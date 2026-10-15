@@ -45,7 +45,13 @@ const SUMMARY_FIELD_CHAR_CAP = 1000;
 const SUMMARY_ARRAY_FIELD_CHAR_CAP = 4000;
 const SUMMARY_TOTAL_CHAR_CAP = 8000;
 /** Matching/merge sentinels — always preserved verbatim (FIFO merge depends on them). */
-const SUMMARY_SENTINEL_KEYS = new Set(['_toolUseId', '_resultMerged', '_truncated']);
+const SUMMARY_SENTINEL_KEYS = new Set([
+  '_toolUseId',
+  '_toolParentUseId',
+  '_toolResultStatus',
+  '_resultMerged',
+  '_truncated',
+]);
 /** Default per-thread cap. 2000 events ≫ any FM metric window; typical sanitized event <1KB. */
 const DEFAULT_MAX_EVENTS_PER_THREAD = 2000;
 
@@ -317,7 +323,7 @@ export class ToolEventLog {
    */
   async updateSummary(
     threadId: string,
-    matcher: { toolUseId?: string; toolName?: string; catId?: string },
+    matcher: { toolUseId?: string; toolParentUseId?: string; invocationId?: string; toolName?: string; catId?: string },
     summaryPatch: Record<string, unknown>,
   ): Promise<boolean> {
     // 砚砚 cloud-7 P1: chain per-thread updates so concurrent fire-and-forget
@@ -342,7 +348,7 @@ export class ToolEventLog {
 
   private async _doUpdateSummary(
     threadId: string,
-    matcher: { toolUseId?: string; toolName?: string; catId?: string },
+    matcher: { toolUseId?: string; toolParentUseId?: string; invocationId?: string; toolName?: string; catId?: string },
     summaryPatch: Record<string, unknown>,
   ): Promise<boolean> {
     // Fast path: tail window. Merge targets are normally the current round's
@@ -359,7 +365,7 @@ export class ToolEventLog {
 
   private async _matchAndMerge(
     threadId: string,
-    matcher: { toolUseId?: string; toolName?: string; catId?: string },
+    matcher: { toolUseId?: string; toolParentUseId?: string; invocationId?: string; toolName?: string; catId?: string },
     summaryPatch: Record<string, unknown>,
     start: number,
   ): Promise<boolean> {
@@ -405,6 +411,10 @@ export class ToolEventLog {
       const summary = event.summary ?? {};
       if (matcher.toolUseId) {
         if (summary['_toolUseId'] !== matcher.toolUseId) continue;
+        if (matcher.catId && event.catId !== matcher.catId) continue;
+        if (matcher.invocationId && event.invocationId !== matcher.invocationId) continue;
+        if (Object.hasOwn(matcher, 'toolParentUseId') && summary['_toolParentUseId'] !== matcher.toolParentUseId)
+          continue;
       } else {
         if (matcher.toolName && event.toolName !== matcher.toolName) continue;
         // 砚砚 六审 P1-B: also require catId match when supplied (parallel-cat guard)
@@ -416,7 +426,15 @@ export class ToolEventLog {
       // TD 2026-08-12: sanitize the merged result — result-side patches (e.g.
       // raw tool output) must not regrow a capped event past the budget.
       const mergedSummary = sanitizeToolEventSummary({ ...summary, ...summaryPatch, _resultMerged: true });
-      const newEvent = { ...event, summary: mergedSummary };
+      const newEvent = {
+        ...event,
+        summary: mergedSummary,
+        ...(summaryPatch['_toolResultStatus'] === 'error'
+          ? { status: 'error' as const }
+          : summaryPatch['_toolResultStatus'] === 'ok'
+            ? { status: 'success' as const }
+            : {}),
+      };
       const newMember = JSON.stringify(newEvent);
       // 砚砚 cloud-4 P2: idempotent retry guard — when newMember bytes match
       // pair.member (same patch re-applied), zadd would be a no-op and the

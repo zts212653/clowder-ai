@@ -1,0 +1,108 @@
+  // Inserted into the pinned upstream steering suite, using its SDK fixtures.
+  for (const autonomousError of [false, true]) {
+  it(`W5.P own MCP followup (${autonomousError ? "error" : "success"}) and final idle settle the steered primary exactly once`, async () => {
+    const agent = createMockAgent();
+    injectGeneratorSession(agent, (input) => {
+      async function* messages() {
+        const iter = input[Symbol.asyncIterator]();
+        const primary = await iter.next();
+        yield userEcho(primary.value);
+        const assistant = createAssistantText("using fixture");
+        yield { ...assistant, user_message_uuid: primary.value.uuid, message: { ...assistant.message, id: "owned-model", content: [{ type: "tool_use", id: "owned-tool", name: "mcp__fixture__read_fixture", input: {} }] } };
+        const notice = await iter.next();
+        yield userEcho(notice.value);
+        yield createResultMessage();
+        yield { type: "system", subtype: "task_notification", task_id: "mcp-task", run_id: "owned-run", tool_use_id: "owned-tool", status: "completed", summary: "fixture", output_file: "/synthetic" };
+        yield { ...createResultMessage(), is_error: autonomousError, usage: { input_tokens: 999, output_tokens: 555, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 }, origin: { kind: "task-notification", producer: "session-task", runId: "owned-run" } };
+        yield idleMessage();
+        await new Promise(() => {}); // keep the SDK open as the real query does
+      }
+      return messages();
+    });
+    let settled = 0;
+    const prompt = agent.prompt({ sessionId: "test-session", prompt: [{ type: "text", text: "primary" }] }).then((response) => { settled++; return response; });
+    await waitFor(() => !!agent.sessions["test-session"]?.activeTurn);
+    await agent.steer({ sessionId: "test-session", prompt: [{ type: "text", text: "notice" }] });
+    const outcome = await Promise.race([prompt, new Promise((resolve) => setTimeout(() => resolve("hung"), 200))]);
+    expect(outcome).not.toBe("hung");
+    expect(outcome).toEqual(expect.objectContaining({ stopReason: "end_turn", usage: { inputTokens: 10, outputTokens: 5, cachedReadTokens: 0, cachedWriteTokens: 0, totalTokens: 15 } }));
+    expect(settled).toBe(1);
+  });
+  }
+
+  it("W5.P foreign autonomous followup idle cannot settle an active steered primary", async () => {
+    const agent = createMockAgent();
+    let releaseOwnIdle: () => void = () => {};
+    const ownIdle = new Promise<void>((resolve) => { releaseOwnIdle = resolve; });
+    let atForeignIdle = false;
+    injectGeneratorSession(agent, (input) => {
+      async function* messages() {
+        const iter = input[Symbol.asyncIterator]();
+        const primary = await iter.next();
+        yield userEcho(primary.value);
+        const oldAssistant = createAssistantText("late old consolidation");
+        yield { ...oldAssistant, user_message_uuid: "old-primary", message: { ...oldAssistant.message, id: "old-model", content: [{ type: "tool_use", id: "old-tool", name: "mcp__fixture__read_fixture", input: {} }] } };
+        const notice = await iter.next();
+        yield userEcho(notice.value);
+        yield createResultMessage();
+        yield { type: "system", subtype: "task_notification", task_id: "old-task", run_id: "old-run", tool_use_id: "old-tool", status: "completed", summary: "old task", output_file: "/synthetic" };
+        yield { ...createResultMessage(), origin: { kind: "task-notification", producer: "session-task", runId: "old-run" } };
+        yield idleMessage();
+        atForeignIdle = true;
+        await ownIdle;
+        yield idleMessage();
+        await new Promise(() => {});
+      }
+      return messages();
+    });
+    let settled = false;
+    const prompt = agent.prompt({ sessionId: "test-session", prompt: [{ type: "text", text: "new primary" }] }).then((response) => { settled = true; return response; });
+    await waitFor(() => !!agent.sessions["test-session"]?.activeTurn);
+    await agent.steer({ sessionId: "test-session", prompt: [{ type: "text", text: "notice" }] });
+    await waitFor(() => atForeignIdle);
+    expect(settled).toBe(false);
+    releaseOwnIdle();
+    await expect(prompt).resolves.toEqual(expect.objectContaining({ stopReason: "end_turn" }));
+  });
+
+  for (const hold of ["second-notice", "background-agent"]) {
+  it(`W5.P owned followup idle preserves the ${hold} hold`, async () => {
+    const agent = createMockAgent();
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    let atOwnedIdle = false;
+    injectGeneratorSession(agent, (input) => {
+      async function* messages() {
+        const iter = input[Symbol.asyncIterator]();
+        const primary = await iter.next();
+        yield userEcho(primary.value);
+        const assistant = createAssistantText("using fixture");
+        yield { ...assistant, user_message_uuid: primary.value.uuid, message: { ...assistant.message, id: "owned-model", content: [{ type: "tool_use", id: "owned-tool", name: "mcp__fixture__read_fixture", input: {} }] } };
+        if (hold === "background-agent") yield { type: "system", subtype: "task_started", task_id: "child", tool_use_id: "agent-tool", subagent_type: "reader", description: "synthetic child" };
+        const first = await iter.next();
+        const second = hold === "second-notice" ? await iter.next() : undefined;
+        yield userEcho(first.value);
+        yield createResultMessage();
+        yield { type: "system", subtype: "task_notification", task_id: "mcp-task", run_id: "owned-run", tool_use_id: "owned-tool", status: "completed", summary: "fixture", output_file: "/synthetic" };
+        yield { ...createResultMessage(), origin: { kind: "task-notification", producer: "session-task", runId: "owned-run" } };
+        yield idleMessage();
+        atOwnedIdle = true;
+        await gate;
+        if (second) { yield userEcho(second.value); yield createResultMessage(); }
+        if (hold === "background-agent") yield { type: "system", subtype: "task_notification", task_id: "child", tool_use_id: "agent-tool", status: "completed", summary: "child done", output_file: "/synthetic" };
+        yield idleMessage();
+        await new Promise(() => {});
+      }
+      return messages();
+    });
+    let settled = false;
+    const prompt = agent.prompt({ sessionId: "test-session", prompt: [{ type: "text", text: "primary" }] }).then((response) => { settled = true; return response; });
+    await waitFor(() => !!agent.sessions["test-session"]?.activeTurn);
+    await agent.steer({ sessionId: "test-session", prompt: [{ type: "text", text: "notice one" }] });
+    if (hold === "second-notice") await agent.steer({ sessionId: "test-session", prompt: [{ type: "text", text: "notice two" }] });
+    await waitFor(() => atOwnedIdle);
+    expect(settled).toBe(false);
+    release();
+    await expect(prompt).resolves.toEqual(expect.objectContaining({ stopReason: "end_turn" }));
+  });
+  }

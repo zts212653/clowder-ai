@@ -112,7 +112,13 @@ function createPoolWithAutoRespond({ usageUpdate = false } = {}) {
         );
       } else if (msg.method === 'session/set_config_option') {
         setImmediate(() =>
-          agentStdout.write(JSON.stringify({ jsonrpc: '2.0', id: msg.id, result: { configOptions: [] } }) + '\n'),
+          agentStdout.write(
+            JSON.stringify({
+              jsonrpc: '2.0',
+              id: msg.id,
+              result: { configOptions: [{ id: 'model', currentValue: msg.params.value }] },
+            }) + '\n',
+          ),
         );
       } else if (msg.method === 'session/prompt') {
         setImmediate(() => {
@@ -814,7 +820,7 @@ describe('GeminiAcpAdapter', () => {
     assert.equal(captured[setModelIndex].params.value, 'anthropic/claude-opus-4-6');
   });
 
-  it('does not set ACP session model when the agent model option does not allow it', async () => {
+  it('rejects unsupported model without sending it or starting a prompt', async () => {
     const { child, clientStdin, agentStdout, ee } = createMockChild();
     const captured = [];
 
@@ -890,8 +896,8 @@ describe('GeminiAcpAdapter', () => {
       'must not send unsupported model value to ACP agent',
     );
     assert.ok(
-      captured.some((m) => m.method === 'session/prompt'),
-      'should continue with the agent default model',
+      !captured.some((m) => m.method === 'session/prompt'),
+      'must block silent substitution by the default model',
     );
     assert.ok(
       messages.some((m) => m.type === 'done'),
@@ -899,7 +905,7 @@ describe('GeminiAcpAdapter', () => {
     );
   });
 
-  it('continues when optional ACP session model selection is rejected by the agent', async () => {
+  it('reports model selection rejection and never silently runs the default', async () => {
     const { child, clientStdin, agentStdout, ee } = createMockChild();
 
     clientStdin.on('data', (chunk) => {
@@ -977,14 +983,11 @@ describe('GeminiAcpAdapter', () => {
     const messages = [];
     for await (const msg of adapter.invoke('hello')) messages.push(msg);
 
-    assert.ok(
-      messages.some((m) => m.type === 'text' && m.content === 'ok'),
-      'prompt should continue',
-    );
+    assert.ok(!messages.some((m) => m.type === 'text'), 'prompt must not run after model selection fails');
     assert.equal(
       messages.some((m) => m.type === 'error'),
-      false,
-      'model selection failure must not abort',
+      true,
+      'model selection failure must be visible',
     );
     assert.ok(
       messages.some((m) => m.type === 'done'),

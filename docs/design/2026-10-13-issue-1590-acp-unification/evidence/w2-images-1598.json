@@ -1,0 +1,206 @@
+{
+  "created": "2026-10-14",
+  "issue": 1598,
+  "pullRequest": 1596,
+  "scope": "W2 image input omission repair; standard ACP blocks, no new protocol extension",
+  "codeHead": "feeabe1f70442fd2ec4a8eec70b8cc868ab7c09e",
+  "independentReview": {
+    "reviewer": "/root/acp_plan_review",
+    "exactTargetHead": "feeabe1f70442fd2ec4a8eec70b8cc868ab7c09e",
+    "verdict": "pass; no P1/P2",
+    "completeG2G4OrMigrationApproved": false
+  },
+  "completeW2": false,
+  "G2": "held",
+  "productionMigration": false,
+  "acceptedUploads": {
+    "maxImages": 5,
+    "maxBytesPerImage": 10485760,
+    "mimeTypes": ["image/png", "image/jpeg", "image/gif", "image/webp"],
+    "source": "contained /uploads/ references only"
+  },
+  "sourceHashes": {
+    "byteScope": "actual Windows worktree bytes at reviewed code HEAD; includes CRLF",
+    "sha256": {
+      "packages/api/src/domains/cats/services/agents/providers/acp/AcpAgentService.ts": "14583889c7c50fe26e2fb58ed23a5b410b44949342bd3a6b19091b492a0de59d",
+      "packages/api/src/domains/cats/services/agents/providers/acp/AcpClient.ts": "bed205f78074836e546e5905a2ee7d979e8d059093fa8abfe7d676eb5b2d8339",
+      "packages/api/src/domains/cats/services/agents/providers/acp/AcpHttpStreamClient.ts": "62134a47b7da886c016e51b1bca97d563e0e8a510bf4e34521b6eef85f02a4bf",
+      "packages/api/src/domains/cats/services/agents/providers/acp/acp-image-input.ts": "53a5aa2261a38cedb8a20e23f2c976cd7bb20592ef9be59e92b23229b2986f73",
+      "packages/api/src/domains/cats/services/agents/providers/acp/acp-prompt-content.ts": "2b1e2385ad3e4199c9d5d247774d7e0ded545f3f35be8d490db8382104ccd336",
+      "packages/api/src/domains/cats/services/agents/providers/acp/types.ts": "ad659f08551a8c1fa356cb43021ce64f669fd2a69ce87c1b5b114d650e64a768",
+      "packages/api/test/acp/acp-image-input.test.js": "25955e578eed149d97ece9a1f153277b2bf8630e63fa1289954b5e0fd61e7a6f",
+      "packages/api/test/helpers/acp-image-fixture.js": "f449bc33b51603290fd450bb9fbb13b06cf415ff4469fea56f047ca03c595a40"
+    }
+  },
+  "checks": {
+    "firstRed": {
+      "pass": 0,
+      "fail": 14,
+      "privateLog": ".cat-cafe/tmp/acp-image-1598-red.log",
+      "sha256": "8769b0cc13dd7e46c71803aa15d2fb2639a6677c247dbc48a8f6263270a45a4e"
+    },
+    "negotiatedCapabilityRed": {
+      "pass": 0,
+      "fail": 2,
+      "privateLog": ".cat-cafe/tmp/acp-image-1598-capability-red.log",
+      "sha256": "7ac99768b70d46cc78c75b613c47f25e011d9595784c0c1ee255629896f1c362"
+    },
+    "imageGreen": {
+      "pass": 27,
+      "fail": 0,
+      "durationMs": 1185.278,
+      "privateLog": ".cat-cafe/tmp/acp-image-1598-final-green.log",
+      "sha256": "41461cd4b3ab634db2779964a30b4d68a114a6e95088651f56b9dd9779634c33"
+    },
+    "affectedGreen": {
+      "pass": 280,
+      "fail": 0,
+      "suites": 37,
+      "durationMs": 23458.8623,
+      "privateLog": ".cat-cafe/tmp/acp-image-1598-final-regression.log",
+      "sha256": "e3b4d8660e7d6c4dd2e42b3bc43968c3f1fc777ef2f1380844108a854031340e"
+    },
+    "apiBuild": {
+      "exitCode": 0,
+      "privateLog": ".cat-cafe/tmp/acp-image-1598-final-build.log",
+      "sha256": "486561d2fcc182e8d9009a7894d16fb957731983c85d0ef57bb2b385ba852e8e"
+    },
+    "widerWindowsRun": {
+      "pass": 350,
+      "fail": 10,
+      "privateLog": ".cat-cafe/tmp/acp-image-1598-regression.log",
+      "sha256": "3a97382290db070caaef076e39d7657b1f90618e78644292d82e162247943212"
+    },
+    "isolatedWindowsBaseline": {
+      "pass": 72,
+      "fail": 10,
+      "privateLog": ".cat-cafe/tmp/acp-image-1598-windows-baseline.log",
+      "excludesNewImageModule": true,
+      "sha256": "e7e61cb8226fab90a236291e6ae20f4a73e1467aeeba0d5a4b8ed9d3e4d3626c"
+    }
+  },
+  "widerFailures": [
+    {
+      "file": "packages/api/test/acp/acp-bootstrap-cwd.test.js",
+      "count": 2,
+      "cause": "POSIX 0700 and /tmp assertions on Windows"
+    },
+    {
+      "file": "packages/api/test/acp/acp-mcp-resolver.test.js",
+      "count": 7,
+      "cause": "slash-only basename assertions on Windows"
+    },
+    {
+      "file": "packages/api/test/image-upload.test.js",
+      "count": 1,
+      "cause": "slash-only default upload path assertion on Windows"
+    }
+  ],
+  "realModelScope": {
+    "syntheticOnly": true,
+    "sourceOrCredentialsSentToModel": false,
+    "pipeline": "production parseMultipart with synthetic parts -> in-memory MessageStore.append -> test JSON file -> JSON cold-read -> built AcpAgentService/AcpClient -> actual fixed STDIO bridge/native/model",
+    "productionHttpUploadRequest": false,
+    "durablePlatformMessageStoreOrTranscript": false,
+    "actualProductUi": false,
+    "sessionAndPool": "test wrappers around actual client with fixed restricted newSession options; not production factory or Approval Hub validation",
+    "hooksAndUserInstructionsDisabled": true,
+    "noMcpServers": true,
+    "toolsDenied": true,
+    "rawKindClarification": "Private runner kind says message-store disk cold-read; it means in-memory store plus test JSON, not durable product MessageStore. Raw receipts preserved unchanged.",
+    "codeAgentCliOrMiniMaxBindingTested": false
+  },
+  "samples": [
+    {
+      "provider": "claude",
+      "success": true,
+      "durationMs": 29276,
+      "bridgeVersion": "0.70.0",
+      "upstreamPin": "d0aafb1ca26427285ffaeac8d8a4452fff28e9c3",
+      "nativeVersion": "2.1.299",
+      "sdkVersion": "0.3.285",
+      "nativeSha256": "295b49ec092f31a7de9c6ff286d9d8f120a4f029b9ad9a5ac0b12c35cbf4df2b",
+      "bridgeModuleSha256": "ce7e4db6de998053497426a658106d9fd14487fe5b83dd63eb8c7b6b9eaf80bf",
+      "runnerSha256": "fe1b9e5fb8209ed936d8ee96484cf8873b21d954d10c8b3bdb1248426533c2df",
+      "runnerCapturedBeforeExecution": true,
+      "actualBuiltClientSha256": "1b5906cb18a5200342cfec4439b92a28b238c1caf460d8a093cf07a1a0306b5b",
+      "negotiatedImage": true,
+      "acpPromptCount": 1,
+      "imageBlocks": 1,
+      "imageMime": "image/png",
+      "imageSha256": "15ca6f5fc6061a4136ee348429a8094f3579361d7305eaef7c11fd1c719b221b",
+      "expectedCodeAbsentFromPromptText": true,
+      "expectedCode": "PIC-50E1CF",
+      "modelResponse": "I understand you want me to report on the image I described earlier. \n\n**Code:** PIC-50E1CF\n\n**Two colored shapes:** \n1. Blue circle\n2. Red triangle",
+      "toolCallCount": 0,
+      "actualSessionId": "3479cc2f-57a9-40a4-9800-8d99a408426d",
+      "limits": {
+        "maxAcpPrompts": 1,
+        "maxRuntimeMs": 90000,
+        "idleTimeoutMs": 30000,
+        "claudeBudgetUsd": 1,
+        "maxClaudeSdkTurns": 3,
+        "codexUsdHardLimit": null,
+        "providerModelRounds": "unknown",
+        "actualProviderCost": "unknown"
+      },
+      "privateReceipts": {
+        ".cat-cafe/tmp/issue-1598-vision-claude-1/result.json": "fab0d1e8e03d683272359ff67fde7cae2700b11592149869599cbf23af6984e6",
+        ".cat-cafe/tmp/issue-1598-vision-claude-1/wire.json": "23c614ff024726915b6e85f1afd5592b7d7e5e4547c2aca69e573964fe7ab84f",
+        ".cat-cafe/tmp/issue-1598-vision-claude-1/raw.json": "c8acbe0c95039b439b41dd12d53655c2f06c63feca68d3a6fc619083f1179b9d",
+        ".cat-cafe/tmp/issue-1598-vision-claude-1/mapped.json": "39f2b4fcc1f97e072d0de95a508d18fcaf4fe63d15e3a111a93cebd332226681",
+        ".cat-cafe/tmp/issue-1598-vision-claude-1/history.json": "95f60d852a85b86044a45c33b489b721bc37457aa99b3c3a867f5421dbf0ebd4",
+        ".cat-cafe/tmp/issue-1598-vision-claude-1/runner.mts": "fe1b9e5fb8209ed936d8ee96484cf8873b21d954d10c8b3bdb1248426533c2df"
+      }
+    },
+    {
+      "provider": "codex",
+      "success": true,
+      "durationMs": 7484,
+      "bridgeVersion": "2.1.1",
+      "upstreamPin": "51f78d67e46c3a96ee8d8bf4e43fc917ab21c73e",
+      "nativeVersion": "0.161.0",
+      "sdkVersion": null,
+      "nativeSha256": "a0f89acca07a511734cac7fddee26b2106fab68918717bc90df16104a0760a30",
+      "bridgeModuleSha256": "265a60c7a7f19b3bb2a080198a91b48884846f8c80121598b3d27f46aadc7649",
+      "runnerSha256": "fe1b9e5fb8209ed936d8ee96484cf8873b21d954d10c8b3bdb1248426533c2df",
+      "runnerCapturedBeforeExecution": true,
+      "actualBuiltClientSha256": "1b5906cb18a5200342cfec4439b92a28b238c1caf460d8a093cf07a1a0306b5b",
+      "negotiatedImage": true,
+      "acpPromptCount": 1,
+      "imageBlocks": 1,
+      "imageMime": "image/png",
+      "imageSha256": "15ca6f5fc6061a4136ee348429a8094f3579361d7305eaef7c11fd1c719b221b",
+      "expectedCodeAbsentFromPromptText": true,
+      "expectedCode": "PIC-50E1CF",
+      "modelResponse": "Code: `PIC-50E1CF`. Shapes: blue circle and red triangle.",
+      "toolCallCount": 0,
+      "actualSessionId": "01a13975-b379-7b61-83c2-014081246111",
+      "nativeTransport": {
+        "turnStartCount": 1,
+        "titleTurnCount": 0,
+        "imageCount": 1,
+        "imageSha256": "15ca6f5fc6061a4136ee348429a8094f3579361d7305eaef7c11fd1c719b221b"
+      },
+      "limits": {
+        "maxAcpPrompts": 1,
+        "maxRuntimeMs": 90000,
+        "idleTimeoutMs": 30000,
+        "claudeBudgetUsd": null,
+        "maxClaudeSdkTurns": null,
+        "codexUsdHardLimit": null,
+        "providerModelRounds": "unknown",
+        "actualProviderCost": "unknown"
+      },
+      "privateReceipts": {
+        ".cat-cafe/tmp/issue-1598-vision-codex-1/result.json": "4ddfd8db1bc5916cc447708a8be9d3002764e2725113664d380660d8d3c1e4d5",
+        ".cat-cafe/tmp/issue-1598-vision-codex-1/wire.json": "aaf76e6de5bf8dedfc282de159742b3e59e21ec1580f8688aa33d026c794b026",
+        ".cat-cafe/tmp/issue-1598-vision-codex-1/raw.json": "e4158563a03e4d8a74224a7a878e683613561b257cbdb4a1816ecadbbf6f8c69",
+        ".cat-cafe/tmp/issue-1598-vision-codex-1/mapped.json": "211b9d364234a16465ee43645909a46006a86eb5d864b26abf2ee019b320243d",
+        ".cat-cafe/tmp/issue-1598-vision-codex-1/history.json": "41ffed1ae9150f6bd64f072aca19f5c38cf483a6a597de04cc02c260c6a8712b",
+        ".cat-cafe/tmp/issue-1598-vision-codex-1/runner.mts": "fe1b9e5fb8209ed936d8ee96484cf8873b21d954d10c8b3bdb1248426533c2df",
+        ".cat-cafe/tmp/issue-1598-vision-codex-1/native/app-server.log": "4caa531100283438b69b9d3838f1cfee01bb7e0465ff9a2500ec4fe94c28ec96"
+      }
+    }
+  ]
+}

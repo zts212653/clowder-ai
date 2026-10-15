@@ -1,0 +1,230 @@
+{
+  "created": "2026-10-14",
+  "sample": "stable-owner-4",
+  "evidenceKind": "real_bridge_native_with_test_only_separate_HTTP_consumer_owner",
+  "bridgePin": "51f78d67e46c3a96ee8d8bf4e43fc917ab21c73e",
+  "nativeVersion": "0.161.0",
+  "bundleSha256": "265a60c7a7f19b3bb2a080198a91b48884846f8c80121598b3d27f46aadc7649",
+  "nativeSha256": "a0f89acca07a511734cac7fddee26b2106fab68918717bc90df16104a0760a30",
+  "bindingRevision": "c10136e2497c818ad345794e08f238987b83962d54d0ad9c4d849a71223a78d0",
+  "sessionId": "01a138c0-3398-7bb0-8364-21cb506ac69f",
+  "nativeTurnId": "01a138c0-3443-72a2-9004-f4bcc8489957",
+  "durationMs": 17977,
+  "scope": {
+    "production": false,
+    "productionHttpConsumerUsed": false,
+    "productionOwnerImplemented": false,
+    "connectionDrop": "Explicitly abort one live HTTP prompt response; same-process test caller makes subsequent HTTP requests, not a full host process crash.",
+    "initializeReplay": "Test-only frozen accepted initialize result replay for identical capability params; no second native initialize. Not production session restore/ownership approval.",
+    "syntheticOnly": true,
+    "nativeAuthOverHttp": false,
+    "loopbackEphemeralAuth": "Random in-memory test-only bearer, not recorded or published",
+    "hooksDisabled": true,
+    "repositoryInstructionsDisabled": true,
+    "shellDisabled": true
+  },
+  "budget": {
+    "maxAcpPromptInvocations": 1,
+    "autoTitleSuppressed": true,
+    "maxRuntimeMs": 90000,
+    "closeGraceMs": 3000,
+    "observedNativeTurnStartRequests": 1,
+    "providerModelCallCount": "unknown; one native turn may include multiple provider rounds",
+    "cost": "unknown",
+    "usdHardLimit": null
+  },
+  "observed": {
+    "ownerPid": 25136,
+    "ownerUnchanged": true,
+    "consumerAbort": "AbortError",
+    "droppedAt": 1791953488250,
+    "consumerClose": [
+      {
+        "t": 1791953488254,
+        "direction": "http-consumer-closed",
+        "id": 4,
+        "method": "session/prompt"
+      }
+    ],
+    "originalPromptResponseLost": [
+      {
+        "t": 1791953499916,
+        "direction": "response-lost",
+        "id": 4
+      }
+    ],
+    "nativeInitializeRequests": 1,
+    "httpInitializeRequests": 3,
+    "frozenInitializeReplays": 1,
+    "changedInitializeRejected409": true,
+    "activeTurnSurvivedConsumerDrop": true,
+    "stillActive": {
+      "nativeSessionId": "01a138c0-3398-7bb0-8364-21cb506ac69f",
+      "nativeTurnId": "01a138c0-3443-72a2-9004-f4bcc8489957",
+      "source": "native_turn_start_callback",
+      "bindingRevision": "c10136e2497c818ad345794e08f238987b83962d54d0ad9c4d849a71223a78d0"
+    },
+    "acceptedBefore": {
+      "operationId": "accepted-before-socket-drop",
+      "nativeSessionId": "01a138c0-3398-7bb0-8364-21cb506ac69f",
+      "nativeTurnId": "01a138c0-3443-72a2-9004-f4bcc8489957",
+      "outcome": "injected",
+      "nativeReceipt": {
+        "turnId": "01a138c0-3443-72a2-9004-f4bcc8489957"
+      }
+    },
+    "acceptedAfter": {
+      "operationId": "accepted-after-socket-drop",
+      "nativeSessionId": "01a138c0-3398-7bb0-8364-21cb506ac69f",
+      "nativeTurnId": "01a138c0-3443-72a2-9004-f4bcc8489957",
+      "outcome": "injected",
+      "nativeReceipt": {
+        "turnId": "01a138c0-3443-72a2-9004-f4bcc8489957"
+      }
+    },
+    "repeat": {
+      "operationId": "accepted-before-socket-drop",
+      "nativeSessionId": "01a138c0-3398-7bb0-8364-21cb506ac69f",
+      "nativeTurnId": "01a138c0-3443-72a2-9004-f4bcc8489957",
+      "outcome": "injected",
+      "nativeReceipt": {
+        "turnId": "01a138c0-3443-72a2-9004-f4bcc8489957"
+      }
+    },
+    "completedFixtureCount": 1,
+    "toolLifecycle": [
+      {
+        "t": 1791953488236,
+        "phase": "started",
+        "id": 2,
+        "scenario": "A",
+        "delayMs": 8000
+      },
+      {
+        "t": 1791953496244,
+        "phase": "completed",
+        "id": 2,
+        "scenario": "A"
+      }
+    ],
+    "nativeSteerCalls": [
+      {
+        "request": {
+          "id": 9,
+          "method": "turn/steer",
+          "params": {
+            "threadId": "01a138c0-3398-7bb0-8364-21cb506ac69f",
+            "expectedTurnId": "01a138c0-3443-72a2-9004-f4bcc8489957",
+            "clientUserMessageId": "d91cf26a-6be6-57c0-aa9f-b84d4211ae52",
+            "input": [
+              {
+                "type": "text",
+                "text": "Keep the same one fixture tool running. After its real result include STABLE-OWNER-CONTROL. No extra tools or files.",
+                "text_elements": []
+              }
+            ]
+          }
+        },
+        "response": {
+          "id": 9,
+          "result": {
+            "turnId": "01a138c0-3443-72a2-9004-f4bcc8489957"
+          }
+        }
+      },
+      {
+        "request": {
+          "id": 10,
+          "method": "turn/steer",
+          "params": {
+            "threadId": "01a138c0-3398-7bb0-8364-21cb506ac69f",
+            "expectedTurnId": "01a138c0-3443-72a2-9004-f4bcc8489957",
+            "clientUserMessageId": "1292af53-728c-5ee8-a4b4-e4cb77e5381f",
+            "input": [
+              {
+                "type": "text",
+                "text": "Keep the same one fixture tool running. After its real result include STABLE-OWNER-CONTROL. No extra tools or files.",
+                "text_elements": []
+              }
+            ]
+          }
+        },
+        "response": {
+          "id": 10,
+          "result": {
+            "turnId": "01a138c0-3443-72a2-9004-f4bcc8489957"
+          }
+        }
+      },
+      {
+        "request": {
+          "id": 12,
+          "method": "turn/steer",
+          "params": {
+            "threadId": "01a138c0-3398-7bb0-8364-21cb506ac69f",
+            "expectedTurnId": "01a138c0-3443-72a2-9004-f4bcc8489957",
+            "clientUserMessageId": "3c430d1b-329f-534a-a31e-b0166c975e96",
+            "input": [
+              {
+                "type": "text",
+                "text": "Keep the same one fixture tool running. After its real result include STABLE-OWNER-CONTROL. No extra tools or files.",
+                "text_elements": []
+              }
+            ]
+          }
+        },
+        "response": {
+          "error": {
+            "code": -32600,
+            "message": "no active turn to steer"
+          },
+          "id": 12
+        }
+      }
+    ],
+    "oldTargetRejectedAfterCompletion": true
+  },
+  "executedRunner": [
+    {
+      "source": "scripts/acp-spikes/run-codex-stable-owner.mts",
+      "sha256": "a13df81d490da227b2e0ea2a6dc9e6dfc61768be5243d0f3d86f20afc46bcd15"
+    },
+    {
+      "source": "scripts/acp-spikes/codex-stable-owner.mts",
+      "sha256": "aae22f954e177ab708342244bc5d09bcce7ce0cfbebc62f68a848aba04fc8704"
+    }
+  ],
+  "rawRefs": [
+    {
+      "privateRef": ".cat-cafe/tmp/authorized-codex-20261014/stable-owner-4/result.json",
+      "sha256": "3e8fd4381a6b5c927d88d1b45e2a3cf143f245460d40887fbb9d0c6008056144"
+    },
+    {
+      "privateRef": ".cat-cafe/tmp/authorized-codex-20261014/stable-owner-4/frames.json",
+      "sha256": "6e6d2975feb170d9ec93b981ab4f4a8bf3b57a87ffce2ba4d35ee787dc91a031"
+    },
+    {
+      "privateRef": ".cat-cafe/tmp/authorized-codex-20261014/stable-owner-4/native/app-server.log",
+      "sha256": "eea2a1dcb1c437b484afa496fdbf3df34e4cb1c52d5bc90d253fbca76a9529c7"
+    },
+    {
+      "privateRef": ".cat-cafe/tmp/authorized-codex-20261014/stable-owner-4/tools.jsonl",
+      "sha256": "5ec729d646d8990c0f8de82e79991370e4e7e6ca4809127d4cfe3203d8c5f384"
+    },
+    {
+      "privateRef": ".cat-cafe/tmp/authorized-codex-20261014/stable-owner-4/run-codex-stable-owner.mts",
+      "sha256": "a13df81d490da227b2e0ea2a6dc9e6dfc61768be5243d0f3d86f20afc46bcd15"
+    },
+    {
+      "privateRef": ".cat-cafe/tmp/authorized-codex-20261014/stable-owner-4/codex-stable-owner.mts",
+      "sha256": "aae22f954e177ab708342244bc5d09bcce7ce0cfbebc62f68a848aba04fc8704"
+    }
+  ],
+  "independentReviewer": "/root/acp_plan_review",
+  "decision": {
+    "boundedLifecycleMechanism": "pass",
+    "productionOwnerIntegration": "held",
+    "fullW4P": "held",
+    "migration": "held"
+  }
+}

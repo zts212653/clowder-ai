@@ -1,0 +1,79 @@
+{
+  "observedAt": "2026-10-13T13:44:45.888Z",
+  "scope": "authorized synthetic read-only isolated test bindings; no production migration",
+  "evidenceKind": "real_official_sdk_through_ClaudeSdkAgentService_test_binding",
+  "durationMs": 29720,
+  "sdkVersion": "0.3.285",
+  "nativeCli": "2.1.296",
+  "credentialSource": "existing_user_settings_environment_only",
+  "settingsSources": [],
+  "hooksDisabled": true,
+  "userInstructionsExcluded": true,
+  "budgetUsd": 2,
+  "toolSurface": ["Read", "Agent(w1-reader tools=Read)"],
+  "uses": [
+    {
+      "id": "toolu_4vBaF7WVIhRcBjH2rhdb10",
+      "parent": null,
+      "name": "Read"
+    },
+    {
+      "id": "toolu_dXul5fHoXCKmg1uWL5fhjP",
+      "parent": null,
+      "name": "Read"
+    },
+    {
+      "id": "toolu_oceE87iPN8KqHDF0LDV0PV",
+      "parent": null,
+      "name": "Agent"
+    },
+    {
+      "id": "toolu_ElOR626O8hU43MjaSrt9KI",
+      "parent": "toolu_oceE87iPN8KqHDF0LDV0PV",
+      "name": "Read"
+    },
+    {
+      "id": "toolu_2Px60dNPCDO3vGCIRM50Ln",
+      "parent": "toolu_oceE87iPN8KqHDF0LDV0PV",
+      "name": "Read"
+    }
+  ],
+  "results": [
+    {
+      "id": "toolu_4vBaF7WVIhRcBjH2rhdb10",
+      "parent": null,
+      "status": "ok"
+    },
+    {
+      "id": "toolu_dXul5fHoXCKmg1uWL5fhjP",
+      "parent": null,
+      "status": "error"
+    },
+    {
+      "id": "toolu_ElOR626O8hU43MjaSrt9KI",
+      "parent": "toolu_oceE87iPN8KqHDF0LDV0PV",
+      "status": "ok"
+    },
+    {
+      "id": "toolu_2Px60dNPCDO3vGCIRM50Ln",
+      "parent": "toolu_oceE87iPN8KqHDF0LDV0PV",
+      "status": "error"
+    },
+    {
+      "id": "toolu_oceE87iPN8KqHDF0LDV0PV",
+      "parent": null,
+      "status": "ok"
+    }
+  ],
+  "errors": [],
+  "productionBinding": false,
+  "rawEventCount": 374,
+  "reportedCostUsd": 0.065478,
+  "billingVerified": false,
+  "fixturePath": "packages/api/test/fixtures/claude-sdk-tool-results.json",
+  "fixtureSha256": "1e7a8af10a304bd2c872bf66e3f9bc236718a7970542026831569ca691d850e5",
+  "sanitization": "only complete native tool blocks retained; synthetic private directory prefix replaced; native call and parent IDs unchanged",
+  "historyTests": 2,
+  "browserTests": 2,
+  "fullPlatformEndToEnd": false
+}

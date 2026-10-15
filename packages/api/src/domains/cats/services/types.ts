@@ -331,6 +331,10 @@ export interface AgentMessage {
   toolChannel?: 'analysis' | 'commentary' | 'final' | 'unknown';
   /** Tool input parameters (for 'tool_use' type) */
   toolInput?: Record<string, unknown>;
+  /** Native tool facts, separate from bounded display previews; matches the #1519 ACP contract. */
+  toolRawPayload?: { rawInput?: unknown; rawOutput?: unknown; content?: unknown };
+  /** Native parent tool call identifying a provider subexecution (not a host invocation ID). */
+  toolParentUseId?: string;
   /** Native completed-file result captured at event birth; never inferred from a later session directory. */
   fileResultEvidence?: import('./agents/providers/native-file-result-evidence.js').NativeFileResultEvidence;
   /** F153 Phase J AC-J1: native provider tool call id; used to pair tool_use ↔ tool_result for real-duration spans.

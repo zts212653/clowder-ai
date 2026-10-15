@@ -1,0 +1,238 @@
+{
+  "codeHead": "652ff67fe78fc0d71018e45a1338b39aac5f1f3b",
+  "status": "public_W2_consumer_implemented",
+  "baseRef": "449134fed1b08e5cf2a05a72817b84f163baf180",
+  "independentReview": {
+    "reviewer": "/root/acp_plan_review",
+    "family": "same family, different individual",
+    "codeHead": "652ff67fe78fc0d71018e45a1338b39aac5f1f3b",
+    "verdict": "approve latest context correction; no P1/P2",
+    "scope": "W2 public consumer plus separate context preservation correction; not full native enhancements or migration",
+    "history": [
+      "4a63c227: 2 P1 + 2 P2 found",
+      "236a2257: first findings closed; usage binding P2 found",
+      "762fa535: usage fixes approved",
+      "eab5082c: mechanical protocol leaf split and regression updates approved",
+      "eab5082c: later maintainer feedback exposed context authority regression; prior review was not sufficient"
+    ]
+  },
+  "validation": [
+    {
+      "privateLog": ".cat-cafe/tmp/w2-ci-fix-regression.log",
+      "sha256": "ba8d004f421c49f1f03481a0c5e4f4403bd2ce8e13a42275ea8db82d0f914c41",
+      "passed": 450,
+      "exitCode": 0
+    },
+    {
+      "privateLog": ".cat-cafe/tmp/w2-ci-bootstrap-green.log",
+      "sha256": "fd34e220955c33b6d8f4f0a83def26c83450aab88bc789d74554561940490f69",
+      "passed": 1,
+      "exitCode": 0
+    },
+    {
+      "privateLog": ".cat-cafe/tmp/w2-web-final.log",
+      "sha256": "4f2a493d2df13f8600180442e745940fc5327d0db8843b309c3460c2473b606a",
+      "passed": 131,
+      "exitCode": 0
+    },
+    {
+      "privateLog": ".cat-cafe/tmp/w2-ci-fix-build.log",
+      "sha256": "486561d2fcc182e8d9009a7894d16fb957731983c85d0ef57bb2b385ba852e8e",
+      "passed": null,
+      "exitCode": 0
+    },
+    {
+      "privateLog": ".cat-cafe/tmp/w2-web-tsc.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "passed": null,
+      "exitCode": 0
+    },
+    {
+      "privateLog": ".cat-cafe/tmp/w2-ci-dir-green.log",
+      "sha256": "c5f05b8a5a293b213d36c2fd3f4704ec575426533cdd0d14ce17e15eb0a91672",
+      "passed": null,
+      "exitCode": 0
+    },
+    {
+      "privateLog": ".cat-cafe/tmp/w2-fallback-check.log",
+      "sha256": "debe3756f0b95b14c1a8fcb6c9d3de8913658b5c6740aaaeb9e5db66cace123e",
+      "passed": null,
+      "exitCode": 0
+    },
+    {
+      "privateLog": ".cat-cafe/tmp/w2-context-consumer-red.log",
+      "sha256": "1351d1fbbfd729448cc8ac721fb7caed306f7f7367571350b20453f1056a1d49",
+      "passed": 0,
+      "scope": "6 expected assertion failures",
+      "exitCode": "expected failure"
+    },
+    {
+      "privateLog": ".cat-cafe/tmp/w2-context-factory-red.log",
+      "sha256": "f06b00073c7f75aebaac5513a69beabccda84bb19b35ffe7baf3a4108003bd36",
+      "passed": 2,
+      "scope": "1 expected Kimi assertion failure",
+      "exitCode": "expected failure"
+    },
+    {
+      "privateLog": ".cat-cafe/tmp/w2-context-green.log",
+      "sha256": "d2bd312de8794d5840c527b3ccf47c98b05432e389f84ec468cd4e978f7a2ee4",
+      "passed": 143,
+      "scope": "factory,capability,snapshot,strategy/cats routes; includes earlier version of 14 new checks",
+      "exitCode": 0
+    },
+    {
+      "privateLog": ".cat-cafe/tmp/w2-context-consumer-final.log",
+      "sha256": "09d8c0b70572ba8714f4723379bcee7cd1a49232000c1bd6e01e7b383d5286e7",
+      "passed": 14,
+      "scope": "latest real transports/service/snapshot/strategy route checks",
+      "exitCode": 0
+    },
+    {
+      "privateLog": ".cat-cafe/tmp/w2-context-web.log",
+      "sha256": "5d574f0001e074bf38eeb3bdc8f3f1de282ca694867d63dd7cbfa1f31cfd4e6d",
+      "passed": 84,
+      "scope": "existing real member-editor component checks",
+      "exitCode": 0
+    },
+    {
+      "privateLog": ".cat-cafe/tmp/w2-context-build.log",
+      "sha256": "486561d2fcc182e8d9009a7894d16fb957731983c85d0ef57bb2b385ba852e8e",
+      "passed": null,
+      "scope": "full API build",
+      "exitCode": 0
+    },
+    {
+      "privateLog": ".cat-cafe/tmp/w2-context-lf.log",
+      "sha256": "2518566044d4247a6346c58a455a1163ae58bdaacb43dc244b39f822bbf08ec9",
+      "passed": null,
+      "scope": "full PR LF 133 files",
+      "exitCode": 0
+    }
+  ],
+  "nativeSamples": [
+    {
+      "sampleId": "claude-public-1",
+      "provider": "claude",
+      "status": "pass_public_contract_support_detection",
+      "modelPrompts": 0,
+      "sourceAttribution": "pre-review W2 source hashes captured before/after; not exact eab5082c run",
+      "sourceHashes": [
+        {
+          "artifact": "tmp/product-image-bridge-guard.mjs",
+          "sha256": "a29771f10e8a75f0c4e57a49937bab5d46c2fc9be1183bac4d9754814fa76fd0"
+        },
+        {
+          "artifact": "claude-2.1.299/claude.exe",
+          "sha256": "295b49ec092f31a7de9c6ff286d9d8f120a4f029b9ad9a5ac0b12c35cbf4df2b"
+        },
+        {
+          "artifact": "acp-spikes/run-public-contract.mts",
+          "sha256": "e31a8e06136dd1faa54f054355301cb64ce9cd421c882d0b4af8bbb9678504f0"
+        },
+        {
+          "artifact": "acp/AcpClient.ts",
+          "sha256": "1cd39573b2d3642321699e6e67b65bda65bbb364711293c9964232db5ea6b80d"
+        },
+        {
+          "artifact": "acp/acp-session-contract.ts",
+          "sha256": "d32c635f065a4fbde31587947100e5e7012d2f9ee3021a624bf95d32bcbd1f31"
+        }
+      ],
+      "beforeSha256": "48b644812d8b6b25d864872d59e41956bc3ea04eb2a91520443c6e89900dabbb",
+      "resultSha256": "fb09f0c8192dce17d39023b37d3d8f58bbc8cc6e812bd686826d17bd8b9cc5b7",
+      "protocolVersion": 1,
+      "model": {
+        "requestedModel": "opus",
+        "effectiveModel": "opus",
+        "source": "session_config",
+        "servedModel": "unknown"
+      },
+      "modelSwitchTested": false,
+      "close": "RPC acknowledged; native tool quiescence unproven",
+      "requiredInstructions": "unsupported_before_session",
+      "executionBinding": "unnegotiated_no_probe",
+      "nativeVerification": "unverified",
+      "deploymentVerification": "unknown"
+    },
+    {
+      "sampleId": "codex-public-1",
+      "provider": "codex",
+      "status": "pass_public_contract_support_detection",
+      "modelPrompts": 0,
+      "sourceAttribution": "pre-review W2 source hashes captured before/after; not exact eab5082c run",
+      "sourceHashes": [
+        {
+          "artifact": "dist/index.js",
+          "sha256": "265a60c7a7f19b3bb2a080198a91b48884846f8c80121598b3d27f46aadc7649"
+        },
+        {
+          "artifact": "bin/codex.exe",
+          "sha256": "a0f89acca07a511734cac7fddee26b2106fab68918717bc90df16104a0760a30"
+        },
+        {
+          "artifact": "acp-spikes/run-public-contract.mts",
+          "sha256": "e31a8e06136dd1faa54f054355301cb64ce9cd421c882d0b4af8bbb9678504f0"
+        },
+        {
+          "artifact": "acp/AcpClient.ts",
+          "sha256": "1cd39573b2d3642321699e6e67b65bda65bbb364711293c9964232db5ea6b80d"
+        },
+        {
+          "artifact": "acp/acp-session-contract.ts",
+          "sha256": "d32c635f065a4fbde31587947100e5e7012d2f9ee3021a624bf95d32bcbd1f31"
+        }
+      ],
+      "beforeSha256": "6f2dde224ffeb511dc754555f679c2e16a4a1b27a1118de969c5b9a9a053e44d",
+      "resultSha256": "f10986f63ba3666b0a8c90e54b6d4374cf7647426451bbc49217bf4be90fe6b9",
+      "protocolVersion": 1,
+      "model": {
+        "requestedModel": "gpt-6.1-sol",
+        "effectiveModel": "gpt-6.1-sol",
+        "source": "session_config",
+        "servedModel": "unknown"
+      },
+      "modelSwitchTested": false,
+      "close": "RPC acknowledged; native tool quiescence unproven",
+      "requiredInstructions": "unsupported_before_session",
+      "executionBinding": "unnegotiated_no_probe",
+      "nativeVerification": "unverified",
+      "deploymentVerification": "unknown"
+    }
+  ],
+  "productImageEvidence": "product-image-ui.json",
+  "issue1519": {
+    "sourcePin": "9677b944",
+    "intake": "targeted tool/restore contracts only; no full onboarding PR merge"
+  },
+  "safety": "Existing W2.S fail-closed retained; strong requirements reject missing/unnegotiated channels before execution; native/default services retained; standard current-context threshold consumers preserved independently of native identity verification",
+  "skippedByUser": ["CodeAgentCLI actual image binding", "MiniMax actual image binding"],
+  "held": [
+    "full per-binding W0/G0",
+    "W3 policy/interaction/quiescence/replacement",
+    "W4/W5 production native positive contracts",
+    "W6 V24-C real continuity integration",
+    "W7 rollout/rollback",
+    "complete G2-G5/default migration"
+  ],
+  "contextCorrection": {
+    "codeHead": "652ff67fe78fc0d71018e45a1338b39aac5f1f3b",
+    "source": "zts PR1596 comment6180891055",
+    "rootCause": "Product current-context authority was confused with native/deployment identity verification; false disabled existing threshold and continuity consumers",
+    "red": {
+      "consumerFailures": 6,
+      "kimiFactoryFailure": 1
+    },
+    "behavior": "Valid current-context used+size restores authority; invalid/incomplete/no usage remains conditional; invocation resets evidence. Kimi matched process window env retained; OpenCode has no actual model-limit setter.",
+    "actualKimiOpenCodeNativeBinding": "unverified; tests are local real host/transport consumers with simulated agents",
+    "independentReview": "/root/acp_plan_review approve exact 652ff67fe78fc0d71018e45a1338b39aac5f1f3b, no P1/P2"
+  },
+  "ci": {
+    "verifiedGreenCodeHead": "eab5082c9ba0cea3c090c773a4a7f8c682d8d944",
+    "success": 16,
+    "skipped": 1,
+    "publicRun": 38656291732,
+    "windowsRun": 38656291717,
+    "latestHead": "652ff67fe78fc0d71018e45a1338b39aac5f1f3b",
+    "latestStatus": "pending at evidence capture; final PR comment must verify latest delivery HEAD separately"
+  }
+}

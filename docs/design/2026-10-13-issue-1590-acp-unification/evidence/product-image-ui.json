@@ -1,0 +1,126 @@
+{
+  "sampleId": "acp-product-ui-2",
+  "status": "pass_bounded_product_image_chain",
+  "production": false,
+  "codeHead": "eab5082c9ba0cea3c090c773a4a7f8c682d8d944",
+  "artifactAttribution": "Frozen source and emitted API modules unchanged before/after actual final API process and prompt",
+  "ports": {
+    "api": 3112,
+    "web": 5112,
+    "redis": 6388
+  },
+  "privateDataRoot": ".cat-cafe/tmp/acp-product-ui-2/",
+  "threadId": "thread_owned_2516f1cefc1b6529c0b727b42a8a00b00459fe1f",
+  "nativeSession": "34bffddc-e3df-4632-8990-5e263a1cd4de",
+  "messageIds": ["0001792022118887-000000-bb94c33c", "0001792022120001-000002-7e72cad4"],
+  "uploadUrl": "/uploads/1792022118875-42f6c69c.png",
+  "image": {
+    "sha256": "15ca6f5fc6061a4136ee348429a8094f3579361d7305eaef7c11fd1c719b221b",
+    "bytes": 5069,
+    "width": 512,
+    "height": 256,
+    "code": "PIC-50E1CF",
+    "shapes": ["blue circle", "red triangle"]
+  },
+  "inputText": "Authorized synthetic image test: report the printed code and the two colored shapes.",
+  "productPath": [
+    "real attachment upload/draft restored",
+    "real UI send",
+    "built API",
+    "production factory/service/client",
+    "standard ACP image",
+    "real Claude bridge/SDK/native",
+    "MessageStore",
+    "warm UI refresh",
+    "API/Redis SAVE restart",
+    "cold stored history",
+    "cold UI refresh"
+  ],
+  "native": {
+    "cli": "2.1.299",
+    "sdk": "0.3.285",
+    "bridgeBase": "v0.70.0 plus fixed local prototype patches",
+    "requestedByGuard": "claude-opus-5-5",
+    "servedModel": "unknown"
+  },
+  "counts": {
+    "initialize": 1,
+    "newSession": 1,
+    "prompts": 1,
+    "images": 1,
+    "toolCalls": 0,
+    "endTurn": 1,
+    "messages": 2
+  },
+  "guard": {
+    "fixtureCwdChecked": true,
+    "mcpServers": [],
+    "tools": [],
+    "settingSources": [],
+    "hooks": false,
+    "userInstructions": false,
+    "maxBudgetUsd": 1,
+    "maxTurns": 3,
+    "maxPromptCount": 1,
+    "replacesSystemPrompt": true,
+    "replacesModel": true,
+    "replacesAllOutboundTextWithFixedSyntheticSentence": true,
+    "imageUnchanged": true
+  },
+  "authentication": "Explicit prior user authorization; existing local authentication subset reused privately; no credential values or repository source sent",
+  "costUsd": "unknown",
+  "historyExactlyEqual": true,
+  "coldRestart": {
+    "oldApi": 2272,
+    "oldRedis": 10096,
+    "keyCount": 66,
+    "newApi": 27896,
+    "newRedis": 15448,
+    "storagePreserved": true
+  },
+  "runtimeHashManifest": "product-image-runtime-hashes.json",
+  "privateArtifactHashes": {
+    "live.png": "1c51135acc1d2cf57a1f51dd19770eb4e1269c610fdd1f1625d5aa6eb7cc3606",
+    "refresh.png": "28d5c11fa8ccf22ac39a3a1dbf09eac462e1623d2ba43ca719ce4351359defc9",
+    "cold.png": "32cfd20b482ab0b3b84b352e3b7a4ffa7547471212d3c2445e3954bf885b37fc",
+    "live.dom.txt": "a5274694da96c23f6919ad16b0fb57013308d90d646248f2f1843da486964f5a",
+    "refresh.dom.txt": "63154afad1cb1a3f5f175afeb43acff42e3f45d91e6501cd3038d8922b64b9d7",
+    "cold.dom.txt": "91a9dcf50f6fb1a60aaa15800b7700e1aa18a7a2bdd96ecea8d6513577e4bf79",
+    "wire-in.jsonl": "474c9765e41e4954a5d6d835e2e7b55f33dc08735bc254addc653ccac30e47cf",
+    "wire-forwarded.jsonl": "e5ab444914d1a3cbcf36f9fd611af3eb05346ff8d1ef0e909226638989aabf40",
+    "wire-out.jsonl": "a4f3049272baea76f9ce1a7af878c56337de3f56da2eccd261f527541bdff265",
+    "stored-response-before-cold.json": "a1f641f5ad1387325794ac4adbd4bdba80a79a9ee0dc364063f7cf45350e90bb",
+    "stored-response-after-cold.json": "a1f641f5ad1387325794ac4adbd4bdba80a79a9ee0dc364063f7cf45350e90bb",
+    "cold-before.json": "61372c27836b6f14eb7fe7581c0272f84214d934b0f0111cb35ca59b56f68b17",
+    "cold-processes.json": "6b0ab24ea38e7592026be95370d92acf2cb58ff84a9209b4a31d1aaa0b5c4438",
+    "runtime-owners-before-cold.json": "f59a520d2ec3c71c47cad144471378e1521848cb39056ad5654e5764d54d5046",
+    "frozen-before.json": "0ceeeef7fc61c8a3216a52a09ca432a05310ded092356f43648519a3bf901765",
+    "verified-after-final.json": "e6111c635997886116ac3121f9e2e5dc7317953d5f4a063c96db08de482583f9",
+    "redis-cold-verified.snapshot.log": "d1384425f6bf45d0e850392a5eb28499181a618f489fd2ed37ee05cef14a5559",
+    "api-cold-verified.snapshot.log": "e79222119e5b1ccd032b2d22512d1df7d0f3d20273cea6250971ecfaf804b4e9"
+  },
+  "limitations": [
+    "Not production principal/policy/approval or trusted L0/model-selector acceptance",
+    "No tool results in this image sample; W1 tool success/failure/child evidence remains separate",
+    "Not complete G2-G5 or migration approval",
+    "CodeAgentCLI/MiniMax skipped by user; not verified",
+    "Product error/cancel UI unverified",
+    "Only PR1596/eab5082c sample; not PR1599 exact HEAD acceptance",
+    "Later context correction 652ff67fe has separate non-model consumer proof; image sample version unchanged"
+  ],
+  "historicalSample": {
+    "sampleId": "acp-product-ui-1",
+    "status": "approved_historical_run_only",
+    "baseHead": "7a2f8537955988602a39e6d6f309b153d63357da",
+    "dirtySource": true,
+    "loadedArtifactHash": "unavailable",
+    "captureBoundary": "post-capture only; later non-prompt public-contract probe appended to original wire files",
+    "notExactFinalHead": true
+  },
+  "snapshotBoundary": "Copied after bounded UI verification and test-service cleanup; originals retained. API 500 after Redis shutdown belongs to cleanup, not the successful cold history reads.",
+  "independentReview": {
+    "reviewer": "/root/acp_plan_review",
+    "verdict": "approve bounded root2 run facts",
+    "scope": "84 frozen hashes, actual wire and image bytes, real answer, persisted history and cold process/UI proof; manifest corrections reviewed separately"
+  }
+}

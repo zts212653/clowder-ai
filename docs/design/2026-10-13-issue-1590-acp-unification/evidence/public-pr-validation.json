@@ -1,0 +1,66 @@
+{
+  "observedAt": "2026-10-14T02:30:20.141Z",
+  "baseCommit": "449134fed1b08e5cf2a05a72817b84f163baf180",
+  "nativeCapturesRerun": false,
+  "productionMigration": false,
+  "independentReviewer": "/root/acp_plan_review",
+  "verdict": "first delivery and rebase only; no open P1/P2; complete gates held",
+  "evidence": [
+    {
+      "name": "api-build",
+      "command": "pnpm --filter @cat-cafe/api build; npm_config_script_shell=Git Bash",
+      "passed": null,
+      "exitCode": 0,
+      "privateLog": ".cat-cafe/tmp/public-rebase-api-build-green.log",
+      "sha256": "486561d2fcc182e8d9009a7894d16fb957731983c85d0ef57bb2b385ba852e8e"
+    },
+    {
+      "name": "web-full-tsc",
+      "command": "node node_modules/typescript/bin/tsc -p packages/web/tsconfig.json --noEmit --incremental false",
+      "passed": null,
+      "exitCode": 0,
+      "privateLog": ".cat-cafe/tmp/public-rebase-full-web-tsc.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "api-source",
+      "command": "with-test-home.sh node --import API tsx --test claude-tool-results/claude-tool-history/claude-native-tool-history/f322-tool-event-instance/acp-permission-decisions/acp-permission-safety",
+      "passed": 46,
+      "exitCode": 0,
+      "privateLog": ".cat-cafe/tmp/public-rebase-source-tests-green.log",
+      "sha256": "054cd8c008fd7b6b08953c49116cfe4d82fcd6b34a5ae39b1d000030ce056b21"
+    },
+    {
+      "name": "api-built",
+      "command": "with-test-home.sh node --test acp-client/acp-httpstream-client/acp-permission-wire/route-parallel-result-merge-fifo/tool-event-log",
+      "passed": 92,
+      "exitCode": 0,
+      "privateLog": ".cat-cafe/tmp/public-rebase-built-regressions.log",
+      "sha256": "011c54bfc5ddb352306dfe0b11af97bec1e7da809c4e2d1131ee5583c0462dcc"
+    },
+    {
+      "name": "web-unit",
+      "command": "vitest run claude-tool-replay/f322-tool-event-instance/story-player-adapter",
+      "passed": 19,
+      "exitCode": 0,
+      "privateLog": ".cat-cafe/tmp/public-rebase-web-tests.log",
+      "sha256": "a062f484a5d73955a1dcf4ed75173f16cbce04950201ffa16c8179a35559e8f5"
+    },
+    {
+      "name": "web-browser",
+      "command": "node --test packages/web/test/browser/claude-native-tool-replay.test.mjs; isolated Edge",
+      "passed": 2,
+      "exitCode": 0,
+      "privateLog": ".cat-cafe/tmp/public-rebase-browser.log",
+      "sha256": "8c4a913bafab7c66ee5255981d91c1797c2bf9a01a8c59455ada5eb9ffafdd22"
+    },
+    {
+      "name": "execution-ref-red",
+      "command": "claude-native-tool-history: explicit invocation scope assertion before lambda correction",
+      "passed": null,
+      "exitCode": 1,
+      "privateLog": ".cat-cafe/tmp/public-rebase-execution-red.log",
+      "sha256": "7b621f683be01d29db3e738cc9d6d77d9c3c49a1028eecafbcbaf93d2950cfb0"
+    }
+  ]
+}

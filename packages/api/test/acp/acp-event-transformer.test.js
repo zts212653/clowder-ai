@@ -25,7 +25,7 @@ describe('transformAcpEvent', () => {
     const result = transformAcpEvent(update, catId, metadata);
     assert.equal(result.type, 'agent_loop');
     assert.equal(result.metadata.usage.contextUsedTokens, 85_000);
-    assert.equal(result.metadata.usage.lastTurnInputTokens, 85_000);
+    assert.equal(result.metadata.usage.lastTurnInputTokens, undefined);
     assert.equal(result.metadata.usage.contextWindowSize, 100_000);
   });
 
@@ -150,7 +150,7 @@ describe('transformAcpEvent', () => {
     // Progress update for a toolCallId that already has pending tool_use → don't re-emit
     const state = createAcpSessionState();
     // Pre-seed state: toolCallId tc-xx already has emitted tool_use
-    state.emittedToolUseByCallId.add('tc-xx');
+    state.emittedToolUseByCallId.add(JSON.stringify([null, 'tc-xx']));
     const update = {
       sessionId: 's1',
       update: {
@@ -166,7 +166,7 @@ describe('transformAcpEvent', () => {
 
   it('tool_call_update(status=completed) for existing toolCallId → tool_result only (F197 AC-A2)', () => {
     const state = createAcpSessionState();
-    state.emittedToolUseByCallId.add('tc-yy');
+    state.emittedToolUseByCallId.add(JSON.stringify([null, 'tc-yy']));
     const update = {
       sessionId: 's1',
       update: {
@@ -206,7 +206,7 @@ describe('transformAcpEvent', () => {
 
   it('tool_call_update(status=failed) for existing toolCallId → tool_result with content (F197 AC-A6f)', () => {
     const state = createAcpSessionState();
-    state.emittedToolUseByCallId.add('tc-fail');
+    state.emittedToolUseByCallId.add(JSON.stringify([null, 'tc-fail']));
     const update = {
       sessionId: 's1',
       update: {
@@ -236,7 +236,10 @@ describe('transformAcpEvent', () => {
     const result = transformAcpEvent(update, catId, metadata, state);
     assert.equal(result.type, 'tool_use', 'no status / pending → single tool_use');
     assert.equal(result.toolName, 'search_evidence');
-    assert.ok(state.emittedToolUseByCallId.has('tc-pending'), 'state must record emittedToolUse');
+    assert.ok(
+      state.emittedToolUseByCallId.has(JSON.stringify([null, 'tc-pending'])),
+      'state must record emittedToolUse',
+    );
   });
 
   it('tool_call (in_progress) → tool_use only (F197 AC-A1)', () => {
@@ -260,7 +263,7 @@ describe('transformAcpEvent', () => {
     // ACP stream replay / duplicate final update would produce N tool_result for same toolCallId.
     // Spec KD-5 "仅一次 final tool_result" must be enforced.
     const state = createAcpSessionState();
-    state.emittedToolUseByCallId.add('tc-dup');
+    state.emittedToolUseByCallId.add(JSON.stringify([null, 'tc-dup']));
     const update = {
       sessionId: 's1',
       update: {
@@ -410,7 +413,7 @@ describe('transformAcpEvent', () => {
     // Pre-fix bug: no-status content was being treated as final.
     // Post-fix: only status=completed/failed triggers tool_result; progress stays null.
     const state = createAcpSessionState();
-    state.emittedToolUseByCallId.add('tc-prog');
+    state.emittedToolUseByCallId.add(JSON.stringify([null, 'tc-prog']));
     const update = {
       sessionId: 's1',
       update: {

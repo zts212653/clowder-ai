@@ -96,7 +96,8 @@ describe('AcpServiceFactory', () => {
 
       let closeFirstPool;
       try {
-        assert.ok(await createAcpServiceForConfig({ ...baseInput, config: makeConfig(200_000) }));
+        const firstService = await createAcpServiceForConfig({ ...baseInput, config: makeConfig(200_000) });
+        assert.ok(firstService);
         const firstPool = poolRegistry.get(profileId);
         assert.ok(firstPool);
         closeFirstPool = firstPool.closeAll.bind(firstPool);
@@ -111,6 +112,9 @@ describe('AcpServiceFactory', () => {
         if (clientId === 'kimi') {
           const client = firstPool.clientFactory();
           assert.equal(client.config.env.KIMI_MODEL_MAX_CONTEXT_SIZE, '200000');
+          assert.equal(firstService.contextCapability().nativeWindowControl, true);
+        } else if (clientId === 'opencode') {
+          assert.equal(firstService.contextCapability().nativeWindowControl, false);
         }
         assert.ok(await createAcpServiceForConfig({ ...baseInput, config: makeConfig(128_000) }));
         const secondPool = poolRegistry.get(profileId);

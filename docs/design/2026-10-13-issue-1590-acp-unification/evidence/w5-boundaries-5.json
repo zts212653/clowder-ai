@@ -1,0 +1,164 @@
+{
+  "sample": "boundaries-5",
+  "evidenceKind": "real_native_SDK_ACP_with_synthetic_human_answer",
+  "bridgePin": "d0aafb1ca26427285ffaeac8d8a4452fff28e9c3",
+  "sdkVersion": "0.3.232",
+  "nativeVersion": "2.1.296",
+  "bundleSha256": "9402a92dfb69c73f5978eacee2c1299adbc8061b5e9c572d71d2784f94b73b70",
+  "fixtureSha256": "6324e250bd0923bc1f8ed4dc58f6c52511a2b2085afe7ae6a65e2582fc057d3e",
+  "sessionId": "589ca305-0a1a-42b1-8315-e0b29c81ac15",
+  "success": true,
+  "durationMs": 34352,
+  "executedRunner": {
+    "capturedBeforeExecution": false,
+    "exactRetainedSourceSnapshot": ".cat-cafe/tmp/authorized-claude-notice-20261014/boundaries-5/runner.mts",
+    "snapshotSha256": "a2a8b7ba26173602a99e6bd8be4412611f02a25c564642d4304481fe6ffb3648",
+    "variant": "baseline",
+    "archiveNote": "Result archived from executed boundaries-4 directory; runner retained unchanged."
+  },
+  "scope": {
+    "syntheticOnly": true,
+    "budgetUsd": 2,
+    "maxSdkTurns": 8,
+    "hooksDisabled": true,
+    "userInstructionsDisabled": true,
+    "productionElicitationHandler": false,
+    "productionMigrationEnabled": false,
+    "humanAnswer": "synthetic boolean confirm=true",
+    "sampleCount": 1,
+    "populationReliabilityEstimate": false
+  },
+  "pendingHuman": {
+    "waitingAt": 1791949891845,
+    "checkedAt": 1791949894861,
+    "noticesQueued": [
+      {
+        "outcome": "injected",
+        "nativeInputUuid": "96933de7-fb54-4cbb-805c-f5817bb8af7e"
+      },
+      {
+        "outcome": "injected",
+        "nativeInputUuid": "81ca8aa7-f47e-4986-b2fd-904fcc51f2f1"
+      }
+    ],
+    "answered": false,
+    "primarySettled": false
+  },
+  "multipleNotices": {
+    "receipts": [
+      {
+        "outcome": "injected",
+        "nativeInputUuid": "96933de7-fb54-4cbb-805c-f5817bb8af7e"
+      },
+      {
+        "outcome": "injected",
+        "nativeInputUuid": "81ca8aa7-f47e-4986-b2fd-904fcc51f2f1"
+      }
+    ],
+    "nativeStarts": [
+      {
+        "observedAt": 1791949902901,
+        "commandUuid": "96933de7-fb54-4cbb-805c-f5817bb8af7e",
+        "state": "started"
+      },
+      {
+        "observedAt": 1791949902901,
+        "commandUuid": "81ca8aa7-f47e-4986-b2fd-904fcc51f2f1",
+        "state": "started"
+      }
+    ],
+    "ordered": true,
+    "primarySettledAt": 1791949908599
+  },
+  "cancellation": {
+    "receipt": {
+      "outcome": "injected",
+      "nativeInputUuid": "8d19b079-7a39-4e55-bc1c-e7de0a3d7ec8"
+    },
+    "cancelledAt": 1791949914155,
+    "nativeLifecycle": [
+      {
+        "observedAt": 1791949914050,
+        "commandUuid": "8d19b079-7a39-4e55-bc1c-e7de0a3d7ec8",
+        "state": "queued"
+      },
+      {
+        "observedAt": 1791949914163,
+        "commandUuid": "8d19b079-7a39-4e55-bc1c-e7de0a3d7ec8",
+        "state": "cancelled"
+      }
+    ],
+    "localStreamError": "ACP session 589ca305-0a1a-42b1-8315-e0b29c81ac15 cancelled locally; native acknowledgement pending",
+    "nativeWireCancelled": true,
+    "subsequentNativePrompt": {
+      "stopReason": "end_turn",
+      "usage": {
+        "inputTokens": 1535,
+        "outputTokens": 8,
+        "cachedReadTokens": 116,
+        "cachedWriteTokens": 5,
+        "totalTokens": 1664
+      }
+    },
+    "noticeNeverStarted": true,
+    "productionClientReopened": false,
+    "usageScope": "known session accumulator only; unobserved usage/cost unknown, never total-spend zero",
+    "instantaneousQuiescenceClaim": false
+  },
+  "nativeResults": [
+    {
+      "observedAt": 1791949908594,
+      "subtype": "success",
+      "isError": false,
+      "terminalReason": "completed",
+      "stopReason": "end_turn",
+      "userMessageUuids": [
+        "8c1037c2-b02f-4959-9b86-7a6cb5c0e289",
+        "96933de7-fb54-4cbb-805c-f5817bb8af7e",
+        "81ca8aa7-f47e-4986-b2fd-904fcc51f2f1"
+      ]
+    },
+    {
+      "observedAt": 1791949914167,
+      "subtype": "error_during_execution",
+      "isError": true,
+      "terminalReason": "aborted_tools",
+      "stopReason": "tool_use",
+      "userMessageUuids": ["b8e78bb9-df1c-410c-b4d5-34b130289021"]
+    },
+    {
+      "observedAt": 1791949918538,
+      "subtype": "success",
+      "isError": false,
+      "terminalReason": "completed",
+      "stopReason": "end_turn",
+      "userMessageUuids": ["411f05fb-b0f0-4c0d-97d5-1dcd9949994b"]
+    }
+  ],
+  "rawRefs": [
+    {
+      "privateRef": ".cat-cafe/tmp/authorized-claude-notice-20261014/boundaries-5/result.json",
+      "sha256": "43061551f21edc18255d0b5978ab5a822aea7d352f9f0c15ddf6d3e080728747"
+    },
+    {
+      "privateRef": ".cat-cafe/tmp/authorized-claude-notice-20261014/boundaries-5/events.json",
+      "sha256": "a30e8fce6eefa6dd9931dc7f95db6e5cb27071f765611ab5c08300d27be1332b"
+    },
+    {
+      "privateRef": ".cat-cafe/tmp/authorized-claude-notice-20261014/boundaries-5/wire.json",
+      "sha256": "982f0983201cb22cbe11ca0876ef1528abe084e387ebfdb262529cc966404370"
+    },
+    {
+      "privateRef": ".cat-cafe/tmp/authorized-claude-notice-20261014/boundaries-5/controls.json",
+      "sha256": "21c1d35f71b702a33156e86637f6b04e176528c45af5067ddf2946d7885722d3"
+    },
+    {
+      "privateRef": ".cat-cafe/tmp/authorized-claude-notice-20261014/boundaries-5/elicitations.json",
+      "sha256": "7e860224ecccce52bc78ca0d65682171134c6d0284a6a00de9f8f60c1a09d713"
+    },
+    {
+      "privateRef": ".cat-cafe/tmp/authorized-claude-notice-20261014/boundaries-5/tools.jsonl",
+      "sha256": "4af73cbc9c22f54ce54ddbf90dac21503a24a4ac88e7cb933405a49e2eba4f46"
+    }
+  ]
+}

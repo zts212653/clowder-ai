@@ -1,0 +1,89 @@
+{
+  "observedAt": "2026-10-13T13:44:45.888Z",
+  "scope": "authorized synthetic read-only isolated test bindings; no production migration",
+  "next": {
+    "evidenceKind": "real_ACP_bridge_SDK_native_notice_test_binding",
+    "bridgePin": "d0aafb1ca26427285ffaeac8d8a4452fff28e9c3",
+    "sdkVersion": "0.3.232",
+    "nativeCli": "2.1.296",
+    "bridgeModuleSha256": "cb7e1694fb0827426523eeaecb130e75f35bf9e217dbc6f24b749fa0a2c7a387",
+    "bridgeLockSha256": "4ee8fa26495bf3e3b8c28e3d5801d230a30408404b2079321060e038b8ed46f7",
+    "runnerSha256": "13a84ad2249e95a441502b28874c33dfb724ef51be16e6c0e39e4b6df9f5e8c7",
+    "hooksDisabled": true,
+    "userInstructionsExcluded": true,
+    "tools": ["fixture.read_fixture"],
+    "budgetUsd": 2,
+    "productionBinding": false,
+    "sessionId": "c6d9adb5-a678-4b6f-8551-2f007dc6d237",
+    "humanPendingWindow": {
+      "startedAt": 1791898711881,
+      "checkedAt": 1791898714902,
+      "noticeReceipt": {
+        "outcome": "injected",
+        "nativeInputUuid": "454f4ce8-4279-43cd-80a1-4b90a0c95b58"
+      },
+      "toolStarted": false,
+      "primarySettled": false,
+      "permissionResponded": false
+    },
+    "durationMs": 41150,
+    "aReceipt": {
+      "outcome": "injected",
+      "nativeInputUuid": "b11cbb8f-a842-40be-a744-b3b8379b1dfd"
+    },
+    "idle": {
+      "outcome": "promptRequired",
+      "reason": "noRunningTurn"
+    },
+    "cancelled": {
+      "outcome": "promptRequired",
+      "reason": "noRunningTurn"
+    },
+    "aSettledAt": 1791898707634,
+    "humanSettledAt": 1791898726229,
+    "success": true
+  },
+  "now": {
+    "evidenceKind": "real_ACP_bridge_SDK_native_notice_test_binding",
+    "bridgePin": "d0aafb1ca26427285ffaeac8d8a4452fff28e9c3",
+    "sdkVersion": "0.3.232",
+    "nativeCli": "2.1.296",
+    "bridgeModuleSha256": "cb7e1694fb0827426523eeaecb130e75f35bf9e217dbc6f24b749fa0a2c7a387",
+    "bridgeLockSha256": "4ee8fa26495bf3e3b8c28e3d5801d230a30408404b2079321060e038b8ed46f7",
+    "runnerSha256": "13a84ad2249e95a441502b28874c33dfb724ef51be16e6c0e39e4b6df9f5e8c7",
+    "hooksDisabled": true,
+    "userInstructionsExcluded": true,
+    "tools": ["fixture.read_fixture"],
+    "budgetUsd": 2,
+    "productionBinding": false,
+    "sessionId": "1f488f35-7dde-48c9-b4d6-0504244ab75e",
+    "controlMode": "now",
+    "durationMs": 19236,
+    "aReceipt": {
+      "outcome": "injected"
+    },
+    "aSettledAt": 1791898613744,
+    "success": true
+  },
+  "originalNow": {
+    "evidenceKind": "real_ACP_bridge_SDK_native_notice_test_binding",
+    "bridgePin": "d0aafb1ca26427285ffaeac8d8a4452fff28e9c3",
+    "sdkVersion": "0.3.232",
+    "nativeCli": "2.1.296",
+    "hooksDisabled": true,
+    "userInstructionsExcluded": true,
+    "tools": ["fixture.read_fixture"],
+    "budgetUsd": 2,
+    "productionBinding": false,
+    "sessionId": "3f0d9168-16e9-423e-9006-02301beb4b93",
+    "error": "Expected values to be strictly equal:\n+ actual - expected\n\n+ 'ACP timeout: session/prompt did not respond within 90000ms'\n- undefined\n",
+    "toolDisposition": "moved to background, explicitly not interrupted",
+    "doNotInferCancellationFromNegatedText": true
+  },
+  "credentialSource": "selected existing user authentication/model env only; isolated CLAUDE_CONFIG_DIR, settingSources=[], hooks/instructions disabled",
+  "followupOwnership": "native command UUID -> model message ID -> native root tool ID -> task_notification run_id -> task-notification origin.runId; unknown ownership retains original debt",
+  "permissionEvidence": "real native request_permission, test handler held 3 seconds then released; not product human UI or elicitation",
+  "cancelEvidence": "local iterator exited exceptionally; later native error/idle; aftercancel notice promptRequired; no wire cancelled-settlement or queued-notice withdrawal proof",
+  "affectedMockChecks": 29,
+  "fullPrototypeGate": "held: elicitation, multiple real notices, queued notice cancellation and version matrix incomplete"
+}

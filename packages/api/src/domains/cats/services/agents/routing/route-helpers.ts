@@ -1,9 +1,11 @@
+import { toStoredToolEvent, truncateDetail } from './stored-tool-events.js';
+export { toStoredToolEvent, truncateDetail };
+
 /**
  * Route Helpers
  * Shared types, interfaces, and helper functions for route-serial and route-parallel.
  */
 
-import { randomUUID } from 'node:crypto';
 import type { CatId, MessageContent, RichBlock, RichBlockBase } from '@cat-cafe/shared';
 import { catRegistry, isCrossThreadProvenance } from '@cat-cafe/shared';
 import { resolveUnboundHistoryContextTokenCeiling } from '../../../../../config/context-capacity.js';
@@ -961,77 +963,6 @@ export function detectContextDegradation(historyCount: number, includedCount: nu
     };
   }
 
-  return null;
-}
-
-/** Truncate a string for tool event detail preview */
-export function truncateDetail(text: string, maxLength: number): string {
-  if (text.length <= maxLength) return text;
-  return `${text.slice(0, maxLength)}…`;
-}
-
-/** Build a StoredToolEvent from a streaming AgentMessage.
- *
- * F153 Phase J Slice J-B AC-J7: extends the event with the four-piece telemetry set
- * (`toolUseId`, `status`, `tracing`, `startTimeMs`/`endTimeMs`) so cold-start hydrate
- * (AC-J8) can synthesize a real-duration `cat_cafe.tool_use ...` child span instead
- * of degrading to a flat `cat_cafe.invocation.restored` marker.
- *
- * All new fields are optional: messages without Phase J wiring (legacy, or providers
- * deferred per KD-41) still produce a valid StoredToolEvent that the hydrate path
- * skips for span synthesis but still surfaces in the Hub history view.
- */
-export function toStoredToolEvent(
-  msg: AgentMessage,
-  executionRef = msg.turnInvocationId ?? msg.invocationId,
-): StoredToolEvent | null {
-  if (msg.type !== 'tool_use' && msg.type !== 'tool_result') return null;
-  // Event IDs are born once in the API and then carried unchanged through every consumer.
-  const prefix = msg.type === 'tool_use' ? 'tool-' : 'toolr-';
-  if (!msg.toolEventId?.startsWith(prefix)) msg.toolEventId = `${prefix}${randomUUID()}`;
-  if (executionRef) msg.toolExecutionRef = executionRef;
-  const instance = { id: msg.toolEventId, ...(msg.toolExecutionRef ? { executionRef: msg.toolExecutionRef } : {}) };
-  if (msg.type === 'tool_use') {
-    const toolName = msg.toolName ?? 'unknown';
-    let detail: string | undefined;
-    if (msg.toolInput) {
-      try {
-        detail = truncateDetail(JSON.stringify(msg.toolInput), 200);
-      } catch {
-        detail = '[unserializable]';
-      }
-    }
-    return {
-      ...instance,
-      type: 'tool_use',
-      label: `${msg.catId as string} → ${toolName}`,
-      // R6 maintainer: persist native tool name as data field (decoupled from display label).
-      // Hydrate prefers this for span naming; label parse becomes legacy fallback only.
-      toolName,
-      ...(detail ? { detail } : {}),
-      timestamp: msg.timestamp,
-      ...(msg.toolUseId ? { toolUseId: msg.toolUseId } : {}),
-      ...(msg.toolTracing ? { tracing: msg.toolTracing } : {}),
-      // For tool_use events, msg.timestamp marks when the span opened.
-      startTimeMs: msg.timestamp,
-    };
-  }
-  if (msg.type === 'tool_result') {
-    const raw = (msg.content ?? '').trimEnd();
-    const detail = raw.length > 0 ? truncateDetail(raw, 1500) : '(no output)';
-    return {
-      ...instance,
-      type: 'tool_result',
-      label: `${msg.catId as string} ← result`,
-      detail,
-      timestamp: msg.timestamp,
-      ...(msg.toolUseId ? { toolUseId: msg.toolUseId } : {}),
-      ...(msg.toolResultStatus ? { status: msg.toolResultStatus } : {}),
-      ...(msg.toolTracing ? { tracing: msg.toolTracing } : {}),
-      // For tool_result events, msg.timestamp marks when the span closed.
-      endTimeMs: msg.timestamp,
-    };
-  }
   return null;
 }
 

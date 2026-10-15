@@ -329,30 +329,27 @@ describe('acp bootstrap cwd', () => {
     );
   });
 
-  it('REGRESSION: AcpClient must filter MCP servers by client mcpCapabilities', () => {
-    const source = readFileSync(
-      new URL('../../src/domains/cats/services/agents/providers/acp/AcpClient.ts', import.meta.url),
-      'utf-8',
-    );
-    // Sending stdio MCP servers to clients that only support http/sse (e.g. OpenCode)
-    // causes session/new to hang. AcpClient.filterMcpByCapabilities() must exist and
-    // be called in both newSession() and loadSession().
-    assert.ok(
-      source.includes('filterMcpByCapabilities'),
-      'REGRESSION: AcpClient must implement filterMcpByCapabilities to prevent sending unsupported MCP transports',
-    );
-    // newSession uses it
-    assert.ok(
-      source.includes('filterMcpByCapabilities(mcpServers)'),
-      'REGRESSION: newSession() and loadSession() must filter MCP servers before sending to client',
-    );
-    // The filter checks mcpCapabilities from initResult
-    assert.ok(
-      source.includes('initResult?.agentCapabilities?.mcpCapabilities'),
-      'REGRESSION: filter must read mcpCapabilities from the ACP initialize result',
-    );
+  it('REGRESSION: both real client transports filter unsupported optional MCP servers', async () => {
+    const { imageFixture } = await import('../helpers/acp-image-fixture.js');
+    const servers = [
+      { name: 'stdio', command: 'synthetic', args: [], env: [] },
+      { name: 'http', type: 'http', url: 'http://example.invalid/mcp', headers: [] },
+      { name: 'sse', type: 'sse', url: 'http://example.invalid/sse', headers: [] },
+    ];
+    for (const transport of ['stdio', 'http']) {
+      const fixture = await imageFixture(transport, '/fixture');
+      try {
+        await fixture.client.newSession('/fixture', servers);
+        await fixture.client.loadSession('native', '/fixture', servers);
+        for (const request of fixture.captured.filter((packet) =>
+          ['session/new', 'session/load'].includes(packet.method),
+        ))
+          assert.deepEqual(request.params.mcpServers, [servers[0]]);
+      } finally {
+        await fixture.close();
+      }
+    }
   });
-
   it('guards helper against TOCTTOU existsSync + mkdirSync creation', () => {
     const source = readFileSync(
       new URL('../../src/domains/cats/services/agents/providers/acp/acp-bootstrap-cwd.ts', import.meta.url),

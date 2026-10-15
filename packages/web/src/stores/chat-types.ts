@@ -106,11 +106,15 @@ export interface ToolEvent {
   type: 'tool_use' | 'tool_result';
   label: string;
   detail?: string;
+  /** Finalized input carried on the result; output remains in detail. */
+  inputDetail?: string;
   resultMeta?: string;
   /** Native provider pair key; Hub UI event ids may differ between use/result rows. */
   toolUseId?: string;
+  toolParentUseId?: string;
+  toolName?: string;
   /** Persisted tool result status; replay adapter maps error status to failed tool UI. */
-  status?: 'completed' | 'error';
+  status?: 'completed' | 'error' | 'unknown';
   timestamp: number;
 }
 

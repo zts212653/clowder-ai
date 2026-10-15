@@ -19,6 +19,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { PassThrough } from 'node:stream';
 import { mock, test } from 'node:test';
+import { readCliJsonArgument } from './helpers/cli-json-argument.js';
 import { ensureFakeCliOnPath } from './helpers/fake-cli-path.js';
 import { emitProcessExit, waitForMockProcessReady } from './helpers/mock-process-lifecycle.js';
 import { emitEvents as emitClaudeEvents } from './helpers/provider-archive-test-helpers.js';
@@ -1186,7 +1187,7 @@ test('#712: merges user .mcp.json servers as base layer — managed entries take
     assert.ok(mcpConfigIdx >= 0, '--mcp-config should be present');
     assert.ok(args.includes('--strict-mcp-config'), '--strict-mcp-config should be present');
 
-    const parsed = JSON.parse(args[mcpConfigIdx + 1]);
+    const parsed = readCliJsonArgument(args, '--mcp-config');
     // User-owned server should be merged in
     assert.ok(parsed.mcpServers.filesystem, 'user-owned filesystem should be merged');
     assert.deepEqual(parsed.mcpServers.filesystem.args, ['-y', '@mcp/fs']);
@@ -1262,7 +1263,7 @@ test('#712: Claude reads capabilities from runtime root while cwd is user projec
     await promise;
 
     const args = spawnFn.mock.calls[0].arguments[1];
-    const parsed = JSON.parse(args[args.indexOf('--mcp-config') + 1]);
+    const parsed = readCliJsonArgument(args, '--mcp-config');
     assert.equal(parsed.mcpServers['cat-cafe-collab'], undefined, 'disabled runtime capability must not be injected');
     assert.ok(parsed.mcpServers['cat-cafe-memory'], 'enabled runtime capability must be injected');
   } finally {
@@ -1321,7 +1322,7 @@ test('Claude MCP config resolves Pencil with the current editor host identifier'
     await promise;
 
     const args = spawnFn.mock.calls[0].arguments[1];
-    const parsed = JSON.parse(args[args.indexOf('--mcp-config') + 1]);
+    const parsed = readCliJsonArgument(args, '--mcp-config');
     assert.deepEqual(parsed.mcpServers.pencil, {
       command: pencilBin,
       args: ['--app', 'visual_studio_code'],
@@ -1396,7 +1397,7 @@ test('#712: Claude merge excludes disabled capability-managed user entries', asy
     await promise;
 
     const args = spawnFn.mock.calls[0].arguments[1];
-    const parsed = JSON.parse(args[args.indexOf('--mcp-config') + 1]);
+    const parsed = readCliJsonArgument(args, '--mcp-config');
     assert.equal(parsed.mcpServers.filesystem, undefined, 'disabled capability must not be re-added from .mcp.json');
     assert.equal(parsed.mcpServers['cat-cafe'], undefined, 'legacy monolith alias must not be re-added from .mcp.json');
     assert.ok(parsed.mcpServers['my-tool'], 'unmanaged user server should still be merged');
@@ -1444,7 +1445,7 @@ test('falls back to default MCP path when CAT_CAFE_MCP_SERVER_PATH is empty', as
     const args = spawnFn.mock.calls[0].arguments[1];
     const mcpConfigIdx = args.indexOf('--mcp-config');
     assert.ok(mcpConfigIdx >= 0, '--mcp-config should be present when fallback resolves');
-    const parsed = JSON.parse(args[mcpConfigIdx + 1]);
+    const parsed = readCliJsonArgument(args, '--mcp-config');
     // #712: Split servers instead of monolith cat-cafe
     assert.ok(parsed.mcpServers['cat-cafe-collab'], 'split server cat-cafe-collab expected');
     assert.equal(parsed.mcpServers['cat-cafe'], undefined, 'monolith must not be injected');

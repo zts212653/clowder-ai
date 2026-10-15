@@ -1,3 +1,4 @@
+import { nativeToolCallKey } from '@cat-cafe/shared';
 /**
  * Parallel Route Strategy
  * All cats respond independently to the same message.
@@ -1300,7 +1301,10 @@ export async function* routeParallel(
   // 砚砚 HW-4 R1-2 review: entries carry toolUseId so an exact result can
   // splice its own entry by id (not the first same-name), preventing
   // same-name queue drift (search→graph→search).
-  const pendingToolResultsByCat = new Map<string, Array<{ toolName: string; toolUseId?: string }>>();
+  const pendingToolResultsByCat = new Map<
+    string,
+    Array<{ toolName: string; toolUseId?: string; toolParentUseId?: string }>
+  >();
   const invocationStartedAt = Date.now();
   // Wrap each stream so iteration errors surface as error+done events
   // instead of being silently dropped by mergeStreams.
@@ -1494,6 +1498,7 @@ export async function* routeParallel(
           toolName?: string;
           toolInput?: Record<string, unknown>;
           toolUseId?: string;
+          toolParentUseId?: string;
           invocationId?: string;
           sessionId?: string;
           threadId?: string;
@@ -1514,7 +1519,11 @@ export async function* routeParallel(
         // Falls back to FIFO toolName+catId match when toolUseId absent.
         const baseSummary = (msg.toolInput ?? {}) as Record<string, unknown>;
         const summary: Record<string, unknown> = msg.toolUseId
-          ? { ...baseSummary, _toolUseId: msg.toolUseId }
+          ? {
+              ...baseSummary,
+              _toolUseId: msg.toolUseId,
+              ...(msg.toolParentUseId ? { _toolParentUseId: msg.toolParentUseId } : {}),
+            }
           : baseSummary;
         deps.toolEventLog
           .append({
@@ -1534,7 +1543,7 @@ export async function* routeParallel(
         {
           const pk = msg.catId ?? 'unknown';
           const pq = pendingToolResultsByCat.get(pk) ?? [];
-          pq.push({ toolName: normalizedToolName, toolUseId: msg.toolUseId });
+          pq.push({ toolName: normalizedToolName, toolUseId: msg.toolUseId, toolParentUseId: msg.toolParentUseId });
           pendingToolResultsByCat.set(pk, pq);
         }
         // 砚砚 二审 P1-4: Skill tool_use → SkillLoadEventLog (AS-4)
@@ -1602,29 +1611,46 @@ export async function* routeParallel(
               // Prevents same-name drift (search→graph→search).
               let si = -1;
               if (resultMsg2.toolUseId) {
-                si = cq.findIndex((e) => e.toolUseId === resultMsg2.toolUseId);
+                si = cq.findIndex((e) => nativeToolCallKey(e) === nativeToolCallKey(effectiveMsg));
               }
-              if (si < 0) {
+              if (si < 0 && !resultMsg2.toolUseId) {
                 const nn = normalizeMcpToolName(toolNameCandidate);
                 si = cq.findIndex((e) => e.toolName === nn);
               }
               if (si >= 0) cq.splice(si, 1);
             }
           } else if (cq && cq.length > 0) {
-            toolNameCandidate = cq.shift()!.toolName;
+            const index = effectiveMsg.toolUseId
+              ? cq.findIndex((e) => nativeToolCallKey(e) === nativeToolCallKey(effectiveMsg))
+              : 0;
+            if (index >= 0) toolNameCandidate = cq.splice(index, 1)[0]!.toolName;
           }
         }
         if (toolNameCandidate) {
           const normalizedName = normalizeMcpToolName(toolNameCandidate);
-          const resultSummary = deriveResultSummary(normalizedName, msg.content);
+          const resultSummary = {
+            ...deriveResultSummary(normalizedName, msg.content),
+            ...(effectiveMsg.toolResultStatus ? { _toolResultStatus: effectiveMsg.toolResultStatus } : {}),
+          };
           if (Object.keys(resultSummary).length > 0) {
             // 砚砚 六审 P1-B: scope updateSummary match to specific cat (parallel
             // route runs multiple cats concurrently; same tool name can collide).
             // 砚砚 cloud-3 P1: also pass toolUseId for exact match when available;
             // otherwise FIFO toolName+catId match handles same-name parallel calls.
             const resultMsg = effectiveMsg as { catId?: string; toolUseId?: string };
-            const matcher: { toolUseId?: string; toolName?: string; catId?: string } = resultMsg.toolUseId
-              ? { toolUseId: resultMsg.toolUseId }
+            const matcher: {
+              toolUseId?: string;
+              toolParentUseId?: string;
+              invocationId?: string;
+              toolName?: string;
+              catId?: string;
+            } = resultMsg.toolUseId
+              ? {
+                  toolUseId: resultMsg.toolUseId,
+                  toolParentUseId: effectiveMsg.toolParentUseId,
+                  catId: effectiveMsg.catId,
+                  invocationId: effectiveMsg.invocationId ?? catInvocationId.get(effectiveMsg.catId),
+                }
               : resultMsg.catId
                 ? { toolName: normalizedName, catId: resultMsg.catId }
                 : { toolName: normalizedName };

@@ -1,0 +1,106 @@
+{
+  "observedAt": "2026-10-13T13:44:45.888Z",
+  "scope": "authorized synthetic read-only isolated test bindings; no production migration",
+  "evidenceKind": "real_ACP_bridge_native_model_fence_test_binding",
+  "nativeVersion": "0.161.0",
+  "bridgePin": "51f78d67e46c3a96ee8d8bf4e43fc917ab21c73e",
+  "bridgeBundleSha256": "273730367b9b880c4e1dfca274f4557ce074500acf16f2fc9eb351df2fae6a76",
+  "bridgeLockSha256": "748a70a13f6a7e7334cd6e3d3c2d1aea414d9a5773e0f6b88161cb84bb1c622e",
+  "runnerSha256": "98560030fe124c901cc5deeb5fa6f6fe87bd6e469387b6edc4e59439d3735a11",
+  "hooksDisabled": true,
+  "projectDocsDisabled": true,
+  "shellDisabled": true,
+  "productionBinding": false,
+  "negotiated": {
+    "prototype": true,
+    "version": 1,
+    "method": "_clowder/v1/control",
+    "nativeIdMethod": "_clowder/v1/turn_started"
+  },
+  "nativeSessionId": "01a1356f-a4b0-7f21-8c88-3bb96904ba12",
+  "turnA": "01a1356f-a809-7d33-a90a-2aca00e0f3d7",
+  "turnB": "01a13570-1b8e-7f01-8201-621a6724b1b7",
+  "turnC": "01a13570-b74d-7702-9782-e04f44e94251",
+  "validNativeReceipt": {
+    "operationId": "valid-A",
+    "nativeSessionId": "01a1356f-a4b0-7f21-8c88-3bb96904ba12",
+    "nativeTurnId": "01a1356f-a809-7d33-a90a-2aca00e0f3d7",
+    "outcome": "injected",
+    "nativeReceipt": {
+      "turnId": "01a1356f-a809-7d33-a90a-2aca00e0f3d7"
+    }
+  },
+  "staleWhileBRejected": true,
+  "staleIdleRejected": true,
+  "cancelledTargetRejected": true,
+  "foreignAndUnknownRejected": true,
+  "durationMs": 79038,
+  "permissions": [],
+  "nativeSteers": [
+    {
+      "id": 9,
+      "threadId": "01a1356f-a4b0-7f21-8c88-3bb96904ba12",
+      "expectedTurnId": "01a1356f-a809-7d33-a90a-2aca00e0f3d7",
+      "result": {
+        "turnId": "01a1356f-a809-7d33-a90a-2aca00e0f3d7"
+      }
+    },
+    {
+      "id": 15,
+      "threadId": "01a1356f-a4b0-7f21-8c88-3bb96904ba12",
+      "expectedTurnId": "01a1356f-a809-7d33-a90a-2aca00e0f3d7",
+      "error": {
+        "code": -32600,
+        "message": "expected active turn id `01a1356f-a809-7d33-a90a-2aca00e0f3d7` but found `01a13570-1b8e-7f01-8201-621a6724b1b7`"
+      }
+    },
+    {
+      "id": 16,
+      "threadId": "01a1356f-a4b0-7f21-8c88-3bb96904ba12",
+      "expectedTurnId": "nonexistent-native-turn",
+      "error": {
+        "code": -32600,
+        "message": "expected active turn id `nonexistent-native-turn` but found `01a13570-1b8e-7f01-8201-621a6724b1b7`"
+      }
+    },
+    {
+      "id": 18,
+      "threadId": "01a1356f-a4b0-7f21-8c88-3bb96904ba12",
+      "expectedTurnId": "01a1356f-a809-7d33-a90a-2aca00e0f3d7",
+      "error": {
+        "code": -32600,
+        "message": "no active turn to steer"
+      }
+    },
+    {
+      "id": 21,
+      "threadId": "01a1356f-a4b0-7f21-8c88-3bb96904ba12",
+      "expectedTurnId": "01a13570-b74d-7702-9782-e04f44e94251",
+      "error": {
+        "code": -32600,
+        "message": "no active turn to steer"
+      }
+    }
+  ],
+  "model": "existing selected gpt-6.1-sol profile",
+  "credentialSource": "read-only copy of selected native auth/provider config into isolated ignored home; values not published",
+  "testLimits": {
+    "perTurnTimeoutMs": 90000,
+    "toolDelayMs": 8000,
+    "toolCalls": 12,
+    "usdHardCap": null,
+    "workloadTurnLimit": 3,
+    "observedNativeTurnStarts": 4,
+    "observedAutoTitleTurns": 1,
+    "enforcedTotalNativeTurnHardCap": false,
+    "budgetCorrectionRef": "codex-budget-audit.json",
+    "providerModelCallCount": "unknown"
+  },
+  "scopeNotes": [
+    "unknown native nonempty turn rejected by native",
+    "unknown ACP session rejected by bridge",
+    "foreign binding and empty target rejected by bridge",
+    "cancelled target rejection does not prove tool quiescence"
+  ],
+  "fullPrototypeGate": "held: lost receipt/reconnect/reconciliation and complete interleaving statistics absent"
+}

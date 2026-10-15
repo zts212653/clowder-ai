@@ -27,6 +27,7 @@ import {
   catRegistry,
   type MessageContent,
   memoryCueDrillFamilyForResolver,
+  nativeToolCallKey,
   type RequestGenerationEnvelopeV1,
   type RequestGenerationPresentationV1,
   type RequestGenerationRetryReason,
@@ -5236,9 +5237,10 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
         // (enabling AC-J8 hydrate-side real-duration restore). Push happens after enrichment
         // (see line below) so outputs carry the enriched form, not the raw msg.
         let enrichedMsg = msg;
+        const nativeToolKey = nativeToolCallKey(msg);
         if (msg.type === 'tool_use' && msg.toolName && invocationSpan) {
-          if (msg.toolUseId) {
-            const span = toolSpanTracker.start(msg.toolName, msg.toolUseId, msg.toolInput as Record<string, unknown>);
+          if (nativeToolKey) {
+            const span = toolSpanTracker.start(msg.toolName, nativeToolKey, msg.toolInput as Record<string, unknown>);
             if (span) {
               const sc = span.spanContext();
               enrichedMsg = {
@@ -5257,8 +5259,8 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
         // F153 Phase J AC-J2 + J-B AC-J7: pair tool_result with matching tool_use span,
         // stamp `toolTracing` BEFORE closing the span (getContext peeks without removing),
         // then close with status.
-        if (msg.type === 'tool_result' && msg.toolUseId) {
-          const ctx = toolSpanTracker.getContext(msg.toolUseId);
+        if (msg.type === 'tool_result' && nativeToolKey) {
+          const ctx = toolSpanTracker.getContext(nativeToolKey);
           if (ctx && invocationSpan) {
             enrichedMsg = {
               ...msg,
@@ -5269,7 +5271,7 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
               },
             };
           }
-          toolSpanTracker.end(msg.toolUseId, msg.toolResultStatus ?? 'unknown');
+          toolSpanTracker.end(nativeToolKey, msg.toolResultStatus ?? 'unknown');
         }
 
         outputs.push(attachInvocationIdToTaskProgress(enrichedMsg));

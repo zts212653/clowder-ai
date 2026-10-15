@@ -38,6 +38,7 @@ import type {
 } from '@/stores/chat-types';
 import { type DefinitiveRichBlockOwner, useChatStore } from '@/stores/chatStore';
 import { useToastStore } from '@/stores/toastStore';
+import { liveToolEventFacts } from '@/utils/tool-event-facts';
 import { extractRecallMetaDetail, toolResultDetail } from '@/utils/toolPreview';
 import {
   type InvocationTerminalPhase,
@@ -305,6 +306,8 @@ interface AgentMsg {
   toolName?: string;
   /** Tool input params (for 'tool_use' events from backend) */
   toolInput?: Record<string, unknown>;
+  toolParentUseId?: string;
+  toolResultStatus?: 'ok' | 'error' | 'unknown';
   /** Message origin: stream = CLI stdout (thinking), callback = MCP post_message (speech) */
   origin?: 'stream' | 'callback';
   /** Backend stored-message ID (set for callback post-message, used for rich_block correlation) */
@@ -533,6 +536,8 @@ export interface BackgroundAgentMessage {
   toolExecutionRef?: string;
   toolName?: string;
   toolInput?: Record<string, unknown>;
+  toolParentUseId?: string;
+  toolResultStatus?: 'ok' | 'error' | 'unknown';
   error?: string;
   /** Structured backend/provider error code. Some provider errors are recoverable mid-run. */
   errorCode?: string;
@@ -3189,8 +3194,8 @@ export function handleBackgroundAgentMessage(
       bgActiveRef?.id === messageId &&
       isCurrentFreshParentSeed(bgActiveRef, msg.timestamp, msg.seq);
     const toolUseEventData: ToolEvent = {
+      ...liveToolEventFacts(msg),
       id: msg.toolEventId ?? `bg-tool-use-${msg.timestamp}-${options.nextBgSeq()}`,
-      ...(msg.toolUseId ? { toolUseId: msg.toolUseId } : {}),
       ...(msg.toolExecutionRef ? { executionRef: msg.toolExecutionRef } : {}),
       type: 'tool_use',
       label: `${msg.catId} → ${toolName}`,
@@ -3249,8 +3254,9 @@ export function handleBackgroundAgentMessage(
       bgActiveRef?.id === messageId &&
       isCurrentFreshParentSeed(bgActiveRef, msg.timestamp, msg.seq);
     const toolResultEventData: ToolEvent = {
+      ...liveToolEventFacts(msg),
+      ...(msg.toolInput !== undefined ? { inputDetail: safeJsonDetail(msg.toolInput) } : {}),
       id: msg.toolEventId ?? `bg-tool-result-${msg.timestamp}-${options.nextBgSeq()}`,
-      ...(msg.toolUseId ? { toolUseId: msg.toolUseId } : {}),
       ...(msg.toolExecutionRef ? { executionRef: msg.toolExecutionRef } : {}),
       type: 'tool_result',
       label: `${msg.catId} ← result`,
@@ -5212,8 +5218,8 @@ export function useAgentMessages() {
         // 跟 ensureActiveAssistantMessage 创建的 id 无关）。recoveryAction !== 'none'
         // 或 invocationless 回退 legacy appendToolEvent。
         const toolUseEventData: ToolEvent = {
+          ...liveToolEventFacts(msg),
           id: msg.toolEventId ?? `tool-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-          ...(msg.toolUseId ? { toolUseId: msg.toolUseId } : {}),
           ...(msg.toolExecutionRef ? { executionRef: msg.toolExecutionRef } : {}),
           type: 'tool_use',
           label: `${msg.catId} → ${toolName}`,
@@ -5296,8 +5302,9 @@ export function useAgentMessages() {
         const resultMeta = extractRecallMetaDetail(rawContent);
         // F183 Phase B1.6 — tool_result wire-up via reducer (same pattern as tool_use).
         const toolResultEventData: ToolEvent = {
+          ...liveToolEventFacts(msg),
+          ...(msg.toolInput !== undefined ? { inputDetail: safeJsonDetail(msg.toolInput) } : {}),
           id: msg.toolEventId ?? `toolr-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-          ...(msg.toolUseId ? { toolUseId: msg.toolUseId } : {}),
           ...(msg.toolExecutionRef ? { executionRef: msg.toolExecutionRef } : {}),
           type: 'tool_result',
           label: `${msg.catId} ← result`,

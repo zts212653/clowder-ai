@@ -1,0 +1,94 @@
+{
+  "created": "2026-10-14",
+  "correction": "Historical modelTurns/maxModelTurns counted intended workload turns, not all native turn/start or provider model calls. Initial fence and stable-owner-1 also issued a title turn.",
+  "originalPrivateSamplesPreserved": true,
+  "rawTitlePromptsSyntheticOnly": true,
+  "providerModelCallCount": "unknown",
+  "usdHardLimit": null,
+  "cost": "unknown",
+  "rows": [
+    {
+      "sample": "initial-fence",
+      "observedNativeTurnStartRequests": 4,
+      "workloadNativeTurnStarts": 3,
+      "autoTitleNativeTurnStarts": 1,
+      "titleClassification": "Explicit TitleGenerator prompt marker; counts are native RPC, not provider model rounds or billed cost",
+      "privateRef": ".cat-cafe/tmp/authorized-codex-20261013/runs/final-native-receipts/wire/app-server.log",
+      "sha256": "43e01600e58b5a7ddca490985d8e93e6d5337b84e5c10f35ce3a7b7c5641b821"
+    },
+    {
+      "sample": "recovery-primary",
+      "observedNativeTurnStartRequests": 1,
+      "workloadNativeTurnStarts": 1,
+      "autoTitleNativeTurnStarts": 0,
+      "titleClassification": "Explicit TitleGenerator prompt marker; counts are native RPC, not provider model rounds or billed cost",
+      "privateRef": ".cat-cafe/tmp/authorized-codex-20261014/recovery-4/primary/app-server.log",
+      "sha256": "acb63e086abb78cf27243ced10c3c9999ef2923d7aeb29d78937521d072fe84d"
+    },
+    {
+      "sample": "recovery-restored",
+      "observedNativeTurnStartRequests": 0,
+      "workloadNativeTurnStarts": 0,
+      "autoTitleNativeTurnStarts": 0,
+      "titleClassification": "Explicit TitleGenerator prompt marker; counts are native RPC, not provider model rounds or billed cost",
+      "privateRef": ".cat-cafe/tmp/authorized-codex-20261014/recovery-4/restored/app-server.log",
+      "sha256": "ef15d42e895905e14ac68e78e30000dfc3b7f39566d369dc36e0129b7a061009"
+    },
+    {
+      "sample": "active-drop-primary",
+      "observedNativeTurnStartRequests": 1,
+      "workloadNativeTurnStarts": 1,
+      "autoTitleNativeTurnStarts": 0,
+      "titleClassification": "Explicit TitleGenerator prompt marker; counts are native RPC, not provider model rounds or billed cost",
+      "privateRef": ".cat-cafe/tmp/authorized-codex-20261014/active-drop-1/primary/app-server.log",
+      "sha256": "45935a8498c1f9dd6556644bc0df7ed69f96e1e819ac285cc263035b22680daf"
+    },
+    {
+      "sample": "stable-owner-1",
+      "observedNativeTurnStartRequests": 2,
+      "workloadNativeTurnStarts": 1,
+      "autoTitleNativeTurnStarts": 1,
+      "titleClassification": "Explicit TitleGenerator prompt marker; counts are native RPC, not provider model rounds or billed cost",
+      "privateRef": ".cat-cafe/tmp/authorized-codex-20261014/stable-owner-1/native/app-server.log",
+      "sha256": "9690a0b1261283022d3da09648607fdf3217d1dd61c09c9a49e6ee4ed4f3af24"
+    },
+    {
+      "sample": "stable-owner-2",
+      "observedNativeTurnStartRequests": 1,
+      "workloadNativeTurnStarts": 1,
+      "autoTitleNativeTurnStarts": 0,
+      "titleClassification": "Explicit TitleGenerator prompt marker; counts are native RPC, not provider model rounds or billed cost",
+      "privateRef": ".cat-cafe/tmp/authorized-codex-20261014/stable-owner-2/native/app-server.log",
+      "sha256": "766d99af192f27a46743b6ea32220c0d290299cc4ad9f9b4cb79e60c650fa411"
+    },
+    {
+      "sample": "stable-owner-3",
+      "observedNativeTurnStartRequests": 1,
+      "workloadNativeTurnStarts": 1,
+      "autoTitleNativeTurnStarts": 0,
+      "titleClassification": "Explicit TitleGenerator prompt marker; counts are native RPC, not provider model rounds or billed cost",
+      "privateRef": ".cat-cafe/tmp/authorized-codex-20261014/stable-owner-3/native/app-server.log",
+      "sha256": "6d97ba087a2ab0d4a4c398928d3f9aedec3c09d80ea3703ec1dfa22f87750f62"
+    },
+    {
+      "sample": "stable-owner-4",
+      "observedNativeTurnStartRequests": 1,
+      "workloadNativeTurnStarts": 1,
+      "autoTitleNativeTurnStarts": 0,
+      "titleClassification": "Explicit TitleGenerator prompt marker; counts are native RPC, not provider model rounds or billed cost",
+      "privateRef": ".cat-cafe/tmp/authorized-codex-20261014/stable-owner-4/native/app-server.log",
+      "sha256": "eea2a1dcb1c437b484afa496fdbf3df34e4cb1c52d5bc90d253fbca76a9529c7"
+    }
+  ],
+  "newBoundedRunner": {
+    "maxAcpPromptInvocations": 1,
+    "autoTitleSuppressed": true,
+    "maxRuntimeMs": 90000,
+    "closeGraceMs": 3000,
+    "enforcement": "Test HTTP owner rejects second prompt; independent spike TitleGenerator env guard suppresses automatic title. Runtime watchdog closes its owner.",
+    "observedFinalSample": "stable-owner-4",
+    "productionTitleBehaviorUnchanged": true
+  },
+  "independentReviewer": "/root/acp_plan_review",
+  "completeGate": "held"
+}

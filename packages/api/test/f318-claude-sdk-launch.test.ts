@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { dirname, resolve } from 'node:path';
 import { test } from 'node:test';
 import { createCatId } from '@cat-cafe/shared';
 import { CLI_EXECUTION_ID_ENV, CLI_EXECUTION_OWNER_BINDING_ENV } from '../src/utils/cli-process-ownership.js';
@@ -175,9 +176,10 @@ test('SDK accepts the documented one-tag flag/value configuration form', async (
 
 test('SDK retains repeated operator directories together with image directories', async () => {
   const { prepareClaudeSdkLaunch } = await import('../src/domains/cats/services/agents/providers/claude-sdk-launch.js');
+  const imagePath = '/tmp/images/fixture.png';
   const options = {
     cliConfigArgs: ['--add-dir /tmp/first', '--add-dir', '/tmp/second with spaces', '--add-dir=/tmp/first'],
-    contentBlocks: [{ type: 'image' as const, url: '/tmp/images/fixture.png' }],
+    contentBlocks: [{ type: 'image' as const, url: imagePath }],
   };
   const prepare = (readOnly = false) =>
     prepareClaudeSdkLaunch({
@@ -189,9 +191,13 @@ test('SDK retains repeated operator directories together with image directories'
       options: { ...options, ...(readOnly ? { toolExecutionPolicy: { mode: 'read_only' as const } } : {}) },
     });
   const prepared = await prepare();
-  assert.deepEqual(prepared.sdkOptions.additionalDirectories, ['/tmp/first', '/tmp/second with spaces', '/tmp/images']);
+  assert.deepEqual(prepared.sdkOptions.additionalDirectories, [
+    '/tmp/first',
+    '/tmp/second with spaces',
+    dirname(resolve(imagePath)),
+  ]);
   assert.equal(prepared.sdkOptions.extraArgs?.['add-dir'], undefined);
-  assert.deepEqual((await prepare(true)).sdkOptions.additionalDirectories, ['/tmp/images']);
+  assert.deepEqual((await prepare(true)).sdkOptions.additionalDirectories, [dirname(resolve(imagePath))]);
 });
 
 test('production invocation keeps native SDK query with tmux enabled and preserves CLI overrides', async (t) => {

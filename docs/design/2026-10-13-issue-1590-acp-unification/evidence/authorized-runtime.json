@@ -1,0 +1,118 @@
+{
+  "observedAt": "2026-10-13T13:44:45.888Z",
+  "scope": "authorized synthetic read-only isolated test bindings; no production migration",
+  "authorization": "direct user reply authorized existing local authentication, synthetic prompts and sentinels, bounded Read/Agent or read-only test tools, hooks disabled, no source or credential values outbound",
+  "hashConvention": "SHA256 of exact captured filesystem bytes; native binaries rechecked; raw data and runners kept in private worktree paths",
+  "nativeBinaries": [
+    {
+      "path": "C:/Users/Administrator/AppData/Roaming/npm/node_modules/@anthropic-ai/claude-code/bin/claude.exe",
+      "sha256": "76de74f7694a5bdc03378a5f837c9e132827bf004c98c276bc4e9094ff06769a",
+      "version": "2.1.296 (Claude Code)"
+    },
+    {
+      "path": "C:/Users/Administrator/AppData/Roaming/npm/node_modules/@openai/codex/node_modules/@openai/codex-win32-x64/vendor/x86_64-pc-windows-msvc/bin/codex.exe",
+      "sha256": "a0f89acca07a511734cac7fddee26b2106fab68918717bc90df16104a0760a30",
+      "version": "codex-cli 0.161.0"
+    }
+  ],
+  "artifacts": {
+    "sdk": "w1-sdk-capture.json",
+    "codex": "w4-native-fence.json",
+    "claude": "w5-native-notice.json"
+  },
+  "sourceRefs": [
+    {
+      "privatePath": ".cat-cafe/tmp/authorized-sdk-20261013/raw.json",
+      "sha256": "aa4e61f473ed37d6484c059b33cc5ede5baa73eeabae7ded9b18f0be8bee18c9"
+    },
+    {
+      "privatePath": ".cat-cafe/tmp/authorized-sdk-20261013/mapped.json",
+      "sha256": "208158aa0c0b9d3300f35517dbd87d4cfe06c7374def99f9b168d5128d67ddea"
+    },
+    {
+      "privatePath": ".cat-cafe/tmp/authorized-sdk-20261013/result.json",
+      "sha256": "c0ad1cd17b8bdd249e099484f5a52beb55526cac8bc13133ca57fdf95155ecca"
+    },
+    {
+      "privatePath": ".cat-cafe/tmp/authorized-codex-20261013/runs/final-native-receipts/controls.json",
+      "sha256": "a303b2033b93fad7644693cf8bded5b7ee0c7234c259c3815440f86c78fe910c"
+    },
+    {
+      "privatePath": ".cat-cafe/tmp/authorized-codex-20261013/runs/final-native-receipts/acp-events.json",
+      "sha256": "dae1e65abd2f84cc93699727fa5122c2c410e587d994877893cbdf8d89265bd2"
+    },
+    {
+      "privatePath": ".cat-cafe/tmp/authorized-codex-20261013/runs/final-native-receipts/wire/app-server.log",
+      "sha256": "43e01600e58b5a7ddca490985d8e93e6d5337b84e5c10f35ce3a7b7c5641b821"
+    },
+    {
+      "privatePath": ".cat-cafe/tmp/authorized-codex-20261013/runs/final-native-receipts/result.json",
+      "sha256": "ce816d4ed3ff79d68b42511b4b604a7744757a6d23ac201e2106ac400d97650c"
+    },
+    {
+      "privatePath": ".cat-cafe/tmp/authorized-claude-notice-20261013/now-control/acp-events.json",
+      "sha256": "f66a1b4b929c18705b72e24cfc2cc7c3af7d43a0e08b9e78a5e18b1388320548"
+    },
+    {
+      "privatePath": ".cat-cafe/tmp/authorized-claude-notice-20261013/now-control/result.json",
+      "sha256": "7f10d0f27a405c2a0af823ffbd84b77c6cafbabe76d668ff8b921a49f94eef64"
+    },
+    {
+      "privatePath": ".cat-cafe/tmp/authorized-claude-notice-20261013/now-owner-final/acp-events.json",
+      "sha256": "63838906c80ec76dbb90907bd7ab832a74dafa85b3afd19be560641bdd99e7c4"
+    },
+    {
+      "privatePath": ".cat-cafe/tmp/authorized-claude-notice-20261013/now-owner-final/result.json",
+      "sha256": "97a0e7787400f98e8fe0a52399c760f17ecb7ebe8c370f5ddec7c67e84c4610c"
+    },
+    {
+      "privatePath": ".cat-cafe/tmp/authorized-claude-notice-20261013/next-owner-final/acp-events.json",
+      "sha256": "16bf78454f32aa27b08333e5e4c26397b57606b727fe4a1e545f5f8215376cd2"
+    },
+    {
+      "privatePath": ".cat-cafe/tmp/authorized-claude-notice-20261013/next-owner-final/permissions.json",
+      "sha256": "5af66bde58dc85d855f81dafcec86f7c42482170c0b8a44de16972ca0d66b23e"
+    },
+    {
+      "privatePath": ".cat-cafe/tmp/authorized-claude-notice-20261013/next-owner-final/result.json",
+      "sha256": "c8758912a316a13b3f7cab54942edd75a934a707da5546608497a7ff81689ae0"
+    },
+    {
+      "privatePath": ".cat-cafe/tmp/run-claude-notice.mts",
+      "sha256": "13a84ad2249e95a441502b28874c33dfb724ef51be16e6c0e39e4b6df9f5e8c7"
+    },
+    {
+      "privatePath": ".cat-cafe/tmp/run-codex-fence.mts",
+      "sha256": "98560030fe124c901cc5deeb5fa6f6fe87bd6e469387b6edc4e59439d3735a11"
+    },
+    {
+      "privatePath": ".cat-cafe/tmp/w1-sdk-history-proof.log",
+      "sha256": "abe2cd75bdeb4e663359aa15c9e1e373a1fca0a03aaef1c2a59e89af1272c620"
+    },
+    {
+      "privatePath": ".cat-cafe/tmp/w1-sdk-browser-proof.log",
+      "sha256": "60deb2091ec6034956760d6f584fc299a36a49c4ddc43a4a663963c69d97aec6"
+    },
+    {
+      "privatePath": ".cat-cafe/tmp/acp-prototypes/claude-followup-red.log",
+      "sha256": "c162354861e53d11a68c8d69fd5fc933dddb1bc42781601e382602f2b6777f5f"
+    },
+    {
+      "privatePath": ".cat-cafe/tmp/acp-prototypes/claude-followup-owner-red.log",
+      "sha256": "9be038f67ecdf2ed25c6ef5d029b3b6c6e84e26953916b6a858f235aa5a93bad"
+    },
+    {
+      "privatePath": ".cat-cafe/tmp/acp-prototypes/claude-followup-final-regression.log",
+      "sha256": "f641893e850d3b228989e51229effef45a22b771ef1d30fef32db4b7ba59b1ec"
+    }
+  ],
+  "independentReview": {
+    "reviewer": "/root/acp_plan_review",
+    "scope": "non-author peer; same family, not cross-family",
+    "W1": "SDK fixture/history/component replay verified; no new blocker; full G1 held",
+    "W2S": "earlier safety floor approval retained; no full policy approval",
+    "W4P": "core bounded L2 verified; complete prototype held",
+    "W5P": "precise owned followup patch and core bounded L2 verified; complete prototype held",
+    "migrationApproved": false
+  }
+}

@@ -1,0 +1,252 @@
+{
+  "stage": "W0",
+  "sourceHead": "f1b4b7fe2d3bc7f5c70873652ad61a8037c5be6f",
+  "providerSourceBaseline": "3add05c161b822a3acfc306cc94570cab4f58c91",
+  "sourceHashes": {
+    "packages/api/src/domains/cats/services/types.ts": "aff7c77982d99d7f5a94779f165989f1e4893c3ee509bdd9ae3d044ad3e99842",
+    "pnpm-lock.yaml": "3d8698c4602fe8dd605c825fdb0c956c85e4432ca3a70a905277ef8dfcad0e72",
+    "packages/api/src/domains/cats/services/agents/providers/claude-ndjson-parser.ts": "8171203598b7d0cb13a6b235f9c466b166fee9dc98c91635d7f8266bd3373933",
+    "packages/api/src/domains/cats/services/agents/providers/ClaudeAgentService.ts": "a4974d00f6987601a9f98d4f5a9d9d96a20db5bf15039dd6997334e3c58bcae1",
+    "packages/api/src/domains/cats/services/agents/providers/ClaudeSdkAgentService.ts": "5082de4170ed62d7d3e33213745e7963e9b29683616e350e6fede3e144599469",
+    "packages/api/src/domains/cats/services/agents/providers/ClaudeBgCarrierService.ts": "7a8b9e928ef2bc904c9588ed327bca2a8b2fc1ed1499d6c71e52026b2cb5d76d",
+    "packages/api/src/domains/cats/services/agents/providers/ClaudeInteractivePtyCarrierService.ts": "18b441a2cd017e3e879755b5bda0a2333f88a6a9f5698e813a4f10c40364c04a",
+    "packages/api/src/domains/cats/services/agents/providers/claude-carrier-factory.ts": "09b674be8b0f8b3d67198238f771526fa6cc732f20fb544d12c27884586ded21",
+    "packages/api/src/domains/cats/services/agents/providers/CodexAgentService.ts": "06f95319eb80e1d356a4a3da7da08aec8bac6ee65bcf2fedb687a99d530edcc4"
+  },
+  "observedEnvironment": {
+    "os": "win32",
+    "arch": "x64",
+    "node": "v24.16.0",
+    "pnpm": "9.15.4",
+    "claudeCli": "2.1.296",
+    "codexCli": "0.161.0",
+    "claudeSdk": "0.3.285",
+    "nativeClaudeModelObserved": "claude-opus-5-5[1m]",
+    "probeKind": "explicit_authorized_audit_not_background_readiness"
+  },
+  "upstreamIntake": {
+    "issue1519": {
+      "state": "OPEN",
+      "head": "a89f25ab0eaecdb3d1a9e23b6b0e5de33bfdb2a2",
+      "intakeApplied": false
+    }
+  },
+  "bridgePins": {
+    "claude": "d0aafb1ca26427285ffaeac8d8a4452fff28e9c3",
+    "codex": "51f78d67e46c3a96ee8d8bf4e43fc917ab21c73e",
+    "claudeNextCandidate": "bcddee2eda74cf64c8f714813a6693cb45d6d22f",
+    "sdkSchema": {
+      "clowderClaudeSdk": "0.3.285",
+      "claudeBridgeSdk": "0.3.232",
+      "codexAcpSdk": "1.5.0",
+      "claudeAcpSdk": "1.3.0"
+    }
+  },
+  "carriers": [
+    {
+      "carrier": "claude_print_sdk",
+      "nativeL0": true,
+      "resume": "native_session",
+      "freshness": "unsupported",
+      "reportsRuntimeWindow": true,
+      "authoritativeUsage": true,
+      "observesCompression": true,
+      "policies": ["read_only"],
+      "parser": "claude-ndjson-parser",
+      "toolResultBeforeFix": "missing",
+      "nativeWindowControl": false,
+      "nativeCompressionControl": false,
+      "availability": "binding_specific_unverified",
+      "runtimeVerification": "unverified_binding_runtime",
+      "activatedExperimentalSet": "unknown_no_runtime_configuration_mutated"
+    },
+    {
+      "carrier": "claude_agent_sdk",
+      "nativeL0": true,
+      "resume": "sdk_session",
+      "freshness": "queued_internal_turn",
+      "reportsRuntimeWindow": true,
+      "authoritativeUsage": true,
+      "observesCompression": true,
+      "policies": ["read_only"],
+      "parser": "claude-ndjson-parser",
+      "toolResultBeforeFix": "missing",
+      "nativeWindowControl": false,
+      "nativeCompressionControl": false,
+      "availability": "binding_specific_unverified",
+      "runtimeVerification": "unverified_binding_runtime",
+      "activatedExperimentalSet": "unknown_no_runtime_configuration_mutated"
+    },
+    {
+      "carrier": "claude_bg",
+      "nativeL0": true,
+      "resume": "chain_key_uuid_rotation",
+      "freshness": "undeclared",
+      "reportsRuntimeWindow": false,
+      "authoritativeUsage": true,
+      "observesCompression": true,
+      "policies": ["read_only"],
+      "parser": "assistant_only_BgTranscriptEventConsumer",
+      "toolResultBeforeFix": "user_event_not_consumed",
+      "nativeWindowControl": false,
+      "nativeCompressionControl": false,
+      "availability": "binding_specific_unverified",
+      "runtimeVerification": "unverified_binding_runtime",
+      "activatedExperimentalSet": "unknown_no_runtime_configuration_mutated"
+    },
+    {
+      "carrier": "claude_interactive_pty",
+      "nativeL0": "undeclared",
+      "resume": "uuid_plus_file_guard",
+      "freshness": "undeclared",
+      "reportsRuntimeWindow": false,
+      "authoritativeUsage": false,
+      "observesCompression": false,
+      "policies": ["read_only"],
+      "parser": "pty_and_hook_sidechannel",
+      "toolResultBeforeFix": "independent_consumer_not_covered_by_parser_fix",
+      "nativeWindowControl": false,
+      "nativeCompressionControl": false,
+      "availability": "binding_specific_unverified",
+      "runtimeVerification": "unverified_binding_runtime",
+      "activatedExperimentalSet": "unknown_no_runtime_configuration_mutated"
+    },
+    {
+      "carrier": "codex_app_server",
+      "nativeL0": true,
+      "resume": "native_thread",
+      "freshness": "exact_active_turn",
+      "controls": ["compact", "goal", "review", "status", "capability-source", "fork", "experimental-realtime"],
+      "continuityPreflight": true,
+      "reportsRuntimeWindow": false,
+      "authoritativeUsage": false,
+      "observesCompression": true,
+      "nativeWindowControl": false,
+      "nativeCompressionControl": false,
+      "availability": "binding_specific_unverified",
+      "runtimeVerification": "unverified_binding_runtime",
+      "activatedExperimentalSet": "unknown_no_runtime_configuration_mutated"
+    },
+    {
+      "carrier": "codex_exec_json",
+      "nativeL0": true,
+      "resume": "native_session",
+      "freshness": "unsupported",
+      "continuityPreflight": false,
+      "reportsRuntimeWindow": true,
+      "authoritativeUsage": true,
+      "observesCompression": true,
+      "contextBindingForCapacity": "invocation_window",
+      "nativeWindowControl": true,
+      "nativeCompressionControl": true,
+      "availability": "binding_specific_unverified",
+      "runtimeVerification": "unverified_binding_runtime",
+      "activatedExperimentalSet": "unknown_no_runtime_configuration_mutated"
+    }
+  ],
+  "policies": {
+    "OAuthVsApiKey": "separate_auth_profile_and_billing_no_automatic_switch_claim",
+    "sdkCanary": "explicit_bypass_wrapper_no_replay_after_tool_effects",
+    "fallback": "yielded_error_next_invocation_only; api_key_fallback_rethrows"
+  },
+  "requiredContract": [
+    "tool_result_success_error_native_id",
+    "child_parent_scope",
+    "raw_content_separate_from_bounded_preview",
+    "persisted_live_history_replay_parity",
+    "beforeProviderLaunch_fail_closed",
+    "onLiveInputOutcome_receipt",
+    "contextNativeWindowTokens_null_vs_undefined",
+    "requiredTools",
+    "runtimeInteractionPort",
+    "resolveEntrustedWorkTaskRef",
+    "recoveryAnchor",
+    "resumeFallbackSystemPrompt",
+    "compactionLaunchPlan",
+    "spawnCliOverride",
+    "agentCarrierSessionFactory",
+    "accountEnv_OAuth_key_isolation"
+  ],
+  "scope": {
+    "W1": ["claude_print_sdk", "claude_agent_sdk", "shared_persistence_and_UI_consumers"],
+    "notClaimedFixed": ["bg_user_tool_result", "pty_native_results"],
+    "migrationEnabled": false
+  },
+  "frozenProposedBudget": {
+    "warmP95Increment": "max(500ms,20%)",
+    "coldResumeP95Increment": "max(2000ms,20%)",
+    "cancellationDeadlineMs": 5000,
+    "statisticalBaseline": "not_measured_no_performance_pass_claim",
+    "maintenanceBudget": "requires_measured_upgrade_rehearsal_before_G3"
+  },
+  "existingChecks": {
+    "apiBuild": "passed",
+    "parserAndToolLog": {
+      "passed": 65,
+      "failed": 0
+    },
+    "newW1Red": {
+      "passed": 1,
+      "failed": 8
+    },
+    "nativeFixture": "real_cli_success_failure_child_results_captured; see w1-native-capture.json; not production_binding"
+  },
+  "status": "source_baseline_reviewed_sufficient_for_W1; binding_runtime_and_G0_migration_not_passed",
+  "observedAt": "2026-10-13T11:16:46.468Z",
+  "checkoutByteHashes": {
+    "packages/api/src/domains/cats/services/types.ts": "c2f2170388f2deb69a1f3a6555715401dd983763c33083c9d71fee1c0b9e4312",
+    "pnpm-lock.yaml": "a7fe5377b5f7665d9d546e156f465dab35803a0e85f57938624095c43d049f87",
+    "packages/api/src/domains/cats/services/agents/providers/claude-ndjson-parser.ts": "5165323d8f29d50947692d647e0909ab21fa894eda241283bc62e32b3da10695",
+    "packages/api/src/domains/cats/services/agents/providers/ClaudeAgentService.ts": "c75a403f8f8543d29254baec5b25e5d451b68185cb7eeb84c85841290b210c00",
+    "packages/api/src/domains/cats/services/agents/providers/ClaudeSdkAgentService.ts": "84c162feca1a28b13a8e38c233eadec33afde6b4ddaab4f795719467e7912502",
+    "packages/api/src/domains/cats/services/agents/providers/ClaudeBgCarrierService.ts": "95fb7525df1f89c237a7d8e969c65336342985f39432126819aa11493174ba0d",
+    "packages/api/src/domains/cats/services/agents/providers/ClaudeInteractivePtyCarrierService.ts": "7043b8d8a72c0bbf450449be2bdc6d74d450ea96f5cd42d9676033eef4511b23",
+    "packages/api/src/domains/cats/services/agents/providers/claude-carrier-factory.ts": "5d47b78ea4eadf3d04d284f2f892f7d7c77009728a46a95e3b63ab0f60e21490",
+    "packages/api/src/domains/cats/services/agents/providers/CodexAgentService.ts": "0edb10c1dbbd9946fd963026435a4319d94fa3970d320cdf9c92c68ea68ac483"
+  },
+  "hashConvention": "sourceHashes=exact Git blob bytes; checkoutByteHashes=initial Windows checkout bytes (CRLF)",
+  "unverifiedG0": [
+    "per_active_binding_B_R_E_availability",
+    "actual_account_profile_and_principal",
+    "provider_capability_receipts",
+    "performance_distribution",
+    "maintenance_upgrade_rehearsal"
+  ],
+  "codexConditionalNotes": [
+    "liveCompanion/requiredTools may select app-server despite exec configuration",
+    "collective policies force exec; collective_work only darwin/linux; read_only only exec",
+    "native controls require host pool and exact binding owner",
+    "Windows automatic pooled invoke disabled"
+  ],
+  "evidenceBoundaries": {
+    "nativeCli": "real_cli_fixture_only; account mode not inferred from apiKeySource:none",
+    "sdk": "authorized isolated official SDK completed; see authorized-runtime.json; full G0/G1 and production bindings not verified",
+    "productionBindings": "not mutated or fully tested"
+  },
+  "nativeBinaries": [
+    {
+      "path": "C:/Users/Administrator/AppData/Roaming/npm/node_modules/@anthropic-ai/claude-code/bin/claude.exe",
+      "sha256": "76de74f7694a5bdc03378a5f837c9e132827bf004c98c276bc4e9094ff06769a",
+      "version": "2.1.296 (Claude Code)"
+    },
+    {
+      "path": "C:/Users/Administrator/AppData/Roaming/npm/node_modules/@openai/codex/node_modules/@openai/codex-win32-x64/vendor/x86_64-pc-windows-msvc/bin/codex.exe",
+      "sha256": "a0f89acca07a511734cac7fddee26b2106fab68918717bc90df16104a0760a30",
+      "version": "codex-cli 0.161.0"
+    }
+  ],
+  "interfacesRef": "w0-contract-interfaces.json",
+  "schemaHashes": {
+    "codex": {
+      "path": ".cat-cafe/tmp/acp-prototypes/codex/node_modules/@agentclientprotocol/sdk/schema/schema.json",
+      "sha256": "2a920d3c0f76443e07ffa7801443e3cdf008e2a3095e565581a0433fd728ce41",
+      "lockSha256": "748a70a13f6a7e7334cd6e3d3c2d1aea414d9a5773e0f6b88161cb84bb1c622e"
+    },
+    "claude": {
+      "path": ".cat-cafe/tmp/acp-prototypes/claude/node_modules/@agentclientprotocol/sdk/schema/schema.json",
+      "sha256": "f71fbcb7beeae82770e9c33d1e5969999868789cacec509289331a1205816838",
+      "lockSha256": "4ee8fa26495bf3e3b8c28e3d5801d230a30408404b2079321060e038b8ed46f7"
+    }
+  },
+  "authorizedContinuationRef": "authorized-runtime.json"
+}

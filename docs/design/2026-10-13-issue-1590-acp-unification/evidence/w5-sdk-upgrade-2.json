@@ -1,0 +1,174 @@
+{
+  "sample": "sdk-upgrade-2",
+  "evidenceKind": "real_native_SDK_ACP_with_synthetic_human_answer",
+  "bridgePin": "d0aafb1ca26427285ffaeac8d8a4452fff28e9c3",
+  "sdkVersion": "0.3.285",
+  "nativeVersion": "2.1.296",
+  "bundleSha256": "ce7e4db6de998053497426a658106d9fd14487fe5b83dd63eb8c7b6b9eaf80bf",
+  "fixtureSha256": "6324e250bd0923bc1f8ed4dc58f6c52511a2b2085afe7ae6a65e2582fc057d3e",
+  "sessionId": "5d2ef5ed-0d18-44e4-92ce-dd755e53f8ff",
+  "success": true,
+  "durationMs": 31917,
+  "executedRunner": {
+    "capturedBeforeExecution": true,
+    "sources": [
+      {
+        "source": "scripts/acp-spikes/run-claude-notice-boundaries.mts",
+        "sha256": "5509eb3c042b07fcefc8eaa9231021f190c474fdf93e1cbb1c3e7eb4de444315"
+      },
+      {
+        "source": "scripts/acp-spikes/claude-boundary-harness.mts",
+        "sha256": "9d35a1365fedd2c76a56c8c5d952b306258711e6623adb3c86aa0b3dc3a68506"
+      }
+    ],
+    "parameters": {
+      "variant": "upgrade",
+      "authorized": true
+    }
+  },
+  "scope": {
+    "syntheticOnly": true,
+    "budgetUsd": 2,
+    "maxSdkTurns": 8,
+    "hooksDisabled": true,
+    "userInstructionsDisabled": true,
+    "productionElicitationHandler": false,
+    "productionMigrationEnabled": false,
+    "humanAnswer": "synthetic boolean confirm=true",
+    "sampleCount": 1,
+    "populationReliabilityEstimate": false
+  },
+  "pendingHuman": {
+    "waitingAt": 1791950726199,
+    "checkedAt": 1791950729211,
+    "noticesQueued": [
+      {
+        "outcome": "injected",
+        "nativeInputUuid": "c15cef0c-dfcd-4736-b734-171db6f05674"
+      },
+      {
+        "outcome": "injected",
+        "nativeInputUuid": "2df0f6f7-9f92-45f2-80af-141d73beb51a"
+      }
+    ],
+    "answered": false,
+    "primarySettled": false
+  },
+  "multipleNotices": {
+    "receipts": [
+      {
+        "outcome": "injected",
+        "nativeInputUuid": "c15cef0c-dfcd-4736-b734-171db6f05674"
+      },
+      {
+        "outcome": "injected",
+        "nativeInputUuid": "2df0f6f7-9f92-45f2-80af-141d73beb51a"
+      }
+    ],
+    "nativeStarts": [
+      {
+        "observedAt": 1791950737237,
+        "commandUuid": "c15cef0c-dfcd-4736-b734-171db6f05674",
+        "state": "started"
+      },
+      {
+        "observedAt": 1791950737237,
+        "commandUuid": "2df0f6f7-9f92-45f2-80af-141d73beb51a",
+        "state": "started"
+      }
+    ],
+    "ordered": true,
+    "primarySettledAt": 1791950742058
+  },
+  "cancellation": {
+    "receipt": {
+      "outcome": "injected",
+      "nativeInputUuid": "8161ace9-eab6-4da1-af18-b53c8a7ee25c"
+    },
+    "cancelledAt": 1791950746434,
+    "nativeLifecycle": [
+      {
+        "observedAt": 1791950746326,
+        "commandUuid": "8161ace9-eab6-4da1-af18-b53c8a7ee25c",
+        "state": "queued"
+      },
+      {
+        "observedAt": 1791950746437,
+        "commandUuid": "8161ace9-eab6-4da1-af18-b53c8a7ee25c",
+        "state": "cancelled"
+      }
+    ],
+    "localStreamError": "ACP session 5d2ef5ed-0d18-44e4-92ce-dd755e53f8ff cancelled locally; native acknowledgement pending",
+    "nativeWireCancelled": true,
+    "subsequentNativePrompt": {
+      "stopReason": "end_turn",
+      "usage": {
+        "inputTokens": 1458,
+        "outputTokens": 9,
+        "cachedReadTokens": 116,
+        "cachedWriteTokens": 5,
+        "totalTokens": 1588
+      }
+    },
+    "noticeNeverStarted": true,
+    "productionClientReopened": false,
+    "usageScope": "known session accumulator only; unobserved usage/cost unknown, never total-spend zero",
+    "instantaneousQuiescenceClaim": false
+  },
+  "nativeResults": [
+    {
+      "observedAt": 1791950742055,
+      "subtype": "success",
+      "isError": false,
+      "terminalReason": "completed",
+      "stopReason": "end_turn",
+      "userMessageUuids": [
+        "1c9e8807-4bae-424c-97fb-5d0f26fcaf24",
+        "c15cef0c-dfcd-4736-b734-171db6f05674",
+        "2df0f6f7-9f92-45f2-80af-141d73beb51a"
+      ]
+    },
+    {
+      "observedAt": 1791950746441,
+      "subtype": "error_during_execution",
+      "isError": true,
+      "terminalReason": "aborted_tools",
+      "stopReason": "tool_use",
+      "userMessageUuids": ["4bac0b57-bbd3-4ab6-9cc5-4754e5fa7325"]
+    },
+    {
+      "observedAt": 1791950751009,
+      "subtype": "success",
+      "isError": false,
+      "terminalReason": "completed",
+      "stopReason": "end_turn",
+      "userMessageUuids": ["5b25e76b-5064-4b0c-bd93-0bfd264437b4"]
+    }
+  ],
+  "rawRefs": [
+    {
+      "privateRef": ".cat-cafe/tmp/authorized-claude-notice-20261014/sdk-upgrade-2/result.json",
+      "sha256": "0efbd3774c94ad741c0fe5e7bdd2f369b12e459d6825dc163d5914127cb7a1de"
+    },
+    {
+      "privateRef": ".cat-cafe/tmp/authorized-claude-notice-20261014/sdk-upgrade-2/events.json",
+      "sha256": "b081b85198ac342cca6a25705bb70726290dc5b5ea24c0cdd6fbe241d0cf4d03"
+    },
+    {
+      "privateRef": ".cat-cafe/tmp/authorized-claude-notice-20261014/sdk-upgrade-2/wire.json",
+      "sha256": "80100f8ccd1b3c67af3313003799040f5c7d7c04a2cdb051c218ae346e539d3e"
+    },
+    {
+      "privateRef": ".cat-cafe/tmp/authorized-claude-notice-20261014/sdk-upgrade-2/controls.json",
+      "sha256": "38c92c78e7f579ce9cf9f85981b2d0a5094860810c933b1dcc571c816c18b714"
+    },
+    {
+      "privateRef": ".cat-cafe/tmp/authorized-claude-notice-20261014/sdk-upgrade-2/elicitations.json",
+      "sha256": "84caf43278fe43b19d78ad8ffd1a82993ce9dc42c22c865e9ad53397d7a905a8"
+    },
+    {
+      "privateRef": ".cat-cafe/tmp/authorized-claude-notice-20261014/sdk-upgrade-2/tools.jsonl",
+      "sha256": "646cd3115b05a4b8674a6589749d00292477190dad639e13f895ed6fdfe9334d"
+    }
+  ]
+}

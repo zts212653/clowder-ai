@@ -1,0 +1,41 @@
+{
+  "evidenceLevel": "L0",
+  "syntheticInputs": true,
+  "realModelCalled": false,
+  "bridgeExecuted": false,
+  "storageOrUiVerified": false,
+  "sourceHead": "3add05c161b822a3acfc306cc94570cab4f58c91",
+  "sourceHashes": {
+    "claude-ndjson-parser.ts": "5165323d8f29d50947692d647e0909ab21fa894eda241283bc62e32b3da10695",
+    "claude-mcp-status.ts": "44fadb9860d625e00447697b6331d8a3514ee66e14a4ff88a6fcdc2462314317"
+  },
+  "nodeVersion": "v24.16.0",
+  "typeStripper": "node:module.stripTypeScriptTypes",
+  "samples": [
+    {
+      "name": "success",
+      "nativeToolUseId": "call-success",
+      "toolUseEmitted": true,
+      "resultEventCount": 0,
+      "toolResultEmitted": false,
+      "result": null
+    },
+    {
+      "name": "failure",
+      "nativeToolUseId": "call-failure",
+      "toolUseEmitted": true,
+      "resultEventCount": 0,
+      "toolResultEmitted": false,
+      "result": null
+    },
+    {
+      "name": "child-success",
+      "nativeToolUseId": "call-child",
+      "toolUseEmitted": true,
+      "resultEventCount": 0,
+      "toolResultEmitted": false,
+      "result": null
+    }
+  ],
+  "result": "tool_result_gap_observed"
+}

@@ -97,14 +97,16 @@ function toolEventPayload(tool: ToolEvent): Record<string, unknown> {
   if (tool.type === 'tool_use') {
     return {
       type: 'tool_use',
-      toolName: tool.label,
+      toolName: tool.toolName ?? tool.label,
       ...(toolUseId ? { toolUseId } : {}),
+      ...(tool.toolParentUseId ? { toolParentUseId: tool.toolParentUseId } : {}),
       ...(tool.detail ? { toolInput: tool.detail } : {}),
     };
   }
   return {
     type: 'tool_result',
     ...(toolUseId ? { toolUseId } : {}),
+    ...(tool.toolParentUseId ? { toolParentUseId: tool.toolParentUseId } : {}),
     ...(tool.detail ? { content: tool.detail } : {}),
     ...(tool.status ? { status: tool.status } : {}),
   };

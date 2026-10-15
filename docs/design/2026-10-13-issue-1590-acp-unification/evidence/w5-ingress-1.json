@@ -1,0 +1,137 @@
+{
+  "sample": "ingress-1",
+  "evidenceKind": "real_native_SDK_ACP_with_synthetic_human_answer",
+  "bridgePin": "d0aafb1ca26427285ffaeac8d8a4452fff28e9c3",
+  "sdkVersion": "0.3.232",
+  "nativeVersion": "2.1.296",
+  "bundleSha256": "108bfca844c487e717ccc9a12560374b230d934dff5d5a2ee40f4e5f689cf703",
+  "fixtureSha256": "6324e250bd0923bc1f8ed4dc58f6c52511a2b2085afe7ae6a65e2582fc057d3e",
+  "sessionId": "db3d2653-4ca1-4dea-824b-2ef1582326bd",
+  "success": true,
+  "durationMs": 22747,
+  "executedRunner": {
+    "capturedBeforeExecution": false,
+    "exactRetainedSourceSnapshot": ".cat-cafe/tmp/authorized-claude-notice-20261014/ingress-1/runner.mts",
+    "snapshotSha256": "f5cf0a239b53b5ee17b824cd95b0067914c202ce08267bb5448e8b8d6b6a86a8",
+    "variant": "ingress",
+    "archiveNote": "Executed pre-format/pre-split runner saved unchanged after execution."
+  },
+  "scope": {
+    "syntheticOnly": true,
+    "budgetUsd": 2,
+    "maxSdkTurns": 8,
+    "hooksDisabled": true,
+    "userInstructionsDisabled": true,
+    "productionElicitationHandler": false,
+    "productionMigrationEnabled": false,
+    "humanAnswer": "synthetic boolean confirm=true",
+    "sampleCount": 1,
+    "populationReliabilityEstimate": false
+  },
+  "cancellation": {
+    "receipt": {
+      "outcome": "injected",
+      "nativeInputUuid": "29c0dbc9-0174-41cc-89a5-75c237365ffa"
+    },
+    "cancelledAt": 1791950335179,
+    "nativeLifecycle": [],
+    "localStreamError": "ACP session db3d2653-4ca1-4dea-824b-2ef1582326bd cancelled locally; native acknowledgement pending",
+    "noticeNeverStarted": true,
+    "oldBindingRetired": true,
+    "productionClientReopened": false,
+    "nativeProcessExit": {
+      "t": 1791950342233,
+      "type": "ingress_fault",
+      "sessionId": "db3d2653-4ca1-4dea-824b-2ef1582326bd",
+      "phase": "exited",
+      "pid": 28968,
+      "code": null,
+      "signal": "SIGKILL"
+    },
+    "faultEvents": [
+      {
+        "t": 1791950328468,
+        "type": "ingress_fault",
+        "sessionId": "db3d2653-4ca1-4dea-824b-2ef1582326bd",
+        "phase": "spawned",
+        "pid": 28968
+      },
+      {
+        "t": 1791950335178,
+        "type": "ingress_fault",
+        "sessionId": "db3d2653-4ca1-4dea-824b-2ef1582326bd",
+        "phase": "held",
+        "uuid": "29c0dbc9-0174-41cc-89a5-75c237365ffa"
+      },
+      {
+        "t": 1791950337179,
+        "type": "ingress_fault",
+        "sessionId": "db3d2653-4ca1-4dea-824b-2ef1582326bd",
+        "phase": "released",
+        "uuid": "29c0dbc9-0174-41cc-89a5-75c237365ffa"
+      },
+      {
+        "t": 1791950342233,
+        "type": "ingress_fault",
+        "sessionId": "db3d2653-4ca1-4dea-824b-2ef1582326bd",
+        "phase": "exited",
+        "pid": 28968,
+        "code": null,
+        "signal": "SIGKILL"
+      }
+    ],
+    "toolLifecycle": [
+      {
+        "t": 1791950335136,
+        "phase": "started",
+        "id": 2,
+        "scenario": "cancel",
+        "delayMs": 8000
+      }
+    ],
+    "promptCancelledAt": [
+      {
+        "observedAt": 1791950335182,
+        "result": {
+          "stopReason": "cancelled",
+          "usage": {
+            "inputTokens": 0,
+            "outputTokens": 0,
+            "cachedReadTokens": 0,
+            "cachedWriteTokens": 0,
+            "totalTokens": 0
+          }
+        }
+      }
+    ],
+    "usageScope": "known session accumulator only; unobserved usage/cost unknown, never total-spend zero",
+    "instantaneousQuiescenceClaim": false
+  },
+  "nativeResults": [],
+  "rawRefs": [
+    {
+      "privateRef": ".cat-cafe/tmp/authorized-claude-notice-20261014/ingress-1/result.json",
+      "sha256": "6445d92d724a0173ee0bfb70c8ee025769cb5cd9737b5f363a2cd82861058a5e"
+    },
+    {
+      "privateRef": ".cat-cafe/tmp/authorized-claude-notice-20261014/ingress-1/events.json",
+      "sha256": "0b1aa8f4c27b29d090dd4f9b2bd2aaee822375be0bbf3b6f8dc7e5d10184c790"
+    },
+    {
+      "privateRef": ".cat-cafe/tmp/authorized-claude-notice-20261014/ingress-1/wire.json",
+      "sha256": "7e7716e7f5a68116cfcbd8f409acbd7bcbd4ddb3205524279fb89e4b0971ad89"
+    },
+    {
+      "privateRef": ".cat-cafe/tmp/authorized-claude-notice-20261014/ingress-1/controls.json",
+      "sha256": "173ebee6db14e12fa1e09ed505aac25911396b380c4da4acc682bdc434af2397"
+    },
+    {
+      "privateRef": ".cat-cafe/tmp/authorized-claude-notice-20261014/ingress-1/elicitations.json",
+      "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    },
+    {
+      "privateRef": ".cat-cafe/tmp/authorized-claude-notice-20261014/ingress-1/tools.jsonl",
+      "sha256": "166bd6fa2279a693eebe513cf3856849b2159ec0cfad76fd2372f672360490d0"
+    }
+  ]
+}

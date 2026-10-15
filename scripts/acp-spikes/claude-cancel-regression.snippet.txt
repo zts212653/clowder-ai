@@ -1,0 +1,136 @@
+  it("W5.P native cancel removes queued notice atomically with the active interrupt", async () => {
+    const agent = createMockAgent();
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    injectGeneratorSession(agent, input => {
+      async function* messages() {
+        const primary = await input[Symbol.asyncIterator]().next();
+        yield userEcho(primary.value);
+        await gate;
+        yield idleMessage();
+      }
+      return messages();
+    });
+    const session = agent.sessions["test-session"]!;
+    (session as unknown as { clowderCancelQueued: boolean }).clowderCancelQueued = true;
+    const request = vi.fn(async () => ({ response: { still_queued: [], cancelled: [] } }));
+    Object.defineProperty(session.query, "request", { value: request });
+    const running = agent.prompt({ sessionId: "test-session", prompt: [{ type: "text", text: "synthetic" }] });
+    await waitFor(() => !!session.activeTurn);
+    await agent.cancel({ sessionId: "test-session" });
+    release();
+    await running;
+    expect(request).toHaveBeenCalledWith({ subtype: "interrupt", cancel_queued: true });
+  });
+
+  it("W5.P an accepted notice still in SDK ingress is fenced by closing the query", async () => {
+    const agent = createMockAgent();
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    injectGeneratorSession(agent, input => {
+      async function* messages() {
+        const primary = await input[Symbol.asyncIterator]().next();
+        yield userEcho(primary.value);
+        await gate;
+        yield idleMessage();
+      }
+      return messages();
+    });
+    const session = agent.sessions["test-session"]!;
+    (session as unknown as { clowderCancelQueued: boolean }).clowderCancelQueued = true;
+    const request = vi.fn(async () => ({ response: { still_queued: [], cancelled: [] } }));
+    const close = vi.spyOn(session.query, "close");
+    Object.defineProperty(session.query, "request", { value: request });
+    const running = agent.prompt({ sessionId: "test-session", prompt: [{ type: "text", text: "synthetic" }] });
+    await waitFor(() => !!session.activeTurn);
+    await agent.steer({ sessionId: "test-session", prompt: [{ type: "text", text: "pending ingress" }],
+      _meta: { steering: { delivery: "next", idleBehavior: "promptRequired" } } });
+    session.accumulatedUsage = { inputTokens: 10, outputTokens: 5, cachedReadTokens: 3, cachedWriteTokens: 2 };
+    const queued = agent.prompt({ sessionId: "test-session", prompt: [{ type: "text", text: "never ran" }] });
+    try {
+      await agent.cancel({ sessionId: "test-session" });
+      expect(close).toHaveBeenCalledOnce();
+      expect(request).not.toHaveBeenCalled();
+      expect(session.queryClosed).toBe(true);
+      await expect(running).resolves.toEqual({ stopReason: "cancelled", usage: {
+        inputTokens: 10, outputTokens: 5, cachedReadTokens: 3, cachedWriteTokens: 2, totalTokens: 20,
+      } });
+      await expect(queued).resolves.toEqual({ stopReason: "cancelled" });
+    } finally { release(); await running; }
+  });
+
+  it("W5.P concurrent cancels share one native interrupt and release admission together", async () => {
+    const agent = createMockAgent();
+    let releaseConsumer!: () => void;
+    const consumerGate = new Promise<void>(resolve => { releaseConsumer = resolve; });
+    injectGeneratorSession(agent, input => {
+      async function* messages() {
+        const primary = await input[Symbol.asyncIterator]().next();
+        yield userEcho(primary.value);
+        await consumerGate;
+        yield idleMessage();
+      }
+      return messages();
+    });
+    const session = agent.sessions["test-session"]!;
+    (session as unknown as { clowderCancelQueued: boolean }).clowderCancelQueued = true;
+    const releases: Array<() => void> = [];
+    const request = vi.fn(async () => {
+      await new Promise<void>(resolve => releases.push(resolve));
+      return { response: { still_queued: [], cancelled: [] } };
+    });
+    Object.defineProperty(session.query, "request", { value: request });
+    const running = agent.prompt({ sessionId: "test-session", prompt: [{ type: "text", text: "synthetic" }] });
+    await waitFor(() => !!session.activeTurn);
+    const one = agent.cancel({ sessionId: "test-session" });
+    const two = agent.cancel({ sessionId: "test-session" });
+    await waitFor(() => request.mock.calls.length > 0);
+    try {
+      expect(request).toHaveBeenCalledTimes(1);
+      await expect(agent.prompt({ sessionId: "test-session", prompt: [{ type: "text", text: "too early" }] })).rejects.toThrow("native_cancel_pending");
+      releases[0]!();
+      await Promise.all([one, two]);
+      expect((session as unknown as { clowderCancelPending: boolean }).clowderCancelPending).toBe(false);
+      const later = agent.cancel({ sessionId: "test-session" });
+      await waitFor(() => request.mock.calls.length === 2);
+      releases[1]!();
+      await later;
+    } finally {
+      for (const release of releases) release();
+      await Promise.all([one, two]);
+      releaseConsumer();
+      await running;
+    }
+  });
+
+  it("W5.P late next and new prompt cannot cross an unresolved native cancel receipt", async () => {
+    const agent = createMockAgent();
+    let releaseConsumer!: () => void;
+    const consumerGate = new Promise<void>(resolve => { releaseConsumer = resolve; });
+    injectGeneratorSession(agent, input => {
+      async function* messages() {
+        const primary = await input[Symbol.asyncIterator]().next();
+        yield userEcho(primary.value);
+        await consumerGate;
+        yield idleMessage();
+      }
+      return messages();
+    });
+    const session = agent.sessions["test-session"]!;
+    (session as unknown as { clowderCancelQueued: boolean }).clowderCancelQueued = true;
+    let releaseNative!: () => void;
+    const nativeGate = new Promise<void>(resolve => { releaseNative = resolve; });
+    const request = vi.fn(async () => { await nativeGate; return { response: { still_queued: [], cancelled: [] } }; });
+    Object.defineProperty(session.query, "request", { value: request });
+    const running = agent.prompt({ sessionId: "test-session", prompt: [{ type: "text", text: "synthetic" }] });
+    await waitFor(() => !!session.activeTurn);
+    const cancel = agent.cancel({ sessionId: "test-session" });
+    await waitFor(() => request.mock.calls.length === 1);
+    try {
+      await expect(agent.steer({ sessionId: "test-session", prompt: [{ type: "text", text: "late next" }],
+        _meta: { steering: { delivery: "next", idleBehavior: "promptRequired" } } })).rejects.toThrow("notice_cancelled");
+      await expect(agent.prompt({ sessionId: "test-session", prompt: [{ type: "text", text: "too early" }] })).rejects.toThrow("native_cancel_pending");
+      expect(session.turnQueue).toHaveLength(1);
+    } finally { releaseNative(); await cancel; releaseConsumer(); await running; }
+  });
+

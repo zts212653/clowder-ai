@@ -11,9 +11,10 @@
 // ─── JSON-RPC 2.0 Envelope ────────────────────────────────────
 
 /** Outgoing request from client to agent */
+export type AcpRequestId = string | number;
 export interface AcpRequest {
   jsonrpc: '2.0';
-  id: string;
+  id: AcpRequestId;
   method: string;
   params: Record<string, unknown>;
 }
@@ -21,7 +22,7 @@ export interface AcpRequest {
 /** Incoming response from agent (correlates by id) */
 export interface AcpResponse {
   jsonrpc: '2.0';
-  id: string;
+  id: AcpRequestId;
   result?: Record<string, unknown>;
   error?: AcpError;
 }
@@ -36,7 +37,7 @@ export interface AcpNotification {
 /** Incoming request from agent that expects our response (has id + method) */
 export interface AcpAgentRequest {
   jsonrpc: '2.0';
-  id: string;
+  id: AcpRequestId;
   method: string;
   params: Record<string, unknown>;
 }
@@ -73,6 +74,11 @@ export const ACP_METHODS = {
 
 export interface AcpInitializeParams {
   protocolVersion: number;
+  clientInfo?: { name: string; title?: string; version: string };
+  clientCapabilities?: {
+    fs?: { readTextFile?: boolean; writeTextFile?: boolean };
+    terminal?: boolean;
+  };
 }
 
 export interface AcpInitializeResult {
@@ -84,12 +90,10 @@ export interface AcpInitializeResult {
     version: string;
   };
   agentCapabilities: {
-    loadSession: boolean;
-    promptCapabilities?: {
-      image?: boolean;
-      audio?: boolean;
-      embeddedContext?: boolean;
-    };
+    loadSession?: boolean;
+    sessionCapabilities?: { resume?: unknown; close?: unknown; [key: string]: unknown };
+    _meta?: Record<string, unknown>;
+    promptCapabilities?: AcpPromptCapabilities;
     mcpCapabilities?: {
       http?: boolean;
       sse?: boolean;
@@ -104,6 +108,12 @@ export interface AcpAuthMethod {
   _meta?: Record<string, unknown>;
 }
 
+export interface AcpPromptCapabilities {
+  image?: boolean;
+  audio?: boolean;
+  embeddedContext?: boolean;
+}
+
 // ─── Session ───────────────────────────────────────────────────
 
 export interface AcpNewSessionParams {
@@ -113,13 +123,15 @@ export interface AcpNewSessionParams {
 
 export interface AcpNewSessionResult {
   sessionId: string;
+  _meta?: Record<string, unknown>;
+  [key: string]: unknown;
   configOptions?: AcpSessionConfigOption[];
   modes?: {
     availableModes: Array<{ id: string; name: string; description: string }>;
     currentModeId: string;
   };
   models?: {
-    availableModels: Array<{ id: string; name: string }>;
+    availableModels: Array<{ id?: string; modelId?: string; name: string }>;
     currentModelId: string;
   };
 }
@@ -149,6 +161,9 @@ export interface AcpPromptParams {
 
 export interface AcpPromptResult {
   stopReason: AcpStopReason;
+  usage?: unknown;
+  _meta?: Record<string, unknown>;
+  [key: string]: unknown;
 }
 
 export type AcpStopReason = 'end_turn' | 'max_tokens' | 'max_turn_requests' | 'refusal' | 'cancelled';
@@ -158,7 +173,12 @@ export type AcpStopReason = 'end_turn' | 'max_tokens' | 'max_turn_requests' | 'r
 export type AcpContentBlock =
   | { type: 'text'; text: string }
   | { type: 'image'; data: string; mimeType: string }
-  | { type: 'audio'; data: string; mimeType: string };
+  | { type: 'audio'; data: string; mimeType: string }
+  | {
+      type: 'resource';
+      resource: { uri: string; mimeType?: string; text?: string; blob?: string; [key: string]: unknown };
+    }
+  | { type: 'resource_link'; uri: string; name: string; mimeType?: string; [key: string]: unknown };
 
 // ─── Session Update (streaming notifications) ──────────────────
 

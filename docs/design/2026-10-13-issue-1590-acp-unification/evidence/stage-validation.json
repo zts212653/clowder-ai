@@ -1,0 +1,112 @@
+{
+  "observedAt": "2026-10-13T13:44:45.888Z",
+  "scope": "current feature worktree; no production migration",
+  "gates": {
+    "W0": "source baseline reviewed; full G0 held",
+    "W1": "code plus real CLI/SDK/history/component replay evidence reviewed; full G1 held",
+    "W2S": "safety floor independently approved; not W3.P",
+    "W4P": "core L2 independently verified; full prototype held, no migration",
+    "W5P": "core L2 and owned followup patch verified; full prototype held, no migration"
+  },
+  "passed": {
+    "apiBuild": true,
+    "apiAffectedChecks": 131,
+    "newSourceChecks": 42,
+    "webAdapterChecks": 28,
+    "browserReplayChecks": 2,
+    "codexControlledChecks": 2,
+    "codexFixedBridgeMappingChecks": 1,
+    "realCaptureHistoryChecks": 2,
+    "claudeSteeringAndNextChecks": 29
+  },
+  "expectedSpikeRed": {
+    "claudeUnpatched": {
+      "pass": 1,
+      "fail": 2
+    },
+    "fullPRPatchAppliesToFixedV70": false,
+    "claudeNextOnlyHistorical": {
+      "pass": 2,
+      "fail": 1
+    },
+    "historicalPendingNoEnqueueCriterion": "too strong; replaced by no preemption/execution/auto-answer criteria after independent review",
+    "followupSettlement": {
+      "ownFailure": 1,
+      "foreignPass": 1
+    },
+    "lateOldToolOwnership": {
+      "fail": 1
+    }
+  },
+  "existingLimitations": {
+    "widerPrintAndSdkChecksFailed": 6,
+    "fullWebTsc": "duplicate Vitest reporter types; source-only tsc passed",
+    "realSdk": "authorized isolated official SDK completed 5 uses/5 results, 2 errors/2 child results",
+    "livePlatformEndToEnd": false
+  },
+  "independentReview": {
+    "reviewer": "/root/acp_plan_review",
+    "W1": "earlier P2 closed; real official SDK fixture/history/UI continuation verified; full G1 held",
+    "W2S": "P1/P2 closed; safety floor approved",
+    "spikes": "core bounded L2 and precise followup patch independently verified; complete prototypes held"
+  },
+  "privateLogs": [
+    {
+      "privatePath": ".cat-cafe/tmp/final-api-build.log",
+      "sha256": "486561d2fcc182e8d9009a7894d16fb957731983c85d0ef57bb2b385ba852e8e"
+    },
+    {
+      "privatePath": ".cat-cafe/tmp/w1-w2-final-regression.log",
+      "sha256": "706280b0b80a6b8977f41208e6e78cb762d197828c4351bf1cd9fe3b769b1a3c"
+    },
+    {
+      "privatePath": ".cat-cafe/tmp/w1-w2-final-source.log",
+      "sha256": "1d1ebf0a9b05473ea17a4dcc893eea0c69f32e4fe6a2e6910b959f2627e52440"
+    },
+    {
+      "privatePath": ".cat-cafe/tmp/w1-web-final.log",
+      "sha256": "f94de01c102f6012880bc43dff8dbde9cd5021240089e2d6ae016aeee2ea0666"
+    },
+    {
+      "privatePath": ".cat-cafe/tmp/w2s-wire-final.log",
+      "sha256": "a22b1a582159ede653d6ef70c57ad2e1c2ee566a4373fa72136f2d5ef04c981c"
+    },
+    {
+      "privatePath": ".cat-cafe/tmp/w5-next-only.log",
+      "sha256": "11753e0f2781cc0dd50913d5846731ac62606b8b2b8010ce5db58feda0dd47ec"
+    },
+    {
+      "privatePath": ".cat-cafe/tmp/w5-candidate-compatibility.log",
+      "sha256": "cb7d19746d7534e5138a6d533c6401adfbe991e190234f01f64d70804a7cb0b3"
+    },
+    {
+      "privatePath": ".cat-cafe/tmp/w4-bridge.log",
+      "sha256": "67eb26000ccdbc2ba4263f6b8b9c223be61a906fd47d9504413282aa3ca3b607"
+    }
+  ],
+  "browser": {
+    "evidenceKind": "production_replay_components_real_persisted_data_isolated_browser",
+    "origin": "https://claude-w1-replay.test",
+    "workspace": "G:\\AIwork\\clowder-ai\\worktrees\\feat-acp-unified-client-plan-1590",
+    "diskReads": 2,
+    "pageErrors": [],
+    "fullPlatformEndToEnd": false
+  },
+  "fixtureSha256": "7c6891993240c3e54685ea709a3bf939d9d569de47ce6667e146f11a5a599e56",
+  "localCommits": {
+    "W1": "355734ea9fcec35bfdb59f3c5408bb9b3cbb50df",
+    "W2S": "44cd6c2c0229ff4e2978ccec960614563e8c883a"
+  },
+  "localOnly": true,
+  "pushed": false,
+  "authenticatedRuntimeRef": "authorized-runtime.json",
+  "browserSdk": {
+    "evidenceKind": "production_replay_components_real_persisted_data_isolated_browser",
+    "capture": "sdk",
+    "origin": "https://claude-w1-replay.test",
+    "workspace": "G:\\AIwork\\clowder-ai\\worktrees\\feat-acp-unified-client-plan-1590",
+    "diskReads": 2,
+    "pageErrors": [],
+    "fullPlatformEndToEnd": false
+  }
+}

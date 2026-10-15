@@ -1,3 +1,4 @@
+import { nativeToolCallKey } from '@cat-cafe/shared';
 /**
  * Serial Route Strategy
  * Cats respond one by one, each seeing previous responses.
@@ -538,6 +539,7 @@ function toolNamesMatch(a: string, b: string): boolean {
 type PendingToolResult = {
   toolName: string;
   toolUseId?: string;
+  toolParentUseId?: string;
   streamDisposition?: CallbackStreamDisposition;
 };
 
@@ -548,7 +550,7 @@ function consumePendingToolResult(
   hasCallbackPostEvidence: boolean,
 ): PendingToolResult | undefined {
   if (msg.toolUseId) {
-    const pendingIndex = pendingToolResults.findIndex((entry) => entry.toolUseId === msg.toolUseId);
+    const pendingIndex = pendingToolResults.findIndex((entry) => nativeToolCallKey(entry) === nativeToolCallKey(msg));
     if (pendingIndex === -1) return undefined;
     return pendingToolResults.splice(pendingIndex, 1)[0];
   }
@@ -2583,6 +2585,7 @@ export async function* routeSerial(
             pendingToolResults.push({
               toolName: effectiveMsg.toolName,
               ...(effectiveMsg.toolUseId ? { toolUseId: effectiveMsg.toolUseId } : {}),
+              ...(effectiveMsg.toolParentUseId ? { toolParentUseId: effectiveMsg.toolParentUseId } : {}),
               ...(isPostMessageToolName(effectiveMsg.toolName)
                 ? { streamDisposition: readCallbackStreamDisposition(effectiveMsg.toolInput) }
                 : {}),
@@ -2634,11 +2637,25 @@ export async function* routeSerial(
             // otherwise FIFO toolName+catId match handles same-name parallel calls.
             if (deps.toolEventLog && completedToolName) {
               const normalizedName = normalizeMcpToolName(completedToolName.toolName);
-              const resultSummary = deriveResultSummary(normalizedName, effectiveMsg.content);
+              const resultSummary = {
+                ...deriveResultSummary(normalizedName, effectiveMsg.content),
+                ...(effectiveMsg.toolResultStatus ? { _toolResultStatus: effectiveMsg.toolResultStatus } : {}),
+              };
               if (Object.keys(resultSummary).length > 0) {
                 const resultMsg = effectiveMsg as { catId?: string; toolUseId?: string };
-                const matcher: { toolUseId?: string; toolName?: string; catId?: string } = resultMsg.toolUseId
-                  ? { toolUseId: resultMsg.toolUseId }
+                const matcher: {
+                  toolUseId?: string;
+                  toolParentUseId?: string;
+                  invocationId?: string;
+                  toolName?: string;
+                  catId?: string;
+                } = resultMsg.toolUseId
+                  ? {
+                      toolUseId: resultMsg.toolUseId,
+                      toolParentUseId: effectiveMsg.toolParentUseId,
+                      catId: effectiveMsg.catId,
+                      invocationId: effectiveMsg.invocationId ?? ownInvocationId,
+                    }
                   : resultMsg.catId
                     ? { toolName: normalizedName, catId: resultMsg.catId }
                     : { toolName: normalizedName };
@@ -2662,6 +2679,7 @@ export async function* routeSerial(
               toolName?: string;
               toolInput?: Record<string, unknown>;
               toolUseId?: string;
+              toolParentUseId?: string;
               invocationId?: string;
               sessionId?: string;
               threadId?: string;
@@ -2676,7 +2694,11 @@ export async function* routeSerial(
             // updateSummary can do exact match when provider emits it on tool_result.
             const baseSummary = (msg.toolInput ?? {}) as Record<string, unknown>;
             const summary: Record<string, unknown> = msg.toolUseId
-              ? { ...baseSummary, _toolUseId: msg.toolUseId }
+              ? {
+                  ...baseSummary,
+                  _toolUseId: msg.toolUseId,
+                  ...(msg.toolParentUseId ? { _toolParentUseId: msg.toolParentUseId } : {}),
+                }
               : baseSummary;
             deps.toolEventLog
               .append({
@@ -3509,6 +3531,7 @@ export async function* routeSerial(
               pendingToolResults.push({
                 toolName: effectiveMsg.toolName,
                 ...(effectiveMsg.toolUseId ? { toolUseId: effectiveMsg.toolUseId } : {}),
+                ...(effectiveMsg.toolParentUseId ? { toolParentUseId: effectiveMsg.toolParentUseId } : {}),
                 ...(isPostMessageToolName(effectiveMsg.toolName)
                   ? { streamDisposition: readCallbackStreamDisposition(effectiveMsg.toolInput) }
                   : {}),

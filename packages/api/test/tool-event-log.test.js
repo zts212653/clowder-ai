@@ -100,6 +100,27 @@ function makeBaseEvent(overrides) {
   };
 }
 
+test('exact native result updates only its invocation and parent scope', async () => {
+  const { ToolEventLog } = await import('../dist/domains/cats/services/tool-usage/ToolEventLog.js');
+  const log = new ToolEventLog(createFakeRedis());
+  await log.append(makeBaseEvent({ invocationId: 'old', summary: { _toolUseId: 'same', _resultMerged: true } }));
+  await log.append(makeBaseEvent({ invocationId: 'new', summary: { _toolUseId: 'same' } }));
+  await log.append(makeBaseEvent({ invocationId: 'new', summary: { _toolUseId: 'same', _toolParentUseId: 'parent' } }));
+  await log.updateSummary(
+    'thread-A',
+    { toolUseId: 'same', toolParentUseId: 'parent', invocationId: 'new', catId: 'opus-47' },
+    { _toolResultStatus: 'error' },
+  );
+  await log.updateSummary(
+    'thread-A',
+    { toolUseId: 'same', toolParentUseId: undefined, invocationId: 'new', catId: 'opus-47' },
+    { _toolResultStatus: 'error' },
+  );
+  const events = await log.readByThread('thread-A');
+  assert.equal(events.find((e) => e.invocationId === 'old').status, 'success');
+  assert.equal(events.filter((e) => e.invocationId === 'new' && e.status === 'error').length, 2);
+});
+
 describe('ToolEventLog (AC-F10)', () => {
   let fakeRedis;
 

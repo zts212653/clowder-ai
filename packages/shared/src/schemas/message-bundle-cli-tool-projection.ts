@@ -6,8 +6,36 @@ export interface CliToolProjectionEvent {
   type: 'tool_use' | 'tool_result';
   label: string;
   detail?: string;
+  inputDetail?: string;
+  executionRef?: string;
   toolUseId?: string;
+  toolParentUseId?: string;
   status?: string;
+}
+
+function callKey(event: CliToolProjectionEvent): string | undefined {
+  return event.toolUseId
+    ? JSON.stringify([event.executionRef ?? '', event.toolParentUseId ?? '', event.toolUseId])
+    : undefined;
+}
+
+/** Fold terminal input into its keyed call, keeping IDs/counts and legacy events intact. */
+export function withFinalizedCliToolInputs<T extends CliToolProjectionEvent>(events: readonly T[]): T[] {
+  const projected = [...events];
+  const pending = new Map<string, number>();
+  for (const [index, event] of events.entries()) {
+    const key = callKey(event);
+    if (!key) continue;
+    if (event.type === 'tool_use') pending.set(key, index);
+    else {
+      const useIndex = pending.get(key);
+      if (useIndex !== undefined && event.inputDetail !== undefined) {
+        projected[useIndex] = { ...projected[useIndex], detail: event.inputDetail };
+      }
+      pending.delete(key);
+    }
+  }
+  return projected;
 }
 
 /** One call as the v2 reply record paints it. */
@@ -21,7 +49,7 @@ export interface CliToolProjectionRow {
 
 interface PendingCliToolCall {
   row: CliToolProjectionRow | null;
-  toolUseId?: string;
+  key?: string;
   settled: boolean;
 }
 
@@ -32,6 +60,7 @@ interface CliToolProjectionState {
 }
 
 function appendCliToolUse(state: CliToolProjectionState, event: CliToolProjectionEvent): void {
+  const key = callKey(event);
   const hidden = cleanCliToolLabel(event.label) === 'unknown';
   const row: CliToolProjectionRow | null = hidden
     ? null
@@ -44,12 +73,12 @@ function appendCliToolUse(state: CliToolProjectionState, event: CliToolProjectio
       };
   const pending: PendingCliToolCall = {
     row,
-    ...(event.toolUseId ? { toolUseId: event.toolUseId } : {}),
+    ...(key ? { key } : {}),
     settled: false,
   };
   state.pendingCalls.push(pending);
   if (row) state.rows.push(row);
-  if (event.toolUseId) state.byUseKey.set(event.toolUseId, pending);
+  if (key) state.byUseKey.set(key, pending);
 }
 
 function takeNextPendingCliToolCall(state: CliToolProjectionState): PendingCliToolCall | undefined {
@@ -61,10 +90,11 @@ function takeNextPendingCliToolCall(state: CliToolProjectionState): PendingCliTo
 }
 
 function appendCliToolResult(state: CliToolProjectionState, event: CliToolProjectionEvent): void {
-  const pending = event.toolUseId ? state.byUseKey.get(event.toolUseId) : takeNextPendingCliToolCall(state);
+  const key = callKey(event);
+  const pending = key ? state.byUseKey.get(key) : takeNextPendingCliToolCall(state);
   if (!pending) return;
   pending.settled = true;
-  if (pending.toolUseId) state.byUseKey.delete(pending.toolUseId);
+  if (pending.key) state.byUseKey.delete(pending.key);
   if (!pending.row) return;
   if (event.detail !== undefined) pending.row.detail = event.detail;
   pending.row.failed = event.status === 'error';
@@ -77,7 +107,7 @@ function appendCliToolResult(state: CliToolProjectionState, event: CliToolProjec
  */
 export function projectCliToolEventRows(events: readonly CliToolProjectionEvent[]): CliToolProjectionRow[] {
   const state: CliToolProjectionState = { rows: [], byUseKey: new Map(), pendingCalls: [] };
-  for (const event of events) {
+  for (const event of withFinalizedCliToolInputs(events)) {
     if (event.type === 'tool_use') appendCliToolUse(state, event);
     else appendCliToolResult(state, event);
   }

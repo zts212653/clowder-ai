@@ -12,6 +12,9 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 const { AcpAgentService } = await import('../../dist/domains/cats/services/agents/providers/acp/AcpAgentService.js');
+const { AcpSessionCancelledError } = await import(
+  '../../dist/domains/cats/services/agents/providers/acp/acp-cancellation-error.js'
+);
 
 const TEST_POOL_KEY = { projectPath: '/tmp', providerProfile: 'test' };
 
@@ -180,6 +183,29 @@ describe('AcpAgentService zero-event resume retry (#1091 review P1)', () => {
     assert.equal(client.newSessionCalls, 1, 'no retry session for a fresh zero-event stream');
     const inits = messages.filter((m) => m.type === 'session_init');
     assert.equal(inits.length, 1);
+    assert.equal(messages.at(-1).type, 'done');
+  });
+
+  it('local cancellation during the fresh retry stays cancelled and seals the replacement', async () => {
+    const client = makeClient();
+    client.promptStream = async function* (sessionId) {
+      client.prompts.push({ sessionId });
+      if (sessionId.startsWith('fresh-')) throw new AcpSessionCancelledError(sessionId);
+    };
+    const pool = makePool(client);
+    const sealed = [];
+    pool.sealSession = (_key, sessionId) => sealed.push(sessionId);
+    const messages = [];
+    for await (const message of makeAdapter(pool).invoke('retry then cancel', { sessionId: 'sess-dead' })) {
+      messages.push(message);
+    }
+    const error = messages.find((message) => message.type === 'error');
+    assert.equal(error.errorCode, 'cancelled');
+    assert.equal(
+      error.error,
+      'cancelled: ACP session fresh-1 cancelled locally; native acknowledgement pending\n已请求取消，执行端的最终状态待确认。',
+    );
+    assert.ok(sealed.includes('fresh-1'));
     assert.equal(messages.at(-1).type, 'done');
   });
 

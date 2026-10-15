@@ -1,0 +1,21 @@
+{
+  "evidenceKind": "real_native_cli_capture_sanitized_excerpt",
+  "observedAt": "2026-10-13T10:37:06.263Z",
+  "rawSha256": "9b836f6aec2c49da1d08355a9f231dfc052fc366a28e73ff4f4e8e8867714f34",
+  "rawPrivatePath": ".cat-cafe/tmp/w1-native-absolute/native.jsonl",
+  "fixturePath": "packages/api/test/fixtures/claude-native-tool-results.json",
+  "nativeVersion": "2.1.296",
+  "model": "claude-opus-5-5[1m]",
+  "permissionMode": "default",
+  "apiKeySource": "none",
+  "accountMode": "unverified_do_not_infer",
+  "terminal": {
+    "subtype": "success",
+    "isError": false,
+    "durationMs": 36932,
+    "totalCostUsd": 0.1290398
+  },
+  "eventCount": 472,
+  "excerptEventCount": 10,
+  "sanitization": "private fixture directory replaced; complete tool input/output blocks and native parent/call IDs retained"
+}

@@ -19,6 +19,7 @@ import { AcpClient } from './AcpClient.js';
 import { AcpHttpStreamClient } from './AcpHttpStreamClient.js';
 import { AcpProcessPool, DEFAULT_ACP_IDLE_TTL_MS, type PoolKey } from './AcpProcessPool.js';
 import { resolveAcpBootstrapArgs, resolveAcpBootstrapCommand, resolveAcpBootstrapCwd } from './acp-bootstrap-cwd.js';
+import { denyUnwiredAcpPermission } from './acp-permission-dispatcher.js';
 // resolveAcpMcpServers + resolveDisabledServerIds moved to AcpAgentService.invoke()
 // for invoke-time resolution (#712 P1-1).
 import { createAcpPoolSpawnSignature } from './acp-pool-signature.js';
@@ -28,6 +29,8 @@ import { tryPrepareAcpProcessEnv } from './acp-spawn-env.js';
 export type AcpPoolRegistry = Map<string, AcpProcessPool>;
 
 export interface CreateAcpServiceForConfigInput {
+  /** Internal required contracts for an isolated/migration candidate; legacy routing is unchanged. */
+  executionRequirements?: import('./AcpAgentService.js').AcpExecutionRequirements;
   projectRoot: string;
   profileId: string;
   config: CatConfig;
@@ -231,6 +234,8 @@ async function ensureAcpPool(
     acpConfig,
     () => {
       const clientCfg = {
+        launchBindingFingerprint: spawnSignature,
+        permissionHandler: denyUnwiredAcpPermission,
         command: bootstrap.command,
         args: bootstrap.args,
         cwd: bootstrap.cwd,
@@ -312,6 +317,11 @@ export async function createAcpServiceForConfig(
     providerName: config.clientId === 'acp' ? 'acp' : config.clientId,
     modelName: spawn.sessionModel ?? config.defaultModel ?? 'acp',
     sessionModel: spawn.sessionModel,
+    executionRequirements: input.executionRequirements,
+    nativeWindowControl:
+      config.clientId === 'kimi' &&
+      spawn.contextPolicy?.windowTokens != null &&
+      spawn.env?.KIMI_MODEL_MAX_CONTEXT_SIZE === String(spawn.contextPolicy.windowTokens),
     contextBinding: {
       model: effectiveModel,
       ...((config.clientId === 'opencode' || config.clientId === 'kimi') && spawn.contextPolicy?.windowTokens

@@ -1,0 +1,195 @@
+{
+  "created": "2026-10-14",
+  "productionMigrationEnabled": false,
+  "completeW5Gate": "held",
+  "privateSdkSeam": "Query.request({subtype:interrupt,cancel_queued:true})",
+  "nativeCapability": "interrupt_cancel_queued_v1",
+  "sdkVersions": ["0.3.232", "0.3.285"],
+  "nativeVersion": "2.1.296",
+  "upgradeBinding": {
+    "baseBridgePin": "d0aafb1ca26427285ffaeac8d8a4452fff28e9c3",
+    "sdkVersion": "0.3.285",
+    "zodVersion": "4.4.3",
+    "anthropicSdkVersion": "0.129.0",
+    "dependencyOverride": "Copied installed SDK; aligned supported peer versions. Base npm lock is historical, not an updated lock.",
+    "contentUnionPatch": "Removed retired mid_conv_system; mcp_tool_listing follows the existing non-rendered content branch.",
+    "productionEnabled": false
+  },
+  "cases": [
+    {
+      "sample": "boundaries-2",
+      "file": "w5-boundaries-2.json",
+      "sha256": "e6ae39a66692bc1663f33d7a0bb4dca7152210744ed9c3ff5baa63c307a30be4"
+    },
+    {
+      "sample": "boundaries-5",
+      "file": "w5-boundaries-5.json",
+      "sha256": "6c160689740f1786758661df0a23078d1ce15acf1266f46124e22f0249fd2f5f"
+    },
+    {
+      "sample": "sdk-upgrade-1",
+      "file": "w5-sdk-upgrade-1.json",
+      "sha256": "2000a1f7e3cb6ded0acddcec6733e7b0495f3c3a1a4ae6694fbd0adec3318ad8"
+    },
+    {
+      "sample": "sdk-upgrade-2",
+      "file": "w5-sdk-upgrade-2.json",
+      "sha256": "7664e2e3fbdf846ba5a4fa9bd3500d05415f8257074a30366a856b82a1d5114d"
+    },
+    {
+      "sample": "ingress-1",
+      "file": "w5-ingress-1.json",
+      "sha256": "3e0f35566e5f56d4edeb3f75fab1e85434235fa3a232659809ac1682d2e37dfb"
+    }
+  ],
+  "checks": [
+    {
+      "name": "review RED",
+      "privateRef": ".cat-cafe/tmp/acp-prototypes/claude-review-boundaries-red.log",
+      "sha256": "ef954732282a3fb73952050f35ca82f60bff473e05f39d7c69ccd61a6569894a",
+      "result": {
+        "failed": 2
+      }
+    },
+    {
+      "name": "retry RED",
+      "privateRef": ".cat-cafe/tmp/acp-retry-cancel-red.log",
+      "sha256": "7ca9c149a66f6195ab1c42a52ff86c9ec7350f5e3cc32ba8b8be20e40c3da39d",
+      "result": {
+        "failed": 1
+      }
+    },
+    {
+      "name": "bridge cancel/interrupt/usage",
+      "privateRef": ".cat-cafe/tmp/acp-prototypes/claude-cancel-expanded-green.log",
+      "sha256": "a7b5cb9426d8df858b475350c9be3d6a6b021c9ef9882bfd8706f1058356989b",
+      "result": {
+        "passed": 110,
+        "skipped": 306
+      }
+    },
+    {
+      "name": "native queued cancel schema helper",
+      "privateRef": ".cat-cafe/tmp/w5-cancel-helper-final.log",
+      "sha256": "c484d3d0ed1d2286a5961fad032b0f26cf321629fa7bf0c92a7c35acea7df3f2",
+      "result": {
+        "passed": 7
+      }
+    },
+    {
+      "name": "API built entry",
+      "privateRef": ".cat-cafe/tmp/acp-cancel-review-green.log",
+      "sha256": "1337b41cacd8e902235292957373bfd39d49ea7f6d440485d109789d6acbbaaa",
+      "result": {
+        "passed": 129
+      }
+    },
+    {
+      "name": "API build",
+      "privateRef": ".cat-cafe/tmp/acp-cancel-review-build.log",
+      "sha256": "486561d2fcc182e8d9009a7894d16fb957731983c85d0ef57bb2b385ba852e8e",
+      "result": {
+        "exitCode": 0
+      }
+    },
+    {
+      "name": "Windows print/SDK launch",
+      "privateRef": ".cat-cafe/tmp/claude-windows-regression-green.log",
+      "sha256": "7ace817429eafe7d749b179a205715e2771bde842fda0452888756ec0f5bf43b",
+      "result": {
+        "passed": 71
+      }
+    },
+    {
+      "name": "SDK upgrade unaligned type/peer failure",
+      "privateRef": ".cat-cafe/tmp/claude-sdk-upgrade-tsc.log",
+      "sha256": "38148761d782bd737964d674ac54b7bab6b63fa5c8c2c8693938acbca127313f",
+      "result": {
+        "exitCode": 2
+      }
+    },
+    {
+      "name": "SDK upgrade aligned compile",
+      "privateRef": ".cat-cafe/tmp/claude-sdk-upgrade-aligned-tsc.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "result": {
+        "exitCode": 0
+      }
+    },
+    {
+      "name": "SDK upgrade aligned checks",
+      "privateRef": ".cat-cafe/tmp/claude-sdk-upgrade-aligned-tests.log",
+      "sha256": "1d15b2ffffe9641a19b6fa2b1e71508c5006e0181a39535a2fc31af314de00f3",
+      "result": {
+        "passed": 36,
+        "skipped": 380
+      }
+    },
+    {
+      "name": "SDK ingress instrumentation compile",
+      "privateRef": ".cat-cafe/tmp/claude-ingress-fault-tsc.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "result": {
+        "exitCode": 0
+      }
+    },
+    {
+      "name": "incomplete run overwrite RED with network disabled",
+      "privateRef": ".cat-cafe/tmp/w5-runner-claim-red.log",
+      "sha256": "4cfb085c17e51f0e14108fd70dbc56025be9f60f2a75d7adb9e8c36a1eb5bd17",
+      "result": {
+        "exitCode": 1
+      }
+    },
+    {
+      "name": "incomplete run atomic claim GREEN with network disabled",
+      "privateRef": ".cat-cafe/tmp/w5-runner-claim-green.log",
+      "sha256": "7d50bea580efda4b7139570a67485cccbd5598a656db92c1ed9626ecc9d62ee2",
+      "result": {
+        "exitCode": 0
+      }
+    },
+    {
+      "name": "final Biome affected files",
+      "privateRef": ".cat-cafe/tmp/w5-final-biome-check.log",
+      "sha256": "e1d7ca00622ccd8998b2b1469bed595d4dd66638adc4ab09327796321db3cd3b",
+      "result": {
+        "exitCode": 0,
+        "warnings": 28,
+        "infos": 20
+      }
+    }
+  ],
+  "sources": [
+    {
+      "file": "scripts/acp-spikes/claude-cancel-patch.mjs",
+      "sha256": "3adf7bf6a49a1c5e675f4d02e693246621c346ab0d395801fcb1202c77b1e9cc"
+    },
+    {
+      "file": "scripts/acp-spikes/claude-native-cancel.ts",
+      "sha256": "5ee6d8e31030125c3f7dd9823329c7fb0f573e045f3ba30ccf52f35124eb9d1c"
+    },
+    {
+      "file": "scripts/acp-spikes/claude-ingress-fault-patch.mjs",
+      "sha256": "95b5170f37f5081b8bf843707ab3012fb9f46b79b3c21ea1d27635f51a340f66"
+    },
+    {
+      "file": "scripts/acp-spikes/claude-boundary-harness.mts",
+      "sha256": "9d35a1365fedd2c76a56c8c5d952b306258711e6623adb3c86aa0b3dc3a68506"
+    },
+    {
+      "file": "scripts/acp-spikes/prepare-claude-sdk-upgrade.mjs",
+      "sha256": "ca3e2e43145ffa234dc3984ed232cf3d6db89ec98ac36a3b85084fd55b961ad6"
+    },
+    {
+      "file": "scripts/acp-spikes/run-claude-notice-boundaries.mts",
+      "sha256": "e006b221527edbc3944bb4d063fbb0626cbb349bf0759d3b49a89b26d743847d"
+    },
+    {
+      "file": "scripts/acp-spikes/readonly-fixture-mcp.mjs",
+      "sha256": "6324e250bd0923bc1f8ed4dc58f6c52511a2b2085afe7ae6a65e2582fc057d3e"
+    }
+  ],
+  "reviewer": "/root/acp_plan_review",
+  "reviewStatus": "Independent code and bounded evidence review passed; five findings closed. Full W5.P and migration held."
+}

@@ -1,0 +1,252 @@
+{
+  "sample": "native-upgrade-2",
+  "evidenceKind": "real_native_SDK_ACP_with_synthetic_human_answer",
+  "success": true,
+  "durationMs": 28102,
+  "bridgePin": "d0aafb1ca26427285ffaeac8d8a4452fff28e9c3",
+  "sdkVersion": "0.3.285",
+  "nativeVersion": "2.1.299",
+  "nativeSha256": "295b49ec092f31a7de9c6ff286d9d8f120a4f029b9ad9a5ac0b12c35cbf4df2b",
+  "bundleSha256": "ce7e4db6de998053497426a658106d9fd14487fe5b83dd63eb8c7b6b9eaf80bf",
+  "nativeObservedVersions": ["2.1.299"],
+  "requiredNativeCapability": "interrupt_cancel_queued_v1",
+  "observedNativeCapability": true,
+  "executedRunner": {
+    "capturedBeforeExecution": true,
+    "sources": [
+      {
+        "source": "scripts/acp-spikes/run-claude-notice-boundaries.mts",
+        "sha256": "3c046e06746fde07e02128c0f29b79689368f560b4018cb14704d5969edd98e5"
+      },
+      {
+        "source": "scripts/acp-spikes/claude-boundary-harness.mts",
+        "sha256": "9d35a1365fedd2c76a56c8c5d952b306258711e6623adb3c86aa0b3dc3a68506"
+      },
+      {
+        "source": "scripts/acp-spikes/claude-native-binding.mts",
+        "sha256": "ad8b27337532056b8f29463f3b7a26315290e82462641177325dcbac037e4dde"
+      }
+    ],
+    "parameters": {
+      "variant": "upgrade",
+      "nativeVersion": "2.1.299",
+      "runId": "native-upgrade-2",
+      "authorized": true
+    }
+  },
+  "scope": {
+    "syntheticOnly": true,
+    "budgetUsd": 2,
+    "maxSdkTurns": 8,
+    "maxRuntimeMs": 180000,
+    "hooksDisabled": true,
+    "userInstructionsDisabled": true,
+    "humanAnswer": "synthetic confirm=true after 3 seconds",
+    "production": false,
+    "productionElicitationHandler": false
+  },
+  "pendingHuman": {
+    "waitingAt": 1791955029910,
+    "checkedAt": 1791955032916,
+    "noticesQueued": [
+      {
+        "outcome": "injected",
+        "nativeInputUuid": "c6fbf908-f94f-47cf-81af-2b8d53e8f38b"
+      },
+      {
+        "outcome": "injected",
+        "nativeInputUuid": "92bd6779-1b61-4445-834e-dfc2871574fe"
+      }
+    ],
+    "answered": false,
+    "primarySettled": false
+  },
+  "multipleNotices": {
+    "receipts": [
+      {
+        "outcome": "injected",
+        "nativeInputUuid": "c6fbf908-f94f-47cf-81af-2b8d53e8f38b"
+      },
+      {
+        "outcome": "injected",
+        "nativeInputUuid": "92bd6779-1b61-4445-834e-dfc2871574fe"
+      }
+    ],
+    "starts": [
+      {
+        "observedAt": 1791955040947,
+        "commandUuid": "c6fbf908-f94f-47cf-81af-2b8d53e8f38b",
+        "state": "started"
+      },
+      {
+        "observedAt": 1791955040947,
+        "commandUuid": "92bd6779-1b61-4445-834e-dfc2871574fe",
+        "state": "started"
+      }
+    ],
+    "ordered": true,
+    "primarySettledAt": 1791955046095
+  },
+  "queuedCancellation": {
+    "receipt": {
+      "outcome": "injected",
+      "nativeInputUuid": "4234c2c5-0421-44e5-9643-433257e2002b"
+    },
+    "nativeLifecycle": [
+      {
+        "observedAt": 1791955049193,
+        "commandUuid": "4234c2c5-0421-44e5-9643-433257e2002b",
+        "state": "queued"
+      },
+      {
+        "observedAt": 1791955049306,
+        "commandUuid": "4234c2c5-0421-44e5-9643-433257e2002b",
+        "state": "cancelled"
+      }
+    ],
+    "nativeWireCancelled": true,
+    "noticeNeverStarted": true,
+    "subsequentNativePrompt": {
+      "stopReason": "end_turn",
+      "usage": {
+        "inputTokens": 1455,
+        "outputTokens": 8,
+        "cachedReadTokens": 116,
+        "cachedWriteTokens": 5,
+        "totalTokens": 1584
+      }
+    },
+    "productionClientReopened": false,
+    "instantaneousQuiescenceClaim": false
+  },
+  "nativeResults": [
+    {
+      "observedAt": 1791955046091,
+      "subtype": "success",
+      "terminalReason": "completed",
+      "userMessageUuids": [
+        "2469f560-1524-4584-8100-72263356a77e",
+        "c6fbf908-f94f-47cf-81af-2b8d53e8f38b",
+        "92bd6779-1b61-4445-834e-dfc2871574fe"
+      ],
+      "totalCostUsd": 0.0105644,
+      "costScope": "native SDK result only; not complete billing attribution"
+    },
+    {
+      "observedAt": 1791955049313,
+      "subtype": "error_during_execution",
+      "terminalReason": "aborted_tools",
+      "userMessageUuids": ["0b8bffc4-9aff-4767-a7eb-35245280f0c8"],
+      "totalCostUsd": 0.0160766,
+      "costScope": "native SDK result only; not complete billing attribution"
+    },
+    {
+      "observedAt": 1791955052231,
+      "subtype": "success",
+      "terminalReason": "completed",
+      "userMessageUuids": ["21afe140-4c43-4eba-b52a-890223573b2e"],
+      "totalCostUsd": 0.0221048,
+      "costScope": "native SDK result only; not complete billing attribution"
+    }
+  ],
+  "artifacts": [
+    {
+      "privateRef": ".cat-cafe/tmp/acp-prototypes/claude-sdk-0.3.285-aligned/dist/acp-agent.js",
+      "sha256": "ce7e4db6de998053497426a658106d9fd14487fe5b83dd63eb8c7b6b9eaf80bf"
+    },
+    {
+      "privateRef": ".cat-cafe/tmp/acp-prototypes/claude-sdk-0.3.285-aligned/node_modules/@anthropic-ai/claude-agent-sdk/sdk.mjs",
+      "sha256": "437c1e85b41958c04b3ce38096ed5e9e6d1b7ade54eba6df7f7d6362c9c073f8"
+    },
+    {
+      "privateRef": ".cat-cafe/tmp/acp-prototypes/claude-sdk-0.3.285-aligned/node_modules/@anthropic-ai/claude-agent-sdk/sdk.d.ts",
+      "sha256": "3bc04bbd9858b00a2589b899317c66852ff875e841eb90c2a741ef9047e235bf"
+    },
+    {
+      "privateRef": ".cat-cafe/tmp/acp-prototypes/claude-sdk-0.3.285-aligned/node_modules/@agentclientprotocol/sdk/dist/schema/zod.gen.js",
+      "sha256": "bf00aace4235fe4eb832f17cfd7ad199d470dd31ba101ee1d9c2d46437265acd"
+    },
+    {
+      "privateRef": ".cat-cafe/tmp/acp-prototypes/claude-sdk-0.3.285-aligned/src/acp-agent.ts",
+      "sha256": "becf7b95a13ca9f31ae43aeef1da27ee80a016e1194b55494c3d2e3dc30410db"
+    },
+    {
+      "privateRef": ".cat-cafe/tmp/acp-prototypes/claude-sdk-0.3.285-aligned/upgrade-binding.json",
+      "sha256": "454f0ab759d91d3f72cc8727bf67d477a1b64d59de7cbea3c07529ea364d646d"
+    }
+  ],
+  "rawRefs": [
+    {
+      "privateRef": ".cat-cafe/tmp/authorized-claude-notice-20261014/native-upgrade-2/result.json",
+      "sha256": "307185493584bc86bd49ff15e2904a7b7d35c2685e2cc599307b0ef1df097c64"
+    },
+    {
+      "privateRef": ".cat-cafe/tmp/authorized-claude-notice-20261014/native-upgrade-2/events.json",
+      "sha256": "1ce751da59a410bf28400e8670f9c30d28252e539f776e4dde726dc6d7e58f60"
+    },
+    {
+      "privateRef": ".cat-cafe/tmp/authorized-claude-notice-20261014/native-upgrade-2/wire.json",
+      "sha256": "3296adb4335f0420c5bfc37cd0e9eb22f4ff740af9fe6454cb7be5413bd3950f"
+    },
+    {
+      "privateRef": ".cat-cafe/tmp/authorized-claude-notice-20261014/native-upgrade-2/controls.json",
+      "sha256": "9f4dd5c05cbed796ade767bd1e3df3305d61f45bb70c5fe690c96f7a78cbb303"
+    },
+    {
+      "privateRef": ".cat-cafe/tmp/authorized-claude-notice-20261014/native-upgrade-2/elicitations.json",
+      "sha256": "44e2db6de074f2123078ff1590b0053675914761240284b3908795af23629940"
+    },
+    {
+      "privateRef": ".cat-cafe/tmp/authorized-claude-notice-20261014/native-upgrade-2/tools.jsonl",
+      "sha256": "05f080d259cd666fca43e8e0fff8634d53c54d348b213cc5405d69de6b61fb66"
+    }
+  ],
+  "checks": [
+    {
+      "name": "native selector RED",
+      "privateRef": ".cat-cafe/tmp/w5-native-binding-red.log",
+      "sha256": "2e447385c98ac3b52ea7172d2a55e59b2856c24ae353b5e7bae3323163d13087",
+      "result": {
+        "passed": 1,
+        "failed": 1
+      }
+    },
+    {
+      "name": "selector and cancellation helpers",
+      "privateRef": ".cat-cafe/tmp/w5-native-upgrade-helpers.log",
+      "sha256": "4da2994aeff8e9f41f3c3a074cf7c537f676af0abf7a12bbdb04bf088fcd35fc",
+      "result": {
+        "passed": 9
+      }
+    },
+    {
+      "name": "upgraded bridge affected regression",
+      "privateRef": ".cat-cafe/tmp/w5-native-upgrade-regression.log",
+      "sha256": "5b945c58b0e898733ce6016535711ae700f3badb008f86b1715acea2b93ace62",
+      "result": {
+        "passed": 129,
+        "skipped": 708,
+        "durationMs": 2590
+      }
+    },
+    {
+      "name": "runner ESM bootstrap failure before authentication/model access",
+      "privateRef": ".cat-cafe/tmp/w5-native-upgrade-1.log",
+      "sha256": "a3743ba42127df35ddc6059803755454a416879d0bd4d4e1dc620b6d26a30aa9",
+      "result": {
+        "exitCode": 1
+      }
+    }
+  ],
+  "maintenanceObservation": {
+    "upgrade": "native2.1.296 -> 2.1.299 with SDK0.3.285 fixed",
+    "nativeCompatibilityPatchLines": 0,
+    "bridgeBundleUnchanged": true,
+    "runnerChanges": "Explicit version/hash selection; ESM binding module linkage corrected before model access.",
+    "secondUpgradeSample": true,
+    "firstUpgrade": "SDK0.3.232 -> 0.3.285 at native2.1.296",
+    "engineerHours": "not instrumented; unknown",
+    "buildReuse": "Unchanged bridge bundle and prior aligned tsc; no new bridge build claimed",
+    "monthlyMaintenanceCost": "unknown; two directed samples do not establish cadence, support capacity or full matrix"
+  }
+}

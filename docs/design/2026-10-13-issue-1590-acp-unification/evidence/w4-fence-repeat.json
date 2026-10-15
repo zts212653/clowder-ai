@@ -1,0 +1,149 @@
+{
+  "sample": "fence-repeat-1",
+  "evidenceKind": "real_native_ACP_repeated_A_to_B_boundary",
+  "success": true,
+  "durationMs": 65003,
+  "nativeVersion": "0.161.0",
+  "nativeSha256": "a0f89acca07a511734cac7fddee26b2106fab68918717bc90df16104a0760a30",
+  "bridgePin": "51f78d67e46c3a96ee8d8bf4e43fc917ab21c73e",
+  "bundleSha256": "265a60c7a7f19b3bb2a080198a91b48884846f8c80121598b3d27f46aadc7649",
+  "bindingRevision": "c10136e2497c818ad345794e08f238987b83962d54d0ad9c4d849a71223a78d0",
+  "sessionId": "01a138d9-948e-7320-a796-bf1fce45e517",
+  "executedRunner": {
+    "capturedBeforeExecution": true,
+    "sources": [
+      {
+        "source": "scripts/acp-spikes/run-codex-fence-repeat.mts",
+        "sha256": "dcc1284357a6ef02fe1ffafdb731703569c6dcfb4a63f7b19229297230bc5966"
+      }
+    ]
+  },
+  "cases": [
+    {
+      "index": 0,
+      "turnA": "01a138d9-952d-7a12-a30f-c8d289e91c29",
+      "turnB": "01a138d9-dc0b-7c32-ad7e-59eb607bc79a",
+      "validReceipt": {
+        "operationId": "valid-A-0",
+        "nativeSessionId": "01a138d9-948e-7320-a796-bf1fce45e517",
+        "nativeTurnId": "01a138d9-952d-7a12-a30f-c8d289e91c29",
+        "outcome": "injected",
+        "nativeReceipt": {
+          "turnId": "01a138d9-952d-7a12-a30f-c8d289e91c29"
+        }
+      },
+      "repeatedReceiptEqual": true,
+      "staleARejectedAt": 1791955168603,
+      "activeBUnchanged": true,
+      "bothPromptsCompleted": true
+    },
+    {
+      "index": 1,
+      "turnA": "01a138da-1492-73e0-85f2-82b9f2912045",
+      "turnB": "01a138da-4f87-7851-b9ac-82709070e4fd",
+      "validReceipt": {
+        "operationId": "valid-A-1",
+        "nativeSessionId": "01a138d9-948e-7320-a796-bf1fce45e517",
+        "nativeTurnId": "01a138da-1492-73e0-85f2-82b9f2912045",
+        "outcome": "injected",
+        "nativeReceipt": {
+          "turnId": "01a138da-1492-73e0-85f2-82b9f2912045"
+        }
+      },
+      "repeatedReceiptEqual": true,
+      "staleARejectedAt": 1791955198655,
+      "activeBUnchanged": true,
+      "bothPromptsCompleted": true
+    }
+  ],
+  "nativeSteers": [
+    {
+      "id": 9,
+      "threadId": "01a138d9-948e-7320-a796-bf1fce45e517",
+      "expectedTurnId": "01a138d9-952d-7a12-a30f-c8d289e91c29",
+      "clientUserMessageId": "93821c3f-c9e8-5f43-a56e-cd3890ad1831",
+      "result": {
+        "turnId": "01a138d9-952d-7a12-a30f-c8d289e91c29"
+      }
+    },
+    {
+      "id": 12,
+      "threadId": "01a138d9-948e-7320-a796-bf1fce45e517",
+      "expectedTurnId": "01a138d9-952d-7a12-a30f-c8d289e91c29",
+      "clientUserMessageId": "7a232134-8cc1-500d-a46b-dc15c0028485",
+      "error": {
+        "code": -32600,
+        "message": "expected active turn id `01a138d9-952d-7a12-a30f-c8d289e91c29` but found `01a138d9-dc0b-7c32-ad7e-59eb607bc79a`"
+      }
+    },
+    {
+      "id": 15,
+      "threadId": "01a138d9-948e-7320-a796-bf1fce45e517",
+      "expectedTurnId": "01a138da-1492-73e0-85f2-82b9f2912045",
+      "clientUserMessageId": "82c290d8-09e5-5e53-a315-5655b50db9e9",
+      "result": {
+        "turnId": "01a138da-1492-73e0-85f2-82b9f2912045"
+      }
+    },
+    {
+      "id": 18,
+      "threadId": "01a138d9-948e-7320-a796-bf1fce45e517",
+      "expectedTurnId": "01a138da-1492-73e0-85f2-82b9f2912045",
+      "clientUserMessageId": "248cd8f1-b932-51d7-ab93-fafaea1b108a",
+      "error": {
+        "code": -32600,
+        "message": "expected active turn id `01a138da-1492-73e0-85f2-82b9f2912045` but found `01a138da-4f87-7851-b9ac-82709070e4fd`"
+      }
+    }
+  ],
+  "observed": {
+    "nativeTurnStarts": 4,
+    "autoTitleNativeTurnStarts": 0,
+    "acceptedSteers": 2,
+    "rejectedStaleSteers": 2,
+    "completedFixtureCalls": 4,
+    "duplicateNativeSteers": 0
+  },
+  "limits": {
+    "maxAcpPrompts": 4,
+    "maxRuntimeMs": 180000,
+    "perPromptActivityBudgetMs": 90000,
+    "usdHardLimit": null,
+    "providerModelCallCount": "unknown",
+    "autoTitleSuppressed": true,
+    "readonlyFixtureOnly": true,
+    "hooksDisabled": true,
+    "projectInstructionsDisabled": true
+  },
+  "statistics": {
+    "newAtoBBoundaries": 2,
+    "initialSampleAtoBBoundaries": 1,
+    "totalAuditedAtoBBoundaries": 3,
+    "staleATouchedBObserved": 0,
+    "populationRaceFailureRate": "unknown; small directed sample, not an SLO"
+  },
+  "rawRefs": [
+    {
+      "privateRef": ".cat-cafe/tmp/authorized-codex-20261014/fence-repeat-1/result.json",
+      "sha256": "9ce25241921344b56f234d2acce2602242af64364b44ffff575d79594f9a082b"
+    },
+    {
+      "privateRef": ".cat-cafe/tmp/authorized-codex-20261014/fence-repeat-1/events.json",
+      "sha256": "eb5d9da4ca822c48dc2cced7d024c879999f18bbf7898bfdc354d7e069726f48"
+    },
+    {
+      "privateRef": ".cat-cafe/tmp/authorized-codex-20261014/fence-repeat-1/controls.json",
+      "sha256": "2790daaeb8700938bdbb363d752ff5964196b1da4a2ec51a9ea5c76021b547f3"
+    },
+    {
+      "privateRef": ".cat-cafe/tmp/authorized-codex-20261014/fence-repeat-1/tools.jsonl",
+      "sha256": "cdc1169c6f519058c6a8dd1dd7e327903981c82d8b44d070aed05e979e51410f"
+    },
+    {
+      "privateRef": ".cat-cafe/tmp/authorized-codex-20261014/fence-repeat-1/native/app-server.log",
+      "sha256": "9847d2c992fdf8d4c2e77bfa2899e91e8125675a5ca6070c993ddf686894b7e3"
+    }
+  ],
+  "production": false,
+  "baselineServiceDifferential": false
+}

@@ -5,7 +5,12 @@
  */
 
 import type { CatId } from '@cat-cafe/shared';
-import type { AgentMessage, TokenUsage } from '../../types.js';
+import type { AgentMessage } from '../../types.js';
+import { claudeAssistantEvents } from './claude-assistant-events.js';
+import { type ClaudeStreamState, claudeToolResults, resetClaudeToolState } from './claude-tool-events.js';
+
+export { extractClaudeUsage } from './claude-usage.js';
+
 import { extractClaudeMcpStatusSnapshot } from './claude-mcp-status.js';
 
 /**
@@ -15,14 +20,7 @@ import { extractClaudeMcpStatusSnapshot } from './claude-mcp-status.js';
 export function transformClaudeEvent(
   event: unknown,
   catId: CatId,
-  streamState: {
-    currentMessageId: string | undefined;
-    partialTextMessageIds: Set<string>;
-    /** F24-fix: Track last message_start's input tokens for context health */
-    lastTurnInputTokens: number | undefined;
-    /** F045: Accumulate thinking_delta chunks until content_block_stop */
-    thinkingBuffer: string;
-  },
+  streamState: ClaudeStreamState,
 ): AgentMessage | AgentMessage[] | null {
   if (typeof event !== 'object' || event === null) return null;
   const e = event as Record<string, unknown>;
@@ -150,6 +148,7 @@ export function transformClaudeEvent(
 
   // system/init → session_init
   if (e.type === 'system' && e.subtype === 'init') {
+    resetClaudeToolState(streamState);
     const sessionId = e.session_id;
     if (typeof sessionId === 'string') {
       const sessionInit = {
@@ -197,100 +196,8 @@ export function transformClaudeEvent(
     };
   }
 
-  // assistant → text / tool_use (multiple content blocks possible)
-  if (e.type === 'assistant') {
-    const message = e.message as Record<string, unknown> | undefined;
-    const messageId = typeof message?.id === 'string' ? message.id : undefined;
-    const skipFinalText = Boolean(messageId && streamState.partialTextMessageIds.has(messageId));
-    const content = message?.content;
-    if (!Array.isArray(content)) return null;
-    const hasTextBlock = content.some((block) => {
-      if (typeof block !== 'object' || block === null) return false;
-      const candidate = block as Record<string, unknown>;
-      return candidate.type === 'text' && typeof candidate.text === 'string' && candidate.text.length > 0;
-    });
-
-    // F230: Claude CLI can synthesize local assistant entries without an LLM
-    // response. Keep that provider provenance structured here, before ordinary
-    // assistant text is emitted:
-    //   - API/Error payloads become error events;
-    //   - "No response requested." and future synthetic variants produce no cat
-    //     output.
-    // Consumers must not infer this boundary from punctuation inside raw text.
-    if (message?.model === '<synthetic>') {
-      const syntheticText = content.find(
-        (block) =>
-          typeof block === 'object' &&
-          block !== null &&
-          (block as Record<string, unknown>).type === 'text' &&
-          typeof (block as Record<string, unknown>).text === 'string',
-      ) as { text?: string } | undefined;
-      const text = syntheticText?.text ?? '';
-      if (text.startsWith('API Error:') || text.startsWith('Error:')) {
-        return {
-          type: 'error',
-          catId,
-          error: text,
-          errorDisposition: 'transient',
-          timestamp: Date.now(),
-        };
-      }
-      return null;
-    }
-
-    const messages: AgentMessage[] = [];
-    for (const block of content) {
-      if (typeof block !== 'object' || block === null) continue;
-      const b = block as Record<string, unknown>;
-
-      if (b.type === 'text' && typeof b.text === 'string' && b.text.length > 0) {
-        if (skipFinalText) continue;
-        messages.push({
-          type: 'text',
-          catId,
-          content: b.text,
-          timestamp: Date.now(),
-        });
-      } else if (b.type === 'tool_use' && typeof b.name === 'string') {
-        const msg: AgentMessage = {
-          type: 'tool_use',
-          catId,
-          toolName: b.name,
-          toolInput: (b.input as Record<string, unknown>) ?? {},
-          timestamp: Date.now(),
-        };
-        if (typeof b.id === 'string') msg.toolUseId = b.id;
-        messages.push(msg);
-      }
-    }
-    // #1272: Claude can split one message ID across thinking/text/tool assistant
-    // envelopes. A thinking-only or tool-only envelope is not proof that the
-    // text-bearing final snapshot has arrived; clearing here makes that later
-    // snapshot look new and re-emits text already delivered by text_delta.
-    if (messageId && skipFinalText && hasTextBlock) {
-      streamState.partialTextMessageIds.delete(messageId);
-    }
-    // #778: thinking-only final message — emit thinking as system_info so the
-    // frontend can attach it to a message bubble. Streaming thinking_delta
-    // normally captures content; this is a safety net for edge cases
-    // (network loss, non-streaming mode, lost deltas).
-    if (messages.length === 0) {
-      const thinkingBlock = content.find(
-        (b) => typeof b === 'object' && b !== null && (b as Record<string, unknown>).type === 'thinking',
-      ) as { thinking?: string; text?: string } | undefined;
-      if (thinkingBlock) {
-        // Claude thinking blocks use `thinking` field; fall back to `text` for safety
-        const thinkingText = thinkingBlock.thinking ?? thinkingBlock.text ?? '';
-        return {
-          type: 'system_info' as AgentMessage['type'],
-          catId,
-          content: JSON.stringify({ type: 'thinking', catId, text: thinkingText }),
-          timestamp: Date.now(),
-        };
-      }
-    }
-    return messages.length > 0 ? messages : null;
-  }
+  if (e.type === 'user') return claudeToolResults(e, catId, streamState);
+  if (e.type === 'assistant') return claudeAssistantEvents(e, catId, streamState);
 
   // F045: rate_limit_event → system_info
   if (e.type === 'rate_limit_event') {
@@ -309,6 +216,7 @@ export function transformClaudeEvent(
   // leak into a subsequent invocation/session.
   if (e.type === 'result') {
     streamState.partialTextMessageIds.clear();
+    if (!e.parent_tool_use_id) resetClaudeToolState(streamState);
   }
 
   // result/error → error message (F045: include errorSubtype)
@@ -343,44 +251,4 @@ export function isResultErrorEvent(event: unknown): boolean {
   if (typeof event !== 'object' || event === null) return false;
   const e = event as Record<string, unknown>;
   return e.type === 'result' && (e.is_error === true || e.subtype !== 'success');
-}
-
-/** F8: Extract token usage from Claude result/success event.
- *  Normalises inputTokens to total input (new + cache_read + cache_creation)
- *  so that the semantics match Codex/OpenAI where inputTokens = total. */
-export function extractClaudeUsage(e: Record<string, unknown>): TokenUsage {
-  const usage = (e.usage ?? {}) as Record<string, unknown>;
-  const result: TokenUsage = {};
-  const rawInput = typeof usage.input_tokens === 'number' ? usage.input_tokens : 0;
-  const cacheRead = typeof usage.cache_read_input_tokens === 'number' ? usage.cache_read_input_tokens : 0;
-  const cacheCreate = typeof usage.cache_creation_input_tokens === 'number' ? usage.cache_creation_input_tokens : 0;
-  const totalInput = rawInput + cacheRead + cacheCreate;
-  if (totalInput > 0) result.inputTokens = totalInput;
-  if (typeof usage.output_tokens === 'number') result.outputTokens = usage.output_tokens;
-  if (cacheRead > 0) result.cacheReadTokens = cacheRead;
-  if (cacheCreate > 0) result.cacheCreationTokens = cacheCreate;
-  if (typeof e.total_cost_usd === 'number') result.costUsd = e.total_cost_usd;
-  if (typeof e.duration_ms === 'number') result.durationMs = e.duration_ms;
-  if (typeof e.duration_api_ms === 'number') result.durationApiMs = e.duration_api_ms;
-  if (typeof e.num_turns === 'number') result.numTurns = e.num_turns;
-
-  // F24: Extract context window capacity from modelUsage.
-  // Claude stream-json has emitted both `modelUsage` and `model_usage` in different versions.
-  const modelUsage = (e.modelUsage ?? e.model_usage) as Record<string, Record<string, unknown>> | undefined;
-  if (modelUsage) {
-    for (const data of Object.values(modelUsage)) {
-      const contextWindow =
-        typeof data.contextWindow === 'number'
-          ? data.contextWindow
-          : typeof data.context_window === 'number'
-            ? data.context_window
-            : undefined;
-      if (contextWindow != null) {
-        result.contextWindowSize = contextWindow;
-        break;
-      }
-    }
-  }
-
-  return result;
 }

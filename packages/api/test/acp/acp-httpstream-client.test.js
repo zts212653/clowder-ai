@@ -100,9 +100,11 @@ describe('AcpHttpStreamClient', () => {
 
   it('initializes when stdout port discovery line is matched', async () => {
     const seenMethods = [];
+    let initializeParams;
     server = await startJsonRpcServer((message) => {
       seenMethods.push(message.method);
       if (message.method === 'initialize') {
+        initializeParams = message.params;
         return { jsonrpc: '2.0', id: message.id, result: INIT_RESULT };
       }
       return { jsonrpc: '2.0', id: message.id, error: { code: -32601, message: 'not found' } };
@@ -125,6 +127,13 @@ describe('AcpHttpStreamClient', () => {
 
     assert.equal(result.agentInfo.name, 'http-acp');
     assert.deepEqual(seenMethods, ['initialize']);
+    assert.equal(initializeParams.protocolVersion, 1);
+    assert.deepEqual(initializeParams.clientInfo, { name: 'clowder-ai', title: 'Clowder AI', version: '1' });
+    assert.deepEqual(initializeParams.clientCapabilities, {
+      fs: { readTextFile: false, writeTextFile: false },
+      terminal: false,
+    });
+    assert.equal(Object.hasOwn(initializeParams.clientCapabilities, 'elicitation'), false);
   });
 
   it('keeps draining stdout after discovering the HTTP port', async () => {
@@ -346,8 +355,8 @@ describe('AcpHttpStreamClient', () => {
 
     assert.equal(caught, null, `Permission request should not stall: ${caught?.message}`);
     assert.ok(capturedPermissionResponse, 'client should POST a JSON-RPC response for the permission request');
-    assert.equal(capturedPermissionResponse.result?.outcome?.outcome, 'selected');
-    assert.equal(capturedPermissionResponse.result?.outcome?.optionId, 'allow_once');
+    assert.equal(capturedPermissionResponse.result?.outcome?.outcome, 'cancelled');
+    assert.equal(capturedPermissionResponse.result?.outcome?.optionId, undefined);
     assert.equal(events.at(-1)?.update?.content?.text, 'approved');
   });
 
@@ -1022,9 +1031,11 @@ describe('AcpHttpStreamClient', () => {
 
     const elapsed = Date.now() - startMs;
 
-    // Should throw AcpStreamIdleError (from cancel callback)
+    // Local cancellation must not claim an idle timeout or native quiescence.
     assert.ok(thrownError, 'HTTP cancel should throw');
-    assert.equal(thrownError.code, 'STREAM_IDLE_STALL', `Expected STREAM_IDLE_STALL, got ${thrownError.code}`);
+    assert.equal(thrownError.code, 'SESSION_CANCELLED');
+    assert.equal(thrownError.nativeAcknowledged, false);
+    assert.doesNotMatch(thrownError.message, /idle/i);
     assert.equal(
       client.isSafeForSingleFlightReuse,
       false,

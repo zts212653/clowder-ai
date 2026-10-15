@@ -10,6 +10,7 @@
  * - Content: string | ContentBlock[] → string
  */
 
+import { nativeToolCallKey } from '@cat-cafe/shared';
 import {
   formatGovernanceBlocked,
   formatSessionSealRequested,
@@ -199,7 +200,14 @@ function buildToolResultIndex(raw: RawTranscriptEvent[]): Map<string, ToolResult
     if ((evt.event.type as string) !== 'tool_result') continue;
     const toolUseId = evt.event.toolUseId as string | undefined;
     if (toolUseId) {
-      const key = `${evt.sessionId}:${toolUseId}`;
+      const key = JSON.stringify([
+        evt.sessionId,
+        evt.invocationId ?? null,
+        nativeToolCallKey({
+          toolUseId,
+          toolParentUseId: typeof evt.event.toolParentUseId === 'string' ? evt.event.toolParentUseId : undefined,
+        }),
+      ]);
       index.set(key, {
         content: extractContent(evt.event),
         isError: isToolResultError(evt.event),
@@ -258,6 +266,7 @@ function enrichToolCall(
   rawEvent: Record<string, unknown>,
   eventNo: number,
   sessionId: string,
+  invocationId: string | undefined,
   toolResults: Map<string, ToolResultPayload>,
   orphanPairs: Map<number, ToolResultPayload>,
 ): void {
@@ -267,7 +276,14 @@ function enrichToolCall(
   const toolUseId = rawEvent.toolUseId as string | undefined;
   if (toolUseId) {
     // Exact match by composite key (session-scoped to prevent AGY run-command-N collision)
-    const key = `${sessionId}:${toolUseId}`;
+    const key = JSON.stringify([
+      sessionId,
+      invocationId ?? null,
+      nativeToolCallKey({
+        toolUseId,
+        toolParentUseId: typeof rawEvent.toolParentUseId === 'string' ? rawEvent.toolParentUseId : undefined,
+      }),
+    ]);
     const matched = toolResults.get(key);
     if (matched) {
       replayEvent.toolResult = matched.content;
@@ -324,7 +340,7 @@ export function adaptTranscriptEvents(raw: RawTranscriptEvent[]): ReplayEvent[] 
     };
 
     if (replayType === 'tool_call') {
-      enrichToolCall(replayEvent, evt.event, evt.eventNo, evt.sessionId, toolResults, orphanPairs);
+      enrichToolCall(replayEvent, evt.event, evt.eventNo, evt.sessionId, evt.invocationId, toolResults, orphanPairs);
     }
 
     result.push(replayEvent);

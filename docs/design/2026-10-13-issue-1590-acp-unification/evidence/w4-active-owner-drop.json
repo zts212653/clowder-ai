@@ -1,0 +1,274 @@
+{
+  "created": "2026-10-14",
+  "evidenceKind": "real_native_active_stdio_owner_drop",
+  "bridgePin": "51f78d67e46c3a96ee8d8bf4e43fc917ab21c73e",
+  "nativeVersion": "0.161.0",
+  "bundleSha256": "a3542a0f3f68a309bad9a20d4fd6c57c6466ac2daace92bb55b55bee5349c0cb",
+  "nativeSha256": "a0f89acca07a511734cac7fddee26b2106fab68918717bc90df16104a0760a30",
+  "bindingRevision": "84a5976d5379d56c6bb64107d44f6ea8be3705ffbe58387b0b327e6aa3600eaf",
+  "sessionId": "01a138a2-4a8b-7831-afad-809fc491e4e8",
+  "nativeTurnId": "01a138a2-4b2b-7303-accf-9313e21aa1d0",
+  "durationMs": 11972,
+  "budget": {
+    "maxModelTurns": 1,
+    "maxPromptMs": 90000,
+    "toolDelayMaxMs": 8000,
+    "toolCallMax": 12,
+    "usdHardLimit": null,
+    "budgetCorrectionRef": "codex-budget-audit.json",
+    "fieldMeaning": "Historical maxModelTurns is intended ACP workload count, not a provider-model-call or total-native-turn hard limit",
+    "providerModelCallCount": "unknown",
+    "cost": "unknown",
+    "observedNativeTurnStartRequests": 1,
+    "observedAutoTitleTurns": 0
+  },
+  "scope": {
+    "production": false,
+    "hooksDisabled": true,
+    "repositoryInstructionsDisabled": true,
+    "shellDisabled": true,
+    "failure": "explicitly ended active bridge STDIO input; not socket loss with a surviving owner",
+    "originalNativeServiceDifferentialTested": false,
+    "instantaneousQuiescenceClaim": false,
+    "globalProtocolInfeasibilityClaim": false
+  },
+  "observed": {
+    "droppedAt": 1791951529828,
+    "bridgeExit": {
+      "name": "primary",
+      "pid": 29256,
+      "exitAt": 1791951531848,
+      "code": 0,
+      "signal": null
+    },
+    "exitAfterDropMs": 2020,
+    "fixture": "{\"t\":1791951529705,\"phase\":\"started\",\"id\":2,\"scenario\":\"A\",\"delayMs\":8000}\n",
+    "primaryStreamError": "ACP process exited: code=0 signal=null",
+    "restoredSnapshot": {
+      "nativeSessionId": "01a138a2-4a8b-7831-afad-809fc491e4e8",
+      "nativeTurnId": null,
+      "source": "native_turn_start_callback",
+      "bindingRevision": "84a5976d5379d56c6bb64107d44f6ea8be3705ffbe58387b0b327e6aa3600eaf"
+    },
+    "acceptedReceipt": {
+      "operationId": "before-drop",
+      "nativeSessionId": "01a138a2-4a8b-7831-afad-809fc491e4e8",
+      "nativeTurnId": "01a138a2-4b2b-7303-accf-9313e21aa1d0",
+      "outcome": "injected",
+      "nativeReceipt": {
+        "turnId": "01a138a2-4b2b-7303-accf-9313e21aa1d0"
+      }
+    },
+    "recoveredReceipt": {
+      "operationId": "before-drop",
+      "nativeSessionId": "01a138a2-4a8b-7831-afad-809fc491e4e8",
+      "nativeTurnId": "01a138a2-4b2b-7303-accf-9313e21aa1d0",
+      "outcome": "injected",
+      "nativeReceipt": {
+        "turnId": "01a138a2-4b2b-7303-accf-9313e21aa1d0"
+      }
+    },
+    "oldAcceptedOperationNotResent": true,
+    "oldTargetRejected": true,
+    "activeTurnSurvivedOwnerDrop": false
+  },
+  "native": [
+    {
+      "owner": "primary",
+      "steerCalls": [
+        {
+          "request": {
+            "id": 9,
+            "method": "turn/steer",
+            "params": {
+              "threadId": "01a138a2-4a8b-7831-afad-809fc491e4e8",
+              "expectedTurnId": "01a138a2-4b2b-7303-accf-9313e21aa1d0",
+              "clientUserMessageId": "09d17b64-3935-5898-ab37-b7c3d974c7ab",
+              "input": [
+                {
+                  "type": "text",
+                  "text": "Keep the same one fixture tool active. After its real result include ACTIVE-DROP-CONTROL. No extra tools.",
+                  "text_elements": []
+                }
+              ]
+            }
+          },
+          "response": {
+            "id": 9,
+            "result": {
+              "turnId": "01a138a2-4b2b-7303-accf-9313e21aa1d0"
+            }
+          }
+        }
+      ],
+      "turnCompletedNotifications": 0
+    },
+    {
+      "owner": "restored",
+      "steerCalls": [
+        {
+          "request": {
+            "id": 12,
+            "method": "turn/steer",
+            "params": {
+              "threadId": "01a138a2-4a8b-7831-afad-809fc491e4e8",
+              "expectedTurnId": "01a138a2-4b2b-7303-accf-9313e21aa1d0",
+              "clientUserMessageId": "181254fb-a925-5109-a46b-5b681c34c474",
+              "input": [
+                {
+                  "type": "text",
+                  "text": "Keep the same one fixture tool active. After its real result include ACTIVE-DROP-CONTROL. No extra tools.",
+                  "text_elements": []
+                }
+              ]
+            }
+          },
+          "response": {
+            "error": {
+              "code": -32600,
+              "message": "no active turn to steer"
+            },
+            "id": 12
+          }
+        }
+      ],
+      "turnCompletedNotifications": 0
+    }
+  ],
+  "controls": [
+    {
+      "t": 1791951529812,
+      "params": {
+        "action": "snapshot",
+        "sessionId": "01a138a2-4a8b-7831-afad-809fc491e4e8"
+      },
+      "result": {
+        "nativeSessionId": "01a138a2-4a8b-7831-afad-809fc491e4e8",
+        "nativeTurnId": "01a138a2-4b2b-7303-accf-9313e21aa1d0",
+        "source": "native_turn_start_callback",
+        "bindingRevision": "84a5976d5379d56c6bb64107d44f6ea8be3705ffbe58387b0b327e6aa3600eaf"
+      }
+    },
+    {
+      "t": 1791951529828,
+      "params": {
+        "action": "steer",
+        "sessionId": "01a138a2-4a8b-7831-afad-809fc491e4e8",
+        "nativeSessionId": "01a138a2-4a8b-7831-afad-809fc491e4e8",
+        "expectedTurnId": "01a138a2-4b2b-7303-accf-9313e21aa1d0",
+        "bindingRevision": "84a5976d5379d56c6bb64107d44f6ea8be3705ffbe58387b0b327e6aa3600eaf",
+        "prompt": [
+          {
+            "type": "text",
+            "text": "Keep the same one fixture tool active. After its real result include ACTIVE-DROP-CONTROL. No extra tools."
+          }
+        ],
+        "operationId": "before-drop"
+      },
+      "result": {
+        "operationId": "before-drop",
+        "nativeSessionId": "01a138a2-4a8b-7831-afad-809fc491e4e8",
+        "nativeTurnId": "01a138a2-4b2b-7303-accf-9313e21aa1d0",
+        "outcome": "injected",
+        "nativeReceipt": {
+          "turnId": "01a138a2-4b2b-7303-accf-9313e21aa1d0"
+        }
+      }
+    },
+    {
+      "t": 1791951532574,
+      "params": {
+        "action": "receipt",
+        "sessionId": "01a138a2-4a8b-7831-afad-809fc491e4e8",
+        "nativeSessionId": "01a138a2-4a8b-7831-afad-809fc491e4e8",
+        "expectedTurnId": "01a138a2-4b2b-7303-accf-9313e21aa1d0",
+        "bindingRevision": "84a5976d5379d56c6bb64107d44f6ea8be3705ffbe58387b0b327e6aa3600eaf",
+        "prompt": [
+          {
+            "type": "text",
+            "text": "Keep the same one fixture tool active. After its real result include ACTIVE-DROP-CONTROL. No extra tools."
+          }
+        ],
+        "operationId": "before-drop"
+      },
+      "result": {
+        "operationId": "before-drop",
+        "nativeSessionId": "01a138a2-4a8b-7831-afad-809fc491e4e8",
+        "nativeTurnId": "01a138a2-4b2b-7303-accf-9313e21aa1d0",
+        "outcome": "injected",
+        "nativeReceipt": {
+          "turnId": "01a138a2-4b2b-7303-accf-9313e21aa1d0"
+        }
+      }
+    },
+    {
+      "t": 1791951532575,
+      "params": {
+        "action": "snapshot",
+        "sessionId": "01a138a2-4a8b-7831-afad-809fc491e4e8"
+      },
+      "result": {
+        "nativeSessionId": "01a138a2-4a8b-7831-afad-809fc491e4e8",
+        "nativeTurnId": null,
+        "source": "native_turn_start_callback",
+        "bindingRevision": "84a5976d5379d56c6bb64107d44f6ea8be3705ffbe58387b0b327e6aa3600eaf"
+      }
+    },
+    {
+      "t": 1791951532583,
+      "params": {
+        "action": "steer",
+        "sessionId": "01a138a2-4a8b-7831-afad-809fc491e4e8",
+        "nativeSessionId": "01a138a2-4a8b-7831-afad-809fc491e4e8",
+        "expectedTurnId": "01a138a2-4b2b-7303-accf-9313e21aa1d0",
+        "bindingRevision": "84a5976d5379d56c6bb64107d44f6ea8be3705ffbe58387b0b327e6aa3600eaf",
+        "prompt": [
+          {
+            "type": "text",
+            "text": "Keep the same one fixture tool active. After its real result include ACTIVE-DROP-CONTROL. No extra tools."
+          }
+        ],
+        "operationId": "after-drop-old-target"
+      },
+      "error": "ACP error -32600: no active turn to steer"
+    }
+  ],
+  "decision": {
+    "controlRecoverySlice": "pass",
+    "activeOwnerContinuity": "held_lifetime_gap",
+    "overallMigration": "held",
+    "next": "Separate native/bridge owner lifetime from reconnectable consumer admission; then prove active A survives, valid A/stale A receipts and no duplicated tool/control side effects."
+  },
+  "rawRefs": [
+    {
+      "privateRef": ".cat-cafe/tmp/authorized-codex-20261014/active-drop-1/result.json",
+      "sha256": "98de19d0922665ee8a09312c2f0af576c7d7e4a4838dc37050486d3c1b57f12d"
+    },
+    {
+      "privateRef": ".cat-cafe/tmp/authorized-codex-20261014/active-drop-1/runner.mts",
+      "sha256": "9df9c5f822f3ee94b7d6f224caaf2d17299072ed757c74a40a131162153c7fcc"
+    },
+    {
+      "privateRef": ".cat-cafe/tmp/authorized-codex-20261014/active-drop-1/controls.json",
+      "sha256": "a568ad3f3e9ddabf4a6b3118dc609d7f033bad38a0b6f7aa82243171972a9940"
+    },
+    {
+      "privateRef": ".cat-cafe/tmp/authorized-codex-20261014/active-drop-1/events.json",
+      "sha256": "12d3d0934ff6110d622cbf134223d9cb8f5562808f2323cc69973660817c38c1"
+    },
+    {
+      "privateRef": ".cat-cafe/tmp/authorized-codex-20261014/active-drop-1/tools.jsonl",
+      "sha256": "8c4caf05a4caa13ec4d4ac2c4b3cbd685e1d84c4d936e0de5a9446c21de1f750"
+    },
+    {
+      "privateRef": ".cat-cafe/tmp/authorized-codex-20261014/active-drop-1/primary/app-server.log",
+      "sha256": "45935a8498c1f9dd6556644bc0df7ed69f96e1e819ac285cc263035b22680daf"
+    },
+    {
+      "privateRef": ".cat-cafe/tmp/authorized-codex-20261014/active-drop-1/restored/app-server.log",
+      "sha256": "469dd9fae6b162e371229e3356b85d7fa0932a64e499e1f4a0801c09fecf1b88"
+    }
+  ],
+  "reviewer": "/root/acp_plan_review",
+  "reviewStatus": "independent native wire, old target rejection, no resend and scope verified; complete gate held"
+}

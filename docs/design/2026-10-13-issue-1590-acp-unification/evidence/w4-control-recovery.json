@@ -1,0 +1,250 @@
+{
+  "observedAt": "2026-10-14T02:59:27.198Z",
+  "upstream": "51f78d67e46c3a96ee8d8bf4e43fc917ab21c73e",
+  "nativeVersion": "0.161.0",
+  "boundary": "one real native synthetic read-only turn; explicit accepted-before-receipt fault; process restart, not OS/power loss",
+  "gates": "recovery slice only; complete W4.P held",
+  "checked": {
+    "deterministic": 21,
+    "nativeSteers": 3,
+    "restoredOwnerNativeSteers": 0,
+    "uniqueClientIds": 3,
+    "lossAndWarmAndColdRecovery": true
+  },
+  "result": {
+    "evidenceKind": "real_native_with_explicit_transport_faults",
+    "bundleHash": "a3542a0f3f68a309bad9a20d4fd6c57c6466ac2daace92bb55b55bee5349c0cb",
+    "nativeHash": "a0f89acca07a511734cac7fddee26b2106fab68918717bc90df16104a0760a30",
+    "bindingRevision": "84a5976d5379d56c6bb64107d44f6ea8be3705ffbe58387b0b327e6aa3600eaf",
+    "production": false,
+    "hooksDisabled": true,
+    "shellDisabled": true,
+    "maxModelTurns": 1,
+    "maxDurationMs": 120000,
+    "usdHardLimit": null,
+    "sessionId": "01a13853-466a-77b2-b162-6aed40851f79",
+    "nativeTurnId": "01a13853-4988-73a2-a33d-0da9f85cb75f",
+    "durableReceipt": {
+      "operationId": "lost-acp",
+      "nativeSessionId": "01a13853-466a-77b2-b162-6aed40851f79",
+      "nativeTurnId": "01a13853-4988-73a2-a33d-0da9f85cb75f",
+      "outcome": "injected",
+      "nativeReceipt": {
+        "turnId": "01a13853-4988-73a2-a33d-0da9f85cb75f"
+      }
+    },
+    "warmReceipt": {
+      "operationId": "lost-native",
+      "nativeSessionId": "01a13853-466a-77b2-b162-6aed40851f79",
+      "nativeTurnId": "01a13853-4988-73a2-a33d-0da9f85cb75f",
+      "outcome": "injected",
+      "nativeReceipt": {
+        "source": "native_history",
+        "nativeItemId": "01a13853-80a1-7de1-a4fe-dbf7373a22d4",
+        "clientUserMessageId": "fbf41194-1fec-5b08-a6ac-46219ccd01cc",
+        "turnId": "01a13853-4988-73a2-a33d-0da9f85cb75f"
+      }
+    },
+    "reconciledReceipt": {
+      "operationId": "lost-native-cold",
+      "nativeSessionId": "01a13853-466a-77b2-b162-6aed40851f79",
+      "nativeTurnId": "01a13853-4988-73a2-a33d-0da9f85cb75f",
+      "outcome": "injected",
+      "nativeReceipt": {
+        "source": "native_history",
+        "nativeItemId": "01a13853-80b6-70d0-9acd-9bed03ba0160",
+        "clientUserMessageId": "c23b4464-519c-55e8-a214-a6f8f70744d1",
+        "turnId": "01a13853-4988-73a2-a33d-0da9f85cb75f"
+      }
+    },
+    "lostACPReceiptRecovered": true,
+    "warmOwnerCacheConverged": true,
+    "coldOwnerNativeHistoryRecovered": true,
+    "nativeClientId": "fbf41194-1fec-5b08-a6ac-46219ccd01cc",
+    "durationMs": 20044,
+    "spawned": [
+      {
+        "name": "primary",
+        "pid": 30084
+      },
+      {
+        "name": "restored",
+        "pid": 13852
+      }
+    ],
+    "budgetCorrectionRef": "codex-budget-audit.json",
+    "fieldMeaning": "Historical maxModelTurns is intended ACP workload count, not a provider-model-call or total-native-turn hard limit",
+    "providerModelCallCount": "unknown",
+    "cost": "unknown",
+    "observedNativeTurnStartRequests": 1,
+    "observedAutoTitleTurns": 0
+  },
+  "requests": [
+    {
+      "owner": "primary",
+      "id": 9,
+      "method": "turn/steer",
+      "params": {
+        "threadId": "01a13853-466a-77b2-b162-6aed40851f79",
+        "expectedTurnId": "01a13853-4988-73a2-a33d-0da9f85cb75f",
+        "clientUserMessageId": "ecd34775-5972-5b27-a648-a12d8bbb0359",
+        "input": [
+          {
+            "type": "text",
+            "text": "Keep the same single fixture tool running. After its real result include RECOVERY-CONTROL. No extra tools.",
+            "text_elements": []
+          }
+        ]
+      }
+    },
+    {
+      "owner": "primary",
+      "id": 10,
+      "method": "turn/steer",
+      "params": {
+        "threadId": "01a13853-466a-77b2-b162-6aed40851f79",
+        "expectedTurnId": "01a13853-4988-73a2-a33d-0da9f85cb75f",
+        "clientUserMessageId": "fbf41194-1fec-5b08-a6ac-46219ccd01cc",
+        "input": [
+          {
+            "type": "text",
+            "text": "Keep the same single fixture tool running. After its real result include RECOVERY-CONTROL. No extra tools.",
+            "text_elements": []
+          }
+        ]
+      }
+    },
+    {
+      "owner": "primary",
+      "id": 11,
+      "method": "turn/steer",
+      "params": {
+        "threadId": "01a13853-466a-77b2-b162-6aed40851f79",
+        "expectedTurnId": "01a13853-4988-73a2-a33d-0da9f85cb75f",
+        "clientUserMessageId": "c23b4464-519c-55e8-a214-a6f8f70744d1",
+        "input": [
+          {
+            "type": "text",
+            "text": "Keep the same single fixture tool running. After its real result include RECOVERY-CONTROL. No extra tools.",
+            "text_elements": []
+          }
+        ]
+      }
+    }
+  ],
+  "nativeReceipts": [
+    {
+      "owner": "primary",
+      "id": 9,
+      "result": {
+        "turnId": "01a13853-4988-73a2-a33d-0da9f85cb75f"
+      }
+    },
+    {
+      "owner": "primary",
+      "id": 10,
+      "result": {
+        "turnId": "01a13853-4988-73a2-a33d-0da9f85cb75f"
+      }
+    },
+    {
+      "owner": "primary",
+      "id": 11,
+      "result": {
+        "turnId": "01a13853-4988-73a2-a33d-0da9f85cb75f"
+      }
+    }
+  ],
+  "nativeItems": [
+    {
+      "type": "userMessage",
+      "id": "01a13853-8089-70d3-ab7f-d8b36cf85e24",
+      "clientId": "ecd34775-5972-5b27-a648-a12d8bbb0359",
+      "content": [
+        {
+          "type": "text",
+          "text": "Keep the same single fixture tool running. After its real result include RECOVERY-CONTROL. No extra tools.",
+          "text_elements": []
+        }
+      ]
+    },
+    {
+      "type": "userMessage",
+      "id": "01a13853-80a1-7de1-a4fe-dbf7373a22d4",
+      "clientId": "fbf41194-1fec-5b08-a6ac-46219ccd01cc",
+      "content": [
+        {
+          "type": "text",
+          "text": "Keep the same single fixture tool running. After its real result include RECOVERY-CONTROL. No extra tools.",
+          "text_elements": []
+        }
+      ]
+    },
+    {
+      "type": "userMessage",
+      "id": "01a13853-80b6-70d0-9acd-9bed03ba0160",
+      "clientId": "c23b4464-519c-55e8-a214-a6f8f70744d1",
+      "content": [
+        {
+          "type": "text",
+          "text": "Keep the same single fixture tool running. After its real result include RECOVERY-CONTROL. No extra tools.",
+          "text_elements": []
+        }
+      ]
+    }
+  ],
+  "refs": [
+    {
+      "path": ".cat-cafe/tmp/authorized-codex-20261014/recovery-4/primary/app-server.log",
+      "sha256": "acb63e086abb78cf27243ced10c3c9999ef2923d7aeb29d78937521d072fe84d"
+    },
+    {
+      "path": ".cat-cafe/tmp/authorized-codex-20261014/recovery-4/restored/app-server.log",
+      "sha256": "ef15d42e895905e14ac68e78e30000dfc3b7f39566d369dc36e0129b7a061009"
+    },
+    {
+      "path": ".cat-cafe/tmp/w4-recovery-red.log",
+      "sha256": "6c36ae09ab71633082cb16a1126983d93ac1aff693c9d3918ebae217e2c15052"
+    },
+    {
+      "path": ".cat-cafe/tmp/w4-live-reconcile-red.log",
+      "sha256": "2d7900dcd561918b5187442892bc284e137eaa58fa75547c493831a1c59e7917"
+    },
+    {
+      "path": ".cat-cafe/tmp/w4-receipt-integrity-red.log",
+      "sha256": "24b5e975083073c793d98cab3abb74df0bf17f633f095b9fc3352f25a033a036"
+    },
+    {
+      "path": ".cat-cafe/tmp/w4-recovery-green.log",
+      "sha256": "1823f1905851dc6ab1e0d880a50d0f3c7412c80e3a76c1ab8b52f1b95753989b"
+    },
+    {
+      "path": ".cat-cafe/tmp/w4-recovery-final-green.log",
+      "sha256": "c7a94a61d674b69b64b0cbfe5fb362f16637d22985c2ccd817992511a93f2156"
+    },
+    {
+      "path": ".cat-cafe/tmp/w4-native-recovery-4.log",
+      "sha256": "eabddd106efa9e977fbe5e0dfcf00492ceff9a54c0dd12d92257aeaac5a39efd"
+    },
+    {
+      "path": ".cat-cafe/tmp/authorized-codex-20261014/recovery-4/controls.json",
+      "sha256": "deebfca61691a37e06d75845dbe7928ccd2032aec56273cf3485890d5b0fd2f3"
+    },
+    {
+      "path": ".cat-cafe/tmp/authorized-codex-20261014/recovery-4/discarded-acp-reply.json",
+      "sha256": "b682e8759d855c716538f0e859afb6f466ed5fe7e4890c234e33cad8a8c73c85"
+    },
+    {
+      "path": ".cat-cafe/tmp/authorized-codex-20261014/recovery-4/result.json",
+      "sha256": "ff7dcaa5860ed476a6a983729ee0f2cf92bccfb8a6bb8c091fa0552bbcee54d5"
+    },
+    {
+      "path": ".cat-cafe/tmp/run-codex-recovery.mts",
+      "sha256": "eeeb921160275b6f4569fe1b1ad987ce03ce76694e47d8d52e061a67b53dbae5"
+    },
+    {
+      "path": ".cat-cafe/tmp/acp-prototypes/codex/dist/index.js",
+      "sha256": "a3542a0f3f68a309bad9a20d4fd6c57c6466ac2daace92bb55b55bee5349c0cb"
+    }
+  ]
+}

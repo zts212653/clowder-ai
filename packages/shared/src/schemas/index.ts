@@ -84,6 +84,7 @@ export {
   type CliToolProjectionEvent,
   type CliToolProjectionRow,
   projectCliToolEventRows,
+  withFinalizedCliToolInputs,
 } from './message-bundle-cli-tool-projection.js';
 // F129 Pack System schemas (fail-closed .strict())
 export type {

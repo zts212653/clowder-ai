@@ -1,0 +1,170 @@
+{
+  "created": "2026-10-14",
+  "scope": "W2 initialization contract only",
+  "completeW2": "unimplemented remainder",
+  "G2": "held",
+  "production": false,
+  "independentReview": {
+    "reviewer": "/root/acp_plan_review",
+    "exactTargetHead": "160a02218e793b6b990c576eda52eb07030abfd3",
+    "verdict": "pass for narrow initialization wiring; no P1/P2",
+    "completeW2G2OrMigrationApproved": false
+  },
+  "clientContractRevision": "1",
+  "module": "packages/api/src/domains/cats/services/agents/providers/acp/acp-initialize.ts",
+  "supportedHostMethods": "session/request_permission via fail-closed dispatcher; no host fs/terminal/elicitation implementation",
+  "initializedCapabilities": {
+    "fs": {
+      "readTextFile": false,
+      "writeTextFile": false
+    },
+    "terminal": false
+  },
+  "tests": {
+    "red": {
+      "passed": 0,
+      "failed": 2
+    },
+    "green": {
+      "passed": 61,
+      "failed": 0,
+      "durationMs": 10673.593
+    },
+    "apiBuildExitCode": 0
+  },
+  "realBridgeSmoke": {
+    "kind": "actual fixed bridge process initialize compatibility; no prompts, not native/model execution",
+    "rows": [
+      {
+        "provider": "codex-no-title",
+        "success": true,
+        "durationMs": 282,
+        "initializeParams": {
+          "protocolVersion": 1,
+          "clientInfo": {
+            "name": "clowder-ai",
+            "title": "Clowder AI",
+            "version": "1"
+          },
+          "clientCapabilities": {
+            "fs": {
+              "readTextFile": false,
+              "writeTextFile": false
+            },
+            "terminal": false
+          }
+        },
+        "agentInfo": {
+          "name": "@agentclientprotocol/codex-acp",
+          "title": "Codex",
+          "version": "2.1.1"
+        },
+        "protocolVersion": 1,
+        "bundleHash": "265a60c7a7f19b3bb2a080198a91b48884846f8c80121598b3d27f46aadc7649",
+        "workloadPrompts": 0,
+        "sourceSentToModel": false
+      },
+      {
+        "provider": "claude-sdk-0.3.285-aligned",
+        "success": true,
+        "durationMs": 342,
+        "initializeParams": {
+          "protocolVersion": 1,
+          "clientInfo": {
+            "name": "clowder-ai",
+            "title": "Clowder AI",
+            "version": "1"
+          },
+          "clientCapabilities": {
+            "fs": {
+              "readTextFile": false,
+              "writeTextFile": false
+            },
+            "terminal": false
+          }
+        },
+        "agentInfo": {
+          "name": "@agentclientprotocol/claude-agent-acp",
+          "title": "Claude Agent",
+          "version": "0.70.0"
+        },
+        "protocolVersion": 1,
+        "bundleHash": "9d73d1f0f121fb96cc8badb28c22d5bff02d8582eb2e40360a81c189e1b9422a",
+        "workloadPrompts": 0,
+        "sourceSentToModel": false
+      }
+    ],
+    "actualBuiltClientSha256": "121a6552f326db7da954922154d30630fe01bc773099bcd3539f9f97b8480dbb",
+    "executedRunner": {
+      "source": ".cat-cafe/tmp/run-w2-initialize-smoke.mts",
+      "sha256": "e0cd971d31ef16c2a9c20264ef3e01faaae99c75cf50c2bae468f674db3244ed",
+      "capturedBeforeExecution": true
+    },
+    "limits": {
+      "perBridgeTimeoutMs": 30000,
+      "workloadPrompts": 0
+    },
+    "claudeNativeSpawned": false,
+    "codexNativeInvocations": "startup/initialize only; no workload turn/start; no additional inference test",
+    "scopeNotes": "STDIO real bridge accepted; HTTP actual consumer is verified against an isolated HTTP protocol fixture. No product UI or principal approval claim."
+  },
+  "schema": {
+    "sdkVersion": "1.3.0",
+    "privateRef": ".cat-cafe/tmp/acp-prototypes/claude-sdk-0.3.285-aligned/node_modules/@agentclientprotocol/sdk/dist/schema/types.gen.d.ts",
+    "sha256": "5e3aa6d49f11a27ecfad6d6a995f60e8f75c7d58d18dba4d437271ea2b20ad44"
+  },
+  "reusedImplementation": {
+    "codexBundleSha256": "265a60c7a7f19b3bb2a080198a91b48884846f8c80121598b3d27f46aadc7649",
+    "claudeAgentModuleSha256": "ce7e4db6de998053497426a658106d9fd14487fe5b83dd63eb8c7b6b9eaf80bf",
+    "prototypeReviewedHead": "3d7b89143c22b964ced13b6f249085d4cb681e29",
+    "change": "Production consumer initialize now sends truthful clientInfo/capabilities; fence/notice/native bridge modules unchanged; smoke validates compatibility only."
+  },
+  "refs": [
+    {
+      "privateRef": ".cat-cafe/tmp/acp-w2-initialize-red.log",
+      "sha256": "266ebd9ad55e4ee61baa92d3c65bb636d92df7e64c986beaac334c90297a6a14"
+    },
+    {
+      "privateRef": ".cat-cafe/tmp/acp-w2-initialize-green.log",
+      "sha256": "08ea42a1c63e682410f8bad28b138088061faad40bf71f61a545bb425d2d68e2"
+    },
+    {
+      "privateRef": ".cat-cafe/tmp/acp-w2-initialize-build.log",
+      "sha256": "486561d2fcc182e8d9009a7894d16fb957731983c85d0ef57bb2b385ba852e8e"
+    },
+    {
+      "privateRef": ".cat-cafe/tmp/acp-w2-initialize-smoke.log",
+      "sha256": "b1fa730cdec30641326874caf47f70cf88ddd50743b43845a2848230c249c775"
+    },
+    {
+      "privateRef": ".cat-cafe/tmp/w2-initialize-real-smoke-1/result.json",
+      "sha256": "7f2d1132e116393170f50aad1512865cd8efcef18a1873a5d72bfc8d610b22a2"
+    },
+    {
+      "privateRef": ".cat-cafe/tmp/w2-initialize-real-smoke-1/runner.mts",
+      "sha256": "e0cd971d31ef16c2a9c20264ef3e01faaae99c75cf50c2bae468f674db3244ed"
+    },
+    {
+      "privateRef": ".cat-cafe/tmp/w2-initialize-real-smoke-1/native/app-server.log",
+      "sha256": "505d0d3aec0ddf89db0c3c43e7f0a01f934bb9b294688454cf9dd648970ac9de"
+    }
+  ],
+  "sourceHashes": [
+    {
+      "path": "packages/api/src/domains/cats/services/agents/providers/acp/acp-initialize.ts",
+      "sha256": "cae51e672c015ed65df4374261d2cccd3eceb3f0789bf076faa6130d20b6a1cb"
+    },
+    {
+      "path": "packages/api/src/domains/cats/services/agents/providers/acp/AcpClient.ts",
+      "sha256": "567040a0ed888d3be7d012876b2a6955ecad3f9f344ef49c83e32adc7be7b8f7"
+    },
+    {
+      "path": "packages/api/src/domains/cats/services/agents/providers/acp/AcpHttpStreamClient.ts",
+      "sha256": "9e6de3418f11e2b78ce02cd025a5fda823789424cc5dad98b84e72995c9b2ac8"
+    },
+    {
+      "path": "packages/api/src/domains/cats/services/agents/providers/acp/types.ts",
+      "sha256": "f8fdc25e73650c0d952805a9da22545f16f65221d1a673861154d1a9ceb649d8"
+    }
+  ]
+}

@@ -86,6 +86,34 @@ const SEARCH_RESULT_TEXT = [
 ].join('\n');
 
 describe('F200 HW-4 根因①: route-parallel per-cat pending FIFO', () => {
+  it('native orphan and child IDs cannot consume unrelated root FIFO entries', async () => {
+    const { routeParallel } = await import('../dist/domains/cats/services/agents/routing/route-parallel.js');
+    const calls = [];
+    const log = {
+      append: async () => {},
+      updateSummary: async (_thread, matcher, summary) => calls.push({ matcher, summary }),
+    };
+    const services = {
+      opus: createMockService('opus', [
+        { type: 'tool_use', toolName: 'search_evidence', toolUseId: 'same', toolInput: {} },
+        { type: 'tool_use', toolName: 'graph_resolve', toolUseId: 'same', toolParentUseId: 'parent', toolInput: {} },
+        { type: 'tool_result', toolUseId: 'orphan', content: SEARCH_RESULT_TEXT },
+        {
+          type: 'tool_result',
+          toolUseId: 'same',
+          toolParentUseId: 'parent',
+          content: 'Graph for "F167": 3 nodes, 2 edges (depth=1)',
+        },
+        { type: 'tool_result', toolUseId: 'same', content: SEARCH_RESULT_TEXT, toolResultStatus: 'error' },
+      ]),
+    };
+    for await (const _event of routeParallel(createMockDeps(services, log), ['opus'], 'hi', 'user1', 'thread1', {})) {
+    }
+    assert.equal(calls.length, 2);
+    assert.equal(calls[0].matcher.toolParentUseId, 'parent');
+    assert.equal(calls[1].summary.resultCount, 5);
+    assert.equal(calls[1].summary._toolResultStatus, 'error');
+  });
   it('Scenario A: nameless tool_result still merges _f200Candidates via per-cat FIFO', async () => {
     const { routeParallel } = await import('../dist/domains/cats/services/agents/routing/route-parallel.js');
     const updateSummaryCalls = [];
