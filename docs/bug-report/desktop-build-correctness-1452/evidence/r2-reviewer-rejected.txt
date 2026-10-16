@@ -1,0 +1,140 @@
+F1: four JS entries are local; sqlite-vec native is absent from fixture but resolves outside: /Users/lang/workspace/github-lab/clowder-1452-build-correctness/node_modules/.pnpm/sqlite-vec-darwin-arm64@0.1.9/node_modules/sqlite-vec-darwin-arm64/vec0.dylib
+Error: Native artifact dependency escapes deployed node_modules: /Users/lang/workspace/github-lab/clowder-1452-build-correctness/node_modules/.pnpm/bindings@1.5.0/node_modules/bindings/bindings.js
+    at artifactPath (/Users/lang/workspace/github-lab/clowder-1452-build-correctness/desktop/scripts/lib/native-artifact-guard.cjs:22:11)
+    at checkURL (/Users/lang/workspace/github-lab/clowder-1452-build-correctness/desktop/scripts/lib/native-artifact-guard.cjs:29:3)
+    at resolve (/Users/lang/workspace/github-lab/clowder-1452-build-correctness/desktop/scripts/lib/native-artifact-guard.cjs:35:5)
+    at nextStep (node:internal/modules/customization_hooks:189:26)
+    at resolveWithHooks (node:internal/modules/customization_hooks:417:10)
+    at resolveForCJSWithHooks (node:internal/modules/cjs/loader:1137:25)
+    at Module._load (node:internal/modules/cjs/loader:1262:25)
+    at wrapModuleLoad (node:internal/modules/cjs/loader:255:19)
+    at Module.require (node:internal/modules/cjs/loader:1576:12)
+    at require (node:internal/modules/helpers:153:16)
+node:internal/errors:985
+  const err = new Error(message);
+              ^
+
+Error: Command failed: /opt/homebrew/Cellar/node@24/24.15.0/bin/node --require /Users/lang/workspace/github-lab/clowder-1452-build-correctness/desktop/scripts/lib/native-artifact-guard.cjs -e // Evaluated by the bundled Node with native-artifact-guard.cjs preloaded.
+const fs = require('node:fs');
+const path = require('node:path');
+const { createRequire } = require('node:module');
+const api = fs.realpathSync(process.argv[1]);
+const requireApi = createRequire(path.join(api, 'package.json'));
+const audit = globalThis.clowderNativeArtifactAudit;
+
+async function checkPty() {
+  const entry = requireApi.resolve('node-pty');
+  const pty = requireApi('node-pty');
+  if (process.platform === 'win32') {
+    // This cleanup helper is otherwise deferred until kill(). Load its actual
+    // ABI here as well as exercising conpty/worker helpers via a real spawn.
+    requireApi(path.join(path.dirname(entry), 'utils.js')).loadNativeModule('conpty_console_list');
+  }
+  await new Promise((resolve, reject) => {
+    let terminal;
+    let output = '';
+    const timer = setTimeout(() => {
+      terminal.kill();
+      reject(new Error('Native PTY smoke timed out'));
+    }, 10000);
+    try {
+      terminal = pty.spawn(process.execPath, ['-e', 'process.stdout.write("CLOWDER_PTY_OK");'], {
+        cwd: api,
+        env: process.env,
+        cols: 80,
+        rows: 24,
+        name: 'xterm',
+      });
+      terminal.onData((data) => {
+        output += data;
+      });
+      terminal.onExit(({ exitCode }) => {
+        clearTimeout(timer);
+        if (exitCode === 0 && output.includes('CLOWDER_PTY_OK')) resolve();
+        else reject(new Error(`Native PTY smoke failed: exit=${exitCode}, output=${output}`));
+      });
+    } catch (error) {
+      clearTimeout(timer);
+      reject(error);
+    }
+  });
+  console.log('native-pty: spawned bundled Node, marker received, exited');
+}
+
+async function smoke() {
+  const db = new (requireApi('better-sqlite3'))(':memory:');
+  try {
+    const vec = requireApi('sqlite-vec');
+    // SQLite loads an extension directly, bypassing process.dlopen.
+    db.loadExtension(audit.artifactPath(vec.getLoadablePath()));
+    console.log('sqlite/vec:', db.prepare('select vec_version() as v').get().v);
+  } finally {
+    db.close();
+  }
+  await requireApi('sharp')({ create: { width: 1, height: 1, channels: 3, background: 'white' } })
+    .png()
+    .toBuffer();
+  await checkPty();
+  audit.assertComplete();
+  console.log('native-smoke: OK');
+}
+
+smoke().catch((error) => {
+  console.error(error);
+  process.exitCode = 1;
+});
+ /Users/lang/workspace/github-lab/clowder-1452-build-correctness/.acceptance/astra-native-leak-cDtFOQ
+Error: Native artifact dependency escapes deployed node_modules: /Users/lang/workspace/github-lab/clowder-1452-build-correctness/node_modules/.pnpm/bindings@1.5.0/node_modules/bindings/bindings.js
+    at artifactPath (/Users/lang/workspace/github-lab/clowder-1452-build-correctness/desktop/scripts/lib/native-artifact-guard.cjs:22:11)
+    at checkURL (/Users/lang/workspace/github-lab/clowder-1452-build-correctness/desktop/scripts/lib/native-artifact-guard.cjs:29:3)
+    at resolve (/Users/lang/workspace/github-lab/clowder-1452-build-correctness/desktop/scripts/lib/native-artifact-guard.cjs:35:5)
+    at nextStep (node:internal/modules/customization_hooks:189:26)
+    at resolveWithHooks (node:internal/modules/customization_hooks:417:10)
+    at resolveForCJSWithHooks (node:internal/modules/cjs/loader:1137:25)
+    at Module._load (node:internal/modules/cjs/loader:1262:25)
+    at wrapModuleLoad (node:internal/modules/cjs/loader:255:19)
+    at Module.require (node:internal/modules/cjs/loader:1576:12)
+    at require (node:internal/modules/helpers:153:16)
+
+    at genericNodeError (node:internal/errors:985:15)
+    at wrappedFn (node:internal/errors:539:14)
+    at checkExecSyncError (node:child_process:925:11)
+    at execFileSync (node:child_process:961:15)
+    at smokeNativeModules (file:///Users/lang/workspace/github-lab/clowder-1452-build-correctness/desktop/scripts/lib/build-node.mjs:96:10)
+    at file:///Users/lang/workspace/github-lab/clowder-1452-build-correctness/.acceptance/astra-review-repro.mjs:18:77
+    at ModuleJob.run (node:internal/modules/esm/module_job:437:25)
+    at async onImport.tracePromise.__proto__ (node:internal/modules/esm/loader:639:26)
+    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:101:5) {
+  status: 1,
+  signal: null,
+  output: [
+    null,
+    '',
+    'Error: Native artifact dependency escapes deployed node_modules: /Users/lang/workspace/github-lab/clowder-1452-build-correctness/node_modules/.pnpm/bindings@1.5.0/node_modules/bindings/bindings.js\n' +
+      '    at artifactPath (/Users/lang/workspace/github-lab/clowder-1452-build-correctness/desktop/scripts/lib/native-artifact-guard.cjs:22:11)\n' +
+      '    at checkURL (/Users/lang/workspace/github-lab/clowder-1452-build-correctness/desktop/scripts/lib/native-artifact-guard.cjs:29:3)\n' +
+      '    at resolve (/Users/lang/workspace/github-lab/clowder-1452-build-correctness/desktop/scripts/lib/native-artifact-guard.cjs:35:5)\n' +
+      '    at nextStep (node:internal/modules/customization_hooks:189:26)\n' +
+      '    at resolveWithHooks (node:internal/modules/customization_hooks:417:10)\n' +
+      '    at resolveForCJSWithHooks (node:internal/modules/cjs/loader:1137:25)\n' +
+      '    at Module._load (node:internal/modules/cjs/loader:1262:25)\n' +
+      '    at wrapModuleLoad (node:internal/modules/cjs/loader:255:19)\n' +
+      '    at Module.require (node:internal/modules/cjs/loader:1576:12)\n' +
+      '    at require (node:internal/modules/helpers:153:16)\n'
+  ],
+  pid: 25982,
+  stdout: '',
+  stderr: 'Error: Native artifact dependency escapes deployed node_modules: /Users/lang/workspace/github-lab/clowder-1452-build-correctness/node_modules/.pnpm/bindings@1.5.0/node_modules/bindings/bindings.js\n' +
+    '    at artifactPath (/Users/lang/workspace/github-lab/clowder-1452-build-correctness/desktop/scripts/lib/native-artifact-guard.cjs:22:11)\n' +
+    '    at checkURL (/Users/lang/workspace/github-lab/clowder-1452-build-correctness/desktop/scripts/lib/native-artifact-guard.cjs:29:3)\n' +
+    '    at resolve (/Users/lang/workspace/github-lab/clowder-1452-build-correctness/desktop/scripts/lib/native-artifact-guard.cjs:35:5)\n' +
+    '    at nextStep (node:internal/modules/customization_hooks:189:26)\n' +
+    '    at resolveWithHooks (node:internal/modules/customization_hooks:417:10)\n' +
+    '    at resolveForCJSWithHooks (node:internal/modules/cjs/loader:1137:25)\n' +
+    '    at Module._load (node:internal/modules/cjs/loader:1262:25)\n' +
+    '    at wrapModuleLoad (node:internal/modules/cjs/loader:255:19)\n' +
+    '    at Module.require (node:internal/modules/cjs/loader:1576:12)\n' +
+    '    at require (node:internal/modules/helpers:153:16)\n'
+}
+
+Node.js v24.15.0

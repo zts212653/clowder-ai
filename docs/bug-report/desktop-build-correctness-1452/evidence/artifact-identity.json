@@ -1,0 +1,29 @@
+{
+  "buildCommit": "50d2be18146f1c3705444399fff45080794b5880",
+  "publicMainRedBase": "b1fe2966fa0a97d1e3cd2e174ed59fd1477b4fc4",
+  "forkBase": "33084dc889722c17de4bc852f762818e076d8242",
+  "os": "26.6.2",
+  "arch": "arm64",
+  "installer": "/Users/lang/workspace/github-lab/clowder-1452-build-correctness/dist/ClowderAI-0.10.1-arm64-r1-942bc1a4.dmg",
+  "installerSha256": "942bc1a4305e9f104f8e7bd333ec4fdda629c11b095afefe4b30f414239f7324",
+  "installerBytes": 809343087,
+  "bundledNode": {
+    "version": "v24.15.0",
+    "abi": "137",
+    "platform": "darwin",
+    "arch": "arm64"
+  },
+  "signedNodeSha256": "3200fbd9f7fd4410426dd541e10d1ab829d3472f270d743c7fabd1696c03fe32",
+  "serviceManagerSha256": "2f3dc6349c08977eec1b21f6f8cccbbc01d9d6d1c10e893ee11ccde07a3978d2",
+  "modules": {
+    "better-sqlite3": "12.11.1",
+    "sqlite-vec": "0.1.9",
+    "node-pty": "1.2.0-beta.12",
+    "sharp": "0.34.5"
+  },
+  "verifiedMachoCount": 40,
+  "redisVersion": "Redis server v=7.4.1 sha=00000000:1 malloc=libc bits=64 build=565e5df097b555d8",
+  "readOnlyMountedInstallerNativeSmoke": "passed",
+  "fullInstalledJourney": "not_run",
+  "loopbackSlice": "separate worktree; not included in this installer"
+}

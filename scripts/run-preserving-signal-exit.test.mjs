@@ -9,6 +9,11 @@ import { fileURLToPath } from 'node:url';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const RUNNER = path.join(ROOT, 'scripts', 'run-preserving-signal-exit.mjs');
 
+test('missing command and missing usage fail closed', () => {
+  assert.equal(spawnSync(process.execPath, [RUNNER], { stdio: 'ignore' }).status, 64);
+  assert.equal(spawnSync(process.execPath, [RUNNER, 'not-a-real-clowder-command'], { stdio: 'ignore' }).status, 1);
+});
+
 test('web build runs its JS entry without a command shim and preserves literal arguments', () => {
   const fixture = mkdtempSync(path.join(tmpdir(), 'next build & args '));
   try {

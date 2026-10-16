@@ -1,0 +1,26 @@
+fatal error: /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/lipo: can't figure out the architecture type of: /private/var/folders/1z/8dpvll5d2fq7brlf2qk4kkw40000gn/T/macho-bundle-R1ZUKo/broken.node
+✔ mac build preflight rejects missing-node before install/deploy (872.254625ms)
+✔ mac build preflight rejects unsupported-engine before install/deploy (151.141167ms)
+✔ mac build preflight rejects foreign-arch before install/deploy (76.066291ms)
+✔ engines validates complete versions and rejects unknown/missing constraints (0.523583ms)
+✔ same-major runtime caches still fail on exact version, ABI or target mismatch (0.21775ms)
+✔ CLI rejects missing/incompatible bundled Node instead of guessing (214.395375ms)
+✔ a bundled executable that never responds fails at the probe budget (105.397292ms)
+✔ native smoke cannot fall back to build-host modules when deploy is incomplete (202.912ms)
+✔ architecture verification checks bytes, loader choice, universal and optional prebuild siblings (0.667708ms)
+✔ afterPack rejects an incomplete app instead of shipping absent native modules (2.553333ms)
+✔ afterPack module copy stays portable after the build source moves (2.813834ms)
+✔ real Mach-O mismatch and corrupt/symlinked native files fail closed (206.42475ms)
+✔ the Web build launches a JS entry instead of a Windows .cmd shim (1.408125ms)
+✔ the exact Web build carrier preserves literal args, spaces and exit status (138.460167ms)
+✔ missing command and missing usage fail closed (143.859167ms)
+✔ the executable carrier preserves SIGINT (141.390792ms)
+✔ the executable carrier preserves SIGTERM (128.262458ms)
+ℹ tests 17
+ℹ suites 0
+ℹ pass 17
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 1933.302708

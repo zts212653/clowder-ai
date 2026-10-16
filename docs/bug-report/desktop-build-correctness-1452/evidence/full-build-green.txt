@@ -1,0 +1,533 @@
+
+> cat-cafe@0.1.0 build /Users/lang/workspace/github-lab/clowder-1452-build-correctness
+> pnpm -r run build
+
+Scope: 8 of 9 workspace projects
+packages/finance build$ tsc
+packages/shared build$ tsc
+packages/finance build: Done
+packages/shared build: Done
+packages/collective-client build$ pnpm run clean && pnpm run lint && node ./scripts/build.mjs && tsc -p tsconfig.server.json
+packages/mcp-server build$ tsc
+packages/web prebuild$ pnpm run sync:vendor-assets
+packages/collective-client build: > @cat-cafe/collective-client@0.1.0 clean /Users/lang/workspace/github-lab/clowder-1452-build-correctness/packages/collective-client
+packages/collective-client build: > rm -rf dist
+packages/web prebuild: > @cat-cafe/web@0.1.0 sync:vendor-assets /Users/lang/workspace/github-lab/clowder-1452-build-correctness/packages/web
+packages/web prebuild: > node scripts/sync-vendor-assets.mjs
+packages/web prebuild: [sync-vendor-assets] /Users/lang/workspace/github-lab/clowder-1452-build-correctness/node_modules/.pnpm/@ricky0123+vad-web@0.0.30/node_modules/@ricky0123/vad-web/dist/silero_vad_v5.onnx -> /Users/lang/workspace/github-lab/clowder-1452-build-correctness/packages/web/public/vendor/vad/silero_vad_v5.onnx
+packages/web prebuild: [sync-vendor-assets] /Users/lang/workspace/github-lab/clowder-1452-build-correctness/node_modules/.pnpm/@ricky0123+vad-web@0.0.30/node_modules/@ricky0123/vad-web/dist/silero_vad_legacy.onnx -> /Users/lang/workspace/github-lab/clowder-1452-build-correctness/packages/web/public/vendor/vad/silero_vad_legacy.onnx
+packages/web prebuild: [sync-vendor-assets] /Users/lang/workspace/github-lab/clowder-1452-build-correctness/node_modules/.pnpm/@ricky0123+vad-web@0.0.30/node_modules/@ricky0123/vad-web/dist/vad.worklet.bundle.min.js -> /Users/lang/workspace/github-lab/clowder-1452-build-correctness/packages/web/public/vendor/vad/vad.worklet.bundle.min.js
+packages/web prebuild: [sync-vendor-assets] /Users/lang/workspace/github-lab/clowder-1452-build-correctness/node_modules/.pnpm/onnxruntime-web@1.24.3/node_modules/onnxruntime-web/dist/ort-wasm-simd-threaded.asyncify.mjs -> /Users/lang/workspace/github-lab/clowder-1452-build-correctness/packages/web/public/vendor/onnxruntime/ort-wasm-simd-threaded.asyncify.mjs
+packages/web prebuild: [sync-vendor-assets] /Users/lang/workspace/github-lab/clowder-1452-build-correctness/node_modules/.pnpm/onnxruntime-web@1.24.3/node_modules/onnxruntime-web/dist/ort-wasm-simd-threaded.asyncify.wasm -> /Users/lang/workspace/github-lab/clowder-1452-build-correctness/packages/web/public/vendor/onnxruntime/ort-wasm-simd-threaded.asyncify.wasm
+packages/web prebuild: [sync-vendor-assets] /Users/lang/workspace/github-lab/clowder-1452-build-correctness/node_modules/.pnpm/onnxruntime-web@1.24.3/node_modules/onnxruntime-web/dist/ort-wasm-simd-threaded.jsep.mjs -> /Users/lang/workspace/github-lab/clowder-1452-build-correctness/packages/web/public/vendor/onnxruntime/ort-wasm-simd-threaded.jsep.mjs
+packages/web prebuild: [sync-vendor-assets] /Users/lang/workspace/github-lab/clowder-1452-build-correctness/node_modules/.pnpm/onnxruntime-web@1.24.3/node_modules/onnxruntime-web/dist/ort-wasm-simd-threaded.jsep.wasm -> /Users/lang/workspace/github-lab/clowder-1452-build-correctness/packages/web/public/vendor/onnxruntime/ort-wasm-simd-threaded.jsep.wasm
+packages/web prebuild: [sync-vendor-assets] /Users/lang/workspace/github-lab/clowder-1452-build-correctness/node_modules/.pnpm/onnxruntime-web@1.24.3/node_modules/onnxruntime-web/dist/ort-wasm-simd-threaded.jspi.mjs -> /Users/lang/workspace/github-lab/clowder-1452-build-correctness/packages/web/public/vendor/onnxruntime/ort-wasm-simd-threaded.jspi.mjs
+packages/web prebuild: [sync-vendor-assets] /Users/lang/workspace/github-lab/clowder-1452-build-correctness/node_modules/.pnpm/onnxruntime-web@1.24.3/node_modules/onnxruntime-web/dist/ort-wasm-simd-threaded.jspi.wasm -> /Users/lang/workspace/github-lab/clowder-1452-build-correctness/packages/web/public/vendor/onnxruntime/ort-wasm-simd-threaded.jspi.wasm
+packages/web prebuild: [sync-vendor-assets] /Users/lang/workspace/github-lab/clowder-1452-build-correctness/node_modules/.pnpm/onnxruntime-web@1.24.3/node_modules/onnxruntime-web/dist/ort-wasm-simd-threaded.mjs -> /Users/lang/workspace/github-lab/clowder-1452-build-correctness/packages/web/public/vendor/onnxruntime/ort-wasm-simd-threaded.mjs
+packages/web prebuild: [sync-vendor-assets] /Users/lang/workspace/github-lab/clowder-1452-build-correctness/node_modules/.pnpm/onnxruntime-web@1.24.3/node_modules/onnxruntime-web/dist/ort-wasm-simd-threaded.wasm -> /Users/lang/workspace/github-lab/clowder-1452-build-correctness/packages/web/public/vendor/onnxruntime/ort-wasm-simd-threaded.wasm
+packages/web prebuild: [sync-vendor-assets] /Users/lang/workspace/github-lab/clowder-1452-build-correctness/node_modules/.pnpm/esbuild-wasm@0.27.3/node_modules/esbuild-wasm/esbuild.wasm -> /Users/lang/workspace/github-lab/clowder-1452-build-correctness/packages/web/public/vendor/esbuild/esbuild.wasm
+packages/web prebuild: [sync-vendor-assets] /Users/lang/workspace/github-lab/clowder-1452-build-correctness/node_modules/.pnpm/@xterm+xterm@6.0.0/node_modules/@xterm/xterm/css/xterm.css -> /Users/lang/workspace/github-lab/clowder-1452-build-correctness/packages/web/public/vendor/xterm/xterm.css
+packages/web prebuild: [sync-vendor-assets] /Users/lang/workspace/github-lab/clowder-1452-build-correctness/packages/web/src/app/theme-tokens.css -> /Users/lang/workspace/github-lab/clowder-1452-build-correctness/packages/web/public/vendor/app/theme-tokens.css
+packages/web prebuild: [sync-vendor-assets] /Users/lang/workspace/github-lab/clowder-1452-build-correctness/packages/web/src/app/cat-persona-tokens.css -> /Users/lang/workspace/github-lab/clowder-1452-build-correctness/packages/web/public/vendor/app/cat-persona-tokens.css
+packages/web prebuild: [sync-vendor-assets] /Users/lang/workspace/github-lab/clowder-1452-build-correctness/packages/web/src/app/cat-persona-derived.css -> /Users/lang/workspace/github-lab/clowder-1452-build-correctness/packages/web/public/vendor/app/cat-persona-derived.css
+packages/web prebuild: [sync-vendor-assets] /Users/lang/workspace/github-lab/clowder-1452-build-correctness/packages/web/src/app/console-shell.css -> /Users/lang/workspace/github-lab/clowder-1452-build-correctness/packages/web/public/vendor/app/console-shell.css
+packages/web prebuild: [sync-vendor-assets] /Users/lang/workspace/github-lab/clowder-1452-build-correctness/packages/web/src/app/console-controls.css -> /Users/lang/workspace/github-lab/clowder-1452-build-correctness/packages/web/public/vendor/app/console-controls.css
+packages/web prebuild: [sync-vendor-assets] /Users/lang/workspace/github-lab/clowder-1452-build-correctness/packages/web/src/app/console-tokens.css -> /Users/lang/workspace/github-lab/clowder-1452-build-correctness/packages/web/public/vendor/app/console-tokens.css
+packages/web prebuild: [sync-vendor-assets] /Users/lang/workspace/github-lab/clowder-1452-build-correctness/packages/web/src/app/connector-tokens.css -> /Users/lang/workspace/github-lab/clowder-1452-build-correctness/packages/web/public/vendor/app/connector-tokens.css
+packages/web prebuild: [sync-vendor-assets] /Users/lang/workspace/github-lab/clowder-1452-build-correctness/packages/web/src/app/theme-extras.css -> /Users/lang/workspace/github-lab/clowder-1452-build-correctness/packages/web/public/vendor/app/theme-extras.css
+packages/web prebuild: [sync-vendor-assets] /Users/lang/workspace/github-lab/clowder-1452-build-correctness/packages/web/src/app/werewolf-theme.css -> /Users/lang/workspace/github-lab/clowder-1452-build-correctness/packages/web/public/vendor/app/werewolf-theme.css
+packages/web prebuild: Done
+packages/web build$ node ../../scripts/run-preserving-signal-exit.mjs node ./node_modules/next/dist/bin/next build
+packages/collective-client build: > @cat-cafe/collective-client@0.1.0 lint /Users/lang/workspace/github-lab/clowder-1452-build-correctness/packages/collective-client
+packages/collective-client build: > tsc --noEmit
+packages/web build:   ▲ Next.js 14.2.35
+packages/web build:   - Experiments (use with caution):
+packages/web build:     · proxyTimeout
+packages/web build:    Creating an optimized production build ...
+packages/mcp-server build: Done
+packages/web build:  ✓ (pwa) Compiling for server...
+packages/web build:  ✓ (pwa) Compiling for server...
+packages/collective-client build: Done
+packages/web build:  ✓ (pwa) Compiling for client (static)...
+packages/web build:  ○ (pwa) Service worker: /Users/lang/workspace/github-lab/clowder-1452-build-correctness/packages/web/public/sw.js
+packages/web build:  ○ (pwa)   URL: /sw.js
+packages/web build:  ○ (pwa)   Scope: /
+packages/web build:  ✓ (pwa) Found a custom worker implementation at /Users/lang/workspace/github-lab/clowder-1452-build-correctness/packages/web/worker/index.ts.
+packages/web build:  ✓ (pwa) Building the custom worker to /Users/lang/workspace/github-lab/clowder-1452-build-correctness/packages/web/public/worker-750ebb00f76c6d57.js...
+packages/web build:  ○ (pwa) Custom runtimeCaching array found, using it to extend the default one.
+packages/web build: Browserslist: browsers data (caniuse-lite) is 9 months old. Please run:
+packages/web build:   npx update-browserslist-db@latest
+packages/web build:   Why you should do it regularly: https://github.com/browserslist/update-db#readme
+packages/web build: Browserslist: caniuse-lite is outdated. Please run:
+packages/web build:   npx update-browserslist-db@latest
+packages/web build:   Why you should do it regularly: https://github.com/browserslist/update-db#readme
+packages/web build:  ✓ Compiled successfully
+packages/web build:    Linting and checking validity of types ...
+packages/web build: ./src/app/dev/f247-inline-recovery-preview/page.tsx
+packages/web build: 101:27  Warning: Hardcoded Tailwind color "text-blue-600" — use a semantic token (e.g., bg-surface, text-primary, border-default). See F056 design token contract.  cafe/no-hardcoded-colors
+packages/web build: ./src/app/dev/f269-overflow-preview/design-gate-patterns.tsx
+packages/web build: 46:20  Warning: Arbitrary rgba/hsl color function in Tailwind utility "shadow-[0_8px_22px_rgba(43,33,26,0.04)]" — define a CSS variable (e.g., --xxx-shadow) and use shadow-[var(--xxx-shadow)] instead. (F056 Phase E)  cafe/no-hardcoded-colors
+packages/web build: 95:41  Warning: Hardcoded Tailwind color "text-white" — use a semantic token (e.g., bg-surface, text-primary, border-default). See F056 design token contract.  cafe/no-hardcoded-colors
+packages/web build: ./src/app/dev/f269-overflow-preview/design-gate.tsx
+packages/web build: 36:27  Warning: Arbitrary rgba/hsl color function in Tailwind utility "shadow-[0_20px_50px_rgba(43,33,26,0.08)]" — define a CSS variable (e.g., --xxx-shadow) and use shadow-[var(--xxx-shadow)] instead. (F056 Phase E)  cafe/no-hardcoded-colors
+packages/web build: 75:25  Warning: Arbitrary rgba/hsl color function in Tailwind utility "shadow-[0_12px_32px_rgba(43,33,26,0.05)]" — define a CSS variable (e.g., --xxx-shadow) and use shadow-[var(--xxx-shadow)] instead. (F056 Phase E)  cafe/no-hardcoded-colors
+packages/web build: ./src/app/dev/f269-overflow-preview/legacy-baseline.tsx
+packages/web build: 51:17  Warning: Arbitrary rgba/hsl color function in Tailwind utility "shadow-[0_8px_22px_rgba(43,33,26,0.04)]" — define a CSS variable (e.g., --xxx-shadow) and use shadow-[var(--xxx-shadow)] instead. (F056 Phase E)  cafe/no-hardcoded-colors
+packages/web build: 93:41  Warning: Hardcoded Tailwind color "text-white" — use a semantic token (e.g., bg-surface, text-primary, border-default). See F056 design token contract.  cafe/no-hardcoded-colors
+packages/web build: ./src/app/dev/f269-overflow-preview/preview.tsx
+packages/web build: 120:28  Warning: Arbitrary rgba/hsl color function in Tailwind utility "shadow-[0_16px_36px_rgba(43,33,26,0.08)]" — define a CSS variable (e.g., --xxx-shadow) and use shadow-[var(--xxx-shadow)] instead. (F056 Phase E)  cafe/no-hardcoded-colors
+packages/web build: ./src/app/starry/page.tsx
+packages/web build: 62:28  Warning: Hex color "#1a0a2e" in style prop — use a CSS variable (var(--xxx)) or design token.  cafe/no-hardcoded-colors
+packages/web build: 66:18  Warning: Hex color "#a090c0" in style prop — use a CSS variable (var(--xxx)) or design token.  cafe/no-hardcoded-colors
+packages/web build: ./src/components/ApprovalHubDrawer.tsx
+packages/web build: 30:19  Warning: Hardcoded Tailwind color "bg-black/20" — use a semantic token (e.g., bg-surface, text-primary, border-default). See F056 design token contract.  cafe/no-hardcoded-colors
+packages/web build: ./src/components/ChatInputMenus.tsx
+packages/web build: 150:39  Warning: Hardcoded Tailwind color "bg-blue-50" — use a semantic token (e.g., bg-surface, text-primary, border-default). See F056 design token contract.  cafe/no-hardcoded-colors
+packages/web build: 150:39  Warning: Hardcoded Tailwind color "text-blue-600" — use a semantic token (e.g., bg-surface, text-primary, border-default). See F056 design token contract.  cafe/no-hardcoded-colors
+packages/web build: 150:39  Warning: Hardcoded Tailwind color "dark:bg-blue-950" — use a semantic token (e.g., bg-surface, text-primary, border-default). See F056 design token contract.  cafe/no-hardcoded-colors
+packages/web build: 150:39  Warning: Hardcoded Tailwind color "dark:text-blue-400" — use a semantic token (e.g., bg-surface, text-primary, border-default). See F056 design token contract.  cafe/no-hardcoded-colors
+packages/web build: ./src/components/ConnectionStatusBar.tsx
+packages/web build: 67:17  Warning: Arbitrary rgba/hsl color function in Tailwind utility "shadow-[0_8px_22px_rgba(43,33,26,0.04)]" — define a CSS variable (e.g., --xxx-shadow) and use shadow-[var(--xxx-shadow)] instead. (F056 Phase E)  cafe/no-hardcoded-colors
+packages/web build: ./src/components/DailyUsageSection.tsx
+packages/web build: 98:24  Warning: Arbitrary rgba/hsl color function in Tailwind utility "shadow-[0_8px_22px_rgba(43,33,26,0.04)]" — define a CSS variable (e.g., --xxx-shadow) and use shadow-[var(--xxx-shadow)] instead. (F056 Phase E)  cafe/no-hardcoded-colors
+packages/web build: ./src/components/DirectionCard.tsx
+packages/web build: 165:25  Warning: Hardcoded Tailwind color "bg-purple-500/10" — use a semantic token (e.g., bg-surface, text-primary, border-default). See F056 design token contract.  cafe/no-hardcoded-colors
+packages/web build: 165:25  Warning: Hardcoded Tailwind color "text-purple-600" — use a semantic token (e.g., bg-surface, text-primary, border-default). See F056 design token contract.  cafe/no-hardcoded-colors
+packages/web build: 165:25  Warning: Hardcoded Tailwind color "dark:text-purple-400" — use a semantic token (e.g., bg-surface, text-primary, border-default). See F056 design token contract.  cafe/no-hardcoded-colors
+packages/web build: 238:25  Warning: Hardcoded Tailwind color "border-red-500/30" — use a semantic token (e.g., bg-surface, text-primary, border-default). See F056 design token contract.  cafe/no-hardcoded-colors
+packages/web build: 238:25  Warning: Hardcoded Tailwind color "text-red-600" — use a semantic token (e.g., bg-surface, text-primary, border-default). See F056 design token contract.  cafe/no-hardcoded-colors
+packages/web build: 238:25  Warning: Hardcoded Tailwind color "dark:text-red-400" — use a semantic token (e.g., bg-surface, text-primary, border-default). See F056 design token contract.  cafe/no-hardcoded-colors
+packages/web build: 238:25  Warning: Hardcoded Tailwind color "hover:border-red-500" — use a semantic token (e.g., bg-surface, text-primary, border-default). See F056 design token contract.  cafe/no-hardcoded-colors
+packages/web build: 248:25  Warning: Hardcoded Tailwind color "border-amber-500/30" — use a semantic token (e.g., bg-surface, text-primary, border-default). See F056 design token contract.  cafe/no-hardcoded-colors
+packages/web build: 248:25  Warning: Hardcoded Tailwind color "text-amber-600" — use a semantic token (e.g., bg-surface, text-primary, border-default). See F056 design token contract.  cafe/no-hardcoded-colors
+packages/web build: 248:25  Warning: Hardcoded Tailwind color "dark:text-amber-400" — use a semantic token (e.g., bg-surface, text-primary, border-default). See F056 design token contract.  cafe/no-hardcoded-colors
+packages/web build: 259:25  Warning: Hardcoded Tailwind color "text-green-600/40" — use a semantic token (e.g., bg-surface, text-primary, border-default). See F056 design token contract.  cafe/no-hardcoded-colors
+packages/web build: 259:25  Warning: Hardcoded Tailwind color "dark:text-green-400/40" — use a semantic token (e.g., bg-surface, text-primary, border-default). See F056 design token contract.  cafe/no-hardcoded-colors
+packages/web build: 259:25  Warning: Hardcoded Tailwind color "hover:text-green-600" — use a semantic token (e.g., bg-surface, text-primary, border-default). See F056 design token contract.  cafe/no-hardcoded-colors
+packages/web build: 259:25  Warning: Hardcoded Tailwind color "hover:border-green-500/30" — use a semantic token (e.g., bg-surface, text-primary, border-default). See F056 design token contract.  cafe/no-hardcoded-colors
+packages/web build: 272:25  Warning: Hardcoded Tailwind color "bg-green-600" — use a semantic token (e.g., bg-surface, text-primary, border-default). See F056 design token contract.  cafe/no-hardcoded-colors
+packages/web build: 272:25  Warning: Hardcoded Tailwind color "text-white" — use a semantic token (e.g., bg-surface, text-primary, border-default). See F056 design token contract.  cafe/no-hardcoded-colors
+packages/web build: 272:25  Warning: Hardcoded Tailwind color "hover:bg-green-700" — use a semantic token (e.g., bg-surface, text-primary, border-default). See F056 design token contract.  cafe/no-hardcoded-colors
+packages/web build: 282:25  Warning: Hardcoded Tailwind color "border-amber-500/30" — use a semantic token (e.g., bg-surface, text-primary, border-default). See F056 design token contract.  cafe/no-hardcoded-colors
+packages/web build: 282:25  Warning: Hardcoded Tailwind color "text-amber-600" — use a semantic token (e.g., bg-surface, text-primary, border-default). See F056 design token contract.  cafe/no-hardcoded-colors
+packages/web build: 282:25  Warning: Hardcoded Tailwind color "dark:text-amber-400" — use a semantic token (e.g., bg-surface, text-primary, border-default). See F056 design token contract.  cafe/no-hardcoded-colors
+packages/web build: 292:25  Warning: Hardcoded Tailwind color "hover:border-red-500/30" — use a semantic token (e.g., bg-surface, text-primary, border-default). See F056 design token contract.  cafe/no-hardcoded-colors
+packages/web build: 292:25  Warning: Hardcoded Tailwind color "hover:text-red-600" — use a semantic token (e.g., bg-surface, text-primary, border-default). See F056 design token contract.  cafe/no-hardcoded-colors
+packages/web build: ./src/components/HubAgentSessionsTab.tsx
+packages/web build: 102:25  Warning: Arbitrary rgba/hsl color function in Tailwind utility "shadow-[0_8px_22px_rgba(43,33,26,0.04)]" — define a CSS variable (e.g., --xxx-shadow) and use shadow-[var(--xxx-shadow)] instead. (F056 Phase E)  cafe/no-hardcoded-colors
+packages/web build: 112:31  Warning: Arbitrary rgba/hsl color function in Tailwind utility "shadow-[0_1px_3px_rgba(43,33,26,0.06)]" — define a CSS variable (e.g., --xxx-shadow) and use shadow-[var(--xxx-shadow)] instead. (F056 Phase E)  cafe/no-hardcoded-colors
+packages/web build: 137:31  Warning: Arbitrary rgba/hsl color function in Tailwind utility "shadow-[0_1px_3px_rgba(43,33,26,0.06)]" — define a CSS variable (e.g., --xxx-shadow) and use shadow-[var(--xxx-shadow)] instead. (F056 Phase E)  cafe/no-hardcoded-colors
+packages/web build: ./src/components/HubCatEditor.tsx
+packages/web build: 588:19  Warning: Arbitrary rgba/hsl color function in Tailwind utility "shadow-[0_22px_48px_rgba(43,33,26,0.13)]" — define a CSS variable (e.g., --xxx-shadow) and use shadow-[var(--xxx-shadow)] instead. (F056 Phase E)  cafe/no-hardcoded-colors
+packages/web build: 619:25  Warning: Arbitrary rgba/hsl color function in Tailwind utility "shadow-[0_8px_22px_rgba(43,33,26,0.04)]" — define a CSS variable (e.g., --xxx-shadow) and use shadow-[var(--xxx-shadow)] instead. (F056 Phase E)  cafe/no-hardcoded-colors
+packages/web build: ./src/components/HubCoCreatorEditor.tsx
+packages/web build: 136:19  Warning: Arbitrary rgba/hsl color function in Tailwind utility "shadow-[0_22px_48px_rgba(43,33,26,0.13)]" — define a CSS variable (e.g., --xxx-shadow) and use shadow-[var(--xxx-shadow)] instead. (F056 Phase E)  cafe/no-hardcoded-colors
+packages/web build: ./src/components/HubQuotaBoardTab.tsx
+packages/web build: 270:24  Warning: Arbitrary rgba/hsl color function in Tailwind utility "shadow-[0_8px_22px_rgba(43,33,26,0.04)]" — define a CSS variable (e.g., --xxx-shadow) and use shadow-[var(--xxx-shadow)] instead. (F056 Phase E)  cafe/no-hardcoded-colors
+packages/web build: 362:20  Warning: Arbitrary rgba/hsl color function in Tailwind utility "shadow-[0_8px_22px_rgba(43,33,26,0.04)]" — define a CSS variable (e.g., --xxx-shadow) and use shadow-[var(--xxx-shadow)] instead. (F056 Phase E)  cafe/no-hardcoded-colors
+packages/web build: ./src/components/HubRoutingPolicyTab.tsx
+packages/web build: 12:24  Warning: Arbitrary rgba/hsl color function in Tailwind utility "shadow-[0_8px_22px_rgba(43,33,26,0.04)]" — define a CSS variable (e.g., --xxx-shadow) and use shadow-[var(--xxx-shadow)] instead. (F056 Phase E)  cafe/no-hardcoded-colors
+packages/web build: ./src/components/HubToolUsageTab.tsx
+packages/web build: 120:23  Warning: Arbitrary rgba/hsl color function in Tailwind utility "shadow-[0_1px_3px_rgba(43,33,26,0.06)]" — define a CSS variable (e.g., --xxx-shadow) and use shadow-[var(--xxx-shadow)] instead. (F056 Phase E)  cafe/no-hardcoded-colors
+packages/web build: 157:22  Warning: Arbitrary rgba/hsl color function in Tailwind utility "shadow-[0_8px_22px_rgba(43,33,26,0.04)]" — define a CSS variable (e.g., --xxx-shadow) and use shadow-[var(--xxx-shadow)] instead. (F056 Phase E)  cafe/no-hardcoded-colors
+packages/web build: 167:23  Warning: Arbitrary rgba/hsl color function in Tailwind utility "shadow-[0_8px_22px_rgba(43,33,26,0.04)]" — define a CSS variable (e.g., --xxx-shadow) and use shadow-[var(--xxx-shadow)] instead. (F056 Phase E)  cafe/no-hardcoded-colors
+packages/web build: 193:24  Warning: Arbitrary rgba/hsl color function in Tailwind utility "shadow-[0_8px_22px_rgba(43,33,26,0.04)]" — define a CSS variable (e.g., --xxx-shadow) and use shadow-[var(--xxx-shadow)] instead. (F056 Phase E)  cafe/no-hardcoded-colors
+packages/web build: 266:23  Warning: Arbitrary rgba/hsl color function in Tailwind utility "shadow-[0_8px_22px_rgba(43,33,26,0.04)]" — define a CSS variable (e.g., --xxx-shadow) and use shadow-[var(--xxx-shadow)] instead. (F056 Phase E)  cafe/no-hardcoded-colors
+packages/web build: 316:24  Warning: Arbitrary rgba/hsl color function in Tailwind utility "shadow-[0_8px_22px_rgba(43,33,26,0.04)]" — define a CSS variable (e.g., --xxx-shadow) and use shadow-[var(--xxx-shadow)] instead. (F056 Phase E)  cafe/no-hardcoded-colors
+packages/web build: ./src/components/McpConfigModal.tsx
+packages/web build: 327:22  Warning: Arbitrary rgba/hsl color function in Tailwind utility "shadow-[0_24px_56px_rgba(43,33,26,0.14)]" — define a CSS variable (e.g., --xxx-shadow) and use shadow-[var(--xxx-shadow)] instead. (F056 Phase E)  cafe/no-hardcoded-colors
+packages/web build: ./src/components/ThreadSidebar/use-group-open-interaction.ts
+packages/web build: 54:5  Warning: React Hook useCallback has an unnecessary dependency: 'state'. Either exclude it or remove the dependency array.  react-hooks/exhaustive-deps
+packages/web build: ./src/components/VoiceSettingsPanel.tsx
+packages/web build: 14:24  Warning: Arbitrary rgba/hsl color function in Tailwind utility "shadow-[0_8px_22px_rgba(43,33,26,0.04)]" — define a CSS variable (e.g., --xxx-shadow) and use shadow-[var(--xxx-shadow)] instead. (F056 Phase E)  cafe/no-hardcoded-colors
+packages/web build: ./src/components/attention/AttentionRailButtons.tsx
+packages/web build: 126:6  Warning: React Hook useCallback has a missing dependency: 'projection'. Either include it or remove the dependency array.  react-hooks/exhaustive-deps
+packages/web build: ./src/components/capability-evolution/CapabilityEvolutionWorkspace.tsx
+packages/web build: 122:6  Warning: React Hook useLayoutEffect has a missing dependency: 'viewport'. Either include it or remove the dependency array.  react-hooks/exhaustive-deps
+packages/web build: ./src/components/capability-evolution/exploration/ExplorationMedia.tsx
+packages/web build: 43:11  Warning: Using `<img>` could result in slower LCP and higher bandwidth. Consider using `<Image />` from `next/image` to automatically optimize images. This may incur additional usage or cost from your provider. See: https://nextjs.org/docs/messages/no-img-element  @next/next/no-img-element
+packages/web build: ./src/components/community/ClosureChecklistCard.tsx
+packages/web build: 91:31  Warning: Hardcoded Tailwind color "text-amber-400" — use a semantic token (e.g., bg-surface, text-primary, border-default). See F056 design token contract.  cafe/no-hardcoded-colors
+packages/web build: 102:24  Warning: Hardcoded Tailwind color "text-emerald-400" — use a semantic token (e.g., bg-surface, text-primary, border-default). See F056 design token contract.  cafe/no-hardcoded-colors
+packages/web build: 160:21  Warning: Hardcoded Tailwind color "bg-emerald-500/20" — use a semantic token (e.g., bg-surface, text-primary, border-default). See F056 design token contract.  cafe/no-hardcoded-colors
+packages/web build: 160:21  Warning: Hardcoded Tailwind color "text-emerald-400" — use a semantic token (e.g., bg-surface, text-primary, border-default). See F056 design token contract.  cafe/no-hardcoded-colors
+packages/web build: 160:21  Warning: Hardcoded Tailwind color "hover:bg-emerald-500/30" — use a semantic token (e.g., bg-surface, text-primary, border-default). See F056 design token contract.  cafe/no-hardcoded-colors
+packages/web build: ./src/components/community/ReconciliationFindingCard.tsx
+packages/web build: 123:23  Warning: Hardcoded Tailwind color "bg-emerald-500/10" — use a semantic token (e.g., bg-surface, text-primary, border-default). See F056 design token contract.  cafe/no-hardcoded-colors
+packages/web build: 123:23  Warning: Hardcoded Tailwind color "text-emerald-400" — use a semantic token (e.g., bg-surface, text-primary, border-default). See F056 design token contract.  cafe/no-hardcoded-colors
+packages/web build: 123:23  Warning: Hardcoded Tailwind color "border-emerald-500/20" — use a semantic token (e.g., bg-surface, text-primary, border-default). See F056 design token contract.  cafe/no-hardcoded-colors
+packages/web build: 123:23  Warning: Hardcoded Tailwind color "hover:bg-emerald-500/20" — use a semantic token (e.g., bg-surface, text-primary, border-default). See F056 design token contract.  cafe/no-hardcoded-colors
+packages/web build: ./src/components/community/closure-forms.tsx
+packages/web build: 84:53  Warning: Hardcoded Tailwind color "text-red-400" — use a semantic token (e.g., bg-surface, text-primary, border-default). See F056 design token contract.  cafe/no-hardcoded-colors
+packages/web build: 164:53  Warning: Hardcoded Tailwind color "text-red-400" — use a semantic token (e.g., bg-surface, text-primary, border-default). See F056 design token contract.  cafe/no-hardcoded-colors
+packages/web build: ./src/components/concierge/ConciergeBall.tsx
+packages/web build: 112:7  Warning: Using `<img>` could result in slower LCP and higher bandwidth. Consider using `<Image />` from `next/image` to automatically optimize images. This may incur additional usage or cost from your provider. See: https://nextjs.org/docs/messages/no-img-element  @next/next/no-img-element
+packages/web build: 140:5  Warning: Using `<img>` could result in slower LCP and higher bandwidth. Consider using `<Image />` from `next/image` to automatically optimize images. This may incur additional usage or cost from your provider. See: https://nextjs.org/docs/messages/no-img-element  @next/next/no-img-element
+packages/web build: ./src/components/content-review/ReviewActor.tsx
+packages/web build: 21:25  Warning: Hardcoded Tailwind color "text-white" — use a semantic token (e.g., bg-surface, text-primary, border-default). See F056 design token contract.  cafe/no-hardcoded-colors
+packages/web build: 24:13  Warning: Using `<img>` could result in slower LCP and higher bandwidth. Consider using `<Image />` from `next/image` to automatically optimize images. This may incur additional usage or cost from your provider. See: https://nextjs.org/docs/messages/no-img-element  @next/next/no-img-element
+packages/web build: ./src/components/content-review/ReviewMedia.tsx
+packages/web build: 105:6  Warning: React Hook useEffect has a missing dependency: 'stage'. Either include it or remove the dependency array.  react-hooks/exhaustive-deps
+packages/web build: 151:13  Warning: Using `<img>` could result in slower LCP and higher bandwidth. Consider using `<Image />` from `next/image` to automatically optimize images. This may incur additional usage or cost from your provider. See: https://nextjs.org/docs/messages/no-img-element  @next/next/no-img-element
+packages/web build: ./src/components/event-memory/EventTimeline.tsx
+packages/web build: 151:60  Warning: Inline oklch() in style prop "1px solid oklch(0.85 0.06 50)" — define a CSS variable in theme-tokens.css and reference via var(--xxx). (F056 Phase E AC-E11)  cafe/no-hardcoded-colors
+packages/web build: ./src/components/event-memory/event-timeline-cards.tsx
+packages/web build: 72:23  Warning: Hardcoded Tailwind color "text-white" — use a semantic token (e.g., bg-surface, text-primary, border-default). See F056 design token contract.  cafe/no-hardcoded-colors
+packages/web build: 73:34  Warning: Inline oklch() in style prop "oklch(0.6 0.13 " — define a CSS variable in theme-tokens.css and reference via var(--xxx). (F056 Phase E AC-E11)  cafe/no-hardcoded-colors
+packages/web build: 134:30  Warning: Inline oklch() in style prop "oklch(0 0 0 / 0.06)" — define a CSS variable in theme-tokens.css and reference via var(--xxx). (F056 Phase E AC-E11)  cafe/no-hardcoded-colors
+packages/web build: ./src/components/growing/PreparedArtifactPreview.tsx
+packages/web build: 57:9  Warning: Using `<img>` could result in slower LCP and higher bandwidth. Consider using `<Image />` from `next/image` to automatically optimize images. This may incur additional usage or cost from your provider. See: https://nextjs.org/docs/messages/no-img-element  @next/next/no-img-element
+packages/web build: ./src/components/hub-cat-editor-fields.tsx
+packages/web build: 239:20  Warning: Arbitrary rgba/hsl color function in Tailwind utility "shadow-[0_6px_18px_rgba(198,95,61,0.09)]" — define a CSS variable (e.g., --xxx-shadow) and use shadow-[var(--xxx-shadow)] instead. (F056 Phase E)  cafe/no-hardcoded-colors
+packages/web build: ./src/components/hub-cat-editor-voice.tsx
+packages/web build: 84:20  Warning: Arbitrary rgba/hsl color function in Tailwind utility "shadow-[0_8px_22px_rgba(43,33,26,0.04)]" — define a CSS variable (e.g., --xxx-shadow) and use shadow-[var(--xxx-shadow)] instead. (F056 Phase E)  cafe/no-hardcoded-colors
+packages/web build: ./src/components/hub-cat-editor.sections.tsx
+packages/web build: 446:41  Warning: Hardcoded Tailwind color "text-amber-600" — use a semantic token (e.g., bg-surface, text-primary, border-default). See F056 design token contract.  cafe/no-hardcoded-colors
+packages/web build: 446:41  Warning: Hardcoded Tailwind color "dark:text-amber-400" — use a semantic token (e.g., bg-surface, text-primary, border-default). See F056 design token contract.  cafe/no-hardcoded-colors
+packages/web build: ./src/components/marketplace/artifact-card.tsx
+packages/web build: 22:17  Warning: Arbitrary rgba/hsl color function in Tailwind utility "shadow-[0_8px_22px_rgba(43,33,26,0.04)]" — define a CSS variable (e.g., --xxx-shadow) and use shadow-[var(--xxx-shadow)] instead. (F056 Phase E)  cafe/no-hardcoded-colors
+packages/web build: ./src/components/marketplace/install-plan-detail.tsx
+packages/web build: 99:22  Warning: Arbitrary rgba/hsl color function in Tailwind utility "shadow-[0_8px_22px_rgba(43,33,26,0.04)]" — define a CSS variable (e.g., --xxx-shadow) and use shadow-[var(--xxx-shadow)] instead. (F056 Phase E)  cafe/no-hardcoded-colors
+packages/web build: 121:24  Warning: Arbitrary rgba/hsl color function in Tailwind utility "shadow-[0_8px_22px_rgba(43,33,26,0.04)]" — define a CSS variable (e.g., --xxx-shadow) and use shadow-[var(--xxx-shadow)] instead. (F056 Phase E)  cafe/no-hardcoded-colors
+packages/web build: 132:24  Warning: Arbitrary rgba/hsl color function in Tailwind utility "shadow-[0_8px_22px_rgba(43,33,26,0.04)]" — define a CSS variable (e.g., --xxx-shadow) and use shadow-[var(--xxx-shadow)] instead. (F056 Phase E)  cafe/no-hardcoded-colors
+packages/web build: 161:17  Warning: Arbitrary rgba/hsl color function in Tailwind utility "shadow-[0_1px_3px_rgba(43,33,26,0.06)]" — define a CSS variable (e.g., --xxx-shadow) and use shadow-[var(--xxx-shadow)] instead. (F056 Phase E)  cafe/no-hardcoded-colors
+packages/web build: ./src/components/marketplace/marketplace-panel.tsx
+packages/web build: 16:21  Warning: Arbitrary rgba/hsl color function in Tailwind utility "shadow-[0_8px_22px_rgba(43,33,26,0.04)]" — define a CSS variable (e.g., --xxx-shadow) and use shadow-[var(--xxx-shadow)] instead. (F056 Phase E)  cafe/no-hardcoded-colors
+packages/web build: ./src/components/memory/CollectionCatalog.tsx
+packages/web build: 249:31  Warning: Arbitrary rgba/hsl color function in Tailwind utility "shadow-[0_1px_3px_rgba(43,33,26,0.06)]" — define a CSS variable (e.g., --xxx-shadow) and use shadow-[var(--xxx-shadow)] instead. (F056 Phase E)  cafe/no-hardcoded-colors
+packages/web build: 260:33  Warning: Arbitrary rgba/hsl color function in Tailwind utility "shadow-[0_1px_3px_rgba(43,33,26,0.06)]" — define a CSS variable (e.g., --xxx-shadow) and use shadow-[var(--xxx-shadow)] instead. (F056 Phase E)  cafe/no-hardcoded-colors
+packages/web build: 269:33  Warning: Arbitrary rgba/hsl color function in Tailwind utility "shadow-[0_1px_3px_rgba(43,33,26,0.06)]" — define a CSS variable (e.g., --xxx-shadow) and use shadow-[var(--xxx-shadow)] instead. (F056 Phase E)  cafe/no-hardcoded-colors
+packages/web build: ./src/components/memory/CreateCollectionDialog.tsx
+packages/web build: 180:23  Warning: Arbitrary rgba/hsl color function in Tailwind utility "shadow-[0_1px_3px_rgba(43,33,26,0.06)]" — define a CSS variable (e.g., --xxx-shadow) and use shadow-[var(--xxx-shadow)] instead. (F056 Phase E)  cafe/no-hardcoded-colors
+packages/web build: 189:25  Warning: Arbitrary rgba/hsl color function in Tailwind utility "shadow-[0_1px_3px_rgba(43,33,26,0.06)]" — define a CSS variable (e.g., --xxx-shadow) and use shadow-[var(--xxx-shadow)] instead. (F056 Phase E)  cafe/no-hardcoded-colors
+packages/web build: ./src/components/memory/IndexStatus.tsx
+packages/web build: 405:60  Warning: Hardcoded Tailwind color "text-red-500" — use a semantic token (e.g., bg-surface, text-primary, border-default). See F056 design token contract.  cafe/no-hardcoded-colors
+packages/web build: 414:28  Warning: Hardcoded Tailwind color "text-white" — use a semantic token (e.g., bg-surface, text-primary, border-default). See F056 design token contract.  cafe/no-hardcoded-colors
+packages/web build: ./src/components/mission-control/CreateIntentCardForm.tsx
+packages/web build: 84:20  Warning: Arbitrary rgba/hsl color function in Tailwind utility "shadow-[0_8px_22px_rgba(43,33,26,0.04)]" — define a CSS variable (e.g., --xxx-shadow) and use shadow-[var(--xxx-shadow)] instead. (F056 Phase E)  cafe/no-hardcoded-colors
+packages/web build: ./src/components/mission-control/DependencyGraphTab.tsx
+packages/web build: 117:22  Warning: Arbitrary rgba/hsl color function in Tailwind utility "shadow-[0_8px_22px_rgba(43,33,26,0.04)]" — define a CSS variable (e.g., --xxx-shadow) and use shadow-[var(--xxx-shadow)] instead. (F056 Phase E)  cafe/no-hardcoded-colors
+packages/web build: 141:22  Warning: Arbitrary rgba/hsl color function in Tailwind utility "shadow-[0_8px_22px_rgba(43,33,26,0.04)]" — define a CSS variable (e.g., --xxx-shadow) and use shadow-[var(--xxx-shadow)] instead. (F056 Phase E)  cafe/no-hardcoded-colors
+packages/web build: 157:24  Warning: Arbitrary rgba/hsl color function in Tailwind utility "shadow-[0_8px_22px_rgba(43,33,26,0.04)]" — define a CSS variable (e.g., --xxx-shadow) and use shadow-[var(--xxx-shadow)] instead. (F056 Phase E)  cafe/no-hardcoded-colors
+packages/web build: 161:24  Warning: Arbitrary rgba/hsl color function in Tailwind utility "shadow-[0_8px_22px_rgba(43,33,26,0.04)]" — define a CSS variable (e.g., --xxx-shadow) and use shadow-[var(--xxx-shadow)] instead. (F056 Phase E)  cafe/no-hardcoded-colors
+packages/web build: 192:17  Warning: Arbitrary rgba/hsl color function in Tailwind utility "shadow-[0_8px_22px_rgba(43,33,26,0.04)]" — define a CSS variable (e.g., --xxx-shadow) and use shadow-[var(--xxx-shadow)] instead. (F056 Phase E)  cafe/no-hardcoded-colors
+packages/web build: ./src/components/mission-control/DispatchProgress.tsx
+packages/web build: 36:23  Warning: Arbitrary rgba/hsl color function in Tailwind utility "shadow-[0_8px_22px_rgba(43,33,26,0.04)]" — define a CSS variable (e.g., --xxx-shadow) and use shadow-[var(--xxx-shadow)] instead. (F056 Phase E)  cafe/no-hardcoded-colors
+packages/web build: ./src/components/mission-control/ExternalProjectTab.tsx
+packages/web build: 343:33  Warning: Arbitrary rgba/hsl color function in Tailwind utility "shadow-[0_8px_22px_rgba(43,33,26,0.04)]" — define a CSS variable (e.g., --xxx-shadow) and use shadow-[var(--xxx-shadow)] instead. (F056 Phase E)  cafe/no-hardcoded-colors
+packages/web build: ./src/components/mission-control/FeatureBirdEyePanel.tsx
+packages/web build: 95:17  Warning: Arbitrary rgba/hsl color function in Tailwind utility "shadow-[0_8px_22px_rgba(43,33,26,0.04)]" — define a CSS variable (e.g., --xxx-shadow) and use shadow-[var(--xxx-shadow)] instead. (F056 Phase E)  cafe/no-hardcoded-colors
+packages/web build: 154:17  Warning: Arbitrary rgba/hsl color function in Tailwind utility "shadow-[0_8px_22px_rgba(43,33,26,0.04)]" — define a CSS variable (e.g., --xxx-shadow) and use shadow-[var(--xxx-shadow)] instead. (F056 Phase E)  cafe/no-hardcoded-colors
+packages/web build: ./src/components/mission-control/FeatureRow.tsx
+packages/web build: 91:18  Warning: Arbitrary rgba/hsl color function in Tailwind utility "shadow-[0_8px_22px_rgba(43,33,26,0.04)]" — define a CSS variable (e.g., --xxx-shadow) and use shadow-[var(--xxx-shadow)] instead. (F056 Phase E)  cafe/no-hardcoded-colors
+packages/web build: ./src/components/mission-control/GovernanceHealth.tsx
+packages/web build: 82:22  Warning: Arbitrary rgba/hsl color function in Tailwind utility "shadow-[0_8px_22px_rgba(43,33,26,0.04)]" — define a CSS variable (e.g., --xxx-shadow) and use shadow-[var(--xxx-shadow)] instead. (F056 Phase E)  cafe/no-hardcoded-colors
+packages/web build: 115:22  Warning: Arbitrary rgba/hsl color function in Tailwind utility "shadow-[0_8px_22px_rgba(43,33,26,0.04)]" — define a CSS variable (e.g., --xxx-shadow) and use shadow-[var(--xxx-shadow)] instead. (F056 Phase E)  cafe/no-hardcoded-colors
+packages/web build: 132:24  Warning: Arbitrary rgba/hsl color function in Tailwind utility "shadow-[0_8px_22px_rgba(43,33,26,0.04)]" — define a CSS variable (e.g., --xxx-shadow) and use shadow-[var(--xxx-shadow)] instead. (F056 Phase E)  cafe/no-hardcoded-colors
+packages/web build: 147:24  Warning: Arbitrary rgba/hsl color function in Tailwind utility "shadow-[0_8px_22px_rgba(43,33,26,0.04)]" — define a CSS variable (e.g., --xxx-shadow) and use shadow-[var(--xxx-shadow)] instead. (F056 Phase E)  cafe/no-hardcoded-colors
+packages/web build: 171:24  Warning: Arbitrary rgba/hsl color function in Tailwind utility "shadow-[0_8px_22px_rgba(43,33,26,0.04)]" — define a CSS variable (e.g., --xxx-shadow) and use shadow-[var(--xxx-shadow)] instead. (F056 Phase E)  cafe/no-hardcoded-colors
+packages/web build: 191:24  Warning: Arbitrary rgba/hsl color function in Tailwind utility "shadow-[0_8px_22px_rgba(43,33,26,0.04)]" — define a CSS variable (e.g., --xxx-shadow) and use shadow-[var(--xxx-shadow)] instead. (F056 Phase E)  cafe/no-hardcoded-colors
+packages/web build: 223:20  Warning: Arbitrary rgba/hsl color function in Tailwind utility "shadow-[0_8px_22px_rgba(43,33,26,0.04)]" — define a CSS variable (e.g., --xxx-shadow) and use shadow-[var(--xxx-shadow)] instead. (F056 Phase E)  cafe/no-hardcoded-colors
+packages/web build: ./src/components/mission-control/IntentCardDetail.tsx
+packages/web build: 59:22  Warning: Arbitrary rgba/hsl color function in Tailwind utility "shadow-[0_8px_22px_rgba(43,33,26,0.04)]" — define a CSS variable (e.g., --xxx-shadow) and use shadow-[var(--xxx-shadow)] instead. (F056 Phase E)  cafe/no-hardcoded-colors
+packages/web build: 70:24  Warning: Arbitrary rgba/hsl color function in Tailwind utility "shadow-[0_8px_22px_rgba(43,33,26,0.04)]" — define a CSS variable (e.g., --xxx-shadow) and use shadow-[var(--xxx-shadow)] instead. (F056 Phase E)  cafe/no-hardcoded-colors
+packages/web build: 91:22  Warning: Arbitrary rgba/hsl color function in Tailwind utility "shadow-[0_8px_22px_rgba(43,33,26,0.04)]" — define a CSS variable (e.g., --xxx-shadow) and use shadow-[var(--xxx-shadow)] instead. (F056 Phase E)  cafe/no-hardcoded-colors
+packages/web build: ./src/components/mission-control/MissionControlPage.tsx
+packages/web build: 449:27  Warning: Arbitrary rgba/hsl color function in Tailwind utility "shadow-[0_1px_3px_rgba(43,33,26,0.06)]" — define a CSS variable (e.g., --xxx-shadow) and use shadow-[var(--xxx-shadow)] instead. (F056 Phase E)  cafe/no-hardcoded-colors
+packages/web build: 457:27  Warning: Arbitrary rgba/hsl color function in Tailwind utility "shadow-[0_1px_3px_rgba(43,33,26,0.06)]" — define a CSS variable (e.g., --xxx-shadow) and use shadow-[var(--xxx-shadow)] instead. (F056 Phase E)  cafe/no-hardcoded-colors
+packages/web build: ./src/components/mission-control/NeedAuditFrame.tsx
+packages/web build: 71:20  Warning: Arbitrary rgba/hsl color function in Tailwind utility "shadow-[0_8px_22px_rgba(43,33,26,0.04)]" — define a CSS variable (e.g., --xxx-shadow) and use shadow-[var(--xxx-shadow)] instead. (F056 Phase E)  cafe/no-hardcoded-colors
+packages/web build: ./src/components/mission-control/QuickCreateForm.tsx
+packages/web build: 44:17  Warning: Arbitrary rgba/hsl color function in Tailwind utility "shadow-[0_8px_22px_rgba(43,33,26,0.04)]" — define a CSS variable (e.g., --xxx-shadow) and use shadow-[var(--xxx-shadow)] instead. (F056 Phase E)  cafe/no-hardcoded-colors
+packages/web build: ./src/components/mission-control/RefluxCapture.tsx
+packages/web build: 78:24  Warning: Arbitrary rgba/hsl color function in Tailwind utility "shadow-[0_8px_22px_rgba(43,33,26,0.04)]" — define a CSS variable (e.g., --xxx-shadow) and use shadow-[var(--xxx-shadow)] instead. (F056 Phase E)  cafe/no-hardcoded-colors
+packages/web build: 133:27  Warning: Arbitrary rgba/hsl color function in Tailwind utility "shadow-[0_8px_22px_rgba(43,33,26,0.04)]" — define a CSS variable (e.g., --xxx-shadow) and use shadow-[var(--xxx-shadow)] instead. (F056 Phase E)  cafe/no-hardcoded-colors
+packages/web build: ./src/components/mission-control/ResolutionQueue.tsx
+packages/web build: 95:24  Warning: Arbitrary rgba/hsl color function in Tailwind utility "shadow-[0_8px_22px_rgba(43,33,26,0.04)]" — define a CSS variable (e.g., --xxx-shadow) and use shadow-[var(--xxx-shadow)] instead. (F056 Phase E)  cafe/no-hardcoded-colors
+packages/web build: 156:27  Warning: Arbitrary rgba/hsl color function in Tailwind utility "shadow-[0_8px_22px_rgba(43,33,26,0.04)]" — define a CSS variable (e.g., --xxx-shadow) and use shadow-[var(--xxx-shadow)] instead. (F056 Phase E)  cafe/no-hardcoded-colors
+packages/web build: ./src/components/mission-control/RiskPanel.tsx
+packages/web build: 87:22  Warning: Arbitrary rgba/hsl color function in Tailwind utility "shadow-[0_8px_22px_rgba(43,33,26,0.04)]" — define a CSS variable (e.g., --xxx-shadow) and use shadow-[var(--xxx-shadow)] instead. (F056 Phase E)  cafe/no-hardcoded-colors
+packages/web build: 105:26  Warning: Arbitrary rgba/hsl color function in Tailwind utility "shadow-[0_8px_22px_rgba(43,33,26,0.04)]" — define a CSS variable (e.g., --xxx-shadow) and use shadow-[var(--xxx-shadow)] instead. (F056 Phase E)  cafe/no-hardcoded-colors
+packages/web build: 109:26  Warning: Arbitrary rgba/hsl color function in Tailwind utility "shadow-[0_8px_22px_rgba(43,33,26,0.04)]" — define a CSS variable (e.g., --xxx-shadow) and use shadow-[var(--xxx-shadow)] instead. (F056 Phase E)  cafe/no-hardcoded-colors
+packages/web build: 113:26  Warning: Arbitrary rgba/hsl color function in Tailwind utility "shadow-[0_8px_22px_rgba(43,33,26,0.04)]" — define a CSS variable (e.g., --xxx-shadow) and use shadow-[var(--xxx-shadow)] instead. (F056 Phase E)  cafe/no-hardcoded-colors
+packages/web build: 128:23  Warning: Arbitrary rgba/hsl color function in Tailwind utility "shadow-[0_8px_22px_rgba(43,33,26,0.04)]" — define a CSS variable (e.g., --xxx-shadow) and use shadow-[var(--xxx-shadow)] instead. (F056 Phase E)  cafe/no-hardcoded-colors
+packages/web build: ./src/components/mission-control/SliceLadder.tsx
+packages/web build: 129:27  Warning: Arbitrary rgba/hsl color function in Tailwind utility "shadow-[0_8px_22px_rgba(43,33,26,0.04)]" — define a CSS variable (e.g., --xxx-shadow) and use shadow-[var(--xxx-shadow)] instead. (F056 Phase E)  cafe/no-hardcoded-colors
+packages/web build: ./src/components/mission-control/SuggestionDecisionPanel.tsx
+packages/web build: 31:22  Warning: Arbitrary rgba/hsl color function in Tailwind utility "shadow-[0_8px_22px_rgba(43,33,26,0.04)]" — define a CSS variable (e.g., --xxx-shadow) and use shadow-[var(--xxx-shadow)] instead. (F056 Phase E)  cafe/no-hardcoded-colors
+packages/web build: ./src/components/mission-control/SuggestionDrawer.tsx
+packages/web build: 117:24  Warning: Arbitrary rgba/hsl color function in Tailwind utility "shadow-[0_8px_22px_rgba(43,33,26,0.04)]" — define a CSS variable (e.g., --xxx-shadow) and use shadow-[var(--xxx-shadow)] instead. (F056 Phase E)  cafe/no-hardcoded-colors
+packages/web build: 125:22  Warning: Arbitrary rgba/hsl color function in Tailwind utility "shadow-[0_8px_22px_rgba(43,33,26,0.04)]" — define a CSS variable (e.g., --xxx-shadow) and use shadow-[var(--xxx-shadow)] instead. (F056 Phase E)  cafe/no-hardcoded-colors
+packages/web build: ./src/components/mission-control/ThreadSituationPanel.tsx
+packages/web build: 39:17  Warning: Arbitrary rgba/hsl color function in Tailwind utility "shadow-[0_8px_22px_rgba(43,33,26,0.04)]" — define a CSS variable (e.g., --xxx-shadow) and use shadow-[var(--xxx-shadow)] instead. (F056 Phase E)  cafe/no-hardcoded-colors
+packages/web build: 86:25  Warning: Arbitrary rgba/hsl color function in Tailwind utility "shadow-[0_8px_22px_rgba(43,33,26,0.04)]" — define a CSS variable (e.g., --xxx-shadow) and use shadow-[var(--xxx-shadow)] instead. (F056 Phase E)  cafe/no-hardcoded-colors
+packages/web build: ./src/components/mission-control/TranslationMatrix.tsx
+packages/web build: 81:24  Warning: Arbitrary rgba/hsl color function in Tailwind utility "shadow-[0_8px_22px_rgba(43,33,26,0.04)]" — define a CSS variable (e.g., --xxx-shadow) and use shadow-[var(--xxx-shadow)] instead. (F056 Phase E)  cafe/no-hardcoded-colors
+packages/web build: ./src/components/mission-control/WorkflowSopPanel.tsx
+packages/web build: 130:19  Warning: Arbitrary rgba/hsl color function in Tailwind utility "shadow-[0_8px_22px_rgba(43,33,26,0.04)]" — define a CSS variable (e.g., --xxx-shadow) and use shadow-[var(--xxx-shadow)] instead. (F056 Phase E)  cafe/no-hardcoded-colors
+packages/web build: 141:19  Warning: Arbitrary rgba/hsl color function in Tailwind utility "shadow-[0_8px_22px_rgba(43,33,26,0.04)]" — define a CSS variable (e.g., --xxx-shadow) and use shadow-[var(--xxx-shadow)] instead. (F056 Phase E)  cafe/no-hardcoded-colors
+packages/web build: 152:19  Warning: Arbitrary rgba/hsl color function in Tailwind utility "shadow-[0_8px_22px_rgba(43,33,26,0.04)]" — define a CSS variable (e.g., --xxx-shadow) and use shadow-[var(--xxx-shadow)] instead. (F056 Phase E)  cafe/no-hardcoded-colors
+packages/web build: 163:19  Warning: Arbitrary rgba/hsl color function in Tailwind utility "shadow-[0_8px_22px_rgba(43,33,26,0.04)]" — define a CSS variable (e.g., --xxx-shadow) and use shadow-[var(--xxx-shadow)] instead. (F056 Phase E)  cafe/no-hardcoded-colors
+packages/web build: 179:19  Warning: Arbitrary rgba/hsl color function in Tailwind utility "shadow-[0_8px_22px_rgba(43,33,26,0.04)]" — define a CSS variable (e.g., --xxx-shadow) and use shadow-[var(--xxx-shadow)] instead. (F056 Phase E)  cafe/no-hardcoded-colors
+packages/web build: 195:17  Warning: Arbitrary rgba/hsl color function in Tailwind utility "shadow-[0_8px_22px_rgba(43,33,26,0.04)]" — define a CSS variable (e.g., --xxx-shadow) and use shadow-[var(--xxx-shadow)] instead. (F056 Phase E)  cafe/no-hardcoded-colors
+packages/web build: 210:22  Warning: Arbitrary rgba/hsl color function in Tailwind utility "shadow-[0_8px_22px_rgba(43,33,26,0.04)]" — define a CSS variable (e.g., --xxx-shadow) and use shadow-[var(--xxx-shadow)] instead. (F056 Phase E)  cafe/no-hardcoded-colors
+packages/web build: 225:19  Warning: Arbitrary rgba/hsl color function in Tailwind utility "shadow-[0_8px_22px_rgba(43,33,26,0.04)]" — define a CSS variable (e.g., --xxx-shadow) and use shadow-[var(--xxx-shadow)] instead. (F056 Phase E)  cafe/no-hardcoded-colors
+packages/web build: ./src/components/rich/CardBlock.tsx
+packages/web build: 320:5  Warning: React Hook useCallback has a missing dependency: 'resolveCatName'. Either include it or remove the dependency array.  react-hooks/exhaustive-deps
+packages/web build: 506:5  Warning: React Hook useCallback has an unnecessary dependency: 'handleConciergePeek'. Either exclude it or remove the dependency array.  react-hooks/exhaustive-deps
+packages/web build: ./src/components/rich/CommunityIssueDraftCard.tsx
+packages/web build: 178:22  Warning: Hardcoded Tailwind color "border-green-300/40" — use a semantic token (e.g., bg-surface, text-primary, border-default). See F056 design token contract.  cafe/no-hardcoded-colors
+packages/web build: 178:22  Warning: Hardcoded Tailwind color "bg-green-50/10" — use a semantic token (e.g., bg-surface, text-primary, border-default). See F056 design token contract.  cafe/no-hardcoded-colors
+packages/web build: 180:27  Warning: Hardcoded Tailwind color "text-green-600" — use a semantic token (e.g., bg-surface, text-primary, border-default). See F056 design token contract.  cafe/no-hardcoded-colors
+packages/web build: 182:27  Warning: Hardcoded Tailwind color "bg-green-100" — use a semantic token (e.g., bg-surface, text-primary, border-default). See F056 design token contract.  cafe/no-hardcoded-colors
+packages/web build: 182:27  Warning: Hardcoded Tailwind color "text-green-700" — use a semantic token (e.g., bg-surface, text-primary, border-default). See F056 design token contract.  cafe/no-hardcoded-colors
+packages/web build: 189:23  Warning: Hardcoded Tailwind color "text-sky-600" — use a semantic token (e.g., bg-surface, text-primary, border-default). See F056 design token contract.  cafe/no-hardcoded-colors
+packages/web build: 214:20  Warning: Hardcoded Tailwind color "border-sky-300/40" — use a semantic token (e.g., bg-surface, text-primary, border-default). See F056 design token contract.  cafe/no-hardcoded-colors
+packages/web build: 214:20  Warning: Hardcoded Tailwind color "bg-sky-50/10" — use a semantic token (e.g., bg-surface, text-primary, border-default). See F056 design token contract.  cafe/no-hardcoded-colors
+packages/web build: 218:25  Warning: Hardcoded Tailwind color "bg-sky-100" — use a semantic token (e.g., bg-surface, text-primary, border-default). See F056 design token contract.  cafe/no-hardcoded-colors
+packages/web build: 218:25  Warning: Hardcoded Tailwind color "text-sky-700" — use a semantic token (e.g., bg-surface, text-primary, border-default). See F056 design token contract.  cafe/no-hardcoded-colors
+packages/web build: 229:21  Warning: Hardcoded Tailwind color "focus:border-sky-400" — use a semantic token (e.g., bg-surface, text-primary, border-default). See F056 design token contract.  cafe/no-hardcoded-colors
+packages/web build: 241:21  Warning: Hardcoded Tailwind color "focus:border-sky-400" — use a semantic token (e.g., bg-surface, text-primary, border-default). See F056 design token contract.  cafe/no-hardcoded-colors
+packages/web build: 253:23  Warning: Hardcoded Tailwind color "focus:border-sky-400" — use a semantic token (e.g., bg-surface, text-primary, border-default). See F056 design token contract.  cafe/no-hardcoded-colors
+packages/web build: 268:23  Warning: Hardcoded Tailwind color "focus:border-sky-400" — use a semantic token (e.g., bg-surface, text-primary, border-default). See F056 design token contract.  cafe/no-hardcoded-colors
+packages/web build: 287:21  Warning: Hardcoded Tailwind color "bg-sky-600" — use a semantic token (e.g., bg-surface, text-primary, border-default). See F056 design token contract.  cafe/no-hardcoded-colors
+packages/web build: 287:21  Warning: Hardcoded Tailwind color "text-white" — use a semantic token (e.g., bg-surface, text-primary, border-default). See F056 design token contract.  cafe/no-hardcoded-colors
+packages/web build: 287:21  Warning: Hardcoded Tailwind color "hover:bg-sky-700" — use a semantic token (e.g., bg-surface, text-primary, border-default). See F056 design token contract.  cafe/no-hardcoded-colors
+packages/web build: 291:31  Warning: Hardcoded Tailwind color "border-white" — use a semantic token (e.g., bg-surface, text-primary, border-default). See F056 design token contract.  cafe/no-hardcoded-colors
+packages/web build: 296:31  Warning: Hardcoded Tailwind color "border-white" — use a semantic token (e.g., bg-surface, text-primary, border-default). See F056 design token contract.  cafe/no-hardcoded-colors
+packages/web build: 314:30  Warning: Hardcoded Tailwind color "text-red-500" — use a semantic token (e.g., bg-surface, text-primary, border-default). See F056 design token contract.  cafe/no-hardcoded-colors
+packages/web build: ./src/components/rich/CommunityIssuePreviewCard.tsx
+packages/web build: 143:22  Warning: Hardcoded Tailwind color "border-sky-300/30" — use a semantic token (e.g., bg-surface, text-primary, border-default). See F056 design token contract.  cafe/no-hardcoded-colors
+packages/web build: 143:22  Warning: Hardcoded Tailwind color "bg-sky-50/10" — use a semantic token (e.g., bg-surface, text-primary, border-default). See F056 design token contract.  cafe/no-hardcoded-colors
+packages/web build: 145:27  Warning: Hardcoded Tailwind color "border-sky-400" — use a semantic token (e.g., bg-surface, text-primary, border-default). See F056 design token contract.  cafe/no-hardcoded-colors
+packages/web build: 155:22  Warning: Hardcoded Tailwind color "border-green-300/40" — use a semantic token (e.g., bg-surface, text-primary, border-default). See F056 design token contract.  cafe/no-hardcoded-colors
+packages/web build: 155:22  Warning: Hardcoded Tailwind color "bg-green-50/10" — use a semantic token (e.g., bg-surface, text-primary, border-default). See F056 design token contract.  cafe/no-hardcoded-colors
+packages/web build: 157:27  Warning: Hardcoded Tailwind color "text-green-600" — use a semantic token (e.g., bg-surface, text-primary, border-default). See F056 design token contract.  cafe/no-hardcoded-colors
+packages/web build: 159:27  Warning: Hardcoded Tailwind color "bg-green-100" — use a semantic token (e.g., bg-surface, text-primary, border-default). See F056 design token contract.  cafe/no-hardcoded-colors
+packages/web build: 159:27  Warning: Hardcoded Tailwind color "text-green-700" — use a semantic token (e.g., bg-surface, text-primary, border-default). See F056 design token contract.  cafe/no-hardcoded-colors
+packages/web build: 166:23  Warning: Hardcoded Tailwind color "text-sky-600" — use a semantic token (e.g., bg-surface, text-primary, border-default). See F056 design token contract.  cafe/no-hardcoded-colors
+packages/web build: 192:20  Warning: Hardcoded Tailwind color "border-sky-300/40" — use a semantic token (e.g., bg-surface, text-primary, border-default). See F056 design token contract.  cafe/no-hardcoded-colors
+packages/web build: 192:20  Warning: Hardcoded Tailwind color "bg-sky-50/10" — use a semantic token (e.g., bg-surface, text-primary, border-default). See F056 design token contract.  cafe/no-hardcoded-colors
+packages/web build: 196:25  Warning: Hardcoded Tailwind color "bg-sky-100" — use a semantic token (e.g., bg-surface, text-primary, border-default). See F056 design token contract.  cafe/no-hardcoded-colors
+packages/web build: 196:25  Warning: Hardcoded Tailwind color "text-sky-700" — use a semantic token (e.g., bg-surface, text-primary, border-default). See F056 design token contract.  cafe/no-hardcoded-colors
+packages/web build: 207:21  Warning: Hardcoded Tailwind color "focus:border-sky-400" — use a semantic token (e.g., bg-surface, text-primary, border-default). See F056 design token contract.  cafe/no-hardcoded-colors
+packages/web build: 219:21  Warning: Hardcoded Tailwind color "focus:border-sky-400" — use a semantic token (e.g., bg-surface, text-primary, border-default). See F056 design token contract.  cafe/no-hardcoded-colors
+packages/web build: 241:21  Warning: Hardcoded Tailwind color "bg-sky-600" — use a semantic token (e.g., bg-surface, text-primary, border-default). See F056 design token contract.  cafe/no-hardcoded-colors
+packages/web build: 241:21  Warning: Hardcoded Tailwind color "text-white" — use a semantic token (e.g., bg-surface, text-primary, border-default). See F056 design token contract.  cafe/no-hardcoded-colors
+packages/web build: 241:21  Warning: Hardcoded Tailwind color "hover:bg-sky-700" — use a semantic token (e.g., bg-surface, text-primary, border-default). See F056 design token contract.  cafe/no-hardcoded-colors
+packages/web build: 245:31  Warning: Hardcoded Tailwind color "border-white" — use a semantic token (e.g., bg-surface, text-primary, border-default). See F056 design token contract.  cafe/no-hardcoded-colors
+packages/web build: 263:30  Warning: Hardcoded Tailwind color "text-red-500" — use a semantic token (e.g., bg-surface, text-primary, border-default). See F056 design token contract.  cafe/no-hardcoded-colors
+packages/web build: ./src/components/rich/CommunityPublishFlow.tsx
+packages/web build: 68:21  Warning: Hardcoded Tailwind color "border-sky-400/50" — use a semantic token (e.g., bg-surface, text-primary, border-default). See F056 design token contract.  cafe/no-hardcoded-colors
+packages/web build: 68:21  Warning: Hardcoded Tailwind color "bg-sky-50/20" — use a semantic token (e.g., bg-surface, text-primary, border-default). See F056 design token contract.  cafe/no-hardcoded-colors
+packages/web build: 68:21  Warning: Hardcoded Tailwind color "text-sky-700" — use a semantic token (e.g., bg-surface, text-primary, border-default). See F056 design token contract.  cafe/no-hardcoded-colors
+packages/web build: 68:21  Warning: Hardcoded Tailwind color "hover:bg-sky-100/30" — use a semantic token (e.g., bg-surface, text-primary, border-default). See F056 design token contract.  cafe/no-hardcoded-colors
+packages/web build: 72:40  Warning: Hardcoded Tailwind color "text-red-500" — use a semantic token (e.g., bg-surface, text-primary, border-default). See F056 design token contract.  cafe/no-hardcoded-colors
+packages/web build: 81:25  Warning: Hardcoded Tailwind color "border-sky-400" — use a semantic token (e.g., bg-surface, text-primary, border-default). See F056 design token contract.  cafe/no-hardcoded-colors
+packages/web build: 97:25  Warning: Hardcoded Tailwind color "text-sky-700" — use a semantic token (e.g., bg-surface, text-primary, border-default). See F056 design token contract.  cafe/no-hardcoded-colors
+packages/web build: ./src/components/rich/FileBlock.tsx
+packages/web build: 47:54  Warning: Hardcoded Tailwind color "bg-black" — use a semantic token (e.g., bg-surface, text-primary, border-default). See F056 design token contract.  cafe/no-hardcoded-colors
+packages/web build: ./src/components/rich/FrustrationIssueCard.tsx
+packages/web build: 150:6  Warning: React Hook useEffect has a missing dependency: 'hydratedDraftId'. Either include it or remove the dependency array.  react-hooks/exhaustive-deps
+packages/web build: 238:90  Warning: Hardcoded Tailwind color "border-amber-500/40" — use a semantic token (e.g., bg-surface, text-primary, border-default). See F056 design token contract.  cafe/no-hardcoded-colors
+packages/web build: 238:90  Warning: Hardcoded Tailwind color "bg-amber-50/10" — use a semantic token (e.g., bg-surface, text-primary, border-default). See F056 design token contract.  cafe/no-hardcoded-colors
+packages/web build: 242:63  Warning: Hardcoded Tailwind color "text-amber-700" — use a semantic token (e.g., bg-surface, text-primary, border-default). See F056 design token contract.  cafe/no-hardcoded-colors
+packages/web build: 307:25  Warning: Hardcoded Tailwind color "text-white" — use a semantic token (e.g., bg-surface, text-primary, border-default). See F056 design token contract.  cafe/no-hardcoded-colors
+packages/web build: 323:25  Warning: Hardcoded Tailwind color "border-orange-300/50" — use a semantic token (e.g., bg-surface, text-primary, border-default). See F056 design token contract.  cafe/no-hardcoded-colors
+packages/web build: 323:25  Warning: Hardcoded Tailwind color "text-orange-600" — use a semantic token (e.g., bg-surface, text-primary, border-default). See F056 design token contract.  cafe/no-hardcoded-colors
+packages/web build: 323:25  Warning: Hardcoded Tailwind color "hover:bg-orange-50/30" — use a semantic token (e.g., bg-surface, text-primary, border-default). See F056 design token contract.  cafe/no-hardcoded-colors
+packages/web build: 329:34  Warning: Hardcoded Tailwind color "text-red-500" — use a semantic token (e.g., bg-surface, text-primary, border-default). See F056 design token contract.  cafe/no-hardcoded-colors
+packages/web build: ./src/components/rich/InteractiveBlock.tsx
+packages/web build: 629:5  Warning: React Hook useCallback has a missing dependency: 'sendContext'. Either include it or remove the dependency array.  react-hooks/exhaustive-deps
+packages/web build: ./src/components/rich/MediaGalleryBlock.tsx
+packages/web build: 64:21  Warning: Using `<img>` could result in slower LCP and higher bandwidth. Consider using `<Image />` from `next/image` to automatically optimize images. This may incur additional usage or cost from your provider. See: https://nextjs.org/docs/messages/no-img-element  @next/next/no-img-element
+packages/web build: ./src/components/rich/ProposalCard.tsx
+packages/web build: 297:28  Warning: Hardcoded Tailwind color "text-gray-600" — use a semantic token (e.g., bg-surface, text-primary, border-default). See F056 design token contract.  cafe/no-hardcoded-colors
+packages/web build: 297:28  Warning: Hardcoded Tailwind color "dark:text-gray-300" — use a semantic token (e.g., bg-surface, text-primary, border-default). See F056 design token contract.  cafe/no-hardcoded-colors
+packages/web build: 302:25  Warning: Hardcoded Tailwind color "border-gray-300" — use a semantic token (e.g., bg-surface, text-primary, border-default). See F056 design token contract.  cafe/no-hardcoded-colors
+packages/web build: 302:25  Warning: Hardcoded Tailwind color "dark:border-gray-600" — use a semantic token (e.g., bg-surface, text-primary, border-default). See F056 design token contract.  cafe/no-hardcoded-colors
+packages/web build: ./src/components/runtime-sessions/ExternalRuntimeSessionsPanel.tsx
+packages/web build: 194:21  Warning: Arbitrary rgba/hsl color function in Tailwind utility "shadow-[0_1px_3px_rgba(43,33,26,0.06)]" — define a CSS variable (e.g., --xxx-shadow) and use shadow-[var(--xxx-shadow)] instead. (F056 Phase E)  cafe/no-hardcoded-colors
+packages/web build: ./src/components/settings/CatDossierContent.tsx
+packages/web build: 182:21  Warning: Hardcoded Tailwind color "text-white" — use a semantic token (e.g., bg-surface, text-primary, border-default). See F056 design token contract.  cafe/no-hardcoded-colors
+packages/web build: ./src/components/settings/CompiledPreviewModal.tsx
+packages/web build: 156:19  Warning: Arbitrary rgba/hsl color function in Tailwind utility "shadow-[0_20px_48px_rgba(43,33,26,0.14)]" — define a CSS variable (e.g., --xxx-shadow) and use shadow-[var(--xxx-shadow)] instead. (F056 Phase E)  cafe/no-hardcoded-colors
+packages/web build: ./src/components/settings/ConciergeSettingsParts.tsx
+packages/web build: 35:20  Warning: Hardcoded Tailwind color "bg-white" — use a semantic token (e.g., bg-surface, text-primary, border-default). See F056 design token contract.  cafe/no-hardcoded-colors
+packages/web build: ./src/components/settings/McpManageContent.tsx
+packages/web build: 258:25  Warning: Arbitrary rgba/hsl color function in Tailwind utility "shadow-[0_8px_22px_rgba(43,33,26,0.04)]" — define a CSS variable (e.g., --xxx-shadow) and use shadow-[var(--xxx-shadow)] instead. (F056 Phase E)  cafe/no-hardcoded-colors
+packages/web build: ./src/components/settings/MountRulesPanel.tsx
+packages/web build: 165:20  Warning: Arbitrary rgba/hsl color function in Tailwind utility "shadow-[0_12px_30px_rgba(43,33,26,0.08)]" — define a CSS variable (e.g., --xxx-shadow) and use shadow-[var(--xxx-shadow)] instead. (F056 Phase E)  cafe/no-hardcoded-colors
+packages/web build: ./src/components/settings/PluginsContent.tsx
+packages/web build: 87:15  Warning: Using `<img>` could result in slower LCP and higher bandwidth. Consider using `<Image />` from `next/image` to automatically optimize images. This may incur additional usage or cost from your provider. See: https://nextjs.org/docs/messages/no-img-element  @next/next/no-img-element
+packages/web build: ./src/components/settings/SegmentEditorModal.tsx
+packages/web build: 74:14  Warning: The ref value 'reqRef.current' will likely have changed by the time this effect cleanup function runs. If this ref points to a node rendered by React, copy 'reqRef.current' to a variable inside the effect, and use that variable in the cleanup function.  react-hooks/exhaustive-deps
+packages/web build: 167:19  Warning: Arbitrary rgba/hsl color function in Tailwind utility "shadow-[0_20px_48px_rgba(43,33,26,0.14)]" — define a CSS variable (e.g., --xxx-shadow) and use shadow-[var(--xxx-shadow)] instead. (F056 Phase E)  cafe/no-hardcoded-colors
+packages/web build: ./src/components/settings/SkillPreviewModal.tsx
+packages/web build: 94:19  Warning: Arbitrary rgba/hsl color function in Tailwind utility "shadow-[0_20px_48px_rgba(43,33,26,0.14)]" — define a CSS variable (e.g., --xxx-shadow) and use shadow-[var(--xxx-shadow)] instead. (F056 Phase E)  cafe/no-hardcoded-colors
+packages/web build: ./src/components/settings/plugin-manager/PluginVisual.tsx
+packages/web build: 35:9  Warning: Using `<img>` could result in slower LCP and higher bandwidth. Consider using `<Image />` from `next/image` to automatically optimize images. This may incur additional usage or cost from your provider. See: https://nextjs.org/docs/messages/no-img-element  @next/next/no-img-element
+packages/web build: ./src/components/settings/primitives/SettingsCard.tsx
+packages/web build: 47:18  Warning: Arbitrary rgba/hsl color function in Tailwind utility "shadow-[0_8px_22px_rgba(43,33,26,0.04)]" — define a CSS variable (e.g., --xxx-shadow) and use shadow-[var(--xxx-shadow)] instead. (F056 Phase E)  cafe/no-hardcoded-colors
+packages/web build: ./src/components/settings/primitives/SettingsCollapsibleCard.tsx
+packages/web build: 15:20  Warning: Arbitrary rgba/hsl color function in Tailwind utility "shadow-[0_8px_22px_rgba(43,33,26,0.04)]" — define a CSS variable (e.g., --xxx-shadow) and use shadow-[var(--xxx-shadow)] instead. (F056 Phase E)  cafe/no-hardcoded-colors
+packages/web build: ./src/components/settings/primitives/SettingsRow.tsx
+packages/web build: 79:52  Warning: Arbitrary rgba/hsl color function in Tailwind utility "shadow-[0_8px_22px_rgba(43,33,26,0.04)]" — define a CSS variable (e.g., --xxx-shadow) and use shadow-[var(--xxx-shadow)] instead. (F056 Phase E)  cafe/no-hardcoded-colors
+packages/web build: ./src/components/settings/primitives/SettingsSection.tsx
+packages/web build: 12:24  Warning: Arbitrary rgba/hsl color function in Tailwind utility "shadow-[0_8px_22px_rgba(43,33,26,0.04)]" — define a CSS variable (e.g., --xxx-shadow) and use shadow-[var(--xxx-shadow)] instead. (F056 Phase E)  cafe/no-hardcoded-colors
+packages/web build: ./src/components/settings/useCapabilityState.ts
+packages/web build: 62:5  Warning: React Hook useCallback has an unnecessary dependency: 'filterType'. Either exclude it or remove the dependency array.  react-hooks/exhaustive-deps
+packages/web build: ./src/components/signals/SignalArticleList.tsx
+packages/web build: 151:29  Warning: Arbitrary rgba/hsl color function in Tailwind utility "shadow-[0_1px_3px_rgba(43,33,26,0.06)]" — define a CSS variable (e.g., --xxx-shadow) and use shadow-[var(--xxx-shadow)] instead. (F056 Phase E)  cafe/no-hardcoded-colors
+packages/web build: ./src/components/signals/SignalInboxView.tsx
+packages/web build: 297:28  Warning: Arbitrary rgba/hsl color function in Tailwind utility "shadow-[0_1px_3px_rgba(43,33,26,0.06)]" — define a CSS variable (e.g., --xxx-shadow) and use shadow-[var(--xxx-shadow)] instead. (F056 Phase E)  cafe/no-hardcoded-colors
+packages/web build: ./src/components/story-player/ChapterBadge.tsx
+packages/web build: 101:20  Warning: Hex color "#e0e0e0" in style prop — use a CSS variable (var(--xxx)) or design token.  cafe/no-hardcoded-colors
+packages/web build: ./src/components/story-player/FeatureTheaterContent.tsx
+packages/web build: 120:22  Warning: Arbitrary rgba/hsl color function in Tailwind utility "border-[var(--console-border,rgba(255,255,255,0.1))]" — define a CSS variable (e.g., --xxx-shadow) and use shadow-[var(--xxx-shadow)] instead. (F056 Phase E)  cafe/no-hardcoded-colors
+packages/web build: ./src/components/story-player/ReplayEventBubble.tsx
+packages/web build: 152:48  Warning: Hardcoded Tailwind color "bg-red-500/10" — use a semantic token (e.g., bg-surface, text-primary, border-default). See F056 design token contract.  cafe/no-hardcoded-colors
+packages/web build: ./src/components/story-player/TheaterOverlay.tsx
+packages/web build: 73:19  Warning: Arbitrary rgba/hsl color function in Tailwind utility "bg-[var(--console-overlay-backdrop,rgba(0,0,0,0.75))]" — define a CSS variable (e.g., --xxx-shadow) and use shadow-[var(--xxx-shadow)] instead. (F056 Phase E)  cafe/no-hardcoded-colors
+packages/web build: 81:24  Warning: Arbitrary rgba/hsl color function in Tailwind utility "border-[var(--console-border,rgba(255,255,255,0.1))]" — define a CSS variable (e.g., --xxx-shadow) and use shadow-[var(--xxx-shadow)] instead. (F056 Phase E)  cafe/no-hardcoded-colors
+packages/web build: 113:23  Warning: Arbitrary rgba/hsl color function in Tailwind utility "hover:bg-[var(--console-hover,rgba(255,255,255,0.08))]" — define a CSS variable (e.g., --xxx-shadow) and use shadow-[var(--xxx-shadow)] instead. (F056 Phase E)  cafe/no-hardcoded-colors
+packages/web build: 139:26  Warning: Arbitrary rgba/hsl color function in Tailwind utility "border-[var(--console-border,rgba(255,255,255,0.1))]" — define a CSS variable (e.g., --xxx-shadow) and use shadow-[var(--xxx-shadow)] instead. (F056 Phase E)  cafe/no-hardcoded-colors
+packages/web build: ./src/components/story-player/ThreadPanel.tsx
+packages/web build: 69:22  Warning: Arbitrary rgba/hsl color function in Tailwind utility "border-[var(--console-border,rgba(255,255,255,0.1))]" — define a CSS variable (e.g., --xxx-shadow) and use shadow-[var(--xxx-shadow)] instead. (F056 Phase E)  cafe/no-hardcoded-colors
+packages/web build: 72:69  Warning: Hardcoded Tailwind color "bg-purple-400" — use a semantic token (e.g., bg-surface, text-primary, border-default). See F056 design token contract.  cafe/no-hardcoded-colors
+packages/web build: 72:121  Warning: Hardcoded Tailwind color "bg-green-400" — use a semantic token (e.g., bg-surface, text-primary, border-default). See F056 design token contract.  cafe/no-hardcoded-colors
+packages/web build: 72:138  Warning: Hardcoded Tailwind color "bg-gray-600" — use a semantic token (e.g., bg-surface, text-primary, border-default). See F056 design token contract.  cafe/no-hardcoded-colors
+packages/web build: ./src/components/visible-cafe/ProvenanceOverlay.tsx
+packages/web build: 35:16  Warning: Hex color "#e8e0f0" in style prop — use a CSS variable (var(--xxx)) or design token.  cafe/no-hardcoded-colors
+packages/web build: 53:20  Warning: Hex color "#a090c0" in style prop — use a CSS variable (var(--xxx)) or design token.  cafe/no-hardcoded-colors
+packages/web build: 87:77  Warning: Hex color "#a090c0" in style prop — use a CSS variable (var(--xxx)) or design token.  cafe/no-hardcoded-colors
+packages/web build: 100:59  Warning: Hex color "#8070a0" in style prop — use a CSS variable (var(--xxx)) or design token.  cafe/no-hardcoded-colors
+packages/web build: ./src/components/visible-cafe/StarCard.tsx
+packages/web build: 110:18  Warning: Hex color "#e8e0f0" in style prop — use a CSS variable (var(--xxx)) or design token.  cafe/no-hardcoded-colors
+packages/web build: 125:20  Warning: Hex color "#a090c0" in style prop — use a CSS variable (var(--xxx)) or design token.  cafe/no-hardcoded-colors
+packages/web build: 141:20  Warning: Hex color "#f0e8ff" in style prop — use a CSS variable (var(--xxx)) or design token.  cafe/no-hardcoded-colors
+packages/web build: 177:20  Warning: Hex color "#c0b0d8" in style prop — use a CSS variable (var(--xxx)) or design token.  cafe/no-hardcoded-colors
+packages/web build: 192:33  Warning: Hex color "#8070a0" in style prop — use a CSS variable (var(--xxx)) or design token.  cafe/no-hardcoded-colors
+packages/web build: 201:20  Warning: Hex color "#8070a0" in style prop — use a CSS variable (var(--xxx)) or design token.  cafe/no-hardcoded-colors
+packages/web build: 245:18  Warning: Hex color "#a0b0d0" in style prop — use a CSS variable (var(--xxx)) or design token.  cafe/no-hardcoded-colors
+packages/web build: ./src/components/visible-cafe/StarryRoom.tsx
+packages/web build: 121:26  Warning: Hex color "#1a0a2e" in style prop — use a CSS variable (var(--xxx)) or design token.  cafe/no-hardcoded-colors
+packages/web build: ./src/components/workbench/GrowingOwnerSurfaces.tsx
+packages/web build: 155:5  Warning: React Hook useCallback has a missing dependency: 'target'. Either include it or remove the dependency array.  react-hooks/exhaustive-deps
+packages/web build: ./src/components/workbench/content-editor/WorkspaceOfficeSurface.tsx
+packages/web build: 82:64  Warning: Hardcoded Tailwind color "text-white" — use a semantic token (e.g., bg-surface, text-primary, border-default). See F056 design token contract.  cafe/no-hardcoded-colors
+packages/web build: ./src/components/workspace/AgentPaneList.tsx
+packages/web build: 60:22  Warning: The ref value 'requestEpoch.current' will likely have changed by the time this effect cleanup function runs. If this ref points to a node rendered by React, copy 'requestEpoch.current' to a variable inside the effect, and use that variable in the cleanup function.  react-hooks/exhaustive-deps
+packages/web build: info  - Need to disable some ESLint rules? Learn more here: https://nextjs.org/docs/basic-features/eslint#disabling-rules
+packages/web build:    Collecting page data ...
+packages/web build:    Generating static pages (0/46) ...
+packages/web build:    Generating static pages (11/46)
+packages/web build:    Generating static pages (22/46)
+packages/web build:    Generating static pages (34/46)
+packages/web build:  ✓ Generating static pages (46/46)
+packages/web build:    Finalizing page optimization ...
+packages/web build:    Collecting build traces ...
+packages/web build: Route (app)                                                Size     First Load JS
+packages/web build: ┌ ƒ /                                                      159 B          91.1 kB
+packages/web build: ├ ○ /_not-found                                            884 B          91.9 kB
+packages/web build: ├ ○ /collective                                            10.3 kB         209 kB
+packages/web build: ├ ○ /dev/f229-chat-surface-parity                          3.08 kB         634 kB
+packages/web build: ├ ○ /dev/f246-history-details                              6.21 kB         340 kB
+packages/web build: ├ ○ /dev/f247-inline-recovery-preview                      10.9 kB         102 kB
+packages/web build: ├ ○ /dev/f269-overflow-preview                             12.5 kB         351 kB
+packages/web build: ├ ○ /dev/f276-person-memory-preview                        3.47 kB         360 kB
+packages/web build: ├ ○ /dev/f277-attention-preview                            13.5 kB         249 kB
+packages/web build: ├ ○ /dev/f277-attention-preview/search                     6.18 kB         414 kB
+packages/web build: ├ ○ /dev/f290-asset-collaboration                          11.5 kB         345 kB
+packages/web build: ├ ○ /dev/f293-human-recovery                               1.46 kB         482 kB
+packages/web build: ├ ○ /dev/f294-html-widget-live-message                     6.85 kB         113 kB
+packages/web build: ├ ○ /dev/f294-html-widget-responsive-export                2.95 kB         109 kB
+packages/web build: ├ ƒ /dev/f294-html-widget-responsive-export/delayed-image  0 B                0 B
+packages/web build: ├ ○ /dev/f294-live-selection-id                            3.72 kB         377 kB
+packages/web build: ├ ○ /dev/f294-long-message-export                          1.15 kB         482 kB
+packages/web build: ├ ○ /dev/f294-quote-plane-fixtures                         3.17 kB         495 kB
+packages/web build: ├ ○ /dev/f294-selection-toolbar-preview                    6.45 kB         412 kB
+packages/web build: ├ ○ /dev/f299-phase-c-evidence-preview                     6.29 kB         377 kB
+packages/web build: ├ ○ /dev/f299-trajectory-visual-preview                    6.96 kB         221 kB
+packages/web build: ├ ○ /dev/f305-approval-design-gate                         4.63 kB         338 kB
+packages/web build: ├ ○ /dev/f310-readable-return-preview                      159 B          91.1 kB
+packages/web build: ├ ○ /dev/issue1371-adopted-hold                            4.79 kB         366 kB
+packages/web build: ├ ○ /dev/markdown-math-preview                             205 B           330 kB
+packages/web build: ├ ○ /dev/memory-status-preview                             4.52 kB        99.9 kB
+packages/web build: ├ ○ /dev/rich-html-interaction-continuity                  2.61 kB         1.3 MB
+packages/web build: ├ ƒ /memory                                                182 B           379 kB
+packages/web build: ├ ƒ /memory/catalog                                        185 B           379 kB
+packages/web build: ├ ƒ /memory/graph                                          182 B           379 kB
+packages/web build: ├ ƒ /memory/health                                         182 B           379 kB
+packages/web build: ├ ƒ /memory/search                                         182 B           379 kB
+packages/web build: ├ ƒ /memory/status                                         183 B           379 kB
+packages/web build: ├ ○ /mission                                               158 B          91.1 kB
+packages/web build: ├ ○ /mission-control                                       158 B          91.1 kB
+packages/web build: ├ ○ /mission-hub                                           88.9 kB         436 kB
+packages/web build: ├ ○ /pixel-brawl                                           1.95 kB        92.9 kB
+packages/web build: ├ ƒ /settings                                              135 kB          519 kB
+packages/web build: ├ ○ /showcase/f052-cross-thread-author-label               2.95 kB         483 kB
+packages/web build: ├ ○ /showcase/f11-review                                   5.19 kB         486 kB
+packages/web build: ├ ƒ /signals                                               12.9 kB         358 kB
+packages/web build: ├ ƒ /signals/sources                                       5.11 kB         230 kB
+packages/web build: ├ ○ /starry                                                11 kB           346 kB
+packages/web build: ├ ○ /story-export                                          1.79 kB         337 kB
+packages/web build: ├ ○ /story-export/grep-hippocampus                         5.98 kB         342 kB
+packages/web build: ├ ƒ /story/[storyId]                                       15.8 kB         361 kB
+packages/web build: ├ ƒ /story/[storyId]/public                                1.97 kB        92.9 kB
+packages/web build: └ ƒ /thread/[threadId]                                     158 B          91.1 kB
+packages/web build: + First Load JS shared by all                              91 kB
+packages/web build:   ├ chunks/7880-68c4464ca33b2822.js                        34.1 kB
+packages/web build:   ├ chunks/bab01579-adcd9d45c94349e9.js                    53.7 kB
+packages/web build:   └ other shared chunks (total)                            3.19 kB
+packages/web build: ○  (Static)   prerendered as static content
+packages/web build: ƒ  (Dynamic)  server-rendered on demand
+packages/web build: Done
+packages/web postbuild$ node scripts/write-build-stamp.cjs && pnpm run test:production-cache-policy
+packages/web postbuild: [web] clean build identity unavailable; skipped .next/.build-commit (runtime deployment guard will fail closed)
+packages/web postbuild: > @cat-cafe/web@0.1.0 test:production-cache-policy /Users/lang/workspace/github-lab/clowder-1452-build-correctness/packages/web
+packages/web postbuild: > node --test test/production-cache-policy.test.cjs
+packages/web postbuild: ▶ production PWA cache policy
+packages/web postbuild:   ✔ keeps build-specific chat documents out of static output and the precache manifest (1.482625ms)
+packages/web postbuild:   ✔ serves documents as non-cacheable while keeping hashed assets immutable (294.840458ms)
+packages/web postbuild: ✔ production PWA cache policy (3917.056292ms)
+packages/web postbuild: ℹ tests 2
+packages/web postbuild: ℹ suites 1
+packages/web postbuild: ℹ pass 2
+packages/web postbuild: ℹ fail 0
+packages/web postbuild: ℹ cancelled 0
+packages/web postbuild: ℹ skipped 0
+packages/web postbuild: ℹ todo 0
+packages/web postbuild: ℹ duration_ms 4067.214209
+packages/web postbuild: Done
+packages/collective-service build$ pnpm --dir ../shared build && pnpm --dir ../collective-client build && tsc
+packages/collective-service build: > @cat-cafe/shared@0.1.0 build /Users/lang/workspace/github-lab/clowder-1452-build-correctness/packages/shared
+packages/collective-service build: > tsc
+packages/collective-service build: > @cat-cafe/collective-client@0.1.0 build /Users/lang/workspace/github-lab/clowder-1452-build-correctness/packages/collective-client
+packages/collective-service build: > pnpm run clean && pnpm run lint && node ./scripts/build.mjs && tsc -p tsconfig.server.json
+packages/collective-service build: > @cat-cafe/collective-client@0.1.0 clean /Users/lang/workspace/github-lab/clowder-1452-build-correctness/packages/collective-client
+packages/collective-service build: > rm -rf dist
+packages/collective-service build: > @cat-cafe/collective-client@0.1.0 lint /Users/lang/workspace/github-lab/clowder-1452-build-correctness/packages/collective-client
+packages/collective-service build: > tsc --noEmit
+packages/collective-service build: Done
+packages/collective-connector build$ tsc
+packages/collective-connector build: Done
+packages/api build$ pnpm --dir ../shared build && pnpm --dir ../collective-connector build && pnpm --dir ../collective-service build && pnpm run build:f247-extension && tsc && node ./scripts/copy-marketplace-catalog-data.mjs && node ../../scripts/check-provider-request-recorder.mjs
+packages/api build: > @cat-cafe/shared@0.1.0 build /Users/lang/workspace/github-lab/clowder-1452-build-correctness/packages/shared
+packages/api build: > tsc
+packages/api build: > @cat-cafe/collective-connector@0.1.0 build /Users/lang/workspace/github-lab/clowder-1452-build-correctness/packages/collective-connector
+packages/api build: > tsc
+packages/api build: > @cat-cafe/collective-service@0.1.0 build /Users/lang/workspace/github-lab/clowder-1452-build-correctness/packages/collective-service
+packages/api build: > pnpm --dir ../shared build && pnpm --dir ../collective-client build && tsc
+packages/api build: > @cat-cafe/shared@0.1.0 build /Users/lang/workspace/github-lab/clowder-1452-build-correctness/packages/shared
+packages/api build: > tsc
+packages/api build: > @cat-cafe/collective-client@0.1.0 build /Users/lang/workspace/github-lab/clowder-1452-build-correctness/packages/collective-client
+packages/api build: > pnpm run clean && pnpm run lint && node ./scripts/build.mjs && tsc -p tsconfig.server.json
+packages/api build: > @cat-cafe/collective-client@0.1.0 clean /Users/lang/workspace/github-lab/clowder-1452-build-correctness/packages/collective-client
+packages/api build: > rm -rf dist
+packages/api build: > @cat-cafe/collective-client@0.1.0 lint /Users/lang/workspace/github-lab/clowder-1452-build-correctness/packages/collective-client
+packages/api build: > tsc --noEmit
+packages/api build: > @cat-cafe/api@0.1.0 build:f247-extension /Users/lang/workspace/github-lab/clowder-1452-build-correctness/packages/api
+packages/api build: > node scripts/build-f247-personal-chrome-extension.mjs
+packages/api build: F299 provider request recorder census OK (13 implementers)
+packages/api build: Done

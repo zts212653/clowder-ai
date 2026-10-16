@@ -1,0 +1,56 @@
+
+==> Step 1/6 — Build web application
+  [OK] Skipped (--skip-web)
+
+==> Step 2/6 — pnpm deploy runtime packages
+  [OK] Skipped (--skip-deploy)
+
+==> Step 3/6 — Bundle Node.js portable (arm64)
+  Build-machine Node: v24.15.0 (arm64)
+v24.15.0
+  [OK] node-darwin-arm64 matches build v24.15.0
+sqlite/vec: v0.1.9
+native-smoke: OK
+v24.15.0
+
+==> Step 4/6 — Build Redis portable from source
+  [OK] redis-darwin-arm64 reused (--skip-redis)
+
+==> Step 5/6 — CLI tools (skipped on macOS)
+  [OK] Skipped — macOS DMG does not auto-install CLI tools
+
+==> Step 6/6 — Assets + electron-builder
+  [OK] icon.icns already present
+  Running: npx electron-builder --mac dir --arm64
+npm warn Unknown env config "shamefully-hoist". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options.
+npm warn Unknown env config "auto-install-peers". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options.
+  • electron-builder  version=26.8.1 os=25.6.0
+  • loaded configuration  file=package.json ("build" field)
+  • executing @electron/rebuild  electronVersion=35.7.5 arch=arm64 buildFromSource=false workspaceRoot=/Users/lang/workspace/github-lab/clowder-1452-build-correctness/desktop projectDir=./ appDir=./
+  • installing native dependencies  arch=arm64
+  • completed installing native dependencies
+  • packaging       platform=darwin arch=arm64 electron=35.7.5 appOutDir=dist/mac-arm64
+  • asar usage is disabled — this is strongly not recommended  solution=enable asar and use asarUnpack to unpack files that must be externally available
+  • searching for node modules  pm=npm searchDir=/Users/lang/workspace/github-lab/clowder-1452-build-correctness/desktop
+(node:37746) [DEP0190] DeprecationWarning: Passing args to a child process with shell option true can lead to security vulnerabilities, as the arguments are not escaped, only concatenated.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+  • searching for node modules  pm=traversal searchDir=/Users/lang/workspace/github-lab/clowder-1452-build-correctness/desktop
+  • using manual traversal of node_modules to build dependency tree
+  • no node modules returned while searching directories  searchDirectories=[""]
+  afterPack: copying api/node_modules ...
+  afterPack: api/node_modules copied
+  afterPack: copying web/node_modules ...
+  afterPack: web/node_modules copied
+  afterPack: copying mcp-server/node_modules ...
+  afterPack: mcp-server/node_modules copied
+  afterPack: scripts/node_modules → packages/api/node_modules (symlink)
+  afterPack: 40 Mach-O binaries verified for arm64
+  • asar usage is disabled — this is strongly not recommended  solution=enable asar and use asarUnpack to unpack files that must be externally available
+  • skipped macOS code signing  reason=identity explicitly is set to null
+  • arm64 requires signing, but identity is set to null and signing is being skipped
+  Ad-hoc signing arm64 bundle ...
+/Users/lang/workspace/github-lab/clowder-1452-build-correctness/desktop/dist/mac-arm64/Clowder AI.app: replacing existing signature
+  [OK] Ad-hoc signed and verified arm64
+[desktop-node] spawnSync /Users/lang/workspace/github-lab/clowder-1452-build-correctness/desktop/dist/mac-arm64/Clowder AI.app/Contents/Resources/node/bin/node ETIMEDOUT
+Fix: use a supported native Node runtime and rebuild the deploy artifacts; no version is guessed.
+  [ERR] Signed installed-layout Node/native validation failed

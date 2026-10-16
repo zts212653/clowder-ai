@@ -1,0 +1,138 @@
+  afterPack: /Users/lang/workspace/github-lab/clowder-1452-build-correctness/.acceptance/public-main/bundled/deploy/api/node_modules not found, skipping
+  afterPack: /Users/lang/workspace/github-lab/clowder-1452-build-correctness/.acceptance/public-main/bundled/deploy/web/node_modules not found, skipping
+  afterPack: /Users/lang/workspace/github-lab/clowder-1452-build-correctness/.acceptance/public-main/bundled/deploy/mcp-server/node_modules not found, skipping
+fatal error: /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/lipo: can't figure out the architecture type of: /private/var/folders/1z/8dpvll5d2fq7brlf2qk4kkw40000gn/T/macho-bundle-MQDf2K/broken.node
+✖ mac build preflight rejects missing-node before install/deploy (1017.749334ms)
+✖ mac build preflight rejects unsupported-engine before install/deploy (309.113959ms)
+✖ mac build preflight rejects foreign-arch before install/deploy (331.224625ms)
+✔ engines validates complete versions and rejects unknown/missing constraints (0.927792ms)
+✔ same-major runtime caches still fail on exact version, ABI or target mismatch (0.346584ms)
+✔ CLI rejects missing/incompatible bundled Node instead of guessing (222.672375ms)
+✔ native smoke cannot fall back to build-host modules when deploy is incomplete (221.0545ms)
+✔ architecture verification checks bytes, loader choice, universal and optional prebuild siblings (0.645042ms)
+✖ afterPack rejects an incomplete app instead of shipping absent native modules (3.380041ms)
+✔ real Mach-O mismatch and corrupt/symlinked native files fail closed (46.079167ms)
+✖ the Web build launches a JS entry instead of a Windows .cmd shim (1.928334ms)
+✔ the exact Web build carrier preserves literal args, spaces and exit status (130.5855ms)
+✔ missing command and missing usage fail closed (137.425208ms)
+✔ the executable carrier preserves SIGINT (130.76575ms)
+✔ the executable carrier preserves SIGTERM (130.007291ms)
+ℹ tests 15
+ℹ suites 0
+ℹ pass 10
+ℹ fail 5
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 2247.811542
+
+✖ failing tests:
+
+test at .acceptance/public-main/desktop/scripts/build-correctness.test.mjs:17:3
+✖ mac build preflight rejects missing-node before install/deploy (1017.749334ms)
+  AssertionError [ERR_ASSERTION]:
+  ==> Step 1/6 — Build web application
+  INSTALL_WAS_REACHED
+    [!!] frozen-lockfile failed, retrying with pnpm install
+  INSTALL_WAS_REACHED
+
+
+  true !== false
+
+      at TestContext.<anonymous> (file:///Users/lang/workspace/github-lab/clowder-1452-build-correctness/.acceptance/public-main/desktop/scripts/build-correctness.test.mjs:34:14)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1201:25)
+      at Test.start (node:internal/test_runner/test:1096:17)
+      at startSubtestAfterBootstrap (node:internal/test_runner/harness:385:17) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: true,
+    expected: false,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at .acceptance/public-main/desktop/scripts/build-correctness.test.mjs:17:3
+✖ mac build preflight rejects unsupported-engine before install/deploy (309.113959ms)
+  AssertionError [ERR_ASSERTION]:
+  ==> Step 1/6 — Build web application
+  INSTALL_WAS_REACHED
+    [!!] frozen-lockfile failed, retrying with pnpm install
+  INSTALL_WAS_REACHED
+
+
+  true !== false
+
+      at TestContext.<anonymous> (file:///Users/lang/workspace/github-lab/clowder-1452-build-correctness/.acceptance/public-main/desktop/scripts/build-correctness.test.mjs:34:14)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1201:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:831:18)
+      at Test.postRun (node:internal/test_runner/test:1330:19)
+      at Test.run (node:internal/test_runner/test:1258:12)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:385:3) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: true,
+    expected: false,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at .acceptance/public-main/desktop/scripts/build-correctness.test.mjs:17:3
+✖ mac build preflight rejects foreign-arch before install/deploy (331.224625ms)
+  AssertionError [ERR_ASSERTION]:
+  ==> Step 1/6 — Build web application
+  INSTALL_WAS_REACHED
+    [!!] frozen-lockfile failed, retrying with pnpm install
+  INSTALL_WAS_REACHED
+
+
+  true !== false
+
+      at TestContext.<anonymous> (file:///Users/lang/workspace/github-lab/clowder-1452-build-correctness/.acceptance/public-main/desktop/scripts/build-correctness.test.mjs:34:14)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1201:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:831:18)
+      at Test.postRun (node:internal/test_runner/test:1330:19)
+      at Test.run (node:internal/test_runner/test:1258:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:831:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: true,
+    expected: false,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at .acceptance/public-main/desktop/scripts/build-correctness.test.mjs:85:1
+✖ afterPack rejects an incomplete app instead of shipping absent native modules (3.380041ms)
+  AssertionError [ERR_ASSERTION]: Missing expected rejection.
+      at async TestContext.<anonymous> (file:///Users/lang/workspace/github-lab/clowder-1452-build-correctness/.acceptance/public-main/desktop/scripts/build-correctness.test.mjs:89:5)
+      at async Test.run (node:internal/test_runner/test:1208:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:831:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: undefined,
+    expected: undefined,
+    operator: 'rejects',
+    diff: 'simple'
+  }
+
+test at .acceptance/public-main/scripts/run-preserving-signal-exit.test.mjs:12:1
+✖ the Web build launches a JS entry instead of a Windows .cmd shim (1.928334ms)
+  AssertionError [ERR_ASSERTION]: The input did not match the regular expression /run-preserving-signal-exit\.mjs node \.\/node_modules\/next\/dist\/bin\/next build$/. Input:
+
+  'node ../../scripts/run-preserving-signal-exit.mjs next build'
+
+      at TestContext.<anonymous> (file:///Users/lang/workspace/github-lab/clowder-1452-build-correctness/.acceptance/public-main/scripts/run-preserving-signal-exit.test.mjs:14:10)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1201:25)
+      at Test.start (node:internal/test_runner/test:1096:17)
+      at startSubtestAfterBootstrap (node:internal/test_runner/harness:385:17) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 'node ../../scripts/run-preserving-signal-exit.mjs next build',
+    expected: /run-preserving-signal-exit\.mjs node \.\/node_modules\/next\/dist\/bin\/next build$/,
+    operator: 'match',
+    diff: 'simple'
+  }

@@ -53,6 +53,11 @@ function Write-Err   { param([string]$msg) Write-Host "  [ERR] $msg" -Foreground
 
 $ProjectRoot = Split-Path -Parent (Split-Path -Parent (Split-Path -Parent $PSCommandPath))
 
+# Validate before install/deploy and even when reusing caches. Never guess Node.
+$nodeVerifier = Join-Path $ProjectRoot "desktop/scripts/verify-build-node.mjs"
+$buildNodeVersion = (& node $nodeVerifier host $ProjectRoot win32 x64).Trim()
+if ($LASTEXITCODE -ne 0) { throw "Build Node validation failed" }
+
 # Step 1: Build web app
 Write-Step "Step 1/8 - Build web application"
 if (-not $SkipWebBuild) {
@@ -160,30 +165,17 @@ Write-Step "Step 3/8 - Bundle Redis portable + Node.js"
 # (NODE_MODULE_VERSION) at runtime.
 $bundledNode = Join-Path (Join-Path $ProjectRoot "bundled") "node"
 
-# Detect build-machine Node version so the bundled runtime matches the ABI
-# that native modules were compiled against.
-$buildNodeVersion = $null
-try {
-    $buildNodeVersion = (node --version 2>$null).Trim()
-} catch {}
-if (-not $buildNodeVersion) {
-    Write-Warn "Could not detect build-machine Node version; defaulting to v22.12.0"
-    $buildNodeVersion = "v22.12.0"
-}
-$buildNodeMajor = $buildNodeVersion.TrimStart('v').Split('.')[0]
-
-# Reuse an already-bundled Node only if its major matches the build machine.
+# Reuse only an executable with the exact build version, ABI and target.
 $reuseBundled = $false
 $existingNode = Join-Path $bundledNode "node.exe"
 if (Test-Path $existingNode) {
     try {
-        $existingVersion = (& $existingNode --version 2>$null).Trim()
-        $existingMajor = $existingVersion.TrimStart('v').Split('.')[0]
-        if ($existingMajor -eq $buildNodeMajor) {
+        & node $nodeVerifier node $ProjectRoot win32 x64 $existingNode
+        if ($LASTEXITCODE -eq 0) {
             Write-Ok "Node.js portable already present (matches build Node $buildNodeVersion)"
             $reuseBundled = $true
         } else {
-            Write-Warn "Bundled Node $existingVersion does not match build $buildNodeVersion; re-downloading"
+            Write-Warn "Bundled Node does not match build $buildNodeVersion; re-downloading"
             Remove-Item $bundledNode -Recurse -Force
         }
     } catch {
@@ -222,6 +214,10 @@ if (-not $reuseBundled) {
         exit 1
     }
 }
+
+# Verify actual deployed native modules with the actual bundled executable.
+& node $nodeVerifier artifact $ProjectRoot win32 x64 (Join-Path $bundledNode "node.exe") (Join-Path $deployRoot "api")
+if ($LASTEXITCODE -ne 0) { throw "Bundled Node/native module validation failed" }
 
 $bundledRedis = Join-Path (Join-Path $ProjectRoot "bundled") "redis"
 $redisBin = Join-Path $bundledRedis "redis-server.exe"
@@ -576,6 +572,10 @@ if (-not $SkipPortableZip) {
     } else {
         Write-Warn "start-portable.bat not found — portable zip will lack start.bat"
     }
+
+    # The zip consumes this staged layout, so verify it before compression.
+    & node $nodeVerifier artifact $staging win32 x64 (Join-Path $staging "node/node.exe") (Join-Path $staging "packages/api")
+    if ($LASTEXITCODE -ne 0) { throw "Portable installed-layout Node/native validation failed" }
 
     # Compress
     $zipPath = Join-Path $distDir "$stagingName.zip"

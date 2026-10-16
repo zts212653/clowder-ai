@@ -1,0 +1,6 @@
+F1: four JS entries are local; sqlite-vec native is absent from fixture but resolves outside: /Users/lang/workspace/github-lab/clowder-1452-build-correctness/node_modules/.pnpm/sqlite-vec-darwin-arm64@0.1.9/node_modules/sqlite-vec-darwin-arm64/vec0.dylib
+F1: NODE_PATH unset; guard still accepts incomplete artifact: sqlite/vec: v0.1.9
+native-smoke: OK
+
+F2: real node-pty with win32 branch: require succeeds; native load attempts=0
+F2: actual spawn rejects unavailable native binding; native load attempts=1

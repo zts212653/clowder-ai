@@ -1,0 +1,63 @@
+Installer SHA-256: c642bbab6d23b92a3b447495ad059a5e4fe140cd80928f6ed060565f0d884310
+正在检查“Protective Master Boot Record（MBR：0）”的校验和…
+Protective Master Boot Record（MBR：0）：已验证CRC32 $FC7FF9DF
+正在检查“GPT Header（Primary GPT Header：1）”的校验和…
+    GPT Header（Primary GPT Header：1）：已验证CRC32 $0DDF7186
+正在检查“GPT Partition Data（Primary GPT Table：2）”的校验和…
+GPT Partition Data（Primary GPT Table：已验证CRC32 $7E64F61D
+正在检查“（Apple_Free：3）”的校验和…
+                      （Apple_Free：3）：已验证CRC32 $00000000
+正在检查“EFI System Partition（C12A7328-F81F-11D2-BA4B-00A0C93EC93B：4）”的校验和…
+EFI System Partition（C12A7328-F81F-1：已验证CRC32 $B54B659C
+正在检查“disk image（Apple_HFS：5）”的校验和…
+             disk image（Apple_HFS：5）：已验证CRC32 $FE69D994
+正在检查“（Apple_Free：6）”的校验和…
+                      （Apple_Free：6）：已验证CRC32 $00000000
+正在检查“GPT Partition Data（Backup GPT Table：7）”的校验和…
+GPT Partition Data（Backup GPT Table：：已验证CRC32 $7E64F61D
+正在检查“GPT Header（Backup GPT Header：8）”的校验和…
+     GPT Header（Backup GPT Header：8）：已验证CRC32 $2375D362
+已验证CRC32 $FA3A0F3E
+hdiutil: verify: checksum of "/Users/lang/workspace/github-lab/clowder-1452-build-correctness/dist/ClowderAI-0.10.1-arm64.dmg" is VALID
+预计CRC32 $FA3A0F3E
+/dev/disk7          	GUID_partition_scheme
+/dev/disk7s1        	EFI
+/dev/disk7s2        	Apple_HFS                      	/private/var/folders/1z/8dpvll5d2fq7brlf2qk4kkw40000gn/T/clowder-1452-dmg-WTE4bU
+Mounted DMG Node: { version: 'v24.15.0', abi: '137', platform: 'darwin', arch: 'arm64' } probe ms: 34637
+sqlite/vec: v0.1.9
+native-artifact paths: ["/private/var/folders/1z/8dpvll5d2fq7brlf2qk4kkw40000gn/T/clowder-1452-dmg-WTE4bU/Clowder AI.app/Contents/Resources/packages/api/node_modules/better-sqlite3/build/Release/better_sqlite3.node","/private/var/folders/1z/8dpvll5d2fq7brlf2qk4kkw40000gn/T/clowder-1452-dmg-WTE4bU/Clowder AI.app/Contents/Resources/packages/api/node_modules/sqlite-vec-darwin-arm64/vec0.dylib"]
+native-pty: spawned bundled Node, marker received, exited
+native-artifact paths: ["/private/var/folders/1z/8dpvll5d2fq7brlf2qk4kkw40000gn/T/clowder-1452-dmg-WTE4bU/Clowder AI.app/Contents/Resources/packages/api/node_modules/better-sqlite3/build/Release/better_sqlite3.node","/private/var/folders/1z/8dpvll5d2fq7brlf2qk4kkw40000gn/T/clowder-1452-dmg-WTE4bU/Clowder AI.app/Contents/Resources/packages/api/node_modules/sqlite-vec-darwin-arm64/vec0.dylib","/private/var/folders/1z/8dpvll5d2fq7brlf2qk4kkw40000gn/T/clowder-1452-dmg-WTE4bU/Clowder AI.app/Contents/Resources/packages/api/node_modules/@img/sharp-darwin-arm64/lib/sharp-darwin-arm64.node","/private/var/folders/1z/8dpvll5d2fq7brlf2qk4kkw40000gn/T/clowder-1452-dmg-WTE4bU/Clowder AI.app/Contents/Resources/packages/api/node_modules/node-pty/prebuilds/darwin-arm64/pty.node","/private/var/folders/1z/8dpvll5d2fq7brlf2qk4kkw40000gn/T/clowder-1452-dmg-WTE4bU/Clowder AI.app/Contents/Resources/packages/api/node_modules/@img/sharp-libvips-darwin-arm64/lib/libvips-cpp.8.17.3.dylib"]
+native-smoke: OK
+
+{
+  "buildCommit": "3b1cd869406467278c105ffbf10c4705aaa9f297",
+  "nativeValidationCommit": "8e1702ef26be971b158adfb473f3fa9aa78eefbc",
+  "publicMainRedBase": "b1fe2966fa0a97d1e3cd2e174ed59fd1477b4fc4",
+  "forkBase": "33084dc889722c17de4bc852f762818e076d8242",
+  "os": "26.6.2",
+  "arch": "arm64",
+  "installer": "/Users/lang/workspace/github-lab/clowder-1452-build-correctness/dist/ClowderAI-0.10.1-arm64.dmg",
+  "installerSha256": "c642bbab6d23b92a3b447495ad059a5e4fe140cd80928f6ed060565f0d884310",
+  "installerBytes": 809310166,
+  "bundledNode": {
+    "version": "v24.15.0",
+    "abi": "137",
+    "platform": "darwin",
+    "arch": "arm64"
+  },
+  "signedNodeSha256": "3200fbd9f7fd4410426dd541e10d1ab829d3472f270d743c7fabd1696c03fe32",
+  "serviceManagerSha256": "2f3dc6349c08977eec1b21f6f8cccbbc01d9d6d1c10e893ee11ccde07a3978d2",
+  "modules": {
+    "better-sqlite3": "12.11.1",
+    "sqlite-vec": "0.1.9",
+    "node-pty": "1.2.0-beta.12",
+    "sharp": "0.34.5"
+  },
+  "verifiedMachoCount": 40,
+  "redisVersion": "Redis server v=7.4.1 sha=00000000:1 malloc=libc bits=64 build=565e5df097b555d8",
+  "readOnlyMountedInstallerNativeSmoke": "passed",
+  "fullInstalledJourney": "not_run",
+  "loopbackSlice": "separate worktree; not included in this installer"
+}
+"disk7" ejected.

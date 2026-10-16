@@ -35,7 +35,7 @@ desktop/
 
 ## 前置要求
 
-1. **Node.js** ≥ 20（与主项目一致）
+1. **Node.js** ≥ 24（以根 `package.json` 的 `engines.node` 为准；安装守卫也必须通过）
 2. **pnpm** ≥ 8（主项目依赖管理）
 3. **desktop 子包依赖已安装**：
    ```bash
@@ -116,16 +116,16 @@ pnpm desktop:pack
 #### 前置要求
 
 - macOS 13+（需要 Xcode Command Line Tools：`xcode-select --install`）
-- pnpm、node（任意 LTS）、bash、curl、tar、make
-- 构建 x64 Redis 需要 Rosetta 2：`softwareupdate --install-rosetta`
+- pnpm、node（满足根 `package.json` 的 `engines.node`）、bash、curl、tar、make
+- 每个平台架构用对应的原生 Node 和构建机；arm64 与 x64 在独立 runner 上分别安装依赖并打包。
 
 #### 构建命令
 
 ```bash
-# 完整构建（arm64 + x64 双架构 DMG）
+# 完整构建（默认当前原生架构；双架构发布使用两个独立 runner）
 ./desktop/scripts/build-mac.sh
 
-# 仅构建当前架构（Apple Silicon 机器推荐，速度更快）
+# 显式构建当前架构（Apple Silicon 示例；跨架构参数会被拒绝）
 ./desktop/scripts/build-mac.sh --arch arm64
 
 # 跳过已有缓存步骤（增量构建）
@@ -144,6 +144,10 @@ pnpm desktop:pack
 | 6/6 | 生成 icon.icns + electron-builder 构建 DMG | `dist/ClowderAI-{version}-{arch}.dmg` |
 
 #### 已知注意事项
+
+- **构建正确性**：Node 不可检测或不满足 `engines.node` 时在安装依赖前中止；下载与复用的 Node 都须与构建机精确版本、native ABI、平台/架构一致。`--skip-node` 不跳过验证。macOS 在 afterPack 补拷依赖后逐个检查实际 Mach-O 文件，保留依赖中的相对符号链接；完成 ad-hoc 签名后再用包内 Node 加载 SQLite、sqlite-vec、node-pty、sharp，验证失败不生成可发布 DMG。Windows 在部署后与 portable zip 压缩前验证实际文件。
+- 这些 guard 参考社区贡献 [#1452](https://github.com/zts212653/clowder-ai/pull/1452)（whutzefengxie-ops），按 [#1459 的已接受切片](https://github.com/zts212653/clowder-ai/issues/1459#issuecomment-5658770842) 收口；Redis pin/兼容与动态端口等待决项独立处理。
+- **原生闭包**：构建验证子进程隔离 Node/loader 注入环境，要求实际解析的 JS、原生 binding、SQLite extension 和新加载的非系统动态库位于产物内；guard 也预载到 PTY worker/helper。PTY 验证会用包内 Node 启动一个短命子进程，确认输出标记和正常退出；Windows 还检查延迟加载的 conpty 与 cleanup native helper。缺件、坏二进制或目标架构不符都不能借构建机依赖通过。
 
 - **node_modules 补拷**：electron-builder 从 v20.15.2 起不再将 `node_modules` 目录包含在 `extraResources` 中（[electron-builder#3104](https://github.com/electron-userland/electron-builder/issues/3104)）。项目通过 `desktop/afterPack.js` hook 在打包后手动拷贝 `node_modules` 解决此问题。
 - **未签名应用**：代码签名已禁用（`identity=null`）。首次启动需右键 → 打开，或执行：

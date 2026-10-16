@@ -1,0 +1,134 @@
+fatal error: /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/lipo: can't figure out the architecture type of: /private/var/folders/1z/8dpvll5d2fq7brlf2qk4kkw40000gn/T/macho-bundle-rqP2Hk/broken.node
+✔ mac build preflight rejects missing-node before install/deploy (876.676ms)
+✔ mac build preflight rejects unsupported-engine before install/deploy (159.561125ms)
+✔ mac build preflight rejects foreign-arch before install/deploy (83.663417ms)
+✔ engines validates complete versions and rejects unknown/missing constraints (0.559917ms)
+✔ same-major runtime caches still fail on exact version, ABI or target mismatch (0.23275ms)
+✔ CLI rejects missing/incompatible bundled Node instead of guessing (221.146584ms)
+✔ a bundled executable that never responds fails at the probe budget (105.329375ms)
+✔ native smoke cannot fall back to build-host modules when deploy is incomplete (216.559042ms)
+✔ architecture verification checks bytes, loader choice, universal and optional prebuild siblings (0.667ms)
+✔ afterPack rejects an incomplete app instead of shipping absent native modules (2.319458ms)
+✔ afterPack module copy stays portable after the build source moves (2.653417ms)
+✔ real Mach-O mismatch and corrupt/symlinked native files fail closed (45.758333ms)
+Error: Native artifact dependency escapes deployed node_modules: /Users/lang/workspace/github-lab/clowder-1452-build-correctness/bundled/deploy/api/node_modules/sqlite-vec-darwin-arm64/vec0.dylib
+    at artifactPath (/Users/lang/workspace/github-lab/clowder-1452-build-correctness/desktop/scripts/lib/native-artifact-guard.cjs:23:11)
+    at checkURL (/Users/lang/workspace/github-lab/clowder-1452-build-correctness/desktop/scripts/lib/native-artifact-guard.cjs:30:3)
+    at resolve (/Users/lang/workspace/github-lab/clowder-1452-build-correctness/desktop/scripts/lib/native-artifact-guard.cjs:36:5)
+    at nextStep (node:internal/modules/customization_hooks:189:26)
+    at resolveWithHooks (node:internal/modules/customization_hooks:417:10)
+    at resolveForCJSWithHooks (node:internal/modules/cjs/loader:1137:25)
+    at require.resolve (node:internal/modules/helpers:171:31)
+    at Object.getLoadablePath (/private/var/folders/1z/8dpvll5d2fq7brlf2qk4kkw40000gn/T/native-artifact-CjjngI/artifact/api/node_modules/sqlite-vec/index.cjs:38:32)
+    at smoke ([eval]:53:45)
+    at [eval]:66:1
+Error: Native artifact dependency escapes deployed node_modules: /Users/lang/workspace/github-lab/clowder-1452-build-correctness/bundled/deploy/api/node_modules/detect-libc/lib/detect-libc.js
+    at artifactPath (/Users/lang/workspace/github-lab/clowder-1452-build-correctness/desktop/scripts/lib/native-artifact-guard.cjs:23:11)
+    at checkURL (/Users/lang/workspace/github-lab/clowder-1452-build-correctness/desktop/scripts/lib/native-artifact-guard.cjs:30:3)
+    at resolve (/Users/lang/workspace/github-lab/clowder-1452-build-correctness/desktop/scripts/lib/native-artifact-guard.cjs:36:5)
+    at nextStep (node:internal/modules/customization_hooks:189:26)
+    at resolveWithHooks (node:internal/modules/customization_hooks:417:10)
+    at resolveForCJSWithHooks (node:internal/modules/cjs/loader:1137:25)
+    at Module._load (node:internal/modules/cjs/loader:1262:25)
+    at wrapModuleLoad (node:internal/modules/cjs/loader:255:19)
+    at Module.require (node:internal/modules/cjs/loader:1576:12)
+    at require (node:internal/modules/helpers:153:16)
+Error: Native artifact dependency escapes deployed node_modules: /Users/lang/workspace/github-lab/clowder-1452-build-correctness/bundled/deploy/api/node_modules/sqlite-vec-darwin-arm64/vec0.dylib
+    at artifactPath (/Users/lang/workspace/github-lab/clowder-1452-build-correctness/desktop/scripts/lib/native-artifact-guard.cjs:23:11)
+    at checkURL (/Users/lang/workspace/github-lab/clowder-1452-build-correctness/desktop/scripts/lib/native-artifact-guard.cjs:30:3)
+    at resolve (/Users/lang/workspace/github-lab/clowder-1452-build-correctness/desktop/scripts/lib/native-artifact-guard.cjs:36:5)
+    at nextStep (node:internal/modules/customization_hooks:189:26)
+    at resolveWithHooks (node:internal/modules/customization_hooks:417:10)
+    at resolveForCJSWithHooks (node:internal/modules/cjs/loader:1137:25)
+    at require.resolve (node:internal/modules/helpers:171:31)
+    at Object.getLoadablePath (/private/var/folders/1z/8dpvll5d2fq7brlf2qk4kkw40000gn/T/native-artifact-VSyYIX/artifact/api/node_modules/sqlite-vec/index.cjs:38:32)
+    at smoke ([eval]:53:45)
+    at [eval]:66:1
+Error: Native artifact dependency escapes deployed node_modules: /private/var/folders/1z/8dpvll5d2fq7brlf2qk4kkw40000gn/T/native-artifact-cfbmMZ/external.mjs
+    at artifactPath (/Users/lang/workspace/github-lab/clowder-1452-build-correctness/desktop/scripts/lib/native-artifact-guard.cjs:23:11)
+    at checkURL (/Users/lang/workspace/github-lab/clowder-1452-build-correctness/desktop/scripts/lib/native-artifact-guard.cjs:30:3)
+    at resolve (/Users/lang/workspace/github-lab/clowder-1452-build-correctness/desktop/scripts/lib/native-artifact-guard.cjs:36:5)
+    at nextStep (node:internal/modules/customization_hooks:189:26)
+    at resolveWithHooks (node:internal/modules/customization_hooks:417:10)
+    at ModuleLoader.resolveSync (node:internal/modules/esm/loader:736:14)
+    at #resolve (node:internal/modules/esm/loader:679:17)
+    at ModuleLoader.getOrCreateModuleJob (node:internal/modules/esm/loader:599:35)
+    at onImport.tracePromise.__proto__ (node:internal/modules/esm/loader:628:32)
+    at TracingChannel.tracePromise (node:diagnostics_channel:362:14)
+Error: Native artifact dependency escapes deployed node_modules: /private/var/folders/1z/8dpvll5d2fq7brlf2qk4kkw40000gn/T/native-artifact-cfbmMZ/external.mjs
+    at artifactPath (/Users/lang/workspace/github-lab/clowder-1452-build-correctness/desktop/scripts/lib/native-artifact-guard.cjs:23:11)
+    at checkURL (/Users/lang/workspace/github-lab/clowder-1452-build-correctness/desktop/scripts/lib/native-artifact-guard.cjs:30:3)
+    at resolve (/Users/lang/workspace/github-lab/clowder-1452-build-correctness/desktop/scripts/lib/native-artifact-guard.cjs:36:5)
+    at nextStep (node:internal/modules/customization_hooks:189:26)
+    at resolveWithHooks (node:internal/modules/customization_hooks:417:10)
+    at ModuleLoader.resolveSync (node:internal/modules/esm/loader:736:14)
+    at #resolve (node:internal/modules/esm/loader:679:17)
+    at ModuleLoader.getOrCreateModuleJob (node:internal/modules/esm/loader:599:35)
+    at onImport.tracePromise.__proto__ (node:internal/modules/esm/loader:628:32)
+    at TracingChannel.tracePromise (node:diagnostics_channel:362:14)
+Error: Failed to load native module: pty.node, checked: build/Release, build/Debug, prebuilds/darwin-arm64: Error: Cannot find module './prebuilds/darwin-arm64/pty.node'
+Require stack:
+- /private/var/folders/1z/8dpvll5d2fq7brlf2qk4kkw40000gn/T/native-artifact-VNBesB/artifact/api/node_modules/node-pty/lib/utils.js
+- /private/var/folders/1z/8dpvll5d2fq7brlf2qk4kkw40000gn/T/native-artifact-VNBesB/artifact/api/node_modules/node-pty/lib/index.js
+- /private/var/folders/1z/8dpvll5d2fq7brlf2qk4kkw40000gn/T/native-artifact-VNBesB/artifact/api/package.json
+    at Object.loadNativeModule (/private/var/folders/1z/8dpvll5d2fq7brlf2qk4kkw40000gn/T/native-artifact-VNBesB/artifact/api/node_modules/node-pty/lib/utils.js:36:11)
+    at Object.<anonymous> (/private/var/folders/1z/8dpvll5d2fq7brlf2qk4kkw40000gn/T/native-artifact-VNBesB/artifact/api/node_modules/node-pty/lib/unixTerminal.js:27:22)
+    at Module._compile (node:internal/modules/cjs/loader:1830:14)
+    at Module._extensions..js (node:internal/modules/cjs/loader:1961:10)
+    at Module.load (node:internal/modules/cjs/loader:1553:32)
+    at Module._load (node:internal/modules/cjs/loader:1355:12)
+    at wrapModuleLoad (node:internal/modules/cjs/loader:255:19)
+    at Module.require (node:internal/modules/cjs/loader:1576:12)
+    at require (node:internal/modules/helpers:153:16)
+    at Object.<anonymous> (/private/var/folders/1z/8dpvll5d2fq7brlf2qk4kkw40000gn/T/native-artifact-VNBesB/artifact/api/node_modules/node-pty/lib/index.js:15:20)
+Error: Failed to load native module: pty.node, checked: build/Release, build/Debug, prebuilds/darwin-arm64: Error: Cannot find module './prebuilds/darwin-arm64/pty.node'
+Require stack:
+- /private/var/folders/1z/8dpvll5d2fq7brlf2qk4kkw40000gn/T/native-artifact-cj29Ba/artifact/api/node_modules/node-pty/lib/utils.js
+- /private/var/folders/1z/8dpvll5d2fq7brlf2qk4kkw40000gn/T/native-artifact-cj29Ba/artifact/api/node_modules/node-pty/lib/index.js
+- /private/var/folders/1z/8dpvll5d2fq7brlf2qk4kkw40000gn/T/native-artifact-cj29Ba/artifact/api/package.json
+    at Object.loadNativeModule (/private/var/folders/1z/8dpvll5d2fq7brlf2qk4kkw40000gn/T/native-artifact-cj29Ba/artifact/api/node_modules/node-pty/lib/utils.js:36:11)
+    at Object.<anonymous> (/private/var/folders/1z/8dpvll5d2fq7brlf2qk4kkw40000gn/T/native-artifact-cj29Ba/artifact/api/node_modules/node-pty/lib/unixTerminal.js:27:22)
+    at Module._compile (node:internal/modules/cjs/loader:1830:14)
+    at Module._extensions..js (node:internal/modules/cjs/loader:1961:10)
+    at Module.load (node:internal/modules/cjs/loader:1553:32)
+    at Module._load (node:internal/modules/cjs/loader:1355:12)
+    at wrapModuleLoad (node:internal/modules/cjs/loader:255:19)
+    at Module.require (node:internal/modules/cjs/loader:1576:12)
+    at require (node:internal/modules/helpers:153:16)
+    at Object.<anonymous> (/private/var/folders/1z/8dpvll5d2fq7brlf2qk4kkw40000gn/T/native-artifact-cj29Ba/artifact/api/node_modules/node-pty/lib/index.js:15:20)
+Error: Failed to load native module: pty.node, checked: build/Release, build/Debug, prebuilds/darwin-arm64: Error: Cannot find module './prebuilds/darwin-arm64/pty.node'
+Require stack:
+- /private/var/folders/1z/8dpvll5d2fq7brlf2qk4kkw40000gn/T/native-artifact-9Oob1o/artifact/api/node_modules/node-pty/lib/utils.js
+- /private/var/folders/1z/8dpvll5d2fq7brlf2qk4kkw40000gn/T/native-artifact-9Oob1o/artifact/api/node_modules/node-pty/lib/index.js
+- /private/var/folders/1z/8dpvll5d2fq7brlf2qk4kkw40000gn/T/native-artifact-9Oob1o/artifact/api/package.json
+    at Object.loadNativeModule (/private/var/folders/1z/8dpvll5d2fq7brlf2qk4kkw40000gn/T/native-artifact-9Oob1o/artifact/api/node_modules/node-pty/lib/utils.js:36:11)
+    at Object.<anonymous> (/private/var/folders/1z/8dpvll5d2fq7brlf2qk4kkw40000gn/T/native-artifact-9Oob1o/artifact/api/node_modules/node-pty/lib/unixTerminal.js:27:22)
+    at Module._compile (node:internal/modules/cjs/loader:1830:14)
+    at Module._extensions..js (node:internal/modules/cjs/loader:1961:10)
+    at Module.load (node:internal/modules/cjs/loader:1553:32)
+    at Module._load (node:internal/modules/cjs/loader:1355:12)
+    at wrapModuleLoad (node:internal/modules/cjs/loader:255:19)
+    at Module.require (node:internal/modules/cjs/loader:1576:12)
+    at require (node:internal/modules/helpers:153:16)
+    at Object.<anonymous> (/private/var/folders/1z/8dpvll5d2fq7brlf2qk4kkw40000gn/T/native-artifact-9Oob1o/artifact/api/node_modules/node-pty/lib/index.js:15:20)
+✔ real native closure and PTY child succeed with injected Node env removed (3023.366625ms)
+✔ local JS entries cannot borrow a missing sqlite-vec platform binary from an ancestor (599.758542ms)
+✔ a missing transitive sharp dependency cannot resolve from the host (887.012833ms)
+✔ the SQLite extension path and native dlopen symlinks cannot escape (596.725292ms)
+✔ guard preload constrains both ESM and inherited worker resolution (367.816ms)
+✔ darwin real PTY rejects missing native even with borrowable host modules (1682.036375ms)
+✔ darwin real PTY rejects corrupt native even with borrowable host modules (1629.1865ms)
+✔ darwin real PTY rejects wrong-architecture native even with borrowable host modules (1645.24475ms)
+✔ the Web build launches a JS entry instead of a Windows .cmd shim (1.094208ms)
+✔ the exact Web build carrier preserves literal args, spaces and exit status (140.019625ms)
+✔ missing command and missing usage fail closed (142.102916ms)
+✔ the executable carrier preserves SIGINT (135.771791ms)
+✔ the executable carrier preserves SIGTERM (133.02875ms)
+ℹ tests 25
+ℹ suites 0
+ℹ pass 25
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 10528.644959

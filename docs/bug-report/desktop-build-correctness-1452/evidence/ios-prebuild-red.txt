@@ -1,0 +1,64 @@
+
+==> Step 1/6 — Build web application
+  [OK] Skipped (--skip-web)
+
+==> Step 2/6 — pnpm deploy runtime packages
+  [OK] Skipped (--skip-deploy)
+
+==> Step 3/6 — Bundle Node.js portable (arm64)
+  Build-machine Node: v24.15.0 (arm64)
+v24.15.0
+  [OK] node-darwin-arm64 matches build v24.15.0
+sqlite/vec: v0.1.9
+native-smoke: OK
+v24.15.0
+
+==> Step 4/6 — Build Redis portable from source
+  [OK] redis-darwin-arm64 reused (--skip-redis)
+
+==> Step 5/6 — CLI tools (skipped on macOS)
+  [OK] Skipped — macOS DMG does not auto-install CLI tools
+
+==> Step 6/6 — Assets + electron-builder
+  [OK] icon.icns already present
+  Running: npx electron-builder --mac dir --arm64
+npm warn Unknown env config "shamefully-hoist". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options.
+npm warn Unknown env config "auto-install-peers". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options.
+  • electron-builder  version=26.8.1 os=25.6.0
+  • loaded configuration  file=package.json ("build" field)
+  • executing @electron/rebuild  electronVersion=35.7.5 arch=arm64 buildFromSource=false workspaceRoot=/Users/lang/workspace/github-lab/clowder-1452-build-correctness/desktop projectDir=./ appDir=./
+  • installing native dependencies  arch=arm64
+  • completed installing native dependencies
+  • packaging       platform=darwin arch=arm64 electron=35.7.5 appOutDir=dist/mac-arm64
+  • asar usage is disabled — this is strongly not recommended  solution=enable asar and use asarUnpack to unpack files that must be externally available
+  • searching for node modules  pm=npm searchDir=/Users/lang/workspace/github-lab/clowder-1452-build-correctness/desktop
+(node:26089) [DEP0190] DeprecationWarning: Passing args to a child process with shell option true can lead to security vulnerabilities, as the arguments are not escaped, only concatenated.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+  • searching for node modules  pm=traversal searchDir=/Users/lang/workspace/github-lab/clowder-1452-build-correctness/desktop
+  • using manual traversal of node_modules to build dependency tree
+  • no node modules returned while searching directories  searchDirectories=[""]
+  afterPack: copying api/node_modules ...
+  afterPack: api/node_modules copied
+  afterPack: copying web/node_modules ...
+  afterPack: web/node_modules copied
+  afterPack: copying mcp-server/node_modules ...
+  afterPack: mcp-server/node_modules copied
+  afterPack: scripts/node_modules → packages/api/node_modules (symlink)
+  ⨯ macOS bundle architecture failed:
+Contents/Resources/packages/api/node_modules/bare-fs/prebuilds/ios-x64-simulator/bare-fs.bare: [x86_64] needs arm64
+Contents/Resources/packages/api/node_modules/bare-path/prebuilds/ios-x64-simulator/bare-path.bare: [x86_64] needs arm64
+Contents/Resources/packages/api/node_modules/bare-url/prebuilds/ios-x64-simulator/bare-url.bare: [x86_64] needs arm64  failedTask=build stackTrace=Error: macOS bundle architecture failed:
+Contents/Resources/packages/api/node_modules/bare-fs/prebuilds/ios-x64-simulator/bare-fs.bare: [x86_64] needs arm64
+Contents/Resources/packages/api/node_modules/bare-path/prebuilds/ios-x64-simulator/bare-path.bare: [x86_64] needs arm64
+Contents/Resources/packages/api/node_modules/bare-url/prebuilds/ios-x64-simulator/bare-url.bare: [x86_64] needs arm64
+    at inspectBundle (file:///Users/lang/workspace/github-lab/clowder-1452-build-correctness/desktop/scripts/lib/mac-bundle-arch.mjs:88:30)
+    at afterPack (/Users/lang/workspace/github-lab/clowder-1452-build-correctness/desktop/afterPack.js:60:17)
+    at emitInternal (/Users/lang/workspace/github-lab/clowder-1452-build-correctness/desktop/node_modules/app-builder-lib/src/util/asyncEventEmitter.ts:61:9)
+    at AsyncEventEmitter.emit (/Users/lang/workspace/github-lab/clowder-1452-build-correctness/desktop/node_modules/app-builder-lib/src/util/asyncEventEmitter.ts:68:26)
+    at Packager.emitAfterPack (/Users/lang/workspace/github-lab/clowder-1452-build-correctness/desktop/node_modules/app-builder-lib/src/packager.ts:347:5)
+    at MacPackager.doPack (/Users/lang/workspace/github-lab/clowder-1452-build-correctness/desktop/node_modules/app-builder-lib/src/platformPackager.ts:344:5)
+    at MacPackager.pack (/Users/lang/workspace/github-lab/clowder-1452-build-correctness/desktop/node_modules/app-builder-lib/src/macPackager.ts:252:9)
+    at Packager.doBuild (/Users/lang/workspace/github-lab/clowder-1452-build-correctness/desktop/node_modules/app-builder-lib/src/packager.ts:538:11)
+    at executeFinally (/Users/lang/workspace/github-lab/clowder-1452-build-correctness/desktop/node_modules/builder-util/src/promise.ts:12:14)
+    at Packager.build (/Users/lang/workspace/github-lab/clowder-1452-build-correctness/desktop/node_modules/app-builder-lib/src/packager.ts:458:31)
+  [ERR] electron-builder failed

@@ -6,6 +6,12 @@
 const path = require('node:path');
 const fs = require('node:fs');
 
+function copyRuntimeModules(src, dest) {
+  // cpSync otherwise rewrites relative links to absolute build-host targets.
+  fs.cpSync(src, dest, { recursive: true, verbatimSymlinks: true });
+}
+exports.copyRuntimeModules = copyRuntimeModules;
+
 exports.default = async function afterPack(context) {
   if (context.electronPlatformName !== 'darwin') {
     return;
@@ -13,6 +19,8 @@ exports.default = async function afterPack(context) {
 
   const productFilename = context.packager.appInfo.productFilename;
   const resourcesDir = path.join(context.appOutDir, `${productFilename}.app`, 'Contents', 'Resources');
+  const node = path.join(resourcesDir, 'node', 'bin', 'node');
+  if (!fs.existsSync(node)) throw new Error(`Packaged Node executable missing: ${node}`);
   const projectRoot = path.resolve(__dirname, '..');
   const deployRoot = path.join(projectRoot, 'bundled', 'deploy');
 
@@ -22,7 +30,7 @@ exports.default = async function afterPack(context) {
     const dest = path.join(resourcesDir, 'packages', pkg, 'node_modules');
     if (fs.existsSync(src)) {
       console.log(`  afterPack: copying ${pkg}/node_modules ...`);
-      fs.cpSync(src, dest, { recursive: true });
+      copyRuntimeModules(src, dest);
       console.log(`  afterPack: ${pkg}/node_modules copied`);
     } else {
       console.warn(`  afterPack: ${src} not found, skipping`);
@@ -41,4 +49,14 @@ exports.default = async function afterPack(context) {
     fs.symlinkSync(path.relative(path.dirname(scriptsNM), apiNM), scriptsNM);
     console.log('  afterPack: scripts/node_modules → packages/api/node_modules (symlink)');
   }
+
+  // Verify the consumed .app after node_modules injection, before signing/DMG.
+  // Execute the bundled Node in build-mac.sh after ad-hoc signing: macOS may
+  // assess an unsealed .app before allowing its embedded executable to start.
+  const arch = { 1: 'x64', 3: 'arm64' }[context.arch];
+  if (!arch) throw new Error(`Unsupported macOS electron-builder arch: ${context.arch}`);
+  const app = path.join(context.appOutDir, `${productFilename}.app`);
+  const { inspectBundle } = await import('./scripts/lib/mac-bundle-arch.mjs');
+  const count = inspectBundle(app, arch);
+  console.log(`  afterPack: ${count} Mach-O binaries verified for ${arch}`);
 };
