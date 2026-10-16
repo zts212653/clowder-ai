@@ -1,0 +1,328 @@
+✖ darwin deployed: Next binds only IPv4 loopback (12.249375ms)
+✖ darwin pnpm: Next binds only IPv4 loopback (0.727459ms)
+✖ darwin hoisted: Next binds only IPv4 loopback (0.610667ms)
+✖ linux deployed: Next binds only IPv4 loopback (0.571708ms)
+✖ linux pnpm: Next binds only IPv4 loopback (0.531ms)
+✖ linux hoisted: Next binds only IPv4 loopback (0.519459ms)
+✖ win32 deployed: Next binds only IPv4 loopback (0.502708ms)
+✖ win32 pnpm: Next binds only IPv4 loopback (0.525375ms)
+✖ win32 hoisted: Next binds only IPv4 loopback (1.286833ms)
+✖ win32 shim: Next binds only IPv4 loopback (0.666459ms)
+✖ win32 path-shim: Next binds only IPv4 loopback (0.524875ms)
+✔ missing POSIX Next entry fails without opening a listener (0.600833ms)
+ℹ tests 12
+ℹ suites 0
+ℹ pass 1
+ℹ fail 11
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 111.720708
+
+✖ failing tests:
+
+test at .acceptance/public-main/desktop/service-manager-loopback.test.js:43:5
+✖ darwin deployed: Next binds only IPv4 loopback (12.249375ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+
+    [
+      'start',
+      '--port',
+      '43173',
+  -   '--hostname',
+  -   '127.0.0.1'
+    ]
+
+      at TestContext.<anonymous> (/Users/lang/workspace/github-lab/clowder-1452-loopback-only/.acceptance/public-main/desktop/service-manager-loopback.test.js:54:14)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1201:25)
+      at Test.start (node:internal/test_runner/test:1096:17)
+      at startSubtestAfterBootstrap (node:internal/test_runner/harness:385:17) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: [ 'start', '--port', '43173' ],
+    expected: [ 'start', '--port', '43173', '--hostname', '127.0.0.1' ],
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }
+
+test at .acceptance/public-main/desktop/service-manager-loopback.test.js:43:5
+✖ darwin pnpm: Next binds only IPv4 loopback (0.727459ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+
+    [
+      'start',
+      '--port',
+      '43173',
+  -   '--hostname',
+  -   '127.0.0.1'
+    ]
+
+      at TestContext.<anonymous> (/Users/lang/workspace/github-lab/clowder-1452-loopback-only/.acceptance/public-main/desktop/service-manager-loopback.test.js:54:14)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1201:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:831:18)
+      at Test.postRun (node:internal/test_runner/test:1330:19)
+      at Test.run (node:internal/test_runner/test:1258:12)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:385:3) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: [ 'start', '--port', '43173' ],
+    expected: [ 'start', '--port', '43173', '--hostname', '127.0.0.1' ],
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }
+
+test at .acceptance/public-main/desktop/service-manager-loopback.test.js:43:5
+✖ darwin hoisted: Next binds only IPv4 loopback (0.610667ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+
+    [
+      'start',
+      '--port',
+      '43173',
+  -   '--hostname',
+  -   '127.0.0.1'
+    ]
+
+      at TestContext.<anonymous> (/Users/lang/workspace/github-lab/clowder-1452-loopback-only/.acceptance/public-main/desktop/service-manager-loopback.test.js:54:14)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1201:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:831:18)
+      at Test.postRun (node:internal/test_runner/test:1330:19)
+      at Test.run (node:internal/test_runner/test:1258:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:831:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: [ 'start', '--port', '43173' ],
+    expected: [ 'start', '--port', '43173', '--hostname', '127.0.0.1' ],
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }
+
+test at .acceptance/public-main/desktop/service-manager-loopback.test.js:43:5
+✖ linux deployed: Next binds only IPv4 loopback (0.571708ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+
+    [
+      'start',
+      '--port',
+      '43173',
+  -   '--hostname',
+  -   '127.0.0.1'
+    ]
+
+      at TestContext.<anonymous> (/Users/lang/workspace/github-lab/clowder-1452-loopback-only/.acceptance/public-main/desktop/service-manager-loopback.test.js:54:14)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1201:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:831:18)
+      at Test.postRun (node:internal/test_runner/test:1330:19)
+      at Test.run (node:internal/test_runner/test:1258:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:831:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: [ 'start', '--port', '43173' ],
+    expected: [ 'start', '--port', '43173', '--hostname', '127.0.0.1' ],
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }
+
+test at .acceptance/public-main/desktop/service-manager-loopback.test.js:43:5
+✖ linux pnpm: Next binds only IPv4 loopback (0.531ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+
+    [
+      'start',
+      '--port',
+      '43173',
+  -   '--hostname',
+  -   '127.0.0.1'
+    ]
+
+      at TestContext.<anonymous> (/Users/lang/workspace/github-lab/clowder-1452-loopback-only/.acceptance/public-main/desktop/service-manager-loopback.test.js:54:14)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1201:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:831:18)
+      at Test.postRun (node:internal/test_runner/test:1330:19)
+      at Test.run (node:internal/test_runner/test:1258:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:831:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: [ 'start', '--port', '43173' ],
+    expected: [ 'start', '--port', '43173', '--hostname', '127.0.0.1' ],
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }
+
+test at .acceptance/public-main/desktop/service-manager-loopback.test.js:43:5
+✖ linux hoisted: Next binds only IPv4 loopback (0.519459ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+
+    [
+      'start',
+      '--port',
+      '43173',
+  -   '--hostname',
+  -   '127.0.0.1'
+    ]
+
+      at TestContext.<anonymous> (/Users/lang/workspace/github-lab/clowder-1452-loopback-only/.acceptance/public-main/desktop/service-manager-loopback.test.js:54:14)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1201:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:831:18)
+      at Test.postRun (node:internal/test_runner/test:1330:19)
+      at Test.run (node:internal/test_runner/test:1258:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:831:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: [ 'start', '--port', '43173' ],
+    expected: [ 'start', '--port', '43173', '--hostname', '127.0.0.1' ],
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }
+
+test at .acceptance/public-main/desktop/service-manager-loopback.test.js:43:5
+✖ win32 deployed: Next binds only IPv4 loopback (0.502708ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+
+    [
+      'start',
+      '--port',
+      '43173',
+  -   '--hostname',
+  -   '127.0.0.1'
+    ]
+
+      at TestContext.<anonymous> (/Users/lang/workspace/github-lab/clowder-1452-loopback-only/.acceptance/public-main/desktop/service-manager-loopback.test.js:54:14)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1201:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:831:18)
+      at Test.postRun (node:internal/test_runner/test:1330:19)
+      at Test.run (node:internal/test_runner/test:1258:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:831:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: [ 'start', '--port', '43173' ],
+    expected: [ 'start', '--port', '43173', '--hostname', '127.0.0.1' ],
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }
+
+test at .acceptance/public-main/desktop/service-manager-loopback.test.js:43:5
+✖ win32 pnpm: Next binds only IPv4 loopback (0.525375ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+
+    [
+      'start',
+      '--port',
+      '43173',
+  -   '--hostname',
+  -   '127.0.0.1'
+    ]
+
+      at TestContext.<anonymous> (/Users/lang/workspace/github-lab/clowder-1452-loopback-only/.acceptance/public-main/desktop/service-manager-loopback.test.js:54:14)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1201:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:831:18)
+      at Test.postRun (node:internal/test_runner/test:1330:19)
+      at Test.run (node:internal/test_runner/test:1258:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:831:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: [ 'start', '--port', '43173' ],
+    expected: [ 'start', '--port', '43173', '--hostname', '127.0.0.1' ],
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }
+
+test at .acceptance/public-main/desktop/service-manager-loopback.test.js:43:5
+✖ win32 hoisted: Next binds only IPv4 loopback (1.286833ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+
+    [
+      'start',
+      '--port',
+      '43173',
+  -   '--hostname',
+  -   '127.0.0.1'
+    ]
+
+      at TestContext.<anonymous> (/Users/lang/workspace/github-lab/clowder-1452-loopback-only/.acceptance/public-main/desktop/service-manager-loopback.test.js:54:14)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1201:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:831:18)
+      at Test.postRun (node:internal/test_runner/test:1330:19)
+      at Test.run (node:internal/test_runner/test:1258:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:831:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: [ 'start', '--port', '43173' ],
+    expected: [ 'start', '--port', '43173', '--hostname', '127.0.0.1' ],
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }
+
+test at .acceptance/public-main/desktop/service-manager-loopback.test.js:43:5
+✖ win32 shim: Next binds only IPv4 loopback (0.666459ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+
+    [
+      'start',
+      '--port',
+      '43173',
+  -   '--hostname',
+  -   '127.0.0.1'
+    ]
+
+      at TestContext.<anonymous> (/Users/lang/workspace/github-lab/clowder-1452-loopback-only/.acceptance/public-main/desktop/service-manager-loopback.test.js:54:14)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1201:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:831:18)
+      at Test.postRun (node:internal/test_runner/test:1330:19)
+      at Test.run (node:internal/test_runner/test:1258:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:831:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: [ 'start', '--port', '43173' ],
+    expected: [ 'start', '--port', '43173', '--hostname', '127.0.0.1' ],
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }
+
+test at .acceptance/public-main/desktop/service-manager-loopback.test.js:43:5
+✖ win32 path-shim: Next binds only IPv4 loopback (0.524875ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+
+    [
+      'start',
+      '--port',
+      '43173',
+  -   '--hostname',
+  -   '127.0.0.1'
+    ]
+
+      at TestContext.<anonymous> (/Users/lang/workspace/github-lab/clowder-1452-loopback-only/.acceptance/public-main/desktop/service-manager-loopback.test.js:54:14)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1201:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:831:18)
+      at Test.postRun (node:internal/test_runner/test:1330:19)
+      at Test.run (node:internal/test_runner/test:1258:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:831:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: [ 'start', '--port', '43173' ],
+    expected: [ 'start', '--port', '43173', '--hostname', '127.0.0.1' ],
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }
