@@ -209,18 +209,24 @@ export function HubCatEditor(props: HubCatEditorProps) {
             />
           ) : null}
           <PersistenceBanner />
-          {error ? <p className="rounded-2xl bg-conn-red-bg px-4 py-3 text-sm text-conn-red-text">{error}</p> : null}
         </div>
 
-        <div className="flex items-center justify-end px-7 pb-5 pt-4">
-          <button
-            type="button"
-            onClick={handleSave}
-            disabled={saving || restoringCloudIdentity || saveBlockedByProfileBinding}
-            className="h-8 rounded-[10px] bg-[var(--cafe-accent)] px-4 text-compact font-extrabold text-[var(--cafe-surface)] transition hover:bg-[var(--cafe-accent-hover)] disabled:opacity-50"
-          >
-            {saving ? '保存中…' : '保存'}
-          </button>
+        <div className="shrink-0 px-7 pb-5 pt-4">
+          {error ? (
+            <p role="alert" className="mb-3 rounded-2xl bg-conn-red-bg px-4 py-3 text-sm text-conn-red-text">
+              {error}
+            </p>
+          ) : null}
+          <div className="flex justify-end">
+            <button
+              type="button"
+              onClick={handleSave}
+              disabled={saving || restoringCloudIdentity || saveBlockedByProfileBinding}
+              className="h-8 rounded-[10px] bg-[var(--cafe-accent)] px-4 text-compact font-extrabold text-[var(--cafe-surface)] transition hover:bg-[var(--cafe-accent-hover)] disabled:opacity-50"
+            >
+              {saving ? '保存中…' : '保存'}
+            </button>
+          </div>
         </div>
       </div>
       <UnifiedAuthModal
