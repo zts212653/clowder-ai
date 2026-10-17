@@ -42,15 +42,25 @@ export function classifyGitHubExecutionFailure(
     : undefined;
 }
 
-export async function enrichGitHubExecutionFailures(input: {
+interface ExecutionFailureInput {
   signal?: AbortSignal;
   repoFullName: string;
   headSha: string;
   checks: CiCheckDetail[];
   ghApiJson<T>(path: string): Promise<T>;
   warn(message: string): void;
-}): Promise<CiCheckDetail[]> {
-  if (!input.checks.some((check) => check.bucket === 'fail')) return input.checks;
+}
+
+/** Fail-open: a failed read returns the checks unclassified. */
+export async function enrichGitHubExecutionFailures(input: ExecutionFailureInput): Promise<CiCheckDetail[]> {
+  return (await readGitHubExecutionFailures(input)).checks;
+}
+
+/** As enrichGitHubExecutionFailures, saying whether every read it needed succeeded. */
+export async function readGitHubExecutionFailures(
+  input: ExecutionFailureInput,
+): Promise<{ checks: CiCheckDetail[]; complete: boolean }> {
+  if (!input.checks.some((check) => check.bucket === 'fail')) return { checks: input.checks, complete: true };
   try {
     const [checkRunsPayload, workflowRunsPayload] = await Promise.all([
       input.ghApiJson<{ check_runs?: GitHubCheckRunPayload[] }>(
@@ -118,13 +128,13 @@ export async function enrichGitHubExecutionFailures(input: {
       });
       enriched.push(executionFailure ? { ...check, executionFailure } : check);
     }
-    return enriched;
+    return { checks: enriched, complete: true };
   } catch (error) {
     input.signal?.throwIfAborted();
     if (error instanceof GitHubRateLimitError) throw error;
     input.warn(
       `[ci-status] typed execution evidence unavailable for ${input.repoFullName}@${input.headSha}: ${String(error)}`,
     );
-    return input.checks;
+    return { checks: input.checks, complete: false };
   }
 }
