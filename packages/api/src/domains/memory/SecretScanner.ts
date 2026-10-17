@@ -22,7 +22,31 @@ const PATTERNS: Pattern[] = [
 
 const CODE_FENCE_RE = /^\s{0,3}[`~]{3,}/;
 const PLACEHOLDER_RE = /EXAMPLE|PLACEHOLDER|YOUR[_-]|REPLACE|CHANGEME|xxx/i;
-const KEY_CONTEXT_RE = /(?:key|token|secret|password|credential|auth)\s*[:=]/i;
+
+/**
+ * The entropy fallback runs only on a single **assignment** shape, matched as one unit so the key and
+ * its value always share the same operator:
+ *
+ * - the key must be the assignment *target* token — decoration is unconstrained
+ *   (`$NAME`, `${NAME}`, `$scope:NAME`, `${scope:NAME}`, `[string]$NAME`, `cfg.apiKey`, `"NAME"`),
+ *   because everything between the leading markers/keyword prefix and the operator must be one
+ *   whitespace-free token. Prose fails here: in "（correlation key = messageId/taskId/…）" the key is
+ *   preceded by whitespace-separated words;
+ * - leading Markdown decoration is allowed (`>`, `*`, `-`, `+`, `#`, `|`, `•`, ordered lists and
+ *   `[ ]`/`[x]` task boxes) plus shell/JS keyword prefixes (`export`, `readonly`, `declare -x`,
+ *   `const`, …) and preceding `NAME=value` assignments, so `1. api_key = …`, `# api_key = …` and
+ *   `FOO=1 API_TOKEN=…` stay in scope;
+ * - the value must belong to **that** operator, not to any `[:=]` later on the line. Scanning the
+ *   line for any operator reported documentation links as secrets: in `api_key: https://host/…` the
+ *   `:` of `https:` supplied a 32+ character "value" and tripped the fail-closed purge. A typed
+ *   declaration (`API_TOKEN: string = …`) and the `:=` operator are still accepted, but the typed
+ *   form only accepts a type-ish run (no `/`, `?`, `:`) so a URL cannot reach an `=` through it.
+ *
+ * No value shape is blanket-exempted: a passphrase like "CorrectHorse/BatteryStaple/…" is
+ * indistinguishable from an identifier enumeration, so only the entropy threshold applies.
+ */
+const ASSIGNMENT_VALUE_RE =
+  /^[\s>*+\-•#|]*(?:\d+[.)]\s+|\[[ xX]\]\s+)*(?:(?:export|readonly|declare|typeset|local|set|env|const|let|var)(?:\s+-{1,2}[A-Za-z][\w-]*)*\s+|[A-Za-z_]\w*=\S*\s+)*[^\s]*?(?:key|token|secret|password|credential|auth)[^\s]*?\s*(?:[:=]+\s*|:\s*[\w$<>\[\]|.,\s]+?=\s*)["']?([A-Za-z0-9_\-/.+=]{32,})["']?/i;
 
 export class SecretScanner {
   static scan(content: string, filePath: string): SecretFinding[] {
@@ -53,9 +77,10 @@ export class SecretScanner {
         }
       }
 
-      if (!found && KEY_CONTEXT_RE.test(line)) {
-        const valueMatch = line.match(/[:=]\s*["']?([A-Za-z0-9_\-/.+=]{32,})["']?/);
-        if (valueMatch && !PLACEHOLDER_RE.test(valueMatch[1]) && shannonEntropy(valueMatch[1]) > 3.5) {
+      if (!found) {
+        const assignment = ASSIGNMENT_VALUE_RE.exec(line);
+        const value = assignment?.[1];
+        if (value !== undefined && !PLACEHOLDER_RE.test(value) && shannonEntropy(value) > 3.5) {
           findings.push({
             type: 'high-entropy-secret',
             file: filePath,
