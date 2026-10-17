@@ -7,11 +7,19 @@ import type { ClientId } from './cat.js';
 export const CAT_CARRIERS = ['cli', 'sdk', 'app_server', 'acp'] as const;
 export type CatCarrier = (typeof CAT_CARRIERS)[number];
 
+/** Clients whose native configuration can be inherited without a managed account binding. */
+export const NATIVE_TOOL_CLIENTS = ['anthropic', 'openai', 'acp', 'kimi', 'pi', 'opencode'] as const;
+
+export function catClientSupportsNativeTool(clientId: ClientId | string): boolean {
+  return NATIVE_TOOL_CLIENTS.some((client) => client === clientId);
+}
+
 const CARRIERS_BY_CLIENT: Readonly<Record<string, readonly CatCarrier[]>> = Object.freeze({
   anthropic: ['cli', 'sdk'],
   openai: ['cli', 'app_server'],
   google: ['cli', 'acp'],
   kimi: ['cli', 'acp'],
+  pi: ['cli', 'acp'],
   opencode: ['cli', 'acp'],
   acp: ['acp'],
   antigravity: ['cli'],

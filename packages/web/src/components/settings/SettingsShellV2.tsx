@@ -1,6 +1,6 @@
 'use client';
 
-import { Fragment } from 'react';
+import { Fragment, useState } from 'react';
 import { usePinnedSections } from '@/hooks/usePinnedSections';
 import { HubIcon } from '../hub-icons';
 import { useShellCopy } from '../shell/shell-copy';
@@ -74,6 +74,7 @@ export function SettingsShellV2({
   onSelect: (selection: string) => void;
 }) {
   const { openEntry, openTeam } = useOpenDestination();
+  const [mobileNavigation, setMobileNavigation] = useState(false);
   const { isPinned, pin, unpin } = usePinnedSections();
   // The words of the frame follow the shell language; ids, icons, groups and destinations stay in settings-ia.
   const t = useShellCopy(settingsShellCopy);
@@ -83,6 +84,7 @@ export function SettingsShellV2({
   const togglePin = (id: string) => (isPinned(id) ? unpin(id) : pin(id));
 
   const chooseEntry = (entry: SettingsEntry) => {
+    setMobileNavigation(false);
     const next = selectionForEntry(entry);
     if (next) onSelect(next);
     else openEntry(entry);
@@ -101,12 +103,25 @@ export function SettingsShellV2({
         data-console-panel="settings-nav"
       >
         <SettingsReturnRow />
-        <div className="px-4 pb-2 pt-4">
+        <div className="flex items-center justify-between gap-3 px-4 pb-2 pt-2 md:pt-4">
           <h1 className="m-0 text-sm font-semibold" style={{ color: 'var(--shell-ink)' }}>
             {t.title}
           </h1>
+          <button
+            type="button"
+            className="min-h-11 rounded-lg px-3 text-sm md:hidden"
+            aria-expanded={mobileNavigation}
+            aria-controls="settings-mobile-navigation"
+            onClick={() => setMobileNavigation((open) => !open)}
+          >
+            设置导航
+          </button>
         </div>
-        <nav aria-label={t.title} className="min-h-0 flex-1 overflow-y-auto px-2 pb-4">
+        <nav
+          id="settings-mobile-navigation"
+          aria-label={t.title}
+          className={`${mobileNavigation ? '' : 'hidden md:block'} min-h-0 flex-1 overflow-y-auto px-2 pb-4`}
+        >
           {SETTINGS_IA.map((entry, index) => {
             const isActive = active?.id === entry.id;
             const newGroup = index > 0 && SETTINGS_IA[index - 1]?.group !== entry.group;

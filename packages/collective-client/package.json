@@ -13,7 +13,7 @@
   },
   "scripts": {
     "build": "pnpm run clean && pnpm run lint && node ./scripts/build.mjs && tsc -p tsconfig.server.json",
-    "clean": "rm -rf dist",
+    "clean": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\"",
     "lint": "tsc --noEmit",
     "test": "vitest run"
   },

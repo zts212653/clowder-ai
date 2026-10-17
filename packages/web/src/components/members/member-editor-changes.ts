@@ -19,6 +19,7 @@ const fields: Record<FormKey, MemberFieldLabels> = {
   caution: ['注意事项', 'Caution'],
   strengths: ['技能标签', 'Strengths'],
   clientId: ['客户端', 'Client'],
+  configurationSource: ['配置方式', 'Configuration mode'],
   accountRef: ['账号', 'Account', '用哪个号'],
   accountBindingMode: ['账号', 'Account', '用哪个号'],
   defaultModel: ['模型', 'Model'],

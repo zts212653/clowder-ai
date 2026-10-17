@@ -275,6 +275,7 @@ function handleTool(msg: BackgroundAgentMessage, options: Options): void {
           toolUseId: msg.toolUseId,
           catId: msg.catId,
           content: msg.content,
+          toolInput: msg.toolInput,
           timestamp: msg.timestamp,
         });
   const target = namedTarget(msg, msg.threadId);

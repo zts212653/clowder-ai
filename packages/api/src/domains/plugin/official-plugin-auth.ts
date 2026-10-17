@@ -1,6 +1,6 @@
 import { stat } from 'node:fs/promises';
 import { isAbsolute, relative, resolve } from 'node:path';
-import QRCode from 'qrcode';
+import { loadQRCode } from '../../utils/lazy-qrcode.js';
 import type { VerifiedPluginPackage, VerifiedPluginPackageLocator } from './external-runtime/types.js';
 import type { PluginInstanceRecord } from './host-inventory/types.js';
 import type { OfficialPluginCatalogEntry, OfficialPluginOwnerAuth } from './official-catalog.js';
@@ -147,7 +147,8 @@ export class OfficialPluginAuthService implements OfficialPluginAuthPort {
 
   constructor(private readonly options: OfficialPluginAuthServiceOptions) {
     this.run = options.run ?? runOfficialPluginAuthCommand;
-    this.toQrDataUrl = options.toQrDataUrl ?? ((url) => QRCode.toDataURL(url, { width: 384, margin: 2 }));
+    this.toQrDataUrl =
+      options.toQrDataUrl ?? (async (url) => (await loadQRCode()).toDataURL(url, { width: 384, margin: 2 }));
     this.now = options.now ?? Date.now;
   }
 

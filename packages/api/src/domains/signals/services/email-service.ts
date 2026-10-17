@@ -1,5 +1,7 @@
-import nodemailer from 'nodemailer';
+import { createRetryableLoader } from '../../../utils/retryable-loader.js';
 import type { SignalNotificationConfig } from '../config/notifications-loader.js';
+
+const loadNodemailer = createRetryableLoader(async () => (await import('nodemailer')).default);
 
 export interface DailyDigestMessage {
   readonly subject: string;
@@ -37,15 +39,19 @@ export interface SignalEmailServiceOptions {
 function defaultCreateTransporter(
   smtpConfig: SignalNotificationConfig['notifications']['email']['smtp'],
 ): EmailTransporter {
-  const transporter = nodemailer.createTransport({
-    host: smtpConfig.host,
-    port: smtpConfig.port,
-    secure: smtpConfig.secure,
-    ...(smtpConfig.auth ? { auth: smtpConfig.auth } : {}),
+  const loadTransporter = createRetryableLoader(async () => {
+    const nodemailer = await loadNodemailer();
+    return nodemailer.createTransport({
+      host: smtpConfig.host,
+      port: smtpConfig.port,
+      secure: smtpConfig.secure,
+      ...(smtpConfig.auth ? { auth: smtpConfig.auth } : {}),
+    });
   });
 
   return {
     async sendMail(input: EmailTransportInput): Promise<{ messageId?: string | undefined }> {
+      const transporter = await loadTransporter();
       const result = await transporter.sendMail(input);
       return {
         ...(result.messageId ? { messageId: result.messageId } : {}),

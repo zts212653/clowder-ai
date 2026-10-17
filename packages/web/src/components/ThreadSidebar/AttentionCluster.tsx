@@ -272,7 +272,7 @@ export function AttentionClusterMember({
       id={isFirst ? `attention-members-${cluster.rootThreadId}` : undefined}
       data-attention-cluster-member={cluster.anchor}
       data-cluster-segment={isLast ? 'end' : 'middle'}
-      className="relative mx-2 h-20 !mt-0 pl-3"
+      className={`relative mx-2 ${isV2 ? 'py-0.5' : 'h-20'} !mt-0 pl-3`}
     >
       <span
         data-cluster-rail="true"

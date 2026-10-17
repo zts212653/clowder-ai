@@ -2,16 +2,19 @@ import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { delimiter, join } from 'node:path';
 import { PassThrough } from 'node:stream';
-import { mock, test } from 'node:test';
+import { after, mock, test } from 'node:test';
+import { isolateKimiTestEnvironment } from './helpers/kimi-test-environment.js';
+
+after(isolateKimiTestEnvironment());
 
 // Ensure `kimi` (new kimi-code) and `kimi-cli` (legacy) are resolvable on CI even
 // when the real CLI is not installed. resolveCliCommand prefers `kimi-cli` first.
 const stubBinDir = mkdtempSync(join(tmpdir(), 'kimi-stub-bin-'));
 writeFileSync(join(stubBinDir, 'kimi'), '#!/bin/sh\nexit 1\n', { mode: 0o755 });
 writeFileSync(join(stubBinDir, 'kimi-cli'), '#!/bin/sh\nexit 1\n', { mode: 0o755 });
-process.env.PATH = `${stubBinDir}:${process.env.PATH}`;
+process.env.PATH = `${stubBinDir}${delimiter}${process.env.PATH}`;
 
 const { KimiAgentService } = await import('../dist/domains/cats/services/agents/providers/KimiAgentService.js');
 const { invalidateCliCommand } = await import('../dist/utils/cli-resolve.js');
@@ -1211,14 +1214,17 @@ function enterNonLegacyKimiPath(t) {
   writeFileSync(join(binDir, 'kimi'), '#!/bin/sh\nexit 1\n', { mode: 0o755 });
   const savedPath = process.env.PATH;
   const savedHome = process.env.HOME;
+  const savedUserProfile = process.env.USERPROFILE;
   const tempHome = mkdtempSync(join(tmpdir(), 'kimi-native-l0-home-'));
-  process.env.PATH = `${binDir}:/usr/bin:/bin`;
+  process.env.PATH = [binDir, '/usr/bin', '/bin'].join(delimiter);
   process.env.HOME = tempHome;
+  process.env.USERPROFILE = tempHome;
   invalidateCliCommand('kimi-cli');
   invalidateCliCommand('kimi');
   return () => {
     process.env.PATH = savedPath;
     process.env.HOME = savedHome;
+    process.env.USERPROFILE = savedUserProfile;
     rmSync(binDir, { recursive: true, force: true });
     rmSync(tempHome, { recursive: true, force: true });
     invalidateCliCommand('kimi-cli');
@@ -1322,7 +1328,7 @@ test('native L0: compile failure is fail-closed (error + done, no spawn, no temp
 
     const msgs = await collect(
       service.invoke('Hello', {
-        callbackEnv: { KIMI_SHARE_DIR: tempShareDir, CAT_CAFE_API_URL: 'http://127.0.0.1:3004' },
+        callbackEnv: { KIMI_CODE_HOME: tempShareDir, CAT_CAFE_API_URL: 'http://127.0.0.1:3004' },
       }),
     );
 
@@ -1445,7 +1451,7 @@ test('native L0 resume: matching fingerprint honors --session', async () => {
     const service = new KimiAgentService({ spawnFn, model: 'kimi-code/k3', l0CompilerFn });
 
     const promise = collect(
-      service.invoke('Continue', { sessionId: 'sess-match', callbackEnv: { KIMI_SHARE_DIR: shareDir } }),
+      service.invoke('Continue', { sessionId: 'sess-match', callbackEnv: { KIMI_CODE_HOME: shareDir } }),
     );
     await new Promise((r) => setImmediate(r));
     emitKimiEvents(proc, [{ role: 'assistant', content: 'resumed' }]);
@@ -1489,7 +1495,7 @@ test('native L0 resume: compiles L0 for the fingerprint gate but passes no agent
       service.invoke('Continue', {
         sessionId: 'sess-bound',
         systemPrompt: 'PACK_CONTENT',
-        callbackEnv: { KIMI_SHARE_DIR: shareDir },
+        callbackEnv: { KIMI_CODE_HOME: shareDir },
       }),
     );
     await new Promise((r) => setImmediate(r));
@@ -1528,7 +1534,7 @@ test('native L0 resume: cliConfigArgs cannot swap the fingerprint-verified sessi
       service.invoke('Continue', {
         sessionId: 'sess-verified',
         cliConfigArgs: ['--session sess-unverified'],
-        callbackEnv: { KIMI_SHARE_DIR: shareDir },
+        callbackEnv: { KIMI_CODE_HOME: shareDir },
       }),
     );
     await new Promise((r) => setImmediate(r));
@@ -1571,7 +1577,7 @@ test('native L0 resume: attached-value session spellings (-S<id> / --session=<id
       service.invoke('Continue', {
         sessionId: 'sess-verified',
         cliConfigArgs: ['-Ssneaky-one', '--session=sneaky-two'],
-        callbackEnv: { KIMI_SHARE_DIR: shareDir },
+        callbackEnv: { KIMI_CODE_HOME: shareDir },
       }),
     );
     await new Promise((r) => setImmediate(r));
@@ -1601,7 +1607,7 @@ test('native L0 fresh start: cliConfigArgs cannot sneak --continue past the fing
       service.invoke('Hello', {
         // no sessionId → fresh bind, --agent-file is carried
         cliConfigArgs: ['--continue', '--verbose'],
-        callbackEnv: { KIMI_SHARE_DIR: shareDir },
+        callbackEnv: { KIMI_CODE_HOME: shareDir },
       }),
     );
     await new Promise((r) => setImmediate(r));
@@ -1633,7 +1639,7 @@ test('native L0 resume: stale fingerprint forces fresh session (no --session) + 
     const service = new KimiAgentService({ spawnFn, model: 'kimi-code/k3', l0CompilerFn });
 
     const promise = collect(
-      service.invoke('Continue', { sessionId: 'sess-old', callbackEnv: { KIMI_SHARE_DIR: shareDir } }),
+      service.invoke('Continue', { sessionId: 'sess-old', callbackEnv: { KIMI_CODE_HOME: shareDir } }),
     );
     await new Promise((r) => setImmediate(r));
     emitKimiEvents(proc, [
@@ -1668,7 +1674,7 @@ test('native L0 resume: unknown session (no fingerprint record) is unverifiable 
     const service = new KimiAgentService({ spawnFn, model: 'kimi-code/k3', l0CompilerFn });
 
     const promise = collect(
-      service.invoke('Continue', { sessionId: 'sess-unknown', callbackEnv: { KIMI_SHARE_DIR: shareDir } }),
+      service.invoke('Continue', { sessionId: 'sess-unknown', callbackEnv: { KIMI_CODE_HOME: shareDir } }),
     );
     await new Promise((r) => setImmediate(r));
     emitKimiEvents(proc, [{ role: 'assistant', content: 'fresh' }]);
@@ -1694,7 +1700,7 @@ test('native L0 first invoke: records fingerprint for the new session after sess
     const l0CompilerFn = mock.fn(async () => 'L0_V3');
     const service = new KimiAgentService({ spawnFn, model: 'kimi-code/k3', l0CompilerFn });
 
-    const promise = collect(service.invoke('Hello', { callbackEnv: { KIMI_SHARE_DIR: shareDir } }));
+    const promise = collect(service.invoke('Hello', { callbackEnv: { KIMI_CODE_HOME: shareDir } }));
     await new Promise((r) => setImmediate(r));
     emitKimiEvents(proc, [
       { role: 'meta', type: 'session.resume_hint', session_id: 'sess-first' },
@@ -1725,7 +1731,7 @@ test('native L0 resume: fingerprint store is cat-scoped (another cat never match
     const service = new KimiAgentService({ spawnFn, model: 'kimi-code/k3', l0CompilerFn });
 
     const promise = collect(
-      service.invoke('Continue', { sessionId: 'sess-shared', callbackEnv: { KIMI_SHARE_DIR: shareDir } }),
+      service.invoke('Continue', { sessionId: 'sess-shared', callbackEnv: { KIMI_CODE_HOME: shareDir } }),
     );
     await new Promise((r) => setImmediate(r));
     emitKimiEvents(proc, [{ role: 'assistant', content: 'fresh' }]);
@@ -1755,7 +1761,7 @@ test('native L0 resume: rejected old session id is never recorded with the new f
     const service = new KimiAgentService({ spawnFn, model: 'kimi-code/k3', l0CompilerFn });
 
     const promise = collect(
-      service.invoke('Continue', { sessionId: 'sess-old', callbackEnv: { KIMI_SHARE_DIR: shareDir } }),
+      service.invoke('Continue', { sessionId: 'sess-old', callbackEnv: { KIMI_CODE_HOME: shareDir } }),
     );
     await new Promise((r) => setImmediate(r));
     // CLI (pathologically) echoes the REJECTED old id — must not be recorded.
@@ -1790,7 +1796,7 @@ test('native L0 resume: rejected id must not consume the session-init slot; real
     const service = new KimiAgentService({ spawnFn, model: 'kimi-code/k3', l0CompilerFn });
 
     const promise = collect(
-      service.invoke('Continue', { sessionId: 'sess-old', callbackEnv: { KIMI_SHARE_DIR: shareDir } }),
+      service.invoke('Continue', { sessionId: 'sess-old', callbackEnv: { KIMI_CODE_HOME: shareDir } }),
     );
     await new Promise((r) => setImmediate(r));
     // Rejected id arrives FIRST (resume_hint), real new id arrives later via assistant event.
@@ -1833,7 +1839,7 @@ test('native L0 resume: rejected id in non-JSON resume hint line does not consum
     const msgs = await collect(
       service.invoke('Continue', {
         sessionId: 'sess-old',
-        callbackEnv: { KIMI_SHARE_DIR: shareDir },
+        callbackEnv: { KIMI_CODE_HOME: shareDir },
         spawnCliOverride,
       }),
     );
@@ -1864,7 +1870,7 @@ test('native L0: valid new id from non-JSON line is recorded (next resume would 
     }
 
     const msgs = await collect(
-      service.invoke('Hello', { callbackEnv: { KIMI_SHARE_DIR: shareDir }, spawnCliOverride }),
+      service.invoke('Hello', { callbackEnv: { KIMI_CODE_HOME: shareDir }, spawnCliOverride }),
     );
 
     const sessionInit = msgs.find((m) => m.type === 'session_init');

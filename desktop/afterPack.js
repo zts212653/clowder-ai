@@ -6,7 +6,64 @@
 const path = require('node:path');
 const fs = require('node:fs');
 
+/** Walk main.js's top-level `require('./x')` graph exactly like the packaging contract test. */
+function collectMainProcessLocalRequires(desktopDir, entry = 'main.js') {
+  const pending = [entry];
+  const visited = new Set();
+  while (pending.length > 0) {
+    const relativeSourcePath = pending.shift();
+    if (visited.has(relativeSourcePath)) continue;
+    visited.add(relativeSourcePath);
+    const source = fs.readFileSync(path.join(desktopDir, relativeSourcePath), 'utf8');
+    for (const match of source.matchAll(/require\(['"](\.[^'"]+)['"]\)/g)) {
+      let dependencyPath = path.relative(
+        desktopDir,
+        path.resolve(desktopDir, path.dirname(relativeSourcePath), match[1]),
+      );
+      if (!path.extname(dependencyPath)) dependencyPath += '.js';
+      dependencyPath = dependencyPath.split(path.sep).join('/');
+      if (path.extname(dependencyPath) !== '.js') continue;
+      pending.push(dependencyPath);
+    }
+  }
+  return [...visited];
+}
+
+function normalizeArchiveEntry(entry) {
+  return entry.replaceAll('\\', '/').replace(/^\/+/, '');
+}
+
+/** Fail the Windows package when a runtime module main.js needs is absent from app.asar. */
+function verifyWindowsMainProcessClosure(appOutDir) {
+  const desktopDir = __dirname;
+  const packageJson = JSON.parse(fs.readFileSync(path.join(desktopDir, 'package.json'), 'utf8'));
+  const packagedFileSpecs = new Set(packageJson.build?.files ?? []);
+  const closure = collectMainProcessLocalRequires(desktopDir);
+  const missingFromBuildFiles = closure.filter((file) => !packagedFileSpecs.has(file));
+  if (missingFromBuildFiles.length > 0) {
+    throw new Error(
+      `afterPack: desktop/package.json build.files is missing main-process modules: ${missingFromBuildFiles.join(', ')}`,
+    );
+  }
+  const asarPath = path.join(appOutDir, 'resources', 'app.asar');
+  if (!fs.existsSync(asarPath)) {
+    console.warn(`  afterPack: ${asarPath} not found, skipping main-process closure check`);
+    return;
+  }
+  const { listPackage } = require('@electron/asar');
+  const packagedEntries = new Set(listPackage(asarPath).map(normalizeArchiveEntry));
+  const missingFromArchive = closure.filter((file) => !packagedEntries.has(file));
+  if (missingFromArchive.length > 0) {
+    throw new Error(`afterPack: Windows app.asar is missing main-process modules: ${missingFromArchive.join(', ')}`);
+  }
+  console.log(`  afterPack: verified ${closure.length} main-process modules inside app.asar`);
+}
+
 exports.default = async function afterPack(context) {
+  if (context.electronPlatformName === 'win32') {
+    verifyWindowsMainProcessClosure(context.appOutDir);
+    return;
+  }
   if (context.electronPlatformName !== 'darwin') {
     return;
   }

@@ -1,4 +1,4 @@
-import QRCode from 'qrcode';
+import { loadQRCode } from '../../utils/lazy-qrcode.js';
 
 const FEISHU_ACCOUNTS_BASE_URL = 'https://accounts.feishu.cn';
 const LARK_ACCOUNTS_BASE_URL = 'https://accounts.larksuite.com';
@@ -94,6 +94,7 @@ export class DefaultFeishuQrBindClient implements FeishuQrBindClient {
 
     const qrUrl = new URL(verificationUri);
     qrUrl.searchParams.set('from', 'onboard');
+    const QRCode = await loadQRCode();
 
     return {
       qrUrl: await QRCode.toDataURL(qrUrl.toString(), { width: 384, margin: 2 }),

@@ -17,6 +17,10 @@ function stubLocation(overrides: Partial<Location> | null) {
 
 /* ---------- suite ---------- */
 
+function stubRuntimeOrigin(apiOrigin: unknown) {
+  vi.stubGlobal('document', { documentElement: { getAttribute: () => apiOrigin } });
+}
+
 describe('resolveApiUrl', () => {
   const originalEnv = process.env.NEXT_PUBLIC_API_URL;
 
@@ -26,6 +30,7 @@ describe('resolveApiUrl', () => {
 
   afterEach(() => {
     vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
     if (originalEnv !== undefined) {
       process.env.NEXT_PUBLIC_API_URL = originalEnv;
     } else {
@@ -38,6 +43,74 @@ describe('resolveApiUrl', () => {
     const mod = await import('../api-client');
     return mod.resolveApiUrl;
   }
+
+  it('uses the desktop runtime API instead of a production build-time localhost default', async () => {
+    process.env.NEXT_PUBLIC_API_URL = 'http://localhost:3004';
+    stubLocation({ hostname: 'localhost', port: '5158' });
+    vi.stubGlobal('desktopBridge', { apiOrigin: 'http://localhost:3158' });
+    expect((await loadResolveApiUrl())()).toBe('http://localhost:3158');
+  });
+
+  it.each([
+    ['5196', '3196'],
+    ['5128', '4117'],
+  ])('initializes an ordinary browser on frontend %s with its independent runtime API %s', async (frontendPort, apiPort) => {
+    process.env.NEXT_PUBLIC_API_URL = 'http://localhost:3004';
+    stubLocation({ hostname: 'localhost', port: frontendPort });
+    stubRuntimeOrigin(`http://localhost:${apiPort}`);
+    vi.resetModules();
+    expect((await import('../api-client')).API_URL).toBe(`http://localhost:${apiPort}`);
+  });
+
+  it('aligns runtime API hostname for strict same-site session cookies', async () => {
+    stubLocation({ hostname: '127.0.0.1', port: '5196' });
+    stubRuntimeOrigin('http://localhost:3196');
+    expect((await loadResolveApiUrl())()).toBe('http://127.0.0.1:3196');
+  });
+
+  it('retains Electron bridge priority over browser bootstrap', async () => {
+    stubLocation({ hostname: 'localhost', port: '5196' });
+    vi.stubGlobal('desktopBridge', { apiOrigin: 'http://localhost:3196' });
+    stubRuntimeOrigin('http://localhost:4117');
+    expect((await loadResolveApiUrl())()).toBe('http://localhost:3196');
+  });
+
+  it.each([
+    'https://outside.invalid',
+    'http://localhost:3196/api',
+    'http://u:p@localhost:3196',
+    'http://localhost:0',
+    '',
+    null,
+  ])('ignores an invalid runtime API origin %s', async (apiOrigin) => {
+    stubLocation({ hostname: 'localhost', port: '5196' });
+    stubRuntimeOrigin(apiOrigin);
+    expect((await loadResolveApiUrl())()).toBe('http://localhost:5197');
+  });
+
+  it('does not route a remote browser to a bootstrapped loopback API', async () => {
+    stubLocation({ hostname: 'cafe.example.test', protocol: 'https:', port: '' });
+    stubRuntimeOrigin('http://localhost:3196');
+    expect((await loadResolveApiUrl())()).toBe('https://cafe.example.test');
+  });
+
+  it('keeps SSR on the explicit runtime API port without relying on a document', async () => {
+    vi.stubGlobal('window', undefined);
+    vi.stubGlobal('document', undefined);
+    stubLocation(null);
+    vi.stubEnv('API_SERVER_PORT', '4117');
+    process.env.NEXT_PUBLIC_API_URL = 'http://localhost:3004';
+    expect((await loadResolveApiUrl())()).toBe('http://localhost:4117');
+  });
+  it.each([
+    'https://outside.invalid',
+    'http://localhost:3158/api',
+    'http://user:pass@localhost:3158',
+  ])('rejects an unsafe desktop API origin %s', async (apiOrigin) => {
+    stubLocation({ hostname: 'localhost', port: '5158' });
+    vi.stubGlobal('desktopBridge', { apiOrigin });
+    expect((await loadResolveApiUrl())()).toBe('http://localhost:5159');
+  });
 
   // ── Cloudflare Tunnel ──
 

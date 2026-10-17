@@ -3,17 +3,12 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, it } from 'node:test';
+import { ACCOUNT_AUTH_ENV_KEYS } from './helpers/account-auth-environment.js';
 
 describe('account-resolver (4b unified runtime resolution)', () => {
   let projectRoot;
   let previousGlobalRoot;
-  const ENV_KEYS_TO_ISOLATE = [
-    'CAT_CAFE_GLOBAL_CONFIG_ROOT',
-    'ANTHROPIC_API_KEY',
-    'OPENAI_API_KEY',
-    'GOOGLE_API_KEY',
-    'HOME',
-  ];
+  const ENV_KEYS_TO_ISOLATE = ['CAT_CAFE_GLOBAL_CONFIG_ROOT', ...ACCOUNT_AUTH_ENV_KEYS, 'HOME'];
   const savedEnv = {};
 
   beforeEach(async () => {
@@ -112,6 +107,7 @@ describe('account-resolver (4b unified runtime resolution)', () => {
     assert.ok(profile);
     assert.equal(profile.id, 'claude');
     assert.equal(profile.authType, 'oauth');
+    assert.equal(profile.syntheticNative, undefined, 'persisted OAuth account remains an explicit OAuth binding');
     assert.equal(profile.protocol, 'anthropic');
     assert.equal(profile.apiKey, undefined);
   });
@@ -160,6 +156,22 @@ describe('account-resolver (4b unified runtime resolution)', () => {
     assert.ok(profile);
     assert.equal(profile.id, 'claude');
     assert.equal(profile.protocol, 'anthropic');
+  });
+
+  it('resolveForClient preserves an environment API key with an empty account catalog', async () => {
+    const { resolveForClient } = await import(`../dist/config/account-resolver.js?t=${Date.now()}-env-empty`);
+    await writeCatalog({});
+    await writeCredentials({});
+    process.env.OPENAI_API_KEY = 'fixture-openai-key';
+    process.env.OPENAI_BASE_URL = 'https://example.invalid/v1';
+
+    const profile = resolveForClient(projectRoot, 'openai', 'codex');
+    assert.ok(profile);
+    assert.equal(profile.id, 'codex');
+    assert.equal(profile.authType, 'api_key');
+    assert.equal(profile.syntheticNative, true);
+    assert.equal(profile.apiKey, 'fixture-openai-key');
+    assert.equal(profile.baseUrl, 'https://example.invalid/v1');
   });
 
   it('resolveForClient prefers preferredAccountRef when provided', async () => {
@@ -217,6 +229,7 @@ describe('account-resolver (4b unified runtime resolution)', () => {
     assert.ok(profile);
     assert.equal(profile.id, 'claude');
     assert.equal(profile.authType, 'oauth');
+    assert.equal(profile.syntheticNative, true, 'fresh-install fallback must retain CLI-owned auth semantics');
   });
 
   it('resolveForClient finds custom account via preferredAccountRef (not protocol)', async () => {

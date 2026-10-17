@@ -65,6 +65,8 @@
 .member-table {
   border-collapse: collapse;
   width: 100%;
+  min-width: 920px;
+  table-layout: fixed;
 }
 .member-table th {
   color: var(--shell-muted);
@@ -78,6 +80,8 @@
   border-top: 1px solid var(--shell-hairline);
   padding: 12px;
   font-size: var(--console-font-xs);
+  vertical-align: top;
+  line-height: 1.55;
 }
 .member-table tr:hover td {
   background: var(--shell-selected);
@@ -88,12 +92,35 @@
   padding: 8px;
 }
 .member-table td:nth-child(2) {
-  min-width: 170px;
+  width: 25%;
 }
-.member-table td:nth-child(3) {
-  overflow-wrap: anywhere;
-  min-width: 130px;
-  max-width: 180px;
+.member-table th:nth-child(2) {
+  width: 25%;
+}
+.member-table th:nth-child(3) {
+  width: 24%;
+}
+.member-table th:nth-child(4) {
+  width: 11%;
+}
+.member-table th:nth-child(5) {
+  width: 12%;
+}
+.member-table th:nth-child(6) {
+  width: 16%;
+}
+.member-table th:last-child {
+  width: 60px;
+}
+.member-runtime-summary,
+.member-table td:nth-child(3) > small,
+.member-name strong,
+.member-name small,
+.member-aliases > summary {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .member-table td:nth-child(4) {
   min-width: 140px;
@@ -109,14 +136,51 @@
   gap: 10px;
   text-align: left;
   color: var(--shell-ink);
+  max-width: 100%;
 }
 .member-name > span {
   display: flex;
   flex-direction: column;
+  min-width: 0;
 }
 .member-name .member-avatar {
   width: 32px;
   height: 32px;
+  flex-shrink: 0;
+}
+.member-identity-details {
+  margin: 6px 0 0 42px;
+}
+.member-identity-details > summary,
+.member-status-detail > summary {
+  color: var(--shell-muted);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.member-full-values {
+  padding-top: 8px;
+}
+.member-full-values > div {
+  margin-bottom: 8px;
+}
+.member-full-values code,
+.member-aliases > div,
+.member-status-detail > small {
+  display: block;
+  overflow-wrap: anywhere;
+}
+.member-full-values button {
+  color: var(--cafe-accent);
+  padding: 4px 0;
+}
+.member-full-values p {
+  margin: 0;
+}
+.member-aliases > summary {
+  cursor: pointer;
+}
+.member-aliases > div {
+  padding-top: 8px;
 }
 .member-name small {
   font-size: var(--console-font-xs);

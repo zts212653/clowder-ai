@@ -56,6 +56,17 @@ function definition(run = readSubject): McpToolDefinition {
 }
 
 describe('F286 compiler and runtime implementation binding', () => {
+  it('loads an actual compiled implementation through a platform-safe module URL', async () => {
+    const compiled = await import('../dist/canonical-server-tools.js');
+    const entry = compiled.CANONICAL_TOOL_REGISTRY[0];
+    assert.ok(entry);
+    const catalog = await resolveMcpImplementationCatalog({
+      repoRoot: resolve(import.meta.dirname, '../../..'),
+      definitions: [entry],
+    });
+    assert.equal(catalog.size, 1);
+    assert.equal(catalog.get(entry.implementation.ref)?.compilerSymbolId.includes('\\'), false);
+  });
   it('resolves a named compiler export and exact pre-registration function identity', async () => {
     const catalog = await resolveMcpImplementationCatalog({
       repoRoot: resolve(import.meta.dirname, '../../..'),

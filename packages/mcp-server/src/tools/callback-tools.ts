@@ -3825,6 +3825,8 @@ export const callbackTools = [
       'Use when: sharing a mid-task update, routing one ordinary @ notification, or handing one named external action to one successor with action.mode="single". ' +
       'NOT for: invocation-token delivery to another thread (use cross_post_message) or deliberate independent multi-cat review/ideation (use multi_mention with mode="parallel"). ' +
       'Output: the message is persisted in the principal-selected thread; routed targets are queued, and action conflicts return safe_wait without creating work. ' +
+      "The receipt acknowledges submission, not the recipient's answer; wait for an inbound reply before claiming their result. " +
+      'GOTCHA: use one delivery carrier per intended hop. After a successful routed post, repeating the same line-start @mention in final text creates another hop; use that text fallback when the post failed. ' +
       'Scarce dossier engagementPolicy seats receive effectClass=fyi or coordination.phase=terminal unread without waking; deliveredWithoutWake confirms delivery, not reading. Active coordination, actions and localReviewVerdict retain their wake. ' +
       'GOTCHA: action requires explicit clientMessageId + exactly one targetCats entry; ordinary single-cat notifications do not need action. ' +
       'For a direct Claim/Release chain, pass coordination.phase=active on work hops and terminal on the final delivery; terminal recipients may clean-stop without another @. ' +

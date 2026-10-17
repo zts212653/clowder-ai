@@ -46,6 +46,8 @@ const messages = [
   },
 ] as const satisfies readonly ChatMessage[];
 const handleSend = vi.hoisted(() => vi.fn());
+const navigate = vi.hoisted(() => vi.fn());
+vi.mock('next/navigation', () => ({ useRouter: () => ({ push: navigate }) }));
 const fixture = vi.hoisted(() => ({
   navigator: false,
   readonly: false,
@@ -116,12 +118,14 @@ vi.mock('../../ChatMessageRow', () => ({
     message,
     sendContext,
     confirmations,
+    onEditCat,
     onEnterSelection,
     forwardingDisabled,
   }: {
     message: ChatMessage;
     sendContext?: string;
     confirmations?: unknown[];
+    onEditCat: (catId: string) => void;
     onEnterSelection?: (id: string) => void;
     forwardingDisabled?: boolean;
   }) => (
@@ -133,6 +137,9 @@ vi.mock('../../ChatMessageRow', () => ({
       data-confirmation-count={confirmations?.length ?? 0}
     >
       {message.content}
+      {message.type === 'assistant' && (
+        <button type="button" aria-label="编辑伙伴" onClick={() => onEditCat('codex')} />
+      )}
       <button type="button" aria-label={`select-${message.id}`} onClick={() => onEnterSelection?.(message.id)} />
       <button type="button" aria-label={`forward-${message.id}`} disabled={forwardingDisabled} />
     </article>
@@ -179,6 +186,8 @@ beforeEach(() => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
   writeShellPresentation('classic');
   handleSend.mockClear();
+  handleSend.mockResolvedValue(true);
+  navigate.mockClear();
   fixture.navigator = false;
   fixture.readonly = false;
   fixture.forwardingBlocked = false;
@@ -207,6 +216,12 @@ function manifest(scope: Element): string[] {
 }
 
 describe('ThreadChatSurface density contract', () => {
+  it('opens the same member settings page from a chat nameplate', async () => {
+    await act(async () => root.render(<ThreadChatSurface threadId="thread-parity" density="full" />));
+    const button = container.querySelector<HTMLButtonElement>('button[aria-label="编辑伙伴"]')!;
+    await act(async () => button.click());
+    expect(navigate).toHaveBeenCalledWith('/settings?s=members&shell=v2&cat=codex');
+  });
   it('projects a proven single-cat conversation only in v2 and leaves the composer mounted', async () => {
     fixture.extraMessages = [
       {

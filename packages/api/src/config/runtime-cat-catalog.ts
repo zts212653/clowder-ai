@@ -1,4 +1,4 @@
-import { mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
+import { closeSync, mkdirSync, openSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import type {
   AgyProfileConfig,
@@ -13,6 +13,7 @@ import type {
   VoiceConfig,
 } from '@cat-cafe/shared';
 import { createCatId } from '@cat-cafe/shared';
+import { saveSpan } from '../utils/member-save-diagnostics.js';
 import { clearBudgetCache } from './cat-budgets.js';
 import { bootstrapCatCatalog, readCatCatalog, resolveCatCatalogPath } from './cat-catalog-store.js';
 import type { AcpVariantConfig } from './cat-config-loader.js';
@@ -28,8 +29,56 @@ import { readLocalAccountSelection } from './local-account-selection.js';
 import { resolveProjectTemplatePath } from './project-template-path.js';
 import { addTemplateVariantTombstone, type TemplateVariantTombstoneInput } from './template-variant-tombstones.js';
 
+const runtimeCatMutationTails = new Map<string, Promise<void>>();
+
+/** Serialize catalog mutations within this API process so retried first-run writes cannot lose a member. */
+export async function withRuntimeCatMutationLock<T>(projectRoot: string, operation: () => T): Promise<T> {
+  const previous = runtimeCatMutationTails.get(projectRoot) ?? Promise.resolve();
+  let release!: () => void;
+  const current = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  runtimeCatMutationTails.set(projectRoot, current);
+  await saveSpan('catalog.queue', () => previous);
+  let lockFd: number | undefined;
+  const lockPath = `${resolveCatCatalogPath(projectRoot)}.lock`;
+  try {
+    mkdirSync(dirname(lockPath), { recursive: true });
+    await saveSpan('catalog.file_lock', async () => {
+      for (let attempt = 0; attempt < 300; attempt += 1) {
+        try {
+          lockFd = openSync(lockPath, 'wx');
+          break;
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+          try {
+            if (Date.now() - statSync(lockPath).mtimeMs > 30_000) unlinkSync(lockPath);
+          } catch {
+            // The writer may have released the lock between stat and unlink.
+          }
+          await new Promise((resolve) => setTimeout(resolve, 10));
+        }
+      }
+      if (lockFd === undefined) throw new Error('Timed out waiting for runtime cat catalog lock');
+    });
+    return saveSpan('catalog.write', operation);
+  } finally {
+    if (lockFd !== undefined) {
+      closeSync(lockFd);
+      try {
+        unlinkSync(lockPath);
+      } catch {
+        // Best-effort release; stale locks are reclaimed above.
+      }
+    }
+    release();
+    if (runtimeCatMutationTails.get(projectRoot) === current) runtimeCatMutationTails.delete(projectRoot);
+  }
+}
+
 export interface RuntimeCatInput {
   catId: string;
+  creationReceipt?: CatVariant['creationReceipt'];
   breedId?: string;
   name: string;
   displayName: string;
@@ -39,6 +88,7 @@ export interface RuntimeCatInput {
   color: CatColor;
   mentionPatterns: string[];
   accountRef?: string;
+  configurationSource?: 'native_tool' | 'managed_account';
   roleDescription: string;
   personality?: string;
   teamStrengths?: string;
@@ -75,6 +125,7 @@ export interface RuntimeCatUpdate {
   color?: CatColor;
   mentionPatterns?: string[];
   accountRef?: string | null;
+  configurationSource?: 'native_tool' | 'managed_account' | null;
   accountBindingMode?: 'follow' | 'override';
   roleDescription?: string;
   personality?: string;
@@ -279,6 +330,8 @@ function createBreedFromInput(input: RuntimeCatInput): CatBreed {
       {
         id: variantId,
         clientId: input.clientId,
+        ...(input.creationReceipt ? { creationReceipt: input.creationReceipt } : {}),
+        ...(input.configurationSource ? { configurationSource: input.configurationSource } : {}),
         carrier: input.carrier,
         ...(input.variantLabel != null && input.variantLabel.trim().length > 0
           ? { variantLabel: input.variantLabel.trim() }
@@ -552,6 +605,10 @@ export function updateRuntimeCat(projectRoot: string, catId: string, patch: Runt
     }
   }
 
+  if (patch.configurationSource !== undefined) {
+    if (patch.configurationSource) variant.configurationSource = patch.configurationSource;
+    else delete variant.configurationSource;
+  }
   if (patch.personality !== undefined) {
     if (patch.personality && patch.personality.trim().length > 0) {
       variant.personality = patch.personality;

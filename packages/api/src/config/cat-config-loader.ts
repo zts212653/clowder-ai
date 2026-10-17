@@ -113,8 +113,10 @@ const catVariantSchema = z
     variantLabel: z.string().min(1).optional(), // F32-b P4: disambiguation label
     mentionPatterns: z.array(mentionPatternSchema).optional(), // F32-b: variant-level mentions
     source: z.string().optional(), // #441: legacy field, ignored — kept in schema for old catalog read compat
+    configurationSource: z.enum(['native_tool', 'managed_account']).optional(),
     accountRef: z.string().min(1).optional(), // F127: concrete account binding
     accountBindingMode: z.enum(['follow', 'override']).optional(),
+    creationReceipt: z.object({ requestHash: z.string().length(64), payloadHash: z.string().length(64) }).optional(),
     clientId: z.string().min(1), // #252: accept unknown providers to avoid full config crash
     carrier: catCarrierSchema.optional(),
     /** Legacy member access-mode field. Read only; canonical writes use carrier. */
@@ -176,6 +178,7 @@ const catVariantSchema = z
   });
 
 type CarrierCompatInput = {
+  configurationSource?: 'native_tool' | 'managed_account';
   carrier?: CatCarrier;
   transport?: CatCarrier;
   clientId?: string;
@@ -199,6 +202,8 @@ export function resolveCatCarrier(
   if (input.transport) return input.transport;
   if (input.clientId && input.acp != null) return 'acp';
   if (input.clientId === 'openai') {
+    if (input.cli?.carrier) return input.cli.carrier === 'app_server' ? 'app_server' : 'cli';
+    if (input.configurationSource === 'native_tool') return 'app_server';
     const legacy = input.cli?.carrier ?? codexCarrierEnv;
     if (legacy === 'app_server') return 'app_server';
   }
@@ -707,6 +712,7 @@ export function toAllCatConfigs(config: CatCafeConfig): Record<string, CatConfig
         color: variant.color ?? breed.color, // F32-b P4c: variant can override
         mentionPatterns,
         ...(variant.accountRef != null ? { accountRef: variant.accountRef } : {}),
+        ...(variant.configurationSource ? { configurationSource: variant.configurationSource } : {}),
         ...(variant.accountBindingMode ? { accountBindingMode: variant.accountBindingMode } : {}),
         clientId: variant.clientId as ClientId, // #252: Zod now accepts any string; downstream switch/case has default branches
         carrier: resolveCatCarrier(variant as CarrierCompatInput),
@@ -1038,6 +1044,8 @@ export function getCatEffort(
   fallbackProvider?: ClientId,
   _effectiveModel?: string | null,
 ): CliEffortLevel {
+  const nativeConfig = config ? undefined : catRegistry.tryGet(catId)?.config;
+  if (nativeConfig?.configurationSource === 'native_tool') return nativeConfig.cli?.effort?.trim() ?? '';
   const cfg = config ?? getCachedConfig();
   if (!cfg) {
     const normalized = normalizeCliEffortForProvider(fallbackProvider ?? 'anthropic', undefined);
@@ -1054,6 +1062,8 @@ export function getCatEffort(
     const nativeValue = variant.cli.effort.trim();
     if (nativeValue) return nativeValue;
   }
+
+  if (variant?.configurationSource === 'native_tool') return '';
 
   // Client-aware defaults: use variant's clientId if found, otherwise fallbackProvider
   const effectiveProvider = variant?.clientId ?? fallbackProvider;

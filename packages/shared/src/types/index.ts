@@ -292,7 +292,9 @@ export {
   CAT_CARRIERS,
   type CatCarrier,
   catClientSupportsCarrier,
+  catClientSupportsNativeTool,
   getCatCarrierOptions,
+  NATIVE_TOOL_CLIENTS,
 } from './cat-carrier.js';
 // F182: Cat routing error types
 export type { CatAlternative, CatRoutingError } from './cat-routing.js';

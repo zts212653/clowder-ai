@@ -15,7 +15,7 @@
  * hook sidechannel (Stop/PostToolUse) for output. Works with ANY claude
  * version — no pinned binary required (2.1.170 pin removed).
  */
-import type { CatId } from '@cat-cafe/shared';
+import { type CatId, catRegistry } from '@cat-cafe/shared';
 import type { AgentMessage, AgentService, AgentServiceOptions, ToolExecutionPolicy } from '../../types.js';
 import { ClaudeAgentService } from './ClaudeAgentService.js';
 import { ClaudeBgCarrierService } from './ClaudeBgCarrierService.js';

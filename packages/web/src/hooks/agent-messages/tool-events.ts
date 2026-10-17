@@ -41,7 +41,9 @@ export function toolUseEvent(input: ToolEventBase & { toolName?: string; toolInp
 }
 
 /** Tool output shown without the appended recall-meta block; the block travels as `resultMeta`. */
-export function toolResultEvent(input: ToolEventBase & { content?: string }): ToolEvent {
+export function toolResultEvent(
+  input: ToolEventBase & { content?: string; toolInput?: Record<string, unknown> },
+): ToolEvent {
   const raw = input.content ?? '';
   const resultMeta = extractRecallMetaDetail(raw);
   return {
@@ -51,6 +53,7 @@ export function toolResultEvent(input: ToolEventBase & { content?: string }): To
     type: 'tool_result',
     label: `${input.catId} ← result`,
     detail: toolResultDetail(raw),
+    ...(input.toolInput !== undefined ? { inputDetail: safeJsonDetail(input.toolInput) } : {}),
     ...(resultMeta ? { resultMeta } : {}),
     timestamp: input.timestamp,
   };

@@ -1,7 +1,12 @@
 import React, { act } from 'react';
-import { createRoot, type Root } from 'react-dom/client';
+import { createRoot, hydrateRoot, type Root } from 'react-dom/client';
+import { renderToString } from 'react-dom/server';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { resetCoCreatorConfigCacheForTest, useCoCreatorConfig } from '@/hooks/useCoCreatorConfig';
+import {
+  primeCoCreatorConfigCache,
+  resetCoCreatorConfigCacheForTest,
+  useCoCreatorConfig,
+} from '@/hooks/useCoCreatorConfig';
 import { getMentionRe, getMentionToCat, resetMentionDataForTest } from '@/lib/mention-highlight';
 import { apiFetch } from '@/utils/api-client';
 
@@ -123,5 +128,17 @@ describe('useCoCreatorConfig', () => {
     const re = getMentionRe();
     re.lastIndex = 0;
     expect(re.exec('请 @lang 看一下')).not.toBeNull();
+  });
+  it('hydrates the server placeholder even when another boundary already loaded the owner', async () => {
+    act(() => root.unmount());
+    container.innerHTML = renderToString(<CoCreatorProbe />);
+    primeCoCreatorConfigCache({ name: '首次体验环境主人', aliases: [], mentionPatterns: ['@owner'] });
+    const recoverable = vi.fn();
+    await act(async () => {
+      root = hydrateRoot(container, <CoCreatorProbe />, { onRecoverableError: recoverable });
+      await flushEffects();
+    });
+    expect(recoverable).not.toHaveBeenCalled();
+    expect(container.textContent).toBe('首次体验环境主人');
   });
 });

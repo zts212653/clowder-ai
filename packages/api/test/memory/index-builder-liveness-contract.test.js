@@ -7,6 +7,7 @@ import { setTimeout as pause } from 'node:timers/promises';
 import { IndexBuilder } from '../../dist/domains/memory/IndexBuilder.js';
 import { SqliteEvidenceStore } from '../../dist/domains/memory/SqliteEvidenceStore.js';
 import { RunLedger } from '../../dist/infrastructure/scheduler/RunLedger.js';
+import { createIndexWriterDiagnostics } from '../helpers/index-writer-diagnostics.js';
 
 async function fixture(t) {
   const root = mkdtempSync(join(tmpdir(), 'index-contract-'));
@@ -75,7 +76,9 @@ test(
       // Match runtime MessageStore.getByThread: latest N, oldest first.
       (_threadId, limit = 2000) => messages.slice(-limit),
     );
-    const ledger = new RunLedger(store.getDb());
+    const writerDiagnostics = createIndexWriterDiagnostics(store.getDb());
+    t.after(() => writerDiagnostics.close());
+    const ledger = new RunLedger(writerDiagnostics.database);
     const gaps = [];
     const writes = [];
     const passageCounts = new Set();
@@ -98,22 +101,31 @@ test(
       gaps.push(recordGap(performance.now()));
       const count = countPassages.get().n;
       if (count > 0 && count < messages.length) passageCounts.add(count);
+      writerDiagnostics.beforeWrite(count);
       const started = performance.now();
-      ledger.record({
-        task_id: 'index-fixture',
-        subject_key: 'live',
-        outcome: 'delivered',
-        signal_summary: null,
-        duration_ms: 0,
-        started_at: Date.now(),
-        assigned_cat_id: null,
-      });
-      writes.push(performance.now() - started);
+      try {
+        ledger.record({
+          task_id: 'index-fixture',
+          subject_key: 'live',
+          outcome: 'delivered',
+          signal_summary: null,
+          duration_ms: 0,
+          started_at: Date.now(),
+          assigned_cat_id: null,
+        });
+      } finally {
+        const elapsedMs = performance.now() - started;
+        writes.push(elapsedMs);
+        writerDiagnostics.afterWrite({ startedAt: started, elapsedMs });
+      }
     }, 5);
     try {
       await builder.rebuild({
         force: true,
-        onProgress: (phase) => phases.push({ phase, atMs: performance.now() - startedAt }),
+        onProgress: (phase) => {
+          phases.push({ phase, atMs: performance.now() - startedAt });
+          writerDiagnostics.phase(phase);
+        },
       });
     } finally {
       // A final synchronous stretch can finish before the next timer fires.
@@ -128,8 +140,10 @@ test(
           slowestGap,
           maxWriterMs: Math.max(...writes),
           phases,
+          writerDiagnostics: writerDiagnostics.summary(),
         }),
       );
+      writerDiagnostics.close();
     }
     assert.equal(countPassages.get().n, 2000);
     const summary = (await store.getByAnchor('thread-fixture')).summary;

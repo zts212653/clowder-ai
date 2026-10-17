@@ -171,6 +171,7 @@ import {
   supportsProviderContinuityPreflight,
 } from './context-continuity.js';
 import { buildContextManagementHint, queueContextHint, takeContextHintPrefix } from './context-management-hint.js';
+import { canUseDefaultThreadWorkspace, resolveDefaultThreadWorkspace } from './default-thread-workspace.js';
 import {
   applyActiveSessionCapacityPin,
   applyContextBindingToInvocationSnapshot,
@@ -2820,6 +2821,19 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
           } else {
             bootcampWorkspaceError = new Error(bootcampWorkspace.error);
           }
+        } else if (provider === 'opencode' && canUseDefaultThreadWorkspace(thread, threadId, userId)) {
+          const defaultWorkspace = await resolveDefaultThreadWorkspace();
+          if (defaultWorkspace.ok) {
+            workingDirectory = defaultWorkspace.path;
+            yield {
+              type: 'system_info' as const,
+              catId,
+              content: `本次使用默认工作区：${workingDirectory}`,
+              timestamp: Date.now(),
+            };
+          } else {
+            workspaceResolutionFailureMessage = defaultWorkspace.error;
+          }
         } else if (requiresThreadWorkspace) {
           workspaceResolutionFailureMessage = `${workspaceRequiredBy} requires a thread projectPath for ${threadId}. Bind the thread to a project workspace before spawning ${workspaceRequiredBy}.`;
         }
@@ -2998,7 +3012,7 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
     const projectRoot = resolveActiveProjectRoot(process.cwd());
     const effectiveAccountRef = resolveBoundAccountRefForCat(projectRoot, catId, catConfig);
     const resolveRuntimeAccount = async () => {
-      if (!builtinClient) return null;
+      if (!builtinClient || (catConfig?.configurationSource === 'native_tool' && !effectiveAccountRef)) return null;
       // Yield to event loop so preflight warnings are delivered before account resolution.
       await Promise.resolve();
       const runtime = resolveForClient(projectRoot, builtinClient, effectiveAccountRef);
@@ -3108,63 +3122,67 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
     }
 
     // ── Clowder AI internal routing vars (not in BUILTIN_ENV_MAPS) ──────────
-    if (effectiveProtocol === 'anthropic') {
-      if (resolvedAccount?.authType === 'api_key') {
-        callbackEnv.CAT_CAFE_ANTHROPIC_PROFILE_MODE = 'api_key';
-        if (resolvedAccount.apiKey) callbackEnv.CAT_CAFE_ANTHROPIC_API_KEY = resolvedAccount.apiKey;
-        // #1086: account.models is an allowed-model list, never a runtime default.
-        // The member-selected model remains authoritative even if that list is absent.
-        if (defaultModel && provider !== 'opencode') {
-          callbackEnv.CAT_CAFE_ANTHROPIC_MODEL_OVERRIDE = defaultModel;
-        }
-        if (resolvedAccount.baseUrl) {
-          const proxyPortStr = process.env.ANTHROPIC_PROXY_PORT || '9877';
-          const proxyPortNum = parseInt(proxyPortStr, 10);
-          const proxyEnabled = process.env.ANTHROPIC_PROXY_ENABLED !== '0';
-          if (proxyEnabled && !Number.isNaN(proxyPortNum) && proxyPortNum > 0 && proxyPortNum <= 65535) {
-            const proxyAlive = await tcpProbe('127.0.0.1', proxyPortNum);
-            if (proxyAlive) {
-              const slug = deriveProxySlug(resolvedAccount.id);
-              registerProxyUpstream(projectRoot, slug, resolvedAccount.baseUrl);
-              callbackEnv.CAT_CAFE_ANTHROPIC_BASE_URL = `http://127.0.0.1:${proxyPortStr}/${slug}`;
+    if (catConfig?.configurationSource !== 'native_tool' || (resolvedAccount && !resolvedAccount.syntheticNative)) {
+      if (effectiveProtocol === 'anthropic') {
+        if (resolvedAccount?.authType === 'api_key') {
+          callbackEnv.CAT_CAFE_ANTHROPIC_PROFILE_MODE = 'api_key';
+          if (resolvedAccount.apiKey) callbackEnv.CAT_CAFE_ANTHROPIC_API_KEY = resolvedAccount.apiKey;
+          // #1086: account.models is an allowed-model list, never a runtime default.
+          // The member-selected model remains authoritative even if that list is absent.
+          if (defaultModel && provider !== 'opencode') {
+            callbackEnv.CAT_CAFE_ANTHROPIC_MODEL_OVERRIDE = defaultModel;
+          }
+          if (resolvedAccount.baseUrl) {
+            const proxyPortStr = process.env.ANTHROPIC_PROXY_PORT || '9877';
+            const proxyPortNum = parseInt(proxyPortStr, 10);
+            const proxyEnabled = process.env.ANTHROPIC_PROXY_ENABLED !== '0';
+            if (proxyEnabled && !Number.isNaN(proxyPortNum) && proxyPortNum > 0 && proxyPortNum <= 65535) {
+              const proxyAlive = await tcpProbe('127.0.0.1', proxyPortNum);
+              if (proxyAlive) {
+                const slug = deriveProxySlug(resolvedAccount.id);
+                registerProxyUpstream(projectRoot, slug, resolvedAccount.baseUrl);
+                callbackEnv.CAT_CAFE_ANTHROPIC_BASE_URL = `http://127.0.0.1:${proxyPortStr}/${slug}`;
+              } else {
+                log.warn(
+                  { proxyPort: proxyPortStr, baseUrl: resolvedAccount.baseUrl },
+                  'Proxy unreachable, falling back to direct upstream',
+                );
+                callbackEnv.CAT_CAFE_ANTHROPIC_BASE_URL = resolvedAccount.baseUrl;
+              }
             } else {
-              log.warn(
-                { proxyPort: proxyPortStr, baseUrl: resolvedAccount.baseUrl },
-                'Proxy unreachable, falling back to direct upstream',
-              );
+              if (proxyEnabled && (Number.isNaN(proxyPortNum) || proxyPortNum <= 0 || proxyPortNum > 65535)) {
+                log.warn({ proxyPort: proxyPortStr }, 'Invalid ANTHROPIC_PROXY_PORT, falling back to direct upstream');
+              }
               callbackEnv.CAT_CAFE_ANTHROPIC_BASE_URL = resolvedAccount.baseUrl;
             }
-          } else {
-            if (proxyEnabled && (Number.isNaN(proxyPortNum) || proxyPortNum <= 0 || proxyPortNum > 65535)) {
-              log.warn({ proxyPort: proxyPortStr }, 'Invalid ANTHROPIC_PROXY_PORT, falling back to direct upstream');
-            }
-            callbackEnv.CAT_CAFE_ANTHROPIC_BASE_URL = resolvedAccount.baseUrl;
           }
+        } else {
+          callbackEnv.CAT_CAFE_ANTHROPIC_PROFILE_MODE = 'subscription';
         }
-      } else {
+      } else if (effectiveProtocol === 'openai' || effectiveProtocol === 'openai-responses') {
+        // Standard env vars (OPENAI_API_KEY, etc.) already set by resolveEnvMap above
+        if (resolvedAccount?.authType === 'api_key') {
+          callbackEnv.CODEX_AUTH_MODE = 'api_key';
+        } else if (effectiveAccountRef) {
+          // A legacy builtin ref may be a synthetic placeholder for the local
+          // CLI configuration. It is not evidence of an explicit OAuth choice.
+          callbackEnv.CODEX_AUTH_MODE = resolvedAccount?.syntheticNative ? 'auto' : 'oauth';
+        }
+      } else if (effectiveProtocol === 'kimi') {
+        if (resolvedAccount?.authType === 'api_key' && resolvedAccount.apiKey) {
+          callbackEnv.CAT_CAFE_KIMI_PROFILE_MODE = 'api_key';
+          callbackEnv.CAT_CAFE_KIMI_API_KEY = resolvedAccount.apiKey;
+          // MOONSHOT_API_KEY already set by resolveEnvMap above
+          if (resolvedAccount.baseUrl) {
+            callbackEnv.CAT_CAFE_KIMI_BASE_URL = resolvedAccount.baseUrl;
+          }
+        } else {
+          callbackEnv.CAT_CAFE_KIMI_PROFILE_MODE = 'subscription';
+        }
+      } else if (provider === 'anthropic' || provider === 'opencode') {
+        // Fallback for unresolved accounts on anthropic/opencode providers
         callbackEnv.CAT_CAFE_ANTHROPIC_PROFILE_MODE = 'subscription';
       }
-    } else if (effectiveProtocol === 'openai' || effectiveProtocol === 'openai-responses') {
-      // Standard env vars (OPENAI_API_KEY, etc.) already set by resolveEnvMap above
-      if (resolvedAccount?.authType === 'api_key') {
-        callbackEnv.CODEX_AUTH_MODE = 'api_key';
-      } else if (effectiveAccountRef) {
-        callbackEnv.CODEX_AUTH_MODE = 'oauth';
-      }
-    } else if (effectiveProtocol === 'kimi') {
-      if (resolvedAccount?.authType === 'api_key' && resolvedAccount.apiKey) {
-        callbackEnv.CAT_CAFE_KIMI_PROFILE_MODE = 'api_key';
-        callbackEnv.CAT_CAFE_KIMI_API_KEY = resolvedAccount.apiKey;
-        // MOONSHOT_API_KEY already set by resolveEnvMap above
-        if (resolvedAccount.baseUrl) {
-          callbackEnv.CAT_CAFE_KIMI_BASE_URL = resolvedAccount.baseUrl;
-        }
-      } else {
-        callbackEnv.CAT_CAFE_KIMI_PROFILE_MODE = 'subscription';
-      }
-    } else if (provider === 'anthropic' || provider === 'opencode') {
-      // Fallback for unresolved accounts on anthropic/opencode providers
-      callbackEnv.CAT_CAFE_ANTHROPIC_PROFILE_MODE = 'subscription';
     }
     // Note: google protocol branch no longer needs explicit credential injection
     // — fully handled by resolveEnvMap above.

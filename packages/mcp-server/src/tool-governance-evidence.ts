@@ -72,7 +72,7 @@ export async function discoverAdmissionSourcePaths(repoRoot: string): Promise<re
       const content = await readFile(path, 'utf8');
       const header = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/.exec(content)?.[1];
       if (header && /^mcp_(admission|selector)_claims:/m.test(header)) {
-        paths.push(relative(resolve(repoRoot), path));
+        paths.push(relative(resolve(repoRoot), path).split(sep).join('/'));
       }
     }
   }

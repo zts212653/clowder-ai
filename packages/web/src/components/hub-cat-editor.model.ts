@@ -9,7 +9,7 @@ import {
 import type { CatData } from '@/hooks/useCatData';
 import { UNKNOWN_CAT_COLOR } from '@/lib/color-defaults';
 import type { BuiltinAccountClient, ProfileItem } from './hub-accounts.types';
-import { defaultAcpCommandForClient, defaultAcpStartupArgsForClient } from './hub-cat-editor.acp';
+import { defaultAcpCommandForClient, defaultAcpStartupArgsForClient, serializeCommandArgs } from './hub-cat-editor.acp';
 import { defaultMcpSupportForClient } from './hub-cat-editor.protocols';
 import type { CatStrategyEntry, StrategyType } from './hub-strategy-types';
 
@@ -34,6 +34,7 @@ export interface HubCatEditorFormState {
   caution: string;
   strengths: string;
   clientId: ClientId;
+  configurationSource?: 'native_tool' | 'managed_account';
   accountRef: string;
   accountBindingMode?: 'follow' | 'override';
   defaultModel: string;
@@ -381,7 +382,12 @@ export function initialState(cat?: CatData | null, draft?: HubCatEditorDraft | n
     teamStrengths: cat?.teamStrengths ?? createDraft?.templateTeamStrengths ?? '',
     caution: cat?.caution ?? '',
     strengths: cat?.strengths?.join(', ') ?? '',
-    clientId,
+    clientId: (cat?.clientId as ClientId | undefined) ?? createDraft?.clientId ?? 'anthropic',
+    configurationSource:
+      cat?.configurationSource ??
+      (cat || createDraft?.accountRef || (createDraft && !['anthropic', 'openai', 'acp'].includes(createDraft.clientId))
+        ? 'managed_account'
+        : 'native_tool'),
     accountRef: cat?.accountRef ?? createDraft?.accountRef ?? '',
     accountBindingMode: cat?.accountBindingMode,
     defaultModel:
@@ -393,7 +399,11 @@ export function initialState(cat?: CatData | null, draft?: HubCatEditorDraft | n
     cliConfigArgs: [...(cat?.cliConfigArgs ?? [])],
     cliEffort: persistedCliEffort ?? '',
     codexSpeed: cat?.cli?.serviceTier ?? '',
-    carrier: cat?.carrier ?? getCatCarrierOptions(clientId)[0] ?? 'cli',
+    carrier:
+      cat?.carrier ??
+      (!cat && !createDraft?.accountRef && clientId === 'openai'
+        ? 'app_server'
+        : (getCatCarrierOptions(clientId)[0] ?? 'cli')),
     provider: cat?.provider ?? '',
     agyNativeEnabled: cat?.clientId === 'google' && cat?.agyProfile?.carrier === 'native',
     agyProfileEnabled: cat?.agyProfile ? cat.agyProfile.enabled === true : true,
@@ -404,8 +414,11 @@ export function initialState(cat?: CatData | null, draft?: HubCatEditorDraft | n
     acpTransport: (acpConfig?.transport as 'stdio' | 'httpstream' | undefined) ?? 'stdio',
     acpCommand: acpConfig?.command ?? defaultAcpCommandForClient(clientId),
     acpStartupArgs:
-      acpConfig?.startupArgs?.join(' ') ??
-      defaultAcpStartupArgsForClient(clientId, (acpConfig?.transport as 'stdio' | 'httpstream' | undefined) ?? 'stdio'),
+      (acpConfig?.startupArgs ? serializeCommandArgs(acpConfig.startupArgs) : undefined) ??
+      defaultAcpStartupArgsForClient(
+        (cat?.clientId as ClientId | undefined) ?? createDraft?.clientId ?? 'anthropic',
+        (acpConfig?.transport as 'stdio' | 'httpstream' | undefined) ?? 'stdio',
+      ),
     acpMaxLiveProcesses: acpConfig?.pool?.maxLiveProcesses !== undefined ? String(acpConfig.pool.maxLiveProcesses) : '',
     acpIdleTtlMinutes:
       acpConfig?.pool?.idleTtlMs !== undefined ? String(Math.round(acpConfig.pool.idleTtlMs / 60_000)) : '',

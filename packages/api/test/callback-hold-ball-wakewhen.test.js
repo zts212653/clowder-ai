@@ -2081,10 +2081,19 @@ describe('F167 Phase P: wakeWhen cancel/replace/delivery tests', () => {
     await waitForWakeHandling(deps, taskId, () => deps._unregisteredIds.includes(taskId));
 
     const tombstone = deps._insertedTasks.find((task) => task.id === taskId);
+    const job = resolveManagedCommandJob(deps.dynamicTaskStore.getById(taskId));
+    assert.equal(
+      deps._unregisteredIds.includes(taskId),
+      true,
+      `retirement did not complete: ${JSON.stringify({
+        enabled: tombstone?.enabled,
+        lifecycle: tombstone?.params?.holdLifecycle,
+        gate: job ? readDurableGateRecord(job) : null,
+      })}`,
+    );
     assert.equal(deps._removedIds.includes(taskId), false, 'completion receipt must remain queryable by taskId');
     assert.equal(tombstone.enabled, false, 'successfully completed carrier retires scheduler execution');
     assert.equal(tombstone.params.holdLifecycle.status, 'fired');
     assert.equal(tombstone.params.holdLifecycle.managedCommand.state, 'consumed');
-    assert.equal(deps._unregisteredIds.includes(taskId), true);
   });
 });

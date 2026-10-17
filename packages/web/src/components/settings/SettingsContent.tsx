@@ -1,23 +1,21 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import Link from 'next/link';
+import { useRouter, useSearchParams } from 'next/navigation';
+import { useCallback, useEffect, useState } from 'react';
 import { refreshCatsNow, useCatData } from '@/hooks/useCatData';
-import { catDossierCoversStrengths, useDossierProfiles } from '@/hooks/useDossierProfiles';
 import { apiFetch } from '@/utils/api-client';
+import type { MemberSaveTrace } from '@/utils/member-save-trace';
 import { accountsCopy } from '../accounts/accounts.shell-copy';
 import { ConnectorPluginInstallButton } from '../ConnectorPluginInstallButton';
-import { CatOverviewTab, type ConfigData } from '../config-viewer-tabs';
+import type { ConfigData } from '../config-viewer-tabs';
 import { DesktopUpdateSettingsPanel } from '../DesktopUpdateSettingsPanel';
 import { HubAccountsTab } from '../HubAccountsTab';
-import { HubCatEditor } from '../HubCatEditor';
 import { HubCoCreatorEditor } from '../HubCoCreatorEditor';
 import { HubConnectorConfigTab } from '../HubConnectorConfigTab';
 import { HubEnvFilesTab } from '../HubEnvFilesTab';
-import { MemberCopyProvider } from '../members/editor-presentation';
-import { type MemberDeleteCopy, MemberEditorHost } from '../members/MemberEditorHost';
-import { MemberListHost } from '../members/MemberListHost';
+import { HubOverviewToolbar } from '../HubMemberOverviewCard';
 import { memberSaveCopy } from '../members/member-save.shell-copy';
-import { useMemberReturn } from '../members/useMemberReturn';
 import { PushSettingsPanel } from '../PushSettingsPanel';
 import { useShellCopy } from '../shell/shell-copy';
 import { useShellPresentation } from '../shell/shell-presentation';
@@ -30,10 +28,10 @@ import { HubSystemSettingsTab } from './HubSystemSettingsTab';
 import { MarketplaceContent } from './MarketplaceContent';
 import { McpManageContent } from './McpManageContent';
 import { MessageDispositionDefaultSettings } from './MessageDispositionDefaultSettings';
+import { MemberSettingsHost } from './members/MemberSettingsHost';
 import { OpenTeamWorkspaceButton } from './OpenTeamWorkspaceButton';
 import { OpsContent } from './OpsContent';
 import { PluginsContent } from './PluginsContent';
-import { SettingsText } from './primitives';
 import { RulesPromptsContent } from './RulesPromptsContent';
 import { ServiceStatusPanel } from './ServiceStatusPanel';
 import { SettingsPageHeader } from './SettingsPageHeader';
@@ -48,39 +46,67 @@ interface SettingsContentProps {
 }
 
 export function SettingsContent({ section, initialEditCatId }: SettingsContentProps) {
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const accountsText = useShellCopy(accountsCopy);
   const saveText = useShellCopy(memberSaveCopy);
   const sectionText = useSettingsDetailText();
   const { cats, refresh, isLoading: catsLoading, hasFetched: catsKnown } = useCatData();
   const isV2 = useShellPresentation() === 'v2';
-  const memberReturn = useMemberReturn();
-  const closeMember = () => {
-    setEditorOpen(false);
-    setEditingCat(null);
-    setCreateDraft(null);
-    memberReturn.restore();
-  };
   const [config, setConfig] = useState<ConfigData | null>(null);
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [editorOpen, setEditorOpen] = useState(false);
   const [editingCat, setEditingCat] = useState<(typeof cats)[number] | null>(null);
-  const [createDraft, setCreateDraft] = useState<Parameters<typeof HubCatEditor>[0]['draft']>(null);
   const [togglingCatId, setTogglingCatId] = useState<string | null>(null);
   const [coCreatorEditorOpen, setCoCreatorEditorOpen] = useState(false);
   const [imRefreshKey, setImRefreshKey] = useState(0);
   const confirm = useConfirm();
+  const openMember = (cat: (typeof cats)[number] | null) => {
+    setEditingCat(cat);
+    setEditorOpen(true);
+    const params = new URLSearchParams(searchParams.toString());
+    params.set('s', 'members');
+    params.delete('returnTo');
+    params.delete('manual');
+    params.delete('resume');
+    if (cat) {
+      params.set('cat', cat.id);
+      params.delete('view');
+    } else {
+      params.set('view', 'add');
+      params.delete('cat');
+    }
+    router.push(`/settings?${params.toString()}`, { scroll: false });
+  };
+  const openMemberSetup = () => {
+    setEditingCat(null);
+    setEditorOpen(true);
+    const params = new URLSearchParams(searchParams.toString());
+    params.set('s', 'members');
+    params.set('view', 'setup');
+    params.delete('cat');
+    params.delete('returnTo');
+    params.delete('manual');
+    params.delete('resume');
+    router.push(`/settings?${params.toString()}`, { scroll: false });
+  };
+  const closeMember = () => {
+    setEditorOpen(false);
+    setEditingCat(null);
+    const params = new URLSearchParams(searchParams.toString());
+    params.set('s', 'members');
+    params.delete('cat');
+    params.delete('view');
+    params.delete('returnTo');
+    params.delete('manual');
+    params.delete('resume');
+    router.push(`/settings?${params.toString()}`, { scroll: false });
+  };
 
-  // F208 OQ-9: per-field check — badge only when dossier l0RosterSummary covers teamStrengths (KD-14)
-  const { data: dossierData } = useDossierProfiles();
-  const editingCatHasDossier = useMemo(
-    () => (editingCat ? catDossierCoversStrengths(editingCat.id, dossierData) : false),
-    [editingCat, dossierData],
-  );
-
-  const fetchData = useCallback(async () => {
+  const fetchData = useCallback(async (headers?: HeadersInit) => {
     setFetchError(null);
     try {
-      const res = await apiFetch('/api/config');
+      const res = await apiFetch('/api/config', headers ? { headers } : undefined);
       if (!res.ok) {
         setFetchError(`配置加载失败 (${res.status})`);
         return;
@@ -96,31 +122,32 @@ export function SettingsContent({ section, initialEditCatId }: SettingsContentPr
     fetchData();
   }, [fetchData]);
 
-  const consumedDeepLinkRef = useRef<string | null>(null);
   useEffect(() => {
-    if (
-      initialEditCatId &&
-      section === 'members' &&
-      cats.length > 0 &&
-      consumedDeepLinkRef.current !== initialEditCatId
-    ) {
-      const cat = cats.find((c) => c.id === initialEditCatId);
-      if (cat) {
-        consumedDeepLinkRef.current = initialEditCatId;
-        setCreateDraft(null);
-        setEditingCat(cat);
-        setEditorOpen(true);
-      }
+    if (section !== 'members') return;
+    if (searchParams.get('view') === 'add' || searchParams.get('view') === 'setup') {
+      setEditingCat(null);
+      setEditorOpen(true);
+      return;
     }
-  }, [initialEditCatId, section, cats]);
+    const id = searchParams.get('cat') || initialEditCatId;
+    const selected = id ? cats.find((item) => item.id === id) : null;
+    setEditingCat(selected ?? null);
+    setEditorOpen(Boolean(selected));
+  }, [initialEditCatId, section, cats, searchParams]);
 
-  const handleEditorSaved = useCallback(async () => {
-    const [, { cats: updatedCats, fromApi }] = await Promise.all([fetchData(), refreshCatsNow()]);
-    if (editingCat && (!fromApi || !updatedCats.some((cat) => cat.id === editingCat.id))) {
-      throw new Error(saveText.readbackFailed);
-    }
-    setEditingCat((previous) => (previous ? (updatedCats.find((cat) => cat.id === previous.id) ?? previous) : null));
-  }, [fetchData, editingCat, saveText.readbackFailed]);
+  const handleEditorSaved = useCallback(
+    async (trace?: MemberSaveTrace) => {
+      const [, { cats: updatedCats, fromApi }] = await Promise.all([
+        fetchData(trace?.headers()),
+        refreshCatsNow(trace?.headers()),
+      ]);
+      if (editingCat && (!fromApi || !updatedCats.some((cat) => cat.id === editingCat.id))) {
+        throw new Error(saveText.readbackFailed);
+      }
+      setEditingCat((previous) => (previous ? (updatedCats.find((cat) => cat.id === previous.id) ?? previous) : null));
+    },
+    [fetchData, editingCat, saveText.readbackFailed],
+  );
 
   const handleToggleAvailability = useCallback(
     async (cat: (typeof cats)[number]) => {
@@ -148,13 +175,12 @@ export function SettingsContent({ section, initialEditCatId }: SettingsContentPr
   );
 
   const handleDeleteMember = useCallback(
-    async (cat: (typeof cats)[number], copy?: MemberDeleteCopy) => {
+    async (cat: (typeof cats)[number]) => {
       const ok = await confirm({
-        title: copy ? copy.deleteTitle : '删除确认',
-        message: copy ? copy.deletePrompt(cat.displayName) : `确认删除成员「${cat.displayName}」吗？此操作不可撤销。`,
+        title: '删除确认',
+        message: `确认删除成员「${cat.displayName}」吗？此操作不可撤销。`,
         variant: 'danger',
-        confirmLabel: copy ? copy.deleteLabel : '删除',
-        ...(copy ? { cancelLabel: copy.取消 } : {}),
+        confirmLabel: '删除',
       });
       if (!ok) return false;
       setFetchError(null);
@@ -193,76 +219,52 @@ export function SettingsContent({ section, initialEditCatId }: SettingsContentPr
   const content = (() => {
     switch (meta.id) {
       case 'members':
-        if (isV2)
-          return (
-            <div ref={memberReturn.host}>
-              {fetchError && (config || editorOpen) && <p role="alert">{fetchError}</p>}
-              <MemberListHost
-                hidden={editorOpen}
-                registryLoading={catsLoading}
-                registryKnown={catsKnown}
-                onRetryRegistry={() => void refresh()}
-                config={config}
-                configError={fetchError}
-                onRetryConfig={() => void fetchData()}
-                cats={cats}
-                onAdd={() => {
-                  memberReturn.remember();
-                  setEditingCat(null);
-                  setCreateDraft(null);
-                  setEditorOpen(true);
-                }}
-                onEdit={(cat) => {
-                  memberReturn.remember();
-                  setEditingCat(cat);
-                  setCreateDraft(null);
-                  setEditorOpen(true);
-                }}
-                onEditCoCreator={() => setCoCreatorEditorOpen(true)}
-                onToggle={handleToggleAvailability}
-                togglingCatId={togglingCatId}
-              />
-            </div>
-          );
         return (
-          <div className="space-y-8">
-            {fetchError ? (
-              <SettingsText as="p" variant="sm" tone="red">
-                {fetchError}
-              </SettingsText>
-            ) : config ? (
-              <CatOverviewTab
-                config={config}
-                cats={cats}
-                onAddMember={() => {
-                  setEditingCat(null);
-                  setCreateDraft(null);
-                  setEditorOpen(true);
-                }}
-                onEditMember={(cat) => {
-                  setCreateDraft(null);
-                  setEditingCat(cat);
-                  setEditorOpen(true);
-                }}
-                onEditCoCreator={() => setCoCreatorEditorOpen(true)}
-                onDeleteMember={handleDeleteMember}
-                onToggleAvailability={handleToggleAvailability}
-                togglingCatId={togglingCatId}
-              />
-            ) : (
-              <SettingsText as="p" variant="sm" tone="muted">
-                加载中...
-              </SettingsText>
-            )}
-            <div className="space-y-3">
-              <div className="flex justify-end">
-                <OpenTeamWorkspaceButton />
-              </div>
-            </div>
-          </div>
+          <MemberSettingsHost
+            v2={isV2}
+            editorOpen={editorOpen}
+            editingCat={editingCat}
+            cats={cats}
+            config={config}
+            configError={fetchError}
+            registryLoading={catsLoading}
+            registryKnown={catsKnown}
+            creationView={searchParams.get('view')}
+            onRetryConfig={() => void fetchData()}
+            onRetryRegistry={() => void refresh()}
+            onOpen={openMember}
+            onDetect={openMemberSetup}
+            onClose={closeMember}
+            onTeamCreated={fetchData}
+            onSaved={async (saved, trace) => {
+              await handleEditorSaved(trace);
+              setEditingCat(saved);
+            }}
+            onEditCoCreator={() => setCoCreatorEditorOpen(true)}
+            onDelete={handleDeleteMember}
+            onToggle={handleToggleAvailability}
+            togglingCatId={togglingCatId}
+          />
         );
       case 'accounts':
-        return <HubAccountsTab />;
+        return (
+          <div className="space-y-4">
+            {searchParams.get('returnTo')?.startsWith('/settings?') && (
+              <Link
+                className="inline-flex min-h-11 items-center text-sm text-cafe-accent"
+                href={searchParams.get('returnTo') ?? '/settings?s=members'}
+              >
+                {searchParams.get('lang') === 'en' ? '← Back to member' : '← 返回成员编辑'}
+              </Link>
+            )}
+            <HubAccountsTab
+              initialClientId={(['anthropic', 'openai', 'google', 'kimi', 'opencode', 'acp'] as const).find(
+                (value) => value === searchParams.get('client'),
+              )}
+              toolLabel={searchParams.get('tool') ?? undefined}
+            />
+          </div>
+        );
       case 'im':
         return <HubConnectorConfigTab refreshKey={imRefreshKey} />;
       case 'voice':
@@ -316,24 +318,9 @@ export function SettingsContent({ section, initialEditCatId }: SettingsContentPr
     }
   })();
 
-  const editor = (
-    <MemberEditorHost
-      v2={isV2 && section === 'members'}
-      cat={editingCat}
-      cats={cats}
-      draft={createDraft}
-      hasDossier={editingCatHasDossier}
-      onClose={closeMember}
-      onSaved={handleEditorSaved}
-      onToggle={handleToggleAvailability}
-      togglingCatId={togglingCatId}
-      onDelete={handleDeleteMember}
-    />
-  );
-
   return (
-    <>
-      {!(isV2 && section === 'members') && (
+    <div className={section === 'members' ? `mx-auto w-full ${editorOpen ? 'max-w-5xl' : 'max-w-6xl'}` : undefined}>
+      {!(section === 'members' && (editorOpen || isV2)) && (
         <SettingsPageHeader
           title={section === 'accounts' ? accountsText.title : (sectionText(section)?.title ?? meta.label)}
           subtitle={
@@ -346,28 +333,19 @@ export function SettingsContent({ section, initialEditCatId }: SettingsContentPr
                 : meta.description
           }
         >
+          {section === 'members' && config && <HubOverviewToolbar onAddMember={() => openMember(null)} />}
           {section === 'im' && <ConnectorPluginInstallButton onInstalled={() => setImRefreshKey((k) => k + 1)} />}
         </SettingsPageHeader>
       )}
-      {isV2 && section === 'members' ? (
-        <MemberCopyProvider>
-          {content}
-          {editorOpen && editor}
-        </MemberCopyProvider>
-      ) : (
-        <>
-          {content}
-          {editorOpen && editor}
-        </>
-      )}
+      {content}
       {coCreatorEditorOpen && config && (
         <HubCoCreatorEditor
           open
           coCreator={config.coCreator}
           onClose={() => setCoCreatorEditorOpen(false)}
-          onSaved={handleEditorSaved}
+          onSaved={() => handleEditorSaved()}
         />
       )}
-    </>
+    </div>
   );
 }

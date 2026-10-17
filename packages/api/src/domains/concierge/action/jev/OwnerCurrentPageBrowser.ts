@@ -1,5 +1,6 @@
-import puppeteer, { type Browser, type Target } from 'puppeteer-core';
+import type { Browser, Target } from 'puppeteer-core';
 import { z } from 'zod';
+import { loadPuppeteer } from '../../../../utils/lazy-puppeteer.js';
 import { whileNotAborted } from '../../live/host/live-controlled-context.js';
 import type { OwnerPageHandle } from '../../live/host/owner-page-action-contract.js';
 import { readBoundedJson } from './bounded-response.js';
@@ -76,6 +77,8 @@ export async function openCurrentBrowserPage(
   if (!current || current.url !== selected.url || current.title !== selected.title)
     throw new Error('Selected page changed');
   const endpoint = await configuredBrowserEndpoint(config, signal);
+  const puppeteer = await whileNotAborted(signal, loadPuppeteer());
+  signal.throwIfAborted();
   let browser: Browser | undefined;
   const connecting = puppeteer.connect({
     browserWSEndpoint: endpoint,

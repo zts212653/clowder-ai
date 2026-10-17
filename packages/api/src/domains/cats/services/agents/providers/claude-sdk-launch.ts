@@ -18,7 +18,8 @@ import { appendLocalImagePathHints, collectImageAccessDirectories } from './imag
 import { extractImagePaths } from './image-paths.js';
 import { compileL0ViaSubprocess } from './l0-compiler.js';
 
-function effortValue(effort: string): EffortLevel {
+function effortValue(effort: string): EffortLevel | undefined {
+  if (!effort) return undefined;
   if (effort === 'low' || effort === 'medium' || effort === 'high' || effort === 'xhigh' || effort === 'max')
     return effort;
   throw new Error(`claude_sdk_effort_unsupported:${effort}`);
@@ -137,7 +138,7 @@ export async function prepareClaudeSdkLaunch(input: {
     runtime: Object.freeze({
       provider: 'anthropic',
       carrier: 'agent_sdk',
-      model: effectiveModel,
+      ...(effectiveModel ? { model: effectiveModel } : {}),
       protocol: 'sdk-streaming-input',
       reasoningEffort: effort,
       ...(readOnly ? { toolExecutionPolicy: 'read_only' as const } : {}),

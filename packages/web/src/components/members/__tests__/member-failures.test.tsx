@@ -120,3 +120,45 @@ it('retries the failed default PUT rather than just re-reading the previous choi
   expect(select?.value).toBe('b');
   expect(container.querySelector('[role="alert"]')).toBeNull();
 });
+
+it('offers one-click native detection when the roster is empty', async () => {
+  const onAddMember = vi.fn();
+  const onDetectMembers = vi.fn();
+  await act(async () =>
+    root.render(
+      <MemberListPage
+        config={config}
+        cats={[]}
+        onAddMember={onAddMember}
+        onDetectMembers={onDetectMembers}
+        onEditMember={vi.fn()}
+        onEditCoCreator={vi.fn()}
+        onToggleAvailability={vi.fn()}
+        togglingCatId={null}
+      />,
+    ),
+  );
+  const button = container.querySelector<HTMLButtonElement>('[data-testid="member-detect-empty-roster"]');
+  expect(button?.textContent).toContain('一键检测并添加伙伴');
+  await act(async () => button?.click());
+  expect(onDetectMembers).toHaveBeenCalledOnce();
+  expect(onAddMember).not.toHaveBeenCalled();
+});
+
+it('keeps the empty-roster detection entry hidden once a member exists', async () => {
+  await act(async () =>
+    root.render(
+      <MemberListPage
+        config={config}
+        cats={cats}
+        onAddMember={vi.fn()}
+        onEditMember={vi.fn()}
+        onEditCoCreator={vi.fn()}
+        onToggleAvailability={vi.fn()}
+        togglingCatId={null}
+      />,
+    ),
+  );
+  expect(container.querySelector('[data-testid="member-detect-empty-roster"]')).toBeNull();
+  expect(container.querySelector('[data-testid="member-add"]')?.textContent).toContain('添加成员');
+});

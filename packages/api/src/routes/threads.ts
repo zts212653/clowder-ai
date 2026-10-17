@@ -670,6 +670,7 @@ const bootcampStateSchema = z
       .optional(),
     advancedFeatures: z.record(z.enum(['available', 'unavailable', 'skipped'])).optional(),
     startedAt: z.number(),
+    journeyId: z.string().min(8).max(200).optional(),
     completedAt: z.number().optional(),
   })
   .strict();
@@ -927,6 +928,25 @@ export const threadsRoutes: FastifyPluginAsync<ThreadsRoutesOptions> = async (ap
       return { error: 'Identity required (session cookie or X-Cat-Cafe-User header)' };
     }
 
+    const onboardingJourneyId = request.headers['x-cat-cafe-onboarding-journey'];
+    const onboardingIdempotencyKey = request.headers['idempotency-key'];
+    const headerJourneyId = typeof onboardingJourneyId === 'string' ? onboardingJourneyId : undefined;
+    const keyJourneyId =
+      typeof onboardingIdempotencyKey === 'string' && onboardingIdempotencyKey.startsWith('onboarding:')
+        ? onboardingIdempotencyKey.slice('onboarding:'.length)
+        : undefined;
+    const journeyId = headerJourneyId ?? bootcampState?.journeyId ?? keyJourneyId;
+    if (journeyId !== undefined && (journeyId.length < 8 || journeyId.length > 200)) {
+      reply.status(400);
+      return { error: 'Invalid onboarding journey id' };
+    }
+    if (journeyId) {
+      const existing = (await threadStore.list(userId)).find(
+        (candidate) => candidate.bootcampState?.journeyId === journeyId,
+      );
+      if (existing) return sanitizeThreadForResponse(existing, userId);
+    }
+
     const resolvedProjectPath = await resolveCreateThreadProjectPath(projectPath, bootcampState as BootcampStateV1);
     if (!resolvedProjectPath.ok) {
       reply.status(resolvedProjectPath.statusCode);
@@ -934,6 +954,21 @@ export const threadsRoutes: FastifyPluginAsync<ThreadsRoutesOptions> = async (ap
     }
 
     let thread: Thread;
+    if (journeyId && threadStore.ensureOnboardingThread) {
+      const ensured = await threadStore.ensureOnboardingThread(
+        userId,
+        journeyId,
+        title ?? '首启协作旅程',
+        resolvedProjectPath.projectPath ?? 'default',
+        bootcampState as BootcampStateV1,
+      );
+      if (ensured.thread.createdBy !== userId) {
+        reply.status(409);
+        return { error: 'Onboarding journey belongs to another user' };
+      }
+      reply.status(ensured.created ? 201 : 200);
+      return sanitizeThreadForResponse(ensured.thread, userId);
+    }
     if (idempotencyKey) {
       try {
         thread = await threadStore.ensureOwnedThread({

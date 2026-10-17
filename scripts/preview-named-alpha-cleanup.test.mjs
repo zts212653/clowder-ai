@@ -4,13 +4,17 @@ import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import net from 'node:net';
 import { dirname, join } from 'node:path';
-import { test } from 'node:test';
+import { test as nodeTest } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { deriveNamedAlphaCoordinates, namedAlphaEnvironment } from './lib/alpha-coordinates.mjs';
 import { namedAlphaFixture } from './lib/alpha-named-fixture.mjs';
 import { captureNamedAlphaRedisIdentity, verifyNamedAlphaRedisIdentity } from './lib/alpha-redis-process.mjs';
 
 const cli = join(dirname(fileURLToPath(import.meta.url)), 'preview-process.mjs');
+const test =
+  process.platform === 'win32'
+    ? (name, fn) => nodeTest(name, { skip: 'Requires POSIX process groups and Bash cleanup traps' }, fn)
+    : nodeTest;
 
 function identityProbeFixture(directory, port, pidFile, mode) {
   if (!mode) return null;

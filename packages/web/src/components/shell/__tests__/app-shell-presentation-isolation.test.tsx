@@ -40,7 +40,7 @@ import { captureChatReadingRef } from '@/utils/chat-scroll-memory';
 import { pushThreadRouteWithHistory } from '../../ThreadSidebar/thread-navigation';
 import type { ChatReadingPort } from '../../thread-chat/useThreadChatReadingPort';
 import { readSettingsReadingSession } from '../settings-reading-session';
-import { SHELL_PRESENTATION_STORAGE_KEY, writeShellPresentation } from '../shell-presentation';
+import { SHELL_PRESENTATION_STORAGE_KEY, useShellPresentation, writeShellPresentation } from '../shell-presentation';
 import { useSettingsReadingEntry, useSettingsReadingPort, useSettingsSourceReturn } from '../useSettingsSourceReturn';
 
 const sourceReader: ChatReadingPort = {
@@ -107,6 +107,8 @@ describe('F322 AppShell presentation isolation', () => {
   });
   afterEach(() => {
     act(() => root.unmount());
+    vi.restoreAllMocks();
+    writeShellPresentation('classic');
     host.remove();
     window.localStorage.removeItem(SHELL_PRESENTATION_STORAGE_KEY);
     window.history.replaceState(null, '', '/');
@@ -124,6 +126,42 @@ describe('F322 AppShell presentation isolation', () => {
     act(() => writeShellPresentation('classic'));
     expectShell(false);
     expect(draft.value).toBe('still unsent');
+  });
+  it('paints the explicit v2 URL and its route children consistently before passive effects', () => {
+    nav.search = 'shell=v2';
+    const paints: string[] = [];
+    function FirstPaintProbe() {
+      const presentation = useShellPresentation();
+      useLayoutEffect(() => {
+        paints.push(presentation);
+      }, [presentation]);
+      return <output>{presentation}</output>;
+    }
+    act(() =>
+      root.render(
+        <AppShell>
+          <FirstPaintProbe />
+        </AppShell>,
+      ),
+    );
+    expect(paints[0]).toBe('v2');
+    expectShell(true);
+  });
+  it('keeps the URL selection and manual changes when storage rejects writes, then accepts cross-tab changes', () => {
+    nav.search = 'shell=v2';
+    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+      throw new DOMException('Storage denied', 'SecurityError');
+    });
+    render();
+    expectShell(true);
+    act(() => writeShellPresentation('classic'));
+    expectShell(false);
+    act(() => writeShellPresentation('v2'));
+    expectShell(true);
+    vi.restoreAllMocks();
+    window.localStorage.setItem(SHELL_PRESENTATION_STORAGE_KEY, 'classic');
+    act(() => window.dispatchEvent(new StorageEvent('storage', { key: SHELL_PRESENTATION_STORAGE_KEY })));
+    expectShell(false);
   });
   it('shows the captured Settings source after a Next address commit without a synthetic browser event', () => {
     writeShellPresentation('v2');

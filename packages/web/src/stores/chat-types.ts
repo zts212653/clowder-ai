@@ -111,6 +111,8 @@ export interface ToolEvent {
   type: 'tool_use' | 'tool_result';
   label: string;
   detail?: string;
+  /** Terminal input for the same native tool call, separate from its output detail. */
+  inputDetail?: string;
   resultMeta?: string;
   /** Native provider pair key; Hub UI event ids may differ between use/result rows. */
   toolUseId?: string;
@@ -624,6 +626,7 @@ export interface BootcampStateV1 {
   envCheck?: Record<string, { ok: boolean; version?: string; note?: string }>;
   advancedFeatures?: Record<string, 'available' | 'unavailable' | 'skipped'>;
   startedAt: number;
+  journeyId?: string;
   completedAt?: number;
 }
 

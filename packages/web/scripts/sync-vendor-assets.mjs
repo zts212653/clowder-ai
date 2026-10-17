@@ -21,7 +21,7 @@ const require = createRequire(import.meta.url);
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const webRoot = resolve(scriptDir, '..');
 const vendorRoot = resolve(webRoot, 'public', 'vendor');
-const appGlobalCssFiles = [
+export const appGlobalCssFiles = [
   'theme-tokens.css',
   'cat-persona-tokens.css',
   'cat-persona-derived.css',

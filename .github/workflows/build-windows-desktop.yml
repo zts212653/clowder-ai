@@ -73,8 +73,18 @@ jobs:
           $env:Path += ";C:\Program Files (x86)\Inno Setup 6"
           iscc.exe /? | Select-Object -First 1
 
+      - name: Test native installer preparation and menu behavior
+        shell: pwsh
+        run: |
+          $env:ISCC_EXE = @('C:\Program Files\Inno Setup 7\ISCC.exe', 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe') |
+            Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
+          if (-not $env:ISCC_EXE) { throw 'Native Inno compiler was not found after installation' }
+          node --test desktop/installer-preparation-log.test.js desktop/installer-no-icons.test.js
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
       - name: Build Windows installer
         env:
+          NODE_OPTIONS: --max-old-space-size=4096
           CATCAFE_VERSION: ${{ inputs.version }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         shell: pwsh

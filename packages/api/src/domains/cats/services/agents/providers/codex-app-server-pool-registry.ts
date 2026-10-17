@@ -1,3 +1,4 @@
+import { saveSpan } from '../../../../../utils/member-save-diagnostics.js';
 import { CodexAppServerHostPool, type CodexAppServerHostPoolConfig } from './CodexAppServerHostPool.js';
 
 export const DEFAULT_CODEX_APP_SERVER_IDLE_TTL_MS = 300_000;
@@ -44,7 +45,7 @@ export async function closeStaleCodexAppServerPools<TPool extends ClosableCodexA
   for (const [profileId, pool] of [...registry.entries()]) {
     if (activeProfileIds.has(profileId)) continue;
     try {
-      await pool.closeAll();
+      await saveSpan('pool.codex.close', () => pool.closeAll(), { catId: profileId });
     } catch (err) {
       onCloseError?.(err, profileId);
     } finally {

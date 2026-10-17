@@ -1043,6 +1043,24 @@ export function ChatInput({
   const draftExtrasRow = COMPOSER_GRID_ROWS[headerRowCount];
   const textareaRow = COMPOSER_GRID_ROWS[(headerRowCount + draftExtrasRowCount) as 0 | 1 | 2];
   const controlsRow = COMPOSER_GRID_ROWS[(headerRowCount + draftExtrasRowCount + 1) as 1 | 2 | 3];
+  const inputMenus = (
+    <ChatInputMenus
+      catOptions={filteredCatOptions}
+      showMentions={showMentions}
+      showGameMenu={showGameMenu}
+      gameStep={gameStep}
+      onGameStepChange={setGameStep}
+      selectedIdx={selectedIdx}
+      onSelectIdx={setSelectedIdx}
+      onInsertMention={insertMention}
+      onSendCommand={(command) => {
+        const role = command.includes('detective') ? 'detective' : command.includes('god-view') ? 'god-view' : 'player';
+        closeMenus();
+        setLobbyMode(role);
+      }}
+      menuRef={menuRef}
+    />
+  );
 
   return (
     <div className={`relative safe-area-bottom ${shellV2 ? 'bg-[var(--shell-work)]' : 'bg-[var(--console-shell-bg)]'}`}>
@@ -1071,27 +1089,7 @@ export function ChatInput({
         />
       )}
 
-      <ChatInputMenus
-        catOptions={filteredCatOptions}
-        showMentions={showMentions}
-        showGameMenu={showGameMenu}
-        gameStep={gameStep}
-        onGameStepChange={setGameStep}
-        selectedIdx={selectedIdx}
-        onSelectIdx={setSelectedIdx}
-        onInsertMention={insertMention}
-        onSendCommand={(command) => {
-          // Open lobby instead of sending directly
-          const role = command.includes('detective')
-            ? 'detective'
-            : command.includes('god-view')
-              ? 'god-view'
-              : 'player';
-          closeMenus();
-          setLobbyMode(role as 'player' | 'god-view' | 'detective');
-        }}
-        menuRef={menuRef}
-      />
+      {!shellV2 && inputMenus}
 
       {whisperMode && !showMentions && !showGameMenu && (
         <WhisperCatSelector
@@ -1169,6 +1167,7 @@ export function ChatInput({
         data-testid="chat-input-composer-row"
         data-composer-presentation={presentation}
       >
+        {shellV2 && inputMenus}
         {hasComposerHeader ? (
           <div
             className="col-span-3 col-start-1 row-start-1 -mx-2 -mt-2 border-b border-[var(--shell-hairline)] px-3 py-1.5"

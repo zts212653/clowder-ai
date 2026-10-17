@@ -3,11 +3,18 @@
 
 const { spawn, execSync } = require('node:child_process');
 const path = require('node:path');
+const { pathToFileURL } = require('node:url');
 const net = require('node:net');
 const http = require('node:http');
 const fs = require('node:fs');
 const os = require('node:os');
 const crypto = require('node:crypto');
+const { resolveDesktopRuntime } = require('./runtime-config');
+const { initializeDesktopTemplate } = require('./desktop-template');
+const { createStartupTimeline } = require('./startup-timing');
+const { prepareStartupServices, stopOwnedStartupProcess } = require('./startup-services');
+const { resolveExternalNodeEntry } = require('./subprocess-entry');
+const { readClientHomes } = require('./client-homes');
 
 const POLL_INTERVAL_MS = 500;
 const MAX_WAIT_MS = 120_000;
@@ -25,6 +32,8 @@ const ARCH_SEG = process.arch === 'arm64' ? 'arm64' : 'x64';
 // Reads brand name from electron-builder config — single source of truth
 // shared with main.js (which imports USER_DATA_DIR from this module).
 function resolveUserDataDir() {
+  const { instanceRoot } = resolveDesktopRuntime();
+  if (instanceRoot) return instanceRoot;
   let brandName;
   try {
     brandName = require('./package.json').build?.productName || 'Clowder AI';
@@ -91,18 +100,31 @@ function resolveNode(projectRoot) {
 }
 
 class ServiceManager {
-  constructor(projectRoot, { frontendPort, apiPort, onStatus }) {
+  constructor(projectRoot, { frontendPort, apiPort, redisPort = 6399, onStatus }) {
     this.root = projectRoot;
     this.frontendPort = frontendPort;
     this.apiPort = apiPort;
+    this.redisPort = redisPort;
     this.onStatus = onStatus || (() => {});
     this.procs = {};
     this.memoryMode = false;
+    this.timeline = createStartupTimeline({ component: 'services', emit: log });
+    this.startupAbort = null;
   }
 
   async startAll() {
+    this.startupAbort = new AbortController();
+    return this.timeline.runPhase('all-services', () => this._startAll());
+  }
+
+  async _startAll() {
     log(`=== ServiceManager.startAll() ===`);
     log(`projectRoot: ${this.root}`);
+    if (resolveDesktopRuntime().instanceRoot) {
+      for (const port of [this.frontendPort, this.apiPort, this.redisPort]) {
+        if (await this._isPortOpen(port)) throw new Error(`Isolated desktop port ${port} is already occupied`);
+      }
+    }
 
     // ---- Pre-flight checks ----
     const nodeExe = resolveNode(this.root);
@@ -129,31 +151,55 @@ class ServiceManager {
     const userDataDir = this._getUserDataDir();
     this._ensureUserDataDir(userDataDir);
     log(`User data dir: ${userDataDir}`);
+    this.timeline.mark('preflight-complete');
+    this.startupAbort.signal.throwIfAborted();
 
     // NOTE: workspace junction repair must happen at install time (admin).
     // Runtime repair in Program Files fails with EPERM for non-admin users.
 
     // ---- Redis ----
     this.onStatus('Starting Redis...');
-    await this._startRedis(userDataDir);
+    await this.timeline.runPhase('redis-ready', () => this._startRedis(userDataDir));
+    if (resolveDesktopRuntime().instanceRoot && this.memoryMode)
+      throw new Error('Isolated desktop requires its own persistent Redis');
     log(`Redis phase complete. memoryMode=${this.memoryMode}`);
 
-    // ---- API ----
-    this.onStatus('Starting API server...');
-    let apiReady = false;
+    this.startupAbort.signal.throwIfAborted();
+    this.onStatus('Starting API and Web...');
+    await prepareStartupServices({
+      controller: this.startupAbort,
+      api: (signal) =>
+        this.timeline.runPhase('api-port-ready', () => this._startApiWithFallback(nodeExe, userDataDir, signal)),
+      web: (signal) =>
+        this.timeline.runPhase('web-http-ready', async () => {
+          this._startNextJs();
+          log(`Web process spawned, waiting for HTTP on port ${this.frontendPort}`);
+          await this._waitForHttpReady(this.frontendPort, 'Web', signal);
+        }),
+    });
+    this.startupAbort.signal.throwIfAborted();
+    this.onStatus('Ready!');
+  }
+
+  async _startApiWithFallback(nodeExe, userDataDir, signal) {
     try {
-      await this._startApi(nodeExe, userDataDir);
-      apiReady = true;
+      await this._startApi(nodeExe, userDataDir, signal);
     } catch (err) {
+      signal.throwIfAborted();
       log(`API first-attempt failed: ${err.message}`);
       // If API failed and we haven't tried memory mode yet, retry with MEMORY_STORE=1
-      if (!this.memoryMode) {
+      if (!this.memoryMode && !resolveDesktopRuntime().instanceRoot) {
+        const failedProcess = this.procs.api;
+        await this.timeline.runPhase('api-failed-process-stopped', () =>
+          stopOwnedStartupProcess(failedProcess, () => this._killProcessTree('api', failedProcess, 5000)),
+        );
+        signal.throwIfAborted();
+        if (this.procs.api === failedProcess) delete this.procs.api;
         this.onStatus('API failed — retrying with memory store...');
         log('Retrying API with MEMORY_STORE=1');
         this.memoryMode = true;
         try {
-          await this._startApi(nodeExe, userDataDir);
-          apiReady = true;
+          await this._startApi(nodeExe, userDataDir, signal);
         } catch (err2) {
           log(`API retry also failed: ${err2.message}`);
           throw new Error(`API server failed to start:\n${err2.message}`);
@@ -162,18 +208,6 @@ class ServiceManager {
         throw err;
       }
     }
-
-    if (!apiReady) {
-      throw new Error('API server did not start');
-    }
-
-    // ---- Web ----
-    this.onStatus('Starting Web frontend...');
-    this._startNextJs();
-    log(`Web process spawned, waiting for HTTP on port ${this.frontendPort}`);
-    await this._waitForHttpReady(this.frontendPort, 'Web');
-
-    this.onStatus('Ready!');
   }
 
   _getUserDataDir() {
@@ -183,6 +217,13 @@ class ServiceManager {
   _ensureUserDataDir(baseDir) {
     const dirs = [
       baseDir,
+      ...(resolveDesktopRuntime().instanceRoot
+        ? [
+            path.join(baseDir, 'home', 'AppData', 'Local'),
+            path.join(baseDir, 'home', 'AppData', 'Roaming'),
+            path.join(baseDir, 'temp'),
+          ]
+        : []),
       path.join(baseDir, 'data', 'transcripts'),
       path.join(baseDir, 'data', 'logs', 'api'),
       path.join(baseDir, 'data', 'connector-media'),
@@ -380,28 +421,23 @@ class ServiceManager {
     return salt;
   }
 
-  async _startApi(nodeExe, userDataDir) {
-    const apiEntry = path.join(this.root, 'packages', 'api', 'dist', 'index.js');
+  async _startApi(nodeExe, userDataDir, signal = this.startupAbort?.signal) {
+    const desktopEntry = path.join(this.root, 'packages', 'api', 'dist', 'index.desktop.js');
+    const apiEntry = fs.existsSync(desktopEntry)
+      ? desktopEntry
+      : path.join(this.root, 'packages', 'api', 'dist', 'index.js');
     // Copy cat-template.json from install root to the writable project dir,
     // and point the API at that copy via CAT_TEMPLATE_PATH. Otherwise the
     // API's cat-config-loader derives projectRoot=dirname(templatePath) from
     // the install location and tries to bootstrap .cat-cafe/cat-catalog.json
     // inside Program Files → EPERM → fallback to placeholder model names.
     const userProjectDir = path.join(userDataDir, 'project');
-    const templateSrc = path.join(this.root, 'cat-template.json');
     const templateDst = path.join(userProjectDir, 'cat-template.json');
     try {
-      if (fs.existsSync(templateSrc)) {
-        const srcStat = fs.statSync(templateSrc);
-        const dstStat = fs.existsSync(templateDst) ? fs.statSync(templateDst) : null;
-        if (!dstStat || srcStat.mtimeMs > dstStat.mtimeMs) {
-          fs.copyFileSync(templateSrc, templateDst);
-          log(`cat-template.json copied to ${templateDst}`);
-        }
-      } else {
-        log(`WARNING: cat-template.json missing at ${templateSrc}`);
-      }
+      initializeDesktopTemplate(this.root, userProjectDir);
+      log(`Persistent cat-template.json ready at ${templateDst}`);
     } catch (err) {
+      if (!fs.existsSync(templateDst)) throw new Error(`Unable to initialize persistent template: ${err.message}`);
       log(`Warning: failed to mirror cat-template.json: ${err.message}`);
     }
 
@@ -411,14 +447,30 @@ class ServiceManager {
     }
     // cwd must be a writable dir containing pnpm-workspace.yaml so that the
     // API's findMonorepoRoot() anchors on it, not on Program Files.
-    this._startProcess('api', nodeExe, [apiEntry], { envOverrides, cwd: userProjectDir });
+    this._startProcess(
+      'api',
+      nodeExe,
+      ['--import', pathToFileURL(resolveExternalNodeEntry('api-startup-probe.mjs')).href, apiEntry],
+      { envOverrides, cwd: userProjectDir },
+    );
     log(`API process spawned, waiting for port ${this.apiPort}`);
-    await this._waitForPort(this.apiPort, 'API');
+    this.timeline.mark('api-process-spawned');
+    await this._waitForPort(this.apiPort, 'API', signal);
   }
 
   _buildApiEnv(userDataDir) {
     const salt = this._getOrCreateTelemetrySalt(userDataDir);
     return {
+      ...(resolveDesktopRuntime().instanceRoot
+        ? {
+            CAT_CAFE_CONFIG_ROOT: path.join(userDataDir, 'project'),
+            CAT_CAFE_GLOBAL_CONFIG_ROOT: path.join(userDataDir, 'global'),
+            CAT_CAFE_DATA_DIR: path.join(userDataDir, 'data'),
+            PREVIEW_GATEWAY_PORT: '0',
+            CAT_CAFE_SKIP_HOMEDIR_MIGRATION: '1',
+            CAT_CAFE_SESSION_COOKIE_NAME: `cat_cafe_desktop_${crypto.createHash('sha256').update(userDataDir).digest('hex').slice(0, 12)}`,
+          }
+        : {}),
       TELEMETRY_HMAC_SALT: salt,
       EVIDENCE_DB: path.join(userDataDir, 'evidence.sqlite'),
       TRANSCRIPT_DATA_DIR: path.join(userDataDir, 'data', 'transcripts'),
@@ -440,13 +492,15 @@ class ServiceManager {
     const portableRedis = path.join(redisDir, `redis-server${EXE_SUFFIX}`);
 
     // Already running — verify it is actually Redis
-    if (await this._isPortOpen(6399)) {
-      const isRedis = await this._verifyRedisPing(6399);
+    if (await this._isPortOpen(this.redisPort)) {
+      if (resolveDesktopRuntime().instanceRoot)
+        throw new Error(`Isolated Redis port ${this.redisPort} is already occupied`);
+      const isRedis = await this._verifyRedisPing(this.redisPort);
       if (isRedis) {
-        this.onStatus('Redis already running on 6399');
+        this.onStatus(`Redis already running on ${this.redisPort}`);
         return;
       }
-      log('Port 6399 occupied by non-Redis — using memory store');
+      log(`Port ${this.redisPort} occupied by non-Redis — using memory store`);
       this.memoryMode = true;
       return;
     }
@@ -468,8 +522,9 @@ class ServiceManager {
     // (e.g. packaged Windows installs where the default 10000 exceeds the
     // process file descriptor limit).  512 is far above local desktop needs.
     const redisArgs = [
+      ...(resolveDesktopRuntime().instanceRoot ? ['--bind', '127.0.0.1'] : []),
       '--port',
-      '6399',
+      String(this.redisPort),
       '--dir',
       redisDataDir,
       '--save',
@@ -493,7 +548,7 @@ class ServiceManager {
     }
 
     this._startProcess('redis', redisCmd, redisArgs, { cwd: redisCwd });
-    const redisReady = await this._waitForPortWithFallback(6399, 'Redis', 'redis');
+    const redisReady = await this._waitForPortWithFallback(this.redisPort, 'Redis', 'redis');
     if (!redisReady) {
       log('Redis failed to start — using memory store');
       this.memoryMode = true;
@@ -534,59 +589,67 @@ class ServiceManager {
   _startNextJs() {
     const webDir = path.join(this.root, 'packages', 'web');
     const nodeExe = resolveNode(this.root) || 'node';
-
-    let nextJs = null;
-    // Primary: deployed layout (pnpm deploy --node-linker=hoisted) places next
-    // directly under packages/web/node_modules/next.
-    const deployed = path.join(webDir, 'node_modules', 'next', 'dist', 'bin', 'next');
-    if (fs.existsSync(deployed)) nextJs = deployed;
-    // Dev fallback: pnpm store layout in root.
-    if (!nextJs) {
-      const pnpmDir = path.join(this.root, 'node_modules', '.pnpm');
-      if (fs.existsSync(pnpmDir)) {
-        try {
-          const dirs = fs.readdirSync(pnpmDir).filter((d) => d.startsWith('next@'));
-          for (const d of dirs) {
-            const candidate = path.join(pnpmDir, d, 'node_modules', 'next', 'dist', 'bin', 'next');
-            if (fs.existsSync(candidate)) {
-              nextJs = candidate;
-              break;
-            }
-          }
-        } catch {}
-      }
-    }
-    if (!nextJs) {
-      const hoisted = path.join(this.root, 'node_modules', 'next', 'dist', 'bin', 'next');
-      if (fs.existsSync(hoisted)) nextJs = hoisted;
-    }
-
-    let cmd, args;
-    if (nextJs) {
-      cmd = nodeExe;
-      args = [nextJs, 'start', '--port', String(this.frontendPort)];
-    } else if (IS_WIN) {
-      cmd = 'cmd.exe';
-      const localNext = path.join(webDir, 'node_modules', '.bin', 'next.cmd');
-      args = ['/c', fs.existsSync(localNext) ? localNext : 'next.cmd', 'start', '--port', String(this.frontendPort)];
-    } else {
-      // macOS/Linux fallback: spawn node against any next binary on PATH.
-      // In practice 'deployed' above is always found after pnpm deploy, so
-      // this branch only triggers during broken installs.
-      cmd = nodeExe;
-      args = ['-e', 'console.error("next entry not found — reinstall required"); process.exit(1)'];
-    }
-
-    log(`Starting Next.js: ${cmd} ${args.join(' ')}`);
-    this._startProcess('web', cmd, args, { cwd: webDir });
+    this._startProcess(
+      'web',
+      nodeExe,
+      [
+        resolveExternalNodeEntry('runtime-web-server.js'),
+        webDir,
+        String(this.frontendPort),
+        String(this.apiPort),
+        resolveDesktopRuntime().instanceRoot ? '127.0.0.1' : '0.0.0.0',
+      ],
+      { cwd: webDir },
+    );
   }
 
   _startProcess(name, cmd, args, opts = {}) {
+    this.startupAbort?.signal.throwIfAborted();
+    const { instanceRoot } = resolveDesktopRuntime();
+    const inherited = instanceRoot
+      ? Object.fromEntries(
+          Object.entries(process.env).filter(([key]) =>
+            [
+              'PATH',
+              'PATHEXT',
+              'SYSTEMROOT',
+              'WINDIR',
+              'COMSPEC',
+              'PROGRAMFILES',
+              'PROGRAMFILES(X86)',
+              'PROGRAMDATA',
+              'PROCESSOR_ARCHITECTURE',
+              'NUMBER_OF_PROCESSORS',
+            ].includes(key.toUpperCase()),
+          ),
+        )
+      : process.env;
     const env = {
-      ...process.env,
+      ...inherited,
+      ...(instanceRoot
+        ? {
+            CAT_CAFE_DESKTOP_INSTANCE_ROOT: instanceRoot,
+            HOME: path.join(instanceRoot, 'home'),
+            USERPROFILE: path.join(instanceRoot, 'home'),
+            APPDATA: path.join(instanceRoot, 'home', 'AppData', 'Roaming'),
+            LOCALAPPDATA: path.join(instanceRoot, 'home', 'AppData', 'Local'),
+            TEMP: path.join(instanceRoot, 'temp'),
+            TMP: path.join(instanceRoot, 'temp'),
+            CODEX_HOME: path.join(instanceRoot, 'home', '.codex'),
+            CLAUDE_CONFIG_DIR: path.join(instanceRoot, 'home', '.claude'),
+            DSH_HOME: path.join(instanceRoot, 'home', '.dsh'),
+            CAT_CAFE_RUNTIME_ROOT: this.root,
+            CAT_CAFE_WORKSPACE_ROOT: path.join(instanceRoot, 'project'),
+            ALLOWED_WORKSPACE_DIRS: path.join(instanceRoot, 'project'),
+            REDIS_PORT: String(this.redisPort),
+            API_SERVER_HOST: '127.0.0.1',
+            NODE_ENV: 'production',
+          }
+        : {}),
       API_SERVER_PORT: String(this.apiPort),
       FRONTEND_PORT: String(this.frontendPort),
       NEXT_PUBLIC_API_URL: `http://localhost:${this.apiPort}`,
+      ...(resolveDesktopRuntime().instanceRoot ? { FRONTEND_URL: `http://localhost:${this.frontendPort}` } : {}),
       PROMPT_DEBUG: '1',
     };
 
@@ -625,13 +688,14 @@ class ServiceManager {
       env.MEMORY_STORE = '1';
       delete env.REDIS_URL;
     } else {
-      env.REDIS_URL = 'redis://localhost:6399';
+      env.REDIS_URL = `redis://localhost:${this.redisPort}`;
     }
 
     // Apply API-specific env overrides (writable paths, telemetry salt, etc.)
     if (opts.envOverrides) {
       Object.assign(env, opts.envOverrides);
     }
+    if (name === 'api') Object.assign(env, readClientHomes(instanceRoot));
 
     log(`[${name}] spawn: ${cmd} ${args.join(' ')}`);
     log(`[${name}] cwd: ${opts.cwd || this.root}`);
@@ -723,10 +787,13 @@ class ServiceManager {
     });
   }
 
-  async _waitForPort(port, label) {
+  async _waitForPort(port, label, signal = this.startupAbort?.signal) {
     const deadline = Date.now() + MAX_WAIT_MS;
     while (Date.now() < deadline) {
-      if (await this._isPortOpen(port)) {
+      signal?.throwIfAborted();
+      const open = await this._isPortOpen(port);
+      signal?.throwIfAborted();
+      if (open) {
         this.onStatus(`${label} ready on port ${port}`);
         return;
       }
@@ -746,10 +813,16 @@ class ServiceManager {
     throw new Error(`${label} did not start within ${MAX_WAIT_MS / 1000}s (port ${port})`);
   }
 
-  async _waitForHttpReady(port, label) {
+  async _waitForHttpReady(port, label, signal = this.startupAbort?.signal) {
     const deadline = Date.now() + MAX_WAIT_MS;
+    let attempts = 0;
     while (Date.now() < deadline) {
-      if (await this._isHttpReady(port)) {
+      signal?.throwIfAborted();
+      attempts++;
+      const ready = await this._isHttpReady(port);
+      signal?.throwIfAborted();
+      if (ready) {
+        this.timeline.mark('web-probe-ready', { attempts });
         this.onStatus(`${label} ready on port ${port}`);
         return;
       }
@@ -769,7 +842,10 @@ class ServiceManager {
     const deadline = Date.now() + MAX_WAIT_MS;
     const earlyCheckDeadline = Date.now() + REDIS_FALLBACK_PORT_CHECK_MS;
     while (Date.now() < deadline) {
-      if (await this._isPortOpen(port)) {
+      this.startupAbort?.signal.throwIfAborted();
+      const open = await this._isPortOpen(port);
+      this.startupAbort?.signal.throwIfAborted();
+      if (open) {
         this.onStatus(`${label} ready on port ${port}`);
         return true;
       }
@@ -787,6 +863,7 @@ class ServiceManager {
   }
 
   async stopAll() {
+    this.startupAbort?.abort(new Error('Desktop startup cancelled'));
     const KILL_TIMEOUT_MS = 5000;
     const killPromises = [];
 

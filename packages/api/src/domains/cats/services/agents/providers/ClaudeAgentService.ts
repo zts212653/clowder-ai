@@ -24,7 +24,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'no
 import { tmpdir } from 'node:os';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { type CatId, type CliEffortPreset, createCatId, resolveCliEffortOverride } from '@cat-cafe/shared';
+import { type CatId, type CliEffortPreset, catRegistry, createCatId, resolveCliEffortOverride } from '@cat-cafe/shared';
 import { summarizeMcpInjection } from '../../../../../config/capabilities/capability-orchestrator.js';
 import { getCatEffort } from '../../../../../config/cat-config-loader.js';
 import { getCatModel } from '../../../../../config/cat-models.js';
@@ -132,6 +132,7 @@ export function resolveClaudeEffortLevel(
   override: CliEffortPreset | null | undefined,
 ): string {
   const inherited = getCatEffort(catId, undefined, 'anthropic', effectiveModel);
+  if (!inherited && !override && catRegistry.tryGet(catId)?.config.configurationSource === 'native_tool') return '';
   return resolveCliEffortOverride('anthropic', effectiveModel, inherited, override).effective;
 }
 
@@ -413,7 +414,12 @@ export class ClaudeAgentService implements AgentService {
 
     // F198 B-prime refactor: model selection delegates to shared helper so
     // ClaudeBgCarrierService reuses the same rules (single source of truth).
-    const { effectiveModel, useEnvModelOverride } = resolveClaudeModelSelection(options?.callbackEnv, this.model);
+    const { effectiveModel, useEnvModelOverride } = resolveClaudeModelSelection(
+      options?.callbackEnv,
+      catRegistry.tryGet(this.catId)?.config.configurationSource === 'native_tool'
+        ? getCatModel(this.catId)
+        : this.model,
+    );
     const isApiKeyMode = options?.callbackEnv?.[ANTHROPIC_PROFILE_MODE_KEY] === 'api_key';
     // #840 R2 (砚砚 review 2026-06-02): the main prompt must NOT ride argv.
     // A2A briefings + memory + image hints push `effectivePrompt` past the
@@ -443,8 +449,7 @@ export class ClaudeAgentService implements AgentService {
       '--include-partial-messages',
       '--verbose',
       ...modelArgs,
-      '--effort',
-      effortLevel,
+      ...(effortLevel ? ['--effort', effortLevel] : []),
       '--permission-mode',
       readOnly ? 'plan' : PERMISSION_MODE,
       // api_key mode: skip user-level ~/.claude/settings.json to prevent config pollution.
@@ -703,7 +708,7 @@ export class ClaudeAgentService implements AgentService {
           carrier: 'print_sdk',
           ...(effectiveModel ? { model: effectiveModel } : {}),
           protocol: 'stream-json',
-          reasoningEffort: effortLevel,
+          ...(effortLevel ? { reasoningEffort: effortLevel } : {}),
           ...(readOnly ? { toolExecutionPolicy: 'read_only' as const } : {}),
         }),
         tools: Object.freeze({

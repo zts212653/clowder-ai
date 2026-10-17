@@ -1,0 +1,233 @@
+.welcome {
+  min-height: calc(100dvh - 38px);
+  background: radial-gradient(ellipse at 50% 55%, #f3eadc 0, transparent 55%), var(--work);
+  display: flex;
+  flex-direction: column;
+  padding: 26px 42px 20px;
+}
+.welcome-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 15px;
+  font-weight: 600;
+}
+.welcome-brand img {
+  width: 34px;
+  height: 34px;
+  object-fit: contain;
+}
+.welcome-inner {
+  text-align: center;
+  margin: auto;
+  max-width: 720px;
+  padding: 30px 0 22px;
+}
+.welcome h1 {
+  font-size: 46px;
+  line-height: 1.35;
+  letter-spacing: -1.5px;
+  font-weight: 600;
+  margin: 12px 0 18px;
+}
+.intro {
+  font-size: 15px;
+  line-height: 1.9;
+  color: #71685c;
+}
+.cat-stage {
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  gap: 46px;
+  margin: 20px 0 18px;
+}
+.cat-on-stage {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+.cat-on-stage .sprite {
+  animation: breathe 4s ease-in-out var(--delay) infinite;
+}
+.cat-on-stage span:last-child {
+  font-size: 12px;
+  color: var(--muted);
+  padding-top: 8px;
+}
+.welcome-action {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  margin: 26px 0 8px;
+}
+.welcome-footer {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+  color: var(--muted);
+  margin-top: 15px;
+}
+.partners {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.partner-card {
+  display: flex;
+  gap: 18px;
+  align-items: flex-start;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: 24px;
+  box-shadow: 0 4px 22px #32280b03;
+}
+.partner-card.chosen {
+  border-color: #d3b89a;
+  box-shadow: 0 0 0 1px #e8d9c855;
+}
+.partner-card > input {
+  accent-color: var(--accent);
+  width: 17px;
+  height: 17px;
+  margin: 20px 0 0;
+  flex-shrink: 0;
+}
+.partner-copy {
+  flex: 1;
+  min-width: 0;
+}
+.partner-copy h3 {
+  font-size: 17px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.inline-note {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 400;
+  margin-left: 7px;
+  display: inline-block;
+}
+.partner-copy p {
+  font-size: 12px;
+  margin: 4px 0 14px;
+}
+.tool-line {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  flex-wrap: wrap;
+  font-size: 12px;
+}
+.status {
+  font-size: 11px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  line-height: 1.5;
+}
+.status:before {
+  content: "";
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: currentColor;
+  flex-shrink: 0;
+}
+.good {
+  color: var(--green);
+}
+.attention {
+  color: #97712d;
+}
+.preference {
+  font-size: 12px;
+  color: var(--muted);
+  margin-top: 8px;
+  line-height: 1.6;
+}
+.card-action {
+  align-self: center;
+}
+.empty-tools {
+  text-align: center;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: var(--card);
+  padding: 30px 20px;
+}
+.empty-cat {
+  display: flex;
+  justify-content: center;
+}
+.empty-cat .sprite {
+  width: 100px;
+  height: 108px;
+  background-size: 100px 108px;
+}
+.empty-tools h2 {
+  font-size: 22px;
+}
+.empty-tools p {
+  font-size: 13px;
+}
+.install-options {
+  display: flex;
+  justify-content: center;
+  gap: 10px;
+  margin: 24px 0;
+  flex-wrap: wrap;
+}
+.handoff-page {
+  max-width: 920px;
+  margin: auto;
+  padding: 40px;
+  text-align: center;
+}
+.handoff-page .progress {
+  justify-content: center;
+}
+.handoff-cats {
+  display: flex;
+  justify-content: center;
+  gap: 38px;
+  flex-wrap: wrap;
+  margin: 55px 0 35px;
+}
+.handoff-cats > div {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+}
+.handoff-cats span:last-child {
+  font-size: 12px;
+  color: var(--muted);
+}
+.handoff-page h1 {
+  font-size: 34px;
+  margin: 14px 0;
+}
+.handoff-summary {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  margin: 28px auto;
+  background: var(--field);
+  border-radius: 14px;
+  padding: 18px;
+  max-width: 420px;
+  text-align: left;
+}
+.handoff-summary small {
+  display: block;
+  margin-top: 4px;
+}
+.handoff-page > .fine {
+  max-width: 500px;
+  margin: 24px auto;
+}

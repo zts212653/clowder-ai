@@ -9,6 +9,7 @@ import { AppTooltip } from '../AppTooltip';
 import { ChatInput } from '../ChatInput';
 import { useArtworkLightboxScope } from '../content-review/ArtworkLightboxScope';
 import { useArtifactLightbox } from '../content-review/useArtifactLightbox';
+import { DemoEntryActions } from '../onboarding-demo/DemoEntryActions';
 import { ShellGlyph } from '../shell/ShellIcons';
 import { useShellCopy } from '../shell/shell-copy';
 import { getProjectPaths } from '../ThreadSidebar/thread-utils';
@@ -163,6 +164,7 @@ export interface NewConversationPageProps {
   onToggleSidebar: () => void;
   onToggleStatusPanel: () => void;
   onNavigate: (threadId: string) => void;
+  onShowCollaboration?: () => void;
 }
 
 export function NewConversationPage(props: NewConversationPageProps) {
@@ -296,6 +298,7 @@ export function NewConversationPage(props: NewConversationPageProps) {
           localSaveFailed={admission.localSaveFailed}
           onRetry={admission.retryLoad}
         />
+        {props.onShowCollaboration && <DemoEntryActions onShowCollaboration={props.onShowCollaboration} />}
         {floating.error && <p role="alert">{floating.error}</p>}
         <div className="mt-8">
           <RecentWorks onOpen={openWork} onOpenAll={() => setWorkspaceMode('artifacts')} />

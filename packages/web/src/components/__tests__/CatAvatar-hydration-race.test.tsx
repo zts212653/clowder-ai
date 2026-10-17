@@ -45,13 +45,26 @@ afterEach(() => {
 });
 
 describe('CatAvatar registry hydration race', () => {
+  it('does not request an invented asset for a new partner while its registry entry loads', async () => {
+    await act(async () => root.render(<CatAvatar catId="pi" size={32} />));
+    expect(container.querySelector('img')?.getAttribute('src')).toBe('/avatars/default.png');
+    catRegistry.current = {
+      id: 'pi',
+      displayName: '派派',
+      avatar: '/avatars/family/opencode.png',
+      color: { primary: '#237A57', secondary: '#DCEFE7' },
+    };
+    await act(async () => root.render(<CatAvatar catId="pi" size={32} />));
+    expect(container.querySelector('img')?.getAttribute('src')).toBe('/avatars/family/opencode.png');
+  });
+
   it('retries with the canonical uploaded avatar after the provisional path fails', async () => {
     await act(async () => {
       root.render(<CatAvatar catId="codex-sol" size={32} />);
     });
 
     const provisional = container.querySelector('img');
-    expect(provisional?.getAttribute('src')).toBe('/avatars/codex-sol.png');
+    expect(provisional?.getAttribute('src')).toBe('/avatars/default.png');
 
     await act(async () => {
       provisional?.dispatchEvent(new Event('error'));

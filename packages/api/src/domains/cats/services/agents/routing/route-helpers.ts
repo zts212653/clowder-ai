@@ -971,16 +971,16 @@ export function toStoredToolEvent(
   if (!msg.toolEventId?.startsWith(prefix)) msg.toolEventId = `${prefix}${randomUUID()}`;
   if (executionRef) msg.toolExecutionRef = executionRef;
   const instance = { id: msg.toolEventId, ...(msg.toolExecutionRef ? { executionRef: msg.toolExecutionRef } : {}) };
+  let inputDetail: string | undefined;
+  if (msg.toolInput !== undefined) {
+    try {
+      inputDetail = truncateDetail(JSON.stringify(msg.toolInput), 200);
+    } catch {
+      inputDetail = '[unserializable]';
+    }
+  }
   if (msg.type === 'tool_use') {
     const toolName = msg.toolName ?? 'unknown';
-    let detail: string | undefined;
-    if (msg.toolInput) {
-      try {
-        detail = truncateDetail(JSON.stringify(msg.toolInput), 200);
-      } catch {
-        detail = '[unserializable]';
-      }
-    }
     return {
       ...instance,
       type: 'tool_use',
@@ -988,7 +988,7 @@ export function toStoredToolEvent(
       // R6 maintainer: persist native tool name as data field (decoupled from display label).
       // Hydrate prefers this for span naming; label parse becomes legacy fallback only.
       toolName,
-      ...(detail ? { detail } : {}),
+      ...(inputDetail !== undefined ? { detail: inputDetail } : {}),
       timestamp: msg.timestamp,
       ...(msg.toolUseId ? { toolUseId: msg.toolUseId } : {}),
       ...(msg.toolTracing ? { tracing: msg.toolTracing } : {}),
@@ -1004,6 +1004,7 @@ export function toStoredToolEvent(
       type: 'tool_result',
       label: `${msg.catId as string} ← result`,
       detail,
+      ...(inputDetail !== undefined ? { inputDetail } : {}),
       timestamp: msg.timestamp,
       ...(msg.toolUseId ? { toolUseId: msg.toolUseId } : {}),
       ...(msg.toolResultStatus ? { status: msg.toolResultStatus } : {}),

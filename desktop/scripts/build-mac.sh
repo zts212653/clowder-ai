@@ -65,29 +65,22 @@ die()   { err "$*"; exit 1; }
 bold "Step 1/6 — Build web application"
 if [[ $SKIP_WEB -eq 0 ]]; then
   cd "$PROJECT_ROOT"
-  if ! pnpm install --frozen-lockfile; then
-    warn "frozen-lockfile failed, retrying with pnpm install"
-    pnpm install
-  fi
+  pnpm install --frozen-lockfile || die "Frozen dependency installation failed"
   pnpm run build
   ok "Web application built"
 else
   ok "Skipped (--skip-web)"
 fi
 
-# ─── Step 2: pnpm deploy runtime packages ──────────────────────────────
-bold "Step 2/6 — pnpm deploy runtime packages"
+# ─── Step 2: frozen runtime packages ──────────────────────────────
+bold "Step 2/6 — frozen runtime packages"
 if [[ $SKIP_DEPLOY -eq 0 ]]; then
   mkdir -p "$BUNDLED_DIR"
-  rm -rf "$DEPLOY_ROOT"
-  mkdir -p "$DEPLOY_ROOT"
   cd "$PROJECT_ROOT"
-  for pkg in api web mcp-server; do
-    echo "  Deploying @cat-cafe/$pkg ..."
-    CAT_CAFE_SKIP_NODE_RUNTIME_GUARD=1 \
-      pnpm --filter "@cat-cafe/$pkg" --prod --config.node-linker=hoisted deploy "${DEPLOY_ROOT}/${pkg}" \
-      || die "pnpm deploy @cat-cafe/$pkg failed"
-  done
+  nextDeploy="$BUNDLED_DIR/deploy-$(date +%s)-$$"
+  node desktop/scripts/frozen-runtime-deploy.mjs "$PROJECT_ROOT" "$nextDeploy" || die "Frozen runtime export failed"
+  [[ ! -d "$DEPLOY_ROOT" ]] || mv "$DEPLOY_ROOT" "$BUNDLED_DIR/deploy-before-$(date +%s)-$$"
+  mv "$nextDeploy" "$DEPLOY_ROOT"
   # Web's .next build output is outside the package's "files" field,
   # so pnpm deploy doesn't copy it. Inject manually.
   webNextSrc="${PROJECT_ROOT}/packages/web/.next"
@@ -228,7 +221,7 @@ fi
 cd "$DESKTOP_DIR"
   if [[ ! -d node_modules ]]; then
     echo "  Installing desktop dependencies ..."
-    npm install --include=dev || die "npm install failed in desktop/"
+    npm ci --include=dev || die "npm ci failed in desktop/"
   fi
 
 # electron-builder writes into desktop/dist/. Force a clean output dir.

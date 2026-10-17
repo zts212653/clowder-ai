@@ -19,7 +19,13 @@ import type { HubCatEditorProps } from './hub-cat-editor.types';
 import type { CatStrategyEntry } from './hub-strategy-types';
 import { useHubCatTemplates } from './useHubCatTemplates';
 
-export function useHubCatEditorData({ cat, draft, existingCats, open }: HubCatEditorProps) {
+export function useHubCatEditorData({ cat, draft, existingCats, open, presentation }: HubCatEditorProps) {
+  // The legacy account editor keeps its explicit binding contract. Native setup
+  // is hosted by MemberSettingsPage; never reinterpret an existing member/draft.
+  const initialForm = () => ({
+    ...initialState(cat, draft),
+    ...(!cat && !draft && presentation === 'page' ? { configurationSource: 'managed_account' as const } : {}),
+  });
   const [profiles, setProfiles] = useState<ProfileItem[]>([]);
   const [loadingProfiles, setLoadingProfiles] = useState(false);
   const [loadingStrategy, setLoadingStrategy] = useState(false);
@@ -33,7 +39,7 @@ export function useHubCatEditorData({ cat, draft, existingCats, open }: HubCatEd
   const [restoringCloudIdentity, setRestoringCloudIdentity] = useState(false);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const [fieldErrors, setFieldErrors] = useState<Record<string, boolean>>({});
-  const [form, setForm] = useState<HubCatEditorFormState>(() => initialState(cat, draft));
+  const [form, setForm] = useState<HubCatEditorFormState>(initialForm);
   const [strategyForm, setStrategyForm] = useState<StrategyFormState | null>(null);
   const [strategyBaseline, setStrategyBaseline] = useState<StrategyFormState | null>(null);
   const [strategyBaselineHasOverride, setStrategyBaselineHasOverride] = useState(false);
@@ -58,7 +64,8 @@ export function useHubCatEditorData({ cat, draft, existingCats, open }: HubCatEd
     return selectedProfile?.models ?? [];
   }, [form.clientId, selectedProfile]);
   const protectedCloudIdentity = cat?.identityProtection?.kind === 'builtin-cloud' ? cat.identityProtection : null;
-  const showCodexSettings = form.clientId === 'openai' && !protectedCloudIdentity;
+  const showCodexSettings =
+    form.clientId === 'openai' && !protectedCloudIdentity && form.configurationSource !== 'native_tool';
   const codexSettingsEditable = !showCodexSettings || codexSettingsBaseline !== null;
 
   // Alias uniqueness: collect all patterns from OTHER cats (lowercase for comparison)
@@ -75,7 +82,7 @@ export function useHubCatEditorData({ cat, draft, existingCats, open }: HubCatEd
 
   useEffect(() => {
     if (!open) return;
-    setForm(initialState(cat, draft));
+    setForm(initialForm());
     setFieldErrors({});
     setSaveError(null);
     setStrategyError(null);
@@ -257,7 +264,11 @@ export function useHubCatEditorData({ cat, draft, existingCats, open }: HubCatEd
   const createAccountClient: BuiltinAccountClient | undefined =
     form.clientId === 'antigravity' ? undefined : form.clientId === 'catagent' ? 'anthropic' : form.clientId;
   const hasEmptyCreatableAccounts =
-    !cat && !loadingProfiles && createAccountClient !== undefined && availableProfiles.length === 0;
+    !cat &&
+    form.configurationSource !== 'native_tool' &&
+    !loadingProfiles &&
+    createAccountClient !== undefined &&
+    availableProfiles.length === 0;
   const saveBlockedByProfileBinding = hasEmptyCreatableAccounts;
 
   return {

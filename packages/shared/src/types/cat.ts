@@ -18,6 +18,7 @@ export type ClientId =
   | 'openai'
   | 'google'
   | 'kimi'
+  | 'pi'
   | 'antigravity'
   | 'opencode'
   | 'a2a'
@@ -69,6 +70,8 @@ export interface CatConfig {
   readonly color: CatColor;
   readonly mentionPatterns: readonly string[];
   readonly accountRef?: string;
+  /** Native tools own authentication and omitted model/effort defaults. */
+  readonly configurationSource?: 'native_tool' | 'managed_account';
   /** clowder-ai#340 P5: CLI client identity (renamed from `provider`). */
   readonly clientId: ClientId;
   /** Canonical, config-resolved member access mode. */

@@ -59,7 +59,7 @@ export function CatAvatar({
   const { getCatById } = useCatData();
   const cat = getCatById(catId);
   const catName = resolveCatDisplayName(catId, getCatById);
-  const avatarSrc = cat?.avatar || `/avatars/${catId}.png`;
+  const avatarSrc = cat?.avatar || '/avatars/default.png';
   const imgError = failedAvatarSrc === avatarSrc;
 
   const isStreaming = status === 'streaming';

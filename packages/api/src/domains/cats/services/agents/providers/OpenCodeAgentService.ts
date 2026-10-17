@@ -24,6 +24,7 @@ import { formatCliExitError } from '../../../../../utils/cli-format.js';
 import { formatCliNotFoundError, resolveCliCommand } from '../../../../../utils/cli-resolve.js';
 import { isCliError, isCliTimeout, isLivenessWarning, spawnCli } from '../../../../../utils/cli-spawn.js';
 import type { SpawnFn } from '../../../../../utils/cli-types.js';
+import { excerptSanitizedStderr } from '../../../../../utils/sanitize-cli-stderr.js';
 import { CliRawArchive } from '../../session/CliRawArchive.js';
 import type {
   AgentMessage,
@@ -39,13 +40,17 @@ import { sanitizeRawEvent } from '../providers/codex-audit-hooks.js';
 import {
   cacheOpenCodeAutoApproveProbe,
   getCliFlagName,
+  getOpenCodeTransportArgs,
   OPENCODE_AUTO_APPROVE_FLAG,
+  OPENCODE_STANDALONE_FLAG,
   type OpenCodeAutoApproveProbeFn,
   type OpenCodeAutoApproveProbeResult,
   parseOpenCodeCliConfigArgs,
   probeOpenCodeAutoApproveSupport,
   userControlsOpenCodeAutoApprove,
+  usesSharedOpenCodeServer,
 } from './opencode-auto-approval.js';
+import { readOpenCodeError } from './opencode-error.js';
 import { transformOpenCodeEvent } from './opencode-event-transform.js';
 import {
   buildOpenCodeNoToolFinalizerConfig,
@@ -100,7 +105,7 @@ interface OpenCodeAgentServiceOptions {
   rawArchive?: RawArchiveSink;
   /** F203 Phase I: test seam — replaces the real L0 compiler subprocess (like Claude/Codex services). */
   l0CompilerFn?: (options: { catId: string; userId?: string; dataDir?: string; outPath?: string }) => Promise<string>;
-  /** Test seam for the `opencode run --help` auto-approval capability probe. */
+  /** Test seam for the shared `opencode run --help` capability probe. */
   autoApproveProbeFn?: OpenCodeAutoApproveProbeFn;
   /** Test seam for OpenCode's local SQLite state used to recover silent completions. */
   opencodeDbPath?: string;
@@ -126,7 +131,7 @@ const OPENCODE_READ_ONLY_PERMISSION = {
   task: 'deny',
   question: 'deny',
 } as const;
-// Process-wide cache: --auto support is a property of the installed opencode binary.
+// Process-wide cache: advertised run flags belong to the installed opencode binary.
 // Restart the API process after upgrading opencode so this capability is re-probed.
 let sharedOpenCodeAutoApproveProbe: Promise<OpenCodeAutoApproveProbeResult> | undefined;
 
@@ -150,6 +155,7 @@ interface OpenCodePostToolFinalizerParams {
   sessionId?: string;
   trace: OpenCodeToolTrace | null;
   textMode: 'append' | 'replace';
+  transportArgs?: readonly string[];
   options?: AgentServiceOptions;
 }
 
@@ -164,14 +170,7 @@ function getOpenCodeStepFinishReason(event: unknown): string | undefined {
 }
 
 function isPermanentOpenCodeProviderFailure(event: unknown, reasonCode: string | undefined): boolean {
-  if (typeof event !== 'object' || event === null) return false;
-  const rawError = (event as Record<string, unknown>).error;
-  if (typeof rawError !== 'object' || rawError === null) return false;
-  const data = (rawError as Record<string, unknown>).data;
-  const statusCode =
-    typeof data === 'object' && data !== null && typeof (data as Record<string, unknown>).statusCode === 'number'
-      ? ((data as Record<string, unknown>).statusCode as number)
-      : undefined;
+  const { statusCode, type } = readOpenCodeError(event);
 
   // These outcomes cannot recover by retrying the same configured invocation.
   // Deliberately exclude 408/429/5xx: those are transient and OpenCode may
@@ -180,6 +179,7 @@ function isPermanentOpenCodeProviderFailure(event: unknown, reasonCode: string |
     reasonCode === 'model_not_found' ||
     reasonCode === 'auth_failed' ||
     reasonCode === 'invalid_config' ||
+    type === 'provider.auth' ||
     statusCode === 401 ||
     statusCode === 402 ||
     statusCode === 403 ||
@@ -329,6 +329,18 @@ export class OpenCodeAgentService implements L0InjectableAgentService {
     let sessionInitEmitted = false;
 
     try {
+      if (readOnly && usesSharedOpenCodeServer(getOpenCodeTransportArgs(options?.cliConfigArgs))) {
+        yield {
+          type: 'error',
+          catId: this.catId,
+          error:
+            'OpenCode cannot verify read-only permissions on an explicitly selected shared server. Use a private local run for this policy.',
+          metadata,
+          timestamp: Date.now(),
+        };
+        yield { type: 'done', catId: this.catId, metadata, timestamp: Date.now() };
+        return;
+      }
       const opencodeCommand = resolveCliCommand('opencode');
       if (!opencodeCommand) {
         yield {
@@ -342,16 +354,21 @@ export class OpenCodeAgentService implements L0InjectableAgentService {
         return;
       }
 
-      const defaultAutoApproveFlag = readOnly
-        ? undefined
-        : await this.resolveDefaultAutoApproveFlag(opencodeCommand, cwd, childEnv, options?.cliConfigArgs);
+      const runDefaults = await this.resolveRunDefaults(
+        opencodeCommand,
+        cwd,
+        childEnv,
+        options?.cliConfigArgs,
+        readOnly,
+      );
       const args = this.buildArgs(
         prompt,
         options?.sessionId,
         effectiveModel,
         readOnly ? undefined : options?.cliConfigArgs,
-        defaultAutoApproveFlag,
+        runDefaults.approvalFlag,
         readOnly,
+        runDefaults.transportArgs,
       );
 
       log.debug(
@@ -545,22 +562,22 @@ export class OpenCodeAgentService implements L0InjectableAgentService {
           // even when CLI never exits non-zero (some providers emit error events then exit 0).
           let yieldMetadata: MessageMetadata = metadata;
           if (result.type === 'error') {
-            const rawError = (event as Record<string, unknown>).error as
-              | { name?: string; data?: { message?: string; statusCode?: number } }
-              | undefined;
+            const rawError = readOpenCodeError(event);
             log.warn(
               {
                 catId: this.catId,
                 invocationId: options?.invocationId,
-                errorName: rawError?.name,
-                errorMessage: rawError?.data?.message,
-                statusCode: rawError?.data?.statusCode,
+                errorName: rawError.type && excerptSanitizedStderr(rawError.type, { edge: 'head', maxLength: 100 }),
+                errorMessage:
+                  rawError.message && excerptSanitizedStderr(rawError.message, { edge: 'head', maxLength: 500 }),
+                statusCode: rawError.statusCode,
               },
               'OpenCode CLI returned error event',
             );
             const diagnosticText = [
-              rawError?.data?.message ?? rawError?.name,
-              rawError?.data?.statusCode ? `HTTP ${rawError.data.statusCode}` : undefined,
+              rawError.message,
+              rawError.statusCode ? `HTTP ${rawError.statusCode}` : undefined,
+              rawError.type === 'provider.auth' ? 'Authentication failed' : undefined,
             ]
               .filter((value): value is string => Boolean(value))
               .join('\n');
@@ -676,6 +693,7 @@ export class OpenCodeAgentService implements L0InjectableAgentService {
             : {}),
           trace: lastToolTrace,
           textMode: 'replace',
+          transportArgs: runDefaults.transportArgs,
           options,
         })) {
           if (finalizerMsg.type === 'text') textEventCount++;
@@ -755,7 +773,10 @@ export class OpenCodeAgentService implements L0InjectableAgentService {
   }
 
   private async *runPostToolFinalizer(params: OpenCodePostToolFinalizerParams): AsyncIterable<AgentMessage> {
-    const boundaryFailure = this.getNoToolFinalizerBoundaryFailure();
+    const requestedTransport = params.transportArgs ?? getOpenCodeTransportArgs(params.options?.cliConfigArgs);
+    const boundaryFailure =
+      this.getNoToolFinalizerBoundaryFailure() ??
+      (usesSharedOpenCodeServer(requestedTransport) ? 'unverified_server_permissions' : null);
     if (boundaryFailure) {
       log.warn(
         { catId: this.catId, invocationId: params.options?.invocationId, reason: boundaryFailure },
@@ -774,11 +795,16 @@ export class OpenCodeAgentService implements L0InjectableAgentService {
 
     const finalizerPrompt = buildOpenCodePostToolFinalizerPrompt(params.trace);
     const finalizerAgent = `${OPENCODE_NO_TOOL_FINALIZER_AGENT}-${randomUUID()}`;
+    const transportArgs =
+      params.transportArgs ??
+      (await this.resolveRunDefaults(params.command, params.cwd, params.childEnv, params.options?.cliConfigArgs, true))
+        .transportArgs;
     const finalizerArgs = this.buildNoToolFinalizerArgs(
       finalizerPrompt,
       params.sessionId,
       params.effectiveModel,
       finalizerAgent,
+      transportArgs,
     );
     const finalizerEnv = this.buildNoToolFinalizerEnv(params.childEnv, finalizerAgent);
     const cliOpts = {
@@ -886,6 +912,7 @@ export class OpenCodeAgentService implements L0InjectableAgentService {
           { catId: this.catId, invocationId: params.options?.invocationId, error: result.error },
           'OpenCode no-tool finalizer returned an error event',
         );
+        if (isPermanentOpenCodeProviderFailure(event, undefined)) break;
         continue;
       }
       if (result.type === 'text') {
@@ -964,8 +991,9 @@ export class OpenCodeAgentService implements L0InjectableAgentService {
     sessionId: string | undefined,
     model: string,
     finalizerAgent = OPENCODE_NO_TOOL_FINALIZER_AGENT,
+    transportArgs: readonly string[] = [],
   ): string[] {
-    const args = ['run', '--pure', '--agent', finalizerAgent];
+    const args = ['run', ...transportArgs, '--pure', '--agent', finalizerAgent];
     if (sessionId) args.push('--session', sessionId);
     if (model) args.push('-m', model);
     args.push('--format', 'json', '--', prompt);
@@ -997,8 +1025,9 @@ export class OpenCodeAgentService implements L0InjectableAgentService {
     cliConfigArgs?: readonly string[],
     defaultAutoApproveFlag?: string,
     readOnly = false,
+    transportArgs: readonly string[] = [],
   ): string[] {
-    const args = ['run'];
+    const args = ['run', ...transportArgs];
 
     if (readOnly) args.push('--pure', '--agent', OPENCODE_READ_ONLY_AGENT);
 
@@ -1045,24 +1074,32 @@ export class OpenCodeAgentService implements L0InjectableAgentService {
     return deduped;
   }
 
-  private async resolveDefaultAutoApproveFlag(
+  private async resolveRunDefaults(
     command: string,
     cwd?: string,
     env?: Record<string, string | null>,
     cliConfigArgs?: readonly string[],
-  ): Promise<string | undefined> {
+    readOnly = false,
+  ): Promise<{ approvalFlag: string | undefined; transportArgs: string[] }> {
     const userParts = parseOpenCodeCliConfigArgs(cliConfigArgs);
     const userFlags = new Set(userParts.map(getCliFlagName).filter((flag): flag is string => flag !== null));
-    if (userControlsOpenCodeAutoApprove(userFlags)) return undefined;
+    const transportArgs = getOpenCodeTransportArgs(cliConfigArgs);
+    const needsApproval = !readOnly && !userControlsOpenCodeAutoApprove(userFlags);
+    if (!needsApproval && transportArgs.length > 0) return { approvalFlag: undefined, transportArgs };
 
+    // One help result supplies both capabilities. A transient failure is retried
+    // by the next invocation, never by a second probe in this invocation.
     const result = await this.getAutoApproveProbe(command, cwd, env);
-    if (result.warning) {
+    if (needsApproval && result.warning) {
       log.warn(
         { catId: this.catId, command, warning: result.warning },
         'OpenCode auto-approval flag unavailable; continuing without default flag',
       );
     }
-    return result.approvalFlag;
+    return {
+      approvalFlag: needsApproval ? result.approvalFlag : undefined,
+      transportArgs: transportArgs.length > 0 ? transportArgs : result.standalone ? [OPENCODE_STANDALONE_FLAG] : [],
+    };
   }
 
   private getAutoApproveProbe(

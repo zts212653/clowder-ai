@@ -91,7 +91,7 @@ export function AdvancedRuntimeSection({
             <ContextWindowCompatibilityNotice cat={cat} form={form} />
           </>
         )}
-        {cliExtensionsAvailable && cliEffortOptions ? (
+        {form.configurationSource !== 'native_tool' && cliExtensionsAvailable && cliEffortOptions ? (
           <>
             <TextField
               label="CLI Effort"

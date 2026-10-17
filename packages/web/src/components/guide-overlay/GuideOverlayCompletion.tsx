@@ -15,6 +15,26 @@ export function GuideOverlayCompletion({
   flow,
   onDismiss,
 }: GuideOverlayCompletionProps) {
+  if (flow.nonBlocking) {
+    return (
+      <div
+        role="status"
+        className="fixed right-4 top-16 z-[var(--guide-z-overlay)] max-w-xs rounded-xl border border-[var(--guide-hud-border)] bg-[var(--guide-hud-bg)] p-4 shadow-lg"
+      >
+        <p className="text-sm text-cafe">
+          {completionFailed ? '提醒已结束，进度保存失败。' : '随时可以从侧栏管理成员和账号。'}
+        </p>
+        <button
+          type="button"
+          onClick={onDismiss}
+          disabled={!completionPersisted && !completionFailed}
+          className="mt-2 text-sm text-cafe-secondary"
+        >
+          {completionPersisted || completionFailed ? '知道了' : '保存中…'}
+        </button>
+      </div>
+    );
+  }
   return (
     <div className="fixed inset-0 z-[var(--guide-z-overlay)] flex items-center justify-center">
       <div

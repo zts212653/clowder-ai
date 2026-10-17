@@ -2,8 +2,9 @@ import { randomUUID } from 'node:crypto';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import puppeteer, { type Browser, type HTTPRequest } from 'puppeteer-core';
+import type { Browser, HTTPRequest } from 'puppeteer-core';
 import { detectChromePath } from '../../../services/image-export-browser-session.js';
+import { loadPuppeteer } from '../../../utils/lazy-puppeteer.js';
 import { runBrowserWorker } from './browser-bootstrap.js';
 import { monitorPrivateBrowser } from './process-budget.js';
 
@@ -61,6 +62,8 @@ export async function runContainedMaterializer(options: {
     const execute = async () => {
       const directory = await mkdtemp(join(tmpdir(), 'clowder-materializer-'));
       profile = directory;
+      controller.signal.throwIfAborted();
+      const puppeteer = await loadPuppeteer();
       controller.signal.throwIfAborted();
       browser = await puppeteer.launch({
         executablePath: detectChromePath(),

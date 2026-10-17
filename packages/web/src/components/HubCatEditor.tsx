@@ -14,6 +14,7 @@ import { MemberChanges } from './members/MemberChangeMark';
 import { MemberEditorPage } from './members/MemberEditorPage';
 import { MemberOperations } from './members/MemberOperationFeedback';
 import { MemberSaveFeedback } from './members/MemberSaveFeedback';
+import { NativeRuntimeSection } from './NativeRuntimeSection';
 import { UnifiedAuthModal } from './UnifiedAuthModal';
 import { useHubCatEditor } from './useHubCatEditor';
 
@@ -169,14 +170,16 @@ function HubCatEditorBody(props: HubCatEditorProps) {
                     onRestore={() => handleRestoreBuiltinCloudIdentity(cat.id)}
                   />
                 ) : (
-                  <AccountSection
-                    form={form}
-                    hasError={fieldErrors.account}
-                    modelOptions={modelOptions}
-                    availableProfiles={availableProfiles}
-                    loadingProfiles={hasEmptyCreatableAccounts ? true : loadingProfiles}
-                    onChange={patchForm}
-                  />
+                  <NativeRuntimeSection form={form} onChange={patchForm}>
+                    <AccountSection
+                      form={form}
+                      hasError={fieldErrors.account}
+                      modelOptions={modelOptions}
+                      availableProfiles={availableProfiles}
+                      loadingProfiles={hasEmptyCreatableAccounts ? true : loadingProfiles}
+                      onChange={patchForm}
+                    />
+                  </NativeRuntimeSection>
                 )}
                 {hasEmptyCreatableAccounts ? (
                   <section

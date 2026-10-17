@@ -56,7 +56,7 @@ test('declares the packaged Web frontend ready only after an HTTP response', asy
     assert.equal(await manager._isHttpReady(webPort), true);
 
     const source = fs.readFileSync(path.join(__dirname, 'service-manager.js'), 'utf8');
-    assert.match(source, /await this\._waitForHttpReady\(this\.frontendPort, 'Web'\)/);
+    assert.match(source, /await this\._waitForHttpReady\(this\.frontendPort, 'Web', signal\)/);
   } finally {
     if (tcpOnly.listening) await close(tcpOnly);
     if (web.listening) await close(web);

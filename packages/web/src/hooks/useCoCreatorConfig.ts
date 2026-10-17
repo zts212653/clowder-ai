@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useSyncExternalStore } from 'react';
 import type { CoCreatorConfig } from '@/components/config-viewer-types';
 import { refreshCoCreatorMentionData, resetMentionDataForTest } from '@/lib/mention-highlight';
 import { apiFetch } from '@/utils/api-client';
@@ -23,6 +23,12 @@ function publishCoCreator(next: CoCreatorConfig): void {
   refreshCoCreatorMentionData(next.mentionPatterns);
   for (const listener of listeners) listener(next);
 }
+function subscribe(listener: () => void) {
+  listeners.add(listener);
+  return () => {
+    listeners.delete(listener);
+  };
+}
 
 async function fetchCoCreator(): Promise<CoCreatorConfig> {
   const res = await apiFetch('/api/config');
@@ -34,16 +40,14 @@ async function fetchCoCreator(): Promise<CoCreatorConfig> {
 }
 
 export function useCoCreatorConfig(): CoCreatorConfig {
-  const [coCreator, setCoCreator] = useState<CoCreatorConfig>(() => cachedCoCreator ?? DEFAULT_CO_CREATOR);
+  const coCreator = useSyncExternalStore(
+    subscribe,
+    () => cachedCoCreator ?? DEFAULT_CO_CREATOR,
+    () => DEFAULT_CO_CREATOR,
+  );
 
   useEffect(() => {
-    listeners.add(setCoCreator);
-    if (cachedCoCreator) {
-      setCoCreator(cachedCoCreator);
-      return () => {
-        listeners.delete(setCoCreator);
-      };
-    }
+    if (cachedCoCreator) return;
     if (!fetchCoCreatorPromise) {
       fetchCoCreatorPromise = fetchCoCreator()
         .then((next) => {
@@ -56,19 +60,13 @@ export function useCoCreatorConfig(): CoCreatorConfig {
         });
     }
     let cancelled = false;
-    fetchCoCreatorPromise
-      .then((next) => {
-        if (!cancelled) setCoCreator(next);
-      })
-      .catch(() => {
-        if (!cancelled) {
-          refreshCoCreatorMentionData(DEFAULT_CO_CREATOR.mentionPatterns);
-          setCoCreator(DEFAULT_CO_CREATOR);
-        }
-      });
+    fetchCoCreatorPromise.catch(() => {
+      if (!cancelled) {
+        refreshCoCreatorMentionData(DEFAULT_CO_CREATOR.mentionPatterns);
+      }
+    });
     return () => {
       cancelled = true;
-      listeners.delete(setCoCreator);
     };
   }, []);
 

@@ -1,7 +1,7 @@
 'use client';
 
 import { usePathname, useSearchParams } from 'next/navigation';
-import { Suspense, useCallback, useEffect, useLayoutEffect, useSyncExternalStore } from 'react';
+import { Suspense, useCallback, useEffect, useLayoutEffect, useState, useSyncExternalStore } from 'react';
 import { useIsDesktop } from '@/hooks/useIsDesktop';
 import { useWorkspaceNavigate } from '@/hooks/useWorkspaceNavigate';
 import { destroyPlaybackRuntime, getPlaybackManager } from '@/services/playbackRuntime';
@@ -13,12 +13,14 @@ import { ConciergeHost } from './concierge/ConciergeHost';
 import { HomeActionHost } from './concierge/HomeActionHost';
 import { DesktopUpdatePrompt } from './DesktopUpdatePrompt';
 import { ListenModePlayer } from './listen-mode/ListenModePlayer';
+import { reportOnboardingPageLoad } from './onboarding-demo/onboarding-performance';
 import { ShellDocumentLanguage } from './shell/ShellDocumentLanguage';
 import { isMemoryRoute } from './shell/shell-navigation';
 import {
   parseShellPresentation,
   readShellPresentation,
   type ShellPresentation,
+  ShellPresentationContext,
   useShellPresentation,
   writeShellPresentation,
 } from './shell/shell-presentation';
@@ -80,14 +82,18 @@ const worldRail = (
  * Storage stays the truth; the location is only read, not remembered.
  */
 function useShellPresentationFromUrl(pathname: string, shellParam: string | null): ShellPresentation {
-  const presentation = useShellPresentation();
-  // biome-ignore lint/correctness/useExhaustiveDependencies: a new pathname IS a new navigation, which is what re-arms the intent
-  useEffect(() => {
-    const requested = parseShellPresentation(shellParam);
+  const stored = useShellPresentation();
+  const requested = parseShellPresentation(shellParam);
+  const intent = JSON.stringify([pathname, shellParam]);
+  const [appliedIntent, setAppliedIntent] = useState<string | null>(null);
+  // Resolve navigation intent in render; do not paint the old shell before writing its preference.
+  const presentation = appliedIntent !== intent && requested ? requested : stored;
+  useLayoutEffect(() => {
     if (requested && requested !== readShellPresentation()) writeShellPresentation(requested);
-  }, [pathname, shellParam]);
+    setAppliedIntent(intent);
+  }, [intent, requested]);
   // Tokens are scoped to [data-shell="v2"] on <html> so portalled tips/menus get them too.
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (presentation !== 'v2') return;
     document.documentElement.dataset.shell = 'v2';
     return () => {
@@ -130,6 +136,7 @@ export function AppShell({ children }: AppShellProps) {
 }
 
 function AppShellContent({ children, pathname }: AppShellProps & { pathname: string }) {
+  useEffect(reportOnboardingPageLoad, []);
   // Next can commit the address after this render without emitting either browser route event.
   // Resubscribing checks that committed address while keeping custom thread history as the route owner.
   // biome-ignore lint/correctness/useExhaustiveDependencies: pathname is the Next navigation signal that rechecks the browser snapshot
@@ -201,60 +208,62 @@ function AppShellContent({ children, pathname }: AppShellProps & { pathname: str
   const workspaceVisible = isChatRoute && rightPanelMode === 'workspace';
 
   return (
-    <SettingsSourceReturnProvider pathname={livePathname} enabled={isV2}>
-      <ThreadChatRuntimeProvider routeThreadId={routeThreadId}>
-        <div className="console-shell flex h-screen h-dvh overflow-hidden">
-          {isV2 ? worldRail : activityRail}
-          {/* Callback-auth snapshot provider: mounted at AppShell level (not chat
+    <ShellPresentationContext.Provider value={presentation}>
+      <SettingsSourceReturnProvider pathname={livePathname} enabled={isV2}>
+        <ThreadChatRuntimeProvider routeThreadId={routeThreadId}>
+          <div className="console-shell flex h-screen h-dvh overflow-hidden">
+            {isV2 ? worldRail : activityRail}
+            {/* Callback-auth snapshot provider: mounted at AppShell level (not chat
           layout) so the zustand store is populated on ALL routes — settings,
           memory, mission, etc. The observability panel and per-cat status dots
           read from this store; keeping it chat-only meant the panel showed "..."
           when navigating to settings without visiting chat first. Returns null;
           30s poll re-render is confined to this leaf. */}
-          <CallbackAuthSnapshotMount />
-          {/* F252/F299: replay host is independent of the conditionally mounted sidebar. */}
-          <TheaterReplayHost />
-          {showSidebar && (
-            <div
-              className={`${suppressCafeSidebar ? 'hidden' : 'flex'} items-stretch flex-shrink-0`}
-              aria-hidden={suppressCafeSidebar || undefined}
-            >
-              <div style={{ width }} className="flex-shrink-0">
-                <ThreadSidebar
-                  onClose={close}
-                  className="w-full"
-                  routeThreadId={routeThreadId}
-                  activeDestination={activeDestination}
+            <CallbackAuthSnapshotMount />
+            {/* F252/F299: replay host is independent of the conditionally mounted sidebar. */}
+            <TheaterReplayHost />
+            {showSidebar && (
+              <div
+                className={`${suppressCafeSidebar ? 'hidden' : 'flex'} items-stretch flex-shrink-0`}
+                aria-hidden={suppressCafeSidebar || undefined}
+              >
+                <div style={{ width }} className="flex-shrink-0">
+                  <ThreadSidebar
+                    onClose={close}
+                    className="w-full"
+                    routeThreadId={routeThreadId}
+                    activeDestination={activeDestination}
+                  />
+                </div>
+                <ResizeHandle
+                  direction="horizontal"
+                  label="左侧对话栏"
+                  onResize={handleResize}
+                  onCollapse={close}
+                  onDoubleClick={resetWidth}
+                  showLine={false}
                 />
               </div>
-              <ResizeHandle
-                direction="horizontal"
-                label="左侧对话栏"
-                onResize={handleResize}
-                onCollapse={close}
-                onDoubleClick={resetWidth}
-                showLine={false}
-              />
+            )}
+            <div
+              className="flex-1 min-w-0 overflow-y-auto"
+              style={isV2 ? { background: 'var(--shell-work)' } : undefined}
+            >
+              {children}
             </div>
-          )}
-          <div
-            className="flex-1 min-w-0 overflow-y-auto"
-            style={isV2 ? { background: 'var(--shell-work)' } : undefined}
-          >
-            {children}
-          </div>
-          <ListenModePlayer variant="mini" workspaceVisible={workspaceVisible} />
-          {/* F226: presentation surface floating window — mounted at AppShell root (outside route
+            <ListenModePlayer variant="mini" workspaceVisible={workspaceVisible} />
+            {/* F226: presentation surface floating window — mounted at AppShell root (outside route
           children) so the float survives both workspace mode-tab switches AND full-page route
           changes (/memory, /settings, /mission-hub). KD-1. */}
-          <FloatingPresentationSurfaceHost />
-          {/* Shared companion config and desktop presence survive route changes.
+            <FloatingPresentationSurfaceHost />
+            {/* Shared companion config and desktop presence survive route changes.
           This initializer renders no web body; the rail opens the original conversation. */}
-          <ConciergeHost />
-          <HomeActionHost enabled={!isExport} />
-          {/* F246 Phase C: Approval Hub moved to workspace panel tab — drawer removed */}
-        </div>
-      </ThreadChatRuntimeProvider>
-    </SettingsSourceReturnProvider>
+            <ConciergeHost />
+            <HomeActionHost enabled={!isExport} />
+            {/* F246 Phase C: Approval Hub moved to workspace panel tab — drawer removed */}
+          </div>
+        </ThreadChatRuntimeProvider>
+      </SettingsSourceReturnProvider>
+    </ShellPresentationContext.Provider>
   );
 }

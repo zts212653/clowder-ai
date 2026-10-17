@@ -413,6 +413,7 @@ import { registerMessageReadDiagnostics } from './infrastructure/message-read-di
 import { runSchedulerReplyUserIdBackfill } from './infrastructure/scheduler/scheduler-reply-userid-backfill.js';
 import { securityHeadersPlugin } from './infrastructure/security-headers.js';
 import { sessionAuthPlugin, sessionRoute } from './infrastructure/session-auth.js';
+import { startupMilestone } from './infrastructure/startup-diagnostics.js';
 import { SocketManager } from './infrastructure/websocket/index.js';
 import { avatarsRoutes } from './routes/avatars.js';
 import {
@@ -627,6 +628,7 @@ function hasRuntimeSessionDrain(service: AgentService): service is AgentService 
 }
 
 async function main(): Promise<void> {
+  startupMilestone('module-graph-loaded');
   let managedCommandWakeRecovery: ManagedCommandWakeRecoverySweep | undefined;
   const { logger: customLogger, isDebugMode, LOG_DIR_PATH } = await import('./infrastructure/logger.js');
   let sessionHookAuthenticationReady = (): boolean => false;
@@ -634,7 +636,10 @@ async function main(): Promise<void> {
   // F152: Initialize OpenTelemetry SDK (must be early, before routes)
   const { initTelemetry } = await import('./infrastructure/telemetry/init.js');
   const telemetryHandle = initTelemetry();
+  startupMilestone('telemetry-ready');
 
+  const { registerMemberSaveDiagnostics } = await import('./routes/member-save-diagnostics.js');
+  const { saveSpan } = await import('./utils/member-save-diagnostics.js');
   const app = Fastify({ logger: customLogger as unknown as import('fastify').FastifyBaseLogger });
   const messageReadDiagnostics = registerMessageReadDiagnostics(app);
   const privateUserId = (process.env.CAT_CAFE_USER_ID ?? 'default-user').trim();
@@ -661,6 +666,7 @@ async function main(): Promise<void> {
   await app.register(cors, {
     origin: resolveFrontendCorsOrigins(process.env, app.log),
     credentials: true,
+    exposedHeaders: ['x-clowder-save-id'],
   });
 
   // F156 D-2: Anti-clickjacking headers (X-Frame-Options + CSP frame-ancestors)
@@ -670,6 +676,7 @@ async function main(): Promise<void> {
   await app.register(fastifyCookie);
   await app.register(sessionAuthPlugin);
   await app.register(sessionRoute, { ownerUserId: privateUserId });
+  registerMemberSaveDiagnostics(app, runtimeDeploymentRevision ?? undefined);
 
   // WebSocket support (F089 terminal)
   await app.register(fastifyWebsocket);
@@ -1558,6 +1565,7 @@ async function main(): Promise<void> {
   // F152: Wire evidence store into /ready probe
   evidenceStoreRef = memoryServices.evidenceStore;
   app.log.info('[api] F102: SQLite memory services initialized');
+  startupMilestone('memory-services-ready');
 
   // Thread index repair: rebuild ZSet indexes from thread detail hashes if sparse.
   // Prevents "all threads disappeared" after unclean shutdown.
@@ -2083,109 +2091,117 @@ async function main(): Promise<void> {
   // ── F32-b: AgentRegistry (catId → AgentService) — one instance per cat ──
   // Each cat gets its own AgentService instance with its catId + model.
   const agentRegistry = new AgentRegistry();
-  const syncAgentRegistry = async (configs: Record<string, CatConfig>) => {
+  const syncAgentRegistry = async (configs: Record<string, CatConfig>, warmPrompts = true) => {
     agentRegistry.reset();
     clearL0Cache(); // Invalidate stale L0 compilations from previous sync
     const projectRoot = resolveActiveProjectRoot();
     const activeAcpProfileIds = new Set<string>();
     const activeCodexProfileIds = new Set<string>();
     for (const [id, config] of Object.entries(configs)) {
-      const catId = config.id;
-      // F32-b P1 fix: do NOT pass model here — let constructors resolve via
-      // getCatModel(catId) which respects env override (CAT_*_MODEL > config > fallback)
-      let service: AgentService;
+      await saveSpan(
+        'registry.member',
+        async () => {
+          const catId = config.id;
+          // F32-b P1 fix: do NOT pass model here — let constructors resolve via
+          // getCatModel(catId) which respects env override (CAT_*_MODEL > config > fallback)
+          let service: AgentService;
 
-      // ── F161: Generic ACP transport path (provider-agnostic) ──
-      // Carrier selection is resolved once by cat-config-loader. The ACP block
-      // below contains only launch details; its mere presence is not routing truth.
-      const acpConfig = config.carrier === 'acp' ? getAcpConfig(id, projectRoot) : undefined;
-      if (config.carrier === 'acp') {
-        if (!acpConfig) {
-          app.log.warn(`[api] Cat "${id}" selects carrier=acp but has no ACP config. It will not be routable.`);
-          continue;
-        }
-        activeAcpProfileIds.add(id);
-        const acpService = await createAcpServiceForConfig({
-          projectRoot,
-          profileId: id,
-          config,
-          effectiveModel: getCatModel(id),
-          acpConfig,
-          poolRegistry: acpPoolRegistry,
-          log: app.log,
-          onUnavailable: (reason) => agentRegistry.markUnavailable(id, reason),
-        });
-        if (!acpService) continue;
-        service = acpService;
-      } else
-        switch (config.clientId) {
-          // ── Provider-specific CLI paths (non-ACP) ──
-          case 'anthropic': {
-            if (config.carrier === 'sdk') {
-              service = new ClaudeSdkAgentService({ catId });
-            } else {
-              const { createClaudeAgentServiceForCanary } = await import(
-                './domains/cats/services/agents/providers/claude-carrier-factory.js'
-              );
-              service = createClaudeAgentServiceForCanary(catId);
+          // ── F161: Generic ACP transport path (provider-agnostic) ──
+          // Carrier is resolved at the catalog boundary; ACP contains launch details only.
+          const acpConfig = config.carrier === 'acp' ? getAcpConfig(id, projectRoot) : undefined;
+          if (config.carrier === 'acp') {
+            if (!acpConfig) {
+              app.log.warn(`[api] Cat "${id}" selects carrier=acp but has no ACP config. It will not be routable.`);
+              return;
             }
-            break;
-          }
-          case 'openai': {
-            activeCodexProfileIds.add(id);
-            const appServerHostPool = getOrCreateCodexAppServerPool(codexAppServerPoolRegistry, id);
-            service = new CodexAgentService({
-              catId,
-              appServerHostPool,
-              carrierMode: config.carrier === 'app_server' ? 'app_server' : 'exec_json',
-              nativeRealtimeCompanionEnabled,
+            activeAcpProfileIds.add(id);
+            const acpService = await createAcpServiceForConfig({
+              projectRoot,
+              profileId: id,
+              config,
+              effectiveModel: getCatModel(id),
+              acpConfig,
+              poolRegistry: acpPoolRegistry,
+              log: app.log,
+              onUnavailable: (reason) => agentRegistry.markUnavailable(id, reason),
             });
-            break;
-          }
-          case 'google':
-            try {
-              service = createGoogleAgentService(catId, config.agyProfile);
-            } catch (error) {
-              if (!(error instanceof AgentServiceUnavailableError)) throw error;
-              agentRegistry.markUnavailable(id, error.reason);
-              continue;
+            if (!acpService) return;
+            service = acpService;
+          } else
+            switch (config.clientId) {
+              // ── Provider-specific CLI paths (non-ACP) ──
+              case 'anthropic': {
+                if (config.carrier === 'sdk') {
+                  service = new ClaudeSdkAgentService({ catId });
+                  break;
+                }
+                // F198 Phase B Step 3 canary: env-gated carrier selection.
+                // CAT_CAFE_CLAUDE_CARRIER=bg_daemon → --bg carrier (subscription
+                // quota, R1 救宪宪). Unset/other → -p (current production default).
+                const { createClaudeAgentServiceForCanary } = await import(
+                  './domains/cats/services/agents/providers/claude-carrier-factory.js'
+                );
+                service = createClaudeAgentServiceForCanary(catId);
+                break;
+              }
+              case 'openai': {
+                activeCodexProfileIds.add(id);
+                const appServerHostPool = getOrCreateCodexAppServerPool(codexAppServerPoolRegistry, id);
+                service = new CodexAgentService({
+                  catId,
+                  appServerHostPool,
+                  carrierMode: config.carrier === 'app_server' ? 'app_server' : 'exec_json',
+                  nativeRealtimeCompanionEnabled,
+                });
+                break;
+              }
+              case 'google':
+                try {
+                  service = createGoogleAgentService(catId, config.agyProfile);
+                } catch (error) {
+                  if (!(error instanceof AgentServiceUnavailableError)) throw error;
+                  agentRegistry.markUnavailable(id, error.reason);
+                  return;
+                }
+                break;
+              case 'kimi':
+                service = new KimiAgentService({ catId });
+                break;
+              case 'antigravity':
+                agentRegistry.markUnavailable(id, {
+                  code: 'AGY_IDE_EXECUTION_RETIRED',
+                  message: 'AGY IDE 执行入口已退役。请在成员设置选择 Google 的 AGY Native 入口；成员身份与历史保留。',
+                });
+                return;
+              case 'opencode':
+                service = new OpenCodeAgentService({ catId });
+                break;
+              case 'catagent': {
+                const { CatAgentService } = await import(
+                  './domains/cats/services/agents/providers/catagent/CatAgentService.js'
+                );
+                service = new CatAgentService({ catId, projectRoot: findMonorepoRoot(), catConfig: config });
+                break;
+              }
+              case 'a2a': {
+                const { A2AAgentService } = await import('./domains/cats/services/agents/providers/A2AAgentService.js');
+                const envKey = `CAT_${id.toUpperCase()}_A2A_URL`;
+                const a2aUrl = process.env[envKey] ?? '';
+                if (!a2aUrl) {
+                  app.log.warn(`[api] A2A cat "${id}" missing ${envKey} env var. It will not be routable.`);
+                  return;
+                }
+                service = new A2AAgentService({ catId, config: { url: a2aUrl } });
+                break;
+              }
+              default:
+                app.log.warn(`[api] Unknown client "${config.clientId}" for cat "${id}". It will not be routable.`);
+                return;
             }
-            break;
-          case 'kimi':
-            service = new KimiAgentService({ catId });
-            break;
-          case 'antigravity':
-            agentRegistry.markUnavailable(id, {
-              code: 'AGY_IDE_EXECUTION_RETIRED',
-              message: 'AGY IDE 执行入口已退役。请在成员设置选择 Google 的 AGY Native 入口；成员身份与历史保留。',
-            });
-            continue;
-          case 'opencode':
-            service = new OpenCodeAgentService({ catId });
-            break;
-          case 'catagent': {
-            const { CatAgentService } = await import(
-              './domains/cats/services/agents/providers/catagent/CatAgentService.js'
-            );
-            service = new CatAgentService({ catId, projectRoot: findMonorepoRoot(), catConfig: config });
-            break;
-          }
-          case 'a2a': {
-            const { A2AAgentService } = await import('./domains/cats/services/agents/providers/A2AAgentService.js');
-            const envKey = `CAT_${id.toUpperCase()}_A2A_URL`;
-            const a2aUrl = process.env[envKey] ?? '';
-            if (!a2aUrl) {
-              app.log.warn(`[api] A2A cat "${id}" missing ${envKey} env var. It will not be routable.`);
-              continue;
-            }
-            service = new A2AAgentService({ catId, config: { url: a2aUrl } });
-            break;
-          }
-          default:
-            app.log.warn(`[api] Unknown client "${config.clientId}" for cat "${id}". It will not be routable.`);
-            continue;
-        }
-      agentRegistry.register(id, service);
+          agentRegistry.register(id, service);
+        },
+        { catId: id },
+      );
     }
     await closeStaleAcpPools(acpPoolRegistry, activeAcpProfileIds, {
       reason: 'config-sync',
@@ -2196,14 +2212,14 @@ async function main(): Promise<void> {
     await closeStaleCodexAppServerPools(codexAppServerPoolRegistry, activeCodexProfileIds, (err, profileId) => {
       app.log.warn({ err, profileId }, 'Codex app-server registry sync failed to close stale member pool');
     });
-    if (router) router.refreshFromRegistry(agentRegistry);
+    if (router) saveSpan('registry.router', () => router.refreshFromRegistry(agentRegistry));
 
     // Pre-compile L0 system prompts for all registered cats in parallel.
     // Avoids per-invocation subprocess overhead and ensures L0 is ready
     // before the first message — also bypasses Windows NTFS junction
     // issues that resolve by the time the user actually interacts (#802).
     const registeredCatIds = Object.keys(configs).filter((id) => agentRegistry.has(id));
-    await warmL0Cache(registeredCatIds, app.log);
+    if (warmPrompts) await warmL0Cache(registeredCatIds, app.log);
   };
   await syncAgentRegistry(catRegistry.getAllConfigs());
 
@@ -2264,8 +2280,16 @@ async function main(): Promise<void> {
   const catCatalogSubscriber = createCatCatalogSubscriber({
     async onReconcile() {
       app.log.info('[api] F136: Cat catalog changed, syncing agent registry...');
-      await syncAgentRegistry(reconcileCatRegistry(resolveActiveProjectRoot(), new Set()));
+      await syncAgentRegistry(
+        saveSpan('catalog.reconcile', () => reconcileCatRegistry(resolveActiveProjectRoot(), new Set())),
+        false,
+      );
     },
+    onWarm: () =>
+      warmL0Cache(
+        Object.keys(catRegistry.getAllConfigs()).filter((id) => agentRegistry.has(id)),
+        app.log,
+      ),
     log: app.log,
   });
 
@@ -4823,6 +4847,19 @@ async function main(): Promise<void> {
 
   let loadRepositoryPluginInfo: (() => Promise<readonly import('@cat-cafe/shared').PluginInfo[]>) | undefined;
 
+  // Seed only an absent registry before plugin activation can persist schedules
+  // into it. Native invoke-time MCP resolution must work without visiting Settings.
+  const { initializeFirstRunCapabilities, readImplicitStartupCapabilities } = await import(
+    './config/capabilities/first-run-capabilities.js'
+  );
+  const capabilityInitialization = await initializeFirstRunCapabilities(
+    resolveActiveProjectRoot(),
+    runtimeEntrypointRoot,
+  );
+  if (capabilityInitialization.status === 'unreadable') {
+    app.log.warn('[api] Existing capabilities are unreadable; preserved without enabling default tools');
+  }
+
   // F202: Plugin framework — discovery + config + resource activation
   {
     const { join } = await import('node:path');
@@ -4949,8 +4986,8 @@ async function main(): Promise<void> {
       // Uses marker file to prevent re-enable after explicit disable (P2-1 fix)
       const root = resolveActiveProjectRoot();
       const githubManifest = pluginRegistry.getManifest('github');
-      if (githubManifest) {
-        const existingCaps = await readCapabilitiesConfig(root);
+      const existingCaps = await readImplicitStartupCapabilities(root);
+      if (githubManifest && existingCaps) {
         const {
           shouldRunGitHubScheduleMigration,
           markGitHubScheduleMigrationDone,
@@ -8017,6 +8054,7 @@ async function main(): Promise<void> {
     address = await listenBeforeTurnExecutionRecovery({
       listen: async () => {
         const listening = await app.listen({ port: PORT, host: HOST });
+        startupMilestone('http-listening');
         releaseHostListening();
         return listening;
       },

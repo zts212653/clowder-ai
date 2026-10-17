@@ -2,13 +2,8 @@ import { lstat, realpath } from 'node:fs/promises';
 import { isAbsolute, relative, resolve, sep } from 'node:path';
 import process from 'node:process';
 import type { ConfigurationField, McpContribution, PluginManifest } from '@clowder-ai/plugin-contract';
-import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import {
-  getDefaultEnvironment,
-  StdioClientTransport,
-  type StdioServerParameters,
-} from '@modelcontextprotocol/sdk/client/stdio.js';
-import { ErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js';
+import type { StdioClientTransport, StdioServerParameters } from '@modelcontextprotocol/sdk/client/stdio.js';
+import { loadMcpClient, loadMcpStdio, loadMcpTypes } from '../../../utils/lazy-mcp-sdk.js';
 import type { PluginInventoryStore, PluginInventoryTransaction } from '../host-inventory/ports.js';
 import type {
   PluginGrantRecord,
@@ -108,10 +103,16 @@ export class BuiltinPluginContributionError extends Error {
   }
 }
 
-function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string, onTimeout?: () => void): Promise<T> {
+function withTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  label: string,
+  onTimeout?: () => void,
+  displayTimeoutMs = timeoutMs,
+): Promise<T> {
   return new Promise<T>((resolvePromise, reject) => {
     const timer = setTimeout(() => {
-      reject(new Error(`${label} timed out after ${timeoutMs}ms`));
+      reject(new Error(`${label} timed out after ${displayTimeoutMs}ms`));
       onTimeout?.();
     }, timeoutMs);
     timer.unref?.();
@@ -141,6 +142,16 @@ export class StdioMcpContributionRuntime implements McpContributionRuntimePort {
   ) {}
 
   async start(spec: McpContributionLaunchSpec): Promise<McpContributionRuntimeHandle> {
+    const startTimeoutMs = this.options.startTimeoutMs ?? DEFAULT_START_TIMEOUT_MS;
+    const connectDeadlineMs = Date.now() + startTimeoutMs;
+    const [{ Client }, { getDefaultEnvironment, StdioClientTransport }, { ErrorCode, McpError }] = await withTimeout(
+      Promise.all([loadMcpClient(), loadMcpStdio(), loadMcpTypes()]),
+      startTimeoutMs,
+      `MCP contribution ${spec.contributionId} SDK load`,
+    );
+    if (Date.now() >= connectDeadlineMs) {
+      throw new Error(`MCP contribution ${spec.contributionId} SDK load timed out after ${startTimeoutMs}ms`);
+    }
     const server: StdioServerParameters = {
       command: spec.command,
       args: [...spec.args],
@@ -157,13 +168,24 @@ export class StdioMcpContributionRuntime implements McpContributionRuntimePort {
       }
       pendingRequests.clear();
     };
-    const runRequest = async <T>(invoke: (signal: AbortSignal) => Promise<T>, timeoutMs: number, label: string) => {
+    const runRequest = async <T>(
+      invoke: (signal: AbortSignal) => Promise<T>,
+      timeoutMs: number,
+      label: string,
+      displayTimeoutMs = timeoutMs,
+    ) => {
       const controller = new AbortController();
       pendingRequests.add(controller);
       try {
-        return await withTimeout(invoke(controller.signal), timeoutMs, label, () => {
-          controller.abort(new McpError(ErrorCode.RequestTimeout, `${label} timed out after ${timeoutMs}ms`));
-        });
+        return await withTimeout(
+          invoke(controller.signal),
+          timeoutMs,
+          label,
+          () => {
+            controller.abort(new McpError(ErrorCode.RequestTimeout, `${label} timed out after ${displayTimeoutMs}ms`));
+          },
+          displayTimeoutMs,
+        );
       } finally {
         pendingRequests.delete(controller);
       }
@@ -175,11 +197,11 @@ export class StdioMcpContributionRuntime implements McpContributionRuntimePort {
     transport.onclose = () => settleClosed?.({});
     transport.onerror = (error) => settleClosed?.({ error });
     try {
-      const startTimeoutMs = this.options.startTimeoutMs ?? DEFAULT_START_TIMEOUT_MS;
       await runRequest(
         (signal) => client.connect(transport, { signal }),
-        startTimeoutMs,
+        Math.max(1, connectDeadlineMs - Date.now()),
         `MCP contribution ${spec.contributionId} connect`,
+        startTimeoutMs,
       );
       const listed = await runRequest(
         (signal) => client.listTools(undefined, { signal }),

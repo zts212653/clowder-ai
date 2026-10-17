@@ -9,7 +9,7 @@ import { trackLongRequestTimers } from './helpers/track-long-request-timers.js';
 
 async function fixture(t, mode) {
   const root = await mkdtemp(join(tmpdir(), 'plugin-mcp-runtime-'));
-  t.after(() => rm(root, { recursive: true, force: true }));
+  t.after(() => rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }));
   const entrypoint = join(root, 'entrypoint.cjs');
   await writeFile(
     entrypoint,

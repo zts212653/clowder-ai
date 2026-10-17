@@ -43,6 +43,7 @@ import type { IThreadStore } from '../domains/cats/services/stores/ports/ThreadS
 import { LOG_DIR_PATH } from '../infrastructure/logger.js';
 import { resolveActiveProjectRoot } from '../utils/active-project-root.js';
 import { isDirectLoopbackRequest } from '../utils/loopback-request.js';
+import { saveSpan } from '../utils/member-save-diagnostics.js';
 import { resolveOwnerGate } from '../utils/owner-gate.js';
 import { resolveHeaderUserId, resolveStrictUserId } from '../utils/request-identity.js';
 import { getDefaultUploadDir } from '../utils/upload-paths.js';
@@ -51,6 +52,7 @@ import { configConversationViewRoutes } from './config-conversation-view.js';
 import { configIgnoredItemRoutes } from './config-ignored-items.js';
 import { configLiveProjectRoutes } from './config-live-projects.js';
 import { configMessageDispositionRoutes } from './config-message-disposition.js';
+import { configOnboardingRoutes } from './config-onboarding.js';
 import { configThreadAttentionRoutes } from './config-thread-attention.js';
 
 const patchSchema = z.object({
@@ -201,6 +203,7 @@ export async function configRoutes(app: FastifyInstance, opts: ConfigRoutesOptio
   await app.register(configConversationViewRoutes, { projectRoot, threadStore: opts.threadStore });
   await app.register(configIgnoredItemRoutes, { projectRoot });
   await app.register(configMessageDispositionRoutes, { projectRoot });
+  await app.register(configOnboardingRoutes, { projectRoot });
   await app.register(configThreadAttentionRoutes, { projectRoot, threadStore: opts.threadStore });
 
   app.get('/api/config', async () => ({
@@ -219,15 +222,15 @@ export async function configRoutes(app: FastifyInstance, opts: ConfigRoutesOptio
       return { error: authorization.error };
     }
 
-    const before = collectConfigSnapshot(projectRoot);
+    const before = saveSpan('config.snapshot.before', () => collectConfigSnapshot(projectRoot));
     const oldValue = getSnapshotValue(before, parsed.data.key);
     try {
-      applyConfigPatch(projectRoot, parsed.data.key, parsed.data.value);
+      saveSpan('config.persist', () => applyConfigPatch(projectRoot, parsed.data.key, parsed.data.value));
     } catch (err) {
       reply.status(400);
       return { error: (err as Error).message };
     }
-    const after = collectConfigSnapshot(projectRoot);
+    const after = saveSpan('config.snapshot.after', () => collectConfigSnapshot(projectRoot));
     const newValue = getSnapshotValue(after, parsed.data.key);
     const riskLevel = configStore.getRiskLevel(parsed.data.key) ?? 'standard';
 
@@ -242,20 +245,22 @@ export async function configRoutes(app: FastifyInstance, opts: ConfigRoutesOptio
     }
 
     try {
-      await auditLog.append({
-        type: AuditEventTypes.CONFIG_UPDATED,
-        data: {
-          key: parsed.data.key,
-          oldValue,
-          newValue,
-          operator: authorization.operator,
-          riskLevel,
-          source:
-            parsed.data.key === PERSISTENT_CLI_OUTPUT_KEY
-              ? 'user-preferences'
-              : (configStore.source(parsed.data.key) ?? 'default'),
-        },
-      });
+      await saveSpan('config.audit', () =>
+        auditLog.append({
+          type: AuditEventTypes.CONFIG_UPDATED,
+          data: {
+            key: parsed.data.key,
+            oldValue,
+            newValue,
+            operator: authorization.operator,
+            riskLevel,
+            source:
+              parsed.data.key === PERSISTENT_CLI_OUTPUT_KEY
+                ? 'user-preferences'
+                : (configStore.source(parsed.data.key) ?? 'default'),
+          },
+        }),
+      );
     } catch (err) {
       request.log.warn({ err, key: parsed.data.key }, 'config audit append failed');
     }

@@ -11,6 +11,7 @@ import { MemberChanges } from './MemberChangeMark';
 import { type MemberStatus as MemberStatusReading, memberStatus } from './member-projection';
 import { memberSaveCopy } from './member-save.shell-copy';
 import { useMemberClock } from './useMemberClock';
+import { useMemberLoginCheck } from './useMemberLoginCheck';
 export function MemberDetailHeader({
   cat,
   toggling,
@@ -23,6 +24,7 @@ export function MemberDetailHeader({
   const t = useMemberText();
   const routing = useRoutingContext();
   const now = useMemberClock(routing.data);
+  const loginFor = useMemberLoginCheck(cat.configurationSource === 'native_tool');
   const copy = useShellCopy(memberSaveCopy);
   const changes = useContext(MemberChanges);
   const confirm = useConfirm();
@@ -38,7 +40,7 @@ export function MemberDetailHeader({
   const status: MemberStatusReading =
     routing.loading && !routing.data
       ? { label: '读取中', detail: '', tone: 'unknown', observedAt: undefined, detailIsNote: false }
-      : memberStatus(cat, routing.data, routing.error, now);
+      : memberStatus(cat, routing.data, routing.error, now, loginFor(cat));
   const detail = status.detailIsNote ? status.source : status.detail;
   return (
     <div className="member-detail-status">

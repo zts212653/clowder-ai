@@ -41,6 +41,7 @@
     if (window.desktopBridge?.onStatus) {
       window.desktopBridge.onStatus((msg) => {
         document.getElementById('status').textContent = msg;
+        if (msg.startsWith('Startup failed:')) document.querySelector('.spinner').style.display = 'none';
       });
     }
   </script>

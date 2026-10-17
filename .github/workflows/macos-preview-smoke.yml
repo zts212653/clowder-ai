@@ -1,0 +1,61 @@
+name: macOS Preview Lifecycle
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: macos-preview-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  identity-witness:
+    name: Native launchd identity witness
+    runs-on: macos-15
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: node scripts/preview-launchd-native-diagnostic.mjs
+  preview-lifecycle:
+    name: Preview lifecycle (macOS)
+    runs-on: macos-15
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Install native lifecycle prerequisites in stable executable directories
+        run: |
+          # launchd intentionally excludes unrelated project node_modules/.bin.
+          # Use a global pnpm executable that also works with test-owned HOME.
+          corepack disable
+          npm install --global pnpm@9.15.4
+          brew install redis bash
+          echo "$(brew --prefix)/bin" >> "$GITHUB_PATH"
+      - name: Record actual native runtime and launchd domain
+        run: |
+          sw_vers
+          uname -a
+          node --version
+          pnpm --version
+          bash --version
+          redis-server --version
+          redis-cli --version
+          launchctl print "gui/$(id -u)"
+      - name: Frozen native hooks and private desktop module data root
+        run: node --test desktop/rebuild-frozen-dependencies.test.mjs desktop/installation-lifecycle.test.js desktop/runtime-config.test.js desktop/service-manager-isolation.test.js
+      - name: Verify exec identity proof and complete owned cleanup
+        # Only test-owned literal arguments are logged by this native witness.
+        # The ordinary preview launcher never logs user commands or environments.
+        run: |
+          node scripts/preview-launchd-native-diagnostic.mjs
+          node --test --test-concurrency=1 scripts/preview-lease-command.test.mjs scripts/preview-launchd-identity.test.mjs scripts/preview-process.test.mjs scripts/preview-process-stop.test.mjs scripts/preview-process-cleanup.test.mjs scripts/preview-named-alpha-cleanup.test.mjs
+          TZ=America/Los_Angeles node --test scripts/preview-process-stop.test.mjs

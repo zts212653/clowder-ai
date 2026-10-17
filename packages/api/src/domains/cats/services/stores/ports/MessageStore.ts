@@ -248,6 +248,8 @@ export interface StoredToolEvent {
   type: 'tool_use' | 'tool_result';
   label: string;
   detail?: string;
+  /** Finalized call input carried by a result; replaces provisional use detail without adding a call. */
+  inputDetail?: string;
   timestamp: number;
   /** F153 Phase J AC-J7: native provider tool id, used to pair tool_use ↔ tool_result
    *  and to key the synthesized span on hydrate. Set by provider transformer via

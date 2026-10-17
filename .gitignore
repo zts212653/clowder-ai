@@ -154,6 +154,8 @@ assets/prototypes/
 desktop/node_modules/
 desktop-dist/
 bundled/
+# Locally cached prebuilt desktop resources; never add to the source PR.
+desktop/resources-prebuilt/
 docs/bug-report/werewolf-investigation/poster-screenshot.png
 .worktrees/
 .review-worktrees/

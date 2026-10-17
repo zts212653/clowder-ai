@@ -1,6 +1,17 @@
+import { createRequire } from 'node:module';
 import type { SignalSource } from '@cat-cafe/shared';
-import { load } from 'cheerio';
+import type { load } from 'cheerio';
 import type { FetchError, Fetcher, FetchResult, RawArticle } from './types.js';
+
+const require = createRequire(import.meta.url);
+let cachedLoad: typeof load | undefined;
+
+function loadHtml(html: string): ReturnType<typeof load> {
+  // Keep the full parse5-backed package and the synchronous extraction contract.
+  // Assignment occurs only after require succeeds, so failed loads remain retryable.
+  if (!cachedLoad) cachedLoad = (require('cheerio') as typeof import('cheerio')).load;
+  return cachedLoad(html);
+}
 
 interface HtmlResponseLike {
   readonly ok: boolean;
@@ -68,7 +79,7 @@ function parseWebpageArticles(html: string, source: SignalSource, fetchedAt: str
     throw new Error(`webpage source "${source.id}" requires fetch.selector`);
   }
 
-  const $ = load(html);
+  const $ = loadHtml(html);
   const nodes = $(selector).toArray();
   const articles: RawArticle[] = [];
 
@@ -100,7 +111,7 @@ function parseWebpageArticles(html: string, source: SignalSource, fetchedAt: str
 }
 
 export function extractArticleBody(html: string): string | undefined {
-  const $ = load(html);
+  const $ = loadHtml(html);
   const container = $('article').first().length > 0 ? $('article').first() : $('main').first();
   if (container.length === 0) return undefined;
 

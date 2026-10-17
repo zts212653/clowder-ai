@@ -1,0 +1,128 @@
+.account-toolbar {
+  display: flex;
+  gap: 14px;
+  justify-content: space-between;
+  align-items: center;
+  margin: 22px 0;
+}
+.account-toolbar input {
+  background: var(--field);
+  border: 1px solid transparent;
+  padding: 11px 13px;
+  border-radius: 10px;
+  flex: 1;
+  max-width: 350px;
+  min-width: 0;
+}
+.segments {
+  display: flex;
+  background: var(--field);
+  padding: 3px;
+  border-radius: 10px;
+}
+.segments button {
+  font-size: 12px;
+  min-height: 32px;
+  padding: 7px 10px;
+}
+.segments .active {
+  background: var(--card);
+  box-shadow: 0 1px 5px #0001;
+}
+.segments small {
+  font-size: 10px;
+  color: var(--muted);
+}
+.accounts-table {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  overflow: hidden;
+}
+.account-row {
+  display: grid;
+  grid-template-columns: 76px minmax(140px, 1.6fr) minmax(85px, 0.8fr) minmax(100px, 1fr) 105px;
+  gap: 14px;
+  align-items: center;
+  padding: 20px 16px;
+  border-bottom: 1px solid var(--line);
+  font-size: 12px;
+}
+.account-row:last-child {
+  border-bottom: 0;
+}
+.account-row strong {
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.account-row small {
+  display: block;
+  font-size: 11px;
+  margin-top: 5px;
+}
+.account-row button {
+  font-size: 12px;
+}
+.table-head {
+  font-size: 11px;
+  color: var(--muted);
+  background: #f8f5ef;
+  padding: 12px 16px;
+}
+.chip {
+  font-size: 11px;
+  background: #f1eaf8;
+  color: var(--purple);
+  border-radius: 8px;
+  padding: 4px 7px;
+  display: inline-block;
+  margin: 2px;
+  overflow-wrap: anywhere;
+}
+.table-empty {
+  padding: 32px;
+  text-align: center;
+  color: var(--muted);
+}
+.login-notice {
+  display: flex;
+  gap: 16px;
+  border: 1px solid #e5d2b6;
+  background: #fff8eb;
+  border-radius: 14px;
+  padding: 22px;
+  margin: 20px 0;
+}
+.login-notice h3 {
+  font-size: 14px;
+}
+.login-notice p {
+  font-size: 12px;
+}
+.pending-symbol {
+  width: 21px;
+  height: 21px;
+  border: 2px solid #e5d2b6;
+  border-top-color: #a67632;
+  animation: spin 2s linear infinite;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.add-account {
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 24px;
+  margin: 20px 0;
+  background: var(--card);
+}
+.add-account p {
+  font-size: 13px;
+}
+.add-account .button-row {
+  justify-content: flex-end;
+}
+.install-link {
+  display: block;
+  margin: 12px 0;
+  font-size: 13px;
+}

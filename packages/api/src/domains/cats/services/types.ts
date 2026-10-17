@@ -357,6 +357,8 @@ export interface AgentMessage {
   toolChannel?: 'analysis' | 'commentary' | 'final' | 'unknown';
   /** Tool input parameters (for 'tool_use' type) */
   toolInput?: Record<string, unknown>;
+  /** Native tool facts retained in transcript events; separate from the bounded display summary. */
+  toolRawPayload?: { rawInput?: unknown; rawOutput?: unknown; content?: unknown };
   /** Native completed-file result captured at event birth; never inferred from a later session directory. */
   fileResultEvidence?: import('./agents/providers/native-file-result-evidence.js').NativeFileResultEvidence;
   /** F153 Phase J AC-J1: native provider tool call id; used to pair tool_use ↔ tool_result for real-duration spans.

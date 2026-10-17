@@ -37,7 +37,11 @@ try {
     tarCode: error.cause?.cause?.code, stderr: error.cause?.cause?.stderr,
     admissionCode: error.cause?.code }) + '\n');
 } finally {
-  await (await import('node:fs/promises')).rm(packagesRoot, { recursive: true, force: true });
+  // On Windows the rejected staging directory may be temporarily locked.
+  // Retry fixture cleanup only; a persistent lock must still fail the test.
+  await (await import('node:fs/promises')).rm(packagesRoot, {
+    recursive: true, force: true, maxRetries: 10, retryDelay: 100,
+  });
 }
 logger.flush();
 `;
@@ -78,7 +82,7 @@ for (const phase of ['list', 'admission']) {
       assert.equal(stdout.includes('must-not-leak'), false);
       assert.equal(stdout.includes('archive contents must not be logged'), false);
     } finally {
-      await rm(logDir, { recursive: true, force: true });
+      await rm(logDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
     }
   });
 }

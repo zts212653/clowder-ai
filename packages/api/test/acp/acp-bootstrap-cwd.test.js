@@ -109,16 +109,22 @@ describe('acp bootstrap cwd', () => {
     assert.ok(existsSync(second), 'bootstrap dir should be recreated on demand');
   });
 
-  it('enforces owner-only permissions on the bootstrap cwd', () => {
-    const projectRoot = resolve('/tmp/cat-cafe-project');
-    const dir = testBootstrapCwd(projectRoot, 'mode-guard');
-    createdDirs.add(dir);
+  it(
+    'enforces owner-only POSIX permissions on the bootstrap cwd',
+    {
+      skip: process.platform === 'win32' ? 'POSIX mode bits do not verify Windows ACLs' : false,
+    },
+    () => {
+      const projectRoot = resolve('/tmp/cat-cafe-project');
+      const dir = testBootstrapCwd(projectRoot, 'mode-guard');
+      createdDirs.add(dir);
 
-    chmodSync(dir, 0o755);
-    testBootstrapCwd(projectRoot, 'mode-guard');
+      chmodSync(dir, 0o755);
+      testBootstrapCwd(projectRoot, 'mode-guard');
 
-    assert.equal(statSync(dir).mode & 0o777, 0o700);
-  });
+      assert.equal(statSync(dir).mode & 0o777, 0o700);
+    },
+  );
 
   it('sanitizes provider profile so it cannot escape the bootstrap root', () => {
     const projectRoot = resolve('/tmp/cat-cafe-project');
@@ -215,7 +221,7 @@ describe('acp bootstrap cwd', () => {
     // Pure path computation — no directories are created on the production root.
     const root = resolveAcpBootstrapRoot();
     assert.ok(
-      root.startsWith('/tmp/cat-cafe-acp-bootstrap-'),
+      root.startsWith(join('/tmp', 'cat-cafe-acp-bootstrap-')),
       `bootstrap root should match /tmp/cat-cafe-acp-bootstrap-*, got ${root}`,
     );
     assert.notEqual(root, testBootstrapRoot, 'default root must not collapse into the test root');

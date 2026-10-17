@@ -17,8 +17,10 @@
  *   - System prompt: prepended to prompt text (ACP agents have no system prompt flag)
  */
 
-import type { CapabilitiesConfig, CatId } from '@cat-cafe/shared';
+import { type CapabilitiesConfig, type CatId, catRegistry } from '@cat-cafe/shared';
 import { readCapabilitiesConfig } from '../../../../../../config/capabilities/capability-orchestrator.js';
+import { getCatEffort } from '../../../../../../config/cat-config-loader.js';
+import { getCatModel } from '../../../../../../config/cat-models.js';
 import { createModuleLogger } from '../../../../../../infrastructure/logger.js';
 import { createPromptDigest } from '../../../context/prompt-digest.js';
 import type {
@@ -42,6 +44,9 @@ import { readAcpImageBlocks, withAcpImages } from './acp-image-input.js';
 import { resolveAcpMcpServers, resolveDisabledServerIds, resolveUserProjectMcpServers } from './acp-mcp-resolver.js';
 import { AcpImageInputError, type AcpPromptInput } from './acp-prompt-content.js';
 import { callbackEnvDiagnostic, materializeSessionMcpServers } from './acp-session-env.js';
+import { AcpSessionBindingError } from './active-session-cache.js';
+import { captureNativeDefaults, defaultsForNativeResume } from './native-session-defaults.js';
+import { applySessionConfiguration } from './session-configuration.js';
 import type { AcpMcpServer, AcpNewSessionResult, AcpPromptCapabilities, AcpSessionUpdate } from './types.js';
 
 const log = createModuleLogger('acp-agent');
@@ -161,7 +166,13 @@ export class AcpAgentService implements AgentService {
   /** Pre-resolved servers (legacy/test path). Used only when mcpWhitelist is null. */
   private readonly mcpServers: AcpMcpServer[];
   private readonly providerName: string;
-  private readonly modelName: string;
+  /**
+   * ACP native tools may omit a configured model from the member record.  The
+   * first session then reports its actual model through configOptions; keep
+   * that value mutable so messages and request-generation evidence carry the
+   * real identity instead of the transport placeholder "acp".
+   */
+  private modelName: string;
   private readonly sessionModel?: string;
   private readonly appliedContextBinding?: import('../../../types.js').AgentContextBinding;
   private readonly mcpSupportEnabled: boolean;
@@ -273,6 +284,12 @@ export class AcpAgentService implements AgentService {
 
   async *invoke(prompt: string, options?: AgentServiceOptions): AsyncIterable<AgentMessage> {
     const metadata: MessageMetadata = { provider: this.providerName, model: this.modelName };
+    const adoptObservedNativeModel = (model: string | undefined) => {
+      const value = model?.trim();
+      if (!value || this.sessionModel) return;
+      this.modelName = value;
+      metadata.model = value;
+    };
     // Diagnostic context: threadId + invocationId for correlating thread-specific failures
     const threadId = options?.auditContext?.threadId;
     const invocationId = options?.auditContext?.invocationId;
@@ -317,7 +334,8 @@ export class AcpAgentService implements AgentService {
     const client = lease.client as unknown as {
       newSession(cwd: string, mcpServers?: AcpMcpServer[]): Promise<AcpNewSessionResult>;
       loadSession(sessionId: string, cwd: string, mcpServers?: AcpMcpServer[]): Promise<AcpNewSessionResult>;
-      setSessionConfigOption(sessionId: string, configId: string, value: string): Promise<void>;
+      setSessionConfigOption(sessionId: string, configId: string, value: string): Promise<unknown>;
+      closeSession?(sessionId: string): Promise<void>;
       cancelSession(sessionId: string): void;
       promptStream(
         sessionId: string,
@@ -468,6 +486,24 @@ export class AcpAgentService implements AgentService {
         );
       }
 
+      const nativeTool = catRegistry.tryGet(this.catId)?.config.configurationSource === 'native_tool';
+      const preferences = {
+        model: nativeTool ? getCatModel(this.catId) || undefined : undefined,
+        effort: nativeTool ? (options?.reasoningEffortOverride ?? (getCatEffort(this.catId) || undefined)) : undefined,
+      };
+      let nativeDefaults: { model?: string; effort?: string } = {};
+      if (nativeTool && resumeSessionId) {
+        nativeDefaults = await defaultsForNativeResume(client, cwd, preferences, () => client.newSession(cwd, []));
+      }
+      const configureNative = async (session: AcpNewSessionResult, fresh = false) => {
+        if (!nativeTool) return;
+        if (fresh) nativeDefaults = await captureNativeDefaults(client, session, cwd, preferences.model);
+        await applySessionConfiguration(client, session, {
+          model: preferences.model || nativeDefaults.model,
+          effort: preferences.effort || nativeDefaults.effort,
+        });
+      };
+      let resumedSession: AcpNewSessionResult | undefined;
       if (resumeSessionId) {
         const resumeCreds = resolveSessionCredentialFile(options?.callbackEnv, resumeSessionId);
         const resumeConfig = buildSessionConfig(resumeCreds);
@@ -483,6 +519,7 @@ export class AcpAgentService implements AgentService {
             'ACP session resume: loading existing session',
           );
           const session = await client.loadSession(resumeSessionId, cwd, resumeConfig.mcpServers);
+          resumedSession = session;
           sessionId = session.sessionId || resumeSessionId;
           this.pool.rememberSession?.(this.poolKey, sessionId, lease);
           if (sessionId !== resumeSessionId) this.pool.rememberSession?.(this.poolKey, resumeSessionId, lease);
@@ -497,6 +534,7 @@ export class AcpAgentService implements AgentService {
           resumeDisposition = 'resumed';
           log.info({ ...ctx, sessionId, requestedSessionId: resumeSessionId }, 'ACP session resume completed');
         } catch (err) {
+          if (err instanceof AcpSessionBindingError) throw err;
           resumeDisposition = 'load_failed_fresh';
           const errorMsg = err instanceof Error ? err.message : String(err);
           log.warn(
@@ -504,6 +542,12 @@ export class AcpAgentService implements AgentService {
             'ACP session resume failed; creating a fresh session',
           );
         }
+      }
+
+      // Configuration rejection is not a load failure: preserve the resumed history.
+      if (resumedSession) {
+        await configureNative(resumedSession);
+        adoptObservedNativeModel(nativeDefaults.model);
       }
 
       if (resumeDisposition !== 'resumed') {
@@ -516,6 +560,8 @@ export class AcpAgentService implements AgentService {
           'ACP newSession starting',
         );
         const session = await client.newSession(cwd, sessionMcpServers);
+        await configureNative(session, true);
+        adoptObservedNativeModel(nativeDefaults.model);
         sessionId = session.sessionId;
         this.pool.rememberSession?.(this.poolKey, sessionId, lease);
         if (freshCreds) bindSessionCredentialFile(sessionId, freshCreds.path);
@@ -524,7 +570,7 @@ export class AcpAgentService implements AgentService {
 
         const sessionModel = this.sessionModel;
         const modelConfig = sessionModel ? resolveSessionModelConfigOption(session, sessionModel) : null;
-        if (modelConfig && sessionModel) {
+        if (!nativeTool && modelConfig && sessionModel) {
           try {
             await client.setSessionConfigOption(sessionId, modelConfig.configId, sessionModel);
             log.info({ ...ctx, sessionId, model: this.sessionModel }, 'ACP session model selected');
@@ -729,6 +775,8 @@ export class AcpAgentService implements AgentService {
           const retryCreds = prepareSessionCredentialFile(options?.callbackEnv);
           const retryConfig = buildSessionConfig(retryCreds);
           const freshSession = await client.newSession(cwd, retryConfig.mcpServers);
+          await configureNative(freshSession, true);
+          adoptObservedNativeModel(nativeDefaults.model);
           const freshSessionId = freshSession.sessionId;
           this.pool.rememberSession?.(this.poolKey, freshSessionId, lease);
           // Replacement retry is a NEW ACP session, so it must get a fresh
@@ -749,7 +797,7 @@ export class AcpAgentService implements AgentService {
           // Apply session model if configured
           const sessionModel = this.sessionModel;
           const modelConfig = sessionModel ? resolveSessionModelConfigOption(freshSession, sessionModel) : null;
-          if (modelConfig && sessionModel) {
+          if (!nativeTool && modelConfig && sessionModel) {
             try {
               await client.setSessionConfigOption(freshSessionId, modelConfig.configId, sessionModel);
             } catch {

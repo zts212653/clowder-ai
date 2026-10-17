@@ -268,7 +268,7 @@ test('production composition constructs and recovers K-2D but exposes no startup
   assert.match(
     source,
     new RegExp(
-      `listen:\\s*async\\s*\\(\\)\\s*=>\\s*\\{\\s*const\\s+([A-Za-z_$][\\w$]*)\\s*=\\s*await app\\.listen\\(\\{ port: PORT, host: HOST \\}\\);\\s*${gate[1]}\\(\\);\\s*return\\s+\\1;\\s*\\}`,
+      `listen:\\s*async\\s*\\(\\)\\s*=>\\s*\\{\\s*const\\s+([A-Za-z_$][\\w$]*)\\s*=\\s*await app\\.listen\\(\\{ port: PORT, host: HOST \\}\\);\\s*(?:startupMilestone\\('http-listening'\\);\\s*)?${gate[1]}\\(\\);\\s*return\\s+\\1;\\s*\\}`,
     ),
     'desktop windows may app.inject; the gate opens only once app.listen has booted Fastify',
   );
