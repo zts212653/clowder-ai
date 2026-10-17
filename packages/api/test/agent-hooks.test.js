@@ -119,8 +119,13 @@ describe('agent hook sync targets', () => {
     assert.equal(settings.hooks.SessionStart[0].hooks[0].command, '/custom/start.sh');
     assert.equal(settings.hooks.SessionStart[0].hooks[1].command, '/custom/session-start-recall.sh');
     assert.equal(settings.hooks.SessionStart[1].hooks[0].command, bashCmd(startScript));
-    assert.equal(settings.hooks.Stop.length, 1);
-    assert.equal(settings.hooks.Stop[0].hooks[0].command, bashCmd(stopScript));
+    // #1566: a same-named script in a subdirectory is the user's, not Clowder's — keep it.
+    assert.equal(settings.hooks.Stop.length, 2);
+    assert.equal(
+      settings.hooks.Stop[0].hooks[0].command,
+      join(targetRoot, '.claude', 'hooks', 'legacy', 'session-stop-check.sh'),
+    );
+    assert.equal(settings.hooks.Stop[1].hooks[0].command, bashCmd(stopScript));
     assert.equal(settings.hooks.PreToolUse[0].hooks[0].command, '/custom/pre.sh');
 
     const codex = JSON.parse(await readFile(join(targetRoot, '.codex', 'hooks.json'), 'utf8'));
