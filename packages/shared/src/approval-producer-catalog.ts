@@ -51,8 +51,6 @@ export interface ApprovalProducerCatalogEntry {
    *   F276 — candidate `sourceRef` can come from an owner-validated deferred receipt
    *          or owner evidence rather than one InvocationRecord; needs scheduler /
    *          deferred route coverage before it could be attested.
-   *   F292 — MeetingIntake lands through signal admission and never calls
-   *          ApprovalIngress.publish, so this value has no effect on this ingress.
    */
   systemOriginExemption: 'server_attested' | 'forbidden';
   history: boolean;
@@ -184,18 +182,6 @@ export const APPROVAL_PRODUCER_CATALOG = {
     history: true,
     humanDispositionReasonCodes: ['not_important', 'wrong_lane', 'bad_evidence', 'wrong', 'other'],
   },
-  F292: {
-    lifecycleVersion: 1,
-    label: '会议',
-    badgeLabel: 'Meeting',
-    colorToken: 'var(--semantic-info, #3b82f6)',
-    decisionEndpointBase: '/api/meeting-intakes',
-    decisionSurface: 'approval_hub',
-    sourcePolicy: 'message-or-event',
-    systemOriginExemption: 'forbidden',
-    history: true,
-    humanDispositionReasonCodes: null,
-  },
   F306: {
     lifecycleVersion: 1,
     label: '运行',
@@ -257,7 +243,6 @@ export const APPROVAL_PRODUCER_IDS = Object.freeze([
   'F221',
   'F321',
   'F276',
-  'F292',
   'F306',
 ] as const satisfies readonly ApprovalProducerId[]);
 

@@ -249,9 +249,7 @@ function Hosted({
         onReread={() => sessions.reread(key)}
       />
       <ApprovalResultLink state={state} />
-      {showCard &&
-      (shown?.sourceFeatureId === 'F276' ||
-        (shown?.decisionMode !== 'claim-select' && shown?.sourceFeatureId !== 'F292'))
+      {showCard && (shown?.sourceFeatureId === 'F276' || shown?.decisionMode !== 'claim-select')
         ? null
         : originalPlaceAction}
     </div>

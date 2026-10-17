@@ -1,6 +1,7 @@
 import type { ActionSubjectTerminalTruth } from './ActionSuccessorLeaseStore.js';
 import { createActionCompletionCandidateSnapshot } from './action-successor-completion-state-machine.js';
 import type { ActionSuccessorLease } from './action-successor-state-machine.js';
+import { parseActionTerminalProviderBinding } from './action-terminal-provider-binding.js';
 
 function normalizeTransitionHistory(
   lease: Pick<ActionSuccessorLease, 'returnTransitions' | 'replacementTransitions'>,
@@ -49,6 +50,11 @@ export function parseActionSuccessorLease(raw: string | null): ActionSuccessorLe
   );
   const base = {
     ...lease,
+    terminalPredicateProviderBinding: parseActionTerminalProviderBinding(
+      lease.terminalPredicateProviderBinding,
+      lease.tenantScope,
+      Boolean(lease.terminalPredicate),
+    ),
     claimOrigin: lease.claimOrigin ?? 'structured_transfer',
     holderThreadId: lease.holderThreadId ?? 'legacy:unknown',
     issuerStandingEvidenceRef: lease.issuerStandingEvidenceRef ?? lease.evidenceRefs[0] ?? 'legacy:unknown',

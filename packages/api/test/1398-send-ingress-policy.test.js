@@ -13,9 +13,7 @@ import { InvocationTracker } from '../dist/domains/cats/services/agents/invocati
 import { PersistedQueueDelivery } from '../dist/domains/cats/services/agents/invocation/PersistedQueueDelivery.js';
 import { MessageStore } from '../dist/domains/cats/services/stores/ports/MessageStore.js';
 import { ThreadStore } from '../dist/domains/cats/services/stores/ports/ThreadStore.js';
-import { ConnectorRouter } from '../dist/infrastructure/connectors/ConnectorRouter.js';
-import { MemoryConnectorThreadBindingStore } from '../dist/infrastructure/connectors/ConnectorThreadBindingStore.js';
-import { InboundMessageDedup } from '../dist/infrastructure/connectors/InboundMessageDedup.js';
+import { createPluginPublicInvocationHost } from '../dist/domains/plugin/host-surface/plugin-public-invocation-host.js';
 import { deliverConnectorMessage } from '../dist/infrastructure/email/deliver-connector-message.js';
 import { createDeliverFn } from '../dist/infrastructure/scheduler/delivery.js';
 import { callbacksRoutes } from '../dist/routes/callbacks.js';
@@ -23,7 +21,7 @@ import { messagesRoutes } from '../dist/routes/messages.js';
 
 // Actual ingress implementations, shared Message/Queue stores; transport and drain are isolated fixtures.
 for (const disposition of ['next_work', 'continue_current']) {
-  test(`current HTTP/callback/IM/mail/notification/scheduler entrances share ${disposition} admission`, async (t) => {
+  test(`current HTTP/callback/plugin/mail/notification/scheduler entrances share ${disposition} admission`, async (t) => {
     const projectRoot = await mkdtemp(join(tmpdir(), 'f117-ingress-policy-'));
     saveMessageDispositionPreference(projectRoot, { scope: 'global', disposition });
     const owner = 'ingress-owner';
@@ -99,20 +97,53 @@ for (const disposition of ['next_work', 'continue_current']) {
     });
     assert.equal(callback.statusCode, 200, callback.body);
     assert.equal(callback.json().status, 'ok', callback.body);
-    const bindings = new MemoryConnectorThreadBindingStore();
-    bindings.bind('feishu', 'policy-chat', thread.id, owner);
-    const im = new ConnectorRouter({
-      bindingStore: bindings,
-      dedup: new InboundMessageDedup(),
-      messageStore: messages,
-      persistedQueueDelivery: delivery,
-      threadStore: threads,
-      defaultUserId: owner,
-      defaultCatId: 'codex',
-      socketManager,
-      log: { debug() {}, info() {}, warn() {}, error() {} },
+    const source = messages.append({
+      userId: owner,
+      threadId: thread.id,
+      from: { kind: 'plugin', instanceId: 'instance' },
+      content: 'plugin payload',
+      mentions: [],
+      timestamp: Date.now(),
+      extra: {
+        pluginMessage: {
+          instanceId: 'instance',
+          revision: 1,
+          presentation: { connector: 'fixture', label: 'Fixture' },
+          elements: [],
+          appendOps: [],
+          provenance: { origin: { kind: 'plugin', instanceId: 'instance' }, epistemicStatus: 'observation' },
+        },
+      },
     });
-    assert.equal((await im.route('feishu', 'policy-chat', 'IM payload', 'im-policy')).kind, 'routed');
+    const plugin = createPluginPublicInvocationHost({
+      pluginInstanceId: 'instance',
+      packageDigest: 'digest',
+      lifecycleRevision: 1,
+      grantRevision: 1,
+      ownerUserId: owner,
+      effectiveGrants: ['thread.readContent', 'messaging.send'],
+      manifest: {
+        features: [
+          {
+            id: 'f',
+            capabilities: ['thread.readContent', 'messaging.send'],
+            contributions: [{ type: 'mcp', id: 'native' }],
+          },
+        ],
+        contributions: [{ type: 'mcp', id: 'native', actions: [{ method: 'native.read' }] }],
+      },
+      messages,
+      threads: { get: async () => ({ ...thread, participants: ['opus'] }) },
+      services: { queue, resume: async () => {} },
+      assertCurrent: async () => {},
+      verify: async (_instance, _carrier, context) => context.assertCurrent(),
+    });
+    await plugin.enqueue({
+      messageRef: `message:${source.id}`,
+      targetCatId: 'opus',
+      native: { contributionId: 'native', methods: ['native.read'] },
+      authority: { ref: 'ref', revision: 'r1' },
+    });
     const mail = await deliverConnectorMessage(
       { delivery },
       {
@@ -145,7 +176,7 @@ for (const disposition of ['next_work', 'continue_current']) {
     assert.equal(entries.length, 6);
     assert.equal(notifications.length, 6, 'each admission notifies the common owner, not a producer loop');
     for (const entry of entries) {
-      assert.deepEqual(entry.targets, ['opus'], 'IM/mail no-target fallback uses common send, not defaultCatId');
+      assert.deepEqual(entry.targets, ['opus'], 'all ingress paths use common send admission');
       assert.equal(entry.delivery.authorIntentByTarget.opus.requested, disposition, entry.payload.content);
       if (disposition === 'continue_current')
         assert.equal(entry.delivery.authorIntentByTarget.opus.boundParentInvocationId, 'exact-ingress-parent');

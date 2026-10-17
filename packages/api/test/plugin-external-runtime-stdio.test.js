@@ -699,3 +699,39 @@ test('missing Host ping response after authority revocation never restarts the r
   assert.equal(inventory.instances[0].activationState, 'error');
   assert.equal(inventory.instances[0].runtimeState, 'crashed');
 });
+
+test('a successful stdio start verifies admitted package bytes exactly once', async () => {
+  const rootDir = await mkdtemp(join(tmpdir(), 'cat-cafe-k2d-stdio-integrity-'));
+  const harness = await createExternalRuntimeHarness({ rootDir, methods: [eventsHandler([])] });
+  const processes = new FakePluginProcessAdapter();
+  let integrityCalls = 0;
+  const supervisor = new ExternalPluginRuntimeSupervisor({
+    inventory: harness.inventory,
+    broker: harness.broker,
+    packages: {
+      async resolveInstalledPackage() {
+        return {
+          rootDir,
+          manifest: externalManifest(),
+          verifyIntegrity: async () => {
+            integrityCalls += 1;
+          },
+          release: async () => undefined,
+        };
+      },
+    },
+    processes,
+  });
+
+  const starting = supervisor.start(EXTERNAL_INSTANCE_ID);
+  const child = await processes.nextProcess();
+  await completeExternalHandshake(child);
+  await starting;
+
+  assert.equal(
+    integrityCalls,
+    1,
+    'the entrypoint authority is the single integrity gate: a second full-tree snapshot per start is pure waste',
+  );
+  await supervisor.stop(EXTERNAL_INSTANCE_ID);
+});

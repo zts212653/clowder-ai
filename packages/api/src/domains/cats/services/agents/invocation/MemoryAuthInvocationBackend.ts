@@ -15,6 +15,7 @@ import {
   type VerifyResult,
 } from './InvocationRegistry.js';
 import { normalizeOwnerAuthProvenance } from './owner-auth-provenance.js';
+import { capturePublicInvocationAuth, publicInvocationRecordView } from './public-invocation-auth-binding.js';
 
 const DEFAULT_MAX_RECORDS = 500;
 const DEFAULT_TOMBSTONE_GC_TTL_MS = 30 * 24 * 60 * 60 * 1000;
@@ -37,6 +38,7 @@ export class MemoryAuthInvocationBackend implements IAuthInvocationBackend {
   }
 
   async create(input: AuthInvocationInput): Promise<void> {
+    input = capturePublicInvocationAuth(input);
     this.cleanupTerminalTombstones();
     if (this.records.size >= this.maxRecords) throw new AuthInvocationAdmissionError();
 
@@ -83,17 +85,19 @@ export class MemoryAuthInvocationBackend implements IAuthInvocationBackend {
 
   async getRecord(invocationId: string): Promise<InvocationRecord | null> {
     this.cleanupTerminalTombstones();
-    return this.records.get(invocationId) ?? null;
+    const record = this.records.get(invocationId);
+    return record ? publicInvocationRecordView(record) : null;
   }
 
   async peekRecord(invocationId: string): Promise<InvocationRecord | null> {
     this.cleanupTerminalTombstones();
-    return this.records.get(invocationId) ?? null;
+    const record = this.records.get(invocationId);
+    return record ? publicInvocationRecordView(record) : null;
   }
 
   async listActiveRecords(): Promise<InvocationRecord[]> {
     this.cleanupTerminalTombstones();
-    return [...this.records.values()].filter((record) => record.state === 'active');
+    return [...this.records.values()].filter((record) => record.state === 'active').map(publicInvocationRecordView);
   }
 
   async migrateLegacyRecords(): Promise<AuthInvocationMigrationResult> {
@@ -158,20 +162,20 @@ export class MemoryAuthInvocationBackend implements IAuthInvocationBackend {
     if (requireLatest && this.latestByThreadCat.get(`${record.threadId}:${record.catId as string}`) !== invocationId) {
       return { ok: false, reason: 'stale_invocation' };
     }
-    return { ok: true, record };
+    return { ok: true, record: publicInvocationRecordView(record) };
   }
 
   private commitTerminalInTurn(input: AuthTerminalCommitInput): AuthTerminalCommitResult {
     const record = this.records.get(input.invocationId);
     if (!record) return { outcome: 'not_found', record: null };
-    if (record.state !== 'active') return { outcome: 'already_terminal', record };
+    if (record.state !== 'active') return { outcome: 'already_terminal', record: publicInvocationRecordView(record) };
     record.state = input.disposition;
     record.endedAt = input.endedAt;
     record.endReason = input.endReason;
     if (input.terminalRef !== undefined) record.terminalRef = input.terminalRef;
     record.expiresAt = Date.now() + this.tombstoneGcTtlMs;
     this.refreshCooldown.delete(input.invocationId);
-    return { outcome: 'committed', record };
+    return { outcome: 'committed', record: publicInvocationRecordView(record) };
   }
 
   private cleanupTerminalTombstones(): void {

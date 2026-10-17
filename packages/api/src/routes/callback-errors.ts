@@ -39,6 +39,8 @@ const MESSAGE_BY_REASON: Record<CallbackAuthErrorReason, string> = {
   agent_key_revoked: 'Agent key has been revoked',
   agent_key_unknown: 'Agent key secret not recognized',
   agent_key_scope_mismatch: 'Agent key scope does not match request',
+  cloud_principal_not_configured:
+    'Agent key belongs to the cloud return boundary, but its cat is not the configured cloud cat (renamed, moved to another provider, or ambiguous)',
 };
 
 export function makeCallbackAuthError(reason: CallbackAuthErrorReason): CallbackAuthErrorBody {

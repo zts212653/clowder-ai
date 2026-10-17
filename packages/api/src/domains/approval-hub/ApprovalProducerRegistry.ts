@@ -18,7 +18,7 @@ export interface ApprovalProducerRuntimeBinding {
   };
 }
 
-export type ApprovalProducerRuntimeBindings = Record<ApprovalProducerId, ApprovalProducerRuntimeBinding>;
+export type ApprovalProducerRuntimeBindings = Partial<Record<ApprovalProducerId, ApprovalProducerRuntimeBinding>>;
 
 export function bindLegacyApprovalProducer(adapter: IApprovalAdapter): ApprovalProducerRuntimeBinding {
   return { adapter, lifecycle: { contractVersion: 1, writerGeneration: 'legacy' } };
@@ -32,16 +32,17 @@ export type ApprovalProducerManifestEntry = ApprovalProducerCatalogEntry & { id:
 
 export class ApprovalProducerRegistry {
   private readonly bindings: ApprovalProducerRuntimeBindings;
+  private readonly producerIds: ApprovalProducerId[];
 
   constructor(bindings: ApprovalProducerRuntimeBindings) {
     const keys = Object.keys(bindings);
-    const missing = APPROVAL_PRODUCER_IDS.filter((id) => !keys.includes(id));
     const extra = keys.filter((id) => !APPROVAL_PRODUCER_IDS.includes(id as ApprovalProducerId));
-    if (missing.length > 0) throw new Error(`Approval producer bindings missing: ${missing.join(', ')}`);
     if (extra.length > 0) throw new Error(`Approval producer bindings contain extra keys: ${extra.join(', ')}`);
 
-    for (const id of APPROVAL_PRODUCER_IDS) {
-      const adapter = bindings[id].adapter;
+    this.producerIds = APPROVAL_PRODUCER_IDS.filter((id) => Object.hasOwn(bindings, id));
+    for (const id of this.producerIds) {
+      const binding = bindings[id]!;
+      const adapter = binding.adapter;
       const adapterId = adapter.featureId;
       if (adapterId !== id) {
         throw new Error(`Approval producer binding ${id} contains adapter ${adapterId}`);
@@ -49,10 +50,10 @@ export class ApprovalProducerRegistry {
       if (APPROVAL_PRODUCER_CATALOG[id].history && typeof adapter.listSettled !== 'function') {
         throw new Error(`Approval producer ${id} declares history but its adapter omits listSettled`);
       }
-      if (!bindings[id].lifecycle) {
+      if (!binding.lifecycle) {
         throw new Error(`Approval producer ${id} lifecycle binding is missing`);
       }
-      if (bindings[id].lifecycle.contractVersion !== APPROVAL_PRODUCER_CATALOG[id].lifecycleVersion) {
+      if (binding.lifecycle.contractVersion !== APPROVAL_PRODUCER_CATALOG[id].lifecycleVersion) {
         throw new Error(`Approval producer ${id} lifecycle contract version mismatch`);
       }
     }
@@ -60,35 +61,37 @@ export class ApprovalProducerRegistry {
   }
 
   get(id: ApprovalProducerId): ApprovalProducerRuntimeBinding {
-    return this.bindings[id];
+    const binding = this.bindings[id];
+    if (!binding) throw new Error(`Approval producer ${id} is not registered`);
+    return binding;
   }
 
   listAdapters(): IApprovalAdapter[] {
-    return APPROVAL_PRODUCER_IDS.map((id) => this.bindings[id].adapter);
+    return this.producerIds.map((id) => this.get(id).adapter);
   }
 
   async listPending(userId: string): Promise<ApprovalHubItem[]> {
-    const items = await Promise.all(APPROVAL_PRODUCER_IDS.map((id) => this.listPendingFor(id, userId)));
+    const items = await Promise.all(this.producerIds.map((id) => this.listPendingFor(id, userId)));
     return items.flat();
   }
 
   async listPendingFor(id: ApprovalProducerId, userId: string): Promise<ApprovalHubItem[]> {
-    return (await this.bindings[id].adapter.listPending(userId)).map((item) => normalizePendingItem(id, item));
+    return (await this.get(id).adapter.listPending(userId)).map((item) => normalizePendingItem(id, item));
   }
 
   async listSettled(userId: string, limit: number): Promise<SettledApprovalHubItem[]> {
-    const items = await Promise.all(APPROVAL_PRODUCER_IDS.map((id) => this.listSettledFor(id, userId, limit)));
+    const items = await Promise.all(this.producerIds.map((id) => this.listSettledFor(id, userId, limit)));
     return items.flat();
   }
 
   async listSettledFor(id: ApprovalProducerId, userId: string, limit: number): Promise<SettledApprovalHubItem[]> {
-    const adapter = this.bindings[id].adapter;
+    const adapter = this.get(id).adapter;
     if (!adapter.listSettled) return [];
     return (await adapter.listSettled(userId, { limit })).map((item) => normalizeSettledItem(id, item));
   }
 
   manifest(): ReadonlyArray<ApprovalProducerManifestEntry> {
-    return APPROVAL_PRODUCER_IDS.map((id) => ({ id, ...APPROVAL_PRODUCER_CATALOG[id] }));
+    return this.producerIds.map((id) => ({ id, ...APPROVAL_PRODUCER_CATALOG[id] }));
   }
 }
 

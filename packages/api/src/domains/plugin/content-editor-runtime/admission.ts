@@ -7,7 +7,7 @@ import type { ContentEditorProviderContribution, PluginManifest } from '@clowder
 export function staticEditorContributions(manifest: PluginManifest): readonly ContentEditorProviderContribution[] {
   const contributions = manifest.contributions ?? [];
   if (
-    manifest.runtime.transport !== 'builtin' ||
+    manifest.runtime?.transport !== 'builtin' ||
     manifest.runtime.entrypoint !== undefined ||
     (manifest.configuration?.length ?? 0) !== 0 ||
     (manifest.data?.length ?? 0) !== 0 ||

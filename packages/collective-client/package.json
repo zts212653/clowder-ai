@@ -3,16 +3,8 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "main": "./dist/server.js",
-  "types": "./dist/server.d.ts",
-  "exports": {
-    ".": {
-      "types": "./dist/server.d.ts",
-      "default": "./dist/server.js"
-    }
-  },
   "scripts": {
-    "build": "pnpm run clean && pnpm run lint && node ./scripts/build.mjs && tsc -p tsconfig.server.json",
+    "build": "pnpm run clean && pnpm run lint && node ./scripts/build.mjs",
     "clean": "rm -rf dist",
     "lint": "tsc --noEmit",
     "test": "vitest run"

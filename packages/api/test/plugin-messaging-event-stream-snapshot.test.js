@@ -178,10 +178,12 @@ describe('EventStreamService — stale + snapshot (INV-9)', () => {
     );
   });
 
-  test('snapshot excludes host messages outside the plugin event domain', async () => {
+  // W2-5b-0: Host messages are on the stream since G5 (the publishing seam), so the catch-up
+  // snapshot carries them too. The old exclusion ("host mutations are not represented by the plugin
+  // event log") predates G5 and left a catching-up subscriber without any cat or user message.
+  test('snapshot carries host messages alongside plugin messages', async () => {
     const handleId = await issueHandle();
     const { subscriptionId } = await stream.subscribe(CTX, handleId);
-    // Insert host-only messages that have no corresponding plugin event.
     for (let index = 0; index < 205; index += 1) {
       messageStore.append(
         canonicalTestMessageInput({
@@ -204,10 +206,16 @@ describe('EventStreamService — stale + snapshot (INV-9)', () => {
       },
     });
     const result = await stream.snapshot(CTX, subscriptionId);
-    // Only the plugin message appears; all 205 host messages are excluded
-    // because their mutations are not represented by the plugin event log.
-    assert.equal(result.envelopes.length, 1);
-    assert.equal(result.envelopes[0].payload.elements[0].payload.text, 'plugin only');
+    assert.equal(result.envelopes.length, 206);
+    assert.deepEqual(
+      result.envelopes.slice(0, 3).map((envelope) => [envelope.actor.kind, envelope.payload.elements[0].payload.text]),
+      [
+        ['user', 'host message 0'],
+        ['user', 'host message 1'],
+        ['user', 'host message 2'],
+      ],
+    );
+    assert.equal(result.envelopes[205].payload.elements[0].payload.text, 'plugin only');
     assert.equal(result.resumeSequence, 1);
   });
 
@@ -350,7 +358,7 @@ describe('EventStreamService — stale + snapshot (INV-9)', () => {
     });
     const snap = await stream.snapshot(CTX, subscriptionId);
     const texts = snap.envelopes.map((envelope) => envelope.payload.elements[0]?.payload.text);
-    assert.deepEqual(texts, ['plugin visible']);
+    assert.deepEqual(texts, ['public user content', 'plugin visible']);
   });
 
   test('race regression: host message injected during scan does not leak into plugin snapshot', async () => {

@@ -157,7 +157,8 @@ describe('SystemPromptBuilder', () => {
       mcpAvailable: true,
     });
     assert.ok(prompt.includes('cat_cafe_post_message'));
-    assert.ok(prompt.includes('cat_cafe_register_pr_tracking'));
+    assert.ok(prompt.includes('已安装的 GitHub 插件'));
+    assert.equal(prompt.includes('cat_cafe_register_pr_tracking'), false); // mcp-cutover-negative-reference: absence
     assert.ok(prompt.includes('cat_cafe_get_pending_mentions'));
     assert.ok(prompt.includes('cat_cafe_get_thread_context'));
   });

@@ -34,6 +34,18 @@ function reviewLease(overrides = {}) {
       digest: 'predicate-review-recovery',
       headSha: OLD_HEAD,
     },
+    terminalPredicateProviderBinding: {
+      pluginInstanceId: 'installed-review-provider',
+      packageDigest: 'sha512-fixture',
+      featureId: 'review',
+      contributionId: 'review-predicate',
+      freshnessMethod: 'review.freshness',
+      completionMethod: 'review.completion',
+      grantRevision: 1,
+      lifecycleRevision: 1,
+      tenantScope: 'user-1',
+      installationProjectRoot: '/isolated/review',
+    },
     returnTransitions: [],
     dispatchDeliveryState: 'pending',
     dispatchDeliveryAttemptCount: 0,
@@ -236,6 +248,16 @@ function recoveryHarness({
       dispatch: {
         leaseStore: dispatchStore,
         truthResolver: {
+          async authorizeDispatchRecovery(frozen, context) {
+            assert.deepEqual(frozen.terminalPredicateProviderBinding, initialLease.terminalPredicateProviderBinding);
+            assert.equal(context.actorCatId, proposal.senderCatId);
+            assert.equal(context.tenantScope, proposal.ownerUserId);
+            return {
+              status: 'authorized',
+              withAuthority: async (operation) => operation(),
+              resolveFreshness: () => this.resolveFreshness(frozen.terminalPredicate),
+            };
+          },
           async resolveFreshness(predicate) {
             events.push('freshness');
             assert.equal(predicate.digest, current.terminalPredicate.digest);
@@ -248,7 +270,7 @@ function recoveryHarness({
         },
         async loadOwnerAuthProvenance() {
           events.push('provenance');
-          if (newerHeadWinsAfterAttempt) {
+          if (newerHeadWinsAfterAttempt && current.dispatchDeliveryAttemptCount > 0) {
             const mismatchEvidenceRef = `community:${current.subjectRef}:head:${NEW_HEAD}`;
             events.push('newer-head-cas');
             current = {
@@ -307,6 +329,8 @@ describe('PR8 ActionSuccessor recovery freshness fence', () => {
 
     assert.deepEqual(result, { outcome: 'delivered', deliveredMessageId: 'message-delivered' });
     assert.deepEqual(h.events, [
+      'proposal',
+      'provenance',
       'freshness',
       'attempt',
       'proposal',
@@ -338,7 +362,16 @@ describe('PR8 ActionSuccessor recovery freshness fence', () => {
       outcome: 'failed',
       reason: 'terminal_predicate_mismatch',
     });
-    assert.deepEqual(h.events, ['freshness', 'retire', 'freshness', 'retire']);
+    assert.deepEqual(h.events, [
+      'proposal',
+      'provenance',
+      'freshness',
+      'retire',
+      'proposal',
+      'provenance',
+      'freshness',
+      'retire',
+    ]);
     assert.deepEqual(h.sideEffects, { messages: 0, queueEntries: 0, invocations: 0 });
     assert.equal(h.current().status, 'replaceable');
     assert.equal(h.current().holderOutcomes['codex-terra'].outcome, 'unavailable');
@@ -354,7 +387,7 @@ describe('PR8 ActionSuccessor recovery freshness fence', () => {
     assert.deepEqual(await new ActionSuccessorRecoverySweep(h.deps).recoverDispatch(h.current()), {
       outcome: 'pending',
     });
-    assert.deepEqual(h.events, ['freshness']);
+    assert.deepEqual(h.events, ['proposal', 'provenance', 'freshness']);
     assert.deepEqual(h.sideEffects, { messages: 0, queueEntries: 0, invocations: 0 });
     assert.equal(h.current().dispatchDeliveryAttemptCount, 0);
   });
@@ -399,7 +432,7 @@ describe('PR8 ActionSuccessor recovery freshness fence', () => {
       outcome: 'failed',
       reason: 'terminal_predicate_mismatch',
     });
-    assert.deepEqual(h.events, ['freshness', 'attempt', 'newer-head-cas']);
+    assert.deepEqual(h.events, ['proposal', 'provenance', 'freshness', 'attempt', 'newer-head-cas']);
     assert.deepEqual(h.sideEffects, { messages: 0, queueEntries: 0, invocations: 0 });
   });
 
@@ -419,7 +452,16 @@ describe('PR8 ActionSuccessor recovery freshness fence', () => {
       outcome: 'failed',
       reason: 'terminal_predicate_mismatch',
     });
-    assert.deepEqual(h.events, ['freshness', 'attempt', 'proposal', 'provenance', 'newer-head-cas', 'reserve']);
+    assert.deepEqual(h.events, [
+      'proposal',
+      'provenance',
+      'freshness',
+      'attempt',
+      'proposal',
+      'provenance',
+      'newer-head-cas',
+      'reserve',
+    ]);
     assert.deepEqual(h.sideEffects, { messages: 0, queueEntries: 0, invocations: 0 });
   });
 });

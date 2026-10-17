@@ -7,7 +7,7 @@ import { buildFrictionRollupReport } from '../../dist/infrastructure/harness-eva
 import { createFrictionGeneratorAdapter } from '../../dist/infrastructure/harness-eval/publish-verdict/friction-generator-adapter.js';
 import { handlePublishVerdict } from '../../dist/infrastructure/harness-eval/publish-verdict/publish-verdict.js';
 import { setupHarnessFeedback } from './eval-manual-trigger-fixtures.js';
-import { buildPacket, seedCanonicalMeasurementCensusState } from './publish-verdict-fixtures.js';
+import { buildPacket, seedCanonicalMeasurementCensusState, unreachablePublisher } from './publish-verdict-fixtures.js';
 
 /**
  * F245 Phase C PR1b — publish_verdict eval:friction end-to-end test (L4).
@@ -204,7 +204,7 @@ describe('handlePublishVerdict end-to-end with eval:friction generator', () => {
     const generator = createFrictionGeneratorAdapter(provider);
 
     const result = await handlePublishVerdict(
-      { harnessFeedbackRoot: root, generator },
+      { gitPublisher: unreachablePublisher, harnessFeedbackRoot: root, generator },
       {
         packet: buildFrictionPacket({ id: 'vhp-friction-kindmismatch' }),
         domain: 'eval:friction',
@@ -225,7 +225,7 @@ describe('handlePublishVerdict end-to-end with eval:friction generator', () => {
     const generator = createFrictionGeneratorAdapter(provider);
 
     const result = await handlePublishVerdict(
-      { harnessFeedbackRoot: root, generator },
+      { gitPublisher: unreachablePublisher, harnessFeedbackRoot: root, generator },
       {
         packet: buildPacket({ id: 'vhp-friction-wrong-domain', domainId: 'eval:a2a' }),
         domain: 'eval:a2a',
@@ -244,7 +244,7 @@ describe('handlePublishVerdict end-to-end with eval:friction generator', () => {
     const generator = createFrictionGeneratorAdapter(provider);
 
     const result = await handlePublishVerdict(
-      { harnessFeedbackRoot: root, generator },
+      { gitPublisher: unreachablePublisher, harnessFeedbackRoot: root, generator },
       {
         packet: buildFrictionPacket({ id: 'vhp-friction-badwindow' }),
         domain: 'eval:friction',
@@ -261,7 +261,7 @@ describe('handlePublishVerdict end-to-end with eval:friction generator', () => {
 
   it('returns 501 when no friction generator wired (route-layer SoT)', async () => {
     const result = await handlePublishVerdict(
-      { harnessFeedbackRoot: root /* generator omitted */ },
+      { gitPublisher: unreachablePublisher, harnessFeedbackRoot: root /* generator omitted */ },
       {
         packet: buildFrictionPacket({ id: 'vhp-friction-no-gen' }),
         domain: 'eval:friction',
@@ -281,7 +281,7 @@ describe('handlePublishVerdict end-to-end with eval:friction generator', () => {
     const generator = createFrictionGeneratorAdapter(provider);
 
     const result = await handlePublishVerdict(
-      { harnessFeedbackRoot: root, generator },
+      { gitPublisher: unreachablePublisher, harnessFeedbackRoot: root, generator },
       {
         packet: buildFrictionPacket({ id: 'vhp-friction-wrongcat' }),
         domain: 'eval:friction',

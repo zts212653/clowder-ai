@@ -20,7 +20,7 @@ export function useAcceptedWorkReconciliation() {
 
 async function reconcileAcceptedWorkResult(input: CollectiveAcceptedWorkResult): Promise<void> {
   const response = await apiFetch(
-    `/api/plugins/collective-connector/${encodeURIComponent(input.connectionId)}/work/result/accepted`,
+    `/api/plugins/official.collective-connector/connections/${encodeURIComponent(input.connectionId)}/work/result/accepted`,
     {
       method: 'POST',
       headers: { 'content-type': 'application/json' },

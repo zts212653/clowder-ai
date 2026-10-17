@@ -21,11 +21,6 @@ mcp_admission_claims:
     boundaryKind: authority-boundary
     decision: accepted
   - ref: "file:docs/features/F167-a2a-chain-quality.md"
-    toolName: cat_cafe_recover_external_review_verdict
-    resourceFamily: tracking-review
-    boundaryKind: authority-boundary
-    decision: accepted
-  - ref: "file:docs/features/F167-a2a-chain-quality.md"
     toolName: cat_cafe_get_hold_status
     resourceFamily: task-workflow
     boundaryKind: authority-boundary
@@ -43,6 +38,8 @@ mcp_admission_claims:
 ---
 
 # F167: A2A Chain Quality — 乒乓球熔断 + 虚空传球检测 + 角色护栏
+
+> **C1 当前准入边界**：`cat_cafe_recover_external_review_verdict` 已退役，无同名插件替代，已撤销其准入声明。下文相关实现记录保留为历史，不作为当前工具准入依据。
 
 > **Status**: in-progress | **Owner**: Ragdoll | **Priority**: P0
 

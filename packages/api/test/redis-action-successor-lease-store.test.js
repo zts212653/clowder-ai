@@ -123,6 +123,58 @@ describe('RedisActionSuccessorLeaseStore', { skip: redisIsolationSkipReason(REDI
     });
   });
 
+  it('persists provider identity across store reconstruction and rejects replay from another installation', async () => {
+    const binding = {
+      pluginInstanceId: 'installation-1',
+      packageDigest: 'b'.repeat(64),
+      featureId: 'review',
+      contributionId: 'review-truth',
+      freshnessMethod: 'review.freshness',
+      completionMethod: 'review.completion',
+      grantRevision: 3,
+      lifecycleRevision: 4,
+      tenantScope: 'user-1',
+      installationProjectRoot: '/isolated/project',
+    };
+    const input = claimInput({ actionFamily: 'review', terminalPredicateProviderBinding: binding });
+    const first = await store.claim(input);
+    const recovered = new RedisActionSuccessorLeaseStore(redis);
+    assert.deepEqual((await recovered.get(first.lease.leaseId)).terminalPredicateProviderBinding, binding);
+    assert.equal((await recovered.claim(input)).outcome, 'replayed');
+    assert.equal(
+      (
+        await recovered.claim({
+          ...input,
+          terminalPredicateProviderBinding: { ...binding, pluginInstanceId: 'installation-2' },
+        })
+      ).outcome,
+      'replay_mismatch',
+    );
+    assert.equal(await redis.ttl(ActionSuccessorKeys.detail(first.lease.leaseId)), -1);
+    await recovered.commitOutcome(first.lease.leaseId, {
+      generation: 1,
+      catId: 'codex-terra',
+      outcome: 'unavailable',
+      evidenceRef: 'delivery:unavailable',
+      now: 105,
+    });
+    const nextBinding = { ...binding, pluginInstanceId: 'installation-2' };
+    const replacement = await recovered.replace(first.lease.leaseId, {
+      expectedGeneration: 1,
+      holderCatIds: ['codex'],
+      holderThreadId: 'thread-next',
+      dispatchId: 'dispatch-next',
+      terminalPredicate: input.terminalPredicate,
+      terminalPredicateProviderBinding: nextBinding,
+      predecessorCatId: 'codex-sol',
+      predecessorThreadId: 'thread-source',
+      evidenceRef: 'message:replacement',
+      now: 110,
+    });
+    assert.equal(replacement.outcome, 'replaced');
+    assert.deepEqual((await store.get(first.lease.leaseId)).terminalPredicateProviderBinding, nextBinding);
+  });
+
   it('reads pre-S.1 TTL=0 leases without inventing a predecessor route', async () => {
     const legacy = {
       leaseId: 'lease-legacy',
@@ -339,9 +391,22 @@ describe('RedisActionSuccessorLeaseStore', { skip: redisIsolationSkipReason(REDI
   });
 
   it('atomically continues exactly one fresh subject revision on a new lease under the same key', async () => {
+    const binding = {
+      pluginInstanceId: 'installation-1',
+      packageDigest: 'b'.repeat(64),
+      featureId: 'review',
+      contributionId: 'review-truth',
+      freshnessMethod: 'review.freshness',
+      completionMethod: 'review.completion',
+      grantRevision: 3,
+      lifecycleRevision: 4,
+      tenantScope: 'user-1',
+      installationProjectRoot: '/isolated/project',
+    };
     const claimed = await store.claim(
       claimInput({
         actionFamily: 'review',
+        terminalPredicateProviderBinding: binding,
         terminalPredicate: reviewPredicate('aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'),
       }),
     );
@@ -361,6 +426,7 @@ describe('RedisActionSuccessorLeaseStore', { skip: redisIsolationSkipReason(REDI
 
     const input = {
       successorLeaseId: 'lease-fresh-head-b',
+      terminalPredicateProviderBinding: { ...binding, pluginInstanceId: 'installation-2' },
       expectedGeneration: 1,
       terminalPredicate: reviewPredicate('bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'),
       holderCatIds: ['codex-terra'],
@@ -389,6 +455,8 @@ describe('RedisActionSuccessorLeaseStore', { skip: redisIsolationSkipReason(REDI
     assert.equal(persisted.key, claimed.lease.key);
     assert.equal(persisted.generation, 1);
     assert.equal(persisted.status, 'active');
+    assert.deepEqual(persisted.terminalPredicateProviderBinding, input.terminalPredicateProviderBinding);
+    assert.deepEqual(oldPersisted.terminalPredicateProviderBinding, binding);
     assert.equal((await store.getByIdentity(claimed.lease)).leaseId, 'lease-fresh-head-b');
     assert.deepEqual(await store.preflight(oldPersisted.leaseId, 1), { ok: false, reason: 'lease_not_active' });
 
@@ -397,6 +465,13 @@ describe('RedisActionSuccessorLeaseStore', { skip: redisIsolationSkipReason(REDI
         ...input,
         successorLeaseId: 'lease-fresh-head-conflict',
         holderCatIds: ['opus'],
+      }),
+      /fresh-revision replay mismatch/,
+    );
+    await assert.rejects(
+      store.continueFreshRevision(claimed.lease.leaseId, {
+        ...input,
+        terminalPredicateProviderBinding: { ...binding, pluginInstanceId: 'installation-3' },
       }),
       /fresh-revision replay mismatch/,
     );

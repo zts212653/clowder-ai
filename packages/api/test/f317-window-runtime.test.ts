@@ -15,8 +15,6 @@ import { normalizePluginInstanceAfterRestart } from '../src/domains/plugin/host-
 import { FilePluginInventoryStore } from '../src/domains/plugin/host-inventory/stores.js';
 import { OfficialPluginPackageInstaller } from '../src/domains/plugin/official-package-installer.js';
 import { createDormantPluginRuntimeComposition } from '../src/domains/plugin/runtime-composition.js';
-import { MemoryMeetingIntakeStore } from '../src/domains/signal-intake/MeetingIntakeStore.js';
-import { MemorySignalRouteStore } from '../src/domains/signal-intake/SignalRouteStore.js';
 import { desktopWindowFixture } from './f317-window.fixture.js';
 
 test('optional public Companion fields require the exact verified alpha.13 archive', () => {
@@ -68,8 +66,6 @@ test('installed companion uses the existing Broker, grant and package authority;
   let bridgePublicCompanionV2: boolean | undefined;
   const runtime = createDormantPluginRuntimeComposition({
     projectRoot: f.root,
-    routes: new MemorySignalRouteStore(),
-    intakes: new MemoryMeetingIntakeStore(),
     messageStore: new MessageStore(),
     now: () => now,
     createCompanionBridge: ({ publicCompanionV2 }) => {
@@ -135,8 +131,6 @@ test('missing grant blocks opening, and a window closed during startup cannot ap
   let opens = 0;
   const runtime = createDormantPluginRuntimeComposition({
     projectRoot: f.root,
-    routes: new MemorySignalRouteStore(),
-    intakes: new MemoryMeetingIntakeStore(),
     messageStore: new MessageStore(),
     desktopExecutor: {
       open: async (spec) => {
@@ -182,8 +176,6 @@ test('a live desktop loss records the bounded first cause without changing the i
   const now = 4_000;
   const runtime = createDormantPluginRuntimeComposition({
     projectRoot: f.root,
-    routes: new MemorySignalRouteStore(),
-    intakes: new MemoryMeetingIntakeStore(),
     messageStore: new MessageStore(),
     now: () => now,
     onDesktopFailure: (_id, failure) => reported.push(failure),

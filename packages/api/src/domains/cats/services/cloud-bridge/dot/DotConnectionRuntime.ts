@@ -1,7 +1,7 @@
-import type { BuiltinPluginRuntime } from '../../../../plugin/builtin-runtime/hybrid-supervisor.js';
+import type { BundledPluginRuntime } from '../../../../plugin/builtin-runtime/carriers/bundled-runtime-carrier.js';
 import type { DotConnectionService } from './DotConnectionService.js';
 
-export class DotConnectionRuntime implements BuiltinPluginRuntime {
+export class DotConnectionRuntime implements Pick<BundledPluginRuntime, 'start' | 'stop'> {
   constructor(
     private readonly connection: () => DotConnectionService | undefined,
     private readonly verified: () => Promise<boolean>,

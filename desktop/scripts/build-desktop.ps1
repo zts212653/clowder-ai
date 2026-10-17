@@ -521,10 +521,6 @@ if (-not $SkipPortableZip) {
     # Guide registry + flow definitions — bootcamp/guide features
     Copy-ToStaging (Join-Path $ProjectRoot "guides") "guides"
 
-    # Plugin manifests/resources — PluginRegistry scans this tree at runtime.
-    # F204 moved plugins from root plugins/ into packages/api/src/plugins/.
-    Copy-ToStaging (Join-Path $ProjectRoot "packages\api\src\plugins") "plugins"
-
     # Agent CLI hook templates
     $hooksSource = Join-Path $ProjectRoot ".claude\hooks\user-level"
     if (Test-Path $hooksSource) {

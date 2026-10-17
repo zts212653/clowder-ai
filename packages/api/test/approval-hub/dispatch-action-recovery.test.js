@@ -25,6 +25,18 @@ const lease = {
   completionCandidates: {},
   evidenceRefs: ['approval:dp-action-1'],
   terminalPredicateState: { kind: 'predicate_backed' },
+  terminalPredicateProviderBinding: {
+    pluginInstanceId: 'recovery-provider',
+    packageDigest: 'sha512-package',
+    featureId: 'review',
+    contributionId: 'review',
+    freshnessMethod: 'review.freshness',
+    completionMethod: 'review.completion',
+    grantRevision: 1,
+    lifecycleRevision: 1,
+    tenantScope: 'user-1',
+    installationProjectRoot: '/isolated/project',
+  },
   terminalPredicate: {
     kind: 'review_delivered',
     subjectRef: 'pr:owner/repo#42',
@@ -42,6 +54,13 @@ const lease = {
 };
 
 const verifiedTruthResolver = {
+  async authorizeDispatchRecovery(frozen) {
+    return {
+      status: 'authorized',
+      withAuthority: async (operation) => operation(),
+      resolveFreshness: () => verifiedTruthResolver.resolveFreshness(frozen.terminalPredicate),
+    };
+  },
   async resolveFreshness(predicate) {
     return {
       status: 'verified',

@@ -14,10 +14,48 @@
 import type { CreateFrustrationIssueInput, FrustrationIssue, FrustrationIssueStatus } from '@cat-cafe/shared';
 import { createFrustrationIssue } from '@cat-cafe/shared';
 import type { RedisClient } from '@cat-cafe/shared/utils';
-import type { ConfirmIssueInput, IFrustrationIssueStore } from '../ports/FrustrationIssueStore.js';
+import { sameFrustrationSource } from '../frustration-source-snapshot.js';
+import type {
+  ConfirmIssueInput,
+  IFrustrationIssueStore,
+  LinkFrustrationDraftInput,
+  LinkFrustrationDraftResult,
+} from '../ports/FrustrationIssueStore.js';
 import { FrustrationIssueKeys } from '../redis-keys/community/frustration-issue-keys.js';
 
 const DEFAULT_LIST_LIMIT = 100;
+
+// Recheck the exact raw material read by TypeScript, then arbitrate the link in the same Redis operation.
+// This works for existing hashes without adding a revision field or changing their persistence policy.
+const SOURCE_FIELDS = [
+  'issueId',
+  'status',
+  'threadId',
+  'userId',
+  'signalType',
+  'signalDetail',
+  'context',
+  'userDescription',
+  'createdAt',
+  'confirmedAt',
+] as const;
+const LINK_DRAFT_CAS = `
+if not redis.call('HGET', KEYS[1], 'issueId') then return 'missing' end
+if redis.call('HGET', KEYS[1], 'status') ~= 'confirmed' then return 'not_confirmed' end
+local expected = cjson.decode(ARGV[1])
+for field, value in pairs(expected) do
+  local actual = redis.call('HGET', KEYS[1], field)
+  if value == cjson.null then
+    if actual then return 'stale_source' end
+  elseif actual ~= value then return 'stale_source' end
+end
+local current = redis.call('HGET', KEYS[1], 'communityIssueDraftId') or ''
+if current == ARGV[3] then return 'already_linked' end
+if current ~= ARGV[2] then return 'conflict' end
+if current ~= '' and ARGV[4] ~= 'true' then return 'conflict' end
+redis.call('HSET', KEYS[1], 'communityIssueDraftId', ARGV[3])
+return 'linked'
+`;
 
 // ── Serialization ──────────────────────────────────────────────
 
@@ -161,6 +199,38 @@ export class RedisFrustrationIssueStore implements IFrustrationIssueStore {
 
   async setCommunityIssueDraftId(issueId: string, draftId: string): Promise<void> {
     await this.redis.hset(FrustrationIssueKeys.detail(issueId), 'communityIssueDraftId', draftId);
+  }
+
+  async compareAndSetCommunityIssueDraft(
+    input: LinkFrustrationDraftInput,
+    assertCurrent?: () => Promise<void>,
+  ): Promise<LinkFrustrationDraftResult> {
+    // Capture caller-owned data before the first asynchronous read.
+    const captured: LinkFrustrationDraftInput = structuredClone(input);
+    if (!captured.draftId || captured.expectedDraftId === '') throw new Error('Draft IDs must be nonempty');
+    const key = FrustrationIssueKeys.detail(captured.issueId);
+    const fields = await this.redis.hgetall(key);
+    const issue = hydrate(fields);
+    if (!issue) return { outcome: 'missing' };
+    if (issue.status !== 'confirmed') return { outcome: 'not_confirmed' };
+    if (!sameFrustrationSource(issue, captured.expectedSource)) return { outcome: 'stale_source' };
+    const expected = Object.fromEntries(SOURCE_FIELDS.map((field) => [field, fields[field] ?? null]));
+    await assertCurrent?.();
+    const outcome = await this.redis.eval(
+      LINK_DRAFT_CAS,
+      1,
+      key,
+      JSON.stringify(expected),
+      captured.expectedDraftId ?? '',
+      captured.draftId,
+      String(captured.allowReplace === true),
+    );
+    if (
+      !['linked', 'already_linked', 'missing', 'not_confirmed', 'stale_source', 'conflict'].includes(String(outcome))
+    ) {
+      throw new Error('Unexpected frustration link CAS result');
+    }
+    return { outcome: outcome as LinkFrustrationDraftResult['outcome'] };
   }
 
   async listByThread(threadId: string): Promise<FrustrationIssue[]> {

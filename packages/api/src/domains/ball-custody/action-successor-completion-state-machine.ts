@@ -6,6 +6,10 @@ import {
 } from './ActionTerminalPredicateCatalog.js';
 import { recordActionSuccessorOutcome } from './action-successor-outcome-state-machine.js';
 import type { ActionSuccessorLease } from './action-successor-state-machine.js';
+import {
+  type ActionTerminalProviderBinding,
+  nextActionTerminalProviderBinding,
+} from './action-terminal-provider-binding.js';
 
 export interface ActionCompletionCandidateSnapshot {
   evidenceRefs: string[];
@@ -154,6 +158,7 @@ export type ContinueActionSuccessorFreshRevisionResult = {
 };
 
 export interface ContinueActionSuccessorFreshRevisionInput {
+  terminalPredicateProviderBinding?: ActionTerminalProviderBinding;
   successorLeaseId: string;
   expectedGeneration: number;
   terminalPredicate: CanonicalActionTerminalPredicate;
@@ -257,6 +262,11 @@ export function continueActionSuccessorFreshRevision(
       holderOutcomes: {},
       terminalPredicateState: { kind: 'predicate_backed' },
       terminalPredicate: input.terminalPredicate,
+      terminalPredicateProviderBinding: nextActionTerminalProviderBinding(
+        current.terminalPredicateProviderBinding,
+        input.terminalPredicateProviderBinding,
+        current.tenantScope,
+      ),
       completionCandidates: {},
       evidenceRefs: [
         ...new Set([issuerStandingEvidenceRef, evidenceRef, input.delegateEvidenceRef].filter((r): r is string => !!r)),

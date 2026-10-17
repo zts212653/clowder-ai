@@ -91,6 +91,39 @@ describe('F267 capability-evolution measurement issuance route', () => {
     }
   });
 
+  it('returns 503 when the issuer has no publication provider', async () => {
+    const { createCapabilityEvolutionMeasurementIssuer } = await import(
+      '../dist/infrastructure/harness-eval/measurement/capability-evolution/capability-evolution-measurement-issuer.js'
+    );
+    let reads = 0;
+    const unreachable = async () => {
+      reads += 1;
+      assert.fail('unavailable provider must stop before evidence reads');
+    };
+    const app = await createApp({
+      principal: {
+        kind: 'agent_key',
+        agentKeyId: 'agent-key-codex-sol',
+        userId: 'operator',
+        catId: 'codex-sol',
+      },
+      measurementIssuer: createCapabilityEvolutionMeasurementIssuer({
+        repoRoot: '/definitely/not/a/repository',
+        programReader: { get: unreachable },
+        sourceStore: { readOnMain: unreachable, verifySourceRevision: unreachable },
+      }),
+    });
+
+    const response = await app.inject({
+      method: 'POST',
+      url: `/api/callbacks/evolution-programs/${encodeURIComponent(PROGRAM_ID)}/measurement-issuance`,
+      payload: { clientMessageId: 'missing-publication-provider' },
+    });
+    assert.equal(response.statusCode, 503);
+    assert.equal(response.json().reason, 'publication_provider_unavailable');
+    assert.equal(reads, 0);
+  });
+
   it('is callback-only and fails closed when the issuer is unavailable', async () => {
     const noPrincipal = await createApp({
       measurementIssuer: { issue: async () => assert.fail('unauthenticated request reached issuer') },

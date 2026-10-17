@@ -142,10 +142,6 @@
       {
         "from": "../assets",
         "to": "assets"
-      },
-      {
-        "from": "../packages/api/src/plugins",
-        "to": "plugins"
       }
     ],
     "asar": false,

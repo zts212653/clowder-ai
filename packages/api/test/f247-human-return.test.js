@@ -1,10 +1,26 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import { catRegistry } from '@cat-cafe/shared';
 import Fastify from 'fastify';
 import { MemoryCloudReturnGrantStore } from '../dist/domains/cats/services/cloud-bridge/cloud-return-grant.js';
 import { MessageStore } from '../dist/domains/cats/services/stores/ports/MessageStore.js';
 
 test('cloud replies to the human persist without routing to a cat, with optional human mention', async (t) => {
+  const originalCats = catRegistry.getAllConfigs();
+  catRegistry.reset();
+  for (const [id, config] of Object.entries(originalCats)) {
+    if (id !== 'gpt-pro' && config.provider !== 'openai-chatgpt-pro') catRegistry.register(id, config);
+  }
+  catRegistry.register('gpt-pro', {
+    catId: 'gpt-pro',
+    clientId: 'openai',
+    provider: 'openai-chatgpt-pro',
+    avatar: '/avatars/gpt-pro.png',
+  });
+  t.after(() => {
+    catRegistry.reset();
+    for (const [id, config] of Object.entries(originalCats)) catRegistry.register(id, config);
+  });
   const previousOwner = process.env.DEFAULT_OWNER_USER_ID;
   process.env.DEFAULT_OWNER_USER_ID = 'alice';
   t.after(() => {
@@ -23,7 +39,7 @@ test('cloud replies to the human persist without routing to a cat, with optional
   const cloudReturnGrantStore = new MemoryCloudReturnGrantStore();
   const invocationQueue = new InvocationQueue();
   const broadcasts = [];
-  const { secret } = await agentKeyRegistry.issue('gpt-pro', 'alice');
+  const { secret } = await agentKeyRegistry.issue('gpt-pro', 'alice', { scope: 'cloud-conversation' });
   const app = Fastify();
   t.after(() => app.close());
   await app.register(callbacksRoutes, {

@@ -22,6 +22,7 @@ after(async () => {
 async function archivedPackage({
   dependencies = { zod: '4.4.3' },
   includeShrinkwrap = true,
+  includeDependencyClosure = false,
   dependencyRegistry = 'https://registry.npmjs.org/',
   lockfileVersion = 3,
 } = {}) {
@@ -82,6 +83,10 @@ async function archivedPackage({
     ].join('\n'),
   );
   await writeFile(join(packageRoot, 'dist/mcp-entrypoint.js'), '// fixture\n');
+  if (includeDependencyClosure) {
+    await mkdir(join(packageRoot, 'node_modules', 'zod'), { recursive: true });
+    await writeFile(join(packageRoot, 'node_modules', 'zod', 'package.json'), '{"version":"4.4.3"}\n');
+  }
   const archivePath = join(sourceRoot, 'package.tgz');
   await execFileAsync('tar', ['czf', archivePath, '-C', sourceRoot, 'package']);
   const bytes = await readFile(archivePath);
@@ -109,6 +114,7 @@ test('materializes a verified builtin package with a closed, script-free npm dep
     pluginId: 'dev.clowder.video-analysis',
     packageDigest: archive.digest,
     packageName: '@clowder-ai/video-analysis',
+    sourceKind: 'catalog',
   });
 
   assert.equal(installs.length, 1);
@@ -122,6 +128,8 @@ test('materializes a verified builtin package with a closed, script-free npm dep
     zod: '4.4.3',
   });
   assert.equal((await stat(join(materialized.rootDir, 'dist/mcp-entrypoint.js'))).isFile(), true);
+  assert.equal(materialized.dependencyRoot, join(installs[0].cwd, 'node_modules'));
+  assert.equal((await stat(join(materialized.dependencyRoot, 'zod', 'package.json'))).isFile(), true);
   await materialized.verifyIntegrity();
 
   const rootDir = materialized.rootDir;
@@ -148,6 +156,7 @@ test('rejects non-registry dependency specs before invoking npm', async () => {
       pluginId: 'dev.clowder.video-analysis',
       packageDigest: archive.digest,
       packageName: '@clowder-ai/video-analysis',
+      sourceKind: 'catalog',
     }),
     (error) => error?.code === 'UNSAFE_DEPENDENCY_SPEC',
   );
@@ -173,6 +182,7 @@ test('rejects a dependency-bearing runtime package without a publisher-owned shr
       pluginId: 'dev.clowder.video-analysis',
       packageDigest: archive.digest,
       packageName: '@clowder-ai/video-analysis',
+      sourceKind: 'catalog',
     }),
     (error) => error?.code === 'DEPENDENCY_LOCK_REQUIRED',
   );
@@ -198,6 +208,7 @@ test('rejects shrinkwrap entries that leave the canonical npm registry boundary'
       pluginId: 'dev.clowder.video-analysis',
       packageDigest: archive.digest,
       packageName: '@clowder-ai/video-analysis',
+      sourceKind: 'catalog',
     }),
     (error) => error?.code === 'UNSAFE_DEPENDENCY_LOCK',
   );
@@ -223,6 +234,7 @@ test('rejects shrinkwrap entries whose host only prefixes the canonical registry
       pluginId: 'dev.clowder.video-analysis',
       packageDigest: archive.digest,
       packageName: '@clowder-ai/video-analysis',
+      sourceKind: 'catalog',
     }),
     (error) => error?.code === 'UNSAFE_DEPENDENCY_LOCK',
   );
@@ -248,8 +260,64 @@ test('rejects lockfile v2 instead of accepting its second unvalidated dependency
       pluginId: 'dev.clowder.video-analysis',
       packageDigest: archive.digest,
       packageName: '@clowder-ai/video-analysis',
+      sourceKind: 'catalog',
     }),
     (error) => error?.code === 'UNSAFE_DEPENDENCY_LOCK',
   );
   assert.equal(installs, 0);
+});
+
+test('prefers an owner-provided dependency closure over an accompanying shrinkwrap', async () => {
+  const packagesRoot = await mkdtemp(join(tmpdir(), 'cat-cafe-f202-builtin-owner-closure-'));
+  roots.push(packagesRoot);
+  const archive = await archivedPackage({ includeShrinkwrap: true, includeDependencyClosure: true });
+  await publishPluginPackageArchive(packagesRoot, archive.digest, archive.bytes);
+  let installs = 0;
+  const materializer = new FilesystemBuiltinPluginPackageMaterializer({
+    packagesRoot,
+    installDependencies: async () => {
+      installs += 1;
+    },
+  });
+
+  const materialized = await materializer.resolve({
+    pluginInstanceId: 'pi_video',
+    pluginId: 'dev.clowder.video-analysis',
+    packageDigest: archive.digest,
+    packageName: '@clowder-ai/video-analysis',
+    sourceKind: 'local-archive',
+  });
+
+  assert.equal(installs, 0);
+  assert.equal(materialized.dependencyRoot, join(materialized.rootDir, 'node_modules'));
+  assert.equal((await stat(join(materialized.dependencyRoot, 'zod', 'package.json'))).isFile(), true);
+  await materialized.release();
+});
+
+test('allows an owner source to install a locked dependency closure from its configured mirror', async () => {
+  const packagesRoot = await mkdtemp(join(tmpdir(), 'cat-cafe-f202-builtin-owner-mirror-'));
+  roots.push(packagesRoot);
+  const archive = await archivedPackage({ dependencyRegistry: 'https://packages.example.invalid/' });
+  await publishPluginPackageArchive(packagesRoot, archive.digest, archive.bytes);
+  const installs = [];
+  const materializer = new FilesystemBuiltinPluginPackageMaterializer({
+    packagesRoot,
+    installDependencies: async (input) => {
+      installs.push(structuredClone(input));
+      await mkdir(join(input.cwd, 'node_modules', 'zod'), { recursive: true });
+    },
+  });
+
+  const materialized = await materializer.resolve({
+    pluginInstanceId: 'pi_video',
+    pluginId: 'dev.clowder.video-analysis',
+    packageDigest: archive.digest,
+    packageName: '@clowder-ai/video-analysis',
+    sourceKind: 'git',
+  });
+
+  assert.equal(installs.length, 1);
+  assert.equal(installs[0].env.npm_config_registry, process.env.npm_config_registry);
+  assert.equal(installs[0].env.npm_config_ignore_scripts, 'true');
+  await materialized.release();
 });

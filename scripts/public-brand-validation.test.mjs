@@ -33,10 +33,7 @@ function fixture() {
     JSON.stringify({ source_commit_sha: 'a'.repeat(40), target_head_sha: 'b'.repeat(40), manifest_version: 3 }),
   );
   write('packages/web/src/app/layout.tsx', 'Clowder AI Your AI team collaboration space favicon.svg icon-192x192.png');
-  write(
-    'packages/api/src/infrastructure/connectors/connector-gateway-bootstrap.ts',
-    "frontendBaseUrl: deps.frontendBaseUrl ?? 'http://localhost:3003'",
-  );
+  write('packages/api/src/config/frontend-origin.ts', "const DEFAULT_FRONTEND_BASE_URL = 'http://localhost:3003'");
   write('packages/web/public/icons/favicon.svg', '<svg/>');
   execFileSync('git', ['init', '-q'], { cwd: dir });
   const stage = () => execFileSync('git', ['add', '.'], { cwd: dir });
@@ -59,10 +56,10 @@ test('public export validates its staged brand and port instead of contradictory
 
 test('public guard rejects staged home port even when worktree has corrected it', () => {
   const f = fixture();
-  const path = 'packages/api/src/infrastructure/connectors/connector-gateway-bootstrap.ts';
-  f.write(path, "frontendBaseUrl: deps.frontendBaseUrl ?? 'http://localhost:3001'");
+  const path = 'packages/api/src/config/frontend-origin.ts';
+  f.write(path, "const DEFAULT_FRONTEND_BASE_URL = 'http://localhost:3001'");
   f.stage();
-  f.write(path, "frontendBaseUrl: deps.frontendBaseUrl ?? 'http://localhost:3003'");
+  f.write(path, "const DEFAULT_FRONTEND_BASE_URL = 'http://localhost:3003'");
   const r = f.run();
   assert.notEqual(r.status, 0);
   assert.match(r.stdout + r.stderr, /public frontend port/);
@@ -187,16 +184,16 @@ for (const [name, path, body, diagnostic] of [
     /missing client for Clowder AI/,
   ],
   [
-    'Weixin fallback',
-    'packages/api/src/infrastructure/connectors/im-connectors/weixin/WeixinAdapter.ts',
+    'Agent API fallback',
+    'packages/api/src/domains/cats/services/agents/routing/AgentRouter.ts',
     "process.env.API_SERVER_PORT ?? '3002'",
     /public API fallback/,
   ],
   [
-    'Weixin hardcoded port',
-    'packages/api/src/infrastructure/connectors/im-connectors/weixin/WeixinAdapter.ts',
-    "process.env.API_SERVER_PORT ?? '3004'; const bad = 'http://localhost:3003'",
-    /hardcoded localhost/,
+    'frontend default with unrelated public URL',
+    'packages/api/src/config/frontend-origin.ts',
+    "const DEFAULT_FRONTEND_BASE_URL = 'http://localhost:3001'; const other = 'http://localhost:3003'",
+    /public frontend port/,
   ],
 ]) {
   test(`public rule rejects ${name} drift`, () => {

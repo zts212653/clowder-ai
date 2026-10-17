@@ -48,7 +48,7 @@ export class DesignGateEpisodeSourceProviderImpl implements DesignGateEpisodeSou
   constructor(
     private readonly deps: {
       repoRoot: string;
-      pullRequestReader: DesignGatePullRequestReader;
+      pullRequestReader?: DesignGatePullRequestReader;
       reviewMessageReader: DesignGateReviewMessageReader;
       gitTruth: DesignGateGitTruth;
     },

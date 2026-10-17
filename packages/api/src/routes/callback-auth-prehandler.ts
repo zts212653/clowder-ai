@@ -5,13 +5,14 @@
  * verifies via InvocationRegistry, and decorates request.callbackAuth.
  */
 
-import type { AgentKeyVerifyResult, CallbackPrincipal } from '@cat-cafe/shared';
+import { type AgentKeyVerifyResult, type CallbackPrincipal, catRegistry } from '@cat-cafe/shared';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { InvocationRecord, VerifyResult } from '../domains/cats/services/agents/invocation/InvocationRegistry.js';
 import { toolExecutionPolicyDenial } from '../domains/cats/services/agents/invocation/tool-execution-policy.js';
+import { cloudPrincipalStanding } from '../domains/cats/services/cloud-bridge/cloud-conversation-identity.js';
+import type { PluginNativeActionTarget } from '../domains/cats/services/types.js';
 import type { CallbackAuthSystemMessageNotifier } from './callback-auth-system-message.js';
 import { recordCallbackAuthFailure, recordLegacyFallbackHit } from './callback-auth-telemetry.js';
-import { allowCollectiveWorkScope } from './callback-collective-work-scope.js';
 import { makeCallbackAuthError } from './callback-errors.js';
 import { derivePrincipal } from './callback-scope-helpers.js';
 
@@ -27,12 +28,18 @@ function callbackToolFromUrl(url: string): string {
   return match ? match[1] : 'unknown';
 }
 
-function allowToolExecution(request: FastifyRequest, reply: FastifyReply, record: InvocationRecord): boolean {
+function allowToolExecution(
+  request: FastifyRequest,
+  reply: FastifyReply,
+  record: InvocationRecord,
+  options: CallbackAuthHookOptions,
+): boolean {
   const denial = toolExecutionPolicyDenial(
     record.toolExecutionPolicy,
-    record.toolExecutionPolicy?.mode === 'callback_allowlist'
+    record.toolExecutionPolicy?.mode === 'callback_allowlist' || record.toolExecutionPolicy?.mode === 'plugin_native'
       ? `${request.method} ${request.url}`
       : callbackToolFromUrl(request.routeOptions.url ?? ''),
+    record.toolExecutionPolicy?.mode === 'plugin_native' ? options.pluginNativeActionTarget?.(request) : undefined,
   );
   if (!denial) return true;
   reply.status(403).send({
@@ -70,6 +77,8 @@ export interface CallbackAuthHookOptions {
   allowDotSourceBoundReturn?: boolean;
   /** Session hooks reuse invocation auth but own a distinct, scope-bound action policy. */
   enforceToolExecutionPolicy?: boolean;
+  /** Only the native action route supplies this Host token-registry resolver. */
+  pluginNativeActionTarget?: (request: FastifyRequest) => PluginNativeActionTarget | undefined;
 }
 
 export function rejectCallbackAuthDuringStartupRecovery(registry: CallbackAuthRegistry, reply: FastifyReply): boolean {
@@ -109,12 +118,12 @@ export function registerCallbackAuthHook(
     // refresh-token does its own atomic verifyLatest in preValidation and
     // pre-populates callbackAuth. Preserve that atomic freshness decision.
     if (request.callbackAuth) {
-      if (!allowCollectiveWorkScope(request, reply, request.callbackAuth)) return;
       if (
         options.enforceToolExecutionPolicy !== false ||
-        request.callbackAuth.toolExecutionPolicy?.mode === 'callback_allowlist'
+        request.callbackAuth.toolExecutionPolicy?.mode === 'callback_allowlist' ||
+        request.callbackAuth.toolExecutionPolicy?.mode === 'plugin_native'
       )
-        allowToolExecution(request, reply, request.callbackAuth);
+        allowToolExecution(request, reply, request.callbackAuth, options);
       return;
     }
 
@@ -158,7 +167,16 @@ export function registerCallbackAuthHook(
           reply.status(403).send({ error: 'dot_facade_required', reason: 'dot_callback_scope_denied' });
           return;
         }
-        request.callbackPrincipal = derivePrincipal(akResult.record);
+        // F202 h3c-2: a key of the cloud return boundary whose cat is no longer the configured cloud
+        // cat is honoured on no route — it must not fall back to being an ordinary agent key. The
+        // standing found here travels with the principal, so a route never re-derives it on its own.
+        const standing = cloudPrincipalStanding(catRegistry, akResult.record);
+        if (standing === 'refused') {
+          recordCallbackAuthFailure({ reason: 'cloud_principal_not_configured', tool });
+          reply.status(403).send(makeCallbackAuthError('cloud_principal_not_configured'));
+          return;
+        }
+        request.callbackPrincipal = derivePrincipal(akResult.record, { cloudBoundary: standing === 'cloud' });
         return;
       }
       return;
@@ -209,11 +227,11 @@ export function registerCallbackAuthHook(
         '[#476 DEPRECATED] Callback credentials received via body/query — migrate to X-Invocation-Id / X-Callback-Token headers',
       );
     }
-    if (!allowCollectiveWorkScope(request, reply, result.record)) return;
     if (
       (options.enforceToolExecutionPolicy !== false ||
-        result.record.toolExecutionPolicy?.mode === 'callback_allowlist') &&
-      !allowToolExecution(request, reply, result.record)
+        result.record.toolExecutionPolicy?.mode === 'callback_allowlist' ||
+        result.record.toolExecutionPolicy?.mode === 'plugin_native') &&
+      !allowToolExecution(request, reply, result.record, options)
     )
       return;
     request.callbackAuth = result.record;

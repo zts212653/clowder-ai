@@ -6,16 +6,11 @@ import {
   MachineOfficialPluginCatalog,
   OFFICIAL_PLUGIN_CATALOG_URL,
 } from './machine-catalog-provider.js';
+import { OFFICIAL_PLUGIN_HOST_POLICIES } from './official-plugin-host-policies.js';
 
 /** Host authority used by both discovery and repository replacement in main(). */
 export const PLUGIN_MANAGER_HOST_POLICIES: readonly MachineCatalogHostPolicy[] = [
-  // The plugin repository supplies release coordinates; this grants no Host capability.
-  { pluginId: 'official.tripo-studio', effectiveGrants: [] },
-  {
-    pluginId: 'dev.clowder.video-analysis',
-    replacesRepositoryPluginId: 'video-analysis',
-    effectiveGrants: ['plugin.config.read', 'secret.read'],
-  },
+  ...OFFICIAL_PLUGIN_HOST_POLICIES,
   // Reuse Companion's existing Host authority; discovery does not grant new capabilities.
   ...OFFICIAL_PLUGIN_POLICIES.filter((policy) => policy.pluginId === 'official.companion'),
 ];

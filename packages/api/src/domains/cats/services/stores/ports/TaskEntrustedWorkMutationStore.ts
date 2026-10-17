@@ -1,6 +1,12 @@
 import type { TaskItem } from '@cat-cafe/shared';
 import { entrustedWorkV1Schema } from '@cat-cafe/shared';
+import {
+  type AttachEntrustedWorkArtifactInput,
+  captureEntrustedWorkArtifactInput,
+  prepareEntrustedWorkArtifactEvidence,
+} from './EntrustedWorkArtifactEvidence.js';
 import { prepareEntrustedWorkUpdate } from './EntrustedWorkContractUpdate.js';
+import { advanceEntrustedWorkRevision } from './EntrustedWorkRevision.js';
 import { reconcileDeploymentWaitTaskMutation } from './TaskDeploymentWaitState.js';
 import type {
   CloseEntrustedWorkStoreInput,
@@ -12,6 +18,13 @@ import type {
 /** Owns the in-memory compare-and-transition boundary for entrusted Task mutations. */
 export class TaskEntrustedWorkMutationStore {
   constructor(private readonly tasks: Map<string, TaskItem>) {}
+
+  attachArtifact(taskId: string, raw: AttachEntrustedWorkArtifactInput) {
+    const input = captureEntrustedWorkArtifactInput(raw);
+    const result = prepareEntrustedWorkArtifactEvidence(this.tasks.get(taskId) ?? null, input);
+    if (result.kind === 'attached') this.tasks.set(taskId, result.task);
+    return result;
+  }
 
   close(taskId: string, input: CloseEntrustedWorkStoreInput): CloseEntrustedWorkStoreResult {
     const existing = this.tasks.get(taskId);
@@ -25,7 +38,7 @@ export class TaskEntrustedWorkMutationStore {
     const { completion: _previousCompletion, ...openWork } = existing.entrustedWork;
     const entrustedWork = entrustedWorkV1Schema.parse({
       ...openWork,
-      revision: existing.entrustedWork.revision + 1,
+      ...advanceEntrustedWorkRevision(existing.entrustedWork),
       closure: input.closure,
       ...(input.closure.state === 'satisfied'
         ? {

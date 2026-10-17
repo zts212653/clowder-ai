@@ -36,8 +36,6 @@ export const DESKTOP_CLOUD_PRO_PHASE0_ALLOWED_TOOLS = derivedProfileSet(
 const KNOWN_DESKTOP_MODES = new Set(['fable-phase0', 'cloud-pro-phase0', 'live-companion']);
 
 export interface ToolsetEnv {
-  collectiveWork?: boolean;
-  participation?: boolean;
   readonly?: boolean;
   hasAgentKey?: boolean;
   desktopMode?: string;
@@ -56,8 +54,7 @@ export interface ToolsetEnv {
  * tests may pass a fixture env to avoid module-cache games.
  */
 export function parseToolsetEnv(env: NodeJS.ProcessEnv = process.env): ToolsetEnv {
-  if (env.CAT_CAFE_MCP_PROFILE && !['collective-participation', 'collective-work'].includes(env.CAT_CAFE_MCP_PROFILE))
-    throw new Error('Unknown CAT_CAFE_MCP_PROFILE');
+  if (env.CAT_CAFE_MCP_PROFILE) throw new Error('Unknown CAT_CAFE_MCP_PROFILE');
   const desktopMode = env.CAT_CAFE_DESKTOP_MODE?.trim();
   if (
     desktopMode === 'live-companion' &&
@@ -65,8 +62,6 @@ export function parseToolsetEnv(env: NodeJS.ProcessEnv = process.env): ToolsetEn
   )
     throw new Error('Live companion requires native invocation binding');
   return {
-    collectiveWork: env.CAT_CAFE_MCP_PROFILE === 'collective-work',
-    participation: env.CAT_CAFE_MCP_PROFILE === 'collective-participation',
     readonly: env.CAT_CAFE_READONLY === 'true',
     // Credential USABILITY, not env presence (#1494): a '{}' variant map, bad
     // JSON, a blank secret, or a path to a missing sidecar resolve zero keys
@@ -82,7 +77,6 @@ export function parseToolsetEnv(env: NodeJS.ProcessEnv = process.env): ToolsetEn
  * Filter a list of tools by the current ToolsetEnv.
  *
  * Precedence:
- *   0. explicit Collective profile — no union with any other runtime surface.
  *   1. desktopMode — NOT union with READONLY/AGENT_KEY whitelists.
  *      Unknown value → throw (fail-fast on server startup).
  *   2. !readonly → return all tools unchanged.
@@ -95,15 +89,6 @@ export function applyReadonlyFilter<T extends { name: string }>(
   tools: readonly T[],
   env: ToolsetEnv = parseToolsetEnv(),
 ): readonly T[] {
-  if (env.collectiveWork) {
-    if (env.participation) throw new Error('Conflicting Collective MCP profiles');
-    const allowed = derivedProfileSet(CANONICAL_TOOL_REGISTRY, 'collective-work');
-    return tools.filter((tool) => allowed.has(tool.name));
-  }
-  if (env.participation) {
-    const allowed = derivedProfileSet(CANONICAL_TOOL_REGISTRY, 'collective-participation');
-    return tools.filter((tool) => allowed.has(tool.name));
-  }
   if (env.desktopMode) {
     if (!KNOWN_DESKTOP_MODES.has(env.desktopMode)) {
       throw new Error(
@@ -353,7 +338,7 @@ export function buildLimbTools(env?: ToolsetEnv): readonly ToolDef[] {
   // full limb surface in standalone limb.ts entry. Antigravity / default
   // (no desktopMode set) keeps the F061 contract: limb fully exposed,
   // not filtered by readonly.
-  if (e.desktopMode || e.participation || e.collectiveWork) {
+  if (e.desktopMode) {
     return buildFamilyTools('limb', e);
   }
   return CANONICAL_TOOL_REGISTRY.filter((definition) => definition.serverFamily === 'limb');

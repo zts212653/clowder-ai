@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { existsSync } from 'node:fs';
 import { test } from 'node:test';
 import {
   humanSessionFirstLine,
@@ -73,9 +74,13 @@ test('the current production prompt prefixes remain recognizable in their actual
     });
     assert.ok(isCatCafeSessionInput(identity), `${id}: identity-only native input must remain recognizable`);
     const staging = buildStagingPrepend(createCatId(id));
-    assert.ok(staging, `${id}: the staging fixture must produce an actual prepend`);
+    if (existsSync(new URL('../../../cat-cafe-skills/refs/l0-staging-content.md', import.meta.url))) {
+      assert.ok(staging, `${id}: available staging content must produce an actual prepend`);
+    } else {
+      assert.equal(staging, '', 'public exports omit private staging content');
+    }
     // invokeSingleCat prepends routing, then staging, before identity and user text.
-    const withoutRouting = [staging, identity, 'Please review this code'].join('\n\n---\n\n');
+    const withoutRouting = [staging, identity, 'Please review this code'].filter(Boolean).join('\n\n---\n\n');
     assert.ok(isCatCafeSessionInput(withoutRouting), `${id}: staging-led native input must remain recognizable`);
     assert.ok(
       isCatCafeSessionInput(`${routing}\n\n---\n\n${withoutRouting}`),

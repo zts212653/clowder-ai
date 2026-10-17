@@ -985,7 +985,6 @@ start_runtime_worktree() {
     export CAT_CAFE_WORKSPACE_ROOT="${CAT_CAFE_WORKSPACE_ROOT:-$PROJECT_DIR}"
     export CAT_CAFE_DEPLOYMENT_ID=runtime
     export CAT_CAFE_PROVISION_GLOBAL_SIDECAR=1
-    export CONNECTOR_GATEWAY_AUTOSTART="${CONNECTOR_GATEWAY_AUTOSTART:-1}"
     # Runtime contract: passive frozen — no tsx watch auto-restart on src changes.
     export CAT_CAFE_DIRECT_NO_WATCH="${CAT_CAFE_DIRECT_NO_WATCH:-1}"
     export CAT_CAFE_RUNTIME_ARTIFACTS_VERIFIED=1
@@ -1020,7 +1019,6 @@ start_runtime_worktree() {
   export CAT_CAFE_WORKSPACE_ROOT="${CAT_CAFE_WORKSPACE_ROOT:-$PROJECT_DIR}"
   export CAT_CAFE_DEPLOYMENT_ID=runtime
   export CAT_CAFE_PROVISION_GLOBAL_SIDECAR=1
-  export CONNECTOR_GATEWAY_AUTOSTART="${CONNECTOR_GATEWAY_AUTOSTART:-1}"
   # Runtime contract: passive frozen — no tsx watch auto-restart on src changes.
   # Restart only happens on explicit `pnpm start` (which runs build invariant first).
   # See docs/decisions/039-runtime-passive-freeze.md for design rationale.
@@ -1029,7 +1027,6 @@ start_runtime_worktree() {
   info "exporting CAT_CAFE_RUNTIME_ROOT=$CAT_CAFE_RUNTIME_ROOT"
   info "exporting CAT_CAFE_WORKSPACE_ROOT=$CAT_CAFE_WORKSPACE_ROOT"
   info "exporting CAT_CAFE_PROVISION_GLOBAL_SIDECAR=$CAT_CAFE_PROVISION_GLOBAL_SIDECAR"
-  info "exporting CONNECTOR_GATEWAY_AUTOSTART=$CONNECTOR_GATEWAY_AUTOSTART (official runtime opt-in)"
   info "exporting CAT_CAFE_DIRECT_NO_WATCH=$CAT_CAFE_DIRECT_NO_WATCH (runtime passive-freeze)"
   # Runtime = production: auto-inject --prod-web for PWA + Tailscale support.
   # Bash 3.2 + set -u: empty-array expansion can throw "unbound variable".

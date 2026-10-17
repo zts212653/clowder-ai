@@ -10,6 +10,11 @@ import type {
   ActionSuccessorReturnDeliveryState,
   ActionSuccessorReturnTransition,
 } from './action-successor-return-state-machine.js';
+import {
+  type ActionTerminalProviderBinding,
+  actionTerminalProviderBindingsMatch,
+  parseActionTerminalProviderBinding,
+} from './action-terminal-provider-binding.js';
 
 export type {
   ActionSuccessorActionFamily,
@@ -117,6 +122,7 @@ export interface ActionSuccessorReplacementTransition {
 }
 
 interface ActionSuccessorLeaseBase extends ActionSuccessorIdentity {
+  terminalPredicateProviderBinding?: ActionTerminalProviderBinding;
   leaseId: string;
   mode: ActionSuccessorMode;
   holderCatIds: string[];
@@ -182,6 +188,7 @@ export function isRecoverableActionSuccessorReturn(lease: ActionSuccessorLease):
 }
 
 export interface ClaimActionSuccessorInput extends ActionSuccessorIdentityInput {
+  terminalPredicateProviderBinding?: ActionTerminalProviderBinding;
   leaseId: string;
   mode: ActionSuccessorMode;
   holderCatIds: string[];
@@ -225,6 +232,7 @@ function isSameReplayPayload(
     | 'predecessorThreadId'
     | 'issuerStandingEvidenceRef'
     | 'terminalPredicate'
+    | 'terminalPredicateProviderBinding'
   >,
   holderCatIds: string[],
 ): boolean {
@@ -236,6 +244,13 @@ function isSameReplayPayload(
   if (current.predecessorThreadId !== input.predecessorThreadId?.trim()) return false;
   if (current.issuerStandingEvidenceRef !== input.issuerStandingEvidenceRef.trim()) return false;
   if (current.terminalPredicate?.digest !== input.terminalPredicate?.digest) return false;
+  if (
+    !actionTerminalProviderBindingsMatch(
+      current.terminalPredicateProviderBinding,
+      input.terminalPredicateProviderBinding,
+    )
+  )
+    return false;
   if (current.holderCatIds.length !== holderCatIds.length) return false;
   const currentHolders = new Set(current.holderCatIds);
   return holderCatIds.every((catId) => currentHolders.has(catId));
@@ -278,6 +293,10 @@ export function claimActionSuccessor(
     throw new Error('terminal predicate is required for a new action successor generation');
   }
   const identity = canonicalizeActionIdentity(input);
+  const providerBinding = parseActionTerminalProviderBinding(
+    input.terminalPredicateProviderBinding,
+    identity.tenantScope,
+  );
   const holderCatIds = normalizeHolders(input.mode, input.holderCatIds, input.parallelIntent);
   const provenance = normalizeClaimProvenance(input);
   if (current) {
@@ -304,6 +323,7 @@ export function claimActionSuccessor(
     holderOutcomes: {},
     terminalPredicateState: { kind: 'predicate_backed' },
     terminalPredicate: input.terminalPredicate,
+    ...(providerBinding ? { terminalPredicateProviderBinding: providerBinding } : {}),
     completionCandidates: {},
     evidenceRefs: [...new Set([...input.evidenceRefs, provenance.issuerStandingEvidenceRef])],
     returnTransitions: [],

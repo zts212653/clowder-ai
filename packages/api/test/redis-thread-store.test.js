@@ -76,6 +76,40 @@ describe('RedisThreadStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () =
     assert.equal(fetched.createdBy, 'user1');
   });
 
+  it('persists generic plugin ownership without TTL and ignores malformed stored ownership', async () => {
+    const persistentStore = new RedisThreadStore(redis, { ttlSeconds: 0 });
+    const thread = await persistentStore.create('user1', 'Plugin-owned thread');
+    const ownership = { v: 1, pluginInstanceId: 'pi_telegram' };
+
+    await persistentStore.updatePluginOwnership(thread.id, ownership);
+    assert.equal(await redis.ttl(threadDetailKey(thread.id)), -1, 'plugin ownership must not expire');
+    assert.deepEqual((await persistentStore.get(thread.id)).pluginOwnership, ownership);
+
+    await redis.hset(threadDetailKey(thread.id), 'pluginOwnership', JSON.stringify({ v: 1, pluginInstanceId: '' }));
+    assert.equal(
+      (await persistentStore.get(thread.id)).pluginOwnership,
+      undefined,
+      'malformed ownership must not grant a plugin authority over the thread',
+    );
+
+    await persistentStore.updatePluginOwnership(thread.id, null);
+    assert.equal(await redis.hget(threadDetailKey(thread.id), 'pluginOwnership'), null);
+
+    await assert.rejects(
+      () => persistentStore.updatePluginOwnership(thread.id, { v: 1, pluginInstanceId: 'pi_telegram', extra: true }),
+      /invalid plugin thread ownership/,
+    );
+    assert.equal(await redis.hget(threadDetailKey(thread.id), 'pluginOwnership'), null);
+
+    await persistentStore.delete(thread.id);
+    await persistentStore.updatePluginOwnership(thread.id, ownership);
+    assert.deepEqual(
+      await redis.hkeys(threadDetailKey(thread.id)),
+      [],
+      'late ownership writes must not recreate a thread',
+    );
+  });
+
   it('persists goal intent without TTL and rejects stale provider reconciliation', async () => {
     const persistentStore = new RedisThreadStore(redis, { ttlSeconds: 0 });
     const thread = await persistentStore.create('user1', 'Goal Thread');

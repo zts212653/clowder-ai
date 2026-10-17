@@ -326,7 +326,7 @@ EOF
 )"
 
 # 3. 注册这个 PR 的追踪（F280 + #1392 AC-7）
-# → 调用 MCP: cat_cafe_register_pr_tracking(repoFullName, prNumber)
+# → tool_search 发现已安装 GitHub 插件的 PR 跟踪工具，再按其 schema 注册 repoFullName / prNumber / registrationId
 #    普通情况这就是全部参数。服务端会装上 PR 自身的状态条件（review decision /
 #    CI 终态 / 冲突 / 新 HEAD）和两个评论面，受众按你在这个 PR 上的角色解析；
 #    返回里的 notification 写明实际装了什么、过滤了什么。
@@ -372,8 +372,8 @@ gh pr comment {PR_NUMBER} --body '@codex review'
 # Skip this step for non-community PRs.
 #
 # Do not call localhost:3004 or hand-build callback auth. The author calls
-# cat_cafe_community_request_guardian(caseId, author, reviewer); the assigned non-author/non-reviewer
-# guardian receives the returned checklist + signoffToken and calls cat_cafe_community_guardian_signoff.
+# github_community_request_guardian({id: caseId, payload: {author, reviewer}}); the assigned non-author/non-reviewer
+# guardian receives the returned checklist + signoffToken and calls github_community_guardian_signoff.
 # Merge remains blocked until the canonical community case projects an approved durable signoff.
 
 # 6.8 Hotfix Cross-Cat Review Gate（F177 Phase E）🔴

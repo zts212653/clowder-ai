@@ -124,6 +124,7 @@ function validateFreshRevisionReplay(lease: ActionSuccessorLease, expected: Acti
     issuerStandingEvidenceRef: expected.issuerStandingEvidenceRef,
     evidenceRefs: expected.evidenceRefs,
     terminalPredicate,
+    terminalPredicateProviderBinding: expected.terminalPredicateProviderBinding,
     now,
   });
   if (replay.outcome !== 'replayed') {

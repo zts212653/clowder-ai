@@ -458,13 +458,13 @@ export function resolveUserCapsule(profileDir, relationshipKey) {
  * @param {string} options.catId - cat ID (must be registered in catRegistry)
  * @param {string} [options.runtimeModel] - resolved runtime model (e.g. claude-opus-4-7)
  * @param {string} [options.profileDir] - override for user profile directory (fixture isolation)
- * @param {'owner'|'public'|'collective-work'} [options.projection='owner'] - Work retains home L0 without USER_CAPSULE
+ * @param {'owner'|'public'} [options.projection='owner']
  * @returns {Promise<string>} compiled L0 ready for system-prompt injection
  */
 export async function compileL0(options) {
   await bootstrapCatRegistry();
   const { catId, runtimeModel, profileDir, projection = 'owner' } = options;
-  if (!['owner', 'public', 'collective-work'].includes(projection)) {
+  if (!['owner', 'public'].includes(projection)) {
     throw new Error(`compileL0: unsupported projection "${projection}"`);
   }
   const entry = catRegistry.tryGet(catId);
@@ -543,7 +543,7 @@ if (isCliEntrypoint(import.meta.url, process.argv[1])) {
   const catIdx = args.indexOf('--cat');
   if (catIdx < 0 || !args[catIdx + 1]) {
     console.error(
-      'Usage: node scripts/compile-system-prompt-l0.mjs --cat <catId> [--out <path>] [--profile-dir <path>] [--projection owner|public|collective-work]',
+      'Usage: node scripts/compile-system-prompt-l0.mjs --cat <catId> [--out <path>] [--profile-dir <path>] [--projection owner|public]',
     );
     process.exit(2);
   }

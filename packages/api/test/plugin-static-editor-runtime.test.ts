@@ -4,8 +4,6 @@ import { test } from 'node:test';
 import { MessageStore } from '../src/domains/cats/services/stores/ports/MessageStore.js';
 import { OfficialPluginPackageInstaller } from '../src/domains/plugin/official-package-installer.js';
 import { createDormantPluginRuntimeComposition } from '../src/domains/plugin/runtime-composition.js';
-import { MemoryMeetingIntakeStore } from '../src/domains/signal-intake/MeetingIntakeStore.js';
-import { MemorySignalRouteStore } from '../src/domains/signal-intake/SignalRouteStore.js';
 import { staticEditorFixture, staticEditorManifest } from './plugin-static-editor.fixture.js';
 
 function fetchSurface(origin: string, path: string): Promise<{ status: number; body: string }> {
@@ -25,8 +23,6 @@ test('real Host composition installs, enables and revokes a static editor throug
   const f = await staticEditorFixture(staticEditorManifest());
   const runtime = createDormantPluginRuntimeComposition({
     projectRoot: f.root,
-    routes: new MemorySignalRouteStore(),
-    intakes: new MemoryMeetingIntakeStore(),
     messageStore: new MessageStore(),
     editorParentOrigin: 'http://localhost:4179',
   });

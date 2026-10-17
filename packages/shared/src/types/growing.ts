@@ -188,6 +188,8 @@ const entrustedClosureSchema = z.discriminatedUnion('state', [
 export const entrustedWorkV1Schema = z
   .object({
     revision: revisionSchema,
+    /** Host-owned execution epoch. Absent on legacy contracts; never inferred from aggregate revision. */
+    executionAuthorityRevision: z.number().int().positive().max(Number.MAX_SAFE_INTEGER).optional(),
     admission: entrustedAdmissionSchema,
     developmentScope: developmentScopeV1Schema.optional(),
     parentTaskRef: developmentTaskRefSchema.optional(),

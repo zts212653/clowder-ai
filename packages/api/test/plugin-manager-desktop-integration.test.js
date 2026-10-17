@@ -9,7 +9,6 @@ import {
   createDormantPluginRuntimeComposition,
   createPluginManagerRuntimeComposition,
 } from '../dist/domains/plugin/runtime-composition.js';
-import { MemoryMeetingIntakeStore, MemorySignalRouteStore } from '../dist/domains/signal-intake/index.js';
 import { catalogEntry, packageArchive } from './plugin-official-package-installer.fixture.js';
 
 async function desktopManager(
@@ -64,8 +63,6 @@ async function desktopManager(
   const observed = { prepared: 0, opens: 0, closes: 0 };
   const runtime = createDormantPluginRuntimeComposition({
     projectRoot,
-    routes: new MemorySignalRouteStore(),
-    intakes: new MemoryMeetingIntakeStore(),
     messageStore: new MessageStore(),
     processes: {
       spawn: async () => {
@@ -99,14 +96,6 @@ async function desktopManager(
     },
     catalogManifests: [],
     fetchOfficialArchive: async () => archive.bytes,
-    builtinContributions: {
-      materializer: {
-        resolve: async () => {
-          throw new Error('desktop packages must keep their dedicated runtime');
-        },
-      },
-      configuration: { readConfig: async () => undefined, readSecret: async () => undefined },
-    },
     prepareDesktopComponent: async () => {
       observed.prepared++;
       if (preparationFails) throw new Error('desktop component unavailable');

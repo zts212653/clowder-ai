@@ -132,3 +132,31 @@ test('business Task completion terminalizes its active deployment wait without a
   assert.equal(lateCancel.statusCode, 409);
   await h.app.close();
 });
+
+test('inactive plugin projection does not shadow an active deployment wait', async () => {
+  const h = await fixture();
+  const task = h.taskStore.get(h.task.id);
+  assert.ok(
+    h.taskStore.replacePluginWait(task.id, {
+      expectedStatus: task.status,
+      expectedState: undefined,
+      expectedGeneration: null,
+      state: {
+        pluginInstanceId: 'instance',
+        generation: 1,
+        userId: 'user-1',
+        catId: 'codex-sol',
+        threadId: task.threadId,
+      },
+    }),
+  );
+  const response = await h.app.inject({
+    method: 'POST',
+    url: `/api/tasks/${task.id}/cancel-wait`,
+    headers: { 'x-cat-cafe-user': 'user-1' },
+    payload: {},
+  });
+  assert.equal(response.statusCode, 200);
+  assert.equal(h.taskStore.get(task.id).deploymentWait.waitOutcome.reason, 'user_cancel');
+  await h.app.close();
+});

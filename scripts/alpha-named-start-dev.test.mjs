@@ -38,7 +38,7 @@ test('the real start-dev consumer reasserts the loaded tuple after stale dotenv 
   const f = namedAlphaFixture(t);
   writeFileSync(
     join(f.alphaRoot, '.env'),
-    'CAT_CAFE_ALPHA_COORDINATES=forged\nCAT_CAFE_DEPLOYMENT_ID=runtime\nCAT_CAFE_RUNTIME_ROOT=/foreign\nCAT_CAFE_DATA_DIR=/foreign\nUPLOAD_DIR=/foreign/uploads\nTRANSCRIPT_DATA_DIR=/foreign/transcripts\nANNOTATION_DATA_DIR=/foreign/stories\nFRONTEND_PORT=3001\nAPI_SERVER_HOST=0.0.0.0\nCOLLECTIVE_SERVICE_PORT=5211\nCAT_CAFE_SIDECAR_LIFECYCLE_DISABLED=0\nCONNECTOR_GATEWAY_AUTOSTART=1\n',
+    'CAT_CAFE_ALPHA_COORDINATES=forged\nCAT_CAFE_DEPLOYMENT_ID=runtime\nCAT_CAFE_RUNTIME_ROOT=/foreign\nCAT_CAFE_DATA_DIR=/foreign\nUPLOAD_DIR=/foreign/uploads\nTRANSCRIPT_DATA_DIR=/foreign/transcripts\nANNOTATION_DATA_DIR=/foreign/stories\nFRONTEND_PORT=3001\nAPI_SERVER_HOST=0.0.0.0\nCAT_CAFE_SIDECAR_LIFECYCLE_DISABLED=0\n',
   );
   const result = source(f, "node -e 'console.log(JSON.stringify(process.env))'\nfrontend_launch_command");
   assert.equal(result.status, 0, result.stderr);
@@ -51,9 +51,7 @@ test('the real start-dev consumer reasserts the loaded tuple after stale dotenv 
   assert.equal(actual.TRANSCRIPT_DATA_DIR, join(f.alphaRoot, '.cat-cafe/transcripts'));
   assert.equal(actual.ANNOTATION_DATA_DIR, join(f.alphaRoot, '.cat-cafe/stories'));
   assert.equal(actual.API_SERVER_HOST, '127.0.0.1');
-  assert.equal(actual.COLLECTIVE_SERVICE_PORT, '5511');
   assert.equal(actual.CAT_CAFE_SIDECAR_LIFECYCLE_DISABLED, '1');
-  assert.equal(actual.CONNECTOR_GATEWAY_AUTOSTART, '0');
   assert.match(web, /next dev -p 5311 -H 127\.0\.0\.1$/);
 });
 

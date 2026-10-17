@@ -15,6 +15,7 @@ type Resolution =
 
 function hasActiveOwnedWait(task: TaskItem, input: { readonly userId: string; readonly catId: string }): boolean {
   if (task.ownerCatId !== input.catId || task.userId !== input.userId || task.status === 'done') return false;
+  if (task.pluginWait) return task.pluginWait.await !== undefined;
   if (task.kind === 'work') return task.deploymentWait?.await !== undefined;
   if (task.kind === 'pr_tracking' || task.kind === 'issue_tracking') {
     return task.automationState?.await !== undefined;
@@ -45,8 +46,14 @@ export async function resolveTypedWaitContinuation(input: {
     for (const task of tasks) {
       if (!hasActiveOwnedWait(task, input)) continue;
       const snapshot = await input.taskStore.getWaitRegistration(task.id);
-      if (isLiveTypedWaitRegistration(snapshot, identity, input.now ?? Date.now()) && snapshot?.receipt) {
-        return { kind: 'bypass', reference: { taskId: task.id, generation: snapshot.receipt.generation } };
+      if (isLiveTypedWaitRegistration(snapshot, identity, input.now ?? Date.now()) && snapshot) {
+        return {
+          kind: 'bypass',
+          reference: {
+            taskId: task.id,
+            generation: snapshot.task.pluginWait?.generation ?? snapshot.receipt!.generation,
+          },
+        };
       }
     }
     return { kind: 'reject', reason: 'no_candidate' };

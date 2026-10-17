@@ -122,7 +122,9 @@ export function FrustrationIssueCard({ block }: FrustrationIssueCardProps) {
         // Cancelled/missing drafts are skipped — user can create a replacement.
         if (data.issue?.communityIssueDraftId && !hydratedDraftId) {
           try {
-            const draftRes = await apiFetch(`/api/community-issue-drafts/${data.issue.communityIssueDraftId}`);
+            const draftRes = await apiFetch(
+              `/api/plugins/official.github-operations/github/community-issue-drafts/by-id/${encodeURIComponent(data.issue.communityIssueDraftId)}`,
+            );
             if (draftRes.ok) {
               const draftData = (await draftRes.json()) as { draft?: { status?: string } };
               const draftStatus = draftData.draft?.status;

@@ -1,4 +1,5 @@
 import { isLifecycleAppendFailure, isMessageFrom } from '@cat-cafe/shared';
+import { assertPluginPublicInvocationCarrier } from '../../../stores/ports/plugin-public-invocation-carrier.js';
 import type { QueueLedgerEntry, QueueLedgerExecution, QueueLedgerPayload, QueueOwner } from './QueueLedger.js';
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -170,6 +171,28 @@ export function assertQueueLedgerEntry(value: unknown): asserts value is QueueLe
       entry.execution.ownerAuthProvenance !== 'strict')
   )
     throw new Error('queue ledger Live admission scope is invalid');
+  if (entry.execution.pluginPublicInvocation !== undefined) {
+    const carrier = entry.execution.pluginPublicInvocation;
+    assertPluginPublicInvocationCarrier(carrier);
+    if (
+      entry.from.kind !== 'plugin' ||
+      entry.from.instanceId !== carrier.pluginInstanceId ||
+      entry.owner.kind !== 'user' ||
+      entry.targets.length !== 1 ||
+      entry.targets[0] !== carrier.targetCatId ||
+      entry.payload.messageId !== carrier.sourceMessageId ||
+      entry.payload.sourceRecordId !== carrier.sourceMessageId ||
+      entry.execution.ownerAuthProvenance !== 'unknown' ||
+      entry.execution.executionScope !== undefined ||
+      entry.execution.liveSessionId !== undefined ||
+      entry.execution.a2aTriggerMessageId !== undefined ||
+      entry.execution.cloudDispatchProvenance !== undefined ||
+      entry.execution.waitContinuationCarrier !== undefined ||
+      entry.execution.actionSuccessorFence !== undefined
+    ) {
+      throw new Error('public Queue carrier identity or authority is invalid');
+    }
+  }
   assertQueueLedgerExecutionScope(entry as QueueLedgerEntry);
   if (!isRecord(entry.delivery)) throw new Error('queue ledger delivery is invalid');
   if (entry.delivery.routingHeldTargetIds !== undefined) assertQueueTargets(entry.delivery.routingHeldTargetIds);

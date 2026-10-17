@@ -55,9 +55,11 @@ import {
   isInternalNonQuotableParent,
   resolveVisibleReplyParent,
 } from '../domains/cats/services/stores/visibility.js';
+import { storedPluginMessageSource } from '../domains/plugin/host-surface/plugin-messaging-source.js';
 import { createModuleLogger } from '../infrastructure/logger.js';
 import type { SocketManager } from '../infrastructure/websocket/index.js';
 import { normalizeJsonUnicode } from '../utils/json-unicode.js';
+import { buildThreadDeepLink } from '../utils/thread-deep-link.js';
 import { getDefaultUploadDir } from '../utils/upload-paths.js';
 import { registerGenerationMessagesRoute } from './generation-messages.js';
 import { importStoredProjectMessage } from './messages-project-review.js';
@@ -1158,6 +1160,7 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
     };
     const chatItems: TimelineItem[] = page.map((m) => {
       const from = messageFrom(m);
+      const source = storedPluginMessageSource(m);
       // Same shared rule the client hydration paths use; `messageFrom` always names a sender here.
       const type: TimelineItem['type'] = timelineMessageKind(from, Boolean(m.source)) ?? 'user';
       return {
@@ -1241,15 +1244,15 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
         ...(m.revealedAt ? { revealedAt: m.revealedAt } : {}),
         ...(m.deliveredAt ? { deliveredAt: m.deliveredAt } : {}),
         ...(m.timelineOrderAt !== undefined ? { timelineOrderAt: m.timelineOrderAt } : {}),
-        ...(m.source
+        ...(source
           ? {
               source: {
-                connector: m.source.connector,
-                label: m.source.label,
-                icon: m.source.icon,
-                ...(m.source.url ? { url: m.source.url } : {}),
-                ...(m.source.meta ? { meta: m.source.meta } : {}),
-                ...(m.source.sender ? { sender: m.source.sender } : {}),
+                connector: source.connector,
+                label: source.label,
+                icon: source.icon,
+                ...(source.url ? { url: source.url } : {}),
+                ...(source.meta ? { meta: source.meta } : {}),
+                ...(source.sender ? { sender: source.sender } : {}),
               },
             }
           : {}),

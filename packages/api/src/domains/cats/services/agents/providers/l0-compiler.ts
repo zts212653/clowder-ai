@@ -155,8 +155,7 @@ type L0ProjectionContext =
 
 function resolveProjection(options: CompileL0Options): L0Projection {
   if (options.projection === undefined) return 'owner';
-  if (options.projection === 'owner' || options.projection === 'public' || options.projection === 'collective-work')
-    return options.projection;
+  if (options.projection === 'owner' || options.projection === 'public') return options.projection;
   throw new Error(`Unsupported L0 projection: ${String(options.projection)}`);
 }
 

@@ -31,9 +31,12 @@ export function CommunityPublishFlow({ issueId, status, restoredDraftId, onStatu
     onStatusChange('creating_draft');
     setDraftError(null);
     try {
-      const res = await apiFetch(`/api/community-issue-drafts/from-frustration-issue/${issueId}`, {
-        method: 'POST',
-      });
+      const res = await apiFetch(
+        `/api/plugins/official.github-operations/github/community-issue-drafts/from-frustration-issue/${encodeURIComponent(issueId)}`,
+        {
+          method: 'POST',
+        },
+      );
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
         if (res.status === 409) {

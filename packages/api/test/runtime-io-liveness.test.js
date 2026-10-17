@@ -7,7 +7,6 @@ import { setImmediate as yieldTurn } from 'node:timers/promises';
 import { CanonicalTasteMemoryCueSource } from '../dist/domains/memory/cue/sources/TasteMemoryCueSource.js';
 import { clearEnvironmentCache, getEnvironmentProfile } from '../dist/domains/services/environment-detector.js';
 import { FileTasteRepository } from '../dist/domains/taste/services/TasteRepository.js';
-import { uninstallPlugin } from '../dist/infrastructure/connectors/plugins/plugin-installer.js';
 import { invalidateCliCommand, resolveCliCommand } from '../dist/utils/cli-resolve.js';
 
 async function fixture() {
@@ -101,71 +100,3 @@ test(
     }
   },
 );
-test('R12: uninstall yields while recursively removing a plugin and preserves config', async () => {
-  const root = await fixture();
-  try {
-    await mkdir(join(root, '.cat-cafe/plugins/my-plugin/nested'), { recursive: true });
-    await mkdir(join(root, '.cat-cafe/im-connector-config'), { recursive: true });
-    await writeFile(join(root, '.cat-cafe/im-connector-config/my-plugin.json'), '{}');
-    await writeFile(join(root, '.cat-cafe/plugins/my-plugin/nested/index.js'), '');
-    let yielded = false;
-    const marker = yieldTurn().then(() => {
-      yielded = true;
-    });
-    const result = await uninstallPlugin(root, 'my-plugin');
-    assert.ok(yielded, 'recursive deletion ran synchronously');
-    assert.deepEqual(result, { id: 'my-plugin', action: 'uninstalled', configPreserved: true });
-    await marker;
-  } finally {
-    await rm(root, { recursive: true, force: true });
-  }
-});
-test('R12: expanded entry/byte budgets reject before publishing and clean staging', async () => {
-  const { execFile } = await import('node:child_process');
-  const { promisify } = await import('node:util');
-  const { installPlugin } = await import('../dist/infrastructure/connectors/plugins/plugin-installer.js');
-  const { readdir } = await import('node:fs/promises');
-  const root = await fixture();
-  try {
-    const source = join(root, 'archive/my-plugin');
-    await mkdir(source, { recursive: true });
-    await writeFile(join(source, 'connector.yaml'), 'id: my-plugin\nname: fixture\n');
-    await writeFile(join(source, 'index.js'), 'export default {}');
-    await promisify(execFile)('tar', ['czf', join(root, 'plugin.tar.gz'), '-C', join(root, 'archive'), 'my-plugin']);
-    const result = await installPlugin(root, join(root, 'plugin.tar.gz'), new Set(), { maxExtractedEntries: 1 });
-    assert.ok('code' in result && result.code === 'INVALID_ARCHIVE', 'expanded archive exceeded its entry budget');
-    assert.deepEqual(
-      await readdir(join(root, '.cat-cafe/plugins')),
-      [],
-      'failed install must leave no published/staging tree',
-    );
-  } finally {
-    await rm(root, { recursive: true, force: true });
-  }
-});
-test('R12: publication failure restores the installed tree and mutations of one plugin serialize', async () => {
-  const { replacePluginTree, withPluginMutation } = await import(
-    '../dist/infrastructure/connectors/plugins/plugin-filesystem.js'
-  );
-  const { setTimeout: delay } = await import('node:timers/promises');
-  const root = await fixture();
-  try {
-    const target = join(root, 'installed');
-    await mkdir(target);
-    await writeFile(join(target, 'index.js'), 'old');
-    await assert.rejects(replacePluginTree(join(root, 'missing-staging'), target));
-    assert.equal(await readFile(join(target, 'index.js'), 'utf8'), 'old');
-    let active = 0;
-    let maximum = 0;
-    const action = () =>
-      withPluginMutation(target, async () => {
-        maximum = Math.max(maximum, ++active);
-        await delay(20);
-        active--;
-      });
-    await Promise.all([action(), action(), action()]);
-    assert.equal(maximum, 1);
-  } finally {
-    await rm(root, { recursive: true, force: true });
-  }
-});

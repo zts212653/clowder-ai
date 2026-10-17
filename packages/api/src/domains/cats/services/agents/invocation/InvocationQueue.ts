@@ -1,3 +1,4 @@
+import type { PluginPublicInvocationCarrierV1 } from '../../stores/ports/plugin-public-invocation-carrier.js';
 /**
  * InvocationQueue
  * Per-thread durable work ledger for user/connector/agent/system dispatch.
@@ -78,6 +79,7 @@ type LifecycleTargetRetirementResult =
   | { outcome: 'state_changed' };
 
 export interface QueueEnqueueInput {
+  pluginPublicInvocation?: PluginPublicInvocationCarrierV1;
   /** Server-owned deliberate repeat keeps the originally selected recipient. */
   exactTargets?: boolean;
   /** Consumer observers register after commit and before the shared drain notification. Not persisted. */
@@ -250,7 +252,8 @@ function isOrdinaryBodyReadEntry(entry: Pick<QueueEntry, 'sourceCategory' | 'exe
     !entry.execution.liveSessionId &&
     !entry.execution.actionSuccessorFence &&
     !entry.execution.waitContinuationCarrier &&
-    !entry.execution.executionScope
+    !entry.execution.executionScope &&
+    !entry.execution.pluginPublicInvocation
   );
 }
 
@@ -453,6 +456,7 @@ export class InvocationQueue {
       readOnlyToolPolicy: input.readOnlyToolPolicy,
       actionSuccessorFence: input.actionSuccessorFence,
       waitContinuationCarrier: input.waitContinuationCarrier,
+      pluginPublicInvocation: input.pluginPublicInvocation,
       suggestedSkill: input.suggestedSkill,
       callerTraceContext: input.callerTraceContext,
       a2aTriggerMessageId: input.a2aTriggerMessageId ?? (input.kind === 'message_wake' ? messageId : undefined),

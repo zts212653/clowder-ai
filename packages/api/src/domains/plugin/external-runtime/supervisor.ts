@@ -5,13 +5,14 @@ import {
   WIRE_METHOD_REGISTRY,
   WIRE_VERSION,
 } from '@clowder-ai/plugin-contract';
+import type { PluginRuntimeAdmission } from '../carrier/runtime-carrier.js';
 import type { BrokerConnection } from '../host-broker/builtin-loopback.js';
 import { HostBrokerError } from '../host-broker/types.js';
 import type { PluginInventoryTransaction } from '../host-inventory/ports.js';
-import type { PluginInstanceRecord, PluginPackageRecord, RuntimeState } from '../host-inventory/types.js';
+import type { RuntimeState } from '../host-inventory/types.js';
 import { NodeExternalPluginProcessAdapter } from './node-process-adapter.js';
-import { verifyExternalPackage } from './package-authority.js';
-import { projectRuntimeCrash } from './runtime-crash-projection.js';
+import { verifyPackageEntrypoint } from './package-entrypoint-authority.js';
+import { deferred, type RuntimeExecution } from './runtime-execution.js';
 import { closeRuntimeExecutionResources } from './runtime-execution-cleanup.js';
 import {
   createRuntimeHeartbeatController,
@@ -20,6 +21,13 @@ import {
   resolveRuntimeHeartbeatPolicy,
 } from './runtime-heartbeat.js';
 import { projectRuntimeReplacementFailure, RuntimeLeaseRecoveryCoordinator } from './runtime-lease-recovery.js';
+import { projectTerminalState, type RuntimeProjectionDeps, setRuntimeState } from './runtime-state-projection.js';
+import {
+  assertAuthorityUnchanged,
+  projectStartConfiguration,
+  type RunnableAuthority,
+  resolveRunnableAuthority,
+} from './start-authority.js';
 import { createExternalStdioBrokerTransport, type ExternalStdioBrokerTransport } from './stdio-broker-transport.js';
 import type {
   ExternalPluginProcess,
@@ -32,44 +40,6 @@ import { ExternalPluginRuntimeError } from './types.js';
 const DEFAULT_HANDSHAKE_TIMEOUT_MS = 10_000;
 const TRANSIENT_EXIT_RECOVERY_COOLDOWN_MS = 5 * 60_000;
 
-interface RunnableAuthority {
-  readonly instance: PluginInstanceRecord;
-  readonly packageRecord: PluginPackageRecord;
-}
-
-interface Deferred<Value> {
-  readonly promise: Promise<Value>;
-  resolve(value: Value): void;
-  reject(error: unknown): void;
-}
-
-interface RuntimeExecution {
-  readonly pluginInstanceId: string;
-  packageDigest: string;
-  readonly ready: Deferred<void>;
-  readonly closed: Deferred<void>;
-  process?: ExternalPluginProcess;
-  exit?: Awaited<ExternalPluginProcess['exited']>;
-  locatedPackage?: VerifiedPluginPackage;
-  connection?: BrokerConnection;
-  transport?: ExternalStdioBrokerTransport;
-  heartbeat?: RuntimeHeartbeatController;
-  projected: boolean;
-  started: boolean;
-  ending: boolean;
-  terminal?: Promise<void>;
-}
-
-function deferred<Value>(): Deferred<Value> {
-  let resolve!: (value: Value) => void;
-  let reject!: (error: unknown) => void;
-  const promise = new Promise<Value>((resolvePromise, rejectPromise) => {
-    resolve = resolvePromise;
-    reject = rejectPromise;
-  });
-  return { promise, resolve, reject };
-}
-
 export class ExternalPluginRuntimeSupervisor {
   private readonly active = new Map<string, RuntimeExecution>();
   readonly handshakeTimeoutMs: number;
@@ -78,10 +48,13 @@ export class ExternalPluginRuntimeSupervisor {
   private readonly processes;
   private readonly recovery: RuntimeLeaseRecoveryCoordinator;
   private readonly transientRecoveryAt = new Map<string, number>();
+  /** The two collaborators every runtime-state write needs, bound once. */
+  private readonly projection: RuntimeProjectionDeps;
 
   constructor(private readonly options: ExternalPluginRuntimeSupervisorOptions) {
     this.handshakeTimeoutMs = options.handshakeTimeoutMs ?? DEFAULT_HANDSHAKE_TIMEOUT_MS;
     this.now = options.now ?? Date.now;
+    this.projection = { inventory: options.inventory, now: () => this.now() };
     this.heartbeatPolicy = resolveRuntimeHeartbeatPolicy(
       options.broker.activeRuntimeLeaseTtlMs,
       options.heartbeatIntervalMs,
@@ -94,6 +67,12 @@ export class ExternalPluginRuntimeSupervisor {
       },
       projectFailure: (target) => projectRuntimeReplacementFailure(options.inventory, target, this.now),
     });
+  }
+
+  /** The child-process carrier. Every transport other than the Host's own in-process
+   * one is a package that runs beside the Host, so it is carried here. */
+  claims({ packageRecord }: PluginRuntimeAdmission): boolean {
+    return packageRecord.manifest.runtime !== undefined && packageRecord.manifest.runtime.transport !== 'builtin';
   }
 
   start(pluginInstanceId: string): Promise<ExternalPluginRuntimeHandle> {
@@ -163,6 +142,18 @@ export class ExternalPluginRuntimeSupervisor {
     return execution.transport.call('host.messaging.deliver', input);
   }
 
+  invoke(pluginInstanceId: string, method: string, params: unknown): Promise<unknown> {
+    if (method !== 'host.messaging.deliver') {
+      return Promise.reject(
+        new ExternalPluginRuntimeError(
+          'DELIVERY_REJECTED',
+          `${pluginInstanceId} stdio runtime does not expose Host action ${method}`,
+        ),
+      );
+    }
+    return this.deliver(pluginInstanceId, params as M0CDeliverInput);
+  }
+
   async recoverAfterRestart(): Promise<number> {
     if (this.active.size > 0) {
       throw new ExternalPluginRuntimeError(
@@ -174,25 +165,38 @@ export class ExternalPluginRuntimeSupervisor {
   }
 
   private async startOwned(execution: RuntimeExecution): Promise<ExternalPluginRuntimeHandle> {
-    const authority = await this.runnableAuthority(execution.pluginInstanceId);
+    const authority = await resolveRunnableAuthority(this.options, execution.pluginInstanceId);
     execution.packageDigest = authority.instance.packageDigest;
-    if (authority.packageRecord.manifest.runtime.transport !== 'stdio') {
+    const { runtime } = authority.packageRecord.manifest;
+    if (runtime?.transport !== 'stdio') {
       throw new ExternalPluginRuntimeError(
         'UNSUPPORTED_TRANSPORT',
-        `runtime transport ${authority.packageRecord.manifest.runtime.transport} is not executable by this Host`,
+        `runtime transport ${runtime?.transport ?? 'none'} is not executable by this Host`,
       );
     }
     const located = await this.options.packages.resolveInstalledPackage(authority.instance.packageDigest);
     execution.locatedPackage = located;
-    const verified = await verifyExternalPackage(authority.packageRecord, located);
-    await this.setRuntimeState(execution, 'starting');
+    const verified = await verifyPackageEntrypoint(authority.packageRecord, located);
+    await setRuntimeState(this.projection, execution, 'starting');
     execution.projected = true;
     await located.verifyIntegrity();
+    // F202 C1 gap C: manifest-declared config/secrets, grant-checked and fail-closed. Declared
+    // fields are resolved BEFORE the protocol variables are written, and a declared key inside
+    // the CLOWDER_ namespace is refused outright, so a package can never restate its own
+    // Host-issued identity by shadowing one of them.
+    const declaredEnv = await projectStartConfiguration(this.options, authority);
+    // The authority above was read before package resolution, integrity verification and the
+    // configuration read. A revoke landing in that window is legal for this instance, so the
+    // values resolved from the old snapshot must not reach a child without revalidation
+    // (sixth-round review P1) — the same authority fence every carrier must apply before
+    // handing a package any Host-owned value.
+    await assertAuthorityUnchanged(this.options, authority, 'starting');
     execution.process = await this.processes.spawn({
       command: process.execPath,
       args: [verified.entrypoint],
       cwd: verified.rootDir,
       env: {
+        ...declaredEnv,
         CLOWDER_PLUGIN_ID: authority.instance.pluginId,
         CLOWDER_PACKAGE_DIGEST: authority.instance.packageDigest,
         CLOWDER_CONTRACT_VERSION: authority.packageRecord.contractVersion,
@@ -205,7 +209,7 @@ export class ExternalPluginRuntimeSupervisor {
       return this.finish(execution, 'process_exit', terminalState, false);
     });
     this.assertOpen(execution);
-    await this.setRuntimeState(execution, 'handshaking');
+    await setRuntimeState(this.projection, execution, 'handshaking');
     execution.connection = await this.options.broker.openExternalConnection(execution.pluginInstanceId);
     this.assertOpen(execution);
     execution.transport = createExternalStdioBrokerTransport({
@@ -262,57 +266,6 @@ export class ExternalPluginRuntimeSupervisor {
     }
   }
 
-  private async runnableAuthority(pluginInstanceId: string): Promise<RunnableAuthority> {
-    const snapshot = await this.options.inventory.snapshot();
-    const instance = snapshot.instances.find((candidate) => candidate.pluginInstanceId === pluginInstanceId);
-    const current = instance
-      ? snapshot.instances.find(
-          (candidate) => candidate.pluginId === instance.pluginId && candidate.lifecycleState === 'installed',
-        )
-      : undefined;
-    const packageRecord = instance
-      ? snapshot.packages.find(
-          (candidate) => candidate.packageDigest === instance.packageDigest && candidate.packageState === 'installed',
-        )
-      : undefined;
-    if (
-      !instance ||
-      current?.pluginInstanceId !== pluginInstanceId ||
-      instance.lifecycleState !== 'installed' ||
-      instance.configReadiness !== 'ready' ||
-      instance.activationState !== 'enabled' ||
-      (instance.runtimeState !== 'stopped' && instance.runtimeState !== 'crashed') ||
-      !packageRecord
-    ) {
-      throw new ExternalPluginRuntimeError('INSTANCE_NOT_RUNNABLE', `${pluginInstanceId} is not a runnable instance`);
-    }
-    return { instance, packageRecord };
-  }
-
-  private async setRuntimeState(execution: RuntimeExecution, runtimeState: RuntimeState): Promise<void> {
-    await this.options.inventory.transaction((transaction: PluginInventoryTransaction) => {
-      const instance = transaction.instances.get(execution.pluginInstanceId);
-      if (
-        !instance ||
-        instance.lifecycleState !== 'installed' ||
-        instance.packageDigest !== execution.packageDigest ||
-        instance.configReadiness !== 'ready' ||
-        instance.activationState !== 'enabled'
-      ) {
-        throw new ExternalPluginRuntimeError(
-          'INSTANCE_NOT_RUNNABLE',
-          `${execution.pluginInstanceId} authority changed before runtime projection`,
-        );
-      }
-      if (runtimeState === 'starting') {
-        const { lastRuntimeError: _lastRuntimeError, ...withoutRuntimeError } = instance;
-        transaction.instances.put({ ...withoutRuntimeError, runtimeState, updatedAt: this.now() });
-      } else {
-        transaction.instances.put({ ...instance, runtimeState, updatedAt: this.now() });
-      }
-    });
-  }
-
   private finish(
     execution: RuntimeExecution,
     reason: string,
@@ -334,7 +287,7 @@ export class ExternalPluginRuntimeSupervisor {
     execution.heartbeat?.stop();
     execution.transport?.close();
     await closeRuntimeExecutionResources(execution, reason, terminateProcess);
-    await this.projectTerminalState(execution, terminalState);
+    await projectTerminalState(this.projection, execution, terminalState);
     this.active.delete(execution.pluginInstanceId);
     execution.closed.resolve(undefined);
     if (terminalState === 'restartable') {
@@ -342,22 +295,6 @@ export class ExternalPluginRuntimeSupervisor {
         pluginInstanceId: execution.pluginInstanceId,
         packageDigest: execution.packageDigest,
       });
-    }
-  }
-
-  private async projectTerminalState(
-    execution: RuntimeExecution,
-    terminalState: 'stopped' | 'crashed' | 'restartable',
-  ): Promise<void> {
-    if (execution.projected && (terminalState === 'crashed' || terminalState === 'restartable')) {
-      await projectRuntimeCrash(this.options.inventory, execution, this.now, {
-        preserveActivation: terminalState === 'restartable',
-        suppressExitDiagnostic: terminalState === 'restartable',
-      }).catch(() => undefined);
-      return;
-    }
-    if (execution.projected && !execution.connection) {
-      await this.setRuntimeState(execution, 'stopped').catch(() => undefined);
     }
   }
 

@@ -847,6 +847,19 @@ export async function* routeSerial(
           continue;
         }
       }
+      // Retained Queue records may name the retired Host-only Collective executor.
+      // Its scope must never silently become an ordinary, unrestricted invocation.
+      if (options.executionScope) {
+        yield {
+          type: 'error',
+          catId,
+          errorCode: 'legacy_execution_scope_retired',
+          error: '旧 Collective 执行入口已迁出，请从已安装插件重新发起。',
+          timestamp: Date.now(),
+        };
+        index++;
+        continue;
+      }
       // F148 OQ-2: briefing→invocation link + context eval
       let briefingMessageId: string | undefined;
       let briefingCoverageMap: import('./context-transport.js').CoverageMap | undefined;
@@ -887,6 +900,7 @@ export async function* routeSerial(
       const streamReplyTo = activeA2ATriggerMessageId ?? queueTriggerReplyTo;
       const turnTriggerMessageId = streamReplyTo ?? currentUserMessageId ?? a2aTriggerMessageId;
       const turnTriggerMessage = turnTriggerMessageId ? await deps.messageStore.getById(turnTriggerMessageId) : null;
+      const turnTriggerThreadId = turnTriggerMessage?.threadId === threadId ? threadId : undefined;
       const collectiveBoundTurn = isCollectiveBoundResponse(options.executionScope, turnTriggerMessage);
       const streamReplyPreview = streamReplyTo
         ? await hydrateReplyPreview(deps.messageStore, streamReplyTo)
@@ -1948,7 +1962,6 @@ export async function* routeSerial(
         ...(options.asrPersonMemoryScenes?.length ? { asrPersonMemoryScenes: options.asrPersonMemoryScenes } : {}),
         ...(memoryCueLegacyFallbacks.length > 0 ? { memoryCueLegacyFallbacks } : {}),
         ...(options.toolExecutionPolicy ? { toolExecutionPolicy: options.toolExecutionPolicy } : {}),
-        ...(options.executionScope ? { executionScope: options.executionScope } : {}),
         executionKind: initialExecutionKind,
         ...(options.beforeOutputCommit ? { outputFenced: true } : {}),
         executionCausal: {
@@ -2722,7 +2735,6 @@ export async function* routeSerial(
           ...(options.routeSpan ? { routeSpan: options.routeSpan } : {}),
           invocationSpanRef,
           ...(options.toolExecutionPolicy ? { toolExecutionPolicy: options.toolExecutionPolicy } : {}),
-          ...(options.executionScope ? { executionScope: options.executionScope } : {}),
           executionKind: 'routing_guard',
           ...(options.beforeOutputCommit ? { outputFenced: true } : {}),
           executionCausal: {
@@ -3126,8 +3138,7 @@ export async function* routeSerial(
 
         // A2A mention detection (缅因猫 P1-3: only after full text accumulated)
         // Line-start @mention = always actionable (no keyword gate)
-        // Collective relay uses the authenticated post-message carrier. Plain prose cannot mint an unscoped queue item.
-        a2aMentions = collectiveBoundTurn ? [] : parseA2AMentions(storedContent, catId);
+        a2aMentions = parseA2AMentions(storedContent, catId);
 
         // clowder-ai#489: baseline counter — line-start mentions
         if (a2aMentions.length > 0) {
@@ -3533,7 +3544,13 @@ export async function* routeSerial(
                   }
                 : {}),
               ...(turnTriggerMessageId
-                ? { causal: { kind: 'invocation_reply' as const, triggerMessageId: turnTriggerMessageId } }
+                ? {
+                    causal: {
+                      kind: 'invocation_reply' as const,
+                      triggerMessageId: turnTriggerMessageId,
+                      ...(turnTriggerThreadId ? { triggerThreadId: turnTriggerThreadId } : {}),
+                    },
+                  }
                 : {}),
               ...executionProjections,
               ...(doneMsg?.tracing ? { tracing: doneMsg.tracing } : {}),
@@ -3815,7 +3832,13 @@ export async function* routeSerial(
                     }
                   : {}),
                 ...(turnTriggerMessageId
-                  ? { causal: { kind: 'invocation_reply' as const, triggerMessageId: turnTriggerMessageId } }
+                  ? {
+                      causal: {
+                        kind: 'invocation_reply' as const,
+                        triggerMessageId: turnTriggerMessageId,
+                        ...(turnTriggerThreadId ? { triggerThreadId: turnTriggerThreadId } : {}),
+                      },
+                    }
                   : {}),
                 ...executionProjections,
                 ...(doneMsg?.tracing ? { tracing: doneMsg.tracing } : {}),
@@ -3967,7 +3990,13 @@ export async function* routeSerial(
                         }
                       : {}),
                     ...(turnTriggerMessageId
-                      ? { causal: { kind: 'invocation_reply' as const, triggerMessageId: turnTriggerMessageId } }
+                      ? {
+                          causal: {
+                            kind: 'invocation_reply' as const,
+                            triggerMessageId: turnTriggerMessageId,
+                            ...(turnTriggerThreadId ? { triggerThreadId: turnTriggerThreadId } : {}),
+                          },
+                        }
                       : {}),
                     ...executionProjections,
                     ...(doneMsg?.tracing ? { tracing: doneMsg.tracing } : {}),

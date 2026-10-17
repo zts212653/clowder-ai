@@ -1,9 +1,12 @@
+import { isDeepStrictEqual } from 'node:util';
 import type { PluginDescription, PluginIconSpec } from '@cat-cafe/shared';
-import type { Capability } from '@clowder-ai/plugin-contract';
-import type { OfficialPluginCatalogEntry, OfficialPluginOwnerAuth } from '../official-catalog.js';
+import type { Capability, PluginManifest } from '@clowder-ai/plugin-contract';
+import { grantsWithinRequest } from '../host-inventory/contract-policy.js';
+import type { OfficialPluginCatalogEntry } from '../official-catalog.js';
 import {
   compareOfficialPluginVersions,
   type OfficialPluginCatalogProvider,
+  type OfficialPluginCatalogRefreshErrorCode,
   type OfficialPluginCatalogSnapshot,
 } from './official-catalog-provider.js';
 
@@ -113,9 +116,7 @@ export type MachineCatalogValidationResult =
 
 export interface MachineCatalogHostPolicy {
   readonly pluginId: string;
-  readonly replacesRepositoryPluginId?: string;
   readonly effectiveGrants: readonly Capability[];
-  readonly ownerAuth?: OfficialPluginOwnerAuth;
 }
 
 export interface MachineOfficialPluginCatalogOptions {
@@ -131,26 +132,20 @@ export interface MachineOfficialPluginCatalogOptions {
 }
 
 /**
- * Resolves repository identities replaced by Host-managed catalog plugins.
- * Machine metadata can announce a current candidate, while an installed instance
- * keeps the replacement authoritative even when discovery is temporarily offline.
+ * Applies Host-owned authority equally to catalog and owner-selected local bytes: the package gets
+ * what it requests within its policy entry (F202 W2-6), and nothing without an entry.
  */
-export function resolveRepositoryReplacementPluginIds(
+export function resolveLocalPluginEffectiveGrants(
   hostPolicies: readonly MachineCatalogHostPolicy[],
-  catalogEntries: readonly Pick<OfficialPluginCatalogEntry, 'pluginId'>[],
-  installedPluginIds: readonly string[],
-): readonly string[] {
-  const authoritativePluginIds = new Set([...catalogEntries.map((entry) => entry.pluginId), ...installedPluginIds]);
-  return hostPolicies.flatMap((policy) =>
-    policy.replacesRepositoryPluginId !== undefined && authoritativePluginIds.has(policy.pluginId)
-      ? [policy.replacesRepositoryPluginId]
-      : [],
-  );
+  manifest: Pick<PluginManifest, 'pluginId' | 'features'>,
+): readonly Capability[] {
+  const policy = hostPolicies.find((candidate) => candidate.pluginId === manifest.pluginId);
+  return grantsWithinRequest(policy?.effectiveGrants ?? [], manifest);
 }
 
 function projectEntry(
   plugin: ValidatedMachineCatalog['plugins'][number],
-  policy: MachineCatalogHostPolicy,
+  policy: MachineCatalogHostPolicy | undefined,
 ): OfficialPluginCatalogEntry | undefined {
   const release = plugin.versions.reduce<(typeof plugin.versions)[number] | undefined>((latest, candidate) => {
     if (!latest) return candidate;
@@ -166,11 +161,7 @@ function projectEntry(
     distribution: 'registry',
     archiveUrl: release.artifact.tarballUrl,
     packageDigest: release.artifact.integrity,
-    ...(policy.replacesRepositoryPluginId === undefined
-      ? {}
-      : { replacesRepositoryPluginId: policy.replacesRepositoryPluginId }),
-    effectiveGrants: policy.effectiveGrants,
-    ...(policy.ownerAuth === undefined ? {} : { ownerAuth: policy.ownerAuth }),
+    effectiveGrants: policy?.effectiveGrants ?? [],
     presentation: {
       displayName: plugin.name,
       description: plugin.description,
@@ -185,6 +176,8 @@ export class MachineOfficialPluginCatalog implements OfficialPluginCatalogProvid
   private readonly now: () => number;
   private readonly policies: ReadonlyMap<string, MachineCatalogHostPolicy>;
   private readonly refreshTtlMs: number;
+  private readonly trustedReleases = new Map<string, OfficialPluginCatalogEntry>();
+  private readonly versionsByDigest = new Map<string, string>();
   private lastGoodEntries: readonly OfficialPluginCatalogEntry[] = [];
   private lastAttemptAt: number | null = null;
   private checkedAt: number | null = null;
@@ -240,21 +233,58 @@ export class MachineOfficialPluginCatalog implements OfficialPluginCatalogProvid
     const entries: OfficialPluginCatalogEntry[] = [];
     for (const plugin of validation.catalog.plugins) {
       const policy = this.policies.get(plugin.pluginId);
-      if (!policy) continue;
+      // Discovery is catalog-owned. An unknown identity receives no Host authority.
       const entry = projectEntry(plugin, policy);
       if (entry) entries.push(entry);
     }
-    this.lastGoodEntries = entries;
+    // Validate the entire snapshot before advancing any trusted release. A temporary
+    // omission does not erase identity history or permit a later rollback.
+    for (const entry of entries) {
+      const error = this.continuityError(entry);
+      if (error) {
+        this.status = 'degraded';
+        this.errorCode = error;
+        return this.project();
+      }
+    }
+    this.lastGoodEntries = structuredClone(entries);
+    for (const entry of this.lastGoodEntries) {
+      this.trustedReleases.set(entry.pluginId, entry);
+      this.versionsByDigest.set(`${entry.pluginId}\0${entry.packageDigest}`, entry.version);
+    }
     this.status = 'fresh';
     this.errorCode = undefined;
     return this.project();
+  }
+
+  private continuityError(entry: OfficialPluginCatalogEntry): OfficialPluginCatalogRefreshErrorCode | undefined {
+    const previous = this.trustedReleases.get(entry.pluginId);
+    const comparison = compareOfficialPluginVersions(entry.version, previous?.version ?? entry.version);
+    if (comparison === undefined) return 'CATALOG_INVALID_METADATA';
+    if (comparison < 0) return 'CATALOG_ROLLBACK_REJECTED';
+    if (
+      previous &&
+      comparison === 0 &&
+      (entry.version !== previous.version ||
+        entry.packageName !== previous.packageName ||
+        entry.archiveUrl !== previous.archiveUrl ||
+        entry.packageDigest !== previous.packageDigest ||
+        !isDeepStrictEqual(entry.presentation, previous.presentation))
+    )
+      return 'CATALOG_EQUIVOCATION_REJECTED';
+    const seenVersion = this.versionsByDigest.get(`${entry.pluginId}\0${entry.packageDigest}`);
+    if (seenVersion !== undefined && seenVersion !== entry.version) return 'CATALOG_EQUIVOCATION_REJECTED';
+    return undefined;
   }
 
   private project(): OfficialPluginCatalogSnapshot {
     const bundled = this.options.bundledEntries ?? [];
     const reservedIds = new Set(bundled.map((entry) => entry.pluginId));
     return {
-      entries: [...bundled, ...this.lastGoodEntries.filter((entry) => !reservedIds.has(entry.pluginId))],
+      entries: structuredClone([
+        ...bundled,
+        ...this.lastGoodEntries.filter((entry) => !reservedIds.has(entry.pluginId)),
+      ]),
       status: this.status,
       checkedAt: this.checkedAt,
       ...(this.errorCode === undefined ? {} : { errorCode: this.errorCode }),

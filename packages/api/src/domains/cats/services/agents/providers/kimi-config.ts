@@ -28,6 +28,7 @@ import {
   resolveMcpCommand,
   resolveMcpWorkingDir,
 } from '../../../../../config/capabilities/mcp-launch-paths.js';
+import { pluginMcpEnvironment } from '../../../../../config/capabilities/plugin-mcp-environment.js';
 import { isRetiredGithubMcpConfigEntry } from '../../../../../config/capabilities/retired-github-mcp.js';
 import { createModuleLogger } from '../../../../../infrastructure/logger.js';
 
@@ -352,7 +353,8 @@ export async function writeMcpConfigFile(
             command: resolveMcpCommand(s.command, workingDir, configSourceRoot),
             args: resolveMcpArgs(s.args, workingDir, configSourceRoot),
           };
-          if (s.env && Object.keys(s.env).length > 0) entry.env = s.env;
+          const environment = pluginMcpEnvironment(s, callbackEnv);
+          if (environment && Object.keys(environment).length > 0) entry.env = environment;
           if (workingDir) entry.cwd = workingDir;
           mcpServers[s.name] = entry;
         }

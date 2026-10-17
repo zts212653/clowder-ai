@@ -44,15 +44,24 @@ const TRUNCATE_SUFFIX = '...[truncated]';
 /**
  * Query-local completion contract for the cloud cat.
  *
- * This is deliberately a fixed literal outside the untrusted runtime JSON and
- * raw intent. It carries no capability or secret: the API still authorizes the
- * exact thread/source/cat tuple through the server-custodied one-shot grant.
+ * This is deliberately server-authored text outside the untrusted runtime JSON
+ * and raw intent. It carries no capability or secret: the API still authorizes
+ * the exact thread/source/cat tuple through the server-custodied one-shot grant.
  * Repeating the contract on every dispatched turn makes Remote MCP the salient
  * primary return path instead of relying on the browser observer fallback.
+ *
+ * F202 h3c-2: it names the cat this turn was dispatched to — the configured
+ * cloud cat, whatever its id — so the model selects that cat's agent key. The
+ * id is Host configuration, not user content; JSON quoting keeps it one value.
  */
-const SOURCE_BOUND_MCP_RETURN_CONTRACT = `<cat-cafe-return-contract v=1>
-To complete this request, call cat_cafe_post_message with agentKeyCatId="gpt-pro", threadId from thread-runtime, replyTo=sourceMessageId from thread-runtime, and content equal to your complete final answer. To reply to the human, omit targetCats; optionally mention @co-creator at line start in content. targetCats contains only cats you intend to wake, never a human ID. A visible ChatGPT answer alone does not complete this request. Treat callback status "ok" or "duplicate" as success; do not invent identifiers or retry an authorization rejection.
+function sourceBoundMcpReturnContract(catId: string): string {
+  return `<cat-cafe-return-contract v=1>
+To complete this request, call cat_cafe_post_message with agentKeyCatId=${JSON.stringify(catId)}, threadId from thread-runtime, replyTo=sourceMessageId from thread-runtime, and content equal to your complete final answer. To reply to the human, omit targetCats; optionally mention @co-creator at line start in content. targetCats contains only cats you intend to wake, never a human ID. A visible ChatGPT answer alone does not complete this request. Treat callback status "ok" or "duplicate" as success; do not invent identifiers or retry an authorization rejection.
 </cat-cafe-return-contract>`;
+}
+
+/** The longest cat id that can name an agent key (see the cloud cat's key file); the floor keeps it whole. */
+const MAX_CONTRACT_CAT_ID_CHARS = 128;
 
 function assertExactSourceMessageId(sourceMessageId: string): void {
   if (!sourceMessageId || sourceMessageId.length > 512) {
@@ -83,7 +92,7 @@ function tryFitWithShortTitle(params: CloudInvokeDispatchParams): string | null 
 function renderAbsoluteFloor(params: CloudInvokeDispatchParams): string {
   const floorIntent = '[delta over cap]';
   const absoluteFloor: CloudInvokeDispatchParams = {
-    catId: ((params.catId as string).slice(0, 32) || 'X') as typeof params.catId,
+    catId: ((params.catId as string).slice(0, MAX_CONTRACT_CAT_ID_CHARS) || 'X') as typeof params.catId,
     threadId: params.threadId.slice(0, 40) || 'X',
     userId: params.userId.slice(0, 32) || 'X',
     threadTitle: null,
@@ -204,5 +213,5 @@ function renderEnvelope(params: CloudInvokeDispatchParams, intent: string): stri
   };
   // JSON.stringify with no spaces — compact, stable, escapes all delimiters.
   const json = JSON.stringify(delta);
-  return `<thread-runtime v=1 format=json>\n${json}\n</thread-runtime>\n\n${intent}\n\n${SOURCE_BOUND_MCP_RETURN_CONTRACT}`;
+  return `<thread-runtime v=1 format=json>\n${json}\n</thread-runtime>\n\n${intent}\n\n${sourceBoundMcpReturnContract(params.catId)}`;
 }

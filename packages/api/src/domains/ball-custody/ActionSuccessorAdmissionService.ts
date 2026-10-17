@@ -20,6 +20,11 @@ import {
   canonicalizeActionTerminalPredicate,
 } from './ActionTerminalPredicateCatalog.js';
 import {
+  requireAdmissionFreshness,
+  resolveAdmissionFreshness,
+  withActionPredicateAuthority,
+} from './action-predicate-authority.js';
+import {
   ActionSuccessorStandingError,
   type ActionSuccessorStandingSnapshot,
   assertActionSuccessorStanding,
@@ -50,7 +55,9 @@ export {
   type MatchedStandingAuthority,
 } from './action-successor-standing.js';
 
-type ActionSuccessorStandingInput = Pick<ActionSuccessorAdmissionInput, 'action'> & ActionSuccessorStandingSnapshot;
+type ActionSuccessorStandingInput = Pick<ActionSuccessorAdmissionInput, 'action'> &
+  ActionSuccessorStandingSnapshot &
+  Partial<Pick<ActionSuccessorAdmissionInput, 'actorCatId' | 'sourceThreadId'>>;
 
 export class ActionSuccessorAdmissionService {
   constructor(
@@ -103,7 +110,7 @@ export class ActionSuccessorAdmissionService {
     input: ActionSuccessorStandingInput,
   ): Promise<Extract<ActionFreshnessResolution, { status: 'verified' }>> {
     const terminalPredicate = this.requireTerminalPredicate(input);
-    const freshness = await this.requireVerifiedGenerationFreshness(terminalPredicate);
+    const freshness = await requireAdmissionFreshness(this.truthResolver, terminalPredicate, input);
     assertActionSuccessorStanding(input, freshness);
     return freshness;
   }
@@ -128,7 +135,7 @@ export class ActionSuccessorAdmissionService {
     const issuerStandingEvidenceRef = this.resolveIssuerStanding(input, claimOrigin);
 
     const terminalPredicate = this.requireTerminalPredicate(input);
-    const freshness = await this.requireVerifiedGenerationFreshness(terminalPredicate);
+    const freshness = await requireAdmissionFreshness(this.truthResolver, terminalPredicate, input);
     const standingAuthority = assertActionSuccessorStanding(input, freshness);
     const claimInput: ClaimActionSuccessorInput = {
       leaseId: randomUUID(),
@@ -149,9 +156,12 @@ export class ActionSuccessorAdmissionService {
         ...(standingAuthority.delegateEvidenceRef ? [standingAuthority.delegateEvidenceRef] : []),
       ],
       terminalPredicate,
+      ...(freshness.providerAuthority ? { terminalPredicateProviderBinding: freshness.providerAuthority.binding } : {}),
       now: input.now,
     };
-    const result = await (options?.claim ? options.claim(claimInput) : this.leaseStore.claim(claimInput));
+    const result = await withActionPredicateAuthority(freshness.providerAuthority, () =>
+      options?.claim ? options.claim(claimInput) : this.leaseStore.claim(claimInput),
+    );
     if (result.outcome === 'subject_terminal') {
       return { admit: false, outcome: 'subject_terminal', terminal: result.terminal };
     }
@@ -197,26 +207,31 @@ export class ActionSuccessorAdmissionService {
       if (lease.terminalPredicate.identityKey !== terminalPredicate.identityKey) return null;
       if (lease.terminalPredicate.freshnessKey === terminalPredicate.freshnessKey) return null;
     }
-    const freshness = await this.resolveGenerationFreshness(terminalPredicate);
+    const freshness = await resolveAdmissionFreshness(this.truthResolver, terminalPredicate, input);
     if (freshness.status !== 'verified') return null;
     // F167: re-check standing to capture delegate authority evidence for the new lease.
     const standingAuthority = assertActionSuccessorStanding(input, freshness);
-    const continued = await this.leaseStore.continueFreshRevision(lease.leaseId, {
-      successorLeaseId: randomUUID(),
-      expectedGeneration: lease.generation,
-      terminalPredicate,
-      holderCatIds: input.holderCatIds,
-      holderThreadId: input.targetThreadId,
-      claimOrigin,
-      ...(claimOrigin === 'structured_transfer'
-        ? { predecessorCatId: input.actorCatId, predecessorThreadId: input.sourceThreadId }
-        : {}),
-      dispatchId: input.dispatchId,
-      issuerStandingEvidenceRef,
-      evidenceRef: freshness.evidenceRef,
-      delegateEvidenceRef: standingAuthority.delegateEvidenceRef,
-      now: input.now,
-    });
+    const continued = await withActionPredicateAuthority(freshness.providerAuthority, () =>
+      this.leaseStore.continueFreshRevision(lease.leaseId, {
+        successorLeaseId: randomUUID(),
+        ...(freshness.providerAuthority
+          ? { terminalPredicateProviderBinding: freshness.providerAuthority.binding }
+          : {}),
+        expectedGeneration: lease.generation,
+        terminalPredicate,
+        holderCatIds: input.holderCatIds,
+        holderThreadId: input.targetThreadId,
+        claimOrigin,
+        ...(claimOrigin === 'structured_transfer'
+          ? { predecessorCatId: input.actorCatId, predecessorThreadId: input.sourceThreadId }
+          : {}),
+        dispatchId: input.dispatchId,
+        issuerStandingEvidenceRef,
+        evidenceRef: freshness.evidenceRef,
+        delegateEvidenceRef: standingAuthority.delegateEvidenceRef,
+        now: input.now,
+      }),
+    );
     if (continued.outcome === 'continued') {
       return this.admitted('continued', continued.lease, input.dispatchId);
     }
@@ -236,7 +251,7 @@ export class ActionSuccessorAdmissionService {
       resolveIssuerStanding: (request, claimOrigin) => this.resolveIssuerStanding(request, claimOrigin),
       resolveVerifiedPredicate: async (request, current, delegateLineageReentry) => {
         const terminalPredicate = this.requireTerminalPredicate(request);
-        const freshness = await this.requireVerifiedGenerationFreshness(terminalPredicate);
+        const freshness = await requireAdmissionFreshness(this.truthResolver, terminalPredicate, request);
         const standingAuthority =
           delegateLineageReentry && terminalPredicate.kind === 'task_done'
             ? assertDelegateLineageSuccessorStanding(current, request, freshness)
@@ -244,6 +259,7 @@ export class ActionSuccessorAdmissionService {
         return {
           terminalPredicate,
           freshnessEvidenceRef: freshness.evidenceRef,
+          providerAuthority: freshness.providerAuthority,
           delegateEvidenceRef: standingAuthority.delegateEvidenceRef,
         };
       },
@@ -263,30 +279,6 @@ export class ActionSuccessorAdmissionService {
       subjectRef: input.action.subjectRef,
       predicate: input.action.terminalPredicate,
     });
-  }
-
-  private async resolveGenerationFreshness(
-    terminalPredicate: CanonicalActionTerminalPredicate,
-  ): Promise<ActionFreshnessResolution> {
-    const freshness = await this.truthResolver.resolveFreshness(terminalPredicate);
-    if (freshness.status === 'verified' && freshness.freshnessKey !== terminalPredicate.freshnessKey) {
-      return {
-        status: 'mismatch',
-        reason: 'verified freshness identity does not match the canonical predicate',
-        evidenceRef: freshness.evidenceRef,
-      };
-    }
-    return freshness;
-  }
-
-  private async requireVerifiedGenerationFreshness(
-    terminalPredicate: CanonicalActionTerminalPredicate,
-  ): Promise<Extract<ActionFreshnessResolution, { status: 'verified' }>> {
-    const freshness = await this.resolveGenerationFreshness(terminalPredicate);
-    if (freshness.status !== 'verified') {
-      throw new ActionSuccessorStandingError(freshness.status, freshness.reason);
-    }
-    return freshness;
   }
 
   private async returnToPredecessor(

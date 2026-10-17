@@ -53,14 +53,7 @@ function buildRealDelegatePipeline({
       return id === task.id ? task : null;
     },
   };
-  const resolver = new ActionSubjectTruthResolver(
-    mockTruthLeaseStore(),
-    mockCommunityStore(),
-    undefined,
-    taskProvider,
-    undefined,
-    delegateProvider,
-  );
+  const resolver = new ActionSubjectTruthResolver(mockTruthLeaseStore(), taskProvider, delegateProvider);
   return { service: new ActionSuccessorAdmissionService(mockLeaseStore(), resolver) };
 }
 

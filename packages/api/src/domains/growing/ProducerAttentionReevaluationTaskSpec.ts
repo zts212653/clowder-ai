@@ -40,6 +40,9 @@ export function createProducerAttentionReevaluationTaskSpec(
     trigger: input.trigger,
     admission: {
       async gate() {
+        if (!input.producerCatalog.find(link.producer.producerId)) {
+          return { run: false, reason: 'producer binding unavailable in current composition' };
+        }
         const receipt = await readExactCurrentReceipt(link, input);
         if (!receipt) return { run: false, reason: 'Task or producer owner coordinates are no longer current' };
         return {
@@ -111,11 +114,13 @@ async function readExactCurrentReceipt(
   link: ProducerAttentionReevaluationLinkV1,
   deps: ProducerAttentionReevaluationDeps,
 ): Promise<ProducerAttentionReceiptV1 | null> {
+  const producer = deps.producerCatalog.find(link.producer.producerId);
+  if (!producer) return null;
   const taskId = taskIdFromSubjectRef(link.taskRef.subjectRef);
   if (!taskId) return null;
   const task = await deps.tasks.get(taskId);
   if (!isExactCurrentTask(task, link)) return null;
-  const receipt = await deps.producerCatalog.get(link.producer.producerId).readCurrentReceipt({
+  const receipt = await producer.readCurrentReceipt({
     ownerUserId: link.ownerUserId,
     producerSubjectRef: link.producer.subjectRef,
   });

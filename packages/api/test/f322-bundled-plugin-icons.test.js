@@ -40,7 +40,7 @@ afterEach(async () => {
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true })));
 });
 
-for (const pluginId of ['official.collective-connector', 'official.chatgpt-dot']) {
+for (const pluginId of ['official.chatgpt-dot']) {
   test(`${pluginId}: offline candidate and installed icon use the same verified archive`, async () => {
     const manifest = OFFICIAL_BUNDLED_MANIFESTS.find((candidate) => candidate.pluginId === pluginId);
     const entry = OFFICIAL_PLUGIN_CATALOG.find((candidate) => candidate.pluginId === pluginId);
@@ -56,7 +56,7 @@ for (const pluginId of ['official.collective-connector', 'official.chatgpt-dot']
     const discovery = await new OfficialPluginManagerCatalogAdapter(provider, OFFICIAL_BUNDLED_MANIFESTS).snapshot();
     assert.deepEqual(
       discovery.candidates.map((candidate) => candidate.pluginId).sort(),
-      ['official.chatgpt-dot', 'official.collective-connector'],
+      ['official.chatgpt-dot'],
       'the production Host bundle list discovers all registered candidates even while registry is offline',
     );
     assert.deepEqual(discovery.candidates.find((candidate) => candidate.pluginId === pluginId).icon, manifest.icon);
@@ -86,10 +86,10 @@ for (const pluginId of ['official.collective-connector', 'official.chatgpt-dot']
 }
 
 test('unknown identities, versions, digests and caller-selected paths cannot select a bundled archive', async () => {
-  const entry = OFFICIAL_PLUGIN_CATALOG.find((candidate) => candidate.catalogId === 'collective-connector');
+  const entry = OFFICIAL_PLUGIN_CATALOG.find((candidate) => candidate.catalogId === 'chatgpt-dot');
   assert.ok(entry);
   for (const delta of [
-    { catalogId: '../collective-connector' },
+    { catalogId: '../chatgpt-dot' },
     { pluginId: 'unknown.builtin' },
     { version: '0.1.2' },
     { packageDigest: `sha512-${Buffer.alloc(64).toString('base64')}` },
@@ -100,7 +100,7 @@ test('unknown identities, versions, digests and caller-selected paths cannot sel
 });
 
 test('injected bytes still pass the immutable digest boundary before archive admission', async () => {
-  const entry = OFFICIAL_PLUGIN_CATALOG.find((candidate) => candidate.catalogId === 'collective-connector');
+  const entry = OFFICIAL_PLUGIN_CATALOG.find((candidate) => candidate.catalogId === 'chatgpt-dot');
   assert.ok(entry);
   const bytes = Buffer.from(await fetchOfficialPackageArchive(entry));
   bytes[bytes.length - 1] ^= 1;
@@ -123,7 +123,7 @@ test('injected bytes still pass the immutable digest boundary before archive adm
 });
 
 test('unknown bundled archive registration is denied even when an injected fetcher would supply bytes', async () => {
-  const entry = OFFICIAL_PLUGIN_CATALOG.find((candidate) => candidate.catalogId === 'collective-connector');
+  const entry = OFFICIAL_PLUGIN_CATALOG.find((candidate) => candidate.catalogId === 'chatgpt-dot');
   assert.ok(entry);
   const unknown = { ...entry, pluginId: 'unknown.builtin' };
   const root = await mkdtemp(join(tmpdir(), 'f322-bundled-unregistered-'));
@@ -147,7 +147,7 @@ test('unknown bundled archive registration is denied even when an injected fetch
   assert.equal((await store.snapshot()).instances.length, 0);
 });
 
-for (const legacy of LEGACY_BUNDLED_MANIFESTS) {
+for (const legacy of LEGACY_BUNDLED_MANIFESTS.filter((manifest) => manifest.pluginId === 'official.chatgpt-dot')) {
   test(`${legacy.pluginId}: a new catalog cannot replace an old installed manifest or icon`, async () => {
     const current = OFFICIAL_PLUGIN_CATALOG.find((candidate) => candidate.pluginId === legacy.pluginId);
     assert.ok(current);

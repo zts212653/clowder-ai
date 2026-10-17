@@ -52,20 +52,14 @@ test('F306 uses updated version witness; same Task does not collapse a different
   assert.equal(result.items[0].linkedNeedsMe?.length, 1);
 });
 
-test('F292 canonical meeting aliases deduplicate only producer-issued exact revision witnesses', () => {
-  const row = {
-    ...approval('minute', 'F292'),
-    needsMeDecisionRefs: [
-      { producerId: 'f292.repair', subjectRef: 'minute', revision: 5 },
-      { producerId: 'f292.repair', subjectRef: 'note', revision: 8 },
-    ],
-  };
-  const result = project([row], [work([receipt('minute', 'f292.repair', 5), receipt('note', 'f292.repair', 8)])]);
+test('retired Host meeting approval is rejected while historical repair receipts stay readable', () => {
+  assert.throws(() => project([{ ...approval('minute'), sourceFeatureId: 'F292' }], []));
+  const result = project([], [work([receipt('minute', 'f292.repair', 5)])]);
   assert.equal(result.totalCount, 1);
-  assert.equal(result.items[0].linkedNeedsMe?.length, 2);
+  assert.equal(result.items[0].decisionRef, 'f292.repair:minute');
 });
 
-test('missing or conflicting F292/F306 versions remain separate and withhold exact count', () => {
+test('missing or conflicting F306 versions remain separate and withhold exact count', () => {
   for (const row of [
     approval('a', 'F306'),
     {

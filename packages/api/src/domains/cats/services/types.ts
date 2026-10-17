@@ -966,22 +966,24 @@ export interface AgentClientActiveRunDispatchRegistration {
 }
 
 /** ADR-042 automatic supplement execution: provider + callback layers must enforce this, not prompt prose. */
+/** Host-owned native action coordinates; never accepted from package tool input. */
+export interface PluginNativeActionTarget {
+  readonly instanceId: string;
+  readonly contributionId: string;
+  readonly method: string;
+}
+
 export type ToolExecutionPolicy =
   | {
       readonly mode: 'read_only';
       readonly replayDeniedToolNames: readonly string[];
     }
-  | { readonly mode: 'collective_participation' }
   | { readonly mode: 'callback_allowlist'; readonly allowedCallbackRoutes: readonly string[] }
   | {
-      readonly mode: 'collective_work';
-      readonly taskId: string;
-      readonly threadId: string;
-      readonly executionRevision: number;
-      readonly executionRef: string;
-      readonly workspaceRoot: string;
-      /** Only host-resolved, explicitly admitted resources; never inferred from external prose. */
-      readonly readOnlyRoots: readonly string[];
+      readonly mode: 'plugin_native';
+      readonly pluginInstanceId: string;
+      readonly contributionId: string;
+      readonly actionMethods: readonly string[];
     };
 
 /**
@@ -1051,6 +1053,13 @@ export interface AgentServiceOptions {
   runtimeInteractionPort?: import('../../runtime-interaction/ports/RuntimeInteractionPort.js').RuntimeInteractionPort;
   /** F310: source-bound Task relation resolved from canonical Task truth for an F306 question. */
   resolveEntrustedWorkTaskRef?: () => Promise<import('@cat-cafe/shared').EntrustedWorkTaskRefV1 | undefined>;
+  /** Host-only exact descriptor plus public source/invocation currentness. Not a plugin or SDK DTO.
+   * Never a plugin or SDK DTO. */
+  pluginNativeLaunch?: {
+    readonly server: import('../../plugin/declared/native-mcp-types.js').NativeMcpServer;
+    readonly sandbox: { readonly kind: 'public'; readonly workspaceRoot: string };
+    readonly assertCurrent: () => void | Promise<void>;
+  };
   /** F317 Host-only continuous companion port; no model-supplied configuration. */
   liveCompanion?: import('./agents/providers/CodexLiveRunPort.js').CodexLiveRunPort;
   /** Route-owned intent. Providers may project only explicit behavior intent onto native modes. */
@@ -1099,6 +1108,8 @@ export interface AgentServiceOptions {
   contentBlocks?: readonly MessageContent[];
   /** Upload directory for resolving image paths */
   uploadDir?: string;
+  /** Host-only verified HMR path resolver; never provided to callback or plugin surfaces. */
+  resolveTrustedImagePath?: (hmrId: string) => Promise<string | undefined>;
   /** AbortSignal to cancel the invocation */
   signal?: AbortSignal;
   /** Correlation context for audit logging and raw trace linking */

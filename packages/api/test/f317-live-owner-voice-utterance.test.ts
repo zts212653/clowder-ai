@@ -26,6 +26,7 @@ async function fixture(prior = 0) {
     binding: { userId: 'owner', threadId: 'home', catId: createCatId('codex61-sol'), callId: 'call' },
     householdToolsEnabled: false,
     messageStore: {
+      recordCompanionDeliveryAcceptance: (...args) => store.recordCompanionDeliveryAcceptance(...args),
       appendIdempotent: async (row) => {
         await beforePersist(row.content);
         return store.appendIdempotent(row);

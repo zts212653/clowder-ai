@@ -111,6 +111,10 @@ local state = cjson.decode(raw)
 if state.snapshotId ~= ARGV[1] or tonumber(state.headSequence) ~= tonumber(ARGV[2]) then return -1 end
 if state.status == 'completed' then return 0 end
 if state.status ~= 'active' or state.traversalComplete ~= true then return -1 end
+if ARGV[4] ~= '' then
+  if state.activePageLease == nil or state.activePageLease.sessionId ~= ARGV[4] then return -1 end
+  if tonumber(state.activePageLease.expiresAt) <= tonumber(ARGV[5]) then return -1 end
+end
 local acked = tonumber(redis.call('HGET', KEYS[2], 'acked') or '-1')
 local delivered = tonumber(redis.call('HGET', KEYS[2], 'delivered') or '-1')
 local head = tonumber(ARGV[2])
@@ -137,6 +141,25 @@ state.lastPageOffset = tonumber(ARGV[2])
 state.nextOffset = tonumber(ARGV[4])
 if ARGV[5] == '' then state.nextPageTokenId = nil else state.nextPageTokenId = ARGV[5] end
 state.traversalComplete = ARGV[6] == '1'
+state.activePageLease = cjson.decode(ARGV[7])
+redis.call('SET', KEYS[2], cjson.encode(state))
+return 1
+`;
+
+export const SNAPSHOT_PAGE_LEASE_ROTATE_LUA = `
+local sub = redis.call('GET', KEYS[1])
+if not sub then return 0 end
+local decodedSub = cjson.decode(sub)
+if decodedSub.revokedAt ~= nil then return 0 end
+local raw = redis.call('GET', KEYS[2])
+if not raw then return 0 end
+local state = cjson.decode(raw)
+if state.status ~= 'active' or state.snapshotId ~= ARGV[1] then return 0 end
+if state.activePageLease == nil or state.activePageLease.sessionId ~= ARGV[2] then return 0 end
+local lease = cjson.decode(ARGV[3])
+if tonumber(state.lastPageOffset) ~= tonumber(lease.pageOffset) then return 0 end
+state.activePageLease = lease
+if ARGV[4] == '' then state.nextPageTokenId = nil else state.nextPageTokenId = ARGV[4] end
 redis.call('SET', KEYS[2], cjson.encode(state))
 return 1
 `;

@@ -3,27 +3,27 @@
   "entries": [
     {
       "id": "redis",
-      "match": "^(?:test/approval\\-hub/approval\\-publication\\-redis\\-contract\\.test\\.js|test/approval\\-hub/redis\\-dispatch\\-proposal\\-store\\.test\\.js|test/approval\\-hub/redis\\-entity\\-proposal\\-dedup\\.test\\.js|test/dossier\\-distillation\\-redis\\-store\\.test\\.js|test/dossier\\-observation\\-redis\\-store\\.test\\.js|test/f254\\-freshness\\-closure\\-redis\\-store\\.test\\.js|test/f254\\-freshness\\-supplement\\-redis\\-store\\.test\\.js|test/f254\\-output\\-commit\\-redis\\-race\\.test\\.js|test/issue1371\\-redis\\-convergence\\.test\\.js|test/person\\-memory\\-redis\\-store\\.test\\.js|test/plugin\\-messaging\\-redis\\-event\\-fencing\\.test\\.js|test/plugin\\-messaging\\-redis\\-snapshot\\.test\\.js|test/plugin\\-messaging\\-redis\\-stores\\.test\\.js|test/redis\\-action\\-successor\\-lease\\-store\\.test\\.js|test/redis\\-action\\-successor\\-task\\-lifecycle\\.test\\.js|test/redis\\-backlog\\-store\\.test\\.js|test/redis\\-community\\-bootstrap\\.test\\.js|test/redis\\-community\\-event\\-log\\.test\\.js|test/redis\\-community\\-pr\\-lifecycle\\.test\\.js|test/redis\\-community\\-projector\\.test\\.js|test/redis\\-concierge\\-config\\-store\\.test\\.js|test/redis\\-connector\\-binding\\-store\\.test\\.js|test/redis\\-f168\\-phase\\-b\\-awaiting\\-external\\.test\\.js|test/redis\\-grounding\\-sample\\-store\\.test\\.js|test/redis\\-invocation\\-record\\-store\\.test\\.js|test/redis\\-label\\-store\\.test\\.js|test/redis\\-limb\\-pairing\\-persistence\\.test\\.js|test/redis\\-message\\-delivery\\-atomicity\\.test\\.js|test/redis\\-message\\-delivery\\-contracts\\.test\\.js|test/redis\\-message\\-store\\.test\\.js|test/redis\\-pr\\-tracking\\-store\\.test\\.js|test/redis\\-profile\\-update\\-proposal\\-store\\.test\\.js|test/redis\\-proposal\\-store\\-finalize\\.test\\.js|test/redis\\-proposal\\-withdraw\\.test\\.js|test/redis\\-read\\-state\\-store\\.test\\.js|test/redis\\-repo\\-comment\\-cursor\\.test\\.js|test/redis\\-runtime\\-interaction\\-store\\.test\\.js|test/redis\\-runtime\\-session\\-store\\.test\\.js|test/redis\\-session\\-chain\\-store\\.test\\.js|test/redis\\-session\\-handoff\\-disposition\\.test\\.js|test/redis\\-session\\-handoff\\-proposal\\-store\\.test\\.js|test/redis\\-summary\\-store\\.test\\.js|test/redis\\-task\\-progress\\-store\\.test\\.js|test/redis\\-task\\-store\\.test\\.js|test/redis\\-taste\\-proposal\\-recovery\\.test\\.js|test/redis\\-test\\-db\\-namespace\\.test\\.js|test/redis\\-thread\\-store\\.test\\.js|test/redis\\-tip\\-telemetry\\-sink\\.test\\.js|test/redis\\-turn\\-execution\\-store\\.test\\.js|test/redis\\-unread\\-summary\\-visibility\\-cursor\\.test\\.js|test/signal\\-intake/redis\\-signal\\-intake\\.test\\.js|test/stores/redis\\-frustration\\-issue\\-store\\-window\\.test\\.js)$",
+      "match": "^(?:test/approval\\-hub/approval\\-publication\\-redis\\-contract\\.test\\.js|test/approval\\-hub/redis\\-dispatch\\-proposal\\-store\\.test\\.js|test/approval\\-hub/redis\\-entity\\-proposal\\-dedup\\.test\\.js|test/dossier\\-distillation\\-redis\\-store\\.test\\.js|test/dossier\\-observation\\-redis\\-store\\.test\\.js|test/f254\\-freshness\\-closure\\-redis\\-store\\.test\\.js|test/f254\\-freshness\\-supplement\\-redis\\-store\\.test\\.js|test/f254\\-output\\-commit\\-redis\\-race\\.test\\.js|test/issue1371\\-redis\\-convergence\\.test\\.js|test/person\\-memory\\-redis\\-store\\.test\\.js|test/plugin\\-messaging\\-redis\\-event\\-fencing\\.test\\.js|test/plugin\\-messaging\\-redis\\-snapshot\\.test\\.js|test/plugin\\-messaging\\-redis\\-stores\\.test\\.js|test/redis\\-action\\-successor\\-lease\\-store\\.test\\.js|test/redis\\-action\\-successor\\-task\\-lifecycle\\.test\\.js|test/redis\\-backlog\\-store\\.test\\.js|test/redis\\-concierge\\-config\\-store\\.test\\.js|test/redis\\-connector\\-binding\\-store\\.test\\.js|test/redis\\-grounding\\-sample\\-store\\.test\\.js|test/redis\\-invocation\\-record\\-store\\.test\\.js|test/redis\\-label\\-store\\.test\\.js|test/redis\\-limb\\-pairing\\-persistence\\.test\\.js|test/redis\\-message\\-delivery\\-atomicity\\.test\\.js|test/redis\\-message\\-delivery\\-contracts\\.test\\.js|test/redis\\-message\\-store\\.test\\.js|test/redis\\-profile\\-update\\-proposal\\-store\\.test\\.js|test/redis\\-proposal\\-store\\-finalize\\.test\\.js|test/redis\\-proposal\\-withdraw\\.test\\.js|test/redis\\-read\\-state\\-store\\.test\\.js|test/redis\\-runtime\\-interaction\\-store\\.test\\.js|test/redis\\-runtime\\-session\\-store\\.test\\.js|test/redis\\-session\\-chain\\-store\\.test\\.js|test/redis\\-session\\-handoff\\-disposition\\.test\\.js|test/redis\\-session\\-handoff\\-proposal\\-store\\.test\\.js|test/redis\\-summary\\-store\\.test\\.js|test/redis\\-task\\-progress\\-store\\.test\\.js|test/redis\\-task\\-store\\.test\\.js|test/redis\\-taste\\-proposal\\-recovery\\.test\\.js|test/redis\\-test\\-db\\-namespace\\.test\\.js|test/redis\\-thread\\-store\\.test\\.js|test/redis\\-tip\\-telemetry\\-sink\\.test\\.js|test/redis\\-turn\\-execution\\-store\\.test\\.js|test/redis\\-unread\\-summary\\-visibility\\-cursor\\.test\\.js|test/stores/redis\\-frustration\\-issue\\-store\\-window\\.test\\.js)$",
       "category": "source_only",
       "reason": "The exact retained suites require an explicitly isolated Redis service; current public CI declares no Redis service and shard children deny shared Redis. Eleven mock/codec/portable tests are re-admitted; the omitted source restore script is separated.",
       "owner": "@zts212653",
       "introducedBy": "78f3bc57c",
       "expiresOn": "2027-12-31",
       "audit": {
-        "reviewedOn": "2026-10-15",
+        "reviewedOn": "2026-10-17",
         "sourceHead": "235bb90755fdba01cf968e27af08ded14a4d039d",
         "publicHead": "7fca378fa010a288484e909446a2faeee5a7fbe2",
         "status": "resource_contract",
-        "matchedFileCount": 49,
-        "matchedFilesHash": "e0a7a8a6cbefb0de3a9e5eb5801f04f470cf4057f94afb4a0615c12cc13b2b0e"
+        "matchedFileCount": 41,
+        "matchedFilesHash": "1fc29e45db82f9c0eb56d4ba75520f789d7196477da65b633fcfaf60aed8208d"
       },
       "publicAudit": {
-        "reviewedOn": "2026-10-08",
+        "reviewedOn": "2026-10-15",
         "sourceHead": "adc163d5e51c40951ca219af3997f6753ab7a54b",
-        "publicHead": "3e70e1d6805be24672e8f841861f180d20b184c2",
+        "publicHead": "3c0aa0c2da08e4bfae487bb4a829a17ce2001e1d",
         "status": "resource_contract",
-        "matchedFileCount": 50,
-        "matchedFilesHash": "05c94617683df394d0dc42a1c03eb66c63ff318593cbef27054ac7a2779d41bb"
+        "matchedFileCount": 42,
+        "matchedFilesHash": "d99c055022a81ad1a1398ec392614fdd91014d262118bcfd99ec4dc2f28a48fe"
       },
       "publicAuditHistory": [
         {
@@ -33,14 +33,30 @@
           "status": "resource_contract",
           "matchedFileCount": 52,
           "matchedFilesHash": "607524b33dbe62de29f2bac9b23eff6aa9ae5f4fba94c8d59e6c7c549259c07e"
+        },
+        {
+          "reviewedOn": "2026-10-08",
+          "sourceHead": "adc163d5e51c40951ca219af3997f6753ab7a54b",
+          "publicHead": "3e70e1d6805be24672e8f841861f180d20b184c2",
+          "status": "resource_contract",
+          "matchedFileCount": 50,
+          "matchedFilesHash": "05c94617683df394d0dc42a1c03eb66c63ff318593cbef27054ac7a2779d41bb"
         }
       ],
       "inventoryRevision": {
-        "reason": "Only the already-retired F254 closure and supplement Redis suites left this existing resource inventory; no new exclusions or TTL changes.",
-        "sourceRetirement": "c94a58ac7388ba077281ab0608f2ec26a81d8551",
+        "reason": "Retain the exact Redis exclusion pattern and expiry. In addition to the two retired F254 suites, remove eight Host business-plugin suites migrated out by C1; no current test is newly excluded.",
+        "sourceRetirement": "3956401e75d692cc72c6369ab33566774f8a7d48",
         "removedFiles": [
           "test/f254-freshness-closure-redis-store.test.js",
-          "test/f254-freshness-supplement-redis-store.test.js"
+          "test/f254-freshness-supplement-redis-store.test.js",
+          "test/redis-community-bootstrap.test.js",
+          "test/redis-community-event-log.test.js",
+          "test/redis-community-pr-lifecycle.test.js",
+          "test/redis-community-projector.test.js",
+          "test/redis-f168-phase-b-awaiting-external.test.js",
+          "test/redis-pr-tracking-store.test.js",
+          "test/redis-repo-comment-cursor.test.js",
+          "test/signal-intake/redis-signal-intake.test.js"
         ]
       },
       "auditHistory": [
@@ -51,6 +67,14 @@
           "status": "resource_contract",
           "matchedFileCount": 51,
           "matchedFilesHash": "3280e54b7a01d83d43912c5eb4e07126c500507e5a16f06119d705c59b3ef2bd"
+        },
+        {
+          "reviewedOn": "2026-10-15",
+          "sourceHead": "235bb90755fdba01cf968e27af08ded14a4d039d",
+          "publicHead": "7fca378fa010a288484e909446a2faeee5a7fbe2",
+          "status": "resource_contract",
+          "matchedFileCount": 49,
+          "matchedFilesHash": "e0a7a8a6cbefb0de3a9e5eb5801f04f470cf4057f94afb4a0615c12cc13b2b0e"
         }
       ]
     },

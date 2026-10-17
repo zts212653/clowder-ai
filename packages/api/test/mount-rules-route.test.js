@@ -977,9 +977,8 @@ describe('Mount Rules Route (F228)', () => {
     const projectDir = await mkdtemp(join(tmpdir(), 'mount-rules-route-plugin-reconcile-'));
     const canonicalProjectDir = await realpath(projectDir);
 
-    // pluginsDir must match the route's resolution: join(STARTUP_PROJECT_ROOT, 'plugins')
-    const repoRoot = resolveRepoRoot();
-    const pluginsDir = join(repoRoot, 'plugins');
+    // Activation records the admitted skill root; source-tree discovery is retired.
+    const pluginsDir = join(canonicalProjectDir, 'installed-packages');
     const pluginId = 'test-reconcile-plugin-regr';
     const skillName = 'plugin-reconcile-skill';
     const skillSourceDir = join(pluginsDir, pluginId, 'skills', skillName);
@@ -1000,7 +999,16 @@ describe('Mount Rules Route (F228)', () => {
     // Write capabilities.json with an enabled plugin skill
     await writeCapabilitiesConfig(canonicalProjectDir, {
       version: 2,
-      capabilities: [{ id: skillName, type: 'skill', enabled: true, source: 'cat-cafe', pluginId }],
+      capabilities: [
+        {
+          id: skillName,
+          type: 'skill',
+          enabled: true,
+          source: 'plugin',
+          pluginId,
+          skillsSource: dirname(skillSourceDir),
+        },
+      ],
     });
 
     // Pre-mount the plugin skill under old provider (.claude/skills)
@@ -1080,7 +1088,16 @@ describe('Mount Rules Route (F228)', () => {
     );
     await writeCapabilitiesConfig(canonicalProjectDir, {
       version: 2,
-      capabilities: [{ id: skillName, type: 'skill', enabled: true, source: 'cat-cafe', pluginId }],
+      capabilities: [
+        {
+          id: skillName,
+          type: 'skill',
+          enabled: true,
+          source: 'plugin',
+          pluginId,
+          skillsSource: dirname(skillSourceDir),
+        },
+      ],
     });
 
     const oldClaudeLink = join(canonicalProjectDir, '.claude/skills', skillName);

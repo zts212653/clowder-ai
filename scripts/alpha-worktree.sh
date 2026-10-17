@@ -38,7 +38,6 @@ NAMED_ALPHA_INSTANCE=""
 NAMED_ALPHA_PORTS=""
 NAMED_ALPHA_COORDINATES=""
 NAMED_ALPHA_DISALLOWED_OPTIONS=false
-ALPHA_COLLECTIVE_SERVICE_PORT=5211
 
 usage() {
   cat <<'EOF'
@@ -50,7 +49,7 @@ Usage:
   ./scripts/alpha-worktree.sh start  [--dir PATH] [--branch NAME] [--remote NAME] [--force] [--no-sync] [--no-install] [--no-quick] [--allow-empty-redis] [--] [start-dev args...]
   ./scripts/alpha-worktree.sh status [--dir PATH] [--branch NAME] [--remote NAME]
   ./scripts/alpha-worktree.sh stop   [--dir PATH]
-  ./scripts/alpha-worktree.sh init|start --instance NAME --ports WEB,API,PREVIEW,SERVICE,REDIS [--allow-empty-redis]
+  ./scripts/alpha-worktree.sh init|start --instance NAME --ports WEB,API,PREVIEW,REDIS [--allow-empty-redis]
 
 Defaults:
   --dir    ../cat-cafe-alpha
@@ -62,7 +61,6 @@ Ports:
   api:      3012
   preview:  4111
   redis:    6397 (dedicated Alpha instance and data directory)
-  collective Service: 5211 (loopback, provisioned on demand)
 
 Behavior:
   start auto-syncs origin/main with ff-only, reuses the root .env for secrets,
@@ -198,8 +196,6 @@ export PREVIEW_GATEWAY_PORT=$ALPHA_PREVIEW_GATEWAY_PORT
 export NEXT_PUBLIC_API_URL=http://localhost:$ALPHA_API_PORT
 export WORKTREE_PORT_OFFSET=0
 export CAT_CAFE_DATA_DIR=$ALPHA_DIR/.cat-cafe
-export COLLECTIVE_SERVICE_PORT=$ALPHA_COLLECTIVE_SERVICE_PORT
-export COLLECTIVE_SERVICE_DATA_DIR=$ALPHA_DIR/.cat-cafe/collective-service
 export ANTHROPIC_PROXY_ENABLED=0
 export ASR_ENABLED=0
 export TTS_ENABLED=0
@@ -208,7 +204,6 @@ export EMBED_ENABLED=0
 export EMBED_MODE=off
 export AUDIO_SERVICE_ENABLED=0
 export AUDIO_SERVICE_PORT=$ALPHA_AUDIO_PORT
-export CONNECTOR_GATEWAY_AUTOSTART=0
 export CAT_CAFE_F247_CLOUD_AUTOSTART=0
 EOF
 }
@@ -285,12 +280,7 @@ apply_alpha_env() {
   export FRONTEND_PORT="$ALPHA_FRONTEND_PORT"
   export PREVIEW_GATEWAY_PORT="$ALPHA_PREVIEW_GATEWAY_PORT"
   export NEXT_PUBLIC_API_URL="http://localhost:$ALPHA_API_PORT"
-  # The independent Alpha Service has its own durable home and loopback port.
-  # The API manager pins the same coordinates and refuses arbitrary worktree overrides.
   export WORKTREE_PORT_OFFSET=0
-  export COLLECTIVE_SERVICE_PORT=5211
-  export COLLECTIVE_SERVICE_DATA_DIR="$ALPHA_DIR/.cat-cafe/collective-service"
-  unset COLLECTIVE_GITHUB_CLIENT_ID COLLECTIVE_GITHUB_CLIENT_SECRET
   export ANTHROPIC_PROXY_ENABLED=0
   export ASR_ENABLED=0
   export TTS_ENABLED=0
@@ -299,7 +289,6 @@ apply_alpha_env() {
   export EMBED_MODE=off
   export AUDIO_SERVICE_ENABLED=0
   export AUDIO_SERVICE_PORT="$ALPHA_AUDIO_PORT"
-  export CONNECTOR_GATEWAY_AUTOSTART=0
   export CAT_CAFE_F247_CLOUD_AUTOSTART=0
   # Alpha owns an isolated services.json beneath its checkout-local data root.
   # Keep the API guard too: persisted config must not re-enable sidecar
@@ -446,8 +435,6 @@ status_alpha_worktree() {
   echo "preview_gateway_port: $ALPHA_PREVIEW_GATEWAY_PORT"
   echo "redis_port: $ALPHA_REDIS_PORT"
   echo "redis_data_dir: $ALPHA_DIR/.cat-cafe/redis"
-  echo "collective_service_port: $ALPHA_COLLECTIVE_SERVICE_PORT"
-  echo "collective_service_data_dir: $ALPHA_DIR/.cat-cafe/collective-service"
   echo "env_source: $env_source_display"
 }
 
@@ -472,9 +459,6 @@ stop_alpha_daemon() {
     --port "$ALPHA_FRONTEND_PORT" --cwd "$PROJECT_DIR" --json
   if is_api_running; then
     die "Alpha API remains on $ALPHA_API_PORT without a proven managed owner"
-  fi
-  if lsof -nP -iTCP:"$ALPHA_COLLECTIVE_SERVICE_PORT" -sTCP:LISTEN >/dev/null 2>&1; then
-    die "Alpha Collective Service remains on $ALPHA_COLLECTIVE_SERVICE_PORT; refusing to claim it was stopped or kill an unverified process"
   fi
 }
 

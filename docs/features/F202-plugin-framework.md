@@ -5,7 +5,7 @@ topics: [plugin-framework, plugin-manager, host-inventory, capability-registry, 
 doc_kind: spec
 created: 2026-05-15
 architecture-cell: plugin
-tips_exempt: "Renewed 2026-10-02: the public delta records home intake, existing Train B tool admission and verified package provenance; it adds no action beyond the already published Manager journey. C1 default cutover and C2 remain separate."
+tips_exempt: "Renewed 2026-09-25 for Train C1 (clowder-ai#1487): the delta records where the C1 plan and status truth live and the C1 timeline; C1 moves existing plugins onto installed packages and deletes the Host copies, so users keep the same entry points and there is no new user-invokable capability to tip. The historical Phase 1 and K-2 acceptance records are retained below. The terminal direction supersedes their product ordering: Train B completes the Manager and one real package loop; Train C1 migrates existing plugins and removes compatibility paths; Train C2 opens bounded public hook/UI seams with real consumers."
 mcp_admission_status: accepted
 mcp_admission_ref: "file:docs/features/F202-plugin-framework.md"
 mcp_admission_claims:
@@ -63,6 +63,15 @@ description_confirmed_by: codex-astra
 > **Status**: in-progress (Train B direction accepted in
 > [clowder-ai#1478](https://github.com/zts212653/clowder-ai/issues/1478); formal review and
 > published-package integration verified; Train B home intake merged, runtime activation separate) | **Owner**: community @mindfn + Clowder AI maintainers | **Priority**: P1
+
+> **Train C1 delivery status (2026-10-17)**: implementation and basic validation are complete in
+> draft Host PR [#1487](https://github.com/zts212653/clowder-ai/pull/1487) and paired Plugins PR
+> [clowder-ai-plugins#54](https://github.com/zts212653/clowder-ai-plugins/pull/54). The next gate is
+> the operator's final worktree experience pass, followed by the agreed integration/soak and maintainer
+> review. Dot remains Host-bundled by explicit scope decision, and Tripo is not part of C1; neither is an
+> unfinished W2 implementation item. Package source updates do not update an already-installed immutable
+> package copy: experience delivery must explicitly replace the installed package before claiming that its
+> README or runtime changed.
 
 ## Architecture Ownership
 
@@ -207,6 +216,70 @@ The accepted Train B direction does not approve the aggregate migration or commi
   author's integration API.
 - Declarative UI contributions target only Host-owned registered slots and commands. A slot lands together
   with the acceptance that plugin disable/uninstall removes both its button/icon and command handler.
+
+#### C2 UI packaging and request forwarding (operator clarification, 2026-10-17)
+
+Source: `thread_mu8dg6h7l2x4ohsk#0001792235065915-010420-85bd8cc9`,
+`#0001792235141810-010424-81b92693`, `#0001792235297969-010435-613d073e`;
+documentation update requested in `#0001792235309117-010437-1ac14ddb`, with the manifest exclusion
+confirmed in `#0001792235339466-010438-b00f5542`.
+
+- Plugin-specific pages, frames/elements and their business handlers belong in the plugin package.
+  Host supplies registered UI slots and the generic embedding/lifecycle mechanism, rather than retaining
+  a separate Host page implementation for each plugin.
+- Page requests enter a generic Plugin Manager forwarding endpoint. Manager resolves the installed plugin
+  instance and invokes its single request entry; the plugin dispatches the action/path internally.
+  Host does not maintain a per-plugin business endpoint or action registry. A URL such as
+  `/plugins/:pluginId/actions/:action` illustrates the direction, not an implemented or frozen wire contract;
+  instance selection must remain unambiguous where multiple instances exist.
+- Host supplies authenticated caller context, instance access checks, enabled/current lifecycle checks
+  and request cancellation. The plugin validates operation inputs and business permissions. Forwarding
+  reaches the plugin's intentional request handler, not arbitrary internal methods selected by a string.
+  This owner-facing channel does not make external callbacks anonymous or replace their verification.
+- **Plugin-internal page endpoints/actions must not be individually listed in `plugin.yaml` or registered
+  as Host contributions.** They are the plugin's implementation details. The manifest retains Host-facing
+  UI entry/slot, permission and discoverable/schedulable capability declarations (including MCP, skills,
+  schedules and limbs). Host-dispatched UI slot commands remain distinct from internal business actions.
+- With the Community page migrated and its real user journeys verified, retire the C1
+  `community-http-01..29` forwarding declarations and their obsolete adapters. Removing declarations before
+  switching their consumers breaks C1; hiding them in the ordinary capability view is presentation cleanup,
+  not C2 completion. Acceptance includes a new plugin-internal action working without a Host route/registry
+  or manifest change, correct instance/authorization routing, and disable/uninstall revoking both UI and
+  invocation.
+
+This records the accepted C2 direction; it does not implement C2 or extend the current C1 cutover.
+
+### Train C1 / C2 — where the plan and the status truth live (updated 2026-09-23)
+
+- **Host-side C1 ledger (decision entry; single source of truth for every Host slice, its acceptance and
+  its review record with exact HEADs)**: `docs/plans/2026-09-21-f202-c1-contract.md`, carried on branch
+  `feat/f202-c1-core-cutover` → upstream PR zts212653/clowder-ai#1487. Its §0 quotes the operator rulings,
+  §1 quantifies the demand per plugin, §2 is the generic interface set, the overview tables list what
+  migrates / what stays for C2 / the "delete code" ledger, and the phase tables (phase 1 S1–S10, phase 2
+  W1–W4, closing items) are updated only by the reviewer after each slice passes.
+- **Host-side pre-plan**: `docs/plans/2026-09-19-f202-train-c1-migration-plan.md` — frozen inventory,
+  no-double-run / rollback / persistent-data contract, operator-ruled terminal acceptance (2026-09-20).
+  `2026-09-21-f202-c1-convergence-worklist.md` and `2026-09-21-f202-c1-honest-assessment.md` are derivation
+  archives whose conclusions were partly overturned; `2026-09-20-f202-c1-host-plugin-interface-contract.md`
+  keeps valid operator quotes but its implementation status is stale.
+- **Package-side C1**: repository `clowder-ai-plugins`, branch `feat/f202-train-c1-plugins-migration` →
+  PR zts212653/clowder-ai-plugins#54 (draft until the cutover gate holds on **both** counts: the Host cutover
+  branch actually running in a Host, and one connector proving external-origin `messaging.send` on it — W1
+  packages installing cleanly does not satisfy it). Plan and current checkpoint (rewritten 2026-09-23 as the
+  package-side "start here"): `docs/plans/2026-09-19-train-c1-plugins-aggregate-migration.md`; frozen
+  inventory: `migration/f202-train-c1-inventory.json`.
+- **Status on 2026-09-23**: Host phase 1 (interfaces S1–S8, contract pin A4, S9 trusted limb invocation,
+  S10 dependency closure by admission source) is complete; phase 2 W1 — video-generation, video-analysis,
+  weixin-mp, enterprise-workflow, wechat-visible-reader — is cut over to installed packages with the Host
+  copies deleted; W2 (7 IM connectors + ChatGPT Pro) is in progress; W3 (github cluster) and W4 (collective
+  backend, GenOffice docx) are pending; closing items (first-boot builtin install, the existing-data
+  migration decision, contract / SDK publication before upstream merge) are listed in the ledger.
+- **C2 scope truth**: the Train C2 bullets above plus the ledger's "留到 C2" table and its §5 frontend
+  table. Operator definition (2026-09-21): anything *outside* the Plugin Manager where a plugin must extend
+  our UI with an entry button or frame — GenOffice editor host, the collective page, Feishu meeting cards,
+  the five managed services. Plugin-specific settings / status / actions *inside* the Plugin Manager are
+  not C2; C1 closes them with generic configuration + actions + binding lists. No C2 execution plan exists
+  yet: per the rule above, a hook or UI slot opens only with its first real migrated consumer, after C1.
 
 The detailed state census, invariants, Design Gate and TDD sequence are retained in the
 [upstream Train B implementation plan](https://github.com/zts212653/clowder-ai/blob/9ab0eaf287381efcb209781463f38cc5f23870ea/feature-specs/2026-09-01-f202-terminal-plugin-manager.md).
@@ -431,6 +504,14 @@ The external-package K-2 path currently covers:
 | 2026-08-10 | K-2B production-transport state machine merged via cat-cafe#3555 (`f7fe82303`): contract-native handshake, durable call ledger, restart normalization, builtin loopback, and typed F292 `events.publish`; external runtime activation remains dormant. |
 | 2026-08-11 | K-2D implemented on cat-cafe#3558: immutable package verification, supervised stdio transport, closed bootstrap environment, and current-main project persistence composition; startup remains dormant with no activation route. |
 | 2026-09-19 | Train B terminal Manager from clowder-ai#1477 absorbed via cat-cafe#4613 (`b96b4d7d5615f8a5b78e97e2bc7a57e26ac7cefc`); intake #4605 closed and ledger advanced to source `9ab0eaf2`. Terra's independent review, full gate plus mechanical-rebase checks, Opus Guardian and the published alpha.1 journey provide the acceptance evidence. Runtime activation, C1/default migration and C2 remain separate. |
+| 2026-09-20 | Train C1 opened: Host cutover PR clowder-ai#1487 (draft) and plugins aggregate PR clowder-ai-plugins#54 (draft). Source of truth for both lanes: `docs/plans/2026-09-21-f202-c1-contract.md` (Host ledger). |
+| 2026-09-22 | Host first stage closed (S1–S10: module start/stop + generic invoke, declared skill / mcp / limb / schedule activation, private storage + tasks, messaging by threadId, git install, generic webhook forwarding, single MCP mechanism, operation state machine + generic action endpoints, grant-gated capabilities, dependency closure by admission source). Contract 0.1.0-beta.18 consumed via vendored tarball. |
+| 2026-09-23 | W1 closed: video-generation, video-analysis, weixin-mp, wechat-visible-reader, enterprise-workflow switched to installed packages and Host copies deleted. Contract beta.19 consumed (hidden / requiredWhen). Maintainer decision A (lang): C1 endpoint = both PRs mergeable; acceptance, npm publish and tests done by the maintainer locally. |
+| 2026-09-23 | P1 frozen and landed as contract 0.1.0-beta.20 / SDK 0.2.0-beta.3: `media_ref` + Host media ledger (`hmr_*`, entitlement grant / revoke / audit, `media.read`), `rich_block` minimal set, `pendingPublication` receipt, lifecycle event rows, permission matrix (21). Host half: P1-H-a (vendor + P gate), P1-H-b1 / b2 (M gate). |
+| 2026-09-24 | P1.1 frozen and landed as contract beta.21 / SDK beta.4: four lifecycle events carry a required `threadId` (shared `ThreadId`). Host consumed it in W2-5c (invocation lifecycle delivery `host.messaging.lifecycle` via the declared `lifecycleAction.method`, ordered on the per-thread delivery tail; `lifecycleId` / `presentation` gated by the subscription declaration). |
+| 2026-09-24 | P1.3 frozen and landed as contract beta.22 / SDK beta.5: subscription `presentation: 'v1' | 'v2'`; started event gains `placeholderLine?` and `replyTo?` (shared `MessageId`, Host message ids only). Host consumption pending (W2-5c-p2). |
+| 2026-09-24 | Historical W2 checkpoint (superseded by the 2026-10-17 row): W2-1 real E2E, W2-2a / 2c, W2-3a, W2-5a + W2-5p-H, W2-5e1a / 1b / 2 / 3, W2-5c (+ patches v2 / v3) and W2-5f were closed; later slices were still pending at this date. |
+| 2026-10-17 | Train C1 implementation and basic validation closed across Host `fa4eaed4` and Plugins `1814ef0`: W2-5b outbound media/TTS, W2-5c-p2, real-artifact gates, connector parity and deletion of the old connector framework are complete; GitHub Operations, Collective/GenOffice and Feishu meeting intake are package-owned. The current default README is Chinese with a parallel `README.en.md`; internal wiring is no longer presented as a user capability. Dot intentionally remains Host-bundled, Tripo remains excluded, and C2 owns plugin UI embedding plus removal of the temporary per-route Community forwarding declarations. Final operator experience, installed-copy replacement where needed, soak and maintainer review remain delivery gates rather than unfinished W2 development. |
 
 ## Agent Tool Admission
 
@@ -462,6 +543,12 @@ Phase 1 is accepted and absorbed as the trusted, repository-local plugin framewo
 Phase 2 is accepted as the correct home for schedule resources and the existing GitHub integration migration. The clowder-ai#844/#846 direction is welcome only after the conflicting standalone anchor is removed and replaced with `F202 Phase 2` in title, body, feature docs, roadmap text, and commits that would enter source truth.
 
 Concrete product plugins such as Weixin MP (F204) and MediaHub providers (F205) keep their own feature anchors because they add new user-visible capabilities on top of F202. GitHub schedule migration is different: it moves an existing core integration into the F202 lifecycle boundary and therefore belongs under this feature.
+
+For Train C1, the implementation boundary is now closed at the two draft PRs named above. Do not reopen
+completed W2 slices merely because an old task or timeline snapshot still says `todo`/`doing`; refresh that
+projection instead. Conversely, do not turn CI or source synchronization into an acceptance claim: the
+operator still needs to exercise the current Host worktree with the current installed package copies before
+the maintainer merge request.
 
 K-2A through K-2D remain the accepted Host-owned external-package foundation. Their historical
 no-activation-route restriction describes that foundation slice, not the current Train B implementation.

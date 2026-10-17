@@ -16,6 +16,8 @@ declare module 'fastify' {
     sessionCsrfToken?: string;
     /** Opaque issuance binding used to prove which browser session authorized an owner action. */
     sessionBindingId?: string;
+    /** Revalidates the same cookie session after an async privileged operation. */
+    assertSessionCurrent?: () => void;
   }
 }
 
@@ -78,6 +80,7 @@ function sessionAuth(app: FastifyInstance, _opts: Record<string, never>, done: (
   app.decorateRequest('sessionUserId', undefined);
   app.decorateRequest('sessionCsrfToken', undefined);
   app.decorateRequest('sessionBindingId', undefined);
+  app.decorateRequest('assertSessionCurrent', undefined);
 
   app.addHook('onRequest', (request, _reply, next) => {
     const session = browserSessionForCookies(request.cookies ?? {});
@@ -85,6 +88,12 @@ function sessionAuth(app: FastifyInstance, _opts: Record<string, never>, done: (
       request.sessionUserId = session.userId;
       request.sessionCsrfToken = session.csrfToken;
       request.sessionBindingId = session.bindingId;
+      const cookies = { ...request.cookies };
+      request.assertSessionCurrent = () => {
+        const current = browserSessionForCookies(cookies);
+        if (!current || current.userId !== session.userId || current.bindingId !== session.bindingId)
+          throw new Error('Authenticated session is no longer current');
+      };
     }
     next();
   });

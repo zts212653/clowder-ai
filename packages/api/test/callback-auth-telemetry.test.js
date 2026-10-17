@@ -39,6 +39,7 @@ describe('callback-auth-telemetry (F174-D1)', () => {
       agent_key_revoked: 0,
       agent_key_unknown: 0,
       agent_key_scope_mismatch: 0,
+      cloud_principal_not_configured: 0,
     });
     assert.deepEqual(snap.toolCounts, {});
     assert.equal(snap.totalFailures, 0);

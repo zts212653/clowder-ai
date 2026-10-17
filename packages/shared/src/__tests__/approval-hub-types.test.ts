@@ -154,11 +154,10 @@ describe('F246 Phase I approval provenance contract', () => {
       'F260',
       'F266',
       'F276',
-      'F292',
       'F306',
       'F321',
     ];
-    assert.equal(ids.length, 12);
+    assert.equal(ids.length, 11);
     assert.equal(ids.includes('F028' as ApprovalProducerId), false);
   });
 
@@ -168,8 +167,8 @@ describe('F246 Phase I approval provenance contract', () => {
   });
 
   it('admits feature-owned exact-claim selection without changing generic approval modes', () => {
-    const modes: ApprovalDecisionMode[] = ['approve-reject', 'claim-select', 'meeting-intake'];
-    assert.deepEqual(modes, ['approve-reject', 'claim-select', 'meeting-intake']);
+    const modes: ApprovalDecisionMode[] = ['approve-reject', 'claim-select'];
+    assert.deepEqual(modes, ['approve-reject', 'claim-select']);
   });
 });
 

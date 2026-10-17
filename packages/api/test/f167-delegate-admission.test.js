@@ -56,14 +56,7 @@ function buildResolver({ task = makeTask(), delegates = [] } = {}) {
       return [];
     },
   };
-  return new ActionSubjectTruthResolver(
-    leaseStore,
-    communityStore,
-    undefined,
-    taskProvider,
-    undefined,
-    delegateProvider,
-  );
+  return new ActionSubjectTruthResolver(leaseStore, taskProvider, delegateProvider);
 }
 
 /** Build an admission service with the given resolver and a mock lease store. */
@@ -226,17 +219,10 @@ describe('F167 approved-child delegation — resolver→admission path', () => {
         async clearSubjectTerminal() {},
       },
       {
-        async get() {
-          return null;
-        },
-      },
-      undefined,
-      {
         async get(id) {
           return id === TASK_ID ? makeTask() : null;
         },
       },
-      undefined,
     );
     const { service } = buildAdmission(resolver);
     await assert.rejects(

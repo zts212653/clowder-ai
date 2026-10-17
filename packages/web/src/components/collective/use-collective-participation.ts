@@ -94,7 +94,7 @@ export function useCollectiveParticipation(connectionId: string) {
   const [notice, setNotice] = useState<string>();
   const busyRef = useRef(false);
   const readRevision = useRef(0);
-  const base = `/api/plugins/collective-connector/${encodeURIComponent(connectionId)}`;
+  const base = `/api/plugins/official.collective-connector/connections/${encodeURIComponent(connectionId)}`;
   const load = useCallback(
     async (signal?: AbortSignal) => {
       const revision = ++readRevision.current;

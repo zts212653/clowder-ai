@@ -19,7 +19,7 @@ select_named_alpha() {
 read_named_alpha_selection() {
   local selected
   selected="$(node -e 'const c=JSON.parse(process.argv[1]); console.log([c.alphaRoot,c.branch,...Object.values(c.ports)].join("\t"))' "$NAMED_ALPHA_COORDINATES")" || die "invalid Alpha selection"
-  IFS=$'\t' read -r ALPHA_DIR ALPHA_BRANCH ALPHA_FRONTEND_PORT ALPHA_API_PORT ALPHA_PREVIEW_GATEWAY_PORT ALPHA_COLLECTIVE_SERVICE_PORT ALPHA_REDIS_PORT <<< "$selected"
+  IFS=$'\t' read -r ALPHA_DIR ALPHA_BRANCH ALPHA_FRONTEND_PORT ALPHA_API_PORT ALPHA_PREVIEW_GATEWAY_PORT ALPHA_REDIS_PORT <<< "$selected"
 }
 
 apply_named_alpha_environment() {
@@ -28,7 +28,6 @@ apply_named_alpha_environment() {
   while IFS=$'\t' read -r key value; do
     export "$key=$value"
   done <<< "$exports"
-  unset COLLECTIVE_GITHUB_CLIENT_ID COLLECTIVE_GITHUB_CLIENT_SECRET
 }
 
 assert_named_alpha_prepared() {
@@ -68,7 +67,7 @@ sync_named_alpha_worktree() {
 assert_named_alpha_ports_idle() {
   command -v lsof >/dev/null 2>&1 || die "named Alpha requires a listener ownership probe"
   local port rc
-  for port in "$ALPHA_FRONTEND_PORT" "$ALPHA_API_PORT" "$ALPHA_PREVIEW_GATEWAY_PORT" "$ALPHA_COLLECTIVE_SERVICE_PORT" "$ALPHA_REDIS_PORT"; do
+  for port in "$ALPHA_FRONTEND_PORT" "$ALPHA_API_PORT" "$ALPHA_PREVIEW_GATEWAY_PORT" "$ALPHA_REDIS_PORT"; do
     rc=0
     lsof -nP -iTCP:"$port" -sTCP:LISTEN >/dev/null 2>&1 || rc=$?
     [ "$rc" -eq 1 ] || die "named Alpha port $port is occupied or unreadable; no process will be replaced"

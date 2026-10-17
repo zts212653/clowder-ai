@@ -5,6 +5,7 @@ import type {
 } from './ActionSuccessorAdmissionContract.js';
 import type { ActionSuccessorLeaseStore } from './ActionSuccessorLeaseStore.js';
 import type { CanonicalActionTerminalPredicate } from './ActionTerminalPredicateCatalog.js';
+import { type ActionFreshnessProviderAuthority, withActionPredicateAuthority } from './action-predicate-authority.js';
 import {
   boundGenerationHasTerminalDelegateOutcome,
   currentDelegateLineageGenerationHasExactEntry,
@@ -33,6 +34,7 @@ interface ReplacementAdmissionDeps {
   ): Promise<{
     terminalPredicate: CanonicalActionTerminalPredicate;
     freshnessEvidenceRef: string;
+    providerAuthority?: ActionFreshnessProviderAuthority;
     /** F167 × F322: delegate authority evidence for lease auditability. */
     delegateEvidenceRef?: string;
   }>;
@@ -172,40 +174,40 @@ export async function admitActionSuccessorReplacement(
   }
   if (returnedReplacement.kind === 'ordinary') assertOrdinaryReplacementRoute(current, input, claimOrigin);
   const delegateLineageReentry = isDelegateLineageReplacement(current, input, claimOrigin, returnedReplacement);
-  const { terminalPredicate, freshnessEvidenceRef, delegateEvidenceRef } = await deps.resolveVerifiedPredicate(
-    input,
-    current,
-    delegateLineageReentry,
-  );
+  const { terminalPredicate, freshnessEvidenceRef, delegateEvidenceRef, providerAuthority } =
+    await deps.resolveVerifiedPredicate(input, current, delegateLineageReentry);
   const replacementInput = {
     expectedGeneration: replacement.expectedGeneration,
     holderCatIds: input.holderCatIds,
     holderThreadId: input.targetThreadId,
     dispatchId: input.dispatchId,
     terminalPredicate,
+    ...(providerAuthority ? { terminalPredicateProviderBinding: providerAuthority.binding } : {}),
     evidenceRef: input.evidenceRef,
     freshnessEvidenceRef,
     ...(delegateEvidenceRef ? { delegateEvidenceRef } : {}),
     now: input.now,
   };
-  const result = await deps.leaseStore.replace(
-    replacement.leaseId,
-    claimOrigin === 'existing_standing'
-      ? { ...replacementInput, claimOrigin, issuerStandingEvidenceRef }
-      : {
-          ...replacementInput,
-          claimOrigin,
-          predecessorCatId: input.actorCatId,
-          predecessorThreadId: input.sourceThreadId,
-          issuerStandingEvidenceRef,
-          ...(returnedReplacement.kind === 'authorized'
-            ? {
-                returnedHolderCatId: input.actorCatId,
-                returnedHolderThreadId: input.sourceThreadId,
-                returnProof: returnedReplacement.proof,
-              }
-            : {}),
-        },
+  const result = await withActionPredicateAuthority(providerAuthority, () =>
+    deps.leaseStore.replace(
+      replacement.leaseId,
+      claimOrigin === 'existing_standing'
+        ? { ...replacementInput, claimOrigin, issuerStandingEvidenceRef }
+        : {
+            ...replacementInput,
+            claimOrigin,
+            predecessorCatId: input.actorCatId,
+            predecessorThreadId: input.sourceThreadId,
+            issuerStandingEvidenceRef,
+            ...(returnedReplacement.kind === 'authorized'
+              ? {
+                  returnedHolderCatId: input.actorCatId,
+                  returnedHolderThreadId: input.sourceThreadId,
+                  returnProof: returnedReplacement.proof,
+                }
+              : {}),
+          },
+    ),
   );
   if (result.outcome === 'replaced' || result.outcome === 'reattached') {
     successorReplace.add(1);

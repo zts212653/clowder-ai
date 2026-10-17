@@ -4,7 +4,13 @@
 
 import type { CreateFrustrationIssueInput, FrustrationIssue } from '@cat-cafe/shared';
 import { createFrustrationIssue } from '@cat-cafe/shared';
-import type { ConfirmIssueInput, IFrustrationIssueStore } from '../ports/FrustrationIssueStore.js';
+import { sameFrustrationSource } from '../frustration-source-snapshot.js';
+import type {
+  ConfirmIssueInput,
+  IFrustrationIssueStore,
+  LinkFrustrationDraftInput,
+  LinkFrustrationDraftResult,
+} from '../ports/FrustrationIssueStore.js';
 
 function clone(issue: FrustrationIssue): FrustrationIssue {
   return JSON.parse(JSON.stringify(issue));
@@ -69,6 +75,27 @@ export class InMemoryFrustrationIssueStore implements IFrustrationIssueStore {
     if (issue) {
       issue.communityIssueDraftId = draftId;
     }
+  }
+
+  async compareAndSetCommunityIssueDraft(
+    input: LinkFrustrationDraftInput,
+    assertCurrent?: () => Promise<void>,
+  ): Promise<LinkFrustrationDraftResult> {
+    input = structuredClone(input);
+    await assertCurrent?.();
+    if (!input.draftId || input.expectedDraftId === '') throw new Error('Draft IDs must be nonempty');
+    const issue = this.issues.get(input.issueId);
+    if (!issue) return { outcome: 'missing' };
+    if (issue.status !== 'confirmed') return { outcome: 'not_confirmed' };
+    if (!sameFrustrationSource(issue, input.expectedSource)) return { outcome: 'stale_source' };
+    const current = issue.communityIssueDraftId ?? null;
+    if (current === input.draftId) return { outcome: 'already_linked' };
+    if (current !== input.expectedDraftId || (current !== null && input.allowReplace !== true)) {
+      return { outcome: 'conflict' };
+    }
+    // No await between reading, checking and writing the in-memory record.
+    issue.communityIssueDraftId = input.draftId;
+    return { outcome: 'linked' };
   }
 
   async listByThread(threadId: string): Promise<FrustrationIssue[]> {

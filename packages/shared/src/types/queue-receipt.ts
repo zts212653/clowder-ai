@@ -266,7 +266,9 @@ export type QueueTargetAttemptTerminalReason =
   | 'prestart_timeout'
   | 'runtime_restart'
   | 'invocation_cancelled'
-  | 'source_withdrawn';
+  | 'source_withdrawn'
+  | 'public_output_abandoned'
+  | 'public_output_conflict';
 
 export interface QueueTargetAttempt {
   id: string;

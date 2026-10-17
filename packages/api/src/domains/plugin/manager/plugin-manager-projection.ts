@@ -13,20 +13,18 @@ import type {
   PluginManagerPackageSource,
 } from '@cat-cafe/shared';
 import type { Capability, PluginManifest } from '@clowder-ai/plugin-contract';
-import type {
-  PluginInstanceRecord,
-  PluginInventorySnapshot,
-  PluginPackageRecord,
-  PluginRuntimeErrorRecord,
-} from '../host-inventory/types.js';
+import { pluginRuntimeDiagnostic } from '../diagnostics/plugin-runtime-diagnostic.js';
+import type { PluginInstanceRecord, PluginInventorySnapshot, PluginPackageRecord } from '../host-inventory/types.js';
 
 /** Catalog-owned metadata required to render an available plugin before installation. */
 export interface PluginManagerCatalogCandidate {
   readonly catalogId: string;
+  readonly sourceLabel?: string;
   readonly pluginId: string;
   readonly packageName: string;
   readonly version: string;
-  readonly packageDigest: string;
+  readonly packageDigest: string | null;
+  readonly directorySource?: Extract<PluginManagerPackageSource, { kind: 'git' }>;
   readonly displayName: string;
   readonly description?: PluginDescription;
   readonly icon?: PluginIconSpec;
@@ -189,16 +187,6 @@ function intentState(
   return 'disabled';
 }
 
-function diagnostic(error: PluginRuntimeErrorRecord | undefined, revision: number) {
-  if (!error) return undefined;
-  return {
-    code: error.code,
-    message: `Plugin runtime reported ${error.code}.`,
-    occurredAt: error.occurredAt,
-    revision,
-  };
-}
-
 function candidatePackage(
   candidate: PluginManagerCatalogCandidate,
   snapshot: PluginInventorySnapshot,
@@ -219,9 +207,23 @@ function candidateSource(
     return {
       kind: provenance.kind,
       packageName: provenance.packageName ?? null,
-      trust: 'local-trusted',
+      trust: 'unverified',
+      ...(provenance.dependencyClosure === undefined ? {} : { dependencyClosure: provenance.dependencyClosure }),
     };
   }
+  if (provenance?.kind === 'git') {
+    return {
+      kind: 'git',
+      url: provenance.url,
+      packageName: provenance.packageName ?? null,
+      trust: 'unverified',
+      ...(provenance.dependencyClosure === undefined ? {} : { dependencyClosure: provenance.dependencyClosure }),
+    };
+  }
+  if (packageRecord && provenance?.kind !== 'catalog') {
+    throw new Error('Installed plugin package is missing admitted source provenance');
+  }
+  if (candidate.directorySource && !packageRecord) return candidate.directorySource;
   return {
     kind: 'catalog',
     catalogId: candidate.catalogId,
@@ -279,9 +281,12 @@ function projectCapabilities(
   }));
 }
 
-function runtimeDiagnostic(instance: PluginInstanceRecord | undefined) {
-  if (!instance?.lastRuntimeError) return {};
-  return { diagnostic: diagnostic(instance.lastRuntimeError, instance.lifecycleRevision) };
+function runtimeDiagnostic(
+  instance: PluginInstanceRecord | undefined,
+  grant: Parameters<typeof pluginRuntimeDiagnostic>[1],
+) {
+  const diagnostic = pluginRuntimeDiagnostic(instance, grant);
+  return diagnostic === undefined ? {} : { diagnostic };
 }
 
 export function projectPluginManagerCatalogCandidate(
@@ -323,9 +328,10 @@ export function projectPluginManagerCatalogCandidate(
     auth,
     intent,
     live,
+    ...(instance?.activationState === 'error' ? { activationFailed: true } : {}),
     lifecycleRevision: instance?.lifecycleRevision ?? null,
     capabilitySummary,
     actions: derivePluginManagerActions({ artifact, config, auth, intent, activationTransition }),
-    ...runtimeDiagnostic(instance),
+    ...runtimeDiagnostic(instance, grant),
   };
 }

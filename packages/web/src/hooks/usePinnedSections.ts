@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import { canonicalSettingsSectionId } from '@/lib/settings-section-id';
 
 const STORAGE_KEY = 'cat-cafe:pinned-settings-sections';
 const SYNC_EVENT = 'cat-cafe:pinned-settings-sync';
@@ -13,7 +14,10 @@ function read(): string[] {
     if (!raw) return [];
     const parsed = JSON.parse(raw);
     if (!Array.isArray(parsed)) return [];
-    return parsed.filter((item): item is string => typeof item === 'string');
+    // Both rails consume canonical identities; the next user edit persists them.
+    return [
+      ...new Set(parsed.filter((item): item is string => typeof item === 'string').map(canonicalSettingsSectionId)),
+    ];
   } catch {
     return [];
   }

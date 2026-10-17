@@ -23,7 +23,7 @@ export function useCollectiveEntryPairing(onPaired: (connectionId: string) => Pr
       setBusy(true);
       setError(undefined);
       try {
-        const response = await apiFetch('/api/plugins/collective-connector/pair', {
+        const response = await apiFetch('/api/plugins/official.collective-connector/pair', {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({

@@ -33,14 +33,18 @@ test('Tripo discovery consumes exact plugin-repository release metadata with no 
   assert.deepEqual(entry.effectiveGrants, []);
 });
 
-test('catalog absence cannot manufacture a bundled Tripo release or hide the remaining legacy bundles', async () => {
+test('catalog absence cannot manufacture a bundled Tripo release or hide the remaining Host bundle', async () => {
   const catalog = createHostOfficialPluginCatalog(async () => ({ schemaVersion: '1', plugins: [] }));
   const snapshot = await catalog.snapshot();
   assert.equal(
     snapshot.entries.some((candidate) => candidate.pluginId === 'official.tripo-studio'),
     false,
   );
-  for (const id of ['official.chatgpt-dot', 'official.collective-connector']) {
+  assert.equal(
+    snapshot.entries.some((candidate) => candidate.pluginId === 'official.collective-connector'),
+    false,
+  );
+  for (const id of ['official.chatgpt-dot']) {
     assert.ok(snapshot.entries.some((candidate) => candidate.pluginId === id));
   }
 });

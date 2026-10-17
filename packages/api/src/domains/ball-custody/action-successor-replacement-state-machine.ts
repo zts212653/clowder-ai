@@ -5,6 +5,10 @@ import {
   reattachReturnedActionSuccessor,
 } from './action-successor-return-state-machine.js';
 import type { ActionSuccessorLease, ActionSuccessorReplacementTransition } from './action-successor-state-machine.js';
+import {
+  type ActionTerminalProviderBinding,
+  nextActionTerminalProviderBinding,
+} from './action-terminal-provider-binding.js';
 
 export type ReplaceActionSuccessorResult = {
   outcome:
@@ -21,6 +25,7 @@ export type ReplaceActionSuccessorResult = {
 };
 
 type ReplaceActionSuccessorInputBase = {
+  terminalPredicateProviderBinding?: ActionTerminalProviderBinding;
   expectedGeneration: number;
   holderCatIds: string[];
   holderThreadId: string;
@@ -92,6 +97,7 @@ function replaceReturnedActionSuccessor(
     holderThreadId: input.holderThreadId,
     dispatchId: input.dispatchId,
     terminalPredicate: input.terminalPredicate,
+    terminalPredicateProviderBinding: input.terminalPredicateProviderBinding,
     evidenceRef: input.evidenceRef,
     freshnessEvidenceRef: input.freshnessEvidenceRef,
     delegateEvidenceRef: input.delegateEvidenceRef,
@@ -191,6 +197,11 @@ export function replaceActionSuccessor(
       dispatchId: input.dispatchId,
       terminalPredicateState: { kind: 'predicate_backed' },
       terminalPredicate: input.terminalPredicate,
+      terminalPredicateProviderBinding: nextActionTerminalProviderBinding(
+        current.terminalPredicateProviderBinding,
+        input.terminalPredicateProviderBinding,
+        current.tenantScope,
+      ),
       generation: current.generation + 1,
       status: 'active',
       holderOutcomes: {},

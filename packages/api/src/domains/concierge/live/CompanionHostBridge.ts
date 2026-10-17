@@ -1,5 +1,5 @@
 import { type ConciergeConfig, catRegistry } from '@cat-cafe/shared';
-import type { CompanionState } from '@clowder-ai/plugin-contract';
+import type { CompanionState } from '@clowder-ai/plugin-contract-beta21';
 import { z } from 'zod';
 import type { IMessageStore } from '../../cats/services/stores/ports/MessageStore.js';
 import {

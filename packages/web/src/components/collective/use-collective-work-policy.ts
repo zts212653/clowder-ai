@@ -33,7 +33,7 @@ export function useCollectiveWorkPolicy(connectionId: string, bridge?: Collectiv
   const running = useRef(false);
   const current = useRef(connectionId);
   current.current = connectionId;
-  const base = `/api/plugins/collective-connector/${encodeURIComponent(connectionId)}`;
+  const base = `/api/plugins/official.collective-connector/connections/${encodeURIComponent(connectionId)}`;
   const readSnapshot = useCallback(async () => {
     try {
       const [policy, attention] = await Promise.all([

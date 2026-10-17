@@ -155,7 +155,7 @@ triggers:
 ### Review
 
 - 用 `request-review` 把 diff 送给非作者猫做独立 review。
-- `cat_cafe_record_external_review_verdict` **只用于 configured maintainer-owned inbound reviews**：当前 authenticated identity 是外部仓库的 maintainer，且 PR 作者不是当前 identity（外部贡献者向我们维护的仓库提 PR）。
+- `github_record_external_review_verdict` **只用于 configured maintainer-owned inbound reviews**：当前 authenticated identity 是外部仓库的 maintainer，且 PR 作者不是当前 identity（外部贡献者向我们维护的仓库提 PR）。
 - 其余场景不写 formal verdict：
   - 我们向外部仓库提的 PR（outbound / self-authored）→ 由外部 maintainer review，我们只回复其 comment / 修自己的 PR，不把 verdict 写回。
   - 第三方仓库的纯审计 → advisory only，只在本 thread 内产出 findings，不强制写回外部系统。
@@ -165,7 +165,7 @@ triggers:
 
 - **不要为每个 PR/issue 自动注册 tracking**。只有以下两类情况才注册显式 typed predicate：
   1. 工作真实阻塞在外部条件（等作者回复、等 CI、等 maintainer review）。
-  2. 计划做 formal external review 时，需要先用 `cat_cafe_register_pr_tracking` seed projection，才能在终端态记录 `cat_cafe_record_external_review_verdict`。
+  2. 计划做 formal external review 时，需要先用 已安装 GitHub 插件的 PR 跟踪工具（先 `tool_search`）seed projection，才能在终端态记录 `github_record_external_review_verdict`。
 - 注册时必须写明 `when`、阻塞解除后的 `nextStep` 和 `expiresAt`。
 - Advisory / triage / 纯审计不需要注册 tracking。
 

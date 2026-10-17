@@ -1,5 +1,6 @@
 'use client';
 
+import { useId } from 'react';
 import { personalChromeSettingsHref } from '@/utils/personal-chrome-settings';
 import {
   CloudConversationChoices,
@@ -86,6 +87,8 @@ function ReadyRecovery(
   props: CloudBindingRecoveryCardViewProps & { loadState: Extract<RecoveryLoadState, { kind: 'ready' }> },
 ) {
   const { loadState, selectedConversationId, showChoices, phase, onRefresh } = props;
+  // Its own radio group: other recovery cards, and the thread panel, can show choices at the same time.
+  const radioName = `cloud-recovery-conversation-${useId()}`;
   if (loadState.candidates.length === 0)
     return (
       <div className="mt-3 text-sm text-cafe-secondary">
@@ -126,7 +129,7 @@ function ReadyRecovery(
     <div>
       {loadState.connectionIssue ? (
         <a
-          href={personalChromeSettingsHref(props.threadId)}
+          href={personalChromeSettingsHref()}
           className="mt-2 inline-block text-xs font-semibold text-cafe-interactive hover:underline"
         >
           检查连接组件
@@ -139,6 +142,7 @@ function ReadyRecovery(
           boundConversationId={loadState.boundConversationId}
           busy={busy}
           onSelect={props.onSelect}
+          name={radioName}
         />
       ) : selected ? (
         <div className="mt-3 rounded-lg border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] px-3 py-2">

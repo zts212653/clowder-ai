@@ -7,7 +7,7 @@ export interface L0CacheGeneration {
   cat: number;
 }
 
-export type L0Projection = 'owner' | 'public' | 'collective-work';
+export type L0Projection = 'owner' | 'public';
 
 function computeProfileContentSignature(profileDir: string): string | null {
   if (!existsSync(profileDir)) return 'missing';

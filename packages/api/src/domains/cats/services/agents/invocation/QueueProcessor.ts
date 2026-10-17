@@ -1,3 +1,4 @@
+import type { PublicInvocationExecution } from './public-invocation-execution.js';
 /**
  * QueueProcessor
  * 处理 InvocationQueue 中的排队条目：自动出队 + 暂停管理。
@@ -152,12 +153,6 @@ import {
   preparePrestartRetirements,
   terminalizePreparedPrestartRetirements,
 } from './queue-prestart-group-retirement.js';
-import {
-  collectiveQueueRefusalError,
-  isPermanentCollectiveQueueRefusal,
-  persistCollectiveRefusalRecord,
-  retireRefusedCollectiveQueueCarrier,
-} from './queue-private-refusal-disposition.js';
 import { type QueueRetryDeferralOptions, QueueRetryDeferrals } from './queue-retry-deferrals.js';
 import { isOwnerRecoverableRoutingTarget } from './queue-routing-recovery-policy.js';
 import { requireInvocationRecordUpdate } from './require-invocation-record-update.js';
@@ -509,17 +504,17 @@ export interface OutboundDeliveryHookLike {
 export interface StreamingOutboundHookLike {
   onStreamStart(
     threadId: string,
-    catId: string,
-    invocationId: string,
+    catId?: string,
+    invocationId?: string,
     senderHint?: { id: string; name?: string },
   ): Promise<void>;
-  onStreamChunk(threadId: string, accumulatedText: string, invocationId: string): Promise<void>;
-  onStreamEnd(threadId: string, finalText: string, invocationId: string): Promise<void>;
-  onClosureCatchingUp?(threadId: string, catId: CatId, invocationId: string): Promise<void>;
-  onClosureBlocked?(threadId: string, catId: CatId, reason: string, invocationId: string): Promise<void>;
-  cleanupPlaceholders?(threadId: string, invocationId: string): Promise<void>;
+  onStreamChunk(threadId: string, accumulatedText: string, invocationId?: string): Promise<void>;
+  onStreamEnd(threadId: string, finalText: string, invocationId?: string): Promise<void>;
+  onClosureCatchingUp?(threadId: string, catId: CatId, invocationId?: string): Promise<void>;
+  onClosureBlocked?(threadId: string, catId: CatId, reason: string, invocationId?: string): Promise<void>;
+  cleanupPlaceholders?(threadId: string, invocationId?: string): Promise<void>;
   /** F151: Signal adapters that delivery batch is complete for a thread. */
-  notifyDeliveryBatchDone?(threadId: string, chainDone: boolean): Promise<void>;
+  notifyDeliveryBatchDone?(threadId: string, chainDone: boolean, status?: string, invocationId?: string): Promise<void>;
 }
 
 /** Thread metadata for outbound delivery (deep link, title, etc.) */
@@ -530,6 +525,7 @@ interface ThreadMetaLike {
 }
 
 export interface QueueProcessorDeps {
+  publicInvocationExecution?: PublicInvocationExecution;
   queue: InvocationQueue;
   liveCompanionSessions?: Pick<
     import('../../../../concierge/live/LiveCompanionSessions.js').LiveCompanionSessions,
@@ -2751,10 +2747,10 @@ export class QueueProcessor {
   /** F151: Signal streaming adapters that delivery is done for this thread invocation.
    *  Fires on both success AND failure — failed invocations must close the task
    *  immediately instead of waiting for TASK_TIMEOUT_MS (P2-1 review fix). */
-  private signalDeliveryBatchDone(threadId: string, _status: string): void {
+  private signalDeliveryBatchDone(threadId: string, status: string, invocationId?: string): void {
     if (!this.deps.streamingHook?.notifyDeliveryBatchDone) return;
     const threadStillBusy = this.deps.invocationTracker.has(threadId) || this.isThreadBusy(threadId);
-    this.deps.streamingHook.notifyDeliveryBatchDone(threadId, !threadStillBusy).catch((err) => {
+    this.deps.streamingHook.notifyDeliveryBatchDone(threadId, !threadStillBusy, status, invocationId).catch((err) => {
       this.deps.log.warn({ err, threadId }, '[QueueProcessor] notifyDeliveryBatchDone failed');
     });
   }
@@ -3501,7 +3497,7 @@ export class QueueProcessor {
             { threadId: entry.threadId, catId, entryId: entry.id, invocationId: result.invocationId },
             '[QueueProcessor] skipped stale completion side effects after processing reservation changed',
           );
-          this.signalDeliveryBatchDone(entry.threadId, result.status);
+          this.signalDeliveryBatchDone(entry.threadId, result.status, result.invocationId);
           return;
         }
         void this.onInvocationComplete(entry.threadId, catId, result.status, result.invocationId, [], {
@@ -3510,7 +3506,7 @@ export class QueueProcessor {
           suppressAutomaticFollowUp,
           terminalInvocationIdByCatId: result.terminalInvocationIdByCatId,
         }).catch(() => {});
-        this.signalDeliveryBatchDone(entry.threadId, result.status);
+        this.signalDeliveryBatchDone(entry.threadId, result.status, result.invocationId);
       },
       () => {
         reportAdmission?.(false);
@@ -5002,6 +4998,16 @@ export class QueueProcessor {
         return executionResult(preRouteStatus);
       }
 
+      const publicCarrier = entry.execution.pluginPublicInvocation;
+      if (
+        publicCarrier &&
+        (!this.deps.publicInvocationExecution ||
+          targetCats.length !== 1 ||
+          targetCats[0] !== publicCarrier.targetCatId ||
+          messageIds.length !== 1 ||
+          messageIds[0] !== publicCarrier.sourceMessageId)
+      )
+        throw new Error('public_queue_execution_binding_invalid');
       routePreparationStartedAt = performance.now();
       for await (const msg of router.routeExecution(
         userId,
@@ -5014,7 +5020,19 @@ export class QueueProcessor {
           ...(entry.execution.suggestedSkill ? { promptTags: [`skill:${entry.execution.suggestedSkill}`] } : {}),
         },
         {
-          ...(liveCall ? { liveCompanion: liveCall } : {}),
+          ...(publicCarrier
+            ? {
+                publicInvocationBinding: { version: 1 as const, entryId: entry.id, carrier: publicCarrier },
+                publicInvocationExecution: this.deps.publicInvocationExecution,
+                toolExecutionPolicy: {
+                  mode: 'plugin_native' as const,
+                  pluginInstanceId: publicCarrier.pluginInstanceId,
+                  contributionId: publicCarrier.contributionId,
+                  actionMethods: publicCarrier.actionMethods,
+                },
+              }
+            : {}),
+          ...(!publicCarrier && liveCall ? { liveCompanion: liveCall } : {}),
           ownerAuthProvenance: entry.execution.ownerAuthProvenance,
           humanDispositionInvocationOrigin: 'queue_replay',
           routingQueueSource: source,
@@ -5029,13 +5047,13 @@ export class QueueProcessor {
             );
           },
           ...(entry.execution.executionScope ? { executionScope: entry.execution.executionScope } : {}),
-          ...(memoryCueOpportunitySeeds.length > 0 ? { memoryCueOpportunitySeeds } : {}),
-          ...(asrPersonMemoryScenes.length > 0 ? { asrPersonMemoryScenes } : {}),
+          ...(!publicCarrier && memoryCueOpportunitySeeds.length > 0 ? { memoryCueOpportunitySeeds } : {}),
+          ...(!publicCarrier && asrPersonMemoryScenes.length > 0 ? { asrPersonMemoryScenes } : {}),
           ...(Object.keys(callerDispatchPromptByCat).length > 0
             ? { modeSystemPromptByCat: callerDispatchPromptByCat }
             : {}),
           turnCustodyWakeForCat: (catId: string) => retargetTurnCustodyWake(turnCustodyWake, catId),
-          ...(contentBlocks.length > 0 ? { contentBlocks } : {}),
+          ...(!publicCarrier && contentBlocks.length > 0 ? { contentBlocks } : {}),
           ...(controller.signal ? { signal: controller.signal } : {}),
           // F-parallel-cancel: each original target keeps the controller captured at
           // startAll. Canceling one cat does not abort siblings, and a later occupant
@@ -5927,11 +5945,7 @@ export class QueueProcessor {
           /* best-effort — don't mask the original error */
         }
       }
-      const errMsg = isPermanentCollectiveQueueRefusal(err)
-        ? collectiveQueueRefusalError(err)
-        : err instanceof Error
-          ? err.message
-          : String(err);
+      const errMsg = err instanceof Error ? err.message : String(err);
       const exposeFailure = entry.execution.actionSuccessorFence
         ? await finalizeActionFenceOutcome('failed', false, targetCats)
         : true;
@@ -6067,29 +6081,7 @@ export class QueueProcessor {
         try {
           const preReceiverUserCancel =
             lifecycleTransferStarted && !lifecycleReceiverPersisted && finalStatus === 'canceled_by_user';
-          if (isPermanentCollectiveQueueRefusal(executionError) && !lifecycleReceiverPersisted && invocationId) {
-            const refusal = executionError;
-            const refusalInvocationId = invocationId;
-            if (batchedEntryIds.length !== 0) throw new Error('Collective refusal cannot retire a batched claim');
-            const current = queue.getEntrySnapshot(threadId, userId, entry.id);
-            if (
-              !current ||
-              !(await retireRefusedCollectiveQueueCarrier({
-                entry: current,
-                queue,
-                messages: messageStore,
-                refusal,
-                persistRefusal: () =>
-                  persistCollectiveRefusalRecord({
-                    store: invocationRecordStore,
-                    invocationId: refusalInvocationId,
-                    entry: current,
-                    refusal,
-                  }),
-              }))
-            )
-              throw new Error('Collective refusal claim retirement did not commit');
-          } else if (lifecycleAdmissionUnknown) {
+          if (lifecycleAdmissionUnknown) {
             // The original short claim fences an uncertain durable commit until canonical recovery.
             if (returnedExecutionResult) returnedExecutionResult.primarySettlementIncomplete = true;
           } else if (lifecycleTransferStarted && !lifecycleReceiverPersisted && !preReceiverUserCancel) {

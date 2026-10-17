@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { resolveContextContinuity } from '../../dist/domains/cats/services/agents/invocation/context-continuity.js';
-import { artifact, intake } from './asr-person-memory-contract-fixture.js';
+import { intake, memorySceneFixture } from './asr-person-memory-contract-fixture.js';
 
 const CODEX_EXEC = {
   provider: 'openai',
@@ -24,16 +24,7 @@ const CONTINUITY = resolveContextContinuity({
 });
 
 async function buildScene() {
-  const { buildAsrPersonMemoryDynamicScenes } = await import(
-    '../../dist/domains/signal-intake/AsrPersonMemorySceneBuilder.js'
-  );
-  const scene = buildAsrPersonMemoryDynamicScenes({
-    intake,
-    artifact,
-    threadId: 'thread-1',
-    consumerCatId: 'codex-sol',
-    now: 1_200,
-  })[0];
+  const scene = await memorySceneFixture();
   const candidate = {
     scene,
     source: {

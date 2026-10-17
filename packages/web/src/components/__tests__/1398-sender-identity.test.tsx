@@ -37,13 +37,13 @@ vi.mock('@/hooks/useCatData', () => ({
   formatCatName: (cat: CatData) => cat.displayName,
 }));
 const identity = {
-  from: { kind: 'external' as const, connectorId: 'github-wait' },
-  source: { connector: 'github-wait', label: 'GitHub Wait', icon: '🐙' },
+  from: { kind: 'external' as const, connectorId: 'scheduler' },
+  source: { connector: 'scheduler', label: '定时任务', icon: 'scheduler' },
 };
 afterEach(() => useChatStore.setState({ currentThreadId: '', messages: [], replyToMessage: null }));
 
 describe('1398 canonical sender identity across Queue and reply surfaces', () => {
-  it('quotes GitHub Wait with its own name and registry icon, never as the operator', () => {
+  it('quotes 定时任务 with its own name and registry icon, never as the operator', () => {
     const html = renderToStaticMarkup(
       <ReplyPill
         replyPreview={{ senderCatId: null, content: 'CI finished', ...identity }}
@@ -51,9 +51,28 @@ describe('1398 canonical sender identity across Queue and reply surfaces', () =>
         getCatById={() => undefined}
       />,
     );
-    expect(html).toContain('GitHub Wait');
+    expect(html).toContain('定时任务');
     expect(html).not.toContain('lang');
     expect(html).toContain('<svg');
+  });
+  it('renders plugin message icons and sender names without changing the plugin identity', () => {
+    const input = {
+      from: { kind: 'plugin' as const, instanceId: 'wechat-instance' },
+      source: { connector: 'wechat-plugin', label: 'WeChat', icon: 'message', sender: { id: 'alice', name: 'Alice' } },
+    };
+    const sender = resolveMessageSender(input, getCatById, { name: 'lang', aliases: [], mentionPatterns: [] });
+    expect(sender.label).toBe('WeChat · Alice');
+    expect(sender.isCoCreator).toBe(false);
+    const html = renderToStaticMarkup(
+      <ReplyPill
+        replyPreview={{ ...input, senderCatId: null, content: 'Hi' }}
+        replyToId="source"
+        getCatById={() => undefined}
+      />,
+    );
+    expect(html).toContain('<svg');
+    expect(html).not.toContain('>message<');
+    expect(input.from).toEqual({ kind: 'plugin', instanceId: 'wechat-instance' });
   });
   it('uses the same identity in the input reply preview', () => {
     const html = renderToStaticMarkup(
@@ -63,7 +82,7 @@ describe('1398 canonical sender identity across Queue and reply surfaces', () =>
         onClear={() => {}}
       />,
     );
-    expect(html).toContain('GitHub Wait');
+    expect(html).toContain('定时任务');
     expect(html).not.toContain('lang');
   });
   it('renders a queued external source with its connector icon rather than a generic cat avatar', () => {
@@ -95,7 +114,7 @@ describe('1398 canonical sender identity across Queue and reply surfaces', () =>
       />,
     );
     const route = html.slice(html.indexOf('data-testid="queue-route-q"'));
-    expect(route).toContain('GitHub Wait');
+    expect(route).toContain('定时任务');
     expect(route).toContain('<svg');
     expect(route).not.toContain('<img');
   });
@@ -110,7 +129,7 @@ describe('1398 canonical sender identity across Queue and reply surfaces', () =>
     expect(html).not.toContain('lang');
   });
   const cases: { name: string; from: MessageFrom; source?: ConnectorSource; label: string }[] = [
-    { name: 'github', ...identity, label: 'GitHub Wait' },
+    { name: 'github', ...identity, label: '定时任务' },
     {
       name: 'named external actor',
       from: { kind: 'external', connectorId: 'custom', sender: { id: 'actor', name: 'Alice' } },
@@ -243,7 +262,7 @@ describe('1398 canonical sender identity across Queue and reply surfaces', () =>
       getCatById,
       { name: 'lang', aliases: [], mentionPatterns: [] },
     );
-    expect(sender.label).toBe('GitHub Wait');
+    expect(sender.label).toBe('定时任务');
     expect(sender.fallbackIcon).toBeUndefined();
   });
   it('does not use legacy catId or source to guess an absent from', () => {
@@ -266,7 +285,7 @@ describe('1398 canonical sender identity across Queue and reply surfaces', () =>
           messages: [{ id: 'source', type: 'connector', content: 'content', timestamp: 1, ...identity } as Message],
         }),
       );
-      expect(container.textContent).toContain('GitHub Wait');
+      expect(container.textContent).toContain('定时任务');
       expect(container.textContent).not.toContain('lang');
       useChatStore.getState().setReplyTo(draft);
       expect(useChatStore.getState().replyToMessage?.from).toEqual(identity.from);

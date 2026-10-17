@@ -9,7 +9,6 @@ import {
   DEV_SCOPE,
   makeProposal,
   makeTask,
-  mockCommunityStore,
   mockTruthLeaseStore,
   OWNER_CAT,
   PROPOSAL_ID,
@@ -155,10 +154,7 @@ async function createHarness(t, separateProposalSource) {
   );
   const resolver = new ActionSubjectTruthResolver(
     mockTruthLeaseStore(),
-    mockCommunityStore(),
-    undefined,
     { get: async (id) => (id === task.id ? task : null) },
-    undefined,
     delegateProvider,
   );
   const app = Fastify();

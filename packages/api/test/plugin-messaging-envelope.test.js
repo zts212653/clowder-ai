@@ -44,6 +44,38 @@ function pluginStoredMessage(overrides = {}) {
 }
 
 describe('projectEnvelope — plugin messages (D-1)', () => {
+  test('accepts frozen typed media elements only when closed payloads and warning references are valid', () => {
+    const base = pluginStoredMessage().extra.pluginMessage;
+    const media = { elementId: 'media-1', kind: 'media_ref', payload: { type: 'image', reference: 'hmr_123' } };
+    const unavailable = {
+      elementId: 'missing-1',
+      kind: 'media_unavailable',
+      payload: { type: 'video', fileName: 'clip.mp4', reason: 'unavailable' },
+    };
+    const warning = {
+      elementId: 'warning-1',
+      kind: 'media_warning',
+      payload: { mediaElementId: 'media-1', stage: 'preview', reason: 'processing_failed' },
+    };
+    const valid = { ...base, revision: 1, elements: [media, unavailable, warning], appendOps: [] };
+    assert.ok(envelope.parsePluginMessageExtra(valid));
+    assert.equal(
+      envelope.renderElementsText(valid.elements),
+      '[media_ref:media-1]\n[media_unavailable:missing-1]\n[media_warning:warning-1]',
+    );
+
+    const invalidPayloads = [
+      { ...unavailable, payload: { ...unavailable.payload, locator: 'secret' } },
+      { ...unavailable, payload: { ...unavailable.payload, type: 'unknown' } },
+      { ...warning, payload: { ...warning.payload, stage: 'unknown' } },
+      { ...warning, payload: { ...warning.payload, mediaElementId: 'absent' } },
+    ];
+    for (const invalid of invalidPayloads) {
+      const elements = invalid.kind === 'media_warning' ? [media, unavailable, invalid] : [media, invalid, warning];
+      assert.equal(envelope.parsePluginMessageExtra({ ...valid, elements }), null, JSON.stringify(invalid));
+    }
+  });
+
   test('projects canonical envelope from stored plugin message', () => {
     const env = envelope.projectEnvelope(pluginStoredMessage());
     assert.ok(env);
@@ -69,6 +101,205 @@ describe('projectEnvelope — plugin messages (D-1)', () => {
 });
 
 describe('projectEnvelope — host-relayed messages (snapshot support)', () => {
+  test('cat causal trigger becomes plugin replyTo without changing the Hub replyTo field', () => {
+    const base = {
+      id: 'cat-reply',
+      threadId: 'thread-1',
+      userId: 'user-1',
+      catId: 'cat-1',
+      content: 'answer',
+      mentions: [],
+      timestamp: 1_800_000_000_000,
+      extra: { causal: { kind: 'invocation_reply', triggerMessageId: 'trigger-1', triggerThreadId: 'thread-1' } },
+    };
+    assert.equal(base.replyTo, undefined);
+    assert.equal(envelope.projectEnvelope(base).replyTo, 'trigger-1');
+    assert.equal(envelope.projectEnvelope({ ...base, replyTo: 'explicit-a2a' }).replyTo, 'explicit-a2a');
+    assert.equal(envelope.projectEnvelope({ ...base, catId: null }).replyTo, undefined);
+    assert.equal(
+      envelope.projectEnvelope({
+        ...base,
+        extra: { causal: { ...base.extra.causal, triggerThreadId: 'other-thread' } },
+      }).replyTo,
+      undefined,
+    );
+    assert.equal(envelope.projectEnvelope({ ...base, extra: {} }).replyTo, undefined);
+  });
+
+  test('invalid historical rich-block shapes use the shared invalid_shape degradation exit', () => {
+    const blocks = [
+      { id: '', kind: 'card', v: 1, title: 'Missing id' },
+      { id: 'old-kind', kind: '', v: 1, title: 'Missing kind' },
+      { id: 'old-version', kind: 'card', v: 0, title: 'Old version' },
+    ];
+    const warnings = [];
+    const previousWarn = console.warn;
+    console.warn = (...args) => warnings.push(args);
+    let env;
+    try {
+      env = envelope.projectEnvelope({
+        id: 'msg-invalid-rich',
+        threadId: 'thread-1',
+        userId: 'user-1',
+        catId: 'opus',
+        content: 'cat replies',
+        mentions: [],
+        timestamp: 1_800_000_000_002,
+        extra: { rich: { v: 1, blocks } },
+      });
+    } finally {
+      console.warn = previousWarn;
+    }
+    assert.deepEqual(
+      env.payload.elements.map((element) => element.kind),
+      ['text', 'text', 'text', 'text'],
+    );
+    assert.deepEqual(
+      warnings.map(([, detail]) => detail.reason),
+      ['invalid_shape', 'invalid_shape', 'invalid_shape'],
+    );
+  });
+
+  test('projects non-media stored rich blocks unchanged after text, omitting media for W2-5b', () => {
+    const card = {
+      id: 'card-1',
+      kind: 'card',
+      v: 1,
+      title: 'Memory proposal',
+      meta: { kind: 'person_memory_proposal', candidateId: 'candidate-1' },
+    };
+    const checklist = {
+      id: 'list-1',
+      kind: 'checklist',
+      v: 1,
+      title: 'Next steps',
+      items: [{ id: 'step-1', text: 'Review', checked: false }],
+    };
+    const audio = { id: 'audio-1', kind: 'audio', v: 1, url: '/api/tts/audio/relative' };
+    const env = envelope.projectEnvelope({
+      id: 'msg-rich',
+      threadId: 'thread-1',
+      userId: 'user-1',
+      catId: 'opus',
+      content: 'cat replies',
+      mentions: [],
+      timestamp: 1_800_000_000_002,
+      extra: { rich: { v: 1, blocks: [card, audio, checklist] } },
+    });
+    assert.deepEqual(env.payload.elements, [
+      { elementId: 'el_msg-rich_0', kind: 'text', payload: { text: 'cat replies' } },
+      { elementId: 'el_msg-rich_1', kind: 'rich_block', payload: card, epistemicStatus: 'inference' },
+      { elementId: 'el_msg-rich_3', kind: 'rich_block', payload: checklist, epistemicStatus: 'inference' },
+    ]);
+    assert.strictEqual(env.payload.elements[1].payload, card, 'payload must be the stored block, not a wrapper');
+  });
+
+  test('oversized non-media block degrades to labelled text and emits a bounded warning', () => {
+    const card = { id: 'large-card', kind: 'card', v: 1, title: 'Oversized', bodyMarkdown: 'x'.repeat(70_000) };
+    const warnings = [];
+    const previousWarn = console.warn;
+    console.warn = (...args) => warnings.push(args);
+    let env;
+    try {
+      env = envelope.projectEnvelope({
+        id: 'msg-large',
+        threadId: 'thread-1',
+        userId: 'user-1',
+        catId: 'opus',
+        content: 'cat replies',
+        mentions: [],
+        timestamp: 1_800_000_000_002,
+        extra: { rich: { v: 1, blocks: [card] } },
+      });
+    } finally {
+      console.warn = previousWarn;
+    }
+    assert.deepEqual(
+      env.payload.elements.map(({ kind }) => kind),
+      ['text', 'text'],
+    );
+    assert.match(env.payload.elements[1].payload.text, /card.*Oversized/);
+    assert.equal(warnings.length, 1);
+    assert.match(warnings[0][0], /rich block degraded/);
+    assert.deepEqual(warnings[0][1], {
+      messageId: 'msg-large',
+      kind: 'card',
+      bytes: Buffer.byteLength(JSON.stringify(card), 'utf8'),
+      reason: 'bounds_exceeded',
+    });
+  });
+
+  test('aggregate overflow remains visible within the 128-element and 256 KiB message limits', () => {
+    const blocks = Array.from({ length: 130 }, (_, index) => ({
+      id: `card-${index}`,
+      kind: 'card',
+      v: 1,
+      title: `Card ${index}`,
+    }));
+    const warnings = [];
+    const previousWarn = console.warn;
+    console.warn = (...args) => warnings.push(args);
+    let env;
+    try {
+      env = envelope.projectEnvelope({
+        id: 'msg-many',
+        threadId: 'thread-1',
+        userId: 'user-1',
+        catId: 'opus',
+        content: 'cat replies',
+        mentions: [],
+        timestamp: 1_800_000_000_002,
+        extra: { rich: { v: 1, blocks } },
+      });
+    } finally {
+      console.warn = previousWarn;
+    }
+    assert.equal(env.payload.elements.length, 128);
+    assert.match(env.payload.elements.at(-1).payload.text, /rich blocks degraded: 4; kinds: card/);
+    assert.equal(warnings.length, 4);
+    const total = env.payload.elements.reduce(
+      (sum, element) => sum + Buffer.byteLength(JSON.stringify(element.payload)),
+      0,
+    );
+    assert.ok(total <= 262_144);
+  });
+
+  test('total payload pressure degrades a block without producing an invalid envelope', () => {
+    const blocks = Array.from({ length: 5 }, (_, index) => ({
+      id: `diff-${index}`,
+      kind: 'diff',
+      v: 1,
+      filePath: `file-${index}.ts`,
+      diff: 'x'.repeat(60_000),
+    }));
+    const warnings = [];
+    const previousWarn = console.warn;
+    console.warn = (...args) => warnings.push(args);
+    let env;
+    try {
+      env = envelope.projectEnvelope({
+        id: 'msg-total',
+        threadId: 'thread-1',
+        userId: 'user-1',
+        catId: 'opus',
+        content: 'cat replies',
+        mentions: [],
+        timestamp: 1_800_000_000_002,
+        extra: { rich: { v: 1, blocks } },
+      });
+    } finally {
+      console.warn = previousWarn;
+    }
+    assert.equal(env.payload.elements.filter((element) => element.kind === 'rich_block').length, 4);
+    assert.match(env.payload.elements.at(-1).payload.text, /diff.*file-4\.ts/);
+    assert.equal(warnings.length, 1);
+    const total = env.payload.elements.reduce(
+      (sum, element) => sum + Buffer.byteLength(JSON.stringify(element.payload)),
+      0,
+    );
+    assert.ok(total <= 262_144);
+  });
+
   test('user message → actor user, epistemic user_intent, deterministic text element', () => {
     const env = envelope.projectEnvelope({
       id: 'msg-u',
@@ -252,16 +483,20 @@ describe('projectEnvelope — host-relayed messages (snapshot support)', () => {
     }
   });
 
-  test('INV-20: media_ref and rich_block payload objects remain open', () => {
+  test('INV-20: media_ref and rich_block payload objects remain open beyond their frozen minimum', () => {
     const base = pluginStoredMessage().extra.pluginMessage;
     const pluginMessage = {
       ...base,
       elements: [
-        { elementId: 'el-media', kind: 'media_ref', payload: { uri: 'asset://one', custom: { width: 4 } } },
+        {
+          elementId: 'el-media',
+          kind: 'media_ref',
+          payload: { type: 'image', reference: 'hmr_one', custom: { width: 4 } },
+        },
         {
           elementId: 'el-rich',
           kind: 'rich_block',
-          payload: { kind: 'card', v: 1, custom: true },
+          payload: { id: 'card-1', kind: 'card', v: 1, custom: true },
           epistemicStatus: 'inference',
         },
       ],

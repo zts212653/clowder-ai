@@ -1,0 +1,139 @@
+{
+  "sourceRevision": "f5f6278fee64d00a7d914b9549ec0875707adeba",
+  "sourcePath": "migration/f202-w3-community-http-routes.json",
+  "scope": "HTTP contract pairing fixture, not installed package acceptance",
+  "routes": [
+    {
+      "method": "POST",
+      "path": "github/community-issues"
+    },
+    {
+      "method": "GET",
+      "path": "github/community-issues"
+    },
+    {
+      "method": "GET",
+      "path": "github/community-issues/:id"
+    },
+    {
+      "method": "PATCH",
+      "path": "github/community-issues/:id"
+    },
+    {
+      "method": "DELETE",
+      "path": "github/community-issues/:id"
+    },
+    {
+      "method": "POST",
+      "path": "github/community-issues/:id/dispatch"
+    },
+    {
+      "method": "POST",
+      "path": "github/community-issues/sync"
+    },
+    {
+      "method": "POST",
+      "path": "github/community-issues/sync-prs"
+    },
+    {
+      "method": "POST",
+      "path": "github/community-issues/:id/triage-complete"
+    },
+    {
+      "method": "POST",
+      "path": "github/community-issues/:id/resolve"
+    },
+    {
+      "method": "POST",
+      "path": "github/community-issues/:id/request-guardian"
+    },
+    {
+      "method": "POST",
+      "path": "github/community-issues/:id/guardian-signoff"
+    },
+    {
+      "method": "GET",
+      "path": "github/community-issues/:id/guardian-status"
+    },
+    {
+      "method": "POST",
+      "path": "github/community-issues/:id/validate-route"
+    },
+    {
+      "method": "POST",
+      "path": "github/community-issues/:id/report"
+    },
+    {
+      "method": "POST",
+      "path": "github/community-issues/:id/waive-closure"
+    },
+    {
+      "method": "POST",
+      "path": "github/community-issues/:subjectKey/await-external"
+    },
+    {
+      "method": "GET",
+      "path": "github/community-repos"
+    },
+    {
+      "method": "GET",
+      "path": "github/community-board"
+    },
+    {
+      "method": "GET",
+      "path": "github/community-issue-drafts/config"
+    },
+    {
+      "method": "POST",
+      "path": "github/community-issue-drafts"
+    },
+    {
+      "method": "POST",
+      "path": "github/community-issue-drafts/from-frustration-issue/:issueId"
+    },
+    {
+      "method": "GET",
+      "path": "github/community-issue-drafts/by-id/:draftId"
+    },
+    {
+      "method": "POST",
+      "path": "github/community-issue-drafts/by-id/:draftId/publish"
+    },
+    {
+      "method": "POST",
+      "path": "github/community-issue-drafts/by-id/:draftId/cancel"
+    },
+    {
+      "method": "GET",
+      "path": "github/community-decision-queue"
+    },
+    {
+      "method": "POST",
+      "path": "github/community-findings/:findingId/acknowledge"
+    },
+    {
+      "method": "POST",
+      "path": "github/community-findings/:findingId/resolve"
+    },
+    {
+      "method": "POST",
+      "path": "github/community-findings/:findingId/waive"
+    },
+    {
+      "method": "GET",
+      "path": "github/community-findings"
+    },
+    {
+      "method": "GET",
+      "path": "github/community-repo-configs"
+    },
+    {
+      "method": "POST",
+      "path": "github/community-repo-configs"
+    },
+    {
+      "method": "DELETE",
+      "path": "github/community-repo-configs/:repo"
+    }
+  ]
+}

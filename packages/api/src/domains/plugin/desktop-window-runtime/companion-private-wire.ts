@@ -1,10 +1,11 @@
+// Pin the existing legacy Companion ABI independently of the current manifest schema.
 import {
   type CompanionCommand,
   type CompanionReply,
   type CompanionState,
   validateCompanionCommand,
   validateCompanionReply,
-} from '@clowder-ai/plugin-contract';
+} from '@clowder-ai/plugin-contract-beta21';
 import {
   type CompanionCommand as ModernCompanionCommand,
   type CompanionReply as ModernCompanionReply,

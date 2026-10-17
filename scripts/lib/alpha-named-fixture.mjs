@@ -6,7 +6,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const SOURCE_ROOT = dirname(dirname(dirname(fileURLToPath(import.meta.url))));
-export const NAMED_ALPHA_PORTS = '5311,5312,5411,5511,15397';
+export const NAMED_ALPHA_PORTS = '5311,5312,5411,15397';
 
 /** Actual Git/worktree and launcher fixture; process/document stores are not simulated deployments. */
 export function namedAlphaFixture(t) {
@@ -46,7 +46,7 @@ export function namedAlphaFixture(t) {
     '.env\n.env.local\n.cat-cafe/\nnode_modules/\ndist/\npackages/web/.env.local\n*.log\n',
   );
   writeFileSync(join(mainRoot, 'pnpm-workspace.yaml'), 'packages: [packages/*]\n');
-  for (const name of ['web', 'api', 'mcp-server', 'shared', 'collective-service']) {
+  for (const name of ['web', 'api', 'mcp-server', 'shared']) {
     mkdirSync(join(mainRoot, 'packages', name), { recursive: true });
     writeFileSync(join(mainRoot, 'packages', name, 'package.json'), '{}\n');
   }

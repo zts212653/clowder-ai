@@ -3,6 +3,7 @@
  * Extracted from publish-verdict.test.js per AGENTS.md 350-line hard limit.
  */
 
+import assert from 'node:assert/strict';
 import { cpSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
@@ -48,6 +49,7 @@ export function markMeasurementCensusDomainCertifiedUsable(isolatedRepoRoot, dom
   entry.validityMigration = {
     ...entry.validityMigration,
     status: 'certified_usable',
+    batch: entry.validityMigration.riskRank,
     certificateRef: `docs/harness-feedback/certificates/test-${domainId}.yaml`,
     resultRef: `docs/harness-feedback/measurement-results/test-${domainId}.yaml`,
     replayRef: `docs/harness-feedback/replays/test-${domainId}.yaml`,
@@ -121,3 +123,10 @@ export function buildPacket(overrides = {}) {
     ...overrides,
   };
 }
+
+/** Installed dependency for tests that must terminate before any publication. */
+export const unreachablePublisher = {
+  async publishOnIsolatedWorktree() {
+    assert.fail('validation or replay must terminate before publication');
+  },
+};

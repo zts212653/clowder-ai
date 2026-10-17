@@ -49,7 +49,7 @@ async function admit(deps: ImageRouteDeps, record: InvocationRecord, reply: Fast
     reply.status(401).send({ error: 'Image publication invocation is no longer current' });
     return false;
   }
-  if (record.collectiveWorkBinding || record.executionGrant) {
+  if (record.publicInvocationBinding) {
     reply.status(403).send({ error: 'Image publication requires ordinary member authority' });
     return false;
   }

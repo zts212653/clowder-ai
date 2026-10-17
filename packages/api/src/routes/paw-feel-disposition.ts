@@ -1,5 +1,5 @@
 import type { FastifyPluginAsync, FastifyReply, FastifyRequest } from 'fastify';
-import { requireConnectorWriteNetworkGuard } from '../config/connector-secret-write-guards.js';
+import { requireOwnerWriteNetworkGuard } from '../config/owner-write-guards.js';
 import {
   type IPawFeelDutyConfigStore,
   PawFeelDutyConfigStoreError,
@@ -165,7 +165,7 @@ async function linkRepairOutcome(
 function requireCvo(request: FastifyRequest, reply: FastifyReply): string | undefined {
   const userId = requireSession(request, reply);
   if (!userId) return undefined;
-  const networkError = requireConnectorWriteNetworkGuard(request);
+  const networkError = requireOwnerWriteNetworkGuard(request);
   if (networkError) {
     reply.status(networkError.status).send({ error: networkError.error });
     return undefined;

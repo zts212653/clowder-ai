@@ -81,12 +81,6 @@ async function createHarness(taskSnapshotFactory, options = {}) {
   const truthResolver = new ActionSubjectTruthResolver(
     {},
     {
-      async get() {
-        return null;
-      },
-    },
-    undefined,
-    {
       async get(taskId) {
         return taskId === taskSnapshot.id ? taskSnapshot : null;
       },

@@ -1,6 +1,10 @@
 import type { CanonicalActionTerminalPredicate } from './ActionTerminalPredicateCatalog.js';
 import { recordActionSuccessorOutcome } from './action-successor-outcome-state-machine.js';
 import type { ActionSuccessorLease } from './action-successor-state-machine.js';
+import {
+  type ActionTerminalProviderBinding,
+  nextActionTerminalProviderBinding,
+} from './action-terminal-provider-binding.js';
 
 export const ACTION_SUCCESSOR_RETURN_DELIVERY_SLA_MS = 60_000;
 
@@ -45,6 +49,7 @@ export type ReturnedActionSuccessorProof =
   | { kind: 'return_delivery'; evidenceRef: string };
 
 export interface ReattachReturnedActionSuccessorInput {
+  terminalPredicateProviderBinding?: ActionTerminalProviderBinding;
   expectedGeneration: number;
   holderCatIds: string[];
   holderThreadId: string;
@@ -226,6 +231,11 @@ export function reattachReturnedActionSuccessor(
       dispatchId,
       terminalPredicateState: { kind: 'predicate_backed' },
       terminalPredicate: input.terminalPredicate,
+      terminalPredicateProviderBinding: nextActionTerminalProviderBinding(
+        current.terminalPredicateProviderBinding,
+        input.terminalPredicateProviderBinding,
+        current.tenantScope,
+      ),
       generation: current.generation + 1,
       status: 'active',
       holderOutcomes: {},

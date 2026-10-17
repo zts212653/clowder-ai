@@ -1,0 +1,122 @@
+{
+  "businessSourceCommit": "ca5b831b48c165ea10c7389fe3eb4ba03d3e01e7",
+  "browserSourceCommit": "ca5b831b48c165ea10c7389fe3eb4ba03d3e01e7",
+  "destination": "Collective plugin package integration/browser test suite in clowder-ai-plugins",
+  "status": "migration_pending_installed_package_unverified",
+  "files": [
+    {
+      "path": "packages/web/test/browser/f290-collective-runtime-journey.test.mjs",
+      "sourceBlob": "bb06f82254c848a3677293f3228ed3e6b7f645e6",
+      "purpose": "Owner/member direct entry and Host launch through the real Service-backed Client"
+    },
+    {
+      "path": "packages/web/test/browser/f290-first-cat-participation.test.mjs",
+      "sourceBlob": "7fb8446349531fd8864dd288f1811f8da9283c3e",
+      "purpose": "First-cat recipient/topic authority, response-loss replay, revoked targets and entry-guide handoff"
+    },
+    {
+      "path": "packages/web/test/browser/f290-default-entry-journeys.test.mjs",
+      "sourceBlob": "a4bfc9b2dbca4437f5f15cdbf48416df16272c31",
+      "purpose": "Direct Client and Host default-entry journeys"
+    },
+    {
+      "path": "packages/web/test/browser/f290-default-client.test.mjs",
+      "sourceBlob": "e97d33effd16466ee1f85e49f5fcea09de93eef4",
+      "purpose": "Persisted channel layout, messages, membership and native-owner routes"
+    },
+    {
+      "path": "packages/web/test/browser/f290-result-artifact-journey.test.mjs",
+      "sourceBlob": "2a82dd506978620f92746d229364f827a6ec7c35",
+      "purpose": "Prepared artifact admission to Needs Me and exact result return"
+    },
+    {
+      "path": "packages/web/test/browser/f290-member-clean-exit.test.mjs",
+      "sourceBlob": "7c32a9c1546a051dd3899d309336aeb9cfc74e1b",
+      "purpose": "Member departure, persisted public history and revocation across restart"
+    },
+    {
+      "path": "packages/web/test/browser/f290-default-client-scroll.test.mjs",
+      "sourceBlob": "03ff93b53ea99d963ac869c3314131399a7b64ed",
+      "purpose": "Scroll restoration after asynchronous Service history load"
+    },
+    {
+      "path": "packages/web/test/browser/f290-reaction-journey.test.mjs",
+      "sourceBlob": "29521a1225625f8df26000356bf256e6b588c8fb",
+      "purpose": "Persistent Channel/Topic reactions with pointer, touch, keyboard and focus"
+    },
+    {
+      "path": "packages/web/test/browser/f290-roadmap-workspace-journey.test.mjs",
+      "sourceBlob": "e5b9b82e913f852d99b4be46d2218dc2d8262731",
+      "purpose": "One Work truth across Roadmap lenses, source navigation and mobile return"
+    },
+    {
+      "path": "packages/web/test/browser/f290-rich-message-journey.test.mjs",
+      "sourceBlob": "24c5ada85eae7afebb95ce2a5b614c311d5bb919",
+      "purpose": "Persisted Markdown safety and unchanged source bytes in Channel/Topic"
+    },
+    {
+      "path": "packages/web/test/browser/f290-informal-vote-journey.test.mjs",
+      "sourceBlob": "09dbf92111c9f39711433033f67869898b915a73",
+      "purpose": "Two authenticated humans persist and update source-linked votes"
+    },
+    {
+      "path": "packages/web/test/browser/f290-binding-vote-journey.test.mjs",
+      "sourceBlob": "11d62770a9210be43eac7c7f02986bcc88c8dde3",
+      "purpose": "Accountable human freezes and settles a two-human Roadmap Decision"
+    },
+    {
+      "path": "packages/web/test/browser/f290-work-policy-ui.test.mjs",
+      "sourceBlob": "17a7005522311bf898c4f23de870a7908e9b4a0d",
+      "purpose": "Human registration policy through real native-owner participation routes"
+    },
+    {
+      "path": "packages/web/test/browser/f322-collective-appearance.journey.mjs",
+      "sourceBlob": "92a17a6de5c4564ecc65ec87c8b61353f9ebb70a",
+      "purpose": "Real Host/Client iframe handshake and appearance bridge"
+    },
+    {
+      "path": "packages/web/test/browser/f290-first-entry-guide.harness.mjs",
+      "sourceBlob": "4b318a46d5112c5d77d6a353b33ec1ea147576cb",
+      "purpose": "Entry-guide fixture starts the old Service directly"
+    },
+    {
+      "path": "packages/web/test/browser/f290-native-owner.harness.mjs",
+      "sourceBlob": "edb4adca43614a4b94c8af8c6b95d07aea0fc5dc",
+      "purpose": "Direct composition of retired Host connector, work admission and routes"
+    },
+    {
+      "path": "packages/web/test/browser/f290-default-client.fixture.mjs",
+      "sourceBlob": "d89ef1d81db4397ce456d6bd7617a1c892b010fb",
+      "purpose": "Service store seeding and human authentication fixture"
+    },
+    {
+      "path": "packages/web/test/browser/f290-first-cat-owner.harness.mjs",
+      "sourceBlob": "7efe067aacc03b37f3e18a9f7d4a46de798f6fad",
+      "purpose": "First-cat Host controls using retired connector endpoints"
+    },
+    {
+      "path": "packages/web/test/browser/f290-result-artifact.harness.mjs",
+      "sourceBlob": "87e57fb11f728de65e8c0ae04b5be68e7909ffa7",
+      "purpose": "Direct retired F290 Needs Me producer composition"
+    },
+    {
+      "path": "packages/web/test/browser/f290-owner-ports.harness.mjs",
+      "sourceBlob": "24fcdbc82ee4e3363b3a6cbc18e8367882cb630d",
+      "purpose": "Dedicated native-owner Host/API port allocation"
+    },
+    {
+      "path": "packages/web/test/browser/fixtures/f322-appearance-readers.ts",
+      "sourceBlob": "c0347f32c30a40cf4dc9501b923c3b8c8bbc6243",
+      "purpose": "Browser appearance oracle bundled only by the retired full-stack journey"
+    }
+  ],
+  "retainedHostCoverage": [
+    "packages/web/test/browser/f322-human-collective.journey.mjs",
+    "packages/web/test/browser/fixtures/f322-human-collective.tsx",
+    "packages/web/test/browser/f290-asset-true-frontend.test.mjs",
+    "packages/web/test/browser/f290-runtime-journey.harness.mjs",
+    "packages/web/test/browser/default-entry-journey.harness.mjs",
+    "packages/web/src/components/collective/__tests__",
+    "packages/collective-client/src"
+  ]
+}

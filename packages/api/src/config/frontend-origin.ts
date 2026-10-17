@@ -9,6 +9,15 @@ export interface WarnLoggerLike {
 const DEFAULT_FRONTEND_BASE_URL = 'http://localhost:3003';
 const DEFAULT_CORS_ORIGINS = ['http://localhost:3000', 'http://localhost:3003', 'https://cafe.clowder-ai.com'];
 
+/** Host navigation uses the frontend origin, never credentials, query strings or request URLs. */
+export function createThreadDeepLinkUrl(frontendBaseUrl: string): (threadId: string) => string {
+  const base = new URL(frontendBaseUrl);
+  if (base.protocol !== 'http:' && base.protocol !== 'https:') {
+    throw new TypeError('Frontend navigation requires an absolute HTTP(S) URL');
+  }
+  return (threadId) => `${base.origin}/thread/${encodeURIComponent(threadId)}`;
+}
+
 /**
  * F156: Loopback (127.x.x.x) is ALWAYS allowed — it is genuinely local.
  * Separated from RFC 1918 private networks because the threat model is different:

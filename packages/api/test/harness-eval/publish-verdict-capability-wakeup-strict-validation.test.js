@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, describe, it } from 'node:test';
 import { handlePublishVerdict } from '../../dist/infrastructure/harness-eval/publish-verdict/publish-verdict.js';
+import { unreachablePublisher } from './publish-verdict-fixtures.js';
 
 /**
  * F192 Phase H 收尾 PR-2 R9 P1 (cloud): split from publish-verdict-capability-wakeup.test.js
@@ -106,7 +107,7 @@ describe('handlePublishVerdict strict validation (PR-2 R5/R8)', () => {
   // cloud R8 P2: cross-check sourceRefs.kind ↔ packet.domainId BEFORE per-kind validation
   it('rejects a2a-shape sourceRefs for capability-wakeup domain (cloud R8 P2)', async () => {
     const result = await handlePublishVerdict(
-      { harnessFeedbackRoot: root },
+      { gitPublisher: unreachablePublisher, harnessFeedbackRoot: root },
       {
         packet: buildPacket({ id: 'vhp-cw-wrong-kind' }),
         domain: 'eval:capability-wakeup',
@@ -122,7 +123,7 @@ describe('handlePublishVerdict strict validation (PR-2 R5/R8)', () => {
 
   it('rejects cw-shape sourceRefs for a2a domain (cloud R8 P2)', async () => {
     const result = await handlePublishVerdict(
-      { harnessFeedbackRoot: root },
+      { gitPublisher: unreachablePublisher, harnessFeedbackRoot: root },
       {
         packet: buildPacket({ id: 'vhp-a2a-wrong-kind', domainId: 'eval:a2a' }),
         domain: 'eval:a2a',
@@ -145,7 +146,7 @@ describe('handlePublishVerdict strict validation (PR-2 R5/R8)', () => {
   // 砚砚 R1 PR-2 review P2: PR-2 wired only window/replay path
   it('rejects cw trial-ids selector at handler (PR-2 wired window only)', async () => {
     const result = await handlePublishVerdict(
-      { harnessFeedbackRoot: root },
+      { gitPublisher: unreachablePublisher, harnessFeedbackRoot: root },
       {
         packet: buildPacket({ id: 'vhp-cw-trial-ids-rejected' }),
         domain: 'eval:capability-wakeup',
@@ -162,7 +163,7 @@ describe('handlePublishVerdict strict validation (PR-2 R5/R8)', () => {
 
   it('accepts cw window selector with omitted sessionIds through handler prevalidation (AC-F8)', async () => {
     const result = await handlePublishVerdict(
-      { harnessFeedbackRoot: root },
+      { gitPublisher: unreachablePublisher, harnessFeedbackRoot: root },
       {
         packet: buildPacket({ id: 'vhp-cw-no-sessions' }),
         domain: 'eval:capability-wakeup',

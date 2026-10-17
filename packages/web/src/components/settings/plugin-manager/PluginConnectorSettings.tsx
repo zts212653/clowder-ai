@@ -1,0 +1,373 @@
+'use client';
+
+import { useCallback, useEffect, useState } from 'react';
+import { useIMEGuard } from '@/hooks/useIMEGuard';
+import { apiFetch } from '@/utils/api-client';
+import { StepBadge } from '../../HubConfigIcons';
+import { SettingsResourceToggleSwitch } from '../../SettingsResourceCard';
+
+interface GroupEntry {
+  externalChatId: string;
+  label?: string;
+  addedAt: number;
+}
+
+interface PermissionConfig {
+  revision: number | null;
+  whitelistEnabled: boolean;
+  commandAdminOnly: boolean;
+  adminOpenIds: string[];
+  allowedGroups: GroupEntry[];
+}
+
+const EMPTY_CONFIG: PermissionConfig = {
+  revision: null,
+  whitelistEnabled: false,
+  commandAdminOnly: false,
+  adminOpenIds: [],
+  allowedGroups: [],
+};
+
+const CARD_SHADOW = 'shadow-[0_8px_22px_rgba(43,33,26,0.04)]';
+
+function SaveFeedback({ result, saving }: { result: 'ok' | 'error' | null; saving: boolean }) {
+  if (saving) return <div className="text-xs text-cafe-muted">保存中...</div>;
+  if (result === 'ok') return <div className="text-xs text-conn-emerald-text">已保存</div>;
+  if (result === 'error') return <div className="text-xs text-conn-red-text">保存失败</div>;
+  return null;
+}
+
+interface PluginConnectorSettingsProps {
+  pluginId: string;
+  pluginLabel?: string;
+}
+
+export default function PluginConnectorSettings({ pluginId }: PluginConnectorSettingsProps) {
+  const [config, setConfig] = useState<PermissionConfig>(EMPTY_CONFIG);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [saveResult, setSaveResult] = useState<'ok' | 'error' | null>(null);
+  const [newGroupId, setNewGroupId] = useState('');
+  const [newGroupLabel, setNewGroupLabel] = useState('');
+  const [newAdminId, setNewAdminId] = useState('');
+  const ime = useIMEGuard();
+
+  const fetchConfig = useCallback(async () => {
+    setLoadError(false);
+    try {
+      const res = await apiFetch(`/api/plugin-manager/plugins/${encodeURIComponent(pluginId)}/permissions`);
+      if (res.ok) {
+        const data = await res.json();
+        setConfig(data);
+      } else {
+        setLoadError(true);
+      }
+    } catch {
+      setLoadError(true);
+    } finally {
+      setLoading(false);
+    }
+  }, [pluginId]);
+
+  useEffect(() => {
+    fetchConfig();
+  }, [fetchConfig]);
+
+  const saveConfig = async (patch: Partial<PermissionConfig>) => {
+    setSaving(true);
+    setSaveResult(null);
+    try {
+      const res = await apiFetch(`/api/plugin-manager/plugins/${encodeURIComponent(pluginId)}/permissions`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          expectedRevision: config.revision,
+          ...patch,
+          ...(patch.allowedGroups
+            ? {
+                allowedGroups: patch.allowedGroups.map(({ externalChatId, label }) => ({
+                  externalChatId,
+                  ...(label ? { label } : {}),
+                })),
+              }
+            : {}),
+        }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setConfig(data);
+        setSaveResult('ok');
+        return true;
+      } else {
+        setSaveResult('error');
+        if (res.status === 409) await fetchConfig();
+      }
+    } catch {
+      setSaveResult('error');
+    } finally {
+      setSaving(false);
+    }
+    return false;
+  };
+
+  const addGroup = async () => {
+    if (!newGroupId.trim()) return;
+    const updated = [
+      ...config.allowedGroups,
+      { externalChatId: newGroupId.trim(), label: newGroupLabel.trim() || undefined, addedAt: Date.now() },
+    ];
+    if (await saveConfig({ allowedGroups: updated })) {
+      setNewGroupId('');
+      setNewGroupLabel('');
+    }
+  };
+
+  const removeGroup = (chatId: string) => {
+    const updated = config.allowedGroups.filter((g) => g.externalChatId !== chatId);
+    saveConfig({ allowedGroups: updated });
+  };
+
+  const addAdmin = async () => {
+    if (!newAdminId.trim()) return;
+    const updated = [...config.adminOpenIds, newAdminId.trim()];
+    if (await saveConfig({ adminOpenIds: updated })) setNewAdminId('');
+  };
+
+  const removeAdmin = (openId: string) => {
+    const updated = config.adminOpenIds.filter((id) => id !== openId);
+    saveConfig({ adminOpenIds: updated });
+  };
+
+  if (loadError)
+    return (
+      <div role="alert" className="p-4 text-sm text-cafe-secondary">
+        群聊设置读取失败。
+        <button type="button" className="console-inline-link ml-2" onClick={() => void fetchConfig()}>
+          重试
+        </button>
+      </div>
+    );
+
+  if (loading) return <div className="p-6 text-cafe-muted text-sm">加载权限配置...</div>;
+
+  return (
+    <div className="space-y-4">
+      <div className={`console-list-card rounded-xl overflow-hidden ${CARD_SHADOW}`}>
+        {/* Header */}
+        <div className="bg-conn-emerald-bg px-4 py-3 flex items-center gap-3">
+          <div className="w-9 h-9 rounded-xl bg-conn-emerald-text/20 flex items-center justify-center text-conn-emerald-text">
+            <svg
+              className="w-5 h-5"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+              strokeWidth={2}
+              aria-hidden="true"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                d="M9 12.75 11.25 15 15 9.75m-3-7.036A11.959 11.959 0 0 1 3.598 6 11.99 11.99 0 0 0 3 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285Z"
+              />
+            </svg>
+          </div>
+          <div>
+            <div className="font-semibold text-sm text-cafe">群聊权限管理</div>
+            <div className="text-xs text-cafe-muted">控制谁能用 bot、谁能用管理命令</div>
+          </div>
+        </div>
+
+        <div className="p-5 space-y-5 divide-y divide-[var(--console-border-soft)]">
+          {/* Section 1: Group Whitelist */}
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <StepBadge num={1} />
+                <span className="font-semibold text-sm text-cafe">群白名单</span>
+              </div>
+              <SettingsResourceToggleSwitch
+                enabled={config.whitelistEnabled}
+                busy={saving}
+                onClick={() => saveConfig({ whitelistEnabled: !config.whitelistEnabled })}
+                title={config.whitelistEnabled ? '关闭白名单' : '开启白名单'}
+              />
+            </div>
+            <p className="text-xs text-cafe-muted">开启后，仅白名单内的群可使用 bot</p>
+
+            {config.whitelistEnabled && (
+              <div className="space-y-2">
+                {config.allowedGroups.map((g) => (
+                  <div
+                    key={g.externalChatId}
+                    className="flex items-center gap-2 px-3 py-2 bg-[var(--console-field-bg)] rounded-lg text-xs"
+                  >
+                    <svg
+                      className="w-3.5 h-3.5 text-cafe-interactive shrink-0"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      stroke="currentColor"
+                      strokeWidth={2}
+                      aria-hidden="true"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        d="M18 18.72a9.094 9.094 0 0 0 3.741-.479 3 3 0 0 0-4.682-2.72m.94 3.198.001.031c0 .225-.012.447-.037.666A11.944 11.944 0 0 1 12 21c-2.17 0-4.207-.576-5.963-1.584A6.062 6.062 0 0 1 6 18.719m12 0a5.971 5.971 0 0 0-.941-3.197m0 0A5.995 5.995 0 0 0 12 12.75a5.995 5.995 0 0 0-5.058 2.772m0 0a3 3 0 0 0-4.681 2.72 8.986 8.986 0 0 0 3.74.477m.94-3.197a5.971 5.971 0 0 0-.94 3.197M15 6.75a3 3 0 1 1-6 0 3 3 0 0 1 6 0Zm6 3a2.25 2.25 0 1 1-4.5 0 2.25 2.25 0 0 1 4.5 0Zm-13.5 0a2.25 2.25 0 1 1-4.5 0 2.25 2.25 0 0 1 4.5 0Z"
+                      />
+                    </svg>
+                    <span className="flex-1 truncate text-cafe-secondary">
+                      {g.label || g.externalChatId}{' '}
+                      {g.label ? <span className="text-cafe-muted">{g.externalChatId.slice(-8)}</span> : null}
+                    </span>
+                    <button
+                      type="button"
+                      disabled={saving}
+                      aria-label={`移除群 ${g.label || g.externalChatId}`}
+                      onClick={() => removeGroup(g.externalChatId)}
+                      className="text-conn-red-text hover:opacity-80 transition-opacity"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                ))}
+                <div className="flex gap-2">
+                  <input
+                    value={newGroupId}
+                    onChange={(e) => setNewGroupId(e.target.value)}
+                    placeholder="群 ID"
+                    aria-label="群 ID"
+                    className="console-form-input flex-1 !rounded-lg !px-2.5 !py-1.5 !text-xs"
+                  />
+                  <input
+                    value={newGroupLabel}
+                    onChange={(e) => setNewGroupLabel(e.target.value)}
+                    placeholder="群名（可选）"
+                    aria-label="群名（可选）"
+                    className="console-form-input flex-1 !rounded-lg !px-2.5 !py-1.5 !text-xs"
+                  />
+                  <button
+                    type="button"
+                    onClick={addGroup}
+                    disabled={
+                      saving ||
+                      !newGroupId.trim() ||
+                      config.allowedGroups.some((group) => group.externalChatId === newGroupId.trim())
+                    }
+                    className="px-3 py-1.5 text-xs font-medium bg-cafe-interactive text-[var(--cafe-surface)] rounded-lg disabled:opacity-40 transition-opacity"
+                  >
+                    添加
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Section 2: Admin List */}
+          <div className="pt-5 space-y-3">
+            <div className="flex items-center gap-2.5">
+              <StepBadge num={2} />
+              <span className="font-semibold text-sm text-cafe">管理员</span>
+            </div>
+            <p className="text-xs text-cafe-muted">管理员可使用 /allow-group、/deny-group、/new、/use 等管理命令</p>
+
+            <div className="space-y-2">
+              {config.adminOpenIds.map((id, i) => (
+                <div
+                  key={id}
+                  className="flex items-center gap-2 px-3 py-2 bg-[var(--console-field-bg)] rounded-lg text-xs"
+                >
+                  <svg
+                    className="w-3.5 h-3.5 text-conn-amber-text shrink-0"
+                    fill="currentColor"
+                    viewBox="0 0 20 20"
+                    aria-hidden="true"
+                  >
+                    <path
+                      fillRule="evenodd"
+                      d="M10 1a.75.75 0 0 1 .65.378l2.005 3.518 3.907.896a.75.75 0 0 1 .35 1.238l-2.634 2.87.363 3.964a.75.75 0 0 1-1.054.747L10 12.868l-3.587 1.743a.75.75 0 0 1-1.054-.747l.363-3.964L3.088 7.03a.75.75 0 0 1 .35-1.238l3.907-.896L9.35 1.378A.75.75 0 0 1 10 1Z"
+                      clipRule="evenodd"
+                    />
+                  </svg>
+                  <span className="flex-1 truncate text-cafe-secondary">{id}</span>
+                  {i === 0 && (
+                    <span className="px-1.5 py-0.5 bg-conn-amber-bg text-conn-amber-text rounded text-micro font-semibold">
+                      Owner
+                    </span>
+                  )}
+                  <button
+                    type="button"
+                    disabled={saving}
+                    aria-label={`移除管理员 ${id}`}
+                    onClick={() => removeAdmin(id)}
+                    className="text-conn-red-text hover:opacity-80 transition-opacity"
+                  >
+                    ✕
+                  </button>
+                </div>
+              ))}
+              <div className="flex gap-2">
+                <input
+                  value={newAdminId}
+                  onChange={(e) => setNewAdminId(e.target.value)}
+                  placeholder="管理员 ID"
+                  aria-label="管理员 ID"
+                  className="console-form-input flex-1 !rounded-lg !px-2.5 !py-1.5 !text-xs"
+                  onCompositionStart={ime.onCompositionStart}
+                  onCompositionEnd={ime.onCompositionEnd}
+                  onKeyDown={(e) => e.key === 'Enter' && !ime.isComposing() && addAdmin()}
+                />
+                <button
+                  type="button"
+                  onClick={addAdmin}
+                  disabled={saving || !newAdminId.trim() || config.adminOpenIds.includes(newAdminId.trim())}
+                  className="px-3 py-1.5 text-xs font-medium bg-cafe-interactive text-[var(--cafe-surface)] rounded-lg disabled:opacity-40 transition-opacity"
+                >
+                  添加
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* Section 3: Command Admin Only */}
+          <div className="pt-5 space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <StepBadge num={3} />
+                <span className="font-semibold text-sm text-cafe">群聊命令仅管理员</span>
+              </div>
+              <SettingsResourceToggleSwitch
+                enabled={config.commandAdminOnly}
+                busy={saving}
+                onClick={() => saveConfig({ commandAdminOnly: !config.commandAdminOnly })}
+                title={config.commandAdminOnly ? '允许所有人使用命令' : '限制命令仅管理员'}
+              />
+            </div>
+            <p className="text-xs text-cafe-muted">开启后，非管理员在群聊发 /threads /new /use 会收到提示</p>
+            {config.commandAdminOnly && (
+              <div className="flex items-center gap-2 px-3 py-2 bg-conn-red-bg rounded-lg text-xs text-conn-red-text">
+                <svg
+                  className="w-3.5 h-3.5 shrink-0"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                  strokeWidth={2}
+                  aria-hidden="true"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126ZM12 15.75h.007v.008H12v-.008Z"
+                  />
+                </svg>
+                <span>非管理员会看到：&quot;此命令仅管理员可用&quot;</span>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      <SaveFeedback result={saveResult} saving={saving} />
+    </div>
+  );
+}

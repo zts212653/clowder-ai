@@ -32,8 +32,9 @@ const BOOTSTRAP_ONLY_NEXT_PUBLIC_VARS = [
   'NEXT_PUBLIC_PROJECT_ROOT',
   'NEXT_PUBLIC_DEBUG_SKIP_FILE_CHANGE_UI',
 ];
-const DEPRECATED_ENV_VARS = [
-  'MODE_SWITCH_REQUIRES_APPROVAL',
+const DEPRECATED_ENV_VARS = ['MODE_SWITCH_REQUIRES_APPROVAL'];
+const RETIRED_PLUGIN_ENV_VARS = [
+  'GITHUB_MCP_PAT',
   'GITHUB_REVIEW_IMAP_USER',
   'GITHUB_REVIEW_IMAP_PASS',
   'GITHUB_REVIEW_IMAP_HOST',
@@ -115,12 +116,11 @@ describe('env-registry', () => {
     }
   });
 
-  it('documents connector autostart as wrapper process authority rather than dotenv configuration', () => {
-    const def = ENV_VARS.find((v) => v.name === 'CONNECTOR_GATEWAY_AUTOSTART');
-
-    assert.ok(def, 'CONNECTOR_GATEWAY_AUTOSTART should be in registry');
-    assert.doesNotMatch(def.description, /\.env/);
-    assert.match(def.description, /启动进程环境|wrapper/);
+  it('does not advertise retired connector autostart as Host configuration', () => {
+    assert.equal(
+      ENV_VARS.some((entry) => entry.name === 'CONNECTOR_GATEWAY_AUTOSTART'),
+      false,
+    );
   });
 
   it('REDIS_URL has maskMode url', () => {
@@ -175,8 +175,8 @@ describe('env-registry', () => {
     assert.equal(hindsightVars.length, 0, 'All HINDSIGHT_* vars should be removed');
   });
 
-  it('marks GITHUB_MCP_PAT, F102_API_KEY as sensitive + runtimeEditable (#340 P6: OPENAI_API_KEY removed)', () => {
-    for (const name of ['GITHUB_MCP_PAT', 'F102_API_KEY']) {
+  it('marks the retained F102_API_KEY as sensitive and runtime editable', () => {
+    for (const name of ['F102_API_KEY']) {
       const def = ENV_VARS.find((v) => v.name === name);
       assert.ok(def, `${name} should be in registry`);
       assert.equal(def.sensitive, true, `${name} should be sensitive`);
@@ -191,7 +191,14 @@ describe('env-registry', () => {
   });
 
   it('hasSensitiveEditableVars detects whitelisted sensitive vars', () => {
-    assert.ok(hasSensitiveEditableVars(['GITHUB_MCP_PAT']));
+    assert.equal(hasSensitiveEditableVars(RETIRED_PLUGIN_ENV_VARS), false);
+    for (const name of RETIRED_PLUGIN_ENV_VARS) {
+      assert.equal(
+        ENV_VARS.some((entry) => entry.name === name),
+        false,
+        `${name} belongs to its plugin`,
+      );
+    }
     assert.ok(hasSensitiveEditableVars(['FRONTEND_URL', 'F102_API_KEY']));
     assert.ok(!hasSensitiveEditableVars(['FRONTEND_URL', 'AUDIT_LOG_DIR']));
     assert.ok(!hasSensitiveEditableVars(['OPENAI_API_KEY']), 'OPENAI_API_KEY is no longer editable (#340 P6)');
@@ -713,7 +720,7 @@ describe('PATCH /api/config/env (route)', () => {
     }
   });
 
-  it('rejects CONNECTOR_GATEWAY_AUTOSTART hub writes because IM autostart is a startup trust boundary', async () => {
+  it('rejects writes to the retired connector autostart variable', async () => {
     const { configRoutes } = await import('../dist/routes/config.js');
     const tempRoot = mkdtempSync(resolve(tmpdir(), 'cat-cafe-env-'));
     const envFilePath = resolve(tempRoot, '.env');

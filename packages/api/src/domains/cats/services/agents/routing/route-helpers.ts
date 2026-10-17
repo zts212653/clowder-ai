@@ -274,6 +274,8 @@ export interface RouteOptions {
   /** Execution-owned fan-out policy. Queue dequeue uses parallel fan-out for one source
    *  with multiple targets; ordinary routes retain their intent-derived default. */
   targetDispatchMode?: 'serial' | 'parallel' | undefined;
+  publicInvocationBinding?: import('../invocation/invoke-single-cat.js').InvocationParams['publicInvocationBinding'];
+  publicInvocationExecution?: import('../invocation/public-invocation-execution.js').PublicInvocationExecution;
   liveCompanion?: import('../../types.js').AgentServiceOptions['liveCompanion'];
   /** Route-owned intent plus whether the user explicitly selected it. */
   routeIntent?: AgentRouteIntent;
@@ -285,7 +287,7 @@ export interface RouteOptions {
   humanDispositionInvocationOrigin?: HumanDispositionInvocationOrigin;
   /** Canonical Queue source class for admission/retry policy. */
   routingQueueSource?: 'user' | 'connector' | 'agent' | 'system';
-  /** Immutable Host domain scope forwarded to children; it limits execution, never grants authority. */
+  /** Retained legacy record discriminator. The retired Host executor is rejected; current plugins use public invocation. */
   executionScope?: 'collective-participation' | 'collective-work';
   /** F167 Phase T: exact protocol wake carrier for this route, never inferred from response prose. */
   turnCustodyWake?: import('../../../../ball-custody/TurnCustodyProjectionService.js').TurnCustodyWakeProvenance;

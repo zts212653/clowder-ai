@@ -1,6 +1,7 @@
 import type { ActionSubjectTruthResolver } from './ActionSubjectTruthResolver.js';
 import type { ActionSuccessorLeaseStore } from './ActionSuccessorLeaseStore.js';
 import type { ActionSuccessorProjectionRetirementService } from './ActionSuccessorProjectionRetirementService.js';
+import { type ActionCompletionAuthorization, withActionPredicateAuthority } from './action-predicate-authority.js';
 import type { ActionSuccessorLease } from './action-successor-state-machine.js';
 
 function sameFenceSucceededLease(
@@ -28,7 +29,8 @@ export class ActionSuccessorCompletionService {
       ActionSuccessorLeaseStore,
       'get' | 'recordCompletionCandidate' | 'commitCompletionVerdict'
     >,
-    private readonly truthResolver: Pick<ActionSubjectTruthResolver, 'resolveCompletion'>,
+    private readonly truthResolver: Pick<ActionSubjectTruthResolver, 'resolveCompletion'> &
+      Partial<Pick<ActionSubjectTruthResolver, 'authorizeCompletion'>>,
     private readonly projectionRetirement?: Pick<ActionSuccessorProjectionRetirementService, 'retire'>,
   ) {}
 
@@ -47,17 +49,28 @@ export class ActionSuccessorCompletionService {
     const lease = await this.leaseStore.get(input.leaseId);
     if (!lease) return { outcome: 'stale', reason: 'lease_missing' };
     if (lease.generation !== input.generation) return { outcome: 'stale', reason: 'stale_generation' };
+    let authority: Extract<ActionCompletionAuthorization, { status: 'authorized' }> | undefined;
+    if (lease.terminalPredicateProviderBinding) {
+      const authorization = await this.truthResolver.authorizeCompletion?.(lease, { catId: input.catId });
+      if (!authorization) return { outcome: 'insufficient', reason: 'predicate provider authority unavailable' };
+      if (authorization.status !== 'authorized') return { outcome: authorization.status, reason: authorization.reason };
+      authority = authorization;
+      // Even a previously persisted success is unavailable to an expired/foreign invocation.
+      await authority.withAuthority(async () => undefined);
+    }
     const replayedLease = sameFenceSucceededLease(lease, input);
     if (replayedLease) return this.committed(replayedLease, input);
     if (lease.status !== 'active') return { outcome: 'stale', reason: 'lease_not_active' };
     if (!lease.terminalPredicate) return { outcome: 'insufficient', reason: 'terminal predicate unavailable' };
 
-    const candidate = await this.leaseStore.recordCompletionCandidate(input.leaseId, {
-      generation: input.generation,
-      catId: input.catId,
-      evidenceRefs: input.evidenceRefs,
-      now: input.now,
-    });
+    const candidate = await withActionPredicateAuthority(authority, () =>
+      this.leaseStore.recordCompletionCandidate(input.leaseId, {
+        generation: input.generation,
+        catId: input.catId,
+        evidenceRefs: input.evidenceRefs,
+        now: input.now,
+      }),
+    );
     if (candidate.outcome !== 'recorded' || !candidate.lease) {
       const replayedCandidate = sameFenceSucceededLease(candidate.lease, input);
       return replayedCandidate
@@ -68,23 +81,27 @@ export class ActionSuccessorCompletionService {
     if (!predicate) return { outcome: 'insufficient', reason: 'terminal predicate unavailable after candidate CAS' };
     const candidateSnapshot = candidate.lease.completionCandidates[input.catId];
     if (!candidateSnapshot) return { outcome: 'stale', reason: 'candidate_missing' };
-    const verdict = await this.truthResolver.resolveCompletion(predicate, candidateSnapshot, {
-      leaseId: candidate.lease.leaseId,
-      generation: candidate.lease.generation,
-      catId: input.catId,
-      holderThreadId: candidate.lease.holderThreadId,
-      predecessorCatId: candidate.lease.predecessorCatId,
-      predecessorThreadId: candidate.lease.predecessorThreadId,
-      tenantScope: candidate.lease.tenantScope,
-    });
+    const verdict = authority
+      ? await authority.resolveCompletion(predicate, candidateSnapshot)
+      : await this.truthResolver.resolveCompletion(predicate, candidateSnapshot, {
+          leaseId: candidate.lease.leaseId,
+          generation: candidate.lease.generation,
+          catId: input.catId,
+          holderThreadId: candidate.lease.holderThreadId,
+          predecessorCatId: candidate.lease.predecessorCatId,
+          predecessorThreadId: candidate.lease.predecessorThreadId,
+          tenantScope: candidate.lease.tenantScope,
+        });
     if (verdict.status !== 'verified') return { outcome: verdict.status, reason: verdict.reason };
 
-    const committed = await this.leaseStore.commitCompletionVerdict(input.leaseId, {
-      generation: input.generation,
-      catId: input.catId,
-      verdict,
-      now: input.now,
-    });
+    const committed = await withActionPredicateAuthority(authority, () =>
+      this.leaseStore.commitCompletionVerdict(input.leaseId, {
+        generation: input.generation,
+        catId: input.catId,
+        verdict,
+        now: input.now,
+      }),
+    );
     if (committed.outcome === 'committed') return this.committed(committed.lease, input);
     const concurrentlyCommitted = sameFenceSucceededLease(committed.lease, input);
     return concurrentlyCommitted

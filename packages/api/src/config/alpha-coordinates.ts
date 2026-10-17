@@ -12,7 +12,6 @@ export interface NamedAlphaCoordinates {
     readonly frontend: number;
     readonly api: number;
     readonly preview: number;
-    readonly service: number;
     readonly redis: number;
   };
   readonly targetSha: string;
@@ -51,7 +50,7 @@ async function loadCanonicalAlphaModule(): Promise<CanonicalAlphaModule> {
   return module as CanonicalAlphaModule;
 }
 
-/** The envelope describes coordinates. Actual current facts still decide whether this Alpha can manage its Service. */
+/** The envelope describes coordinates. Actual current facts still decide whether the named Alpha still matches its isolated runtime. */
 export async function resolveNamedAlphaRuntimeBoundary(
   env: NodeJS.ProcessEnv,
 ): Promise<NamedAlphaRuntimeBoundary | undefined> {

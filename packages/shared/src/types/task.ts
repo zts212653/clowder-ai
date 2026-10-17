@@ -1,3 +1,4 @@
+import type { PluginWaitState } from './plugin-wait.js';
 /**
  * Task Types (毛线球)
  * 猫猫任务系统 — 让每只猫追踪自己负责的事项
@@ -188,6 +189,7 @@ export type TaskProbeSpec =
     };
 
 export interface TaskItem {
+  readonly pluginWait?: PluginWaitState;
   readonly id: string;
   /** Task kind: 'work' (default) or 'pr_tracking' (#320) */
   readonly kind: TaskKind;

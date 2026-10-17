@@ -44,29 +44,28 @@ test('production Manager composition exposes the cold Companion catalog and inst
 
 test('installed alpha.24 stays discoverable with alpha.25 available and upgrades through the existing details action', async (t) => {
   const f = await managerEntryFixture(t);
-  f.setOld(true);
+  await f.setOld(true);
   const old = f.releaseEntry();
-  const installed = await f.request('POST', '/api/plugins/official/companion/install', {
-    expectedCatalogVersion: old.version,
-    expectedPackageDigest: old.packageDigest,
+  const installed = await f.request('POST', '/api/plugin-manager/plugins/install', {
+    source: { kind: 'catalog', catalogId: old.catalogId },
+    expectedVersion: old.version,
+    expectedDigest: old.packageDigest,
   });
-  assert.equal(installed.statusCode, 200, installed.payload);
+  assert.equal(installed.statusCode, 201, installed.payload);
   const original = await f.assertVersion('0.1.0-alpha.24');
-  f.setOld(false);
+  await f.setOld(false);
   const detail = await f.request('GET', detailPath);
   assert.equal(detail.statusCode, 200, detail.payload);
   assert.equal(detail.json().plugin.installedVersion, '0.1.0-alpha.24');
   assert.equal(detail.json().plugin.availableVersion, '0.1.0-alpha.25');
-  const official = await f.request('GET', '/api/plugins/official');
+  const official = await f.request('GET', '/api/plugin-manager/plugins');
   const info = official.json().plugins.find((row) => row.pluginId === 'official.companion');
-  assert.equal(info.updateAvailable, true);
-  assert.equal(info.instance.pluginInstanceId, original.pluginInstanceId);
-  const upgraded = await f.request('POST', `/api/plugins/official/${original.pluginInstanceId}/update`, {
-    expectedRevision: info.instance.lifecycleRevision,
-    expectedCatalogVersion: info.availableVersion,
-    expectedPackageDigest: info.packageDigest,
-  });
-  assert.equal(upgraded.statusCode, 200, upgraded.payload);
+  assert.equal(info.availableVersion !== info.installedVersion, true);
+  assert.equal(info.pluginInstanceId, original.pluginInstanceId);
+  const selected = info.installSources?.find((candidate) => candidate.request.source.kind === 'catalog');
+  assert.ok(selected, 'installed plugins retain the current official release as an explicit replacement choice');
+  const upgraded = await f.request('POST', '/api/plugin-manager/plugins/install', selected.request);
+  assert.equal(upgraded.statusCode, 201, upgraded.payload);
   const next = await f.assertVersion('0.1.0-alpha.25');
   assert.equal(next.pluginInstanceId, original.pluginInstanceId);
 });

@@ -1,9 +1,4 @@
-import {
-  APPROVAL_PRODUCER_IDS,
-  type ApprovalProducerId,
-  approvalProducerMeta,
-  type MeetingIntakeRepairAction,
-} from '@cat-cafe/shared';
+import { APPROVAL_PRODUCER_IDS, type ApprovalProducerId, approvalProducerMeta } from '@cat-cafe/shared';
 import { useCallback, useEffect, useRef } from 'react';
 import { io } from 'socket.io-client';
 import {
@@ -59,13 +54,6 @@ export function parseEntrustedWorkMessageAction(actionRef: string): EntrustedWor
   return { threadId: match[1], messageId: match[2], ...(match[3] ? { blockId: match[3] } : {}) };
 }
 
-const MEETING_ACTIONS = new Set<MeetingIntakeRepairAction | 'confirm'>([
-  'confirm',
-  'retry',
-  'regrant',
-  'manual_import',
-]);
-
 function decodeActionId(encoded: string): string | null {
   try {
     const value = decodeURIComponent(encoded);
@@ -75,18 +63,9 @@ function decodeActionId(encoded: string): string | null {
   }
 }
 
-function resolveMeetingActionTarget(actionRef: string): EntrustedWorkActionTarget | null {
-  const meeting = /^\/api\/meeting-intakes\/([^/]+)\/([^/]+)$/u.exec(actionRef);
-  if (meeting?.[1] && meeting[2] && MEETING_ACTIONS.has(meeting[2] as MeetingIntakeRepairAction | 'confirm')) {
-    const proposalId = decodeActionId(meeting[1]);
-    return proposalId ? { kind: 'approval', producerId: 'F292', proposalId } : null;
-  }
-  return null;
-}
-
 function resolveApprovalActionTarget(actionRef: string): EntrustedWorkActionTarget | null {
   const producer = APPROVAL_PRODUCER_IDS.find((producerId) => {
-    if (producerId === 'F292' || producerId === 'F306') return false;
+    if (producerId === 'F306') return false;
     const base = approvalProducerMeta(producerId).decisionEndpointBase;
     return base ? actionRef.startsWith(`${base}/`) : false;
   });
@@ -102,9 +81,7 @@ export function resolveEntrustedWorkActionTarget(actionRef: string): EntrustedWo
   const message = parseEntrustedWorkMessageAction(actionRef);
   return message
     ? { kind: 'message', ...message }
-    : (parseCollectiveWorkActionRef(actionRef) ??
-        resolveMeetingActionTarget(actionRef) ??
-        resolveApprovalActionTarget(actionRef));
+    : (parseCollectiveWorkActionRef(actionRef) ?? resolveApprovalActionTarget(actionRef));
 }
 
 function findRichBlock(coordinate: EntrustedWorkMessageAction): HTMLElement | null {

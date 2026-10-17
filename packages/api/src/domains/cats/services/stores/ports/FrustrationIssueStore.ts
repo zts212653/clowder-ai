@@ -1,7 +1,7 @@
 /**
  * F222: Frustration Auto-Issue Store — Port interface.
  *
- * Lifecycle: draft → confirmed | skipped | false_positive (one-way, no CAS needed).
+ * Lifecycle: draft → confirmed | skipped | false_positive. Navigation links use snapshot CAS.
  * User-visible data → persistent by default (Iron Law #5, LL-048).
  */
 
@@ -12,6 +12,20 @@ import type { CreateFrustrationIssueInput, FrustrationIssue } from '@cat-cafe/sh
 export interface ConfirmIssueInput {
   issueId: string;
   userDescription?: string;
+}
+
+/** Host-internal input: expectedSource and replacement authority never come from plugin arguments. */
+export interface LinkFrustrationDraftInput {
+  issueId: string;
+  expectedSource: FrustrationIssue;
+  expectedDraftId: string | null;
+  draftId: string;
+  /** Only a current, authenticated owner request may replace a different nonempty link. */
+  allowReplace: boolean;
+}
+
+export interface LinkFrustrationDraftResult {
+  outcome: 'linked' | 'already_linked' | 'missing' | 'not_confirmed' | 'stale_source' | 'conflict';
 }
 
 // ── Port interface ─────────────────────────────────────────────
@@ -37,6 +51,13 @@ export interface IFrustrationIssueStore {
 
   /** Link a community issue draft to this frustration issue (F235). */
   setCommunityIssueDraftId(issueId: string, draftId: string): Promise<void>;
+
+  /** Atomically check confirmed content/ownership and the expected link before writing.
+   * The optional Host-only guard runs immediately before the atomic operation, after asynchronous reads. */
+  compareAndSetCommunityIssueDraft(
+    input: LinkFrustrationDraftInput,
+    assertCurrent?: () => Promise<void>,
+  ): Promise<LinkFrustrationDraftResult>;
 
   /** List issues in a thread, sorted by createdAt desc. */
   listByThread(threadId: string): Promise<FrustrationIssue[]>;

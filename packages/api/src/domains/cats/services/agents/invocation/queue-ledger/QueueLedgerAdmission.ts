@@ -2,11 +2,13 @@ import type { CatRoutingError, MessageFrom, QueueAuthorIntent, WaitContinuationC
 import type { CallerTraceContext } from '../../../../../../infrastructure/telemetry/genai-semconv.js';
 import type { ActionSuccessorFence } from '../../../../../ball-custody/ActionSuccessorAdmissionContract.js';
 import type { CloudDispatchProvenance } from '../../../cloud-bridge/types.js';
+import type { PluginPublicInvocationCarrierV1 } from '../../../stores/ports/plugin-public-invocation-carrier.js';
 import type { ToolExecutionPolicy } from '../../../types.js';
 import type { OwnerAuthProvenance } from '../owner-auth-provenance.js';
 import { type QueueLedgerEntry, type QueueOwner, queueEntryId } from './QueueLedger.js';
 
 export interface QueueLedgerAdmissionInput {
+  pluginPublicInvocation?: PluginPublicInvocationCarrierV1;
   sourceId: string;
   threadId: string;
   owner: QueueOwner;
@@ -62,6 +64,9 @@ export function createQueueLedgerAdmission(input: QueueLedgerAdmissionInput): Qu
         ...(input.routingWarnings?.length ? { routingWarnings: structuredClone(input.routingWarnings) } : {}),
       },
       execution: {
+        ...(input.pluginPublicInvocation
+          ? { pluginPublicInvocation: structuredClone(input.pluginPublicInvocation) }
+          : {}),
         intent: input.intent,
         ownerAuthProvenance: input.ownerAuthProvenance,
         ...(input.executionScope !== undefined ? { executionScope: input.executionScope } : {}),

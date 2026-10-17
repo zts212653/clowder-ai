@@ -51,9 +51,8 @@ try {
     ['packages/web/src/components/SplitPaneView.tsx', ['Clowder AI']],
     ['packages/web/src/components/ChatContainerHeader.tsx', ['Clowder AI', "'cat-cafe'", "'cat-cafe-runtime'"]],
     ['packages/web/src/utils/api-client.ts', ['HttpOnly session cookie', 'client for Clowder AI']],
-    ['packages/api/src/infrastructure/connectors/connector-gateway-bootstrap.ts', ['http://localhost:3003']],
-    ['packages/api/src/infrastructure/connectors/im-connectors/weixin/WeixinAdapter.ts', []],
     ['packages/api/src/index.ts', []],
+    ['packages/api/src/config/frontend-origin.ts', []],
     ['packages/api/src/domains/cats/services/agents/routing/AgentRouter.ts', []],
   ]);
   // Sanitized dictionaries can have identical home/public variants. Only home
@@ -92,18 +91,13 @@ try {
       if (!body.includes(term))
         fail(`${path}: missing ${term}${term.includes(':3003') ? ' (public frontend port)' : ''}`);
     }
+    if (
+      path === 'packages/api/src/config/frontend-origin.ts' &&
+      !/const\s+DEFAULT_FRONTEND_BASE_URL\s*=\s*['"]http:\/\/localhost:3003['"]/.test(body)
+    )
+      fail(`${path}: expected public frontend port 3003 in DEFAULT_FRONTEND_BASE_URL`);
     for (const term of homeBrandTerms) {
       if (body.includes(term)) fail(`${path}: home-only brand term ${term}`);
-    }
-    if (
-      path === 'packages/api/src/infrastructure/connectors/connector-gateway-bootstrap.ts' &&
-      /http:\/\/localhost:3001\b/.test(body)
-    )
-      fail(`${path}: expected public frontend port 3003, found 3001`);
-    if (path === 'packages/api/src/infrastructure/connectors/im-connectors/weixin/WeixinAdapter.ts') {
-      if (!/API_SERVER_PORT\s*\?\?\s*['"]3004['"]/.test(body))
-        fail(`${path}: expected public API fallback API_SERVER_PORT ?? '3004'`);
-      if (/localhost:300[1-4]\b/.test(body)) fail(`${path}: hardcoded localhost port bypasses API_SERVER_PORT`);
     }
     if (
       ['packages/api/src/index.ts', 'packages/api/src/domains/cats/services/agents/routing/AgentRouter.ts'].includes(

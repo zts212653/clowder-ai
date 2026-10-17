@@ -19,6 +19,8 @@ export function DirectoryBrowser({
   initialPath,
   activeProjectPath,
   onCurrentPathChange,
+  onNavigationStart,
+  allowCreateDirectory = true,
   onVirtualLocationChange,
   onCancel,
   onSelectCurrent,
@@ -45,8 +47,9 @@ export function DirectoryBrowser({
     useDrivesLoader(isWindowsServer);
 
   const fetchDirectory = useCallback(
-    async (path?: string, fallbackOnForbidden = false) => {
+    async (path?: string, fallbackOnUnavailable = false) => {
       const navigationVersion = ++navigationVersionRef.current;
+      onNavigationStart?.();
       setIsLoading(true);
       setError(null);
       showDirectoryView();
@@ -54,8 +57,8 @@ export function DirectoryBrowser({
         const res = await apiFetch(buildBrowseUrl(path));
         if (navigationVersion !== navigationVersionRef.current) return;
         if (!res.ok) {
-          // 403 fallback (initial load only) — otherwise surface the error.
-          if (shouldFallbackToHome(fallbackOnForbidden, path, res.status)) {
+          // Unavailable path fallback (initial load only) — otherwise surface the error.
+          if (shouldFallbackToHome(fallbackOnUnavailable, path, res.status)) {
             setInfo(copyRef.current.configuredPathUnavailable);
             // await so outer finally doesn't clear isLoading before fallback finishes
             await fetchDirectory(undefined, false);
@@ -79,12 +82,16 @@ export function DirectoryBrowser({
         if (navigationVersion === navigationVersionRef.current) setIsLoading(false);
       }
     },
-    [onCurrentPathChange, showDirectoryView],
+    [onCurrentPathChange, onNavigationStart, showDirectoryView],
   );
 
-  // Initial load — try initialPath, fallback to homedir on 403 (with visible info)
+  // Initial load — try initialPath, fallback to homedir on 403/404 (with visible info)
   useEffect(() => {
     fetchDirectory(initialPath, !!initialPath);
+    return () => {
+      // Retire this browser's requests before a replacement can select a path.
+      navigationVersionRef.current += 1;
+    };
   }, [fetchDirectory, initialPath]);
 
   const handlePathSubmit = useCallback(() => {
@@ -154,7 +161,7 @@ export function DirectoryBrowser({
         view={view}
         onEnterDrivesView={enterDrivesView}
         onNavigateTo={fetchDirectory}
-        onStartCreateDir={handleStartCreateDir}
+        onStartCreateDir={allowCreateDirectory ? handleStartCreateDir : undefined}
         thisPcLabel={copy.thisPc}
         newFolderTitle={copy.newFolderTitle}
         newFolderLabel={copy.newFolder}
@@ -271,20 +278,25 @@ export function DirectoryBrowser({
           <input
             type="text"
             value={pathInput}
-            onChange={(e) => setPathInput(e.target.value)}
+            onChange={(e) => {
+              navigationVersionRef.current += 1;
+              setIsLoading(false);
+              onNavigationStart?.();
+              setPathInput(e.target.value);
+            }}
             onCompositionStart={ime.onCompositionStart}
             onCompositionEnd={ime.onCompositionEnd}
             onKeyDown={(e) => {
               if (e.key === 'Enter' && !ime.isComposing()) handlePathSubmit();
             }}
             placeholder={copy.pathPlaceholder}
-            className="flex-1 text-xs px-3 py-2 rounded-lg border border-[var(--console-border-soft)] bg-cafe-white focus:outline-none focus:ring-1 focus:ring-cafe-accent"
+            className="min-w-0 flex-1 text-xs px-3 py-2 rounded-lg border border-[var(--console-border-soft)] bg-cafe-white focus:outline-none focus:ring-1 focus:ring-cafe-accent"
           />
           {pathInput.trim() && (
             <button
               type="button"
               onClick={handlePathSubmit}
-              className="px-2.5 py-2 rounded-lg border border-[var(--console-border-soft)] bg-cafe-white text-cafe-secondary hover:bg-cafe-surface transition-colors"
+              className="shrink-0 px-2.5 py-2 rounded-lg border border-[var(--console-border-soft)] bg-cafe-white text-cafe-secondary hover:bg-cafe-surface transition-colors"
               aria-label={copy.goToPath}
             >
               <svg aria-hidden="true" className="w-3.5 h-3.5" viewBox="0 0 20 20" fill="currentColor">

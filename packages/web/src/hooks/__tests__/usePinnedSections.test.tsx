@@ -68,4 +68,22 @@ describe('usePinnedSections', () => {
     expect(state.isPinned('accounts')).toBe(true);
     expect(state.isPinned('skills')).toBe(true);
   });
+  it('normalizes old im pins for both rails, deduplicates and preserves unpin', () => {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(['notify', 'im', 'plugins', 'skills']));
+    const state = renderHook();
+    expect(state.pinned).toEqual(['notify', 'plugins', 'skills']);
+    expect(state.isPinned('plugins')).toBe(true);
+    React.act(() => state.unpin('plugins'));
+    expect(latest?.pinned).toEqual(['notify', 'skills']);
+    expect(localStorage.getItem(STORAGE_KEY)).toBe(JSON.stringify(['notify', 'skills']));
+  });
+
+  it('normalizes old pins arriving from another tab without rewriting storage on read', () => {
+    renderHook();
+    const raw = JSON.stringify(['im']);
+    localStorage.setItem(STORAGE_KEY, raw);
+    React.act(() => window.dispatchEvent(new StorageEvent('storage', { key: STORAGE_KEY })));
+    expect(latest?.pinned).toEqual(['plugins']);
+    expect(localStorage.getItem(STORAGE_KEY)).toBe(raw);
+  });
 });

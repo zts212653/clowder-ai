@@ -8,12 +8,4 @@ export const BUNDLED_PACKAGE_ARCHIVES = {
     packageDigest: 'sha512-RcEUUfzmteKQ1DtwCCBfMDxFgKKHWI5O6rZ8oZM+hXUwUT0iRxRdXjXt3yyAxoeMTTWSvuPOeoTo+Tvp7QRuvQ==',
     archivePath: 'chatgpt-dot/0.1.1/package.tgz',
   },
-  'collective-connector': {
-    catalogId: 'collective-connector',
-    pluginId: 'official.collective-connector',
-    version: '0.1.1',
-    archiveUrl: 'builtin://collective-connector/0.1.1',
-    packageDigest: 'sha512-gwLfmwvp4PyCyhGNeHaX3+a93t01zwfgAiCm8vCdN1jMSZWt0LN57vdLZlTBHNeVM6/0DMeVD57ar77O/mgxAQ==',
-    archivePath: 'collective-connector/0.1.1/package.tgz',
-  },
 } as const;

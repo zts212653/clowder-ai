@@ -10,7 +10,7 @@ import { decidesOnOriginCard } from './original-place';
  * read at different moments, so the card is hosted only when the store's copy is the same decision the user is looking at.
  * "Same" means the proposal, the producer, the owner (the read's verified identity: the read carries none on the item),
  * the version, the lifecycle, the ability to act, not expired, and the credentials the producer itself checks when the
- * button is pressed — equal createdAt and lifecycle do not make two F292 revisions or two F260 fingerprints the same.
+ * button is pressed — equal createdAt and lifecycle do not make two producer detail values or two F260 fingerprints the same.
  *
  * Anything that differs, is missing, or cannot be told is unmatched. There is no default match.
  */
@@ -84,12 +84,6 @@ function conflictCredential(detail: Record<string, unknown>): ConflictCredential
   return { fingerprint, allowedActions: allowed, canonicalReplacementRequiredFor: required };
 }
 
-/** F292 presents its `detail.revision` as `expectedRevision`; both copies must carry the same readable integer. */
-function meetingMismatch(read: Record<string, unknown>, store: Record<string, unknown>): string | null {
-  const same = Number.isSafeInteger(read.revision) && read.revision === store.revision;
-  return same ? null : 'revision';
-}
-
 function entityMismatch(read: Record<string, unknown>, store: Record<string, unknown>): string | null {
   const a = conflictCredential(read);
   const b = conflictCredential(store);
@@ -112,7 +106,6 @@ function personMemoryMismatch(read: Record<string, unknown>, store: Record<strin
 
 /** The first credential the producer would check at press time that the two copies do not share; null when they share it. */
 function credentialMismatch(read: UnifiedAttentionVisibleApproval, store: ApprovalHubItem): string | null {
-  if (read.sourceFeatureId === 'F292') return meetingMismatch(read.detail, store.detail);
   if (read.sourceFeatureId === 'F260') return entityMismatch(read.detail, store.detail);
   if (read.sourceFeatureId === 'F276' && read.decisionMode === 'claim-select') {
     return personMemoryMismatch(read.detail, store.detail);
@@ -240,10 +233,5 @@ export function isHostableApproval(approval: UnifiedAttentionVisibleApproval): b
   if (!isRecord(approval) || approval.resolution !== 'open') return false;
   if (!(approval.sourceFeatureId in APPROVAL_FEATURES)) return false;
   if (decidesOnOriginCard(approval.sourceFeatureId)) return false;
-  return (
-    approval.sourceFeatureId === 'F128' ||
-    approval.inlineApprovable ||
-    approval.decisionMode === 'claim-select' ||
-    approval.decisionMode === 'meeting-intake'
-  );
+  return approval.sourceFeatureId === 'F128' || approval.inlineApprovable || approval.decisionMode === 'claim-select';
 }

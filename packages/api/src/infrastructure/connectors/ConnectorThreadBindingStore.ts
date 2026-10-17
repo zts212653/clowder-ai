@@ -13,6 +13,7 @@ export interface IConnectorThreadBindingStore {
   ): ConnectorThreadBinding | null | Promise<ConnectorThreadBinding | null>;
   getByThread(threadId: string): ConnectorThreadBinding[] | Promise<ConnectorThreadBinding[]>;
   remove(connectorId: string, externalChatId: string): boolean | Promise<boolean>;
+  removeIfMatches(binding: ConnectorThreadBinding): boolean | Promise<boolean>;
   listByUser(
     connectorId: string,
     userId: string,
@@ -54,6 +55,18 @@ export class MemoryConnectorThreadBindingStore implements IConnectorThreadBindin
 
   remove(connectorId: string, externalChatId: string): boolean {
     return this.bindings.delete(this.key(connectorId, externalChatId));
+  }
+
+  removeIfMatches(binding: ConnectorThreadBinding): boolean {
+    const current = this.getByExternal(binding.connectorId, binding.externalChatId);
+    if (
+      !current ||
+      current.userId !== binding.userId ||
+      current.threadId !== binding.threadId ||
+      current.createdAt !== binding.createdAt
+    )
+      return false;
+    return this.remove(binding.connectorId, binding.externalChatId);
   }
 
   listByUser(connectorId: string, userId: string, limit?: number): ConnectorThreadBinding[] {

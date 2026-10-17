@@ -544,45 +544,17 @@ describe('cross-platform pnpm-start profile propagation (#421)', () => {
     }
   });
 
-  it('official runtime launchers opt in to connector autostart without overriding explicit false', () => {
-    const runtimeScript = readFileSync(resolve(ROOT, 'scripts/runtime-worktree.sh'), 'utf8');
-    const windowsScript = readFileSync(resolve(ROOT, 'scripts/start-windows.ps1'), 'utf8');
-    const unixOptIns = runtimeScript.match(
-      /export CONNECTOR_GATEWAY_AUTOSTART="\$\{CONNECTOR_GATEWAY_AUTOSTART:-1\}"/g,
-    );
-
-    assert.equal(unixOptIns?.length, 2, 'both Unix runtime paths must explicitly opt in');
-    assert.match(windowsScript, /CONNECTOR_GATEWAY_AUTOSTART\s*=\s*\$connectorGatewayAutostart/);
-    assert.match(
-      windowsScript,
-      /\$connectorGatewayAutostart\s*=\s*if\s*\(\$env:CONNECTOR_GATEWAY_AUTOSTART\)[\s\S]*?elseif\s*\(-not \$Dev\)/,
-      'Windows production runtime must compute an explicit connector opt-in',
-    );
-  });
-
-  it('Windows launcher snapshots connector authority before dotenv and restores only that wrapper decision', () => {
-    const windowsScript = readFileSync(resolve(ROOT, 'scripts/start-windows.ps1'), 'utf8');
-    const snapshot =
-      '$connectorGatewayAutostartOverride = [System.Environment]::GetEnvironmentVariable("CONNECTOR_GATEWAY_AUTOSTART", "Process")';
-    const dotenvLoad = '# -- Load .env';
-    const restore = '# -- Restore connector launcher authority after dotenv';
-    const runtimeProjection = '$connectorGatewayAutostart = if ($env:CONNECTOR_GATEWAY_AUTOSTART)';
-
-    assert.ok(windowsScript.indexOf(snapshot) >= 0, 'Windows launcher must snapshot wrapper authority');
-    assert.ok(
-      windowsScript.indexOf(snapshot) < windowsScript.indexOf(dotenvLoad),
-      'wrapper authority must be captured before dotenv mutates the process environment',
-    );
-    assert.ok(
-      windowsScript.indexOf(restore) > windowsScript.indexOf(dotenvLoad) &&
-        windowsScript.indexOf(restore) < windowsScript.indexOf(runtimeProjection),
-      'dotenv-only grants must be removed before runtimeEnvOverrides are computed',
-    );
-    assert.match(
-      windowsScript,
-      /SetEnvironmentVariable\("CONNECTOR_GATEWAY_AUTOSTART", \$null, "Process"\)/,
-      'an absent wrapper decision must remain absent after dotenv loading',
-    );
+  it('startup entrypoints no longer project a retired connector gateway capability', () => {
+    for (const path of [
+      'start-entry.mjs',
+      'start-dev.sh',
+      'runtime-worktree.sh',
+      'start-windows.ps1',
+      'review-start.sh',
+    ]) {
+      const source = readFileSync(resolve(ROOT, 'scripts', path), 'utf8');
+      assert.doesNotMatch(source, /CONNECTOR_GATEWAY_AUTOSTART|connectorGatewayAutostart/, path);
+    }
   });
 
   it('does not advertise connector lifecycle authority through the .env template', () => {
@@ -725,35 +697,6 @@ describe('cross-platform pnpm-start profile propagation (#421)', () => {
     );
 
     assert.ok(source.includes('env: childEnv'), 'Windows spawn must use childEnv (which contains profile env vars)');
-  });
-
-  it('start-entry.mjs defaults direct Unix starts to connector gateway autostart off', () => {
-    const source = readFileSync(resolve(ROOT, 'scripts/start-entry.mjs'), 'utf8');
-    const unixDispatchStart = source.indexOf('// Unix: dispatch based on mode');
-    const startDirectBlock = source.slice(
-      source.indexOf("mode === 'start:direct'", unixDispatchStart),
-      source.indexOf("} else if (mode === 'dev:direct'", unixDispatchStart),
-    );
-    const devDirectBlock = source.slice(
-      source.indexOf("mode === 'dev:direct'", unixDispatchStart),
-      source.indexOf('} else {', source.indexOf("mode === 'dev:direct'", unixDispatchStart)),
-    );
-
-    assert.match(
-      source,
-      /CONNECTOR_GATEWAY_AUTOSTART:\s*'0'/,
-      'direct fail-closed helper must default CONNECTOR_GATEWAY_AUTOSTART=0',
-    );
-    assert.match(
-      startDirectBlock,
-      /directConnectorAutostartFailClosed/,
-      'start:direct must explicitly fail closed for preconfigured IM connector autostart',
-    );
-    assert.match(
-      devDirectBlock,
-      /directConnectorAutostartFailClosed/,
-      'dev:direct must explicitly fail closed for preconfigured IM connector autostart',
-    );
   });
 
   it('start-entry.mjs marks Unix runtime-worktree starts as no-watch before dispatch', () => {

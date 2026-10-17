@@ -10,6 +10,7 @@ import type {
 import type { CallerTraceContext } from '../../../../../../infrastructure/telemetry/genai-semconv.js';
 import type { ActionSuccessorFence } from '../../../../../ball-custody/ActionSuccessorAdmissionContract.js';
 import type { CloudDispatchProvenance } from '../../../cloud-bridge/types.js';
+import type { PluginPublicInvocationCarrierV1 } from '../../../stores/ports/plugin-public-invocation-carrier.js';
 import type { ToolExecutionPolicy } from '../../../types.js';
 import type { OwnerAuthProvenance } from '../owner-auth-provenance.js';
 
@@ -37,6 +38,7 @@ export interface QueueLedgerPayload {
 }
 
 export interface QueueLedgerExecution {
+  pluginPublicInvocation?: PluginPublicInvocationCarrierV1;
   intent: string;
   ownerAuthProvenance: OwnerAuthProvenance;
   /** Domain execution restriction; never an owner-authentication grant. */

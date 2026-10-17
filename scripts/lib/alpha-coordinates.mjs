@@ -4,13 +4,13 @@ import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 export const ALPHA_COORDINATE_VERSION = 1;
-// Runtime/standard Alpha/Redis, Service manifest defaults, launcher proxy and
-// the F247 remote sidecar. The test checks these against their source controls.
+// Runtime/standard Alpha/Redis, retained Host sidecar defaults and launcher proxy.
+// Historical service ports stay reserved to avoid colliding with existing instances.
 const PROTECTED_PORTS = new Set([
   3001, 3002, 3011, 3012, 3098, 4100, 4111, 5201, 5211, 6379, 6099, 6397, 6398, 6399, 6401, 9876, 9877, 9878, 9879,
   9880, 9881,
 ]);
-const PORT_ROLES = ['frontend', 'api', 'preview', 'service', 'redis'];
+const PORT_ROLES = ['frontend', 'api', 'preview', 'redis'];
 const EXACT_SHA = /^[a-f0-9]{40}(?:[a-f0-9]{24})?$/;
 const SAFE_PATH = /^[A-Za-z0-9._/@+-]+$/;
 
@@ -125,7 +125,6 @@ export function deriveNamedAlphaCoordinates({ mainRoot, instance, ports, targetS
     join(alphaRoot, '.cat-cafe'),
     join(alphaRoot, '.cat-cafe/redis'),
     join(alphaRoot, '.cat-cafe/redis-backups'),
-    join(alphaRoot, '.cat-cafe/collective-service'),
     join(alphaRoot, '.cat-cafe/uploads'),
     join(alphaRoot, '.cat-cafe/transcripts'),
     join(alphaRoot, '.cat-cafe/stories'),
@@ -230,12 +229,6 @@ export function namedAlphaEnvironment(coordinates) {
     REDIS_KEY_PREFIX: 'cat-cafe:',
     REDIS_DATA_DIR: join(alphaRoot, '.cat-cafe/redis'),
     REDIS_BACKUP_DIR: join(alphaRoot, '.cat-cafe/redis-backups'),
-    COLLECTIVE_SERVICE_HOST: '127.0.0.1',
-    COLLECTIVE_SERVICE_PORT: String(ports.service),
-    COLLECTIVE_SERVICE_DATA_DIR: join(alphaRoot, '.cat-cafe/collective-service'),
-    COLLECTIVE_SERVICE_PUBLIC_URL: `http://127.0.0.1:${ports.service}`,
-    NEXT_PUBLIC_COLLECTIVE_SERVICE_URL: `http://127.0.0.1:${ports.service}`,
-    COLLECTIVE_SERVICE_ALLOWED_HOST_ORIGINS: `http://localhost:${ports.frontend},http://127.0.0.1:${ports.frontend}`,
     ANTHROPIC_PROXY_ENABLED: '0',
     ASR_ENABLED: '0',
     TTS_ENABLED: '0',
@@ -243,7 +236,6 @@ export function namedAlphaEnvironment(coordinates) {
     EMBED_ENABLED: '0',
     EMBED_MODE: 'off',
     AUDIO_SERVICE_ENABLED: '0',
-    CONNECTOR_GATEWAY_AUTOSTART: '0',
     CAT_CAFE_F247_CLOUD_AUTOSTART: '0',
   };
 }

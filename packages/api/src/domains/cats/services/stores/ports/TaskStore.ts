@@ -1,3 +1,7 @@
+import type { AttachEntrustedWorkArtifactInput } from './EntrustedWorkArtifactEvidence.js';
+import { advanceEntrustedTaskAuthority } from './EntrustedWorkRevision.js';
+import { reconcilePluginWaitTaskMutation, replaceTaskPluginWait } from './TaskPluginWait.js';
+import type { ReplacePluginWaitInput } from './TaskStoreContract.js';
 /**
  * Task Store (毛线球)
  * 内存实现，Map-based，有界 (MAX=500)。
@@ -15,7 +19,6 @@ import type {
   TaskKind,
   UpdateTaskInput,
 } from '@cat-cafe/shared';
-import { isTrackingKind } from '@cat-cafe/shared';
 import {
   type TypedWaitRegistration,
   type TypedWaitRegistrationSnapshot,
@@ -43,10 +46,11 @@ import {
   isEntrustedWorkSubjectKey,
   type ReplaceAutomationStateIfGenerationInput,
   type ReplaceDeploymentWaitIfGenerationInput,
+  type TaskSubjectUpsertCondition,
   type UpdateEntrustedWorkStoreInput,
   type UpdateEntrustedWorkStoreResult,
 } from './TaskStoreContract.js';
-import { assertSubjectUpdateOwnership } from './TaskSubjectOwnership.js';
+import { assertTaskSubjectSnapshot, buildSubjectTaskUpdate } from './TaskSubjectUpsert.js';
 import { TaskWaitMutationStore } from './TaskWaitMutationStore.js';
 
 export type { ITaskStore } from './TaskStoreContract.js';
@@ -124,6 +128,13 @@ export class TaskStore implements ITaskStore {
     return this.tasks.get(taskId) ?? null;
   }
 
+  replacePluginWait(taskId: string, input: ReplacePluginWaitInput): TaskItem | null {
+    const task = this.tasks.get(taskId);
+    const updated = task ? replaceTaskPluginWait(task, input) : null;
+    if (updated) this.tasks.set(taskId, updated);
+    return updated;
+  }
+
   getWaitRegistration(taskId: string): TypedWaitRegistrationSnapshot | null {
     const task = this.tasks.get(taskId);
     return task ? structuredClone({ task, receipt: this.waitRegistrations.get(taskId) ?? null }) : null;
@@ -135,13 +146,17 @@ export class TaskStore implements ITaskStore {
     return this.tasks.get(taskId) ?? null;
   }
 
-  upsertBySubject(input: CreateTaskInput): TaskItem {
+  upsertBySubject(input: CreateTaskInput, condition?: TaskSubjectUpsertCondition): TaskItem {
     const sk = input.subjectKey;
-    if (!sk) return this.create(input);
+    if (!sk) {
+      if (condition) throw new Error('Conditional subject upsert requires a subject key');
+      return this.create(input);
+    }
 
     this.assertGenericUpsertSubjectAllowed(sk);
 
     const existingId = this.subjectIndex.get(sk);
+    if (condition) assertTaskSubjectSnapshot(sk, existingId ? (this.tasks.get(existingId) ?? null) : null, condition);
     if (!existingId) return this.create(input);
     const existing = this.tasks.get(existingId);
     if (!existing) {
@@ -161,24 +176,7 @@ export class TaskStore implements ITaskStore {
   }
 
   private updateExistingSubjectTask(subjectKey: string, existing: TaskItem, input: CreateTaskInput): TaskItem {
-    assertSubjectUpdateOwnership(subjectKey, existing, input);
-    assertEntrustedWorkGenericUpsertAllowed(existing);
-    const updated: TaskItem = {
-      ...existing,
-      threadId: input.threadId,
-      title: input.title,
-      ownerCatId: input.ownerCatId ?? existing.ownerCatId,
-      status: isTrackingKind(existing.kind) && existing.status === 'done' ? 'todo' : existing.status,
-      why: input.why,
-      userId: input.userId ?? existing.userId,
-      probe: input.probe !== undefined ? input.probe : existing.probe,
-      resolveMode: input.resolveMode !== undefined ? input.resolveMode : existing.resolveMode,
-      automationState: input.automationState
-        ? mergeTaskAutomationState(existing.automationState, input.automationState)
-        : existing.automationState,
-      updatedAt: Date.now(),
-    };
-    const reconciled = reconcileDeploymentWaitTaskMutation(existing, updated);
+    const reconciled = buildSubjectTaskUpdate(subjectKey, existing, input);
     this.tasks.set(existing.id, reconciled);
     return reconciled;
   }
@@ -202,11 +200,11 @@ export class TaskStore implements ITaskStore {
     const existing = this.tasks.get(taskId);
     if (!existing) return null;
 
-    const updated: TaskItem = {
+    const updated = advanceEntrustedTaskAuthority(existing, {
       ...existing,
       automationState: mergeTaskAutomationState(existing.automationState, patch),
       updatedAt: Date.now(),
-    };
+    });
     this.tasks.set(taskId, updated);
     return updated;
   }
@@ -248,6 +246,10 @@ export class TaskStore implements ITaskStore {
     return this.entrustedWorkMutations.update(taskId, input);
   }
 
+  attachEntrustedWorkArtifactEvidence(taskId: string, input: AttachEntrustedWorkArtifactInput) {
+    return this.entrustedWorkMutations.attachArtifact(taskId, input);
+  }
+
   replaceAutomationStateIfGeneration(taskId: string, input: ReplaceAutomationStateIfGenerationInput): TaskItem | null {
     return this.waitMutations.replaceAutomationStateIfGeneration(taskId, input);
   }
@@ -277,7 +279,10 @@ export class TaskStore implements ITaskStore {
       updatedAt: Date.now(),
     };
 
-    const reconciled = reconcileDeploymentWaitTaskMutation(existing, updated);
+    const reconciled = reconcilePluginWaitTaskMutation(
+      existing,
+      reconcileDeploymentWaitTaskMutation(existing, updated),
+    );
     this.tasks.set(taskId, reconciled);
     return reconciled;
   }

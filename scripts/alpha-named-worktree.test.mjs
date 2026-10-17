@@ -12,7 +12,7 @@ test('canonical named Alpha launcher carries one tuple from actual main to isola
   f.captureChild();
   writeFileSync(
     join(f.mainRoot, '.env'),
-    'API_SERVER_PORT=3004\nFRONTEND_URL=http://foreign.invalid\nCOLLECTIVE_SERVICE_PORT=5211\nCAT_CAFE_DATA_DIR=/must-not-use\n',
+    'API_SERVER_PORT=3004\nFRONTEND_URL=http://foreign.invalid\nCAT_CAFE_DATA_DIR=/must-not-use\n',
   );
   const result = f.run([
     'start',
@@ -29,11 +29,9 @@ test('canonical named Alpha launcher carries one tuple from actual main to isola
   assert.equal(env.API_SERVER_PORT, '5312');
   assert.equal(env.FRONTEND_PORT, '5311');
   assert.equal(env.PREVIEW_GATEWAY_PORT, '5411');
-  assert.equal(env.COLLECTIVE_SERVICE_PORT, '5511');
   assert.equal(env.REDIS_PORT, '15397');
   assert.equal(env.API_SERVER_HOST, '127.0.0.1');
   assert.equal(env.FRONTEND_URL, 'http://localhost:5311');
-  assert.equal(env.NEXT_PUBLIC_COLLECTIVE_SERVICE_URL, 'http://127.0.0.1:5511');
   assert.equal(env.REDIS_DATA_DIR, join(f.alphaRoot, '.cat-cafe/redis'));
   assert.equal(env.CAT_CAFE_SIDECAR_LIFECYCLE_DISABLED, '1');
   assert.equal(env.CAT_CAFE_DIRECT_NO_WATCH, '1');
@@ -145,9 +143,9 @@ test('named status/stop consume the existing launcher record coordinates without
 test('named start rejects path overrides and protected tuples before contacting any Redis', (t) => {
   const f = namedAlphaFixture(t);
   for (const args of [
-    ['--ports', '5311,5312,5411,5511,6399'],
-    ['--ports', '05311,5312,5411,5511,15397'],
-    ['--ports', '5311,5311,5411,5511,15397'],
+    ['--ports', '5311,5312,5411,6399'],
+    ['--ports', '05311,5312,5411,15397'],
+    ['--ports', '5311,5311,5411,15397'],
     ['--ports', NAMED_ALPHA_PORTS, '--dir', f.alphaRoot],
     ['--ports', NAMED_ALPHA_PORTS, '--no-sync'],
   ]) {
@@ -220,7 +218,7 @@ test('a live process in the named checkout prevents a new tuple from rebuilding 
     serving.once('error', reject);
   });
   t.after(() => serving.kill());
-  const tuple = '5321,5322,5421,5521,15407';
+  const tuple = '5321,5322,5421,15407';
   const command = `pnpm preview:process start --port 5321 --cwd ${f.mainRoot} -- pnpm alpha:start --instance f290-communication --ports ${tuple}`;
   const decision = decideNativeHookPayload(
     { turn_id: 'serving-alpha', tool_name: 'exec_command', cwd: f.mainRoot, tool_input: { cmd: command } },

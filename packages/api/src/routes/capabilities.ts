@@ -17,7 +17,6 @@
 import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import type { CapabilityEntry, CapabilityPatchRequest, GovernanceSelection, MountRules } from '@cat-cafe/shared';
 import { catRegistry, STANDARD_MOUNT_POINT_IDS } from '@cat-cafe/shared';
 import type { FastifyPluginAsync, FastifyRequest } from 'fastify';
@@ -51,8 +50,6 @@ import {
   scanProjectSkillSources,
 } from '../domains/capabilities/capability-board-parts.js';
 import { readCapabilitySnapshot } from '../domains/capabilities/capability-read-service.js';
-import { resourceCapId } from '../domains/plugin/PluginRegistry.js';
-import { parsePluginManifest } from '../domains/plugin/plugin-manifest.js';
 import { syncMcpAll } from '../mcp/mcp-sync-all.js';
 import { syncAll } from '../skills/skill-sync-all.js';
 import { type MountConflict, syncProject } from '../skills/skill-sync-engine.js';
@@ -153,71 +150,9 @@ function findCapabilityPatchTargetIndex(
 
 // ────────── Helpers ──────────
 
-const MODULE_REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../../../..');
-const CANONICAL_PLUGINS_DIR = join(MODULE_REPO_ROOT, 'packages', 'api', 'src', 'plugins');
-
-async function collectDeclaredPluginSkillIds(
-  pluginsDir: string,
-  declaredSkillIds: Map<string, Set<string>>,
-): Promise<boolean> {
-  const pluginDirs = await listSubdirs(pluginsDir);
-  if (pluginDirs === null) return false;
-
-  for (const dirName of pluginDirs) {
-    const manifestPath = join(pluginsDir, dirName, 'plugin.yaml');
-    if (!existsSync(manifestPath)) continue;
-
-    try {
-      const manifest = parsePluginManifest(manifestPath);
-      if (manifest.id !== dirName) continue;
-      const skillIds = new Set(
-        manifest.resources
-          .filter((resource) => resource.type === 'skill')
-          .map((resource) => resourceCapId(manifest.id, resource)),
-      );
-      declaredSkillIds.set(manifest.id, skillIds);
-    } catch {}
-  }
-
-  return true;
-}
-
-async function readDeclaredPluginSkillIds(projectRoot: string): Promise<Map<string, Set<string>> | null> {
-  const declaredSkillIds = new Map<string, Set<string>>();
-  const pluginsDirs = [CANONICAL_PLUGINS_DIR];
-  const projectPluginsDir = join(projectRoot, 'plugins');
-  if (resolve(projectPluginsDir) !== resolve(CANONICAL_PLUGINS_DIR)) {
-    pluginsDirs.push(projectPluginsDir);
-  }
-
-  for (const pluginsDir of pluginsDirs) {
-    const ok = await collectDeclaredPluginSkillIds(pluginsDir, declaredSkillIds);
-    if (!ok) return null;
-  }
-
-  return declaredSkillIds;
-}
-
-function isDeclaredPluginSkill(
-  cap: CapabilityEntry,
-  allSkillNames: Set<string>,
-  declaredPluginSkillIds: Map<string, Set<string>> | null,
-): boolean {
-  if (!cap.pluginId) return false;
-  if (declaredPluginSkillIds === null) return true;
-  const declaredIds = declaredPluginSkillIds.get(cap.pluginId);
-  if (!declaredIds) return allSkillNames.has(cap.id);
-  return declaredIds.has(cap.id);
-}
-
-function shouldKeepSkillCapability(
-  cap: CapabilityEntry,
-  allSkillNames: Set<string>,
-  declaredPluginSkillIds: Map<string, Set<string>> | null,
-): boolean {
-  if (cap.type !== 'skill') return true;
-  if (cap.source === 'external') return allSkillNames.has(cap.id);
-  if (cap.pluginId) return isDeclaredPluginSkill(cap, allSkillNames, declaredPluginSkillIds);
+/** Installed plugin skill lifecycle owns pruning its own capability entries. */
+function shouldKeepSkillCapability(cap: CapabilityEntry, allSkillNames: Set<string>): boolean {
+  if (cap.type !== 'skill' || cap.pluginId) return true;
   return allSkillNames.has(cap.id);
 }
 
@@ -430,11 +365,8 @@ export const capabilitiesRoutes: FastifyPluginAsync = async (app) => {
       // Prune stale skills no longer on filesystem.
       // Guard: only prune when ALL provider scans succeeded (no null returns).
       if (allScansOk) {
-        const declaredPluginSkillIds = await readDeclaredPluginSkillIds(projectRoot);
         const before = config.capabilities.length;
-        config.capabilities = config.capabilities.filter((c) =>
-          shouldKeepSkillCapability(c, allSkillNames, declaredPluginSkillIds),
-        );
+        config.capabilities = config.capabilities.filter((c) => shouldKeepSkillCapability(c, allSkillNames));
         if (config.capabilities.length !== before) configDirty = true;
       }
 

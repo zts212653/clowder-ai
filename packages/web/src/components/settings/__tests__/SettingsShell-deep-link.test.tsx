@@ -50,4 +50,21 @@ describe('SettingsShell deep-link routing', () => {
     expect(html).toContain('min-w-0 flex-1 overflow-hidden');
     expect(html).toContain('flex h-full min-h-0 flex-col gap-5');
   });
+
+  it('keeps standalone Manager scrolling inside its list and detail panes', () => {
+    mockSearchParams = new URLSearchParams('s=plugins&standalone=1');
+
+    const html = renderToStaticMarkup(<SettingsShell />);
+
+    expect(html).toContain('overflow-hidden');
+    expect(html).not.toContain('overflow-y-auto');
+  });
+
+  it('opens the unified plugin page from an existing IM bookmark', () => {
+    mockSearchParams = new URLSearchParams('s=im');
+    const html = renderToStaticMarkup(<SettingsShell />);
+    expect(html).toContain('data-section="plugins"');
+    expect(html).toContain('data-active="plugins"');
+    expect(html).not.toContain('data-section="im"');
+  });
 });

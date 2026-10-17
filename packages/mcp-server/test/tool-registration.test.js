@@ -284,10 +284,10 @@ describe('MCP Server Tool Registration', () => {
       'cat_cafe_create_rich_block',
       'cat_cafe_generate_document',
       'cat_cafe_register_deployment_wait',
-      'cat_cafe_register_pr_tracking',
-      'cat_cafe_register_issue_tracking',
-      'cat_cafe_community_await_external',
-      'cat_cafe_validate_community_route',
+      'cat_cafe_register_pr_tracking', // mcp-cutover-negative-reference: absence
+      'cat_cafe_register_issue_tracking', // mcp-cutover-negative-reference: absence
+      'cat_cafe_community_await_external', // mcp-cutover-negative-reference: absence
+      'cat_cafe_validate_community_route', // mcp-cutover-negative-reference: absence
       'cat_cafe_update_workflow',
       'cat_cafe_multi_mention',
       'cat_cafe_start_vote',
@@ -340,7 +340,6 @@ describe('MCP Server Tool Registration', () => {
       'cat_cafe_publish_verdict',
       'cat_cafe_record_eval_lifecycle',
       'cat_cafe_read_diary',
-      'cat_cafe_read_meeting_artifact',
       'cat_cafe_read_profile',
       'cat_cafe_read_entrusted_work',
       'cat_cafe_list_diaries',
@@ -349,8 +348,6 @@ describe('MCP Server Tool Registration', () => {
       'cat_cafe_recall_person_relationship',
       'cat_cafe_drill_person_memory',
       'cat_cafe_register_external_runtime_session',
-      'cat_cafe_community_request_guardian',
-      'cat_cafe_community_guardian_signoff',
       'cat_cafe_constitute_evolution_program',
       'cat_cafe_rebind_evolution_program_measurement',
       'cat_cafe_open_evolution_round',
@@ -613,7 +610,7 @@ describe('F061 READONLY_ALLOWED_TOOLS whitelist', () => {
         names.includes('cat_cafe_multi_mention') ||
         names.includes('cat_cafe_hold_ball') ||
         names.includes('cat_cafe_propose_thread') ||
-        names.includes('cat_cafe_unregister_tracking') ||
+        names.includes('cat_cafe_unregister_tracking') || // mcp-cutover-negative-reference: absence
         names.includes('cat_cafe_submit_game_action') ||
         // 砚砚 R9 P1: shared-MCP cats must see publish-verdict
         !names.includes('cat_cafe_publish_verdict')

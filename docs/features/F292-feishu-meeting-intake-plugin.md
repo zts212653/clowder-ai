@@ -16,13 +16,15 @@ mcp_admission_status: accepted
 mcp_admission_ref: "file:docs/features/F292-feishu-meeting-intake-plugin.md"
 mcp_admission_claims:
   - ref: "file:docs/features/F292-feishu-meeting-intake-plugin.md"
-    toolName: cat_cafe_read_meeting_artifact
+    toolName: cat_cafe_meeting_records_read
     resourceFamily: meeting-artifact
     boundaryKind: resource-entry
     decision: accepted
 ---
 
 # F292: Feishu Meeting Intake Plugin — 会后产物不再靠人搬运
+
+> **C1 当前准入边界**：当前读取入口为安装插件提供的 `cat_cafe_meeting_records_read`：按当前线程授权读取保留会议记录的文字稿，不提供旧 Host artifact 的历史快照读取语义。下文旧 Host intake/artifact 设计保留为历史；其工具 identity 已退役。
 
 > **Status**: implementation / Phase D acceptance active; public alpha.10 and the paired Host auth-probe repair are landed, but live still has alpha.9 installed with its source consumer in the error state and not running. Runtime adoption, a fresh healthy observation, and one new source-bound real-meeting journey remain required
 > **Owner**: 小太阳·Maine Coon (@codex-sol, GPT-5.6 Sol)

@@ -159,13 +159,6 @@ describe('F190 visual contract — no hard borders in card/panel components', ()
     expect(src).toContain('hover:bg-[var(--console-hover-bg)]');
   });
 
-  it('HubConnectorConfigTab uses SettingsRow-aligned shadow, not --hub-shadow var', () => {
-    const src = readSrc('HubConnectorConfigTab.tsx');
-    expect(src).not.toContain('var(--hub-shadow)');
-    expect(src).toContain('console-list-card rounded-xl overflow-hidden shadow-[var(--console-shadow-soft)]');
-    expect(src).not.toContain('shadow-[0_12px_30px');
-  });
-
   it('SignalInboxView title is text-xl, list pane has no border-r', () => {
     const src = readSrc('signals/SignalInboxView.tsx');
     expect(src).toMatch(/text-xl font-bold/);
@@ -254,15 +247,6 @@ describe('F190 visual contract — no hard borders in card/panel components', ()
     expect(src).toContain('console-modal-close-bg');
   });
 
-  it('HubPermissionsTab uses rounded-xl + 0.04 shadow, no hub-* CSS vars', () => {
-    const src = readSrc('HubPermissionsTab.tsx');
-    expect(src).not.toMatch(/var\(--hub-/);
-    expect(src).toContain('rounded-xl');
-    expect(src).toContain('shadow-[0_8px_22px_rgba(43,33,26,0.04)]');
-    expect(src).not.toContain('rounded-2xl');
-    expect(src).not.toContain('0_12px_30px');
-  });
-
   it('MemoryNav uses underline tabs matching MissionHub, not soft pills', () => {
     const src = readSrc('memory/MemoryNav.tsx');
     expect(src).toContain('console-divider-b');
@@ -310,9 +294,10 @@ describe('F190 visual contract — no hard borders in card/panel components', ()
     expect(src).toContain('focus:ring-[var(--console-input-stroke)]');
   });
 
-  it('PluginsContent shows GitHub config only, no ServiceStatusPanel', () => {
+  it('PluginsContent uses the generic Manager without a provider-specific page', () => {
     const src = readSrc('settings/PluginsContent.tsx');
-    expect(src).toContain('GitHub');
+    expect(src).toContain('PluginManagerLiveContent');
+    expect(src).not.toContain('GitHub');
     expect(src).not.toContain('ServiceStatusPanel');
     expect(src).not.toContain('adaptServiceToPlugin');
   });
@@ -575,12 +560,6 @@ describe('#723 Mission Hub — card/border unification guard', () => {
 });
 
 describe('#723 IM connector — typography and card guard', () => {
-  it('HubConnectorConfigTab heading uses text-sm font-semibold, not text-base font-extrabold', () => {
-    const src = readSrc('HubConnectorConfigTab.tsx');
-    expect(src).toContain('text-sm font-semibold');
-    expect(src).not.toContain('text-base font-extrabold');
-  });
-
   it('ConfigFieldRenderer inputs use field-bg pattern, not border-cafe', () => {
     const src = readSrc('settings/primitives/ConfigFieldRenderer.tsx');
     expect(src).toContain('console-form-input');
@@ -935,12 +914,6 @@ describe('#723 round 4.1 — deeper primitive convergence guard', () => {
     expect(src).not.toContain('purple-500');
     expect(src).toContain('bg-cafe-accent');
   });
-
-  it('HubConnectorConfigTab card shells match SettingsRow: rounded-xl + 0.04 shadow', () => {
-    const src = readSrc('HubConnectorConfigTab.tsx');
-    expect(src).toContain('rounded-xl overflow-hidden shadow-[var(--console-shadow-soft)]');
-    expect(src).not.toContain('shadow-[0_12px_30px');
-  });
 });
 
 describe('#723 round 5 — ops tab/button convergence guard', () => {
@@ -1207,14 +1180,6 @@ describe('#723 round 7 — operator visual convergence: tabs, search, selects, b
     }
   });
 
-  it('HubConnectorConfigTab: platform card header uses resource-card sizing, not custom h-11/px-5', () => {
-    const src = readSrc('HubConnectorConfigTab.tsx');
-    expect(src).not.toContain('h-11 w-11');
-    expect(src).not.toContain('px-5 py-[18px]');
-    expect(src).toContain('h-9 w-9');
-    expect(src).toContain('px-4 py-3');
-  });
-
   it('SettingsCollapsibleCard: rounded-xl + 0.04 shadow, not rounded-2xl or 0.05', () => {
     const src = readSrc('settings/primitives/SettingsCollapsibleCard.tsx');
     expect(src).not.toContain('rounded-2xl');
@@ -1333,12 +1298,6 @@ describe('#723 round 9 — install button, error suppression, breadcrumb, tab/ca
     expect(src).toContain('(installed && enabled) || !home.installable ? home.error');
   });
 
-  it('HubPermissionsTab: no breadcrumb separator', () => {
-    const src = readSrc('HubPermissionsTab.tsx');
-    expect(src).not.toContain('›');
-    expect(src).not.toMatch(/connectorLabel.*群聊权限/);
-  });
-
   it('KnowledgeFeed tabs: underline emphasis tokens, no cafe-accent tab styling', () => {
     const src = readSrc('workspace/KnowledgeFeed.tsx');
     expect(src).toContain('console-button-emphasis');
@@ -1394,7 +1353,6 @@ describe('#723 round 9 — install button, error suppression, breadcrumb, tab/ca
       'MessageActions.tsx',
       'UnifiedAuthModal.tsx',
       'BrakeModal.tsx',
-      'HubListModal.tsx',
       'memory/CreateCollectionDialog.tsx',
       'ConfirmDialog.tsx',
       'mission-control/ImportProjectModal.tsx',

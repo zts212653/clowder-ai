@@ -45,7 +45,7 @@ export function CollectiveEntryReview({
     const abort = new AbortController();
     setError(undefined);
     setRoster(undefined);
-    void apiFetch('/api/plugins/collective-connector/entry-roster', { signal: abort.signal })
+    void apiFetch('/api/plugins/official.collective-connector/entry-roster', { signal: abort.signal })
       .then(async (response) => {
         if (!response.ok) throw new Error('暂时无法读取这台 Café 的注册伙伴，请重试。');
         const result = (await response.json()) as EntryRoster;

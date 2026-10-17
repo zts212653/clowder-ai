@@ -13,7 +13,7 @@ import { InMemoryContextEpochStore } from '../../dist/domains/cats/services/stor
 import { MemoryContractTrialTraceBuffer } from '../../dist/domains/memory/people/AsrPersonMemoryContractTrial.js';
 import { AsrPersonMemoryOpportunityPromptService } from '../../dist/domains/memory/people/AsrPersonMemoryOpportunityPromptService.js';
 import { estimateTokens } from '../../dist/utils/token-counter.js';
-import { artifact, intake } from './asr-person-memory-contract-fixture.js';
+import { memorySceneFixture } from './asr-person-memory-contract-fixture.js';
 
 const CODEX_EXEC = {
   provider: 'openai',
@@ -30,16 +30,7 @@ const CODEX_EXEC = {
 const CODEX_APP_SERVER = { ...CODEX_EXEC, carrier: 'app_server' };
 
 async function sceneAt(now) {
-  const { buildAsrPersonMemoryDynamicScenes } = await import(
-    '../../dist/domains/signal-intake/AsrPersonMemorySceneBuilder.js'
-  );
-  return buildAsrPersonMemoryDynamicScenes({
-    intake: { ...intake, updatedAt: now - 10 },
-    artifact,
-    threadId: 'thread-1',
-    consumerCatId: 'codex',
-    now,
-  })[0];
+  return memorySceneFixture({ now, consumerCatId: 'codex' });
 }
 
 function handshake() {

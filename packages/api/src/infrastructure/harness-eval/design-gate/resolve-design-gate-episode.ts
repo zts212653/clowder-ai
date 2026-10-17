@@ -22,7 +22,7 @@ interface RepoRefEvidence {
 }
 
 interface ResolveDesignGateEpisodeDeps {
-  pullRequestReader: DesignGatePullRequestReader;
+  pullRequestReader?: DesignGatePullRequestReader;
   reviewMessageReader: DesignGateReviewMessageReader;
   gitTruth: DesignGateGitTruth;
   readRepoRef(ref: string): RepoRefEvidence;
@@ -88,6 +88,10 @@ async function resolvePullRequest(
   deps: ResolveDesignGateEpisodeDeps,
   reasons: string[],
 ): Promise<DesignGatePullRequestEvidence | null> {
+  if (!deps.pullRequestReader) {
+    reasons.push('pull request evidence provider unavailable');
+    return null;
+  }
   try {
     const pr = await deps.pullRequestReader.resolve(source.pullRequestRef);
     assertPullRequest(source, pr, deps, reasons);

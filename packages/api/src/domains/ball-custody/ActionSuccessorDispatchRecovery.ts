@@ -1,3 +1,4 @@
+import { isDeepStrictEqual } from 'node:util';
 import type { DispatchProposal } from '@cat-cafe/shared';
 import { createModuleLogger } from '../../infrastructure/logger.js';
 import { normalizeOwnerAuthProvenance, type OwnerAuthProvenance } from '../cats/services/owner-auth-provenance.js';
@@ -8,6 +9,11 @@ import {
   buildActionSuccessorFence,
 } from './ActionSuccessorAdmissionService.js';
 import type { ActionSuccessorLeaseStore } from './ActionSuccessorLeaseStore.js';
+import {
+  type ActionDispatchRecoveryAuthorization,
+  type ActionPredicateWriteAuthority,
+  withActionPredicateAuthority,
+} from './action-predicate-authority.js';
 import type { ActionSuccessorDispatchFailureReason, ActionSuccessorLease } from './action-successor-state-machine.js';
 
 export type { ApprovedActionCarrierClassification } from './approved-action-carrier-classification.js';
@@ -42,7 +48,8 @@ export interface ActionSuccessorDispatchRecoveryDeps {
     | 'markDispatchDelivered'
     | 'markDispatchFailed'
   >;
-  readonly truthResolver: Pick<ActionSubjectTruthResolver, 'resolveFreshness'>;
+  readonly truthResolver: Pick<ActionSubjectTruthResolver, 'resolveFreshness'> &
+    Partial<Pick<ActionSubjectTruthResolver, 'authorizeDispatchRecovery'>>;
   readonly loadProposal: (proposalId: string) => Promise<DispatchProposal | null>;
   readonly loadOwnerAuthProvenance: (proposalId: string) => Promise<OwnerAuthProvenance | undefined>;
   readonly recordProposalDelivery: (proposalId: string, deliveredMessageId: string) => Promise<void>;
@@ -68,6 +75,18 @@ type ApprovedDispatchProposalClassification =
       readonly evidenceRef: string;
     };
 
+function matchesBoundRecoverySource(proposal: DispatchProposal, lease: ActionSuccessorLease): boolean {
+  return Boolean(
+    lease.predecessorCatId &&
+      lease.predecessorThreadId &&
+      proposal.ownerUserId === lease.tenantScope &&
+      proposal.senderCatId === lease.predecessorCatId &&
+      proposal.sourceThreadId === lease.predecessorThreadId &&
+      proposal.targetThreadId === lease.holderThreadId &&
+      isDeepStrictEqual([...proposal.targetCats].sort(), [...lease.holderCatIds].sort()),
+  );
+}
+
 function classifyApprovedDispatchProposal(
   proposalId: string | null,
   proposal: DispatchProposal | null,
@@ -88,7 +107,8 @@ function classifyApprovedDispatchProposal(
     proposal.actionLeaseRef?.leaseId === lease.leaseId &&
     proposal.actionLeaseRef.generation === lease.generation &&
     proposal.actionLeaseRef.dispatchId === lease.dispatchId &&
-    proposal.actionLeaseRef.terminalPredicateDigest === lease.terminalPredicate?.digest;
+    proposal.actionLeaseRef.terminalPredicateDigest === lease.terminalPredicate?.digest &&
+    (!lease.terminalPredicateProviderBinding || matchesBoundRecoverySource(proposal, lease));
   return fenceMatches
     ? { outcome: 'approved', proposalId, proposal }
     : { outcome: 'failure', reason: 'proposal_fence_mismatch', evidenceRef: `proposal:${proposalId}` };
@@ -135,12 +155,63 @@ export class ActionSuccessorDispatchRecovery {
     if (!predicate) return { outcome: 'pending' };
 
     const now = this.now();
+    if (predicate.kind === 'review_delivered') return this.recoverBoundReview(candidate, now);
+    return this.recoverAuthorized(candidate, now);
+  }
+
+  private async recoverBoundReview(candidate: ActionSuccessorLease, now: number): Promise<DispatchRecoveryResult> {
+    if (!candidate.terminalPredicateProviderBinding) return { outcome: 'pending' };
+    const proposalId = proposalIdFromDispatch(candidate.dispatchId);
+    const state = classifyApprovedDispatchProposal(
+      proposalId,
+      proposalId ? await this.deps.loadProposal(proposalId) : null,
+      candidate,
+    );
+    if (state.outcome === 'failure') return this.markFailed(candidate, state.reason, state.evidenceRef, now);
+    const proposal = state.proposal;
+    // Identity comes from the durable authenticated proposal, never the holder or plugin input.
+    if (
+      !matchesBoundRecoverySource(proposal, candidate) ||
+      !(await this.loadOwnerAuthProvenance(candidate, state.proposalId))
+    )
+      return { outcome: 'pending' };
+    let authority: Extract<ActionDispatchRecoveryAuthorization, { status: 'authorized' }>;
+    try {
+      const result = await this.deps.truthResolver.authorizeDispatchRecovery?.(candidate, {
+        tenantScope: proposal.ownerUserId,
+        actorCatId: proposal.senderCatId,
+        sourceThreadId: proposal.sourceThreadId,
+        targetThreadId: proposal.targetThreadId,
+        holderCatIds: [...proposal.targetCats],
+      });
+      if (!result || result.status !== 'authorized') return { outcome: 'pending' };
+      await result.withAuthority(async () => undefined);
+      authority = result;
+    } catch (err) {
+      log.warn({ err, leaseId: candidate.leaseId }, 'Bound dispatch recovery authority unavailable');
+      return { outcome: 'pending' };
+    }
+    // Once authorized, preserve the original recovery failure contract. In particular,
+    // a durable receipt followed by a failed lease write must remain observable.
+    // Later authority fences still reject before their guarded write or delivery.
+    return this.recoverAuthorized(candidate, now, authority);
+  }
+
+  private async recoverAuthorized(
+    candidate: ActionSuccessorLease,
+    now: number,
+    authority?: Extract<ActionDispatchRecoveryAuthorization, { status: 'authorized' }>,
+  ): Promise<DispatchRecoveryResult> {
+    const predicate = candidate.terminalPredicate;
+    if (!predicate) return { outcome: 'pending' };
     if (candidate.dispatchDeliveryReservation) {
-      return this.recoverReserved(candidate, now);
+      return this.recoverReserved(candidate, now, authority);
     }
     let freshness: ActionFreshnessResolution;
     try {
-      freshness = await this.deps.truthResolver.resolveFreshness(predicate);
+      freshness = authority
+        ? await authority.resolveFreshness()
+        : await this.deps.truthResolver.resolveFreshness(predicate);
     } catch (err) {
       log.warn(
         { err, leaseId: candidate.leaseId, generation: candidate.generation },
@@ -150,7 +221,9 @@ export class ActionSuccessorDispatchRecovery {
     }
     if (freshness.status === 'insufficient') return { outcome: 'pending' };
     if (freshness.status === 'mismatch') {
-      return this.retireFreshnessMismatch(candidate, freshness.evidenceRef, now);
+      return withActionPredicateAuthority(authority, () =>
+        this.retireFreshnessMismatch(candidate, freshness.evidenceRef, now),
+      );
     }
     const standingMismatch = actionSuccessorStandingMismatchDimensions(
       {
@@ -161,16 +234,20 @@ export class ActionSuccessorDispatchRecovery {
       freshness,
     );
     if (freshness.freshnessKey !== predicate.freshnessKey || standingMismatch.length > 0) {
-      return this.retireFreshnessMismatch(candidate, freshness.evidenceRef, now);
+      return withActionPredicateAuthority(authority, () =>
+        this.retireFreshnessMismatch(candidate, freshness.evidenceRef, now),
+      );
     }
 
-    const attempt = await this.deps.leaseStore.recordDispatchDeliveryAttempt(candidate.leaseId, {
-      expectedGeneration: candidate.generation,
-      expectedRevision: candidate.revision,
-      expectedPredicateDigest: predicate.digest,
-      freshnessEvidenceRef: freshness.evidenceRef,
-      now,
-    });
+    const attempt = await withActionPredicateAuthority(authority, () =>
+      this.deps.leaseStore.recordDispatchDeliveryAttempt(candidate.leaseId, {
+        expectedGeneration: candidate.generation,
+        expectedRevision: candidate.revision,
+        expectedPredicateDigest: predicate.digest,
+        freshnessEvidenceRef: freshness.evidenceRef,
+        now,
+      }),
+    );
     if (attempt.outcome !== 'recorded') return dispatchStateResult(attempt.lease);
 
     const proposalId = proposalIdFromDispatch(attempt.lease.dispatchId);
@@ -184,13 +261,15 @@ export class ActionSuccessorDispatchRecovery {
     }
     const ownerAuthProvenance = await this.loadOwnerAuthProvenance(attempt.lease, proposalState.proposalId);
     if (!ownerAuthProvenance) return { outcome: 'pending' };
-    const reservation = await this.deps.leaseStore.reserveDispatchDelivery(attempt.lease.leaseId, {
-      expectedGeneration: attempt.lease.generation,
-      expectedRevision: attempt.lease.revision,
-      expectedPredicateDigest: predicate.digest,
-      freshnessEvidenceRef: freshness.evidenceRef,
-      now,
-    });
+    const reservation = await withActionPredicateAuthority(authority, () =>
+      this.deps.leaseStore.reserveDispatchDelivery(attempt.lease.leaseId, {
+        expectedGeneration: attempt.lease.generation,
+        expectedRevision: attempt.lease.revision,
+        expectedPredicateDigest: predicate.digest,
+        freshnessEvidenceRef: freshness.evidenceRef,
+        now,
+      }),
+    );
     if (reservation.outcome !== 'reserved') return dispatchStateResult(reservation.lease);
     return this.deliverApproved(
       reservation.lease,
@@ -198,10 +277,15 @@ export class ActionSuccessorDispatchRecovery {
       proposalState.proposal,
       ownerAuthProvenance,
       now,
+      authority,
     );
   }
 
-  private async recoverReserved(lease: ActionSuccessorLease, now: number): Promise<DispatchRecoveryResult> {
+  private async recoverReserved(
+    lease: ActionSuccessorLease,
+    now: number,
+    authority?: ActionPredicateWriteAuthority,
+  ): Promise<DispatchRecoveryResult> {
     const proposalId = proposalIdFromDispatch(lease.dispatchId);
     const proposalState = classifyApprovedDispatchProposal(
       proposalId,
@@ -213,7 +297,14 @@ export class ActionSuccessorDispatchRecovery {
     }
     const ownerAuthProvenance = await this.loadOwnerAuthProvenance(lease, proposalState.proposalId);
     if (!ownerAuthProvenance) return { outcome: 'pending' };
-    return this.deliverApproved(lease, proposalState.proposalId, proposalState.proposal, ownerAuthProvenance, now);
+    return this.deliverApproved(
+      lease,
+      proposalState.proposalId,
+      proposalState.proposal,
+      ownerAuthProvenance,
+      now,
+      authority,
+    );
   }
 
   private async loadOwnerAuthProvenance(
@@ -237,9 +328,13 @@ export class ActionSuccessorDispatchRecovery {
     proposal: DispatchProposal,
     ownerAuthProvenance: OwnerAuthProvenance,
     now: number,
+    authority?: ActionPredicateWriteAuthority,
   ): Promise<DispatchRecoveryResult> {
     let result: ActionSuccessorDispatchDeliveryResult = { outcome: 'unavailable' };
     try {
+      // A durable reservation retains its chosen HEAD; current installation authorization
+      // is still required before retrying transport. Transport IO does not hold inventory.
+      await withActionPredicateAuthority(authority, async () => undefined);
       result = await this.deps.deliver(
         proposal,
         buildActionSuccessorFence(lease, lease.dispatchId),

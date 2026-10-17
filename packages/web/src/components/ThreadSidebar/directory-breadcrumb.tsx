@@ -11,7 +11,7 @@ interface DirectoryBreadcrumbProps {
   view: 'directory' | 'drives';
   onEnterDrivesView: () => void;
   onNavigateTo: (path: string | undefined) => void;
-  onStartCreateDir: () => void;
+  onStartCreateDir?: (() => void) | undefined;
   thisPcLabel?: string;
   newFolderTitle?: string;
   newFolderLabel?: string;
@@ -89,7 +89,7 @@ export function DirectoryBreadcrumb({
           );
         })}
       {/* [+] New folder button - hidden in drives view (no current dir, codex review P2) */}
-      {view !== 'drives' && (
+      {view !== 'drives' && onStartCreateDir && (
         <button
           type="button"
           onClick={onStartCreateDir}

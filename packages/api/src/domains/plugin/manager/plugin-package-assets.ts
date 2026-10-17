@@ -56,6 +56,10 @@ export interface PluginManagerPackageAssetServiceOptions {
   readonly catalog: OfficialPluginCatalogProvider;
   readonly fetchArchive?: (entry: OfficialPluginCatalogEntry) => Promise<Uint8Array>;
   readonly validateManifest?: PluginManifestValidator;
+  readonly repositoryAssets?: {
+    readIcon(pluginId: string): Promise<PluginManagerPackageAsset | undefined>;
+    readReadme(pluginId: string): Promise<string | undefined>;
+  };
 }
 
 interface PackageIdentity {
@@ -142,11 +146,17 @@ async function readVerifiedIcon(
   );
   await located.verifyIntegrity();
 
-  if (icon.type === 'png') assertPng(bytes);
+  return pluginIconAsset(icon.type, bytes);
+}
+
+export function pluginIconAsset(type: 'png' | 'svg', bytes: Buffer): PluginManagerPackageAsset {
+  if (bytes.length > MAX_PLUGIN_ICON_BYTES)
+    throw new PluginManagerPackageAssetError('INVALID_ASSET', 'plugin icon exceeds size limit');
+  if (type === 'png') assertPng(bytes);
   else assertSvg(bytes);
   return {
     bytes,
-    contentType: icon.type === 'png' ? 'image/png' : 'image/svg+xml',
+    contentType: type === 'png' ? 'image/png' : 'image/svg+xml',
     etag: `"${createHash('sha256').update(bytes).digest('hex')}"`,
   };
 }
@@ -305,7 +315,11 @@ export class PluginManagerPackageAssetService
         cause: error,
       });
     }
-    if (!entry) throw new PluginManagerPackageAssetError('PLUGIN_NOT_FOUND', `unknown plugin ${pluginId}`);
+    if (!entry) {
+      const asset = await this.options.repositoryAssets?.readIcon(pluginId);
+      if (asset) return asset;
+      throw new PluginManagerPackageAssetError('PLUGIN_NOT_FOUND', `unknown plugin ${pluginId}`);
+    }
     const catalogIcon = objectIcon(entry.presentation?.icon);
     if (entry.presentation !== undefined && catalogIcon === undefined) {
       throw new PluginManagerPackageAssetError('ASSET_NOT_FOUND', 'plugin does not declare a package icon');
@@ -370,7 +384,10 @@ export class PluginManagerPackageAssetService
         cause: error,
       });
     }
-    if (!entry) throw new PluginManagerPackageAssetError('PLUGIN_NOT_FOUND', `unknown plugin ${pluginId}`);
+    if (!entry) {
+      if (this.options.repositoryAssets) return this.options.repositoryAssets.readReadme(pluginId);
+      throw new PluginManagerPackageAssetError('PLUGIN_NOT_FOUND', `unknown plugin ${pluginId}`);
+    }
     return this.cachedReadme(entry.packageDigest, async () => {
       let located: VerifiedPluginPackage;
       try {

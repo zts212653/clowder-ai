@@ -3,13 +3,9 @@ import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { validateManifest } from '@clowder-ai/plugin-contract';
 import { CHATGPT_DOT_PLUGIN_MANIFEST } from '../src/domains/plugin/chatgpt-dot-manifest.js';
-import { COLLECTIVE_CONNECTOR_PLUGIN_MANIFEST } from '../src/domains/plugin/collective-connector-manifest.js';
 import { generateBundledPluginArtifacts } from './bundled-plugin-artifacts.mjs';
 
-const definitions = [
-  { catalogId: 'chatgpt-dot', manifest: CHATGPT_DOT_PLUGIN_MANIFEST },
-  { catalogId: 'collective-connector', manifest: COLLECTIVE_CONNECTOR_PLUGIN_MANIFEST },
-];
+const definitions = [{ catalogId: 'chatgpt-dot', manifest: CHATGPT_DOT_PLUGIN_MANIFEST }];
 for (const { catalogId, manifest } of definitions) {
   assert.equal(validateManifest(manifest).valid, true, `invalid ${catalogId} manifest`);
 }

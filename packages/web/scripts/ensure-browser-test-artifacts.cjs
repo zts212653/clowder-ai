@@ -53,12 +53,6 @@ function ensureBrowserTestArtifacts() {
     dirtyInputs: hasDirtyWebBuildInputs(),
   });
 
-  // The F290 journey imports the compiled Service before the test body runs.
-  // Build it on every standalone browser lane: unlike Web, this package has no
-  // revision stamp that could honestly prove an existing dist belongs to HEAD.
-  console.log('[browser-test] building the Collective Service artifact');
-  run('pnpm', ['--filter', '@cat-cafe/collective-service', 'build']);
-
   // F277 exercises the real Group writer against synthetic owner data.
   // The canonical build wrapper reuses only a verified prepared API artifact.
   console.log('[browser-test] preparing the API writer artifact');

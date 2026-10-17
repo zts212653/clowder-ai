@@ -111,7 +111,7 @@ describe('#1371 fenced terminal projection retirement', () => {
     assert.equal(fixture.grounding.trackingTaskPresent, false);
   });
 
-  it('retires the exact Queue fence and matching tracking generation idempotently', async () => {
+  it('retires the exact Queue fence idempotently without mutating migrated tracking data', async () => {
     const lease = completedLease();
     const taskStore = new TaskStore();
     const task = await createTrackingTask(taskStore);
@@ -144,8 +144,7 @@ describe('#1371 fenced terminal projection retirement', () => {
     await service.retire(lease);
 
     const retired = await taskStore.get(task.id);
-    assert.equal(retired.status, 'done');
-    assert.equal(retired.automationState.await, undefined);
+    assert.deepEqual(retired, task, 'tracking lifecycle belongs to the installed provider');
     assert.equal(retired.automationState.ci.headSha, HEAD_A);
     assert.equal(invocationQueue.retireActionSuccessorFenceDurable.mock.calls.length, 2);
     assert.deepEqual(publishQueue.mock.calls[0].arguments[0], {

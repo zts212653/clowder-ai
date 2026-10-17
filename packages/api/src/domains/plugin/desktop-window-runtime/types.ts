@@ -1,3 +1,7 @@
+import type { DesktopWindowFailureReason } from './failure-reason.js';
+
+export type { DesktopWindowFailureReason } from './failure-reason.js';
+
 import type { DesktopWindowContribution } from '@clowder-ai/plugin-contract';
 import type { DesktopAppAssistOwner } from '../../concierge/live/host/companion-app-assist-owner.js';
 import type { StaticSurfaceServer } from '../external-runtime/static-surface-server.js';
@@ -23,18 +27,6 @@ export interface DesktopCompanionBridge {
 }
 
 export type DesktopWindowVisibility = 'visible' | 'hidden';
-export type DesktopWindowFailureReason =
-  | 'renderer-gone'
-  | 'unresponsive'
-  | 'window-closed'
-  | 'process-exit'
-  | 'request-timeout'
-  | 'protocol-violation'
-  | 'connection-ended'
-  | 'heartbeat-expired'
-  | 'poll-failed'
-  | 'surface-unavailable'
-  | 'unknown';
 export interface DesktopWindowFailure {
   readonly reason: DesktopWindowFailureReason;
   readonly exitCode: number | null;

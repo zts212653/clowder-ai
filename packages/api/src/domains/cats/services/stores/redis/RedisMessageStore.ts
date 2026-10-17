@@ -1832,8 +1832,13 @@ export class RedisMessageStore {
       // APPEND_WITH_VISIBILITY_LUA will reclaim it atomically (#1210).
     }
 
-    const id = reservedId ?? generateSortableId(msg.timestamp);
-    const { idempotencyKey, ...payload } = msg;
+    if (msg.reservedId !== undefined && !/^\d{16}-\d{6,}-[0-9a-f]{8}$/.test(msg.reservedId))
+      throw new TypeError('reserved message id has invalid shape');
+    if (reservedId !== undefined && msg.reservedId !== undefined && reservedId !== msg.reservedId)
+      throw new Error('reserved message id conflict');
+    const id = reservedId ?? msg.reservedId ?? generateSortableId(msg.timestamp);
+    const { idempotencyKey, reservedId: mediaReservedId, ...payload } = msg;
+    void mediaReservedId;
     void idempotencyKey;
     const stored: StoredMessage = {
       ...payload,
@@ -3616,10 +3621,6 @@ export class RedisMessageStore {
       evolutionPreparationSubmissionV1: _stripPreparation,
       dotAsk: _stripDotAsk,
       deliveryBoundary: _stripBoundary,
-      collectiveOwnerAdmissionV1: _stripCollectiveAdmission,
-      collectiveWorkInvocationV1: _stripCollectiveInvocation,
-      collectiveWorkDelegationV1: _stripCollectiveDelegation,
-      collectiveAuthorizationInvalid: _stripCollectiveInvalid,
       ...hostPatch
     } = extra as Record<string, unknown>;
     const merged = { ...current, ...hostPatch };

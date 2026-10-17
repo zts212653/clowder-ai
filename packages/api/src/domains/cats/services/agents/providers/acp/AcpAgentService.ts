@@ -387,6 +387,7 @@ export class AcpAgentService implements AgentService {
         client.promptCapabilities,
         options?.signal,
         options?.uploadDir,
+        options?.resolveTrustedImagePath,
       );
       // #712 P1-1: resolve MCP servers at invoke time from capabilities.json
       // so capability toggles take effect immediately without registry rebuild.

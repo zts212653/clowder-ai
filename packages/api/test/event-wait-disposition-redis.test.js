@@ -98,8 +98,8 @@ describe('EventWaitDispositionService (Redis path)', { skip: redisIsolationSkipR
   it('completes through the fenced append: one terminal in Redis, the ball resolves, the stop gate reads it', async () => {
     const s = await scenario();
     const opened = await s.gate.open(s.wake);
-    assert.equal(opened.state, 'covered_active');
-    assert.equal((await s.gate.close(opened)).shouldBlock, true);
+    assert.equal(opened.state, 'covered_empty', 'main treats event-wait continuation as a structured lifecycle wake');
+    assert.equal((await s.gate.close(opened)).shouldBlock, false);
 
     const result = await s.service.complete(s.auth(), 'completed');
 
@@ -111,7 +111,11 @@ describe('EventWaitDispositionService (Redis path)', { skip: redisIsolationSkipR
     assert.equal((await s.projectionStore.get(s.subjectKey)).state, 'resolved');
     const decision = await s.gate.close(opened);
     assert.equal(decision.shouldBlock, false);
-    assert.equal(decision.structuredTransitionKind, 'wait_dispositioned');
+    assert.equal(
+      decision.state,
+      'covered_empty',
+      'the retained terminal does not create an action-successor obligation',
+    );
   });
 
   it('a replay and a successor invocation see the recorded terminal; no second one is written', async () => {

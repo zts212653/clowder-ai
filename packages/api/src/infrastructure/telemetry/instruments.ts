@@ -1085,65 +1085,6 @@ export const entityNudgePrivacyBlocked = lazy(() =>
   }),
 );
 
-// F168 F-Step3: external case closure activation, zero-tolerance violations,
-// and latency. Counter warmup below lets eval distinguish no traffic from a
-// traffic window with zero violations.
-export const externalCaseHeadObserved = lazy(() =>
-  meter().createCounter('cat_cafe.external_case.head_observed', {
-    description: 'Distinct external PR HEAD observations admitted to the F168 event log',
-  }),
-);
-
-export const externalCaseVerdictRecorded = lazy(() =>
-  meter().createCounter('cat_cafe.external_case.verdict_recorded', {
-    description: 'Atomic external review verdict and delivery-custody events recorded',
-  }),
-);
-
-export const externalCaseReviewerWakeDelivered = lazy(() =>
-  meter().createCounter('cat_cafe.external_case.reviewer_wake_delivered', {
-    description: 'Current-HEAD reviewer wake messages delivered by F168',
-  }),
-);
-
-export const externalCaseVerdictReadyWithoutDelivery = lazy(() =>
-  meter().createCounter('cat_cafe.external_case.verdict_ready_without_delivery', {
-    description: 'Zero-tolerance external verdict attempts without delivered or pending_delivery custody',
-  }),
-);
-
-export const externalCaseNoisyWakeDuringCloudReview = lazy(() =>
-  meter().createCounter('cat_cafe.external_case.noisy_wake_during_cloud_review', {
-    description: 'Zero-tolerance reviewer wakes delivered while current-head cloud review is unsatisfied',
-  }),
-);
-
-export const externalCaseDuplicateReviewerWakePerHead = lazy(() =>
-  meter().createCounter('cat_cafe.external_case.duplicate_reviewer_wake_per_head', {
-    description: 'Zero-tolerance extra reviewer wake identities delivered for one subject and HEAD',
-  }),
-);
-
-export const externalCaseUserNudgeRequired = lazy(() =>
-  meter().createCounter('cat_cafe.external_case.user_nudge_required', {
-    description: 'operator reminders required to resume an accepted external issue or PR',
-  }),
-);
-
-export const externalCasePendingDeliveryAgeSeconds = lazy(() =>
-  meter().createHistogram('cat_cafe.external_case.pending_delivery_age', {
-    description: 'Observed age of durable external review pending_delivery responsibility',
-    unit: 's',
-  }),
-);
-
-export const externalCaseAuthorUpdateToReadyWakeSeconds = lazy(() =>
-  meter().createHistogram('cat_cafe.external_case.author_update_to_ready_wake', {
-    description: 'Latency from current external PR HEAD observation to reviewer wake delivery',
-    unit: 's',
-  }),
-);
-
 /** Liveness state type. */
 export type LivenessState = 'dead' | 'idle-silent' | 'busy-silent' | 'active';
 
@@ -1292,13 +1233,6 @@ export function warmupCounters(): void {
   entityNudgeSuppressed.add(0);
   entityNudgePrivacyBlocked.add(0);
   // F168 F-Step3: activation + zero-tolerance external-case closure counters.
-  externalCaseHeadObserved.add(0);
-  externalCaseVerdictRecorded.add(0);
-  externalCaseReviewerWakeDelivered.add(0);
-  externalCaseVerdictReadyWithoutDelivery.add(0);
-  externalCaseNoisyWakeDuringCloudReview.add(0);
-  externalCaseDuplicateReviewerWakePerHead.add(0);
-  externalCaseUserNudgeRequired.add(0);
   contextProjectionTransitionTotal.add(0);
   contextProjectionLedgerOutcomeTotal.add(0);
   routingSyntaxCorrectionDetected.add(0);

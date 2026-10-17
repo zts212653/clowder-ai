@@ -155,11 +155,6 @@ export const KNOWN_PRODUCER_LOCATORS = Object.freeze([
     needles: ['name.slice(-(maxLen - 1))'],
   },
   {
-    id: 'producer:web:permission-external-chat-id',
-    path: 'packages/web/src/components/HubPermissionsTab.tsx',
-    needles: ['g.externalChatId.slice(-8)'],
-  },
-  {
     id: 'producer:web:visible-cafe-thread-id',
     path: 'packages/web/src/components/visible-cafe/StarCard.tsx',
     needles: ['card.threadId.slice(-8)'],

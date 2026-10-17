@@ -109,6 +109,7 @@ describe('test entry Redis isolation', () => {
 
 /** Files that read REDIS_URL or open a Redis client without the isolation gate, and why that is safe. */
 const EXCEPTIONS = {
+  'public-test-script.test.js': 'probes wrapper environment through a stub node executable; never opens a Redis client',
   'with-test-home.test.js': 'probes child environment only; never creates or connects a Redis client',
   'a2a-1577-turn-redis-seam.test.mjs':
     'owns its random-directory Unix socket child with port 0; SAVE and retains all artifacts',

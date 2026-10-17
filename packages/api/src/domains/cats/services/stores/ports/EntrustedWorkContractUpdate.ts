@@ -4,6 +4,7 @@ import {
   entrustedWorkV1Schema,
   type TaskItem,
 } from '@cat-cafe/shared';
+import { advanceEntrustedWorkRevision } from './EntrustedWorkRevision.js';
 import type { UpdateEntrustedWorkStoreInput } from './TaskStoreContract.js';
 
 export type PreparedEntrustedWorkUpdate =
@@ -41,7 +42,7 @@ export function prepareEntrustedWorkUpdate(
   }
   const candidate: EntrustedWorkV1 = {
     ...current,
-    revision: current.revision + 1,
+    ...advanceEntrustedWorkRevision(current),
     time,
     artifactRefs,
     progress: nextProgress,
