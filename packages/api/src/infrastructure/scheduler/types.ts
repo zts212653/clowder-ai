@@ -206,6 +206,8 @@ export interface TaskSpec_P1<Signal = unknown> {
   id: string;
   profile: TaskProfile;
   trigger: TriggerSpec;
+  /** Tasks naming the same lane run their pipelines one at a time (PipelineLanes). Code-owned. */
+  lane?: string;
   /** F167 Phase M: optional pre-fire defer policy (busy thread → re-arm instead of fire) */
   firePolicy?: FirePolicy;
   /** Code-owned recovery policy; never accepted from public dynamic-task params. */

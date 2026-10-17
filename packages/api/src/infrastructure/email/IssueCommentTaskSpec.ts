@@ -24,7 +24,7 @@ import {
 } from '../../domains/community/issue-analysis/issue-comment-classifier.js';
 import type { GitHubWaitLifecycleService } from '../../domains/github-signals/GitHubWaitLifecycleService.js';
 import type { ExecuteContext, TaskSpec_P1 } from '../../infrastructure/scheduler/types.js';
-import { gitHubAdmissionCanContinue, gitHubObjectSignal } from '../github/admission-budget.js';
+import { GITHUB_COLLECTION_LANE, gitHubAdmissionCanContinue, gitHubObjectSignal } from '../github/admission-budget.js';
 import { GitHubRateLimitError } from '../github/request-budget.js';
 import type { IssueComment, IssueCommentRouter } from './IssueCommentRouter.js';
 
@@ -215,6 +215,7 @@ export function createIssueCommentTaskSpec(opts: IssueCommentTaskSpecOptions): T
     id: opts.id ?? 'issue-comment',
     profile: 'poller',
     trigger: { type: 'interval', ms: opts.pollIntervalMs ?? 60_000 },
+    lane: GITHUB_COLLECTION_LANE,
     admission: {
       async gate(ctx) {
         const gateSignal = ctx?.signal;

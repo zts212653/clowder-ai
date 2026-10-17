@@ -13,7 +13,7 @@
 import type { GitHubWaitOutcomeV1, TaskItem } from '@cat-cafe/shared';
 import { parsePrSubjectKey } from '@cat-cafe/shared';
 import type { ITaskStore } from '../../domains/cats/services/stores/ports/TaskStore.js';
-import { gitHubAdmissionCanContinue } from '../github/admission-budget.js';
+import { GITHUB_COLLECTION_LANE, gitHubAdmissionCanContinue } from '../github/admission-budget.js';
 import { GitHubRateLimitError } from '../github/request-budget.js';
 import type { ExecuteContext, TaskSpec_P1 } from '../scheduler/types.js';
 import type { AutoResolveResult, ConflictAutoExecutor } from './ConflictAutoExecutor.js';
@@ -93,6 +93,7 @@ export function createConflictCheckTaskSpec(opts: ConflictCheckTaskSpecOptions):
     id: opts.id ?? 'conflict-check',
     profile: 'poller',
     trigger: { type: 'interval', ms: opts.pollIntervalMs ?? 5 * 60 * 1000 },
+    lane: GITHUB_COLLECTION_LANE,
     admission: {
       async gate(ctx) {
         const signal = ctx?.signal;

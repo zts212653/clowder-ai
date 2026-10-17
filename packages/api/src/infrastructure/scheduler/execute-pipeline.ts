@@ -1,6 +1,7 @@
 import type { IBallCustodyIngest } from '../../domains/ball-custody/BallCustodyIngest.js';
 import type { EmissionStore } from './EmissionStore.js';
 import type { GlobalControlStore } from './GlobalControlStore.js';
+import type { PipelineLanes } from './pipeline-lanes.js';
 import type { RunLedger } from './RunLedger.js';
 import type {
   ActorRole,
@@ -44,6 +45,8 @@ export interface PipelineContext {
   /** F233 PR3: optional ball-custody event sink for scheduler-originated events. */
   ballCustody?: IBallCustodyIngest;
   managedCommandWakeRecovery?: (taskId: string) => Promise<'missing' | 'pending' | 'recovered'>;
+  /** Shared turns for tasks that name a lane; without it, a lane is ignored. */
+  lanes?: PipelineLanes;
   /** #415: per-workItem outcome callback (used for failure notifications) */
   onItemOutcome?: (taskId: string, subjectKey: string, outcome: RunOutcome, errorSummary: string | null) => void;
 }
@@ -119,6 +122,7 @@ export async function executeTaskPipeline(ctx: PipelineContext): Promise<void> {
     ballCustody,
     managedCommandWakeRecovery,
     onItemOutcome,
+    lanes,
   } = ctx;
   const startMs = Date.now();
   const timing = ledgerTimingFields(task, schedule, isManualTrigger);
@@ -179,8 +183,12 @@ export async function executeTaskPipeline(ctx: PipelineContext): Promise<void> {
     return;
   }
   running.set(task.id, true);
+  let releaseLane: (() => void) | undefined;
 
   try {
+    // Step 2b: wait for this task's turn on its lane before any deadline starts.
+    if (task.lane && lanes) releaseLane = await lanes.acquire(task.lane);
+
     // Step 3: Gate — returns workItems[]
     const gateController = new AbortController();
     const gateTimeoutMs = task.admission.timeoutMs ?? 30_000;
@@ -355,5 +363,6 @@ export async function executeTaskPipeline(ctx: PipelineContext): Promise<void> {
     );
   } finally {
     running.set(task.id, false);
+    releaseLane?.();
   }
 }

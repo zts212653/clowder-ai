@@ -4,6 +4,7 @@ import { computeNextCronSlot, countAdditionalDueCronSlots } from './cron-utils.j
 import type { DynamicTaskDef, DynamicTaskStore } from './DynamicTaskStore.js';
 import { executeTaskPipeline } from './execute-pipeline.js';
 import { emitHoldExpiredAfterSatisfied } from './hold-lifecycle-telemetry.js';
+import { PipelineLanes } from './pipeline-lanes.js';
 import type { RunLedger } from './RunLedger.js';
 import { notifyTaskFailed, notifyTaskSucceeded, SCHEDULER_TOAST_DURATION_MS } from './schedule-notify.js';
 import type { TaskTemplate } from './templates/types.js';
@@ -153,6 +154,7 @@ export class TaskRunnerV2 {
   private tasks: AnyTaskSpec[] = [];
   private timers = new Map<string, ReturnType<typeof setTimeout>>();
   private running = new Map<string, boolean>();
+  private readonly lanes = new PipelineLanes();
   private tickCounts = new Map<string, number>();
   private lastRunAt = new Map<string, number | null>();
   /**
@@ -896,6 +898,7 @@ export class TaskRunnerV2 {
       running: this.running,
       tickCounts: this.tickCounts,
       lastRunAt: this.lastRunAt,
+      lanes: this.lanes,
       actorResolver: this.actorResolver,
       globalControlStore: this.globalControlStore,
       emissionStore: this.emissionStore,
