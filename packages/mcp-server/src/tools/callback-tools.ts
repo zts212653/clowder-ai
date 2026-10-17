@@ -64,7 +64,7 @@ import { formatSuggestedCrossPostActionLines } from './cross-post-suggestion-for
 import { withDegradation } from './degradation.js';
 import type { ToolResult } from './file-tools.js';
 import { errorResult, successResult } from './file-tools.js';
-import { getInvocationAuthSignal, resolveInvocationCredentials } from './invocation-auth.js';
+import { getInvocationAuthSignal, resolveInvocationCredentials, resolveScopedApiBaseUrl } from './invocation-auth.js';
 import { createMemoryCueTools } from './memory-cue-tools.js';
 import { createPersonMemoryLifecycleTools } from './person-memory-lifecycle-tools.js';
 import { createPersonMemoryProposalTool } from './person-memory-proposal-tool.js';
@@ -168,7 +168,9 @@ function resolveAgentKeySecret(options?: AgentKeyOptions): string | undefined {
 }
 
 export function getCallbackConfig(options?: AgentKeyOptions): CallbackConfig | null {
-  const apiUrl = process.env.CAT_CAFE_API_URL;
+  // #1092 + F306 Phase B: prefer the per-turn credential scope (member MCP
+  // gateway runs in-process); MCP child processes fall back to launch env.
+  const apiUrl = resolveScopedApiBaseUrl() ?? process.env.CAT_CAFE_API_URL;
   if (!apiUrl) return null;
 
   const agentKeySecret = resolveAgentKeySecret(options);

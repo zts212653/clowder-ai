@@ -11,6 +11,7 @@ import { z } from 'zod';
 import { defineMcpCanonicalFactory } from '../tool-governance-migration.js';
 import { buildAuthHeaders, getCallbackConfig } from './callback-tools.js';
 import { errorResult, successResult, type ToolResult } from './file-tools.js';
+import { resolveInvocationEnv } from './invocation-auth.js';
 
 const defineTool = defineMcpCanonicalFactory('home-state-tools.ts', undefined, {
   resourceFamily: 'home-state',
@@ -28,8 +29,11 @@ const admissionReason = {
   admissionRef: 'file:docs/features/F300-self-sensing-home-state-awareness.md' as const,
 };
 
-const API_URL = process.env['CAT_CAFE_API_URL'] ?? 'http://localhost:3004';
 const TIMEOUT_MS = 5_000;
+
+function resolveApiUrl(): string {
+  return resolveInvocationEnv('CAT_CAFE_API_URL') ?? 'http://localhost:3004';
+}
 
 /**
  * No caller identity parameters: who is asking is proven by the invocation
@@ -39,7 +43,7 @@ const TIMEOUT_MS = 5_000;
 export const homeStateSelfInputSchema = {};
 
 export async function handleHomeStateSelf(_input: Record<string, never> = {}): Promise<ToolResult> {
-  const url = `${API_URL}/api/home-state/self`;
+  const url = `${resolveApiUrl()}/api/home-state/self`;
   const config = getCallbackConfig();
   if (!config) {
     return errorResult(
@@ -84,7 +88,7 @@ export const capabilitiesSnapshotInputSchema = {
 
 export async function handleCapabilitiesSnapshot(input: { projectPath?: string } = {}): Promise<ToolResult> {
   const query = input.projectPath ? `?projectPath=${encodeURIComponent(input.projectPath)}` : '';
-  const url = `${API_URL}/api/capabilities/snapshot${query}`;
+  const url = `${resolveApiUrl()}/api/capabilities/snapshot${query}`;
   const config = getCallbackConfig();
   if (!config) {
     return errorResult(

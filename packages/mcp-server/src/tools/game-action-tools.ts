@@ -3,20 +3,22 @@ import { defineMcpMigrationFactory } from '../tool-governance-migration.js';
 
 import type { ToolResult } from './file-tools.js';
 import { errorResult, successResult } from './file-tools.js';
-import { getInvocationAuthSignal } from './invocation-auth.js';
+import { getInvocationAuthSignal, resolveInvocationEnv } from './invocation-auth.js';
 
 const defineTool = defineMcpMigrationFactory('game-action-tools.ts', undefined, {
   resourceFamily: 'game',
   authority: 'callback-owner',
 });
 
-const API_URL = process.env['CAT_CAFE_API_URL'] ?? 'http://localhost:3004';
+function resolveApiUrl(): string {
+  return resolveInvocationEnv('CAT_CAFE_API_URL') ?? 'http://localhost:3004';
+}
 
 function buildHeaders(): Record<string, string> {
   const headers: Record<string, string> = {};
-  const userId = process.env['CAT_CAFE_USER_ID'];
+  const userId = resolveInvocationEnv('CAT_CAFE_USER_ID');
   if (userId) headers['x-cat-cafe-user'] = userId;
-  const catId = process.env['CAT_CAFE_CAT_ID'];
+  const catId = resolveInvocationEnv('CAT_CAFE_CAT_ID');
   if (catId) headers['x-cat-id'] = catId;
   const invocationId = getInvocationAuthSignal().invocationId;
   if (invocationId) headers['x-callback-invocation-id'] = invocationId;
@@ -42,8 +44,8 @@ function emitGameActionTrace(
     `[cat-cafe-game-action] ${JSON.stringify({
       stage,
       invocationId: getInvocationAuthSignal().invocationId ?? null,
-      catId: process.env['CAT_CAFE_CAT_ID'] ?? null,
-      userId: process.env['CAT_CAFE_USER_ID'] ?? null,
+      catId: resolveInvocationEnv('CAT_CAFE_CAT_ID') ?? null,
+      userId: resolveInvocationEnv('CAT_CAFE_USER_ID') ?? null,
       gameId: input.gameId,
       round: input.round,
       phase: input.phase,
@@ -78,7 +80,7 @@ export async function handleSubmitGameAction(input: {
   text?: string;
   nonce: string;
 }): Promise<ToolResult> {
-  const url = `${API_URL}/api/game/${input.gameId}/action`;
+  const url = `${resolveApiUrl()}/api/game/${input.gameId}/action`;
   emitGameActionTrace('submit_attempt', input, { url });
 
   try {

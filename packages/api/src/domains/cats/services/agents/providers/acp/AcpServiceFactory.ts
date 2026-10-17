@@ -211,6 +211,7 @@ async function ensureAcpPool(
     idleTtlMs: acpConfig.pool?.idleTtlMs ?? DEFAULT_ACP_IDLE_TTL_MS,
     transport: acpConfig.transport ?? 'stdio',
     supportsMultiplexing: acpConfig.supportsMultiplexing,
+    protocolAdapter: acpConfig.protocolAdapter,
   });
 
   const existingPool = poolRegistry.get(profileId);
@@ -235,6 +236,9 @@ async function ensureAcpPool(
         args: bootstrap.args,
         cwd: bootstrap.cwd,
         ...(spawn.env ? { env: spawn.env } : {}),
+        // iCode fail-closed policy: flagged native effects must never be
+        // auto-approved by the generic default (allow) path.
+        ...(acpConfig.protocolAdapter === 'icode' ? { defaultPermissionDecision: 'reject' as const } : {}),
       };
       return acpConfig.transport === 'httpstream' ? new AcpHttpStreamClient(clientCfg) : new AcpClient(clientCfg);
     },
@@ -261,6 +265,15 @@ export async function createAcpServiceForConfig(
       'httpstream-missing-experimental-opt-in',
       { catId, profileId },
       'ACP registry sync skipped member because httpstream transport requires experimental opt-in',
+    );
+  }
+
+  if (acpConfig.protocolAdapter === 'icode' && acpConfig.transport === 'httpstream') {
+    return skipAcpProfile(
+      input,
+      'icode-requires-stdio',
+      { catId, profileId, transport: acpConfig.transport },
+      'ACP registry sync skipped iCode member because the icode adapter requires stdio transport',
     );
   }
 
@@ -311,7 +324,11 @@ export async function createAcpServiceForConfig(
     mcpWhitelist: acpConfig.mcpWhitelist ?? [],
     providerName: config.clientId === 'acp' ? 'acp' : config.clientId,
     modelName: spawn.sessionModel ?? config.defaultModel ?? 'acp',
-    sessionModel: spawn.sessionModel,
+    // iCode: modelProfileId is the session/set_model target (iCode model
+    // configuration id), distinct from defaultModel (display/audit model name).
+    sessionModel:
+      acpConfig.protocolAdapter === 'icode' ? (acpConfig.modelProfileId ?? spawn.sessionModel) : spawn.sessionModel,
+    protocolAdapter: acpConfig.protocolAdapter,
     contextBinding: {
       model: effectiveModel,
       ...((config.clientId === 'opencode' || config.clientId === 'kimi') && spawn.contextPolicy?.windowTokens

@@ -15,6 +15,7 @@ import { defineMcpCanonicalFactory } from '../tool-governance-migration.js';
 import { z } from 'zod';
 import type { ToolResult } from './file-tools.js';
 import { errorResult, successResult } from './file-tools.js';
+import { resolveInvocationEnv } from './invocation-auth.js';
 import {
   renderChatSessionEvents,
   renderHandoffSessionEvents,
@@ -27,14 +28,16 @@ const defineTool = defineMcpCanonicalFactory('session-chain-tools.ts', undefined
   authority: 'local-runtime',
 });
 
-const API_URL = process.env['CAT_CAFE_API_URL'] ?? 'http://localhost:3004';
+function resolveApiUrl(): string {
+  return resolveInvocationEnv('CAT_CAFE_API_URL') ?? 'http://localhost:3004';
+}
 
 function resolveToolUserId(): string {
-  return process.env['CAT_CAFE_USER_ID'] ?? 'default-user';
+  return resolveInvocationEnv('CAT_CAFE_USER_ID') ?? 'default-user';
 }
 
 function resolveToolCatId(): string | undefined {
-  return process.env['CAT_CAFE_CAT_ID'];
+  return resolveInvocationEnv('CAT_CAFE_CAT_ID');
 }
 
 function buildAuthHeaders(): Record<string, string> {
@@ -71,7 +74,7 @@ export async function handleListSessionChain(input: {
   params.set('limit', String(input.limit ?? 20));
   params.set('offset', String(input.offset ?? 0));
 
-  const url = `${API_URL}/api/threads/${input.threadId}/sessions?${params.toString()}`;
+  const url = `${resolveApiUrl()}/api/threads/${input.threadId}/sessions?${params.toString()}`;
 
   try {
     const res = await fetch(url, {
@@ -143,7 +146,7 @@ export async function handleReadSessionEvents(input: {
   if (input.view) params.set('view', input.view);
   if (input.charOffset != null) params.set('charOffset', String(input.charOffset));
 
-  const url = `${API_URL}/api/sessions/${input.sessionId}/events?${params.toString()}`;
+  const url = `${resolveApiUrl()}/api/sessions/${input.sessionId}/events?${params.toString()}`;
 
   try {
     const res = await fetch(url, {
@@ -234,7 +237,7 @@ export const readSessionDigestInputSchema = {
 
 export async function handleReadSessionDigest(input: { sessionId: string; charOffset?: number }): Promise<ToolResult> {
   const params = input.charOffset === undefined ? '' : `?charOffset=${input.charOffset}`;
-  const url = `${API_URL}/api/sessions/${input.sessionId}/digest${params}`;
+  const url = `${resolveApiUrl()}/api/sessions/${input.sessionId}/digest${params}`;
 
   try {
     const res = await fetch(url, {
@@ -288,7 +291,7 @@ export async function handleReadInvocationDetail(input: {
 }): Promise<ToolResult> {
   const params = new URLSearchParams({ limit: String(input.limit ?? 50) });
   if (input.cursor != null) params.set('cursor', String(input.cursor));
-  const url = `${API_URL}/api/sessions/${input.sessionId}/invocations/${input.invocationId}?${params.toString()}`;
+  const url = `${resolveApiUrl()}/api/sessions/${input.sessionId}/invocations/${input.invocationId}?${params.toString()}`;
 
   try {
     const res = await fetch(url, {
@@ -336,7 +339,7 @@ export async function handleSessionSearch(input: {
   if (input.limit != null) params.set('limit', String(input.limit));
   if (input.scope) params.set('scope', input.scope);
 
-  const url = `${API_URL}/api/threads/${input.threadId}/sessions/search?${params.toString()}`;
+  const url = `${resolveApiUrl()}/api/threads/${input.threadId}/sessions/search?${params.toString()}`;
 
   try {
     const res = await fetch(url, {

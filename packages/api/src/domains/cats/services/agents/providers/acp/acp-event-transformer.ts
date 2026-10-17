@@ -112,7 +112,34 @@ function resolveToolInput(inner: Record<string, unknown>): Record<string, unknow
   if (inner.toolInput && typeof inner.toolInput === 'object') return inner.toolInput as Record<string, unknown>;
   if (inner.input && typeof inner.input === 'object') return inner.input as Record<string, unknown>;
   if (inner.tool_input && typeof inner.tool_input === 'object') return inner.tool_input as Record<string, unknown>;
+  // iCode (Chrys): args are carried in rawInput (a JSON object).
+  if (inner.rawInput && typeof inner.rawInput === 'object') return inner.rawInput as Record<string, unknown>;
   return undefined;
+}
+
+/**
+ * Extract result text for final tool events. iCode sends tool content as an
+ * ARRAY of wrapped blocks ({type:'content', content:{type:'text',...}}, diff
+ * blocks, terminal refs); plain-CLI events send a single block via
+ * `content.text` (handled by the caller) or a bare rawOutput string.
+ */
+function extractToolResultText(contentField: unknown, rawOutput: unknown): string {
+  const parts: string[] = [];
+  if (Array.isArray(contentField)) {
+    for (const block of contentField) {
+      if (!block || typeof block !== 'object') continue;
+      const record = block as Record<string, unknown>;
+      const wrapped =
+        record.content && typeof record.content === 'object' ? (record.content as Record<string, unknown>) : record;
+      if (wrapped.type === 'text' && typeof wrapped.text === 'string' && wrapped.text) {
+        parts.push(wrapped.text);
+      }
+    }
+  }
+  if (parts.length === 0 && typeof rawOutput === 'string' && rawOutput) {
+    parts.push(rawOutput);
+  }
+  return parts.join('\n');
 }
 
 export function transformAcpEvent(
@@ -255,7 +282,7 @@ export function transformAcpEvent(
           type: 'tool_result',
           catId,
           ...(toolName !== undefined ? { toolName } : {}),
-          content: content?.text ?? '',
+          content: content?.text ?? extractToolResultText(inner.content, inner.rawOutput),
           metadata,
           timestamp: now,
         };
@@ -313,7 +340,7 @@ export function transformAcpEvent(
         type: 'tool_result',
         catId,
         ...(toolName !== undefined ? { toolName } : {}),
-        content: content?.text ?? '',
+        content: content?.text ?? extractToolResultText(inner.content, inner.rawOutput),
         metadata,
         timestamp: now,
       };
@@ -350,7 +377,20 @@ export function transformAcpEvent(
       // frontend has no plan formatter — drop it instead of leaking raw
       // `{"type":"plan","text":""}` JSON into chat. Non-empty plans unchanged.
       const planText = typeof content?.text === 'string' ? content.text : '';
-      if (!planText.trim()) return withFlush(null);
+      if (!planText.trim()) {
+        // iCode (Chrys) sends structured entries[] — empty array explicitly
+        // clears the plan, so both empty and populated entries must be emitted.
+        if (Array.isArray(inner.entries)) {
+          return withFlush({
+            type: 'system_info',
+            catId,
+            content: JSON.stringify({ type: 'plan', entries: inner.entries }),
+            metadata,
+            timestamp: now,
+          });
+        }
+        return withFlush(null);
+      }
       return withFlush({
         type: 'system_info',
         catId,

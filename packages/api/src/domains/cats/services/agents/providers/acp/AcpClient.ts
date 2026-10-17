@@ -70,6 +70,12 @@ export function resolveAcpPromptRequestCeilingMs(activityBudgetMs: number): numb
 /** Callback for handling ACP permission requests. Call `respond` with the chosen option. */
 export type AcpPermissionHandler = (req: AcpAgentRequest, respond: (result: { optionId: string }) => void) => void;
 
+/**
+ * Callback for agent-initiated session-scoped requests (e.g. iCode `_chrys/request_input`).
+ * Return value is written back verbatim as the JSON-RPC result.
+ */
+export type AcpSessionRequestHandler = (req: AcpAgentRequest) => Promise<Record<string, unknown>>;
+
 export interface AcpClientConfig {
   /** CLI command (e.g. 'gemini') */
   command: string;
@@ -83,6 +89,12 @@ export interface AcpClientConfig {
   spawnFn?: typeof nodeSpawn;
   /** Custom permission request handler. Defaults to auto-approve (allow_once). */
   permissionHandler?: AcpPermissionHandler;
+  /**
+   * Default decision when no permissionHandler is set and the agent asks for
+   * permission. 'reject' (iCode fail-closed policy) selects a reject option
+   * instead of auto-approving flagged native effects. Defaults to 'allow'.
+   */
+  defaultPermissionDecision?: 'allow' | 'reject';
 }
 
 export interface AcpSpawnLogFields {
@@ -201,6 +213,12 @@ export class AcpClient {
    * could be reused while the old request is unresolved.
    */
   private readonly sessionPromptPendingIds = new Map<string, string>();
+  /**
+   * Session-scoped handlers for agent-initiated requests (iCode `_chrys/request_input`).
+   * Keyed by sessionId so a request is only answerable while that session is
+   * actively driven by us; clearing the entry invalidates late requests.
+   */
+  private readonly sessionRequestHandlers = new Map<string, AcpSessionRequestHandler>();
   /** Client-level capacity signal — always captured regardless of listeners.
    *  Fallback for delayed stderr arriving after invoke listener is removed. */
   private _recentCapacitySignal: AcpCapacitySignal | null = null;
@@ -423,6 +441,62 @@ export class AcpClient {
       value: trimmedValue,
     });
     log.info({ sessionId, durationMs: Date.now() - t0 }, 'ACP session/set_config_option: response received');
+  }
+
+  /**
+   * Select the model for a session via the standard ACP `session/set_model`
+   * method (iCode: `modelId` is the agent's model configuration id).
+   * Throws on empty ids — a silently-skipped model switch must not be
+   * reported as success.
+   */
+  async setSessionModel(sessionId: string, modelId: string): Promise<void> {
+    const trimmedSessionId = sessionId.trim();
+    const trimmedModelId = modelId.trim();
+    if (!trimmedSessionId || !trimmedModelId) {
+      throw new Error(`session/set_model requires non-empty sessionId and modelId (got sessionId=${JSON.stringify(sessionId)}, modelId=${JSON.stringify(modelId)})`);
+    }
+
+    log.info(
+      { sessionId: trimmedSessionId, modelId: trimmedModelId, pid: this.child?.pid },
+      'ACP session/set_model: sending request',
+    );
+    const t0 = Date.now();
+    await this.sendRequest(ACP_METHODS.sessionSetModel, {
+      sessionId: trimmedSessionId,
+      modelId: trimmedModelId,
+    });
+    log.info({ sessionId: trimmedSessionId, durationMs: Date.now() - t0 }, 'ACP session/set_model: response received');
+  }
+
+  /**
+   * Close a live session instance via the standard ACP `session/close` method.
+   * The provider keeps its persisted conversation; only the running instance
+   * ends.
+   */
+  async closeSession(sessionId: string): Promise<void> {
+    const trimmedSessionId = sessionId.trim();
+    if (!trimmedSessionId) {
+      throw new Error('session/close requires non-empty sessionId');
+    }
+
+    log.info({ sessionId: trimmedSessionId, pid: this.child?.pid }, 'ACP session/close: sending request');
+    const t0 = Date.now();
+    await this.sendRequest(ACP_METHODS.sessionClose, { sessionId: trimmedSessionId });
+    log.info({ sessionId: trimmedSessionId, durationMs: Date.now() - t0 }, 'ACP session/close: response received');
+  }
+
+  /**
+   * Register (or clear) the handler for agent-initiated session-scoped
+   * requests such as iCode `_chrys/request_input`. Requests for sessions
+   * without a handler are answered with an honest JSON-RPC error instead of
+   * being silently dropped or auto-answered.
+   */
+  setSessionRequestHandler(sessionId: string, handler: AcpSessionRequestHandler | undefined): void {
+    if (handler === undefined) {
+      this.sessionRequestHandlers.delete(sessionId);
+    } else {
+      this.sessionRequestHandlers.set(sessionId, handler);
+    }
   }
 
   /**
@@ -1067,6 +1141,28 @@ export class AcpClient {
           };
           this.child?.stdin?.write(JSON.stringify(errResponse) + '\n');
         }
+      } else if (this.config.defaultPermissionDecision === 'reject') {
+        // iCode fail-closed policy: never auto-approve. Select an explicit
+        // reject option; if the agent offers none, cancel rather than allow.
+        const params = req.params as unknown as AcpPermissionRequest;
+        const rejectOption =
+          params.options?.find((o) => o.kind === 'reject_once') ??
+          params.options?.find((o) => o.kind === 'reject_always') ??
+          params.options?.find((o) => o.optionId === 'reject');
+        if (rejectOption) {
+          respond({ optionId: rejectOption.optionId });
+        } else {
+          log.warn(
+            { method: req.method, id: req.id, sessionId: params.sessionId },
+            'ACP permission: reject policy but no reject option offered — cancelling',
+          );
+          const response = {
+            jsonrpc: '2.0' as const,
+            id: req.id,
+            result: { outcome: { outcome: 'cancelled' as const } },
+          };
+          this.child?.stdin?.write(JSON.stringify(response) + '\n');
+        }
       } else {
         // Default: auto-approve (allow_once)
         const params = req.params as unknown as AcpPermissionRequest;
@@ -1078,6 +1174,8 @@ export class AcpClient {
           params.options?.[0];
         respond({ optionId: allowOption?.optionId ?? 'allow_once' });
       }
+    } else if (req.method === ACP_METHODS.chrysRequestInput) {
+      this.handleChrysRequestInput(req);
     } else {
       // Unknown agent request — respond with method not found
       log.warn('Unhandled agent request: %s', req.method);
@@ -1088,6 +1186,54 @@ export class AcpClient {
       };
       this.child?.stdin?.write(JSON.stringify(response) + '\n');
     }
+  }
+
+  /** Write a JSON-RPC response to the agent, tolerating a dead/destroyed pipe. */
+  private writeAgentResponse(response: Record<string, unknown>): void {
+    const stdin = this.child?.stdin;
+    if (!stdin || stdin.destroyed || !stdin.writable) {
+      log.warn({ id: response['id'] }, 'ACP client dropped a response: agent stdin is no longer writable');
+      return;
+    }
+    stdin.write(JSON.stringify(response) + '\n');
+  }
+
+  /** Dispatch `_chrys/request_input` to the session-scoped handler, if any. */
+  private handleChrysRequestInput(req: AcpAgentRequest): void {
+    const params = (req.params ?? {}) as { sessionId?: string };
+    const sessionId = typeof params.sessionId === 'string' ? params.sessionId : '';
+    const handler = sessionId ? this.sessionRequestHandlers.get(sessionId) : undefined;
+
+    if (!handler) {
+      log.warn(
+        { method: req.method, id: req.id, sessionId: sessionId || null },
+        'ACP request_input: no handler registered for session — answering with error',
+      );
+      const response = {
+        jsonrpc: '2.0' as const,
+        id: req.id,
+        error: { code: -32603, message: `No request handler for session ${sessionId || '<missing>'}` },
+      };
+      this.writeAgentResponse(response);
+      return;
+    }
+
+    void (async () => {
+      try {
+        const result = await handler(req);
+        const response = { jsonrpc: '2.0' as const, id: req.id, result };
+        this.writeAgentResponse(response);
+        log.debug({ id: req.id, sessionId }, 'ACP request_input: answered');
+      } catch (err) {
+        log.error('request_input handler threw: %s', (err as Error).message);
+        const response = {
+          jsonrpc: '2.0' as const,
+          id: req.id,
+          error: { code: -32603, message: `request_input handler error: ${(err as Error).message}` },
+        };
+        this.writeAgentResponse(response);
+      }
+    })();
   }
 
   private rejectAllPending(error: Error): void {

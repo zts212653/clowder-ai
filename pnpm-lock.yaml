@@ -47,6 +47,9 @@ importers:
       '@cat-cafe/collective-service':
         specifier: workspace:*
         version: link:../collective-service
+      '@cat-cafe/mcp-server':
+        specifier: workspace:*
+        version: link:../mcp-server
       '@cat-cafe/shared':
         specifier: workspace:*
         version: link:../shared

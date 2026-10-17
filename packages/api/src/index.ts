@@ -580,6 +580,7 @@ import { threadMemberStrategyRoutes } from './routes/thread-member-strategy.js';
 import { registerWaitTerminationRoutes } from './routes/wait-termination-routes.js';
 import { ApiInstanceLease, type ApiInstanceLeaseInvalidation } from './services/ApiInstanceLease.js';
 import { resolveActiveProjectRoot } from './utils/active-project-root.js';
+import { registerMemberMcpRoutes, resolveMemberToolFamiliesForCat } from './routes/member-mcp.js';
 import { createCliExecutionOwnerService } from './utils/cli-process-ownership.js';
 import { resolveMemoryRepoPaths } from './utils/memory-root.js';
 import { findMonorepoRoot } from './utils/monorepo-root.js';
@@ -5378,6 +5379,14 @@ async function main(): Promise<void> {
     },
   } as Parameters<typeof callbacksRoutes>[1];
   await app.register(callbacksRoutes, callbackOpts);
+  // F306 Phase B: member MCP gateway — loopback Streamable HTTP MCP for ACP
+  // members (iCode), authenticated per invocation against the live registry.
+  registerMemberMcpRoutes(app, {
+    registry,
+    resolveMemberToolFamilies: ({ catId }) => resolveMemberToolFamiliesForCat(resolveActiveProjectRoot(), catId),
+    apiBaseUrl: `http://127.0.0.1:${PORT}`,
+    log: app.log,
+  });
   await app.register(callbackRuntimeInteractionRoutes, {
     registry,
     callbackAuthNotifier,

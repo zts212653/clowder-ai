@@ -107,6 +107,10 @@ const acpConfigSchema = z
     experimental: z.literal(true).optional(),
     mcpWhitelist: z.array(z.string().min(1)).optional(),
     supportsMultiplexing: z.boolean().optional(),
+    /** iCode protocol adapter: session/set_model model binding, per-turn session/close, fail-closed permissions. */
+    protocolAdapter: z.enum(['icode']).optional(),
+    /** iCode: model configuration id sent to session/set_model (distinct from defaultModel). */
+    modelProfileId: z.string().min(1).optional(),
     pool: z
       .object({
         maxLiveProcesses: z.number().int().positive().optional(),

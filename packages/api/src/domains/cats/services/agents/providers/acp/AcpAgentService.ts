@@ -41,7 +41,11 @@ import { createAcpSessionState, flushAcpThinking, transformAcpEvent } from './ac
 import { readAcpImageBlocks, withAcpImages } from './acp-image-input.js';
 import { resolveAcpMcpServers, resolveDisabledServerIds, resolveUserProjectMcpServers } from './acp-mcp-resolver.js';
 import { AcpImageInputError, type AcpPromptInput } from './acp-prompt-content.js';
-import { callbackEnvDiagnostic, materializeSessionMcpServers } from './acp-session-env.js';
+import {
+  createAcpRequestInputBridge,
+  type AcpRequestInputBridge,
+} from './acp-runtime-interaction-adapter.js';
+import { callbackEnvDiagnostic, materializeIcodeSessionMcpServers, materializeSessionMcpServers } from './acp-session-env.js';
 import type { AcpMcpServer, AcpNewSessionResult, AcpPromptCapabilities, AcpSessionUpdate } from './types.js';
 
 const log = createModuleLogger('acp-agent');
@@ -128,6 +132,13 @@ export interface AcpAgentServiceConfig {
   modelName?: string;
   /** ACP session model override sent via session/set_config_option when the agent exposes model selection. */
   sessionModel?: string;
+  /**
+   * Protocol adapter selection. 'icode' switches the service onto iCode's ACP
+   * dialect: model selection via standard session/set_model (fail-loud), no
+   * stdio MCP injection and no overlay re-injection on session/load, and
+   * per-turn session/close of the live instance.
+   */
+  protocolAdapter?: 'icode';
   /** #1208: model/window already applied to this process-pool generation. */
   contextBinding?: import('../../../types.js').AgentContextBinding;
   /** When false, disables ALL MCP servers (base + per-project) for this member. */
@@ -163,6 +174,7 @@ export class AcpAgentService implements AgentService {
   private readonly providerName: string;
   private readonly modelName: string;
   private readonly sessionModel?: string;
+  readonly protocolAdapter: 'icode' | undefined;
   private readonly appliedContextBinding?: import('../../../types.js').AgentContextBinding;
   private readonly mcpSupportEnabled: boolean;
   /**
@@ -186,10 +198,32 @@ export class AcpAgentService implements AgentService {
     this.providerName = config.providerName ?? 'acp';
     this.modelName = config.modelName ?? config.sessionModel ?? 'acp';
     this.sessionModel = config.sessionModel?.trim() || undefined;
+    this.protocolAdapter = config.protocolAdapter;
     this.appliedContextBinding = config.contextBinding;
     this.mcpSupportEnabled = config.mcpSupport !== false;
     this.idleTtlMs = config.idleTtlMs ?? DEFAULT_ACP_IDLE_TTL_MS;
     this.agentBusyRetryDelaysMs = config.agentBusyRetryDelaysMs ?? DEFAULT_AGENT_BUSY_RETRY_DELAYS_MS;
+  }
+
+  /**
+   * iCode adapter: select the session model via the standard `session/set_model`
+   * (modelId = iCode model profile id). Returns an error message on failure —
+   * callers must surface it instead of silently continuing on the agent's
+   * default model. No-op when no session model is configured.
+   */
+  private async applyIcodeSessionModel(
+    client: { setSessionModel(sessionId: string, modelId: string): Promise<void> },
+    sessionId: string,
+  ): Promise<string | null> {
+    const modelId = this.sessionModel;
+    if (!modelId) return null;
+    try {
+      await client.setSessionModel(sessionId, modelId);
+      log.info({ sessionId, model: modelId }, 'ACP session model selected (icode session/set_model)');
+      return null;
+    } catch (err) {
+      return err instanceof Error ? err.message : String(err);
+    }
   }
 
   contextCapability(): import('../../../types.js').AgentContextCapability {
@@ -318,6 +352,12 @@ export class AcpAgentService implements AgentService {
       newSession(cwd: string, mcpServers?: AcpMcpServer[]): Promise<AcpNewSessionResult>;
       loadSession(sessionId: string, cwd: string, mcpServers?: AcpMcpServer[]): Promise<AcpNewSessionResult>;
       setSessionConfigOption(sessionId: string, configId: string, value: string): Promise<void>;
+      setSessionModel(sessionId: string, modelId: string): Promise<void>;
+      closeSession(sessionId: string): Promise<void>;
+      setSessionRequestHandler(
+        sessionId: string,
+        handler: ((request: { id: string | number; params?: unknown }) => Promise<Record<string, unknown>>) | undefined,
+      ): void;
       cancelSession(sessionId: string): void;
       promptStream(
         sessionId: string,
@@ -333,6 +373,8 @@ export class AcpAgentService implements AgentService {
     const cwd = options?.workingDirectory ?? this.projectRoot;
     let sessionId: string | undefined;
     let promptPhase: PromptPhase = 'not_started';
+    /** F306 Phase C: iCode ask-user bridge active for this turn. */
+    let requestInputBridge: AcpRequestInputBridge | null = null;
 
     const sealActivePromptSession = (activeSessionId: string): boolean => {
       if (promptPhase !== 'active_unacknowledged') return false;
@@ -445,6 +487,30 @@ export class AcpAgentService implements AgentService {
       // its own file, which stops updating — its late callbacks fail registry.isLatest().
       const buildSessionConfig = (preparedCreds: PreparedCredentialEnv | null) => {
         const sessionCallbackEnv = preparedCreds?.env ?? options?.callbackEnv;
+        if (this.protocolAdapter === 'icode') {
+          // F306 Phase B: route cat-cafe tool families through the member gateway
+          // HTTP overlay carrying THIS turn's invocation credentials. iCode rejects
+          // client-injected stdio servers and persisted sessions take the overlay
+          // on both session/new and session/load (per-turn credential rotation).
+          const materialized = materializeIcodeSessionMcpServers(invokeServers, sessionCallbackEnv);
+          const hasOverlay = materialized.servers.some((s) => s.name === 'cat-cafe-member');
+          if (materialized.gatewayRouted.length > 0 && !hasOverlay) {
+            log.warn(
+              { ...ctx, requested: materialized.gatewayRouted },
+              'ACP icode adapter could not build the member gateway overlay (callback credentials missing) — tools unavailable this turn',
+            );
+          }
+          if (materialized.droppedStdio.length > 0) {
+            log.warn(
+              { ...ctx, dropped: materialized.droppedStdio },
+              'ACP icode adapter dropped non-cat-cafe stdio MCP servers — iCode only accepts remote overlays',
+            );
+          }
+          return {
+            mcpServers: materialized.servers,
+            envDiag: callbackEnvDiagnostic(sessionCallbackEnv),
+          };
+        }
         return {
           mcpServers: materializeSessionMcpServers(invokeServers, sessionCallbackEnv),
           envDiag: callbackEnvDiagnostic(sessionCallbackEnv),
@@ -468,21 +534,38 @@ export class AcpAgentService implements AgentService {
         );
       }
 
+      const modelSelectionFailure = (errorMsg: string): AgentMessage[] => [
+        {
+          type: 'error',
+          catId: this.catId,
+          error: `model_selection_failed: ${errorMsg}`,
+          errorCode: 'model_selection_failed',
+          metadata,
+          timestamp: Date.now(),
+        },
+        { type: 'done', catId: this.catId, metadata, timestamp: Date.now() },
+      ];
+
       if (resumeSessionId) {
         const resumeCreds = resolveSessionCredentialFile(options?.callbackEnv, resumeSessionId);
         const resumeConfig = buildSessionConfig(resumeCreds);
+        // iCode: the per-turn overlay (externals + member gateway with fresh
+        // credentials) is re-injected on load — the previous turn's live
+        // instance was closed, so the rebuild takes the new overlay instead of
+        // the stored, now-dead credentials.
+        const resumeOverlayServers = resumeConfig.mcpServers;
         try {
           log.info(
             {
               ...ctx,
               sessionId: resumeSessionId,
               cwd,
-              mcpCount: resumeConfig.mcpServers.length,
+              mcpCount: resumeOverlayServers.length,
               ...resumeConfig.envDiag,
             },
             'ACP session resume: loading existing session',
           );
-          const session = await client.loadSession(resumeSessionId, cwd, resumeConfig.mcpServers);
+          const session = await client.loadSession(resumeSessionId, cwd, resumeOverlayServers);
           sessionId = session.sessionId || resumeSessionId;
           this.pool.rememberSession?.(this.poolKey, sessionId, lease);
           if (sessionId !== resumeSessionId) this.pool.rememberSession?.(this.poolKey, resumeSessionId, lease);
@@ -496,6 +579,14 @@ export class AcpAgentService implements AgentService {
           metadata.sessionId = sessionId;
           resumeDisposition = 'resumed';
           log.info({ ...ctx, sessionId, requestedSessionId: resumeSessionId }, 'ACP session resume completed');
+          if (this.protocolAdapter === 'icode') {
+            const modelError = await this.applyIcodeSessionModel(client, sessionId);
+            if (modelError) {
+              log.error({ ...ctx, sessionId, model: this.sessionModel, err: modelError }, 'ACP icode model selection failed after resume');
+              for (const msg of modelSelectionFailure(modelError)) yield msg;
+              return;
+            }
+          }
         } catch (err) {
           resumeDisposition = 'load_failed_fresh';
           const errorMsg = err instanceof Error ? err.message : String(err);
@@ -523,17 +614,26 @@ export class AcpAgentService implements AgentService {
         log.info({ ...ctx, sessionId }, 'ACP newSession completed');
 
         const sessionModel = this.sessionModel;
-        const modelConfig = sessionModel ? resolveSessionModelConfigOption(session, sessionModel) : null;
-        if (modelConfig && sessionModel) {
-          try {
-            await client.setSessionConfigOption(sessionId, modelConfig.configId, sessionModel);
-            log.info({ ...ctx, sessionId, model: this.sessionModel }, 'ACP session model selected');
-          } catch (err) {
-            const errorMsg = err instanceof Error ? err.message : String(err);
-            log.warn(
-              { ...ctx, sessionId, model: this.sessionModel, err: errorMsg },
-              'ACP session model selection failed — continuing with agent default',
-            );
+        if (this.protocolAdapter === 'icode') {
+          const modelError = await this.applyIcodeSessionModel(client, sessionId);
+          if (modelError) {
+            log.error({ ...ctx, sessionId, model: this.sessionModel, err: modelError }, 'ACP icode model selection failed');
+            for (const msg of modelSelectionFailure(modelError)) yield msg;
+            return;
+          }
+        } else {
+          const modelConfig = sessionModel ? resolveSessionModelConfigOption(session, sessionModel) : null;
+          if (modelConfig && sessionModel) {
+            try {
+              await client.setSessionConfigOption(sessionId, modelConfig.configId, sessionModel);
+              log.info({ ...ctx, sessionId, model: this.sessionModel }, 'ACP session model selected');
+            } catch (err) {
+              const errorMsg = err instanceof Error ? err.message : String(err);
+              log.warn(
+                { ...ctx, sessionId, model: this.sessionModel, err: errorMsg },
+                'ACP session model selection failed — continuing with agent default',
+              );
+            }
           }
         }
       }
@@ -541,6 +641,28 @@ export class AcpAgentService implements AgentService {
       // At this point sessionId is always defined (resume or newSession path).
       // TS control-flow can't prove it across the if/else — assert for downstream usage.
       if (!sessionId) throw new Error('ACP invariant: sessionId must be set after session setup');
+
+      // F306 Phase C: iCode's native ask-user requests (`_chrys/request_input`)
+      // become canonical question cards through the shared interaction port.
+      // Registered per turn so the card carries THIS invocation's owner identity.
+      const runtimeInteractionPort = options?.runtimeInteractionPort;
+      const auditContext = options?.auditContext;
+      if (this.protocolAdapter === 'icode' && runtimeInteractionPort && auditContext) {
+        requestInputBridge = createAcpRequestInputBridge({
+          owner: {
+            userId: auditContext.userId,
+            threadId: auditContext.threadId,
+            catId: auditContext.catId,
+            invocationId: auditContext.invocationId,
+          },
+          port: runtimeInteractionPort,
+          providerSessionId: sessionId,
+          ...(options?.signal ? { signal: options.signal } : {}),
+        });
+        const bridge = requestInputBridge;
+        client.setSessionRequestHandler(sessionId, (request) => bridge.handle(request));
+        log.info({ ...ctx, sessionId }, 'ACP icode request_input bridged to runtime interaction port');
+      }
 
       // Window 2: abort may have fired during newSession
       if (options?.signal?.aborted) {
@@ -725,6 +847,7 @@ export class AcpAgentService implements AgentService {
         );
         // Create fresh session and retry promptStream once (not recursive — single retry)
         promptPhase = 'not_started';
+        const replacedSessionId = sessionId; // captured: `sessionId` is repointed below
         try {
           const retryCreds = prepareSessionCredentialFile(options?.callbackEnv);
           const retryConfig = buildSessionConfig(retryCreds);
@@ -740,6 +863,32 @@ export class AcpAgentService implements AgentService {
           // session, not the dead resumed one.
           sessionId = freshSessionId;
 
+          // The replacement session must serve ask_user too. Rebind the
+          // request_input bridge to the fresh session, clear the replaced
+          // session's handler (a late request must never reach a finished
+          // invocation), and close the replaced live instance so the next
+          // turn's session/load can re-inject the per-turn overlay.
+          if (requestInputBridge) {
+            const bridge = requestInputBridge;
+            client.setSessionRequestHandler(replacedSessionId, undefined);
+            bridge.setProviderSessionId(freshSessionId);
+            client.setSessionRequestHandler(freshSessionId, (request) => bridge.handle(request));
+          }
+          if (this.protocolAdapter === 'icode') {
+            try {
+              await client.closeSession(replacedSessionId);
+              log.info(
+                { ...ctx, sessionId: replacedSessionId },
+                'ACP icode replaced resumed session closed before retry replacement',
+              );
+            } catch (err) {
+              log.warn(
+                { ...ctx, sessionId: replacedSessionId, err: err instanceof Error ? err.message : String(err) },
+                'ACP icode best-effort close of the replaced resumed session failed',
+              );
+            }
+          }
+
           // Abort may have fired during the fresh newSession (mirrors Window 2)
           if (options?.signal?.aborted) {
             yield { type: 'done', catId: this.catId, metadata, timestamp: Date.now() };
@@ -748,12 +897,21 @@ export class AcpAgentService implements AgentService {
 
           // Apply session model if configured
           const sessionModel = this.sessionModel;
-          const modelConfig = sessionModel ? resolveSessionModelConfigOption(freshSession, sessionModel) : null;
-          if (modelConfig && sessionModel) {
-            try {
-              await client.setSessionConfigOption(freshSessionId, modelConfig.configId, sessionModel);
-            } catch {
-              /* best-effort — continue with agent default */
+          if (this.protocolAdapter === 'icode') {
+            const modelError = await this.applyIcodeSessionModel(client, freshSessionId);
+            if (modelError) {
+              log.error({ ...ctx, sessionId: freshSessionId, model: this.sessionModel, err: modelError }, 'ACP icode model selection failed on retry session');
+              for (const msg of modelSelectionFailure(modelError)) yield msg;
+              return;
+            }
+          } else {
+            const modelConfig = sessionModel ? resolveSessionModelConfigOption(freshSession, sessionModel) : null;
+            if (modelConfig && sessionModel) {
+              try {
+                await client.setSessionConfigOption(freshSessionId, modelConfig.configId, sessionModel);
+              } catch {
+                /* best-effort — continue with agent default */
+              }
             }
           }
 
@@ -895,6 +1053,43 @@ export class AcpAgentService implements AgentService {
       };
       yield { type: 'done', catId: this.catId, metadata, timestamp: Date.now() };
     } finally {
+      if (requestInputBridge) {
+        // Clear the bridge first so no late request re-enters a dead turn, then
+        // terminalize any interaction still waiting on the human — an orphaned
+        // card must never outlive the invocation that asked the question.
+        if (sessionId) client.setSessionRequestHandler(sessionId, undefined);
+        const pendingPort = options?.runtimeInteractionPort;
+        const pendingInvocationId = options?.auditContext?.invocationId;
+        if (requestInputBridge.hasPending() && pendingPort?.invalidateInvocation && pendingInvocationId) {
+          try {
+            await pendingPort.invalidateInvocation(pendingInvocationId, 'provider_cancelled');
+            log.warn(
+              { ...ctx, sessionId, invocationId: pendingInvocationId },
+              'ACP icode turn ended with a pending request_input — interaction invalidated',
+            );
+          } catch (err) {
+            log.warn(
+              { ...ctx, sessionId, err: err instanceof Error ? err.message : String(err) },
+              'ACP icode failed to invalidate a pending request_input interaction',
+            );
+          }
+        }
+      }
+      if (this.protocolAdapter === 'icode' && sessionId) {
+        // iCode: a persisted session rejects overlay re-injection while a live
+        // instance holds it — end the instance each turn so the next turn can
+        // session/load with fresh per-turn credentials. Best-effort: the
+        // provider keeps the persisted conversation either way.
+        try {
+          await client.closeSession(sessionId);
+          log.info({ ...ctx, sessionId }, 'ACP icode session instance closed (per-turn session/close)');
+        } catch (err) {
+          log.warn(
+            { ...ctx, sessionId, err: err instanceof Error ? err.message : String(err) },
+            'ACP icode best-effort session/close failed',
+          );
+        }
+      }
       client.offCapacity(onCapacity);
       if (onAbort && options?.signal) {
         options.signal.removeEventListener('abort', onAbort);

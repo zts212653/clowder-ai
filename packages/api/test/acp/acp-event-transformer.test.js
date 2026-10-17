@@ -635,3 +635,126 @@ describe('transformAcpEvent', () => {
     assert.equal(state2.scratchpadDetected, false);
   });
 });
+
+describe('transformAcpEvent — iCode (Chrys) wire format', () => {
+  // iCode tool events carry: toolCallId + title (no toolName), rawInput args,
+  // content as an ARRAY of wrapped blocks ({type:'content', content:{...}}),
+  // and plan updates as entries[] (empty array = clear plan). These shapes are
+  // confirmed against the installed iCode 0.29.2 acp bridge.
+
+  it('tool_call start uses title as toolName and rawInput as toolInput', () => {
+    const update = {
+      sessionId: 's1',
+      update: {
+        sessionUpdate: 'tool_call',
+        toolCallId: 'call-1',
+        title: 'powershell: Get-ChildItem',
+        kind: 'execute',
+        status: 'in_progress',
+        rawInput: { command: 'Get-ChildItem', working_dir: 'E:/repo' },
+      },
+    };
+    const result = transformAcpEvent(update, catId, metadata);
+    assert.equal(result.type, 'tool_use');
+    assert.equal(result.toolName, 'powershell: Get-ChildItem');
+    assert.deepEqual(result.toolInput, { command: 'Get-ChildItem', working_dir: 'E:/repo' });
+  });
+
+  it('final tool_call_update extracts text from the content block array', () => {
+    const state = createAcpSessionState();
+    const start = {
+      sessionId: 's1',
+      update: { sessionUpdate: 'tool_call', toolCallId: 'call-2', title: 'read_file', status: 'in_progress', rawInput: { path: 'a.ts' } },
+    };
+    transformAcpEvent(start, catId, metadata, state);
+
+    const final = {
+      sessionId: 's1',
+      update: {
+        sessionUpdate: 'tool_call_update',
+        toolCallId: 'call-2',
+        status: 'completed',
+        content: [{ type: 'content', content: { type: 'text', text: 'file contents here' } }],
+      },
+    };
+    const result = transformAcpEvent(final, catId, metadata, state);
+    assert.equal(result.type, 'tool_result');
+    assert.equal(result.content, 'file contents here');
+  });
+
+  it('final tool_call falls back to rawOutput when no content array is present', () => {
+    const update = {
+      sessionId: 's1',
+      update: {
+        sessionUpdate: 'tool_call',
+        toolCallId: 'call-3',
+        title: 'run_skill',
+        status: 'completed',
+        rawOutput: 'skill finished ok',
+      },
+    };
+    const results = transformAcpEvent(update, catId, metadata);
+    const arr = Array.isArray(results) ? results : [results];
+    const resultMsg = arr.find((m) => m.type === 'tool_result');
+    assert.ok(resultMsg, 'final tool_call must produce a tool_result');
+    assert.equal(resultMsg.content, 'skill finished ok');
+  });
+
+  it('plan entries[] map to a structured plan system_info', () => {
+    const update = {
+      sessionId: 's1',
+      update: {
+        sessionUpdate: 'plan',
+        entries: [
+          { content: 'Write RED tests', priority: 'high', status: 'completed' },
+          { content: 'Implement adapter', priority: 'medium', status: 'in_progress' },
+        ],
+      },
+    };
+    const result = transformAcpEvent(update, catId, metadata);
+    assert.equal(result.type, 'system_info');
+    const parsed = JSON.parse(result.content);
+    assert.equal(parsed.type, 'plan');
+    assert.equal(parsed.entries.length, 2);
+    assert.deepEqual(parsed.entries[0], { content: 'Write RED tests', priority: 'high', status: 'completed' });
+  });
+
+  it('plan entries: [] clears the plan instead of being dropped', () => {
+    const update = {
+      sessionId: 's1',
+      update: { sessionUpdate: 'plan', entries: [] },
+    };
+    const result = transformAcpEvent(update, catId, metadata);
+    assert.equal(result.type, 'system_info');
+    const parsed = JSON.parse(result.content);
+    assert.equal(parsed.type, 'plan');
+    assert.deepEqual(parsed.entries, []);
+  });
+
+  it('concurrent tool calls pair correctly through state (start×2 then final×2)', () => {
+    const state = createAcpSessionState();
+    const mkStart = (id, title) => ({
+      sessionId: 's1',
+      update: { sessionUpdate: 'tool_call', toolCallId: id, title, status: 'in_progress', rawInput: {} },
+    });
+    const mkFinal = (id, title, text) => ({
+      sessionId: 's1',
+      update: {
+        sessionUpdate: 'tool_call_update',
+        toolCallId: id,
+        status: 'completed',
+        content: [{ type: 'content', content: { type: 'text', text } }],
+      },
+    });
+
+    transformAcpEvent(mkStart('a', 'tool-a'), catId, metadata, state);
+    transformAcpEvent(mkStart('b', 'tool-b'), catId, metadata, state);
+    const finalA = transformAcpEvent(mkFinal('a', 'tool-a', 'A result'), catId, metadata, state);
+    const finalB = transformAcpEvent(mkFinal('b', 'tool-b', 'B result'), catId, metadata, state);
+
+    assert.equal(finalA.type, 'tool_result');
+    assert.equal(finalA.content, 'A result');
+    assert.equal(finalB.type, 'tool_result');
+    assert.equal(finalB.content, 'B result');
+  });
+});

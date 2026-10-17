@@ -75,3 +75,65 @@ export function callbackEnvDiagnostic(callbackEnv?: Record<string, string>): Rec
     hasThreadId: !!callbackEnv?.CAT_CAFE_THREAD_ID,
   };
 }
+
+/** Result of routing a member's MCP servers onto the iCode transport. */
+export interface IcodeMcpMaterialization {
+  /** Servers to pass into session/new and session/load for this turn. */
+  servers: AcpMcpServer[];
+  /** cat-cafe builtin servers routed through the member gateway overlay. */
+  gatewayRouted: string[];
+  /** Non-cat-cafe stdio servers dropped because iCode rejects stdio injection. */
+  droppedStdio: string[];
+}
+
+/**
+ * F306 Phase B — iCode transport materialization.
+ *
+ * iCode rejects client-injected stdio MCP servers, so the member's cat-cafe
+ * tool families are routed through the in-API member gateway as a single HTTP
+ * overlay carrying THIS turn's invocation credentials. Remote (http/sse)
+ * servers configured by the project pass through; stdio servers that are not
+ * cat-cafe builtins cannot be routed yet and are reported (never silently
+ * dropped) so a missing tool cannot be mistaken for a working one.
+ */
+export function materializeIcodeSessionMcpServers(
+  baseServers: AcpMcpServer[],
+  callbackEnv?: Record<string, string>,
+): IcodeMcpMaterialization {
+  const externals: AcpMcpServer[] = [];
+  const catCafeBuiltins: string[] = [];
+  const droppedStdio: string[] = [];
+
+  for (const server of baseServers) {
+    if (isCatCafeStdioServer(server)) {
+      catCafeBuiltins.push(server.name);
+      continue;
+    }
+    if ('command' in server) {
+      // Stdio server that is not a cat-cafe builtin — iCode cannot take it.
+      droppedStdio.push(server.name);
+      continue;
+    }
+    externals.push(server);
+  }
+
+  const apiUrl = callbackEnv?.CAT_CAFE_API_URL;
+  const invocationId = callbackEnv?.CAT_CAFE_INVOCATION_ID;
+  const callbackToken = callbackEnv?.CAT_CAFE_CALLBACK_TOKEN;
+  const overlay: AcpMcpServer[] =
+    catCafeBuiltins.length > 0 && apiUrl && invocationId && callbackToken
+      ? [
+          {
+            type: 'http',
+            name: 'cat-cafe-member',
+            url: `${apiUrl.replace(/\/+$/, '')}/api/member-mcp/mcp`,
+            headers: [
+              { name: 'x-invocation-id', value: invocationId },
+              { name: 'x-callback-token', value: callbackToken },
+            ],
+          },
+        ]
+      : [];
+
+  return { servers: [...externals, ...overlay], gatewayRouted: catCafeBuiltins, droppedStdio };
+}

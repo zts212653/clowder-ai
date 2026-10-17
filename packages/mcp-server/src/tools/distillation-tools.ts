@@ -10,13 +10,16 @@ import { defineMcpMigrationFactory } from '../tool-governance-migration.js';
 import { z } from 'zod';
 import type { ToolResult } from './file-tools.js';
 import { errorResult, successResult } from './file-tools.js';
+import { resolveInvocationEnv } from './invocation-auth.js';
 
 const defineTool = defineMcpMigrationFactory('distillation-tools.ts', undefined, {
   resourceFamily: 'distillation',
   authority: 'callback-owner',
 });
 
-const API_URL = process.env['CAT_CAFE_API_URL'] ?? 'http://localhost:3004';
+function resolveApiUrl(): string {
+  return resolveInvocationEnv('CAT_CAFE_API_URL') ?? 'http://localhost:3004';
+}
 
 export const markGeneralizableInputSchema = {
   anchor: z.string().min(1).describe('Evidence anchor to mark'),
@@ -25,7 +28,7 @@ export const markGeneralizableInputSchema = {
 
 export async function handleMarkGeneralizable(input: { anchor: string; generalizable: boolean }): Promise<ToolResult> {
   try {
-    const res = await fetch(`${API_URL}/api/evidence/${encodeURIComponent(input.anchor)}/generalizable`, {
+    const res = await fetch(`${resolveApiUrl()}/api/evidence/${encodeURIComponent(input.anchor)}/generalizable`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ generalizable: input.generalizable }),
@@ -53,7 +56,7 @@ export async function handleNominateForGlobal(input: {
   personNames?: string[];
 }): Promise<ToolResult> {
   try {
-    const res = await fetch(`${API_URL}/api/distillation/nominate`, {
+    const res = await fetch(`${resolveApiUrl()}/api/distillation/nominate`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(input),
@@ -81,7 +84,7 @@ export async function handleReviewDistillation(input: {
   reviewerId: string;
 }): Promise<ToolResult> {
   try {
-    const res = await fetch(`${API_URL}/api/distillation/${encodeURIComponent(input.candidateId)}/review`, {
+    const res = await fetch(`${resolveApiUrl()}/api/distillation/${encodeURIComponent(input.candidateId)}/review`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ decision: input.decision, reviewerId: input.reviewerId }),

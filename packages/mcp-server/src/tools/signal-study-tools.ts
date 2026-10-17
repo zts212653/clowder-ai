@@ -3,10 +3,14 @@ import { defineMcpMigrationFactory } from '../tool-governance-migration.js';
 
 import type { ToolResult } from './file-tools.js';
 import { errorResult, successResult } from './file-tools.js';
+import { resolveInvocationEnv } from './invocation-auth.js';
 
 const defineTool = defineMcpMigrationFactory('signal-study-tools.ts', undefined, { authority: 'local-runtime' });
 
-const API_URL = process.env['CAT_CAFE_API_URL'] ?? 'http://localhost:3004';
+function resolveApiUrl(): string {
+  return resolveInvocationEnv('CAT_CAFE_API_URL') ?? 'http://localhost:3004';
+}
+
 const SIGNAL_USER = process.env['CAT_CAFE_SIGNAL_USER']?.trim() || 'codex';
 
 async function apiJson(
@@ -19,7 +23,7 @@ async function apiJson(
     if (init?.body && !headers.has('Content-Type')) {
       headers.set('Content-Type', 'application/json');
     }
-    const response = await fetch(`${API_URL}${path}`, { ...init, headers });
+    const response = await fetch(`${resolveApiUrl()}${path}`, { ...init, headers });
     if (!response.ok) {
       return { ok: false, error: `API failed (${response.status}): ${await response.text()}` };
     }
