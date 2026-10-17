@@ -9,7 +9,7 @@ import {
   SETTINGS_IA,
   TEAM_WORKSPACE_PIN_ID,
 } from '../settings-ia';
-import { SETTINGS_SECTIONS } from '../settings-nav-config';
+import { CLASSIC_DESTINATION_SECTION_IDS, SETTINGS_SECTIONS } from '../settings-nav-config';
 
 describe('F322 设置与管理 information architecture', () => {
   it('has exactly the 11 decided first-level items, in the decided order and groups', () => {
@@ -39,7 +39,9 @@ describe('F322 设置与管理 information architecture', () => {
   });
 
   it('keeps every one of the 14 old sections, each under exactly one first-level item', () => {
-    for (const section of SETTINGS_SECTIONS) {
+    const classicDestinationSections = new Set<string>(CLASSIC_DESTINATION_SECTION_IDS);
+    const originalSections = SETTINGS_SECTIONS.filter((section) => !classicDestinationSections.has(section.id));
+    for (const section of originalSections) {
       const owners = SETTINGS_IA.filter(
         (entry) =>
           entry.destination.kind === 'sections' &&
@@ -48,7 +50,7 @@ describe('F322 设置与管理 information architecture', () => {
       expect(owners, `section ${section.id} must have exactly one owner`).toHaveLength(1);
       expect(entryForSection(section.id)).toBe(owners[0]);
     }
-    expect(SETTINGS_SECTIONS).toHaveLength(14);
+    expect(originalSections).toHaveLength(14);
   });
 
   it('places account login immediately after members under 猫猫团队', () => {

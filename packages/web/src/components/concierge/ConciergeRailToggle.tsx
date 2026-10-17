@@ -8,8 +8,8 @@ import { CafeIcon } from '../rich/CafeIcons';
 import { openCompanionConversation } from './companion-entry';
 
 /**
- * The re-entry contract (INV-3 / P2 R6) as a hook, so the classic rail button and the F322 v2 rail button
- * share ONE source of truth for when the entry exists and what a click does.
+ * The re-entry contract (INV-3 / P2 R6), shared by Settings recovery and the F322 v2 rail.
+ * Classic ActivityBar does not mount a companion button; Settings owns its recovery action.
  */
 export function useConciergeRailToggle(): {
   visible: boolean;

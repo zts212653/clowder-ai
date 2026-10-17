@@ -11,6 +11,7 @@ import {
   validateCapabilityTipInventory,
 } from '@cat-cafe/shared';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { CAPABILITY_SURFACE_ROUTES, isHiddenTipDestination } from '@/lib/capability-tip-surfaces';
 import rawTips from '@/lib/capability-tips.seed.json';
 import { recordCapabilityTipEvent } from '@/lib/capabilityTipEvents';
 import {
@@ -35,15 +36,12 @@ const DEFAULT_FIRST_DELAY_MS = 6000;
 const DEFAULT_ROTATE_MS = 30000;
 
 const INVENTORY_TIP_IDS: readonly string[] = CAPABILITY_TIPS.map((t) => t.id);
-const CAPABILITY_SURFACE_ROUTES: Readonly<Record<string, string>> = {
-  collective: '/collective',
-  'new-conversation': '/',
-  'settings.plugins': '/settings?s=plugins',
-};
 
 function capabilitySurfaceHref(tip: CapabilityTip): string | undefined {
   if (tip.action?.type !== 'open_capability_surface') return undefined;
-  return CAPABILITY_SURFACE_ROUTES[tip.action.surfaceId];
+  if (isHiddenTipDestination(tip.action.surfaceId)) return undefined;
+  const href = CAPABILITY_SURFACE_ROUTES[tip.action.surfaceId];
+  return href && !isHiddenTipDestination(href) ? href : undefined;
 }
 
 function canRenderInTipStrip(tip: CapabilityTip): boolean {

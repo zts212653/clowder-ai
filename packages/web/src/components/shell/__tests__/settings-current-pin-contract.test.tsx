@@ -2,7 +2,7 @@ import { act, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { entryForSection } from '@/components/settings/settings-ia';
-import { SETTINGS_SECTIONS } from '@/components/settings/settings-nav-config';
+import { CLASSIC_DESTINATION_SECTION_IDS, SETTINGS_SECTIONS } from '@/components/settings/settings-nav-config';
 
 const pin = vi.hoisted(() => vi.fn());
 vi.mock('@/components/settings/SettingsContent', () => ({
@@ -42,7 +42,10 @@ describe('F322 selected-section pins and manual tabs', () => {
     delete (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT;
   });
   it.each(
-    SETTINGS_SECTIONS.map((section) => [section.id, section.label]),
+    // F190 also registers classic sections whose v2 destinations have separate route owners.
+    SETTINGS_SECTIONS.filter((section) => !CLASSIC_DESTINATION_SECTION_IDS.some((id) => id === section.id)).map(
+      (section) => [section.id, section.label],
+    ),
   )('%s is pinnable after selecting it, despite one current-section pin control', (id, label) => {
     const owner = entryForSection(id);
     if (!owner) throw new Error('Missing section owner');

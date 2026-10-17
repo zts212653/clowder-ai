@@ -27,6 +27,7 @@ interface ChatContainerHeaderProps {
   hasWorkspaceActivity?: boolean;
   onOpenMessageSearch?: () => void;
   messageSearchOpen?: boolean;
+  approvalCount?: number;
   conversationViewController?: ConversationViewPreferenceController;
   conversationViewMessages?: readonly ChatMessage[];
   conversationViewQueue?: readonly QueueEntry[];
@@ -46,6 +47,7 @@ export function ChatContainerHeader({
   hasWorkspaceActivity = false,
   onOpenMessageSearch,
   messageSearchOpen = false,
+  approvalCount = 0,
   conversationViewController,
   conversationViewMessages,
   conversationViewQueue,
@@ -99,6 +101,7 @@ export function ChatContainerHeader({
               onToggleStatusPanel={onToggleStatusPanel}
               statusPanelOpen={statusPanelOpen}
               hasWorkspaceActivity={hasWorkspaceActivity}
+              approvalCount={approvalCount}
               tooltip
             />
           </div>
@@ -142,6 +145,7 @@ export function ChatContainerHeader({
           onToggleStatusPanel={onToggleStatusPanel}
           statusPanelOpen={statusPanelOpen}
           hasWorkspaceActivity={hasWorkspaceActivity}
+          approvalCount={approvalCount}
         />
       </div>
     </header>
@@ -210,12 +214,14 @@ export function PanelToggle({
   statusPanelOpen,
   hasWorkspaceActivity = false,
   tooltip = false,
+  approvalCount = 0,
 }: {
   onToggleStatusPanel: () => void;
   statusPanelOpen: boolean;
   hasWorkspaceActivity?: boolean;
   /** F322 v2: name comes from AppTooltip (150ms, focus, Escape) instead of the native `title` (~1s). */
   tooltip?: boolean;
+  approvalCount?: number;
 }) {
   // The button is server-rendered before React owns its click handler. Browser
   // journeys wait on this marker rather than racing cold client hydration.
@@ -225,6 +231,7 @@ export function PanelToggle({
   }, []);
 
   const label = statusPanelOpen ? '收起 Workspace' : '打开 Workspace';
+  const accessibleLabel = approvalCount > 0 ? `${label}，${approvalCount} 项待审批` : label;
   const button = (
     <button
       type="button"
@@ -234,8 +241,8 @@ export function PanelToggle({
           ? 'text-cafe-accent'
           : 'text-cafe-secondary hover:bg-[var(--console-hover-bg)] hover:text-cafe-accent'
       }`}
-      aria-label={label}
-      title={tooltip ? undefined : label}
+      aria-label={accessibleLabel}
+      title={tooltip ? undefined : accessibleLabel}
       data-client-interactive={clientInteractive ? 'true' : 'false'}
       data-testid="workspace-panel-toggle"
     >
@@ -252,17 +259,25 @@ export function PanelToggle({
         <path d="M4 2.5h8a1.5 1.5 0 0 1 1.5 1.5v8a1.5 1.5 0 0 1-1.5 1.5H4A1.5 1.5 0 0 1 2.5 12V4A1.5 1.5 0 0 1 4 2.5Z" />
         <path d="M10.5 2.5v11M7.5 6 5.5 8l2 2" />
       </svg>
-      {hasWorkspaceActivity && (
+      {approvalCount > 0 ? (
+        <span
+          className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-[var(--semantic-warning)] px-1 text-micro font-bold text-[var(--cafe-accent-foreground)]"
+          aria-hidden="true"
+          data-testid="workspace-approval-count"
+        >
+          {approvalCount > 99 ? '99+' : approvalCount}
+        </span>
+      ) : hasWorkspaceActivity ? (
         <span
           className="absolute right-1 top-1 h-2 w-2 rounded-full border-2 border-[var(--console-card-bg)] bg-[var(--semantic-success)]"
           aria-hidden="true"
           data-testid="workspace-activity-badge"
         />
-      )}
+      ) : null}
     </button>
   );
   return tooltip ? (
-    <AppTooltip label={label} side="bottom">
+    <AppTooltip label={accessibleLabel} side="bottom">
       {button}
     </AppTooltip>
   ) : (

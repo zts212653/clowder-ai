@@ -23,10 +23,6 @@ const mockCloseRightPanel = vi.fn(() => {
   mockRightPanelOpen = false;
 });
 
-vi.mock('@/hooks/useApprovalHub', () => ({
-  useApprovalHubSync: vi.fn(),
-}));
-
 vi.mock('@/hooks/useEntrustedWorkProjection', () => ({
   useEntrustedWorkProjection: (projection: string) => {
     if (projection !== 'needs-me') throw new Error(`unexpected projection: ${projection}`);
@@ -77,36 +73,7 @@ vi.mock('@/components/workbench/experience-workbench-store', () => ({
     }),
 }));
 
-vi.mock('@/stores/callbackAuthStore', () => ({
-  useCallbackAuthAvailable: () => false,
-  useCallbackAuthAggregate: () => ({ unviewedFailures24h: 0 }),
-}));
-
-vi.mock('@/hooks/useCafeTheme', () => ({
-  useCafeTheme: () => ({ toggleTheme: vi.fn(), resolvedTheme: 'light' }),
-}));
-
-vi.mock('@/hooks/usePinnedSections', () => ({
-  usePinnedSections: () => ({ pinned: [], pin: vi.fn(), unpin: vi.fn(), isPinned: () => false }),
-}));
-
-vi.mock('@/components/icons/MemoryIcon', () => ({
-  MemoryIcon: () => React.createElement('span', null, 'M'),
-}));
-
-vi.mock('@/components/hub-icons', () => ({
-  HubIcon: () => React.createElement('span'),
-}));
-
-vi.mock('@/components/settings/settings-nav-config', () => ({
-  SETTINGS_SECTIONS: [],
-}));
-
-vi.mock('@/components/ThreadSidebar/thread-navigation', () => ({
-  getThreadIdFromPathname: () => 'default',
-}));
-
-import { ActivityBar } from '@/components/ActivityBar';
+import { AttentionRailButtons } from '@/components/attention/AttentionRailButtons';
 
 describe('F246 AC-D3 + F310 — distinct attention entries', () => {
   let container: HTMLDivElement;
@@ -144,7 +111,7 @@ describe('F246 AC-D3 + F310 — distinct attention entries', () => {
   it('preserves the Approval Hub bell for pending approvals outside entrusted work', async () => {
     mockCount = 2;
     await act(async () => {
-      root.render(React.createElement(ActivityBar));
+      root.render(React.createElement(AttentionRailButtons));
     });
 
     const bellBtn = container.querySelector('[data-testid="approval-hub-button"]');
@@ -166,7 +133,7 @@ describe('F246 AC-D3 + F310 — distinct attention entries', () => {
 
   it('renders the Approval Hub bell button', async () => {
     await act(async () => {
-      root.render(React.createElement(ActivityBar));
+      root.render(React.createElement(AttentionRailButtons));
     });
 
     const bellBtn = container.querySelector('[data-testid="approval-hub-button"]');
@@ -179,7 +146,7 @@ describe('F246 AC-D3 + F310 — distinct attention entries', () => {
   it('caps badge at 99+ for count > 99', async () => {
     mockCount = 200;
     await act(async () => {
-      root.render(React.createElement(ActivityBar));
+      root.render(React.createElement(AttentionRailButtons));
     });
 
     const badge = container.querySelector('[data-testid="approval-hub-badge"]') as HTMLElement;
@@ -199,7 +166,7 @@ describe('F246 AC-D3 + F310 — distinct attention entries', () => {
       resultTargetRef: { owner: 'f284-workspace-launcher', key: 'global:mode:approval' },
     };
     await act(async () => {
-      root.render(React.createElement(ActivityBar));
+      root.render(React.createElement(AttentionRailButtons));
     });
 
     const bellBtn = container.querySelector('[data-testid="approval-hub-button"]');
@@ -229,7 +196,7 @@ describe('F246 AC-D3 + F310 — distinct attention entries', () => {
       },
     };
     await act(async () => {
-      root.render(React.createElement(ActivityBar));
+      root.render(React.createElement(AttentionRailButtons));
     });
 
     await act(async () => {
@@ -246,7 +213,7 @@ describe('F246 AC-D3 + F310 — distinct attention entries', () => {
     mockRightPanelMode = 'status';
     mockRightPanelOpen = false;
     await act(async () => {
-      root.render(React.createElement(ActivityBar));
+      root.render(React.createElement(AttentionRailButtons));
     });
 
     await act(async () => {
@@ -263,7 +230,7 @@ describe('F246 AC-D3 + F310 — distinct attention entries', () => {
     mockRightPanelMode = 'workspace';
     mockRightPanelOpen = true;
     await act(async () => {
-      root.render(React.createElement(ActivityBar));
+      root.render(React.createElement(AttentionRailButtons));
     });
 
     await act(async () => {
@@ -278,7 +245,7 @@ describe('F246 AC-D3 + F310 — distinct attention entries', () => {
   it('Approval title and aria expose only the Approval count', async () => {
     mockCount = 7;
     await act(async () => {
-      root.render(React.createElement(ActivityBar));
+      root.render(React.createElement(AttentionRailButtons));
     });
 
     const bellBtn = container.querySelector('[data-testid="approval-hub-button"]') as HTMLElement;
@@ -289,7 +256,7 @@ describe('F246 AC-D3 + F310 — distinct attention entries', () => {
   it.each(['loading', 'error'] as const)('hides a stale Approval count while its read is %s', async (state) => {
     mockCount = 2;
     mockApprovalUnavailable = state;
-    await act(async () => root.render(React.createElement(ActivityBar)));
+    await act(async () => root.render(React.createElement(AttentionRailButtons)));
     const bell = container.querySelector('[data-testid="approval-hub-button"]') as HTMLElement;
     const expectedLabel = state === 'loading' ? '审批正在读取' : '审批暂时不可用';
     expect(bell.getAttribute('title')).toBe(expectedLabel);
@@ -300,7 +267,7 @@ describe('F246 AC-D3 + F310 — distinct attention entries', () => {
   it('keeps a stable Needs Me entry at zero without inventing a badge', async () => {
     mockCount = 0;
     await act(async () => {
-      root.render(React.createElement(ActivityBar));
+      root.render(React.createElement(AttentionRailButtons));
     });
 
     const needsMeButton = container.querySelector('[data-testid="needs-me-button"]') as HTMLElement;
@@ -319,7 +286,7 @@ describe('F246 AC-D3 + F310 — distinct attention entries', () => {
     mockCount = 2;
     mockNeedsMeCount = 3;
     await act(async () => {
-      root.render(React.createElement(ActivityBar));
+      root.render(React.createElement(AttentionRailButtons));
     });
 
     const approvalButton = container.querySelector<HTMLButtonElement>('[data-testid="approval-hub-button"]');
@@ -339,7 +306,7 @@ describe('F246 AC-D3 + F310 — distinct attention entries', () => {
     mockNeedsMeCount = 1;
     mockNeedsMeError = true;
     await act(async () => {
-      root.render(React.createElement(ActivityBar));
+      root.render(React.createElement(AttentionRailButtons));
     });
 
     const needsMeButton = container.querySelector('[data-testid="needs-me-button"]') as HTMLElement;

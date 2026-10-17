@@ -2,6 +2,7 @@ import type { CapabilityTip } from '@cat-cafe/shared';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { HIDDEN_TIP_DESTINATIONS } from '@/lib/capability-tip-surfaces';
 
 const sourceTip: CapabilityTip = {
   id: 'capability-alpha-source',
@@ -219,9 +220,11 @@ describe('F244 CapabilityTipStrip action eligibility', () => {
     expect(link?.getAttribute('href')).toBe('/settings?s=plugins');
   });
 
-  it('opens the canonical Collective launch surface from its capability tip', async () => {
+  it.each(
+    Object.keys(HIDDEN_TIP_DESTINATIONS),
+  )('does not promote the hidden %s surface from a capability tip', async (surfaceId) => {
     vi.doMock('@/lib/capability-tips.seed.json', () => ({
-      default: [collectiveTip],
+      default: [{ ...collectiveTip, action: { ...collectiveTip.action, surfaceId } }],
     }));
 
     const { CapabilityTipStrip } = await import('../CapabilityTipStrip');
@@ -244,8 +247,8 @@ describe('F244 CapabilityTipStrip action eligibility', () => {
     });
 
     const link = container.querySelector<HTMLAnchorElement>('[data-testid="capability-tip-open-surface"]');
-    expect(link?.textContent).toContain('Enter Collective');
-    expect(link?.getAttribute('href')).toBe('/collective');
+    expect(link).toBeNull();
+    expect(container.querySelector('[data-testid="capability-tip-strip"]')?.getAttribute('data-tip-id')).toBeNull();
   });
 
   it('opens the real new-conversation landing from its capability tip', async () => {

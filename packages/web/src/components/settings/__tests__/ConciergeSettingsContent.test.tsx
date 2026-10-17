@@ -5,6 +5,14 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mockApiFetch = vi.fn();
+const showDesktop = vi.hoisted(() => vi.fn());
+const openCompanion = vi.hoisted(() => vi.fn());
+
+vi.mock('@/components/concierge/companion-entry', () => ({ openCompanionConversation: openCompanion }));
+vi.mock('@/stores/conciergeDesktopStore', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/stores/conciergeDesktopStore')>()),
+  showConciergeDesktop: showDesktop,
+}));
 
 vi.mock('@/utils/api-client', () => ({
   apiFetch: (...args: unknown[]) => mockApiFetch(...args),
@@ -17,7 +25,9 @@ vi.mock('@/hooks/useCatData', () => ({
   }),
 }));
 
+import { useConciergeDesktopStore } from '@/stores/conciergeDesktopStore';
 import { useConciergeStore } from '@/stores/conciergeStore';
+import { writeShellPresentation } from '../../shell/shell-presentation';
 import { ConciergeSettingsContent } from '../ConciergeSettingsContent';
 
 const CONFIG = {
@@ -38,6 +48,11 @@ describe('ConciergeSettingsContent behavior controls', () => {
   let root: Root;
 
   beforeEach(() => {
+    localStorage.clear();
+    useConciergeStore.setState({ configLoaded: false, configFailed: false, invocationStatus: 'idle' });
+    useConciergeDesktopStore.setState({ available: false });
+    showDesktop.mockReset().mockResolvedValue(true);
+    openCompanion.mockReset().mockResolvedValue(true);
     vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
     container = document.createElement('div');
     document.body.appendChild(container);
@@ -49,6 +64,47 @@ describe('ConciergeSettingsContent behavior controls', () => {
         config: init?.method === 'PUT' ? { ...CONFIG, ...JSON.parse(String(init.body)) } : CONFIG,
       }),
     }));
+  });
+
+  it('recalls a hidden desktop from classic Settings without referring to a missing rail icon', async () => {
+    useConciergeDesktopStore.setState({ available: true, visible: false });
+    await act(async () => {
+      root.render(<ConciergeSettingsContent />);
+    });
+    expect(container.textContent).not.toContain('左侧猫图标');
+    const button = container.querySelector<HTMLButtonElement>('[data-testid="concierge-settings-recall"]');
+    expect(button).not.toBeNull();
+    expect(button?.textContent).toBe('唤回桌面猫猫');
+    await act(async () => button?.click());
+    expect(showDesktop).toHaveBeenCalledOnce();
+    expect(openCompanion).not.toHaveBeenCalled();
+  });
+
+  it('opens the canonical companion conversation when no desktop is available', async () => {
+    await act(async () => root.render(<ConciergeSettingsContent />));
+    const button = container.querySelector<HTMLButtonElement>('[data-testid="concierge-settings-recall"]');
+    expect(button?.textContent).toBe('打开伴随对话');
+    await act(async () => button?.click());
+    expect(openCompanion).toHaveBeenCalledOnce();
+    expect(showDesktop).not.toHaveBeenCalled();
+  });
+
+  it('falls back to companion conversation if recalling the desktop fails', async () => {
+    useConciergeDesktopStore.setState({ available: true });
+    showDesktop.mockResolvedValue(false);
+    await act(async () => root.render(<ConciergeSettingsContent />));
+    await act(async () =>
+      container.querySelector<HTMLButtonElement>('[data-testid="concierge-settings-recall"]')?.click(),
+    );
+    expect(showDesktop).toHaveBeenCalledOnce();
+    expect(openCompanion).toHaveBeenCalledOnce();
+  });
+
+  it('mentions the still-mounted rail icon only in v2', async () => {
+    writeShellPresentation('v2');
+    await act(async () => root.render(<ConciergeSettingsContent />));
+    expect(container.textContent).toContain('左侧猫图标');
+    expect(container.querySelector('[data-testid="concierge-settings-recall"]')).not.toBeNull();
   });
 
   afterEach(() => {

@@ -5,6 +5,7 @@ import { ChatVoiceFeatureControls } from '@/components/ChatVoiceFeatureControls'
 import { useShellPresentation } from '@/components/shell/shell-presentation';
 import { openTheaterReplay } from '@/components/ThreadSidebar/theater-navigation';
 import { WORKSPACE_MODE_META, type WorkspaceMode } from '@/lib/workspace-modes';
+import { useApprovalHubStore } from '@/stores/approvalHubStore';
 import type { WorkspaceSurface } from '@/stores/chat-types';
 import { useChatStore } from '@/stores/chatStore';
 import { RecentTrajectoryRecall } from './RecentTrajectoryRecall';
@@ -177,9 +178,11 @@ export function canonicalLauncherDestination(
 function DestinationCard({
   destination,
   onSelect,
+  badgeCount,
 }: {
   destination: WorkspaceLauncherDestination;
   onSelect: () => void;
+  badgeCount?: number;
 }) {
   const testId =
     destination.kind === 'surface'
@@ -208,7 +211,17 @@ function DestinationCard({
         />
       </span>
       <span className="min-w-0 flex-1">
-        <span className="block text-sm font-semibold tracking-tight">{destination.label}</span>
+        <span className="flex items-center gap-2 text-sm font-semibold tracking-tight">
+          {destination.label}
+          {badgeCount !== undefined && badgeCount > 0 && (
+            <span
+              className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-[var(--semantic-warning)] px-1.5 text-micro font-bold text-[var(--cafe-accent-foreground)]"
+              data-testid="workspace-launcher-approval-count"
+            >
+              {badgeCount > 99 ? '99+' : badgeCount}
+            </span>
+          )}
+        </span>
         <span className="mt-0.5 block text-micro leading-4 text-cafe-secondary">{destination.description}</span>
       </span>
       <svg
@@ -249,6 +262,7 @@ export function WorkspaceLauncher({
 }) {
   const setWorkspaceMode = useChatStore((state) => state.setWorkspaceMode);
   const openTeamSubject = useChatStore((state) => state.openTeamSubject);
+  const approvalCount = useApprovalHubStore((state) => (state.isLoading || state.error ? 0 : state.count));
   const [query, setQuery] = useState(initialSearchQuery ?? '');
   useEffect(() => setQuery(initialSearchQuery ?? ''), [initialSearchQuery]);
   const normalizedQuery = query.trim().toLocaleLowerCase();
@@ -327,6 +341,7 @@ export function WorkspaceLauncher({
                   key={`${destination.kind}:${destination.id}`}
                   destination={destination}
                   onSelect={() => selectDestination(destination)}
+                  badgeCount={destination.kind === 'mode' && destination.id === 'approval' ? approvalCount : undefined}
                 />
               ))}
             </div>
