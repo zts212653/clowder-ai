@@ -28,6 +28,8 @@ export interface CiPollResult {
   readonly failureDetailsPending?: boolean;
   /** More than one GraphQL context page; exact PR read belongs to execution. */
   readonly fullRollupPending?: boolean;
+  /** A detail read failed open: checks lack their required projection or execution classification. */
+  readonly failureDetailsIncomplete?: boolean;
   /** GitHub login of the user who merged the PR (only present when prState=merged). */
   readonly mergedByLogin?: string;
 }

@@ -10,11 +10,12 @@
 import type { TaskItem } from '@cat-cafe/shared';
 import { parsePrSubjectKey } from '@cat-cafe/shared';
 import type { ITaskStore } from '../../domains/cats/services/stores/ports/TaskStore.js';
+import { ReadMemo } from '../github/read-memo.js';
 import type { ExecuteContext, TaskSpec_P1 } from '../scheduler/types.js';
 import type { CiCdRouter, CiPollResult, CiRouteResult } from './CiCdRouter.js';
 import { isStaleCiSnapshot } from './ci-cd-contract.js';
 import { ciStatusTargetKey, createCiCollectionReaders, type PrCiStatusTarget } from './ci-status-batch-fetcher.js';
-import { enrichPrCiFailure } from './ci-status-fetcher.js';
+import { describesRollup, enrichPrCiFailure, failureDetailRollup } from './ci-status-fetcher.js';
 
 /** Signal carries the TaskItem so execute can access threadId/catId/userId */
 export interface CiCdCheckSignal {
@@ -45,6 +46,8 @@ export interface CiCdCheckTaskSpecOptions {
     warn: (...args: unknown[]) => void;
   };
   readonly pollIntervalMs?: number;
+  /** Clock that remembered failure-detail reads age by (test seam). */
+  readonly now?: () => number;
   /**
    * F168 external-case collection outlives one F280 wait generation. A done
    * wait remains collectable only when the canonical external-review policy
@@ -108,7 +111,12 @@ async function listCollectablePrs(opts: CiCdCheckTaskSpecOptions, signal?: Abort
   return candidates;
 }
 
-async function resolvePollResult(opts: CiCdCheckTaskSpecOptions, item: CiCdCheckSignal, signal?: AbortSignal) {
+async function resolvePollResult(
+  opts: CiCdCheckTaskSpecOptions,
+  item: CiCdCheckSignal,
+  failureDetails: ReadMemo<CiPollResult>,
+  signal?: AbortSignal,
+) {
   signal?.throwIfAborted();
   const poll = opts.fetchPrStatus
     ? await opts.fetchPrStatus(item.repoFullName, item.prNumber, signal)
@@ -119,7 +127,18 @@ async function resolvePollResult(opts: CiCdCheckTaskSpecOptions, item: CiCdCheck
   if (isStaleCiSnapshot(poll, currentWait)) {
     throw new Error(`Stale CI snapshot for ${item.repoFullName}#${item.prNumber}; retry current HEAD`);
   }
-  if (!poll.failureDetailsPending && !poll.fullRollupPending) return poll;
+  const key = ciStatusTargetKey(item.repoFullName, item.prNumber);
+  if (!poll.failureDetailsPending && !poll.fullRollupPending) {
+    failureDetails.forget(key);
+    return poll;
+  }
+  const rollup = failureDetailRollup(poll);
+  const remembered = rollup === undefined ? undefined : failureDetails.recall(key, rollup);
+  if (remembered) {
+    // Read for this very rollup: route it as observed with this batch.
+    const { observedAt: _readAt, ...details } = remembered;
+    return poll.observedAt === undefined ? details : { ...details, observedAt: poll.observedAt };
+  }
   // Admission is one batched request; details can need several typed GitHub
   // reads. Keep their combined budget below the existing 30-second work item.
   const timeoutSignal = AbortSignal.timeout(20_000);
@@ -132,6 +151,8 @@ async function resolvePollResult(opts: CiCdCheckTaskSpecOptions, item: CiCdCheck
   if (isStaleCiSnapshot(result, afterDetails)) {
     throw new Error(`Stale CI snapshot for ${item.repoFullName}#${item.prNumber}; retry current HEAD`);
   }
+  if (rollup !== undefined && describesRollup(poll, result)) failureDetails.remember(key, rollup, result);
+  else failureDetails.forget(key);
   return result;
 }
 
@@ -152,6 +173,7 @@ function collectionCycleLength(candidateCount: number, windowSize: number): numb
 
 export function createCiCdCheckTaskSpec(opts: CiCdCheckTaskSpecOptions): TaskSpec_P1<CiCdCheckSignal> {
   const defaultReaders = createCiCollectionReaders(opts.log, () => undefined);
+  const failureDetails = new ReadMemo<CiPollResult>(opts.now);
   const fetchPrStatuses = opts.fetchPrStatuses ?? defaultReaders.fetchPrStatuses;
   let lastCollectedSubject: string | undefined;
   let firstBatchOffset = 0;
@@ -225,7 +247,7 @@ export function createCiCdCheckTaskSpec(opts: CiCdCheckTaskSpecOptions): TaskSpe
       overlap: 'skip',
       timeoutMs: 30_000,
       async execute(signal: CiCdCheckSignal, _subjectKey: string, ctx: ExecuteContext) {
-        const pollResult = await resolvePollResult(opts, signal, ctx.signal);
+        const pollResult = await resolvePollResult(opts, signal, failureDetails, ctx.signal);
 
         const routeResult = await opts.cicdRouter.route(pollResult);
         if (isUnrecordedCiRoute(routeResult)) {
