@@ -45,7 +45,6 @@ const mockStoreState = () => ({
     targetCats: [],
     catStatuses: {},
     catInvocations: {},
-    currentGame: null,
 
     unreadCount: 0,
     lastActivity: 0,

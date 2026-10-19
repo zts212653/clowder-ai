@@ -1,22 +1,37 @@
-import type { UnifiedAttentionPreferenceCoordinate } from '@cat-cafe/shared';
+import {
+  ignoredItemKey,
+  type UnifiedAttentionItemV1,
+  type UnifiedAttentionPreferenceCoordinate,
+} from '@cat-cafe/shared';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useIgnoredItemPreferences } from '@/hooks/useIgnoredItemPreferences';
 import type { UnifiedAttentionView } from '../use-unified-attention';
+import {
+  type PersonalActionRefusal,
+  type PersonalActionSource,
+  personalSourceRefusal,
+} from './personal-action-eligibility';
 
 export interface MailboxPersonalActions {
   mode: 'visible' | 'ignored';
-  disabled: boolean;
-  change: (coordinate: UnifiedAttentionPreferenceCoordinate, restore?: boolean) => Promise<boolean>;
+  refusal: (item: UnifiedAttentionItemV1) => PersonalActionRefusal | null;
+  change: (item: UnifiedAttentionItemV1, restore?: boolean) => Promise<boolean>;
 }
 
-/** Use only the original owner-private writer, bound to the version shown by the exact personal read. */
+type Undo = { owner: string; coordinates: UnifiedAttentionPreferenceCoordinate[]; source: PersonalActionSource };
+const sourceOf = (item: UnifiedAttentionItemV1): PersonalActionSource =>
+  item.kind === 'user_mention' && item.userMention ? 'mentions' : 'all';
+
+/** Owner-private writes retain their identity/revision fence; each operation proves its own source. */
 export function useMailboxPersonalPreferences(view: UnifiedAttentionView) {
   const read = view.result.kind === 'ok' ? view.result.read : null;
   const personal = read?.personalView;
   const preferences = useIgnoredItemPreferences(read?.identity.ownerUserId, personal !== undefined);
   const currentView = useRef(view);
   currentView.current = view;
-  const [undo, setUndo] = useState<{ owner: string; coordinates: UnifiedAttentionPreferenceCoordinate[] } | null>(null);
+  const currentPreferences = useRef(preferences);
+  currentPreferences.current = preferences;
+  const [undo, setUndo] = useState<Undo | null>(null);
   const [actionError, setActionError] = useState<{ owner: string; error: 'conflict' | 'unavailable' } | null>(null);
   const displayOwner = (read ?? view.staleRead)?.identity.ownerUserId;
   useEffect(() => {
@@ -28,31 +43,53 @@ export function useMailboxPersonalPreferences(view: UnifiedAttentionView) {
     currentView.current.refetch();
     return false;
   };
-  const ready = Boolean(
-    read &&
-      personal &&
-      preferences.ready &&
-      !preferences.saving &&
-      personal.preferenceRevision === preferences.snapshot?.revision &&
-      read.identity.ownerUserId === preferences.snapshot?.ownerUserId &&
-      read.status === 'available' &&
-      read.consistency.state === 'verified' &&
-      Object.values(read.sources).every(
-        (source) => source.status === 'available' && source.exhaustiveness === 'complete',
-      ) &&
-      view.resultGeneration === view.readsStarted(),
-  );
-  const save = async (coordinates: UnifiedAttentionPreferenceCoordinate[], restore: boolean) => {
+  const refusal = (source: PersonalActionSource): PersonalActionRefusal | null => {
     const live = currentView.current;
-    if (!ready || !read || live.result !== view.result || live.resultGeneration !== live.readsStarted()) {
+    const prefs = currentPreferences.current;
+    if (!read || !personal || live.result !== view.result || live.resultGeneration !== live.readsStarted())
+      return 'refreshing';
+    if (prefs.saving) return 'saving';
+    if (prefs.error === 'unavailable') return 'preferences';
+    if (!prefs.ready) return 'identity';
+    if (read.identity.ownerUserId !== prefs.snapshot?.ownerUserId) return 'identity';
+    if (personal.preferenceRevision !== prefs.snapshot?.revision) return 'changed';
+    return personalSourceRefusal(read, source);
+  };
+  const containsPreferences = (coordinates: UnifiedAttentionPreferenceCoordinate[]) => {
+    const keys = new Set(currentPreferences.current.snapshot?.entries.map((entry) => ignoredItemKey(entry.coordinate)));
+    return coordinates.every((coordinate) => keys.has(ignoredItemKey(coordinate)));
+  };
+  const itemRefusal = (item: UnifiedAttentionItemV1): PersonalActionRefusal | null => {
+    const reason = refusal(sourceOf(item));
+    if (reason) return reason;
+    const coordinate = item.preferenceCoordinate;
+    if (!coordinate) return 'changed';
+    const matches = read?.items.filter(
+      (current) =>
+        current.preferenceCoordinate && ignoredItemKey(current.preferenceCoordinate) === ignoredItemKey(coordinate),
+    );
+    if (matches?.length !== 1 || sourceOf(matches[0]) !== sourceOf(item)) return 'changed';
+    if (personal?.mode === 'ignored' && !containsPreferences([coordinate])) return 'changed';
+    return null;
+  };
+  const save = async (
+    coordinates: UnifiedAttentionPreferenceCoordinate[],
+    restore: boolean,
+    source: PersonalActionSource,
+  ) => {
+    const live = currentView.current;
+    if (refusal(source) || !read || coordinates.length === 0 || (restore && !containsPreferences(coordinates))) {
       return refuse();
     }
     setActionError(null);
-    const result = await preferences.changeWithResult(restore ? [] : coordinates, restore ? coordinates : []);
-    if (result.saved && !restore) setUndo({ owner: read.identity.ownerUserId, coordinates });
+    const result = await currentPreferences.current.changeWithResult(
+      restore ? [] : coordinates,
+      restore ? coordinates : [],
+    );
+    if (result.saved && !restore) setUndo({ owner: read.identity.ownerUserId, coordinates, source });
     if (result.saved && restore) setUndo(null);
     if (!result.saved) {
-      // Capture the write's terminal failure before refetch disables/reinitializes the preference read.
+      // Preserve the terminal write failure across the next identity/read refresh.
       setActionError({ owner: read.identity.ownerUserId, error: result.error });
       live.refetch();
     }
@@ -61,24 +98,31 @@ export function useMailboxPersonalPreferences(view: UnifiedAttentionView) {
   const actions: MailboxPersonalActions | undefined = personal
     ? {
         mode: personal.mode,
-        disabled: !ready,
-        change: (coordinate, restore = false) => save([coordinate], restore),
+        refusal: itemRefusal,
+        change: (item, restore = false) => {
+          if (itemRefusal(item) || !item.preferenceCoordinate || restore !== (personal.mode === 'ignored'))
+            return Promise.resolve(refuse());
+          return save([item.preferenceCoordinate], restore, sourceOf(item));
+        },
       }
     : undefined;
+  const visibleUndo =
+    undo && read?.identity.ownerUserId === undo.owner && preferences.snapshot?.ownerUserId === undo.owner ? undo : null;
   return {
     actions,
+    batchRefusal: refusal('mentions'),
+    undoRefusal: visibleUndo
+      ? (refusal(visibleUndo.source) ?? (containsPreferences(visibleUndo.coordinates) ? null : ('changed' as const)))
+      : ('changed' as const),
     error: actionError && actionError.owner === displayOwner ? actionError.error : preferences.error,
     loading: preferences.loading,
     saving: preferences.saving,
-    undo:
-      undo && read?.identity.ownerUserId === undo.owner && preferences.snapshot?.ownerUserId === undo.owner
-        ? undo
-        : null,
+    undo: visibleUndo,
     ignoreBatch: (coordinates: UnifiedAttentionPreferenceCoordinate[], owner: string, revision: number) =>
-      read?.identity.ownerUserId === owner && preferences.snapshot?.revision === revision
-        ? save(coordinates, false)
+      read?.identity.ownerUserId === owner && currentPreferences.current.snapshot?.revision === revision
+        ? save(coordinates, false, 'mentions')
         : Promise.resolve(refuse()),
     dismissUndo,
-    undoLast: () => (undo ? save(undo.coordinates, true) : Promise.resolve(false)),
+    undoLast: () => (visibleUndo ? save(visibleUndo.coordinates, true, visibleUndo.source) : Promise.resolve(false)),
   };
 }

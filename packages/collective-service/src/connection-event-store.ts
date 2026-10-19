@@ -2,16 +2,19 @@ import {
   type CollectiveAgentMessageRequest,
   type CollectiveEventEnvelope,
   type CollectivePairingIntent,
+  type CollectiveWorkResultFileBindingResponse,
   collectiveAckRequestSchema,
   collectiveAgentMessageRequestSchema,
   collectiveConnectionCoordinatesSchema,
   collectiveHumanMessageRequestSchema,
   collectivePollRequestSchema,
+  collectiveWorkResultFileBindingRequestSchema,
 } from '@cat-cafe/shared';
 import { requireAgentMessageParticipation } from './agent-message-participation.js';
 import { requireNoArtifactCustody } from './artifact-revocation-guard.js';
 import { recordCollectiveWorkResult } from './collaboration-work.js';
 import { recordCollectiveWorkProgress } from './collaboration-work-progress.js';
+import { emitHumanCommentWake } from './collaboration-work-wake.js';
 import {
   assertConnectionCoordinates,
   assertServiceCoordinates,
@@ -31,6 +34,11 @@ import {
   secretMatches,
 } from './persistence.js';
 import type { ConnectionRecord, MutableServiceState } from './state.js';
+import {
+  bindAcceptedCollectiveWorkResultFile,
+  persistCollectiveWorkResultFile,
+  projectCollectiveWorkResultEvents,
+} from './work-result-files.js';
 
 export interface PairingExchangeInput {
   readonly serviceInstanceId: string;
@@ -140,21 +148,34 @@ export class CollectiveConnectionEventStore {
       const auth = resolveSession(state, sessionToken);
       requireHumanAuthBinding(state, auth.human.humanId);
       requireMembership(state, input.collectiveId, auth.human.humanId);
-      return appendEvent(state, {
+      const actorScope = `human:${auth.human.humanId}`;
+      const existingId = state.clientEventIndex[`${input.collectiveId}:${actorScope}:${input.clientEventId}`];
+      const replayed = Boolean(
+        existingId && (state.events[input.collectiveId] ?? []).some((event) => event.eventId === existingId),
+      );
+      const actor = {
+        kind: 'human' as const,
+        humanId: auth.human.humanId,
+        displayName: auth.human.displayName,
+        ...(auth.human.avatarUrl ? { avatarUrl: auth.human.avatarUrl } : {}),
+      };
+      const now = this.now();
+      const event = appendEvent(state, {
         coordinates: input,
-        actorScope: `human:${auth.human.humanId}`,
-        actor: {
-          kind: 'human',
-          humanId: auth.human.humanId,
-          displayName: auth.human.displayName,
-          ...(auth.human.avatarUrl ? { avatarUrl: auth.human.avatarUrl } : {}),
-        },
-        now: this.now(),
+        actorScope,
+        actor,
+        now,
       });
+      if (!replayed) emitHumanCommentWake(state, input, event, auth.human, now);
+      return event;
     });
   }
 
-  async postAgentMessage(endpointCredential: string, unsafeInput: unknown): Promise<CollectiveEventEnvelope> {
+  async postAgentMessage(
+    endpointCredential: string,
+    unsafeInput: unknown,
+    serviceOrigin: string,
+  ): Promise<CollectiveEventEnvelope> {
     const input = collectiveAgentMessageRequestSchema.parse(unsafeInput);
     return this.persistence.transaction((state) => {
       const connection = requireConnection(state, endpointCredential, input.connectionId);
@@ -167,7 +188,12 @@ export class CollectiveConnectionEventStore {
         authorizedHuman.humanId,
         this.now(),
       );
-      const { workResultIntent: _workResultIntent, workProgressIntent: _workProgressIntent, ...coordinates } = input;
+      const {
+        workResultIntent: _workResultIntent,
+        workResultFile: _workResultFile,
+        workProgressIntent: _workProgressIntent,
+        ...coordinates
+      } = input;
       const actor: Extract<CollectiveEventEnvelope['actor'], { kind: 'agent' }> = {
         kind: 'agent',
         human: {
@@ -186,12 +212,22 @@ export class CollectiveConnectionEventStore {
           sessionRef: input.agent.sessionRef,
         },
       };
+      const actorScope = `connection:${connection.connectionId}`;
+      const replayed = Boolean(state.clientEventIndex[`${input.collectiveId}:${actorScope}:${input.clientEventId}`]);
       const event = appendEvent(state, {
         coordinates: { ...coordinates, ...receipts },
-        actorScope: `connection:${connection.connectionId}`,
+        actorScope,
         // Current participation names new events; exact retries retain history.
         actor: authoritativeDisplayName === undefined ? actor : preserveAgentReplayActor(state, input, actor),
         now: this.now(),
+      });
+      persistCollectiveWorkResultFile({
+        state,
+        request: input,
+        receipt: receipts.workResultReceipt,
+        event,
+        serviceOrigin,
+        replayed,
       });
       recordCollectiveWorkResult(state, event, this.now());
       recordCollectiveWorkProgress(state, event);
@@ -199,12 +235,44 @@ export class CollectiveConnectionEventStore {
     });
   }
 
-  async listEventsForHuman(sessionToken: string, collectiveId: string): Promise<CollectiveEventEnvelope[]> {
+  async bindAcceptedWorkResultFile(
+    endpointCredential: string,
+    unsafeInput: unknown,
+  ): Promise<CollectiveWorkResultFileBindingResponse> {
+    const input = collectiveWorkResultFileBindingRequestSchema.parse(unsafeInput);
+    return this.persistence.transaction((state) => {
+      const connection = requireConnection(state, endpointCredential, input.connectionId);
+      assertConnectionCoordinates(state, connection, input);
+      const authorizedHuman = requireAuthorizedHuman(state, connection);
+      const event = (state.events[input.collectiveId] ?? []).find(
+        (candidate) => candidate.eventId === input.resultEventId,
+      );
+      if (
+        !event ||
+        event.actor.kind !== 'agent' ||
+        event.actor.provenance.connectionId !== connection.connectionId ||
+        event.actor.human.humanId !== authorizedHuman.humanId
+      )
+        throw new CollectiveServiceError(
+          'RETURN_UNAVAILABLE',
+          'Legacy file binding does not belong to this endpoint authority',
+          409,
+        );
+      const record = bindAcceptedCollectiveWorkResultFile({ state, event, file: input.workResultFile });
+      return { resultEventId: event.eventId, fileId: record.fileId };
+    });
+  }
+
+  async listEventsForHuman(
+    sessionToken: string,
+    collectiveId: string,
+    serviceOrigin: string,
+  ): Promise<CollectiveEventEnvelope[]> {
     const state = this.persistence.snapshot();
     const auth = resolveSession(state, sessionToken);
     requireHumanAuthBinding(state, auth.human.humanId);
     requireMembership(state, collectiveId, auth.human.humanId);
-    return structuredClone(state.events[collectiveId] ?? []);
+    return projectCollectiveWorkResultEvents(state, state.events[collectiveId] ?? [], serviceOrigin);
   }
 
   async pollEvents(endpointCredential: string, unsafeInput: unknown) {

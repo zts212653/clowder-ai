@@ -310,3 +310,32 @@ it('revalidates the requesting Human membership after restart before disclosing 
   expect(() => reopened.store.readParticipationContext(f.connection.endpointCredential, input)).toThrow();
   expect(await reopened.store.listEventsForHuman(f.owner.sessionToken, f.coordinates.collectiveId)).toEqual([request]);
 });
+
+it('persists updated public short names without changing the exact recipient or leaking a second connection', async () => {
+  const f = await fixture();
+  const second = await f.pair();
+  for (const connection of [f.connection, second])
+    await f.store.publishParticipation(connection.endpointCredential, {
+      ...f.coordinates,
+      connectionId: connection.connectionId,
+      revision: 1,
+      agents: [{ catId: 'opus', displayName: '完整模型身份', displayLabel: '宪宪', channelIds: ['a'] }],
+    });
+  await f.store.publishParticipation(f.connection.endpointCredential, {
+    ...f.coordinates,
+    connectionId: f.connection.connectionId,
+    revision: 2,
+    agents: [{ catId: 'opus', displayName: '完整模型身份', displayLabel: ' 新昵称 ', channelIds: ['a'] }],
+  });
+  const reopened = await CollectiveServiceStore.open({ dataDirectory: f.directory });
+  const members = await reopened.store.listParticipants(f.owner.sessionToken, f.coordinates.collectiveId);
+  expect(members.find((m) => m.connectionId === f.connection.connectionId)).toMatchObject({
+    displayLabel: '新昵称',
+    displayName: '完整模型身份',
+    catId: 'opus',
+  });
+  expect(members.find((m) => m.connectionId === second.connectionId)).toMatchObject({
+    displayLabel: '宪宪',
+    catId: 'opus',
+  });
+});

@@ -66,6 +66,16 @@ describe('GET /api/callbacks/get-message visibility', () => {
     return app;
   }
 
+  test('retired game callback is absent from the full callback registration', async () => {
+    const app = await createApp();
+    try {
+      const response = await app.inject({ method: 'POST', url: '/api/callbacks/submit-game-action', payload: {} });
+      assert.equal(response.statusCode, 404, response.body);
+    } finally {
+      await app.close();
+    }
+  });
+
   test('returns 404 for whisper message not visible to calling cat (play mode)', async () => {
     const app = await createApp();
     const { invocationId, callbackToken } = await registry.create('user-1', 'opus');

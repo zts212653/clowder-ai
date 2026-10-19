@@ -162,23 +162,25 @@ export function MailboxRow({
     <li
       data-testid="mailbox-item"
       data-kind-label={
-        nativePerson
-          ? personCopy.kind
-          : nativeRepair
-            ? repairCopy.kind
-            : nativeSchedule
-              ? scheduleCopy.kind
-              : nativeCorrection
-                ? correctionCopy.kind
-                : nativeDomain
-                  ? domainCopy.kind[nativeDomain]
-                  : nativeOriginal
-                    ? originalKind
-                    : nativeReview
-                      ? reviewCopy.kind
-                      : item.choiceRequest || nativeRuntime
-                        ? runtimeKind
-                        : t.kinds[item.kind]
+        item.collectiveAccountabilityRequest
+          ? t.accountabilityKind
+          : nativePerson
+            ? personCopy.kind
+            : nativeRepair
+              ? repairCopy.kind
+              : nativeSchedule
+                ? scheduleCopy.kind
+                : nativeCorrection
+                  ? correctionCopy.kind
+                  : nativeDomain
+                    ? domainCopy.kind[nativeDomain]
+                    : nativeOriginal
+                      ? originalKind
+                      : nativeReview
+                        ? reviewCopy.kind
+                        : item.choiceRequest || nativeRuntime
+                          ? runtimeKind
+                          : t.kinds[item.kind]
       }
       data-row-key={rowKey}
       data-stale={stale ? 'true' : undefined}

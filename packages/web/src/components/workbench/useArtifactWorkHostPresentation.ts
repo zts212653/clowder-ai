@@ -54,6 +54,7 @@ export function useArtifactWorkHostPresentation({
     activeSurface,
     surfaceActive,
     hostEligible,
+    workModeHostEligible,
     fullWindowActive,
     narrowWorkComposerActive,
     splitPreferenceActive,
@@ -95,7 +96,13 @@ export function useArtifactWorkHostPresentation({
   useEffect(() => {
     const session = presentation.session;
     if (!session) return;
-    const reason = invalidationReason(session, threadId, layout, activeSurface?.id ?? null, hostEligible);
+    const reason = invalidationReason(
+      session,
+      threadId,
+      layout,
+      activeSurface?.id ?? null,
+      hostEligible || (session.workMode === true && workModeHostEligible),
+    );
     if (!reason) return;
     dispatch({
       type: 'invalidate',
@@ -105,7 +112,7 @@ export function useArtifactWorkHostPresentation({
       threadId: session.threadId,
       surfaceId: session.surfaceId,
     });
-  }, [activeSurface?.id, dispatch, hostEligible, layout, presentation.session, threadId]);
+  }, [activeSurface?.id, dispatch, hostEligible, workModeHostEligible, layout, presentation.session, threadId]);
 
   useEffect(() => {
     if (!fullWindowActive) return;

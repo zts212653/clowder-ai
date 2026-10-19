@@ -91,7 +91,9 @@ export function ChannelConversationFlow({
               humanNames={humanNames}
               reactions={channelReactions}
               onProposeWork={(event) => void actions.proposeWork(event.eventId).catch(() => undefined)}
-              onCommitWork={(work, participant) => void actions.commitWork(work, participant).catch(() => undefined)}
+              onCommitWork={(work, participant, accountability) =>
+                void actions.commitWork(work, participant, accountability).catch(() => undefined)
+              }
               onDeclineWork={(work) => void actions.declineWork(work).catch(() => undefined)}
               onAcceptWorkResult={(work) => void actions.acceptWorkResult(work).catch(() => undefined)}
               onRequestWorkRevision={actions.requestWorkRevision}
@@ -134,7 +136,11 @@ export interface ChannelConversationActions {
   readonly mention: (event: CollectiveEventEnvelope) => void;
   readonly openMember: (event: CollectiveEventEnvelope) => void;
   readonly proposeWork: (sourceEventId: string) => Promise<void>;
-  readonly commitWork: (work: CollectiveWorkProjection, participant?: CollectiveParticipant) => Promise<void>;
+  readonly commitWork: (
+    work: CollectiveWorkProjection,
+    participant?: CollectiveParticipant,
+    accountability?: 'self' | 'unassigned',
+  ) => Promise<void>;
   readonly declineWork: (work: CollectiveWorkProjection) => Promise<void>;
   readonly acceptWorkResult: (work: CollectiveWorkProjection) => Promise<void>;
   readonly requestWorkRevision: (work: CollectiveWorkProjection, feedback: string) => Promise<void>;

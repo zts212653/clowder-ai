@@ -60,6 +60,12 @@ export async function resolveMessageTakeover(
     message.visibility === 'whisper'
       ? ({ visibility: 'whisper', whisperTo: [...new Set(message.whisperTo ?? [])] } as const)
       : ({ visibility: 'public' } as const);
+  const attachments = (message.contentBlocks ?? [])
+    .filter((block) => block.type === 'context_attachment')
+    .map((block) => ContextAttachmentSchema.parse(block.attachment));
+  const selected = input.attachmentId ? attachments.filter((item) => item.id === input.attachmentId) : attachments;
+  if (input.attachmentId && (selected.length !== 1 || selected[0]?.kind !== 'media'))
+    throw new ModificationTextError('invalid_patch');
   if (existing?.payload.source.kind === 'video-project') {
     if (!deps.project) throw new ModificationTextError('invalid_patch');
     return deps.project.resolve(input, principal, existing);
@@ -68,20 +74,18 @@ export async function resolveMessageTakeover(
     if (
       existing.progress.sourceKind !== 'human_message' ||
       existing.progress.sourceMessageId !== input.sourceMessageId ||
+      existing.progress.sourceAttachmentId !== input.attachmentId ||
       existing.progress.sourceMessageRevision !== sourceMessageRevision
     )
       throw new ModificationTextError('source_changed');
     return { payload: existing.payload, sourceMessageRevision, sourceVisibility };
   }
-  const attachments = (message.contentBlocks ?? [])
-    .filter((block) => block.type === 'context_attachment')
-    .map((block) => ContextAttachmentSchema.parse(block.attachment));
   if (attachments.some((item) => item.kind === 'project-screening')) {
     if (!deps.project || attachments.some((item) => item.kind === 'media' || item.kind === 'quote'))
       throw new ModificationTextError('invalid_patch');
     return deps.project.resolve(input, principal);
   }
-  const media = attachments.filter((item) => item.kind === 'media');
+  const media = selected.filter((item) => item.kind === 'media');
   if (media.length) {
     if (!deps.media || attachments.some((item) => item.kind === 'quote' && item.source.kind === 'workspace_file'))
       throw new ModificationTextError('invalid_patch');

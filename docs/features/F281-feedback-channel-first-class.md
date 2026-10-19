@@ -150,7 +150,7 @@ operator 原话（2026-07-30，[thread-id]）：
 
 ### Phase D（反射沉淀）
 - [x] AC-D1: 出生三件套反射已落
-  ADR-038，`feat-lifecycle` Design Gate checklist
+  [ADR-038](../decisions/038-l0-staging-protocol.md)，`feat-lifecycle` Design Gate checklist
   引用；F281 的 feedback expression / TTL=0 episode truth / exact-subject consumer
   对照表是首个合规样例。
 

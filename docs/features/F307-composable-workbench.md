@@ -58,7 +58,7 @@ operator 对拆分的定论是：
 
 | 证据 | 已成立的事实 | 不得冒充的结论 |
 |---|---|---|
-| F284 | 已落地 contextual 右侧 Workspace v1：稳定入口、单一焦点、Activity 与按需详情 | F284 v1 不是全局多上下文 Workbench |
+| [F284](F284-contextual-workspace-shell.md) | 已落地 contextual 右侧 Workspace v1：稳定入口、单一焦点、Activity 与按需详情 | F284 v1 不是全局多上下文 Workbench |
 | [PR #3974](https://github.com/zts212653/clowder-ai/pull/3974) exact `ae6a623cf9e19f88089dc95682233d1f87026319` | 历史上曾把 F290 working-set 原型挂进真实 Workspace | operator 于 2026-08-26 明确否决该产品面；runtime surface、独立 persistence 与一级 Workspace mode 已删除，只保留 Git 历史作为反例证据 |
 | [PR #3981](https://github.com/zts212653/clowder-ai/pull/3981) exact `4224d006c1af599d095b506bd578c6847bfd3df1` | 分支曾探索 typed surface、working-set 恢复、Agent Run tab 与结果回链 | 它是被否决方向的原型证据，不是 F290 交付、F307 Gate 通过或既定 merge 路径；不得合入或从其继续堆 UI |
 | [F063](F063-hub-workspace-explorer.md) / [F120](F120-hub-embedded-browser.md) / [F299](F299-workspace-invocation-trajectory.md) | File/Code、Browser、运行轨迹已有真实 owner 与产品路径 | F307 不接管编辑器、Browser、Agent runtime 或领域数据 |

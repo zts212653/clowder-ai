@@ -1,11 +1,13 @@
 'use client';
 
-import type { ContextAttachment, WorkspaceFileQuoteSource } from '@cat-cafe/shared';
+import type { ContextAttachment, MediaContextAttachment, WorkspaceFileQuoteSource } from '@cat-cafe/shared';
 import { useState } from 'react';
 import { useChatStore } from '@/stores/chatStore';
 import { apiFetch } from '@/utils/api-client';
 import { ComposerFileQuoteTags } from './ComposerFileQuoteTags';
 import { ContextMediaSelections } from './ContextMediaSelections';
+import { GalleryAttachmentGroup } from './content-review/GalleryAttachmentGroup';
+import { sameGalleryGroup } from './content-review/media-chat-selection';
 import { useContextAttachmentPresentation } from './context-attachment-presentation';
 import { replyBodyCopy } from './reply-body.shell-copy';
 import { useShellCopy } from './shell/shell-copy';
@@ -239,12 +241,24 @@ export function ContextAttachmentList({
   );
   let annotationSummaryRendered = false;
   let fileTagsRendered = false;
+  const renderedGalleries = new Set<string>();
   return (
     <div
       data-testid="context-attachment-list"
       className={compact ? 'relative flex flex-wrap gap-2 px-4 pt-2' : undefined}
     >
       {attachments.map((attachment) => {
+        if (attachment.kind === 'media' && attachment.gallery) {
+          if (renderedGalleries.has(attachment.id)) return null;
+          const group = attachments.filter(
+            (item): item is MediaContextAttachment =>
+              item.kind === 'media' && !!item.gallery && sameGalleryGroup(attachment.gallery!, item.gallery),
+          );
+          for (const member of group) renderedGalleries.add(member.id);
+          return (
+            <GalleryAttachmentGroup key={attachment.id} attachments={group} compact={compact} onRemove={onRemove} />
+          );
+        }
         if (fileQuoteIds.has(attachment.id) && onRemove) {
           if (fileTagsRendered) return null;
           fileTagsRendered = true;

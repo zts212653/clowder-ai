@@ -65,6 +65,11 @@ import {
   type LifecycleAppendRecoveryResult,
   prepareLifecycleAppendRecovery,
 } from '../lifecycle-append-recovery.js';
+import {
+  type LifecycleWakeCoverageInput,
+  type LifecycleWakeCoverageResult,
+  prepareLifecycleWakeCoverage,
+} from '../lifecycle-wake-coverage.js';
 import type { MessageDeliveryBoundary } from '../message-delivery-boundary.js';
 import { messageFrom } from '../message-from.js';
 import { notifyMessageTimelineChange } from '../notify-message-timeline-change.js';
@@ -315,6 +320,11 @@ export interface StoredMessage {
       parentInvocationId: string;
       isFailureReport: boolean;
     };
+    /** Additional callers actually covered by this same response, with admission provenance. */
+    coveredA2AFailureReturns?: Omit<
+      NonNullable<NonNullable<StoredMessage['extra']>['a2aFailureReturn']>,
+      'parentInvocationId'
+    >[];
     /** Immutable Live ingress receipt, not executable media or an ownership record. */
     liveAdmission?: { sessionId: string; targetId: string };
     /** HTTP conversation request provenance; prose expansion is derived, explicit selection is identity. */
@@ -2251,6 +2261,10 @@ export interface IMessageStore {
     input: LifecycleAppendRecoveryInput,
     ledgerStore: QueueLedgerStore,
   ): LifecycleAppendRecoveryResult | Promise<LifecycleAppendRecoveryResult>;
+  commitLifecycleWakeCoverage(
+    input: LifecycleWakeCoverageInput,
+    ledgerStore: QueueLedgerStore,
+  ): LifecycleWakeCoverageResult | Promise<LifecycleWakeCoverageResult>;
   /**
    * F098-D: CAS transition queued → delivered at an admitted timestamp.
    * `deliveryTransitioned` is true only when this call won; false on a state no-op.
@@ -3958,6 +3972,44 @@ export class MessageStore {
     source.lifecycle = structuredClone(prepared.lifecycles[0]);
     response.lifecycle = structuredClone(prepared.lifecycles[1]);
     return { kind: 'applied', messages: [structuredClone(source), structuredClone(response)], entry: prepared.entry };
+  }
+
+  commitLifecycleWakeCoverage(
+    input: LifecycleWakeCoverageInput,
+    ledgerStore: QueueLedgerStore,
+  ): LifecycleWakeCoverageResult {
+    if (!(ledgerStore instanceof InMemoryQueueLedgerStore))
+      throw new Error('Wake coverage requires the matching memory Queue ledger');
+    const sources = input.entries.map((entry) => this.messages.find((message) => message.id === entry.messageId));
+    const response = this.messages.find((message) => message.id === input.responseMessageId);
+    if (!response || sources.some((source) => !source)) return { kind: 'not_found' };
+    const entries = input.entries.map((entry) => ledgerStore.getNow(input.threadId, entry.entryId));
+    const prepared = prepareLifecycleWakeCoverage(sources as StoredMessage[], response, entries, input);
+    if (prepared.kind !== 'prepared') return prepared;
+    if (!prepared.replayed) {
+      ledgerStore.commitWakeCoverageNow(
+        input.threadId,
+        input.entries.map((entry) => entry.entryId),
+        entries,
+        prepared.entries,
+      );
+      for (const message of prepared.messages) {
+        const current = this.messages.find((candidate) => candidate.id === message.id)!;
+        current.lifecycle = structuredClone(message.lifecycle);
+        if (message.id === response.id) current.extra = structuredClone(message.extra);
+        else if (current.deliveryStatus === 'queued' && message.deliveryStatus === 'delivered') {
+          current.deliveryStatus = message.deliveryStatus;
+          current.deliveredAt = message.deliveredAt;
+          current.timelineOrderAt = message.timelineOrderAt;
+          this.threadTimeline.upsert(current);
+        }
+      }
+    }
+    return {
+      kind: prepared.replayed ? 'replayed' : 'applied',
+      messages: structuredClone(prepared.messages),
+      entries: prepared.entries,
+    };
   }
 
   /**

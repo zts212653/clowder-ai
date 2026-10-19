@@ -72,6 +72,7 @@ export function FileBlock({
                 alt: block.fileName,
                 mediaType: isVideoFile(block) ? 'video' : 'image',
                 entry: source,
+                item: { kind: 'rich-file', blockId: block.id },
               })
             }
             className="flex w-full items-center gap-3 text-left"

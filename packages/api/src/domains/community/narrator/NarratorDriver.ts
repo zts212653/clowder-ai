@@ -4,7 +4,7 @@
  * Wakes the narrator cat (resolved via RoleResolver, never hardcoded) to produce a
  * DirectionCard TriageEntry with narrative + evidence + route recommendation.
  *
- * Design (SPIKE-1 decision — wakeCatFn path, GameNarratorDriver same mechanism):
+ * Design (SPIKE-1 decision — shared private-briefing wakeCatFn path):
  * - spawnNarrator() fire-and-forgets via the injected WakeCatFn to the configured
  *   narrator ops thread.
  * - The narrator cat (gemini35 by default) wakes with a structured briefing, uses MCP
@@ -21,7 +21,7 @@
 import { createCatId, type RoleResolver } from '@cat-cafe/shared';
 import type { FastifyBaseLogger } from 'fastify';
 
-import type { WakeCatFn } from '../../cats/services/game/GameNarratorDriver.js';
+import type { WakeCatFn } from '../../cats/services/agents/invocation/wake-cat.js';
 
 // ---------------------------------------------------------------------------
 // D0.2: Persistent dedup store interface (replaces process-local Set)
@@ -56,7 +56,7 @@ export interface NarratorDriverDeps {
    * community ops / F168 narrator thread ID (not a per-case thread).
    */
   readonly narratorThreadId: string;
-  /** Proven production mechanism: GameNarratorDriver.WakeCatFn (SPIKE-1 candidate a). */
+  /** Shared durable private-briefing wake-up contract. */
   readonly wakeCat: WakeCatFn;
   readonly log: Pick<FastifyBaseLogger, 'info' | 'warn' | 'error'>;
   /** D0.2: Persistent dedup store for INV-3 idempotency. */
@@ -78,7 +78,7 @@ export interface NarratorSpawnParams {
   readonly briefingContext: string;
 }
 
-/** Narrator spawn SLA — matches game narrator timeout (generous for evidence search). */
+/** Narrator spawn SLA — generous budget for evidence search. */
 const NARRATOR_TIMEOUT_MS = 5 * 60_000; // 5 min
 
 /**

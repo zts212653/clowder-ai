@@ -2,6 +2,7 @@
 
 import type { ContentModificationRecord, ContentModificationRequest } from '@cat-cafe/shared';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { useArtworkChrome, useRegisterArtworkHistory } from '@/components/content-review/ArtworkChrome';
 import { ContentModificationLanding } from '@/components/content-review/ContentModificationLanding';
 import { modificationSourceVersion, modificationStorageKey } from '@/components/content-review/modification-draft';
 import {
@@ -11,6 +12,7 @@ import {
 } from '@/components/content-review/modification-focus';
 import { textModificationCopy } from '@/components/content-review/text-modification.shell-copy';
 import { useShellCopy } from '@/components/shell/shell-copy';
+import { useShellPresentation } from '@/components/shell/shell-presentation';
 import { useChatStore } from '@/stores/chatStore';
 import { apiFetch } from '@/utils/api-client';
 import { useWorkspaceChatReveal } from '../WorkspaceChatReveal';
@@ -195,9 +197,13 @@ export function WorkspaceModificationEntry({
     openedRequest.current = openRequest;
     void open();
   }, [openRequest, open]);
+  useRegisterArtworkHistory(() => void open());
+  const chrome = useArtworkChrome();
+  const isV2 = useShellPresentation() === 'v2';
+  const unifiedHistory = !!chrome && isV2 && compact && !allowNewRequest;
   return (
     <>
-      {!hideTrigger && (allowNewRequest || chatRequest || !intent) ? (
+      {!hideTrigger && !unifiedHistory && (allowNewRequest || chatRequest || !intent) ? (
         <div
           className={
             compact

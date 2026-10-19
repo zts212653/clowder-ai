@@ -1,10 +1,18 @@
 import { z } from 'zod';
 import { mediaModificationSelectionItemSchema, reviewedMediaTypeSchema } from './artifact-review-media.js';
 import { contentModificationSourceSchema } from './content-modification.js';
+import { messageMediaPublicationSourceSchema } from './media-publication-source.js';
 
 const id = z.string().trim().min(1).max(128);
 const ownerId = z.string().trim().min(1).max(256);
 const revision = z.number().int().positive().safe();
+/** Navigation only. The selected work still uses its independent, version-bound source below. */
+export const mediaGalleryOriginSchema = messageMediaPublicationSourceSchema
+  .pick({ threadId: true, messageId: true, messageRevision: true, item: true })
+  .extend({ index: z.number().int().min(0).max(10000), count: z.number().int().min(1).max(10001) })
+  .strict()
+  .refine((value) => value.index < value.count, 'Gallery position must be inside its original message group');
+export type MediaGalleryOrigin = z.infer<typeof mediaGalleryOriginSchema>;
 /** References owner truth; preview images and the original Human body stay in ordinary message blocks. */
 export const MediaContextAttachmentSchema = z
   .object({
@@ -14,6 +22,7 @@ export const MediaContextAttachmentSchema = z
     title: z.string().trim().min(1).max(300),
     mediaType: reviewedMediaTypeSchema,
     source: contentModificationSourceSchema,
+    gallery: mediaGalleryOriginSchema.optional(),
     selections: z.array(mediaModificationSelectionItemSchema).max(12),
     taskContext: z
       .object({

@@ -96,6 +96,7 @@ test(
       );
       await workAction.click();
       await linkedWorkArticle.getByText('工作提议 · 来自这条消息', { exact: true }).waitFor();
+      await host.screenshot({ path: path.join(evidence, 'proposal-1440.png'), fullPage: true });
       await linkedWorkArticle.getByRole('button', { name: `交给 ${nativeOwner.cat.displayName}`, exact: true }).click();
       await linkedWorkArticle.getByText('可以开始', { exact: true }).waitFor();
       await linkedWorkArticle.scrollIntoViewIfNeeded();
@@ -106,7 +107,10 @@ test(
       await embedded.getByRole('heading', { name: '产品方向 路线', exact: true }).waitFor();
       await embedded.getByRole('button', { name: '依赖关系', exact: true }).click();
       await embedded.getByText('没有前置工作', { exact: true }).waitFor();
-      await embedded.getByRole('button', { name: '对话', exact: true }).click();
+      await embedded
+        .getByRole('navigation', { name: '频道', exact: true })
+        .getByRole('button', { name: /产品方向/ })
+        .click();
 
       const linkedWorkEvent = (
         await opened.store.listEventsForHuman(seeded.owner.sessionToken, seeded.coordinates.collectiveId)
@@ -117,8 +121,8 @@ test(
         .works.find((work) => work.sourceEventId === linkedWorkEvent.eventId);
       assert.ok(publicWork?.assignmentEventId);
       assert.equal((await nativeOwner.dispatchPending()).failed, 0);
-      await embedded.getByRole('button', { name: '我的猫', exact: true }).click();
-      await cafe.getByRole('button', { name: '日程', exact: true }).click();
+      await embedded.locator('details.collective-menu > summary').click();
+      await embedded.getByRole('button', { name: '我的日程…', exact: true }).click();
       const publicWorkRequest = cafe.getByRole('article').filter({ hasText: linkedWorkTalk });
       assert.equal(await publicWorkRequest.getByRole('button', { name: '交给它持续处理', exact: true }).count(), 0);
       await nativeOwner.admitCommittedWorkForEvent(publicWork.assignmentEventId);
@@ -130,7 +134,7 @@ test(
         'the public assignment must resolve its exact private Task instead of the first Work item',
       );
       assert.equal(admittedPublicTask.status, 'todo');
-      await cafe.getByRole('button', { name: '关闭我的猫', exact: true }).click();
+      await cafe.getByRole('button', { name: '返回共同体', exact: true }).click();
       const publicResult = '真实首页已接通，结果留在原讨论。';
       await nativeOwner.replyToEvent(publicWork.assignmentEventId, publicResult);
       await embedded.getByText(publicResult, { exact: true }).waitFor();
@@ -195,7 +199,10 @@ test(
       await embedded.getByRole('button', { name: 'Roadmap', exact: true }).click();
       await embedded.getByText('已完成', { exact: true }).waitFor();
       await host.screenshot({ path: path.join(evidence, 'default-roadmap-1440.png'), fullPage: true });
-      await embedded.getByRole('button', { name: '对话', exact: true }).click();
+      await embedded
+        .getByRole('navigation', { name: '频道', exact: true })
+        .getByRole('button', { name: /产品方向/ })
+        .click();
 
       const queuedBeforeResponse = (await nativeOwner.queuedForChannel('产品方向')).length;
       await nativeOwner.replyToRequest(responseRequest, response);
@@ -206,16 +213,16 @@ test(
         queuedBeforeResponse,
         'the returning Agent event must not self-awaken the endpoint',
       );
-      await embedded.getByRole('button', { name: '我的猫', exact: true }).click();
-      await cafe.getByRole('button', { name: '日程', exact: true }).click();
+      await embedded.locator('details.collective-menu > summary').click();
+      await embedded.getByRole('button', { name: '我的日程…', exact: true }).click();
       await cafe.getByText('已回复', { exact: true }).waitFor({ timeout: 7_000 });
-      await cafe.getByRole('button', { name: '关闭我的猫', exact: true }).click();
+      await cafe.getByRole('button', { name: '返回共同体', exact: true }).click();
       assert.equal((await nativeOwner.receiveRequest('请把这段讨论整理成可以一起审阅的首页方案。')).failed, 0);
       assert.equal((await nativeOwner.receiveRequest('再独立检查消息、话题与私人工作的边界。')).failed, 0);
       await nativeOwner.receiveRequest('插件频道的请求应当留在它自己的位置。', '插件共建');
       const requests = ['请把这段讨论整理成可以一起审阅的首页方案。', '再独立检查消息、话题与私人工作的边界。'];
-      await embedded.getByRole('button', { name: '我的猫', exact: true }).click();
-      await cafe.getByRole('button', { name: '日程', exact: true }).click();
+      await embedded.locator('details.collective-menu > summary').click();
+      await embedded.getByRole('button', { name: '我的日程…', exact: true }).click();
       await cafe.getByText(requests[0], { exact: true }).waitFor();
       const admittedRequestTaskIds = [];
       for (const body of requests) {
@@ -227,10 +234,10 @@ test(
         );
         assert.ok(source);
         const taskCount = (await nativeOwner.tasks.listByKind('work')).length;
-        await cafe.getByRole('button', { name: '关闭我的猫', exact: true }).click();
+        await cafe.getByRole('button', { name: '返回共同体', exact: true }).click();
         const proposal = await nativeOwner.proposeWorkForEvent(source.event.eventId, body);
         const proposalArticle = embedded.locator('article.message').filter({ hasText: body });
-        await proposalArticle.getByRole('button', { name: '授权决定…', exact: true }).click();
+        await proposalArticle.getByRole('button', { name: '待你决定…', exact: true }).click();
         const decision = host.getByRole('dialog', { name: '授权决定', exact: true });
         await decision.getByRole('button', { name: '允许这一次', exact: true }).click();
         await decision.getByText('规则已生效，猫将重新判断原请求', { exact: true }).waitFor();
@@ -253,8 +260,8 @@ test(
           'Service records the actual Host Task receipt',
         );
         admittedRequestTaskIds.push(accepted.task.id);
-        await embedded.getByRole('button', { name: '我的猫', exact: true }).click();
-        await cafe.getByRole('button', { name: '日程', exact: true }).click();
+        await embedded.locator('details.collective-menu > summary').click();
+        await embedded.getByRole('button', { name: '我的日程…', exact: true }).click();
         await article.getByRole('link', { name: '查看工作', exact: true }).waitFor();
       }
       const work = (await nativeOwner.tasks.listByKind('work')).filter((task) => task.id !== unrelatedTask.id);
@@ -279,7 +286,7 @@ test(
         assert.equal(publicText.includes(task.threadId), false);
         assert.equal(await frame.locator(`a[href="/thread/${task.threadId}"]`).count(), 0);
       }
-      await cafe.getByRole('button', { name: '关闭我的猫', exact: true }).click();
+      await cafe.getByRole('button', { name: '返回共同体', exact: true }).click();
       await embedded
         .locator('article.message')
         .filter({ hasText: seeded.cat.body })
@@ -289,10 +296,11 @@ test(
       assert.equal(await cafe.count(), 0);
       await host.setViewportSize({ width: 390, height: 844 });
       await embedded.getByRole('button', { name: '关闭话题', exact: true }).click();
-      await embedded.getByRole('button', { name: '我的猫', exact: true }).click();
-      await cafe.waitFor();
+      await embedded.getByRole('button', { name: '查看成员', exact: true }).click();
+      const mobileRoster = host.getByRole('region', { name: '我的猫 · 仅自己可见', exact: true });
+      await mobileRoster.waitFor();
       assert.equal(await host.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
-      const rosterLabelsFit = await cafe
+      const rosterLabelsFit = await mobileRoster
         .locator('[data-testid="collective-cat-row"] strong, [data-testid="collective-cat-row"] strong + span')
         .evaluateAll((labels) => labels.map((label) => label.scrollWidth <= label.clientWidth));
       assert.equal(
@@ -305,12 +313,6 @@ test(
       await host.close();
       await nativeOwner.close();
       nativeOwner = undefined;
-      const prototype = await browser.newPage({ viewport: { width: 1440, height: 960 } });
-      prototype.setDefaultTimeout(15_000);
-      prototype.setDefaultNavigationTimeout(15_000);
-      await prototype.goto('http://127.0.0.1:5102/dev/collective-experience-gate', { waitUntil: 'domcontentloaded' });
-      await prototype.getByRole('heading', { name: '# 产品方向', exact: true }).waitFor();
-      await prototype.screenshot({ path: path.join(evidence, 'prototype-channel-1440.png'), fullPage: true });
       console.log(
         JSON.stringify({
           result: 'pass',
@@ -347,6 +349,28 @@ test(
       console.error(JSON.stringify({ evidence, result: 'fail' }));
       for (const [index, page] of (browser?.contexts().flatMap((context) => context.pages()) ?? []).entries()) {
         await page.screenshot({ path: path.join(evidence, `failure-${index}.png`) }).catch(() => undefined);
+        for (const frame of page.frames()) {
+          const action = await frame
+            .evaluate(() => {
+              const button = [...document.querySelectorAll('.message-action-more')].at(-1);
+              if (!button) return;
+              const r = button.getBoundingClientRect();
+              const toolbar = button.closest('.message-actions');
+              const flow = button.closest('.channel-flow');
+              return {
+                x: r.x,
+                y: r.y,
+                width: r.width,
+                height: r.height,
+                hit: document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2)?.className,
+                pointerEvents: getComputedStyle(toolbar).pointerEvents,
+                hovered: button.closest('.message')?.matches(':hover'),
+                scrollBehavior: flow && getComputedStyle(flow).scrollBehavior,
+              };
+            })
+            .catch(() => undefined);
+          if (action) console.error(JSON.stringify({ messageActionGeometry: action }));
+        }
       }
       throw error;
     } finally {
@@ -392,13 +416,13 @@ async function createCommittedPublicWork({
   assert.ok(publicWork?.assignmentEventId);
   assert.equal((await nativeOwner.dispatchPending()).failed, 0);
   const task = await nativeOwner.admitCommittedWorkForEvent(publicWork.assignmentEventId);
-  await embedded.getByRole('button', { name: '我的猫', exact: true }).click();
-  await cafe.getByRole('button', { name: '日程', exact: true }).click();
+  await embedded.locator('details.collective-menu > summary').click();
+  await embedded.getByRole('button', { name: '我的日程…', exact: true }).click();
   await cafe
     .getByRole('article')
     .filter({ hasText: body })
     .getByRole('link', { name: '查看工作', exact: true })
     .waitFor();
-  await cafe.getByRole('button', { name: '关闭我的猫', exact: true }).click();
+  await cafe.getByRole('button', { name: '返回共同体', exact: true }).click();
   return { article, event, publicWork, task };
 }

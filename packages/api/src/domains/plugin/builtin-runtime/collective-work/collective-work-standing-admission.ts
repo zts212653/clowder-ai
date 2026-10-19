@@ -189,7 +189,10 @@ async function immutableAssignmentSource(
     !event ||
     !identity ||
     !collectiveWorkAssignmentMatches(identity, work, event.workAcceptanceNotice) ||
-    !work.history.some((entry) => entry.action === 'committed' && entry.eventId === event.eventId)
+    !work.history.some(
+      (entry) =>
+        (entry.action === 'committed' || entry.action === 'accountability_assigned') && entry.eventId === event.eventId,
+    )
   )
     throw executionError('WORK_TASK_UNAVAILABLE', 'First assignment is absent from actual Service history and inbox');
   const existing =

@@ -549,7 +549,7 @@
     {
       "id": "F090",
       "name": "像素猫猫大作战（Pixel Cat Brawl）",
-      "status": "phase-1-done | **Owner**: Ragdoll",
+      "status": "legacy-implementation-retired（PR #5731 已合入；玩法愿望保留，未宣称完成）",
       "file": "F090-pixel-cat-brawl.md"
     },
     {
@@ -615,7 +615,7 @@
     {
       "id": "F101",
       "name": "Mode v2 — 游戏系统引擎 + 狼人杀",
-      "status": "in-progress (Phase I in progress) | **Owner**: Ragdoll | **Priority**: P1 | **Reopened**: 2026-03-14",
+      "status": "legacy-implementation-retired（PR #5731 已合入；玩法愿望保留，未宣称完成）",
       "file": "F101-mode-v2-game-engine.md"
     },
     {
@@ -1707,7 +1707,7 @@
     {
       "id": "F290",
       "name": "AI-native Collective — 多人·多 Agent 共同世界",
-      "status": "in-progress / 2026-10-13 对账：通讯模型 #4955、共同体首页 #5205、入口修复 #5304 与临时断线会话恢复 #5473 已合；真实模型接活/修订/回流和有界旅程已有证据；真实 Alpha runtime 重启、双真人双 Café 完整协作、最新 Collective 界面、F309 双 Human 共享内容与整项验收仍开放",
+      "status": "in-progress / 2026-10-19：旧同Café选猫/失效责任邀请两P1与R1状态反例已在5739 Alpha转绿；原266在5744关闭C-UAT-1/2，并在5748 Alpha `8ae121bd2a` / boot166关闭C-UAT-3，原三处页面纠偏全部通过。图组密度5737已由原414补验并释放。正式5201按You494单独恢复，Host/3003/3004保持e8c/boot38，六待办来源完整可读、原Work文件已绑定，原设计141限定通过；成果漏计修复5745已装入同一Alpha，但独立计数验收与正式Host加载仍待续。完整v1.2、真人OAuth/文件打开、双真人双Café、真实模型与整项验收继续开放。",
       "file": "F290-ai-native-collective.md"
     },
     {

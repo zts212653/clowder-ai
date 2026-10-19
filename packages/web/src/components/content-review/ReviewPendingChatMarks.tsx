@@ -4,6 +4,12 @@ import { anchorBounds } from './review-geometry';
 export interface PendingChatMark {
   readonly id: string;
   readonly anchor: ArtifactReviewAnchor;
+  readonly label?: string;
+  readonly active?: boolean;
+}
+
+function thumbnailBadgeCenter(position: number, extent: number, radius: number, fitted: boolean) {
+  return fitted ? Math.min(extent - radius, Math.max(radius, position)) : position;
 }
 
 /**
@@ -11,18 +17,34 @@ export interface PendingChatMark {
  * are not saved annotations (those keep their own numbering and discussion), so they look different: a dashed outline
  * and a filled number badge. Like the chips they go away when the message is sent or the place is removed.
  */
-export function ReviewPendingChatMarks({ marks, media }: { marks: readonly PendingChatMark[]; media: ImmutableMedia }) {
-  const radius = Math.max(8, media.width / 65);
+export function ReviewPendingChatMarks({
+  marks,
+  media,
+  badgeRadius,
+}: {
+  marks: readonly PendingChatMark[];
+  media: ImmutableMedia;
+  badgeRadius?: number;
+}) {
+  const radius = badgeRadius ?? Math.max(8, media.width / 65);
   return (
     <>
       {marks.map((mark, index) => {
         const box = anchorBounds(mark.anchor);
         if (!box) return null;
         const isPoint = mark.anchor.kind === 'image-point';
-        const cx = isPoint ? box.x : box.x + radius;
-        const cy = isPoint ? box.y : box.y + radius;
+        const fitted = badgeRadius !== undefined;
+        const cx = thumbnailBadgeCenter(isPoint ? box.x : box.x + radius, media.width, radius, fitted);
+        const cy = thumbnailBadgeCenter(isPoint ? box.y : box.y + radius, media.height, radius, fitted);
         return (
-          <g key={mark.id} data-testid="review-pending-chat-mark" data-selection-id={mark.id}>
+          <g
+            key={mark.id}
+            data-testid="review-pending-chat-mark"
+            data-selection-id={mark.id}
+            data-active={mark.active || undefined}
+            tabIndex={mark.active ? 0 : undefined}
+            aria-label={mark.active ? `第 ${mark.label ?? index + 1} 处` : undefined}
+          >
             {isPoint ? null : (
               <rect
                 x={box.x}
@@ -30,10 +52,10 @@ export function ReviewPendingChatMarks({ marks, media }: { marks: readonly Pendi
                 width={box.width}
                 height={box.height}
                 fill="var(--cafe-accent)"
-                fillOpacity={0.1}
+                fillOpacity={mark.active ? 0.25 : 0.1}
                 stroke="var(--cafe-accent)"
                 strokeWidth={2}
-                strokeDasharray="6 4"
+                strokeDasharray={mark.active ? undefined : '6 4'}
                 vectorEffect="non-scaling-stroke"
               />
             )}
@@ -47,7 +69,7 @@ export function ReviewPendingChatMarks({ marks, media }: { marks: readonly Pendi
               fontSize={Math.max(11, radius * 1.2)}
               fontWeight={600}
             >
-              {index + 1}
+              {mark.label ?? index + 1}
             </text>
           </g>
         );

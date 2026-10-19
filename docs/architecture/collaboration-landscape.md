@@ -5,7 +5,7 @@ feature_ids: [F064, F078, F079, F086, F087, F100, F108, F110, F128, F154, F155, 
 related_features: [F043, F052, F070, F073, F102, F114, F117, F148, F163, F169, F177, F178, F186, F188, F192, F200, F209, F236, F240, F241, F248, F250, F259, F261, F266, F267, F270, F277, F282, F285, F286, F287, F290]
 topics: [collaboration, a2a, human-cat, culture, routing, ball-custody, nurturing, taste, profile, attention-budget, teamact, harness-metabolism, memory-collaboration-loop, contract-hardening, control-plane, multi-provider, work-identity]
 created: 2026-06-29
-updated: 2026-08-02
+updated: 2026-10-18
 status: v2
 author: "Ragdoll/claude-opus-4-6 (v1), Ragdoll/claude-fable-5 (v2)"
 reviewed_by: "Ragdoll/claude-opus-4-8 (structural attack v1+v2), Maine Coon/GPT-5.5 (memory-side v1+v2); v2 review pending"
@@ -51,7 +51,7 @@ F234 之后的演化在这个框架上叠加了**三条主线**（v2 新增视�
 | 主线 | 一句话 | 代表 feature |
 |------|--------|--------------|
 | **契约化** | 协同原语从"约定+尽力而为"变成"可声明、可回执、可归属的契约" | F264 回执 / F280 等待契约 / F275 工作身份 |
-| **控制面化** | 协同状态从"散落在 thread 里"收敛成 operator 驾驶舱 | F246 审批中心 / F233 值班简报 / F262 档位 / F277(spec) |
+| **控制面化** | 协同状态从"散落在 thread 里"收敛成 operator 驾驶舱 | F246 审批中心 / F233 简报（已退役） / F262 档位 / F277(spec) |
 | **开放拓扑化** | 坐上桌的从"本地 CLI 双家族"扩展到云端猫、新家族、社区 provider | F247 云端猫 / F274 Kimi L0 / F241(spec) / F240 |
 
 ```
@@ -68,7 +68,7 @@ F234 之后的演化在这个框架上叠加了**三条主线**（v2 新增视�
 │         ┌──────────────┴─────┐   ┌─────┴──────────────┐               │
 │         │ 控制面（驾驶舱）    │   │ 人 ↔ 猫 记忆 Lanes │               │
 │         │ F246 审批中心      │   │ F231 profile        │               │
-│         │ F233 值班简报      │   │ F221 taste          │               │
+│         │ F233 简报（退役）  │   │ F221 taste          │               │
 │         │ F250 计划板        │   │ F227 event          │               │
 │         │ F262 思考档位      │   │ F255 dream→通水     │               │
 │         │ F277 注意力导航(s) │   └──┬────────┬─────────┘               │
@@ -225,21 +225,21 @@ feat creation（系统层）
 - **与 compress 正交**：compress 是"省 token 的失忆兜底"（被动、有损）；handoff 是"猫主导的优雅接力"（主动、高保真、选时机）
 - **五件套**：`done`（做了什么）/ `worktree_branch` / `commits` / `next_steps` / `gotchas`
 
-### 球权可观测（F233）— 整条河的守望者
+### 球权可观测（F233）— 旧产品面退役，账本保留
 
-上面四种形态每段管道都有局部刹车，但**没人看整条河**。F233 聚合所有形态的球权事件：
+F233 原设计试图通过一本球权账本提供两种读法；下图保留方案来源，产品面现已退役，账本继续用于任务审计与责任事实：
 
 ```
 球权事件流（append-only）
     │
-    ├─ 横切：值班简报（operator的收件箱）
+    ├─ 横切：值班简报（已退役）
     │   "球在我手上的有 3 个、球在猫手上的有 7 个、暗球 2 个"
     │
-    └─ 纵切：轨迹下钻（一个 feat 经历了什么）
+    └─ 纵切：旧 feat 轨迹（历史投影冻结只读）
         "F192 从 Phase A 开始，经过 12 个 thread、47 次传球、3 次乒乓"
 ```
 
-**v2 状态**：轨迹全链（Phase C 主体）已收口；值班简报的 operator surface（C1b/C1c）仍 pending——这部分职责正在被控制面（下文 F246/F277）分担。
+**退役校准（2026-10-18）**：F233 已于 2026-08-17 failed-close，C1b/C1c 撤销；[PR #5729](https://github.com/zts212653/clowder-ai/pull/5729) 清除简报 backend/cron/route。Phase B 账本保留，旧 feat 投影按 F304 冻结并供 F252 Story 历史读取；Workspace 执行轨迹由 F299 承载。线上 daily 已持久停用，源码部署与重启后核验由原 Task 继续持有，详见 [F233](../features/F233-ball-custody-observability.md#2026-10-18-退役补完与保留归属)。
 
 ### 协同原语的契约化（v2 主线一）
 
@@ -501,7 +501,7 @@ F255 做梦流程                                                F255
 
 #### 看得见：球和计划
 
-- **F233 值班简报**（in-progress）："球在谁手上"的横切收件箱——事件流与轨迹已收口，operator surface 尚未 close
+- **F233 值班简报**（已退役）：2026-08-17 failed-close，2026-10-18 补完 backend/cron/route 拆除；Phase B 账本与 Story 历史读取保留，不再排期 operator surface
 - **F250 Plan Board 猫猫祟祟**（done）：多猫任务进度右栏。注意：这是 2026-03 的老功能（原 F055，因号码撞车 2026-06 改号 F250），是控制面的元老，**不是** F234 之后的新增量
 
 #### 管得住：审批中心（F246，in-progress，控制面主角）
@@ -708,7 +708,7 @@ operator只在关键决策点介入，日常执行猫自主。目标是让operat
 | | 开新 thread | F128 Cat-Proposed Thread | 猫提议创建工作间 | active |
 | | 传球依据 | F208 Capability Profile | 能力画像六维档案 | done |
 | | 时效安全 | F254 Side-Effect Freshness | 发消息时世界变了吗 | in-progress |
-| | 球权观测 | F233 Ball Custody | 值班简报 + 轨迹下钻 | in-progress |
+| | 球权观测 | F233 Ball Custody | Phase B 审计账本保留；简报退役，旧轨迹冻结只读 | failed-close (partial-value-preserved) |
 | | 群发 | F078 Group Mentions | @all/@thread 群发 | done |
 | | 并行编排 | F086 Multi-Mention | 多猫并行 + 状态机 | done |
 | | 并发侧分发 | F108 Side Dispatch | 同 thread 多猫不互打断 | done |
@@ -772,7 +772,7 @@ operator只在关键决策点介入，日常执行猫自主。目标是让operat
 |---------|------|
 | 1. F231 养熟循环零有机使用 | **通水中**——F255 Phase A+A.1 已实装（diary/Present Loop），Phase B 未开工；F271/F282 补写侧生产端 |
 | 2. operator侧入口不对称 | **部分收敛**——F229 仍 in-progress；控制面（F246/F262）先一步给了 operator 统一入口 |
-| 3. F233 值班简报 dashboard 未 close | **仍开放**——轨迹全链已收口，operator surface (C1b/C1c) pending；职责部分由 F246/F277 分担 |
+| 3. F233 值班简报 dashboard 未 close | **已退役**——2026-08-17 failed-close，C1b/C1c 撤销；2026-10-18 补完简报 backend/cron/route 拆除，保留 Phase B 账本与 Story 历史读取 |
 | 4. TeamAct 从未进 architecture/ | **已闭环**——本文 v1 扶正，v2 延续 |
 | 5. F234 sunset deferred，代谢零运行 | **已反转**——reopen + SOP 手术落地，见元轴 |
 
@@ -781,7 +781,7 @@ operator只在关键决策点介入，日常执行猫自主。目标是让operat
 1. **契约层全部在长尾**——F264 部分 AC 开放、F280 Phase B 进行中、F275 runtime dormant（Phase C deferred）。契约"设计已立、覆盖未满"，跟 v1 时代元轴的状态类似——是下一个要盯实跑的地方
 2. **F278 awaiting activation**——摩擦责任闭环的代码落了，operator 激活前仍是 🟡
 3. **正式 sunset verdict = 0**——SOP 手术是判断驱动的结构减负；ablation 实验（L0-GD）尚未产出第一份反事实验证的退役判决
-4. **控制面下一块在纸上**——F277 注意力导航 spec；F233 值班简报 operator surface 仍未 close（两者有职责重叠，实现时需对齐边界）
+4. **F233 缺口已以退役处置**——不再把值班简报 operator surface 当作未完成开发；后续控制面工作依各自现行 feature 契约推进（2026-10-18 校准）
 5. **拓扑扩张的地基未开工**——F241 provider 插件、F261 durable execution 均 spec；云端猫（F247）目前是"能对话的家庭成员"，离"能全流程协作"（等待契约/回执/工作身份全覆盖）还有距离
 6. **F070 治理产物化仍零运行**——元轴闭环的最后一环还没通
 

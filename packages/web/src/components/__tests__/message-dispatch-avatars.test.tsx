@@ -2,6 +2,7 @@ import type { LifecycleActiveRun } from '@cat-cafe/shared';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { MessageNavigationProvider } from '@/components/thread-chat/MessageNavigationContext';
 import type { ChatMessage, QueueEntry } from '@/stores/chat-types';
 import {
   isLinkedDeliveryFailureCarrier,
@@ -287,6 +288,30 @@ describe('MessageDispatchAvatars', () => {
     expect(statusRow.scrollIntoView).toHaveBeenCalledWith({ behavior: 'smooth', block: 'center' });
     expect(statusRow.dataset.messageJumpFocus).toBe('true');
     statusRow.remove();
+  });
+
+  it('uses the clicked surface owner when another surface contains the same reply', () => {
+    const firstJump = vi.fn(() => true);
+    const secondJump = vi.fn(() => true);
+    act(() => {
+      root.render(
+        <>
+          {[firstJump, secondJump].map((jump, index) => (
+            <MessageNavigationProvider key={index} value={jump}>
+              <MessageDispatchAvatars
+                message={source('settled')}
+                timelineMessages={[response('completed')]}
+                activeRuns={[]}
+                getCatLabel={() => '布偶猫'}
+              />
+            </MessageNavigationProvider>
+          ))}
+        </>,
+      );
+    });
+    act(() => container.querySelectorAll('button')[1]?.click());
+    expect(secondJump).toHaveBeenCalledExactlyOnceWith('response-1');
+    expect(firstJump).not.toHaveBeenCalled();
   });
 
   it('checks uncertain Append without a button, then offers an explicit repeat until exact read proof', () => {

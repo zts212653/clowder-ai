@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
@@ -50,36 +51,37 @@ const attrsOf = (html: string, testId: string) =>
   new RegExp(`<[^>]*data-testid="${testId}"[^>]*>`).exec(html)?.[0] ?? '';
 
 describe('the nameplate carries a 32px face laid over its left end', () => {
-  it('keeps the plate at 26px high, 40px of left padding for the face and 10px on the right', () => {
-    const plate = attrsOf(render(), 'cat-nameplate');
-    expect(plate).toContain('h-[26px]');
-    expect(plate).toContain('pl-10'); // 40px
-    expect(plate).toContain('pr-2.5'); // 10px
-    expect(plate).toContain('rounded-t-lg'); // upper corners 8px
-    expect(plate).toContain('relative'); // the face is placed against the plate
+  it('renders the accepted 26px plate with a 32px face below its edge through the shared CSS', () => {
+    const style = document.createElement('style');
+    style.textContent = readFileSync('../ui/src/styles.css', 'utf8');
+    document.head.append(style);
+    const host = document.createElement('div');
+    host.innerHTML = render();
+    document.body.append(host);
+    try {
+      const plate = getComputedStyle(host.querySelector('[data-testid="cat-nameplate"]') as HTMLElement);
+      const face = getComputedStyle(host.querySelector('[data-testid="cat-nameplate-avatar"]') as HTMLElement);
+      const name = getComputedStyle(host.querySelector('[data-testid="cat-nameplate-name"]') as HTMLElement);
+      expect(plate.height).toBe('26px');
+      expect(plate.paddingLeft).toBe('40px');
+      expect(plate.paddingRight).toBe('10px');
+      expect(face.width).toBe('32px');
+      expect(face.height).toBe('32px');
+      expect(face.bottom).toBe('-2px');
+      expect(face.boxShadow).toBe('0 0 0 2px var(--shell-work)');
+      expect(name.fontSize).toBe('13px');
+      expect(name.fontWeight).toBe('600');
+      expect(name.textOverflow).toBe('ellipsis');
+    } finally {
+      host.remove();
+      style.remove();
+    }
   });
 
   it('fills the plate with the cat surface role, fading to transparent, as before', () => {
     expect(attrsOf(render(), 'cat-nameplate')).toContain(
       'linear-gradient(to bottom, var(--color-opus-surface), transparent)',
     );
-  });
-
-  it('draws the face 32px: its bottom 2px below the plate, its top above it, from the plate left edge', () => {
-    const face = attrsOf(render(), 'cat-nameplate-avatar');
-    expect(face).toContain('absolute');
-    expect(face).toContain('left-0');
-    const style = /style="([^"]*)"/.exec(face)?.[1] ?? '';
-    expect(style).toContain('width:32px');
-    expect(style).toContain('height:32px');
-    // the plate is 26 high: a 32px face whose bottom is 2px below it starts 4px above its top
-    expect(style).toContain('bottom:-2px');
-  });
-
-  it('rings the face in the work-surface colour, 2px, so it reads apart from the plate', () => {
-    const style = /style="([^"]*)"/.exec(attrsOf(render(), 'cat-nameplate-avatar'))?.[1] ?? '';
-    expect(style).toContain('box-shadow:0 0 0 2px var(--shell-work)');
-    expect(attrsOf(render(), 'cat-nameplate-avatar')).toContain('rounded-full');
   });
 
   it('asks the avatar for 32px and for no cat-coloured ring', () => {
@@ -90,15 +92,11 @@ describe('the nameplate carries a 32px face laid over its left end', () => {
     expect(html).not.toMatch(/width:16px;height:16px/);
   });
 
-  it('leaves the name as it was: 13px / 600, truncated, in the cat name role, with its own title', () => {
-    const html = render({ title: '完整名字' });
-    const name = attrsOf(html, 'cat-nameplate-name');
-    expect(name).toContain('text-compact');
-    expect(name).toContain('font-semibold');
-    expect(name).toContain('truncate');
+  it('keeps the full name keyboard-accessible for the shared tooltip and consumes the cat name role', () => {
+    const name = attrsOf(render({ title: '完整名字' }), 'cat-nameplate-name');
     expect(name).toContain('color:var(--color-opus-text)');
-    expect(name).toContain('title="完整名字"');
-    expect(html).toContain('>宪宪<');
+    expect(name).toContain('tabindex="0"');
+    expect(name).not.toContain('title=');
   });
 
   it('keeps the v2 face still; observed activity belongs to the last line', () => {

@@ -10,6 +10,7 @@ import type {
   CollectiveWorkProgressReceipt,
   CollectiveWorkResultReceipt,
   CollectiveWorkRevisionNotice,
+  CollectiveWorkWakeNotice,
 } from '@cat-cafe/shared';
 
 import { CollectiveServiceError } from './errors.js';
@@ -29,10 +30,11 @@ export interface AppendEventInput {
     readonly recipient?: CollectiveRecipient;
     readonly replyToEventId?: string;
     readonly attentionRequest?: CollectiveAttentionRequest;
-    readonly workRequest?: 'entrust' | 'revise' | 'continue';
+    readonly workRequest?: 'entrust' | 'revise' | 'continue' | 'resume';
     readonly workRevisionNotice?: CollectiveWorkRevisionNotice;
     readonly workAcceptanceNotice?: CollectiveWorkAcceptanceNotice;
     readonly workExecutionNotice?: CollectiveWorkExecutionNotice;
+    readonly workWakeNotice?: CollectiveWorkWakeNotice;
     readonly workResultReceipt?: CollectiveWorkResultReceipt;
     readonly workProgressReceipt?: CollectiveWorkProgressReceipt;
     readonly body: string;
@@ -69,6 +71,7 @@ export function appendEvent(state: MutableServiceState, input: AppendEventInput)
       isDeepStrictEqual(existing.workRevisionNotice, input.coordinates.workRevisionNotice) &&
       isDeepStrictEqual(existing.workAcceptanceNotice, input.coordinates.workAcceptanceNotice) &&
       isDeepStrictEqual(existing.workExecutionNotice, input.coordinates.workExecutionNotice) &&
+      isDeepStrictEqual(existing.workWakeNotice, input.coordinates.workWakeNotice) &&
       isDeepStrictEqual(existing.workResultReceipt, input.coordinates.workResultReceipt) &&
       isDeepStrictEqual(existing.workProgressReceipt, input.coordinates.workProgressReceipt) &&
       isDeepStrictEqual(existing.location, address.location) &&
@@ -129,6 +132,7 @@ function projectEventRelations(coordinates: AppendEventInput['coordinates']) {
     ...(coordinates.workRevisionNotice ? { workRevisionNotice: coordinates.workRevisionNotice } : {}),
     ...(coordinates.workAcceptanceNotice ? { workAcceptanceNotice: coordinates.workAcceptanceNotice } : {}),
     ...(coordinates.workExecutionNotice ? { workExecutionNotice: coordinates.workExecutionNotice } : {}),
+    ...(coordinates.workWakeNotice ? { workWakeNotice: coordinates.workWakeNotice } : {}),
     ...(coordinates.workResultReceipt ? { workResultReceipt: coordinates.workResultReceipt } : {}),
     ...(coordinates.workProgressReceipt ? { workProgressReceipt: coordinates.workProgressReceipt } : {}),
   };

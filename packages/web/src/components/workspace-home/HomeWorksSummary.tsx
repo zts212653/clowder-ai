@@ -189,7 +189,7 @@ function ThreadWorksSummary({
           {t.works}
         </h2>
         <span className="text-xs text-cafe-muted">
-          {!loading && !error && complete && total !== null ? t.threadCount(total) : ''}
+          {!error && complete && total !== null ? t.threadCount(total) : ''}
         </span>
         <button
           type="button"

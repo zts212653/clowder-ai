@@ -1,6 +1,12 @@
 import type { ArtifactReviewAnchor } from '@cat-cafe/shared';
 import { useEffect, useRef, useState } from 'react';
-import { addMediaSelectionToChat, addMediaWorkToChat } from '@/components/content-review/media-chat-composer';
+import { useArtworkGallery, useArtworkReference } from '@/components/content-review/ArtworkGalleryScope';
+import {
+  addMediaSelectionToChat,
+  addMediaWorkToChat,
+  removeMediaSelectionFromChat,
+  updateMediaSelectionWordsInChat,
+} from '@/components/content-review/media-chat-composer';
 import {
   addMediaWork,
   MEDIA_SELECTION_REFUSAL_COPY,
@@ -9,6 +15,7 @@ import {
   pendingMediaAttachment,
   sameMediaSource,
 } from '@/components/content-review/media-chat-selection';
+import { sameMediaContentWithAdvancedReview } from '@/components/content-review/media-work-identity';
 import type { PendingChatMark } from '@/components/content-review/ReviewPendingChatMarks';
 import { useShellPresentation } from '@/components/shell/shell-presentation';
 import { useComposerContextAttachments } from '@/components/useComposerContextAttachments';
@@ -48,6 +55,8 @@ export function useWorkspaceMediaChat({
   const threadId = useChatStore((state) => state.currentThreadId);
   const visible = useWorkspaceSurfaceVisibility();
   const isV2 = useShellPresentation() === 'v2';
+  const gallery = useArtworkGallery();
+  const reference = useArtworkReference();
   const composerDraft = useComposerContextAttachments(threadId ?? '');
   const [notice, setNotice] = useState<{ kind: 'selection' | 'whole'; message: string } | null>(null);
   const source = view.currentSource ?? view.review.source;
@@ -55,7 +64,7 @@ export function useWorkspaceMediaChat({
     source.kind === 'text' || source.kind === 'video-project' || source.kind === 'collective-artifact'
       ? null
       : source.mime;
-  const chatMedia =
+  const baseChatMedia =
     workflow && 'chatMedia' in workflow
       ? (workflow.chatMedia ?? null)
       : mime
@@ -65,10 +74,49 @@ export function useWorkspaceMediaChat({
             source: workspaceReviewRequestSource(view),
           })
         : null;
-  const pending = chatMedia ? pendingMediaAttachment(composerDraft) : undefined;
+  const origin = gallery?.items[gallery.index]?.origin;
+  const chatMedia = baseChatMedia && origin ? { ...baseChatMedia, gallery: origin } : baseChatMedia;
+  const pending = chatMedia ? pendingMediaAttachment(composerDraft, chatMedia) : undefined;
+  const [editing, setEditing] = useState<{
+    key: string;
+    attachmentId: string;
+    selectionId: string;
+    anchor: ArtifactReviewAnchor;
+    words: string;
+  } | null>(null);
+  const editingKey = JSON.stringify([threadId, chatMedia]);
+  const editor =
+    editing && editing.key === editingKey && origin && threadId
+      ? {
+          anchor: editing.anchor,
+          selectionId: editing.selectionId,
+          imageIndex: origin.index,
+          words: editing.words,
+          change: (words: string) =>
+            updateMediaSelectionWordsInChat(threadId, editing.attachmentId, editing.selectionId, words),
+          finish: () => setEditing(null),
+          cancel: () => {
+            if (removeMediaSelectionFromChat(threadId, editing.attachmentId, editing.selectionId)) setEditing(null);
+            else setNotice({ kind: 'selection', message: MEDIA_SELECTION_REFUSAL_COPY.recall_pending });
+          },
+        }
+      : null;
+  const referenced =
+    reference &&
+    chatMedia &&
+    (sameMediaSource(reference.attachment, chatMedia) ||
+      sameMediaContentWithAdvancedReview(reference.attachment, chatMedia))
+      ? reference.attachment
+      : undefined;
+  const marked = pending ?? referenced;
   const marks: readonly PendingChatMark[] | undefined =
-    pending && chatMedia && sameMediaSource(pending, chatMedia)
-      ? pending.selections.map((item) => ({ id: item.id, anchor: item.selection }))
+    marked && chatMedia && (sameMediaSource(marked, chatMedia) || sameMediaContentWithAdvancedReview(marked, chatMedia))
+      ? marked.selections.map((item) => ({
+          id: item.id,
+          anchor: item.selection,
+          ...(marked.gallery ? { label: item.id } : {}),
+          active: !!referenced && reference?.selectionId === item.id,
+        }))
       : undefined;
   const addSelection = (anchor: ArtifactReviewAnchor) => {
     if (!chatMedia) {
@@ -84,6 +132,14 @@ export function useWorkspaceMediaChat({
       return false;
     }
     setNotice(null);
+    if (isV2 && origin)
+      setEditing({
+        key: editingKey,
+        attachmentId: result.attachment.id,
+        selectionId: result.selectionId,
+        anchor,
+        words: result.attachment.selections.find((item) => item.id === result.selectionId)?.instruction ?? '',
+      });
     setDraft('');
     setTarget(null);
     return true;
@@ -130,5 +186,6 @@ export function useWorkspaceMediaChat({
     notice: notice && (notice.kind === 'whole' || target?.kind === 'media_anchor') ? notice.message : null,
     clearNotice: () => setNotice(null),
     marks,
+    editor,
   };
 }

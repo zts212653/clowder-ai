@@ -185,7 +185,7 @@ export function ThreadWorksPanelV2({ threadId, width, onClose, onSelectArtifact,
         <div className="v2-works-topline">
           <h2 className="text-sm font-semibold">{t.title}</h2>
           <span className="v2-works-count text-xs text-cafe-muted">
-            {active.loading
+            {active.loading && !complete
               ? cardCopy.worksLoading
               : active.error && works.length === 0
                 ? cardCopy.worksUnavailable

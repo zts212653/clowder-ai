@@ -1,7 +1,10 @@
-import { useContext, useState } from 'react';
+import { useContext } from 'react';
+import { WorkActions } from './CollectiveWorkActions.js';
 import type { RoadmapAction } from './channel-collaboration.js';
 import type { CollectiveParticipant, CollectiveWorkProjection } from './client-types.js';
+import { useCollectiveText } from './collective-copy.js';
 import { HostWorkPermissionContext } from './use-host-work-policy.js';
+import { workExecutionPresentation } from './work-execution-presentation.js';
 
 export function CollectiveWorkCard({
   work,
@@ -25,7 +28,11 @@ export function CollectiveWorkCard({
   readonly canSteward: boolean;
   readonly participants: readonly CollectiveParticipant[];
   readonly humanNames: Readonly<Record<string, string>>;
-  readonly onCommit: (work: CollectiveWorkProjection, participant?: CollectiveParticipant) => void;
+  readonly onCommit: (
+    work: CollectiveWorkProjection,
+    participant?: CollectiveParticipant,
+    accountability?: 'self' | 'unassigned',
+  ) => void;
   readonly onDecline: (work: CollectiveWorkProjection) => void;
   readonly onAcceptResult: (work: CollectiveWorkProjection) => void;
   readonly onRequestRevision?: (work: CollectiveWorkProjection, feedback: string) => Promise<void>;
@@ -33,6 +40,7 @@ export function CollectiveWorkCard({
   readonly roadmapActions?: readonly RoadmapAction[];
 }) {
   const home = useContext(HostWorkPermissionContext);
+  const t = useCollectiveText();
   const ownerProposal =
     work.proposedBy.kind === 'agent' && work.proposedBy.humanId === currentHumanId && Boolean(work.proposedRequestKind);
   const homeProposal =
@@ -46,74 +54,56 @@ export function CollectiveWorkCard({
       participant.availability === 'declared' &&
       participant.channelIds.includes(work.sourceLocation.channelId),
   );
-  const accountable = work.accountableHumanId ? (humanNames[work.accountableHumanId] ?? 'Collective 成员') : undefined;
+  const accountable = work.accountableHumanId ? (humanNames[work.accountableHumanId] ?? t('共同体成员')) : undefined;
   const dependencies = work.dependencyWorkIds
     .map((dependencyId) => works.find((candidate) => candidate.workId === dependencyId)?.title)
     .filter((title): title is string => Boolean(title));
   const canDecline = canSteward || work.proposedBy.humanId === currentHumanId || sourceOwnerHumanId === currentHumanId;
   const execution = workExecutionPresentation(work);
   return (
-    <section className="collective-work-card" aria-label={`工作 · ${work.title}`} data-work-status={work.status}>
+    <section
+      className="collective-work-card"
+      aria-label={`${t('任务')} · ${work.title}`}
+      data-work-status={work.status}
+      data-work-lifecycle={work.lifecycle}
+    >
       <header>
-        <span>{work.lifecycle === 'proposed' ? '工作提议 · 来自这条消息' : '工作 · 来自这条消息'}</span>
-        <strong>{execution.statusLabel}</strong>
+        <span>{t(work.lifecycle === 'proposed' ? '任务建议 · 来自这条消息' : '任务 · 来自这条消息')}</span>
+        <strong>
+          {ownerProposal && homeProposal && work.lifecycle === 'proposed' ? t('待你决定') : t(execution.statusLabel)}
+        </strong>
       </header>
       <h3>{work.title}</h3>
       {work.intendedOutcome !== work.title && <p>{work.intendedOutcome}</p>}
+      {work.lifecycle === 'proposed' && (
+        <p className="work-proposal-origin">
+          {humanNames[work.proposedBy.humanId] ?? t('共同体成员')} {t('提出')} ·{' '}
+          {ownerProposal
+            ? `${t('等')} ${humanNames[work.proposedBy.humanId] ?? t('共同体成员')} ${t('决定')}`
+            : t('待成员接下')}
+        </p>
+      )}
       <WorkOwnership work={work} accountable={accountable} execution={execution} />
-      {dependencies.length > 0 && <p className="work-dependencies">前置 · {dependencies.join('、')}</p>}
+      {dependencies.length > 0 && (
+        <p className="work-dependencies">
+          {t('前置任务')} · {dependencies.join('、')}
+        </p>
+      )}
       <WorkResultStatus work={work} />
-      {work.lifecycle === 'proposed' && ownerProposal && (
-        <div className="work-actions">
-          {homeProposal ? (
-            <button type="button" className="quiet-action" onClick={() => home.request?.(work)}>
-              授权决定…
-            </button>
-          ) : (
-            <span>请在提议猫所属的 Café 中决定授权。</span>
-          )}
-        </div>
-      )}
-      {work.lifecycle === 'proposed' && !ownerProposal && (
-        <div className="work-actions">
-          {ownParticipants.map((participant) => (
-            <button
-              key={`${participant.connectionId}:${participant.catId}`}
-              type="button"
-              onClick={() => onCommit(work, participant)}
-            >
-              交给 {participant.displayName}
-            </button>
-          ))}
-          <button type="button" onClick={() => onCommit(work)}>
-            由我负责
-          </button>
-          {canDecline && (
-            <button type="button" className="quiet-action" onClick={() => onDecline(work)}>
-              先不跟踪
-            </button>
-          )}
-        </div>
-      )}
-      {work.status === 'ready' && !work.assignment && work.accountableHumanId === currentHumanId && (
-        <div className="work-actions">
-          <button type="button" onClick={() => onComplete(work)}>
-            标记完成
-          </button>
-        </div>
-      )}
-      {work.lifecycle === 'result_ready' && work.accountableHumanId === currentHumanId && (
-        <WorkResultReview work={work} onAcceptResult={onAcceptResult} onRequestRevision={onRequestRevision} />
-      )}
-      {roadmapActions.length > 0 && work.lifecycle !== 'proposed' && work.lifecycle !== 'declined' && (
-        <div className="work-actions work-secondary-actions">
-          {roadmapActions.map((action) => (
-            <button key={action.label} type="button" className="quiet-action" onClick={() => action.onInvoke(work)}>
-              {action.label}
-            </button>
-          ))}
-        </div>
-      )}
+      <WorkActions
+        work={work}
+        currentHumanId={currentHumanId}
+        ownerProposal={ownerProposal}
+        requestHome={homeProposal ? () => home.request?.(work) : undefined}
+        ownParticipants={ownParticipants}
+        canDecline={canDecline}
+        roadmapActions={roadmapActions}
+        onCommit={onCommit}
+        onDecline={onDecline}
+        onAcceptResult={onAcceptResult}
+        onRequestRevision={onRequestRevision}
+        onComplete={onComplete}
+      />
     </section>
   );
 }
@@ -127,15 +117,23 @@ function WorkOwnership({
   readonly accountable?: string;
   readonly execution: ReturnType<typeof workExecutionPresentation>;
 }) {
+  const t = useCollectiveText();
   return (
     <>
       {work.assignment && accountable && (
         <p className="work-ownership">
-          {work.assignment.displayName} {execution.assignmentAction} · {accountable} 负责
+          {work.assignment.displayName} {t(execution.assignmentAction)} · {accountable} {t('负责')}
         </p>
       )}
-      {!work.assignment && accountable && <p className="work-ownership">{accountable} 负责</p>}
-      {execution.admissionMessage && <p className="work-admission">{execution.admissionMessage}</p>}
+      {!work.assignment && accountable && (
+        <p className="work-ownership">
+          {accountable} {t('负责')}
+        </p>
+      )}
+      {!work.assignment && !accountable && work.status === 'unassigned' && (
+        <p className="work-ownership">{t('未分配 · 等待负责人接下')}</p>
+      )}
+      {execution.admissionMessage && <p className="work-admission">{t(execution.admissionMessage)}</p>}
     </>
   );
 }
@@ -151,145 +149,4 @@ function WorkResultStatus({ work }: { readonly work: CollectiveWorkProjection })
       已退回结果 v{latestRequest.resultRevision ?? 1} · {latestRequest.note}
     </p>
   );
-}
-
-function WorkResultReview({
-  work,
-  onAcceptResult,
-  onRequestRevision,
-}: {
-  readonly work: CollectiveWorkProjection;
-  readonly onAcceptResult: (work: CollectiveWorkProjection) => void;
-  readonly onRequestRevision?: (work: CollectiveWorkProjection, feedback: string) => Promise<void>;
-}) {
-  const [feedback, setFeedback] = useState('');
-  const submitRevision = () => {
-    const exactFeedback = feedback.trim();
-    if (!onRequestRevision || !exactFeedback) return;
-    void onRequestRevision(work, exactFeedback)
-      .then(() => setFeedback(''))
-      .catch(() => undefined);
-  };
-  return (
-    <div className="work-result-review">
-      {onRequestRevision && (
-        <label>
-          <span>需要修改什么</span>
-          <textarea
-            aria-label="修订反馈"
-            value={feedback}
-            onChange={(event) => setFeedback(event.currentTarget.value)}
-            placeholder="说明要补充或修改的具体内容"
-            maxLength={1000}
-          />
-        </label>
-      )}
-      <div className="work-actions">
-        {onRequestRevision && (
-          <button type="button" className="quiet-action" disabled={!feedback.trim()} onClick={submitRevision}>
-            退回修改
-          </button>
-        )}
-        <button type="button" onClick={() => onAcceptResult(work)}>
-          确认结果并完成
-        </button>
-      </div>
-    </div>
-  );
-}
-
-export function workStatusLabel(status: CollectiveWorkProjection['status']): string {
-  const labels: Record<CollectiveWorkProjection['status'], string> = {
-    proposed: '等待确认',
-    ready: '可以开始',
-    blocked: '等待前置工作',
-    in_progress: '推进中',
-    result_ready: '结果待确认',
-    completed: '已完成',
-    declined: '不跟踪',
-    cancelled: '已取消',
-  };
-  return labels[status];
-}
-
-/** Live Service permission and current Host receipt govern execution; first acceptance stays historical. */
-export function workExecutionPresentation(work: CollectiveWorkProjection): {
-  readonly statusLabel: string;
-  readonly assignmentAction: '推进' | '已接下';
-  readonly admissionMessage?: string;
-} {
-  const currentExecution = work.executionAuthority ?? work.acceptance;
-  const active = work.lifecycle === 'committed' || work.lifecycle === 'in_progress';
-  const currentStatus = work.executionStatus;
-  if (
-    active &&
-    currentStatus?.revision === (work.executionAuthority?.revision ?? 1) &&
-    currentStatus.state === 'unavailable'
-  ) {
-    return {
-      statusLabel: '当前无法执行',
-      assignmentAction: '已接下',
-      admissionMessage: executionUnavailableMessage(currentStatus.reason),
-    };
-  }
-  if (!currentExecution) return { statusLabel: workStatusLabel(work.status), assignmentAction: '推进' };
-  const admission = currentExecution.hostAdmission;
-  const assignmentAction =
-    admission?.state === 'admitted' && work.lifecycle === 'in_progress' && work.status === 'in_progress'
-      ? '推进'
-      : '已接下';
-  if (!active) {
-    return { statusLabel: workStatusLabel(work.status), assignmentAction };
-  }
-  if (admission?.state === 'rejected') {
-    return {
-      statusLabel: '暂时不能执行',
-      assignmentAction,
-      admissionMessage: rejectedAdmissionMessage(admission.reason),
-    };
-  }
-  if (!admission) return { statusLabel: '已接下，待家内准入', assignmentAction };
-  return {
-    statusLabel:
-      work.lifecycle === 'committed' && work.status !== 'blocked' ? '已准入，待开始' : workStatusLabel(work.status),
-    assignmentAction,
-  };
-}
-
-function executionUnavailableMessage(reason?: string): string {
-  switch (reason) {
-    case 'WORK_DELEGATION_UNAVAILABLE':
-      return '当前委托已经不可用，暂时不能继续。';
-    case 'PARTICIPATION_REVOKED':
-      return '猫的公共参与已撤回，当前无法继续执行。';
-    case 'WORK_SOURCE_UNAVAILABLE':
-      return '来源消息或相关成员已不可用，当前无法继续执行。';
-    case 'MEMBERSHIP_REVOKED':
-      return '相关成员已退出或被移除，当前无法继续执行。';
-    case 'WORK_ADMISSION_NOT_CURRENT':
-      return '当前执行的家内准入已失效，无法继续执行。';
-    case 'CONNECTION_REVOKED':
-      return '所属 Café 的连接已撤回，当前无法继续执行。';
-    default:
-      return '暂时不能继续。回原讨论查看下一步。';
-  }
-}
-
-function rejectedAdmissionMessage(reason?: string): string {
-  switch (reason) {
-    case 'PARTICIPATION_REVOKED':
-      return '这只猫已不再参与，暂时不能执行。';
-    case 'CONNECTION_REVOKED':
-      return '所属 Café 的连接已撤回，暂时不能执行。';
-    case 'MEMBERSHIP_REVOKED':
-      return '相关成员已退出或被移除，暂时不能执行。';
-    case 'WORK_SOURCE_UNAVAILABLE':
-      return '原讨论已不可用，暂时不能执行。';
-    case 'WORK_ADMISSION_NOT_CURRENT':
-      return '这次允许已经失效，暂时不能执行。';
-    case 'WORK_DELEGATION_UNAVAILABLE':
-      return '当前委托已经不可用，暂时不能执行。';
-    default:
-      return '暂时不能执行。回原讨论查看下一步。';
-  }
 }

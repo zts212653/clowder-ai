@@ -1,5 +1,7 @@
 import type { WorkspaceContentReviewAction } from '@cat-cafe/shared';
 import { useRef, useState } from 'react';
+import { artworkActionsCopy } from '@/components/content-review/artwork-actions.shell-copy';
+import { GalleryPlaceEditor } from '@/components/content-review/GalleryPlaceEditor';
 import { ImageWorkProgress } from '@/components/content-review/ImageWorkProgress';
 import { mediaChatMime } from '@/components/content-review/media-chat-selection';
 import { modificationStorageKey } from '@/components/content-review/modification-draft';
@@ -9,6 +11,7 @@ import commentStyles from '@/components/content-review/review-comment.module.css
 import toolbarStyles from '@/components/content-review/review-toolbar.module.css';
 import styles from '@/components/content-review/review-workspace.module.css';
 import { reviewMediaDisplayPath } from '@/components/content-review/useReviewMediaSource';
+import { useShellCopy } from '@/components/shell/shell-copy';
 import { useShellPresentation } from '@/components/shell/shell-presentation';
 import { useChatStore } from '@/stores/chatStore';
 import { API_URL } from '@/utils/api-client';
@@ -121,6 +124,7 @@ export function WorkspaceContentReviewProjection({
   };
   const source = view.currentSource ?? view.review.source;
   const isV2 = useShellPresentation() === 'v2';
+  const artworkCopy = useShellCopy(artworkActionsCopy);
   const canAuthor = view.canWrite && view.sourceState === 'current' && capabilities.annotate.state === 'available';
   const canWrite = canAuthor && !busy;
   const imageChatPrimary =
@@ -280,8 +284,9 @@ export function WorkspaceContentReviewProjection({
         {view.review.annotations.length > 0 ? <div className="border-t border-cafe-subtle p-3">{comments}</div> : null}
       </>
     );
-  const originalMediaSrc =
-    source.kind === 'publication'
+  const originalMediaSrc = workflow?.mediaSource
+    ? (workflow.mediaSource.downloadSrc ?? workflow.mediaSource.src ?? '')
+    : source.kind === 'publication'
       ? `${API_URL}/api/content-publications/${encodeURIComponent(source.publication.contentRef)}/media/${source.publication.ownerRevision}`
       : `${API_URL}/api/${source.kind === 'evolution' ? '' : 'workspace/'}content-reviews/${encodeURIComponent(view.review.reviewId)}/media?expectedSourceRevision=${encodeURIComponent(source.revision)}`;
   return (
@@ -303,13 +308,15 @@ export function WorkspaceContentReviewProjection({
           draftKey={workflow?.canvasDraftKey}
           canMarkup={capabilities.markup.state === 'available'}
           key={`${view.review.reviewId}:${source.revision}`}
+          originalUrl={originalMediaSrc}
+          filename={path.split('/').at(-1) || path}
+          mime={source.mime}
+          byteLength={'byteLength' in source ? source.byteLength : undefined}
           reviewId={view.review.reviewId}
           sourceRevision={source.revision}
           src={workflow?.mediaSource ? workflow.mediaSource.src : reviewMediaDisplayPath(originalMediaSrc, source.mime)}
           download={{
-            src: workflow?.mediaSource
-              ? (workflow.mediaSource.downloadSrc ?? workflow.mediaSource.src)
-              : originalMediaSrc,
+            src: originalMediaSrc,
             filename: `作品.${source.mime === 'image/jpeg' ? 'jpg' : source.mime.split('/')[1]}`,
           }}
           media={source.media}
@@ -324,8 +331,27 @@ export function WorkspaceContentReviewProjection({
           selected={target?.kind === 'media_anchor' ? target.anchor : null}
           restoreComment={canWrite && draft.trim() !== ''}
           composer={composer}
+          chatPlaceEditor={
+            mediaChat.editor
+              ? {
+                  anchor: mediaChat.editor.anchor,
+                  cancel: mediaChat.editor.cancel,
+                  content: <GalleryPlaceEditor key={mediaChat.editor.selectionId} editor={mediaChat.editor} />,
+                }
+              : undefined
+          }
           imageChatPrimary={imageChatPrimary}
-          wholeWorkAction={!comparing && !openingComparison ? <WholeWorkChatButton chat={mediaChat} /> : undefined}
+          wholeWorkAction={
+            !comparing && !openingComparison ? (
+              <WholeWorkChatButton
+                chat={mediaChat}
+                menuItem={isV2}
+                label={
+                  isV2 ? (source.media.kind === 'video' ? artworkCopy.wholeVideo : artworkCopy.wholeImage) : undefined
+                }
+              />
+            ) : undefined
+          }
           onOpenDiscussion={() => {
             setDiscussionOpen(true);
           }}
@@ -366,7 +392,10 @@ export function WorkspaceContentReviewProjection({
       ) : null}
       {!comparing && !imageChatPrimary ? (
         <div className="flex shrink-0 justify-end px-3 py-2">
-          <WholeWorkChatButton chat={mediaChat} />
+          <WholeWorkChatButton
+            chat={mediaChat}
+            label={isV2 ? (source.media.kind === 'video' ? artworkCopy.wholeVideo : artworkCopy.wholeImage) : undefined}
+          />
         </div>
       ) : null}
       {imageChatPrimary || !mediaChat.offered ? <AddToChatNotice chat={mediaChat} /> : null}

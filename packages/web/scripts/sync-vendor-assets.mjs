@@ -7,11 +7,13 @@ import {
   mkdirSync,
   mkdtempSync,
   readdirSync,
+  readFileSync,
   renameSync,
   rmSync,
   unwatchFile,
   watch,
   watchFile,
+  writeFileSync,
 } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, resolve } from 'node:path';
@@ -21,6 +23,7 @@ const require = createRequire(import.meta.url);
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const webRoot = resolve(scriptDir, '..');
 const vendorRoot = resolve(webRoot, 'public', 'vendor');
+const sharedUiCssPath = resolve(webRoot, '../ui/src/styles.css');
 const appGlobalCssFiles = [
   'theme-tokens.css',
   'cat-persona-tokens.css',
@@ -31,7 +34,6 @@ const appGlobalCssFiles = [
   'shell-v2.css',
   'connector-tokens.css',
   'theme-extras.css',
-  'werewolf-theme.css',
 ];
 
 function ensureDir(path) {
@@ -53,7 +55,7 @@ function resolvePackageDir(pkgName) {
   }
 }
 
-export function copyAsset(src, dest) {
+export function copyAsset(src, dest, transform) {
   ensureDir(dirname(dest));
   // Publish one complete file on the same filesystem. Concurrent readers keep
   // either the previous inode or the new one; writers never truncate public URLs.
@@ -61,6 +63,7 @@ export function copyAsset(src, dest) {
   try {
     const staged = resolve(stagingDir, 'asset');
     copyFileSync(src, staged);
+    if (transform) writeFileSync(staged, transform(readFileSync(staged, 'utf8')));
     renameSync(staged, dest);
   } finally {
     rmSync(stagingDir, { recursive: true, force: true });
@@ -123,7 +126,13 @@ function copyAppGlobalCssFile(file) {
   if (!existsSync(src)) {
     throw new Error(`Missing app global CSS: ${src}`);
   }
-  copyAsset(src, dest);
+  copyAsset(
+    src,
+    dest,
+    file === 'shell-v2.css'
+      ? (css) => css.replace('@import "@cat-cafe/ui/styles.css";', readFileSync(sharedUiCssPath, 'utf8'))
+      : undefined,
+  );
 }
 
 function copyAppGlobalCss() {
@@ -150,13 +159,13 @@ function watchAppGlobalCss() {
   // Match Next/Watchpack's existing polling mode when native file-event admission is exhausted.
   if (process.env.WATCHPACK_POLLING === 'true' || /^[1-9]\d*$/.test(process.env.WATCHPACK_POLLING ?? '')) {
     const interval = Math.max(500, Math.min(10000, Number(process.env.WATCHPACK_POLLING) || 1000));
-    const paths = appGlobalCssFiles.map((file) => appGlobalCssPaths(file).src);
+    const paths = [...appGlobalCssFiles.map((file) => appGlobalCssPaths(file).src), sharedUiCssPath];
     console.log(`[sync-vendor-assets] polling ${paths.length} app CSS files every ${interval}ms`);
     return pollVendorCssFiles(
       paths,
       (src) => {
         try {
-          copyAppGlobalCssFile(appGlobalCssFiles[paths.indexOf(src)]);
+          copyAppGlobalCssFile(src === sharedUiCssPath ? 'shell-v2.css' : appGlobalCssFiles[paths.indexOf(src)]);
         } catch (error) {
           console.error(
             '[sync-vendor-assets] CSS polling failed:',
@@ -168,6 +177,13 @@ function watchAppGlobalCss() {
     );
   }
   return [
+    ...pollVendorCssFiles([sharedUiCssPath], () => {
+      try {
+        copyAppGlobalCssFile('shell-v2.css');
+      } catch (error) {
+        console.error('[sync-vendor-assets] shared UI CSS failed:', String(error));
+      }
+    }),
     watch(resolve(webRoot, 'src', 'app'), { persistent: true }, (_eventType, filename) => {
       const file = typeof filename === 'string' ? filename : filename?.toString();
       const exact = file && appGlobalCssFiles.includes(file);

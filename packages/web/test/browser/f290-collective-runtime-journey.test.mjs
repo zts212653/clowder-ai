@@ -161,7 +161,7 @@ test(
       assert.deepEqual(hostApi.pairRequests[0].excludedCatIds, []);
       // Pairing reloads the embedded Client at its canonical Home entry.
       await openChannelFromCollectiveHome(frame, 'general');
-      await frame.getByRole('button', { name: '我的猫', exact: true }).waitFor();
+      await frame.getByRole('button', { name: '查看成员', exact: true }).waitFor();
       await memberPage.screenshot({ path: path.join(evidenceDirectory, 'host-embedded-member.png'), fullPage: true });
 
       const ownerProjection = await activeStore.getHumanProjection(ownerAuth.sessionToken());

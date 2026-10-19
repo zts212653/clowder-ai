@@ -21,7 +21,6 @@ describe('chatStore background thread invocation lifecycle (P2 regression)', () 
       targetCats: [],
       catStatuses: {},
       catInvocations: {},
-      currentGame: null,
 
       threadStates: {},
       viewMode: 'single',

@@ -406,6 +406,15 @@ it('keeps Roadmap dependencies live while an exact Cat result unblocks downstrea
     workIds: [workA.workId, workB.workId],
     revision: 1,
   });
+  await expect(
+    current.store.setCollectiveWorkDependencies(current.owner.sessionToken, {
+      ...current.coordinates,
+      workId: workA.workId,
+      expectedRevision: workA.revision,
+      dependencyWorkIds: [workB.workId],
+      requestId: 'cycle-a-on-b',
+    }),
+  ).rejects.toMatchObject({ code: 'WORK_DEPENDENCY_CYCLE' });
 
   const result = await current.store.postAgentMessage(current.connection.endpointCredential, {
     ...current.coordinates,
@@ -484,9 +493,9 @@ it('keeps Roadmap dependencies live while an exact Cat result unblocks downstrea
       workId: workA.workId,
       expectedRevision: completed.revision,
       dependencyWorkIds: [workB.workId],
-      requestId: 'cycle-a-on-b',
+      requestId: 'terminal-a-on-b',
     }),
-  ).rejects.toMatchObject({ code: 'WORK_DEPENDENCY_CYCLE' });
+  ).rejects.toMatchObject({ code: 'WORK_TERMINAL' });
   await current.store.revokeConnection({
     sessionToken: current.owner.sessionToken,
     collectiveId: current.coordinates.collectiveId,

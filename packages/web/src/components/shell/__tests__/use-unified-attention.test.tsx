@@ -279,6 +279,7 @@ describe('useUnifiedAttention — one verified read of the owner’s attention',
     'cat-cafe:proposal-created',
     'cat-cafe:runtime-interaction-updated',
     'cat-cafe:entrusted-work-projection-invalidated',
+    'cat-cafe:collective-attention-invalidated',
   ])('re-reads on %s from the original invalidation chain', async (eventName) => {
     route(() => Promise.resolve(Response.json(readBody())));
     await mount();
@@ -286,6 +287,31 @@ describe('useUnifiedAttention — one verified read of the owner’s attention',
     await fire(eventName);
     const after = mocks.apiFetch.mock.calls.filter(([path]) => path === UNIFIED_ATTENTION_PATH).length;
     expect(after).toBe(before + 1);
+  });
+
+  it('retains the last confirmed badge through a same-scope refresh, clears it on scope or identity change', async () => {
+    route(() => Promise.resolve(Response.json(readBody())));
+    await mount();
+    const first = latest.result;
+    const pending = deferred();
+    const sessionPending = deferred();
+    route(
+      () => pending.promise,
+      () => sessionPending.promise,
+    );
+    await act(async () => latest.refetch());
+    expect(latest.badgeResult).toEqual(first);
+    expect(latest.result.kind).toBe('loading');
+    await act(async () => sessionPending.resolve(Response.json({ userId: 'owner-2' })));
+    expect(latest.badgeResult).toEqual({ kind: 'loading' });
+    await act(async () => pending.resolve(Response.json(readBody({ identity: { ownerUserId: 'owner-2' } }))));
+    expect(latest.badgeResult?.kind).toBe('ok');
+    route(
+      () => deferred().promise,
+      () => Promise.resolve(Response.json({ userId: 'owner-2' })),
+    );
+    await act(async () => latest.setPersonalView?.('ignored'));
+    expect(latest.badgeResult).toEqual({ kind: 'loading' });
   });
 
   it('withdraws the previous claim while re-reading and offers the old rows only as stale', async () => {
@@ -304,6 +330,9 @@ describe('useUnifiedAttention — one verified read of the owner’s attention',
     await act(async () => pending.resolve(new Response('{}', { status: 500 })));
     expect(latest.result).toEqual({ kind: 'failed', reason: 'unavailable' });
     expect(latest.staleRead).toBeNull();
+    route(() => deferred().promise);
+    await fire('cat-cafe:proposal-updated');
+    expect(latest.badgeResult).toEqual({ kind: 'loading' });
   });
 
   describe('previous rows are only ever shown to the person who read them', () => {

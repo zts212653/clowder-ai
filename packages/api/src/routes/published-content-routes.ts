@@ -5,12 +5,34 @@ import type { PublishedMediaService } from '../domains/video-studio/content-owne
 import { resolveDirectLocalAuthorizationUserId } from '../utils/request-identity.js';
 import { replyArtifactReviewError } from './artifact-review-route-errors.js';
 import { directContentHuman } from './content-modification-routes.js';
+import { registerMediaFileActions } from './media-file-actions.js';
 import { sendPublishedMedia } from './published-media-response.js';
 
 const id = z.string().min(1).max(256);
 const publication = z.object({ contentRef: id, ownerRevision: z.coerce.number().int().positive().safe() }).strict();
 
 export function registerPublishedContentRoutes(app: FastifyInstance, deps: { media: PublishedMediaService }): void {
+  registerMediaFileActions(app, '/api/content-publications/:contentRef/media/:ownerRevision', {
+    onError: replyArtifactReviewError,
+    authorize: async (request) => {
+      const principal = directContentHuman(request);
+      if (!principal) return null;
+      const { contentRef, ownerRevision } = publication.parse(request.params);
+      const asset = await deps.media.read(contentRef, ownerRevision, principal);
+      const media = await deps.media.openAsset(asset, principal, true);
+      try {
+        return {
+          path: media.path,
+          mime: media.mediaType,
+          byteLength: media.byteLength,
+          author: media.fileAuthor,
+          createdAt: media.fileCreatedAt,
+        };
+      } finally {
+        await media.handle.close();
+      }
+    },
+  });
   app.post('/api/content-publications/resolve', async (request, reply) => {
     reply.header('Cache-Control', 'private, no-store');
     const principal = directContentHuman(request);

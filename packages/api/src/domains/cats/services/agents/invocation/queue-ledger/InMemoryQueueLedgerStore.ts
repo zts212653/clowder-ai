@@ -281,6 +281,32 @@ export class InMemoryQueueLedgerStore implements QueueLedgerStore {
     return this.claimPrefix(threadId, [entryId], claimId, claimedAt, bindTargetCatId, steerRequestedAt);
   }
 
+  /** Synchronous half of Message/Queue coverage; validate the whole set before writing. */
+  commitWakeCoverageNow(
+    threadId: string,
+    ids: readonly string[],
+    expected: readonly (QueueLedgerEntry | null)[],
+    next: readonly (QueueLedgerEntry | null)[],
+  ): void {
+    for (let index = 0; index < ids.length; index++) {
+      if (JSON.stringify(this.getNow(threadId, ids[index]!)) !== JSON.stringify(expected[index]))
+        throw new Error('Wake coverage Queue changed');
+      if (next[index]) assertQueueLedgerEntry(next[index]!);
+    }
+    const replacements = new Map(ids.map((id, index) => [id, next[index]]));
+    const rows = this.rows.get(threadId) ?? [];
+    this.rows.set(
+      threadId,
+      rows.flatMap((row) => {
+        if (!replacements.has(row.id)) return [row];
+        const replacement = replacements.get(row.id);
+        if (replacement) return [cloneQueueLedgerEntry(replacement)];
+        this.messageIndex.unindex(threadId, [row]);
+        return [];
+      }),
+    );
+  }
+
   async claimPrefix(
     threadId: string,
     entryIds: readonly string[],

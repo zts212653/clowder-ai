@@ -21,6 +21,11 @@ export function MailboxReadNotes({
     ? [
         { id: 'approvals', label: t.source.approvals, source: read.sources.approvals },
         { id: 'needs-me', label: t.source.needsMe, source: read.sources.needsMe },
+        {
+          id: 'collective-accountability',
+          label: t.source.accountability,
+          source: read.sources.collectiveAccountabilityRequests,
+        },
         { id: 'user-mentions', label: t.mentions, source: read.sources.userMentions },
         { id: 'choices', label: t.source.choices, source: read.sources.structuredChoices },
         { id: 'preferences', label: t.source.personal, source: read.sources.personalPreferences },

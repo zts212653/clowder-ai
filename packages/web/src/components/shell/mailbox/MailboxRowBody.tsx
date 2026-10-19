@@ -54,7 +54,7 @@ export function MailboxRowBody({
   return (
     <section
       id={id}
-      aria-label={`${item.choiceRequest ? t.choice : t.kinds[item.kind]}：${heading}`}
+      aria-label={`${item.collectiveAccountabilityRequest ? t.accountabilityKind : item.choiceRequest ? t.choice : t.kinds[item.kind]}：${heading}`}
       data-testid="mailbox-item-body"
       className="flex flex-col gap-3 px-3 pb-3 pt-1"
       style={{ color: 'var(--shell-ink)' }}

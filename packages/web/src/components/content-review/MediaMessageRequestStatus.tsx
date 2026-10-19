@@ -2,7 +2,7 @@ import type { MediaContextAttachment } from '@cat-cafe/shared';
 import type { ChatMessage } from '@/stores/chat-types';
 import { ModificationProgressLine } from './ModificationProgressLine';
 import { ModificationProgressRow } from './ModificationProgressRow';
-import { mediaAttachmentOf, mediaRequestsForMessage } from './media-message-request';
+import { mediaAttachmentsOf, mediaRequestsForMessage } from './media-message-request';
 import { describeModificationReadFailure } from './modification-progress-copy';
 import { useMediaMessageRequests } from './useMediaMessageRequests';
 
@@ -51,6 +51,12 @@ export function MediaMessageRequestStatus({
   message: StatusMessage;
   resolveCatName: ResolveCatName;
 }) {
-  const attachment = message.extra?.contentModificationRequestV1 ? null : mediaAttachmentOf(message.contentBlocks);
-  return attachment ? <Status message={message} attachment={attachment} resolveCatName={resolveCatName} /> : null;
+  const attachments = message.extra?.contentModificationRequestV1 ? [] : mediaAttachmentsOf(message.contentBlocks);
+  return (
+    <>
+      {attachments.map((attachment) => (
+        <Status key={attachment.id} message={message} attachment={attachment} resolveCatName={resolveCatName} />
+      ))}
+    </>
+  );
 }

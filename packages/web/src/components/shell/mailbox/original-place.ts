@@ -20,9 +20,11 @@ export type OriginalPlace =
   | { kind: 'exact'; actionRef: string; host?: 'workspace' }
   | { kind: 'list'; destination: MailboxDestination };
 
-const REACHABLE_FROM_PANEL = new Set(['message', 'collective-work']);
+const REACHABLE_FROM_PANEL = new Set(['message', 'collective-work', 'collective-accountability']);
 
 function actionRefOf(item: UnifiedAttentionItemV1): string | null {
+  const accountabilityRef = item.collectiveAccountabilityRequest?.actionRef;
+  if (typeof accountabilityRef === 'string' && accountabilityRef.trim() !== '') return accountabilityRef;
   const action = eligibleReceiptOf(item)?.receipt.action;
   const ref = isRecord(action) ? action.actionRef : undefined;
   return typeof ref === 'string' && ref.trim() !== '' ? ref : null;

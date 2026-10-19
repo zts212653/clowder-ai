@@ -1,13 +1,9 @@
-import type {
-  ActionSuccessorAdmissionInput,
-  ActionSuccessorFence,
-} from '../domains/ball-custody/ActionSuccessorAdmissionContract.js';
+import type { ActionSuccessorFence } from '../domains/ball-custody/ActionSuccessorAdmissionContract.js';
 import {
   type ActionSuccessorCarrierRefreshRejection,
   refreshHandledActionSuccessorCarrier,
 } from '../domains/ball-custody/ActionSuccessorCarrierRefresh.js';
 import type { ActionSuccessorLeaseStore } from '../domains/ball-custody/ActionSuccessorLeaseStore.js';
-import type { ActionSuccessorLease } from '../domains/ball-custody/action-successor-state-machine.js';
 import {
   type DirectActionSuccessorCarrierUnavailableReason,
   readCarrierAdmissionEvidence,
@@ -19,9 +15,15 @@ import type {
   ExecutionRecordReader,
 } from '../domains/ball-custody/DirectActionSuccessorExecutionEvidence.js';
 import { readActionHistoryExecution } from '../domains/ball-custody/DirectActionSuccessorExecutionEvidence.js';
-import type { ActionSuccessorCarrierAdmissionOutcome } from '../domains/ball-custody/reconcile-action-successor-enqueue.js';
 import type { InvocationQueue } from '../domains/cats/services/agents/invocation/InvocationQueue.js';
 import type { IMessageStore } from '../domains/cats/services/stores/ports/MessageStore.js';
+import {
+  adoptReplayedTaskOrphanCarrier,
+  type OrphanCarrierResolutionInput,
+  replayedOrphanReceipt,
+  type SafeWaitCarrierResolution,
+  tryTaskOrphanRecovery,
+} from './callback-task-orphan-carrier-resolution.js';
 
 /** Stable append identity of one generation's replacement carrier; a retry converges on one message. */
 export function actionCarrierRecoveryKey(fence: Pick<ActionSuccessorFence, 'leaseId' | 'generation'>): string {
@@ -166,16 +168,7 @@ export async function carrierRecoveryPendingResponse(
   };
 }
 
-export type SafeWaitCarrierResolution =
-  /** Answer the caller now; nothing is dispatched. */
-  | { kind: 'respond'; statusCode?: number; body: Record<string, unknown> }
-  /** Persist and enqueue a carrier bound to `fence`, appended under `recoveryKey`. */
-  | {
-      kind: 'continue';
-      admissionOutcome: ActionSuccessorCarrierAdmissionOutcome;
-      fence: ActionSuccessorFence;
-      recoveryKey: string;
-    };
+export type { SafeWaitCarrierResolution } from './callback-task-orphan-carrier-resolution.js';
 
 /** Refusals about the lease or the request are authority problems; the rest mean custody already ended. */
 const REFRESH_REFUSAL_REASON: Record<
@@ -199,6 +192,14 @@ const REFRESH_REFUSAL_REASON: Record<
  */
 export const MAX_REFRESH_ATTEMPTS = 3;
 
+interface SafeWaitCarrierInput extends OrphanCarrierResolutionInput {
+  invocationQueue: Pick<InvocationQueue, 'listAllDurable'>;
+  messageStore: Pick<IMessageStore, 'getByThreadAfter' | 'getById'>;
+  invocationRecordStore: ExecutionRecordReader | undefined;
+  turnExecutionStore: ExecutionLineageReader | undefined;
+  leaseStore: Pick<ActionSuccessorLeaseStore, 'refreshHandledCarrier' | 'getSubjectTerminal'> | undefined;
+}
+
 /**
  * An active lease already exists for this action and the caller wants to dispatch it again
  * (`safe_wait`). Decide from durable custody what that means: a live carrier waits, an interrupted
@@ -214,16 +215,7 @@ export const MAX_REFRESH_ATTEMPTS = 3;
  * work twice for one overlapping ask, so the caller is told the lease changed and may ask again.
  */
 export async function resolveSafeWaitCarrier(
-  input: {
-    invocationQueue: Pick<InvocationQueue, 'listAllDurable'>;
-    messageStore: Pick<IMessageStore, 'getByThreadAfter' | 'getById'>;
-    invocationRecordStore: ExecutionRecordReader | undefined;
-    turnExecutionStore: ExecutionLineageReader | undefined;
-    leaseStore: Pick<ActionSuccessorLeaseStore, 'refreshHandledCarrier' | 'getSubjectTerminal'> | undefined;
-    lease: ActionSuccessorLease;
-    admissionInput: ActionSuccessorAdmissionInput;
-    clientMessageId: string | undefined;
-  },
+  input: SafeWaitCarrierInput,
   race: { attempt: number; observedGeneration: number } = { attempt: 1, observedGeneration: input.lease.generation },
 ): Promise<SafeWaitCarrierResolution> {
   const { lease, clientMessageId } = input;
@@ -248,7 +240,13 @@ export async function resolveSafeWaitCarrier(
     admissionInput: input.admissionInput,
   });
   if (carrier.disposition === 'live') {
-    return { kind: 'respond', body: { status: 'safe_wait', actionLease: lease, clientMessageId } };
+    const orphanReplay = await adoptReplayedTaskOrphanCarrier(input);
+    return (
+      orphanReplay ?? {
+        kind: 'respond',
+        body: { status: 'safe_wait', actionLease: lease, clientMessageId },
+      }
+    );
   }
   if (carrier.disposition === 'restart_interrupted') {
     return {
@@ -259,16 +257,27 @@ export async function resolveSafeWaitCarrier(
     };
   }
   if (carrier.disposition === 'unavailable') {
+    const orphanResolution = await tryTaskOrphanRecovery(input, carrier.reason, race, (nextLease, nextRace) =>
+      resolveSafeWaitCarrier({ ...input, lease: nextLease }, nextRace),
+    );
+    if (orphanResolution) return orphanResolution;
     // On a re-read the request already passed the authority check against the lease it observed, so
     // failing it now means the lease itself changed (cancelled, completed, replaced), not the caller.
     return unavailable(attempt > 1 && carrier.reason === 'authority_mismatch' ? 'lease_changed' : carrier.reason);
   }
 
+  const orphanReplay = replayedOrphanReceipt(input);
+  if (orphanReplay) return orphanReplay;
+
   // refresh_handled. Without the lease store the old, safe answer stands: no new execution.
-  if (!input.leaseStore) return unavailable('carrier_terminal');
-  if (lease.generation !== observedGeneration) return unavailable('lease_changed');
+  const refreshBlocker = carrierRefreshBlocker(input, observedGeneration);
+  if (refreshBlocker) return unavailable(refreshBlocker);
+  const leaseStore = input.leaseStore as Pick<
+    ActionSuccessorLeaseStore,
+    'refreshHandledCarrier' | 'getSubjectTerminal'
+  >;
   const refreshed = await refreshHandledActionSuccessorCarrier({
-    leaseStore: input.leaseStore,
+    leaseStore,
     lease,
     admissionInput: input.admissionInput,
   });
@@ -285,7 +294,7 @@ export async function resolveSafeWaitCarrier(
       // no longer ours to refresh is a fact about the lease that is current now, so ask it again.
       return resolveSafeWaitCarrier({ ...input, lease: refreshed.lease }, { attempt: attempt + 1, observedGeneration });
     case 'subject_terminal': {
-      const terminal = await input.leaseStore.getSubjectTerminal(lease.subjectRef);
+      const terminal = await leaseStore.getSubjectTerminal(lease.subjectRef);
       return terminal
         ? { kind: 'respond', body: { status: 'subject_terminal', terminal, clientMessageId } }
         : unavailable('carrier_terminal');
@@ -293,4 +302,12 @@ export async function resolveSafeWaitCarrier(
     default:
       return unavailable(REFRESH_REFUSAL_REASON[refreshed.reason], { refusal: refreshed.reason });
   }
+}
+
+function carrierRefreshBlocker(
+  input: SafeWaitCarrierInput,
+  observedGeneration: number,
+): DirectActionSuccessorCarrierUnavailableReason | null {
+  if (!input.leaseStore) return 'carrier_terminal';
+  return input.lease.generation === observedGeneration ? null : 'lease_changed';
 }

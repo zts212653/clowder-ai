@@ -6,7 +6,8 @@ import { describe, expect, it } from 'vitest';
 import { MEMORY_BOOK_STAR_PATH } from '../memory-book-star-path';
 
 const SRC_ROOT = fileURLToPath(new URL('../../../', import.meta.url));
-const DEFINITION = join('components', 'shell', 'memory-book-star-path.ts');
+const UI_ROOT = fileURLToPath(new URL('../../../../../ui/src/', import.meta.url));
+const DEFINITION = join('..', '..', 'ui', 'src', 'memory-book-star-path.ts');
 
 function sourceFiles(dir: string): string[] {
   return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
@@ -20,7 +21,7 @@ describe('F322 记忆 icon single definition', () => {
   it('keeps the traced outline in exactly one source file', () => {
     // The sidebar 记忆 entry and the Workspace 记忆 tile share D; a second copy would let them drift apart again.
     const fingerprint = MEMORY_BOOK_STAR_PATH.slice(0, 48);
-    const holders = sourceFiles(SRC_ROOT)
+    const holders = [...sourceFiles(SRC_ROOT), ...sourceFiles(UI_ROOT)]
       .filter((file) => readFileSync(file, 'utf8').includes(fingerprint))
       .map((file) => relative(SRC_ROOT, file));
     expect(holders).toEqual([DEFINITION]);

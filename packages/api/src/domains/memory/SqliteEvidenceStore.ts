@@ -329,7 +329,8 @@ export class SqliteEvidenceStore implements IEvidenceStore {
       db: this.getDb(),
       isEmbeddingAvailable: () => this.isPassageEmbeddingAvailable(normalized),
       semanticSearch: (limit) => this.semanticPassageNNSearch(query, limit, normalized),
-      hybridSearch: (lexical, limit, accept) => this.hybridPassageRRFSearch(query, lexical, limit, normalized, accept),
+      hybridSearch: (lexical, limit, accept, compare) =>
+        this.hybridPassageRRFSearch(query, lexical, limit, normalized, accept, compare),
     });
   }
 
@@ -1132,6 +1133,7 @@ export class SqliteEvidenceStore implements IEvidenceStore {
     limit: number,
     options?: SearchOptions,
     accept?: (passage: PassageResult) => boolean,
+    compare?: (a: PassageResult, b: PassageResult) => number,
   ): Promise<PassageResult[]> {
     const semanticPassages = (await this.semanticPassageNNSearch(query, limit, options)).filter(
       (passage) => !accept || accept(passage),
@@ -1162,10 +1164,9 @@ export class SqliteEvidenceStore implements IEvidenceStore {
       passageMap.set(key, passage);
     }
 
-    return [...scores.keys()]
-      .sort((a, b) => (scores.get(b) ?? 0) - (scores.get(a) ?? 0))
-      .map((key) => passageMap.get(key))
-      .filter((p): p is PassageResult => Boolean(p))
+    return [...passageMap]
+      .sort(([a, left], [b, right]) => (compare?.(left, right) ?? 0) || (scores.get(b) ?? 0) - (scores.get(a) ?? 0))
+      .map(([, passage]) => passage)
       .slice(0, limit);
   }
 

@@ -27,6 +27,7 @@ export function useArtworkViewport(
   media: Size,
   maximumFitScale = Number.POSITIVE_INFINITY,
   scrollZoomedImage = false,
+  horizontalPaging = false,
 ) {
   const [size, setSize] = useState<Size & { top: number }>({ width: 0, height: 0, top: 0 });
   const [scale, setScale] = useState<number | null>(null);
@@ -89,6 +90,16 @@ export function useArtworkViewport(
   const onWheel = (event: ReactWheelEvent<HTMLElement> | WheelEvent) => {
     if (event.target instanceof HTMLElement && event.target.closest('input, textarea, [contenteditable="true"]'))
       return;
+    // A fitted gallery gives horizontal swipes to its pager. A wider, zoomed image
+    // still owns horizontal panning; vertical scroll and modifier zoom stay local.
+    if (
+      horizontalPaging &&
+      !event.ctrlKey &&
+      !event.metaKey &&
+      Math.abs(event.deltaX) > Math.abs(event.deltaY) &&
+      overflow(renderedScale).x < 0.5
+    )
+      return;
     event.preventDefault();
     if (scrollZoomedImage && !event.ctrlKey && !event.metaKey) {
       const factor = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? size.height : 1;
@@ -109,7 +120,10 @@ export function useArtworkViewport(
   }, [viewport, scrollZoomedImage]);
   const onPointerDownCapture = (event: PointerEvent<HTMLElement>) => {
     if (!canPan || event.button !== 0 || !Number.isInteger(event.pointerId) || gesture.current) return;
-    if (event.target instanceof HTMLElement && event.target.closest('input, textarea, [contenteditable="true"]'))
+    if (
+      event.target instanceof Element &&
+      event.target.closest('button, a[href], input, select, textarea, [role="button"], [contenteditable="true"]')
+    )
       return;
     event.stopPropagation();
     event.preventDefault();

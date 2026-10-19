@@ -138,7 +138,7 @@ export function SharedArtifactPublication({
             </label>
             {sourceWorks.length > 0 && (
               <label>
-                属于工作
+                属于任务
                 <select value={workId} onChange={(event) => setWorkId(event.target.value)}>
                   <option value="">这条讨论中的作品</option>
                   {sourceWorks.map((work) => (

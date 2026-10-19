@@ -2,7 +2,9 @@ import type { MediaContextAttachment } from '@cat-cafe/shared';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { syncContextAttachmentDraftToStorage } from '@/components/thread-drafts';
+import { ArtworkGalleryScope } from '@/components/content-review/ArtworkGalleryScope';
+import { writeShellPresentation } from '@/components/shell/shell-presentation';
+import { getContextAttachmentDraft, syncContextAttachmentDraftToStorage } from '@/components/thread-drafts';
 import { useChatStore } from '@/stores/chatStore';
 import { WorkspaceContentReviewSurface } from '../WorkspaceContentReviewSurface';
 import { mediaView, reviewId, revision } from './WorkspaceContentReviewSurface.fixture';
@@ -20,20 +22,48 @@ const THREAD = 'thread-ordinary-media';
 let container: HTMLDivElement;
 let root: Root;
 
-const mount = async (view = mediaView()) => {
+const originalGallery = {
+  index: 0,
+  onSelect: () => {},
+  items: [0, 1].map((index) => ({
+    url: `/original-${index}.png`,
+    title: `original-${index}.png`,
+    alt: '',
+    mediaType: 'image' as const,
+    origin: {
+      threadId: THREAD,
+      messageId: 'same-original-message',
+      messageRevision: '7',
+      item: { kind: 'media-gallery' as const, blockId: 'group', itemIndex: index },
+      index,
+      count: 2,
+    },
+  })),
+};
+const mount = async (
+  view = mediaView(),
+  gallery = false,
+  reference?: { attachment: MediaContextAttachment; selectionId?: string },
+) => {
   mocks.apiFetch.mockImplementation(async (url: string) => {
-    if (url === '/api/workspace/content-reviews/prepare') return new Response(JSON.stringify(view));
+    if (
+      url === '/api/workspace/content-reviews/prepare' ||
+      (reference && url === `/api/workspace/content-reviews/${reviewId}`)
+    )
+      return new Response(JSON.stringify(view));
     throw new Error(`unexpected route: ${url}`);
   });
   await act(async () => {
     root.render(
-      <WorkspaceContentReviewSurface
-        worktreeId="worktree-a"
-        path="cover.png"
-        sourceText=""
-        sourceTextRevision=""
-        onBack={vi.fn()}
-      />,
+      <ArtworkGalleryScope gallery={gallery ? originalGallery : undefined} reference={reference}>
+        <WorkspaceContentReviewSurface
+          worktreeId="worktree-a"
+          path="cover.png"
+          sourceText=""
+          sourceTextRevision=""
+          onBack={vi.fn()}
+        />
+      </ArtworkGalleryScope>,
     );
     await Promise.resolve();
     await Promise.resolve();
@@ -94,6 +124,7 @@ afterEach(() => {
   act(() => root.unmount());
   container.remove();
   vi.restoreAllMocks();
+  writeShellPresentation('classic');
 });
 
 it('puts a native image region directly into the same Chat without another input or write', async () => {
@@ -243,4 +274,95 @@ it('puts the brush next to the image and keeps the only ordinary input in Chat',
   expect(container.querySelector('textarea')).toBeNull();
   expect(container.querySelector('[aria-label="图片更多操作"]')).not.toBeNull();
   expect(mocks.apiFetch).toHaveBeenCalledTimes(1);
+});
+
+it('keeps per-place gallery words in the one original draft and Enter retains them', async () => {
+  writeShellPresentation('v2');
+  await mount(mediaView(), true);
+  await selectWholeImage();
+  expect(queuedMedia()?.selections).toHaveLength(1);
+  const editor = container.querySelector<HTMLTextAreaElement>('textarea[aria-label="这处的话"]');
+  expect(editor).not.toBeNull();
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(editor, '只改图一这处');
+    editor!.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  expect(queuedMedia()?.selections[0]?.instruction).toBe('只改图一这处');
+  await act(async () =>
+    editor!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', isComposing: true, bubbles: true })),
+  );
+  expect(container.querySelector('textarea[aria-label="这处的话"]')).toBe(editor);
+  await act(async () => editor!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })));
+  expect(container.querySelector('textarea[aria-label="这处的话"]')).toBeNull();
+  expect(queuedMedia()?.selections[0]?.instruction).toBe('只改图一这处');
+});
+
+it('Escape cancels only the newly captured gallery place and preserves a sibling work', async () => {
+  writeShellPresentation('v2');
+  await mount(mediaView(), true);
+  await selectWholeImage();
+  const captured = queuedMedia()!;
+  if (captured.source.kind !== 'workspace') throw new Error('Expected workspace fixture');
+  const sibling: MediaContextAttachment = {
+    ...captured,
+    id: 'sibling',
+    source: { ...captured.source, reviewId: 'other-review' },
+    gallery: { ...originalGallery.items[1].origin },
+    selections: [{ id: '2', selection: { kind: 'image-point', x: 1, y: 1 }, instruction: '保留图二' }],
+  };
+  await act(async () => syncContextAttachmentDraftToStorage(THREAD, [sibling]));
+  const editor = container.querySelector<HTMLTextAreaElement>('textarea[aria-label="这处的话"]');
+  expect(editor).not.toBeNull();
+  await act(async () => editor!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
+  expect(container.querySelector('textarea[aria-label="这处的话"]')).toBeNull();
+  const queuedAttachments = queued()?.contextAttachments ?? [];
+  expect(queuedAttachments.some((item) => item.id === captured.id)).toBe(false);
+  expect(queued()?.removeContextAttachmentIds).toContain(captured.id);
+  expect(getContextAttachmentDraft(THREAD).find((item) => item.id === sibling.id)).toEqual(sibling);
+
+  expect(useChatStore.getState().currentThreadId).toBe(THREAD);
+});
+
+it('does not interpret an IME Escape as cancellation of a gallery place', async () => {
+  writeShellPresentation('v2');
+  await mount(mediaView(), true);
+  await selectWholeImage();
+  const editor = container.querySelector<HTMLTextAreaElement>('textarea[aria-label="这处的话"]')!;
+  expect(editor).not.toBeNull();
+  await act(async () =>
+    editor.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', isComposing: true, bubbles: true })),
+  );
+  expect(container.querySelector('textarea[aria-label="这处的话"]')).toBe(editor);
+  expect(queuedMedia()?.selections).toHaveLength(1);
+});
+
+it('reopens a sent gallery place on the exact retained owner read and highlights it without inserting a new draft', async () => {
+  writeShellPresentation('v2');
+  const attachment: MediaContextAttachment = {
+    v: 1,
+    id: 'sent-image',
+    kind: 'media',
+    title: 'cover.png',
+    mediaType: 'image/png',
+    source: {
+      kind: 'workspace',
+      locator: { worktreeId: 'worktree-a', path: 'cover.png' },
+      reviewId,
+      expectedReviewRevision: 1,
+      expectedSourceRevision: revision,
+    },
+    gallery: originalGallery.items[0].origin,
+    selections: [
+      { id: '9', selection: { kind: 'image-region', x: 10, y: 20, width: 30, height: 40 }, instruction: '只改这里' },
+    ],
+  };
+  await mount(mediaView(), true, { attachment, selectionId: '9' });
+  expect(mocks.apiFetch.mock.calls[0]?.[0]).toBe(`/api/workspace/content-reviews/${reviewId}`);
+  expect(
+    container
+      .querySelector('[data-testid="review-pending-chat-mark"][data-selection-id="9"]')
+      ?.getAttribute('data-active'),
+  ).toBe('true');
+  expect(queued()).toBeNull();
+  expect(getContextAttachmentDraft(THREAD)).toEqual([]);
 });

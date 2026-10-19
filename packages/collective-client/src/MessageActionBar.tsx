@@ -188,7 +188,7 @@ export function MessageActionBar({
           )}
           {onProposeWork && (
             <button type="button" role="menuitem" onClick={() => run(onProposeWork)}>
-              整理为工作
+              建成任务
             </button>
           )}
           {onPublishArtifact && (

@@ -25,7 +25,6 @@ describe('chatStore thinking dedupe', () => {
       targetCats: [],
       catStatuses: {},
       catInvocations: {},
-      currentGame: null,
       threadStates: {},
       viewMode: 'single',
       splitPaneThreadIds: [],

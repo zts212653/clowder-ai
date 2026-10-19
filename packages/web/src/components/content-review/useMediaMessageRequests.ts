@@ -9,8 +9,8 @@ export const POLL_MS = 4000;
 /**
  * How long after sending a visible page keeps asking whether a cat has taken the message over, as a fallback for a
  * missed event. When a cat takes a message over the owner pushes `entrusted_work_projection_invalidated`, which the web
- * turns into the DOM event below, so the normal path is that event; the same takeover by another cat reuses the one
- * request of that message and pushes the same event. The asking stops as soon as the request from this message is
+ * turns into the DOM event below, so the normal path is that event; the same takeover by another cat reuses that selected
+ * work request and pushes the same event. The asking stops as soon as the request from this message is
  * found, and an old message that nobody took over is only re-read on that event, a focus or a reload.
  */
 export const DISCOVERY_WINDOW_MS = 10 * 60 * 1000;
@@ -31,10 +31,11 @@ export function useMediaMessageRequests(input: {
   messageId: string;
   /** When the message was sent; bounds how long a fresh message keeps looking for a cat to take it over. */
   sentAt: number;
-  attachment: Pick<MediaContextAttachment, 'source'> | null;
+  attachment: (Pick<MediaContextAttachment, 'source'> & Partial<Pick<MediaContextAttachment, 'id'>>) | null;
 }) {
   const source = input.attachment?.source;
-  const sourceKey = source ? `${input.messageId}:${JSON.stringify(source)}` : null;
+  const attachmentId = input.attachment?.id;
+  const sourceKey = source ? `${input.messageId}:${attachmentId ?? ''}:${JSON.stringify(source)}` : null;
   const sourceRef = useRef(source);
   sourceRef.current = source;
   const [catalogue, setCatalogue] = useState<ContentModificationContextCatalogue | null>(null);
@@ -98,10 +99,9 @@ export function useMediaMessageRequests(input: {
     };
   }, [sourceKey, refresh]);
 
-  // The owner holds one request per Human message, so the look ends once that request is listed. Another request of the
-  // same source, or one generated for this message, is not it and does not end the look.
+  // Each named work keeps looking until its own takeover is listed. Sibling progress cannot end this discovery.
   const unreadable = readState === 'hidden';
-  const found = catalogue ? hasRequestFromMessage(catalogue, input.messageId) : false;
+  const found = catalogue ? hasRequestFromMessage(catalogue, input.messageId, attachmentId) : false;
   const { sentAt } = input;
   useEffect(() => {
     if (!sourceKey || unreadable || found) return;

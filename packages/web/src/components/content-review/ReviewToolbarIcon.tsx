@@ -19,6 +19,12 @@ const paths = {
   refresh: 'M3 10a9 9 0 0 1 15-5l3 3M21 3v5h-5M21 14a9 9 0 0 1-15 5l-3-3m0 5v-5h5',
   check: 'm5 12 4 4L19 6',
   resize: 'M8 3H3v5m13 13h5v-5M3 3l6 6m6 6 6 6M14 3h5a2 2 0 0 1 2 2v6M3 13v6a2 2 0 0 0 2 2h6',
+  folder: 'M3 7V5h6l2 2h10v13H3V7Z',
+  external: 'M14 3h7v7m0-7L10 14M10 3H3v18h18v-7',
+  copy: 'M9 8h12v13H9V8ZM5 16H3V3h12v2',
+  image: 'M3 3h18v18H3V3Zm0 14 5-5 4 4 3-3 6 6M16 7h.01',
+  video: 'M3 5h18v14H3V5Zm7 3 6 4-6 4V8Z',
+  volume: 'M3 9h4l5-5v16l-5-5H3V9Zm13-2a7 7 0 0 1 0 10m3-13a11 11 0 0 1 0 16',
 } as const;
 
 export type ReviewIconName = keyof typeof paths;

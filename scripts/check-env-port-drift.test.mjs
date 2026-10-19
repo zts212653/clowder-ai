@@ -215,6 +215,10 @@ function buildExportedRootScripts(sourceScripts) {
   delete scripts['test:architecture-ownership'];
 
   const internalScripts = [
+    'check:artifacts:after-api-tests',
+    'check:measurement-bundles:after-api-tests',
+    'check:capability-tips-enablement:after-api-tests',
+    'check:prompt-budget:after-api-tests',
     'check:browser-consumers',
     'sync:train',
     'antigravity:smoke',
@@ -1213,9 +1217,19 @@ excluded:
       }
     });
 
-    it('sync-to-opensource.sh keeps exported root package script surfaces closed', () => {
+    it('sync-to-opensource.sh keeps exported root package script surfaces closed', (t) => {
       const content = readFileSync(resolve(ROOT, 'scripts/sync-to-opensource.sh'), 'utf-8');
       const exportedScripts = buildExportedRootScripts(readJsonFile('package.json').scripts);
+      const directory = mkdtempSync(resolve(tmpdir(), 'public-root-checks-'));
+      t.after(() => rmSync(directory, { recursive: true, force: true }));
+      const packagePath = resolve(directory, 'package.json');
+      writeFileSync(packagePath, JSON.stringify(readJsonFile('package.json')));
+      const transform = content.match(/<<'PACKAGE_JSON_TRANSFORM_EOF'\n([\s\S]*?)\nPACKAGE_JSON_TRANSFORM_EOF/);
+      assert.ok(transform, 'execute the actual root package projection');
+      execFileSync(process.execPath, ['-', packagePath], { input: transform[1] });
+      const actualScripts = JSON.parse(readFileSync(packagePath, 'utf8')).scripts;
+      assert.ok(!Object.keys(actualScripts).some((name) => name.endsWith(':after-api-tests')));
+      assert.ok(!Object.values(actualScripts).some((command) => command.includes(':after-api-tests')));
 
       assert.ok(
         !content.includes('pkg.scripts.check === "node scripts/run-checks.mjs"'),

@@ -5,19 +5,16 @@
   flex: 0 0 auto;
   padding: 10px clamp(16px, 4vw, 52px) 14px;
   border-top: 1px solid var(--console-border-soft);
-  background: var(--console-card-bg);
+  background: var(--shell-work);
 }
 .composer-box {
   display: flex;
   align-items: center;
   gap: 8px;
-  max-width: 900px;
+  max-width: 720px;
   margin: 0 auto;
   padding: 7px;
-  border: 1px solid var(--console-border-soft);
-  border-radius: 13px;
-  background: var(--console-card-bg);
-  box-shadow: var(--console-shadow-soft);
+  box-shadow: none;
 }
 .composer-box:focus-within {
   border-color: color-mix(in srgb, var(--cafe-accent) 45%, var(--console-border-soft));
@@ -37,12 +34,11 @@
   font-size: 14px;
   line-height: 1.55;
 }
-.composer-expand,
 .composer-send {
   display: grid;
   place-items: center;
-  width: 30px;
-  height: 30px;
+  width: 32px;
+  height: 32px;
   flex: 0 0 auto;
   border: 0;
   border-radius: 9px;
@@ -70,7 +66,7 @@
   border: 1px solid var(--console-border-soft);
   border-radius: 10px;
   background: var(--console-card-bg);
-  box-shadow: var(--console-shadow-soft);
+  box-shadow: none;
 }
 .composer-tray button {
   padding: 6px 9px;
@@ -182,4 +178,36 @@
   .composer {
     padding: 10px 12px max(12px, env(safe-area-inset-bottom));
   }
+}
+
+.composer-box {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  padding: 12px;
+  gap: 8px;
+}
+.composer textarea {
+  grid-column: 1 / -1;
+  grid-row: 1;
+  min-height: 38px;
+}
+.composer-expand {
+  grid-column: 1;
+  grid-row: 2;
+}
+.composer-send {
+  grid-column: 2;
+  grid-row: 2;
+  border-radius: 50%;
+}
+.composer-box:has(textarea:focus-visible) {
+  outline: 2px solid var(--shell-primary);
+  outline-offset: 2px;
+}
+.composer-box textarea:focus-visible {
+  outline: none;
+}
+.composer-recipient {
+  max-width: 720px;
+  margin: 0 auto 8px;
 }

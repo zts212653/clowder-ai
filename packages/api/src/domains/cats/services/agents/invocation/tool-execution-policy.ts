@@ -157,6 +157,7 @@ const COLLECTIVE_PARTICIPATION_TOOLS = new Set([
   'cat_cafe_collective_reply',
   'cat_cafe_collective_set_interest',
   'cat_cafe_collective_propose_work',
+  'cat_cafe_collective_suggest_project_work',
   'cat_cafe_collective_accept_work',
   'cat_cafe_collective_continue_work',
 ]);

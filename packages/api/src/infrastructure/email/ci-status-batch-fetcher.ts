@@ -1,5 +1,8 @@
 /** F304: batched GitHub GraphQL reader for one cicd-check tick. */
+
+import { gitHubAdmissionCanContinue, gitHubObjectSignal } from '../github/admission-budget.js';
 import { GitHubRateLimitError } from '../github/request-budget.js';
+import type { GateCtx } from '../scheduler/types.js';
 import type { CiCheckDetail, CiPollResult } from './ci-cd-contract.js';
 import { enrichGitHubExecutionFailures } from './ci-execution-failure.js';
 import {
@@ -281,12 +284,30 @@ export async function fetchPrCiStatuses(
   targets: readonly PrCiStatusTarget[],
   log: MinimalLog,
   options: FetchPrCiStatusOptions = {},
+  gateCtx?: GateCtx,
 ): Promise<ReadonlyMap<string, CiPollResult | null>> {
-  const results = new Map<string, CiPollResult | null>();
+  const results = new Map<string, CiPollResult | null>(
+    targets.map((target) => [ciStatusTargetKey(target.repoFullName, target.prNumber), null]),
+  );
+  // The request options own cancellation; GateCtx adds the shared deadline.
+  const wholeGateSignal = options.signal;
   for (let offset = 0; offset < targets.length; offset += 20) {
-    options.signal?.throwIfAborted();
-    const batch = await fetchBatch(targets.slice(offset, offset + 20), log, options);
-    for (const [key, value] of batch) results.set(key, value);
+    wholeGateSignal?.throwIfAborted();
+    if (!gitHubAdmissionCanContinue(gateCtx)) break;
+    const targetsInBatch = targets.slice(offset, offset + 20);
+    const signal = gateCtx
+      ? gitHubObjectSignal({ ...gateCtx, signal: wholeGateSignal }, options.timeoutMs ?? 15_000)
+      : wholeGateSignal;
+    try {
+      const batch = await fetchBatch(targetsInBatch, log, { ...options, signal });
+      for (const [key, value] of batch) results.set(key, value);
+    } catch (error) {
+      wholeGateSignal?.throwIfAborted();
+      if (!signal?.aborted) throw error;
+      // A local batch cutoff leaves earlier complete snapshots usable. The
+      // task rotates both windows and batch positions, so missing targets retry.
+      log.warn(`[ci-status] batch collection interrupted for ${targetsInBatch.length} PRs; preserving earlier facts`);
+    }
   }
   return results;
 }
@@ -304,14 +325,19 @@ export function createCiCollectionReaders(
   transport: Pick<FetchPrCiStatusOptions, 'execFileAsync'> = {},
 ) {
   return {
-    fetchPrStatuses: (targets: readonly PrCiStatusTarget[], signal?: AbortSignal) =>
-      fetchPrCiStatuses(targets, log, {
-        ...transport,
-        ghToken: getToken(),
-        signal,
-        timeoutMs: CI_COLLECTION_REQUEST_TIMEOUT_MS,
-        deferFailureDetails: true,
-      }),
+    fetchPrStatuses: (targets: readonly PrCiStatusTarget[], signal?: AbortSignal, gateCtx?: GateCtx) =>
+      fetchPrCiStatuses(
+        targets,
+        log,
+        {
+          ...transport,
+          ghToken: getToken(),
+          signal,
+          timeoutMs: CI_COLLECTION_REQUEST_TIMEOUT_MS,
+          deferFailureDetails: true,
+        },
+        gateCtx,
+      ),
     enrichFailureDetails: (poll: CiPollResult, signal: AbortSignal) =>
       enrichPrCiFailure(poll, log, {
         ...transport,

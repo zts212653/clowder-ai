@@ -1,7 +1,9 @@
 'use client';
 import { type ReviewedMediaAsset, reviewedMediaAssetSchema } from '@cat-cafe/shared';
 import { type ReactNode, useEffect, useState } from 'react';
+import { artworkActionsCopy } from '@/components/content-review/artwork-actions.shell-copy';
 import { checked } from '@/components/content-review/modification-http';
+import { useShellCopy } from '@/components/shell/shell-copy';
 import type { WorkspaceFileNavigationOrigin } from '@/stores/chat-types';
 import { apiFetch } from '@/utils/api-client';
 import { useWorkspaceSurfaceVisibility } from '../WorkspaceSurfaceVisibility';
@@ -62,6 +64,7 @@ function PublicationSurface({
   fullWindowAction,
 }: Props) {
   const titleInHost = false;
+  const artworkCopy = useShellCopy(artworkActionsCopy);
   const review = useWorkspaceContentReview({ publication: { contentRef, ownerRevision } });
   const visible = useWorkspaceSurfaceVisibility();
   const [latest, setLatest] = useState(ownerRevision),
@@ -159,14 +162,15 @@ function PublicationSurface({
         <label className="shrink-0 text-xs text-cafe-muted">
           <span className="sr-only">作品版本</span>
           <select
-            aria-label="作品版本"
+            aria-label={artworkCopy.versionLabel}
             value={ownerRevision}
             onChange={(event) => onVersionChange?.(Number(event.target.value))}
             className="rounded bg-transparent p-1"
           >
             {Array.from({ length: latest }, (_, index) => index + 1).map((revision) => (
               <option key={revision} value={revision}>
-                第 {revision} 版{revision === latest ? ' · 当前' : ' · 历史'}
+                {artworkCopy.versionNumber(revision)} ·{' '}
+                {revision === latest ? artworkCopy.current : artworkCopy.historyVersion}
               </option>
             ))}
           </select>

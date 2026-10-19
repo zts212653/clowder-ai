@@ -99,6 +99,44 @@ describe('where a 待办 row can really take you, decided only from what the rea
       expect(resolveOriginalPlace(work('repair', { action: { actionRef } }))).toEqual({ kind: 'exact', actionRef });
     });
 
+    it('a typed responsibility request opens its exact Project Task', () => {
+      const actionRef =
+        '/collective?target=accountability&connectionId=con_abcdefgh&workId=work_abcdefgh&workRevision=2&channelId=general&roadmapId=roadmap_abcdefgh&accountabilityRequestId=accountability_abcdefgh';
+      const item = {
+        decisionRef:
+          'f290.collective_work_accountability_request:collective-accountability-request:svc_abcdefgh:col_abcdefgh:work_abcdefgh:accountability_abcdefgh',
+        kind: 'judgment',
+        summary: '邀请你负责',
+        linkedNeedsMe: [],
+        collectiveAccountabilityRequest: {
+          producerId: 'f290.collective_work_accountability_request',
+          subjectRef:
+            'collective-accountability-request:svc_abcdefgh:col_abcdefgh:work_abcdefgh:accountability_abcdefgh',
+          serviceInstanceId: 'svc_abcdefgh',
+          collectiveId: 'col_abcdefgh',
+          connectionId: 'con_abcdefgh',
+          workId: 'work_abcdefgh',
+          workRevision: 2,
+          accountabilityRequestId: 'accountability_abcdefgh',
+          targetHumanId: 'human_abcdefgh',
+          targetDisplayName: 'WuLang',
+          requestedByHumanId: 'human_requester',
+          requestedByDisplayName: 'You',
+          requestEventId: 'evt_request000',
+          requestedAt: '2026-10-18T12:00:00.000Z',
+          status: 'pending',
+          roadmapId: 'roadmap_abcdefgh',
+          projectTitle: '共同项目',
+          channelId: 'general',
+          workSourceEventId: 'evt_source0000',
+          workTitle: '完成接责验收',
+          actionRef,
+          expectedProducerRevision: 2,
+        },
+      } as UnifiedAttentionItemV1;
+      expect(resolveOriginalPlace(item)).toEqual({ kind: 'exact', actionRef });
+    });
+
     it.each([
       ['a meeting-intake repair', '/api/meeting-intakes/p1/retry'],
       ['an artifact review', `content-review:review-${'a'.repeat(64)}`],

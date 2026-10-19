@@ -18,7 +18,6 @@ describe('chatStore hasActiveInvocation', () => {
       targetCats: [],
       catStatuses: {},
       catInvocations: {},
-      currentGame: null,
 
       threadStates: {},
       viewMode: 'single',

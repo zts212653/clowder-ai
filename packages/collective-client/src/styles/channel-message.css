@@ -1,22 +1,13 @@
 /* Message / Topic vitality styles ported from experience-content.module.css, a981211f1b. */
 .message {
   position: relative;
-  display: flex;
-  align-items: flex-start;
-  gap: 13px;
-  max-width: 900px;
-  margin: 0 auto 14px;
-  padding: 8px 7px;
-  border-radius: 9px;
+  display: block;
+  max-width: 720px;
+  margin: 0 auto 24px;
+  padding: 8px 0;
   outline: none;
-  transition:
-    background 160ms ease,
-    box-shadow 160ms ease;
 }
-.message:hover,
-.message:focus-within {
-  background: color-mix(in srgb, var(--cafe-text) 3%, transparent);
-}
+
 .message[data-highlighted="true"] {
   background: color-mix(in srgb, var(--cafe-accent) 9%, transparent);
   box-shadow: 0 0 0 6px color-mix(in srgb, var(--cafe-accent) 9%, transparent);
@@ -30,6 +21,7 @@
   background: transparent;
 }
 .avatar {
+  position: relative;
   display: grid;
   flex: 0 0 auto;
   place-items: center;
@@ -39,13 +31,18 @@
   border-radius: 11px;
   background: var(--console-active-bg);
   color: var(--cafe-accent);
-  font-size: 15px;
+  font-size: 14px;
   font-weight: 600;
 }
 .avatar img {
+  position: absolute;
+  inset: 0;
   width: 100%;
   height: 100%;
   object-fit: cover;
+}
+.avatar-fallback {
+  font: 600 14px / 1 var(--font-sans, system-ui, sans-serif);
 }
 .avatar svg {
   width: 28px;
@@ -105,7 +102,7 @@
   color: var(--cafe-accent-ink);
   font-weight: 600;
 }
-.message-inline-mention + p {
+.message-prefix + p {
   display: inline;
 }
 .message-markdown > :last-child {
@@ -152,10 +149,18 @@
   white-space: pre;
   overflow-wrap: normal;
 }
-.message-markdown a {
+.message-markdown a,
+.message-markdown-authenticated-file {
   color: var(--cafe-accent);
   text-decoration: underline;
   text-underline-offset: 2px;
+}
+.message-markdown-authenticated-file {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  cursor: pointer;
 }
 .message-markdown-inert-link,
 .message-markdown-inert-image {
@@ -179,10 +184,7 @@
   background: var(--console-card-bg);
   box-shadow: var(--console-shadow-soft);
   pointer-events: none;
-  transform: translateY(2px);
-  transition:
-    opacity 120ms ease,
-    transform 120ms ease;
+  transition: opacity 120ms ease;
 }
 .message:hover .message-actions,
 .message:focus-within .message-actions,
@@ -190,7 +192,6 @@
 .topic-event:focus-within .message-actions {
   opacity: 1;
   pointer-events: auto;
-  transform: translateY(0);
 }
 .message-actions > button {
   display: grid;
@@ -342,7 +343,6 @@
     background: transparent;
     box-shadow: none;
     pointer-events: auto;
-    transform: none;
   }
   .topic-event .message-actions {
     top: 3px;
@@ -360,6 +360,60 @@
   }
 }
 
+.message .message-body,
+.topic-message .message-body {
+  margin-top: 10px;
+  font-size: 14px;
+  line-height: 1.7;
+  color: var(--shell-body);
+}
+.message[data-author="agent"] .message-body {
+  border-left: 3px solid var(--shell-hairline-strong);
+  padding-left: 16px;
+}
+.message-meta {
+  align-items: center;
+  gap: 8px;
+  min-height: 32px;
+}
+.message-meta .cafe-nameplate-name {
+  font-weight: 600;
+  font-size: 13px;
+}
+.cafe-nameplate .avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  font-size: 14px;
+}
+.message-receipt {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+  color: var(--shell-muted);
+  font-size: 12px;
+}
+.message-receipt button {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--shell-primary-text);
+}
+.receipt-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--shell-muted);
+}
+.receipt-dot[data-state="in_progress"] {
+  background: var(--semantic-info);
+}
+.receipt-dot[data-state="done"] {
+  background: var(--semantic-success);
+}
+
 /* F322 B segment 1 (human message), shared-room half — every person stays left-aligned and fully named. The Host-provided
  * human palette marks identity on the avatar and name without turning the message into a Café-style right-hand bubble. */
 :root {
@@ -371,10 +425,7 @@
    * white, whichever reads better); this is the one for the default primary above (L .62: black 5.7:1, white 3.7:1). */
   --human-ink: #000000;
 }
-.message[data-author="self"] .avatar,
-.message[data-author="other-human"] .avatar,
-.topic-message[data-author="self"] .avatar,
-.topic-message[data-author="other-human"] .avatar {
+.avatar[data-actor-kind="human"] {
   background: var(--human-primary);
   color: var(--human-ink);
   box-shadow: inset 0 0 0 2px var(--human-surface);
@@ -390,4 +441,16 @@
   color: var(--cafe-text-muted);
   font-size: 12px;
   line-height: 1.3;
+}
+
+.receipt-status {
+  display: inline-flex;
+  flex: 1;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  min-height: 28px;
+}
+.message-prefix {
+  display: contents;
 }

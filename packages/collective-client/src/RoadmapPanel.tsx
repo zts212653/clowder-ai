@@ -1,44 +1,103 @@
 import { type ReactNode, useState } from 'react';
-import type { CollectiveRoadmapRecord, CollectiveWorkProjection } from './client-types.js';
+import type {
+  CollectiveMemberDirectory,
+  CollectiveParticipant,
+  CollectiveRoadmapRecord,
+  CollectiveWorkProjection,
+} from './client-types.js';
+import type { SharedArtifact } from './collective-artifact-client.js';
+import { type ProjectArtifactStatus, ProjectArtifactSurface } from './ProjectArtifactSurface.js';
+import { ProjectBoard } from './ProjectBoard.js';
+import { ProjectContextPanel } from './ProjectContextPanel.js';
+import { ProjectPageToolbar, ProjectPanelSummary } from './ProjectPanelChrome.js';
+import { ProjectPlanTable } from './ProjectPlanTable.js';
+import { ProjectSuggestionActions, type ProjectSuggestionDecisionHandler } from './ProjectSuggestionActions.js';
 import { RoadmapProjection } from './RoadmapProjection.js';
 import { RoadmapWorkDetails } from './RoadmapWorkDetails.js';
 import {
-  actorName,
-  formatHistoryTime,
+  canCompleteProject,
   type RoadmapLens,
   type RoadmapViewState,
-  roadmapHistoryLabels,
   visibleRoadmapWorks,
   worksForRoadmap,
 } from './roadmap-view-model.js';
+import type { ProjectTaskResponsibility } from './use-collective-collaboration.js';
 
 export function RoadmapPanel({
   roadmap,
+  allRoadmaps = [roadmap],
   works,
+  artifacts = [],
+  artifactStatus = 'ready',
   currentHumanId,
+  channelId = roadmap.sourceLocation.channelId,
+  humans = [],
+  participants = [],
   humanNames = {},
   view,
   onViewChange,
+  onOpenNavigation,
+  onBack,
   onSetDependencies,
   onSetStatus,
+  onCreateTask,
+  onCommitWork,
+  onRequestWorkAccountability,
+  onRespondWorkAccountability,
+  onDecideProjectSuggestion,
   onOpenSource,
   onOpenResult,
+  onOpenArtifact,
 }: {
   readonly roadmap: CollectiveRoadmapRecord;
+  readonly allRoadmaps?: readonly CollectiveRoadmapRecord[];
   readonly works: readonly CollectiveWorkProjection[];
+  readonly artifacts?: readonly SharedArtifact[];
+  readonly artifactStatus?: ProjectArtifactStatus;
   readonly currentHumanId: string;
+  readonly channelId?: string;
+  readonly humans?: CollectiveMemberDirectory['humans'];
+  readonly participants?: readonly CollectiveParticipant[];
   readonly humanNames?: Readonly<Record<string, string>>;
   readonly view?: RoadmapViewState;
   readonly onViewChange?: (view: RoadmapViewState) => void;
+  readonly onOpenNavigation?: () => void;
+  readonly onBack?: () => void;
   readonly onSetDependencies: (work: CollectiveWorkProjection, dependencyWorkIds: readonly string[]) => void;
   readonly onSetStatus: (roadmap: CollectiveRoadmapRecord, status: 'active' | 'completed') => void;
+  readonly onCreateTask?: (
+    roadmap: CollectiveRoadmapRecord,
+    channelId: string,
+    title: string,
+    intendedOutcome: string,
+    responsibility: ProjectTaskResponsibility,
+  ) => Promise<void>;
+  readonly onCommitWork?: (
+    work: CollectiveWorkProjection,
+    participant?: CollectiveParticipant,
+    accountability?: 'self' | 'unassigned',
+  ) => Promise<void>;
+  readonly onRequestWorkAccountability?: (
+    roadmap: CollectiveRoadmapRecord,
+    work: CollectiveWorkProjection,
+    targetHumanId: string,
+  ) => Promise<void>;
+  readonly onRespondWorkAccountability?: (
+    work: CollectiveWorkProjection,
+    request: NonNullable<CollectiveWorkProjection['accountabilityRequests']>[number],
+    decision: 'accept' | 'decline',
+    participant?: CollectiveParticipant,
+  ) => Promise<void>;
+  readonly onDecideProjectSuggestion?: ProjectSuggestionDecisionHandler;
   readonly onOpenSource?: (work: CollectiveWorkProjection, view: RoadmapViewState) => void;
   readonly onOpenResult?: (work: CollectiveWorkProjection, view: RoadmapViewState) => void;
+  readonly onOpenArtifact?: (artifact: SharedArtifact) => void;
 }) {
   const [internalView, setInternalView] = useState<RoadmapViewState>({
     lens: 'stage',
     presentation: 'graph',
     scope: 'all',
+    relation: 'all',
   });
   const activeView = view ?? internalView;
   const updateView = (next: RoadmapViewState) => {
@@ -48,114 +107,164 @@ export function RoadmapPanel({
   const routeWorks = worksForRoadmap(roadmap, works);
   const visibleWorks = visibleRoadmapWorks(routeWorks, activeView, currentHumanId);
   const selectedWork = activeView.workId ? routeWorks.find((work) => work.workId === activeView.workId) : undefined;
-  const setLens = (lens: RoadmapLens) => updateView({ ...activeView, lens });
+  const setLens = (lens: RoadmapLens, presentation = activeView.presentation) =>
+    updateView({
+      ...activeView,
+      lens,
+      presentation,
+      workId: lens === 'artifacts' ? undefined : activeView.workId,
+      ...(lens === 'dependencies' || (lens === 'stage' && presentation === 'graph')
+        ? { scope: 'all', relation: 'all' as const }
+        : {}),
+    });
+  const canChangeStatus = roadmap.status === 'completed' || canCompleteProject(roadmap, routeWorks);
+  const unfinishedCount = visibleRoadmapWorks(
+    routeWorks,
+    { ...activeView, lens: 'stage', scope: 'unfinished', relation: 'all' },
+    currentHumanId,
+  ).length;
+  const mineCount = visibleRoadmapWorks(
+    routeWorks,
+    { ...activeView, lens: 'stage', scope: 'all', relation: 'mine' },
+    currentHumanId,
+  ).length;
+  const isPlan = activeView.lens === 'stage' && activeView.presentation === 'graph';
+  const isBoard = activeView.lens === 'stage' && activeView.presentation === 'board';
   return (
-    <section className="roadmap-panel" aria-label={`Roadmap · ${roadmap.title}`}>
-      <header className="roadmap-heading">
-        <div>
-          <span>Roadmap · {roadmap.status === 'active' ? '持续更新' : '已完成'}</span>
-          <h2>{roadmap.title}</h2>
-          <p>{roadmap.purpose}</p>
-        </div>
-        {roadmap.accountableHumanId === currentHumanId && (
-          <button
-            type="button"
-            className="roadmap-status-action"
-            onClick={() => onSetStatus(roadmap, roadmap.status === 'active' ? 'completed' : 'active')}
-          >
-            {roadmap.status === 'active' ? '完成路线' : '重新打开路线'}
-          </button>
-        )}
-      </header>
-
-      <div className="roadmap-primary-bar">
-        <nav aria-label="Roadmap 观察方式">
-          <LensButton active={activeView.lens === 'stage'} onClick={() => setLens('stage')}>
-            阶段路线
-          </LensButton>
-          <LensButton active={activeView.lens === 'dependencies'} onClick={() => setLens('dependencies')}>
-            依赖关系
-          </LensButton>
-          <LensButton active={activeView.lens === 'mine'} onClick={() => setLens('mine')}>
-            我的路线
-          </LensButton>
-        </nav>
-        <details className="roadmap-history-disclosure">
-          <summary aria-label="打开 Roadmap 操作历史">路线历史</summary>
-          <ol>
-            {[...roadmap.history].reverse().map((entry) => (
-              <li key={`${entry.revision}:${entry.action}`}>
-                <strong>{roadmapHistoryLabels[entry.action]}</strong>
-                <span>
-                  {actorName(entry.actor)} · {formatHistoryTime(entry.at)}
-                </span>
-                {entry.note && <p>{entry.note}</p>}
-              </li>
-            ))}
-          </ol>
-        </details>
-      </div>
-
-      {activeView.lens === 'stage' && (
-        <div className="roadmap-context-bar">
-          <ControlGroup label="Roadmap 呈现方式">
-            <ControlButton
-              active={activeView.presentation === 'graph'}
-              onClick={() => updateView({ ...activeView, presentation: 'graph' })}
-            >
-              工作图
-            </ControlButton>
-            <ControlButton
-              active={activeView.presentation === 'board'}
-              onClick={() => updateView({ ...activeView, presentation: 'board' })}
-            >
-              状态看板
-            </ControlButton>
-          </ControlGroup>
-          <ControlGroup label="Roadmap 显示范围">
-            <ControlButton
-              active={activeView.scope === 'focus'}
-              onClick={() => updateView({ ...activeView, scope: 'focus' })}
-            >
-              当前重点
-            </ControlButton>
-            <ControlButton
-              active={activeView.scope === 'all'}
-              onClick={() => updateView({ ...activeView, scope: 'all' })}
-            >
-              全部工作
-            </ControlButton>
-          </ControlGroup>
-        </div>
-      )}
-
-      <div className="roadmap-canvas" data-concierge-safe-zone>
-        {visibleWorks.length ? (
-          <RoadmapProjection
-            works={visibleWorks}
-            allWorks={routeWorks}
-            view={activeView}
+    <section className="roadmap-panel" aria-label={`项目页面 · ${roadmap.title}`}>
+      <ProjectPageToolbar
+        roadmap={roadmap}
+        channelId={channelId}
+        currentHumanId={currentHumanId}
+        humans={humans}
+        view={activeView}
+        onOpenNavigation={onOpenNavigation}
+        onBack={onBack ?? (() => undefined)}
+        onSetLens={setLens}
+        onCreateTask={onCreateTask}
+      />
+      <div className="project-page-body">
+        <main className="project-page-main">
+          <ProjectPanelSummary
+            roadmap={roadmap}
+            works={routeWorks}
             currentHumanId={currentHumanId}
+            humans={humans}
             humanNames={humanNames}
-            selectedWorkId={selectedWork?.workId}
-            onSelect={(workId) => updateView({ ...activeView, workId })}
+            canChangeStatus={canChangeStatus}
+            onSetStatus={onSetStatus}
           />
-        ) : (
-          <p className="roadmap-empty">
-            {activeView.lens === 'mine' ? '这条路线还没有属于你的工作。' : '当前范围还没有工作。'}
-          </p>
-        )}
+          <ProjectSuggestionActions
+            roadmap={roadmap}
+            works={works}
+            currentHumanId={currentHumanId}
+            onDecide={onDecideProjectSuggestion}
+          />
+          {(isPlan || activeView.lens === 'dependencies') && (
+            <div className="roadmap-context-bar">
+              <ControlGroup label="项目筛选">
+                <ControlButton
+                  active={activeView.relation !== 'mine' && activeView.scope === 'all'}
+                  onClick={() => updateView({ ...activeView, relation: 'all', scope: 'all' })}
+                >
+                  {`全部 ${routeWorks.length}`}
+                </ControlButton>
+                <ControlButton
+                  active={activeView.relation !== 'mine' && activeView.scope === 'unfinished'}
+                  onClick={() => updateView({ ...activeView, relation: 'all', scope: 'unfinished' })}
+                >
+                  {`未完成 ${unfinishedCount}`}
+                </ControlButton>
+                <ControlButton
+                  active={activeView.relation === 'mine'}
+                  onClick={() => updateView({ ...activeView, relation: 'mine', scope: 'all' })}
+                >
+                  {`与我相关 ${mineCount}`}
+                </ControlButton>
+              </ControlGroup>
+            </div>
+          )}
+          {activeView.lens === 'artifacts' ? (
+            <ProjectArtifactSurface
+              roadmap={roadmap}
+              works={routeWorks}
+              artifacts={artifacts}
+              status={artifactStatus}
+              onOpen={onOpenArtifact}
+            />
+          ) : isBoard ? (
+            <ProjectBoard
+              roadmaps={[roadmap]}
+              allRoadmaps={allRoadmaps}
+              works={routeWorks}
+              availableWorks={works}
+              currentHumanId={currentHumanId}
+              humans={humans}
+              participants={participants}
+              humanNames={humanNames}
+              onSelect={(work) => updateView({ ...activeView, workId: work.workId })}
+              onCommitWork={onCommitWork}
+              onRequestWorkAccountability={onRequestWorkAccountability}
+              onRespondWorkAccountability={onRespondWorkAccountability}
+            />
+          ) : isPlan ? (
+            <ProjectPlanTable
+              roadmap={roadmap}
+              allRoadmaps={allRoadmaps}
+              works={visibleWorks}
+              availableWorks={works}
+              currentHumanId={currentHumanId}
+              humans={humans}
+              participants={participants}
+              humanNames={humanNames}
+              selectedWorkId={selectedWork?.workId}
+              onSelect={(workId) => updateView({ ...activeView, workId })}
+              onCommitWork={onCommitWork}
+              onRequestWorkAccountability={onRequestWorkAccountability}
+              onRespondWorkAccountability={onRespondWorkAccountability}
+            />
+          ) : visibleWorks.length ? (
+            <div className="roadmap-canvas" data-concierge-safe-zone>
+              <RoadmapProjection
+                works={visibleWorks}
+                allWorks={works}
+                view={activeView}
+                currentHumanId={currentHumanId}
+                humanNames={humanNames}
+                selectedWorkId={selectedWork?.workId}
+                onSelect={(workId) => updateView({ ...activeView, workId })}
+              />
+            </div>
+          ) : (
+            <p className="roadmap-empty">
+              {activeView.relation === 'mine' ? '这个项目还没有与你相关的任务。' : '当前筛选下没有任务。'}
+            </p>
+          )}
+        </main>
+        <ProjectContextPanel
+          roadmap={roadmap}
+          works={routeWorks}
+          availableWorks={works}
+          view={activeView}
+          onOpenSource={onOpenSource}
+        />
       </div>
-
       {selectedWork && (
         <RoadmapWorkDetails
           work={selectedWork}
-          works={routeWorks}
+          roadmap={roadmap}
+          allRoadmaps={allRoadmaps}
+          availableWorks={works}
           view={activeView}
           currentHumanId={currentHumanId}
           humanNames={humanNames}
+          humans={humans}
+          participants={participants}
           canEditDependencies={roadmap.status === 'active'}
           onSetDependencies={onSetDependencies}
+          onCommitWork={onCommitWork}
+          onRequestWorkAccountability={onRequestWorkAccountability}
+          onRespondWorkAccountability={onRespondWorkAccountability}
           onOpenSource={onOpenSource}
           onOpenResult={onOpenResult}
           onClose={() => updateView({ ...activeView, workId: undefined })}
@@ -165,30 +274,24 @@ export function RoadmapPanel({
   );
 }
 
-function LensButton({ active, onClick, children }: ControlButtonProps) {
-  return (
-    <button type="button" aria-current={active ? 'page' : undefined} onClick={onClick}>
-      {children}
-    </button>
-  );
-}
-
 function ControlGroup({ label, children }: { readonly label: string; readonly children: ReactNode }) {
   return (
-    <fieldset className="roadmap-control-group">
+    <fieldset className="roadmap-control-group" aria-label={label}>
       <legend>{label}</legend>
       {children}
     </fieldset>
   );
 }
 
-interface ControlButtonProps {
+function ControlButton({
+  active,
+  onClick,
+  children,
+}: {
   readonly active: boolean;
   readonly onClick: () => void;
   readonly children: string;
-}
-
-function ControlButton({ active, onClick, children }: ControlButtonProps) {
+}) {
   return (
     <button type="button" aria-pressed={active} onClick={onClick}>
       {children}

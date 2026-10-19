@@ -1,6 +1,7 @@
 import { type FormEvent, useState } from 'react';
 
 import type { ClientPhase, HumanAuthProviderStatus } from './client-types.js';
+import { useCollectiveText } from './collective-copy.js';
 import type { EntryMode } from './human-auth-flow.js';
 
 export function OnboardingScene({
@@ -24,6 +25,7 @@ export function OnboardingScene({
   readonly onConfigureProvider: () => Promise<void>;
   readonly onCreateCollective: (name: string) => Promise<void>;
 }) {
+  const t = useCollectiveText();
   const [busy, setBusy] = useState(false);
   const [localError, setLocalError] = useState<string>();
   const github = providers.find((provider) => provider.id === 'github');
@@ -31,15 +33,15 @@ export function OnboardingScene({
   if (phase === 'loading') {
     return (
       <div className="state-scene" aria-live="polite">
-        <p>正在打开共同家园…</p>
+        <p>{t('正在打开共同家园…')}</p>
       </div>
     );
   }
   if (phase === 'unavailable') {
     return (
       <div className="state-scene state-scene-error" role="alert">
-        <h2>现在还进不去</h2>
-        <p>暂时连不上这个共同体。恢复后可以接着用。</p>
+        <h2>{t('现在还进不去')}</h2>
+        <p>{t('暂时连不上这个共同体。恢复后可以接着用。')}</p>
         {error && <small>{error}</small>}
       </div>
     );
@@ -69,12 +71,12 @@ export function OnboardingScene({
     return (
       <div className="entry-wrap">
         <section className="entry-card">
-          <p className="entry-eyebrow">Human 登录</p>
-          <h2>创建 GitHub 登录应用</h2>
-          <p>在 GitHub 确认一次即可为这个 Service 建立登录能力，不需要复制 Client ID 或 secret。</p>
+          <p className="entry-eyebrow">{t('Human 登录')}</p>
+          <h2>{t('创建 GitHub 登录应用')}</h2>
+          <p>{t('在 GitHub 确认一次即可为这个 Service 建立登录能力，不需要复制 Client ID 或 secret。')}</p>
           <div className="entry-action">
             <button type="button" disabled={busy} onClick={() => void run(onConfigureProvider)}>
-              {busy ? '正在打开 GitHub…' : '在 GitHub 中创建'}
+              {t(busy ? '正在打开 GitHub…' : '在 GitHub 中创建')}
             </button>
           </div>
           {localError && <p className="form-error">{localError}</p>}
@@ -151,7 +153,7 @@ export function OnboardingScene({
   return (
     <AuthCard
       eyebrow="欢迎回来"
-      title="进入你的 Collective"
+      title="登录共同体"
       description="用已经绑定的 Human 身份登录。若你是新成员，请从邀请链接进入。"
       button="使用 GitHub 登录"
       providerReady={github?.ready === true}
@@ -193,18 +195,19 @@ function AuthCard({
   readonly error?: string;
   readonly onAuthenticate: () => Promise<void>;
 }) {
+  const t = useCollectiveText();
   return (
     <div className="entry-wrap">
       <section className="entry-card">
-        <p className="entry-eyebrow">{eyebrow}</p>
-        <h2>{title}</h2>
-        <p>{description}</p>
+        <p className="entry-eyebrow">{t(eyebrow)}</p>
+        <h2>{t(title)}</h2>
+        <p>{t(description)}</p>
         <div className="entry-action">
           <button type="button" disabled={busy || !providerReady} onClick={() => void onAuthenticate()}>
-            {busy ? '正在前往验证…' : button}
+            {t(busy ? '正在前往验证…' : button)}
           </button>
         </div>
-        {!providerReady && <p className="provider-note">Human 登录尚未配置，请联系 Service 管理者。</p>}
+        {!providerReady && <p className="provider-note">{t('Human 登录尚未配置，请联系 Service 管理者。')}</p>}
         {error && <p className="form-error">{error}</p>}
       </section>
     </div>
@@ -232,19 +235,20 @@ function EntryCard({
   readonly error?: string;
   readonly onSubmit: (event: FormEvent<HTMLFormElement>) => Promise<void>;
 }) {
+  const t = useCollectiveText();
   return (
     <div className="entry-wrap">
       <section className="entry-card">
-        <p className="entry-eyebrow">{eyebrow}</p>
-        <h2>{title}</h2>
-        <p>{description}</p>
+        <p className="entry-eyebrow">{t(eyebrow)}</p>
+        <h2>{t(title)}</h2>
+        <p>{t(description)}</p>
         <form onSubmit={(event) => void onSubmit(event)}>
           <label>
-            {label}
+            {t(label)}
             <input name="value" defaultValue={defaultValue} autoComplete="name" required />
           </label>
           <button type="submit" disabled={busy}>
-            {busy ? '正在继续…' : button}
+            {t(busy ? '正在继续…' : button)}
           </button>
         </form>
         {error && <p className="form-error">{error}</p>}

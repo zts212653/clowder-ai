@@ -3,6 +3,7 @@ import type {
   CollectiveRoadmapRecord,
   CollectiveWorkProjection,
 } from './client-types.js';
+import { canTrackWorkInProject } from './roadmap-view-model.js';
 
 export interface RoadmapAction {
   readonly label: string;
@@ -16,20 +17,21 @@ export function roadmapActionsFor(
   createRoadmap: (work: CollectiveWorkProjection) => Promise<void>,
   setRoadmapWorks: (roadmap: CollectiveRoadmapRecord, workIds: readonly string[]) => Promise<void>,
 ): readonly RoadmapAction[] {
+  if (!canTrackWorkInProject(work)) return [];
   const ownedActive = roadmaps.filter(
     (roadmap) => roadmap.accountableHumanId === currentHumanId && roadmap.status === 'active',
   );
   const available = ownedActive.filter((roadmap) => !roadmap.workIds.includes(work.workId));
   if (available.length) {
     return available.map((roadmap) => ({
-      label: `加入「${roadmap.title}」`,
+      label: `加入项目「${roadmap.title}」`,
       onInvoke: () => void setRoadmapWorks(roadmap, [...roadmap.workIds, work.workId]).catch(() => undefined),
     }));
   }
   if (ownedActive.length) return [];
   return [
     {
-      label: roadmaps.length ? '建立另一条路线' : '建立路线',
+      label: roadmaps.length ? '新建另一个项目' : '新建项目',
       onInvoke: () => void createRoadmap(work).catch(() => undefined),
     },
   ];

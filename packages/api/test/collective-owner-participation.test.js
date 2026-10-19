@@ -375,15 +375,41 @@ test('owner entry reads registered Cat cards without leaking private routing set
 test('automatic bring-in publishes only a short public Cat introduction and preserves exclusions', async () => {
   const h = await harness();
   h.setCats([
-    { id: 'sol', displayName: '缅因猫（Sol）', supported: true, roleDescription: '复杂实现'.repeat(80) },
+    {
+      id: 'sol',
+      displayName: '缅因猫（Sol）',
+      nickname: ' 小太阳 ',
+      supported: true,
+      roleDescription: '复杂实现'.repeat(80),
+    },
     { id: 'private', displayName: '私家猫', supported: false, roleDescription: '不要公开' },
   ]);
   const result = await h.reconcile({ expectedRevision: 0, channelIds: ['general'] });
   assert.equal(result.statusCode, 200);
   assert.equal(h.route().channelRoutes.general.participants.sol.displayName, '缅因猫（Sol）');
   assert.equal(h.route().publicProfiles.sol.description.length, 120);
+  assert.equal(h.route().publicProfiles.sol.displayLabel, '小太阳');
   assert.equal(h.route().publicProfiles.private, undefined);
   await h.app.close();
+});
+
+test('short-name publication follows nickname changes, omits blanks and rejects oversized values before mutation', async () => {
+  const h = await harness();
+  try {
+    h.setCats([{ id: 'sol', displayName: 'Sol full model identity', nickname: '  ', supported: true }]);
+    assert.equal((await h.reconcile({ expectedRevision: 0, channelIds: ['general'] })).statusCode, 200);
+    assert.equal(h.route().publicProfiles.sol.displayLabel, undefined);
+    const revision = h.route().revision;
+    h.setCats([{ id: 'sol', displayName: 'Sol full model identity', nickname: ' 新昵称 ', supported: true }]);
+    assert.equal((await h.reconcile({ expectedRevision: revision, channelIds: ['general'] })).statusCode, 200);
+    assert.equal(h.route().publicProfiles.sol.displayLabel, '新昵称');
+    const prior = structuredClone(h.route());
+    h.setCats([{ id: 'sol', displayName: 'Sol full model identity', nickname: '中'.repeat(121), supported: true }]);
+    assert.notEqual((await h.reconcile({ expectedRevision: prior.revision, channelIds: ['general'] })).statusCode, 200);
+    assert.deepEqual(h.route(), prior);
+  } finally {
+    await h.app.close();
+  }
 });
 
 test('owner view exposes response-request attention custody separately from private Work admission', async () => {
@@ -550,6 +576,7 @@ test('owner view distinguishes a routed named request, private execution, and a 
     assert.equal(response.json().requests[0].execution.stage, 'started');
     const startedRef = originalGetById(source.id).lifecycle.dispatchRefs[0];
     const receiver = originalGetById(startedRef.statusMessageId);
+    assert.equal(response.json().requests[0].execution.invocationId, receiver.lifecycle.invocationId);
     for (const foreign of [
       { ...receiver, userId: 'foreign' },
       { ...receiver, threadId: 'foreign' },

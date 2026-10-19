@@ -1312,7 +1312,14 @@ echo -e "${GREEN}✓ web lint 通过（api/shared/mcp/ppt tsc 已在 Step 4 覆�
 
 # Only the artifact-dependent remainder is left here; the source-only and
 # dependency-only tiers already ran in Step 2a/2b against the same frozen tree.
-if ! run_resumable_gate_stage shared check pnpm check:artifacts; then
+# The source full API suite also ran the API tests embedded in this tier.
+# Keep standalone checks and public subsets complete; neither establishes that
+# prerequisite. Distinct checker regressions and the actual audits still run.
+GATE_ARTIFACT_CHECK=check:artifacts
+if [ "$TEST_MODE" = "full" ] && [ "$PUBLIC_EXPORT" = "false" ]; then
+  GATE_ARTIFACT_CHECK=check:artifacts:after-api-tests
+fi
+if ! run_resumable_gate_stage shared check pnpm "$GATE_ARTIFACT_CHECK"; then
   echo ""
   echo -e "${RED}❌ check 失败${NC}"
   exit 1

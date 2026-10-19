@@ -33,6 +33,7 @@ test('public participation exposes only current-source context, reply, interest,
     'collective_reply',
     'collective_set_interest',
     'collective_propose_work',
+    'collective_suggest_project_work',
   ]) {
     assert.equal(toolExecutionPolicyDenial(policy, `cat_cafe_${tool}`), null);
     assert.equal(toolExecutionPolicyDenial(policy, `/api/callbacks/${tool.replaceAll('_', '-')}`), null);

@@ -13,7 +13,7 @@
     "collective:start": "pnpm --filter @cat-cafe/collective-service start",
     "collective:dev": "pnpm --filter @cat-cafe/collective-service dev",
     "test:f290-runtime-journey": "pnpm --filter @cat-cafe/collective-service build && pnpm --filter @cat-cafe/web build && node --test packages/web/test/browser/f290-collective-runtime-journey.test.mjs",
-    "test:f290-shared-artifacts": "pnpm --filter @cat-cafe/api build && bash packages/api/scripts/with-test-home.sh node --import tsx --test packages/web/test/browser/f290-shared-artifacts.test.mjs packages/web/test/browser/f290-shared-artifact-management.test.mjs",
+    "test:f290-shared-artifacts": "node packages/web/scripts/ensure-browser-test-artifacts.cjs && bash packages/api/scripts/with-test-home.sh node packages/web/scripts/run-with-node-env-test.mjs node --import tsx --test --test-concurrency=1 packages/web/test/browser/f290-shared-artifacts.test.mjs packages/web/test/browser/f290-shared-artifact-management.test.mjs packages/web/test/browser/f290-retained-media.test.mjs",
     "stop": "./scripts/start-dev.sh --stop",
     "dev:stop": "./scripts/start-dev.sh --stop",
     "runtime:stop": "./scripts/runtime-worktree.sh stop",

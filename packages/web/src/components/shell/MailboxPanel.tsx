@@ -23,12 +23,22 @@ import type { UnifiedAttentionView } from './use-unified-attention';
 
 const RAIL_WIDTH_FALLBACK = 52;
 const PANEL_WIDTH = 440;
+const MOBILE_BREAKPOINT = 768;
 /** The panel docks against the rail's right edge; without a rail in the tree (a bare unit render) it uses the rail's width. */
 function useRailEdge(anchor: React.RefObject<HTMLElement | null>): number | null {
   const [edge, setEdge] = useState<number | null>(null);
   useEffect(() => {
-    const rail = anchor.current?.closest('[data-testid="world-rail"]');
-    setEdge(Math.round(rail?.getBoundingClientRect().right || RAIL_WIDTH_FALLBACK));
+    const measure = () => {
+      if (window.innerWidth < MOBILE_BREAKPOINT) {
+        setEdge(0);
+        return;
+      }
+      const rail = anchor.current?.closest('[data-testid="world-rail"]');
+      setEdge(Math.round(rail?.getBoundingClientRect().right || RAIL_WIDTH_FALLBACK));
+    };
+    measure();
+    window.addEventListener('resize', measure);
+    return () => window.removeEventListener('resize', measure);
   }, [anchor]);
   return edge;
 }
@@ -127,7 +137,7 @@ export function MailboxPanel({
   const canRetry =
     state.kind === 'unavailable' || state.kind === 'partial' || (state.kind === 'has-items' && state.partial);
   // The identically named Needs me tab and rail count the same qualified decisions, never @you requests.
-  const decisionState = deriveMailboxState(view.result);
+  const decisionState = deriveMailboxState(view.badgeResult ?? view.result);
   const total = decisionState.kind === 'empty' ? 0 : decisionState.kind === 'has-items' ? decisionState.count : null;
 
   // A hidden element can't take focus, so move focus in only once the panel is positioned and visible.

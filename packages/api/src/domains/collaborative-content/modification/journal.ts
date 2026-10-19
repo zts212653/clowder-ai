@@ -13,13 +13,16 @@ import { CollectiveModificationJournal } from './journal/collective-journal.js';
 import {
   type ContentModificationProgress,
   contentModificationJournalIdSchema,
-  contentModificationMessageRevisionSchema,
   contentModificationProgressSchema,
-  modificationMessageRequestId,
   modificationRequestId,
   parseContentModificationRecord,
 } from './journal/journal-record.js';
 import { findContentModificationRecordsForSource } from './journal/journal-source-query.js';
+import {
+  findTakeoverOperation,
+  type MessageTakeoverSource,
+  reserveMessageModification,
+} from './journal/message-takeover-journal.js';
 import {
   initializeContentModificationProjectionCursor,
   nextContentModificationProjectionBodies,
@@ -90,59 +93,17 @@ export class ContentModificationJournal {
       .immediate();
   }
 
-  /** One immutable Human message owns at most one request, independent of retry or competing cat operation IDs. */
   reserveFromMessage(
     ownerUserId: string,
     raw: unknown,
-    source: {
-      messageId: string;
-      messageRevision: `sha256:${string}`;
-      visibility:
-        | { readonly visibility: 'public' }
-        | { readonly visibility: 'whisper'; readonly whisperTo: readonly string[] };
-    },
+    source: MessageTakeoverSource,
     now = Date.now(),
   ): ContentModificationRecord {
-    contentModificationJournalIdSchema.parse(ownerUserId);
-    contentModificationJournalIdSchema.parse(source.messageId);
-    contentModificationMessageRevisionSchema.parse(source.messageRevision);
-    const payload = contentModificationRequestContractSchema.parse(raw);
-    contentModificationOutcome(payload.intent);
-    const requestId = modificationMessageRequestId(ownerUserId, source.messageId);
-    return this.db
-      .transaction(() => {
-        const existing = this.get(requestId, ownerUserId);
-        if (existing) {
-          if (
-            existing.progress.sourceMessageId !== source.messageId ||
-            existing.progress.sourceMessageRevision !== source.messageRevision ||
-            existing.progress.sourceKind !== 'human_message' ||
-            !isDeepStrictEqual(existing.progress.sourceVisibility, source.visibility)
-          )
-            throw new ContentModificationJournalError('operation_reused');
-          return existing;
-        }
-        if (payload.taskContext) this.cancellations.assertTaskAvailable(ownerUserId, payload.taskContext.taskId);
-        const record: ContentModificationRecord = {
-          requestId,
-          ownerUserId,
-          payload,
-          progress: {
-            sourceMessageId: source.messageId,
-            sourceMessageRevision: source.messageRevision,
-            sourceKind: 'human_message',
-            sourceVisibility: source.visibility,
-          },
-          revision: 1,
-          createdAt: now,
-          updatedAt: now,
-        };
-        this.db
-          .prepare('INSERT INTO content_modification_requests(request_id,owner_user_id,revision,body) VALUES(?,?,?,?)')
-          .run(requestId, ownerUserId, 1, JSON.stringify(record));
-        return record;
-      })
-      .immediate();
+    return reserveMessageModification(this.db, this.cancellations, ownerUserId, raw, source, now);
+  }
+
+  forTakeoverOperation(ownerUserId: string, operationId: string): ContentModificationRecord | null {
+    return findTakeoverOperation(this.db, ownerUserId, operationId);
   }
 
   /** Called inside the same DB transaction as a new human candidate decision. Fences delayed UI reads. */
@@ -314,6 +275,8 @@ export class ContentModificationJournal {
     for (const key of [
       'sourceMessageId',
       'sourceMessageRevision',
+      'sourceAttachmentId',
+      'takeoverOperationIds',
       'sourceKind',
       'sourceVisibility',
       'prepared',

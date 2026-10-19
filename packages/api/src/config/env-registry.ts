@@ -718,14 +718,6 @@ export const ENV_VARS: EnvDefinition[] = [
     sensitive: false,
   },
   {
-    name: 'GAME_NARRATOR_ENABLED',
-    defaultValue: '(未设置 → 不启用)',
-    description: '设为 true 启用游戏叙述者模式',
-    category: 'server',
-    sensitive: false,
-    hubVisible: false,
-  },
-  {
     name: 'COMMUNITY_PUBLISH_DEFAULT_REPO',
     defaultValue: 'clowder-ai/cat-cafe',
     description: 'F235 社区发布默认 GitHub 仓库（owner/repo 格式）',

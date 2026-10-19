@@ -1,15 +1,20 @@
 import {
+  type CollectiveAccountabilityAttentionReadRequest,
   type CollectiveAgentMessageRequest,
   type CollectiveAgentWorkProposalRequest,
   type CollectiveEventEnvelope,
   type CollectivePairingIntent,
   type CollectiveParticipationDeclaration,
   type CollectiveSourceIdentity,
+  type CollectiveWorkResultFileBindingRequest,
+  type CollectiveWorkResultFileBindingResponse,
+  collectiveAccountabilityAttentionReadResponseSchema,
   collectiveEventEnvelopeSchema,
   collectiveEventIdSchema,
   collectiveParticipationDeclarationSchema,
   collectiveWorkIdSchema,
   collectiveWorkProjectionSchema,
+  collectiveWorkResultFileBindingResponseSchema,
 } from '@cat-cafe/shared';
 import { z } from 'zod';
 import { CollectiveArtifactCustodyClient } from './artifact-custody-client.js';
@@ -32,6 +37,10 @@ const metadataResponseSchema = z
   .object({
     serviceInstanceId: z.string(),
     clientBuildId: z.string().trim().min(1).max(120),
+    capabilities: z
+      .object({ workResultFiles: z.literal(1).optional() })
+      .strict()
+      .optional(),
   })
   .passthrough();
 
@@ -79,12 +88,17 @@ export class CollectiveServiceClient {
     this.media = new CollectiveArtifactMediaClient((url, path, options) => this.request(url, path, options), fetchImpl);
   }
 
-  async readMetadata(serviceUrl: string): Promise<{ serviceInstanceId: string; clientBuildId: string }> {
+  async readMetadata(serviceUrl: string): Promise<{
+    serviceInstanceId: string;
+    clientBuildId: string;
+    capabilities?: { workResultFiles?: 1 };
+  }> {
     const parsed = metadataResponseSchema.safeParse(await this.request(serviceUrl, '/api/meta'));
     if (!parsed.success) throw new ConnectorTransportError('Service metadata is invalid');
     return {
       serviceInstanceId: parsed.data.serviceInstanceId,
       clientBuildId: parsed.data.clientBuildId,
+      ...(parsed.data.capabilities ? { capabilities: parsed.data.capabilities } : {}),
     };
   }
 
@@ -121,6 +135,19 @@ export class CollectiveServiceClient {
     return collectiveEventEnvelopeSchema.parse(payload);
   }
 
+  async bindAcceptedWorkResultFile(
+    serviceUrl: string,
+    endpointCredential: string,
+    input: CollectiveWorkResultFileBindingRequest,
+  ): Promise<CollectiveWorkResultFileBindingResponse> {
+    const payload = await this.request(serviceUrl, '/api/collaboration/work-result-files/bind', {
+      method: 'POST',
+      credential: endpointCredential,
+      body: input,
+    });
+    return collectiveWorkResultFileBindingResponseSchema.parse(payload);
+  }
+
   async proposeWork(serviceUrl: string, endpointCredential: string, input: CollectiveAgentWorkProposalRequest) {
     const payload = await this.request(serviceUrl, '/api/collaboration/work/propose-agent', {
       method: 'POST',
@@ -149,6 +176,25 @@ export class CollectiveServiceClient {
       throw new ConnectorTransportError('Assigned Work response does not match the requested Work');
     }
     return work;
+  }
+
+  async readPendingAccountabilityRequests(
+    serviceUrl: string,
+    endpointCredential: string,
+    input: CollectiveAccountabilityAttentionReadRequest,
+  ) {
+    const query = new URLSearchParams({
+      serviceInstanceId: input.serviceInstanceId,
+      collectiveId: input.collectiveId,
+      connectionId: input.connectionId,
+      offset: String(input.offset),
+      limit: String(input.limit),
+      ...(input.snapshot ? { snapshot: input.snapshot } : {}),
+    });
+    const payload = await this.request(serviceUrl, `/api/collaboration/work/accountability/pending?${query}`, {
+      credential: endpointCredential,
+    });
+    return collectiveAccountabilityAttentionReadResponseSchema.parse(payload);
   }
 
   async readAssignedWorkByAssignment(

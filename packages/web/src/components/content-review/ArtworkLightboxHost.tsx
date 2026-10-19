@@ -4,11 +4,23 @@ import { Lightbox } from '@/components/Lightbox';
 import { ContentSurfaceResolutionProvider } from '@/components/workbench/ContentSurfaceResolution';
 import { F307OwnerSurfaceRenderer } from '@/components/workbench/F307OwnerSurfaceRenderer';
 import { WorkspaceChatWorkSurface } from '@/components/workbench/WorkspaceChatWorkScope';
+import { ArtworkGalleryScope, useArtworkGallery } from './ArtworkGalleryScope';
 import { FloatingArtworkPresentation, useArtworkLightboxScope } from './ArtworkLightboxScope';
 import styles from './artwork-lightbox.module.css';
 
 export function ArtworkLightboxHost() {
   const scope = useArtworkLightboxScope();
+  const work = scope?.work;
+  if (!scope || !work) return null;
+  return (
+    <ArtworkGalleryScope gallery={work.gallery} reference={work.reference}>
+      <ArtworkLightboxContents />
+    </ArtworkGalleryScope>
+  );
+}
+function ArtworkLightboxContents() {
+  const scope = useArtworkLightboxScope();
+  const gallery = useArtworkGallery();
   const work = scope?.work;
   if (!scope || !work) return null;
   return (
@@ -18,6 +30,7 @@ export function ArtworkLightboxHost() {
         alt={work.alt}
         caption={work.caption}
         mediaType={work.mediaType}
+        gallery={gallery}
         annotationUnavailableReason={work.reason}
         onClose={scope.close}
         onOpenWorkspace={work.openWorkspace}

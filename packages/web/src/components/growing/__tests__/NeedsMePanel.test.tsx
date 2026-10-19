@@ -7,6 +7,7 @@ import { useChatStore } from '@/stores/chatStore';
 const mocks = vi.hoisted(() => ({
   ownerReads: [] as EntrustedWorkOwnerReadV1[],
   loading: false,
+  confirmed: false,
   error: false,
   refetch: vi.fn(),
 }));
@@ -144,6 +145,7 @@ describe('F310 NeedsMePanel', () => {
 
   beforeEach(() => {
     mocks.ownerReads = [];
+    mocks.confirmed = false;
     mocks.loading = false;
     mocks.error = false;
     mocks.refetch.mockReset();
@@ -203,6 +205,14 @@ describe('F310 NeedsMePanel', () => {
     } finally {
       useChatStore.setState({ workspaceMode: previousMode });
     }
+  });
+
+  it('keeps the confirmed count during a background refresh of the same owner projection', async () => {
+    mocks.ownerReads = [ownerRead({ eligible: true })];
+    mocks.confirmed = true;
+    mocks.loading = true;
+    await act(async () => root.render(<NeedsMePanel />));
+    expect(container.querySelector('[data-testid="needs-me-count"]')?.textContent).toBe('1');
   });
 
   it('withholds the count while the read is loading or failed instead of fabricating zero', async () => {
@@ -298,6 +308,23 @@ describe('F310 NeedsMePanel', () => {
       'message:thread-ppt:message-question#block-direction',
       expect.stringContaining('interaction:ppt-direction'),
     );
+  });
+
+  it('shows the F290 system result prompt in this Chinese-only surface instead of leaking producer English', async () => {
+    const read = ownerRead({ eligible: true });
+    const receipt = read.attentionReceipts[0];
+    if (!receipt?.eligible) throw new Error('fixture receipt missing');
+    receipt.producer.producerId = 'f290.collective_work_result';
+    receipt.reasonCode = 'collective_result_ready';
+    receipt.recommendation = 'Review the prepared result in its Collective Work';
+    mocks.ownerReads = [read];
+
+    await act(async () => {
+      root.render(<NeedsMePanel />);
+    });
+
+    expect(container.textContent).toContain('建议：查看共同体工作中准备好的成果');
+    expect(container.textContent).not.toContain('Review the prepared result in its Collective Work');
   });
 
   it('keeps an unknown producer reason code verbatim behind the fold instead of translating it', async () => {

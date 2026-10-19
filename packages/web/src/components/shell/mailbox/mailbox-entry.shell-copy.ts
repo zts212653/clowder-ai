@@ -1,3 +1,4 @@
+import { COLLECTIVE_RESULT_READY_RECOMMENDATION } from '../../growing/needs-me-recommendation';
 import { defineShellCopy } from '../shell-copy';
 
 export const mailboxEntryCopy = defineShellCopy(
@@ -9,9 +10,16 @@ export const mailboxEntryCopy = defineShellCopy(
       reject: '拒绝',
       clear: '清除',
       suggestion: '建议',
+      collectiveResultReady: COLLECTIVE_RESULT_READY_RECOMMENDATION.zh,
       goal: '目标',
       work: '受托工作',
       artwork: '成果',
+      accountabilityKind: '责任邀请',
+      accountabilityLead: (name: string) => `${name} 邀请你负责`,
+      accountabilitySource: (project: string) => `项目「${project}」`,
+      accountabilityProject: '项目',
+      accountabilityRequester: '邀请人',
+      accountabilityHint: '接受或暂不接受，请在原项目任务中确认。',
       choice: '选择请求',
       newConversation: '新建对话',
       reread: '重新读取',
@@ -101,6 +109,7 @@ export const mailboxEntryCopy = defineShellCopy(
       source: {
         approvals: '审批',
         needsMe: '等你判断或修复',
+        accountability: '责任邀请',
         personal: '忽略记录',
         choices: '等你选择',
         login: '需要登录',
@@ -136,9 +145,16 @@ export const mailboxEntryCopy = defineShellCopy(
       reject: 'Reject',
       clear: 'Clear',
       suggestion: 'Suggestion',
+      collectiveResultReady: COLLECTIVE_RESULT_READY_RECOMMENDATION.en,
       goal: 'Goal',
       work: 'Entrusted work',
       artwork: 'Result',
+      accountabilityKind: 'Responsibility request',
+      accountabilityLead: (name: string) => `${name} invited you to own`,
+      accountabilitySource: (project: string) => `Project “${project}”`,
+      accountabilityProject: 'Project',
+      accountabilityRequester: 'Requested by',
+      accountabilityHint: 'Accept or decline in the original Project Task.',
       choice: 'Choice request',
       newConversation: 'New conversation',
       reread: 'Read again',
@@ -228,6 +244,7 @@ export const mailboxEntryCopy = defineShellCopy(
       source: {
         approvals: 'Approvals',
         needsMe: 'Judgments or repairs',
+        accountability: 'Responsibility requests',
         personal: 'Ignore preferences',
         choices: 'Choices',
         login: 'Sign in required',
@@ -275,6 +292,8 @@ export const mailboxEntryCopy = defineShellCopy(
         ['A', 'C'],
         ['B', 'D'],
       ],
+      accountabilityLead: [['A'], ['B']],
+      accountabilitySource: [['A'], ['B']],
       page: [[1], [2]],
       pageItems: [[1], [2]],
       more: [[0], [21]],

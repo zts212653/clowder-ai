@@ -13,6 +13,7 @@ export async function routeCollaborationPost(
   const credential = requireBearer(request);
   if (await routeWorkAuthorityPost(store, pathname, response, body, credential)) return true;
   if (await routeVotePost(store, pathname, response, body, credential)) return true;
+  if (await routeProjectPost(store, pathname, response, body, credential)) return true;
   if (pathname === '/api/collaboration/reactions/set') {
     writeJson(response, 200, await store.setCollectiveReaction(credential, body));
   } else if (pathname === '/api/collaboration/work/propose') {
@@ -31,6 +32,29 @@ export async function routeCollaborationPost(
     writeJson(response, 200, await store.requestCollectiveWorkRevision(credential, body));
   } else if (pathname === '/api/collaboration/work/complete') {
     writeJson(response, 200, await store.completeCollectiveWork(credential, body));
+  } else {
+    return false;
+  }
+  return true;
+}
+
+async function routeProjectPost(
+  store: CollectiveServiceStore,
+  pathname: string,
+  response: ServerResponse,
+  body: Record<string, unknown>,
+  credential: string,
+): Promise<boolean> {
+  if (pathname === '/api/collaboration/projects/create') {
+    writeJson(response, 201, await store.createCollectiveProject(credential, body));
+  } else if (pathname === '/api/collaboration/projects/tasks/create') {
+    writeJson(response, 201, await store.createCollectiveProjectTask(credential, body));
+  } else if (pathname === '/api/collaboration/work/accountability/request') {
+    writeJson(response, 200, await store.requestCollectiveWorkAccountability(credential, body));
+  } else if (pathname === '/api/collaboration/work/accountability/respond') {
+    writeJson(response, 200, await store.respondCollectiveWorkAccountability(credential, body));
+  } else if (pathname === '/api/collaboration/projects/suggestions/decide') {
+    writeJson(response, 200, await store.decideCollectiveProjectWorkSuggestion(credential, body));
   } else if (pathname === '/api/collaboration/roadmaps') {
     writeJson(response, 201, await store.createCollectiveRoadmap(credential, body));
   } else if (pathname === '/api/collaboration/roadmaps/works') {

@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 import { retainedMediaBrowserFixture } from './f290-retained-media.harness.mjs';
 import { startNext, stopChild, waitForHttp } from './f290-runtime-journey.harness.mjs';
-import { checkRetainedMediaHistory } from './helpers/retained-media-history-journey.mjs';
+import { checkRetainedMediaHistory, openRetainedMediaHistory } from './helpers/retained-media-history-journey.mjs';
 import { checkRetainedMediaDiscussion } from './helpers/retained-media-review-journey.mjs';
 
 test(
@@ -58,12 +58,14 @@ test(
           const page = await context.newPage();
           page.setDefaultTimeout(15000);
           const responses = [];
-          const metadata = page.waitForResponse(
-            (response) =>
-              response.url().endsWith('/api/artifacts/owner/request') &&
-              response.request().postDataJSON()?.action === 'read' &&
-              response.status() === 200,
-          );
+          const waitForMetadata = () =>
+            page.waitForResponse(
+              (response) =>
+                response.url().endsWith('/api/artifacts/owner/request') &&
+                response.request().postDataJSON()?.action === 'read' &&
+                response.status() === 200,
+            );
+          let metadata;
           page.on('response', (response) => {
             if (response.url().includes('/media/1?')) responses.push(response);
           });
@@ -99,13 +101,15 @@ test(
             const published = page.waitForResponse(
               (response) => response.url().endsWith('/artifacts/share-media') && response.status() === 200,
             );
+            metadata = waitForMetadata();
             await page.getByRole('button', { name: '分享所选作品' }).click();
             artifact = await (await published).json();
             assert.equal(artifact.contentRef, f.media.asset.contentRef);
             assert.equal(artifact.versions[0].blobDigest, f.media.asset.blobDigest);
           } else {
             await client.getByRole('button', { name: /全部作品/ }).click();
-            await client.getByRole('button', { name: '版本记录', exact: true }).click();
+            await openRetainedMediaHistory(client, artifact.title);
+            metadata = waitForMetadata();
             await client.getByRole('button', { name: '查看第 1 版', exact: true }).click();
           }
           const surface = page.getByTestId('collective-media-surface');
@@ -154,7 +158,7 @@ test(
             await f.reopenRetainedOwner();
             await page.reload();
             await client.getByRole('button', { name: /全部作品/ }).click();
-            await client.getByRole('button', { name: '版本记录', exact: true }).click();
+            await openRetainedMediaHistory(client, artifact.title);
             await client.getByRole('button', { name: '查看第 1 版', exact: true }).click();
             await surface.getByRole('button', { name: '打开作品讨论', exact: true }).click();
             await surface.getByText('这处画面请保留，颜色不变。', { exact: true }).waitFor();

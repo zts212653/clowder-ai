@@ -49,7 +49,7 @@
   color: var(--cafe-text-muted);
   font-size: 12px;
 }
-.shared-artifact-card > span:last-child {
+.shared-artifact-card > .shared-artifact-open {
   color: var(--cafe-accent);
   font-size: 12px;
 }

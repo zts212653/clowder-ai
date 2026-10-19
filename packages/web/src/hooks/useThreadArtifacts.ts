@@ -9,6 +9,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { apiFetch } from '../utils/api-client';
 import { useThreadLiveness, useThreadMessages } from './useThreadScopedSelectors';
 
+const EMPTY_ARTIFACTS: ThreadArtifactDTO[] = [];
+
 async function fetchArtifacts(tid: string, signal: AbortSignal, view?: 'works'): Promise<ThreadArtifactsResponse> {
   const res = await apiFetch(`/api/threads/${encodeURIComponent(tid)}/artifacts${view ? '?view=works' : ''}`, {
     signal,
@@ -73,6 +75,8 @@ export function useWorksSourceRefresh(threadId: string | undefined, enabled: boo
 }
 
 export function useThreadArtifacts(threadId: string | undefined, view?: 'works'): UseThreadArtifactsResult {
+  const scope = JSON.stringify([threadId, view]);
+  const [resolvedScope, setResolvedScope] = useState<string | null>(null);
   const [artifacts, setArtifacts] = useState<ThreadArtifactDTO[]>([]);
   const [loading, setLoading] = useState(Boolean(threadId));
   const [error, setError] = useState(false);
@@ -94,21 +98,25 @@ export function useThreadArtifacts(threadId: string | undefined, view?: 'works')
 
     const tid = threadIdRef.current;
     if (!tid) {
+      setResolvedScope(null);
       setArtifacts([]);
       setLoading(false);
       return;
     }
     setLoading(true);
     setError(false);
+    const requestedView = viewRef.current;
     try {
-      const result = await fetchArtifacts(tid, ac.signal, viewRef.current);
+      const result = await fetchArtifacts(tid, ac.signal, requestedView);
       if (!ac.signal.aborted) {
         setArtifacts(result.artifacts);
-        setCoverage(sourceCoverage(result, viewRef.current));
+        setCoverage(sourceCoverage(result, requestedView));
+        setResolvedScope(JSON.stringify([tid, requestedView]));
       }
     } catch (err: unknown) {
       if (ac.signal.aborted || (err instanceof DOMException && err.name === 'AbortError')) return;
       setError(true);
+      setResolvedScope(null);
       setArtifacts([]);
     } finally {
       if (!ac.signal.aborted) setLoading(false);
@@ -127,13 +135,14 @@ export function useThreadArtifacts(threadId: string | undefined, view?: 'works')
     () => projectThreadWorks(artifacts, coverage.lineageResolved),
     [artifacts, coverage.lineageResolved],
   );
+  const sameScope = resolvedScope === scope;
   return {
-    artifacts,
-    loading,
+    artifacts: sameScope ? artifacts : EMPTY_ARTIFACTS,
+    loading: loading || (Boolean(threadId) && !sameScope && !error),
     error,
     refetch,
-    works,
-    total: coverage.total,
-    complete: coverage.complete,
+    works: sameScope ? works : EMPTY_ARTIFACTS,
+    total: sameScope ? coverage.total : null,
+    complete: sameScope && coverage.complete,
   };
 }

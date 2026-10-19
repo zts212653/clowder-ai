@@ -263,6 +263,7 @@ export function continueActionSuccessorFreshRevision(
       ],
       returnTransitions: [],
       replacementTransitions: [],
+      orphanCarrierRecoveryTransitions: [],
       revision: 1,
       createdAt: input.now,
       updatedAt: input.now,

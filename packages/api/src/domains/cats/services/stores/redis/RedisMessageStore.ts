@@ -70,6 +70,7 @@ import {
 } from '../../agents/invocation/queue-ledger/RedisQueueLedgerStore.js';
 import { cursorFor, parseCursor } from '../cursor.js';
 import type { LifecycleAppendRecoveryInput, LifecycleAppendRecoveryResult } from '../lifecycle-append-recovery.js';
+import type { LifecycleWakeCoverageInput, LifecycleWakeCoverageResult } from '../lifecycle-wake-coverage.js';
 import { messageFrom } from '../message-from.js';
 import { notifyMessageTimelineChange } from '../notify-message-timeline-change.js';
 import type {
@@ -151,6 +152,7 @@ import {
 } from '../visibility.js';
 import { HUMAN_SOURCE_HASH_LUA, humanSourceHash } from './redis-human-source-hash.js';
 import { commitRedisLifecycleAppendRecovery } from './redis-lifecycle-append-recovery.js';
+import { commitRedisLifecycleWakeCoverage } from './redis-lifecycle-wake-coverage.js';
 import { appendMessage } from './redis-message-append.js';
 import { CANCEL_LUA, REASSIGN_LUA } from './redis-message-delivery-lua-scripts.js';
 import { appendMessageAndObservePriorFrontier } from './redis-message-frontier-append.js';
@@ -3391,39 +3393,6 @@ export class RedisMessageStore {
   }
 
   /**
-   * Fetch IDs before a composite cursor (timestamp + beforeId) using chunked scanning.
-   * Loops until we have `limit` results or exhaust the sorted set.
-   */
-  private async fetchBeforeWithCursor(
-    key: string,
-    timestamp: number,
-    beforeId: string,
-    limit: number,
-  ): Promise<string[]> {
-    const CHUNK = 50;
-    const filtered: string[] = [];
-    let offset = 0;
-
-    while (filtered.length < limit) {
-      const chunk = await this.redis.zrevrangebyscore(key, String(timestamp), '-inf', 'LIMIT', offset, CHUNK);
-      if (chunk.length === 0) break;
-
-      for (const id of chunk) {
-        if (filtered.length >= limit) break;
-        const score = await this.redis.zscore(key, id);
-        if (score !== null && parseRedisNumber(score) === timestamp && id >= beforeId) {
-          continue;
-        }
-        filtered.push(id);
-      }
-
-      offset += CHUNK;
-    }
-
-    return filtered;
-  }
-
-  /**
    * Scan before a cursor (desc), hydrate + apply visibility + optional extra,
    * collecting exactly N visible messages or until sorted set exhaustion.
    * Returns messages in desc order (newest first). Caller must reverse for asc.
@@ -3441,14 +3410,24 @@ export class RedisMessageStore {
     let offset = 0;
 
     while (result.length < n) {
-      const chunk = await this.redis.zrevrangebyscore(key, String(timestamp), '-inf', 'LIMIT', offset, CHUNK);
-      if (chunk.length === 0) break;
+      const chunk = await this.redis.zrevrangebyscore(
+        key,
+        String(timestamp),
+        '-inf',
+        'WITHSCORES',
+        'LIMIT',
+        offset,
+        CHUNK,
+      );
+      const memberCount = chunk.length / 2;
+      if (memberCount === 0) break;
 
-      // Filter cursor boundary (same logic as fetchBeforeWithCursor)
+      // Bind the boundary to the timeline score returned with each member.
       const validIds: string[] = [];
-      for (const id of chunk) {
-        const score = await this.redis.zscore(key, id);
-        if (score !== null && parseRedisNumber(score) === timestamp && id >= beforeId) {
+      for (let i = 0; i < chunk.length; i += 2) {
+        const id = chunk[i]!;
+        const score = parseRedisNumber(chunk[i + 1]!);
+        if (score === timestamp && id >= beforeId) {
           continue;
         }
         validIds.push(id);
@@ -3465,8 +3444,8 @@ export class RedisMessageStore {
         }
       }
 
-      if (chunk.length < CHUNK) break;
-      offset += CHUNK;
+      if (memberCount < CHUNK) break;
+      offset += memberCount;
     }
 
     return result;
@@ -4036,6 +4015,13 @@ export class RedisMessageStore {
     ledgerStore: QueueLedgerStore,
   ): Promise<LifecycleAppendRecoveryResult> {
     return commitRedisLifecycleAppendRecovery(this.redis, this, input, ledgerStore);
+  }
+
+  commitLifecycleWakeCoverage(
+    input: LifecycleWakeCoverageInput,
+    ledgerStore: QueueLedgerStore,
+  ): Promise<LifecycleWakeCoverageResult> {
+    return commitRedisLifecycleWakeCoverage(this.redis, this, input, ledgerStore);
   }
 
   /**

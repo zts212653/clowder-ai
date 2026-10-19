@@ -57,6 +57,7 @@ test('rejected Kimi registration preserves the account diagnostic without creati
   ]);
   const service = await createAcpServiceForConfig({
     projectRoot: root,
+    bootstrapRoot: join(root, 'bootstrap'),
     profileId: 'kimi',
     config: config('kimi'),
     effectiveModel: 'kimi-code/k3',
@@ -91,6 +92,7 @@ test('native OAuth registration is healthy while a separate orphan stays unavail
   try {
     const service = await createAcpServiceForConfig({
       projectRoot: root,
+      bootstrapRoot: join(root, 'bootstrap'),
       profileId: 'kimi',
       config: config('kimi', 'native'),
       effectiveModel: 'kimi-code/k3',
@@ -112,6 +114,7 @@ test('missing account binding reports why the configured cat cannot register', a
   const reasons = new Map();
   const service = await createAcpServiceForConfig({
     projectRoot: root,
+    bootstrapRoot: join(root, 'bootstrap'),
     profileId: 'kimi',
     config: config('kimi', 'missing-native'),
     effectiveModel: 'kimi-code/k3',
@@ -154,6 +157,7 @@ test('httpstream refusal is carried to the caller', async () => {
   const reasons = new Map();
   const service = await createAcpServiceForConfig({
     projectRoot: root,
+    bootstrapRoot: join(root, 'bootstrap'),
     profileId: 'kimi',
     config: config('kimi'),
     effectiveModel: 'kimi-code/k3',

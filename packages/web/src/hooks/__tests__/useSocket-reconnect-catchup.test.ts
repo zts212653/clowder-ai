@@ -46,7 +46,6 @@ const mockGetThreadState = vi.fn(() => ({
   targetCats: [],
   catStatuses: {},
   catInvocations: {},
-  currentGame: null,
   unreadCount: 0,
   lastActivity: 0,
 }));
@@ -124,11 +123,6 @@ vi.mock('@/utils/api-client', () => ({
 
 vi.mock('@/utils/sidebar-thread-snapshot', () => ({
   invalidateSidebarProjection: () => mockRefreshSidebarThreadSnapshot(),
-}));
-
-// Mock game reconnect
-vi.mock('../useGameReconnect', () => ({
-  reconnectGame: vi.fn(() => Promise.resolve()),
 }));
 
 import { configureDebug } from '@/debug/invocationEventDebug';

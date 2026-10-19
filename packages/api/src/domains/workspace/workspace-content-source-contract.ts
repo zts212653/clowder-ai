@@ -82,5 +82,7 @@ export interface WorkspaceMediaDescriptionV1 extends WorkspaceContentDescription
 
 /** F063 owns the ephemeral immutable snapshot; callers may only relay this one request stream. */
 export interface OpenWorkspaceMediaV1 extends WorkspaceMediaDescriptionV1 {
+  /** Server-only exact authorized file. HTTP media readers stream bytes; only local file actions expose this. */
+  readonly localPath?: string;
   readonly stream: Readable;
 }

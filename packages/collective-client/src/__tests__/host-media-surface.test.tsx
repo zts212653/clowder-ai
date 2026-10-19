@@ -98,7 +98,10 @@ it('serves metadata with the original iframe Human transport and refuses forged,
   expect(operation).not.toHaveBeenCalled();
   await f.message(request);
   expect(operation).toHaveBeenCalledOnce();
-  expect(f.post.mock.calls.at(-1)?.[0]).toMatchObject({
+  const response = f.post.mock.calls.find(
+    ([body]) => body.type === 'collective:client-media-result' && body.requestId === request.requestId,
+  )?.[0];
+  expect(response).toMatchObject({
     type: 'collective:client-media-result',
     ref: opened.ref,
     requestId: request.requestId,
@@ -148,7 +151,9 @@ it('bounds transient Host metadata requests and does not start another owner rea
   expect(operation).toHaveBeenCalledOnce();
   for (let index = 0; index < 8; index++) await f.message({ ...input, requestId: crypto.randomUUID() });
   expect(operation).toHaveBeenCalledTimes(8);
-  expect(f.post.mock.calls.at(-1)?.[0]).toMatchObject({ result: { kind: 'error', code: 'unavailable' } });
+  expect(
+    f.post.mock.calls.filter(([body]) => body.type === 'collective:client-media-result').at(-1)?.[0],
+  ).toMatchObject({ result: { kind: 'error', code: 'unavailable' } });
   await act(async () => {
     for (const resolve of finish) resolve(mediaProjection());
   });

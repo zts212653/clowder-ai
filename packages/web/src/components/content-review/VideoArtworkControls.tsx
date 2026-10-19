@@ -3,11 +3,13 @@
 import type { ArtifactReviewAnchor, ImmutableMedia } from '@cat-cafe/shared';
 import { type ReactNode, type RefObject, useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { useShellCopy } from '@/components/shell/shell-copy';
 import { useArtworkLightboxScope, useFloatingArtworkPresentation } from './ArtworkLightboxScope';
+import { ArtworkVideoPlayback } from './ArtworkVideoPlayback';
 import type { ReviewCanvasMode } from './ReviewCanvasToolbar';
 import { browserTimeToTick, tickToBrowserTime } from './review-geometry';
+import { videoArtworkCopy } from './video-artwork.shell-copy';
 
-const clock = (seconds: number) => `${Math.floor(seconds / 60)}:${String(Math.floor(seconds % 60)).padStart(2, '0')}`;
 type Video = Extract<ImmutableMedia, { kind: 'video' }>;
 export function VideoArtworkControls({
   media,
@@ -40,6 +42,7 @@ export function VideoArtworkControls({
   onAnnotationActive: (id: string) => void;
   children: ReactNode;
 }) {
+  const t = useShellCopy(videoArtworkCopy);
   const [rangeOpen, setRangeOpen] = useState(false);
   const [paused, setPaused] = useState(true);
   const [start, setStart] = useState('0'),
@@ -70,7 +73,7 @@ export function VideoArtworkControls({
     endTick <= media.startTick + media.durationTicks &&
     endTick > startTick;
   const tools = (
-    <div className="flex flex-wrap items-center gap-2 px-3 py-1" role="toolbar" aria-label="视频批注工具">
+    <div className="flex flex-wrap items-center gap-2 px-3 py-1" role="toolbar" aria-label={t.tools}>
       <button
         type="button"
         className="rounded-full border border-cafe-subtle px-3 py-1 text-xs"
@@ -84,7 +87,7 @@ export function VideoArtworkControls({
           setRangeOpen(!rangeOpen);
         }}
       >
-        选时间段
+        {t.range}
       </button>
       <button
         type="button"
@@ -97,17 +100,17 @@ export function VideoArtworkControls({
           onFrame();
         }}
       >
-        圈这一帧
+        {t.frame}
       </button>
       {!paused || !frameReady ? (
         <span role="status" className="text-xs text-cafe-muted">
-          画面还没停稳
+          {t.notReady}
         </span>
       ) : null}
       <details className="text-xs">
-        <summary aria-label="更多视频工具">⋯</summary>
+        <summary aria-label={t.more}>⋯</summary>
         <button type="button" disabled={!canMarkup || !paused || !frameReady} onClick={() => onModeChange('markup')}>
-          画笔
+          {t.brush}
         </button>
       </details>
       {mode === 'markup' ? children : null}
@@ -122,9 +125,9 @@ export function VideoArtworkControls({
           }}
         >
           <label>
-            从{' '}
+            {t.from}{' '}
             <input
-              aria-label="片段起点"
+              aria-label={t.start}
               className="w-20 rounded border border-cafe-subtle bg-cafe-surface p-1"
               type="number"
               min="0"
@@ -135,9 +138,9 @@ export function VideoArtworkControls({
             />
           </label>
           <label>
-            到{' '}
+            {t.to}{' '}
             <input
-              aria-label="片段终点"
+              aria-label={t.end}
               className="w-20 rounded border border-cafe-subtle bg-cafe-surface p-1"
               type="number"
               min="0"
@@ -152,7 +155,7 @@ export function VideoArtworkControls({
             disabled={!canAnnotate || !validRange}
             className="rounded border border-cafe-subtle px-2 py-1"
           >
-            放入对话
+            {t.add}
           </button>
         </form>
       ) : null}
@@ -161,41 +164,15 @@ export function VideoArtworkControls({
   return (
     <>
       <div className="shrink-0 px-3 py-2 text-xs" data-testid="artwork-video-timeline">
-        <div className="flex items-center gap-3">
-          <button
-            type="button"
-            aria-label={paused ? '播放视频' : '暂停视频'}
-            onClick={() => {
-              const node = video.current;
-              if (!node) return;
-              if (node.paused) void node.play().catch(() => {});
-              else node.pause();
-            }}
-          >
-            {paused ? '▶' : 'Ⅱ'}
-          </button>
-          <span className="shrink-0 tabular-nums">
-            {clock(seconds)} / {clock(duration)}
-          </span>
-          <input
-            type="range"
-            aria-label="视频播放位置"
-            className="min-w-0 flex-1"
-            min="0"
-            max={duration}
-            step="any"
-            value={seconds}
-            onChange={(event) => seekTo(Number(event.target.value))}
-          />
-        </div>
+        <ArtworkVideoPlayback video={video} seconds={seconds} duration={duration} paused={paused} seekTo={seekTo} />
         {annotations.length ? (
-          <div className="relative mt-1 h-5" role="group" aria-label="视频历史批注">
+          <div className="relative mt-1 h-5" role="group" aria-label={t.annotations}>
             {annotations.map((item, index) =>
               item.anchor.kind === 'video-range' ? (
                 <button
                   type="button"
                   key={item.id}
-                  aria-label={`查看批注 ${index + 1}`}
+                  aria-label={t.annotation(index + 1)}
                   className="absolute rounded-full bg-cafe-accent px-1 text-[var(--cafe-surface)]"
                   style={{ left: `${((item.anchor.startTick - media.startTick) / media.durationTicks) * 100}%` }}
                   onClick={() => onAnnotationActive(item.id)}

@@ -150,8 +150,8 @@ export async function verifyFirstCatOwnerControls({
       .click();
     const frame = page.frameLocator('iframe[title="Collective"]');
     await openChannelFromCollectiveHome(frame, 'general');
-    await frame.getByRole('button', { name: '我的猫', exact: true }).click();
-    const cafe = page.getByRole('complementary', { name: '我的猫', exact: true });
+    await frame.getByRole('button', { name: '查看成员', exact: true }).click();
+    const cafe = page.getByRole('region', { name: '我的猫 · 仅自己可见', exact: true });
     await page.getByText('家里的可参与伙伴已自动接入。', { exact: true }).waitFor();
     const astra = cafe.getByRole('switch', { name: 'Astra（@codex-astra）参与这个共同体', exact: true });
     const unsupported = cafe.getByRole('switch', {
@@ -181,7 +181,10 @@ export async function verifyFirstCatOwnerControls({
       const box = await control.boundingBox();
       assert.ok(box && box.x >= 0 && box.x + box.width <= 390, `owner control clipped: ${JSON.stringify(box)}`);
     }
-    await cafe.getByRole('button', { name: '连接', exact: true }).click();
+    await frame.getByRole('button', { name: '关闭成员资料', exact: true }).click();
+    await frame.getByRole('button', { name: '频道导航', exact: true }).click();
+    await frame.locator('details.collective-menu > summary').click();
+    await frame.getByRole('button', { name: '重新连接…', exact: true }).click();
     const connectionPicker = page.getByLabel('选择 Café 连接');
     const connectionBox = await connectionPicker.boundingBox();
     assert.ok(

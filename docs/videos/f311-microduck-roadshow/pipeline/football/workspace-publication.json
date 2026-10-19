@@ -46,13 +46,13 @@
               "kind": "document",
               "label": "足球准备总览",
               "path": "docs/videos/f311-microduck-roadshow/pipeline/football/README.md",
-              "sha256": "39ad109c8872ede8a959e19ee8dba205de8a1ac96f44a680e52129c28c53db49"
+              "sha256": "e6f944b33fec940fe77ab927914c84a7d16debf256c93314e4efda9f9ac125c4"
             },
             {
               "kind": "document",
               "label": "十段回放说明",
               "path": "docs/videos/f311-microduck-roadshow/briefing/README.md",
-              "sha256": "35258cae00aa4be8f560d1fa314091bbbe9a598c25ddd6ce216d3eeb446cd6e8"
+              "sha256": "3f830f05572871159eb2415204f019c264b0efeb5a2f20da4bb2cdf071681ee5"
             }
           ]
         },
@@ -89,19 +89,19 @@
               "kind": "document",
               "label": "六项起步对照",
               "path": "docs/videos/f311-microduck-roadshow/pipeline/football/evidence/20260907-walking-startup/README.md",
-              "sha256": "3c73b91c31d26e4a8890f6553dde62074035f8d530e1902a52e427dd74738d19"
+              "sha256": "b53c0f7b4781199ff88d6649d76bd24f6a26a8309c5201df8b273eebff3d8570"
             },
             {
               "kind": "document",
               "label": "四项纯侧移诊断",
               "path": "docs/videos/f311-microduck-roadshow/pipeline/football/evidence/20260907-lateral-boundary/README.md",
-              "sha256": "a7b1b6ecb4182f30e59b2f2d204ca2df39cd2a6b7367eee326fee3575e7c5d24"
+              "sha256": "f51191a41a831d2ae62629ea8de8cda567dc5cea81b75dab7a7bb0487e22106c"
             },
             {
               "kind": "document",
               "label": "两项转向诊断",
               "path": "docs/videos/f311-microduck-roadshow/pipeline/football/evidence/20260907-yaw-boundary/README.md",
-              "sha256": "4b5d4879f542b1e533c94a575519129b9896f4f9df38161e31d8ea1a9e82f68f"
+              "sha256": "f5006a50441cdca5b6ad71b6738ede68e5db9f800bb2c67a2ccaaacdb729ecb6"
             }
           ]
         },
@@ -130,7 +130,7 @@
               "kind": "document",
               "label": "v0 完整结果",
               "path": "docs/videos/f311-microduck-roadshow/pipeline/football/evidence/20260907-fixed-kicks/README.md",
-              "sha256": "15f4d7b2ec60851144d24cc3bbac638cc7f6cb0425a7ce011d5752f561d34162"
+              "sha256": "3ddbacf683e7f90553458157653fffcde19ffa0fb6b4d7b17b1355084199e85a"
             },
             {
               "kind": "video",
@@ -175,7 +175,7 @@
               "kind": "document",
               "label": "v1 完整结果",
               "path": "docs/videos/f311-microduck-roadshow/pipeline/football/evidence/20260907-approach-v1/README.md",
-              "sha256": "6a51cccb98c8e7844a297926c52530b712674429dc10506768963af4dd1643a5"
+              "sha256": "b051a2ed8838a7ba7a45263eda2cf319c3305033f75b01e5bc2dba033853c8fe"
             },
             {
               "kind": "video",
@@ -220,7 +220,7 @@
               "kind": "document",
               "label": "v2 完整结果",
               "path": "docs/videos/f311-microduck-roadshow/pipeline/football/evidence/20260907-approach-v2/README.md",
-              "sha256": "388711447ecb55742fb27c499c553b4c326343a670adc0b7bad4f37a46f5b471"
+              "sha256": "cd44fd238e9104b44165fe5a290b0491bf9e2930dd69eaee0fa9e8564b3bdef3"
             },
             {
               "kind": "video",
@@ -265,7 +265,7 @@
               "kind": "document",
               "label": "v3 原八场景",
               "path": "docs/videos/f311-microduck-roadshow/pipeline/football/evidence/20260907-approach-v3/README.md",
-              "sha256": "8cd04a31792bff2329abb59ceeb455c84e1f0281463e801d4e19a28855491440"
+              "sha256": "6c42580dc22f1b960e9dc96ee3bde47eff3c4a30dfbbcf092751d057253ec973"
             },
             {
               "kind": "video",
@@ -314,7 +314,7 @@
               "kind": "document",
               "label": "v3 时间补充结果",
               "path": "docs/videos/f311-microduck-roadshow/pipeline/football/evidence/20260907-approach-v3-extended/README.md",
-              "sha256": "2fbb1c265061f4326e049fefa52bedd5df28a19f6786cedb5fece5e2282506bf"
+              "sha256": "332b60ffd226465e0de6e07a6bff2ae9618a8850ddbcb45ccd72ac2a087c6f75"
             },
             {
               "kind": "video",
@@ -371,7 +371,7 @@
               "kind": "document",
               "label": "v4 完整结果与失败分析",
               "path": "docs/videos/f311-microduck-roadshow/pipeline/football/evidence/20260907-approach-v4/README.md",
-              "sha256": "bee953a90f20291a6b5e03a7a9648078432873304dd09453abfcb437508f622b"
+              "sha256": "b76f4a9874b9e6fe9a02f6f964596ca105ab5c8eecf84de4a5b6bbc5655f59e6"
             },
             {
               "kind": "video",

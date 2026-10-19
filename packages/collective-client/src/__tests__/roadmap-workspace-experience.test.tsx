@@ -13,6 +13,7 @@ const at = '2026-09-19T12:00:00.000Z';
 function lifecycleForStatus(status: CollectiveWorkProjection['status']): CollectiveWorkProjection['lifecycle'] {
   if (status === 'blocked') return 'committed';
   if (status === 'ready') return 'committed';
+  if (status === 'unassigned') return 'committed';
   return status;
 }
 
@@ -89,7 +90,7 @@ function roadmap(
     sourceEventId: 'evt_routeaa',
     sourceLocation: { channelId: '产品方向' },
     title,
-    purpose: `让 ${title} 从讨论长成可回查的路线。`,
+    purpose: `让 ${title} 从讨论长成可回查的项目。`,
     accountableHumanId: operator.humanId,
     workIds: [...workIds],
     status,
@@ -175,33 +176,38 @@ it('keeps the accepted lenses while projection and scope reshape the same canoni
     ),
   );
 
-  expect(
-    [...container.querySelectorAll('[aria-label="Roadmap 观察方式"] button')].map((item) => item.textContent),
-  ).toEqual(['阶段路线', '依赖关系', '我的路线']);
-  expect(controlLabels('Roadmap 呈现方式')).toEqual(['工作图', '状态看板']);
-  expect(controlLabels('Roadmap 显示范围')).toEqual(['当前重点', '全部工作']);
+  await click(primary.title);
 
-  const focusTree = container.querySelector('[aria-label="Roadmap 工作图"]');
-  expect(focusTree).not.toBeNull();
-  expect(focusTree?.querySelectorAll('[data-roadmap-work-id]')).toHaveLength(3);
-  expect(focusTree?.textContent).toContain(foundation.title);
-  expect(focusTree?.textContent).toContain(narrative.title);
-  expect(focusTree?.textContent).toContain(mobile.title);
-  expect(focusTree?.textContent).not.toContain(memberWork.title);
-
-  await click('状态看板');
-  const focusBoard = container.querySelector('[aria-label="Roadmap 状态看板"]');
-  expect(focusBoard?.querySelectorAll('[data-roadmap-work-id]')).toHaveLength(3);
-  await click('全部工作');
-  expect(
-    container.querySelector('[aria-label="Roadmap 状态看板"]')?.querySelectorAll('[data-roadmap-work-id]'),
-  ).toHaveLength(4);
-  expect(container.querySelector('[aria-label="Roadmap 观察方式"] [aria-current="page"]')?.textContent).toBe(
-    '阶段路线',
+  expect([...container.querySelectorAll('[aria-label="项目观察方式"] button')].map((item) => item.textContent)).toEqual(
+    ['计划', '看板', '依赖图', '作品'],
   );
+  expect(controlLabels('项目筛选')).toEqual(['全部 4', '未完成 3', '与我相关 3']);
+  expect([...container.querySelectorAll('button')].some((button) => button.textContent === '完成项目')).toBe(false);
 
-  await click('依赖关系');
-  const graph = container.querySelector('[aria-label="依赖工作图"]');
+  const plan = container.querySelector('[aria-label="项目任务计划"]');
+  expect(plan).not.toBeNull();
+  expect(plan?.querySelectorAll('[data-project-plan-work-id]')).toHaveLength(4);
+  expect(plan?.textContent).toContain(foundation.title);
+  expect(plan?.textContent).toContain(narrative.title);
+  expect(plan?.textContent).toContain(mobile.title);
+  expect(plan?.textContent).toContain(memberWork.title);
+
+  await click('未完成');
+  expect(
+    container.querySelector('[aria-label="项目任务计划"]')?.querySelectorAll('[data-project-plan-work-id]'),
+  ).toHaveLength(3);
+
+  const projectBoardButton = [
+    ...container.querySelectorAll<HTMLButtonElement>('[aria-label="项目观察方式"] button'),
+  ].find((button) => button.textContent === '看板');
+  expect(projectBoardButton).toBeDefined();
+  await act(async () => projectBoardButton?.click());
+  const focusBoard = container.querySelector('[aria-label="项目看板"]');
+  expect(focusBoard?.querySelectorAll('[data-roadmap-work-id]')).toHaveLength(4);
+  expect(container.querySelector('[aria-label="项目观察方式"] [aria-current="page"]')?.textContent).toBe('看板');
+
+  await click('依赖图');
+  const graph = container.querySelector('[aria-label="任务依赖图"]');
   expect(graph).not.toBeNull();
   if (!graph) throw new Error('Expected the dependency projection');
   expect(graph.querySelectorAll('[data-dependency-level="0"]')).toHaveLength(3);
@@ -211,15 +217,22 @@ it('keeps the accepted lenses while projection and scope reshape the same canoni
       [...graph.querySelectorAll('[data-roadmap-work-id]')].map((item) => item.getAttribute('data-roadmap-work-id')),
     ).size,
   ).toBe(4);
-  expect(graph.textContent).toContain(`等待 ${foundation.title}`);
+  expect(graph.textContent).toContain('阻塞原因未填写');
+  expect(graph.textContent).toContain(`前置已完成：${foundation.title}`);
+  expect(graph.textContent).not.toContain(`等待 ${foundation.title}`);
+
+  await click(foundation.title);
+  const completedDetail = container.querySelector(`[aria-label="任务详情 · ${foundation.title}"]`);
+  expect(completedDetail).not.toBeNull();
+  expect(completedDetail?.querySelector('.roadmap-dependency-editor')).toBeNull();
 
   await click(mobile.title);
-  const detail = container.querySelector(`[aria-label="工作详情 · ${mobile.title}"]`);
+  const detail = container.querySelector(`[aria-label="任务详情 · ${mobile.title}"]`);
   expect(detail?.textContent).toContain('You 负责');
   expect(detail?.textContent).toContain('小星星 · 砚砚 推进');
   expect(detail?.textContent).toContain('#插件共建 · 话题');
-  expect(detail?.textContent).toContain('调整了前置工作');
-  expect(container.textContent).toContain('重新打开了路线');
+  expect(detail?.textContent).toContain('调整了前置任务');
+  expect(container.textContent).toContain('重新打开了项目');
   expect(container.textContent).not.toContain('今天已冻结');
   await click('查看来源消息');
   expect(onOpenSource).toHaveBeenCalledWith(
@@ -227,11 +240,104 @@ it('keeps the accepted lenses while projection and scope reshape the same canoni
     expect.objectContaining({ roadmapId: primary.roadmapId, lens: 'dependencies', workId: mobile.workId }),
   );
 
-  await click('我的路线');
-  const mine = container.querySelector('[aria-label="我的路线"]');
+  await click('与我相关');
+  const mine = container.querySelector('[aria-label="任务依赖图"]');
   expect(mine).not.toBeNull();
   expect(mine?.textContent).toContain(foundation.title);
   expect(mine?.textContent).toContain(narrative.title);
   expect(mine?.textContent).toContain(mobile.title);
   expect(mine?.textContent).not.toContain(memberWork.title);
+});
+
+it('shows one real cross-project task board with four progress columns and executor swimlanes', async () => {
+  const unassigned = {
+    ...work('unassigned', '精简共同体公开接口', 'ready'),
+    accountableHumanId: undefined,
+    status: 'unassigned' as const,
+  } satisfies CollectiveWorkProjection;
+  const blocked = {
+    ...work('blockedrun', 'C1 插件切换', 'blocked', {
+      assigned: true,
+      dependencies: ['work_foundation'],
+    }),
+    lifecycle: 'in_progress',
+  } satisfies CollectiveWorkProjection;
+  const review = work('review', '#1519 新安装包', 'result_ready', { assigned: true });
+  const shared = work('shared', 'A2A 主体合入', 'completed', { assigned: true });
+  const selfRun = work('selfrun', '取包核验新安装包', 'in_progress');
+  const primary = roadmap('roadmap_primarya', '插件框架', [
+    unassigned.workId,
+    blocked.workId,
+    review.workId,
+    shared.workId,
+  ]);
+  const secondary = roadmap('roadmap_secondaa', '首次上手', [shared.workId, selfRun.workId]);
+
+  await act(async () =>
+    root.render(
+      <RoadmapWorkspace
+        roadmaps={[primary, secondary]}
+        works={[unassigned, blocked, review, shared, selfRun]}
+        currentHumanId={operator.humanId}
+        humanNames={{ [operator.humanId]: 'You' }}
+        onSetDependencies={vi.fn()}
+        onSetStatus={vi.fn()}
+        bindingVotes={[]}
+        decisions={[]}
+        onCreateBindingVote={vi.fn()}
+        onCastBindingVote={vi.fn()}
+        onWithdrawBindingVote={vi.fn()}
+        onSettleBindingVote={vi.fn()}
+      />,
+    ),
+  );
+
+  expect(
+    [...container.querySelectorAll('[aria-label="项目视图"] button')].map((item) => item.textContent?.trim()),
+  ).toEqual(['项目列表', '跨项目依赖', '看板']);
+  await click('看板');
+  const board = container.querySelector('[aria-label="项目看板"]');
+  expect(board).not.toBeNull();
+  expect(
+    [...(board?.querySelectorAll('[data-project-column] > header strong') ?? [])].map((item) => item.textContent),
+  ).toEqual(['待开始', '进行中', '待确认', '已完成']);
+  expect(board?.querySelector('[data-project-lane]')?.textContent).toContain('未分配');
+  const cardColumn = (workId: string) =>
+    board
+      ?.querySelector(`[data-roadmap-work-id="${workId}"]`)
+      ?.closest('[data-project-column]')
+      ?.getAttribute('data-project-column');
+  expect(cardColumn(unassigned.workId)).toBe('queued');
+  expect(cardColumn(blocked.workId)).toBe('in_progress');
+  expect(cardColumn(review.workId)).toBe('result_ready');
+  expect(cardColumn(shared.workId)).toBe('completed');
+  expect(board?.querySelector('[data-work-status="blocked"] .project-board-banner-critical')?.textContent).toContain(
+    '等待',
+  );
+  expect(board?.querySelectorAll(`[data-roadmap-work-id="${shared.workId}"]`)).toHaveLength(1);
+  expect(board?.querySelectorAll('[data-roadmap-work-id]')).toHaveLength(5);
+
+  await click(unassigned.title);
+  expect(container.querySelector(`[aria-label="任务详情 · ${unassigned.title}"]`)).not.toBeNull();
+  expect(
+    container.querySelector(`[aria-label="项目任务计划"] [data-project-plan-work-id="${unassigned.workId}"]`),
+  ).not.toBeNull();
+
+  await click('项目');
+  const list = container.querySelector('[aria-label="项目列表"]');
+  expect(list?.textContent).toContain(primary.title);
+  expect(list?.textContent).toContain(secondary.title);
+  expect(list?.querySelectorAll('[data-project-id]')).toHaveLength(2);
+
+  await click(secondary.title);
+  await click('看板');
+  await click(shared.title);
+  expect(container.querySelector(`[aria-label="项目 · ${secondary.title}"]`)).not.toBeNull();
+  expect(container.querySelector(`[aria-label="项目看板"] [data-roadmap-work-id="${shared.workId}"]`)).not.toBeNull();
+
+  await click('项目');
+  await click('跨项目依赖');
+  const dependencies = container.querySelector('[aria-label="任务依赖图"]');
+  expect(dependencies?.querySelectorAll(`[data-roadmap-work-id="${shared.workId}"]`)).toHaveLength(1);
+  expect(dependencies?.querySelectorAll('[data-roadmap-work-id]')).toHaveLength(5);
 });

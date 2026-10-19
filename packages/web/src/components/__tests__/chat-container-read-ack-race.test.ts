@@ -61,8 +61,6 @@ const baseStore = () => ({
   clearCatStatuses: vi.fn(),
   setCurrentThread: vi.fn(),
   updateThreadTitle: vi.fn(),
-  setCurrentGame: vi.fn(),
-  currentGame: null,
 
   viewMode: 'single' as const,
   setViewMode: vi.fn(),

@@ -47,7 +47,6 @@ function makeThreadState(messages: ChatMessage[]): ThreadState {
     catStatuses: {},
     catStatusDetails: {},
     catInvocations: {},
-    currentGame: null,
     unreadCount: 0,
     hasUserMention: false,
     lastActivity: Date.now(),
@@ -1184,7 +1183,7 @@ describe('useChatHistory scroll memory (#27)', () => {
 
     const scrollEl = capturedHook!.scrollContainerRef.current!;
     const scrollTop = defineMutableNumberProp(scrollEl, 'scrollTop', 400);
-    defineMutableNumberProp(scrollEl, 'clientHeight', 600);
+    const clientHeight = defineMutableNumberProp(scrollEl, 'clientHeight', 600);
     defineMutableNumberProp(scrollEl, 'scrollHeight', 1000);
     const endEl = capturedHook!.messagesEndRef.current!;
     endEl.scrollIntoView = vi.fn(() => {
@@ -1197,6 +1196,7 @@ describe('useChatHistory scroll memory (#27)', () => {
       capturedHook?.handleScroll();
     });
 
+    clientHeight.set(540);
     act(() => {
       window.dispatchEvent(new Event('catcafe:chat-layout-changed'));
       flushAnimationFrames();
@@ -1204,6 +1204,11 @@ describe('useChatHistory scroll memory (#27)', () => {
 
     expect(endEl.scrollIntoView).toHaveBeenCalledWith({ behavior: 'auto' });
     expect(scrollTop.get()).toBe(460);
+    act(() => {
+      window.dispatchEvent(new Event('catcafe:chat-layout-changed'));
+      flushAnimationFrames();
+    });
+    expect(endEl.scrollIntoView).toHaveBeenCalledTimes(1);
   });
 
   it('turns a widget disclosure into an offset anchor instead of following the old bottom anchor', async () => {

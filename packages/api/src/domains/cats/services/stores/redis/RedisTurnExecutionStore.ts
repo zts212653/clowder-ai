@@ -28,6 +28,7 @@ import {
   SETTLE_TURN_OUTPUT_FENCE_LUA,
   TERMINALIZE_TURN_EXECUTION_LUA,
 } from './turn-execution-redis-scripts.js';
+import { isUnrelatedRetiredTurnExecution } from './turn-execution-retired-record.js';
 
 export class RedisTurnExecutionStore implements ITurnExecutionStore {
   constructor(private readonly redis: RedisClient) {}
@@ -125,6 +126,7 @@ export class RedisTurnExecutionStore implements ITurnExecutionStore {
       for (let i = 0; i < keys.length; i += 1) {
         const hash = readAuthoritativeHash(results?.[i], `turn execution ${keys[i]}`);
         if (hash === null) continue;
+        if (isUnrelatedRetiredTurnExecution(hash as RedisTurnExecutionHash, query)) continue;
         const record = hydrateTurnExecution(hash as RedisTurnExecutionHash);
         if (!record) throw new Error(`turn execution ${keys[i]}: non-empty hash failed to hydrate`);
         if (matchesTurnExecutionSource(record, query))

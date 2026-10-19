@@ -15,6 +15,7 @@ import { ExplorationHistory } from './ExplorationHistory';
 import {
   ExplorationHistoryPublicationNotice,
   ExplorationHistoryPublicationRecords,
+  ExplorationHistoryRecovery,
 } from './ExplorationHistoryPublication';
 import { ExplorationIcon } from './ExplorationIcon';
 import { ExplorationNavigation } from './ExplorationNavigation';
@@ -68,6 +69,7 @@ export function EvolutionExplorationWorkspace({
           ref.assetId,
       )
       .join('、');
+  const recoverySelection = resource.recoverySelection;
   if (!catalog)
     return (
       <section className="exploration-workspace" aria-label="探索进化">
@@ -75,18 +77,16 @@ export function EvolutionExplorationWorkspace({
           <ExplorationIcon kind="branch" />
           探索进化
         </h2>
-        <p role="status">{resource.error ?? '正在读取版本与实验…'}</p>
-        <ExplorationSourceStatus blockers={resource.blockers} retry={resource.retry} />
-        {resource.recoverySelection && (
-          <button
-            type="button"
-            className="exploration-link"
-            onClick={() => void workspace.adoptPublication(resource.recoverySelection!)}
-          >
-            打开最新历史
-          </button>
+        {recoverySelection ? (
+          <ExplorationHistoryRecovery
+            message={resource.error}
+            onOpen={() => void workspace.adoptPublication(recoverySelection)}
+          />
+        ) : (
+          <p role="status">{resource.error ?? '正在读取版本与实验…'}</p>
         )}
-        {resource.error && (
+        {!recoverySelection && <ExplorationSourceStatus blockers={resource.blockers} retry={resource.retry} />}
+        {resource.error && !recoverySelection && (
           <>
             <button type="button" className="exploration-link" onClick={resource.retry}>
               重新读取探索记录

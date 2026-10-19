@@ -85,6 +85,26 @@ function ownerReadStatus(asset: ReturnType<typeof useEvolutionAssetReview>) {
   return asset.catalog ? ('resolved' as const) : ('unavailable' as const);
 }
 
+function EvolutionEvaluationStatus({
+  projection,
+  whileReadingHistory = false,
+}: {
+  projection: EvolutionProgramPresentationProjection;
+  whileReadingHistory?: boolean;
+}) {
+  return (
+    <aside className="evolution-v2-phase-note" aria-label={whileReadingHistory ? '项目效果评估状态' : undefined}>
+      <strong>
+        {whileReadingHistory ? '项目效果评估仍待补证' : `${MOMENTS[journeyMoment(projection)]}这一阶段还缺`}
+      </strong>
+      <p>
+        <EvolutionPhaseGaps projection={projection} />
+      </p>
+      {whileReadingHistory && <p>这些缺口用于判断改进是否有效，不是查看已发布探索记录的前置条件。</p>}
+    </aside>
+  );
+}
+
 export function CapabilityEvolutionProgramDetail({
   projection,
   onClose,
@@ -139,12 +159,7 @@ export function CapabilityEvolutionProgramDetail({
       <EvolutionProgressAction projection={projection} compact={v2 || moment === 2} />
       {v2 && (
         <>
-          <aside className="evolution-v2-phase-note">
-            <strong>{MOMENTS[journeyMoment(projection)]}这一阶段还缺</strong>
-            <p>
-              <EvolutionPhaseGaps projection={projection} />
-            </p>
-          </aside>
+          {moment !== 2 && <EvolutionEvaluationStatus projection={projection} />}
           <div role="tablist" aria-label="项目阅读内容" className="evolution-tabs">
             <button
               type="button"
@@ -190,6 +205,7 @@ export function CapabilityEvolutionProgramDetail({
           {v2 ? '在主区展开阅读' : '展开阅读 →'}
         </button>
       </div>
+      {v2 && moment === 2 && <EvolutionEvaluationStatus projection={projection} whileReadingHistory />}
       {v2 ? (
         <details className="evolution-preparation-related">
           <summary>目标与评估来源</summary>

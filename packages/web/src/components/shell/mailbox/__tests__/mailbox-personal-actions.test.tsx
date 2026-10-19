@@ -1,8 +1,9 @@
-import type { UnifiedAttentionItemV1 } from '@cat-cafe/shared';
+import type { IgnoredItemSnapshot, UnifiedAttentionItemV1 } from '@cat-cafe/shared';
 import { act, createRef } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { MailboxPanel } from '../../MailboxPanel';
+import { parseUnifiedAttentionRead } from '../../parse-unified-attention';
 import { writeShellLanguage } from '../../shell-language';
 import { deriveMailboxPanelState } from '../../unified-mailbox-state';
 import type { UnifiedAttentionView } from '../../use-unified-attention';
@@ -43,6 +44,7 @@ let mode: 'visible' | 'ignored';
 let history: boolean;
 let view: UnifiedAttentionView;
 let revision: number;
+let preferenceEntries: IgnoredItemSnapshot['entries'];
 let owner: string;
 let refuse: boolean;
 let unavailableSave: boolean;
@@ -71,6 +73,7 @@ const render = async () => act(async () => root.render(<Wrapper />));
 const click = async (id: string) =>
   act(async () => document.querySelector<HTMLButtonElement>(`[data-testid="${id}"]`)?.click());
 function read() {
+  if (mode === 'ignored' && revision === 4) preferenceEntries = [{ coordinate, ignoredAt: 20 }];
   const result = okRead([item]);
   if (result.kind !== 'ok') throw new Error('Fixture');
   result.read.sources.personalPreferences = source;
@@ -106,6 +109,7 @@ beforeEach(() => {
   history = false;
   localStorage.clear();
   revision = 4;
+  preferenceEntries = [];
   owner = OWNER;
   refuse = false;
   unavailableSave = false;
@@ -143,7 +147,22 @@ beforeEach(() => {
       });
     }
     if (path === '/api/config/ignored-items') {
-      if (init?.method === 'PATCH')
+      if (init?.method === 'PATCH') {
+        if (!unavailableSave && !refuse) {
+          const patch: { ignore: (typeof coordinate)[]; restore: (typeof coordinate)[] } = JSON.parse(
+            init.body as string,
+          );
+          preferenceEntries = preferenceEntries.filter(
+            (entry) =>
+              !patch.restore.some(
+                (restored: typeof coordinate) => JSON.stringify(restored) === JSON.stringify(entry.coordinate),
+              ),
+          );
+          for (const ignored of patch.ignore) {
+            if (!preferenceEntries.some((entry) => JSON.stringify(entry.coordinate) === JSON.stringify(ignored)))
+              preferenceEntries.push({ coordinate: ignored, ignoredAt: 20 });
+          }
+        }
         return unavailableSave
           ? Response.json({ error: 'Read-only controlled failure' }, { status: 503 })
           : refuse
@@ -151,9 +170,10 @@ beforeEach(() => {
             : Response.json({
                 ownerUserId: owner,
                 revision: ++revision,
-                entries: mode === 'visible' ? [{ coordinate, ignoredAt: 20 }] : [],
+                entries: preferenceEntries,
               });
-      return Response.json({ ownerUserId: owner, revision, entries: [] });
+      }
+      return Response.json({ ownerUserId: owner, revision, entries: preferenceEntries });
     }
     throw new Error(`Unexpected request ${path}`);
   });
@@ -555,6 +575,273 @@ describe('Mailbox exact personal ignore actions through the original preference 
     await render();
     await click('mailbox-item-toggle');
     await click('mailbox-item-ignore');
+    expect(writes()).toHaveLength(0);
+  });
+});
+
+function knownHealthySources() {
+  if (view.result.kind !== 'ok') throw new Error('diagnostic fixture');
+  view.result.read.sources.userMentions = { ...source, coverage: 'explicit_user_mentions' };
+  view.result.read.sources.collectiveAccountabilityRequests = {
+    ...source,
+    coverage: 'pending_f290_collective_accountability_requests',
+  };
+}
+function unrelatedCollectiveFailure() {
+  knownHealthySources();
+  if (view.result.kind !== 'ok') throw new Error('diagnostic fixture');
+  const r = view.result.read;
+  r.status = 'partial';
+  r.sources.collectiveAccountabilityRequests = {
+    ...source,
+    coverage: 'pending_f290_collective_accountability_requests',
+    status: 'unavailable',
+    exhaustiveness: 'unknown',
+  };
+  r.consistency = { state: 'uncertain', reasons: ['collective_accountability_connection_read_failed'] };
+  delete r.totalCount;
+  delete r.attentionCount;
+  if (r.personalView)
+    for (const k of [
+      'originalTotalCount',
+      'visibleTotalCount',
+      'ignoredTotalCount',
+      'originalAttentionCount',
+      'visibleAttentionCount',
+      'ignoredAttentionCount',
+      'groupCounts',
+    ] as const)
+      delete r.personalView[k];
+  expect(parseUnifiedAttentionRead(r), 'real unified parser accepts the partial source combination').not.toBeNull();
+}
+describe('Personal actions keep independent source eligibility', () => {
+  it('control: healthy exact mention/preferences permits one personal PATCH', async () => {
+    knownHealthySources();
+    await render();
+    await click('mailbox-item-ignore');
+    expect(writes()).toHaveLength(1);
+  });
+  it('unrelated F290 outage must not disable exact @you single ignore', async () => {
+    unrelatedCollectiveFailure();
+    await render();
+    const b = document.querySelector<HTMLButtonElement>('[data-testid="mailbox-item-ignore"]');
+    if (!b) throw new Error('Personal action missing');
+    expect(b.disabled).toBe(false);
+  });
+  it('unrelated F290 outage must allow full-set authority preview', async () => {
+    unrelatedCollectiveFailure();
+    await render();
+    await click('mailbox-mentions-ignore-all');
+    expect(previewReads).toBe(1);
+  });
+  it('exact ignored mention restore is not disabled by unrelated outage', async () => {
+    mode = 'ignored';
+    read();
+    unrelatedCollectiveFailure();
+    await render();
+    await click('mailbox-item-toggle');
+    const b = document.querySelector<HTMLButtonElement>('[data-testid="mailbox-item-restore"]');
+    if (!b) throw new Error('Personal action missing');
+    expect(b.disabled).toBe(false);
+  });
+  it('owner-fenced undo is not disabled solely by unrelated outage', async () => {
+    knownHealthySources();
+    await render();
+    await click('mailbox-item-ignore');
+    expect(writes()).toHaveLength(1);
+    read();
+    unrelatedCollectiveFailure();
+    await render();
+    const b = document.querySelector<HTMLButtonElement>('[data-testid="mailbox-personal-undo"]');
+    if (!b) throw new Error('Personal action missing');
+    expect(b.disabled).toBe(false);
+  });
+  it.each([
+    'pointer',
+    'keyboard',
+  ] as const)('required personal preference proof is unavailable, reason is readable by %s', async (input) => {
+    knownHealthySources();
+    if (view.result.kind !== 'ok') throw new Error('diagnostic fixture');
+    expect(parseUnifiedAttentionRead(view.result.read)).not.toBeNull();
+    const original = mocks.apiFetch.getMockImplementation();
+    let preferenceReadRefusals = 0;
+    mocks.apiFetch.mockImplementation(async (path: string, init?: RequestInit) => {
+      if (path === '/api/config/ignored-items' && init?.method !== 'PATCH') {
+        preferenceReadRefusals++;
+        return Response.json({ error: 'Ignored item preferences are unavailable' }, { status: 503 });
+      }
+      return original?.(path, init);
+    });
+    await render();
+    expect(preferenceReadRefusals).toBe(1);
+    const b = document.querySelector<HTMLButtonElement>('[data-testid="mailbox-item-ignore"]');
+    if (!b) throw new Error('Personal action missing');
+    expect(b.disabled).toBe(true);
+    expect(document.querySelector('[data-testid="mailbox-personal-notice"]')?.textContent).toBe(
+      '暂时无法确认你的忽略记录，请重试。',
+    );
+    expect(writes()).toHaveLength(0);
+    const target = b.closest<HTMLElement>('[tabindex="0"],[role="button"][aria-disabled="true"]') ?? b;
+    vi.useFakeTimers();
+    if (input === 'pointer') {
+      await act(async () => {
+        const event = new Event('pointerover', { bubbles: true });
+        Object.defineProperty(event, 'pointerType', { value: 'mouse' });
+        target.dispatchEvent(event);
+        await vi.advanceTimersByTimeAsync(200);
+      });
+    } else {
+      const matches = Element.prototype.matches;
+      const spy = vi.spyOn(Element.prototype, 'matches').mockImplementation(function (this: Element, selector: string) {
+        return selector === ':focus-visible' ? this === target : matches.call(this, selector);
+      });
+      try {
+        await act(async () => target.focus());
+      } finally {
+        spy.mockRestore();
+      }
+    }
+    const tip = document.querySelector<HTMLElement>('[role="tooltip"]');
+    const ids = (target.getAttribute('aria-describedby') ?? b.getAttribute('aria-describedby') ?? '')
+      .split(/\s+/)
+      .filter(Boolean);
+    const description = ids.map((id) => document.getElementById(id)?.textContent ?? '').join(' ');
+    if (input === 'keyboard') expect.soft(document.activeElement).toBe(target);
+    expect.soft(tip?.textContent ?? '').toContain('暂时无法确认你的忽略记录');
+    expect.soft(description).toContain('暂时无法确认你的忽略记录');
+  });
+});
+
+describe('Partial reads preserve the personal write boundary', () => {
+  it('saves, rereads and restores only the exact mention version while another source is down', async () => {
+    unrelatedCollectiveFailure();
+    await render();
+    await click('mailbox-item-ignore');
+    expect(writes()).toHaveLength(1);
+    expect(JSON.parse(writes()[0][1].body)).toMatchObject({
+      expectedOwnerUserId: OWNER,
+      expectedRevision: 4,
+      ignore: [coordinate],
+      restore: [],
+    });
+    mode = 'ignored';
+    read();
+    unrelatedCollectiveFailure();
+    await render();
+    await click('mailbox-item-toggle');
+    await click('mailbox-item-restore');
+    expect(writes()).toHaveLength(2);
+    expect(JSON.parse(writes()[1][1].body)).toMatchObject({ expectedRevision: 5, ignore: [], restore: [coordinate] });
+    expect(preferenceEntries).toEqual([]);
+  });
+  it('persists all 26 previewed versions and undoes the entire receipt even off the visible page', async () => {
+    unrelatedCollectiveFailure();
+    await render();
+    await click('mailbox-mentions-ignore-all');
+    await click('mailbox-mentions-ignore-confirm');
+    expect(previewReads).toBe(2);
+    expect(writes()).toHaveLength(1);
+    const ignored = JSON.parse(writes()[0][1].body).ignore;
+    expect(ignored).toHaveLength(26);
+    expect(preferenceEntries).toHaveLength(26);
+    read();
+    unrelatedCollectiveFailure();
+    if (view.result.kind !== 'ok') throw new Error('Fixture');
+    view.result.read.items = [];
+    await render();
+    await click('mailbox-personal-undo');
+    expect(JSON.parse(writes()[1][1].body).restore).toEqual(ignored);
+    expect(preferenceEntries).toEqual([]);
+  });
+  it.each([
+    'mentions',
+    'preferences',
+    'unknown',
+    'empty-reasons',
+    'owner',
+    'revision',
+    'generation',
+    'coordinate',
+    'other-source',
+  ] as const)('refuses the partial mention write when %s is unverified', async (failure) => {
+    unrelatedCollectiveFailure();
+    if (view.result.kind !== 'ok') throw new Error('Fixture');
+    const value = view.result.read;
+    if (failure === 'mentions')
+      value.sources.userMentions = {
+        ...source,
+        coverage: 'explicit_user_mentions',
+        status: 'unavailable',
+        exhaustiveness: 'unknown',
+      };
+    if (failure === 'preferences')
+      value.sources.personalPreferences = { ...source, status: 'unavailable', exhaustiveness: 'unknown' };
+    if (failure === 'unknown') value.consistency.reasons.push('unrecognized_identity_conflict');
+    if (failure === 'empty-reasons') value.consistency.reasons = [];
+    if (failure === 'owner') owner = 'different-owner';
+    if (failure === 'revision') revision++;
+    if (failure === 'generation') view = { ...view, readsStarted: () => 2 };
+    if (failure === 'coordinate') value.items = [{ ...item, preferenceCoordinate: undefined }];
+    if (failure === 'other-source')
+      value.sources.approvals = {
+        ...source,
+        coverage: 'all_registered_F246_producers',
+        status: 'unavailable',
+        exhaustiveness: 'unknown',
+      };
+    await render();
+    await click('mailbox-item-ignore');
+    expect(writes()).toHaveLength(0);
+  });
+  it('keeps non-mention cards conservative under the same outage', async () => {
+    unrelatedCollectiveFailure();
+    if (view.result.kind !== 'ok') throw new Error('Fixture');
+    view.result.read.items = [
+      {
+        decisionRef: 'other',
+        kind: 'judgment',
+        summary: 'Work decision',
+        linkedNeedsMe: [],
+        preferenceCoordinate: { ...coordinate, decisionRef: 'other' },
+      },
+    ];
+    await render();
+    await click('mailbox-item-toggle');
+    const button = document.querySelector<HTMLButtonElement>('[data-testid="mailbox-item-ignore"]');
+    expect(button?.disabled).toBe(true);
+    await click('mailbox-item-ignore');
+    expect(writes()).toHaveLength(0);
+  });
+  it('does not restore a missing exact preference or a different producer version', async () => {
+    mode = 'ignored';
+    read();
+    unrelatedCollectiveFailure();
+    preferenceEntries = [{ coordinate: { ...coordinate, version: 'sha256:different-version' }, ignoredAt: 20 }];
+    await render();
+    await click('mailbox-item-toggle');
+    await click('mailbox-item-restore');
+    expect(writes()).toHaveLength(0);
+  });
+  it('rechecks source eligibility after a full-set confirmation read is in flight', async () => {
+    unrelatedCollectiveFailure();
+    await render();
+    await click('mailbox-mentions-ignore-all');
+    const original = mocks.apiFetch.getMockImplementation();
+    let release: () => void = () => {};
+    const pending = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    mocks.apiFetch.mockImplementation(async (path: string, init?: RequestInit) => {
+      if (path.startsWith('/api/concierge/work/mentions/handling-preview')) await pending;
+      return original?.(path, init);
+    });
+    await click('mailbox-mentions-ignore-confirm');
+    read();
+    unrelatedCollectiveFailure();
+    if (view.result.kind !== 'ok') throw new Error('Fixture');
+    view.result.read.consistency.reasons.push('unrecognized');
+    await render();
+    await act(async () => release());
     expect(writes()).toHaveLength(0);
   });
 });

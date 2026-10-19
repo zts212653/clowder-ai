@@ -115,6 +115,26 @@ export interface ReactionRecord {
   }[];
 }
 
+export interface WorkResultFileRecord {
+  readonly v: 1;
+  readonly fileId: string;
+  readonly collectiveId: string;
+  readonly workId: string;
+  readonly resultEventId: string;
+  readonly resultRevision: number;
+  readonly assignmentEventId: string;
+  readonly connectionId: string;
+  readonly humanId: string;
+  readonly catId: string;
+  readonly sourceHref: string;
+  readonly fileName: string;
+  readonly mediaType: 'text/markdown' | 'text/plain';
+  readonly contentDigest: string;
+  readonly byteLength: number;
+  readonly contentBase64: string;
+  readonly createdAt: string;
+}
+
 export interface ServiceState {
   readonly schemaVersion: 2;
   readonly serviceInstanceId: string;
@@ -145,6 +165,7 @@ export interface ServiceState {
   readonly bindingVotes: Record<string, CollectiveBindingVoteRecord>;
   readonly decisions: Record<string, CollectiveDecisionRecord>;
   readonly reactions: Record<string, ReactionRecord>;
+  readonly workResultFiles: Record<string, WorkResultFileRecord>;
   readonly collaborationOperations: Record<string, CollaborationOperationReceipt>;
   readonly legacyEvents: Record<string, unknown[]>;
   readonly clientEventIndex: Record<string, string>;

@@ -139,7 +139,7 @@ async function verifiedPermissionChange(
 }
 function ownCurrentProposal(works: CollectiveWorkProjection[], command: CollectiveHostWorkPolicyCommand) {
   const action = command.action;
-  if (action.kind !== 'allow_request' && action.kind !== 'decline_request') throw new Error('当前操作没有工作提议。');
+  if (action.kind !== 'allow_request' && action.kind !== 'decline_request') throw new Error('当前操作没有任务建议。');
   const work = works.find(
     (item) => item.workId === action.workId && item.revision === action.workRevision && item.lifecycle === 'proposed',
   );

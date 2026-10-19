@@ -341,6 +341,23 @@ describe('scrollToMessage', () => {
     vi.useRealTimers();
   });
 
+  it('reveals a collapsed reply before measuring where its header should land', () => {
+    const viewport = document.createElement('div');
+    Object.defineProperty(viewport, 'clientHeight', { value: 300 });
+    const details = document.createElement('details');
+    const target = document.createElement('div');
+    target.dataset.messageId = 'collapsed-reply';
+    target.getBoundingClientRect = () => ({ height: details.open ? 900 : 0 }) as DOMRect;
+    target.scrollIntoView = vi.fn();
+    details.appendChild(target);
+    viewport.appendChild(details);
+    document.body.appendChild(viewport);
+
+    expect(scrollToMessage('collapsed-reply', viewport, 'instant')).toBe(true);
+    expect(details.open).toBe(true);
+    expect(target.scrollIntoView).toHaveBeenCalledWith({ behavior: 'instant', block: 'start' });
+  });
+
   it('does nothing when element is not found', () => {
     // Should not throw
     scrollToMessage('nonexistent-id');

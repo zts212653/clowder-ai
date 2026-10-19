@@ -1378,13 +1378,13 @@ export async function* routeSerial(
               threadTitle: routeThread?.title ?? undefined,
               projectPath: routeThread?.projectPath,
               cursorOverlay: options.cursorBoundaries?.get(catId as string),
-              sameRouteOutputMessageIds,
-              exactA2ATriggerMessageId: streamReplyTo,
-              ...(options.resolvePendingPromptMessageIds
+              ...(options.resolvePendingWakeMessageIds
                 ? {
-                    resolvePendingPromptMessageIds: options.resolvePendingPromptMessageIds.bind(undefined, catId),
+                    resolvePendingWakeMessageIds: options.resolvePendingWakeMessageIds.bind(undefined, catId),
                   }
                 : {}),
+              sameRouteOutputMessageIds,
+              exactA2ATriggerMessageId: streamReplyTo,
               ...(contextProjection ? { contextProjection } : {}),
             },
           );
@@ -3573,9 +3573,7 @@ export async function* routeSerial(
               : undefined;
           const failedA2AReportCommit =
             lifecycleResponse?.status === 'failed' &&
-            a2aTriggerMessageId &&
-            options.a2aCallerCatId &&
-            !options.a2aFailureReport
+            (commitFailedA2AReport || (a2aTriggerMessageId && options.a2aCallerCatId && !options.a2aFailureReport))
               ? async (message: AppendMessageInput) => {
                   if (!commitFailedA2AReport) {
                     throw new Error('failed response A2A report admission unavailable');
@@ -3593,7 +3591,9 @@ export async function* routeSerial(
                     ownerAuthProvenance,
                     threadId,
                     reporterCatId: catId,
-                    predecessorCatId: options.a2aCallerCatId as CatId,
+                    ...(!options.a2aFailureReport && options.a2aCallerCatId
+                      ? { predecessorCatId: options.a2aCallerCatId as CatId }
+                      : {}),
                     ...(options.parentInvocationId ? { parentInvocationId: options.parentInvocationId } : {}),
                   });
                 }
@@ -3995,9 +3995,7 @@ export async function* routeSerial(
             };
             if (
               terminal.status === 'failed' &&
-              a2aTriggerMessageId &&
-              options.a2aCallerCatId &&
-              !options.a2aFailureReport
+              (commitFailedA2AReport || (a2aTriggerMessageId && options.a2aCallerCatId && !options.a2aFailureReport))
             ) {
               if (!commitFailedA2AReport) {
                 throw new Error('failed response A2A report admission unavailable');
@@ -4011,7 +4009,9 @@ export async function* routeSerial(
                 ownerAuthProvenance,
                 threadId,
                 reporterCatId: catId,
-                predecessorCatId: options.a2aCallerCatId as CatId,
+                ...(!options.a2aFailureReport && options.a2aCallerCatId
+                  ? { predecessorCatId: options.a2aCallerCatId as CatId }
+                  : {}),
                 ...(options.parentInvocationId ? { parentInvocationId: options.parentInvocationId } : {}),
               });
             } else {

@@ -6,7 +6,7 @@
   height: calc(100dvh - 80px);
   max-width: 1440px;
   min-height: 0;
-  gap: 14px;
+  gap: 6px;
 }
 .owner {
   display: flex;
@@ -21,6 +21,8 @@
   min-height: 0;
 }
 .composer {
+  max-height: 30%;
+  overflow-y: auto;
   position: relative;
   z-index: 10;
   flex: none;
@@ -37,11 +39,41 @@
   .window {
     width: calc(100vw - 16px);
     height: calc(100dvh - 64px);
-    gap: 8px;
+    gap: 6px;
   }
   .composer {
-    max-height: 44dvh;
-    overflow-y: auto;
     border-radius: 14px;
   }
+}
+
+/* The original textarea stays mounted; long prose scrolls rather than displacing the artwork. */
+.composer textarea {
+  max-height: 56px;
+}
+@media (max-width: 600px) {
+  /* Keep the draft in its original input and scroll longer prose within one line. */
+  .composer textarea {
+    max-height: 32px;
+    overflow-y: auto;
+  }
+}
+.composer [data-testid="chat-input-composer-row"] {
+  margin: 4px 8px 8px;
+  gap: 2px;
+  padding: 6px 8px;
+}
+.composer [data-testid="context-attachment-list"] {
+  padding: 4px 8px 0;
+}
+
+/* Image modes are portalled into this slot, rather than ChatInput's optional header. */
+.composer [data-artwork-tools-slot] > [data-review-mode] {
+  padding-block: 2px;
+}
+.composer [data-artwork-tools-slot] [data-review-mode] [role="toolbar"] {
+  padding: 1px;
+  box-shadow: none;
+}
+.composer [data-artwork-tools-slot] [data-review-mode] [role="toolbar"] button {
+  min-height: 32px;
 }

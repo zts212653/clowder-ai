@@ -26,6 +26,7 @@ import {
 } from './persistence.js';
 import type { ServiceState } from './state.js';
 import { CollectiveWorkPolicyStore } from './work-policy-store.js';
+import { readCollectiveWorkResultFile } from './work-result-files.js';
 
 export interface OpenCollectiveServiceStoreOptions {
   readonly dataDirectory: string;
@@ -114,6 +115,7 @@ export class CollectiveServiceStore {
         bindingVotes: {},
         decisions: {},
         reactions: {},
+        workResultFiles: {},
         collaborationOperations: {},
         legacyEvents: {},
         clientEventIndex: {},
@@ -272,6 +274,7 @@ export class CollectiveServiceStore {
         Object.values(state.humanAuthBindings).some((binding) => binding.humanId === ownerHumanId) &&
         Object.keys(state.collectives).length > 0,
       clientBuildId: COLLECTIVE_CLIENT_BUILD_ID,
+      capabilities: { workResultFiles: 1 as const },
     };
   }
 
@@ -349,12 +352,26 @@ export class CollectiveServiceStore {
     return this.#connections.postHumanMessage(sessionToken, input);
   }
 
-  postAgentMessage(endpointCredential: string, input: unknown) {
-    return this.#connections.postAgentMessage(endpointCredential, input);
+  postAgentMessage(endpointCredential: string, input: unknown, serviceOrigin?: string) {
+    const resultFileOrigin =
+      serviceOrigin === undefined ? new URL(this.getHumanAuthRedirectUri()).origin : serviceOrigin;
+    return this.#connections.postAgentMessage(endpointCredential, input, resultFileOrigin);
+  }
+
+  bindAcceptedWorkResultFile(endpointCredential: string, input: unknown) {
+    return this.#connections.bindAcceptedWorkResultFile(endpointCredential, input);
+  }
+
+  readWorkResultFile(sessionToken: string, fileId: string, fileName: string) {
+    return readCollectiveWorkResultFile(this.persistence.snapshot(), sessionToken, fileId, fileName);
   }
 
   listEventsForHuman(sessionToken: string, collectiveId: string) {
-    return this.#connections.listEventsForHuman(sessionToken, collectiveId);
+    return this.#connections.listEventsForHuman(
+      sessionToken,
+      collectiveId,
+      new URL(this.getHumanAuthRedirectUri()).origin,
+    );
   }
 
   pollEvents(endpointCredential: string, input: unknown) {
@@ -402,6 +419,10 @@ export class CollectiveServiceStore {
     return this.#collaboration.readAssignedWork(endpointCredential, input);
   }
 
+  readCollectiveAccountabilityAttention(endpointCredential: string, input: unknown) {
+    return this.#collaboration.readAccountabilityAttention(endpointCredential, input);
+  }
+
   readAssignedWorkByAssignment(endpointCredential: string, input: unknown) {
     return this.#collaboration.readAssignedWorkByAssignment(endpointCredential, input);
   }
@@ -436,6 +457,26 @@ export class CollectiveServiceStore {
 
   createCollectiveRoadmap(sessionToken: string, input: unknown) {
     return this.#collaboration.createRoadmap(sessionToken, input);
+  }
+
+  createCollectiveProject(sessionToken: string, input: unknown) {
+    return this.#collaboration.createProject(sessionToken, input);
+  }
+
+  createCollectiveProjectTask(sessionToken: string, input: unknown) {
+    return this.#collaboration.createProjectTask(sessionToken, input);
+  }
+
+  requestCollectiveWorkAccountability(sessionToken: string, input: unknown) {
+    return this.#collaboration.requestWorkAccountability(sessionToken, input);
+  }
+
+  respondCollectiveWorkAccountability(sessionToken: string, input: unknown) {
+    return this.#collaboration.respondWorkAccountability(sessionToken, input);
+  }
+
+  decideCollectiveProjectWorkSuggestion(sessionToken: string, input: unknown) {
+    return this.#collaboration.decideProjectWorkSuggestion(sessionToken, input);
   }
 
   setCollectiveRoadmapWorks(sessionToken: string, input: unknown) {

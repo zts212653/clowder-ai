@@ -172,7 +172,11 @@ export function NeedsMeOwnerSurface({
       const actionTarget = resolveEntrustedWorkActionTarget(actionRef);
       if (!actionTarget) return;
       onRefreshSurface(selectedSurface);
-      if (actionTarget.kind === 'message' || actionTarget.kind === 'collective-work') {
+      if (
+        actionTarget.kind === 'message' ||
+        actionTarget.kind === 'collective-work' ||
+        actionTarget.kind === 'collective-accountability'
+      ) {
         navigateToEntrustedWorkAction(actionRef);
         return;
       }

@@ -43,6 +43,7 @@ async function fetchPage(token: string | undefined, signal: AbortSignal): Promis
 export function usePagedGlobalWorks(enabled: boolean) {
   const [snapshot, setSnapshot] = useState<Snapshot>(empty);
   const current = useRef<Snapshot>(empty());
+  const confirmed = useRef<Snapshot | null>(null);
   const cursor = useRef<string | undefined>();
   const request = useRef<AbortController | null>(null);
   const cursorExpired = useRef(false);
@@ -50,6 +51,7 @@ export function usePagedGlobalWorks(enabled: boolean) {
     request.current?.abort();
     const ac = new AbortController();
     request.current = ac;
+    const retained = restart ? confirmed.current : null;
     if (restart) {
       current.current = empty();
       cursor.current = undefined;
@@ -57,7 +59,14 @@ export function usePagedGlobalWorks(enabled: boolean) {
     }
     const publish = (patch: Partial<Snapshot>) => {
       current.current = { ...current.current, ...patch };
-      setSnapshot(current.current);
+      if (current.current.error) confirmed.current = null;
+      else if (current.current.complete) confirmed.current = current.current;
+      // Rebuild independently; a partial replacement is not a new exact total.
+      setSnapshot(
+        retained && current.current.loadingMore && !current.current.error
+          ? { ...retained, loadingMore: true }
+          : current.current,
+      );
     };
     publish({ loading: current.current.artifacts.length === 0, loadingMore: true, error: false });
     const visited = new Set<string>();
@@ -99,6 +108,7 @@ export function usePagedGlobalWorks(enabled: boolean) {
     if (enabled) restart();
     else {
       current.current = empty();
+      confirmed.current = null;
       cursor.current = undefined;
       setSnapshot(current.current);
     }

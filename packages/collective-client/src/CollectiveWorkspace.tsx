@@ -17,7 +17,7 @@ import { useFirstEntryGuide } from './first-entry/use-first-entry-guide.js';
 import { collectiveClientNamespace } from './human-send-custody.js';
 import type { MemberSelection } from './MemberPanel.js';
 import { ProductShell } from './ProductShell.js';
-import type { RoadmapViewState } from './roadmap-view-model.js';
+import { defaultRoadmapView, type RoadmapViewState } from './roadmap-view-model.js';
 import { SharedArtifactLibrary } from './SharedArtifactLibrary.js';
 import { SharedArtifactPublication } from './SharedArtifactPublication.js';
 import { SharedArtifactReading } from './SharedArtifactReading.js';
@@ -46,6 +46,7 @@ export function CollectiveWorkspace({
   const [roadmapViews, setRoadmapViews] = useState<Readonly<Record<string, RoadmapViewState>>>({});
   const [roadmapReturn, setRoadmapReturn] = useState<RoadmapReturn>();
   const [query, setQuery] = useState('');
+  const [libraryChannel, setLibraryChannel] = useState<{ channelId: string; revision: number }>();
   const [navigationOpen, setNavigationOpen] = useState(false);
   const [selectedMember, setSelectedMember] = useState<MemberSelection | 'members'>();
   const participants = snapshot.participants ?? [];
@@ -76,6 +77,7 @@ export function CollectiveWorkspace({
         },
       },
     },
+    () => showMembers(),
   );
   const firstEntry = useFirstEntryGuide({
     embedded,
@@ -124,22 +126,50 @@ export function CollectiveWorkspace({
     if (guideStarted && destination === 'home') enterFirstEntryChannel();
   }, [destination, enterFirstEntryChannel, firstEntry.phase]);
   useEffect(() => {
-    if (!host.focusWork) return;
+    const focus = host.focusWork;
+    if (!focus) return;
+    if ('roadmapId' in focus) {
+      setDestination('channel');
+      setFocusEventId(undefined);
+      setContent('roadmap');
+      setRoadmapReturn(undefined);
+      setChannelId(focus.channelId);
+      setRoadmapViews((current) => ({
+        ...current,
+        [focus.channelId]: {
+          ...defaultRoadmapView,
+          workspace: 'project',
+          roadmapId: focus.roadmapId,
+          workId: focus.workId,
+        },
+      }));
+      writeChannelTarget(focus.channelId);
+      setQuery('');
+      setSelectedMember(undefined);
+      setNavigationOpen(false);
+      return;
+    }
     setDestination('channel');
-    setFocusEventId(host.focusWork.eventId);
+    setFocusEventId(focus.eventId);
     setContent('conversation');
     setRoadmapReturn(undefined);
-    setChannelId(host.focusWork.channelId);
-    writeChannelTarget(host.focusWork.channelId);
+    setChannelId(focus.channelId);
+    writeChannelTarget(focus.channelId);
     setQuery('');
     setSelectedMember(undefined);
     setNavigationOpen(false);
   }, [host.focusWork]);
-  const showCafe = () => {
+  const showMembers = () => {
     artifactNavigation.discard();
-    setSelectedMember(undefined);
+    setDestination('channel');
+    writeChannelTarget(channelId);
+    setSelectedMember('members');
     setNavigationOpen(false);
-    host.show('cats');
+    host.hide();
+  };
+  const showPrivateSection = (section: 'permissions' | 'calendar' | 'connection') => {
+    setNavigationOpen(false);
+    host.show(section);
   };
   const replayGuide = () => {
     enterFirstEntryChannel();
@@ -174,6 +204,16 @@ export function CollectiveWorkspace({
     setNavigationOpen(false);
     host.hide();
     writeChannelTarget();
+  };
+  const showLibrary = (sourceChannel?: string) => {
+    artifactNavigation.discard();
+    if (sourceChannel)
+      setLibraryChannel((current) => ({ channelId: sourceChannel, revision: (current?.revision ?? 0) + 1 }));
+    setDestination('library');
+    setNavigationOpen(false);
+    setSelectedMember(undefined);
+    host.hide();
+    writeLibraryTarget();
   };
   useEffect(() => {
     if (previousNamespace.current !== namespace) return;
@@ -215,7 +255,7 @@ export function CollectiveWorkspace({
     artifactNavigation.discard();
     const roadmap = snapshot.collaboration?.roadmaps.find((candidate) => candidate.roadmapId === view.roadmapId);
     setRoadmapViews((current) => ({ ...current, [channelId]: view }));
-    setRoadmapReturn({ channelId, label: roadmap?.title ?? 'Roadmap', view });
+    setRoadmapReturn({ channelId, label: roadmap?.title ?? '项目', view });
     setFocusEventId(eventId);
     setDestination('channel');
     setContent('conversation');
@@ -277,7 +317,10 @@ export function CollectiveWorkspace({
             onInvite={() => void client.createInvite()}
             onPair={beginPair}
             onLeave={() => void client.leaveCollective()}
-            onCafe={host.available ? showCafe : undefined}
+            onCafe={host.available ? showMembers : undefined}
+            onPermissions={host.available ? () => showPrivateSection('permissions') : undefined}
+            onCalendar={host.available ? () => showPrivateSection('calendar') : undefined}
+            onReconnect={host.available ? () => showPrivateSection('connection') : undefined}
             onReplayGuide={firstEntry.narrator ? replayGuide : undefined}
             navigationOpen={navigationOpen || firstEntry.phase === 'entry'}
             onCloseNavigation={() => setNavigationOpen(false)}
@@ -294,18 +337,19 @@ export function CollectiveWorkspace({
                 }}
                 onSelect={selectChannel}
                 libraryActive={destination === 'library'}
-                onLibrary={
-                  client.artifacts?.api
-                    ? () => {
-                        artifactNavigation.discard();
-                        setDestination('library');
-                        setNavigationOpen(false);
-                        setSelectedMember(undefined);
-                        host.hide();
-                        writeLibraryTarget();
-                      }
-                    : undefined
-                }
+                onLibrary={client.artifacts?.api ? () => showLibrary() : undefined}
+                roadmapActive={content === 'roadmap'}
+                roadmapCount={snapshot.collaboration?.roadmaps.length}
+                memberCount={members ? members.humans.length + visibleCats.length : undefined}
+                onRoadmap={() => {
+                  artifactNavigation.discard();
+                  setDestination('channel');
+                  setContent('roadmap');
+                  setSelectedMember(undefined);
+                  setNavigationOpen(false);
+                  host.hide();
+                  setQuery('');
+                }}
                 guideCatCount={
                   firstEntry.phase === 'playing' && firstEntry.beat === 0
                     ? firstEntry.arrivalComplete
@@ -313,14 +357,7 @@ export function CollectiveWorkspace({
                       : 0
                     : undefined
                 }
-                onMembers={() => {
-                  artifactNavigation.discard();
-                  host.hide();
-                  setDestination('channel');
-                  writeChannelTarget(channelId);
-                  setSelectedMember('members');
-                  setNavigationOpen(false);
-                }}
+                onMembers={showMembers}
               />
             }
           >
@@ -329,6 +366,7 @@ export function CollectiveWorkspace({
               title="全部作品"
               active={destination === 'library'}
               filterable
+              requestedChannel={libraryChannel}
               onOpenNavigation={() => setNavigationOpen((value) => !value)}
             />
             {destination === 'home' ? (
@@ -356,6 +394,7 @@ export function CollectiveWorkspace({
                 }}
                 onMember={openMember}
                 onNavigation={() => setNavigationOpen((value) => !value)}
+                onLibrary={showLibrary}
                 onOpenRoadmapMessage={openRoadmapMessage}
                 onReplayGuide={replayGuide}
                 onReturnToRoadmap={roadmapReturn ? returnToRoadmap : undefined}

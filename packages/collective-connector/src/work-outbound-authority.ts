@@ -42,7 +42,7 @@ export async function revalidateQueuedWork(
 
 export function workOutboundIntent(
   pending: ConnectorOutboxItem,
-): Pick<CollectiveAgentMessageRequest, 'workResultIntent' | 'workProgressIntent'> {
+): Pick<CollectiveAgentMessageRequest, 'workResultIntent' | 'workResultFile' | 'workProgressIntent'> {
   const purpose = pending.workPurpose;
   const source = pending.replySource;
   if (!purpose || !source) return {};
@@ -59,6 +59,7 @@ export function workOutboundIntent(
           ...intent,
           ...(purpose.executionRevision ? { executionRevision: purpose.executionRevision } : {}),
         },
+        ...(purpose.resultFile ? { workResultFile: purpose.resultFile } : {}),
       };
 }
 

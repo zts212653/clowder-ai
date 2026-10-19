@@ -20,6 +20,7 @@ import { resolveCollectiveWorkThread } from '../../../api/dist/domains/plugin/bu
 import { registerCollectiveConnectorRoutes } from '../../../api/dist/routes/collective-connector-routes.js';
 import { registerCollectiveOwnerParticipationRoutes } from '../../../api/dist/routes/collective-owner-participation-routes.js';
 import { registerCollectiveWorkResultRoutes } from '../../../api/dist/routes/collective-work-result-routes.js';
+import { companionDecisionRoutes } from '../../../api/dist/routes/companion-decision-routes.js';
 import { CollectiveConnector } from '../../../collective-connector/dist/index.js';
 import { catRegistry } from '../../../shared/dist/index.js';
 import {
@@ -37,7 +38,15 @@ export async function startNativeOwner({ store, owner, collectiveId, serviceUrl,
   const { hostPort, apiPort } = ports;
   const directory = await mkdtemp(path.join(tmpdir(), 'f290-native-owner-'));
   const registered = catRegistry.getOrThrow('codex-sol').config;
-  const cat = { id: 'codex-sol', displayName: registered.displayName, supported: true };
+  const cat = {
+    id: 'codex-sol',
+    displayName: registered.displayName,
+    supported: true,
+    breedDisplayName: registered.breedDisplayName,
+    variantLabel: registered.variantLabel,
+    defaultModel: registered.defaultModel,
+    avatar: registered.avatar,
+  };
   const userId = process.env.DEFAULT_OWNER_USER_ID ?? 'f290-browser-owner';
   const hostUrl = `http://localhost:${hostPort}`;
   const apiUrl = `http://localhost:${apiPort}`;
@@ -131,6 +140,13 @@ export async function startNativeOwner({ store, owner, collectiveId, serviceUrl,
   app.get('/api/session', async (request, reply) =>
     request.sessionUserId ? { userId } : reply.code(401).send({ error: 'fixture session required' }),
   );
+  await app.register(companionDecisionRoutes, {
+    ownerUserId: userId,
+    messageStore: messages,
+    threadStore: threads,
+    collectiveConnector: () => connector,
+    readIgnoredItemPreferences: (ownerUserId) => ({ ownerUserId, revision: 0, entries: [] }),
+  });
   registerNativeOwnerResultArtifactRoutes(app, resultArtifacts);
   registerCollectiveConnectorRoutes(app, {
     runtime: { connector: () => connector },

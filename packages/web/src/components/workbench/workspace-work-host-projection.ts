@@ -55,15 +55,6 @@ export function projectWorkspaceWorkHost(
   const sessionMatchesHost =
     presentation.session?.threadId === input.threadId && presentation.session?.surfaceId === activeSurface?.id;
   const fullWindowActive = hostEligible && sessionMatchesHost && presentation.session?.mode === 'full-window';
-  const workModeActive =
-    input.shellPresentation === 'v2' &&
-    ((hostEligible && sessionMatchesHost && presentation.session?.workMode === true) ||
-      (input.workModeRequested === true &&
-        !!input.threadId &&
-        input.viewMode === 'single' &&
-        input.isDesktop &&
-        input.statusPanelOpen &&
-        input.rightPanelMode === 'workspace'));
   const review = activeSurface && resolveArtifactReviewTarget(activeSurface);
   const publication = activeSurface && resolvePublicationTarget(activeSurface);
   const file = activeSurface && resolveFileTarget(activeSurface);
@@ -74,8 +65,8 @@ export function projectWorkspaceWorkHost(
   const sameThread = Boolean(
     input.threadId && input.currentThreadId === input.threadId && (!originThread || originThread === input.threadId),
   );
-  // Media qualification comes from the mounted content owner's real PNG source, not the descriptor's broad type.
-  const readableImage =
+  // Composer qualification comes from the mounted media owner, not the descriptor's broad type.
+  const readableMedia =
     activeSurface?.id === input.mediaComposerSurfaceId &&
     Boolean(file || publication || (review && review.threadId === input.threadId));
   const readableDocument = Boolean(file && /\.(?:mdx?|txt)$/i.test(file.path));
@@ -87,7 +78,24 @@ export function projectWorkspaceWorkHost(
     input.rightPanelMode === 'workspace' &&
     !layout.split &&
     sameThread &&
-    (readableImage || readableDocument);
+    (readableMedia || readableDocument);
+  // The session carries explicit intent after the open request is consumed. Keep it while
+  // this same-thread owner loads; desktop fullscreen eligibility is a separate capability.
+  const workModeHostEligible =
+    hostEligible ||
+    (input.shellPresentation === 'v2' &&
+      !input.isDesktop &&
+      input.viewMode === 'single' &&
+      input.statusPanelOpen &&
+      input.rightPanelMode === 'workspace' &&
+      !layout.split &&
+      sameThread &&
+      surfaceActive);
+  const workModeActive =
+    input.shellPresentation === 'v2' &&
+    !!input.threadId &&
+    workModeHostEligible &&
+    ((sessionMatchesHost && presentation.session?.workMode === true) || input.workModeRequested === true);
   const ordinaryHost =
     input.viewMode === 'single' && input.isDesktop && input.statusPanelOpen && input.rightPanelMode === 'workspace';
   const returnSurface = activeSurface ? createEntrustedReturnFromRef(activeSurface.returnTargetRef) : null;
@@ -115,11 +123,12 @@ export function projectWorkspaceWorkHost(
     workspaceAttentionFullWindowActive,
     workModeActive,
     hostEligible,
+    workModeHostEligible,
     fullWindowActive,
     narrowWorkComposerActive,
     // v2 file artwork shares the Artifact ratio; browser previews keep the Chat owner's ratio.
     splitPreferenceActive:
-      workModeActive ||
+      (input.isDesktop && workModeActive) ||
       (hostEligible &&
         (isWorkspaceFullWindowSurface(activeSurface, 'classic') || isWorkspaceArtworkFile(activeSurface))),
     suppressCafeSidebar:

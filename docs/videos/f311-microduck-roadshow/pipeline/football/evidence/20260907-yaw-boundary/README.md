@@ -17,4 +17,4 @@ T1 Sol（GPT-5.6 Sol）执行两项冻结对照，Astra 读取原脚本、receip
 
 v3 必须保持向前步态，用朝向反馈走弧线；“原地转、再直走”仍会进入未持续运动的区间。这轮只测正 yaw；负向响应、闭环路径收敛、最后对齐与 20 秒内触球，都仍需原八个足球场景实跑。规划半径 0.22 m 是据此提出的设计值，不能把单段弧线响应叫作已验证的全局运动学模型。
 
-来源：`[thread-id]#private-source-id`，root 源码 `d41d40b9ff1082c256982bffb870090023a0351f`。原始 index.json SHA-256 `cbf0493ba29e017bc98398265e4da7f89db96928c7d9bfe66528cd96300dc330`；run_yaw_probe.py SHA-256 `8d03bf187e7553eddd61e902f1924631bbc1b58db9cfb20bb60b6047ec7f86fe`。执行命令、采样时刻与后段持续性判据见原件；这是基础能力诊断，不能计入足球成功率或正式采用证明。
+来源：`[thread-id]#private-source-id`，root 源码 `d41d40b9ff1082c256982bffb870090023a0351f`。原始 [index.json](index.json) SHA-256 `cbf0493ba29e017bc98398265e4da7f89db96928c7d9bfe66528cd96300dc330`；[run_yaw_probe.py](run_yaw_probe.py) SHA-256 `8d03bf187e7553eddd61e902f1924631bbc1b58db9cfb20bb60b6047ec7f86fe`。执行命令、采样时刻与后段持续性判据见原件；这是基础能力诊断，不能计入足球成功率或正式采用证明。

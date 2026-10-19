@@ -201,7 +201,10 @@ export class ProjectContentOwnerStore {
   }
 
   /** Verify an immutable file once per inode/change identity, then let callers stream their requested range. */
-  async openBlob(contentRef: string, digest: `sha256:${string}`): Promise<{ handle: FileHandle; byteLength: number }> {
+  async openBlob(
+    contentRef: string,
+    digest: `sha256:${string}`,
+  ): Promise<{ handle: FileHandle; byteLength: number; path: string }> {
     if (!/^sha256:[a-f0-9]{64}$/.test(digest)) throw new Error('Invalid content blob digest');
     const path = join(this.contentRoot(contentRef), 'blobs', digest.slice('sha256:'.length));
     const handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
@@ -227,7 +230,7 @@ export class ProjectContentOwnerStore {
         if (this.verifiedBlobs.get(path) === verification) this.verifiedBlobs.delete(path);
         throw error;
       }
-      return { handle, byteLength: Number(stat.size) };
+      return { handle, byteLength: Number(stat.size), path };
     } catch (error) {
       await handle.close();
       throw error;

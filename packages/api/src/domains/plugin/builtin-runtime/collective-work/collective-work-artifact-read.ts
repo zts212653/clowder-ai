@@ -5,7 +5,7 @@ import type {
   CollectiveWorkResultPublication,
   WorkResultArtifactSnapshot,
 } from '@cat-cafe/collective-connector';
-import { createCatId } from '@cat-cafe/shared';
+import { type CollectiveWorkResultTextSource, createCatId, type TaskItem } from '@cat-cafe/shared';
 import { isCollectiveDocumentFile } from '../../../../infrastructure/document/collective-document-scope.js';
 import { aggregateThreadArtifacts } from '../../../cats/services/agents/routing/thread-artifacts-aggregator.js';
 import type { IMessageStore, StoredMessage } from '../../../cats/services/stores/ports/MessageStore.js';
@@ -16,6 +16,13 @@ import type { CollectiveCurrentContext } from '../collective-current-context.js'
 
 type WorkBinding = NonNullable<Awaited<ReturnType<CollectiveCurrentContext['resolvePrivate']>>>;
 type TextPublication = NonNullable<WorkResultArtifactSnapshot['textPublication']>;
+export interface CollectiveWorkArtifactScope {
+  readonly task: TaskItem;
+  readonly workRevision: number;
+  readonly resultRevision: number;
+  readonly executionRevision: number;
+  readonly executionRef?: string;
+}
 const TEXT_BUDGET = 65_536;
 interface CallbackPublication {
   readonly message: StoredMessage;
@@ -32,79 +39,118 @@ export class CollectiveWorkArtifactReader {
   ) {}
 
   async seal(binding: WorkBinding, snapshot: WorkResultArtifactSnapshot, viewerCatId: string) {
-    const prefix = `message:${binding.work.task.threadId}:`;
+    return (await this.sealResult(binding, snapshot, viewerCatId)).snapshot;
+  }
+
+  async sealResult(
+    binding: WorkBinding,
+    snapshot: WorkResultArtifactSnapshot,
+    viewerCatId: string,
+  ): Promise<{ snapshot: WorkResultArtifactSnapshot; file?: CollectiveWorkResultTextSource }> {
+    return this.sealScopedResult(workArtifactScope(binding), snapshot, viewerCatId);
+  }
+
+  sealAcceptedResult(
+    scope: CollectiveWorkArtifactScope,
+    snapshot: WorkResultArtifactSnapshot,
+    viewerCatId: string,
+  ): Promise<{ snapshot: WorkResultArtifactSnapshot; file?: CollectiveWorkResultTextSource }> {
+    return this.sealScopedResult(scope, snapshot, viewerCatId);
+  }
+
+  private async sealScopedResult(
+    scope: CollectiveWorkArtifactScope,
+    snapshot: WorkResultArtifactSnapshot,
+    viewerCatId: string,
+  ): Promise<{ snapshot: WorkResultArtifactSnapshot; file?: CollectiveWorkResultTextSource }> {
+    const prefix = `message:${scope.task.threadId}:`;
     const suffix = `#available:${snapshot.artifactRevision}`;
     if (!snapshot.completenessRef.startsWith(prefix) || !snapshot.completenessRef.endsWith(suffix))
       throw artifactError('Published artifact source is unavailable');
     const sourceMessageId = snapshot.completenessRef.slice(prefix.length, -suffix.length);
-    const publication = await this.publicationMessage(binding, sourceMessageId, viewerCatId);
+    const publication = await this.publicationMessage(scope, sourceMessageId, viewerCatId);
     const { message } = publication;
     if (String(message.timestamp) !== snapshot.artifactRevision) throw artifactError('Published artifact changed');
-    const ancestry = await this.taskAncestry(binding, publication, {
-      taskId: binding.work.task.id,
-      resultRevision: binding.work.resultRevision,
-      executionRevision: binding.work.executionRevision,
-      executionRef: binding.work.executionRef,
+    const ancestry = await this.taskAncestry(scope, publication, {
+      taskId: scope.task.id,
+      resultRevision: scope.resultRevision,
+      executionRevision: scope.executionRevision,
+      executionRef: scope.executionRef,
     });
     const item = publishedFileItem(message, snapshot.artifactRef);
     const file = textFile(snapshot.artifactRef);
-    if (!file) return snapshot;
+    if (!file) return { snapshot };
     // Legacy uploaded files remain metadata-only. A genuine callback row does not prove ownership of its URL.
-    if (!file.fileName.startsWith('cwork-')) return snapshot;
-    const scope = documentScope(binding, binding.work);
-    if (!isCollectiveDocumentFile(scope, file.fileName))
+    if (!file.fileName.startsWith('cwork-')) return { snapshot };
+    const document = documentScope(scope, scope);
+    if (!isCollectiveDocumentFile(document, file.fileName))
       throw artifactError('Published artifact file belongs to another Task or execution scope');
     const bytes = await this.textBytes(file.fileName);
     decodeText(bytes);
-    if (!isCollectiveDocumentFile(scope, file.fileName, bytes)) throw artifactError('Published artifact body changed');
+    if (!isCollectiveDocumentFile(document, file.fileName, bytes))
+      throw artifactError('Published artifact body changed');
+    const contentDigest = digest(bytes);
+    const sealed = {
+      v: 1 as const,
+      taskId: scope.task.id,
+      resultRevision: scope.resultRevision,
+      executionRevision: scope.executionRevision,
+      ...(scope.executionRef ? { executionRef: scope.executionRef } : {}),
+      sourceMessageId,
+      sourceMessageRevision: String(message.timestamp),
+      triggerMessageId: ancestry.id,
+      publisherCatId: publication.publisherCatId,
+      invocationId: publication.invocationId,
+      item,
+      contentDigest,
+      byteLength: bytes.length,
+      mediaType: file.mediaType,
+    };
     return {
-      ...snapshot,
-      textPublication: {
+      snapshot: {
+        ...snapshot,
+        textPublication: sealed,
+      },
+      file: {
         v: 1 as const,
-        taskId: binding.work.task.id,
-        resultRevision: binding.work.resultRevision,
-        executionRevision: binding.work.executionRevision,
-        ...(binding.work.executionRef ? { executionRef: binding.work.executionRef } : {}),
-        sourceMessageId,
-        sourceMessageRevision: String(message.timestamp),
-        triggerMessageId: ancestry.id,
-        publisherCatId: publication.publisherCatId,
-        invocationId: publication.invocationId,
-        item,
-        contentDigest: digest(bytes),
-        byteLength: bytes.length,
+        sourceHref: snapshot.artifactRef,
+        fileName: file.fileName,
         mediaType: file.mediaType,
+        contentDigest,
+        byteLength: bytes.length,
+        contentBase64: bytes.toString('base64'),
       },
     };
   }
 
   async read(binding: WorkBinding, snapshot: WorkResultArtifactSnapshot, viewerCatId: string) {
+    const scope = workArtifactScope(binding);
     const seal = snapshot.textPublication;
-    if (!seal || seal.taskId !== binding.work.task.id) throw artifactError('Artifact has no same-Task content seal');
-    const publication = await this.publicationMessage(binding, seal.sourceMessageId, viewerCatId);
+    if (!seal || seal.taskId !== scope.task.id) throw artifactError('Artifact has no same-Task content seal');
+    const publication = await this.publicationMessage(scope, seal.sourceMessageId, viewerCatId);
     const { message } = publication;
     if (
       String(message.timestamp) !== seal.sourceMessageRevision ||
       snapshot.artifactRevision !== seal.sourceMessageRevision ||
       snapshot.completenessRef !==
-        `message:${binding.work.task.threadId}:${message.id}#available:${seal.sourceMessageRevision}` ||
+        `message:${scope.task.threadId}:${message.id}#available:${seal.sourceMessageRevision}` ||
       message.catId !== seal.publisherCatId ||
       message.extra?.stream?.turnInvocationId !== seal.invocationId ||
       message.extra?.causal?.triggerMessageId !== seal.triggerMessageId ||
       !isDeepStrictEqual(publishedFileItem(message, snapshot.artifactRef), seal.item)
     )
       throw artifactError('Published artifact changed');
-    await this.taskAncestry(binding, publication, { ...seal, executionRef: seal.executionRef });
+    await this.taskAncestry(scope, publication, { ...seal, executionRef: seal.executionRef });
     const file = textFile(snapshot.artifactRef);
     if (!file || file.mediaType !== seal.mediaType) throw artifactError('Artifact is outside the UTF8 text boundary');
-    const scope = documentScope(binding, seal);
-    if (!isCollectiveDocumentFile(scope, file.fileName))
+    const document = documentScope(scope, seal);
+    if (!isCollectiveDocumentFile(document, file.fileName))
       throw artifactError('Published artifact file belongs to another Task or execution scope');
     const bytes = await this.textBytes(file.fileName);
     if (
       bytes.length !== seal.byteLength ||
       digest(bytes) !== seal.contentDigest ||
-      !isCollectiveDocumentFile(scope, file.fileName, bytes)
+      !isCollectiveDocumentFile(document, file.fileName, bytes)
     )
       throw artifactError('Published artifact body changed');
     return decodeText(bytes);
@@ -119,16 +165,16 @@ export class CollectiveWorkArtifactReader {
     }
   }
 
-  private async publicationMessage(binding: WorkBinding, messageId: string, viewerCatId: string) {
+  private async publicationMessage(scope: CollectiveWorkArtifactScope, messageId: string, viewerCatId: string) {
     const message = await resolveVisibleReplyParent(this.messages, messageId, {
-      threadId: binding.work.task.threadId,
+      threadId: scope.task.threadId,
       viewer: { type: 'cat', catId: createCatId(viewerCatId) },
     });
     const invocationId = message?.extra?.stream?.turnInvocationId;
     const triggerMessageId = message?.extra?.causal?.triggerMessageId;
     if (
       !message ||
-      message.userId !== binding.work.task.userId ||
+      message.userId !== scope.task.userId ||
       message.origin !== 'callback' ||
       !message.catId ||
       message.source ||
@@ -144,7 +190,7 @@ export class CollectiveWorkArtifactReader {
   }
 
   private async taskAncestry(
-    binding: WorkBinding,
+    scope: CollectiveWorkArtifactScope,
     publication: CallbackPublication,
     expected: { taskId: string; resultRevision: number; executionRevision: number; executionRef?: string },
   ) {
@@ -152,8 +198,8 @@ export class CollectiveWorkArtifactReader {
     const carrier = trigger?.extra?.collectiveWorkInvocationV1 ?? trigger?.extra?.collectiveWorkDelegationV1;
     if (
       !trigger ||
-      trigger.userId !== binding.work.task.userId ||
-      trigger.threadId !== binding.work.task.threadId ||
+      trigger.userId !== scope.task.userId ||
+      trigger.threadId !== scope.task.threadId ||
       trigger.deletedAt ||
       trigger.recall ||
       trigger._tombstone ||
@@ -163,7 +209,7 @@ export class CollectiveWorkArtifactReader {
       carrier.resultRevision !== expected.resultRevision ||
       carrier.executionRevision !== expected.executionRevision ||
       ('executionRef' in expected && carrier.executionRef !== expected.executionRef) ||
-      carrier.observedRevision > binding.work.revision ||
+      carrier.observedRevision > scope.workRevision ||
       (!trigger.mentions.includes(createCatId(publication.publisherCatId)) &&
         !trigger.extra?.collectiveWorkDelegationV1?.targetCatIds.includes(publication.publisherCatId))
     )
@@ -272,12 +318,24 @@ function textFile(artifactRef: string) {
 function digest(bytes: Buffer) {
   return `sha256:${createHash('sha256').update(bytes).digest('hex')}`;
 }
-function documentScope(binding: WorkBinding, revision: Pick<TextPublication, 'executionRevision' | 'resultRevision'>) {
-  const userId = binding.work.task.userId;
+function workArtifactScope(binding: WorkBinding): CollectiveWorkArtifactScope {
+  return {
+    task: binding.work.task,
+    workRevision: binding.work.revision,
+    resultRevision: binding.work.resultRevision,
+    executionRevision: binding.work.executionRevision,
+    ...(binding.work.executionRef ? { executionRef: binding.work.executionRef } : {}),
+  };
+}
+function documentScope(
+  scope: CollectiveWorkArtifactScope,
+  revision: Pick<TextPublication, 'executionRevision' | 'resultRevision'>,
+) {
+  const userId = scope.task.userId;
   if (!userId) throw artifactError('Published artifact Task owner is unavailable');
   return {
     userId,
-    taskId: binding.work.task.id,
+    taskId: scope.task.id,
     executionRevision: revision.executionRevision,
     resultRevision: revision.resultRevision,
   };

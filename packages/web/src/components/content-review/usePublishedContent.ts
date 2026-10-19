@@ -11,6 +11,7 @@ import type { MessagePublicationOrigin, WorkspaceOpenRequest } from '@/stores/ch
 import { useChatStore } from '@/stores/chatStore';
 import { apiFetch } from '@/utils/api-client';
 import { captureChatReadingBeforeLayoutChange } from '@/utils/chat-layout-change';
+import type { MessageArtworkItem } from './message-artwork-gallery';
 import { checked, json, ModificationHttpError } from './modification-http';
 
 export type ArtworkTarget = Extract<
@@ -28,6 +29,7 @@ export interface PublishedMessageCoordinate {
   messageId: string;
   messageRevision: string;
   origins?: Record<string, MessagePublicationOrigin>;
+  media?: readonly MessageArtworkItem[];
 }
 export function messagePublicationSource(
   coordinate: PublishedMessageCoordinate | undefined,
@@ -70,8 +72,9 @@ export function usePublishedContent() {
       source: MessageMediaPublicationSource,
       title: string,
       presentation: ArtworkPresentation = 'workspace',
+      isCurrent: () => boolean = () => true,
     ): Promise<ArtworkOpenResult> => {
-      if (pending.current) return { status: 'blocked' };
+      if (pending.current && presentation === 'workspace') return { status: 'blocked' };
       const ticket = ++generation.current;
       const hostThreadId = useChatStore.getState().currentThreadId;
       pending.current = true;
@@ -88,6 +91,7 @@ export function usePublishedContent() {
           setError('对话已切换。回到来源后可以继续打开这件作品。');
           return { status: 'blocked' };
         }
+        if (!isCurrent()) return { status: 'blocked' };
         let changedSelection = false;
         try {
           const saved = localStorage.getItem(
@@ -125,7 +129,7 @@ export function usePublishedContent() {
           setOpenedVersion({ source: JSON.stringify(source), revision: landing.asset.ownerRevision });
         return applied ? { status: 'opened', target } : { status: 'blocked' };
       } catch (failure) {
-        if (ticket !== generation.current || useChatStore.getState().currentThreadId !== hostThreadId)
+        if (ticket !== generation.current || !isCurrent() || useChatStore.getState().currentThreadId !== hostThreadId)
           return { status: 'blocked' };
         const reason = failure instanceof Error ? failure.message : '作品暂时无法打开，请重试。';
         setError(reason);
@@ -133,8 +137,10 @@ export function usePublishedContent() {
           ? { status: 'blocked' }
           : { status: 'preview', reason: `无法批注：${reason}` };
       } finally {
-        pending.current = false;
-        if (ticket === generation.current) setBusy(false);
+        if (ticket === generation.current) {
+          pending.current = false;
+          setBusy(false);
+        }
       }
     },
     [],

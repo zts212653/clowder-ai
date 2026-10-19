@@ -145,6 +145,60 @@ describe('F212 Phase B — ChatMessage routes cliDiagnostics to folded panel', (
     });
   }
 
+  for (const location of ['extra', 'metadata'] as const) {
+    it(`failed assistant exposes expandable diagnostics from ${location} in its own bubble`, () => {
+      const invocationId = 'a7ee4973-3c22-4982-b1fc-51e2bbc1da7f';
+      const diag = {
+        reasonCode: 'upstream_policy_reject' as const,
+        publicSummary: '上游内容安全策略拦截了本次调用',
+        publicHint: '具体上游层和触发内容尚不明确。',
+        debugRef: { command: 'agy', exitCode: 3, signal: null, invocationId },
+        safeExcerpt:
+          'Your previous response was blocked by content safety filters\nOutput retries exhausted after 4 attempts',
+        excerptSource: 'classifier' as const,
+      };
+      const message = {
+        id: 'policy-response',
+        type: 'assistant' as const,
+        catId: 'opus',
+        origin: 'stream' as const,
+        content: diag.publicSummary,
+        timestamp: Date.now(),
+        lifecycle: {
+          kind: 'response' as const,
+          orderKey: '1:policy',
+          invocationId: 'policy-invocation',
+          targetId: 'opus',
+          inputEntryIds: [],
+          inputMessageIds: [],
+          startedAt: 1,
+          completedAt: 2,
+          status: 'failed' as const,
+        },
+        metadata: {
+          provider: 'google',
+          model: 'fixture',
+          ...(location === 'metadata' ? { cliDiagnostics: diag } : {}),
+        },
+        ...(location === 'extra' ? { extra: { cliDiagnostics: diag } } : {}),
+      } as ChatMessageType;
+      render(message);
+      const toggle = container.querySelector<HTMLButtonElement>('[data-testid="cli-diagnostics-toggle"]');
+      expect(toggle).not.toBeNull();
+      if (!toggle) throw new Error('Missing diagnostic details button');
+      expect(container.textContent).toContain('exit: 3');
+      expect(container.textContent).toContain(invocationId);
+      expect(container.querySelector('[data-testid="cli-diagnostics-excerpt"]')).toBeNull();
+      act(() => toggle.click());
+      expect(container.querySelector('[data-testid="cli-diagnostics-excerpt"]')?.textContent).toContain(
+        'Output retries exhausted after 4 attempts',
+      );
+      if (message.lifecycle?.kind !== 'response') throw new Error('Expected response lifecycle');
+      render({ ...message, lifecycle: { ...message.lifecycle, status: 'completed' } } as ChatMessageType);
+      expect(container.querySelector('[data-testid="cli-diagnostics"]')).toBeNull();
+    });
+  }
+
   it('cliDiagnostics on extra → CliDiagnosticsPanel mounts (not legacy red-pill text)', () => {
     const diag: CliDiagnostics = {
       reasonCode: 'auth_failed',

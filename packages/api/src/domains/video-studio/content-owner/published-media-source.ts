@@ -1,6 +1,7 @@
+import { createHash } from 'node:crypto';
 import { constants } from 'node:fs';
-import { open } from 'node:fs/promises';
-import { join, resolve } from 'node:path';
+import { open, realpath } from 'node:fs/promises';
+import { basename, join, resolve, sep } from 'node:path';
 import {
   createCatId,
   type MediaPublicationSource,
@@ -50,6 +51,22 @@ export class PublishedMediaSource {
     },
   ) {
     this.uploadDir = resolve(deps.uploadDir);
+  }
+
+  /** Only called after publication authorization; retain the original upload when its bytes still match. */
+  async localOriginalFile(publication: ContentSourcePublicationV1 | undefined, digest: string): Promise<string | null> {
+    const ref = publication?.artifactRef;
+    if (!ref?.startsWith('/uploads/')) return null;
+    try {
+      const name = decodeURIComponent(ref.slice('/uploads/'.length));
+      if (!name || name !== basename(name) || name.includes('\\') || name.includes('\0')) return null;
+      const [root, path] = await Promise.all([realpath(this.uploadDir), realpath(join(this.uploadDir, name))]);
+      if (!path.startsWith(root + sep)) return null;
+      const bytes = await readBoundedFile(path, 256 * 1024 * 1024);
+      return `sha256:${createHash('sha256').update(bytes).digest('hex')}` === digest ? path : null;
+    } catch {
+      return null;
+    }
   }
 
   messageIdentity(source: import('@cat-cafe/shared').MessageMediaPublicationSource, principal: MediaReviewPrincipal) {

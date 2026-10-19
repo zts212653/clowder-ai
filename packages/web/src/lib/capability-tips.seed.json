@@ -2595,7 +2595,7 @@
     },
     "contexts": ["thinking", "feature_dev", "concierge_open"],
     "audience": ["cvo", "developer"],
-    "body": "先自己带猫进入 Collective：用本人身份登入，点击连接这台 Café。确认前先看清登记的头像与介绍，取消勾选不想带的猫，再确认连接。获准伙伴进入频道成员栏后，在“我的 Café”管理参与；回到频道点名，以接收状态和具名回复确认它真的接住了。",
+    "body": "用本人身份连接 Café，确认公开资料和要带的猫。在成员页顶部管理我的猫；从频道名菜单设置监听，从共同体菜单管理许可和日程。回到频道点名，用逐猫回执和具名回复确认实际进展。",
     "action": {
       "type": "open_capability_surface",
       "label": "进入 Collective",
@@ -2636,7 +2636,7 @@
       "anchor": "Work 结果反馈与修订"
     },
     "structureSource": {
-      "path": "packages/collective-client/src/CollectiveWorkCard.tsx",
+      "path": "packages/collective-client/src/CollectiveWorkActions.tsx",
       "anchor": "WorkResultReview"
     },
     "bodySource": {

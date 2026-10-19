@@ -1,10 +1,12 @@
 'use client';
 
 import { type RefObject, useCallback, useEffect, useRef } from 'react';
+import { useShellLanguage } from '../shell/shell-language';
 
 import { useShellPresentation } from '../shell/shell-presentation';
 import {
   createAppearanceSequencer,
+  createShellAppearanceSequencer,
   type ResolveHostColor,
   readHostAppearance,
   resolveColorFromDocument,
@@ -28,25 +30,39 @@ export function useCollectiveAppearanceBridge(input: {
   /** Tests only: the default reads the page with the browser's own colour engine. */
   readonly resolveColor?: ResolveHostColor;
 }) {
+  const language = useShellLanguage();
   const presentation = useShellPresentation();
   const sequencer = useRef(createAppearanceSequencer());
+  const shellSequencer = useRef(createShellAppearanceSequencer());
   const defaultResolver = useRef<ResolveHostColor>();
-  const latest = useRef({ ...input, presentation });
-  latest.current = { ...input, presentation };
+  const latest = useRef({ ...input, presentation, language });
+  latest.current = { ...input, presentation, language };
 
   const publish = useCallback(() => {
-    const { frameGeneration, iframeRef, presentation: current, resolveColor } = latest.current;
+    const {
+      frameGeneration,
+      iframeRef,
+      presentation: current,
+      language: currentLanguage,
+      resolveColor,
+    } = latest.current;
     const frame = iframeRef.current?.contentWindow;
     if (!frameGeneration || !frame) return;
     defaultResolver.current ??= resolveColorFromDocument();
     const appearance = readHostAppearance({
       presentation: current,
+      language: currentLanguage,
       scheme: document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light',
       resolveColor: resolveColor ?? defaultResolver.current,
     });
     if (!appearance) return;
     const message = sequencer.current.next(frameGeneration.bridgeId, appearance);
     if (message) frame.postMessage(message, frameGeneration.serviceOrigin);
+    const shellMessage = shellSequencer.current.next(frameGeneration.bridgeId, {
+      language: currentLanguage,
+      shell: appearance.shell,
+    });
+    if (shellMessage) frame.postMessage(shellMessage, frameGeneration.serviceOrigin);
   }, []);
 
   const bridgeId = input.frameGeneration?.bridgeId;
@@ -54,7 +70,7 @@ export function useCollectiveAppearanceBridge(input: {
   // biome-ignore lint/correctness/useExhaustiveDependencies: a new generation or interface version is the trigger.
   useEffect(() => {
     publish();
-  }, [bridgeId, serviceOrigin, presentation, publish]);
+  }, [bridgeId, serviceOrigin, presentation, language, publish]);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: observe while a generation exists; a new one needs no new observer.
   useEffect(() => {

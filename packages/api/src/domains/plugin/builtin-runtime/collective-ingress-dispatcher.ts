@@ -17,8 +17,8 @@ import {
 import type { InvocationQueue } from '../../cats/services/agents/invocation/InvocationQueue.js';
 import type { IMessageStore, StoredMessage } from '../../cats/services/stores/ports/MessageStore.js';
 import { routeCollectiveChannelEvent } from './collective-channel-ingress.js';
+import { appendCollectiveResumeEvent } from './collective-ingress-resume.js';
 import {
-  attentionSource,
   collectiveSender,
   collectiveSource,
   emitConnectorMessage,
@@ -53,6 +53,7 @@ interface CollectiveIngressThread {
 export interface CollectiveIngressDispatcherOptions {
   readonly admitStandingWork?: (source: StoredMessage, catId: CatId) => Promise<void>;
   readonly resumeWorkRevision?: (source: StoredMessage, event: CollectiveEventEnvelope, catId: CatId) => Promise<void>;
+  readonly resumeWorkWake?: (source: StoredMessage, event: CollectiveEventEnvelope, catId: CatId) => Promise<void>;
   readonly connector: CollectiveIngressConnectorPort;
   readonly threadStore: {
     get(threadId: string): CollectiveIngressThread | null | Promise<CollectiveIngressThread | null>;
@@ -172,6 +173,26 @@ export class CollectiveIngressDispatcher {
     );
     if (!agentRoute) throw missingAgentRoute(route, authorizedHumanId, target.agentId);
     if (!this.options.isCatAvailable(agentRoute.catId)) {
+      if (event.workRequest === 'resume') {
+        const thread = await this.requireThread(route, agentRoute.threadId);
+        if (!thread.participants?.includes(agentRoute.catId)) {
+          throw ingressError(
+            'ROUTE_CAT_NOT_IN_THREAD',
+            'Configured Cat is not a participant in the destination Thread',
+          );
+        }
+        await this.options.connector.readParticipationContext(source, 0, 1);
+        await appendCollectiveResumeEvent({
+          route,
+          event,
+          threadId: agentRoute.threadId,
+          catId: agentRoute.catId,
+          sourceIdentity: source,
+          messageStore: this.options.messageStore,
+          socketManager: this.options.socketManager,
+          emit: true,
+        });
+      }
       throw ingressError('ROUTE_CAT_UNAVAILABLE', 'Configured Cat is unavailable');
     }
     const thread = await this.requireThread(route, agentRoute.threadId);
@@ -227,27 +248,8 @@ export class CollectiveIngressDispatcher {
     const idempotencyKey = ingressIdempotencyKey(event);
     if (event.workAcceptanceNotice || event.workExecutionNotice)
       return persistCollectiveWorkNotice(this.options, route, event, threadId, catId, sourceIdentity);
-    if (event.workRequest === 'revise') {
-      if (!event.workRevisionNotice || !this.options.resumeWorkRevision) {
-        throw ingressError('WORK_REVISION_UNAVAILABLE', 'Host cannot resume this Work revision');
-      }
-      const source = collectiveSource(event, sourceIdentity);
-      const stored = await this.options.messageStore.appendIdempotent({
-        threadId,
-        userId: route.localOwnerUserId,
-        from: collectiveMessageFrom(event),
-        content: event.body,
-        source,
-        mentions: [catId as CatId],
-        timestamp: Date.parse(event.acceptedAt),
-        idempotencyKey,
-        extra: { targetCats: [catId] },
-      });
-      await this.options.resumeWorkRevision(stored.message, event, catId as CatId);
-      if (!stored.idempotent)
-        emitConnectorMessage(this.options.socketManager, threadId, stored.message.id, event, source);
-      return { kind: 'thread_message', threadId, messageId: stored.message.id, catId };
-    }
+    if (event.workRequest === 'revise' || event.workRequest === 'resume')
+      return this.persistResumeEvent(route, event, threadId, catId, sourceIdentity);
     const source = collectiveSource(event, sourceIdentity);
     const from = collectiveMessageFrom(event);
     const stored = await this.options.invocationQueue.send(
@@ -292,6 +294,38 @@ export class CollectiveIngressDispatcher {
       });
     }
 
+    return { kind: 'thread_message', threadId, messageId: stored.message.id, catId };
+  }
+
+  private async persistResumeEvent(
+    route: HostRouteConfig,
+    event: CollectiveEventEnvelope,
+    threadId: string,
+    catId: string,
+    sourceIdentity?: CollectiveSourceIdentity,
+  ): Promise<Extract<ConnectorRouteReceipt, { kind: 'thread_message' }>> {
+    const revision = event.workRequest === 'revise';
+    const resume = revision ? this.options.resumeWorkRevision : this.options.resumeWorkWake;
+    const notice = revision ? event.workRevisionNotice : event.workWakeNotice;
+    if (!notice || !resume) {
+      throw ingressError(
+        revision ? 'WORK_REVISION_UNAVAILABLE' : 'COLLECTIVE_WORK_WAKE_UNAVAILABLE',
+        revision ? 'Host cannot resume this Work revision' : 'Host cannot resume this Work signal',
+      );
+    }
+    const { source, stored } = await appendCollectiveResumeEvent({
+      route,
+      event,
+      threadId,
+      catId,
+      sourceIdentity,
+      messageStore: this.options.messageStore,
+      socketManager: this.options.socketManager,
+      emit: false,
+    });
+    await resume(stored.message, event, catId as CatId);
+    if (!stored.idempotent)
+      emitConnectorMessage(this.options.socketManager, threadId, stored.message.id, event, source);
     return { kind: 'thread_message', threadId, messageId: stored.message.id, catId };
   }
 

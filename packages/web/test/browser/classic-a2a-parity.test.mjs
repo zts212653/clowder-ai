@@ -165,13 +165,7 @@ test(
           );
           assert.deepEqual(
             await page.getByRole('menuitem').evaluateAll((items) => items.map((item) => item.dataset.testid)),
-            [
-              'composer-add-context',
-              'composer-upload',
-              'message-disposition-trigger',
-              'composer-whisper',
-              'composer-game',
-            ],
+            ['composer-add-context', 'composer-upload', 'message-disposition-trigger', 'composer-whisper'],
           );
           assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
           measurements.push({ width, theme, ...metrics });

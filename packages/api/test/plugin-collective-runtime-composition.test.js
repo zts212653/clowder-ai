@@ -159,6 +159,9 @@ test('builtin runtime dispatches persisted Collective inbox after connection syn
         resolveDispatch();
       },
     }),
+    async reconcileAcceptedWorkResultFiles(_connector, connectionId) {
+      order.push(`reconcile-result-files:${connectionId}`);
+    },
   });
 
   await runtime.start('instance_collective_runtime_dispatch');
@@ -166,7 +169,12 @@ test('builtin runtime dispatches persisted Collective inbox after connection syn
     dispatched,
     new Promise((_, reject) => setTimeout(() => reject(new Error('Timed out waiting for ingress dispatch')), 1_000)),
   ]);
-  assert.deepEqual(order, ['list', 'sync:conn_runtime_dispatch', 'dispatch:conn_runtime_dispatch']);
+  assert.deepEqual(order, [
+    'list',
+    'sync:conn_runtime_dispatch',
+    'reconcile-result-files:conn_runtime_dispatch',
+    'dispatch:conn_runtime_dispatch',
+  ]);
   let stopped = false;
   const stopping = runtime.stop('instance_collective_runtime_dispatch', 'test complete').then(() => {
     stopped = true;

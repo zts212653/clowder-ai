@@ -40,6 +40,9 @@ describe('F309 message takeover MCP tool', () => {
       operationId: '4eedc6aa-a688-4c3e-a69a-f42560e98189',
     };
     assert.equal(schema.safeParse(input).success, true);
+    const selected = { ...input, attachmentId: 'original-four' };
+    assert.deepEqual(schema.parse(selected), selected);
+    assert.equal(schema.safeParse({ ...input, attachmentIds: ['original-four'] }).success, false);
     assert.equal(
       schema.safeParse({ ...input, targetCatId: 'codex-astra', body: 'caller copy', userId: 'operator' }).success,
       false,
@@ -58,5 +61,7 @@ describe('F309 message takeover MCP tool', () => {
     assert.deepEqual(JSON.parse(capturedOptions.body), input);
     assert.equal(capturedOptions.headers['x-invocation-id'], 'takeover-invocation');
     assert.equal(capturedOptions.headers['x-callback-token'], 'takeover-token');
+    await tools.handleTakeOverContentModification(selected);
+    assert.deepEqual(JSON.parse(capturedOptions.body), selected);
   });
 });

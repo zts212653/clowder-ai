@@ -5,6 +5,7 @@ import { AppTooltip } from '@/components/AppTooltip';
 import { useMeasuredOverflow } from '@/components/content-overflow/useMeasuredOverflow';
 import { ChevronIcon } from '@/components/hub-icons';
 import { useShellPresentation } from '@/components/shell/shell-presentation';
+import { useMessageNavigation } from '@/components/thread-chat/MessageNavigationContext';
 import type { CatData } from '@/hooks/useCatData';
 import { useCoCreatorConfig } from '@/hooks/useCoCreatorConfig';
 import {
@@ -15,7 +16,6 @@ import {
 } from '@/lib/dispatch-receipt-display';
 import { messageSenderThemeColor, resolveMessageSender } from '@/lib/resolve-sender';
 import type { ChatMessage } from '@/stores/chat-types';
-import { focusLineageMessage } from '@/utils/focusLineageMessage';
 import styles from './AppendedInputReceipts.module.css';
 
 const COLLAPSED_VISIBLE_ROWS = 3.5;
@@ -71,6 +71,7 @@ export function appendedInputReadDisplay(source: ChatMessage, response: ChatMess
  * overflow rule shared with ExpandableProse), and a separate jump back to the original message.
  */
 function AppendedInputRow({ source, label, expanded, onToggle, response, color }: AppendedInputRowProps) {
+  const navigateToMessage = useMessageNavigation();
   const contentId = useId();
   const { ref, overflowing } = useMeasuredOverflow<HTMLSpanElement>({ axis: 'inline', active: !expanded });
   const content = source.content.trim() || '（无文字内容）';
@@ -127,7 +128,7 @@ function AppendedInputRow({ source, label, expanded, onToggle, response, color }
       <button
         type="button"
         className="shrink-0 font-medium text-[var(--color-cocreator-primary)] hover:underline"
-        onClick={() => focusLineageMessage(source.id)}
+        onClick={() => navigateToMessage(source.id)}
       >
         跳到原文
       </button>

@@ -6,7 +6,13 @@ import type {
 } from '@cat-cafe/shared';
 import { advanceWork, humanActor, humanEventActor, mutableWork } from './collaboration-command-helpers.js';
 import { collaborationOperationReplay, recordCollaborationOperation } from './collaboration-operations.js';
-import { projectCollectiveWork, requireCollectiveWork, requireWorkRevision } from './collaboration-work.js';
+import {
+  isAcceptedUnassignedWork,
+  projectCollectiveWork,
+  requireCollectiveWork,
+  requireOrdinaryWorkTransition,
+  requireWorkRevision,
+} from './collaboration-work.js';
 import { CollectiveServiceError } from './errors.js';
 import { appendEvent } from './event-log.js';
 import { requireParticipant } from './participation-store.js';
@@ -34,10 +40,34 @@ export function commitCollectiveWork(
   }
   const work = mutableWork(state, input.collectiveId, input.workId);
   requireWorkRevision(work, input.expectedRevision);
-  if (work.lifecycle !== 'proposed') {
-    throw new CollectiveServiceError('WORK_NOT_PROPOSED', 'Only a proposed Work can be committed', 409);
+  requireOrdinaryWorkTransition(work);
+  const acceptingUnassigned = work.lifecycle === 'proposed' && input.accountability === 'unassigned';
+  const alreadyUnassigned = isAcceptedUnassignedWork(work);
+  const keepingUnassigned = alreadyUnassigned && input.accountability === 'unassigned';
+  const claimingUnassigned = alreadyUnassigned && !keepingUnassigned;
+  if (work.lifecycle !== 'proposed' && !alreadyUnassigned) {
+    throw new CollectiveServiceError(
+      'WORK_NOT_PROPOSED',
+      'Only proposed or accepted unassigned Work can be committed',
+      409,
+    );
   }
-  commitCollectiveWorkAssignment(state, input, work, human, actorScope, humanActor(human), humanEventActor(human), now);
+  if (acceptingUnassigned) {
+    commitCollectiveWorkUnassigned(work, human, now);
+  } else if (!keepingUnassigned) {
+    commitCollectiveWorkAssignment(
+      state,
+      input,
+      work,
+      human,
+      actorScope,
+      humanActor(human),
+      humanEventActor(human),
+      now,
+      undefined,
+      claimingUnassigned ? 'accountability_assigned' : 'committed',
+    );
+  }
   recordCollaborationOperation(state, {
     ...replay,
     actorScope,
@@ -59,7 +89,21 @@ export function commitCollectiveWorkAssignment(
   eventActor: CollectiveEventEnvelope['actor'],
   now: number,
   acceptance?: CollectiveWorkAcceptanceNotice,
+  historyAction: 'committed' | 'accountability_assigned' | 'accountability_request_accepted' = 'committed',
+  historyEventId?: string,
+  resolvesPendingAccountabilityRequest = false,
 ) {
+  requireOrdinaryWorkTransition(work);
+  if (
+    !resolvesPendingAccountabilityRequest &&
+    work.accountabilityRequests?.some((request) => request.status === 'pending')
+  ) {
+    throw new CollectiveServiceError(
+      'ACCOUNTABILITY_REQUEST_PENDING',
+      'The named Human must answer the pending responsibility request before this Task can be claimed',
+      409,
+    );
+  }
   const at = new Date(now).toISOString();
   let assignmentEventId: string | undefined;
   if (input.assignment) {
@@ -106,5 +150,16 @@ export function commitCollectiveWorkAssignment(
   }
   work.accountableHumanId = human.humanId;
   work.lifecycle = 'committed';
-  advanceWork(work, 'committed', actor, at, assignmentEventId);
+  advanceWork(work, historyAction, actor, at, historyEventId ?? assignmentEventId);
+}
+
+/** Low-level transition used after the caller has already proven the relevant decision authority. */
+export function commitCollectiveWorkUnassigned(
+  work: MutableServiceState['works'][string],
+  human: { humanId: string; displayName: string },
+  now: number,
+) {
+  const at = new Date(now).toISOString();
+  work.lifecycle = 'committed';
+  advanceWork(work, 'committed', humanActor(human), at, undefined, '已纳入任务，等待负责人接下');
 }

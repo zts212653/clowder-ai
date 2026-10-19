@@ -87,6 +87,7 @@ export * from './types/artifact-review-drawing.js';
 // F255 runtime schemas are exported directly while their source remains grouped
 // with shared types; API and MCP must validate the same owner-free settlement shape.
 export * from './types/auto-dream.js';
+export * from './types/collective-accountability-attention.js';
 export * from './types/collective-appearance-bridge.js';
 export * from './types/collective-artifact.js';
 export * from './types/collective-artifact-command.js';
@@ -107,10 +108,14 @@ export * from './types/collective-media-surface.js';
 export * from './types/collective-media-surface-rpc.js';
 export * from './types/collective-members.js';
 export * from './types/collective-participation.js';
+export * from './types/collective-project-authoring.js';
+export * from './types/collective-ui-placement.js';
 export * from './types/collective-work.js';
 export * from './types/collective-work-acceptance.js';
 export * from './types/collective-work-matter.js';
 export * from './types/collective-work-policy.js';
+export { collectiveWorkResultMediaTypeForFileName } from './types/collective-work-return.js';
+export * from './types/collective-work-wake.js';
 export * from './types/content-modification.js';
 export * from './types/content-modification-carrier.js';
 export * from './types/content-modification-control.js';

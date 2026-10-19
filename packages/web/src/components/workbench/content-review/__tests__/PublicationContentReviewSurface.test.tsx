@@ -82,6 +82,7 @@ it.each([
     },
   };
   mocks.apiFetch.mockImplementation(async (url: string, init?: RequestInit) => {
+    if (url.endsWith('/file-info')) return new Response(JSON.stringify({ local: false }));
     if (url.startsWith('/api/content-publications/'))
       return new Response(
         JSON.stringify({
@@ -105,11 +106,17 @@ it.each([
   });
   expect(container.querySelector('[data-testid="workspace-content-review-surface"]')).not.toBeNull();
   expect(container.querySelector('[data-testid="content-modification-entry"]')).toBeNull();
+  expect(mocks.apiFetch).toHaveBeenCalledTimes(2);
+  if (shell === 'v2') {
+    const more = container.querySelector<HTMLButtonElement>('[aria-label="作品更多操作"]');
+    expect(more).not.toBeNull();
+    await act(async () => more?.click());
+  }
   expect(container.querySelector('[data-testid="workspace-media-chat-whole-work"]')).not.toBeNull();
   expect(container.querySelector('img')?.getAttribute('src')).toContain(
     `/api/content-publications/${encodeURIComponent(contentRef)}/media/2`,
   );
-  expect(mocks.apiFetch).toHaveBeenCalledTimes(2);
+  expect(mocks.apiFetch).toHaveBeenCalledTimes(shell === 'v2' ? 3 : 2);
   expect([...container.querySelectorAll('h2')].map((node) => node.textContent)).toEqual(['封面']);
   expect(
     container.querySelector('select[aria-label="作品版本"]')?.getAttribute('value') ??

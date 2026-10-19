@@ -1,3 +1,4 @@
+import { HeaderFrame } from '@cat-cafe/ui';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import type { ConversationViewPreferenceController } from '@/hooks/useConversationViewPreference';
@@ -58,7 +59,10 @@ export function ChatContainerHeader({
         style={{ background: 'var(--shell-work)', borderBottom: '1px solid var(--shell-hairline)' }}
         data-shell-header="v2"
       >
-        <div className="shell-chat-header-layout flex h-[52px] items-center gap-1 pl-3 pr-2 sm:gap-1.5 sm:pl-6 sm:pr-3.5">
+        <HeaderFrame
+          as="div"
+          className="shell-chat-header-layout cafe-header-inner flex h-[52px] items-center gap-1 pl-3 pr-2 sm:gap-1.5 sm:pl-6 sm:pr-3.5"
+        >
           <div className="shell-chat-header-navigation flex min-w-0 flex-1 items-center gap-1 sm:gap-1.5">
             {/* The sidebar has its own collapse control; this one only brings a collapsed sidebar back. */}
             {!sidebarOpen && (
@@ -102,7 +106,7 @@ export function ChatContainerHeader({
               tooltip
             />
           </div>
-        </div>
+        </HeaderFrame>
       </header>
     );
   }

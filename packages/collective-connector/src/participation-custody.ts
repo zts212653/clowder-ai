@@ -1,6 +1,7 @@
 import {
   type CollectiveParticipationDeclaration,
   type CollectiveSourceIdentity,
+  collectiveParticipationDeclarationSchema,
   participationSourceIsCurrent,
 } from '@cat-cafe/shared';
 import type { ConnectorConnectionState, ConnectorState, HostRouteConfig } from './state.js';
@@ -31,13 +32,13 @@ export function participationDeclaration(
   connection: ConnectorConnectionState,
   route: HostRouteConfig,
 ): CollectiveParticipationDeclaration {
-  return {
+  return collectiveParticipationDeclarationSchema.parse({
     serviceInstanceId: connection.serviceInstanceId,
     collectiveId: connection.collectiveId,
     connectionId: connection.connectionId,
     revision: route.revision,
     agents: materializedAgents(connection, route),
-  };
+  });
 }
 
 export function resolveMaterializedParticipation(
@@ -72,13 +73,21 @@ function materializedAgents(connection: ConnectorConnectionState, route: HostRou
           catId: binding.catId,
           displayName: binding.participation.displayName,
           channelIds: [...binding.participation.channelIds],
+          ...route.publicProfiles?.[binding.catId],
         },
       ];
     });
   }
   const agents = new Map<
     string,
-    { catId: string; displayName: string; channelIds: string[]; description?: string; avatarDataUrl?: string }
+    {
+      catId: string;
+      displayName: string;
+      channelIds: string[];
+      displayLabel?: string;
+      description?: string;
+      avatarDataUrl?: string;
+    }
   >();
   for (const [channelId, endpoint] of Object.entries(channelRoutes)) {
     if (endpoint.channelId !== channelId)

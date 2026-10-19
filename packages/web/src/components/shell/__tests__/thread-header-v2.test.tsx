@@ -99,12 +99,18 @@ describe('F322 thread-scoped header facts', () => {
     for (const state of [
       { total: 774, complete: false, loading: false, error: false },
       { total: 774, complete: true, loading: false, error: true },
-      { total: 774, complete: true, loading: true, error: false },
     ]) {
       data.works = state;
       render();
       expect(host.querySelector('[data-testid="header-works"]')?.textContent).toBe('作品');
     }
+  });
+  it('keeps a confirmed Works count during a same-thread background read', () => {
+    data.works = { total: 1, complete: true, loading: false, error: false };
+    render();
+    data.works = { ...data.works, loading: true };
+    render();
+    expect(host.querySelector('[data-testid="header-works"]')?.textContent).toBe('作品1');
   });
   it('switches both labels and accessible descriptions to English without changing counts or destinations', () => {
     data.tasks = [{ status: 'doing' }, { status: 'done' }];

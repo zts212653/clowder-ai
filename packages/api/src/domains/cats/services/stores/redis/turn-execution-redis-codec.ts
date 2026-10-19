@@ -40,7 +40,7 @@ type RedisTurnExecutionIdentityHash = RedisTurnExecutionHash &
     >
   >;
 
-function hasIdentityFields(data: RedisTurnExecutionHash): data is RedisTurnExecutionIdentityHash {
+export function hasTurnExecutionIdentityFields(data: RedisTurnExecutionHash): data is RedisTurnExecutionIdentityHash {
   return Boolean(
     data.invocationId &&
       data.parentInvocationId &&
@@ -90,7 +90,7 @@ function withOutputFence(record: TurnExecutionRecord, raw: string | undefined): 
 }
 
 export function hydrateTurnExecution(data: RedisTurnExecutionHash): TurnExecutionRecord | null {
-  if (!hasIdentityFields(data)) return null;
+  if (!hasTurnExecutionIdentityFields(data)) return null;
   try {
     if (!['ordinary', 'routing_guard'].includes(data.executionKind)) return null;
     if (!['running', 'succeeded', 'failed', 'canceled', 'interrupted'].includes(data.status)) return null;

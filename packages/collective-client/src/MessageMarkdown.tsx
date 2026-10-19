@@ -1,7 +1,12 @@
-import type { ReactNode } from 'react';
+import { type ReactNode, useState } from 'react';
 import ReactMarkdown, { type Components, defaultUrlTransform } from 'react-markdown';
 import remarkBreaks from 'remark-breaks';
 import remarkGfm from 'remark-gfm';
+import {
+  collectiveWorkResultFileAddress,
+  currentCollectiveSessionToken,
+  openCollectiveWorkResultFile,
+} from './work-result-file-link.js';
 
 function isSafeWebLink(href: string | undefined): href is string {
   if (!href) return false;
@@ -15,6 +20,41 @@ function isSafeWebLink(href: string | undefined): href is string {
 
 function InertLink({ children }: { readonly children: ReactNode }) {
   return <span className="message-markdown-inert-link">{children}</span>;
+}
+
+function SafeLink({ href, children }: { readonly href: string; readonly children: ReactNode }) {
+  return (
+    <a href={href} target="_blank" rel="noreferrer noopener">
+      {children}
+    </a>
+  );
+}
+
+function AuthenticatedWorkResultFile({ href, children }: { readonly href: string; readonly children: ReactNode }) {
+  const [failed, setFailed] = useState(false);
+  const open = () => {
+    const sessionToken = currentCollectiveSessionToken();
+    if (!sessionToken) {
+      setFailed(true);
+      return;
+    }
+    setFailed(false);
+    const popup = window.open('about:blank', '_blank');
+    void openCollectiveWorkResultFile(href, sessionToken, popup).catch(() => setFailed(true));
+  };
+  return (
+    <>
+      <button
+        type="button"
+        className="message-markdown-authenticated-file"
+        data-collective-work-result-file=""
+        onClick={open}
+      >
+        {children}
+      </button>
+      {failed && <output>文件暂时无法打开，请刷新后重试。</output>}
+    </>
+  );
 }
 
 export function MessageMarkdown({
@@ -46,20 +86,21 @@ export function MessageMarkdown({
     : {};
   return (
     <div className="message-body message-markdown">
-      {prefix}
+      {prefix && <span className="message-prefix">{prefix}</span>}
       <ReactMarkdown
         remarkPlugins={[remarkGfm, remarkBreaks]}
         urlTransform={defaultUrlTransform}
         components={{
           ...sourceComponents,
-          a: ({ children, href }) =>
-            isSafeWebLink(href) ? (
-              <a href={href} target="_blank" rel="noreferrer noopener">
-                {children}
-              </a>
+          a: ({ children, href }) => {
+            if (href && collectiveWorkResultFileAddress(href))
+              return <AuthenticatedWorkResultFile href={href}>{children}</AuthenticatedWorkResultFile>;
+            return isSafeWebLink(href) ? (
+              <SafeLink href={href}>{children}</SafeLink>
             ) : (
               <InertLink>{children}</InertLink>
-            ),
+            );
+          },
           img: ({ alt }) => <span className="message-markdown-inert-image">{alt ? `图片：${alt}` : '图片'}</span>,
         }}
       >

@@ -19,6 +19,7 @@ export function CollectiveChannelWorkspace({
   onContent,
   onMember,
   onNavigation,
+  onLibrary,
   onOpenRoadmapMessage,
   onReplayGuide,
   onReturnToRoadmap,
@@ -40,6 +41,7 @@ export function CollectiveChannelWorkspace({
   readonly onContent: (content: ChannelContent) => void;
   readonly onMember: (event: CollectiveEventEnvelope) => void;
   readonly onNavigation: () => void;
+  readonly onLibrary?: (channelId: string) => void;
   readonly onOpenRoadmapMessage: (work: CollectiveWorkProjection, view: RoadmapViewState, eventId: string) => void;
   readonly onReplayGuide: () => void;
   readonly onReturnToRoadmap?: () => void;
@@ -67,6 +69,7 @@ export function CollectiveChannelWorkspace({
       channelId={channelId}
       content={content}
       onSelectContent={onContent}
+      onOpenLibrary={onLibrary}
       focusEventId={focusEventId}
       onCloseContext={() => {
         host.hide();
@@ -90,6 +93,11 @@ export function CollectiveChannelWorkspace({
       onRequestWorkRevision={client.requestWorkRevision}
       onCompleteWork={client.completeWork}
       onCreateRoadmap={client.createRoadmap}
+      onCreateProject={client.createProject}
+      onCreateProjectTask={client.createProjectTask}
+      onRequestWorkAccountability={client.requestWorkAccountability}
+      onRespondWorkAccountability={client.respondWorkAccountability}
+      onDecideProjectSuggestion={client.decideProjectWorkSuggestion}
       onSetRoadmapWorks={client.setRoadmapWorks}
       onSetRoadmapStatus={client.setRoadmapStatus}
       roadmapView={roadmapView}
@@ -110,14 +118,24 @@ export function CollectiveChannelWorkspace({
       onSetWorkDependencies={client.setWorkDependencies}
       onSetReaction={client.setReaction}
       onOpenNavigation={onNavigation}
+      onMembers={() => {
+        host.hide();
+        setSelectedMember('members');
+      }}
+      onSearch={() => {
+        onNavigation();
+        requestAnimationFrame(() => document.querySelector<HTMLInputElement>('.destination-search input')?.focus());
+      }}
       onOpenMember={onMember}
       onCafe={showCafe}
       onChannelCafe={showChannelCafe}
+      hostActivity={host.available}
       onOpenTopic={() => {
         host.hide();
         setSelectedMember(undefined);
       }}
       onOpenChannel={onSelectChannel}
+      contextFullPage={selectedMember === 'members' || host.open}
       context={
         host.open ? (
           <div className="context-panel" aria-hidden="true" />
@@ -125,6 +143,7 @@ export function CollectiveChannelWorkspace({
           selectedMember && (
             <MemberPanel
               member={selectedMember}
+              privateRoster={host.available}
               members={members}
               participants={participants}
               events={snapshot.events}

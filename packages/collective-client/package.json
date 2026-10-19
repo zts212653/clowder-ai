@@ -24,7 +24,8 @@
     "react-markdown": "^10.1.0",
     "remark-breaks": "^4.0.0",
     "remark-gfm": "^4.0.1",
-    "zod": "^3.22.4"
+    "zod": "^3.22.4",
+    "@cat-cafe/ui": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^20.11.0",

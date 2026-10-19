@@ -1,6 +1,7 @@
 'use client';
 import type { ArtifactReviewAnnotation, ArtifactReviewRound, ArtifactReviewView } from '@cat-cafe/shared';
 import { type ReactNode, useCallback, useRef, useState } from 'react';
+import { useShellCopy } from '@/components/shell/shell-copy';
 import { useShellPresentation } from '@/components/shell/shell-presentation';
 import { ContentReviewSurface } from '@/components/workbench/content-review/ContentReviewSurface';
 import type { ContentReviewController } from '@/components/workbench/content-review/content-review-contract';
@@ -9,6 +10,7 @@ import type { WorkspaceFileNavigationOrigin } from '@/stores/chat-types';
 import { ArtifactModificationEntry } from './ArtifactModificationEntry';
 import { artifactRoundChatTarget } from './artifact-modification-source';
 import { artifactLandingCapabilities, artifactReviewProjection } from './artifact-review-adapter';
+import { artworkActionsCopy } from './artwork-actions.shell-copy';
 import { artworkTitle } from './artwork-title';
 import { ArtifactMediaCompare } from './media-compare/ArtifactMediaCompare';
 import { reviewAuthorityMessages } from './media-compare/review-authority-messages';
@@ -57,6 +59,7 @@ export function ArtifactRoundLanding({
 }: ArtifactRoundProps & { linked?: ReturnType<typeof useWorkspaceContentReview> }) {
   const draft = useReviewDraft(`${prefix}round:${round.number}:annotation`);
   const isV2 = useShellPresentation() === 'v2';
+  const artworkCopy = useShellCopy(artworkActionsCopy);
   const workTitle = isV2
     ? artworkTitle(title ?? view.review.title, round.asset.media.kind === 'image' ? '图片' : '作品')
     : view.review.title;
@@ -172,7 +175,7 @@ export function ArtifactRoundLanding({
           capabilities={capabilities}
           versionControl={
             <>
-              {view.review.rounds.some((item) => item.number < round.number) ? (
+              {!isV2 && view.review.rounds.some((item) => item.number < round.number) ? (
                 <button
                   type="button"
                   aria-label="对比版本"
@@ -183,16 +186,27 @@ export function ArtifactRoundLanding({
                 </button>
               ) : null}
               <select
-                aria-label="审阅版本"
+                aria-label={isV2 ? artworkCopy.versionLabel : '审阅版本'}
                 value={round.number}
-                onChange={(event) => onVersion(Number(event.target.value))}
+                onChange={(event) => {
+                  if (event.target.value === 'details') setPanel(panel === 'details' ? null : 'details');
+                  else if (event.target.value === 'compare') comparison.open();
+                  else onVersion(Number(event.target.value));
+                }}
                 className="max-w-28 rounded bg-transparent text-xs"
               >
                 {view.review.rounds.map((item) => (
                   <option key={item.number} value={item.number}>
-                    第 {item.number} 版{item.number === view.review.rounds.at(-1)?.number ? ' · 当前' : ' · 历史'}
+                    {artworkCopy.versionNumber(item.number)} ·{' '}
+                    {item.number === view.review.rounds.at(-1)?.number
+                      ? artworkCopy.current
+                      : artworkCopy.historyVersion}
                   </option>
                 ))}
+                {isV2 && view.review.rounds.some((item) => item.number < round.number) ? (
+                  <option value="compare">{artworkCopy.compare}</option>
+                ) : null}
+                {isV2 ? <option value="details">{artworkCopy.details}</option> : null}
               </select>
               {!isV2 ? (
                 <button
@@ -204,14 +218,16 @@ export function ArtifactRoundLanding({
                   审阅
                 </button>
               ) : null}
-              <button
-                type="button"
-                aria-label="审阅详情"
-                onClick={() => setPanel(panel === 'details' ? null : 'details')}
-                className="shrink-0 text-xs text-cafe-muted"
-              >
-                详情
-              </button>
+              {!isV2 ? (
+                <button
+                  type="button"
+                  aria-label="审阅详情"
+                  onClick={() => setPanel(panel === 'details' ? null : 'details')}
+                  className="shrink-0 text-xs text-cafe-muted"
+                >
+                  详情
+                </button>
+              ) : null}
               {!isV2 ? (
                 <button
                   type="button"
@@ -236,7 +252,7 @@ export function ArtifactRoundLanding({
                 round={round}
                 draft={selectedDraft}
                 disabled={!projection.canWrite || !canWrite}
-                allowNewRequest={round.asset.media.kind !== 'image'}
+                allowNewRequest={!isV2 && round.asset.media.kind !== 'image'}
                 onRegionHandedOff={() => effective.setTarget(null)}
               />
             ),

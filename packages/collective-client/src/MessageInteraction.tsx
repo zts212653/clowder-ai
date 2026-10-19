@@ -166,7 +166,11 @@ export interface MessageInteractionProps {
   readonly onReply?: () => void;
   readonly onMention?: () => void;
   readonly onProposeWork?: () => void;
-  readonly onCommitWork?: (work: CollectiveWorkProjection, participant?: CollectiveParticipant) => void;
+  readonly onCommitWork?: (
+    work: CollectiveWorkProjection,
+    participant?: CollectiveParticipant,
+    accountability?: 'self' | 'unassigned',
+  ) => void;
   readonly onDeclineWork?: (work: CollectiveWorkProjection) => void;
   readonly onAcceptWorkResult?: (work: CollectiveWorkProjection) => void;
   readonly onRequestWorkRevision?: (work: CollectiveWorkProjection, feedback: string) => Promise<void>;

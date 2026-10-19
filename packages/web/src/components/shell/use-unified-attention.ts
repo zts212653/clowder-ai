@@ -18,6 +18,7 @@ export const UNIFIED_ATTENTION_INVALIDATION_EVENTS = [
   'cat-cafe:entrusted-work-projection-invalidated',
   'cat-cafe:user-mention-updated',
   'cat-cafe:ignored-item-preferences-updated',
+  'cat-cafe:collective-attention-invalidated',
 ] as const;
 
 export type MentionPeriod = 'recent' | 'today' | 'week' | 'earlier' | 'handled';
@@ -26,6 +27,8 @@ export interface UnifiedAttentionView {
   setPersonalView?: (mode: MailboxPersonalView, period?: MentionPeriod) => void;
   setMentionPeriod?: (period: MentionPeriod) => void;
   result: MailboxRead;
+  /** Last confirmed count for this scope during refresh; never used to authorize panel actions. */
+  badgeResult?: MailboxRead;
   /**
    * Only while a re-read is in flight after a successful one: the rows read last time. The panel may keep showing
    * them labelled as the previous read; nothing may count them as current. It is dropped on failure.
@@ -95,6 +98,7 @@ async function readOnce(
 
 export function useUnifiedAttention(): UnifiedAttentionView {
   const [result, setResult] = useState<MailboxRead>({ kind: 'loading' });
+  const [badgeResult, setBadgeResult] = useState<MailboxRead>({ kind: 'loading' });
   const [staleRead, setStaleRead] = useState<UnifiedAttentionReadV1 | null>(null);
   const [resultGeneration, setResultGeneration] = useState<number | null>(null);
   const lastOkRef = useRef<UnifiedAttentionReadV1 | null>(null);
@@ -111,6 +115,8 @@ export function useUnifiedAttention(): UnifiedAttentionView {
     const previous = lastOkRef.current;
     const mode = modeRef.current;
     const period = periodRef.current;
+    const sameScope = previous && previous.personalView?.mode === mode && (previous.mentionPeriod ?? 'week') === period;
+    setBadgeResult(sameScope ? { kind: 'ok', read: previous } : { kind: 'loading' });
     let settled = false;
     // Counted synchronously, before anything is awaited: a write that ends right now must see that this read has begun.
     startedRef.current += 1;
@@ -125,6 +131,7 @@ export function useUnifiedAttention(): UnifiedAttentionView {
       controller.signal,
       (principal) => {
         if (settled || controller.signal.aborted) return;
+        if (!previous || principal !== previous.identity.ownerUserId) setBadgeResult({ kind: 'loading' });
         if (
           previous &&
           principal !== null &&
@@ -144,6 +151,7 @@ export function useUnifiedAttention(): UnifiedAttentionView {
       lastOkRef.current = next.kind === 'ok' ? next.read : null;
       setStaleRead(null);
       setResult(next);
+      setBadgeResult(next);
       setResultGeneration(generation);
     });
   }, []);
@@ -185,6 +193,7 @@ export function useUnifiedAttention(): UnifiedAttentionView {
 
   return {
     result,
+    badgeResult,
     staleRead,
     refetch,
     nextPage,

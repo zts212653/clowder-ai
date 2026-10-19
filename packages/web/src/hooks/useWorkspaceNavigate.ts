@@ -182,7 +182,7 @@ export function navigateToEntrustedWorkAction(actionRef: string): boolean {
   if (typeof window === 'undefined') return false;
   const target = resolveEntrustedWorkActionTarget(actionRef);
   if (!target) return false;
-  if (target.kind === 'collective-work') {
+  if (target.kind === 'collective-work' || target.kind === 'collective-accountability') {
     window.location.assign(target.actionRef);
     return true;
   }

@@ -146,7 +146,6 @@ describe('ThreadItem draft badge', () => {
       targetCats: [],
       catStatuses: {},
       catInvocations: {},
-      currentGame: null,
       queue: [],
       queueFull: false,
       threadStates: {

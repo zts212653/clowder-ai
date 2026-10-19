@@ -9,6 +9,7 @@ import { useThreadArtifacts } from '@/hooks/useThreadArtifacts';
 import { useChatStore } from '@/stores/chatStore';
 import { EntrustedWorkBrief } from './EntrustedWorkBrief';
 import { type EligibleNeedsMeReceipt, selectNeedsMeItems } from './needs-me-items';
+import { needsMeRecommendation } from './needs-me-recommendation';
 import { type PreparedArtifactCoordinate, PreparedArtifactPreview } from './PreparedArtifactPreview';
 import { preparedArtifactPresentation, preparedReviewCoordinate } from './prepared-artifact-presentation';
 import { usePreparedReviewTitle } from './prepared-review-presentation';
@@ -101,7 +102,7 @@ export function NeedsMePanel({
         <div className="min-w-0">
           <div className="flex items-center gap-2">
             <p className="text-micro font-bold uppercase tracking-[0.16em] text-cafe-muted">Needs Me</p>
-            {projection.loading || projection.error ? null : (
+            {(projection.loading && !projection.confirmed) || projection.error ? null : (
               <span
                 data-testid="needs-me-count"
                 className="rounded-full bg-cafe-surface px-2 py-0.5 text-micro font-semibold text-cafe-secondary"
@@ -174,7 +175,9 @@ export function NeedsMePanel({
                 <div className="min-w-0 flex-1">
                   <p className="text-micro font-bold uppercase tracking-[0.12em] text-cafe-muted">为什么现在需要你</p>
                   <h3 className="mt-1 text-sm font-semibold text-cafe-black">{whyNow(receipt)}</h3>
-                  <p className="mt-2 text-xs leading-5 text-cafe-secondary">建议：{receipt.recommendation}</p>
+                  <p className="mt-2 text-xs leading-5 text-cafe-secondary">
+                    建议：{needsMeRecommendation(receipt, 'zh')}
+                  </p>
                   <details className="mt-1 text-micro text-cafe-muted">
                     <summary className="cursor-pointer">来源判断</summary>
                     <p className="mt-1 break-all">{receipt.reasonCode}</p>

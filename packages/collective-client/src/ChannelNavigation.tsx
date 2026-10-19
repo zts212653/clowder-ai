@@ -1,5 +1,8 @@
+import { AppTooltip, ShellGlyph, WorksIcon } from '@cat-cafe/ui';
+import { useEffect, useRef, useState } from 'react';
 import { CollectiveIcon } from './CollectiveIcon.js';
 import type { channelDestinations } from './channel-navigation.js';
+import { useCollectiveText } from './collective-copy.js';
 
 export function ChannelNavigation({
   channels,
@@ -10,7 +13,10 @@ export function ChannelNavigation({
   onMembers,
   onLibrary,
   libraryActive,
-  guideCatCount,
+  onRoadmap,
+  roadmapActive,
+  roadmapCount,
+  memberCount,
 }: {
   readonly channels: ReturnType<typeof channelDestinations>;
   readonly channelId?: string;
@@ -21,25 +27,110 @@ export function ChannelNavigation({
   readonly onLibrary?: () => void;
   readonly libraryActive?: boolean;
   readonly guideCatCount?: number;
+  readonly onRoadmap?: () => void;
+  readonly roadmapActive?: boolean;
+  readonly roadmapCount?: number;
+  readonly memberCount?: number;
 }) {
+  const t = useCollectiveText();
+  const [searchOpen, setSearchOpen] = useState(false);
+  const search = useRef<HTMLInputElement>(null);
+  const trigger = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (searchOpen) search.current?.focus();
+  }, [searchOpen]);
   const visible = channels.filter((channel) =>
     channel.id.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()),
   );
   return (
     <>
-      <label className="destination-search">
-        <CollectiveIcon kind="search" />
-        <input
-          type="search"
-          aria-label="搜索频道与话题"
-          placeholder="搜索频道、话题或消息"
-          value={query}
-          onChange={(event) => onQuery(event.target.value)}
-        />
-      </label>
+      <div className="destination-search" data-open={searchOpen || Boolean(query)}>
+        <AppTooltip label={t('搜索频道与话题')}>
+          <button
+            type="button"
+            className="destination-search-trigger"
+            ref={trigger}
+            aria-label={t('搜索频道与话题')}
+            onClick={() => setSearchOpen((value) => !value)}
+          >
+            <CollectiveIcon kind="search" />
+          </button>
+        </AppTooltip>
+        <label className="destination-search-field">
+          <input
+            type="search"
+            ref={search}
+            tabIndex={searchOpen || query ? 0 : -1}
+            onFocus={() => setSearchOpen(true)}
+            onKeyDown={(event) => {
+              if (event.key === 'Escape') {
+                setSearchOpen(false);
+                onQuery('');
+                trigger.current?.focus();
+              }
+            }}
+            aria-label={t('搜索频道与话题')}
+            placeholder={t('搜索频道、话题或消息')}
+            value={query}
+            onChange={(event) => onQuery(event.target.value)}
+          />
+        </label>
+      </div>
       <div className="destination-scroll">
-        <nav className="destination-list" aria-label="频道">
-          <p>频道</p>
+        <div className="destination-global-entries">
+          {onRoadmap && (
+            <nav className="destination-list destination-global-list" aria-label="项目">
+              <button
+                type="button"
+                aria-label="项目"
+                className={`destination-item ${roadmapActive ? 'destination-item-active' : ''}`}
+                aria-current={roadmapActive ? 'page' : undefined}
+                onClick={onRoadmap}
+              >
+                <span className="destination-symbol">
+                  <ShellGlyph name="checkSquare" />
+                </span>
+                <span>
+                  <strong>项目</strong>
+                </span>
+                {roadmapCount !== undefined && <small>{roadmapCount}</small>}
+              </button>
+            </nav>
+          )}
+          {onLibrary && (
+            <nav className="destination-list destination-global-list" aria-label="作品资料库">
+              <button
+                type="button"
+                aria-label={t('全部作品')}
+                className={`destination-item ${libraryActive ? 'destination-item-active' : ''}`}
+                aria-current={libraryActive ? 'page' : undefined}
+                onClick={onLibrary}
+              >
+                <span className="destination-symbol" aria-hidden="true">
+                  <WorksIcon />
+                </span>
+                <span>
+                  <strong>{t('全部作品')}</strong>
+                </span>
+              </button>
+            </nav>
+          )}
+          <nav className="destination-list destination-global-list member-destination" aria-label="共同家园成员">
+            <button type="button" className="destination-item" onClick={onMembers}>
+              <span className="destination-symbol">
+                <CollectiveIcon kind="members" />
+              </span>
+              <span>
+                <strong>{t('成员')}</strong>
+              </span>
+              {memberCount !== undefined && <small>{memberCount}</small>}
+            </button>
+          </nav>
+        </div>
+        <nav className="destination-list" aria-label={t('频道')}>
+          <p>
+            {t('频道')} {channels.length}
+          </p>
           {(query ? visible : channels).map((channel) => (
             <button
               key={channel.id}
@@ -51,49 +142,10 @@ export function ChannelNavigation({
               <span className="destination-symbol">#</span>
               <span>
                 <strong>{channel.id}</strong>
-                <small>
-                  {channel.id === 'general' && guideCatCount !== undefined
-                    ? guideCatCount
-                      ? '伙伴正在加入'
-                      : '正在准备'
-                    : channel.messageCount
-                      ? `${channel.messageCount} 条消息`
-                      : ''}
-                </small>
               </span>
             </button>
           ))}
           {query && !visible.length && <p className="navigation-empty">没有同名频道；主区显示匹配的消息。</p>}
-        </nav>
-        {onLibrary && (
-          <nav className="destination-list" aria-label="作品资料库">
-            <button
-              type="button"
-              aria-label="全部作品"
-              className={`destination-item ${libraryActive ? 'destination-item-active' : ''}`}
-              aria-current={libraryActive ? 'page' : undefined}
-              onClick={onLibrary}
-            >
-              <span className="destination-symbol" aria-hidden="true">
-                ≡
-              </span>
-              <span>
-                <strong>全部作品</strong>
-                <small>找回版本与原讨论</small>
-              </span>
-            </button>
-          </nav>
-        )}
-        <nav className="destination-list member-destination" aria-label="共同家园成员">
-          <button type="button" className="destination-item" onClick={onMembers}>
-            <span className="destination-symbol">
-              <CollectiveIcon kind="members" />
-            </span>
-            <span>
-              <strong>成员</strong>
-              <small>认识这里的人与猫</small>
-            </span>
-          </button>
         </nav>
       </div>
     </>

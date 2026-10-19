@@ -25,7 +25,7 @@ F312 只登记支持边界，既不复制 provider home 内容，也不把 sessi
 transport 误称为 provider-memory write/read/receipt。
 
 七个 runtime carrier 的机器可读真相源是
-`assets/memory-surfaces/provider-local-memory/provider-census.yaml`。
+[`assets/memory-surfaces/provider-local-memory/provider-census.yaml`](../../assets/memory-surfaces/provider-local-memory/provider-census.yaml)。
 carrier universe 来自 `cat-template.json`；runtime carrier 是盘点单位，不能按 model 名合并。
 
 ## 2. E0 disposition

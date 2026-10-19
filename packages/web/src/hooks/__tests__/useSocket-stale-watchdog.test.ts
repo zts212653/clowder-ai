@@ -46,7 +46,6 @@ const mockGetThreadState = vi.fn(() => ({
   targetCats: [],
   catStatuses: {},
   catInvocations: {},
-  currentGame: null,
   unreadCount: 0,
   lastActivity: 0,
 }));
@@ -123,10 +122,6 @@ vi.mock('@/utils/api-client', () => ({
   refreshApiSession: vi.fn(async () => {}),
   API_URL: 'http://localhost:3100',
   apiFetch: (...args: unknown[]) => mockApiFetch(...args),
-}));
-
-vi.mock('../useGameReconnect', () => ({
-  reconnectGame: vi.fn(() => Promise.resolve()),
 }));
 
 import { configureDebug } from '@/debug/invocationEventDebug';

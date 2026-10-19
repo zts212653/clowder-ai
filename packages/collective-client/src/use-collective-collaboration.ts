@@ -1,3 +1,4 @@
+import { collectiveWorkProjectionSchema } from '@cat-cafe/shared';
 import { type Dispatch, type MutableRefObject, type SetStateAction, useCallback, useRef } from 'react';
 import type { ClientRequest } from './client-request.js';
 import type {
@@ -11,9 +12,18 @@ import type {
   CollectiveWorkProjection,
 } from './client-types.js';
 import { acknowledgeCollaborationCommand, prepareCollaborationCommand } from './collaboration-command-custody.js';
+import { publishCollectiveAccountabilityChanged } from './collective-accountability-events.js';
 import { collectiveClientNamespace } from './human-send-custody.js';
+import type { ProjectSuggestionEdits } from './ProjectSuggestionActions.js';
 import { collectiveClientErrorMessage } from './use-human-auth-session.js';
 import type { InformalVoteDraft } from './VoteCard.js';
+
+export interface ProjectTaskResponsibility {
+  readonly accountability: 'self' | 'unassigned';
+  readonly requestedAccountableHumanId?: string;
+}
+
+type WorkAccountabilityRequest = NonNullable<CollectiveWorkProjection['accountabilityRequests']>[number];
 
 export function useCollectiveCollaboration(input: {
   readonly snapshot: ClientSnapshot;
@@ -24,7 +34,7 @@ export function useCollectiveCollaboration(input: {
 }) {
   const running = useRef<Promise<void>>();
   const command = useCallback(
-    (path: string, payload: Record<string, unknown>, acceptedLabel: string) => {
+    (path: string, payload: Record<string, unknown>, acceptedLabel: string, onAccepted?: (result: unknown) => void) => {
       const { snapshot } = input;
       const namespace = collectiveClientNamespace(snapshot);
       if (!namespace || !snapshot.meta || !snapshot.collective) {
@@ -39,7 +49,7 @@ export function useCollectiveCollaboration(input: {
           delivery: { kind: 'requesting', label: '正在更新…' },
         }));
         try {
-          await input.request(path, {
+          const result = await input.request(path, {
             method: 'POST',
             body: JSON.stringify({
               serviceInstanceId: snapshot.meta?.serviceInstanceId,
@@ -57,6 +67,7 @@ export function useCollectiveCollaboration(input: {
             delivery: { kind: 'accepted', label: acceptedLabel },
             error: undefined,
           }));
+          onAccepted?.(result);
         } catch (error) {
           if (namespace !== input.currentNamespace.current) throw error;
           input.setSnapshot((current) => ({
@@ -76,14 +87,62 @@ export function useCollectiveCollaboration(input: {
     [input],
   );
   return {
-    proposeWork: (sourceEventId: string) =>
-      command('/api/collaboration/work/propose', { sourceEventId }, '工作提议已挂回原消息'),
-    commitWork: (work: CollectiveWorkProjection, participant?: CollectiveParticipant) =>
+    createProject: (channelId: string, title: string, purpose: string) =>
+      command('/api/collaboration/projects/create', { channelId, title, purpose }, '项目已建立，来源已留在频道'),
+    createProjectTask: (
+      roadmap: CollectiveRoadmapRecord,
+      channelId: string,
+      title: string,
+      intendedOutcome: string,
+      responsibility: ProjectTaskResponsibility,
+    ) =>
       command(
-        '/api/collaboration/work/commit',
+        '/api/collaboration/projects/tasks/create',
+        {
+          roadmapId: roadmap.roadmapId,
+          expectedRoadmapRevision: roadmap.revision,
+          channelId,
+          title,
+          intendedOutcome,
+          accountability: responsibility.accountability,
+          ...(responsibility.requestedAccountableHumanId
+            ? { requestedAccountableHumanId: responsibility.requestedAccountableHumanId }
+            : {}),
+        },
+        responsibility.requestedAccountableHumanId
+          ? '任务已建立，负责人邀请已送达'
+          : responsibility.accountability === 'self'
+            ? '任务已建立，由你负责'
+            : '任务已建立，等待负责人接下',
+      ),
+    requestWorkAccountability: (
+      roadmap: CollectiveRoadmapRecord,
+      work: CollectiveWorkProjection,
+      targetHumanId: string,
+    ) =>
+      command(
+        '/api/collaboration/work/accountability/request',
+        {
+          roadmapId: roadmap.roadmapId,
+          workId: work.workId,
+          expectedRevision: work.revision,
+          targetHumanId,
+        },
+        '负责人邀请已送达',
+      ),
+    respondWorkAccountability: (
+      work: CollectiveWorkProjection,
+      accountabilityRequest: WorkAccountabilityRequest,
+      decision: 'accept' | 'decline',
+      participant?: CollectiveParticipant,
+    ) =>
+      command(
+        '/api/collaboration/work/accountability/respond',
         {
           workId: work.workId,
           expectedRevision: work.revision,
+          accountabilityRequestId: accountabilityRequest.accountabilityRequestId,
+          decision,
           ...(participant
             ? {
                 assignment: {
@@ -94,7 +153,67 @@ export function useCollectiveCollaboration(input: {
               }
             : {}),
         },
-        participant ? `已交给 ${participant.displayName}，责任仍由你确认` : '这项工作已由你承诺',
+        decision === 'accept' ? '你已接下这项任务' : '已回复暂不负责',
+        (result) => {
+          const parsed = collectiveWorkProjectionSchema.safeParse(result);
+          const changed = parsed.success
+            ? parsed.data.accountabilityRequests?.find(
+                (candidate) => candidate.accountabilityRequestId === accountabilityRequest.accountabilityRequestId,
+              )
+            : undefined;
+          if (!parsed.success || !changed || changed.status === 'pending') return;
+          publishCollectiveAccountabilityChanged({
+            workId: parsed.data.workId,
+            workRevision: parsed.data.revision,
+            accountabilityRequestId: changed.accountabilityRequestId,
+            status: changed.status,
+          });
+        },
+      ),
+    decideProjectWorkSuggestion: (
+      roadmap: CollectiveRoadmapRecord,
+      work: CollectiveWorkProjection,
+      decision: 'accept' | 'ignore',
+      edits?: ProjectSuggestionEdits,
+    ) => {
+      const prepared = prepareProjectSuggestionDecision(
+        roadmap,
+        work,
+        input.snapshot.collaboration?.works,
+        decision,
+        edits,
+      );
+      if ('error' in prepared) return Promise.reject(prepared.error);
+      return command('/api/collaboration/projects/suggestions/decide', prepared.payload, prepared.acceptedLabel);
+    },
+    proposeWork: (sourceEventId: string) =>
+      command('/api/collaboration/work/propose', { sourceEventId }, '任务建议已挂回原消息'),
+    commitWork: (
+      work: CollectiveWorkProjection,
+      participant?: CollectiveParticipant,
+      accountability: 'self' | 'unassigned' = 'self',
+    ) =>
+      command(
+        '/api/collaboration/work/commit',
+        {
+          workId: work.workId,
+          expectedRevision: work.revision,
+          ...(accountability === 'unassigned' ? { accountability } : {}),
+          ...(participant
+            ? {
+                assignment: {
+                  connectionId: participant.connectionId,
+                  catId: participant.catId,
+                  participationRevision: participant.participationRevision,
+                },
+              }
+            : {}),
+        },
+        participant
+          ? `已交给 ${participant.displayName}，责任仍由你确认`
+          : accountability === 'unassigned'
+            ? '这项任务已接纳，等待负责人接下'
+            : '这项任务已由你负责',
       ),
     declineWork: (work: CollectiveWorkProjection) =>
       command(
@@ -112,9 +231,9 @@ export function useCollectiveCollaboration(input: {
               resultEventId: work.resultEventId,
               resultRevision: work.resultRevision ?? 1,
             },
-            '结果已确认，工作历史会继续保留',
+            '结果已确认，任务动态会继续保留',
           )
-        : Promise.reject(new Error('当前工作没有可确认的结果')),
+        : Promise.reject(new Error('当前任务没有可确认的结果')),
     requestWorkRevision: (work: CollectiveWorkProjection, feedback: string) =>
       work.resultEventId
         ? command(
@@ -126,14 +245,14 @@ export function useCollectiveCollaboration(input: {
               resultRevision: work.resultRevision ?? 1,
               feedback,
             },
-            '反馈已送达，猫会沿同一工作返回新版',
+            '反馈已送达，猫会沿同一任务返回新版',
           )
-        : Promise.reject(new Error('当前工作没有可退回的结果')),
+        : Promise.reject(new Error('当前任务没有可退回的结果')),
     completeWork: (work: CollectiveWorkProjection) =>
       command(
         '/api/collaboration/work/complete',
         { workId: work.workId, expectedRevision: work.revision },
-        '这项工作已完成，历史会继续保留',
+        '这项任务已完成，动态会继续保留',
       ),
     setWorkDependencies: (work: CollectiveWorkProjection, dependencyWorkIds: readonly string[]) =>
       command(
@@ -146,23 +265,23 @@ export function useCollectiveCollaboration(input: {
         '/api/collaboration/roadmaps',
         {
           sourceEventId: work.sourceEventId,
-          title: `${work.sourceLocation.channelId} 路线`,
-          purpose: `沿着“${work.title}”把承诺、依赖和结果留在同一条路线上。`,
+          title: `${work.sourceLocation.channelId} 项目`,
+          purpose: `围绕“${work.title}”把目标、任务、前置关系和结果留在同一个项目里。`,
           workIds: [work.workId],
         },
-        '路线已从这项工作长出来',
+        '项目已从这项任务建立',
       ),
     setRoadmapWorks: (roadmap: CollectiveRoadmapRecord, workIds: readonly string[]) =>
       command(
         '/api/collaboration/roadmaps/works',
         { roadmapId: roadmap.roadmapId, expectedRevision: roadmap.revision, workIds },
-        '路线中的工作已更新',
+        '项目中的任务已更新',
       ),
     setRoadmapStatus: (roadmap: CollectiveRoadmapRecord, status: 'active' | 'completed') =>
       command(
         '/api/collaboration/roadmaps/status',
         { roadmapId: roadmap.roadmapId, expectedRevision: roadmap.revision, status },
-        status === 'completed' ? '路线已完成，历史会继续保留' : '路线已重新打开',
+        status === 'completed' ? '项目已完成，动态会继续保留' : '项目已重新打开',
       ),
     createVote: (sourceEventId: string, draft: InformalVoteDraft) =>
       command('/api/collaboration/votes', { sourceEventId, ...draft }, '随手投票已挂回原消息'),
@@ -174,7 +293,7 @@ export function useCollectiveCollaboration(input: {
       command(
         '/api/collaboration/binding-votes',
         { roadmapId: roadmap.roadmapId, expectedRoadmapRevision: roadmap.revision, ...draft },
-        '投票人、规则与路线 authority 已冻结',
+        '投票人、规则与项目负责人权限已记录',
       ),
     castBindingVote: (vote: CollectiveBindingVoteProjection, choice: CollectiveBindingVoteChoice) =>
       command('/api/collaboration/binding-votes/cast', { bindingVoteId: vote.bindingVoteId, choice }, '你的票已更新'),
@@ -188,5 +307,36 @@ export function useCollectiveCollaboration(input: {
       ),
     setReaction: (eventId: string, emoji: CollectiveReactionEmoji, active: boolean) =>
       command('/api/collaboration/reactions/set', { eventId, emoji, active }, active ? '回应已留下' : '回应已收回'),
+  };
+}
+
+function prepareProjectSuggestionDecision(
+  roadmap: CollectiveRoadmapRecord,
+  work: CollectiveWorkProjection,
+  works: readonly CollectiveWorkProjection[] | undefined,
+  decision: 'accept' | 'ignore',
+  edits?: ProjectSuggestionEdits,
+): { payload: Record<string, unknown>; acceptedLabel: string } | { error: Error } {
+  const suggestion = work.projectSuggestion;
+  if (!suggestion || suggestion.roadmapId !== roadmap.roadmapId) {
+    return { error: new Error('当前任务不是这个项目的待判断建议') };
+  }
+  const target = suggestion.prerequisiteForWorkId
+    ? works?.find((candidate) => candidate.workId === suggestion.prerequisiteForWorkId)
+    : undefined;
+  if (suggestion.prerequisiteForWorkId && !target) {
+    return { error: new Error('建议所指的前置目标当前不可读') };
+  }
+  return {
+    payload: {
+      workId: work.workId,
+      expectedRevision: work.revision,
+      expectedRoadmapRevision: roadmap.revision,
+      ...(target ? { expectedTargetWorkRevision: target.revision } : {}),
+      decision,
+      ...(decision === 'accept' && edits ? edits : {}),
+      ...(decision === 'ignore' ? { reason: '暂不纳入当前项目' } : {}),
+    },
+    acceptedLabel: decision === 'accept' ? '建议已纳入项目，等待负责人接下' : '建议已忽略',
   };
 }

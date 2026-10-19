@@ -51,6 +51,8 @@ function carrierLease(sourceThreadId, targetThreadId) {
     }),
     evidenceRefs: ['callback:old-invocation:review-4058-original'],
     returnTransitions: [],
+    replacementTransitions: [],
+    orphanCarrierRecoveryTransitions: [],
     revision: 1,
     createdAt: 100,
     updatedAt: 100,
@@ -113,8 +115,14 @@ describe('direct action carrier restart recovery', () => {
   let unavailable;
   let registry;
   let stores;
+  let admissionResult;
+  let orphanRecoveryResult;
+  let orphanRecoveryCalls;
 
   beforeEach(async () => {
+    admissionResult = undefined;
+    orphanRecoveryResult = undefined;
+    orphanRecoveryCalls = 0;
     app = Fastify();
     messageStore = new MessageStore();
     const ledger = new InMemoryQueueLedgerStore();
@@ -158,10 +166,16 @@ describe('direct action carrier restart recovery', () => {
       },
       actionSuccessorAdmissionService: {
         async admit() {
-          return { admit: false, outcome: 'safe_wait', lease };
+          return admissionResult ?? { admit: false, outcome: 'safe_wait', lease };
         },
         async markUnavailable(input) {
           unavailable.push(input);
+        },
+      },
+      taskActionSuccessorOrphanRecovery: {
+        async recover() {
+          orphanRecoveryCalls++;
+          return orphanRecoveryResult ?? { outcome: 'refused', reason: 'not_test_orphan' };
         },
       },
     });
@@ -246,6 +260,84 @@ describe('direct action carrier restart recovery', () => {
     const [queued] = invocationQueue.list(target.id, 'user-1');
     assert.equal(queued.payload.messageId, replacement.message.id);
     assert.deepEqual(queued.execution.actionSuccessorFence, fence);
+  });
+
+  test('returns the typed receipt when Task recovery atomically restores the orphan', async () => {
+    const recovered = {
+      ...lease,
+      generation: 2,
+      revision: lease.revision + 1,
+      dispatchId: 'cross-post:review-4058-orphan',
+      orphanCarrierRecoveryTransitions: [
+        {
+          kind: 'orphan_carrier_recovery',
+          fromGeneration: 1,
+          toGeneration: 2,
+          taskId: 'task-4058',
+          taskRevision: 2,
+          sourceMessageId: 'message-orphan',
+          predecessorCatId: 'opus',
+          predecessorThreadId: source.id,
+          holderCatId: 'codex',
+          holderThreadId: target.id,
+          fromDispatchId: lease.dispatchId,
+          toDispatchId: 'cross-post:review-4058-orphan',
+          evidenceRef: 'callback:new:review-4058-orphan',
+          at: 200,
+        },
+      ],
+    };
+    orphanRecoveryResult = { outcome: 'recovered', lease: recovered, messageId: 'message-orphan' };
+
+    const response = await post('review-4058-orphan');
+
+    assert.equal(response.statusCode, 200, response.body);
+    assert.deepEqual(response.json().actionLease, {
+      leaseId: lease.leaseId,
+      generation: 2,
+      outcome: 'orphan_carrier_recovery',
+    });
+    assert.equal(response.json().messageId, 'message-orphan');
+    assert.equal(orphanRecoveryCalls, 1);
+  });
+
+  test('same-client callback replay returns the existing orphan receipt and never appends a second carrier', async () => {
+    lease = {
+      ...lease,
+      generation: 2,
+      revision: lease.revision + 1,
+      dispatchId: 'cross-post:review-4058-orphan-replay',
+      orphanCarrierRecoveryTransitions: [],
+    };
+    const oldSource = await appendCarrier(messageStore, invocationQueue, lease, 'live');
+    lease.orphanCarrierRecoveryTransitions = [
+      {
+        kind: 'orphan_carrier_recovery',
+        fromGeneration: 1,
+        toGeneration: 2,
+        taskId: 'task-4058',
+        taskRevision: 2,
+        sourceMessageId: oldSource.id,
+        predecessorCatId: 'opus',
+        predecessorThreadId: source.id,
+        holderCatId: 'codex',
+        holderThreadId: target.id,
+        fromDispatchId: 'cross-post:review-4058-original',
+        toDispatchId: lease.dispatchId,
+        evidenceRef: 'callback:new:review-4058-orphan-replay',
+        at: 200,
+      },
+    ];
+    admissionResult = { admit: false, outcome: 'replayed', lease };
+    orphanRecoveryResult = { outcome: 'replayed', lease, messageId: oldSource.id };
+
+    const response = await post('review-4058-orphan-replay');
+
+    assert.equal(response.statusCode, 200, response.body);
+    assert.equal(response.json().status, 'orphan_carrier_recovered');
+    assert.equal(response.json().messageId, oldSource.id);
+    assert.equal(orphanRecoveryCalls, 1, 'live replay must repair process-local Queue adoption');
+    assert.equal(invocationQueue.list(target.id, 'user-1').length, 1);
   });
 
   describe('a replacement carrier whose delivery fails is restored by retrying the same clientMessageId', () => {

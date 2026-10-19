@@ -1,3 +1,5 @@
+@import "@cat-cafe/ui/styles.css";
+
 /*
  * F322 Stage 1 — Café 1.6 shell role tokens.
  *
@@ -14,53 +16,6 @@
  * Dark follows the DESIGN.md "Dark mode" rule: map by light/dark relationship, not by token name
  * (外框最暗 → 工作面 → 纸面 → 选中最亮).
  */
-[data-shell="v2"],
-.member-editor-embedded {
-  --shell-paper: var(--cafe-surface-canvas);
-  --shell-work: var(--cafe-surface-elevated);
-  --shell-frame: var(--cafe-surface);
-  --shell-selected: var(--cafe-surface-sunken);
-  --shell-hairline: var(--cafe-border-subtle);
-  --shell-hairline-strong: var(--cafe-border);
-  --shell-ink: var(--cafe-text);
-  /* Three text levels that all stay ≥4.5:1 on the frame / work / paper surfaces in light, dark and custom themes.
-   * The runtime --cafe-text-muted (neutral-500) measured 4.05:1 on the frame in light, so small secondary text
-   * (times, counts, notes) steps one neutral darker. Measured 2026-09-30 (see F322 Stage 1 evidence). */
-  --shell-body: var(--neutral-700);
-  --shell-muted: var(--neutral-600);
-  --shell-primary: var(--cafe-accent);
-  --shell-primary-on: var(--cafe-accent-foreground);
-  --shell-primary-text: var(--accent-700);
-  --shell-primary-soft: color-mix(in srgb, var(--cafe-accent) 12%, var(--shell-paper) 88%);
-  --shell-critical: var(--semantic-warning);
-  /* Danger for state marks (the rail's "!" badge). Light and dark come from --semantic-critical's own theme values. */
-  --shell-danger: var(--semantic-critical);
-  --shell-tip-bg: var(--cafe-text);
-  --shell-tip-fg: var(--cafe-surface-canvas);
-  --shell-tip-shadow: 0 4px 10px rgb(20 20 19 / 0.1);
-}
-
-/*
- * F322 B segment 1 (human message). People are cocoa (DESIGN.md「对话」: primary #6B5443, light #E9DCCF, OKLCH hue 58 /
- * chroma 0.04) until the config says otherwise: CoCreatorHueInjector replaces these two numbers with the configured colour's.
- * Every --color-cocreator-* role is still derived from them in cat-persona-tokens.css, with the Tuner's lightness steps and
- * the light / dark split on top, exactly as for the cats. Scoped to the new presentation: the classic UI keeps its own.
- */
-html[data-shell="v2"] {
-  --cocreator-hue: 58;
-  --cocreator-chroma: 0.04;
-}
-
-[data-theme="dark"][data-shell="v2"],
-[data-theme="dark"] .member-editor-embedded {
-  --shell-frame: var(--cafe-surface-elevated);
-  --shell-work: var(--cafe-surface-canvas);
-  --shell-paper: var(--cafe-surface);
-  --shell-selected: var(--cafe-surface-sunken);
-  --shell-primary-text: var(--accent-700);
-  --shell-tip-shadow: 0 0 0 1px rgb(255 255 255 / 0.1) inset, 0 4px 10px rgb(0 0 0 / 0.35);
-}
-
 /* Chat chrome responds to its own pane, including narrow desktop split views.
  * Keep navigation and work actions intact instead of overflowing the shared
  * scroll host, which lets keyboard focus pan the entire conversation sideways. */
@@ -219,4 +174,19 @@ html[data-shell="v2"] {
 
 [data-shell="v2"] [data-testid="chat-input-composer-row"] textarea:focus-visible {
   outline: none;
+}
+
+/* The Client sidebar uses its own viewport. Match that iframe width through the existing Host container. */
+.collective-private-page {
+  width: calc(100% - 300px);
+}
+@container collective-host (max-width: 1540px) {
+  .collective-private-page {
+    width: calc(100% - 280px);
+  }
+}
+@container collective-host (max-width: 820px) {
+  .collective-private-page {
+    width: 100%;
+  }
 }

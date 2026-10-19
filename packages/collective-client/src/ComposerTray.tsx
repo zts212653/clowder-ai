@@ -36,7 +36,7 @@ export function ComposerTray({
           希望伙伴回应
         </label>
       )}
-      {entrust && <small>由猫的主人安排私人工作，结果回到这里。</small>}
+      {entrust && <small>由猫的主人安排私人任务，结果回到这里。</small>}
       {responseRequested && <small>只通知自愿值守回应请求的伙伴；普通消息仍会安静送达。</small>}
     </div>
   );

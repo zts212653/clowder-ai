@@ -45,7 +45,6 @@ describe('F173 AC-B4 — thread switch ghost-bubble fixture', () => {
       targetCats: [],
       catStatuses: {},
       catInvocations: {},
-      currentGame: null,
       threadStates: {},
       viewMode: 'single',
       splitPaneThreadIds: [],

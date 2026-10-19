@@ -1,9 +1,9 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import { useMessageNavigation } from '@/components/thread-chat/MessageNavigationContext';
 import type { ChatMessage } from '@/stores/chat-types';
 import { apiFetch } from '@/utils/api-client';
-import { focusLineageMessage } from '@/utils/focusLineageMessage';
 import { kickTeleportResolve, setPendingTeleport } from '@/utils/teleport';
 
 interface GenerationMessages {
@@ -23,6 +23,7 @@ export function GenerationMessagesNotice({
   timelineMessages: readonly ChatMessage[];
 }) {
   const lifecycle = response.lifecycle?.kind === 'response' ? response.lifecycle : undefined;
+  const navigateToMessage = useMessageNavigation();
   const host = useRef<HTMLDivElement>(null);
   const [visible, setVisible] = useState(typeof IntersectionObserver === 'undefined');
   const [loaded, setLoaded] = useState<{ key: string; value: GenerationMessages } | null>(null);
@@ -79,7 +80,7 @@ export function GenerationMessagesNotice({
   const jump = () => {
     if (!result?.messageIds.length) return;
     const messageId = result.messageIds[nextIndex % result.messageIds.length]!;
-    if (!focusLineageMessage(messageId)) {
+    if (!navigateToMessage(messageId)) {
       setPendingTeleport({ threadId, messageId });
       kickTeleportResolve();
     }

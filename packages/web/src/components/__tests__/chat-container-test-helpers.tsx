@@ -30,8 +30,6 @@ type StoreState = {
   clearCatStatuses: ReturnType<typeof vi.fn>;
   setCurrentThread: ReturnType<typeof vi.fn>;
   updateThreadTitle: ReturnType<typeof vi.fn>;
-  setCurrentGame: ReturnType<typeof vi.fn>;
-  currentGame: null;
   viewMode: 'single';
   setViewMode: ReturnType<typeof vi.fn>;
   setCurrentProject: ReturnType<typeof vi.fn>;
@@ -105,8 +103,6 @@ const makeStoreState = (): StoreState => ({
   clearCatStatuses: vi.fn(),
   setCurrentThread: vi.fn(),
   updateThreadTitle: vi.fn(),
-  setCurrentGame: vi.fn(),
-  currentGame: null,
   viewMode: 'single',
   setViewMode: vi.fn(),
   setCurrentProject: vi.fn(),
@@ -158,31 +154,6 @@ vi.mock('@/stores/chatStore', () => {
     return selector ? selector(state) : state;
   };
   return { useChatStore: Object.assign(hook, { getState: () => storeState }) };
-});
-
-vi.mock('@/stores/gameStore', () => {
-  const gameState = {
-    gameView: null,
-    isGameActive: false,
-    isNight: false,
-    selectedTarget: null,
-    godScopeFilter: null,
-    myRole: null,
-    myRoleIcon: null,
-    myActionLabel: null,
-    myActionHint: null,
-    isGodView: false,
-    isDetective: false,
-    detectiveBoundName: null,
-    godSeats: [],
-    godNightSteps: [],
-    hasTargetedAction: false,
-    altActionName: null,
-    overlayMinimized: false,
-  };
-  const hook = (selector?: (s: typeof gameState) => unknown) => (selector ? selector(gameState) : gameState);
-  hook.getState = () => ({ restoreOverlay: vi.fn() });
-  return { useGameStore: hook };
 });
 
 vi.mock('@/utils/api-client', () => ({
@@ -296,7 +267,6 @@ vi.mock('@/components/ProjectSetupCard', () => ({
   ProjectSetupCard: ({ onComplete }: { onComplete: () => void }) =>
     React.createElement('button', { 'data-testid': 'project-setup-complete', onClick: onComplete }, 'complete setup'),
 }));
-vi.mock('@/components/game/GameOverlayConnector', () => ({ GameOverlayConnector: () => null }));
 vi.mock('@/components/icons/PawIcon', () => ({ PawIcon: () => null }));
 vi.mock('@/components/icons/BootcampIcon', () => ({ BootcampIcon: () => null }));
 vi.mock('@/components/workspace/ResizeHandle', () => ({ ResizeHandle: () => null }));

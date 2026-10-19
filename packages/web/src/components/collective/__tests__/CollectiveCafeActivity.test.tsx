@@ -1,9 +1,10 @@
-import type { CollectiveClientContext } from '@cat-cafe/shared';
+import type { ActiveExecutionProjection, CollectiveClientContext } from '@cat-cafe/shared';
 import type { ComponentProps } from 'react';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { CollectiveCafeHost } from '../CollectiveCafeHost';
+import { executionForPrivateRequest } from '../CollectivePrivateSlots';
 import type { ParticipationView } from '../use-collective-participation';
 
 let view: ParticipationView | undefined;
@@ -104,4 +105,125 @@ it.each([
   );
 
   expect(container.textContent).toContain(copy);
+});
+
+it('hosts the private roster at a current public slot and fences stale and foreign placements', async () => {
+  const iframe = document.createElement('iframe');
+  container.appendChild(iframe);
+  const iframeRef = { current: iframe };
+  const props = {
+    ...baseProps,
+    iframeRef,
+    connection: {
+      ...baseProps.connection,
+      serviceUrl: 'https://collective.example',
+      serviceInstanceId: context.serviceInstanceId,
+      collectiveId: context.collectiveId,
+      authorizedHumanId: context.humanId,
+    },
+  };
+  const placement = {
+    type: 'collective:client-ui-placement',
+    bridgeId: context.bridgeId,
+    contextId: context.contextId,
+    contextRevision: 1,
+    humanId: context.humanId,
+    serviceInstanceId: context.serviceInstanceId,
+    collectiveId: context.collectiveId,
+    channelId: context.channelId,
+    slots: [{ kind: 'roster', x: 300, y: 80, width: 600, height: 360 }],
+  };
+  const send = async (
+    data: unknown = placement,
+    origin = 'https://collective.example',
+    source: MessageEventSource | null = iframe.contentWindow,
+  ) => {
+    await act(async () => window.dispatchEvent(new MessageEvent('message', { data, origin, source })));
+  };
+  await act(async () => root.render(<CollectiveCafeHost {...props} />));
+  await send(placement, 'https://foreign.example');
+  await send(placement, 'https://collective.example', window);
+  await send({ ...placement, channelId: 'another-channel' });
+  await send({ ...placement, humanId: 'human_another' });
+  await send({ ...placement, slots: [{ ...placement.slots[0], width: -1 }] });
+  await send({ ...placement, slots: [{ ...placement.slots[0], threadId: 'private-thread' }] });
+  expect(container.querySelector('[aria-label="我的猫 · 仅自己可见"]')).toBeNull();
+  await send();
+  expect(container.querySelector('[aria-label="我的猫 · 仅自己可见"]')?.textContent).toContain('小星星');
+  expect(container.querySelector('[aria-label="我的猫分区"]')).toBeNull();
+  await act(async () => root.render(<CollectiveCafeHost {...props} context={{ ...context, revision: 2 }} />));
+  expect(container.querySelector('[aria-label="我的猫 · 仅自己可见"]')).toBeNull();
+  await send();
+  expect(container.querySelector('[aria-label="我的猫 · 仅自己可见"]')).toBeNull();
+  iframe.remove();
+});
+
+it('routes the empty listening roster to the Client member page', async () => {
+  if (!view) throw new Error('Expected loaded participation');
+  view.channelRoutes.general.participants = {};
+  const onOpenMembers = vi.fn();
+  await act(async () =>
+    root.render(
+      <CollectiveCafeHost
+        {...baseProps}
+        onOpenMembers={onOpenMembers}
+        context={{ ...context, openCafe: true, cafeSection: 'channel' }}
+      />,
+    ),
+  );
+  const select = [...container.querySelectorAll('button')].find((button) => button.textContent === '选择猫…');
+  expect(select).toBeDefined();
+  await act(async () => select?.click());
+  expect(onOpenMembers).toHaveBeenCalledOnce();
+  expect(container.querySelector('section[aria-label="我的猫"]')).toBeNull();
+});
+
+it('never attaches another invocation in the same private thread to this request cancellation', () => {
+  const request: ParticipationView['requests'][number] = {
+    event: {
+      ...context,
+      eventId: 'evt_request',
+      clientEventId: 'request',
+      sequence: 1,
+      actor: { kind: 'human', humanId: context.humanId, displayName: 'You' },
+      target: { kind: 'channel', channelId: 'general' },
+      location: { channelId: 'general' },
+      recipient: {
+        kind: 'agent',
+        humanId: context.humanId,
+        connectionId: 'con_12345678',
+        agentId: 'codex-astra',
+        participationRevision: 1,
+      },
+      body: 'exact source request',
+      acceptedAt: '2026-10-18T02:00:00.000Z',
+    },
+    delivery: 'routed',
+    privateThread: { id: 'thread_private' },
+    execution: { stage: 'started', invocationId: 'child_exact' },
+  };
+  const execution: ActiveExecutionProjection = {
+    kind: 'live_invocation',
+    executionId: 'parent_exact',
+    turnInvocationId: 'another_child',
+    threadId: 'thread_private',
+    threadTitle: null,
+    catId: 'codex-astra',
+    startedAt: 1,
+    cancelability: {
+      state: 'cancelable',
+      target: {
+        kind: 'live_invocation',
+        threadId: 'thread_private',
+        catId: 'codex-astra',
+        executionId: 'parent_exact',
+      },
+    },
+  };
+  expect(executionForPrivateRequest(request, [execution])).toBeUndefined();
+  const exact = { ...execution, turnInvocationId: 'child_exact' };
+  expect(executionForPrivateRequest(request, [exact])).toBe(exact);
+  expect(executionForPrivateRequest({ ...request, execution: { stage: 'started' } }, [exact])).toBeUndefined();
+  expect(executionForPrivateRequest({ ...request, privateThread: { id: 'another-thread' } }, [exact])).toBeUndefined();
+  expect(executionForPrivateRequest(request, [{ ...exact, catId: 'another-cat' }])).toBeUndefined();
 });

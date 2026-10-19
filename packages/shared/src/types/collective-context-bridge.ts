@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import {
+  collectiveConnectionCoordinatesSchema,
   collectiveConnectionIdSchema,
   collectiveCoordinatesSchema,
   collectiveEventIdSchema,
@@ -9,6 +10,10 @@ import {
   collectiveServiceInstanceIdSchema,
 } from './collective.js';
 import { collectiveAcceptedWorkResultSchema, collectiveWorkIdSchema } from './collective-collaboration.js';
+import {
+  collectiveRoadmapIdSchema,
+  collectiveWorkAccountabilityRequestIdSchema,
+} from './collective-collaboration-identifiers.js';
 
 const sessionId = z.string().min(8).max(120);
 export const collectiveCafeSectionSchema = z.enum(['cats', 'channel', 'calendar', 'permissions', 'connection']);
@@ -58,7 +63,7 @@ export const collectiveHostParticipationReadySchema = collectiveCoordinatesSchem
   .strict();
 export const collectiveHostContextActionSchema = z
   .object({
-    type: z.enum(['collective:host-context-close', 'collective:host-context-open']),
+    type: z.enum(['collective:host-context-close', 'collective:host-context-open', 'collective:host-member-list-open']),
     bridgeId: sessionId,
     contextId: sessionId,
     revision: z.number().int().positive(),
@@ -94,6 +99,32 @@ export const collectiveHostWorkFocusSchema = z
     channelId: collectiveLocationSchema.shape.channelId,
     resultEventId: collectiveEventIdSchema,
     resultRevision: z.number().int().positive(),
+  })
+  .strict();
+export const collectiveHostProjectWorkFocusSchema = z
+  .object({
+    type: z.literal('collective:host-focus-project-work'),
+    bridgeId: sessionId,
+    contextId: sessionId,
+    contextRevision: z.number().int().positive(),
+    workId: collectiveWorkIdSchema,
+    workRevision: z.number().int().positive(),
+    channelId: collectiveLocationSchema.shape.channelId,
+    roadmapId: collectiveRoadmapIdSchema,
+    accountabilityRequestId: collectiveWorkAccountabilityRequestIdSchema,
+  })
+  .strict();
+export const collectiveClientAccountabilityChangedSchema = collectiveConnectionCoordinatesSchema
+  .extend({
+    type: z.literal('collective:client-accountability-changed'),
+    bridgeId: sessionId,
+    contextId: sessionId,
+    contextRevision: z.number().int().positive(),
+    humanId: collectiveHumanIdSchema,
+    workId: collectiveWorkIdSchema,
+    workRevision: z.number().int().positive(),
+    accountabilityRequestId: collectiveWorkAccountabilityRequestIdSchema,
+    status: z.enum(['accepted', 'declined']),
   })
   .strict();
 
@@ -160,6 +191,8 @@ export type CollectiveHostContextInit = z.infer<typeof collectiveHostContextInit
 export type CollectiveHostParticipationReady = z.infer<typeof collectiveHostParticipationReadySchema>;
 export type CollectiveClientWorkResultAccepted = z.infer<typeof collectiveClientWorkResultAcceptedSchema>;
 export type CollectiveHostWorkFocus = z.infer<typeof collectiveHostWorkFocusSchema>;
+export type CollectiveHostProjectWorkFocus = z.infer<typeof collectiveHostProjectWorkFocusSchema>;
+export type CollectiveClientAccountabilityChanged = z.infer<typeof collectiveClientAccountabilityChangedSchema>;
 export type CollectiveClientWorldDirectory = z.infer<typeof collectiveClientWorldDirectorySchema>;
 export type CollectiveHostWorldDirectoryInit = z.infer<typeof collectiveHostWorldDirectoryInitSchema>;
 export type CollectiveHostWorldSelection = z.infer<typeof collectiveHostWorldSelectionSchema>;

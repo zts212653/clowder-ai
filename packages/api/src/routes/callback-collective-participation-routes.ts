@@ -41,6 +41,15 @@ const proposeWorkSchema = z
     intendedOutcome: z.string().trim().min(1).max(32_000).optional(),
   })
   .strict();
+const suggestProjectWorkSchema = z
+  .object({
+    contextRef: z.string().min(1).max(256),
+    projectRef: z.string().min(1).max(2000),
+    prerequisiteForWorkRef: z.string().min(1).max(2000).optional(),
+    title: z.string().trim().min(1).max(200),
+    intendedOutcome: z.string().trim().min(1).max(32_000),
+  })
+  .strict();
 const acceptWorkSchema = z
   .object({
     contextRef: z.string().min(1).max(256),
@@ -91,6 +100,12 @@ export async function registerCollectiveParticipationCallbacks(
         ...(input.title ? { title: input.title } : {}),
         ...(input.intendedOutcome ? { intendedOutcome: input.intendedOutcome } : {}),
       }),
+    );
+    registerCollectiveCallback(
+      scope,
+      'suggest-project-work',
+      suggestProjectWorkSchema,
+      (auth, { contextRef, ...input }) => options.context.suggestProjectWork(auth, contextRef, input),
     );
     registerCollectiveCallback(scope, 'reply', replySchema, (auth, input) =>
       options.context.reply(auth, input.returnRef, input.replyOperationRef, input.body),

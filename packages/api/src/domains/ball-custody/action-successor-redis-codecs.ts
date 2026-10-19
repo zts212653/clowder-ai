@@ -3,11 +3,15 @@ import { createActionCompletionCandidateSnapshot } from './action-successor-comp
 import type { ActionSuccessorLease } from './action-successor-state-machine.js';
 
 function normalizeTransitionHistory(
-  lease: Pick<ActionSuccessorLease, 'returnTransitions' | 'replacementTransitions'>,
-): Pick<ActionSuccessorLease, 'returnTransitions' | 'replacementTransitions'> {
+  lease: Pick<
+    ActionSuccessorLease,
+    'returnTransitions' | 'replacementTransitions' | 'orphanCarrierRecoveryTransitions'
+  >,
+): Pick<ActionSuccessorLease, 'returnTransitions' | 'replacementTransitions' | 'orphanCarrierRecoveryTransitions'> {
   return {
     returnTransitions: lease.returnTransitions ?? [],
     replacementTransitions: lease.replacementTransitions ?? [],
+    orphanCarrierRecoveryTransitions: lease.orphanCarrierRecoveryTransitions ?? [],
   };
 }
 

@@ -8,6 +8,7 @@ const data = vi.hoisted(() => ({
   view: {
     result: { kind: 'loading' } as unknown,
     staleRead: null as unknown,
+    badgeResult: undefined as MailboxRead | undefined,
     refetch: vi.fn(),
     nextPage: vi.fn(),
     previousPage: vi.fn(),
@@ -128,7 +129,9 @@ describe('F322 待办 (the mailbox) on the unified read', () => {
   };
 
   beforeEach(() => {
+    data.view.badgeResult = undefined;
     (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1024 });
     vi.clearAllMocks();
     data.pathname = '/thread/current';
     show({ kind: 'loading' });
@@ -324,6 +327,15 @@ describe('F322 待办 (the mailbox) on the unified read', () => {
       }
     });
 
+    it('retains confirmed rail and panel counts during background loading without authorizing stale actions', () => {
+      data.view.badgeResult = ok({ totalCount: 3 });
+      show({ kind: 'loading' });
+      render();
+      expect(host.querySelector('[data-testid="rail-badge-count"]')?.textContent).toBe('3');
+      open();
+      expect(panel()?.querySelector('[data-testid="mailbox-tab-count"]')?.textContent).toBe('3');
+    });
+
     it('never prints a digit while the count is unconfirmed, loading or failed', () => {
       for (const result of [
         { kind: 'loading' } as MailboxRead,
@@ -339,6 +351,15 @@ describe('F322 待办 (the mailbox) on the unified read', () => {
   });
 
   describe('panel', () => {
+    it('covers the mobile viewport instead of docking behind an expanded navigation drawer', () => {
+      Object.defineProperty(window, 'innerWidth', { configurable: true, value: 390 });
+      show(ok({ items: [], totalCount: 0 }));
+      render();
+      open();
+      expect(panel()?.style.left).toBe('0px');
+      expect(panel()?.style.visibility).toBe('visible');
+    });
+
     it('focus enters the first row; Escape closes the panel and returns to the rail button', () => {
       show(ok({ items: [approvalItem('a')], totalCount: 1 }));
       render();

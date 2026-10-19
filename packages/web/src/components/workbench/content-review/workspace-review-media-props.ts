@@ -10,6 +10,10 @@ import type { PendingChatMark } from '@/components/content-review/ReviewPendingC
 import type { ContentReviewAnnotation, ContentReviewVisualMark } from './content-review-contract';
 import type { CanvasFocusRequest, DiscussionFocusRequest } from './workspace-review-media-focus';
 export interface WorkspaceReviewMediaProps {
+  readonly originalUrl?: string;
+  readonly filename?: string;
+  readonly mime?: string;
+  readonly byteLength?: number;
   download?: { src: string | null; filename: string };
   readonly sourceError?: string | null;
   readonly draftKey?: string;
@@ -18,6 +22,11 @@ export interface WorkspaceReviewMediaProps {
   /** An unsaved comment text is present (e.g. restored on return), so its composer should be showing. */
   readonly restoreComment?: boolean;
   readonly composer: ReactNode;
+  readonly chatPlaceEditor?: {
+    readonly anchor: ArtifactReviewAnchor;
+    readonly content: ReactNode;
+    readonly cancel: () => void;
+  };
   readonly imageChatPrimary?: boolean;
   readonly wholeWorkAction?: ReactNode;
   readonly onOpenDiscussion: () => void;

@@ -67,7 +67,7 @@ export function CollectiveHome({
         {projection.partial && (
           <output className="collective-home-notice">部分内容暂不可读，只显示当前有权打开的公共记录。</output>
         )}
-        <HomeSection title="最近动态" state={activityState} empty="这里还没有公共工作动态。">
+        <HomeSection title="最近动态" state={activityState} empty="这里还没有公共任务动态。">
           {projection.activities.map((activity) => (
             <button
               key={activity.id}

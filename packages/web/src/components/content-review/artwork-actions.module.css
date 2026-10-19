@@ -1,0 +1,204 @@
+.header {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 10px;
+  min-height: 44px;
+  color: var(--overlay-fg);
+}
+.title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+  font-size: 14px;
+}
+.version {
+  flex: none;
+  font-size: 12px;
+}
+.headerActions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+  flex: none;
+}
+.header > button,
+.headerActions > button,
+.headerActions > a,
+.trigger {
+  border-radius: 8px;
+  background: var(--console-overlay-control);
+  color: var(--overlay-fg);
+  padding: 7px 10px;
+  font-size: 12px;
+  white-space: nowrap;
+}
+.menu {
+  position: fixed;
+  z-index: 90;
+  width: 300px;
+  max-width: calc(100vw - 16px);
+  max-height: calc(100dvh - 24px);
+  overflow: auto;
+  padding: 6px;
+  border: 1px solid var(--cafe-border);
+  border-radius: 12px;
+  background: var(--cafe-surface);
+  color: var(--cafe-text);
+  box-shadow: 0 12px 48px #0005;
+}
+.menu button,
+.menu a {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 12px;
+  text-align: left;
+  border-radius: 6px;
+  padding: 9px 10px;
+  font-size: 13px;
+  color: inherit;
+  background: transparent;
+  white-space: normal;
+}
+.menu button:hover,
+.menu a:hover {
+  background: var(--cafe-surface-elevated);
+}
+.menu button:focus-visible,
+.menu a:focus-visible {
+  background: var(--cafe-surface-elevated);
+  outline: 2px solid var(--cafe-accent);
+  outline-offset: -2px;
+}
+.menu svg {
+  width: 16px;
+  height: 16px;
+  flex: none;
+}
+.wholeWork button {
+  border: 0;
+  font-weight: 400;
+}
+.menu button:disabled {
+  opacity: 0.45;
+}
+.menu small {
+  margin-left: auto;
+  color: var(--cafe-text-muted);
+  white-space: nowrap;
+}
+.group {
+  border-bottom: 1px solid var(--cafe-border);
+  padding-bottom: 5px;
+  margin-bottom: 5px;
+}
+.info {
+  padding: 8px 10px;
+  font-size: 12px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+.info strong {
+  display: block;
+  font-size: 13px;
+}
+.info .path {
+  background: var(--cafe-surface-elevated);
+  padding: 6px;
+  font-family: monospace;
+  margin-top: 6px;
+  font-size: 11px;
+}
+.notice {
+  position: absolute;
+  top: 52px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 95;
+  border-radius: 8px;
+  padding: 8px 14px;
+  background: var(--cafe-surface);
+  color: var(--cafe-text);
+  box-shadow: 0 4px 20px #0004;
+  font-size: 13px;
+}
+@media (max-width: 600px) {
+  .header {
+    gap: 4px;
+  }
+  .title {
+    font-size: 12px;
+  }
+  .headerActions {
+    gap: 4px;
+  }
+  .header > button,
+  .headerActions > button,
+  .headerActions > a {
+    padding: 6px;
+  }
+  .version {
+    max-width: none;
+    font-size: 11px;
+  }
+  .version select {
+    padding-right: 12px;
+    font-size: inherit;
+  }
+  .workMode,
+  .headerActions > .download {
+    display: none;
+  }
+}
+
+.workHeader {
+  container: artwork-work-header / inline-size;
+}
+.workHeaderRow {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+}
+.workVersion select {
+  max-width: 100%;
+  text-overflow: ellipsis;
+}
+.downloadIcon {
+  display: none;
+}
+@container artwork-work-header (max-width: 28rem) {
+  .workHeaderRow {
+    gap: 4px;
+  }
+  .workTitle {
+    min-width: 3rem;
+    font-size: 12px;
+  }
+  .workVersion {
+    max-width: 6rem;
+  }
+  .download {
+    padding: 6px;
+  }
+  .downloadIcon {
+    display: inline-flex;
+  }
+  .downloadLabel {
+    display: none;
+  }
+}
+
+.menu .narrowMenuAction {
+  display: none;
+}
+@media (max-width: 600px) {
+  .menu .narrowMenuAction {
+    display: flex;
+  }
+}

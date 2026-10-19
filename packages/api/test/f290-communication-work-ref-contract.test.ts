@@ -7,7 +7,10 @@ import { collectiveContinueWorkInputSchema } from '../../mcp-server/src/tools/co
 import { InvocationRegistry } from '../src/domains/cats/services/agents/invocation/InvocationRegistry.js';
 import { collectiveContextError } from '../src/domains/plugin/builtin-runtime/collective-context-refs.js';
 import { CollectiveCurrentContext } from '../src/domains/plugin/builtin-runtime/collective-current-context.js';
-import { currentWorkSourceContext } from '../src/domains/plugin/builtin-runtime/collective-work/collective-work-source-context.js';
+import {
+  currentWorkSourceContext,
+  suggestProjectWorkFromSource,
+} from '../src/domains/plugin/builtin-runtime/collective-work/collective-work-source-context.js';
 import { registerCollectiveParticipationCallbacks } from '../src/routes/callback-collective-participation-routes.js';
 
 test('actual source-context signed refs survive MCP and authenticated HTTP after multi-digit Work revisions', async () => {
@@ -48,6 +51,14 @@ test('actual source-context signed refs survive MCP and authenticated HTTP after
     resultEventId: `evt_${'b'.repeat(32)}`,
     lifecycle: 'result_ready',
     status: 'result_ready',
+    projectContext: {
+      projects: [],
+      unreadableProjectCount: 0,
+      projectsHasMore: false,
+      dependencies: [],
+      unreadableDependencyCount: 0,
+      dependenciesHasMore: false,
+    },
   };
   const producer = await currentWorkSourceContext(
     {
@@ -113,6 +124,116 @@ test('actual source-context signed refs survive MCP and authenticated HTTP after
   } finally {
     await app.close();
   }
+});
+
+test('signed Project refs create only a pending candidate and fail closed after Project or target drift', async () => {
+  const source: CollectiveSourceIdentity = {
+    serviceInstanceId: 'svc_200000000000',
+    collectiveId: 'col_200000000000',
+    connectionId: 'con_200000000000',
+    eventId: 'evt_200000000000',
+    location: { channelId: 'general' },
+    catId: 'codex-sol',
+    participationRevision: 3,
+    actor: { kind: 'human', humanId: 'human_guest00001', displayName: 'Guest' },
+  };
+  const registry = new InvocationRegistry();
+  const credentials = await registry.create(
+    'owner',
+    createCatId(source.catId),
+    'channel',
+    undefined,
+    undefined,
+    { mode: 'collective_participation' },
+    'project-source',
+    'unknown',
+    undefined,
+    { kind: 'collective-participation', originTriggerMessageId: 'project-source', source },
+  );
+  const verified = await registry.verify(credentials.invocationId, credentials.callbackToken);
+  assert.ok(verified.ok);
+  const project = {
+    roadmapId: `roadmap_${'p'.repeat(12)}`,
+    sourceEventId: `evt_${'r'.repeat(12)}`,
+    sourceLocation: { channelId: 'general' },
+    title: '正式交付',
+    purpose: '把真实结果接回原项目。',
+    status: 'active' as const,
+    revision: 7,
+  };
+  let matter: CollectiveWorkMatter = {
+    workId: `work_${'c'.repeat(32)}`,
+    sourceEventId: source.eventId,
+    sourceLocation: source.location,
+    title: '现有任务',
+    intendedOutcomePreview: '交付现有任务',
+    revision: 14,
+    lifecycle: 'committed',
+    status: 'ready',
+    projectContext: {
+      projects: [project],
+      unreadableProjectCount: 0,
+      projectsHasMore: false,
+      dependencies: [],
+      unreadableDependencyCount: 0,
+      dependenciesHasMore: false,
+    },
+  };
+  let proposal: Record<string, unknown> | undefined;
+  const connector = {
+    async readWorkSourceContext() {
+      return { sourceEventId: source.eventId, matters: [matter], relatedWorkIds: [matter.workId], hasMore: false };
+    },
+    async proposeWork(_source: unknown, _requestId: string, _agent: unknown, input: Record<string, unknown>) {
+      proposal = input;
+      return {
+        workId: `work_${'d'.repeat(32)}`,
+        revision: 1,
+        lifecycle: 'proposed',
+        projectSuggestion: input.projectSuggestion,
+      };
+    },
+  };
+  const binding = { source, sourceRef: 'message:project-source', displayName: 'Sol' };
+  const projected = await currentWorkSourceContext(connector, verified.record, binding);
+  const projectedMatter = projected.matters[0];
+  const projectRef = projectedMatter?.projectContext.projects[0]?.projectRef;
+  assert.ok(projectRef && projectedMatter?.workRef);
+  const result = await suggestProjectWorkFromSource(connector as never, verified.record, binding, {
+    projectRef,
+    prerequisiteForWorkRef: projectedMatter.workRef,
+    title: '补一项真实前置',
+    intendedOutcome: '前置完成且有可验收结果。',
+  });
+  assert.equal(result.disposition, 'pending_human_decision');
+  assert.deepEqual(proposal?.projectSuggestion, {
+    roadmapId: project.roadmapId,
+    roadmapRevision: project.revision,
+    prerequisiteForWorkId: matter.workId,
+    prerequisiteForWorkRevision: matter.revision,
+  });
+
+  matter = {
+    ...matter,
+    projectContext: { ...matter.projectContext, projects: [{ ...project, revision: project.revision + 1 }] },
+  };
+  await assert.rejects(
+    suggestProjectWorkFromSource(connector as never, verified.record, binding, {
+      projectRef,
+      prerequisiteForWorkRef: projectedMatter.workRef,
+      title: '过期候选',
+      intendedOutcome: '不能写入。',
+    }),
+    { code: 'WORK_REVISION_CONFLICT' },
+  );
+  await assert.rejects(
+    suggestProjectWorkFromSource(connector as never, verified.record, binding, {
+      projectRef: `${projectRef.slice(0, -1)}x`,
+      title: '篡改候选',
+      intendedOutcome: '不能写入。',
+    }),
+    { code: 'RETURN_REF_INVALID' },
+  );
 });
 
 test('untrusted Collective callbacks retain domain reasons while filesystem and internal errors hide private paths', async () => {

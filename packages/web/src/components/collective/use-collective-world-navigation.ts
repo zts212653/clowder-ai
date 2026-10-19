@@ -68,6 +68,7 @@ export function useCollectiveWorldNavigation(input: {
   return {
     activeLaunchUrl,
     connection,
+    sessionRequired: resolution?.kind === 'directory_unavailable' && resolution.state === 'session_required',
     error: worldTargetError({
       parsedTarget: input.parsedTarget,
       serviceApproved: explicitServiceApproved,

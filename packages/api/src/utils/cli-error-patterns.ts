@@ -124,7 +124,8 @@ export const CLASSIFIER_PATTERNS: Array<{ code: CliErrorReasonCode; regex: RegEx
   // Highly-specific phrase so ordering-insensitive, but keep near top for provenance clarity.
   {
     code: 'upstream_policy_reject',
-    regex: /flagged for possible cybersecurity risk/i,
+    // AGY 2026-10-18, human3195: response rejected after four upstream output attempts.
+    regex: /flagged for possible cybersecurity risk|Your previous response was blocked by content safety filters/i,
   },
   // clowder-ai#1324 (refs #848 "CLI upgrade with format incompatibility"): the CLI's own
   // argument parser rejected the argv the harness built. Deterministic — the same argv is

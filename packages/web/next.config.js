@@ -60,6 +60,7 @@ function buildContentSecurityPolicy() {
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
+  transpilePackages: ['@cat-cafe/ui'],
   ...(testDistDir ? { distDir: testDistDir } : {}),
   ...(testTsconfigPath ? { typescript: { tsconfigPath: testTsconfigPath } } : {}),
   experimental: { proxyTimeout: 120_000 },

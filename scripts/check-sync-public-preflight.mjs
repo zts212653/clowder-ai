@@ -12,6 +12,7 @@ import {
   isCoveredByPublicExport,
   loadPublicExportCoverage,
 } from './lib/sync-public-export-coverage.mjs';
+import { publicWorkspaceDependencyErrors } from './lib/sync-public-workspace-closure.mjs';
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const defaultRepoRoot = resolve(scriptDir, '..');
@@ -294,6 +295,7 @@ export function checkSyncPublicPreflight(repoRoot = defaultRepoRoot, options = {
   });
   const errors = [
     ...packageClosure.errors,
+    ...publicWorkspaceDependencyErrors(repoRoot),
     ...publicWorkflowScriptErrors(repoRoot),
     ...publicHookScriptErrors(repoRoot),
     ...tipReferenceRegressions.errors,

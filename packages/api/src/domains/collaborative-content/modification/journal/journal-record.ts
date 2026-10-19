@@ -60,6 +60,8 @@ export const contentModificationProgressSchema = z
   .object({
     sourceMessageId: contentModificationJournalIdSchema.optional(),
     sourceMessageRevision: contentModificationMessageRevisionSchema.optional(),
+    sourceAttachmentId: z.string().trim().min(1).max(128).optional(),
+    takeoverOperationIds: z.array(z.string().uuid()).optional(),
     sourceKind: z.enum(['generated_request', 'human_message']).optional(),
     sourceVisibility: sourceVisibilitySchema.optional(),
     prepared: preparedSchema.optional(),
@@ -90,9 +92,19 @@ export function modificationRequestId(ownerUserId: string, operationId: string):
     .digest('hex')}`;
 }
 
-export function modificationMessageRequestId(ownerUserId: string, sourceMessageId: string): string {
+export function modificationMessageRequestId(
+  ownerUserId: string,
+  sourceMessageId: string,
+  attachmentId?: string,
+): string {
   return `f309-modification-${createHash('sha256')
-    .update(JSON.stringify(['f309-message-modification-v1', ownerUserId, sourceMessageId]))
+    .update(
+      JSON.stringify(
+        attachmentId === undefined
+          ? ['f309-message-modification-v1', ownerUserId, sourceMessageId]
+          : ['f309-message-attachment-modification-v1', ownerUserId, sourceMessageId, attachmentId],
+      ),
+    )
     .digest('hex')}`;
 }
 

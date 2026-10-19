@@ -1,4 +1,9 @@
-import type { CollectiveCollaborationActor, CollectiveEventEnvelope, CollectiveWorkRecord } from '@cat-cafe/shared';
+import type {
+  CollectiveCollaborationActor,
+  CollectiveEventEnvelope,
+  CollectiveProjectWorkSuggestionTarget,
+  CollectiveWorkRecord,
+} from '@cat-cafe/shared';
 import { collaborationOperationReplay, recordCollaborationOperation } from './collaboration-operations.js';
 import { projectCollectiveWork, requireCollectiveWork } from './collaboration-work.js';
 import { assertServiceCoordinates } from './connection-authority.js';
@@ -7,17 +12,20 @@ import { requireHumanAuthBinding, requireMembership, resolveSession } from './id
 import { createStableId } from './persistence.js';
 import type { MutableServiceState, ServiceState } from './state.js';
 
+interface WorkProposalInput {
+  serviceInstanceId: string;
+  collectiveId: string;
+  requestId: string;
+  sourceEventId: string;
+  title?: string;
+  intendedOutcome?: string;
+  requestKind?: string;
+  projectSuggestion?: CollectiveProjectWorkSuggestionTarget;
+}
+
 export function createWorkProposal(
   state: MutableServiceState,
-  input: {
-    serviceInstanceId: string;
-    collectiveId: string;
-    requestId: string;
-    sourceEventId: string;
-    title?: string;
-    intendedOutcome?: string;
-    requestKind?: string;
-  },
+  input: WorkProposalInput,
   actor: CollectiveCollaborationActor,
   actorScope: string,
   now: number,
@@ -49,11 +57,7 @@ export function createWorkProposal(
         )
       : undefined;
   if (previous) {
-    if (
-      (input.title && input.title !== previous.title) ||
-      (input.intendedOutcome && input.intendedOutcome !== previous.intendedOutcome) ||
-      (input.requestKind && input.requestKind !== previous.proposedRequestKind)
-    )
+    if (proposalPayloadConflicts(input, previous))
       throw new CollectiveServiceError(
         'COLLABORATION_OPERATION_CONFLICT',
         'This source already identifies another proposal payload',
@@ -83,6 +87,16 @@ export function createWorkProposal(
     intendedOutcome: input.intendedOutcome ?? source.body,
     proposedBy: actor,
     ...(input.requestKind ? { proposedRequestKind: input.requestKind } : {}),
+    ...(input.projectSuggestion
+      ? {
+          projectSuggestion: {
+            ...input.projectSuggestion,
+            suggestedTitle: input.title ?? source.body.slice(0, 200),
+            suggestedIntendedOutcome: input.intendedOutcome ?? source.body,
+          },
+        }
+      : {}),
+    accountabilityRequests: [],
     dependencyWorkIds: [],
     lifecycle: 'proposed',
     revision: 1,
@@ -100,6 +114,28 @@ export function createWorkProposal(
     recordedAt: at,
   });
   return projectCollectiveWork(state, work, now);
+}
+
+function proposalPayloadConflicts(input: WorkProposalInput, previous: CollectiveWorkRecord): boolean {
+  return Boolean(
+    (input.title && input.title !== previous.title) ||
+      (input.intendedOutcome && input.intendedOutcome !== previous.intendedOutcome) ||
+      (input.requestKind && input.requestKind !== previous.proposedRequestKind) ||
+      !projectSuggestionTargetMatches(input.projectSuggestion, previous.projectSuggestion),
+  );
+}
+
+function projectSuggestionTargetMatches(
+  requested: CollectiveProjectWorkSuggestionTarget | undefined,
+  persisted: CollectiveWorkRecord['projectSuggestion'],
+): boolean {
+  if (!requested || !persisted) return requested === undefined && persisted === undefined;
+  return (
+    requested.roadmapId === persisted.roadmapId &&
+    requested.roadmapRevision === persisted.roadmapRevision &&
+    requested.prerequisiteForWorkId === persisted.prerequisiteForWorkId &&
+    requested.prerequisiteForWorkRevision === persisted.prerequisiteForWorkRevision
+  );
 }
 
 export function requireHumanCommand(
@@ -162,6 +198,10 @@ export function advanceWork(
   work: MutableServiceState['works'][string],
   action:
     | 'committed'
+    | 'accountability_assigned'
+    | 'accountability_requested'
+    | 'accountability_request_accepted'
+    | 'accountability_request_declined'
     | 'dependencies_changed'
     | 'revision_requested'
     | 'result_accepted'

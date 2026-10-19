@@ -24,7 +24,6 @@ describe('split-pane keyboard shortcuts (logic)', () => {
       targetCats: [],
       catStatuses: {},
       catInvocations: {},
-      currentGame: null,
 
       threadStates: {},
     });

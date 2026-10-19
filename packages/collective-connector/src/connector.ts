@@ -4,13 +4,19 @@ import {
   type CollectiveArtifactAgentContext,
   type CollectiveMediaReadRequest,
   type CollectivePairingIntent,
+  type CollectiveProjectWorkSuggestionTarget,
   type CollectiveRetainedMediaRegistrationRequest,
   type CollectiveSourceIdentity,
   type CollectiveWorkHostAdmissionRequest,
   type CollectiveWorkProjection,
+  type CollectiveWorkResultTextSource,
   collectivePairingIntentSchema,
   type RegisterCollectiveArtifact,
 } from '@cat-cafe/shared';
+import {
+  type AcceptedWorkResultFileSeal,
+  reconcileAcceptedWorkResultFiles,
+} from './accepted-work-result-file-reconciliation.js';
 import type { CollectiveArtifactOwnerPort } from './artifact-owner-client.js';
 import { ConnectorArtifactOwnerRelay } from './artifact-owner-relay.js';
 import { type StandingInterestInput, setStandingInterest } from './attention-custody.js';
@@ -65,6 +71,7 @@ import {
   type CollectiveWorkResultPublication,
   type CollectiveWorkResultPublicationCandidate,
   projectWorkResultPublications,
+  workResultBodyLinksTextSource,
 } from './work-result-publication.js';
 
 export type { ConnectorSyncHooks } from './connector-synchronization.js';
@@ -393,6 +400,54 @@ export class CollectiveConnector {
     );
   }
 
+  async readPendingAccountabilityRequests(
+    connectionId: string,
+    ownerUserId: string,
+    page: { readonly offset: number; readonly limit: number; readonly snapshot?: string },
+  ) {
+    return this.withAuthority(connectionId, async () => {
+      const before = this.persistence.snapshot();
+      const connection = requireConnection(before.connections[connectionId]);
+      const credential = requireCredential(connection);
+      const route = before.hostRoutes[connectionId];
+      if (!route || route.localOwnerUserId !== ownerUserId) {
+        throw new Error('Host owner does not control this Collective connection');
+      }
+      if (!connection.authorizedHumanId) throw new Error('Collective connection has no authorized Human');
+      const read = await this.service.readPendingAccountabilityRequests(connection.serviceUrl, credential, {
+        serviceInstanceId: connection.serviceInstanceId,
+        collectiveId: connection.collectiveId,
+        connectionId: connection.connectionId,
+        offset: page.offset,
+        limit: page.limit,
+        ...(page.snapshot ? { snapshot: page.snapshot } : {}),
+      });
+      const after = this.persistence.snapshot();
+      const currentConnection = requireConnection(after.connections[connectionId]);
+      const currentRoute = after.hostRoutes[connectionId];
+      const authorityMatches =
+        currentConnection.authorityStatus === 'connected' &&
+        currentConnection.endpointCredential === credential &&
+        currentConnection.serviceInstanceId === connection.serviceInstanceId &&
+        currentConnection.collectiveId === connection.collectiveId &&
+        currentConnection.authorizedHumanId === connection.authorizedHumanId &&
+        currentRoute?.revision === route.revision &&
+        currentRoute.localOwnerUserId === ownerUserId;
+      const responseMatches =
+        read.identity.serviceInstanceId === currentConnection.serviceInstanceId &&
+        read.identity.collectiveId === currentConnection.collectiveId &&
+        read.identity.connectionId === currentConnection.connectionId &&
+        read.identity.authorizedHumanId === currentConnection.authorizedHumanId &&
+        read.page.offset === page.offset &&
+        read.page.limit === page.limit &&
+        (!page.snapshot || read.page.snapshot === page.snapshot);
+      if (!authorityMatches || !responseMatches) {
+        throw new Error('Collective accountability authority changed while it was being read');
+      }
+      return read;
+    });
+  }
+
   async listInbox(connectionId: string) {
     const connection = requireConnection(this.persistence.snapshot().connections[connectionId]);
     return structuredClone(connection.inbox);
@@ -406,6 +461,29 @@ export class CollectiveConnector {
         workId: publication.workId,
         taskRef: publication.taskRef,
       })),
+    );
+  }
+
+  /** Backfills one immutable sidecar for a result accepted before file publication existed. */
+  async reconcileAcceptedWorkResultFiles(
+    connectionId: string,
+    seal: (
+      scope: AssignedWorkAuthorityScope,
+      publication: CollectiveWorkResultPublication,
+    ) => Promise<AcceptedWorkResultFileSeal | undefined>,
+  ): Promise<{ readonly published: number }> {
+    return this.withAuthority(connectionId, () =>
+      reconcileAcceptedWorkResultFiles({
+        connectionId,
+        persistence: this.persistence,
+        service: this.service,
+        readScope: async (workId) =>
+          this.assignedWorkAuthorityScope(
+            connectionId,
+            await this.readAssignedWorkWithinAuthority(connectionId, workId),
+          ),
+        seal,
+      }),
     );
   }
 
@@ -570,8 +648,21 @@ export class CollectiveConnector {
     artifactSnapshot?: WorkResultArtifactSnapshot,
     resultRevision?: number,
     execution?: { readonly revision: number; readonly assignmentEventId: string },
+    resultFileSource?: CollectiveWorkResultTextSource,
   ) {
     await this.readParticipationContext(source, 0, 1);
+    const publishResultFile = resultFileSource && workResultBodyLinksTextSource(body, resultFileSource);
+    if (publishResultFile) {
+      const { connection } = requireParticipation(this.persistence.snapshot(), source);
+      const metadata = await this.service.readMetadata(connection.serviceUrl);
+      if (metadata.serviceInstanceId !== connection.serviceInstanceId)
+        throw participationError('RETURN_UNAVAILABLE', 'Collective Service identity changed before result publication');
+      if (metadata.capabilities?.workResultFiles !== 1)
+        throw participationError(
+          'RETURN_UNAVAILABLE',
+          'Collective Service must support authenticated Work result files before this result can be published',
+        );
+    }
     return submitReplyOperation({
       persistence: this.persistence,
       now: this.now,
@@ -585,6 +676,7 @@ export class CollectiveConnector {
       ...(resultRevision ? { resultRevision } : {}),
       verifyAgent: this.verifyAgent,
       ...(execution ? { execution } : {}),
+      ...(publishResultFile ? { resultFileSource } : {}),
     });
   }
 
@@ -607,7 +699,12 @@ export class CollectiveConnector {
     source: CollectiveSourceIdentity,
     requestId: string,
     agent: VerifiedAgent,
-    input: { readonly title?: string; readonly intendedOutcome?: string; readonly requestKind?: string } = {},
+    input: {
+      readonly title?: string;
+      readonly intendedOutcome?: string;
+      readonly requestKind?: string;
+      readonly projectSuggestion?: CollectiveProjectWorkSuggestionTarget;
+    } = {},
   ) {
     return this.withAuthority(source.connectionId, async () => {
       await this.readParticipationContext(source, 0, 1);

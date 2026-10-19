@@ -10,6 +10,7 @@ import type { useArtworkViewport } from './useArtworkViewport';
 
 /** Image actions share the measured canvas; viewport and annotation authority remain with its owner. */
 export function ImageArtworkControls({
+  unifiedActions = false,
   mode,
   canAnnotate,
   canMarkup,
@@ -22,6 +23,7 @@ export function ImageArtworkControls({
   wholeWorkAction,
   children,
 }: {
+  unifiedActions?: boolean;
   mode: ReviewCanvasMode;
   canAnnotate: boolean;
   canMarkup: boolean;
@@ -73,54 +75,56 @@ export function ImageArtworkControls({
   );
   return (
     <>
-      <div className={styles.viewOptions}>
-        <details className={styles.menu}>
-          <summary aria-label={t.viewport}>
-            <span role="status" aria-label={t.scale}>
-              {Math.round(viewport.renderedScale * 100)}%
-            </span>
-            <span aria-hidden>⌄</span>
-          </summary>
-          <div className={styles.menuBody}>
-            <button type="button" onClick={viewport.fit}>
-              {t.fit}
-            </button>
-            <button type="button" onClick={viewport.actual}>
-              100%
-            </button>
-            <button type="button" aria-label={t.zoomOutLabel} onClick={viewport.zoomOut}>
-              {t.zoomOut}
-            </button>
-            <button type="button" aria-label={t.zoomInLabel} onClick={viewport.zoomIn}>
-              {t.zoomIn}
-            </button>
-            <button
-              type="button"
-              aria-pressed={viewport.panMode}
-              onClick={() => viewport.setPanMode(!viewport.panMode)}
-            >
-              {t.pan}
-            </button>
-          </div>
-        </details>
-        <details className={styles.menu}>
-          <summary aria-label={t.more}>
-            <ReviewToolbarIcon name="more" />
-          </summary>
-          <div className={styles.menuBody}>
-            {wholeWorkAction}
-            <button type="button" aria-label={t.discussionLabel} onClick={onOpenDiscussion}>
-              {t.discussion}
-              {discussionCount ? ` · ${discussionCount}` : ''}
-            </button>
-            {src ? (
-              <a href={download?.src ?? src} download={download?.filename ?? '作品.png'}>
-                {t.download}
-              </a>
-            ) : null}
-          </div>
-        </details>
-      </div>
+      {!unifiedActions ? (
+        <div className={styles.viewOptions}>
+          <details className={styles.menu}>
+            <summary aria-label={t.viewport}>
+              <span role="status" aria-label={t.scale}>
+                {Math.round(viewport.renderedScale * 100)}%
+              </span>
+              <span aria-hidden>⌄</span>
+            </summary>
+            <div className={styles.menuBody}>
+              <button type="button" onClick={viewport.fit}>
+                {t.fit}
+              </button>
+              <button type="button" onClick={viewport.actual}>
+                100%
+              </button>
+              <button type="button" aria-label={t.zoomOutLabel} onClick={viewport.zoomOut}>
+                {t.zoomOut}
+              </button>
+              <button type="button" aria-label={t.zoomInLabel} onClick={viewport.zoomIn}>
+                {t.zoomIn}
+              </button>
+              <button
+                type="button"
+                aria-pressed={viewport.panMode}
+                onClick={() => viewport.setPanMode(!viewport.panMode)}
+              >
+                {t.pan}
+              </button>
+            </div>
+          </details>
+          <details className={styles.menu}>
+            <summary aria-label={t.more}>
+              <ReviewToolbarIcon name="more" />
+            </summary>
+            <div className={styles.menuBody}>
+              {wholeWorkAction}
+              <button type="button" aria-label={t.discussionLabel} onClick={onOpenDiscussion}>
+                {t.discussion}
+                {discussionCount ? ` · ${discussionCount}` : ''}
+              </button>
+              {src ? (
+                <a href={download?.src ?? src} download={download?.filename ?? '作品.png'}>
+                  {t.download}
+                </a>
+              ) : null}
+            </div>
+          </details>
+        </div>
+      ) : null}
       {floating && toolsSlot ? createPortal(tools, toolsSlot) : tools}
     </>
   );

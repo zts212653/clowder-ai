@@ -182,3 +182,52 @@ it('projects an evolution Program reading beside the exact visible Chat instead 
     fullWindowActive: false,
   });
 });
+
+it.each([
+  'cover.png',
+  'clip.mp4',
+])('explicit narrow %s work mode keeps the gallery header and return while desktop sessions stay ineligible', (path) => {
+  const file = createFileSurface({
+    worktreeId: 'wt-a',
+    path,
+    navigationOrigin: { kind: 'chat-file-link', threadId: 'thread-a', messageId: 'original' },
+  });
+  const input = {
+    threadId: 'thread-a',
+    currentThreadId: 'thread-a',
+    mediaComposerSurfaceId: file.id,
+    viewMode: 'single' as const,
+    isDesktop: false,
+    statusPanelOpen: true,
+    rightPanelMode: 'workspace' as const,
+    shellPresentation: 'v2' as const,
+    workModeRequested: true,
+  };
+  const layout = createInitialWorkbenchState([file]);
+  const project = (patch: Partial<Parameters<typeof projectWorkspaceWorkHost>[0]> = {}) =>
+    projectWorkspaceWorkHost({ ...input, ...patch }, layout, createArtifactWorkPresentationState());
+  expect(project()).toMatchObject({
+    workModeActive: true,
+    narrowWorkComposerActive: true,
+    hostEligible: false,
+    fullWindowActive: false,
+    splitPreferenceActive: false,
+  });
+  // Loading has not registered a composer yet, but consuming the open request must
+  // not discard the already explicit artwork session or its return/gallery header.
+  expect(project({ mediaComposerSurfaceId: null })).toMatchObject({
+    workModeActive: true,
+    narrowWorkComposerActive: false,
+    hostEligible: false,
+    fullWindowActive: false,
+  });
+  for (const patch of [
+    { currentThreadId: 'foreign' },
+    { statusPanelOpen: false },
+    { viewMode: 'split' as const },
+    { shellPresentation: 'classic' as const },
+    { rightPanelMode: 'status' as const },
+    { workModeRequested: false },
+  ])
+    expect(project(patch).workModeActive).toBe(false);
+});

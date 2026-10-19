@@ -83,7 +83,7 @@ it('identifies a sole revoked connection without losing its Host re-pair context
     connectionId: connection.connectionId,
     authorityStatus: 'revoked',
   });
-  expect(container.querySelector('[aria-label="我的猫"]')).toBeNull();
+  expect(container.querySelector('[aria-label="我的 Café"]')).toBeNull();
 });
 it('reports an exactly published zero-cat participation to the current Client bridge', async () => {
   vi.mocked(apiFetch).mockImplementation(async (url) =>
@@ -208,9 +208,8 @@ it.each([
     channelId: 'general',
     channelIds: ['general'],
     openCafe: true,
+    cafeSection: 'calendar',
   });
-  const calendar = Array.from(container.querySelectorAll('button')).find((button) => button.textContent === '日程');
-  await act(async () => calendar?.click());
   await vi.waitFor(() => expect(container.querySelector('[aria-label="日程"]')?.textContent).toContain(expected));
 });
 it('attributes a failed named request to the actual delivery boundary instead of the owner settings', () => {
@@ -253,9 +252,9 @@ it('opens the native Café only for the current default Client and clears it on 
   await message(iframe, projection, 'https://foreign.invalid');
   await message(iframe, { ...projection, humanId: 'human_other123' });
   await message(iframe, { ...projection, privateThreadId: 'injected' });
-  expect(container.querySelector('[aria-label="我的猫"]')).toBeNull();
+  expect(container.querySelector('[aria-label="我的 Café"]')).toBeNull();
   await message(iframe, projection);
-  expect(container.querySelector('[aria-label="我的猫"]')).not.toBeNull();
+  expect(container.querySelector('[aria-label="我的 Café"]')).not.toBeNull();
   const section = {
     type: 'collective:client-cafe-section',
     bridgeId: init.bridgeId,
@@ -270,11 +269,9 @@ it('opens the native Café only for the current default Client and clears it on 
   await message(iframe, section, 'https://foreign.invalid');
   await message(iframe, { ...section, humanId: 'human_other123' });
   await message(iframe, { ...section, contextRevision: projection.revision + 1 });
-  expect(container.querySelector('button[aria-pressed="true"]')?.textContent).toBe('我的猫');
+  expect(container.querySelector('[aria-label="我的 Café"] h2')?.textContent).toBe('我的猫');
   await message(iframe, section);
-  expect(container.querySelector('button[aria-pressed="true"]')?.textContent).toBe('频道');
-  const channel = Array.from(container.querySelectorAll('button')).find((button) => button.textContent === '频道');
-  await act(async () => channel?.click());
+  expect(container.querySelector('[aria-label="我的 Café"] h2')?.textContent).toBe('# 产品方向');
   expect(container.textContent).toContain('# 产品方向');
   expect(JSON.stringify(post.mock.calls)).not.toContain('secret-thread');
   expect(JSON.stringify(post.mock.calls)).not.toContain('PRIVATE_HOST_ONLY');
@@ -333,12 +330,12 @@ it('opens the native Café only for the current default Client and clears it on 
   );
   await message(iframe, { ...projection, revision: 2, openCafe: false });
   await message(iframe, projection);
-  expect(container.querySelector('[aria-label="我的猫"]')).toBeNull();
+  expect(container.querySelector('[aria-label="我的 Café"]')).toBeNull();
   await message(iframe, { ...projection, revision: 3 });
-  expect(container.querySelector('[aria-label="我的猫"]')).not.toBeNull();
+  expect(container.querySelector('[aria-label="我的 Café"]')).not.toBeNull();
   act(() => iframe.dispatchEvent(new Event('load')));
   await message(iframe, { ...projection, revision: 4 });
-  expect(container.querySelector('[aria-label="我的猫"]')).toBeNull();
+  expect(container.querySelector('[aria-label="我的 Café"]')).toBeNull();
 });
 
 it('selects the requested connection and resends exact Work focus for each current context revision', async () => {
@@ -385,4 +382,80 @@ it('selects the requested connection and resends exact Work focus for each curre
   const focusMessages = post.mock.calls.filter(([body]) => body.type === 'collective:host-focus-work');
   expect(focusMessages).toHaveLength(2);
   expect(focusMessages.at(-1)?.[0]).toMatchObject({ contextId: projection.contextId, contextRevision: 2 });
+});
+
+it('sends a responsibility action only as an exact Project Task focus on the selected connection', async () => {
+  window.history.replaceState(
+    {},
+    '',
+    '/collective?target=accountability&connectionId=con_12345678&workId=work_12345678&workRevision=4&channelId=general&roadmapId=roadmap_12345678&accountabilityRequestId=accountability_12345678',
+  );
+  await act(async () => root.render(<CollectiveLaunchSurface initialServiceUrl={service} />));
+  const iframe = container.querySelector('iframe');
+  if (!iframe?.contentWindow) throw new Error('Collective iframe was not mounted');
+  const post = vi.spyOn(iframe.contentWindow, 'postMessage');
+  await message(iframe, { type: 'collective:context-ready' });
+  const init = post.mock.calls.find(([body]) => body.type === 'collective:host-context-init')?.[0];
+  if (!init) throw new Error('Host bridge was not initialized');
+  const projection = {
+    type: 'collective:client-context',
+    bridgeId: init.bridgeId,
+    contextId: 'context-12345678',
+    revision: 1,
+    serviceInstanceId: connection.serviceInstanceId,
+    collectiveId: connection.collectiveId,
+    humanId: connection.authorizedHumanId,
+    channelId: 'general',
+    channelIds: ['general'],
+    openCafe: false,
+  };
+  await message(iframe, projection);
+  expect(post).toHaveBeenCalledWith(
+    {
+      type: 'collective:host-focus-project-work',
+      bridgeId: init.bridgeId,
+      contextId: projection.contextId,
+      contextRevision: projection.revision,
+      workId: 'work_12345678',
+      workRevision: 4,
+      channelId: 'general',
+      roadmapId: 'roadmap_12345678',
+      accountabilityRequestId: 'accountability_12345678',
+    },
+    service,
+  );
+  expect(post.mock.calls.some(([body]) => body.type === 'collective:host-focus-work')).toBe(false);
+  const invalidated = vi.fn();
+  window.addEventListener('cat-cafe:collective-attention-invalidated', invalidated);
+  await message(iframe, {
+    type: 'collective:client-accountability-changed',
+    bridgeId: init.bridgeId,
+    contextId: projection.contextId,
+    contextRevision: projection.revision,
+    serviceInstanceId: connection.serviceInstanceId,
+    collectiveId: connection.collectiveId,
+    connectionId: connection.connectionId,
+    humanId: connection.authorizedHumanId,
+    workId: 'work_12345678',
+    workRevision: 5,
+    accountabilityRequestId: 'accountability_12345678',
+    status: 'accepted',
+  });
+  expect(invalidated).toHaveBeenCalledOnce();
+  await message(iframe, {
+    type: 'collective:client-accountability-changed',
+    bridgeId: init.bridgeId,
+    contextId: projection.contextId,
+    contextRevision: projection.revision,
+    serviceInstanceId: connection.serviceInstanceId,
+    collectiveId: connection.collectiveId,
+    connectionId: connection.connectionId,
+    humanId: 'human_another1',
+    workId: 'work_12345678',
+    workRevision: 5,
+    accountabilityRequestId: 'accountability_12345678',
+    status: 'accepted',
+  });
+  expect(invalidated).toHaveBeenCalledOnce();
+  window.removeEventListener('cat-cafe:collective-attention-invalidated', invalidated);
 });

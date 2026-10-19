@@ -302,10 +302,10 @@ export class PublishedMediaService {
     await this.assertVisible(asset, scope, principal);
   }
 
-  async openAsset(asset: ReviewedMediaAsset, principal: MediaReviewPrincipal) {
+  async openAsset(asset: ReviewedMediaAsset, principal: MediaReviewPrincipal, localFile = false) {
     const actual = await this.deps.owner.describe(asset.contentRef, asset.ownerRevision);
     if (!actual.publicationScope) throw new MediaOwnerError('access_denied');
-    return this.open(asset, actual.publicationScope, principal);
+    return this.open(asset, actual.publicationScope, principal, localFile);
   }
 
   async origin(contentRef: string, principal: MediaReviewPrincipal) {
@@ -327,7 +327,12 @@ export class PublishedMediaService {
     return content.bytes;
   }
 
-  async open(asset: ReviewedMediaAsset, scope: ContentPublicationScopeV1, principal: MediaReviewPrincipal) {
+  async open(
+    asset: ReviewedMediaAsset,
+    scope: ContentPublicationScopeV1,
+    principal: MediaReviewPrincipal,
+    localFile = false,
+  ) {
     await this.assertVisible(asset, scope, principal);
     const content = await this.deps.owner.open(asset.contentRef, asset.ownerRevision);
     try {
@@ -335,7 +340,25 @@ export class PublishedMediaService {
         throw new MediaOwnerError('access_denied');
       }
       await this.assertVisible(asset, scope, principal);
-      return content;
+      const originalPath = localFile
+        ? await this.deps.sources.localOriginalFile(content.sourcePublication, content.blobDigest)
+        : null;
+      const publication =
+        localFile && 'kind' in scope && scope.kind === 'message'
+          ? await this.deps.sources.messageIdentity(scope.source, principal)
+          : null;
+      if (localFile) await this.assertVisible(asset, scope, principal);
+      return {
+        ...content,
+        path: originalPath ?? content.path,
+        fileAuthor:
+          publication?.publisherCatId ??
+          (content.committedBy?.kind === 'cat' ? content.committedBy.actorId : undefined),
+        fileCreatedAt:
+          publication && 'kind' in scope && scope.kind === 'message'
+            ? new Date(Number(scope.source.messageRevision)).toISOString()
+            : content.committedAt,
+      };
     } catch (error) {
       await content.handle.close();
       throw error;

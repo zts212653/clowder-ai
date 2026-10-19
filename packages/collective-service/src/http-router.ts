@@ -32,9 +32,11 @@ import {
   writeJson,
 } from './http-transport.js';
 import type { CollectiveServiceStore } from './store.js';
+import { routeWorkResultFileGet } from './work-result-file-http.js';
 
 interface CollectiveHttpHandlerOptions {
   readonly store: CollectiveServiceStore;
+  readonly serviceOrigin?: string;
   readonly allowedHostOrigins: readonly string[];
   readonly bootstrapLinkPath?: string;
   readonly githubAppSetup?: GitHubAppManifestSetup;
@@ -55,6 +57,7 @@ export function createCollectiveHttpHandler(options: CollectiveHttpHandlerOption
       }
       await routeRequest(
         options.store,
+        options.serviceOrigin,
         allowedOrigins,
         options.bootstrapLinkPath,
         options.githubAppSetup,
@@ -69,6 +72,7 @@ export function createCollectiveHttpHandler(options: CollectiveHttpHandlerOption
 
 async function routeRequest(
   store: CollectiveServiceStore,
+  serviceOrigin: string | undefined,
   allowedOrigins: ReadonlySet<string>,
   bootstrapLinkPath: string | undefined,
   githubAppSetup: GitHubAppManifestSetup | undefined,
@@ -93,7 +97,7 @@ async function routeRequest(
     routeClientFallback(url, response);
     return;
   }
-  await routePost(store, allowedOrigins, bootstrapLinkPath, githubAppSetup, url, request, response);
+  await routePost(store, serviceOrigin, allowedOrigins, bootstrapLinkPath, githubAppSetup, url, request, response);
 }
 
 async function routeGet(
@@ -131,6 +135,7 @@ async function routeGet(
     }
     return;
   }
+  if (routeWorkResultFileGet(store, url, request, response)) return;
   if (await routeCollectiveRead(store, url, request, response)) return;
   routeClientFallback(url, response);
 }
@@ -166,6 +171,7 @@ function redirectHumanAuthError(response: ServerResponse, code: HumanAuthRedirec
 
 async function routePost(
   store: CollectiveServiceStore,
+  serviceOrigin: string | undefined,
   allowedOrigins: ReadonlySet<string>,
   bootstrapLinkPath: string | undefined,
   githubAppSetup: GitHubAppManifestSetup | undefined,
@@ -182,7 +188,7 @@ async function routePost(
   if (await routeIdentityPost(store, bootstrapLinkPath, url.pathname, request, response, body)) return;
   if (await routeConnectionPost(store, allowedOrigins, url.pathname, request, response, body)) return;
   if (await routeCollaborationPost(store, url.pathname, request, response, body)) return;
-  if (await routeEventPost(store, url.pathname, request, response, body)) return;
+  if (await routeEventPost(store, serviceOrigin, url.pathname, request, response, body)) return;
   writeJson(response, 404, { error: { code: 'NOT_FOUND', message: 'Route not found' } });
 }
 
@@ -299,6 +305,7 @@ async function routeConnectionPost(
 
 async function routeEventPost(
   store: CollectiveServiceStore,
+  serviceOrigin: string | undefined,
   pathname: string,
   request: IncomingMessage,
   response: ServerResponse,
@@ -307,7 +314,9 @@ async function routeEventPost(
   if (pathname === '/api/events/human') {
     writeJson(response, 201, await store.postHumanMessage(requireBearer(request), body));
   } else if (pathname === '/api/events/agent') {
-    writeJson(response, 201, await store.postAgentMessage(requireBearer(request), body));
+    writeJson(response, 201, await store.postAgentMessage(requireBearer(request), body, serviceOrigin));
+  } else if (pathname === '/api/collaboration/work-result-files/bind') {
+    writeJson(response, 200, await store.bindAcceptedWorkResultFile(requireBearer(request), body));
   } else if (pathname === '/api/acks') {
     writeJson(response, 200, await store.acknowledge(requireBearer(request), body));
   } else if (pathname === '/api/participation') {

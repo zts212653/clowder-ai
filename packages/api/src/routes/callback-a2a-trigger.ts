@@ -1,3 +1,4 @@
+import { resolveFailedResponseReturn } from './a2a-failure-callers.js';
 /**
  * A2A invocation trigger for MCP callback post_message (F27 rewrite).
  *
@@ -392,7 +393,7 @@ export async function commitFailedResponseAndEnqueueA2ACaller(
     ownerAuthProvenance: OwnerAuthProvenance;
     threadId: string;
     reporterCatId: CatId;
-    predecessorCatId: CatId;
+    predecessorCatId?: CatId;
     parentInvocationId?: string;
     callerTraceContext?: CallerTraceContext;
   },
@@ -414,33 +415,65 @@ export async function commitFailedResponseAndEnqueueA2ACaller(
 /** Normal commits and recovery share this transaction; recovery supplies its exact durable patch. */
 async function commitFailedResponsePatchAndEnqueueA2ACaller(
   deps: A2ATriggerDeps,
-  opts: Omit<Parameters<typeof commitFailedResponseAndEnqueueA2ACaller>[1], 'terminal' | 'message'> & {
+  opts: Omit<
+    Parameters<typeof commitFailedResponseAndEnqueueA2ACaller>[1],
+    'terminal' | 'message' | 'ownerAuthProvenance'
+  > & {
+    ownerAuthProvenance?: OwnerAuthProvenance;
     terminalPatch: LifecycleResponseTerminalPatch;
   },
 ): Promise<StoredMessage> {
   if (!deps.messageStore) throw new Error('failed response A2A report requires MessageStore');
   if (!deps.invocationQueue) throw new Error('failed response A2A report requires InvocationQueue');
 
+  const current = await deps.messageStore.getById(opts.responseMessageId);
+  if (!current || current.lifecycle?.kind !== 'response' || current.lifecycle.invocationId !== opts.invocationId)
+    throw new Error('failed response identity mismatch');
+  const { targetCats, ownerAuthProvenance } = await resolveFailedResponseReturn(
+    deps.messageStore,
+    current,
+    opts.ownerAuthProvenance === undefined
+      ? undefined
+      : {
+          ...(opts.predecessorCatId ? { callerCatId: opts.predecessorCatId } : {}),
+          ownerAuthProvenance: opts.ownerAuthProvenance,
+        },
+  );
+  const terminalPatch = {
+    ...opts.terminalPatch,
+    expectedInputMessageIds: current.lifecycle.inputMessageIds,
+    extra: {
+      ...current.extra,
+      ...opts.terminalPatch.extra,
+      ...(current.extra?.a2aFailureReturn ? { a2aFailureReturn: current.extra.a2aFailureReturn } : {}),
+      ...(current.extra?.coveredA2AFailureReturns
+        ? { coveredA2AFailureReturns: current.extra.coveredA2AFailureReturns }
+        : {}),
+    },
+  };
+  if (targetCats.length === 0)
+    return commitLifecycleResponseFromTerminalPatch(deps.messageStore, current.id, terminalPatch);
+  const parentInvocationId = targetCats.length === 1 ? opts.parentInvocationId : undefined;
   const admission = await deps.invocationQueue.terminalizeResponseAndEnqueueDurable(
     deps.messageStore,
     opts.responseMessageId,
-    opts.terminalPatch,
+    terminalPatch,
     {
       from: { kind: 'agent', catId: opts.reporterCatId },
       threadId: opts.threadId,
       userId: opts.userId,
       kind: 'message_wake',
-      ownerAuthProvenance: normalizeOwnerAuthProvenance(opts.ownerAuthProvenance),
+      ownerAuthProvenance,
       content: opts.terminalPatch.content,
       messageId: opts.responseMessageId,
       sourceId: opts.responseMessageId,
       sourceCategory: 'a2a_failure',
-      targetCats: [opts.predecessorCatId],
+      targetCats,
       intent: 'execute',
       autoExecute: true,
-      a2aParentInvocationId: opts.parentInvocationId,
+      a2aParentInvocationId: parentInvocationId,
       callerTraceContext: opts.callerTraceContext
-        ? wrapWithDispatchSpan(opts.callerTraceContext, 1, opts.reporterCatId)
+        ? wrapWithDispatchSpan(opts.callerTraceContext, targetCats.length, opts.reporterCatId)
         : undefined,
       a2aTriggerMessageId: opts.responseMessageId,
     },
@@ -450,18 +483,18 @@ async function commitFailedResponsePatchAndEnqueueA2ACaller(
   await settleLifecycleResponseInputs(deps.messageStore, stored, opts.responseMessageId);
 
   await enqueueA2ATargets(deps, {
-    targetCats: [opts.predecessorCatId],
+    targetCats,
     content: opts.terminalPatch.content,
     userId: opts.userId,
-    ownerAuthProvenance: opts.ownerAuthProvenance,
+    ownerAuthProvenance,
     threadId: opts.threadId,
     triggerMessage: stored,
     callerCatId: opts.reporterCatId,
-    ...(opts.parentInvocationId ? { parentInvocationId: opts.parentInvocationId } : {}),
+    ...(parentInvocationId ? { parentInvocationId } : {}),
     ...(opts.callerTraceContext ? { callerTraceContext: opts.callerTraceContext } : {}),
     preplannedAdmission: {
-      requestedTargetCats: [opts.predecessorCatId],
-      acceptedTargetCats: [opts.predecessorCatId],
+      requestedTargetCats: targetCats,
+      acceptedTargetCats: targetCats,
       streakTargetCats: [],
     },
     preAdmittedEntries: admission.entries,
@@ -487,6 +520,16 @@ export async function commitRecoveredFailedResponse(
     response.from.catId !== lifecycle.targetId
   ) {
     throw new Error('failed recovery response identity mismatch');
+  }
+  if (response.extra?.coveredA2AFailureReturns?.length) {
+    return commitFailedResponsePatchAndEnqueueA2ACaller(deps, {
+      responseMessageId: response.id,
+      invocationId: lifecycle.invocationId,
+      terminalPatch: patch,
+      userId: response.userId,
+      threadId: response.threadId,
+      reporterCatId: response.from.catId as CatId,
+    });
   }
   const commitOnly = () => commitLifecycleResponseFromTerminalPatch(store, response.id, patch);
   const receipt = response.extra?.a2aFailureReturn;

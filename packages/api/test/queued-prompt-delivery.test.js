@@ -1,6 +1,7 @@
 import './helpers/setup-cat-registry.js';
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import { setTimeout as delay } from 'node:timers/promises';
 import { InvocationQueue } from '../dist/domains/cats/services/agents/invocation/InvocationQueue.js';
 import { InvocationRegistry } from '../dist/domains/cats/services/agents/invocation/InvocationRegistry.js';
 import { InvocationTracker } from '../dist/domains/cats/services/agents/invocation/InvocationTracker.js';
@@ -21,114 +22,212 @@ const SECOND = 'REVIEW_SECOND_SOURCE_ONLY';
 
 // Real Queue → AgentRouter → context projection → invocation lifecycle. Only
 // the provider is controlled; an explicit barrier holds the first receiver.
-for (const topology of ['serial', 'parallel']) {
-  test(`${topology}: two queued A2A requests are each exposed only to their owning turn`, async () => {
-    const messages = new MessageStore();
-    const threads = new ThreadStore();
-    const thread = threads.create('owner', 'pending prompt delivery');
-    const turns = new InMemoryTurnExecutionStore();
-    const registry = new InvocationRegistry();
-    const tracker = new InvocationTracker();
-    const prompts = [];
-    const firstStarted = Promise.withResolvers();
-    const secondStarted = Promise.withResolvers();
-    const firstMayFinish = Promise.withResolvers();
-    const service = {
-      async *invoke(prompt) {
-        prompts.push(prompt);
-        if (prompts.length === 1) {
-          firstStarted.resolve();
-          await firstMayFinish.promise;
-        } else secondStarted.resolve();
-        yield { type: 'text', catId: 'opus', content: 'Review complete.', timestamp: Date.now() };
-        yield { type: 'done', catId: 'opus', timestamp: Date.now() };
-      },
-    };
-    const router = new AgentRouter(
-      await migrateRouterOpts({
-        claudeService: service,
-        codexService: {
-          async *invoke() {
-            yield { type: 'text', catId: 'codex', content: 'Peer finished.', timestamp: Date.now() };
-            yield { type: 'done', catId: 'codex', timestamp: Date.now() };
+for (const topology of ['serial', 'parallel'])
+  for (const outcome of ['completed', 'failed'])
+    for (const middle of topology === 'serial' && outcome === 'completed'
+      ? [null, 'conversation_input', 'private_input']
+      : [null]) {
+      test(`${topology}/${outcome}/${middle ?? 'adjacent'}: complete public A2A projection covers both wakes in one receiver`, async () => {
+        const messages = new MessageStore();
+        const threads = new ThreadStore();
+        const thread = threads.create('owner', 'pending prompt delivery');
+        const turns = new InMemoryTurnExecutionStore();
+        const registry = new InvocationRegistry();
+        const tracker = new InvocationTracker();
+        const prompts = [];
+        const firstStarted = Promise.withResolvers();
+        const firstMayFinish = Promise.withResolvers();
+        const service = {
+          async *invoke(prompt) {
+            prompts.push(prompt);
+            if (prompts.length === 1) {
+              firstStarted.resolve();
+              await firstMayFinish.promise;
+            }
+            if (outcome === 'failed')
+              yield {
+                type: 'error',
+                catId: 'opus',
+                content: 'provider failed',
+                error: 'provider failed',
+                timestamp: Date.now(),
+              };
+            else yield { type: 'text', catId: 'opus', content: 'Review complete.', timestamp: Date.now() };
+            yield { type: 'done', catId: 'opus', timestamp: Date.now() };
           },
-        },
-        registry,
-        messageStore: messages,
-        threadStore: threads,
-        turnExecutionStore: turns,
-      }),
-    );
-    const queue = new InvocationQueue(undefined, { invocationTracker: tracker });
-    const processor = new QueueProcessor({
-      queue,
-      router,
-      messageStore: messages,
-      invocationTracker: tracker,
-      invocationRecordStore: new InvocationRecordStore(),
-      turnExecutionStore: turns,
-      socketManager: { emitToUser: noop, broadcastToRoom: noop, broadcastAgentMessage: noop },
-      log: { info: noop, warn: noop, error: noop },
-    });
-    const admit = (content, targets = ['opus']) =>
-      queue.send(
-        messages,
-        {
-          userId: 'owner',
-          threadId: thread.id,
-          from: { kind: 'agent', catId: 'codex' },
-          content,
-          mentions: targets,
-          timestamp: Date.now(),
-          idempotencyKey: content,
-        },
-        {
-          kind: 'message_wake',
-          userId: 'owner',
-          threadId: thread.id,
-          from: { kind: 'agent', catId: 'codex' },
-          content,
-          targetCats: targets,
-          sourceCategory: 'a2a',
-          ownerAuthProvenance: 'strict',
-          intent: 'execute',
-          autoExecute: true,
-          messageDisposition: 'next_work',
-        },
-      );
-    const first = await admit(FIRST, topology === 'parallel' ? ['opus', 'codex'] : ['opus']);
-    const second = await admit(SECOND);
-    const drain = processor.requestDrain(thread.id);
-    try {
-      await firstStarted.promise;
-      assert.match(prompts[0], new RegExp(FIRST));
-      assert.doesNotMatch(
-        prompts[0],
-        new RegExp(SECOND),
-        'pending request must not be worked before its Queue delivery',
-      );
-      assert.equal(messages.getById(second.message.id).lifecycle.dispatchRefs.length, 0);
-      firstMayFinish.resolve();
-      await secondStarted.promise;
-      await drain;
-      assert.match(prompts[1], new RegExp(SECOND), 'deferred request must arrive in its own turn');
-      assert.equal(prompts.length, 2, 'one actual receiver per request, with no redundant receiver');
-      for (const source of [first.message, second.message]) {
-        const refs = messages.getById(source.id).lifecycle.dispatchRefs.filter((ref) => ref.targetId === 'opus');
-        assert.equal(refs.length, 1);
-        const response = messages.getById(refs[0].statusMessageId);
-        assert.deepEqual(response.lifecycle.inputMessageIds, [source.id]);
-      }
-      assert.equal(queue.list(thread.id, 'owner').length, 0);
-    } finally {
-      firstMayFinish.resolve();
-      await drain;
+        };
+        const callerInvocations = [];
+        const callerService = (catId) => ({
+          async *invoke(prompt) {
+            callerInvocations.push({ catId, prompt });
+            yield { type: 'text', catId, content: 'Peer finished.', timestamp: Date.now() };
+            yield { type: 'done', catId, timestamp: Date.now() };
+          },
+        });
+        const router = new AgentRouter(
+          await migrateRouterOpts({
+            claudeService: service,
+            codexService: callerService('codex'),
+            geminiService: callerService('gemini'),
+            registry,
+            messageStore: messages,
+            threadStore: threads,
+            turnExecutionStore: turns,
+          }),
+        );
+        const queue = new InvocationQueue(undefined, { invocationTracker: tracker });
+        const processor = new QueueProcessor({
+          queue,
+          router,
+          messageStore: messages,
+          invocationTracker: tracker,
+          invocationRecordStore: new InvocationRecordStore(),
+          turnExecutionStore: turns,
+          socketManager: { emitToUser: noop, broadcastToRoom: noop, broadcastAgentMessage: noop },
+          log: { info: noop, warn: noop, error: noop },
+        });
+        const admit = (content, targets = ['opus'], callerCatId = 'codex') =>
+          queue.send(
+            messages,
+            {
+              userId: 'owner',
+              threadId: thread.id,
+              from: { kind: 'agent', catId: callerCatId },
+              content,
+              mentions: targets,
+              timestamp: Date.now(),
+              idempotencyKey: content,
+            },
+            {
+              kind: 'message_wake',
+              userId: 'owner',
+              threadId: thread.id,
+              from: { kind: 'agent', catId: callerCatId },
+              content,
+              targetCats: targets,
+              sourceCategory: 'a2a',
+              ownerAuthProvenance: 'strict',
+              intent: 'execute',
+              autoExecute: true,
+              messageDisposition: 'next_work',
+            },
+          );
+        const first = await admit(FIRST, topology === 'parallel' ? ['opus', 'codex'] : ['opus']);
+        const hiddenBody = 'NOT_YET_ADMITTED_INPUT';
+        const hidden =
+          middle === 'conversation_input'
+            ? await queue.send(
+                messages,
+                {
+                  userId: 'owner',
+                  threadId: thread.id,
+                  from: { kind: 'user', userId: 'owner' },
+                  content: hiddenBody,
+                  mentions: ['opus'],
+                  timestamp: Date.now(),
+                  deliveryStatus: 'queued',
+                },
+                {
+                  userId: 'owner',
+                  threadId: thread.id,
+                  from: { kind: 'user', userId: 'owner' },
+                  content: hiddenBody,
+                  targetCats: ['opus'],
+                  kind: middle,
+                  ownerAuthProvenance: 'strict',
+                  intent: 'execute',
+                  autoExecute: true,
+                  messageDisposition: 'next_work',
+                },
+              )
+            : middle === 'private_input'
+              ? await queue.enqueueDurable({
+                  userId: 'owner',
+                  threadId: thread.id,
+                  sourceId: 'private-between-wakes',
+                  from: { kind: 'system', service: 'fixture' },
+                  content: hiddenBody,
+                  targetCats: ['opus'],
+                  kind: middle,
+                  ownerAuthProvenance: 'strict',
+                  intent: 'execute',
+                  autoExecute: true,
+                })
+              : undefined;
+        const second = await admit(SECOND, ['opus'], 'gemini');
+        const drain = processor.requestDrain(thread.id);
+        try {
+          await firstStarted.promise;
+          assert.match(prompts[0], new RegExp(FIRST));
+          assert.ok(
+            prompts[0].includes(SECOND),
+            'ordinary public A2A speech remains visible to the actual unread projection',
+          );
+          const firstResponseId = messages
+            .getById(first.message.id)
+            .lifecycle.dispatchRefs.find((ref) => ref.targetId === 'opus').statusMessageId;
+          for (const source of [first.message, second.message]) {
+            const refs = messages.getById(source.id).lifecycle.dispatchRefs.filter((ref) => ref.targetId === 'opus');
+            assert.equal(refs.length, 1);
+            assert.equal(refs[0].statusMessageId, firstResponseId);
+          }
+          const response = messages.getById(firstResponseId);
+          assert.deepEqual(new Set(response.lifecycle.inputMessageIds), new Set([first.message.id, second.message.id]));
+          const active = tracker.getActiveSlots(thread.id).find((slot) => slot.catId === 'opus').activeRun;
+          assert.deepEqual(new Set(active.inputMessageIds), new Set(response.lifecycle.inputMessageIds));
+          assert.ok(!prompts[0].includes(hiddenBody), 'unpublished input cannot enter the first public projection');
+          assert.ok(
+            queue.list(thread.id, 'owner').every((row) => row.id === hidden?.entry.id || !row.targets.includes('opus')),
+          );
+          if (hidden) assert.deepEqual((await queue.getDurableEntry(thread.id, hidden.entry.id)).targets, ['opus']);
+          firstMayFinish.resolve();
+          await drain;
+          const deadline = Date.now() + 5000;
+          while (
+            (tracker.getActiveSlots(thread.id).length || queue.list(thread.id, 'owner').length) &&
+            Date.now() < deadline
+          )
+            await delay(5);
+          assert.equal(messages.getById(firstResponseId).lifecycle.status, outcome);
+          assert.equal(
+            prompts.length,
+            hidden ? 2 : 1,
+            'public wakes share one receiver; an unpublished input waits for its own admission',
+          );
+          if (hidden) assert.ok(prompts[1].includes(hiddenBody));
+          for (const source of [first.message, second.message]) {
+            const refs = messages.getById(source.id).lifecycle.dispatchRefs.filter((ref) => ref.targetId === 'opus');
+            assert.equal(refs.length, 1);
+            const response = messages.getById(refs[0].statusMessageId);
+            assert.deepEqual(
+              new Set(response.lifecycle.inputMessageIds),
+              new Set([first.message.id, second.message.id]),
+            );
+            assert.equal(refs[0].phase, 'settled');
+          }
+          assert.equal(queue.list(thread.id, 'owner').length, 0);
+          assert.equal(tracker.getActiveSlots(thread.id).length, 0);
+          if (outcome === 'failed') {
+            const failureRefs = messages.getById(firstResponseId).lifecycle.dispatchRefs;
+            assert.deepEqual(new Set(failureRefs.map((ref) => ref.targetId)), new Set(['codex', 'gemini']));
+            assert.ok(failureRefs.every((ref) => ref.phase === 'settled'));
+            for (const ref of failureRefs)
+              assert.ok(messages.getById(ref.statusMessageId).lifecycle.inputMessageIds.includes(firstResponseId));
+            assert.equal(callerInvocations.filter((call) => call.catId === 'gemini').length, 1);
+            assert.equal(
+              callerInvocations.filter((call) => call.catId === 'codex').length,
+              topology === 'parallel' ? 2 : 1,
+            );
+          }
+        } finally {
+          firstMayFinish.resolve();
+          await drain;
+        }
+      });
     }
-  });
-}
 
 for (const contextMode of ['hot', 'cold']) {
-  test(`${contextMode}: pending work cannot leak through navigation, smart-window anchors, or reply previews`, async () => {
+  test(`${contextMode}: pending public speech participates in the actual projection and reply previews`, async () => {
     const messages = new MessageStore();
     const append = (content, extra = {}) =>
       messages.append({
@@ -150,7 +249,7 @@ for (const contextMode of ['hot', 'cold']) {
     const deps = { messageStore: messages, deliveryCursorStore, invocationDeps: {} };
     const options = {
       effectiveMaxContextTokens: 10000,
-      resolvePendingPromptMessageIds: async () => [second.id],
+      resolvePendingWakeMessageIds: async () => [second.id],
       contextProjection: {
         coordinate: {
           providerCarrier: { provider: 'codex', carrier: 'exec_json' },
@@ -173,26 +272,15 @@ for (const contextMode of ['hot', 'cold']) {
       options,
     );
     assert.ok(projection.exposedMessageIds.includes(first.id));
-    assert.ok(!projection.exposedMessageIds.includes(second.id));
-    assert.doesNotMatch(projection.contextText, new RegExp(SECOND));
-    assert.doesNotMatch(projection.navigationHeader, new RegExp(SECOND));
-    assert.ok(
-      projection.projectionAudit.messageRefs.some(
-        (item) => item.messageRef === second.id && item.reason === 'pending_delivery',
-      ),
+    assert.ok(projection.exposedMessageIds.includes(second.id));
+    assert.match(projection.contextText, new RegExp(SECOND));
+    assert.ok(!projection.projectionAudit.messageRefs.some((item) => item.reason === 'pending_delivery'));
+    assert.equal(
+      projection.boundaryId,
+      cursorFor(third),
+      'the actual complete projection may acknowledge the public tail',
     );
-    assert.equal(projection.boundaryId, cursorFor(first), 'a visible tail must not acknowledge pending work');
-    await deliveryCursorStore.ackSeenCursor('owner', 'opus', 'prompt-visibility', projection.boundaryId);
-    await deliveryCursorStore.ackCursor('owner', 'opus', 'prompt-visibility', projection.boundaryId);
-    const next = await assembleIncrementalContext(deps, 'owner', 'prompt-visibility', 'opus', second.id, 'play', {
-      ...options,
-      resolvePendingPromptMessageIds: async () => [],
-    });
-    assert.ok(next.projectedMessageIds.includes(second.id));
-    assert.ok(next.projectedMessageIds.includes(third.id));
-    assert.equal(next.includesCurrentUserMessage, true);
-    assert.match(next.navigationHeader, /传球:.*→ 你/);
-    assert.match(next.contextText, new RegExp(`\\[↩[^\\n]*${SECOND}`));
+    assert.match(projection.contextText, new RegExp(`\\[↩[^\\n]*${SECOND}`));
   });
 }
 
@@ -238,7 +326,7 @@ for (const pendingPosition of ['middle', 'first', 'after-cursor']) {
     const deps = { messageStore: messages, deliveryCursorStore: cursors, invocationDeps: {} };
     const projection = await assembleIncrementalContext(deps, 'owner', threadId, 'opus', first?.id, 'play', {
       effectiveMaxContextTokens: 10000,
-      resolvePendingPromptMessageIds: async () => [pending.id],
+      resolvePendingWakeMessageIds: async () => [pending.id],
     });
     const previousCursor = pendingPosition === 'after-cursor' ? cursorFor(first) : undefined;
     assert.equal(
@@ -246,6 +334,10 @@ for (const pendingPosition of ['middle', 'first', 'after-cursor']) {
       previousCursor,
       'recovery must not acknowledge a proven later source across the gap',
     );
-    assert.equal(projection.boundaryId, first ? cursorFor(first) : undefined);
+    assert.equal(
+      projection.boundaryId,
+      cursorFor(later),
+      'the complete prompt can cover the gap after recovery leaves it unread',
+    );
   });
 }

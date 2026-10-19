@@ -13,7 +13,6 @@ describe('chatStore viewMode + split pane state', () => {
       targetCats: [],
       catStatuses: {},
       catInvocations: {},
-      currentGame: null,
 
       threadStates: {},
       viewMode: 'single',

@@ -18,6 +18,9 @@
  * include the co-creator's local wall clock alongside UTC.
  */
 
+/** Co-creator calendar boundary used when marking stale prompt history. */
+export const CO_CREATOR_TIME_ZONE = 'America/Los_Angeles';
+
 function dateTimeInZone(epochMs: number, timeZone: string): string {
   const parts = new Intl.DateTimeFormat('en-US', {
     timeZone,

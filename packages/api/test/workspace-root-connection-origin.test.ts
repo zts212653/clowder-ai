@@ -18,6 +18,7 @@ import {
 } from '../src/domains/workspace/roots/workspace-root-proof.js';
 import { workspaceRoutes } from '../src/routes/workspace.js';
 import { issueReconnectionProofForChangedConnection } from '../src/routes/workspace-root-connection-routes.js';
+import { rootStoreFixture } from './helpers/workspace-root-store-fixture.js';
 
 test('ancestor removal cannot be bypassed by omitting the admission label on the same prepared file connection', async () => {
   const temp = await realpath(await mkdtemp(join(tmpdir(), 'f309-connection-origin-')));
@@ -145,7 +146,8 @@ test('ancestor removal cannot be bypassed by omitting the admission label on the
   }
 });
 
-test('changed-connection proof renewal is limited to directory selections', () => {
+test('changed-connection proof renewal is limited to directory selections', async (t) => {
+  await rootStoreFixture(t);
   const absolute = verifyRootConnectionProof(
     issueRootConnectionProof({
       userId: 'operator',

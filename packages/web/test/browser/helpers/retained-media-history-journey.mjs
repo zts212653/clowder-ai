@@ -1,6 +1,17 @@
 import assert from 'node:assert/strict';
 import sharp from 'sharp';
 
+/** Reach history through the current card menu, preserving the exact artifact selection. */
+export async function openRetainedMediaHistory(client, title) {
+  const item = client
+    .getByRole('region', { name: '全部作品', exact: true })
+    .locator('.shared-artifact-item')
+    .filter({ hasText: title });
+  const menu = item.locator('details.shared-artifact-card-menu');
+  if ((await menu.getAttribute('open')) === null) await menu.locator('summary').click();
+  await item.getByRole('button', { name: '版本记录', exact: true }).click();
+}
+
 /** Version production stays with F138. Every public version goes through the normal Host picker. */
 export async function checkRetainedMediaHistory({ f, page, client, surface, publisher, artifact, mime }) {
   const next = await f.publishNextRetainedVersion();
@@ -14,7 +25,7 @@ export async function checkRetainedMediaHistory({ f, page, client, surface, publ
   await f.openHost(1, 4314);
   await page.reload();
   await client.getByRole('button', { name: /全部作品/ }).click();
-  await client.getByRole('button', { name: '版本记录', exact: true }).click();
+  await openRetainedMediaHistory(client, artifact.title);
   const current = page.waitForResponse(
     (response) =>
       response.url().endsWith('/api/artifacts/owner/request') &&
@@ -32,7 +43,7 @@ export async function checkRetainedMediaHistory({ f, page, client, surface, publ
   await assertBluePixels(page, mime, true);
   await surface.getByRole('button', { name: '返回原讨论', exact: true }).click();
   await client.getByRole('button', { name: /全部作品/ }).click();
-  await client.getByRole('button', { name: '版本记录', exact: true }).click();
+  await openRetainedMediaHistory(client, artifact.title);
   const old = page.waitForResponse(
     (response) =>
       response.url().endsWith('/api/artifacts/owner/request') &&
@@ -70,7 +81,7 @@ export async function checkRetainedMediaHistory({ f, page, client, surface, publ
   await f.reopenRetainedOwner();
   await page.reload();
   await client.getByRole('button', { name: /全部作品/ }).click();
-  await client.getByRole('button', { name: '版本记录', exact: true }).click();
+  await openRetainedMediaHistory(client, artifact.title);
   await client.getByRole('button', { name: '查看第 1 版', exact: true }).click();
   await assertBluePixels(page, mime, false);
   await surface.getByRole('button', { name: '打开作品讨论', exact: true }).click();

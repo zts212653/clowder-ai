@@ -1,6 +1,9 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { ArtworkActions } from '@/components/content-review/ArtworkActions';
+import { ArtworkGalleryArrows } from '@/components/content-review/ArtworkGalleryNavigation';
+import { useArtworkGallery } from '@/components/content-review/ArtworkGalleryScope';
 import { ArtworkMediaFooter } from '@/components/content-review/ArtworkMediaFooter';
 import { ImageArtworkControls } from '@/components/content-review/ImageArtworkControls';
 import { ReviewCanvasPopover } from '@/components/content-review/ReviewCanvasPopover';
@@ -51,6 +54,7 @@ export function WorkspaceContentReviewMedia({
   selected,
   restoreComment = false,
   composer,
+  chatPlaceEditor,
   onOpenDiscussion,
   draftKey,
   canMarkup = true,
@@ -58,9 +62,14 @@ export function WorkspaceContentReviewMedia({
   pendingChatMarks,
   imageChatPrimary = false,
   wholeWorkAction,
+  originalUrl,
+  filename,
+  mime,
+  byteLength,
 }: WorkspaceReviewMediaProps) {
   const draftStarted = useWorkspacePreviewIntent();
   const isV2 = useShellPresentation() === 'v2';
+  const gallery = useArtworkGallery();
   const chatSelection = imageChatPrimary && isV2;
   const artwork = useRef<HTMLDivElement>(null);
   const video = useRef<HTMLVideoElement>(null);
@@ -122,14 +131,27 @@ export function WorkspaceContentReviewMedia({
   }, [visualMarkResolutions, visualMarks]);
   useDiscussionVideoSeek({
     media,
-    annotations: attachedAnnotations,
-    activeAnnotationId,
+    annotations: [
+      ...attachedAnnotations,
+      ...(pendingChatMarks ?? []).map((item) => ({ id: `pending:${item.id}`, anchor: item.anchor })),
+    ],
+    activeAnnotationId: pendingChatMarks?.find((item) => item.active)
+      ? `pending:${pendingChatMarks.find((item) => item.active)!.id}`
+      : activeAnnotationId,
     discussionFocusRequest,
     src: src ?? '',
     seekTo,
     setSeconds,
   });
   useCanvasFocus(stage, canvasFocusRequest);
+  const focusedPlace = pendingChatMarks?.find((item) => item.active)?.id;
+  useEffect(() => {
+    if (!focusedPlace) return;
+    const mark = [...(stage.current?.querySelectorAll<SVGGElement>('[data-selection-id]') ?? [])].find(
+      (item) => item.dataset.selectionId === focusedPlace,
+    );
+    mark?.focus();
+  }, [focusedPlace, src]);
   const markup = useReviewMarkupDraft(
     draftKey ?? `workspace-content-review:${reviewId}:${sourceRevision}:markup`,
     media,
@@ -146,6 +168,7 @@ export function WorkspaceContentReviewMedia({
     media,
     imageChatPrimary ? 1 : Number.POSITIVE_INFINITY,
     imageChatPrimary,
+    (gallery?.items.length ?? 0) > 1,
   );
   const selection = useReviewMediaSelection({
     media,
@@ -288,6 +311,20 @@ export function WorkspaceContentReviewMedia({
           )}
         </p>
       ) : null}
+      {isV2 && originalUrl ? (
+        <ArtworkActions
+          src={src}
+          originalUrl={originalUrl}
+          filename={filename ?? download?.filename ?? '作品'}
+          mime={mime}
+          byteLength={byteLength}
+          width={media.width}
+          height={media.height}
+          root={viewportRef}
+          viewport={viewport}
+          wholeWorkAction={wholeWorkAction}
+        />
+      ) : null}
       <section
         ref={viewportRef}
         className={styles.media}
@@ -305,6 +342,7 @@ export function WorkspaceContentReviewMedia({
             media={media}
             video={video}
             selectionActive={selection.selectionActive}
+            customControls={imageChatPrimary}
             onSeeking={onSeeking}
             onSeeked={onSeeked}
             onSeconds={setSeconds}
@@ -312,6 +350,7 @@ export function WorkspaceContentReviewMedia({
           />
           {src && !error ? overlay : null}
         </div>
+        {gallery ? <ArtworkGalleryArrows gallery={gallery} /> : null}
       </section>
       {imageChatPrimary && media.kind === 'video' ? (
         <VideoArtworkControls
@@ -333,6 +372,7 @@ export function WorkspaceContentReviewMedia({
         </VideoArtworkControls>
       ) : imageChatPrimary ? (
         <ImageArtworkControls
+          unifiedActions={isV2 && !!originalUrl}
           mode={mode}
           canAnnotate={selectable}
           canMarkup={writable && canMarkup && markup.canEdit}
@@ -385,7 +425,18 @@ export function WorkspaceContentReviewMedia({
           }}
         />
       ) : null}
-      {!imageChatPrimary && writable && mode === 'comment' && selected ? (
+      {chatPlaceEditor ? (
+        <ReviewCanvasPopover
+          anchor={chatPlaceEditor.anchor}
+          media={media}
+          canvasRef={stage}
+          containerRef={artwork}
+          viewKey={`${viewport.renderedScale}:${viewport.offset.x}:${viewport.offset.y}`}
+          onClose={chatPlaceEditor.cancel}
+        >
+          {chatPlaceEditor.content}
+        </ReviewCanvasPopover>
+      ) : !imageChatPrimary && writable && mode === 'comment' && selected ? (
         <ReviewCanvasPopover
           anchor={selected}
           media={media}

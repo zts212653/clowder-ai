@@ -4,8 +4,8 @@ related_features: [F143, F198, F230, F246, F254, F296, F306, F183, F039, F117, F
 topics: [claude-agent-sdk, carrier, provider-native, capability-alignment, freshness, runtime]
 doc_kind: spec
 created: 2026-09-16
-updated: 2026-10-01
-tips_exempt: "SDK carrier 是默认关闭的内部接入候选，尚未授权 runtime 激活；可启用后的用户提示随独立验收提供。"
+updated: 2026-10-18
+tips_exempt: "2026-10-19：本次说明 freshness 通知退役，没有新增操作入口；SDK carrier 仍是默认关闭的内部接入候选，专项启用提示随独立验收提供，不把通知退役验收写成 SDK 整体启用。"
 description: "让Ragdoll经由官方 Claude Agent SDK 获得与 Codex app-server 同级的原生运行待遇：能对齐的逐项原生接入，对不齐的如实标注，不为对称硬造。"
 description_source: human
 description_author: opus5

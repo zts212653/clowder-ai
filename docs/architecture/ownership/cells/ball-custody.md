@@ -201,7 +201,7 @@ attributable canonical provenance remain non-executable.
   或 owner-authenticated cancel route。
 - 改 F280 wait outcome 到 connector message / Queue / Invocation 的 exact carrier 投影。
 - 改 F280 wait/action-backed explicit retry 的 current-authority preflight 或 fail-closed reason。
-- 值班简报 / feat 轨迹消费球权 projection。
+- Phase B 任务审计与 F300 按原契约消费球权 projection；F252 Story 保留 feat 历史投影读取。F233 值班简报 producer/route 已于 2026-10-18 退役（见 [F233 保留边界](../../../features/F233-ball-custody-observability.md)），不再是现役 consumer；F299 invocation/session 轨迹的归属不变。
 - 接入 ProbeScheduler / WakeSender（Phase B 后续 Task：blocked task 探针 + best-effort 唤醒）。
 
 ## Extend By

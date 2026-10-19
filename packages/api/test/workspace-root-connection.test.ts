@@ -93,7 +93,7 @@ test('human connection receipts survive response loss and removal without reacti
     assert.equal((await connect()).json().connected, true);
     await removeLinkedRoot(first.json().linked.id);
     await rename(root, `${root}-old`);
-    await symlink(dir, root);
+    await symlink(dir, root, process.platform === 'win32' ? 'junction' : 'dir');
     const moved = await app.inject({
       method: 'POST',
       url: '/api/workspace/root-connections',

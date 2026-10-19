@@ -1,3 +1,4 @@
+import type { CollectiveConnector } from '@cat-cafe/collective-connector';
 import type { FastifyInstance, FastifyReply } from 'fastify';
 import { z } from 'zod';
 import type { IMessageStore } from '../domains/cats/services/stores/ports/MessageStore.js';
@@ -81,6 +82,7 @@ export function registerCompanionWorkReadRoutes(
   projectPath: string,
   runtimeInteractionStore?: RuntimeInteractionPendingReadSource,
   messageStore?: Pick<IMessageStore, 'getById'>,
+  collectiveConnector?: () => CollectiveConnector | undefined,
 ): void {
   app.get('/api/callbacks/companion/running-work', async (request, reply) => {
     const record = requireCallbackAuth(request, reply);
@@ -121,6 +123,7 @@ export function registerCompanionWorkReadRoutes(
       runtimeInteractionStore,
       undefined,
       messageStore,
+      collectiveConnector,
     );
     const response = companionDecisionWireResponse(result, view);
     return reply.code(response.statusCode).send(response.body);

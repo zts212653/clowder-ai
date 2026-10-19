@@ -65,7 +65,7 @@ export interface ParticipationView {
     delivery: string;
     failure?: { code: string };
     privateThread?: { id: string; title?: string };
-    execution?: { stage: 'queued' | 'started' | 'ended' | 'failed' };
+    execution?: { stage: 'queued' | 'started' | 'ended' | 'failed'; invocationId?: string };
     attention?:
       | { request: 'response_requested'; state: 'unclaimed' }
       | {

@@ -1,45 +1,90 @@
-import { workExecutionPresentation } from './CollectiveWorkCard.js';
-import type { CollectiveWorkProjection } from './client-types.js';
-import { actorName, formatHistoryTime, type RoadmapViewState, workHistoryLabels } from './roadmap-view-model.js';
+import type {
+  CollectiveMemberDirectory,
+  CollectiveParticipant,
+  CollectiveRoadmapRecord,
+  CollectiveWorkProjection,
+} from './client-types.js';
+import {
+  actorName,
+  canEditWorkDependencies,
+  canTrackWorkInProject,
+  formatHistoryTime,
+  type RoadmapViewState,
+  workHistoryLabels,
+} from './roadmap-view-model.js';
+import { WorkAccountabilityActions } from './WorkAccountabilityActions.js';
+import { resolveWorkDependencies, unreadableDependencyLabel } from './work-dependency-resolution.js';
+import { workExecutionPresentation } from './work-execution-presentation.js';
 
 export function RoadmapWorkDetails({
   work,
-  works,
+  roadmap,
+  allRoadmaps = roadmap ? [roadmap] : [],
+  availableWorks,
   view,
   currentHumanId,
   humanNames,
+  humans = [],
+  participants = [],
   canEditDependencies,
   onSetDependencies,
+  onCommitWork,
+  onRequestWorkAccountability,
+  onRespondWorkAccountability,
   onOpenSource,
   onOpenResult,
   onClose,
 }: {
   readonly work: CollectiveWorkProjection;
-  readonly works: readonly CollectiveWorkProjection[];
+  readonly roadmap?: CollectiveRoadmapRecord;
+  readonly allRoadmaps?: readonly CollectiveRoadmapRecord[];
+  readonly availableWorks: readonly CollectiveWorkProjection[];
   readonly view: RoadmapViewState;
   readonly currentHumanId: string;
   readonly humanNames: Readonly<Record<string, string>>;
+  readonly humans?: CollectiveMemberDirectory['humans'];
+  readonly participants?: readonly CollectiveParticipant[];
   readonly canEditDependencies: boolean;
   readonly onSetDependencies: (work: CollectiveWorkProjection, dependencyWorkIds: readonly string[]) => void;
+  readonly onCommitWork?: (
+    work: CollectiveWorkProjection,
+    participant?: CollectiveParticipant,
+    accountability?: 'self' | 'unassigned',
+  ) => Promise<void>;
+  readonly onRequestWorkAccountability?: (
+    roadmap: CollectiveRoadmapRecord,
+    work: CollectiveWorkProjection,
+    targetHumanId: string,
+  ) => Promise<void>;
+  readonly onRespondWorkAccountability?: (
+    work: CollectiveWorkProjection,
+    request: NonNullable<CollectiveWorkProjection['accountabilityRequests']>[number],
+    decision: 'accept' | 'decline',
+    participant?: CollectiveParticipant,
+  ) => Promise<void>;
   readonly onOpenSource?: (work: CollectiveWorkProjection, view: RoadmapViewState) => void;
   readonly onOpenResult?: (work: CollectiveWorkProjection, view: RoadmapViewState) => void;
   readonly onClose: () => void;
 }) {
-  const accountable = work.accountableHumanId ? (humanNames[work.accountableHumanId] ?? 'Collective 成员') : '待确认';
-  const dependencies = work.dependencyWorkIds
-    .map((workId) => works.find((candidate) => candidate.workId === workId))
-    .filter((candidate): candidate is CollectiveWorkProjection => Boolean(candidate));
+  const accountable = work.accountableHumanId ? (humanNames[work.accountableHumanId] ?? '共同体成员') : '未分配';
+  const dependencies = resolveWorkDependencies(work, availableWorks);
+  const dependencyLabels = dependencies.resolved.map(
+    (dependency) => `${dependency.title}（#${dependency.sourceLocation.channelId}）`,
+  );
+  if (dependencies.unresolvedCount) {
+    dependencyLabels.push(unreadableDependencyLabel(dependencies.unresolvedCount));
+  }
   const sourceKind = work.sourceLocation.rootEventId ? '话题' : '频道消息';
-  const canEdit = canEditDependencies && work.accountableHumanId === currentHumanId;
+  const canEdit = canEditDependencies && canEditWorkDependencies(work) && work.accountableHumanId === currentHumanId;
   const execution = workExecutionPresentation(work);
   return (
-    <aside className="roadmap-work-details" aria-label={`工作详情 · ${work.title}`}>
+    <aside className="roadmap-work-details" aria-label={`任务详情 · ${work.title}`}>
       <header>
         <div>
           <span>{execution.statusLabel}</span>
           <h3>{work.title}</h3>
         </div>
-        <button type="button" className="roadmap-details-close" aria-label="关闭工作详情" onClick={onClose}>
+        <button type="button" className="roadmap-details-close" aria-label="关闭任务详情" onClick={onClose}>
           ×
         </button>
       </header>
@@ -47,12 +92,12 @@ export function RoadmapWorkDetails({
       {execution.admissionMessage && <p className="work-admission">{execution.admissionMessage}</p>}
       <dl>
         <div>
-          <dt>现实责任</dt>
-          <dd>{accountable} 负责</dd>
+          <dt>负责人</dt>
+          <dd>{work.accountableHumanId ? `${accountable} 负责` : '未分配'}</dd>
         </div>
         <div>
-          <dt>猫的参与</dt>
-          <dd>{work.assignment ? `${work.assignment.displayName} ${execution.assignmentAction}` : '尚未交给猫'}</dd>
+          <dt>执行</dt>
+          <dd>{work.assignment ? `${work.assignment.displayName} ${execution.assignmentAction}` : accountable}</dd>
         </div>
         <div>
           <dt>来源</dt>
@@ -61,10 +106,23 @@ export function RoadmapWorkDetails({
           </dd>
         </div>
         <div>
-          <dt>前置工作</dt>
-          <dd>{dependencies.length ? dependencies.map((item) => item.title).join('、') : '没有前置工作'}</dd>
+          <dt>前置任务</dt>
+          <dd>{dependencyLabels.length ? dependencyLabels.join('、') : '没有前置任务'}</dd>
         </div>
       </dl>
+      {roadmap && (
+        <WorkAccountabilityActions
+          roadmap={roadmap}
+          roadmaps={allRoadmaps}
+          work={work}
+          currentHumanId={currentHumanId}
+          humans={humans}
+          participants={participants}
+          onCommit={onCommitWork}
+          onRequest={onRequestWorkAccountability}
+          onRespond={onRespondWorkAccountability}
+        />
+      )}
       <div className="roadmap-details-actions">
         {onOpenSource && (
           <button type="button" onClick={() => onOpenSource(work, view)}>
@@ -79,9 +137,9 @@ export function RoadmapWorkDetails({
       </div>
       {canEdit && (
         <details className="roadmap-dependency-editor">
-          <summary>调整前置工作</summary>
-          {works
-            .filter((candidate) => candidate.workId !== work.workId)
+          <summary>调整前置任务</summary>
+          {availableWorks
+            .filter((candidate) => candidate.workId !== work.workId && canTrackWorkInProject(candidate))
             .map((candidate) => {
               const selected = work.dependencyWorkIds.includes(candidate.workId);
               return (
@@ -103,8 +161,8 @@ export function RoadmapWorkDetails({
             })}
         </details>
       )}
-      <section className="roadmap-work-history" aria-label="工作历史">
-        <h4>工作历史</h4>
+      <section className="roadmap-work-history" aria-label="任务动态">
+        <h4>动态</h4>
         <ol>
           {[...work.history].reverse().map((entry) => (
             <li key={`${entry.revision}:${entry.action}`}>

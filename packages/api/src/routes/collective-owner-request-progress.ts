@@ -19,7 +19,7 @@ export async function ownerRequestExecution(
   ownerUserId: string,
   connectionId: string,
   queue?: QueueTargetExecutionReadPort,
-): Promise<{ stage: Stage } | undefined> {
+): Promise<{ stage: Stage; invocationId?: string } | undefined> {
   const receipt = item.routeReceipt?.kind === 'thread_message' ? item.routeReceipt : undefined;
   const recipient = item.event.recipient?.kind === 'agent' ? item.event.recipient : undefined;
   if (
@@ -55,5 +55,5 @@ export async function ownerRequestExecution(
   if (execution?.kind !== 'response') return undefined;
   const status = execution.response.status;
   const stage: Stage = status === 'processing' ? 'started' : status === 'failed' ? 'failed' : 'ended';
-  return { stage };
+  return { stage, invocationId: execution.response.invocationId };
 }

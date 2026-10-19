@@ -159,6 +159,53 @@ export function requireParticipationSource(
   return source as CollectiveEventEnvelope & { location: NonNullable<CollectiveEventEnvelope['location']> };
 }
 
+/** Rechecks a linked public source against the Cat's current declaration without trusting caller-supplied revision. */
+export function requireLinkedParticipationSource(
+  state: ServiceState,
+  credential: string,
+  input: {
+    serviceInstanceId: string;
+    collectiveId: string;
+    connectionId: string;
+    catId: string;
+  },
+  eventId: string,
+) {
+  const source = (state.events[input.collectiveId] ?? []).find((event) => event.eventId === eventId);
+  if (!source?.recipient) {
+    throw new CollectiveServiceError('RETURN_UNAVAILABLE', 'Linked public source is unavailable', 409);
+  }
+  const participationRevision =
+    source.recipient.kind === 'agent'
+      ? source.recipient.connectionId === input.connectionId && source.recipient.agentId === input.catId
+        ? source.recipient.participationRevision
+        : undefined
+      : state.participations[input.connectionId]?.revision;
+  if (!participationRevision) {
+    throw new CollectiveServiceError('PARTICIPATION_REVOKED', 'Linked source is outside this participant scope', 403);
+  }
+  return requireParticipationSource(state, credential, { ...input, eventId, participationRevision });
+}
+
+export function canReadLinkedParticipationSource(
+  state: ServiceState,
+  credential: string,
+  input: {
+    serviceInstanceId: string;
+    collectiveId: string;
+    connectionId: string;
+    catId: string;
+  },
+  eventId: string,
+) {
+  try {
+    requireLinkedParticipationSource(state, credential, input, eventId);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function participationReceipt(record: ParticipationRecord) {
   const { workPolicy: _policy, scopeStarts: _scopes, ...receipt } = record;
   return structuredClone(receipt);

@@ -12,7 +12,6 @@ import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { describe, it } from 'node:test';
 import { fileURLToPath } from 'node:url';
-
 import {
   findOrphanRuntimeDocsAssets,
   IGNORE_PATHS,
@@ -23,6 +22,7 @@ import {
   parseDocsReferences,
   parseManifestList,
 } from './check-sync-docs-runtime-assets.mjs';
+import { isCoveredByPublicExport, loadPublicExportCoverage } from './lib/sync-public-export-coverage.mjs';
 
 const SELF_DIR = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(SELF_DIR, '..');
@@ -58,6 +58,26 @@ const MICRODUCK_LITERAL_RUNTIME_ASSETS = [
   `${MICRODUCK_PIPELINE_ROOT}/evidence/football-scene-ball-29e887ec.png`,
   MICRODUCK_FOOTBALL_PUBLICATION,
 ];
+
+describe('accepted contributor philosophy articles', () => {
+  it('keeps all six approved public articles in canonical export without exporting future drafts', () => {
+    // A home intake alone used to leave these docs outside the real exporter,
+    // so the next full sync would silently remove the public reader's articles.
+    const coverage = loadPublicExportCoverage(REPO_ROOT);
+    for (const name of [
+      'nurturing-moat',
+      'structured-delivery',
+      'platform-sets-the-floor',
+      'presence-before-service',
+      'honest-body',
+      'explicit-custody',
+    ]) {
+      const path = `docs/ideas/${name}.md`;
+      assert.equal(isCoveredByPublicExport(path, coverage), true, `${path} must survive a public export`);
+    }
+    assert.equal(isCoveredByPublicExport('docs/ideas/unapproved-draft.md', coverage), false);
+  });
+});
 
 describe('F221 private Taste outbound exclusion', () => {
   it('hard-excludes docs/taste and gives neither its index nor vignettes public sync coverage', () => {

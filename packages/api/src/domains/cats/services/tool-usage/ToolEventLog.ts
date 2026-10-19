@@ -243,7 +243,7 @@ export class ToolEventLog {
   /**
    * 砚砚 六审 P1-A: discover thread IDs that own a tool-event-log zset.
    * Handles ioredis keyPrefix manually (keys()/scan() don't auto-prefix per
-   * RedisGameStore convention) and filters out the `:seq` counter sibling
+   * the Redis client contract) and filters out the `:seq` counter sibling
    * key so callers don't accidentally zrange a string and hit WRONGTYPE.
    *
    * 砚砚 cloud-5 P1: uses cursor-based SCAN instead of blocking KEYS. KEYS

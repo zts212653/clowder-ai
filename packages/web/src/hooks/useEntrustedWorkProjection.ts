@@ -6,6 +6,8 @@ interface EntrustedWorkProjectionResult {
   ownerReads: EntrustedWorkOwnerReadV1[];
   loading: boolean;
   error: boolean;
+  /** A confirmed snapshot exists for this same projection while revalidating. */
+  confirmed: boolean;
   refetch: () => void;
 }
 
@@ -17,7 +19,10 @@ export function useEntrustedWorkProjection(
   const [ownerReads, setOwnerReads] = useState<EntrustedWorkOwnerReadV1[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
-  const [resolvedProjection, setResolvedProjection] = useState<EntrustedWorkProjection | null>(null);
+  const [resolution, setResolution] = useState<{
+    projection: EntrustedWorkProjection;
+    confirmed: boolean;
+  } | null>(null);
   const abortRef = useRef<AbortController | null>(null);
 
   const refetch = useCallback(async () => {
@@ -37,14 +42,17 @@ export function useEntrustedWorkProjection(
       if (!response.ok) throw new Error(`entrusted-work owner reads failed: ${response.status}`);
       const body = (await response.json()) as { ownerReads?: unknown };
       const parsed = entrustedWorkOwnerReadV1Schema.array().parse(body.ownerReads);
-      if (!controller.signal.aborted) setOwnerReads(parsed);
+      if (!controller.signal.aborted) {
+        setOwnerReads(parsed);
+        setResolution({ projection, confirmed: true });
+      }
     } catch (reason: unknown) {
       if (controller.signal.aborted || (reason instanceof DOMException && reason.name === 'AbortError')) return;
       setOwnerReads([]);
+      setResolution({ projection, confirmed: false });
       setError(true);
     } finally {
       if (!controller.signal.aborted) {
-        setResolvedProjection(projection);
         setLoading(false);
       }
     }
@@ -62,5 +70,11 @@ export function useEntrustedWorkProjection(
     };
   }, [refetch]);
 
-  return { ownerReads, loading: loading || resolvedProjection !== projection, error, refetch };
+  return {
+    ownerReads,
+    loading: loading || resolution?.projection !== projection,
+    confirmed: resolution?.projection === projection && resolution.confirmed && !error,
+    error,
+    refetch,
+  };
 }

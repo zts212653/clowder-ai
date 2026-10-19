@@ -18,12 +18,16 @@ export interface MediaRequestJoin {
 
 const isMedia = (attachment: ContextAttachment): attachment is MediaContextAttachment => attachment.kind === 'media';
 
-/** One send carries one media attachment; when a message somehow has several, the first one speaks for it. */
+/** Every work in a sent message keeps its own owner/status join. */
+export function mediaAttachmentsOf(blocks: readonly MessageContent[] | undefined): MediaContextAttachment[] {
+  return (blocks ?? []).flatMap((block) =>
+    block.type === 'context_attachment' && isMedia(block.attachment) ? [block.attachment] : [],
+  );
+}
+/** Legacy single-work consumers may not silently choose a gallery's first item. */
 export function mediaAttachmentOf(blocks: readonly MessageContent[] | undefined): MediaContextAttachment | null {
-  for (const block of blocks ?? []) {
-    if (block.type === 'context_attachment' && isMedia(block.attachment)) return block.attachment;
-  }
-  return null;
+  const attachments = mediaAttachmentsOf(blocks);
+  return attachments.length === 1 ? attachments[0] : null;
 }
 
 type CatalogueRequest = ContentModificationContextCatalogue['requests'][number];
@@ -36,16 +40,22 @@ type CatalogueRequest = ContentModificationContextCatalogue['requests'][number];
 const isTakeoverOf = ({ record }: CatalogueRequest, messageId: string) =>
   record.progress.sourceKind === 'human_message' && record.progress.sourceMessageId === messageId;
 
-/** The owner holds at most one request per Human message, so once this is true there is nothing left to discover. */
-export function hasRequestFromMessage(catalogue: ContentModificationContextCatalogue, messageId: string): boolean {
-  return catalogue.requests.some((request) => isTakeoverOf(request, messageId));
+/** A selected takeover ends discovery only for that attachment; unselected legacy records keep their source-scoped join. */
+export function hasRequestFromMessage(
+  catalogue: ContentModificationContextCatalogue,
+  messageId: string,
+  attachmentId?: string,
+): boolean {
+  return catalogue.requests.some(
+    (request) =>
+      isTakeoverOf(request, messageId) &&
+      (!attachmentId ||
+        !request.record.progress.sourceAttachmentId ||
+        request.record.progress.sourceAttachmentId === attachmentId),
+  );
 }
 
-/**
- * The request taken over from this exact Human message, joined through the owner's own record; nothing is written onto
- * the message. The contract gives one message at most one request (a second cat taking it over reuses it), so this is
- * one entry; it stays a list, oldest first, only so that odd or historical data renders stably instead of throwing.
- */
+/** Requests are joined through the original Human and the exact selected attachment, never a sibling's label. */
 export function mediaRequestsForMessage(
   catalogue: ContentModificationContextCatalogue,
   messageId: string,
@@ -53,7 +63,11 @@ export function mediaRequestsForMessage(
   resolveCatName: (catId: string) => string | undefined,
 ): MediaRequestJoin[] {
   return catalogue.requests
-    .filter((request) => isTakeoverOf(request, messageId))
+    .filter(
+      (request) =>
+        isTakeoverOf(request, messageId) &&
+        (!request.record.progress.sourceAttachmentId || request.record.progress.sourceAttachmentId === attachment.id),
+    )
     .sort((a, b) => a.record.createdAt - b.record.createdAt || a.record.requestId.localeCompare(b.record.requestId))
     .map(({ record }) => ({
       requestId: record.requestId,

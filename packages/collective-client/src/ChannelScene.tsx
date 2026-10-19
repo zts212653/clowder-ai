@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ChannelComposer } from './ChannelComposer.js';
-import { ChannelContentTabs } from './ChannelContentTabs.js';
 import { ChannelConversationFlow } from './ChannelConversationFlow.js';
 import { ChannelHeader } from './ChannelHeader.js';
+import { ChannelRightPanel } from './ChannelRightPanel.js';
 import { ChannelTopicContext } from './ChannelTopicContext.js';
+import { CollectiveWorkCard } from './CollectiveWorkCard.js';
 import type { MentionSelection } from './Composer.js';
 import { collaborationForChannel } from './channel-collaboration.js';
 import { actorDisplayName, groupChannelThreads } from './channel-model.js';
@@ -11,6 +12,7 @@ import { eventChannelId } from './channel-navigation.js';
 import type { ChannelSceneProps } from './channel-scene-props.js';
 import type { CollectiveEventEnvelope } from './client-types.js';
 import { DemoPlayback } from './first-entry/DemoPlayback.js';
+import { PublicChannelActivity } from './PublicChannelActivity.js';
 import { mentionSelectionForEvent } from './participant-identity.js';
 import { RoadmapWorkspace } from './RoadmapWorkspace.js';
 import { SharedArtifactLibrary } from './SharedArtifactLibrary.js';
@@ -24,7 +26,6 @@ export function ChannelScene(props: ChannelSceneProps) {
     humanName,
     channelId,
     content,
-    onSelectContent,
     focusEventId,
     onCloseContext,
     namespace,
@@ -43,6 +44,11 @@ export function ChannelScene(props: ChannelSceneProps) {
     onRequestWorkRevision,
     onCompleteWork,
     onCreateRoadmap,
+    onCreateProject,
+    onCreateProjectTask,
+    onRequestWorkAccountability,
+    onRespondWorkAccountability,
+    onDecideProjectSuggestion,
     onSetRoadmapWorks,
     onSetRoadmapStatus,
     roadmapView,
@@ -74,6 +80,7 @@ export function ChannelScene(props: ChannelSceneProps) {
   const selectedArtifact = shared?.catalogue.find((item) => item.artifactId === shared.selected?.artifactId);
   const sharedOpenSource = useRef(onOpenTopic);
   sharedOpenSource.current = onOpenTopic;
+  const [rightPanel, setRightPanel] = useState<'artifacts' | 'works'>();
   const [topicRootId, setTopicRootId] = useState<string>();
   const [sharedDiscussionOpen, setSharedDiscussionOpen] = useState(false);
   const [replyRequest, setReplyRequest] = useState<{ eventId: string }>();
@@ -106,15 +113,21 @@ export function ChannelScene(props: ChannelSceneProps) {
   }, [artifactTopicId]);
   const humans = members?.humans ?? [];
   const humanNames = Object.fromEntries(humans.map((human) => [human.humanId, human.displayName]));
-  const { allWorks, channelWorks, channelVotes, roadmaps, bindingVotes, decisions } = collaborationForChannel(
-    collaboration,
-    channelId,
-  );
+  const {
+    allWorks,
+    channelWorks,
+    channelVotes,
+    roadmaps: channelRoadmaps,
+    bindingVotes,
+    decisions,
+  } = collaborationForChannel(collaboration, channelId);
+  const roadmaps = content === 'roadmap' ? (collaboration?.roadmaps ?? []) : channelRoadmaps;
   const channelReactions = (collaboration?.reactions ?? []).filter((reaction) =>
     threads.some((thread) => [thread.root, ...thread.replies].some((event) => event.eventId === reaction.eventId)),
   );
   const legacy = events.filter((event) => !eventChannelId(event));
   const openTopic = (id: string, focusComposer = false) => {
+    setRightPanel(undefined);
     setTopicRootId(id);
     setReplyRequest(focusComposer ? { eventId: id } : undefined);
     onOpenTopic();
@@ -215,41 +228,59 @@ export function ChannelScene(props: ChannelSceneProps) {
   return (
     <div
       className="scene-layout"
-      data-context-open={Boolean(context || topic)}
+      data-context-open={Boolean(context || topic || rightPanel)}
       data-shared-artifact-open={Boolean(shared?.selected)}
       data-shared-discussion-open={Boolean(shared?.selected && sharedDiscussionOpen)}
       data-entry-browsing={firstEntry?.phase === 'browsing'}
     >
       <section
         className="channel-scene"
-        hidden={Boolean(shared?.selected)}
+        hidden={Boolean(shared?.selected) || props.contextFullPage}
         aria-label={search ? '搜索结果' : `# ${channelId}`}
       >
-        <ChannelHeader
-          collectiveName={collective.name}
-          channelId={channelId}
-          searchCount={search ? threads.length : undefined}
-          connection={connection}
-          onOpenNavigation={onOpenNavigation}
-          onCafe={onCafe}
-          onChannelCafe={onChannelCafe}
-          guideCatCount={
-            firstEntry?.phase === 'playing' && firstEntry.beat === 0 && firstEntry.arrivalComplete
-              ? firstEntry.ownCats.length
-              : undefined
-          }
-        />
-        {!search && (
-          <ChannelContentTabs
-            content={content}
-            hasRoadmap={roadmaps.length > 0}
-            onSelect={(next) => {
-              if (next === 'roadmap') {
-                setTopicRootId(undefined);
-                onCloseContext?.();
-              }
-              onSelectContent(next);
+        {content !== 'roadmap' && (
+          <ChannelHeader
+            collectiveName={collective.name}
+            channelId={channelId}
+            searchCount={search ? threads.length : undefined}
+            connection={connection}
+            onOpenNavigation={onOpenNavigation}
+            onCafe={onCafe}
+            onChannelCafe={onChannelCafe}
+            memberCount={
+              members
+                ? members.humans.length +
+                  participants.filter((p) => p.availability === 'declared' && p.channelIds.includes(channelId)).length
+                : undefined
+            }
+            artifactCount={
+              shared?.status === 'ready'
+                ? shared.catalogue.filter((a) => a.sourceLocation.channelId === channelId).length
+                : undefined
+            }
+            workCount={collaboration ? channelWorks.length : undefined}
+            onMembers={props.onMembers}
+            onArtifacts={
+              shared?.api
+                ? () => {
+                    setTopicRootId(undefined);
+                    onCloseContext?.();
+                    setRightPanel((p) => (p === 'artifacts' ? undefined : 'artifacts'));
+                  }
+                : undefined
+            }
+            onWorks={() => {
+              setTopicRootId(undefined);
+              onCloseContext?.();
+              setRightPanel((p) => (p === 'works' ? undefined : 'works'));
             }}
+            onSearch={props.onSearch}
+            activePanel={rightPanel}
+            guideCatCount={
+              firstEntry?.phase === 'playing' && firstEntry.beat === 0 && firstEntry.arrivalComplete
+                ? firstEntry.ownCats.length
+                : undefined
+            }
           />
         )}
         {content === 'conversation' && roadmapReturnLabel && onReturnToRoadmap && (
@@ -259,20 +290,33 @@ export function ChannelScene(props: ChannelSceneProps) {
         )}
         {content === 'artifacts' ? (
           <SharedArtifactLibrary key={namespace} channelId={channelId} filterable />
-        ) : content === 'roadmap' && roadmaps.length ? (
+        ) : content === 'roadmap' ? (
           <RoadmapWorkspace
             roadmaps={roadmaps}
             works={allWorks}
+            artifacts={shared?.catalogue}
+            artifactStatus={shared?.status}
             currentHumanId={humanId}
+            channelId={channelId}
+            humans={humans}
+            participants={participants}
             humanNames={humanNames}
             view={roadmapView}
             onViewChange={onRoadmapViewChange}
+            onOpenNavigation={onOpenNavigation}
             onOpenSource={onOpenRoadmapSource}
             onOpenResult={onOpenRoadmapResult}
+            onOpenArtifact={shared?.open}
             onSetDependencies={(work, dependencyWorkIds) =>
               void onSetWorkDependencies(work, dependencyWorkIds).catch(() => undefined)
             }
             onSetStatus={(roadmap, status) => void onSetRoadmapStatus(roadmap, status).catch(() => undefined)}
+            onCreateProject={onCreateProject}
+            onCreateProjectTask={onCreateProjectTask}
+            onCommitWork={onCommitWork}
+            onRequestWorkAccountability={onRequestWorkAccountability}
+            onRespondWorkAccountability={onRespondWorkAccountability}
+            onDecideProjectSuggestion={onDecideProjectSuggestion}
             bindingVotes={bindingVotes}
             decisions={decisions}
             onCreateBindingVote={onCreateBindingVote}
@@ -326,19 +370,76 @@ export function ChannelScene(props: ChannelSceneProps) {
           </p>
         )}
         {!search && content === 'conversation' && (
-          <ChannelComposer
-            namespace={namespace}
-            channelId={channelId}
-            participants={participants}
-            humans={humans}
-            delivery={delivery}
-            mention={mention}
-            onSend={onSend}
-            onCafe={onCafe}
-            firstEntry={firstEntry}
-          />
+          <div className="channel-composer-placement">
+            <PublicChannelActivity
+              works={channelWorks}
+              humanId={humanId}
+              participants={participants}
+              hostAvailable={Boolean(props.hostActivity)}
+              requestedEventIds={
+                new Set(
+                  events
+                    .filter((event) => event.actor.kind === 'human' && event.actor.humanId === humanId)
+                    .map((event) => event.eventId),
+                )
+              }
+              onOpen={openTopic}
+            />
+            {props.hostActivity && <div className="private-activity-slot" data-host-ui-slot="activity" />}
+            <ChannelComposer
+              namespace={namespace}
+              channelId={channelId}
+              participants={participants}
+              humans={humans}
+              delivery={delivery}
+              mention={mention}
+              onSend={onSend}
+              onCafe={onCafe}
+              firstEntry={firstEntry}
+            />
+          </div>
         )}
       </section>
+      {rightPanel && !context && !topic && (
+        <ChannelRightPanel
+          title={rightPanel === 'artifacts' ? '频道作品' : '频道任务'}
+          onClose={() => setRightPanel(undefined)}
+        >
+          {rightPanel === 'artifacts' ? (
+            <SharedArtifactLibrary
+              key={namespace}
+              channelId={channelId}
+              presentation="channel"
+              onOpenChannelLibrary={() => props.onOpenLibrary?.(channelId)}
+            />
+          ) : !collaboration ? (
+            <p>正在读取任务…</p>
+          ) : !channelWorks.length ? (
+            <p>这个频道还没有任务。</p>
+          ) : (
+            channelWorks.map((work) => (
+              <CollectiveWorkCard
+                key={work.workId}
+                work={work}
+                works={allWorks}
+                currentHumanId={humanId}
+                humanNames={humanNames}
+                participants={participants}
+                canSteward={collective.role === 'steward'}
+                sourceOwnerHumanId={(() => {
+                  const actor = events.find((e) => e.eventId === work.sourceEventId)?.actor;
+                  return actor?.kind === 'human' ? actor.humanId : (actor?.human.humanId ?? '');
+                })()}
+                onCommit={onCommitWork}
+                onDecline={onDeclineWork}
+                onAcceptResult={onAcceptWorkResult}
+                onRequestRevision={onRequestWorkRevision}
+                onComplete={onCompleteWork}
+              />
+            ))
+          )}
+        </ChannelRightPanel>
+      )}
       {context ||
         (topic && (
           <ChannelTopicContext

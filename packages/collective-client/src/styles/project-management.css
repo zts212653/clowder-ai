@@ -1,0 +1,265 @@
+.project-attention {
+  display: grid;
+  width: min(1180px, calc(100% - 36px));
+  gap: 0;
+  margin: 14px auto 0;
+  border: 1px solid var(--console-border-soft);
+  border-radius: 12px;
+  background: var(--console-card-bg);
+}
+
+.project-attention > header,
+.project-attention > header > div,
+.project-attention > header > label,
+.project-attention-controls > label,
+.project-attention li,
+.project-attention li > div {
+  display: flex;
+  align-items: center;
+}
+
+.project-attention > header {
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 42px;
+  padding: 7px 12px;
+  border-bottom: 1px solid var(--console-border-soft);
+}
+
+.project-attention > header > div,
+.project-attention > header > label,
+.project-attention-controls > label {
+  gap: 8px;
+}
+
+.project-attention-controls {
+  justify-content: flex-end;
+}
+
+.project-attention > header span,
+.project-attention > header label,
+.project-attention li > div > span,
+.project-attention > p {
+  color: var(--cafe-text-muted);
+  font-size: 11px;
+}
+
+.project-attention select {
+  min-height: 30px;
+  border: 1px solid var(--console-border-soft);
+  border-radius: 8px;
+  background: var(--console-card-bg);
+  color: var(--cafe-text-primary);
+}
+
+.project-attention-all {
+  min-height: 30px;
+  padding: 0 10px;
+  border: 1px solid var(--console-border-soft);
+  border-radius: 8px;
+  background: var(--console-card-bg);
+  color: var(--cafe-text-secondary);
+  font-size: 11px;
+}
+
+.project-attention-all[aria-pressed="true"] {
+  background: var(--console-active-bg);
+  color: var(--cafe-text-primary);
+}
+
+.project-attention ul {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.project-attention li {
+  gap: 10px;
+  min-width: 0;
+  padding: 9px 12px;
+}
+
+.project-attention li + li {
+  border-top: 1px solid var(--console-border-soft);
+}
+
+.project-attention li > div {
+  flex: 1;
+  align-items: flex-start;
+  min-width: 0;
+  flex-direction: column;
+}
+
+.project-attention-status {
+  flex: 0 0 auto;
+  padding: 3px 7px;
+  border-radius: 999px;
+  background: var(--semantic-warning-surface);
+  color: var(--semantic-warning);
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.project-attention-status.is-unassigned {
+  background: var(--semantic-critical-surface);
+  color: var(--semantic-critical);
+}
+
+.project-attention li > button {
+  flex: 0 0 auto;
+  min-height: 30px;
+  padding: 0 10px;
+  border: 1px solid var(--console-border-soft);
+  border-radius: 8px;
+  background: var(--console-card-bg);
+  color: var(--cafe-text-primary);
+  font-size: 12px;
+}
+
+.project-attention > p {
+  margin: 0;
+  padding: 12px;
+}
+
+.project-list,
+.project-board {
+  width: min(1180px, 100%);
+  margin-inline: auto;
+  padding: 18px clamp(18px, 4vw, 46px) 40px;
+}
+
+.project-list-toolbar,
+.project-board-toolbar,
+.project-list-toolbar nav,
+.project-board-toolbar nav,
+.project-list-toolbar > div {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.project-list-toolbar,
+.project-board-toolbar {
+  justify-content: space-between;
+  min-height: 42px;
+  margin-bottom: 8px;
+}
+
+.project-list-toolbar button,
+.project-board-toolbar button,
+.project-list-toolbar select,
+.project-list-toolbar summary,
+.project-board-toolbar summary {
+  min-height: 32px;
+  padding: 6px 10px;
+  border: 1px solid var(--console-border-soft);
+  border-radius: 8px;
+  background: var(--console-card-bg);
+  color: var(--cafe-text-secondary);
+  font-size: 12px;
+}
+
+.project-list-toolbar button[aria-pressed="true"],
+.project-board-toolbar button[aria-pressed="true"] {
+  background: var(--console-active-bg);
+  color: var(--cafe-text-primary);
+}
+
+.project-identity-chip {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.project-identity-chip .avatar {
+  width: 19px;
+  height: 19px;
+}
+
+.project-identity-chip > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project-identity-chip > small {
+  color: var(--cafe-text-muted);
+  font-size: 9px;
+}
+
+.project-work-identities {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px 8px;
+  padding: 0 10px;
+}
+
+.project-identity-empty,
+.project-responsibility-pending {
+  color: var(--semantic-critical);
+  font-size: 10px;
+}
+
+.project-responsibility-inline {
+  display: flex;
+  min-width: 0;
+  gap: 5px;
+  align-items: center;
+  margin: 0;
+  padding: 0 10px 9px;
+  border: 0;
+}
+
+.project-responsibility-inline > span {
+  flex: 1;
+  font-size: 10px;
+}
+
+.project-responsibility-inline > div {
+  display: flex;
+  gap: 4px;
+}
+
+.project-responsibility-inline select,
+.project-responsibility-inline button {
+  min-height: 28px;
+  padding: 4px 7px;
+  border: 1px solid var(--console-border-soft);
+  border-radius: 7px;
+  background: var(--console-card-bg);
+  color: var(--cafe-text-secondary);
+  font-size: 10px;
+}
+
+.project-responsibility-inline label {
+  min-width: 0;
+  flex: 1;
+}
+
+.project-responsibility-inline select {
+  width: 100%;
+}
+
+@media (max-width: 820px) {
+  .project-attention {
+    width: calc(100% - 28px);
+  }
+
+  .project-attention > header,
+  .project-attention li,
+  .project-list-toolbar,
+  .project-board-toolbar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .project-attention-controls {
+    width: 100%;
+    flex-flow: row wrap;
+    justify-content: space-between;
+  }
+}

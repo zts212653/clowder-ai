@@ -67,6 +67,8 @@ export interface TokenUsage {
 }
 
 export interface ChatMessageMetadata {
+  /** Persisted CLI diagnosis; history and live events also project it into extra. */
+  cliDiagnostics?: CliDiagnostics;
   executionAccount?: import('@cat-cafe/shared').ExecutionAccountSnapshot;
   provider: string;
   model: string;
@@ -920,15 +922,6 @@ export interface TrueRecallResponse {
   clientSnapshot?: ComposerDraftInsert['clientSnapshot'];
 }
 
-/** F101: Current game state in a thread */
-export type GameState = {
-  gameId: string;
-  gameType: string;
-  status: 'lobby' | 'playing' | 'finished';
-  currentPhase: string;
-  round: number;
-};
-
 export type TeamWorkspaceSubject = { type: 'cat'; id: string } | { type: 'provider'; id: string };
 
 /**
@@ -1031,8 +1024,6 @@ export interface ThreadState {
   /** F198 Phase C AC-C3: daemon detail text per catId, shown in status dot tooltip */
   catStatusDetails: Record<string, string>;
   catInvocations: Record<string, CatInvocationInfo>;
-  /** F101: Active game in this thread */
-  currentGame: GameState | null;
   unreadCount: number;
   /** F057-C2: Thread has an unread @user mention from a cat */
   hasUserMention: boolean;
@@ -1160,7 +1151,6 @@ export const DEFAULT_THREAD_STATE: ThreadState = {
   catStatuses: {},
   catStatusDetails: {},
   catInvocations: {},
-  currentGame: null,
   unreadCount: 0,
   hasUserMention: false,
   lastActivity: 0,

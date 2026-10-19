@@ -1,7 +1,12 @@
 import { randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 
-import { type CollectiveSourceIdentity, collectiveTargetSchema } from '@cat-cafe/shared';
+import {
+  type CollectiveSourceIdentity,
+  type CollectiveWorkResultFile,
+  type CollectiveWorkResultTextSource,
+  collectiveTargetSchema,
+} from '@cat-cafe/shared';
 import { z } from 'zod';
 import { participationError, requireParticipation, resolveMaterializedParticipation } from './participation-custody.js';
 import type { ConnectorPersistence } from './persistence.js';
@@ -13,6 +18,7 @@ import {
   type WorkResultArtifactSnapshot,
   workResultArtifactSnapshotSchema,
 } from './state.js';
+import { assertWorkResultFileAuthority, prepareOutboxWorkResultFile } from './work-result-file-outbox.js';
 
 const queuedMessageSchema = z
   .object({
@@ -182,34 +188,19 @@ function requireReplyOperation(
   return item;
 }
 
-function assertArtifactMatchesWork(
-  item: ConnectorOutboxItem,
-  artifactSnapshot: WorkResultArtifactSnapshot | undefined,
-): void {
-  if (artifactSnapshot && !item.workPurpose) {
-    throw participationError('RETURN_UNAVAILABLE', 'Prepared Artifact does not belong to an admitted Work result');
-  }
-  if (
-    artifactSnapshot &&
-    item.workPurpose &&
-    (artifactSnapshot.taskRef !== item.workPurpose.taskRef ||
-      artifactSnapshot.taskRevision !== item.workPurpose.admittedRevision)
-  ) {
-    throw participationError('RETURN_UNAVAILABLE', 'Prepared Artifact does not match the current Task revision');
-  }
-}
-
 function recoverSubmittedReply(
   item: ConnectorOutboxItem,
   body: string,
   agent: VerifiedAgent,
   artifactSnapshot: WorkResultArtifactSnapshot | undefined,
+  resultFile: CollectiveWorkResultFile | undefined,
 ): ConnectorOutboxItem | undefined {
   if (item.status === 'prepared') return undefined;
   if (
     item.body !== body ||
     item.agent?.catId !== agent.catId ||
-    !isDeepStrictEqual(item.workPurpose?.artifactSnapshot, artifactSnapshot)
+    !isDeepStrictEqual(item.workPurpose?.artifactSnapshot, artifactSnapshot) ||
+    !isDeepStrictEqual(item.workPurpose?.resultFile, resultFile)
   ) {
     throw participationError('REPLY_PAYLOAD_CONFLICT', 'This reply operation already owns a different payload');
   }
@@ -309,6 +300,7 @@ export async function submitReplyOperation(
     agent: VerifiedAgent;
     verifyAgent: (agent: VerifiedAgent) => Promise<boolean>;
     artifactSnapshot?: WorkResultArtifactSnapshot;
+    resultFileSource?: CollectiveWorkResultTextSource;
   },
 ): Promise<ConnectorOutboxItem> {
   const body = z.string().trim().min(1).max(32000).parse(input.body);
@@ -321,12 +313,24 @@ export async function submitReplyOperation(
   }
   return input.persistence.transaction((state) => {
     const item = requireReplyOperation(state, input, agent);
-    assertArtifactMatchesWork(item, artifactSnapshot);
-    const recovered = recoverSubmittedReply(item, body, agent, artifactSnapshot);
+    const connection = state.connections[input.source.connectionId];
+    if (!connection) throw participationError('PARTICIPATION_REVOKED', 'Collective connection is unavailable');
+    const publication = prepareOutboxWorkResultFile({
+      item,
+      connection,
+      body,
+      ...(artifactSnapshot ? { artifactSnapshot } : {}),
+      ...(input.resultFileSource ? { resultFileSource: input.resultFileSource } : {}),
+    });
+    assertWorkResultFileAuthority(item, artifactSnapshot, publication.file);
+    const recovered = recoverSubmittedReply(item, publication.body, agent, artifactSnapshot, publication.file);
     if (recovered) return recovered;
     item.agent = agent;
-    item.body = body;
-    if (item.workPurpose && artifactSnapshot) item.workPurpose.artifactSnapshot = artifactSnapshot;
+    item.body = publication.body;
+    if (item.workPurpose && artifactSnapshot) {
+      item.workPurpose.artifactSnapshot = artifactSnapshot;
+      if (publication.file) item.workPurpose.resultFile = publication.file;
+    }
     item.status = 'queued';
     return structuredClone(item);
   });

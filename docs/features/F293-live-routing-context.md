@@ -39,7 +39,7 @@ operator明确要求：
 - [F051](F051-real-quota-dashboard.md) 已定义真实额度池与独立 pool 不合并，但它主要是展示面，不在每次传球的必经决策路径上。
 - [F208](F208-capability-profile-routing.md) 提供较慢变化的能力知识，并坚持“给数据，不替猫做判断”；当前 dossier 里的部分价格/模型信息已经会随时间过期。
 - Team 已是日常 routing 判断面，Settings 保留成员结构配置、只读账本与 F208 来源 workflow。F208 已有 observation → distillation proposal → approve/apply 路径；F293 已读取 applied dossier revision 进入 snapshot/preflight。尚缺的是完整待更新投影与实际回流验收：`RoutingContextRuntime` 未注入 `pendingProposalReader`，其默认 `0` 不能证明没有待处理提案。
-- F284 已在 `origin/main@69d5597eb` 落地：Header 只有一个 Workspace 入口，持续能力由 `WORKSPACE_MODES` / `WORKSPACE_MODE_META` 注册并由 `WorkspacePanel` 渲染；首页 `WorkspaceNowSurface` 只表达当前 thread 正在运行什么，后台 activity 不得抢走用户 Focus。F293 必须沿用真实 mode / chrome / back / fold 契约，而不是再造一个孤立状态页或 sibling host。F248 另提供“Workspace 事件面 + Settings 完整账本、共享同一 read model”的边界先例。
+- [F284](F284-contextual-workspace-shell.md) 已在 `origin/main@69d5597eb` 落地：Header 只有一个 Workspace 入口，持续能力由 `WORKSPACE_MODES` / `WORKSPACE_MODE_META` 注册并由 `WorkspacePanel` 渲染；首页 `WorkspaceNowSurface` 只表达当前 thread 正在运行什么，后台 activity 不得抢走用户 Focus。F293 必须沿用真实 mode / chrome / back / fold 契约，而不是再造一个孤立状态页或 sibling host。[F248](F248-eval-hub-human-readability.md) 另提供“Workspace 事件面 + Settings 完整账本、共享同一 read model”的边界先例。
 - [F154](F154-cat-routing-personalization.md) 的 `preferredCats` / default 是静态偏好，不能表达“本周一恢复”“provider 暂时不可达”等带时间语义的条件。
 - [F203](F203-native-system-prompt-l0.md) 继续编译稳定 L0；已落地的 F293 per-invocation 稀疏投影位于动态路径，不把临时 Redis 状态写进缓存名单。
 - 已落地的 `routing-context` owner 在发送副作用边界组合 capability、operator policy 与 live availability；后续优化保留同一 resolver 与 exact-target preflight。
@@ -95,7 +95,7 @@ Why: `routing-context` 继续只负责决策时的组合、解释与 preflight�
 
 - **F300 组织跨域感知，不替 F293 判定**：F300 M1 是副作用前的通用 authoritative grounding policy；当副作用是选猫/@/dispatch 时，它必须调用或引用 F293 的 canonical snapshot/preflight，而不是另算 routeability。F293 dispatch preflight 仍独占逐目标 `allowed / warned / rejected`、alternatives 与 routing degradation 语义。
 - **F299 记录视野，不改写路由**：F293 决策时看见的 snapshot/preflight refs 进入 F299 P3 durable request envelope，供异常确诊“供给 gap vs 猫的判断 bug”；inspector 不重放或覆盖 route decision。
-- **F298/ADR-045 约束新状态的出生方式**：F293 新增的 signal、preference、receipt/recovery 等持久状态必须满足“持久性 ≥ 所服务过程生命周期、TTL 只做 GC”；按法设计的新状态不登记进 F298 存量违反项家族表。
+- **F298/[ADR-045](../decisions/045-runtime-promise-durability.md) 约束新状态的出生方式**：F293 新增的 signal、preference、receipt/recovery 等持久状态必须满足“持久性 ≥ 所服务过程生命周期、TTL 只做 GC”；按法设计的新状态不登记进 F298 存量违反项家族表。
 
 ### 与 F300 之后新能力的分工
 

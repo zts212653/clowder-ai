@@ -151,6 +151,7 @@ describe('RedisActionSuccessorLeaseStore', { skip: redisIsolationSkipReason(REDI
     assert.equal(normalized.issuerStandingEvidenceRef, 'message:legacy-claim');
     assert.deepEqual(normalized.returnTransitions, []);
     assert.deepEqual(normalized.replacementTransitions, []);
+    assert.deepEqual(normalized.orphanCarrierRecoveryTransitions, []);
     assert.equal(normalized.predecessorCatId, undefined);
     assert.deepEqual(await store.preflight(legacy.leaseId, 1), { ok: true, reason: 'active' });
 

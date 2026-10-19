@@ -818,9 +818,9 @@ export async function* routeParallel(
               threadTitle: routeThread?.title ?? undefined,
               projectPath: routeThread?.projectPath,
               cursorOverlay: options.cursorBoundaries?.get(catId as string),
-              ...(options.resolvePendingPromptMessageIds
+              ...(options.resolvePendingWakeMessageIds
                 ? {
-                    resolvePendingPromptMessageIds: options.resolvePendingPromptMessageIds.bind(undefined, catId),
+                    resolvePendingWakeMessageIds: options.resolvePendingWakeMessageIds.bind(undefined, catId),
                   }
                 : {}),
               ...(currentUserMessageId ? { sameUserWaveTriggerMessageId: currentUserMessageId } : {}),
@@ -1732,9 +1732,8 @@ export async function* routeParallel(
           : undefined;
       const failedA2AReportCommit =
         lifecycleResponse?.status === 'failed' &&
-        options.a2aTriggerMessageId &&
-        exactA2ACallerCatId &&
-        !options.a2aFailureReport
+        (options.commitFailedA2AReport ||
+          (options.a2aTriggerMessageId && exactA2ACallerCatId && !options.a2aFailureReport))
           ? async (message: AppendMessageInput) => {
               if (!options.commitFailedA2AReport) {
                 throw new Error('failed response A2A report admission unavailable');
@@ -1752,7 +1751,9 @@ export async function* routeParallel(
                 ownerAuthProvenance,
                 threadId,
                 reporterCatId: msg.catId as CatId,
-                predecessorCatId: exactA2ACallerCatId as CatId,
+                ...(!options.a2aFailureReport && exactA2ACallerCatId
+                  ? { predecessorCatId: exactA2ACallerCatId as CatId }
+                  : {}),
                 ...(options.parentInvocationId ? { parentInvocationId: options.parentInvocationId } : {}),
               });
             }

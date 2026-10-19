@@ -143,7 +143,7 @@ work、custody、completion 或 acceptance 的 canonical truth。
 ### Review 去叠加
 
 测试的价值、UT/集成/浏览器层级，以及合并、降层、退役的判断见
-`测试规范`。新增昂贵 journey 和删除覆盖在现有 PR 中说明失败故事与
+[`测试规范`](ops/testing-standard.md)。新增昂贵 journey 和删除覆盖在现有 PR 中说明失败故事与
 承接证据；不新增审批，不因采用规范自动跑全量。
 
 作者与已选 reviewer 同样审新增、改写和删除：真实失败是什么、最低足够层级、已有覆盖缺口及新增成本。
@@ -310,7 +310,7 @@ PR-3 是 interim 方案 —— 仍开 per-run PR，只是 label + 猫自决 merg
 | 方向和形状 | 创作位，一次给完；新界面/改版、架构模块或归属变化、做片子，动手前出稿 |
 | 安全、鉴权、生产数据、外部契约 | 优先 cloud；cloud 不可用时只换成一只本地 reviewer，不拆成两路 |
 
-Sonnet 常规 review 暂停（2026-10-15 operator 试行，来源见 dossier v0.11），其他任务不因此停用。按 dossier 现行边界和实时可用性选具体个体；本次不扩大到其他Siamese。
+Sonnet 常规 review 暂停（2026-10-15 operator 试行，来源见 [dossier v0.11](team/cat-dossier.md)），其他任务不因此停用。按 dossier 现行边界和实时可用性选具体个体；本次不扩大到其他Siamese。
 
 只有两个风险面确实需要不同的人时才加第二只，并写明各自理由。迭代修复只请改动所在那一面的 reviewer 复审；稀缺席位不进迭代循环，按 dossier `engagementPolicy` 交付单次判断后退出。
 
@@ -381,7 +381,7 @@ Sonnet 常规 review 暂停（2026-10-15 operator 试行，来源见 dossier v0.
 ### Full Sync Gate（Source-Owned）
 
 **每日草稿同步（2026-10-12 operator 已授权）**先走
-固定分支入口：`node scripts/daily-public-sync.mjs`。
+[固定分支入口](ops/daily-public-sync.md)：`node scripts/daily-public-sync.mjs`。
 该路径只追加 `clowder-ai sync/daily`，维护唯一开放草稿 PR；隐私、intake、F251、导出闭包和迁移说明仍须通过。
 本机 `source_full` 与临时公开仓完整长验证不再是这条路径的前置条件，实际候选的公开 CI 承担完整行为验证；
 `--status` 读取当前 PR head 的 CI / Windows Smoke 结论，不授权合 main 或发布版本。

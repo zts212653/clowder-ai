@@ -4,11 +4,13 @@ import {
   type CollectiveLocation,
   type CollectiveSourceIdentity,
   type CollectiveTarget,
+  type CollectiveWorkResultFile,
   collectiveArtifactPublicationRecordSchema,
   collectiveEventEnvelopeSchema,
   collectiveLocationSchema,
   collectiveSourceIdentitySchema,
   collectiveTargetSchema,
+  collectiveWorkResultFileSchema,
 } from '@cat-cafe/shared';
 import { z } from 'zod';
 import { type HostRouteConfig, hostRouteConfigSchema } from './host-route-state.js';
@@ -72,6 +74,7 @@ const outboxItemSchema = z
         assignmentEventId: z.string().startsWith('evt_').optional(),
         progressKey: z.string().length(64).optional(),
         artifactSnapshot: workResultArtifactSnapshotSchema.optional(),
+        resultFile: collectiveWorkResultFileSchema.optional(),
       })
       .strict()
       .optional(),
@@ -239,6 +242,7 @@ export interface ConnectorOutboxItem {
     readonly assignmentEventId?: string;
     readonly progressKey?: string;
     readonly artifactSnapshot?: WorkResultArtifactSnapshot;
+    readonly resultFile?: CollectiveWorkResultFile;
   };
   readonly replyToEventId?: string;
   readonly body: string;

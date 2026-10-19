@@ -1,4 +1,6 @@
+import { createHash } from 'node:crypto';
 import { chmod, mkdtemp, readFile, rename, rm, stat, symlink, writeFile } from 'node:fs/promises';
+import { createServer as createNodeServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -694,6 +696,7 @@ describe('official Collective Connector', () => {
         defaultIngressThreadId: 'thread_general',
         humanNotificationThreadId: 'thread_general',
         agentRoutes: {},
+        publicProfiles: { 'codex-sol': { displayLabel: ' 砚砚 ' }, hidden: { displayLabel: 'Private roster' } },
         desiredParticipation: {
           defaultMode: 'include',
           excludedCatIds: ['opus'],
@@ -728,6 +731,20 @@ describe('official Collective Connector', () => {
     const reopened = await openConnector(fixture.connectorDirectory);
     expect(await reopened.getHostRoute(connection.connectionId)).toEqual(route);
     expect(await reopened.isParticipationPublished(connection.connectionId)).toBe(true);
+    const response = await fetch(`${fixture.server.url}/api/participants?collectiveId=${fixture.collectiveId}`, {
+      headers: { authorization: `Bearer ${fixture.ownerSessionToken}` },
+    });
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as {
+      participants: { catId: string; displayName: string; displayLabel?: string; connectionId: string }[];
+    };
+    expect(body.participants.find((cat) => cat.catId === 'codex-sol')).toMatchObject({
+      displayLabel: '砚砚',
+      displayName: 'Sol',
+      connectionId: connection.connectionId,
+    });
+    expect(body.participants.some((cat) => cat.catId === 'hidden')).toBe(false);
+    expect(body.participants.find((cat) => cat.catId === 'codex-terra')).not.toHaveProperty('displayLabel');
   });
 
   it('keeps Cat-authored standing interest on a separate CAS from public participation revision', async () => {
@@ -873,7 +890,7 @@ it('recovers an accepted reply after response loss and restart without duplicati
   let loseResponse = true;
   const connector = await openConnector(f.connectorDirectory, async (input, init) => {
     const response = await fetch(input, init);
-    if (loseResponse && String(input).includes('/api/events/agent')) {
+    if (loseResponse && response.ok && String(input).includes('/api/events/agent')) {
       loseResponse = false;
       throw Object.assign(new Error('accepted response lost'), { code: 'ECONNRESET' });
     }
@@ -911,34 +928,92 @@ it('recovers an accepted reply after response loss and restart without duplicati
   const source = collectiveEventSourceIdentity(assignment);
   if (!source) throw new Error('Expected the assignment to preserve exact participation identity');
   const operation = await connector.prepareReply(source, 'message:source', 'work:canonical-task', 1);
+  const fileBytes = Buffer.from('# Public Work result\n\nThe exact accepted file.\n');
+  const fileDigest = `sha256:${createHash('sha256').update(fileBytes).digest('hex')}`;
+  const fileName = `cwork-${fileDigest.slice('sha256:'.length)}.md`;
+  const artifactRef = `/uploads/${fileName}`;
   const artifactSnapshot = {
     taskRef: 'task:work:canonical-task',
     taskRevision: 1,
-    artifactRef: 'artifact:result',
+    artifactRef,
     artifactRevision: '7',
     completenessRef: 'artifact:result#complete:7',
     previewRef: 'artifact:result#preview:7',
     openInWorkspaceRef: 'workspace:artifact:thread-result:7:artifact:result',
-  };
-  await connector.submitReply(
-    source,
-    'message:source',
-    'work:canonical-task',
-    operation.outboxId,
-    'A named answer',
-    {
-      catId: 'codex-sol',
-      agentId: 'codex-sol',
-      displayName: 'Sol',
-      sessionRef: 'invocation:verified',
+    textPublication: {
+      v: 1 as const,
+      taskId: 'canonical-task',
+      resultRevision: 1,
+      executionRevision: 1,
+      sourceMessageId: 'message-result-file',
+      sourceMessageRevision: '7',
+      triggerMessageId: 'message-work-trigger',
+      publisherCatId: 'codex-sol',
+      invocationId: 'invocation:verified',
+      item: { kind: 'rich-file' as const, blockId: 'file-result' },
+      contentDigest: fileDigest,
+      byteLength: fileBytes.length,
+      mediaType: 'text/markdown' as const,
     },
-    artifactSnapshot,
-  );
+  };
+  const resultFile = {
+    v: 1 as const,
+    sourceHref: artifactRef,
+    fileName,
+    mediaType: 'text/markdown' as const,
+    contentDigest: fileDigest,
+    byteLength: fileBytes.length,
+    contentBase64: fileBytes.toString('base64'),
+  };
+  const submitResult = (target: CollectiveConnector) =>
+    target.submitReply(
+      source,
+      'message:source',
+      'work:canonical-task',
+      operation.outboxId,
+      `A named answer: [Open result](${artifactRef})`,
+      {
+        catId: 'codex-sol',
+        agentId: 'codex-sol',
+        displayName: 'Sol',
+        sessionRef: 'invocation:verified',
+      },
+      artifactSnapshot,
+      undefined,
+      undefined,
+      resultFile,
+    );
+  const legacyServiceConnector = await openConnector(f.connectorDirectory, async (input, init) => {
+    const response = await fetch(input, init);
+    if (new URL(String(input)).pathname !== '/api/meta') return response;
+    const { capabilities: _capabilities, ...metadata } = (await response.json()) as Record<string, unknown>;
+    return new Response(JSON.stringify(metadata), {
+      status: response.status,
+      headers: { 'content-type': 'application/json; charset=utf-8' },
+    });
+  });
+  await expect(submitResult(legacyServiceConnector)).rejects.toMatchObject({ code: 'RETURN_UNAVAILABLE' });
+  await submitResult(connector);
   expect(await connector.sync(connection.connectionId)).toMatchObject({ liveStatus: 'offline' });
   const before = await f.store.listEventsForHuman(f.ownerSessionToken, f.collectiveId);
   expect(before).toHaveLength(3);
   const resultEvent = before[2];
   if (!resultEvent) throw new Error('Expected the exact Work result to be accepted');
+  const publicHref = /\[Open result\]\((https?:\/\/[^)]+)\)/u.exec(resultEvent.body)?.[1];
+  expect(publicHref).toMatch(new RegExp(`^${f.server.url}/api/collaboration/work-result-files/wrf_[a-f0-9]{64}/`));
+  if (!publicHref) throw new Error('Expected one Service-owned Work result file href');
+  expect((await fetch(publicHref)).status).toBe(401);
+  const publicFile = await fetch(publicHref, { headers: { authorization: `Bearer ${f.ownerSessionToken}` } });
+  expect(publicFile.status).toBe(200);
+  expect(publicFile.headers.get('content-type')).toBe('text/markdown; charset=utf-8');
+  expect(publicFile.headers.get('x-content-type-options')).toBe('nosniff');
+  expect(publicFile.headers.get('cache-control')).toBe('private, no-store');
+  expect(Buffer.from(await publicFile.arrayBuffer())).toEqual(fileBytes);
+  const malformedFile = await fetch(`${f.server.url}/api/collaboration/work-result-files/not-a-file/result.md`, {
+    headers: { authorization: `Bearer ${f.ownerSessionToken}` },
+  });
+  expect(malformedFile.status).toBe(404);
+  expect(await malformedFile.json()).toMatchObject({ error: { code: 'WORK_RESULT_FILE_NOT_FOUND' } });
   expect(resultEvent).toMatchObject({
     workResultReceipt: {
       assignmentEventId: assignment.eventId,
@@ -1347,8 +1422,11 @@ it('keeps a generic same-Cat callback from returning old Work after route remova
 async function createFixture() {
   const serviceDirectory = await temporaryDirectory('collective-service-connector-');
   const connectorDirectory = await temporaryDirectory('collective-connector-');
+  const port = await availableLoopbackPort();
+  const publicUrl = `http://127.0.0.1:${port}`;
   const opened = await CollectiveServiceStore.open({
     dataDirectory: serviceDirectory,
+    humanAuthRedirectUri: `${publicUrl}/api/auth/github/callback`,
     humanAuthProvider: {
       id: 'github',
       readiness: { ready: true },
@@ -1395,7 +1473,8 @@ async function createFixture() {
   const server = await startCollectiveServer({
     store: opened.store,
     host: '127.0.0.1',
-    port: 0,
+    port,
+    publicUrl,
     allowedHostOrigins: ['http://localhost:5172'],
   });
   servers.push(server);
@@ -1408,6 +1487,21 @@ async function createFixture() {
     ownerSessionToken: owner.sessionToken,
     ownerHumanId: owner.human.humanId,
   };
+}
+
+async function availableLoopbackPort(): Promise<number> {
+  const reservation = createNodeServer();
+  await new Promise<void>((resolve, reject) => {
+    reservation.once('error', reject);
+    reservation.listen(0, '127.0.0.1', () => {
+      reservation.off('error', reject);
+      resolve();
+    });
+  });
+  const address = reservation.address();
+  if (!address || typeof address === 'string') throw new Error('Could not reserve a loopback Service port');
+  await new Promise<void>((resolve, reject) => reservation.close((error) => (error ? reject(error) : resolve())));
+  return address.port;
 }
 
 function openConnector(dataDirectory: string, fetchImpl?: typeof fetch) {

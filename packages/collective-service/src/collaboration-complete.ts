@@ -7,6 +7,7 @@ import {
   requireWorkAccountableHuman,
   requireWorkRevision,
 } from './collaboration-work.js';
+import { emitDependencyCompletionWakes } from './collaboration-work-wake.js';
 import { CollectiveServiceError } from './errors.js';
 import type { MutableServiceState } from './state.js';
 
@@ -53,6 +54,7 @@ export function completeCollectiveWork(
   work.lifecycle = 'completed';
   const at = new Date(now).toISOString();
   advanceWork(work, 'completed', humanActor(human), at);
+  emitDependencyCompletionWakes(state, work, human, now);
   recordCollaborationOperation(state, {
     ...replay,
     actorScope,

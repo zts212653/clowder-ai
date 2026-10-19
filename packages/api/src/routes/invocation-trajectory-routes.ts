@@ -101,16 +101,20 @@ export function registerInvocationTrajectoryRoutes(
     if (request.query.reveal !== undefined && request.query.reveal !== 'exact') {
       return reply.status(400).send({ error: 'Invalid reveal mode', code: 'INVOCATION_GENERATION_REVEAL_INVALID' });
     }
-    const observedRead =
-      (stage: TranscriptReadStage) => (sessions: ReadableSession[], invocationId: string, signal?: AbortSignal) => {
-        let observer: TranscriptReadObserver | undefined;
-        try {
-          observer = dependencies.createReadObserver?.(request.id, stage);
-        } catch {
-          /* Observation is optional. */
-        }
-        return dependencies.readInvocationEvents(sessions, invocationId, signal, observer);
-      };
+    // The resolver has already read every authorized candidate and selected the
+    // matching sessions. Reuse that request's snapshot instead of hydrating it
+    // again; the next HTTP request still performs its own fresh read.
+    let canonicalEvents: ReadonlyMap<string, readonly TranscriptEvent[]> = new Map();
+    const readCanonicalEvents = async (sessions: ReadableSession[], invocationId: string, signal?: AbortSignal) => {
+      let observer: TranscriptReadObserver | undefined;
+      try {
+        observer = dependencies.createReadObserver?.(request.id, 'canonical');
+      } catch {
+        /* Observation is optional. */
+      }
+      canonicalEvents = await dependencies.readInvocationEvents(sessions, invocationId, signal, observer);
+      return canonicalEvents;
+    };
     const result = await withTranscriptReadSignal(request, reply, (signal) =>
       resolveCanonicalInvocationTrajectory(
         {
@@ -126,7 +130,7 @@ export function registerInvocationTrajectoryRoutes(
           turnExecutionStore,
           sessionChainStore,
           threadStore,
-          readInvocationEvents: observedRead('canonical'),
+          readInvocationEvents: readCanonicalEvents,
         },
       ),
     );
@@ -139,10 +143,7 @@ export function registerInvocationTrajectoryRoutes(
         .send({ error: 'Invocation session chain changed during read', code: 'INVOCATION_SESSION_CHAIN_CHANGED' });
     }
     try {
-      const bySession = await withTranscriptReadSignal(request, reply, (signal) =>
-        observedRead('generations')(sessions as ReadableSession[], request.params.invocationId, signal),
-      );
-      const events = sessions.flatMap((session) => [...(bySession.get((session as ReadableSession).id) ?? [])]);
+      const events = sessionIds.flatMap((sessionId) => [...(canonicalEvents.get(sessionId) ?? [])]);
       const hidden = projectRequestGenerations(events);
       const gaps = projectRequestGenerationGaps(events);
       let generations = hidden;

@@ -1,6 +1,7 @@
 'use client';
 
 import type { LifecycleActiveRun } from '@cat-cafe/shared';
+import { useMessageNavigation } from '@/components/thread-chat/MessageNavigationContext';
 import {
   dispatchReadText,
   dispatchReceiptDisplay,
@@ -8,7 +9,6 @@ import {
   isUnconfirmedAppend,
 } from '@/lib/dispatch-receipt-display';
 import type { ChatMessage, QueueEntry } from '@/stores/chat-types';
-import { focusLineageMessage } from '@/utils/focusLineageMessage';
 import { CatAvatar } from './CatAvatar';
 import { projectMessageDispatchAvatars } from './message-dispatch-projection';
 import { QueueTargetRetryButton } from './QueueTargetRetryButton';
@@ -46,6 +46,7 @@ export function MessageDispatchAvatars({
   queue = [],
   inline = false,
 }: MessageDispatchAvatarsProps) {
+  const navigateToMessage = useMessageNavigation();
   const projections = projectMessageDispatchAvatars(message, timelineMessages, activeRuns);
   const pending = queue.filter((entry) => entry.messageId === message.id);
   if (projections.length === 0 && pending.length === 0) return null;
@@ -132,7 +133,7 @@ export function MessageDispatchAvatars({
                 type="button"
                 aria-label={`看${label}的回复`}
                 className="rounded hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-current"
-                onClick={() => focusLineageMessage(projection.statusMessageId!)}
+                onClick={() => navigateToMessage(projection.statusMessageId!)}
               >
                 · 看回复 ↓
               </button>

@@ -42,6 +42,7 @@ const observedEligibilitySchema = z
 
 const publicProfileSchema = z
   .object({
+    displayLabel: displayNameSchema.optional(),
     description: z.string().trim().min(1).max(120).optional(),
     avatarDataUrl: z
       .string()
@@ -144,6 +145,7 @@ export interface ObservedCatEligibility {
 }
 
 export interface PublicParticipationProfile {
+  readonly displayLabel?: string;
   readonly description?: string;
   readonly avatarDataUrl?: string;
 }

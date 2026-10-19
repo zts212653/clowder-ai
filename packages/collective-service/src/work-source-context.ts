@@ -6,9 +6,9 @@ import {
 } from '@cat-cafe/shared';
 import { workReferences } from './collaboration-agent-continuation.js';
 import { requireWorkSource } from './collaboration-command-helpers.js';
-import { projectCollectiveWork } from './collaboration-work.js';
+import { isAcceptedUnassignedWork, projectCollectiveWork } from './collaboration-work.js';
 import { assertConnectionCoordinates, requireAuthorizedHuman, requireConnection } from './connection-authority.js';
-import { requireParticipationSource } from './participation-store.js';
+import { canReadLinkedParticipationSource, requireParticipationSource } from './participation-store.js';
 import type { ServiceState } from './state.js';
 
 /** Discovery is confined to the source's current public channel and this exact assigned Café/Cat. */
@@ -19,11 +19,13 @@ export function readWorkSourceContext(
   now = Date.now(),
 ) {
   const source = requireParticipationSource(state, credential, { ...input, eventId: input.sourceEventId });
+  const visibility = { credential, input };
   const candidates = Object.values(state.works).filter(
     (work) =>
       work.collectiveId === input.collectiveId &&
       work.sourceLocation.channelId === source.location.channelId &&
       ((work.assignment?.connectionId === input.connectionId && work.assignment.catId === input.catId) ||
+        (work.sourceEventId === source.eventId && isAcceptedUnassignedWork(work)) ||
         (work.lifecycle === 'proposed' &&
           work.proposedBy.kind === 'agent' &&
           work.proposedBy.connectionId === input.connectionId &&
@@ -38,8 +40,8 @@ export function readWorkSourceContext(
       Number(relatedIds.has(b.workId)) - Number(relatedIds.has(a.workId)) || b.updatedAt.localeCompare(a.updatedAt),
   );
   const matters = ordered.slice(0, 30).map((work) => ({
-    ...projectPublicMatter(state, work, now),
-    ...(work.lifecycle === 'proposed' && work.sourceEventId === source.eventId
+    ...projectPublicMatter(state, work, now, visibility),
+    ...(work.sourceEventId === source.eventId && (work.lifecycle === 'proposed' || isAcceptedUnassignedWork(work))
       ? { proposedOutcome: work.intendedOutcome }
       : {}),
   }));
@@ -89,7 +91,16 @@ export function readWorkRoutingContext(
     });
     return true;
   });
-  const matters = visible.slice(0, 30).map((work) => projectPublicMatter(state, work, now));
+  const matters = visible.slice(0, 30).map((work) =>
+    projectPublicMatter(state, work, now, {
+      credential,
+      input: {
+        ...input,
+        catId: work.assignment?.catId ?? '',
+        participationRevision: declaration?.revision ?? 0,
+      },
+    }),
+  );
   return collectiveWorkSourceContextSchema.parse({
     sourceEventId: source.eventId,
     matters,
@@ -98,7 +109,15 @@ export function readWorkRoutingContext(
   });
 }
 
-function projectPublicMatter(state: ServiceState, work: CollectiveWorkRecord, now: number) {
+function projectPublicMatter(
+  state: ServiceState,
+  work: CollectiveWorkRecord,
+  now: number,
+  visibility: {
+    readonly credential: string;
+    readonly input: CollectiveWorkSourceReadRequest;
+  },
+) {
   const projection = projectCollectiveWork(state, work, now);
   return {
     workId: work.workId,
@@ -117,5 +136,70 @@ function projectPublicMatter(state: ServiceState, work: CollectiveWorkRecord, no
     revision: work.revision,
     executionRevision: work.executionAuthority?.revision,
     requestKind: work.executionAuthority?.requestKind ?? work.acceptance?.requestKind ?? work.proposedRequestKind,
+    projectContext: projectWorkContext(state, work, now, visibility),
   };
+}
+
+function projectWorkContext(
+  state: ServiceState,
+  work: CollectiveWorkRecord,
+  now: number,
+  visibility: {
+    readonly credential: string;
+    readonly input: CollectiveWorkSourceReadRequest;
+  },
+) {
+  const associatedProjects = Object.values(state.roadmaps).filter(
+    (roadmap) => roadmap.collectiveId === work.collectiveId && roadmap.workIds.includes(work.workId),
+  );
+  const visibleProjects = associatedProjects.filter((roadmap) =>
+    canReadLinkedSource(state, visibility, roadmap.sourceEventId),
+  );
+  const dependencies = work.dependencyWorkIds
+    .map((workId) => state.works[workId])
+    .filter((candidate): candidate is CollectiveWorkRecord => Boolean(candidate?.collectiveId === work.collectiveId));
+  const visibleDependencies = dependencies.filter((dependency) =>
+    canReadLinkedSource(state, visibility, dependency.sourceEventId),
+  );
+  return {
+    projects: visibleProjects.slice(0, 12).map((roadmap) => ({
+      roadmapId: roadmap.roadmapId,
+      sourceEventId: roadmap.sourceEventId,
+      sourceLocation: roadmap.sourceLocation,
+      title: roadmap.title,
+      purpose: roadmap.purpose,
+      status: roadmap.status,
+      revision: roadmap.revision,
+    })),
+    unreadableProjectCount: associatedProjects.length - visibleProjects.length,
+    projectsHasMore: visibleProjects.length > 12,
+    dependencies: visibleDependencies.slice(0, 30).map((dependency) => {
+      const dependencyProjection = projectCollectiveWork(state, dependency, now);
+      return {
+        workId: dependency.workId,
+        sourceEventId: dependency.sourceEventId,
+        sourceLocation: dependency.sourceLocation,
+        title: dependency.title,
+        intendedOutcomePreview: dependency.intendedOutcome.slice(0, 500),
+        lifecycle: dependency.lifecycle,
+        status: dependencyProjection.status,
+        resultEventId: dependency.resultEventId,
+        resultRevision: dependency.resultRevision,
+        revision: dependency.revision,
+      };
+    }),
+    unreadableDependencyCount: dependencies.length - visibleDependencies.length,
+    dependenciesHasMore: visibleDependencies.length > 30,
+  };
+}
+
+function canReadLinkedSource(
+  state: ServiceState,
+  visibility: {
+    readonly credential: string;
+    readonly input: CollectiveWorkSourceReadRequest;
+  },
+  eventId: string,
+) {
+  return canReadLinkedParticipationSource(state, visibility.credential, visibility.input, eventId);
 }

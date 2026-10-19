@@ -85,6 +85,7 @@ export function MediaGalleryBlock({
                         caption: item.caption,
                         mediaType: 'image',
                         entry: source,
+                        item: { kind: 'media-gallery', blockId: block.id, itemIndex: i },
                       })
                     }
                     className="block w-full rounded focus:outline-2 focus:outline-[var(--semantic-info)]"
@@ -124,6 +125,7 @@ export function MediaGalleryBlock({
                             caption: item.caption,
                             mediaType: 'image',
                             entry: source,
+                            item: { kind: 'media-gallery', blockId: block.id, itemIndex: i },
                           })
                         }
                       >

@@ -11,9 +11,9 @@ tips_exempt: Isolated roadshow physics/telemetry experiment; does not add a Hub 
 
 用官方现成 walking / standing / 左右踢球 ONNX，在真实 MuJoCo + BAM M6 中验证足球动作的起点。这里不训练网络、不签发采用或独立验证，也不修改原 walking 实验。operator 总目标仍是鸭鸭学会踢足球；本切片先交付能复跑的球状态、触球、关节动作和真实画面。
 
-**2026-09-09 演示数据入口**：真实谱系、GT 与完整结果，包含 v4 及本次十二场公开球位补测。共五个控制器版本、八轮测量、56 场记录、54,256 条状态与 24 段录像；重复轨迹和窗口前缀不计作独立样本。可直接读取 JSON/CSV、原件与训练准备说明，补测不生成新版本，也不代表正式足球验收。
+**2026-09-09 演示数据入口**：[真实谱系、GT 与完整结果](readiness/20260909-demo/README.md)，包含 v4 及本次十二场公开球位补测。共五个控制器版本、八轮测量、56 场记录、54,256 条状态与 24 段录像；重复轨迹和窗口前缀不计作独立样本。可直接读取 JSON/CSV、原件与训练准备说明，补测不生成新版本，也不代表正式足球验收。
 
-来源锁在 probe-plan.json：官方 [模型库 088524a64e2557dc453256b6071dbb9d23888802](https://huggingface.co/pollen-robotics/microduck-policies/tree/088524a64e2557dc453256b6071dbb9d23888802) 与 `microduck_rl@29e887ecfbf5d37144759e5a9f8a176dfb83d547`。四个 ONNX 和官方 manifest 均逐字节核 hash；walking ONNX 与原行走实验相同。场景与 include 链也核 hash。
+来源锁在 [probe-plan.json](probe-plan.json)：官方 [模型库 088524a64e2557dc453256b6071dbb9d23888802](https://huggingface.co/pollen-robotics/microduck-policies/tree/088524a64e2557dc453256b6071dbb9d23888802) 与 `microduck_rl@29e887ecfbf5d37144759e5a9f8a176dfb83d547`。四个 ONNX 和官方 manifest 均逐字节核 hash；walking ONNX 与原行走实验相同。场景与 include 链也核 hash。
 
 两个待观察的动作持续时间来自真实来源：官方模型 manifest 的 0.5 秒与该版本 `infer_policy.py` 命令行默认的 3 秒。左右脚各自比较，另有不踢球、远球和向前偏移 15 mm 的对照；完整 10 个公开 case 在首次物理运行前提交。它们是公开准备探测，不是密封样本、正式候选或 operator 已冻结的足球验收标准。
 
@@ -49,7 +49,7 @@ python run_probe.py --source-root /path/to/microduck_rl --assets /tmp/microduck-
 
 首轮完整结果 (internal) 包含 10 场景、4,010 条状态、4 段真实录像：近球能踢，远球不动；0.5 s / 3 s 没有球轨迹增益。接触计数是物理子步记录数，不是踢球次数。原场景 `condim=3` 未启用滚动摩擦，长距离滚动不能用作真实射程或策略优劣证明。
 
-approach-plan.json 在执行前冻结 8 个 20 秒公开场景：两项远球原地踢对照，以及左右脚各自的近球、正前方远球、侧前方远球。`ApproachController` 直接读取 MuJoCo 球位置和机器人姿态，转成机器人坐标中的目标位置误差，发出有界 walking 速度指令；到脚前窗口后切 standing 停稳，触发一次固定 kick，之后站立观察。它没有相机识别、噪声鲁棒性或新网络训练。阈值是探测控制器参数，未被声明为 operator 的足球成功标准。
+[approach-plan.json](approach-plan.json) 在执行前冻结 8 个 20 秒公开场景：两项远球原地踢对照，以及左右脚各自的近球、正前方远球、侧前方远球。`ApproachController` 直接读取 MuJoCo 球位置和机器人姿态，转成机器人坐标中的目标位置误差，发出有界 walking 速度指令；到脚前窗口后切 standing 停稳，触发一次固定 kick，之后站立观察。它没有相机识别、噪声鲁棒性或新网络训练。阈值是探测控制器参数，未被声明为 operator 的足球成功标准。
 
 ```bash
 python run_probe.py --plan approach-plan.json --source-root /path/to/microduck_rl \

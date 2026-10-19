@@ -6,6 +6,7 @@ import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { build } from 'vite';
 import { chromium } from '../../../ppt-forge/node_modules/playwright/index.mjs';
+import './reply-navigation-owner.cases.mjs';
 
 test(
   'real Append region exposes exact read status in text at desktop and mobile widths',

@@ -19,6 +19,7 @@ import {
   verifySameRunGuard,
 } from './f311-exploration-recovery.journey.mjs';
 import { startExplorationBrowserFixture } from './f311-exploration-workspace.harness.mjs';
+import { verifyHistoryEntryJourney } from './f311-history-entry.journey.mjs';
 import { waitForResponsiveWorkspaceLayout } from './f311-responsive-workspace-layout.mjs';
 import { verifyV2ClosureJourney } from './f311-v2-closure.journey.mjs';
 import { verifyV2ExplorationReading } from './f311-v2-exploration.journey.mjs';
@@ -96,6 +97,17 @@ test(
     report.publicSourceReading = await verifyV2PublicSources({ fixture, browser, capture });
     report.checks.push(
       '352afab6 exact original target snapshot through actual authenticated reader; v1-v4 same-scene four-video sync; both Cortex originals and ten-second read window; no invented ancestry, narrow stacking/dark/explicit reentry; not production auth or AC-UX6.',
+    );
+  },
+);
+
+test(
+  'v2 history entry leads with the published archive, recovers an old selection, opens exact sources, and returns',
+  { timeout: 120_000 },
+  async () => {
+    report.historyEntry = await verifyHistoryEntryJourney({ fixture, browser, capture });
+    report.checks.push(
+      'Settings → Program preserves an old F314 coordinate, leads with explicit current-history recovery before evaluation gaps, opens 11-step/26-case history with exact original and cited source links, and restores the exact selected step after return; zero Program/proposal writes.',
     );
   },
 );

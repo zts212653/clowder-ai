@@ -3044,7 +3044,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/collective-participation-tools.js#handleCollectiveAcceptWork",
-      "protectedImplementationDigest": "sha256:00f7490d5552c7c268f3faa671bcaec48bdd2a8771dcb4f2c520a3a236b5b99f"
+      "protectedImplementationDigest": "sha256:4dd2ac0a40d1b3ca61efdfaca30f939e7427f473a25a58c0bf17935c18d7d6aa"
     },
     {
       "name": "cat_cafe_collective_artifact_command",
@@ -3252,7 +3252,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/collective-participation-tools.js#handleCollectiveArtifactCommand",
-      "protectedImplementationDigest": "sha256:00f7490d5552c7c268f3faa671bcaec48bdd2a8771dcb4f2c520a3a236b5b99f"
+      "protectedImplementationDigest": "sha256:4dd2ac0a40d1b3ca61efdfaca30f939e7427f473a25a58c0bf17935c18d7d6aa"
     },
     {
       "name": "cat_cafe_collective_continue_work",
@@ -3333,7 +3333,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/collective-participation-tools.js#handleCollectiveContinueWork",
-      "protectedImplementationDigest": "sha256:00f7490d5552c7c268f3faa671bcaec48bdd2a8771dcb4f2c520a3a236b5b99f"
+      "protectedImplementationDigest": "sha256:4dd2ac0a40d1b3ca61efdfaca30f939e7427f473a25a58c0bf17935c18d7d6aa"
     },
     {
       "name": "cat_cafe_collective_current_context",
@@ -3369,7 +3369,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/collective-participation-tools.js#handleCollectiveCurrentContext",
-      "protectedImplementationDigest": "sha256:00f7490d5552c7c268f3faa671bcaec48bdd2a8771dcb4f2c520a3a236b5b99f"
+      "protectedImplementationDigest": "sha256:4dd2ac0a40d1b3ca61efdfaca30f939e7427f473a25a58c0bf17935c18d7d6aa"
     },
     {
       "name": "cat_cafe_collective_progress",
@@ -3428,7 +3428,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/collective-participation-tools.js#handleCollectiveProgress",
-      "protectedImplementationDigest": "sha256:00f7490d5552c7c268f3faa671bcaec48bdd2a8771dcb4f2c520a3a236b5b99f"
+      "protectedImplementationDigest": "sha256:4dd2ac0a40d1b3ca61efdfaca30f939e7427f473a25a58c0bf17935c18d7d6aa"
     },
     {
       "name": "cat_cafe_collective_propose_work",
@@ -3491,7 +3491,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/collective-participation-tools.js#handleCollectiveProposeWork",
-      "protectedImplementationDigest": "sha256:00f7490d5552c7c268f3faa671bcaec48bdd2a8771dcb4f2c520a3a236b5b99f"
+      "protectedImplementationDigest": "sha256:4dd2ac0a40d1b3ca61efdfaca30f939e7427f473a25a58c0bf17935c18d7d6aa"
     },
     {
       "name": "cat_cafe_collective_read_context",
@@ -3548,7 +3548,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/collective-participation-tools.js#handleCollectiveReadContext",
-      "protectedImplementationDigest": "sha256:00f7490d5552c7c268f3faa671bcaec48bdd2a8771dcb4f2c520a3a236b5b99f"
+      "protectedImplementationDigest": "sha256:4dd2ac0a40d1b3ca61efdfaca30f939e7427f473a25a58c0bf17935c18d7d6aa"
     },
     {
       "name": "cat_cafe_collective_reply",
@@ -3608,7 +3608,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/collective-participation-tools.js#handleCollectiveReply",
-      "protectedImplementationDigest": "sha256:00f7490d5552c7c268f3faa671bcaec48bdd2a8771dcb4f2c520a3a236b5b99f"
+      "protectedImplementationDigest": "sha256:4dd2ac0a40d1b3ca61efdfaca30f939e7427f473a25a58c0bf17935c18d7d6aa"
     },
     {
       "name": "cat_cafe_collective_set_interest",
@@ -3662,7 +3662,79 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/collective-participation-tools.js#handleCollectiveSetInterest",
-      "protectedImplementationDigest": "sha256:00f7490d5552c7c268f3faa671bcaec48bdd2a8771dcb4f2c520a3a236b5b99f"
+      "protectedImplementationDigest": "sha256:4dd2ac0a40d1b3ca61efdfaca30f939e7427f473a25a58c0bf17935c18d7d6aa"
+    },
+    {
+      "name": "cat_cafe_collective_suggest_project_work",
+      "serverFamily": "collab",
+      "resourceFamily": "collective-participation",
+      "actions": [
+        "suggest-project-work"
+      ],
+      "activeState": "canonical",
+      "description": "Propose one durable Task candidate for a visible Collective Project. Use when: current-context exposes a projectRef and the Project needs a new Task, or a current Work needs a newly proposed prerequisite. NOT for: accepting the candidate, changing a Project directly, linking an arbitrary existing Work, or proposing a generic non-Project matter (use collective_propose_work). Output: one persisted proposed Work with Project provenance and pending_human_decision; no Human responsibility, assignment, or execution begins. GOTCHA: use only opaque projectRef/workRef values from this invocation; the Project Human may edit, accept, or ignore the candidate, and Service revalidates current revisions, authority, and dependency cycles on acceptance.",
+      "descriptionDigest": "sha256:74f4f3c034cffaa6def99e10cd3fdf3294edf7d4766eb7f475d14bd674cc8918",
+      "descriptionCharacters": 746,
+      "descriptionTokensCl100kBase": 141,
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "additionalProperties": false,
+        "properties": {
+          "contextRef": {
+            "description": "Opaque contextRef returned for this invocation exact Collective source.",
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "intendedOutcome": {
+            "description": "Reviewable proposed outcome; the Human may edit it before accepting the candidate.",
+            "maxLength": 32000,
+            "minLength": 1,
+            "type": "string"
+          },
+          "prerequisiteForWorkRef": {
+            "description": "Optional opaque workRef from the same current-context matter; when present, this candidate becomes a new prerequisite Task for that Work.",
+            "maxLength": 2000,
+            "minLength": 1,
+            "type": "string"
+          },
+          "projectRef": {
+            "description": "Opaque projectRef from current-context for the exact visible Project and revision.",
+            "maxLength": 2000,
+            "minLength": 1,
+            "type": "string"
+          },
+          "title": {
+            "description": "Concise title for the proposed Project Task.",
+            "maxLength": 200,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "contextRef",
+          "projectRef",
+          "title",
+          "intendedOutcome"
+        ],
+        "type": "object"
+      },
+      "inputSchemaDigest": "sha256:6a5ec190067c6b6519060a4a993e9cab74f49a5082ed09ed9dd0a116d595a1a5",
+      "annotations": {
+        "destructiveHint": false,
+        "openWorldHint": true,
+        "readOnlyHint": false
+      },
+      "runtimeProfiles": [
+        "collective-participation",
+        "full"
+      ],
+      "schemaDelivery": {
+        "evidenceRef": "file:packages/mcp-server/src/tools/collective-participation-tools.ts",
+        "policy": "host-default"
+      },
+      "implementationRef": "module:./tools/collective-participation-tools.js#handleCollectiveSuggestProjectWork",
+      "protectedImplementationDigest": "sha256:4dd2ac0a40d1b3ca61efdfaca30f939e7427f473a25a58c0bf17935c18d7d6aa"
     },
     {
       "name": "cat_cafe_community_await_external",
@@ -10253,6 +10325,44 @@
                 {
                   "additionalProperties": false,
                   "properties": {
+                    "gallery": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "count": {
+                          "maximum": 10001,
+                          "minimum": 1,
+                          "type": "integer"
+                        },
+                        "index": {
+                          "maximum": 10000,
+                          "minimum": 0,
+                          "type": "integer"
+                        },
+                        "item": {
+                          "$ref": "#/properties/contextAttachments/items/anyOf/2/properties/source/anyOf/0/properties/artifactFile/properties/item"
+                        },
+                        "messageId": {
+                          "$ref": "#/properties/contextAttachments/items/anyOf/2/properties/source/anyOf/0/properties/artifactFile/properties/item/anyOf/0/properties/blockId"
+                        },
+                        "messageRevision": {
+                          "maxLength": 64,
+                          "pattern": "^\\d+$",
+                          "type": "string"
+                        },
+                        "threadId": {
+                          "$ref": "#/properties/contextAttachments/items/anyOf/2/properties/source/anyOf/0/properties/artifactFile/properties/item/anyOf/0/properties/blockId"
+                        }
+                      },
+                      "required": [
+                        "threadId",
+                        "messageId",
+                        "messageRevision",
+                        "item",
+                        "index",
+                        "count"
+                      ],
+                      "type": "object"
+                    },
                     "id": {
                       "maxLength": 128,
                       "minLength": 1,
@@ -11132,7 +11242,7 @@
         ],
         "type": "object"
       },
-      "inputSchemaDigest": "sha256:ebf89f4a9ddf61a8166fa769c2b5eb0423be872515447f8af3d8527515f97884",
+      "inputSchemaDigest": "sha256:287a1866f1f93bb01dc2e28e49445f9f2326366dc8fb8d6faadb6eb6670d00e4",
       "annotations": {
         "destructiveHint": false,
         "openWorldHint": false,
@@ -14721,7 +14831,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/content-modification-tools.js#handleReadContentModification",
-      "protectedImplementationDigest": "sha256:228034c2fc289433db820bb5c0e51dc48dc2884fb9071369ec6370c6449205d4"
+      "protectedImplementationDigest": "sha256:563c0db89d27e667d6c99cfdf7875050f310ca36d79ecff4e0e234f245168176"
     },
     {
       "name": "cat_cafe_read_development_return",
@@ -18209,7 +18319,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/content-modification-tools.js#handleRespondContentModification",
-      "protectedImplementationDigest": "sha256:228034c2fc289433db820bb5c0e51dc48dc2884fb9071369ec6370c6449205d4"
+      "protectedImplementationDigest": "sha256:563c0db89d27e667d6c99cfdf7875050f310ca36d79ecff4e0e234f245168176"
     },
     {
       "name": "cat_cafe_retain_memory_callback",
@@ -20819,91 +20929,6 @@
       "protectedImplementationDigest": "sha256:01d5f2bf141c6850aebbf8a19e6caa24bc3ccf7e33b059bb26b7005652333e59"
     },
     {
-      "name": "cat_cafe_submit_game_action",
-      "serverFamily": "collab",
-      "resourceFamily": "game",
-      "actions": [
-        "create"
-      ],
-      "activeState": "migration-candidate",
-      "description": "Submit a game action (kill/guard/divine/vote/speak/last_words). Only use when you are woken up for a game phase that requires your action. Server validates round/phase/seat/role automatically — invalid actions are rejected. GOTCHA: Always include a unique nonce string for idempotency — duplicate nonces are silently deduplicated. GOTCHA: target is required for kill/guard/divine/vote; text is required for speak/last_words.",
-      "descriptionDigest": "sha256:4af85b8d38779738d033fe700b255e312b5c2109abac1c5e81f11c3e8e1236e1",
-      "descriptionCharacters": 424,
-      "descriptionTokensCl100kBase": 98,
-      "inputSchema": {
-        "$schema": "http://json-schema.org/draft-07/schema#",
-        "additionalProperties": false,
-        "properties": {
-          "action": {
-            "description": "Action type: kill/guard/divine/vote/speak/last_words",
-            "minLength": 1,
-            "type": "string"
-          },
-          "gameId": {
-            "description": "Game UUID",
-            "minLength": 1,
-            "type": "string"
-          },
-          "nonce": {
-            "description": "Unique string for idempotency",
-            "maxLength": 200,
-            "minLength": 1,
-            "type": "string"
-          },
-          "phase": {
-            "description": "Current phase name (e.g. night_wolf, day_vote)",
-            "minLength": 1,
-            "type": "string"
-          },
-          "round": {
-            "description": "Current round number",
-            "minimum": 1,
-            "type": "integer"
-          },
-          "seat": {
-            "description": "Your seat number",
-            "minimum": 1,
-            "type": "integer"
-          },
-          "target": {
-            "description": "Target seat number (for kill/guard/divine/vote)",
-            "minimum": 1,
-            "type": "integer"
-          },
-          "text": {
-            "description": "Speech content (for speak/last_words)",
-            "maxLength": 2000,
-            "type": "string"
-          }
-        },
-        "required": [
-          "gameId",
-          "round",
-          "phase",
-          "seat",
-          "action",
-          "nonce"
-        ],
-        "type": "object"
-      },
-      "inputSchemaDigest": "sha256:dda81dcc0e4e9dd6eb45c188064bece83c86e71b108d0977ec3e01a0c7fe04cc",
-      "annotations": {
-        "destructiveHint": false,
-        "openWorldHint": false,
-        "readOnlyHint": false
-      },
-      "runtimeProfiles": [
-        "full"
-      ],
-      "schemaDelivery": {
-        "candidate": "discoverable",
-        "evidenceRef": "file:packages/mcp-server/src/tools/game-action-tools.ts",
-        "policy": "host-default"
-      },
-      "implementationRef": "module:./tools/game-action-tools.js#handleSubmitGameAction",
-      "protectedImplementationDigest": "sha256:3ae84ab985e2855ef0a15137fb3ef600b778b026236cbe1d58a7a0a6f1cb4ae4"
-    },
-    {
       "name": "cat_cafe_take_over_content_modification",
       "serverFamily": "collab",
       "resourceFamily": "collaborative-content",
@@ -20911,10 +20936,10 @@
         "update"
       ],
       "activeState": "canonical",
-      "description": "Take over one delivered Human message addressed to this authenticated cat as one durable text or media modification request. Use when: the Human asks the named cat to modify exact-revision workspace quotes from the same file/base, one canonical PNG/MP4 work with named media ranges or a whole-work attachment, or delivered project-screening marks from the same input/media version. Not for: caller-supplied identities/body/anchors, screenshots as source identity, unversioned or mixed sources, recalled messages, DOCX changes, human acceptance, or writing the original file. Input supplies only source message id and attempt UUID (plus permitted thread selection for agent-key auth); the server rereads owner identity, targets, version, ranges and withdrawal, reuses original media Task custody, and atomically gives competing addressed cats one request. Output: actual request/Task/execution state and server media selection-to-annotation ids. For media content and candidates use read_artifact_review/respond_artifact_review; for accepted project marks use video_project_command. Project takeover requires a real invocation that consumed the original Human message and creates one bound Task without resending the message. Reusing a Human source never creates another request.",
-      "descriptionDigest": "sha256:4c2bf8fb5e08abd60702bef3ed97ff1a272c0fef8a46bf976c35da37756fd47d",
-      "descriptionCharacters": 1278,
-      "descriptionTokensCl100kBase": 238,
+      "description": "Take over one delivered Human source selection as one durable modification request. Use when: the addressed Human asks this cat to modify exact-revision quotes from one file/base, a canonical image/video with places or a whole-work reference, or immutable project-screening marks. For a gallery message with multiple work sources, supply the exact attachmentId of the one media context_attachment to change; call separately for each requested work with a distinct operationId. Not for: batch Tasks, guessed first attachments, caller-supplied identities/body/anchors/paths, screenshots as identity, unversioned sources, recalled messages, DOCX changes, Human acceptance or writing the original file. Output: the existing owner-authorized request/Task/execution state and server selection-to-annotation ids. The server rereads the original Human, exact work/version and current rights; competing addressed cats reuse the same source-selection request. A retry UUID cannot select a different attachment. Omit attachmentId only for compatible single-source calls; ambiguous multi-source messages are refused. Use read_artifact_review/respond_artifact_review for media content/candidates, or video_project_command for accepted project marks. Project takeover still requires a real invocation that consumed the source; this tool never resends the Human message.",
+      "descriptionDigest": "sha256:e22a582a94675d6e4bb0c1c7066d80f68aee84c65f85d706639b2f899ddcd0b9",
+      "descriptionCharacters": 1355,
+      "descriptionTokensCl100kBase": 250,
       "inputSchema": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "additionalProperties": false,
@@ -20924,13 +20949,19 @@
             "minLength": 1,
             "type": "string"
           },
+          "attachmentId": {
+            "description": "Optional exact id of one canonical media context_attachment in the delivered Human message. Required to select one work in a multi-source gallery send; never a filename, path, URL or selection id. Omit for legacy single-source text/media/project takeover.",
+            "maxLength": 128,
+            "minLength": 1,
+            "type": "string"
+          },
           "operationId": {
-            "description": "UUID for this takeover attempt. Source-message identity owns the request, so retries or competing addressed cats reuse one request.",
+            "description": "Stable UUID for this takeover attempt. Retries must name the same source message and attachmentId. Competing addressed cats reuse the request for that same source selection.",
             "format": "uuid",
             "type": "string"
           },
           "sourceMessageId": {
-            "description": "Exact id of the delivered Human message addressed to this authenticated cat, carrying version-bound workspace-file quotes, a canonical PNG/MP4 media attachment, or an immutable project-screening selection.",
+            "description": "Exact id of the delivered Human message addressed to this authenticated cat, carrying version-bound workspace-file quotes, canonical media attachments, or an immutable project-screening selection.",
             "maxLength": 256,
             "minLength": 1,
             "type": "string"
@@ -20948,7 +20979,7 @@
         ],
         "type": "object"
       },
-      "inputSchemaDigest": "sha256:0a5c0279d761bcb0d1cf530fd3d2b59cc4faf8f09b0331fdae1cca93f895e8eb",
+      "inputSchemaDigest": "sha256:8a6ffd81eaf7088df84d29dab883d30edd09be4dde23b137ba556b5adc97381d",
       "annotations": {
         "destructiveHint": false,
         "openWorldHint": false,
@@ -20963,7 +20994,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/content-modification-tools.js#handleTakeOverContentModification",
-      "protectedImplementationDigest": "sha256:228034c2fc289433db820bb5c0e51dc48dc2884fb9071369ec6370c6449205d4"
+      "protectedImplementationDigest": "sha256:563c0db89d27e667d6c99cfdf7875050f310ca36d79ecff4e0e234f245168176"
     },
     {
       "name": "cat_cafe_teleport",
@@ -23044,7 +23075,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/content-modification-tools.js#handleVideoProjectCommand",
-      "protectedImplementationDigest": "sha256:228034c2fc289433db820bb5c0e51dc48dc2884fb9071369ec6370c6449205d4"
+      "protectedImplementationDigest": "sha256:563c0db89d27e667d6c99cfdf7875050f310ca36d79ecff4e0e234f245168176"
     },
     {
       "name": "cat_cafe_withdraw_deferred_person_memory",

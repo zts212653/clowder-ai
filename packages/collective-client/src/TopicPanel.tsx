@@ -189,7 +189,11 @@ interface TopicPanelProps {
   readonly humanNames: Readonly<Record<string, string>>;
   readonly canSteward: boolean;
   readonly onProposeWork: (sourceEventId: string) => void;
-  readonly onCommitWork: (work: CollectiveWorkProjection, participant?: CollectiveParticipant) => void;
+  readonly onCommitWork: (
+    work: CollectiveWorkProjection,
+    participant?: CollectiveParticipant,
+    accountability?: 'self' | 'unassigned',
+  ) => void;
   readonly onDeclineWork: (work: CollectiveWorkProjection) => void;
   readonly onAcceptWorkResult: (work: CollectiveWorkProjection) => void;
   readonly onRequestWorkRevision?: (work: CollectiveWorkProjection, feedback: string) => Promise<void>;

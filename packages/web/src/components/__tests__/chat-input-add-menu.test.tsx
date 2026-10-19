@@ -61,7 +61,6 @@ describe('ChatInputAddMenu', () => {
       onAttach: vi.fn(),
       onAddContext: vi.fn(),
       onWhisperToggle: vi.fn(),
-      onGameClick: vi.fn(),
       onClose: vi.fn(),
       messageDisposition: createMessageDisposition(),
       ...props,
@@ -77,7 +76,7 @@ describe('ChatInputAddMenu', () => {
   it('groups context, upload and optional modes behind one menu', () => {
     render();
     const menu = document.querySelector('[data-testid="composer-add-menu"]');
-    expect(document.querySelectorAll('[role="menuitem"]')).toHaveLength(4);
+    expect(document.querySelectorAll('[role="menuitem"]')).toHaveLength(3);
     expect(menu?.textContent?.startsWith('添加')).toBe(false);
     expect(menu?.className).not.toContain('border-cafe');
     expect(menu?.className).toContain('bg-cafe-surface-canvas');
@@ -85,7 +84,7 @@ describe('ChatInputAddMenu', () => {
     expect(menu?.textContent).toContain('上传附件');
     expect(menu?.textContent).toContain('图片、文档或压缩包，最多 5 个');
     expect(menu?.textContent).toContain('悄悄话');
-    expect(menu?.textContent).toContain('游戏');
+    expect(menu?.textContent).not.toContain('游戏');
     expect(menu?.textContent).not.toContain('这条发出去后');
   });
 

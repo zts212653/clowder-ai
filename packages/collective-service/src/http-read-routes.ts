@@ -66,6 +66,21 @@ export async function routeCollectiveRead(
     );
     return true;
   }
+  if (url.pathname === '/api/collaboration/work/accountability/pending') {
+    writeJson(
+      response,
+      200,
+      store.readCollectiveAccountabilityAttention(requireBearer(request), {
+        serviceInstanceId: requiredQuery(url, 'serviceInstanceId'),
+        collectiveId: requiredQuery(url, 'collectiveId'),
+        connectionId: requiredQuery(url, 'connectionId'),
+        offset: numberQuery(url, 'offset', 0),
+        limit: numberQuery(url, 'limit', 50),
+        ...(url.searchParams.get('snapshot') ? { snapshot: url.searchParams.get('snapshot') } : {}),
+      }),
+    );
+    return true;
+  }
   if (url.pathname === '/api/participation') {
     writeJson(
       response,

@@ -8,7 +8,7 @@ import { collectiveContextError, opaqueRef, verifyRef } from './collective-conte
 import { requireCollectiveInvocationSource } from './collective-invocation-binding.js';
 import type { CollectiveInvocationSource } from './collective-participation-source.js';
 import { resolveCollectiveParticipationSource } from './collective-participation-source.js';
-import { readCollectivePreparedResultArtifact } from './collective-prepared-result.js';
+import { readCollectivePreparedResultPublication } from './collective-prepared-result.js';
 import { readAcceptedPublicReply } from './collective-public-reply-read.js';
 import { assertReconsiderationInput, ownerWakeDecision } from './collective-work/collective-reconsideration-source.js';
 import {
@@ -19,8 +19,10 @@ import type { CollectiveWorkAuthority } from './collective-work/collective-work-
 import { publishCollectiveProgress } from './collective-work/collective-work-progress.js';
 import {
   type CollectiveContinueWorkInput,
+  type CollectiveSuggestProjectWorkInput,
   continueWorkFromSource,
   currentWorkSourceContext,
+  suggestProjectWorkFromSource,
 } from './collective-work/collective-work-source-context.js';
 
 export { collectiveContextError } from './collective-context-refs.js';
@@ -186,6 +188,15 @@ export class CollectiveCurrentContext {
     );
   }
 
+  async suggestProjectWork(auth: InvocationRecord, contextRef: string, input: CollectiveSuggestProjectWorkInput) {
+    const binding = await this.requireInvocationSource(auth);
+    if (binding.authority !== 'public_participation') {
+      throw collectiveContextError('WORK_AUTHORITY_REQUIRED', 'Private Work cannot create another Project suggestion');
+    }
+    verifyRef(auth, contextRef, 'context', binding.refScope);
+    return suggestProjectWorkFromSource(this.requireConnector(), auth, binding, input);
+  }
+
   async acceptWork(auth: InvocationRecord, contextRef: string, input: CollectiveWorkAcceptanceInput) {
     const binding = await this.requireInvocationSource(auth);
     if (binding.authority !== 'public_participation')
@@ -244,9 +255,9 @@ export class CollectiveCurrentContext {
     );
     verifyRef(auth, returnRef, 'return', binding.refScope);
     verifyRef(auth, replyOperationRef, `reply:${operation.outboxId}`, binding.refScope);
-    const artifactSnapshot =
+    const artifactPublication =
       'work' in binding
-        ? await readCollectivePreparedResultArtifact(
+        ? await readCollectivePreparedResultPublication(
             binding,
             auth,
             this.options.artifactReader,
@@ -268,11 +279,12 @@ export class CollectiveCurrentContext {
         displayName: binding.displayName,
         sessionRef: auth.invocationId,
       },
-      artifactSnapshot,
+      artifactPublication?.snapshot,
       'work' in binding ? binding.work.resultRevision : undefined,
       'work' in binding
         ? { revision: binding.work.executionRevision, assignmentEventId: binding.work.assignmentEventId }
         : undefined,
+      artifactPublication?.file,
     );
     await connector.sync(binding.source.connectionId);
     return this.current(auth);

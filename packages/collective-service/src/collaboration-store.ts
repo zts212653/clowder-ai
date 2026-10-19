@@ -4,6 +4,7 @@ import {
   castCollectiveVoteRequestSchema,
   closeCollectiveVoteRequestSchema,
   collectiveAcceptWorkRequestSchema,
+  collectiveAccountabilityAttentionReadRequestSchema,
   collectiveAgentWorkProposalRequestSchema,
   collectiveAssignedWorkByAssignmentReadRequestSchema,
   collectiveAssignedWorkReadRequestSchema,
@@ -13,15 +14,25 @@ import {
   collectiveWorkSourceReadRequestSchema,
   commitCollectiveWorkRequestSchema,
   completeCollectiveWorkRequestSchema,
+  createCollectiveProjectRequestSchema,
+  createCollectiveProjectTaskRequestSchema,
   createCollectiveRoadmapRequestSchema,
   createCollectiveVoteRequestSchema,
+  decideCollectiveProjectWorkSuggestionRequestSchema,
   declineCollectiveWorkRequestSchema,
   proposeCollectiveWorkRequestSchema,
+  requestCollectiveWorkAccountabilityRequestSchema,
   requestCollectiveWorkRevisionRequestSchema,
+  respondCollectiveWorkAccountabilityRequestSchema,
   setCollectiveRoadmapStatusRequestSchema,
   setCollectiveRoadmapWorksRequestSchema,
   setCollectiveWorkDependenciesRequestSchema,
 } from '@cat-cafe/shared';
+import {
+  requestCollectiveWorkAccountability,
+  respondCollectiveWorkAccountability,
+} from './collaboration-accountability.js';
+import { readCollectiveAccountabilityAttention } from './collaboration-accountability-attention.js';
 import { acceptCollectiveWorkAsAgent } from './collaboration-agent-acceptance.js';
 import { continueCollectiveWorkAsAgent } from './collaboration-agent-continuation.js';
 import {
@@ -36,6 +47,8 @@ import {
 import { commitCollectiveWork } from './collaboration-commit.js';
 import { completeCollectiveWork } from './collaboration-complete.js';
 import { collaborationOperationReplay, recordCollaborationOperation } from './collaboration-operations.js';
+import { createCollectiveProjectFromPage, createCollectiveProjectTask } from './collaboration-project-authoring.js';
+import { assertAgentProjectSuggestion, decideProjectWorkSuggestion } from './collaboration-project-suggestion.js';
 import { requestCollectiveWorkRevision } from './collaboration-revision.js';
 import {
   createCollectiveRoadmap,
@@ -52,9 +65,11 @@ import {
   assertDependencySet,
   projectCollectiveWork,
   requireCollectiveWork,
+  requireOrdinaryWorkTransition,
   requireWorkAccountableHuman,
   requireWorkRevision,
 } from './collaboration-work.js';
+import { emitDependencyCompletionWakes } from './collaboration-work-wake.js';
 import { assertConnectionCoordinates, requireAuthorizedHuman, requireConnection } from './connection-authority.js';
 import { CollectiveServiceError } from './errors.js';
 import { requireHumanAuthBinding, requireMembership, resolveSession } from './identity-store.js';
@@ -113,6 +128,11 @@ export class CollectiveCollaborationStore {
       );
     }
     return projectCollectiveWork(state, work, this.now());
+  }
+
+  readAccountabilityAttention(endpointCredential: string, unsafeInput: unknown) {
+    const input = collectiveAccountabilityAttentionReadRequestSchema.parse(unsafeInput);
+    return readCollectiveAccountabilityAttention(this.persistence.snapshot(), endpointCredential, input);
   }
 
   readSourceContext(endpointCredential: string, unsafeInput: unknown) {
@@ -192,6 +212,7 @@ export class CollectiveCollaborationStore {
         catId: participant.catId,
         displayName: participant.displayName,
       };
+      assertAgentProjectSuggestion(state, endpointCredential, input);
       return createWorkProposal(
         state,
         input,
@@ -229,6 +250,9 @@ export class CollectiveCollaborationStore {
         );
       const work = mutableWork(state, input.collectiveId, input.workId);
       requireWorkRevision(work, input.expectedRevision);
+      if (['completed', 'declined', 'cancelled'].includes(work.lifecycle)) {
+        throw new CollectiveServiceError('WORK_TERMINAL', 'Completed or closed Work cannot change dependencies', 409);
+      }
       requireWorkAccountableHuman(work, human.humanId);
       assertDependencySet(state, work, input.dependencyWorkIds);
       work.dependencyWorkIds = [...input.dependencyWorkIds];
@@ -273,6 +297,7 @@ export class CollectiveCollaborationStore {
         );
       const work = mutableWork(state, input.collectiveId, input.workId);
       requireWorkRevision(work, input.expectedRevision);
+      requireOrdinaryWorkTransition(work);
       if (work.lifecycle !== 'proposed') {
         throw new CollectiveServiceError('WORK_NOT_PROPOSED', 'Only a proposed Work can be declined', 409);
       }
@@ -337,6 +362,7 @@ export class CollectiveCollaborationStore {
       work.lifecycle = 'completed';
       const at = new Date(this.now()).toISOString();
       advanceWork(work, 'result_accepted', humanActor(human), at, work.resultEventId, undefined, resultRevision);
+      emitDependencyCompletionWakes(state, work, human, this.now());
       recordCollaborationOperation(state, {
         ...replay,
         actorScope,
@@ -362,6 +388,46 @@ export class CollectiveCollaborationStore {
     return this.persistence.transaction((state) => {
       const human = requireHumanCommand(state, sessionToken, input);
       return createCollectiveRoadmap(state, input, human, this.now());
+    });
+  }
+
+  async createProject(sessionToken: string, unsafeInput: unknown) {
+    const input = createCollectiveProjectRequestSchema.parse(unsafeInput);
+    return this.persistence.transaction((state) => {
+      const human = requireHumanCommand(state, sessionToken, input);
+      return createCollectiveProjectFromPage(state, input, human, this.now());
+    });
+  }
+
+  async createProjectTask(sessionToken: string, unsafeInput: unknown) {
+    const input = createCollectiveProjectTaskRequestSchema.parse(unsafeInput);
+    return this.persistence.transaction((state) => {
+      const human = requireHumanCommand(state, sessionToken, input);
+      return createCollectiveProjectTask(state, input, human, this.now());
+    });
+  }
+
+  async requestWorkAccountability(sessionToken: string, unsafeInput: unknown) {
+    const input = requestCollectiveWorkAccountabilityRequestSchema.parse(unsafeInput);
+    return this.persistence.transaction((state) => {
+      const human = requireHumanCommand(state, sessionToken, input);
+      return requestCollectiveWorkAccountability(state, input, human, this.now());
+    });
+  }
+
+  async respondWorkAccountability(sessionToken: string, unsafeInput: unknown) {
+    const input = respondCollectiveWorkAccountabilityRequestSchema.parse(unsafeInput);
+    return this.persistence.transaction((state) => {
+      const human = requireHumanCommand(state, sessionToken, input);
+      return respondCollectiveWorkAccountability(state, input, human, this.now());
+    });
+  }
+
+  async decideProjectWorkSuggestion(sessionToken: string, unsafeInput: unknown) {
+    const input = decideCollectiveProjectWorkSuggestionRequestSchema.parse(unsafeInput);
+    return this.persistence.transaction((state) => {
+      const human = requireHumanCommand(state, sessionToken, input);
+      return decideProjectWorkSuggestion(state, input, human, this.now());
     });
   }
 

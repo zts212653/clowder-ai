@@ -38,6 +38,7 @@ import { useShellPresentation } from '../shell/shell-presentation';
 import { ThreadComposerContext } from '../ThreadComposerContext';
 import { TransferTargetPicker } from '../TransferTargetPicker';
 import { VoteActiveBar } from '../VoteActiveBar';
+import { MessageNavigationProvider } from './MessageNavigationContext';
 import { SingleCatConversationTimeline } from './SingleCatConversationTimeline';
 import {
   projectSingleCatConversation,
@@ -282,7 +283,7 @@ export function ThreadChatSurface({
     return () => window.removeEventListener('cat-cafe:interactive-send', handleInteractiveSend);
   }, [acceptUnscopedInteractiveSend, handleSend, interactiveSendContext, threadId]);
 
-  return (
+  const surface = (
     <section
       className="flex min-h-0 flex-1 flex-col"
       data-thread-chat-surface
@@ -463,4 +464,5 @@ export function ThreadChatSurface({
       />
     </section>
   );
+  return <MessageNavigationProvider value={jumpToMessage}>{surface}</MessageNavigationProvider>;
 }

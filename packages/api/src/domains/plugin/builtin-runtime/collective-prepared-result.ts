@@ -1,3 +1,5 @@
+import type { WorkResultArtifactSnapshot } from '@cat-cafe/collective-connector';
+import type { CollectiveWorkResultTextSource } from '@cat-cafe/shared';
 import type { InvocationRecord } from '../../cats/services/agents/invocation/InvocationRegistry.js';
 import type { PreparedArtifactReader } from '../../growing/EntrustedWorkOwnerReadService.js';
 import { collectiveContextError } from './collective-context-refs.js';
@@ -9,6 +11,29 @@ export async function readCollectivePreparedResultArtifact(
   auth: InvocationRecord,
   reader: PreparedArtifactReader | undefined,
   contentReader?: CollectiveWorkArtifactReader,
+) {
+  const prepared = await readPreparedResultArtifact(binding, auth, reader);
+  if (!prepared) return undefined;
+  return contentReader ? contentReader.seal(binding, prepared, auth.catId) : prepared;
+}
+
+export async function readCollectivePreparedResultPublication(
+  binding: NonNullable<Awaited<ReturnType<CollectiveCurrentContext['resolvePrivate']>>>,
+  auth: InvocationRecord,
+  reader: PreparedArtifactReader | undefined,
+  contentReader?: CollectiveWorkArtifactReader,
+): Promise<
+  { readonly snapshot: WorkResultArtifactSnapshot; readonly file?: CollectiveWorkResultTextSource } | undefined
+> {
+  const prepared = await readPreparedResultArtifact(binding, auth, reader);
+  if (!prepared) return undefined;
+  return contentReader ? contentReader.sealResult(binding, prepared, auth.catId) : { snapshot: prepared };
+}
+
+async function readPreparedResultArtifact(
+  binding: NonNullable<Awaited<ReturnType<CollectiveCurrentContext['resolvePrivate']>>>,
+  auth: InvocationRecord,
+  reader: PreparedArtifactReader | undefined,
 ) {
   const task = binding.work.task;
   const contract = task.entrustedWork;
@@ -28,6 +53,5 @@ export async function readCollectivePreparedResultArtifact(
   });
   if (!artifact || artifact.artifactRef !== artifactRef)
     throw collectiveContextError('WORK_ARTIFACT_UNAVAILABLE', 'Registered Work artifact publication is unavailable');
-  const snapshot = { taskRef, taskRevision: contract.revision, ...artifact };
-  return contentReader ? contentReader.seal(binding, snapshot, auth.catId) : snapshot;
+  return { taskRef, taskRevision: contract.revision, ...artifact };
 }

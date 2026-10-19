@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { afterEach, describe, it } from 'node:test';
@@ -11,6 +11,7 @@ import {
   checkPublicPackageScriptClosure,
   checkSyncPublicPreflight,
 } from './check-sync-public-preflight.mjs';
+import { isCoveredByPublicExport, loadPublicExportCoverage } from './lib/sync-public-export-coverage.mjs';
 
 const tempRoots = [];
 
@@ -53,6 +54,36 @@ afterEach(() => {
 });
 
 describe('public package script closure', () => {
+  it('rejects a declared workspace dependency missing from the uninstalled export', () => {
+    const root = makeRoot();
+    write(root, 'package.json', JSON.stringify({ scripts: {} }));
+    write(root, 'packages/web/src/lib/capability-tips.seed.json', '[]');
+    write(root, 'packages/shared/package.json', JSON.stringify({ name: '@cat-cafe/shared' }));
+    write(
+      root,
+      'packages/collective-client/package.json',
+      readFileSync(new URL('../packages/collective-client/package.json', import.meta.url), 'utf8'),
+    );
+    commitAll(root, 'export missing the Collective client UI dependency');
+    const missing = checkSyncPublicPreflight(root, { baseRef: 'HEAD' });
+    assert.equal(missing.ok, false);
+    assert.deepEqual(missing.errors, [
+      'packages/collective-client/package.json:dependencies -> missing workspace package @cat-cafe/ui',
+    ]);
+    write(root, 'packages/ui/package.json', JSON.stringify({ name: '@cat-cafe/ui' }));
+    assert.equal(checkSyncPublicPreflight(root, { baseRef: 'HEAD' }).ok, true);
+  });
+
+  it('exports the UI package consumed by the real Collective client', () => {
+    const repoRoot = join(import.meta.dirname, '..');
+    const coverage = loadPublicExportCoverage(repoRoot);
+    for (const path of ['packages/ui/package.json', 'packages/ui/src/index.ts']) {
+      assert.ok(existsSync(join(repoRoot, path)), `UI entrypoint is present: ${path}`);
+      // The source allowlist is private; a public checkout checks delivered files.
+      if (coverage !== null) assert.ok(isCoveredByPublicExport(path, coverage));
+    }
+  });
+
   it('rejects the actual exported pre-commit hook when its Node companion is missing', () => {
     const root = makeRoot();
     write(root, 'package.json', JSON.stringify({ scripts: {} }));
@@ -75,6 +106,7 @@ describe('public package script closure', () => {
       'check-sync-public-preflight.mjs',
       'check-capability-tips.mjs',
       'lib/sync-public-export-coverage.mjs',
+      'lib/sync-public-workspace-closure.mjs',
     ]) {
       write(root, `scripts/${file}`, readFileSync(new URL(file, import.meta.url), 'utf8'));
     }

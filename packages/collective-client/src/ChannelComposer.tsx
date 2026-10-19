@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef } from 'react';
 import { Composer, type HumanMention, type MentionSelection } from './Composer.js';
 import type { ClientTarget, CollectiveParticipant, DeliveryState } from './client-types.js';
+import { useCollectiveLanguage } from './collective-copy.js';
 import type { FirstEntryGuide } from './first-entry/use-first-entry-guide.js';
 
 export function ChannelComposer({
@@ -24,6 +25,7 @@ export function ChannelComposer({
   readonly onCafe?: () => void;
   readonly firstEntry?: FirstEntryGuide;
 }) {
+  const language = useCollectiveLanguage();
   const host = useRef<HTMLDivElement>(null);
   const guidePhase = firstEntry?.phase;
   const guideCat = firstEntry?.narrator;
@@ -103,7 +105,7 @@ export function ChannelComposer({
           channelId={channelId}
           participants={participants}
           humans={humans}
-          placeholder={`在 #${channelId} 里说点什么……`}
+          placeholder={language === 'en' ? `Message #${channelId}…` : `在 #${channelId} 里说点什么……`}
           delivery={delivery}
           mention={guideMention ?? mention}
           onSend={async (body, recipient, entrust, responseRequested) => {

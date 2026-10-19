@@ -134,6 +134,49 @@ it('submits one Cat-authored Work proposal through exact current participation a
     requestKind: 'guide',
   });
 
+  const unassignedRequest = await opened.store.postHumanMessage(owner.sessionToken, {
+    serviceInstanceId: opened.store.serviceInstanceId,
+    collectiveId: collective.collectiveId,
+    clientEventId: 'unassigned-source',
+    location: { channelId: 'general' },
+    recipient: {
+      kind: 'agent',
+      humanId: owner.human.humanId,
+      connectionId: connection.connectionId,
+      agentId: 'codex-sol',
+      participationRevision: 1,
+    },
+    body: '先接纳为未分配任务，再由当前猫明确认领。',
+  });
+  const unassignedProposal = await opened.store.proposeCollectiveWork(owner.sessionToken, {
+    serviceInstanceId: opened.store.serviceInstanceId,
+    collectiveId: collective.collectiveId,
+    requestId: 'unassigned-proposal',
+    sourceEventId: unassignedRequest.eventId,
+    intendedOutcome: '认领后沿同一任务执行并回到原讨论。',
+  });
+  const unassigned = await opened.store.commitCollectiveWork(owner.sessionToken, {
+    serviceInstanceId: opened.store.serviceInstanceId,
+    collectiveId: collective.collectiveId,
+    requestId: 'unassigned-acceptance',
+    workId: unassignedProposal.workId,
+    expectedRevision: unassignedProposal.revision,
+    accountability: 'unassigned',
+  });
+  const unassignedSource = {
+    ...source,
+    eventId: unassignedRequest.eventId,
+    location: unassignedRequest.location,
+    actor: unassignedRequest.actor,
+  };
+  const unassignedContext = await connector.readWorkSourceContext(unassignedSource);
+  expect(unassignedContext.relatedWorkIds).toEqual([unassigned.workId]);
+  expect(unassignedContext.matters.find((matter) => matter.workId === unassigned.workId)).toMatchObject({
+    lifecycle: 'committed',
+    status: 'unassigned',
+    proposedOutcome: '认领后沿同一任务执行并回到原讨论。',
+  });
+
   const committed = await opened.store.commitCollectiveWork(owner.sessionToken, {
     serviceInstanceId: opened.store.serviceInstanceId,
     collectiveId: collective.collectiveId,

@@ -84,6 +84,7 @@ export function collectiveSource(
       ...(event.workRevisionNotice ? { workRevisionNotice: event.workRevisionNotice } : {}),
       ...(event.workAcceptanceNotice ? { workAcceptanceNotice: event.workAcceptanceNotice } : {}),
       ...(event.workExecutionNotice ? { workExecutionNotice: event.workExecutionNotice } : {}),
+      ...(event.workWakeNotice ? { workWakeNotice: event.workWakeNotice } : {}),
       ...(sourceIdentity ? { participation: sourceIdentity } : {}),
     },
   };

@@ -11,8 +11,8 @@
   --cafe-danger: var(--semantic-critical);
   --cafe-shadow: var(--console-shadow-soft);
   --font-sans: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-  --collective-destination-width: 326px;
-  --collective-context-width: 420px;
+  --collective-destination-width: 300px;
+  --collective-context-width: 340px;
   font-family: var(--font-sans);
   color: var(--cafe-text);
   background: var(--console-shell-bg);
@@ -66,7 +66,7 @@ svg {
 }
 @media (max-width: 1540px) {
   :root {
-    --collective-destination-width: 266px;
+    --collective-destination-width: 280px;
   }
 }
 @media (prefers-reduced-motion: reduce) {

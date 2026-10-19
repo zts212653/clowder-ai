@@ -10,7 +10,7 @@
 
 import { CORE_COMMANDS, type CommandSource, type CommandSurface } from '@cat-cafe/shared';
 
-export type CommandCategory = 'general' | 'memory' | 'knowledge' | 'game' | 'task' | 'vote' | 'connector';
+export type CommandCategory = 'general' | 'memory' | 'knowledge' | 'task' | 'vote' | 'connector';
 
 export interface CommandDefinition {
   /** The command string, e.g. '/help' */
@@ -31,7 +31,6 @@ export const COMMAND_CATEGORIES: Record<CommandCategory, string> = {
   general: '通用',
   memory: '记忆',
   knowledge: '知识库',
-  game: '游戏',
   task: '任务',
   vote: '投票',
   connector: '跨平台',

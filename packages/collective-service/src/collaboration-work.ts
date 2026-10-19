@@ -32,6 +32,28 @@ export function requireWorkAccountableHuman(work: CollectiveWorkRecord, humanId:
   }
 }
 
+/** Pending Project suggestions may leave proposed only through the atomic Project-owner decision. */
+export function requireOrdinaryWorkTransition(work: CollectiveWorkRecord): void {
+  if (work.lifecycle === 'proposed' && work.projectSuggestion) {
+    throw new CollectiveServiceError(
+      'PROJECT_SUGGESTION_DECISION_REQUIRED',
+      'A pending Project suggestion requires the Project owner decision',
+      409,
+    );
+  }
+}
+
+export function isAcceptedUnassignedWork(work: CollectiveWorkRecord): boolean {
+  return (
+    work.lifecycle === 'committed' &&
+    !work.accountableHumanId &&
+    !work.assignment &&
+    !work.assignmentEventId &&
+    !work.acceptance &&
+    !work.executionAuthority
+  );
+}
+
 export function projectCollectiveWork(
   state: ServiceState,
   work: CollectiveWorkRecord,
@@ -200,6 +222,7 @@ function workStatus(
   executionStatus: CollectiveWorkProjection['executionStatus'],
 ): CollectiveWorkProjection['status'] {
   if (work.lifecycle !== 'committed' && work.lifecycle !== 'in_progress') return work.lifecycle;
+  if (!work.accountableHumanId) return 'unassigned';
   if (executionStatus && executionStatus.state !== 'permitted') return 'blocked';
   const blocked = work.dependencyWorkIds.some((dependencyId) => state.works[dependencyId]?.lifecycle !== 'completed');
   if (blocked) return 'blocked';

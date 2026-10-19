@@ -1,18 +1,38 @@
 ---
 feature_ids: [F101]
-related_features: [F011, F107]
+related_features: [F011, F090, F107, F202]
 topics: [mode, game, werewolf, game-engine]
 doc_kind: spec
+tips_exempt: "Retires the old game implementation; no new user capability or operation to advertise."
 created: 2026-03-11
 reopened: 2026-03-14
-updated: 2026-03-23
+updated: 2026-10-18
 ---
 
 # F101: Mode v2 — 游戏系统引擎 + 狼人杀
 
-> **Status**: in-progress (Phase I in progress) | **Owner**: Ragdoll | **Priority**: P1 | **Reopened**: 2026-03-14
+> **Status**: legacy-implementation-retired（PR #5731 已合入；玩法愿望保留，未宣称完成）
 >
 > **重新打开原因**：2026-03-12 声称 done 并通过愿景守护，但operator 2026-03-14 实际启动 dev 点开狼人杀后发现：(1) 无关闭/返回按钮，用户被困在全屏游戏界面；(2) 无大厅/配置流程，7 只猫自动塞入无法选择；(3) 猫猫不会自动行动，游戏永远卡在 night_guard 等待中；(4) 整体不可用。92 个单元测试全绿但零 E2E 真实验证。教训见 LL-032。
+
+## 2026-10-18 旧主仓实现退役
+
+You 在本 thread 原话 `private-source-id` 提出旧游戏退出主仓，并在
+`private-source-id` 授权实施。这里只退役旧实现；稳定地让猫猫玩游戏的愿望仍保留。
+以后若重做，按 F202 插件边界重新设计，不包装空插件、不等待插件扩展，也不动 Cat Planet 的现役游戏。
+
+退役前完整版本：`c6df09be4c789fe091f8105a244ad853402dd18d`。历史设计、研究、故事和素材来源/许可保留。
+旧运行代码、页面/聊天入口、专用 API/MCP、启动恢复、类型及依赖已从本次变更移除。
+历史数据不删除、不改 TTL、不伪造结束结果：旧 `game:{id}`、
+`game:thread:{threadId}:active/history` 由原库保留，启动不再恢复旧对局。
+
+## User Journey（退役后的历史线程）
+
+旧 `games/*` 线程按普通聊天读取，保留项目路径兼容、play 私密裁剪、session 权限和公共检索排除；
+旧对局面板不再提供。共用队列唤醒迁至 `agents/invocation/wake-cat.ts`，F075 排行榜保留。
+
+已合入 PR #5731（`0174cfce6a82f49d223999678f0c4730cbe04d44`），并通过隔离 Alpha 入口/历史读取/重连验收。
+不能作为当前可用入口或已兑现体验的说明。
 
 ## Why
 

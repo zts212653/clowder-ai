@@ -4,12 +4,12 @@ related_features: [F229, F258, F195, F202, F246, F295, F306, F309, F310]
 topics: [coactive, realtime, desktop-companion, gpt-live]
 doc_kind: spec
 created: 2026-09-15
-updated: 2026-10-18
+updated: 2026-10-17
 description: "让具名家猫通过实时感知与交谈、持续深思和行动，陪人跨应用共看、共听、互相指点，并接续共同经历。"
 description_source: model
 description_author: codex-astra
 description_updated_at: 2026-09-15T08:29:30Z
-tips_exempt: "Renewed 2026-10-18: progress-only runtime reconciliation. Daily alpha32 remains installed/enabled at lifecycleRevision106 but live is crashed; Host logs show poll-failed during lease-renew, root cause and recovery unknown. Prior controlled S6/S7/S8 validation stays separate from daily availability and human acceptance. No lifecycle, observation or media mutation."
+tips_exempt: "Renewed 2026-10-17: public alpha31 fix and Host5687/908a74dc are independently verified. Named Alpha dffba092 normal30-to31 upgrade preserves the original disabled/stopped instance; API/Web200, canonical stop0 and six ports clear. Targeted S8 real-Electron continuous offer check is submitted under resource32912, observed queued with no native result yet. Earlier S7 behavior and compact layout remain supported by byte continuity; alpha30 flicker stays historical evidence. Runtime g12 waits for actual908a74dc containment on API/Web, baselineboot36. No automatic daily activation; packaged TCC, real-human and overall AC remain open."
 mcp_admission_status: accepted
 mcp_admission_ref: "file:docs/features/F317-coactive-companion.md"
 mcp_admission_claims:
@@ -32,21 +32,6 @@ mcp_admission_claims:
 > **Status**: in-progress | **Owner**: 小星星·Maine Coon（@codex-astra / gpt-6-astra） | **Priority**: P1
 
 Owner thread：`[thread-id]`；总任务沿用 `private-source-id`（按 `relatedFeatureId=F317` 查询）。正式安装入口与 Host 媒体边界已随 #4611 合入；第一批真实资料、非 GPT 深思及完整组合体验仍未验收，Phase/AC 不因工程合入提前关闭。workflow 沿用原记录；原任务属于源线程，未重复建任务。
-
-## 当前进展（2026-10-18 00:39 UTC）
-
-**日常猫猫球已安装 alpha.32，但本次核对为异常退出；猫旁文字、轻量通话与应用提示的受控原生验证结论保持，日常恢复与完整真实使用仍在验收。** 本节是当前摘要；下方带日期的发布、失败与修复记录保留为历史，不以旧的“待升级”覆盖当前状态。
-
-| 你能看到的变化 | 当前交付与还需验证的部分 |
-|---|---|
-| 在猫旁打字、等回信、读完整回复 | 1.16 第26–30项已交付并走通受控原生往返，覆盖未确认发送与草稿恢复、长文续读、留住、上翻和回最新。来源关联与完成状态由 Host 判断，信件动画不冒充工作已完成。 |
-| 通话时猫留在旁边，控件按需出现 | 第24–25项已交付并完成受控原生验证；输入和操作控件时不自动收起，共享时保留目标与停止入口。真实语音听感、长时稳定性与自然插话仍按原旅程验收。 |
-| 按应用名主动问一句 | 第31项及15秒剩余时间圈已交付。alpha.32/Host修复后的受控原生检查通过：短暂隐藏回放保留同一提示、跨历史刷新不重置、自然到期、关闭/接受收回。须本人单独选择是否开启；真实应用观察与安装版系统权限尚未据此验收。 |
-| 猫理解、找伙伴并把结果带回来 | 专用前台岗位说明、协作/回告/接续与子执行接线已有交付；“我的一天”中自然托付、首版、改意、第二版和重入接续，仍须同一次真实使用核验，不能由桌面交互通过代替。 |
-
-**接下来**：先定位并恢复当前桌面连接异常，再在已更新的日常版本中收真人体验，核实上述完整往返、真实应用与系统权限、长时对话/恢复；跨应用共看共听与互指、非GPT组合和完整旧能力承接继续逐项对照原AC。功能已交付、受控验证通过和真人验收完成分别记录，F317保持in-progress。
-
-## 分批交付与历史记录
 
 **2026-10-16 已定方向：1.16 整组24–31**。You 在设计线程
 `[thread-id]#private-source-id` 对29「回复气泡」说「挺好的！！！」、
@@ -84,7 +69,6 @@ D 身份/恢复界面、E 会议接入、F 页面操作（三者 Sol6）。会�
 
 | 已有事实 | 证据与边界 |
 |---|---|
-| 隐藏确认差异已修复并经受控原生复验，真实撤销边界保留 | #5696统一media/app-assist既有1秒确认；546ms回调回放已保同提示/来源，完整S8通过。explicit hide/appHidden/non-all-workspaces/lock/suspend仍立即撤销的已审反例保留。run2无自然hide/app/power，不能把回放当实际OS Space切换或锁屏证明；旧观察来源不追认。 |
 | 正式插件入口与手势约束媒体边界已合入 main | #4611 `dca811516dd48cfa04f52ce35b49186e13131ab2`（2026-09-19 13:49Z）；公开 contract beta.16、SDK beta.11、companion alpha.2 已发布并核对真实包字节。完整 frozen-base gate 通过，最终 HEAD 定向检查 82 项通过，真实 Electron 合成音频旅程通过；Terra/Opus5 的既有独立判断按连续性保留。仅证明安装入口、身份/媒体边界与合成交互；真实家内资料、非 GPT 深思、F128/S5、F229 全迁移仍欠验收，日常 runtime 未激活。 |
 | 思考中持续追加截图、ASR 并继续交流，是实际使用过的能力 | operator source `[thread-id]#private-source-id`（引用附件正文）；会议原记录及 [F167 Case E23](F167-a2a-chain-quality.md)。不能再把基础 `turn/steer` 可行性列为下一轮 spike。 |
 | 已有猫猫球共享主 Chat 的对话设施 | [F229](F229-cat-ball-concierge.md) M1–M4 已收敛到 `thread-chat-surface`；新伴随入口须消费既有身份、消息和任务真相。 |
@@ -214,7 +198,7 @@ F322 的“窄屏小把手”不再作为终态工作实施。当前遮挡证据
 | S5 | 桌面、记忆与协作的一段完整经历 | operator与当前具名猫 | 点猫直接语音 → 说“看这里”并共享明确桌面/窗口 → 问“这和上次的方案哪里不一样” → 猫用真实记忆搜索并回读原文，关联当前画面解释 → 人继续说/指并纠正 → 需要时把原话和来源送到已有 owner thread，接回追问/结果 → 暂停或断线后回到同一交流和未完工作 | 用户不用手工截屏搬运、找 thread 或转述；实际屏幕来源/时间、检索参数与源锚点、工具回执、跨线程原文及真实可听回复可对账；只讨论而不派工也可结束 |
 | S6 | 1.16猫旁文字与回复的一次完整往返（26–30） | operator与猫 | 未通话时点聊天 → 猫旁一行输入 → 后台接受后递信、显示已发送；未确认则退信并保留草稿、同ID重试 → 与这次发送可信关联的回复回来才收信 → 在气泡里读完整回复、留住、往上翻、回到最新 | 用户文字与语音转写不折叠；无关助手消息不能收掉信；已发送不冒充执行完成；圈/关闭/滚动实际可操作、长文和更早历史可读、新消息不拉走阅读位置；以真实Host/公开包配对和真桌面26–30对稿举证。能力核对和视觉收敛中的差异须先解决，不借本单元隐藏原麦克风/共享控制或新增主动采集。 |
 | S7 | 1.16轻量通话（24–25） | operator与猫 | 通话时常见猫、名牌和气泡 → 指向或点猫显示控件/输入 → 移开或Esc收起；输入/焦点/控件交互中不自动收起 | 麦克风状态一直可辨；共享中通话条、共享目标与停止共享常驻；hover只显示，不授权开通话/选屏；完整占位、键盘与直接挂断可用。方向已认可，须在26–30共用视图稳定后验证。 |
-| S8 | 1.16按明确偏好主动凑近（31） | operator与猫 | 主人主动打开默认关闭的开关 → 猫只依据前台程序名问一句 → 不理则收回；同程序每天最多一次 → 人点击后进入原通话和选屏流程 | 先核最窄名称采集及Host许可，不能顺带取窗口标题、URL、文档或屏幕内容；关闭后停采集/提示，未点击不启媒体，点击也不绕过原选屏/系统权限。沿F229安静默认与逐类opt-in，频率跨重启不重置，不借名牌开关扩大授权；原A/B正式实现已交付，父正常Alpha30→31升级通过；原生run2受控连续显示/到期/接受/失败关闭reload通过；B819针对alpha31旧证据的边界判断保留；剩余时间圈已随原B PR91/alpha32发布，原A准入和父正常Alpha升级已过；新包原生圈可见、dismiss/accept停圈、四帧猫体完整；run1的2373ms hide清offer已由原B#5696/d23897f7修正既有确认差异，明确隐藏/锁屏/休眠仍立即撤销。父已正常同步构建固定修复，完整受控S8通过：546ms标注回调保同offer/source，圈跨五次history不复位、14996ms到期，失败关闭/reload/finalfalse完成；11实图与四帧猫体已看，资源33007完整释放。回放不冒充真实OS切换。日常应用提示未主动开启，真人/安装版TCC未验。 |
+| S8 | 1.16按明确偏好主动凑近（31） | operator与猫 | 主人主动打开默认关闭的开关 → 猫只依据前台程序名问一句 → 不理则收回；同程序每天最多一次 → 人点击后进入原通话和选屏流程 | 先核最窄名称采集及Host许可，不能顺带取窗口标题、URL、文档或屏幕内容；关闭后停采集/提示，未点击不启媒体，点击也不绕过原选屏/系统权限。沿F229安静默认与逐类opt-in，频率跨重启不重置，不借名牌开关扩大授权；原A/B正式实现已交付，父正常Alpha30→31升级通过；定向原生连续呈现复验已提交，日常未启用、真人/安装版TCC未验。 |
 
 ### 2026-09-24 现场反馈：三部分整合交付
 

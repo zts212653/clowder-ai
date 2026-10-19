@@ -1,8 +1,11 @@
+import { AppTooltip } from '@cat-cafe/ui';
+import { CollectiveNameplate } from './CollectiveNameplate.js';
 import { actorDisplayName, formatEventTime } from './channel-model.js';
 import type { CollectiveEventEnvelope, CollectiveParticipant } from './client-types.js';
 import { MemberAvatar } from './MemberAvatar.js';
 import { MessageMarkdown } from './MessageMarkdown.js';
 import { authorPresentation } from './message-presentation.js';
+import { participantLabel } from './participant-label.js';
 import { useRoomPresentation } from './use-room-presentation.js';
 
 export function MessageAvatar({
@@ -20,6 +23,8 @@ export function MessageAvatar({
       ? participants.find(
           (participant) =>
             participant.serviceInstanceId === event.serviceInstanceId &&
+            participant.collectiveId === event.collectiveId &&
+            participant.humanId === actor.human.humanId &&
             participant.connectionId === actor.provenance.connectionId &&
             participant.catId === actor.provenance.catId,
         )
@@ -48,6 +53,7 @@ export function MessageBody({
     ? participants.find(
         (participant) =>
           participant.serviceInstanceId === event.serviceInstanceId &&
+          participant.collectiveId === event.collectiveId &&
           participant.connectionId === recipient.connectionId &&
           participant.humanId === recipient.humanId &&
           participant.catId === recipient.agentId,
@@ -59,7 +65,20 @@ export function MessageBody({
         source={event.body}
         prefix={
           recipient ? (
-            <span className="message-inline-mention">@{namedCat?.displayName ?? recipient.agentId}</span>
+            <AppTooltip
+              label={
+                namedCat
+                  ? `${namedCat.displayName} · ${namedCat.humanDisplayName} · @${namedCat.catId}`
+                  : `@${recipient.agentId}`
+              }
+              intent="content"
+              side="top"
+            >
+              {/* biome-ignore lint/a11y/noNoninteractiveTabindex: focus reveals the exact recipient identity tooltip without introducing a new action. */}
+              <span className="message-inline-mention" tabIndex={0}>
+                @{namedCat ? participantLabel(namedCat, participants) : recipient.agentId}
+              </span>
+            </AppTooltip>
           ) : undefined
         }
       />
@@ -96,21 +115,13 @@ export function TopicMessage({
   const author = authorPresentation(event, currentHumanId);
   return (
     <article className="topic-message" data-author={v2 ? author : undefined}>
-      {onOpenMember ? (
-        <button
-          type="button"
-          className="avatar-button"
-          onClick={() => onOpenMember(event)}
-          aria-label={`查看 ${actorDisplayName(event)}`}
-        >
-          <MessageAvatar event={event} participants={participants} compact />
-        </button>
-      ) : (
-        <MessageAvatar event={event} participants={participants} compact />
-      )}
       <div>
         <header className="message-meta">
-          <strong>{actorDisplayName(event)}</strong>
+          <CollectiveNameplate
+            event={event}
+            participants={participants}
+            onOpen={onOpenMember ? () => onOpenMember(event) : undefined}
+          />
           {(!v2 || showTime) && (
             <time className={v2 ? 'message-time' : undefined} dateTime={event.acceptedAt}>
               {formatEventTime(event.acceptedAt)}

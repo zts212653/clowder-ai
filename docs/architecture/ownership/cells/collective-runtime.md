@@ -8,21 +8,31 @@ description_author: codex-sol
 description_generated_by: codex-sol@gpt-5.6-sol
 description_generated_at: 2026-08-29T07:06:24Z
 description_confirmed_by: codex-sol
-description_updated_at: 2026-09-28T09:26:00-07:00
+description_updated_at: 2026-10-17T00:00:00-07:00
 doc_kind: architecture
 created: 2026-08-28
 canonical_features: [F290]
 code_anchors:
   - packages/shared/src/types/collective.ts
   - packages/shared/src/types/collective-collaboration.ts
+  - packages/shared/src/collective-work-assignment.ts
   - packages/shared/src/types/collective-work-policy.ts
   - packages/shared/src/types/collective-work-acceptance.ts
   - packages/shared/src/types/collective-work-matter.ts
+  - packages/shared/src/types/collective-project-authoring.ts
+  - packages/shared/src/types/collective-accountability-attention.ts
+  - packages/shared/src/types/collective-work-wake.ts
   - packages/shared/src/types/collective-work-return.ts
   - packages/shared/src/types/collective-vote.ts
   - packages/shared/src/types/collective-decision-vote.ts
   - packages/collective-service/src/store.ts
   - packages/collective-service/src/collaboration-store.ts
+  - packages/collective-service/src/collaboration-commit.ts
+  - packages/collective-service/src/collaboration-project-authoring.ts
+  - packages/collective-service/src/collaboration-accountability.ts
+  - packages/collective-service/src/collaboration-project-suggestion.ts
+  - packages/collective-service/src/collaboration-accountability-attention.ts
+  - packages/collective-service/src/collaboration-work-wake.ts
   - packages/collective-service/src/work-policy-store.ts
   - packages/collective-service/src/collaboration-agent-acceptance.ts
   - packages/collective-service/src/collaboration-agent-continuation.ts
@@ -35,6 +45,8 @@ code_anchors:
   - packages/collective-connector/src/artifact-owner-relay.ts
   - packages/collective-connector/src/artifact-media-relay.ts
   - packages/collective-service/src/collaboration-work.ts
+  - packages/collective-service/src/work-result-files.ts
+  - packages/collective-service/src/work-result-file-http.ts
   - packages/collective-service/src/collaboration-revision.ts
   - packages/collective-service/src/collaboration-vote.ts
   - packages/collective-service/src/collaboration-binding-vote.ts
@@ -45,10 +57,20 @@ code_anchors:
   - packages/collective-service/src/http-router.ts
   - packages/collective-client/src/CollectiveClient.tsx
   - packages/collective-client/src/CollectiveWorkCard.tsx
+  - packages/collective-client/src/RoadmapWorkspace.tsx
+  - packages/collective-client/src/ProjectAttentionPanel.tsx
+  - packages/collective-client/src/ProjectList.tsx
+  - packages/collective-client/src/ProjectBoard.tsx
   - packages/collective-client/src/RoadmapPanel.tsx
+  - packages/collective-client/src/ProjectAuthoringForms.tsx
+  - packages/collective-client/src/ProjectArtifactSurface.tsx
+  - packages/collective-client/src/ProjectSuggestionActions.tsx
+  - packages/collective-client/src/WorkAccountabilityActions.tsx
   - packages/collective-client/src/VoteCard.tsx
   - packages/collective-client/src/BindingVoteCard.tsx
+  - packages/collective-client/src/work-result-file-link.ts
   - packages/collective-connector/src/connector.ts
+  - packages/collective-connector/src/accepted-work-result-file-reconciliation.ts
   - packages/collective-connector/src/outbox-custody.ts
   - packages/collective-connector/src/work-policy-custody.ts
   - packages/collective-connector/src/work-acceptance-custody.ts
@@ -61,23 +83,29 @@ code_anchors:
   - packages/api/src/domains/plugin/builtin-runtime/collective-work/collective-work-authority.ts
   - packages/api/src/domains/plugin/builtin-runtime/collective-work/collective-work-admission.ts
   - packages/api/src/domains/plugin/builtin-runtime/collective-work/collective-work-execution-receipt.ts
+  - packages/api/src/domains/plugin/builtin-runtime/collective-work/collective-work-standing-admission.ts
   - packages/api/src/domains/plugin/builtin-runtime/collective-work/collective-work-artifact-read.ts
+  - packages/api/src/domains/plugin/builtin-runtime/collective-work/collective-accepted-result-file-reconciler.ts
   - packages/api/src/infrastructure/document/collective-document-scope.ts
   - packages/api/src/routes/callback-document-routes.ts
   - packages/api/src/config/collective-alpha-boundary.ts
   - packages/api/src/domains/plugin/builtin-runtime/collective-work/collective-work-delegation.ts
   - packages/api/src/domains/plugin/builtin-runtime/collective-work-dispatcher.ts
   - packages/api/src/domains/plugin/builtin-runtime/collective-work-revision-reconciler.ts
+  - packages/api/src/domains/plugin/builtin-runtime/collective-work-wake-reconciler.ts
   - packages/api/src/domains/plugin/builtin-runtime/collective-current-context.ts
+  - packages/api/src/routes/companion-collective-accountability-source.ts
   - packages/api/src/routes/collective-connector-routes.ts
   - packages/web/src/components/collective/CollectiveLaunchSurface.tsx
+  - packages/web/src/components/collective/collective-work-action.ts
+  - packages/web/src/components/collective/use-collective-context-bridge.ts
 doc_anchors:
   - docs/features/F290-ai-native-collective.md
   - feature-specs/2026-08-28-f290-collective-runtime-vertical.md
   - feature-specs/2026-08-29-f290-collective-vision-correction.md
   - docs/architecture/f290-communication-model.md
   - feature-specs/2026-09-11-f290-usable-release.md
-static_scan_hints: [CollectiveServiceStore, CollectiveCollaborationStore, CollectiveWorkCard, RoadmapPanel, InformalVoteCard, BindingVoteSection, CollectiveDecisionRecord, HumanAuthBinding, serviceInstanceId, collectiveId, connectionId, CollectiveConnector, CollectiveIngressDispatcher, CollectiveWorkAuthority, CollectiveWorkRevisionReconciler, collectiveWorkDelegationV1, workRevisionNotice, resultRevision, assignmentCatId, pairingIntent, endpointCredential, canonical order, lastAckedSequence, Agent provenance, CollectiveLaunchSurface]
+static_scan_hints: [CollectiveServiceStore, CollectiveCollaborationStore, CollectiveWorkCard, RoadmapPanel, RoadmapWorkspace, ProjectAttentionPanel, ProjectList, ProjectBoard, ProjectAuthoringForms, WorkAccountabilityActions, accountability_assigned, accountabilityRequestId, projectSuggestion, collectiveWorkWakeNotice, collectiveAccountabilityRequest, InformalVoteCard, BindingVoteSection, CollectiveDecisionRecord, HumanAuthBinding, serviceInstanceId, collectiveId, connectionId, CollectiveConnector, CollectiveIngressDispatcher, CollectiveWorkAuthority, CollectiveWorkRevisionReconciler, CollectiveWorkWakeReconciler, collectiveWorkDelegationV1, workRevisionNotice, resultRevision, assignmentCatId, pairingIntent, endpointCredential, canonical order, lastAckedSequence, Agent provenance, CollectiveLaunchSurface]
 cited_by:
   - {feature: F290, date: 2026-08-28, delta: new cell — first independent Service + canonical Client + official Connector runtime vertical}
   - {feature: F290, date: 2026-09-11, delta: Service-owned public Work/Roadmap lineage, exact Cat assignment and result-return projection}
@@ -87,6 +115,9 @@ cited_by:
   - {feature: F290, date: 2026-09-28, delta: accountable Human feedback resumes the same admitted Task for a versioned result round; prior results and feedback remain in Work history and only the current result may be accepted}
   - {feature: F290, date: 2026-09-30, delta: registered owner delegation is separate from matter address; real Cat commitment and durable Host admission consume independent current execution authority on the same immutable Work/Task}
   - {feature: F290, date: 2026-10-17, delta: "W4 branch supplies fresh Artifact domain constraints, content-free version/access/custody records and bounded owner relays; content/review owners remain canonical. Implementation is not yet merged or accepted."}
+  - {feature: F290, date: 2026-10-17, delta: "A Host-sealed small UTF-8 file may become an immutable Service Work-result attachment only under the exact current result authority; current Collective membership is rechecked at read time and SharedArtifact/content ownership is unchanged."}
+  - {feature: F290, date: 2026-10-18, delta: "Human acceptance may persist one committed-but-unassigned Work without execution; a later Human or authorized Cat claims that same Work with immutable assignment lineage, while the canonical Client projects deduplicated Project list/dependency/board views and terminal Work dependencies remain immutable."}
+  - {feature: F290, date: 2026-10-18, delta: "Project-page commands atomically bind public source events to new Projects/Tasks; cross-Human accountability remains a target-Human request, Cat Project suggestions stay pending until revalidated Human acceptance, prerequisite/comment wakes resume only the existing Task, and Host unified attention reads pending accountability through endpoint/owner-fenced Connector authority."}
 ---
 
 # Collective Runtime
@@ -127,6 +158,7 @@ connection health and pairing/revoke controls; Channel, identity and membership 
 - Adding a Service-routed Cat Agent signal, typed target, Host ingress route or endpoint/session provenance.
 - Changing owner admission, private Work execution binding, same-thread home delegation or exact result-return authority.
 - Changing result feedback, revision rounds, current-result acceptance or Host Task resumption from Service Work truth.
+- Changing immutable Work-result file publication, authenticated member reads or result-file retry/replay semantics.
 - Changing shared Artifact source/version/access, owner custody handoff, or bounded Markdown/media owner transport.
 
 ## Extend By
@@ -158,6 +190,26 @@ connection health and pairing/revoke controls; Channel, identity and membership 
   a fresh exact source and grant revision, then reuses the same Task; old callbacks and sealed operations cannot cross epochs.
 - Treat delivery, public commitment, actual Host Task, execution, progress, result publication and Human Work acceptance as
   separate facts. Record and recover cross-boundary admission before executing; progress is not a result or closure.
+- Treat “accepted into the Project” and “someone accepted accountability” as separate facts on the same Work. A Human may
+  persist a committed Work with no accountable Human, assignment event or execution; a later authenticated Human or a Cat
+  inside current owner delegation may establish accountability exactly once without creating a second Work. Host bootstrap
+  accepts the resulting `accountability_assigned` lineage only when the current Service Work, inbox event, participant and
+  acceptance notice all match. Completed, declined and cancelled Work dependencies are immutable; new follow-up belongs in
+  a sourced new Work. Project list, cross-project dependencies and board are read projections over stable Work IDs, so one
+  Work referenced by several Projects renders once in global task views and never becomes a duplicate execution authority.
+- Bind direct Project/Task creation and its public Channel source inside one Service transaction and one replay identity.
+  A cross-Human accountability request is append-only pending truth addressed to the named Human; only that Human may accept
+  or decline, and any selected Cat must come from that Human's current Café participation. Cat project suggestions are separate
+  pending candidates built from invocation-bound opaque Project/Work refs. Human acceptance rechecks current revisions,
+  membership, dependency cycles and accountability, then commits the candidate, Roadmap membership and optional prerequisite
+  edge atomically. A prerequisite completion or exact Work comment may issue one typed wake to the current assignment, but Host
+  must resolve the unique existing private Task and current execution authority; it never creates a replacement Task. If a local
+  Cat is temporarily unavailable, retain the visible comment and retry the same wake/message identity after recovery.
+- Treat pending cross-Human accountability as a separate F310 source, not as a private Host Task or approval. Service reads use
+  the endpoint credential's current authorized Human and current Project membership; Connector rechecks connection, Human and
+  local owner route after every async read. Stable item identity includes Service/Collective/Work/accountability-request ID;
+  Work revision is version only. Unified-attention action refs navigate to the exact Project Task and grant no authority;
+  accept/decline remains a canonical Service write, and resolved or inoperable requests disappear on the next authoritative read.
 - Shared Artifacts retain exact public source, content identity, immutable version and Work linkage. The Service owns
   current membership/access/custody constraints; the retained content owner owns bytes and final authorization. Metadata
   owner RPC and binary ranges remain transient and bounded, with fresh validation before disclosure. Neither a patch
@@ -168,6 +220,14 @@ connection health and pairing/revoke controls; Channel, identity and membership 
 - The existing document producer binds immutable Markdown bytes to Task/execution/result scope. Canonical Artifact-ref
   registration uses the existing entrusted-work revision CAS, including an authorized same-Task delegate's evidence;
   it does not transfer ownership, change deadlines or accept the Work. Prior body reads consume that accepted scope and digest.
+- A public Work-result file is an immutable attachment to the accepted result event, not a SharedArtifact or private Task
+  projection. The Host may publish only its current Task/execution/result-sealed `cwork` UTF-8 bytes; Connector rewrites
+  only that exact Markdown destination and persists the same file with its outbox retry. The Service stores it atomically
+  with the result, serves it only to a currently authenticated member, and never permits browser caching to bypass that
+  membership check. For a current result accepted before this attachment capability existed, the Host may re-seal the
+  unchanged Task publication and idempotently bind one Service sidecar to the same event; the Work, event ID, result
+  revision and stored event body remain unchanged, while Human event reads project the authenticated Service destination.
+  Unsupported or unrelated old events remain no-file events.
 - A named isolated Alpha may parameterize the Service's existing loopback/data-origin pins only through the installation's
   current validated launch coordinates. Default Alpha pins and F324's deployment identity remain enforced; the descriptor
   cannot authorize a foreign directory, process stop, implicit writer or restored incident data.

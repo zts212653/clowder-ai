@@ -10,7 +10,7 @@ status: observed-partial-improvement-left-kick-missed
 
 **取舍：不能把这一档称为双侧踢球的完整改善。** 只把规划半径从 0.22 m 缩到 0.18 m 后，两侧路线都短了约 0.25 m，右偏远球在 18.905 秒实际触球；左侧虽在 18.9 秒触发踢腿，整场没有触球。保留这项局部改善和反例，不继续在同一轮改参数到过线。
 
-执行前冻结的计划来自实施计划。真实运行 source `ca49d8ca97dd840ef54e70a39d63d20625fc16ea`、启动时 clean；8 场景、20 秒、全部固定官方模型、球位、物理、速度上限、staging、0.6 秒停稳阶段和 0.5 秒 kick 都与 [v3](../20260907-approach-v3/README.md)相同。递归比较 plan、忽略明确标注的版本说明后，唯一行为字段差异为 `approachController.arc.radiusM`。模型契约、环境与依赖对象逐项全等。
+[执行前冻结的计划](../../approach-v4-plan.json)来自[实施计划](../../../../../../feature-specs/2026-09-07-f311-football-path-radius.md)。真实运行 source `ca49d8ca97dd840ef54e70a39d63d20625fc16ea`、启动时 clean；8 场景、20 秒、全部固定官方模型、球位、物理、速度上限、staging、0.6 秒停稳阶段和 0.5 秒 kick 都与 [v3](../20260907-approach-v3/README.md)相同。递归比较 plan、忽略明确标注的版本说明后，唯一行为字段差异为 `approachController.arc.radiusM`。模型契约、环境与依赖对象逐项全等。
 
 执行入口另加了新计划名的固定 allowlist 登记，没有改仿真循环。首次命令在参数解析阶段 exit 2，零物理运行、输出目录未创建；修复后同一参数完整执行 exit 0、耗时 24 秒。本页只报告后一次真实运行，不把第一次 CLI 拒绝当作实验失败或成功。
 
@@ -48,10 +48,10 @@ status: observed-partial-improvement-left-kick-missed
 
 四段 MP4 均是本轮 MuJoCo renderer 的同场采集：640×480、10 fps、201 帧、20.1 秒（含 reset 帧）。不是生成视频，也不是用轨迹重建的表演。Astra 已目视左右远球 18.8 / 19.2 秒原视频帧：左侧球仍在脚前，右侧球已离脚向前运动；这些帧只支持可见现象，接触与全程未跌倒由完整状态及接触记录判断。
 
-- 左侧：18.8 秒 → 19.2 秒
-- 右侧：18.8 秒 → 19.2 秒
-- index.json SHA-256：`ca3f985fccf51bdddba0a050677fdf83694940659c2085401332ea7a9f73fab3`
-- archive-manifest.json：保护 33 个原始运行文件和上述 4 张视频截帧；后者的来源方法与取帧时间单列。
+- 左侧：[18.8 秒](approach-left-far-frame-18.8s.png) → [19.2 秒](approach-left-far-frame-19.2s.png)
+- 右侧：[18.8 秒](approach-right-far-frame-18.8s.png) → [19.2 秒](approach-right-far-frame-19.2s.png)
+- [index.json](index.json) SHA-256：`ca3f985fccf51bdddba0a050677fdf83694940659c2085401332ea7a9f73fab3`
+- [archive-manifest.json](archive-manifest.json)：保护 33 个原始运行文件和上述 4 张视频截帧；后者的来源方法与取帧时间单列。
 
 `verify_archive.py` 实跑通过：37 文件、8 episodes、8,008 samples；逐项核 raw/compressed SHA、数组维度、控制时序、接触计数与 signed displacement。Python 行为/完整性 tests 17/17，通过不等于 v4 改善假设成立；该假设因左侧仍未触球而不满足本轮预声明的整体接受条件。
 

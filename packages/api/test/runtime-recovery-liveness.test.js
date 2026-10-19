@@ -4,7 +4,6 @@ import { setImmediate } from 'node:timers/promises';
 import { ActionSuccessorDispatchRecovery } from '../dist/domains/ball-custody/ActionSuccessorDispatchRecovery.js';
 import { ActionSuccessorRecoverySweep } from '../dist/domains/ball-custody/ActionSuccessorRecoverySweep.js';
 import { ManagedCommandWakeRecoverySweep } from '../dist/domains/ball-custody/ManagedCommandWakeRecoverySweep.js';
-import { RedisGameStore } from '../dist/domains/cats/services/stores/redis/RedisGameStore.js';
 import { ManagedJobService } from '../dist/domains/managed-job/ManagedJobService.js';
 import { isolateManagedJobData } from './helpers/isolated-managed-job-data.js';
 
@@ -80,34 +79,6 @@ test('recovery cycles coalesce census through completion and recover after a rej
   await assert.rejects(sweep.runOnce(), /temporary/);
   assert.equal((await sweep.runOnce()).scanned, 0);
 });
-test('game recovery scans bounded pages, tolerates duplicates and empty pages, and batches reads', async () => {
-  const calls = [];
-  const redis = {
-    options: { keyPrefix: 'fixture:' },
-    keys: async () => {
-      assert.fail('KEYS blocks the shared Redis event loop');
-    },
-    async scan(cursor, ...args) {
-      calls.push([cursor, ...args]);
-      if (cursor === '0') return ['4', []];
-      if (cursor === '4') return ['7', ['fixture:game:thread:a:active', 'fixture:game:thread:b:active']];
-      return ['0', ['fixture:game:thread:a:active', 'fixture:game:thread:c:active']];
-    },
-    async mget(...keys) {
-      assert(keys.length <= 100);
-      return keys.map((key) =>
-        key.includes('thread:')
-          ? ({ 'game:thread:a:active': 'ga', 'game:thread:b:active': null, 'game:thread:c:active': 'gc' }[key] ?? null)
-          : JSON.stringify({ gameId: key.split(':').at(-1) }),
-      );
-    },
-  };
-  const games = await new RedisGameStore(redis).listActiveGames();
-  assert.deepEqual(games.map((g) => g.gameId).sort(), ['ga', 'gc']);
-  assert.equal(calls.length, 3);
-  assert(calls.every((args) => args.includes('fixture:game:thread:*:active') && args.map(String).includes('100')));
-});
-
 test('ActionSuccessor timer coalesces all three owners until slow siblings settle after an early failure', async () => {
   const { createActionSuccessorRecoveryCycle } = await import(
     '../dist/domains/ball-custody/ActionSuccessorRecoveryCycle.js'

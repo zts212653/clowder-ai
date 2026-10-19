@@ -267,12 +267,12 @@ export class ArtifactReviewService {
     return { bytes, mediaType: round.asset.mediaType, digest: round.asset.blobDigest };
   }
 
-  async openMedia(reviewId: string, roundNumber: number, principal: MediaReviewPrincipal) {
+  async openMedia(reviewId: string, roundNumber: number, principal: MediaReviewPrincipal, localFile = false) {
     const view = await this.readCurrent(reviewId, principal);
     principal = withContentTask(principal, view.review.task.taskId);
     const round = view.review.rounds.find((item) => item.number === roundNumber);
     if (!round) throw new ArtifactReviewError('not_found');
-    return this.deps.media.openAsset(round.asset, principal);
+    return this.deps.media.openAsset(round.asset, principal, localFile);
   }
 
   async listForTask(taskId: string, principal: MediaReviewPrincipal) {

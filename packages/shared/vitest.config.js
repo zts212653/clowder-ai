@@ -75,6 +75,7 @@ export default defineConfig({
       'src/__tests__/memory-cue.test.ts',
       'src/__tests__/context-attachment.test.ts',
       'src/__tests__/media-context-attachment.test.ts',
+      'src/__tests__/media-gallery-origin.test.ts',
       'src/__tests__/content-modification-receipt.test.ts',
       'src/__tests__/runtime-interaction.test.ts',
       'src/__tests__/routing-context.test.ts',

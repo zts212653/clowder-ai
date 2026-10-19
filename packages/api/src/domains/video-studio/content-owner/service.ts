@@ -185,7 +185,14 @@ export class ProjectContentOwnerService {
 
   async open(contentRef: string, ownerRevision: number) {
     const metadata = await this.describe(contentRef, ownerRevision);
-    return { ...metadata, ...(await this.store.openBlob(contentRef, metadata.blobDigest)) };
+    const state = await this.store.readState(contentRef);
+    const revision = state?.revisions.find((item) => item.ownerRevision === ownerRevision);
+    return {
+      ...metadata,
+      ...(await this.store.openBlob(contentRef, metadata.blobDigest)),
+      committedBy: revision?.committedBy,
+      committedAt: revision?.committedAt,
+    };
   }
 
   async describe(contentRef: string, ownerRevision?: number): Promise<Omit<LoadedProjectContentV1, 'bytes'>> {

@@ -37,7 +37,7 @@ import { projectWorkspaceWorkHost } from './workbench/workspace-work-host-projec
 import { FloatingPresentationSurfaceHost } from './workspace/FloatingPresentationSurfaceHost';
 import { ResizeHandle } from './workspace/ResizeHandle';
 
-const CHROMELESS_ROUTES = ['/story', '/story-export', '/pixel-brawl', '/showcase', '/dev/f277-attention-preview'];
+const CHROMELESS_ROUTES = ['/story', '/story-export', '/showcase', '/dev/f277-attention-preview'];
 
 const SIDEBAR_HIDDEN_ROUTES = [
   '/settings',

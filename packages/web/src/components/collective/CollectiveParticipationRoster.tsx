@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { AvatarImageWithFallback } from '@/components/AvatarImageWithFallback';
 import { CollectiveToggleSwitch } from './CollectiveToggleSwitch';
 import type { ParticipationView } from './use-collective-participation';
+import { useCollectiveText } from './use-collective-text';
 
 export function CollectiveParticipationRoster({
   view,
@@ -18,18 +19,19 @@ export function CollectiveParticipationRoster({
   readonly enabled: boolean;
   readonly mutate: (path: string, body: Record<string, unknown>, method?: string) => Promise<boolean | undefined>;
 }) {
+  const t = useCollectiveText();
   const [pendingDisable, setPendingDisable] = useState<string>();
   const includedCatCount = view.cats.filter(
     (cat) =>
       cat.configured && cat.supported && cat.eligible && !view.desiredParticipation.excludedCatIds.includes(cat.id),
   ).length;
   return (
-    <section aria-label="我的猫" className="space-y-3">
+    <section aria-label={t('我的猫')} className="space-y-3">
       <header className="flex items-baseline justify-between gap-3">
         <div>
-          <h3 className="text-sm font-semibold">我的猫</h3>
+          <h3 className="text-sm font-semibold">{t('我的猫')}</h3>
           <p className="mt-1 text-xs text-cafe-muted">
-            家里 {view.cats.length} 只 · {includedCatCount} 只在这里
+            {t('家里')} {view.cats.length} {t('只')} · {includedCatCount} {t('只在这里')}
           </p>
         </div>
       </header>
@@ -55,14 +57,14 @@ export function CollectiveParticipationRoster({
                     <strong className="text-sm font-medium text-cafe-primary">{name}</strong>
                     <span className="break-all text-xs text-cafe-muted">@{cat.id}</span>
                   </div>
-                  <p className="text-xs text-cafe-secondary">{catIdentity(cat)}</p>
+                  {catIdentity(cat) && <p className="text-xs text-cafe-secondary">{catIdentity(cat)}</p>}
                   <p id={statusId} className="mt-0.5 text-xs text-cafe-muted">
-                    {status}
+                    {t(status)}
                   </p>
                 </div>
                 <div className="flex items-center">
                   <CollectiveToggleSwitch
-                    label={`${name}（@${cat.id}）参与这个共同体`}
+                    label={`${name}（@${cat.id}）${t('参与这个共同体')}`}
                     describedBy={statusId}
                     checked={participating}
                     disabled={busy || !interactive}
@@ -79,8 +81,8 @@ export function CollectiveParticipationRoster({
               {confirming && (
                 <div className="mb-3 rounded-lg bg-[var(--console-card-bg)] p-3 text-xs leading-5 text-cafe-secondary">
                   <p>
-                    关掉以后，{name}
-                    不再收到这个共同体的新请求，也不在这里发言；已经接下的工作照实际情况留在「日程」里。
+                    {t('关掉以后')}，{name}
+                    {t('不再收到这个共同体的新请求，也不在这里发言；已经接下的工作照实际情况留在「日程」里。')}
                   </p>
                   <div className="mt-3 flex justify-end gap-2">
                     <button
@@ -92,14 +94,14 @@ export function CollectiveParticipationRoster({
                         })
                       }
                     >
-                      关掉
+                      {t('关掉')}
                     </button>
                     <button
                       type="button"
                       className="rounded-lg border border-[var(--console-border-soft)] px-3 py-1.5"
                       onClick={() => setPendingDisable(undefined)}
                     >
-                      取消
+                      {t('取消')}
                     </button>
                   </div>
                 </div>
@@ -107,14 +109,14 @@ export function CollectiveParticipationRoster({
             </div>
           );
         })}
-        {!view.cats.length && <p className="py-4 text-sm text-cafe-muted">家里还没有成员。</p>}
+        {!view.cats.length && <p className="py-4 text-sm text-cafe-muted">{t('家里还没有成员。')}</p>}
       </div>
     </section>
   );
 }
 
 function catIdentity(cat: ParticipationView['cats'][number]) {
-  return [cat.breedDisplayName, cat.variantLabel ?? cat.defaultModel].filter(Boolean).join(' · ') || cat.displayName;
+  return [cat.breedDisplayName, cat.variantLabel ?? cat.defaultModel].filter(Boolean).join(' · ');
 }
 
 function participationStatus(view: ParticipationView, cat: ParticipationView['cats'][number]) {

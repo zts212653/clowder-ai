@@ -22,38 +22,9 @@ export function useGalleryMediaUrls(items: RichMediaGalleryBlock['items']) {
   const pathsKey = JSON.stringify([...new Set(items.map((item) => item.url.trim()).filter(isLocalPath))]);
   useEffect(() => {
     const paths: string[] = JSON.parse(pathsKey);
-    if (paths.length === 0) return;
+    if (!paths.length) return;
     let cancelled = false;
-    void Promise.all(
-      paths.map(async (href) => {
-        try {
-          const response = await apiFetch('/api/workspace/resolve-document-link', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ href }),
-          });
-          if (!response.ok) throw new Error('Local image path unavailable');
-          const target: unknown = await response.json();
-          if (
-            !target ||
-            typeof target !== 'object' ||
-            !('kind' in target) ||
-            target.kind !== 'file' ||
-            !('worktreeId' in target) ||
-            typeof target.worktreeId !== 'string' ||
-            !('path' in target) ||
-            typeof target.path !== 'string'
-          )
-            throw new Error('Invalid workspace image target');
-          return [
-            href,
-            `/api/workspace/file/raw?${new URLSearchParams({ worktreeId: target.worktreeId, path: target.path })}`,
-          ] as const;
-        } catch {
-          return [href, null] as const;
-        }
-      }),
-    ).then((entries) => {
+    void Promise.all(paths.map(async (href) => [href, await resolveGalleryMediaUrl(href)] as const)).then((entries) => {
       if (!cancelled) setResolved(Object.fromEntries(entries));
     });
     return () => {
@@ -68,4 +39,36 @@ export function useGalleryMediaUrls(items: RichMediaGalleryBlock['items']) {
       isGalleryApiUrl(url) || /^https?:\/\//i.test(url) || /^data:image\//i.test(url) || /^blob:/i.test(url);
     return { url: valid ? url : null, pending: false };
   });
+}
+
+/** Resolves only an original message locator; it does not prepare or publish a media owner. */
+export async function resolveGalleryMediaUrl(raw: string): Promise<string | null> {
+  const url = raw.trim();
+  if (!isLocalPath(url))
+    return isGalleryApiUrl(url) || /^https?:\/\//i.test(url) || /^data:image\//i.test(url) || /^blob:/i.test(url)
+      ? url
+      : null;
+  try {
+    const response = await apiFetch('/api/workspace/resolve-document-link', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ href: url }),
+    });
+    if (!response.ok) return null;
+    const target: unknown = await response.json();
+    if (
+      !target ||
+      typeof target !== 'object' ||
+      !('kind' in target) ||
+      target.kind !== 'file' ||
+      !('worktreeId' in target) ||
+      typeof target.worktreeId !== 'string' ||
+      !('path' in target) ||
+      typeof target.path !== 'string'
+    )
+      return null;
+    return `/api/workspace/file/raw?${new URLSearchParams({ worktreeId: target.worktreeId, path: target.path })}`;
+  } catch {
+    return null;
+  }
 }

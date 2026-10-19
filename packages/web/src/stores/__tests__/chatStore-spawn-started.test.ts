@@ -23,7 +23,6 @@ describe('spawn_started state mutations', () => {
       targetCats: [],
       catStatuses: {},
       catInvocations: {},
-      currentGame: null,
       threadStates: {
         'bg-thread': { ...DEFAULT_THREAD_STATE, lastActivity: Date.now() },
       },

@@ -23,7 +23,6 @@ import type {
   ChatMessageMetadata,
   ChatMessagePatch,
   ComposerDraftInsert,
-  GameState,
   PresentationLockSnapshot,
   PresentationLockView,
   PresentationSurfaceState,
@@ -58,7 +57,6 @@ export type {
   ChatMessagePatch,
   EvidenceData,
   EvidenceResultData,
-  GameState,
   ImageContent,
   MessageContent,
   QueueEntry,
@@ -120,7 +118,6 @@ function snapshotActive(s: ChatState): ThreadState {
     catStatuses: s.catStatuses,
     catStatusDetails: s.catStatusDetails,
     catInvocations: s.catInvocations,
-    currentGame: s.currentGame,
     unreadCount: 0, // active thread always 0
     hasUserMention: false,
     // If the thread is actively streaming, Date.now() is correct — there IS real activity.
@@ -252,7 +249,6 @@ function flattenThread(ts: ThreadState): Partial<ChatState> {
     targetCats: ts.targetCats,
     catStatuses: ts.catStatuses,
     catInvocations: ts.catInvocations,
-    currentGame: ts.currentGame,
     queue: ts.queue,
     queueFull: ts.queueFull,
     queueFullSource: ts.queueFullSource,
@@ -679,8 +675,6 @@ export interface ChatState {
   /** F198 Phase C AC-C3: daemon detail text per catId */
   catStatusDetails: Record<string, string>;
   catInvocations: Record<string, CatInvocationInfo>;
-  /** F101: Active game in current thread */
-  currentGame: GameState | null;
   /** F39: Message queue entries */
   queue: QueueEntry[];
   /** F39: Queue full flag */
@@ -884,8 +878,6 @@ export interface ChatState {
    * handler), and exposing fromSeq would create a contract that nobody honors.
    */
   requestStreamCatchUp: (threadId: string) => void;
-  /** F101: Update current game state */
-  setCurrentGame: (game: GameState | null) => void;
 
   // ── Thread management ──
   setThreads: (threads: Thread[]) => void;
@@ -1182,7 +1174,6 @@ export const useChatStore = create<ChatState>((set, get) => ({
   catStatuses: {},
   catStatusDetails: {},
   catInvocations: {},
-  currentGame: null,
   queue: [],
   queueFull: false,
 
@@ -2515,8 +2506,6 @@ export const useChatStore = create<ChatState>((set, get) => ({
         [threadId]: (state.streamCatchUpVersionByThread[threadId] ?? 0) + 1,
       },
     })),
-
-  setCurrentGame: (game) => set({ currentGame: game }),
 
   // ── Thread management ──
 

@@ -23,6 +23,23 @@ describe('F167 successor runtime wiring', () => {
     );
   });
 
+  it('wires Task orphan recovery through the existing lease, Task, Message, and Queue owners', () => {
+    const actionWiring = block(
+      "import('./domains/ball-custody/RedisActionSuccessorLeaseStore.js')",
+      'const [dispatchApprovalMod, redisDispatchApprovalMod]',
+    );
+    assert.match(actionWiring, /new orphanRecoveryMod\.TaskActionSuccessorOrphanRecovery\(/);
+    assert.match(actionWiring, /tasks: taskStore/);
+    assert.match(actionWiring, /messages: messageStore/);
+    assert.match(actionWiring, /queue: invocationQueue/);
+    assert.match(actionWiring, /invocationRecords: invocationRecordStore/);
+    assert.match(actionWiring, /turnExecutions: turnExecutionStore/);
+    assert.match(actionWiring, /delegates: taskApprovedDelegateProvider/);
+    assert.match(actionWiring, /new orphanAtomicStoreMod\.RedisActionSuccessorOrphanCarrierAtomicStore\(redis\)/);
+    const callbackOpts = block('const callbackOpts = {', 'await app.register(callbacksRoutes, callbackOpts);');
+    assert.match(callbackOpts, /taskActionSuccessorOrphanRecovery/);
+  });
+
   it('does not pretend messagesRoutes consumes ActionSuccessorAdmissionService', () => {
     const messagesOpts = block('const messagesOpts = {', 'await app.register(messagesRoutes, messagesOpts);');
     assert.doesNotMatch(

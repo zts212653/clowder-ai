@@ -120,6 +120,59 @@ describe('parseUnifiedAttentionRead — a body is a read only if it is a version
     expect(parsed?.items[0]?.choiceRequest?.cardRef.blockId).toBe('card-1');
   });
 
+  it('accepts only a canonical pending Collective responsibility request with its declared source', () => {
+    const request = {
+      producerId: 'f290.collective_work_accountability_request',
+      subjectRef: 'collective-accountability-request:svc_abcdefgh:col_abcdefgh:work_abcdefgh:accountability_abcdefgh',
+      serviceInstanceId: 'svc_abcdefgh',
+      collectiveId: 'col_abcdefgh',
+      connectionId: 'con_abcdefgh',
+      workId: 'work_abcdefgh',
+      workRevision: 2,
+      accountabilityRequestId: 'accountability_abcdefgh',
+      targetHumanId: 'human_abcdefgh',
+      targetDisplayName: 'WuLang',
+      requestedByHumanId: 'human_requester',
+      requestedByDisplayName: 'You',
+      requestEventId: 'evt_request000',
+      requestedAt: '2026-10-18T12:00:00.000Z',
+      status: 'pending',
+      roadmapId: 'roadmap_abcdefgh',
+      projectTitle: '共同项目',
+      channelId: 'general',
+      workSourceEventId: 'evt_source0000',
+      workTitle: '完成接责验收',
+      actionRef:
+        '/collective?target=accountability&connectionId=con_abcdefgh&workId=work_abcdefgh&workRevision=2&channelId=general&roadmapId=roadmap_abcdefgh&accountabilityRequestId=accountability_abcdefgh',
+      expectedProducerRevision: 2,
+    };
+    const item = {
+      decisionRef: `${request.producerId}:${request.subjectRef}`,
+      kind: 'judgment',
+      summary: 'You 邀请你负责',
+      linkedNeedsMe: [],
+      collectiveAccountabilityRequest: request,
+    };
+    const input = body({
+      sources: {
+        approvals: source(),
+        needsMe: source({ coverage: 'current_linked_F310_five_producers' }),
+        collectiveAccountabilityRequests: source({ coverage: 'pending_f290_collective_accountability_requests' }),
+      },
+      items: [item],
+    });
+    expect(parseUnifiedAttentionRead(input)?.items[0]?.collectiveAccountabilityRequest).toEqual(request);
+    expect(
+      parseUnifiedAttentionRead({
+        ...input,
+        sources: { approvals: source(), needsMe: source({ coverage: 'current_linked_F310_five_producers' }) },
+      }),
+    ).toBeNull();
+    const stale = structuredClone(input);
+    (stale.items as (typeof item)[])[0].collectiveAccountabilityRequest.expectedProducerRevision = 1;
+    expect(parseUnifiedAttentionRead(stale)).toBeNull();
+  });
+
   it('keeps the publication proof on a canonical provider question instead of rejecting the entire read', () => {
     const cardRef = {
       threadId: 'thread-1',

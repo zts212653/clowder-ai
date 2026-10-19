@@ -4,6 +4,7 @@ doc_kind: architecture
 related_docs: [collaboration-landscape.md]
 topics: [user-journey, human-cat, cat-experience, collaboration]
 created: 2026-06-29
+updated: 2026-10-18
 status: v1
 author: "Ragdoll/claude-opus-4-6"
 ---
@@ -71,7 +72,7 @@ operator说了一句话 → 三只猫跑了 2 小时 → `collaboration-landscap
 
 #### 真实案例（partial proxy）：持球小优化（thread `[thread-id]`）
 
-> ⚠️ **目标旅程 vs 现状**：理想状态是 F233 值班简报 dashboard——operator一眼看到"球在谁手上"。该 dashboard 还未 close。当前案例是 partial proxy：operator通过 Hub thread 列表自己观察到球权状态。
+> ⚠️ **目标旅程 vs 现状**：原拟用 F233 值班简报承载"一眼看到球在谁手上"，但该方向已于 2026-08-17 failed-close，2026-10-18 补完简报 backend/cron/route 退役（[PR #5729](https://github.com/zts212653/clowder-ai/pull/5729)）。下例仍是历史 partial proxy：operator通过 Hub thread 列表自己观察球权状态，不能作为简报成功案例。Phase B 审计账本、Story 历史读取与 F299 执行轨迹保留；后续目标旅程按现行控制面契约推进。
 
 operator回来发现Maine Coon在用 hold_ball 等remote review。operator注意到：
 
@@ -79,7 +80,7 @@ operator回来发现Maine Coon在用 hold_ball 等remote review。operator注意
 
 这不是operator在追进度——是operator**路过时**发现了 UX 不一致，顺手开了优化 thread。球权机制在安静运转，operator只在"看到值得说的事"时才介入。
 
-**涉及 feature**：F167 hold_ball、F233 ball custody 可观测（dashboard 未完成）
+**涉及 feature**：F167 hold_ball、F233 Phase B 球权账本（保留；值班简报已退役）
 
 ---
 
@@ -338,7 +339,7 @@ opus-48 在做 F244（Capability Tips）Phase D 时，context 快满了。48 发
 ## 缺口
 
 1. **operator旅程 4（猫猫日记）没有真实案例** — F255 Auto Dream 还在 spec 阶段
-2. **operator旅程 2（球在哪）缺少值班简报案例** — F233 值班简报 dashboard 未 close
+2. **operator旅程 2（球在哪）的原简报方案已退役** — F233 保持 failed-close，C1b/C1c 撤销；历史 partial proxy 不冒充产品验收，也不继续排期旧 dashboard
 3. **operator旅程 5（第一天）是社区用户的旅程** — You 自己没走过 bootcamp，真实案例来自社区 PR
 
 ---

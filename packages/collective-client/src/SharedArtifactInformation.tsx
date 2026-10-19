@@ -51,8 +51,8 @@ export function SharedArtifactInformation({
               #{artifact.sourceLocation.channelId} · 原讨论
             </button>
           </dd>
-          <dt>属于工作</dt>
-          <dd>{artifact.workId ? '已关联原工作' : '这条讨论中的共同作品'}</dd>
+          <dt>属于任务</dt>
+          <dd>{artifact.workId ? '已关联原任务' : '这条讨论中的共同作品'}</dd>
           <dt>查看与批注</dt>
           <dd>有权访问这件作品的共同体成员</dd>
           <dt>采用修改</dt>

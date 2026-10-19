@@ -1,5 +1,12 @@
 import type { CollectiveConnector } from '@cat-cafe/collective-connector';
-import { type CollectiveSourceIdentity, type CollectiveWorkMatter, collectiveWorkMatterSchema } from '@cat-cafe/shared';
+import {
+  type CollectiveSourceIdentity,
+  type CollectiveWorkMatter,
+  collectiveWorkIdSchema,
+  collectiveWorkMatterSchema,
+  collectiveWorkProjectSummarySchema,
+} from '@cat-cafe/shared';
+import { z } from 'zod';
 import type { InvocationRecord } from '../../../cats/services/agents/invocation/InvocationRegistry.js';
 import { collectiveContextError, opaqueRef, verifyRef } from '../collective-context-refs.js';
 
@@ -9,6 +16,12 @@ export interface CollectiveContinueWorkInput {
   readonly grantRef: string;
   readonly grantRevision: number;
   readonly requestKind: string;
+}
+export interface CollectiveSuggestProjectWorkInput {
+  readonly projectRef: string;
+  readonly prerequisiteForWorkRef?: string;
+  readonly title: string;
+  readonly intendedOutcome: string;
 }
 interface SourceBinding {
   readonly source: CollectiveSourceIdentity;
@@ -22,6 +35,10 @@ const coordinatesSchema = collectiveWorkMatterSchema.pick({
   resultEventId: true,
   resultRevision: true,
 });
+const projectCoordinatesSchema = collectiveWorkProjectSummarySchema
+  .pick({ roadmapId: true, revision: true })
+  .extend({ workId: collectiveWorkIdSchema })
+  .strict();
 
 function workCoordinates(matter: CollectiveWorkMatter) {
   const { workId, revision, executionRevision, resultEventId, resultRevision } = matter;
@@ -39,6 +56,25 @@ function decodeWorkRef(auth: InvocationRecord, sourceRef: string, workRef: strin
   verifyRef(auth, parts[1], `work:${parts[0]}`, sourceRef);
   return coordinatesSchema.parse(JSON.parse(Buffer.from(parts[0], 'base64url').toString('utf8')));
 }
+function encodeProjectRef(
+  auth: InvocationRecord,
+  sourceRef: string,
+  matter: CollectiveWorkMatter,
+  project: z.infer<typeof collectiveWorkProjectSummarySchema>,
+) {
+  const payload = Buffer.from(
+    JSON.stringify({ workId: matter.workId, roadmapId: project.roadmapId, revision: project.revision }),
+  ).toString('base64url');
+  return `${payload}.${opaqueRef(auth, `project:${payload}`, sourceRef)}`;
+}
+function decodeProjectRef(auth: InvocationRecord, sourceRef: string, projectRef: string) {
+  if (projectRef.length > 2000) throw collectiveContextError('RETURN_REF_INVALID', 'Invalid Project reference');
+  const parts = projectRef.split('.');
+  if (parts.length !== 2 || !parts[0] || !parts[1])
+    throw collectiveContextError('RETURN_REF_INVALID', 'Invalid Project reference');
+  verifyRef(auth, parts[1], `project:${parts[0]}`, sourceRef);
+  return projectCoordinatesSchema.parse(JSON.parse(Buffer.from(parts[0], 'base64url').toString('utf8')));
+}
 
 /** Only bounded public candidates enter the model. The reference is bound to this source and invocation. */
 export async function currentWorkSourceContext(
@@ -49,7 +85,79 @@ export async function currentWorkSourceContext(
   const current = await connector.readWorkSourceContext(binding.source);
   return {
     ...current,
-    matters: current.matters.map((matter) => ({ ...matter, workRef: encodeWorkRef(auth, binding.sourceRef, matter) })),
+    matters: current.matters.map((matter) => ({
+      ...matter,
+      workRef: encodeWorkRef(auth, binding.sourceRef, matter),
+      projectContext: {
+        ...matter.projectContext,
+        projects: matter.projectContext.projects.map((project) => ({
+          ...project,
+          projectRef: encodeProjectRef(auth, binding.sourceRef, matter, project),
+        })),
+      },
+    })),
+  };
+}
+
+export async function suggestProjectWorkFromSource(
+  connector: CollectiveConnector,
+  auth: InvocationRecord,
+  binding: SourceBinding,
+  input: CollectiveSuggestProjectWorkInput,
+) {
+  const expectedProject = decodeProjectRef(auth, binding.sourceRef, input.projectRef);
+  const expectedTarget = input.prerequisiteForWorkRef
+    ? decodeWorkRef(auth, binding.sourceRef, input.prerequisiteForWorkRef)
+    : undefined;
+  const current = await connector.readWorkSourceContext(binding.source);
+  const matter = current.matters.find((candidate) => candidate.workId === expectedProject.workId);
+  const project = matter?.projectContext.projects.find(
+    (candidate) => candidate.roadmapId === expectedProject.roadmapId && candidate.revision === expectedProject.revision,
+  );
+  if (!matter || !project) {
+    throw collectiveContextError('WORK_REVISION_CONFLICT', 'The referenced Project changed; read current context');
+  }
+  if (
+    expectedTarget &&
+    (expectedTarget.workId !== matter.workId ||
+      JSON.stringify(workCoordinates(matter)) !== JSON.stringify(expectedTarget))
+  ) {
+    throw collectiveContextError(
+      'WORK_REVISION_CONFLICT',
+      'The prerequisite target changed; read current Project context',
+    );
+  }
+  const work = await connector.proposeWork(
+    binding.source,
+    `project-work-suggestion:${auth.invocationId}`,
+    {
+      catId: auth.catId,
+      agentId: auth.catId,
+      displayName: binding.displayName,
+      sessionRef: auth.invocationId,
+    },
+    {
+      title: input.title,
+      intendedOutcome: input.intendedOutcome,
+      requestKind: expectedTarget ? 'project_prerequisite_suggestion' : 'project_task_suggestion',
+      projectSuggestion: {
+        roadmapId: project.roadmapId,
+        roadmapRevision: project.revision,
+        ...(expectedTarget
+          ? {
+              prerequisiteForWorkId: expectedTarget.workId,
+              prerequisiteForWorkRevision: expectedTarget.revision,
+            }
+          : {}),
+      },
+    },
+  );
+  return {
+    workId: work.workId,
+    revision: work.revision,
+    lifecycle: work.lifecycle,
+    projectSuggestion: work.projectSuggestion,
+    disposition: 'pending_human_decision' as const,
   };
 }
 

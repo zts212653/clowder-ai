@@ -39,8 +39,7 @@ import type { MemoryCueOpportunitySeed } from '../../../../memory/cue/MemoryCueI
 import type { NudgeProcessResult } from '../../../../memory/EntityNudgeService.js';
 import type { CloudDispatchProvenance } from '../../cloud-bridge/types.js';
 import { buildMessageMap, formatMessage } from '../../context/ContextAssembler.js';
-import { BRIEFING_TIMEZONE } from '../../duty-briefing/constants.js';
-import { formatPromptTime } from '../../format-time.js';
+import { CO_CREATOR_TIME_ZONE, formatPromptTime } from '../../format-time.js';
 import type { DegradationResult } from '../../orchestration/DegradationPolicy.js';
 import { mapToPresentation } from '../../session/context/context-presentation.js';
 import {
@@ -377,7 +376,7 @@ export interface RouteOptions {
         ownerAuthProvenance: OwnerAuthProvenance;
         threadId: string;
         reporterCatId: CatId;
-        predecessorCatId: CatId;
+        predecessorCatId?: CatId;
         parentInvocationId?: string;
         callerTraceContext?: import('../../../../../infrastructure/telemetry/genai-semconv.js').CallerTraceContext;
       }) => Promise<StoredMessage>)
@@ -401,8 +400,8 @@ export interface RouteOptions {
   /** F108: Unique invocation ID for WorklistRegistry isolation in concurrent execution.
    *  When provided, worklist is keyed by this ID instead of threadId. */
   parentInvocationId?: string | undefined;
-  /** Queue owns which persisted sources still await this target's delivery. */
-  resolvePendingPromptMessageIds?: (catId: string, messageIds: readonly string[]) => Promise<readonly string[]>;
+  /** A recovery proof cannot acknowledge an older wake that still awaits this target. */
+  resolvePendingWakeMessageIds?: (catId: string, messageIds: readonly string[]) => Promise<readonly string[]>;
   /** Exact, non-trigger message bodies exposed by incremental context to this invocation. */
   onPromptMessagesExposed?:
     | ((input: {
@@ -666,7 +665,6 @@ export type IncrementalProjectionReason =
   | 'briefing'
   | 'same_route_output_isolation'
   | 'same_user_wave_sibling_deferred'
-  | 'pending_delivery'
   | 'visibility'
   | 'self_output'
   | 'smart_window_omitted'
@@ -1368,8 +1366,8 @@ export async function fetchAfterCursor(
 
 /** Options for caller-specified budget overrides */
 export interface IncrementalContextOptions {
-  /** Resolve after reading History; a public source is not yet this turn's input. */
-  resolvePendingPromptMessageIds?: (messageIds: readonly string[]) => Promise<readonly string[]>;
+  /** Pending wakes cap recovery only; they remain visible in the actual projection. */
+  resolvePendingWakeMessageIds?: (messageIds: readonly string[]) => Promise<readonly string[]>;
   /**
    * Invocation-owned history ceiling for the token-trim pass.
    * The routing layer should calculate this as:
@@ -1514,12 +1512,9 @@ function resolveIncrementalBoundaryCap(
   playMode: boolean,
   options: IncrementalContextOptions | undefined,
   isolation: SameRouteIsolationContext,
-  pendingMessageIds: ReadonlySet<string>,
 ): IncrementalBoundaryCap {
   const firstWithheldIndex = unseen.findIndex(
-    (message) =>
-      pendingMessageIds.has(message.id) ||
-      incrementalDeferralReason(message, catId, playMode, options, isolation) !== undefined,
+    (message) => incrementalDeferralReason(message, catId, playMode, options, isolation) !== undefined,
   );
   if (firstWithheldIndex < 0) return { active: false };
 
@@ -1775,19 +1770,14 @@ async function assembleIncrementalContextInternal(
     }
   }
   const fetchedUnseen = await fetchAfterCursor(deps.messageStore, threadId, cursor, userId);
-  const pendingMessageIds = new Set(
-    await options?.resolvePendingPromptMessageIds?.([
-      ...new Set(fetchedUnseen.flatMap((message) => [message.id, ...(message.replyTo ? [message.replyTo] : [])])),
-    ]),
+  // Public speech stays in the unread projection. Queue coverage is committed
+  // for the exact fully projected IDs before the provider sees this prompt.
+  const loadedUnseen = fetchedUnseen;
+  const pendingWakes = new Set(
+    await options?.resolvePendingWakeMessageIds?.(fetchedUnseen.map((message) => message.id)),
   );
-  // Agent speech is public before all its requested targets have received it.
-  // Do not expose another pending job as History, navigation, or a reply preview:
-  // reading it here must not make the current turn work outside its Queue input.
-  const loadedUnseen = fetchedUnseen.filter((message) => !pendingMessageIds.has(message.id));
-  // A visibility cursor acknowledges a contiguous prefix. Neither recovery nor
-  // the final prompt ACK can cross the first source still awaiting delivery.
-  const firstPendingIndex = fetchedUnseen.findIndex((message) => pendingMessageIds.has(message.id));
-  const recoveryPrefix = firstPendingIndex < 0 ? fetchedUnseen : fetchedUnseen.slice(0, firstPendingIndex);
+  const firstPending = fetchedUnseen.findIndex((message) => pendingWakes.has(message.id));
+  const recoveryPrefix = firstPending < 0 ? fetchedUnseen : fetchedUnseen.slice(0, firstPending);
   const deliveryRecovery = recoverableDeliveryBoundary(recoveryPrefix, { userId, threadId, catId });
   let unreadCandidates = fetchedUnseen;
   if (deliveryRecovery.cursor && (!cursor || compareCursors(deliveryRecovery.cursor, cursor) > 0)) {
@@ -1804,7 +1794,7 @@ async function assembleIncrementalContextInternal(
       log.warn({ err, catId, threadId }, 'Delivery boundary recovery failed; retaining unread context');
     }
   }
-  const unseen = unreadCandidates.filter((message) => !pendingMessageIds.has(message.id));
+  const unseen = unreadCandidates;
 
   // Debug mode: cats see all whispers (full transparency). Play mode: cats only see their own whispers.
   const playMode = thinkingMode !== 'debug';
@@ -1830,7 +1820,6 @@ async function assembleIncrementalContextInternal(
     playMode,
     options,
     sameRouteIsolation,
-    pendingMessageIds,
   );
   const filteredReasons = new Map<string, ProjectionAuditCandidate['filteredReason']>();
   const relevant = unseen.filter((m) => {
@@ -1872,17 +1861,10 @@ async function assembleIncrementalContextInternal(
     // the same visibility contract for user and cat authors.
     return true;
   });
-  const auditedMessageIds = new Set(unseen.map((message) => message.id));
-  auditCapture.candidates = fetchedUnseen
-    .filter((message) => pendingMessageIds.has(message.id) || auditedMessageIds.has(message.id))
-    .map((message) => ({
-      messageRef: message.id,
-      ...(pendingMessageIds.has(message.id)
-        ? { filteredReason: 'pending_delivery' as const }
-        : filteredReasons.get(message.id)
-          ? { filteredReason: filteredReasons.get(message.id) }
-          : {}),
-    }));
+  auditCapture.candidates = unseen.map((message) => ({
+    messageRef: message.id,
+    ...(filteredReasons.get(message.id) ? { filteredReason: filteredReasons.get(message.id) } : {}),
+  }));
 
   // An explicit zero means fixed prompt parts exhausted the invocation budget.
   // An absent override identifies an unbound direct consumer and uses the
@@ -2057,7 +2039,6 @@ async function assembleIncrementalContextInternal(
       incrementalBoundaryCap,
       contextMode ?? 'cold',
       deltaSize,
-      pendingMessageIds,
     );
     return shaped;
   }
@@ -2115,9 +2096,7 @@ async function assembleIncrementalContextInternal(
   ];
   if (missingReplyIds.length > 0) {
     const resolved = await Promise.all(
-      missingReplyIds
-        .filter((id) => !pendingMessageIds.has(id))
-        .map((id) => resolveVisibleReplyParent(deps.messageStore, id, replyParentOpts)),
+      missingReplyIds.map((id) => resolveVisibleReplyParent(deps.messageStore, id, replyParentOpts)),
     );
     for (const msg of resolved) {
       if (msg) baseMap.set(msg.id, msg);
@@ -2131,7 +2110,7 @@ async function assembleIncrementalContextInternal(
         formatPromptTime(epochMs, {
           nowMs: options.nowMs,
           includeAge: 'stale',
-          staleComparisonTimeZone: BRIEFING_TIMEZONE,
+          staleComparisonTimeZone: CO_CREATOR_TIME_ZONE,
         })
     : undefined;
   const lines = capped.map((m) => {
@@ -2289,7 +2268,6 @@ async function assembleSmartWindowContext(
   incrementalBoundaryCap: IncrementalBoundaryCap,
   contextMode: 'cold' | 'hot',
   deltaSize: 'small' | 'large',
-  pendingMessageIds: ReadonlySet<string>,
 ): Promise<IncrementalContextResult> {
   const truncateLimit = PROMPT_MESSAGE_SAFETY_CHAR_LIMIT;
   const hasEpochProjection = options?.contextProjection !== undefined;
@@ -2472,9 +2450,7 @@ async function assembleSmartWindowContext(
   ];
   if (missingReplyIds.length > 0) {
     const resolved = await Promise.all(
-      missingReplyIds
-        .filter((id) => !pendingMessageIds.has(id))
-        .map((id) => resolveVisibleReplyParent(deps.messageStore, id, replyParentOptsCold)),
+      missingReplyIds.map((id) => resolveVisibleReplyParent(deps.messageStore, id, replyParentOptsCold)),
     );
     for (const msg of resolved) {
       if (msg) baseMap.set(msg.id, msg);
@@ -2487,7 +2463,7 @@ async function assembleSmartWindowContext(
         formatPromptTime(epochMs, {
           nowMs: options.nowMs,
           includeAge: 'stale',
-          staleComparisonTimeZone: BRIEFING_TIMEZONE,
+          staleComparisonTimeZone: CO_CREATOR_TIME_ZONE,
         })
     : undefined;
   const burstLines = scrubbedBurst.map((m) => {

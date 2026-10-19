@@ -1,5 +1,6 @@
 'use client';
 
+import { WorldRailFrame } from '@cat-cafe/ui';
 import { usePathname, useRouter } from 'next/navigation';
 import { Suspense, useCallback } from 'react';
 import { useApprovalHubSync } from '@/hooks/useApprovalHub';
@@ -50,12 +51,7 @@ export function WorldRail() {
   const inSettings = pathname.startsWith('/settings');
 
   return (
-    <nav
-      aria-label="主导航"
-      data-testid="world-rail"
-      className="flex h-full w-[52px] flex-none flex-col items-center gap-1.5 px-0 pb-3 pt-2.5"
-      style={{ background: 'var(--shell-frame)', borderRight: '1px solid var(--shell-hairline)' }}
-    >
+    <WorldRailFrame aria-label="主导航" data-testid="world-rail">
       <CafeWorld selected={inCafe} onOpen={() => go('/')} />
       <RailSeparator />
       <CollectiveWorld selected={inCollective} onOpen={() => go('/collective')} />
@@ -70,7 +66,7 @@ export function WorldRail() {
         <div className="h-1" aria-hidden="true" />
         <AvatarButton selected={inSettings} onOpen={() => go('/settings')} />
       </div>
-    </nav>
+    </WorldRailFrame>
   );
 }
 

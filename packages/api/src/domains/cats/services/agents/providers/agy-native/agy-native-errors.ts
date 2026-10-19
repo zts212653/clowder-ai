@@ -1,6 +1,17 @@
 import type { CliDiagnostics } from '@cat-cafe/shared';
 import { buildCliDiagnostics } from '../../../../../../utils/cli-diagnostics.js';
-import { summarizeAgyStreamJsonTurn } from '../agy-stream-json-parser.js';
+import { type AgyStreamJsonTurn, summarizeAgyStreamJsonTurn } from '../agy-stream-json-parser.js';
+
+/** Stdout-only policy errors need the same display, without admitting new auth evidence. */
+export function agyNativePolicyDiagnostics(
+  turn: AgyStreamJsonTurn,
+  diagnostics: CliDiagnostics | undefined,
+  debugRef: CliDiagnostics['debugRef'],
+): CliDiagnostics | undefined {
+  if (diagnostics?.reasonCode || turn.upstreamStatus !== 'ERROR' || !turn.upstreamError) return diagnostics;
+  const terminal = buildCliDiagnostics({ rawText: turn.upstreamError, debugRef: diagnostics?.debugRef ?? debugRef });
+  return terminal.reasonCode === 'upstream_policy_reject' ? terminal : diagnostics;
+}
 
 /** The requested native conversation cannot be resumed; the router must rebuild cold. */
 export class AgyNativeResumeMismatchError extends Error {}

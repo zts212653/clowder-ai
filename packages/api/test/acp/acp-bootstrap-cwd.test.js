@@ -10,7 +10,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { isAbsolute, join, relative, resolve, win32 } from 'node:path';
+import { basename, dirname, isAbsolute, join, relative, resolve, win32 } from 'node:path';
 import { after, afterEach, before, describe, it } from 'node:test';
 
 const {
@@ -30,6 +30,7 @@ describe('acp bootstrap cwd', () => {
   // that) pulls the cwd out from under live pooled ACP processes and the next
   // prompt dies with ACP -32603 getcwd ENOENT.
   let testBootstrapRoot;
+  let testFixture;
   // Explicit deletion allowlist: afterEach may only rmSync paths inside one of
   // these roots. Anything else — above all the uid-shared production bootstrap
   // root — throws instead of deleting.
@@ -60,14 +61,15 @@ describe('acp bootstrap cwd', () => {
   before(() => {
     // Portable throwaway root — never a hard-coded '/tmp' (PR #1207 sweep):
     // os.tmpdir() exists on every platform, '/tmp' does not on Windows.
-    testBootstrapRoot = mkdtempSync(join(tmpdir(), 'cat-cafe-acp-bootstrap-test-'));
-    allowCleanup(testBootstrapRoot);
+    testFixture = makeTmpDir('cat-cafe-acp-bootstrap-test-');
+    // Let the production Windows helper create the private root atomically.
+    testBootstrapRoot = join(testFixture, 'bootstrap');
   });
 
   after(() => {
     // Final teardown goes through the same safety guard as afterEach.
-    assertSafeCleanupDir(testBootstrapRoot);
-    rmSync(testBootstrapRoot, { recursive: true, force: true });
+    assertSafeCleanupDir(testFixture);
+    rmSync(testFixture, { recursive: true, force: true });
   });
 
   afterEach(() => {
@@ -109,7 +111,7 @@ describe('acp bootstrap cwd', () => {
     assert.ok(existsSync(second), 'bootstrap dir should be recreated on demand');
   });
 
-  it('enforces owner-only permissions on the bootstrap cwd', () => {
+  it('enforces POSIX owner-only permissions on the bootstrap cwd', { skip: process.platform === 'win32' }, () => {
     const projectRoot = resolve('/tmp/cat-cafe-project');
     const dir = testBootstrapCwd(projectRoot, 'mode-guard');
     createdDirs.add(dir);
@@ -145,10 +147,10 @@ describe('acp bootstrap cwd', () => {
     const bootstrapPath = testBootstrapCwd(projectRoot, 'symlink-guard');
     createdDirs.add(target);
     rmSync(bootstrapPath, { recursive: true, force: true });
-    symlinkSync(target, bootstrapPath);
+    symlinkSync(target, bootstrapPath, process.platform === 'win32' ? 'junction' : 'dir');
     createdDirs.add(bootstrapPath);
 
-    assert.throws(() => testBootstrapCwd(projectRoot, 'symlink-guard'), /must not be a symlink/);
+    assert.throws(() => testBootstrapCwd(projectRoot, 'symlink-guard'), /symlink|reparse point/);
   });
 
   it('uses platform-safe containment checks for Windows-style paths', () => {
@@ -214,10 +216,8 @@ describe('acp bootstrap cwd', () => {
   it('scopes bootstrap root by current uid or equivalent user identity', () => {
     // Pure path computation — no directories are created on the production root.
     const root = resolveAcpBootstrapRoot();
-    assert.ok(
-      root.startsWith('/tmp/cat-cafe-acp-bootstrap-'),
-      `bootstrap root should match /tmp/cat-cafe-acp-bootstrap-*, got ${root}`,
-    );
+    assert.equal(dirname(root), process.platform === 'win32' ? tmpdir() : '/tmp');
+    assert.match(basename(root), /^cat-cafe-acp-bootstrap-(uid|user)-/);
     assert.notEqual(root, testBootstrapRoot, 'default root must not collapse into the test root');
   });
 
@@ -234,37 +234,9 @@ describe('acp bootstrap cwd', () => {
     assertSafeCleanupDir(join(testBootstrapRoot, 'some-child-dir'));
     // A sibling sharing the root's path prefix is NOT inside it (prefix trap).
     assert.throws(
-      () => assertSafeCleanupDir(`${testBootstrapRoot}-evil`),
+      () => assertSafeCleanupDir(`${testFixture}-evil`),
       /outside test cleanup allowlist/,
       'sibling directory sharing a path prefix must be rejected',
-    );
-  });
-
-  it('guards AcpServiceFactory against wiring ACP clients back to repo cwd', () => {
-    const indexSource = readFileSync(new URL('../../src/index.ts', import.meta.url), 'utf-8');
-    const factorySource = readFileSync(
-      new URL('../../src/domains/cats/services/agents/providers/acp/AcpServiceFactory.ts', import.meta.url),
-      'utf-8',
-    );
-    assert.ok(
-      indexSource.includes('createAcpServiceForConfig'),
-      'REGRESSION: index.ts must keep generic ACP service construction delegated to AcpServiceFactory.',
-    );
-    assert.ok(
-      factorySource.includes('resolveAcpBootstrapCwd'),
-      'REGRESSION: AcpServiceFactory must compute an isolated ACP bootstrap cwd.',
-    );
-    assert.ok(
-      factorySource.includes('cwd: resolveAcpBootstrapCwd(projectRoot, profileId)'),
-      'REGRESSION: AcpClient spawn cwd must be re-resolved per cold start, not reused from registry init.',
-    );
-    assert.ok(
-      factorySource.includes('resolveAcpBootstrapCommand(projectRoot, acpConfig.command)'),
-      'REGRESSION: AcpServiceFactory must preserve repo-relative ACP command resolution when using bootstrap cwd.',
-    );
-    assert.ok(
-      factorySource.includes('resolveAcpBootstrapArgs(projectRoot, acpConfig.startupArgs'),
-      'REGRESSION: AcpServiceFactory must resolve path-like startupArgs against the project root.',
     );
   });
 

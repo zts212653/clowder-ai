@@ -1,0 +1,254 @@
+/* Same paper, proportions and two-column rhythm as the home's works surface. */
+.shared-artifact-library {
+  container-type: inline-size;
+}
+.shared-artifact-library > header h2 {
+  font-size: 14px;
+  font-weight: 600;
+}
+.shared-artifact-library > header h2 small {
+  margin-left: 10px;
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--shell-muted);
+}
+.shared-artifact-library-filters {
+  display: grid;
+  grid-template-columns: minmax(140px, 1fr) auto auto auto;
+  align-items: center;
+  gap: 8px;
+  margin: 18px 0;
+}
+.shared-artifact-library-filters label {
+  display: flex;
+  min-width: 0;
+}
+.shared-artifact-library-filters input,
+.shared-artifact-library-filters select {
+  height: 32px;
+  padding: 5px 10px;
+  border: 1px solid var(--console-border-soft);
+  background: var(--shell-paper);
+  color: var(--shell-ink);
+  border-radius: 8px;
+  font: inherit;
+  font-size: 12px;
+}
+.shared-artifact-library-filters select {
+  max-width: 170px;
+}
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+.artifact-sort-menu {
+  position: relative;
+  color: var(--shell-muted);
+  font-size: 12px;
+}
+.artifact-sort-menu summary {
+  padding: 7px;
+  cursor: pointer;
+}
+.artifact-sort-menu > label {
+  position: absolute;
+  z-index: 4;
+  top: 100%;
+  right: 0;
+  padding: 6px;
+  background: var(--shell-work);
+  border: 1px solid var(--console-border-soft);
+  border-radius: 8px;
+}
+.shared-artifact-library .shared-artifact-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  margin-top: 16px;
+}
+.shared-artifact-item {
+  position: relative;
+  min-width: 0;
+}
+.shared-artifact-card-tile {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0;
+  max-width: none;
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+}
+.shared-artifact-preview {
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 8px;
+  width: 100%;
+  aspect-ratio: 16 / 10;
+  background: var(--shell-frame);
+  color: var(--shell-muted);
+}
+.shared-artifact-preview svg {
+  width: 38px;
+  height: 44px;
+}
+.shared-artifact-preview > span {
+  font-size: 11px;
+}
+.shared-artifact-card-tile .shared-artifact-caption {
+  flex: none;
+  padding: 12px 42px 14px 14px;
+}
+.shared-artifact-card-tile strong {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  min-height: 38px;
+  font-size: 13.5px;
+  line-height: 19px;
+}
+.shared-artifact-card-tile small {
+  margin-top: 5px;
+  font-size: 11px;
+}
+.shared-artifact-source {
+  position: absolute;
+  right: 8px;
+  bottom: 9px;
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: 6px;
+  background: var(--shell-work);
+  color: var(--shell-muted);
+}
+.shared-artifact-card-menu {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+}
+.shared-artifact-card-menu > summary {
+  list-style: none;
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  text-align: center;
+  background: var(--shell-work);
+  cursor: pointer;
+}
+.shared-artifact-card-menu > button {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  white-space: nowrap;
+  padding: 8px;
+  background: var(--shell-work);
+  color: var(--shell-ink);
+  border: 1px solid var(--console-border-soft);
+  border-radius: 7px;
+}
+.channel-artifact-list {
+  display: grid;
+  gap: 12px;
+}
+.channel-artifact-heading {
+  margin: 0;
+  color: var(--shell-muted);
+  font-size: 11px;
+}
+.channel-artifact-list .shared-artifact-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  margin: 0;
+  gap: 0;
+}
+.channel-artifact-list .shared-artifact-card {
+  max-width: none;
+  margin: 0;
+  padding: 12px 0;
+  border: 0;
+  border-bottom: 1px solid var(--console-border-soft);
+  border-radius: 0;
+  background: transparent;
+}
+.channel-artifact-list .shared-artifact-card strong {
+  font-size: 12px;
+}
+.channel-artifact-list .shared-artifact-card small {
+  margin-top: 4px;
+  font-size: 11px;
+}
+.shared-artifact-page svg {
+  width: 25px;
+  height: 30px;
+}
+.channel-artifact-all {
+  justify-self: start;
+  padding: 6px 0;
+  border: 0;
+  background: transparent;
+  color: var(--shell-muted);
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+}
+@container (max-width: 480px) {
+  .shared-artifact-library-filters {
+    grid-template-columns: minmax(120px, 1fr) auto;
+  }
+  .artifact-channel-filter {
+    grid-column: 1;
+  }
+}
+@container (max-width: 360px) {
+  .shared-artifact-library .shared-artifact-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.shared-artifact-card-tile .shared-artifact-caption {
+  color: var(--shell-ink);
+}
+
+.shared-artifact-library-filters input {
+  width: 100%;
+  min-width: 0;
+}
+.shared-artifact-library-filters :is(input, select):focus-visible,
+.shared-artifact-history button:focus-visible {
+  outline: 2px solid var(--cafe-accent);
+  outline-offset: 2px;
+}
+.shared-artifact-history button {
+  min-height: 32px;
+  padding: 7px 10px;
+  border: 1px solid var(--console-border-soft);
+  border-radius: 6px;
+  background: var(--shell-paper);
+  color: var(--shell-ink);
+  font: inherit;
+}
+
+.shared-artifact-card-menu {
+  opacity: 0;
+}
+.shared-artifact-item:hover .shared-artifact-card-menu,
+.shared-artifact-card-menu:focus-within,
+.shared-artifact-card-menu[open] {
+  opacity: 1;
+}
+@media (hover: none) {
+  .shared-artifact-card-menu {
+    opacity: 1;
+  }
+}

@@ -51,11 +51,13 @@ it('turns a proposal into a linked card with one-click self/Cat acceptance and a
       />,
     ),
   );
-  expect(container.textContent).toContain('工作提议 · 来自这条消息');
+  expect(container.textContent).toContain('任务建议 · 来自这条消息');
   expect(container.textContent).toContain(work.title);
   expect(container.querySelector('input')).toBeNull();
   await click('交给 小太阳 · 砚砚');
   expect(onCommit).toHaveBeenCalledWith(work, participant);
+  await click('接纳，稍后指派');
+  expect(onCommit).toHaveBeenCalledWith(work, undefined, 'unassigned');
   await click('先不跟踪');
   expect(onDecline).toHaveBeenCalledWith(work);
 });
@@ -107,7 +109,7 @@ it('lets the accountable Human return exact feedback or accept the current resul
     ),
   );
   expect(container.textContent).toContain('小太阳 · 砚砚 推进 · You 负责');
-  expect(container.textContent).toContain('前置 · 确认验收范围');
+  expect(container.textContent).toContain('前置任务 · 确认验收范围');
   expect(container.textContent).toContain('结果 v1 已回到原讨论');
   const feedback = container.querySelector<HTMLTextAreaElement>('[aria-label="修订反馈"]');
   expect(feedback).not.toBeNull();
@@ -273,7 +275,7 @@ it('keeps reply-sourced Work under the exact Topic reply and lets Humans propose
   const more = secondReplyInteraction?.querySelector<HTMLButtonElement>('[aria-label="更多消息动作"]');
   await act(async () => more?.click());
   const proposeReply = [...(secondReplyInteraction?.querySelectorAll<HTMLButtonElement>('button') ?? [])].find(
-    (button) => button.textContent?.trim() === '整理为工作',
+    (button) => button.textContent?.trim() === '建成任务',
   );
   expect(proposeReply).toBeDefined();
   await act(async () => proposeReply?.click());
@@ -304,9 +306,13 @@ it('renders one real Roadmap through route, dependency, and personal lenses', as
   expect(container.textContent).toContain(roadmap.title);
   expect(container.textContent).toContain('接通真实首页');
   expect(container.textContent).toContain('完成团队验收');
-  await click('依赖关系');
+  await click('依赖图');
   expect(container.textContent).toContain('完成团队验收');
-  expect(container.textContent).toContain('等待 接通真实首页');
-  await click('我的路线');
-  expect(container.textContent).toContain('由我负责');
+  expect(container.textContent).toContain('阻塞原因未填写');
+  expect(container.textContent).toContain('前置已完成：接通真实首页');
+  expect(container.textContent).not.toContain('等待 接通真实首页');
+  await click('与我相关');
+  const relatedNodes = [...container.querySelectorAll<HTMLElement>('[data-roadmap-work-id]')];
+  expect(relatedNodes).toHaveLength(1);
+  expect(relatedNodes[0]?.dataset.roadmapWorkId).toBe(second.workId);
 });

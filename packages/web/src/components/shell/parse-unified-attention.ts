@@ -1,4 +1,9 @@
-import { isValidRichBlock, type UnifiedAttentionReadV1, unifiedAttentionChoiceRequestSchema } from '@cat-cafe/shared';
+import {
+  collectiveAccountabilityAttentionItemSchema,
+  isValidRichBlock,
+  type UnifiedAttentionReadV1,
+  unifiedAttentionChoiceRequestSchema,
+} from '@cat-cafe/shared';
 
 /**
  * Structural guard for `GET /api/concierge/work/decisions?view=unified` (F310 delivery record).
@@ -108,11 +113,7 @@ function isPreferenceCoordinate(value: unknown, decisionRef: string): boolean {
 }
 
 function isItem(value: unknown): boolean {
-  if (!isRecord(value)) return false;
-  if (!isNonBlankString(value.decisionRef)) return false;
-  if (typeof value.kind !== 'string' || !ITEM_KIND.has(value.kind)) return false;
-  if (typeof value.summary !== 'string') return false;
-  if (!Array.isArray(value.linkedNeedsMe)) return false;
+  if (!isItemRecord(value)) return false;
   if (
     value.preferenceCoordinate !== undefined &&
     !isPreferenceCoordinate(value.preferenceCoordinate, value.decisionRef)
@@ -120,9 +121,38 @@ function isItem(value: unknown): boolean {
     return false;
   if (value.runtimeInteraction !== undefined && !isRuntimeInteraction(value.runtimeInteraction)) return false;
   if (value.choiceRequest !== undefined && !isChoiceRequest(value.choiceRequest)) return false;
+  if (!isCollectiveAccountabilityItem(value)) return false;
   if (value.kind === 'user_mention') return isUserMention(value.userMention);
   if (value.approval === undefined) return true;
   return isRecord(value.approval) && isNonBlankString(value.approval.proposalId);
+}
+
+function isItemRecord(value: unknown): value is Record<string, unknown> & {
+  decisionRef: string;
+  kind: string;
+  summary: string;
+  linkedNeedsMe: unknown[];
+} {
+  return Boolean(
+    isRecord(value) &&
+      isNonBlankString(value.decisionRef) &&
+      typeof value.kind === 'string' &&
+      ITEM_KIND.has(value.kind) &&
+      typeof value.summary === 'string' &&
+      Array.isArray(value.linkedNeedsMe),
+  );
+}
+
+function isCollectiveAccountabilityItem(value: Record<string, unknown>): boolean {
+  if (value.collectiveAccountabilityRequest === undefined) return true;
+  const parsed = collectiveAccountabilityAttentionItemSchema.safeParse(value.collectiveAccountabilityRequest);
+  return Boolean(
+    parsed.success &&
+      value.kind === 'judgment' &&
+      Array.isArray(value.linkedNeedsMe) &&
+      value.linkedNeedsMe.length === 0 &&
+      value.decisionRef === `${parsed.data.producerId}:${parsed.data.subjectRef}`,
+  );
 }
 
 function hasOwnerIdentity(body: Record<string, unknown>): boolean {
@@ -134,10 +164,25 @@ function hasSources(body: Record<string, unknown>): boolean {
     isRecord(body.sources) &&
     isSourceRead(body.sources.approvals) &&
     isSourceRead(body.sources.needsMe) &&
+    (body.sources.collectiveAccountabilityRequests === undefined ||
+      (isSourceRead(body.sources.collectiveAccountabilityRequests) &&
+        isRecord(body.sources.collectiveAccountabilityRequests) &&
+        body.sources.collectiveAccountabilityRequests.coverage ===
+          'pending_f290_collective_accountability_requests')) &&
     (body.sources.structuredChoices === undefined || isSourceRead(body.sources.structuredChoices)) &&
     (body.sources.userMentions === undefined || isSourceRead(body.sources.userMentions)) &&
     (body.sources.personalPreferences === undefined || isSourceRead(body.sources.personalPreferences))
   );
+}
+
+function itemsMatchSources(body: Record<string, unknown>): boolean {
+  if (!Array.isArray(body.items) || !isRecord(body.sources)) return false;
+  const accountabilityItems = body.items.filter(
+    (item) => isRecord(item) && item.collectiveAccountabilityRequest !== undefined,
+  );
+  if (accountabilityItems.length === 0) return true;
+  const source = body.sources.collectiveAccountabilityRequests;
+  return isRecord(source) && source.status === 'available';
 }
 
 function hasConsistency(body: Record<string, unknown>): boolean {
@@ -259,6 +304,7 @@ export function parseUnifiedAttentionRead(body: unknown): UnifiedAttentionReadV1
   const structurallyValid =
     hasOwnerIdentity(body) &&
     hasSources(body) &&
+    itemsMatchSources(body) &&
     hasConsistency(body) &&
     hasValidTotal(body) &&
     hasPage(body) &&

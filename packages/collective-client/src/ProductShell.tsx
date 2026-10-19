@@ -1,6 +1,7 @@
 import type { MouseEvent, ReactNode } from 'react';
 import { CollectiveWorldRail } from './CollectiveWorldRail.js';
 import type { CollectiveMembership } from './client-types.js';
+import { useCollectiveText } from './collective-copy.js';
 
 function DestinationTitle({
   collective,
@@ -11,6 +12,9 @@ function DestinationTitle({
   onInvite,
   onCafe,
   onReplayGuide,
+  onPermissions,
+  onCalendar,
+  onReconnect,
   onLeave,
 }: {
   readonly collective?: CollectiveMembership;
@@ -21,9 +25,13 @@ function DestinationTitle({
   readonly onInvite: () => void;
   readonly onCafe?: () => void;
   readonly onReplayGuide?: () => void;
+  readonly onPermissions?: () => void;
+  readonly onCalendar?: () => void;
+  readonly onReconnect?: () => void;
   readonly onLeave?: () => void;
 }) {
-  if (!collective) return <h1>共同家园</h1>;
+  const t = useCollectiveText();
+  if (!collective) return <h1>{t('共同家园')}</h1>;
   const hasMenu = Boolean(onHome || canSteward || onCafe || onReplayGuide || (canLeave && onLeave));
   if (!hasMenu) return <h1>{collective.name}</h1>;
   const action = (callback: () => void) => (event: MouseEvent<HTMLButtonElement>) => {
@@ -48,22 +56,37 @@ function DestinationTitle({
         </button>
         {canSteward && (
           <button type="button" onClick={action(onInvite)}>
-            邀请成员
+            {t('邀请成员')}
           </button>
         )}
         {onCafe && (
           <button type="button" onClick={action(onCafe)}>
-            我的猫… <small>仅自己可见</small>
+            {t('我的猫…')} <small>{t('仅自己可见')}</small>
+          </button>
+        )}
+        {onPermissions && (
+          <button type="button" onClick={action(onPermissions)}>
+            {t('已允许的任务…')}
+          </button>
+        )}
+        {onCalendar && (
+          <button type="button" onClick={action(onCalendar)}>
+            {t('我的日程…')}
+          </button>
+        )}
+        {onReconnect && (
+          <button type="button" onClick={action(onReconnect)}>
+            {t('重新连接…')}
           </button>
         )}
         {onReplayGuide && (
           <button type="button" onClick={action(onReplayGuide)}>
-            再看一遍介绍
+            {t('再看一遍介绍')}
           </button>
         )}
         {canLeave && onLeave && (
           <button type="button" className="collective-menu-muted" onClick={action(onLeave)}>
-            离开共同体…
+            {t('离开共同体…')}
           </button>
         )}
       </div>
@@ -88,6 +111,9 @@ export function ProductShell({
   onLeave,
   onCafe,
   onReplayGuide,
+  onPermissions,
+  onCalendar,
+  onReconnect,
   destinations,
   headerMeta,
   children,
@@ -110,12 +136,16 @@ export function ProductShell({
   readonly onLeave?: () => void;
   readonly onCafe?: () => void;
   readonly onReplayGuide?: () => void;
+  readonly onPermissions?: () => void;
+  readonly onCalendar?: () => void;
+  readonly onReconnect?: () => void;
   readonly destinations?: ReactNode;
   readonly headerMeta?: ReactNode;
   readonly navigationOpen?: boolean;
   readonly onCloseNavigation?: () => void;
   readonly children: ReactNode;
 }) {
+  const t = useCollectiveText();
   const hasWorldRail = !embedded && Boolean(collectives?.length);
   return (
     <main
@@ -133,9 +163,9 @@ export function ProductShell({
         visible={!embedded}
       />
       {navigationOpen && (
-        <button type="button" className="navigation-scrim" aria-label="关闭频道导航" onClick={onCloseNavigation} />
+        <button type="button" className="navigation-scrim" aria-label={t('关闭频道导航')} onClick={onCloseNavigation} />
       )}
-      <aside className="destination-pane" data-spatial-role="destination-pane" aria-label="共同家园导航">
+      <aside className="destination-pane" data-spatial-role="destination-pane" aria-label={t('共同家园导航')}>
         <header className="destination-header">
           <DestinationTitle
             collective={collective}
@@ -146,9 +176,12 @@ export function ProductShell({
             onInvite={onInvite}
             onCafe={onCafe}
             onReplayGuide={onReplayGuide}
+            onPermissions={onPermissions}
+            onCalendar={onCalendar}
+            onReconnect={onReconnect}
             onLeave={onLeave}
           />
-          <button type="button" className="navigation-close" aria-label="收起频道导航" onClick={onCloseNavigation}>
+          <button type="button" className="navigation-close" aria-label={t('收起频道导航')} onClick={onCloseNavigation}>
             ×
           </button>
         </header>
@@ -161,7 +194,7 @@ export function ProductShell({
               </button>
             </div>
           )}
-          {notice && <p className="destination-notice">{notice}</p>}
+          {notice && <p className="destination-notice">{t(notice)}</p>}
           {connection === 'offline' && <p className="connection-line">暂时离线 · 发送失败后可以重试</p>}
         </footer>
       </aside>

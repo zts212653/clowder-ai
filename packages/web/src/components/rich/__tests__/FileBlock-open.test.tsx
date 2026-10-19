@@ -11,16 +11,19 @@ const mocks = vi.hoisted(() => ({
   thread: 'thread-source',
 }));
 vi.mock('@/utils/api-client', () => ({ apiFetch: mocks.fetch }));
-vi.mock('@/stores/chatStore', () => ({
-  useChatStore: {
-    getState: () => ({
-      currentThreadId: mocks.thread,
-      openPublishedArtifact: mocks.dispatch,
-      setRightPanelMode: mocks.panel,
-      setRightPanelOpen: mocks.visible,
+vi.mock('@/stores/chatStore', () => {
+  const getState = () => ({
+    currentThreadId: mocks.thread,
+    openPublishedArtifact: mocks.dispatch,
+    setRightPanelMode: mocks.panel,
+    setRightPanelOpen: mocks.visible,
+  });
+  return {
+    useChatStore: Object.assign((selector: (state: ReturnType<typeof getState>) => unknown) => selector(getState()), {
+      getState,
     }),
-  },
-}));
+  };
+});
 vi.mock('@/components/workbench/experience-workbench-store', () => ({
   useF307ExperienceWorkbenchStore: { getState: () => ({ dispatch: mocks.dispatch }) },
 }));

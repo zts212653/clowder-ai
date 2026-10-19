@@ -1,3 +1,5 @@
+import './f290-collective-navigation.journey.mjs';
+import './f290-ui701-design-corrections.journey.mjs';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { mkdir, writeFile } from 'node:fs/promises';
@@ -82,19 +84,30 @@ registerDefaultEntryJourney(
         .getByRole('navigation', { name: '频道', exact: true })
         .getByRole('button', { name: /产品方向/ })
         .click();
-      await client.getByRole('button', { name: '我的猫', exact: true }).waitFor();
-      await client.getByRole('button', { name: '我的猫', exact: true }).click();
-      const panel = page.getByRole('complementary', { name: '我的猫', exact: true });
-      await panel.getByRole('heading', { name: '我的猫', exact: true, level: 2 }).waitFor();
-      await panel.getByRole('button', { name: '频道', exact: true }).click();
+      await client.locator('details.channel-menu > summary').click();
+      await client.getByRole('button', { name: '谁留意频道消息…' }).click();
+      const panel = page.getByRole('complementary', { name: '我的 Café', exact: true });
       await panel.getByRole('radio', { name: '留意所有消息', exact: true }).click();
       await poll(
         async () =>
           (await actualOwner.connector.getHostRoute(actualOwner.connection.connectionId))?.channelListening?.产品方向
             ?.mode === 'all',
       );
-      await panel.getByRole('button', { name: '授权', exact: true }).click();
+      await page.getByRole('button', { name: '返回共同体', exact: true }).click();
+      await client.locator('details.collective-menu > summary').click();
+      await client.getByRole('button', { name: '已允许的任务…', exact: true }).click();
       await journey.arrive(page);
+      for (const width of [1920, 1440, 390, 1440]) {
+        await page.setViewportSize({ width, height: 960 });
+        const privateBounds = await panel.boundingBox();
+        const frameBounds = await page.locator('iframe[title="Collective"]').boundingBox();
+        const navigation = await client.locator('.destination-pane').boundingBox();
+        assert.ok(privateBounds && frameBounds && (width <= 820 || navigation));
+        assert.ok(
+          Math.abs(privateBounds.x - (width <= 820 ? frameBounds.x : navigation.x + navigation.width)) <= 1,
+          'private page preserves the actual Client navigation column',
+        );
+      }
       await panel.getByRole('switch', { name: '接工作前先问我', exact: true }).click();
       await poll(
         async () =>
@@ -102,7 +115,7 @@ registerDefaultEntryJourney(
             ?.decisionMode === 'manual',
       );
       await page.screenshot({ path: path.join(evidence, 'settings-desktop.png'), fullPage: true });
-      await page.getByRole('button', { name: '关闭我的猫', exact: true }).click();
+      await page.getByRole('button', { name: '返回共同体', exact: true }).click();
       const body = `UI_SENTINEL_${randomUUID()} \xB7 请写新人接入指南。`;
       await owner.receiveRequest(body);
       const source = (await owner.connector.listInbox(owner.connection.connectionId)).find(
@@ -122,8 +135,8 @@ registerDefaultEntryJourney(
         },
         { title: body, intendedOutcome: body, requestKind: 'guide' },
       );
-      await client.getByRole('button', { name: '授权决定…', exact: true }).waitFor();
-      await client.getByRole('button', { name: '授权决定…', exact: true }).click();
+      await client.getByRole('button', { name: '待你决定…', exact: true }).waitFor();
+      await client.getByRole('button', { name: '待你决定…', exact: true }).click();
       const decision = page.getByRole('dialog', { name: '授权决定', exact: true });
       const registrationIds = [];
       let loseAfterCommit = true;
@@ -242,6 +255,18 @@ registerDefaultEntryJourney(
           2,
         ),
       );
+      await decision.getByRole('button', { name: '关闭授权决定', exact: true }).click();
+      const draft = client.locator('.channel-scene .composer textarea');
+      await draft.fill('PRESERVE_DRAFT_ACROSS_HOST_APPEARANCE');
+      await page.evaluate(() => {
+        localStorage.setItem('cat-cafe:shell-language', 'en');
+        window.dispatchEvent(new CustomEvent('cat-cafe:shell-language-sync'));
+        document.documentElement.setAttribute('data-theme', 'dark');
+      });
+      await client.getByPlaceholder('Message #产品方向…').waitFor();
+      assert.equal(await draft.inputValue(), 'PRESERVE_DRAFT_ACROSS_HOST_APPEARANCE');
+      await client.locator('html[data-theme="dark"][lang="en"]').waitFor({ state: 'attached' });
+      await page.screenshot({ path: path.join(evidence, 'channel-mobile-dark-en.png'), fullPage: true });
       assert.deepEqual(errors, []);
     } catch (error) {
       await page?.screenshot({ path: path.join(evidence, 'failure.png'), fullPage: true });

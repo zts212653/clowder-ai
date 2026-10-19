@@ -2,12 +2,12 @@
 
 import type { ReplyPreview } from '@cat-cafe/shared';
 import { useShellPresentation } from '@/components/shell/shell-presentation';
+import { useMessageNavigation } from '@/components/thread-chat/MessageNavigationContext';
 import type { CatData } from '@/hooks/useCatData';
 import { useCoCreatorConfig } from '@/hooks/useCoCreatorConfig';
 import { tintOf } from '@/lib/hex-color';
 import { resolveMessageSender } from '@/lib/resolve-sender';
 import { useChatStore } from '@/stores/chatStore';
-import { focusLineageMessage } from '@/utils/focusLineageMessage';
 import { SenderAvatar } from './SenderAvatar';
 
 interface ReplyPreviewBarProps {
@@ -23,6 +23,7 @@ interface ReplyPreviewBarProps {
  * name role, as on the pill; the tint stays the identity colour, and classic keeps the hex (frozen).
  */
 export function ReplyPreviewBar({ replyToMessage, cats, onClear }: ReplyPreviewBarProps) {
+  const navigateToMessage = useMessageNavigation();
   const coCreator = useCoCreatorConfig();
   const nameRole = useShellPresentation() === 'v2';
   const { content, id: replyToId } = replyToMessage;
@@ -37,7 +38,7 @@ export function ReplyPreviewBar({ replyToMessage, cats, onClear }: ReplyPreviewB
   const sender = resolveMessageSender(parent ?? replyToMessage, getCatById, coCreator, { nameRole });
 
   const handleClick = () => {
-    focusLineageMessage(replyToId);
+    navigateToMessage(replyToId);
   };
 
   return (

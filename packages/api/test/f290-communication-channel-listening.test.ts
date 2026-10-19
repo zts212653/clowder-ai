@@ -35,6 +35,12 @@ async function setup() {
   const revision = configured.revision;
   const selected = new Set<string>();
   const unavailable = new Set<string>();
+  const resumed: Array<{
+    source: Awaited<ReturnType<typeof f.messages.getByIdempotencyKey>>;
+    eventId: string;
+    catId: string;
+  }> = [];
+  const wakeByComment = new Map<string, string>();
   const connector = f.cafe.connector;
   const ingress = new CollectiveIngressDispatcher({
     connector: {
@@ -54,8 +60,11 @@ async function setup() {
     queueProcessor: { async processNext() {} },
     socketManager: { broadcastToRoom() {} },
     isCatAvailable: (cat) => !unavailable.has(cat),
+    resumeWorkWake: async (source, event, catId) => {
+      resumed.push({ source, eventId: event.eventId, catId });
+    },
   });
-  const message = async (body: string, replyToEventId?: string) => {
+  const message = async (body: string, replyToEventId?: string, expectedFailed = 0) => {
     const event = await f.world.store.postHumanMessage(f.world.wulang.sessionToken, {
       ...f.world.coordinates,
       clientEventId: `channel-${body}`,
@@ -67,8 +76,15 @@ async function setup() {
     });
     selected.add(event.eventId);
     await connector.sync(f.cafe.connectionId);
+    const wake = (await connector.listInboxForRouting(f.cafe.connectionId)).find(
+      (item) => item.event.workWakeNotice?.reason === 'comment' && item.event.replyToEventId === event.eventId,
+    );
+    if (wake) {
+      selected.add(wake.event.eventId);
+      wakeByComment.set(event.eventId, wake.event.eventId);
+    }
     const result = await ingress.dispatchConnection(f.cafe.connectionId);
-    assert.equal(result.failed, 0);
+    assert.equal(result.failed, expectedFailed);
     const stored = await f.messages.getByIdempotencyKey(
       f.cafe.ownerUserId,
       f.endpoint.id,
@@ -88,7 +104,7 @@ async function setup() {
         : { channelId: 'general', mode, expectedAttentionRevision: route.attentionRevision },
     );
   };
-  return { ...f, duty, revision, ingress, message, listen, unavailable };
+  return { ...f, duty, revision, ingress, message, listen, resumed, unavailable, wakeByComment };
 }
 
 test('mentions-only persists ordinary conversation; all queues exactly the configured duty Cat as public classification', async () => {
@@ -157,15 +173,26 @@ test('precise A feedback selects its assigned Cat despite a newer B or another d
     await catAccepts(f.world, f.cafe, requestB, { grantRef: 'terra-guides', grantRevision: 1, title: 'Matter B' });
     await f.listen('all');
     const first = await f.message('Feedback on A while Terra is on duty', f.work.assignmentEventId);
-    assert.deepEqual(first.extra?.targetCats, [CAT]);
+    assert.equal(first.extra?.targetCats, undefined, 'the public comment remains visible without a second queue entry');
     await f.listen('mentions');
     const second = await f.message('More A feedback without any mention', f.work.assignmentEventId);
-    assert.deepEqual(second.extra?.targetCats, [CAT]);
-    assert.equal(second.source?.meta?.attentionRequest, undefined);
     assert.equal(
-      f.queue.list(f.endpoint.id, f.cafe.ownerUserId).find((entry) => entry.payload.messageId === second.id)?.execution
-        ?.executionScope,
-      'collective-participation',
+      second.extra?.targetCats,
+      undefined,
+      'the typed wake reuses the visible comment for the original Task',
+    );
+    assert.equal(second.source?.meta?.attentionRequest, undefined);
+    assert.deepEqual(
+      f.resumed.map(({ source, catId }) => ({ messageId: source?.id, catId })),
+      [
+        { messageId: first.id, catId: CAT },
+        { messageId: second.id, catId: CAT },
+      ],
+    );
+    assert.equal(
+      f.queue.list(f.endpoint.id, f.cafe.ownerUserId).some((entry) => entry.payload.messageId === second.id),
+      false,
+      'an exact Work comment resumes the existing private Task instead of creating public participation work',
     );
     assert.equal((await f.tasks.listByKind('work')).length, 1);
   } finally {
@@ -191,9 +218,33 @@ test('unavailable duty and feedback Cats preserve channel delivery and durable a
         reason: 'ROUTE_CAT_UNAVAILABLE',
       });
     f.unavailable.add(CAT);
-    const feedback = await f.message('Actual Work feedback while its Cat is offline', f.work.assignmentEventId);
+    const feedback = await f.message('Actual Work feedback while its Cat is offline', f.work.assignmentEventId, 1);
     assert.equal(feedback.queueCustody, undefined);
+    assert.deepEqual(f.resumed, []);
     assert.equal(f.queue.list(f.endpoint.id, f.cafe.ownerUserId).length, 0);
+    const commentEventId = feedback.source?.meta?.eventId;
+    const wakeEventId = commentEventId ? f.wakeByComment.get(commentEventId) : undefined;
+    assert.ok(wakeEventId);
+    const failedWake = (await f.cafe.connector.listInbox(f.cafe.connectionId)).find(
+      (item) => item.event.eventId === wakeEventId,
+    );
+    assert.equal(failedWake?.disposition, 'route_failed');
+    assert.equal(failedWake?.routeFailure?.code, 'ROUTE_CAT_UNAVAILABLE');
+
+    f.unavailable.delete(CAT);
+    assert.deepEqual(await f.ingress.dispatchConnection(f.cafe.connectionId), { routed: 1, failed: 0, skipped: 0 });
+    assert.deepEqual(
+      f.resumed.map(({ catId }) => catId),
+      [CAT],
+    );
+    const recoveredWake = (await f.cafe.connector.listInbox(f.cafe.connectionId)).find(
+      (item) => item.event.eventId === wakeEventId,
+    );
+    assert.equal(recoveredWake?.disposition, 'routed');
+    assert.equal(recoveredWake?.routeReceipt?.kind, 'thread_message');
+    if (recoveredWake?.routeReceipt?.kind === 'thread_message') {
+      assert.equal(recoveredWake.routeReceipt.messageId, feedback.id);
+    }
   } finally {
     await f.world.close();
   }

@@ -32,7 +32,6 @@ describe('#3444 unresolved visibility read-anchor policy', { skip: redisIsolatio
   let DeliveryCursorStore;
   let SessionStore;
   let ThreadStore;
-  let collectDutyBriefingInput;
   let cursorFor;
   let threadsRoutes;
 
@@ -45,9 +44,6 @@ describe('#3444 unresolved visibility read-anchor policy', { skip: redisIsolatio
     ));
     ({ DeliveryCursorStore } = await import('../dist/domains/cats/services/stores/ports/DeliveryCursorStore.js'));
     ({ ThreadStore } = await import('../dist/domains/cats/services/stores/ports/ThreadStore.js'));
-    ({ collectDutyBriefingInput } = await import(
-      '../dist/domains/cats/services/duty-briefing/collectDutyBriefingInput.js'
-    ));
     ({ cursorFor } = await import('../dist/domains/cats/services/stores/cursor.js'));
     ({ threadsRoutes } = await import('../dist/routes/threads.js'));
     SessionStore = redisUtils.SessionStore;
@@ -231,53 +227,6 @@ describe('#3444 unresolved visibility read-anchor policy', { skip: redisIsolatio
 
     assert.notEqual(await sessionStore.getMentionAckCursor(USER_ID, CAT_ID, threadId), MALFORMED_V2);
     assert.equal(await cursorStore.getMentionAckCursor(USER_ID, CAT_ID, threadId), cursorFor(mention));
-  });
-
-  it('Duty Briefing: a pruned mention anchor does not let older operator history suppress the candidate', async () => {
-    const now = Date.now();
-    const threadId = `duty-unresolved-${now}`;
-    await appendMessage({ threadId, catId: null, content: 'an older operator reply', timestamp: now - 2_000 });
-    const mention = await appendMessage({
-      threadId,
-      catId: 'opus',
-      content: '@co-creator pending decision',
-      mentionsUser: true,
-      timestamp: now - 1_000,
-    });
-
-    let pruned = false;
-    const raceStore = {
-      getByThread: async (...args) => {
-        const tail = await messageStore.getByThread(...args);
-        if (!pruned) {
-          pruned = true;
-          await redis.del(`msg:${mention.id}`);
-          await redis.zrem(`msg:visibility:${threadId}`, mention.id);
-        }
-        return tail;
-      },
-      getByThreadAfter: messageStore.getByThreadAfter.bind(messageStore),
-    };
-
-    const input = await collectDutyBriefingInput({
-      taskStore: { listByKind: async () => [] },
-      invocationRecordStore: { scanAll: async () => [] },
-      draftStore: { getByThread: async () => [] },
-      dynamicTaskStore: { getAll: () => [] },
-      threadStore: {
-        list: async () => [{ id: threadId, title: 'Unresolved duty anchor', lastActiveAt: now - 500 }],
-      },
-      messageStore: raceStore,
-      f167SnapshotProvider: async () => null,
-      userId: USER_ID,
-      now,
-      bindingStatus: 'degraded',
-    });
-
-    assert.deepEqual(
-      input.mentionCandidates.map((candidate) => candidate.messageId),
-      [mention.id],
-    );
   });
 
   it('Generic pagination keeps the FM-3 rescan default for an unresolvable v1 anchor', async () => {

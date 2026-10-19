@@ -118,7 +118,17 @@ for (const shell of ['classic', 'v2']) {
           ({ presentation }) => localStorage.setItem('cat-cafe:shell-presentation', presentation),
           { presentation: shell },
         );
+        // The Client-only history effect proves the route has hydrated. The
+        // isolated owner supplies no Chat history, so its 404 is still a read.
+        const initialHistoryRead = page.waitForResponse((response) => {
+          const url = new URL(response.url());
+          return url.pathname === '/api/messages' && url.searchParams.get('threadId') === sourceThreadId;
+        });
         await page.goto(`${nativeOwner.hostUrl}/thread/${sourceThreadId}`, { waitUntil: 'domcontentloaded' });
+        await initialHistoryRead;
+        // The persisted v2 choice is applied after hydration. Wait for that
+        // requested shell before clicking a control from the initial classic shell.
+        if (shell === 'v2') await page.getByTestId('world-rail').waitFor();
         await page.locator('[data-guide-id="nav.collective"]').click();
         await page.waitForURL((url) => url.pathname === '/collective');
         assert.equal(new URL(page.url()).searchParams.get('from'), sourceThreadId);
@@ -185,9 +195,9 @@ registerDefaultEntryJourney(
       assert.equal(request?.routeReceipt?.kind, 'thread_message');
       const destination = `/thread/${encodeURIComponent(request.routeReceipt.threadId)}`;
       const evidence = await mkdtemp(path.join(tmpdir(), 'f290-owner-progress-evidence-'));
-      await collective.getByRole('button', { name: '我的猫', exact: true }).click();
-      const cafe = page.getByRole('complementary', { name: '我的猫', exact: true });
-      await cafe.getByRole('button', { name: '日程', exact: true }).click();
+      await collective.locator('details.collective-menu > summary').click();
+      await collective.getByRole('button', { name: '我的日程…', exact: true }).click();
+      const cafe = page.getByRole('complementary', { name: '我的 Café', exact: true });
       const requestArticle = cafe.getByRole('article').filter({ hasText: '帮我看看这条点名请求' });
       await requestArticle.getByText('排着队', { exact: true }).waitFor();
       const privateThread = requestArticle.getByRole('link', { name: '在家里查看', exact: true });

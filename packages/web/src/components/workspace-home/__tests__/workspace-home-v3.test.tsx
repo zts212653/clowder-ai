@@ -144,6 +144,9 @@ describe('Workspace v3 Home content', () => {
     expect(works?.querySelector('header svg')).not.toBeNull();
     expect(works?.querySelector('header')?.textContent).toContain('2 件');
     expect(works?.querySelector('header')?.textContent).not.toContain('这条对话');
+    data.loading = true;
+    await render();
+    expect(works?.querySelector('header')?.textContent).toContain('2 件');
     expect(host.querySelector('[data-testid="workspace-home-status-summary"] .home-live-sub')).not.toBeNull();
   });
 

@@ -9,6 +9,7 @@ import type { WorkspaceFileQuoteDependencies } from '../domains/collaborative-co
 import type { WorkspaceContentReviewService } from '../domains/collaborative-content/workspace-review/service.js';
 import { resolveDirectLocalAuthorizationUserId } from '../utils/request-identity.js';
 import { parseMediaByteRange, streamMediaByteRange } from './media-byte-range.js';
+import { registerMediaFileActions } from './media-file-actions.js';
 import { sendOrientedWebp } from './published-media-response.js';
 import { replyWorkspaceContentReviewError } from './workspace-content-review-error.js';
 import { registerWorkspaceFileQuoteRoutes } from './workspace-file-quote-routes.js';
@@ -173,6 +174,19 @@ export function registerWorkspaceContentReviewRoutes(
     }
   });
 
+  registerMediaFileActions(app, `${base}/:reviewId/media`, {
+    onError: replyWorkspaceContentReviewError,
+    authorize: async (request) => {
+      const principal = principalActor(request);
+      if (!principal) return null;
+      const { reviewId } = paramsSchema.parse(request.params);
+      const { expectedSourceRevision } = z.object({ expectedSourceRevision: revision }).strict().parse(request.query);
+      const media = await deps.reviews.openMedia({ principal, reviewId, expectedSourceRevision });
+      media.stream.destroy();
+      if (!('localPath' in media) || typeof media.localPath !== 'string') return { local: false as const };
+      return { path: media.localPath, mime: media.mime, byteLength: media.byteLength };
+    },
+  });
   app.get(`${base}/:reviewId/media`, async (request, reply) => {
     try {
       reply.header('Cache-Control', 'private, no-store');

@@ -1,4 +1,5 @@
 import type Database from 'better-sqlite3';
+import { messageLiteralRelevance } from './message-literal-relevance.js';
 import { lexicalMessagePassages } from './message-passage-lexical.js';
 import type { MessagePassageSearchExecution, MessagePassageSearchOptions } from './message-passage-search-types.js';
 import { readMessagePassageState } from './message-passage-state.js';
@@ -12,6 +13,7 @@ interface MessagePassageSearchDeps {
     lexical: PassageResult[],
     limit: number,
     accept: (passage: PassageResult) => boolean,
+    compare?: (a: PassageResult, b: PassageResult) => number,
   ): Promise<PassageResult[]>;
 }
 
@@ -41,6 +43,7 @@ function messageAdmission(
 }
 
 async function retrieveVectors(
+  query: string,
   lexical: PassageResult[],
   options: MessagePassageSearchOptions,
   deps: MessagePassageSearchDeps,
@@ -58,7 +61,12 @@ async function retrieveVectors(
     const passages =
       options.mode === 'semantic'
         ? await deps.semanticSearch(meta.candidateLimit)
-        : await deps.hybridSearch(lexical, meta.candidateLimit, accept);
+        : await deps.hybridSearch(
+            lexical,
+            meta.candidateLimit,
+            accept,
+            options.sort === 'relevance' ? messageLiteralRelevance(query)?.compareExact : undefined,
+          );
     meta.semanticCandidatesLimited = true;
     return passages;
   } catch (error) {
@@ -96,7 +104,7 @@ export async function searchMessagePassages(
   const lexical = lexicalMessagePassages(deps.db, query, options, anchors, pool);
   meta.truncated = lexical.length > pool;
   const accept = messageAdmission(deps.db, anchors, options);
-  const passages = await retrieveVectors(lexical.slice(0, pool), options, deps, meta, accept);
+  const passages = await retrieveVectors(query, lexical.slice(0, pool), options, deps, meta, accept);
   options.signal?.throwIfAborted();
   const seen = new Set<string>();
   const eligible = passages.filter((passage) => {

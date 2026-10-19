@@ -6,6 +6,7 @@ import { MessageStore } from '../dist/domains/cats/services/stores/ports/Message
 import { TaskStore } from '../dist/domains/cats/services/stores/ports/TaskStore.js';
 import { CollectiveWorkAuthority } from '../dist/domains/plugin/builtin-runtime/collective-work/collective-work-authority.js';
 import { CollectiveWorkRevisionReconciler } from '../dist/domains/plugin/builtin-runtime/collective-work-revision-reconciler.js';
+import { CollectiveWorkWakeReconciler } from '../dist/domains/plugin/builtin-runtime/collective-work-wake-reconciler.js';
 
 async function fixture() {
   const messages = new MessageStore();
@@ -269,4 +270,90 @@ test('rejects forged feedback authority, mismatched result coordinates, and miss
     reconciler.reconcile({ ownerUserId: 'owner', event: f.revisionEvent, inbox: f.inbox, work: f.work }),
     { code: 'COLLECTIVE_REVISION_TASK_UNAVAILABLE' },
   );
+});
+
+test('routes a current prerequisite or comment wake back to the same admitted Task and rejects stale identity', async () => {
+  const f = await fixture();
+  const calls = [];
+  const reconciler = new CollectiveWorkWakeReconciler({
+    messages: f.messages,
+    tasks: f.tasks,
+    dispatcher: { dispatch: async (...args) => calls.push(args) },
+  });
+  const work = {
+    ...f.work,
+    lifecycle: 'committed',
+    status: 'ready',
+    resultEventId: undefined,
+    resultRevision: undefined,
+    dependencyWorkIds: ['work_dependency00'],
+    history: [],
+  };
+  const wakeEvent = {
+    ...f.revisionEvent,
+    eventId: 'evt_dependencywake',
+    clientEventId: 'work-wake:dependency',
+    replyToEventId: work.assignmentEventId,
+    workRequest: 'resume',
+    workRevisionNotice: undefined,
+    workWakeNotice: {
+      v: 1,
+      reason: 'dependency_completed',
+      workId: work.workId,
+      workRevision: work.revision,
+      assignmentEventId: work.assignmentEventId,
+      executionRevision: 1,
+      dependencyWorkId: 'work_dependency00',
+      dependencyWorkRevision: 2,
+    },
+    body: '前置任务已完成；请沿原任务继续。',
+  };
+  const resumed = await reconciler.reconcile({ ownerUserId: 'owner', event: wakeEvent, inbox: f.inbox, work });
+  assert.equal(resumed.taskId, f.task.id);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0][0].id, f.task.id);
+  assert.deepEqual(calls[0][3], {
+    kind: 'resume',
+    executionRevision: 1,
+    sourceRef: f.task.entrustedWork.admission.sourceRefs[0],
+    requestId: `collective-work-wake:${wakeEvent.eventId}`,
+    resultRevision: 1,
+    feedbackEventId: wakeEvent.eventId,
+    feedbackText: wakeEvent.body,
+  });
+
+  const commentEvent = {
+    ...wakeEvent,
+    eventId: 'evt_commentwake000',
+    clientEventId: 'comment-wake',
+    replyToEventId: work.sourceEventId,
+    workWakeNotice: {
+      v: 1,
+      reason: 'comment',
+      workId: work.workId,
+      workRevision: work.revision,
+      assignmentEventId: work.assignmentEventId,
+      executionRevision: 1,
+    },
+    body: '请保留恢复证据。',
+  };
+  await reconciler.reconcile({
+    ownerUserId: 'owner',
+    event: commentEvent,
+    inbox: f.inbox,
+    work: { ...work, status: 'blocked' },
+  });
+  assert.equal(calls.length, 2);
+  assert.equal(calls[1][0].id, f.task.id);
+
+  await assert.rejects(
+    reconciler.reconcile({
+      ownerUserId: 'owner',
+      event: wakeEvent,
+      inbox: f.inbox,
+      work: { ...work, revision: work.revision + 1 },
+    }),
+    { code: 'COLLECTIVE_WORK_WAKE_NOT_CURRENT' },
+  );
+  assert.equal(calls.length, 2);
 });

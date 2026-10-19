@@ -1,14 +1,19 @@
 ---
 feature_ids: [F119]
-related_features: [F101, F107, F075]
+related_features: [F101, F107, F075, F202]
 topics: [game, who-is-spy, party-game, ai-deception, social-deduction]
 doc_kind: spec
+tips_exempt: "2026-10-19：本次仅同步旧游戏基座退役后的历史依赖说明；玩法仍为未实现 spec，没有可引导的使用入口，不把保留的玩法愿望宣传为现有能力。"
+user_journey_exempt: "本次仅更正已退役基座的历史依赖说明；玩法仍为未实现 spec，没有新增或变更的用户旅程。"
 created: 2026-03-14
 ---
 
 # F119: 谁是卧底 — 坏猫战术推理游戏 #2
 
 > **Status**: spec | **Owner**: Ragdoll | **Priority**: P1
+
+> 2026-10-18 依赖更新：F101 的主仓旧实现已随退役变更移除；下文复用 F101 的内容是历史方案。
+> 本玩法愿望保留，未来应在 F202 插件边界重新设计；本次不关闭、不宣称已实现。
 
 ## Why
 

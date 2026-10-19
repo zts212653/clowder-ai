@@ -1,4 +1,5 @@
 import type { ReactNode, RefCallback } from 'react';
+import { useArtworkWorkMode } from '@/components/content-review/ArtworkWorkModeScope';
 import { useShellPresentation } from '@/components/shell/shell-presentation';
 import type { WorkspaceMenuContext } from '@/components/workspace/V2WorkspaceMenu';
 import { F307WorkbenchControlRail } from './F307WorkbenchControlRail';
@@ -33,6 +34,7 @@ export interface F307WorkbenchTabsProps {
 
 export function F307WorkbenchTabs(props: F307WorkbenchTabsProps) {
   const isV2 = useShellPresentation() === 'v2';
+  const artworkWorkMode = useArtworkWorkMode();
   const {
     layout,
     dispatch,
@@ -46,6 +48,7 @@ export function F307WorkbenchTabs(props: F307WorkbenchTabsProps) {
     onExitMainAreaAttention,
   } = props;
   const labels = workbenchTabLabels(layout.surfaces);
+  if (isV2 && artworkWorkMode) return null;
   if (isV2) return <V2WorkbenchChrome {...props} />;
   const renderTabs = (focusRootRef: RefCallback<HTMLElement>) => {
     return (

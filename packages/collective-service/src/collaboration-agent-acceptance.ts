@@ -6,7 +6,7 @@ import type {
 import { createWorkProposal, mutableWork, requireWorkSource } from './collaboration-command-helpers.js';
 import { commitCollectiveWorkAssignment } from './collaboration-commit.js';
 import { collaborationOperationReplay, recordCollaborationOperation } from './collaboration-operations.js';
-import { projectCollectiveWork, requireCollectiveWork } from './collaboration-work.js';
+import { isAcceptedUnassignedWork, projectCollectiveWork, requireCollectiveWork } from './collaboration-work.js';
 import { assertConnectionCoordinates, requireAuthorizedHuman, requireConnection } from './connection-authority.js';
 import { CollectiveServiceError } from './errors.js';
 import { requireParticipant, sourceAuthorizesParticipant } from './participation-store.js';
@@ -47,17 +47,8 @@ export function acceptCollectiveWorkAsAgent(
         (eventId) => eventId && [work.sourceEventId, work.assignmentEventId, work.resultEventId].includes(eventId),
       ),
   );
-  const proposed =
-    related.length === 1 && related[0]?.lifecycle === 'proposed' && related[0].sourceEventId === source.eventId
-      ? related[0]
-      : undefined;
-  if (related.length && !proposed)
-    throw new CollectiveServiceError(
-      related.length > 1 ? 'WORK_SOURCE_AMBIGUOUS' : 'WORK_CONTINUATION_REQUIRED',
-      'This exact source belongs to existing work; continue the matter instead of accepting another Work',
-      409,
-    );
-  if (proposed && proposed.intendedOutcome !== input.intendedOutcome)
+  const acceptedWork = acceptableRelatedWork(related, source.eventId);
+  if (acceptedWork && acceptedWork.intendedOutcome !== input.intendedOutcome)
     throw new CollectiveServiceError(
       'COLLABORATION_OPERATION_CONFLICT',
       'Accept the exact proposed outcome before changing this matter',
@@ -71,7 +62,7 @@ export function acceptCollectiveWorkAsAgent(
     catId: participant.catId,
     displayName: participant.displayName,
   };
-  const proposal = proposed ?? createWorkProposal(state, input, actor, actorScope, now);
+  const proposal = acceptedWork ?? createWorkProposal(state, input, actor, actorScope, now);
   const work = mutableWork(state, input.collectiveId, proposal.workId);
   const eventActor: CollectiveEventEnvelope['actor'] = {
     kind: 'agent',
@@ -111,6 +102,7 @@ export function acceptCollectiveWorkAsAgent(
     eventActor,
     now,
     work.acceptance,
+    acceptedWork?.lifecycle === 'committed' ? 'accountability_assigned' : 'committed',
   );
   if (!work.assignmentEventId)
     throw new CollectiveServiceError('STATE_CORRUPT', 'Accepted Work has no assignment', 409);
@@ -131,4 +123,23 @@ export function acceptCollectiveWorkAsAgent(
     recordedAt: new Date(now).toISOString(),
   });
   return projectCollectiveWork(state, work, now);
+}
+
+function acceptableRelatedWork(
+  related: readonly MutableServiceState['works'][string][],
+  sourceEventId: string,
+): MutableServiceState['works'][string] | undefined {
+  if (related.length === 0) return undefined;
+  const candidate = related.length === 1 ? related[0] : undefined;
+  if (
+    candidate?.sourceEventId === sourceEventId &&
+    (candidate.lifecycle === 'proposed' || isAcceptedUnassignedWork(candidate))
+  ) {
+    return candidate;
+  }
+  throw new CollectiveServiceError(
+    related.length > 1 ? 'WORK_SOURCE_AMBIGUOUS' : 'WORK_CONTINUATION_REQUIRED',
+    'This exact source belongs to existing work; continue the matter instead of accepting another Work',
+    409,
+  );
 }

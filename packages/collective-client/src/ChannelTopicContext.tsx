@@ -54,7 +54,9 @@ export function ChannelTopicContext({
       onReturnToSource={onReturnToSource}
       onSend={scene.onSend}
       onProposeWork={(id) => void scene.onProposeWork(id).catch(() => undefined)}
-      onCommitWork={(work, participant) => void scene.onCommitWork(work, participant).catch(() => undefined)}
+      onCommitWork={(work, participant, accountability) =>
+        void scene.onCommitWork(work, participant, accountability).catch(() => undefined)
+      }
       onDeclineWork={(work) => void scene.onDeclineWork(work).catch(() => undefined)}
       onAcceptWorkResult={(work) => void scene.onAcceptWorkResult(work).catch(() => undefined)}
       onRequestWorkRevision={scene.onRequestWorkRevision}

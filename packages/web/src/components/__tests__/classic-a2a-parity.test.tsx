@@ -73,20 +73,13 @@ describe('classic A2A presentation parity', () => {
       onAddContext={vi.fn()}
       onAttach={vi.fn()}
       onWhisperToggle={vi.fn()}
-      onGameClick={vi.fn()}
     />
   );
 
   it('restores the classic menu order and a paper surface independent of v2 tokens', () => {
     act(() => root.render(menu()));
     const ids = [...document.querySelectorAll('[role="menuitem"]')].map((item) => item.getAttribute('data-testid'));
-    expect(ids).toEqual([
-      'composer-add-context',
-      'composer-upload',
-      'message-disposition-trigger',
-      'composer-whisper',
-      'composer-game',
-    ]);
+    expect(ids).toEqual(['composer-add-context', 'composer-upload', 'message-disposition-trigger', 'composer-whisper']);
     const panel = required(document.querySelector('[role="dialog"]'));
     expect(panel.className).toContain('bg-cafe-surface-canvas');
     expect(panel.className).not.toContain('--shell-paper');

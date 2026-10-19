@@ -133,7 +133,7 @@ describe('applyReadonlyFilter — env modes', () => {
       'cat_cafe_multi_mention',
       'cat_cafe_hold_ball',
       'cat_cafe_set_read_mode',
-      'cat_cafe_submit_game_action',
+      'cat_cafe_submit_game_action', // mcp-cutover-negative-reference: absence
       'cat_cafe_propose_thread',
       'cat_cafe_propose_profile_update',
       'cat_cafe_unregister_tracking',

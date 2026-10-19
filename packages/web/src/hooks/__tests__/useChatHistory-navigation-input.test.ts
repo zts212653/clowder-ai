@@ -55,7 +55,6 @@ function makeThreadState(messages: ChatMessage[]): ThreadState {
     catStatuses: {},
     catStatusDetails: {},
     catInvocations: {},
-    currentGame: null,
     unreadCount: 0,
     hasUserMention: false,
     lastActivity: Date.now(),
@@ -1426,6 +1425,57 @@ describe('useChatHistory navigation input owner', () => {
       gesture.end();
     });
     expect(readChatScrollState(threadId)).toEqual({ top: 1000, anchor: 'bottom' });
+  });
+
+  it.each([
+    300, 600, 800,
+  ])('settles at a %ipx reply header when earlier rows shrink after native arrival', async (height) => {
+    const threadId = `reply-header-after-earlier-reflow-${height}`;
+    const { top, second } = await openThread(threadId);
+    let shift = 0;
+    const rect = () => ({ top: 500 + shift - top.get(), bottom: 500 + height + shift - top.get(), height }) as DOMRect;
+    second.getBoundingClientRect = rect;
+    const target = second.querySelector<HTMLElement>('[data-message-id]')!;
+    target.getBoundingClientRect = rect;
+    target.scrollIntoView = vi.fn(() => top.set(400 - Math.max(0, (600 - height) / 2)));
+
+    act(() => {
+      jump('second');
+      flushAnimationFrames();
+    });
+    expect(target.scrollIntoView).toHaveBeenCalledWith({
+      behavior: 'smooth',
+      block: height > 600 ? 'start' : 'center',
+    });
+    // The browser reached the reply; a preceding content-visibility row then
+    // shrinks. A partly visible short or equal-height reply also loses its header.
+    shift = -200;
+    act(() => {
+      for (let frame = 0; frame < 8; frame++) flushAnimationFrames();
+    });
+    expect(top.get()).toBe(200);
+    expect(readChatScrollState(threadId)).toMatchObject({
+      anchor: 'offset',
+      messageAnchor: { messageId: 'second', viewportOffsetPx: 0 },
+    });
+  });
+
+  it('keeps a short reply centered when its full content remains visible', async () => {
+    const { top, second } = await openThread('short-reply-centered');
+    const rect = () => ({ top: 500 - top.get(), bottom: 800 - top.get(), height: 300 }) as DOMRect;
+    second.getBoundingClientRect = rect;
+    const target = second.querySelector<HTMLElement>('[data-message-id]')!;
+    target.getBoundingClientRect = rect;
+    target.scrollIntoView = vi.fn(() => top.set(250));
+    act(() => {
+      jump('second');
+      for (let frame = 0; frame < 8; frame++) flushAnimationFrames();
+    });
+    expect(top.get()).toBe(250);
+    expect(readChatScrollState('short-reply-centered')).toMatchObject({
+      anchor: 'offset',
+      messageAnchor: { messageId: 'second', viewportOffsetPx: 150 },
+    });
   });
 
   it('keeps the v2 source highlighted for a full interval after a late visible arrival', async () => {

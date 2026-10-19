@@ -7,6 +7,7 @@ import {
   approvalMaterializationSchema,
   approvalResolutionSchema,
 } from './approval-lifecycle.js';
+import type { CollectiveAccountabilityAttentionItem } from './collective-accountability-attention.js';
 import { preparedArtifactSnapshotV1Schema } from './growing-artifact.js';
 import type { RichCardBlock, RichInteractiveBlock } from './rich.js';
 import {
@@ -125,6 +126,7 @@ export type UnifiedAttentionSourceRead = {
   coverage:
     | 'all_registered_F246_producers'
     | 'current_linked_F310_five_producers'
+    | 'pending_f290_collective_accountability_requests'
     | 'pending_f306_structured_choices'
     | 'explicit_user_mentions'
     | 'owner_personal_ignored_items';
@@ -220,6 +222,8 @@ export interface UnifiedAttentionItemV1 {
   /** Present for every canonical pending F306 approval, question or elicitation. */
   runtimeInteraction?: UnifiedAttentionRuntimeInteraction;
   approval?: UnifiedAttentionVisibleApproval;
+  /** One Service-authorized, still-operable named-Human responsibility request. */
+  collectiveAccountabilityRequest?: CollectiveAccountabilityAttentionItem;
   /** Present only after the canonical live F225/F231 source message passes its closed producer validator. */
   originalApprovalCard?: UnifiedAttentionOriginalApprovalCard;
   linkedNeedsMe: { ownerRead: UnifiedAttentionWork; receipt: UnifiedAttentionReceipt }[];
@@ -229,7 +233,7 @@ export interface UnifiedAttentionItemV1 {
 
 /** Exact groups from the full selected response vector, before offset/limit is applied. */
 export interface UnifiedAttentionItemGroupCountsV1 {
-  /** Open approvals, canonical pending runtime interactions and exact named content reviews. */
+  /** Open approvals, canonical pending runtime interactions, exact named content reviews and current Collective results. */
   decisions: number;
   userMentions: number;
   /** Repairs, non-question judgments and every other non-mention item. */
@@ -265,6 +269,7 @@ export interface UnifiedAttentionReadV1 {
   sources: {
     approvals: UnifiedAttentionSourceRead;
     needsMe: UnifiedAttentionSourceRead;
+    collectiveAccountabilityRequests?: UnifiedAttentionSourceRead;
     structuredChoices?: UnifiedAttentionSourceRead;
     userMentions?: UnifiedAttentionSourceRead;
     personalPreferences?: UnifiedAttentionSourceRead;

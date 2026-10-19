@@ -113,7 +113,7 @@ describe('F290 default product entry', () => {
     expect(html).not.toContain('Needs Me');
     expect(html).not.toContain('我的 Café');
     expect(html).not.toContain('灵感公地');
-    expect(html).not.toContain('Roadmap');
+    expect(html).toContain('项目');
     expect(html).not.toContain('资料库');
   });
 
@@ -142,8 +142,8 @@ describe('F290 default product entry', () => {
     expect(renderToStaticMarkup(<CollectiveClient />)).toContain('希望伙伴回应 · 已有回应');
   });
 
-  it('mounts real linked Work at its source and reveals Roadmap only after a persistent route exists', () => {
-    expect(renderToStaticMarkup(<CollectiveClient />)).not.toContain('Roadmap');
+  it('mounts real linked Work at its source and keeps one Roadmap destination while mounting persisted work at its source', () => {
+    expect(renderToStaticMarkup(<CollectiveClient />)).toContain('项目');
     if (message.actor.kind !== 'human') throw new Error('Expected Human fixture');
     const actor = { kind: 'human' as const, humanId: message.actor.humanId, displayName: message.actor.displayName };
     const work = {
@@ -195,8 +195,8 @@ describe('F290 default product entry', () => {
       },
     };
     const html = renderToStaticMarkup(<CollectiveClient />);
-    expect(html).toContain('工作提议 · 来自这条消息');
+    expect(html).toContain('任务建议 · 来自这条消息');
     expect(html).toContain(work.title);
-    expect(html).toContain('Roadmap');
+    expect(html).toContain('项目');
   });
 });

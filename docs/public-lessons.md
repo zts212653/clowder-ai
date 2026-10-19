@@ -1521,7 +1521,7 @@ created: 2026-02-26
 - 状态：validated
 - 更新时间：2026-06-13
 - 摘要：一次 multi-agent 协作恢复 session 的 7 条蒸馏 — ① 你是不可靠 agent 时干净退出 critical path（TAKEOVER 逃生门，交可外部验证方；新实例的你 ≠ 认证干净替身）；② 接手 ownership 从外部真相（feat doc / git log / 别的猫报告）重建而非记忆，区分平行自己的工作；③ 三个 read-only aggregator bug 原型（时区边界 today 检查 / 能力检测静默降级 / 多源聚合覆盖不对称）；④ 修前做 failure-mode audit 别当补锅匠（抽象 invariant → grep 所有 sibling → 一起修 → 自报 sweep）；⑤ AC-pass ≠ 可用，user-visible 输出必须 dogfood 看渲染；⑥ 判断高度四响应（halt / escalate / handoff + over-correction 陷阱）；⑦ 协作战术（pre-register 弱点 / 跨族 review 抓真 bug / PR 描述漂移代码 / 诚实记录失败是团队资产）。
-- 详细全文（新模式：主文件留索引、详文另存）：lessons-learned/LL-074-multi-agent-recovery-ownership-handoff.md
+- 详细全文（新模式：主文件留索引、详文另存）：[lessons-learned/LL-074-multi-agent-recovery-ownership-handoff.md](lessons-learned/LL-074-multi-agent-recovery-ownership-handoff.md)
 - 来源锚点：[thread-id]#0001781348069695（平行 48 session 蒸馏，2026-06-13）
 - 关联：feedback_judgment_altitude | feedback_evidence_slice_to_unique_coordinate | LL-071（cucu-pr-flow）| LL-073（同期 saga）
 

@@ -9,6 +9,7 @@ import { F232PreparedArtifactReader } from '../src/domains/growing/F232PreparedA
 import { F290CollectiveWorkResultProducerAdapter } from '../src/domains/growing/F290CollectiveWorkResultProducerAdapter.js';
 import { CollectiveCurrentContext } from '../src/domains/plugin/builtin-runtime/collective-current-context.js';
 import { readCollectivePreparedResultArtifact } from '../src/domains/plugin/builtin-runtime/collective-prepared-result.js';
+import { CollectiveAcceptedWorkResultFileReconciler } from '../src/domains/plugin/builtin-runtime/collective-work/collective-accepted-result-file-reconciler.js';
 import { CollectiveWorkArtifactReader } from '../src/domains/plugin/builtin-runtime/collective-work/collective-work-artifact-read.js';
 import { callbacksRoutes } from '../src/routes/callbacks.js';
 import { documentWriterFixture } from './f290-communication-document-writer.fixture.js';
@@ -19,6 +20,26 @@ export const documentPayload = {
   format: 'md',
   baseName: 'guide',
 };
+
+export const originalGuideMarkdown = `# 共同作品接力指南
+
+版本：第1版
+
+## 目的
+
+让每位伙伴清楚目标、分工与交接位置，把各自的贡献汇成可查看、可修改的共同作品。
+
+## 协作步骤
+
+1. 发起人说明要做什么、交给谁，以及期望结果。
+2. 接手伙伴确认范围，制作初稿；遇到阻碍及时说明。
+3. 交接时附上文件、版本和待确认问题。完成后，把结果贴这里。
+4. 收到反馈后沿同一事项修订，注明改动，避免另起一份造成混淆。
+
+## 完成标准
+
+文件可打开或下载，内容符合约定，反馈已回应。提交初稿只是交付；由负责人确认接受当前版本，才算验收完成。
+`;
 
 /** Production document/post-message/CAS/read/reply/producer consumers; OAuth/model/socket sinks are fixtures. */
 export async function duplicatePublicationFixture() {
@@ -54,6 +75,19 @@ export async function duplicatePublicationFixture() {
     messageStore: f.messages,
     threadStore: f.threads,
     artifactReader: artifacts,
+    artifactUploadDir: f.uploadDir,
+  });
+  const legacyContext = new CollectiveCurrentContext({
+    connector: () => f.cafe.connector,
+    workAuthority: f.authority,
+    messageStore: f.messages,
+    threadStore: f.threads,
+    artifactReader: artifacts,
+  });
+  const resultFileReconciler = new CollectiveAcceptedWorkResultFileReconciler({
+    authority: f.authority,
+    tasks: f.tasks,
+    messages: f.messages,
     artifactUploadDir: f.uploadDir,
   });
   const adapter = new F290CollectiveWorkResultProducerAdapter({
@@ -147,7 +181,28 @@ export async function duplicatePublicationFixture() {
   const returnResult = async (credentials: Credentials = f.auth) => {
     const auth = await record(credentials);
     const current = await context.current(auth);
-    return context.reply(auth, current.returnRef, current.replyOperationRef, 'The registered guide is ready');
+    const task = await f.tasks.get(f.task.id);
+    const artifactRef = task?.entrustedWork?.artifactRefs[0];
+    assert.ok(artifactRef, 'current Work result must retain its one registered file');
+    return context.reply(
+      auth,
+      current.returnRef,
+      current.replyOperationRef,
+      `The registered guide is ready: [Open result](${artifactRef})`,
+    );
+  };
+  const returnLegacyResult = async (credentials: Credentials = f.auth) => {
+    const auth = await record(credentials);
+    const current = await legacyContext.current(auth);
+    const task = await f.tasks.get(f.task.id);
+    const artifactRef = task?.entrustedWork?.artifactRefs[0];
+    assert.ok(artifactRef, 'current Work result must retain its one registered file');
+    return legacyContext.reply(
+      auth,
+      current.returnRef,
+      current.replyOperationRef,
+      `The registered guide is ready: [Open result](${artifactRef})`,
+    );
   };
   const receipt = () =>
     adapter.readCurrentReceipt({
@@ -169,12 +224,15 @@ export async function duplicatePublicationFixture() {
     artifacts,
     adapter,
     context,
+    legacyContext,
+    resultFileReconciler,
     record,
     publish,
     register,
     prepared,
     sealed,
     returnResult,
+    returnLegacyResult,
     receipt,
     filePublications,
     resultPublications,

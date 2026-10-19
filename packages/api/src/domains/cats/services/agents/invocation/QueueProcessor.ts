@@ -1383,6 +1383,76 @@ export class QueueProcessor {
    * remain pending there, while Message lifecycle points at the existing
    * processing response instead of creating a second invocation.
    */
+  private async coverProjectedMessageWakes(input: {
+    threadId: string;
+    userId: string;
+    catId: string;
+    invocationId: string;
+    entries: readonly { entryId: string; messageId: string }[];
+    seenAt?: number;
+  }): Promise<AdoptExposedQueuedEntriesResult> {
+    const { queue, invocationTracker, messageStore, socketManager } = this.deps;
+    const activeRun = invocationTracker
+      .getActiveSlots?.(input.threadId)
+      .find((slot) => slot.catId === input.catId)?.activeRun;
+    if (
+      !activeRun ||
+      activeRun.invocationId !== input.invocationId ||
+      activeRun.targetId !== input.catId ||
+      invocationTracker.getUserId?.(input.threadId, input.catId) !== input.userId
+    ) {
+      return { outcome: 'rejected', reason: 'active_run_missing' };
+    }
+    if (
+      input.entries.length === 0 ||
+      new Set(input.entries.map((entry) => entry.entryId)).size !== input.entries.length ||
+      new Set(input.entries.map((entry) => entry.messageId)).size !== input.entries.length
+    ) {
+      return { outcome: 'rejected', reason: 'state_changed' };
+    }
+
+    try {
+      const result = await queue.commitProjectedWakeCoverage(messageStore, {
+        threadId: input.threadId,
+        userId: input.userId,
+        targetId: input.catId,
+        invocationId: input.invocationId,
+        responseMessageId: activeRun.responseMessageId,
+        entries: input.entries,
+        at: input.seenAt ?? Date.now(),
+      });
+      if (result.kind !== 'applied' && result.kind !== 'replayed')
+        return { outcome: 'rejected', reason: 'lifecycle_conflict' };
+      for (const candidate of input.entries) {
+        const adopted = invocationTracker.adoptLifecycleActiveRunInputs?.(
+          input.threadId,
+          input.catId,
+          activeRun,
+          candidate.entryId,
+          [candidate.messageId],
+        );
+        if (!adopted) throw new Error('Wake coverage Active Run changed after durable commit');
+      }
+      for (const source of result.messages.slice(0, -1))
+        this.callerDispatchObservations.registerPersistedSource(source, [input.catId]);
+      for (const message of result.messages) this.emitLifecycleMessageUpdated(input.userId, message);
+      await emitQueueUpdated(
+        socketManager,
+        input.userId,
+        input.threadId,
+        queue.list(input.threadId, input.userId),
+        'queued_adopted',
+      );
+      return { outcome: 'adopted', adoptedEntryIds: input.entries.map((entry) => entry.entryId) };
+    } catch (err) {
+      this.deps.log.error(
+        { err, threadId: input.threadId, invocationId: input.invocationId },
+        '[QueueProcessor] projected wake coverage failed before body exposure',
+      );
+      return { outcome: 'rejected', reason: 'persistence_unavailable' };
+    }
+  }
+
   async adoptExposedQueuedEntries(input: {
     threadId: string;
     userId: string;
@@ -1411,8 +1481,24 @@ export class QueueProcessor {
       return { outcome: 'rejected', reason: 'state_changed' };
     }
 
+    const publicCandidates = await queue.projectedWakeCandidates(
+      input.threadId,
+      input.userId,
+      input.catId,
+      input.entries.map((entry) => entry.messageId),
+      messageStore,
+    );
+    const exactCandidates = publicCandidates.filter((candidate) =>
+      input.entries.some((entry) => entry.entryId === candidate.entryId && entry.messageId === candidate.messageId),
+    );
+    const projectedIds = new Set(exactCandidates.map((entry) => entry.entryId));
     const adoptedEntryIds: string[] = [];
-    for (const candidate of input.entries) {
+    if (exactCandidates.length) {
+      const covered = await this.coverProjectedMessageWakes({ ...input, entries: exactCandidates });
+      if (covered.outcome === 'rejected') return covered;
+      adoptedEntryIds.push(...covered.adoptedEntryIds);
+    }
+    for (const candidate of input.entries.filter((entry) => !projectedIds.has(entry.entryId))) {
       const result = await this.adoptExposedQueuedEntry({
         ...input,
         candidate,
@@ -2210,6 +2296,17 @@ export class QueueProcessor {
    * explicit full-body get_thread_context read.
    */
   async markPromptMessagesSeen(input: PromptMessagesExposedInput): Promise<void> {
+    const entries = await this.deps.queue.projectedWakeCandidates(
+      input.threadId,
+      input.userId,
+      input.catId,
+      input.messageIds,
+      this.deps.messageStore,
+    );
+    if (entries.length) {
+      const covered = await this.coverProjectedMessageWakes({ ...input, entries });
+      if (covered.outcome !== 'adopted') throw new Error(`prompt_wake_coverage_${covered.reason}`);
+    }
     await this.ackPromptMentionCursors(input);
     const attempts = this.deps.queue.findAdmittedEntriesForMessages(
       input.threadId,
@@ -5100,21 +5197,15 @@ export class QueueProcessor {
           persistenceContext,
           ...(invocationId ? { parentInvocationId: invocationId } : {}),
           persistedPromptMessageIds: messageIds,
-          resolvePendingPromptMessageIds: async (catId, candidateIds) => {
+          resolvePendingWakeMessageIds: async (catId, candidateIds) => {
             const pending = await queue.getDurableEntriesForMessages(threadId, candidateIds);
-            const ownedIds = new Set(messageIds);
-            return candidateIds.filter(
-              (id) =>
-                !ownedIds.has(id) &&
-                pending
-                  .get(id)
-                  ?.some(
-                    (row) =>
-                      row.threadId === threadId &&
-                      queueEntryOwnerId(row) === userId &&
-                      row.targets.includes(catId) &&
-                      (row.status === 'queued' || row.status === 'claimed'),
-                  ),
+            return candidateIds.filter((id) =>
+              pending
+                .get(id)
+                ?.some(
+                  (row) =>
+                    row.kind === 'message_wake' && queueEntryOwnerId(row) === userId && row.targets.includes(catId),
+                ),
             );
           },
           // F063: this is the authoritative per-message hydration subset. Passing
@@ -5405,14 +5496,18 @@ export class QueueProcessor {
             }
             const responseMessageId = lifecycleResponseMessageIdByCat.get(catId);
             const evidence = dispatcher.initialInputRead;
-            if (dispatcher.capabilities.inputReadReceipt && evidence && responseMessageId) {
+            const submittedMessageIds = invocationTracker
+              .getActiveSlots?.(threadId)
+              .find((slot) => slot.catId === catId && slot.activeRun?.invocationId === dispatcher.invocationId)
+              ?.activeRun?.inputMessageIds;
+            if (dispatcher.capabilities.inputReadReceipt && evidence && responseMessageId && submittedMessageIds) {
               const receipt = {
                 threadId,
                 userId,
                 targetId: catId,
                 invocationId: dispatcher.invocationId,
                 responseMessageId,
-                messageIds,
+                messageIds: submittedMessageIds,
               };
               void this.updateInputReadReceipt(receipt)
                 .then(() => evidence)

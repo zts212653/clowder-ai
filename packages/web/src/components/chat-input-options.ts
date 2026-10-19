@@ -135,36 +135,11 @@ export function buildWhisperOptions(cats: CatData[]): CatOption[] {
   }));
 }
 
-/** Layer 1: game list (currently only werewolf) */
-export const GAME_LIST = [
-  {
-    id: 'werewolf',
-    label: '狼人杀',
-    desc: '经典推理对抗',
-  },
-] as const;
-
-/** Layer 2: mode options after selecting a game */
-export const WEREWOLF_MODES = [
-  { id: 'player', label: '玩家模式', desc: '当一名玩家参与', command: '/game werewolf player' },
-  { id: 'god-view', label: '上帝视角', desc: '观战所有角色动态', command: '/game werewolf god-view' },
-  { id: 'detective', label: '推理模式', desc: '绑定一只猫的视角推理', command: '/game werewolf detective' },
-  { id: 'player-voice', label: '玩家模式（语音）', desc: '语音发言+互动', command: '/game werewolf player voice' },
-  { id: 'god-view-voice', label: '上帝视角（语音）', desc: '语音观战体验', command: '/game werewolf god-view voice' },
-] as const;
-
-export type GameListItem = (typeof GAME_LIST)[number];
-export type GameModeItem = (typeof WEREWOLF_MODES)[number];
-
 /** Pure detection — returns menu trigger type from current input, or null. */
 export function detectMenuTrigger(
   val: string,
   selectionStart: number,
-): { type: 'game' } | { type: 'mention'; start: number; filter: string } | null {
-  const trimmed = val.trimStart();
-  if (/^\/g(a(m(e( )?)?)?)?$/i.test(trimmed) && trimmed.length <= 6) {
-    return { type: 'game' };
-  }
+): { type: 'mention'; start: number; filter: string } | null {
   const textBefore = val.slice(0, selectionStart);
   const atIdx = textBefore.lastIndexOf('@');
   if (atIdx >= 0) {

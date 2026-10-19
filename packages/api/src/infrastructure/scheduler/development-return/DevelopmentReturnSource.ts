@@ -8,6 +8,8 @@ import {
   isCurrentDelegateLineageGeneration,
   replacementTransitionMatchesDelegateLineage,
 } from '../../../domains/ball-custody/action-successor-delegate-lineage.js';
+import { orphanCarrierRecoveryMatchesDelegateLineage } from '../../../domains/ball-custody/action-successor-orphan-carrier-lineage.js';
+import type { ActionSuccessorLease } from '../../../domains/ball-custody/action-successor-state-machine.js';
 import type { DevelopmentWorkActor } from '../../../domains/cats/services/stores/ports/DevelopmentWorkTransition.js';
 import {
   canonicalGrowingSourceJson,
@@ -72,6 +74,39 @@ export type ReturnedActionSuccessorReturnStatus =
       supersededPredecessor?: { generation: number; reporterCatIds: string[] };
     }
   | { kind: 'superseded' };
+
+type SupersededPredecessor = NonNullable<
+  Extract<ReturnedActionSuccessorReturnStatus, { kind: 'current' }>['supersededPredecessor']
+>;
+
+function supersededPredecessorForCurrentGeneration(input: {
+  lease: ActionSuccessorLease;
+  generation: number;
+  reporterCatIds: string[];
+  route: { ownerCatId: string; ownerThreadId: string; childThreadId: string };
+}): SupersededPredecessor | undefined {
+  const { lease, generation, reporterCatIds, route } = input;
+  const enteringReplacement = (lease.replacementTransitions ?? []).find(
+    (transition) =>
+      transition.toGeneration === generation && replacementTransitionMatchesDelegateLineage(transition, route),
+  );
+  if (enteringReplacement) {
+    return {
+      generation: enteringReplacement.fromGeneration,
+      reporterCatIds: [...enteringReplacement.fromHolderCatIds],
+    };
+  }
+  const enteringRecovery = (lease.orphanCarrierRecoveryTransitions ?? []).find(
+    (transition) =>
+      transition.toGeneration === generation &&
+      transition.holderCatId === reporterCatIds[0] &&
+      reporterCatIds.length === 1 &&
+      orphanCarrierRecoveryMatchesDelegateLineage(transition, route),
+  );
+  return enteringRecovery
+    ? { generation: enteringRecovery.fromGeneration, reporterCatIds: [enteringRecovery.holderCatId] }
+    : undefined;
+}
 
 /**
  * Resolve the exact active reporter, or prove that the bound reporter explicitly
@@ -154,24 +189,17 @@ export async function resolveReturnedActionSuccessorReturnStatus(
       : null;
   }
 
-  const enteringReplacement = replacementTransitions.find(
-    (transition) =>
-      transition.toGeneration === coordinate.generation &&
-      transition.toHolderThreadId === executionThreadId &&
-      replacementTransitionMatchesDelegateLineage(transition, lineageRoute),
-  );
+  const supersededPredecessor = supersededPredecessorForCurrentGeneration({
+    lease,
+    generation: coordinate.generation,
+    reporterCatIds,
+    route: lineageRoute,
+  });
 
   return {
     kind: 'current',
     reporterCatIds,
-    ...(enteringReplacement
-      ? {
-          supersededPredecessor: {
-            generation: enteringReplacement.fromGeneration,
-            reporterCatIds: [...enteringReplacement.fromHolderCatIds],
-          },
-        }
-      : {}),
+    ...(supersededPredecessor ? { supersededPredecessor } : {}),
     sourceMessageRevision: `sha256:${createHash('sha256')
       .update(
         canonicalGrowingSourceJson({
@@ -188,6 +216,7 @@ export async function resolveReturnedActionSuccessorReturnStatus(
           issuerStandingEvidenceRef: lease.issuerStandingEvidenceRef,
           returnTransitions: lease.returnTransitions,
           replacementTransitions,
+          orphanCarrierRecoveryTransitions: lease.orphanCarrierRecoveryTransitions,
           terminalPredicateDigest: terminalPredicate.digest,
           delegateEvidenceRef: expectedDelegateEvidence,
         }),

@@ -10,8 +10,6 @@ import { useCoCreatorConfig } from '@/hooks/useCoCreatorConfig';
 import { useConnectionStatus } from '@/hooks/useConnectionStatus';
 import { useConversationViewPreference } from '@/hooks/useConversationViewPreference';
 import { useConversationViewReadingCheckpoint } from '@/hooks/useConversationViewReadingCheckpoint';
-import { godAction, submitAction } from '@/hooks/useGameApi';
-import { reconnectGame } from '@/hooks/useGameReconnect';
 import { useGovernanceStatus } from '@/hooks/useGovernanceStatus';
 import { useIndexState } from '@/hooks/useIndexState';
 import { useIsDesktop } from '@/hooks/useIsDesktop';
@@ -24,7 +22,6 @@ import { useVoiceAutoPlay } from '@/hooks/useVoiceAutoPlay';
 import { useVoiceStream } from '@/hooks/useVoiceStream';
 import { useActiveExecutionStore } from '@/stores/activeExecutionStore';
 import { type ChatMessage, type Thread, useChatStore } from '@/stores/chatStore';
-import { useGameStore } from '@/stores/gameStore';
 import { useGuideStore } from '@/stores/guideStore';
 import { withQueuedInputPreviews } from '@/stores/queued-input-preview';
 import { useSidebarProjectionStore } from '@/stores/sidebarProjectionStore';
@@ -42,6 +39,7 @@ import { hydrateEvolutionFromCurrentUrl } from './capability-evolution/evolution
 import { useConciergeConfirmations } from './concierge/useConciergeConfirmations';
 import { ArtworkLightboxHost } from './content-review/ArtworkLightboxHost';
 import { ArtworkLightboxProvider, useArtworkLightboxScope } from './content-review/ArtworkLightboxScope';
+import { ArtworkWorkModeScope } from './content-review/ArtworkWorkModeScope';
 import { scopedQueue } from './execution-row/thread-queue';
 import { FirstRunQuestWizard } from './FirstRunQuestWizard';
 import { BootcampGuideOverlay } from './first-run-quest/BootcampGuideOverlay';
@@ -49,9 +47,7 @@ import { QuestBanner } from './first-run-quest/QuestBanner';
 import { syncLocalBootcampState } from './first-run-quest/syncLocalBootcampState';
 import { useFirstProjectMistakeTipGate } from './first-run-quest/useFirstProjectMistakeTipGate';
 import { useFirstProjectPreviewAutoOpen } from './first-run-quest/useFirstProjectPreviewAutoOpen';
-import { GameOverlayConnector } from './game/GameOverlayConnector';
 import { BootcampIcon } from './icons/BootcampIcon';
-import { GameIcon } from './icons/GameIcon';
 import { PawIcon } from './icons/PawIcon';
 import { MessageSearchOverlay } from './message-search/MessageSearchOverlay';
 import { useMessageSearchHost } from './message-search/useMessageSearchHost';
@@ -68,6 +64,7 @@ import type { RegisterChatReadingPort } from './thread-chat/useThreadChatReading
 import { type VoteConfig, VoteConfigModal } from './VoteConfigModal';
 import { WorkspacePanel } from './WorkspacePanel';
 import { DEFAULT_ARTIFACT_WORK_CHAT_BASIS } from './workbench/artifact-work-presentation';
+import { toggleArtifactWorkFullWindow } from './workbench/artifact-work-presentation-actions';
 import { useF307ExperienceWorkbenchStore } from './workbench/experience-workbench-store';
 import { useArtifactWorkHostPresentation } from './workbench/useArtifactWorkHostPresentation';
 import { WorkspaceChatRevealProvider } from './workbench/WorkspaceChatReveal';
@@ -187,25 +184,6 @@ function InteractiveChatContainer({ threadId }: ChatContainerProps) {
   const navigateToThread = useCallback((tid: string) => {
     pushThreadRouteWithHistory(tid, typeof window !== 'undefined' ? window : undefined);
   }, []);
-  // F101: Game state from Zustand store
-  const gameView = useGameStore((s) => s.gameView);
-  const isGameActive = useGameStore((s) => s.isGameActive);
-  const isNight = useGameStore((s) => s.isNight);
-  const selectedTarget = useGameStore((s) => s.selectedTarget);
-  const godScopeFilter = useGameStore((s) => s.godScopeFilter);
-  const myRole = useGameStore((s) => s.myRole);
-  const myRoleIcon = useGameStore((s) => s.myRoleIcon);
-  const myActionLabel = useGameStore((s) => s.myActionLabel);
-  const myActionHint = useGameStore((s) => s.myActionHint);
-  const isGodView = useGameStore((s) => s.isGodView);
-  const isDetective = useGameStore((s) => s.isDetective);
-  const detectiveBoundName = useGameStore((s) => s.detectiveBoundName);
-  const godSeats = useGameStore((s) => s.godSeats);
-  const godNightSteps = useGameStore((s) => s.godNightSteps);
-  const hasTargetedAction = useGameStore((s) => s.hasTargetedAction);
-  const altActionName = useGameStore((s) => s.altActionName);
-  const overlayMinimized = useGameStore((s) => s.overlayMinimized);
-
   const searchParams = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null;
   // AC-6: research=multi hint from Signal study "多猫研究" button
   const isResearchMode = searchParams?.get('research') === 'multi';
@@ -447,7 +425,7 @@ function InteractiveChatContainer({ threadId }: ChatContainerProps) {
   useEffect(() => {
     if (isDesktop || !statusPanelOpen) return;
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape') return;
+      if (event.key !== 'Escape' || event.defaultPrevented || event.isComposing) return;
       event.preventDefault();
       closeStatusPanel();
     };
@@ -782,8 +760,6 @@ function InteractiveChatContainer({ threadId }: ChatContainerProps) {
     }
     // First mount — sync threadId to store without save/restore
     setCurrentThread(threadId);
-    // F101: Recover game state for the new thread (or clear stale game from previous thread)
-    reconnectGame(threadId).catch(() => {});
   }, [
     threadId,
     clearTasks, // Clean up non-thread-scoped refs
@@ -1270,73 +1246,6 @@ function InteractiveChatContainer({ threadId }: ChatContainerProps) {
                     | undefined;
                   return questState?.phase === 'quest-2-cat-intro' ? 'quest-input-highlight rounded-xl mx-1' : '';
                 })()}
-                footerTail={
-                  isGameActive && overlayMinimized && gameView?.threadId === threadId ? (
-                    <button
-                      type="button"
-                      onClick={() => useGameStore.getState().restoreOverlay()}
-                      className="mx-4 mb-2 flex items-center justify-center gap-2 rounded-lg border border-[var(--color-cafe-accent)] bg-[var(--accent-50)] px-3 py-2 text-sm text-[var(--color-cafe-accent)] hover:bg-[var(--color-cocreator-surface)] transition-colors"
-                    >
-                      <GameIcon />
-                      返回游戏
-                    </button>
-                  ) : undefined
-                }
-              />
-
-              {/* F101: Game overlay — renders when a game is active */}
-              <GameOverlayConnector
-                gameView={gameView}
-                isGameActive={isGameActive}
-                overlayMinimized={overlayMinimized}
-                currentThreadId={threadId}
-                isNight={isNight}
-                selectedTarget={selectedTarget}
-                godScopeFilter={godScopeFilter}
-                isGodView={isGodView}
-                isDetective={isDetective}
-                detectiveBoundName={detectiveBoundName ?? undefined}
-                godSeats={godSeats}
-                godNightSteps={godNightSteps}
-                hasTargetedAction={hasTargetedAction}
-                myRole={myRole ?? undefined}
-                myRoleIcon={myRoleIcon ?? undefined}
-                myActionLabel={myActionLabel ?? undefined}
-                myActionHint={myActionHint ?? undefined}
-                altActionName={altActionName ?? undefined}
-                onClose={() => {
-                  useGameStore.getState().minimizeOverlay();
-                }}
-                onSelectTarget={(seatId) => useGameStore.getState().setSelectedTarget(seatId)}
-                onGodScopeChange={(scope) => useGameStore.getState().setGodScopeFilter(scope)}
-                onGodAction={(action) => godAction(threadId, action)}
-                onVote={() => {
-                  const state = useGameStore.getState();
-                  if (state.selectedTarget && state.mySeatId) {
-                    submitAction(threadId, state.mySeatId, 'vote', state.selectedTarget);
-                    state.setSelectedTarget(null);
-                  }
-                }}
-                onSpeak={(content) => {
-                  const state = useGameStore.getState();
-                  if (state.mySeatId) {
-                    submitAction(threadId, state.mySeatId, 'speak', undefined, { content });
-                  }
-                }}
-                onConfirmAction={() => {
-                  const state = useGameStore.getState();
-                  if (state.selectedTarget && state.mySeatId && state.currentActionName) {
-                    submitAction(threadId, state.mySeatId, state.currentActionName, state.selectedTarget);
-                    state.setSelectedTarget(null);
-                  }
-                }}
-                onConfirmAltAction={() => {
-                  const state = useGameStore.getState();
-                  if (state.selectedTarget && state.mySeatId && state.altActionName) {
-                    submitAction(threadId, state.mySeatId, state.altActionName, state.selectedTarget);
-                    state.setSelectedTarget(null);
-                  }
-                }}
               />
             </>
           )}
@@ -1419,70 +1328,74 @@ function InteractiveChatContainer({ threadId }: ChatContainerProps) {
             }
             data-attention-surface={mainAreaAttentionActive ? mainAreaAttentionSurfaceId : undefined}
           >
-            {workModeActive ? (
-              <div className="flex shrink-0 items-center border-b border-cafe-subtle px-3 py-2">
-                <button
-                  type="button"
-                  onClick={closeStatusPanel}
-                  className="text-xs text-cafe-secondary"
-                  data-testid="artwork-work-mode-return"
-                >
-                  ‹ 聊天
-                </button>
-              </div>
-            ) : null}
-            <ContextualWorkspaceChrome
-              mode={rightPanelMode}
-              onFold={closeStatusPanel}
-              onNavigateHome={rightPanelMode === 'workspace' ? undefined : openWorkspaceLauncher}
-              showFold={rightPanelMode === 'workspace' && (isV2 || !isDesktop)}
+            <ArtworkWorkModeScope
+              onReturn={workModeActive ? closeStatusPanel : null}
+              fullWindowAction={
+                isDesktop
+                  ? {
+                      active: artifactFullWindowActive,
+                      onToggle: () => {
+                        const { layout } = useF307ExperienceWorkbenchStore.getState();
+                        const surface = layout.surfaces.find((item) => item.id === layout.activeSurfaceId);
+                        if (surface) toggleArtifactWorkFullWindow(threadId, surface);
+                      },
+                    }
+                  : undefined
+              }
             >
-              {activityPanelMounted && (
-                <div className={rightPanelMode === 'status' ? 'flex min-h-0 flex-1' : 'hidden'}>
-                  <StatusPresentation
-                    intentMode={intentMode}
-                    targetCats={targetCats}
-                    catStatuses={catStatuses}
-                    catInvocations={catInvocations}
-                    activeInvocations={activeInvocations}
-                    hasActiveInvocation={hasActiveInvocation}
-                    threadId={threadId}
-                    messageSummary={messageSummary}
-                    width={isDesktop ? statusPanelWidth : '100%'}
-                  />
-                </div>
-              )}
-              {workspacePanelMounted && (
-                <div
-                  className={rightPanelMode === 'workspace' ? 'flex min-h-0 min-w-0 flex-1' : 'hidden'}
-                  data-testid="workspace-host-pane"
-                >
-                  <WorkspaceChatRevealProvider threadId={threadId} onReveal={revealWorkspaceChat}>
-                    <WorkspacePanel
+              <ContextualWorkspaceChrome
+                mode={rightPanelMode}
+                onFold={closeStatusPanel}
+                onNavigateHome={rightPanelMode === 'workspace' ? undefined : openWorkspaceLauncher}
+                showFold={rightPanelMode === 'workspace' && (isV2 || !isDesktop)}
+              >
+                {activityPanelMounted && (
+                  <div className={rightPanelMode === 'status' ? 'flex min-h-0 flex-1' : 'hidden'}>
+                    <StatusPresentation
+                      intentMode={intentMode}
+                      targetCats={targetCats}
+                      catStatuses={catStatuses}
+                      catInvocations={catInvocations}
+                      activeInvocations={activeInvocations}
+                      hasActiveInvocation={hasActiveInvocation}
                       threadId={threadId}
-                      projectPath={isV2 ? workspaceProjectPath : undefined}
-                      defaultCatId={targetCats[0] || 'opus'}
-                      visible={statusPanelOpen && rightPanelMode === 'workspace' && documentVisible}
-                      artifactWorkHostAvailable
-                      statusSurface={
-                        <StatusPresentation
-                          intentMode={intentMode}
-                          targetCats={targetCats}
-                          catStatuses={catStatuses}
-                          catInvocations={catInvocations}
-                          activeInvocations={activeInvocations}
-                          hasActiveInvocation={hasActiveInvocation}
-                          threadId={threadId}
-                          messageSummary={messageSummary}
-                          width="100%"
-                        />
-                      }
+                      messageSummary={messageSummary}
+                      width={isDesktop ? statusPanelWidth : '100%'}
                     />
-                  </WorkspaceChatRevealProvider>
-                </div>
-              )}
-              {rightPanelMode === 'transcript' && statusPanelOpen && <TranscriptPanel />}
-            </ContextualWorkspaceChrome>
+                  </div>
+                )}
+                {workspacePanelMounted && (
+                  <div
+                    className={rightPanelMode === 'workspace' ? 'flex min-h-0 min-w-0 flex-1' : 'hidden'}
+                    data-testid="workspace-host-pane"
+                  >
+                    <WorkspaceChatRevealProvider threadId={threadId} onReveal={revealWorkspaceChat}>
+                      <WorkspacePanel
+                        threadId={threadId}
+                        projectPath={isV2 ? workspaceProjectPath : undefined}
+                        defaultCatId={targetCats[0] || 'opus'}
+                        visible={statusPanelOpen && rightPanelMode === 'workspace' && documentVisible}
+                        artifactWorkHostAvailable
+                        statusSurface={
+                          <StatusPresentation
+                            intentMode={intentMode}
+                            targetCats={targetCats}
+                            catStatuses={catStatuses}
+                            catInvocations={catInvocations}
+                            activeInvocations={activeInvocations}
+                            hasActiveInvocation={hasActiveInvocation}
+                            threadId={threadId}
+                            messageSummary={messageSummary}
+                            width="100%"
+                          />
+                        }
+                      />
+                    </WorkspaceChatRevealProvider>
+                  </div>
+                )}
+                {rightPanelMode === 'transcript' && statusPanelOpen && <TranscriptPanel />}
+              </ContextualWorkspaceChrome>
+            </ArtworkWorkModeScope>
           </div>
         )}
         <FloatingTranscriptContainer />

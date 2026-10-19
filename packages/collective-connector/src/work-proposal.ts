@@ -1,4 +1,4 @@
-import type { CollectiveSourceIdentity } from '@cat-cafe/shared';
+import type { CollectiveProjectWorkSuggestionTarget, CollectiveSourceIdentity } from '@cat-cafe/shared';
 import { participationError, requireParticipation } from './participation-custody.js';
 import type { ConnectorPersistence } from './persistence.js';
 import type { CollectiveServiceClient } from './service-client.js';
@@ -11,7 +11,12 @@ export async function proposeVerifiedCollectiveWork(input: {
   readonly source: CollectiveSourceIdentity;
   readonly requestId: string;
   readonly agent: VerifiedAgent;
-  readonly proposal: { readonly title?: string; readonly intendedOutcome?: string; readonly requestKind?: string };
+  readonly proposal: {
+    readonly title?: string;
+    readonly intendedOutcome?: string;
+    readonly requestKind?: string;
+    readonly projectSuggestion?: CollectiveProjectWorkSuggestionTarget;
+  };
 }) {
   const { connection, binding, credential } = requireParticipation(input.persistence.snapshot(), input.source);
   if (
@@ -33,6 +38,7 @@ export async function proposeVerifiedCollectiveWork(input: {
     ...(input.proposal.requestKind ? { requestKind: input.proposal.requestKind } : {}),
     ...(input.proposal.title ? { title: input.proposal.title } : {}),
     ...(input.proposal.intendedOutcome ? { intendedOutcome: input.proposal.intendedOutcome } : {}),
+    ...(input.proposal.projectSuggestion ? { projectSuggestion: input.proposal.projectSuggestion } : {}),
   });
   requireParticipation(input.persistence.snapshot(), input.source);
   return proposal;

@@ -113,6 +113,15 @@ export function normalizedOrigin(value: string | undefined): string | undefined 
   }
 }
 
+export function requestOrigin(request: IncomingMessage): string {
+  const host = request.headers.host;
+  if (!host) throw new CollectiveServiceError('FORBIDDEN', 'Request host is unavailable', 400);
+  const protocol = (request.socket as { encrypted?: boolean }).encrypted ? 'https:' : 'http:';
+  const candidate = `${protocol}//${host}`;
+  if (!URL.canParse(candidate)) throw new CollectiveServiceError('FORBIDDEN', 'Request host is invalid', 400);
+  return new URL(candidate).origin;
+}
+
 export function requireAllowedOrigin(
   origin: string | undefined,
   allowedOrigins: ReadonlySet<string>,

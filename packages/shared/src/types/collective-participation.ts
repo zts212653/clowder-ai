@@ -13,6 +13,7 @@ export const collectiveParticipantAgentSchema = z
   .object({
     catId: z.string().trim().min(1).max(120),
     displayName: z.string().trim().min(1).max(120),
+    displayLabel: z.string().trim().min(1).max(120).optional(),
     channelIds: z.array(z.string().trim().min(1).max(160)).min(1).max(100),
     description: z.string().trim().min(1).max(120).optional(),
     avatarDataUrl: z
@@ -43,6 +44,7 @@ export const collectiveParticipantSchema = collectiveConnectionCoordinatesSchema
     humanDisplayName: z.string().min(1).max(120),
     catId: z.string().min(1).max(120),
     displayName: z.string().min(1).max(120),
+    displayLabel: z.string().trim().min(1).max(120).optional(),
     channelIds: z.array(z.string()),
     description: z.string().trim().min(1).max(120).optional(),
     avatarDataUrl: z

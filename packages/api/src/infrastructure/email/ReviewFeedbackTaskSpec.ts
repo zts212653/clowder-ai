@@ -520,7 +520,9 @@ export function createReviewFeedbackTaskSpec(opts: ReviewFeedbackTaskSpecOptions
         for (let step = 0; step < tasks.length; step++) {
           gateSignal?.throwIfAborted();
           if (!gitHubAdmissionCanContinue(ctx)) break;
-          const signal = gitHubObjectSignal(ctx);
+          // Metadata, comments, decisions and threads form one observation;
+          // shared credential-queue waits must not reset it every ten seconds.
+          const signal = gitHubObjectSignal(ctx, 30_000);
           const index = (startIndex + step) % tasks.length;
           const task = tasks[index]!;
           nextTaskIndex = (index + 1) % tasks.length;

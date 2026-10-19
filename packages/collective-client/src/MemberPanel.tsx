@@ -1,5 +1,7 @@
 import type { CollectiveEventEnvelope, CollectiveMemberDirectory, CollectiveParticipant } from './client-types.js';
+import { useCollectiveText } from './collective-copy.js';
 import { MemberAvatar } from './MemberAvatar.js';
+import { MemberFamilies } from './MemberFamilies.js';
 
 export type MemberSelection =
   | { readonly kind: 'human'; readonly humanId: string }
@@ -14,6 +16,7 @@ export function MemberPanel({
   onClose,
   onCafe,
   onReplayGuide,
+  privateRoster = false,
 }: {
   readonly member: MemberSelection | 'members';
   readonly members?: CollectiveMemberDirectory;
@@ -22,74 +25,45 @@ export function MemberPanel({
   readonly onSelect: (member: MemberSelection) => void;
   readonly onClose: () => void;
   readonly onCafe?: () => void;
+  readonly privateRoster?: boolean;
   readonly onReplayGuide?: () => void;
 }) {
-  const agents = participants.filter(
-    (cat) => cat.availability === 'declared' && members?.cafes.some((cafe) => cafe.connectionId === cat.connectionId),
-  );
+  const t = useCollectiveText();
   return (
     <aside
-      className="context-panel member-panel"
+      className={member === 'members' ? 'members-page' : 'context-panel member-panel'}
       data-spatial-role="context-panel"
-      aria-label={member === 'members' ? '成员' : '成员资料'}
+      aria-label={t(member === 'members' ? '成员' : '成员资料')}
     >
       <header className="context-header">
         <div>
-          <span>共同家园</span>
-          <h2>{member === 'members' ? '成员' : '成员资料'}</h2>
+          <span>{t('共同家园')}</span>
+          <h2>{t(member === 'members' ? '成员' : '成员资料')}</h2>
         </div>
-        <button type="button" aria-label="关闭成员资料" onClick={onClose}>
+        <button type="button" aria-label={t('关闭成员资料')} onClick={onClose}>
           ×
         </button>
       </header>
       <div className="member-content">
+        {member === 'members' && privateRoster && <div data-host-ui-slot="roster" className="private-roster-slot" />}
+
         {member === 'members' ? (
           !members ? (
-            <p className="empty-copy">正在读取成员…</p>
+            <p className="empty-copy">{t('正在读取成员…')}</p>
           ) : (
-            members.humans.map((human) => (
-              <section key={human.humanId} className="member-family">
-                <button
-                  type="button"
-                  className="member-row"
-                  onClick={() => onSelect({ kind: 'human', humanId: human.humanId })}
-                >
-                  <MemberAvatar name={human.displayName} kind="human" avatarUrl={human.avatarUrl} />
-                  <span>
-                    <strong>{human.displayName}</strong>
-                    <small>{human.role === 'steward' ? '维护者' : '成员'} · 人</small>
-                  </span>
-                </button>
-                {agents
-                  .filter((agent) => agent.humanId === human.humanId)
-                  .map((agent) => (
-                    <button
-                      key={`${agent.connectionId}:${agent.catId}`}
-                      type="button"
-                      className="member-row member-row-agent"
-                      onClick={() => onSelect({ kind: 'agent', connectionId: agent.connectionId, catId: agent.catId })}
-                    >
-                      <MemberAvatar name={agent.displayName} kind="agent" avatarUrl={agent.avatarDataUrl} />
-                      <span>
-                        <strong>{agent.displayName}</strong>
-                        <small>{agent.endpointLabel} · 猫</small>
-                      </span>
-                    </button>
-                  ))}
-              </section>
-            ))
+            <MemberFamilies members={members} participants={participants} onSelect={onSelect} />
           )
         ) : (
           <MemberProfile member={member} members={members} participants={participants} events={events} />
         )}
-        {onCafe && (
+        {onCafe && !privateRoster && (
           <button type="button" className="cafe-window-button" onClick={onCafe}>
             管理…
           </button>
         )}
         {member === 'members' && onReplayGuide && (
           <button type="button" className="first-entry-replay" onClick={onReplayGuide}>
-            再看一遍演示
+            {t('再看一遍介绍')}
           </button>
         )}
       </div>
@@ -121,7 +95,6 @@ function MemberProfile({
         <div className="member-profile">
           <MemberAvatar name={human.displayName} kind="human" avatarUrl={human.avatarUrl} />
           <h3>{human.displayName}</h3>
-          <p>以本人身份交流 · 人</p>
         </div>
         <dl className="member-facts">
           <dt>在共同家园的身份</dt>

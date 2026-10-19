@@ -185,7 +185,14 @@ export class WorkspaceContentSourceService {
       const media = await probeImmutableMedia(snapshot, mime).catch(() => {
         throw new WorkspaceContentSourceError('unsupported_media');
       });
-      return { ...description, kind: 'media', mime, media, stream: Readable.from([snapshot]) };
+      return {
+        ...description,
+        kind: 'media',
+        mime,
+        media,
+        stream: Readable.from([snapshot]),
+        localPath: resolved.path,
+      };
     } finally {
       await handle.close();
     }

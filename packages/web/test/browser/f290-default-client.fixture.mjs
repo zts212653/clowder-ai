@@ -187,10 +187,10 @@ export async function openNativeOwnerClient({ context, evidence, nativeOwner, se
     .getByRole('navigation', { name: '频道', exact: true })
     .getByRole('button', { name: /产品方向/ })
     .click();
-  await embedded.getByRole('button', { name: '我的猫', exact: true }).waitFor();
+  await embedded.getByRole('button', { name: '查看成员', exact: true }).waitFor();
   await host.screenshot({ path: path.join(evidence, 'default-embedded-channel-1440.png'), fullPage: true });
-  await embedded.getByRole('button', { name: '我的猫', exact: true }).click();
-  const cafe = host.getByRole('complementary', { name: '我的猫', exact: true });
+  await embedded.getByRole('button', { name: '查看成员', exact: true }).click();
+  let cafe = host.getByRole('region', { name: '我的猫 · 仅自己可见', exact: true });
   await cafe.getByText('已加入', { exact: true }).first().waitFor();
   assert.equal(await cafe.getByText('带它加入', { exact: true }).count(), 0);
   assert.equal(await cafe.getByText('这种接入方式暂时不能参与', { exact: true }).count(), 1);
@@ -210,10 +210,21 @@ export async function openNativeOwnerClient({ context, evidence, nativeOwner, se
     { catId: nativeOwner.cat.id, channelId: '产品方向', state: 'listen' },
     route.attentionRevision,
   );
-  await cafe.getByRole('button', { name: '关闭我的猫', exact: true }).click();
+  // The fixture changed attention outside the page. Observe the normal Host
+  // refresh before issuing a CAS write; an old snapshot correctly returns 409.
+  const currentAttention = host.waitForResponse(
+    async (response) =>
+      response.url().endsWith('/listening') &&
+      response.request().method() === 'GET' &&
+      response.ok() &&
+      (await response.json()).attentionRevision === interested.attentionRevision,
+  );
+  await embedded.getByRole('button', { name: '关闭成员资料', exact: true }).click();
+  cafe = host.getByRole('complementary', { name: '我的 Café', exact: true });
   await embedded.locator('details.channel-menu > summary').click();
-  await embedded.getByRole('button', { name: /我家的猫在这个频道/ }).click();
+  await embedded.getByRole('button', { name: /谁留意频道消息/ }).click();
   await cafe.getByRole('heading', { name: '# 产品方向', exact: true }).waitFor();
+  await currentAttention;
   const enableListening = host.waitForResponse(
     (response) => response.url().endsWith('/listening') && response.request().method() === 'POST',
   );
@@ -245,7 +256,7 @@ export async function openNativeOwnerClient({ context, evidence, nativeOwner, se
   assert.equal(listening.channelListening.产品方向.dutyCatId, nativeOwner.cat.id);
   assert.equal(finalListening.attentionRevision, finalListening.channelListening.产品方向.revision);
   assert.equal(finalListening.standingInterests.产品方向[nativeOwner.cat.id].revision, interested.attentionRevision);
-  await cafe.getByRole('button', { name: '关闭我的猫', exact: true }).click();
+  await cafe.getByRole('button', { name: '返回共同体', exact: true }).click();
   return { cafe, embedded, host, nativeErrors };
 }
 
@@ -274,12 +285,12 @@ export async function setupResponseRequest({ cafe, embedded, nativeOwner }) {
     catId: nativeOwner.cat.id,
     interestRevision: listening.standingInterests.产品方向[nativeOwner.cat.id].revision,
   });
-  await embedded.getByRole('button', { name: '我的猫', exact: true }).click();
-  await cafe.getByRole('button', { name: '日程', exact: true }).click();
+  await embedded.locator('details.collective-menu > summary').click();
+  await embedded.getByRole('button', { name: '我的日程…', exact: true }).click();
   const responseArticle = cafe.getByRole('article').filter({ hasText: responseRequest });
   await responseArticle.getByText('排着队', { exact: true }).waitFor();
   assert.equal(await responseArticle.getByRole('button', { name: '交给它持续处理', exact: true }).count(), 0);
-  await cafe.getByRole('button', { name: '关闭我的猫', exact: true }).click();
+  await cafe.getByRole('button', { name: '返回共同体', exact: true }).click();
   return { composer, response, responseRequest };
 }
 
@@ -387,8 +398,8 @@ export async function createLinkedPublicWork({
   if (!publicWork?.assignmentEventId) throw new Error(`Missing assigned public Work for ${event.eventId}`);
   assertDispatch(await nativeOwner.dispatchPending(), 'route the Work assignment');
 
-  await embedded.getByRole('button', { name: '我的猫', exact: true }).click();
-  await cafe.getByRole('button', { name: '日程', exact: true }).click();
+  await embedded.locator('details.collective-menu > summary').click();
+  await embedded.getByRole('button', { name: '我的日程…', exact: true }).click();
   const request = cafe.getByRole('article').filter({ hasText: body });
   const admitted = host.waitForResponse(
     (response) => response.url().endsWith('/work/admit') && response.request().method() === 'POST',
@@ -400,7 +411,7 @@ export async function createLinkedPublicWork({
   }
   await request.getByRole('link', { name: '查看工作', exact: true }).waitFor();
   const task = await nativeOwner.workTaskForEvent(publicWork.assignmentEventId);
-  await cafe.getByRole('button', { name: '关闭我的猫', exact: true }).click();
+  await cafe.getByRole('button', { name: '返回共同体', exact: true }).click();
   return { article, event, publicWork, task };
 }
 

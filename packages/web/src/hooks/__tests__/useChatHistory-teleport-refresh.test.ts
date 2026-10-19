@@ -58,7 +58,6 @@ function cachedThreadState(): ThreadState {
     catStatuses: {},
     catStatusDetails: {},
     catInvocations: {},
-    currentGame: null,
     unreadCount: 0,
     hasUserMention: false,
     lastActivity: CACHED_MESSAGE.timestamp,

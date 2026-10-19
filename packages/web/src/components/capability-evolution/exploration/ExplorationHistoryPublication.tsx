@@ -3,6 +3,19 @@ import { useCatNameResolver } from '@/hooks/useCatNameResolver';
 import type { useExplorationWorkspace } from './use-exploration-workspace';
 
 type Workspace = ReturnType<typeof useExplorationWorkspace>;
+
+export function ExplorationHistoryRecovery({ message, onOpen }: { message?: string; onOpen: () => void }) {
+  return (
+    <section className="exploration-history-recovery" aria-label="最新历史可读">
+      <strong>最新历史已经发布，可以直接阅读</strong>
+      <p>{message ?? '上次阅读位置属于较早的内容版本，原选择仍会保留。'}</p>
+      <button type="button" className="exploration-link" onClick={onOpen}>
+        打开最新历史
+      </button>
+    </section>
+  );
+}
+
 export function ExplorationHistoryPublicationNotice({ workspace }: { workspace: Workspace }) {
   const catName = useCatNameResolver();
   const publication = workspace.catalog?.publication;

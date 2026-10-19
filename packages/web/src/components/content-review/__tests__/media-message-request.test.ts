@@ -35,9 +35,9 @@ describe('mediaAttachmentOf', () => {
     expect(mediaAttachmentOf([{ type: 'text', text: '只有字' }, block(quote)])).toBeNull();
   });
 
-  it('takes the first one when there are several, because one send carries one', () => {
+  it('does not guess a first work when a gallery carries several', () => {
     const first = media({ id: 'media-first' });
-    expect(mediaAttachmentOf([block(first), block(media({ id: 'media-second' }))])).toBe(first);
+    expect(mediaAttachmentOf([block(first), block(media({ id: 'media-second' }))])).toBeNull();
   });
 });
 
@@ -176,4 +176,17 @@ describe('hasRequestFromMessage', () => {
       ),
     ).toBe(false);
   });
+});
+
+it('joins a gallery takeover only to its named work and does not end discovery of a sibling', () => {
+  const own = media({ id: 'picture-2', title: '图二.png' });
+  const other = request({ id: 'request-for-picture-1', sourceMessageId: 'message-gallery' });
+  other.record.progress.sourceAttachmentId = 'picture-1';
+  const second = request({ id: 'request-for-picture-2', sourceMessageId: 'message-gallery' });
+  second.record.progress.sourceAttachmentId = own.id;
+  expect(
+    mediaRequestsForMessage(catalogue([other, second]), 'message-gallery', own, nameOf).map((item) => item.requestId),
+  ).toEqual(['request-for-picture-2']);
+  expect(hasRequestFromMessage(catalogue([other]), 'message-gallery', own.id)).toBe(false);
+  expect(hasRequestFromMessage(catalogue([other, second]), 'message-gallery', own.id)).toBe(true);
 });

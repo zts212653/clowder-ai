@@ -145,6 +145,36 @@ describe('Collective world navigation surface', () => {
     expect(new URL(iframe.src).searchParams.get('collectiveId')).toBe('col_target000');
   });
 
+  it('presents an expired session as a neutral sign-in notice and retains the exact selected world', async () => {
+    window.history.replaceState({}, '', explicitTarget('col_target000'));
+    mockApiFetch.mockResolvedValue(response({ runtimeStatus: 'active', connections: [connection('col_target000')] }));
+    await act(async () => root.render(<CollectiveLaunchSurface />));
+    await flush();
+    const iframe = container.querySelector('iframe');
+    if (!iframe?.contentWindow) throw new Error('Collective iframe was not mounted');
+    const post = vi.spyOn(iframe.contentWindow, 'postMessage');
+    const send = async (data: unknown) =>
+      act(async () =>
+        window.dispatchEvent(
+          new MessageEvent('message', { origin: 'http://localhost:5201', source: iframe.contentWindow, data }),
+        ),
+      );
+    await send({ type: 'collective:world-directory-ready' });
+    const init = post.mock.calls.find(([data]) => data.type === 'collective:host-world-directory-init')?.[0];
+    if (!init) throw new Error('Missing directory handshake');
+    await send({
+      type: 'collective:client-world-directory',
+      bridgeId: init.bridgeId,
+      revision: 1,
+      state: 'session_required',
+      serviceInstanceId: 'svc_12345678',
+    });
+    const notice = container.querySelector('[role="status"]');
+    expect(notice?.textContent).toContain('需要重新登录');
+    expect(notice?.className).not.toContain('conn-red');
+    expect(new URL(iframe.src).searchParams.get('collectiveId')).toBe('col_target000');
+  });
+
   it('refuses an incomplete explicit target instead of opening a paired fallback', async () => {
     window.history.replaceState({}, '', '/collective?collectiveId=col_target000');
     mockApiFetch.mockResolvedValue(response({ runtimeStatus: 'active', connections: [connection('col_fallback0')] }));

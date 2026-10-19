@@ -18,6 +18,7 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { mkdtemp, readFile } from 'node:fs/promises';
+import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { CollectiveConnector } from '@cat-cafe/collective-connector';
@@ -33,6 +34,21 @@ export const HOST_ORIGIN = 'http://localhost:5172';
 export const CHANNEL = 'general';
 
 const displayNames: Record<string, string> = { 'codex-sol': 'Sol', 'codex-terra': 'Terra' };
+
+async function availableLoopbackPort(): Promise<number> {
+  const reservation = createServer();
+  await new Promise<void>((resolve, reject) => {
+    reservation.once('error', reject);
+    reservation.listen(0, '127.0.0.1', () => {
+      reservation.off('error', reject);
+      resolve();
+    });
+  });
+  const address = reservation.address();
+  if (!address || typeof address === 'string') throw new Error('Could not reserve a loopback Service port');
+  await new Promise<void>((resolve, reject) => reservation.close((error) => (error ? reject(error) : resolve())));
+  return address.port;
+}
 
 type TurnStatus = 'running' | 'succeeded' | 'failed' | 'canceled' | 'interrupted';
 
@@ -88,9 +104,12 @@ export async function createWorld(options: { now?: () => number } = {}) {
     authenticate: async ({ code }: { code: string }) => ({ providerSubject: code, handle: code, displayName: code }),
   };
   const serviceDirectory = await temp('f290v-service-');
+  const port = await availableLoopbackPort();
+  const publicUrl = `http://127.0.0.1:${port}`;
   const opened = await CollectiveServiceStore.open({
     dataDirectory: serviceDirectory,
     humanAuthProvider,
+    humanAuthRedirectUri: `${publicUrl}/api/auth/github/callback`,
     now: options.now,
   });
   let store = opened.store;
@@ -111,10 +130,10 @@ export async function createWorld(options: { now?: () => number } = {}) {
   let server: RunningCollectiveServer = await startCollectiveServer({
     store,
     host: '127.0.0.1',
-    port: 0,
+    port,
+    publicUrl,
     allowedHostOrigins: [HOST_ORIGIN],
   });
-  const port = server.port;
 
   const invite = await store.createInvite({ sessionToken: owner.sessionToken, collectiveId: collective.collectiveId });
   const memberAttempt = await store.beginHumanAuth({
@@ -237,10 +256,17 @@ export async function createWorld(options: { now?: () => number } = {}) {
       const reopened = await CollectiveServiceStore.open({
         dataDirectory: serviceDirectory,
         humanAuthProvider,
+        humanAuthRedirectUri: `${publicUrl}/api/auth/github/callback`,
         now: options.now,
       });
       store = reopened.store;
-      server = await startCollectiveServer({ store, host: '127.0.0.1', port, allowedHostOrigins: [HOST_ORIGIN] });
+      server = await startCollectiveServer({
+        store,
+        host: '127.0.0.1',
+        port,
+        publicUrl,
+        allowedHostOrigins: [HOST_ORIGIN],
+      });
     },
     async restartService() {
       await world.stopService();

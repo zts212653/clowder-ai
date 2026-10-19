@@ -30,6 +30,7 @@ async function main(): Promise<void> {
     store: opened.store,
     host,
     port,
+    publicUrl,
     allowedHostOrigins,
     bootstrapLinkPath,
     githubAppSetup,

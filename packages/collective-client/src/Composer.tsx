@@ -1,3 +1,4 @@
+import { ComposerControl, ComposerFrame } from '@cat-cafe/ui';
 import { type FormEvent, type KeyboardEvent, useEffect, useId, useRef, useState } from 'react';
 import { CollectiveIcon } from './CollectiveIcon.js';
 import { ComposerMentionMenu } from './ComposerMentionMenu.js';
@@ -9,6 +10,7 @@ import type {
   CollectiveRecipient,
   DeliveryState,
 } from './client-types.js';
+import { useCollectiveText } from './collective-copy.js';
 import {
   clearConfirmedComposerDraft,
   type ReplySelection,
@@ -17,6 +19,7 @@ import {
   selectReply,
 } from './composer-draft.js';
 import { participantKey, participantRecipient } from './participant-identity.js';
+import { participantLabel } from './participant-label.js';
 import { SharedArtifactQuoteTags } from './SharedArtifactQuoteTags.js';
 import { useSharedArtifactComposer } from './use-shared-artifact-composer.js';
 
@@ -85,6 +88,7 @@ export function Composer({
   readonly reply?: ReplySelection;
   readonly replyEvents?: readonly CollectiveEventEnvelope[];
 }) {
+  const t = useCollectiveText();
   const draftKey = `collective-draft:${namespace}:${channelId}:${rootEventId ?? 'channel'}`;
   const [draft, setDraft] = useState(() => readDraft(draftKey));
   const attachment = useSharedArtifactComposer(draft, setDraft, rootEventId);
@@ -115,7 +119,7 @@ export function Composer({
       .filter((item) => item.availability === 'declared' && item.channelIds.includes(channelId))
       .map((item) => ({
         key: participantKey(item),
-        label: item.displayName,
+        label: participantLabel(item, participants),
         detail: `${item.humanDisplayName} · ${item.endpointLabel} (${item.endpointId.slice(-6)})`,
         recipient: participantRecipient(item),
         kind: 'agent' as const,
@@ -294,16 +298,16 @@ export function Composer({
           onResponseRequested={setResponseRequested}
         />
       )}
-      <div className="composer-box">
-        <button
+      <ComposerFrame className="composer-box">
+        <ComposerControl
           type="button"
           className="composer-expand"
-          aria-label="更多输入选项"
+          aria-label={t('更多输入选项')}
           aria-expanded={expanded}
           onClick={() => setExpanded((value) => !value)}
         >
           +
-        </button>
+        </ComposerControl>
         <textarea
           ref={inputRef}
           id={inputId}
@@ -325,10 +329,10 @@ export function Composer({
             setActiveOption(0);
           }}
         />
-        <button type="submit" className="composer-send" aria-label="发送" disabled={disabled}>
+        <button type="submit" className="composer-send" aria-label={t('发送')} disabled={disabled}>
           <CollectiveIcon kind="send" />
         </button>
-      </div>
+      </ComposerFrame>
       {storageNotice && (
         <p className="composer-warning" role="status">
           {storageNotice}

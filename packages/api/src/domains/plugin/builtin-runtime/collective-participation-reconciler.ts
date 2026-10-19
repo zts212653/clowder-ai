@@ -8,7 +8,7 @@ import {
   type HostRouteConfig,
   type ObservedCatEligibility,
 } from '@cat-cafe/collective-connector';
-import type { CatId } from '@cat-cafe/shared';
+import { type CatId, collectiveParticipantAgentSchema } from '@cat-cafe/shared';
 import type { ThreadSystemKind } from '../../cats/services/stores/ports/ThreadStore.js';
 import { collectiveAvatarRoots, publicCollectiveAvatar } from './collective-public-avatar.js';
 
@@ -171,10 +171,15 @@ async function collectPublicProfiles(cats: readonly ParticipationCat[]) {
           .filter((cat) => cat.supported)
           .map(async (cat) => {
             const avatarDataUrl = await publicCollectiveAvatar(cat.avatar, roots);
+            const nickname = cat.nickname?.trim();
+            const displayLabel = nickname
+              ? collectiveParticipantAgentSchema.shape.displayLabel.parse(nickname)
+              : undefined;
             const description = cat.roleDescription?.trim().slice(0, 120);
             return [
               cat.id,
               {
+                ...(displayLabel ? { displayLabel } : {}),
                 ...(description ? { description } : {}),
                 ...(avatarDataUrl ? { avatarDataUrl } : {}),
               },

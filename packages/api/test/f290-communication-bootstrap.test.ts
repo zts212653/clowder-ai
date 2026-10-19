@@ -152,6 +152,7 @@ test('a crash after current first admission retains the actual Task and recovers
     assert.equal((await firstReceipt(f, task)).id, initialReceipt.id);
     const next = await f.continueWork('Continue A once more under current g3');
     assert.ok(f.birth && task.entrustedWork);
+    assert.ok(f.work.assignmentEventId);
     const scope = await resolveCollectiveStandingGrant(f.cafe.connector, next.source, CAT);
     assert.ok(scope);
     await assert.rejects(
@@ -172,7 +173,7 @@ test('a crash after current first admission retains the actual Task and recovers
         bootstrapExecution: {
           sourceRef: `message:${next.source.id}`,
           workId: f.work.workId,
-          assignmentEventId: f.work.assignmentEventId!,
+          assignmentEventId: f.work.assignmentEventId,
           revision: 3,
         },
       }),
@@ -282,6 +283,29 @@ test('a cold Host uses the actual inbox first assignment only as lineage when g1
     const auth = await f.authFor(dispatch.messageId);
     const current = await f.context.current(auth);
     assert.equal((await f.context.read(auth, current.contextRef)).previousResultArtifact, undefined);
+  } finally {
+    await f.world.close();
+  }
+});
+
+test('a cold Host accepts an explicit Cat claim after Human acceptance left the task unassigned', async () => {
+  const f = await bootstrapFixture({ persistBirth: false, unassignedBeforeCatAcceptance: true });
+  try {
+    assert.equal(f.birth, undefined);
+    assert.equal(f.work.history.at(-1)?.action, 'accountability_assigned');
+    assert.equal((await f.tasks.listByKind('work')).length, 0);
+    await f.cafe.connector.revokeWorkGrants(f.cafe.connectionId, f.cafe.ownerUserId, ['grant-guides']);
+    await f.regrant();
+    const continued = await f.continueWork('Continue the explicitly claimed project task');
+    const dispatch = await f.admission.admit(continued.source, CAT);
+    assert.ok(dispatch);
+    const [task] = await f.tasks.listByKind('work');
+    assert.ok(task?.entrustedWork);
+    const [lineageRef] = task.entrustedWork.admission.sourceRefs;
+    assert.ok(lineageRef);
+    const lineage = await f.messages.getById(lineageRef.slice('message:'.length));
+    assert.equal(lineage?.source?.meta?.eventId, f.work.assignmentEventId);
+    assert.equal(workOf(f.world, f.work.workId).executionAuthority?.hostAdmission?.state, 'admitted');
   } finally {
     await f.world.close();
   }

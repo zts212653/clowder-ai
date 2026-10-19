@@ -26,7 +26,7 @@ tips_exempt: "Renewed 2026-09-04 for the current F308 public-link projection onl
 >
 > 本文档作为愿景研究产物保留：三层方向性主张 + 跨族视角论证 + ADHD 同构假设，已被两条主线（F148/F163）实现。Phase A operator 2026-04-25 拍板关闭——不做持久文档，若痛点复现走 query-time Feature Lens。2026-05-11 close sync 将 F169 从 BACKLOG 活跃列表移出。
 >
-> **Meta-Aesthetics 约束**：本文档按 canon §5.4 写——方向性约束（终态设计 / 不加认知脚手架）作为 F148 Phase F / F163 Phase F 实现时的**设计哲学输入**，不是本文档的实现切片。
+> **Meta-Aesthetics 约束**：本文档按 [canon](../canon/meta-aesthetics.md) §5.4 写——方向性约束（终态设计 / 不加认知脚手架）作为 F148 Phase F / F163 Phase F 实现时的**设计哲学输入**，不是本文档的实现切片。
 
 ## Why
 

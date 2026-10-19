@@ -22,7 +22,7 @@ trigger_phrases:
 
 > **⛔ 新接入、社区用户或“让猫帮我配置”不要从本文件开始。**
 > 这份文档复现 2026-06 的单 owner B1a dogfood，包含环境特有的 Cloudflare/tunnel 假设和历史 token 形态；其中的账号、固定 ID、域名与命令不能复制给其他用户。
-> 当前入口是 `docs/guides/chatgpt-cloud-cat-onboarding.md`，用户页面是 `chatgpt-cloud-cat-onboarding.html`。
+> 当前入口是 [`docs/guides/chatgpt-cloud-cat-onboarding.md`](../../docs/guides/chatgpt-cloud-cat-onboarding.md)，用户页面是 [`chatgpt-cloud-cat-onboarding.html`](../../docs/guides/chatgpt-cloud-cat-onboarding.html)。
 
 > **接球前先读完整本 SOP**——里面踩坑的 dashboard UI 迷雾 + token scope 残缺
 > 都是 2026-06-21 那个晚上实测出来的，CF SaaS UI 还在频繁改组，**先信文不信
@@ -124,7 +124,7 @@ curl -s -H "Authorization: Bearer $CF_TOKEN" "https://api.cloudflare.com/client/
 
 ## 2. cat 注册（两层：mint allowlist + runtime catRegistry）
 
-> ⚠️ **常见误判**（LL-cat-cafe-api-has-hot-reload）：之前以为 catId 加进 `cat-config.json` 重启 API 就能让 callback 路由认识它。**错**。
+> ⚠️ **常见误判**（[LL-cat-cafe-api-has-hot-reload](../../docs/lessons-learned/LL-cat-cafe-api-has-hot-reload.md)）：之前以为 catId 加进 `cat-config.json` 重启 API 就能让 callback 路由认识它。**错**。
 >
 > Runtime catRegistry **不读 `cat-config.json`**，读的是 `.cat-cafe/cat-catalog.json` —— 改前者无效。正确做法是用 **`POST /api/cats`** API endpoint，**零重启** 注入。
 >
@@ -193,7 +193,7 @@ F247 R3 P2-4 KD-10 早期推测 "runtime cat / bubble identity 走 breeds.varian
 
 > 注意（R3 P2-4 / R8.2 修正）：roster 只是 **mint allowlist**，不消费 provider/avatar/color。
 > Runtime cat / bubble / avatar **已由 §2.2 `POST /api/cats` 完成注册** —— 早期 R3 P2-4 推测的
-> "breeds[].variants[] Phase C 单独工程" 已被 B1a 实测 supersede（详见 LL-cat-cafe-api-has-hot-reload），
+> "breeds[].variants[] Phase C 单独工程" 已被 B1a 实测 supersede（详见 [LL-cat-cafe-api-has-hot-reload](../../docs/lessons-learned/LL-cat-cafe-api-has-hot-reload.md)），
 > Phase C scope = UX 抛光（真头像 + 气泡 + cat picker），不需要为 gpt-pro 加 breeds entry。
 
 ```bash
@@ -316,7 +316,7 @@ INF Updated to new configuration config="{\"ingress\":[...]}" version=N
 ## 5. 启 B1a spike server
 
 > 🚨 **必读**：启动命令 **首段必须 `env -u`** 清掉 5 个可能从父 invocation 继承的污染变量。
-> 否则会触发"长得像 X 但行为像 Y"的诡异 bug — 详见 LL-spike-server-env-contamination。
+> 否则会触发"长得像 X 但行为像 Y"的诡异 bug — 详见 [LL-spike-server-env-contamination](../../docs/lessons-learned/LL-spike-server-env-contamination.md)。
 
 ```bash
 cd /home/user/cat-cafe
@@ -451,10 +451,10 @@ cloudflared tunnel create cat-cafe
 | `curl ... /mcp` returns tools but少几个 | 白名单 mode 错 | 检查 env `CAT_CAFE_DESKTOP_MODE=cloud-pro-phase0` |
 | Quick tunnel TLS handshake EOF | ISP 拦 trycloudflare.com | 不修，**只用 named tunnel** mcp.clowder-ai.com |
 | dashboard "Hostname routes (Beta)" 是 private network 表单 | CF UI 重组，public hostname 入口藏了 | **不走 dashboard，走 §4.2 CF API PUT** |
-| Maine Coon云端 read 工具 OK，但 `cat_cafe_post_message` 返 `Unknown catId filter: gpt-pro` 或 502 | cat-cafe API catRegistry 没注册 gpt-pro | **不要重启 API**，走 `POST /api/cats` 热加载（§2.2）。详见 LL-cat-cafe-api-has-hot-reload |
-| `post_message rejects threadId from invocation-token callers (F193 KD-1)` 错误（Maine Coon云端是 agent-key，本不该 fire）| spike server 继承父 invocation 的 `CAT_CAFE_INVOCATION_ID` + `CAT_CAFE_CALLBACK_TOKEN` env，MCP server gate 误判 | spike 启动加 `env -u CAT_CAFE_INVOCATION_ID -u CAT_CAFE_CALLBACK_TOKEN`（§5）。详见 LL-spike-server-env-contamination |
+| Maine Coon云端 read 工具 OK，但 `cat_cafe_post_message` 返 `Unknown catId filter: gpt-pro` 或 502 | cat-cafe API catRegistry 没注册 gpt-pro | **不要重启 API**，走 `POST /api/cats` 热加载（§2.2）。详见 [LL-cat-cafe-api-has-hot-reload](../../docs/lessons-learned/LL-cat-cafe-api-has-hot-reload.md) |
+| `post_message rejects threadId from invocation-token callers (F193 KD-1)` 错误（Maine Coon云端是 agent-key，本不该 fire）| spike server 继承父 invocation 的 `CAT_CAFE_INVOCATION_ID` + `CAT_CAFE_CALLBACK_TOKEN` env，MCP server gate 误判 | spike 启动加 `env -u CAT_CAFE_INVOCATION_ID -u CAT_CAFE_CALLBACK_TOKEN`（§5）。详见 [LL-spike-server-env-contamination](../../docs/lessons-learned/LL-spike-server-env-contamination.md) |
 | `Clowder AI callback not configured. Missing ... agent-key credentials` 但你明明设了 `CAT_CAFE_AGENT_KEY_FILE` | spike 继承父 `CAT_CAFE_AGENT_KEY_FILES` (antigravity multi-cat map)，不含 gpt-pro → `resolveAgentKeySecret()` 走 map 路径返 undefined，**屏蔽** single AGENT_KEY_FILE | spike 启动 `-u CAT_CAFE_AGENT_KEY_FILES` 后重新 set 含 gpt-pro 的 map（§5） |
-| `threadId required for agent-key auth` (cat-cafe API 错误) | agent-key caller 模式必传 `threadId`（vs invocation-token 必禁），Maine Coon ChatGPT 端没传 | 告诉Maine Coon他是 agent-key 模式 `post_message` 必须显式带 `threadId`（短 L0 已说明）。详见 LL-agent-key-vs-invocation-token-threadId |
+| `threadId required for agent-key auth` (cat-cafe API 错误) | agent-key caller 模式必传 `threadId`（vs invocation-token 必禁），Maine Coon ChatGPT 端没传 | 告诉Maine Coon他是 agent-key 模式 `post_message` 必须显式带 `threadId`（短 L0 已说明）。详见 [LL-agent-key-vs-invocation-token-threadId](../../docs/lessons-learned/LL-agent-key-vs-invocation-token-threadId.md) |
 | ChatGPT 端 write 工具偶尔被 OpenAI safety check 拦截，read 工具不拦 | ChatGPT 对 `readOnlyHint=false` 工具更严格 + first-time write 可能要 user 确认 | 让Maine Coon在 ChatGPT UI 点确认按钮 (如有)；或多试几次。属于 OpenAI 平台行为，**我们不可控** |
 
 ## §C 风险表 + Token Rotation SOP

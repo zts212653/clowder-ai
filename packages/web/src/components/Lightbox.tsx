@@ -3,6 +3,11 @@
 import { type ReactNode, useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { API_URL } from '@/utils/api-client';
+import { ArtworkChromeProvider } from './content-review/ArtworkChrome';
+import { ArtworkFloatingHeader } from './content-review/ArtworkFloatingHeader';
+import { ArtworkGalleryNavigation, useArtworkGalleryNavigation } from './content-review/ArtworkGalleryNavigation';
+import { ArtworkPreviewMedia } from './content-review/ArtworkPreviewMedia';
+import type { ArtworkGallery } from './content-review/artwork-gallery';
 import artworkStyles from './content-review/artwork-lightbox.module.css';
 import { lightboxCopy } from './lightbox.shell-copy';
 import { useShellCopy } from './shell/shell-copy';
@@ -69,6 +74,7 @@ export function Lightbox({
   workspaceError,
   children,
   composerSlot,
+  gallery,
   onClose,
 }: {
   url: string;
@@ -81,6 +87,7 @@ export function Lightbox({
   workspaceError?: string | null;
   children?: ReactNode;
   composerSlot?: ReactNode;
+  gallery?: ArtworkGallery;
   onClose: () => void;
 }) {
   const isV2 = useShellPresentation() === 'v2';
@@ -89,6 +96,7 @@ export function Lightbox({
   closeRef.current = onClose;
   const closeButton = useRef<HTMLButtonElement>(null);
   const dialog = useRef<HTMLDivElement>(null);
+  useArtworkGalleryNavigation(gallery, dialog);
   const [opening, setOpening] = useState(false);
   const [openError, setOpenError] = useState<string | null>(null);
   useEffect(() => {
@@ -127,84 +135,106 @@ export function Lightbox({
 
   return createPortal(
     // biome-ignore lint/a11y/useKeyWithClickEvents: Escape key handled via useEffect
-    <div
-      role="dialog"
-      ref={dialog}
-      aria-modal="true"
-      aria-label={alt || (isV2 ? (mediaType === 'image' ? t.imagePreview : t.videoPreview) : 'Image preview')}
-      className="fixed inset-0 z-50 flex items-center justify-center bg-[var(--console-overlay-heavy)] backdrop-blur-sm"
-      onClick={onClose}
-    >
-      {/* biome-ignore lint/a11y/useKeyWithClickEvents: stopPropagation only, not interactive */}
-      {/* biome-ignore lint/a11y/noStaticElementInteractions: container prevents backdrop close */}
+    <ArtworkChromeProvider>
       <div
-        className={
-          composerSlot
-            ? `group ${artworkStyles.window}`
-            : 'relative group max-w-[90vw] max-h-[90vh] flex flex-col items-center'
-        }
-        onClick={(e) => e.stopPropagation()}
+        role="dialog"
+        ref={dialog}
+        aria-modal="true"
+        aria-label={alt || (isV2 ? (mediaType === 'image' ? t.imagePreview : t.videoPreview) : 'Image preview')}
+        className="fixed inset-0 z-50 flex items-center justify-center bg-[var(--console-overlay-heavy)] backdrop-blur-sm"
+        style={composerSlot ? { background: 'rgba(0,0,0,0.90)' } : undefined}
+        onClick={onClose}
       >
-        <button
-          ref={closeButton}
-          type="button"
-          onClick={onClose}
-          className="absolute -top-3 -right-3 bg-[var(--console-overlay-heavy)] hover:bg-[var(--console-overlay-heavy-hover)] text-[var(--overlay-fg)] rounded-full w-8 h-8 flex items-center justify-center text-lg z-10"
-          title={isV2 ? t.close : 'Close'}
+        {/* biome-ignore lint/a11y/useKeyWithClickEvents: stopPropagation only, not interactive */}
+        {/* biome-ignore lint/a11y/noStaticElementInteractions: container prevents backdrop close */}
+        <div
+          className={
+            composerSlot
+              ? `group ${artworkStyles.window}`
+              : 'relative group max-w-[90vw] max-h-[90vh] flex flex-col items-center'
+          }
+          onClick={(e) => e.stopPropagation()}
         >
-          &times;
-        </button>
-        {onOpenWorkspace ? (
-          <button
-            type="button"
-            data-testid="lightbox-open-workspace"
-            disabled={workspaceBusy || opening}
-            onClick={async () => {
-              setOpening(true);
-              setOpenError(null);
-              try {
-                if (await onOpenWorkspace()) onClose();
-                else setOpenError('未能进入作品模式，请确认原作品仍可访问后重试。');
-              } catch {
-                setOpenError('暂时无法打开作品模式，请重试。');
-              } finally {
-                setOpening(false);
+          {composerSlot ? (
+            <ArtworkFloatingHeader
+              title={alt}
+              position={
+                gallery && gallery.items.length > 1 ? `${gallery.index + 1} / ${gallery.items.length}` : undefined
               }
-            }}
-            className="absolute -top-8 right-10 z-10 rounded-md bg-[var(--console-overlay-control)] px-3 py-2 text-sm text-[var(--overlay-fg)]"
-          >
-            作品模式
-          </button>
-        ) : null}
-        {/* biome-ignore lint/performance/noImgElement: data URIs from MCP cannot use next/image */}
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        {children ??
-          (mediaType === 'video' ? (
-            <video
-              src={url}
-              controls
-              preload="metadata"
-              aria-label={alt}
-              className="max-w-full max-h-[85vh] rounded-lg"
+              onClose={onClose}
+              closeRef={closeButton}
+              onOpenWorkspace={onOpenWorkspace}
+              busy={workspaceBusy}
+              onError={setOpenError}
             />
           ) : (
-            <img src={url} alt={alt} className="max-w-full max-h-[85vh] object-contain rounded-lg" />
-          ))}
-        {caption && <p className="mt-2 text-sm text-[var(--overlay-fg-muted)]">{caption}</p>}
-        {annotationUnavailableReason && (
-          <p role="status" className="mt-2 text-sm text-[var(--overlay-fg-muted)]">
-            {annotationUnavailableReason}
-          </p>
-        )}
-        {(workspaceError || openError) && (
-          <p role="alert" className="mt-2 text-sm text-[var(--overlay-fg)]">
-            {workspaceError || openError}
-          </p>
-        )}
-        {!children && mediaType === 'image' && <CopyButton url={url} />}
-        {composerSlot}
+            <>
+              <button
+                ref={closeButton}
+                type="button"
+                onClick={onClose}
+                className="absolute -top-3 -right-3 bg-[var(--console-overlay-heavy)] hover:bg-[var(--console-overlay-heavy-hover)] text-[var(--overlay-fg)] rounded-full w-8 h-8 flex items-center justify-center text-lg z-10"
+                title={isV2 ? t.close : 'Close'}
+              >
+                &times;
+              </button>
+              {onOpenWorkspace ? (
+                <button
+                  type="button"
+                  data-testid="lightbox-open-workspace"
+                  disabled={workspaceBusy || opening}
+                  onClick={async () => {
+                    setOpening(true);
+                    setOpenError(null);
+                    try {
+                      if (await onOpenWorkspace()) onClose();
+                      else setOpenError('未能进入作品模式，请确认原作品仍可访问后重试。');
+                    } catch {
+                      setOpenError('暂时无法打开作品模式，请重试。');
+                    } finally {
+                      setOpening(false);
+                    }
+                  }}
+                  className="absolute -top-8 right-10 z-10 rounded-md bg-[var(--console-overlay-control)] px-3 py-2 text-sm text-[var(--overlay-fg)]"
+                >
+                  作品模式
+                </button>
+              ) : null}
+            </>
+          )}
+          {/* biome-ignore lint/performance/noImgElement: data URIs from MCP cannot use next/image */}
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          {children ??
+            (composerSlot ? (
+              <ArtworkPreviewMedia url={url} title={alt} video={mediaType === 'video'} gallery={gallery} />
+            ) : mediaType === 'video' ? (
+              <video
+                src={url}
+                controls
+                preload="metadata"
+                aria-label={alt}
+                className="max-w-full max-h-[85vh] rounded-lg"
+              />
+            ) : (
+              <img src={url} alt={alt} className="max-w-full max-h-[85vh] object-contain rounded-lg" />
+            ))}
+          {caption && <p className="mt-2 text-sm text-[var(--overlay-fg-muted)]">{caption}</p>}
+          {gallery ? <ArtworkGalleryNavigation gallery={gallery} arrows={!children && !composerSlot} /> : null}
+          {annotationUnavailableReason && (
+            <p role="status" className="mt-2 text-sm text-[var(--overlay-fg-muted)]">
+              {annotationUnavailableReason}
+            </p>
+          )}
+          {(workspaceError || openError) && (
+            <p role="alert" className="mt-2 text-sm text-[var(--overlay-fg)]">
+              {workspaceError || openError}
+            </p>
+          )}
+          {!children && !composerSlot && mediaType === 'image' && <CopyButton url={url} />}
+          {composerSlot}
+        </div>
       </div>
-    </div>,
+    </ArtworkChromeProvider>,
     document.body,
   );
 }

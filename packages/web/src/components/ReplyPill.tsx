@@ -4,11 +4,11 @@ import type { ReplyPreview } from '@cat-cafe/shared';
 import { useId, useState } from 'react';
 import { useMeasuredOverflow } from '@/components/content-overflow/useMeasuredOverflow';
 import { useShellPresentation } from '@/components/shell/shell-presentation';
+import { useMessageNavigation } from '@/components/thread-chat/MessageNavigationContext';
 import type { CatData } from '@/hooks/useCatData';
 import { useCoCreatorConfig } from '@/hooks/useCoCreatorConfig';
 import { tintOf } from '@/lib/hex-color';
 import { messageSenderThemeColor, resolveMessageSender } from '@/lib/resolve-sender';
-import { focusLineageMessage } from '@/utils/focusLineageMessage';
 import { SenderAvatar } from './SenderAvatar';
 
 interface ReplyPillProps {
@@ -26,6 +26,7 @@ interface ReplyPillProps {
  * hex; the 12.5% tint behind them stays the identity colour, because it says who.
  */
 export function ReplyPill({ replyPreview, expandedContent, replyToId, getCatById }: ReplyPillProps) {
+  const navigateToMessage = useMessageNavigation();
   const coCreator = useCoCreatorConfig();
   const nameRole = useShellPresentation() === 'v2';
   const [expanded, setExpanded] = useState(false);
@@ -44,7 +45,7 @@ export function ReplyPill({ replyPreview, expandedContent, replyToId, getCatById
   const themeColor = messageSenderThemeColor(replyPreview, sender, getCatById);
 
   const handleClick = () => {
-    focusLineageMessage(replyToId);
+    navigateToMessage(replyToId);
   };
 
   return (

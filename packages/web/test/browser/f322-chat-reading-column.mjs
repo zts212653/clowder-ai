@@ -68,7 +68,8 @@ export async function runChatReadingColumnJourney(t, { openProof, closeProof, ca
         };
         await page.locator('[data-message-piano-ready="true"][data-message-piano]').waitFor();
         const m = await measure();
-        assert.deepEqual(m.padding, { left: 16, right: 40 }, 'the measured piano owns the reserved right gutter');
+        // #5685 reserves room for the 28px latest control beside the piano.
+        assert.deepEqual(m.padding, { left: 16, right: 72 }, 'the piano and latest control own the reserved gutter');
         assertReadingGeometry(m);
         assert.equal(m.cat.width, m.column.width);
         const rail = await cat.locator('[data-reply-color-rail]').evaluate((node) => {
@@ -121,7 +122,7 @@ export async function runChatReadingColumnJourney(t, { openProof, closeProof, ca
             ),
           );
           const narrow = await measure();
-          assert.deepEqual(narrow.padding, { left: 16, right: 40 });
+          assert.deepEqual(narrow.padding, { left: 16, right: 72 });
           assertReadingGeometry(narrow);
         }
       } catch (error) {

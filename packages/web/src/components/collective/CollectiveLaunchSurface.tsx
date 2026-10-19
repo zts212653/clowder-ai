@@ -88,7 +88,7 @@ export function CollectiveLaunchSurface({
 
   return (
     <div
-      className="relative h-full min-h-0 overflow-hidden bg-[var(--cafe-surface-canvas)]"
+      className="cafe-presentation relative h-full min-h-0 overflow-hidden bg-[var(--cafe-surface-canvas)]"
       data-testid="collective-launch-surface"
       style={{ containerType: 'inline-size', containerName: 'collective-host' }}
     >
@@ -134,6 +134,7 @@ export function CollectiveLaunchSurface({
       <CollectiveLaunchNotice
         connectorError={error}
         worldError={world.error}
+        sessionRequired={world.sessionRequired}
         workError={workResult.error}
         pairingError={pairingBridge.error}
         entryError={entry.error}
@@ -149,6 +150,7 @@ export function CollectiveLaunchSurface({
           key={`${connection.connectionId}:${contextBridge.context.contextId}:${contextBridge.context.channelId}`}
           connection={connection}
           context={contextBridge.context}
+          iframeRef={iframeRef}
           policyBridge={policyBridge}
           onParticipationReady={({ revision, catCount }) => {
             const activeContext = contextBridge.context;
@@ -168,6 +170,7 @@ export function CollectiveLaunchSurface({
           busy={busy}
           pairingState={pairingBridge.state}
           onClose={contextBridge.close}
+          onOpenMembers={contextBridge.openMembers}
           onPair={pairingBridge.requestPairing}
           onMutate={(operation) => void mutateConnection(operation, connection.connectionId)}
           connections={status.connections}

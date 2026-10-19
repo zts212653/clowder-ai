@@ -53,11 +53,84 @@ const choice: UnifiedAttentionItemV1 = {
     cardRef,
   },
 };
+const accountability: UnifiedAttentionItemV1 = {
+  decisionRef:
+    'f290.collective_work_accountability_request:collective-accountability-request:svc_abcdefgh:col_abcdefgh:work_abcdefgh:accountability_abcdefgh',
+  kind: 'judgment',
+  summary: 'You 邀请你负责「完成接责验收」 · 共同项目',
+  linkedNeedsMe: [],
+  collectiveAccountabilityRequest: {
+    producerId: 'f290.collective_work_accountability_request',
+    subjectRef: 'collective-accountability-request:svc_abcdefgh:col_abcdefgh:work_abcdefgh:accountability_abcdefgh',
+    serviceInstanceId: 'svc_abcdefgh',
+    collectiveId: 'col_abcdefgh',
+    connectionId: 'con_abcdefgh',
+    workId: 'work_abcdefgh',
+    workRevision: 2,
+    accountabilityRequestId: 'accountability_abcdefgh',
+    targetHumanId: 'human_abcdefgh',
+    targetDisplayName: 'WuLang',
+    requestedByHumanId: 'human_requester',
+    requestedByDisplayName: 'You',
+    requestEventId: 'evt_request000',
+    requestedAt: '2026-10-18T12:00:00.000Z',
+    status: 'pending',
+    roadmapId: 'roadmap_abcdefgh',
+    projectTitle: '共同项目',
+    channelId: 'general',
+    workSourceEventId: 'evt_source0000',
+    workTitle: '完成接责验收',
+    actionRef:
+      '/collective?target=accountability&connectionId=con_abcdefgh&workId=work_abcdefgh&workRevision=2&channelId=general&roadmapId=roadmap_abcdefgh&accountabilityRequestId=accountability_abcdefgh',
+    expectedProducerRevision: 2,
+  },
+};
+const collectiveResult = {
+  decisionRef: 'f290.collective_work_result:collective-result:con_abcdefgh:work_abcdefgh',
+  kind: 'judgment',
+  summary: 'Review the prepared result in its Collective Work',
+  linkedNeedsMe: [
+    {
+      ownerRead: {
+        envelope: {
+          subjectRef: 'task:work:result-ready',
+          revision: 3,
+          visibility: { ownerUserId: OWNER },
+        },
+        brief: { outcome: { state: 'known', value: '可验收的共同体成果' } },
+        work: { title: '准备共同体成果', ownerCatId: 'codex-sol' },
+        preparedArtifact: {
+          artifactRef: 'artifact:result',
+          artifactRevision: '7',
+          completenessRef: 'artifact:result#complete:7',
+          previewRef: 'artifact:result#preview:7',
+          openInWorkspaceRef: 'workspace:artifact:thread-private:7:artifact:result',
+        },
+      },
+      receipt: {
+        eligible: true,
+        producer: {
+          producerId: 'f290.collective_work_result',
+          ownerRef: 'collective-result:con_abcdefgh:work_abcdefgh',
+          subjectRef: 'collective-result:con_abcdefgh:work_abcdefgh',
+          revision: 4,
+        },
+        taskRef: { subjectRef: 'task:work:result-ready', observedRevision: 3 },
+        kind: 'judgment',
+        reasonCode: 'collective_result_ready',
+        recommendation: 'Review the prepared result in its Collective Work',
+        salience: 'normal',
+        action: { actionRef: '/collective?workId=work_abcdefgh', expectedProducerRevision: 4 },
+        reEvaluateActionRef: 'collective-result:con_abcdefgh:work_abcdefgh#reevaluate',
+      },
+    },
+  ],
+} as unknown as UnifiedAttentionItemV1;
 const withCoordinate = (item: UnifiedAttentionItemV1): UnifiedAttentionItemV1 => ({
   ...item,
   preferenceCoordinate: { kind: 'mailbox', decisionRef: item.decisionRef, version: 'exact-version' },
 });
-const personal = { mode: 'visible' as const, disabled: false, change: vi.fn(async () => true) };
+const personal = { mode: 'visible' as const, refusal: () => null, change: vi.fn(async () => true) };
 const onOpen = vi.fn();
 let root: Root;
 let container: HTMLDivElement;
@@ -153,6 +226,43 @@ describe.each(['zh', 'en'] as const)('expanded mailbox decisions (%s)', (languag
     await render(mention(), false);
     expect(container.querySelector('[data-testid="mailbox-mention-handled-reason"]')).toBeNull();
   });
+  it('shows a named responsibility request with its Project, requester, and original Task action', async () => {
+    writeShellLanguage(language);
+    await render(accountability);
+    expect(container.querySelector('[data-testid="mailbox-item"]')?.getAttribute('data-kind-label')).toBe(
+      language === 'zh' ? '责任邀请' : 'Responsibility request',
+    );
+    expect(container.querySelector('[data-testid="mailbox-accountability-project"]')?.textContent).toContain(
+      '共同项目',
+    );
+    expect(container.querySelector('[data-testid="mailbox-accountability-requester"]')?.textContent).toContain('You');
+    expect(container.querySelector('[data-testid="mailbox-accountability-details"]')?.textContent).toContain(
+      language === 'zh' ? '原项目任务' : 'original Project Task',
+    );
+    await act(async () => container.querySelector<HTMLButtonElement>('[data-testid="mailbox-open-original"]')?.click());
+    expect(onOpen).toHaveBeenCalledExactlyOnceWith(resolveOriginalPlace(accountability));
+    expect(mocks.apiFetch.mock.calls.some((call) => call[1]?.method === 'POST')).toBe(false);
+  });
+  it('localizes the F290 system result prompt without rewriting ordinary producer recommendations', async () => {
+    writeShellLanguage(language);
+    await render(collectiveResult);
+    const expected =
+      language === 'zh' ? '查看共同体工作中准备好的成果' : 'Review the prepared result in its Collective Work';
+    expect(container.querySelector('[data-testid="mailbox-item-toggle"]')?.textContent).toContain(expected);
+    expect(container.querySelector('[data-testid="mailbox-detail-recommendation"]')?.textContent).toContain(expected);
+    if (language === 'zh') {
+      expect(container.textContent).not.toContain('Review the prepared result in its Collective Work');
+    }
+
+    const ordinary = structuredClone(collectiveResult);
+    ordinary.decisionRef = 'f292.repair:ordinary';
+    ordinary.summary = '保留用户写下的建议';
+    ordinary.linkedNeedsMe[0].receipt.producer.producerId = 'f292.repair';
+    ordinary.linkedNeedsMe[0].receipt.reasonCode = 'repair_ready';
+    ordinary.linkedNeedsMe[0].receipt.recommendation = ordinary.summary;
+    await render(ordinary);
+    expect(container.textContent).toContain('保留用户写下的建议');
+  });
   it.each([
     { kind: 'approval', original: approvalRow(approval), expanded: true },
     { kind: 'choice', original: choice, expanded: true },
@@ -195,7 +305,7 @@ describe.each(['zh', 'en'] as const)('expanded mailbox decisions (%s)', (languag
       ignore?.click();
       open?.click();
     });
-    expect(personal.change).toHaveBeenCalledExactlyOnceWith(item.preferenceCoordinate, false);
+    expect(personal.change).toHaveBeenCalledExactlyOnceWith(item, false);
     expect(onOpen).toHaveBeenCalledExactlyOnceWith(resolveOriginalPlace(item));
     expect(mocks.apiFetch.mock.calls.some((call) => call[1]?.method === 'POST')).toBe(false);
   });

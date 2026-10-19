@@ -163,7 +163,7 @@ it.each(['Chat', 'Inbox'] as const)('uses the existing taste recovery on its ori
           onOpen={() => {}}
           hosted={{ sessions, ownerUserId: 'owner-1' }}
           readCurrent
-          personal={{ mode: 'visible', disabled: false, change: async () => true }}
+          personal={{ mode: 'visible', refusal: () => null, change: async () => true }}
         />
       ),
     ),

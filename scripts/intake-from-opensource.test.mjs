@@ -1129,7 +1129,6 @@ describe('pre-commit hook brand guard (--from-index)', () => {
     'packages/api/src/domains/cats/services/stores/redis/RedisMessageStore.ts',
     'packages/api/src/domains/cats/services/stores/redis/RedisThreadReadStateStore.ts',
     'packages/shared/src/utils/redis.ts',
-    'packages/api/src/domains/cats/services/duty-briefing/collectDutyBriefingInput.ts',
     'packages/api/src/domains/cats/services/freshness/ThreadUnseenChecker.ts',
     'packages/api/src/domains/cats/services/freshness/checkFreshnessForPostMessage.ts',
     'packages/api/src/domains/cats/services/freshness/checkStreamOutputFreshness.ts',

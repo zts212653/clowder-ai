@@ -10,6 +10,8 @@ import {
   collectiveVoteRecordSchema,
   collectiveWorkPolicySchema,
   collectiveWorkRecordSchema,
+  collectiveWorkResultFileSchema,
+  collectiveWorkResultMediaTypeForFileName,
 } from '@cat-cafe/shared';
 import { z } from 'zod';
 
@@ -135,6 +137,24 @@ const collaborationOperationReceiptSchema = z
   })
   .strict();
 
+const workResultFileRecordSchema = z
+  .object({
+    ...collectiveWorkResultFileSchema.shape,
+    collectiveId: z.string(),
+    workId: z.string().startsWith('work_'),
+    resultEventId: z.string().startsWith('evt_'),
+    resultRevision: z.number().int().positive(),
+    assignmentEventId: z.string().startsWith('evt_'),
+    connectionId: z.string().startsWith('con_'),
+    humanId: z.string().startsWith('human_'),
+    catId: z.string().trim().min(1).max(120),
+    createdAt: z.string().datetime(),
+  })
+  .strict()
+  .refine((record) => record.mediaType === collectiveWorkResultMediaTypeForFileName(record.fileName), {
+    message: 'Work result file name and media type do not match',
+  });
+
 const serviceStateV2Schema = z
   .object({
     schemaVersion: z.literal(2),
@@ -170,6 +190,7 @@ const serviceStateV2Schema = z
     bindingVotes: z.record(z.string(), collectiveBindingVoteRecordSchema).default({}),
     decisions: z.record(z.string(), collectiveDecisionRecordSchema).default({}),
     reactions: z.record(z.string(), reactionRecordSchema).default({}),
+    workResultFiles: z.record(z.string(), workResultFileRecordSchema).default({}),
     collaborationOperations: z.record(z.string(), collaborationOperationReceiptSchema).default({}),
     legacyEvents: z.record(z.string(), z.array(z.unknown())),
     clientEventIndex: z.record(z.string(), z.string()),
@@ -271,6 +292,7 @@ export function migrateServiceState(value: unknown): { readonly state: ServiceSt
     bindingVotes: {},
     decisions: {},
     reactions: {},
+    workResultFiles: {},
     collaborationOperations: {},
     legacyEvents: {},
     clientEventIndex: rebuildClientEventIndex(migratedEvents),

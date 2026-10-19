@@ -23,6 +23,7 @@ const agentMessageBodySchema = collectiveAgentMessageRequestSchema.innerType().o
   agent: true,
   participationRevision: true,
   workResultIntent: true,
+  workResultFile: true,
   workProgressIntent: true,
 });
 

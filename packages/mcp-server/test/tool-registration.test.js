@@ -306,8 +306,8 @@ describe('MCP Server Tool Registration', () => {
       'cat_cafe_get_thread_metadata',
       'cat_cafe_set_thread_metadata',
       'cat_cafe_set_read_mode',
-      // Game action uses game-phase env identity headers rather than agent-key principal auth.
-      'cat_cafe_submit_game_action',
+      // Retired game tools must never reappear in agent-key profiles.
+      'cat_cafe_submit_game_action', // mcp-cutover-negative-reference: absence
     ];
 
     const exposed = agentKeyUnsafeTools.filter((name) => AGENT_KEY_TOOLS.has(name));
@@ -614,7 +614,7 @@ describe('F061 READONLY_ALLOWED_TOOLS whitelist', () => {
         names.includes('cat_cafe_hold_ball') ||
         names.includes('cat_cafe_propose_thread') ||
         names.includes('cat_cafe_unregister_tracking') ||
-        names.includes('cat_cafe_submit_game_action') ||
+        names.includes('cat_cafe_submit_game_action') || // mcp-cutover-negative-reference: absence
         // 砚砚 R9 P1: shared-MCP cats must see publish-verdict
         !names.includes('cat_cafe_publish_verdict')
       ) {

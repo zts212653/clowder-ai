@@ -11,6 +11,7 @@ import {
 } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { z } from 'zod';
+import { flushParentDirectorySync } from './flush-parent-directory.js';
 import {
   linkedRootConfigPath,
   mutateLinkedRootState,
@@ -61,12 +62,7 @@ function signingSecret(): string {
           closeSync(file);
         }
         renameSync(temporary, path);
-        const directory = openSync(dirname(path), 'r');
-        try {
-          fsyncSync(directory);
-        } finally {
-          closeSync(directory);
-        }
+        flushParentDirectorySync(path);
       } finally {
         try {
           unlinkSync(temporary);

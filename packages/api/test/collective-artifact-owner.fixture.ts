@@ -13,7 +13,11 @@ import { ProjectContentOwnerService } from '../src/domains/video-studio/content-
 
 export async function collectiveArtifactOwnerFixture(
   t: { after(fn: () => Promise<unknown>): void },
-  options: { verifyAgent?: CollectiveConnectorOptions['verifyAgent']; text?: string } = {},
+  options: {
+    verifyAgent?: CollectiveConnectorOptions['verifyAgent'];
+    text?: string;
+    additionalHostOrigins?: readonly string[];
+  } = {},
 ) {
   const root = await mkdtemp(join(tmpdir(), 'f290-real-owner-'));
   const serviceDirectory = join(root, 'service');
@@ -21,7 +25,7 @@ export async function collectiveArtifactOwnerFixture(
   const server = await startCollectiveServer({
     store: f.store,
     port: 0,
-    allowedHostOrigins: ['http://localhost:5182'],
+    allowedHostOrigins: ['http://localhost:5182', ...(options.additionalHostOrigins ?? [])],
   });
   let reviews: WorkspaceContentReviewStore | undefined;
   let modifications: ArtifactReviewStore | undefined;

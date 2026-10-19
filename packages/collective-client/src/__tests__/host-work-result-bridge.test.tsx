@@ -5,7 +5,7 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { CollectiveWorkspace } from '../CollectiveWorkspace.js';
-import type { ClientSnapshot } from '../client-types.js';
+import type { ClientSnapshot, CollectiveRoadmapRecord, CollectiveWorkProjection } from '../client-types.js';
 import type { useCollectiveClient } from '../use-collective-client.js';
 import { useHostContext } from '../use-host-context.js';
 
@@ -75,6 +75,56 @@ const snapshot: ClientSnapshot = {
   members: { humans: [], cafes: [] },
   connection: 'online',
   delivery: { kind: 'idle' },
+};
+
+const accountabilityRequestId = 'accountability_12345678';
+const pendingProjectWork: CollectiveWorkProjection = {
+  v: 1,
+  serviceInstanceId: completedWork.serviceInstanceId,
+  collectiveId: completedWork.collectiveId,
+  workId: 'work_project1234',
+  sourceEventId: 'evt_projectsrc12',
+  sourceLocation: { channelId: 'general' },
+  title: 'Take responsibility for this Task',
+  intendedOutcome: 'The named Human decides in the Project.',
+  proposedBy: { kind: 'human', humanId: 'human_requester', displayName: 'Requester' },
+  accountabilityRequests: [
+    {
+      accountabilityRequestId,
+      roadmapId: 'roadmap_12345678',
+      targetHumanId: 'human_12345678',
+      targetDisplayName: 'You',
+      requestedByHumanId: 'human_requester',
+      requestedByDisplayName: 'Requester',
+      requestEventId: 'evt_request1234',
+      requestedAt: '2026-09-13T00:00:00.000Z',
+      status: 'pending',
+    },
+  ],
+  dependencyWorkIds: [],
+  lifecycle: 'committed',
+  revision: 2,
+  createdAt: '2026-09-13T00:00:00.000Z',
+  updatedAt: '2026-09-13T00:01:00.000Z',
+  history: [],
+  status: 'unassigned',
+};
+const pendingProject: CollectiveRoadmapRecord = {
+  v: 1,
+  serviceInstanceId: completedWork.serviceInstanceId,
+  collectiveId: completedWork.collectiveId,
+  roadmapId: 'roadmap_12345678',
+  sourceEventId: 'evt_roadmapsrc1',
+  sourceLocation: { channelId: 'general' },
+  title: 'Responsibility Project',
+  purpose: 'Make the responsibility handoff explicit.',
+  accountableHumanId: 'human_requester',
+  workIds: [pendingProjectWork.workId],
+  status: 'active',
+  revision: 2,
+  createdAt: '2026-09-13T00:00:00.000Z',
+  updatedAt: '2026-09-13T00:01:00.000Z',
+  history: [],
 };
 
 function Harness({ value = snapshot }: { value?: ClientSnapshot }) {
@@ -385,6 +435,121 @@ it('accepts an exact result-ready Work focus only on the current bridge and publ
       eventId: readyWork.resultEventId,
     }),
   );
+});
+
+it('accepts a responsibility focus only after the current Project, Work, request, and target Human all match', async () => {
+  const loading = {
+    ...snapshot,
+    collaboration: snapshot.collaboration ? { ...snapshot.collaboration, works: [], roadmaps: [] } : undefined,
+  };
+  const post = vi.spyOn(window.parent, 'postMessage');
+  await act(async () => root.render(<Harness value={loading} />));
+  await act(async () => {
+    window.dispatchEvent(
+      new MessageEvent('message', {
+        source: window.parent,
+        origin: 'http://localhost:3000',
+        data: {
+          type: 'collective:host-context-init',
+          bridgeId: 'bridge_12345678',
+          serviceInstanceId: completedWork.serviceInstanceId,
+          collectiveId: completedWork.collectiveId,
+          connectionId,
+          humanId: 'human_12345678',
+        },
+      }),
+    );
+  });
+  const context = post.mock.calls.filter(([body]) => body.type === 'collective:client-context').at(-1)?.[0];
+  if (!context) throw new Error('Client did not publish its current Host context');
+  await act(async () => {
+    window.dispatchEvent(
+      new MessageEvent('message', {
+        source: window.parent,
+        origin: 'http://localhost:3000',
+        data: {
+          type: 'collective:host-focus-project-work',
+          bridgeId: context.bridgeId,
+          contextId: context.contextId,
+          contextRevision: context.revision,
+          workId: pendingProjectWork.workId,
+          workRevision: pendingProjectWork.revision,
+          channelId: 'general',
+          roadmapId: pendingProject.roadmapId,
+          accountabilityRequestId,
+        },
+      }),
+    );
+  });
+  expect(container.querySelector('[data-testid="focused-work"]')?.getAttribute('data-focus')).toBe('');
+  await act(async () =>
+    root.render(
+      <Harness
+        value={{
+          ...loading,
+          collaboration: loading.collaboration
+            ? { ...loading.collaboration, works: [pendingProjectWork], roadmaps: [pendingProject] }
+            : undefined,
+        }}
+      />,
+    ),
+  );
+  expect(container.querySelector('[data-testid="focused-work"]')?.getAttribute('data-focus')).toBe(
+    JSON.stringify({
+      workId: pendingProjectWork.workId,
+      channelId: 'general',
+      roadmapId: pendingProject.roadmapId,
+      accountabilityRequestId,
+    }),
+  );
+  const declinedWork: CollectiveWorkProjection = {
+    ...pendingProjectWork,
+    revision: pendingProjectWork.revision + 1,
+    accountabilityRequests: pendingProjectWork.accountabilityRequests?.map((request) => ({
+      ...request,
+      status: 'declined' as const,
+      responseEventId: 'evt_response123',
+      respondedAt: '2026-09-13T00:02:00.000Z',
+    })),
+    updatedAt: '2026-09-13T00:02:00.000Z',
+  };
+  await act(async () => {
+    window.dispatchEvent(
+      new CustomEvent('collective:accountability-changed', {
+        detail: {
+          workId: declinedWork.workId,
+          workRevision: declinedWork.revision,
+          accountabilityRequestId,
+          status: 'declined',
+        },
+      }),
+    );
+  });
+  expect(post.mock.calls.some(([body]) => body.type === 'collective:client-accountability-changed')).toBe(false);
+  await act(async () =>
+    root.render(
+      <Harness
+        value={{
+          ...loading,
+          collaboration: loading.collaboration
+            ? { ...loading.collaboration, works: [declinedWork], roadmaps: [pendingProject] }
+            : undefined,
+        }}
+      />,
+    ),
+  );
+  expect(
+    post.mock.calls.filter(([body]) => body.type === 'collective:client-accountability-changed').at(-1)?.[0],
+  ).toMatchObject({
+    bridgeId: context.bridgeId,
+    contextId: context.contextId,
+    connectionId,
+    humanId: 'human_12345678',
+    workId: declinedWork.workId,
+    workRevision: declinedWork.revision,
+    accountabilityRequestId,
+    status: 'declined',
+  });
 });
 
 it('publishes Host channel scope only after the current Collective projection finishes its first read', async () => {

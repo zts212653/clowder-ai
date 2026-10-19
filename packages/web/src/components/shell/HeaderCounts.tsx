@@ -57,8 +57,8 @@ export function ThreadWorksButton({ threadId }: { threadId: string }) {
 function ThreadWorksCount({ threadId }: { threadId: string | undefined }) {
   const t = useShellCopy(headerCountsCopy);
   const setWorkspaceMode = useChatStore((s) => s.setWorkspaceMode);
-  const { total, complete, loading, error } = useThreadArtifacts(threadId, 'works');
-  const count = complete && !loading && !error && total !== null ? total : undefined;
+  const { total, complete, error } = useThreadArtifacts(threadId, 'works');
+  const count = complete && !error && total !== null ? total : undefined;
   return (
     <HeaderChip
       icon={<WorksIcon className="h-4 w-4" />}

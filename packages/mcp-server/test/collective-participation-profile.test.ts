@@ -19,8 +19,9 @@ const names = [
   'cat_cafe_collective_read_context',
   'cat_cafe_collective_reply',
   'cat_cafe_collective_set_interest',
+  'cat_cafe_collective_suggest_project_work',
 ];
-test('real mounted participation profile exposes only eight canonical collab tools across every entrypoint', () => {
+test('real mounted participation profile exposes only nine canonical collab tools across every entrypoint', () => {
   const env = parseToolsetEnv({
     CAT_CAFE_MCP_PROFILE: 'collective-participation',
     CAT_CAFE_AGENT_KEY_SECRET: 'cannot-expand',

@@ -5,147 +5,16 @@ import path from 'node:path';
 import { test } from 'node:test';
 import { CollectiveServiceStore, startCollectiveServer } from '../../../collective-service/dist/index.js';
 import { chromium } from '../../../ppt-forge/node_modules/playwright/index.mjs';
+import { registerAccountabilityMailboxJourney } from './f290-accountability-mailbox.journey.mjs';
 import { defaultHumanAuthProvider, seedDefaultCollective } from './f290-default-client.fixture.mjs';
+import { registerProjectAuthoringJourney } from './f290-project-authoring.journey.mjs';
+import { seedRoadmaps } from './f290-roadmap-workspace.fixture.mjs';
 
-async function seedRoadmaps(store, seeded) {
-  let sequence = 0;
-  const post = (body, channelId = '产品方向', replyToEventId) =>
-    store.postHumanMessage(seeded.owner.sessionToken, {
-      ...seeded.coordinates,
-      clientEventId: `u3-roadmap-source-${++sequence}`,
-      body,
-      location: { channelId },
-      recipient: { kind: 'channel' },
-      ...(replyToEventId ? { replyToEventId } : {}),
-    });
-  const propose = (sourceEventId, label) =>
-    store.proposeCollectiveWork(seeded.owner.sessionToken, {
-      ...seeded.coordinates,
-      requestId: `u3-propose-${label}`,
-      sourceEventId,
-    });
-  const commit = (proposal, label, assigned = false) =>
-    store.commitCollectiveWork(seeded.owner.sessionToken, {
-      ...seeded.coordinates,
-      requestId: `u3-commit-${label}`,
-      workId: proposal.workId,
-      expectedRevision: proposal.revision,
-      ...(assigned
-        ? {
-            assignment: {
-              connectionId: seeded.connection.connectionId,
-              catId: 'codex-astra',
-              participationRevision: 1,
-            },
-          }
-        : {}),
-    });
-
-  const prerequisiteSource = await post('先把正式入口与恢复路径接稳。');
-  const activeSource = await post('砚砚继续推进完整可用版本。');
-  const pluginRoot = await post('插件频道需要一条移动端发布路径。', '插件共建');
-  const mobileSource = await store.postHumanMessage(seeded.member.sessionToken, {
-    ...seeded.coordinates,
-    clientEventId: 'u3-roadmap-topic-source',
-    target: { kind: 'message', eventId: pluginRoot.eventId },
-    replyToEventId: pluginRoot.eventId,
-    body: '移动端发布要等正式入口稳定后再开始。',
-  });
-  const completedSource = await post('安全 Markdown 已经合入并保留原始来源。');
-
-  const prerequisite = await commit(await propose(prerequisiteSource.eventId, 'prerequisite'), 'prerequisite');
-  const active = await commit(await propose(activeSource.eventId, 'active'), 'active', true);
-  if (!active.assignmentEventId) throw new Error('Expected the active Work to have an assignment event');
-  await store.postAgentMessage(seeded.connection.endpointCredential, {
-    ...seeded.coordinates,
-    connectionId: seeded.connection.connectionId,
-    clientEventId: 'u3-active-result',
-    agent: {
-      agentId: 'codex-astra',
-      catId: 'codex-astra',
-      displayName: '小星星 · 砚砚',
-      sessionRef: 'u3-roadmap-browser-fixture',
-    },
-    target: { kind: 'message', eventId: activeSource.eventId },
-    location: { channelId: '产品方向', rootEventId: activeSource.eventId },
-    recipient: { kind: 'channel' },
-    participationRevision: 1,
-    replyToEventId: active.assignmentEventId,
-    workResultIntent: {
-      assignmentEventId: active.assignmentEventId,
-      participationRevision: 1,
-      resultRevision: 1,
-    },
-    body: '完整可用版本的首轮实现已回到共同路线，等待负责人确认。',
-  });
-  const mobileCommitted = await commit(await propose(mobileSource.eventId, 'mobile'), 'mobile', true);
-  const mobile = await store.setCollectiveWorkDependencies(seeded.owner.sessionToken, {
-    ...seeded.coordinates,
-    requestId: 'u3-mobile-dependency',
-    workId: mobileCommitted.workId,
-    expectedRevision: mobileCommitted.revision,
-    dependencyWorkIds: [prerequisite.workId],
-  });
-  const completedCommitted = await commit(await propose(completedSource.eventId, 'completed'), 'completed');
-  const completed = await store.completeCollectiveWork(seeded.owner.sessionToken, {
-    ...seeded.coordinates,
-    requestId: 'u3-complete-markdown',
-    workId: completedCommitted.workId,
-    expectedRevision: completedCommitted.revision,
-  });
-
-  const created = await store.createCollectiveRoadmap(seeded.owner.sessionToken, {
-    ...seeded.coordinates,
-    requestId: 'u3-create-primary-roadmap',
-    sourceEventId: seeded.first.eventId,
-    title: '完整可用版本',
-    purpose: '让基础能力、体验修整和真实验收沿同一批 Work 继续。',
-    workIds: [completed.workId],
-  });
-  const closed = await store.setCollectiveRoadmapStatus(seeded.owner.sessionToken, {
-    ...seeded.coordinates,
-    requestId: 'u3-close-primary-roadmap',
-    roadmapId: created.roadmapId,
-    expectedRevision: created.revision,
-    status: 'completed',
-    note: '首个可交付切片已验收。',
-  });
-  const reopened = await store.setCollectiveRoadmapStatus(seeded.owner.sessionToken, {
-    ...seeded.coordinates,
-    requestId: 'u3-reopen-primary-roadmap',
-    roadmapId: closed.roadmapId,
-    expectedRevision: closed.revision,
-    status: 'active',
-    note: '继续完整版本路线。',
-  });
-  const primary = await store.setCollectiveRoadmapWorks(seeded.owner.sessionToken, {
-    ...seeded.coordinates,
-    requestId: 'u3-expand-primary-roadmap',
-    roadmapId: reopened.roadmapId,
-    expectedRevision: reopened.revision,
-    workIds: [completed.workId, prerequisite.workId, active.workId, mobile.workId],
-  });
-
-  const followupCreated = await store.createCollectiveRoadmap(seeded.owner.sessionToken, {
-    ...seeded.coordinates,
-    requestId: 'u3-create-followup-roadmap',
-    sourceEventId: completedSource.eventId,
-    title: '发布后跟进',
-    purpose: '保留已完成工作的后续观察。',
-    workIds: [completed.workId],
-  });
-  const followup = await store.setCollectiveRoadmapStatus(seeded.owner.sessionToken, {
-    ...seeded.coordinates,
-    requestId: 'u3-close-followup-roadmap',
-    roadmapId: followupCreated.roadmapId,
-    expectedRevision: followupCreated.revision,
-    status: 'completed',
-  });
-  return { primary, followup, prerequisite, active, mobile, completed, mobileSource };
-}
+registerProjectAuthoringJourney();
+registerAccountabilityMailboxJourney();
 
 test(
-  'Roadmap keeps one Work truth across lenses, projections, source navigation, and mobile return',
+  'Project keeps one Task truth across overview, board, Project plan, context, source return, and mobile',
   { timeout: 60_000 },
   async () => {
     const dataDirectory = await mkdtemp(path.join(tmpdir(), 'f290-u3-roadmap-data-'));
@@ -161,74 +30,193 @@ test(
       { origin: server.url, sessionToken: seeded.owner.sessionToken },
     );
     const page = await context.newPage();
+    const pageErrors = [];
+    page.on('pageerror', (error) => pageErrors.push(error.message));
     try {
       await page.goto(server.url, { waitUntil: 'networkidle' });
       await page
         .getByRole('navigation', { name: '频道', exact: true })
         .getByRole('button', { name: /产品方向/ })
         .click();
-      await page.getByRole('button', { name: 'Roadmap', exact: true }).click();
-      await page.getByRole('heading', { name: records.primary.title, exact: true }).waitFor();
+      await page.getByRole('button', { name: '项目', exact: true }).click();
+
+      const projectList = page.getByRole('region', { name: '项目列表', exact: true });
+      await projectList.waitFor();
+      assert.equal(await page.locator('.scene-header').count(), 0, 'Project replaces the channel-style header');
+      assert.deepEqual(await page.getByRole('navigation', { name: '项目视图' }).getByRole('button').allTextContents(), [
+        '项目列表',
+        '跨项目依赖',
+        '看板',
+      ]);
       assert.deepEqual(
-        await page.getByRole('navigation', { name: 'Roadmap 观察方式' }).getByRole('button').allTextContents(),
-        ['阶段路线', '依赖关系', '我的路线'],
+        await page.getByRole('navigation', { name: '项目列表筛选' }).getByRole('button').allTextContents(),
+        ['进行中 2', '与我相关 2', '有阻塞 1'],
       );
-      assert.deepEqual(
-        await page.getByRole('group', { name: 'Roadmap 呈现方式' }).getByRole('button').allTextContents(),
-        ['工作图', '状态看板'],
-      );
-      assert.deepEqual(
-        await page.getByRole('group', { name: 'Roadmap 显示范围' }).getByRole('button').allTextContents(),
-        ['当前重点', '全部工作'],
-      );
+      assert.equal(await projectList.locator('[data-project-id]').count(), 2, 'completed Projects start folded');
+      assert.equal(await page.getByRole('region', { name: '项目待办', exact: true }).count(), 1);
+      await projectList.getByText(`等待 ${records.prerequisite.title}`, { exact: true }).waitFor();
+      assert.equal(await projectList.getByText('继续推进', { exact: true }).count(), 0);
+
+      await page.getByRole('group', { name: '项目列表显示设置' }).locator('summary').click();
+      await page.getByLabel('显示已完成项目', { exact: true }).check();
+      await page.getByRole('group', { name: '已完成项目' }).locator('summary').click();
+      await projectList.locator(`[data-project-id="${records.followup.roadmapId}"]`).waitFor();
+      await page.getByRole('group', { name: '项目列表显示设置' }).locator('summary').click();
+      await page.screenshot({
+        path: path.join(evidenceDirectory, 'u3-project-list-desktop-1440.png'),
+        fullPage: true,
+      });
 
       const workIds = (locator) =>
         locator
           .locator('[data-roadmap-work-id]')
           .evaluateAll((nodes) => nodes.map((node) => node.dataset.roadmapWorkId));
-      const focusTree = page.getByRole('region', { name: 'Roadmap 工作图', exact: true });
-      assert.deepEqual(
-        new Set(await workIds(focusTree)),
-        new Set([records.prerequisite.workId, records.active.workId, records.mobile.workId]),
-      );
-      await page.getByRole('button', { name: '全部工作', exact: true }).click();
-      const allWorkIds = await workIds(focusTree);
-      assert.equal(allWorkIds.length, 4);
 
-      const visualSignatures = await focusTree.locator('[data-roadmap-work-id]').evaluateAll((nodes) =>
-        nodes.map((node) => {
-          const style = getComputedStyle(node);
-          return `${node.dataset.statusTone}:${style.borderStyle}:${style.borderColor}:${style.backgroundColor}`;
-        }),
+      await page.getByRole('button', { name: '看板', exact: true }).click();
+      const projectBoard = page.getByRole('region', { name: '项目看板', exact: true });
+      await projectBoard.waitFor();
+      assert.equal(await page.getByRole('region', { name: '项目待办', exact: true }).count(), 0);
+      const globalTaskAction = page.getByRole('button', { name: '新建任务', exact: true });
+      assert.equal(await globalTaskAction.count(), 1);
+      const globalTaskActionStyle = await globalTaskAction.evaluate((node) => {
+        const style = getComputedStyle(node);
+        return {
+          minHeight: style.minHeight,
+          padding: style.padding,
+          borderRadius: style.borderRadius,
+          fontSize: style.fontSize,
+          backgroundColor: style.backgroundColor,
+          color: style.color,
+          borderTopColor: style.borderTopColor,
+        };
+      });
+      assert.notEqual(
+        globalTaskActionStyle.backgroundColor,
+        'rgba(0, 0, 0, 0)',
+        'the canonical primary Task action keeps a filled background',
       );
-      assert.equal(new Set(visualSignatures).size, 4, 'four canonical status tones remain visually distinct');
-
-      await page.getByRole('button', { name: '状态看板', exact: true }).click();
-      const board = page.getByRole('region', { name: 'Roadmap 状态看板', exact: true });
-      assert.deepEqual(new Set(await workIds(board)), new Set(allWorkIds));
       assert.equal(
-        await page
-          .getByRole('navigation', { name: 'Roadmap 观察方式' })
-          .getByRole('button', { name: '阶段路线' })
-          .getAttribute('aria-current'),
-        'page',
+        globalTaskActionStyle.borderTopColor,
+        globalTaskActionStyle.backgroundColor,
+        'the canonical primary Task action uses one accent for fill and border',
       );
+      assert.deepEqual(
+        await projectBoard.getByRole('navigation', { name: '看板筛选' }).getByRole('button').allTextContents(),
+        ['全部任务 6', '与我相关 5', '被阻塞 1', '待确认 1'],
+      );
+      assert.equal((await workIds(projectBoard)).length, 6, 'shared tasks appear once across projects');
+      assert.equal(new Set(await workIds(projectBoard)).size, 6);
+      assert.equal(await projectBoard.locator('[data-project-lane]').first().getAttribute('data-unassigned'), 'true');
+      assert.ok(await projectBoard.locator('[data-identity-kind="agent"]').count());
+      assert.ok(await projectBoard.locator('[data-identity-kind="human"]').count());
+      assert.equal(await projectBoard.getByRole('group', { name: '看板显示设置' }).count(), 1);
+      await page.screenshot({
+        path: path.join(evidenceDirectory, 'u3-project-board-desktop-1440.png'),
+        fullPage: true,
+      });
+      const lightCardSurface = await projectBoard
+        .locator('.project-board-card')
+        .first()
+        .evaluate((node) => getComputedStyle(node).backgroundColor);
+      await page.evaluate(() => {
+        document.documentElement.dataset.theme = 'dark';
+      });
+      const darkCardSurface = await projectBoard
+        .locator('.project-board-card')
+        .first()
+        .evaluate((node) => getComputedStyle(node).backgroundColor);
+      assert.notEqual(darkCardSurface, lightCardSurface, 'the board consumes shared dark theme tokens');
+      await page.evaluate(() => {
+        delete document.documentElement.dataset.theme;
+      });
 
-      await page.getByRole('button', { name: '依赖关系', exact: true }).click();
-      const graph = page.getByRole('region', { name: '依赖工作图', exact: true });
-      assert.equal((await workIds(graph)).length, 4);
-      assert.equal(new Set(await workIds(graph)).size, 4, 'dependency projection renders each canonical Work once');
-      assert.equal(await graph.locator('[data-dependency-level="0"]').count(), 3);
-      assert.equal(await graph.locator('[data-dependency-level="1"]').count(), 1);
+      const unassignedCard = projectBoard.locator(`[data-roadmap-work-id="${records.unassigned.workId}"]`);
+      await unassignedCard.getByRole('button', { name: new RegExp(records.unassigned.title) }).click();
+      const plan = page.getByRole('region', { name: '项目任务计划', exact: true });
+      await plan.waitFor();
+      assert.equal(await page.getByRole('navigation', { name: '项目视图' }).count(), 0);
+      assert.equal(await page.getByRole('region', { name: '项目待办', exact: true }).count(), 0);
+      assert.deepEqual(
+        await page.getByRole('navigation', { name: '项目观察方式' }).getByRole('button').allTextContents(),
+        ['计划', '看板', '依赖图', '作品'],
+      );
+      const projectTaskAction = page.getByRole('button', { name: '新建任务', exact: true });
+      assert.equal(await projectTaskAction.count(), 1);
+      assert.deepEqual(
+        await projectTaskAction.evaluate((node) => {
+          const style = getComputedStyle(node);
+          return {
+            minHeight: style.minHeight,
+            padding: style.padding,
+            borderRadius: style.borderRadius,
+            fontSize: style.fontSize,
+            backgroundColor: style.backgroundColor,
+            color: style.color,
+            borderTopColor: style.borderTopColor,
+          };
+        }),
+        globalTaskActionStyle,
+        'single-Project and global Task creation keep the same compact primary-action geometry and color',
+      );
+      assert.deepEqual(await page.getByRole('group', { name: '项目筛选' }).getByRole('button').allTextContents(), [
+        '全部 5',
+        '未完成 4',
+        '与我相关 4',
+      ]);
+      assert.equal(await plan.locator('[data-project-plan-work-id]').count(), 5);
+      assert.deepEqual(await plan.locator('.project-plan-columns > span').allTextContents(), [
+        '任务',
+        '执行',
+        '阻塞 / 前置',
+        '下一次交付',
+        '最近',
+      ]);
+      await page.getByRole('complementary', { name: `任务详情 · ${records.unassigned.title}`, exact: true }).waitFor();
 
+      const projectContext = page.getByRole('complementary', { name: '项目上下文与动态', exact: true });
+      await projectContext.getByText('猫接手这个项目的任务时，先读到这些', { exact: true }).waitFor();
+      await projectContext.getByText(records.primary.purpose, { exact: true }).waitFor();
+      await projectContext.getByText('重新打开了项目', { exact: true }).waitFor();
+      assert.equal(await projectContext.getByText('今天已冻结', { exact: true }).count(), 0);
+      await page
+        .getByRole('complementary', { name: `任务详情 · ${records.unassigned.title}`, exact: true })
+        .getByRole('button', { name: '关闭任务详情', exact: true })
+        .click();
+      await page.screenshot({
+        path: path.join(evidenceDirectory, 'u3-project-plan-context-desktop-1440.png'),
+        fullPage: true,
+      });
+
+      await page.getByRole('navigation', { name: '项目观察方式' }).getByRole('button', { name: '看板' }).click();
+      const singleProjectBoard = page.getByRole('region', { name: '项目看板', exact: true });
+      assert.equal((await workIds(singleProjectBoard)).length, 5);
+
+      await page.getByRole('navigation', { name: '项目层级' }).getByRole('button', { name: '项目' }).click();
+      await page.getByRole('button', { name: '跨项目依赖', exact: true }).click();
+      const projectDependencies = page.getByRole('region', { name: '任务依赖图', exact: true });
+      assert.equal((await workIds(projectDependencies)).length, 6);
+      assert.equal(new Set(await workIds(projectDependencies)).size, 6);
+
+      await page.getByRole('button', { name: '项目列表', exact: true }).click();
+      await projectList.getByRole('button', { name: new RegExp(records.primary.title) }).click();
+      await page.getByRole('navigation', { name: '项目观察方式' }).getByRole('button', { name: '依赖图' }).click();
+      const graph = page.getByRole('region', { name: '任务依赖图', exact: true });
+      assert.equal((await workIds(graph)).length, 5);
+      await graph
+        .locator(`[data-roadmap-work-id="${records.mobile.workId}"]`)
+        .getByText(`等待 ${records.prerequisite.title}`, { exact: true })
+        .waitFor();
       await graph.getByRole('button', { name: new RegExp(records.mobile.title) }).click();
-      const inspector = page.getByRole('complementary', { name: `工作详情 · ${records.mobile.title}`, exact: true });
+      const inspector = page.getByRole('complementary', { name: `任务详情 · ${records.mobile.title}`, exact: true });
       await inspector.getByText('You 负责', { exact: true }).waitFor();
       await inspector.getByText('小星星 · 砚砚 推进', { exact: true }).waitFor();
       await inspector.getByText('#插件共建 · 话题', { exact: true }).waitFor();
-      await inspector.getByText('调整了前置工作', { exact: true }).waitFor();
-      assert.equal(await page.getByRole('region', { name: '依赖工作图', exact: true }).count(), 1);
-      await page.screenshot({ path: path.join(evidenceDirectory, 'u3-roadmap-desktop-1440.png'), fullPage: true });
+      await inspector.getByText(`${records.prerequisite.title}（#产品方向）`, { exact: true }).waitFor();
+      assert.equal(
+        await graph.locator(`[data-roadmap-work-id="${records.prerequisite.workId}"]`).count(),
+        0,
+        'an authorized external prerequisite resolves without becoming a Project member',
+      );
 
       await inspector.getByRole('button', { name: '查看来源消息', exact: true }).click();
       await page.getByRole('heading', { name: '# 插件共建', exact: true }).waitFor();
@@ -237,56 +225,77 @@ test(
         .locator('.topic-message .message-body')
         .getByText(records.mobileSource.body, { exact: true })
         .waitFor();
-      const returnButton = page.getByRole('button', { name: `← 返回 ${records.primary.title}`, exact: true });
-      await returnButton.click();
-      await page.getByRole('heading', { name: records.primary.title, exact: true }).waitFor();
-      assert.equal(
-        await page
-          .getByRole('navigation', { name: 'Roadmap 观察方式' })
-          .getByRole('button', { name: '依赖关系' })
-          .getAttribute('aria-current'),
-        'page',
-      );
-      await page.getByRole('complementary', { name: `工作详情 · ${records.mobile.title}`, exact: true }).waitFor();
+      await page.getByRole('button', { name: `← 返回 ${records.primary.title}`, exact: true }).click();
+      await page.getByRole('navigation', { name: '项目层级' }).waitFor();
+      await page.getByRole('complementary', { name: `任务详情 · ${records.mobile.title}`, exact: true }).waitFor();
 
-      await page.locator('summary[aria-label="打开 Roadmap 操作历史"]').click();
-      await page.getByText('重新打开了路线', { exact: true }).waitFor();
-      assert.equal(await page.getByText('今天已冻结', { exact: true }).count(), 0);
       await page.setViewportSize({ width: 390, height: 844 });
+      assert.equal(await page.getByRole('button', { name: '频道导航', exact: true }).count(), 1);
+      assert.deepEqual(
+        await page.getByRole('button', { name: '新建任务', exact: true }).evaluate((node) => {
+          const style = getComputedStyle(node);
+          return {
+            minHeight: style.minHeight,
+            padding: style.padding,
+            borderRadius: style.borderRadius,
+            fontSize: style.fontSize,
+            backgroundColor: style.backgroundColor,
+            color: style.color,
+            borderTopColor: style.borderTopColor,
+          };
+        }),
+        globalTaskActionStyle,
+        'mobile single-Project Task creation keeps the compact primary-action geometry and color',
+      );
       const mobileInspector = page.getByRole('complementary', {
-        name: `工作详情 · ${records.mobile.title}`,
+        name: `任务详情 · ${records.mobile.title}`,
         exact: true,
       });
       const inspectorBox = await mobileInspector.boundingBox();
       assert.ok(inspectorBox && inspectorBox.x >= 0 && inspectorBox.x + inspectorBox.width <= 390);
-      assert.ok(
-        await page.locator('.roadmap-canvas').isVisible(),
-        'the Roadmap remains present behind the mobile sheet',
-      );
       assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true);
-      await page.screenshot({ path: path.join(evidenceDirectory, 'u3-roadmap-mobile-390.png'), fullPage: true });
+      await page.screenshot({ path: path.join(evidenceDirectory, 'u3-project-detail-mobile-390.png'), fullPage: true });
+
+      await mobileInspector.getByRole('button', { name: '关闭任务详情', exact: true }).click();
+      await page.getByRole('navigation', { name: '项目观察方式' }).getByRole('button', { name: '计划' }).click();
+      const mobilePlan = page.getByRole('region', { name: '项目任务计划', exact: true });
+      assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true);
+      assert.equal(
+        await mobilePlan
+          .locator('[data-project-plan-work-id]')
+          .first()
+          .evaluate((node) => getComputedStyle(node).gridTemplateColumns.split(' ').length),
+        1,
+      );
+      await page.screenshot({ path: path.join(evidenceDirectory, 'u3-project-plan-mobile-390.png'), fullPage: true });
 
       const projection = opened.store.listCollectiveCollaboration(
         seeded.owner.sessionToken,
         seeded.coordinates.collectiveId,
       );
-      assert.equal(projection.roadmaps.length, 2);
+      assert.equal(projection.roadmaps.length, 3);
       assert.equal(
         projection.roadmaps.find((item) => item.roadmapId === records.primary.roadmapId)?.history.at(-2)?.action,
         'reopened',
       );
+      assert.deepEqual(pageErrors, []);
       console.log(
         JSON.stringify({
           result: 'pass',
           evidence: evidenceDirectory,
           tested: [
-            'stable-lenses',
-            'orthogonal-projection-scope',
-            'unique-parallel-dependency-graph',
-            'status-grammar',
-            'work-inspector-history',
+            'one-project-header',
+            'project-list-filters-and-completed-fold',
+            'attention-list-only',
+            'four-column-filtered-board',
+            'cross-project-deduplication',
+            'human-and-cat-identity-chips',
+            'single-project-breadcrumb-and-four-views',
+            'dependency-ordered-plan-table',
+            'project-context-and-activity',
+            'non-overlapping-cross-project-dependency-detail',
             'exact-topic-source-return',
-            'mobile-sheet-continuity',
+            'mobile-detail-and-plan-containment',
           ],
         }),
       );

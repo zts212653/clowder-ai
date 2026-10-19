@@ -1,3 +1,4 @@
+import type { CollectiveConnector } from '@cat-cafe/collective-connector';
 import type { IgnoredItemSnapshot } from '@cat-cafe/shared';
 import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
@@ -28,6 +29,7 @@ export const companionDecisionRoutes: FastifyPluginAsync<{
   runtimeInteractionStore?: RuntimeInteractionPendingReadSource;
   onResolved?: (userId: string) => void;
   readIgnoredItemPreferences?: (ownerUserId: string) => IgnoredItemSnapshot | Promise<IgnoredItemSnapshot>;
+  collectiveConnector?: () => CollectiveConnector | undefined;
 }> = async (app, options) => {
   const cutover = options.messageStore
     ? await options.messageStore.initializeUserMentionInbox((options.now ?? Date.now)())
@@ -52,6 +54,7 @@ export const companionDecisionRoutes: FastifyPluginAsync<{
       options.runtimeInteractionStore,
       personalView ? { mode: personalView, read: options.readIgnoredItemPreferences } : undefined,
       options.messageStore,
+      options.collectiveConnector,
     );
     const response = companionDecisionWireResponse(result, view);
     return reply.code(response.statusCode).send(response.body);

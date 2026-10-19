@@ -2,6 +2,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, expect, it } from 'vitest';
+import { CollectiveServiceStore } from '../store.js';
 import { participationFixture } from './participation-fixture.js';
 
 const directories: string[] = [];
@@ -27,7 +28,7 @@ async function fixture() {
     recipient: { kind: 'channel' },
     body: '把完整 Collective 首页接到真实数据，并让结果回到这里。',
   });
-  return { ...current, source };
+  return { ...current, directory, source };
 }
 
 async function propose(current: Awaited<ReturnType<typeof fixture>>, sourceEventId: string, requestId: string) {
@@ -149,6 +150,111 @@ it('lets accountable Humans complete their own unassigned Work without bypassing
       requestId: 'complete-assigned-without-result',
     }),
   ).rejects.toMatchObject({ code: 'WORK_RESULT_REQUIRED' });
+});
+
+it('keeps a Human-accepted task unassigned until a Human or their Cat explicitly takes responsibility', async () => {
+  const current = await fixture();
+  const proposed = await propose(current, current.source.eventId, 'accept-into-project');
+  const eventCountBefore = (
+    await current.store.listEventsForHuman(current.owner.sessionToken, current.coordinates.collectiveId)
+  ).length;
+
+  await expect(
+    current.store.commitCollectiveWork(current.owner.sessionToken, {
+      ...current.coordinates,
+      workId: proposed.workId,
+      expectedRevision: proposed.revision,
+      requestId: 'conflicting-unassigned-acceptance',
+      accountability: 'unassigned',
+      assignment: {
+        connectionId: current.connection.connectionId,
+        catId: 'codex-sol',
+        participationRevision: 1,
+      },
+    }),
+  ).rejects.toThrow('Unassigned Work cannot also name a Cat assignment');
+
+  const unassigned = await current.store.commitCollectiveWork(current.owner.sessionToken, {
+    ...current.coordinates,
+    workId: proposed.workId,
+    expectedRevision: proposed.revision,
+    requestId: 'accept-into-project-unassigned',
+    accountability: 'unassigned',
+  });
+
+  expect(unassigned).toMatchObject({
+    lifecycle: 'committed',
+    status: 'unassigned',
+    revision: 2,
+  });
+  expect(unassigned.accountableHumanId).toBeUndefined();
+  expect(unassigned.assignment).toBeUndefined();
+  expect(unassigned.assignmentEventId).toBeUndefined();
+  expect(
+    await current.store.listEventsForHuman(current.owner.sessionToken, current.coordinates.collectiveId),
+  ).toHaveLength(eventCountBefore);
+  expect(
+    await current.store.commitCollectiveWork(current.owner.sessionToken, {
+      ...current.coordinates,
+      workId: proposed.workId,
+      expectedRevision: proposed.revision,
+      requestId: 'accept-into-project-unassigned',
+      accountability: 'unassigned',
+    }),
+  ).toEqual(unassigned);
+  expect(
+    await current.store.commitCollectiveWork(current.owner.sessionToken, {
+      ...current.coordinates,
+      workId: proposed.workId,
+      expectedRevision: unassigned.revision,
+      requestId: 'keep-project-task-unassigned',
+      accountability: 'unassigned',
+    }),
+  ).toEqual(unassigned);
+  const reopened = await CollectiveServiceStore.open({
+    dataDirectory: current.directory,
+    humanAuthProvider: current.humanAuthProvider,
+  });
+  const reopenedWork = reopened.store.listCollectiveCollaboration(
+    current.owner.sessionToken,
+    current.coordinates.collectiveId,
+  ).works[0];
+  expect(reopenedWork).toMatchObject({ workId: unassigned.workId, status: 'unassigned' });
+  expect(reopenedWork?.accountableHumanId).toBeUndefined();
+
+  const claimed = await current.store.commitCollectiveWork(current.owner.sessionToken, {
+    ...current.coordinates,
+    workId: unassigned.workId,
+    expectedRevision: unassigned.revision,
+    requestId: 'claim-project-task',
+  });
+  expect(claimed).toMatchObject({
+    lifecycle: 'committed',
+    status: 'ready',
+    accountableHumanId: current.owner.human.humanId,
+    revision: 3,
+  });
+  expect(claimed.history.at(-1)).toMatchObject({ action: 'accountability_assigned' });
+});
+
+it('keeps terminal task dependencies immutable', async () => {
+  const current = await fixture();
+  const completed = await current.store.completeCollectiveWork(current.owner.sessionToken, {
+    ...current.coordinates,
+    workId: (await commit(current, await propose(current, current.source.eventId, 'terminal-task'))).workId,
+    expectedRevision: 2,
+    requestId: 'complete-terminal-task',
+  });
+
+  await expect(
+    current.store.setCollectiveWorkDependencies(current.owner.sessionToken, {
+      ...current.coordinates,
+      workId: completed.workId,
+      expectedRevision: completed.revision,
+      dependencyWorkIds: [],
+      requestId: 'mutate-terminal-dependencies',
+    }),
+  ).rejects.toMatchObject({ code: 'WORK_TERMINAL' });
 });
 
 it('lets the Human behind an Agent proposal decline it without granting unrelated members the same authority', async () => {

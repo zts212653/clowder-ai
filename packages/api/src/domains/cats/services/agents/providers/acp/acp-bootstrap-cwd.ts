@@ -1,7 +1,8 @@
 import { createHash } from 'node:crypto';
 import { chmodSync, existsSync, lstatSync, mkdirSync, realpathSync } from 'node:fs';
-import { userInfo } from 'node:os';
-import { basename, isAbsolute, join, type PlatformPath, relative, resolve } from 'node:path';
+import { tmpdir, userInfo } from 'node:os';
+import { basename, isAbsolute, join, type PlatformPath, posix, relative, resolve, win32 } from 'node:path';
+import { ensureWindowsAcpBootstrapDirectories } from './acp-bootstrap-windows-directory.js';
 
 const SAFE_SEGMENT_RE = /[^a-zA-Z0-9._-]+/g;
 const OWNER_ONLY_MODE = 0o700;
@@ -32,15 +33,16 @@ function bootstrapOwnerSegment(): string {
 }
 
 /**
- * Bootstrap root under /tmp (→ /private/tmp on macOS) instead of os.tmpdir().
+ * Unix uses stable /tmp (→ /private/tmp on macOS); Windows uses user temp.
  *
  * macOS periodically cleans os.tmpdir() (/var/folders/.../T/) during runtime —
  * when the bootstrap CWD is deleted while a CLI process idles, the next prompt
  * fails with os.getcwd() → FileNotFoundError → ACP -32603. /tmp is only
  * cleaned on reboot, so idle processes survive between reboots.
  */
-export function resolveAcpBootstrapRoot(): string {
-  return join('/tmp', `cat-cafe-acp-bootstrap-${bootstrapOwnerSegment()}`);
+export function resolveAcpBootstrapRoot(platform: NodeJS.Platform = process.platform, tempRoot = tmpdir()): string {
+  const pathApi = platform === 'win32' ? win32 : posix;
+  return pathApi.join(platform === 'win32' ? tempRoot : '/tmp', `cat-cafe-acp-bootstrap-${bootstrapOwnerSegment()}`);
 }
 
 export function isPathWithinRoot(
@@ -89,20 +91,26 @@ export function resolveAcpBootstrapCwd(
   const projectSlug = sanitizeSegment(basename(normalizedProjectRoot), 'project');
   const providerSlug = sanitizeSegment(providerProfile, 'profile');
   const digest = createHash('sha1').update(`${normalizedProjectRoot}::${providerProfile}`).digest('hex').slice(0, 12);
-  mkdirSync(bootstrapRoot, { recursive: true, mode: OWNER_ONLY_MODE });
-  assertRealDirectory(bootstrapRoot, 'ACP bootstrap root');
-  enforceOwnerOnlyPermissions(bootstrapRoot);
-  const realBootstrapRoot = realpathSync(bootstrapRoot);
   const dir = join(bootstrapRoot, `${projectSlug}-${providerSlug}-${digest}`);
-  try {
-    mkdirSync(dir, { recursive: false, mode: OWNER_ONLY_MODE });
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code !== 'EEXIST') {
-      throw err;
+  if (process.platform === 'win32') {
+    // Creates with a private DACL atomically; existing directories are only
+    // inspected, never repaired. Windows chmod cannot enforce this boundary.
+    ensureWindowsAcpBootstrapDirectories(bootstrapRoot, dir);
+  } else {
+    mkdirSync(bootstrapRoot, { recursive: true, mode: OWNER_ONLY_MODE });
+    assertRealDirectory(bootstrapRoot, 'ACP bootstrap root');
+    enforceOwnerOnlyPermissions(bootstrapRoot);
+    try {
+      mkdirSync(dir, { recursive: false, mode: OWNER_ONLY_MODE });
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err;
     }
+    assertRealDirectory(dir, 'ACP bootstrap cwd');
+    enforceOwnerOnlyPermissions(dir);
   }
+  assertRealDirectory(bootstrapRoot, 'ACP bootstrap root');
   assertRealDirectory(dir, 'ACP bootstrap cwd');
-  enforceOwnerOnlyPermissions(dir);
+  const realBootstrapRoot = realpathSync(bootstrapRoot);
   const realDir = realpathSync(dir);
   if (!isPathWithinRoot(realBootstrapRoot, realDir, { relative, isAbsolute })) {
     throw new Error(`ACP bootstrap cwd escaped bootstrap root: ${realDir}`);

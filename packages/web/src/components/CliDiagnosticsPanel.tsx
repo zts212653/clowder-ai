@@ -188,6 +188,8 @@ function sanitizePathLeaks(s: string): string {
 }
 
 interface CliDiagnosticsPanelProps {
+  /** A failed reply already owns its failure text; append only guidance and detail controls. */
+  detailsOnly?: boolean;
   /** The bubble's display content (`Error: ...`). Falls back if publicSummary missing. */
   errorMessage: string;
   diagnostics: CliDiagnostics;
@@ -200,7 +202,12 @@ interface CliDiagnosticsPanelProps {
   dedupCount?: number;
 }
 
-export function CliDiagnosticsPanel({ errorMessage, diagnostics, dedupCount }: CliDiagnosticsPanelProps) {
+export function CliDiagnosticsPanel({
+  errorMessage,
+  diagnostics,
+  dedupCount,
+  detailsOnly = false,
+}: CliDiagnosticsPanelProps) {
   const [expanded, setExpanded] = useState(false);
 
   // 云端 codex P2 (2026-05-27): membership check before indexing — stale/newer/malformed
@@ -226,40 +233,50 @@ export function CliDiagnosticsPanel({ errorMessage, diagnostics, dedupCount }: C
   const hasExitCode = Object.prototype.hasOwnProperty.call(diagnostics.debugRef, 'exitCode');
 
   return (
-    <div data-testid="cli-diagnostics" className="flex flex-col gap-2.5">
+    <div
+      data-testid="cli-diagnostics"
+      className={`flex flex-col gap-2.5${detailsOnly ? ' [--cli-diag-meta:currentColor] [--cli-diag-hint:currentColor]' : ''}`}
+    >
       {/* Error banner */}
-      <div
-        data-testid="cli-diagnostics-banner"
-        className="flex items-start gap-2.5 rounded-xl"
-        style={{ backgroundColor: bg, border: `1px solid ${border}`, padding: '10px 14px' }}
-      >
-        <Icon
-          className="w-4 h-4 flex-shrink-0 mt-0.5"
-          style={{ color: accent }}
-          ariaLabel={knownReason ?? 'cli-error-unknown'}
-        />
-        <div className="flex flex-col gap-1 min-w-0">
-          <span className="text-sm font-semibold flex items-center gap-2 flex-wrap" style={{ color: text }}>
-            <span>{summary}</span>
-            {dedupCount !== undefined && dedupCount > 1 && (
-              <span
-                data-testid="cli-diagnostics-dedup-badge"
-                role="img"
-                aria-label={`Same error occurred ${dedupCount} times`}
-                className="text-xs font-normal px-1.5 py-0.5 rounded"
-                style={{ backgroundColor: accent, color: bg }}
-              >
-                ×{dedupCount}
+      {!detailsOnly && (
+        <div
+          data-testid="cli-diagnostics-banner"
+          className="flex items-start gap-2.5 rounded-xl"
+          style={{ backgroundColor: bg, border: `1px solid ${border}`, padding: '10px 14px' }}
+        >
+          <Icon
+            className="w-4 h-4 flex-shrink-0 mt-0.5"
+            style={{ color: accent }}
+            ariaLabel={knownReason ?? 'cli-error-unknown'}
+          />
+          <div className="flex flex-col gap-1 min-w-0">
+            <span className="text-sm font-semibold flex items-center gap-2 flex-wrap" style={{ color: text }}>
+              <span>{summary}</span>
+              {dedupCount !== undefined && dedupCount > 1 && (
+                <span
+                  data-testid="cli-diagnostics-dedup-badge"
+                  role="img"
+                  aria-label={`Same error occurred ${dedupCount} times`}
+                  className="text-xs font-normal px-1.5 py-0.5 rounded"
+                  style={{ backgroundColor: accent, color: bg }}
+                >
+                  ×{dedupCount}
+                </span>
+              )}
+            </span>
+            {diagnostics.publicHint && (
+              <span className="text-xs" style={{ color: 'var(--cli-diag-hint)', lineHeight: 1.5 }}>
+                {diagnostics.publicHint}
               </span>
             )}
-          </span>
-          {diagnostics.publicHint && (
-            <span className="text-xs" style={{ color: 'var(--cli-diag-hint)', lineHeight: 1.5 }}>
-              {diagnostics.publicHint}
-            </span>
-          )}
+          </div>
         </div>
-      </div>
+      )}
+      {detailsOnly && diagnostics.publicHint ? (
+        <p className="m-0 text-xs" style={{ color: 'var(--cli-diag-hint)', lineHeight: 1.5 }}>
+          {diagnostics.publicHint}
+        </p>
+      ) : null}
 
       {/* Excerpt toggle — only shown when Phase A populated safeExcerpt (reasonCode whitelisted) */}
       {hasExcerpt && (
@@ -318,8 +335,9 @@ export function CliDiagnosticsPanel({ errorMessage, diagnostics, dedupCount }: C
           </span>
         )}
         {diagnostics.debugRef.invocationId && (
-          <span>
-            <span className="font-medium">invocationId:</span> {truncateMiddle(diagnostics.debugRef.invocationId, 32)}
+          <span className="break-all" title={diagnostics.debugRef.invocationId}>
+            <span className="font-medium">invocationId:</span>{' '}
+            {detailsOnly ? diagnostics.debugRef.invocationId : truncateMiddle(diagnostics.debugRef.invocationId, 32)}
           </span>
         )}
         {diagnostics.debugRef.upstreamRequestId &&

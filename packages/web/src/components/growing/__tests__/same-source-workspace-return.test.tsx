@@ -102,6 +102,26 @@ describe('F310 same-source Workspace return', () => {
         '/collective?connectionId=con_aaaaaaaa&workId=work_aaaaaaaa&workRevision=4&channelId=general&resultEventId=evt_result0000&resultRevision=2&taskId=private',
       ),
     ).toBeNull();
+    expect(
+      resolveEntrustedWorkActionTarget(
+        '/collective?target=accountability&connectionId=con_aaaaaaaa&workId=work_aaaaaaaa&workRevision=4&channelId=general&roadmapId=roadmap_aaaaaaaa&accountabilityRequestId=accountability_aaaaaaaa',
+      ),
+    ).toEqual({
+      kind: 'collective-accountability',
+      connectionId: 'con_aaaaaaaa',
+      workId: 'work_aaaaaaaa',
+      workRevision: 4,
+      channelId: 'general',
+      roadmapId: 'roadmap_aaaaaaaa',
+      accountabilityRequestId: 'accountability_aaaaaaaa',
+      actionRef:
+        '/collective?target=accountability&connectionId=con_aaaaaaaa&workId=work_aaaaaaaa&workRevision=4&channelId=general&roadmapId=roadmap_aaaaaaaa&accountabilityRequestId=accountability_aaaaaaaa',
+    });
+    expect(
+      resolveEntrustedWorkActionTarget(
+        '/collective?target=accountability&connectionId=con_aaaaaaaa&workId=work_aaaaaaaa&workRevision=4&channelId=general&roadmapId=roadmap_aaaaaaaa&accountabilityRequestId=accountability_aaaaaaaa&resultEventId=evt_result0000',
+      ),
+    ).toBeNull();
   });
 
   it('keeps the exact Needs Me item as desktop sidecar and promotes it on Artifact close', () => {

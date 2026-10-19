@@ -103,23 +103,29 @@ test(
         .getByLabel('Markdown 文件')
         .setInputFiles({ name: '共同协作指南.md', mimeType: 'text/markdown', buffer: Buffer.from(text) });
       await owner.getByLabel('作品存放在').selectOption({ label: 'Canonical content Café' });
-      await owner.getByLabel('属于工作').selectOption(originalWork.workId);
+      await owner.getByLabel('属于任务').selectOption(originalWork.workId);
       const ownerResponse = owner.waitForResponse(
         (response) =>
           response.url().endsWith('/api/artifacts/owner/request') &&
           response.status() === 200 &&
           response.request().postDataJSON().action === 'read',
       );
+      void ownerResponse.catch(() => undefined);
       await owner.getByRole('button', { name: '分享作品', exact: true }).click();
       await owner.getByRole('heading', { name: '共同协作指南', exact: true }).waitFor();
-      await member.getByRole('button', { name: '作品', exact: true }).click();
+      await member.getByRole('button', { name: '频道作品', exact: true }).click();
       const memberResponse = member.waitForResponse(
         (response) =>
           response.url().endsWith('/api/artifacts/owner/request') &&
           response.status() === 200 &&
           response.request().postDataJSON().action === 'read',
       );
-      await member.locator('.shared-artifact-card').filter({ hasText: '共同协作指南' }).click();
+      void memberResponse.catch(() => undefined);
+      await member
+        .getByRole('complementary', { name: '频道作品', exact: true })
+        .locator('.shared-artifact-card')
+        .filter({ hasText: '共同协作指南' })
+        .click();
       await member.getByRole('heading', { name: '共同协作指南', exact: true }).waitFor();
       const ownerRead = (await (await ownerResponse).json()).value;
       const memberRead = (await (await memberResponse).json()).value;
@@ -442,14 +448,18 @@ test(
       await owner.getByRole('button', { name: '回到原讨论', exact: true }).click();
       const returnedWork = owner
         .locator(`.channel-flow #collective-event-${f.source.eventId}`)
-        .getByRole('region', { name: `工作 · ${originalWork.title}`, exact: true });
+        .getByRole('region', { name: `任务 · ${originalWork.title}`, exact: true });
       await returnedWork.getByRole('button', { name: '标记完成', exact: true }).waitFor();
       await owner.waitForFunction(
         (id) => document.getElementById(`collective-event-${id}`)?.dataset.highlighted === 'true',
         f.source.eventId,
       );
       await owner.getByRole('button', { name: /全部作品/ }).click();
-      await owner.locator('.shared-artifact-card').filter({ hasText: '共同协作指南' }).click();
+      await owner
+        .getByRole('region', { name: '全部作品', exact: true })
+        .locator('.shared-artifact-card')
+        .filter({ hasText: '共同协作指南' })
+        .click();
       await member.locator('.shared-artifact-document').evaluate((paper) => {
         const walker = document.createTreeWalker(paper, NodeFilter.SHOW_TEXT);
         for (let node = walker.nextNode(); node; node = walker.nextNode()) {
@@ -530,6 +540,12 @@ test(
         .getByText('两名各自登录的成员阅读同一份正文。', { exact: true })
         .waitFor();
       assert.deepEqual(pageErrors, []);
+    } catch (error) {
+      console.error(error);
+      for (const [index, context] of contexts.entries()) {
+        for (const page of context.pages()) await capture(page, `shared-failure-${index}`);
+      }
+      throw error;
     } finally {
       clearInterval(timer);
       await browser.close();

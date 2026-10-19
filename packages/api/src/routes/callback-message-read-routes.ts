@@ -28,6 +28,7 @@ import { recordAnchorFullDrill } from './anchor-telemetry.js';
 import { truncateHead } from './callback-anchor-helpers.js';
 import { requireCallbackPrincipal } from './callback-auth-prehandler.js';
 import { projectCallbackMessageBody } from './callback-message-body.js';
+import { coverPublishedMessageReads } from './callback-published-wake-coverage.js';
 import { guardLiveCarrierRead } from './live-carrier-read-guard.js';
 
 export interface CallbackMessageReadDeps {
@@ -251,6 +252,23 @@ export function registerCallbackMessageReadRoutes(app: FastifyInstance, opts: Ca
       }
 
       const contextMessages = Array.isArray(result.context) ? result.context : [];
+
+      if (isFullDrill && principal.kind === 'invocation' && message.threadId === principal.threadId) {
+        try {
+          await coverPublishedMessageReads(opts, {
+            threadId: principal.threadId,
+            userId: principal.userId,
+            catId: principal.catId,
+            invocationId: principal.invocationId,
+            parentInvocationId: expectedParentInvocationId!,
+            messageIds: [message.id, ...contextMessages.map((item) => item.id)],
+          });
+        } catch (err) {
+          app.log.error({ err, messageId }, 'Published wake coverage failed before full drill');
+          reply.status(503);
+          return { error: 'Public wake coverage unavailable', code: 'QUEUE_ADOPTION_UNAVAILABLE' };
+        }
+      }
 
       // F236 AC-B2 (R1/砚砚 P1): record full-drill cost AFTER the whole payload (message +
       // context neighbors + contentBlocks) is assembled, so the cost account isn't undercounted.

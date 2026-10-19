@@ -8,7 +8,7 @@ import {
   parseAgyStreamJsonLine,
   summarizeAgyStreamJsonTurn,
 } from '../agy-stream-json-parser.js';
-import { missingAgyNativeInitError } from './agy-native-errors.js';
+import { agyNativePolicyDiagnostics, missingAgyNativeInitError } from './agy-native-errors.js';
 import {
   asRecord,
   type ExpectedNativeInit,
@@ -94,15 +94,15 @@ export async function* observeAgyNativeTurn(
       yield { kind: 'step', event };
     }
   }
-  if (!sessionId) {
-    throw missingAgyNativeInitError(lines, transportError, cliDiagnostics, {
-      command: expected.command ?? 'agy',
-      signal: transportExit?.signal ?? null,
-      ...(transportExit ? { exitCode: transportExit.code } : {}),
-      ...(expected.invocationId ? { invocationId: expected.invocationId } : {}),
-    });
-  }
+  const debugRef = {
+    command: expected.command ?? 'agy',
+    signal: transportExit?.signal ?? null,
+    ...(transportExit ? { exitCode: transportExit.code } : {}),
+    ...(expected.invocationId ? { invocationId: expected.invocationId } : {}),
+  };
+  if (!sessionId) throw missingAgyNativeInitError(lines, transportError, cliDiagnostics, debugRef);
   const turn = verifiedNativeTerminal(lines, sessionId, resultCount);
+  cliDiagnostics = agyNativePolicyDiagnostics(turn, cliDiagnostics, debugRef);
   yield {
     kind: 'complete',
     observed: {
@@ -299,7 +299,7 @@ export function projectAgyNativeTurn(
       : unexpectedTool
         ? 'AGY_UNEXPECTED_TOOL'
         : 'AGY_NATIVE_FAILED';
-  if (transportFailed && !cancelled && observed.cliDiagnostics) metadata.cliDiagnostics = observed.cliDiagnostics;
+  if (!cancelled && observed.cliDiagnostics) metadata.cliDiagnostics = observed.cliDiagnostics;
   messages.push({
     type: 'error',
     catId,
@@ -308,7 +308,9 @@ export function projectAgyNativeTurn(
       ? 'AGY native turn was cancelled before its terminal result'
       : unexpectedTool
         ? `AGY emitted undeclared native tool ${unexpectedTool.toolName}`
-        : (transportError ?? turn.diagnosis),
+        : errorCode === 'AGY_NATIVE_FAILED' && metadata.cliDiagnostics?.reasonCode
+          ? metadata.cliDiagnostics.publicSummary
+          : (transportError ?? turn.diagnosis),
     metadata,
     timestamp: Date.now(),
   });

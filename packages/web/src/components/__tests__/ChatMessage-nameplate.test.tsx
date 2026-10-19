@@ -148,7 +148,6 @@ describe('F322 B segment 1 — cat nameplate, no outer bubble', () => {
       render(catMessage());
       const p = plate() as HTMLElement;
 
-      expect(p.className.split(/\s+/)).toEqual(expect.arrayContaining(['h-[26px]', 'rounded-t-lg', 'pl-10', 'pr-2.5']));
       expect(p.style.backgroundImage).toBe('linear-gradient(to bottom, var(--color-opus-surface), transparent)');
     });
 
@@ -160,9 +159,6 @@ describe('F322 B segment 1 — cat nameplate, no outer bubble', () => {
       expect(name.textContent).toBe('布偶猫');
       expect(name.textContent).not.toContain('@');
       expect(name.style.opacity).toBe('');
-      expect(name.className.split(/\s+/)).toEqual(
-        expect.arrayContaining(['text-compact', 'font-semibold', 'truncate']),
-      );
     });
 
     it('puts the time to the right of the plate, not inside it', () => {

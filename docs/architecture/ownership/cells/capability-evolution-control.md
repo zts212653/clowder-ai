@@ -218,4 +218,4 @@ Watch for `capability-evolution-control`, Evolution Program stores, copied traje
 
 ## F314 历史内容独立发布边界
 
-operator `[thread-id]#private-source-id` 要求谱系通过 API 独立更新；F311 owner `private-source-id` 要求对象专用写入口归 F314。`cat_cafe_get_harness_history` 与 `cat_cafe_publish_harness_history` 是这一个内容源的读取与发布/恢复入口，由 F314 校验活跃 invocation 和原 Program workspace，Git 保留正文，独立持久 journal 仅存来源与具名回执。F311 exploration 只消费通用发布元数据和 exact source selection，不持有发布动作或正文。实现与验收约定见独立发布计划。
+operator `[thread-id]#private-source-id` 要求谱系通过 API 独立更新；F311 owner `private-source-id` 要求对象专用写入口归 F314。`cat_cafe_get_harness_history` 与 `cat_cafe_publish_harness_history` 是这一个内容源的读取与发布/恢复入口，由 F314 校验活跃 invocation 和原 Program workspace，Git 保留正文，独立持久 journal 仅存来源与具名回执。F311 exploration 只消费通用发布元数据和 exact source selection，不持有发布动作或正文。实现与验收约定见[独立发布计划](../../../feature-specs/2026-10-16-f314-live-history-publication.md)。

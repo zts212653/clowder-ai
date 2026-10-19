@@ -39,14 +39,9 @@ import {
   type MessageSelectionAdmissionResult,
   MessageSelectionResolver,
 } from '../domains/cats/services/context/MessageSelectionResolver.js';
-import { createGameDriver } from '../domains/cats/services/game/createGameDriver.js';
-import type { GameDriver } from '../domains/cats/services/game/GameDriver.js';
-import { GameOrchestrator } from '../domains/cats/services/game/GameOrchestrator.js';
-import { WerewolfLobby } from '../domains/cats/services/game/werewolf/WerewolfLobby.js';
 import type { AgentRouter } from '../domains/cats/services/index.js';
 import { messageFrom } from '../domains/cats/services/stores/message-from.js';
 import type { IDraftStore } from '../domains/cats/services/stores/ports/DraftStore.js';
-import type { IGameStore } from '../domains/cats/services/stores/ports/GameStore.js';
 import type { IMessageStore, StoredMessage } from '../domains/cats/services/stores/ports/MessageStore.js';
 import { isTimelinePublished } from '../domains/cats/services/stores/ports/MessageStore.js';
 import { deriveAutoThreadTitle, type IThreadStore } from '../domains/cats/services/stores/ports/ThreadStore.js';
@@ -79,7 +74,6 @@ function projectRecoveryForHistory(recovery: StoredRecovery) {
 
 import { emitQueueUpdated, enrichQueueEntries } from '../utils/queue-enrichment.js';
 import { resolveStrictUserId, resolveUserId } from '../utils/request-identity.js';
-import { buildGameSeats, parseGameCommand, sanitizeCatIds } from './game-command-interceptor.js';
 import type { HoldBallCancelDeps } from './hold-ball-cancel.js';
 import { cancelPendingHoldsForThread } from './hold-ball-cancel.js';
 import { formatHoldOwnerName, persistHoldTerminalVisibility } from './hold-ball-terminal-visibility.js';
@@ -144,10 +138,6 @@ export interface MessagesRoutesOptions {
   draftStore?: IDraftStore;
   /** Canonical durable ingress for every normal user message. */
   invocationQueue?: InvocationQueue;
-  /** F101: Game store for /game command interception */
-  gameStore?: IGameStore;
-  /** F101: Injectable auto-player for lifecycle-safe teardown in tests/routes */
-  autoPlayer?: Pick<GameDriver, 'startLoop' | 'stopLoop' | 'stopAllLoops'>;
   /** F167 Phase J: deps for auto-cancelling pending hold-ball tasks on user message */
   holdBallCancelDeps?: HoldBallCancelDeps & {
     messageStore?: IMessageStore;
@@ -299,31 +289,6 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
 
   // Shared AgentRouter injected via opts (created in index.ts)
   const router = opts.router;
-  const gameOrchestrator = opts.gameStore
-    ? new GameOrchestrator({
-        gameStore: opts.gameStore,
-        socketManager: opts.socketManager,
-        messageStore: opts.messageStore,
-      })
-    : null;
-  const gameAutoPlayer = gameOrchestrator
-    ? (opts.autoPlayer ??
-      createGameDriver({
-        gameNarratorEnabled: false,
-        legacyDeps: {
-          gameStore: opts.gameStore!,
-          orchestrator: gameOrchestrator,
-          messageStore: opts.messageStore,
-        },
-      }))
-    : null;
-
-  if (gameAutoPlayer) {
-    app.addHook('onClose', async () => {
-      gameAutoPlayer.stopAllLoops();
-    });
-  }
-
   // POST /api/messages - 发送消息（WebSocket 广播）
   app.post('/api/messages', async (request, reply) => {
     let content: string;
@@ -553,104 +518,6 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
           }
         }
       }
-    }
-
-    // F101: /game command interception — start game directly, skip AI routing
-    const parsedGame = parseGameCommand(content);
-    if (parsedGame && opts.gameStore && opts.threadStore) {
-      if (!gameOrchestrator || !gameAutoPlayer) {
-        throw new Error('game auto-player is unavailable');
-      }
-
-      const DEFAULT_PLAYER_COUNT = 7;
-      const allCatIds = catRegistry.getAllIds();
-      const sanitized = parsedGame.catIds ? sanitizeCatIds(parsedGame.catIds, allCatIds) : [];
-      // Fallback to all cats if sanitize filtered everything out (or no catIds provided)
-      const catIds = sanitized.length > 0 ? sanitized : [...allCatIds];
-      if (catIds.length === 0) {
-        reply.status(400);
-        return { error: '没有可用的猫猫成员，请先在设置中添加一只猫猫', code: 'NO_TARGETS' };
-      }
-      const playerCount = parsedGame.playerCount ?? DEFAULT_PLAYER_COUNT;
-      const seats = buildGameSeats({
-        humanRole: parsedGame.humanRole,
-        userId,
-        catIds,
-        playerCount,
-      });
-
-      // Phase D: Create independent game thread with project categorization
-      const ts = new Date()
-        .toLocaleString('sv-SE', { timeZone: 'Asia/Shanghai' })
-        .replace(' ', '-')
-        .replaceAll(':', '');
-      const gameTitle = `狼人杀 — ${playerCount}人局 (${ts})`;
-      const gameThread = await opts.threadStore.create(userId, gameTitle, `games/${parsedGame.gameType}`);
-      const gameThreadId = gameThread.id;
-      await opts.threadStore.updatePin(gameThreadId, true);
-
-      // Notify source thread about the new game thread (include initiator for frontend guard)
-      opts.socketManager.broadcastToRoom(`thread:${resolvedThreadId}`, 'game:thread_created', {
-        gameThreadId,
-        gameTitle,
-        initiatorUserId: userId,
-        timestamp: Date.now(),
-      });
-
-      // Store user message in the game thread
-      const userMessage = await opts.messageStore.append({
-        from: { kind: 'user', userId },
-        userId,
-        content,
-        mentions: [],
-        timestamp: Date.now(),
-        threadId: gameThreadId,
-      });
-
-      // Use WerewolfLobby for role assignment, then orchestrator for persistence + broadcast
-      const lobby = new WerewolfLobby();
-      const lobbyRuntime = lobby.createLobby({
-        threadId: gameThreadId,
-        playerCount,
-        players: seats.map((s) => ({ actorType: s.actorType, actorId: s.actorId })),
-      });
-      lobby.startGame(lobbyRuntime);
-
-      let gameRuntime;
-      try {
-        gameRuntime = await gameOrchestrator.startGame({
-          threadId: gameThreadId,
-          definition: lobbyRuntime.definition,
-          seats: lobbyRuntime.seats,
-          config: {
-            timeoutMs: 30000,
-            voiceMode: parsedGame.voiceMode,
-            humanRole: parsedGame.humanRole,
-            ...(parsedGame.humanRole === 'player' ? { humanSeat: 'P1' } : {}),
-            observerUserId: userId, // H2 fix: messageStore dual-write needs userId for thread visibility
-          },
-        });
-      } catch (err: unknown) {
-        const message = err instanceof Error ? err.message : String(err);
-        if (message.includes('already has an active game')) {
-          reply.status(409);
-          return { error: message };
-        }
-        throw err;
-      }
-
-      // Broadcast scoped views so frontend receives game:state_update
-      await gameOrchestrator.broadcastGameState(gameRuntime.gameId);
-
-      // AC-C3: Start AI auto-play loop — cats submit actions asynchronously
-      gameAutoPlayer.startLoop(gameRuntime.gameId);
-
-      return {
-        status: 'game_started',
-        gameId: gameRuntime.gameId,
-        gameThreadId,
-        userMessageId: userMessage.id,
-      };
     }
 
     // ADR-008 S1: Pre-resolve targets + intent, persisting @mentions as participants

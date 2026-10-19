@@ -217,6 +217,8 @@ export function scrollToMessage(
   if (!el) return false;
 
   revealFoldedSourceAnchor(el);
+  const enclosingDetails = el.closest('details');
+  if (enclosingDetails) enclosingDetails.open = true;
   // The owner passes its reading viewport. Default-document callers use the
   // nearest scrolling ancestor, so a tall reply never hides its author header.
   let viewport = root instanceof HTMLElement ? root : el.parentElement;

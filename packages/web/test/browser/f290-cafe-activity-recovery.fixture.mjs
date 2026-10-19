@@ -49,7 +49,7 @@ export async function ownerActivityRecovery() {
       context,
       ports,
     });
-    const { host, embedded, cafe, nativeErrors } = await openNativeOwnerClient({
+    let { host, embedded, cafe, nativeErrors } = await openNativeOwnerClient({
       context,
       evidence,
       nativeOwner: owner,
@@ -57,6 +57,7 @@ export async function ownerActivityRecovery() {
       serviceUrl: server.url,
     });
     assert.equal(await host.evaluate(() => 'serviceWorker' in navigator), false);
+    cafe = host.getByRole('complementary', { name: '我的 Café', exact: true });
     let unavailable = true;
     const reads = [];
     await context.route(/\/api\/plugins\/collective-connector\/[^/]+\/(work-policy|listening)$/, async (route) => {
@@ -64,8 +65,8 @@ export async function ownerActivityRecovery() {
       if (unavailable) return route.fulfill({ status: 403, json: { code: 'CONNECTOR_OWNER_MISMATCH' } });
       return route.fallback();
     });
-    await embedded.getByRole('button', { name: '我的猫', exact: true }).click();
-    await cafe.getByRole('button', { name: '授权', exact: true }).click();
+    await embedded.locator('details.collective-menu > summary').click();
+    await embedded.getByRole('button', { name: '已允许的任务…', exact: true }).click();
     await cafe.getByRole('alert').waitFor({ timeout: 7_000 });
     await host.screenshot({ path: path.join(evidence, 'settings-read-failed.png'), fullPage: true });
     unavailable = false;
@@ -77,7 +78,7 @@ export async function ownerActivityRecovery() {
       'recovery must not change listening or Work authority',
     );
     await host.screenshot({ path: path.join(evidence, 'settings-read-recovered.png'), fullPage: true });
-    await cafe.getByRole('button', { name: '关闭我的猫', exact: true }).click();
+    await cafe.getByRole('button', { name: '返回共同体', exact: true }).click();
     const body = '请在这个原请求的位置回应，私人入口只留在我的 Café。';
     assert.equal((await owner.receiveRequest(body)).failed, 0);
     const item = (await owner.connector.listInbox(owner.connection.connectionId)).find(
@@ -87,8 +88,8 @@ export async function ownerActivityRecovery() {
     const thread = await owner.threads.get(item.routeReceipt.threadId);
     assert.equal(thread.createdBy, owner.userId);
     const href = `/thread/${encodeURIComponent(thread.id)}`;
-    await embedded.getByRole('button', { name: '我的猫', exact: true }).click();
-    await cafe.getByRole('button', { name: '日程', exact: true }).click();
+    await embedded.locator('details.collective-menu > summary').click();
+    await embedded.getByRole('button', { name: '我的日程…', exact: true }).click();
     const link = cafe.getByRole('link', { name: '在家里查看', exact: true });
     await link.waitFor({ timeout: 7_000 });
     assert.equal(await link.getAttribute('href'), href);

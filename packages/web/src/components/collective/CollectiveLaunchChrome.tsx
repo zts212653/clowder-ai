@@ -3,6 +3,7 @@
 import type { CollectiveConnectionProjection, CollectiveConnectorStatus } from './collective-client';
 import { normalizeCollectiveServiceUrl } from './collective-client';
 import { localServiceAction, localServiceDescription } from './collective-launch-copy';
+import { useCollectiveText } from './use-collective-text';
 
 export function CollectiveConnectorBoundary({
   status,
@@ -125,6 +126,7 @@ export function CollectiveServiceSetup({
 export function CollectiveLaunchNotice({
   connectorError,
   worldError,
+  sessionRequired,
   workError,
   pairingError,
   entryError,
@@ -132,18 +134,22 @@ export function CollectiveLaunchNotice({
 }: {
   readonly connectorError?: string;
   readonly worldError?: string;
+  readonly sessionRequired?: boolean;
   readonly workError?: string;
   readonly pairingError?: string;
   readonly entryError?: string;
   readonly entryBusy?: boolean;
 }) {
+  const t = useCollectiveText();
   const error = connectorError ?? worldError ?? workError ?? pairingError ?? entryError;
+  const signInNotice = sessionRequired && error === worldError;
   if (!error && !entryBusy) return null;
   return (
     <div
-      className={`absolute inset-x-0 top-0 z-10 px-4 py-2 text-center text-xs ${error ? 'bg-conn-red-bg text-conn-red-text' : 'bg-conn-amber-bg text-conn-amber-text'}`}
+      role={signInNotice ? 'status' : error ? 'alert' : 'status'}
+      className={`absolute inset-x-0 top-0 z-10 px-4 py-2 text-center text-xs ${signInNotice ? 'border-b border-[var(--console-border-soft)] bg-[var(--shell-work)] text-cafe-secondary' : error ? 'bg-conn-red-bg text-conn-red-text' : 'bg-conn-amber-bg text-conn-amber-text'}`}
     >
-      {error ?? 'Clowder AI 正在安全托管连接凭据…'}
+      {t(error ?? 'Clowder AI 正在安全托管连接凭据…')}
     </div>
   );
 }

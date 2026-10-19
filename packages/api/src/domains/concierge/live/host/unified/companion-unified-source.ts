@@ -1,5 +1,6 @@
 import { isDeepStrictEqual } from 'node:util';
 import {
+  collectiveAccountabilityAttentionItemSchema,
   NEEDS_ME_PRODUCER_IDS,
   type UnifiedAttentionItemV1,
   type UnifiedAttentionReadV1,
@@ -16,11 +17,15 @@ const source = z.object({
   coverage: z.enum(['all_registered_F246_producers', 'current_linked_F310_five_producers']),
   exhaustiveness: z.enum(['complete', 'partial', 'unknown']),
 });
+const collectiveAccountabilitySource = source.extend({
+  coverage: z.literal('pending_f290_collective_accountability_requests'),
+});
 const row = z.object({
   decisionRef: z.string().min(1),
   kind: z.enum(['approval', 'judgment', 'repair']),
   summary: z.string(),
   approval: z.record(z.unknown()).optional(),
+  collectiveAccountabilityRequest: z.unknown().optional(),
   linkedNeedsMe: z.array(z.object({ ownerRead: z.unknown(), receipt: z.unknown() })),
 });
 const read = z.object({
@@ -29,7 +34,11 @@ const read = z.object({
   scope: z.literal('owner_all_projects'),
   identity: z.object({ ownerUserId: z.string().min(1) }),
   observedAt: z.number().finite().nonnegative(),
-  sources: z.object({ approvals: source, needsMe: source }),
+  sources: z.object({
+    approvals: source,
+    needsMe: source,
+    collectiveAccountabilityRequests: collectiveAccountabilitySource.optional(),
+  }),
   readWindow: z.object({
     startedAt: z.number(),
     endedAt: z.number(),
@@ -47,47 +56,72 @@ const read = z.object({
 });
 
 function item(raw: z.infer<typeof row>, ownerUserId: string): UnifiedAttentionItemV1 {
-  let approval: UnifiedAttentionItemV1['approval'];
-  if (raw.approval) {
-    if ('ownerUserId' in raw.approval && raw.approval.ownerUserId !== ownerUserId)
-      throw new CompanionBridgeError('permission_required');
-    const canonical = unifiedAttentionApprovalsSourceSchema.parse({
-      items: [{ ...raw.approval, ownerUserId }],
-    }).items[0]!;
-    const { ownerUserId: _owner, ...visible } = canonical;
-    approval = visible;
-  }
+  const approval = visibleApproval(raw.approval, ownerUserId);
   if ((raw.kind === 'approval') !== (approval !== undefined)) throw new CompanionBridgeError('unavailable');
-  const linkedNeedsMe = raw.linkedNeedsMe.map((linked) => {
-    const work = unifiedAttentionWorkSourceSchema.parse({ ownerReads: [linked.ownerRead] }).ownerReads[0]!;
-    if (work.envelope.visibility.ownerUserId !== ownerUserId) throw new CompanionBridgeError('permission_required');
-    const receipt = work.attentionReceipts.find((candidate) => isDeepStrictEqual(candidate, linked.receipt));
-    if (
-      !receipt ||
-      !receipt.eligible ||
-      receipt.taskRef.subjectRef !== work.envelope.subjectRef ||
-      !NEEDS_ME_PRODUCER_IDS.some((id) => id === receipt.producer.producerId) ||
-      !receipt.kind ||
-      !receipt.recommendation ||
-      !work.preparedArtifact ||
-      work.brief?.current?.state === 'done' ||
-      receipt.taskRef.observedRevision !== work.envelope.revision ||
-      work.envelope.freshness?.state !== 'current' ||
-      work.envelope.freshness.observedRevision !== work.envelope.revision ||
-      receipt.action?.expectedProducerRevision !== receipt.producer.revision
-    )
-      throw new CompanionBridgeError('unavailable');
-    return { ownerRead: work, receipt };
-  });
-  if (!approval && (!linkedNeedsMe.length || linkedNeedsMe.some(({ receipt }) => receipt.kind !== raw.kind)))
+  const linkedNeedsMe = raw.linkedNeedsMe.map((linked) => visibleNeedsMe(linked, ownerUserId));
+  const accountability = raw.collectiveAccountabilityRequest
+    ? collectiveAccountabilityAttentionItemSchema.parse(raw.collectiveAccountabilityRequest)
+    : undefined;
+  if (
+    accountability &&
+    (approval ||
+      linkedNeedsMe.length > 0 ||
+      raw.kind !== 'judgment' ||
+      raw.decisionRef !== `${accountability.producerId}:${accountability.subjectRef}`)
+  ) {
+    throw new CompanionBridgeError('unavailable');
+  }
+  if (
+    !approval &&
+    !accountability &&
+    (!linkedNeedsMe.length || linkedNeedsMe.some(({ receipt }) => receipt.kind !== raw.kind))
+  )
     throw new CompanionBridgeError('unavailable');
   return {
     decisionRef: raw.decisionRef,
     kind: raw.kind,
     summary: raw.summary,
     ...(approval ? { approval } : {}),
+    ...(accountability ? { collectiveAccountabilityRequest: accountability } : {}),
     linkedNeedsMe,
   };
+}
+
+function visibleApproval(
+  raw: z.infer<typeof row>['approval'],
+  ownerUserId: string,
+): UnifiedAttentionItemV1['approval'] {
+  if (!raw) return undefined;
+  if ('ownerUserId' in raw && raw.ownerUserId !== ownerUserId) throw new CompanionBridgeError('permission_required');
+  const canonical = unifiedAttentionApprovalsSourceSchema.parse({
+    items: [{ ...raw, ownerUserId }],
+  }).items[0];
+  if (!canonical) throw new CompanionBridgeError('unavailable');
+  const { ownerUserId: _owner, ...visible } = canonical;
+  return visible;
+}
+
+function visibleNeedsMe(linked: z.infer<typeof row>['linkedNeedsMe'][number], ownerUserId: string) {
+  const work = unifiedAttentionWorkSourceSchema.parse({ ownerReads: [linked.ownerRead] }).ownerReads[0];
+  if (!work) throw new CompanionBridgeError('unavailable');
+  if (work.envelope.visibility.ownerUserId !== ownerUserId) throw new CompanionBridgeError('permission_required');
+  const receipt = work.attentionReceipts.find((candidate) => isDeepStrictEqual(candidate, linked.receipt));
+  if (
+    !receipt ||
+    !receipt.eligible ||
+    receipt.taskRef.subjectRef !== work.envelope.subjectRef ||
+    !NEEDS_ME_PRODUCER_IDS.some((id) => id === receipt.producer.producerId) ||
+    !receipt.kind ||
+    !receipt.recommendation ||
+    !work.preparedArtifact ||
+    work.brief?.current?.state === 'done' ||
+    receipt.taskRef.observedRevision !== work.envelope.revision ||
+    work.envelope.freshness?.state !== 'current' ||
+    work.envelope.freshness.observedRevision !== work.envelope.revision ||
+    receipt.action?.expectedProducerRevision !== receipt.producer.revision
+  )
+    throw new CompanionBridgeError('unavailable');
+  return { ownerRead: work, receipt };
 }
 
 /** Reuse the canonical source validators, then bind every retained row to this Host principal. */
@@ -110,6 +144,8 @@ export function parseUnifiedCompanionSource(
     items.some(
       (value) =>
         (value.approval && parsed.sources.approvals.status !== 'available') ||
+        (value.collectiveAccountabilityRequest &&
+          parsed.sources.collectiveAccountabilityRequests?.status !== 'available') ||
         (value.linkedNeedsMe.length > 0 && parsed.sources.needsMe.status !== 'available'),
     )
   )

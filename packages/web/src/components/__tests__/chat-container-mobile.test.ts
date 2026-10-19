@@ -75,8 +75,6 @@ const mockStoreState = () => ({
   clearCatStatuses: vi.fn(),
   setCurrentThread: vi.fn(),
   updateThreadTitle: vi.fn(),
-  setCurrentGame: vi.fn(),
-  currentGame: null,
 
   viewMode: mockViewMode,
   setViewMode: vi.fn(),
@@ -462,7 +460,7 @@ describe('ChatContainer mobile interactions', () => {
       expect(controls() !== null).toBe(cover === 'workspace' && desktop);
       expect(localStorage.getItem(key)).toBe(saved);
       if (cover === 'artwork') {
-        act(() => document.querySelector<HTMLButtonElement>('[role="dialog"] button')?.click());
+        act(() => document.querySelector<HTMLButtonElement>('[role="dialog"] button[aria-label="关闭作品"]')?.click());
         expect(document.querySelector('[role="dialog"]')).toBeNull();
       } else {
         mockRightPanelOpen = false;
@@ -710,6 +708,26 @@ describe('ChatContainer mobile interactions', () => {
     });
 
     expect(mockCloseRightPanel).toHaveBeenCalledOnce();
+  });
+
+  it.each(['composition', 'handled'])('keeps the mobile owner when Escape belongs to %s input', async (kind) => {
+    mockRightPanelOpen = true;
+    mockRightPanelMode = 'workspace';
+    await act(async () => root.render(renderChatContainer('test-thread')));
+    const composer = container.querySelector<HTMLElement>('[data-testid="chat-input"]');
+    if (!composer) throw new Error('composer missing');
+    if (kind === 'handled') composer.addEventListener('keydown', (event) => event.preventDefault());
+    await act(async () =>
+      composer.dispatchEvent(
+        new KeyboardEvent('keydown', {
+          key: 'Escape',
+          isComposing: kind === 'composition',
+          bubbles: true,
+          cancelable: true,
+        }),
+      ),
+    );
+    expect(mockCloseRightPanel).not.toHaveBeenCalled();
   });
 
   it.each([false, true])('reveals the original Chat from a covering v2 Workspace on desktop=%s', async (desktop) => {

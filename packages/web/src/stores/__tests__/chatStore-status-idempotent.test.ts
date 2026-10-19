@@ -24,7 +24,6 @@ describe('setCatStatus idempotent guard (#84)', () => {
       targetCats: [],
       catStatuses: {},
       catInvocations: {},
-      currentGame: null,
       threadStates: {},
       viewMode: 'single',
       splitPaneThreadIds: [],
@@ -114,7 +113,6 @@ describe('updateThreadCatStatus idempotent guard (#84)', () => {
       targetCats: [],
       catStatuses: {},
       catInvocations: {},
-      currentGame: null,
       threadStates: {
         'bg-thread': { ...DEFAULT_THREAD_STATE, lastActivity: Date.now() },
       },

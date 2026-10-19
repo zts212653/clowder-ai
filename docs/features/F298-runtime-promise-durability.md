@@ -16,7 +16,7 @@ description_updated_at: 2026-08-20T04:06:00Z
 > **Status**: done | **Completed**: 2026-08-21 | **Owner**: Ragdoll (@fable5, claude-fable-5) | **Priority**: P1
 
 **性质**: hardening / debt-paydown 收敛 feat——**跟踪锚不是实现容器**。实现落各自然领地，本 feat 家族表裁定与跟踪 verdict。
-**法源**: ADR-045 | **operator signoff**: 2026-08-17 [thread-id]（「不能头痛医头」「数学之美和第一性原理」「我们得f298了」）
+**法源**: [ADR-045](../decisions/045-runtime-promise-durability.md) | **operator signoff**: 2026-08-17 [thread-id]（「不能头痛医头」「数学之美和第一性原理」「我们得f298了」）
 
 ## Architecture ownership
 

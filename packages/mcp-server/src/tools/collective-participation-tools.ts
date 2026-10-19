@@ -84,6 +84,29 @@ export const collectiveProposeWorkInputSchema = {
     .optional()
     .describe('Optional reviewable outcome; omit to retain the source message as the proposal.'),
 };
+export const collectiveSuggestProjectWorkInputSchema = {
+  contextRef: collectiveProposeWorkInputSchema.contextRef,
+  projectRef: z
+    .string()
+    .min(1)
+    .max(2000)
+    .describe('Opaque projectRef from current-context for the exact visible Project and revision.'),
+  prerequisiteForWorkRef: z
+    .string()
+    .min(1)
+    .max(2000)
+    .optional()
+    .describe(
+      'Optional opaque workRef from the same current-context matter; when present, this candidate becomes a new prerequisite Task for that Work.',
+    ),
+  title: z.string().trim().min(1).max(200).describe('Concise title for the proposed Project Task.'),
+  intendedOutcome: z
+    .string()
+    .trim()
+    .min(1)
+    .max(32000)
+    .describe('Reviewable proposed outcome; the Human may edit it before accepting the candidate.'),
+};
 export const collectiveAcceptWorkInputSchema = {
   contextRef: collectiveProposeWorkInputSchema.contextRef,
   grantRef: z
@@ -141,6 +164,13 @@ export const handleCollectiveProposeWork = (input: {
   intendedOutcome?: string;
   requestKind?: string;
 }) => callbackPost('/api/callbacks/collective-propose-work', input);
+export const handleCollectiveSuggestProjectWork = (input: {
+  contextRef: string;
+  projectRef: string;
+  prerequisiteForWorkRef?: string;
+  title: string;
+  intendedOutcome: string;
+}) => callbackPost('/api/callbacks/collective-suggest-project-work', input);
 export const handleCollectiveAcceptWork = (input: {
   contextRef: string;
   grantRef: string;
@@ -258,6 +288,15 @@ export const collectiveParticipationTools = [
     collectiveProposeWorkInputSchema,
     'handleCollectiveProposeWork',
     handleCollectiveProposeWork,
+    { level: 'write', openWorld: true },
+  ),
+  tool(
+    'cat_cafe_collective_suggest_project_work',
+    'Propose one durable Task candidate for a visible Collective Project. Use when: current-context exposes a projectRef and the Project needs a new Task, or a current Work needs a newly proposed prerequisite. NOT for: accepting the candidate, changing a Project directly, linking an arbitrary existing Work, or proposing a generic non-Project matter (use collective_propose_work). Output: one persisted proposed Work with Project provenance and pending_human_decision; no Human responsibility, assignment, or execution begins. GOTCHA: use only opaque projectRef/workRef values from this invocation; the Project Human may edit, accept, or ignore the candidate, and Service revalidates current revisions, authority, and dependency cycles on acceptance.',
+    'suggest-project-work',
+    collectiveSuggestProjectWorkInputSchema,
+    'handleCollectiveSuggestProjectWork',
+    handleCollectiveSuggestProjectWork,
     { level: 'write', openWorld: true },
   ),
   tool(

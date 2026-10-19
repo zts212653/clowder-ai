@@ -1,5 +1,6 @@
+import { CollectiveNameplate } from './CollectiveNameplate.js';
 import type { RoadmapAction } from './channel-collaboration.js';
-import { actorDisplayName, actorOrigin, formatEventTime } from './channel-model.js';
+import { formatEventTime } from './channel-model.js';
 import type {
   ChannelThread,
   CollectiveEventEnvelope,
@@ -10,7 +11,9 @@ import type {
   CollectiveWorkProjection,
 } from './client-types.js';
 import { MessageInteraction } from './MessageInteraction.js';
+import { MessageReceipt } from './MessageReceipt.js';
 import { authorPresentation } from './message-presentation.js';
+import { publicActorLabel } from './participant-label.js';
 import { MessageAvatar, MessageBody } from './TopicMessage.js';
 import { useRoomPresentation } from './use-room-presentation.js';
 import type { InformalVoteDraft } from './VoteCard.js';
@@ -87,7 +90,7 @@ export function ChannelMessage({
             <span key={reply.eventId} className="reply-preview-item">
               <MessageAvatar event={reply} participants={participants} compact />
               <span>
-                <b>{actorDisplayName(reply)}</b>
+                <b>{publicActorLabel(reply, participants)}</b>
                 <span>{reply.body}</span>
               </span>
             </span>
@@ -105,18 +108,9 @@ export function ChannelMessage({
 
   return (
     <article {...frame} className="message" data-author={v2 ? author : undefined}>
-      <button
-        type="button"
-        className="avatar-button"
-        onClick={() => onOpenMember(root)}
-        aria-label={`查看 ${actorDisplayName(root)}`}
-      >
-        <MessageAvatar event={root} participants={participants} />
-      </button>
       <div className="message-content">
         <header className="message-meta">
-          <strong>{actorDisplayName(root)}</strong>
-          <span>{actorOrigin(root)}</span>
+          <CollectiveNameplate event={root} participants={participants} onOpen={() => onOpenMember(root)} />
           {(!v2 || showTime) && (
             <time className={v2 ? 'message-time' : undefined} dateTime={root.acceptedAt}>
               {formatEventTime(root.acceptedAt)}
@@ -124,6 +118,13 @@ export function ChannelMessage({
           )}
         </header>
         {body}
+        <MessageReceipt
+          event={root}
+          replies={replies}
+          participants={participants}
+          works={works}
+          onOpen={() => onOpenTopic(root.eventId)}
+        />
         {interaction}
         {replyVitals}
       </div>
@@ -145,7 +146,11 @@ interface ChannelMessageProps {
   readonly humanNames?: Readonly<Record<string, string>>;
   readonly reactions?: readonly CollectiveReactionSummary[];
   readonly onProposeWork?: (event: CollectiveEventEnvelope) => void;
-  readonly onCommitWork?: (work: CollectiveWorkProjection, participant?: CollectiveParticipant) => void;
+  readonly onCommitWork?: (
+    work: CollectiveWorkProjection,
+    participant?: CollectiveParticipant,
+    accountability?: 'self' | 'unassigned',
+  ) => void;
   readonly onDeclineWork?: (work: CollectiveWorkProjection) => void;
   readonly onAcceptWorkResult?: (work: CollectiveWorkProjection) => void;
   readonly onRequestWorkRevision?: (work: CollectiveWorkProjection, feedback: string) => Promise<void>;

@@ -8,7 +8,7 @@ export interface GitHubProcessOptions {
   signal?: AbortSignal;
 }
 
-const KILL_GRACE_MS = 1000;
+export const KILL_GRACE_MS = 1000;
 
 /** Own gh and its credential helpers in one POSIX process group. gh's keyring
  * timeout can exit without reaping macOS security, so parent exit also cleans

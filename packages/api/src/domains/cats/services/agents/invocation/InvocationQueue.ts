@@ -37,10 +37,12 @@ import {
 } from '../../../../ball-custody/ActionSuccessorAdmissionContract.js';
 import type { CloudDispatchProvenance } from '../../cloud-bridge/types.js';
 import type { LifecycleAppendRecoveryInput } from '../../stores/lifecycle-append-recovery.js';
+import { type LifecycleWakeCoverageInput, ordinaryWakeCoverageEligible } from '../../stores/lifecycle-wake-coverage.js';
 import {
   type AppendMessageInput,
   assertQueueMessageReplay,
   type IMessageStore,
+  isTimelinePublished,
   LifecycleResponseInputsChangedError,
   type LifecycleResponseTerminalPatch,
   messageIdempotencyScope,
@@ -705,6 +707,19 @@ export class InvocationQueue {
     const prepared = onPrepared?.(entries, message);
     if (prepared && typeof prepared.then === 'function') return prepared.then(wake);
     wake();
+  }
+
+  /**
+   * Project rows already committed by a cross-owner atomic transaction.
+   * This method never writes custody; it only updates the process cache and emits the ordinary drain signal.
+   */
+  async adoptCommittedAdmission(entries: readonly QueueLedgerEntry[], message: StoredMessage): Promise<QueueEntry[]> {
+    if (entries.length === 0 || entries.some((entry) => entry.threadId !== message.threadId)) {
+      throw new Error('committed Queue admission must contain one message-scoped thread');
+    }
+    const projected = this.cacheLedgerEntries(entries);
+    await this.notifyAdmission(message.threadId, projected, message);
+    return projected;
   }
 
   /** One storage transaction for a queued Message and its complete Queue fan-out. */
@@ -1452,6 +1467,53 @@ export class InvocationQueue {
     evidenceByTarget.set(targetCatId, evidence);
     this.admittedAttemptEvidence.set(admitted, evidenceByTarget);
     return { changed, newlySeen };
+  }
+
+  /** Durable pending targets whose ordinary public bodies may be covered by this exact projection. */
+  async projectedWakeCandidates(
+    threadId: string,
+    userId: string,
+    targetId: string,
+    messageIds: readonly string[],
+    messageStore: Pick<IMessageStore, 'getById'>,
+  ) {
+    const indexed = await this.ledgerStore.getByMessageIds(threadId, messageIds);
+    const candidates = messageIds.flatMap((messageId) =>
+      (indexed.get(messageId) ?? [])
+        .filter(
+          (entry) =>
+            entry.owner.kind === 'user' &&
+            entry.owner.userId === userId &&
+            ordinaryWakeCoverageEligible(entry, targetId),
+        )
+        .map((entry) => ({ entryId: entry.id, messageId })),
+    );
+    const sources = await Promise.all(candidates.map((candidate) => messageStore.getById(candidate.messageId)));
+    return candidates.filter((_, index) => {
+      const source = sources[index];
+      return (
+        source &&
+        source.userId === userId &&
+        source.threadId === threadId &&
+        source.visibility !== 'whisper' &&
+        isTimelinePublished(source) &&
+        !source.recall &&
+        !source._tombstone &&
+        !source.deletedAt
+      );
+    });
+  }
+
+  async commitProjectedWakeCoverage(messageStore: IMessageStore, input: LifecycleWakeCoverageInput) {
+    const result = await messageStore.commitLifecycleWakeCoverage(input, this.ledgerStore);
+    if (result.kind === 'applied' || result.kind === 'replayed') {
+      for (const [index, candidate] of input.entries.entries()) {
+        this.removeCachedEntry(input.threadId, candidate.entryId);
+        const remaining = result.entries[index];
+        if (remaining) this.cacheLedgerEntries([remaining]);
+      }
+    }
+    return result;
   }
 
   /** Claim one exact pending target on its source entry before binding a full-body read to the active child. */

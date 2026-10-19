@@ -6,6 +6,7 @@ import { MessageStore } from '../dist/domains/cats/services/stores/ports/Message
 import { RedisTurnExecutionStore } from '../dist/domains/cats/services/stores/redis/RedisTurnExecutionStore.js';
 import { readModificationSourceExecution } from '../dist/domains/collaborative-content/modification/media-publication/source-execution.js';
 import { ownedRedisFixture } from './helpers/owned-redis-fixture.js';
+import { retiredHash } from './helpers/retired-turn-execution-fixture.js';
 
 const redis = ownedRedisFixture('f117-execution-source');
 const query = { userId: 'owner', threadId: 'thread', catId: 'codex-astra', messageId: 'private-carrier' };
@@ -49,6 +50,65 @@ for (const backend of ['memory', 'Redis']) {
     client?.disconnect();
   });
 }
+
+test('Redis source recovery tolerates validated unrelated retired records without rewriting history', async () => {
+  const client = redis.client(`retired-source:${randomUUID()}:`);
+  const store = new RedisTurnExecutionStore(client);
+  await store.createRunning(input('exact'));
+  const old = retiredHash('old');
+  const sameScope = retiredHash('same-scope', { threadId: query.threadId });
+  await client.hset('turnexec:record:old', old);
+  await client.hset('turnexec:record:same-scope', sameScope);
+  assert.deepEqual(
+    (await store.listBySource(query)).map((record) => record.invocationId),
+    ['exact'],
+  );
+  assert.deepEqual(await store.listBySource({ ...query, messageId: 'absent' }), []);
+  assert.deepEqual(await client.hgetall('turnexec:record:old'), old);
+  assert.deepEqual(await client.hgetall('turnexec:record:same-scope'), sameScope);
+  assert.equal(await client.ttl('turnexec:record:old'), -1);
+  await assert.rejects(
+    store.createRunning(input('new-retired', { executionKind: 'freshness_supplement' })),
+    /invalid executionKind/,
+  );
+});
+
+test('Redis source recovery still refuses malformed, unknown or possibly matching retired executions', async () => {
+  const exactScope = { threadId: query.threadId };
+  const relevant = retiredHash('legacy', {
+    ...exactScope,
+    causal: { triggerMessageId: query.messageId, freshnessSupplementId: 'old-supplement' },
+  });
+  const covered = retiredHash('legacy', exactScope);
+  covered.coveredMessageIds = JSON.stringify([query.messageId]);
+  const coverageIdentity = JSON.parse(covered.immutableIdentity);
+  coverageIdentity.causal.coveredMessageIds = [query.messageId];
+  covered.coveredMessageIdsIdentity = JSON.stringify(coverageIdentity);
+  for (const [label, old] of [
+    ['matching trigger', relevant],
+    ['matching late-bound coverage', covered],
+    ['missing identity', { ...retiredHash('legacy'), immutableIdentity: '' }],
+    ['identity mismatch', { ...retiredHash('legacy'), threadId: 'tampered' }],
+    ['invalid lifecycle', { ...retiredHash('legacy'), endedAt: '9' }],
+    ['invalid causal', { ...retiredHash('legacy'), causal: '{' }],
+    ['bad coverage identity', { ...covered, coveredMessageIdsIdentity: 'bad' }],
+    ['invalid supplement identity', retiredHash('legacy', { causal: { freshnessSupplementId: 3 } })],
+    ['missing same-scope causality', retiredHash('legacy', { ...exactScope, causal: {} })],
+    ['missing coverage identity', { ...retiredHash('legacy'), coveredMessageIds: '["old-message"]' }],
+    ['invalid fence', { ...retiredHash('legacy'), outputFence: 'mystery' }],
+    ['unknown kind', retiredHash('legacy', { executionKind: 'unknown_kind' })],
+    [
+      'corrupt ordinary',
+      { ...retiredHash('legacy', { executionKind: 'ordinary', causal: {} }), immutableIdentity: 'bad' },
+    ],
+  ]) {
+    const client = redis.client(`retired-negative:${randomUUID()}:`);
+    const store = new RedisTurnExecutionStore(client);
+    await client.hset('turnexec:record:legacy', old);
+    await assert.rejects(store.listBySource(query), /failed to hydrate|retired.*execution/i, label);
+    assert.deepEqual(await client.hgetall('turnexec:record:legacy'), old, label);
+  }
+});
 
 test('private execution lookup requires exact scope, audience and unambiguous causality; no public input reference is added', async () => {
   const messages = new MessageStore();

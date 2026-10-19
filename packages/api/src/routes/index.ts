@@ -46,7 +46,6 @@ export { featTrajectoryRoutes } from './feat-trajectory.js';
 export { featureDocDetailRoutes } from './feature-doc-detail.js';
 export { firstRunQuestRoutes } from './first-run-quest.js';
 export { frustrationIssueRoutes } from './frustration-issue-routes.js';
-export { gameRoutes } from './games.js';
 export { governanceStatusRoute } from './governance-status.js';
 export { guideActionRoutes } from './guide-action-routes.js';
 export { homeStateRoutes } from './home-state.js';

@@ -18,6 +18,10 @@ export interface CollectiveConnectorBuiltinRuntimeOptions {
   readonly createIngressDispatcher?: (connector: CollectiveConnector) => {
     dispatchConnection(connectionId: string): Promise<unknown>;
   };
+  readonly reconcileAcceptedWorkResultFiles?: (
+    connector: CollectiveConnector,
+    connectionId: string,
+  ) => Promise<unknown>;
 }
 
 export class CollectiveConnectorBuiltinRuntime implements BuiltinPluginRuntime {
@@ -83,6 +87,9 @@ export class CollectiveConnectorBuiltinRuntime implements BuiltinPluginRuntime {
         .filter((connection) => connection.authorityStatus !== 'revoked')
         .map(async (connection) => {
           await connector.sync(connection.connectionId).catch(() => undefined);
+          await this.options
+            .reconcileAcceptedWorkResultFiles?.(connector, connection.connectionId)
+            .catch(() => undefined);
           await this.#ingressDispatcher?.dispatchConnection(connection.connectionId).catch(() => undefined);
         }),
     );

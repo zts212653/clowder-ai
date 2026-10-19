@@ -129,7 +129,6 @@ function Proof() {
           onAddContext={() => {}}
           onAttach={() => {}}
           onWhisperToggle={() => {}}
-          onGameClick={() => {}}
         />
       )}
     </main>

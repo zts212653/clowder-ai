@@ -76,7 +76,7 @@ export function DemoSpotlight({
     };
   }, [beat, selectedCats, arrivalComplete]);
 
-  const titles = ['你的伙伴到了', '@ 它，它会回你', '别家的猫也在这儿帮忙', '定下来的事变成工作卡'];
+  const titles = ['你的伙伴到了', '@ 它，它会回你', '别家的猫也在这儿帮忙', '定下来的事变成任务卡'];
   const details = [
     '这里的成员都可以 @ 它们',
     '谁回的、回在哪，一眼看清',

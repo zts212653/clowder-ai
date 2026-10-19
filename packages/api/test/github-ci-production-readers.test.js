@@ -1,9 +1,101 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import { setTimeout as delay } from 'node:timers/promises';
 import { TaskStore } from '../dist/domains/cats/services/stores/ports/TaskStore.js';
 import { registerGitHubScheduleFactories } from '../dist/domains/plugin/github-schedule-factories.js';
 import { ScheduleFactoryRegistry } from '../dist/domains/plugin/ScheduleFactoryRegistry.js';
 import { createCiCollectionReaders } from '../dist/infrastructure/email/ci-status-batch-fetcher.js';
+import { executeTaskPipeline } from '../dist/infrastructure/scheduler/execute-pipeline.js';
+
+test('production CI delivers a completed batch when the last queued batch reaches admission cutoff', async () => {
+  const taskStore = new TaskStore();
+  for (let n = 1; n <= 21; n++)
+    taskStore.create({
+      kind: 'pr_tracking',
+      subjectKey: `pr:owner/repo#${n}`,
+      threadId: 'owner-thread',
+      ownerCatId: 'codex61-sol',
+      userId: 'u',
+      title: 'tracked',
+      why: 'batch cutoff regression',
+      createdBy: 'codex61-sol',
+    });
+  let slow = true;
+  let calls = 0;
+  let secondBatchStarted;
+  const readers = createCiCollectionReaders({ warn() {} }, () => 'batch-cutoff-fixture', {
+    execFileAsync: async (_file, _args, options) => {
+      calls++;
+      if (calls === 2 && slow) {
+        slow = false;
+        secondBatchStarted?.();
+        await delay(5000, undefined, { signal: options.signal });
+      }
+      const prs = Object.fromEntries(
+        Array.from({ length: 20 }, (_, index) => [
+          `p${index}`,
+          { headRefOid: 'a'.repeat(40), state: 'OPEN', mergedAt: null, mergedBy: null, commits: { nodes: [] } },
+        ]),
+      );
+      return { stdout: JSON.stringify({ data: { r0: prs } }) };
+    },
+  });
+  const registry = new ScheduleFactoryRegistry();
+  registerGitHubScheduleFactories(registry);
+  const routed = [];
+  const log = { info() {}, warn() {}, error() {} };
+  const spec = registry.get('github.cicd-check').createTaskSpec('schedule:github:cicd-check', {
+    taskStore,
+    log,
+    ...readers,
+    cicdRouter: {
+      route: async (poll) => {
+        routed.push(poll.prNumber);
+        return { kind: 'skipped', reason: 'state-only' };
+      },
+    },
+  });
+  spec.admission.timeoutMs = 2400;
+  const run = () =>
+    executeTaskPipeline({
+      task: spec,
+      ledger: { record() {} },
+      logger: log,
+      running: new Map(),
+      tickCounts: new Map(),
+      lastRunAt: new Map(),
+    });
+  await run();
+  assert.deepEqual(
+    routed,
+    Array.from({ length: 20 }, (_, index) => index + 1),
+  );
+  assert.equal(
+    taskStore.listByKind('pr_tracking').some((task) => task.automationState?.ci),
+    false,
+    'interrupted snapshots do not fabricate durable frontiers',
+  );
+  await run();
+  assert(routed.includes(21), 'the interrupted batch remains reachable next tick');
+  calls = 0;
+  slow = true;
+  const started = new Promise((resolve) => {
+    secondBatchStarted = resolve;
+  });
+  const controller = new AbortController();
+  const pending = readers.fetchPrStatuses(
+    Array.from({ length: 21 }, (_, index) => ({ repoFullName: 'owner/repo', prNumber: index + 1 })),
+    controller.signal,
+    { taskId: spec.id, tickCount: 3, lastRunAt: null, signal: controller.signal, deadlineMs: Date.now() + 2400 },
+  );
+  await started;
+  controller.abort(new Error('whole collector cancelled'));
+  await assert.rejects(
+    pending,
+    /whole collector cancelled/,
+    'a whole-gate cancellation must never become partial success',
+  );
+});
 
 test('production-shaped plugin wiring defers details, uses one credential, and routes the enriched failure', async () => {
   const taskStore = new TaskStore();

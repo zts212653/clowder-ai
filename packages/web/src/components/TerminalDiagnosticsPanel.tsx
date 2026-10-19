@@ -46,3 +46,12 @@ export function TerminalDiagnosticsPanel({
     <TimeoutDiagnosticsPanel errorMessage={errorMessage} diagnostics={selected.diagnostics} />
   );
 }
+
+/** Native failures belong to their response; keep the diagnostic controls inside that same bubble. */
+export function NativeFailureDiagnostics({ message }: { message: ChatMessage }) {
+  const failed =
+    message.lifecycle?.kind === 'response' ? message.lifecycle.status === 'failed' : message.variant === 'error';
+  const diagnostics = message.extra?.cliDiagnostics ?? message.metadata?.cliDiagnostics;
+  if (message.isStreaming || !failed || message.metadata?.provider !== 'google' || !diagnostics) return null;
+  return <CliDiagnosticsPanel errorMessage={message.content} diagnostics={diagnostics} detailsOnly />;
+}

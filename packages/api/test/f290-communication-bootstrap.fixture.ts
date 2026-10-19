@@ -27,7 +27,13 @@ import {
 import { CAT } from './f290-communication-validation.host.js';
 
 /** Real Service HTTP/Connector/Host, deferred first admission; no model or production data. */
-export async function bootstrapFixture({ persistBirth = true } = {}) {
+export async function bootstrapFixture({
+  persistBirth = true,
+  unassignedBeforeCatAcceptance = false,
+}: {
+  readonly persistBirth?: boolean;
+  readonly unassignedBeforeCatAcceptance?: boolean;
+} = {}) {
   const world = await createWorld();
   const cafe = world.operator;
   const messages = new MessageStore();
@@ -92,7 +98,28 @@ export async function bootstrapFixture({ persistBirth = true } = {}) {
     'Matter A: late Host admission',
     participationRevision,
   );
+  const unassigned = unassignedBeforeCatAcceptance
+    ? await world.store.commitCollectiveWork(world.wulang.sessionToken, {
+        ...world.coordinates,
+        requestId: `bootstrap-unassigned-${randomUUID()}`,
+        workId: (
+          await world.store.proposeCollectiveWork(world.wulang.sessionToken, {
+            ...world.coordinates,
+            requestId: `bootstrap-proposal-${randomUUID()}`,
+            sourceEventId: request.eventId,
+            title: 'Newcomer guide',
+            intendedOutcome: request.body,
+          })
+        ).workId,
+        expectedRevision: 1,
+        accountability: 'unassigned',
+      })
+    : undefined;
   const work = await catAccepts(world, cafe, request);
+  if (unassigned) {
+    assert.equal(work.workId, unassigned.workId);
+    assert.equal(work.history.at(-1)?.action, 'accountability_assigned');
+  }
   assert.ok(work.assignmentEventId);
   const birth = persistBirth ? await persist(work.assignmentEventId) : undefined;
   const regrant = async () => {

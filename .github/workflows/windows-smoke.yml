@@ -35,6 +35,8 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter @cat-cafe/shared build
       - run: pnpm --filter @cat-cafe/api build
+      - name: Workspace root cold-store, HTTP and persistence regressions
+        run: node packages/api/scripts/test-workspace-roots.mjs
       - name: Windows web build and duplicate Trusted Types regression
         run: >-
           node --test
@@ -96,6 +98,29 @@ jobs:
           packages/api/test/opencode-model-id-request.test.js
         env:
           REQUIRE_OPENCODE_MODEL_ID_TEST: '1'
+      - name: Windows ACP bootstrap private directories and test isolation
+        run: >-
+          node --import ./packages/api/test/helpers/setup-cat-registry.js --test
+          --test-concurrency=2 --test-timeout=60000
+          packages/api/test/acp/acp-bootstrap-cwd.test.js
+          packages/api/test/acp/acp-bootstrap-platform.test.js
+          packages/api/test/acp/acp-bootstrap-windows.test.js
+          packages/api/test/acp/acp-service-factory.test.js
+          packages/api/test/acp/acp-registration-availability.test.js
+          packages/api/test/account-credential-identity.test.js
+          packages/api/test/account-store-adjudication.test.js
+        env:
+          NODE_ENV: test
+          CAT_CAFE_GLOBAL_CONFIG_ROOT: ${{ runner.temp }}/acp-bootstrap-config
+          REDIS_URL: redis://127.0.0.1:0
+      - name: ACP pool and client lifecycle regressions
+        run: >-
+          node --test --test-concurrency=2 --test-timeout=60000
+          packages/api/test/acp/acp-process-pool.test.js
+          packages/api/test/acp/acp-client.test.js
+        env:
+          NODE_ENV: test
+          REDIS_URL: redis://127.0.0.1:0
       - name: Windows-relevant tests
         run: |
           node --test packages/api/test/cli-spawn-win.test.js

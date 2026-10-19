@@ -5,6 +5,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { HarnessHistoryPublicationOwner } from '../../../../../api/src/infrastructure/capability-evolution/adapters/request-review/harness-history-publication-owner';
 import { MemoryHarnessHistoryPublicationStore } from '../../../../../api/src/infrastructure/capability-evolution/adapters/request-review/harness-history-publication-store';
+import { CapabilityEvolutionProgramDetail } from '../CapabilityEvolutionProgramDetail';
 import { parseProgramProjection } from '../evolution-program-projection';
 import { useEvolutionReading } from '../evolution-reading-state';
 import { DEFAULT_EXPLORATION } from '../exploration/exploration-reading';
@@ -24,7 +25,12 @@ value.program.objectRef = {
   ownerFeatureId: 'F100',
   ownerStateRef: 'capability:development-process-harness-effectiveness',
 };
-const projection = parseProgramProjection(value)!;
+function parseFixtureProjection() {
+  const projection = parseProgramProjection(value);
+  if (!projection) throw new Error('history fixture must be a valid Program projection');
+  return projection;
+}
+const projection = parseFixtureProjection();
 const input = {
   programRef: { ownerFeatureId: 'F311', ownerStateRef: value.program.programId },
   objectRef: value.program.objectRef,
@@ -79,8 +85,11 @@ async function publish() {
     window.dispatchEvent(new Event('focus'));
   });
 }
-const button = (text: string) =>
-  [...host.querySelectorAll('button')].find((entry) => entry.textContent?.includes(text))!;
+const button = (text: string) => {
+  const match = [...host.querySelectorAll('button')].find((entry) => entry.textContent?.includes(text));
+  if (!match) throw new Error(`missing button containing: ${text}`);
+  return match;
+};
 
 it('pins the source, preserves the current body until explicit replacement, and keeps the same reading DOM', async () => {
   await show();
@@ -106,8 +115,8 @@ it('automatically adopts unrelated updates while retaining collapsed cases', asy
   await show();
   const article = host.querySelector('[data-history-step]');
   const toggle = host.querySelector<HTMLButtonElement>('.exploration-history-case-toggle');
-  expect(toggle).not.toBeNull();
-  await act(async () => toggle!.click());
+  if (!toggle) throw new Error('history case toggle missing');
+  await act(async () => toggle.click());
   next.story.nodes.at(-1).summary = '其他步骤新增说明';
   await publish();
   expect(
@@ -121,7 +130,7 @@ it.each(['period', 'updatedThrough'])('requires explicit adoption when visible %
   await show();
   const selected = useEvolutionReading.getState().programs[value.program.programId]?.exploration?.selectedSourceRef;
   if (field === 'period') next.story.nodes[0].when = '9月2日 · 后续补记';
-  else next.story.updated = '2026-10-17';
+  else next.story.updated = archive.story.updated === '2026-10-18' ? '2026-10-19' : '2026-10-18';
   await publish();
   expect(useEvolutionReading.getState().programs[value.program.programId]?.exploration?.selectedSourceRef).toEqual(
     selected,
@@ -148,6 +157,47 @@ it('recovers legacy saved references only through the owner-issued explicit acti
   expect(
     useEvolutionReading.getState().programs[value.program.programId]?.exploration?.selectedSourceRef,
   ).toBeDefined();
+});
+
+it('puts the readable archive and explicit recovery before evaluation gaps in the v2 Program detail', async () => {
+  localStorage.setItem('cat-cafe:shell-presentation', 'v2');
+  const legacyNodeRef = {
+    ownerFeatureId: 'F314',
+    ownerStateRef: 'harness-history:release:H01',
+    version: 'old',
+  };
+  useEvolutionReading.getState().update(value.program.programId, {
+    journeyMoment: 2,
+    exploration: { ...DEFAULT_EXPLORATION, selectedNodeRef: legacyNodeRef },
+  });
+
+  await act(async () =>
+    root.render(
+      <CapabilityEvolutionProgramDetail
+        projection={projection}
+        onClose={() => undefined}
+        onOpenProgram={() => undefined}
+      />,
+    ),
+  );
+
+  const recovery = host.querySelector<HTMLElement>('[aria-label="最新历史可读"]');
+  const evaluation = host.querySelector<HTMLElement>('[aria-label="项目效果评估状态"]');
+  if (!recovery || !evaluation) throw new Error('history recovery and evaluation status must both render');
+  expect(recovery.textContent).toContain('最新历史已经发布，可以直接阅读');
+  expect(host.textContent).not.toContain('仍有来源待确认');
+  expect(evaluation.textContent).toContain('项目效果评估仍待补证');
+  expect(evaluation.textContent).toContain('不是查看已发布探索记录的前置条件');
+  expect(recovery.compareDocumentPosition(evaluation) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(useEvolutionReading.getState().programs[value.program.programId]?.exploration?.selectedNodeRef).toEqual(
+    legacyNodeRef,
+  );
+
+  await act(async () => button('打开最新历史').click());
+  const archiveSummary = host.querySelector<HTMLElement>('[aria-label="错题谱系"]');
+  if (!archiveSummary) throw new Error('latest history summary missing after explicit recovery');
+  expect(archiveSummary.textContent).toContain('11 步 · 26 道错题');
+  expect(archiveSummary.compareDocumentPosition(evaluation) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 });
 
 it.each([

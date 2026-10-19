@@ -12,7 +12,7 @@ import { COMPOSER_RECALL_PENDING_COPY, COMPOSER_TOO_LARGE_COPY } from '../compos
 import { projectScreeningComposerConflict } from '../project-screening-composer-group';
 
 /**
- * The places a person circles on an image, held as ONE media attachment of the chat composer until the one send.
+ * Each work's circled places stay in its own media attachment of the one original composer until the one send.
  *
  * The attachment is the canonical message form (docs/architecture/f309-media-message-contract.md): one source, up to
  * twelve stable-id selections, the person's own words stay in the message body. These functions only decide what that
@@ -25,6 +25,7 @@ export interface MediaChatTarget {
   readonly title: string;
   readonly mediaType: MediaContextAttachment['mediaType'];
   readonly source: MediaContextAttachment['source'];
+  readonly gallery?: MediaContextAttachment['gallery'];
   /** Only a media round that already has a Task carries one; it must name the same round as the source. */
   readonly taskContext?: MediaContextAttachment['taskContext'];
 }
@@ -33,7 +34,7 @@ export const MEDIA_SELECTION_LIMIT = 12;
 const INSTRUCTION_LIMIT = 4000;
 
 export type MediaSelectionRefusal =
-  /** Places on another work (or another version of this one) are already waiting; one send names one source. */
+  /** Places outside this original message group, or another version of this work, are already waiting. */
   | 'other_source'
   | 'full'
   /** The composer already holds the most things a message can carry; a draft past that is discarded, so refuse. */
@@ -139,6 +140,7 @@ export function mediaChatTarget(input: {
   readonly title: string;
   readonly mime: string;
   readonly source: MediaContextAttachment['source'];
+  readonly gallery?: MediaContextAttachment['gallery'];
   readonly taskContext?: MediaContextAttachment['taskContext'];
 }): MediaChatTarget | null {
   const mediaType = mediaChatMime(input.mime);
@@ -149,6 +151,7 @@ export function mediaChatTarget(input: {
     title,
     mediaType,
     source: input.source,
+    ...(input.gallery ? { gallery: input.gallery } : {}),
     ...(input.taskContext ? { taskContext: input.taskContext } : {}),
   };
 }
@@ -160,8 +163,43 @@ export function mediaSelectionLabel(item: MediaSelectionItem): '圈选' | '点�
   return item.selection.kind === 'image-point' ? '点选' : '圈选';
 }
 
-export function pendingMediaAttachment(list: readonly ContextAttachment[]): MediaContextAttachment | undefined {
-  return list.find((attachment): attachment is MediaContextAttachment => attachment.kind === 'media');
+export function pendingMediaAttachment(
+  list: readonly ContextAttachment[],
+  target?: MediaChatTarget,
+): MediaContextAttachment | undefined {
+  return list.find(
+    (attachment): attachment is MediaContextAttachment =>
+      attachment.kind === 'media' &&
+      (!target ||
+        (sameMediaSource(attachment, target) &&
+          (!target.gallery ||
+            !attachment.gallery ||
+            (sameGalleryGroup(attachment.gallery, target.gallery) &&
+              attachment.gallery.index === target.gallery.index)))),
+  );
+}
+
+export function sameGalleryGroup(
+  a: NonNullable<MediaChatTarget['gallery']>,
+  b: NonNullable<MediaChatTarget['gallery']>,
+): boolean {
+  return (
+    a.threadId === b.threadId &&
+    a.messageId === b.messageId &&
+    a.messageRevision === b.messageRevision &&
+    a.count === b.count
+  );
+}
+
+/** More than one source is admitted only within the same explicit original-message group. */
+function otherMediaSource(current: readonly ContextAttachment[], target: MediaChatTarget): boolean {
+  return current.some((item) => {
+    if (item.kind !== 'media') return false;
+    const a = item.gallery,
+      b = target.gallery;
+    if (sameMediaSource(item, target) && (!a || !b)) return false;
+    return !a || !b || !sameGalleryGroup(a, b) || (a.index === b.index && !sameMediaSource(item, target));
+  });
 }
 
 function nextSelectionId(selections: readonly MediaSelectionItem[]): string {
@@ -199,6 +237,12 @@ function refusalBefore(
 ): MediaSelectionRefusal | null {
   if ((target.mediaType === 'video/mp4') !== (anchor.kind === 'video-range')) return 'not_image';
   if (words.length > INSTRUCTION_LIMIT) return 'too_long';
+  if (otherMediaSource(current, target)) return 'other_source';
+  if (
+    current.reduce((count, item) => count + (item.kind === 'media' ? item.selections.length : 0), 0) >=
+    MEDIA_SELECTION_LIMIT
+  )
+    return 'full';
   if (!pending) return current.length >= CONTEXT_ATTACHMENT_MAX_COUNT ? 'composer_full' : null;
   if (!sameMediaSource(pending, target)) return 'other_source';
   if (pending.selections.length === 0) return 'whole_work_pending';
@@ -228,8 +272,8 @@ export type AddMediaWork =
 
 /** An empty selection list is the canonical whole-work reference, never a synthetic full-canvas selection. */
 export function addMediaWork(current: readonly ContextAttachment[], target: MediaChatTarget): AddMediaWork {
-  const pending = pendingMediaAttachment(current);
-  if (pending && !sameMediaSource(pending, target)) return { kind: 'refused', reason: 'other_source' };
+  const pending = pendingMediaAttachment(current, target);
+  if (otherMediaSource(current, target)) return { kind: 'refused', reason: 'other_source' };
   if (pending?.selections.length) return { kind: 'refused', reason: 'selected_places_pending' };
   if (pending) return { kind: 'added', attachment: pending };
   if (current.length >= CONTEXT_ATTACHMENT_MAX_COUNT) return { kind: 'refused', reason: 'composer_full' };
@@ -240,6 +284,7 @@ export function addMediaWork(current: readonly ContextAttachment[], target: Medi
     title: target.title,
     mediaType: target.mediaType,
     source: target.source,
+    ...(target.gallery ? { gallery: target.gallery } : {}),
     ...(target.taskContext ? { taskContext: target.taskContext } : {}),
     selections: [],
   });
@@ -256,12 +301,12 @@ export function addMediaSelection(
   instruction?: string,
 ): AddMediaSelection {
   const words = instruction?.trim() ?? '';
-  const pending = pendingMediaAttachment(current);
+  const pending = pendingMediaAttachment(current, target);
   const refusal = refusalBefore(current, pending, target, anchor, words);
   if (refusal) return { kind: 'refused', reason: refusal };
 
   const existing = pending?.selections ?? [];
-  const selectionId = nextSelectionId(existing);
+  const selectionId = nextSelectionId(current.flatMap((item) => (item.kind === 'media' ? item.selections : [])));
   const selections = [...existing, { id: selectionId, selection: anchor, ...(words ? { instruction: words } : {}) }];
   if (placesWordsTooLong(selections)) return { kind: 'refused', reason: 'too_long' };
   const parsed = MediaContextAttachmentSchema.safeParse({
@@ -272,6 +317,7 @@ export function addMediaSelection(
     title: target.title,
     mediaType: target.mediaType,
     source: target.source,
+    ...((target.gallery ?? pending?.gallery) ? { gallery: target.gallery ?? pending?.gallery } : {}),
     ...(target.taskContext ? { taskContext: target.taskContext } : {}),
     selections,
   });

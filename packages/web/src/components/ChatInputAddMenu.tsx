@@ -7,7 +7,6 @@ import { ComposerPopover } from './ComposerPopover';
 import { type ComposerPreferredCatControl, ComposerPreferredCatSection } from './ComposerPreferredCatSection';
 import { chatComposerCopy } from './chat-composer.shell-copy';
 import { AttachIcon } from './icons/AttachIcon';
-import { GameIcon } from './icons/GameIcon';
 import { MessageDispositionSelector, messageDispositionLabel } from './MessageDispositionSelector';
 import { useShellCopy } from './shell/shell-copy';
 
@@ -16,7 +15,6 @@ interface ChatInputAddMenuProps {
   onAddContext: () => void;
   onAttach: () => void;
   onWhisperToggle: () => void;
-  onGameClick: () => void;
   onClose: () => void;
   triggerRef: RefObject<HTMLButtonElement>;
   disabled?: boolean;
@@ -33,7 +31,6 @@ export function ChatInputAddMenu({
   onAddContext,
   onAttach,
   onWhisperToggle,
-  onGameClick,
   onClose,
   triggerRef,
   disabled,
@@ -127,18 +124,6 @@ export function ChatInputAddMenu({
                 onClick={() => {
                   onClose();
                   onWhisperToggle();
-                }}
-              />
-              <AddMenuItem
-                tooltip={presentation === 'v2'}
-                testId="composer-game"
-                icon={<GameIcon />}
-                label={t.game}
-                description={t.gameHint}
-                disabled={unavailable}
-                onClick={() => {
-                  onClose();
-                  onGameClick();
                 }}
               />
             </div>

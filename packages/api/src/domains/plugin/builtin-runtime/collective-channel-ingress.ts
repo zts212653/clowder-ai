@@ -61,6 +61,11 @@ export async function routeCollectiveChannelEvent(input: {
       ? { ...receipt, attention: { request: 'response_requested' as const, state: 'unclaimed' as const } }
       : receipt;
   }
+  if (listener.reason === 'work_feedback') {
+    // The Service emits a separate typed wake for an exact Work comment. Keep this public
+    // event visible, but do not create a second classification invocation for the same text.
+    return input.persistVisible(threadId);
+  }
   const source = attentionSource(event, connection.connectionId, listener.catId, route.revision);
   const receipt = await input.persistAgent(threadId, listener.catId, source);
   return listener.reason === 'response_request'

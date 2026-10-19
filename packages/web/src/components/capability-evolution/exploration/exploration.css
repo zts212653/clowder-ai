@@ -224,6 +224,21 @@
 .exploration-link {
   margin: 8px 12px 0 0;
 }
+.exploration-history-recovery {
+  margin: 12px 0;
+  padding: 12px 14px;
+  border-left: 2px solid var(--semantic-info);
+  border-radius: 0 6px 6px 0;
+  background: var(--semantic-info-surface);
+  color: var(--cafe-text-secondary);
+  font-size: var(--console-font-xs);
+}
+.exploration-history-recovery strong {
+  color: var(--cafe-text);
+}
+.exploration-history-recovery p {
+  margin: 6px 0 0;
+}
 .exploration-notice {
   margin: 12px 0;
   padding: 12px 14px;

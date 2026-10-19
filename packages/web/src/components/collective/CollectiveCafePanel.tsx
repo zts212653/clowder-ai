@@ -1,18 +1,13 @@
 'use client';
+
 import type { CollectiveCafeSection } from '@cat-cafe/shared';
 import { useEffect, useRef, useState } from 'react';
+import { useOpenInChat } from '@/components/shell/use-open-in-chat';
+import { useChatStore } from '@/stores/chatStore';
 import { CollectiveCafeSectionContent } from './CollectiveCafeSectionContent';
 import type { CollectiveConnectionProjection } from './collective-client';
 import type { useCollectiveParticipation } from './use-collective-participation';
 import type { CollectiveWorkPolicyState } from './use-collective-work-policy';
-
-const CAFE_SECTIONS = [
-  ['cats', '我的猫'],
-  ['channel', '频道'],
-  ['calendar', '日程'],
-  ['permissions', '授权'],
-  ['connection', '连接'],
-] as const;
 
 function sectionTitle(section: CollectiveCafeSection, channelId: string) {
   if (section === 'channel') return `# ${channelId}`;
@@ -34,6 +29,7 @@ export function CollectiveCafePanel({
   busy,
   pairingState,
   onClose,
+  onOpenMembers,
   onPair,
   onMutate,
   connections,
@@ -50,11 +46,13 @@ export function CollectiveCafePanel({
   readonly busy?: string;
   readonly pairingState: 'waiting' | 'ready' | 'unavailable';
   readonly onClose: () => void;
+  readonly onOpenMembers?: () => void;
   readonly onPair: () => void;
   readonly onMutate: (operation: 'reconnect' | 'revoke') => void;
   readonly connections: readonly CollectiveConnectionProjection[];
   readonly onSelectConnection: (id: string) => void;
 }) {
+  const openInChat = useOpenInChat();
   const closeButton = useRef<HTMLButtonElement>(null);
   const [section, setSection] = useState<CollectiveCafeSection>(initialSection);
   useEffect(() => {
@@ -75,8 +73,8 @@ export function CollectiveCafePanel({
   }, [onClose]);
   return (
     <aside
-      aria-label="我的猫"
-      className="absolute inset-y-0 right-0 z-20 flex w-[min(420px,94%)] flex-col border-l border-[var(--console-border-soft)] bg-[var(--console-card-bg)] text-cafe-primary shadow-[var(--console-elevation-2)]"
+      aria-label="我的 Café"
+      className="absolute inset-y-0 right-0 z-20 flex collective-private-page flex-col border-l border-[var(--console-border-soft)] bg-[var(--shell-work)] text-cafe-primary "
     >
       <header className="flex items-center justify-between border-b border-[var(--console-border-soft)] px-5 py-4">
         <div>
@@ -86,27 +84,26 @@ export function CollectiveCafePanel({
         <button
           ref={closeButton}
           type="button"
-          aria-label="关闭我的猫"
+          aria-label="返回共同体"
           className="px-2 text-2xl text-cafe-muted"
           onClick={onClose}
         >
           ×
         </button>
       </header>
-      <nav className="grid grid-cols-5 border-b border-[var(--console-border-soft)] p-2" aria-label="我的猫分区">
-        {CAFE_SECTIONS.map(([id, label]) => (
-          <button
-            key={id}
-            type="button"
-            aria-pressed={section === id}
-            className="rounded-lg px-2 py-2 text-xs text-cafe-secondary aria-pressed:bg-[var(--cafe-surface-sunken)] aria-pressed:text-cafe-primary"
-            onClick={() => setSection(id)}
-          >
-            {label}
-          </button>
-        ))}
-      </nav>
       <div className="min-h-0 flex-1 space-y-5 overflow-y-auto px-5 py-5">
+        {section === 'calendar' && (
+          <button
+            type="button"
+            className="mb-5 rounded-lg border border-[var(--shell-hairline-strong)] px-3 py-2 text-sm"
+            onClick={() => {
+              onClose();
+              openInChat(() => useChatStore.getState().setWorkspaceMode('product-schedule'));
+            }}
+          >
+            打开家里的待办与日程
+          </button>
+        )}
         <CollectiveCafeSectionContent
           section={section}
           state={state}
@@ -120,7 +117,7 @@ export function CollectiveCafePanel({
           onPair={onPair}
           onMutate={onMutate}
           onSelectConnection={onSelectConnection}
-          onSelectCats={() => setSection('cats')}
+          onSelectCats={onOpenMembers ?? (() => setSection('cats'))}
         />
       </div>
     </aside>

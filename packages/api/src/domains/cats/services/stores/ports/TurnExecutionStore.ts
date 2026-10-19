@@ -7,7 +7,6 @@ import type {
   TurnExecutionKind,
   TurnExecutionMessageProjection,
   TurnExecutionRecord,
-  TurnExecutionStatus,
   TurnExecutionTerminalInput,
   TurnExecutionTerminalStatus,
   TurnOutputFence,
@@ -168,14 +167,19 @@ function assertTimestamp(value: number, field: string): void {
 }
 
 export function assertCreateTurnExecutionInput(input: CreateTurnExecutionInput): void {
+  if (!EXECUTION_KINDS.has(input.executionKind)) {
+    throw new Error(`invalid executionKind: ${String(input.executionKind)}`);
+  }
+  assertTurnExecutionIdentityFields(input);
+}
+
+/** Identity invariants shared with the bounded, read-only retired-record decoder. */
+export function assertTurnExecutionIdentityFields(input: Omit<CreateTurnExecutionInput, 'executionKind'>): void {
   assertNonEmpty(input.invocationId, 'invocationId');
   assertNonEmpty(input.parentInvocationId, 'parentInvocationId');
   assertNonEmpty(input.threadId, 'threadId');
   assertNonEmpty(input.userId, 'userId');
   assertNonEmpty(input.catId as string, 'catId');
-  if (!EXECUTION_KINDS.has(input.executionKind)) {
-    throw new Error(`invalid executionKind: ${String(input.executionKind)}`);
-  }
   assertTimestamp(input.startedAt, 'startedAt');
   if (input.outputFence !== undefined && !isTurnOutputFence(input.outputFence)) {
     throw new Error(`invalid outputFence: ${String(input.outputFence)}`);
@@ -187,17 +191,7 @@ export function assertCreateTurnExecutionInput(input: CreateTurnExecutionInput):
   if (input.causal?.routingGuardReason !== undefined && input.causal.routingGuardReason !== 'missing_routing_exit') {
     throw new Error(`invalid routingGuardReason: ${String(input.causal.routingGuardReason)}`);
   }
-  if (input.causal?.coveredMessageIds !== undefined) {
-    if (!Array.isArray(input.causal.coveredMessageIds) || input.causal.coveredMessageIds.length === 0) {
-      throw new Error('coveredMessageIds must be a non-empty array when present');
-    }
-    const covered = new Set<string>();
-    for (const messageId of input.causal.coveredMessageIds) {
-      assertNonEmpty(messageId, 'coveredMessageId');
-      if (covered.has(messageId)) throw new Error('coveredMessageIds must not contain duplicates');
-      covered.add(messageId);
-    }
-  }
+  if (input.causal?.coveredMessageIds !== undefined) assertCoveredMessageIds(input.causal.coveredMessageIds);
 }
 
 export function assertTurnExecutionTerminalInput(

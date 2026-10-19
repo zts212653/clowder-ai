@@ -80,6 +80,12 @@ it('uses the named source read and opens a complete document DTO with the origin
     },
   });
 });
+it('keeps the same-scope works count while refreshing', async () => {
+  await act(async () => root.render(<ThreadWorksPanelV2 threadId="work-source" />));
+  data.fetch.mockImplementation(() => new Promise<Response>(() => {}));
+  await act(async () => window.dispatchEvent(new Event('cat-cafe:entrusted-work-projection-invalidated')));
+  expect(host.querySelector('.v2-works-count')?.textContent).toContain('2 works');
+});
 it('incomplete source reads show neither a precise count nor a false empty state', async () => {
   data.fetch.mockImplementation(async () =>
     Response.json({ artifacts: [], workLineage: 'unavailable', view: 'works', complete: false }),
@@ -398,4 +404,15 @@ it('retires an unavailable type filter when the original catalogue refreshes', a
   expect(types.value).toBe('all');
   expect(host.textContent).toContain('Exact PR');
   expect(host.textContent).not.toContain('No works match');
+});
+
+it('shows loading rather than a fabricated zero while retrying a failed refresh', async () => {
+  await act(async () => root.render(<ThreadWorksPanelV2 threadId="work-source" />));
+  expect(host.querySelector('.v2-works-count')?.textContent).toContain('2 works');
+  data.fetch.mockResolvedValue(new Response('', { status: 503 }));
+  await act(async () => window.dispatchEvent(new Event('cat-cafe:entrusted-work-projection-invalidated')));
+  data.fetch.mockImplementation(() => new Promise<Response>(() => {}));
+  await act(async () => window.dispatchEvent(new Event('cat-cafe:entrusted-work-projection-invalidated')));
+  expect(host.querySelector('.v2-works-count')?.textContent).not.toContain('0 works');
+  expect(host.querySelector('.v2-works-count')?.textContent).toContain('Reading');
 });

@@ -4,6 +4,12 @@ import {
   replacementTransitionMatchesDelegateLineage,
   sameSingleActionSuccessorHolder,
 } from './action-successor-delegate-lineage-transition.js';
+import {
+  orphanCarrierRecoveryGenerationMatches,
+  orphanCarrierRecoveryHistoryIsValid,
+  orphanCarrierRecoveryMatchesDelegateLineage,
+  orphanCarrierRecoverySupersedesGeneration,
+} from './action-successor-orphan-carrier-lineage.js';
 import { carrierRefreshEvidenceRef } from './action-successor-refresh-state-machine.js';
 import type { ActionSuccessorLease } from './action-successor-state-machine.js';
 
@@ -27,7 +33,10 @@ export interface ActionSuccessorDelegateLineageAnchor {
 }
 
 type ActionSuccessorLineageArrays = Partial<Pick<ActionSuccessorLease, 'replacementTransitions' | 'returnTransitions'>>;
-type ActionSuccessorLineageHistory = Pick<ActionSuccessorLease, 'evidenceRefs' | 'generation' | 'leaseId'> &
+type ActionSuccessorLineageHistory = Pick<
+  ActionSuccessorLease,
+  'evidenceRefs' | 'generation' | 'leaseId' | 'orphanCarrierRecoveryTransitions' | 'subjectRef'
+> &
   ActionSuccessorLineageArrays;
 
 const NO_RETURN_TRANSITIONS: ActionSuccessorLease['returnTransitions'] = [];
@@ -63,6 +72,7 @@ function delegateLineageGenerationHasExactEntry(input: {
       replacementTransitionMatchesCanonicalOwnerRoute(transition, route),
   );
   if (replacementEntry) return true;
+  if (orphanCarrierRecoveryGenerationMatches({ lease, route, generation, holderCatIds, holderThreadId })) return true;
   return delegateLineageGenerationHasExactRefreshEntry({
     lease,
     route,
@@ -82,6 +92,9 @@ function delegateLineageGenerationHasExactRefreshEntry(input: {
   const { lease, generation } = input;
   if (!lease.evidenceRefs.includes(carrierRefreshEvidenceRef(lease.leaseId, generation))) return false;
   if (replacementTransitionsOf(lease).some((transition) => transition.toGeneration === generation)) return false;
+  if ((lease.orphanCarrierRecoveryTransitions ?? []).some((transition) => transition.toGeneration === generation)) {
+    return false;
+  }
   if (returnTransitionsOf(lease).some((transition) => transition.fromGeneration < generation)) return false;
   if (generation === 2) return true;
   return delegateLineageGenerationHasExactEntry({ ...input, generation: generation - 1 });
@@ -103,50 +116,57 @@ function returnTransitionMatchesCanonicalOwnerRoute(
   );
 }
 
+type ActionSuccessorLineageEdge =
+  | ActionSuccessorLease['returnTransitions'][number]
+  | ActionSuccessorLease['replacementTransitions'][number]
+  | ActionSuccessorLease['orphanCarrierRecoveryTransitions'][number];
+
+function lineageEdgeExtendsKnownGeneration(input: {
+  lease: ActionSuccessorLineageHistory;
+  route: Pick<ActionSuccessorDelegateLineageRoute, 'ownerCatId' | 'ownerThreadId'>;
+  edge: ActionSuccessorLineageEdge;
+  fromGenerations: Set<number>;
+}): boolean {
+  const { lease, route, edge, fromGenerations } = input;
+  if (edge.toGeneration > lease.generation || fromGenerations.has(edge.fromGeneration)) return false;
+  fromGenerations.add(edge.fromGeneration);
+  if (edge.fromGeneration === 1) return true;
+  const holderCatIds =
+    'kind' in edge ? [edge.holderCatId] : 'fromHolderCatIds' in edge ? edge.fromHolderCatIds : [edge.rejectingCatId];
+  const holderThreadId =
+    'kind' in edge
+      ? edge.holderThreadId
+      : 'fromHolderThreadId' in edge
+        ? edge.fromHolderThreadId
+        : edge.rejectingThreadId;
+  return delegateLineageGenerationHasExactEntry({
+    lease,
+    route,
+    generation: edge.fromGeneration,
+    holderCatIds,
+    holderThreadId,
+  });
+}
+
 export function delegateLineageHistoryMatchesCanonicalOwner(
   lease: ActionSuccessorLineageHistory,
   route: Pick<ActionSuccessorDelegateLineageRoute, 'ownerCatId' | 'ownerThreadId'>,
 ): boolean {
   const returnTransitions = returnTransitionsOf(lease);
   const replacementTransitions = replacementTransitionsOf(lease);
-  const edges = [...returnTransitions, ...replacementTransitions];
+  const orphanTransitions = lease.orphanCarrierRecoveryTransitions ?? [];
+  const edges = [...returnTransitions, ...replacementTransitions, ...orphanTransitions];
   const fromGenerations = new Set<number>();
-  if (!returnTransitions.every((transition) => returnTransitionMatchesCanonicalOwnerRoute(transition, route))) {
-    return false;
-  }
   if (
-    !replacementTransitions.every((transition) => replacementTransitionMatchesCanonicalOwnerRoute(transition, route))
-  ) {
+    !returnTransitions.every((transition) => returnTransitionMatchesCanonicalOwnerRoute(transition, route)) ||
+    !replacementTransitions.every((transition) => replacementTransitionMatchesCanonicalOwnerRoute(transition, route)) ||
+    !orphanCarrierRecoveryHistoryIsValid(lease, route)
+  )
     return false;
-  }
-  for (const transition of edges) {
-    if (transition.toGeneration > lease.generation) return false;
-    if (fromGenerations.has(transition.fromGeneration)) return false;
-    fromGenerations.add(transition.fromGeneration);
-    if (transition.fromGeneration === 1) continue;
-    const holderCatIds = 'fromHolderCatIds' in transition ? transition.fromHolderCatIds : [transition.rejectingCatId];
-    const holderThreadId =
-      'fromHolderThreadId' in transition ? transition.fromHolderThreadId : transition.rejectingThreadId;
-    if (
-      !delegateLineageGenerationHasExactEntry({
-        lease,
-        route,
-        generation: transition.fromGeneration,
-        holderCatIds,
-        holderThreadId,
-      })
-    ) {
-      return false;
-    }
-  }
-  return true;
+  return edges.every((edge) => lineageEdgeExtendsKnownGeneration({ lease, route, edge, fromGenerations }));
 }
 
-/**
- * A child proposal anchors its first admitted cat, while later same-child
- * successors may differ. The anchor must be server-derived lease evidence plus
- * a durable observation of that exact cat/thread in the lineage.
- */
+/** A proposal anchor needs server-derived evidence plus its exact cat/thread in lineage. */
 export function delegateLineageHasProposalAnchor(
   lease: Pick<
     ActionSuccessorLease,
@@ -182,11 +202,7 @@ export function delegateLineageHasProposalAnchor(
   );
 }
 
-/**
- * Return and cross-child replacement edges delimit child-local lineage
- * segments. Historical segments remain auditable but cannot veto the current
- * child's valid terminal/interrupted successor recovery.
- */
+/** Historical child segments remain auditable but cannot veto the current child. */
 export function currentDelegateLineageSegmentStartGeneration(
   lease: ActionSuccessorLease,
   route: ActionSuccessorDelegateLineageRoute,
@@ -217,10 +233,13 @@ export function currentDelegateLineageSegmentStartGeneration(
   const startGeneration = Math.max(1, ...returnStarts, ...replacementStarts);
   if (startGeneration > lease.generation) return null;
 
-  const currentSegmentMatches = replacementTransitionsOf(lease)
+  const currentSegmentReplacementsMatch = replacementTransitionsOf(lease)
     .filter((transition) => transition.fromGeneration >= startGeneration)
     .every((transition) => replacementTransitionMatchesDelegateLineage(transition, route));
-  return currentSegmentMatches ? startGeneration : null;
+  const currentSegmentRecoveriesMatch = (lease.orphanCarrierRecoveryTransitions ?? [])
+    .filter((transition) => transition.fromGeneration >= startGeneration)
+    .every((transition) => orphanCarrierRecoveryMatchesDelegateLineage(transition, route));
+  return currentSegmentReplacementsMatch && currentSegmentRecoveriesMatch ? startGeneration : null;
 }
 
 export function currentDelegateLineageGenerationHasExactEntry(
@@ -312,11 +331,13 @@ export function delegateLineageGenerationWasSuperseded(input: {
       entry.predecessorThreadId === route.ownerThreadId,
   );
   if (supersedingReturn) return true;
-  return replacementTransitionsOf(lease).some(
+  const supersedingReplacement = replacementTransitionsOf(lease).some(
     (entry) =>
       entry.fromGeneration === generation &&
       sameSingleActionSuccessorHolder(entry.fromHolderCatIds, expectedReporterCatIds) &&
       entry.fromHolderThreadId === route.childThreadId &&
       replacementTransitionMatchesCanonicalOwnerRoute(entry, route),
   );
+  if (supersedingReplacement) return true;
+  return orphanCarrierRecoverySupersedesGeneration({ lease, route, generation, expectedReporterCatIds });
 }

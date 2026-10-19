@@ -1,0 +1,270 @@
+.project-authoring-control {
+  position: relative;
+  flex: none;
+}
+
+.project-authoring-form {
+  position: absolute;
+  z-index: 8;
+  top: calc(100% + 8px);
+  right: 0;
+  display: grid;
+  width: min(380px, calc(100vw - 28px));
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid var(--console-border-soft);
+  border-radius: 12px;
+  background: var(--console-card-bg);
+  box-shadow: var(--shadow-elevation-3);
+}
+
+.project-authoring-form label,
+.work-accountability-actions label {
+  display: grid;
+  gap: 5px;
+  color: var(--cafe-text-muted);
+  font-size: 11px;
+}
+
+.project-authoring-form input,
+.project-authoring-form textarea,
+.project-authoring-form select,
+.work-accountability-actions select {
+  width: 100%;
+  min-height: 38px;
+  padding: 8px 10px;
+  border: 1px solid var(--console-border-soft);
+  border-radius: 8px;
+  background: var(--console-surface);
+  color: var(--cafe-text-primary);
+  font: inherit;
+}
+
+.project-authoring-form textarea {
+  min-height: 76px;
+  resize: vertical;
+}
+
+.project-authoring-form [role="alert"],
+.project-authoring-note {
+  margin: 0;
+  color: var(--semantic-critical);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.project-authoring-note {
+  color: var(--cafe-text-muted);
+}
+
+.project-authoring-actions,
+.roadmap-heading-actions,
+.work-accountability-actions > div {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.project-authoring-actions button,
+.work-accountability-actions button {
+  min-height: 36px;
+  padding: 7px 10px;
+  border: 1px solid var(--console-border-soft);
+  border-radius: 8px;
+  background: var(--console-card-bg);
+  color: var(--cafe-text-secondary);
+}
+
+button.project-primary-action {
+  border-color: var(--cafe-accent);
+  background: var(--cafe-accent);
+  color: var(--console-on-accent, white);
+}
+
+.roadmap-heading-actions {
+  position: relative;
+  flex: none;
+}
+
+.project-task-authoring-form {
+  top: calc(100% + 10px);
+}
+
+.project-workspace-empty {
+  width: min(980px, calc(100% - 28px));
+  margin: 44px auto;
+  padding: 28px;
+  border: 1px dashed var(--console-border-soft);
+  border-radius: 12px;
+  color: var(--cafe-text-muted);
+  text-align: center;
+}
+
+.project-list-empty {
+  margin: 32px 0;
+  padding: 28px;
+  border: 1px dashed var(--console-border-soft);
+  border-radius: 12px;
+  color: var(--cafe-text-muted);
+  text-align: center;
+}
+
+.work-accountability-actions {
+  display: grid;
+  gap: 10px;
+  margin: 14px 0;
+  padding: 12px;
+  border: 1px solid color-mix(in srgb, var(--cafe-accent) 32%, var(--console-border-soft));
+  border-radius: 9px;
+  background: var(--console-active-bg);
+}
+
+.work-accountability-actions strong,
+.work-accountability-actions p {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.work-accountability-actions p {
+  color: var(--cafe-text-muted);
+}
+
+.work-accountability-actions > .work-accountability-invite {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+}
+
+.project-suggestions {
+  width: min(980px, 100%);
+  margin: 18px auto 0;
+  padding: 14px;
+  border: 1px solid color-mix(in srgb, var(--semantic-warning) 38%, var(--console-border-soft));
+  border-radius: 12px;
+  background: var(--semantic-warning-surface);
+}
+
+.project-suggestions > header,
+.project-suggestion-card > header,
+.project-suggestion-card > footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.project-suggestions > header > div,
+.project-suggestion-card > header > div {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.project-suggestions > header span,
+.project-suggestions > header small,
+.project-suggestion-card > header span,
+.project-suggestion-card label > span {
+  color: var(--cafe-text-muted);
+  font-size: 10px;
+  line-height: 1.45;
+}
+
+.project-suggestion-list {
+  display: grid;
+  gap: 10px;
+  padding-top: 12px;
+}
+
+.project-suggestion-card {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--console-border-soft);
+  border-radius: 10px;
+  background: var(--console-card-bg);
+}
+
+.project-suggestion-card label {
+  display: grid;
+  gap: 5px;
+}
+
+.project-suggestion-card input,
+.project-suggestion-card textarea {
+  width: 100%;
+  min-height: 38px;
+  padding: 8px 10px;
+  border: 1px solid var(--console-border-soft);
+  border-radius: 8px;
+  background: var(--console-surface);
+  color: var(--cafe-text-primary);
+  font: inherit;
+}
+
+.project-suggestion-card textarea {
+  min-height: 72px;
+  resize: vertical;
+}
+
+.project-suggestion-card [role="alert"] {
+  margin: 0;
+  color: var(--semantic-critical);
+  font-size: 11px;
+}
+
+.project-suggestion-card button {
+  min-height: 36px;
+  padding: 7px 10px;
+  border: 1px solid var(--console-border-soft);
+  border-radius: 8px;
+  background: var(--console-card-bg);
+  color: var(--cafe-text-secondary);
+}
+
+.project-suggestion-card .project-suggestion-accept {
+  border-color: var(--cafe-accent);
+  background: var(--cafe-accent);
+  color: var(--console-on-accent, white);
+}
+
+.project-suggestion-card > header > .project-suggestion-state {
+  flex: none;
+  padding: 4px 7px;
+  border-radius: 999px;
+  background: var(--semantic-warning-surface);
+  color: var(--semantic-warning);
+}
+
+@media (max-width: 820px) {
+  .project-workspace-heading > .project-authoring-control,
+  .roadmap-heading-actions,
+  .project-task-authoring-control {
+    width: 100%;
+  }
+
+  .project-workspace-heading > .project-authoring-control > button,
+  .project-page-toolbar > .project-authoring-control > button,
+  .roadmap-heading-actions > .project-authoring-control > button {
+    width: 100%;
+  }
+
+  .project-authoring-form {
+    position: static;
+    width: 100%;
+    margin-top: 8px;
+    box-shadow: none;
+  }
+
+  .roadmap-heading-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .project-suggestions > header,
+  .project-suggestion-card > header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}

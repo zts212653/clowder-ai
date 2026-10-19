@@ -267,6 +267,7 @@ test('ACP registry construction skips a rejected account and still constructs a 
   };
   const input = {
     projectRoot: workspace,
+    bootstrapRoot: join(workspace, 'bootstrap'),
     profileId: config.id,
     effectiveModel: 'fixture',
     acpConfig: { command: 'mock-acp', startupArgs: ['--acp'] },
