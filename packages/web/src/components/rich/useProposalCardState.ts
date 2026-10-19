@@ -16,7 +16,6 @@ import { pushThreadRouteWithHistory } from '@/components/ThreadSidebar/thread-na
 import type { RichCardBlock } from '@/stores/chat-types';
 import { useChatStore } from '@/stores/chatStore';
 import { apiFetch } from '@/utils/api-client';
-import { executeSidebarFieldCommand } from '@/utils/sidebar-commands';
 import { formatDeclaredWorkMode, formatReportingMode, type ReportingModeEditValue } from './ProposalCardFields';
 import {
   extractProposalId,
@@ -173,6 +172,7 @@ export function useProposalCardState({ block, proposal }: ProposalCardInput) {
             declaredWorkMode: edits.declaredWorkMode || undefined,
           }
         : {};
+      if (pinOnApprove) body.pinned = true;
       let receivedResponse = false;
       try {
         const res = await apiFetch(`/api/proposals/${proposalId}/approve`, {
@@ -190,34 +190,6 @@ export function useProposalCardState({ block, proposal }: ProposalCardInput) {
         setResultThreadId(newThreadId);
         setStatus('approved');
         setEditing(false);
-        if (newThreadId && !authorizeContinuation('producer-card')) {
-          setError(t.continuationRefused);
-          return;
-        }
-        // AC-F7: persist pin through the shared field-scoped overlay command.
-        if (pinOnApprove && newThreadId) {
-          const pinned = await executeSidebarFieldCommand({
-            threadId: newThreadId,
-            field: 'pinned',
-            value: true,
-            request: (signal) => {
-              if (!authorizeContinuation('producer-card')) {
-                setError(t.continuationRefused);
-                return Promise.resolve({ ok: false });
-              }
-              return apiFetch(`/api/threads/${newThreadId}`, {
-                method: 'PATCH',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ pinned: true }),
-                signal,
-              });
-            },
-          });
-          if (!pinned) {
-            setError((previous) => previous ?? t.pinFailed);
-            return;
-          }
-        }
         if (newThreadId) {
           if (!authorizeContinuation('producer-card')) {
             setError(t.continuationRefused);
@@ -241,7 +213,6 @@ export function useProposalCardState({ block, proposal }: ProposalCardInput) {
       pinOnApprove,
       authorizeContinuation,
       t.continuationRefused,
-      t.pinFailed,
     ],
   );
 

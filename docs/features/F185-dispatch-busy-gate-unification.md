@@ -11,7 +11,7 @@ tips_exempt: "Renewed 2026-09-04 for the current F308 public-link projection onl
 
 > **Status**: done | **Owner**: Ragdoll/Ragdoll | **Priority**: P1
 >
-> **Decision**: [ADR-034](../../docs/decisions/034-dispatch-busy-gate-unification.md)
+> **Decision**: ADR-034
 
 ## Vision Guard Record
 

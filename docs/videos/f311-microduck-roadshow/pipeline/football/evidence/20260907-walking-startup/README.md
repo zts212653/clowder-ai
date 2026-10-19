@@ -23,7 +23,7 @@ status: bounded-cause-identified
 | 0.25 m/s | 1 s | 原公开 3/6 s 推扰 | 0.532546 m | 7 s |
 | 0.25 m/s | 0 s | 原公开 3/6 s 推扰 | 0.567030 m | 约 8 s |
 
-“立即 walking”两项的距离测量从第一个控制步后的 0.02 秒开始，故此处写“约 8 s”；精确末位置在 [index.json](index.json)。全部存活。最后一项 terminal x/z/body-forward velocity 与旧公开 seed-1 trace 完全一致，验证了本诊断与旧 runner 的对应关系。速度最大值字段只覆盖脚本记录的采样时刻，不宣称是全物理子步最大值。
+“立即 walking”两项的距离测量从第一个控制步后的 0.02 秒开始，故此处写“约 8 s”；精确末位置在 index.json。全部存活。最后一项 terminal x/z/body-forward velocity 与旧公开 seed-1 trace 完全一致，验证了本诊断与旧 runner 的对应关系。速度最大值字段只覆盖脚本记录的采样时刻，不宣称是全物理子步最大值。
 
 ## 根因与动作
 
@@ -33,7 +33,7 @@ status: bounded-cause-identified
 
 ## 复现与来源
 
-[run_boundary_probe.py](run_boundary_probe.py) 为 Sol 的原诊断脚本，SHA-256 `1c10da5bd9bc8b922e542f72be9e557050663944e8948b39cafcbad0e89f3ec6`；[index.json](index.json) SHA-256 `00fdfb66fc0417f1cd00189b516cd7a9341167c9308638868e464bc7b63757cb`。依赖与四模型 hash 均在 receipt 中。脚本引用同仓 football 运行基础，首次运行使用 root probe `4676e72d2a42d120fdb0cc3c1a3e51641b8234e1`。
+run_boundary_probe.py 为 Sol 的原诊断脚本，SHA-256 `1c10da5bd9bc8b922e542f72be9e557050663944e8948b39cafcbad0e89f3ec6`；index.json SHA-256 `00fdfb66fc0417f1cd00189b516cd7a9341167c9308638868e464bc7b63757cb`。依赖与四模型 hash 均在 receipt 中。脚本引用同仓 football 运行基础，首次运行使用 root probe `4676e72d2a42d120fdb0cc3c1a3e51641b8234e1`。
 
 ```bash
 python run_boundary_probe.py --football-root /path/to/pipeline/football \

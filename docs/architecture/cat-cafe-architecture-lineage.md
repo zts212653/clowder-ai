@@ -87,7 +87,7 @@ author: "Maine Coon/GPT-5.5"
 
 **Design artifacts**
 
-- [longform-003-teamact-evolution-v0.md](../content/drafts/longform-003-teamact-evolution-v0.md)
+- longform-003-teamact-evolution-v0.md
 - [at-mention-routing-system.md](./at-mention-routing-system.md)
 - [collaboration-landscape.md](./collaboration-landscape.md)
 
@@ -205,10 +205,10 @@ author: "Maine Coon/GPT-5.5"
 
 **Design artifacts**
 
-- [longform-003-seed-poe-vision.md](../content/drafts/longform-003-seed-poe-vision.md)
-- [ppt-huawei-pitch-v0.md](../content/drafts/ppt-huawei-pitch-v0.md)
-- [agent-experience-and-self-evolution-synthesis.md](../study/agent-experience-and-self-evolution-synthesis.md)
-- [2026-06-05-anthropic-june-takeaways.md](../study/2026-06-05-anthropic-june-takeaways.md)
+- longform-003-seed-poe-vision.md
+- ppt-huawei-pitch-v0.md
+- agent-experience-and-self-evolution-synthesis.md
+- 2026-06-05-anthropic-june-takeaways.md
 
 **Feature outcomes**
 
@@ -242,7 +242,7 @@ author: "Maine Coon/GPT-5.5"
 
 **Design artifacts**
 
-- [longform-003-seed-poe-vision.md](../content/drafts/longform-003-seed-poe-vision.md)
+- longform-003-seed-poe-vision.md
 - [memory-system-overview.md](./memory-system-overview.md) 的 Specialized Memory Lanes
 
 **Feature outcomes**
@@ -349,7 +349,7 @@ author: "Maine Coon/GPT-5.5"
 
 - ADR-031 source-audit / harness 三层
 - ADR-038 L0 staging protocol
-- [F234 harness sunset](../features/F234-harness-sunset-cat-fishing.md)
+- F234 harness sunset
 - [F253 QC loop](../features/F253-qc-loop.md)
 
 **Feature outcomes**
@@ -386,7 +386,7 @@ author: "Maine Coon/GPT-5.5"
 **Design artifacts**
 
 - [F088 Multi-Platform Chat Gateway](../features/F088-multi-platform-chat-gateway.md)
-- [F124/F088 architecture unification draft](../features/assets/F124/f124-f088-architecture-unification-draft.md)
+- F124/F088 architecture unification draft
 - [Transport Plane ownership cell](./ownership/cells/transport.md)
 - [F050 External Agent Onboarding](../features/F050-a2a-external-agent-onboarding.md)
 - [F241 Agent Provider Plugin](../features/F241-agent-provider-plugin.md)

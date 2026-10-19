@@ -1,5 +1,6 @@
 import { refIdentity } from '@cat-cafe/shared';
 import { useState } from 'react';
+import { MarkdownContent } from '@/components/MarkdownContent';
 import type { WorktreeEntry } from '@/hooks/useWorkspace';
 import { useChatStore } from '@/stores/chatStore';
 import { apiFetch } from '@/utils/api-client';
@@ -94,18 +95,26 @@ export function ExplorationHistoryCases({ workspace }: { workspace: ReturnType<t
                 <ExplorationDetailStatus detail={detail} retry={resource.retry} />
                 {record && (
                   <>
-                    <dl className="exploration-output-reading">
-                      {record.output.map((part, index) => (
-                        <div key={`${part.label}:${index}`}>
-                          <dt>{part.label}</dt>
-                          <dd>{part.value}</dd>
+                    {record.bodyMarkdown ? (
+                      <MarkdownContent
+                        content={record.bodyMarkdown}
+                        className="exploration-history-authored-body"
+                        disableCommandPrefix
+                      />
+                    ) : (
+                      <dl className="exploration-output-reading">
+                        {record.output.map((part, index) => (
+                          <div key={`${part.label}:${index}`}>
+                            <dt>{part.label}</dt>
+                            <dd>{part.value}</dd>
+                          </div>
+                        ))}
+                        <div>
+                          <dt>后来怎样了</dt>
+                          <dd>{record.result.label}</dd>
                         </div>
-                      ))}
-                      <div>
-                        <dt>后来怎样了</dt>
-                        <dd>{record.result.label}</dd>
-                      </div>
-                    </dl>
+                      </dl>
+                    )}
                     <HistorySourceLink key={record.caseId} href={original?.href} />
                     <details>
                       <summary>历史原件与后续来源</summary>

@@ -2,6 +2,16 @@ import { type EvolutionExplorationNodeV1, refIdentity } from '@cat-cafe/shared';
 
 export const LINEAGE_NODE_SIZE = { width: 176, height: 112 };
 
+export interface LineageRoutePoint {
+  x: number;
+  y: number;
+}
+
+export interface ExplorationPositionedNode extends LineageRoutePoint {
+  node: EvolutionExplorationNodeV1;
+  key: string;
+}
+
 export interface ExplorationLineageRegion {
   key: 'owner' | 'registered' | 'parentless' | 'cortex';
   label: string;
@@ -69,6 +79,136 @@ export function layoutExplorationLineage(
     height: Math.max(160, ...placed.map((node) => node.y + LINEAGE_NODE_SIZE.height + 24)),
     hiddenCount: hidden.size,
   };
+}
+
+/** Authored history keeps publication order as time: later steps always move
+ * right. Geometry never adds an edge; every visible relationship remains the
+ * owner's source-backed parentEdge. Independent starts receive their own lane. */
+export function layoutHistoricalLineage(
+  nodes: EvolutionExplorationNodeV1[],
+  collapsed: string[],
+  direction: 'map' | 'vertical' = 'map',
+) {
+  const hidden = new Set<string>();
+  const folded = new Set(collapsed);
+  const lanes = new Map<string, number>();
+  let nextRootLane = 0;
+  const positioned: ExplorationPositionedNode[] = [];
+
+  nodes.forEach((node, index) => {
+    const key = refIdentity(node.nodeRef);
+    const parents = node.parentEdges.map((edge) => refIdentity(edge.parentNodeRef));
+    if (parents.some((parent) => folded.has(parent) || hidden.has(parent))) {
+      hidden.add(key);
+      return;
+    }
+    const firstKnownParent = parents.find((parent) => lanes.has(parent));
+    const lane = firstKnownParent === undefined ? nextRootLane++ : (lanes.get(firstKnownParent) ?? 0);
+    lanes.set(key, lane);
+    positioned.push({
+      node,
+      key,
+      x: 24 + (direction === 'vertical' ? lane * 208 : index * 208),
+      y: 24 + (direction === 'vertical' ? index * 144 : lane * 144),
+    });
+  });
+
+  const routePoints = [...historicalLineageEdgeRoutes(positioned, direction).values()].flat();
+  return {
+    nodes: positioned,
+    width: Math.max(
+      240,
+      ...positioned.map((node) => node.x + LINEAGE_NODE_SIZE.width + 24),
+      ...routePoints.map((point) => point.x + 24),
+    ),
+    height: Math.max(
+      160,
+      ...positioned.map((node) => node.y + LINEAGE_NODE_SIZE.height + 24),
+      ...routePoints.map((point) => point.y + 24),
+    ),
+    hiddenCount: hidden.size,
+  };
+}
+
+export const historicalLineageEdgeKey = (parentKey: string, childKey: string) => JSON.stringify([parentKey, childKey]);
+
+/** Route only source edges that skip authored steps through independent channels
+ * outside every intervening node. Adjacent edges remain direct and branches stay
+ * distinguishable without inventing chronological adjacency. */
+export function historicalLineageEdgeRoutes(
+  nodes: ReadonlyArray<ExplorationPositionedNode>,
+  direction: 'map' | 'vertical' = 'map',
+) {
+  const byKey = new Map(nodes.map((node) => [node.key, node]));
+  const axisCenter = (node: ExplorationPositionedNode) =>
+    direction === 'map' ? node.x + LINEAGE_NODE_SIZE.width / 2 : node.y + LINEAGE_NODE_SIZE.height / 2;
+  const routed = nodes
+    .flatMap((child) =>
+      child.node.parentEdges.flatMap((edge) => {
+        const parent = byKey.get(refIdentity(edge.parentNodeRef));
+        if (!parent) return [];
+        const start = axisCenter(parent);
+        const end = axisCenter(child);
+        const low = Math.min(start, end);
+        const high = Math.max(start, end);
+        const skipsStep = nodes.some(
+          (node) =>
+            node.key !== parent.key && node.key !== child.key && axisCenter(node) > low && axisCenter(node) < high,
+        );
+        return skipsStep
+          ? [
+              {
+                child,
+                end: high,
+                key: historicalLineageEdgeKey(parent.key, child.key),
+                parent,
+                start: low,
+              },
+            ]
+          : [];
+      }),
+    )
+    .sort((a, b) => a.start - b.start || a.end - b.end || a.key.localeCompare(b.key));
+  const channelIntervals: Array<Array<[number, number]>> = [];
+  const result = new Map<string, LineageRoutePoint[]>();
+  for (const edge of routed) {
+    let channel = channelIntervals.findIndex((intervals) =>
+      intervals.every(([start, end]) => edge.end <= start || edge.start >= end),
+    );
+    if (channel < 0) {
+      channel = channelIntervals.length;
+      channelIntervals.push([]);
+    }
+    channelIntervals[channel].push([edge.start, edge.end]);
+    const spanned = nodes.filter((node) => {
+      const center = axisCenter(node);
+      return center >= edge.start && center <= edge.end;
+    });
+    if (direction === 'map') {
+      const start = {
+        x: edge.parent.x + LINEAGE_NODE_SIZE.width / 2,
+        y: edge.parent.y + LINEAGE_NODE_SIZE.height / 2,
+      };
+      const end = {
+        x: edge.child.x + LINEAGE_NODE_SIZE.width / 2,
+        y: edge.child.y + LINEAGE_NODE_SIZE.height / 2,
+      };
+      const laneY = Math.max(...spanned.map((node) => node.y + LINEAGE_NODE_SIZE.height)) + 64 + channel * 24;
+      result.set(edge.key, [start, { x: start.x, y: laneY }, { x: end.x, y: laneY }, end]);
+      continue;
+    }
+    const start = {
+      x: edge.parent.x + LINEAGE_NODE_SIZE.width / 2,
+      y: edge.parent.y + LINEAGE_NODE_SIZE.height / 2,
+    };
+    const end = {
+      x: edge.child.x + LINEAGE_NODE_SIZE.width / 2,
+      y: edge.child.y + LINEAGE_NODE_SIZE.height / 2,
+    };
+    const laneX = Math.max(...spanned.map((node) => node.x + LINEAGE_NODE_SIZE.width)) + 64 + channel * 24;
+    result.set(edge.key, [start, { x: laneX, y: start.y }, { x: laneX, y: end.y }, end]);
+  }
+  return result;
 }
 
 const CORTEX_ARCHIVE_PREFIX = 'cortex-archive-container:';
@@ -152,11 +292,6 @@ export function layoutExplorationLineageV2(
     height: Math.max(160, cursorY - 12),
     hiddenCount,
   };
-}
-
-export interface LineageRoutePoint {
-  x: number;
-  y: number;
 }
 
 /** Sparse v2 labels live to the right of fixed-size points, so edges leave and

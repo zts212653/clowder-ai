@@ -1,4 +1,8 @@
 import { z } from 'zod';
+import {
+  requestReviewHarnessStoryV3Schema,
+  validateRequestReviewHarnessStoryV3,
+} from './request-review-harness-lineage-v3-schema.js';
 
 const nonempty = z.string().trim().min(1);
 const sha = z.string().regex(/^[a-f0-9]{40}$/);
@@ -64,9 +68,20 @@ const caseSchema = z
   })
   .strict();
 
-const storySchema = z
+// Legacy indices stay fail-closed. V3 strips extensions from the same machine skeleton and records
+// their JSON Pointer paths in the publication receipt before this parser runs.
+const v3ReleaseSchema = releaseSchema.extend({ commits: z.array(commitSchema.strip()).min(1).max(64) }).strip();
+const v3CaseSchema = caseSchema
+  .extend({
+    occurredWindow: z.object({ start: nonempty, end: nonempty }).strip().optional(),
+    citedMemberCommits: z.array(citedCommitSchema.strip()).max(32),
+  })
+  .strip();
+
+const legacyStorySchema = z
   .object({
     updated: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+    overview: nonempty.max(1000).optional(),
     sources: z
       .array(
         z
@@ -107,6 +122,7 @@ const storySchema = z
           .object({
             caseId: nonempty,
             nodeId: nonempty,
+            title: nonempty.max(80).optional(),
             problem: nonempty.max(2000),
             response: nonempty.max(2000),
             outcome: nonempty.max(400),
@@ -119,8 +135,8 @@ const storySchema = z
   })
   .strict();
 
-function validateStory(
-  story: z.infer<typeof storySchema>,
+function validateLegacyStory(
+  story: z.infer<typeof legacyStorySchema>,
   archiveCases: z.infer<typeof caseSchema>[],
   ctx: z.RefinementCtx,
 ): void {
@@ -167,20 +183,38 @@ function validateStory(
   for (const node of story.nodes) visit(node.id);
 }
 
-export const requestReviewHarnessLineageIndexSchema = z
+const commonIndexShape = {
+  status: z.enum(['owner-reviewed-source-index', 'source-backed-evolution-story']),
+  snapshotCommit: sha,
+  ownerReviewCommit: sha,
+  ownerReviewRef: nonempty,
+  since: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  members: z.record(nonempty, z.array(nonempty).min(1).max(32)),
+  releases: z.array(releaseSchema).min(1).max(128),
+  cases: z.array(caseSchema).min(1).max(128),
+};
+
+const legacyIndexSchema = z
   .object({
+    ...commonIndexShape,
     schemaVersion: z.union([z.literal(1), z.literal(2)]),
-    status: z.enum(['owner-reviewed-source-index', 'source-backed-evolution-story']),
-    snapshotCommit: sha,
-    ownerReviewCommit: sha,
-    ownerReviewRef: nonempty,
-    since: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-    members: z.record(nonempty, z.array(nonempty).min(1).max(32)),
-    releases: z.array(releaseSchema).min(1).max(128),
-    cases: z.array(caseSchema).min(1).max(128),
-    story: storySchema.optional(),
+    story: legacyStorySchema.optional(),
   })
-  .strict()
+  .strict();
+
+const v3IndexSchema = z
+  .object({
+    ...commonIndexShape,
+    releases: z.array(v3ReleaseSchema).min(1).max(128),
+    cases: z.array(v3CaseSchema).min(1).max(128),
+    schemaVersion: z.literal(3),
+    status: z.literal('source-backed-evolution-story'),
+    story: requestReviewHarnessStoryV3Schema,
+  })
+  .strip();
+
+export const requestReviewHarnessLineageIndexSchema = z
+  .union([legacyIndexSchema, v3IndexSchema])
   .superRefine((index, ctx) => {
     const releases = new Map(index.releases.map((release) => [release.id, release]));
     if (releases.size !== index.releases.length) ctx.addIssue({ code: 'custom', message: 'duplicate history release' });
@@ -201,11 +235,22 @@ export const requestReviewHarnessLineageIndexSchema = z
         ctx.addIssue({ code: 'custom', message: 'legacy history cannot claim a story publication' });
       return;
     }
-    if (!index.story || index.status !== 'source-backed-evolution-story') {
-      ctx.addIssue({ code: 'custom', message: 'story publication missing' });
+    if (index.schemaVersion === 2) {
+      if (!index.story || index.status !== 'source-backed-evolution-story') {
+        ctx.addIssue({ code: 'custom', message: 'story publication missing' });
+        return;
+      }
+      validateLegacyStory(index.story, index.cases, ctx);
       return;
     }
-    validateStory(index.story, index.cases, ctx);
+    const v3Story = requestReviewHarnessStoryV3Schema.safeParse(index.story);
+    if (!v3Story.success) {
+      ctx.addIssue({ code: 'custom', message: 'v3 story publication missing' });
+      return;
+    }
+    validateRequestReviewHarnessStoryV3(v3Story.data, index.cases, ctx);
   });
 
 export type RequestReviewHarnessLineageIndex = z.infer<typeof requestReviewHarnessLineageIndexSchema>;
+export type RequestReviewHarnessLineageIndexLegacy = z.infer<typeof legacyIndexSchema>;
+export type RequestReviewHarnessLineageIndexV3 = z.infer<typeof v3IndexSchema>;

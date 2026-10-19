@@ -16,6 +16,7 @@ export type { ProposalRoutesOptions } from './proposal-route-options.js';
 
 const approveBodySchema = z
   .object({
+    pinned: z.boolean().optional(),
     title: z.string().trim().min(1).max(200).optional(),
     parentThreadId: z.string().min(1).optional(),
     preferredCats: z.array(catIdSchema()).max(10).optional(),
@@ -145,15 +146,23 @@ export const proposalRoutes: FastifyPluginAsync<ProposalRoutesOptions> = async (
     // because nothing user-visible has been committed yet.
     let thread: Thread;
     try {
-      thread = await threadStore.create(userId, finalTitle, finalProjectPath, finalParentThreadId, {
-        createdFromProposalId: proposal.proposalId,
-        sourceThreadId: proposal.sourceThreadId,
-        sourceInvocationId: proposal.sourceInvocationId,
-        ...(proposal.sourceMessageId ? { sourceMessageId: proposal.sourceMessageId } : {}),
-        ...(finalDeclaredWorkMode ? { declaredWorkMode: finalDeclaredWorkMode } : {}),
-        approvedBy: userId,
-        approvedAt: Date.now(),
-      });
+      thread = await threadStore.create(
+        userId,
+        finalTitle,
+        finalProjectPath,
+        finalParentThreadId,
+        {
+          createdFromProposalId: proposal.proposalId,
+          sourceThreadId: proposal.sourceThreadId,
+          sourceInvocationId: proposal.sourceInvocationId,
+          ...(proposal.sourceMessageId ? { sourceMessageId: proposal.sourceMessageId } : {}),
+          ...(finalDeclaredWorkMode ? { declaredWorkMode: finalDeclaredWorkMode } : {}),
+          approvedBy: userId,
+          approvedAt: Date.now(),
+        },
+        undefined,
+        { pinned: bodyParse.data.pinned },
+      );
     } catch (err) {
       await proposalStore.rollbackClaim(proposal.proposalId);
       throw err;

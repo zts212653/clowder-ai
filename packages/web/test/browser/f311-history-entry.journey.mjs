@@ -14,7 +14,77 @@ async function rejectFixtureWrite(route, request, url, writes) {
   return true;
 }
 
-async function createHistoryOwner(rawIndex) {
+function v3HistoryIndex(rawIndex) {
+  const next = structuredClone(rawIndex);
+  next.schemaVersion = 3;
+  next.story = {
+    updated: '2026-10-19',
+    overviewMarkdown: '### 这条历史怎么读\n\n作者正文已经与页面能力分开：\n\n- 可以直接写列表\n- 可以放安全链接',
+    sources: structuredClone(rawIndex.story.sources),
+    steps: rawIndex.story.nodes.map((node, index) => {
+      const sourceIds = [
+        ...new Set([
+          ...node.changes.map((change) => change.sourceId),
+          ...node.parents.map((parent) => parent.sourceId),
+        ]),
+      ];
+      return {
+        stepId: node.id,
+        date: node.when,
+        title: node.title,
+        parentEdges: node.parents.map((parent) => ({
+          parentStepId: parent.nodeId,
+          sourceId: parent.sourceId,
+          reason: parent.reason,
+        })),
+        sourceIds: sourceIds.length ? sourceIds : [rawIndex.story.sources[0].id],
+        bodyMarkdown: [
+          '### 我们看见了什么',
+          '',
+          node.summary,
+          '',
+          '### 我们改了什么',
+          '',
+          ...node.changes.flatMap((change) => [`- **${change.label}**：${change.detail}`]),
+          '- [查看安全链接](https://github.com/zts212653/clowder-ai)',
+          '',
+          '### 仍待确认',
+          '',
+          index === 0 ? 'SENTINEL_V3_STEP_BODY：后续效果仍需真实使用确认。' : '后续效果仍需真实使用确认。',
+        ].join('\n'),
+        ...(index === 0 ? { futureStepPresentation: { emphasis: 'future' } } : {}),
+      };
+    }),
+    cases: rawIndex.story.cases.map((entry, index) => ({
+      caseId: entry.caseId,
+      stepId: entry.nodeId,
+      title: entry.title ?? entry.problem,
+      sourceIds: entry.sourceIds,
+      bodyMarkdown: [
+        '### 踩了什么坑',
+        '',
+        entry.problem,
+        '',
+        '### 当时怎么应对',
+        '',
+        `1. ${entry.response}`,
+        '2. 保留来源与未确定边界。',
+        '',
+        '### 后来怎样',
+        '',
+        entry.outcome,
+        '',
+        '[查看案例说明](https://github.com/zts212653/clowder-ai)',
+        ...(index === 0 ? ['', 'SENTINEL_V3_CASE_BODY'] : []),
+      ].join('\n'),
+      ...(index === 0 ? { futureCasePresentation: true } : {}),
+    })),
+  };
+  next.story.sources[0].futureSourcePresentation = 'future';
+  return next;
+}
+
+async function createHistoryOwner(rawIndex, nextIndex) {
   const [{ HarnessHistoryPublicationOwner }, { MemoryHarnessHistoryPublicationStore }] = await Promise.all([
     import(
       '../../../api/src/infrastructure/capability-evolution/adapters/request-review/harness-history-publication-owner.ts'
@@ -24,22 +94,34 @@ async function createHistoryOwner(rawIndex) {
     ),
   ]);
   const revision = 'c'.repeat(40);
+  const nextRevision = 'd'.repeat(40);
   const source = {
     baseline: async () => revision,
     read: async (requested) => {
-      assert.equal(requested, revision);
-      return rawIndex;
+      assert.ok([revision, nextRevision].includes(requested));
+      return requested === nextRevision ? nextIndex : rawIndex;
     },
     acquire: async (requested) => {
-      assert.equal(requested, revision);
-      return rawIndex;
+      assert.equal(requested, nextRevision);
+      return nextIndex;
     },
+    ignoredFieldPaths: async (requested) =>
+      requested === nextRevision
+        ? [
+            '/story/cases/0/futureCasePresentation',
+            '/story/sources/0/futureSourcePresentation',
+            '/story/steps/0/futureStepPresentation',
+          ]
+        : [],
   };
-  return new HarnessHistoryPublicationOwner({
-    store: new MemoryHarnessHistoryPublicationStore(),
-    source,
-    now: () => '2026-10-18T07:00:00.000Z',
-  });
+  return {
+    owner: new HarnessHistoryPublicationOwner({
+      store: new MemoryHarnessHistoryPublicationStore(),
+      source,
+      now: () => '2026-10-19T20:00:00.000Z',
+    }),
+    nextRevision,
+  };
 }
 
 async function fulfillProgramRead({ route, request, url, projection, programPath, historyOwner }) {
@@ -101,6 +183,7 @@ function installOldReading(context) {
                   ownerStateRef: 'harness-history:release:H01',
                   version: 'old',
                 },
+                draft: { intent: 'explore', text: '保留的旧想法 sentinel-f311-history' },
               },
             },
           },
@@ -124,6 +207,26 @@ export async function verifyHistoryEntryJourney({ fixture, browser, capture }) {
       'utf8',
     ),
   );
+  const authoredStory = JSON.parse(
+    await readFile(
+      new URL('../../../../docs/discussions/f314-incident-archive/lineage/evolution-story.json', import.meta.url),
+      'utf8',
+    ),
+  );
+  rawIndex.story = {
+    updated: authoredStory.updated,
+    ...(authoredStory.overview ? { overview: authoredStory.overview } : {}),
+    sources: authoredStory.sources,
+    nodes: authoredStory.nodes,
+    cases: authoredStory.cases,
+  };
+  assert.equal(rawIndex.story.nodes.length, 12, 'the reader fixture must consume all authored steps');
+  assert.equal(rawIndex.story.cases.length, 27, 'the reader fixture must consume all authored cases');
+  assert.equal(
+    new Set(rawIndex.story.cases.map((entry) => entry.caseId)).size,
+    rawIndex.cases.length,
+    'the authored story must still cover every published archive case exactly once',
+  );
   const linkedCase = rawIndex.cases.find((entry) => entry.link && entry.citedMemberCommits.length);
   assert(linkedCase, 'reviewed F314 history must retain a case with an exact cited commit');
   const narrative = rawIndex.story.cases.find((entry) => entry.caseId === linkedCase.caseId);
@@ -131,7 +234,8 @@ export async function verifyHistoryEntryJourney({ fixture, browser, capture }) {
   const step = rawIndex.story.nodes.find((entry) => entry.id === narrative.nodeId);
   assert(step, 'reviewed F314 story must expose the cited case step');
 
-  const historyOwner = await createHistoryOwner(rawIndex);
+  const v3Index = v3HistoryIndex(rawIndex);
+  const { owner: historyOwner, nextRevision } = await createHistoryOwner(rawIndex, v3Index);
   const programPath = `/api/capability-evolution/programs/${encodeURIComponent(PROGRAM_ID)}`;
   const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
   await installOldReading(context);
@@ -183,26 +287,92 @@ export async function verifyHistoryEntryJourney({ fixture, browser, capture }) {
     await recovery.getByRole('button', { name: '打开最新历史', exact: true }).click();
     const summary = detail.getByRole('region', { name: '错题谱系' });
     await summary.waitFor();
-    assert.ok((await summary.innerText()).includes('11 步 · 26 道错题'));
+    assert.ok((await summary.innerText()).includes('12 步 · 27 道错题'));
+    assert.ok((await summary.innerText()).includes(authoredStory.overview));
     const recovered = await page.evaluate(
       (programId) => JSON.parse(localStorage.getItem('f311-program-reading-v1')).state.programs[programId].exploration,
       PROGRAM_ID,
     );
     assert.notEqual(recovered.selectedNodeRef.version, 'old');
     assert.ok(recovered.selectedSourceRef, 'explicit recovery must persist the owner-issued publication');
+    assert.equal(recovered.draft.text, '保留的旧想法 sentinel-f311-history');
     await capture(page, 'history-entry-latest-readable');
 
     await detail.getByRole('button', { name: '在主区展开阅读', exact: true }).click();
     let main = page.locator('[data-testid="evolution-program-surface"]:visible');
     const history = main.getByTestId('evolution-exploration-workspace');
     await history.waitFor();
+    const visibleHistory = await history.innerText();
+    assert.ok(visibleHistory.includes(authoredStory.overview));
+    assert.doesNotMatch(
+      visibleHistory,
+      /sha256:|harness-history:|F314 owner 核对|[a-f0-9]{40}/,
+      'implementation coordinates and hashes must stay inside collapsed evidence',
+    );
+    const toolbar = history.getByRole('toolbar', { name: '谱系导航' });
+    assert.deepEqual(await toolbar.locator(':scope > button').allTextContents(), ['看全图']);
+    const more = toolbar.locator(':scope > details > summary');
+    assert.equal(await more.innerText(), '更多');
+    await more.click();
+    await toolbar.getByLabel('谱系缩放').waitFor();
+    await toolbar.getByLabel('谱系排列').waitFor();
+
+    const nodeTitles = await history.locator('.exploration-node-title > span').allTextContents();
+    assert.deepEqual(
+      nodeTitles,
+      authoredStory.nodes.map((entry) => `${entry.when} · ${entry.title}`),
+      'the historical map keeps the authored date beside each title without rendering body excerpts',
+    );
+    const titleStyles = await history.locator('.exploration-node-title > span').evaluateAll((nodes) =>
+      nodes.map((node) => {
+        const style = getComputedStyle(node);
+        return { whiteSpace: style.whiteSpace, lineClamp: style.webkitLineClamp };
+      }),
+    );
+    assert.ok(titleStyles.every((style) => style.whiteSpace === 'normal' && style.lineClamp === '2'));
+    const chronology = await history
+      .locator('.exploration-node-wrap')
+      .evaluateAll((nodes) => nodes.map((node) => Number.parseFloat(node.style.left)));
+    assert.ok(chronology.every((left, index) => index === 0 || left > chronology[index - 1]));
+    assert.equal(
+      await history.locator('.exploration-edges path').count(),
+      authoredStory.nodes.reduce((count, node) => count + node.parents.length, 0),
+      'the map must draw every and only authored source relationship',
+    );
     const stepPicker = history.getByLabel('选择阅读步骤');
+    for (const root of authoredStory.nodes.filter((node, index) => index > 0 && node.parents.length === 0)) {
+      const origin = authoredStory.cases.find((entry) => entry.nodeId === root.id);
+      assert(origin, `independent start ${root.id} needs an authored counterexample`);
+      const rootOption = await stepPicker.locator('option', { hasText: root.title }).getAttribute('value');
+      assert(rootOption, `independent start ${root.id} must remain selectable`);
+      await stepPicker.selectOption(rootOption);
+      await toolbar.getByRole('button', { name: '定位阅读版' }).click();
+      await history
+        .locator('.exploration-node-wrap[data-selected="true"] .exploration-node-meta', {
+          hasText: `起于：${origin.title}`,
+        })
+        .waitFor();
+    }
     const option = await stepPicker.locator('option', { hasText: step.title }).getAttribute('value');
     assert(option, 'F314 history must expose the cited case step');
-    await stepPicker.selectOption(option);
+    await toolbar.getByRole('button', { name: '看全图', exact: true }).click();
+    await history.getByRole('button', { name: `阅读 ${step.title}`, exact: true }).click();
+    assert.equal(await stepPicker.inputValue(), option, 'clicking a map node must open that exact authored step');
+    await history.locator('.exploration-version-nav').scrollIntoViewIfNeeded();
+    await capture(page, 'history-entry-desktop-map-readable');
+
+    await page.setViewportSize({ width: 390, height: 844 });
+    await more.waitFor();
+    const narrow = await history.evaluate((node) => ({ clientWidth: node.clientWidth, scrollWidth: node.scrollWidth }));
+    assert.ok(narrow.scrollWidth <= narrow.clientWidth + 1, 'the history reader must not overflow at 390px');
+    await capture(page, 'history-entry-narrow-map-readable');
+    await history.getByRole('button', { name: '收起地图', exact: true }).click();
+    await stepPicker.waitFor();
+    assert.equal(await stepPicker.inputValue(), option, 'narrow navigation must preserve the exact selected step');
+    await capture(page, 'history-entry-narrow-readable');
 
     const selectedCase = history.locator('.exploration-history-case-toggle', {
-      hasText: narrative.problem.slice(0, 80),
+      hasText: narrative.title,
     });
     await selectedCase.waitFor();
     if ((await selectedCase.getAttribute('aria-expanded')) !== 'true') await selectedCase.click();
@@ -223,17 +393,104 @@ export async function verifyHistoryEntryJourney({ fixture, browser, capture }) {
     );
     await capture(page, 'history-entry-exact-source');
 
-    await main.getByRole('button', { name: '← 返回侧栏', exact: true }).click();
+    const publicationInput = {
+      programRef: { ownerFeatureId: 'F311', ownerStateRef: PROGRAM_ID },
+      objectRef: projection.program.objectRef,
+    };
+    const publication = await historyOwner.publish(
+      publicationInput,
+      {
+        action: 'publish',
+        expectedRevision: 0,
+        sourceRevision: nextRevision,
+        clientMessageId: 'browser-publish-v3',
+        reason: '浏览器保持打开时发布作者 Markdown',
+      },
+      { actorRef: 'cat:codex-astra', originRef: 'thread:fixture:invocation:browser-v3' },
+    );
+    assert.equal(publication.outcome, 'appended');
+    assert.equal(publication.attempt.status, 'published');
+    assert.deepEqual(publication.attempt.ignoredFieldPaths, [
+      '/story/cases/0/futureCasePresentation',
+      '/story/sources/0/futureSourcePresentation',
+      '/story/steps/0/futureStepPresentation',
+    ]);
+    await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+    const update = history.getByRole('button', { name: '查看新版', exact: true });
+    await update.waitFor();
+    await update.click();
+    await history.getByText('这条历史怎么读', { exact: true }).waitFor();
+    assert.equal(await history.getByText('可以直接写列表', { exact: true }).count(), 1);
+    const selectedV3Step = v3Index.story.steps.find((entry) => entry.stepId === step.id);
+    assert(selectedV3Step);
+    const selectedV3Option = await stepPicker
+      .locator('option', { hasText: selectedV3Step.title })
+      .getAttribute('value');
+    assert(selectedV3Option, 'the published v3 step must remain selectable');
+    assert.notEqual(selectedV3Option, option, 'accepting the publication must replace the bundled source coordinate');
+    assert.equal(
+      JSON.parse(selectedV3Option)[3],
+      `publication:1:${nextRevision}`,
+      'the selected logical step must bind the exact newly published source',
+    );
+    assert.ok((await history.innerText()).includes(selectedV3Step.bodyMarkdown.split('\n')[2]));
+    const selectedMapNode = history.locator('.exploration-node-wrap[data-selected="true"] .exploration-node');
+    assert.ok((await selectedMapNode.innerText()).includes(`${selectedV3Step.date} · ${selectedV3Step.title}`));
+    assert.doesNotMatch(await selectedMapNode.innerText(), /SENTINEL_V3_STEP_BODY/);
+    assert.equal(
+      await history.getByRole('link', { name: '查看安全链接', exact: true }).getAttribute('href'),
+      'https://github.com/zts212653/clowder-ai',
+    );
+    const selectedV3Case = v3Index.story.cases.find((entry) => entry.caseId === narrative.caseId);
+    assert(selectedV3Case);
+    const v3CaseToggle = history.locator('.exploration-history-case-toggle', { hasText: selectedV3Case.title });
+    if ((await v3CaseToggle.getAttribute('aria-expanded')) !== 'true') await v3CaseToggle.click();
+    const v3CaseBody = v3CaseToggle.locator('xpath=following-sibling::*[1]');
+    await v3CaseBody.getByText('踩了什么坑', { exact: true }).waitFor();
+    assert.equal(await v3CaseBody.locator('ol > li').count(), 2);
+    assert.equal(
+      await v3CaseBody.getByRole('link', { name: '查看案例说明', exact: true }).getAttribute('href'),
+      'https://github.com/zts212653/clowder-ai',
+    );
+    assert.doesNotMatch(await v3CaseBody.innerText(), /后来怎样了/);
+    await capture(page, 'history-entry-v3-same-process-publication');
+
+    await main.getByRole('button', { name: '← 返回详情', exact: true }).click();
     detail = page.locator('[data-testid="capability-evolution-program-detail"]:visible');
     await detail.getByRole('button', { name: '在主区展开阅读', exact: true }).click();
     main = page.locator('[data-testid="evolution-program-surface"]:visible');
-    await main.getByTestId('evolution-exploration-workspace').waitFor();
-    assert.equal(await main.getByLabel('选择阅读步骤').inputValue(), option, 'return must restore the exact step');
+    const restoredHistory = main.getByTestId('evolution-exploration-workspace');
+    await restoredHistory.waitFor();
+    assert.equal(
+      await main.getByLabel('选择阅读步骤').inputValue(),
+      selectedV3Option,
+      'return must restore the same step at the explicitly accepted publication',
+    );
+    const restoredLoading = restoredHistory.getByText('正在读取这道错题…', { exact: true });
+    if (await restoredLoading.isVisible()) await restoredLoading.waitFor({ state: 'hidden' });
+    const restored = await page.evaluate(
+      (programId) => JSON.parse(localStorage.getItem('f311-program-reading-v1')).state.programs[programId].exploration,
+      PROGRAM_ID,
+    );
+    assert.equal(restored.draft.text, '保留的旧想法 sentinel-f311-history');
     await capture(page, 'history-entry-return-restored');
 
     assert.deepEqual(writes, [], 'reading and recovery must not mutate the Program or proposal');
     assert.deepEqual(errors, []);
-    return { programId: PROGRAM_ID, selectedStep: option, writes, pageErrors: errors };
+    return {
+      programId: PROGRAM_ID,
+      selectedStep: selectedV3Option,
+      previousBundledStep: option,
+      stepCount: authoredStory.nodes.length,
+      caseCount: authoredStory.cases.length,
+      sameProcessPublication: {
+        sourceRevision: nextRevision,
+        ignoredFieldPaths: publication.attempt.ignoredFieldPaths,
+        processRestarted: false,
+      },
+      writes,
+      pageErrors: errors,
+    };
   } catch (error) {
     console.error(
       JSON.stringify({

@@ -27,7 +27,6 @@ export const proposalCardCopy = defineShellCopy({
     withdrawn: '已撤回',
     open: '打开新对话',
     continuationRefused: '对话已创建；当前身份或读取已变化，请重新确认后打开。',
-    pinFailed: '对话已创建，但未能置顶。请重新读取后再试，勿重复创建。',
     title: '对话名',
     parentEdit: '父对话',
     parentAddress: '父对话地址（高级）',
@@ -74,7 +73,6 @@ export const proposalCardCopy = defineShellCopy({
     open: 'Open new conversation',
     continuationRefused:
       'The conversation was created. Your identity or the current read changed; verify again before opening it.',
-    pinFailed: 'The conversation was created, but pinning failed. Read again before retrying; do not create it again.',
     title: 'Conversation name',
     parentEdit: 'Parent conversation',
     parentAddress: 'Parent conversation address (advanced)',

@@ -88,13 +88,13 @@ Clowder AI 的记忆系统不是一个数据库，也不是“把旧聊天自动
 - **主动性层**提供一次“现在是否值得判断”的机会；detector 只报事实，猫给 disposition。
 - **治理层**负责批准、拒绝、纠正、遗忘、权限和派生视图失效。
 
-公众叙事图见 [EP04 正式主图](../../content/offer-column/assets/ep04-memory-architecture-amber.png)。
+公众叙事图见 EP04 正式主图。
 第一次向人解释“同一条记忆怎样留下、想起、回源与纠正”时，可从
-[ChatGPT × Clowder AI 互动对照样稿](../../feature-discussions/2026-09-05-chatgpt-cat-cafe-memory-explainer/README.md)
+ChatGPT × Clowder AI 互动对照样稿
 进入。它是带 provenance 的解释性快照，不拥有 Clowder AI 架构或运行状态；工程判断仍回本 Atlas
 指向的 canonical owner。
 
-2026-09-05 的[第一用户架构与交付路线提案](../../feature-specs/2026-09-05-memory-first-user-roadmap.md)
+2026-09-05 的第一用户架构与交付路线提案
 把三猫愿景转为完整使用旅程、跨 epoch 接续和近期交付顺序，并附低保真与 imagegen 总图。
 它是目标设计与执行提案，不替代本 Atlas 的 claim registry，也不把新入口写成已上线能力。
 
@@ -136,14 +136,14 @@ Clowder AI 的记忆系统不是一个数据库，也不是“把旧聊天自动
 
 | 观察面 | 它只回答什么 | 稳定入口 | 证据、快照或相邻 owner |
 |---|---|---|---|
-| **原则面** | 记忆为何存在，哪些事无论实现怎样变化都不能做？ | [Memory Philosophy](../memory-philosophy.md) | [写入触发再思考](../../feature-discussions/2026-08-10-memory-write-trigger-rethink.md)、[prior-art source audit](../../research/2026-08-15-memory-trigger-paper-source-audit/source-audit.md) |
-| **拓扑面** | 当前有哪些职责模块，它们怎样连接、谁不拥有谁？ | [Memory System Overview](../memory-system-overview.md) | [Memory ownership cell](../ownership/cells/memory.md)、[Proactive Relationship Loop](../ownership/cells/proactive-relationship-loop.md)、[Research-First roadmap](../../feature-specs/2026-08-15-memory-system-research-first-roadmap.md) |
+| **原则面** | 记忆为何存在，哪些事无论实现怎样变化都不能做？ | [Memory Philosophy](../memory-philosophy.md) | 写入触发再思考、prior-art source audit |
+| **拓扑面** | 当前有哪些职责模块，它们怎样连接、谁不拥有谁？ | [Memory System Overview](../memory-system-overview.md) | [Memory ownership cell](../ownership/cells/memory.md)、[Proactive Relationship Loop](../ownership/cells/proactive-relationship-loop.md)、Research-First roadmap |
 | **真相与投影面** | 什么是 canonical truth，什么只是可重建 view；过期怎样可见？ | [Derived View Contract](../memory-derived-view-contract.md) | [Derived View Census](../memory-derived-view-census.md)、[ADR-020](../../decisions/020-f102-memory-system-architecture.md) |
 | **读取面** | 猫怎样搜索、融合、重排、下钻并回到原文？ | [Retrieval Pipeline Deep Dive](../retrieval-pipeline-deep-dive.md) | [Memory Cue Source Map](../memory-cue-source-map.md)、[F200](../../features/F200-memory-recall-eval.md)、[F287](../../features/F287-memory-cue-plane.md) |
 | **写入面** | 哪些产品 lane 与文件习俗能改变未来判断；感知、提案、裁决、消费是否闭环？ | [Write Surface Census](../memory-write-lane-census.md) | 各 lane/claim-family owner；[Write-Side Autopsy](../memory-write-side-autopsy-2026-07.md) 只作历史基线 |
 | **主动性面** | 什么时候值得让猫判断 `propose / defer / abstain` 或浮现旧记忆？ | [Standing Reflex Contract](../memory-standing-reflex-contract.md) | [Context Injection & Reflex Source Map](../context-injection-reflex-source-map.md)、[F282](../../features/F282-proactive-memory-pipeline.md)、[F276](../../features/F276-people-relationship-memory.md)、[F287](../../features/F287-memory-cue-plane.md) |
 | **呈现面** | 已经 admitted 的内容怎样按 carrier、continuity、epoch 和 tier 进入当前 context？ | [F296 Context Presentation](../../features/F296-continuity-aware-context-injection.md) | [Context Injection & Reflex Source Map](../context-injection-reflex-source-map.md) |
-| **治理面** | 谁能批准、纠正、遗忘、retire、改变 ACL；失效怎样传播？ | lane-owned feature specs + 两份 frozen contract | [Memory ownership cell](../ownership/cells/memory.md)、[ADR-028](../../decisions/028-inter-agent-trust-provenance.md) |
+| **治理面** | 谁能批准、纠正、遗忘、retire、改变 ACL；失效怎样传播？ | lane-owned feature specs + 两份 frozen contract | [Memory ownership cell](../ownership/cells/memory.md)、ADR-028 |
 | **结果面** | 某条记忆是被展示、检视、采用，还是帮助/伤害了结果？我们能证明到哪一层？ | [Outcome & Attribution Source Map](../memory-outcome-attribution-source-map.md) | [F200](../../features/F200-memory-recall-eval.md)、[F263](../../features/F263-memory-lifecycle-repair-and-metrics.md) |
 
 ### 六层与九面的映射
@@ -180,7 +180,7 @@ F255/F272 的 owned seed、intent 与行动是记忆循环的下游主体边界�
 | RecallOpportunity catalog 与 cue 生命周期 | [F287](../../features/F287-memory-cue-plane.md) | 指向 feature 与 [source map](../memory-cue-source-map.md) | producer catalog、authority 或 lifecycle contract 改变 |
 | Context presentation / continuity | [F296](../../features/F296-continuity-aware-context-injection.md) | 不复制 carrier 支持矩阵和运行状态 | presentation authority、epoch 或 carrier contract 改变 |
 | outcome/attribution 的认识论 ceiling | [Outcome Source Map](../memory-outcome-attribution-source-map.md) | 只保留 presented→inspected→used→outcome 不可互相代证 | 新 typed observation 改变可证明层级 |
-| memory-wide current release、terminal acceptance 与下一棒 | [F312](../../features/F312-memory-initiative-closure-command.md)；lane 内 phase/AC/live/UAT 仍回对应 feature；研究依据与历史 ledger 见 [roadmap](../../feature-specs/2026-08-15-memory-system-research-first-roadmap.md) | 不复写 generated RED 或 lane 详细状态 | command owner、完成定义或真相源迁移 |
+| memory-wide current release、terminal acceptance 与下一棒 | [F312](../../features/F312-memory-initiative-closure-command.md)；lane 内 phase/AC/live/UAT 仍回对应 feature；研究依据与历史 ledger 见 roadmap | 不复写 generated RED 或 lane 详细状态 | command owner、完成定义或真相源迁移 |
 
 ## 我想知道什么？从这里走
 
@@ -195,7 +195,7 @@ F255/F272 的 owned seed、intent 与行动是记忆循环的下游主体边界�
 | “画像、摘要、索引过期了怎么办？” | Derived View Contract | 查现有 11 类 view 的病灶时进 census |
 | “代码合入后猫真的看到了吗？” | F296 | 查 outcome 能证明到哪时进 outcome source map |
 | “它到底有没有帮助任务？” | Outcome Source Map | 只有明确 keep/tune/sunset consumer 才进入 eval 设计 |
-| “搜到了以后，这轮最多允许怎么用？” | [Claim / Use Admission 讨论收敛](../../feature-discussions/2026-08-24-memory-belief-admission/README.md) | 当前仍回 Philosophy、F287、F296、Derived View Contract 与 Outcome Source Map 分别查边界；讨论稿不是 frozen contract |
+| “搜到了以后，这轮最多允许怎么用？” | Claim / Use Admission 讨论收敛 | 当前仍回 Philosophy、F287、F296、Derived View Contract 与 Outcome Source Map 分别查边界；讨论稿不是 frozen contract |
 | “一条 cue 怎样成为猫自己的 seed、意图和行动？” | [F255](../../features/F255-auto-dream.md) + [F272](../../features/F272-cat-jumps-on-the-table.md) | 查跨 owner 边界时进 Proactive Relationship Loop cell |
 | “记忆与主动性闭环现在做到哪了、下一棒是谁？” | F312 + generated closure catalog；具体 lane 再进对应 feature | 不从 roadmap 历史 board、discussion 或旧聊天卡片推断 |
 | “为什么会长成这样？” | rethink、autopsy、postmortem | 历史材料不能反向覆盖 current truth |
@@ -233,7 +233,7 @@ views 是否共享同一 evidence ancestor。**同祖后代不能冒充独立佐
 - [2026-07 Write-Side Autopsy](../memory-write-side-autopsy-2026-07.md)
 - [Cloud Memory Stance Collapse Postmortem](../cloud-memory-stance-collapse-postmortem-2026-07.md)
 - [2026-05 Architecture Views](../2026-05-05-architecture-views.md)
-- [2026-08-02 Closure Plan](../../feature-specs/2026-08-02-memory-system-closure-plan.md)
+- 2026-08-02 Closure Plan
 
 ## Atlas 自己的 Derived View Envelope
 

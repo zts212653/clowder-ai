@@ -104,6 +104,7 @@ describe('public package script closure', () => {
     const root = makeRoot();
     for (const file of [
       'check-sync-public-preflight.mjs',
+      'project-public-dead-links.mjs',
       'check-capability-tips.mjs',
       'lib/sync-public-export-coverage.mjs',
       'lib/sync-public-workspace-closure.mjs',

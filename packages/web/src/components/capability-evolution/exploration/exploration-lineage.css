@@ -46,6 +46,42 @@
   text-align: center;
   font-variant-numeric: tabular-nums;
 }
+.exploration-more-tools {
+  position: relative;
+}
+.exploration-more-tools > summary {
+  min-height: 28px;
+  padding: 4px 6px;
+  display: inline-flex;
+  align-items: center;
+  border-radius: 6px;
+  font-size: var(--console-font-xs);
+  cursor: pointer;
+  list-style: none;
+}
+.exploration-more-tools > summary::-webkit-details-marker {
+  display: none;
+}
+.exploration-more-tools > summary:hover {
+  background: var(--cafe-surface-elevated);
+}
+.exploration-more-tools-panel {
+  position: absolute;
+  z-index: 3;
+  top: calc(100% + 4px);
+  left: 0;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  width: max-content;
+  max-width: min(520px, calc(100vw - 96px));
+  padding: 6px;
+  overflow-x: auto;
+  border: 1px solid var(--cafe-border);
+  border-radius: 8px;
+  background: var(--console-card-bg);
+  box-shadow: var(--shadow-elevation-2);
+}
 .exploration-canvas {
   height: 320px;
   overflow: hidden;
@@ -114,6 +150,13 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.exploration-lineage[data-historical="true"] .exploration-node-title > span {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  white-space: normal;
+  line-height: 1.35;
+}
 .exploration-node-summary {
   display: -webkit-box;
   -webkit-box-orient: vertical;
@@ -160,6 +203,9 @@
 }
 .exploration-lineage[data-density="compact"] .exploration-node-summary {
   -webkit-line-clamp: 1;
+}
+.exploration-lineage[data-historical="true"][data-density="compact"] .exploration-node-summary {
+  display: none;
 }
 .exploration-lineage[data-density="compact"] .exploration-node-title {
   font-size: var(--console-font-xs);
@@ -225,6 +271,12 @@
 }
 .exploration-lineage[data-density="points"] .exploration-node-title > span {
   display: block;
+}
+.exploration-lineage[data-historical="true"][data-density="points"] .exploration-node-title > span {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  white-space: normal;
 }
 .exploration-lineage[data-density="points"] .exploration-node-wrap[data-label-side="end"] .exploration-node-title {
   left: auto;

@@ -3,11 +3,16 @@
 import { type EvolutionExplorationNodeV1, refIdentity } from '@cat-cafe/shared';
 import { type ReactNode, useId, useMemo, useRef } from 'react';
 import { ExplorationIcon } from './ExplorationIcon';
+import { ExplorationLineageTools } from './ExplorationLineageTools';
 import { isHistoricalStep } from './exploration-history';
 import {
+  historicalLineageEdgeKey,
+  historicalLineageEdgeRoutes,
   LINEAGE_NODE_SIZE,
+  type LineageRoutePoint,
   layoutExplorationLineage,
   layoutExplorationLineageV2,
+  layoutHistoricalLineage,
   lineageDetailLevel,
   sparseLineageEdgeRoute,
 } from './exploration-lineage';
@@ -17,6 +22,15 @@ import { useLineageCamera } from './use-lineage-camera';
 
 type Viewport = ExplorationReading['viewport'];
 const EMPTY_KEYS = new Set<string>();
+
+function lineageDisplayTitle(node: EvolutionExplorationNodeV1): string {
+  return isHistoricalStep(node) ? `${node.history.period} · ${node.title}` : node.title;
+}
+
+function lineageSummary(node: EvolutionExplorationNodeV1, historical: boolean): ReactNode {
+  if (historical) return null;
+  return <span className="exploration-node-summary">{node.changes[0]?.detail ?? node.summary}</span>;
+}
 
 function lineageNodeMeta(
   key: string,
@@ -37,9 +51,23 @@ function positionLineage(
   direction: 'map' | 'vertical',
   v2: boolean,
 ) {
+  if (nodes.length > 0 && nodes.every(isHistoricalStep))
+    return { ...layoutHistoricalLineage(nodes, collapsed, direction), regions: [] };
   return v2
     ? layoutExplorationLineageV2(nodes, collapsed, direction)
     : { ...layoutExplorationLineage(nodes, collapsed, direction), regions: [] };
+}
+
+function edgePath(
+  parent: { x: number; y: number },
+  child: { x: number; y: number },
+  direction: 'map' | 'vertical',
+  route: ReadonlyArray<LineageRoutePoint> | null,
+) {
+  if (route) return route.map((point, index) => `${index ? 'L' : 'M'}${point.x},${point.y}`).join(' ');
+  if (direction === 'vertical')
+    return `M${parent.x + 88},${parent.y + 56} C${parent.x + 88},${(parent.y + child.y) / 2 + 56} ${child.x + 88},${(parent.y + child.y) / 2 + 56} ${child.x + 88},${child.y + 56}`;
+  return `M${parent.x + 88},${parent.y + 56} C${(parent.x + child.x) / 2 + 88},${parent.y + 56} ${(parent.x + child.x) / 2 + 88},${child.y + 56} ${child.x + 88},${child.y + 56}`;
 }
 
 export function ExplorationLineage({
@@ -75,6 +103,10 @@ export function ExplorationLineage({
     [nodes, viewport.collapsed, direction, v2],
   );
   const expandedPositioned = useMemo(() => positionLineage(nodes, [], direction, v2), [nodes, direction, v2]);
+  const historicalRoutes = useMemo(
+    () => (historical ? historicalLineageEdgeRoutes(positioned.nodes, direction) : new Map()),
+    [historical, positioned.nodes, direction],
+  );
   const density = lineageDetailLevel(viewport.zoom);
   const { host, size } = useLineageCamera(positioned, selected, viewport, onViewport);
   const minimumZoom = Math.max(
@@ -124,31 +156,22 @@ export function ExplorationLineage({
     });
   };
   return (
-    <section className="exploration-lineage" aria-label="版本谱系画布" data-density={density} data-label-beside={v2}>
-      <div className="exploration-section-heading">
-        <div className="exploration-canvas-tools" role="group" aria-label="谱系导航">
-          <button
-            type="button"
-            aria-label="缩小谱系"
-            disabled={viewport.zoom <= minimumZoom}
-            onClick={() => zoom(-0.15)}
-          >
-            <ExplorationIcon kind="minus" />
-          </button>
-          <output aria-label="谱系缩放">{Math.round(viewport.zoom * 1000) / 10}%</output>
-          <button type="button" aria-label="放大谱系" disabled={viewport.zoom >= 2.5} onClick={() => zoom(0.15)}>
-            <ExplorationIcon kind="plus" />
-          </button>
-          <button type="button" onClick={fit}>
-            看全图
-          </button>
-          <button type="button" onClick={locate} aria-label="定位阅读版">
-            <ExplorationIcon kind="focus" />
-            定位
-          </button>
-          {toolbarEnd}
-        </div>
-      </div>
+    <section
+      className="exploration-lineage"
+      aria-label="版本谱系画布"
+      data-density={density}
+      data-label-beside={v2}
+      data-historical={historical}
+    >
+      <ExplorationLineageTools
+        historical={historical}
+        minimumZoom={minimumZoom}
+        zoom={viewport.zoom}
+        toolbarEnd={toolbarEnd}
+        fit={fit}
+        locate={locate}
+        changeZoom={zoom}
+      />
       <div
         ref={host}
         className="exploration-canvas"
@@ -237,19 +260,19 @@ export function ExplorationLineage({
               item.node.parentEdges.map((edge) => {
                 const parent = positioned.nodes.find((node) => node.key === refIdentity(edge.parentNodeRef));
                 if (!parent) return null;
+                const historicalRoute = historicalRoutes.get(historicalLineageEdgeKey(parent.key, item.key));
                 const sparseRoute =
-                  v2 && density === 'points' ? sparseLineageEdgeRoute(parent, item, viewport.zoom) : null;
+                  !historicalRoute && v2 && density === 'points'
+                    ? sparseLineageEdgeRoute(parent, item, viewport.zoom)
+                    : null;
+                const route = historicalRoute ?? sparseRoute;
                 return (
                   <path
                     key={`${parent.key}:${item.key}`}
-                    data-edge-route={sparseRoute ? 'label-clear' : 'direct'}
-                    d={
-                      sparseRoute
-                        ? sparseRoute.map((point, index) => `${index ? 'L' : 'M'}${point.x},${point.y}`).join(' ')
-                        : direction === 'vertical'
-                          ? `M${parent.x + 88},${parent.y + 56} C${parent.x + 88},${(parent.y + item.y) / 2 + 56} ${item.x + 88},${(parent.y + item.y) / 2 + 56} ${item.x + 88},${item.y + 56}`
-                          : `M${parent.x + 88},${parent.y + 56} C${(parent.x + item.x) / 2 + 88},${parent.y + 56} ${(parent.x + item.x) / 2 + 88},${item.y + 56} ${item.x + 88},${item.y + 56}`
-                    }
+                    data-edge-route={historicalRoute ? 'history-clear' : sparseRoute ? 'label-clear' : 'direct'}
+                    data-parent-key={parent.key}
+                    data-child-key={item.key}
+                    d={edgePath(parent, item, direction, route)}
                     vectorEffect="non-scaling-stroke"
                     style={{ strokeWidth: 1.2 / viewport.zoom }}
                   />
@@ -275,15 +298,15 @@ export function ExplorationLineage({
                 className="exploration-node"
                 aria-pressed={key === selected}
                 aria-label={`阅读 ${node.title}`}
-                title={node.summary}
+                title={isHistoricalStep(node) ? lineageDisplayTitle(node) : node.summary}
                 onClick={() => onSelect(node)}
               >
                 <span className="sr-only">阅读 </span>
                 <span className="exploration-node-title">
                   <ExplorationIcon kind={node.kind === 'owner_version' ? 'code' : 'branch'} />
-                  <span>{node.title}</span>
+                  <span>{lineageDisplayTitle(node)}</span>
                 </span>
-                <span className="exploration-node-summary">{node.changes[0]?.detail ?? node.summary}</span>
+                {lineageSummary(node, historical)}
                 {lineageNodeMeta(key, currentKeys, adoptedKeys, nodeNotes) && (
                   <span className="exploration-node-meta">
                     {lineageNodeMeta(key, currentKeys, adoptedKeys, nodeNotes)}

@@ -218,7 +218,7 @@ ActivityBar (bell icon + badge count)
 ### Proposed M3 batch command/recovery delta — not implemented
 
 The current read-through aggregation/publication ingress described above does **not** own a durable batch executor.
-The [M3 candidate §4.1/B1](../../../feature-discussions/2026-09-14-memory-m3-front-door-design-gate.md) proposes a new F246-owned boundary:
+The M3 candidate §4.1/B1 proposes a new F246-owned boundary:
 
 ```text
 authenticated begin(client key, complete member descriptors[1..32])

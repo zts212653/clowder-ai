@@ -1,5 +1,6 @@
 import { refIdentity } from '@cat-cafe/shared';
 import { useEffect, useRef } from 'react';
+import { MarkdownContent } from '@/components/MarkdownContent';
 import { EvolutionSource } from '../EvolutionVersionEvidence';
 import type { EvolutionProgramProjection } from '../evolution-program-projection';
 import { projectAssetVersions } from '../evolution-version-view';
@@ -61,7 +62,13 @@ export function ExplorationHistory({
         <p>
           {steps.length} 步 · {caseCount} 道错题 · 更新到 {node.history.updatedThrough}
         </p>
-        <p>一路走来踩过的坑、当时怎么改、后来怎样了。这是历史记录，不算成功率。</p>
+        <div className="exploration-history-overview">
+          {catalog.overviewMarkdown ? (
+            <MarkdownContent content={catalog.overviewMarkdown} disableCommandPrefix />
+          ) : (
+            <p>{catalog.overview ?? '一路走来踩过的坑、当时怎么改、后来怎样了。这是历史记录，不算成功率。'}</p>
+          )}
+        </div>
       </header>
       <ExplorationHistoryPublicationNotice workspace={workspace} />
       <ExplorationSourceStatus blockers={catalog.blockers} retry={resource.retry} />
@@ -70,8 +77,15 @@ export function ExplorationHistory({
         <header>
           <time>{node.history.period}</time>
           <h3>{node.title}</h3>
-          <p>{node.summary}</p>
+          {!node.bodyMarkdown && <p>{node.summary}</p>}
         </header>
+        {node.bodyMarkdown && (
+          <MarkdownContent
+            content={node.bodyMarkdown}
+            className="exploration-history-authored-body"
+            disableCommandPrefix
+          />
+        )}
         {mode === 'workspace' && (
           <>
             {node.parentEdges.map((edge) => {
@@ -88,16 +102,18 @@ export function ExplorationHistory({
                 </p>
               );
             })}
-            <section className="exploration-history-changes" aria-label="这一步改了什么">
-              <h4>这一步改了什么</h4>
-              {node.changes.map((item, index) => (
-                <div key={`${item.label}:${index}`}>
-                  <strong>{item.label}</strong>
-                  <p>{item.detail}</p>
-                  <EvolutionSource label="依据" source={item.sourceRef} href={item.ownerHref} />
-                </div>
-              ))}
-            </section>
+            {!node.bodyMarkdown && (
+              <section className="exploration-history-changes" aria-label="这一步改了什么">
+                <h4>这一步改了什么</h4>
+                {node.changes.map((item, index) => (
+                  <div key={`${item.label}:${index}`}>
+                    <strong>{item.label}</strong>
+                    <p>{item.detail}</p>
+                    <EvolutionSource label="依据" source={item.sourceRef} href={item.ownerHref} />
+                  </div>
+                ))}
+              </section>
+            )}
             <ExplorationHistoryCases key={nodeKey} workspace={workspace} />
             {next && (
               <button
@@ -113,6 +129,14 @@ export function ExplorationHistory({
               <p>当前采用：{names('adopted') || '未登记'}</p>
               <p>来源当前版本：{asset.catalog ? names('sourceCurrent') || '未登记' : '待来源核验'}</p>
               <EvolutionSource label="历史来源版本" source={node.sourceRef} />
+              {node.sources?.map((source, index) => (
+                <EvolutionSource
+                  key={`${refIdentity(source.ref)}:${index}`}
+                  label={source.label}
+                  source={source.ref}
+                  href={source.href}
+                />
+              ))}
               <ExplorationHistoryPublicationRecords workspace={workspace} />
               {experiment && <ExplorationConditions experiment={experiment} />}
             </details>

@@ -325,8 +325,8 @@ Eval 猫的价值在于解释：同样是 counter 变高，到底是环境漂移
 2. 再读 [F192 spec](../features/F192-socio-technical-harness-eval.md)，看 control plane 如何从 Phase A 发展到多域。
 3. 读 [F153 spec](../features/F153-observability-infra.md)，理解 telemetry 为什么只是 descriptive plane。
 4. 读 [F245 spec](../features/F245-friction-signal-eval.md)，看一个新 eval domain 如何从死信号长成 rollup + Hub view。
-5. 读 [F248 spec](../features/F248-eval-hub-human-readability.md)，理解为什么 eval 不能只给猫看，也要给 operator 讲人话。
-6. 读 [ADR-031 draft v3.4](../decisions/031-harness-engineering-methodology.md)，理解如何按 claim 选择机制，以及 eval 为什么服务于 harness 的新陈代谢和 sunset。
+5. 读 F248 spec，理解为什么 eval 不能只给猫看，也要给 operator 讲人话。
+6. 读 ADR-031 draft v3.4，理解如何按 claim 选择机制，以及 eval 为什么服务于 harness 的新陈代谢和 sunset。
 
 ---
 
@@ -336,7 +336,7 @@ Eval 猫的价值在于解释：同样是 counter 变高，到底是环境漂移
 - [F153: Observability Infrastructure](../features/F153-observability-infra.md)
 - [F200: Memory Recall Eval](../features/F200-memory-recall-eval.md)
 - [F245: Friction Signal Eval](../features/F245-friction-signal-eval.md)
-- [F248: Eval Hub 人类可读性](../features/F248-eval-hub-human-readability.md)
+- F248: Eval Hub 人类可读性
 - [F253: Clowder AI QC Loop](../features/F253-qc-loop.md)
-- [ADR-031 draft v3.4: Harness Engineering 方法论](../decisions/031-harness-engineering-methodology.md)
+- ADR-031 draft v3.4: Harness Engineering 方法论
 - [Harness Eval Control Plane ownership cell](./ownership/cells/harness-eval.md)

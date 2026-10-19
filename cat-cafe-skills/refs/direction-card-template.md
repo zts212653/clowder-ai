@@ -91,4 +91,4 @@ feature thread，要说明为什么。没有理由就先 route 到 PR / issue ow
 ## 来源
 
 - 主人翁五问：[ownership-gate.md](./ownership-gate.md)
-- Issue Triage SOP：[opensource-ops-issue-triage.md](./opensource-ops-issue-triage.md)
+- Issue Triage SOP：opensource-ops-issue-triage.md

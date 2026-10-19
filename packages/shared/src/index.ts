@@ -53,6 +53,7 @@ export * from './eval-metric-ref.js';
 // First-party WebSocket Stop intent contract (API + Web single source).
 export * from './explicit-stop-intent.js';
 export * from './ignored-item-preference.js';
+export * from './markdown-link-safety.js';
 // Export shared text helpers
 export * from './markdown-readable-text.js';
 export * from './message-bundle-projection.js';

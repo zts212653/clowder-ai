@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import { evolutionExplorationReviewV1Schema } from '@cat-cafe/shared';
 import { projectRequestReviewHarnessExploration } from '../src/infrastructure/capability-evolution/adapters/request-review/request-review-harness-lineage.js';
+import { f314HistoryV3Fixture } from './helpers/f314-history-v3-fixture.js';
 
 const archive = JSON.parse(
   readFileSync(
@@ -27,7 +28,10 @@ test('the published F314 index opens the latest cases with their actual later ou
     catalog.blockers.map((blocker) => blocker.code),
     ['public_archive_not_program_adoption'],
   );
-  assert(catalog.nodes.some((node) => node.title.includes('10月16日：')));
+  assert.deepEqual(
+    catalog.nodes.map((node) => node.title),
+    archive.story.nodes.map((node: { title: string }) => node.title),
+  );
   const saved = catalog.experiments.find((entry) => entry.experimentRef.ownerStateRef.includes('f322-save-readback'));
   assert(saved, 'the real member-save counterexample must be reachable from exploration');
   const detail = projectRequestReviewHarnessExploration(
@@ -39,9 +43,16 @@ test('the published F314 index opens the latest cases with their actual later ou
   assert.equal(evolutionExplorationReviewV1Schema.safeParse(detail).success, true);
   const record = detail.details[0]?.status === 'resolved' ? detail.details[0].records[0] : undefined;
   assert(record);
-  assert.match(record.output[0]?.value ?? '', /GET503/);
-  assert.match(record.result.label, /Alpha/);
-  assert.match(record.result.label, /正式加载/);
+  const savedEvidence = record.output[0];
+  const readbackEvidence = record.output[1];
+  assert(savedEvidence);
+  assert(readbackEvidence);
+  assert.match(savedEvidence.value, /保存/);
+  assert.match(savedEvidence.value, /深滚|向下滚很远/);
+  assert.match(readbackEvidence.value, /真实回读|真实读取/);
+  assert.match(record.result.label, /正式/);
+  assert.match(record.result.label, /自然/);
+  assert.doesNotMatch(record.result.label, /服务器没存|正式写入/);
 });
 
 const fixture = () => ({
@@ -51,6 +62,7 @@ const fixture = () => ({
   cases: archive.cases.slice(0, 2).map((entry: object, index: number) => ({ ...entry, caseId: `case-${index}` })),
   story: {
     updated: '2026-10-16',
+    overview: '一开始只看检查是否通过。后来把原始托付、真实操作和失败一起带进交付。',
     sources: [
       {
         id: 'journey',
@@ -82,6 +94,7 @@ const fixture = () => ({
       {
         caseId: 'case-0',
         nodeId: 'complete-result',
+        title: '局部通过不是完成',
         problem: '局部批准被当成整项完成。',
         response: '恢复原始需求并区分批准范围。',
         outcome: '局部证据保留，完整交付继续。',
@@ -90,6 +103,7 @@ const fixture = () => ({
       {
         caseId: 'case-1',
         nodeId: 'real-input',
+        title: '真实文件必须点得开',
         problem: '清单能列出 backlog，却打不开内容。',
         response: '改用需求方的真实文件，从打开走到读到正文。',
         outcome: '真实输入要求已落地；后续案例仍暴露执行遗漏。',
@@ -103,6 +117,14 @@ test('publishes declared problem-to-response lineage instead of unrelated calend
   const result = projectRequestReviewHarnessExploration(input, fixture(), readAt);
   assert(result, 'source-backed history must be available in the existing exploration surface');
   assert.equal(evolutionExplorationReviewV1Schema.safeParse(result).success, true);
+  assert.equal(
+    (result as typeof result & { overview?: string }).overview,
+    '一开始只看检查是否通过。后来把原始托付、真实操作和失败一起带进交付。',
+  );
+  assert.deepEqual(
+    result.experiments.map((experiment) => experiment.title),
+    ['局部通过不是完成', '真实文件必须点得开'],
+  );
   assert.deepEqual(
     result.nodes.map((node) => node.title),
     ['先看整件事是否完成', '用需求方的真实例子验收'],
@@ -154,4 +176,61 @@ test('rejects unsupported relationships and missing case narratives rather than 
   const incomplete = fixture();
   incomplete.story.cases.pop();
   assert.equal(projectRequestReviewHarnessExploration(input, incomplete, readAt), null);
+});
+
+test('v3 projects author Markdown without rebuilding it from semantic JSON fields', () => {
+  const index = f314HistoryV3Fixture(archive);
+  const catalog = projectRequestReviewHarnessExploration(input, index, readAt);
+  assert(catalog, 'the v3 author contract must project through the existing exploration owner');
+  assert.equal(evolutionExplorationReviewV1Schema.safeParse(catalog).success, true);
+  assert.equal(catalog.overviewMarkdown, index.story.overviewMarkdown);
+  assert.equal(catalog.overview, undefined);
+  assert.deepEqual(
+    catalog.nodes.map((node) => [node.title, node.bodyMarkdown, node.changes]),
+    index.story.steps.map((step) => [step.title, step.bodyMarkdown, []]),
+  );
+  assert.deepEqual(
+    catalog.nodes.map((node) => node.kind === 'public_archive' && node.history.period),
+    index.story.steps.map((step) => step.date),
+  );
+  assert.deepEqual(
+    catalog.experiments.map((experiment) => experiment.title),
+    index.story.cases.map((entry) => entry.title),
+  );
+
+  const selected = catalog.experiments[1];
+  assert(selected);
+  const detail = projectRequestReviewHarnessExploration(
+    { ...input, selectedExperimentRef: selected.experimentRef },
+    index,
+    readAt,
+  );
+  const record = detail?.details[0]?.status === 'resolved' ? detail.details[0].records[0] : undefined;
+  assert(record);
+  assert.equal(record.bodyMarkdown, index.story.cases[1]?.bodyMarkdown);
+  assert.deepEqual(record.output, []);
+  assert(record.sources.some((source) => source.href?.includes('/blob/')));
+});
+
+test('v3 strips unknown author extensions while preserving known content and rejects broken skeletons', () => {
+  const extended = f314HistoryV3Fixture(archive);
+  Object.assign(extended.story, { futureStoryField: { presentation: 'future' } });
+  Object.assign(extended.story.sources[0], { futureSourceField: true });
+  Object.assign(extended.story.steps[0], { futureStepField: ['ignored'] });
+  Object.assign(extended.story.cases[0], { futureCaseField: 1 });
+  const projected = projectRequestReviewHarnessExploration(input, extended, readAt);
+  assert(projected);
+  assert.equal(projected.nodes[0]?.bodyMarkdown, extended.story.steps[0]?.bodyMarkdown);
+
+  const missingParent = f314HistoryV3Fixture(archive);
+  missingParent.story.steps[1].parentEdges[0].parentStepId = 'missing-step';
+  assert.equal(projectRequestReviewHarnessExploration(input, missingParent, readAt), null);
+
+  const missingSource = f314HistoryV3Fixture(archive);
+  missingSource.story.cases[0].sourceIds = ['missing-source'];
+  assert.equal(projectRequestReviewHarnessExploration(input, missingSource, readAt), null);
+
+  const dangerous = f314HistoryV3Fixture(archive);
+  dangerous.story.steps[0].bodyMarkdown = '[unsafe](javascript:alert(1))';
+  assert.equal(projectRequestReviewHarnessExploration(input, dangerous, readAt), null);
 });

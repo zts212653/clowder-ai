@@ -10,6 +10,7 @@ import {
   checkCapabilityTipExportCoverage,
   checkCapabilityTipReferenceRegressions,
 } from './check-sync-public-preflight.mjs';
+import { isCoveredByPublicExport, loadPublicExportCoverage } from './lib/sync-public-export-coverage.mjs';
 
 const tempRoots = [];
 const sourceRepoRoot = dirname(dirname(fileURLToPath(import.meta.url)));
@@ -77,6 +78,14 @@ afterEach(() => {
 });
 
 describe('capability-tip transform export coverage', () => {
+  it('keeps managed roots when their descriptive inline comment contains a colon', () => {
+    const root = makeRoot();
+    write(root, 'sync-manifest.yaml', 'managed_roots:\n  - desktop # F179: public desktop shell\nexcluded:\n');
+    const coverage = loadPublicExportCoverage(root);
+    assert.equal(isCoveredByPublicExport('desktop/plugin-window/app-assist-host.cjs', coverage), true);
+    assert.equal(isCoveredByPublicExport('not-exported/private.cjs', coverage), false);
+  });
+
   it('treats materialized transform targets as covered public export paths', () => {
     const root = makeRoot();
     const target = 'cat-cafe-skills/opensource-ops/SKILL.md';

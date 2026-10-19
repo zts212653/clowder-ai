@@ -807,7 +807,9 @@ export function resolveBrowserTarget(
   return { ownerKey: surface.ownerStateRef.key, port, path: target[1] };
 }
 
-export function resolveAgentRunTarget(surface: WorkspaceSurfaceDescriptor): TrajectoryTarget | null {
+export function resolveAgentRunTarget(
+  surface: Pick<WorkspaceSurfaceDescriptor, 'ownerStateRef' | 'resultTargetRef'>,
+): TrajectoryTarget | null {
   if (surface.ownerStateRef.owner !== REAL_SURFACE_OWNERS.agentRun) return null;
   const ownerKey = splitOwnerKey(surface.ownerStateRef.key);
   if (!ownerKey) return null;

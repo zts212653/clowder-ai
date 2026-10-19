@@ -65,7 +65,13 @@ export async function sessionTranscriptRoutes(
     signal?: AbortSignal,
     observer?: TranscriptReadObserver,
   ) {
-    const pages = await invocationReader.readInvocation(sessions, invocationId, {}, signal, observer);
+    const pages = await invocationReader.readInvocation(
+      sessions,
+      invocationId,
+      { generationEvidenceOnly: true },
+      signal,
+      observer,
+    );
     return new Map([...pages].map(([id, page]) => [id, page.events]));
   }
 

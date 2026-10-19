@@ -302,7 +302,7 @@ tab chrome 本身不是证据。证据是陌生用户真的创造了一个新工
 
 任一场景若无法从 Demo Contract 直接读出判题类型、交付车道、视觉真相源和诚实边界，不进入前端实现。
 
-完整的两支 Demo 失败谱系与来源见 [`refs/lessons-from-two-demos.md`](refs/lessons-from-two-demos.md)。视觉 taste 还应读取 [`../../docs/taste/vignettes/creative-craft-概念演示-mksdmh.md`](../../docs/taste/vignettes/creative-craft-概念演示-mksdmh.md)。
+完整的两支 Demo 失败谱系与来源见 [`refs/lessons-from-two-demos.md`](refs/lessons-from-two-demos.md)。视觉 taste 还应读取 `../../docs/taste/vignettes/creative-craft-概念演示-mksdmh.md`。
 
 ## 下一步
 

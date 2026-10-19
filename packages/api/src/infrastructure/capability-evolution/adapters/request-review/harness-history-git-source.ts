@@ -6,6 +6,7 @@ import {
   type RequestReviewHarnessLineageIndex,
   requestReviewHarnessLineageIndexSchema,
 } from './request-review-harness-lineage-schema.js';
+import { collectRequestReviewHarnessV3UnknownFieldPaths } from './request-review-harness-lineage-v3-schema.js';
 
 export const HARNESS_HISTORY_INDEX_PATH = 'docs/discussions/f314-incident-archive/lineage/lineage-index.json';
 export class HarnessHistorySourceError extends Error {
@@ -17,6 +18,7 @@ export interface HarnessHistorySource {
   baseline(): Promise<string>;
   read(revision: string): Promise<RequestReviewHarnessLineageIndex>;
   acquire(revision: string): Promise<RequestReviewHarnessLineageIndex>;
+  ignoredFieldPaths?(revision: string): Promise<string[]>;
 }
 
 function sourcePath(raw: string) {
@@ -57,6 +59,7 @@ export function createHarnessHistoryGitSource(options: { repoRoot: string }): Ha
       );
     });
   let refreshing: Promise<void> | undefined;
+  const ignoredFieldsByRevision = new Map<string, string[]>();
   async function refreshMain() {
     if (!refreshing)
       refreshing = git(['fetch', '--no-tags', 'origin', '+refs/heads/main:refs/remotes/origin/main'], 30_000)
@@ -81,10 +84,19 @@ export function createHarnessHistoryGitSource(options: { repoRoot: string }): Ha
     } catch {
       throw new HarnessHistorySourceError('invalid_history');
     }
-    if (typeof raw === 'object' && raw && 'schemaVersion' in raw && raw.schemaVersion !== 1 && raw.schemaVersion !== 2)
+    if (
+      typeof raw === 'object' &&
+      raw &&
+      'schemaVersion' in raw &&
+      raw.schemaVersion !== 1 &&
+      raw.schemaVersion !== 2 &&
+      raw.schemaVersion !== 3
+    )
       throw new HarnessHistorySourceError('unsupported_history_schema');
+    const ignoredFieldPaths = collectRequestReviewHarnessV3UnknownFieldPaths(raw);
     const parsed = requestReviewHarnessLineageIndexSchema.safeParse(raw);
     if (!parsed.success) throw new HarnessHistorySourceError('invalid_history');
+    ignoredFieldsByRevision.set(revision, ignoredFieldPaths);
     return parsed.data;
   }
   async function verifyEvidence(index: RequestReviewHarnessLineageIndex) {
@@ -183,5 +195,10 @@ export function createHarnessHistoryGitSource(options: { repoRoot: string }): Ha
       return readIndex(revision);
     },
     acquire,
+    async ignoredFieldPaths(revision) {
+      harnessHistoryCommitSchema.parse(revision);
+      if (!ignoredFieldsByRevision.has(revision)) await readIndex(revision);
+      return [...(ignoredFieldsByRevision.get(revision) ?? [])];
+    },
   };
 }

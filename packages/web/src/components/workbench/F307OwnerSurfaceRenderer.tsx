@@ -7,9 +7,8 @@ import { TheaterReplayContent } from '@/components/story-player/TheaterReplayCon
 import type { WorkspaceSurfaceDescriptor } from '@/components/workbench/workbench-contract';
 import { BrowserPanel } from '@/components/workspace/BrowserPanel';
 import { TerminalTab } from '@/components/workspace/TerminalTab';
-import { ThreadChatLink } from '@/components/workspace/ThreadChatLink';
-import { TrajectoryPanel } from '@/components/workspace/trajectory/TrajectoryPanel';
 import type { WorkspaceFileNavigationOrigin } from '@/stores/chat-types';
+import { AgentRunOwnerSurface } from './AgentRunOwnerSurface';
 import { ArtifactFileNavigator } from './ArtifactFileNavigator';
 import { createArtifactReviewSurface, resolveArtifactReviewTarget } from './artifact-review-surface';
 import { CanonicalWorkspaceFileSurface } from './CanonicalWorkspaceFileSurface';
@@ -29,7 +28,6 @@ import { PublicationLandingResolver } from './PublicationLandingResolver';
 import { createPublicationSurface, resolvePublicationTarget } from './publication-surface';
 import {
   createBrowserSurface,
-  resolveAgentRunTarget,
   resolveBrowserTarget,
   resolveContentEditorTarget,
   resolveEvolutionProgramId,
@@ -40,21 +38,6 @@ import { VideoProjectReviewSurface } from './video-project/VideoProjectReviewSur
 import { resolveVideoProjectTarget } from './video-project-surface';
 import { WorkspacePreviewIntentProvider } from './WorkspacePreviewIntent';
 import { WorkspaceSurfaceVisibilityProvider } from './WorkspaceSurfaceVisibility';
-
-function AgentRunOwnerSurface({ surface }: { surface: WorkspaceSurfaceDescriptor }) {
-  const target = resolveAgentRunTarget(surface);
-  if (!target?.threadId) return <OwnerUnavailable message="Agent Run descriptor 没有合法的 F299 invocation 引用。" />;
-  return (
-    <div className="flex h-full min-h-0 flex-col">
-      <div className="flex shrink-0 justify-end border-b border-cafe-subtle px-3 py-2">
-        <ThreadChatLink threadId={target.threadId} />
-      </div>
-      <div className="min-h-0 flex-1">
-        <TrajectoryPanel threadId={target.threadId} targetOverride={target} />
-      </div>
-    </div>
-  );
-}
 
 interface F307OwnerSurfaceRendererProps {
   surface: WorkspaceSurfaceDescriptor;

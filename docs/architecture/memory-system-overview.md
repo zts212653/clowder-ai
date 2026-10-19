@@ -446,7 +446,7 @@ F263 A/B/C 已完成：
 
 Phase D 分成两个不同证据时点：
 
-1. **D0 基线裁决（2026-08-04 closed）**：69 条 verification trace 与 127 个零活动小时通过 gate。全盘 abandoned 因类别混淆降级为 `keep_observe`；F256 appearance 判为 `not_observable`，旧 5/4816 LIKE 代测正式撤回；conflict / repeated synthesis 均为 `not_observable`。详见 [versioned verdict](../harness-feedback/verdicts/2026-08-04-f263-d0-baseline-abandoned-decomposition-and-f256-validity.md)。
+1. **D0 基线裁决（2026-08-04 closed）**：69 条 verification trace 与 127 个零活动小时通过 gate。全盘 abandoned 因类别混淆降级为 `keep_observe`；F256 appearance 判为 `not_observable`，旧 5/4816 LIKE 代测正式撤回；conflict / repeated synthesis 均为 `not_observable`。详见 versioned verdict。
 2. **D1 修复后效用**：F256 健康漏斗稳定且达到预先冻结的 sample floor 后，再判 keep/tune/sunset；新失败孵化进 living bench，连续稳定且已有低成本 guard 的 fixture 才退役。
 
 F263 不接走两个外部责任：F260 maintenance 需单独归属；soft-forget 是带副作用的干预 feature，必须另过 operator Decision Gate。
@@ -511,7 +511,7 @@ F263 不接走两个外部责任：F260 maintenance 需单独归属；soft-forge
 - [F287 Memory Cue Source Map](./memory-cue-source-map.md)
 - [Memory Outcome & Attribution Source Map](./memory-outcome-attribution-source-map.md)
 - [ADR-020: F102 Memory System Architecture](../decisions/020-f102-memory-system-architecture.md)
-- [ADR-028: Trust, Provenance, and Authority](../decisions/028-inter-agent-trust-provenance.md)
+- ADR-028: Trust, Provenance, and Authority
 - [F152](../features/F152-expedition-memory.md) · [F256](../features/F256-memory-search-strategy-evolution.md) · [F263](../features/F263-memory-lifecycle-repair-and-metrics.md)
 - [F271](../features/F271-pragmatic-memory-reflection.md) · [F276](../features/F276-people-relationship-memory.md) · [F281](../features/F281-feedback-channel-first-class.md) · [F282](../features/F282-proactive-memory-pipeline.md) · [F287](../features/F287-memory-cue-plane.md) · [F296](../features/F296-continuity-aware-context-injection.md)
 

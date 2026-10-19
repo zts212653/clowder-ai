@@ -50,6 +50,7 @@ test(
         baseline: async () => runtimeHead,
         read: async (revision: string) => (revision === b ? next : archive),
         acquire: async () => next,
+        ignoredFieldPaths: async (revision: string) => (revision === b ? ['/story/steps/0/futurePresentation'] : []),
       };
       const store = new RedisHarnessHistoryPublicationStore(redis);
       const owner = new HarnessHistoryPublicationOwner({ store, source });
@@ -167,9 +168,12 @@ test(
         ),
       );
       assert.deepEqual(writes.map((response) => response.statusCode).sort(), [201, 409]);
-      const written = writes.find((response) => response.statusCode === 201)!.json();
+      const published = writes.find((response) => response.statusCode === 201);
+      assert.ok(published);
+      const written = published.json();
       assert.equal(written.attempt.actorRef, 'cat:codex-astra');
       assert.match(written.attempt.originRef, /:message:source-message$/);
+      assert.deepEqual(written.attempt.ignoredFieldPaths, ['/story/steps/0/futurePresentation']);
       const current = await app.inject({ url: exploration, headers });
       assert.equal(current.statusCode, 200, current.body);
       assert.equal(current.json().nodes[0].summary, next.story.nodes[0].summary);
@@ -189,6 +193,7 @@ test(
       });
       assert.equal(status.current.sourceRevision, b);
       assert.equal(status.current.revision, 1);
+      assert.deepEqual(status.attempts[0]?.ignoredFieldPaths, ['/story/steps/0/futurePresentation']);
       for (const key of Object.values(harnessHistoryPublicationKeys(id))) assert.equal(await redis.ttl(key), -1);
       const duplicate = await app.inject({
         method: 'POST',

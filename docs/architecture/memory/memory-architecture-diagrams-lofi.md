@@ -83,7 +83,7 @@ description_updated_at: 2026-08-18T16:20:00Z
 第八层。左侧“留下来”和右侧“想起来”共享证据与治理，但不是一条自动直写、自动相信的流水线。
 
 **正式图视觉指引**：保留“大厦剖面”隐喻；P1 只画职责和流向，不出现数据库表名、状态数字或
-feature ID。沿用现有 [EP04 琥珀主图](../../content/offer-column/assets/ep04-memory-architecture-amber.png)
+feature ID。沿用现有 EP04 琥珀主图
 的深蓝蓝图语言，但把两条循环和三条横切画清。
 
 ## P2｜① 证据层：先保证能回到“当时到底发生了什么”

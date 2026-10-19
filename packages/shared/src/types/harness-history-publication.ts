@@ -2,6 +2,8 @@ import { z } from 'zod';
 import {
   evolutionArchivePublicationSchema,
   evolutionArchiveVersionSchema,
+  HARNESS_HISTORY_IGNORED_FIELD_PATH_MAX_COUNT,
+  HARNESS_HISTORY_IGNORED_FIELD_PATH_MAX_LENGTH,
 } from './capability-evolution-exploration.js';
 import { bounded, ownerTruthRefV1Schema, timestampSchema } from './capability-evolution-refs.js';
 
@@ -37,6 +39,10 @@ export const harnessHistoryPublicationAttemptSchema = z
     reason: bounded(1_000),
     occurredAt: timestampSchema,
     failureCode: harnessHistoryFailureCodeSchema.optional(),
+    ignoredFieldPaths: z
+      .array(bounded(HARNESS_HISTORY_IGNORED_FIELD_PATH_MAX_LENGTH))
+      .max(HARNESS_HISTORY_IGNORED_FIELD_PATH_MAX_COUNT)
+      .optional(),
   })
   .strict()
   .superRefine((attempt, ctx) => {

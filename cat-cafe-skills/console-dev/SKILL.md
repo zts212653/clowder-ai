@@ -26,7 +26,7 @@ Console 前端开发先定入口和状态，再写组件。这个 skill 不替�
 | L4 独立 route | 需要专属布局/流程的体验 | 先讨论入口理由 |
 
 涉及状态的 UI 需考虑 loading / empty / partial / full / error、身份权限和 desktop / mobile 中实际相关的状态。
-矩阵用于发现独有风险，不要求全组合各跑完整旅程；测试层级与成本按[测试规范](../../docs/ops/testing-standard.md)选择。
+矩阵用于发现独有风险，不要求全组合各跑完整旅程；测试层级与成本按测试规范选择。
 
 ## Gate 2: Design-System Gate
 
@@ -58,7 +58,7 @@ Console 前端开发先定入口和状态，再写组件。这个 skill 不替�
 - 改共享 primitive 时抽样兄弟页面
 - modal 检查 footer、滚动容器、sticky action、ESC/关闭行为
 - 暗色/移动端如果会被影响，必须抽样
-- 对照[界面错题本](../../feature-discussions/2026-10-08-f322-v2-retrospective/mistakes-ledger.md)，只看本次改动碰到的条目（家里真犯过的反例和自查法；规则正文仍以 DESIGN.md 和在地设计检查单为准）
+- 对照界面错题本，只看本次改动碰到的条目（家里真犯过的反例和自查法；规则正文仍以 DESIGN.md 和在地设计检查单为准）
 
 ## Common Mistakes
 

@@ -186,7 +186,7 @@ ASR→F276 仍是强候选：它有黄挺 detected-FN、source coordinates、own
 ## 9. 主要真相源
 
 - [F200 Memory Recall Eval](../features/F200-memory-recall-eval.md)
-- [F200 Consumption Attribution Audit](../audits/2026-05-18-f200-consumption-attribution-audit.md)
+- F200 Consumption Attribution Audit
 - [F263 Memory Lifecycle Repair & Metrics](../features/F263-memory-lifecycle-repair-and-metrics.md)
 - `packages/api/src/domains/memory/RecallEventCorrelator.ts`
 - `packages/api/src/domains/memory/TrajectoryAggregator.ts`

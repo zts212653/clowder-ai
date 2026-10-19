@@ -73,25 +73,18 @@ function button(label: RegExp) {
 const posts = () => vi.mocked(apiFetch).mock.calls.filter((call) => call[1]?.method === 'POST');
 
 describe('original ProposalCard under its containing owner/read host', () => {
-  it('checks authority again at the queued pin request, not only when adding it to the queue', async () => {
-    let continuations = 0;
-    vi.mocked(host.authorizeWrite).mockImplementation(
-      (_kind, options) => !options?.continuation || ++continuations === 1,
-    );
-    await render();
-    await act(async () => container.querySelector<HTMLInputElement>('input[type="checkbox"]')?.click());
-    await act(async () => button(/批准/).click());
-    expect(posts()).toHaveLength(1);
-    expect(vi.mocked(apiFetch).mock.calls.filter((call) => call[1]?.method === 'PATCH')).toHaveLength(0);
-    expect(pushThreadRouteWithHistory).not.toHaveBeenCalled();
-  });
-  it('rechecks the current host before pinning or navigating after approval', async () => {
+  it.each([
+    'mailbox',
+    undefined,
+  ] as const)('includes pin in the authorized approval but rechecks authority before navigation (%s)', async (presentation) => {
+    host = { ...host, presentation };
     vi.mocked(host.authorizeWrite).mockImplementation((_kind, options) => !options?.continuation);
     await render();
     const pin = container.querySelector<HTMLInputElement>('input[type="checkbox"]');
     await act(async () => pin?.click());
     await act(async () => button(/批准/).click());
     expect(posts()).toHaveLength(1);
+    expect(JSON.parse(String(posts()[0]?.[1]?.body))).toEqual({ pinned: true });
     expect(vi.mocked(apiFetch).mock.calls.filter((call) => call[1]?.method === 'PATCH')).toHaveLength(0);
     expect(pushThreadRouteWithHistory).not.toHaveBeenCalled();
   });

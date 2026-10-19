@@ -2,6 +2,7 @@ import type { InvocationTrajectorySummary } from '@cat-cafe/shared';
 import { runModuleWorker } from '../../../../../utils/run-module-worker.js';
 import type { TranscriptEvent, TranscriptReader } from '../TranscriptReader.js';
 import type { TranscriptWriter } from '../TranscriptWriter.js';
+import { projectRequestGenerationEvidence } from './request-generation-evidence.js';
 import type {
   IndexedSession,
   InvocationIndexRequest,
@@ -102,13 +103,13 @@ export class TranscriptInvocationReader {
   async readInvocation(
     sessions: readonly IndexedSession[],
     invocationId: string,
-    page: { cursor?: number; limit?: number } = {},
+    page: { cursor?: number; limit?: number; generationEvidenceOnly?: boolean } = {},
     signal?: AbortSignal,
     observer?: TranscriptReadObserver,
   ): Promise<Map<string, InvocationReadPage>> {
     if (!observer) {
       const { result, snapshots } = await this.read(sessions, { kind: 'invocation', invocationId, ...page }, signal);
-      return this.materializePages(result, snapshots, invocationId);
+      return this.materializePages(result, snapshots, invocationId, page.generationEvidenceOnly);
     }
     const started = performance.now();
     const metrics: TranscriptReadMetrics = {
@@ -134,7 +135,7 @@ export class TranscriptInvocationReader {
       const materializeStarted = performance.now();
       let pages: Map<string, InvocationReadPage>;
       try {
-        pages = this.materializePages(result, snapshots, invocationId);
+        pages = this.materializePages(result, snapshots, invocationId, page.generationEvidenceOnly);
       } finally {
         metrics.materializeMs = performance.now() - materializeStarted;
       }
@@ -175,6 +176,7 @@ export class TranscriptInvocationReader {
     result: InvocationIndexResponse,
     snapshots: Map<string, TranscriptEvent[]>,
     invocationId?: string,
+    generationEvidenceOnly = false,
   ): Map<string, InvocationReadPage> {
     return new Map(
       result.pages.map((indexed) => [
@@ -186,7 +188,8 @@ export class TranscriptInvocationReader {
             const event = snapshots.get(indexed.sessionId)?.[item.bufferIndex];
             if (!event || (invocationId !== undefined && event.invocationId !== invocationId))
               throw new Error('Transcript buffer changed during indexed read');
-            return { ...event, eventNo: item.eventNo };
+            const envelope = { ...event, eventNo: item.eventNo };
+            return generationEvidenceOnly ? projectRequestGenerationEvidence(envelope) : envelope;
           }),
         },
       ]),

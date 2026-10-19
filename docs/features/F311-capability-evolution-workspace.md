@@ -414,7 +414,7 @@ Meta Evolution 的正式定义为：**能力对象与改进机制的协同演进
 - **Preparation in use**: 选中一次实验或比较，能读到实际使用的环境、数据/样本、量尺与 GT 来源、可信性和缺项，回到阶段 2 的同源材料。条件摘要针对当前比较，不给整棵树贴一个虚假的统一实验条件；沿用版缺少相应条件的测量时明确提示。
 - **Comparison and learning**: 明确对照对象、观察窗和适用范围，呈现结果及证据数量/充分性，具体统计随 claim 决定，不强制所有任务共用总分。条件变化时按适用契约重比；AC-32 的换尺复判或重建 baseline 要求保留。方案整体效果、内部归因、反例/方法线索分别表达；没有可靠新发现时也如实显示，不把每次尝试自动算成长。
 - **Visible work and decisions**: 展示由真实回执支持的补测/修改、所需证据、成本及下一步依据。探索或采用请求绑定发起时版本，切换阅读不改其对象；版本、生效与独立验证回执各守其含义，数据收集或比较完成不自动采用。
-- **Draft input**: [鸭鸭公开数据入口](../videos/f311-microduck-roadshow/pipeline/football/readiness/20260909-demo/README.md)包含 5 个控制器版本、8 轮实验、56 条含重复场景记录。v3 的三轮补测与 v4 右 farther“走近碰球但没有 kick”是本轮必走场景。该派生 catalog 和控制器 fingerprint 供展示溯源，不冒充正式 owner 资产版本、独立样本量、足球成功或采用回执。
+- **Draft input**: 鸭鸭公开数据入口包含 5 个控制器版本、8 轮实验、56 条含重复场景记录。v3 的三轮补测与 v4 右 farther“走近碰球但没有 kick”是本轮必走场景。该派生 catalog 和控制器 fingerprint 供展示溯源，不冒充正式 owner 资产版本、独立样本量、足球成功或采用回执。
 
 ### Primary Journey: 一句话开启一轮能力进化
 - **Scope unit**: workspace（一个 Evolution Program）

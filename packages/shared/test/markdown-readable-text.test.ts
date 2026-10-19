@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { isSafeMarkdownUrl, unsafeMarkdownUrls } from '../src/markdown-link-safety.js';
 import {
   findGeneratedTextConstructs,
   projectMarkdownReadableText,
@@ -131,18 +132,24 @@ describe('markdown readable-text source map (F309 rendered selection → raw ran
     return Array.from(visible, (_c, index) => mapped.sourceOffsets[at + index] ?? null);
   };
 
+  const sampleAt = (index: number) => {
+    const sample = samples[index];
+    if (sample === undefined) throw new Error(`missing Markdown sample ${index}`);
+    return sample;
+  };
+
   it('maps text inside emphasis, across soft breaks and blockquote continuations to its raw characters', () => {
-    const [first] = samples;
-    expect(offsetOf(first!, '暮色')).toEqual([first!.indexOf('暮色'), first!.indexOf('暮色') + 1]);
-    expect(offsetOf(first!, 'salt')[0]).toBe(first!.indexOf('salt'));
-    const quote = samples[2]!;
+    const first = sampleAt(0);
+    expect(offsetOf(first, '暮色')).toEqual([first.indexOf('暮色'), first.indexOf('暮色') + 1]);
+    expect(offsetOf(first, 'salt')[0]).toBe(first.indexOf('salt'));
+    const quote = sampleAt(2);
     expect(offsetOf(quote, '引用第二行')[0]).toBe(quote.indexOf('引用第二行'));
     expect(offsetOf(quote, '续行')[0]).toBe(quote.indexOf('续行'));
     expect(offsetOf(quote, 'inline')[0]).toBe(quote.indexOf('inline'));
   });
 
   it('never maps a character reference, but maps the escaped character of a backslash escape', () => {
-    const markdown = samples[1]!;
+    const markdown = sampleAt(1);
     expect(offsetOf(markdown, '&')).toEqual([null]);
     expect(offsetOf(markdown, '©')).toEqual([null]);
     expect(offsetOf(markdown, 'Jerry')[0]).toBe(markdown.indexOf('Jerry'));
@@ -154,7 +161,7 @@ describe('markdown readable-text source map (F309 rendered selection → raw ran
   });
 
   it('refuses to guess a code value that its own fence repeats', () => {
-    const markdown = samples[4]!;
+    const markdown = sampleAt(4);
     const mapped = projectMarkdownReadableTextWithSourceMap(markdown);
     expect(mapped.text.startsWith('js')).toBe(true);
     expect(mapped.sourceOffsets.slice(0, 2)).toEqual([null, null]);
@@ -168,4 +175,34 @@ it('projects a large flat paragraph without using its characters as variadic fun
   expect(projection.text).toBe(paragraph);
   expect(projection.sourceOffsets).toHaveLength(paragraph.length);
   expect(projection.sourceOffsets.at(-1)).toBe(paragraph.length - 1);
+});
+
+describe('author Markdown link safety', () => {
+  it('allows ordinary web and relative reading links', () => {
+    for (const url of ['https://example.com/path?q=1#part', 'http://example.com', 'docs/case.md#source', '#part']) {
+      expect(isSafeMarkdownUrl(url)).toBe(true);
+    }
+    expect(unsafeMarkdownUrls('[web](https://example.com) [local](docs/case.md#source)')).toEqual([]);
+  });
+
+  it('finds executable, local-machine and protocol-relative destinations in links, images and definitions', () => {
+    expect(
+      unsafeMarkdownUrls(
+        [
+          '[script](javascript:alert(1))',
+          '![data](data:image/svg+xml,bad)',
+          '[file][secret]',
+          '[secret]: file:///etc/passwd',
+          '[network](//outside.invalid/path)',
+          '[escape](../outside.md)',
+        ].join('\n\n'),
+      ),
+    ).toEqual([
+      'javascript:alert(1)',
+      'data:image/svg+xml,bad',
+      'file:///etc/passwd',
+      '//outside.invalid/path',
+      '../outside.md',
+    ]);
+  });
 });

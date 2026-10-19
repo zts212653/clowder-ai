@@ -114,6 +114,32 @@ async function render() {
   );
 }
 describe('the inbox uses the original new-conversation card capabilities', () => {
+  it.each([
+    'checked',
+    'default',
+    'unchecked',
+  ])('submits initial pin=%s in the approval even if the card loses continuation authority', async (selection) => {
+    const pinned = selection === 'checked';
+    const originalAuthorize = host.authorizeWrite;
+    host.authorizeWrite = (_kind, options) => !options?.continuation;
+    vi.mocked(apiFetch).mockImplementation(async (_path, init) =>
+      Response.json(init?.method === 'POST' ? { threadId: 'created-thread' } : { proposal }),
+    );
+    try {
+      await render();
+      if (selection !== 'default')
+        await act(async () => container.querySelector<HTMLInputElement>('input[type="checkbox"]')?.click());
+      if (selection === 'unchecked')
+        await act(async () => container.querySelector<HTMLInputElement>('input[type="checkbox"]')?.click());
+      await act(async () => container.querySelector<HTMLButtonElement>('[data-testid="approve-btn"]')?.click());
+      const posts = vi.mocked(apiFetch).mock.calls.filter((call) => call[1]?.method === 'POST');
+      expect(posts).toHaveLength(1);
+      expect(JSON.parse(String(posts[0]?.[1]?.body))).toEqual(pinned ? { pinned: true } : {});
+      expect(vi.mocked(apiFetch).mock.calls.filter((call) => call[1]?.method === 'PATCH')).toHaveLength(0);
+    } finally {
+      host.authorizeWrite = originalAuthorize;
+    }
+  });
   it('offers canonical parent alternatives when the narrow page has never mounted a sidebar', async () => {
     useSidebarProjectionStore.setState({
       rows: [

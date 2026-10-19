@@ -256,6 +256,7 @@ export class RedisThreadStore implements IThreadStore {
     parentThreadId?: string,
     proposalAudit?: import('../ports/ThreadStore.js').ThreadProposalAudit,
     branchAudit?: import('../ports/ThreadStore.js').ThreadBranchAudit,
+    options?: import('../ports/ThreadStore.js').ThreadCreateOptions,
   ): Promise<Thread> {
     const now = Date.now();
     const thread: Thread = {
@@ -266,6 +267,7 @@ export class RedisThreadStore implements IThreadStore {
       participants: [],
       lastActiveAt: now,
       createdAt: now,
+      ...(options?.pinned ? { pinned: true, pinnedAt: now } : {}),
       ...(parentThreadId ? { parentThreadId } : {}),
       ...(proposalAudit
         ? {

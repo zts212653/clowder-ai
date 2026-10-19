@@ -4,9 +4,24 @@
 .exploration-history-heading h2 {
   margin: 0;
 }
-.exploration-history-heading p {
+.exploration-history-heading > p {
   margin: 4px 0;
   color: var(--cafe-text-secondary);
+}
+.exploration-history-overview {
+  margin-top: 8px;
+  color: var(--cafe-text-secondary);
+}
+.exploration-history-overview > p {
+  margin: 0;
+}
+.exploration-history-overview .markdown-content > :first-child,
+.exploration-history-authored-body > :first-child {
+  margin-top: 0;
+}
+.exploration-history-overview .markdown-content > :last-child,
+.exploration-history-authored-body > :last-child {
+  margin-bottom: 0;
 }
 .exploration-history-step {
   scroll-margin-top: 16px;
@@ -24,6 +39,10 @@
 .exploration-history-parent {
   padding-left: 12px;
   border-left: 2px solid var(--cafe-border);
+}
+.exploration-history-authored-body {
+  margin: 16px 0 24px;
+  line-height: 1.7;
 }
 .exploration-history-changes,
 .exploration-history-cases {

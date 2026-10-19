@@ -67,6 +67,38 @@ describe('RedisThreadStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () =
     assert.deepEqual(thread.participants, []);
   });
 
+  it('writes initial pin in the creation transaction and preserves it for a fresh reader without TTL', async () => {
+    const persistentStore = new RedisThreadStore(redis, { ttlSeconds: 0 });
+    const created = await persistentStore.create(
+      'user1',
+      'Pinned at birth',
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      { pinned: true },
+    );
+    assert.equal(created.pinned, true);
+    assert.equal(typeof created.pinnedAt, 'number');
+    const stored = await redis.hgetall(threadDetailKey(created.id));
+    assert.equal(stored.pinned, 'true');
+    assert.equal(Number(stored.pinnedAt), created.pinnedAt);
+    assert.equal(await redis.ttl(threadDetailKey(created.id)), -1);
+    const freshReader = new RedisThreadStore(redis, { ttlSeconds: 0 });
+    assert.equal((await freshReader.get(created.id)).pinned, true);
+    assert.equal((await freshReader.get(created.id)).pinnedAt, created.pinnedAt);
+    assert.equal((await freshReader.list('user1')).find((thread) => thread.id === created.id).pinned, true);
+    const plain = await persistentStore.create('user1', 'Default');
+    const unchecked = await persistentStore.create('user1', 'Unchecked', undefined, undefined, undefined, undefined, {
+      pinned: false,
+    });
+    for (const thread of [plain, unchecked]) {
+      const read = await freshReader.get(thread.id);
+      assert.equal(read.pinned, false);
+      assert.equal(read.pinnedAt, null);
+    }
+  });
+
   it('get() returns stored thread', async () => {
     const created = await store.create('user1', 'My Thread');
     const fetched = await store.get(created.id);

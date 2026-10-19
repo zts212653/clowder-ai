@@ -11,7 +11,7 @@ tips_exempt: "Renewed 2026-10-15 for the public repository-name projection in an
 
 > ## ⛔ 契约冻结（2026-07-29，operator signoff msg `private-source-id`）
 >
-> **本 Feature 的 wake 契约已移交 [F280 Unified Wait Contract](F280-unified-wait-contract.md)。**
+> **本 Feature 的 wake 契约已移交 F280 Unified Wait Contract。**
 > F140 从此不再接受新的 post-completion 补丁——下面那串从 2026-05-07 到 2026-07-20 的
 > 修正记录（backlog guard → `intent` 轴 → routing 修正 ×2 → CI state-only → `wakePolicy` 轴）
 > 本身就是病历：一个 done 的 Feature 被当活体补锅了三个月，因为"哪些事件该唤醒猫"

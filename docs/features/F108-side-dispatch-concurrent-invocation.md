@@ -196,4 +196,4 @@ F254 实测发现多猫独立思考模式下，晚启动的猫会被早启动猫
 - [ ] context snapshot 时间戳：每个 target 收到的 context 截止到多目标消息发出时刻，不含其他 target 的后续输出
 
 **参考**：
-- ADR-040: [`040-per-target-queued-message-state-model.md`](../decisions/040-per-target-queued-message-state-model.md)
+- ADR-040: `040-per-target-queued-message-state-model.md`

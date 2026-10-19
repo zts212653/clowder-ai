@@ -301,6 +301,11 @@ for (const language of ['zh', 'en'])
         const approveResponse = await approved;
         assert.equal(approveResponse.status(), 200);
         const result = await approveResponse.json();
+        // The choice must already be stored before the browser receives its reply.
+        // A disappearing card or refresh can no longer cancel a second pin write.
+        assert.deepEqual(fixture.approvalResponses, [
+          { path: '/api/proposals/inbox-native-approve/approve', threadId: result.threadId, pinned: true },
+        ]);
         await page.waitForURL((url) => url.pathname === `/thread/${result.threadId}`);
         const created = fixture.threads.get(result.threadId),
           approvedRecord = fixture.proposals.get('inbox-native-approve');
@@ -320,6 +325,9 @@ for (const language of ['zh', 'en'])
         );
         await page.screenshot({ path: path.join(evidence, 'approved-navigation.png'), fullPage: true });
         await page.goto(`http://127.0.0.1:${webPort}/thread/${CALENDAR_THREAD}?shell=v2`);
+        const reloadedThread = await page.request.get(`http://127.0.0.1:${fixture.apiPort}/api/threads/${created.id}`);
+        assert.equal(reloadedThread.status(), 200);
+        assert.equal((await reloadedThread.json()).pinned, true);
         const coldChatResult = page.locator('[data-chat-container]').getByTestId('approval-item-inbox-native-approve');
         await coldChatResult
           .getByRole('button', {
@@ -332,6 +340,12 @@ for (const language of ['zh', 'en'])
           language === 'en' ? /Approved · Conversation created/ : /已同意 · 对话已创建/,
         );
         assert.equal(await coldChatResult.getByTestId('approve-btn').count(), 0);
+        if (width === 1440) {
+          const sidebarPin = page.locator(`[data-thread-id="${created.id}"]`).getByTestId('thread-pin-button');
+          await sidebarPin.waitFor();
+          assert.equal(await sidebarPin.getAttribute('aria-pressed'), 'true');
+          await page.screenshot({ path: path.join(evidence, 'pin-after-refresh.png'), fullPage: true });
+        }
         await page.getByTestId('mailbox-button').click();
         const rejectRow = page.getByTestId('mailbox-item').filter({ hasText: 'Native new conversation reject' });
         await rejectRow.getByTestId('reject-btn').waitFor();
@@ -374,9 +388,10 @@ for (const language of ['zh', 'en'])
           /^\/api\/proposals\/[^/]+\/(approve|reject)$/.test(m.path),
         );
         assert.equal(decisionWrites.length, 2);
+        assert.equal(decisionWrites[0].body.pinned, true);
         assert.equal(
           fixture.mutations.filter((m) => m.method === 'PATCH' && m.path === `/api/threads/${created.id}`).length,
-          1,
+          0,
         );
         assert.equal(
           fixture.mutations.some((m) => /ignored-items|taste-proposals|person-memory/.test(m.path)),
@@ -399,6 +414,7 @@ for (const language of ['zh', 'en'])
               seed,
               rejectedRecord: fixture.proposals.get('inbox-native-reject'),
               decisionWrites,
+              approvalResponses: fixture.approvalResponses,
               mutations: fixture.mutations,
               originalDraft: fixture.original.getDraft(CALENDAR_THREAD),
               providerBoundary:

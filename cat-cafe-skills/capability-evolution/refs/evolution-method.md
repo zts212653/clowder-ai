@@ -108,5 +108,5 @@ GT 的判定域与取得成本分别核验，不能用便宜的裁判替代其�
 ## 真相源
 
 - [F311 规格与 owner 边界](../../../docs/features/F311-capability-evolution-workspace.md)
-- [正式状态、事件与门](../../../feature-specs/2026-08-31-f311-capability-evolution-workspace.md#13-state--event-transition-table)
+- 正式状态、事件与门
 - 方法迁移的直接需求：`[thread-id]#private-source-id`；方法可复用不等于具体项目已完成。

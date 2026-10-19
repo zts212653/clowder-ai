@@ -20,6 +20,7 @@ import type {
 } from './harness-history-publication-store.js';
 import { mapHarnessHistorySelection } from './harness-history-selection.js';
 import { projectRequestReviewHarnessExploration } from './request-review-harness-lineage.js';
+import { normalizeRequestReviewHarnessV3UnknownFieldPaths } from './request-review-harness-lineage-v3-schema.js';
 import { REQUEST_REVIEW_TARGET_STATE_REF } from './request-review-owner-identity.js';
 
 export class HarnessHistoryPublicationError extends Error {
@@ -136,7 +137,17 @@ export class HarnessHistoryPublicationOwner {
       publication: {
         ...publication,
         attempts: status.attempts.map(
-          ({ revision, action, status: result, actorRef, originRef, reason, occurredAt, failureCode }) => ({
+          ({
+            revision,
+            action,
+            status: result,
+            actorRef,
+            originRef,
+            reason,
+            occurredAt,
+            failureCode,
+            ignoredFieldPaths,
+          }) => ({
             revision,
             action,
             status: result,
@@ -145,6 +156,7 @@ export class HarnessHistoryPublicationOwner {
             reason,
             occurredAt,
             ...(failureCode ? { failureCode } : {}),
+            ...(ignoredFieldPaths?.length ? { ignoredFieldPaths } : {}),
           }),
         ),
         ...(update ? { selectionUpdate: update } : {}),
@@ -168,7 +180,11 @@ export class HarnessHistoryPublicationOwner {
             : undefined;
       if (!revision) throw new HarnessHistorySourceError('restore_not_found');
       await this.project(input, this.version(programId, revision));
-      return revision;
+      return {
+        sourceRevision: revision,
+        ignoredFieldPaths:
+          (await this.options.source.ignoredFieldPaths?.(revision)) ?? previous?.ignoredFieldPaths ?? [],
+      };
     }
     const index = await this.options.source.acquire(command.sourceRevision);
     const projected = projectRequestReviewHarnessExploration(
@@ -179,7 +195,10 @@ export class HarnessHistoryPublicationOwner {
     );
     if (!evolutionExplorationReviewV1Schema.safeParse(projected).success)
       throw new HarnessHistorySourceError('invalid_history');
-    return command.sourceRevision;
+    return {
+      sourceRevision: command.sourceRevision,
+      ignoredFieldPaths: (await this.options.source.ignoredFieldPaths?.(command.sourceRevision)) ?? [],
+    };
   }
   /** Transport service must supply a revalidated active invocation; no actor fields come from the body. */
   async publish(
@@ -197,9 +216,12 @@ export class HarnessHistoryPublicationOwner {
     if (snapshot.revision !== command.expectedRevision) return { outcome: 'conflict' as const };
     const baseline = await this.baseline(programId, snapshot);
     let sourceRevision: string | undefined = command.action === 'publish' ? command.sourceRevision : undefined;
+    let ignoredFieldPaths: string[] = [];
     let failureCode: HarnessHistoryPublicationAttempt['failureCode'];
     try {
-      sourceRevision = await this.validateSource(input, command, baseline);
+      const validated = await this.validateSource(input, command, baseline);
+      sourceRevision = validated.sourceRevision;
+      ignoredFieldPaths = normalizeRequestReviewHarnessV3UnknownFieldPaths(validated.ignoredFieldPaths);
     } catch (error) {
       if (!(error instanceof HarnessHistorySourceError)) throw error;
       failureCode = error.code;
@@ -215,6 +237,7 @@ export class HarnessHistoryPublicationOwner {
       ...(sourceRevision ? { sourceRevision } : {}),
       ...(command.action === 'restore' ? { restoreRevision: command.restoreRevision } : {}),
       ...(failureCode ? { failureCode } : {}),
+      ...(ignoredFieldPaths.length ? { ignoredFieldPaths } : {}),
     };
     return this.options.store.append({
       programId,

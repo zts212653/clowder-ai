@@ -17,10 +17,14 @@ vi.mock('@/utils/api-client', () => ({ apiFetch: api.fetch }));
 let host: HTMLDivElement;
 let root: Root;
 let failDetail = false;
-const title = ['先理解整件事', '再用真实输入验收'];
+const title = ['把原始托付带进审查', '再用真实输入验收', '从读者看不懂重新起步'];
 function catalog(path: string) {
   const url = new URL(path, 'https://cafe.invalid');
   const base = explorationFixture({ withDetail: true });
+  const baseExperiment = base.experiments[0];
+  const baseDetail = base.details[0];
+  if (!baseExperiment || baseDetail?.status !== 'resolved' || !baseDetail.records[0])
+    throw new Error('Expected a resolved exploration fixture');
   const nodes = title.map((name, index) => ({
     kind: 'public_archive',
     nodeRef: source(`step-${index}`),
@@ -29,19 +33,20 @@ function catalog(path: string) {
     sourceRef: source('publication'),
     history: { period: `10月${index + 7}日`, updatedThrough: '2026-10-16' },
     changes: [{ label: '当时改变', detail: '改用原话里的例子', sourceRef: source('change') }],
-    parentEdges: index
-      ? [{ parentNodeRef: source('step-0'), sourceRef: source('relation'), description: '完整交付还要检查真实输入' }]
-      : [],
+    parentEdges:
+      index === 1
+        ? [{ parentNodeRef: source('step-0'), sourceRef: source('relation'), description: '完整交付还要检查真实输入' }]
+        : [],
   }));
   const experiments = nodes.map((node, index) => ({
-    ...base.experiments[0],
+    ...baseExperiment,
     nodeRef: node.nodeRef,
     experimentRef: source(`run-${index}`),
-    title: `打不开真实文件 ${index}`,
+    title: ['局部通过不是完成', '真实文件必须点得开', '内部写法让读者看不懂'][index] ?? '未命名错题',
     metrics: [],
     conditions: {
-      ...base.experiments[0]!.conditions,
-      window: { ...base.experiments[0]!.conditions.window, label: `2026-10-0${index + 7}` },
+      ...baseExperiment.conditions,
+      window: { ...baseExperiment.conditions.window, label: `2026-10-0${index + 7}` },
     },
   }));
   const raw = url.searchParams.get('selectedExperimentRef');
@@ -54,7 +59,7 @@ function catalog(path: string) {
           nodeRef: run.nodeRef,
           records: [
             {
-              ...base.details[0]!.records[0],
+              ...baseDetail.records[0],
               nodeRef: run.nodeRef,
               experimentRef: run.experimentRef,
               output: [
@@ -75,7 +80,13 @@ function catalog(path: string) {
         },
       ]
     : [];
-  return { ...base, nodes, experiments, details };
+  return {
+    ...base,
+    overview: '一开始，我们常把代码通过检查当成工作完成。后来，我们把原始托付、真实操作和失败一起带进开发与审查。',
+    nodes,
+    experiments,
+    details,
+  };
 }
 beforeEach(() => {
   (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -103,18 +114,32 @@ afterEach(() => {
 async function show() {
   const value = programFixture('observing');
   value.program.objectRef = objectRef;
+  const projection = parseProgramProjection(value);
+  if (!projection) throw new Error('Expected a valid Program projection');
   await act(async () =>
-    root.render(
-      <EvolutionMomentContext projection={parseProgramProjection(value)!} moment={2} explorationMode="workspace" />,
-    ),
+    root.render(<EvolutionMomentContext projection={projection} moment={2} explorationMode="workspace" />),
   );
   return value.program.programId;
 }
-const button = (text: string) =>
-  [...host.querySelectorAll('button')].find((entry) => entry.textContent?.includes(text))!;
+const button = (text: string) => {
+  const match = [...host.querySelectorAll('button')].find((entry) => entry.textContent?.includes(text));
+  if (!match) throw new Error(`Missing button: ${text}`);
+  return match;
+};
 it('reads historical cases from the first step through the next, keeps source navigation and the selected place', async () => {
   const id = await show();
   expect(host.textContent).toContain('错题谱系');
+  expect(host.querySelector('.exploration-history-heading')?.textContent).toContain(
+    '一开始，我们常把代码通过检查当成工作完成。',
+  );
+  expect(host.querySelector('.exploration-node-meta')?.textContent).toContain('起于：内部写法让读者看不懂');
+  const toolbar = host.querySelector('[aria-label="谱系导航"]');
+  if (!toolbar) throw new Error('Missing historical lineage toolbar');
+  expect(
+    [...toolbar.children].filter((entry) => entry.tagName === 'BUTTON').map((entry) => entry.textContent?.trim()),
+  ).toEqual(['看全图']);
+  expect(toolbar?.querySelector('summary')?.textContent).toBe('更多');
+  expect(toolbar?.querySelector('[aria-label="谱系缩放"]')).not.toBeNull();
   expect(host.querySelector('[data-history-step] h3')?.textContent).toBe(title[0]);
   expect(host.textContent).toContain('踩了什么坑');
   expect(host.textContent).toContain('当时怎么应对');

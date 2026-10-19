@@ -13,6 +13,7 @@ import {
   loadPublicExportCoverage,
 } from './lib/sync-public-export-coverage.mjs';
 import { publicWorkspaceDependencyErrors } from './lib/sync-public-workspace-closure.mjs';
+import { projectPublicDeadLinks } from './project-public-dead-links.mjs';
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const defaultRepoRoot = resolve(scriptDir, '..');
@@ -263,19 +264,22 @@ export function checkCapabilityTipExportCoverage(repoRoot = defaultRepoRoot, opt
   return { ok: errors.length === 0, errors };
 }
 
-function isCanonicalProvenanceOnlyChange(repoRoot, baseRef, filePath) {
+function canonicalProjectionOnlyChange(repoRoot, baseRef, filePath) {
   // Only prose paths already governed by contribution coverage qualify.
   // Guide YAML and runtime identities do not share this export transform.
-  if (!filePath.endsWith('.md') || !isContributionRelevantFile(filePath)) return false;
+  if (!filePath.endsWith('.md') || !isContributionRelevantFile(filePath)) return null;
   const baseline = readGitFile(repoRoot, baseRef, filePath);
   const candidatePath = resolve(repoRoot, filePath);
-  if (baseline === null || !existsSync(candidatePath)) return false;
-  // Match the approved outbound provenance transform, never general whitespace
-  // or wording normalization. Any extra authored byte keeps coverage mandatory.
-  const projected = baseline
+  if (baseline === null || !existsSync(candidatePath)) return null;
+  // Compare only the actual outbound transforms, including legacy public trees
+  // whose dead links were never projected. Any extra authored byte needs coverage.
+  const redacted = baseline
     .replace(/\b[0-9]{16,}-[0-9]{6,}-[a-f0-9]{8}\b/g, 'private-source-id')
     .replace(/\bthread_(?=[a-z0-9_]*[0-9])[a-z0-9_]{8,}\b/g, '[thread-id]');
-  return projected !== baseline && projected === readFileSync(candidatePath, 'utf8');
+  const candidate = readFileSync(candidatePath, 'utf8');
+  if (redacted !== baseline && redacted === candidate) return 'provenance';
+  const projected = projectPublicDeadLinks(redacted, candidatePath).content;
+  return projected !== redacted && projected === candidate ? 'dead-link' : null;
 }
 
 export function checkSyncPublicPreflight(repoRoot = defaultRepoRoot, options = {}) {
@@ -284,9 +288,11 @@ export function checkSyncPublicPreflight(repoRoot = defaultRepoRoot, options = {
   const tipExportCoverage = checkCapabilityTipExportCoverage(repoRoot, options);
   const baseRef = options.baseRef ?? 'HEAD';
   const provenanceOnlyChanges = [];
+  const deadLinkOnlyChanges = [];
   const changedFiles = (options.changedFiles ?? []).filter((filePath) => {
-    if (!isCanonicalProvenanceOnlyChange(repoRoot, baseRef, filePath)) return true;
-    provenanceOnlyChanges.push(filePath);
+    const projection = canonicalProjectionOnlyChange(repoRoot, baseRef, filePath);
+    if (!projection) return true;
+    (projection === 'provenance' ? provenanceOnlyChanges : deadLinkOnlyChanges).push(filePath);
     return false;
   });
   const capabilityTips = checkCapabilityTipsForRepo(repoRoot, {
@@ -303,7 +309,7 @@ export function checkSyncPublicPreflight(repoRoot = defaultRepoRoot, options = {
     ...capabilityTips.errors,
   ];
   const warnings = capabilityTips.warnings ?? [];
-  return { ok: errors.length === 0, errors, warnings, provenanceOnlyChanges };
+  return { ok: errors.length === 0, errors, warnings, provenanceOnlyChanges, deadLinkOnlyChanges };
 }
 
 function parseArgs(argv) {

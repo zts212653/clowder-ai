@@ -1,8 +1,11 @@
-import type { EvolutionExplorationNodeV1 } from '@cat-cafe/shared';
+import { type EvolutionExplorationNodeV1, refIdentity } from '@cat-cafe/shared';
 import { describe, expect, it } from 'vitest';
 import {
+  historicalLineageEdgeKey,
+  historicalLineageEdgeRoutes,
   layoutExplorationLineage,
   layoutExplorationLineageV2,
+  layoutHistoricalLineage,
   lineageDetailLevel,
   sparseLineageEdgeRoute,
 } from '../exploration/exploration-lineage';
@@ -54,6 +57,69 @@ describe('readable lineage at different scales', () => {
     expect(vertical.nodes.at(-1)?.node.parentEdges).toHaveLength(2);
     expect(vertical.nodes[1].y).toBeGreaterThan(vertical.nodes[0].y);
     expect(vertical.nodes[1].x).not.toBe(vertical.nodes[2].x);
+  });
+  it('places authored history from left to right without manufacturing or dropping source relationships', () => {
+    const historical = (id: string, index: number, parents: string[] = []): EvolutionExplorationNodeV1 => {
+      const base = node(id, parents);
+      if (base.kind !== 'public_archive') throw new Error('Expected a public archive test node');
+      return { ...base, history: { period: `10月${index + 1}日`, updatedThrough: '2026-10-19' } };
+    };
+    const nodes = [
+      historical('step-1', 0),
+      historical('step-2', 1, ['step-1']),
+      historical('step-3', 2, ['step-1']),
+      historical('step-4', 3, ['step-2', 'step-3']),
+      historical('step-5', 4),
+    ];
+
+    const map = layoutHistoricalLineage(nodes, []);
+    expect(map.nodes.map((entry) => entry.key)).toEqual(nodes.map((entry) => refIdentity(entry.nodeRef)));
+    expect(map.nodes.map((entry) => entry.x)).toEqual([...map.nodes.map((entry) => entry.x)].sort((a, b) => a - b));
+    expect(map.nodes[3]?.node.parentEdges).toHaveLength(2);
+    expect(map.nodes[4]?.y).not.toBe(map.nodes[0]?.y);
+  });
+  it.each([
+    'map',
+    'vertical',
+  ] as const)('routes long authored edges around every unrelated step in the %s layout', (direction) => {
+    const historical = (id: string, parents: string[] = []): EvolutionExplorationNodeV1 => {
+      const base = node(id, parents);
+      if (base.kind !== 'public_archive') throw new Error('Expected a public archive test node');
+      return { ...base, history: { period: id, updatedThrough: '2026-10-19' } };
+    };
+    const map = layoutHistoricalLineage(
+      [
+        historical('step-1'),
+        historical('step-2', ['step-1']),
+        historical('step-3', ['step-1']),
+        historical('step-4', ['step-2', 'step-3']),
+        historical('step-5', ['step-1']),
+      ],
+      [],
+      direction,
+    );
+    const routes = historicalLineageEdgeRoutes(map.nodes, direction);
+    expect(routes.has(historicalLineageEdgeKey(refIdentity(ref('step-1')), refIdentity(ref('step-2'))))).toBe(false);
+    expect(routes.has(historicalLineageEdgeKey(refIdentity(ref('step-1')), refIdentity(ref('step-3'))))).toBe(true);
+    const route = routes.get(historicalLineageEdgeKey(refIdentity(ref('step-1')), refIdentity(ref('step-5'))));
+    if (!route) throw new Error('long authored edge must have a collision-free route');
+    const endpointKeys = new Set([refIdentity(ref('step-1')), refIdentity(ref('step-5'))]);
+    const collisions = route.slice(1).flatMap((point, index) => {
+      const start = route[index];
+      if (!start) throw new Error('route segment must have a starting point');
+      return map.nodes
+        .filter((entry) => !endpointKeys.has(entry.key))
+        .filter((entry) =>
+          segmentCrossesBox(start, point, {
+            left: entry.x,
+            top: entry.y,
+            right: entry.x + 176,
+            bottom: entry.y + 112,
+          }),
+        )
+        .map((entry) => entry.key);
+    });
+    expect(collisions).toEqual([]);
   });
   it('persists the chosen layout with the existing camera and draft', () => {
     const value = {

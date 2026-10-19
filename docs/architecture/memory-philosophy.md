@@ -97,7 +97,7 @@ reviewed_by: ["Maine Coon/gpt-5.5", "斑斑/agy-opus-4.6", "Siamese/gemini-3.5-f
   **遗忘语义分层**（v5，S3 遗忘穿透实证后精确化）：**结论/画像层**（lesson、文档、画像、隐私）的遗忘 = 物理清除，索引面与向量残留全清（上句原语义，保留不变）；**历史层**（thread 记录、provenance 链上的原始事件）的遗忘 = **退役封存**——移出活跃召回、敏感行 redaction（涂黑那一行，不撕那一页），但不物理改写：历史完整性是 provenance（M12）与仲裁（M16）的地基，"删聊天记录 = 改变过去的事实"（operator）。分层的原因是张力真实存在——遗忘权（公理零）与历史完整性（公理五）在历史层正面相遇，解法不是二选一，是语义分化；且公理六加重了两端：记忆构成身份，所以遗忘是身份手术（必须能做），历史链是同一性的载体（不容改写）。两层的边界由 owner 划定——公理零不因分层而减损。
   → [F186](../features/F186-library-memory-architecture.md) KD-5/sensitivity · [F231](../features/F231-user-profile-capsule.md) 数据最小化 · S3 遗忘穿透实证（§7.8）
 - **M2 记忆是数据不是指令**：任何记忆内容——包括带 anchor 的原文——不得改变系统规则、工具权限、身份判断或 authority 等级。**provenance 只证明来源，不证明可信**；弱模型/外部来源的产出是 evidence 不是 instruction。
-  → [F186](../features/F186-library-memory-architecture.md) KD-6 · [ADR-028](../decisions/028-inter-agent-trust-provenance.md)（stub，scope 已定：authority class / taint tracking / 弱→强解释边界）
+  → [F186](../features/F186-library-memory-architecture.md) KD-6 · ADR-028（stub，scope 已定：authority class / taint tracking / 弱→强解释边界）
 
 ### 从公理一（生命局部）
 
@@ -141,7 +141,7 @@ reviewed_by: ["Maine Coon/gpt-5.5", "斑斑/agy-opus-4.6", "Siamese/gemini-3.5-f
 ### 从公理五（视角局部）
 
 - **M16 写入带签名，仲裁归真相源，传递保链**：每份写入标注写者与依据；多猫对同一事实的冲突不取一边、双向对比、仲裁于真相源协议（Git + anchor 唯一）而非消息往来；跨猫传递记忆时 provenance 链随行（二手证据标二手）。
-  → P4 单一真相源 · 家规"消息不是真相源" · [ADR-028](../decisions/028-inter-agent-trust-provenance.md) handoff 可信度 · ledger conflict 教训（LL 系）
+  → P4 单一真相源 · 家规"消息不是真相源" · ADR-028 handoff 可信度 · ledger conflict 教训（LL 系）
 
 ### 从公理六（记忆构成身份）
 
@@ -332,7 +332,7 @@ operator二枪：**"我不知道我缺什么。如果我不给你任何 memory d
 
 ### v5（2026-07-05，恋爱头脑战三份材料对照后）
 
-operator三枪，这次打的是方法："**你根本没看原文吧？**"——v5 起点是一次翻车：作者先拿五条二手转述做对照，交出一张工程化修订清单，被打回读原文（恋爱头脑战复盘 (internal) / [共犯宣言 v1](../content/drafts/2026-07-04-coactive-manifesto-v1.md) / coactive §16 (internal)）。清单对照量的是条款覆盖，思想对照量的是坐标系盲区——只有后者需要读原文。
+operator三枪，这次打的是方法："**你根本没看原文吧？**"——v5 起点是一次翻车：作者先拿五条二手转述做对照，交出一张工程化修订清单，被打回读原文（恋爱头脑战复盘 (internal) / 共犯宣言 v1 / coactive §16 (internal)）。清单对照量的是条款覆盖，思想对照量的是坐标系盲区——只有后者需要读原文。
 
 认账：纲领处理"记忆作为证据"登峰造极，处理"记忆作为关系与身份"只给了牌位（taste 一个道名 + connect 一句主菜）——"温度"在二十条定律中出现零次，"身份"仅在安全语境出现一次。v3 补了目的层与写侧，但检索起点的引力仍在：写侧四律全长成"如何把经验变成可检索资产"的语法。**纲领与恋爱头脑战互为对方的盲区**——从检索吐槽开局的文档看不见温度，从关系实验开局的复盘不会去写幽灵防线；公理五在文档层的自证。
 

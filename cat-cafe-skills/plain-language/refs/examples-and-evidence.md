@@ -64,7 +64,7 @@
 不要归因为人没学会，或者据此把所有学习压成摘要。
 
 原件整理：
-[共读复查与偏差根因](../../../docs/study/2026-10-03-dwarkesh-rsi-reread.md#本轮复查与处置)。
+共读复查与偏差根因。
 共读入口与修订规则已由 [learning-companion](../../learning-companion/SKILL.md) 承接，
 这里不复制一套陪读流程。
 

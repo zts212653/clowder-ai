@@ -11,6 +11,7 @@ import {
   type RequestReviewHarnessLineageIndex,
   requestReviewHarnessLineageIndexSchema,
 } from './request-review-harness-lineage-schema.js';
+import { projectHarnessStoryV3Nodes, v3CaseNarrative, v3CaseSources } from './request-review-harness-lineage-v3.js';
 import {
   harnessStoryNodeRef,
   projectHarnessStoryNodes,
@@ -19,6 +20,9 @@ import {
 } from './request-review-harness-story.js';
 
 export { requestReviewHarnessLineageIndexSchema } from './request-review-harness-lineage-schema.js';
+
+type ResolvedDetail = Extract<EvolutionExplorationDetailV1, { status: 'resolved' }>;
+type ExplorationRecord = ResolvedDetail['records'][number];
 
 const ref = (kind: string, id: string, version: string): OwnerTruthRefV1 => ({
   ownerFeatureId: 'F314',
@@ -107,7 +111,7 @@ function conditions(
     },
     preparationRefs: [
       { label: '打开案例原文', ref: source, href: sourceHref(index, entry.link) },
-      ...storyCaseSources(index, entry),
+      ...(index.schemaVersion === 3 ? v3CaseSources(index, entry) : storyCaseSources(index, entry)),
       {
         label: 'F314 owner 核对',
         ref: ref('owner-review', 'development-process', index.ownerReviewCommit),
@@ -123,14 +127,17 @@ function projectExperiment(
   release: RequestReviewHarnessLineageIndex['releases'][number],
   publicationRef?: OwnerTruthRefV1,
 ): EvolutionExplorationExperimentV1 {
-  const narrative = storyCaseNarrative(index, entry);
+  const v3Narrative = index.schemaVersion === 3 ? v3CaseNarrative(index, entry) : undefined;
+  const legacyNarrative = index.schemaVersion === 3 ? undefined : storyCaseNarrative(index, entry);
   return {
     experimentRef: caseRef(entry, publicationRef?.version),
-    nodeRef: narrative
-      ? harnessStoryNodeRef(index, narrative.nodeId, publicationRef?.version)
-      : releaseRef(release, publicationRef?.version),
+    nodeRef: v3Narrative
+      ? harnessStoryNodeRef(index, v3Narrative.stepId, publicationRef?.version)
+      : legacyNarrative
+        ? harnessStoryNodeRef(index, legacyNarrative.nodeId, publicationRef?.version)
+        : releaseRef(release, publicationRef?.version),
     sourceRef: caseRef(entry),
-    title: (narrative?.problem ?? entry.summary).slice(0, 240),
+    title: (v3Narrative?.title ?? legacyNarrative?.title ?? legacyNarrative?.problem ?? entry.summary).slice(0, 240),
     status: 'recorded',
     recordCount: 1,
     conditions: conditions(index, entry, publicationRef),
@@ -146,7 +153,35 @@ function projectDetail(
 ): EvolutionExplorationDetailV1 {
   const evidence = caseRef(entry);
   const citations = entry.citedMemberCommits;
-  const narrative = storyCaseNarrative(index, entry);
+  const v3Narrative = index.schemaVersion === 3 ? v3CaseNarrative(index, entry) : undefined;
+  const legacyNarrative = index.schemaVersion === 3 ? undefined : storyCaseNarrative(index, entry);
+  const input: ExplorationRecord['input'] = [
+    { label: '发生时间', value: experiment.conditions.window.label },
+    { label: '文档整理日期', value: entry.documentedOn },
+  ];
+  if (!v3Narrative && !legacyNarrative)
+    input.push({ label: '日期浏览组', value: `${entry.browsingBucket}（不代表实际沿用）` });
+  let output: ExplorationRecord['output'];
+  let result: ExplorationRecord['result'];
+  if (v3Narrative) {
+    output = [];
+    result = { status: 'observed', label: v3Narrative.title };
+  } else if (legacyNarrative) {
+    output = [
+      { label: '踩了什么坑', value: legacyNarrative.problem },
+      { label: '当时怎么应对', value: legacyNarrative.response },
+    ];
+    result = { status: 'observed', label: legacyNarrative.outcome };
+  } else {
+    output = [
+      { label: '实际沿用版本', value: '未确认' },
+      {
+        label: '成员提交引用',
+        value: citations.length ? citations.map((item) => item.sha).join('、') : '未找到可核成员提交引用',
+      },
+    ];
+    result = { status: 'unknown', label: '历史案例来源已归档；不是版本效用判定。' };
+  }
   return {
     status: 'resolved',
     experimentRef: experiment.experimentRef,
@@ -157,36 +192,20 @@ function projectDetail(
         experimentRef: experiment.experimentRef,
         nodeRef: experiment.nodeRef,
         caseId: entry.caseId ?? entry.sourceTextSha256.slice(0, 16),
-        label: entry.summary.slice(0, 240),
+        label: (v3Narrative?.title ?? entry.summary).slice(0, 240),
+        ...(v3Narrative ? { bodyMarkdown: v3Narrative.bodyMarkdown } : {}),
         inputRef: evidence,
         evidenceRef: evidence,
         windowRef: experiment.conditions.window.sourceRef,
         measurementRef: experiment.conditions.measurement.sourceRef,
-        input: [
-          { label: '发生时间', value: experiment.conditions.window.label },
-          { label: '文档整理日期', value: entry.documentedOn },
-          ...(narrative ? [] : [{ label: '日期浏览组', value: `${entry.browsingBucket}（不代表实际沿用）` }]),
-        ],
-        output: narrative
-          ? [
-              { label: '踩了什么坑', value: narrative.problem },
-              { label: '当时怎么应对', value: narrative.response },
-            ]
-          : [
-              { label: '实际沿用版本', value: '未确认' },
-              {
-                label: '成员提交引用',
-                value: citations.length ? citations.map((item) => item.sha).join('、') : '未找到可核成员提交引用',
-              },
-            ],
-        result: narrative
-          ? { status: 'observed', label: narrative.outcome }
-          : { status: 'unknown', label: '历史案例来源已归档；不是版本效用判定。' },
+        input,
+        output,
+        result,
         values: {},
         media: [],
         sources: [
           { label: '案例原文', ref: evidence, href: sourceHref(index, entry.link) },
-          ...storyCaseSources(index, entry),
+          ...(index.schemaVersion === 3 ? v3CaseSources(index, entry) : storyCaseSources(index, entry)),
           ...citations.slice(0, 15).map((citation) => ({
             label: `原文引用 · ${citation.relation}`,
             ref: commitRef(citation),
@@ -208,22 +227,25 @@ export function projectRequestReviewHarnessExploration(
   if (!parsed.success) return null;
   const index = parsed.data;
   const byId = new Map(index.releases.map((release) => [release.id, release]));
-  const nodes: EvolutionResolvedExplorationReviewV1['nodes'] = index.story
-    ? projectHarnessStoryNodes(index, index.story, publicationRef)
-    : index.releases.map((release) => ({
-        kind: 'public_archive',
-        nodeRef: releaseRef(release, publicationRef?.version),
-        title: `${release.id} · ${release.date}`,
-        summary: `作者日期 ${release.date} 的 ${release.commits.length} 个提交浏览组；不代表发布、加载或采用。`,
-        sourceRef: publicationRef ?? indexRef(index),
-        changes: release.commits.slice(0, 32).map((commit) => ({
-          label: commit.members.join('、'),
-          detail: commit.subject,
-          sourceRef: commitRef(commit),
-          ownerHref: commitHref(commit),
-        })),
-        parentEdges: [],
-      }));
+  const nodes: EvolutionResolvedExplorationReviewV1['nodes'] =
+    index.schemaVersion === 3
+      ? projectHarnessStoryV3Nodes(index, publicationRef)
+      : index.story
+        ? projectHarnessStoryNodes(index, index.story, publicationRef)
+        : index.releases.map((release) => ({
+            kind: 'public_archive',
+            nodeRef: releaseRef(release, publicationRef?.version),
+            title: `${release.id} · ${release.date}`,
+            summary: `作者日期 ${release.date} 的 ${release.commits.length} 个提交浏览组；不代表发布、加载或采用。`,
+            sourceRef: publicationRef ?? indexRef(index),
+            changes: release.commits.slice(0, 32).map((commit) => ({
+              label: commit.members.join('、'),
+              detail: commit.subject,
+              sourceRef: commitRef(commit),
+              ownerHref: commitHref(commit),
+            })),
+            parentEdges: [],
+          }));
   const pairs = index.cases.map((entry) => {
     const browsingBucket = entry.browsingBucket;
     if (!browsingBucket) throw new Error('validated F314 case bucket disappeared');
@@ -244,6 +266,11 @@ export function projectRequestReviewHarnessExploration(
     objectRef: input.objectRef,
     sourceRef: publicationRef ?? indexRef(index),
     readAt,
+    ...(index.schemaVersion === 3
+      ? { overviewMarkdown: index.story.overviewMarkdown }
+      : index.story?.overview
+        ? { overview: index.story.overview }
+        : {}),
     nodes,
     experiments: pairs.map(({ experiment }) => experiment),
     details: pairs

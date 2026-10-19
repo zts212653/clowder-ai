@@ -206,7 +206,7 @@ F178 §12 升级条件给出新 F 号触发集合（self OAuth AS / multi-tenant
 ```
 
 2. **`.cat-cafe/cat-catalog.json` runtime catRegistry — runtime cat / callback API routing**（`packages/api/src/routes/cats.ts:485 catRegistry.register(id, config)` 消费）。
-   **正确做法**：通过 `POST /api/cats` API endpoint 注入，**0 重启**（详见 [LL-cat-cafe-api-has-hot-reload](../lessons-learned/LL-cat-cafe-api-has-hot-reload.md)）。
+   **正确做法**：通过 `POST /api/cats` API endpoint 注入，**0 重启**（详见 LL-cat-cafe-api-has-hot-reload）。
    **错误推测**（R3 P2-4 + 47 B1a 早期）：以为要改 `cat-config.json` 的 `breeds[].variants[]` + 重启 API。
    **实际**：runtime 不读 `cat-config.json` 的 breeds，读 `.cat-cafe/cat-catalog.json` runtime data 文件。POST API 会持久化到 runtime catalog。
 

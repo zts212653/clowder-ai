@@ -99,7 +99,8 @@ export async function createInboxProposalFixture({
     }
     const mutations = [],
       reads = [],
-      readReceipts = [];
+      readReceipts = [],
+      approvalResponses = [];
     app.addHook('onRequest', async (request, reply) => {
       reply
         .header('Access-Control-Allow-Origin', request.headers.origin ?? '*')
@@ -113,6 +114,14 @@ export async function createInboxProposalFixture({
         mutations.push({ method: request.method, path: request.url.split('?')[0], body: request.body });
     });
     app.addHook('onSend', async (request, _reply, payload) => {
+      if (request.method === 'POST' && /\/api\/proposals\/[^/]+\/approve$/.test(request.url)) {
+        const body = JSON.parse(String(payload));
+        approvalResponses.push({
+          path: request.url,
+          threadId: body.threadId,
+          pinned: body.threadId ? (await threads.get(body.threadId))?.pinned : undefined,
+        });
+      }
       if (
         (request.method === 'POST' || request.method === 'PATCH') &&
         /\/read(?:\/latest)?$|\/read\/mark-all$/.test(request.url)
@@ -217,6 +226,7 @@ export async function createInboxProposalFixture({
       mutations,
       reads,
       readReceipts,
+      approvalResponses,
       original,
       runtime,
       approvalSources,
