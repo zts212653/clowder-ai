@@ -132,6 +132,10 @@ export function ensureWindowsAcpBootstrapDirectories(root: string, cwd: string):
         Buffer.from(PRIVATE_DIRECTORY_SCRIPT, 'utf16le').toString('base64'),
       ],
       {
+        // A pwsh -> Node -> Windows PowerShell chain otherwise inherits
+        // incompatible PowerShell 7 modules. Let WinPS build its own paths.
+        // https://learn.microsoft.com/powershell/module/microsoft.powershell.core/about/about_psmodulepath
+        env: Object.fromEntries(Object.entries(process.env).filter(([name]) => name.toUpperCase() !== 'PSMODULEPATH')),
         input: JSON.stringify({ root, cwd }),
         encoding: 'utf8',
         timeout: 20_000,

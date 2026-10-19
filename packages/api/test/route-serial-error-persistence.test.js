@@ -293,43 +293,67 @@ describe('route-serial error persistence (F5 reload)', () => {
     });
   }
 
-  it('serial: reports a failed A2A response to the exact predecessor and suppresses recursive report carriers', async () => {
-    const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
-    const deps = createMockDeps({ bengal: createErrorService('bengal', 'model unavailable') }, []);
-    const reports = [];
-    const commonOptions = {
-      a2aTriggerMessageId: 'source-from-opus',
-      a2aCallerCatId: 'opus',
-      onLifecycleInvocationStarted: async (input) => {
-        const admission = await lifecycleResponseStoreFor(input);
-        deps.messageStore = admission.store;
-        return { responseMessageId: admission.response.id, priorFrontierMessageId: null };
-      },
-      commitFailedA2AReport: async (input) => {
-        reports.push(input);
-        const current = await deps.messageStore.getById(input.responseMessageId);
-        return { ...current, content: input.message.content, lifecycle: { ...current.lifecycle, ...input.terminal } };
-      },
-    };
+  for (const strategy of ['serial', 'parallel']) {
+    it(`${strategy}: reports a failed A2A response to the exact predecessor and suppresses recursive report carriers`, async () => {
+      const route =
+        strategy === 'serial'
+          ? (await import('../dist/domains/cats/services/agents/routing/route-serial.js')).routeSerial
+          : (await import('../dist/domains/cats/services/agents/routing/route-parallel.js')).routeParallel;
+      const { InvocationQueue } = await import('../dist/domains/cats/services/agents/invocation/InvocationQueue.js');
+      const { commitFailedResponseAndEnqueueA2ACaller } = await import('../dist/routes/callback-a2a-trigger.js');
+      const deps = createMockDeps({ bengal: createErrorService('bengal', 'model unavailable') }, []);
+      const queue = new InvocationQueue();
+      const threadId = `failure-carrier-${strategy}`;
+      let responseMessageId;
+      const reportsForCurrentResponse = async () =>
+        (await queue.listAllDurable(threadId)).filter((entry) => entry.payload.messageId === responseMessageId);
+      const commonOptions = {
+        a2aTriggerMessageId: 'source-from-opus',
+        a2aCallerCatId: 'opus',
+        onLifecycleInvocationStarted: async (input) => {
+          const admission = await lifecycleResponseStoreFor(input);
+          deps.messageStore = admission.store;
+          responseMessageId = admission.response.id;
+          return { responseMessageId, priorFrontierMessageId: null };
+        },
+        // Direct route callers can lack durable admission receipts. Exercise the
+        // real transaction's legacy fallback, not the number of callback calls.
+        commitFailedA2AReport: (input) =>
+          commitFailedResponseAndEnqueueA2ACaller(
+            {
+              messageStore: deps.messageStore,
+              invocationQueue: queue,
+              queueProcessor: { requestDrain: async () => {} },
+              socketManager: { emitToUser() {}, broadcastAgentMessage() {} },
+              log: { info() {}, warn() {}, error() {} },
+            },
+            input,
+          ),
+      };
 
-    for await (const _ of routeSerial(deps, ['bengal'], 'please handle this', 'user1', 'thread1', commonOptions)) {
-      void _;
-    }
-    assert.equal(reports.length, 1);
-    assert.equal(reports[0].reporterCatId, 'bengal');
-    assert.equal(reports[0].predecessorCatId, 'opus');
-    assert.equal(reports[0].terminal.status, 'failed');
-    assert.match(reports[0].message.content, /model unavailable/);
+      for await (const _ of route(deps, ['bengal'], 'please handle this', 'user1', threadId, commonOptions)) {
+        void _;
+      }
+      const normalReports = await reportsForCurrentResponse();
+      assert.equal(normalReports.length, 1);
+      assert.equal(normalReports[0].from.catId, 'bengal');
+      assert.deepEqual(normalReports[0].targets, ['opus']);
+      assert.equal(normalReports[0].sourceCategory, 'a2a_failure');
+      assert.equal(deps.messageStore.getById(responseMessageId).lifecycle.status, 'failed');
+      assert.match(deps.messageStore.getById(responseMessageId).content, /model unavailable/);
 
-    reports.length = 0;
-    for await (const _ of routeSerial(deps, ['bengal'], 'failure report carrier', 'user1', 'thread1', {
-      ...commonOptions,
-      a2aFailureReport: true,
-    })) {
-      void _;
-    }
-    assert.equal(reports.length, 0, 'a failed report carrier must not recurse back to its reporter');
-  });
+      for await (const _ of route(deps, ['bengal'], 'failure report carrier', 'user1', threadId, {
+        ...commonOptions,
+        a2aFailureReport: true,
+      })) {
+        void _;
+      }
+      const recursiveReports = await reportsForCurrentResponse();
+      assert.equal(recursiveReports.length, 0, 'a failed report carrier must not recurse back to its reporter');
+      assert.equal(deps.messageStore.getById(responseMessageId).lifecycle.status, 'failed');
+      assert.match(deps.messageStore.getById(responseMessageId).content, /model unavailable/);
+    });
+  }
 
   it('persists error-only response as system message with Error: prefix', async () => {
     const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');

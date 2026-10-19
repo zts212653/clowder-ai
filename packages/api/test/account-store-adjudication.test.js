@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import fs, { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { syncBuiltinESMExports } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, test } from 'node:test';
+import { afterEach, beforeEach, mock, test } from 'node:test';
 import './helpers/setup-cat-registry.js';
 import {
   resolveAnthropicRuntimeProfile,
@@ -448,6 +449,50 @@ test('installer-only fallback survives unrelated rejected accounts, but a health
   assert.equal(resolveAnthropicRuntimeProfile(workspace).apiKey, credential.apiKey);
   put(workspace, 'accounts.json', { 'installer-anthropic': account, builtin_anthropic: { authType: 'oauth' } });
   assert.equal(resolveAnthropicRuntimeProfile(workspace).apiKey, undefined);
+});
+
+test('HTTP account reads and writes retain legacy adjudication across native path aliases', async () => {
+  pair(workspace);
+  pair(runtime, { ...account, models: ['different'] });
+  const alias = join(root, 'workspace-alias');
+  symlinkSync(workspace, alias, process.platform === 'win32' ? 'junction' : 'dir');
+  process.env.CAT_CAFE_WORKSPACE_ROOT = alias;
+  const original = fs.realpathSync;
+  // Windows short (8.3) spellings survive the JS realpath walker, whereas
+  // fs.promises.realpath uses the native resolver and expands those aliases.
+  // Model that distinction without depending on 8.3 being enabled on this host.
+  const lexicalRealpath = Object.assign((path, ...args) => (path === alias ? alias : original(path, ...args)), {
+    native: original.native,
+  });
+  const stub = mock.method(fs, 'realpathSync', lexicalRealpath);
+  syncBuiltinESMExports();
+  const Fastify = (await import('fastify')).default;
+  const { accountsRoutes } = await import('../dist/routes/accounts.js');
+  const app = Fastify();
+  try {
+    await app.register(accountsRoutes);
+    const headers = { 'x-cat-cafe-user': 'fixture-owner' };
+    const listed = await app.inject({ method: 'GET', url: '/api/accounts', headers });
+    assert.equal(listed.statusCode, 200, listed.body);
+    assert.equal(
+      listed.json().providers.some((entry) => entry.id === 'fixture'),
+      false,
+    );
+    assert.match(listed.json().unavailableAccounts[0].reason, /divergent/);
+    const patched = await app.inject({
+      method: 'PATCH',
+      url: '/api/accounts/fixture',
+      headers,
+      payload: { displayName: 'Blocked' },
+    });
+    assert.equal(patched.statusCode, 400, patched.body);
+    assert.match(patched.json().error, /divergent/);
+    assert.equal(readCatalogAccounts(workspace).fixture, undefined);
+  } finally {
+    await app.close();
+    stub.mock.restore();
+    syncBuiltinESMExports();
+  }
 });
 
 test('mutating a rejected ref returns its diagnostic, while an absent ref stays not found', async () => {

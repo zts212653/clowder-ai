@@ -4,7 +4,7 @@ import Fastify from 'fastify';
 import { createTranscriptReadDiagnostics } from '../dist/infrastructure/transcript-read-diagnostics.js';
 import { registerInvocationTrajectoryRoutes } from '../dist/routes/invocation-trajectory-routes.js';
 
-test('request-generations attributes both actual reads after access checks without changing the response', async (t) => {
+test('request-generations attributes one canonical read per authorized request without changing the response', async (t) => {
   const session = {
     id: 'private-session',
     threadId: 'private-thread',
@@ -20,6 +20,7 @@ test('request-generations attributes both actual reads after access checks witho
   const diagnostic = createTranscriptReadDiagnostics({ onEvent: (event) => logs.push(event), slowMs: 0 });
   t.after(() => diagnostic.stop());
   const admissions = [];
+  let physicalReads = 0;
   const app = Fastify();
   t.after(() => app.close());
   registerInvocationTrajectoryRoutes(app, {
@@ -46,6 +47,7 @@ test('request-generations attributes both actual reads after access checks witho
       return diagnostic.beginRead(requestId, stage);
     },
     readInvocationEvents: async (sessions, _id, signal, observer) => {
+      physicalReads += 1;
       signal?.throwIfAborted();
       observer?.onRead({
         status: 'success',
@@ -69,6 +71,7 @@ test('request-generations attributes both actual reads after access checks witho
   });
   assert.equal(denied.statusCode, 403);
   assert.equal(admissions.length, 0);
+  assert.equal(physicalReads, 0);
   const staleHint = await app.inject({
     method: 'GET',
     url: '/api/invocations/inv/request-generations?threadId=foreign',
@@ -76,17 +79,32 @@ test('request-generations attributes both actual reads after access checks witho
   });
   assert.equal(staleHint.statusCode, 409);
   assert.equal(admissions.length, 0);
+  assert.equal(physicalReads, 0);
   const ok = await app.inject({
     method: 'GET',
     url: '/api/invocations/inv/request-generations?sessionId=private-session',
     headers: { 'x-cat-cafe-user': 'owner', 'request-id': 'duplicate-client-id' },
   });
   assert.equal(ok.statusCode, 200);
-  assert.deepEqual(admissions, ['canonical', 'generations']);
+  assert.equal(physicalReads, 1);
+  assert.deepEqual(admissions, ['canonical']);
   assert.deepEqual(ok.json(), { invocationId: 'inv', threadId: session.threadId, generations: [], gaps: [] });
   assert.deepEqual(
     logs.map((event) => event.stage),
-    ['canonical', 'generations'],
+    ['canonical'],
+  );
+  const next = await app.inject({
+    method: 'GET',
+    url: '/api/invocations/inv/request-generations?sessionId=private-session',
+    headers: { 'x-cat-cafe-user': 'owner', 'request-id': 'duplicate-client-id' },
+  });
+  assert.equal(next.statusCode, 200);
+  assert.deepEqual(next.json(), ok.json());
+  assert.equal(physicalReads, 2);
+  assert.deepEqual(admissions, ['canonical', 'canonical']);
+  assert.deepEqual(
+    logs.map((event) => event.stage),
+    ['canonical', 'canonical'],
   );
   assert.ok(logs.every((event) => event.requestId === 'duplicate-client-id'));
   assert.notEqual(logs[0].readSequence, logs[1].readSequence);

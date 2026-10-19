@@ -365,7 +365,11 @@ export interface RouteOptions {
         callerTraceContext?: import('../../../../../infrastructure/telemetry/genai-semconv.js').CallerTraceContext;
       }) => Promise<StoredMessage>)
     | undefined;
-  /** Canonical failed-final path: terminalize the response and wake the exact A2A caller once. */
+  /**
+   * Canonical failed-final transaction. Always persists the terminal response;
+   * durable receipts select eligible callers and suppress failure-report bounces.
+   * Calling this hook does not itself imply a caller wake was admitted.
+   */
   commitFailedA2AReport?:
     | ((input: {
         responseMessageId: string;

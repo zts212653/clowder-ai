@@ -23,11 +23,16 @@ const SECOND = 'REVIEW_SECOND_SOURCE_ONLY';
 // Real Queue → AgentRouter → context projection → invocation lifecycle. Only
 // the provider is controlled; an explicit barrier holds the first receiver.
 for (const topology of ['serial', 'parallel'])
-  for (const outcome of ['completed', 'failed'])
+  for (const [outcome, failureCarrier] of [
+    ['completed', null],
+    ['failed', null],
+    ['failed', 'only'],
+    ['failed', 'with ordinary caller'],
+  ])
     for (const middle of topology === 'serial' && outcome === 'completed'
       ? [null, 'conversation_input', 'private_input']
       : [null]) {
-      test(`${topology}/${outcome}/${middle ?? 'adjacent'}: complete public A2A projection covers both wakes in one receiver`, async () => {
+      test(`${topology}/${outcome}/${failureCarrier ?? middle ?? 'adjacent'}: complete public A2A projection covers only eligible caller returns in one receiver`, async () => {
         const messages = new MessageStore();
         const threads = new ThreadStore();
         const thread = threads.create('owner', 'pending prompt delivery');
@@ -86,7 +91,7 @@ for (const topology of ['serial', 'parallel'])
           socketManager: { emitToUser: noop, broadcastToRoom: noop, broadcastAgentMessage: noop },
           log: { info: noop, warn: noop, error: noop },
         });
-        const admit = (content, targets = ['opus'], callerCatId = 'codex') =>
+        const admit = (content, targets = ['opus'], callerCatId = 'codex', sourceCategory = 'a2a') =>
           queue.send(
             messages,
             {
@@ -105,14 +110,19 @@ for (const topology of ['serial', 'parallel'])
               from: { kind: 'agent', catId: callerCatId },
               content,
               targetCats: targets,
-              sourceCategory: 'a2a',
+              sourceCategory,
               ownerAuthProvenance: 'strict',
               intent: 'execute',
               autoExecute: true,
               messageDisposition: 'next_work',
             },
           );
-        const first = await admit(FIRST, topology === 'parallel' ? ['opus', 'codex'] : ['opus']);
+        const first = await admit(
+          FIRST,
+          topology === 'parallel' ? ['opus', 'codex'] : ['opus'],
+          'codex',
+          failureCarrier ? 'a2a_failure' : 'a2a',
+        );
         const hiddenBody = 'NOT_YET_ADMITTED_INPUT';
         const hidden =
           middle === 'conversation_input'
@@ -154,25 +164,28 @@ for (const topology of ['serial', 'parallel'])
                   autoExecute: true,
                 })
               : undefined;
-        const second = await admit(SECOND, ['opus'], 'gemini');
+        const second = failureCarrier === 'only' ? undefined : await admit(SECOND, ['opus'], 'gemini');
+        const sources = [first.message, ...(second ? [second.message] : [])];
+        const inputIds = sources.map((source) => source.id);
         const drain = processor.requestDrain(thread.id);
         try {
           await firstStarted.promise;
           assert.match(prompts[0], new RegExp(FIRST));
-          assert.ok(
+          assert.equal(
             prompts[0].includes(SECOND),
-            'ordinary public A2A speech remains visible to the actual unread projection',
+            Boolean(second),
+            'the prompt contains exactly the actual ordinary public source when present',
           );
           const firstResponseId = messages
             .getById(first.message.id)
             .lifecycle.dispatchRefs.find((ref) => ref.targetId === 'opus').statusMessageId;
-          for (const source of [first.message, second.message]) {
+          for (const source of sources) {
             const refs = messages.getById(source.id).lifecycle.dispatchRefs.filter((ref) => ref.targetId === 'opus');
             assert.equal(refs.length, 1);
             assert.equal(refs[0].statusMessageId, firstResponseId);
           }
           const response = messages.getById(firstResponseId);
-          assert.deepEqual(new Set(response.lifecycle.inputMessageIds), new Set([first.message.id, second.message.id]));
+          assert.deepEqual(new Set(response.lifecycle.inputMessageIds), new Set(inputIds));
           const active = tracker.getActiveSlots(thread.id).find((slot) => slot.catId === 'opus').activeRun;
           assert.deepEqual(new Set(active.inputMessageIds), new Set(response.lifecycle.inputMessageIds));
           assert.ok(!prompts[0].includes(hiddenBody), 'unpublished input cannot enter the first public projection');
@@ -195,28 +208,30 @@ for (const topology of ['serial', 'parallel'])
             'public wakes share one receiver; an unpublished input waits for its own admission',
           );
           if (hidden) assert.ok(prompts[1].includes(hiddenBody));
-          for (const source of [first.message, second.message]) {
+          for (const source of sources) {
             const refs = messages.getById(source.id).lifecycle.dispatchRefs.filter((ref) => ref.targetId === 'opus');
             assert.equal(refs.length, 1);
             const response = messages.getById(refs[0].statusMessageId);
-            assert.deepEqual(
-              new Set(response.lifecycle.inputMessageIds),
-              new Set([first.message.id, second.message.id]),
-            );
+            assert.deepEqual(new Set(response.lifecycle.inputMessageIds), new Set(inputIds));
             assert.equal(refs[0].phase, 'settled');
           }
           assert.equal(queue.list(thread.id, 'owner').length, 0);
           assert.equal(tracker.getActiveSlots(thread.id).length, 0);
           if (outcome === 'failed') {
-            const failureRefs = messages.getById(firstResponseId).lifecycle.dispatchRefs;
-            assert.deepEqual(new Set(failureRefs.map((ref) => ref.targetId)), new Set(['codex', 'gemini']));
+            const failureRefs = messages.getById(firstResponseId).lifecycle.dispatchRefs ?? [];
+            const expectedCallers = [...(failureCarrier ? [] : ['codex']), ...(second ? ['gemini'] : [])];
+            assert.deepEqual(
+              new Set(failureRefs.map((ref) => ref.targetId)),
+              new Set(expectedCallers),
+              'a failed report carrier never bounces to its reporter; covered ordinary callers still receive it',
+            );
             assert.ok(failureRefs.every((ref) => ref.phase === 'settled'));
             for (const ref of failureRefs)
               assert.ok(messages.getById(ref.statusMessageId).lifecycle.inputMessageIds.includes(firstResponseId));
-            assert.equal(callerInvocations.filter((call) => call.catId === 'gemini').length, 1);
+            assert.equal(callerInvocations.filter((call) => call.catId === 'gemini').length, second ? 1 : 0);
             assert.equal(
               callerInvocations.filter((call) => call.catId === 'codex').length,
-              topology === 'parallel' ? 2 : 1,
+              (topology === 'parallel' ? 1 : 0) + (failureCarrier ? 0 : 1),
             );
           }
         } finally {

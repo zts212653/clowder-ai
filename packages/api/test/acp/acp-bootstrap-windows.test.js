@@ -1,10 +1,12 @@
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
+import childProcess, { execFileSync } from 'node:child_process';
 import { existsSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { syncBuiltinESMExports } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, describe, it } from 'node:test';
+import { afterEach, describe, it, mock } from 'node:test';
 import { resolveAcpBootstrapCwd } from '../../dist/domains/cats/services/agents/providers/acp/acp-bootstrap-cwd.js';
+import { ensureWindowsAcpBootstrapDirectories } from '../../dist/domains/cats/services/agents/providers/acp/acp-bootstrap-windows-directory.js';
 
 const powershell = join(
   process.env.SystemRoot ?? 'C:\\Windows',
@@ -41,6 +43,9 @@ function inspectOrChangeAcl(path, operation = '') {
       powershell,
       ['-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(script, 'utf16le').toString('base64')],
       {
+        // Keep the independent Get-Acl/Set-Acl oracle on Windows PowerShell
+        // modules even when the native runner's parent shell is pwsh.
+        env: Object.fromEntries(Object.entries(process.env).filter(([name]) => name.toUpperCase() !== 'PSMODULEPATH')),
         input: JSON.stringify(path),
         encoding: 'utf8',
         timeout: 20_000,
@@ -50,6 +55,40 @@ function inspectOrChangeAcl(path, operation = '') {
     ),
   );
 }
+
+describe('Windows PowerShell child environment', () => {
+  for (const oracle of [false, true]) {
+    it(`${oracle ? 'ACL fixture' : 'production verifier'} excludes inherited PowerShell 7 module paths`, () => {
+      const saved = process.env.PSModulePath;
+      process.env.PSModulePath = 'fixture-powershell-7-modules';
+      let childEnvironment;
+      const stub = mock.method(childProcess, 'execFileSync', (_command, _args, options) => {
+        childEnvironment = options.env;
+        return oracle ? '{}' : 'acp-private-directory-v1';
+      });
+      syncBuiltinESMExports();
+      try {
+        if (oracle) inspectOrChangeAcl(join(tmpdir(), 'fixture-acl'));
+        else ensureWindowsAcpBootstrapDirectories(tmpdir(), join(tmpdir(), 'fixture-cwd'));
+        assert.ok(childEnvironment, 'Windows PowerShell needs an explicit child environment');
+        assert.equal(
+          Object.keys(childEnvironment).some((key) => key.toUpperCase() === 'PSMODULEPATH'),
+          false,
+        );
+        assert.equal(
+          Object.entries(childEnvironment).find(([key]) => key.toUpperCase() === 'PATH')?.[1],
+          process.env.PATH,
+        );
+        assert.equal(process.env.PSModulePath, 'fixture-powershell-7-modules');
+      } finally {
+        stub.mock.restore();
+        syncBuiltinESMExports();
+        if (saved === undefined) delete process.env.PSModulePath;
+        else process.env.PSModulePath = saved;
+      }
+    });
+  }
+});
 
 describe('native Windows ACP bootstrap privacy', { skip: process.platform !== 'win32' }, () => {
   const fixtures = new Set();

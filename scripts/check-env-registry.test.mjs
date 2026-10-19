@@ -33,6 +33,10 @@ const ALLOWLIST = new Map([
   ['APPDATA', 'Windows OS variable (cli-spawn-win.ts)'],
   ['LOCALAPPDATA', 'Windows OS variable (cli-resolve.ts)'],
   ['SYSTEMROOT', 'Windows OS variable (project-path.ts)'],
+  [
+    'SystemRoot',
+    'Windows OS-provided SystemRoot spelling used to locate the ACP PowerShell verifier; not an app setting',
+  ],
   ['PROGRAMFILES', 'Windows OS variable (ImageExporter.ts Chrome detection)'],
   ['PATHEXT', 'Windows OS variable (capability-orchestrator.ts executable extension lookup)'],
   ['NODE_ENV', 'Node.js standard'],
