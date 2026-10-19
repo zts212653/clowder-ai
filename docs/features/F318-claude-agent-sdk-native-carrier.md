@@ -14,7 +14,13 @@ description_updated_at: 2026-09-16T16:24:46Z
 
 # F318: Claude Agent SDK Native Carrier — 对齐 Codex app-server 能力
 
-> **Status**: in-progress（Phase A ✅；Phase B 候选已合入（优先 F254 原生感知，默认关闭）；Phase C/D 未整体完成） | **Owner**: Ragdoll (@opus5, claude-opus-5) | **Priority**: P1
+> **Status**: in-progress（Phase A ✅；Phase B SDK carrier 候选已合入（默认关闭）；freshness 通知能力已由 #1615 退役；Phase C/D 其余 carrier 能力未整体完成） | **Owner**: Ragdoll (@opus5, claude-opus-5) | **Priority**: P1
+
+## 当前交付边界（#1615，2026-10-18）
+
+Claude SDK carrier 仍承载实际输入、追加、输出与 exact input-read 回执。F254 freshness 通知已整套退役，包括 SDK 定时输入、工具边界 notice、HELD／补读和 Live 例外；不得以旧 Phase 的能力要求、风险缓解或验收勾选为由恢复它们。新消息只走 F117 Queue 的真实收件人及 active-run append／下一轮。
+
+下文涉及 F254／freshness／notice 的 2026-09 与 10-01 实验、Decision Packet、Phase/AC、风险和 KD-5 均是**退役前历史**，不再是当前需求或 runtime 指令。保留原实验数据以解释历史，不让它们成为新的通知 owner。
 
 ## Why
 
@@ -34,7 +40,7 @@ operator experience（2026-09-16，`[thread-id]#private-source-id`）：
 目标：**以 Codex app-server 能力清单为对齐基准**，让 Claude Agent SDK 能给的原生能力都真正进家；
 SDK 没有的能力明确登记，不拿 CLI 偶然行为或包装层假装已对齐。
 
-## 2026-09-30 当前接续范围
+## 2026-09-30 接续范围（历史，freshness 部分已退役）
 
 最新 operator source：`[thread-id]#private-source-id`：
 > “最重要的是支持Ragdoll和你一样的f254的能力……没这能力不能当主力开发”。
@@ -188,7 +194,7 @@ F318 拥有新 carrier 本体与这张对齐表；每个能力的产品语义仍
 
 ## User Journey
 
-### Primary Journey: Ragdoll干活时也能及时听到新消息
+### Primary Journey（历史 freshness 旅程，#1615 已退役）: Ragdoll干活时也能及时听到新消息
 - **Scope unit**: thread
 - **Actor**: operator / 队友猫
 - **Entry**: Ragdoll正在一个 thread 里跑长工具链（Bash / Read / Edit）
@@ -272,14 +278,14 @@ Phase A 同时得到一个原 gate 没有预料到的新证据：默认 priority
 
 - **Evolved from**: F198（Claude Code Subscription Carrier，carrier 分层与降级链）、F230（Interactive PTY Carrier）
 - **Blocked by**: 无（Phase B 起的 runtime 切换需 operator 授权）
-- **Related**: F143（`identity-session` carrier/session 归属）、F254（freshness 最后一米）、F296（context 呈现边界）、F246（显式人工边界的审批投影）、F183（语义活动 → 气泡投影）、F306（Codex 对齐方法与对照基准）、F039/F117（普通排队消息与状态迁移）、F008/F153（token/usage/cost observability）、F212（结构化 CLI 诊断）、F291（account/session 设置 owner）、F286（MCP surface governance）、F024（context 存活监控 / ContextHealthBar）、F146/F202（能力市场 / plugin）
+- **Related**: F143（`identity-session` carrier/session 归属）、F254（历史通知已退役，保留发布／读取证据）、F296（context 呈现边界）、F246（显式人工边界的审批投影）、F183（语义活动 → 气泡投影）、F306（Codex 对齐方法与对照基准）、F039/F117（普通排队消息与状态迁移）、F008/F153（token/usage/cost observability）、F212（结构化 CLI 诊断）、F291（account/session 设置 owner）、F286（MCP surface governance）、F024（context 存活监控 / ContextHealthBar）、F146/F202（能力市场 / plugin）
 
 Architecture cell: `identity-session`
-Map delta: none
-Why: 新增 Claude source adapter，沿用现有 carrier/session 边界；MCP 解析提取为 print/SDK 共用 helper，freshness、context、审批、语义事件的 canonical owner 不变。
-Canonical source: `FreshnessNoticeBroker.ts#FreshnessNoticeBroker` / `claude-mcp-config.ts#resolveClaudeMcpConfig` / `ClaudeAgentService.ts#buildClaudeEnvOverrides`。
-Consumer evidence: `rg -n 'activeInvocationFreshness|resolveClaudeMcpConfig|buildClaudeEnvOverrides' packages/api/src/domains/cats/services/agents`；SDK 新 consumer 和旧 print consumer 共用同一 MCP/env owner。
-Claim guard: 原生送达非入队成功 → `test/f318-claude-sdk.test.ts` 的 UUID/轮尾/异常测试；MCP 提取保行为 → `test/claude-agent-service.test.js`；F296 exact managed settings → launch regression + `test/f296-claude-compaction-launch-plan.test.js`。
+Map delta: completed
+Why: Claude source adapter 沿用现有 carrier/session、MCP/env、实际 Queue 输入及读取回执边界；#1615 删除其 freshness 通知接线，不设独立或 Live 例外 owner。
+Canonical source: `ClaudeSdkAgentService.ts#invoke` / `claude-sdk-turn-input-state.ts#ClaudeSdkTurnInputState` / `claude-mcp-config.ts#resolveClaudeMcpConfig` / `ClaudeAgentService.ts#buildClaudeEnvOverrides`。已删除的 freshness broker 不再是 canonical source。
+Consumer evidence: `rg -n 'activeRunDispatch|onInputRead|resolveClaudeMcpConfig|buildClaudeEnvOverrides' packages/api/src/domains/cats/services/agents`；SDK 新 consumer 和旧 print consumer 共用同一 MCP/env owner。
+Claim guard: 无 freshness 注入、原生输出/异常保持真实 → `test/f318-claude-sdk.test.ts`；实际追加与读取身份 → `test/a2a-1577-sdk-input-seam.test.mjs`；MCP 提取保行为 → `test/claude-agent-service.test.js`；F296 exact managed settings → launch regression + `test/f296-claude-compaction-launch-plan.test.js`。
 Characterization/contract test: `claude-agent-service`、`claude-ndjson-parser`、`claude-carrier-factory` 与 `f254-provider-native-freshness` 回归。
 Migration/restart/rollback evidence: 无存量数据迁移；默认关闭。移除显式 env 后下一 invocation 恢复原 carrier，未启动正式 runtime。
 
@@ -289,7 +295,7 @@ Migration/restart/rollback evidence: 无存量数据迁移；默认关闭。移�
 |------|------|
 | Agent SDK 用量计费归属与现有 carrier 不同，切换带来显著成本 | OQ-1 先核官方政策；runtime 切换由 operator 授权；默认关闭 |
 | `priority:'now'` 实测不进当前 turn | F254 那一格记 `queued_internal_turn`；若剩余收益（session/权限/context 原生化）不值得换 carrier，Phase A 结束即停止本 feature，由 operator 决定。**Phase A 实测：已触发**（`now` 会打断当前轮）。新证据是默认 priority 能在工具边界并入；是否据此修订 gate，由 operator 决定，见 Decision Packet。历史暂停已由 2026-09-30 的 operator 功能目标接续；见当前接续范围 |
-| notice 被模型视为不可信而不采纳（Phase A 新发现） | 由 F254 owner 在 Phase C 实测 notice 的措辞和 `origin` 标注；不为了让 `queued_turn_count` 计数把非人类消息标成 `origin:human` |
+| notice 被模型视为不可信而不采纳（历史 Phase A） | 通知机制已退役，不再安排 F254 owner 调整措辞；实际输入仍保留真实 source 身份 |
 | 依赖 CLI 偶然能力（`command_lifecycle`、`cancel_async_message`） | 只作辅助观测，主信号用有文档的 `user_message_uuids`；按 init `capabilities` 做特性检测 |
 | 依赖未文档化或 experimental 接口 | 只接公开接口；CLI 偶然能力与 experimental 标 deferred，按 init `capabilities` 做特性检测 |
 | 从 #1398 带入夸大的能力声明 | AC-B2 测试守住声明与实测一致 |
@@ -302,7 +308,7 @@ Migration/restart/rollback evidence: 无存量数据迁移；默认关闭。移�
 | KD-2 | 以 Codex app-server 能力清单为对齐基准，对不齐的如实标注，不为对称硬造 | operator 要求对齐（`#private-source-id`）；F306 方法 | 2026-09-16 |
 | KD-3 | #1398 仅作候选实现样本，A2A 重构不进本 feature | #1398 仍为 Draft 且能力声明未经实测 | 2026-09-16 |
 | KD-4 | 计费：订阅登录下，Agent SDK 用量目前与 `claude -p` 一样从订阅额度扣，换 carrier 不新增成本类别；政策可能再变，Phase D 切换前需复核 | 官方 support 文章 `https://support.claude.com/en/articles/15036540-use-the-claude-agent-sdk-with-your-claude-plan`（横幅写 "Update June 15"；抓取工具报告页面日期为 June 16, 2026，原始 HTML 里没找到日期，精确日期未核实；2026-09-16 取）原文："We're pausing the changes to Claude Agent SDK usage described below. For now, nothing has changed: Claude Agent SDK, `claude -p`, and third-party app usage still draw from your subscription's usage limits." 条款见 `https://code.claude.com/docs/en/legal-and-compliance.md`（2026-09-16 取，页面无日期） | 2026-09-16 |
-| KD-5 | **技术约束（已定）**：notice 投递禁止使用 `priority:'now'`；投递归属以同一 turn result 的 `user_message_uuids` 为主信号，逐次记为 delivered 或 missed。**机制变更（待 operator）**：改用默认 priority 做工具边界投递，并据此修订 Phase A 停止 gate | Phase A fixture（claude-sonnet-5 + 串行 Bash）：并入 9/9，`now` 打断 6/6，本轮末尾到达的消息落到下一轮；证据见 `docs/features/evidence/F318/phase-a/` | 2026-09-16 |
+| KD-5 | **历史通知约束（#1615 已退役，不再适用）**：notice 投递禁止使用 `priority:'now'`；投递归属以同一 turn result 的 `user_message_uuids` 为主信号，逐次记为 delivered 或 missed。**机制变更（待 operator）**：改用默认 priority 做工具边界投递，并据此修订 Phase A 停止 gate | Phase A fixture（claude-sonnet-5 + 串行 Bash）：并入 9/9，`now` 打断 6/6，本轮末尾到达的消息落到下一轮；证据见 `docs/features/evidence/F318/phase-a/` | 2026-09-16 |
 
 ## Review Gate
 
@@ -314,7 +320,7 @@ Migration/restart/rollback evidence: 无存量数据迁移；默认关闭。移�
 | # | 需求点（operator 原话 / 来源） | 对应 AC | 状态 |
 |---|------|------|------|
 | R1 | 对齐 Codex app-server 能力（`#…156-d78e83be`） | AC-A1, AC-C1 | ⬜ |
-| R2 | Ragdoll获得 provider-native freshness（源 thread 调查请求） | AC-A2, AC-B2, AC-C2 | ⬜ |
+| R2 | Ragdoll获得 provider-native freshness（历史请求，#1615 已退役） | 历史 AC-A2, AC-B2, AC-C2 | 已退役，不恢复实现 |
 | R3 | 本 thread 指挥、Phase 分 thread 执行、重启后验收（`#…159-5d8b10ea`） | AC-D1 | ⬜ |
 
 ## Tips Contribution（F244）

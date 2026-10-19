@@ -512,7 +512,7 @@ fallback 不改写原始正文或冒充 authored mention。相同幂等 ID 重�
 **设计规则**：full queued read is an exact per-target adoption, not a passive peek. A+B 中 A 接管只从 source entry 删除 A 并写入 A 的 `dispatchRef`；B 后续从同一可见 History source 接管自己，最后没有剩余 target 才删除 Queue Entry。Sparse/cross-thread/无法证明 active child 的读取不接管。Queue 不保存 `queued_seen` / `queued_handled` / terminal tombstone。
 
 **关联 Feature**：
-- F254 消费 exact History dispatch / body-exposure evidence 来抑制 freshness 重复提醒，但不在 Queue 复制这些事实
+- F254 的 native／SDK／idle／MCP freshness 通知已退役（包括 Live）；exact History dispatch / body-exposure 仍分别记录实际投递与读取事实，不在 Queue 复制，也不再用全线程未读推动提醒。
 - F086/F264 从 `dispatchRefs` 与 response lifecycle 投影逐目标 UI 状态
 - F108 拥有独立 fan-out context cutoff 策略
 - F117/F039 定义 queued delivery lifecycle 底层语义

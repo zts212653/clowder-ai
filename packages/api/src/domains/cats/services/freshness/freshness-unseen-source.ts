@@ -1,10 +1,5 @@
-/**
- * What counts as an unseen message for a cat, and where to read them from.
- *
- * This is the read side the provider-native freshness notice is built on: it answers
- * "is this row real work for this cat" and "who sent it", for both delivered rows and
- * F117 queue entries that are not delivered yet. It holds no policy about what to do
- * with the answer — the notice broker owns that.
+/** Read-only historical message projections and shared visibility helpers.
+ * Runtime freshness scanners, Queue bypass adapters and notice producers are retired.
  */
 
 import type { MessageFrom, PublishedFreshnessAnnotation } from '@cat-cafe/shared';
@@ -56,77 +51,6 @@ export interface FreshnessMessageReader {
   ): FreshnessReadableMessage[] | Promise<FreshnessReadableMessage[]>;
 }
 
-/**
- * F254 queue-aware gate: check for queued (not yet delivered) messages.
- *
- * F117 marks messages as deliveryStatus='queued' while a cat is running,
- * and isDelivered() filters them out at the store layer. This interface
- * lets the freshness gate bypass that filter by checking the InvocationQueue
- * directly. Without this, the gate false-forwards when users send messages
- * to a running cat (operator live test 2026-06-29).
- */
-export interface QueuedMessageChecker {
-  getQueuedForThread(
-    threadId: string,
-    userId: string,
-    catId: string,
-  ): Array<{
-    entryId?: string;
-    from: MessageFrom;
-    content: string;
-    messageId?: string | null;
-    sourceCategory?: string;
-  }>;
-}
-
-/**
- * Creates a QueuedMessageChecker from any object with a list() method that
- * returns queue entries (e.g. InvocationQueue). The adapter filters to
- * 'queued' status entries only and maps to the minimal shape needed by
- * the freshness gate.
- *
- * Usage at wiring layer:
- *   queueChecker: invocationQueue
- *     ? createQueueChecker(invocationQueue, { parentInvocationId })
- *     : undefined
- */
-export function createQueueChecker(
-  queue: {
-    getQueuedFreshnessMessagesForCat(
-      threadId: string,
-      userId: string,
-      catId: string,
-      opts?: { parentInvocationId?: string },
-    ): Array<{
-      entryId?: string;
-      from: MessageFrom;
-      content: string;
-      messageId?: string | null;
-      sourceCategory?: string;
-    }>;
-  },
-  context: {
-    /** Exact active parent whose safe boundary is performing this check. */
-    parentInvocationId: string | undefined;
-  },
-): QueuedMessageChecker {
-  return {
-    getQueuedForThread(threadId: string, userId: string, catId: string) {
-      return queue
-        .getQueuedFreshnessMessagesForCat(threadId, userId, catId, {
-          parentInvocationId: context.parentInvocationId,
-        })
-        .map((e) => ({
-          ...(e.entryId ? { entryId: e.entryId } : {}),
-          from: structuredClone(e.from),
-          content: e.content,
-          ...(e.messageId !== undefined ? { messageId: e.messageId } : {}),
-          sourceCategory: e.sourceCategory,
-        }));
-    },
-  };
-}
-
 export function getFreshnessSenderLabel(msg: Pick<FreshnessReadableMessage, 'from' | 'catId' | 'source'>): string {
   if (msg.source) return getSourceDisplayName(msg.source);
   const from = messageFrom(msg as unknown as Parameters<typeof messageFrom>[0]);
@@ -135,18 +59,6 @@ export function getFreshnessSenderLabel(msg: Pick<FreshnessReadableMessage, 'fro
   if (from.kind === 'plugin') return from.instanceId;
   if (from.kind === 'system') return from.service;
   return 'user';
-}
-
-export function getQueuedFreshnessSenderLabel(entry: { from: MessageFrom; sourceCategory?: string }): string {
-  if (entry.from.kind === 'user') return 'user';
-  if (entry.from.kind === 'external' || entry.from.kind === 'plugin') {
-    if (entry.sourceCategory === 'review') return 'Review';
-    if (entry.sourceCategory === 'issue') return 'Issue';
-    if (entry.sourceCategory === 'ci') return 'CI';
-    return 'Connector';
-  }
-  if (entry.from.kind === 'agent') return entry.from.catId;
-  return entry.from.service;
 }
 
 const INTERNAL_FRESHNESS_USER_IDS = new Set(['system']);

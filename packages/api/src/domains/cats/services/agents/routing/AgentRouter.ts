@@ -526,8 +526,6 @@ export interface AgentRouterOptions {
   turnExecutionStore?: import('../../stores/ports/TurnExecutionStore.js').ITurnExecutionStore;
   /** F254 Phase C: Freshness state store for carrier tier persistence */
   freshnessStateStore?: import('../../freshness/FreshnessInvocationStateStore.js').FreshnessInvocationStateStore;
-  /** F254 D2: invocation-scoped provider-native freshness broker factory. */
-  providerNativeFreshnessFactory?: import('../invocation/invoke-single-cat.js').InvocationDeps['providerNativeFreshnessFactory'];
   /** F306: canonical cross-provider request/response surface. */
   runtimeInteractionPort?: import('../../../../runtime-interaction/ports/RuntimeInteractionPort.js').RuntimeInteractionPort;
   /** F254 Phase D (AC-D4): Freshness event log for stream output audit trail */
@@ -619,7 +617,6 @@ export class AgentRouter {
   /** F254 Phase C */
   private freshnessStateStore?: import('../../freshness/FreshnessInvocationStateStore.js').FreshnessInvocationStateStore;
   /** F254 D2 */
-  private providerNativeFreshnessFactory?: import('../invocation/invoke-single-cat.js').InvocationDeps['providerNativeFreshnessFactory'];
   /** F306 */
   private runtimeInteractionPort?: import('../../../../runtime-interaction/ports/RuntimeInteractionPort.js').RuntimeInteractionPort;
   /** F254 Phase D (AC-D4) */
@@ -710,7 +707,6 @@ export class AgentRouter {
     this.cloudReturnGrantStore = options.cloudReturnGrantStore;
     this.turnExecutionStore = options.turnExecutionStore;
     this.freshnessStateStore = options.freshnessStateStore;
-    this.providerNativeFreshnessFactory = options.providerNativeFreshnessFactory;
     this.runtimeInteractionPort = options.runtimeInteractionPort;
     this.freshnessEventLog = options.freshnessEventLog;
     this.freshnessOutputCommitCoordinator = options.freshnessOutputCommitCoordinator;
@@ -1353,9 +1349,6 @@ export class AgentRouter {
         ...(this.cloudInvokeBridge ? { cloudInvokeBridge: this.cloudInvokeBridge } : {}),
         ...(this.cloudReturnGrantStore ? { cloudReturnGrantStore: this.cloudReturnGrantStore } : {}),
         ...(this.freshnessStateStore ? { freshnessStateStore: this.freshnessStateStore } : {}),
-        ...(this.providerNativeFreshnessFactory
-          ? { providerNativeFreshnessFactory: this.providerNativeFreshnessFactory }
-          : {}),
         ...(this.runtimeInteractionPort ? { runtimeInteractionPort: this.runtimeInteractionPort } : {}),
         ...(this.memoryCuePromptService ? { memoryCuePromptService: this.memoryCuePromptService } : {}),
         ...(this.profileCueOpportunitySource ? { profileCueOpportunitySource: this.profileCueOpportunitySource } : {}),

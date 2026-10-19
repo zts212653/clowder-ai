@@ -17,7 +17,7 @@ export function freshnessMessageFilter(catId: CatId, playMode: boolean) {
   };
 }
 
-/** Shared by the running notice and its read-only historical projection. */
+/** Read-only historical projection; runtime freshness notices are retired. */
 export async function isFreshnessCandidate(
   message: FreshnessReadableMessage,
   context: {

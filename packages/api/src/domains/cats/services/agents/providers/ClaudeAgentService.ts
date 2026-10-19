@@ -52,7 +52,6 @@ import { extractImagePaths } from '../providers/image-paths.js';
 import { findGitBashPath } from './claude-agent-win.js';
 import { composeManagedSettingsDocument } from './claude-compaction-launch-plan.js';
 import { resolveClaudeMcpConfig } from './claude-mcp-config.js';
-import { ClaudeNativeToolBoundaryClassifier } from './claude-native-tool-boundary.js';
 import { extractClaudeUsage, isResultErrorEvent, transformClaudeEvent } from './claude-ndjson-parser.js';
 import { compileL0ViaSubprocess } from './l0-compiler.js';
 import {
@@ -764,7 +763,6 @@ export class ClaudeAgentService implements AgentService {
       let hasAssistantEvent = false;
       let lastAssistantHasToolUseBlock = false;
       let lastAssistantHasTextBlock = false;
-      const nativeToolBoundaries = new ClaudeNativeToolBoundaryClassifier();
       for await (const rawEvent of events) {
         const event = redactClaudeLaunchToken(
           rawEvent,
@@ -783,20 +781,6 @@ export class ClaudeAgentService implements AgentService {
             : '__unknown';
         uniqueEventTypes.add(evtType);
         log.debug({ catId: this.catId, eventIndex: eventCount, type: evtType }, 'CLI event received');
-        if (options?.activeInvocationFreshness) {
-          for (const toolSurface of nativeToolBoundaries.observe(event)) {
-            try {
-              const notice = await options.activeInvocationFreshness.prepare({
-                threadId: options.auditContext?.threadId ?? 'unknown',
-                turnId: options.invocationId ?? 'claude-print-sdk',
-                toolSurface,
-              });
-              if (notice) await options.activeInvocationFreshness.markMissed(notice, 'unsupported_carrier');
-            } catch (err) {
-              log.warn({ err, invocationId: options.invocationId }, '[F254-D2] Claude freshness telemetry failed');
-            }
-          }
-        }
         // F215: Inspect assistant events for content blocks (before transformClaudeEvent runs).
         // Reset per-turn tracking on each new assistant event so multi-turn tool-using sessions are handled
         // correctly: an earlier turn's blocks must not suppress detection on a later malformed turn.
@@ -955,12 +939,6 @@ export class ClaudeAgentService implements AgentService {
           }
           yield { ...result, metadata: resultMetadata };
         }
-      }
-
-      try {
-        await options?.activeInvocationFreshness?.markTurnCompleted(options.invocationId ?? 'claude-print-sdk');
-      } catch (err) {
-        log.warn({ err, invocationId: options?.invocationId }, '[F254-D2] Claude terminal freshness audit failed');
       }
 
       log.info(

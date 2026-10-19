@@ -91,7 +91,7 @@ Append 的 `inputMessageIds` 保存输入与 exact response 的持久关联，�
 
 成员顶层 canonical `carrier` 决定接入方式。旧 transport 兼容只在配置边界读取，不在运行路径按全局开关改派 carrier。一个 carrier 的故障不能静默换成另一个。
 
-`activeInvocationGuidance`、`deliverySemantics` 与 `inputReadReceipt` 分别表示能否引导、承载精度和读取证据。引导能力不等于模型已读；`queued_internal_turn` 不冒充 `exact_active_turn`。MCP/callback send 是发送原语，不在出口检查 inbox、HELD 或注入强制读取教学。
+`activeInvocationGuidance`、`deliverySemantics` 与 `inputReadReceipt` 分别表示能否引导、承载精度和读取证据。引导能力不等于模型已读；`queued_internal_turn` 不冒充 `exact_active_turn`。MCP/callback send 是发送原语，不在出口检查 inbox、HELD 或注入强制读取教学。 所有调用（包括 Live 语音）均不装配 provider-native freshness：工具断点或 idle 均不扫描全线程未读来要求读取增量。消息可公开检索不代表投递给该成员；新输入只经 Queue 的实际目标进入 exact append／新回合。Live 语音的正常输入、结果返回和实际投递引用沿已有明确来源机制推进，不保留 freshness 例外或另一条未读提醒路径。
 
 ### Phase G: Managed hold 与 structured continuation
 

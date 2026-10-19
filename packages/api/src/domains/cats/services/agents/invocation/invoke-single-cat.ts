@@ -1198,33 +1198,11 @@ export interface InvocationDeps {
     'issue'
   >;
   /**
-   * F254 Phase B3/B4: Optional freshness re-invoke callback.
-   * Called after invocation terminal event to decide if a re-invoke is needed
-   * for unacknowledged high-priority notices. The routing layer wires this
-   * with access to Redis + event log + InvocationRegistry.
-   *
-   * Returns reinvoke decision or null (fail-open). When shouldReinvoke=true,
-   * the returned prompt/senders are used for the re-invoke invocation.
-   */
-  /**
    * F254 Phase C: Freshness invocation state store (optional).
    * Used to persist the carrier tier at invocation start so callback routes
    * can derive a RuntimeCapabilityDescriptor without AgentService access.
    */
   readonly freshnessStateStore?: import('../../freshness/FreshnessInvocationStateStore.js').FreshnessInvocationStateStore;
-  /** F254 D2: build one invocation-scoped provider-native freshness controller. */
-  readonly providerNativeFreshnessFactory?: (params: {
-    liveResultConsumerActive?: () => boolean;
-    liveExposureReason?: (
-      message: import('../../freshness/freshness-unseen-source.js').FreshnessReadableMessage,
-    ) => 'same_live_call_exposure' | null;
-    invocationId: string;
-    threadId: string;
-    userId: string;
-    catId: CatId;
-    provider: string;
-    capability: import('../../types.js').AgentFreshnessCarrierCapability;
-  }) => Promise<import('../../freshness/FreshnessNoticeBroker.js').ActiveInvocationFreshnessController | null>;
   /** F306: canonical cross-provider request/response surface. */
   readonly runtimeInteractionPort?: import('../../../../runtime-interaction/ports/RuntimeInteractionPort.js').RuntimeInteractionPort;
   /** F287: invocation-bound Cue resolver; receives only server-owned typed seeds. */
@@ -3948,36 +3926,6 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
           }).requested ?? undefined)
         : undefined;
 
-    const activeInvocationFreshness = deps.providerNativeFreshnessFactory
-      ? await deps.providerNativeFreshnessFactory({
-          // Live MCP credentials belong to this child; an enclosing route is not its carrier.
-          invocationId: params.liveCompanion ? invocationId : (params.parentInvocationId ?? invocationId),
-          threadId,
-          userId,
-          catId,
-          provider: provider ?? 'unknown',
-          capability: freshnessCarrierCapability,
-          ...(params.liveCompanion
-            ? {
-                liveResultConsumerActive: () =>
-                  params.liveCompanion!.acceptsFreshness?.() === true &&
-                  params.liveCompanion!.isActiveCarrier?.({
-                    invocationId,
-                    catId,
-                    threadId,
-                  }) === true,
-              }
-            : {}),
-          ...(params.liveCompanion?.exposureReason
-            ? {
-                liveExposureReason: (
-                  message: import('../../freshness/freshness-unseen-source.js').FreshnessReadableMessage,
-                ) => params.liveCompanion!.exposureReason!(message),
-              }
-            : {}),
-        })
-      : null;
-
     const entrustedWorkSourceMessageId = params.a2aTriggerMessageId ?? params.executionCausal?.triggerMessageId;
     const entrustedWorkTaskStore = deps.taskStore;
 
@@ -4056,7 +4004,6 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
       ...(signal ? { signal } : {}),
       ...(spawnCliOverride ? { spawnCliOverride } : {}),
       ...(agentCarrierSessionFactory ? { agentCarrierSessionFactory } : {}),
-      ...(activeInvocationFreshness ? { activeInvocationFreshness } : {}),
       ...(params.liveCompanion ? { liveCompanion: params.liveCompanion } : {}),
       ...(deps.runtimeInteractionPort ? { runtimeInteractionPort: deps.runtimeInteractionPort } : {}),
       ...(entrustedWorkTaskStore && entrustedWorkSourceMessageId
@@ -5548,11 +5495,9 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
                 launchCountThisAttempt += 1;
                 const liveFollowup =
                   Boolean(params.liveCompanion) &&
-                  [
-                    'app_server_live_typed_input',
-                    'app_server_live_freshness_input',
-                    'app_server_live_context_input',
-                  ].includes(prepared.message.injectionDecision ?? '');
+                  ['app_server_live_typed_input', 'app_server_live_context_input'].includes(
+                    prepared.message.injectionDecision ?? '',
+                  );
                 let committed: ProviderRequestGenerationCommitV1;
                 if (generationRecorder) {
                   const reason =

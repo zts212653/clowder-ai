@@ -15,6 +15,7 @@ import { createRequire } from 'node:module';
 import { dirname, resolve } from 'node:path';
 import { describe, it } from 'node:test';
 import vm from 'node:vm';
+import { stripFrontmatter } from './lib/doc-frontmatter.mjs';
 import { assignDocHeadingIds, resolveDocLink, resolveImageSrc } from './lib/doc-links.mjs';
 import { fetchLocalizedMarkdown, localizedDocCandidates } from './lib/doc-locale.mjs';
 import { sanitizeMarkdown } from './lib/sanitize-md.mjs';
@@ -317,6 +318,41 @@ describe('localized roadmap bars', () => {
       [],
       'every roadmap hover description needs an i18n key',
     );
+  });
+});
+
+// ─── Frontmatter stripping ───────────────────────────────────────────
+// Repo docs carry a YAML frontmatter block for tooling. marked renders it as
+// a paragraph of raw text, so the viewer must strip it before rendering —
+// otherwise the first thing a reader sees is `title: "…" doc_kind: …`.
+describe('stripFrontmatter', () => {
+  const doc = '---\ndoc_kind: architecture\ncreated: 2026-02-26\n---\n\n# Clowder AI 愿景\n\n正文。\n';
+
+  it('removes a leading frontmatter block and keeps the body', () => {
+    const out = stripFrontmatter(doc);
+    assert.doesNotMatch(out, /doc_kind/);
+    assert.match(out, /^# Clowder AI 愿景/);
+  });
+
+  it('leaves markdown without frontmatter untouched', () => {
+    const plain = '# Title\n\nBody.\n';
+    assert.equal(stripFrontmatter(plain), plain);
+  });
+
+  it('keeps a horizontal rule that is not frontmatter', () => {
+    // No closing fence after a blank line, so this is a rule, not metadata.
+    const rule = '---\n\nJust a rule below.\n';
+    assert.equal(stripFrontmatter(rule), rule);
+  });
+
+  it('does not strip a block that appears later in the document', () => {
+    const late = '# Title\n\n---\nkeep: me\n---\n';
+    assert.match(stripFrontmatter(late), /keep: me/);
+  });
+
+  it('leaves issue bodies alone (community.html shares the sanitizer)', () => {
+    // community.html must not call stripFrontmatter; guard the wiring itself.
+    assert.doesNotMatch(readSite('community.html'), /_stripFrontmatter/);
   });
 });
 
@@ -805,6 +841,25 @@ describe('no runtime Tailwind CDN', () => {
 
   it('pre-built tailwind.css exists', () => {
     assert.ok(existsSync(resolve(SITE, 'tailwind.css')));
+  });
+
+  // Tailwind preflight sets `img { display: block }`. Without an override the
+  // README badge row stacks vertically — six badges become six lines, which is
+  // the first thing a visitor sees because README is the default document.
+  it('docs content keeps badge images inline instead of stacking them', () => {
+    const css = readSite('tailwind.css');
+    assert.match(
+      css,
+      /#doc-content img\{[^}]*display:inline-block/,
+      'badge images must be inline-block inside the docs article',
+    );
+  });
+
+  it('the inline-image override is scoped to the docs article', () => {
+    const css = readSite('tailwind.css');
+    // A bare `img{display:inline-block}` would leak into the homepage, which
+    // lays out its own images and relies on preflight's block behavior.
+    assert.doesNotMatch(css, /(^|\})img\{[^}]*display:inline-block/, 'override must stay scoped to #doc-content');
   });
 
   it('tailwind config exists for reproducible rebuilds', () => {

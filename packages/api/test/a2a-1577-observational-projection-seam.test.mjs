@@ -4,12 +4,7 @@ import { existsSync } from 'node:fs';
 import { test } from 'node:test';
 import { projectInvocationSettlement } from '../src/domains/cats/services/agents/invocation/InvocationSettlementProjection.ts';
 import { resolveActiveInvocationsStrict } from '../src/domains/cats/services/agents/invocation/live-invocation-projection.ts';
-import {
-  createContentFreeFreshnessNotice,
-  FreshnessNoticeBroker,
-} from '../src/domains/cats/services/freshness/FreshnessNoticeBroker.ts';
 import { decideFreshnessRelevance } from '../src/domains/cats/services/freshness/FreshnessRelevancePolicy.ts';
-import { ThreadUnseenChecker } from '../src/domains/cats/services/freshness/ThreadUnseenChecker.ts';
 import { observeCliExecutionProcess } from '../src/utils/CliExecutionObservation.ts';
 
 function projectionFixture(id) {
@@ -80,14 +75,6 @@ function projectionFixture(id) {
     resolve: (status) => resolveActiveInvocationsStrict(threadId, userId, tracker, records, status, turns),
   };
 }
-
-test('native freshness instruction selects unread without confusing full projection with selection', () => {
-  const notice = createContentFreeFreshnessNotice({ threadId: 'isolated-thread', unseenCount: 3 });
-  assert.match(notice, /readIntent: "unread"/);
-  assert.match(notice, /responseMode: "full"/);
-  assert.match(notice, /contextScope=unread_delta/);
-  assert.match(notice, /不表示完整历史/);
-});
 
 test('actual canonical slot projects public settlement only with exact live auxiliary child evidence', async (t) => {
   const f = projectionFixture('auxiliary');
@@ -180,69 +167,6 @@ test('auxiliary settlement ends with native process exit and cannot describe an 
   }
   assert.equal(projectInvocationSettlement(scope, f.children), undefined);
   assert.equal((await f.resolve())[0].settlement, undefined);
-});
-
-test('bounded live-exposure scan is incomplete, resumes, and neither acknowledges nor publishes queued work', async () => {
-  let cursorReads = 0;
-  let cursorWrites = 0;
-  const rows = Array.from({ length: 210 }, (_, i) => ({
-    id: String(i + 1),
-    visibilitySeq: i + 1,
-    threadId: 'scan-thread',
-    userId: 'scan-owner',
-    catId: null,
-    from: { kind: 'user', userId: 'scan-owner' },
-    content: 'owned synthetic scan fixture',
-  }));
-  const checker = new ThreadUnseenChecker({
-    userId: 'scan-owner',
-    cursorStore: {
-      getSeenCursor: async () => {
-        cursorReads += 1;
-        return '0';
-      },
-      setSeenCursor: () => {
-        cursorWrites += 1;
-      },
-    },
-    messageStore: {
-      getByThreadAfter: async (_tid, after, limit) => {
-        const id = after.startsWith('v2:') ? after.split(':').at(-1) : after;
-        return rows.slice(Number(id), Number(id) + limit);
-      },
-    },
-    exposureReason: (row) => (Number(row.id) <= 200 ? 'same_live_call_exposure' : null),
-  });
-  const first = await checker.checkUnseen({ threadId: 'scan-thread', catId: 'opus' });
-  assert.deepEqual(first, { kind: 'incomplete', reason: 'scan_cap', scanned: 200 });
-  const second = await checker.checkUnseen({ threadId: 'scan-thread', catId: 'opus' });
-  assert.equal(second.count, 10);
-  assert.deepEqual(
-    second.correlationMessageIds,
-    rows.slice(200).map((x) => x.id),
-  );
-  assert.equal(cursorReads, 2);
-  assert.equal(cursorWrites, 0);
-});
-
-test('native broker emits no notice or delivery receipt for an incomplete scan', async () => {
-  const events = [];
-  const broker = new FreshnessNoticeBroker({
-    context: { invocationId: 'scan-child', threadId: 'scan-thread', catId: 'opus' },
-    checkUnseen: async () => ({ kind: 'incomplete', reason: 'scan_cap', scanned: 200 }),
-    appendEvent: async (event) => events.push(event),
-  });
-  assert.equal(
-    await broker.prepare({
-      provider: 'openai_codex',
-      carrier: 'app_server',
-      deliverySemantics: 'same_turn',
-      toolSurface: 'mcp',
-      turnId: 'scan-turn',
-    }),
-    null,
-  );
-  assert.deepEqual(events, []);
 });
 
 test('fork retired post-message gate, MCP piggyback and notice-driven reinvoke are not resurrected', () => {

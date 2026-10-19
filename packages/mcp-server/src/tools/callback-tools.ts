@@ -1030,53 +1030,21 @@ async function _executePostMessage(
         );
       }
 
-      // F254 Phase A: Detect held — server returned 200 but message was NOT sent
-      // because the cat has unseen messages in the thread (freshness gate).
+      // An HTTP-200 hold is still an unsent message. Its own reason determines
+      // the repair; it never authorizes a thread read or a force-send bypass.
       if (data?.status === 'held') {
-        const previews = (data.previews ?? []) as Array<{ from: string; messageId: string; preview: string }>;
-        const previewLines = previews.map(
-          (p: { from: string; preview: string }) =>
-            `  [${p.from}]: "${p.preview.slice(0, 100)}${p.preview.length > 100 ? '…' : ''}"`,
-        );
-        const omitted = (data.omittedCount ?? 0) as number;
-        const omittedLine = omitted > 0 ? `  ...and ${omitted} more message(s)\n` : '';
-        const freshnessReason =
-          typeof data.freshnessReason === 'string'
-            ? data.freshnessReason
-            : typeof data.reason === 'string'
-              ? data.reason
-              : 'unknown';
-        const unseenCount = typeof data.unseenCount === 'number' ? data.unseenCount : null;
-        const unseenCountKnown = data.unseenCountKnown === true || (unseenCount !== null && unseenCount > 0);
-        const serverCatchUpArguments =
-          data.catchUp?.tool === 'cat_cafe_get_thread_context' &&
-          data.catchUp.arguments &&
-          typeof data.catchUp.arguments === 'object'
-            ? (data.catchUp.arguments as Record<string, unknown>)
-            : null;
-        const catchUpArguments = serverCatchUpArguments ?? {
-          ...(input.threadId ? { threadId: input.threadId } : {}),
-          readIntent: 'unread',
-          responseMode: 'full',
-        };
-        const catchUpCall = `cat_cafe_get_thread_context(${JSON.stringify(catchUpArguments)})`;
         const retryTool = input.threadId ? 'cat_cafe_cross_post_message' : 'cat_cafe_post_message';
-        const countLine = unseenCountKnown
-          ? `Unseen messages: ${unseenCount}\n\n`
-          : 'Unseen count is unknown; a numeric 0 in this held envelope is not proof that the thread is caught up.\n\n';
-
+        if (data.reason === 'routing_mismatch') {
+          return errorResult(
+            'Message NOT sent (routing_mismatch): line-start @ targets in content are outside the declared targetCats. ' +
+              `Declared targetCats: ${JSON.stringify(data.declaredTargets ?? [])}; ` +
+              `unexpected content targets: ${JSON.stringify(data.unexpectedTargets ?? [])}. ` +
+              `Correct content or targetCats to match the intended recipients, then retry ${retryTool}.`,
+          );
+        }
+        const reason = typeof data.reason === 'string' ? data.reason : 'unknown_hold';
         return errorResult(
-          `⚠️ Message NOT sent (HELD)\n` +
-            `━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
-            `Freshness reason: ${freshnessReason}\n` +
-            countLine +
-            (previewLines.length > 0
-              ? `Recent messages you haven't read:\n${previewLines.join('\n')}\n${omittedLine}\n`
-              : '') +
-            `Your options:\n` +
-            `1. Call ${catchUpCall}. If it returns hasMore=true, copy nextCursor into the cursor argument and continue until hasMore=false.\n` +
-            `2. Revise your message based on what you learn, then retry ${retryTool}.\n` +
-            `3. Retry ${retryTool} with acknowledgeHeld: true to force-send your original message as-is.`,
+          `Message NOT sent (${reason}). Resolve the server's stated hold condition before retrying ${retryTool}.`,
         );
       }
     } catch {

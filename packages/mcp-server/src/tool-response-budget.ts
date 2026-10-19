@@ -5,7 +5,6 @@ export interface BoundedToolResult {
 }
 
 export const TOOL_TEXT_RESPONSE_MAX_CHARS = 24_000;
-const FRESHNESS_NOTICE_RESERVED_CHARS = 1_502;
 
 const PURE_READERS_WITH_SOURCE_BUDGET = new Set([
   'cat_cafe_search_evidence',
@@ -38,12 +37,6 @@ function hasNonText(result: BoundedToolResult): boolean {
   return result.content.some((block) => block.type !== 'text');
 }
 
-/** API records notice_attached before returning; only request when its full text can fit. */
-export function canRequestFreshnessNotice(result: BoundedToolResult): boolean {
-  const chars = hasNonText(result) ? textChars(result) : projectedChars(result);
-  return chars <= TOOL_TEXT_RESPONSE_MAX_CHARS - FRESHNESS_NOTICE_RESERVED_CHARS;
-}
-
 export function protectToolResponse<T extends BoundedToolResult>(toolName: string, result: T, isReadOnly: boolean): T {
   if (hasNonText(result)) return result;
   if (projectedChars(result) <= TOOL_TEXT_RESPONSE_MAX_CHARS) return result;
@@ -60,19 +53,4 @@ export function protectToolResponse<T extends BoundedToolResult>(toolName: strin
     ],
     isError: true,
   } as T;
-}
-
-export function appendFreshnessNoticeWithinBudget<T extends BoundedToolResult>(
-  result: T,
-  noticeText: string,
-): { result: T; appended: boolean } {
-  const addedText = `\n\n${noticeText}`;
-  const chars = hasNonText(result) ? textChars(result) : projectedChars(result);
-  if (chars + addedText.length > TOOL_TEXT_RESPONSE_MAX_CHARS) {
-    return { result, appended: false };
-  }
-  return {
-    result: { ...result, content: [...result.content, { type: 'text', text: addedText }] },
-    appended: true,
-  };
 }

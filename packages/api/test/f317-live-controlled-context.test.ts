@@ -79,7 +79,6 @@ test('Host context is bound to one invocation and call generation; stopping revo
     verifyCompanion: async () => true,
     inbox: {
       source: () => ({ page: async () => ({ items: [reference], hasMore: false }), read: async () => reference }),
-      onSuccessorRequired: async () => assert.fail('current source is readable'),
     },
     publish() {},
   });
@@ -110,7 +109,7 @@ test('Host context is bound to one invocation and call generation; stopping revo
       submittedRefs = sourceRefs;
       pendingSignal = signal;
       authorize = check;
-      if (text.includes('inbox_notice')) return 'accepted-turn';
+      if (text.includes('recovery_context')) return 'accepted-turn';
       return new Promise<string>(() => {});
     },
     request: async (method) => {
@@ -126,17 +125,11 @@ test('Host context is bound to one invocation and call generation; stopping revo
   });
   try {
     await call.start('offer');
-    assert.equal(call.hasPendingInboxWake(), true);
-    assert.ok(nativeWakes >= 2, 'startup must re-wake unread after the call becomes authorized');
-    await call.observe({
-      method: 'thread/realtime/transcript/delta',
-      params: { threadId: 'foreign-native-thread', role: 'user', delta: 'unrelated caller' },
-    });
+    assert.equal(call.hasPendingInboxWake(), false, 'Live startup does not install a thread-unread notifier');
+    assert.equal(nativeWakes, 0);
     await call.onSafeBoundary('tool_complete');
-    assert.match(submittedText, /inbox_notice/);
-    assert.deepEqual(submittedRefs, ['home#message-1']);
-    const envelope = JSON.parse(submittedText.slice(submittedText.lastIndexOf('\n') + 1)) as { text: string };
-    assert.match(envelope.text, /"sourceThreadId":"source"/, 'origin stays visible as provenance');
+    assert.equal(submittedText, '');
+    assert.deepEqual(submittedRefs, []);
     const scope = call.contextScope({ invocationId: 'original-invocation', catId, threadId: 'home' });
     assert.ok(scope);
     assert.equal(scope.callId, 'context-call');
@@ -145,7 +138,7 @@ test('Host context is bound to one invocation and call generation; stopping revo
     await assert.rejects(
       call.injectControlledContext({
         scope: { ...scope, invocationId: 'forged' },
-        kind: 'inbox_notice',
+        kind: 'recovery_context',
         text: 'read source',
         sourceRefs: ['thread_home#message-1'],
         signal: new AbortController().signal,
@@ -155,7 +148,7 @@ test('Host context is bound to one invocation and call generation; stopping revo
     assert.equal(
       await call.injectControlledContext({
         scope,
-        kind: 'inbox_notice',
+        kind: 'recovery_context',
         text: 'Read the exact source before action',
         sourceRefs: ['thread_home#message-1'],
         signal: new AbortController().signal,

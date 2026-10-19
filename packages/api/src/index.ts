@@ -151,7 +151,6 @@ import {
 import { clearL0Cache, clearL0CacheOwner, warmL0Cache } from './domains/cats/services/agents/providers/l0-compiler.js';
 import { AgentRegistry } from './domains/cats/services/agents/registry/AgentRegistry.js';
 import { createPostCompactContextProjector } from './domains/cats/services/agents/routing/post-compact-context-projector.js';
-import { createProviderNativeFreshnessFactory } from './domains/cats/services/freshness/createProviderNativeFreshnessFactory.js';
 import { FreshnessAttentionEventLog } from './domains/cats/services/freshness/FreshnessAttentionEventLog.js';
 import { FreshnessInvocationStateStore } from './domains/cats/services/freshness/FreshnessInvocationStateStore.js';
 import { FreshnessOutputCommitCoordinator } from './domains/cats/services/freshness/glass-box/FreshnessOutputCommitCoordinator.js';
@@ -2496,18 +2495,7 @@ async function main(): Promise<void> {
       sourceCategory?: string;
     }>;
   } | null = null;
-  // F254 Phase C/D2: keep provider-native freshness bound to the canonical
-  // Queue projection after the F117 ledger cutover.
   const freshnessStateStore = redis ? new FreshnessInvocationStateStore(redis) : undefined;
-  const providerNativeFreshnessFactory = redis
-    ? createProviderNativeFreshnessFactory({
-        redis,
-        cursorStore: deliveryCursorStore,
-        messageStore,
-        threadStore,
-        getQueue: () => invocationQueueRef,
-      })
-    : undefined;
 
   // F254 Phase D (AC-D4): Freshness event log for stream output audit trail.
   const freshnessEventLog = redis ? new FreshnessAttentionEventLog(redis) : undefined;
@@ -2557,15 +2545,6 @@ async function main(): Promise<void> {
       },
     },
   });
-  const previousAppendListener = appendListener;
-  appendListener = (message) => {
-    previousAppendListener?.(message);
-    liveCompanionSessions.signalInbox(message.userId, message.threadId);
-  };
-  const stopQueueInboxWake = invocationQueue.onSourceChanged((threadId, userId) => {
-    liveCompanionSessions.signalInbox(userId, threadId);
-  });
-  app.addHook('onClose', async () => stopQueueInboxWake());
   const proactiveCandidateRegistryResolver = personMemoryStore
     ? new ProactiveCandidateRegistryResolver({
         entityRegistry: new EntityRegistryStore(memoryServices.store.getDb()),
@@ -2710,7 +2689,6 @@ async function main(): Promise<void> {
     cloudReturnGrantStore,
     turnExecutionStore,
     ...(freshnessStateStore ? { freshnessStateStore } : {}),
-    ...(providerNativeFreshnessFactory ? { providerNativeFreshnessFactory } : {}),
     runtimeInteractionPort: runtimeInteractionRuntime.service,
     ...(freshnessEventLog ? { freshnessEventLog } : {}),
     ...(freshnessOutputCommitCoordinator ? { freshnessOutputCommitCoordinator } : {}),
@@ -4438,7 +4416,6 @@ async function main(): Promise<void> {
         approvals: { listSettled: (...args) => approvalProducerRegistry.listSettled(...args) },
         epochs: contextEpochStore,
       },
-      progressOwnedCarrier: (entry, targetCatId) => queueProcessor.progressOwnedCarrier(entry, targetCatId),
       mcpDistDir: join(findMonorepoRoot(), 'packages/mcp-server/dist'),
       // Keep native meeting exposure off until this package's Host/MCP/native lifecycle cut is verified together.
       meetingToolsEnabled: false,

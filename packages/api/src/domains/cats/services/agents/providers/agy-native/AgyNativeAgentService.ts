@@ -2,7 +2,6 @@ import { resolve } from 'node:path';
 import type { AgyProfileConfig, CatId } from '@cat-cafe/shared';
 import { createModuleLogger } from '../../../../../../infrastructure/logger.js';
 import { spawnCli } from '../../../../../../utils/cli-spawn.js';
-import type { PreparedIdleFreshnessNotice } from '../../../freshness/FreshnessNoticeBroker.js';
 import { CliRawArchive } from '../../../session/CliRawArchive.js';
 import type {
   AgentFreshnessCarrierCapability,
@@ -201,8 +200,6 @@ export class AgyNativeAgentService implements AgentService {
       { type: 'done', catId: this.catId, errorCode: code, metadata, timestamp: Date.now() },
     ];
     let disposeCredentials: (() => void) | undefined;
-    const idleFreshness = options?.activeInvocationFreshness?.idle;
-    let preparedNotice: PreparedIdleFreshnessNotice | null = null;
     try {
       if (hasUnsupportedNativeOverrides(this.model, this.profile, options)) {
         throw new Error('AGY native requires an explicit profile/model and refuses CLI or account env overrides');
@@ -222,16 +219,12 @@ export class AgyNativeAgentService implements AgentService {
         userId: compactionControl?.userId ?? options?.callbackEnv?.CAT_CAFE_USER_ID,
         projection: options?.toolExecutionPolicy?.mode === 'collective_participation' ? 'public' : 'owner',
       });
-      if (options?.toolExecutionPolicy?.mode !== 'read_only') {
-        preparedNotice = (await idleFreshness?.prepare()) ?? null;
-      }
-      const turnPrompt = preparedNotice ? `${prompt}\n\n${preparedNotice.text}` : prompt;
       const launch = await prepareAgyNativeLaunch({
         catId: this.catId,
         model: this.model,
         profileConfig: this.profile,
         workspace,
-        prompt: turnPrompt,
+        prompt,
         body,
         ...(compactionControl ? { controlOperation: 'compact' as const } : {}),
         ...(this.command ? { command: this.command } : {}),
@@ -240,9 +233,7 @@ export class AgyNativeAgentService implements AgentService {
       disposeCredentials = launch.disposeCredentials;
       const rawArchivePath = options?.invocationId ? this.rawArchive.getPath?.(options.invocationId) : undefined;
       if (rawArchivePath) metadata.diagnostics = { agyNative: { rawArchivePath } };
-      const continuityInput = preflight
-        ? createAgyNativeContinuityInput(launch, preflight, options, preparedNotice?.text)
-        : undefined;
+      const continuityInput = preflight ? createAgyNativeContinuityInput(launch, preflight, options) : undefined;
       if (!continuityInput) await options?.beforeProviderLaunch?.(launch.preparedRequest);
       const inputLifetime = new AbortController();
       const { stdinInput, ...deferredLaunchOptions } = launch.cliOptions;
@@ -293,18 +284,8 @@ export class AgyNativeAgentService implements AgentService {
         launch.agentTools,
         compactionControl !== undefined,
       );
-      if (preparedNotice) {
-        const terminal = messages.at(-1);
-        if (terminal?.type === 'done' && !terminal.errorCode) {
-          await idleFreshness?.commitDelivered(preparedNotice, { acceptedTurnId: observed.sessionId });
-        } else {
-          idleFreshness?.defer(preparedNotice);
-        }
-        preparedNotice = null;
-      }
       yield* progress.final(messages);
     } catch (error) {
-      if (preparedNotice) idleFreshness?.defer(preparedNotice);
       const cancelled = options?.signal?.aborted === true;
       if (!cancelled && error instanceof AgyNativeStartupError && error.cliDiagnostics) {
         metadata.cliDiagnostics = error.cliDiagnostics;

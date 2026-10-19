@@ -1515,7 +1515,7 @@
     {
       "id": "F254",
       "name": "Side-Effect Freshness Gate — 副作用出口 freshness 拦截",
-      "status": "partially superseded — **Phase A HELD + Phase B1 MCP piggyback + Phase B2 hold reminder + D1.2 Queue seen/handled ownership + ADR-042 glass-box supplements + Phase E output-commit closure + B3/B4 freshness re-invoke + Phase D output-commit scan are retired by F117/#1398**; the atomic publish path (one original, one exact-boundary frontier annotation), provider-native freshness evaluation and honest carrier precision remain independently owned here. Live delivery capability follows each member's canonical `carrier`; `activeInvocationGuidance` is a separate adapter capability and must not be inferred from freshness precision. | **Owner**: 小太阳·Maine Coon (@codex-sol, GPT-5.6 Sol) | **Priority**: P1",
+      "status": "runtime notification mechanisms retired by F117/#1398 and #1615 — HELD, MCP piggyback, reminders, supplements, output-commit gates, re-invoke and all provider-native tool-boundary／idle freshness notifications are retired, including Live voice. Atomic publication frontier and actual carrier／read evidence remain separate delivery facts. The phase history below is archival, not an active implementation mandate. | **Owner**: 小太阳·Maine Coon (@codex-sol, GPT-5.6 Sol) | **Priority**: P1",
       "file": "F254-side-effect-freshness-gate.md"
     },
     {
@@ -1869,7 +1869,7 @@
     {
       "id": "F318",
       "name": "Claude Agent SDK Native Carrier — 对齐 Codex app-server 能力",
-      "status": "in-progress（Phase A ✅；Phase B 候选已合入（优先 F254 原生感知，默认关闭）；Phase C/D 未整体完成） | **Owner**: Ragdoll (@opus5, claude-opus-5) | **Priority**: P1",
+      "status": "in-progress（Phase A ✅；Phase B SDK carrier 候选已合入（默认关闭）；freshness 通知能力已由 #1615 退役；Phase C/D 其余 carrier 能力未整体完成） | **Owner**: Ragdoll (@opus5, claude-opus-5) | **Priority**: P1",
       "file": "F318-claude-agent-sdk-native-carrier.md"
     },
     {

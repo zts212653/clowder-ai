@@ -119,7 +119,7 @@ function optionsFor(
     allowedDirectories: [],
     verifyNativeBinding: async () => true,
     publish() {},
-    inbox: { source: () => source, onSuccessorRequired: async () => {} },
+    inbox: { source: () => source },
     recovery: { tasks: f.tasks, approvals: f.approvals, messages: f.messages, epochs: f.epochs, authorize },
   };
 }
@@ -204,54 +204,6 @@ test('an empty inbox leaves its first safe boundary available for recovery witho
   contexts.close();
 });
 
-test('an accepted inbox notice cannot make its generated turn page recovery', async () => {
-  const f = recoveryFixture();
-  f.task('still open');
-  const nativeKinds: string[] = [];
-  const gate = gateFor(async (_text, _refs, kind, _signal, authorize) => {
-    assert.equal(await authorize(), true);
-    nativeKinds.push(kind);
-    return 'native-turn';
-  });
-  const reference = {
-    messageId: 'incoming',
-    queueEntryId: 'queue-incoming',
-    threadId: scope.threadId,
-    sourceThreadId: 'source',
-    authorCatId: 'codex-sol',
-    targetCatId: scope.catId,
-    priority: 'normal' as const,
-    order: '0001:incoming',
-    nextWork: false,
-    facts: {
-      persisted: true as const,
-      notified: false,
-      readByInvocationIds: [],
-      readInCurrentContext: false,
-      handled: false,
-      playback: 'unknown' as const,
-    },
-  };
-  const contexts = new LiveBoundaryContexts(
-    optionsFor(f, async () => true, {
-      page: async () => ({ items: [reference], hasMore: false }),
-      read: async () => reference,
-    }),
-    gate,
-    () => {},
-    () => false,
-  );
-  contexts.configure({ CAT_CAFE_INVOCATION_ID: scope.invocationId });
-  await contexts.atBoundary('tool_complete');
-  assert.deepEqual(nativeKinds, ['inbox_notice']);
-  await contexts.atBoundary('turn_complete');
-  assert.deepEqual(nativeKinds, ['inbox_notice'], 'the notice-generated turn is not a new user ticket');
-  contexts.onUserTurn();
-  await contexts.atBoundary('tool_complete');
-  assert.deepEqual(nativeKinds, ['inbox_notice', 'recovery_context']);
-  contexts.close();
-});
-
 test('compaction after projection but before the native write revokes the recovery page', async () => {
   const f = recoveryFixture();
   f.task('old epoch item');
@@ -321,4 +273,32 @@ test('a real V3 user transcript revokes in-flight recovery and preserves its nex
     contexts.close();
     await firstBoundary;
   }
+});
+
+test('Live does not turn an inbox projection into an automatic read-notice consumer', async () => {
+  const f = recoveryFixture();
+  let scans = 0;
+  let nativeWrites = 0;
+  const { recovery: _recovery, ...options } = optionsFor(f);
+  options.inbox = {
+    source: () => {
+      scans++;
+      throw new Error('notification source retired');
+    },
+  };
+  const contexts = new LiveBoundaryContexts(
+    options,
+    gateFor(async () => {
+      nativeWrites++;
+      return 'unexpected';
+    }),
+    () => {},
+    () => false,
+  );
+  contexts.configure({ CAT_CAFE_INVOCATION_ID: scope.invocationId });
+  await contexts.atBoundary('tool_complete');
+  await contexts.atBoundary('idle');
+  assert.equal(scans, 0);
+  assert.equal(nativeWrites, 0);
+  contexts.close();
 });

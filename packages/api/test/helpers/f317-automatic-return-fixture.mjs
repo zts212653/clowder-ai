@@ -14,7 +14,6 @@ import { InMemoryTurnExecutionStore } from '../../src/domains/cats/services/stor
 import { DeliveryCursorStore } from '../../src/domains/cats/services/stores/ports/DeliveryCursorStore.ts';
 import { InvocationRecordStore } from '../../src/domains/cats/services/stores/ports/InvocationRecordStore.ts';
 import { settleLifecycleResponseInputs } from '../../src/domains/cats/services/stores/ports/MessageStore.ts';
-import { LiveInboxHost } from '../../src/domains/concierge/live/host/live-inbox-host.ts';
 import { MessageLiveInboxSource } from '../../src/domains/concierge/live/inbox/MessageLiveInboxSource.ts';
 import { LiveCarrierOperationGate } from '../../src/domains/concierge/live/LiveCarrierOperationGate.ts';
 import { callbacksRoutes } from '../../src/routes/callbacks.ts';
@@ -58,7 +57,7 @@ export async function automaticReturnFixture(t, f, provider) {
   const app = Fastify();
   const gate = new LiveCarrierOperationGate();
   const starts = [],
-    notices = [],
+    appends = [],
     errors = [];
   let closed = false;
   const socketManager = { broadcastAgentMessage() {}, broadcastToRoom() {}, emitToUser() {} };
@@ -237,39 +236,27 @@ export async function automaticReturnFixture(t, f, provider) {
     generation: 1,
   };
   const source = new MessageLiveInboxSource({ store: f.messages, queue, authorize: async () => !closed });
-  let host;
-  let boundary = Promise.resolve();
-  host = new LiveInboxHost({
-    scope,
-    source,
-    wakeNative() {
-      // Deterministic safe-boundary driver, not evidence of an actual native call or speech.
-      boundary = boundary
-        .then(() => new Promise((resolve) => setImmediate(resolve)))
-        .then(async () => {
-          if (!closed) await host.atBoundary('tool_complete');
-        })
-        .catch((error) => errors.push(error));
+  const releaseDispatcher = tracker.bindAgentClientActiveRunDispatcher(
+    scope.threadId,
+    scope.catId,
+    {
+      invocationId: live.invocationId,
+      capabilities: { append: true, steer: true, inputReadReceipt: true },
+      handle: { provider: 'openai', carrier: 'codex_app_server', threadId: 'native-live', turnId: 'active-live-turn' },
+      dispatch: async (input) => {
+        appends.push(input);
+        return { accepted: true, inputReadAt: Date.now() };
+      },
     },
-    async deliver(batch) {
-      notices.push(batch);
-      return 'accepted';
-    },
-    async onSuccessorRequired() {
-      assert.fail('partner returns should be full-readable in the same Live call');
-    },
-  });
-  const unsubscribe = queue.onSourceChanged((threadId, userId) => {
-    if (threadId === scope.threadId && userId === scope.userId) host.signal();
-  });
+    'live-parent',
+  );
+  assert.ok(releaseDispatcher, 'normal Queue append has an exact active Live target');
   t.after(async () => {
     closed = true;
-    unsubscribe();
-    host.close();
+    releaseDispatcher();
     gate.close();
     await gate.drain();
-    await boundary;
     await app.close();
   });
-  return { live, scope, host, source, queue, tracker, records, turns, starts, notices, errors, post, read };
+  return { live, scope, source, queue, tracker, records, turns, starts, appends, errors, post, read };
 }

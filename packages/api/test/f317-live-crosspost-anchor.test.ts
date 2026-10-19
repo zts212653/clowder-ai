@@ -1,13 +1,12 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { LiveContextGate } from '../src/domains/concierge/live/host/live-controlled-context.js';
-import { bindLiveInboxHost } from '../src/domains/concierge/live/host/live-inbox-host.js';
 import { bindLiveRecoveryHost } from '../src/domains/concierge/live/host/live-recovery-binding.js';
 import { MessageLiveInboxSource } from '../src/domains/concierge/live/inbox/MessageLiveInboxSource.js';
 import type { LiveCompanionCallOptions } from '../src/domains/concierge/live/live-call-options.js';
 import { recoveryFixture, scope } from './helpers/f317-recovery-fixture.js';
 
-test('cross-post notice and recovery reference the persisted receiving message', async () => {
+test('cross-post recovery references the persisted receiving message', async () => {
   const f = recoveryFixture();
   const queue = f.queue;
   const from = { kind: 'agent' as const, catId: scope.catId };
@@ -46,7 +45,6 @@ test('cross-post notice and recovery reference the persisted receiving message',
   let recoveredSourceThread: string | undefined;
   let recoveredNextWork: boolean | undefined;
 
-  let noticeRefs: readonly string[] = [];
   const binding = { userId: scope.userId, threadId: scope.threadId, catId: scope.catId, callId: scope.callId };
   const context = new LiveContextGate({
     binding,
@@ -67,7 +65,7 @@ test('cross-post notice and recovery reference the persisted receiving message',
           const snapshot = JSON.parse(envelope.text);
           recoveredSourceThread = snapshot.inbox.items[0]?.sourceThreadId;
           recoveredNextWork = snapshot.inbox.items[0]?.nextWork;
-        } else noticeRefs = refs;
+        }
         return 'accepted-turn';
       },
     }),
@@ -83,7 +81,6 @@ test('cross-post notice and recovery reference the persisted receiving message',
     recovery: f.options,
     inbox: {
       source: () => new MessageLiveInboxSource({ store: f.messages, queue, authorize: async () => true }),
-      onSuccessorRequired: async () => {},
     },
   };
   const hostInput = {
@@ -102,11 +99,7 @@ test('cross-post notice and recovery reference the persisted receiving message',
     'recovery retains the exact parent policy instead of inventing successor work',
   );
   recovery.close();
-  const inbox = bindLiveInboxHost(hostInput);
-  assert.ok(inbox);
-  assert.equal(await inbox.atBoundary('idle'), 'accepted');
-  assert.deepEqual({ recoveryRefs, noticeRefs }, { recoveryRefs: [expectedRef], noticeRefs: [expectedRef] });
+  assert.deepEqual(recoveryRefs, [expectedRef]);
   assert.equal(recoveredSourceThread, 'remote-thread', 'origin attribution stays separate from the read anchor');
-  inbox.close();
   context.close('test-complete');
 });

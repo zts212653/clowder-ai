@@ -1,4 +1,3 @@
-import type { FreshnessReadableMessage } from '../../freshness/freshness-unseen-source.js';
 import type { CodexAppServerJsonObject } from './CodexAppServerEventMapper.js';
 import type { CodexAppServerNativeRpcClient } from './CodexAppServerNativeRpc.js';
 import type { CodexSubexecutionEvent } from './CodexSubexecutionIdentity.js';
@@ -14,7 +13,6 @@ export class CodexLiveStartupCancelledError extends Error {
 }
 
 export type CodexLiveContextKind =
-  | 'inbox_notice'
   | 'meeting_context'
   | 'recovery_context'
   | 'page_action_result'
@@ -45,11 +43,8 @@ export interface CodexLiveRunPort {
   readonly compositionInstructions?: string;
   /** Stops new queued inputs before transport teardown finishes. */
   acceptsInput?(): boolean;
-  /** A voice-only call cannot be asked to read household messages through unavailable tools. */
-  acceptsFreshness?(): boolean;
   /** Exact server-owned invocation binding; a surface/exposure callback alone grants no result consumption. */
   isActiveCarrier?(query: { invocationId: string; catId: string; threadId: string }): boolean;
-  exposureReason?(message: FreshnessReadableMessage): 'same_live_call_exposure' | null;
   /** Bind to credentials minted by the ordinary Host invocation before configuring native MCP. */
   configure?(callbackEnv: Record<string, string>): Promise<CodexAppServerJsonObject>;
   /** Surface teardown when the enclosing normal invocation exits or fails before readiness. */

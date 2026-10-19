@@ -44,7 +44,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleAckMentions",
-      "protectedImplementationDigest": "sha256:e81230e4f676a22bae446f5b91dfab775f0303e271ee1420a809fe035ae73e4c"
+      "protectedImplementationDigest": "sha256:af6258513638ed5e94a3659634d1f136b3fbf1f54f0c50bd3558fc86d7fe0f02"
     },
     {
       "name": "cat_cafe_act_artifact_review",
@@ -1199,7 +1199,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleAdmitEntrustedWork",
-      "protectedImplementationDigest": "sha256:e81230e4f676a22bae446f5b91dfab775f0303e271ee1420a809fe035ae73e4c"
+      "protectedImplementationDigest": "sha256:af6258513638ed5e94a3659634d1f136b3fbf1f54f0c50bd3558fc86d7fe0f02"
     },
     {
       "name": "cat_cafe_advance_evolution_program_change",
@@ -1535,7 +1535,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleAmendPersonInteraction",
-      "protectedImplementationDigest": "sha256:e81230e4f676a22bae446f5b91dfab775f0303e271ee1420a809fe035ae73e4c"
+      "protectedImplementationDigest": "sha256:af6258513638ed5e94a3659634d1f136b3fbf1f54f0c50bd3558fc86d7fe0f02"
     },
     {
       "name": "cat_cafe_audio_capture_start",
@@ -2284,7 +2284,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleBootcampEnvCheck",
-      "protectedImplementationDigest": "sha256:e81230e4f676a22bae446f5b91dfab775f0303e271ee1420a809fe035ae73e4c"
+      "protectedImplementationDigest": "sha256:af6258513638ed5e94a3659634d1f136b3fbf1f54f0c50bd3558fc86d7fe0f02"
     },
     {
       "name": "cat_cafe_capabilities_snapshot",
@@ -2965,7 +2965,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleCloseEntrustedWork",
-      "protectedImplementationDigest": "sha256:e81230e4f676a22bae446f5b91dfab775f0303e271ee1420a809fe035ae73e4c"
+      "protectedImplementationDigest": "sha256:af6258513638ed5e94a3659634d1f136b3fbf1f54f0c50bd3558fc86d7fe0f02"
     },
     {
       "name": "cat_cafe_collective_accept_work",
@@ -3710,7 +3710,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleCommunityAwaitExternal",
-      "protectedImplementationDigest": "sha256:e81230e4f676a22bae446f5b91dfab775f0303e271ee1420a809fe035ae73e4c"
+      "protectedImplementationDigest": "sha256:af6258513638ed5e94a3659634d1f136b3fbf1f54f0c50bd3558fc86d7fe0f02"
     },
     {
       "name": "cat_cafe_community_guardian_signoff",
@@ -3821,7 +3821,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleCommunityGuardianSignoff",
-      "protectedImplementationDigest": "sha256:e81230e4f676a22bae446f5b91dfab775f0303e271ee1420a809fe035ae73e4c"
+      "protectedImplementationDigest": "sha256:af6258513638ed5e94a3659634d1f136b3fbf1f54f0c50bd3558fc86d7fe0f02"
     },
     {
       "name": "cat_cafe_community_request_guardian",
@@ -3882,7 +3882,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleCommunityRequestGuardian",
-      "protectedImplementationDigest": "sha256:e81230e4f676a22bae446f5b91dfab775f0303e271ee1420a809fe035ae73e4c"
+      "protectedImplementationDigest": "sha256:af6258513638ed5e94a3659634d1f136b3fbf1f54f0c50bd3558fc86d7fe0f02"
     },
     {
       "name": "cat_cafe_constitute_evolution_program",
@@ -4170,7 +4170,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleCorrectPersonClaim",
-      "protectedImplementationDigest": "sha256:e81230e4f676a22bae446f5b91dfab775f0303e271ee1420a809fe035ae73e4c"
+      "protectedImplementationDigest": "sha256:af6258513638ed5e94a3659634d1f136b3fbf1f54f0c50bd3558fc86d7fe0f02"
     },
     {
       "name": "cat_cafe_create_rich_block",
@@ -4301,7 +4301,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleCreateRichBlock",
-      "protectedImplementationDigest": "sha256:e81230e4f676a22bae446f5b91dfab775f0303e271ee1420a809fe035ae73e4c"
+      "protectedImplementationDigest": "sha256:af6258513638ed5e94a3659634d1f136b3fbf1f54f0c50bd3558fc86d7fe0f02"
     },
     {
       "name": "cat_cafe_create_task",
@@ -4395,7 +4395,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleCreateTask",
-      "protectedImplementationDigest": "sha256:e81230e4f676a22bae446f5b91dfab775f0303e271ee1420a809fe035ae73e4c"
+      "protectedImplementationDigest": "sha256:af6258513638ed5e94a3659634d1f136b3fbf1f54f0c50bd3558fc86d7fe0f02"
     },
     {
       "name": "cat_cafe_cross_post_message",
@@ -4785,7 +4785,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleCrossPostMessage",
-      "protectedImplementationDigest": "sha256:e81230e4f676a22bae446f5b91dfab775f0303e271ee1420a809fe035ae73e4c"
+      "protectedImplementationDigest": "sha256:af6258513638ed5e94a3659634d1f136b3fbf1f54f0c50bd3558fc86d7fe0f02"
     },
     {
       "name": "cat_cafe_defer_person_memory_delta",
@@ -4965,7 +4965,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleDeferPersonMemoryDelta",
-      "protectedImplementationDigest": "sha256:e81230e4f676a22bae446f5b91dfab775f0303e271ee1420a809fe035ae73e4c"
+      "protectedImplementationDigest": "sha256:af6258513638ed5e94a3659634d1f136b3fbf1f54f0c50bd3558fc86d7fe0f02"
     },
     {
       "name": "cat_cafe_development_return",
@@ -5636,7 +5636,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleDisposeDeferredPersonMemory",
-      "protectedImplementationDigest": "sha256:e81230e4f676a22bae446f5b91dfab775f0303e271ee1420a809fe035ae73e4c"
+      "protectedImplementationDigest": "sha256:af6258513638ed5e94a3659634d1f136b3fbf1f54f0c50bd3558fc86d7fe0f02"
     },
     {
       "name": "cat_cafe_drill_memory_cue",
@@ -5686,7 +5686,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleDrillMemoryCue",
-      "protectedImplementationDigest": "sha256:e81230e4f676a22bae446f5b91dfab775f0303e271ee1420a809fe035ae73e4c"
+      "protectedImplementationDigest": "sha256:af6258513638ed5e94a3659634d1f136b3fbf1f54f0c50bd3558fc86d7fe0f02"
     },
     {
       "name": "cat_cafe_drill_person_memory",
@@ -5783,7 +5783,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleDrillPersonMemory",
-      "protectedImplementationDigest": "sha256:e81230e4f676a22bae446f5b91dfab775f0303e271ee1420a809fe035ae73e4c"
+      "protectedImplementationDigest": "sha256:af6258513638ed5e94a3659634d1f136b3fbf1f54f0c50bd3558fc86d7fe0f02"
     },
     {
       "name": "cat_cafe_edit_office_document",
@@ -5973,7 +5973,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleFeatIndex",
-      "protectedImplementationDigest": "sha256:e81230e4f676a22bae446f5b91dfab775f0303e271ee1420a809fe035ae73e4c"
+      "protectedImplementationDigest": "sha256:af6258513638ed5e94a3659634d1f136b3fbf1f54f0c50bd3558fc86d7fe0f02"
     },
     {
       "name": "cat_cafe_finance_query",
@@ -6113,7 +6113,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleForgetDeferredPersonMemory",
-      "protectedImplementationDigest": "sha256:e81230e4f676a22bae446f5b91dfab775f0303e271ee1420a809fe035ae73e4c"
+      "protectedImplementationDigest": "sha256:af6258513638ed5e94a3659634d1f136b3fbf1f54f0c50bd3558fc86d7fe0f02"
     },
     {
       "name": "cat_cafe_forget_person",
@@ -6163,7 +6163,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleForgetPerson",
-      "protectedImplementationDigest": "sha256:e81230e4f676a22bae446f5b91dfab775f0303e271ee1420a809fe035ae73e4c"
+      "protectedImplementationDigest": "sha256:af6258513638ed5e94a3659634d1f136b3fbf1f54f0c50bd3558fc86d7fe0f02"
     },
     {
       "name": "cat_cafe_forget_person_memory_proposal",
@@ -6213,7 +6213,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleForgetPersonMemoryProposal",
-      "protectedImplementationDigest": "sha256:e81230e4f676a22bae446f5b91dfab775f0303e271ee1420a809fe035ae73e4c"
+      "protectedImplementationDigest": "sha256:af6258513638ed5e94a3659634d1f136b3fbf1f54f0c50bd3558fc86d7fe0f02"
     },
     {
       "name": "cat_cafe_generate_document",
@@ -6274,7 +6274,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleGenerateDocument",
-      "protectedImplementationDigest": "sha256:e81230e4f676a22bae446f5b91dfab775f0303e271ee1420a809fe035ae73e4c"
+      "protectedImplementationDigest": "sha256:af6258513638ed5e94a3659634d1f136b3fbf1f54f0c50bd3558fc86d7fe0f02"
     },
     {
       "name": "cat_cafe_get_available_guides",
@@ -6310,7 +6310,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleGetAvailableGuides",
-      "protectedImplementationDigest": "sha256:e81230e4f676a22bae446f5b91dfab775f0303e271ee1420a809fe035ae73e4c"
+      "protectedImplementationDigest": "sha256:af6258513638ed5e94a3659634d1f136b3fbf1f54f0c50bd3558fc86d7fe0f02"
     },
     {
       "name": "cat_cafe_get_custody_events",
@@ -6361,7 +6361,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleGetCustodyEvents",
-      "protectedImplementationDigest": "sha256:e81230e4f676a22bae446f5b91dfab775f0303e271ee1420a809fe035ae73e4c"
+      "protectedImplementationDigest": "sha256:af6258513638ed5e94a3659634d1f136b3fbf1f54f0c50bd3558fc86d7fe0f02"
     },
     {
       "name": "cat_cafe_get_evolution_program",
@@ -6500,7 +6500,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleGetHoldStatus",
-      "protectedImplementationDigest": "sha256:e81230e4f676a22bae446f5b91dfab775f0303e271ee1420a809fe035ae73e4c"
+      "protectedImplementationDigest": "sha256:af6258513638ed5e94a3659634d1f136b3fbf1f54f0c50bd3558fc86d7fe0f02"
     },
     {
       "name": "cat_cafe_get_message",
@@ -6566,7 +6566,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleGetMessage",
-      "protectedImplementationDigest": "sha256:e81230e4f676a22bae446f5b91dfab775f0303e271ee1420a809fe035ae73e4c"
+      "protectedImplementationDigest": "sha256:af6258513638ed5e94a3659634d1f136b3fbf1f54f0c50bd3558fc86d7fe0f02"
     },
     {
       "name": "cat_cafe_get_pending_decisions",
@@ -6615,7 +6615,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleGetPendingDecisions",
-      "protectedImplementationDigest": "sha256:e81230e4f676a22bae446f5b91dfab775f0303e271ee1420a809fe035ae73e4c"
+      "protectedImplementationDigest": "sha256:af6258513638ed5e94a3659634d1f136b3fbf1f54f0c50bd3558fc86d7fe0f02"
     },
     {
       "name": "cat_cafe_get_pending_mentions",
@@ -6662,7 +6662,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleGetPendingMentions",
-      "protectedImplementationDigest": "sha256:e81230e4f676a22bae446f5b91dfab775f0303e271ee1420a809fe035ae73e4c"
+      "protectedImplementationDigest": "sha256:af6258513638ed5e94a3659634d1f136b3fbf1f54f0c50bd3558fc86d7fe0f02"
     },
     {
       "name": "cat_cafe_get_person_memory_proposal_status",
@@ -6713,7 +6713,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleGetPersonMemoryProposalStatus",
-      "protectedImplementationDigest": "sha256:e81230e4f676a22bae446f5b91dfab775f0303e271ee1420a809fe035ae73e4c"
+      "protectedImplementationDigest": "sha256:af6258513638ed5e94a3659634d1f136b3fbf1f54f0c50bd3558fc86d7fe0f02"
     },
     {
       "name": "cat_cafe_get_recall_metrics",
@@ -6840,7 +6840,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleGetRunningWork",
-      "protectedImplementationDigest": "sha256:e81230e4f676a22bae446f5b91dfab775f0303e271ee1420a809fe035ae73e4c"
+      "protectedImplementationDigest": "sha256:af6258513638ed5e94a3659634d1f136b3fbf1f54f0c50bd3558fc86d7fe0f02"
     },
     {
       "name": "cat_cafe_get_thread_cats",
@@ -6889,7 +6889,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleGetThreadCats",
-      "protectedImplementationDigest": "sha256:e81230e4f676a22bae446f5b91dfab775f0303e271ee1420a809fe035ae73e4c"
+      "protectedImplementationDigest": "sha256:af6258513638ed5e94a3659634d1f136b3fbf1f54f0c50bd3558fc86d7fe0f02"
     },
     {
       "name": "cat_cafe_get_thread_context",
@@ -6995,7 +6995,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleGetThreadContext",
-      "protectedImplementationDigest": "sha256:e81230e4f676a22bae446f5b91dfab775f0303e271ee1420a809fe035ae73e4c"
+      "protectedImplementationDigest": "sha256:af6258513638ed5e94a3659634d1f136b3fbf1f54f0c50bd3558fc86d7fe0f02"
     },
     {
       "name": "cat_cafe_get_thread_metadata",
@@ -7029,7 +7029,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleGetThreadMetadata",
-      "protectedImplementationDigest": "sha256:e81230e4f676a22bae446f5b91dfab775f0303e271ee1420a809fe035ae73e4c"
+      "protectedImplementationDigest": "sha256:af6258513638ed5e94a3659634d1f136b3fbf1f54f0c50bd3558fc86d7fe0f02"
     },
     {
       "name": "cat_cafe_get_workflow_sop",
@@ -7078,7 +7078,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleGetWorkflowSop",
-      "protectedImplementationDigest": "sha256:e81230e4f676a22bae446f5b91dfab775f0303e271ee1420a809fe035ae73e4c"
+      "protectedImplementationDigest": "sha256:af6258513638ed5e94a3659634d1f136b3fbf1f54f0c50bd3558fc86d7fe0f02"
     },
     {
       "name": "cat_cafe_graph_resolve",
@@ -7192,7 +7192,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleGuideControl",
-      "protectedImplementationDigest": "sha256:e81230e4f676a22bae446f5b91dfab775f0303e271ee1420a809fe035ae73e4c"
+      "protectedImplementationDigest": "sha256:af6258513638ed5e94a3659634d1f136b3fbf1f54f0c50bd3558fc86d7fe0f02"
     },
     {
       "name": "cat_cafe_hold_ball",
@@ -7340,7 +7340,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleHoldBall",
-      "protectedImplementationDigest": "sha256:e81230e4f676a22bae446f5b91dfab775f0303e271ee1420a809fe035ae73e4c"
+      "protectedImplementationDigest": "sha256:af6258513638ed5e94a3659634d1f136b3fbf1f54f0c50bd3558fc86d7fe0f02"
     },
     {
       "name": "cat_cafe_home_action",
@@ -8422,7 +8422,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleListLabels",
-      "protectedImplementationDigest": "sha256:e81230e4f676a22bae446f5b91dfab775f0303e271ee1420a809fe035ae73e4c"
+      "protectedImplementationDigest": "sha256:af6258513638ed5e94a3659634d1f136b3fbf1f54f0c50bd3558fc86d7fe0f02"
     },
     {
       "name": "cat_cafe_list_paw_feel_inbox",
@@ -8773,7 +8773,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleListTasks",
-      "protectedImplementationDigest": "sha256:e81230e4f676a22bae446f5b91dfab775f0303e271ee1420a809fe035ae73e4c"
+      "protectedImplementationDigest": "sha256:af6258513638ed5e94a3659634d1f136b3fbf1f54f0c50bd3558fc86d7fe0f02"
     },
     {
       "name": "cat_cafe_list_threads",
@@ -8835,7 +8835,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleListThreads",
-      "protectedImplementationDigest": "sha256:e81230e4f676a22bae446f5b91dfab775f0303e271ee1420a809fe035ae73e4c"
+      "protectedImplementationDigest": "sha256:af6258513638ed5e94a3659634d1f136b3fbf1f54f0c50bd3558fc86d7fe0f02"
     },
     {
       "name": "cat_cafe_manage_conversation_decision",
@@ -9435,7 +9435,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleMultiMention",
-      "protectedImplementationDigest": "sha256:e81230e4f676a22bae446f5b91dfab775f0303e271ee1420a809fe035ae73e4c"
+      "protectedImplementationDigest": "sha256:af6258513638ed5e94a3659634d1f136b3fbf1f54f0c50bd3558fc86d7fe0f02"
     },
     {
       "name": "cat_cafe_nominate_for_global",
@@ -9552,7 +9552,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleOfferCustody",
-      "protectedImplementationDigest": "sha256:e81230e4f676a22bae446f5b91dfab775f0303e271ee1420a809fe035ae73e4c"
+      "protectedImplementationDigest": "sha256:af6258513638ed5e94a3659634d1f136b3fbf1f54f0c50bd3558fc86d7fe0f02"
     },
     {
       "name": "cat_cafe_open_evolution_round",
@@ -11151,7 +11151,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handlePostMessage",
-      "protectedImplementationDigest": "sha256:e81230e4f676a22bae446f5b91dfab775f0303e271ee1420a809fe035ae73e4c"
+      "protectedImplementationDigest": "sha256:af6258513638ed5e94a3659634d1f136b3fbf1f54f0c50bd3558fc86d7fe0f02"
     },
     {
       "name": "cat_cafe_prepare_artifact_review",
@@ -11869,7 +11869,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleProposeEntity",
-      "protectedImplementationDigest": "sha256:e81230e4f676a22bae446f5b91dfab775f0303e271ee1420a809fe035ae73e4c"
+      "protectedImplementationDigest": "sha256:af6258513638ed5e94a3659634d1f136b3fbf1f54f0c50bd3558fc86d7fe0f02"
     },
     {
       "name": "cat_cafe_propose_eval_repair",
@@ -12045,7 +12045,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleProposeEventMemoryCorrection",
-      "protectedImplementationDigest": "sha256:e81230e4f676a22bae446f5b91dfab775f0303e271ee1420a809fe035ae73e4c"
+      "protectedImplementationDigest": "sha256:af6258513638ed5e94a3659634d1f136b3fbf1f54f0c50bd3558fc86d7fe0f02"
     },
     {
       "name": "cat_cafe_propose_person_memory",
@@ -12955,7 +12955,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleProposePersonMemory",
-      "protectedImplementationDigest": "sha256:e81230e4f676a22bae446f5b91dfab775f0303e271ee1420a809fe035ae73e4c"
+      "protectedImplementationDigest": "sha256:af6258513638ed5e94a3659634d1f136b3fbf1f54f0c50bd3558fc86d7fe0f02"
     },
     {
       "name": "cat_cafe_propose_profile_update",
@@ -13034,7 +13034,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleProposeProfileUpdate",
-      "protectedImplementationDigest": "sha256:e81230e4f676a22bae446f5b91dfab775f0303e271ee1420a809fe035ae73e4c"
+      "protectedImplementationDigest": "sha256:af6258513638ed5e94a3659634d1f136b3fbf1f54f0c50bd3558fc86d7fe0f02"
     },
     {
       "name": "cat_cafe_propose_session_handoff",
@@ -13111,7 +13111,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleProposeSessionHandoff",
-      "protectedImplementationDigest": "sha256:e81230e4f676a22bae446f5b91dfab775f0303e271ee1420a809fe035ae73e4c"
+      "protectedImplementationDigest": "sha256:af6258513638ed5e94a3659634d1f136b3fbf1f54f0c50bd3558fc86d7fe0f02"
     },
     {
       "name": "cat_cafe_propose_taste",
@@ -13299,7 +13299,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleProposeTaste",
-      "protectedImplementationDigest": "sha256:e81230e4f676a22bae446f5b91dfab775f0303e271ee1420a809fe035ae73e4c"
+      "protectedImplementationDigest": "sha256:af6258513638ed5e94a3659634d1f136b3fbf1f54f0c50bd3558fc86d7fe0f02"
     },
     {
       "name": "cat_cafe_propose_thread",
@@ -13407,7 +13407,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleProposeThread",
-      "protectedImplementationDigest": "sha256:e81230e4f676a22bae446f5b91dfab775f0303e271ee1420a809fe035ae73e4c"
+      "protectedImplementationDigest": "sha256:af6258513638ed5e94a3659634d1f136b3fbf1f54f0c50bd3558fc86d7fe0f02"
     },
     {
       "name": "cat_cafe_publish_harness_history",
@@ -15207,7 +15207,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleReadProfile",
-      "protectedImplementationDigest": "sha256:e81230e4f676a22bae446f5b91dfab775f0303e271ee1420a809fe035ae73e4c"
+      "protectedImplementationDigest": "sha256:af6258513638ed5e94a3659634d1f136b3fbf1f54f0c50bd3558fc86d7fe0f02"
     },
     {
       "name": "cat_cafe_read_session_digest",
@@ -15614,7 +15614,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleRecallPersonRelationship",
-      "protectedImplementationDigest": "sha256:e81230e4f676a22bae446f5b91dfab775f0303e271ee1420a809fe035ae73e4c"
+      "protectedImplementationDigest": "sha256:af6258513638ed5e94a3659634d1f136b3fbf1f54f0c50bd3558fc86d7fe0f02"
     },
     {
       "name": "cat_cafe_record_eval_lifecycle",
@@ -16281,7 +16281,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleRecordMemoryCueOutcome",
-      "protectedImplementationDigest": "sha256:e81230e4f676a22bae446f5b91dfab775f0303e271ee1420a809fe035ae73e4c"
+      "protectedImplementationDigest": "sha256:af6258513638ed5e94a3659634d1f136b3fbf1f54f0c50bd3558fc86d7fe0f02"
     },
     {
       "name": "cat_cafe_record_proactive_memory_abstention",
@@ -16355,7 +16355,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleRecordProactiveMemoryAbstention",
-      "protectedImplementationDigest": "sha256:e81230e4f676a22bae446f5b91dfab775f0303e271ee1420a809fe035ae73e4c"
+      "protectedImplementationDigest": "sha256:af6258513638ed5e94a3659634d1f136b3fbf1f54f0c50bd3558fc86d7fe0f02"
     },
     {
       "name": "cat_cafe_record_request_review_consumption",
@@ -16877,7 +16877,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleRedactPersonMemoryItem",
-      "protectedImplementationDigest": "sha256:e81230e4f676a22bae446f5b91dfab775f0303e271ee1420a809fe035ae73e4c"
+      "protectedImplementationDigest": "sha256:af6258513638ed5e94a3659634d1f136b3fbf1f54f0c50bd3558fc86d7fe0f02"
     },
     {
       "name": "cat_cafe_register_deployment_wait",
@@ -16989,7 +16989,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleRegisterDeploymentWait",
-      "protectedImplementationDigest": "sha256:e81230e4f676a22bae446f5b91dfab775f0303e271ee1420a809fe035ae73e4c"
+      "protectedImplementationDigest": "sha256:af6258513638ed5e94a3659634d1f136b3fbf1f54f0c50bd3558fc86d7fe0f02"
     },
     {
       "name": "cat_cafe_register_external_runtime_session",
@@ -17222,7 +17222,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleRegisterIssueTracking",
-      "protectedImplementationDigest": "sha256:e81230e4f676a22bae446f5b91dfab775f0303e271ee1420a809fe035ae73e4c"
+      "protectedImplementationDigest": "sha256:af6258513638ed5e94a3659634d1f136b3fbf1f54f0c50bd3558fc86d7fe0f02"
     },
     {
       "name": "cat_cafe_register_pr_tracking",
@@ -17453,7 +17453,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleRegisterPrTracking",
-      "protectedImplementationDigest": "sha256:e81230e4f676a22bae446f5b91dfab775f0303e271ee1420a809fe035ae73e4c"
+      "protectedImplementationDigest": "sha256:af6258513638ed5e94a3659634d1f136b3fbf1f54f0c50bd3558fc86d7fe0f02"
     },
     {
       "name": "cat_cafe_register_scheduled_task",
@@ -18330,7 +18330,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleRetirePersonClaim",
-      "protectedImplementationDigest": "sha256:e81230e4f676a22bae446f5b91dfab775f0303e271ee1420a809fe035ae73e4c"
+      "protectedImplementationDigest": "sha256:af6258513638ed5e94a3659634d1f136b3fbf1f54f0c50bd3558fc86d7fe0f02"
     },
     {
       "name": "cat_cafe_retry_custody_admission",
@@ -18473,7 +18473,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleRetryCustodyAdmission",
-      "protectedImplementationDigest": "sha256:e81230e4f676a22bae446f5b91dfab775f0303e271ee1420a809fe035ae73e4c"
+      "protectedImplementationDigest": "sha256:af6258513638ed5e94a3659634d1f136b3fbf1f54f0c50bd3558fc86d7fe0f02"
     },
     {
       "name": "cat_cafe_review_distillation",
@@ -18797,7 +18797,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleSetReadMode",
-      "protectedImplementationDigest": "sha256:e81230e4f676a22bae446f5b91dfab775f0303e271ee1420a809fe035ae73e4c"
+      "protectedImplementationDigest": "sha256:af6258513638ed5e94a3659634d1f136b3fbf1f54f0c50bd3558fc86d7fe0f02"
     },
     {
       "name": "cat_cafe_set_thread_metadata",
@@ -18970,7 +18970,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleSetThreadMetadata",
-      "protectedImplementationDigest": "sha256:e81230e4f676a22bae446f5b91dfab775f0303e271ee1420a809fe035ae73e4c"
+      "protectedImplementationDigest": "sha256:af6258513638ed5e94a3659634d1f136b3fbf1f54f0c50bd3558fc86d7fe0f02"
     },
     {
       "name": "cat_cafe_settle_present_loop",
@@ -19672,7 +19672,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleStartGuide",
-      "protectedImplementationDigest": "sha256:e81230e4f676a22bae446f5b91dfab775f0303e271ee1420a809fe035ae73e4c"
+      "protectedImplementationDigest": "sha256:af6258513638ed5e94a3659634d1f136b3fbf1f54f0c50bd3558fc86d7fe0f02"
     },
     {
       "name": "cat_cafe_start_vote",
@@ -19750,7 +19750,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleStartVote",
-      "protectedImplementationDigest": "sha256:e81230e4f676a22bae446f5b91dfab775f0303e271ee1420a809fe035ae73e4c"
+      "protectedImplementationDigest": "sha256:af6258513638ed5e94a3659634d1f136b3fbf1f54f0c50bd3558fc86d7fe0f02"
     },
     {
       "name": "cat_cafe_submit_evolution_preparation",
@@ -21460,7 +21460,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleUnregisterTracking",
-      "protectedImplementationDigest": "sha256:e81230e4f676a22bae446f5b91dfab775f0303e271ee1420a809fe035ae73e4c"
+      "protectedImplementationDigest": "sha256:af6258513638ed5e94a3659634d1f136b3fbf1f54f0c50bd3558fc86d7fe0f02"
     },
     {
       "name": "cat_cafe_update_bootcamp_state",
@@ -21588,7 +21588,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleUpdateBootcampState",
-      "protectedImplementationDigest": "sha256:e81230e4f676a22bae446f5b91dfab775f0303e271ee1420a809fe035ae73e4c"
+      "protectedImplementationDigest": "sha256:af6258513638ed5e94a3659634d1f136b3fbf1f54f0c50bd3558fc86d7fe0f02"
     },
     {
       "name": "cat_cafe_update_entrusted_work",
@@ -21768,7 +21768,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleUpdateEntrustedWork",
-      "protectedImplementationDigest": "sha256:e81230e4f676a22bae446f5b91dfab775f0303e271ee1420a809fe035ae73e4c"
+      "protectedImplementationDigest": "sha256:af6258513638ed5e94a3659634d1f136b3fbf1f54f0c50bd3558fc86d7fe0f02"
     },
     {
       "name": "cat_cafe_update_evolution_program",
@@ -22115,7 +22115,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleUpdateGuideState",
-      "protectedImplementationDigest": "sha256:e81230e4f676a22bae446f5b91dfab775f0303e271ee1420a809fe035ae73e4c"
+      "protectedImplementationDigest": "sha256:af6258513638ed5e94a3659634d1f136b3fbf1f54f0c50bd3558fc86d7fe0f02"
     },
     {
       "name": "cat_cafe_update_task",
@@ -22205,7 +22205,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleUpdateTask",
-      "protectedImplementationDigest": "sha256:e81230e4f676a22bae446f5b91dfab775f0303e271ee1420a809fe035ae73e4c"
+      "protectedImplementationDigest": "sha256:af6258513638ed5e94a3659634d1f136b3fbf1f54f0c50bd3558fc86d7fe0f02"
     },
     {
       "name": "cat_cafe_update_workflow",
@@ -22355,7 +22355,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleUpdateWorkflow",
-      "protectedImplementationDigest": "sha256:e81230e4f676a22bae446f5b91dfab775f0303e271ee1420a809fe035ae73e4c"
+      "protectedImplementationDigest": "sha256:af6258513638ed5e94a3659634d1f136b3fbf1f54f0c50bd3558fc86d7fe0f02"
     },
     {
       "name": "cat_cafe_validate_community_route",
@@ -23087,7 +23087,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleWithdrawDeferredPersonMemory",
-      "protectedImplementationDigest": "sha256:e81230e4f676a22bae446f5b91dfab775f0303e271ee1420a809fe035ae73e4c"
+      "protectedImplementationDigest": "sha256:af6258513638ed5e94a3659634d1f136b3fbf1f54f0c50bd3558fc86d7fe0f02"
     },
     {
       "name": "cat_cafe_withdraw_thread_proposal",
@@ -23131,7 +23131,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleWithdrawThreadProposal",
-      "protectedImplementationDigest": "sha256:e81230e4f676a22bae446f5b91dfab775f0303e271ee1420a809fe035ae73e4c"
+      "protectedImplementationDigest": "sha256:af6258513638ed5e94a3659634d1f136b3fbf1f54f0c50bd3558fc86d7fe0f02"
     },
     {
       "name": "cat_cafe_workspace_navigate",

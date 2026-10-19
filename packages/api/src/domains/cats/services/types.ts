@@ -1113,8 +1113,6 @@ export interface AgentServiceOptions {
   spawnCliOverride?: SpawnCliOverride;
   /** F254 D2: optional tmux/direct duplex carrier factory for app-server mode. */
   agentCarrierSessionFactory?: AgentCarrierSessionFactory;
-  /** F254 D2: per-invocation two-phase provider-native freshness controller. */
-  activeInvocationFreshness?: import('./freshness/FreshnessNoticeBroker.js').ActiveInvocationFreshnessController;
   /** #1354: expose an exact provider-native active-turn dispatcher after turn acceptance. */
   activeRunDispatch?: AgentClientActiveRunDispatchRegistration;
   /** F117 K2: Claude compaction hooks for a carrier that runs them in-process (the Agent SDK carrier). */

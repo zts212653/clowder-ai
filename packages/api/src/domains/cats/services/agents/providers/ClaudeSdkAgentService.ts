@@ -22,10 +22,8 @@ import type {
   ToolExecutionPolicy,
 } from '../../types.js';
 import { resolveDefaultClaudeMcpServerPath } from './ClaudeAgentService.js';
-import { ClaudeNativeToolBoundaryClassifier } from './claude-native-tool-boundary.js';
 import { extractClaudeUsage, transformClaudeEvent } from './claude-ndjson-parser.js';
 import { sdkCompactionHooks } from './claude-sdk-compaction-hooks.js';
-import { ClaudeSdkFreshness } from './claude-sdk-input.js';
 import { prepareClaudeSdkLaunch } from './claude-sdk-launch.js';
 import { withActiveRunControlDeadline } from './claude-sdk-runtime-helpers.js';
 import { ClaudeSdkTurnInputState, createSdkUserMessage } from './claude-sdk-turn-input-state.js';
@@ -153,33 +151,8 @@ export class ClaudeSdkAgentService implements AgentService {
     if (options?.activeRunDispatch) {
       inputReadCallbacks.set(initialMessageId, async () => resolveInitialInputRead(Date.now()));
     }
-    let noticeId: string | null = null;
-    const freshness = new ClaudeSdkFreshness(
-      {
-        push: (text, sessionId) => (noticeId = turnInputs.pushNotice(text, sessionId)),
-        close: () => {
-          if (noticeId) turnInputs.withdrawNotice(noticeId);
-        },
-      },
-      initialMessageId,
-      options?.auditContext?.threadId ?? 'unknown',
-      options?.activeInvocationFreshness,
-      (err) => log.warn({ err, invocationId: options?.invocationId }, 'SDK freshness owner operation failed'),
-      async (notice, uuid) => {
-        if (options?.invocationId)
-          await this.rawArchive.append(options.invocationId, {
-            type: 'sdk_input',
-            kind: 'freshness_notice',
-            uuid,
-            noticeId: notice.noticeId,
-            expectedInputUuid: initialMessageId,
-            contentFree: true,
-          });
-      },
-    );
     const abort = () => {
       abortController.abort(options?.signal?.reason);
-      freshness.cancel();
       turnInputs.close();
     };
     options?.signal?.addEventListener('abort', abort, { once: true });
@@ -194,7 +167,6 @@ export class ClaudeSdkAgentService implements AgentService {
       lastTurnInputTokens: undefined as number | undefined,
       thinkingBuffer: '',
     };
-    const boundaries = new ClaudeNativeToolBoundaryClassifier();
     let query: ReturnType<ClaudeSdkQueryFn> | undefined;
     let terminal = false;
     let failed = false;
@@ -282,7 +254,6 @@ export class ClaudeSdkAgentService implements AgentService {
       query = this.queryFn({ prompt: turnInputs.input, options: sdkOptions });
       turnInputs.push(createSdkUserMessage(prepared.prompt, activeSessionId, initialMessageId));
       archive({ type: 'sdk_input', kind: 'primary', uuid: initialMessageId });
-      freshness.start();
       for await (const rawEvent of query) {
         const event = redactClaudeLaunchToken(
           rawEvent,
@@ -311,32 +282,11 @@ export class ClaudeSdkAgentService implements AgentService {
         if (typeof raw.session_id === 'string' && raw.session_id) {
           activeSessionId = raw.session_id;
           metadata.sessionId = raw.session_id;
-          freshness.setSession(raw.session_id);
           registerDispatcher();
         }
         if (isResultTerminal) {
           terminal = true;
           failed ||= raw.subtype !== 'success' || raw.is_error === true;
-          const ids = Array.isArray(raw.user_message_uuids) ? raw.user_message_uuids : [];
-          const origin = raw.origin as { kind?: string } | undefined;
-          if (
-            ids.includes(initialMessageId) ||
-            raw.user_message_uuid === initialMessageId ||
-            (ids.length === 0 && !raw.user_message_uuid && (!origin?.kind || origin.kind === 'human'))
-          ) {
-            const outcome = await freshness.settle(raw);
-            if (outcome === 'missed' || outcome === 'unconfirmed')
-              yield {
-                type: 'system_info',
-                catId: this.catId,
-                content: JSON.stringify({
-                  type: `claude_sdk_notice_${outcome}`,
-                  responsibility: 'freshness_owner',
-                  terminalReason: raw.terminal_reason ?? 'unknown',
-                }),
-                timestamp: Date.now(),
-              };
-          }
           // The SDK may coalesce several queued sends into one provider turn.
           // Its result echoes every consumed user-message uuid, so settle the
           // accepted messages by identity instead of assuming one result per
@@ -353,7 +303,6 @@ export class ClaudeSdkAgentService implements AgentService {
             metadata.usage.lastTurnInputTokens = streamState.lastTurnInputTokens;
           }
         }
-        for (const surface of boundaries.observe(event)) await freshness.poll(surface);
         const transformed = transformClaudeEvent(event, this.catId, streamState);
         if (transformed) {
           for (const message of Array.isArray(transformed) ? transformed : [transformed]) {
@@ -413,7 +362,6 @@ export class ClaudeSdkAgentService implements AgentService {
       abortController.abort();
       options?.signal?.removeEventListener('abort', abort);
       await archiveWrites;
-      await freshness.close(failed).catch((err) => log.warn({ err }, 'SDK freshness terminal bookkeeping failed'));
     }
     yield {
       type: 'done',

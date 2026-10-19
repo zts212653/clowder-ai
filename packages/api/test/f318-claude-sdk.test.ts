@@ -13,14 +13,13 @@ const started = {
 };
 
 async function run(
-  consumed = true,
+  _consumed = true,
   crash = false,
   bookkeepingFailure?: 'delivered' | 'missed' | 'completed' | 'query_close',
 ) {
   const calls: string[] = [];
   let input: AsyncIterator<unknown>;
   let first: { uuid: string };
-  let notice: { uuid: string; priority?: string; origin?: unknown };
   const queryFn = ({ prompt }: { prompt: AsyncIterable<unknown> }) => {
     input = prompt[Symbol.asyncIterator]();
     return {
@@ -29,14 +28,13 @@ async function run(
         yield { type: 'system', subtype: 'init', session_id: 'session' };
         yield started;
         yield completed;
-        notice = (await input.next()).value as typeof notice;
         if (crash) throw new Error('provider failed after tool effect');
         yield {
           type: 'result',
           subtype: 'success',
           terminal_reason: 'completed',
           session_id: 'session',
-          user_message_uuids: consumed ? [first.uuid, notice.uuid] : [first.uuid],
+          user_message_uuids: [first.uuid],
           queued_turn_count: 0,
         };
       },
@@ -91,14 +89,13 @@ async function run(
     workingDirectory: '/tmp',
   }))
     output.push(event);
-  assert.equal(notice?.priority, undefined);
-  assert.equal(notice?.origin, undefined);
   return { calls, output, service };
 }
 
-test('SDK notice reaches ordinary native tool chain; input enqueue alone is not delivered', async () => {
+test('SDK native tool chain ignores retired freshness hooks', async () => {
   const { calls, service } = await run();
-  assert.equal(calls.filter((c) => c === 'delivered').length, 1);
+  assert.ok(!calls.includes('prepare'));
+  assert.equal(calls.filter((c) => c === 'delivered').length, 0);
   assert.equal(calls.filter((c) => c.startsWith('missed')).length, 0);
   assert.deepEqual(service.freshnessCarrierCapability(), {
     provider: 'anthropic',
@@ -108,15 +105,15 @@ test('SDK notice reaches ordinary native tool chain; input enqueue alone is not 
   });
 });
 
-test('tail race preserves missed responsibility even when queued_turn_count is zero', async () => {
+test('SDK terminal result cannot create freshness responsibility', async () => {
   const { calls } = await run(false);
-  assert.ok(calls.includes('missed:turn_completed'));
+  assert.ok(!calls.includes('missed:turn_completed'));
   assert.ok(!calls.includes('delivered'));
 });
 
 test('failure after acceptance is surfaced once and never replays tools', async () => {
   const { calls, output } = await run(true, true);
-  assert.ok(calls.includes('missed:transport_failed'));
+  assert.ok(!calls.includes('missed:transport_failed'));
   const errors = output.filter((e) => e.type === 'error');
   assert.equal(errors.length, 1);
   assert.equal(errors[0]?.metadata?.cliDiagnostics?.excerptSource, 'unknown_raw');
@@ -164,33 +161,26 @@ for (const operation of ['delivered', 'missed', 'completed'] as const) {
     assert.equal(done.length, 1);
     assert.equal(done[0]?.errorCode, undefined);
     assert.equal(calls.filter((call) => call === 'close').length, 1);
-    assert.equal(calls.filter((call) => call === 'completed').length, 1);
-    if (operation !== 'completed') {
-      assert.ok(
-        output.some(
-          (event) => event.type === 'system_info' && event.content?.includes('claude_sdk_notice_unconfirmed'),
-        ),
-      );
-    }
+    assert.equal(calls.filter((call) => call === 'completed').length, 0);
   });
 }
 
-test('missed bookkeeping rejection preserves the original provider failure and completes owner lifecycle', async () => {
+test('retired bookkeeping cannot replace the original provider failure', async () => {
   const { calls, output } = await run(false, true, 'missed');
   const errors = output.filter((event) => event.type === 'error');
   assert.equal(errors.length, 1);
   assert.equal(errors[0]?.error, 'provider failed after tool effect');
-  assert.equal(calls.filter((call) => call === 'completed').length, 1);
+  assert.equal(calls.filter((call) => call === 'completed').length, 0);
   assert.equal(output.filter((event) => event.type === 'done').length, 1);
 });
 
-test('SDK query cleanup failure cannot replace the successful primary result or skip owner completion', async () => {
+test('SDK query cleanup failure cannot replace the successful primary result', async () => {
   const { calls, output } = await run(true, false, 'query_close');
   assert.equal(output.filter((event) => event.type === 'error').length, 0);
   const done = output.filter((event) => event.type === 'done');
   assert.equal(done.length, 1);
   assert.equal(done[0]?.errorCode, undefined);
-  assert.equal(calls.filter((call) => call === 'completed').length, 1);
+  assert.equal(calls.filter((call) => call === 'completed').length, 0);
 });
 
 test('SDK cancellation closes streaming input, yields done, and does not restart', async () => {
@@ -257,9 +247,9 @@ test('one upstream API failure emitted as assistant and result surfaces one term
   }
 });
 
-test('long silent native tool receives notice through the SDK input timer', async () => {
+test('a long silent SDK tool has no freshness timer or auxiliary input', async (t) => {
+  t.mock.timers.enable({ apis: ['setInterval'] });
   const calls: string[] = [];
-  let pending = false;
   const service = new ClaudeSdkAgentService({
     model: 'claude-opus-4-6',
     mcpServerPath: '',
@@ -267,50 +257,31 @@ test('long silent native tool receives notice through the SDK input timer', asyn
     queryFn: ({ prompt }) => ({
       close() {},
       async *[Symbol.asyncIterator]() {
-        const iterator = prompt[Symbol.asyncIterator]();
-        const first = (await iterator.next()).value;
+        const input = prompt[Symbol.asyncIterator]();
+        const first = (await input.next()).value;
         yield { type: 'system', subtype: 'init', session_id: 's' };
         yield started;
-        const notice = (await iterator.next()).value;
-        assert.ok(!calls.includes('delivered'), 'dequeue alone is not provider result evidence');
-        yield {
-          type: 'result',
-          subtype: 'success',
-          terminal_reason: 'completed',
-          user_message_uuids: [first?.uuid, notice?.uuid],
-        };
+        t.mock.timers.tick(5000);
+        await new Promise((resolve) => setImmediate(resolve));
+        const pending = input.next();
+        yield { type: 'result', subtype: 'success', user_message_uuids: [first?.uuid] };
+        assert.equal((await pending).done, true, 'only the primary input may enter the SDK');
       },
     }),
   });
-  const output = [];
-  for await (const item of service.invoke('develop', {
+  const legacyOptions = {
     activeInvocationFreshness: {
-      async prepare(boundary) {
-        if (pending) return null;
-        pending = true;
-        return {
-          noticeId: 'n',
-          frontier: 'm',
-          correlationMessageIds: ['m'],
-          expectedTurnId: boundary.turnId,
-          boundary,
-          text: 'content-free notice',
-          provider: 'anthropic',
-          carrier: 'claude_agent_sdk',
-          deliverySemantics: 'queued_internal_turn',
-        };
+      prepare: async () => {
+        calls.push('prepare');
+        throw new Error('retired');
       },
-      async commitDelivered() {
-        calls.push('delivered');
-      },
-      async markMissed() {
-        calls.push('missed');
-      },
-      async markTurnCompleted() {},
+      markTurnCompleted: async () => calls.push('completed'),
     },
-  }))
-    output.push(item);
-  assert.deepEqual(calls, ['delivered']);
+  };
+  const output = [];
+  for await (const item of service.invoke('develop', { ...legacyOptions })) output.push(item);
+  assert.deepEqual(calls, []);
+  assert.equal(output.filter((item) => item.type === 'done').length, 1);
 });
 
 test('carrier factory opts in explicitly and preserves default and unknown selection', async () => {

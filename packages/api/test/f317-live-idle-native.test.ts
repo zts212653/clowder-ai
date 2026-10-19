@@ -123,7 +123,7 @@ test(
             await client.request('turn/start', {
               threadId,
               input: [],
-              additionalContext: { test: { kind: 'application', value: 'F317_IDLE_NOTICE' } },
+              additionalContext: { test: { kind: 'application', value: 'F317_SOURCE_CONTEXT' } },
             });
           } catch (error) {
             rejection = error;
@@ -136,18 +136,18 @@ test(
           const idle = (await client.request('turn/start', {
             threadId,
             input: [],
-            turnTrigger: 'live_freshness',
-            additionalContext: { 'cat-cafe.live-freshness': { kind: 'application', value: 'F317_IDLE_NOTICE' } },
+            turnTrigger: 'live_context',
+            additionalContext: { 'cat-cafe.live-context': { kind: 'application', value: 'F317_SOURCE_CONTEXT' } },
           })) as { turn: { id: string } };
           assert.notEqual(idle.turn.id, first.turn.id);
           await terminal(idle.turn.id);
           assert.equal(requests.length, 2);
           const items = requests[1].input as Array<{ role?: string }>;
           assert.ok(
-            items.some((item) => item.role === 'developer' && JSON.stringify(item).includes('F317_IDLE_NOTICE')),
+            items.some((item) => item.role === 'developer' && JSON.stringify(item).includes('F317_SOURCE_CONTEXT')),
           );
           assert.equal(
-            items.some((item) => item.role === 'user' && JSON.stringify(item).includes('F317_IDLE_NOTICE')),
+            items.some((item) => item.role === 'user' && JSON.stringify(item).includes('F317_SOURCE_CONTEXT')),
             false,
           );
         },

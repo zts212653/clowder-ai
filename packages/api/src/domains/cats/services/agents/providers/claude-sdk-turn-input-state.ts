@@ -27,12 +27,6 @@ class AsyncInputQueue<T> implements AsyncIterable<T> {
     for (const waiter of this.waiters.splice(0)) waiter({ value: undefined, done: true });
   }
 
-  remove(predicate: (value: T) => boolean): void {
-    for (let i = this.values.length - 1; i >= 0; i--) {
-      if (predicate(this.values[i].value)) this.values.splice(i, 1);
-    }
-  }
-
   [Symbol.asyncIterator](): AsyncIterator<T> {
     return {
       next: () => {
@@ -137,17 +131,6 @@ export class ClaudeSdkTurnInputState {
   private activeDispatches = 0;
   private terminalWaitingForDispatch = false;
   private accepting = true;
-
-  // Content-free freshness is an auxiliary owner, not an accepted business
-  // input. It cannot keep a primary query open or settle a promised Append.
-  pushNotice(text: string, sessionId: string, uuid = randomUUID()): string | null {
-    if (!this.accepting) return null;
-    return this.queue.push(createSdkUserMessage(text, sessionId, uuid)) ? uuid : null;
-  }
-
-  withdrawNotice(uuid: string): void {
-    this.queue.remove((message) => message.uuid === uuid);
-  }
 
   constructor() {
     this.input = this.queue;

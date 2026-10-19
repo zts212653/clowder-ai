@@ -1,4 +1,3 @@
-import type { IdleFreshnessController } from '../../freshness/FreshnessNoticeBroker.js';
 import type {
   LiveProviderInputOutcome,
   PreparedProviderRequestV1,
@@ -10,7 +9,7 @@ import type { CodexLiveContextKind } from './CodexLiveRunPort.js';
 import { CodexAppServerRpcError } from './codex-app-server-rpc-error.js';
 
 export interface LiveProviderInput {
-  kind: 'text' | 'notice' | 'context';
+  kind: 'text' | 'context';
   text: string;
   sourceRef: string;
   sourceRefs?: readonly string[];
@@ -89,7 +88,6 @@ export class CodexLiveTurnInput {
     if (!this.deps.isOpen() || signal.aborted) throw new LiveContextCancelledError();
     if (
       ![
-        'inbox_notice',
         'meeting_context',
         'recovery_context',
         'page_action_result',
@@ -199,40 +197,6 @@ export class CodexLiveTurnInput {
       this.pending.delete(value);
     }
   }
-  async startIdle(threadId: string, idle: IdleFreshnessController): Promise<string | null> {
-    const notice = await idle.prepare();
-    if (!notice) return null;
-    let accepted: string | null = null;
-    let request: ProviderRequestGenerationCommitV1 | undefined;
-    try {
-      const recorded = await this.record({ kind: 'notice', text: notice.text, sourceRef: notice.noticeId });
-      request = recorded.request;
-      if (!this.deps.isOpen()) throw new Error('Live call ended');
-      const result = asCodexAppServerRecord(
-        await this.deps.request('turn/start', {
-          threadId,
-          input: [],
-          turnTrigger: 'live_freshness',
-          additionalContext: { 'cat-cafe.live-freshness': { kind: 'application', value: recorded.text } },
-        }),
-      );
-      const id = asCodexAppServerRecord(result?.turn)?.id;
-      if (typeof id !== 'string' || !id) throw new Error('Live idle acceptance identity unavailable');
-      accepted = id;
-      await this.settle(request, 'accepted', accepted);
-      await idle.commitDelivered(notice, { acceptedTurnId: accepted });
-    } catch (error) {
-      if (accepted) return accepted;
-      await this.settle(request, this.failureOutcome(error));
-      if (
-        !this.deps.isOpen() ||
-        (error instanceof CodexAppServerRpcError && /empty.*input|input.*empty/i.test(error.message))
-      )
-        idle.defer(notice);
-      else await idle.markMissed(notice, error instanceof CodexAppServerRpcError ? 'rpc_rejected' : 'transport_failed');
-    }
-    return accepted;
-  }
   close(): void {
     for (const request of this.pending) request.reject(new Error('Live call ended'));
     this.pending.clear();
@@ -276,7 +240,7 @@ export class CodexLiveTurnInput {
     return { text, ...(request ? { request } : {}) };
   }
   private verifiedApplicationText(input: LiveProviderInput, prepared: PreparedProviderRequestV1): string {
-    const decision = input.kind === 'notice' ? 'app_server_live_freshness_context' : 'app_server_live_context';
+    const decision = 'app_server_live_context';
     const application = prepared.nativeInstructions.find((item) => item.injectionDecision === decision);
     const expectedMessage = input.kind === 'context' ? LIVE_CONTEXT_TRIGGER : '';
     if (

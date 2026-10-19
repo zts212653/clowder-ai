@@ -3,7 +3,7 @@ import { catRegistry, createCompanionIdentitySnapshot } from '@cat-cafe/shared';
 import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
 import { isCatAvailable } from '../config/cat-config-loader.js';
-import type { InvocationQueue, QueueEntry } from '../domains/cats/services/agents/invocation/InvocationQueue.js';
+import type { InvocationQueue } from '../domains/cats/services/agents/invocation/InvocationQueue.js';
 import type { IMessageStore, StoredMessage } from '../domains/cats/services/stores/ports/MessageStore.js';
 import type { ISessionChainStore } from '../domains/cats/services/stores/ports/SessionChainStore.js';
 import type { IConciergeConfigStore } from '../domains/concierge/ConciergeConfigStore.js';
@@ -40,7 +40,6 @@ interface Options {
     'getQueuedBodyMessagesForCat' | 'getEntrySnapshot' | 'getDurableEntriesForMessages'
   >;
   recovery: Pick<LiveRecoveryOptions, 'tasks' | 'approvals' | 'epochs'>;
-  progressOwnedCarrier(entry: QueueEntry, catId: string): Promise<unknown>;
   mcpDistDir: string;
   /** Host-only readiness switch; the owner request schema never accepts it. Defaults off. */
   meetingToolsEnabled?: boolean;
@@ -203,18 +202,6 @@ export const conciergeLiveRoutes: FastifyPluginAsync<Options> = async (app, opti
               // An invocation ID alone cannot prove retained F296 context.
               retainsCurrentInvocationReads: () => false,
             }),
-          onSuccessorRequired: async (scope, references) => {
-            for (const reference of references) {
-              const entry = options.invocationQueue.getEntrySnapshot(
-                scope.threadId,
-                scope.userId,
-                reference.queueEntryId,
-              );
-              if (!entry || !entry.targets.includes(scope.catId) || entry.payload.messageId !== reference.messageId)
-                continue;
-              await options.progressOwnedCarrier(entry, scope.catId);
-            }
-          },
         },
         recovery: {
           ...options.recovery,

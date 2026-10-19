@@ -530,7 +530,7 @@ describe('F325 one-turn native AGY carrier', () => {
     }
   });
 
-  test('declares queued native freshness and delivers a content-free notice before the next turn', async () => {
+  test('native launch ignores retired freshness hooks and preserves the original input', async () => {
     const f = fixture();
     try {
       assert.deepEqual(f.service.freshnessCarrierCapability(), {
@@ -562,10 +562,10 @@ describe('F325 one-turn native AGY carrier', () => {
             },
           },
           spawnCliOverride: async function* (options) {
-            assert.equal(actions[0], 'prepare');
+            assert.deepEqual(actions, []);
             const text = JSON.parse(options.stdinInput).message.content[0].text;
             assert.match(text, /^Continue the task\./);
-            assert.match(text, /📬 One new message/);
+            assert.doesNotMatch(text, /📬 One new message/);
             assert.ok(!text.includes('SECRET-MESSAGE-BODY'));
             const agentName = options.args[options.args.indexOf('--agent') + 1];
             yield* fakeEvents(agentName, options.cwd, 'agy-freshness-1', 'I will read it.');
@@ -573,13 +573,13 @@ describe('F325 one-turn native AGY carrier', () => {
         }),
       );
       assert.equal(events.at(-1).errorCode, undefined);
-      assert.deepEqual(actions, ['prepare', ['commit', notice, { acceptedTurnId: 'agy-freshness-1' }]]);
+      assert.deepEqual(actions, []);
     } finally {
       f.cleanup();
     }
   });
 
-  test('defers a prepared freshness notice if AGY never accepts the turn', async () => {
+  test('native launch failure never invokes retired freshness cleanup', async () => {
     const f = fixture();
     try {
       const actions = [];
@@ -606,13 +606,13 @@ describe('F325 one-turn native AGY carrier', () => {
         }),
       );
       assert.equal(events.at(-1).errorCode, 'AGY_NATIVE_PREFLIGHT');
-      assert.deepEqual(actions, ['defer']);
+      assert.deepEqual(actions, []);
     } finally {
       f.cleanup();
     }
   });
 
-  test('defers a prepared freshness notice when the accepted turn is denied or fails upstream', async () => {
+  test('native denial and failure never invoke retired freshness cleanup', async () => {
     for (const outcome of ['denied', 'upstream-error']) {
       const f = fixture();
       try {
@@ -653,7 +653,7 @@ describe('F325 one-turn native AGY carrier', () => {
           }),
         );
         assert.equal(events.at(-1).errorCode, outcome === 'denied' ? 'AGY_PERMISSION_DENIED' : 'AGY_NATIVE_FAILED');
-        assert.deepEqual(actions, ['prepare', 'defer'], outcome);
+        assert.deepEqual(actions, [], outcome);
       } finally {
         f.cleanup();
       }

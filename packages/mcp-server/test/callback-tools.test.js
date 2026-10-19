@@ -627,46 +627,57 @@ describe('MCP Callback Tools', () => {
     assert.ok(result.content[0].text.includes('NOT delivered'));
   });
 
-  test('handleCrossPostMessage preserves pagination reason and gives executable target-thread catch-up', async () => {
-    const { handleCrossPostMessage } = await import('../dist/tools/callback-tools.js');
-
+  test('held routing mismatch reports unsent targets without freshness catch-up or a bypass', async () => {
+    const { handlePostMessage, handleCrossPostMessage } = await import('../dist/tools/callback-tools.js');
     globalThis.fetch = async () => ({
       ok: true,
       json: async () => ({
         status: 'held',
-        reason: 'newer_messages_available',
-        freshnessReason: 'pagination_limit_uncertain',
-        unseenCount: 0,
-        unseenCountKnown: false,
-        previews: [],
-        omittedCount: 0,
-        actions: ['read_latest', 'revise', 'send_with_acknowledge'],
-        catchUp: {
-          tool: 'cat_cafe_get_thread_context',
-          arguments: { threadId: 'thread-target', readIntent: 'unread', responseMode: 'full' },
-          continuation: { cursorArgument: 'cursor', cursorFrom: 'nextCursor', completeWhen: 'hasMore=false' },
-        },
+        reason: 'routing_mismatch',
+        declaredTargets: ['opus'],
+        parsedTargets: ['codex'],
+        unexpectedTargets: ['codex'],
+        actions: ['revise_content', 'expand_target_cats'],
       }),
     });
+    for (const send of [handlePostMessage, (input) => handleCrossPostMessage({ ...input, threadId: 'target' })]) {
+      const result = await send({ targetCats: ['opus'], content: '@codex\nDeliver only to the intended target' });
+      assert.equal(result.isError, true);
+      const text = result.content[0].text;
+      assert.match(text, /NOT sent/);
+      assert.match(text, /routing_mismatch/);
+      assert.match(text, /targetCats/);
+      assert.match(text, /codex/);
+      assert.match(text, /content/);
+      assert.doesNotMatch(text, /freshness|cat_cafe_get_thread_context|readIntent|acknowledgeHeld/i);
+    }
+  });
 
-    const result = await handleCrossPostMessage({
-      threadId: 'thread-target',
-      targetCats: ['codex'],
-      content: 'Recover this delivery',
-    });
-
-    assert.equal(result.isError, true);
-    const text = result.content[0].text;
-    assert.match(text, /pagination_limit_uncertain/);
-    assert.match(text, /unseen count is unknown/i);
-    assert.doesNotMatch(text, /You have 0 unseen message/);
-    assert.match(text, /cat_cafe_get_thread_context/);
-    assert.match(text, /thread-target/);
-    assert.match(text, /readIntent.*unread/);
-    assert.match(text, /responseMode.*full/);
-    assert.match(text, /nextCursor/);
-    assert.match(text, /hasMore=false/);
-    assert.match(text, /cat_cafe_cross_post_message.*acknowledgeHeld: true/s);
+  test('an unknown or obsolete held response remains unsent without reviving retired catch-up', async () => {
+    const { handleCrossPostMessage } = await import('../dist/tools/callback-tools.js');
+    for (const reason of ['newer_messages_available', 'unknown_policy']) {
+      globalThis.fetch = async () => ({
+        ok: true,
+        json: async () => ({
+          status: 'held',
+          reason,
+          unseenCount: 1,
+          catchUp: { tool: 'cat_cafe_get_thread_context', arguments: { readIntent: 'unread', responseMode: 'full' } },
+          actions: ['send_with_acknowledge'],
+        }),
+      });
+      const result = await handleCrossPostMessage({
+        threadId: 'target',
+        targetCats: ['codex'],
+        content: 'not accepted',
+      });
+      assert.equal(result.isError, true);
+      assert.match(result.content[0].text, new RegExp(reason));
+      assert.doesNotMatch(
+        result.content[0].text,
+        /cat_cafe_get_thread_context|readIntent|acknowledgeHeld|Freshness reason/i,
+      );
+    }
   });
 
   test('handlePostMessage treats normal success as success (not stale)', async () => {

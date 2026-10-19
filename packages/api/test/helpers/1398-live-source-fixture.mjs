@@ -9,14 +9,13 @@ import { InMemoryTurnExecutionStore } from '../../dist/domains/cats/services/sto
 import { DeliveryCursorStore } from '../../dist/domains/cats/services/stores/ports/DeliveryCursorStore.js';
 import { InvocationRecordStore } from '../../dist/domains/cats/services/stores/ports/InvocationRecordStore.js';
 import { MessageStore } from '../../dist/domains/cats/services/stores/ports/MessageStore.js';
-import { LiveInbox } from '../../dist/domains/concierge/live/inbox/LiveInbox.js';
 import { MessageLiveInboxSource } from '../../dist/domains/concierge/live/inbox/MessageLiveInboxSource.js';
 import { LiveCarrierOperationGate } from '../../dist/domains/concierge/live/LiveCarrierOperationGate.js';
 import { callbacksRoutes } from '../../dist/routes/callbacks.js';
 import { appendTestLifecycleResponseSource } from './message-from-fixtures.js';
 
 // Actual atomic Queue admission, callback auth, exact Live child and close gate.
-// Notifications contain references; only the real full-body callback delivers a target.
+// Only actual Queue dispatch or an explicit exact full read delivers a target.
 export async function createCanonicalLiveSourceFixture(intent, source = 'user', options = {}) {
   const queue = new InvocationQueue(options.ledgerStore);
   const store = options.messageStore ?? new MessageStore();
@@ -124,17 +123,7 @@ export async function createCanonicalLiveSourceFixture(intent, source = 'user', 
       options.withLiveCarrierOperation ?? ((query, consume) => gate.runForCarrier(query, consume)),
     socketManager,
   });
-  const deliveries = [];
   const inboxSource = new MessageLiveInboxSource({ store, queue, authorize: async () => true });
-  const inbox = new LiveInbox({
-    scope,
-    source: inboxSource,
-    wake() {},
-    deliver: async (batch) => {
-      deliveries.push(batch);
-      return 'accepted';
-    },
-  });
   const read = (query = '') =>
     app.inject({
       method: 'GET',
@@ -142,7 +131,6 @@ export async function createCanonicalLiveSourceFixture(intent, source = 'user', 
       headers: { 'x-invocation-id': auth.invocationId, 'x-callback-token': auth.callbackToken },
     });
   async function close() {
-    inbox.close();
     gate.close();
     await gate.drain();
     await app.close();
@@ -160,9 +148,7 @@ export async function createCanonicalLiveSourceFixture(intent, source = 'user', 
     response,
     message: admitted.message,
     entry: admitted.entry,
-    inbox,
     inboxSource,
-    deliveries,
     read,
     scope,
     cursorStore,

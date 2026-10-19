@@ -21,71 +21,72 @@ after(async () => {
 });
 
 for (const live of [true, false]) {
-  test(`freshness uses ${live ? 'the Live child credential' : 'the ordinary parent execution'} identity`, async () => {
-    let bound;
-    let capabilityOptions;
-    let active = true;
-    const capability = {
-      provider: 'openai_codex',
-      carrier: 'codex_app_server',
-      deliverySemantics: 'exact_active_turn',
-    };
-    const port = {
-      finished: Promise.resolve(),
-      acceptsFreshness: () => active,
-      isActiveCarrier: (query) =>
-        query.invocationId === 'child' && query.threadId === 'home' && query.catId === 'codex',
-    };
-    const service = {
-      freshnessCarrierCapability: (options) => {
-        capabilityOptions = options;
-        return capability;
-      },
-      async *invoke() {
-        yield { type: 'done', catId: 'codex', timestamp: Date.now() };
-      },
-    };
-    for await (const _message of invokeSingleCat(
-      {
-        registry: {
-          create: async () => ({ invocationId: 'child', callbackToken: 'child-token' }),
-          verify: async () => ({ ok: false }),
+  test(
+    live ? 'Live calls do not create a freshness consumer' : 'ordinary A2A does not create a freshness consumer',
+    async () => {
+      let bound;
+      let capabilityOptions;
+      const capability = {
+        provider: 'openai_codex',
+        carrier: 'codex_app_server',
+        deliverySemantics: 'exact_active_turn',
+      };
+      const port = {
+        finished: Promise.resolve(),
+        acceptsFreshness: () => true,
+        isActiveCarrier: (query) =>
+          query.invocationId === 'child' && query.threadId === 'home' && query.catId === 'codex',
+      };
+      const service = {
+        freshnessCarrierCapability: (options) => {
+          capabilityOptions = options;
+          return capability;
         },
-        sessionManager: {
-          get: async () => undefined,
-          getOrCreate: async () => ({}),
-          store: async () => {},
-          delete: async () => {},
-          resolveWorkingDirectory: () => directory,
+        async *invoke(_prompt, options) {
+          assert.equal(
+            options.activeInvocationFreshness,
+            undefined,
+            'ordinary tools and idle turns have no notice controller',
+          );
+          yield { type: 'done', catId: 'codex', timestamp: Date.now() };
         },
-        threadStore: null,
-        apiUrl: 'http://127.0.0.1:3512',
-        providerNativeFreshnessFactory: async (input) => {
-          bound = input;
-          return null;
+      };
+      for await (const _message of invokeSingleCat(
+        {
+          registry: {
+            create: async () => ({ invocationId: 'child', callbackToken: 'child-token' }),
+            verify: async () => ({ ok: false }),
+          },
+          sessionManager: {
+            get: async () => undefined,
+            getOrCreate: async () => ({}),
+            store: async () => {},
+            delete: async () => {},
+            resolveWorkingDirectory: () => directory,
+          },
+          threadStore: null,
+          apiUrl: 'http://127.0.0.1:3512',
+          providerNativeFreshnessFactory: async (input) => {
+            bound = input;
+            return null;
+          },
         },
-      },
-      {
-        catId: 'codex',
-        service,
-        prompt: 'read-only synthetic fixture',
-        userId: 'owner',
-        threadId: 'home',
-        parentInvocationId: 'parent',
-        isLastCat: true,
-        ...(live ? { liveCompanion: port } : {}),
-      },
-    )) {
-    }
-    assert.ok(bound, 'the ordinary invocation must create its freshness consumer');
-    assert.equal(bound.invocationId, live ? 'child' : 'parent');
-    if (live) {
-      assert.equal(capabilityOptions.liveCompanion, port);
-      assert.equal(bound.liveResultConsumerActive(), true, 'a distinct parent must not mute the actual Live child');
-      active = false;
-      assert.equal(bound.liveResultConsumerActive(), false, 'revoking Live access still silences the consumer');
-    } else assert.equal(bound.liveResultConsumerActive, undefined);
-  });
+        {
+          catId: 'codex',
+          service,
+          prompt: 'read-only synthetic fixture',
+          userId: 'owner',
+          threadId: 'home',
+          parentInvocationId: 'parent',
+          isLastCat: true,
+          ...(live ? { liveCompanion: port } : {}),
+        },
+      )) {
+      }
+      assert.equal(bound, undefined, 'neither ordinary A2A nor Live may install a freshness consumer');
+      if (live) assert.equal(capabilityOptions.liveCompanion, port);
+    },
+  );
 }
 
 test('Live declares the app-server carrier it actually uses even when ordinary text uses exec', () => {

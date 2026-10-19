@@ -27,6 +27,8 @@ mcp_admission_claims:
 
 # F317: Coactive Companion — 猫猫走进共同生活现场
 
+**A2A 通知退役（#1615）**：Live 与普通文字共用 #1398 的实际 Queue／Steer 投递，不再装配 native freshness、idle 未读扫描或 `LiveInboxHost` 内容空白提醒。新结果直接按原消息身份投递，不靠通知模型去读全线程；恢复读取面保留其只读 source 引用，不取得投递或完成的第二本账。
+
 > **Status**: in-progress | **Owner**: 小星星·Maine Coon（@codex-astra / gpt-6-astra） | **Priority**: P1
 
 Owner thread：`[thread-id]`；总任务沿用 `private-source-id`（按 `relatedFeatureId=F317` 查询）。正式安装入口与 Host 媒体边界已随 #4611 合入；第一批真实资料、非 GPT 深思及完整组合体验仍未验收，Phase/AC 不因工程合入提前关闭。workflow 沿用原记录；原任务属于源线程，未重复建任务。

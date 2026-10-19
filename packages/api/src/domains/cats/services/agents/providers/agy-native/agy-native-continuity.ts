@@ -8,7 +8,6 @@ export function createAgyNativeContinuityInput(
   launch: AgyNativeLaunchPlan,
   preflight: ProviderContinuityPreflight,
   options?: AgentServiceOptions,
-  freshnessNotice?: string,
 ) {
   let writer: ((input: string) => void) | undefined;
   let settled = false;
@@ -26,9 +25,8 @@ export function createAgyNativeContinuityInput(
         compactions: [],
       });
       options?.signal?.throwIfAborted();
-      const prompt = freshnessNotice ? `${generation.prompt}\n\n${freshnessNotice}` : generation.prompt;
       const input = prepareAgyNativeInput(
-        prompt,
+        generation.prompt,
         options?.contentBlocks,
         launch.binding.workspaceRoot,
         options?.uploadDir,

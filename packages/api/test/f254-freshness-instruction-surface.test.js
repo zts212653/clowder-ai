@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 
 const apiRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const sourceRoot = resolve(apiRoot, 'src');
+const mcpSourceRoot = resolve(apiRoot, '../mcp-server/src');
 const stagingContentPath = resolve(apiRoot, '../../cat-cafe-skills/refs/l0-staging-content.md');
 
 function sourceFiles(directory) {
@@ -17,6 +18,25 @@ function sourceFiles(directory) {
 }
 
 describe('F254 freshness instruction source contract', () => {
+  it('retires the notification owner and every runtime unread-notice prompt, including Live', () => {
+    for (const relativePath of [
+      'domains/cats/services/freshness/FreshnessNoticeBroker.ts',
+      'domains/cats/services/freshness/ThreadUnseenChecker.ts',
+      'domains/cats/services/freshness/createProviderNativeFreshnessFactory.ts',
+      'domains/cats/services/agents/providers/claude-sdk-input.ts',
+      'domains/concierge/live/host/live-inbox-host.ts',
+      'domains/concierge/live/inbox/LiveInbox.ts',
+    ])
+      assert.equal(existsSync(resolve(sourceRoot, relativePath)), false, relativePath);
+    for (const path of [...sourceFiles(sourceRoot), ...sourceFiles(mcpSourceRoot)]) {
+      assert.doesNotMatch(
+        readFileSync(path, 'utf8'),
+        /📬 freshness notice|freshnessController|activeInvocationFreshness|Freshness reason:|acknowledgeHeld|catchUpCall|收到来信提示/,
+        path,
+      );
+    }
+  });
+
   it('never directs current-thread unread handling to the project-memory list_recent surface', () => {
     const violations = [];
     const promptMarkers = /未读消息|新消息|查看并回应|freshness notice/i;
@@ -37,22 +57,8 @@ describe('F254 freshness instruction source contract', () => {
     assert.deepEqual(violations, [], 'freshness prompts must use a full, contiguous cat_cafe_get_thread_context read');
   });
 
-  it('every freshness read instruction selects unread independently from the full projection', () => {
-    const paths = [
-      'domains/cats/services/freshness/FreshnessNoticeBroker.ts',
-      'domains/concierge/conversation-duty.ts',
-    ];
-    for (const path of paths) {
-      const instructions = readFileSync(resolve(sourceRoot, path), 'utf8')
-        .split('\n')
-        .filter((line) => line.includes('get_thread_context') && line.includes('responseMode'));
-      assert.ok(instructions.length > 0, path);
-      for (const instruction of instructions) assert.match(instruction, /readIntent(?:: |=)"unread"/, path);
-    }
-  });
-
   it(
-    'home staging freshness instructions select unread independently from the full projection',
+    'private L0 staging does not restore a retired freshness notice handling rule',
     {
       skip:
         !existsSync(resolve(apiRoot, '../../sync-manifest.yaml')) &&
@@ -61,8 +67,7 @@ describe('F254 freshness instruction source contract', () => {
     },
     () => {
       const staging = readFileSync(stagingContentPath, 'utf8');
-      const instruction = staging.split('\n').find((line) => line.includes('**Freshness notice 处理**'));
-      assert.match(instruction, /readIntent: "unread"/);
+      assert.doesNotMatch(staging, /\*\*Freshness notice 处理\*\*|收到来信提示/);
     },
   );
 });

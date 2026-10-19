@@ -144,3 +144,11 @@ for (const householdToolsEnabled of [true, false]) {
     }
   });
 }
+
+for (const tools of [true, false]) {
+  test(`Live fast/deep prompts have no notice-to-catch-up protocol (tools=${tools})`, () => {
+    for (const prompt of [dutyText(tools), liveRealtimePrompt({ catId: 'codex', householdToolsEnabled: tools })]) {
+      assert.doesNotMatch(prompt, /收到来信提示|freshness notice|acknowledgeHeld|readIntent.*unread/i);
+    }
+  });
+}

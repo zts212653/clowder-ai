@@ -3,7 +3,7 @@ import type { CodexAppServerJsonObject } from '../../cats/services/agents/provid
 import type { IMessageStore, StoredMessage } from '../../cats/services/stores/ports/MessageStore.js';
 import type { LivePageActionApprovalLedger } from './host/page-action/live-page-action-approval-ledger.js';
 import type { LivePageActionAuthorityDeps } from './host/page-action/live-page-action-authority.js';
-import type { LiveInboxReference, LiveInboxScope, LiveInboxSource } from './inbox/live-inbox-contract.js';
+import type { LiveInboxScope, LiveInboxSource } from './inbox/live-inbox-contract.js';
 import type { LiveCompanionSelection } from './live-companion-selection.js';
 import type { LiveTranscriptBinding } from './live-transcript.js';
 import type { LiveRecoveryOptions } from './recovery/live-recovery-contract.js';
@@ -37,7 +37,6 @@ export interface LiveCompanionCallOptions {
       authorize: (scope: LiveInboxScope) => Promise<boolean>,
       isSameCallExposure: (message: StoredMessage) => boolean,
     ): LiveInboxSource;
-    onSuccessorRequired(scope: LiveInboxScope, references: readonly LiveInboxReference[]): Promise<void>;
   };
   /** Canonical read ports; the Host supplies the call and current-thread authority. */
   recovery?: Omit<LiveRecoveryOptions, 'inbox'>;
