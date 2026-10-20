@@ -1,5 +1,16 @@
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import { HOOK_LOAD_CONTRACTS } from './hook-load-contracts.js';
+import {
+  MANAGED_EVENT_SCRIPTS,
+  type ManagedHookCommands,
+  type ManagedHookEvent,
+  type ManagedHookScope,
+  managedHookFileHealth,
+  mergeManagedHooks,
+  readHookDocument,
+  renderManagedHooksDocument,
+} from './managed-hook-entries.js';
 
 export type SyncTargetContentKind = 'text' | 'json';
 
@@ -9,6 +20,18 @@ export interface SyncTarget {
   targetPath: string;
   contentKind?: SyncTargetContentKind;
   executable?: boolean;
+  /**
+   * Set for hook configs shared with users and other tools: an existing file is merged so that
+   * only Clowder-managed entries change, never rewritten wholesale (#1566).
+   */
+  managedHooks?: ManagedHookScope;
+}
+
+export interface SyncOutcome {
+  name: string;
+  targetPath: string;
+  action: 'written' | 'unchanged' | 'refused' | 'dry-run';
+  reason?: string;
 }
 
 export interface DriftResult {
@@ -63,6 +86,12 @@ export function checkDrift(target: SyncTarget): DriftResult {
     };
   }
 
+  if (target.managedHooks) {
+    const health = managedHookFileHealth(target.name, target.targetPath, target.managedHooks);
+    const drifted = health.status !== 'configured';
+    return { name: target.name, drifted, targetPath: target.targetPath, reason: drifted ? health.reason : undefined };
+  }
+
   const current = readFileSync(target.targetPath, 'utf-8');
   const drifted = !contentMatches(target, current, rendered);
 
@@ -74,13 +103,43 @@ export function checkDrift(target: SyncTarget): DriftResult {
   };
 }
 
-export function applySync(target: SyncTarget, dryRun: boolean): void {
+function mergeSync(target: SyncTarget, scope: ManagedHookScope, dryRun: boolean): SyncOutcome {
+  const outcome = (action: SyncOutcome['action'], reason?: string): SyncOutcome => ({
+    name: target.name,
+    targetPath: target.targetPath,
+    action,
+    ...(reason ? { reason } : {}),
+  });
+  const read = readHookDocument(target.targetPath);
+  const result = read.ok
+    ? mergeManagedHooks(read.source, { ...scope, removeDuplicates: false })
+    : ({ kind: 'refused', reason: read.reason } as const);
+  if (result.kind === 'refused') {
+    console.warn(`skipped ${target.name}: ${result.reason} (${target.targetPath} left unchanged)`);
+    return outcome('refused', result.reason);
+  }
+  if (result.kind === 'unchanged') return outcome('unchanged');
+
+  const merged = result.text;
+  if (dryRun) {
+    console.log(`\n=== ${target.name} -> ${target.targetPath} (dry-run merge) ===\n`);
+    console.log(merged);
+    return outcome('dry-run');
+  }
+  // writeFileSync follows symlinks, so dotfile-managed links stay links.
+  writeFileSync(target.targetPath, merged, 'utf-8');
+  console.log(`merged ${target.name} -> ${target.targetPath}`);
+  return outcome('written');
+}
+
+export function applySync(target: SyncTarget, dryRun: boolean): SyncOutcome {
+  if (target.managedHooks && existsSync(target.targetPath)) return mergeSync(target, target.managedHooks, dryRun);
   const rendered = target.render();
 
   if (dryRun) {
     console.log(`\n=== ${target.name} -> ${target.targetPath} (dry-run) ===\n`);
     console.log(rendered);
-    return;
+    return { name: target.name, targetPath: target.targetPath, action: 'dry-run' };
   }
 
   const dir = dirname(target.targetPath);
@@ -93,6 +152,7 @@ export function applySync(target: SyncTarget, dryRun: boolean): void {
     chmodSync(target.targetPath, 0o755);
   }
   console.log(`synced ${target.name} -> ${target.targetPath}`);
+  return { name: target.name, targetPath: target.targetPath, action: 'written' };
 }
 
 function readUserHook(projectRoot: string, name: string): string {
@@ -108,60 +168,23 @@ function codexStopCommand(scriptPath: string): string {
   return `${bashCommand(scriptPath)} --codex-json`;
 }
 
-export function renderCodexHooksJson(targetRoot: string): string {
-  const config = {
-    hooks: {
-      SessionStart: [
-        {
-          hooks: [
-            {
-              type: 'command',
-              command: bashCommand(join(targetRoot, '.claude', 'hooks', 'session-start-recall.sh')),
-            },
-          ],
-        },
-      ],
-      Stop: [
-        {
-          hooks: [
-            {
-              type: 'command',
-              command: codexStopCommand(join(targetRoot, '.claude', 'hooks', 'session-stop-check.sh')),
-            },
-          ],
-        },
-      ],
-    },
+export type ManagedHookConsumer = 'claude' | 'codex' | 'gemini';
+
+/** The exact commands Clowder renders for each consumer of the shared hook scripts. */
+export function managedHookCommands(consumer: ManagedHookConsumer, targetRoot: string): ManagedHookCommands {
+  const script = (event: ManagedHookEvent) => join(targetRoot, '.claude', 'hooks', MANAGED_EVENT_SCRIPTS[event]);
+  return {
+    SessionStart: bashCommand(script('SessionStart')),
+    Stop: consumer === 'codex' ? codexStopCommand(script('Stop')) : bashCommand(script('Stop')),
   };
-  return JSON.stringify(config, null, 2) + '\n';
+}
+
+export function renderCodexHooksJson(targetRoot: string): string {
+  return renderManagedHooksDocument(managedHookCommands('codex', targetRoot));
 }
 
 export function renderGeminiHooksJson(targetRoot: string): string {
-  const config = {
-    hooks: {
-      SessionStart: [
-        {
-          hooks: [
-            {
-              type: 'command',
-              command: bashCommand(join(targetRoot, '.claude', 'hooks', 'session-start-recall.sh')),
-            },
-          ],
-        },
-      ],
-      Stop: [
-        {
-          hooks: [
-            {
-              type: 'command',
-              command: bashCommand(join(targetRoot, '.claude', 'hooks', 'session-stop-check.sh')),
-            },
-          ],
-        },
-      ],
-    },
-  };
-  return JSON.stringify(config, null, 2) + '\n';
+  return renderManagedHooksDocument(managedHookCommands('gemini', targetRoot));
 }
 
 export function buildAgentHookTargets({ projectRoot, targetRoot }: BuildAgentHookTargetsOptions): SyncTarget[] {
@@ -183,12 +206,22 @@ export function buildAgentHookTargets({ projectRoot, targetRoot }: BuildAgentHoo
       render: () => renderCodexHooksJson(targetRoot),
       targetPath: join(targetRoot, '.codex', 'hooks.json'),
       contentKind: 'json',
+      managedHooks: {
+        targetRoot,
+        commands: managedHookCommands('codex', targetRoot),
+        contract: HOOK_LOAD_CONTRACTS.codex,
+      },
     },
     {
       name: 'gemini-hooks',
       render: () => renderGeminiHooksJson(targetRoot),
       targetPath: join(targetRoot, '.gemini', 'hooks.json'),
       contentKind: 'json',
+      managedHooks: {
+        targetRoot,
+        commands: managedHookCommands('gemini', targetRoot),
+        contract: HOOK_LOAD_CONTRACTS.gemini,
+      },
     },
   ];
 }

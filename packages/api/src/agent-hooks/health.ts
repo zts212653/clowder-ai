@@ -7,6 +7,7 @@ import { computeSkillDrift } from '../routes/skills-drift.js';
 import { syncDrift } from '../skills/drift-resolver.js';
 import { resolveStartupProjectRoot } from '../utils/startup-root.js';
 import { claudeSettingsHealth, syncClaudeSettings } from './claude-settings.js';
+import { managedHookFileHealth } from './managed-hook-entries.js';
 import {
   applySync,
   buildAgentHookTargets,
@@ -68,8 +69,6 @@ function resolveCapabilityTruth(projectRoot: string): CapabilityTruth {
   return { root: resolveStartupProjectRoot() };
 }
 
-type JsonObject = Record<string, unknown>;
-
 function buildSelectedAgentHookTargets(options: AgentHookOptions): SyncTarget[] {
   return selectAgentHookTargets(buildAgentHookTargets(options));
 }
@@ -117,46 +116,8 @@ function buildTextDiff(current: string, rendered: string): AgentHookDiffSummary 
   return { kind: 'text', message: 'content differs' };
 }
 
-function flattenJson(value: unknown, prefix = ''): Map<string, string> {
-  const result = new Map<string, string>();
-  if (Array.isArray(value)) {
-    value.forEach((item, index) => {
-      for (const [key, nested] of flattenJson(item, `${prefix}[${index}]`)) result.set(key, nested);
-    });
-    return result;
-  }
-  if (value && typeof value === 'object') {
-    for (const [key, nested] of Object.entries(value as JsonObject)) {
-      const nextPrefix = prefix ? `${prefix}.${key}` : key;
-      for (const [nestedKey, nestedValue] of flattenJson(nested, nextPrefix)) result.set(nestedKey, nestedValue);
-    }
-    return result;
-  }
-  result.set(prefix === '' ? '<root>' : prefix, JSON.stringify(value));
-  return result;
-}
-
-function buildJsonDiff(current: string, rendered: string): AgentHookDiffSummary {
-  try {
-    const currentFlat = flattenJson(JSON.parse(current));
-    const renderedFlat = flattenJson(JSON.parse(rendered));
-    const keys = new Set([...currentFlat.keys(), ...renderedFlat.keys()]);
-    const fields = [...keys].filter((key) => currentFlat.get(key) !== renderedFlat.get(key)).slice(0, 8);
-    return {
-      kind: 'json',
-      fields,
-      message: fields.length > 0 ? `changed fields: ${fields.join(', ')}` : 'json content differs',
-    };
-  } catch {
-    return { kind: 'json', message: 'json parse failed while building diff' };
-  }
-}
-
 function buildDiff(target: SyncTarget): AgentHookDiffSummary | undefined {
-  const current = readFileSync(target.targetPath, 'utf-8');
-  const rendered = target.render();
-  if (target.contentKind === 'json') return buildJsonDiff(current, rendered);
-  return buildTextDiff(current, rendered);
+  return buildTextDiff(readFileSync(target.targetPath, 'utf-8'), target.render());
 }
 
 function buildMissingDiff(target: SyncTarget): AgentHookDiffSummary {
@@ -178,6 +139,9 @@ function targetHealth(target: SyncTarget): HealthResult {
       };
     }
 
+    if (target.managedHooks && existsSync(target.targetPath)) {
+      return managedHookFileHealth(target.name, target.targetPath, target.managedHooks);
+    }
     const drift = checkDrift(target);
     const status = mapDriftResult(drift);
     return {
