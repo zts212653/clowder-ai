@@ -57,7 +57,7 @@ test('reads the exact owner publication and keeps complete result sets bound to 
   assert.equal(counts().writes, 0);
 });
 
-test('rejects owner data from another Program, node, window or measurement and cyclic lineage', async () => {
+test('rejects invalid known Program, identity, window, measurement and lineage fields', async () => {
   const { explorationFixture, experimentRef, source, nodeRef } = await import(
     './capability-evolution-exploration.helper.mjs'
   );
@@ -85,9 +85,6 @@ test('rejects owner data from another Program, node, window or measurement and c
     },
     (value) => {
       value.nodes[0].kind = 'public_archive';
-    },
-    (value) => {
-      value.currentVersionRefs = [source('forged-adoption')];
     },
     (value) => {
       value.nodes[0].preview = {
@@ -119,6 +116,22 @@ test('rejects owner data from another Program, node, window or measurement and c
     assert.equal(response.statusCode, 422, response.body);
     assert.equal(counts().writes, 0);
   }
+});
+
+test('strips unknown owner response extensions without granting authority or writing state', async () => {
+  const { explorationFixture, experimentRef, source } = await import('./capability-evolution-exploration.helper.mjs');
+  const value = explorationFixture({ withDetail: true });
+  value.currentVersionRefs = [source('forged-adoption')];
+  const { app, adapter, counts } = await fixture();
+  adapter.explorationReview = async () => value;
+
+  const response = await app.inject({
+    url: `${url}?selectedExperimentRef=${encodeURIComponent(JSON.stringify(experimentRef))}`,
+  });
+
+  assert.equal(response.statusCode, 200, response.body);
+  assert.equal('currentVersionRefs' in response.json(), false);
+  assert.deepEqual(counts(), { reads: 1, writes: 0 });
 });
 
 test('does not consume a valid response for a different selection or caller-supplied authority', async () => {

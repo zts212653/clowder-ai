@@ -41,6 +41,17 @@ const MICRODUCK_CORTEX_RUNTIME_ASSETS = [
 ];
 const F314_ARCHIVE_ROOT = 'docs/discussions/f314-incident-archive';
 const F314_LINEAGE_INDEX = `${F314_ARCHIVE_ROOT}/lineage/lineage-index.json`;
+const F314_CONTRACT_FIXTURE = 'packages/shared/src/__tests__/fixtures/f314-history-publication-contract.json';
+const F314_EXPORTED_TEST_CONSUMERS = [
+  'packages/api/test/capability-evolution-harness-story.test.ts',
+  'packages/api/test/f314-history-publication-source.test.ts',
+  'packages/api/test/f314-history-publication-owner.test.ts',
+  'packages/api/test/f314-history-publication-reader.test.ts',
+  'packages/api/test/f314-history-publication-redis-routes.test.ts',
+  'packages/web/src/components/capability-evolution/__tests__/evolution-history-publication.test.tsx',
+  'packages/web/test/browser/f311-history-entry.journey.mjs',
+  'packages/web/test/browser/f311-v2-closure.journey.mjs',
+];
 const MICRODUCK_RUNTIME_SOURCE_FILES = [
   'packages/api/src/infrastructure/capability-evolution/adapters/microduck-local-owner-evidence.ts',
   'packages/api/src/infrastructure/capability-evolution/adapters/microduck-preparation/publication.ts',
@@ -174,7 +185,7 @@ describe('F311 Microduck runtime asset boundary', () => {
     }
   });
 
-  it('exports only the F314 owner-reviewed lineage index while source links stay commit-pinned', () => {
+  it('keeps F314 house history private while all exported tests use the public contract fixture', () => {
     const projection =
       'packages/api/src/infrastructure/capability-evolution/adapters/request-review/request-review-harness-lineage.ts';
     assert.deepEqual(
@@ -182,9 +193,24 @@ describe('F311 Microduck runtime asset boundary', () => {
       [F314_ARCHIVE_ROOT],
     );
     assert.equal(isIgnored(F314_ARCHIVE_ROOT), true);
-    assert.equal(isIgnored(F314_LINEAGE_INDEX), false);
-    assert.equal(isCoveredBySync(F314_LINEAGE_INDEX, loadSyncCoveragePaths(REPO_ROOT)), true);
+    assert.equal(isIgnored(F314_LINEAGE_INDEX), true);
+    assert.equal(isCoveredBySync(F314_LINEAGE_INDEX, loadSyncCoveragePaths(REPO_ROOT)), false);
     assert.equal(isCoveredBySync(`${F314_ARCHIVE_ROOT}/cases/private.md`, loadSyncCoveragePaths(REPO_ROOT)), false);
+    assert.equal(isCoveredByPublicExport(F314_CONTRACT_FIXTURE, loadPublicExportCoverage(REPO_ROOT)), true);
+
+    const fixture = readFileSync(resolve(REPO_ROOT, F314_CONTRACT_FIXTURE), 'utf8');
+    assert.doesNotMatch(fixture, /docs\/discussions\/f314-incident-archive/);
+    for (const consumer of F314_EXPORTED_TEST_CONSUMERS) {
+      const source = readFileSync(resolve(REPO_ROOT, consumer), 'utf8');
+      assert.match(source, /f314-history-publication-contract\.json/, `${consumer} must use the public fixture`);
+      assert.doesNotMatch(source, /docs\/discussions\/f314-incident-archive\/lineage\/lineage-index\.json/);
+    }
+    const defaultBrowserEntry = readFileSync(
+      resolve(REPO_ROOT, 'packages/web/test/browser/f311-exploration-workspace.test.mjs'),
+      'utf8',
+    );
+    assert.match(defaultBrowserEntry, /verifyHistoryEntryJourney/);
+    assert.match(defaultBrowserEntry, /verifyV2ClosureJourney/);
   });
 });
 

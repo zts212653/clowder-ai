@@ -14,7 +14,7 @@ export function f314HistoryV3Fixture(archive: Record<string, unknown>) {
         {
           id: 'journey',
           label: '真实输入验收修订',
-          path: 'docs/discussions/f314-incident-archive/cases/2026-10-07-f232-plan-only-shadow-replay.md',
+          path: 'docs/VISION.md',
         },
       ],
       steps: [

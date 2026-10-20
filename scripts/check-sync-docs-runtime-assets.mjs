@@ -90,10 +90,11 @@ export const IGNORE_PATHS = [
       'Keeping this exception exact prevents the remaining raw trajectories, events, clips and calibration captures from leaking.',
   },
   {
-    exact: 'docs/discussions/f314-incident-archive',
+    pathOrPrefix: 'docs/discussions/f314-incident-archive',
     reason:
-      'F311 exploration uses this literal only to build commit-pinned source links. The sole runtime read is the ' +
-      'owner-reviewed lineage-index.json, which is individually covered by the runtime allowlist; internal discussion files stay private.',
+      'F311 exploration builds commit-pinned source links and optionally reads this installation-owned house archive. ' +
+      'The public product returns owner_historical_index_unavailable when it is absent; exported tests use the synthetic ' +
+      'contract fixture under packages/shared, so no private lineage index or case file belongs in the sync allowlist.',
   },
   {
     pathOrPrefix: 'docs/markers',

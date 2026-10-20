@@ -169,7 +169,9 @@ it.each([
   'Inbox',
 ] as const)('shows the original repair content and submits through its original %s writer', async (entrance) => {
   await render(entrance);
-  const cost = Array.from(container.querySelectorAll('p')).find((e) => e.textContent === item.detail.costAndRollback);
+  const cost = Array.from(container.querySelectorAll('p, dd')).find(
+    (element) => element.textContent === item.detail.costAndRollback,
+  );
   expect(cost).not.toBeUndefined();
   expect(cost?.closest('details')).toBeNull();
   expect(container.textContent).toContain('Withdraw if the exact target changes');
@@ -183,6 +185,60 @@ it.each([
       .mock.calls.filter(([, init]) => init?.method === 'POST')
       .map(([path]) => path),
   ).toEqual(['/api/eval-repair-proposals/eval-repair-original/approve']);
+});
+it('keeps the owner-backed decision boundary on the original Inbox card', async () => {
+  item = {
+    ...item,
+    detail: {
+      ...item.detail,
+      decisionExplanation: {
+        schemaVersion: 1,
+        expectedChange: 'Repair the original evidence reader',
+        beforeSummary: 'The next review had no exact source.',
+        afterSummary: 'The next review shows its exact source.',
+        changeSetSummary: 'Source receipt, reading entry and recovery ship together.',
+        attributionBoundary: 'This proves one exact use, not whole-program improvement.',
+        independentVerification: 'A non-author replays the full owner journey.',
+        rejectedCandidates: ['Infer the version from prose', 'Treat opening as adoption'],
+        costAndRollback: 'One review; revert this change',
+      },
+    },
+  };
+  await render('Inbox');
+  const explanation = container.querySelector('[data-testid="eval-repair-decision-explanation"]');
+  expect(explanation).not.toBeNull();
+  for (const value of [
+    'The next review had no exact source.',
+    'The next review shows its exact source.',
+    'This proves one exact use, not whole-program improvement.',
+    'A non-author replays the full owner journey.',
+    'Infer the version from prose',
+  ])
+    expect(explanation?.textContent).toContain(value);
+});
+it('keeps a complete legacy flat decision boundary readable on the original Inbox card', async () => {
+  item = {
+    ...item,
+    detail: {
+      ...item.detail,
+      beforeSummary: 'Legacy before',
+      afterSummary: 'Legacy after',
+      changeSetSummary: 'Legacy change set',
+      attributionBoundary: 'Legacy attribution boundary',
+      independentVerification: 'Legacy independent verification',
+      rejectedCandidates: ['Legacy rejected alternative'],
+    },
+  };
+  await render('Inbox');
+  const explanation = container.querySelector('[data-testid="eval-repair-decision-explanation"]');
+  for (const value of [
+    'Legacy before',
+    'Legacy after',
+    'Legacy attribution boundary',
+    'Legacy independent verification',
+    'Legacy rejected alternative',
+  ])
+    expect(explanation?.textContent).toContain(value);
 });
 it('keeps a canonical cold result on the original Chat card without allowing another decision', async () => {
   phase = 'accepted';

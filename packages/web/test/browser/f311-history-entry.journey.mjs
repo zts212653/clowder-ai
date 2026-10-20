@@ -203,23 +203,11 @@ export async function verifyHistoryEntryJourney({ fixture, browser, capture }) {
   const projection = structuredClone(snapshot);
   const rawIndex = JSON.parse(
     await readFile(
-      new URL('../../../../docs/discussions/f314-incident-archive/lineage/lineage-index.json', import.meta.url),
+      new URL('../../../shared/src/__tests__/fixtures/f314-history-publication-contract.json', import.meta.url),
       'utf8',
     ),
   );
-  const authoredStory = JSON.parse(
-    await readFile(
-      new URL('../../../../docs/discussions/f314-incident-archive/lineage/evolution-story.json', import.meta.url),
-      'utf8',
-    ),
-  );
-  rawIndex.story = {
-    updated: authoredStory.updated,
-    ...(authoredStory.overview ? { overview: authoredStory.overview } : {}),
-    sources: authoredStory.sources,
-    nodes: authoredStory.nodes,
-    cases: authoredStory.cases,
-  };
+  const authoredStory = structuredClone(rawIndex.story);
   assert.equal(rawIndex.story.nodes.length, 12, 'the reader fixture must consume all authored steps');
   assert.equal(rawIndex.story.cases.length, 27, 'the reader fixture must consume all authored cases');
   assert.equal(

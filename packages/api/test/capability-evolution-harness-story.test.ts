@@ -7,7 +7,7 @@ import { f314HistoryV3Fixture } from './helpers/f314-history-v3-fixture.js';
 
 const archive = JSON.parse(
   readFileSync(
-    new URL('../../../docs/discussions/f314-incident-archive/lineage/lineage-index.json', import.meta.url),
+    new URL('../../shared/src/__tests__/fixtures/f314-history-publication-contract.json', import.meta.url),
     'utf8',
   ),
 );
@@ -20,7 +20,7 @@ const input = {
   },
 };
 const readAt = '2026-10-16T10:30:00.000Z';
-test('the published F314 index opens the latest cases with their actual later outcomes', () => {
+test('the exported F314 contract fixture opens a selected case with its bounded later outcome', () => {
   const catalog = projectRequestReviewHarnessExploration(input, archive, readAt);
   assert(catalog);
   assert.equal(evolutionExplorationReviewV1Schema.safeParse(catalog).success, true);
@@ -32,8 +32,10 @@ test('the published F314 index opens the latest cases with their actual later ou
     catalog.nodes.map((node) => node.title),
     archive.story.nodes.map((node: { title: string }) => node.title),
   );
-  const saved = catalog.experiments.find((entry) => entry.experimentRef.ownerStateRef.includes('f322-save-readback'));
-  assert(saved, 'the real member-save counterexample must be reachable from exploration');
+  const saved = catalog.experiments.find((entry) =>
+    entry.experimentRef.ownerStateRef.includes('contract-save-readback'),
+  );
+  assert(saved, 'the synthetic save/readback counterexample must be reachable from exploration');
   const detail = projectRequestReviewHarnessExploration(
     { ...input, selectedExperimentRef: saved.experimentRef },
     archive,

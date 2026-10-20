@@ -10,7 +10,8 @@ import { F266ApprovalAdapter } from '../../../../../../api/src/domains/approval-
 import { EvalRepairApprovalService } from '../../../../../../api/src/infrastructure/harness-eval/eval-repair-approval';
 import type { IReevalClosureEventLog } from '../../../../../../api/src/infrastructure/harness-eval/reeval-closure-event-log';
 import type { EvalLifecycleEvent } from '../../../../../../api/src/infrastructure/harness-eval/reeval-closure-schema';
-import { MailboxApprovalExplanation } from '../MailboxApprovalExplanation';
+import { EvalRepairDecisionDetails } from '../../../rich/eval-repair/EvalRepairDecisionDetails';
+import { evalRepairModel } from '../../../rich/eval-repair-model';
 
 vi.mock('@/hooks/useCatNameResolver', () => ({ useCatNameResolver: () => (catId: string) => catId }));
 
@@ -140,14 +141,16 @@ async function productionItem(): Promise<ApprovalHubItem> {
   };
 }
 
-describe('F266 Mailbox decision explanation', () => {
+describe('F266 original-card decision explanation', () => {
   it('renders the owner-backed producer contract rather than fixture-only flat fields', async () => {
     const item = await productionItem();
+    const model = evalRepairModel(item);
+    if (!model) throw new Error('Expected the production F266 projection to remain readable');
     (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
     const container = document.createElement('div');
     document.body.appendChild(container);
     const root = createRoot(container);
-    await act(async () => root.render(<MailboxApprovalExplanation item={item} />));
+    await act(async () => root.render(<EvalRepairDecisionDetails item={item} model={model} />));
     for (const text of [
       '这次只批准一件事',
       '把 approved source 用在下一次本地审阅',
@@ -164,7 +167,6 @@ describe('F266 Mailbox decision explanation', () => {
     ]) {
       expect(container.textContent).toContain(text);
     }
-    expect(container.textContent).toContain('同意后：采用这条评估修复提议。');
     act(() => root.unmount());
     container.remove();
     delete (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT;

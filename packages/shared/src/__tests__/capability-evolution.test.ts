@@ -466,6 +466,7 @@ describe('capability evolution exploration read compatibility', () => {
   it('keeps known authored content while stripping future API fields at every read layer', () => {
     const candidate = explorationReview() as ReturnType<typeof explorationReview> & Record<string, unknown>;
     candidate.futureEnvelope = { mode: 'newer-api' };
+    candidate.currentVersionRefs = [explorationRef('forged-adoption')];
     Object.assign(candidate.programRef, { futureRefField: true });
     Object.assign(candidate.nodes[0], { futureNodeField: ['newer'] });
     Object.assign(candidate.nodes[0]?.history, { futureHistoryField: 'newer' });
@@ -514,6 +515,7 @@ describe('capability evolution exploration read compatibility', () => {
     };
     expect(node.bodyMarkdown).toContain('正文');
     expect(parsed.data).not.toHaveProperty('futureEnvelope');
+    expect(parsed.data).not.toHaveProperty('currentVersionRefs');
     expect(parsed.data.programRef).not.toHaveProperty('futureRefField');
     expect(node).not.toHaveProperty('futureNodeField');
     expect(node.kind).toBe('public_archive');

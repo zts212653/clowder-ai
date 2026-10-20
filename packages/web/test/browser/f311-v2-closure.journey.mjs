@@ -88,14 +88,18 @@ export async function verifyV2ClosureJourney({ fixture, browser, capture }) {
   const item = approvalItem();
   const rawIndex = JSON.parse(
     await readFile(
-      new URL('../../../../docs/discussions/f314-incident-archive/lineage/lineage-index.json', import.meta.url),
+      new URL('../../../shared/src/__tests__/fixtures/f314-history-publication-contract.json', import.meta.url),
       'utf8',
     ),
   );
   const linkedCase = rawIndex.cases.find((entry) => entry.link && entry.citedMemberCommits.length);
   assert(linkedCase, 'reviewed F314 index must retain a case with an exact cited commit');
-  const linkedRelease = rawIndex.releases.find((entry) => entry.id === linkedCase.browsingBucket);
-  assert(linkedRelease, 'the linked case browsing bucket must resolve to one exact release');
+  const linkedNarrative = rawIndex.story.cases.find((entry) => entry.caseId === linkedCase.caseId);
+  assert(linkedNarrative, 'the linked case must retain one readable story narrative');
+  const linkedStep = rawIndex.story.nodes.find((entry) => entry.id === linkedNarrative.nodeId);
+  assert(linkedStep, 'the linked case narrative must resolve to one readable story step');
+  const linkedStepSource = rawIndex.story.sources.find((entry) => entry.id === linkedStep.changes[0]?.sourceId);
+  assert(linkedStepSource, 'the linked story step must retain one exact source');
   const { projectRequestReviewHarnessExploration: projectExploration } = await import(
     '../../../api/src/infrastructure/capability-evolution/adapters/request-review/request-review-harness-lineage.ts'
   );
@@ -206,31 +210,30 @@ export async function verifyV2ClosureJourney({ fixture, browser, capture }) {
     main = page.locator('[data-testid="evolution-program-surface"]:visible');
     const exploration = main.getByTestId('evolution-exploration-workspace');
     await exploration.waitFor();
-    const picker = exploration.getByLabel('选择阅读版本');
+    const picker = exploration.getByLabel('选择阅读步骤');
     await picker.waitFor();
-    const option = await picker
-      .locator('option', { hasText: `${linkedRelease.id} · ${linkedRelease.date}` })
-      .getAttribute('value');
-    assert(option, 'F314 history fixture must expose the linked case browsing release');
+    const option = await picker.locator('option', { hasText: linkedStep.title }).getAttribute('value');
+    assert(option, 'F314 history fixture must expose the linked case story step');
     await picker.selectOption(option);
     assert.equal(await picker.inputValue(), option);
-    const selectedCard = exploration.locator('.exploration-version-card[data-reading="true"]');
-    await selectedCard.locator(':scope > details > summary').click();
-    const firstChangeSource = selectedCard.locator(':scope > details > div > details.evolution-source').first();
+    const selectedStep = exploration.locator('.exploration-history-step');
+    await selectedStep.getByRole('heading', { name: linkedStep.title, exact: true }).waitFor();
+    const firstChangeSource = selectedStep.locator('.exploration-history-changes details.evolution-source').first();
     await firstChangeSource.locator(':scope > summary').click();
-    const commitLink = firstChangeSource.getByRole('link', { name: '打开来源' });
+    const stepLink = firstChangeSource.getByRole('link', { name: '打开来源' });
     assert.equal(
-      await commitLink.getAttribute('href'),
-      `https://github.com/zts212653/clowder-ai/commit/${linkedRelease.commits[0].sha}`,
+      await stepLink.getAttribute('href'),
+      `https://github.com/zts212653/clowder-ai/blob/${rawIndex.snapshotCommit}/${linkedStepSource.path}`,
     );
 
-    const experimentPicker = exploration.getByLabel('选择本版实验');
-    await experimentPicker.selectOption({ label: linkedCase.summary.slice(0, 240) });
-    const selectedResult = exploration.locator('.exploration-result', { hasText: linkedCase.summary.slice(0, 80) });
-    await selectedResult.waitFor();
-    const recordDetails = selectedResult.locator('.exploration-outcome > details');
-    await recordDetails.locator(':scope > summary').click();
-    const originalSources = recordDetails.locator('details.exploration-sources');
+    const selectedCase = exploration.locator('.exploration-history-case-toggle', {
+      hasText: linkedNarrative.title ?? linkedNarrative.problem,
+    });
+    await selectedCase.waitFor();
+    if ((await selectedCase.getAttribute('aria-expanded')) !== 'true') await selectedCase.click();
+    const caseBody = selectedCase.locator('xpath=following-sibling::*[1]');
+    await caseBody.waitFor();
+    const originalSources = caseBody.getByText('历史原件与后续来源', { exact: true }).locator('..');
     await originalSources.locator(':scope > summary').click();
     const caseSource = originalSources.locator('details.evolution-source', { hasText: '案例原文' });
     await caseSource.locator(':scope > summary').click();
@@ -252,7 +255,7 @@ export async function verifyV2ClosureJourney({ fixture, browser, capture }) {
     main = page.locator('[data-testid="evolution-program-surface"]:visible');
     await main.getByTestId('evolution-exploration-workspace').waitFor();
     assert.equal(
-      await main.getByLabel('选择阅读版本').inputValue(),
+      await main.getByLabel('选择阅读步骤').inputValue(),
       option,
       'return must restore exact archive reading',
     );
@@ -263,17 +266,22 @@ export async function verifyV2ClosureJourney({ fixture, browser, capture }) {
       .click();
 
     await home.getByRole('button', { name: '去待办审阅', exact: true }).click();
-    const explanation = page.getByTestId('mailbox-evolution-decision-explanation');
+    const explanation = page.getByTestId('eval-repair-decision-explanation');
     await explanation.waitFor();
     const decisionText = await explanation.innerText();
     for (const text of [
       '这次只批准一件事',
+      '让后续审阅结果显示它实际沿用的规则版本',
       '后续结果显示 exact version，并从原项目进入治理操作',
       '只证明当前任务使用了该版本；不证明候选已获批准或整体交付改善',
+      '隔离旅程核对真实入口、状态恢复和零 Program 写入',
       '从回复文案推断版本',
-      CANDIDATE_VERSION.version,
+      '来源行可移除；回退动作仍由 Program owner 执行',
+      'exact target、owner 或授权变化时撤回',
     ])
       assert.ok(decisionText.includes(text), `Mailbox candidate detail is missing: ${text}`);
+    await explanation.getByText('目标版本', { exact: true }).click();
+    await explanation.getByText(CANDIDATE_VERSION.version, { exact: true }).waitFor();
     assert.equal(await page.getByTestId('approve-btn').count(), 1);
     assert.equal(await page.getByTestId('reject-btn').count(), 1);
     await page.waitForFunction(() => {

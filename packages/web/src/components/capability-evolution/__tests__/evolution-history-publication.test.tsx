@@ -16,7 +16,7 @@ const api = vi.hoisted(() => ({ fetch: vi.fn() }));
 vi.mock('@/utils/api-client', () => ({ apiFetch: api.fetch }));
 const archive = JSON.parse(
   readFileSync(
-    resolve(process.cwd(), '../../docs/discussions/f314-incident-archive/lineage/lineage-index.json'),
+    resolve(process.cwd(), '../shared/src/__tests__/fixtures/f314-history-publication-contract.json'),
     'utf8',
   ),
 );
@@ -46,7 +46,7 @@ function v3Archive() {
         {
           id: 'owner-source',
           label: '作者核对原件',
-          path: 'docs/discussions/f314-incident-archive/README.md',
+          path: 'docs/VISION.md',
         },
       ],
       steps: [
@@ -365,14 +365,18 @@ it.each([
   const original = host.querySelector('.exploration-history-cases')?.textContent;
   expect(host.querySelectorAll('.exploration-history-case-toggle')).toHaveLength(2);
   if (change === 'added')
-    next.story.cases.find((entry: { caseId: string }) => entry.caseId === 'C').nodeId = 'whole-result';
+    next.story.cases.find((entry: { caseId: string }) => entry.caseId === 'contract-addition-source').nodeId =
+      'contract-step-02';
   else if (change === 'removed') {
-    next.story.cases = next.story.cases.filter((entry: { caseId: string }) => entry.caseId !== 'K');
-    next.cases = next.cases.filter((entry: { caseId: string }) => entry.caseId !== 'K');
+    next.story.cases = next.story.cases.filter(
+      (entry: { caseId: string }) => entry.caseId !== 'contract-selected-case',
+    );
+    next.cases = next.cases.filter((entry: { caseId: string }) => entry.caseId !== 'contract-selected-case');
   } else if (change === 'renamed')
-    next.story.cases.find((entry: { caseId: string }) => entry.caseId === 'K').problem = '另一道错题的新标题';
+    next.story.cases.find((entry: { caseId: string }) => entry.caseId === 'contract-selected-case').title =
+      '另一道错题的新标题';
   else {
-    const entry = next.cases.find((entry: { caseId: string }) => entry.caseId === 'K');
+    const entry = next.cases.find((entry: { caseId: string }) => entry.caseId === 'contract-selected-case');
     delete entry.occurredWindow;
     entry.occurredOn = '2026-09-03';
   }

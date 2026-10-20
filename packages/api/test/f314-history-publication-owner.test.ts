@@ -9,7 +9,7 @@ import { f314HistoryV3Fixture } from './helpers/f314-history-v3-fixture.js';
 
 const archive = JSON.parse(
   readFileSync(
-    new URL('../../../docs/discussions/f314-incident-archive/lineage/lineage-index.json', import.meta.url),
+    new URL('../../shared/src/__tests__/fixtures/f314-history-publication-contract.json', import.meta.url),
     'utf8',
   ),
 );

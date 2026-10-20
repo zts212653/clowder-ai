@@ -54,6 +54,8 @@ export function approvalItem() {
       decisionExplanation,
       withdrawalCondition: 'exact target、owner 或授权变化时撤回',
       targetVersionRef: CANDIDATE_VERSION,
+      ownerRef: sourceRef('request-review-owner:isolated-fixture'),
+      ownerAuthorizationRef: sourceRef('request-review-authorization:isolated-fixture'),
     },
     navigation: {
       state: 'anchored',
