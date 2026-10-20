@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
+import { assertHistoricalMapGeometry, assertSelectedCardInsideCanvas } from './f311-history-map-assertions.mjs';
 import { assetReview, PROGRAM_ID } from './f311-v2-closure.fixture.mjs';
 import { CONTRACT_THREAD_ID } from './f311-workspace-browser.harness.mjs';
 
@@ -305,28 +306,7 @@ export async function verifyHistoryEntryJourney({ fixture, browser, capture }) {
     await toolbar.getByLabel('谱系缩放').waitFor();
     await toolbar.getByLabel('谱系排列').waitFor();
 
-    const nodeTitles = await history.locator('.exploration-node-title > span').allTextContents();
-    assert.deepEqual(
-      nodeTitles,
-      authoredStory.nodes.map((entry) => `${entry.when} · ${entry.title}`),
-      'the historical map keeps the authored date beside each title without rendering body excerpts',
-    );
-    const titleStyles = await history.locator('.exploration-node-title > span').evaluateAll((nodes) =>
-      nodes.map((node) => {
-        const style = getComputedStyle(node);
-        return { whiteSpace: style.whiteSpace, lineClamp: style.webkitLineClamp };
-      }),
-    );
-    assert.ok(titleStyles.every((style) => style.whiteSpace === 'normal' && style.lineClamp === '2'));
-    const chronology = await history
-      .locator('.exploration-node-wrap')
-      .evaluateAll((nodes) => nodes.map((node) => Number.parseFloat(node.style.left)));
-    assert.ok(chronology.every((left, index) => index === 0 || left > chronology[index - 1]));
-    assert.equal(
-      await history.locator('.exploration-edges path').count(),
-      authoredStory.nodes.reduce((count, node) => count + node.parents.length, 0),
-      'the map must draw every and only authored source relationship',
-    );
+    await assertHistoricalMapGeometry(history, authoredStory);
     const stepPicker = history.getByLabel('选择阅读步骤');
     for (const root of authoredStory.nodes.filter((node, index) => index > 0 && node.parents.length === 0)) {
       const origin = authoredStory.cases.find((entry) => entry.nodeId === root.id);
@@ -343,11 +323,18 @@ export async function verifyHistoryEntryJourney({ fixture, browser, capture }) {
     }
     const option = await stepPicker.locator('option', { hasText: step.title }).getAttribute('value');
     assert(option, 'F314 history must expose the cited case step');
-    await toolbar.getByRole('button', { name: '看全图', exact: true }).click();
+    await stepPicker.selectOption(option);
+    await toolbar.getByRole('button', { name: '定位阅读版' }).click();
+    await assertSelectedCardInsideCanvas(history);
     await history.getByRole('button', { name: `阅读 ${step.title}`, exact: true }).click();
     assert.equal(await stepPicker.inputValue(), option, 'clicking a map node must open that exact authored step');
     await history.locator('.exploration-version-nav').scrollIntoViewIfNeeded();
     await capture(page, 'history-entry-desktop-map-readable');
+
+    await page.getByTestId('workspace-focus-enter').click();
+    await page.getByTestId('workspace-focus-exit').waitFor();
+    await toolbar.getByRole('button', { name: '看全图', exact: true }).click();
+    await capture(page, 'history-entry-focus-map-readable');
 
     await page.setViewportSize({ width: 390, height: 844 });
     await more.waitFor();
@@ -423,7 +410,8 @@ export async function verifyHistoryEntryJourney({ fixture, browser, capture }) {
     );
     assert.ok((await history.innerText()).includes(selectedV3Step.bodyMarkdown.split('\n')[2]));
     const selectedMapNode = history.locator('.exploration-node-wrap[data-selected="true"] .exploration-node');
-    assert.ok((await selectedMapNode.innerText()).includes(`${selectedV3Step.date} · ${selectedV3Step.title}`));
+    assert.equal(await selectedMapNode.locator('.exploration-node-period').innerText(), selectedV3Step.date);
+    assert.equal(await selectedMapNode.locator('.exploration-node-heading').innerText(), selectedV3Step.title);
     assert.doesNotMatch(await selectedMapNode.innerText(), /SENTINEL_V3_STEP_BODY/);
     assert.equal(
       await history.getByRole('link', { name: '查看安全链接', exact: true }).getAttribute('href'),

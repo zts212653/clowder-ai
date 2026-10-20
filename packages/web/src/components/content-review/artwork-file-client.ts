@@ -14,8 +14,17 @@ export type ArtworkFileInfo = {
 };
 export function artworkFileActionUrl(mediaUrl: string, action: 'file-info' | 'reveal' | 'open'): string | null {
   const url = new URL(mediaUrl, API_URL);
-  if (
-    url.origin !== new URL(API_URL).origin ||
+  if (url.origin !== new URL(API_URL).origin) return null;
+  if (/^\/uploads\/[a-zA-Z0-9][a-zA-Z0-9._-]*\.(mp4|webm|mov)$/i.test(url.pathname)) {
+    url.pathname = `/api${url.pathname}`;
+    url.search = '';
+  } else if (url.pathname === '/api/workspace/file/raw') {
+    if (url.searchParams.getAll('worktreeId').length !== 1 || url.searchParams.getAll('path').length !== 1) return null;
+    const worktreeId = url.searchParams.get('worktreeId'),
+      path = url.searchParams.get('path');
+    if (!worktreeId || !path) return null;
+    url.search = new URLSearchParams({ worktreeId, path }).toString();
+  } else if (
     !/^\/api\/(?:content-publications\/[^/]+\/media\/\d+|artifact-reviews\/[^/]+\/media\/\d+|(?:workspace\/)?content-reviews\/[^/]+\/media)$/.test(
       url.pathname,
     )
@@ -28,6 +37,7 @@ export function artworkFileActionUrl(mediaUrl: string, action: 'file-info' | 're
 export function localDesktopViewer() {
   return (
     /^(localhost|127\.0\.0\.1|\[::1\])$/.test(window.location.hostname) &&
+    window.innerWidth > 600 &&
     !/Android|iPhone|iPad|iPod/i.test(navigator.userAgent) &&
     !(navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
   );

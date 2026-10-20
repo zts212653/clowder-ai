@@ -52,6 +52,7 @@ export function useWorkspaceContentReview({ worktreeId, path, publication, evolu
   const base = publication || evolution ? '/api/content-reviews' : '/api/workspace/content-reviews';
   const [view, setView] = useState<WorkspaceContentReviewView | null>(null),
     [error, setError] = useState<string | null>(null),
+    [openingRefusal, setOpeningRefusal] = useState<string | null>(null),
     [busy, setBusy] = useState(false);
   const state = useWorkspaceReviewDraft();
   const { activate, reset, confirmAnnotation } = state;
@@ -108,6 +109,7 @@ export function useWorkspaceContentReview({ worktreeId, path, publication, evolu
         if (annotation.operationId) confirmAnnotation(annotation.operationId);
       setView(next);
       setError(null);
+      setOpeningRefusal(null);
       return next;
     },
     [
@@ -129,11 +131,15 @@ export function useWorkspaceContentReview({ worktreeId, path, publication, evolu
     const stamp = ++generation.current;
     setView(null);
     setError(null);
+    setOpeningRefusal(null);
     setBusy(false);
     reset();
     prepareOperationId.current = null;
     void load().catch((failure) => {
-      if (stamp === generation.current) setError(openFailureMessage(failure));
+      if (stamp === generation.current) {
+        setError(openFailureMessage(failure));
+        setOpeningRefusal(failure instanceof ModificationHttpError ? failure.code : null);
+      }
     });
     return () => {
       generation.current++;
@@ -295,6 +301,7 @@ export function useWorkspaceContentReview({ worktreeId, path, publication, evolu
   };
   return {
     view,
+    openingRefusal,
     error: state.storageError ? '浏览器暂时无法保存草稿或重试记录。请恢复存储后重试；当前输入仍保留。' : error,
     draft: state.snapshot.body,
     target: state.snapshot.target,

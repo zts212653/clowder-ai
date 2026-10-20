@@ -1,6 +1,4 @@
-import { createReadStream } from 'node:fs';
 import { basename, dirname } from 'node:path';
-import { createInterface } from 'node:readline';
 import type { TurnExecutionRecord } from '@cat-cafe/shared';
 import { CliRawArchive } from '../../session/CliRawArchive.js';
 import {
@@ -41,37 +39,28 @@ export class CodexNativeImageEvidenceReader {
     const last = new Date(child.endedAt);
     last.setHours(0, 0, 0, 0);
     for (const date = first; date <= last; date.setDate(date.getDate() + 1)) {
-      const input = createReadStream(this.archive.getPath(child.invocationId, date));
-      const lines = createInterface({ input, crlfDelay: Infinity });
-      try {
-        for await (const line of lines) {
-          let entry: { payload?: { transport?: string; direction?: string; envelope?: Record<string, unknown> } };
-          try {
-            entry = JSON.parse(line);
-          } catch {
-            continue;
-          }
-          const raw = entry.payload;
-          if (raw?.transport !== 'codex_app_server' || !raw.envelope || !raw.direction) continue;
-          const projected = codexImageOriginEnvelope(raw.direction, raw.envelope);
-          if (!projected) continue;
-          envelopes.push(projected);
-          const params = raw.envelope.params;
-          if (
-            raw.direction === 'outbound' &&
-            raw.envelope.method === 'turn/start' &&
-            params &&
-            typeof params === 'object' &&
-            'threadId' in params &&
-            typeof params.threadId === 'string'
-          )
-            sessions.add(params.threadId);
+      for await (const line of this.archive.readLines(child.invocationId, date)) {
+        let entry: { payload?: { transport?: string; direction?: string; envelope?: Record<string, unknown> } };
+        try {
+          entry = JSON.parse(line);
+        } catch {
+          continue;
         }
-      } catch (error) {
-        if (!(error instanceof Error && 'code' in error && error.code === 'ENOENT')) throw error;
-      } finally {
-        lines.close();
-        input.destroy();
+        const raw = entry.payload;
+        if (raw?.transport !== 'codex_app_server' || !raw.envelope || !raw.direction) continue;
+        const projected = codexImageOriginEnvelope(raw.direction, raw.envelope);
+        if (!projected) continue;
+        envelopes.push(projected);
+        const params = raw.envelope.params;
+        if (
+          raw.direction === 'outbound' &&
+          raw.envelope.method === 'turn/start' &&
+          params &&
+          typeof params === 'object' &&
+          'threadId' in params &&
+          typeof params.threadId === 'string'
+        )
+          sessions.add(params.threadId);
       }
     }
     const nativeSource = { invocationId: child.invocationId, envelopes };

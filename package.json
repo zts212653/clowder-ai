@@ -78,7 +78,7 @@
     "check:no-provider-canary-residue": "node scripts/check-no-provider-canary-residue.mjs",
     "check:paw-feel-disposition-boundaries": "node --test scripts/check-paw-feel-disposition-boundaries.test.mjs && node scripts/check-paw-feel-disposition-boundaries.mjs",
     "check:paw-feel-disposition-capacity": "pnpm --filter @cat-cafe/shared build && pnpm --filter @cat-cafe/api build && node --test packages/api/test/harness-eval/paw-feel-disposition-capacity.test.js",
-    "check:f212-reconciliation-eval": "node --test scripts/eval-f212-reconciliation/reconciliation-baseline.test.mjs scripts/eval-f212-reconciliation/reconciliation-window.test.mjs scripts/eval-f212-reconciliation/reconciliation-matcher.test.mjs scripts/eval-f212-reconciliation/reconciliation-sequence.test.mjs scripts/eval-f212-reconciliation/reconciliation-malformed.test.mjs",
+    "check:f212-reconciliation-eval": "node --test scripts/eval-f212-reconciliation/reconciliation-baseline.test.mjs scripts/eval-f212-reconciliation/reconciliation-window.test.mjs scripts/eval-f212-reconciliation/reconciliation-matcher.test.mjs scripts/eval-f212-reconciliation/reconciliation-sequence.test.mjs scripts/eval-f212-reconciliation/reconciliation-malformed.test.mjs scripts/eval-f212-reconciliation/reconciliation-compression.test.mjs",
     "eval:f212-reconciliation": "node scripts/eval-f212-abnormal-exit-reconciliation.mjs",
     "eval:f168-external-case-closure": "node scripts/run-f168-external-case-eval.mjs",
     "video:new": "node scripts/video-forge/new-project.mjs",

@@ -37,6 +37,7 @@ async function run(
           user_message_uuids: [first.uuid],
           queued_turn_count: 0,
         };
+        yield { type: 'system', subtype: 'session_state_changed', state: 'idle' };
       },
       close() {
         calls.push('close');
@@ -236,6 +237,7 @@ test('one upstream API failure emitted as assistant and result surfaces one term
             result: text,
             user_message_uuids: [first?.uuid],
           };
+          yield { type: 'system', subtype: 'session_state_changed', state: 'idle' };
         },
       }),
     });
@@ -250,6 +252,7 @@ test('one upstream API failure emitted as assistant and result surfaces one term
 test('a long silent SDK tool has no freshness timer or auxiliary input', async (t) => {
   t.mock.timers.enable({ apis: ['setInterval'] });
   const calls: string[] = [];
+  let pendingInput: Promise<IteratorResult<unknown>> | undefined;
   const service = new ClaudeSdkAgentService({
     model: 'claude-opus-4-6',
     mcpServerPath: '',
@@ -263,9 +266,9 @@ test('a long silent SDK tool has no freshness timer or auxiliary input', async (
         yield started;
         t.mock.timers.tick(5000);
         await new Promise((resolve) => setImmediate(resolve));
-        const pending = input.next();
+        pendingInput = input.next();
         yield { type: 'result', subtype: 'success', user_message_uuids: [first?.uuid] };
-        assert.equal((await pending).done, true, 'only the primary input may enter the SDK');
+        yield { type: 'system', subtype: 'session_state_changed', state: 'idle' };
       },
     }),
   });
@@ -280,6 +283,8 @@ test('a long silent SDK tool has no freshness timer or auxiliary input', async (
   };
   const output = [];
   for await (const item of service.invoke('develop', { ...legacyOptions })) output.push(item);
+  assert.ok(pendingInput);
+  assert.equal((await pendingInput).done, true, 'only the primary input may enter the SDK');
   assert.deepEqual(calls, []);
   assert.equal(output.filter((item) => item.type === 'done').length, 1);
 });

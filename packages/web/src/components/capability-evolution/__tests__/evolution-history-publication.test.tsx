@@ -187,6 +187,8 @@ it('renders v3 author Markdown once and keeps the historical map to date plus ti
   expect(mapNode?.textContent).toContain('2026-09-19');
   expect(mapNode?.textContent).toContain('正文属于作者');
   expect(mapNode?.textContent).not.toContain('SENTINEL_STEP_BODY');
+  expect(mapNode?.querySelector('.exploration-node-period')?.textContent).toBe('2026-09-19');
+  expect(mapNode?.querySelector('.exploration-node-heading')?.textContent).toBe('正文属于作者');
 
   const toggle = [...(history?.querySelectorAll<HTMLButtonElement>('.exploration-history-case-toggle') ?? [])].find(
     (entry) => entry.textContent?.includes('第一道错题'),

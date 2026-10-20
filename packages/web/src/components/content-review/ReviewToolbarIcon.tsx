@@ -25,6 +25,8 @@ const paths = {
   image: 'M3 3h18v18H3V3Zm0 14 5-5 4 4 3-3 6 6M16 7h.01',
   video: 'M3 5h18v14H3V5Zm7 3 6 4-6 4V8Z',
   volume: 'M3 9h4l5-5v16l-5-5H3V9Zm13-2a7 7 0 0 1 0 10m3-13a11 11 0 0 1 0 16',
+  fullscreen: 'M8 3H3v5m13-5h5v5M3 16v5h5m13-5v5h-5',
+  exitFullscreen: 'M3 8h5V3m8 0v5h5M8 21v-5H3m13 5v-5h5',
 } as const;
 
 export type ReviewIconName = keyof typeof paths;

@@ -131,6 +131,7 @@ export class ClaudeSdkTurnInputState {
   private activeDispatches = 0;
   private terminalWaitingForDispatch = false;
   private accepting = true;
+  private nativeIdle = false;
 
   constructor() {
     this.input = this.queue;
@@ -138,6 +139,16 @@ export class ClaudeSdkTurnInputState {
 
   get isAccepting(): boolean {
     return this.accepting;
+  }
+
+  observeSessionState(event: Record<string, unknown>): void {
+    if (event.type !== 'system' || event.subtype !== 'session_state_changed') return;
+    if (event.state !== 'idle' && event.state !== 'running' && event.state !== 'requires_action') return;
+    // Only native idle proves that both background work and its queued report
+    // turns have drained. An empty task set or a result cannot prove that.
+    this.nativeIdle = event.state === 'idle';
+    if (this.nativeIdle) this.closeAfterTerminalIfIdle();
+    else this.terminalWaitingForDispatch = false;
   }
 
   push(message: IdentifiedSdkUserMessage): boolean {
@@ -174,7 +185,8 @@ export class ClaudeSdkTurnInputState {
       !this.terminalWaitingForDispatch ||
       this.locallyQueuedIds.size !== 0 ||
       this.providerOwnedIds.size !== 0 ||
-      this.activeDispatches !== 0
+      this.activeDispatches !== 0 ||
+      !this.nativeIdle
     ) {
       return false;
     }

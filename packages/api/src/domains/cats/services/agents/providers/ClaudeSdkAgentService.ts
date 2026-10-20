@@ -278,6 +278,7 @@ export class ClaudeSdkAgentService implements AgentService {
         // The archive is ordered best-effort diagnostics, not the receipt
         // authority. Disk I/O must not delay cancellation or member output.
         archive(event);
+        turnInputs.observeSessionState(raw);
         const isResultTerminal = raw.type === 'result';
         if (typeof raw.session_id === 'string' && raw.session_id) {
           activeSessionId = raw.session_id;
@@ -323,10 +324,10 @@ export class ClaudeSdkAgentService implements AgentService {
           }
         }
         // A streaming-input query may carry multiple accepted turns. Close at
-        // the result for the final accepted input, but keep consuming when an
-        // Append/Steer already promised another result to the caller. Breaking
+        // native idle only after accepted inputs and background report turns
+        // have drained. A result alone can precede queued reports. Breaking
         // performs AsyncIteratorClose (Query.return), terminating the SDK query.
-        if (isResultTerminal && !turnInputs.isAccepting) break;
+        if (!turnInputs.isAccepting) break;
       }
       if ((!terminal || turnInputs.isAccepting) && !abortController.signal.aborted)
         throw new Error('claude_sdk_stream_ended_without_result');

@@ -103,7 +103,7 @@ export function Lightbox({
     const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     closeButton.current?.focus({ preventScroll: true });
     const handleKey = (e: KeyboardEvent) => {
-      if (e.defaultPrevented || e.isComposing) return;
+      if (e.defaultPrevented || e.isComposing || document.fullscreenElement) return;
       if (e.key === 'Escape') {
         e.stopPropagation();
         closeRef.current();

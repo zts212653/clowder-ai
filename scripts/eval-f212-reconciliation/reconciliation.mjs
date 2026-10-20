@@ -1,5 +1,5 @@
 import { existsSync, readdirSync } from 'node:fs';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { scanArchiveForAbnormalExit } from './archive-scanner.mjs';
 import { validateWindow, YYYY_MM_DD } from './calendar-validation.mjs';
 import { messageStoreHasErrorFor } from './message-matcher.mjs';
@@ -49,10 +49,21 @@ export function runReconciliation({ archiveDir, messageStorePath, windowStart, w
     .map((d) => join(archiveDir, d.name));
 
   for (const dayDir of dayDirs) {
-    const files = readdirSync(dayDir).filter((f) => f.endsWith('.ndjson'));
-    for (const file of files) {
-      const invocationId = file.replace(/\.ndjson$/, '');
-      const scan = scanArchiveForAbnormalExit(join(dayDir, file));
+    const groups = new Map();
+    for (const file of readdirSync(dayDir).sort()) {
+      if (!/\.ndjson(?:\.gz)?$/.test(file)) continue;
+      const invocationId = file.replace(/\.ndjson(?:\.gz)?$/, '');
+      const paths = groups.get(invocationId) ?? [];
+      paths.push(join(dayDir, file));
+      groups.set(invocationId, paths);
+    }
+    for (const [invocationId, paths] of groups) {
+      let scan;
+      try {
+        scan = scanArchiveForAbnormalExit(paths);
+      } catch (error) {
+        return errBase(`cannot read archive ${invocationId}: ${error.message}`);
+      }
       // Sol Final确权 P1-B: fail-CLOSED on malformed archive lines. Silent skip
       // let a corrupt `__cliError` line masquerade as an empty archive → verdict:pass.
       // Now propagates structured error with concrete file + line pointers.
@@ -65,9 +76,9 @@ export function runReconciliation({ archiveDir, messageStorePath, windowStart, w
           unmatched,
           recovered,
           verdict: 'error',
-          error: `malformed archive line(s) in ${invocationId}.ndjson: ${scan.malformedLines
+          error: `malformed archive line(s) for ${invocationId}: ${scan.malformedLines
             .slice(0, 3)
-            .map((m) => `line ${m.line}: ${m.reason}`)
+            .map((m) => `${basename(m.file)} line ${m.line}: ${m.reason}`)
             .join('; ')}${scan.malformedLines.length > 3 ? ` (+${scan.malformedLines.length - 3} more)` : ''}`,
         };
       }

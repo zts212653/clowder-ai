@@ -2,10 +2,17 @@
 'use client';
 import { type EvolutionExplorationNodeV1, refIdentity } from '@cat-cafe/shared';
 import { type ReactNode, useId, useMemo, useRef } from 'react';
-import { ExplorationIcon } from './ExplorationIcon';
+import {
+  ExplorationLineageNodeTitle,
+  lineageDisplayTitle,
+  lineageNodeMeta,
+  lineageSummary,
+} from './ExplorationLineageNodeContent';
 import { ExplorationLineageTools } from './ExplorationLineageTools';
 import { isHistoricalStep } from './exploration-history';
 import {
+  HISTORICAL_LINEAGE_MIN_ZOOM,
+  HISTORICAL_LINEAGE_NODE_SIZE,
   historicalLineageEdgeKey,
   historicalLineageEdgeRoutes,
   LINEAGE_NODE_SIZE,
@@ -18,32 +25,11 @@ import {
 } from './exploration-lineage';
 import type { ExplorationReading } from './exploration-reading';
 import { lineageLabels } from './lineage-labels';
+import { fitLineageViewport } from './lineage-viewport';
 import { useLineageCamera } from './use-lineage-camera';
 
 type Viewport = ExplorationReading['viewport'];
 const EMPTY_KEYS = new Set<string>();
-
-function lineageDisplayTitle(node: EvolutionExplorationNodeV1): string {
-  return isHistoricalStep(node) ? `${node.history.period} · ${node.title}` : node.title;
-}
-
-function lineageSummary(node: EvolutionExplorationNodeV1, historical: boolean): ReactNode {
-  if (historical) return null;
-  return <span className="exploration-node-summary">{node.changes[0]?.detail ?? node.summary}</span>;
-}
-
-function lineageNodeMeta(
-  key: string,
-  currentKeys: ReadonlySet<string>,
-  adoptedKeys: ReadonlySet<string>,
-  nodeNotes?: ReadonlyMap<string, string>,
-): string | undefined {
-  const labels = [];
-  if (currentKeys.has(key)) labels.push('来源当前版本');
-  if (adoptedKeys.has(key)) labels.push('当前采用');
-  if (!labels.length && nodeNotes?.has(key)) labels.push(nodeNotes.get(key));
-  return labels.filter((label): label is string => Boolean(label)).join(' · ') || undefined;
-}
 
 function positionLineage(
   nodes: EvolutionExplorationNodeV1[],
@@ -63,11 +49,12 @@ function edgePath(
   child: { x: number; y: number },
   direction: 'map' | 'vertical',
   route: ReadonlyArray<LineageRoutePoint> | null,
+  nodeSize = LINEAGE_NODE_SIZE,
 ) {
   if (route) return route.map((point, index) => `${index ? 'L' : 'M'}${point.x},${point.y}`).join(' ');
   if (direction === 'vertical')
-    return `M${parent.x + 88},${parent.y + 56} C${parent.x + 88},${(parent.y + child.y) / 2 + 56} ${child.x + 88},${(parent.y + child.y) / 2 + 56} ${child.x + 88},${child.y + 56}`;
-  return `M${parent.x + 88},${parent.y + 56} C${(parent.x + child.x) / 2 + 88},${parent.y + 56} ${(parent.x + child.x) / 2 + 88},${child.y + 56} ${child.x + 88},${child.y + 56}`;
+    return `M${parent.x + nodeSize.width / 2},${parent.y + nodeSize.height / 2} C${parent.x + nodeSize.width / 2},${(parent.y + child.y) / 2 + nodeSize.height / 2} ${child.x + nodeSize.width / 2},${(parent.y + child.y) / 2 + nodeSize.height / 2} ${child.x + nodeSize.width / 2},${child.y + nodeSize.height / 2}`;
+  return `M${parent.x + nodeSize.width / 2},${parent.y + nodeSize.height / 2} C${(parent.x + child.x) / 2 + nodeSize.width / 2},${parent.y + nodeSize.height / 2} ${(parent.x + child.x) / 2 + nodeSize.width / 2},${child.y + nodeSize.height / 2} ${child.x + nodeSize.width / 2},${child.y + nodeSize.height / 2}`;
 }
 
 export function ExplorationLineage({
@@ -107,41 +94,49 @@ export function ExplorationLineage({
     () => (historical ? historicalLineageEdgeRoutes(positioned.nodes, direction) : new Map()),
     [historical, positioned.nodes, direction],
   );
-  const density = lineageDetailLevel(viewport.zoom);
-  const { host, size } = useLineageCamera(positioned, selected, viewport, onViewport);
+  const nodeSize = historical ? HISTORICAL_LINEAGE_NODE_SIZE : LINEAGE_NODE_SIZE;
+  const cameraMinimumZoom = historical ? HISTORICAL_LINEAGE_MIN_ZOOM : 0.001;
+  const density = historical ? (viewport.zoom < 1.15 ? 'compact' : 'detail') : lineageDetailLevel(viewport.zoom);
+  const { host, size } = useLineageCamera(positioned, selected, viewport, onViewport, {
+    minimumZoom: cameraMinimumZoom,
+    nodeSize,
+  });
   const minimumZoom = Math.max(
-    0.001,
+    cameraMinimumZoom,
     Math.min(1, size.width / positioned.width, size.height / positioned.height) * 0.8,
   );
   const labels = lineageLabels(positioned, viewport, size, selected, v2);
   const suppressClick = useRef(false);
   const locate = () => {
     const target = expandedPositioned.nodes.find((node) => node.key === selected);
+    const element = host.current;
+    if (!target) return;
+    if (!element) return;
     const readableZoom = Math.max(1, viewport.zoom);
-    if (target)
-      onViewport({
-        ...viewport,
-        collapsed: [],
-        framing: 'manual',
-        zoom: readableZoom,
-        x: (host.current?.clientWidth ?? 600) / 2 - (target.x + LINEAGE_NODE_SIZE.width / 2) * readableZoom,
-        y: (host.current?.clientHeight ?? 210) / 2 - (target.y + LINEAGE_NODE_SIZE.height / 2) * readableZoom,
-      });
+    onViewport({
+      ...viewport,
+      collapsed: [],
+      framing: 'manual',
+      zoom: readableZoom,
+      x: element.clientWidth / 2 - (target.x + nodeSize.width / 2) * readableZoom,
+      y: element.clientHeight / 2 - (target.y + nodeSize.height / 2) * readableZoom,
+    });
   };
   const fit = () => {
     const width = host.current?.clientWidth;
     const height = host.current?.clientHeight;
-    if (!width || !height) return;
-    const paddedWidth = expandedPositioned.width;
-    const paddedHeight = expandedPositioned.height;
-    const scale = Math.max(0.001, Math.min(1, width / paddedWidth, height / paddedHeight));
+    if (!width) return;
+    if (!height) return;
+    const fitted = fitLineageViewport(
+      expandedPositioned,
+      { width, height },
+      { minimumZoom: cameraMinimumZoom, nodeSize, selectedKey: selected },
+    );
     onViewport({
       ...viewport,
       collapsed: [],
       framing: 'fit',
-      x: (width - paddedWidth * scale) / 2,
-      y: (height - paddedHeight * scale) / 2,
-      zoom: scale,
+      ...fitted,
     });
   };
   const zoom = (delta: number) => {
@@ -199,7 +194,8 @@ export function ExplorationLineage({
           }
         }}
         onPointerDown={(event) => {
-          if (event.button !== 0 || (event.target as HTMLElement).closest('.exploration-fold')) return;
+          if (event.button !== 0) return;
+          if ((event.target as HTMLElement).closest('.exploration-fold')) return;
           drag.current = { id: event.pointerId, x: event.clientX, y: event.clientY, start: viewport, moved: false };
           suppressClick.current = false;
         }}
@@ -272,7 +268,7 @@ export function ExplorationLineage({
                     data-edge-route={historicalRoute ? 'history-clear' : sparseRoute ? 'label-clear' : 'direct'}
                     data-parent-key={parent.key}
                     data-child-key={item.key}
-                    d={edgePath(parent, item, direction, route)}
+                    d={edgePath(parent, item, direction, route, nodeSize)}
                     vectorEffect="non-scaling-stroke"
                     style={{ strokeWidth: 1.2 / viewport.zoom }}
                   />
@@ -291,7 +287,11 @@ export function ExplorationLineage({
               data-label-side={labels.get(key)?.side ?? (x > positioned.width / 2 ? 'end' : 'start')}
               data-label-visible={labels.has(key)}
               data-label-above={labels.get(key)?.above ?? false}
-              style={{ left: x + 88, top: y + 56, transform: `scale(${1 / viewport.zoom}) translate(-50%, -50%)` }}
+              style={{
+                left: x + nodeSize.width / 2,
+                top: y + nodeSize.height / 2,
+                transform: `scale(${1 / viewport.zoom}) translate(-50%, -50%)`,
+              }}
             >
               <button
                 type="button"
@@ -303,8 +303,7 @@ export function ExplorationLineage({
               >
                 <span className="sr-only">阅读 </span>
                 <span className="exploration-node-title">
-                  <ExplorationIcon kind={node.kind === 'owner_version' ? 'code' : 'branch'} />
-                  <span>{lineageDisplayTitle(node)}</span>
+                  <ExplorationLineageNodeTitle node={node} />
                 </span>
                 {lineageSummary(node, historical)}
                 {lineageNodeMeta(key, currentKeys, adoptedKeys, nodeNotes) && (

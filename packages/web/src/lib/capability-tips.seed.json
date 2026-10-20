@@ -2854,7 +2854,7 @@
     },
     "contexts": ["concierge_open", "pet_waiting_for_user"],
     "audience": ["all"],
-    "body": "在 Workspace 打开 Markdown 或代码，选一处或几处后点“请猫修改”，在同一个聊天输入框说出想法并发送。图片旁的圈选和画笔也沿用这个聊天；返回的版本可对照后采用或拒绝，保存标记不会直接改写原文件。",
+    "body": "在 Workspace 选中内容后点“请猫修改”，在同一聊天里说明想法；新版可对照后采用或拒绝，标记不会改原件。视频按 F 全屏播放；本机宽屏的“⋯”可在 Finder 中显示或用默认播放器打开原件。",
     "action": {
       "type": "open_source",
       "label": "查看 Workspace 协作说明",

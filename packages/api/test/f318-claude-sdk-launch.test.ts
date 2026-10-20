@@ -84,6 +84,7 @@ test('launch preserves resume, account isolation, native identity and managed F2
     },
   });
   assert.equal(prepared.sdkOptions.resume, 'prior-session');
+  assert.equal(prepared.sdkOptions.env?.CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS, '1');
   assert.equal(prepared.sdkOptions.env?.ANTHROPIC_API_KEY, undefined);
   assert.equal(prepared.sdkOptions.env?.ANTHROPIC_BASE_URL, undefined);
   assert.equal(prepared.sdkOptions.env?.SOME_ACCOUNT_SETTING, 'kept');
@@ -241,6 +242,7 @@ test('production invocation keeps native SDK query with tmux enabled and preserv
           user_message_uuids: [first?.uuid],
           usage: { input_tokens: 1, output_tokens: 1 },
         };
+        yield { type: 'system', subtype: 'session_state_changed', state: 'idle' };
       },
     }),
   });

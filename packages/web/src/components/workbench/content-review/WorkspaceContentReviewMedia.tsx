@@ -5,6 +5,7 @@ import { ArtworkActions } from '@/components/content-review/ArtworkActions';
 import { ArtworkGalleryArrows } from '@/components/content-review/ArtworkGalleryNavigation';
 import { useArtworkGallery } from '@/components/content-review/ArtworkGalleryScope';
 import { ArtworkMediaFooter } from '@/components/content-review/ArtworkMediaFooter';
+import videoStyles from '@/components/content-review/artwork-video-fullscreen.module.css';
 import { ImageArtworkControls } from '@/components/content-review/ImageArtworkControls';
 import { ReviewCanvasPopover } from '@/components/content-review/ReviewCanvasPopover';
 import { type ReviewCanvasMode } from '@/components/content-review/ReviewCanvasToolbar';
@@ -293,8 +294,9 @@ export function WorkspaceContentReviewMedia({
   return (
     <div
       ref={artwork}
-      className={`${styles.artwork} ${imageChatPrimary ? styles.imageArtwork : ''}`}
+      className={`${styles.artwork} ${imageChatPrimary ? styles.imageArtwork : ''} ${media.kind === 'video' ? videoStyles.player : ''}`}
       data-testid="workspace-review-artwork"
+      data-artwork-video-player={media.kind === 'video' ? '' : undefined}
     >
       {saveNotice ? <output className="px-3 text-xs text-cafe-muted">{saveNotice}</output> : null}
       {markup.readError || markup.storageError ? (
@@ -327,6 +329,7 @@ export function WorkspaceContentReviewMedia({
       ) : null}
       <section
         ref={viewportRef}
+        data-artwork-video-viewport={media.kind === 'video' ? '' : undefined}
         className={styles.media}
         aria-label="作品画面"
         {...viewport.handlers}
@@ -335,7 +338,13 @@ export function WorkspaceContentReviewMedia({
           alignItems: imageChatPrimary && viewport.fitsVertically ? 'start' : undefined,
         }}
       >
-        <div ref={stage} data-testid="review-media-stage" className={styles.stage} style={viewport.stageStyle}>
+        <div
+          ref={stage}
+          data-testid="review-media-stage"
+          data-artwork-video-stage={media.kind === 'video' ? '' : undefined}
+          className={styles.stage}
+          style={viewport.stageStyle}
+        >
           <WorkspaceReviewMediaElement
             src={src}
             error={error}
@@ -356,6 +365,7 @@ export function WorkspaceContentReviewMedia({
         <VideoArtworkControls
           media={media}
           video={video}
+          player={artwork}
           seconds={seconds}
           frameReady={frame !== null}
           mode={mode}
@@ -366,6 +376,7 @@ export function WorkspaceContentReviewMedia({
           onFrame={() => selection.setSelecting(true)}
           seekTo={seekTo}
           annotations={attachedAnnotations}
+          pendingMarks={pendingChatMarks}
           onAnnotationActive={onAnnotationActive}
         >
           {toolbar}

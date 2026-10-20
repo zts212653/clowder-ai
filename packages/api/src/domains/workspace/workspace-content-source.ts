@@ -78,6 +78,30 @@ export class WorkspaceContentSourceService {
     },
   ) {}
 
+  /** Navigation needs a readable canonical file, not a revision-bound collaboration snapshot. */
+  async resolveFileLocator(input: {
+    readonly principal: WorkspaceContentPrincipalV1;
+    readonly locator: WorkspaceContentLocatorV1;
+  }): Promise<WorkspaceContentLocatorV1> {
+    this.assertPrincipal(input.principal);
+    const resolved = await this.resolveLocator(input.locator);
+    const handle = await open(resolved.path, constants.O_RDONLY | constants.O_NOFOLLOW).catch(
+      (error: NodeJS.ErrnoException) => {
+        throw new WorkspaceContentSourceError(error.code === 'ENOENT' ? 'not_found' : 'access_denied');
+      },
+    );
+    try {
+      if (
+        !(await handle.stat()).isFile() ||
+        !(await openedWorkspaceContentMatchesCanonicalLocator(resolved.root, resolved.path, resolved.locator, handle))
+      )
+        throw new WorkspaceContentSourceError('access_denied');
+      return resolved.locator;
+    } finally {
+      await handle.close();
+    }
+  }
+
   /** Owner-issued current file identity for a read projection; no registration or write authority. */
   async describeFileReference(input: {
     readonly principal: WorkspaceContentPrincipalV1;

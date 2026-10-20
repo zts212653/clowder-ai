@@ -18,5 +18,7 @@ export function retiredHash(id, overrides = {}) {
     immutableIdentity: JSON.stringify(record),
     status: 'succeeded',
     endedAt: '20',
+    // CREATE/TERMINAL Lua retain an empty field when success has no reason.
+    terminalReason: '',
   };
 }

@@ -145,17 +145,48 @@
   width: 16px;
   height: 16px;
 }
-.exploration-node-title > span {
+.exploration-node-heading {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.exploration-lineage[data-historical="true"] .exploration-node-title > span {
+.exploration-lineage[data-historical="true"] .exploration-node-wrap {
+  width: 136px;
+  height: 88px;
+}
+.exploration-lineage[data-historical="true"] .exploration-node {
+  padding: 8px 10px;
+  gap: 2px;
+}
+.exploration-lineage[data-historical="true"] .exploration-node-title {
+  display: grid;
+  gap: 2px;
+  align-content: start;
+  font-size: var(--console-font-xs);
+}
+.exploration-node-period {
+  overflow: hidden;
+  color: var(--cafe-text-muted);
+  font-size: var(--console-font-label);
+  font-weight: 400;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.exploration-lineage[data-historical="true"] .exploration-node-heading {
   display: -webkit-box;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
+  overflow: hidden;
   white-space: normal;
-  line-height: 1.35;
+  line-height: 1.25;
+}
+.exploration-lineage[data-historical="true"] .exploration-node-meta {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  line-height: 1.2;
 }
 .exploration-node-summary {
   display: -webkit-box;
@@ -214,6 +245,17 @@
 .exploration-lineage[data-density="compact"] .exploration-node-title svg {
   display: none;
 }
+.exploration-lineage[data-historical="true"][data-density="compact"] .exploration-node-wrap {
+  width: 136px;
+  height: 88px;
+}
+.exploration-lineage[data-historical="true"][data-density="compact"] .exploration-node {
+  padding: 8px 10px;
+  gap: 2px;
+}
+.exploration-lineage[data-historical="true"][data-density="compact"] .exploration-node-title {
+  font-size: var(--console-font-xs);
+}
 .exploration-lineage[data-density="points"] .exploration-node-wrap {
   width: 28px;
   height: 28px;
@@ -269,10 +311,10 @@
 .exploration-lineage[data-density="points"] .exploration-node-title svg {
   display: none;
 }
-.exploration-lineage[data-density="points"] .exploration-node-title > span {
+.exploration-lineage[data-density="points"] .exploration-node-heading {
   display: block;
 }
-.exploration-lineage[data-historical="true"][data-density="points"] .exploration-node-title > span {
+.exploration-lineage[data-historical="true"][data-density="points"] .exploration-node-heading {
   display: -webkit-box;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;

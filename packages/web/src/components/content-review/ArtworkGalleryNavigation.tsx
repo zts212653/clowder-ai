@@ -18,6 +18,7 @@ export function useArtworkGalleryNavigation(gallery: ArtworkGallery | undefined,
       if (index >= 0 && index < value.items.length) value.onSelect(index);
     };
     const keyboard = (event: KeyboardEvent) => {
+      if (document.fullscreenElement) return;
       if (
         !root.current ||
         root.current.closest('[hidden], [inert], [aria-hidden="true"]') ||

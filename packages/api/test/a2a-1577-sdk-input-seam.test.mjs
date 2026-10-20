@@ -49,6 +49,7 @@ test('real SDK carrier preserves accepted Append with freshness fully retired', 
           user_message_uuids: [append.uuid],
           queued_turn_count: 0,
         };
+        yield { type: 'system', subtype: 'session_state_changed', state: 'idle' };
       },
     }),
   });

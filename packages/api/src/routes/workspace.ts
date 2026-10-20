@@ -63,6 +63,7 @@ import {
   registerCallbackAuthHook,
 } from './callback-auth-prehandler.js';
 import { resolvePrincipalThread } from './callback-scope-helpers.js';
+import { registerWorkspaceVideoFileActions } from './local-video-file-actions.js';
 import { parseWorkspaceChangedFiles } from './workspace-diff.js';
 import { workspaceDirectHuman } from './workspace-direct-human.js';
 import { registerWorkspaceFileSourceRoutes } from './workspace-file-source-routes.js';
@@ -418,6 +419,7 @@ async function attachSkillConsumptionReceipt(
 }
 
 export const workspaceRoutes: FastifyPluginAsync<WorkspaceRouteOpts> = async (app, opts) => {
+  registerWorkspaceVideoFileActions(app);
   const auditLog = opts.auditLog ?? getEventAuditLog();
   if (opts.callbackRegistry) {
     registerCallbackAuthHook(app, opts.callbackRegistry, { agentKeyRegistry: opts.agentKeyRegistry });

@@ -9,6 +9,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { listWorktrees } from '../../domains/workspace/workspace-security.js';
 import { withHiddenGhCliWindow } from '../github/gh-cli-env.js';
+import { executeGitHubProcess } from '../github/gh-process.js';
 
 const execFileAsync = promisify(execFile);
 const GIT_TIMEOUT_MS = 30_000;
@@ -148,10 +149,10 @@ export class ConflictAutoExecutor {
 
   async getPrHead(repoFullName: string, prNumber: number, signal?: AbortSignal): Promise<PullRequestHead | null> {
     try {
-      const { stdout } = await execFileAsync(
+      const { stdout } = await executeGitHubProcess(
         'gh',
         ['api', `repos/${repoFullName}/pulls/${prNumber}`, '--jq', '{branch:.head.ref,headSha:.head.sha}'],
-        withHiddenGhCliWindow({ timeout: GH_TIMEOUT_MS, signal }),
+        withHiddenGhCliWindow({ timeout: GH_TIMEOUT_MS, maxBuffer: 1024 * 1024, signal }),
       );
       const value: unknown = JSON.parse(stdout);
       if (!value || typeof value !== 'object') return null;

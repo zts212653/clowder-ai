@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react';
 import { ArtworkActions } from './ArtworkActions';
 import { ArtworkGalleryArrows } from './ArtworkGalleryNavigation';
+import { ArtworkPreviewVideo } from './ArtworkPreviewVideo';
 import type { ArtworkGallery } from './artwork-gallery';
 import { useArtworkViewport } from './useArtworkViewport';
 /** Unadmitted/remote previews have presentation controls, never a fabricated review or Chat sender. */
@@ -35,16 +36,7 @@ export function ArtworkPreviewMedia({
         viewport={viewport}
       />
       {video ? (
-        <video
-          src={url}
-          crossOrigin="use-credentials"
-          controls
-          playsInline
-          style={viewport.stageStyle}
-          onLoadedMetadata={(event) =>
-            setSize({ width: event.currentTarget.videoWidth, height: event.currentTarget.videoHeight })
-          }
-        />
+        <ArtworkPreviewVideo url={url} stageStyle={viewport.stageStyle} onSize={setSize} />
       ) : (
         <img
           src={url}

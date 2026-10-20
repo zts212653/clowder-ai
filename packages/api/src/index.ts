@@ -354,6 +354,7 @@ import type { ReviewFeedbackPrMetadata } from './infrastructure/email/ReviewFeed
 import { fetchLatestIssueCommentCursor } from './infrastructure/github/comment-cursors.js';
 import { fetchGitHubReviewThreads } from './infrastructure/github/fetch-review-threads.js';
 import { buildGhCliEnv, resolveGhCliToken, withHiddenGhCliWindow } from './infrastructure/github/gh-cli-env.js';
+import { executeGitHubProcess, type GitHubProcessOptions } from './infrastructure/github/gh-process.js';
 import { readGitHubApiResource, validateGitHubApiResource } from './infrastructure/github/github-object-validator.js';
 import { createGitHubRepoPollReaders } from './infrastructure/github/repo-poll-readers.js';
 import { executeGitHubRequest, GitHubRateLimitError } from './infrastructure/github/request-budget.js';
@@ -4544,9 +4545,10 @@ async function main(): Promise<void> {
   const getGitHubToken = (): string | undefined => {
     return resolveGhCliToken({ pluginEnv: getGitHubPluginEnv() });
   };
-  const getGitHubExecOptions = (timeout: number): { timeout: number; env?: NodeJS.ProcessEnv; windowsHide: true } => {
+  const getGitHubExecOptions = (timeout: number): GitHubProcessOptions => {
     return withHiddenGhCliWindow({
       timeout,
+      maxBuffer: 1024 * 1024,
       env: buildGhCliEnv({ token: getGitHubToken() }),
     });
   };
@@ -4589,13 +4591,10 @@ async function main(): Promise<void> {
     prNumber: number,
   ): Promise<import('@cat-cafe/shared').GitHubTrackingIdentityV1> => {
     const { fetchPaginated } = await import('./infrastructure/github/fetch-paginated.js');
-    const { execFile } = await import('node:child_process');
-    const { promisify } = await import('node:util');
-    const execFileAsync = promisify(execFile);
     const [selfLogin, metadata, reviews] = await Promise.all([
       resolveTrackingSelfLogin(),
       (async () => {
-        const { stdout } = await execFileAsync(
+        const { stdout } = await executeGitHubProcess(
           'gh',
           [
             'api',
@@ -4643,9 +4642,6 @@ async function main(): Promise<void> {
       import('./domains/github-signals/GitHubWaitBaselineReader.js'),
       import('./infrastructure/github/fetch-paginated.js'),
     ]);
-    const { execFile } = await import('node:child_process');
-    const { promisify } = await import('node:util');
-    const execFileAsync = promisify(execFile);
     return readGitHubWaitBaseline(
       { repoFullName, prNumber, when },
       {
@@ -4656,7 +4652,7 @@ async function main(): Promise<void> {
           fetchPaginated(`/repos/${repo}/issues/${pr}/comments`, { ghToken: getGitHubToken() }),
         fetchReviews: (repo, pr) => fetchPaginated(`/repos/${repo}/pulls/${pr}/reviews`, { ghToken: getGitHubToken() }),
         fetchMergeState: async (repo, pr) => {
-          const { stdout } = await execFileAsync(
+          const { stdout } = await executeGitHubProcess(
             'gh',
             ['pr', 'view', String(pr), '-R', repo, '--json', 'mergeable', '--jq', '.mergeable'],
             getGitHubExecOptions(15_000),
@@ -4683,15 +4679,12 @@ async function main(): Promise<void> {
     fetchLatestIssueCommentCursor(repoFullName, issueNumber, { ghToken: getGitHubToken() });
   const fetchIssueWaitBaseline = async (repoFullName: string, issueNumber: number) => {
     const { readGitHubIssueWaitBaseline } = await import('./domains/github-signals/GitHubIssueWaitBaselineReader.js');
-    const { execFile } = await import('node:child_process');
-    const { promisify } = await import('node:util');
-    const execFileAsync = promisify(execFile);
     return readGitHubIssueWaitBaseline(
       { repoFullName, issueNumber },
       {
         fetchCommentCursor: fetchIssueCommentCursor,
         fetchMetadata: async (repo, issue) => {
-          const { stdout } = await execFileAsync(
+          const { stdout } = await executeGitHubProcess(
             'gh',
             ['api', `/repos/${repo}/issues/${issue}`, '--jq', '{state, authorLogin: .user.login}'],
             getGitHubExecOptions(15_000),
@@ -6915,10 +6908,7 @@ async function main(): Promise<void> {
   await app.register(worldRoutes, { worldStore, coordinator: worldCoordinator });
 
   const fetchIssuesForSync = async (repo: string) => {
-    const { execFile } = await import('node:child_process');
-    const { promisify } = await import('node:util');
-    const execFileAsync = promisify(execFile);
-    const { stdout } = await execFileAsync(
+    const { stdout } = await executeGitHubProcess(
       'gh',
       [
         'api',
@@ -6942,10 +6932,7 @@ async function main(): Promise<void> {
       .map((line: string) => JSON.parse(line));
   };
   const fetchPrsForSync = async (repo: string) => {
-    const { execFile } = await import('node:child_process');
-    const { promisify } = await import('node:util');
-    const execFileAsync = promisify(execFile);
-    const { stdout } = await execFileAsync(
+    const { stdout } = await executeGitHubProcess(
       'gh',
       [
         'api',
@@ -6969,10 +6956,7 @@ async function main(): Promise<void> {
       .map((line: string) => JSON.parse(line));
   };
   const fetchPrReviewsForSync = async (_repo: string, prNumber: number) => {
-    const { execFile } = await import('node:child_process');
-    const { promisify } = await import('node:util');
-    const execFileAsync = promisify(execFile);
-    const { stdout } = await execFileAsync(
+    const { stdout } = await executeGitHubProcess(
       'gh',
       [
         'api',

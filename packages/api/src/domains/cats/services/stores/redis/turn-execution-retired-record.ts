@@ -70,13 +70,18 @@ function readRetiredCausal(data: RedisTurnExecutionHash): RetiredCausal | null {
     assertTurnExecutionIdentityFields({ ...fields, causal });
     if (data.immutableIdentity !== identity(data, original)) return null;
     if (hasCoverage && data.coveredMessageIdsIdentity !== identity(data, causal)) return null;
+    // Both historical and current Lua writers persist absent lifecycle values as empty strings.
+    // Match the normal codec before validating; a terminal row still requires an actual end time.
+    const endedAt = data.endedAt ? Number(data.endedAt) : undefined;
+    const terminalReason = data.terminalReason || undefined;
     if (data.status === 'running') {
-      if (data.endedAt !== undefined || data.terminalReason !== undefined) return null;
+      if (endedAt !== undefined || terminalReason !== undefined) return null;
     } else {
+      if (endedAt === undefined) return null;
       assertTurnExecutionTerminalInput(fields, {
         status: data.status as TurnExecutionTerminalStatus,
-        endedAt: Number(data.endedAt),
-        ...(data.terminalReason !== undefined ? { terminalReason: data.terminalReason } : {}),
+        endedAt,
+        ...(terminalReason !== undefined ? { terminalReason } : {}),
       });
     }
     return causal;

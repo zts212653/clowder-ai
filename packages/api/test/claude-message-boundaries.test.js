@@ -153,9 +153,10 @@ test('SDK invoke preserves the handoff boundary and resets identity between invo
     catId: 'opus',
     model: 'claude-test',
     l0CompilerFn: async () => 'test L0',
-    queryFn: () => ({
+    queryFn: ({ prompt }) => ({
       interrupt: async () => {},
       async *[Symbol.asyncIterator]() {
+        await prompt[Symbol.asyncIterator]().next();
         yield { type: 'system', subtype: 'init', session_id: 'boundary-sdk' };
         yield start('progress');
         yield delta('进度：');
@@ -166,6 +167,7 @@ test('SDK invoke preserves the handoff boundary and resets identity between invo
         yield stop();
         yield snapshot('final', [textBlock('@codex\n请处理')]);
         yield { type: 'result', subtype: 'success', session_id: 'boundary-sdk' };
+        yield { type: 'system', subtype: 'session_state_changed', state: 'idle' };
       },
     }),
   });
@@ -174,6 +176,7 @@ test('SDK invoke preserves the handoff boundary and resets identity between invo
     for await (const message of service.invoke('test', {
       toolExecutionPolicy: { mode: 'read_only', replayDeniedToolNames: [] },
     })) {
+      assert.notEqual(message.type, 'error');
       if (message.type === 'text') text = accumulateTextAggregate(text, message.content, message.textMode);
     }
     assert.equal(text, '进度：\n\n@codex\n请处理');

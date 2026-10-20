@@ -12,12 +12,14 @@ export function ArtworkVideoPlayback({
   duration,
   paused,
   seekTo,
+  fullscreen,
 }: {
   video: RefObject<HTMLVideoElement>;
   seconds: number;
   duration: number;
   paused: boolean;
   seekTo: (seconds: number) => void;
+  fullscreen?: { active: boolean; failed: boolean; toggle: () => void; available: boolean };
 }) {
   const t = useShellCopy(videoArtworkCopy);
   const [volume, setVolume] = useState(1),
@@ -104,6 +106,17 @@ export function ArtworkVideoPlayback({
           </option>
         ))}
       </select>
+      {fullscreen?.available ? (
+        <button
+          type="button"
+          aria-label={fullscreen.active ? t.exitFullscreen : t.fullscreen}
+          title={`${fullscreen.active ? t.exitFullscreen : t.fullscreen} · F`}
+          onClick={fullscreen.toggle}
+        >
+          <ReviewToolbarIcon name={fullscreen.active ? 'exitFullscreen' : 'fullscreen'} />
+        </button>
+      ) : null}
+      {fullscreen?.failed ? <span role="status">{t.fullscreenFailed}</span> : null}
     </div>
   );
 }

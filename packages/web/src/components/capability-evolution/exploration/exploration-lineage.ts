@@ -1,6 +1,10 @@
 import { type EvolutionExplorationNodeV1, refIdentity } from '@cat-cafe/shared';
 
 export const LINEAGE_NODE_SIZE = { width: 176, height: 112 };
+export const HISTORICAL_LINEAGE_NODE_SIZE = { width: 136, height: 88 };
+export const HISTORICAL_LINEAGE_MIN_ZOOM = 0.9;
+const HISTORICAL_LINEAGE_COLUMN_GAP = 160;
+const HISTORICAL_LINEAGE_ROW_GAP = 120;
 
 export interface LineageRoutePoint {
   x: number;
@@ -108,8 +112,8 @@ export function layoutHistoricalLineage(
     positioned.push({
       node,
       key,
-      x: 24 + (direction === 'vertical' ? lane * 208 : index * 208),
-      y: 24 + (direction === 'vertical' ? index * 144 : lane * 144),
+      x: 24 + (direction === 'vertical' ? lane * HISTORICAL_LINEAGE_COLUMN_GAP : index * HISTORICAL_LINEAGE_COLUMN_GAP),
+      y: 24 + (direction === 'vertical' ? index * HISTORICAL_LINEAGE_ROW_GAP : lane * HISTORICAL_LINEAGE_ROW_GAP),
     });
   });
 
@@ -118,12 +122,12 @@ export function layoutHistoricalLineage(
     nodes: positioned,
     width: Math.max(
       240,
-      ...positioned.map((node) => node.x + LINEAGE_NODE_SIZE.width + 24),
+      ...positioned.map((node) => node.x + HISTORICAL_LINEAGE_NODE_SIZE.width + 24),
       ...routePoints.map((point) => point.x + 24),
     ),
     height: Math.max(
       160,
-      ...positioned.map((node) => node.y + LINEAGE_NODE_SIZE.height + 24),
+      ...positioned.map((node) => node.y + HISTORICAL_LINEAGE_NODE_SIZE.height + 24),
       ...routePoints.map((point) => point.y + 24),
     ),
     hiddenCount: hidden.size,
@@ -141,7 +145,9 @@ export function historicalLineageEdgeRoutes(
 ) {
   const byKey = new Map(nodes.map((node) => [node.key, node]));
   const axisCenter = (node: ExplorationPositionedNode) =>
-    direction === 'map' ? node.x + LINEAGE_NODE_SIZE.width / 2 : node.y + LINEAGE_NODE_SIZE.height / 2;
+    direction === 'map'
+      ? node.x + HISTORICAL_LINEAGE_NODE_SIZE.width / 2
+      : node.y + HISTORICAL_LINEAGE_NODE_SIZE.height / 2;
   const routed = nodes
     .flatMap((child) =>
       child.node.parentEdges.flatMap((edge) => {
@@ -186,26 +192,27 @@ export function historicalLineageEdgeRoutes(
     });
     if (direction === 'map') {
       const start = {
-        x: edge.parent.x + LINEAGE_NODE_SIZE.width / 2,
-        y: edge.parent.y + LINEAGE_NODE_SIZE.height / 2,
+        x: edge.parent.x + HISTORICAL_LINEAGE_NODE_SIZE.width / 2,
+        y: edge.parent.y + HISTORICAL_LINEAGE_NODE_SIZE.height / 2,
       };
       const end = {
-        x: edge.child.x + LINEAGE_NODE_SIZE.width / 2,
-        y: edge.child.y + LINEAGE_NODE_SIZE.height / 2,
+        x: edge.child.x + HISTORICAL_LINEAGE_NODE_SIZE.width / 2,
+        y: edge.child.y + HISTORICAL_LINEAGE_NODE_SIZE.height / 2,
       };
-      const laneY = Math.max(...spanned.map((node) => node.y + LINEAGE_NODE_SIZE.height)) + 64 + channel * 24;
+      const laneY =
+        Math.max(...spanned.map((node) => node.y + HISTORICAL_LINEAGE_NODE_SIZE.height)) + 48 + channel * 20;
       result.set(edge.key, [start, { x: start.x, y: laneY }, { x: end.x, y: laneY }, end]);
       continue;
     }
     const start = {
-      x: edge.parent.x + LINEAGE_NODE_SIZE.width / 2,
-      y: edge.parent.y + LINEAGE_NODE_SIZE.height / 2,
+      x: edge.parent.x + HISTORICAL_LINEAGE_NODE_SIZE.width / 2,
+      y: edge.parent.y + HISTORICAL_LINEAGE_NODE_SIZE.height / 2,
     };
     const end = {
-      x: edge.child.x + LINEAGE_NODE_SIZE.width / 2,
-      y: edge.child.y + LINEAGE_NODE_SIZE.height / 2,
+      x: edge.child.x + HISTORICAL_LINEAGE_NODE_SIZE.width / 2,
+      y: edge.child.y + HISTORICAL_LINEAGE_NODE_SIZE.height / 2,
     };
-    const laneX = Math.max(...spanned.map((node) => node.x + LINEAGE_NODE_SIZE.width)) + 64 + channel * 24;
+    const laneX = Math.max(...spanned.map((node) => node.x + HISTORICAL_LINEAGE_NODE_SIZE.width)) + 48 + channel * 20;
     result.set(edge.key, [start, { x: laneX, y: start.y }, { x: laneX, y: end.y }, end]);
   }
   return result;

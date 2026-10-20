@@ -1,4 +1,5 @@
 import { buildGhCliEnv, withHiddenGhCliWindow } from './gh-cli-env.js';
+import { executeGitHubProcess } from './gh-process.js';
 
 export type PrReviewEventWaitUncoveredReason =
   | 'subject_mismatch'
@@ -82,13 +83,7 @@ export async function verifyPrReviewEventWaitCoverage(
   input: VerifyPrReviewEventWaitCoverageInput,
   options: VerifyPrReviewEventWaitCoverageOptions = {},
 ): Promise<PrReviewEventWaitCoverageResult> {
-  const execFn =
-    options.execFileAsync ??
-    (async (file: string, args: string[], execOptions: ExecFileOptions) => {
-      const { execFile } = await import('node:child_process');
-      const { promisify } = await import('node:util');
-      return promisify(execFile)(file, args, execOptions);
-    });
+  const execFn = options.execFileAsync ?? executeGitHubProcess;
   const execOptions = {
     timeout: 15_000,
     maxBuffer: 2 * 1024 * 1024,

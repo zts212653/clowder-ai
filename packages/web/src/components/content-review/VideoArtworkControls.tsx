@@ -7,13 +7,16 @@ import { useShellCopy } from '@/components/shell/shell-copy';
 import { useArtworkLightboxScope, useFloatingArtworkPresentation } from './ArtworkLightboxScope';
 import { ArtworkVideoPlayback } from './ArtworkVideoPlayback';
 import type { ReviewCanvasMode } from './ReviewCanvasToolbar';
+import type { PendingChatMark } from './ReviewPendingChatMarks';
 import { browserTimeToTick, tickToBrowserTime } from './review-geometry';
+import { useArtworkVideoFullscreen } from './useArtworkVideoFullscreen';
 import { videoArtworkCopy } from './video-artwork.shell-copy';
 
 type Video = Extract<ImmutableMedia, { kind: 'video' }>;
 export function VideoArtworkControls({
   media,
   video,
+  player,
   seconds,
   frameReady,
   mode,
@@ -24,11 +27,13 @@ export function VideoArtworkControls({
   onFrame,
   seekTo,
   annotations,
+  pendingMarks = [],
   onAnnotationActive,
   children,
 }: {
   media: Video;
   video: RefObject<HTMLVideoElement>;
+  player?: RefObject<HTMLElement>;
   seconds: number;
   frameReady: boolean;
   mode: ReviewCanvasMode;
@@ -39,10 +44,12 @@ export function VideoArtworkControls({
   onFrame: () => void;
   seekTo: (seconds: number) => void;
   annotations: readonly { id: string; anchor: ArtifactReviewAnchor }[];
+  pendingMarks?: readonly PendingChatMark[];
   onAnnotationActive: (id: string) => void;
   children: ReactNode;
 }) {
   const t = useShellCopy(videoArtworkCopy);
+  const fullscreen = useArtworkVideoFullscreen(player, video);
   const [rangeOpen, setRangeOpen] = useState(false);
   const [paused, setPaused] = useState(true);
   const [start, setStart] = useState('0'),
@@ -50,6 +57,14 @@ export function VideoArtworkControls({
   const floating = useFloatingArtworkPresentation();
   const toolsSlot = useArtworkLightboxScope()?.toolsSlot;
   const duration = tickToBrowserTime(media.startTick + media.durationTicks, media);
+  const pendingRanges = pendingMarks.flatMap((mark) =>
+    mark.anchor.kind === 'video-range' &&
+    mark.anchor.streamId === media.streamId &&
+    !mark.anchor.frameRegion &&
+    !mark.anchor.framePoint
+      ? [{ ...mark, anchor: mark.anchor }]
+      : [],
+  );
   useEffect(() => {
     const node = video.current;
     if (!node) return;
@@ -164,8 +179,15 @@ export function VideoArtworkControls({
   return (
     <>
       <div className="shrink-0 px-3 py-2 text-xs" data-testid="artwork-video-timeline">
-        <ArtworkVideoPlayback video={video} seconds={seconds} duration={duration} paused={paused} seekTo={seekTo} />
-        {annotations.length ? (
+        <ArtworkVideoPlayback
+          video={video}
+          seconds={seconds}
+          duration={duration}
+          paused={paused}
+          seekTo={seekTo}
+          fullscreen={fullscreen}
+        />
+        {annotations.length || pendingRanges.length ? (
           <div className="relative mt-1 h-5" role="group" aria-label={t.annotations}>
             {annotations.map((item, index) =>
               item.anchor.kind === 'video-range' ? (
@@ -173,6 +195,7 @@ export function VideoArtworkControls({
                   type="button"
                   key={item.id}
                   aria-label={t.annotation(index + 1)}
+                  disabled={fullscreen.active}
                   className="absolute rounded-full bg-cafe-accent px-1 text-[var(--cafe-surface)]"
                   style={{ left: `${((item.anchor.startTick - media.startTick) / media.durationTicks) * 100}%` }}
                   onClick={() => onAnnotationActive(item.id)}
@@ -181,10 +204,25 @@ export function VideoArtworkControls({
                 </button>
               ) : null,
             )}
+            {pendingRanges.map((mark) => (
+              <span
+                role="img"
+                key={`pending:${mark.id}`}
+                data-video-range={mark.id}
+                aria-label={`${t.selectedRange} ${mark.label ?? mark.id}`}
+                className="absolute h-4 overflow-hidden rounded bg-cafe-accent text-center text-[var(--cafe-surface)]"
+                style={{
+                  left: `${Math.max(0, (mark.anchor.startTick - media.startTick) / media.durationTicks) * 100}%`,
+                  width: `${Math.min(1, (mark.anchor.endTick - mark.anchor.startTick) / media.durationTicks) * 100}%`,
+                }}
+              >
+                {mark.label ?? mark.id}
+              </span>
+            ))}
           </div>
         ) : null}
       </div>
-      {floating && toolsSlot ? createPortal(tools, toolsSlot) : tools}
+      {!fullscreen.active ? (floating && toolsSlot ? createPortal(tools, toolsSlot) : tools) : null}
     </>
   );
 }

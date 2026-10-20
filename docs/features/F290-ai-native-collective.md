@@ -4,7 +4,7 @@ related_features: [F044, F077, F128, F168, F195, F202, F232, F246, F254, F276, F
 topics: [ai-native-collaboration, multi-human, multi-agent, collective, cafe, channel, topic, asset, annotation, rich-message, task, vote, team-memory]
 doc_kind: spec
 created: 2026-08-08
-updated: 2026-10-19
+updated: 2026-10-20
 tips_exempt: "Renewed 2026-10-18 for Task038 and the project-management v1.2 first slice: the Project entry and its list/dependencies/board views are persistent primary navigation, while accept/claim/result-file actions appear on the exact Task or result that can use them; proactive tips would duplicate visible contextual affordances before a relevant object exists. The first-entry guide remains directly visible and replayable from members and 我的 Café."
 description: "让多个独立 Café 在同一个 Collective 中围绕对话、资产、工作与关系持续协同；私人空间不被吞并，承诺、来源与团队记忆也不会掉线。"
 description_source: human
@@ -70,7 +70,7 @@ mcp_admission_claims:
 
 # F290: AI-native Collective — 多人·多 Agent 共同世界
 
-> **Status**: in-progress / 2026-10-19：旧同Café选猫/失效责任邀请两P1与R1状态反例已在5739 Alpha转绿；原266在5744关闭C-UAT-1/2，并在5748 Alpha `8ae121bd2a` / boot166关闭C-UAT-3，原三处页面纠偏全部通过。图组密度5737已由原414补验并释放。正式5201按You494单独恢复，Host/3003/3004保持e8c/boot38，六待办来源完整可读、原Work文件已绑定，原设计141限定通过；成果漏计修复5745已装入同一Alpha，但独立计数验收与正式Host加载仍待续。完整v1.2、真人OAuth/文件打开、双真人双Café、真实模型与整项验收继续开放。
+> **Status**: in-progress / 2026-10-19：旧同Café选猫/失效责任邀请两P1与R1状态反例已在5739 Alpha转绿；原266在5744关闭C-UAT-1/2，并在5748 Alpha `8ae121bd2a` / boot166关闭C-UAT-3，原三处页面纠偏全部通过。图组密度5737已由原414补验并释放。10-19正式5201单独恢复及原设计141限定通过的证据保留；10-20只读观测正式health为a8df6fcb66f/boot40，Git已含5745/5748，其独立成果计数验收仍待续。完整v1.2、真人OAuth/文件打开、双真人双Café、真实模型与整项验收继续开放。
 > **Owner**: 小星星·Maine Coon (@codex-astra, GPT-6 Astra；operator 2026-09-06 交接)
 > **Design / implementation provenance**: Sol + Fable 共创原设计；Sol 负责既有 runtime/provider 纵切片
 > **Priority**: P1

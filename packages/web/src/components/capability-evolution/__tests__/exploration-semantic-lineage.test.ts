@@ -1,6 +1,8 @@
 import { type EvolutionExplorationNodeV1, refIdentity } from '@cat-cafe/shared';
 import { describe, expect, it } from 'vitest';
 import {
+  HISTORICAL_LINEAGE_MIN_ZOOM,
+  HISTORICAL_LINEAGE_NODE_SIZE,
   historicalLineageEdgeKey,
   historicalLineageEdgeRoutes,
   layoutExplorationLineage,
@@ -11,6 +13,7 @@ import {
 } from '../exploration/exploration-lineage';
 import { DEFAULT_EXPLORATION, explorationReadingSchema } from '../exploration/exploration-reading';
 import { lineageLabels } from '../exploration/lineage-labels';
+import { fitLineageViewport } from '../exploration/lineage-viewport';
 
 const ref = (id: string) => ({ ownerFeatureId: 'example-owner', ownerStateRef: id, version: 'v1' });
 const node = (id: string, parents: string[] = []): EvolutionExplorationNodeV1 => ({
@@ -78,6 +81,69 @@ describe('readable lineage at different scales', () => {
     expect(map.nodes[3]?.node.parentEdges).toHaveLength(2);
     expect(map.nodes[4]?.y).not.toBe(map.nodes[0]?.y);
   });
+  it('keeps twelve historical cards readable and horizontally pannable when the host is narrower than the story', () => {
+    const nodes = Array.from({ length: 12 }, (_, index) => {
+      const id = `step-${index + 1}`;
+      const base = node(id, index ? [`step-${index}`] : []);
+      if (base.kind !== 'public_archive') throw new Error('Expected a public archive test node');
+      return { ...base, history: { period: `10月${index + 1}日`, updatedThrough: '2026-10-19' } };
+    });
+    const map = layoutHistoricalLineage(nodes, []);
+    const first = fitLineageViewport(
+      map,
+      { width: 880, height: 320 },
+      {
+        minimumZoom: HISTORICAL_LINEAGE_MIN_ZOOM,
+        nodeSize: HISTORICAL_LINEAGE_NODE_SIZE,
+        selectedKey: map.nodes[0]?.key,
+      },
+    );
+    const last = fitLineageViewport(
+      map,
+      { width: 880, height: 320 },
+      {
+        minimumZoom: HISTORICAL_LINEAGE_MIN_ZOOM,
+        nodeSize: HISTORICAL_LINEAGE_NODE_SIZE,
+        selectedKey: map.nodes.at(-1)?.key,
+      },
+    );
+    const minimumScreenGap = Math.min(
+      ...map.nodes.slice(1).map((entry, index) => {
+        const previous = map.nodes[index];
+        if (!previous) throw new Error('Historical cards must keep their authored predecessor');
+        return (entry.x - previous.x) * first.zoom - HISTORICAL_LINEAGE_NODE_SIZE.width;
+      }),
+    );
+
+    expect(first.zoom).toBe(HISTORICAL_LINEAGE_MIN_ZOOM);
+    expect(minimumScreenGap).toBeGreaterThanOrEqual(8);
+    expect(first.x).toBeGreaterThan(last.x);
+    expect(first.x).toBeGreaterThanOrEqual(0);
+    expect(map.width * last.zoom + last.x).toBeLessThanOrEqual(892);
+  });
+  it('keeps the selected independent lane inside a short historical canvas', () => {
+    const nodes = Array.from({ length: 3 }, (_, index) => {
+      const base = node(`root-${index + 1}`);
+      if (base.kind !== 'public_archive') throw new Error('Expected a public archive test node');
+      return { ...base, history: { period: `10月${index + 1}日`, updatedThrough: '2026-10-19' } };
+    });
+    const map = layoutHistoricalLineage(nodes, []);
+    const selected = map.nodes.at(-1);
+    if (!selected) throw new Error('Expected a selected independent history root');
+    const fitted = fitLineageViewport(
+      map,
+      { width: 390, height: 260 },
+      {
+        minimumZoom: HISTORICAL_LINEAGE_MIN_ZOOM,
+        nodeSize: HISTORICAL_LINEAGE_NODE_SIZE,
+        selectedKey: selected.key,
+      },
+    );
+    const selectedCenter = (selected.y + HISTORICAL_LINEAGE_NODE_SIZE.height / 2) * fitted.zoom + fitted.y;
+
+    expect(selectedCenter - HISTORICAL_LINEAGE_NODE_SIZE.height / 2).toBeGreaterThanOrEqual(0);
+    expect(selectedCenter + HISTORICAL_LINEAGE_NODE_SIZE.height / 2).toBeLessThanOrEqual(260);
+  });
   it.each([
     'map',
     'vertical',
@@ -113,8 +179,8 @@ describe('readable lineage at different scales', () => {
           segmentCrossesBox(start, point, {
             left: entry.x,
             top: entry.y,
-            right: entry.x + 176,
-            bottom: entry.y + 112,
+            right: entry.x + HISTORICAL_LINEAGE_NODE_SIZE.width,
+            bottom: entry.y + HISTORICAL_LINEAGE_NODE_SIZE.height,
           }),
         )
         .map((entry) => entry.key);
