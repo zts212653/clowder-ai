@@ -21,6 +21,7 @@ import { useVadInterrupt } from '@/hooks/useVadInterrupt';
 import { useVoiceAutoPlay } from '@/hooks/useVoiceAutoPlay';
 import { useVoiceStream } from '@/hooks/useVoiceStream';
 import { useActiveExecutionStore } from '@/stores/activeExecutionStore';
+import { useApprovalHubStore } from '@/stores/approvalHubStore';
 import { type ChatMessage, type Thread, useChatStore } from '@/stores/chatStore';
 import { useGuideStore } from '@/stores/guideStore';
 import { withQueuedInputPreviews } from '@/stores/queued-input-preview';
@@ -122,6 +123,7 @@ function InteractiveChatContainer({ threadId }: ChatContainerProps) {
   const bottomChromeObserverRef = useRef<ResizeObserver | null>(null);
   const bottomChromeObserverRafRef = useRef<number | null>(null);
   const [bottomChromeHeight, setBottomChromeHeight] = useState(0);
+  const approvalCount = useApprovalHubStore((state) => (state.isLoading || state.error ? 0 : state.count));
   const {
     setCurrentThread,
     viewMode,
@@ -1059,6 +1061,7 @@ function InteractiveChatContainer({ threadId }: ChatContainerProps) {
               messageSearchOpen={messageSearch.open}
               onToggleViewMode={() => setViewMode(viewMode === 'single' ? 'split' : 'single')}
               statusPanelOpen={statusPanelOpen && rightPanelMode === 'workspace'}
+              approvalCount={approvalCount}
               hasWorkspaceActivity={hasProjectedExecution || workspaceSurface !== 'home' || presentationLock !== null}
               onToggleStatusPanel={() => {
                 if (statusPanelOpen && rightPanelMode === 'workspace') {

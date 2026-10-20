@@ -16,9 +16,12 @@ import { type MemberDeleteCopy, MemberEditorHost } from '../members/MemberEditor
 import { MemberListHost } from '../members/MemberListHost';
 import { memberSaveCopy } from '../members/member-save.shell-copy';
 import { useMemberReturn } from '../members/useMemberReturn';
+import { MemoryHub } from '../memory/MemoryHub';
+import { MissionControlPage } from '../mission-control/MissionControlPage';
 import { PushSettingsPanel } from '../PushSettingsPanel';
 import { useShellCopy } from '../shell/shell-copy';
 import { useShellPresentation } from '../shell/shell-presentation';
+import { SignalInboxView } from '../signals/SignalInboxView';
 import { useConfirm } from '../useConfirm';
 import { VoiceSettingsPanel } from '../VoiceSettingsPanel';
 import { CatDossierContent } from './CatDossierContent';
@@ -43,9 +46,10 @@ import { SETTINGS_SECTIONS } from './settings-nav-config';
 interface SettingsContentProps {
   section: string;
   initialEditCatId?: string;
+  initialReferrerThread?: string | null;
 }
 
-export function SettingsContent({ section, initialEditCatId }: SettingsContentProps) {
+export function SettingsContent({ section, initialEditCatId, initialReferrerThread = null }: SettingsContentProps) {
   const accountsText = useShellCopy(accountsCopy);
   const saveText = useShellCopy(memberSaveCopy);
   const sectionText = useSettingsDetailText();
@@ -174,6 +178,30 @@ export function SettingsContent({ section, initialEditCatId }: SettingsContentPr
 
   if (section === 'marketplace') return <MarketplaceContent />;
   if (section === 'skills') return <SkillsContent />;
+  if (section === 'memory') {
+    return (
+      <div className="space-y-5">
+        <SettingsPageHeader title="记忆" subtitle="查看知识动态、检索证据、索引状态与记忆健康度" />
+        <MemoryHub variant="settings" activeTab="feed" initialReferrerThread={initialReferrerThread} />
+      </div>
+    );
+  }
+  if (section === 'mission-hub') {
+    return (
+      <div className="space-y-5">
+        <SettingsPageHeader title="Mission Hub" subtitle="查看 Feature、依赖关系与任务推进状态" />
+        <MissionControlPage variant="settings" />
+      </div>
+    );
+  }
+  if (section === 'signals') {
+    return (
+      <div className="space-y-5">
+        <SettingsPageHeader title="信号" subtitle="查看订阅来源、文章和研究时间线" />
+        <SignalInboxView variant="settings" initialReferrerThread={initialReferrerThread} />
+      </div>
+    );
+  }
   if (section === 'profiles') {
     return (
       <div className="space-y-4">

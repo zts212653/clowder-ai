@@ -100,12 +100,24 @@ describe('F322 设置与管理 shell (v2)', () => {
     expect(host.querySelector('[data-testid="settings-entry-system"]')?.getAttribute('aria-current')).toBe('page');
   });
 
-  it('choosing a section-based entry selects its first old section and keeps the other query params', () => {
+  it('choosing a section-based entry selects its first current section and keeps the other query params', () => {
     render('from=thread-1&cat=opus');
     click('settings-entry-connect');
     expect(nav.replace).toHaveBeenCalledTimes(1);
     const url = String(nav.replace.mock.calls[0]?.[0]);
-    expect(url).toContain('s=im');
+    expect(url).toContain('s=marketplace');
+    expect(url).toContain('from=thread-1');
+    expect(url).toContain('cat=opus');
+  });
+
+  it('opens an old IM bookmark in the unified plugin Manager without exposing a retired tab', () => {
+    render('s=im&from=thread-1&cat=opus');
+    expect(host.querySelector('[data-testid="content"]')?.getAttribute('data-section')).toBe('plugins');
+    expect(host.querySelector('[data-testid="settings-entry-connect"]')?.getAttribute('aria-current')).toBe('page');
+    expect(host.querySelector('[data-testid="settings-tab-im"]')).toBeNull();
+    click('settings-tab-skills');
+    const url = String(nav.replace.mock.calls[0]?.[0]);
+    expect(url).toContain('s=skills');
     expect(url).toContain('from=thread-1');
     expect(url).toContain('cat=opus');
   });

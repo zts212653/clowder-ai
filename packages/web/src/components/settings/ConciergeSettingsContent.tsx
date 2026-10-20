@@ -8,6 +8,8 @@ import { useCatData } from '@/hooks/useCatData';
 import { formatCompanionPartnerChoice } from '@/lib/companion-partner-name';
 import { useConciergeStore } from '@/stores/conciergeStore';
 import { apiFetch } from '@/utils/api-client';
+import { useConciergeRailToggle } from '../concierge/ConciergeRailToggle';
+import { useShellPresentation } from '../shell/shell-presentation';
 import { RadioOption, RangeSlider, TextInput, ToggleSwitch } from './ConciergeSettingsParts';
 import { SettingsField, SettingsPillButton, SettingsSection, SettingsText } from './primitives';
 
@@ -36,6 +38,8 @@ interface ConciergeSettingsState {
 
 export function ConciergeSettingsContent() {
   const { cats } = useCatData();
+  const companionEntry = useConciergeRailToggle();
+  const isV2 = useShellPresentation() === 'v2';
   const [state, setState] = useState<ConciergeSettingsState | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -56,7 +60,7 @@ export function ConciergeSettingsContent() {
           setState(data.config);
           // P2 fix: sync live store so ConciergeHost picks up correct state
           // even if its own fetchConfig() previously failed (configFailed=true).
-          useConciergeStore.setState(data.config);
+          useConciergeStore.setState({ ...data.config, configLoaded: true, configFailed: false });
         }
       } catch {
         if (!cancelled) setError('加载猫猫球配置失败');
@@ -157,7 +161,19 @@ export function ConciergeSettingsContent() {
         </SettingsText>
       )}
 
-      <SettingsSection title="伴随入口" description="左侧猫图标可唤回桌面猫猫，或打开原伴随对话。">
+      <SettingsSection
+        title="伴随入口"
+        description={
+          isV2 ? '在这里或通过左侧猫图标唤回桌面猫猫，或打开原伴随对话。' : '在这里唤回桌面猫猫，或打开原伴随对话。'
+        }
+      >
+        <SettingsPillButton
+          disabled={!companionEntry.visible}
+          onClick={() => void companionEntry.onClick()}
+          data-testid="concierge-settings-recall"
+        >
+          {companionEntry.label}
+        </SettingsPillButton>
         <a href="/settings?s=plugins" className="text-cafe-accent underline">
           查看桌面插件的启停与恢复状态
         </a>

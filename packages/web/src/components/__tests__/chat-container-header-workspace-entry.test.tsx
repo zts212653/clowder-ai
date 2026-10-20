@@ -47,6 +47,17 @@ describe('F284 Workspace entry', () => {
     expect(button?.dataset.clientInteractive).toBe('true');
   });
 
+  it('projects pending approvals onto the stable Workspace entry', async () => {
+    await act(async () => {
+      root.render(<PanelToggle onToggleStatusPanel={vi.fn()} statusPanelOpen={false} approvalCount={7} />);
+    });
+
+    const button = container.querySelector<HTMLButtonElement>('[data-testid="workspace-panel-toggle"]');
+    expect(button?.getAttribute('aria-label')).toBe('打开 Workspace，7 项待审批');
+    expect(button?.querySelector('[data-testid="workspace-approval-count"]')?.textContent).toBe('7');
+    expect(button?.querySelector('[data-testid="workspace-activity-badge"]')).toBeNull();
+  });
+
   it('keeps one Workspace recall control instead of a second status entry in the header', async () => {
     await act(async () => {
       root.render(
@@ -67,6 +78,31 @@ describe('F284 Workspace entry', () => {
     expect(container.querySelector('button[aria-label="导出对话"]')).toBeNull();
     expect(container.querySelector('button[aria-label="语音陪伴"]')).toBeNull();
     expect(container.querySelector('button[aria-label="会议伴随"]')).toBeNull();
+  });
+
+  it('carries pending approvals through the v2 header into its Workspace control', async () => {
+    writeShellPresentation('v2');
+    const workspace = vi.fn();
+    await act(async () => {
+      root.render(
+        <ChatContainerHeader
+          sidebarOpen={false}
+          onToggleSidebar={vi.fn()}
+          threadId="origin"
+          viewMode="single"
+          onToggleViewMode={vi.fn()}
+          statusPanelOpen={false}
+          onToggleStatusPanel={workspace}
+          approvalCount={7}
+        />,
+      );
+    });
+
+    const button = container.querySelector<HTMLButtonElement>('[data-testid="workspace-panel-toggle"]');
+    expect(button?.getAttribute('aria-label')).toBe('打开 Workspace，7 项待审批');
+    expect(button?.querySelector('[data-testid="workspace-approval-count"]')?.textContent).toBe('7');
+    act(() => button?.click());
+    expect(workspace).toHaveBeenCalledOnce();
   });
 
   it('opens message search through its named Host callback without opening Workspace', async () => {
