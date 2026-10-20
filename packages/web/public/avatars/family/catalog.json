@@ -56,6 +56,22 @@
     "roleTemplateId": "ragdoll"
   },
   {
+    "id": "cat-3wffwdg9",
+    "breed": "maine-coon",
+    "group": "缅因猫",
+    "label": "砚砚 6",
+    "src": "/avatars/family/yanyan6-sol.png",
+    "roleTemplateId": "maine-coon"
+  },
+  {
+    "id": "cat-yanyan61",
+    "breed": "maine-coon",
+    "group": "缅因猫",
+    "label": "砚砚 6.1",
+    "src": "/avatars/family/yanyan61-sol.png",
+    "roleTemplateId": "maine-coon"
+  },
+  {
     "id": "codex61-sol",
     "breed": "maine-coon",
     "group": "缅因猫",

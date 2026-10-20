@@ -25,6 +25,9 @@ describe('F291 Codex speed contract', () => {
     ['openai/gpt-5.6-sol', true],
     ['gpt-5.3-codex', false],
     ['gpt-6', false],
+    ['gpt-6.1-sol', true],
+    ['gpt-6.1-sol-long', true],
+    ['openai/gpt-6.1-sol', true],
     ['', false],
   ])('classifies the v1 Fast model family %s', (model, expected) => {
     expect(supportsCodexFastModel(model)).toBe(expected);

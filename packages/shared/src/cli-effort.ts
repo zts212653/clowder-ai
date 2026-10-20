@@ -28,7 +28,15 @@ const CLI_EFFORT_OPTIONS_BY_PROVIDER: Record<CliEffortProvider, readonly CliEffo
 const OPENAI_MAX_EFFORT_OPTIONS: readonly CliEffortPreset[] = ['low', 'medium', 'high', 'xhigh', 'max'];
 const OPENAI_MAX_ULTRA_EFFORT_OPTIONS: readonly CliEffortPreset[] = [...OPENAI_MAX_EFFORT_OPTIONS, 'ultra'];
 const OPENAI_MAX_MODELS = new Set(['gpt-5.6-luna', 'gpt-6-luna']);
-const OPENAI_MAX_ULTRA_MODELS = new Set(['gpt-5.6', 'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-6-astra', 'gpt-6-sol']);
+const OPENAI_MAX_ULTRA_MODELS = new Set([
+  'gpt-5.6',
+  'gpt-5.6-sol',
+  'gpt-5.6-terra',
+  'gpt-6-astra',
+  'gpt-6-sol',
+  // Codex 0.163.0-alpha.10.2 model/list, 2026-10-19 (Codex-specific ultra preset).
+  'gpt-6.1-sol',
+]);
 
 const CLI_EFFORT_DEFAULT_BY_PROVIDER: Record<CliEffortProvider, CliEffortPreset> = {
   anthropic: 'max',

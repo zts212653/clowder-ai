@@ -12,6 +12,22 @@ describe('model-pricing', () => {
       assert.equal(pricing.outputPerMillion, 14.0);
     });
 
+    it('prices gpt-6.1-sol standard and long per the official model card', () => {
+      const std = getModelPricing('gpt-6.1-sol');
+      const long = getModelPricing('gpt-6.1-sol-long');
+      assert.ok(std && long);
+      assert.equal(std.inputPerMillion, 2);
+      assert.equal(std.cachedInputPerMillion, 0.1);
+      assert.equal(std.outputPerMillion, 10);
+      assert.equal(long.inputPerMillion, 4);
+      assert.equal(long.cachedInputPerMillion, 0.2);
+      assert.equal(long.outputPerMillion, 15);
+      for (const pricing of [std, long]) {
+        assert.equal(pricing.source, 'https://developers.openai.com/api/docs/models/gpt-6.1-sol');
+        assert.equal(pricing.verifiedAt, '2026-10-19');
+      }
+    });
+
     it('returns undefined for unknown models', () => {
       assert.equal(getModelPricing('unknown-model-xyz'), undefined);
     });
@@ -24,6 +40,8 @@ describe('model-pricing', () => {
         'gpt-5.4-long',
         'gpt-5.5',
         'gpt-5.5-long',
+        'gpt-6.1-sol',
+        'gpt-6.1-sol-long',
       ]) {
         assert.ok(getModelPricing(model), `missing pricing for ${model}`);
       }

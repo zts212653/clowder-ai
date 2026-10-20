@@ -71,6 +71,21 @@ const MODEL_PRICING: Record<string, ModelPricing> = {
     cachedInputPerMillion: 1.0,
     outputPerMillion: 45.0,
   },
+  // GPT-6.1 Sol standard; above 272K input: 2× input/cache and 1.5× output.
+  'gpt-6.1-sol': {
+    inputPerMillion: 2.0,
+    cachedInputPerMillion: 0.1,
+    outputPerMillion: 10.0,
+    source: 'https://developers.openai.com/api/docs/models/gpt-6.1-sol',
+    verifiedAt: '2026-10-19',
+  },
+  'gpt-6.1-sol-long': {
+    inputPerMillion: 4.0,
+    cachedInputPerMillion: 0.2,
+    outputPerMillion: 15.0,
+    source: 'https://developers.openai.com/api/docs/models/gpt-6.1-sol',
+    verifiedAt: '2026-10-19',
+  },
 
   // ── Kimi (Moonshot) ────────────────────────────────────────────────
   // clowder-ai#1197: API-equivalent estimates only. Kimi CLI never reports

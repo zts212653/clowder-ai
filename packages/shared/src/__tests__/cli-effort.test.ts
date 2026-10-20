@@ -51,6 +51,14 @@ describe('CLI effort capabilities', () => {
       'max',
       'ultra',
     ]);
+    expect(getCliEffortOptionsForProvider('openai', 'gpt-6.1-sol')).toEqual([
+      'low',
+      'medium',
+      'high',
+      'xhigh',
+      'max',
+      'ultra',
+    ]);
     expect(getCliEffortOptionsForProvider('openai', 'gpt-6-luna')).toEqual(['low', 'medium', 'high', 'xhigh', 'max']);
     expect(getCliEffortOptionsForProvider('openai', 'gpt-5.5')).toEqual(['low', 'medium', 'high', 'xhigh']);
     expect(getCliEffortOptionsForProvider('openai', 'gpt-5.6-unknown')).toEqual(['low', 'medium', 'high', 'xhigh']);
@@ -65,6 +73,7 @@ describe('CLI effort capabilities', () => {
     expect(isValidCliEffortForProvider('openai', 'ultra', 'gpt-5.6-luna')).toBe(false);
     expect(isValidCliEffortForProvider('openai', 'max', 'gpt-6-astra')).toBe(true);
     expect(isValidCliEffortForProvider('openai', 'ultra', 'gpt-6-sol')).toBe(true);
+    expect(isValidCliEffortForProvider('openai', 'ultra', 'gpt-6.1-sol')).toBe(true);
     expect(isValidCliEffortForProvider('openai', 'max', 'gpt-6-luna')).toBe(true);
     expect(isValidCliEffortForProvider('openai', 'ultra', 'gpt-6-luna')).toBe(false);
     expect(isValidCliEffortForProvider('openai', 'ultra', 'gpt-5.5')).toBe(false);

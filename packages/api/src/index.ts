@@ -2126,6 +2126,7 @@ async function main(): Promise<void> {
             const appServerHostPool = getOrCreateCodexAppServerPool(codexAppServerPoolRegistry, id);
             service = new CodexAgentService({
               catId,
+              cliCommand: config.cli?.command,
               appServerHostPool,
               carrierMode: config.carrier === 'app_server' ? 'app_server' : 'exec_json',
               nativeRealtimeCompanionEnabled,
