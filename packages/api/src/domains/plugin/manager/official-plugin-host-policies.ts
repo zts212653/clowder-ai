@@ -41,6 +41,11 @@ function connectorGrants(...unused: readonly (typeof CONNECTOR_GRANTS)[number][]
 export const OFFICIAL_PLUGIN_HOST_POLICIES: readonly MachineCatalogHostPolicy[] = [
   { pluginId: 'dev.clowder.genoffice-docx', effectiveGrants: [] },
   {
+    pluginId: 'dev.clowder.xiangqi',
+    // Verify the human's opening source and chosen conversation/cat; deliver confirmed moves there.
+    effectiveGrants: ['thread.readContent', 'thread.listMetadata', 'messaging.send'],
+  },
+  {
     pluginId: 'official.collective-connector',
     // Shipped Collective features: private state/browser binding, ordinary thread messages,
     // canonical Task data, and subscribed result materials. Each Host port retains its
