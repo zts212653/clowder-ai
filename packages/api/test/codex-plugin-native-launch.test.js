@@ -9,7 +9,10 @@ import { isAbsolute, join, relative } from 'node:path';
 import { PassThrough } from 'node:stream';
 import { test } from 'node:test';
 import { resolveCodexAccountLaunch } from '../dist/config/codex-account-launch.js';
-import { CodexAgentService } from '../dist/domains/cats/services/agents/providers/CodexAgentService.js';
+import {
+  CodexAgentService,
+  codexConfigObjectFromArgs,
+} from '../dist/domains/cats/services/agents/providers/CodexAgentService.js';
 
 // This suite tests only the provider's launch boundary. The Host resolver and
 // public source admission are separate authorities; these callbacks are fakes,
@@ -82,9 +85,8 @@ async function fixture(t, serviceOverrides = {}) {
     },
   };
   const spawnFn = (_command, args, options) => {
-    const values = configValues(args);
-    const launchArgs = values.get('mcp_servers.plugin__fixture__native.args');
-    const specPath = launchArgs ? JSON.parse(launchArgs)[1] : undefined;
+    const launchArgs = codexConfigObjectFromArgs(args).mcp_servers?.[server.name]?.args;
+    const specPath = launchArgs?.[1];
     const spec = specPath ? JSON.parse(readFileSync(specPath, 'utf8')) : undefined;
     const specMode = specPath ? statSync(specPath).mode & 0o777 : undefined;
     const authPath = options.env.CODEX_HOME && join(options.env.CODEX_HOME, 'auth.json');
@@ -174,6 +176,27 @@ async function refused(f, options) {
   assert.equal(f.calls.length, 0, 'native admission refusal must precede provider spawn');
   assert.ok(thrown || messages.some((message) => message.type === 'error'), 'refusal must be explicit');
 }
+
+test(
+  'native dotted plugin identity is carried as a literal MCP key without ambient servers',
+  { timeout: 15000 },
+  async (t) => {
+    const f = await fixture(t);
+    const name = 'plugin__dev.clowder.xiangqi__xiangqi-analysis';
+    f.launch.server.name = name;
+    const messages = await collect(f.service.invoke('Fixture prompt', f.options));
+    assert.equal(f.calls.length, 1, JSON.stringify(messages));
+    const args = f.calls[0].args;
+    const servers = codexConfigObjectFromArgs(args).mcp_servers;
+    assert.deepEqual(Object.keys(servers), [name]);
+    assert.equal(servers[name].enabled, true);
+    assert.equal(f.calls[0].spec.env.CLOWDER_PLUGIN_ACTION_TOKEN, 'activation-fixture');
+    assert.equal(
+      args.some((arg) => arg.startsWith('mcp_servers."')),
+      false,
+    );
+  },
+);
 
 test('native launch refuses missing or unpaired Host admission', { timeout: 15000 }, async (t) => {
   for (const shape of ['absent', 'no-current-check', 'no-policy', 'no-signal']) {
