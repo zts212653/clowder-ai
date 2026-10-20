@@ -1,0 +1,4 @@
+[2026-09-30T17:08:26.422Z] Starting Next.js: /opt/homebrew/bin/node /Users/lang/workspace/github-lab/clowder-1452-loopback-only/.acceptance/installed-loopback/packages/web/node_modules/next/dist/bin/next start --port 61742 --hostname 127.0.0.1
+PID=96609; Next=14.2.35; port=61742; production HTTP=200
+COMMAND   PID USER   FD   TYPE             DEVICE SIZE/OFF NODE NAME
+node    96609 lang   12u  IPv4 0x612a49160e70f983      0t0  TCP 127.0.0.1:61742 (LISTEN)
