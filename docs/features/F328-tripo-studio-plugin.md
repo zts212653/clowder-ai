@@ -23,13 +23,17 @@ After：授权目标页面后，插件取得已有预览/模型，生成来源�
 
 ## Current State
 
+2026-10-19（当地）建筑线沿原 Task 请求恢复已生成、未接收的账号资产。本轮只读实查：生产仍为原 v0.1.5 实例，建筑线按其使用请求恢复 enabled/running 后 lifecycle 为 7；实际 `tripo_status` 返回 `HELPER_DISCONNECTED`、auth unverified。当前本机 Native 注册指向 v0.1.5 已准备目录；主线已发一次 Chrome 加载/授权步骤，本线不覆盖注册、不替换生产包、不重复催该确认。
+
+当前五工具只支持真实分享 URL，或已明确授权的 1–8 个模型页 UUID 及可用 preview 资源；`tripo_export_selected` 只复制已有本地文件，不请求供应商正式导出。现版和 v0.2.0 候选均没有全账号资产分页清单、生成记录或逐件实际扣分读取工具；不能把 /assets 页面、fixture 或旧 Alpha 记录当成已扫账号。本轮指定本地输入检索没有找到可立即回流的新建筑 GLB 或明确建筑分享 URL，未取得新文件；模型身份、余额/账单和账号完整性均保留未验证。具名恢复目录与机器可读缺口留在消费者项目，建筑总表、66 栋映射与 sharedscene 由主线维护，家里不复制项目资产数据。原 AC-2/5 与 Task 不关闭，不重抽已生成件、不调用另付费 API。
+
 首轮分享链接审模已可实际使用：独立 `official.tripo-studio` v0.1.5 已经 Host 准入、启用并提供五个可调用工具；源码已通过非作者封板审查并合入 PR #5645，main merge SHA `1d953f6a10ed2a24452ae3ec64588473ac41cb39`。四个用户分享链接经已安装 v0.1.4 插件生成 16 张旋转截图；v0.1.5 另完成 C1 四图真实旅程。来源矩阵与新版实采分别标记版本；16 张比较图的来源/编号/图像 SHA-256 已回读核验。四轮 NSWorkspace 前台采样与原 Chrome 窗口/活动标签前后记录均保持；这是采样证据，不声称连续监控。此前 v0.1.3 三轮前台变化与 v0.1.0 错误取证保留为失败/不充分证据，没有改写成通过。
 
 2026-10-16 operator 纠偏后，已按 F202 重新核定归属：Tripo 业务源码、独立构建与包发布属于 `clowder-ai-plugins`；Core 只消费版本化插件契约。Core PR #5658 已合入（main `d42b3917f12e789b2796493781208aa5ef7fceef`），移除本次 Tripo 业务源码、bundled 归档、专用 packer 与公开同步中的依赖准备/重建分支，只保留 `host-official-catalog.ts` 中 `official.tripo-studio` 的零 grant Host allow policy。它不提供发布坐标，也不凭空制造可安装版本。插件仓独立源码包 v0.1.7 已提交 PR #85（`e101cc541909031ac49a3fad896d43e1aa6c6f9b`），两条 Typecheck + Conformance CI 均通过；涉及根锁文件与 CI workflow，按该仓规则等待另一方 CODEOWNER mindfn 审查。尚未发布 npm 或进入官方 catalog；Core 去耦不等待该包发布。
 
 此前 PR #5655（main `36c37aa935f62768c47cc13d8f5cf249d7a8c485`）解决冻结源码构建依赖，并生成 Core 归档 v0.1.6；这是历史修复，现已由两仓归属纠偏取代，不再继续加固 Core 打包链。当前 Host 已加载的实例仍为 v0.1.5，其实例、配置和已有产物保留；本次不卸载、升级或重启。公开同步与最终 CI 仍由 Astra / Task062 负责，不据源码迁移或局部验证声称发布完成。
 
-模型/比较材料留在 `/home/user/projects/cat-planet/refs/review/tripo-plugin-dogfood/`（`index.html`、`manifest.json`、`host-receipt-v0.1.5.json`（矩阵保留 v0.1.4 真实来源） 及原始 provenance）。分享页尚无可用 GLB，插件回执为 `not_exported`。母线程已通过人工下载取得 C1 并进入 Blender；该文件只核验、不复制，不能算插件正式导出完成。可选 Chrome 扩展/本机组件仍未安装或授权，不是分享链接审模的前置。
+模型/比较材料留在 `/home/user/projects/cat-planet/refs/review/tripo-plugin-dogfood/`（`index.html`、`manifest.json`、`host-receipt-v0.1.5.json`（矩阵保留 v0.1.4 真实来源） 及原始 provenance）。首轮分享页未取得可用 GLB，插件回执为 `not_exported`。母线程已通过人工下载取得 C1 并进入 Blender；该文件只核验、不复制，不能算插件正式导出完成。已登录 Chrome 通道尚未完成授权旅程，不是分享链接审模的前置。
 
 ## What
 
@@ -47,7 +51,7 @@ After：授权目标页面后，插件取得已有预览/模型，生成来源�
 
 素材线用户 `[thread-id]#private-source-id` 已手动生成、贴图并导出Ragdoll A/B 静态 GLB；随后 `private-source-id` 又交付 A 的真实绑定与异常 walk 导出。素材线已核到 40 关节、1 skin、约 2.6 秒四足 walk，但前爪过折、后腿间蒙皮牵连，变形质量未通过。素材线沿既有责任修整现有动作与权重，**不再等待插件 Rig 入口，不为当前 A 重复生成或 AutoRig**。这些人工供应商导出不是插件成果；非空骨架/动画也不等于动作验收。页面来源必须来自真实 Studio URL，不能用 GLB 内部 UUID 拼造作品链接。
 
-本机组件已准备 v0.2.0，但 Chrome 扩展尚未连接、没有浏览器授权；02:05 UTC 的实际回执仍为 `HELPER_DISCONNECTED`。已向 You 给出一次 Chrome 原生加载与「生成与导出」授权的具体操作，等待该动作；不重复索要插件开发许可。Alpha 加载、源码 CI 与供应商真实生成/导出分别记录，不能互相代替。
+10-17 的本机组件准备 v0.2.0 是历史实验步骤，当时 Chrome 仍未连接或授权。10-19 建筑线沿当前生产插件重新准备 v0.1.5；本轮实查 Native launcher 与稳定目录均为 v0.1.5。旧 v0.2.0 目录、归档和源码仍在，#85/#87 仍 OPEN、待另一方 CODEOWNER，未 npm 发布。当前应沿主线已发的 v0.1.5 原生确认操作，不叠加历史 v0.2.0 加载指引。Alpha 加载、源码 CI、当前实际工具与供应商真实生成/导出分别记录，不能互相代替。
 
 ## User Journey
 

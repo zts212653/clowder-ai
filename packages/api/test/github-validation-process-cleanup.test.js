@@ -68,6 +68,7 @@ describe('default GitHub validation process ownership', { concurrency: false }, 
       const helperFile = join(dir, 'helper.cjs');
       const ghFile = join(dir, 'gh');
       const priorPath = process.env.PATH;
+      const priorLocalCommandFixtures = process.env.CAT_CAFE_PUBLIC_TEST_LOCAL_COMMAND_FIXTURES;
       let helperPid;
       try {
         await writeFile(
@@ -96,6 +97,7 @@ const timer = setInterval(() => {
         );
         await chmod(ghFile, 0o755);
         process.env.PATH = `${dir}${delimiter}${priorPath ?? ''}`;
+        process.env.CAT_CAFE_PUBLIC_TEST_LOCAL_COMMAND_FIXTURES = ghFile;
         // Exercise the actual default transport: injecting execFileAsync would
         // hide the production wiring defect that leaves the helper orphaned.
         await exerciseDefault(entry);
@@ -105,6 +107,8 @@ const timer = setInterval(() => {
         assert.equal(isRunning(helperPid), false, 'credential helper survived the completed default validation');
       } finally {
         restorePath(priorPath);
+        if (priorLocalCommandFixtures === undefined) delete process.env.CAT_CAFE_PUBLIC_TEST_LOCAL_COMMAND_FIXTURES;
+        else process.env.CAT_CAFE_PUBLIC_TEST_LOCAL_COMMAND_FIXTURES = priorLocalCommandFixtures;
         helperPid ??= Number(await readFile(helperPidFile, 'utf8').catch(() => ''));
         killHelper(helperPid);
         await rm(dir, { recursive: true, force: true });
