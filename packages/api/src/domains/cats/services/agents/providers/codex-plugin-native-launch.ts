@@ -7,6 +7,7 @@ import { codexManagedLaunchArgs } from '../../../../../config/codex-managed-laun
 import type { NativeMcpServer } from '../../../../plugin/declared/native-mcp-launches.js';
 import type { AgentServiceOptions } from '../../types.js';
 import { normalizeToolExecutionPolicy } from '../invocation/tool-execution-policy.js';
+import { codexMcpConfigArgs } from './codex-config-overrides.js';
 import { CODEX_LIVE_DISABLED_FEATURES } from './codex-live-policy.js';
 
 const AUTH_KEYS = ['OPENAI_API_KEY', 'OPENAI_ORG_ID', 'OPENAI_ORGANIZATION', 'OPENAI_PROJECT_ID'] as const;
@@ -216,7 +217,7 @@ export async function prepareCodexNativeLaunch(
       kind: 'public',
       options: captured,
       env,
-      args: Object.freeze(args),
+      args: Object.freeze(codexMcpConfigArgs(args)),
       serverName: server.name,
       assertCurrent,
       dispose,

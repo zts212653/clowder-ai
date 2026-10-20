@@ -6,7 +6,16 @@ import { assertCodexManagedPlatformSupport } from '../../../../../config/codex-m
 import { assertCodexSharedStateRoots } from '../../../../../config/codex-shared-state.js';
 import { inspectCodexImportSession, listCodexImportSessions } from './CodexLocalSessionSource.js';
 import { bindCodexAccountConfiguration } from './codex-app-server-account-configuration.js';
+import {
+  codexConfigObjectFromArgs,
+  codexMcpConfigArgs,
+  isCodexConfigObject,
+  mergeCodexConfig,
+} from './codex-config-overrides.js';
 import { CODEX_DESKTOP_ISOLATION_ARGS, CODEX_RESTRICTED_APPS_ARGS } from './codex-desktop-isolation.js';
+
+export { codexConfigObjectFromArgs } from './codex-config-overrides.js';
+
 import { extractUserEnvTemplates, hasSupportedEnvTemplate, resolveEnvMap } from './env-map.js';
 /**
  * Codex Agent Service
@@ -39,7 +48,6 @@ import {
   resolveCodexSpeed,
   resolveCodexSpeedWire,
 } from '@cat-cafe/shared';
-import { parse as parseToml } from 'smol-toml';
 import {
   resolveBinaryRoot,
   resolvePencilCommand,
@@ -894,7 +902,7 @@ async function buildCatCafeMcpArgs(
         // `cat-cafe` shim above (L371-379).
         if (!s.enabled) {
           disabledServers.push(s.name);
-          const dummyToml = /^[A-Za-z0-9_-]+$/.test(s.name) ? s.name : `"${s.name}"`;
+          const dummyToml = /^[A-Za-z0-9_-]+$/.test(s.name) ? s.name : toTomlString(s.name);
           if (s.transport === 'streamableHttp' && s.url) {
             // URL-based disabled: emit url + enabled=false to avoid transport
             // conflict with stale config.toml URL entries — overlaying stdio
@@ -922,7 +930,7 @@ async function buildCatCafeMcpArgs(
         // (same pattern as ClaudeAgentService). The resolver scans the local
         // machine for the latest Pencil MCP binary and returns {command, args}.
         if (s.resolver === 'pencil') {
-          const tomlName = /^[A-Za-z0-9_-]+$/.test(s.name) ? s.name : `"${s.name}"`;
+          const tomlName = /^[A-Za-z0-9_-]+$/.test(s.name) ? s.name : toTomlString(s.name);
           const pencil = await resolvePencilCommand({ projectRoot: configSourceRoot });
           if (pencil) {
             enabledServers.push(s.name);
@@ -957,7 +965,7 @@ async function buildCatCafeMcpArgs(
         // the token into an env var and point `bearer_token_env_var` at it.
         if (s.transport === 'streamableHttp' && s.url) {
           enabledServers.push(s.name);
-          const tomlName = /^[A-Za-z0-9_-]+$/.test(s.name) ? s.name : `"${s.name}"`;
+          const tomlName = /^[A-Za-z0-9_-]+$/.test(s.name) ? s.name : toTomlString(s.name);
           args.push(
             '--config',
             `mcp_servers.${tomlName}.url=${toTomlString(s.url)}`,
@@ -1019,7 +1027,7 @@ async function buildCatCafeMcpArgs(
         }
         enabledServers.push(s.name);
 
-        const tomlName = /^[A-Za-z0-9_-]+$/.test(s.name) ? s.name : `"${s.name}"`;
+        const tomlName = /^[A-Za-z0-9_-]+$/.test(s.name) ? s.name : toTomlString(s.name);
         args.push(
           '--config',
           `mcp_servers.${tomlName}.command=${toTomlString(cmd)}`,
@@ -1084,7 +1092,7 @@ async function buildCatCafeMcpArgs(
     },
     '#712: MCP invoke-time injection',
   );
-  return { args, bearerEnv, declaredServerNames: [...new Set(enabledServers)].sort() };
+  return { args: codexMcpConfigArgs(args), bearerEnv, declaredServerNames: [...new Set(enabledServers)].sort() };
 }
 
 export function isGitRepositoryPath(workingDirectory: string): boolean {
@@ -1134,38 +1142,6 @@ export function buildCodexAppServerArgs(args: readonly string[]): string[] {
     }
   }
   return out;
-}
-
-/** Convert Codex CLI `--config key=<toml>` pairs into app-server thread config. */
-export function codexConfigObjectFromArgs(args: readonly string[]): Record<string, unknown> {
-  let config: Record<string, unknown> = {};
-  for (let index = 0; index < args.length; index++) {
-    const flag = args[index];
-    if (flag !== '--config' && flag !== '-c') continue;
-    const assignment = args[index + 1];
-    if (assignment !== undefined) {
-      const overlay = parseToml(assignment) as Record<string, unknown>;
-      config = mergeCodexConfig(config, overlay);
-      index++;
-    }
-  }
-  return config;
-}
-
-function mergeCodexConfig(base: Record<string, unknown>, overlay: Record<string, unknown>): Record<string, unknown> {
-  const merged = { ...base };
-  for (const [key, value] of Object.entries(overlay)) {
-    const previous = merged[key];
-    merged[key] =
-      isCodexConfigObject(previous) && isCodexConfigObject(value) ? mergeCodexConfig(previous, value) : value;
-  }
-  return merged;
-}
-
-function isCodexConfigObject(value: unknown): value is Record<string, unknown> {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
-  const prototype = Object.getPrototypeOf(value);
-  return prototype === Object.prototype || prototype === null;
 }
 
 function readInitializedProviderVersion(value: unknown): string {
