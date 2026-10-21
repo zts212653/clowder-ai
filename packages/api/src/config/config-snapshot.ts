@@ -5,6 +5,7 @@ export type CodexAuthMode = 'oauth' | 'api_key' | 'auto';
 export interface ConfigSnapshot {
   coCreator: {
     name: string;
+    nickname?: string;
     aliases: string[];
     mentionPatterns: string[];
     timeZone?: string;

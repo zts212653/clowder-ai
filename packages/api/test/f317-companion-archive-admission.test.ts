@@ -3,8 +3,6 @@ import { test } from 'node:test';
 import { MessageStore } from '../src/domains/cats/services/stores/ports/MessageStore.js';
 import { OfficialPluginPackageInstaller } from '../src/domains/plugin/official-package-installer.js';
 import { createDormantPluginRuntimeComposition } from '../src/domains/plugin/runtime-composition.js';
-import { MemoryMeetingIntakeStore } from '../src/domains/signal-intake/MeetingIntakeStore.js';
-import { MemorySignalRouteStore } from '../src/domains/signal-intake/SignalRouteStore.js';
 import { desktopWindowManifest, windowHtml } from './f317-window.fixture.js';
 import { staticEditorFixture } from './plugin-static-editor.fixture.js';
 
@@ -21,8 +19,6 @@ test('an unpaired official archive with bridge 1.3 is rejected before Broker, Br
   let windows = 0;
   const runtime = createDormantPluginRuntimeComposition({
     projectRoot: f.root,
-    routes: new MemorySignalRouteStore(),
-    intakes: new MemoryMeetingIntakeStore(),
     messageStore: new MessageStore(),
     createCompanionBridge: () => {
       bridges++;

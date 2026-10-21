@@ -118,6 +118,7 @@ export interface QuotaProbeAction {
 }
 
 export interface QuotaProbeDescriptor {
+  // Stable probe identifier; the executable for the kimi-cli key is Kimi Code (kimi).
   id: 'claude-cli' | 'official-browser' | 'kimi-cli' | 'antigravity-placeholder';
   sourceKind: 'cli' | 'browser' | 'placeholder';
   refreshMode: 'manual' | 'scheduled';
@@ -261,7 +262,7 @@ function isKimiQuotaApiFallbackEnabled(env: NodeJS.ProcessEnv = process.env): bo
 }
 
 function isKimiCliProbeAvailable(): boolean {
-  return kimiCliProbeOverrideForTests != null || Boolean(resolveCliCommand('kimi-cli') ?? resolveCliCommand('kimi'));
+  return kimiCliProbeOverrideForTests != null || Boolean(resolveCliCommand('kimi'));
 }
 
 function getKimiProbeStatus(env: NodeJS.ProcessEnv = process.env): QuotaProbeRuntimeStatus {
@@ -432,7 +433,7 @@ function resolveKimiAuthToken(env: NodeJS.ProcessEnv = process.env): string | nu
 async function probeKimiQuotaViaCli(env: NodeJS.ProcessEnv = process.env): Promise<CodexUsageItem[]> {
   if (kimiCliProbeOverrideForTests) return kimiCliProbeOverrideForTests(env);
 
-  const kimiCommand = resolveCliCommand('kimi-cli') ?? resolveCliCommand('kimi');
+  const kimiCommand = resolveCliCommand('kimi');
   if (!kimiCommand) throw new Error('Kimi CLI not found in PATH');
 
   return await new Promise<CodexUsageItem[]>((resolve, reject) => {

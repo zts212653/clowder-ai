@@ -11,6 +11,7 @@ import type {
   DevelopmentSourceQuery,
   DevelopmentWorkTransition,
 } from '../cats/services/stores/ports/DevelopmentWorkTransition.js';
+import type { AttachEntrustedWorkArtifactInput } from '../cats/services/stores/ports/EntrustedWorkArtifactEvidence.js';
 import type { ITaskStore } from '../cats/services/stores/ports/TaskStore.js';
 import type {
   AdmitEntrustedWorkStoreInput,
@@ -19,6 +20,8 @@ import type {
   CloseEntrustedWorkStoreResult,
   ReplaceAutomationStateIfGenerationInput,
   ReplaceDeploymentWaitIfGenerationInput,
+  ReplacePluginWaitInput,
+  TaskSubjectUpsertCondition,
   UpdateEntrustedWorkStoreInput,
   UpdateEntrustedWorkStoreResult,
 } from '../cats/services/stores/ports/TaskStoreContract.js';
@@ -69,6 +72,26 @@ class BallCustodyTaskStore implements ITaskStore {
 
   get(taskId: string): MaybePromise<TaskItem | null> {
     return this.inner.get(taskId);
+  }
+
+  async replacePluginWait(taskId: string, input: ReplacePluginWaitInput): Promise<TaskItem | null> {
+    const before = await this.inner.get(taskId);
+    if (!before) return null;
+    const tracking = before.kind === 'pr_tracking' || before.kind === 'issue_tracking';
+    const status = tracking
+      ? input.state.await
+        ? 'doing'
+        : input.state.waitOutcome
+          ? 'done'
+          : before.status
+      : before.status;
+    await this.actionLifecycle?.assertUpdateAllowed(before, { status });
+    const updated = await this.inner.replacePluginWait(taskId, input);
+    if (updated) {
+      this.recordStatusTransition({ ...updated, status: input.expectedStatus }, updated);
+      await this.actionLifecycle?.completeStatusTransition(before, updated);
+    }
+    return updated;
   }
 
   getWaitRegistration(taskId: string): ReturnType<ITaskStore['getWaitRegistration']> {
@@ -141,8 +164,8 @@ class BallCustodyTaskStore implements ITaskStore {
     return this.inner.getBySubject(subjectKey);
   }
 
-  upsertBySubject(input: CreateTaskInput): MaybePromise<TaskItem> {
-    return this.inner.upsertBySubject(input);
+  upsertBySubject(input: CreateTaskInput, condition?: TaskSubjectUpsertCondition): MaybePromise<TaskItem> {
+    return this.inner.upsertBySubject(input, condition);
   }
 
   upsertBySubjectWithManagedWorkBinding(input: CreateTaskInput, binding: ManagedWorkBinding): MaybePromise<TaskItem> {
@@ -186,6 +209,11 @@ class BallCustodyTaskStore implements ITaskStore {
       return isPromiseLike(closedResult) ? closedResult.then(finish) : finish(closedResult);
     };
     return isPromiseLike(beforeResult) ? beforeResult.then(closeAfterBefore) : closeAfterBefore(beforeResult);
+  }
+
+  // Evidence append changes no status/custody and must not complete an action lifecycle.
+  attachEntrustedWorkArtifactEvidence(taskId: string, input: AttachEntrustedWorkArtifactInput) {
+    return this.inner.attachEntrustedWorkArtifactEvidence(taskId, input);
   }
 
   updateEntrustedWork(

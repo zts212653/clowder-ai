@@ -1,6 +1,6 @@
 import type { FastifyPluginAsync, FastifyReply, FastifyRequest } from 'fastify';
 import type { Redis } from 'ioredis';
-import { requireConnectorWriteNetworkGuard } from '../config/connector-secret-write-guards.js';
+import { requireOwnerWriteNetworkGuard } from '../config/owner-write-guards.js';
 import {
   buildCapabilityWakeupClosureImport,
   CAPABILITY_WAKEUP_HISTORICAL_VERDICT_ID,
@@ -70,7 +70,7 @@ function requireCvoActor(
     reply.status(403).send({ error: 'owner browser session required for reassignment or suppression' });
     return undefined;
   }
-  const networkError = requireConnectorWriteNetworkGuard(request);
+  const networkError = requireOwnerWriteNetworkGuard(request);
   if (networkError) {
     reply.status(networkError.status).send({ error: networkError.error });
     return undefined;

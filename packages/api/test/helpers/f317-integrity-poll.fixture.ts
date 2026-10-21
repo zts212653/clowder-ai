@@ -18,8 +18,6 @@ import { CompanionHostBridge } from '../../src/domains/concierge/live/CompanionH
 import type { DesktopWindowLaunch } from '../../src/domains/plugin/desktop-window-runtime/types.js';
 import { OfficialPluginPackageInstaller } from '../../src/domains/plugin/official-package-installer.js';
 import { createDormantPluginRuntimeComposition } from '../../src/domains/plugin/runtime-composition.js';
-import { MemoryMeetingIntakeStore } from '../../src/domains/signal-intake/MeetingIntakeStore.js';
-import { MemorySignalRouteStore } from '../../src/domains/signal-intake/SignalRouteStore.js';
 import { sessionAuthPlugin, sessionRoute } from '../../src/infrastructure/session-auth.js';
 import { conciergeRoutes } from '../../src/routes/concierge.js';
 import { desktopWindowFixture } from '../f317-window.fixture.js';
@@ -85,8 +83,6 @@ export async function integrityPollFixture(t: TestContext, large = false) {
   let launch: DesktopWindowLaunch | undefined;
   const runtime = createDormantPluginRuntimeComposition({
     projectRoot: f.root,
-    routes: new MemorySignalRouteStore(),
-    intakes: new MemoryMeetingIntakeStore(),
     messageStore: new MessageStore(),
     now: () => 2000,
     createCompanionBridge: (options) =>

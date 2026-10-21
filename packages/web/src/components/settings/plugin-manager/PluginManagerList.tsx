@@ -11,7 +11,10 @@ import {
 import { SettingsDeleteButton } from '../primitives/SettingsDeleteButton';
 import { SettingsPrimaryButton } from '../primitives/SettingsPrimaryButton';
 import { SettingsText } from '../primitives/SettingsText';
+import { PluginInstallationProgress } from './PluginInstallationProgress';
+import { PluginSourceLabel } from './PluginSourceLabel';
 import { PluginVisual } from './PluginVisual';
+import { type PluginManagerPresentation, pluginAttentionReason } from './plugin-manager-attention';
 import type { PluginManagerDesignFixture } from './plugin-manager-fixtures';
 
 export function PluginListSection({
@@ -50,6 +53,7 @@ function PluginListActions({
   onSetEnabled,
   onBlockedToggle,
   onUninstall,
+  quietUninstall,
 }: {
   plugin: PluginManagerDesignFixture;
   installed: boolean;
@@ -62,18 +66,24 @@ function PluginListActions({
   onSetEnabled: ((enabled: boolean) => void) | undefined;
   onBlockedToggle: (() => void) | undefined;
   onUninstall: (() => void) | undefined;
+  quietUninstall: boolean;
 }) {
   const actionSubject = plugin.id === 'official.chatgpt-dot' ? 'dot协作' : plugin.displayName;
-  if (canInstall) {
+  if (canInstall && !installed) {
     return (
       <SettingsPrimaryButton onClick={() => onInstall?.()} disabled={busy}>
-        {plugin.id === 'official.chatgpt-dot' ? '开启 dot 协作' : '安装'}
+        {busy ? <PluginInstallationProgress /> : plugin.id === 'official.chatgpt-dot' ? '开启 dot 协作' : '安装'}
       </SettingsPrimaryButton>
     );
   }
   if (!installed && !canUninstall) return null;
   return (
     <>
+      {installed && canInstall && (
+        <SettingsPrimaryButton onClick={() => onInstall?.()} disabled={busy}>
+          {busy ? <PluginInstallationProgress /> : '更新'}
+        </SettingsPrimaryButton>
+      )}
       {installed && showLifecycleToggle && (
         <SettingsResourceToggleSwitch
           enabled={plugin.intent === 'enabled'}
@@ -91,11 +101,20 @@ function PluginListActions({
         />
       )}
       {canUninstall && (
-        <SettingsDeleteButton
-          onClick={() => onUninstall?.()}
-          disabled={busy}
-          aria-label={`${plugin.artifact === 'quarantined' ? '移除' : '卸载'}${actionSubject}`}
-        />
+        <span
+          data-plugin-uninstall
+          className={
+            quietUninstall
+              ? 'pointer-events-none opacity-0 group-hover/plugin-row:pointer-events-auto group-hover/plugin-row:opacity-100 group-focus-within/plugin-row:pointer-events-auto group-focus-within/plugin-row:opacity-100'
+              : 'contents'
+          }
+        >
+          <SettingsDeleteButton
+            onClick={() => onUninstall?.()}
+            disabled={busy}
+            aria-label={`${plugin.artifact === 'quarantined' ? '移除' : '卸载'}${actionSubject}`}
+          />
+        </span>
       )}
     </>
   );
@@ -112,6 +131,7 @@ export function PluginListRow({
   busy,
   enableBlockedReason,
   locale,
+  presentation = 'v1',
 }: {
   plugin: PluginManagerDesignFixture;
   selected: boolean;
@@ -123,19 +143,21 @@ export function PluginListRow({
   busy: boolean;
   enableBlockedReason?: string;
   locale: string;
+  presentation?: PluginManagerPresentation;
 }) {
   const installed = plugin.artifact === 'installed';
   const canInstall = plugin.actions?.install ?? !installed;
   const canSetEnabled = plugin.actions?.setEnabled ?? installed;
   const canUninstall = plugin.actions?.uninstall ?? installed;
-  const showLifecycleToggle = installed && plugin.sourceAdapter === undefined;
+  const showLifecycleToggle = installed;
   const description = resolvePluginDescription(plugin.description, locale);
+  const reason = presentation === 'v2' ? pluginAttentionReason(plugin) : undefined;
   return (
     <li
       data-plugin-id={plugin.id}
       data-plugin-list-row="true"
       aria-current={selected ? 'true' : undefined}
-      className={`${settingsResourceCardClass} min-h-[88px] transition-colors ${
+      className={`${settingsResourceCardClass} group/plugin-row min-h-[88px] transition-colors ${
         selected ? '' : 'hover:bg-[var(--console-hover-bg)]'
       }`}
       style={selected ? { backgroundColor: 'var(--console-active-bg)' } : undefined}
@@ -147,11 +169,28 @@ export function PluginListRow({
             <SettingsText as="span" variant="sm" tone="default" className="block truncate font-semibold">
               {plugin.displayName}
             </SettingsText>
-            <span data-plugin-description="true" className="mt-0.5 line-clamp-2 block overflow-hidden">
+            <PluginSourceLabel trust={plugin.trust} repositoryName={plugin.repositoryName} />
+            <span
+              data-plugin-description="true"
+              className={`mt-0.5 block overflow-hidden ${presentation === 'v2' ? 'truncate' : 'line-clamp-2'}`}
+            >
               <SettingsText as="span" variant="xs" tone="secondary">
                 {description}
               </SettingsText>
             </span>
+            {installed && canInstall && (
+              <SettingsText as="span" variant="xs" tone="secondary" className="block">
+                有更新 · {plugin.availableVersion}
+              </SettingsText>
+            )}
+            {reason && (
+              <span data-plugin-attention className="mt-1 flex items-center gap-1.5 text-xs text-cafe-secondary">
+                <span aria-hidden="true" className="h-2 w-2 shrink-0 rounded-full bg-conn-amber-text" />
+                <span className="truncate" title={reason}>
+                  {reason}
+                </span>
+              </span>
+            )}
           </span>
         </button>
         <div className={settingsResourceActionGroupClass}>
@@ -167,6 +206,7 @@ export function PluginListRow({
             onSetEnabled={onSetEnabled}
             onBlockedToggle={onBlockedToggle}
             onUninstall={onUninstall}
+            quietUninstall={presentation === 'v2' && !selected}
           />
         </div>
       </div>

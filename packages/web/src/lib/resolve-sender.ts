@@ -64,24 +64,27 @@ export function resolveMessageSender(
   const connectorId = from?.kind === 'external' ? from.connectorId : source?.connector;
   const definition = connectorId ? getConnectorDefinition(connectorId) : undefined;
   const sourceName = source?.label || definition?.displayName || connectorId;
-  const actor = from?.kind === 'external' ? from.sender : undefined;
-  const actorName = actor?.name || actor?.id;
+  const actor = from?.kind === 'external' ? from.sender : from?.kind === 'plugin' ? source?.sender : undefined;
+  const actorName = actor?.name || (from?.kind === 'plugin' ? undefined : actor?.id);
   const label = sourceName
     ? actorName
       ? `${sourceName} · ${actorName}`
       : sourceName
     : from?.kind === 'plugin'
-      ? `Plugin · ${from.instanceId}`
+      ? '插件'
       : from?.kind === 'system'
         ? from.service
         : '未知来源';
-  const color = definition?.themeColor ?? '#64748B';
+  const color = source?.themeColor ?? definition?.themeColor ?? '#64748B';
   return {
     label,
     color,
     textColor: color,
     isCoCreator: false,
-    icon: definition?.icon ?? (source?.icon ? undefined : { type: 'svg', iconId: 'robot' }),
+    icon:
+      from?.kind === 'plugin' && source?.icon
+        ? undefined
+        : (definition?.icon ?? (source?.icon ? undefined : { type: 'svg', iconId: 'robot' })),
     ...(source?.icon ? { fallbackIcon: source.icon } : {}),
   };
 }

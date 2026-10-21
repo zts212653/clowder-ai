@@ -1,3 +1,4 @@
+import { deploymentDefaults } from '@cat-cafe/shared';
 import { z } from 'zod';
 import { defineMcpMigrationFactory } from '../tool-governance-migration.js';
 
@@ -10,7 +11,7 @@ const defineTool = defineMcpMigrationFactory('external-runtime-session-tools.ts'
   authority: 'callback-owner',
 });
 
-const API_URL = process.env['CAT_CAFE_API_URL'] ?? 'http://localhost:3004';
+const API_URL = process.env['CAT_CAFE_API_URL'] ?? deploymentDefaults.apiBaseUrl;
 
 function resolveToolUserId(): string {
   return process.env['CAT_CAFE_USER_ID'] ?? 'default-user';

@@ -49,7 +49,7 @@ const approvalSourceItemSchema: z.ZodType<UnifiedAttentionApproval> = z
     detail: z.record(z.string(), z.unknown()),
     navigation: approvalNavigationSchema,
     inlineApprovable: z.boolean(),
-    decisionMode: z.enum(['approve-reject', 'claim-select', 'meeting-intake']).optional(),
+    decisionMode: z.enum(['approve-reject', 'claim-select']).optional(),
     resolution: approvalResolutionSchema,
     materialization: approvalMaterializationSchema,
     createdAt: z.number(),

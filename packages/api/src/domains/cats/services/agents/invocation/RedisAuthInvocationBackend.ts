@@ -23,6 +23,7 @@ import {
   VERIFY_AUTH_INVOCATION_LUA,
 } from './RedisAuthInvocationLua.js';
 import { authRecordFromRedisHash, isAuthTerminalState, parseRedisHashArray } from './RedisAuthInvocationRecord.js';
+import { assertCurrentAuthPrincipal } from './retired-auth-authorization.js';
 
 const KEY_INV = AuthInvocationKeys.record;
 const KEY_MSGS = (id: string) => `auth:inv:${id}:msgs`;
@@ -30,6 +31,11 @@ const KEY_LATEST = AuthInvocationKeys.latest;
 const KEY_REFRESH_COOLDOWN = (id: string) => `auth:refresh-cooldown:${id}`;
 const DEFAULT_TOMBSTONE_GC_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 const MAX_CLIENT_MESSAGE_IDS = 1000;
+function principalKind(input: AuthInvocationInput): string {
+  if (input.managedWorkBinding) return 'managed_work';
+  return 'ordinary';
+}
+
 export class RedisAuthInvocationBackend implements IAuthInvocationBackend {
   private readonly tombstoneGcTtlMs: number;
 
@@ -41,7 +47,12 @@ export class RedisAuthInvocationBackend implements IAuthInvocationBackend {
   }
 
   async create(input: AuthInvocationInput): Promise<void> {
+    assertCurrentAuthPrincipal(input);
     const fields: string[] = [
+      'recordSchemaVersion',
+      '1',
+      'principalKind',
+      principalKind(input),
       'invocationId',
       input.invocationId,
       'callbackToken',
@@ -67,8 +78,6 @@ export class RedisAuthInvocationBackend implements IAuthInvocationBackend {
     if (input.a2aTriggerMessageId) fields.push('a2aTriggerMessageId', input.a2aTriggerMessageId);
     if (input.originTriggerMessageId) fields.push('originTriggerMessageId', input.originTriggerMessageId);
     if (input.toolExecutionPolicy) fields.push('toolExecutionPolicy', JSON.stringify(input.toolExecutionPolicy));
-    if (input.executionGrant) fields.push('executionGrant', JSON.stringify(input.executionGrant));
-    if (input.collectiveWorkBinding) fields.push('collectiveWorkBinding', JSON.stringify(input.collectiveWorkBinding));
 
     const latestKey = KEY_LATEST(input.threadId, input.catId as string);
     for (let attempt = 0; attempt < 8; attempt += 1) {
@@ -287,11 +296,33 @@ export class RedisAuthInvocationBackend implements IAuthInvocationBackend {
       const raw = await this.redis.hgetall(key);
       // Missing after SCAN is normal GC, not a corrupt principal to admit.
       if (Object.keys(raw).length === 0) continue;
+      if (!raw.invocationId || key !== KEY_INV(raw.invocationId))
+        throw new Error(`corrupt callback auth record during migration: ${key}`);
       const record = authRecordFromRedisHash(raw, new Set<string>());
-      if (!record) throw new Error(`corrupt callback auth record during migration: ${key}`);
-      records.push(record);
+      if (record) {
+        records.push(record);
+        continue;
+      }
+      const retired = await this.revokeRetiredActiveRecord(raw);
+      if (!retired) throw new Error(`corrupt callback auth record during migration: ${key}`);
+      // A record expiring between the scan and CAS is ordinary GC.
+      if (retired.record) records.push(retired.record);
     }
     return records;
+  }
+
+  private async revokeRetiredActiveRecord(raw: Record<string, string>): Promise<AuthTerminalCommitResult | null> {
+    if ((raw.state && raw.state !== 'active') || !raw.threadId || !raw.catId || !raw.userId) return null;
+    // Validate a terminal-only diagnostic before changing a retired principal.
+    // The existing atomic CAS preserves any terminal committed in the meantime.
+    const retired = authRecordFromRedisHash({ ...raw, state: 'revoked' }, new Set<string>());
+    if (!retired?.retiredAuthorization) return null;
+    return this.commitTerminal({
+      invocationId: retired.invocationId,
+      disposition: 'revoked',
+      endedAt: Date.now(),
+      endReason: 'retired_authorization',
+    });
   }
 
   private groupActiveRecordsBySlot(records: InvocationRecord[]): Map<string, InvocationRecord[]> {

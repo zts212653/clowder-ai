@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
-import { test } from 'node:test';
 import { sharedProposal } from './collective-artifact-proposal.fixture.js';
 import { custodyHttpFixture } from './collective-custody-http.fixture.js';
+import { test } from './helpers/f202-collective-installed-business.js';
 
 async function seedAnnotation(f: Awaited<ReturnType<typeof custodyHttpFixture>>) {
   const message = await f.store.postHumanMessage(f.member.sessionToken, {

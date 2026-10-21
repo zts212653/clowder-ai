@@ -4,10 +4,13 @@ import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { setTimeout } from 'node:timers/promises';
 import type { ReviewedMediaAsset } from '@cat-cafe/shared';
-import { CollectiveConnector } from '../../collective-connector/src/index.js';
-import { participationFixture } from '../../collective-service/src/__tests__/participation-fixture.js';
-import { CollectiveServiceStore, startCollectiveServer } from '../../collective-service/src/index.js';
 import { publishedCollectiveFixture } from './collective-published-media.fixture.js';
+import {
+  CollectiveConnector,
+  CollectiveServiceStore,
+  startCollectiveServer,
+} from './helpers/f202-collective-installed-business.js';
+import { participationFixture } from './helpers/f202-collective-participation.fixture.js';
 
 /** Two independent authenticated Service Humans; the retained owner still belongs to one private Host Human. */
 export async function collectiveMediaHttpFixture(t: { after(fn: () => Promise<unknown>): void }, mime = 'image/png') {

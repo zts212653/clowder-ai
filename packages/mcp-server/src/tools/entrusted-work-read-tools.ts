@@ -60,7 +60,7 @@ export const entrustedWorkReadTools = [
       implementationExport: 'handleReadEntrustedWork',
       action: 'read',
       risk: { level: 'read', openWorld: false },
-      runtimeProfiles: ['collective-work', 'full', 'readonly', 'agent-key', 'desktop:live-companion'],
+      runtimeProfiles: ['full', 'readonly', 'agent-key', 'desktop:live-companion'],
       standaloneReason: {
         disposition: 'accepted-boundary',
         kind: 'progressive-disclosure',

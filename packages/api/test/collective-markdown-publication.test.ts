@@ -3,10 +3,13 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { test } from 'node:test';
-import { CollectiveConnector, ConnectorTransportError } from '@cat-cafe/collective-connector';
-import { CollectiveServiceStore } from '../../collective-service/src/store.js';
 import { collectiveArtifactOwnerFixture } from './collective-artifact-owner.fixture.js';
+import {
+  CollectiveConnector,
+  CollectiveServiceStore,
+  ConnectorTransportError,
+  test,
+} from './helpers/f202-collective-installed-business.js';
 
 async function finishUpload(
   f: Awaited<ReturnType<typeof collectiveArtifactOwnerFixture>>,

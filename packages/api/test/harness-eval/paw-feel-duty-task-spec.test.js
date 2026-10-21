@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
+import { getCoCreatorConfig } from '../../dist/config/cat-config-loader.js';
 import {
   buildPawFeelDutyNotice,
   createPawFeelDutyTaskSpec,
@@ -223,7 +224,9 @@ describe('F278 paw-feel duty task', () => {
     assert.match(invoked[0].content, /1 review bundle\(s\) \/ 2 raw signal\(s\)/i);
     assert.match(invoked[0].content, /10\/20\/50-item slices are execution limits, not a terminal condition/i);
     assert.match(invoked[0].content, /real task \+ named owner \+ active F167 lease/i);
-    assert.match(invoked[0].content, /durable proposal awaiting operator approval/i);
+    assert.ok(
+      invoked[0].content.includes(`durable proposal awaiting ${getCoCreatorConfig().nickname ?? 'operator'} approval`),
+    );
     assert.match(invoked[0].content, /signature-waiting must continue.*independent signature or blocker/i);
     assert.match(invoked[0].content, /structured continuation instead of waiting for the next duty cron/i);
     assert.equal(fixture.watermarkStore.current.status, 'awaiting_receipt');

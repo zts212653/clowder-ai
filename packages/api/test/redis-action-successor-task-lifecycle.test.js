@@ -54,20 +54,11 @@ describe('task-backed Redis ActionSuccessor lifecycle', { skip: redisIsolationSk
       userId: 'user-1',
       createdBy: 'codex-sol',
     });
-    const truthResolver = new ActionSubjectTruthResolver(
-      leaseStore,
-      {
-        async get() {
-          return null;
-        },
+    const truthResolver = new ActionSubjectTruthResolver(leaseStore, {
+      async get(taskId) {
+        return rawTasks.get(taskId);
       },
-      undefined,
-      {
-        async get(taskId) {
-          return rawTasks.get(taskId);
-        },
-      },
-    );
+    });
     const admission = new ActionSuccessorAdmissionService(leaseStore, truthResolver);
     const completion = new ActionSuccessorCompletionService(leaseStore, truthResolver);
     const lifecycle = new TaskActionSuccessorLifecycle({ leaseStore, completionService: completion });
@@ -128,20 +119,11 @@ describe('task-backed Redis ActionSuccessor lifecycle', { skip: redisIsolationSk
       userId: 'user-1',
       createdBy: 'codex-sol',
     });
-    const truthResolver = new ActionSubjectTruthResolver(
-      leaseStore,
-      {
-        async get() {
-          return null;
-        },
+    const truthResolver = new ActionSubjectTruthResolver(leaseStore, {
+      async get(taskId) {
+        return rawTasks.get(taskId);
       },
-      undefined,
-      {
-        async get(taskId) {
-          return rawTasks.get(taskId);
-        },
-      },
-    );
+    });
     const admission = new ActionSuccessorAdmissionService(leaseStore, truthResolver);
     const subjectRef = `subject:task:${task.id}`;
     const action = {

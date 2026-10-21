@@ -3,7 +3,7 @@ feature_ids: [F101]
 related_features: [F011, F090, F107, F202]
 topics: [mode, game, werewolf, game-engine]
 doc_kind: spec
-tips_exempt: "Retires the old game implementation; no new user capability or operation to advertise."
+tips_exempt: "Renewed 2026-10-21: the retired game remains retired. KD-19 retains its public identity summary and the verbatim source quotation stays in Internal Notes; no gameplay entry or user action is introduced."
 created: 2026-03-11
 reopened: 2026-03-14
 updated: 2026-10-18
@@ -323,7 +323,7 @@ operator 2026-03-16 实测发现的核心体验 bug。先调研 GitHub agent 狼
 | R9 | "网易的狼人杀的规则，大家知道的多" | AC-B1 | test | [x] |
 | R10 | "允许你们说遗言" | AC-B1 | test | [x] |
 | R11 | "新建独立 thread，类似新手训练营那样独立" | AC-D1 | manual | [x] |
-| R12 | "还是猫猫咖啡的猫猫！！！" | AC-D2 | manual | [x] |
+| R12 | 保留 Clowder AI 的猫猫身份（原意摘要） | AC-D2 | manual | [x] |
 | R13 | "发牌✅ 暂停✅ 踢人❌ 跳过超时✅" | AC-D3 | manual | [x] |
 | R14 | "展示真实状态，不是假动画" | AC-D4 | manual | [x] |
 | R15 | "猫猫装狼人那种可爱的带点黑色的风格" | AC-D5 | manual+design | [x] |
@@ -396,7 +396,7 @@ operator 2026-03-16 实测发现的核心体验 bug。先调研 GitHub agent 狼
 | KD-16 | 游戏战绩对接 Leaderboard（F075） | 所有游戏模式（狼人杀/三国杀/猜猜我是谁等）统一接入现有排行榜系统，历史战绩通过排行榜查看 | 2026-03-11 |
 | KD-17 | 技术细节（断线重连/AI策略等）找 gpt52 讨论，不找operator | operator："涉及技术你找 GPT-5.4 讨论都比我靠谱" | 2026-03-11 |
 | KD-18 | 游戏在独立 thread 运行，归档分类 `游戏-狼人杀` | operator希望游戏和日常聊天完全隔离 | 2026-03-14 |
-| KD-19 | 猫猫保留咖啡馆身份，不需要新 persona | operator："还是猫猫咖啡的猫猫！！！" | 2026-03-14 |
+| KD-19 | 猫猫保留咖啡馆身份，不需要新 persona | operator：保留 Clowder AI 的猫猫身份（原意摘要） | 2026-03-14 |
 | KD-20 | 上帝面板：发牌+暂停+跳过，**不要踢人** | operator："太过分了 猫猫做错什么了" | 2026-03-14 |
 | KD-21 | 展示真实 ready 状态，不做假动画 | operator担心猫猫卡住看不到 | 2026-03-14 |
 | KD-22 | 狼人猫猫风 UX = 可爱+暗色调+猫猫 cosplay 狼人 | operator："猫猫装狼人那种可爱的带点黑色的风格" | 2026-03-14 |

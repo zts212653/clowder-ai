@@ -22,6 +22,7 @@ import {
   fetchProcessInfo,
   fetchTracesStats,
 } from '../packages/api/dist/infrastructure/harness-eval/telemetry-adapter.js';
+import { deploymentDefaults } from '../packages/shared/src/deployment-defaults.ts';
 import { formatAttributionYaml, formatSnapshotYaml } from './lib/format-eval-yaml.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -34,7 +35,7 @@ const { values } = parseArgs({
   },
 });
 
-const baseUrl = values['base-url'] || process.env.EVAL_BASE_URL || 'http://localhost:3004';
+const baseUrl = values['base-url'] || process.env.EVAL_BASE_URL || deploymentDefaults.apiBaseUrl;
 const cookie = values.cookie || process.env.EVAL_SESSION_COOKIE || '';
 const dryRun = values['dry-run'] ?? false;
 const storeMode = values.store ?? false;

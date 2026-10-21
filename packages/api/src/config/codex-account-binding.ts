@@ -8,6 +8,7 @@ import {
 import { toAllCatConfigs } from './cat-config-loader.js';
 import { inspectCodexLogin } from './codex-account-identity.js';
 import { resolveCodexAccountLaunch } from './codex-account-launch.js';
+import { usesNativeCodexThirdPartyProvider } from './codex-native-provider-admission.js';
 import { assertCodexSharedStateRoots } from './codex-shared-state.js';
 import { isLocalAccountMember, readLocalAccountSelection } from './local-account-selection.js';
 
@@ -51,6 +52,13 @@ export function assertCodexMemberMutationReady(
   if (!profile) throw new Error('Codex account not found');
   const compatibilityError = validateRuntimeProviderBinding('openai', profile, next.defaultModel);
   if (compatibilityError) throw new Error(compatibilityError);
+  if (next.configurationSource === 'native_tool' && !next.accountRef && profile.syntheticNative) {
+    const launch = resolveCodexAccountLaunch(profile, { cwd: projectRoot });
+    // Match CodexAgentService's member argument tokenization. Explicit account
+    // selection and account-switch operations retain their existing auth contract.
+    const args = (next.cliConfigArgs ?? []).flatMap((arg) => arg.trim().split(/\s+/));
+    if (usesNativeCodexThirdPartyProvider(launch.credentialHome, projectRoot, args)) return;
+  }
   assertNativeCodexAccountReady(projectRoot, profile);
 }
 export function planCodexAccountBinding(projectRoot: string, catalog: CatCafeConfig, selection: CodexBindingSelection) {

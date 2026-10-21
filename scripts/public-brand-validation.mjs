@@ -1,6 +1,7 @@
 // Public export counterpart of the home inbound guard. No environment bypass.
 import { execFileSync, spawnSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { lstatSync, readFileSync } from 'node:fs';
+import { resolveDeploymentDefaults } from '../packages/shared/src/deployment-defaults.ts';
 import { classifyPath, getHomeTerms, getPublicTerms, parseDictionary } from './brand-dictionary-helper.mjs';
 
 const fromIndex = process.argv.includes('--from-index');
@@ -15,6 +16,14 @@ const exists = (path) =>
     ? spawnSync('git', ['cat-file', '-e', `:${path}`], { stdio: 'ignore' }).status === 0
     : spawnSync('test', ['-f', path], { stdio: 'ignore' }).status === 0;
 const read = (path) => (fromIndex ? git('show', `:${path}`) : readFileSync(path, 'utf8'));
+const isRegularRoadmap = (path) => {
+  if (fromIndex) return /^100(?:644|755) [a-f0-9]+ 0\t/.test(git('ls-files', '--stage', '--', path));
+  try {
+    return lstatSync('docs').isDirectory() && lstatSync(path).isFile();
+  } catch {
+    return false;
+  }
+};
 const fail = (message) => {
   console.error(`Public Brand Guard: ${message}`);
   process.exitCode = 1;
@@ -36,6 +45,26 @@ try {
   ) {
     throw new Error('home exporter must retain inbound policy; removing it does not select public policy');
   }
+  if (exists('packages/shared/src/deployment-profiles.json')) {
+    const file = JSON.parse(read('packages/shared/src/deployment-profiles.json'));
+    const defaults = resolveDeploymentDefaults(file);
+    if (
+      file.activeProfile !== 'opensource' ||
+      Object.keys(file.profiles).join(',') !== 'opensource' ||
+      defaults.apiPort !== 3004 ||
+      defaults.webPort !== 3003
+    ) {
+      fail('expected public deployment defaults (frontend 3003, API 3004)');
+    }
+    if (defaults.roadmapPath !== 'docs/ROADMAP.md') {
+      fail('roadmapPath must match the generated artifact docs/ROADMAP.md');
+    }
+    if (!isRegularRoadmap(defaults.roadmapPath)) {
+      fail(`roadmap artifact ${defaults.roadmapPath} must exist as a regular file in a real docs directory`);
+    }
+  } else {
+    fail('public deployment defaults must exist');
+  }
   const scopeText = readFileSync(0, 'utf8');
   const scope = scopeText.trimStart().startsWith('[') ? JSON.parse(scopeText) : scopeText.split('\n').filter(Boolean);
   if (!Array.isArray(scope) || scope.some((path) => typeof path !== 'string' || !path || path.includes('\0'))) {
@@ -51,9 +80,8 @@ try {
     ['packages/web/src/components/SplitPaneView.tsx', ['Clowder AI']],
     ['packages/web/src/components/ChatContainerHeader.tsx', ['Clowder AI', "'cat-cafe'", "'cat-cafe-runtime'"]],
     ['packages/web/src/utils/api-client.ts', ['HttpOnly session cookie', 'client for Clowder AI']],
-    ['packages/api/src/infrastructure/connectors/connector-gateway-bootstrap.ts', ['http://localhost:3003']],
-    ['packages/api/src/infrastructure/connectors/im-connectors/weixin/WeixinAdapter.ts', []],
     ['packages/api/src/index.ts', []],
+    ['packages/api/src/config/frontend-origin.ts', []],
     ['packages/api/src/domains/cats/services/agents/routing/AgentRouter.ts', []],
   ]);
   // Sanitized dictionaries can have identical home/public variants. Only home
@@ -92,18 +120,18 @@ try {
       if (!body.includes(term))
         fail(`${path}: missing ${term}${term.includes(':3003') ? ' (public frontend port)' : ''}`);
     }
+    if (path === 'packages/api/src/config/frontend-origin.ts') {
+      if (
+        /const\s+DEFAULT_FRONTEND_BASE_URL\s*=\s*deploymentDefaults\.frontendBaseUrl/.test(body) &&
+        /import\s*\{[^}]*\bdeploymentDefaults\b[^}]*\}\s*from\s*['"]@cat-cafe\/shared['"]/.test(body)
+      ) {
+        if (!exists('packages/shared/src/deployment-profiles.json')) fail('missing public deployment defaults');
+      } else if (!/const\s+DEFAULT_FRONTEND_BASE_URL\s*=\s*['"]http:\/\/localhost:3003['"]/.test(body)) {
+        fail(`${path}: expected public frontend port 3003 in DEFAULT_FRONTEND_BASE_URL`);
+      }
+    }
     for (const term of homeBrandTerms) {
       if (body.includes(term)) fail(`${path}: home-only brand term ${term}`);
-    }
-    if (
-      path === 'packages/api/src/infrastructure/connectors/connector-gateway-bootstrap.ts' &&
-      /http:\/\/localhost:3001\b/.test(body)
-    )
-      fail(`${path}: expected public frontend port 3003, found 3001`);
-    if (path === 'packages/api/src/infrastructure/connectors/im-connectors/weixin/WeixinAdapter.ts') {
-      if (!/API_SERVER_PORT\s*\?\?\s*['"]3004['"]/.test(body))
-        fail(`${path}: expected public API fallback API_SERVER_PORT ?? '3004'`);
-      if (/localhost:300[1-4]\b/.test(body)) fail(`${path}: hardcoded localhost port bypasses API_SERVER_PORT`);
     }
     if (
       ['packages/api/src/index.ts', 'packages/api/src/domains/cats/services/agents/routing/AgentRouter.ts'].includes(

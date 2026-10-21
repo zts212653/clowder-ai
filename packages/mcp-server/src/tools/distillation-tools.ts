@@ -7,6 +7,7 @@ import { defineMcpMigrationFactory } from '../tool-governance-migration.js';
  * cat_cafe_review_distillation — approve/reject distillation candidate
  */
 
+import { deploymentDefaults } from '@cat-cafe/shared';
 import { z } from 'zod';
 import type { ToolResult } from './file-tools.js';
 import { errorResult, successResult } from './file-tools.js';
@@ -16,7 +17,7 @@ const defineTool = defineMcpMigrationFactory('distillation-tools.ts', undefined,
   authority: 'callback-owner',
 });
 
-const API_URL = process.env['CAT_CAFE_API_URL'] ?? 'http://localhost:3004';
+const API_URL = process.env['CAT_CAFE_API_URL'] ?? deploymentDefaults.apiBaseUrl;
 
 export const markGeneralizableInputSchema = {
   anchor: z.string().min(1).describe('Evidence anchor to mark'),

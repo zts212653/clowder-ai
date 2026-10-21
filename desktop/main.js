@@ -1,68 +1,68 @@
-// Clowder AI Desktop — Electron main process
-// Launches backend services (Redis, API, Web) then shows the web UI.
-
-const { app, BrowserWindow, Menu, Tray, dialog, ipcMain, net, session, shell, Notification } = require('electron');
+const { app, BrowserWindow, Menu, dialog, ipcMain, net, session, shell, Notification } = require('electron');
 const path = require('node:path');
-const fs = require('node:fs');
 const { resolveProjectRootFromDir } = require('./project-root');
+const { installationIdentity, isInstallationShutdownRequest } = require('./installation-lifecycle');
 const ServiceManager = require('./service-manager');
+const { createStartupReporter, showStartupFailure } = require('./startup-state');
+const { createStartupTimeline } = require('./startup-timing');
+const { showVisibleRenderer } = require('./visible-renderer');
+const { installRendererNavigation } = require('./renderer-navigation');
+const {
+  resolveDesktopRuntime,
+  initializeDesktopInstance,
+  createDesktopLogger,
+  prepareDesktopInstance,
+} = require('./runtime-config');
 const {
   createRendererLinkOrigins,
   createVersionedRendererUrl,
-  isAllowedRendererLink,
-  isAllowedRendererDownload,
   resolveRendererLinkOrigins,
 } = require('./renderer-link-policy');
-const { isExpectedOrigin } = require('./update-prompt-controller');
-const { safeErrorMessage, safeHost } = require('./update-network-diagnostics');
+const { safeErrorMessage } = require('./update-network-diagnostics');
+const { createStartupFailureHandler } = require('./startup-failure-handler');
+const { createShutdownController } = require('./shutdown-controller');
 const { DESKTOP_APP_ID } = require('./app-identity');
 const { createDesktopUpdateRuntime } = require('./desktop-update-runtime');
 const { ensureValidMacInstallLocation } = require('./mac-install-location');
+const { createWindowRecoveryController } = require('./window-recovery');
+const { decideWindowClose } = require('./window-close-policy');
+const { createLifecycleLogger } = require('./lifecycle-diagnostics');
+const appLifecycle = require('./app-lifecycle');
 const {
-  createDesktopTray,
+  createNativeDesktopTrayResult,
   createManualUpdateHandler,
   installMacApplicationMenu,
   showAboutDialog,
 } = require('./desktop-update-menu');
-
 if (process.platform === 'win32') {
   app.setAppUserModelId(DESKTOP_APP_ID);
 }
-
 const PROJECT_ROOT = resolveProjectRootFromDir(__dirname);
-const FRONTEND_PORT = 3003;
-const API_PORT = 3004;
+const desktopRuntime = resolveDesktopRuntime();
+const FRONTEND_PORT = desktopRuntime.frontendPort;
+const API_PORT = desktopRuntime.apiPort;
+prepareDesktopInstance(app, desktopRuntime);
 const APP_URL = `http://localhost:${FRONTEND_PORT}`;
 const APP_ORIGIN = new URL(APP_URL).origin;
 const API_ORIGIN = new URL(`http://localhost:${API_PORT}`).origin;
-function createBaseRendererLinkOrigins() {
-  return createRendererLinkOrigins({
+const createBaseRendererLinkOrigins = () =>
+  createRendererLinkOrigins({
     appOrigin: APP_ORIGIN,
     apiOrigin: API_ORIGIN,
     previewGatewayPort: Number.NaN,
   });
-}
 let rendererLinkOrigins = createBaseRendererLinkOrigins();
-const QUIT_FOR_UPDATE_ARG = '--quit-for-update';
-// Main process log in the user data directory alongside API + desktop logs.
-// Single source of truth: service-manager.js resolveUserDataDir() reads
-// electron-builder productName and handles legacy data directory migration.
+const QUIT_FOR_UPDATE_ARG = '--quit-owned-installation';
 const userDataRoot = ServiceManager.USER_DATA_DIR;
-const mainLogDir = path.join(userDataRoot, 'data', 'logs');
-try {
-  fs.mkdirSync(mainLogDir, { recursive: true });
-} catch {}
-const DEBUG_LOG = path.join(mainLogDir, 'main.log');
-
-function dbg(msg) {
-  const line = `[main ${new Date().toISOString()}] ${msg}\n`;
-  try {
-    fs.appendFileSync(DEBUG_LOG, line);
-  } catch {}
-}
-
+const dbg = createDesktopLogger(userDataRoot);
+const lifecycle = createLifecycleLogger(dbg);
+const startupLogDir = path.join(userDataRoot, 'data', 'logs');
+const reportStartup = createStartupReporter(startupLogDir);
+const startupTimeline = createStartupTimeline({ component: 'desktop', emit: dbg });
+startupTimeline.mark('main-initialized');
 dbg(`Electron starting. ELECTRON_RUN_AS_NODE=${process.env.ELECTRON_RUN_AS_NODE}`);
 dbg(`process.type=${process.type}, versions.electron=${process.versions.electron}`);
+appLifecycle.logRuntimeIdentity({ dbg, app, projectRoot: PROJECT_ROOT });
 
 let mainWindow = null;
 let splashWindow = null;
@@ -71,12 +71,13 @@ let services = null;
 let updater = null;
 let updatePrompt = null;
 let isQuitting = false;
-let quitPromise = null;
+let quitSource = null;
+let startupPhase = 'booting';
+const startupController = new AbortController();
 const checkForUpdatesManually = createManualUpdateHandler({
   getUpdatePrompt: () => updatePrompt,
   getUpdater: () => updater,
 });
-
 async function refreshRendererLinkOrigins() {
   try {
     rendererLinkOrigins = await resolveRendererLinkOrigins({
@@ -95,7 +96,6 @@ async function refreshRendererLinkOrigins() {
     dbg(`Could not resolve preview gateway origin: ${safeErrorMessage(error)}`);
   }
 }
-
 function createSplashWindow() {
   splashWindow = new BrowserWindow({
     width: 420,
@@ -105,6 +105,7 @@ function createSplashWindow() {
     transparent: false,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
+      additionalArguments: [`--cat-cafe-api-origin=${API_ORIGIN}`],
       contextIsolation: true,
       nodeIntegration: false,
     },
@@ -112,8 +113,7 @@ function createSplashWindow() {
   splashWindow.loadFile(path.join(__dirname, 'splash.html'));
   splashWindow.center();
 }
-
-function createMainWindow() {
+async function createMainWindow() {
   mainWindow = new BrowserWindow({
     width: 1280,
     height: 800,
@@ -124,148 +124,177 @@ function createMainWindow() {
     show: false,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
+      additionalArguments: [`--cat-cafe-api-origin=${API_ORIGIN}`, `--cat-cafe-app-origin=${APP_ORIGIN}`],
       contextIsolation: true,
       nodeIntegration: false,
     },
   });
 
   mainWindow.setMenu(null);
-  const guardAppNavigation = (event) => {
-    if (event.isMainFrame === false) return;
-    if (isExpectedOrigin(event.url, APP_ORIGIN)) return;
-    event.preventDefault();
-    dbg(`Blocked renderer navigation outside app origin: ${safeHost(event.url)}`);
-  };
-  mainWindow.webContents.on('will-navigate', (event) => {
-    if (event.isMainFrame !== false && isAllowedRendererDownload(event.url, API_ORIGIN)) {
-      event.preventDefault();
-      mainWindow.webContents.downloadURL(event.url);
-      dbg(`Started trusted renderer download: ${safeHost(event.url)}`);
-      return;
-    }
-    guardAppNavigation(event);
-  });
-  mainWindow.webContents.on('will-redirect', guardAppNavigation);
-  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-    try {
-      const parsed = new URL(url);
-      if (!isAllowedRendererLink(parsed.href, rendererLinkOrigins)) {
-        dbg(`Blocked non-HTTPS renderer link: ${parsed.protocol}`);
-        return { action: 'deny' };
-      }
-      void shell.openExternal(url).catch((error) => dbg(`Could not open renderer link: ${safeErrorMessage(error)}`));
-    } catch {
-      dbg('Blocked malformed renderer link');
-    }
-    return { action: 'deny' };
+  installRendererNavigation({
+    window: mainWindow,
+    appOrigin: APP_ORIGIN,
+    apiOrigin: API_ORIGIN,
+    getLinkOrigins: () => rendererLinkOrigins,
+    shell,
+    dbg,
   });
   mainWindow.webContents.on('did-navigate', () => updatePrompt?.markRendererUnavailable());
-  mainWindow.webContents.on('render-process-gone', () => updatePrompt?.markRendererUnavailable());
-  mainWindow.loadURL(createVersionedRendererUrl(APP_URL, app.getVersion()));
-
-  mainWindow.once('ready-to-show', () => {
-    if (splashWindow && !splashWindow.isDestroyed()) {
-      splashWindow.close();
-    }
-    mainWindow.show();
+  appLifecycle.installRendererProcessDiagnostics({
+    webContents: mainWindow.webContents,
+    lifecycle,
+    onUnavailable: () => updatePrompt?.markRendererUnavailable(),
   });
+  mainWindow.webContents.once('dom-ready', () => startupTimeline.mark('renderer-dom-ready'));
+  mainWindow.webContents.once('did-finish-load', () => startupTimeline.mark('renderer-did-finish-load'));
 
   mainWindow.on('close', (e) => {
-    // Hide to tray on manual close — but let the window close when the
-    // app is quitting (Cmd+Q / OS quit / tray "Quit"). Without the
-    // isQuitting guard, the close handler blocks app.quit() because
-    // tray still exists → zombie Electron shell with dead services.
-    if (tray && !isQuitting) {
+    const decision = decideWindowClose({
+      platform: process.platform,
+      isQuitting,
+      trayAvailable: Boolean(tray),
+    });
+    lifecycle('window-close-requested', { ...decision, trayAvailable: Boolean(tray), isQuitting });
+    if (decision.action !== 'allow') {
       e.preventDefault();
-      mainWindow.hide();
+      if (decision.action === 'hide') {
+        mainWindow.hide();
+        lifecycle('window-close-hidden', { reason: decision.reason });
+      } else {
+        lifecycle('window-close-kept-visible', { reason: decision.reason });
+      }
     }
   });
 
   mainWindow.on('closed', () => {
     mainWindow = null;
   });
+  return startupTimeline.runPhase('renderer-visible', () =>
+    showVisibleRenderer({
+      window: mainWindow,
+      url: createVersionedRendererUrl(APP_URL, app.getVersion()),
+      signal: startupController.signal,
+      onVisible: () => {
+        if (splashWindow && !splashWindow.isDestroyed()) splashWindow.close();
+        mainWindow.show();
+      },
+    }),
+  );
 }
 
-async function quitApp() {
-  if (!quitPromise) {
-    isQuitting = true;
-    updater?.stopSchedule();
-    updatePrompt?.dispose();
-    updatePrompt = null;
-    quitPromise = (async () => {
-      if (services) {
-        const activeServices = services;
-        services = null;
-        await activeServices.stopAll();
-      }
-      if (tray) {
-        tray.destroy();
-        tray = null;
-      }
-      app.quit();
-    })();
-  }
-  return quitPromise;
+const shutdown = createShutdownController({
+  app,
+  startupController,
+  getServices: () => services,
+  setServices: (value) => (services = value),
+  getTray: () => tray,
+  setTray: (value) => (tray = value),
+  getUpdater: () => updater,
+  getUpdatePrompt: () => updatePrompt,
+  setUpdatePrompt: (value) => (updatePrompt = value),
+  setQuitting: (value) => (isQuitting = value),
+  setPhase: (phase) => (startupPhase = phase),
+  dbg,
+});
+function requestQuit(source = 'unknown') {
+  quitSource = source;
+  lifecycle('quit-requested', { source });
+  return shutdown.quitApp();
 }
+
+const quitApp = () => requestQuit('startup-failure');
+
+const getLifecycleState = () => ({ isQuitting, quitSource, trayAvailable: Boolean(tray), startupPhase });
+appLifecycle.installAppLifecycleDiagnostics({ app, lifecycle, requestQuit, shutdown, getState: getLifecycleState });
 
 function sendSplashStatus(msg) {
   if (splashWindow && !splashWindow.isDestroyed()) splashWindow.webContents.send('splash-status', msg);
 }
 
-app.on('second-instance', (_event, commandLine) => {
-  if (commandLine.includes(QUIT_FOR_UPDATE_ARG)) {
-    dbg('Installer requested coordinated shutdown');
-    void quitApp();
-    return;
-  }
-  if (mainWindow) {
-    if (mainWindow.isMinimized()) mainWindow.restore();
-    mainWindow.show();
-    mainWindow.focus();
-  }
+const handleStartupFailure = createStartupFailureHandler({
+  isQuitting: () => isQuitting,
+  setPhase: (phase) => (startupPhase = phase),
+  dbg,
+  reportStartup,
+  sendSplashStatus,
+  stopServices: async () => {
+    const activeServices = services;
+    services = null;
+    if (activeServices) await activeServices.stopAll();
+  },
+  showFailure: (message, error) => showStartupFailure({ app, dialog, shell, message, error, userDataRoot }),
+  quitApp,
 });
 
+const windowRecovery = createWindowRecoveryController({
+  getState: () => ({ phase: startupPhase, mainWindow, splashWindow, services, isQuitting }),
+  createMainWindow,
+  quitArg: QUIT_FOR_UPDATE_ARG,
+  isShutdownRequest: isInstallationShutdownRequest,
+  projectRoot: PROJECT_ROOT,
+  getUserDataRoot: () => app.getPath('userData'),
+  quitApp: () => requestQuit('window-recovery'),
+  dbg,
+  onRecoveryError: (error) => void handleStartupFailure(error),
+});
+app.on('second-instance', (_event, commandLine, _workingDirectory, identity) =>
+  windowRecovery.handleSecondInstance(commandLine, identity),
+);
 app.on('ready', async () => {
+  startupTimeline.mark('electron-ready');
   dbg('app ready event fired');
 
   if (!ensureValidMacInstallLocation({ app, dialog })) {
     return;
   }
-
-  // Single instance lock — prevent multiple Clowder AI processes.
-  // This runs AFTER the install-location guard so that launching from a DMG
-  // always shows the warning dialog, even if another instance is already
-  // running from /Applications.
-  const gotTheLock = app.requestSingleInstanceLock();
+  const gotTheLock = app.requestSingleInstanceLock(installationIdentity(PROJECT_ROOT, app.getPath('userData')));
   if (!gotTheLock) {
-    app.quit();
+    await requestQuit('single-instance-lock');
     return;
   }
+  lifecycle('single-instance-lock-acquired', { userDataRoot: app.getPath('userData') });
   if (process.argv.includes(QUIT_FOR_UPDATE_ARG)) {
-    await quitApp();
+    await requestQuit('installer');
     return;
   }
 
   createSplashWindow();
+  lifecycle('splash-created');
+  startupPhase = 'starting';
+  initializeDesktopInstance(session, desktopRuntime, PROJECT_ROOT);
+  lifecycle('desktop-instance-initialized', { isolated: Boolean(desktopRuntime.instanceRoot) });
   const showAbout = () => showAboutDialog({ app, dialog, onManualUpdate: checkForUpdatesManually });
-  tray = createDesktopTray({
-    Menu,
-    Tray,
-    iconPath: path.join(__dirname, 'assets', 'icon.ico'),
+  lifecycle('tray-create-requested');
+  const trayResult = createNativeDesktopTrayResult({
+    electron: require('electron'),
     getMainWindow: () => mainWindow,
     onManualUpdate: checkForUpdatesManually,
-    onQuit: () => quitApp(),
+    onQuit: () => requestQuit('tray'),
     showAbout,
   });
+  if (trayResult.status === 'created') {
+    tray = trayResult.tray;
+    appLifecycle.logTrayCreated({ lifecycle, tray, app, iconPath: trayResult.iconPath });
+  } else {
+    lifecycle('tray-create-failed', trayResult.error);
+    void dialog
+      .showMessageBox({
+        type: 'warning',
+        buttons: ['OK'],
+        title: 'Clowder AI',
+        message: '系统托盘不可用',
+        detail: '关闭窗口时将保持窗口打开。请查看桌面日志以诊断托盘创建失败原因。',
+      })
+      .catch((error) => lifecycle('tray-failure-notice-failed', { message: safeErrorMessage(error) }));
+  }
   installMacApplicationMenu({ app, Menu, onManualUpdate: checkForUpdatesManually, showAbout });
 
   services = new ServiceManager(PROJECT_ROOT, {
     frontendPort: FRONTEND_PORT,
     apiPort: API_PORT,
+    redisPort: desktopRuntime.redisPort,
     onStatus: sendSplashStatus,
   });
-  // F273: Initialize updater — check pending upgrade result BEFORE services
-  // (spec §3.2: "main.js 早期、服务启动前检测")
   ({ updater, updatePrompt } = createDesktopUpdateRuntime({
     app,
     net,
@@ -277,7 +306,7 @@ app.on('ready', async () => {
     getMainWindow: () => mainWindow,
     getTray: () => tray,
     trustedOrigin: APP_ORIGIN,
-    quitApp,
+    quitApp: () => requestQuit('update'),
     stopServices: async () => {
       const activeServices = services;
       services = null;
@@ -285,7 +314,11 @@ app.on('ready', async () => {
       if (activeServices) await activeServices.stopAll();
     },
     startServices: async () => {
-      services = new ServiceManager(PROJECT_ROOT, { frontendPort: FRONTEND_PORT, apiPort: API_PORT });
+      services = new ServiceManager(PROJECT_ROOT, {
+        frontendPort: FRONTEND_PORT,
+        apiPort: API_PORT,
+        redisPort: desktopRuntime.redisPort,
+      });
       await services.startAll();
       await refreshRendererLinkOrigins();
     },
@@ -295,46 +328,21 @@ app.on('ready', async () => {
     arch: process.arch,
   }));
   const upgradeResult = await updater.checkPendingUpgrade();
-  if (upgradeResult === 'quitting') return; // P1-2: installer launched — skip startAll
+  if (upgradeResult === 'quitting' || isQuitting) return; // Installer/quit must not start services later.
 
   try {
     dbg('startAll() called');
+    reportStartup('starting');
     await services.startAll();
-    await refreshRendererLinkOrigins();
+    startupTimeline.mark('services-ready');
+    await startupTimeline.runPhase('preview-origin', () => refreshRendererLinkOrigins());
+    startupController.signal.throwIfAborted();
     dbg('startAll() done — creating main window');
-    createMainWindow();
+    await createMainWindow();
+    startupController.signal.throwIfAborted();
+    startupPhase = 'ready';
+    reportStartup('ready');
   } catch (err) {
-    dbg(`startAll() FAILED: ${err.message}`);
-    dialog.showErrorBox(
-      'Clowder AI - Startup Error',
-      `Failed to start services:\n${err.message}\n\nCheck logs in .cat-cafe/logs/`,
-    );
-    app.quit();
-  }
-});
-
-app.on('window-all-closed', () => {
-  // keep running in tray on Windows
-  if (process.platform !== 'win32') quitApp();
-});
-app.on('before-quit', (e) => {
-  // Signal close handlers to stop hiding windows to tray.
-  isQuitting = true;
-  updater?.stopSchedule();
-  updatePrompt?.dispose();
-  updatePrompt = null;
-  // Electron does NOT await async event handlers. Without blocking here,
-  // the app exits before stopAll() finishes → orphaned node/redis processes.
-  // Prevent default, run cleanup, then quit when done.
-  if (services) {
-    e.preventDefault();
-    services.stopAll().finally(() => {
-      services = null; // prevent re-entry
-      if (tray) {
-        tray.destroy();
-        tray = null;
-      }
-      app.quit();
-    });
+    await handleStartupFailure(err);
   }
 });

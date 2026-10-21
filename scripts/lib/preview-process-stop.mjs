@@ -1,3 +1,4 @@
+import { spawnSync } from 'node:child_process';
 import { readFileSync, rmSync } from 'node:fs';
 import {
   hasConflictingLaunchdProcess,
@@ -43,8 +44,19 @@ function signalOwnedRunner(config, record) {
     throw new Error('refusing to stop preview: exact process ownership is not proven');
   }
   if (identity && !readCompletion(record)) {
-    // Signal only the supervisor. It alone owns the detached command group.
+    // POSIX signals only the supervisor; it owns the command group's drain.
     try {
+      // Windows SIGTERM terminates Node immediately; it cannot run the
+      // supervisor's POSIX drain handler. Kill the proven owned tree, but
+      // retain the missing receipt below instead of certifying resource cleanup.
+      if (process.platform === 'win32') {
+        const killed = spawnSync('taskkill.exe', ['/PID', String(record.pid), '/T', '/F'], {
+          windowsHide: true,
+          stdio: 'ignore',
+        });
+        if (killed.status !== 0 && processGroupExists(record)) throw new Error('owned preview tree did not stop');
+        return;
+      }
       process.kill(record.pid, 'SIGTERM');
     } catch (error) {
       // Expiry can finish between the identity read and this signal. Its
@@ -79,7 +91,13 @@ async function stopWithCompletion(config, record) {
 function killOwnedGroup(record, signal, ownershipAlreadyProven = false) {
   if (!ownershipAlreadyProven && !ownsProcess(record)) return false;
   try {
-    process.kill(process.platform === 'win32' ? record.pid : -record.pid, signal);
+    if (process.platform === 'win32') {
+      return (
+        spawnSync('taskkill.exe', ['/PID', String(record.pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' })
+          .status === 0
+      );
+    }
+    process.kill(-record.pid, signal);
     return true;
   } catch {
     return false;

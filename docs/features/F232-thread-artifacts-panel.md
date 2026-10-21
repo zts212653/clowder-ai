@@ -1,6 +1,6 @@
 ---
 feature_ids: [F232]
-related_features: [F148, F063, F095, F131]
+related_features: [F148, F063, F095, F131, F290, F309]
 topics: [artifacts, thread, workspace, ui]
 doc_kind: spec
 created: 2026-06-11
@@ -9,6 +9,10 @@ created: 2026-06-11
 # F232: Thread Artifacts Panel — Thread 产物视图
 
 > **Status**: in-progress（Phase A 全部 merged；**Phase B foundation merged PR #2285 + grouping merged PR #2288 + cat filter merged PR #2290**（AC-B1 ✅）；source-code artifact classification hardening merged PR #2362；视觉待 alpha）| **Owner**: Ragdoll Opus-5.5（承 Opus-4.8；4.8 已于 2026-09-23 归档） | **Priority**: P1
+
+**范围分工**：本 Feature 负责产物的目录、发现与打开；[F309 产物协作](F309-collaborative-content-plane.md)
+负责围绕文档、图片、视频、网页与交互作品的批注、修改、审阅及版本协作，Office 插件只是其中
+一种内容接入能力。目录投影不另建内容或版本真相；网页作品的稳定身份与版本接入状态见 OQ-B4。
 
 ## Why
 

@@ -1,5 +1,30 @@
 [
   {
+    "id": "capability-native-runtime-role-config",
+    "kind": "capability",
+    "sourceRef": {
+      "path": "docs/plans/issue-1466-native-runtime-role-config.md",
+      "anchor": "本机工具配置入口"
+    },
+    "structureSource": {
+      "path": "packages/web/src/components/NativeRuntimeSection.tsx",
+      "anchor": "NativeRuntimeSection"
+    },
+    "bodySource": {
+      "path": "docs/plans/issue-1466-native-runtime-role-config.md",
+      "anchor": "本机工具配置入口"
+    },
+    "contexts": ["concierge_open", "feature_dev"],
+    "audience": ["cvo"],
+    "body": "已经装好并登录 Codex、Claude Code 或 DSH？打开设置里的成员，选择本机工具即可继承工具配置；只想为某个角色调整模型或思考强度时，再展开高级配置分别覆盖。",
+    "action": {
+      "type": "open_concierge_draft",
+      "label": "配置本机工具成员",
+      "draftPrompt": "请帮我在设置的成员中选择本机工具，继承工具的模型与思考强度，并说明怎样为单个角色分别覆盖和恢复继承。请保留已有 DSH 启动配置和账号，不修改 CLI 认证文件。"
+    },
+    "owner": "codex"
+  },
+  {
     "id": "feature-f322-work-discussion",
     "kind": "feature",
     "sourceRef": {
@@ -975,6 +1000,22 @@
       }
     },
     "owner": "codex-astra"
+  },
+  {
+    "id": "feature-f325-official-acp",
+    "kind": "feature",
+    "sourceRef": { "path": "docs/ops/agy-acp-setup.md", "anchor": "# 使用 AGY 官方 ACP" },
+    "structureSource": { "path": "packages/web/src/components/hub-cat-editor.sections.tsx", "anchor": "agy-acp" },
+    "bodySource": { "path": "docs/ops/agy-acp-setup.md", "anchor": "# 使用 AGY 官方 ACP" },
+    "contexts": ["concierge_open", "feature_dev"],
+    "audience": ["cvo", "developer"],
+    "body": "想让 AGY 成员通过官方 ACP 工作？在成员设置中选择 Google → AGY 官方 ACP，保存程序路径、Profile 与权限，再按登录说明完成独立的个人订阅登录，回正常 Chat 新建会话。旧历史保留；活动回合中的新消息沿队列接收。",
+    "action": {
+      "type": "open_source",
+      "label": "查看 ACP 安装与登录",
+      "sourceRef": { "path": "docs/ops/agy-acp-setup.md", "anchor": "# 使用 AGY 官方 ACP" }
+    },
+    "owner": "codex61-sol"
   },
   {
     "id": "feature-f242-convention-graph",
@@ -2159,7 +2200,7 @@
     },
     "contexts": ["feature_dev"],
     "audience": ["cvo", "developer"],
-    "body": "视频插件已就绪：设置 → 插件 → video-gen / video-analysis → 配置 provider 凭据（API Key 或 Access Key + Secret Key）并启用。生成结果可在对话中内联播放，分析结果直接返回文本。",
+    "body": "视频插件已就绪：设置 → 插件 → Video Generation / Video Analysis → 配置 provider 凭据（API Key 或 Access Key + Secret Key）并启用。生成结果可在对话中内联播放，分析结果直接返回文本。",
     "action": {
       "type": "open_source",
       "label": "打开 F205 spec",
@@ -2187,11 +2228,8 @@
     },
     "contexts": ["thinking", "long_running"],
     "audience": ["cvo"],
-    "body": "微信公众号插件已就绪：设置 → 插件 → weixin-mp → 配置 App ID 和 App Secret 并启用。猫猫可以帮你把 Markdown 转成微信格式、上传图片、创建草稿、一键发布文章。",
-    "action": {
-      "type": "open_concierge_draft",
-      "label": "了解更多"
-    },
+    "body": "微信公众号插件已就绪：设置 → 插件 → WeChat Official Account → 配置 App ID 和 App Secret 并启用。猫猫可以帮你把 Markdown 转成微信格式、上传图片、创建草稿、一键发布文章。",
+    "action": { "type": "open_concierge_draft", "label": "了解更多" },
     "owner": "opus"
   },
   {
@@ -2227,7 +2265,7 @@
     "kind": "feature",
     "sourceRef": {
       "path": "docs/features/F292-feishu-meeting-intake-plugin.md",
-      "anchor": "Current activation and repair truth"
+      "anchor": "User Journey"
     },
     "structureSource": {
       "path": "docs/features/F292-feishu-meeting-intake-plugin.md",
@@ -2235,7 +2273,7 @@
     },
     "bodySource": {
       "path": "docs/features/F292-feishu-meeting-intake-plugin.md",
-      "anchor": "Current activation and repair truth"
+      "anchor": "User Journey"
     },
     "contexts": ["thinking", "long_running", "concierge_open"],
     "audience": ["cvo"],
@@ -2271,6 +2309,56 @@
       "surfaceId": "new-conversation"
     },
     "owner": "codex-sol"
+  },
+  {
+    "id": "feature-f202-git-plugin-install",
+    "kind": "feature",
+    "sourceRef": {
+      "path": "docs/architecture/plugin-architecture.md",
+      "anchor": "Git marketplace sources"
+    },
+    "structureSource": {
+      "path": "packages/web/src/components/settings/plugin-manager/PluginGitInstallButton.tsx",
+      "anchor": "PluginGitInstallButton"
+    },
+    "bodySource": {
+      "path": "docs/architecture/plugin-architecture.md",
+      "anchor": "Git marketplace sources"
+    },
+    "contexts": ["feature_dev", "concierge_open"],
+    "audience": ["cvo", "developer"],
+    "body": "到设置 → 插件管理的仓库设置添加 Git 地址与分支，刷新后从插件列表安装。已安装插件只在发现更高兼容版本时显示更新，不提供来源或版本切换器。",
+    "action": {
+      "type": "open_capability_surface",
+      "label": "打开插件管理",
+      "surfaceId": "settings.plugins"
+    },
+    "owner": "codex-sol"
+  },
+  {
+    "id": "feature-f202-local-directory-install",
+    "kind": "feature",
+    "sourceRef": {
+      "path": "docs/architecture/plugin-architecture.md",
+      "anchor": "Local directory installation"
+    },
+    "structureSource": {
+      "path": "packages/web/src/components/settings/plugin-manager/PluginDirectoryInstallButton.tsx",
+      "anchor": "PluginDirectoryInstallButton"
+    },
+    "bodySource": {
+      "path": "docs/architecture/plugin-architecture.md",
+      "anchor": "Settings → 插件集成"
+    },
+    "contexts": ["feature_dev", "concierge_open"],
+    "audience": ["cvo", "developer"],
+    "body": "调试本机插件时，到设置 → 插件集成选择“从本地目录安装”，打开已构建的插件包目录再安装。目录或依赖校验失败会保留错误提示；安装成功后仍需另行启用。",
+    "action": {
+      "type": "open_capability_surface",
+      "label": "打开插件管理",
+      "surfaceId": "settings.plugins"
+    },
+    "owner": "astra"
   },
   {
     "id": "capability-concept-demo-design",
@@ -2607,16 +2695,16 @@
     "id": "workflow-collective-result-return",
     "kind": "workflow",
     "sourceRef": {
-      "path": "cat-cafe-skills/collective-participation/SKILL.md",
-      "anchor": "恢复与真实状态"
+      "path": "docs/features/F290-ai-native-collective.md",
+      "anchor": "J0 — 人带第一只猫入场，并完成一次真实协作"
     },
     "structureSource": {
       "path": "packages/web/src/components/collective/CollectiveWorkRequests.tsx",
       "anchor": "CollectiveWorkRequests"
     },
     "bodySource": {
-      "path": "cat-cafe-skills/collective-participation/SKILL.md",
-      "anchor": "丢了响应或换了 invocation"
+      "path": "docs/features/F290-ai-native-collective.md",
+      "anchor": "J0 — 人带第一只猫入场，并完成一次真实协作"
     },
     "contexts": ["long_running", "concierge_open"],
     "audience": ["all"],

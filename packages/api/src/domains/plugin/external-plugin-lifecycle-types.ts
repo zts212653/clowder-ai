@@ -1,3 +1,4 @@
+import type { PluginStartFailureObserver } from './diagnostics/plugin-start-failure.js';
 import type { PluginInventoryStore } from './host-inventory/ports.js';
 import type { PluginInstanceRecord, PluginRuntimeErrorCode } from './host-inventory/types.js';
 
@@ -10,21 +11,27 @@ export type PluginLifecycleErrorCode =
   | 'STOP_FAILED'
   | 'UPDATE_RESUME_FAILED'
   | 'UPDATE_ROLLBACK_RESUME_FAILED'
-  | 'CATCH_UP_RESUME_FAILED';
+  | 'CATCH_UP_RESUME_FAILED'
+  | 'CONFIGURATION_RESUME_FAILED';
 
 export interface PluginMaintenanceInput<T> {
   readonly instanceId: string;
   readonly expectedRevision: number;
-  readonly stopReason: 'package_update' | 'meeting_catch_up';
-  readonly resumeFailureCode: Extract<PluginRuntimeErrorCode, 'UPDATE_RESUME_FAILED' | 'CATCH_UP_RESUME_FAILED'>;
+  readonly stopReason: 'package_update' | 'meeting_catch_up' | 'configuration_update' | 'host_setup';
+  readonly resumeFailureCode: Extract<
+    PluginRuntimeErrorCode,
+    'UPDATE_RESUME_FAILED' | 'CATCH_UP_RESUME_FAILED' | 'CONFIGURATION_RESUME_FAILED'
+  >;
   /** Validate a replacement before disrupting the currently running package. */
   readonly preflight?: () => Promise<void>;
   readonly operation: (stopped: PluginInstanceRecord) => Promise<T>;
+  /** Restore an admitted replacement before resuming the old runtime. Runs inside the same queue. */
+  readonly rollback?: () => Promise<void>;
 }
 
 export type PluginMaintenanceResumeFailureCode = Extract<
   PluginRuntimeErrorCode,
-  'UPDATE_RESUME_FAILED' | 'UPDATE_ROLLBACK_RESUME_FAILED' | 'CATCH_UP_RESUME_FAILED'
+  'UPDATE_RESUME_FAILED' | 'UPDATE_ROLLBACK_RESUME_FAILED' | 'CATCH_UP_RESUME_FAILED' | 'CONFIGURATION_RESUME_FAILED'
 >;
 
 export interface PluginMaintenanceResult<T> {
@@ -45,10 +52,25 @@ export class PluginLifecycleError extends Error {
 export interface PluginRuntimeLifecyclePort {
   start(pluginInstanceId: string): Promise<unknown>;
   stop(pluginInstanceId: string, reason?: string): Promise<void>;
+  configRefresh?(pluginInstanceId: string): Promise<void>;
+}
+
+export const PLUGIN_OWNER_DISABLED_REASON = 'owner_disabled';
+export const PLUGIN_OWNER_UNINSTALLED_REASON = 'owner_uninstalled';
+
+const PLUGIN_OWNER_REMOVAL_REASONS = new Set<string>([PLUGIN_OWNER_DISABLED_REASON, PLUGIN_OWNER_UNINSTALLED_REASON]);
+
+export function removesPluginOwnedResources(reason: string): boolean {
+  return PLUGIN_OWNER_REMOVAL_REASONS.has(reason);
 }
 
 export interface ExternalPluginLifecycleServiceOptions {
   readonly store: PluginInventoryStore;
   readonly supervisor: PluginRuntimeLifecyclePort;
   readonly now?: () => number;
+  /**
+   * F202 W2-6b: told of every failed runtime start, with a safe projection of the error — never the
+   * error itself. Defaults to the Host's `plugin/lifecycle` error log.
+   */
+  readonly onStartFailure?: PluginStartFailureObserver;
 }

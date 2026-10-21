@@ -1,10 +1,10 @@
 ---
 name: memory-navigation
-tips_exempt: internal shared-reference coordinate repair; no user-visible capability change
+tips_exempt: "Renewed 2026-10-20: internal agent source routing, current-Task authority checks and original-owner experience placement; no new end-user Hub control or action."
 description: >
   记忆系统三入口路由（search_evidence / graph_resolve / list_recent）决策树 + 噪音控制 + 加载时机。F188 Phase F (AC-F6) 配套 skill。
   Use when: 没先验、压缩后回顾、"我记得最近讨论过 X"、search_evidence 反复 low-hit。
-  Not for: 已有精确 anchor 直接 Read；代码符号查 Grep/LSP。
+  Not for: 已有消息坐标或文件路径时直接读原文；代码符号查 Grep/LSP。
   Output: 选定入口 + 噪音控制参数 + 进入对应 MCP 工具。
 triggers:
   - "没先验"
@@ -43,6 +43,11 @@ Not for:
 - 全文匹配 → `Grep`
 
 ## 三入口决策树
+
+先识别坐标的类型：`threadId#messageId` 或裸消息 ID 直接走
+`cat_cafe_get_message(messageId="裸消息ID", mode="full")`，不要把 thread 前缀传进 messageId；
+文件 sourcePath 走 `cat_cafe_read_file_slice`。消息坐标、文件路径都不是知识图谱节点，
+不要在已有原文坐标时重新搜索来代替回源。下面的精确 anchor 指 F 编号、ADR 等知识节点。
 
 ```
 开工 / 接到任务 / 压缩恢复
@@ -103,6 +108,8 @@ Not for:
 
 ## 关键纪律
 
+- 高分候选只表明相关，不等于本题所需的当前依据。未定位到实际适用的记录时，改写查询或用
+  `list_recent(scope="docs")` / 实际目录继续发现；核实可达范围后仍缺材料，再明确缺口。
 - **`search_evidence` 不是默认万能**——历史 hook 只提它是 one-trick legacy。三入口按场景选才是 Phase F 设计。
 - **看到 search_evidence payload 的 🧭 Memory navigation nudge**——这是低命中信号，立刻试 graph 或 recent，不要继续盲搜。
 - **猫的认知成本**来自"工具间互相找"而非"工具总数"，cross-reference 直接解决。

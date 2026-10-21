@@ -290,158 +290,44 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     };
   }
 
-  it('F290 carries an authenticated home delegation into the receiving Cat private Work binding', async () => {
-    const previousDataDir = process.env.CAT_CAFE_DATA_DIR;
-    process.env.CAT_CAFE_DATA_DIR = join(testGlobalConfigRoot, 'private-work');
-    const createCalls = [];
-    const delegationMessage = {
-      id: 'message-home-delegation',
-      userId: 'owner-1',
-      threadId: 'thread-private-work',
-      catId: 'codex-astra',
-      content: '@codex-sol continue the admitted Work',
-      mentions: ['codex-sol'],
-      origin: 'callback',
-      timestamp: 1,
-      extra: {
-        isExplicitPost: true,
-        collectiveWorkDelegationV1: {
-          v: 1,
-          taskId: 'task-private-work',
-          observedRevision: 3,
-          resultRevision: 1,
-          executionRevision: 2,
-          executionRef: 'message:owner-admission',
-          ownerCatId: 'codex-astra',
-          targetCatIds: ['codex-sol'],
-        },
-      },
-    };
-    const privateCalls = [];
-    const verifiedCalls = [];
-    const source = {
-      serviceInstanceId: 'service-test',
-      collectiveId: 'world-test',
-      location: { channelId: 'channel-test' },
-    };
-    const deps = {
-      ...makeDeps(),
-      ...scopedTestSessions(process.env.CAT_CAFE_DATA_DIR),
-      registry: {
-        create: async (...args) => {
-          createCalls.push(args);
-          return { invocationId: 'inv-home-delegation', callbackToken: 'tok-home-delegation' };
-        },
-        verify: async (invocationId, callbackToken) => {
-          verifiedCalls.push({ invocationId, callbackToken });
-          assert.equal(invocationId, 'inv-home-delegation');
-          assert.equal(callbackToken, 'tok-home-delegation');
-          return { ok: true };
-        },
-      },
-      messageStore: { getById: async () => delegationMessage },
-      collectiveContext: () => ({
-        resolvePrivate: async (input, phase) => {
-          privateCalls.push({ input, phase });
-          return {
-            sourceRef: 'message:collective-source',
-            grant: { source },
-            context: {
-              events: [],
-              source: {
-                ...source,
-                eventId: 'collective-source',
-                sequence: 1,
-                actor: { type: 'human' },
-                body: 'CURRENT_WORK_SOURCE_CANARY',
-              },
-            },
-            work: {
-              task: { id: 'task-private-work', title: 'Current Work', why: 'Continue this matter' },
-              revision: 3,
-              resultRevision: 1,
-              authorityRef: 'message:owner-admission',
-              executionRevision: 2,
-              executionRef: 'message:owner-admission',
-            },
-          };
-        },
-      }),
-    };
-    const launched = [];
-    const service = {
-      l0CompilerFn: dummyL0CompilerFn,
-      supportsToolExecutionPolicy: (policy) => policy.mode === 'collective_work',
-      async *invoke(prompt, options) {
-        launched.push({ prompt, options });
-        yield* scriptedSessionInit('codex-sol', prompt, options);
-        yield { type: 'done', catId: 'codex-sol', timestamp: Date.now() };
-      },
-    };
-    const params = {
-      catId: 'codex-sol',
-      service,
-      prompt: 'UNRELATED_HOME_HISTORY_CANARY',
-      userId: 'owner-1',
-      ownerAuthProvenance: 'strict',
-      threadId: 'thread-private-work',
-      a2aTriggerMessageId: delegationMessage.id,
-      isLastCat: true,
-    };
+  it('F321 keeps unrelated private Profile content behind the authenticated pull entry', async () => {
+    const { FileProfileRepository } = await import('../dist/domains/cats/services/profile/ProfileRepository.js');
+    const dataDir = await mkdtemp(join(tmpdir(), 'f321-pull-only-'));
     try {
-      await assert.rejects(
-        collect(
-          invokeSingleCat(deps, {
-            ...params,
-            service: { ...service, supportsToolExecutionPolicy: () => false },
-          }),
-        ),
-        (error) => {
-          assert.equal(error.code, 'collective_private_work_refused');
-          assert.equal(error.reason, 'private_provider_unsupported');
-          return true;
+      const repository = new FileProfileRepository({ dataDir, relationshipKeyForCat: () => 'maine-coon' });
+      for (const path of [
+        repository.primerPath(repository.scope('user-1', 'codex')),
+        repository.corpusPath('user-1'),
+      ]) {
+        await mkdir(dirname(path), { recursive: true });
+        await writeFile(path, 'PRIVATE_UNRELATED_PROFILE_PAYLOAD');
+      }
+      const prompts = [];
+      const service = {
+        async *invoke(prompt) {
+          prompts.push(prompt);
+          yield { type: 'done', catId: 'codex', timestamp: Date.now() };
         },
+      };
+      await collect(
+        invokeSingleCat(
+          { ...makeDeps(), profileRepository: repository },
+          {
+            catId: 'codex',
+            service,
+            prompt: '17乘19是多少？',
+            userId: 'user-1',
+            ownerAuthProvenance: 'strict',
+            threadId: 'thread-f321-pull',
+            isLastCat: true,
+          },
+        ),
       );
-      assert.equal(createCalls.length, 0, 'unsupported private provider must not register an invocation');
-      assert.equal(launched.length, 0, 'unsupported private provider must not start a model');
-      privateCalls.length = 0;
-
-      const events = await collect(invokeSingleCat(deps, params));
-      assert.deepEqual(
-        events.filter((event) => event.type === 'error'),
-        [],
-      );
-
-      assert.equal(privateCalls.length, 1);
-      assert.equal(privateCalls[0].phase, 'admission');
-      assert.equal(createCalls.length, 1);
-      assert.equal(createCalls[0][7], 'unknown', 'Work admission must not inherit strict owner authority');
-      assert.deepEqual(createCalls[0][10], {
-        v: 1,
-        taskId: 'task-private-work',
-        observedRevision: 3,
-        resultRevision: 1,
-        executionRevision: 2,
-        executionRef: 'message:owner-admission',
-        sourceRef: 'message:collective-source',
-        authorityRef: 'message:owner-admission',
-      });
-      assert.equal(launched.length, 1);
-      const { prompt, options } = launched[0];
-      assert.match(prompt, /CURRENT_WORK_SOURCE_CANARY/);
-      assert.match(prompt, /continue the admitted Work/);
-      assert.doesNotMatch(prompt, /UNRELATED_HOME_HISTORY_CANARY/);
-      assert.deepEqual(options.toolExecutionPolicy, createCalls[0][5]);
-      assert.equal(options.toolExecutionPolicy.mode, 'collective_work');
-      assert.equal(options.toolExecutionPolicy.taskId, 'task-private-work');
-      assert.equal(options.toolExecutionPolicy.executionRevision, 2);
-      assert.equal(options.toolExecutionPolicy.executionRef, 'message:owner-admission');
-      assert.ok(options.workingDirectory.startsWith(await realpath(process.env.CAT_CAFE_DATA_DIR)));
-      assert.equal(options.sessionId, undefined);
-      assert.ok(verifiedCalls.length > 0, 'private launch must revalidate the current invocation');
+      assert.equal(prompts.length, 1);
+      assert.doesNotMatch(prompts[0], /PRIVATE_UNRELATED_PROFILE_PAYLOAD|当前关系档案/);
+      assert.equal(repository.readCorpus('user-1').content, 'PRIVATE_UNRELATED_PROFILE_PAYLOAD');
     } finally {
-      if (previousDataDir === undefined) delete process.env.CAT_CAFE_DATA_DIR;
-      else process.env.CAT_CAFE_DATA_DIR = previousDataDir;
+      await rm(dataDir, { recursive: true, force: true });
     }
   });
 
@@ -5886,6 +5772,46 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     });
   });
 
+  it('AGY official ACP does not replay an uncertain upstream failure even before text arrives', async () => {
+    let invokeCount = 0;
+    const deps = makeDeps();
+    const workspace = await mkdtemp(join(tmpdir(), 'agy-acp-no-replay-'));
+    deps.threadStore = { get: async () => ({ projectPath: workspace }) };
+    const service = {
+      l0CompilerFn: dummyL0CompilerFn,
+      freshnessCarrierCapability: () => ({
+        provider: 'google',
+        carrier: 'agy_acp',
+        deliverySemantics: 'unsupported',
+        activeInvocationGuidance: 'unsupported',
+      }),
+      async *invoke() {
+        invokeCount++;
+        yield { type: 'error', catId: 'opus', error: 'Premature close', timestamp: Date.now() };
+        yield { type: 'done', catId: 'opus', timestamp: Date.now() };
+      },
+    };
+    try {
+      const messages = await collect(
+        invokeSingleCat(deps, {
+          catId: 'opus',
+          service,
+          prompt: 'test',
+          userId: 'owner-acp',
+          threadId: 'thread-acp',
+          isLastCat: true,
+        }),
+      );
+      assert.equal(invokeCount, 1);
+      assert.equal(
+        messages.some((message) => message.type === 'error' && message.error === 'Premature close'),
+        true,
+      );
+    } finally {
+      await rm(workspace, { recursive: true, force: true });
+    }
+  });
+
   it('transient CLI self-heal: retries once when Claude exits code 1 before any stream output', async () => {
     let invokeCount = 0;
     const service = {
@@ -8287,6 +8213,60 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     assert.equal(callbackEnv.OPENAI_BASE_URL, undefined);
     assert.equal(callbackEnv.OPENAI_API_BASE, undefined);
   });
+
+  for (const configurationSource of [undefined, 'native_tool']) {
+    it(`first-run synthetic Codex binding inherits CLI provider config (${configurationSource ?? 'legacy'})`, async () => {
+      const root = await mkdtemp(join(tmpdir(), 'first-run-codex-native-'));
+      const apiDir = join(root, 'packages', 'api');
+      await mkdir(apiDir, { recursive: true });
+      await writeFile(join(root, 'pnpm-workspace.yaml'), 'packages:\n  - "packages/*"\n', 'utf-8');
+      const prevGlobalRoot = process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT;
+      process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT = root;
+      const registrySnapshot = catRegistry.getAllConfigs();
+      const originalConfig = catRegistry.tryGet('codex')?.config;
+      assert.ok(originalConfig);
+      const catId = 'first-run-native-codex';
+      catRegistry.register(catId, {
+        ...originalConfig,
+        id: catId,
+        mentionPatterns: [`@${catId}`],
+        clientId: 'openai',
+        accountRef: 'codex',
+        defaultModel: 'gpt-5.4',
+        ...(configurationSource ? { configurationSource } : {}),
+      });
+      const optionsSeen = [];
+      const service = {
+        l0CompilerFn: dummyL0CompilerFn,
+        async *invoke(_prompt, options) {
+          optionsSeen.push(options ?? {});
+          yield { type: 'done', catId, timestamp: Date.now() };
+        },
+      };
+      const previousCwd = process.cwd();
+      try {
+        process.chdir(apiDir);
+        await collect(
+          invokeSingleCat(makeDeps(), {
+            catId,
+            service,
+            prompt: 'test',
+            userId: 'first-run-native-user',
+            threadId: 'first-run-native-thread',
+            isLastCat: true,
+          }),
+        );
+      } finally {
+        process.chdir(previousCwd);
+        catRegistry.reset();
+        for (const [id, config] of Object.entries(registrySnapshot)) catRegistry.register(id, config);
+        if (prevGlobalRoot === undefined) delete process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT;
+        else process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT = prevGlobalRoot;
+        await rmWithRetry(root);
+      }
+      assert.equal(optionsSeen[0]?.callbackEnv?.CODEX_AUTH_MODE, configurationSource ? undefined : 'auto');
+    });
+  }
 
   it('F127 P1: keeps env-based codex auth untouched when no openai profile is explicitly configured', async () => {
     const root = await mkdtemp(join(tmpdir(), 'f127-openai-env-auth-'));
@@ -11208,8 +11188,9 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     assert.ok(
       msgs.some(
         (message) =>
-          message.type === 'error' && String(message.error).includes('AGY native requires a thread projectPath'),
+          message.type === 'error' && /AGY(?: native)? requires a thread projectPath/u.test(String(message.error)),
       ),
+      JSON.stringify(msgs.filter((message) => message.type === 'error')),
     );
   });
 
@@ -11382,108 +11363,6 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
         ),
       );
     } finally {
-      await rm(base, { recursive: true, force: true });
-    }
-  });
-
-  it('refuses private native Work before consulting an unrelated operator coding grant', async () => {
-    const { AgyNativeAgentService } = await import(
-      '../dist/domains/cats/services/agents/providers/agy-native/AgyNativeAgentService.js'
-    );
-    const base = await mkdtemp(join(tmpdir(), 'f325-private-native-refusal-'));
-    const previousDataDir = process.env.CAT_CAFE_DATA_DIR;
-    process.env.CAT_CAFE_DATA_DIR = base;
-    const configs = catRegistry.getAllConfigs();
-    const grant = {
-      threadId: 'private-thread',
-      taskId: 'approved-native-task',
-      workUnitRef: 'file:docs/plans/2026-09-29-f325-three-pr-execution.md#p2-first-coding',
-      acceptedRevision: 'a'.repeat(40),
-      workspaceRoot: base,
-      writableFiles: ['task.ts', 'task.test.mjs'],
-      testFile: 'task.test.mjs',
-    };
-    catRegistry.reset();
-    for (const [id, config] of Object.entries(configs)) {
-      catRegistry.register(
-        id,
-        id === 'gemini38' ? { ...config, agyProfile: { ...config.agyProfile, nativeCodingGrant: grant } } : config,
-      );
-    }
-    let grantReads = 0;
-    let authRegistrations = 0;
-    let launches = 0;
-    try {
-      assert.deepEqual(catRegistry.tryGet('gemini38')?.config.agyProfile?.nativeCodingGrant, grant);
-      const service = new AgyNativeAgentService({
-        catId: 'gemini38',
-        profile: { enabled: true, profileId: 'gemini38', model: 'gemini-3.8-flash-high' },
-        command: '/usr/bin/true',
-      });
-      service.contextCapability = () => ({
-        provider: 'google',
-        carrier: 'agy_stream_json',
-        reportsRuntimeWindow: false,
-        authoritativeUsage: false,
-        nativeWindowControl: false,
-        nativeCompressionControl: false,
-        observesCompression: false,
-        reason: 'private native Work refusal fixture preserves the concrete carrier',
-      });
-      service.invoke = async function* () {
-        launches++;
-      };
-      await assert.rejects(
-        collect(
-          invokeSingleCat(
-            {
-              ...makeDeps(),
-              taskStore: {
-                get: async () => {
-                  grantReads++;
-                },
-              },
-              registry: {
-                create: async () => {
-                  authRegistrations++;
-                },
-              },
-              collectiveContext: () => ({
-                resolvePrivate: async () => ({
-                  work: {
-                    task: { id: 'private-task' },
-                    executionRevision: 1,
-                    authorityRef: 'message:private-admission',
-                  },
-                }),
-              }),
-            },
-            {
-              catId: 'gemini38',
-              service,
-              userId: 'user1',
-              threadId: 'private-thread',
-              executionScope: 'collective-work',
-              prompt: 'Current private Work',
-              isLastCat: true,
-            },
-          ),
-        ),
-        (error) => {
-          assert.equal(error.code, 'collective_private_work_refused');
-          assert.equal(error.reason, 'private_provider_unsupported');
-          return true;
-        },
-      );
-      assert.deepEqual(
-        { grantReads, authRegistrations, launches },
-        { grantReads: 0, authRegistrations: 0, launches: 0 },
-      );
-    } finally {
-      catRegistry.reset();
-      for (const [id, config] of Object.entries(configs)) catRegistry.register(id, config);
-      if (previousDataDir === undefined) delete process.env.CAT_CAFE_DATA_DIR;
-      else process.env.CAT_CAFE_DATA_DIR = previousDataDir;
       await rm(base, { recursive: true, force: true });
     }
   });

@@ -1,0 +1,12 @@
+# First-run quest entry reminder. It is intentionally non-blocking.
+tips_exempt: "2026-10-15: This flow is already the automatic non-blocking first-message reminder after partner creation; a second capability tip would duplicate the same instruction."
+schemaVersion: 1
+id: first-run-entry
+name: 首次协作入口
+description: 创建真实伙伴后，提醒成员和账号入口，不挡住第一句话
+nonBlocking: true
+steps:
+  - id: settings-entries
+    target: hub.trigger
+    tips: 团队已准备好，可以直接开始对话。之后可从这里进入「成员」调整伙伴和分工，在「密钥／账号」管理连接；已登录的工具可直接复用。
+    advance: next

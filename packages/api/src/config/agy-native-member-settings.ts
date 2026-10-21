@@ -7,7 +7,7 @@ import { resolveByAccountRef } from './account-resolver.js';
 export const agyNativeMemberSettingsSchema = z
   .object({
     enabled: z.boolean(),
-    carrier: z.literal('native'),
+    carrier: z.enum(['native', 'acp']),
     profileId: z
       .string()
       .trim()
@@ -38,15 +38,32 @@ export function resolveAgyNativeMemberPatch(input: {
   current?: AgyProfileConfig;
   clientId: ClientId;
   acp: unknown;
+  carrier?: string;
   model: string;
   accountRef?: string;
   previousAccountRef?: string;
   cliConfigArgs?: readonly string[];
 }): AgyProfileConfig | null | undefined {
   if (input.requested === null) return null;
-  const leavesNativeClient = input.clientId !== 'google' || input.acp != null;
+  const proposed = input.requested ?? input.current;
+  const selectedAcp = input.carrier === 'acp' || (input.carrier === undefined && input.acp != null);
+  if (input.requested?.carrier === 'acp' && (!selectedAcp || !input.acp))
+    throw new Error('AGY ACP requires carrier=acp and an ACP launch configuration');
+  if (proposed?.carrier === 'acp' && input.clientId === 'google' && selectedAcp && input.acp) {
+    const account = resolveByAccountRef(input.projectRoot, input.accountRef ?? 'gemini');
+    if (
+      account &&
+      (account.client !== 'google' || account.authType !== 'oauth' || Object.keys(account.envVars ?? {}).length)
+    )
+      throw new Error('AGY ACP requires personal OAuth with no account environment overrides');
+    if (input.cliConfigArgs?.length) throw new Error('AGY ACP does not accept CLI extension arguments');
+    if (proposed.model !== input.model) throw new Error('AGY ACP profile model must match the member model ID');
+    return input.requested ?? undefined;
+  }
+  const leavesNativeClient = input.clientId !== 'google' || input.acp != null || selectedAcp;
   if (leavesNativeClient && input.requested) throw new Error('AGY Native requires Gemini without ACP');
-  if (leavesNativeClient) return input.current?.carrier === 'native' ? null : undefined;
+  if (leavesNativeClient)
+    return input.current?.carrier === 'native' || input.current?.carrier === 'acp' ? null : undefined;
   const next: AgyProfileConfig | undefined = input.requested ?? input.current;
   if (next?.carrier !== 'native') return undefined;
   const account = resolveByAccountRef(input.projectRoot, input.accountRef ?? 'gemini');

@@ -68,7 +68,39 @@ function loadConfigWithPwaCapture() {
   }
 }
 
+it('precache includes current CSS without eagerly caching every retained historical version', async () => {
+  const currentUrl = require('../src/generated/vendor-stylesheets.json')[0];
+  const historicalUrl = currentUrl.replace(/\.[a-f0-9]{16}\.css$/, '.0000000000000000.css');
+  const entries = [
+    { url: currentUrl.slice(1), revision: 'current' },
+    { url: historicalUrl, revision: 'historical' },
+    { url: 'vendor/app/theme-tokens.css', revision: 'legacy-alias' },
+    { url: '_next/static/css/document.css', revision: 'next-owned' },
+  ];
+  const options = loadConfigWithPwaCapture();
+  const result = await options.workboxOptions.manifestTransforms[0](entries);
+  assert.deepEqual(result.manifest, [entries[0], entries[2], entries[3]]);
+  assert.deepEqual(result.warnings, []);
+});
+
 describe('next.config rewrites', () => {
+  it('uses non-adjacent configured API defaults when FRONTEND_PORT selects that Web port', async () => {
+    const originalLoad = Module._load;
+    Module._load = function loadSyntheticDefaults(request, parent, isMain) {
+      const actual = originalLoad.call(this, request, parent, isMain);
+      if (request !== '../shared/src/deployment-defaults.ts') return actual;
+      return { ...actual, deploymentDefaults: { ...actual.deploymentDefaults, webPort: 4510, apiPort: 4599 } };
+    };
+    try {
+      await withEnv({ FRONTEND_PORT: '4510' }, async (config) => {
+        const rewrites = await config.rewrites();
+        assert.equal(rewrites[0].destination, 'http://localhost:4599/api/:path*');
+      });
+    } finally {
+      Module._load = originalLoad;
+    }
+  });
+
   it('proxies /api, /socket.io, and /uploads to default API port', async () => {
     await withEnv({}, async (config) => {
       const rewrites = await config.rewrites();

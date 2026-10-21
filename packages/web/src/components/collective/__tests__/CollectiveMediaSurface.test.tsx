@@ -42,7 +42,7 @@ it('mounts the original F309 canvas with an authenticated local media URL and no
   await act(async () => root.render(<CollectiveMediaSurface reference={mediaRef} rpc={rpc} onBack={vi.fn()} />));
   const image = container.querySelector<HTMLImageElement>('[data-testid="workspace-content-review-media"]');
   expect(image?.src).toContain(
-    `/api/plugins/collective-connector/${mediaRef.connectionId}/artifacts/${mediaRef.artifactId}/media/1?sourceEventId=`,
+    `/api/plugins/official.collective-connector/connections/${mediaRef.connectionId}/artifacts/${mediaRef.artifactId}/media/1?sourceEventId=`,
   );
   expect(container.querySelector('[data-testid="workspace-content-review-surface"]')).not.toBeNull();
   expect(container.textContent).toContain('返回原讨论');

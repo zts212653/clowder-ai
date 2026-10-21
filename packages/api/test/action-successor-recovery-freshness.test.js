@@ -4,35 +4,34 @@ import { describe, test } from 'node:test';
 const OLD_HEAD = 'a'.repeat(40);
 const NEW_HEAD = 'b'.repeat(40);
 
-function reviewLease(overrides = {}) {
+function frozenLease(overrides = {}) {
   return {
-    leaseId: 'lease-review-recovery',
-    key: 'user-1\u001fpr:owner/repo#42\u001freview\u001freviewer',
+    leaseId: 'lease-task-freshness',
+    key: 'user-1\u001fsubject:task:work-42\u001fimplement\u001fimplementer',
     tenantScope: 'user-1',
-    subjectRef: 'pr:owner/repo#42',
-    actionFamily: 'review',
-    successorSlot: 'reviewer',
+    subjectRef: 'subject:task:work-42',
+    actionFamily: 'implement',
+    successorSlot: 'implementer',
     mode: 'single',
     holderCatIds: ['codex-terra'],
-    dispatchId: 'approval:proposal-review-recovery',
+    dispatchId: 'approval:proposal-task-freshness',
     claimOrigin: 'structured_transfer',
-    holderThreadId: 'thread-review',
+    holderThreadId: 'thread-task',
     predecessorCatId: 'codex-sol',
     predecessorThreadId: 'thread-author',
-    issuerStandingEvidenceRef: 'approval:proposal-review-recovery',
+    issuerStandingEvidenceRef: 'approval:proposal-task-freshness',
     generation: 1,
     status: 'active',
     holderOutcomes: {},
     completionCandidates: {},
-    evidenceRefs: ['approval:proposal-review-recovery'],
+    evidenceRefs: ['approval:proposal-task-freshness'],
     terminalPredicateState: { kind: 'predicate_backed' },
     terminalPredicate: {
-      kind: 'review_delivered',
-      subjectRef: 'pr:owner/repo#42',
-      identityKey: 'review_delivered\u001fpr:owner/repo#42',
+      kind: 'task_done',
+      subjectRef: 'subject:task:work-42',
+      identityKey: 'task_done\u001fsubject:task:work-42',
       freshnessKey: `head:${OLD_HEAD}`,
-      digest: 'predicate-review-recovery',
-      headSha: OLD_HEAD,
+      digest: 'predicate-task-freshness',
     },
     returnTransitions: [],
     dispatchDeliveryState: 'pending',
@@ -45,7 +44,7 @@ function reviewLease(overrides = {}) {
 }
 
 function taskLease(overrides = {}) {
-  return reviewLease({
+  return frozenLease({
     leaseId: 'lease-task-recovery',
     key: 'user-1\u001fsubject:task:task-1\u001fimplement\u001fimplementer',
     subjectRef: 'subject:task:task-1',
@@ -80,10 +79,7 @@ function approvedProposal(lease) {
       actionFamily: lease.actionFamily,
       successorSlot: lease.successorSlot,
       mode: lease.mode,
-      terminalPredicate:
-        lease.terminalPredicate.kind === 'review_delivered'
-          ? { kind: 'review_delivered', headSha: lease.terminalPredicate.headSha }
-          : { kind: 'task_done' },
+      terminalPredicate: { kind: 'task_done' },
     },
     envelopeDigest: 'sha256:proposal',
     status: 'approved',
@@ -248,7 +244,7 @@ function recoveryHarness({
         },
         async loadOwnerAuthProvenance() {
           events.push('provenance');
-          if (newerHeadWinsAfterAttempt) {
+          if (newerHeadWinsAfterAttempt && current.dispatchDeliveryAttemptCount > 0) {
             const mismatchEvidenceRef = `community:${current.subjectRef}:head:${NEW_HEAD}`;
             events.push('newer-head-cas');
             current = {
@@ -292,13 +288,13 @@ async function loadSweep() {
 }
 
 describe('PR8 ActionSuccessor recovery freshness fence', () => {
-  test('verified frozen review HEAD is CAS-bound before the existing carrier delivery runs', async () => {
+  test('verified frozen revision is CAS-bound before the existing carrier delivery runs', async () => {
     const { ActionSuccessorRecoverySweep } = await loadSweep();
     const h = recoveryHarness({
-      lease: reviewLease(),
+      lease: frozenLease(),
       freshness: {
         status: 'verified',
-        evidenceRef: `community:pr:owner/repo#42:head:${OLD_HEAD}`,
+        evidenceRef: `community:subject:task:work-42:head:${OLD_HEAD}`,
         freshnessKey: `head:${OLD_HEAD}`,
       },
     });
@@ -318,14 +314,14 @@ describe('PR8 ActionSuccessor recovery freshness fence', () => {
     assert.deepEqual(h.sideEffects, { messages: 1, queueEntries: 1, invocations: 1 });
   });
 
-  test('mismatched frozen review HEAD retires the old generation before any provider-side effect', async () => {
+  test('mismatched frozen revision retires the old generation before any carrier-side effect', async () => {
     const { ActionSuccessorRecoverySweep } = await loadSweep();
     const h = recoveryHarness({
-      lease: reviewLease(),
+      lease: frozenLease(),
       freshness: {
         status: 'mismatch',
-        reason: 'predicate HEAD is not the server-observed current HEAD',
-        evidenceRef: `community:pr:owner/repo#42:head:${NEW_HEAD}`,
+        reason: 'predicate revision does not match the current Task revision',
+        evidenceRef: `community:subject:task:work-42:head:${NEW_HEAD}`,
       },
     });
     const sweep = new ActionSuccessorRecoverySweep(h.deps);
@@ -334,7 +330,7 @@ describe('PR8 ActionSuccessor recovery freshness fence', () => {
       outcome: 'failed',
       reason: 'terminal_predicate_mismatch',
     });
-    assert.deepEqual(await sweep.recoverDispatch(reviewLease()), {
+    assert.deepEqual(await sweep.recoverDispatch(frozenLease()), {
       outcome: 'failed',
       reason: 'terminal_predicate_mismatch',
     });
@@ -344,11 +340,11 @@ describe('PR8 ActionSuccessor recovery freshness fence', () => {
     assert.equal(h.current().holderOutcomes['codex-terra'].outcome, 'unavailable');
   });
 
-  test('insufficient review freshness remains pending without recording an attempt or guessing', async () => {
+  test('insufficient Task freshness remains pending without recording an attempt or guessing', async () => {
     const { ActionSuccessorRecoverySweep } = await loadSweep();
     const h = recoveryHarness({
-      lease: reviewLease(),
-      freshness: { status: 'insufficient', reason: 'current HEAD projection unavailable' },
+      lease: frozenLease(),
+      freshness: { status: 'insufficient', reason: 'current Task projection unavailable' },
     });
 
     assert.deepEqual(await new ActionSuccessorRecoverySweep(h.deps).recoverDispatch(h.current()), {
@@ -383,13 +379,13 @@ describe('PR8 ActionSuccessor recovery freshness fence', () => {
     assert.equal(h.current().holderOutcomes['codex-sol'].outcome, 'unavailable');
   });
 
-  test('a newer-head retirement that wins the exact-revision race prevents provider entry', async () => {
+  test('a newer-head retirement that wins the exact-revision race prevents carrier entry', async () => {
     const { ActionSuccessorRecoverySweep } = await loadSweep();
     const h = recoveryHarness({
-      lease: reviewLease(),
+      lease: frozenLease(),
       freshness: {
         status: 'verified',
-        evidenceRef: `community:pr:owner/repo#42:head:${OLD_HEAD}`,
+        evidenceRef: `community:subject:task:work-42:head:${OLD_HEAD}`,
         freshnessKey: `head:${OLD_HEAD}`,
       },
       newerHeadWinsBeforeAttempt: true,
@@ -406,10 +402,10 @@ describe('PR8 ActionSuccessor recovery freshness fence', () => {
   test('a post-attempt newer-head retirement prevents carrier entry before the durable delivery reservation', async () => {
     const { ActionSuccessorRecoverySweep } = await loadSweep();
     const h = recoveryHarness({
-      lease: reviewLease(),
+      lease: frozenLease(),
       freshness: {
         status: 'verified',
-        evidenceRef: `community:pr:owner/repo#42:head:${OLD_HEAD}`,
+        evidenceRef: `community:subject:task:work-42:head:${OLD_HEAD}`,
         freshnessKey: `head:${OLD_HEAD}`,
       },
       newerHeadWinsAfterAttempt: true,

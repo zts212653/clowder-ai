@@ -121,10 +121,15 @@ test('daemon launch rejects before any daemon state or process is created', () =
     for (const path of [
       'start-dev.sh',
       'download-source-overrides.sh',
+      'read-deployment-default.mjs',
       'lib/node-runtime-guard.sh',
       'lib/redis-rdb-first.sh',
     ]) {
       cpSync(resolve('../../scripts', path), join(root, 'scripts', path));
+    }
+    mkdirSync(join(root, 'packages/shared/src'), { recursive: true });
+    for (const path of ['deployment-defaults.ts', 'deployment-profiles.json']) {
+      cpSync(resolve('../shared/src', path), join(root, 'packages/shared/src', path));
     }
     mkdirSync(join(root, 'bin'));
     writeFileSync(join(root, 'bin/git'), '#!/bin/sh\nprintf fixture-head\n', { mode: 0o755 });

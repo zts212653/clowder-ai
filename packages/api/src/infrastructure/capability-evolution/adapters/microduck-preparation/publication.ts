@@ -8,6 +8,7 @@ import {
   evolutionPreparationReviewV1Schema,
   type OwnerTruthRefV1,
 } from '@cat-cafe/shared';
+import { getCoCreatorDisplay } from '../../../../config/co-creator-display.js';
 import { isMeasuredControlEvaluation, selectedPublicControlSubject } from '../microduck-control-candidate-selection.js';
 import {
   MICRODUCK_CONTROL_CANDIDATE_ORDER,
@@ -242,7 +243,10 @@ export async function readMicroduckPreparationPublication(
               facts: [
                 { label: '已有产物', value: '5 个 subject × 8 个公开 seed 的 metrics 与 content-addressed captures' },
                 { label: '还缺什么', value: '独立密封 holdout、采用决定、加载后的 fresh outcome 与 rollback outcome' },
-                { label: '负责角色', value: 'Microduck evaluation owner；采用仍由 F246/operator 决定' },
+                {
+                  label: '负责角色',
+                  value: `Microduck evaluation owner；采用仍由 F246/${getCoCreatorDisplay().role} 决定`,
+                },
               ],
               resources: [
                 { label: '公开评估 receipt', sourceRef: publicEvaluationRef },

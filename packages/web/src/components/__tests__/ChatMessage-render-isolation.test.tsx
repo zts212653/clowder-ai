@@ -421,6 +421,9 @@ describe('ChatMessage render isolation', () => {
     expect(container.querySelector('[data-testid="companion-avatar"]')?.getAttribute('data-companion-cat-id')).toBe(
       'fable-5',
     );
+    expect(
+      container.querySelector('[data-testid="companion-avatar"] [data-sender-avatar="message"]')?.className,
+    ).toContain('w-8 h-8');
     expect(container.querySelector('[data-testid="companion-avatar"] img')?.getAttribute('src')).toBe(
       '/avatars/claude-fable-5.png',
     );

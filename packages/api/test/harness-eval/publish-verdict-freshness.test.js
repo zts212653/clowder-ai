@@ -8,7 +8,7 @@ import { FreshnessReplayProviderImpl } from '../../dist/infrastructure/harness-e
 import { loadEvalHubSummary } from '../../dist/infrastructure/harness-eval/hub/eval-hub-read-model.js';
 import { createFreshnessGeneratorAdapter } from '../../dist/infrastructure/harness-eval/publish-verdict/freshness-generator-adapter.js';
 import { handlePublishVerdict } from '../../dist/infrastructure/harness-eval/publish-verdict/publish-verdict.js';
-import { buildPacket, seedCanonicalMeasurementCensusState } from './publish-verdict-fixtures.js';
+import { buildPacket, seedCanonicalMeasurementCensusState, unreachablePublisher } from './publish-verdict-fixtures.js';
 
 const root = mkdtempSync(join(tmpdir(), 'publish-verdict-freshness-'));
 const harnessFeedbackRoot = join(root, 'docs', 'harness-feedback');
@@ -167,7 +167,7 @@ describe('publish_verdict eval:freshness', () => {
   it('rejects malformed selectors before the generator runs', async () => {
     const generator = createFreshnessGeneratorAdapter({ resolve: async () => assert.fail('must not resolve') });
     const result = await handlePublishVerdict(
-      { harnessFeedbackRoot, generator },
+      { gitPublisher: unreachablePublisher, harnessFeedbackRoot, generator },
       {
         packet: freshnessPacket({ id: 'vhp-freshness-bad-selector' }),
         domain: 'eval:freshness',
@@ -183,7 +183,7 @@ describe('publish_verdict eval:freshness', () => {
   it('rejects caller-selected fixture subsets instead of letting the subject choose coverage', async () => {
     const generator = createFreshnessGeneratorAdapter({ resolve: async () => assert.fail('must not resolve') });
     const result = await handlePublishVerdict(
-      { harnessFeedbackRoot, generator },
+      { gitPublisher: unreachablePublisher, harnessFeedbackRoot, generator },
       {
         packet: freshnessPacket({ id: 'vhp-freshness-fixture-subset' }),
         domain: 'eval:freshness',
@@ -234,7 +234,7 @@ describe('publish_verdict eval:freshness', () => {
   it('rejects incomplete verdict packets before resolving replay evidence', async () => {
     const generator = createFreshnessGeneratorAdapter({ resolve: async () => assert.fail('must not resolve') });
     const result = await handlePublishVerdict(
-      { harnessFeedbackRoot, generator },
+      { gitPublisher: unreachablePublisher, harnessFeedbackRoot, generator },
       {
         packet: freshnessPacket({
           id: 'vhp-freshness-bad-packet',

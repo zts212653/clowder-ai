@@ -13,6 +13,7 @@
 
 import { useCallback, useState } from 'react';
 import { ExpandableProse } from '@/components/content-overflow';
+import { useCoCreatorDisplay } from '@/hooks/useCoCreatorConfig';
 import { type EvidenceSnippet, useDossierEvidence } from '@/hooks/useDossierEvidence';
 import { type DossierObservation, useDossierObservations } from '@/hooks/useDossierObservations';
 import {
@@ -199,11 +200,12 @@ function ObservationForm({
 }
 
 function ObservationList({ observations }: { observations: DossierObservation[] }) {
+  const owner = useCoCreatorDisplay();
   if (observations.length === 0) return null;
   return (
     <div className="mt-2 space-y-1.5">
       <SettingsText variant="xs" tone="muted" className="font-medium">
-        operator 观察
+        {owner.role} 观察
       </SettingsText>
       {observations.map((obs) => (
         <div key={obs.id} className="rounded-md bg-[var(--console-bg)] px-3 py-2">

@@ -2457,55 +2457,11 @@ describe('MCP Callback Tools', () => {
     assert.match(result.content[0].text, /parallelIntent/);
   });
 
-  // ---- handleRegisterPrTracking payload semantics ----
-
-  test('handleRegisterPrTracking omits catId from body when not provided', async () => {
-    const { handleRegisterPrTracking } = await import('../dist/tools/callback-tools.js');
-
-    let capturedOptions;
-    globalThis.fetch = async (_url, options) => {
-      capturedOptions = options;
-      return { ok: true, json: async () => ({ status: 'ok' }) };
-    };
-
-    await handleRegisterPrTracking({
-      repoFullName: 'zts212653/clowder-ai',
-      prNumber: 832,
-      when: [{ kind: 'pr_head_changed' }],
-      nextStep: 'Inspect the new HEAD.',
-      expiresAt: Date.now() + 60_000,
-    });
-
-    const body = JSON.parse(capturedOptions.body);
-    assert.equal(body.repoFullName, 'zts212653/clowder-ai');
-    assert.equal(body.prNumber, 832);
-    assert.equal(body.catId, undefined, 'catId must not appear in body when omitted');
-    assert.equal(capturedOptions.headers['x-invocation-id'], 'test-invocation');
-    assert.equal(capturedOptions.headers['x-callback-token'], 'test-token');
-  });
-
-  test('handleRegisterPrTracking never trusts caller-supplied catId in the body', async () => {
-    const { handleRegisterPrTracking } = await import('../dist/tools/callback-tools.js');
-
-    let capturedOptions;
-    globalThis.fetch = async (_url, options) => {
-      capturedOptions = options;
-      return { ok: true, json: async () => ({ status: 'ok' }) };
-    };
-
-    await handleRegisterPrTracking({
-      repoFullName: 'zts212653/clowder-ai',
-      prNumber: 100,
-      when: [{ kind: 'pr_ci_terminal' }],
-      nextStep: 'Continue merge-gate.',
-      expiresAt: Date.now() + 60_000,
-      catId: 'opus',
-    });
-
-    const body = JSON.parse(capturedOptions.body);
-    assert.equal(body.catId, undefined, 'cat identity must come from callback authentication');
-    assert.equal(body.repoFullName, 'zts212653/clowder-ai');
-    assert.equal(body.prNumber, 100);
+  test('Host callback tools do not expose plugin-owned tracking registration', async () => {
+    const tools = await import('../dist/tools/callback-tools.js');
+    assert.equal(Object.hasOwn(tools, 'handleRegisterPrTracking'), false);
+    assert.equal(Object.hasOwn(tools, 'handleRegisterIssueTracking'), false);
+    assert.equal(Object.hasOwn(tools, 'handleUnregisterTracking'), false);
   });
 
   // ── F182 KD-6: formatCatRoutingErrorPrefix unit tests ──────────────────────

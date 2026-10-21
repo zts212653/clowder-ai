@@ -49,6 +49,7 @@ export class OwnerDesktop {
         instance.configReadiness !== 'ready' ||
         (instance.runtimeState !== 'crashed' && !hasRetainedDesktopLoss(instance)) ||
         pkg?.packageState !== 'installed' ||
+        pkg.manifest === null ||
         !desktopWindowContribution(pkg.manifest)
       )
         throw new Error('desktop recovery unavailable');

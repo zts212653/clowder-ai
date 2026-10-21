@@ -89,31 +89,49 @@ export function useConversationViewPreference(threadId: string, enabled = true):
       setError(null);
       return;
     }
-    const generation = ++generationRef.current;
-    const abort = new AbortController();
-    snapshotRef.current = PRODUCT_SNAPSHOT;
-    setSnapshot(PRODUCT_SNAPSHOT);
-    setLoading(true);
-    setSaving(false);
-    setError(null);
-    void apiFetch(`/api/config/conversation-view?threadId=${encodeURIComponent(threadId)}`, { signal: abort.signal })
-      .then(async (response) => {
-        if (!response.ok) throw new Error(`conversation view load failed (${response.status})`);
-        const parsed = parseSnapshot(await response.json());
-        if (!parsed) throw new Error('conversation view response is invalid');
-        if (generation === generationRef.current) commitSnapshot(parsed);
-      })
-      .catch((cause: unknown) => {
-        if (abort.signal.aborted || generation !== generationRef.current) return;
-        console.error('Failed to load conversation view preference', cause);
-        setError('load');
-      })
-      .finally(() => {
-        if (generation === generationRef.current) setLoading(false);
-      });
+    let activeRead: AbortController | undefined;
+    const load = () => {
+      activeRead?.abort();
+      const generation = ++generationRef.current;
+      const abort = new AbortController();
+      activeRead = abort;
+      snapshotRef.current = PRODUCT_SNAPSHOT;
+      setSnapshot(PRODUCT_SNAPSHOT);
+      setLoading(true);
+      setSaving(false);
+      setError(null);
+      void apiFetch(`/api/config/conversation-view?threadId=${encodeURIComponent(threadId)}`, { signal: abort.signal })
+        .then(async (response) => {
+          if (!response.ok) throw new Error(`conversation view load failed (${response.status})`);
+          const parsed = parseSnapshot(await response.json());
+          if (!parsed) throw new Error('conversation view response is invalid');
+          if (generation === generationRef.current) commitSnapshot(parsed);
+        })
+        .catch((cause: unknown) => {
+          if (abort.signal.aborted || generation !== generationRef.current) return;
+          console.error('Failed to load conversation view preference', cause);
+          setError('load');
+        })
+        .finally(() => {
+          if (generation === generationRef.current) setLoading(false);
+        });
+    };
+    const leaveDocument = () => {
+      activeRead?.abort();
+      generationRef.current += 1;
+    };
+    const returnToDocument = (event: PageTransitionEvent) => {
+      if (event.persisted) load();
+    };
+    // Full document navigation does not run React's unmount cleanup. End its
+    // pending read explicitly, and reconcile again if BFCache restores it.
+    window.addEventListener('pagehide', leaveDocument);
+    window.addEventListener('pageshow', returnToDocument);
+    load();
     return () => {
-      abort.abort();
-      if (generation === generationRef.current) generationRef.current += 1;
+      window.removeEventListener('pagehide', leaveDocument);
+      window.removeEventListener('pageshow', returnToDocument);
+      leaveDocument();
     };
   }, [commitSnapshot, enabled, threadId]);
 

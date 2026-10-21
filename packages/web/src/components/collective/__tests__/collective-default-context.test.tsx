@@ -295,7 +295,7 @@ it('opens the native Café only for the current default Client and clears it on 
   expect(vi.mocked(apiFetch).mock.calls.some(([url]) => String(url).endsWith('/work/result/accepted'))).toBe(false);
   await message(iframe, accepted);
   expect(vi.mocked(apiFetch)).toHaveBeenCalledWith(
-    `/api/plugins/collective-connector/${connection.connectionId}/work/result/accepted`,
+    `/api/plugins/official.collective-connector/connections/${connection.connectionId}/work/result/accepted`,
     {
       method: 'POST',
       headers: { 'content-type': 'application/json' },

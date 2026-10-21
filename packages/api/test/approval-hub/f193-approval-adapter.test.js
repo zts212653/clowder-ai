@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { beforeEach, describe, it } from 'node:test';
-import { anchorApproval, proposedReviewAction } from './helpers.js';
+import { anchorApproval, proposedTaskAction } from './helpers.js';
 
 describe('F193ApprovalAdapter', () => {
   let InMemoryDispatchProposalStore;
@@ -21,7 +21,7 @@ describe('F193ApprovalAdapter', () => {
     ownerUserId: 'user-1',
     content: 'Fix the bug in package X',
     targetCats: ['sonnet'],
-    proposedAction: proposedReviewAction(),
+    proposedAction: proposedTaskAction(),
     envelopeDigest: 'sha256:action-envelope',
     cardMessageId: 'msg-card-1',
     createdAt: Date.now(),
@@ -58,11 +58,11 @@ describe('F193ApprovalAdapter', () => {
     assert.equal(items[0].detail.targetThreadId, 'thread-target');
     assert.deepEqual(items[0].detail.targetCats, ['sonnet']);
     assert.equal(items[0].detail.effectClass, 'assign_work');
-    assert.equal(items[0].detail.actionFamily, 'review');
-    assert.equal(items[0].detail.subjectRef, 'pr:owner/repo#42');
-    assert.equal(items[0].detail.successorSlot, 'reviewer');
+    assert.equal(items[0].detail.actionFamily, 'implement');
+    assert.equal(items[0].detail.subjectRef, 'subject:task:work-42');
+    assert.equal(items[0].detail.successorSlot, 'implementer');
     assert.equal(items[0].detail.mode, 'single');
-    assert.deepEqual(items[0].detail.terminalPredicate, proposedReviewAction().terminalPredicate);
+    assert.deepEqual(items[0].detail.terminalPredicate, proposedTaskAction().terminalPredicate);
     assert.equal(items[0].detail.envelopeDigest, 'sha256:action-envelope');
     assert.equal(items[0].navigation.state, 'anchored');
     assert.equal(items[0].requesterCatId, 'opus');

@@ -2,6 +2,12 @@ import { defineShellCopy } from './shell/shell-copy';
 
 export const agyNativeCopy = defineShellCopy({
   zh: {
+    acpEnabled: '启用 ACP',
+    acpLogin: '使用此 Profile 内 ACP 独立登录的个人订阅。旧 Native 身份和历史保留；保存不会调用模型。',
+    acpRestricted: '可读取文件并调用获准的 MCP 工具；文件写入和命令会被拒绝。需要这些操作时请选择自动批准。',
+    acpBinding: '设置变更后会重新核验会话；无法续接时需手动新建会话，已有历史保留。',
+    acpQueue: '活动回合中的新消息沿队列接收；不支持精确插入当前生成。',
+    acpSetup: '首次登录：在仓库根目录运行以下命令，按浏览器指引完成个人订阅授权。',
     permission: '执行权限',
     restricted: '受限模式',
     automatic: '自动批准（危险模式）',
@@ -11,6 +17,17 @@ export const agyNativeCopy = defineShellCopy({
     bindingChange: '设置变更后会重新核验会话；无法续接时新建会话，已有历史消息保留。',
   },
   en: {
+    acpEnabled: 'Enable ACP',
+    acpLogin:
+      'Use the personal subscription signed in separately for ACP in this Profile. Existing Native identity and history are kept. Saving does not call a model.',
+    acpRestricted:
+      'Can read files and call permitted MCP tools. File writes and commands are denied. Choose auto-approve to enable them.',
+    acpBinding:
+      'Settings changes recheck the session. Start a new session explicitly if it is incompatible; existing history is kept.',
+    acpQueue:
+      'New messages during an active turn use the queue. Precise insertion into the current generation is unsupported.',
+    acpSetup:
+      'First sign-in: run this command from the repository root and complete personal subscription authorization in the browser.',
     permission: 'Execution permissions',
     restricted: 'Restricted',
     automatic: 'Auto-approve (dangerous)',

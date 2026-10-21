@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, it } from 'node:test';
@@ -11,8 +11,8 @@ import {
   createDormantPluginRuntimeComposition,
   createPluginManagerRuntimeComposition,
 } from '../dist/domains/plugin/index.js';
-import { MemoryMeetingIntakeStore, MemorySignalRouteStore } from '../dist/domains/signal-intake/index.js';
-import { registerOfficialPluginRoutes } from '../dist/routes/plugin-official-routes.js';
+import { InstalledPluginOperations } from '../dist/domains/plugin/operations/plugin-operation-routes.js';
+import { registerPluginManagerRoutes } from '../dist/routes/plugin-manager-routes.js';
 import { catalogEntry, manifest, packageArchive } from './plugin-official-package-installer.fixture.js';
 
 const roots = [];
@@ -32,12 +32,15 @@ async function harness({
   offline = () => false,
   contract,
   machinePresentation = false,
+  extraFiles = {},
+  effectiveGrants,
 } = {}) {
   const projectRoot = await root('cat-cafe-f202-manager-composition-');
-  const archive = await packageArchive({ packageManifest });
+  let archive = await packageArchive({ packageManifest, extraFiles });
   const entry = catalogEntry(archive.integrity, {
     pluginId: packageManifest.pluginId,
     version: packageManifest.version,
+    ...(effectiveGrants ? { effectiveGrants } : {}),
     ...(machinePresentation
       ? {
           presentation: {
@@ -55,12 +58,18 @@ async function harness({
       return { entries: [entry], status: 'fresh', checkedAt: 8_000 };
     },
   };
+  let mcpConfig = null;
   const runtime = createDormantPluginRuntimeComposition({
     projectRoot,
-    routes: new MemorySignalRouteStore(),
-    intakes: new MemoryMeetingIntakeStore(),
     messageStore: new MessageStore(),
     now: () => 9_000,
+    mcpConfigIO: {
+      readConfig: async () => structuredClone(mcpConfig),
+      writeAndRegenCli: async (config) => {
+        mcpConfig = structuredClone(config);
+      },
+      withLock: async (fn) => fn(),
+    },
     ...(contract === undefined ? {} : { contract }),
   });
   const composition = createPluginManagerRuntimeComposition({
@@ -70,7 +79,19 @@ async function harness({
     fetchOfficialArchive: async () => archive.bytes,
     now: () => 9_000,
   });
-  return { archive, composition, entry, projectRoot, provider, runtime };
+  return {
+    archive,
+    composition,
+    entry,
+    projectRoot,
+    provider,
+    runtime,
+    async setRelease(nextManifest, nextFiles) {
+      archive = await packageArchive({ packageManifest: nextManifest, extraFiles: nextFiles });
+      Object.assign(entry, { version: nextManifest.version, packageDigest: archive.integrity });
+      Object.assign(packageManifest, nextManifest);
+    },
+  };
 }
 
 function contributionContractRuntime() {
@@ -82,75 +103,31 @@ function contributionContractRuntime() {
 }
 
 describe('F202 Plugin Manager runtime composition', () => {
-  it('keeps legacy official discovery and installation on the same catalog authority', async () => {
-    const projectRoot = await root('cat-cafe-f202-official-route-composition-');
-    const packageManifest = manifest();
-    const archive = await packageArchive({ packageManifest });
-    const legacyEntry = catalogEntry(archive.integrity, {
-      pluginId: packageManifest.pluginId,
-      version: packageManifest.version,
-    });
-    const legacyCatalog = {
-      snapshot: async () => ({ entries: [legacyEntry], status: 'fresh', checkedAt: 8_000 }),
-    };
-    const machineCatalog = {
-      snapshot: async () => ({
-        entries: [
-          {
-            ...legacyEntry,
-            catalogId: 'video-analysis',
-            pluginId: 'dev.clowder.video-analysis',
-            packageName: '@clowder-ai/video-analysis',
-          },
-        ],
-        status: 'fresh',
-        checkedAt: 8_000,
-      }),
-    };
+  it('constructs, lists, and shuts down with no installed business packages', async () => {
+    const projectRoot = await root('cat-cafe-f202-empty-host-');
     const runtime = createDormantPluginRuntimeComposition({
       projectRoot,
-      routes: new MemorySignalRouteStore(),
-      intakes: new MemoryMeetingIntakeStore(),
       messageStore: new MessageStore(),
-      contract: contributionContractRuntime(),
     });
-    const composition = createPluginManagerRuntimeComposition({
-      runtime,
-      catalogProvider: machineCatalog,
-      officialRouteCatalogProvider: legacyCatalog,
-      catalogManifests: [],
-      fetchOfficialArchive: async () => archive.bytes,
-    });
-    const app = Fastify();
-    app.addHook('preHandler', async (request) => {
-      request.sessionUserId = process.env.DEFAULT_OWNER_USER_ID ?? 'owner-user';
-    });
-    registerOfficialPluginRoutes(app, {
-      inventory: runtime.inventoryStore,
-      lifecycle: runtime.lifecycle,
-      catalogProvider: legacyCatalog,
-      installer: composition.officialRouteInstaller,
-    });
-    await app.ready();
     try {
-      const listed = await app.inject({ method: 'GET', url: '/api/plugins/official' });
-      assert.equal(listed.statusCode, 200, listed.payload);
-      assert.equal(listed.json().plugins[0].catalogId, legacyEntry.catalogId);
-
-      const installed = await app.inject({
-        method: 'POST',
-        url: `/api/plugins/official/${legacyEntry.catalogId}/install`,
-        headers: { host: 'localhost:3004', origin: 'http://localhost:5173' },
-        remoteAddress: '127.0.0.1',
-        payload: {
-          expectedCatalogVersion: legacyEntry.version,
-          expectedPackageDigest: legacyEntry.packageDigest,
+      const composition = createPluginManagerRuntimeComposition({
+        runtime,
+        catalogProvider: {
+          snapshot: async () => ({ entries: [], status: 'fresh', checkedAt: 9_000 }),
         },
+        catalogManifests: [],
+        fetchOfficialArchive: async () => assert.fail('an empty Host must not fetch a business package'),
+        now: () => 9_000,
       });
-      assert.equal(installed.statusCode, 200, installed.payload);
-      assert.equal(installed.json().pluginId, legacyEntry.pluginId);
+      const result = await composition.manager.list();
+      assert.deepEqual(result.plugins, []);
+      assert.equal(result.catalog.status, 'fresh');
+      const inventory = await runtime.inventoryStore.snapshot();
+      assert.deepEqual(inventory.packages, []);
+      assert.deepEqual(inventory.instances, []);
+      assert.deepEqual(inventory.grants, []);
     } finally {
-      await app.close();
+      await runtime.shutdown('empty_host_test');
     }
   });
 
@@ -165,7 +142,7 @@ describe('F202 Plugin Manager runtime composition', () => {
     );
     assert.equal(before.plugins[0].actions.install, true);
     assert.deepEqual(before.plugins[0].capabilitySummary, [
-      { id: 'events.publish', kind: 'events', name: 'Source', active: false },
+      { id: 'messaging.send', kind: 'messaging', name: 'Source', active: false },
     ]);
 
     const installed = await composition.manager.install({
@@ -181,7 +158,6 @@ describe('F202 Plugin Manager runtime composition', () => {
       kind: 'catalog',
       catalogId: entry.catalogId,
       packageName: entry.packageName,
-      ownerAuthRequired: false,
     });
     const projected = (await composition.manager.get(entry.pluginId)).plugin;
     assert.equal(projected.artifact, 'installed');
@@ -269,6 +245,90 @@ describe('F202 Plugin Manager runtime composition', () => {
     assert.equal(JSON.stringify(await runtime.inventoryStore.snapshot()).includes('private-key'), false);
   });
 
+  it('saves configuration independently of enabled intent and invokes the explicit refresh hook', async () => {
+    const packageManifest = manifest({
+      runtime: { transport: 'builtin', entrypoint: 'dist/entrypoint.js' },
+      features: [{ id: 'source', name: 'Source', resources: [], capabilities: ['plugin.config.read'] }],
+      configuration: [{ key: 'endpoint', label: 'Endpoint', kind: 'url', required: true }],
+      test: { action: { method: 'self.test' } },
+    });
+    const entrypoint = `
+export default { create() { return { async start(host) {
+  let endpoint;
+  async function configure() {
+    const next = await host.config.get('endpoint');
+    if (next === 'https://fail.test') throw new Error('fixture reconnect failed');
+    endpoint = next;
+  }
+  await configure();
+  return { actions: { 'self.test': async () => ({ ok: true, message: endpoint }) }, configRefresh: configure, stop() {} };
+} }; } };
+`;
+    const { composition, entry, runtime } = await harness({
+      packageManifest,
+      contract: contributionContractRuntime(),
+      effectiveGrants: ['plugin.config.read'],
+      extraFiles: { 'dist/entrypoint.js': entrypoint },
+    });
+    const manager = composition.manager;
+    const detail = async () => (await manager.get(entry.pluginId)).plugin;
+    const save = async (value, expectedRevision) =>
+      manager.configure(entry.pluginId, {
+        expectedRevision: expectedRevision ?? (await detail()).lifecycleRevision,
+        updates: [{ key: 'endpoint', value }],
+      });
+    try {
+      await manager.install({
+        source: { kind: 'catalog', catalogId: entry.catalogId },
+        expectedVersion: entry.version,
+        expectedDigest: entry.packageDigest,
+      });
+      await save('https://first.test');
+      assert.equal((await detail()).intent, 'disabled');
+      assert.equal((await detail()).live, 'stopped');
+      await manager.setEnabled(entry.pluginId, { enabled: true, expectedRevision: (await detail()).lifecycleRevision });
+      const operations = new InstalledPluginOperations({
+        inventory: runtime.inventoryStore,
+        configuration: composition.configuration,
+        invocation: runtime.supervisor,
+      });
+      const observed = async () => (await operations.runTest(entry.pluginId)).body.message;
+      assert.equal(await observed(), 'https://first.test');
+      const originalRevision = (await detail()).lifecycleRevision;
+      await assert.rejects(save('invalid-url'), (error) => error?.code === 'INVALID_CONFIGURATION');
+      assert.equal((await detail()).lifecycleRevision, originalRevision);
+      assert.equal(await observed(), 'https://first.test');
+      await save('https://second.test');
+      assert.equal((await detail()).intent, 'enabled');
+      assert.equal((await detail()).live, 'running');
+      assert.equal(await observed(), 'https://second.test');
+      await assert.rejects(save('https://stale.test', originalRevision), (error) => error?.code === 'STALE_REVISION');
+      assert.equal(await observed(), 'https://second.test');
+      await save(null);
+      assert.equal((await detail()).config, 'incomplete');
+      assert.equal((await detail()).intent, 'enabled');
+      assert.equal((await detail()).live, 'stopped');
+      await save('https://third.test');
+      assert.equal(await observed(), 'https://third.test');
+      await assert.rejects(save('https://fail.test'), (error) => error?.code === 'RUNTIME_START_FAILED');
+      assert.equal((await detail()).intent, 'enabled');
+      assert.equal((await detail()).live, 'stopped');
+      assert.equal((await detail()).configFields[0].currentValue, 'https://fail.test');
+      await save('https://recovered.test');
+      assert.equal(await observed(), 'https://recovered.test');
+      assert.equal((await runtime.inventoryStore.snapshot()).instances[0].lastRuntimeError, undefined);
+      await manager.setEnabled(entry.pluginId, {
+        enabled: false,
+        expectedRevision: (await detail()).lifecycleRevision,
+      });
+      await save('https://disabled.test');
+      assert.equal((await detail()).intent, 'disabled');
+      assert.equal((await detail()).live, 'stopped');
+    } finally {
+      await runtime.shutdown('configuration_test');
+    }
+  });
+
   it('projects typed defaults as the same effective values used for readiness', async () => {
     const packageManifest = manifest({
       configuration: [
@@ -299,6 +359,401 @@ describe('F202 Plugin Manager runtime composition', () => {
       ],
     );
   });
+
+  it('projects hidden and conditional fields and derives readiness from the effective selector', async () => {
+    const packageManifest = manifest({
+      configuration: [
+        { key: 'mode', label: 'Mode', kind: 'string', required: false, default: 'webhook' },
+        { key: 'internalFlag', label: 'Internal', kind: 'boolean', required: false, hidden: true, default: false },
+        {
+          key: 'token',
+          label: 'Token',
+          kind: 'string',
+          required: true,
+          requiredWhen: { key: 'mode', value: ['webhook', 'hybrid'] },
+        },
+      ],
+    });
+    const { composition, entry } = await harness({ packageManifest, contract: contributionContractRuntime() });
+    await composition.manager.install({
+      source: { kind: 'catalog', catalogId: entry.catalogId },
+      expectedVersion: entry.version,
+      expectedDigest: entry.packageDigest,
+    });
+    const before = (await composition.manager.get(entry.pluginId)).plugin;
+    assert.equal(before.config, 'incomplete');
+    assert.equal(before.configFields.find((field) => field.key === 'internalFlag').hidden, true);
+    assert.deepEqual(before.configFields.find((field) => field.key === 'token').requiredWhen, {
+      key: 'mode',
+      value: ['webhook', 'hybrid'],
+    });
+    assert.equal(before.configFields.find((field) => field.key === 'token').requiredNow, true);
+    await composition.manager.configure(entry.pluginId, {
+      expectedRevision: before.lifecycleRevision,
+      updates: [{ key: 'mode', value: 'polling' }],
+    });
+    const after = (await composition.manager.get(entry.pluginId)).plugin;
+    assert.equal(after.config, 'ready');
+    assert.equal(after.configFields.find((field) => field.key === 'token').requiredNow, false);
+  });
+
+  it('projects declared operations, persisted operation state, setup steps, and testability', async () => {
+    const packageManifest = manifest({
+      configuration: [
+        { key: 'provider', label: 'Provider', kind: 'string', required: false },
+        {
+          key: 'login',
+          label: 'Log in',
+          kind: 'operation',
+          required: false,
+          target: ['provider'],
+          actions: [
+            {
+              id: 'begin',
+              label: 'Begin',
+              render: 'button',
+              action: { method: 'login.begin', params: { private: true } },
+              next: 'status',
+            },
+            { id: 'status', label: 'Status', render: 'polling', action: { method: 'login.status' } },
+          ],
+        },
+      ],
+      test: { action: { method: 'self.test' } },
+      steps: [{ text: 'Open the login page.' }, { text: 'Approve access.' }],
+    });
+    const { composition, entry } = await harness({
+      packageManifest,
+      contract: contributionContractRuntime(),
+    });
+    await composition.manager.install({
+      source: { kind: 'catalog', catalogId: entry.catalogId },
+      expectedVersion: entry.version,
+      expectedDigest: entry.packageDigest,
+    });
+    await composition.configuration.writeOperationState(entry.pluginId, 'login', {
+      currentAction: 'status',
+      updatedAt: 12,
+      lastResult: { render: 'polling', data: { waiting: true } },
+    });
+
+    const plugin = (await composition.manager.get(entry.pluginId)).plugin;
+    assert.deepEqual(plugin.steps, ['Open the login page.', 'Approve access.']);
+    assert.equal(plugin.testable, true);
+    const operation = plugin.configFields.find((field) => field.key === 'login');
+    assert.deepEqual(operation, {
+      key: 'login',
+      label: 'Log in',
+      kind: 'operation',
+      required: false,
+      currentValue: null,
+      sensitive: false,
+      target: ['provider'],
+      configured: false,
+      actions: [
+        { id: 'begin', label: 'Begin', render: 'button', next: 'status' },
+        { id: 'status', label: 'Status', render: 'polling' },
+      ],
+      operationState: {
+        currentAction: 'status',
+        updatedAt: 12,
+      },
+    });
+    assert.equal(JSON.stringify(operation).includes('login.begin'), false);
+    assert.equal(JSON.stringify(operation).includes('private'), false);
+    await composition.manager.configure(entry.pluginId, {
+      expectedRevision: plugin.lifecycleRevision,
+      updates: [{ key: 'provider', value: 'feishu' }],
+    });
+    const configured = (await composition.manager.get(entry.pluginId)).plugin.configFields.find(
+      (field) => field.key === 'login',
+    );
+    assert.equal(configured.configured, true);
+  });
+
+  it('projects operation configured only for declared targets with all effective values', async () => {
+    const packageManifest = manifest({
+      configuration: [
+        { key: 'account', label: 'Account', kind: 'string', required: false, default: 'fixture' },
+        { key: 'token', label: 'Token', kind: 'secret', required: false },
+        { key: 'mode', label: 'Mode', kind: 'string', required: false },
+        {
+          key: 'connect',
+          label: 'Connect',
+          kind: 'operation',
+          required: false,
+          target: ['account', 'token'],
+          actions: [{ id: 'start', label: 'Start', render: 'button', action: { method: 'connect.start' } }],
+        },
+        {
+          key: 'inspect',
+          label: 'Inspect',
+          kind: 'operation',
+          required: false,
+          actions: [{ id: 'check', label: 'Check', render: 'button', action: { method: 'inspect.check' } }],
+        },
+      ],
+    });
+    const { composition, entry } = await harness({ packageManifest, contract: contributionContractRuntime() });
+    await composition.manager.install({
+      source: { kind: 'catalog', catalogId: entry.catalogId },
+      expectedVersion: entry.version,
+      expectedDigest: entry.packageDigest,
+    });
+    const before = (await composition.manager.get(entry.pluginId)).plugin;
+    assert.equal(before.configFields.find((field) => field.key === 'connect').configured, false);
+    assert.equal(
+      Object.hasOwn(
+        before.configFields.find((field) => field.key === 'inspect'),
+        'configured',
+      ),
+      false,
+    );
+    await composition.configuration.configureOperationTargets(entry.pluginId, before.pluginInstanceId, 'connect', {
+      token: 'secret',
+    });
+    await composition.configuration.completeOperation(
+      entry.pluginId,
+      before.pluginInstanceId,
+      before.lifecycleRevision,
+    );
+    const after = (await composition.manager.get(entry.pluginId)).plugin;
+    assert.equal(after.configFields.find((field) => field.key === 'connect').configured, true);
+    assert.equal(after.configFields.find((field) => field.key === 'token').currentValue, '••••••');
+  });
+
+  it('invokes operation and test handlers through an installed and enabled builtin fixture package', async () => {
+    const packageManifest = manifest({
+      runtime: { transport: 'builtin', entrypoint: 'dist/entrypoint.js' },
+      configuration: [
+        { key: 'token', label: 'Token', kind: 'secret', required: false },
+        {
+          key: 'login',
+          label: 'Log in',
+          kind: 'operation',
+          required: false,
+          target: ['token'],
+          actions: [{ id: 'begin', label: 'Begin', render: 'button', action: { method: 'login.begin' } }],
+        },
+      ],
+      test: { action: { method: 'self.test' } },
+    });
+    const entrypoint = `
+export default {
+  create() {
+    return {
+      async start() {
+        return {
+          actions: {
+            async 'login.begin'() {
+              return { render: 'img', data: { url: 'fixture://qr' }, targetValues: { token: 'fixture-secret' } };
+            },
+            async 'self.test'() { return { ok: true }; },
+          },
+          stop() {},
+        };
+      },
+    };
+  },
+};
+`;
+    const { composition, entry, runtime } = await harness({
+      packageManifest,
+      contract: contributionContractRuntime(),
+      extraFiles: { 'dist/entrypoint.js': entrypoint },
+    });
+    await composition.manager.install({
+      source: { kind: 'catalog', catalogId: entry.catalogId },
+      expectedVersion: entry.version,
+      expectedDigest: entry.packageDigest,
+    });
+    const installed = (await composition.manager.get(entry.pluginId)).plugin;
+    await composition.manager.setEnabled(entry.pluginId, {
+      enabled: true,
+      expectedRevision: installed.lifecycleRevision,
+    });
+    const operations = new InstalledPluginOperations({
+      inventory: runtime.inventoryStore,
+      configuration: composition.configuration,
+      invocation: runtime.supervisor,
+    });
+
+    const action = await operations.runAction(entry.pluginId, 'login', 'begin', {});
+    assert.equal(action.status, 200);
+    assert.deepEqual(action.body.data, { url: 'fixture://qr' });
+    assert.deepEqual(await operations.runTest(entry.pluginId), {
+      matched: true,
+      status: 200,
+      body: { ok: true },
+    });
+    assert.equal(
+      (await composition.configuration.fields(entry.pluginId)).find((field) => field.key === 'token').currentValue,
+      '••••••',
+    );
+
+    const running = (await composition.manager.get(entry.pluginId)).plugin;
+    await composition.manager.setEnabled(entry.pluginId, {
+      enabled: false,
+      expectedRevision: running.lifecycleRevision,
+    });
+    const disabled = (await composition.manager.get(entry.pluginId)).plugin;
+    await composition.manager.uninstall(entry.pluginId, { expectedRevision: disabled.lifecycleRevision });
+  });
+
+  for (const { failOld, sourceKind } of [false, true].flatMap((failOld) =>
+    ['local-directory', 'catalog'].map((sourceKind) => ({ failOld, sourceKind })),
+  )) {
+    it(`HTTP ${sourceKind} replacement with a throwing real module restores old package (old restart fails: ${failOld})`, async () => {
+      const packageManifest = manifest({
+        runtime: { transport: 'builtin', entrypoint: 'dist/entrypoint.js' },
+        configuration: [{ key: 'ownerValue', label: 'Owner value', kind: 'string', required: false }],
+        test: { action: { method: 'self.test' } },
+      });
+      const failureMarker = join(await root('cat-cafe-old-restart-failure-'), 'fail');
+      const entrypoint = `import { existsSync } from 'node:fs';
+export default { create() { return { async start() {
+  if (existsSync(${JSON.stringify(failureMarker)})) throw new Error('old runtime recovery fixture failure');
+  return { actions: { 'self.test': async () => ({ ok: true }) }, stop() {} };
+} }; } };`;
+      const { composition, entry, runtime, projectRoot, setRelease } = await harness({
+        packageManifest,
+        contract: contributionContractRuntime(),
+        extraFiles: { 'dist/entrypoint.js': entrypoint },
+      });
+      const app = Fastify();
+      app.addHook('preHandler', async (request) => {
+        request.sessionUserId = process.env.DEFAULT_OWNER_USER_ID ?? 'owner-user';
+      });
+      registerPluginManagerRoutes(app, { manager: composition.manager, auditLog: { append: async () => {} } });
+      try {
+        await composition.manager.install({
+          source: { kind: 'catalog', catalogId: entry.catalogId },
+          expectedVersion: entry.version,
+          expectedDigest: entry.packageDigest,
+        });
+        let plugin = (await composition.manager.get(entry.pluginId)).plugin;
+        await composition.manager.configure(entry.pluginId, {
+          expectedRevision: plugin.lifecycleRevision,
+          updates: [{ key: 'ownerValue', value: 'keep owner configuration' }],
+        });
+        plugin = (await composition.manager.get(entry.pluginId)).plugin;
+        await composition.manager.setEnabled(entry.pluginId, {
+          enabled: true,
+          expectedRevision: plugin.lifecycleRevision,
+        });
+        if (failOld) await writeFile(failureMarker, 'fail next old runtime start');
+        const before = await runtime.inventoryStore.snapshot();
+        const dataFile = join(projectRoot, 'retained-owner-data');
+        await writeFile(dataFile, 'retained');
+        const directory = await root('cat-cafe-broken-replacement-');
+        await mkdir(join(directory, 'dist'));
+        await mkdir(join(directory, 'schemas'));
+        await writeFile(
+          join(directory, 'manifest.json'),
+          JSON.stringify({ ...packageManifest, version: '0.1.0-alpha.2' }),
+        );
+        await writeFile(join(directory, 'schemas/official.test.v1.schema.json'), JSON.stringify({ type: 'object' }));
+        await writeFile(
+          join(directory, 'dist/entrypoint.js'),
+          `export default { create() { return { async start() { throw new Error('new runtime fixture failure'); } }; } };`,
+        );
+        let payload = { source: { kind: 'local-directory', path: directory } };
+        if (sourceKind === 'catalog') {
+          await setRelease(
+            { ...packageManifest, version: '0.1.0-alpha.2' },
+            {
+              'dist/entrypoint.js': await readFile(join(directory, 'dist/entrypoint.js'), 'utf8'),
+            },
+          );
+          const projected = (await composition.manager.get(entry.pluginId)).plugin;
+          assert.equal(projected.actions.install, true);
+          payload = { expectedVersion: projected.availableVersion, expectedRevision: projected.lifecycleRevision };
+        }
+        const response = await app.inject({
+          method: 'POST',
+          url:
+            sourceKind === 'catalog'
+              ? `/api/plugin-manager/plugins/${entry.pluginId}/update`
+              : '/api/plugin-manager/plugins/install',
+          headers: { host: 'localhost:3004', origin: 'http://localhost:5173' },
+          payload,
+        });
+        assert.equal(response.statusCode, 503, response.body);
+        assert.equal(response.json().code, failOld ? 'UPDATE_ROLLBACK_RESUME_FAILED' : 'UPDATE_RESUME_FAILED');
+        const after = await runtime.inventoryStore.snapshot();
+        assert.equal(after.instances[0].packageDigest, before.instances[0].packageDigest);
+        assert.equal(after.instances[0].pluginInstanceId, before.instances[0].pluginInstanceId);
+        assert.deepEqual(after.grants[0].effectiveGrants, before.grants[0].effectiveGrants);
+        const current = (await composition.manager.get(entry.pluginId)).plugin;
+        assert.equal(current.intent, 'enabled');
+        assert.equal(current.live, failOld ? 'crashed' : 'running');
+        assert.equal(current.config, 'ready');
+        assert.equal(current.configFields.find((f) => f.key === 'ownerValue').currentValue, 'keep owner configuration');
+        assert.equal(await readFile(dataFile, 'utf8'), 'retained');
+        if (!failOld) {
+          const operations = new InstalledPluginOperations({
+            inventory: runtime.inventoryStore,
+            configuration: composition.configuration,
+            invocation: runtime.supervisor,
+          });
+          assert.deepEqual(await operations.runTest(entry.pluginId), {
+            matched: true,
+            status: 200,
+            body: { ok: true },
+          });
+        }
+      } finally {
+        await app.close();
+        await runtime.shutdown('replacement_recovery_test');
+      }
+    });
+  }
+
+  for (const nextVersion of ['1.0.0', '2.0.0']) {
+    it(`fresh catalog after Host restart cannot replace installed v2 with ${nextVersion} different bytes`, async () => {
+      const { composition, entry, runtime, projectRoot } = await harness({
+        packageManifest: manifest({ version: '2.0.0' }),
+      });
+      await composition.manager.install({
+        source: { kind: 'catalog', catalogId: entry.catalogId },
+        expectedVersion: entry.version,
+        expectedDigest: entry.packageDigest,
+      });
+      const before = await runtime.inventoryStore.snapshot();
+      await runtime.shutdown('restart_continuity_test');
+      const restarted = createDormantPluginRuntimeComposition({ projectRoot, messageStore: new MessageStore() });
+      const nextManifest = manifest({ version: nextVersion });
+      const nextArchive = await packageArchive({
+        packageManifest: nextManifest,
+        extraFiles: { 'dist/entrypoint.js': '// different release bytes' },
+      });
+      const nextEntry = catalogEntry(nextArchive.integrity, { version: nextVersion });
+      let fetched = 0;
+      const next = createPluginManagerRuntimeComposition({
+        runtime: restarted,
+        catalogProvider: { snapshot: async () => ({ entries: [nextEntry], status: 'fresh', checkedAt: 1 }) },
+        catalogManifests: [nextManifest],
+        fetchOfficialArchive: async () => {
+          fetched++;
+          return nextArchive.bytes;
+        },
+      });
+      try {
+        await assert.rejects(
+          next.manager.install({
+            source: { kind: 'catalog', catalogId: nextEntry.catalogId },
+            expectedVersion: nextEntry.version,
+            expectedDigest: nextEntry.packageDigest,
+          }),
+          (error) => error.code === 'UPDATE_NOT_NEWER',
+        );
+        assert.equal(fetched, 0, 'reject before package preparation or runtime suspension');
+        assert.deepEqual(await restarted.inventoryStore.snapshot(), before);
+      } finally {
+        await restarted.shutdown('restart_continuity_test_done');
+      }
+    });
+  }
 
   it('keeps an installed catalog plugin manageable while discovery is offline and fences uninstall', async () => {
     let offline = false;
@@ -347,12 +802,7 @@ describe('F202 Plugin Manager runtime composition', () => {
     });
     offline = true;
 
-    const [plugin] = (await composition.manager.list()).plugins;
-    assert.deepEqual(plugin.source, { kind: 'legacy', packageName: null, trust: 'unknown' });
-    assert.equal(plugin.auth, 'error');
-    assert.equal(plugin.actions.setEnabled, false);
-    assert.deepEqual(plugin.actions.blockingReasons, ['auth-error']);
-    assert.equal(plugin.actions.uninstall, true);
+    assert.deepEqual((await composition.manager.list()).plugins, [], 'only admitted packages are projected');
   });
 
   it('admits a local archive without persisting its raw host path or granting requested authority', async () => {
@@ -368,12 +818,15 @@ describe('F202 Plugin Manager runtime composition', () => {
     const listed = await composition.manager.get(packageManifest.pluginId);
 
     assert.equal(installed.pluginId, packageManifest.pluginId);
-    assert.deepEqual(snapshot.packages[0].provenance, { kind: 'local-archive' });
+    assert.deepEqual(snapshot.packages[0].provenance, {
+      kind: 'local-archive',
+      packageName: '@clowder-ai/official-test-source',
+    });
     assert.deepEqual(snapshot.grants[0].effectiveGrants, []);
     assert.deepEqual(listed.plugin.source, {
       kind: 'local-archive',
-      packageName: null,
-      trust: 'local-trusted',
+      packageName: '@clowder-ai/official-test-source',
+      trust: 'unverified',
     });
     assert.equal(JSON.stringify(snapshot).includes(archivePath), false);
   });
@@ -420,11 +873,11 @@ describe('F202 Plugin Manager runtime composition', () => {
     assert.equal(snapshot.grants.length, 1);
   });
 
-  it('routes builtin contribution packages through the Host-owned materializer and supervisor', async () => {
+  it('projects runtime-less declared MCP capabilities from the canonical capability state', async () => {
     let catalogOffline = false;
     const packageManifest = manifest({
       runtime: { transport: 'builtin' },
-      description: 'Runs the fixture capability through a Host-supervised contribution.',
+      description: 'Installs the fixture capability through the canonical MCP pipeline.',
       icon: 'github',
       contributions: [
         {
@@ -439,7 +892,7 @@ describe('F202 Plugin Manager runtime composition', () => {
           name: 'Source',
           resources: [],
           contributions: [{ type: 'mcp', id: 'fixture-tools' }],
-          capabilities: ['events.publish'],
+          capabilities: ['messaging.send'],
         },
       ],
     });
@@ -450,10 +903,6 @@ describe('F202 Plugin Manager runtime composition', () => {
       offline: () => catalogOffline,
       machinePresentation: true,
     });
-    const materializedRoot = await root('cat-cafe-f202-builtin-materialized-');
-    await mkdir(join(materializedRoot, 'dist'), { recursive: true });
-    await writeFile(join(materializedRoot, 'dist/entrypoint.js'), '// builtin fixture\n', 'utf8');
-    const launches = [];
     const composition = createPluginManagerRuntimeComposition({
       runtime,
       catalogProvider: provider,
@@ -461,39 +910,6 @@ describe('F202 Plugin Manager runtime composition', () => {
       // becomes authoritative after inventory admission.
       catalogManifests: [],
       fetchOfficialArchive: async () => archive.bytes,
-      builtinContributions: {
-        materializer: {
-          resolve: async () => ({
-            rootDir: materializedRoot,
-            verifyIntegrity: async () => {},
-            release: async () => {},
-          }),
-        },
-        configuration: {
-          readConfig: async () => undefined,
-          readSecret: async () => undefined,
-        },
-        runtime: {
-          start: async (spec) => {
-            launches.push(structuredClone(spec));
-            return {
-              tools: [
-                {
-                  name: 'fixture_tool',
-                  description: 'Run the fixture capability.',
-                  inputSchema: {
-                    type: 'object',
-                    properties: { value: { type: 'string' } },
-                    required: ['value'],
-                  },
-                },
-              ],
-              callTool: async (name, args) => ({ ok: true, name, args }),
-              close: async () => {},
-            };
-          },
-        },
-      },
     });
     await composition.manager.install({
       source: { kind: 'catalog', catalogId: entry.catalogId },
@@ -502,38 +918,23 @@ describe('F202 Plugin Manager runtime composition', () => {
     });
     await composition.manager.setEnabled(entry.pluginId, { enabled: true, expectedRevision: 2 });
 
-    assert.equal(launches.length, 1);
-    assert.equal(launches[0].contributionId, 'fixture-tools');
-    assert.equal(launches[0].cwd, await realpath(materializedRoot));
     const running = (await composition.manager.get(entry.pluginId)).plugin;
     assert.equal(running.live, 'running');
     assert.deepEqual(running.capabilitySummary, [
-      { id: 'events.publish', kind: 'events', name: 'Source', active: true },
+      { id: 'messaging.send', kind: 'messaging', name: 'Source', active: true },
     ]);
-    assert.deepEqual(await composition.builtinSupervisor.listPluginTools(entry.pluginId), [
-      {
-        contributionId: 'fixture-tools',
-        name: 'fixture_tool',
-        description: 'Run the fixture capability.',
-        inputSchema: {
-          type: 'object',
-          properties: { value: { type: 'string' } },
-          required: ['value'],
-        },
-      },
-    ]);
-    assert.deepEqual(
-      await composition.builtinSupervisor.callPluginTool(entry.pluginId, 'fixture-tools', 'fixture_tool', {
-        value: 'real-call',
-      }),
-      { ok: true, name: 'fixture_tool', args: { value: 'real-call' } },
+    assert.equal(
+      (await runtime.mcpConfigIO.readConfig()).capabilities.find(
+        (capability) => capability.id === `plugin:${entry.pluginId}:fixture-tools`,
+      )?.enabled,
+      true,
     );
 
     catalogOffline = true;
     const degraded = await composition.manager.list();
     assert.equal(degraded.catalog.status, 'unavailable');
     assert.deepEqual(degraded.plugins[0].capabilitySummary, [
-      { id: 'events.publish', kind: 'events', name: 'Source', active: true },
+      { id: 'messaging.send', kind: 'messaging', name: 'Source', active: true },
     ]);
     catalogOffline = false;
 
@@ -541,79 +942,7 @@ describe('F202 Plugin Manager runtime composition', () => {
     const stopped = (await composition.manager.get(entry.pluginId)).plugin;
     assert.equal(stopped.live, 'stopped');
     assert.deepEqual(stopped.capabilitySummary, [
-      { id: 'events.publish', kind: 'events', name: 'Source', active: false },
+      { id: 'messaging.send', kind: 'messaging', name: 'Source', active: false },
     ]);
-    await assert.rejects(composition.builtinSupervisor.listPluginTools(entry.pluginId), /is not active/);
-  });
-
-  it('surfaces a typed diagnostic when a builtin contribution cannot start', async () => {
-    const packageManifest = manifest({
-      runtime: { transport: 'builtin' },
-      description: 'Runs the fixture capability through a Host-supervised contribution.',
-      icon: 'github',
-      contributions: [
-        {
-          type: 'mcp',
-          id: 'fixture-tools',
-          runtime: { transport: 'stdio', entrypoint: 'dist/entrypoint.js' },
-        },
-      ],
-      features: [
-        {
-          id: 'source',
-          name: 'Source',
-          resources: [],
-          contributions: [{ type: 'mcp', id: 'fixture-tools' }],
-          capabilities: ['events.publish'],
-        },
-      ],
-    });
-    const contract = contributionContractRuntime();
-    const { archive, entry, provider, runtime } = await harness({
-      packageManifest,
-      contract,
-      machinePresentation: true,
-    });
-    const materializedRoot = await root('cat-cafe-f202-builtin-start-failure-');
-    await mkdir(join(materializedRoot, 'dist'), { recursive: true });
-    await writeFile(join(materializedRoot, 'dist/entrypoint.js'), '// builtin fixture\n', 'utf8');
-    const composition = createPluginManagerRuntimeComposition({
-      runtime,
-      catalogProvider: provider,
-      catalogManifests: [],
-      fetchOfficialArchive: async () => archive.bytes,
-      builtinContributions: {
-        materializer: {
-          resolve: async () => ({
-            rootDir: materializedRoot,
-            verifyIntegrity: async () => {},
-            release: async () => {},
-          }),
-        },
-        configuration: {
-          readConfig: async () => undefined,
-          readSecret: async () => undefined,
-        },
-        runtime: {
-          start: async () => {
-            throw new Error('secret-bearing child failure');
-          },
-        },
-      },
-    });
-    await composition.manager.install({
-      source: { kind: 'catalog', catalogId: entry.catalogId },
-      expectedVersion: entry.version,
-      expectedDigest: entry.packageDigest,
-    });
-
-    await assert.rejects(
-      () => composition.manager.setEnabled(entry.pluginId, { enabled: true, expectedRevision: 2 }),
-      (error) => error?.code === 'RUNTIME_START_FAILED',
-    );
-    const failed = (await composition.manager.get(entry.pluginId)).plugin;
-    assert.equal(failed.live, 'stopped');
-    assert.equal(failed.diagnostic?.code, 'UNEXPECTED_RUNTIME_FAILURE');
-    assert.equal(failed.diagnostic?.revision, 5);
   });
 });

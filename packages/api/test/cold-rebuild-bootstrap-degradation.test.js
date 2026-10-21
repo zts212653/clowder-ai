@@ -16,7 +16,6 @@ import {
   createProjectionService,
   failingRebuildChain,
   PARALLEL_DEGRADED_MESSAGE,
-  REMEDIAL_DEGRADED_MESSAGE,
   runRoute,
   SERIAL_DEGRADED_MESSAGE,
   SessionChainStore,
@@ -89,14 +88,14 @@ describe('cold-rebuild bootstrap degradation (Session #1, no sealed prior)', () 
     }
   });
 
-  test('remedial retains the bare stop-gate prompt and warns once per rebuild', async () => {
+  test('action-successor cold rebuild retains its prompt without a corrective model turn', async () => {
     const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
     const warns = captureWarns('route-serial');
     const projection = createProjectionService({
       state: 'covered_active',
       closeDecisions: [{ shouldBlock: true, transitionObserved: false }],
     });
-    const service = createHandshakeService('codex', ['No structured transition.', 'remedial answer']);
+    const service = createHandshakeService('codex', ['No structured transition.']);
     const { yielded, deps } = await runRoute(routeSerial, { codex: service }, 'thread-cold-rebuild-remedial', {
       projectionService: projection,
       routeOptions: {
@@ -114,9 +113,10 @@ describe('cold-rebuild bootstrap degradation (Session #1, no sealed prior)', () 
       catId: 'codex',
       getChainCalls: deps.invocationDeps.sessionChainStore.getChainCalls,
     });
-    assert.equal(service.calls.length, 2, 'main child plus one remedial child');
-    assert.match(service.calls[1], /F167 球权停止门/);
+    assert.equal(service.calls.length, 1, 'a custody observation must not invoke a second model turn');
+    assert.match(service.calls[0], /cold rebuild probe/);
+    assert.doesNotMatch(service.calls[0], /F167 球权停止门/);
+    assert.equal(projection.closes.length, 1, 'the existing observation still completes');
     assert.equal(countDegradationWarnings(warns, { catId: 'codex', message: SERIAL_DEGRADED_MESSAGE }), 1);
-    assert.equal(countDegradationWarnings(warns, { catId: 'codex', message: REMEDIAL_DEGRADED_MESSAGE }), 1);
   });
 });

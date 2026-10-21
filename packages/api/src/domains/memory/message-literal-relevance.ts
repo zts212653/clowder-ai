@@ -15,21 +15,29 @@ export function messageLiteralRelevance(query: string) {
   const coverage = literalTermCoverage(words);
   const chinese = literalTermCoverage(splitLexicalBackfillWords(query).filter((word) => /[一-鿿㐀-䶿]/.test(word)));
   const phrase = fold(query.trim());
+  // Spaces between CJK terms are query separators, not stronger evidence in
+  // quoted query/diagnostic messages than the same adjacent words in an original.
+  // Retain the exact spelling too; do not remove Latin word boundaries.
+  const phrases = [...new Set([phrase, phrase.replace(/([一-鿿㐀-䶿])\s+(?=[一-鿿㐀-䶿])/g, '$1')])];
   const scores = new WeakMap<LiteralPassage, Score>();
   const score = (passage: LiteralPassage): Score => {
     const cached = scores.get(passage);
     if (cached) return cached;
     const content = fold(passage.content);
-    let length = 0;
-    // SQLite length(TEXT) counts code points and stops at the first NUL.
-    for (const point of content) {
-      if (point === '\0') break;
-      length++;
+    let specificity = 0;
+    if (phrases.some((value) => content.includes(value))) {
+      let length = 0;
+      // SQLite length(TEXT) counts code points and stops at the first NUL.
+      for (const point of content) {
+        if (point === '\0') break;
+        length++;
+      }
+      // Count a phrase once: repeating the question cannot manufacture evidence.
+      specificity = 1 / Math.max(1, length);
     }
     const result = {
       coverage: coverage(content),
-      // Count a phrase once: repeating the question cannot manufacture evidence.
-      specificity: content.includes(phrase) ? 1 / Math.max(1, length) : 0,
+      specificity,
     };
     scores.set(passage, result);
     return result;
@@ -37,8 +45,8 @@ export function messageLiteralRelevance(query: string) {
 
   return {
     selectSql: `message_literal_coverage(LOWER(p.content)) AS literalCoverage,
-      CASE WHEN instr(LOWER(p.content), ?) > 0 THEN 1.0 / MAX(1, length(p.content)) ELSE 0 END AS literalSpecificity`,
-    params: [phrase],
+      CASE WHEN ${phrases.map(() => 'instr(LOWER(p.content), ?) > 0').join(' OR ')} THEN 1.0 / MAX(1, length(p.content)) ELSE 0 END AS literalSpecificity`,
+    params: phrases,
     // SQL LOWER does the same ASCII fold once in native code per callback.
     coverageFolded: coverage,
     matchesChineseFolded(content: string): number {
@@ -49,8 +57,15 @@ export function messageLiteralRelevance(query: string) {
       const right = score(b);
       return right.coverage - left.coverage || right.specificity - left.specificity;
     },
-    compareExact(a: PassageResult, b: PassageResult): number {
-      return score(b).specificity - score(a).specificity;
+    compareHybrid(a: PassageResult, b: PassageResult): number {
+      const left = score(a);
+      const right = score(b);
+      // Natural query words need not be adjacent or in query order. Complete
+      // literal evidence survives fusion; partial/semantic rows still use RRF.
+      return (
+        Number(right.coverage === words.length) - Number(left.coverage === words.length) ||
+        right.specificity - left.specificity
+      );
     },
   };
 }

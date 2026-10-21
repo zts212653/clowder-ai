@@ -75,7 +75,7 @@ describe('Callback routes: agent-key auth path', () => {
   }
 
   async function issueGptProKey(userId = TEST_USER) {
-    return agentKeyRegistry.issue('gpt-pro', userId);
+    return agentKeyRegistry.issue('gpt-pro', userId, { scope: 'cloud-conversation' });
   }
 
   test('agent-key rich gallery fallback rejects an unregistered local image without storing a message', async () => {
@@ -243,7 +243,7 @@ describe('Callback routes: agent-key auth path', () => {
     });
 
     assert.equal(res.statusCode, 403);
-    assert.deepEqual(res.json(), { ok: false, reason: 'gpt_pro_principal_required' });
+    assert.deepEqual(res.json(), { ok: false, reason: 'cloud_principal_required' });
   });
 
   test('auth-probe rejects a gpt-pro key for another user', async () => {
@@ -257,7 +257,7 @@ describe('Callback routes: agent-key auth path', () => {
     });
 
     assert.equal(res.statusCode, 403);
-    assert.deepEqual(res.json(), { ok: false, reason: 'gpt_pro_principal_required' });
+    assert.deepEqual(res.json(), { ok: false, reason: 'cloud_principal_required' });
   });
 
   test('auth-probe rejects an unknown sidecar secret', async () => {

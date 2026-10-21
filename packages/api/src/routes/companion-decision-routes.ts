@@ -1,9 +1,9 @@
-import type { CollectiveConnector } from '@cat-cafe/collective-connector';
 import type { IgnoredItemSnapshot } from '@cat-cafe/shared';
 import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
 import type { IMessageStore } from '../domains/cats/services/stores/ports/MessageStore.js';
 import type { RuntimeInteractionPendingReadSource } from '../domains/runtime-interaction/ports/RuntimeInteractionStore.js';
+import type { CollectiveAccountabilitySource } from './companion-collective-accountability-source.js';
 import { companionDecisionWireResponse, readCompanionDecisionProjection } from './companion-decision-read-service.js';
 import { requirePluginOwnerLocalAccess } from './plugin-access-guards.js';
 import { registerUserMentionHandlingRoutes, type UserMentionInboxStore } from './user-mention-handling-routes.js';
@@ -23,13 +23,13 @@ const pageSchema = z
 /** Owner-local decision read and exact-source mention acknowledgement, independent of Live configuration. */
 export const companionDecisionRoutes: FastifyPluginAsync<{
   ownerUserId: string;
+  collectiveAccountability?: CollectiveAccountabilitySource;
   messageStore?: UserMentionInboxStore & Pick<IMessageStore, 'getById'>;
   now?: () => number;
   threadStore?: MentionReadOptions['threads'];
   runtimeInteractionStore?: RuntimeInteractionPendingReadSource;
   onResolved?: (userId: string) => void;
   readIgnoredItemPreferences?: (ownerUserId: string) => IgnoredItemSnapshot | Promise<IgnoredItemSnapshot>;
-  collectiveConnector?: () => CollectiveConnector | undefined;
 }> = async (app, options) => {
   const cutover = options.messageStore
     ? await options.messageStore.initializeUserMentionInbox((options.now ?? Date.now)())
@@ -54,7 +54,7 @@ export const companionDecisionRoutes: FastifyPluginAsync<{
       options.runtimeInteractionStore,
       personalView ? { mode: personalView, read: options.readIgnoredItemPreferences } : undefined,
       options.messageStore,
-      options.collectiveConnector,
+      options.collectiveAccountability,
     );
     const response = companionDecisionWireResponse(result, view);
     return reply.code(response.statusCode).send(response.body);

@@ -3,6 +3,7 @@ import {
   type HumanDispositionEnvelope,
   isHumanDispositionEnvelopeEligible,
 } from '@cat-cafe/shared';
+import { getCoCreatorDisplay } from '../../config/co-creator-display.js';
 import type { PersonMemoryDispositionSubjectProof } from '../memory/people/PersonMemoryDispositionSubjectProofResolver.js';
 import { extractCandidatePhrases, normalizeCandidatePhrase } from '../memory/proactive-memory-lexical-noise.js';
 import type { HumanDispositionLedger } from './HumanDispositionLedger.js';
@@ -59,7 +60,7 @@ function renderContext(
   );
   return (
     '\n[human-disposition-feedback]\n' +
-    '以下是co-creator对当前 exact subject 的已验证定向反馈；只修正该 subject，不外推到 lane、其他 subject 或猫的整体判断：\n' +
+    `以下是${getCoCreatorDisplay().nickname}对当前 exact subject 的已验证定向反馈；只修正该 subject，不外推到 lane、其他 subject 或猫的整体判断：\n` +
     `${lines.join('\n')}\n` +
     '[/human-disposition-feedback]'
   );

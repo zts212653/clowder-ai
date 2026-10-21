@@ -267,7 +267,7 @@ async function searchWorkspaceContent(
 
 /** The tree listing's own visibility rule: dot entries (except .claude/.kimi) and SKIP_DIRS are not shown. */
 function hiddenFromTree(name: string): boolean {
-  return (name.startsWith('.') && name !== '.claude' && name !== '.kimi') || SKIP_DIRS.has(name);
+  return (name.startsWith('.') && name !== '.claude' && name !== '.kimi-code') || SKIP_DIRS.has(name);
 }
 
 async function buildTree(root: string, dirPath: string, depth: number, maxDepth: number): Promise<TreeNode[]> {

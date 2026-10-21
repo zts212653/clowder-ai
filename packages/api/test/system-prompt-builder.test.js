@@ -157,7 +157,8 @@ describe('SystemPromptBuilder', () => {
       mcpAvailable: true,
     });
     assert.ok(prompt.includes('cat_cafe_post_message'));
-    assert.ok(prompt.includes('cat_cafe_register_pr_tracking'));
+    assert.ok(prompt.includes('已安装的 GitHub 插件'));
+    assert.equal(prompt.includes('cat_cafe_register_pr_tracking'), false); // mcp-cutover-negative-reference: absence
     assert.ok(prompt.includes('cat_cafe_get_pending_mentions'));
     assert.ok(prompt.includes('cat_cafe_get_thread_context'));
   });
@@ -826,7 +827,8 @@ describe('SystemPromptBuilder', () => {
     assert.ok(ctx.includes('terminal Release'));
     assert.ok(ctx.includes('不要发送“收到/谢谢” ACK'));
     assert.ok(ctx.includes('继续原任务'));
-    assert.ok(ctx.includes('无需 @co-creator'));
+    const { getCoCreatorConfig } = await import('../dist/config/cat-config-loader.js');
+    assert.ok(ctx.includes(`无需 ${getCoCreatorConfig().mentionPatterns[0]}`));
     assert.ok(!ctx.includes('回复请用 cross_post_message'));
   });
 

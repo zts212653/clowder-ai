@@ -35,6 +35,8 @@ function createFixture(t) {
     'scripts/runtime-worktree.sh',
     'scripts/daemon-state.mjs',
     'scripts/lib/platform-status.mjs',
+    'packages/shared/src/deployment-defaults.ts',
+    'packages/shared/src/deployment-profiles.json',
     'scripts/lib/quickstart-freshness.sh',
     'scripts/lib/node-runtime-guard.sh',
     'scripts/lib/daemon-state.mjs',

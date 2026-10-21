@@ -1,4 +1,3 @@
-import type { CollectiveCustodyOwnerAuthority } from '@cat-cafe/collective-connector';
 import type {
   CollectiveArtifactCustodyTransfer,
   CollectiveCustodyPage,
@@ -14,6 +13,7 @@ import {
   requirePrepared,
   transferProofRef,
 } from './custody-owner-support.js';
+import type { CollectiveCustodyOwnerAuthority } from './owner-port.js';
 
 /** Target stages all bytes invisibly; only canonical Service commit permits installation and final activation. */
 export class CollectiveArtifactTargetOwner {

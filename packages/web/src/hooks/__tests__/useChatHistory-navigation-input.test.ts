@@ -1390,6 +1390,103 @@ describe('useChatHistory navigation input owner', () => {
     expect(readChatScrollState(threadId)).toMatchObject({ anchor: 'offset', messageAnchor: { messageId: 'first' } });
   });
 
+  it('finishes native End at the new bottom when deferred rows grow beyond its original destination', async () => {
+    const threadId = 'native-end-growing-bottom';
+    const { el, top } = await openThread(threadId);
+    top.set(200);
+    saveChatScrollState(threadId, { top: 200, anchor: 'offset' });
+    const end = capturedHook!.messagesEndRef.current!;
+    end.scrollIntoView = vi.fn(() => top.set(el.scrollHeight - el.clientHeight));
+    act(() => {
+      el.dispatchEvent(new KeyboardEvent('keydown', { key: 'End', bubbles: true }));
+      top.set(400);
+      capturedHook!.handleScroll();
+      Object.defineProperty(el, 'scrollHeight', { configurable: true, value: 1600 });
+      window.dispatchEvent(new Event(CHAT_LAYOUT_CHANGED_EVENT));
+      flushAnimationFrames();
+    });
+    expect(end.scrollIntoView).not.toHaveBeenCalled();
+    act(() => {
+      top.set(600); // The browser reaches the bottom measured at keydown.
+      capturedHook!.handleScroll();
+      el.dispatchEvent(new Event('scrollend'));
+    });
+    expect(top.get()).toBe(1000);
+    expect(readChatScrollState(threadId)).toEqual({ top: 1000, anchor: 'bottom' });
+    act(() => {
+      Object.defineProperty(el, 'scrollHeight', { configurable: true, value: 1800 });
+      window.dispatchEvent(new Event(CHAT_LAYOUT_CHANGED_EVENT));
+      flushAnimationFrames();
+    });
+    expect(top.get()).toBe(1200);
+    expect(readChatScrollState(threadId)).toEqual({ top: 1200, anchor: 'bottom' });
+  });
+
+  it.each([
+    'upward-wheel',
+    'message-navigation',
+    'thread-switch',
+  ] as const)('cancels an unfinished End destination on %s', async (interrupt) => {
+    const threadId = `native-end-cancel-${interrupt}`;
+    const { el, top } = await openThread(threadId);
+    top.set(200);
+    saveChatScrollState(threadId, { top: 200, anchor: 'offset' });
+    const end = capturedHook!.messagesEndRef.current!;
+    end.scrollIntoView = vi.fn(() => top.set(el.scrollHeight - el.clientHeight));
+    act(() => {
+      el.dispatchEvent(new KeyboardEvent('keydown', { key: 'End', bubbles: true }));
+      top.set(400);
+      capturedHook!.handleScroll();
+      Object.defineProperty(el, 'scrollHeight', { configurable: true, value: 1600 });
+      if (interrupt === 'upward-wheel') {
+        el.dispatchEvent(new WheelEvent('wheel', { deltaY: -100 }));
+        top.set(300);
+        capturedHook!.handleScroll();
+      } else if (interrupt === 'message-navigation') {
+        const first = el.querySelector<HTMLElement>('[data-message-id="first"]')!;
+        first.scrollIntoView = vi.fn(() => top.set(0));
+        jump('first');
+      } else {
+        useChatStore.setState({ currentThreadId: 'other-thread' });
+      }
+      el.dispatchEvent(new Event('scrollend'));
+      window.dispatchEvent(new Event(CHAT_LAYOUT_CHANGED_EVENT));
+      flushAnimationFrames();
+    });
+    expect(end.scrollIntoView).not.toHaveBeenCalled();
+    expect(readChatScrollState(threadId)?.anchor).toBe('offset');
+  });
+
+  it.each([
+    'PageDown',
+    'wheel',
+    'click',
+    'outside-End',
+  ] as const)('keeps offset reading after %s when geometry grows', async (input) => {
+    const threadId = `native-offset-growth-${input}`;
+    const { el, top } = await openThread(threadId);
+    top.set(200);
+    saveChatScrollState(threadId, { top: 200, anchor: 'offset' });
+    const end = capturedHook!.messagesEndRef.current!;
+    act(() => {
+      if (input === 'wheel') el.dispatchEvent(new WheelEvent('wheel', { deltaY: 100 }));
+      else if (input === 'click') el.dispatchEvent(new Event('pointerdown'));
+      else if (input === 'outside-End') {
+        const control = document.createElement('button');
+        container.appendChild(control);
+        control.dispatchEvent(new KeyboardEvent('keydown', { key: 'End', bubbles: true }));
+      } else el.dispatchEvent(new KeyboardEvent('keydown', { key: input, bubbles: true }));
+      Object.defineProperty(el, 'scrollHeight', { configurable: true, value: 1600 });
+      if (input !== 'click') top.set(600);
+      capturedHook!.handleScroll();
+      el.dispatchEvent(new Event('scrollend'));
+      window.dispatchEvent(new Event(CHAT_LAYOUT_CHANGED_EVENT));
+      flushAnimationFrames();
+    });
+    expect(end.scrollIntoView).not.toHaveBeenCalled();
+    expect(readChatScrollState(threadId)?.anchor).toBe('offset');
+  });
+
   it('keeps an explicit last-message anchor through passive bottom observations and late layout', async () => {
     const threadId = 'piano-last-source-late-layout';
     const { el, top, second } = await openThread(threadId);

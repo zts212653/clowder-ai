@@ -24,7 +24,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, it } from 'node:test';
 import Fastify from 'fastify';
-import { proposedReviewAction } from './helpers.js';
+import { proposedTaskAction } from './helpers.js';
 import {
   appendSchedulerWakeRow,
   assertAnchoredToWakeRow,
@@ -52,6 +52,7 @@ describe('F167 scheduler-origin exemption over real callback routes', () => {
 
     const app = Fastify();
     await app.register(callbacksRoutes, {
+      actionSuccessorAdmissionService: { async preflightStructuredTransferStanding() {} },
       registry,
       messageStore,
       socketManager: socket(),
@@ -98,6 +99,7 @@ describe('F167 scheduler-origin exemption over real callback routes', () => {
 
     const app = Fastify();
     await app.register(callbacksRoutes, {
+      actionSuccessorAdmissionService: { async preflightStructuredTransferStanding() {} },
       registry,
       messageStore,
       socketManager: socket(),
@@ -144,6 +146,7 @@ describe('F167 scheduler-origin exemption over real callback routes', () => {
 
     const app = Fastify();
     await app.register(callbacksRoutes, {
+      actionSuccessorAdmissionService: { async preflightStructuredTransferStanding() {} },
       registry,
       messageStore,
       threadStore,
@@ -164,7 +167,7 @@ describe('F167 scheduler-origin exemption over real callback routes', () => {
         content: '@sonnet\nThe timer woke me and this needs another pair of paws',
         targetCats: ['sonnet'],
         effectClass: 'assign_work',
-        proposedAction: proposedReviewAction(),
+        proposedAction: proposedTaskAction(),
         clientMessageId: 'f167-scheduler-origin-dispatch',
       });
 

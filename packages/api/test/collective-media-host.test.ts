@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import { join } from 'node:path';
-import { after, before, test } from 'node:test';
 import { mediaHostFixture } from './collective-media-host.fixture.js';
 import { mediaRangeFixture } from './collective-media-range.fixture.js';
+import { after, before, test } from './helpers/f202-collective-installed-business.js';
 
 const configuredOwner = process.env.DEFAULT_OWNER_USER_ID;
 before(() => {
@@ -15,7 +15,7 @@ after(() => {
 test('the normal Host serves exact media through its authenticated paired reader Cafe', async (t) => {
   const f = await mediaRangeFixture(t);
   const host = await mediaHostFixture(t, f.directory);
-  const path = `/api/plugins/collective-connector/${f.connection.connectionId}/artifacts/${f.input.artifactId}/media/1?sourceEventId=${f.input.sourceEventId}`;
+  const path = `/api/plugins/official.collective-connector/connections/${f.connection.connectionId}/artifacts/${f.input.artifactId}/media/1?sourceEventId=${f.input.sourceEventId}`;
   const response = await f.drive(fetch(`${host.url}${path}`, { headers: { cookie: 'test-session=reader' } }));
   assert.equal(response.status, 200, await response.clone().text());
   assert.equal(response.headers.get('content-type'), 'image/png');
@@ -27,14 +27,14 @@ test('the normal Host serves exact media through its authenticated paired reader
 test('Host reads reject missing, remote, borrowed or cross-source authority before disclosing bytes', async (t) => {
   const f = await mediaRangeFixture(t);
   const host = await mediaHostFixture(t, f.directory);
-  const path = `/api/plugins/collective-connector/${f.connection.connectionId}/artifacts/${f.input.artifactId}/media/1?sourceEventId=${f.input.sourceEventId}`;
+  const path = `/api/plugins/official.collective-connector/connections/${f.connection.connectionId}/artifacts/${f.input.artifactId}/media/1?sourceEventId=${f.input.sourceEventId}`;
   for (const [headers, expected] of [
     [{}, 401],
     [{ 'x-cat-cafe-user': 'reader-private-human' }, 401],
     [{ cookie: 'test-session=publisher' }, 403],
     [{ cookie: 'test-session=reader', origin: 'https://foreign.invalid' }, 403],
     [{ cookie: 'test-session=reader', 'x-forwarded-for': '127.0.0.1' }, 403],
-    [{ cookie: 'test-session=reader', 'x-invocation-id': 'other-cat' }, 401],
+    [{ 'x-invocation-id': 'other-cat', 'x-callback-token': 'borrowed' }, 401],
   ] as const) {
     const response = await fetch(`${host.url}${path}`, { headers });
     assert.equal(response.status, expected, await response.text());
@@ -58,7 +58,7 @@ test('Host reads reject missing, remote, borrowed or cross-source authority befo
 test('the Host forwards real MP4 ranges and 416 without exposing a private media URL', async (t) => {
   const f = await mediaRangeFixture(t, 'video/mp4');
   const host = await mediaHostFixture(t, f.directory);
-  const url = `${host.url}/api/plugins/collective-connector/${f.connection.connectionId}/artifacts/${f.input.artifactId}/media/1?sourceEventId=${f.input.sourceEventId}`;
+  const url = `${host.url}/api/plugins/official.collective-connector/connections/${f.connection.connectionId}/artifacts/${f.input.artifactId}/media/1?sourceEventId=${f.input.sourceEventId}`;
   for (const [range, start, end] of [
     ['bytes=0-31', 0, 31],
     ['bytes=-16', f.f.media.bytes.length - 16, f.f.media.bytes.length - 1],
@@ -101,7 +101,7 @@ test('explicit Host sharing derives the exact retained tuple and replays one pub
     operationId: 'another-retained-publication',
   });
   const host = await mediaHostFixture(t, join(publisher.root, 'connector'), publisher.port);
-  const url = `${host.url}/api/plugins/collective-connector/${f.f.connection.connectionId}/artifacts/share-media`;
+  const url = `${host.url}/api/plugins/official.collective-connector/connections/${f.f.connection.connectionId}/artifacts/share-media`;
   const input = {
     contentRef,
     ownerRevision: 1,
@@ -143,7 +143,7 @@ test('Host reports an unavailable canonical owner separately from denied access'
     connectionId: f.f.connection.connectionId,
   });
   const response = await fetch(
-    `${host.url}/api/plugins/collective-connector/${f.connection.connectionId}/artifacts/${f.input.artifactId}/media/1?sourceEventId=${f.input.sourceEventId}`,
+    `${host.url}/api/plugins/official.collective-connector/connections/${f.connection.connectionId}/artifacts/${f.input.artifactId}/media/1?sourceEventId=${f.input.sourceEventId}`,
     { headers: { cookie: 'test-session=reader' } },
   );
   assert.equal(response.status, 503, await response.clone().text());
@@ -153,12 +153,12 @@ test('Host reports an unavailable canonical owner separately from denied access'
 test('Host registration context requires its direct local Human and discloses only exact public CAS', async (t) => {
   const f = await mediaRangeFixture(t);
   const host = await mediaHostFixture(t, join(f.f.media.root, 'connector'), f.f.media.port);
-  const url = `${host.url}/api/plugins/collective-connector/${f.f.connection.connectionId}/artifacts/share-media/context`;
+  const url = `${host.url}/api/plugins/official.collective-connector/connections/${f.f.connection.connectionId}/artifacts/share-media/context`;
   const input = { contentRef: f.f.artifact.contentRef, sourceEventId: f.f.source.eventId, mediaType: 'image/png' };
   const read = (body: unknown, headers: Record<string, string>) =>
     fetch(url, {
       method: 'POST',
-      headers: { 'content-type': 'application/json', ...headers },
+      headers: { 'content-type': 'application/json', origin: 'http://localhost:5182', ...headers },
       body: JSON.stringify(body),
     });
   const publisher = { cookie: 'test-session=publisher' };
@@ -175,7 +175,7 @@ test('Host registration context requires its direct local Human and discloses on
     [{}, 401],
     [{ cookie: 'test-session=reader' }, 403],
     [{ ...publisher, origin: 'https://foreign.invalid' }, 403],
-    [{ ...publisher, 'x-invocation-id': 'borrowed-cat' }, 401],
+    [{ 'x-invocation-id': 'borrowed-cat', 'x-callback-token': 'borrowed' }, 401],
   ] as const) {
     assert.equal((await read(input, headers)).status, expected);
   }

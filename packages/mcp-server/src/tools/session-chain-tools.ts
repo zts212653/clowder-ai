@@ -12,6 +12,7 @@ import { defineMcpCanonicalFactory } from '../tool-governance-migration.js';
  * - session_search: Full-text search across transcripts/digests
  */
 
+import { deploymentDefaults } from '@cat-cafe/shared';
 import { z } from 'zod';
 import type { ToolResult } from './file-tools.js';
 import { errorResult, successResult } from './file-tools.js';
@@ -27,7 +28,7 @@ const defineTool = defineMcpCanonicalFactory('session-chain-tools.ts', undefined
   authority: 'local-runtime',
 });
 
-const API_URL = process.env['CAT_CAFE_API_URL'] ?? 'http://localhost:3004';
+const API_URL = process.env['CAT_CAFE_API_URL'] ?? deploymentDefaults.apiBaseUrl;
 
 function resolveToolUserId(): string {
   return process.env['CAT_CAFE_USER_ID'] ?? 'default-user';

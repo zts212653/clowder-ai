@@ -27,7 +27,6 @@ import {
   projectEmptyResponseLifecycleNotice,
 } from './assistant-message-renderability';
 import { CapabilityTipStrip } from './CapabilityTipStrip';
-import { CatAvatar } from './CatAvatar';
 import { CatNameplate } from './CatNameplate';
 import { CloudBindingRecoveryCard } from './CloudBindingRecoveryCard';
 import { CollapsibleMarkdown } from './CollapsibleMarkdown';
@@ -78,6 +77,7 @@ import type { CardConfirmationEntry } from './rich/CardBlock';
 import { CustodyOfferCard } from './rich/CustodyOfferCard';
 import { RichBlocks } from './rich/RichBlocks';
 import { RoutingPreflightActions } from './routing-context/RoutingPreflightActions';
+import { SenderAvatar } from './SenderAvatar';
 import { SubexecutionActivity } from './SubexecutionActivity';
 import { SummaryCard } from './SummaryCard';
 import { SystemNoticeBar } from './SystemNoticeBar';
@@ -580,34 +580,7 @@ function ChatMessageContent({
     } catch {
       /* fallback values already set */
     }
-    const userAvatar = (
-      <button
-        type="button"
-        onClick={onEditCoCreator}
-        className={`w-8 h-8 rounded-full overflow-hidden flex-shrink-0 ring-2 flex items-center justify-center text-xs font-bold text-[var(--cafe-surface)] ${onEditCoCreator ? 'cursor-pointer hover:opacity-80 transition-opacity' : ''}`}
-        style={{
-          backgroundColor: 'var(--color-cocreator-primary)',
-          boxShadow: '0 0 0 2px var(--color-cocreator-surface)',
-        }}
-        aria-label={`编辑 ${coCreator.name}`}
-      >
-        {coCreator.avatar ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
-            src={coCreator.avatar}
-            alt={coCreator.name}
-            width={32}
-            height={32}
-            className="object-cover w-full h-full"
-            onError={(e) => {
-              (e.target as HTMLImageElement).style.display = 'none';
-            }}
-          />
-        ) : (
-          'ME'
-        )}
-      </button>
-    );
+    const userAvatar = <SenderAvatar sender={sender} presentation="message" onClick={onEditCoCreator} />;
 
     /* F322 B segment 1 (human message). In the new presentation your own message is right-aligned with no avatar and no
      * signature (DESIGN.md「对话」: alone in the Café, right-aligned is you). What you could do with the message stays: the
@@ -798,12 +771,13 @@ function ChatMessageContent({
       return (
         <div data-message-id={message.id} data-testid="response-lifecycle-tip" className="mb-4 flex items-start gap-2">
           {catData && (shellPresentation !== 'v2' || compact) ? (
-            <CatAvatar catId={catData.id} size={32} status="streaming" />
+            <SenderAvatar sender={sender} presentation="message" streaming />
           ) : null}
           <div className="min-w-0 flex-1 pt-1">
             <div className="flex items-center gap-2 text-xs">
               {catData && shellPresentation === 'v2' && !compact ? (
                 <CatNameplate
+                  sender={sender}
                   catId={catData.id}
                   name={catStyle?.label ?? sender.label}
                   onEditCat={onEditCat ? () => onEditCat(catData.id) : undefined}
@@ -863,6 +837,7 @@ function ChatMessageContent({
           {showsNameplate && catData && catStyle ? (
             <>
               <CatNameplate
+                sender={sender}
                 catId={catData.id}
                 name={catStyle.label}
                 onEditCat={onEditCat && catData ? () => onEditCat(catData.id) : undefined}
@@ -1052,14 +1027,10 @@ function ChatMessageContent({
         companionIdentity ? (
           <CompanionMessageAvatar identity={companionIdentity} />
         ) : catData ? (
-          <CatAvatar
-            catId={catData.id}
-            size={32}
-            status={
-              message.lifecycle?.kind === 'response' && message.lifecycle.status === 'processing'
-                ? 'streaming'
-                : undefined
-            }
+          <SenderAvatar
+            sender={sender}
+            presentation="message"
+            streaming={message.lifecycle?.kind === 'response' && message.lifecycle.status === 'processing'}
             onClick={onEditCat ? () => onEditCat(catData.id) : undefined}
           />
         ) : null

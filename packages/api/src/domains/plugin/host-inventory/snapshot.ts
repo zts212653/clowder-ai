@@ -1,6 +1,7 @@
-import type { SignalSchemaCatalog } from '@clowder-ai/plugin-contract';
 import { DEFAULT_PLUGIN_CONTRACT_RUNTIME, requestedCapabilitiesForManifest } from './contract-policy.js';
 import type { PackageAdmissionContractRuntime } from './manifest-verifier.js';
+import { parseRuntimeErrorDetail } from './runtime-failure-record.js';
+import { storedManifest } from './stored-manifest.js';
 import type {
   ActivationState,
   ConfigReadiness,
@@ -30,6 +31,7 @@ const RUNTIME_ERROR_CODES = new Set<PluginRuntimeErrorCode>([
   'UNAVAILABLE',
   'UPDATE_RESUME_FAILED',
   'UPDATE_ROLLBACK_RESUME_FAILED',
+  'CONFIGURATION_RESUME_FAILED',
   'CATCH_UP_RESUME_FAILED',
   'UNEXPECTED_RUNTIME_FAILURE',
 ]);
@@ -97,7 +99,7 @@ function equalStrings(left: readonly string[], right: readonly string[]): boolea
   return left.length === right.length && left.every((value, index) => value === right[index]);
 }
 
-function signalSchemaCatalog(value: unknown, label: string): SignalSchemaCatalog {
+function signalSchemaCatalog(value: unknown, label: string): PluginPackageRecord['signalSchemas'] {
   const raw = object(value, label);
   return Object.fromEntries(
     Object.entries(raw).map(([key, schema]) => [key, structuredClone(object(schema, `${label}.${key}`))]),
@@ -108,7 +110,12 @@ function packageProvenance(value: unknown, label: string): PluginPackageRecord['
   const raw = object(value, label);
   const kind = enumValue(
     raw.kind,
-    new Set<'catalog' | 'local-directory' | 'local-archive'>(['catalog', 'local-directory', 'local-archive']),
+    new Set<'catalog' | 'local-directory' | 'local-archive' | 'git'>([
+      'catalog',
+      'local-directory',
+      'local-archive',
+      'git',
+    ]),
     `${label}.kind`,
   );
   if (kind === 'catalog') {
@@ -121,9 +128,34 @@ function packageProvenance(value: unknown, label: string): PluginPackageRecord['
         : { ownerAuthRequired: boolean(raw.ownerAuthRequired, `${label}.ownerAuthRequired`) }),
     };
   }
+  if (kind === 'git') {
+    return {
+      kind,
+      url: string(raw.url, `${label}.url`),
+      ...(raw.packageName === undefined ? {} : { packageName: string(raw.packageName, `${label}.packageName`) }),
+      ...(raw.dependencyClosure === undefined
+        ? {}
+        : {
+            dependencyClosure: enumValue(
+              raw.dependencyClosure,
+              new Set(['shipped', 'materialized'] as const),
+              `${label}.dependencyClosure`,
+            ),
+          }),
+    };
+  }
   return {
     kind,
     ...(raw.packageName === undefined ? {} : { packageName: string(raw.packageName, `${label}.packageName`) }),
+    ...(raw.dependencyClosure === undefined
+      ? {}
+      : {
+          dependencyClosure: enumValue(
+            raw.dependencyClosure,
+            new Set(['shipped', 'materialized'] as const),
+            `${label}.dependencyClosure`,
+          ),
+        }),
   };
 }
 
@@ -166,14 +198,17 @@ export function isCanonicalPackageDigest(value: string): boolean {
 
 function parsePackage(value: unknown, index: number, contract: PackageAdmissionContractRuntime): PluginPackageRecord {
   const raw = object(value, `packages[${index}]`);
-  const validation = contract.validateManifest(raw.manifest);
-  if (!validation.valid) corrupt(`packages[${index}].manifest is invalid`);
+  const persistedManifest = raw.manifest === null ? raw.incompatibleManifest : raw.manifest;
+  const stored = storedManifest(persistedManifest, `packages[${index}].manifest`);
+  const validation = contract.validateManifest(persistedManifest);
+  const compatible = validation.valid && contract.manifestContractVersions.includes(stored.contractVersion);
   const record: PluginPackageRecord = {
     packageDigest: string(raw.packageDigest, `packages[${index}].packageDigest`),
     pluginId: string(raw.pluginId, `packages[${index}].pluginId`),
     version: string(raw.version, `packages[${index}].version`),
     contractVersion: string(raw.contractVersion, `packages[${index}].contractVersion`),
-    manifest: structuredClone(validation.manifest),
+    manifest: compatible && validation.valid ? structuredClone(validation.manifest) : null,
+    ...(!compatible ? { incompatibleManifest: stored } : {}),
     signalSchemas: signalSchemaCatalog(raw.signalSchemas ?? {}, `packages[${index}].signalSchemas`),
     ...(raw.provenance === undefined
       ? {}
@@ -184,16 +219,13 @@ function parsePackage(value: unknown, index: number, contract: PackageAdmissionC
   };
   if (!isCanonicalPackageDigest(record.packageDigest)) corrupt(`packages[${index}].packageDigest is not canonical`);
   if (
-    record.pluginId !== record.manifest.pluginId ||
-    record.version !== record.manifest.version ||
-    record.contractVersion !== record.manifest.contractVersion
+    record.pluginId !== stored.pluginId ||
+    record.version !== stored.version ||
+    record.contractVersion !== stored.contractVersion
   ) {
     corrupt(`packages[${index}] identity does not match its manifest`);
   }
-  if (!contract.manifestContractVersions.includes(record.contractVersion)) {
-    corrupt(`packages[${index}] contract version is not supported by this Host`);
-  }
-  for (const declaration of record.manifest.signals?.provides ?? []) {
+  for (const declaration of record.manifest?.signals?.provides ?? []) {
     if (!Object.hasOwn(record.signalSchemas, declaration.schemaRef)) {
       corrupt(`packages[${index}] is missing declared signal schema ${declaration.schemaRef}`);
     }
@@ -201,7 +233,12 @@ function parsePackage(value: unknown, index: number, contract: PackageAdmissionC
   return record;
 }
 
-function parseInstance(value: unknown, index: number): PluginInstanceRecord {
+function parseInstance(
+  value: unknown,
+  index: number,
+  contract: PackageAdmissionContractRuntime,
+  packages: ReadonlyMap<string, PluginPackageRecord>,
+): PluginInstanceRecord {
   const raw = object(value, `instances[${index}]`);
   const record: PluginInstanceRecord = {
     pluginInstanceId: string(raw.pluginInstanceId, `instances[${index}].pluginInstanceId`),
@@ -220,19 +257,36 @@ function parseInstance(value: unknown, index: number): PluginInstanceRecord {
       ? {}
       : { lastRuntimeError: runtimeError(raw.lastRuntimeError, `instances[${index}].lastRuntimeError`) }),
   };
+  const detail = parseRuntimeErrorDetail(
+    raw,
+    `instances[${index}]`,
+    record,
+    contract,
+    packages.get(record.packageDigest)?.manifest === null,
+  );
   if (!isCanonicalPackageDigest(record.packageDigest)) corrupt(`instances[${index}].packageDigest is not canonical`);
   if (record.lifecycleState === 'retired' && record.retiredAt === undefined) {
     corrupt(`instances[${index}] retired state requires retiredAt`);
   }
-  return record;
+  return detail === undefined ? record : { ...record, lastRuntimeErrorDetail: detail };
 }
 
-function parseGrant(value: unknown, index: number, contract: PackageAdmissionContractRuntime): PluginGrantRecord {
+function parseGrant(
+  value: unknown,
+  index: number,
+  contract: PackageAdmissionContractRuntime,
+  incompatible: boolean,
+): PluginGrantRecord {
   const raw = object(value, `grants[${index}]`);
   const requestedCapabilities = stringArray(raw.requestedCapabilities, `grants[${index}].requestedCapabilities`);
   const effectiveGrants = stringArray(raw.effectiveGrants, `grants[${index}].effectiveGrants`);
   const grantRevision = raw.grantRevision;
-  if (!contract.validateEffectiveGrants(requestedCapabilities) || !contract.validateEffectiveGrants(effectiveGrants)) {
+  if (
+    new Set(requestedCapabilities).size !== requestedCapabilities.length ||
+    new Set(effectiveGrants).size !== effectiveGrants.length ||
+    (!incompatible &&
+      (!contract.validateEffectiveGrants(requestedCapabilities) || !contract.validateEffectiveGrants(effectiveGrants)))
+  ) {
     corrupt(`grants[${index}] contains invalid or duplicate capabilities`);
   }
   if (effectiveGrants.some((capability) => !requestedCapabilities.includes(capability))) {
@@ -330,7 +384,11 @@ function validateGrantReferences(
     if (grantByInstance.has(record.pluginInstanceId)) corrupt(`duplicate grant record ${record.pluginInstanceId}`);
     const packageRecord = packageByDigest.get(instance.packageDigest);
     if (!packageRecord) corrupt(`grant ${record.pluginInstanceId} has no package`);
-    const requestedCapabilities = requestedCapabilitiesForManifest(packageRecord.manifest);
+    const requestedCapabilities = packageRecord.manifest
+      ? requestedCapabilitiesForManifest(packageRecord.manifest)
+      : [
+          ...new Set(packageRecord.incompatibleManifest!.features.flatMap((feature) => [...feature.capabilities])),
+        ].sort();
     if (!equalStrings(record.requestedCapabilities, requestedCapabilities)) {
       corrupt(`grant ${record.pluginInstanceId} requests do not match its package manifest`);
     }
@@ -353,10 +411,15 @@ export function parsePluginInventorySnapshot(
   const raw = object(value, 'inventory');
   requireSupportedCollections(raw);
   const packages = raw.packages.map((entry, index) => parsePackage(entry, index, contract));
-  const instances = raw.instances.map(parseInstance);
-  const grants = raw.grants.map((entry, index) => parseGrant(entry, index, contract));
   const packageByDigest = indexPackages(packages);
+  const instances = raw.instances.map((entry, index) => parseInstance(entry, index, contract, packageByDigest));
   const instanceById = indexInstances(instances, packageByDigest);
+  const grants = raw.grants.map((entry, index) => {
+    const grant = object(entry, `grants[${index}]`);
+    const instance = instanceById.get(String(grant.pluginInstanceId));
+    const incompatible = instance !== undefined && packageByDigest.get(instance.packageDigest)?.manifest === null;
+    return parseGrant(entry, index, contract, incompatible);
+  });
   validateGrantReferences(grants, instances, instanceById, packageByDigest);
   return { schemaVersion: 1, packages, instances, grants };
 }

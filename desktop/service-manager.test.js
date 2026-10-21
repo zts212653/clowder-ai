@@ -56,7 +56,7 @@ test('declares the packaged Web frontend ready only after an HTTP response', asy
     assert.equal(await manager._isHttpReady(webPort), true);
 
     const source = fs.readFileSync(path.join(__dirname, 'service-manager.js'), 'utf8');
-    assert.match(source, /await this\._waitForHttpReady\(this\.frontendPort, 'Web'\)/);
+    assert.match(source, /await this\._waitForHttpReady\(this\.frontendPort, 'Web', signal\)/);
   } finally {
     if (tcpOnly.listening) await close(tcpOnly);
     if (web.listening) await close(web);
@@ -152,6 +152,27 @@ test('probes bundled plugin mirror and rebuilds it when the first read fails', a
     assert.equal(pluginProbeReads, 2, 'plugin mirror should be probed, rebuilt, and verified');
     assert.equal(pluginMirrorLinks, 2, 'plugin mirror should be recreated after the failed probe');
     assert.equal(existsSync(pluginProbePath), true);
+  } finally {
+    rmSync(installRoot, { recursive: true, force: true });
+    rmSync(userDataRoot, { recursive: true, force: true });
+  }
+});
+
+test('waits for all startup-critical mirror files before spawning services', async () => {
+  const installRoot = await mkdtemp(path.join(tmpdir(), 'service-manager-install-'));
+  const userDataRoot = await mkdtemp(path.join(tmpdir(), 'service-manager-user-'));
+  try {
+    for (const name of ['.claude', 'assets', 'guides', 'packages', 'scripts']) {
+      seedMirrorSource(installRoot, name);
+    }
+    seedMirrorSource(installRoot, 'docs', path.join('harness-feedback', 'eval-domains', 'eval-design-gate.yaml'));
+    seedMirrorSource(installRoot, 'cat-cafe-skills', path.join('refs', 'shared-rules.md'));
+    seedMirrorSource(installRoot, 'cat-cafe-skills', path.join('custody-recognition', 'SKILL.md'));
+    seedMirrorSource(installRoot, 'plugins', path.join('github', 'plugin.yaml'));
+
+    const manager = new ServiceManager(installRoot, { frontendPort: 3003, apiPort: 3004 });
+    manager._ensureUserDataDir(userDataRoot);
+    await manager._waitForProjectMirrors(userDataRoot, 1_000);
   } finally {
     rmSync(installRoot, { recursive: true, force: true });
     rmSync(userDataRoot, { recursive: true, force: true });

@@ -21,6 +21,8 @@ import {
 } from '../dist/config/capabilities/capability-orchestrator.js';
 import { writeMountRules } from '../dist/config/mount/mount-rules-store.js';
 
+const providerDirectory = (provider) => (provider === 'kimi' ? '.kimi-code' : `.${provider}`);
+
 const AUTH_HEADERS = { 'x-cat-cafe-user': 'test-user' };
 const OWNER_SESSION_HEADERS = { 'x-test-session-user': 'you' };
 const NON_OWNER_SESSION_HEADERS = { 'x-test-session-user': 'codex' };
@@ -58,8 +60,8 @@ describe('scanProviderSkillDirs', () => {
   it('merges multi-source provider results deterministically', async () => {
     const { scanProviderSkillDirs } = await import('../dist/routes/capabilities.js');
     const root = join(process.cwd(), '.test-tmp-cap-scan-' + Date.now());
-    const kimiProject = join(root, '.kimi', 'skills');
-    const kimiUser = join(root, 'home', '.kimi', 'skills');
+    const kimiProject = join(root, '.kimi-code', 'skills');
+    const kimiUser = join(root, 'home', '.kimi-code', 'skills');
     await mkdir(join(kimiProject, 'alpha'), { recursive: true });
     await mkdir(join(kimiUser, 'beta'), { recursive: true });
     await Promise.all([
@@ -83,7 +85,7 @@ describe('scanProviderSkillDirs', () => {
   it('preserves null scan sentinels for failed project scans', async () => {
     const { scanProviderSkillDirs } = await import('../dist/routes/capabilities.js');
     const root = join(process.cwd(), '.test-tmp-cap-scan-fail-' + Date.now());
-    const kimiUser = join(root, 'home', '.kimi', 'skills');
+    const kimiUser = join(root, 'home', '.kimi-code', 'skills');
     await mkdir(join(kimiUser, 'beta'), { recursive: true });
     await writeFile(join(kimiUser, 'beta', 'SKILL.md'), '# beta');
     try {
@@ -985,14 +987,14 @@ describe('GET /api/capabilities (Fastify)', () => {
       mkdir(join(projectDir, '.claude'), { recursive: true }),
       mkdir(join(projectDir, '.codex'), { recursive: true }),
       mkdir(join(projectDir, '.gemini'), { recursive: true }),
-      mkdir(join(projectDir, '.kimi'), { recursive: true }),
+      mkdir(join(projectDir, '.kimi-code'), { recursive: true }),
       mkdir(homeDir, { recursive: true }),
     ]);
     await Promise.all([
       symlink(sourceSkillsDir, join(projectDir, '.claude', 'skills')),
       symlink(sourceSkillsDir, join(projectDir, '.codex', 'skills')),
       symlink(sourceSkillsDir, join(projectDir, '.gemini', 'skills')),
-      symlink(sourceSkillsDir, join(projectDir, '.kimi', 'skills')),
+      symlink(sourceSkillsDir, join(projectDir, '.kimi-code', 'skills')),
     ]);
     await writeCapabilitiesConfig(projectDir, { version: 1, capabilities: [] });
 
@@ -1057,7 +1059,7 @@ describe('GET /api/capabilities (Fastify)', () => {
         claude: { enabled: true, path: '.project-claude/skills' },
         codex: { enabled: false, path: '.codex/skills' },
         gemini: { enabled: false, path: '.gemini/skills' },
-        kimi: { enabled: false, path: '.kimi/skills' },
+        kimi: { enabled: false, path: '.kimi-code/skills' },
       },
       customPaths: [],
     });
@@ -1120,7 +1122,7 @@ describe('GET /api/capabilities (Fastify)', () => {
       mkdir(join(projectDir, '.claude/skills'), { recursive: true }),
       mkdir(join(projectDir, '.codex/skills'), { recursive: true }),
       mkdir(join(projectDir, '.gemini/skills'), { recursive: true }),
-      mkdir(join(projectDir, '.kimi/skills'), { recursive: true }),
+      mkdir(join(projectDir, '.kimi-code/skills'), { recursive: true }),
       mkdir(homeDir, { recursive: true }),
       writeCapabilitiesConfig(projectDir, {
         version: 2,
@@ -1136,7 +1138,7 @@ describe('GET /api/capabilities (Fastify)', () => {
     for (const provider of ['claude', 'codex', 'gemini']) {
       await Promise.all(
         sourceSkillNames.map((name) =>
-          symlink(join(sourceSkillsDir, name), join(projectDir, `.${provider}/skills`, name)),
+          symlink(join(sourceSkillsDir, name), join(projectDir, `${providerDirectory(provider)}/skills`, name)),
         ),
       );
     }
@@ -1189,7 +1191,7 @@ describe('GET /api/capabilities (Fastify)', () => {
     await mkdir(skillSourceDir, { recursive: true });
     await writeFile(join(skillSourceDir, 'SKILL.md'), '# Project Local Source Skill\n');
     for (const provider of ['claude', 'codex', 'gemini', 'kimi']) {
-      const skillsDir = join(projectDir, `.${provider}`, 'skills');
+      const skillsDir = join(projectDir, providerDirectory(provider), 'skills');
       const linkPath = join(skillsDir, skillName);
       await mkdir(skillsDir, { recursive: true });
       await symlink(relative(dirname(linkPath), skillSourceDir), linkPath);
@@ -1263,7 +1265,7 @@ describe('GET /api/capabilities (Fastify)', () => {
       mkdir(join(projectDir, '.claude/skills'), { recursive: true }),
       mkdir(join(projectDir, '.codex/skills'), { recursive: true }),
       mkdir(join(projectDir, '.gemini/skills'), { recursive: true }),
-      mkdir(join(projectDir, '.kimi/skills'), { recursive: true }),
+      mkdir(join(projectDir, '.kimi-code/skills'), { recursive: true }),
       mkdir(homeDir, { recursive: true }),
       writeCapabilitiesConfig(projectDir, {
         version: 2,
@@ -1338,7 +1340,7 @@ describe('GET /api/capabilities (Fastify)', () => {
           { name: 'claude', path: '.claude/skills', enabled: false },
           { name: 'codex', path: '.codex/skills', enabled: false },
           { name: 'gemini', path: '.gemini/skills', enabled: false },
-          { name: 'kimi', path: '.kimi/skills', enabled: false },
+          { name: 'kimi', path: '.kimi-code/skills', enabled: false },
           { name: 'acp', path: customSkillsDir, enabled: true },
         ],
       }),
@@ -1431,7 +1433,7 @@ describe('GET /api/capabilities (Fastify)', () => {
         claude: { enabled: true, path: '.claude/skills' },
         codex: { enabled: false, path: '.codex/skills' },
         gemini: { enabled: false, path: '.gemini/skills' },
-        kimi: { enabled: false, path: '.kimi/skills' },
+        kimi: { enabled: false, path: '.kimi-code/skills' },
       },
       customPaths: [],
     });
@@ -1861,7 +1863,7 @@ describe('GET /api/capabilities (Fastify)', () => {
     }
   });
 
-  it('uses selected project plugin manifests for plugin-owned skill pruning', async () => {
+  it('does not use project-local manifests to prune installed plugin skills', async () => {
     const Fastify = (await import('fastify')).default;
     const { capabilitiesRoutes } = await import('../dist/routes/capabilities.js');
 
@@ -1920,7 +1922,7 @@ describe('GET /api/capabilities (Fastify)', () => {
       assert.ok(preserved, 'project-local declared plugin-owned skill should survive pruning');
       assert.equal(preserved.pluginId, pluginId);
       const stale = config?.capabilities.find((item) => item.id === 'old-project-skill');
-      assert.equal(stale, undefined, 'project-local undeclared plugin-owned skill should still be pruned');
+      assert.equal(stale?.pluginId, pluginId, 'only the installed plugin lifecycle may prune its entries');
       const body = res.json();
       assert.equal(
         body.skillHealth?.registrationConsistent,
@@ -2127,7 +2129,7 @@ describe('GET /api/capabilities (Fastify)', () => {
         claude: { enabled: true, path: '.claude/skills' },
         codex: { enabled: true, path: '.codex/skills' },
         gemini: { enabled: true, path: '.gemini/skills' },
-        kimi: { enabled: true, path: '.kimi/skills' },
+        kimi: { enabled: true, path: '.kimi-code/skills' },
       },
       customPaths: [{ alias: 'acp-client', path: '.acp/skills' }],
     });
@@ -2167,7 +2169,7 @@ describe('GET /api/capabilities (Fastify)', () => {
     }
   });
 
-  it('prunes plugin-owned skills with no manifest and no filesystem backing', async () => {
+  it('preserves plugin-owned entries when the source-tree scanner has no manifest', async () => {
     const Fastify = (await import('fastify')).default;
     const { capabilitiesRoutes } = await import('../dist/routes/capabilities.js');
 
@@ -2200,156 +2202,8 @@ describe('GET /api/capabilities (Fastify)', () => {
       const config = await readCapabilitiesConfig(projectDir);
       assert.equal(
         config?.capabilities.some((item) => item.id === 'orphan-plugin-skill'),
-        false,
-        'plugin-owned skill without manifest or filesystem backing should be pruned',
-      );
-    } finally {
-      await app.close();
-      await rm(projectDir, { recursive: true, force: true });
-    }
-  });
-
-  it('prunes plugin-owned skills no longer declared by the canonical plugin manifest', async () => {
-    const Fastify = (await import('fastify')).default;
-    const { capabilitiesRoutes } = await import('../dist/routes/capabilities.js');
-
-    const pluginId = `cap-prune-${Date.now()}`;
-    const repoRoot = findRepoRoot();
-    const pluginDir = join(repoRoot, 'packages', 'api', 'src', 'plugins', pluginId);
-    await mkdir(join(pluginDir, 'skills', 'current'), { recursive: true });
-    await writeFile(
-      join(pluginDir, 'plugin.yaml'),
-      [
-        `id: ${pluginId}`,
-        'name: Capability Prune Test',
-        'version: "1.0.0"',
-        'resources:',
-        '  - type: skill',
-        '    path: skills/current',
-      ].join('\n'),
-    );
-
-    const projectDir = await makeTmpDir('plugin-skill-canonical-root');
-    await mkdir(join(projectDir, '.claude', 'skills', 'old'), { recursive: true });
-    await writeFile(join(projectDir, '.claude', 'skills', 'old', 'SKILL.md'), '# stale mounted plugin skill\n');
-    const currentSkill = {
-      id: 'current',
-      type: 'skill',
-      enabled: true,
-      source: 'cat-cafe',
-      pluginId,
-    };
-    const staleSkill = {
-      id: 'old',
-      type: 'skill',
-      enabled: true,
-      source: 'cat-cafe',
-      pluginId,
-    };
-    await writeCapabilitiesConfig(projectDir, {
-      version: 1,
-      capabilities: [currentSkill, staleSkill],
-    });
-
-    const app = Fastify();
-    await app.register(capabilitiesRoutes);
-    await app.ready();
-
-    try {
-      const res = await app.inject({
-        method: 'GET',
-        url: `/api/capabilities?projectPath=${encodeURIComponent(projectDir)}`,
-        headers: AUTH_HEADERS,
-      });
-
-      assert.equal(res.statusCode, 200, res.payload);
-      const config = await readCapabilitiesConfig(projectDir);
-      const preserved = config?.capabilities.find((item) => item.id === currentSkill.id);
-      assert.ok(preserved, 'declared plugin-owned skill should survive pruning');
-      assert.equal(preserved.pluginId, pluginId);
-      const stale = config?.capabilities.find((item) => item.id === staleSkill.id);
-      assert.equal(stale, undefined, 'removed plugin-owned skill should be pruned even when plugin dir exists');
-    } finally {
-      await app.close();
-      await rm(projectDir, { recursive: true, force: true });
-      await rm(pluginDir, { recursive: true, force: true });
-    }
-  });
-
-  it('continues plugin-owned skill pruning when one selected-project plugin manifest is invalid', async () => {
-    const Fastify = (await import('fastify')).default;
-    const { capabilitiesRoutes } = await import('../dist/routes/capabilities.js');
-
-    const pluginId = `valid-prune-${Date.now()}`;
-    const projectDir = await makeTmpDir('plugin-skill-invalid-manifest');
-    const validPluginDir = join(projectDir, 'plugins', pluginId);
-    const invalidPluginDir = join(projectDir, 'plugins', 'bad-plugin');
-    await mkdir(join(validPluginDir, 'skills', 'current'), { recursive: true });
-    await writeFile(
-      join(validPluginDir, 'plugin.yaml'),
-      [
-        `id: ${pluginId}`,
-        'name: Valid Prune Plugin',
-        'version: "1.0.0"',
-        'resources:',
-        '  - type: skill',
-        '    path: skills/current',
-      ].join('\n'),
-    );
-    await mkdir(invalidPluginDir, { recursive: true });
-    await writeFile(
-      join(invalidPluginDir, 'plugin.yaml'),
-      [
-        'id: bad-plugin',
-        'name: Bad Plugin',
-        'version: "1.0.0"',
-        'resources:',
-        '  - type: skill',
-        '    path: ../escape',
-      ].join('\n'),
-    );
-
-    await writeCapabilitiesConfig(projectDir, {
-      version: 1,
-      capabilities: [
-        {
-          id: 'current',
-          type: 'skill',
-          enabled: true,
-          source: 'cat-cafe',
-          pluginId,
-        },
-        {
-          id: 'old',
-          type: 'skill',
-          enabled: true,
-          source: 'cat-cafe',
-          pluginId,
-        },
-      ],
-    });
-
-    const app = Fastify();
-    await app.register(capabilitiesRoutes);
-    await app.ready();
-
-    try {
-      const res = await app.inject({
-        method: 'GET',
-        url: `/api/capabilities?projectPath=${encodeURIComponent(projectDir)}`,
-        headers: AUTH_HEADERS,
-      });
-
-      assert.equal(res.statusCode, 200, res.payload);
-      const config = await readCapabilitiesConfig(projectDir);
-      assert.ok(
-        config?.capabilities.find((item) => item.id === 'current'),
-        'valid plugin skill should survive',
-      );
-      assert.equal(
-        config?.capabilities.some((item) => item.id === 'old'),
-        false,
-        'invalid sibling plugin manifest should not disable pruning for valid plugin skills',
+        true,
+        'missing source-tree files do not prove an installed plugin was uninstalled',
       );
     } finally {
       await app.close();
@@ -2639,7 +2493,7 @@ describe('GET /api/capabilities (Fastify)', () => {
     }
   });
 
-  it('extracts skill metadata from project-level .kimi/skills SKILL.md', async () => {
+  it('extracts skill metadata from project-level .kimi-code/skills SKILL.md', async () => {
     const Fastify = (await import('fastify')).default;
     const { capabilitiesRoutes } = await import('../dist/routes/capabilities.js');
 
@@ -2648,7 +2502,7 @@ describe('GET /api/capabilities (Fastify)', () => {
     await app.ready();
 
     const projectDir = join('/tmp', `cap-kimi-project-meta-${Date.now()}`);
-    const kimiSkillsDir = join(projectDir, '.kimi', 'skills');
+    const kimiSkillsDir = join(projectDir, '.kimi-code', 'skills');
     await mkdir(join(kimiSkillsDir, 'test-skill'), { recursive: true });
 
     // Write SKILL.md with frontmatter containing description and triggers
@@ -2684,12 +2538,12 @@ describe('GET /api/capabilities (Fastify)', () => {
       assert.equal(
         skillItem.description,
         'Test skill for project-level Kimi metadata extraction',
-        'Should extract description from project .kimi/skills SKILL.md',
+        'Should extract description from project .kimi-code/skills SKILL.md',
       );
       assert.deepEqual(
         skillItem.triggers,
         ['test-trigger', 'kimi-test'],
-        'Should extract triggers from project .kimi/skills SKILL.md',
+        'Should extract triggers from project .kimi-code/skills SKILL.md',
       );
     } finally {
       await rm(projectDir, { recursive: true, force: true });
@@ -2969,7 +2823,7 @@ describe('PATCH /api/capabilities write auth (Fastify)', () => {
       const res = await patchSkillCapability(app, projectDir, skillId, true, 'project');
 
       assert.equal(res.statusCode, 200, res.payload);
-      for (const provider of ['.claude', '.codex', '.gemini', '.kimi']) {
+      for (const provider of ['.claude', '.codex', '.gemini', '.kimi-code']) {
         const linkPath = join(projectDir, provider, 'skills', skillId);
         const stat = await lstat(linkPath);
         assert.equal(stat.isSymbolicLink(), true, `${provider} skill path should be a symlink`);
@@ -3122,7 +2976,7 @@ describe('PATCH /api/capabilities write auth (Fastify)', () => {
       assert.equal(skill?.globalEnabled, false, 'project enable must NOT change globalEnabled');
       assert.deepEqual(skill?.mountPaths, ['claude', 'codex', 'gemini', 'kimi']);
       // Non-conflicting providers ARE mounted
-      for (const provider of ['.claude', '.gemini', '.kimi']) {
+      for (const provider of ['.claude', '.gemini', '.kimi-code']) {
         const linkPath = join(projectDir, provider, 'skills', skillId);
         assert.equal(
           (await lstat(linkPath)).isSymbolicLink(),
@@ -3235,7 +3089,7 @@ describe('PATCH /api/capabilities write auth (Fastify)', () => {
       // siblingSkill must remain disabled — must NOT have symlinks
       const sibling = config?.capabilities.find((c) => c.id === siblingSkill);
       assert.deepEqual(sibling?.mountPaths, [], 'disabled sibling must keep empty mountPaths');
-      for (const mp of ['.claude', '.codex', '.gemini', '.kimi']) {
+      for (const mp of ['.claude', '.codex', '.gemini', '.kimi-code']) {
         const linkPath = join(projectDir, mp, 'skills', siblingSkill);
         assert.equal(existsSync(linkPath), false, `${mp} symlink for disabled sibling must not exist`);
       }
@@ -3300,7 +3154,7 @@ describe('PATCH /api/capabilities write auth (Fastify)', () => {
 
       // No symlinks for either skill
       for (const id of skills) {
-        for (const mp of ['.claude', '.codex', '.gemini', '.kimi']) {
+        for (const mp of ['.claude', '.codex', '.gemini', '.kimi-code']) {
           const linkPath = join(projectDir, mp, 'skills', id);
           assert.equal(existsSync(linkPath), false, `${mp}/${id} symlink must not exist`);
         }
@@ -3685,7 +3539,7 @@ describe('PATCH /api/capabilities write auth (Fastify)', () => {
         { name: 'claude', path: '.claude/skills', enabled: true },
         { name: 'codex', path: '.codex/skills', enabled: true },
         { name: 'gemini', path: '.gemini/skills', enabled: false },
-        { name: 'kimi', path: '.kimi/skills', enabled: false },
+        { name: 'kimi', path: '.kimi-code/skills', enabled: false },
       ],
     });
     const app = await buildSessionAppWithProjectRoot(mainRoot);
@@ -3749,7 +3603,7 @@ describe('PATCH /api/capabilities write auth (Fastify)', () => {
         { name: 'claude', path: '.claude/skills', enabled: true },
         { name: 'codex', path: '.codex/skills', enabled: true },
         { name: 'gemini', path: '.gemini/skills', enabled: false },
-        { name: 'kimi', path: '.kimi/skills', enabled: false },
+        { name: 'kimi', path: '.kimi-code/skills', enabled: false },
       ],
     });
     const app = await buildSessionAppWithProjectRoot(mainRoot);
@@ -4114,7 +3968,7 @@ describe('PATCH /api/capabilities write auth (Fastify)', () => {
         claude: { enabled: false, path: '.claude/skills' },
         codex: { enabled: false, path: '.codex/skills' },
         gemini: { enabled: false, path: '.gemini/skills' },
-        kimi: { enabled: false, path: '.kimi/skills' },
+        kimi: { enabled: false, path: '.kimi-code/skills' },
       },
       customPaths: [{ alias: 'acp', path: customSkillsDir }],
     });
@@ -4181,7 +4035,7 @@ describe('PATCH /api/capabilities write auth (Fastify)', () => {
         { name: 'claude', path: '.claude/skills', enabled: true },
         { name: 'codex', path: '.codex/skills', enabled: true },
         { name: 'gemini', path: '.gemini/skills', enabled: false },
-        { name: 'kimi', path: '.kimi/skills', enabled: false },
+        { name: 'kimi', path: '.kimi-code/skills', enabled: false },
       ],
     });
     const app = await buildSessionApp();
@@ -4235,7 +4089,7 @@ describe('PATCH /api/capabilities write auth (Fastify)', () => {
         { name: 'claude', path: '.claude/skills', enabled: true },
         { name: 'codex', path: '.codex/skills', enabled: false },
         { name: 'gemini', path: '.gemini/skills', enabled: false },
-        { name: 'kimi', path: '.kimi/skills', enabled: false },
+        { name: 'kimi', path: '.kimi-code/skills', enabled: false },
       ],
     });
 
@@ -4494,7 +4348,7 @@ describe('PATCH /api/capabilities write auth (Fastify)', () => {
         claude: { enabled: true, path: '.claude/skills' },
         codex: { enabled: false, path: '.codex/skills' },
         gemini: { enabled: false, path: '.gemini/skills' },
-        kimi: { enabled: false, path: '.kimi/skills' },
+        kimi: { enabled: false, path: '.kimi-code/skills' },
       },
       customPaths: [],
     });
@@ -4683,7 +4537,7 @@ describe('PATCH /api/capabilities write auth (Fastify)', () => {
       );
       for (const provider of ['claude', 'codex', 'gemini', 'kimi']) {
         await assert.rejects(
-          () => lstat(join(projectDir, `.${provider}/skills/debugging`)),
+          () => lstat(join(projectDir, `${providerDirectory(provider)}/skills/debugging`)),
           /ENOENT/,
           `${provider} mount should be rolled back`,
         );

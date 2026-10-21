@@ -29,6 +29,22 @@ describe('F155 guide registry loader target validation', async () => {
     }
   });
 
+  test('first-run entry explains members and accounts at the shared settings anchor without requiring pins', () => {
+    const flow = loadGuideFlow('first-run-entry');
+    assert.equal(flow.nonBlocking, true);
+    assert.deepEqual(
+      flow.steps.map((step) => step.target),
+      ['hub.trigger'],
+    );
+    // #1466 comment 6094825401: explain the real entry with F155 while leaving
+    // pin preference independent. Both shells render hub.trigger; rail.* does
+    // not exist in the current main shell and fails for an explicitly empty pin list.
+    assert.equal(flow.steps[0].advance, 'next');
+    assert.match(flow.steps[0].tips, /成员/);
+    assert.match(flow.steps[0].tips, /密钥|账号/);
+    assert.equal(loadGuideFlow('add-member').nonBlocking, undefined, 'existing guides retain their blocking behavior');
+  });
+
   test('loaded add-member flow goes straight from add-member CTA into the member editor', () => {
     const flow = loadGuideFlow('add-member');
     const createIndex = flow.steps.findIndex((step) => step.id === 'click-add-member');

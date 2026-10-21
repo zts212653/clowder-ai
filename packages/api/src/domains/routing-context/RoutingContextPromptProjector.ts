@@ -4,6 +4,7 @@ import {
   type RoutingSubjectRefV1,
   routingContextReadModelV1Schema,
 } from '@cat-cafe/shared';
+import { getCoCreatorDisplay } from '../../config/co-creator-display.js';
 import { CAPABILITY_PROFILE_INVALID_REASON } from './CapabilityProfileRevisionSource.js';
 import type { EngagementPolicyReader } from './ScarceSeatNotificationPolicy.js';
 
@@ -172,7 +173,7 @@ export class RoutingContextPromptProjector {
             scarceSeats,
             scarceSeatColdStartObservation: {
               catId: 'fable-5',
-              note: '长线程冷启动约占周额度 2%（operator 10-06 观测）',
+              note: `长线程冷启动约占周额度 2%（${getCoCreatorDisplay().role} 10-06 观测）`,
               sourceRef: 'thread:thread_msl9i0iius52mpkh#0001791331785089-000433-e8ec2e5b',
             },
           }

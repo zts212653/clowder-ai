@@ -14,7 +14,8 @@ const TSX_LOADER = createRequire(import.meta.url).resolve('tsx');
 async function freeTuple() {
   const servers = [];
   try {
-    for (let index = 0; index < 5; index += 1) {
+    // C1 named Alpha has frontend/api/preview/redis; its Service role is retired.
+    for (let index = 0; index < 4; index += 1) {
       const server = createServer();
       await new Promise((resolve, reject) => {
         server.once('error', reject);

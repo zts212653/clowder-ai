@@ -13,12 +13,14 @@ import {
   requestGenerationObservedEventSchema,
   requestGenerationTerminalEventSchema,
 } from '@cat-cafe/shared';
-import { CURRENT_RELATIONSHIP_PROFILE_URI, renderUserCapsuleSection } from '@cat-cafe/shared/profile-contract';
-import type { FileProfileRepository } from '../../profile/ProfileRepository.js';
 import type { TranscriptSessionInfo, TranscriptWriter } from '../../session/TranscriptWriter.js';
-import { encodeProfileSourceRef } from '../../session/transcript-index/request-generation-source-policy.js';
 import type { ISessionChainStore } from '../../stores/ports/SessionChainStore.js';
 import type { PreparedProviderRequestV1, ProviderRequestGenerationCommitV1 } from '../../types.js';
+
+import {
+  type CapsuleSourceRepository,
+  requestGenerationCapsuleSourceRefs,
+} from './request-generation-capsule-source.js';
 
 export interface RequestGenerationRecorderSnapshot {
   readonly continuity: RequestGenerationEnvelopeV1['continuity'];
@@ -167,45 +169,6 @@ function persistedRetryBoundary(
   };
 }
 
-type ProfileSourceRepository = Pick<FileProfileRepository, 'readCapsule' | 'scope' | 'readPrimer'>;
-
-async function embeddedCapsuleSourceRef(input: {
-  readonly body: string;
-  readonly userId: string;
-  readonly profileRepository?: ProfileSourceRepository;
-  readonly digest: (value: string) => Promise<string>;
-}): Promise<RequestGenerationSourceRef | undefined> {
-  if (!input.body.includes('## 主人画像')) return undefined;
-  let rendered = '';
-  try {
-    const capsule = input.profileRepository?.readCapsule(input.userId);
-    rendered = capsule ? renderUserCapsuleSection(capsule.content) : '';
-  } catch {
-    rendered = '';
-  }
-  const digest = rendered && input.body.includes(rendered) ? await input.digest(rendered) : 'unresolved';
-  return { owner: 'home_state', ref: encodeProfileSourceRef('capsule', digest) };
-}
-
-async function embeddedPrimerSourceRef(input: {
-  readonly body: string;
-  readonly userId: string;
-  readonly catId: CatId;
-  readonly profileRepository?: ProfileSourceRepository;
-  readonly digest: (value: string) => Promise<string>;
-}): Promise<RequestGenerationSourceRef | undefined> {
-  if (!input.body.includes(CURRENT_RELATIONSHIP_PROFILE_URI)) return undefined;
-  let primer: { content: string } | null = null;
-  try {
-    const scope = input.profileRepository?.scope(input.userId, input.catId);
-    primer = scope && input.profileRepository ? input.profileRepository.readPrimer(scope) : null;
-  } catch {
-    primer = null;
-  }
-  const digest = primer ? await input.digest(primer.content) : 'unresolved';
-  return { owner: 'home_state', ref: encodeProfileSourceRef('primer', digest) };
-}
-
 export function createRequestGenerationRecorder(input: {
   readonly invocationId: string;
   readonly threadId: string;
@@ -215,7 +178,7 @@ export function createRequestGenerationRecorder(input: {
   readonly sessionChainStore: Pick<ISessionChainStore, 'getActive'>;
   /** Scoped one-shot nodes have an explicit owner and never enter the home active index. */
   readonly resolveSession?: () => SessionRecord | null | Promise<SessionRecord | null>;
-  readonly profileRepository?: ProfileSourceRepository;
+  readonly profileRepository?: CapsuleSourceRepository;
   readonly snapshot: () => RequestGenerationRecorderSnapshot;
   readonly now?: () => number;
   readonly createId?: () => string;
@@ -238,21 +201,13 @@ export function createRequestGenerationRecorder(input: {
     return active ? transcriptSession(active) : state.session;
   };
 
-  const profileSourceRefs = async (body: string): Promise<RequestGenerationSourceRef[]> => {
-    const digest = input.transcriptWriter.keyedContentDigest.bind(input.transcriptWriter);
-    return (
-      await Promise.all([
-        embeddedCapsuleSourceRef({ body, userId: input.userId, profileRepository: input.profileRepository, digest }),
-        embeddedPrimerSourceRef({
-          body,
-          userId: input.userId,
-          catId: input.catId,
-          profileRepository: input.profileRepository,
-          digest,
-        }),
-      ])
-    ).filter((sourceRef): sourceRef is RequestGenerationSourceRef => Boolean(sourceRef));
-  };
+  const profileSourceRefs = (body: string) =>
+    requestGenerationCapsuleSourceRefs({
+      body,
+      userId: input.userId,
+      profileRepository: input.profileRepository,
+      digest: input.transcriptWriter.keyedContentDigest.bind(input.transcriptWriter),
+    });
 
   const persistedNativeChannels = async (
     prepared: PreparedProviderRequestV1,
@@ -284,7 +239,13 @@ export function createRequestGenerationRecorder(input: {
       const requestGenerationId = (input.createId ?? randomUUID)();
       const digest = input.transcriptWriter.keyedContentDigest.bind(input.transcriptWriter);
       const { channel: messageChannel, messageDigest } = await persistedMessageChannel({
-        message: prepared.message,
+        message: {
+          ...prepared.message,
+          sourceRefs: [
+            ...(prepared.message.sourceRefs ?? snapshot.messageSourceRefs),
+            ...('body' in prepared.message ? await profileSourceRefs(prepared.message.body) : []),
+          ],
+        },
         fallbackSourceRefs: snapshot.messageSourceRefs,
         requestGenerationId,
         digest,

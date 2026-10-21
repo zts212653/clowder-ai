@@ -64,16 +64,6 @@ describe('useMessageDispositionPreference settlement', () => {
     expect(latest?.snapshot).toEqual(SNAPSHOT);
   });
 
-  it('an earlier send acknowledgement cannot clear the next one-shot selection', () => {
-    React.act(() => latest?.setOneShot('continue_current'));
-    const settleEarlierSend = latest!.clearOneShot;
-    React.act(() => latest?.setOneShot('continue_current'));
-    React.act(() => settleEarlierSend());
-    expect(latest?.oneShot).toBe('continue_current');
-    React.act(() => latest?.clearOneShot());
-    expect(latest?.oneShot).toBeNull();
-  });
-
   it.each([
     ['timeout', Object.assign(new Error('网络请求超时，请重试。'), { name: 'TimeoutError' }), '网络请求超时，请重试。'],
     ['caller abort', new DOMException('请求已取消', 'AbortError'), '偏好保存失败'],

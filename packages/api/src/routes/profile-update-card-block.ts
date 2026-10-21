@@ -7,15 +7,20 @@
  */
 
 import type { ProfileUpdateProposal, RichCardBlock } from '@cat-cafe/shared';
+import { getCoCreatorDisplay } from '../config/co-creator-display.js';
 
-const SIGNAL_KIND_LABEL: Record<ProfileUpdateProposal['signalProvenance']['kind'], string> = {
-  'cvo-instructed': 'cvo-instructed（co-creator指示）',
-  'cat-declared': 'cat-declared（猫主动声明）',
-  'magic-word': 'magic-word（Magic Word 触发）',
-  'message-coordinate': 'message-coordinate（消息坐标锚定）',
-  'sign-off': 'sign-off（co-creator签字/驳回）',
-  reaction: 'reaction（co-creator反馈/表情）',
-};
+function signalKindLabel(kind: ProfileUpdateProposal['signalProvenance']['kind']): string {
+  const nickname = getCoCreatorDisplay().nickname;
+  const labels: Record<ProfileUpdateProposal['signalProvenance']['kind'], string> = {
+    'cvo-instructed': `cvo-instructed（${nickname}指示）`,
+    'cat-declared': 'cat-declared（猫主动声明）',
+    'magic-word': 'magic-word（Magic Word 触发）',
+    'message-coordinate': 'message-coordinate（消息坐标锚定）',
+    'sign-off': `sign-off（${nickname}签字/驳回）`,
+    reaction: `reaction（${nickname}反馈/表情）`,
+  };
+  return labels[kind];
+}
 
 export function buildProfileUpdateCardBlock(proposal: ProfileUpdateProposal): RichCardBlock {
   return {
@@ -30,7 +35,7 @@ export function buildProfileUpdateCardBlock(proposal: ProfileUpdateProposal): Ri
     tone: 'info',
     fields: [
       { label: '目标', value: proposal.targetPath },
-      { label: '来源', value: SIGNAL_KIND_LABEL[proposal.signalProvenance.kind] },
+      { label: '来源', value: signalKindLabel(proposal.signalProvenance.kind) },
     ],
     actions: [
       { label: '批准并写入', action: 'profile-update:approve', payload: { proposalId: proposal.proposalId } },

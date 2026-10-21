@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -180,34 +181,42 @@ test('low confidence speaker and quoted instructions remain untrusted transcript
   assert.equal(received[0].context.content.includes('<|system|>'), false);
 });
 
-test('reads the actual F195 TranscriptArtifactStore bytes after a simulated listener loss', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'f317-meeting-producer-'));
-  roots.push(root);
-  const script = [
-    'import sys',
-    'sys.path.insert(0, "scripts/meeting-copilot")',
-    'from transcript_store import TranscriptArtifactStore',
-    'store = TranscriptArtifactStore(sys.argv[1], "thread-1", "mtg-1", "Meeting App", [])',
-    'for n in range(1, 4):',
-    '    store.append_line({"ts": 1790000000+n, "elapsed_s": n, "chunk_num": n, "text": f"utterance {n}", "speaker_label": "Speaker 1", "speaker_confidence": 0.8, "speaker_identity_source": "session_cluster", "input_id": "meeting-app", "input_source": "app"})',
-  ].join('\n');
-  execFileSync('python3', ['-c', script, root], { cwd: join(import.meta.dirname, '../../..') });
-  const received: F317MeetingContext[] = [];
-  const subscription = source(root).bind(
-    { ...binding, afterCursor: 1 },
-    {
-      onContext: (item) => received.push(item),
-    },
-  );
-  assert.deepEqual(await subscription.refresh(), { state: 'ready', cursor: 3, delivered: 2 });
-  assert.deepEqual(
-    received.map((item) => item.sourceRef),
-    [
-      'f195-transcript:thread-1:mtg-1:transcript-mtg-1.lines.jsonl:2:1',
-      'f195-transcript:thread-1:mtg-1:transcript-mtg-1.lines.jsonl:3:1',
-    ],
-  );
-});
+test(
+  'reads the actual F195 TranscriptArtifactStore bytes after a simulated listener loss',
+  {
+    skip:
+      !existsSync(new URL('../../../scripts/meeting-copilot/transcript_store.py', import.meta.url)) &&
+      'Optional F195 Python capture producer is not shipped in this checkout',
+  },
+  async () => {
+    const root = await mkdtemp(join(tmpdir(), 'f317-meeting-producer-'));
+    roots.push(root);
+    const script = [
+      'import sys',
+      'sys.path.insert(0, "scripts/meeting-copilot")',
+      'from transcript_store import TranscriptArtifactStore',
+      'store = TranscriptArtifactStore(sys.argv[1], "thread-1", "mtg-1", "Meeting App", [])',
+      'for n in range(1, 4):',
+      '    store.append_line({"ts": 1790000000+n, "elapsed_s": n, "chunk_num": n, "text": f"utterance {n}", "speaker_label": "Speaker 1", "speaker_confidence": 0.8, "speaker_identity_source": "session_cluster", "input_id": "meeting-app", "input_source": "app"})',
+    ].join('\n');
+    execFileSync('python3', ['-c', script, root], { cwd: join(import.meta.dirname, '../../..') });
+    const received: F317MeetingContext[] = [];
+    const subscription = source(root).bind(
+      { ...binding, afterCursor: 1 },
+      {
+        onContext: (item) => received.push(item),
+      },
+    );
+    assert.deepEqual(await subscription.refresh(), { state: 'ready', cursor: 3, delivered: 2 });
+    assert.deepEqual(
+      received.map((item) => item.sourceRef),
+      [
+        'f195-transcript:thread-1:mtg-1:transcript-mtg-1.lines.jsonl:2:1',
+        'f195-transcript:thread-1:mtg-1:transcript-mtg-1.lines.jsonl:3:1',
+      ],
+    );
+  },
+);
 
 test('ASR error records advance the durable cursor without becoming meeting context', async () => {
   const error = line(1);

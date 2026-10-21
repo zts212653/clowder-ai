@@ -14,6 +14,7 @@ import {
   emptyPluginInventorySnapshot,
   parsePluginInventorySnapshot,
 } from './snapshot.js';
+import { serializeInventoryPackage } from './stored-manifest.js';
 import type { PluginGrantRecord, PluginInstanceRecord, PluginInventorySnapshot, PluginPackageRecord } from './types.js';
 import { PluginInventoryError } from './types.js';
 
@@ -207,10 +208,14 @@ export class FilePluginInventoryStore implements PluginInventoryStore {
       const next = candidate.snapshot();
       await this.fileOps.mkdir(dirname(this.path), { recursive: true });
       const temporaryPath = `${this.path}.tmp-${process.pid}-${randomUUID()}`;
-      await this.fileOps.writeFile(temporaryPath, `${JSON.stringify(next, null, 2)}\n`, {
-        encoding: 'utf8',
-        mode: 0o600,
-      });
+      await this.fileOps.writeFile(
+        temporaryPath,
+        `${JSON.stringify({ ...next, packages: next.packages.map(serializeInventoryPackage) }, null, 2)}\n`,
+        {
+          encoding: 'utf8',
+          mode: 0o600,
+        },
+      );
       try {
         await this.fileOps.rename(temporaryPath, this.path);
       } catch (error) {

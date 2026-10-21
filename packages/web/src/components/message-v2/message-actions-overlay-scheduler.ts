@@ -1,3 +1,5 @@
+import { readActionPort } from './message-actions-overlay-geometry';
+
 export interface ActionPlaneContext {
   epoch: number;
   column: DOMRect;
@@ -190,22 +192,10 @@ class ActionPlaneScheduler {
   private flush = () => {
     this.frame = null;
     if (this.disposed) return;
-    const rect = this.port?.getBoundingClientRect();
     const context: ActionPlaneContext = {
       epoch: this.epoch,
       column: this.column.getBoundingClientRect(),
-      port: {
-        top: Math.max(0, (rect?.top ?? 0) + (this.port?.clientTop ?? 0)),
-        bottom: Math.min(
-          window.innerHeight,
-          rect ? rect.top + (this.port?.clientTop ?? 0) + (this.port?.clientHeight || rect.height) : window.innerHeight,
-        ),
-        left: Math.max(0, (rect?.left ?? 0) + (this.port?.clientLeft ?? 0)),
-        right: Math.min(
-          window.innerWidth,
-          rect ? rect.left + (this.port?.clientLeft ?? 0) + (this.port?.clientWidth || rect.width) : window.innerWidth,
-        ),
-      },
+      port: readActionPort(this.port),
       compact: Boolean(this.media?.matches),
       touch: Boolean(this.coarse?.matches),
     };

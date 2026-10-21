@@ -41,6 +41,15 @@ describe('mixed-language message relevance', () => {
     for (const text of ['bababa 起名 起名', '猫🐾\0名', 'absent', '', 'a'.repeat(2000)]) {
       assert.equal(count(text), [...new Set(words)].filter((word) => text.includes(word)).length);
     }
+    for (let size = 0; size <= 6; size++) {
+      const subset = words.slice(0, size);
+      for (const text of ['bababa 起名', '猫🐾\0名', 'absent', '']) {
+        assert.equal(
+          literalTermCoverage(subset)(text),
+          [...new Set(subset)].filter((word) => text.includes(word)).length,
+        );
+      }
+    }
     const all = Array.from({ length: 1000 }, (_, i) => String.fromCodePoint(0x4e00 + i));
     assert.equal(literalTermCoverage(all)(all.join('、')), 1000, 'no query terms are discarded');
   });
@@ -81,6 +90,39 @@ describe('mixed-language message relevance', () => {
     assert.equal(result.passages.length, 2, 'overlapping FTS and literal hits must not consume the pool twice');
   });
 
+  it('does not privilege spaced CJK query echoes over a concise unspaced original', async () => {
+    add('a-noise', 'echo', '检索验收的 query 是“归属 称谓”，保持原参数和来源。'.repeat(30));
+    add('z-source', 'source', '请按归属称谓来选择合适的表达。');
+    const lexical = await store.searchMessagePassages('归属 称谓', { ...options, candidateLimit: 1 });
+    assert.equal(lexical.passages[0]?.messageId, 'source');
+
+    const db = store.getDb();
+    sqliteVec.load(db);
+    ensureVectorTable(db, 3);
+    ensurePassageVectorTable(db, 3);
+    vectors = new PassageVectorStore(db, 3);
+    store.setEmbedDeps({
+      mode: 'on',
+      vectorStore: new VectorStore(db, 3),
+      passageVectorStore: vectors,
+      embedding: {
+        isReady: () => true,
+        reprobeIfNeeded: async () => {},
+        embed: async () => [new Float32Array([1, 0, 0])],
+        getModelInfo: () => ({ modelId: 'fixture', modelRev: '1', dim: 3 }),
+      },
+    });
+    vectors.upsert(passageVectorKey('thread-a-noise', 'msg-echo'), new Float32Array([1, 0, 0]));
+    vectors.upsert(passageVectorKey('thread-z-source', 'msg-source'), new Float32Array([0, 1, 0]));
+    const hybrid = await store.searchMessagePassages('归属 称谓', {
+      ...options,
+      mode: 'hybrid',
+      candidateLimit: 1,
+    });
+    assert.equal(hybrid.passages[0]?.messageId, 'source');
+    assert.equal(hybrid.meta.degraded, false);
+  });
+
   it('keeps exact literal evidence through hybrid fusion even when NN has a closer unrelated row', async () => {
     const db = store.getDb();
     sqliteVec.load(db);
@@ -107,6 +149,38 @@ describe('mixed-language message relevance', () => {
     assert.equal(result.passages[0]?.messageId, 'source');
     assert.equal(result.meta.degraded, false);
     assert.equal(result.meta.candidateLimit, 1);
+  });
+
+  it('keeps complete non-adjacent query evidence ahead of unrelated semantic neighbors', async () => {
+    const db = store.getDb();
+    sqliteVec.load(db);
+    ensureVectorTable(db, 3);
+    ensurePassageVectorTable(db, 3);
+    vectors = new PassageVectorStore(db, 3);
+    store.setEmbedDeps({
+      mode: 'on',
+      vectorStore: new VectorStore(db, 3),
+      passageVectorStore: vectors,
+      embedding: {
+        isReady: () => true,
+        reprobeIfNeeded: async () => {},
+        embed: async () => [new Float32Array([1, 0, 0])],
+        getModelInfo: () => ({ modelId: 'fixture', modelRev: '1', dim: 3 }),
+      },
+    });
+    add('a-noise', 'near', 'hello');
+    add('a-noise', 'partial', '只有归属这一半的记录');
+    add('z-source', 'source', '称谓应该按自己的归属与关系选择。');
+    vectors.upsert(passageVectorKey('thread-a-noise', 'msg-near'), new Float32Array([1, 0, 0]));
+    vectors.upsert(passageVectorKey('thread-z-source', 'msg-source'), new Float32Array([0, 1, 0]));
+    const result = await store.searchMessagePassages('归属 称谓', { ...options, mode: 'hybrid', candidateLimit: 1 });
+    assert.equal(result.passages[0]?.messageId, 'source');
+    assert.equal(result.meta.degraded, false);
+    const expanded = await store.searchMessagePassages('归属 称谓', { ...options, mode: 'hybrid', candidateLimit: 3 });
+    assert.ok(
+      expanded.passages.some((p) => p.messageId === 'near'),
+      'semantic discovery retains remaining pool budget',
+    );
   });
 
   it('retains chronological ordering and exact-source/date admission independently of relevance', async () => {

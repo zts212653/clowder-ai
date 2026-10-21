@@ -2,7 +2,7 @@ import '../helpers/setup-cat-registry.js';
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import Fastify from 'fastify';
-import { proposedReviewAction } from './helpers.js';
+import { proposedTaskAction } from './helpers.js';
 
 // ── R3 P1-1: Retry recovery — staged proposal retries commitEnvelope ──────
 // First request: card persisted, commitEnvelope fails → proposal staged.
@@ -53,6 +53,7 @@ describe('P1-1 R3: retry recovery — commitEnvelope failure, then successful re
 
     const app = Fastify();
     await app.register(callbacksRoutes, {
+      actionSuccessorAdmissionService: { async preflightStructuredTransferStanding() {} },
       registry,
       messageStore,
       threadStore,
@@ -79,7 +80,7 @@ describe('P1-1 R3: retry recovery — commitEnvelope failure, then successful re
       content: '@sonnet\nPlease fix the bug',
       targetCats: ['sonnet'],
       effectClass: 'assign_work',
-      proposedAction: proposedReviewAction(),
+      proposedAction: proposedTaskAction(),
       clientMessageId: 'retry-test-f193',
     };
 

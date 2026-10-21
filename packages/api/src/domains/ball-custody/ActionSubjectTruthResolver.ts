@@ -1,4 +1,3 @@
-import type { ICommunityObjectStore } from '../community/CommunityObjectStore.js';
 import type { ActionSubjectTerminalTruth, ActionSuccessorLeaseStore } from './ActionSuccessorLeaseStore.js';
 import {
   type CanonicalActionTerminalPredicate,
@@ -16,8 +15,6 @@ import {
   bindActionCompletionVerdict,
 } from './action-successor-completion-state-machine.js';
 import { canonicalizeActionSubjectRef } from './action-successor-state-machine.js';
-import { resolveProjectedActionCompletion } from './action-terminal-predicate-truth.js';
-import { type LivePrFreshnessProvider, resolveLivePrFreshnessObservation } from './LivePrFreshnessObservation.js';
 
 // Re-export for backward compatibility — consumers that imported from this
 // module continue to work unchanged.
@@ -25,13 +22,13 @@ export type { ApprovedDelegate, TaskActionSnapshot, TaskActionTruthProvider, Tas
 
 type TerminalResolution = {
   terminal: true;
-  source: 'marker' | 'community_projection' | 'task_store';
+  source: 'marker' | 'task_store';
   truth: ActionSubjectTerminalTruth;
 };
 
 type NonTerminalResolution = {
   terminal: false;
-  source: 'community_projection' | 'task_store' | 'unsupported';
+  source: 'task_store' | 'unsupported';
   state: 'active' | 'unknown';
 };
 
@@ -55,31 +52,6 @@ export type ActionFreshnessResolution =
   | { status: 'mismatch'; reason: string; evidenceRef: string }
   | { status: 'insufficient'; reason: string };
 
-/**
- * Narrow snapshot of the PR tracking task that observed a HEAD SHA. Freshness
- * depends on both the observed revision and the PR lifecycle. A tracking task
- * reaching `done` only completes the wait/poll lifecycle; its exact observed
- * HEAD remains durable truth until the snapshot records PR terminal state.
- *
- * The HEAD is server-observed (GitHub API via CI poll), not a cat claim.
- * Availability tradeoff: if CommunityStore is unavailable and no producer
- * records a later PR transition, this latest durable observation can lag
- * GitHub until the next server observation; this fallback does not widen that
- * pre-existing producer window.
- */
-export interface TrackingFreshnessSnapshot {
-  kind: 'work' | 'pr_tracking' | 'issue_tracking';
-  status: 'todo' | 'doing' | 'blocked' | 'done';
-  headSha: string | null;
-  ciPrState: 'merged' | 'closed' | null;
-  reviewPrState: 'merged' | 'closed' | null;
-  closedAt: number | null;
-}
-
-export interface TrackingFreshnessProvider {
-  getBySubject(subjectKey: string): Promise<TrackingFreshnessSnapshot | null>;
-}
-
 export interface ActionCompletionLeaseContext {
   leaseId: string;
   generation: number;
@@ -99,23 +71,13 @@ function taskEvidenceRef(task: TaskActionSnapshot, state: 'active' | 'done'): st
   return `task:${task.id}:${state}:${task.updatedAt}`;
 }
 
-function durableTrackingHead(snapshot: TrackingFreshnessSnapshot | null): string | null {
-  if (!snapshot) return null;
-  if (snapshot.kind !== 'pr_tracking') return null;
-  if (snapshot.ciPrState || snapshot.reviewPrState || snapshot.closedAt !== null) return null;
-  return snapshot.headSha;
-}
-
 export class ActionSubjectTruthResolver {
   constructor(
     private readonly leaseStore: Pick<
       ActionSuccessorLeaseStore,
       'getSubjectTerminal' | 'markSubjectTerminal' | 'clearSubjectTerminal'
     >,
-    private readonly communityStore: Pick<ICommunityObjectStore, 'get'>,
-    private readonly trackingFreshnessProvider?: TrackingFreshnessProvider,
     private readonly taskActionTruthProvider?: TaskActionTruthProvider,
-    private readonly livePrFreshnessProvider?: LivePrFreshnessProvider,
     private readonly taskApprovedDelegateProvider?: TaskApprovedDelegateProvider,
   ) {}
 
@@ -148,44 +110,8 @@ export class ActionSubjectTruthResolver {
       return { terminal: false, source: 'task_store', state: 'active' };
     }
 
-    if (!subjectRef.startsWith('pr:')) {
-      if (marker) return { terminal: true, source: 'marker', truth: marker };
-      return { terminal: false, source: 'unsupported', state: 'unknown' };
-    }
-
-    const projection = await this.communityStore.get(subjectRef);
-    if (marker && (!projection || projection.updatedAt <= marker.observedAt)) {
-      return { terminal: true, source: 'marker', truth: marker };
-    }
-    if (!projection || projection.type !== 'pr') {
-      return { terminal: false, source: 'community_projection', state: 'active' };
-    }
-
-    const terminalState =
-      projection.state === 'fixed' || projection.state === 'reported'
-        ? 'merged'
-        : projection.state === 'closed'
-          ? 'closed'
-          : projection.state === 'declined'
-            ? 'declined'
-            : null;
-    if (!terminalState) {
-      if (marker) {
-        await this.leaseStore.clearSubjectTerminal(subjectRef, {
-          evidenceRef: `community:${subjectRef}:${projection.state}:${projection.updatedAt}`,
-          now: projection.updatedAt,
-        });
-      }
-      return { terminal: false, source: 'community_projection', state: 'active' };
-    }
-
-    const truth = await this.leaseStore.markSubjectTerminal({
-      subjectRef,
-      state: terminalState,
-      evidenceRef: `community:${subjectRef}:${projection.state}:${projection.updatedAt}`,
-      now: projection.updatedAt,
-    });
-    return { terminal: true, source: 'community_projection', truth };
+    if (marker) return { terminal: true, source: 'marker', truth: marker };
+    return { terminal: false, source: 'unsupported', state: 'unknown' };
   }
 
   async resolveCompletion(
@@ -215,9 +141,10 @@ export class ActionSubjectTruthResolver {
         candidate,
       );
     }
-    const projection = await this.communityStore.get(predicate.subjectRef);
-    const projected = resolveProjectedActionCompletion(predicate, projection, candidate);
-    return bindActionCompletionVerdict(projected, candidate);
+    return bindActionCompletionVerdict(
+      { status: 'insufficient', reason: 'terminal predicate has no Host completion resolver' },
+      candidate,
+    );
   }
 
   async resolveFreshness(predicate: CanonicalActionTerminalPredicate): Promise<ActionFreshnessResolution> {
@@ -257,79 +184,6 @@ export class ActionSubjectTruthResolver {
         ...(approvedDelegates.length > 0 ? { approvedDelegates } : {}),
       };
     }
-    if (capability.freshnessResolver !== 'community_current_head') {
-      throw new Error(`unsupported action freshness resolver: ${capability.freshnessResolver}`);
-    }
-    const projection = await this.communityStore.get(predicate.subjectRef);
-    const projectionIsTerminal =
-      projection?.type === 'pr' &&
-      (projection.state === 'fixed' ||
-        projection.state === 'reported' ||
-        projection.state === 'closed' ||
-        projection.state === 'declined' ||
-        projection.externalReview?.lifecycle === 'terminal');
-    if (projectionIsTerminal) {
-      return {
-        status: 'mismatch',
-        reason: 'PR is already terminal',
-        evidenceRef: `community:${predicate.subjectRef}:${projection.state}:${projection.updatedAt}`,
-      };
-    }
-    const communityHead = projection?.externalReview?.currentHeadSha;
-
-    // Primary source: community projection (ExternalReviewCoordinator → case.head_observed)
-    if (communityHead) {
-      if (communityHead !== predicate.headSha) {
-        return {
-          status: 'mismatch',
-          reason: 'predicate HEAD is not the server-observed current HEAD',
-          evidenceRef: `community:${predicate.subjectRef}:head:${communityHead}`,
-        };
-      }
-      return {
-        status: 'verified',
-        evidenceRef: `community:${predicate.subjectRef}:head:${communityHead}`,
-        freshnessKey: predicate.freshnessKey,
-      };
-    }
-
-    // Fallback: PR tracking task automation state (CI poll → task store headSha).
-    // Bridges the gap where ExternalReviewCoordinator hasn't yet seeded the community
-    // projection but the CI poll has already observed the HEAD from GitHub.
-    if (this.trackingFreshnessProvider) {
-      const trackingHead = durableTrackingHead(await this.trackingFreshnessProvider.getBySubject(predicate.subjectRef));
-      if (trackingHead) {
-        if (trackingHead !== predicate.headSha) {
-          return {
-            status: 'mismatch',
-            reason: 'predicate HEAD is not the tracking-observed current HEAD',
-            evidenceRef: `tracking:${predicate.subjectRef}:head:${trackingHead}`,
-          };
-        }
-        return {
-          status: 'verified',
-          evidenceRef: `tracking:${predicate.subjectRef}:head:${trackingHead}`,
-          freshnessKey: predicate.freshnessKey,
-        };
-      }
-    }
-
-    // Bootstrap only: a fresh server-owned observation is consulted only after
-    // CommunityStore and existing PR tracking have no usable HEAD.
-    const livePr = await resolveLivePrFreshnessObservation(
-      predicate.subjectRef,
-      predicate.headSha,
-      this.livePrFreshnessProvider,
-    );
-    if (livePr) {
-      if (livePr.status !== 'verified') return livePr;
-      return {
-        status: 'verified',
-        evidenceRef: livePr.evidenceRef,
-        freshnessKey: predicate.freshnessKey,
-      };
-    }
-
-    return { status: 'insufficient', reason: 'current HEAD projection unavailable' };
+    return { status: 'insufficient', reason: 'terminal predicate has no Host freshness resolver' };
   }
 }

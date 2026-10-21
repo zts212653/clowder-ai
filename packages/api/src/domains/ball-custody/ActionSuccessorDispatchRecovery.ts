@@ -135,6 +135,12 @@ export class ActionSuccessorDispatchRecovery {
     if (!predicate) return { outcome: 'pending' };
 
     const now = this.now();
+    return this.recoverAuthorized(candidate, now);
+  }
+
+  private async recoverAuthorized(candidate: ActionSuccessorLease, now: number): Promise<DispatchRecoveryResult> {
+    const predicate = candidate.terminalPredicate;
+    if (!predicate) return { outcome: 'pending' };
     if (candidate.dispatchDeliveryReservation) {
       return this.recoverReserved(candidate, now);
     }

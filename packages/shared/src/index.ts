@@ -21,6 +21,7 @@ export * from './chatgpt-cloud-presentation.js';
 // Export shared CLI effort helpers
 export * from './cli-effort.js';
 export * from './cli-tool-label.js';
+export * from './co-creator-display.js';
 export * from './codex-account.js';
 // F291: OAuth Codex Standard/Fast semantic contract
 export * from './codex-speed.js';
@@ -46,6 +47,7 @@ export * from './context-window-catalog.js';
 // F322: shared wire validation for the owner-private conversation presentation preference.
 export * from './conversation-view-preference.js';
 export { CORE_COMMANDS } from './core-commands.js';
+export * from './deployment-defaults.js';
 // F247: one contract for the shared Remote entry and the source-bound Host.
 export * from './dot-mcp.js';
 // Export Eval Hub metric reference normalization (F248 B3)
@@ -65,6 +67,9 @@ export type {
   MessageSearchResponse,
   MessageSearchResult,
 } from './message-search.js';
+// First-party host-tool identities shared by onboarding discovery and catalog repair.
+export * from './native-tool-identities.js';
+export * from './plugin-configuration-required.js';
 // Browser Preview Gateway request identity shared by API and Web.
 export * from './preview-gateway.js';
 export * from './preview-visible-page-admission.js';

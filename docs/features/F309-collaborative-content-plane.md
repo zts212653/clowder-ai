@@ -1,16 +1,16 @@
 ---
 feature_ids: [F309]
-related_features: [F063, F138, F202, F290, F307, F310, F322]
-topics: [collaborative-content, co-editing, change-awareness, selection-anchors, annotations, agent-patch, office, media]
+related_features: [F063, F138, F202, F232, F290, F307, F310, F322]
+topics: [artifacts, collaborative-content, co-editing, change-awareness, selection-anchors, annotations, agent-patch, office, media, html-widget]
 doc_kind: spec
 tips_exempt: "Renewed 2026-10-02 for Studio K1/K2 backend: the new takeover MCP is an authenticated Cat-internal bridge from the Human's already-sent, revision-bound message; the Human action remains the mounted Chat/candidate/receipt journey and teaches itself in context. A generic tip would expose internal sourceMessageId/operationId mechanics before the Sonnet consumer and parent Alpha are accepted. The 2026-09-26 artwork-focus in-canvas rationale remains unchanged."
 design_gate_claim_contracts:
   - docs/design-gate-claims/f309-artwork-review-real-shell.json
 created: 2026-08-27
-description: "让人和猫在异质内容上共同编辑、感知有版本的变化、精确批注并安全审阅 Agent patch，同时让 canonical 内容和版本留在各自 owner。"
+description: "产物协作：让人和猫围绕文档、图片、视频、网页与交互作品共同查看、编辑、批注、迭代版本并审阅修改，感知彼此有版本的变化；内容和版本由各自 owner 管理，Office 插件是其中一种内容能力。"
 description_source: human
-description_author: codex-sol
-description_updated_at: 2026-09-13T20:42:00Z
+description_author: codex61-sol
+description_updated_at: 2026-10-20T11:14:40Z
 mcp_admission_status: accepted
 mcp_admission_ref: "file:docs/features/F309-collaborative-content-plane.md"
 mcp_admission_claims:
@@ -46,7 +46,19 @@ mcp_admission_claims:
     decision: accepted
 ---
 
-# F309: Collaborative Content Plane — 跨媒介内容协作平面
+# F309: 产物协作 — Artifact Collaboration / Collaborative Content Plane
+
+**F309 面向人和猫共同创作的产物：文档、图片、视频、网页、可运行原型及其他交互作品。**
+它要让同一件作品可以被找回、精确指出位置、讨论、修改、比较版本并由有权的人决定采用，
+最终支持人猫共同编辑和变化感知。Office 文档是其中一类产物，Office provider plugin 是接入
+这类内容的一条实现支线；不能用“Office/PPT 插件”概括整个 F309。
+
+这里的交互作品指网页、小工具、可运行原型等内容；审批、投票、选择卡仍是交互记录，
+不会因为出现在聊天中就自动成为可版本化作品。
+
+产品定位澄清来源：You `[thread-id]#private-source-id`
+（2026-10-20：“应该是产物……视频 图片 文档”）。本次修正描述与检索入口；具体能力仍按下列
+阶段和原验收证据交付，不把网页作品版本化或 Office 完整共编记成已经完成。
 
 > **Status**: in-progress / Phase R 历史有界交付保留；Phase U 的 Studio 297 作品体验工作单元已在 #5507/#5521 合入后通过父 Alpha 与原设计负责人实页复看；其余 Phase U、Office/video Admission Gate 与未勾 AC 仍开放
 > **Owner**: 小太阳·Maine Coon (@codex-sol, GPT-5.6 Sol)
@@ -92,7 +104,7 @@ F309 把这条协作关系做成公共 plane，同时守住两条边界：不自
 ## Vision / 终态远景
 
 F309 的终态不是“聊天旁边多几个可看的附件”，也不是把所有媒介塞进一个新的万能编辑器。它要让
-文档、表格、图片、视频、画布等内容都成为人和猫可以**共同看见、共同指向、共同修改、共同裁决**
+文档、表格、图片、视频、画布、网页与交互作品等产物都成为人和猫可以**共同看见、共同指向、共同修改、共同裁决**
 的活内容：
 
 1. **原生地编辑**：用户在内容 owner 提供的真实编辑器里直接编辑，不需要把正文复制回聊天框。
@@ -141,6 +153,16 @@ anchor。结论：F309 不是 F307/F290/F063/F138 的 Phase 或 adapter 子任�
 独立 contract plane。
 
 ## Product and Architecture Boundary
+
+### 产物、目录、宿主与内容实现
+
+| 关注点 | 负责方与本 Feature 的关系 |
+|---|---|
+| 找到产物、列出当前对话或全部作品 | F232 负责目录、筛选与打开投影；内容的稳定身份和版本仍由内容 owner 提供。 |
+| 围绕产物讨论、批注、提修改、审阅和处理版本变化 | F309 提供跨内容类型的协作契约与体验，既包括现有图片/视频审阅、文本修改回流，也包括仍开放的共同编辑目标。 |
+| 正文、媒体字节、真实编辑器与版本写入 | 各内容 owner 与成熟引擎负责。Office 插件只是文档接入支线，视频引擎是视频接入支线，不替代 F309 的产品总定位。 |
+| 页面和作品显示在哪里、怎样返回、操作是否易懂 | F307 承载工作面与恢复，F322 统筹 v2 UI/UX；不另造内容或版本真相。 |
+| 网页与可运行作品持续迭代 | 已有 `html_widget` 展示与产物目录基础；社区 [#1621](https://github.com/zts212653/clowder-ai/issues/1621) 提出的稳定句柄、显式新版、重启读回与旧版回看仍待内容 owner 接入收敛。参见 [F232 OQ-B4](F232-thread-artifacts-panel.md#open-questions)，不因改描述接纳独立 `artifact:` 身份/版本库或扩大分享权限。 |
 
 ### F309 拥有
 

@@ -21,7 +21,7 @@ export interface BrokerSessionRecord {
   readonly phase: BrokerSessionPhase;
   readonly candidate?: CandidateHello;
   readonly grantRevision?: number;
-  readonly effectiveGrants?: readonly Capability[];
+  readonly effectiveGrants?: readonly string[];
   readonly bindingNonce?: string;
   readonly preActiveDeadlineAt: number;
   readonly activeLeaseExpiresAt?: number;
@@ -54,7 +54,7 @@ export interface BrokerCallRecord {
   readonly pluginInstanceId: string;
   readonly packageDigest: string;
   readonly grantRevision: number;
-  readonly method: WireMethodName;
+  readonly method: string;
   readonly settlementKey: string;
   readonly inputDigest: string;
   readonly phase: BrokerCallPhase;

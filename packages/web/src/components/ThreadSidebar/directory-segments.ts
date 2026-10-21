@@ -100,6 +100,10 @@ export function buildBrowseUrl(path?: string): string {
 }
 
 /** Whether a failed browse response should trigger the homedir fallback. */
-export function shouldFallbackToHome(fallbackOnForbidden: boolean, path: string | undefined, status: number): boolean {
-  return fallbackOnForbidden && Boolean(path) && status === 403;
+export function shouldFallbackToHome(
+  fallbackOnUnavailable: boolean,
+  path: string | undefined,
+  status: number,
+): boolean {
+  return fallbackOnUnavailable && Boolean(path) && (status === 403 || status === 404);
 }

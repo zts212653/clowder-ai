@@ -144,6 +144,26 @@ function seedCatalogFromTemplate(projectRoot, templateObj) {
 }
 
 describe('cats routes read runtime catalog', { concurrency: false }, () => {
+  it('CLI login checks require a session before starting any credential-reading process', async (t) => {
+    const projectRoot = createRuntimeCatalogProject(makeCatalog('auth-probe-cat', '登录检测猫'));
+    process.env.CAT_TEMPLATE_PATH = join(projectRoot, 'cat-template.json');
+    const keys = ['HOME', 'USERPROFILE', 'CODEX_HOME', 'CLAUDE_CONFIG_DIR', 'DSH_HOME'];
+    const saved = new Map(keys.map((key) => [key, process.env[key]]));
+    for (const key of keys) process.env[key] = projectRoot;
+    t.after(() => {
+      for (const [key, value] of saved) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
+    });
+    const Fastify = (await import('fastify')).default;
+    const { catsRoutes } = await import('../dist/routes/cats.js');
+    const app = Fastify();
+    t.after(() => app.close());
+    await app.register(catsRoutes);
+    const res = await app.inject({ method: 'GET', url: '/api/cats/native-runtimes' });
+    assert.equal(res.statusCode, 401);
+  });
   beforeEach(() => {
     savedTemplatePath = process.env.CAT_TEMPLATE_PATH;
     savedGlobalRoot = process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT;

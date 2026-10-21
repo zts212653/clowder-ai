@@ -1,8 +1,9 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { basename, resolve } from 'node:path';
+import { deploymentDefaults } from '../../packages/shared/src/deployment-defaults.ts';
 
-const DEFAULT_API_PORT = '3004';
-const DEFAULT_WEB_PORT = '3003';
+const DEFAULT_API_PORT = String(deploymentDefaults.apiPort);
+const DEFAULT_WEB_PORT = String(deploymentDefaults.webPort);
 
 export function pidIsRunning(pid) {
   try {

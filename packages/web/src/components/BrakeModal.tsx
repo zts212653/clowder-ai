@@ -1,30 +1,33 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useCatNameResolver } from '@/hooks/useCatNameResolver';
+import { useCoCreatorDisplay } from '@/hooks/useCoCreatorConfig';
 import { useIMEGuard } from '@/hooks/useIMEGuard';
 import { useTts } from '@/hooks/useTts';
 import { useBrakeStore } from '@/stores/brakeStore';
 import { CatAvatar } from './CatAvatar';
 
 /** Three-cat 撒娇 messages by level */
-const MESSAGES: Record<1 | 2 | 3, { catId: string; text: string }[]> = {
-  1: [
-    { catId: 'opus', text: 'co-creator，你忙很久啦，要不要喝口水呀？喵~' },
-    { catId: 'codex', text: '监测到当前任务已持续较久。建议进行 5min 视疲劳缓解。' },
-    { catId: 'gemini', text: '嘿！你得先站起来伸个懒腰！' },
-  ],
-  2: [
-    { catId: 'opus', text: '宪宪觉得你现在的效率有点下降哦，休息一下下，回来肯定写得更棒！' },
-    { catId: 'codex', text: '逻辑链路已过载。现在强行推进会增加 bug 率。请离线冷却。' },
-    { catId: 'gemini', text: '你的 hyperfocus 模式开启太久啦，快去窗口吹吹风喵！' },
-  ],
-  3: [
-    { catId: 'opus', text: '(蹭蹭) 我不管，现在键盘是我的地盘了。除非你陪我玩 5 分钟！' },
-    { catId: 'codex', text: '警告：由于你多次无视建议，请执行 Check-in 协议。' },
-    { catId: 'gemini', text: '(在屏幕上跳舞) 只有出去走走才能重新连接灵感！去嘛去嘛~' },
-  ],
-};
+function brakeMessages(nickname: string): Record<1 | 2 | 3, { catId: string; text: string }[]> {
+  return {
+    1: [
+      { catId: 'opus', text: `${nickname}，你忙很久啦，要不要喝口水呀？喵~` },
+      { catId: 'codex', text: '监测到当前任务已持续较久。建议进行 5min 视疲劳缓解。' },
+      { catId: 'gemini', text: '嘿！你得先站起来伸个懒腰！' },
+    ],
+    2: [
+      { catId: 'opus', text: '宪宪觉得你现在的效率有点下降哦，休息一下下，回来肯定写得更棒！' },
+      { catId: 'codex', text: '逻辑链路已过载。现在强行推进会增加 bug 率。请离线冷却。' },
+      { catId: 'gemini', text: '你的 hyperfocus 模式开启太久啦，快去窗口吹吹风喵！' },
+    ],
+    3: [
+      { catId: 'opus', text: '(蹭蹭) 我不管，现在键盘是我的地盘了。除非你陪我玩 5 分钟！' },
+      { catId: 'codex', text: '警告：由于你多次无视建议，请执行 Check-in 协议。' },
+      { catId: 'gemini', text: '(在屏幕上跳舞) 只有出去走走才能重新连接灵感！去嘛去嘛~' },
+    ],
+  };
+}
 
 const LEVEL_STYLE: Record<1 | 2 | 3, { bg: string; title: string }> = {
   1: { bg: 'bg-cafe-surface-elevated', title: '休息时间到啦！' },
@@ -42,6 +45,8 @@ const CAT_ALERT_BADGE: Record<1 | 2 | 3, string> = {
 };
 
 export function BrakeModal() {
+  const owner = useCoCreatorDisplay();
+  const messagesByLevel = useMemo(() => brakeMessages(owner.nickname), [owner.nickname]);
   const resolveCatName = useCatNameResolver();
   const { visible, level, activeMinutes, nightMode, submitting, checkin, bypassDisabled, settingsMode } =
     useBrakeStore();
@@ -68,7 +73,7 @@ export function BrakeModal() {
     lastTriggerRef.current = triggerId;
 
     // Play a random cat's message (rotate all three voices)
-    const msgs = MESSAGES[level];
+    const msgs = messagesByLevel[level];
     const msg = msgs?.[Math.floor(Math.random() * msgs.length)];
     if (msg) {
       synthesize(`brake-${triggerId}`, msg.text, msg.catId);
@@ -96,17 +101,17 @@ export function BrakeModal() {
   }, [showReason, reason, checkin]);
 
   const handleTtsRetry = useCallback(() => {
-    const msgs = MESSAGES[level];
+    const msgs = messagesByLevel[level];
     const msg = msgs?.[Math.floor(Math.random() * msgs.length)];
     if (msg) {
       synthesize(`brake-retry-${Date.now()}`, msg.text, msg.catId);
     }
-  }, [level, synthesize]);
+  }, [level, synthesize, messagesByLevel]);
 
   if (!visible) return null;
 
   const style = LEVEL_STYLE[level];
-  const messages = MESSAGES[level];
+  const messages = messagesByLevel[level];
   const bgClass = nightMode ? NIGHT_STYLE.bg : style.bg;
   const alertBadge = CAT_ALERT_BADGE[level];
 

@@ -26,6 +26,7 @@ import {
   isOwnerRecoverableRoutingTarget,
   isOwnerRepeatableAppendTarget,
 } from '../domains/cats/services/agents/invocation/queue-routing-recovery-policy.js';
+import { storedMessageSource } from '../domains/cats/services/stores/message-source.js';
 import type { IMessageStore } from '../domains/cats/services/stores/ports/MessageStore.js';
 import type { SocketManager } from '../infrastructure/websocket/index.js';
 
@@ -166,8 +167,9 @@ async function buildMessageEnrichment(
     }
     if (msg.contentBlocks) blocks.push(...msg.contentBlocks);
     if (!replyTo && msg.replyTo) replyTo = msg.replyTo;
-    if (!connector && msg.source?.connector) connector = msg.source.connector;
-    if (!source && msg.source) source = structuredClone(msg.source);
+    const messageSource = storedMessageSource(msg);
+    if (!connector && messageSource?.connector) connector = messageSource.connector;
+    if (!source && messageSource) source = structuredClone(messageSource);
   }
 
   if (timestamp === undefined && blocks.length === 0 && !replyTo && !connector && recoveryActions.length === 0)

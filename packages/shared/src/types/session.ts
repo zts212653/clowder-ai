@@ -43,7 +43,7 @@ export interface AuthenticatedCompressionObservation {
 /** Host-verified Native launch identity; persisted with the canonical session, never the private L0 body. */
 export interface NativeSessionBinding {
   readonly v: 1;
-  readonly carrier: 'agy_stream_json';
+  readonly carrier: 'agy_stream_json' | 'agy_acp';
   readonly cliSessionId: string;
   readonly l0Hash: string;
   readonly workspaceRoot: string;

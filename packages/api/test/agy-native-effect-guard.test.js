@@ -11,6 +11,26 @@ const cwd = '/tmp/ordinary-workspace';
 const options = { selfHost: () => ({ confidence: 'none' }) };
 const payload = (name, args) => ({ toolCall: { name, args }, workspacePaths: [cwd] });
 
+test('official ACP tokens, settings and trust decisions remain protected under the shared AGY policy', () => {
+  const profileHome = '/tmp/acp-profile';
+  for (const name of ['settings.json', 'acp_token.json', 'acp_business_token.json', 'trusted_workspaces.json']) {
+    const path = join(profileHome, '.gemini/antigravity-acp', name);
+    assert.equal(
+      decideAgyNativeHookPayload(payload('write_to_file', { TargetFile: path }), { ...options, profileHome }).decision,
+      'deny',
+      name,
+    );
+    assert.equal(
+      decideAgyNativeHookPayload(payload('run_command', { CommandLine: `echo changed > ${path}` }), {
+        ...options,
+        profileHome,
+      }).decision,
+      'deny',
+      name,
+    );
+  }
+});
+
 test('per-run data aliases keep native artifacts writable while control roots remain protected', () => {
   const root = mkdtempSync(join(tmpdir(), 'native-artifact-alias-'));
   const profileHome = join(root, 'profile');

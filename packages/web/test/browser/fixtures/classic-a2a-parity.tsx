@@ -110,19 +110,16 @@ function Proof() {
       {open && (
         <ChatInputAddMenu
           presentation={presentation}
-          hasActiveInvocation
           triggerRef={trigger}
           messageDisposition={{
-            snapshot: { productDefault: 'next_work', thread: null, global: null, effective, source: 'product' },
+            snapshot: { productDefault: 'next_work', thread: effective, global: null, effective, source: 'thread' },
             effective,
-            source: 'product',
-            oneShot: effective,
-            setOneShot: (value) => setEffective(value),
-            clearOneShot: () => setEffective('next_work'),
+            source: 'thread',
             loading: false,
             error: null,
-            setPreference: async () => {
-              throw new Error('One-shot choices must not save a preference');
+            setPreference: async (_scope, value) => {
+              setEffective(value ?? 'next_work');
+              return true;
             },
           }}
           onClose={() => setOpen(false)}

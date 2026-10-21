@@ -1,4 +1,5 @@
 import type { MessageSearchResult } from '@cat-cafe/shared';
+import { storedMessageSource } from '../cats/services/stores/message-source.js';
 import type { StoredMessage } from '../cats/services/stores/ports/MessageStore.js';
 import { isSystemUserMessage } from '../cats/services/stores/visibility.js';
 
@@ -28,16 +29,30 @@ export function projectMessageSearchHighlights(text: string, query: string): Mes
   return match ? [{ start: match.index, end: match.index + match[0].length }] : [];
 }
 
-/** Stored source provenance takes precedence over a missing cat identity. */
+/** Canonical sender chooses the actor class; stored presentation only supplies display metadata. */
 export function projectMessageSearchSpeaker(
   message: StoredMessage & { type?: string },
 ): Pick<MessageSearchResult, 'speaker' | 'speakerLabel'> {
-  if (isSystemUserMessage(message) || message.sourceParseFailure || message.type === 'system')
+  const from = message.from;
+  if (from?.kind === 'user') return { speaker: 'user' };
+  if (from?.kind === 'agent') return { speaker: from.catId };
+  if (
+    from?.kind === 'system' ||
+    isSystemUserMessage(message) ||
+    message.sourceParseFailure ||
+    message.type === 'system'
+  )
     return { speaker: 'system' };
-  if (message.source?.connector || message.type === 'connector') {
-    const source = message.source;
-    const label = (source?.label?.trim() || source?.connector || '外部来源').slice(0, 80);
-    const sender = (source?.sender?.name?.trim() || source?.sender?.id?.trim())?.slice(0, 80);
+  const source = storedMessageSource(message);
+  if (from?.kind === 'plugin' || from?.kind === 'external' || source?.connector || message.type === 'connector') {
+    const label = (
+      source?.label?.trim() ||
+      source?.connector ||
+      (from?.kind === 'plugin' ? '插件' : from?.kind === 'external' ? from.connectorId : '外部来源')
+    ).slice(0, 80);
+    const sender = (
+      source?.sender?.name?.trim() || (from?.kind === 'plugin' ? undefined : source?.sender?.id?.trim())
+    )?.slice(0, 80);
     return { speaker: 'connector', speakerLabel: sender ? `${label} · ${sender}` : label };
   }
   return { speaker: message.catId ?? 'user' };

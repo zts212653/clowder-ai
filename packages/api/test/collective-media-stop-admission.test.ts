@@ -1,8 +1,7 @@
 import assert from 'node:assert/strict';
-import { test } from 'node:test';
 import { setTimeout } from 'node:timers/promises';
-import { CollectiveConnector, ConnectorTransportError } from '../../collective-connector/src/index.js';
 import { mediaRangeFixture } from './collective-media-range.fixture.js';
+import { CollectiveConnector, ConnectorTransportError, test } from './helpers/f202-collective-installed-business.js';
 
 function gate() {
   let resolve = () => {};

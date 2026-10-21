@@ -15,10 +15,8 @@ import {
   createDormantPluginRuntimeComposition,
   createPluginManagerRuntimeComposition,
 } from '../dist/domains/plugin/runtime-composition.js';
-import { MemoryMeetingIntakeStore, MemorySignalRouteStore } from '../dist/domains/signal-intake/index.js';
 import { sessionAuthPlugin, sessionRoute } from '../dist/infrastructure/session-auth.js';
 import { registerPluginManagerRoutes } from '../dist/routes/plugin-manager-routes.js';
-import { registerOfficialPluginRoutes } from '../dist/routes/plugin-official-routes.js';
 import { desktopWindowManifest, windowHtml } from './f317-window-manifest.fixture.js';
 
 // Exact Companion rows (alpha.25/.24) from public b06ce75fc421c42579b0d930133d86e4909fac6b.
@@ -96,32 +94,36 @@ export async function managerEntryFixture(
   }));
   const runtime = createDormantPluginRuntimeComposition({
     projectRoot: root,
-    routes: new MemorySignalRouteStore(),
-    intakes: new MemoryMeetingIntakeStore(),
     messageStore: new MessageStore(),
     ...(actual ? {} : { companionArchives }),
     desktopExecutor: { open: async () => assert.fail('discovery/install/update must not open a window') },
   });
   t.after(() => runtime.shutdown());
-  const catalog = createHostOfficialPluginCatalog(async () => raw);
+  let oldRelease = false;
+  const catalog = createHostOfficialPluginCatalog(async () => {
+    const selected = structuredClone(raw);
+    if (oldRelease)
+      selected.plugins[0].versions = selected.plugins[0].versions.filter(
+        (release) => release.version === previousVersion,
+      );
+    return selected;
+  });
   const base = OFFICIAL_PLUGIN_CATALOG.find((row) => row.pluginId === plugin.pluginId);
   assert.ok(base);
-  let oldRelease = false;
   const releaseEntry = () => {
     const release = plugin.versions.find((row) => row.version === (oldRelease ? previousVersion : latestVersion));
     return {
       ...base,
+      catalogId: plugin.pluginId,
       version: release.version,
       archiveUrl: release.artifact.tarballUrl,
       packageDigest: release.artifact.integrity,
     };
   };
-  const legacy = { snapshot: async () => ({ entries: [releaseEntry()], status: 'fresh', checkedAt: 1000 }) };
   const downloads = [];
   const composition = createPluginManagerRuntimeComposition({
     runtime,
     catalogProvider: catalog,
-    officialRouteCatalogProvider: legacy,
     catalogManifests: OFFICIAL_BUNDLED_MANIFESTS,
     prepareDesktopComponent: async () => {},
     fetchOfficialArchive: async (entry) => {
@@ -137,12 +139,6 @@ export async function managerEntryFixture(
   await app.register(sessionAuthPlugin);
   await app.register(sessionRoute, { ownerUserId: process.env.DEFAULT_OWNER_USER_ID ?? 'default-user' });
   registerPluginManagerRoutes(app, { manager: composition.manager, auditLog: { append: async () => {} } });
-  registerOfficialPluginRoutes(app, {
-    inventory: runtime.inventoryStore,
-    lifecycle: runtime.lifecycle,
-    catalogProvider: legacy,
-    installer: composition.officialRouteInstaller,
-  });
   const session = await app.inject({ method: 'GET', url: '/api/session', remoteAddress: '127.0.0.1' });
   assert.equal(session.statusCode, 200);
   const headers = {
@@ -173,8 +169,9 @@ export async function managerEntryFixture(
     downloads,
     releaseEntry,
     assertVersion,
-    setOld: (value) => {
+    setOld: async (value) => {
       oldRelease = value;
+      await catalog.refresh();
     },
   };
 }

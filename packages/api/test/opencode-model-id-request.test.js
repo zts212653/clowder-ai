@@ -330,8 +330,9 @@ test(
       if (openCodeProcess) await terminateOpenCodeProcess(openCodeProcess);
       server.closeAllConnections?.();
       await close(server);
-      // Bound transient Windows EPERM retries after process cleanup; persistent failures still fail the test.
-      rmSync(tempRoot, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+      // Windows can release file/directory handles after the child close event.
+      // Bound that OS cleanup delay; do not skip process-tree checks or swallow failure.
+      rmSync(tempRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
     }
   },
 );

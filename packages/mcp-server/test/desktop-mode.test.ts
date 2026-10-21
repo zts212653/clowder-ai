@@ -48,7 +48,6 @@ const ALL_FAKE_NAMES = [
   'cat_cafe_preview_scheduled_task',
   'cat_cafe_register_scheduled_task',
   'cat_cafe_remove_scheduled_task',
-  'cat_cafe_unregister_tracking',
   'cat_cafe_shell_exec',
   // memory
   'cat_cafe_search_evidence',
@@ -136,7 +135,6 @@ describe('applyReadonlyFilter — env modes', () => {
       'cat_cafe_submit_game_action', // mcp-cutover-negative-reference: absence
       'cat_cafe_propose_thread',
       'cat_cafe_propose_profile_update',
-      'cat_cafe_unregister_tracking',
     ];
     for (const name of expectedAbsent) {
       assert.equal(outNames.has(name), false, `${name} must remain blocked in readonly+agent-key mode`);

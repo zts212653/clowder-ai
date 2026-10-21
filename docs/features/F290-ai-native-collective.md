@@ -37,7 +37,7 @@ mcp_admission_claims:
     boundaryKind: resource-entry
     decision: accepted
   - ref: "file:docs/features/F290-ai-native-collective.md"
-    toolName: cat_cafe_collective_reply
+    toolName: cat_cafe_collective_submit_reply
     resourceFamily: collective-participation
     boundaryKind: resource-entry
     decision: accepted
@@ -69,6 +69,8 @@ mcp_admission_claims:
 ---
 
 # F290: AI-native Collective — 多人·多 Agent 共同世界
+
+> **C1 当前准入边界**：Collective 工具由安装的插件提供；回复入口为 `cat_cafe_collective_submit_reply`，其余同名能力继续保留准入。下文旧 Host 回复入口的实现记录不再作为当前注册依据。
 
 > **Status**: in-progress / 2026-10-19：旧同Café选猫/失效责任邀请两P1与R1状态反例已在5739 Alpha转绿；原266在5744关闭C-UAT-1/2，并在5748 Alpha `8ae121bd2a` / boot166关闭C-UAT-3，原三处页面纠偏全部通过。图组密度5737已由原414补验并释放。10-19正式5201单独恢复及原设计141限定通过的证据保留；10-20只读观测正式health为a8df6fcb66f/boot40，Git已含5745/5748，其独立成果计数验收仍待续。完整v1.2、真人OAuth/文件打开、双真人双Café、真实模型与整项验收继续开放。
 > **Owner**: 小星星·Maine Coon (@codex-astra, GPT-6 Astra；operator 2026-09-06 交接)

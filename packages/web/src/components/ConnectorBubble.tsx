@@ -3,7 +3,6 @@
 import { type ConnectorSource, decideHoldCancelEntry, readHoldCardCancelability } from '@cat-cafe/shared';
 import type { ReactNode } from 'react';
 import { useCoCreatorConfig } from '@/hooks/useCoCreatorConfig';
-import { tintedLight } from '@/lib/color-utils';
 import { connectorThemeToken } from '@/lib/connector-theme-token';
 import { resolveMessageSender } from '@/lib/resolve-sender';
 import type { ChatMessage as ChatMessageType } from '@/stores/chatStore';
@@ -13,7 +12,6 @@ import { isAbsorbedManagedJobMessage, isHiddenChatRow } from './chat-row-surface
 import { HOST_CONTENT_REVIEW_CONNECTOR, hostReturnHeadline } from './content-review/host-return-headline';
 import { DevelopmentReturnBody } from './development-return/DevelopmentReturnBody';
 import { HoldBallCancelButton } from './HoldBallCancelButton';
-import { ConnectorIcon } from './icons/ConnectorIcon';
 import { MarkdownContent } from './MarkdownContent';
 import { MessageActionSlot } from './MessageActionSlot';
 import { MessageBubble } from './MessageBubble';
@@ -21,6 +19,7 @@ import { ManagedJobCard } from './managed-job/ManagedJobCard';
 import { frustrationHistoryCopy } from './rich/frustration-history.shell-copy';
 import { trustedFrustrationMeta, useFrustrationVisibility } from './rich/frustration-visibility';
 import { RichBlocks } from './rich/RichBlocks';
+import { SenderAvatar } from './SenderAvatar';
 import { useShellCopy } from './shell/shell-copy';
 
 function formatTime(ts: number): string {
@@ -110,7 +109,11 @@ export function ConnectorBubble({ message, threadId, timelineMessages, footer }:
   const connId = source.connector;
   const themeToken = connectorThemeToken(connId);
   const sender = resolveMessageSender({ from: message.from, source }, () => undefined, coCreator);
-  const themeHex = sender.color;
+  const pluginColor = message.from?.kind === 'plugin' ? source.themeColor : undefined;
+  const nameColor = pluginColor ?? `var(--color-${themeToken}-bubble, var(--cafe-text))`;
+  const surfaceColor = pluginColor
+    ? `color-mix(in srgb, ${pluginColor} 10%, var(--cafe-surface))`
+    : `var(--color-${themeToken}-surface, var(--cafe-surface))`;
   const hasBlocks = message.contentBlocks && message.contentBlocks.length > 0;
   const richBlocks = visibility
     .filter((entry) => entry.visibility === 'allowed')
@@ -135,17 +138,7 @@ export function ConnectorBubble({ message, threadId, timelineMessages, footer }:
       ? { threadId, messageId: message.id, messageRevision: String(message.timestamp) }
       : undefined;
 
-  const avatar = (
-    <div
-      className="w-8 h-8 rounded-full flex-shrink-0 flex items-center justify-center text-base"
-      style={{
-        backgroundColor: themeHex ? tintedLight(themeHex, 0.5) : 'var(--cafe-surface)',
-        boxShadow: themeHex ? `0 0 0 2px ${themeHex}` : '0 0 0 2px var(--cafe-border)',
-      }}
-    >
-      <ConnectorIcon iconSpec={sender.icon} fallbackIcon={sender.fallbackIcon} />
-    </div>
-  );
+  const avatar = <SenderAvatar sender={sender} presentation="message" />;
 
   const header = (
     <div className="flex items-center gap-2 mb-1">
@@ -155,15 +148,12 @@ export function ConnectorBubble({ message, threadId, timelineMessages, footer }:
           target="_blank"
           rel="noopener noreferrer"
           className="text-xs font-semibold hover:underline"
-          style={{ color: `var(--color-${themeToken}-bubble, var(--cafe-text))` }}
+          style={{ color: nameColor }}
         >
           {withdrawnFeedback ? t.title : sender.label}
         </a>
       ) : (
-        <span
-          className="text-xs font-semibold"
-          style={{ color: `var(--color-${themeToken}-bubble, var(--cafe-text))` }}
-        >
+        <span className="text-xs font-semibold" style={{ color: nameColor }}>
           {withdrawnFeedback ? t.title : sender.label}
         </span>
       )}
@@ -179,7 +169,7 @@ export function ConnectorBubble({ message, threadId, timelineMessages, footer }:
       header={header}
       footer={footer}
       bubbleStyle={{
-        backgroundColor: `var(--color-${themeToken}-surface, var(--cafe-surface))`,
+        backgroundColor: surfaceColor,
         color: 'var(--cat-msg-text, var(--cafe-text))',
       }}
     >

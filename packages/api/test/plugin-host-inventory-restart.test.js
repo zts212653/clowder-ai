@@ -210,7 +210,7 @@ describe('K-2A persisted restart normalization', () => {
     );
   });
 
-  it('rejects persisted packages outside the Host exact contract version', async () => {
+  it('retains packages outside the Host contract as incompatible without admitting them', async () => {
     const root = mkdtempSync(join(os.tmpdir(), 'plugin-inventory-stale-contract-'));
     const path = join(root, 'inventory.json');
     const store = new FilePluginInventoryStore(path);
@@ -221,10 +221,11 @@ describe('K-2A persisted restart normalization', () => {
     snapshot.packages[0].contractVersion = '0.1.0-beta.5';
     writeFileSync(path, JSON.stringify(snapshot));
 
-    await assert.rejects(
-      () => new FilePluginInventoryStore(path).snapshot(),
-      (error) => error?.code === 'CORRUPT_SNAPSHOT',
-    );
+    const recovered = await new FilePluginInventoryStore(path).snapshot();
+    assert.equal(recovered.packages[0].manifest, null);
+    assert.deepEqual(recovered.packages[0].incompatibleManifest, snapshot.packages[0].manifest);
+    assert.deepEqual(recovered.instances, snapshot.instances);
+    assert.deepEqual(recovered.grants, snapshot.grants);
   });
 
   it('rejects a current installed instance backed by a quarantined package', async () => {

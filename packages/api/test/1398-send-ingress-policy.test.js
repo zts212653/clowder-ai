@@ -13,17 +13,15 @@ import { InvocationTracker } from '../dist/domains/cats/services/agents/invocati
 import { PersistedQueueDelivery } from '../dist/domains/cats/services/agents/invocation/PersistedQueueDelivery.js';
 import { MessageStore } from '../dist/domains/cats/services/stores/ports/MessageStore.js';
 import { ThreadStore } from '../dist/domains/cats/services/stores/ports/ThreadStore.js';
-import { ConnectorRouter } from '../dist/infrastructure/connectors/ConnectorRouter.js';
-import { MemoryConnectorThreadBindingStore } from '../dist/infrastructure/connectors/ConnectorThreadBindingStore.js';
-import { InboundMessageDedup } from '../dist/infrastructure/connectors/InboundMessageDedup.js';
 import { deliverConnectorMessage } from '../dist/infrastructure/email/deliver-connector-message.js';
 import { createDeliverFn } from '../dist/infrastructure/scheduler/delivery.js';
 import { callbacksRoutes } from '../dist/routes/callbacks.js';
 import { messagesRoutes } from '../dist/routes/messages.js';
+import { sendPluginInput } from './helpers/plugin-ingress-fixture.js';
 
 // Actual ingress implementations, shared Message/Queue stores; transport and drain are isolated fixtures.
 for (const disposition of ['next_work', 'continue_current']) {
-  test(`current HTTP/callback/IM/mail/notification/scheduler entrances share ${disposition} admission`, async (t) => {
+  test(`current HTTP/callback/plugin/mail/notification/scheduler entrances share ${disposition} admission`, async (t) => {
     const projectRoot = await mkdtemp(join(tmpdir(), 'f117-ingress-policy-'));
     saveMessageDispositionPreference(projectRoot, { scope: 'global', disposition });
     const owner = 'ingress-owner';
@@ -99,20 +97,15 @@ for (const disposition of ['next_work', 'continue_current']) {
     });
     assert.equal(callback.statusCode, 200, callback.body);
     assert.equal(callback.json().status, 'ok', callback.body);
-    const bindings = new MemoryConnectorThreadBindingStore();
-    bindings.bind('feishu', 'policy-chat', thread.id, owner);
-    const im = new ConnectorRouter({
-      bindingStore: bindings,
-      dedup: new InboundMessageDedup(),
-      messageStore: messages,
-      persistedQueueDelivery: delivery,
-      threadStore: threads,
-      defaultUserId: owner,
-      defaultCatId: 'codex',
-      socketManager,
-      log: { debug() {}, info() {}, warn() {}, error() {} },
+    await sendPluginInput({
+      messages,
+      queue,
+      threads,
+      threadId: thread.id,
+      owner,
+      catId: 'opus',
+      content: 'plugin payload',
     });
-    assert.equal((await im.route('feishu', 'policy-chat', 'IM payload', 'im-policy')).kind, 'routed');
     const mail = await deliverConnectorMessage(
       { delivery },
       {
@@ -145,7 +138,7 @@ for (const disposition of ['next_work', 'continue_current']) {
     assert.equal(entries.length, 6);
     assert.equal(notifications.length, 6, 'each admission notifies the common owner, not a producer loop');
     for (const entry of entries) {
-      assert.deepEqual(entry.targets, ['opus'], 'IM/mail no-target fallback uses common send, not defaultCatId');
+      assert.deepEqual(entry.targets, ['opus'], 'all ingress paths use common send admission');
       assert.equal(entry.delivery.authorIntentByTarget.opus.requested, disposition, entry.payload.content);
       if (disposition === 'continue_current')
         assert.equal(entry.delivery.authorIntentByTarget.opus.boundParentInvocationId, 'exact-ingress-parent');

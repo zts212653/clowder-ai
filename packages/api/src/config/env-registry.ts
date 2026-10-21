@@ -12,6 +12,7 @@
  * The "环境 & 文件" tab picks it up automatically.
  */
 
+import { deploymentDefaults } from '@cat-cafe/shared';
 import { DEFAULT_CLI_TIMEOUT_LABEL } from '../utils/cli-timeout.js';
 
 /** Semantic groups used by the curated System Settings projection. */
@@ -113,6 +114,15 @@ export const ENV_CATEGORIES: Record<EnvCategory, string> = {
 };
 
 export const ENV_VARS: EnvDefinition[] = [
+  {
+    name: 'PLUGIN_GIT_MARKETPLACE',
+    defaultValue: '(未设置)',
+    description:
+      '额外插件 Git 仓库：一个 HTTPS/SSH 地址或地址/{url, branch} JSON 数组；在打开插件管理时同步，使用本机 Git 凭据',
+    category: 'server',
+    sensitive: false,
+    runtimeEditable: false,
+  },
   // --- server ---
   {
     name: 'CAT_CAFE_DOT_WEBHOOK_PROXY_URL',
@@ -175,7 +185,7 @@ export const ENV_VARS: EnvDefinition[] = [
   },
   {
     name: 'API_SERVER_PORT',
-    defaultValue: '3004',
+    defaultValue: String(deploymentDefaults.apiPort),
     description: 'API 服务端口',
     category: 'server',
     sensitive: false,
@@ -296,7 +306,7 @@ export const ENV_VARS: EnvDefinition[] = [
   },
   {
     name: 'FRONTEND_PORT',
-    defaultValue: '3003',
+    defaultValue: String(deploymentDefaults.envRegistryFrontendPort),
     description: '前端端口',
     category: 'server',
     sensitive: false,
@@ -452,36 +462,6 @@ export const ENV_VARS: EnvDefinition[] = [
       'F247 Cloud Cat — gpt-pro Remote MCP agent-key sidecar override；默认由 runtime owner 自动 provision/renew，无需手工 mint。',
     category: 'server',
     sensitive: true,
-    runtimeEditable: false,
-  },
-  {
-    name: 'CAT_CAFE_PERSONAL_CHROME_SOCKET',
-    defaultValue: '(空)',
-    description:
-      'F247 Personal Chrome Host Adapter — operator-provisioned Unix socket path；仅与 pairing secret 同时存在时启用。',
-    category: 'server',
-    sensitive: false,
-    hubVisible: false,
-    runtimeEditable: false,
-  },
-  {
-    name: 'CAT_CAFE_PERSONAL_CHROME_PAIRING_SECRET',
-    defaultValue: '(空)',
-    description:
-      'F247 Personal Chrome Host Adapter — 本地 API ↔ Native Messaging helper 配对密钥；仅 operator/dev seam，禁止日志输出。',
-    category: 'server',
-    sensitive: true,
-    hubVisible: false,
-    runtimeEditable: false,
-  },
-  {
-    name: 'CAT_CAFE_PERSONAL_CHROME_WEB_STORE_URL',
-    defaultValue: '(空)',
-    description:
-      'F247 Personal Chrome 安装旅程 — 已公开发布且扩展 ID 匹配的 Chrome Web Store listing URL；为空时诚实阻断产品安装。',
-    category: 'server',
-    sensitive: false,
-    hubVisible: false,
     runtimeEditable: false,
   },
   {
@@ -765,6 +745,15 @@ export const ENV_VARS: EnvDefinition[] = [
     hubVisible: false,
   },
   {
+    name: 'CAT_CAFE_SESSION_COOKIE_NAME',
+    defaultValue: 'cat_cafe_session',
+    description: '独立本机环境的登录 Cookie 名称，避免同主机不同端口的实例互相覆盖会话',
+    category: 'server',
+    sensitive: false,
+    hubVisible: false,
+    runtimeEditable: false,
+  },
+  {
     name: 'CAT_CAFE_SKIP_HOMEDIR_MIGRATION',
     defaultValue: '0',
     description: '跳过 homedir credentials / legacy provider profiles 迁移（新安装或 opensource profile 可显式关闭）',
@@ -780,6 +769,15 @@ export const ENV_VARS: EnvDefinition[] = [
     category: 'server',
     sensitive: false,
     exampleRecommended: true,
+  },
+  {
+    name: 'CAT_CAFE_DESKTOP_INSTANCE_ROOT',
+    defaultValue: '(未设置 → 保留桌面应用默认目录和端口)',
+    description:
+      '桌面隔离实例的绝对目录；必须同时指定独立 FRONTEND_PORT、API_SERVER_PORT、REDIS_PORT，禁止使用生产保留端口',
+    category: 'storage',
+    sensitive: false,
+    runtimeEditable: false,
   },
   {
     name: 'CAT_CAFE_RUNTIME_ROOT',
@@ -994,7 +992,7 @@ export const ENV_VARS: EnvDefinition[] = [
   },
   {
     name: 'CAT_CAFE_SUPERVISOR_KILL_GRACE_MS',
-    defaultValue: '3003',
+    defaultValue: '3000',
     description: 'CLI supervisor 内部 SIGTERM 到 SIGKILL 的等待时间',
     category: 'cli',
     sensitive: false,
@@ -1086,6 +1084,14 @@ export const ENV_VARS: EnvDefinition[] = [
     name: 'CAT_TEMPLATE_PATH',
     defaultValue: '(repo 根 cat-template.json)',
     description: '猫猫模板文件路径',
+    category: 'cli',
+    sensitive: false,
+    runtimeEditable: false,
+  },
+  {
+    name: 'CAT_TEMPLATE_BASE_PATH',
+    defaultValue: '(未设置)',
+    description: '安装包内置的只读猫猫模板路径；设置后与项目模板按 id 合并，项目模板优先',
     category: 'cli',
     sensitive: false,
     runtimeEditable: false,
@@ -1231,8 +1237,15 @@ export const ENV_VARS: EnvDefinition[] = [
     sensitive: false,
   },
   {
+    name: 'DSH_HOME',
+    defaultValue: '~/.dsh',
+    description: 'DeepSeek Harness 配置目录；只读探测已安装的 ACP profile',
+    category: 'cli',
+    sensitive: false,
+  },
+  {
     name: 'CAT_CAFE_API_URL',
-    defaultValue: 'http://localhost:3004',
+    defaultValue: deploymentDefaults.apiBaseUrl,
     description: 'API 服务地址（由 API 进程注入 MCP Server 子进程 env）',
     category: 'cli',
     sensitive: false,
@@ -1368,106 +1381,6 @@ export const ENV_VARS: EnvDefinition[] = [
     hubVisible: false,
   },
 
-  // --- connector infrastructure ---
-  // F240: Per-connector config (TELEGRAM_*, FEISHU_*, DINGTALK_*, XIAOYI_*,
-  // WEIXIN_*, WECOM_*) moved to YAML manifests (connector.yaml/plugin.yaml).
-  // Only infrastructure-level and diagnostic vars remain here.
-  {
-    name: 'CONNECTOR_GATEWAY_AUTOSTART',
-    defaultValue: 'explicit-runtime-opt-in',
-    description:
-      '预配置 IM connector 自动接入开关：仅显式 true 启用。官方 runtime 入口默认注入 1；start:direct/alpha/dev/review 与绕过入口的 API 命令默认禁用。授权只能由官方 wrapper 或启动进程环境显式注入；项目 dotenv 配置不会授予该能力',
-    category: 'connector',
-    sensitive: false,
-    runtimeEditable: false,
-  },
-  {
-    name: 'WEIXIN_VOICE_ITEM_MODE',
-    defaultValue: '(未设置)',
-    description:
-      '微信原生 voice_item 发送实验模式；未设置时音频按文件附件发送。可选 minimal / playtime / playtime-sec / playtime-encode / metadata',
-    category: 'connector',
-    sensitive: false,
-    runtimeEditable: true,
-    allowedValues: ['minimal', 'playtime', 'playtime-sec', 'playtime-encode', 'metadata'],
-  },
-  {
-    name: 'WEIXIN_ENABLE_UNSAFE_VOICE_MODES',
-    defaultValue: '0',
-    description: '设为 1 时允许已知不稳定的微信原生 voice_item 实验模式（playtime-encode / metadata）',
-    category: 'connector',
-    sensitive: false,
-    runtimeEditable: true,
-    allowedValues: ['0', '1'],
-  },
-  {
-    name: 'WEIXIN_CAPTURE_INBOUND_VOICE_MEDIA',
-    defaultValue: '0',
-    description: '设为 1 时将微信入站语音媒体捕获为文件附件，便于调试语音/媒体链路',
-    category: 'connector',
-    sensitive: false,
-    runtimeEditable: true,
-    allowedValues: ['0', '1'],
-  },
-
-  // --- GitHub Repo Inbox / Review ---
-  {
-    name: 'GITHUB_WEBHOOK_SECRET',
-    defaultValue: '(未设置 → Repo Inbox webhook 不启用)',
-    description: 'GitHub Repo Inbox webhook secret（需与 GitHub 仓库 webhook 配置一致）',
-    category: 'github_review',
-    sensitive: true,
-    runtimeEditable: true,
-    exampleRecommended: true,
-  },
-  {
-    name: 'GITHUB_REPO_ALLOWLIST',
-    defaultValue: '(未设置)',
-    description: 'GitHub Repo Inbox 允许接收事件的仓库列表（owner/repo，多个用逗号分隔）',
-    category: 'github_review',
-    sensitive: false,
-    exampleRecommended: true,
-  },
-  {
-    name: 'GITHUB_REPO_INBOX_CAT_ID',
-    defaultValue: '(未设置)',
-    description: 'GitHub Repo Inbox 启动必填 fallback catId；已登记仓库以 Community Repo guardCatId 为准',
-    category: 'github_review',
-    sensitive: false,
-    exampleRecommended: true,
-  },
-  {
-    name: 'GITHUB_AUTHORITATIVE_REVIEW_LOGINS',
-    defaultValue: 'chatgpt-codex-connector[bot]',
-    description:
-      '[DEPRECATED] F140 Phase E.2 cutover (2026-04-24): Rule B authoritative-source skip removed; this var now only serves as backward-compat fallback for GITHUB_SETUP_NOISE_BOT_LOGINS. Will be removed in a follow-up release.',
-    category: 'github_review',
-    sensitive: false,
-  },
-  {
-    name: 'GITHUB_SETUP_NOISE_BOT_LOGINS',
-    defaultValue: 'chatgpt-codex-connector[bot]',
-    description:
-      'Comma-separated GitHub bot logins whose conversation comments may contain Codex setup-only guidance. F140 polling-side setup-noise filter skips those (bot + conversation + setup-only body, no codex review content). Falls back to GITHUB_AUTHORITATIVE_REVIEW_LOGINS for backward compat.',
-    category: 'github_review',
-    sensitive: false,
-  },
-  {
-    name: 'GITHUB_SELF_LOGIN',
-    defaultValue: '(未设置 → 自动使用 gh api /user 识别)',
-    description: 'GitHub review feedback 自身账号 fallback；当 gh api /user 无法识别时用于防止处理自己发出的评论',
-    category: 'github_review',
-    sensitive: false,
-    runtimeEditable: true,
-  },
-  {
-    name: 'GITHUB_TOKEN',
-    defaultValue: '(未设置)',
-    description: 'GitHub Personal Access Token（Scheduler 仓库活跃度模板 HTTP 请求鉴权）',
-    category: 'github_review',
-    sensitive: true,
-  },
-
   // --- codex ---
   {
     name: 'CAT_CODEX_SANDBOX_MODE',
@@ -1567,6 +1480,88 @@ export const ENV_VARS: EnvDefinition[] = [
     category: 'codex',
     sensitive: true,
   },
+  {
+    name: 'ANTHROPIC_BASE_URL',
+    defaultValue: '(未设置)',
+    description: 'Anthropic builtin provider 的可选 API 基地址',
+    category: 'cli',
+    sensitive: false,
+    hubVisible: false,
+  },
+  {
+    name: 'OPENAI_BASE_URL',
+    defaultValue: '(未设置)',
+    description: 'OpenAI builtin provider 的可选 API 基地址',
+    category: 'cli',
+    sensitive: false,
+    hubVisible: false,
+  },
+  {
+    name: 'OPENAI_API_BASE',
+    defaultValue: '(未设置)',
+    description: 'OpenAI API 基地址的兼容环境变量',
+    category: 'cli',
+    sensitive: false,
+    hubVisible: false,
+  },
+  {
+    name: 'GEMINI_BASE_URL',
+    defaultValue: '(未设置)',
+    description: 'Gemini builtin provider 的可选 API 基地址',
+    category: 'cli',
+    sensitive: false,
+    hubVisible: false,
+  },
+  {
+    name: 'CAT_CAFE_KIMI_BASE_URL',
+    defaultValue: '(未设置)',
+    description: 'Clowder Kimi provider 的可选 API 基地址',
+    category: 'cli',
+    sensitive: false,
+    hubVisible: false,
+  },
+  {
+    name: 'KIMI_BASE_URL',
+    defaultValue: '(未设置)',
+    description: 'Kimi provider 的兼容 API 基地址',
+    category: 'cli',
+    sensitive: false,
+    hubVisible: false,
+  },
+  {
+    name: 'CAT_CAFE_OC_BASE_URL',
+    defaultValue: '(未设置)',
+    description: 'Clowder OpenCode provider 的可选 API 基地址',
+    category: 'cli',
+    sensitive: false,
+    hubVisible: false,
+  },
+  {
+    name: 'OPENCODE_BASE_URL',
+    defaultValue: '(未设置)',
+    description: 'OpenCode provider 的兼容 API 基地址',
+    category: 'cli',
+    sensitive: false,
+    hubVisible: false,
+  },
+  {
+    name: 'OPENCODE_CONFIG',
+    defaultValue: '~/.config/opencode/opencode.json',
+    description: 'OpenCode 本机配置文件路径；用于读取模型快捷配置，启动时读取',
+    category: 'cli',
+    sensitive: false,
+    hubVisible: false,
+    runtimeEditable: false,
+  },
+  {
+    name: 'PI_CODING_AGENT_DIR',
+    defaultValue: '~/.pi/agent',
+    description: 'Pi 本机配置与认证目录；仅用于读取模型配置并由 Pi 原生客户端管理认证',
+    category: 'cli',
+    sensitive: false,
+    hubVisible: false,
+    runtimeEditable: false,
+  },
 
   // --- gemini ---
   {
@@ -1600,23 +1595,15 @@ export const ENV_VARS: EnvDefinition[] = [
   {
     name: 'MOONSHOT_API_KEY',
     defaultValue: '(未设置)',
-    description: 'Kimi / Moonshot API Key（官方 kimi-cli API Key 模式用）',
+    description: 'Kimi / Moonshot API Key（Kimi Code API Key 模式用）',
     category: 'kimi',
     sensitive: true,
     hubVisible: false,
   },
   {
-    name: 'KIMI_SHARE_DIR',
-    defaultValue: '~/.kimi',
-    description: '官方 kimi-cli 共享目录（session / mcp / logs）',
-    category: 'kimi',
-    sensitive: false,
-    hubVisible: false,
-  },
-  {
-    name: 'KIMI_CONFIG_FILE',
-    defaultValue: '~/.kimi/config.toml',
-    description: '官方 kimi-cli 配置文件路径（覆盖默认 ~/.kimi/config.toml）',
+    name: 'KIMI_CODE_HOME',
+    defaultValue: '~/.kimi-code',
+    description: 'Kimi Code 配置、登录与会话目录；仅支持新的 kimi 入口。',
     category: 'kimi',
     sensitive: false,
     hubVisible: false,
@@ -1694,74 +1681,11 @@ export const ENV_VARS: EnvDefinition[] = [
     category: 'connector',
     sensitive: false,
   },
-  {
-    name: 'COLLECTIVE_SERVICE_HOST',
-    defaultValue: '127.0.0.1',
-    description: '独立 Collective Service 监听地址（仅 Service 进程读取）',
-    category: 'connector',
-    sensitive: false,
-    runtimeEditable: false,
-    exampleRecommended: true,
-  },
-  {
-    name: 'COLLECTIVE_SERVICE_PORT',
-    defaultValue: '5201',
-    description: '独立 Collective Service 端口；不得使用 Clowder AI runtime 3003/3004',
-    category: 'connector',
-    sensitive: false,
-    runtimeEditable: false,
-    exampleRecommended: true,
-  },
-  {
-    name: 'COLLECTIVE_SERVICE_DATA_DIR',
-    defaultValue: '~/.cat-cafe/collective-service',
-    description: 'Collective Service 身份、成员、连接与事件日志的持久化目录',
-    category: 'connector',
-    sensitive: false,
-    runtimeEditable: false,
-    exampleRecommended: true,
-  },
-  {
-    name: 'COLLECTIVE_SERVICE_ALLOWED_HOST_ORIGINS',
-    defaultValue: '(空)',
-    description: '允许嵌入并配对的 Clowder AI Web origin，多个用逗号分隔',
-    category: 'connector',
-    sensitive: false,
-    runtimeEditable: false,
-    exampleRecommended: true,
-  },
-  {
-    name: 'COLLECTIVE_SERVICE_PUBLIC_URL',
-    defaultValue: '(监听地址)',
-    description: 'Human 登录回调与分享链接使用的外部 Collective Service URL',
-    category: 'connector',
-    sensitive: false,
-    runtimeEditable: false,
-    exampleRecommended: true,
-  },
-  {
-    name: 'COLLECTIVE_GITHUB_CLIENT_ID',
-    defaultValue: '(未设置)',
-    description: 'Collective Service 的 GitHub OAuth App client ID',
-    category: 'connector',
-    sensitive: false,
-    runtimeEditable: false,
-    exampleRecommended: true,
-  },
-  {
-    name: 'COLLECTIVE_GITHUB_CLIENT_SECRET',
-    defaultValue: '(未设置)',
-    description: 'Collective Service 的 GitHub OAuth App client secret',
-    category: 'connector',
-    sensitive: true,
-    runtimeEditable: false,
-    exampleRecommended: true,
-  },
 
   // --- frontend ---
   {
     name: 'NEXT_PUBLIC_API_URL',
-    defaultValue: 'http://localhost:3004',
+    defaultValue: deploymentDefaults.apiBaseUrl,
     description: '前端连接的 API 地址',
     category: 'frontend',
     sensitive: false,
@@ -1855,70 +1779,6 @@ export const ENV_VARS: EnvDefinition[] = [
     description: 'Signal 默认执行猫',
     category: 'signal',
     sensitive: false,
-  },
-
-  // --- github_review ---
-  {
-    name: 'GITHUB_REVIEW_IMAP_USER',
-    defaultValue: '(未设置 → 监控不启用)',
-    description: 'QQ 邮箱地址 (xxx@qq.com)',
-    category: 'github_review',
-    sensitive: false,
-    deprecated:
-      'IMAP 邮件监控通道已在 v0.9.0（clowder-ai#596）移除；PR review 反馈现由 register_pr_tracking 驱动的 GitHub API 轮询获取',
-  },
-  {
-    name: 'GITHUB_REVIEW_IMAP_PASS',
-    defaultValue: '(未设置)',
-    description: 'QQ 邮箱授权码 (非登录密码)',
-    category: 'github_review',
-    sensitive: true,
-    deprecated:
-      'IMAP 邮件监控通道已在 v0.9.0（clowder-ai#596）移除；PR review 反馈现由 register_pr_tracking 驱动的 GitHub API 轮询获取',
-  },
-  {
-    name: 'GITHUB_REVIEW_IMAP_HOST',
-    defaultValue: 'imap.qq.com',
-    description: 'IMAP 服务器地址',
-    category: 'github_review',
-    sensitive: false,
-    deprecated:
-      'IMAP 邮件监控通道已在 v0.9.0（clowder-ai#596）移除；PR review 反馈现由 register_pr_tracking 驱动的 GitHub API 轮询获取',
-  },
-  {
-    name: 'GITHUB_REVIEW_IMAP_PORT',
-    defaultValue: '993',
-    description: 'IMAP 端口 (SSL)',
-    category: 'github_review',
-    sensitive: false,
-    deprecated:
-      'IMAP 邮件监控通道已在 v0.9.0（clowder-ai#596）移除；PR review 反馈现由 register_pr_tracking 驱动的 GitHub API 轮询获取',
-  },
-  {
-    name: 'GITHUB_REVIEW_POLL_INTERVAL_MS',
-    defaultValue: '120000',
-    description: '邮件轮询间隔 (毫秒)',
-    category: 'github_review',
-    sensitive: false,
-    deprecated:
-      'IMAP 邮件监控通道已在 v0.9.0（clowder-ai#596）移除；PR review 反馈现由 register_pr_tracking 驱动的 GitHub API 轮询获取',
-  },
-  {
-    name: 'GITHUB_MCP_PAT',
-    defaultValue: '(未设置)',
-    description: 'GitHub Personal Access Token (MCP 用)',
-    category: 'github_review',
-    sensitive: true,
-    runtimeEditable: true,
-  },
-  {
-    name: 'GITHUB_REVIEW_IMAP_PROXY',
-    defaultValue: '(未设置)',
-    description: 'IMAP 连接代理地址（如 socks5://127.0.0.1:1080）',
-    category: 'github_review',
-    sensitive: false,
-    deprecated:
-      'IMAP 邮件监控通道已在 v0.9.0（clowder-ai#596）移除；PR review 反馈现由 register_pr_tracking 驱动的 GitHub API 轮询获取',
   },
 
   // --- evidence (F102 记忆系统) ---

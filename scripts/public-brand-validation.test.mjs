@@ -1,9 +1,19 @@
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { cpSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import {
+  cpSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  renameSync,
+  symlinkSync,
+  unlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { test } from 'node:test';
+import { projectDeploymentProfiles } from '../packages/shared/src/deployment-defaults.ts';
 
 const source = resolve('.');
 function fixture() {
@@ -14,6 +24,8 @@ function fixture() {
     'scripts/lib/intake-brand-paths.mjs',
     'scripts/brand-dictionary-helper.mjs',
     'assets/brand-dictionary.yaml',
+    'packages/shared/src/deployment-defaults.ts',
+    'packages/shared/src/deployment-profiles.json',
   ]) {
     mkdirSync(resolve(dir, path, '..'), { recursive: true });
     cpSync(resolve(source, path), resolve(dir, path));
@@ -28,16 +40,28 @@ function fixture() {
     mkdirSync(resolve(dir, path, '..'), { recursive: true });
     writeFileSync(resolve(dir, path), text);
   };
+  const defaultsFile = 'packages/shared/src/deployment-profiles.json';
+  write(
+    defaultsFile,
+    JSON.stringify(
+      projectDeploymentProfiles(JSON.parse(readFileSync(resolve(dir, defaultsFile), 'utf8')), 'opensource'),
+    ),
+  );
+  // Public intake carries public branding; do not stage the home script's comments as public data.
+  write(
+    'scripts/intake-from-opensource.sh',
+    readFileSync(resolve(dir, 'scripts/intake-from-opensource.sh'), 'utf8')
+      .replaceAll('Clowder AI', 'Clowder AI')
+      .replaceAll('Clowder AI', 'Clowder AI'),
+  );
   write(
     '.sync-provenance.json',
     JSON.stringify({ source_commit_sha: 'a'.repeat(40), target_head_sha: 'b'.repeat(40), manifest_version: 3 }),
   );
   write('packages/web/src/app/layout.tsx', 'Clowder AI Your AI team collaboration space favicon.svg icon-192x192.png');
-  write(
-    'packages/api/src/infrastructure/connectors/connector-gateway-bootstrap.ts',
-    "frontendBaseUrl: deps.frontendBaseUrl ?? 'http://localhost:3003'",
-  );
+  write('packages/api/src/config/frontend-origin.ts', "const DEFAULT_FRONTEND_BASE_URL = 'http://localhost:3003'");
   write('packages/web/public/icons/favicon.svg', '<svg/>');
+  write('docs/ROADMAP.md', '# Roadmap\n');
   execFileSync('git', ['init', '-q'], { cwd: dir });
   const stage = () => execFileSync('git', ['add', '.'], { cwd: dir });
   const run = () =>
@@ -57,12 +81,100 @@ test('public export validates its staged brand and port instead of contradictory
   assert.match(r.stdout, /Public Brand Guard/);
 });
 
+test('public guard rejects a missing staged roadmap even when the worktree restores it', () => {
+  const f = fixture();
+  execFileSync('git', ['rm', '--cached', 'docs/ROADMAP.md'], { cwd: f.dir });
+  assert.ok(readFileSync(resolve(f.dir, 'docs/ROADMAP.md'), 'utf8'));
+  const result = f.run();
+  assert.notEqual(result.status, 0, result.stdout + result.stderr);
+  assert.match(result.stdout + result.stderr, /roadmap.*must exist/i);
+});
+
+test('public guard requires its staged deployment configuration', () => {
+  const f = fixture();
+  execFileSync('git', ['rm', '--cached', 'packages/shared/src/deployment-profiles.json'], { cwd: f.dir });
+  const result = f.run();
+  assert.notEqual(result.status, 0, result.stdout + result.stderr);
+  assert.match(result.stdout + result.stderr, /deployment defaults.*must exist/);
+});
+
+test('public guard also rejects missing roadmap artifacts in worktree validation', () => {
+  const f = fixture();
+  unlinkSync(resolve(f.dir, 'docs/ROADMAP.md'));
+  const result = spawnSync('node', ['scripts/public-brand-validation.mjs'], {
+    cwd: f.dir,
+    encoding: 'utf8',
+    input: '[]',
+  });
+  assert.notEqual(result.status, 0, result.stdout + result.stderr);
+  assert.match(result.stdout + result.stderr, /roadmap.*must exist/i);
+});
+
+for (const target of ['../packages/shared/src/deployment-profiles.json', 'MISSING.md']) {
+  for (const fromIndex of [true, false]) {
+    test(`public guard rejects ${target} roadmap symlink in ${fromIndex ? 'index' : 'worktree'}`, () => {
+      const f = fixture();
+      const path = resolve(f.dir, 'docs/ROADMAP.md');
+      unlinkSync(path);
+      symlinkSync(target, path);
+      if (fromIndex) {
+        f.stage();
+        assert.match(
+          execFileSync('git', ['ls-files', '--stage', '--', 'docs/ROADMAP.md'], { cwd: f.dir, encoding: 'utf8' }),
+          /^120000 /,
+        );
+        // A valid worktree replacement must not hide the staged symlink.
+        unlinkSync(path);
+        f.write('docs/ROADMAP.md', '# Roadmap\n');
+      }
+      const result = spawnSync(
+        'node',
+        ['scripts/public-brand-validation.mjs', ...(fromIndex ? ['--from-index'] : [])],
+        {
+          cwd: f.dir,
+          encoding: 'utf8',
+          input: '[]',
+        },
+      );
+      assert.notEqual(result.status, 0, result.stdout + result.stderr);
+      assert.match(result.stdout + result.stderr, /roadmap.*regular file/i);
+    });
+  }
+}
+
+test('public worktree guard rejects a symlinked roadmap parent directory', () => {
+  const f = fixture();
+  renameSync(resolve(f.dir, 'docs'), resolve(f.dir, 'other-docs'));
+  symlinkSync('other-docs', resolve(f.dir, 'docs'));
+  const result = spawnSync('node', ['scripts/public-brand-validation.mjs'], {
+    cwd: f.dir,
+    encoding: 'utf8',
+    input: '[]',
+  });
+  assert.notEqual(result.status, 0, result.stdout + result.stderr);
+  assert.match(result.stdout + result.stderr, /roadmap.*regular file/i);
+});
+
+test('public guard rejects staged document-coordinate drift despite an unstaged repair', () => {
+  const f = fixture();
+  const path = 'packages/shared/src/deployment-profiles.json';
+  const original = readFileSync(resolve(f.dir, path), 'utf8');
+  const input = JSON.parse(original);
+  input.profiles.opensource.roadmapPath = 'docs/MISSING.md';
+  f.write(path, JSON.stringify(input));
+  f.stage();
+  f.write(path, original);
+  const result = f.run();
+  assert.notEqual(result.status, 0, result.stdout + result.stderr);
+  assert.match(result.stdout + result.stderr, /roadmapPath.*artifact/);
+});
+
 test('public guard rejects staged home port even when worktree has corrected it', () => {
   const f = fixture();
-  const path = 'packages/api/src/infrastructure/connectors/connector-gateway-bootstrap.ts';
-  f.write(path, "frontendBaseUrl: deps.frontendBaseUrl ?? 'http://localhost:3001'");
+  const path = 'packages/api/src/config/frontend-origin.ts';
+  f.write(path, "const DEFAULT_FRONTEND_BASE_URL = 'http://localhost:3001'");
   f.stage();
-  f.write(path, "frontendBaseUrl: deps.frontendBaseUrl ?? 'http://localhost:3003'");
+  f.write(path, "const DEFAULT_FRONTEND_BASE_URL = 'http://localhost:3003'");
   const r = f.run();
   assert.notEqual(r.status, 0);
   assert.match(r.stdout + r.stderr, /public frontend port/);
@@ -187,16 +299,16 @@ for (const [name, path, body, diagnostic] of [
     /missing client for Clowder AI/,
   ],
   [
-    'Weixin fallback',
-    'packages/api/src/infrastructure/connectors/im-connectors/weixin/WeixinAdapter.ts',
+    'Agent API fallback',
+    'packages/api/src/domains/cats/services/agents/routing/AgentRouter.ts',
     "process.env.API_SERVER_PORT ?? '3002'",
     /public API fallback/,
   ],
   [
-    'Weixin hardcoded port',
-    'packages/api/src/infrastructure/connectors/im-connectors/weixin/WeixinAdapter.ts',
-    "process.env.API_SERVER_PORT ?? '3004'; const bad = 'http://localhost:3003'",
-    /hardcoded localhost/,
+    'frontend default with unrelated public URL',
+    'packages/api/src/config/frontend-origin.ts',
+    "const DEFAULT_FRONTEND_BASE_URL = 'http://localhost:3001'; const other = 'http://localhost:3003'",
+    /public frontend port/,
   ],
 ]) {
   test(`public rule rejects ${name} drift`, () => {
@@ -214,4 +326,36 @@ test('mandatory source checks include the public guard regressions', () => {
   assert.match(scripts['check:brand-guard'], /\bscripts\/public-brand-validation\.test\.mjs\b/);
   assert.match(scripts['check:sources'], /(?:^|&&)\s*pnpm check:brand-guard(?:\s*&&|$)/);
   assert.match(scripts.check, /(?:^|&&)\s*pnpm check:sources(?:\s*&&|$)/);
+});
+
+test('public configured frontend default checks staged profile data and rejects a home profile', () => {
+  const f = fixture();
+  f.write(
+    'packages/api/src/config/frontend-origin.ts',
+    "import { deploymentDefaults } from '@cat-cafe/shared';\nconst DEFAULT_FRONTEND_BASE_URL = deploymentDefaults.frontendBaseUrl;",
+  );
+  const file = 'packages/shared/src/deployment-profiles.json';
+  const config = {
+    schemaVersion: 1,
+    activeProfile: 'opensource',
+    profiles: {
+      opensource: {
+        apiPort: 3004,
+        webPort: 3003,
+        envRegistryFrontendPort: 3003,
+        corsOrigins: ['http://localhost:3003'],
+        roadmapPath: 'docs/ROADMAP.md',
+      },
+    },
+  };
+  f.write(file, JSON.stringify(config));
+  f.stage();
+  let result = f.run();
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  f.write(file, JSON.stringify({ ...config, activeProfile: 'home', profiles: { home: config.profiles.opensource } }));
+  f.stage();
+  f.write(file, JSON.stringify(config));
+  result = f.run();
+  assert.notEqual(result.status, 0);
+  assert.match(result.stdout + result.stderr, /public deployment/);
 });

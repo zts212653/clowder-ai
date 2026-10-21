@@ -1,28 +1,28 @@
 {
-  "source_commit_sha": "e74b4b0d46b1bd4a2cc85484e2c3451abb1be023",
-  "target_head_sha": "bdff9d9a035017519396cdc834c68c39409cf900",
+  "source_commit_sha": "1aa9d2fbcd6da6be0d267926708f7d89f2af7ff7",
+  "target_head_sha": "1fc3e6921f9898022db3b3d05b3d637e9a2530c9",
   "release_tag": null,
   "source_snapshot_tag": null,
   "manifest_version": 3,
-  "included_file_count": 14843,
+  "included_file_count": 14593,
   "excluded_file_count": 29,
-  "transform_count": 41,
+  "transform_count": 34,
   "secret_scan_result": "clean",
-  "synced_at": "2026-10-20T05:08:46Z",
+  "synced_at": "2026-10-21T03:41:35Z",
   "publicBehaviorReporter": {
-    "changeCount": 9,
+    "changeCount": 57,
     "watchlistTouched": true,
-    "migrationNotesLength": 4240,
+    "migrationNotesLength": 5153,
     "allowEmptyNotes": false,
     "allowEmptyNotesReason": null,
     "blockReason": null,
-    "reportBasename": "public-behavior-impact-2026-10-20T05-17-58-580Z.json"
+    "reportBasename": "public-behavior-impact-2026-10-21T03-58-19-758Z.json"
   },
   "publicDeltaGate": {
     "blockCount": 0,
     "overrideCount": 0,
     "cvoApprovalRequired": false,
-    "passCount": 257,
-    "reportBasename": "sync-public-delta-gate-2026-10-20T051611432Z.json"
+    "passCount": 3375,
+    "reportBasename": "sync-public-delta-gate-2026-10-21T035034046Z.json"
   }
 }

@@ -1,5 +1,7 @@
+const { deploymentDefaults, resolveDirectApiPort } = require('../shared/src/deployment-defaults.ts');
 const withPWA = require('@ducanh2912/next-pwa').default;
 const { resolveWebBuildRevision } = require('./scripts/build-revision.cjs');
+const currentVendorStylesheets = new Set(require('./src/generated/vendor-stylesheets.json'));
 
 const enablePwaInDev = process.env.ENABLE_PWA_IN_DEV === '1';
 const pwaDisabled = process.env.NODE_ENV === 'development' && !enablePwaInDev;
@@ -35,13 +37,13 @@ function resolveApiBaseUrl() {
 
   const frontendPort = Number(process.env.FRONTEND_PORT);
   if (Number.isInteger(frontendPort) && frontendPort > 0) {
-    return `http://localhost:${frontendPort + 1}`;
+    return `http://localhost:${resolveDirectApiPort(frontendPort, deploymentDefaults)}`;
   }
 
   const explicit = process.env.NEXT_PUBLIC_API_URL?.replace(/\/+$/, '');
   if (explicit) return explicit;
 
-  return 'http://localhost:3004';
+  return deploymentDefaults.apiBaseUrl;
 }
 
 const apiBaseUrl = resolveApiBaseUrl();
@@ -123,6 +125,17 @@ module.exports = withPWA({
   extendDefaultRuntimeCaching: true,
   workboxOptions: {
     disableDevLogs: true,
+    // Older documents can still request their immutable files, but installing
+    // a new worker should not download every historical CSS version.
+    manifestTransforms: [
+      async (entries) => ({
+        manifest: entries.filter((entry) => {
+          const url = `/${entry.url.replace(/^\/+/, '')}`;
+          return !/^\/vendor\/(?:app|xterm)\/[^/]+\.[a-f0-9]{16}\.css$/.test(url) || currentVendorStylesheets.has(url);
+        }),
+        warnings: [],
+      }),
+    ],
     // Keep the Electron package version in the navigation cache key. Desktop
     // starts at /?__clowder_desktop_version=<version> so an older worker may
     // serve static assets, but can never substitute its precached root shell.

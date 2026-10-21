@@ -31,7 +31,7 @@ export function CollectiveMediaShare({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
   const current = useRef(true);
-  const base = `/api/plugins/collective-connector/${encodeURIComponent(reference.connectionId)}/artifacts`;
+  const base = `/api/plugins/official.collective-connector/connections/${encodeURIComponent(reference.connectionId)}/artifacts`;
   const load = useCallback(
     async (after?: string) => {
       setBusy(true);

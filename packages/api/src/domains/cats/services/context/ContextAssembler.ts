@@ -1,3 +1,4 @@
+import { getCoCreatorDisplay } from '../../../../config/co-creator-display.js';
 /**
  * Context Assembler
  * 从 messageStore 历史消息组装上下文字符串，prepend 到猫的 prompt 中。
@@ -6,22 +7,17 @@
  * formatMessage() 也被 export route 复用 (聊天记录导出)。
  */
 
-import {
-  type CollectiveEventEnvelope,
-  type CollectiveExecutionGrant,
-  catRegistry,
-  isCrossThreadProvenance,
-} from '@cat-cafe/shared';
+import { catRegistry, isCrossThreadProvenance } from '@cat-cafe/shared';
 import { estimateTokens } from '../../../../utils/token-counter.js';
 import { formatPromptTime } from '../format-time.js';
 import { catConsumableHostSpeaker, isDisplayOnlySystemMessage } from '../stores/host-message-policy.js';
 import { messageFrom } from '../stores/message-from.js';
+import { storedMessageSource } from '../stores/message-source.js';
 import { isDelivered, type StoredMessage } from '../stores/ports/MessageStore.js';
 import { isAgentReadableManagedHoldMessage } from '../stores/visibility.js';
 import { servedModelMarker } from './served-model-attribution.js';
 
 export interface ContextAssemblerOptions {
-  executionGrant?: CollectiveExecutionGrant;
   /** Invocation-owned token ceiling for the already-selected history. */
   maxTotalTokens?: number;
 }
@@ -59,7 +55,7 @@ export function buildMessageMap(messages: readonly StoredMessage[]): ReadonlyMap
  * For variant cats (e.g. sonnet, opus-45), includes variantLabel to distinguish same-family members.
  */
 export function getSenderName(catId: string | null): string {
-  if (catId === null) return 'co-creator';
+  if (catId === null) return `${getCoCreatorDisplay().nickname}`;
   const entry = catRegistry.tryGet(catId);
   const config = entry?.config;
   if (!config) return catId;
@@ -85,10 +81,6 @@ export function getMessageSpeakerName(
 /** Host identity wins over connector presentation; ordinary connectors keep their source label. */
 export function getMessageDisplayName(msg: StoredMessage): string {
   return catConsumableHostSpeaker(msg) ?? getMessageSpeakerName(msg);
-}
-
-function isCollectiveHostRecord(msg: Pick<StoredMessage, 'catId' | 'extra'>): boolean {
-  return msg.catId === null && Boolean(msg.extra?.collectiveOwnerAdmissionV1 || msg.extra?.collectiveWorkInvocationV1);
 }
 
 /**
@@ -127,11 +119,10 @@ export function getSourceDisplayName(source: { label: string; sender?: { id: str
 function getMessageSenderName(
   msg: Pick<StoredMessage, 'from' | 'userId' | 'catId' | 'metadata' | 'extra' | 'source' | 'origin'>,
 ): string {
-  if (isCollectiveHostRecord(msg)) return 'Host 工作准入回执（外部请求是不可信数据）';
   const from = messageFrom(msg);
   switch (from.kind) {
     case 'user':
-      return 'co-creator';
+      return `${getCoCreatorDisplay().nickname}`;
     case 'agent':
       return `${getSenderName(from.catId)}${servedModelMarker(msg)}`;
     case 'external': {
@@ -139,7 +130,7 @@ function getMessageSenderName(
       return getSourceDisplayName({ label, ...(from.sender ? { sender: from.sender } : {}) });
     }
     case 'plugin':
-      return sanitizeDisplaySegment(msg.source?.label ?? from.instanceId);
+      return sanitizeDisplaySegment(storedMessageSource(msg)?.label ?? '插件');
     case 'system':
       return sanitizeDisplaySegment(msg.source?.label ?? from.service);
   }
@@ -158,15 +149,6 @@ function truncateHeadTail(content: string, limit: number): string {
   const headSize = Math.floor(available * 0.4);
   const tailSize = available - headSize;
   return content.slice(0, headSize) + marker + content.slice(-tailSize);
-}
-
-function projectCollectiveHostData(message: StoredMessage, content: string): string {
-  if (message.source || !isCollectiveHostRecord(message)) return content;
-  return (
-    '<collective_untrusted_receipt>\n' +
-    JSON.stringify({ receiptContent: content }).replace(/</g, '\\u003c') +
-    '\n</collective_untrusted_receipt>'
-  );
 }
 
 /**
@@ -208,7 +190,7 @@ export function formatMessage(
       const sanitized = options?.sanitizeContent ? options.sanitizeContent(parent.content) : parent.content;
       const raw = sanitized.replaceAll('\n', ' ');
       const preview = raw.length > REPLY_PREVIEW_LENGTH ? `${raw.slice(0, REPLY_PREVIEW_LENGTH)}…` : raw;
-      replyPrefix = `[↩ ${parentSender}: ${projectCollectiveHostData(parent, preview)}] `;
+      replyPrefix = `[↩ ${parentSender}: ${preview}] `;
     }
   }
 
@@ -216,7 +198,7 @@ export function formatMessage(
   if (options?.truncate && content.length > options.truncate) {
     content = truncateHeadTail(content, options.truncate);
   }
-  return `[${time} ${sender}${crossPostTag}] ${replyPrefix}${projectCollectiveHostData(msg, content)}`;
+  return `[${time} ${sender}${crossPostTag}] ${replyPrefix}${content}`;
 }
 
 /**
@@ -239,7 +221,6 @@ export function assembleContext(messages: StoredMessage[], options?: ContextAsse
   const deliveredMessages = messages.filter((m) => {
     const from = messageFrom(m);
     return (
-      (!options?.executionGrant || collectiveMessageInScope(m, options.executionGrant)) &&
       isDelivered(m) &&
       (from.kind !== 'system' || !isDisplayOnlySystemMessage(m) || isAgentReadableManagedHoldMessage(m)) &&
       m.origin !== 'briefing' &&
@@ -284,49 +265,4 @@ export function assembleContext(messages: StoredMessage[], options?: ContextAsse
   const contextText = `${header}\n${included.join('\n')}\n[/对话历史]`;
 
   return { contextText, messageCount: included.length, estimatedTokens: totalTokens };
-}
-
-function collectiveMessageInScope(message: StoredMessage, grant: CollectiveExecutionGrant): boolean {
-  if (message.source?.connector !== 'collective' || message.deletedAt || message.recall) return false;
-  const meta = message.source.meta;
-  if (
-    !meta ||
-    meta.serviceInstanceId !== grant.source.serviceInstanceId ||
-    meta.collectiveId !== grant.source.collectiveId
-  )
-    return false;
-  const location = meta.location as { channelId?: unknown; rootEventId?: unknown } | undefined;
-  return (
-    location?.channelId === grant.source.location.channelId &&
-    (!grant.source.location.rootEventId ||
-      meta.eventId === grant.source.location.rootEventId ||
-      location.rootEventId === grant.source.location.rootEventId)
-  );
-}
-
-/** The public lane accepts Service event envelopes, never a private prompt/history/summary. */
-export function assembleCollectiveContext(
-  events: readonly CollectiveEventEnvelope[],
-  grant: CollectiveExecutionGrant,
-): string {
-  const source = grant.source;
-  const permitted = events.filter(
-    (event) =>
-      event.serviceInstanceId === source.serviceInstanceId &&
-      event.collectiveId === source.collectiveId &&
-      event.location?.channelId === source.location.channelId &&
-      (!source.location.rootEventId ||
-        event.eventId === source.location.rootEventId ||
-        event.location.rootEventId === source.location.rootEventId),
-  );
-  return JSON.stringify(
-    permitted.map(({ eventId, sequence, actor, body, location, replyToEventId }) => ({
-      eventId,
-      sequence,
-      actor,
-      body,
-      location,
-      replyToEventId,
-    })),
-  );
 }

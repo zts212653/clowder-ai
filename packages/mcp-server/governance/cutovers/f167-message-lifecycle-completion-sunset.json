@@ -3,69 +3,51 @@
     "kind": "family",
     "resourceFamily": "task-workflow"
   },
-  "retiredNames": ["cat_cafe_complete_a2a_dispatch", "cat_cafe_complete_managed_hold", "cat_cafe_complete_event_wait"],
+  "retiredNames": [],
   "canonicalNames": [],
-  "expectedProfiles": {},
-  "rollbackRevision": "47f716cac016eca3211e4f0754ae18607f4ada45",
+  "expectedProfiles": {
+    "cat_cafe_list_tasks": ["full", "desktop:live-companion"],
+    "cat_cafe_read_entrusted_work": ["full", "readonly", "agent-key", "desktop:live-companion"],
+    "cat_cafe_update_entrusted_work": ["full", "desktop:live-companion"],
+    "cat_cafe_update_task": ["full", "desktop:live-companion"]
+  },
+  "rollbackRevision": "466d4549fe2d75c9cc5c96b9497f47e464d13cf2",
   "layers": {
     "mcp-definition": {
       "status": "covered",
-      "consumers": ["packages/mcp-server/src/tools/callback-tools.ts", "packages/mcp-server/src/tools/index.ts"]
+      "consumers": ["packages/mcp-server/src/canonical-server-tools.ts"]
     },
     "runtime-catalog-profile": {
       "status": "covered",
       "consumers": [
-        "packages/mcp-server/src/canonical-server-tools.ts",
+        "packages/mcp-server/src/server-toolsets.ts",
         "packages/mcp-server/governance/mcp-surface-baseline.json"
       ]
     },
     "prompt-l0": {
-      "status": "not-applicable",
-      "rationale": "Ordinary A2A and managed-hold completion now follow the persisted Message/Queue lifecycle; no completion instruction is injected into a model prompt.",
-      "absenceEvidence": [
-        "cat_cafe_complete_a2a_dispatch",
-        "cat_cafe_complete_managed_hold",
-        "cat_cafe_complete_event_wait"
-      ]
+      "status": "covered",
+      "consumers": ["assets/prompt-templates/l5-mcp-tools-index.md"]
     },
     "skill-convention": {
-      "status": "not-applicable",
-      "rationale": "The retired manual completion operations are no longer agent decisions or skill steps; hold_ball remains only for registering a persistent continuation.",
-      "absenceEvidence": [
-        "cat_cafe_complete_a2a_dispatch",
-        "cat_cafe_complete_managed_hold",
-        "cat_cafe_complete_event_wait"
-      ]
+      "status": "covered",
+      "consumers": ["cat-cafe-skills/refs/mcp-callbacks.md", "docs/features/F202-plugin-framework.md"]
     },
     "fixture-test": {
       "status": "covered",
       "consumers": [
         "packages/mcp-server/test/tool-registration.test.js",
-        "packages/api/test/turn-custody-projection.test.js",
-        "packages/api/test/managed-command-wake-recovery-sweep.test.js",
-        "packages/api/test/turn-custody-event-wait-remedial-prompt.test.js",
-        "packages/mcp-server/test/a2a-1577-terminal-retirement.test.mjs",
-        "packages/api/test/a2a-1577-thread-context-seam.test.mjs",
-        "packages/api/test/f317-live-dispatch-adoption.test.mjs",
-        "packages/mcp-server/test/tool-cutover-consumer-scan.test.ts"
+        "packages/mcp-server/test/f202-native-tracking-ownership.test.js",
+        "packages/api/test/system-prompt-builder.test.js"
       ]
     },
     "eval": {
       "status": "not-applicable",
-      "rationale": "The cutover removes a duplicate manual terminal declaration; the canonical Message/Queue lifecycle tests are the behavioral proof.",
-      "absenceEvidence": [
-        "cat_cafe_complete_a2a_dispatch",
-        "cat_cafe_complete_managed_hold",
-        "cat_cafe_complete_event_wait"
-      ]
+      "rationale": "C1 moves provider business to installed contributions and removes the retired task execution profile. Deterministic registration, profile and installed-contribution tests cover this ownership change; no model quality claim is made.",
+      "absenceEvidence": []
     },
     "observability": {
       "status": "covered",
-      "consumers": [
-        "packages/api/src/domains/cats/services/stores/visibility.ts",
-        "packages/api/src/domains/cats/services/context/ContextAssembler.ts",
-        "packages/api/src/domains/ball-custody/managed-command-wake-task-projection.ts"
-      ]
+      "consumers": ["packages/api/src/domains/plugin/runtime-composition.ts"]
     }
   }
 }

@@ -3,56 +3,60 @@
     "kind": "family",
     "resourceFamily": "tracking-review"
   },
-  "retiredNames": [],
-  "canonicalNames": ["cat_cafe_transfer_external_review"],
-  "expectedProfiles": {
-    "cat_cafe_transfer_external_review": ["full"]
-  },
-  "rollbackRevision": "e511896dc26ce771911c716fe3009e19de04f080",
+  "retiredNames": [
+    "cat_cafe_record_external_review_verdict",
+    "cat_cafe_recover_external_review_verdict",
+    "cat_cafe_register_issue_tracking",
+    "cat_cafe_register_pr_tracking",
+    "cat_cafe_transfer_external_review",
+    "cat_cafe_unregister_tracking"
+  ],
+  "canonicalNames": [],
+  "expectedProfiles": {},
+  "rollbackRevision": "466d4549fe2d75c9cc5c96b9497f47e464d13cf2",
   "layers": {
     "mcp-definition": {
       "status": "covered",
-      "consumers": [
-        "packages/mcp-server/src/tools/external-review-verdict-tool.ts",
-        "packages/api/src/routes/callback-external-review-transfer-route.ts"
-      ]
+      "consumers": ["packages/mcp-server/src/canonical-server-tools.ts"]
     },
     "runtime-catalog-profile": {
       "status": "covered",
       "consumers": [
-        "packages/mcp-server/src/canonical-server-tools.ts",
+        "packages/mcp-server/src/server-toolsets.ts",
         "packages/mcp-server/governance/mcp-surface-baseline.json"
       ]
     },
     "prompt-l0": {
-      "status": "not-applicable",
-      "rationale": "Tool discovery exposes this scoped cat-only handover; no new constant L0 injection.",
-      "absenceEvidence": ["cat_cafe_transfer_external_review"]
+      "status": "covered",
+      "consumers": ["assets/prompt-templates/l5-mcp-tools-index.md"]
     },
     "skill-convention": {
       "status": "covered",
-      "consumers": ["docs/features/F168-community-ops-board.md", "docs/plans/2026-10-06-f168-reviewer-transfer.md"]
+      "consumers": ["cat-cafe-skills/refs/mcp-callbacks.md", "docs/features/F202-plugin-framework.md"]
     },
     "fixture-test": {
       "status": "covered",
       "consumers": [
-        "packages/api/test/f168-reviewer-transfer.test.ts",
-        "packages/api/test/f168-reviewer-transfer-routes.test.ts",
-        "packages/api/test/redis-community-event-log.test.js",
-        "packages/mcp-server/test/external-review-verdict-tool.test.js"
+        "packages/mcp-server/test/tool-registration.test.js",
+        "packages/mcp-server/test/f202-native-tracking-ownership.test.js",
+        "packages/api/test/system-prompt-builder.test.js"
       ]
     },
     "eval": {
       "status": "not-applicable",
-      "rationale": "Deterministic authority, replay and CAS contracts use regression tests; there is no uncertain utility claim.",
-      "absenceEvidence": ["cat_cafe_transfer_external_review"]
+      "rationale": "C1 moves provider business to installed contributions and removes the retired task execution profile. Deterministic registration, profile and installed-contribution tests cover this ownership change; no model quality claim is made.",
+      "absenceEvidence": [
+        "cat_cafe_record_external_review_verdict",
+        "cat_cafe_recover_external_review_verdict",
+        "cat_cafe_register_issue_tracking",
+        "cat_cafe_register_pr_tracking",
+        "cat_cafe_transfer_external_review",
+        "cat_cafe_unregister_tracking"
+      ]
     },
     "observability": {
       "status": "covered",
-      "consumers": [
-        "packages/api/src/domains/community/CommunityEventLog.ts",
-        "packages/api/src/domains/community/community-projector.ts"
-      ]
+      "consumers": ["packages/api/src/domains/plugin/runtime-composition.ts"]
     }
   }
 }

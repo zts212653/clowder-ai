@@ -2,6 +2,34 @@ export function ownerAllowsActions(owner: HTMLElement) {
   return !owner.closest('[aria-hidden="true"], [inert], [hidden]') && getComputedStyle(owner).visibility !== 'hidden';
 }
 
+/** The same live reading clip is used during invalidation and the settled geometry pass. */
+export function readActionPort(port: HTMLElement | null) {
+  const rect = port?.getBoundingClientRect();
+  return {
+    top: Math.max(0, (rect?.top ?? 0) + (port?.clientTop ?? 0)),
+    bottom: Math.min(
+      window.innerHeight,
+      rect ? rect.top + (port?.clientTop ?? 0) + (port?.clientHeight || rect.height) : window.innerHeight,
+    ),
+    left: Math.max(0, (rect?.left ?? 0) + (port?.clientLeft ?? 0)),
+    right: Math.min(
+      window.innerWidth,
+      rect ? rect.left + (port?.clientLeft ?? 0) + (port?.clientWidth || rect.width) : window.innerWidth,
+    ),
+  };
+}
+
+export function messageIsReadable(row: HTMLElement, port: ReturnType<typeof readActionPort>) {
+  const bounds = row.getBoundingClientRect();
+  return (
+    ownerAllowsActions(row) &&
+    bounds.bottom > port.top &&
+    bounds.top < port.bottom &&
+    bounds.right > port.left &&
+    bounds.left < port.right
+  );
+}
+
 function fitsAfterAnchor(slot: DOMRect, bounds: DOMRect, width: number, isUser: boolean) {
   return isUser ? slot.left - width >= bounds.left : slot.right + width <= bounds.right;
 }

@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { chmodSync, existsSync, lstatSync, mkdirSync, realpathSync } from 'node:fs';
 import { tmpdir, userInfo } from 'node:os';
-import { basename, isAbsolute, join, type PlatformPath, posix, relative, resolve, win32 } from 'node:path';
+import { basename, dirname, isAbsolute, join, type PlatformPath, posix, relative, resolve, win32 } from 'node:path';
 import { ensureWindowsAcpBootstrapDirectories } from './acp-bootstrap-windows-directory.js';
 
 const SAFE_SEGMENT_RE = /[^a-zA-Z0-9._-]+/g;
@@ -45,6 +45,25 @@ export function resolveAcpBootstrapRoot(platform: NodeJS.Platform = process.plat
   return pathApi.join(platform === 'win32' ? tempRoot : '/tmp', `cat-cafe-acp-bootstrap-${bootstrapOwnerSegment()}`);
 }
 
+/**
+ * Machine-local fallback for Windows profiles whose temp ACLs were modified by
+ * another tool (a sandbox group or sibling user holding Modify/Delete on the
+ * profile ancestors). ProgramData stays trusted on default Windows installs and
+ * the fallback root receives the same protected owner-only DACL, so privacy is
+ * unchanged — only the ancestor chain that cannot be replaced differs.
+ */
+export function resolveWindowsAcpBootstrapFallbackRoot(
+  platform: NodeJS.Platform = process.platform,
+  programData = process.env.ProgramData ?? process.env.ALLUSERSPROFILE ?? '',
+): string | undefined {
+  if (platform !== 'win32') return undefined;
+  const base = programData.trim();
+  if (!base) return undefined;
+  return win32.join(base, 'ClowderAI', 'acp-bootstrap', `cat-cafe-acp-bootstrap-${bootstrapOwnerSegment()}`);
+}
+
+type WindowsBootstrapEnsurer = (root: string, cwd: string) => void;
+
 export function isPathWithinRoot(
   rootPath: string,
   candidatePath: string,
@@ -86,20 +105,47 @@ export function resolveAcpBootstrapCwd(
   // #1203: Test-isolation injection point — tests pass a throwaway root so
   // their fixtures and cleanup never touch the uid-shared production root.
   bootstrapRoot: string = resolveAcpBootstrapRoot(),
+  windowsEnsure: WindowsBootstrapEnsurer = ensureWindowsAcpBootstrapDirectories,
+  windowsFallbackRoot: string | undefined = resolveWindowsAcpBootstrapFallbackRoot(),
+  // Only the production default root may relocate. Callers that inject a root
+  // (tests, isolated fixtures) keep the fail-closed contract they assert.
+  allowWindowsFallback = bootstrapRoot === resolveAcpBootstrapRoot(),
 ): string {
   const normalizedProjectRoot = resolve(projectRoot);
   const projectSlug = sanitizeSegment(basename(normalizedProjectRoot), 'project');
   const providerSlug = sanitizeSegment(providerProfile, 'profile');
   const digest = createHash('sha1').update(`${normalizedProjectRoot}::${providerProfile}`).digest('hex').slice(0, 12);
-  const dir = join(bootstrapRoot, `${projectSlug}-${providerSlug}-${digest}`);
+  const leaf = `${projectSlug}-${providerSlug}-${digest}`;
+  let root = bootstrapRoot;
+  let dir = join(root, leaf);
   if (process.platform === 'win32') {
     // Creates with a private DACL atomically; existing directories are only
     // inspected, never repaired. Windows chmod cannot enforce this boundary.
-    ensureWindowsAcpBootstrapDirectories(bootstrapRoot, dir);
+    try {
+      windowsEnsure(root, dir);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      const fallbackDir = windowsFallbackRoot ? join(windowsFallbackRoot, leaf) : undefined;
+      // Only an unsafe ancestor chain justifies relocating the root. A reparse
+      // point at the cwd itself must still fail closed.
+      if (!allowWindowsFallback || !fallbackDir || !/permits unsafe directory replacement/.test(message)) throw error;
+      if (resolve(fallbackDir) === resolve(dir)) throw error;
+      // A sibling principal (sandbox group or another local user) holds Modify
+      // or Delete on the temp-profile ancestors, so it could replace the private
+      // bootstrap directory. ProgramData's default ancestor chain stays trusted
+      // and the fallback root receives the same protected owner-only DACL.
+      console.warn(`[acp] Windows ACP bootstrap root rejected (${message}); using ${windowsFallbackRoot}`);
+      // The private root must be created by the ACL helper, so only the
+      // non-sensitive container above it is created here.
+      mkdirSync(dirname(windowsFallbackRoot as string), { recursive: true });
+      windowsEnsure(windowsFallbackRoot as string, fallbackDir);
+      root = windowsFallbackRoot as string;
+      dir = fallbackDir;
+    }
   } else {
-    mkdirSync(bootstrapRoot, { recursive: true, mode: OWNER_ONLY_MODE });
-    assertRealDirectory(bootstrapRoot, 'ACP bootstrap root');
-    enforceOwnerOnlyPermissions(bootstrapRoot);
+    mkdirSync(root, { recursive: true, mode: OWNER_ONLY_MODE });
+    assertRealDirectory(root, 'ACP bootstrap root');
+    enforceOwnerOnlyPermissions(root);
     try {
       mkdirSync(dir, { recursive: false, mode: OWNER_ONLY_MODE });
     } catch (err) {
@@ -108,9 +154,9 @@ export function resolveAcpBootstrapCwd(
     assertRealDirectory(dir, 'ACP bootstrap cwd');
     enforceOwnerOnlyPermissions(dir);
   }
-  assertRealDirectory(bootstrapRoot, 'ACP bootstrap root');
+  assertRealDirectory(root, 'ACP bootstrap root');
   assertRealDirectory(dir, 'ACP bootstrap cwd');
-  const realBootstrapRoot = realpathSync(bootstrapRoot);
+  const realBootstrapRoot = realpathSync(root);
   const realDir = realpathSync(dir);
   if (!isPathWithinRoot(realBootstrapRoot, realDir, { relative, isAbsolute })) {
     throw new Error(`ACP bootstrap cwd escaped bootstrap root: ${realDir}`);

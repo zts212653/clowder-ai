@@ -1,5 +1,6 @@
 export interface CoCreatorConfig {
   name: string;
+  nickname?: string;
   aliases: string[];
   mentionPatterns: string[];
   avatar?: string;

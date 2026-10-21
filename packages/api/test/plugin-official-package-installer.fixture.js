@@ -25,7 +25,7 @@ export function manifest(overrides = {}) {
         id: 'source',
         name: 'Source',
         resources: [],
-        capabilities: ['events.publish'],
+        capabilities: ['messaging.send'],
       },
     ],
     signals: {
@@ -54,6 +54,15 @@ export async function packageArchive({
   const packageRoot = join(sourceRoot, 'package');
   await mkdir(join(packageRoot, 'dist'), { recursive: true });
   await mkdir(join(packageRoot, 'schemas'), { recursive: true });
+  await writeFile(
+    join(packageRoot, 'package.json'),
+    `${JSON.stringify({
+      name: '@clowder-ai/official-test-source',
+      version: packageManifest.version,
+      type: 'module',
+    })}\n`,
+    'utf8',
+  );
   await writeFile(join(packageRoot, manifestFilename), `${JSON.stringify(packageManifest)}\n`, 'utf8');
   await writeFile(join(packageRoot, 'dist/entrypoint.js'), '// official fixture\n', 'utf8');
   if (includeSchema) {
@@ -88,7 +97,7 @@ export function catalogEntry(integrity, overrides = {}) {
     distribution: 'registry',
     archiveUrl: 'https://registry.npmjs.org/@clowder-ai/official-test-source/-/official-test-source-0.1.0-alpha.1.tgz',
     packageDigest: integrity,
-    effectiveGrants: ['events.publish'],
+    effectiveGrants: ['messaging.send'],
     ...overrides,
   };
 }

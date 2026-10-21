@@ -63,19 +63,19 @@ describe('action successor shared contract', () => {
   it('uses canonical subject grammar for every successor carrier', () => {
     const invalid = actionSuccessorMetadataSchema.safeParse({
       subjectRef: 'github:owner/repo#2868@abc1234',
-      actionFamily: 'review',
-      successorSlot: 'reviewer',
+      actionFamily: 'implement',
+      successorSlot: 'implementer',
       mode: 'single',
-      terminalPredicate: { kind: 'review_delivered', headSha: FULL_HEAD_SHA },
+      terminalPredicate: { kind: 'task_done' },
     });
     expect(invalid.success).toBe(false);
     expect(
       actionSuccessorMetadataSchema.safeParse({
-        subjectRef: 'pr:owner/repo#2868',
-        actionFamily: 'review',
-        successorSlot: 'reviewer',
+        subjectRef: 'subject:task:work-2868',
+        actionFamily: 'implement',
+        successorSlot: 'implementer',
         mode: 'single',
-        terminalPredicate: { kind: 'review_delivered', headSha: FULL_HEAD_SHA },
+        terminalPredicate: { kind: 'task_done' },
       }).success,
     ).toBe(true);
   });
@@ -83,7 +83,7 @@ describe('action successor shared contract', () => {
   it('rejects arbitrary slots that could evade the canonical key', () => {
     expect(
       actionSuccessorMetadataSchema.safeParse({
-        subjectRef: 'pr:owner/repo#2868',
+        subjectRef: 'subject:task:work-2868',
         actionFamily: 'merge',
         successorSlot: 'reviewer-2',
         mode: 'single',
@@ -94,55 +94,45 @@ describe('action successor shared contract', () => {
   it('requires explicit intent for parallel cardinality', () => {
     expect(
       actionSuccessorMetadataSchema.safeParse({
-        subjectRef: 'pr:owner/repo#2868',
-        actionFamily: 'review',
-        successorSlot: 'reviewer',
+        subjectRef: 'subject:task:work-2868',
+        actionFamily: 'implement',
+        successorSlot: 'implementer',
         mode: 'parallel',
       }).success,
     ).toBe(false);
     expect(
       actionSuccessorMetadataSchema.safeParse({
-        subjectRef: 'pr:owner/repo#2868',
-        actionFamily: 'review',
-        successorSlot: 'reviewer',
+        subjectRef: 'subject:task:work-2868',
+        actionFamily: 'implement',
+        successorSlot: 'implementer',
         mode: 'parallel',
         parallelIntent: 'independent_review',
-        terminalPredicate: { kind: 'review_delivered', headSha: FULL_HEAD_SHA },
+        terminalPredicate: { kind: 'task_done' },
       }).success,
     ).toBe(true);
   });
 
-  it('rejects abbreviated or non-canonical HEADs before creating a lease', () => {
-    const base = {
-      subjectRef: 'pr:owner/repo#2868',
-      actionFamily: 'review',
-      successorSlot: 'reviewer',
-      mode: 'single',
-    } as const;
-
-    for (const headSha of ['abc1234', 'A'.repeat(40), 'g'.repeat(40), 'a'.repeat(39), 'a'.repeat(41)]) {
+  it('rejects the removed GitHub review predicate for every HEAD', () => {
+    for (const headSha of ['abc1234', 'a'.repeat(40), 'b'.repeat(64)]) {
       expect(
         actionSuccessorMetadataSchema.safeParse({
-          ...base,
+          subjectRef: 'pr:owner/repo#1',
+          actionFamily: 'review',
+          successorSlot: 'reviewer',
+          mode: 'single',
           terminalPredicate: { kind: 'review_delivered', headSha },
         }).success,
       ).toBe(false);
     }
-    expect(
-      actionSuccessorMetadataSchema.safeParse({
-        ...base,
-        terminalPredicate: { kind: 'review_delivered', headSha: 'b'.repeat(64) },
-      }).success,
-    ).toBe(true);
   });
 
   it('drops the retired local-review re-entry control field from action metadata', () => {
     const base = {
-      subjectRef: 'pr:owner/repo#2868',
-      actionFamily: 'review',
-      successorSlot: 'reviewer',
+      subjectRef: 'subject:task:work-2868',
+      actionFamily: 'implement',
+      successorSlot: 'implementer',
       mode: 'single',
-      terminalPredicate: { kind: 'review_delivered', headSha: FULL_HEAD_SHA },
+      terminalPredicate: { kind: 'task_done' },
     } as const;
 
     const parsed = actionSuccessorMetadataSchema.safeParse({
@@ -155,7 +145,7 @@ describe('action successor shared contract', () => {
 
   it('requires durable grounding evidence for an existing-standing self claim', () => {
     const missingEvidence = actionSuccessorMetadataSchema.safeParse({
-      subjectRef: 'pr:owner/repo#2868',
+      subjectRef: 'subject:task:work-2868',
       actionFamily: 'implement',
       successorSlot: 'implementer',
       mode: 'single',
@@ -164,7 +154,7 @@ describe('action successor shared contract', () => {
     expect(missingEvidence.success).toBe(false);
 
     const grounded = actionSuccessorMetadataSchema.parse({
-      subjectRef: 'pr:owner/repo#2868',
+      subjectRef: 'subject:task:work-2868',
       actionFamily: 'implement',
       successorSlot: 'implementer',
       mode: 'single',
@@ -208,7 +198,7 @@ describe('action successor shared contract', () => {
       mode: 'single',
       terminalPredicate: { kind: 'task_done' },
     });
-    expect(review.success).toBe(true);
+    expect(review.success).toBe(false);
     expect(implementation.success).toBe(true);
 
     for (const unsupported of [
@@ -299,9 +289,9 @@ describe('action successor shared contract', () => {
 
   it('requires a typed terminal predicate for replacement generations while allowing a pure return', () => {
     const replacement = {
-      subjectRef: 'pr:owner/repo#2868',
-      actionFamily: 'review',
-      successorSlot: 'reviewer',
+      subjectRef: 'subject:task:work-2868',
+      actionFamily: 'implement',
+      successorSlot: 'implementer',
       mode: 'single',
       replace: { leaseId: 'lease-1', expectedGeneration: 1 },
     } as const;
@@ -309,7 +299,7 @@ describe('action successor shared contract', () => {
     expect(
       actionSuccessorMetadataSchema.safeParse({
         ...replacement,
-        terminalPredicate: { kind: 'review_delivered', headSha: FULL_HEAD_SHA },
+        terminalPredicate: { kind: 'task_done' },
       }).success,
     ).toBe(true);
   });

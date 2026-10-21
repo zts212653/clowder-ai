@@ -94,6 +94,22 @@ describe('apiFetch bounded completion', () => {
     });
   });
 
+  it('keeps a long installation pending beyond the ordinary deadline, but still bounds it', async () => {
+    globalThis.fetch = vi.fn((url: string) =>
+      url.includes('/api/session')
+        ? Promise.resolve(new Response('{}', { status: 200 }))
+        : new Promise<Response>(() => undefined),
+    ) as typeof fetch;
+    const apiFetch = await loadApiFetch();
+    const result = observe(
+      apiFetch('/api/plugin-manager/plugins/install', { method: 'POST' }, { mutationTimeoutMs: 600_000 }),
+    );
+    await vi.advanceTimersByTimeAsync(30_001);
+    expect(await settledOutcome(result)).toMatchObject({ kind: 'pending' });
+    await vi.advanceTimersByTimeAsync(600_000);
+    expect(await settledOutcome(result)).toMatchObject({ kind: 'rejected', error: { name: 'TimeoutError' } });
+  });
+
   it('lets one caller abort while concurrent callers keep sharing the same session bootstrap', async () => {
     const session = deferred<Response>();
     const mockFetch = vi.fn((url: string) => {

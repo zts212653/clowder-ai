@@ -191,6 +191,7 @@ export function replaceActionSuccessor(
       dispatchId: input.dispatchId,
       terminalPredicateState: { kind: 'predicate_backed' },
       terminalPredicate: input.terminalPredicate,
+
       generation: current.generation + 1,
       status: 'active',
       holderOutcomes: {},

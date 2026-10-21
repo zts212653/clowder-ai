@@ -257,6 +257,7 @@ export function continueActionSuccessorFreshRevision(
       holderOutcomes: {},
       terminalPredicateState: { kind: 'predicate_backed' },
       terminalPredicate: input.terminalPredicate,
+
       completionCandidates: {},
       evidenceRefs: [
         ...new Set([issuerStandingEvidenceRef, evidenceRef, input.delegateEvidenceRef].filter((r): r is string => !!r)),

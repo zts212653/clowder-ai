@@ -1,0 +1,70 @@
+{
+  "resource": {
+    "kind": "family",
+    "resourceFamily": "collective-participation"
+  },
+  "retiredNames": [
+    "cat_cafe_collective_accept_work",
+    "cat_cafe_collective_artifact_command",
+    "cat_cafe_collective_continue_work",
+    "cat_cafe_collective_current_context",
+    "cat_cafe_collective_progress",
+    "cat_cafe_collective_propose_work",
+    "cat_cafe_collective_read_context",
+    "cat_cafe_collective_reply",
+    "cat_cafe_collective_set_interest",
+    "cat_cafe_collective_suggest_project_work"
+  ],
+  "canonicalNames": [],
+  "expectedProfiles": {},
+  "rollbackRevision": "db22707d59d530e4d140f79eedf8bd0db6ee7a29",
+  "layers": {
+    "mcp-definition": {
+      "status": "covered",
+      "consumers": ["packages/mcp-server/src/canonical-server-tools.ts"]
+    },
+    "runtime-catalog-profile": {
+      "status": "covered",
+      "consumers": [
+        "packages/mcp-server/src/server-toolsets.ts",
+        "packages/mcp-server/governance/mcp-surface-baseline.json"
+      ]
+    },
+    "prompt-l0": {
+      "status": "covered",
+      "consumers": ["assets/prompt-templates/l5-mcp-tools-index.md"]
+    },
+    "skill-convention": {
+      "status": "covered",
+      "consumers": ["cat-cafe-skills/refs/mcp-callbacks.md", "docs/features/F202-plugin-framework.md"]
+    },
+    "fixture-test": {
+      "status": "covered",
+      "consumers": [
+        "packages/mcp-server/test/tool-registration.test.js",
+        "packages/mcp-server/test/f202-native-tracking-ownership.test.js",
+        "packages/api/test/system-prompt-builder.test.js"
+      ]
+    },
+    "eval": {
+      "status": "not-applicable",
+      "rationale": "C1 moves provider business to installed contributions and removes the retired task execution profile. Deterministic registration, profile and installed-contribution tests cover this ownership change; no model quality claim is made.",
+      "absenceEvidence": [
+        "cat_cafe_collective_accept_work",
+        "cat_cafe_collective_artifact_command",
+        "cat_cafe_collective_continue_work",
+        "cat_cafe_collective_current_context",
+        "cat_cafe_collective_progress",
+        "cat_cafe_collective_propose_work",
+        "cat_cafe_collective_read_context",
+        "cat_cafe_collective_reply",
+        "cat_cafe_collective_set_interest",
+        "cat_cafe_collective_suggest_project_work"
+      ]
+    },
+    "observability": {
+      "status": "covered",
+      "consumers": ["packages/api/src/domains/plugin/runtime-composition.ts"]
+    }
+  }
+}

@@ -1,3 +1,6 @@
+import { type CloudBindingRefusal, catRegistry } from '@cat-cafe/shared';
+import { resolveCloudConversationCat } from '../domains/cats/services/cloud-bridge/cloud-conversation-identity.js';
+import { pluginPrTitleReader } from './plugin/pr-artifact-title-reader.js';
 /**
  * Thread API Routes
  * POST   /api/threads     - 创建对话
@@ -678,6 +681,7 @@ const bootcampStateSchema = z
       .optional(),
     advancedFeatures: z.record(z.enum(['available', 'unavailable', 'skipped'])).optional(),
     startedAt: z.number(),
+    journeyId: z.string().min(8).max(200).optional(),
     completedAt: z.number().optional(),
   })
   .strict();
@@ -935,6 +939,25 @@ export const threadsRoutes: FastifyPluginAsync<ThreadsRoutesOptions> = async (ap
       return { error: 'Identity required (session cookie or X-Cat-Cafe-User header)' };
     }
 
+    const onboardingJourneyId = request.headers['x-cat-cafe-onboarding-journey'];
+    const onboardingIdempotencyKey = request.headers['idempotency-key'];
+    const headerJourneyId = typeof onboardingJourneyId === 'string' ? onboardingJourneyId : undefined;
+    const keyJourneyId =
+      typeof onboardingIdempotencyKey === 'string' && onboardingIdempotencyKey.startsWith('onboarding:')
+        ? onboardingIdempotencyKey.slice('onboarding:'.length)
+        : undefined;
+    const journeyId = headerJourneyId ?? bootcampState?.journeyId ?? keyJourneyId;
+    if (journeyId !== undefined && (journeyId.length < 8 || journeyId.length > 200)) {
+      reply.status(400);
+      return { error: 'Invalid onboarding journey id' };
+    }
+    if (journeyId) {
+      const existing = (await threadStore.list(userId)).find(
+        (candidate) => candidate.bootcampState?.journeyId === journeyId,
+      );
+      if (existing) return sanitizeThreadForResponse(existing, userId);
+    }
+
     const resolvedProjectPath = await resolveCreateThreadProjectPath(projectPath, bootcampState as BootcampStateV1);
     if (!resolvedProjectPath.ok) {
       reply.status(resolvedProjectPath.statusCode);
@@ -942,6 +965,21 @@ export const threadsRoutes: FastifyPluginAsync<ThreadsRoutesOptions> = async (ap
     }
 
     let thread: Thread;
+    if (journeyId && threadStore.ensureOnboardingThread) {
+      const ensured = await threadStore.ensureOnboardingThread(
+        userId,
+        journeyId,
+        title ?? '首启协作旅程',
+        resolvedProjectPath.projectPath ?? 'default',
+        bootcampState as BootcampStateV1,
+      );
+      if (ensured.thread.createdBy !== userId) {
+        reply.status(409);
+        return { error: 'Onboarding journey belongs to another user' };
+      }
+      reply.status(ensured.created ? 201 : 200);
+      return sanitizeThreadForResponse(ensured.thread, userId);
+    }
     if (idempotencyKey) {
       try {
         thread = await threadStore.ensureOwnedThread({
@@ -1413,7 +1451,10 @@ export const threadsRoutes: FastifyPluginAsync<ThreadsRoutesOptions> = async (ap
       return { error: 'Only the thread owner can read cloud cat bindings' };
     }
     const bindings = await threadStore.getCloudCatBindings(id);
-    return { bindings };
+    // F202 h3c-2: which cat's binding is the thread's ChatGPT conversation is the Host's answer, not
+    // a fixed id — the panel lists the binding of the configured cloud cat, and none when the
+    // provider has no cat or several.
+    return { bindings, cloudCat: resolveCloudConversationCat(catRegistry, 'chatgpt') };
   });
 
   // PATCH /api/threads/:id/cloud-bindings — STRICT user-owned only.
@@ -1422,34 +1463,51 @@ export const threadsRoutes: FastifyPluginAsync<ThreadsRoutesOptions> = async (ap
   //
   // Auth model: same 4 layers as GET (strict resolver / reserved-identity reject /
   // system-thread reject / literal owner match). See GET doc above for history.
+  //
+  // F202 h3c-1: every refusal carries a `CloudBindingRefusal` code, and only these checks — all made
+  // before the write — send one. A client reads such a refusal as "nothing was written"; any other
+  // failure leaves the outcome unknown, and the client reads the binding back.
   app.patch<{ Params: { id: string } }>('/api/threads/:id/cloud-bindings', async (request, reply) => {
     const { id } = request.params;
     const userId = resolveStrictUserId(request);
     if (!userId) {
       reply.status(401);
-      return { error: 'Authentication required' };
+      return { error: 'Authentication required', code: 'CLOUD_BINDING_AUTH_REQUIRED' satisfies CloudBindingRefusal };
     }
     if (SYSTEM_USER_IDS.has(userId)) {
       reply.status(401);
-      return { error: 'Reserved internal identity cannot be used' };
+      return {
+        error: 'Reserved internal identity cannot be used',
+        code: 'CLOUD_BINDING_RESERVED_IDENTITY' satisfies CloudBindingRefusal,
+      };
     }
     const parseResult = cloudBindingPatchSchema.safeParse(request.body);
     if (!parseResult.success) {
       reply.status(400);
-      return { error: 'Invalid request body', details: parseResult.error.issues };
+      return {
+        error: 'Invalid request body',
+        code: 'CLOUD_BINDING_INVALID_BODY' satisfies CloudBindingRefusal,
+        details: parseResult.error.issues,
+      };
     }
     const thread = await threadStore.get(id);
     if (!thread || thread.deletedAt) {
       reply.status(404);
-      return { error: 'Thread not found' };
+      return { error: 'Thread not found', code: 'CLOUD_BINDING_THREAD_NOT_FOUND' satisfies CloudBindingRefusal };
     }
     if (SYSTEM_USER_IDS.has(thread.createdBy)) {
       reply.status(403);
-      return { error: 'Cloud cat bindings are not supported on system-owned threads' };
+      return {
+        error: 'Cloud cat bindings are not supported on system-owned threads',
+        code: 'CLOUD_BINDING_SYSTEM_THREAD' satisfies CloudBindingRefusal,
+      };
     }
     if (thread.createdBy !== userId) {
       reply.status(403);
-      return { error: 'Only the thread owner can update cloud cat bindings' };
+      return {
+        error: 'Only the thread owner can update cloud cat bindings',
+        code: 'CLOUD_BINDING_NOT_OWNER' satisfies CloudBindingRefusal,
+      };
     }
     const { catId, chatUrl } = parseResult.data;
     await threadStore.updateCloudCatBinding(id, catId as CatId, chatUrl);
@@ -1637,7 +1695,7 @@ export const threadsRoutes: FastifyPluginAsync<ThreadsRoutesOptions> = async (ap
         prTasks,
         fileLedger: worksView ? [] : fileLedger,
       }),
-      worksView ? opts.prTitleReader : undefined,
+      worksView ? (opts.prTitleReader ?? pluginPrTitleReader(app, request)) : undefined,
     );
     const projected = await projectGlobalArtifactWorkLineage(
       opts.artifactWorkLineage,
@@ -1786,7 +1844,10 @@ export const threadsRoutes: FastifyPluginAsync<ThreadsRoutesOptions> = async (ap
       rawQuery as { type?: string; cat?: string; q?: string | string[] },
     );
 
-    const titled = await readArtifactPrTitles(all, worksView ? opts.prTitleReader : undefined);
+    const titled = await readArtifactPrTitles(
+      all,
+      worksView ? (opts.prTitleReader ?? pluginPrTitleReader(app, request)) : undefined,
+    );
     const projected = await projectGlobalArtifactWorkLineage(opts.artifactWorkLineage, userId, titled);
     return worksView
       ? {

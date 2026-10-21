@@ -6,8 +6,8 @@ import type { Achievement, CvoLevel } from '@cat-cafe/shared';
 import { ALL_ACHIEVEMENTS, computeCvoLevel } from './achievement-defs.js';
 
 export class AchievementStore {
-  /** userId → Set of achievementIds */
-  private unlocked = new Map<string, Map<string, Achievement>>();
+  /** userId → achievementId → unlock time; display definitions stay live. */
+  private unlocked = new Map<string, Map<string, number>>();
 
   unlock(userId: string, achievementId: string): Achievement | undefined {
     const def = ALL_ACHIEVEMENTS.get(achievementId);
@@ -19,24 +19,22 @@ export class AchievementStore {
       this.unlocked.set(userId, userMap);
     }
 
-    // Idempotent — return existing if already unlocked
-    const existing = userMap.get(achievementId);
-    if (existing) return existing;
-
-    const achievement: Achievement = { ...def, unlockedAt: Date.now() };
-    userMap.set(achievementId, achievement);
-    return achievement;
+    const unlockedAt = userMap.get(achievementId) ?? Date.now();
+    userMap.set(achievementId, unlockedAt);
+    return { ...def, unlockedAt };
   }
 
   getUnlocked(userId: string): Achievement[] {
     const userMap = this.unlocked.get(userId);
     if (!userMap) return [];
-    return [...userMap.values()];
+    return [...userMap].flatMap(([id, unlockedAt]) => {
+      const def = ALL_ACHIEVEMENTS.get(id);
+      return def ? [{ ...def, unlockedAt }] : [];
+    });
   }
 
   getCvoLevel(userId: string): CvoLevel {
-    const userMap = this.unlocked.get(userId);
-    const cvoCount = userMap ? [...userMap.values()].filter((a) => a.category === 'cvo').length : 0;
+    const cvoCount = this.getUnlocked(userId).filter((achievement) => achievement.category === 'cvo').length;
     return computeCvoLevel(cvoCount);
   }
 }

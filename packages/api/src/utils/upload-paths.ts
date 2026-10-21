@@ -1,5 +1,6 @@
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { deploymentDefaults } from '@cat-cafe/shared';
 
 const THIS_DIR = dirname(fileURLToPath(import.meta.url));
 const MODULE_DEFAULT_UPLOAD_DIR = resolve(THIS_DIR, '../../uploads');
@@ -27,7 +28,7 @@ export function resolveInternalRouteUrl(url: string): string {
     const apiBase = (
       process.env.CAT_CAFE_API_URL ??
       process.env.NEXT_PUBLIC_API_URL ??
-      'http://localhost:3004'
+      deploymentDefaults.apiBaseUrl
     ).replace(/\/$/, '');
     return `${apiBase}${url}`;
   }

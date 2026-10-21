@@ -1,6 +1,11 @@
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import {
+  primeCoCreatorConfigCache,
+  resetCoCreatorConfigCacheForTest,
+  useCoCreatorDisplay,
+} from '@/hooks/useCoCreatorConfig';
 import { apiFetch } from '@/utils/api-client';
 
 vi.mock('@/utils/api-client', () => ({
@@ -52,6 +57,7 @@ describe('HubCoCreatorEditor', () => {
     document.body.appendChild(container);
     root = createRoot(container);
     mockApiFetch.mockReset();
+    resetCoCreatorConfigCacheForTest();
   });
 
   afterEach(() => {
@@ -97,5 +103,28 @@ describe('HubCoCreatorEditor', () => {
     expect(payload.avatar).toBe('/uploads/owner-lang.png');
     expect(onSaved).toHaveBeenCalledTimes(1);
     expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps the configured familiar address visible after saving through the existing editor', async () => {
+    const coCreator = { name: 'Mina', nickname: '小明', aliases: [], mentionPatterns: ['@mina'] };
+    primeCoCreatorConfigCache(coCreator);
+    mockApiFetch.mockResolvedValue(jsonResponse({ ok: true }));
+    function FamiliarAddress() {
+      return <output data-testid="familiar-address">{useCoCreatorDisplay().nickname}</output>;
+    }
+    await act(async () => {
+      root.render(
+        <>
+          <HubCoCreatorEditor open coCreator={coCreator} onClose={() => {}} onSaved={() => {}} />
+          <FamiliarAddress />
+        </>,
+      );
+    });
+    expect(container.querySelector('output')?.textContent).toBe('小明');
+    await act(async () => {
+      queryButton(container, '保存').dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await flushEffects();
+    expect(container.querySelector('output')?.textContent).toBe('小明');
   });
 });

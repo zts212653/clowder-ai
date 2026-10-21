@@ -978,39 +978,38 @@ if (flag === '--classify-path') {
     assert.match(err.stdout, /fail-closed|broken.*brand-sensitive|anchor.*pet/i);
   });
 
-  it('catches public frontend port contamination in connector-gateway-bootstrap.ts', () => {
+  it('catches public API port contamination at the surviving Host entrypoint', () => {
     const f = makeBrandFixture({
-      'packages/api/src/infrastructure/connectors/connector-gateway-bootstrap.ts':
-        "frontendBaseUrl: deps.frontendBaseUrl ?? 'http://localhost:3003',",
+      'packages/api/src/index.ts': "const port = process.env.API_SERVER_PORT ?? '3004';",
     });
     fixtures.push(f.sandboxRoot);
     const err = captureValidateFailure(f.repoRoot);
     assert.match(err.stdout, /brand violation/i);
-    assert.match(err.stdout, /connector-gateway-bootstrap/);
+    assert.match(err.stdout, /packages\/api\/src\/index\.ts/);
   });
 
   it('Phase 2 skip honors all BRAND_EXPECTATIONS entries via printf + [@] anchor', () => {
     // Regression for echo→printf fix in intake-from-opensource.sh:
     // Old `echo "${BRAND_EXPECTATIONS[*]}" | grep -q "^${bsf}|"` joined array entries
     // onto one line, so the ^anchor only matched the FIRST entry. Files later in the
-    // BRAND_EXPECTATIONS array (e.g. weixin/WeixinAdapter.ts at the back) leaked into
+    // BRAND_EXPECTATIONS array (e.g. routing/AgentRouter.ts at the back) leaked into
     // Phase 2 dictionary scan and got double-counted, or produced false brand-violation
     // reports if their content happened to match a public-term sentinel.
     // New `printf '%s\n' "${BRAND_EXPECTATIONS[@]}"` puts each entry on its own line,
     // so the ^anchor matches any entry — including back-of-array files.
     const f = makeBrandFixture({
-      // weixin/WeixinAdapter.ts is a BACK-of-array BRAND_EXPECTATIONS entry. Plant
+      // routing/AgentRouter.ts is a BACK-of-array BRAND_EXPECTATIONS entry. Plant
       // "Clowder AI" (the public-term sentinel from the stub below) into the file —
       // Phase 2 dictionary scan would report a violation if the BRAND_EXPECTATIONS skip
-      // failed. Phase 1 BRAND_EXPECTATIONS for this file checks localhost:3003/3004
+      // failed. Phase 1 BRAND_EXPECTATIONS for this file checks the public API port
       // contamination, not brand terms, so it passes Phase 1.
-      'packages/api/src/infrastructure/connectors/im-connectors/weixin/WeixinAdapter.ts':
-        '// Clowder AI internal adapter for weixin\nexport class WeixinAdapter {}\n',
+      'packages/api/src/domains/cats/services/agents/routing/AgentRouter.ts':
+        '// Clowder AI routing uses the home API fallback\nexport class AgentRouter {}\n',
     });
     fixtures.push(f.sandboxRoot);
 
     // Stub: brand-sensitive-patterns lists the three real anchors PLUS the back-of-array
-    // WeixinAdapter.ts path. Phase 2 should SKIP WeixinAdapter.ts because it IS in
+    // AgentRouter.ts path. Phase 2 should SKIP AgentRouter.ts because it IS in
     // BRAND_EXPECTATIONS (covered by the localhost-port rules) — the printf + [@] fix
     // makes the ^${bsf}| anchor match the back-of-array entry, so Phase 2 skip works.
     const stub = `
@@ -1022,17 +1021,17 @@ if (flag === '--classify-path') {
 } else if (flag === '--manual-port-patterns') {
   console.log('assets/system-prompts/**');
 } else if (flag === '--brand-sensitive-patterns') {
-  console.log('packages/web/public/manifest.json\\npackages/web/public/icons/**\\npackages/web/public/concierge/**/pet.json\\npackages/api/src/infrastructure/connectors/im-connectors/weixin/WeixinAdapter.ts');
+  console.log('packages/web/public/manifest.json\\npackages/web/public/icons/**\\npackages/web/public/concierge/**/pet.json\\npackages/api/src/domains/cats/services/agents/routing/AgentRouter.ts');
 } else {
   console.log('');
 }
 `;
     writeFileSync(join(f.repoRoot, 'scripts', 'brand-dictionary-helper.mjs'), stub, 'utf-8');
 
-    // With printf + [@] fix: Phase 2 SKIPS WeixinAdapter.ts (covered by BRAND_EXPECTATIONS),
+    // With printf + [@] fix: Phase 2 SKIPS AgentRouter.ts (covered by BRAND_EXPECTATIONS),
     // so the "Clowder AI" sentinel inside the file does NOT produce a Phase 2 brand violation.
     const output = runValidate(f.repoRoot);
-    assert.doesNotMatch(output, /WeixinAdapter\.ts.*Clowder AI.*dictionary-driven/);
+    assert.doesNotMatch(output, /AgentRouter\.ts.*Clowder AI.*dictionary-driven/);
     assert.match(output, /No brand violations detected/);
   });
 
@@ -2311,7 +2310,9 @@ describe('intake-from-opensource.sh --record strict guard (absorbed)', () => {
   it('requires intent issue metadata for absorbed records', () => {
     const f = makeRecordFixture();
     fixtures.push(f.sandboxRoot);
-    const err = captureRecordFailure(f.repoRoot, ['--pr', '495', '--decision', 'absorbed']);
+    const err = captureRecordFailure(f.repoRoot, ['--pr', '495', '--decision', 'absorbed'], {
+      PATH: `${f.mockBin}:${process.env.PATH}`,
+    });
     assert.match(err.stdout, /requires --intent-issue/);
   });
 
@@ -3704,4 +3705,27 @@ describe('F238: intake plan classifies dictionary-flipped directories as manual-
     assert.match(plain, /Manual:\s+6/, 'all 6 flipped directories should be manual-port');
     assert.match(plain, /Safe:\s+1/, 'only packages/api file should be safe');
   });
+});
+
+it('home intake rejects an exported active deployment profile from the index', () => {
+  const file = 'packages/shared/src/deployment-profiles.json';
+  const f = makeBrandFixture({ [file]: '{"activeProfile":"home"}\n' });
+  try {
+    git(f.repoRoot, 'init', '-q');
+    git(f.repoRoot, 'add', '.');
+    let result = runResult(
+      'bash',
+      ['scripts/intake-from-opensource.sh', '--validate-inbound', '--from-index'],
+      f.repoRoot,
+    );
+    assert.equal(result.status, 0, result.stdout + result.stderr);
+    writeFileSync(join(f.repoRoot, file), '{"activeProfile":"opensource"}\n');
+    git(f.repoRoot, 'add', file);
+    writeFileSync(join(f.repoRoot, file), '{"activeProfile":"home"}\n');
+    result = runResult('bash', ['scripts/intake-from-opensource.sh', '--validate-inbound', '--from-index'], f.repoRoot);
+    assert.notEqual(result.status, 0);
+    assert.match(result.stdout + result.stderr, /active deployment profile must remain home/);
+  } finally {
+    rmSync(f.sandboxRoot, { recursive: true, force: true });
+  }
 });

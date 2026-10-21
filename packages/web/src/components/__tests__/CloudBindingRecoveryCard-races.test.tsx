@@ -1,6 +1,7 @@
 import { act, useLayoutEffect } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { packageRows } from './cloud-route-test-fixtures';
 
 vi.mock('@/utils/api-client', () => ({ apiFetch: vi.fn() }));
 
@@ -14,19 +15,7 @@ function jsonResponse(body: unknown, status = 200): Response {
 }
 
 function pluginState(conversationId: string): Record<string, unknown> {
-  return {
-    pluginId: 'personal-chrome-host',
-    authorization: {
-      status: 'authorized',
-      conversations: [
-        {
-          conversationId,
-          authorizedAt: '2026-09-01T00:00:00.000Z',
-          updatedAt: '2026-09-01T00:00:00.000Z',
-        },
-      ],
-    },
-  };
+  return packageRows([{ conversationId }]);
 }
 
 function RecoveryIdentityHarness({
@@ -84,8 +73,12 @@ describe('CloudBindingRecoveryCard lifecycle fences', () => {
       resolveOldPlugin = resolve;
     });
     mockApiFetch.mockImplementation((path) => {
-      if (path === '/api/plugins/personal-chrome' && mockApiFetch.mock.calls.length <= 2) return oldPlugin;
-      if (path === '/api/plugins/personal-chrome')
+      if (
+        path === '/api/plugins/official.companion.personal-chrome/actions/personalChromeAuthorizations/list' &&
+        mockApiFetch.mock.calls.length <= 2
+      )
+        return oldPlugin;
+      if (path === '/api/plugins/official.companion.personal-chrome/actions/personalChromeAuthorizations/list')
         return Promise.resolve(jsonResponse(pluginState('conversation-new')));
       return Promise.resolve(jsonResponse({ bindings: {} }));
     });
@@ -115,7 +108,7 @@ describe('CloudBindingRecoveryCard lifecycle fences', () => {
       ],
     ]);
     mockApiFetch.mockImplementation((path, init) => {
-      if (path === '/api/plugins/personal-chrome') {
+      if (path === '/api/plugins/official.companion.personal-chrome/actions/personalChromeAuthorizations/list') {
         pluginReads += 1;
         return pluginReads === 1 ? Promise.resolve(jsonResponse(pluginState('conversation-old'))) : pendingRead;
       }
@@ -175,7 +168,8 @@ describe('CloudBindingRecoveryCard lifecycle fences', () => {
       resolvePatch = resolve;
     });
     mockApiFetch.mockImplementation(async (path, init) => {
-      if (path === '/api/plugins/personal-chrome') return jsonResponse(pluginState('one'));
+      if (path === '/api/plugins/official.companion.personal-chrome/actions/personalChromeAuthorizations/list')
+        return jsonResponse(pluginState('one'));
       if (path.includes('/cloud-bindings') && !init?.method) return jsonResponse({ bindings: {} });
       if (path.includes('/cloud-bindings') && init?.method === 'PATCH') return pendingPatch;
       return jsonResponse({ status: 'retry_queued' }, 202);
@@ -198,7 +192,7 @@ describe('CloudBindingRecoveryCard lifecycle fences', () => {
       resolveOldPatch = resolve;
     });
     mockApiFetch.mockImplementation(async (path, init) => {
-      if (path === '/api/plugins/personal-chrome') {
+      if (path === '/api/plugins/official.companion.personal-chrome/actions/personalChromeAuthorizations/list') {
         pluginReads += 1;
         return jsonResponse(pluginState(pluginReads === 1 ? 'conversation-old' : 'conversation-new'));
       }
@@ -223,7 +217,8 @@ describe('CloudBindingRecoveryCard lifecycle fences', () => {
 
   it('surfaces a stale immutable retry fence without duplicating the message', async () => {
     mockApiFetch.mockImplementation(async (path) => {
-      if (path === '/api/plugins/personal-chrome') return jsonResponse(pluginState('conversation-bound'));
+      if (path === '/api/plugins/official.companion.personal-chrome/actions/personalChromeAuthorizations/list')
+        return jsonResponse(pluginState('conversation-bound'));
       if (path === '/api/threads/thread-one/cloud-bindings')
         return jsonResponse({ bindings: { 'gpt-pro': 'https://chatgpt.com/c/conversation-bound' } });
       if (path.endsWith('/retry')) return jsonResponse({ code: 'QUEUE_RETRY_AUTHORITY_STALE' }, 409);

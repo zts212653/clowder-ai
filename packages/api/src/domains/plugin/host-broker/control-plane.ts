@@ -1,8 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import {
   type Capability,
-  type EventsPublishInput,
-  type EventsPublishResult,
   type HandshakeRejectReason,
   hasHandshakeAuthorityInjection,
   type SessionBinding,
@@ -87,7 +85,7 @@ function sessionForConnection(transaction: HostBrokerTransaction, connectionId: 
   return session;
 }
 
-function sameGrants(left: readonly Capability[], right: readonly Capability[]): boolean {
+function sameGrants(left: readonly string[], right: readonly string[]): boolean {
   if (left.length !== right.length) return false;
   const sortedLeft = [...left].sort();
   const sortedRight = [...right].sort();
@@ -355,19 +353,6 @@ export class HostBrokerControlPlane implements BrokerConnectionController {
       handler,
     );
     return this.executeCallDecision(decision, handler, context, validated.value);
-  }
-
-  async publishOwnerImportedSignal(pluginInstanceId: string, input: EventsPublishInput): Promise<EventsPublishResult> {
-    const sessions = (await this.options.store.snapshot()).sessions.filter(
-      (candidate) => candidate.pluginInstanceId === pluginInstanceId && candidate.phase === 'active',
-    );
-    if (sessions.length === 0) {
-      throw new HostBrokerError('INSTANCE_NOT_READY', `${pluginInstanceId} has no active Broker session`);
-    }
-    if (sessions.length !== 1) {
-      throw new HostBrokerError('BROKER_INVARIANT', `${pluginInstanceId} has multiple active Broker sessions`);
-    }
-    return this.call(sessions[0].connectionId, 'events.publish', input) as Promise<EventsPublishResult>;
   }
 
   /** Authorize a queued Host delivery without requiring a live runtime session. */
@@ -801,6 +786,8 @@ export class HostBrokerControlPlane implements BrokerConnectionController {
     if (!packageRecord || !grants) {
       throw new HostBrokerError('BROKER_INVARIANT', `${pluginInstanceId} has incomplete inventory authority`);
     }
+    if (packageRecord.manifest === null)
+      throw new HostBrokerError('INSTANCE_NOT_READY', 'Plugin version is incompatible');
     return { instance, packageRecord, grants };
   }
 

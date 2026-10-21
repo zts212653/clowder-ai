@@ -4,14 +4,9 @@ import type {
   ActionSubjectTerminalTruth,
   ActionSuccessorClaimStoreResult,
   ActionSuccessorCommitOutcomeResult,
-  ActionSuccessorExternalReviewRecoveryStoreResult,
   ActionSuccessorLeaseStore,
   ActionSuccessorOutputPreflightResult,
 } from './ActionSuccessorLeaseStore.js';
-import {
-  type RecoverActiveExternalReviewVerdictInput,
-  recoverActiveExternalReviewVerdict,
-} from './action-successor-external-review-recovery-state-machine.js';
 import { ActionSuccessorKeys } from './action-successor-keys.js';
 import { preflightActionSuccessorOutputInRedis } from './action-successor-output-preflight.js';
 import { parseActionSubjectTerminal, parseActionSuccessorLease } from './action-successor-redis-codecs.js';
@@ -258,22 +253,6 @@ export class RedisActionSuccessorLeaseStore implements ActionSuccessorLeaseStore
       if (committed === 'subject_terminal') return { outcome: 'subject_terminal', lease: current };
     }
     throw new Error(`action successor commit CAS exhausted: ${leaseId}`);
-  }
-
-  async recoverExternalReviewVerdict(
-    leaseId: string,
-    input: RecoverActiveExternalReviewVerdictInput,
-  ): Promise<ActionSuccessorExternalReviewRecoveryStoreResult> {
-    for (let attempt = 0; attempt < MAX_CAS_ATTEMPTS; attempt += 1) {
-      const current = await this.require(leaseId);
-      const result = recoverActiveExternalReviewVerdict(current, input);
-      if (result.outcome === 'replayed') return result;
-      if (result.outcome !== 'recovered') return result;
-      const committed = await this.compareAndSetUnlessSubjectTerminal(current, result.lease);
-      if (committed === 'written') return result;
-      if (committed === 'subject_terminal') return { outcome: 'subject_terminal', lease: current };
-    }
-    throw new Error(`action successor external-review recovery CAS exhausted: ${leaseId}`);
   }
 
   async recordCompletionCandidate(

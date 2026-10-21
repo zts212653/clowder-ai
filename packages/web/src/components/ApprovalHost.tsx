@@ -23,8 +23,7 @@ export type ApprovalWriteKind =
   | 'person-memory-defer'
   | 'person-memory-withdraw'
   | 'person-memory-undo'
-  | 'producer-card'
-  | 'meeting-intake';
+  | 'producer-card';
 
 export type ApprovalRequestEvent =
   | { phase: 'start'; kind: ApprovalWriteKind }
@@ -36,8 +35,8 @@ export type ApprovalRequestEvent =
 
 export interface AuthorizeOptions {
   /**
-   * The request being asked about is the next one of a write this host already let out, not a new press: F292 saves the
-   * destination's cat and then retries delivery, and the second request is asked about on its own. A host that locks writes
+   * The request being asked about is the next one of a write this host already let out, not a new press: a producer saves a
+   * selection and then completes its write, and the second request is asked about on its own. A host that locks writes
    * while one is in flight must still be able to answer this one, and may judge it by whether what the user was looking at
    * has moved since the write was allowed. A host that does not tell the two apart can ignore it.
    */
@@ -116,7 +115,7 @@ export function useGuardedWrite(): GuardedWrite {
 
 /**
  * Ask the host again, right now, for a request that is not the first of its write. A write that sends more than one request
- * (F292 saves the destination's cat, then retries delivery) was authorized for its first request; whatever the host knew
+ * (a producer saves a selection, then completes its write) was authorized for its first request; whatever the host knew
  * then may no longer hold when the second is about to go out. Read at the moment of the call, and from the host that is
  * current then: a lock lives on the host the card has now, while start and end of the write stay with the host that began it.
  */

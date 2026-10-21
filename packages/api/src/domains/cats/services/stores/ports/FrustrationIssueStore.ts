@@ -1,7 +1,7 @@
 /**
  * F222: Frustration Auto-Issue Store — Port interface.
  *
- * Lifecycle: draft → confirmed | skipped | false_positive (one-way, no CAS needed).
+ * Lifecycle: draft → confirmed | skipped | false_positive.
  * User-visible data → persistent by default (Iron Law #5, LL-048).
  */
 
@@ -34,9 +34,6 @@ export interface IFrustrationIssueStore {
 
   /** Set the card message ID (visibility marker). */
   setCardMessageId(issueId: string, cardMessageId: string): Promise<void>;
-
-  /** Link a community issue draft to this frustration issue (F235). */
-  setCommunityIssueDraftId(issueId: string, draftId: string): Promise<void>;
 
   /** List issues in a thread, sorted by createdAt desc. */
   listByThread(threadId: string): Promise<FrustrationIssue[]>;

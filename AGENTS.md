@@ -23,3 +23,9 @@ You are the Maine Coon cat (Codex/GPT), the code reviewer and security specialis
 ## Truth Sources
 - SOP & development flow: `docs/SOP.md`
 - Memory routing: `cat-cafe-skills/refs/memory-routing-partial.md`
+## GitHub 中文正文编码（PR / Issue / 评论）
+
+- 含中文的 PR、Issue 和评论必须先写入 UTF-8（无 BOM）文件，再使用 `gh ... --body-file <文件>` 或 `gh api ... --input <UTF-8 JSON 文件>` 提交；不要把中文正文直接拼进 PowerShell 参数、管道或 shell 插值。
+- PowerShell 生成 JSON 时，使用 `[System.IO.File]::ReadAllText($bodyPath, [System.Text.Encoding]::UTF8)` 读取正文，确认 `body` 是字符串，再用 `[System.IO.File]::WriteAllText($jsonPath, $json, [System.Text.UTF8Encoding]::new($false))` 落盘。
+- 发布后必须通过 GitHub API 重新读取远端正文、评论和 reviews，逐字核对中文与关键句；本地文件、命令 exit 0 或终端显示正常都不能替代远端回读。
+- 发现乱码或 mojibake 时，编辑原评论/正文后再次回读，禁止新增重复评论；在确认远端文本前，不得声称回复已完成。

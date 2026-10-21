@@ -7,7 +7,6 @@ import { PassThrough } from 'node:stream';
 import { namedAlphaEnvironment } from '../../../../scripts/lib/alpha-coordinates.mjs';
 import { CodexAgentService } from '../../dist/domains/cats/services/agents/providers/CodexAgentService.js';
 import { resolveClaudeMcpConfig } from '../../dist/domains/cats/services/agents/providers/claude-mcp-config.js';
-import { writeMcpConfigFile } from '../../dist/domains/cats/services/agents/providers/kimi-config.js';
 import { writeOpenCodeRuntimeConfig } from '../../dist/domains/cats/services/agents/providers/opencode-config-writer.js';
 import { fakeL0Compiler } from './fake-l0-compiler.js';
 
@@ -187,15 +186,6 @@ export const providers = {
         callbackEnv: { ...callbackFixture, CAT_CAFE_CAT_ID: 'opus' },
       })
     ).servers,
-  kimi: async (f, workingDirectory) => {
-    const path = await writeMcpConfigFile(workingDirectory ?? '', f.mcpServerPath, {
-      ...callbackFixture,
-      CAT_CAFE_CAT_ID: 'kimi',
-    });
-    const config = JSON.parse(readFileSync(path, 'utf8')).mcpServers;
-    rmSync(join(path, '..'), { recursive: true, force: true });
-    return config;
-  },
   opencode: async (f, workingDirectory) => {
     const path = await writeOpenCodeRuntimeConfig(
       f.runtime,

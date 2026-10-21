@@ -8,8 +8,8 @@ plugin 的*管理*与 plugin 的*实现*分处于不同的仓库中，由契约�
 
 | 仓库 | 拥有 |
 |---|---|
-| **`clowder-ai`**（核心） | plugin 的发现与安装、管理 UI、授权、运行 plugins 的 **Host Broker**、编排、审计，以及所有用户数据。 |
-| **`clowder-ai-plugins`** | plugin **契约**、plugin 侧的 **SDK** 与独立运行时、脚手架、官方 plugins，以及一致性测试夹具（fixtures）。 |
+| **`clowder-ai`**（核心） | plugin 的发现与安装、管理 UI、授权、运行 plugins 的 **Host Broker**、编排、审计，以及核心线程、消息与 Task 数据。 |
+| **`clowder-ai-plugins`** | plugin **契约**、plugin 侧的 **SDK** 与独立运行时、脚手架、官方 plugins、插件私有业务数据，以及一致性测试夹具（fixtures）。 |
 
 plugins 仓库**不是**一个 plugin 管理器。官方 plugins 在那里被独立地构建和发布；宿主（host）下载或接收一个 plugin 制品，校验其清单（manifest）与摘要，取得用户的授权，然后才通过 Host Broker 安装、启用并运行它。**第一方和第三方 plugins 使用相同的 SDK 和相同的授权通道**——不存在有特权的旁门。
 
@@ -18,14 +18,14 @@ plugins 仓库**不是**一个 plugin 管理器。官方 plugins 在那里被独
 `@clowder-ai/plugin-contract` 是双方共同消费的、机器可读的事实来源——JSON Schema、生成的类型、一张能力表，以及一致性测试夹具。它定义了三样东西：
 
 - **输入信封**——一个 plugin 接收的每个输入都在两个维度上被描述：它的**来源**（它从哪里来）和它的**认知状态**（该信息有多确定或多可信）。
-- **输出事件流**——一个 plugin 如何把结果发回给宿主。
+- **普通操作及结果**——消息、Task 数据、action、投递回执与字节流。
 - **清单与能力类型**——一个 plugin 声明它拥有什么、以及被允许做什么。
 
-由于契约是一个共享的包，宿主和一个 plugin 永远不会无声地漂移：一项能力只有在其契约行从*保留（reserved）*变为*可执行（executable）*之后才可用。
+Host 与插件消费同一版本契约，包校验与一致性测试核对声明的能力和操作形状。
 
 ## SDK
 
-`@clowder-ai/plugin-sdk` 面向 plugin 作者和 plugin 运行时——而非宿主内部。它提供一个 schema 无关的**独立 stdio 运行时**、握手校验，以及一个绑定到 Host 的 `events.publish` 辅助函数。用 SDK 构建的一个 plugin 通过一个受约束的、由契约拥有的传输层（`call` / `callback` / `event` / `handshake`）与核心中的 **Host Broker** 通信。
+`@clowder-ai/plugin-sdk` 为插件作者提供绑定身份的 Host client、模块生命周期 hook、action handler、消息投递和字节流。公共接口以插件仓 `docs/plugin-development.md` 的三段式基线为准。Signal schema 描述 manifest 声明元数据，不提供运行时事件总线。独立 stdio 载体及其握手、帧编码是传输实现细节，不是额外的作者接口。
 
 ## 一个 plugin 拥有什么
 
@@ -46,14 +46,17 @@ plugins 仓库**不是**一个 plugin 管理器。官方 plugins 在那里被独
 4. **激活（Activate）**——启用时，只有该 plugin 的资源会被激活；它们的状态出现在 plugin 与能力界面中，与内置能力清晰地区分开来。
 5. **重新水合（Rehydrate）**——重启之后，只有仍处于启用且仍然有效的 plugins 会回来；已禁用或无效的则保持未激活，并带有一个可见的错误状态。
 
-机密绝不会落入被 git 跟踪的清单中：plugin 配置通过连接器机密边界流动，而长期存活的外部凭据（比如一个 IM 令牌）留在由宿主管理的网关中，而不是留在 plugin 内部。
+凭据通过 Host 的机密存储保存，由获授权的插件通过 `secrets.get` 读取。外部平台连接、配置刷新和插件自建进程由插件管理；凭据不写入 Git 跟踪的 manifest。
 
-## 受信本地 plugins 与外部包
+## 业务归属
 
-该框架分两层演进而来：
+插件使用普通消息、线程、成员、Task 和私有存储。插件通知进入普通会话队列，与用户消息使用同一套路由及出队流程。不存在或不可用的提及按普通会话规则接棒，插件不预检 Host 部署状态。
 
-- **仓库本地 plugins**——随代码树一起分发、位于 `plugins/<id>` 之下的受信 plugins，被直接发现和激活。GitHub 集成（CI、评审、冲突和仓库扫描轮询器）就是其中之一。
-- **外部包**——独立发布的 plugins，作为契约原生包被安装，并在 Host Broker 的一次性握手会话、运行时租约和持久化调用结算之下运行，具备不可变的包到进程授权以及失败关闭（fail-closed）的重启恢复。
+GitHub 跟踪产生普通消息。审查分工与完成通过普通提及、Task 和本地 review 回传表达；GitHub 实际操作使用 `gh` 及声明的工具。反馈卡把显式内容交给插件 action，展示返回的草稿。GitHub 草稿关联与发布状态归插件存储，和 Host 的持久反馈正文独立。
+
+Collective 自己管理本地 HTTP 监听、端口配置、页面资产、认证、origin 校验和 OAuth 回调。Host 通过声明的 action 获取页面地址。插件停止时关闭监听；Host 不分配 browser-service 端口，也不转发插件内部请求。
+
+仓库本地资源与已安装包各自使用对应的加载方式。官方 GitHub provider 代码位于插件仓，使用相同的授权公共 client。
 
 ## 官方 plugins
 
@@ -67,4 +70,15 @@ plugins 仓库是首批官方"身体"的家园，每一个都是构建在契约�
 
 - **没有任意的同权脚本**——能力只来自声明的、由契约定义的资源类型。
 - **不绕过 Host Broker**——一个 plugin 只能通过契约的传输层和授权来抵达核心。
-- **不接管核心**——身份、记忆、会话真相和用户数据始终留在 `clowder-ai` 中；一个 plugin 是一个身体，永远不是灵魂。
+- **不接管核心**——身份、记忆、会话真相和核心会话数据留在 `clowder-ai` 中；一个 plugin 是一个身体，永远不是灵魂。
+
+### Task 数据
+
+公开 Task API 只有 `get(selector)`、`list(filter)`、`create(input, options?)` 和
+`update(id, patch, conditions?)`。读取选择 `id` 或 `subjectKey`；列表可组合 `threadId` 与 `kind`。
+创建默认拒绝已有 subject；显式 `onConflict: 'update'` 必须给出 subjectKey，由 Host 原子更新。
+已接纳的 Work 重复创建时，`update` 原子更新标题和原因；原 owner、thread、来源和合同保持绑定，
+带版本的合同修改使用 `update` 方法。
+patch 修改普通字段或 Work 数据，或仅包含 `wait`。Host 在原子提交时检查适用的
+`expectedThreadId`、等待 generation 与 Work revision，不以先读后写替代条件更新。
+Task 数据读写本身不会调度猫或提交审查。

@@ -34,6 +34,7 @@ import {
   resolveCapabilityWriteSessionUserId,
 } from '../config/capabilities/capability-write-guards.js';
 import { syncMcpAll } from '../mcp/mcp-sync-all.js';
+import { resolveKimiRuntimePaths } from '../utils/kimi-cli-runtime.js';
 import { resolvePersistentProjectPath } from '../utils/persistent-project-path.js';
 import { resolveUserId } from '../utils/request-identity.js';
 import { resolveMainRepoPath } from '../utils/skill-mount.js';
@@ -617,14 +618,14 @@ export const capabilitiesMcpWriteRoutes: FastifyPluginAsync<{
         claudeConfig: join(projectRoot, '.mcp.json'),
         codexConfig: join(projectRoot, '.codex', 'config.toml'),
         geminiConfig: join(projectRoot, '.gemini', 'settings.json'),
-        kimiConfig: join(projectRoot, '.kimi', 'mcp.json'),
+        kimiConfig: join(projectRoot, '.kimi-code', 'mcp.json'),
         antigravityConfig: join(home, '.gemini', 'antigravity', 'mcp_config.json'),
       };
       const userPaths: DiscoveryPaths = {
         claudeConfig: join(home, '.claude', 'mcp.json'),
         codexConfig: join(home, '.codex', 'config.toml'),
         geminiConfig: join(home, '.gemini', 'settings.json'),
-        kimiConfig: join(home, '.kimi', 'mcp.json'),
+        kimiConfig: join(resolveKimiRuntimePaths(process.env, home).shareDir, 'mcp.json'),
       };
       const [projectTagged, userTagged] = await Promise.all([
         discoverExternalMcpServersTagged(projectPaths),

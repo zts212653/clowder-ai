@@ -37,7 +37,8 @@ cat_cafe_redis_start_daemon() {
       {
         PATH: `${bin}:${process.env.PATH}`,
         ALPHA_TEST_READINESS_TRACE: trace,
-        ALPHA_TEST_UNREADABLE_AT: String(observation),
+        // Exhaust the current full-scope reobservation before expecting refusal.
+        ALPHA_TEST_UNREADABLE_AT: `${observation}+${observation + 1}`,
         ALPHA_TEST_PROTOCOL_TRACE: protocol,
         ALPHA_TEST_REAL_REDIS_CLI: execFileSync('which', ['redis-cli'], { encoding: 'utf8' }).trim(),
       },
@@ -59,7 +60,7 @@ cat_cafe_redis_start_daemon() {
   });
 }
 
-for (const unavailable of ['2', '2+6']) {
+for (const unavailable of ['2+3', '2+3+6+7']) {
   test(`RDB-first unreadable DBSIZE at ${unavailable} preserves an unloaded snapshot through cleanup`, async (t) => {
     const f = await storageFixture(t, { unreadableAfterBoot: true });
     f.seedRdb();

@@ -49,7 +49,7 @@ function seed() {
           { ...variant('override', 'other'), accountBindingMode: 'override' },
           { ...variant('disabled-override', 'other'), accountBindingMode: 'override' },
           {
-            ...variant('opus', 'claude', 'anthropic'),
+            ...variant('opus', 'claude', 'acp'),
             acp: { command: 'custom-acp', startupArgs: ['--acp'] },
             customExtension: { keep: [1, 'x'] },
           },

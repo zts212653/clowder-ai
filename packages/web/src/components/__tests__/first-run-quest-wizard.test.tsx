@@ -1,248 +1,129 @@
-import React, { act, useState } from 'react';
+import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { apiFetch } from '@/utils/api-client';
+import { FirstRunQuestWizard } from '../FirstRunQuestWizard';
+import { recommendNativePartners } from '../first-run-quest/native-onboarding';
+import { useNativeOnboarding } from '../first-run-quest/useNativeOnboarding';
 
-vi.mock('@/utils/api-client', () => ({
-  apiFetch: vi.fn(() => Promise.resolve(new Response('{}', { status: 200 }))),
-}));
+vi.mock('../first-run-quest/useNativeOnboarding', () => ({ useNativeOnboarding: vi.fn() }));
+vi.mock('../settings/members/MemberRuntimeFields', () => ({ MemberRuntimeFields: () => null }));
 
-vi.mock('next/navigation', () => ({
-  useRouter: () => ({ push: vi.fn() }),
-}));
+const runtimes = [{ id: 'codex', label: 'Codex', clientId: 'openai' as const, installed: true, models: [] }];
 
-vi.mock('@/hooks/useCatData', () => ({
-  useCatData: () => ({
-    cats: [],
-    isLoading: false,
-    getCatById: () => undefined,
-    getCatsByBreed: () => new Map(),
-    refresh: () => Promise.resolve([]),
-  }),
-}));
+let container: HTMLDivElement;
+let root: Root;
+const onClose = vi.fn();
+const onCreated = vi.fn();
 
-import { FirstRunQuestWizard } from '@/components/FirstRunQuestWizard';
-
-const mockApiFetch = vi.mocked(apiFetch);
-
-function jsonResponse(body: unknown, status = 200): Response {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { 'content-type': 'application/json' },
-  });
+function makeSetup(goal = '小目标') {
+  const partners = recommendNativePartners(runtimes, [], [], 'wizard-shell');
+  return {
+    draft: { version: 2 as const, journeyId: 'wizard-shell', partners, goal, lead: '', created: {} },
+    loading: false,
+    error: '',
+    errorStage: null,
+    busy: '',
+    patch: vi.fn(),
+    patchPartner: vi.fn(),
+    start: vi.fn(),
+    reload: vi.fn(),
+  } as unknown as ReturnType<typeof useNativeOnboarding>;
 }
 
-async function flushEffects() {
-  await act(async () => {
-    await Promise.resolve();
-  });
+function install(goal = '小目标') {
+  const setup = makeSetup(goal);
+  vi.mocked(useNativeOnboarding).mockReturnValue(setup);
+  return setup;
 }
 
-function WizardHost({ onCreated }: { onCreated?: (tid: string) => void }) {
-  const [open, setOpen] = useState(true);
-  return <FirstRunQuestWizard open={open} onClose={() => setOpen(false)} onCreated={onCreated ?? (() => {})} />;
-}
+const render = () => act(() => root.render(<FirstRunQuestWizard open onClose={onClose} onCreated={onCreated} />));
+const button = (selector: string) => document.querySelector<HTMLButtonElement>(selector);
+const nextButton = () => button('button[aria-label^="下一步"]');
+const saveButton = () => button('button[aria-label="保存伙伴，前往对话"]');
 
-describe('FirstRunQuestWizard', () => {
-  let container: HTMLDivElement;
-  let root: Root;
+beforeEach(() => {
+  container = document.createElement('div');
+  document.body.append(container);
+  root = createRoot(container);
+  onClose.mockReset();
+  onCreated.mockReset();
+});
 
-  beforeEach(() => {
-    container = document.createElement('div');
-    document.body.appendChild(container);
-    root = createRoot(container);
-    mockApiFetch.mockReset();
+afterEach(() => {
+  act(() => root.unmount());
+  container.remove();
+  vi.resetAllMocks();
+});
+
+describe('FirstRunQuestWizard native two-step setup', () => {
+  it('renders the native partner step instead of the removed demo copy', () => {
+    install();
+    render();
+
+    // The wizard is always portalled to document.body.
+    expect(document.querySelector('[role="dialog"][aria-labelledby="native-setup-title"]')).not.toBeNull();
+    expect(document.body.textContent).toContain('把你的工具，变成一起做事的伙伴');
+    expect(document.body.textContent).toContain('1 / 2 · 配置伙伴');
+    // The legacy demo/template wizard owned this copy; it was replaced by native discovery.
+    expect(document.body.textContent).not.toContain('认识你的协作团队');
+    expect(document.body.textContent).not.toContain('选择团队角色');
+    expect(document.body.textContent).not.toContain('开始演示');
   });
 
-  afterEach(() => {
-    act(() => root.unmount());
-    container.remove();
+  it('advances to the goal step and saves through the setup hook', () => {
+    const setup = install('小目标');
+    render();
+
+    expect(nextButton()?.disabled).toBe(false);
+    act(() => nextButton()?.click());
+
+    expect(document.body.textContent).toContain('一起完成一件小事');
+    expect(document.body.textContent).toContain('2 / 2 · 第一个小目标');
+    const save = saveButton();
+    expect(save).not.toBeNull();
+    expect(save?.disabled).toBe(false);
+    act(() => save?.click());
+    expect(setup.start).toHaveBeenCalledOnce();
   });
 
-  it('renders template step on open and loads templates', async () => {
-    mockApiFetch.mockImplementation(async (url) => {
-      if (typeof url === 'string' && url.includes('/api/cat-templates')) {
-        return jsonResponse({
-          templates: [
-            {
-              id: 'opus',
-              name: '布偶猫',
-              nickname: '宪宪',
-              avatar: '/avatars/opus.png',
-              color: { primary: '#9B7EBD', secondary: '#E8DFF5' },
-              roleDescription: '主架构师',
-              personality: '温柔但有主见',
-            },
-          ],
-        });
-      }
-      return jsonResponse({});
-    });
+  it('keeps saving disabled until the goal is written', () => {
+    const setup = install('');
+    render();
 
-    await act(async () => {
-      root.render(<WizardHost />);
-    });
-    await flushEffects();
-
-    // FirstRunQuestWizard uses createPortal to document.body
-    expect(document.body.textContent).toContain('选择角色模板');
-    expect(document.body.textContent).toContain('布偶猫');
-    expect(document.body.textContent).toContain('宪宪');
+    act(() => nextButton()?.click());
+    const save = saveButton();
+    expect(save).not.toBeNull();
+    expect(save?.disabled).toBe(true);
+    act(() => save?.click());
+    expect(setup.start).not.toHaveBeenCalled();
   });
 
-  it('shows step title for template step', async () => {
-    mockApiFetch.mockResolvedValue(jsonResponse({ templates: [] }));
+  it('returns to the partner step and closes without saving', () => {
+    const setup = install();
+    render();
 
-    await act(async () => {
-      root.render(<WizardHost />);
-    });
-    await flushEffects();
+    act(() => nextButton()?.click());
+    const back = Array.from(document.querySelectorAll('button')).find((item) => item.textContent === '返回选择伙伴');
+    expect(back).toBeDefined();
+    act(() => back?.click());
+    expect(document.body.textContent).toContain('1 / 2 · 配置伙伴');
 
-    // FirstRunQuestWizard uses createPortal to document.body
-    expect(document.body.textContent).toContain('第 1 步');
-    expect(document.body.textContent).toContain('选择角色模板');
+    act(() => button('button[aria-label="关闭伙伴配置"]')?.click());
+    expect(onClose).toHaveBeenCalledOnce();
+    expect(setup.start).not.toHaveBeenCalled();
   });
 
-  it('shows empty state when no templates available', async () => {
-    mockApiFetch.mockResolvedValue(jsonResponse({ templates: [] }));
+  it('disables the primary and close controls while the setup is running', () => {
+    const setup = install();
+    setup.busy = '正在保存';
+    render();
 
-    await act(async () => {
-      root.render(<WizardHost />);
-    });
-    await flushEffects();
-
-    // FirstRunQuestWizard uses createPortal to document.body
-    expect(document.body.textContent).toContain('暂无可用角色模板');
-  });
-
-  it('handles template API errors gracefully', async () => {
-    mockApiFetch.mockRejectedValue(new Error('Network error'));
-
-    await act(async () => {
-      root.render(<WizardHost />);
-    });
-    await flushEffects();
-
-    // Should degrade gracefully, not crash
-    // FirstRunQuestWizard uses createPortal to document.body
-    expect(document.body.textContent).toContain('暂无可用角色模板');
-  });
-
-  it('sends clientId (not client) in POST /api/cats payload', async () => {
-    let catsPayload: Record<string, unknown> | null = null;
-
-    mockApiFetch.mockImplementation(async (url: string, init?: RequestInit) => {
-      if (url.includes('/api/cat-templates')) {
-        return jsonResponse({
-          templates: [
-            {
-              id: 'ragdoll',
-              name: '布偶猫',
-              nickname: '宪宪',
-              avatar: '/avatars/opus.png',
-              color: { primary: '#9B7EBD', secondary: '#E8DFF5' },
-              roleDescription: '主架构师',
-              personality: '温柔',
-            },
-          ],
-        });
-      }
-      if (url.includes('/api/first-run/available-clients')) {
-        return jsonResponse({
-          clients: [
-            {
-              client: 'claude',
-              provider: 'anthropic',
-              label: 'Claude',
-              cli: 'claude',
-              installed: true,
-              hasApiKey: false,
-            },
-          ],
-        });
-      }
-      if (url.includes('/api/accounts')) {
-        return jsonResponse({
-          providers: [
-            {
-              id: 'claude',
-              displayName: 'Claude (OAuth)',
-              name: 'Claude (OAuth)',
-              authType: 'oauth',
-
-              mode: 'subscription',
-              models: ['claude-opus-4-6'],
-              hasApiKey: false,
-              createdAt: '2026-01-01',
-              updatedAt: '2026-01-01',
-            },
-          ],
-        });
-      }
-      if (url.includes('/api/first-run/connectivity-test')) {
-        return jsonResponse({ ok: true, message: '连接成功' });
-      }
-      if (url === '/api/cats' && init?.method === 'POST') {
-        catsPayload = JSON.parse(String(init.body)) as Record<string, unknown>;
-        return jsonResponse({ cat: { id: 'ragdoll-test', displayName: '布偶猫' } });
-      }
-      if (url === '/api/threads' && init?.method === 'POST') {
-        return jsonResponse({ id: 'thread-test-123' });
-      }
-      if (url === '/api/threads') {
-        return jsonResponse({ threads: [] });
-      }
-      return jsonResponse({});
-    });
-
-    await act(async () => {
-      root.render(<WizardHost />);
-    });
-    await flushEffects();
-
-    // Step 1: select template
-    // FirstRunQuestWizard uses createPortal to document.body
-    const templateButton = Array.from(document.querySelectorAll('button')).find((b) =>
-      b.textContent?.includes('布偶猫'),
-    );
-    expect(templateButton).toBeTruthy();
-    await act(async () => {
-      templateButton!.click();
-    });
-    await flushEffects();
-
-    // Step 2: select client
-    const clientButton = Array.from(document.querySelectorAll('button')).find((b) => b.textContent?.includes('Claude'));
-    expect(clientButton).toBeTruthy();
-    await act(async () => {
-      clientButton!.click();
-    });
-    await flushEffects();
-
-    // Step 3: profile auto-selected, select model, test, then create
-    // Click test button
-    const testButton = Array.from(document.querySelectorAll('button')).find((b) => b.textContent?.includes('测试连接'));
-    if (testButton) {
-      await act(async () => {
-        testButton.click();
-      });
-      await flushEffects();
-    }
-
-    // Click create button
-    const createButton = Array.from(document.querySelectorAll('button')).find((b) =>
-      b.textContent?.includes('创建猫猫'),
-    );
-    if (createButton && !createButton.disabled) {
-      await act(async () => {
-        createButton.click();
-      });
-      await flushEffects();
-    }
-
-    // Assert: POST /api/cats must use clientId, not client
-    expect(catsPayload).not.toBeNull();
-    expect(catsPayload!.clientId).toBe('anthropic');
-    expect(catsPayload!.client).toBeUndefined();
+    // While busy the primary control exposes the busy label instead of the step label.
+    const primary = button('button[aria-label="正在保存"]');
+    expect(primary).not.toBeNull();
+    expect(primary?.disabled).toBe(true);
+    expect(button('button[aria-label="关闭伙伴配置"]')?.disabled).toBe(true);
+    expect(nextButton()).toBeNull();
+    expect(setup.start).not.toHaveBeenCalled();
   });
 });

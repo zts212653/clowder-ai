@@ -1,5 +1,4 @@
 import { Readable } from 'node:stream';
-import type { CollectiveArtifactMediaReadPort, CollectiveArtifactOwnerResult } from '@cat-cafe/collective-connector';
 import {
   type CollectiveMediaDescriptor,
   collectiveMediaBufferBytes,
@@ -10,6 +9,7 @@ import { ZodError } from 'zod';
 import { WorkspaceContentReviewError } from '../workspace-review/errors.js';
 import { admitCollectiveMedia } from './media-authority.js';
 import type { CollectiveMediaReviews } from './media-reviews.js';
+import type { CollectiveArtifactMediaReadPort, CollectiveArtifactOwnerResult } from './owner-port.js';
 import type { CollectivePublishedMediaOwner } from './published-media-owner.js';
 
 export function publishedMediaReadPort(

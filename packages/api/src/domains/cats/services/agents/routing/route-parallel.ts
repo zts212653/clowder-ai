@@ -236,6 +236,18 @@ export async function* routeParallel(
       return;
     }
   }
+  // A persisted legacy domain scope cannot borrow the ordinary parallel carrier.
+  if (options.executionScope) {
+    for (const catId of targetCats)
+      yield {
+        type: 'error',
+        catId,
+        errorCode: 'legacy_execution_scope_retired',
+        error: '旧 Collective 执行入口已迁出，请从已安装插件重新发起。',
+        timestamp: Date.now(),
+      };
+    return;
+  }
   const ownerAuthProvenance = options.ownerAuthProvenance ?? 'unknown';
   const triggerMessageId = currentUserMessageId ?? options.a2aTriggerMessageId;
   const collectiveBoundTurn =
@@ -251,6 +263,9 @@ export async function* routeParallel(
     options.cloudDispatchProvenance?.calledByCatId ?? (options.a2aTriggerMessageId ? exactA2ACallerCatId : userId);
   const bridgeTriggerMessageId =
     options.cloudDispatchProvenance?.sourceMessageId ?? options.a2aTriggerMessageId ?? currentUserMessageId;
+  const causalTriggerMessageId = currentUserMessageId ?? options.a2aTriggerMessageId;
+  const causalTriggerMessage = causalTriggerMessageId ? await deps.messageStore.getById(causalTriggerMessageId) : null;
+  const causalTriggerThreadId = causalTriggerMessage?.threadId === threadId ? threadId : undefined;
   // P2-3 fix: also consider default MCP server path (ClaudeAgentService has fallback resolution)
   const mcpServerPath = process.env.CAT_CAFE_MCP_SERVER_PATH || resolveDefaultClaudeMcpServerPath();
   const incrementalMode = Boolean(currentUserMessageId && deps.deliveryCursorStore);
@@ -1053,7 +1068,6 @@ export async function* routeParallel(
         ...(options.asrPersonMemoryScenes?.length ? { asrPersonMemoryScenes: options.asrPersonMemoryScenes } : {}),
         ...(memoryCueLegacyFallbacks.length > 0 ? { memoryCueLegacyFallbacks } : {}),
         ...(options.toolExecutionPolicy ? { toolExecutionPolicy: options.toolExecutionPolicy } : {}),
-        ...(options.executionScope ? { executionScope: options.executionScope } : {}),
         executionKind: turnExecutionKind,
         ...(options.beforeOutputCommit ? { outputFenced: true } : {}),
         executionCausal: {
@@ -1999,6 +2013,7 @@ export async function* routeParallel(
                     causal: {
                       kind: 'invocation_reply' as const,
                       triggerMessageId: (currentUserMessageId ?? options.a2aTriggerMessageId) as string,
+                      ...(causalTriggerThreadId ? { triggerThreadId: causalTriggerThreadId } : {}),
                     },
                   }
                 : {}),
@@ -2147,6 +2162,7 @@ export async function* routeParallel(
                       causal: {
                         kind: 'invocation_reply' as const,
                         triggerMessageId: (currentUserMessageId ?? options.a2aTriggerMessageId) as string,
+                        ...(causalTriggerThreadId ? { triggerThreadId: causalTriggerThreadId } : {}),
                       },
                     }
                   : {}),

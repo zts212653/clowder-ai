@@ -29,13 +29,6 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
     description: '猫登录模型用的号。登录成功后不会自动换号。',
   },
   {
-    id: 'im',
-    label: 'IM 对接',
-    icon: 'plug',
-    color: 'var(--cafe-accent)',
-    description: '飞书、钉钉、企微和外部消息入口。',
-  },
-  {
     id: 'skills',
     label: 'Skill 管理',
     icon: 'zap',

@@ -2,7 +2,8 @@ import { statSync } from 'node:fs';
 import type { Server } from 'node:http';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import puppeteer, { type Browser } from 'puppeteer-core';
+import type { Browser } from 'puppeteer-core';
+import { loadPuppeteer } from '../../../../utils/lazy-puppeteer.js';
 import { createHostLaunchedLocalNoteConnector } from '../../action/LocalNoteTrialConnector.js';
 import { createOwnerLocalNoteProfile } from './owner-local-note-profile.js';
 
@@ -98,6 +99,7 @@ export async function maybeStartOwnerLocalNoteLab(
   const close = createOwnerLocalNoteCleanup(() => browser, fixture.server, cleanupTimeoutMs);
   try {
     const chromium = await browserModule.loadChromium();
+    const puppeteer = await loadPuppeteer();
     browser = await puppeteer.launch({ headless: true, executablePath: chromium.executablePath() });
     const ownedBrowser = browser;
     const profile = createOwnerLocalNoteProfile(fixture.url);

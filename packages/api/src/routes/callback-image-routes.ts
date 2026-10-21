@@ -49,10 +49,6 @@ async function admit(deps: ImageRouteDeps, record: InvocationRecord, reply: Fast
     reply.status(401).send({ error: 'Image publication invocation is no longer current' });
     return false;
   }
-  if (record.collectiveWorkBinding || record.executionGrant) {
-    reply.status(403).send({ error: 'Image publication requires ordinary member authority' });
-    return false;
-  }
   const thread = await deps.threadStore?.get(record.threadId);
   if (!thread || thread.createdBy !== record.userId) {
     reply.status(403).send({ error: 'Current thread is not owned by the invocation owner' });

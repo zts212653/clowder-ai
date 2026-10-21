@@ -5,32 +5,37 @@
 .DESCRIPTION
   Full pipeline:
     1. Install & build the web application
-    2. pnpm deploy per runtime package (api, web) -> bundled/deploy/{api,web}/
+    2. Frozen production install -> bundled/deploy/{api,web,mcp-server}/
        with flat hoisted node_modules (real files, no junctions)
     3. Bundle Redis portable for offline install
     4. Build the Electron shell (via desktop/ npm install + electron-builder)
     5. Compile Inno Setup installer -> dist/ClowderAI-Setup-x.x.x.exe
 
-  Why pnpm deploy (not tar of root node_modules): pnpm on Windows uses
-  junctions, which require absolute paths. A tarball of node_modules bakes in
-  the build-machine absolute paths and every junction is broken after install.
-  `pnpm deploy --config.node-linker=hoisted` produces a self-contained, flat
-  node_modules with real files that is portable across machines.
+  Production dependencies use the source lock, including peer bindings.
+  Workspace links are materialized as real files for portable installation.
 
 .PARAMETER SkipWebBuild
   Skip pnpm install/build (use existing build artifacts).
 
 .PARAMETER SkipBundleDeps
-  Skip pnpm deploy step (use existing bundled/deploy/).
+  Skip frozen runtime export (use existing bundled/deploy/).
 
 .PARAMETER SkipElectronBuild
-  Skip electron-builder (use existing desktop-dist/). Use desktop/package-lock.json
+  Diagnostic-only: skip electron-builder and use unverified existing desktop-dist/.
 
 .PARAMETER SkipInstaller
   Skip Inno Setup compilation.
 
 .PARAMETER SkipPortableZip
   Skip portable zip assembly.
+
+.PARAMETER NoManifest
+  Skip writing dist/build-manifest.json for an explicitly diagnostic build.
+  Release builds require a complete manifest and fail if it cannot be written.
+
+.PARAMETER AllowDirtyInputs
+  Allow a diagnostic build from a dirty checkout. The generated manifest keeps
+  the dirty-input evidence, but this mode must not be used for a release EXE.
 
 .EXAMPLE
   .\desktop\scripts\build-desktop.ps1
@@ -41,7 +46,9 @@ param(
     [switch]$SkipBundleDeps,
     [switch]$SkipElectronBuild,
     [switch]$SkipInstaller,
-    [switch]$SkipPortableZip
+    [switch]$SkipPortableZip,
+    [switch]$NoManifest,
+    [switch]$AllowDirtyInputs
 )
 
 $ErrorActionPreference = "Stop"
@@ -52,106 +59,137 @@ function Write-Warn  { param([string]$msg) Write-Host "  [!!] $msg" -ForegroundC
 function Write-Err   { param([string]$msg) Write-Host "  [ERR] $msg" -ForegroundColor Red }
 
 $ProjectRoot = Split-Path -Parent (Split-Path -Parent (Split-Path -Parent $PSCommandPath))
+$integrityTool = Join-Path (Join-Path $ProjectRoot 'desktop') 'scripts\installer-integrity.mjs'
+$script:SetupIntegrityLevel = $null
+$script:BuildRootIntegrity = $null
+$generatedSetupPath = $null
+$generatedPortablePath = $null
+if (-not $AllowDirtyInputs -and $SkipElectronBuild) {
+    throw '-SkipElectronBuild has no verified shell source receipt. Rebuild Electron for a release; use -AllowDirtyInputs only for diagnostics.'
+}
+if (-not $AllowDirtyInputs -and $NoManifest) {
+    throw '-NoManifest is diagnostic-only. A release requires its build manifest.'
+}
+
+# A restrictive mandatory integrity label on this build root is inherited by
+# every produced file. A Low-labelled Setup runs at Low integrity and cannot
+# create `%TEMP%\is-*.tmp` (error 5); an explicitly Medium-labelled Setup caps
+# the process at Medium and the PrepareToInstall identity helper fails with
+# Win32 1314. The release step below raises such labels to High, but warn early
+# so the workspace cause is visible instead of looking like a code bug.
+if (Test-Path -LiteralPath $integrityTool) {
+    $rootIntegrityJson = (& node $integrityTool $ProjectRoot --check --json 2>$null | Out-String).Trim()
+    if ($rootIntegrityJson) {
+        try { $script:BuildRootIntegrity = ($rootIntegrityJson | ConvertFrom-Json).level } catch {}
+    }
+    if ($LASTEXITCODE -ne 0 -and $rootIntegrityJson) {
+        Write-Warn "Build root carries a restrictive integrity label; produced installers inherit it and will be raised to High before release (fix the workspace label for clean provenance)."
+    }
+}
+
+# A release package must be reproducible from the exact source revision. The
+# installer copies these roots directly or packs them into the runtime archives;
+# allowing local edits here makes sourceSha/Setup SHA evidence non-reproducible.
+$releaseInputRoots = @(
+    'docs', 'cat-cafe-skills', 'scripts', 'assets', 'guides',
+    'packages', '.claude/hooks/user-level', '.claude/hooks/f24-compaction.mjs',
+    'cat-template.json', 'pnpm-workspace.yaml', 'package.json', 'LICENSE',
+    'bundled/archives', 'bundled/node', 'bundled/redis', 'bundled/cli-tools',
+    'desktop'
+)
+$releaseInputStatus = @(git -C $ProjectRoot status --porcelain --untracked-files=all -- $releaseInputRoots 2>$null)
+if ($LASTEXITCODE -ne 0) { throw 'Could not inspect release input status' }
+if ($releaseInputStatus.Count -gt 0 -and -not $AllowDirtyInputs) {
+    throw "Release packaging requires a clean checkout. Use -AllowDirtyInputs only for diagnostics.`n$($releaseInputStatus -join "`n")"
+}
+if ($releaseInputStatus.Count -gt 0) {
+    Write-Warn 'Diagnostic build: release inputs are dirty; build-manifest.json will record them and the EXE is not releaseable.'
+}
+function Assert-WebBuildIdentity {
+    param([string]$WebRoot)
+    $expectedRevision = (git -C $ProjectRoot rev-parse HEAD).Trim()
+    # Frozen Web keeps dependencies under the shared deploy tree; resolve the
+    # validator's Next implementation from the already-built source workspace.
+    # The artifact itself is still validated for its serialized config, BUILD_ID
+    # and exact revision, and the final staged app is exercised at runtime.
+    $resolver = Join-Path $ProjectRoot 'packages/web/package.json'
+    & node (Join-Path $ProjectRoot 'desktop/scripts/verify-web-build.cjs') $WebRoot $expectedRevision $resolver
+    if ($LASTEXITCODE -ne 0) { throw "Web runtime admission failed: $WebRoot. Rebuild; do not rewrite build stamps." }
+}
+function Assert-ApiDesktopBundle {
+    param([string]$ApiRoot)
+    $required = @(
+        (Join-Path $ApiRoot 'dist/index.desktop.js'),
+        (Join-Path $ApiRoot 'dist/agent-hooks/index.desktop.js'),
+        (Join-Path $ApiRoot 'dist/.startup-read-ahead.json'),
+        (Join-Path $ApiRoot 'dist/desktop-bundle.json')
+    )
+    foreach ($file in $required) {
+        if (-not (Test-Path -LiteralPath $file -PathType Leaf)) {
+            throw "Desktop API bundle incomplete: missing $file. Run frozen-runtime-deploy without -SkipBundleDeps."
+        }
+        if ((Get-Item -LiteralPath $file).Length -le 0) {
+            throw "Desktop API bundle incomplete: empty $file."
+        }
+    }
+    $receipt = Get-Content -LiteralPath (Join-Path $ApiRoot 'dist/desktop-bundle.json') -Raw | ConvertFrom-Json
+    if ($receipt.entry -ne 'dist/index.desktop.js' -or $receipt.agentHooks.entry -ne 'dist/agent-hooks/index.desktop.js') {
+        throw "Desktop API bundle receipt does not name both optimized entries."
+    }
+    Write-Ok "Desktop API bundle complete (optimized entry + startup manifest + installer hooks)"
+}
 
 # Step 1: Build web app
-Write-Step "Step 1/8 - Build web application"
+Write-Step "Step 1/9 - Build web application"
 if (-not $SkipWebBuild) {
     Push-Location $ProjectRoot
+    $buildRevision = (git rev-parse HEAD).Trim()
+    if ($LASTEXITCODE -ne 0 -or $buildRevision -notmatch '^[a-f0-9]{40}$') { throw "Build requires a source revision" }
+    $buildInputs = @('packages', 'scripts', 'package.json', 'pnpm-lock.yaml', 'pnpm-workspace.yaml', 'tsconfig.base.json')
+    if (git status --porcelain --untracked-files=all -- @buildInputs) { throw "Commit runtime source changes before building a release" }
     pnpm install --frozen-lockfile
-    if ($LASTEXITCODE -ne 0) { pnpm install }
+    if ($LASTEXITCODE -ne 0) { throw "Frozen dependency installation failed" }
     pnpm run build
     if ($LASTEXITCODE -ne 0) { Write-Err "Build failed"; exit 1 }
+    if ((git rev-parse HEAD).Trim() -ne $buildRevision -or
+        (git status --porcelain --untracked-files=all -- @buildInputs)) { throw "Source changed during the build" }
+    $webRevision = (Get-Content -LiteralPath (Join-Path $ProjectRoot 'packages/web/.next/.build-commit') -Raw).Trim()
+    if ($webRevision -ne $buildRevision) { throw "Web build identity does not match this source revision" }
+    # The API's generic tsc build does not stamp itself. Only record its identity
+    # after this complete, unchanged-source API/Web build has succeeded.
+    [IO.File]::WriteAllText((Join-Path $ProjectRoot 'packages/api/dist/.build-commit'), "$buildRevision`n", [Text.UTF8Encoding]::new($false))
     Pop-Location
     Write-Ok "Web application built"
 } else {
+    Assert-WebBuildIdentity (Join-Path $ProjectRoot 'packages/web')
     Write-Ok "Skipped (existing artifacts)"
 }
 
-# Step 2: pnpm deploy per runtime package (flat, self-contained node_modules)
-# Produces bundled/deploy/{api,web}/ with real files — no junctions, no workspace
-# references. Replaces the old "tar root node_modules" approach, which baked in
-# build-machine absolute paths via Windows junctions and broke on install.
-Write-Step "Step 2/8 - pnpm deploy runtime packages"
+# Step 2: ordinary frozen install, then materialize portable runtime trees.
+# pnpm 9 hoisted deploy disables lockfile reads; do not use it for releases.
+Write-Step "Step 2/9 - Frozen runtime packages"
 $bundledDir = Join-Path $ProjectRoot "bundled"
 $deployRoot = Join-Path $bundledDir "deploy"
 if (-not $SkipBundleDeps) {
-    if (-not (Test-Path $bundledDir)) {
-        New-Item -ItemType Directory -Path $bundledDir -Force | Out-Null
+    New-Item -ItemType Directory -Path $bundledDir -Force | Out-Null
+    $stamp = [DateTime]::UtcNow.ToString('yyyyMMddHHmmssfff')
+    $nextDeploy = Join-Path $bundledDir "deploy-$stamp"
+    node (Join-Path $ProjectRoot "desktop/scripts/frozen-runtime-deploy.mjs") $ProjectRoot $nextDeploy
+    if ($LASTEXITCODE -ne 0) { throw "Frozen runtime export failed" }
+    if (Test-Path -LiteralPath $deployRoot) {
+        Move-Item -LiteralPath $deployRoot -Destination (Join-Path $bundledDir "deploy-before-$stamp")
     }
-    if (Test-Path $deployRoot) { Remove-Item $deployRoot -Recurse -Force }
-    New-Item -ItemType Directory -Path $deployRoot -Force | Out-Null
-
-    # pnpm deploy creates .bin/ shims on Windows that Defender can lock,
-    # causing EPERM.  pnpm deploy also requires an empty target directory.
-    # Retry with a delay lets Defender finish scanning before the next attempt.
-    $defenderExclusionAdded = $false
-    $deployFailed = $false
-
-    try {
-        Add-MpPreference -ExclusionPath $deployRoot -ErrorAction Stop
-        $defenderExclusionAdded = $true
-    } catch {
-        Write-Host "  Defender exclusion skipped: $($_.Exception.Message)" -ForegroundColor Yellow
-    }
-
-    try {
-        Push-Location $ProjectRoot
-        try {
-            foreach ($pkg in @('api', 'web', 'mcp-server')) {
-                $out = Join-Path $deployRoot $pkg
-                $deployed = $false
-                for ($attempt = 1; $attempt -le 3; $attempt++) {
-                    if ($attempt -gt 1) {
-                        Write-Host "  Retry $attempt/3 for @cat-cafe/$pkg ..." -ForegroundColor Yellow
-                        Start-Sleep -Seconds 10
-                    }
-                    if (Test-Path $out) { Remove-Item $out -Recurse -Force }
-                    Write-Host "  Deploying @cat-cafe/$pkg ..." -ForegroundColor Gray
-                    $env:CAT_CAFE_SKIP_NODE_RUNTIME_GUARD = "1"
-                    pnpm --filter "@cat-cafe/$pkg" --prod --config.node-linker=hoisted deploy $out 2>&1
-                    $env:CAT_CAFE_SKIP_NODE_RUNTIME_GUARD = $null
-                    if ($LASTEXITCODE -eq 0) { $deployed = $true; break }
-                }
-                if (-not $deployed) { throw "pnpm deploy @cat-cafe/$pkg failed after 3 attempts" }
-            }
-        } finally {
-            Pop-Location
-        }
-    } catch {
-        Write-Err $_.Exception.Message
-        $deployFailed = $true
-    } finally {
-        if ($defenderExclusionAdded) {
-            try { Remove-MpPreference -ExclusionPath $deployRoot -ErrorAction SilentlyContinue } catch {}
-        }
-    }
-
-    if ($deployFailed) { exit 1 }
-
-    # Web's pre-built .next artifact is not copied by `pnpm deploy` (it's outside
-    # the package `files` field), so inject it explicitly.
-    $webNextSrc = Join-Path $ProjectRoot "packages\web\.next"
-    $webNextDst = Join-Path $deployRoot "web\.next"
-    if (Test-Path $webNextSrc) {
-        if (Test-Path $webNextDst) { Remove-Item $webNextDst -Recurse -Force }
-        Copy-Item $webNextSrc $webNextDst -Recurse
-        Write-Ok "Copied packages/web/.next -> bundled/deploy/web/.next"
-    } else {
-        Write-Err "packages/web/.next not found — did 'pnpm run build' run?"
-        exit 1
-    }
-
-    Write-Ok "Deploy artifacts ready under bundled/deploy/"
-} else {
-    if (-not (Test-Path $deployRoot)) {
-        Write-Err "bundled/deploy/ missing. Run without -SkipBundleDeps first."
-        exit 1
-    }
-    Write-Ok "Skipped (-SkipBundleDeps)"
-}
+    Move-Item -LiteralPath $nextDeploy -Destination $deployRoot
+    # frozen-runtime-deploy stages .next and generated public/vendor from the same build.
+    Write-Ok "Frozen runtime artifacts ready"
+} elseif (-not (Test-Path -LiteralPath $deployRoot)) {
+    throw "bundled/deploy missing. Run without -SkipBundleDeps first."
+} else { Write-Ok "Skipped (-SkipBundleDeps)" }
+Assert-WebBuildIdentity (Join-Path $deployRoot 'web')
+Assert-ApiDesktopBundle (Join-Path $deployRoot 'api')
 
 # Step 3: Bundle Redis portable + Node.js runtime
-Write-Step "Step 3/8 - Bundle Redis portable + Node.js"
+Write-Step "Step 3/9 - Bundle Redis portable + Node.js"
 
 # Node.js portable — without this, clean Windows installs with no system Node
 # cannot spawn the API/Web processes. CRITICAL: the bundled Node major version
@@ -276,7 +314,7 @@ if (Test-Path $redisBin) {
 }
 
 # Step 4: Write CLI install guidance (CLIs are installed by users separately)
-Write-Step "Step 4/8 - Write CLI install guidance"
+Write-Step "Step 4/9 - Write CLI install guidance"
 
 $cliToolsDir = Join-Path $bundledDir "cli-tools"
 if (-not (Test-Path $cliToolsDir)) {
@@ -301,18 +339,38 @@ Write-Ok "agy-install-instructions.txt written"
 Write-Ok "CLI tool provisioning removed — users install CLIs separately"
 
 # Step 5: Build Electron app
-Write-Step "Step 5/8 - Build Electron shell"
+Write-Step "Step 5/9 - Build Electron shell"
 $desktopDir = Join-Path $ProjectRoot "desktop"
 $desktopDist = Join-Path $ProjectRoot "desktop-dist"
 
 if (-not $SkipElectronBuild) {
     Push-Location $desktopDir
-    if (-not (Test-Path (Join-Path $desktopDir "node_modules"))) {
-        Write-Host "  Installing desktop dependencies..."
-    npm install --include=dev
-        if ($LASTEXITCODE -ne 0) { Write-Err "npm install failed in desktop/"; exit 1 }
+    # node_modules may already exist but disagree with package-lock.json (for
+    # example an Electron manually installed for diagnosis). electron-builder
+    # packages whatever is installed, so a version drift would ship a shell that
+    # does not match the lockfile and may need an unexpected download. Repair the
+    # installed tree from the lock before packaging.
+    $lockElectron = $null
+    $lockPath = Join-Path $desktopDir "package-lock.json"
+    if (Test-Path -LiteralPath $lockPath) {
+        # package-lock v3 stores the project entry under the empty-string key,
+        # which Windows PowerShell 5.1's ConvertFrom-Json cannot materialize.
+        # Node is a build prerequisite, so ask it for the locked version.
+        $lockElectron = (& node -e "const lock=require(process.argv[1]);process.stdout.write(((lock.packages||{})['']||{}).devDependencies?.electron||'')" $lockPath 2>$null)
+        if ($LASTEXITCODE -ne 0) { $lockElectron = $null }
+        if ($lockElectron) { $lockElectron = "$lockElectron".Trim() }
     }
-    npx electron-builder --win --dir
+    $installedElectronPath = Join-Path $desktopDir "node_modules/electron/package.json"
+    # Matching Electron alone does not verify electron-builder, asar or their peers.
+    # Install the complete locked tree on every build.
+    npm ci --include=dev
+    if ($LASTEXITCODE -ne 0) { Write-Err "npm ci failed in desktop/"; exit 1 }
+    $installedElectron = (Get-Content -LiteralPath $installedElectronPath -Raw | ConvertFrom-Json).version
+    if ($lockElectron -and $installedElectron -ne $lockElectron) {
+        Write-Err "desktop Electron $installedElectron still does not match package-lock $lockElectron"
+        exit 1
+    }
+    npx electron-builder --win --dir --config windows-builder.cjs
     if ($LASTEXITCODE -ne 0) { Write-Err "electron-builder failed"; exit 1 }
     Pop-Location
 
@@ -335,6 +393,7 @@ if (-not $SkipElectronBuild) {
     # Substring match avoids slash-direction issues — Windows FullName uses '\',
     # the patterns above contain no separators so they hit either way.
     $winResources = Join-Path (Join-Path $desktopDist "win-unpacked") "resources"
+    if (Test-Path (Join-Path $winResources "packages")) { throw "Windows shell duplicated runtime packages" }
     if (Test-Path $winResources) {
         $darwinLeak = Get-ChildItem -Path $winResources -Recurse -Force -ErrorAction SilentlyContinue | Where-Object {
             $_.FullName -match 'node-darwin|redis-darwin|darwin-[a-z0-9]+'
@@ -359,12 +418,18 @@ if (-not $SkipElectronBuild) {
 # NTFS metadata creation + Windows Defender real-time scan → 10+ min install.
 # Shipping tar.gz archives and extracting post-install with Windows' built-in
 # tar.exe reduces Inno Setup [Files] count from ~30K to ~100.
-Write-Step "Step 6/8 - Archive for fast installer extraction"
+Write-Step "Step 6/9 - Archive for fast installer extraction"
+$releaseRevision = (git -C $ProjectRoot rev-parse HEAD).Trim()
+foreach ($stamp in @('api/dist/.build-commit', 'web/.next/.build-commit')) {
+    $artifactRevision = (Get-Content -LiteralPath (Join-Path $deployRoot $stamp) -Raw).Trim()
+    if ($artifactRevision -ne $releaseRevision) { throw "Stale release artifact: $stamp. Rebuild API and Web together." }
+}
 $archiveDir = Join-Path $bundledDir "archives"
 if (Test-Path $archiveDir) { Remove-Item $archiveDir -Recurse -Force }
 New-Item -ItemType Directory -Path $archiveDir -Force | Out-Null
 
 $archiveTargets = @(
+    @{ Name = "deploy-dependencies"; Src = Join-Path $deployRoot "dependencies" },
     @{ Name = "deploy-api";        Src = Join-Path $deployRoot "api" },
     @{ Name = "deploy-web";        Src = Join-Path $deployRoot "web" },
     @{ Name = "deploy-mcp-server"; Src = Join-Path $deployRoot "mcp-server" },
@@ -372,13 +437,56 @@ $archiveTargets = @(
     @{ Name = "node";              Src = Join-Path $bundledDir "node" }
 )
 
+# Only Node itself needs a system tar. Runtime archives use the same bundled npm
+# tar implementation as installation and include integrity/progress manifests.
+$archiveTar = (Get-Command tar.exe).Source
+$archiveTarPrefix = @()
+$systemTar = Join-Path $env:WINDIR 'System32/tar.exe'
+$gitTar = Join-Path $env:ProgramFiles "Git/usr/bin/tar.exe"
+if (Test-Path -LiteralPath $systemTar) {
+    # Git's bundled tar can terminate with 0xC0000142 while archiving the
+    # portable Node tree on Windows. Prefer the inbox bsdtar for deterministic
+    # packaging; fall back to Git tar on older Windows images.
+    $archiveTar = $systemTar
+} elseif (Test-Path -LiteralPath $gitTar) {
+    $archiveTar = $gitTar
+    $archiveTarPrefix = @('--force-local')
+}
+Write-Host "  Archive tool: $archiveTar"
+
 foreach ($t in $archiveTargets) {
     if (-not (Test-Path $t.Src)) {
         Write-Warn "$($t.Src) not found — skipping $($t.Name).tar.gz"
         continue
     }
     $archivePath = Join-Path $archiveDir "$($t.Name).tar.gz"
-    tar -czf $archivePath -C $t.Src .
+    if ($t.Name -ne 'node') {
+        node (Join-Path $ProjectRoot 'desktop/scripts/create-runtime-archive.mjs') $t.Src $archivePath
+        if ($LASTEXITCODE -ne 0) { throw "Runtime archive failed: $($t.Name)" }
+        if ($t.Name -eq 'deploy-api') {
+            $entries = @(& (Join-Path $env:SystemRoot 'System32/tar.exe') -tzf $archivePath)
+            foreach ($requiredEntry in @('./dist/index.desktop.js', './dist/agent-hooks/index.desktop.js', './dist/.startup-read-ahead.json')) {
+                if (-not ($entries -contains $requiredEntry) -and -not ($entries -contains $requiredEntry.TrimStart('./'))) {
+                    throw "deploy-api archive missing required entry: $requiredEntry"
+                }
+            }
+            Write-Ok "deploy-api archive contains optimized desktop entry and startup manifest"
+        }
+        continue
+    }
+    $oldErrorPreference = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = "Continue"
+        $previousArchivePath = $env:PATH
+        try {
+            $env:PATH = "$(Split-Path -Parent $archiveTar);$env:PATH"
+            $tarOutput = & $archiveTar @archiveTarPrefix -czf $archivePath -C $t.Src . 2>&1
+        } finally { $env:PATH = $previousArchivePath }
+        $tarExit = $LASTEXITCODE
+    } finally { $ErrorActionPreference = $oldErrorPreference }
+    $tarOutput | ForEach-Object { Write-Host $_ }
+    if ($tarExit -ne 0) { throw "tar failed for $($t.Name), exit=$tarExit, source=$($t.Src)" }
+    & (Join-Path $env:SystemRoot 'System32/tar.exe') -tzf $archivePath > $null
     if ($LASTEXITCODE -ne 0) {
         Write-Err "tar failed for $($t.Name)"
         exit 1
@@ -386,10 +494,12 @@ foreach ($t in $archiveTargets) {
     $sizeMB = [math]::Round((Get-Item $archivePath).Length / 1MB, 2)
     Write-Ok "$($t.Name).tar.gz ($sizeMB MB)"
 }
+& node (Join-Path $ProjectRoot 'desktop/scripts/verify-runtime-archives.mjs') $ProjectRoot
+if ($LASTEXITCODE -ne 0) { throw 'Runtime archive gate failed; no installer may be compiled.' }
 Write-Ok "Archives ready under bundled/archives/"
 
 # Step 7: Compile Inno Setup installer
-Write-Step "Step 7/8 - Compile installer"
+Write-Step "Step 7/9 - Compile installer"
 if (-not $SkipInstaller) {
     $issFile = Join-Path (Join-Path (Join-Path $ProjectRoot "desktop") "installer") "cat-cafe.iss"
     $distDir = Join-Path $ProjectRoot "dist"
@@ -397,6 +507,7 @@ if (-not $SkipInstaller) {
 
     $iscc = "iscc.exe"
     $candidates = @(
+        (Join-Path (Join-Path $env:ProgramFiles "Inno Setup 7") "ISCC.exe"),
         (Join-Path (Join-Path $env:ProgramFiles "Inno Setup 6") "ISCC.exe"),
         (Join-Path (Join-Path ${env:ProgramFiles(x86)} "Inno Setup 6") "ISCC.exe"),
         (Join-Path (Join-Path (Join-Path $env:LOCALAPPDATA "Programs") "Inno Setup 6") "ISCC.exe")
@@ -430,7 +541,27 @@ if (-not $SkipInstaller) {
     if ($LASTEXITCODE -ne 0) { Write-Err "Inno Setup compilation failed"; exit 1 }
     Write-Ok "Installer built"
 
-    $outputExe = Get-ChildItem -Path $distDir -Filter "ClowderAI-Setup-*.exe" | Select-Object -First 1
+    $outputExe = Get-Item -LiteralPath (Join-Path $distDir "ClowderAI-Setup-$catCafeVersion.exe") -ErrorAction Stop
+    # The installer must be launchable from the delivered folder. A Low label
+    # inherited from the build root makes Setup run at Low integrity (TEMP
+    # creation fails with error 5); an explicit Medium label caps the elevated
+    # process so the identity helper's Add-Type fails with Win32 1314. Raise a
+    # restrictive label to High and fail the release build if it stays
+    # unlaunchable.
+    $integrityResult = (& node $integrityTool $outputExe.FullName --json 2>&1 | Out-String).Trim()
+    if ($LASTEXITCODE -ne 0) {
+        Write-Err "Setup integrity normalization failed: $integrityResult"
+        Write-Err "Delivered EXE would be capped below the elevated token (error 5 at %TEMP%\is-*.tmp, or Win32 1314 in the identity helper)."
+        exit 1
+    }
+    $integrity = $integrityResult | ConvertFrom-Json
+    $script:SetupIntegrityLevel = $integrity.after
+    $generatedSetupPath = $outputExe.FullName
+    if ($integrity.changed) {
+        Write-Warn "Raised Setup integrity from $($integrity.before) to $($integrity.after) (restrictive label inherited from the build root)"
+    } else {
+        Write-Ok "Setup integrity: $($integrity.after)"
+    }
     Write-Host ""
     Write-Host "  ========================================" -ForegroundColor Green
     Write-Host "  Installer ready!" -ForegroundColor Green
@@ -442,7 +573,7 @@ if (-not $SkipInstaller) {
 }
 
 # Step 8: Assemble portable zip (no-install distribution)
-Write-Step "Step 8/8 - Portable zip"
+Write-Step "Step 8/9 - Portable zip"
 if (-not $SkipPortableZip) {
     $distDir = Join-Path $ProjectRoot "dist"
     if (-not (Test-Path $distDir)) { New-Item -ItemType Directory -Path $distDir | Out-Null }
@@ -477,6 +608,7 @@ if (-not $SkipPortableZip) {
     Copy-ToStaging (Join-Path $deployRoot "api")         "packages\api"
     Copy-ToStaging (Join-Path $deployRoot "web")         "packages\web"
     Copy-ToStaging (Join-Path $deployRoot "mcp-server")  "packages\mcp-server"
+    Copy-ToStaging (Join-Path $deployRoot "dependencies") "node_modules"
 
     # Root config files
     foreach ($f in @("cat-template.json", "pnpm-workspace.yaml", "package.json")) {
@@ -486,6 +618,18 @@ if (-not $SkipPortableZip) {
 
     # Skills
     Copy-ToStaging (Join-Path $ProjectRoot "cat-cafe-skills") "cat-cafe-skills"
+    # Windows checkouts materialize the Git symlink
+    # cat-cafe-skills/.cat-cafe-shared-refs as a four-byte "refs" file.  The
+    # portable layout must contain a real alias directory so relative skill
+    # references survive extraction and upgrades on Windows.
+    $stagedSkills = Join-Path $staging "cat-cafe-skills"
+    $stagedSharedRefs = Join-Path $stagedSkills ".cat-cafe-shared-refs"
+    $stagedMarker = $stagedSharedRefs
+    if (Test-Path -LiteralPath $stagedMarker -PathType Leaf) { Remove-Item -LiteralPath $stagedMarker -Force }
+    $stagedRefs = Join-Path $stagedSkills "refs"
+    if (Test-Path -LiteralPath $stagedRefs) {
+        Copy-Item -Path $stagedRefs -Destination $stagedSharedRefs -Recurse -Force
+    }
 
     # Docs
     Copy-ToStaging (Join-Path $ProjectRoot "docs") "docs"
@@ -520,10 +664,6 @@ if (-not $SkipPortableZip) {
 
     # Guide registry + flow definitions — bootcamp/guide features
     Copy-ToStaging (Join-Path $ProjectRoot "guides") "guides"
-
-    # Plugin manifests/resources — PluginRegistry scans this tree at runtime.
-    # F204 moved plugins from root plugins/ into packages/api/src/plugins/.
-    Copy-ToStaging (Join-Path $ProjectRoot "packages\api\src\plugins") "plugins"
 
     # Agent CLI hook templates
     $hooksSource = Join-Path $ProjectRoot ".claude\hooks\user-level"
@@ -591,6 +731,7 @@ if (-not $SkipPortableZip) {
     Remove-Item $staging -Recurse -Force
 
     $zipFile = Get-Item $zipPath
+    $generatedPortablePath = $zipFile.FullName
     Write-Host ""
     Write-Host "  ========================================" -ForegroundColor Green
     Write-Host "  Portable zip ready!" -ForegroundColor Green
@@ -599,4 +740,167 @@ if (-not $SkipPortableZip) {
     Write-Host "  ========================================" -ForegroundColor Green
 } else {
     Write-Ok "Portable zip skipped"
+}
+
+# Step 9: Build identity manifest (P2-6). Release evidence must succeed before
+# any output can be delivered. Only files produced by this invocation belong
+# to its source revision. The manifest records: source
+# SHA, generation time, Setup/portable ZIP path+sha256, every tar.gz archive
+# with its serialized manifest, API/Web .build-commit identities, and the
+# working-tree state of every input that the installer packages (including
+# desktop/ source and untracked files that are bundled along, e.g. docs/).
+if (-not $NoManifest) {
+    Write-Step "Step 9/9 - Build manifest"
+    try {
+        $manifestDistDir = Join-Path $ProjectRoot "dist"
+        if (-not (Test-Path -LiteralPath $manifestDistDir)) {
+            New-Item -ItemType Directory -Path $manifestDistDir -Force | Out-Null
+        }
+
+        function Get-ProjectRelativePath {
+            param([string]$Path)
+            $full = [IO.Path]::GetFullPath($Path)
+            if ($full.StartsWith($ProjectRoot, [StringComparison]::OrdinalIgnoreCase)) {
+                $relative = $full.Substring($ProjectRoot.Length) -replace '^[\\/]+', ''
+                return ($relative -replace '\\', '/')
+            }
+            return ($full -replace '\\', '/')
+        }
+        function Get-FileSha256 {
+            param([string]$Path)
+            return (Get-FileHash -LiteralPath $Path -Algorithm SHA256 -ErrorAction Stop).Hash.ToLowerInvariant()
+        }
+        function Get-ArtifactRecord {
+            param([string]$Path)
+            if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { throw "Manifest input is missing: $Path" }
+            return [ordered]@{
+                path      = Get-ProjectRelativePath $Path
+                sizeBytes = (Get-Item -LiteralPath $Path).Length
+                sha256    = Get-FileSha256 $Path
+            }
+        }
+
+        $manifestVersion = if ($env:CATCAFE_VERSION) {
+            $env:CATCAFE_VERSION
+        } else {
+            (Get-Content (Join-Path (Join-Path $ProjectRoot 'desktop') 'package.json') -Raw | ConvertFrom-Json).version
+        }
+
+        # Artifact identities stamped by the paired API/Web build.
+        $buildIdentity = [ordered]@{}
+        foreach ($stamp in @(
+            @{ Key = 'api'; RelativePath = 'packages/api/dist/.build-commit' },
+            @{ Key = 'web'; RelativePath = 'packages/web/.next/.build-commit' }
+        )) {
+            $stampPath = Join-Path $ProjectRoot $stamp.RelativePath
+            if (Test-Path -LiteralPath $stampPath) {
+                $stampValue = Get-Content -LiteralPath $stampPath -Raw
+                if ($null -eq $stampValue) { $stampValue = '' } else { $stampValue = $stampValue.Trim() }
+                $buildIdentity[$stamp.Key] = [ordered]@{
+                    path  = $stamp.RelativePath
+                    value = $stampValue
+                }
+            } else {
+                $buildIdentity[$stamp.Key] = $null
+            }
+        }
+
+        # A skipped output must remain null even when dist contains an older release.
+        $setupExe = if ($generatedSetupPath) { Get-Item -LiteralPath $generatedSetupPath -ErrorAction Stop } else { $null }
+        $portableZip = if ($generatedPortablePath) { Get-Item -LiteralPath $generatedPortablePath -ErrorAction Stop } else { $null }
+        $setupRecord = if ($setupExe) { Get-ArtifactRecord $setupExe.FullName } else { $null }
+        if ($setupRecord) {
+            # Re-check (and normalize when needed) so the manifest never records
+            # an unlaunchable Low-integrity installer as a release artifact.
+            $setupIntegrityJson = (& node $integrityTool $setupExe.FullName --json 2>&1 | Out-String).Trim()
+            if ($LASTEXITCODE -eq 0 -and $setupIntegrityJson) {
+                $setupIntegrity = $setupIntegrityJson | ConvertFrom-Json
+                $setupRecord.integrity = $setupIntegrity.after
+                $script:SetupIntegrityLevel = $setupIntegrity.after
+                if ($setupIntegrity.changed) {
+                    Write-Warn "Raised existing Setup integrity from $($setupIntegrity.before) to $($setupIntegrity.after)"
+                }
+            } else {
+                throw "Could not verify Setup integrity: $setupIntegrityJson"
+            }
+        }
+        $portableRecord = if ($portableZip) { Get-ArtifactRecord $portableZip.FullName } else { $null }
+
+        # Each bulk archive and its serialized extraction manifest (sidecar).
+        $archives = @()
+        $archiveDirManifest = Join-Path (Join-Path $ProjectRoot 'bundled') 'archives'
+        if (Test-Path -LiteralPath $archiveDirManifest) {
+            foreach ($archive in (Get-ChildItem -LiteralPath $archiveDirManifest -Filter '*.tar.gz' -File | Sort-Object Name)) {
+                $archives += [ordered]@{
+                    name     = $archive.Name
+                    archive  = Get-ArtifactRecord $archive.FullName
+                    manifest = if ($archive.Name -eq 'node.tar.gz') { $null } else { Get-ArtifactRecord ($archive.FullName + '.json') }
+                }
+            }
+        }
+
+        # Clean/hygiene check over everything the installer copies. The
+        # preflight above rejects dirty release inputs; this duplicate census is
+        # retained in the manifest so diagnostic builds remain auditable.
+        $packagedRoots = @(
+            'docs', 'cat-cafe-skills', 'scripts', 'assets', 'guides',
+            '.claude/hooks/user-level',
+            '.claude/hooks/f24-compaction.mjs', 'cat-template.json',
+            'pnpm-workspace.yaml', 'package.json', 'LICENSE',
+            'bundled/archives', 'bundled/node', 'bundled/redis', 'bundled/cli-tools',
+            'desktop/scripts', 'desktop/assets'
+        )
+        $packagedStatus = @(git -C $ProjectRoot status --porcelain --untracked-files=all -- @packagedRoots 2>$null)
+        if ($LASTEXITCODE -ne 0) { throw "Could not read packaged-input git status" }
+        $desktopStatus = @(git -C $ProjectRoot status --porcelain --untracked-files=normal -- desktop 2>$null)
+        if ($LASTEXITCODE -ne 0) { throw "Could not read desktop/ git status" }
+
+        $trackedPackagedChanges = @($packagedStatus | Where-Object { $_ -and $_ -notmatch '^\?\?' })
+        $untrackedPackagedFiles = @($packagedStatus | ForEach-Object {
+            if ($_ -match '^\?\?\s+(.+)$') { $Matches[1].Trim() }
+        } | Where-Object { $_ })
+        $desktopSourceChanges = @($desktopStatus | Where-Object { $_ })
+
+        $manifest = [ordered]@{
+            schemaVersion = 1
+            sourceSha     = (git -C $ProjectRoot rev-parse HEAD).Trim()
+            sourceBranch  = (git -C $ProjectRoot rev-parse --abbrev-ref HEAD).Trim()
+            generatedAt   = [DateTime]::UtcNow.ToString('o')
+            version       = $manifestVersion
+            diagnosticOnly = [bool]$AllowDirtyInputs
+            skippedElectronBuild = [bool]$SkipElectronBuild
+            installer     = $setupRecord
+            portableZip   = $portableRecord
+            archives      = $archives
+            buildIdentity = $buildIdentity
+            workingTree   = [ordered]@{
+                packagedInputsClean      = ($packagedStatus.Count -eq 0)
+                packagedTrackedChanges   = $trackedPackagedChanges
+                packagedUntrackedFiles   = $untrackedPackagedFiles
+                desktopSourceClean       = ($desktopStatus.Count -eq 0)
+                desktopSourceChanges     = $desktopSourceChanges
+                buildRootIntegrity       = $script:BuildRootIntegrity
+                installerIntegrity       = $script:SetupIntegrityLevel
+            }
+        }
+        $manifestPath = Join-Path $manifestDistDir 'build-manifest.json'
+        # BOM-free JSON via .NET so CI parsers and other tools see plain UTF-8.
+        [IO.File]::WriteAllText(
+            $manifestPath,
+            ($manifest | ConvertTo-Json -Depth 8),
+            [Text.UTF8Encoding]::new($false)
+        )
+        Write-Ok "Build manifest -> dist/build-manifest.json"
+        if ($desktopSourceChanges.Count -gt 0) {
+            Write-Warn "desktop/ source has uncommitted changes; recorded in dist/build-manifest.json (build continues)"
+        }
+        if ($trackedPackagedChanges.Count -gt 0) {
+            Write-Warn "Packaged inputs have uncommitted changes; recorded in dist/build-manifest.json"
+        }
+    } catch {
+        if (-not $AllowDirtyInputs) { throw "Release build manifest generation failed: $_" }
+        Write-Warn "Diagnostic build manifest generation failed; output is not releaseable: $_"
+    }
+} else {
+    Write-Ok "Build manifest skipped (-NoManifest)"
 }

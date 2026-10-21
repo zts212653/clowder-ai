@@ -1,10 +1,7 @@
 import type { FastifyPluginAsync, FastifyReply, FastifyRequest } from 'fastify';
 import type { Redis } from 'ioredis';
 import { getRoster } from '../config/cat-config-loader.js';
-import {
-  requireConnectorWriteNetworkGuard,
-  requireConnectorWriteOwner,
-} from '../config/connector-secret-write-guards.js';
+import { requireOwnerWrite, requireOwnerWriteNetworkGuard } from '../config/owner-write-guards.js';
 import type { IThreadStore } from '../domains/cats/services/stores/ports/ThreadStore.js';
 import { resolveDesignGateReplayDeps } from '../infrastructure/harness-eval/design-gate/design-gate-replay-preflight.js';
 import { setEvalCatOverride } from '../infrastructure/harness-eval/domain/eval-domain-override.js';
@@ -181,12 +178,12 @@ export const evalHubRoutes: FastifyPluginAsync<EvalHubRoutesOptions> = async (ap
     // client spam cat invocations (DoS + cost attack). Mirror generate-now's
     // network + owner gate chain so both manual surfaces have symmetric
     // privilege requirements.
-    const networkError = requireConnectorWriteNetworkGuard(request);
+    const networkError = requireOwnerWriteNetworkGuard(request);
     if (networkError) {
       return reply.status(networkError.status).send({ error: networkError.error });
     }
 
-    const ownerError = requireConnectorWriteOwner(userId);
+    const ownerError = requireOwnerWrite(userId);
     if (ownerError) {
       return reply.status(ownerError.status).send({ error: ownerError.error });
     }
@@ -218,11 +215,11 @@ export const evalHubRoutes: FastifyPluginAsync<EvalHubRoutesOptions> = async (ap
     if (!userId) return;
 
     // Cloud codex R8 P1 (network): single-user mode (no DEFAULT_OWNER_USER_ID)
-    // makes requireConnectorWriteOwner() a no-op, and /api/session mints
+    // makes requireOwnerWrite() a no-op, and /api/session mints
     // default-user for any client. Without this guard, an exposed non-loopback
     // instance would let any remote client dirty docs/harness-feedback/.
     // Match push.ts / config-secrets.ts ordering: network guard first.
-    const networkError = requireConnectorWriteNetworkGuard(request);
+    const networkError = requireOwnerWriteNetworkGuard(request);
     if (networkError) {
       return reply.status(networkError.status).send({ error: networkError.error });
     }
@@ -232,7 +229,7 @@ export const evalHubRoutes: FastifyPluginAsync<EvalHubRoutesOptions> = async (ap
     // without proving ownership — same as other repo-mutating surfaces
     // (push.ts, config-secrets.ts, connector-hub.ts), require owner privilege
     // before dirtying the working tree.
-    const ownerError = requireConnectorWriteOwner(userId);
+    const ownerError = requireOwnerWrite(userId);
     if (ownerError) {
       return reply.status(ownerError.status).send({ error: ownerError.error });
     }

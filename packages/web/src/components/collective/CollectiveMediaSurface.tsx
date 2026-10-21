@@ -29,7 +29,7 @@ export function CollectiveMediaSurface({
     decide: unavailable,
     historyReadOnly: value?.view.historyReadOnly ?? true,
   };
-  const url = `${API_URL}/api/plugins/collective-connector/${encodeURIComponent(reference.connectionId)}/artifacts/${encodeURIComponent(reference.artifactId)}/media/${reference.ownerRevision}?sourceEventId=${encodeURIComponent(reference.sourceEventId)}`;
+  const url = `${API_URL}/api/plugins/official.collective-connector/connections/${encodeURIComponent(reference.connectionId)}/artifacts/${encodeURIComponent(reference.artifactId)}/media/${reference.ownerRevision}?sourceEventId=${encodeURIComponent(reference.sourceEventId)}`;
   return (
     <div className="absolute inset-0 z-20 flex min-h-0 flex-col bg-cafe-surface" data-testid="collective-media-surface">
       <ContentReviewSurface

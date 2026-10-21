@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
-import { test } from 'node:test';
 import { sharedProposal } from './collective-artifact-proposal.fixture.js';
 import { custodyHttpFixture } from './collective-custody-http.fixture.js';
+import { test } from './helpers/f202-collective-installed-business.js';
 
 test('a new public rework request keeps the old candidate reference and binds the current owner version without moving its old quotes', async (t) => {
   const f = await custodyHttpFixture(t);

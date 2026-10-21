@@ -13,6 +13,7 @@ import type {
 import { pluginDescriptionVariants } from '@cat-cafe/shared';
 import type { PluginInventoryStore } from '../host-inventory/ports.js';
 import type { PluginInventorySnapshot } from '../host-inventory/types.js';
+import { connectorPermissionsProjection } from './connector-settings.js';
 import {
   type PluginManagerCatalogCandidate,
   type PluginManagerProjectionOverrides,
@@ -32,8 +33,8 @@ export interface PluginManagerCatalogPort {
   snapshot(): Promise<PluginManagerCatalogSnapshot>;
 }
 
-export interface PluginManagerCompatibilityPort {
-  /** Transitional rows for repository-local/builtin plugins. Train C deletes this port. */
+export interface PluginManagerInstalledPackagesPort {
+  /** Current installed packages, including local archives absent from the catalog. */
   list(): Promise<readonly PluginManagerDetail[]>;
 }
 
@@ -77,7 +78,7 @@ export interface PluginManagerConfigurationPort {
 export interface PluginManagerServiceOptions {
   readonly catalog: PluginManagerCatalogPort;
   readonly inventory: Pick<PluginInventoryStore, 'snapshot'>;
-  readonly compatibility?: PluginManagerCompatibilityPort;
+  readonly installedPackages?: PluginManagerInstalledPackagesPort;
   readonly stateProjection?: PluginManagerStateProjectionPort;
   readonly installer?: PluginManagerInstallPort;
   readonly lifecycle?: PluginManagerLifecyclePort;
@@ -151,7 +152,7 @@ function catalogDetail(
   const installedManifest =
     plugin.pluginInstanceId === null
       ? undefined
-      : inventory.packages.find((item) => item.packageDigest === plugin.packageDigest)?.manifest;
+      : (inventory.packages.find((item) => item.packageDigest === plugin.packageDigest)?.manifest ?? undefined);
   const contributions = installedManifest
     ? pluginManagerContributionsFromManifest(installedManifest)
     : candidate.contributions;
@@ -160,6 +161,15 @@ function catalogDetail(
     ...(contributions === undefined
       ? {}
       : { contributions: contributions.map((contribution) => ({ ...contribution })) }),
+    ...(installedManifest?.steps === undefined
+      ? {}
+      : {
+          steps: installedManifest.steps.map((step) =>
+            'mode' in step && typeof step.mode === 'string' ? { text: step.text, mode: step.mode } : step.text,
+          ),
+        }),
+    ...connectorPermissionsProjection(installedManifest),
+    ...(installedManifest === undefined ? {} : { testable: installedManifest.test !== undefined }),
   };
 }
 
@@ -249,7 +259,11 @@ export class PluginManagerService {
       (item) => item.pluginId === projected.pluginId && quarantineAppliesTo(projected, item),
     );
     const current = quarantined ?? projected;
-    if (!current.actions.install) {
+    const explicitReplacement =
+      current.artifact === 'installed' &&
+      current.actions.uninstall &&
+      current.diagnostic?.code !== 'PACKAGE_INCOMPATIBLE';
+    if (!current.actions.install && !explicitReplacement) {
       throw new PluginManagerServiceError('ACTION_NOT_ALLOWED', 'Plugin cannot be installed from its current state');
     }
     const installed = await this.options.installer.install({ request, candidate });
@@ -257,9 +271,42 @@ export class PluginManagerService {
     return installed;
   }
 
+  async update(
+    pluginId: string,
+    request: { expectedVersion: string; expectedRevision: number },
+  ): Promise<PluginManagerMutationResult> {
+    const current = (await this.get(pluginId)).plugin;
+    this.requireCurrentInstance(current, request.expectedRevision);
+    if (!current.actions.install || current.availableVersion !== request.expectedVersion) {
+      throw new PluginManagerServiceError('ACTION_NOT_ALLOWED', 'No newer compatible plugin version is available');
+    }
+    const catalog = await this.readCatalog();
+    const candidate = catalog.candidates.find((item) => item.pluginId === pluginId);
+    if (!candidate || candidate.compatibleReplacement !== true || candidate.version !== request.expectedVersion) {
+      throw new PluginManagerServiceError('CATALOG_MISMATCH', 'Plugin update changed; refresh the plugin list');
+    }
+    const git = candidate.directorySource;
+    if (git?.marketplace) {
+      return this.install({ source: { kind: 'git', url: git.url, marketplace: git.marketplace } });
+    }
+    if (!candidate.packageDigest) {
+      throw new PluginManagerServiceError('ACTION_NOT_ALLOWED', 'Plugin update is not available');
+    }
+    return this.install({
+      source: { kind: 'catalog', catalogId: candidate.catalogId },
+      expectedVersion: candidate.version,
+      expectedDigest: candidate.packageDigest,
+    });
+  }
+
   async setEnabled(pluginId: string, request: PluginManagerSetEnabledRequest): Promise<PluginManagerMutationResult> {
     const current = (await this.get(pluginId)).plugin;
     const instance = this.requireCurrentInstance(current, request.expectedRevision);
+    if (current.diagnostic?.code === 'PACKAGE_INCOMPATIBLE')
+      throw new PluginManagerServiceError(
+        'ACTION_NOT_ALLOWED',
+        'Plugin version is incompatible; update or reinstall it',
+      );
     if (current.intent === (request.enabled ? 'enabled' : 'disabled')) {
       return { pluginId, pluginInstanceId: instance.pluginInstanceId };
     }
@@ -332,10 +379,10 @@ export class PluginManagerService {
     readonly response: PluginManagerListResponse;
     readonly entries: readonly { readonly plugin: PluginManagerListItem; readonly detail?: PluginManagerDetail }[];
   }> {
-    const [catalog, inventory, compatibility, quarantines] = await Promise.all([
+    const [catalog, inventory, installedPackages, quarantines] = await Promise.all([
       this.readCatalog(),
       this.options.inventory.snapshot(),
-      this.options.compatibility?.list() ?? Promise.resolve([]),
+      this.options.installedPackages?.list() ?? Promise.resolve([]),
       this.options.quarantine?.list() ?? Promise.resolve([]),
     ]);
     const projectedPublished = await Promise.all(
@@ -351,8 +398,11 @@ export class PluginManagerService {
     const byPluginId = new Map<
       string,
       { readonly plugin: PluginManagerListItem; readonly detail?: PluginManagerDetail }
-    >(projectedPublished.map(({ plugin, detail }) => [plugin.pluginId, { plugin, detail }] as const));
-    for (const plugin of compatibility) {
+    >();
+    for (const entry of projectedPublished) {
+      if (!byPluginId.has(entry.plugin.pluginId)) byPluginId.set(entry.plugin.pluginId, entry);
+    }
+    for (const plugin of installedPackages) {
       if (!byPluginId.has(plugin.pluginId)) byPluginId.set(plugin.pluginId, { plugin, detail: plugin });
     }
     for (const plugin of quarantines) {

@@ -39,9 +39,6 @@ const preference: MessageDispositionPreferenceController = {
   loading: false,
   error: null,
   setPreference: vi.fn(async () => true),
-  oneShot: null,
-  setOneShot: vi.fn(),
-  clearOneShot: vi.fn(),
 };
 
 describe('classic A2A presentation parity', () => {
@@ -68,7 +65,6 @@ describe('classic A2A presentation parity', () => {
       presentation={presentation}
       triggerRef={{ current: trigger }}
       messageDisposition={preference}
-      hasActiveInvocation
       onClose={vi.fn()}
       onAddContext={vi.fn()}
       onAttach={vi.fn()}
@@ -83,9 +79,7 @@ describe('classic A2A presentation parity', () => {
     const panel = required(document.querySelector('[role="dialog"]'));
     expect(panel.className).toContain('bg-cafe-surface-canvas');
     expect(panel.className).not.toContain('--shell-paper');
-    expect(document.querySelector('[data-testid="message-disposition-trigger"]')?.textContent).toBe(
-      '这条发出去后作为下一件工作',
-    );
+    expect(document.querySelector('[data-testid="message-disposition-trigger"]')?.textContent).toBe('发送策略排队等待');
   });
 
   it('retains the v2 menu structure and palette while repairing classic', () => {

@@ -1,5 +1,6 @@
 import type { CatId, ConnectorSource, MessageFrom } from '@cat-cafe/shared';
 import { getCoCreatorConfig } from '../../../../../config/cat-config-loader.js';
+import { getCoCreatorDisplay } from '../../../../../config/co-creator-display.js';
 import { getMessageSpeakerName, getSenderName } from '../../context/ContextAssembler.js';
 import { renderSegment } from '../../context/prompt-template-loader.js';
 import { formatPromptTime } from '../../format-time.js';
@@ -116,7 +117,7 @@ export interface NavigationFormatOptions {
 function situationSourceLabel(from: import('@cat-cafe/shared').MessageFrom): string {
   switch (from.kind) {
     case 'user':
-      return 'co-creator';
+      return `${getCoCreatorDisplay().nickname}`;
     case 'agent':
       return getSenderName(from.catId);
     case 'external':

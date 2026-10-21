@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import {
   chmodSync,
   existsSync,
+  mkdirSync,
   mkdtempSync,
   readFileSync,
   rmSync,
@@ -111,16 +112,54 @@ describe('acp bootstrap cwd', () => {
     assert.ok(existsSync(second), 'bootstrap dir should be recreated on demand');
   });
 
-  it('enforces POSIX owner-only permissions on the bootstrap cwd', { skip: process.platform === 'win32' }, () => {
-    const projectRoot = resolve('/tmp/cat-cafe-project');
-    const dir = testBootstrapCwd(projectRoot, 'mode-guard');
-    createdDirs.add(dir);
+  it(
+    'falls back to the machine-local root when temp ancestors allow replacement',
+    { skip: process.platform === 'win32' ? false : 'Windows ACL boundary is only enforced on win32' },
+    () => {
+      const primaryRoot = join(testFixture, 'unsafe-temp-root');
+      const fallbackRoot = join(testFixture, 'programdata-root');
+      mkdirSync(primaryRoot, { recursive: true });
+      mkdirSync(fallbackRoot, { recursive: true });
+      const windowsEnsure = (root, cwd) => {
+        if (resolve(root) === resolve(primaryRoot)) {
+          throw new Error(
+            'ACP bootstrap parent permits unsafe directory replacement: C:\\Temp allows S-1-5-21-x Modify',
+          );
+        }
+        mkdirSync(cwd, { recursive: true });
+      };
 
-    chmodSync(dir, 0o755);
-    testBootstrapCwd(projectRoot, 'mode-guard');
+      const dir = resolveAcpBootstrapCwd(
+        resolve('/tmp/cat-cafe-project'),
+        'dsh',
+        primaryRoot,
+        windowsEnsure,
+        fallbackRoot,
+        true,
+      );
+      createdDirs.add(dir);
 
-    assert.equal(statSync(dir).mode & 0o777, 0o700);
-  });
+      assert.ok(isPathWithinRoot(fallbackRoot, dir, { relative, isAbsolute }));
+      assert.ok(existsSync(dir), 'fallback bootstrap dir should be created eagerly');
+    },
+  );
+
+  it(
+    'enforces owner-only POSIX permissions on the bootstrap cwd',
+    {
+      skip: process.platform === 'win32' ? 'POSIX mode bits do not verify Windows ACLs' : false,
+    },
+    () => {
+      const projectRoot = resolve('/tmp/cat-cafe-project');
+      const dir = testBootstrapCwd(projectRoot, 'mode-guard');
+      createdDirs.add(dir);
+
+      chmodSync(dir, 0o755);
+      testBootstrapCwd(projectRoot, 'mode-guard');
+
+      assert.equal(statSync(dir).mode & 0o777, 0o700);
+    },
+  );
 
   it('sanitizes provider profile so it cannot escape the bootstrap root', () => {
     const projectRoot = resolve('/tmp/cat-cafe-project');

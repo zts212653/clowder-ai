@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
-import { test } from 'node:test';
 import { collectiveContentTextProposalReceiptSchema } from '@cat-cafe/shared';
 import { sharedProposal } from './collective-artifact-proposal.fixture.js';
 import { custodyHttpFixture } from './collective-custody-http.fixture.js';
+import { test } from './helpers/f202-collective-installed-business.js';
 
 for (const action of ['cancel', 'reject'])
   test(`Human ${action} preserves the candidate, creates one durable resolution and prevents adoption after reopen`, async (t) => {

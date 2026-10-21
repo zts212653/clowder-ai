@@ -1,5 +1,4 @@
 import { isDeepStrictEqual } from 'node:util';
-import type { CollectiveArtifactOwnerPort } from '@cat-cafe/collective-connector';
 import {
   type CollectiveArtifactConstraint,
   collectiveMediaOperationId,
@@ -9,6 +8,7 @@ import {
 import { WorkspaceContentReviewError } from '../workspace-review/errors.js';
 import type { CollectiveMediaReviews } from './media-reviews.js';
 import { type SharedPublishedMediaAsset, sharedMediaAsset } from './media-source.js';
+import type { CollectiveArtifactOwnerPort } from './owner-port.js';
 import type { CollectivePublishedMediaOwner } from './published-media-owner.js';
 
 export interface AdmittedCollectiveMedia {

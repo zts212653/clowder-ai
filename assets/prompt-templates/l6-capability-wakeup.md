@@ -1,5 +1,7 @@
 非 SOP 默认链。"坏直觉 → 该用的"。不熟用 `tool_search` 搜 skill 名：
 
+先核个人/项目前提；检索并回读当前原文，核主体/项目/条件/版本。历史不替现行；本批授权/进度回原Task与执行回执核对。缺资料不编造，检索摘要不授予操作权限。新知识留原合法入口；无关任务直接做。
+
 - Chat内交付→rich-messaging（无需富文本）
 - 改前端 UI 想说"开浏览器看看" → `browser-preview` 渲染到 Hub panel
 - 想说"文件在 X 路径" → `workspace-navigator` 程式打开

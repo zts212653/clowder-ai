@@ -7,7 +7,7 @@ import '../helpers/setup-cat-registry.js';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import Fastify from 'fastify';
-import { proposedReviewAction } from './helpers.js';
+import { proposedTaskAction } from './helpers.js';
 
 function implementAction(overrides = {}) {
   return {
@@ -81,6 +81,7 @@ async function createFixture(t, options = {}) {
 
   const app = Fastify();
   await app.register(callbacksRoutes, {
+    actionSuccessorAdmissionService: { async preflightStructuredTransferStanding() {} },
     registry,
     messageStore,
     threadStore,
@@ -164,7 +165,7 @@ async function post(fixture, auth, payload) {
   });
 }
 
-async function createAssignWorkProposal(fixture, proposedAction = proposedReviewAction()) {
+async function createAssignWorkProposal(fixture, proposedAction = proposedTaskAction()) {
   const response = await post(fixture, fixture.auth, {
     effectClass: 'assign_work',
     proposedAction,

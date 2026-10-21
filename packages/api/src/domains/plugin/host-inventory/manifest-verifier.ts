@@ -11,7 +11,7 @@ import { PluginInventoryError } from './types.js';
 export { PLUGIN_CONTRACT_VERSION } from './contract-policy.js';
 
 export interface VerifiedPackageAdmission {
-  readonly package: PluginPackageRecord;
+  readonly package: PluginPackageRecord & { readonly manifest: PluginManifest };
   readonly effectiveGrants: readonly Capability[];
   readonly requestedCapabilities: readonly Capability[];
 }

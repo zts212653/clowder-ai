@@ -220,6 +220,62 @@ describe('Queue Management API', () => {
     if (app) await app.close();
   });
 
+  it('HTTP queue reconciliation carries presentation from a real persisted plugin message', async () => {
+    const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
+    const store = new MessageStore();
+    const from = { kind: 'plugin', instanceId: 'pi_8e8bfc62-7545-4c31-a764-666d3284d138' };
+    const presentation = {
+      connector: 'custom-plugin',
+      label: 'Room Connector',
+      icon: '/plugin.svg',
+      themeColor: '#07c160',
+    };
+    await deps.invocationQueue.send(
+      store,
+      {
+        from,
+        userId: 'user-a',
+        threadId: 't1',
+        content: 'Plugin input',
+        mentions: ['opus'],
+        timestamp: 1,
+        deliveryStatus: 'queued',
+        extra: {
+          pluginMessage: {
+            instanceId: from.instanceId,
+            revision: 1,
+            provenance: { origin: from, epistemicStatus: 'observation' },
+            elements: [],
+            presentation,
+          },
+        },
+      },
+      {
+        from,
+        userId: 'user-a',
+        threadId: 't1',
+        content: 'Plugin input',
+        targetCats: ['opus'],
+        kind: 'conversation_input',
+        intent: 'execute',
+        ownerAuthProvenance: 'unknown',
+        priority: 'normal',
+      },
+    );
+    deps.messageStore.getById.mock.mockImplementation(async (id) => store.getById(id));
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/threads/t1/queue',
+      headers: { 'x-cat-cafe-user': 'user-a' },
+    });
+    assert.equal(res.statusCode, 200, res.body);
+    const [entry] = res.json().queue;
+    assert.deepEqual(entry.from, from);
+    assert.deepEqual(entry.messagePreview.source, presentation);
+    assert.equal(entry.messagePreview.connector, presentation.connector);
+    assert.equal(store.getById(entry.messageId).source, undefined);
+  });
+
   async function routingRecoveryFixture() {
     const result = enqueueEntry(deps.invocationQueue, {
       from: { kind: 'agent', catId: 'codex' },

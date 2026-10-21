@@ -8,7 +8,7 @@ const { TaskStore } = await import('../../dist/domains/cats/services/stores/port
 const { EntrustedWorkLifecycleService } = await import('../../dist/domains/growing/EntrustedWorkLifecycleService.js');
 const { EntrustedWorkOwnerReadService } = await import('../../dist/domains/growing/EntrustedWorkOwnerReadService.js');
 const { F232PreparedArtifactReader } = await import('../../dist/domains/growing/F232PreparedArtifactReader.js');
-const { F246NeedsMeProducerAdapter, F292NeedsMeProducerAdapter, F306NeedsMeProducerAdapter } = await import(
+const { F246NeedsMeProducerAdapter, F306NeedsMeProducerAdapter } = await import(
   '../../dist/domains/growing/NeedsMeProducerAdapter.js'
 );
 const { NeedsMeProducerCatalog } = await import('../../dist/domains/growing/NeedsMeProducerCatalog.js');
@@ -637,34 +637,6 @@ describe('F310 entrusted-work owner-read backbone', () => {
 
   test('closed producer adapters preserve owner identity, revision, and exact action coordinates', async () => {
     const taskRef = { subjectRef: 'task:work:ppt', observedRevision: 7 };
-    const f292 = new F292NeedsMeProducerAdapter({
-      async get() {
-        return {
-          intakeId: 'meeting-1',
-          ownerId: 'owner-1',
-          sourceState: 'auth_required',
-          judgmentState: 'unresolved',
-          executionState: 'idle',
-          healthState: 'degraded',
-          unresolved: ['destination'],
-          repair: { code: 'auth_required', action: 'regrant', observedAt: now },
-          entrustedWorkTaskRef: taskRef,
-          revision: 4,
-        };
-      },
-    });
-    const meeting = await f292.readCurrentReceipt({
-      ownerUserId: 'owner-1',
-      producerSubjectRef: 'meeting-1',
-    });
-    const meetingAgain = await f292.readCurrentReceipt({
-      ownerUserId: 'owner-1',
-      producerSubjectRef: 'meeting-1',
-    });
-    assert.deepEqual(meetingAgain, meeting, 'a repeated owner read preserves the producer revision');
-    assert.equal(meeting.producer.revision, 4);
-    assert.match(meeting.action.actionRef, /meeting-intakes\/meeting-1\/regrant$/);
-
     const f306 = new F306NeedsMeProducerAdapter({
       async get() {
         return {

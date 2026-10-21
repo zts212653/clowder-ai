@@ -23,10 +23,8 @@ HTTP callback route 是 MCP tool 的底层实现和维护者调试面，不是 s
 | 建毛线球任务 | `cat_cafe_create_task` | `POST /api/callbacks/create-task` |
 | 更新任务状态 | `cat_cafe_update_task` | `POST /api/callbacks/update-task` |
 | 列任务 | `cat_cafe_list_tasks` | `GET /api/callbacks/list-tasks` |
-| 注册 PR tracking | `cat_cafe_register_pr_tracking` | `POST /api/callbacks/register-pr-tracking` |
-| 注册 issue tracking | `cat_cafe_register_issue_tracking` | `POST /api/callbacks/register-issue-tracking` |
-| assigned cat 接/退 community route | `cat_cafe_validate_community_route` | `POST /api/community-issues/:id/validate-route` |
-| 记录 external review verdict + delivery | `cat_cafe_record_external_review_verdict` | `POST /api/callbacks/record-external-review-verdict` |
+| assigned cat 接/退 community route | `github_community_validate_route` | 已安装 GitHub 插件原生 action，输入 `{id, payload}` |
+| 记录 external review verdict + delivery | `github_record_external_review_verdict` | 已安装 GitHub 插件原生 action，按当前工具 schema 提交 |
 | 搜证据 | `cat_cafe_search_evidence` | `GET /api/callbacks/search-evidence` |
 | 写长期记忆 | `cat_cafe_retain_memory_callback` | `POST /api/callbacks/retain-memory` |
 | 创建 rich block | `cat_cafe_create_rich_block` | `POST /api/callbacks/create-rich-block` |
@@ -39,25 +37,9 @@ HTTP callback route 是 MCP tool 的底层实现和维护者调试面，不是 s
 Freshness 补读用 `readIntent="unread", responseMode="full"`，不加 catId/keyword/messageId/before/after；按原参数跟随 `nextCursor` 到 `hasMore=false`。
 Unread 从同一 user/cat/thread 的 seen 之后向前读，无 seen 时从头开始；全部消费后返回空集合。Anchor 与超大正文锚点不确认 freshness。换意图、limit、投影或其他 scope 参数时须去掉 cursor 开始新读。
 
-## Tracking registration policy
+## Plugin tracking tools
 
-PR/issue tracking 注册一次，匹配后默认自动续代，不需要再注册。**普通注册只给对象**：PR 是 `repoFullName + prNumber`，issue 是 `repoFullName + issueNumber`。`when`、`goal`、`nextStep` 全部可选（#1392 AC-7）。
-
-省略 `when` 时服务端装上对象自身的状态条件**和两个评论面**，受众按角色解析：PR 作者收除自己以外的全部回复（含 bot）；有可核验依据的 maintainer/reviewer 只收 PR 作者的回复（过滤 bot 与可确定识别的纯召唤命令）；issue 收除自己以外的全部评论。身份或角色无法确定时，评论照常投递并标注「身份/角色未知」，**不静默丢弃、不扩大收件人、也不因此关闭追踪**。注册返回的 `notification` 写明实际装了什么、解析出什么角色、过滤规则是什么。
-
-可选：
-
-- `when`：高级精确入口，flat any-of typed predicate，每种条件最多一个。写在这里的 `pr_conversation_comment_added` / `pr_inline_comment_added` 仍然必须自带 `authorLogins`，且不会被套上角色过滤。
-- `goal`：把两个评论面收窄到你点名的人，是收窄而不是前置条件。
-- `nextStep`：条件满足后要做什么；只显示、不解析为 policy。省略则由服务端确定性生成。
-
-- `expiresAt`：责任失效时间（Unix ms）。**省略则没有时间到期**；写了必须在未来，并会在注册返回中可见。
-
-baseline 与 owner fence 均由 server 从实时真相生成，调用方不能提交。
-
-不匹配的 GitHub 事实只推进 collector 台账；匹配时每个 generation 最多投递一次 compact delta，并默认原子地装上下一代（`autoRenew: false` 为单次等待）。merged/closed 会投递 terminal outcome 并结束追踪；expiry 投递明确的到期通知并结束追踪；owner change、user cancel 静默终止。要等待**另一个条件**时 re-register，它原子替换上一 generation。
-
-Issue tracking 在 F280 Phase C 前仍保留自己的 comment actor policy；不要把 issue 的 `wakePolicy` 借回 PR。正常调用只传 MCP 参数，不要为了设置 policy 手写 callback HTTP。
+PR/issue tracking 由已安装并启用的插件原生 MCP 提供，Host callback server 不注册这三项工具，也不提供对应的 HTTP callback 入口。使用当前工具目录中的 schema；新登记使用新的 `registrationId`，同一登记的精确重试复用原 ID 和参数。工具未出现时检查插件安装、授权与启用状态，不手写旧 callback URL。
 
 ## Credentials
 
@@ -71,7 +53,7 @@ MCP 工具会从 invocation credentials 或 agent-key sidecar 自动处理认证
 | shared Antigravity MCP 缺凭证 | 传 `agentKeyCatId`，让工具选择对应猫的 sidecar key |
 | 工具目录完全没有对应能力 | 按 F223 追踪 execution surface 缺口，不把 HTTP route 当主路径 |
 
-`routeAcceptance=pending` 只能由真实 assigned cat 调 `cat_cafe_validate_community_route` 变更；不要把 callback token 暴露给 `curl`，也不要由 case owner 冒充目标猫直写 API。
+`routeAcceptance=pending` 只能由真实 assigned cat 调 `github_community_validate_route` 变更；不要把 callback token 暴露给 `curl`，也不要由 case owner 冒充目标猫直写 API。
 
 ## Notes
 

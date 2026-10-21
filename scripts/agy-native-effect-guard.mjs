@@ -37,6 +37,10 @@ function profileControlPath(path, profileHome) {
     suffix === '.gemini/antigravity-cli/antigravity-oauth-token' ||
     suffix === '.gemini' ||
     suffix === '.gemini/antigravity-cli' ||
+    suffix === '.gemini/antigravity-acp' ||
+    /^\.gemini\/antigravity-acp\/(?:settings\.json|acp_token\.json|acp_business_token\.json|trusted_workspaces\.json)$/.test(
+      suffix,
+    ) ||
     suffix === '.gemini/config' ||
     suffix.startsWith('.gemini/config/') ||
     /^\.gemini\/antigravity-cli\/(?:settings\.json|skills(?:\/|$)|plugins(?:\/|$)|\.cat-cafe-skills[-.])/.test(

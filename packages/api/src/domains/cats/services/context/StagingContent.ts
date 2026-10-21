@@ -26,7 +26,7 @@ import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { CatId } from '@cat-cafe/shared';
-import { catRegistry } from '@cat-cafe/shared';
+import { catRegistry, deploymentDefaults } from '@cat-cafe/shared';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 // staging content lives in cat-cafe-skills/refs/ — package-relative path
@@ -222,8 +222,8 @@ function loadStagingContent(): ParsedStagingContent {
 
 function renderRuntimePlaceholders(body: string): string {
   return body
-    .replaceAll('{{FRONTEND_PORT}}', process.env.FRONTEND_PORT ?? '3003')
-    .replaceAll('{{API_SERVER_PORT}}', process.env.API_SERVER_PORT ?? '3004');
+    .replaceAll('{{FRONTEND_PORT}}', process.env.FRONTEND_PORT ?? String(deploymentDefaults.webPort))
+    .replaceAll('{{API_SERVER_PORT}}', process.env.API_SERVER_PORT ?? String(deploymentDefaults.apiPort));
 }
 
 /**

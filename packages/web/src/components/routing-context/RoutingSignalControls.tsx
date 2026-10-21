@@ -3,6 +3,7 @@
 import type { RoutingSignalEventV1, RoutingSubjectRefV1 } from '@cat-cafe/shared';
 import { useMemo, useRef, useState } from 'react';
 import { useCatData } from '@/hooks/useCatData';
+import { useCoCreatorDisplay } from '@/hooks/useCoCreatorConfig';
 import { closeRoutingSignal, markRoutingSignal } from './routing-context-client';
 import { buildSignalMarkCommand, newRoutingCommandId, openRoutingSignalsForSubject } from './routing-context-commands';
 import { availabilityStateLabel } from './team-member-projection';
@@ -11,7 +12,6 @@ const HOUR_MS = 3_600_000;
 
 /** Reason codes this surface writes or has ever rendered; anything else stays as stored. */
 const REASON_CODE_LABELS: Record<string, string> = {
-  'owner-constraint': 'co-creator设置的临时限制',
   'owner-maintenance': '维护中',
   'quota-window': '额度周期限制',
   quota_exhausted: '额度已用尽',
@@ -20,7 +20,8 @@ const REASON_CODE_LABELS: Record<string, string> = {
   provider_timeout: '服务响应超时',
 };
 
-function reasonCodeLabel(reasonCode: string): string {
+function reasonCodeLabel(reasonCode: string, nickname: string): string {
+  if (reasonCode === 'owner-constraint') return `${nickname}设置的临时限制`;
   return REASON_CODE_LABELS[reasonCode] ?? reasonCode;
 }
 
@@ -35,6 +36,7 @@ export function RoutingSignalControls({
   signalEvents: readonly RoutingSignalEventV1[];
   onChanged: () => Promise<boolean>;
 }) {
+  const owner = useCoCreatorDisplay();
   const [state, setState] = useState<'scarce' | 'degraded' | 'unavailable'>('scarce');
   const [reasonCode, setReasonCode] = useState('owner-constraint');
   const [note, setNote] = useState('');
@@ -135,7 +137,7 @@ export function RoutingSignalControls({
                   : assertion.eventType === 'asserted'
                     ? availabilityStateLabel(assertion.state)
                     : ''}{' '}
-                · {reasonCodeLabel(assertion.reasonCode)}
+                · {reasonCodeLabel(assertion.reasonCode, owner.nickname)}
               </p>
               <div className="mt-2 flex gap-2">
                 <button

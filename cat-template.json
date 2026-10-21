@@ -54,6 +54,19 @@
       "teamStrengths": "编码、文档、验收"
     },
     {
+      "id": "dsh",
+      "name": "小鲸鱼",
+      "nickname": "鲸鲸",
+      "avatar": "/avatars/family/dsh.png",
+      "color": {
+        "primary": "#3B7EA1",
+        "secondary": "#DCEBF2"
+      },
+      "roleDescription": "共创与推理伙伴，负责分析问题、编码实现和交叉验证",
+      "personality": "细心务实，先理清问题，再用可验证的结果交付",
+      "teamStrengths": "问题分析、编码、交叉验证"
+    },
+    {
       "id": "dragon-li",
       "name": "狸花猫",
       "nickname": "小狸花",

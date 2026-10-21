@@ -111,7 +111,8 @@ describe('F322 B segment 1 — cat nameplate, no outer bubble', () => {
       expect(bubble().style.backgroundColor).toBe('var(--color-opus-surface)');
       expect(bubble().className).toContain('px-4 py-3');
       expect(bubble().className).toContain('rounded-2xl rounded-bl-sm');
-      expect(wrapper().firstElementChild?.querySelector('img')?.getAttribute('width')).toBe('32');
+      expect(wrapper().querySelector('[data-sender-avatar="message"]')?.className).toContain('w-8 h-8');
+      expect(wrapper().querySelector('[data-sender-avatar="message"] img')?.className).toContain('w-full h-full');
       const name = container.querySelector('[data-testid="message-header"] span.truncate') as HTMLElement;
       expect(name.textContent).toContain('布偶猫');
       expect(name.style.opacity).toBe('0.8');
@@ -129,9 +130,13 @@ describe('F322 B segment 1 — cat nameplate, no outer bubble', () => {
       const avatars = container.querySelectorAll('img');
       expect(avatars).toHaveLength(1);
       expect(p?.contains(avatars[0] as Node)).toBe(true);
-      expect(avatars[0]?.getAttribute('width')).toBe('32');
-      // The plate is already this cat's colour: the avatar carries no ring of its own (design owner, 2026-10-01).
-      expect(avatars[0]?.parentElement?.className.split(/\s+/)).not.toContain('ring-2');
+      const frame = p?.querySelector('[data-sender-avatar="nameplate"]') as HTMLElement;
+      expect(frame).not.toBeNull();
+      expect(frame.className).toContain('w-8 h-8');
+      expect(frame.querySelector('[data-member-avatar-ring]')).toBeNull();
+      expect(frame.style.backgroundColor).toBe('var(--shell-work)');
+      expect(avatars[0]?.className).toContain('w-full h-full');
+      expect(frame.parentElement?.style.boxShadow).toBe('');
       expect(p?.textContent).toContain('布偶猫');
       // The plate is inside the header, which stays where code and tests find it.
       expect(container.querySelector('[data-testid="message-header"]')?.contains(p)).toBe(true);

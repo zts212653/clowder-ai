@@ -65,9 +65,11 @@ import type {
 } from '../../stores/ports/InvocationRecordStore.js';
 import { classifyInvocationRecoveryStatus } from '../../stores/ports/invocation-state-machine.js';
 import {
+  type AdvanceLifecycleInputDispatchResult,
   hydrateReplyPreview,
   type IMessageStore,
   isTimelinePublished,
+  type LifecycleInputDispatchPatch,
   lifecycleInputIdentityForStoredMessage,
   preAdmissionFailureIdempotencyKey,
   type StoredMessage,
@@ -152,12 +154,6 @@ import {
   preparePrestartRetirements,
   terminalizePreparedPrestartRetirements,
 } from './queue-prestart-group-retirement.js';
-import {
-  collectiveQueueRefusalError,
-  isPermanentCollectiveQueueRefusal,
-  persistCollectiveRefusalRecord,
-  retireRefusedCollectiveQueueCarrier,
-} from './queue-private-refusal-disposition.js';
 import { type QueueRetryDeferralOptions, QueueRetryDeferrals } from './queue-retry-deferrals.js';
 import { isOwnerRecoverableRoutingTarget } from './queue-routing-recovery-policy.js';
 import { requireInvocationRecordUpdate } from './require-invocation-record-update.js';
@@ -509,17 +505,17 @@ export interface OutboundDeliveryHookLike {
 export interface StreamingOutboundHookLike {
   onStreamStart(
     threadId: string,
-    catId: string,
-    invocationId: string,
+    catId?: string,
+    invocationId?: string,
     senderHint?: { id: string; name?: string },
   ): Promise<void>;
-  onStreamChunk(threadId: string, accumulatedText: string, invocationId: string): Promise<void>;
-  onStreamEnd(threadId: string, finalText: string, invocationId: string): Promise<void>;
-  onClosureCatchingUp?(threadId: string, catId: CatId, invocationId: string): Promise<void>;
-  onClosureBlocked?(threadId: string, catId: CatId, reason: string, invocationId: string): Promise<void>;
-  cleanupPlaceholders?(threadId: string, invocationId: string): Promise<void>;
+  onStreamChunk(threadId: string, accumulatedText: string, invocationId?: string): Promise<void>;
+  onStreamEnd(threadId: string, finalText: string, invocationId?: string): Promise<void>;
+  onClosureCatchingUp?(threadId: string, catId: CatId, invocationId?: string): Promise<void>;
+  onClosureBlocked?(threadId: string, catId: CatId, reason: string, invocationId?: string): Promise<void>;
+  cleanupPlaceholders?(threadId: string, invocationId?: string): Promise<void>;
   /** F151: Signal adapters that delivery batch is complete for a thread. */
-  notifyDeliveryBatchDone?(threadId: string, chainDone: boolean): Promise<void>;
+  notifyDeliveryBatchDone?(threadId: string, chainDone: boolean, status?: string, invocationId?: string): Promise<void>;
 }
 
 /** Thread metadata for outbound delivery (deep link, title, etc.) */
@@ -2256,13 +2252,22 @@ export class QueueProcessor {
             : undefined
           : { phase: 'settled' as const };
       if (!phase) continue;
-      const transition = await this.deps.messageStore.advanceLifecycleInputDispatch(id, {
+      const readPatch: LifecycleInputDispatchPatch = {
         ...lifecycleInputIdentityForStoredMessage(source),
         targetId: input.targetId,
         statusMessageId: input.responseMessageId,
         ...phase,
         inputRead: readAt === undefined ? { status: 'pending' } : { status: 'read', at: readAt },
-      });
+      };
+      let transition = await this.deps.messageStore.advanceLifecycleInputDispatch(id, readPatch);
+      if (transition.kind === 'conflict' && transition.reason === 'contended') {
+        transition = await this.advanceLifecycleDispatchWithRetry(id, readPatch, {
+          threadId: input.threadId,
+          catId: input.targetId,
+          invocationId: input.invocationId,
+          purpose: 'input_read_receipt',
+        });
+      }
       if (transition.kind === 'applied') this.emitLifecycleMessageUpdated(input.userId, transition.message);
       if (
         readAt !== undefined &&
@@ -2562,7 +2567,33 @@ export class QueueProcessor {
       terminal.outcome,
       'reason' in terminal ? terminal.reason : undefined,
     );
-    if (!removed) throw new Error(`admitted attempt cleanup lost source entry ${attempted.id}`);
+    if (!removed) {
+      // A fan-out retires the shared source row when its last target settles.
+      // An earlier target may already have removed it; that is success, not a
+      // lost admission.
+      const current = await this.deps.queue.getDurableEntry(attempted.threadId, attempted.id);
+      if (!current || current.status === 'terminal') return;
+      throw new Error(`admitted attempt cleanup lost source entry ${attempted.id}`);
+    }
+  }
+
+  /**
+   * DispatchRef writes are serialized in the store. A short retry here covers
+   * the remaining transient case (a lock holder that has not released yet)
+   * without turning a delivery race into a user-visible interrupted response.
+   */
+  private async advanceLifecycleDispatchWithRetry(
+    messageId: string,
+    patch: LifecycleInputDispatchPatch,
+    context: { threadId: string; catId: string; invocationId: string; purpose: string },
+  ): Promise<AdvanceLifecycleInputDispatchResult> {
+    let result = await this.deps.messageStore.advanceLifecycleInputDispatch(messageId, patch);
+    for (let attempt = 1; attempt <= 3 && result.kind === 'conflict' && result.reason === 'contended'; attempt++) {
+      this.deps.log.warn({ ...context, messageId, attempt }, '[QueueProcessor] lifecycle dispatch contended; retrying');
+      await new Promise((resolve) => setTimeout(resolve, 5 * attempt + Math.floor(Math.random() * 5)));
+      result = await this.deps.messageStore.advanceLifecycleInputDispatch(messageId, patch);
+    }
+    return result;
   }
 
   /** Provider admission accepts only exact durable source custody or a source-less internal carrier. */
@@ -2850,10 +2881,10 @@ export class QueueProcessor {
   /** F151: Signal streaming adapters that delivery is done for this thread invocation.
    *  Fires on both success AND failure — failed invocations must close the task
    *  immediately instead of waiting for TASK_TIMEOUT_MS (P2-1 review fix). */
-  private signalDeliveryBatchDone(threadId: string, _status: string): void {
+  private signalDeliveryBatchDone(threadId: string, status: string, invocationId?: string): void {
     if (!this.deps.streamingHook?.notifyDeliveryBatchDone) return;
     const threadStillBusy = this.deps.invocationTracker.has(threadId) || this.isThreadBusy(threadId);
-    this.deps.streamingHook.notifyDeliveryBatchDone(threadId, !threadStillBusy).catch((err) => {
+    this.deps.streamingHook.notifyDeliveryBatchDone(threadId, !threadStillBusy, status, invocationId).catch((err) => {
       this.deps.log.warn({ err, threadId }, '[QueueProcessor] notifyDeliveryBatchDone failed');
     });
   }
@@ -3227,7 +3258,7 @@ export class QueueProcessor {
       );
       if (!source || source.threadId !== input.threadId || source.userId !== input.userId || !ref)
         throw new Error('Append acceptance lost its original source binding');
-      const accepted = await this.deps.messageStore.advanceLifecycleInputDispatch(messageId, {
+      const acceptancePatch: LifecycleInputDispatchPatch = {
         ...lifecycleInputIdentityForStoredMessage(source),
         targetId: input.targetId,
         statusMessageId: input.responseMessageId,
@@ -3235,7 +3266,16 @@ export class QueueProcessor {
           ? { phase: 'settled' as const }
           : { phase: 'dispatched' as const, dispatchedAt: ref.dispatchedAt ?? source.timestamp }),
         appendAcceptance: 'accepted',
-      });
+      };
+      let accepted = await this.deps.messageStore.advanceLifecycleInputDispatch(messageId, acceptancePatch);
+      if (accepted.kind === 'conflict' && accepted.reason === 'contended') {
+        accepted = await this.advanceLifecycleDispatchWithRetry(messageId, acceptancePatch, {
+          threadId: input.threadId,
+          catId: input.targetId,
+          invocationId: input.invocationId,
+          purpose: 'append_acceptance',
+        });
+      }
       if (accepted.kind !== 'applied' && accepted.kind !== 'replayed')
         throw new Error('Append acceptance did not persist');
       this.emitLifecycleMessageUpdated(input.userId, accepted.message);
@@ -3600,7 +3640,7 @@ export class QueueProcessor {
             { threadId: entry.threadId, catId, entryId: entry.id, invocationId: result.invocationId },
             '[QueueProcessor] skipped stale completion side effects after processing reservation changed',
           );
-          this.signalDeliveryBatchDone(entry.threadId, result.status);
+          this.signalDeliveryBatchDone(entry.threadId, result.status, result.invocationId);
           return;
         }
         void this.onInvocationComplete(entry.threadId, catId, result.status, result.invocationId, [], {
@@ -3609,7 +3649,7 @@ export class QueueProcessor {
           suppressAutomaticFollowUp,
           terminalInvocationIdByCatId: result.terminalInvocationIdByCatId,
         }).catch(() => {});
-        this.signalDeliveryBatchDone(entry.threadId, result.status);
+        this.signalDeliveryBatchDone(entry.threadId, result.status, result.invocationId);
       },
       () => {
         reportAdmission?.(false);
@@ -5319,16 +5359,49 @@ export class QueueProcessor {
                 lifecycleResponseInterrupted = true;
               };
               await this.admitQueueEntriesForProvider(deliveryTimeByMessageId);
+              // Queue admission changes queued sources to delivered and assigns their
+              // durable timeline clock. Re-read the canonical rows before deriving
+              // dispatch identity: the initial snapshot may still carry the queued
+              // fallback order key, which Redis correctly rejects as stale.
+              const dispatchInputMessages = (
+                await Promise.all(lifecycleInputMessages.map((message) => messageStore.getById(message.id)))
+              ).filter((message): message is StoredMessage => Boolean(message));
+              if (dispatchInputMessages.length !== lifecycleInputMessages.length) {
+                await interruptLifecycleResponse('input_dispatch_source_missing');
+                throw new Error(`Lifecycle input dispatch source missing: ${input.invocationId}`);
+              }
               const lifecycleInputSnapshots: StoredMessage[] = [];
-              for (const inputMessage of lifecycleInputMessages) {
-                const transition = await messageStore.advanceLifecycleInputDispatch(inputMessage.id, {
+              for (const inputMessage of dispatchInputMessages) {
+                const dispatchPatch: LifecycleInputDispatchPatch = {
                   ...lifecycleInputIdentityForStoredMessage(inputMessage),
                   targetId: input.catId,
                   phase: 'dispatched',
                   statusMessageId: observed.message.id,
                   dispatchedAt: input.startedAt,
-                });
+                };
+                let transition = await messageStore.advanceLifecycleInputDispatch(inputMessage.id, dispatchPatch);
+                if (transition.kind === 'conflict' && transition.reason === 'contended') {
+                  transition = await this.advanceLifecycleDispatchWithRetry(inputMessage.id, dispatchPatch, {
+                    threadId: input.threadId,
+                    catId: input.catId,
+                    invocationId: input.invocationId,
+                    purpose: 'response_admission',
+                  });
+                }
                 if (transition.kind !== 'applied' && transition.kind !== 'replayed') {
+                  this.deps.log.error(
+                    {
+                      threadId: input.threadId,
+                      catId: input.catId,
+                      invocationId: input.invocationId,
+                      messageId: inputMessage.id,
+                      outcome: transition.kind,
+                      reason: 'reason' in transition ? transition.reason : undefined,
+                      orderKey: dispatchPatch.orderKey,
+                      producerInvocationId: dispatchPatch.producerInvocationId,
+                    },
+                    '[QueueProcessor] lifecycle input dispatch failed after retry budget',
+                  );
                   await interruptLifecycleResponse('input_dispatch_projection_conflict');
                   throw new Error(
                     `Lifecycle input dispatch conflict: ${inputMessage.id}:${transition.kind}:${'reason' in transition ? transition.reason : 'missing'}`,
@@ -6041,11 +6114,7 @@ export class QueueProcessor {
           /* best-effort — don't mask the original error */
         }
       }
-      const errMsg = isPermanentCollectiveQueueRefusal(err)
-        ? collectiveQueueRefusalError(err)
-        : err instanceof Error
-          ? err.message
-          : String(err);
+      const errMsg = err instanceof Error ? err.message : String(err);
       const exposeFailure = entry.execution.actionSuccessorFence
         ? await finalizeActionFenceOutcome('failed', false, targetCats)
         : true;
@@ -6181,29 +6250,7 @@ export class QueueProcessor {
         try {
           const preReceiverUserCancel =
             lifecycleTransferStarted && !lifecycleReceiverPersisted && finalStatus === 'canceled_by_user';
-          if (isPermanentCollectiveQueueRefusal(executionError) && !lifecycleReceiverPersisted && invocationId) {
-            const refusal = executionError;
-            const refusalInvocationId = invocationId;
-            if (batchedEntryIds.length !== 0) throw new Error('Collective refusal cannot retire a batched claim');
-            const current = queue.getEntrySnapshot(threadId, userId, entry.id);
-            if (
-              !current ||
-              !(await retireRefusedCollectiveQueueCarrier({
-                entry: current,
-                queue,
-                messages: messageStore,
-                refusal,
-                persistRefusal: () =>
-                  persistCollectiveRefusalRecord({
-                    store: invocationRecordStore,
-                    invocationId: refusalInvocationId,
-                    entry: current,
-                    refusal,
-                  }),
-              }))
-            )
-              throw new Error('Collective refusal claim retirement did not commit');
-          } else if (lifecycleAdmissionUnknown) {
+          if (lifecycleAdmissionUnknown) {
             // The original short claim fences an uncertain durable commit until canonical recovery.
             if (returnedExecutionResult) returnedExecutionResult.primarySettlementIncomplete = true;
           } else if (lifecycleTransferStarted && !lifecycleReceiverPersisted && !preReceiverUserCancel) {

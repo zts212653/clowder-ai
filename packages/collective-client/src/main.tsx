@@ -9,6 +9,8 @@ import '@cat-cafe/ui/styles.css';
 import './styles/tokens.css';
 import './styles/shell.css';
 import './styles/shell-footer.css';
+import './styles/leave-dialog.css';
+import './styles/leave-responsibilities.css';
 import './styles/channel.css';
 import './styles/channel-message.css';
 import './styles/message-reactions.css';

@@ -18,9 +18,6 @@ function createMessageDisposition(): MessageDispositionPreferenceController {
     loading: false,
     error: null,
     setPreference: vi.fn(async () => true),
-    oneShot: null,
-    setOneShot: vi.fn(),
-    clearOneShot: vi.fn(),
   };
 }
 
@@ -76,7 +73,7 @@ describe('ChatInputAddMenu', () => {
   it('groups context, upload and optional modes behind one menu', () => {
     render();
     const menu = document.querySelector('[data-testid="composer-add-menu"]');
-    expect(document.querySelectorAll('[role="menuitem"]')).toHaveLength(3);
+    expect(document.querySelectorAll('[role="menuitem"]')).toHaveLength(4);
     expect(menu?.textContent?.startsWith('添加')).toBe(false);
     expect(menu?.className).not.toContain('border-cafe');
     expect(menu?.className).toContain('bg-cafe-surface-canvas');
@@ -85,11 +82,11 @@ describe('ChatInputAddMenu', () => {
     expect(menu?.textContent).toContain('图片、文档或压缩包，最多 5 个');
     expect(menu?.textContent).toContain('悄悄话');
     expect(menu?.textContent).not.toContain('游戏');
-    expect(menu?.textContent).not.toContain('这条发出去后');
+    expect(menu?.textContent).toContain('发送策略');
   });
 
-  it('changes only this send while work is active', async () => {
-    const callbacks = render({ hasActiveInvocation: true });
+  it('persists the Thread strategy without an active-work gate', async () => {
+    const callbacks = render();
     await act(async () => {
       document.querySelector<HTMLButtonElement>('[data-testid="message-disposition-trigger"]')?.click();
       await Promise.resolve();
@@ -100,8 +97,7 @@ describe('ChatInputAddMenu', () => {
       document.querySelector<HTMLButtonElement>('[data-disposition-option="continue_current"]')?.click();
       await Promise.resolve();
     });
-    expect(callbacks.messageDisposition.setOneShot).toHaveBeenCalledWith('continue_current');
-    expect(callbacks.messageDisposition.setPreference).not.toHaveBeenCalled();
+    expect(callbacks.messageDisposition.setPreference).toHaveBeenCalledWith('thread', 'continue_current');
     expect(document.querySelector('[data-testid="message-disposition-trigger"]')).not.toBeNull();
   });
 

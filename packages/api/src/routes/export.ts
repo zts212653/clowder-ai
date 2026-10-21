@@ -1,3 +1,4 @@
+import { getCoCreatorDisplay } from '../config/co-creator-display.js';
 /**
  * Export Routes
  * GET /api/export/thread/:threadId?format=md|txt - 导出对话记录
@@ -131,7 +132,7 @@ export function formatThreadAsText(thread: Thread, messages: StoredMessage[]): s
 function selectionSender(item: ResolvedMessageSelectionItem): string {
   switch (item.from.kind) {
     case 'user':
-      return 'co-creator';
+      return `${getCoCreatorDisplay().nickname}`;
     case 'agent':
       return getSenderName(item.from.catId);
     case 'external':

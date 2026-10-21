@@ -5,8 +5,7 @@ import {
   loadMachinePluginCatalog,
   MachineOfficialPluginCatalog,
   OfficialPluginManagerCatalogAdapter,
-  RepositoryPluginManagerCompatibilityProvider,
-  resolveRepositoryReplacementPluginIds,
+  resolveLocalPluginEffectiveGrants,
 } from '../dist/domains/plugin/index.js';
 
 const digest = `sha512-${Buffer.alloc(64, 7).toString('base64')}`;
@@ -60,8 +59,7 @@ test('projects canonical machine catalog release truth while Host policy remains
     hostPolicies: [
       {
         pluginId: 'dev.clowder.video-analysis',
-        replacesRepositoryPluginId: 'video-analysis',
-        effectiveGrants: ['events.publish'],
+        effectiveGrants: ['messaging.send'],
       },
     ],
     now: () => 1_000,
@@ -79,8 +77,7 @@ test('projects canonical machine catalog release truth while Host policy remains
       distribution: 'registry',
       archiveUrl: 'https://registry.npmjs.org/@clowder-ai/video-analysis/-/video-analysis-0.1.0-alpha.0.tgz',
       packageDigest: digest,
-      replacesRepositoryPluginId: 'video-analysis',
-      effectiveGrants: ['events.publish'],
+      effectiveGrants: ['messaging.send'],
       presentation: {
         displayName: 'Video Analysis',
         description: {
@@ -109,8 +106,48 @@ test('projects canonical machine catalog release truth while Host policy remains
     icon: { type: 'svg', src: 'assets/icon.svg' },
     publisher: 'Clowder AI',
     ownerAuthRequired: false,
+    compatibleReplacement: false,
     capabilities: [],
   });
+});
+
+test('uses the same Host-owned grants for local development archives as catalog releases', () => {
+  const policies = [
+    {
+      pluginId: 'official.weixin-mp',
+      effectiveGrants: ['plugin.config.read', 'secret.read'],
+    },
+    {
+      pluginId: 'dev.clowder.video-generation',
+      effectiveGrants: ['plugin.config.read', 'secret.read'],
+    },
+    {
+      pluginId: 'dev.clowder.video-analysis',
+      effectiveGrants: ['plugin.config.read', 'secret.read'],
+    },
+  ];
+
+  // The package's request bounds the grant too (F202 W2-6): less than the entry gets less, more gets no more.
+  const requesting = (pluginId, ...capabilities) => ({ pluginId, features: [{ capabilities }] });
+  assert.deepEqual(
+    resolveLocalPluginEffectiveGrants(policies, requesting('official.weixin-mp', 'plugin.config.read', 'secret.read')),
+    ['plugin.config.read', 'secret.read'],
+  );
+  assert.deepEqual(
+    resolveLocalPluginEffectiveGrants(
+      policies,
+      requesting('dev.clowder.video-generation', 'plugin.config.read', 'secret.read', 'messaging.send'),
+    ),
+    ['plugin.config.read', 'secret.read'],
+  );
+  assert.deepEqual(
+    resolveLocalPluginEffectiveGrants(policies, requesting('untrusted.local', 'plugin.config.read', 'secret.read')),
+    [],
+  );
+  assert.deepEqual(
+    resolveLocalPluginEffectiveGrants(policies, requesting('dev.clowder.video-analysis', 'secret.read')),
+    ['secret.read'],
+  );
 });
 
 test('selects the newest validated release independently of catalog array order', async () => {
@@ -140,7 +177,7 @@ test('selects the newest validated release independently of catalog array order'
   assert.equal(snapshot.entries[0].packageDigest, `sha512-${Buffer.alloc(64, 8).toString('base64')}`);
 });
 
-test('fails closed when catalog validation fails and omits entries outside Host admission scope', async () => {
+test('fails closed when catalog validation fails but discovers valid entries without Host grants', async () => {
   const invalid = new MachineOfficialPluginCatalog({
     loadCatalog: async () => rawCatalog(),
     validateCatalog: () => ({ valid: false, errors: [{ message: 'invalid' }] }),
@@ -160,70 +197,15 @@ test('fails closed when catalog validation fails and omits entries outside Host 
     hostPolicies: [],
     now: () => 3_000,
   });
-  assert.deepEqual(await missingPolicy.snapshot(), {
-    entries: [],
-    status: 'fresh',
-    checkedAt: 3_000,
-  });
-});
-
-test('keeps an installed Host replacement authoritative during a cold catalog outage', async () => {
-  const hostPolicies = [
-    {
-      pluginId: 'dev.clowder.video-analysis',
-      replacesRepositoryPluginId: 'video-analysis',
-      effectiveGrants: ['events.publish'],
-    },
-  ];
-  const catalog = new MachineOfficialPluginCatalog({
-    loadCatalog: async () => Promise.reject(new Error('offline')),
-    validateCatalog: canonicalValidator,
-    hostPolicies,
-    now: () => 3_000,
-  });
-  const inventory = {
-    snapshot: async () => ({
-      schemaVersion: 1,
-      packages: [],
-      instances: [
-        {
-          pluginId: 'dev.clowder.video-analysis',
-          pluginInstanceId: 'pi_video',
-          lifecycleState: 'installed',
-        },
-      ],
-      grants: [],
-    }),
-  };
-  const compatibility = new RepositoryPluginManagerCompatibilityProvider(
-    async () => [
-      {
-        id: 'video-analysis',
-        name: 'Video Analysis (repository)',
-        version: '0.0.0',
-        status: 'disabled',
-        configured: false,
-        config: [],
-        resources: [],
-        hasHealthCheck: false,
-      },
-    ],
-    {
-      loadSuppressedPluginIds: async () => {
-        const [catalogSnapshot, inventorySnapshot] = await Promise.all([catalog.snapshot(), inventory.snapshot()]);
-        return resolveRepositoryReplacementPluginIds(
-          hostPolicies,
-          catalogSnapshot.entries,
-          inventorySnapshot.instances
-            .filter((instance) => instance.lifecycleState === 'installed')
-            .map((instance) => instance.pluginId),
-        );
-      },
-    },
-  );
-
-  assert.deepEqual(await compatibility.list(), []);
-  assert.equal((await catalog.snapshot()).status, 'degraded');
+  const discovered = await missingPolicy.snapshot();
+  assert.equal(discovered.status, 'fresh');
+  assert.equal(discovered.checkedAt, 3_000);
+  assert.equal(discovered.entries.length, 1);
+  assert.equal(discovered.entries[0].pluginId, 'dev.clowder.video-analysis');
+  assert.deepEqual(discovered.entries[0].effectiveGrants, []);
+  const manager = await new OfficialPluginManagerCatalogAdapter(missingPolicy, []).snapshot();
+  assert.equal(manager.candidates[0].pluginId, 'dev.clowder.video-analysis');
+  assert.deepEqual(manager.candidates[0].capabilities, []);
 });
 
 test('retains the last canonical machine catalog when a later read fails', async () => {
@@ -333,4 +315,96 @@ test('rejects an oversized machine catalog before buffering it', async () => {
     }),
     /size limit/,
   );
+});
+
+function releaseCatalog(version, seed) {
+  const raw = rawCatalog();
+  const release = raw.plugins[0].versions[0];
+  release.version = version;
+  release.artifact.version = version;
+  release.artifact.tarballUrl = `https://registry.npmjs.org/@clowder-ai/video-analysis/-/video-analysis-${version}.tgz`;
+  release.artifact.integrity = `sha512-${Buffer.alloc(64, seed).toString('base64')}`;
+  return raw;
+}
+
+for (const [name, mutate, code] of [
+  ['rollback', () => releaseCatalog('1.0.0', 1), 'CATALOG_ROLLBACK_REJECTED'],
+  [
+    'same-version digest change',
+    (raw) => {
+      raw.plugins[0].versions[0].artifact.integrity = digest;
+      return raw;
+    },
+    'CATALOG_EQUIVOCATION_REJECTED',
+  ],
+  [
+    'same-version archive change',
+    (raw) => {
+      raw.plugins[0].versions[0].artifact.tarballUrl += '?changed';
+      return raw;
+    },
+    'CATALOG_EQUIVOCATION_REJECTED',
+  ],
+  [
+    'same-version presentation change',
+    (raw) => {
+      raw.plugins[0].name = 'Different publisher claim';
+      return raw;
+    },
+    'CATALOG_EQUIVOCATION_REJECTED',
+  ],
+  [
+    'same-version package identity change',
+    (raw) => {
+      raw.plugins[0].versions[0].artifact.packageName = '@other/package';
+      return raw;
+    },
+    'CATALOG_EQUIVOCATION_REJECTED',
+  ],
+  ['new-version digest reuse', () => releaseCatalog('3.0.0', 2), 'CATALOG_EQUIVOCATION_REJECTED'],
+]) {
+  test(`machine release continuity rejects ${name} and preserves the trusted snapshot`, async () => {
+    let raw = releaseCatalog('2.0.0', 2);
+    let now = 1;
+    const provider = new MachineOfficialPluginCatalog({
+      loadCatalog: async () => raw,
+      validateCatalog: canonicalValidator,
+      hostPolicies: [],
+      refreshTtlMs: 1,
+      now: () => now,
+    });
+    const first = await provider.snapshot();
+    raw = mutate(structuredClone(raw));
+    now++;
+    const rejected = await provider.snapshot();
+    assert.equal(rejected.status, 'degraded');
+    assert.equal(rejected.errorCode, code);
+    assert.deepEqual(rejected.entries, first.entries);
+    raw = releaseCatalog('3.0.0', 3);
+    now++;
+    const recovered = await provider.snapshot();
+    assert.equal(recovered.status, 'fresh');
+    assert.equal(recovered.entries[0].version, '3.0.0');
+  });
+}
+
+test('continuity retains historical digest bindings across upgrades and temporary catalog omission', async () => {
+  let raw = releaseCatalog('1.0.0', 1);
+  const provider = new MachineOfficialPluginCatalog({
+    loadCatalog: async () => raw,
+    validateCatalog: canonicalValidator,
+    hostPolicies: [],
+    refreshTtlMs: 0,
+  });
+  await provider.snapshot();
+  raw = releaseCatalog('2.0.0', 2);
+  const trusted = await provider.snapshot();
+  raw = releaseCatalog('3.0.0', 1);
+  const reused = await provider.snapshot();
+  assert.equal(reused.errorCode, 'CATALOG_EQUIVOCATION_REJECTED');
+  assert.deepEqual(reused.entries, trusted.entries);
+  raw = { schemaVersion: '1', plugins: [] };
+  assert.equal((await provider.snapshot()).status, 'fresh');
+  raw = releaseCatalog('1.0.0', 1);
+  assert.equal((await provider.snapshot()).errorCode, 'CATALOG_ROLLBACK_REJECTED');
 });

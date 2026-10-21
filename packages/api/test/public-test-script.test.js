@@ -1,8 +1,12 @@
 import assert from 'node:assert/strict';
-import { existsSync, readFileSync, statSync } from 'node:fs';
-import { dirname, resolve } from 'node:path';
+import { spawnSync } from 'node:child_process';
+import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { dirname, join, resolve } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
+
+import { PUBLIC_TEST_DENY_REDIS_URL } from '../scripts/public-test-isolation-preflight.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const packageJsonPath = resolve(__dirname, '../package.json');
@@ -41,4 +45,37 @@ test('run-public-tests.sh exists, is executable, and routes through the resolver
 
 test('resolve-public-test-files.mjs still exists as the registry source', () => {
   assert.ok(existsSync(resolverPath), 'resolver script must exist');
+});
+
+test('serial public lane overrides the test-home Redis default before executing any selected test', () => {
+  const root = mkdtempSync(join(tmpdir(), 'public-serial-redis-boundary-'));
+  const scripts = join(root, 'scripts');
+  const bin = join(root, 'bin');
+  mkdirSync(scripts);
+  mkdirSync(bin);
+  cpSync(runPublicTestsPath, join(scripts, 'run-public-tests.sh'));
+  cpSync(resolve(__dirname, '../scripts/with-test-home.sh'), join(scripts, 'with-test-home.sh'));
+  // Probe the real shell entry without running the whole test set or opening a socket.
+  const node = join(bin, 'node');
+  writeFileSync(
+    node,
+    `#!${process.execPath}
+if (process.argv.includes('./scripts/resolve-public-test-files.mjs')) {
+  console.log('test/selected-fixture.test.js');
+} else {
+  console.log(JSON.stringify({ redis: process.env.REDIS_URL, args: process.argv.slice(2) }));
+}
+`,
+  );
+  chmodSync(node, 0o755);
+  const result = spawnSync('bash', [join(scripts, 'with-test-home.sh'), 'bash', join(scripts, 'run-public-tests.sh')], {
+    cwd: root,
+    env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, REDIS_URL: 'redis://127.0.0.1:6399' },
+    encoding: 'utf8',
+  });
+  assert.equal(result.status, 0, result.stderr);
+  const probe = JSON.parse(result.stdout);
+  assert.equal(probe.redis, PUBLIC_TEST_DENY_REDIS_URL);
+  assert.ok(probe.args.includes('--test'));
+  assert.ok(probe.args.includes('test/selected-fixture.test.js'));
 });

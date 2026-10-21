@@ -4,6 +4,7 @@ import type {
   PersonMemoryInteractionApprovalDetail,
   TemporalValue,
 } from '@cat-cafe/shared';
+import { useCoCreatorDisplay } from '@/hooks/useCoCreatorConfig';
 import { jumpToApprovalAnchor } from './ApprovalProvenanceLinks';
 import { type PersonMemoryDraftView, sourceLabel } from './PersonMemoryDraftDetails';
 import { personMemoryEvidenceCopy } from './person-memory-evidence.shell-copy';
@@ -23,6 +24,7 @@ export function EventDraftDetails({
 }) {
   const t = useShellCopy(personMemoryEvidenceCopy),
     language = useShellLanguage();
+  const ownerName = useCoCreatorDisplay().name;
   const temporal = (value: TemporalValue | undefined): string => {
     if (!value) return t.unknown;
     if (value.kind === 'exact') return value.value;
@@ -53,7 +55,7 @@ export function EventDraftDetails({
   return (
     <span className="block space-y-2 rounded-md bg-[var(--cafe-muted)] p-2 text-xs">
       <span className="block text-micro font-medium opacity-65">
-        {t.event} · {sourceLabel(sourceRole, language)}
+        {t.event} · {sourceLabel(sourceRole, language, ownerName)}
       </span>
       <span className="block font-medium">{t.person(displayName)}</span>
       <span className="block text-sm font-medium">{t.headline(event.headline)}</span>

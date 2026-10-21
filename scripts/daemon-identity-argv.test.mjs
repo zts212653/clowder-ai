@@ -35,8 +35,17 @@ import { captureReadableIdentity } from './lib/process-identity.mjs';
 
 const tempRoots = new Set();
 const children = new Set();
+/** Forked PID -> the shell that launched it, which reaps it; the PID is ours only while that shell lives. */
+const forkedPids = new Map();
 
 afterEach(async () => {
+  for (const [pid, shell] of forkedPids) {
+    if (shell.exitCode !== null || shell.signalCode !== null) continue;
+    try {
+      process.kill(pid, 'SIGKILL');
+    } catch {}
+  }
+  forkedPids.clear();
   for (const child of children) {
     if (child.exitCode === null && child.signalCode === null) {
       child.kill('SIGKILL');
@@ -172,6 +181,122 @@ test('a readable argv without the launch token is still an identity mismatch, wi
       error.details?.tokenPresent === false &&
       typeof error.details?.observedCwd === 'string',
   );
+});
+
+/**
+ * start-dev.sh launches the daemon with `nohup ... --cat-cafe-daemon-token=T &`.
+ * Until the forked child execs, it is a copy of the launching shell: ps shows
+ * the shell's own argv - readable, in the right cwd, without the token. Here the
+ * child sleeps before its exec so the state write lands inside that window.
+ */
+async function forkDaemonWithDelayedExec(projectRoot, launchToken, delaySeconds) {
+  const script = [
+    `{ sleep ${delaySeconds}; exec nohup "$NODE_BIN" -e 'setInterval(() => {}, 1000)' -- "--cat-cafe-daemon-token=$LAUNCH_TOKEN"; } &`,
+    'echo "$!"',
+    'wait',
+  ].join('\n');
+  const shell = spawn('/bin/bash', ['-c', script], {
+    cwd: projectRoot,
+    env: { ...process.env, NODE_BIN: process.execPath, LAUNCH_TOKEN: launchToken },
+    stdio: ['ignore', 'pipe', 'ignore'],
+  });
+  children.add(shell);
+  const pid = await new Promise((resolve, reject) => {
+    shell.stdout.once('data', (chunk) => resolve(Number.parseInt(String(chunk), 10)));
+    shell.once('error', reject);
+  });
+  forkedPids.set(pid, shell);
+  return { pid };
+}
+
+function inspectRuntime({ homeDir, runtimeRoot }) {
+  return inspectDaemonState({
+    stateFile: daemonStatePaths({ homeDir, projectRoot: runtimeRoot, deploymentId: 'runtime' }).stateFile,
+    expectedProjectRoot: runtimeRoot,
+    expectedDeploymentId: 'runtime',
+  });
+}
+
+test('writing state waits out the fork-to-exec window instead of reading the launcher argv as a mismatch', async () => {
+  const fixture = createFixture();
+  const launchToken = 'delayed-exec-token';
+  const child = await forkDaemonWithDelayedExec(fixture.runtimeRoot, launchToken, 0.5);
+
+  const paths = writeState({ ...fixture, child, launchToken });
+
+  const state = JSON.parse(readFileSync(paths.stateFile, 'utf8'));
+  assert.equal(state.pid, child.pid);
+  assert.match(state.process.command, new RegExp(`--cat-cafe-daemon-token=${launchToken}`));
+  assert.equal(inspectRuntime(fixture).kind, 'running', 'the recorded identity must keep matching the daemon');
+});
+
+/**
+ * The full launch chain, read by read: the fork (launcher argv, no token), nohup
+ * (token, but about to exec), then the daemon. The nohup stage normally lasts
+ * about a millisecond, so it is injected rather than raced for.
+ */
+test('writing state records the daemon, never the nohup stage that already carries the token', async () => {
+  const fixture = createFixture();
+  const launchToken = 'nohup-stage-token';
+  const child = await spawnFakeDaemon(fixture.runtimeRoot, launchToken);
+  const stages = [
+    (identity) => ({ ...identity, command: '/bin/bash ./scripts/start-dev.sh --daemon' }),
+    (identity) => ({ ...identity, command: `nohup ${identity.command}` }),
+  ];
+  let calls = 0;
+  const paths = writeState({
+    ...fixture,
+    child,
+    launchToken,
+    captureIdentity: (pid) => {
+      const identity = captureProcessIdentity(pid);
+      calls += 1;
+      return calls <= stages.length ? stages[calls - 1](identity) : identity;
+    },
+  });
+
+  const state = JSON.parse(readFileSync(paths.stateFile, 'utf8'));
+  assert.equal(state.process.command, captureProcessIdentity(child.pid).command);
+  assert.equal(inspectRuntime(fixture).kind, 'running');
+});
+
+test('a child that never gets past nohup is refused with its own reason and nothing is recorded', async () => {
+  const fixture = createFixture();
+  const launchToken = 'stuck-nohup-token';
+  const child = await spawnFakeDaemon(fixture.runtimeRoot, launchToken);
+  const paths = daemonStatePaths({ ...fixture, projectRoot: fixture.runtimeRoot, deploymentId: 'runtime' });
+  assert.throws(
+    () =>
+      writeState({
+        ...fixture,
+        child,
+        launchToken,
+        captureIdentity: (pid) => {
+          const identity = captureProcessIdentity(pid);
+          return { ...identity, command: `nohup ${identity.command}` };
+        },
+      }),
+    (error) =>
+      error instanceof DaemonStateError &&
+      error.reason === 'spawned-process-exec-unsettled' &&
+      !error.message.includes(launchToken),
+  );
+  assert.equal(existsSync(paths.stateFile), false);
+});
+
+test('a spawned process in another cwd is refused at once, naming what was observed', async () => {
+  const fixture = createFixture();
+  const elsewhere = createFixture().runtimeRoot;
+  const child = await spawnFakeDaemon(elsewhere, 'elsewhere-token');
+  const startedAt = Date.now();
+  assert.throws(
+    () => writeState({ ...fixture, child, launchToken: 'elsewhere-token' }),
+    (error) =>
+      error instanceof DaemonStateError &&
+      error.reason === 'spawned-process-identity-mismatch' &&
+      error.message.includes(`cwd ${error.details.observedCwd}`),
+  );
+  assert.ok(Date.now() - startedAt < 1_000, 'a different cwd is conclusive and must not wait');
 });
 
 test('inspection gives an unreadable argv its own fail-closed reason', async () => {

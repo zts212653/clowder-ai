@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { test } from 'node:test';
 import { readArtifactJsonPages } from '../../collective-client/src/collective-artifact-client.js';
 import { sharedProposal } from './collective-artifact-proposal.fixture.js';
 import { custodyHttpFixture } from './collective-custody-http.fixture.js';
+import { test } from './helpers/f202-collective-installed-business.js';
 
 for (const disposition of ['accepted', 'pending', 'escaped-body'])
   test(`a current read-only member recovers ${disposition} owner adoption after the adopter is revoked and both stores reopen`, async (t) => {

@@ -10,7 +10,7 @@
  */
 
 import { existsSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 
 import { type CapabilitiesConfig, type CapabilityEntry, type MountRules } from '@cat-cafe/shared';
 import { readCapabilitiesConfig, writeCapabilitiesConfig } from '../config/capabilities/capability-orchestrator.js';
@@ -205,6 +205,8 @@ export async function addSkill(
   // restart, plugin manifest update). Without this, addSkill defaults to all
   // active mount targets and silently overwrites per-project mount choices.
   const existing = findSkillEntry(config.capabilities, capId, pluginId);
+  const previousPluginSource =
+    pluginId && existing?.skillsSource ? resolve(projectRoot, existing.skillsSource) : undefined;
 
   // Compute effective mountPaths: caller-specified > existing policy > active mount targets.
   // Same contract as updateSkillMountPaths in skill-sync-config — always explicit,
@@ -243,6 +245,13 @@ export async function addSkill(
     });
   }
   await writeCapabilitiesWithRollback(store, previous, config);
+
+  // Package replacement changes the digest-scoped source while retaining the
+  // plugin and its mount policy. Remove only links to its recorded old source;
+  // foreign links/directories remain conflicts, never replacement targets.
+  if (previousPluginSource && previousPluginSource !== resolve(skillsSource)) {
+    await unmountSkillSymlinks(projectRoot, skillName, previousPluginSource, mountRules);
+  }
 
   // 2. Mount symlinks — use effectiveMountPaths (not opts.mountPaths) so the
   // filesystem matches the config entry written above.  opts.mountPaths is the

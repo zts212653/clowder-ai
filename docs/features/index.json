@@ -1041,7 +1041,7 @@
     {
       "id": "F170",
       "name": "Web Chinese Chess — 网页象棋、人猫对弈与复盘",
-      "status": "in-progress（插件基础已合入 clowder-ai-plugins#65；Astra 已验 packed MCP，Host 棋盘接入、真实对弈与 D4/E/F2–F3 仍开放） | **Owner**: 小星星·Maine Coon（@codex-astra, gpt-6-astra；原 A/B owner：Ragdoll） | **Priority**: P2",
+      "status": "in-progress（插件基础已合入 #65；安装后真实回合与恢复已实测，#66 最终独立审查通过，待 CODEOWNER 批准及合入发布；D4/E/F2–F3 仍开放） | **Owner**: 小星星·Maine Coon（@codex-astra, gpt-6-astra；原 A/B owner：Ragdoll） | **Priority**: P2",
       "file": "F170-web-chinese-chess.md"
     },
     {
@@ -1226,7 +1226,7 @@
     },
     {
       "id": "F202",
-      "name": "Terminal Plugin Manager and Host-governed Plugin Framework",
+      "name": "Plugin Manager and Host Interfaces",
       "status": "in-progress (Train B direction accepted in",
       "file": "F202-plugin-framework.md"
     },
@@ -1719,7 +1719,7 @@
     {
       "id": "F292",
       "name": "Feishu Meeting Intake Plugin — 会后产物不再靠人搬运",
-      "status": "implementation / Phase D acceptance active; public alpha.10 and the paired Host auth-probe repair are landed, but live still has alpha.9 installed with its source consumer in the error state and not running. Runtime adoption, a fresh healthy observation, and one new source-bound real-meeting journey remain required",
+      "status": "unknown",
       "file": "F292-feishu-meeting-intake-plugin.md"
     },
     {
@@ -1820,7 +1820,7 @@
     },
     {
       "id": "F309",
-      "name": "Collaborative Content Plane — 跨媒介内容协作平面",
+      "name": "产物协作 — Artifact Collaboration / Collaborative Content Plane",
       "status": "in-progress / Phase R 历史有界交付保留；Phase U 的 Studio 297 作品体验工作单元已在 #5507/#5521 合入后通过父 Alpha 与原设计负责人实页复看；其余 Phase U、Office/video Admission Gate 与未勾 AC 仍开放",
       "file": "F309-collaborative-content-plane.md"
     },
@@ -1899,7 +1899,7 @@
     {
       "id": "F323",
       "name": "Runtime Restart Coordination｜等待登记、优雅重启与自动回访",
-      "status": "in-progress；Phase A 保留，等待回访已加载，原 Task607 继续 A 的用户现场与事故恢复验收；Phase B 已由 #5201 撤回，原 B→C 承接方案失效，尚无获准的新维护执行方案 | **Owner**: 本 thread 指挥责任猫 Astra（@codex-astra, gpt-6-astra）与 Opus55（@opus55, claude-opus-5-5） | **Priority**: P1",
+      "status": "frozen（原开发线已暂停/取消；保留已交付 Phase A，仅留既有事故修复与验收收尾；非全部完成） | **Owner**: 本 thread 收尾责任猫 Astra（@codex-astra, gpt-6-astra）与 Opus55（@opus55, claude-opus-5-5） | **Priority**: P1",
       "file": "F323-runtime-restart-coordination.md"
     },
     {
@@ -1931,6 +1931,12 @@
       "name": "Tripo Studio 插件｜后台审模与资产回流",
       "status": "in-progress | **Owner**: 小太阳·Maine Coon (@codex61-sol) | **Priority**: P1",
       "file": "F328-tripo-studio-plugin.md"
+    },
+    {
+      "id": "F330",
+      "name": "团队仓当上游",
+      "status": "in-progress | **Owner**: Ragdoll (@opus55，指挥 Phase A/B) · 小星星 (@codex-astra，指挥 Phase C–E) | **Priority**: P1",
+      "file": "F330-team-repo-upstream.md"
     }
   ]
 }

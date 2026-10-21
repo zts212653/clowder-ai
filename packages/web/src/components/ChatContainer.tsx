@@ -1,7 +1,7 @@
 'use client';
 
+import Link from 'next/link';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { createPortal } from 'react-dom';
 import { useShallow } from 'zustand/react/shallow';
 import { useActiveExecutionProjection } from '@/hooks/useActiveExecutionProjection';
 import { useAgentHookHealth } from '@/hooks/useAgentHookHealth';
@@ -41,17 +41,22 @@ import { ArtworkLightboxHost } from './content-review/ArtworkLightboxHost';
 import { ArtworkLightboxProvider, useArtworkLightboxScope } from './content-review/ArtworkLightboxScope';
 import { ArtworkWorkModeScope } from './content-review/ArtworkWorkModeScope';
 import { scopedQueue } from './execution-row/thread-queue';
-import { FirstRunQuestWizard } from './FirstRunQuestWizard';
 import { BootcampGuideOverlay } from './first-run-quest/BootcampGuideOverlay';
+import { FirstRunEntryReminder } from './first-run-quest/FirstRunEntryReminder';
+import { restoreJourneyState } from './first-run-quest/onboarding-journey';
 import { QuestBanner } from './first-run-quest/QuestBanner';
 import { syncLocalBootcampState } from './first-run-quest/syncLocalBootcampState';
 import { useFirstProjectMistakeTipGate } from './first-run-quest/useFirstProjectMistakeTipGate';
 import { useFirstProjectPreviewAutoOpen } from './first-run-quest/useFirstProjectPreviewAutoOpen';
+import { useFirstRealMessageSync } from './first-run-quest/useFirstRealMessageSync';
 import { BootcampIcon } from './icons/BootcampIcon';
 import { PawIcon } from './icons/PawIcon';
 import { MessageSearchOverlay } from './message-search/MessageSearchOverlay';
 import { useMessageSearchHost } from './message-search/useMessageSearchHost';
 import { NewConversationPage } from './new-conversation/NewConversationPage';
+import { DEMO_SETTINGS_URL } from './onboarding-demo/demo-story';
+import { GuidedOnboarding } from './onboarding-demo/GuidedOnboarding';
+import { useDemoAdmission } from './onboarding-demo/useDemoAdmission';
 import { ProjectSetupCard } from './ProjectSetupCard';
 import { RuntimeUpdateRequiredDialog } from './RuntimeUpdateRequiredDialog';
 import { SplitPaneChatView } from './SplitPaneView';
@@ -188,14 +193,14 @@ function InteractiveChatContainer({ threadId }: ChatContainerProps) {
   // AC-6: research=multi hint from Signal study "多猫研究" button
   const isResearchMode = searchParams?.get('research') === 'multi';
   const { clearTasks } = useTaskStore();
-  const { cats, isLoading, hasFetched } = useCatData();
+  const { cats, hasFetched: registryKnown, isLoading: registryRefreshing } = useCatData();
   const isV2 = useShellPresentation() === 'v2';
   const conversationViewQueue = useChatStore((state) => scopedQueue(state, threadId)) ?? EMPTY_CONVERSATION_QUEUE;
   const conversationViewMessages = useMemo(
     () => withQueuedInputPreviews(allMessages, conversationViewQueue, threadId),
     [allMessages, conversationViewQueue, threadId],
   );
-  const conversationViewController = useConversationViewPreference(threadId, isV2);
+  const conversationViewController = useConversationViewPreference(threadId, isV2 && threadId !== 'default');
   const conversationViewReading = useConversationViewReadingCheckpoint({
     threadId,
     controller: conversationViewController,
@@ -219,7 +224,8 @@ function InteractiveChatContainer({ threadId }: ChatContainerProps) {
   const [workspacePanelMounted, setWorkspacePanelMounted] = useState(rightPanelMode === 'workspace');
   const [activityPanelMounted, setActivityPanelMounted] = useState(false);
   const [showBootcampList, setShowBootcampList] = useState(false);
-  const [showFirstRunQuestPrompt, setShowFirstRunQuestPrompt] = useState(false);
+  const [showOnboardingHint, setShowOnboardingHint] = useState(false);
+  const [onboardingSyncError, setOnboardingSyncError] = useState(false);
   const [showQuestWizard, setShowQuestWizard] = useState(false);
   // F106: fetch bootcamp count independently of sidebar lifecycle
   // refreshKey increments only on modal close → avoids duplicate fetch on open
@@ -230,6 +236,34 @@ function InteractiveChatContainer({ threadId }: ChatContainerProps) {
     setBootcampRefreshKey((k) => k + 1);
   }, []);
   const [bootcampCount, setBootcampCount] = useState(0);
+  useEffect(() => {
+    let cancelled = false;
+    apiFetch(`/api/threads/${encodeURIComponent(threadId)}`)
+      .then(async (res) =>
+        res.ok ? ((await res.json()) as { bootcampState?: { journeyId?: string; completedAt?: number } }) : null,
+      )
+      .then((thread) => {
+        if (cancelled) return;
+        try {
+          const journey = restoreJourneyState(localStorage.getItem('cat-cafe:onboarding-journey'));
+          setShowOnboardingHint(
+            Boolean(
+              thread?.bootcampState?.journeyId &&
+                thread.bootcampState.completedAt === undefined &&
+                journey?.threadId === threadId &&
+                journey.stage === 'ready' &&
+                journey.completedAt === undefined,
+            ),
+          );
+        } catch {
+          setShowOnboardingHint(false);
+        }
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [threadId]);
   useEffect(() => {
     let cancelled = false;
     apiFetch('/api/bootcamp/threads')
@@ -546,20 +580,14 @@ function InteractiveChatContainer({ threadId }: ChatContainerProps) {
     : threadId === 'default'
       ? 'default'
       : null;
-  const setThreads = useChatStore((s) => s.setThreads);
-  const handleSkipFirstRunQuest = useCallback(() => {
-    // #707: Persist skip to localStorage so refreshing doesn't re-trigger
-    try {
-      localStorage.setItem('cat-cafe:first-run-quest-skipped', '1');
-    } catch {
-      /* localStorage may be unavailable in some contexts */
-    }
-    setShowFirstRunQuestPrompt(false);
-  }, []);
   const handleStartFirstRunQuest = useCallback(() => {
-    setShowFirstRunQuestPrompt(false);
     setShowQuestWizard(true);
   }, []);
+  const demoAdmission = useDemoAdmission(
+    threadId === 'default',
+    handleStartFirstRunQuest,
+    registryKnown && !registryRefreshing && cats.length === 0,
+  );
   const currentBootcampState = storeThreads.find((thread) => thread.id === threadId)?.bootcampState;
   const currentBootcampPhase = currentBootcampState?.phase;
   const showFirstProjectMistakeTip = useFirstProjectMistakeTipGate({
@@ -615,28 +643,6 @@ function InteractiveChatContainer({ threadId }: ChatContainerProps) {
       mistakeTipAdvanceKeyRef.current = null;
     }
   }, [currentBootcampPhase, threadId]);
-  useEffect(() => {
-    // Pure backend-driven: show prompt only when no cats AND no bootcamp thread
-    const isCurrentBootcamp = Boolean(storeThreads.find((thread) => thread.id === threadId)?.bootcampState);
-    const hasAnyBootcamp = storeThreads.some((t) => t.bootcampState);
-    if (isCurrentBootcamp || hasAnyBootcamp || cats.length > 0 || isLoading) {
-      setShowFirstRunQuestPrompt(false);
-      return;
-    }
-    // Wait for thread store to populate before deciding — prevents flash on page refresh
-    if (storeThreads.length === 0) return;
-    // Only show first-run prompt after a successful cat fetch — prevents false
-    // positives when /api/cats fails transiently (returns [] on network error).
-    if (!hasFetched) return;
-    // #707: Don't re-show if user previously skipped
-    try {
-      if (localStorage.getItem('cat-cafe:first-run-quest-skipped') === '1') return;
-    } catch {
-      /* localStorage unavailable */
-    }
-    setShowFirstRunQuestPrompt(true);
-  }, [cats.length, isLoading, hasFetched, storeThreads, threadId]);
-
   // ── Data sync: re-fetch thread state ──
   // MCP callbacks update Redis directly; the companion WebSocket `thread_updated`
   // may not reach this frontend (e.g. worktree port isolation). Re-fetching the
@@ -656,6 +662,7 @@ function InteractiveChatContainer({ threadId }: ChatContainerProps) {
         const local = useChatStore.getState().threads.find((t) => t.id === threadId);
         if (thread.bootcampState || local?.bootcampState) {
           syncLocalBootcampState(threadId, thread.bootcampState);
+          if (thread.bootcampState?.completedAt !== undefined) setShowOnboardingHint(false);
         }
         const localQuest = (local as Record<string, unknown> | undefined)?.firstRunQuestState;
         if (thread.firstRunQuestState || localQuest) {
@@ -686,6 +693,11 @@ function InteractiveChatContainer({ threadId }: ChatContainerProps) {
   // ── Bootcamp add-teammate: trigger guide engine when user interacts with input ──
   // Subscribe reactively so the effect re-runs when guide exits (session cleared).
   const activeGuideFlowId = useGuideStore((s) => s.session?.flow.id ?? null);
+  useEffect(() => {
+    if (!showOnboardingHint || showQuestWizard || activeGuideFlowId) return;
+    if (useGuideStore.getState().completedGuides.has(`${threadId}::first-run-entry`)) return;
+    useGuideStore.getState().reduceServerEvent({ action: 'start', guideId: 'first-run-entry', threadId });
+  }, [activeGuideFlowId, showOnboardingHint, showQuestWizard, threadId]);
   useEffect(() => {
     if (currentBootcampPhase !== 'phase-7.5-add-teammate') return;
     // Guide already running — don't re-register
@@ -943,23 +955,13 @@ function InteractiveChatContainer({ threadId }: ChatContainerProps) {
     [setViewMode, navigateToThread],
   );
 
-  const handleQuestCreated = useCallback(
-    async (questThreadId: string) => {
-      setShowQuestWizard(false);
-      try {
-        const res = await apiFetch('/api/threads');
-        if (res.ok) {
-          const data = (await res.json()) as { threads: Thread[] };
-          setThreads(data.threads);
-        }
-      } catch {
-        // Ignore refresh errors — navigation is the priority
-      }
-      void invalidateSidebarProjection();
-      navigateToThread(questThreadId);
-    },
-    [navigateToThread, setThreads],
-  );
+  const { handleRealOnboardingMessage, requestRetry: requestFirstRealMessageRetry } = useFirstRealMessageSync({
+    threadId,
+    currentBootcampState,
+    onboardingSyncError,
+    setOnboardingSyncError,
+    setShowOnboardingHint,
+  });
 
   const handleSearchKnowledge = useCallback(() => {
     const fromParam = threadId ? `?from=${encodeURIComponent(threadId)}` : '';
@@ -1093,6 +1095,7 @@ function InteractiveChatContainer({ threadId }: ChatContainerProps) {
                 }
               }}
               onNavigate={navigateToThread}
+              onShowCollaboration={handleStartFirstRunQuest}
             />
           ) : (
             <>
@@ -1105,31 +1108,51 @@ function InteractiveChatContainer({ threadId }: ChatContainerProps) {
                 conversationViewController={conversationViewController}
                 conversationViewQueue={conversationViewQueue}
                 acceptUnscopedInteractiveSend
+                onRealMessageSent={() => handleRealOnboardingMessage(threadId)}
                 footerRef={attachBottomChromeRef}
                 timelineLead={
-                  showAgentHookNotice ? (
-                    <div className="mb-3 flex justify-center text-left">
-                      <div className="max-w-[85%] w-full">
-                        <AgentHookHealthNotice
-                          health={agentHookHealth.health}
-                          error={agentHookHealth.error}
-                          syncing={agentHookHealth.syncing}
-                          synced={agentHookHealth.synced}
-                          syncAttempted={agentHookHealth.syncAttempted}
-                          onSync={agentHookHealth.sync}
-                        />
+                  <>
+                    {showOnboardingHint && (
+                      <div className="mb-3 rounded-lg border border-conn-amber-ring bg-conn-amber-bg px-3 py-2 text-sm text-conn-amber-text">
+                        团队已创建。发送第一条消息后，首启旅程就完成了。成员和账号已固定在设置中。
+                        {onboardingSyncError && (
+                          <button
+                            type="button"
+                            className="ml-2 underline"
+                            onClick={() => {
+                              requestFirstRealMessageRetry();
+                            }}
+                          >
+                            重试同步
+                          </button>
+                        )}
                       </div>
-                    </div>
-                  ) : undefined
+                    )}
+                    {showAgentHookNotice ? (
+                      <div className="mb-3 flex justify-center text-left">
+                        <div className="max-w-[85%] w-full">
+                          <AgentHookHealthNotice
+                            configurationOnly={
+                              cats.length > 0 && cats.every((cat) => cat.configurationSource === 'native_tool')
+                            }
+                            health={agentHookHealth.health}
+                            error={agentHookHealth.error}
+                            syncing={agentHookHealth.syncing}
+                            synced={agentHookHealth.synced}
+                            syncAttempted={agentHookHealth.syncAttempted}
+                            onSync={agentHookHealth.sync}
+                          />
+                        </div>
+                      </div>
+                    ) : undefined}
+                  </>
                 }
                 emptyState={
                   <div className="text-center mt-20">
                     <PawIcon className="w-12 h-12 text-cafe-muted mx-auto mb-4" />
                     <p className="text-lg text-cafe-secondary mb-1">欢迎来到 Clowder AI!</p>
                     <p className="text-sm text-cafe-muted" suppressHydrationWarning>
-                      {cats.length > 0
-                        ? '输入 @布偶 召唤布偶猫开始聊天'
-                        : '还没有可用成员，先开始新手教程创建第一只猫猫'}
+                      {cats.length > 0 ? '选择一位伙伴，开始你的下一个目标' : '先看看猫猫如何协作，再创建自己的伙伴'}
                     </p>
                     {showSetupCard && govStatus && (
                       <div className="mt-6 text-left">
@@ -1191,23 +1214,27 @@ function InteractiveChatContainer({ threadId }: ChatContainerProps) {
                         );
                       }
                       return (
-                        <button
-                          type="button"
-                          onClick={() => setShowBootcampList(true)}
-                          className="mt-6 inline-flex items-center gap-2 px-4 py-2 rounded-xl border border-cafe-accent/20 bg-accent-50 text-cafe-accent hover:bg-accent-100 transition-colors text-sm font-medium"
-                          data-testid="empty-state-bootcamp"
-                        >
-                          <BootcampIcon className="w-4 h-4" />
-                          第一次来？开始猫猫训练营
-                        </button>
+                        <div className="mt-6 flex flex-wrap items-center justify-center gap-3">
+                          <button
+                            type="button"
+                            onClick={handleStartFirstRunQuest}
+                            className="inline-flex items-center gap-2 px-4 py-2 rounded-xl border border-cafe-accent/20 bg-accent-50 text-cafe-accent hover:bg-accent-100 transition-colors text-sm font-medium"
+                            data-testid="empty-state-bootcamp"
+                          >
+                            <BootcampIcon className="w-4 h-4" />
+                            看看团队如何协作
+                          </button>
+                          <Link href={DEMO_SETTINGS_URL} className="px-4 py-2 text-sm text-cafe-accent">
+                            创建我的猫猫
+                          </Link>
+                        </div>
                       );
                     })()}
                   </div>
                 }
                 footerLead={
                   <>
-                    {!showFirstRunQuestPrompt &&
-                      !showQuestWizard &&
+                    {!showQuestWizard &&
                       (() => {
                         const currentThread = storeThreads.find((thread) => thread.id === threadId);
                         const questState = (currentThread as Record<string, unknown> | undefined)?.firstRunQuestState as
@@ -1218,7 +1245,7 @@ function InteractiveChatContainer({ threadId }: ChatContainerProps) {
                           <QuestBanner
                             phase={questState.phase}
                             firstCatName={questState.firstCatName}
-                            onAddSecondCat={() => setShowQuestWizard(true)}
+                            onAddSecondCat={() => assignDocumentRoute(DEMO_SETTINGS_URL, window)}
                             onStartBootcamp={() => setShowBootcampList(true)}
                             onComplete={() =>
                               assignDocumentRoute('/hub', typeof window !== 'undefined' ? window : undefined)
@@ -1235,7 +1262,7 @@ function InteractiveChatContainer({ threadId }: ChatContainerProps) {
                   </>
                 }
                 composerClassName={(() => {
-                  if (showFirstRunQuestPrompt || showQuestWizard) return '';
+                  if (showQuestWizard) return '';
                   const currentThread = storeThreads.find((thread) => thread.id === threadId);
                   const bootcampState = currentThread?.bootcampState as { phase: string } | undefined;
                   if (bootcampState?.phase === 'phase-1-intro' && messages.length === 0) {
@@ -1399,47 +1426,34 @@ function InteractiveChatContainer({ threadId }: ChatContainerProps) {
           </div>
         )}
         <FloatingTranscriptContainer />
-        {showFirstRunQuestPrompt &&
-          createPortal(
-            <div className="fixed inset-0 z-[70] flex items-center justify-center bg-[var(--console-overlay-medium)] px-4 backdrop-blur-sm">
-              <div
-                className="w-full max-w-md rounded-2xl border border-conn-amber-ring bg-[var(--console-card-bg)] p-6 shadow-2xl"
-                onClick={(event) => event.stopPropagation()}
-              >
-                <h3 className="text-lg font-semibold text-cafe">开始猫猫新手教程？</h3>
-                <p className="mt-2 text-sm text-cafe-secondary">
-                  当前还没有可用成员。我们可以先带你创建第一只猫猫，再开始首个协作任务。
-                </p>
-                <div className="mt-5 flex justify-end gap-3">
-                  <button
-                    type="button"
-                    onClick={handleSkipFirstRunQuest}
-                    className="rounded-lg border border-[var(--console-border-soft)] px-3 py-2 text-sm text-cafe-secondary hover:bg-[var(--console-hover-bg)]"
-                  >
-                    跳过
-                  </button>
-                  <button
-                    type="button"
-                    onClick={handleStartFirstRunQuest}
-                    className="rounded-lg bg-cafe-accent px-3 py-2 text-sm font-medium text-[var(--cafe-surface)] hover:opacity-90"
-                  >
-                    开始教程
-                  </button>
-                </div>
-              </div>
-            </div>,
-            document.body,
-          )}
-        <FirstRunQuestWizard
+        <GuidedOnboarding
           open={showQuestWizard}
-          onClose={() => setShowQuestWizard(false)}
-          onCreated={handleQuestCreated}
+          storageScope={demoAdmission.storageScope}
+          onCompleted={demoAdmission.complete}
+          onClose={() => {
+            setShowQuestWizard(false);
+            demoAdmission.dismiss();
+          }}
+        />
+        {demoAdmission.error && (
+          <p role="status" className="text-sm text-cafe-secondary">
+            {demoAdmission.error}{' '}
+            <button type="button" onClick={demoAdmission.retry}>
+              重试保存引导记录
+            </button>
+          </p>
+        )}
+        <FirstRunEntryReminder
+          enabled={
+            threadId === 'default' && registryKnown && !registryRefreshing && cats.length > 0 && !showQuestWizard
+          }
+          threadId={threadId}
         />
         <BootcampListModal open={showBootcampList} onClose={handleBootcampModalClose} currentThreadId={threadId} />
         {showVoteModal && <VoteConfigModal onSubmit={handleVoteSubmit} onCancel={() => setShowVoteModal(false)} />}
         {/* Bootcamp guide overlay: intro phase tips + lifecycle tips (phase-7.5 uses guide engine) */}
         {(() => {
-          if (showFirstRunQuestPrompt || showQuestWizard) return null;
+          if (showQuestWizard) return null;
           const bt = storeThreads.find((t) => t.id === threadId);
           const raw = bt?.bootcampState;
           if (!raw) return null;

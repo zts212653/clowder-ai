@@ -2,22 +2,14 @@ import type {
   ApprovalItem,
   ApprovalProducerId,
   EntrustedWorkTaskRefV1,
-  MeetingIntake,
   NeedsMeProducerId,
   ProducerAttentionReceiptV1,
   RuntimeInteractionRecord,
   SettledApprovalItem,
 } from '@cat-cafe/shared';
-import {
-  APPROVAL_PRODUCER_IDS,
-  approvalProducerMeta,
-  meetingIntakeNeedsAttention,
-  producerAttentionReceiptV1Schema,
-} from '@cat-cafe/shared';
+import { APPROVAL_PRODUCER_IDS, approvalProducerMeta, producerAttentionReceiptV1Schema } from '@cat-cafe/shared';
 import type { ApprovalProducerRegistry } from '../approval-hub/ApprovalProducerRegistry.js';
-import { canonicalMeetings } from '../approval-hub/adapters/F292CanonicalMeetings.js';
 import type { RuntimeInteractionStore } from '../runtime-interaction/ports/RuntimeInteractionStore.js';
-import type { MeetingIntakeStore } from '../signal-intake/MeetingIntakeStore.js';
 
 export interface NeedsMeProducerReadInput {
   readonly ownerUserId: string;
@@ -87,7 +79,7 @@ interface F246Subject {
 function parseF246Subject(value: string): F246Subject | null {
   const match = /^approval:(F\d+):(.+)$/u.exec(value);
   if (!match?.[1] || !match[2]) return null;
-  if (match[1] === 'F292' || match[1] === 'F306') return null;
+  if (match[1] === 'F306') return null;
   if (!APPROVAL_PRODUCER_IDS.includes(match[1] as ApprovalProducerId)) return null;
   return { featureId: match[1] as ApprovalProducerId, proposalId: match[2] };
 }
@@ -178,74 +170,6 @@ export class F246NeedsMeProducerAdapter implements NeedsMeProducerAdapter {
 
   reEvaluate(input: NeedsMeProducerReevaluateInput): Promise<NeedsMeProducerReevaluationResult> {
     return reEvaluateCurrentReceipt(this, input);
-  }
-}
-
-function meetingAction(intake: MeetingIntake): { reasonCode: string; recommendation: string; actionRef: string } {
-  if (intake.healthState === 'degraded' && intake.repair) {
-    return {
-      reasonCode: intake.repair.code,
-      recommendation: `Resolve the meeting source through ${intake.repair.action}`,
-      actionRef: `/api/meeting-intakes/${encodeURIComponent(intake.intakeId)}/${intake.repair.action}`,
-    };
-  }
-  return {
-    reasonCode: `meeting_unresolved:${intake.unresolved[0] ?? 'choices'}`,
-    recommendation: 'Confirm the unresolved meeting choices in the source intake',
-    actionRef: `/api/meeting-intakes/${encodeURIComponent(intake.intakeId)}/confirm`,
-  };
-}
-
-export class F292NeedsMeProducerAdapter implements NeedsMeProducerAdapter {
-  readonly producerId = 'f292.repair' as const;
-
-  constructor(private readonly store: Pick<MeetingIntakeStore, 'get' | 'list'>) {}
-
-  async listCurrentReceipts(ownerUserId: string): Promise<ProducerAttentionReceiptV1[]> {
-    const intakes = canonicalMeetings((await this.store.list()).filter((intake) => intake.ownerId === ownerUserId));
-    return intakes.flatMap(({ intake }) => {
-      if (intake.ownerId !== ownerUserId || !intake.entrustedWorkTaskRef || !meetingIntakeNeedsAttention(intake)) {
-        return [];
-      }
-      const receipt = this.project(intake);
-      return receipt?.eligible ? [receipt] : [];
-    });
-  }
-
-  async readCurrentReceipt(input: NeedsMeProducerReadInput): Promise<ProducerAttentionReceiptV1 | null> {
-    const intake = await this.store.get(input.producerSubjectRef);
-    if (!intake || intake.ownerId !== input.ownerUserId || !intake.entrustedWorkTaskRef) return null;
-    return this.project(intake);
-  }
-
-  reEvaluate(input: NeedsMeProducerReevaluateInput): Promise<NeedsMeProducerReevaluationResult> {
-    return reEvaluateCurrentReceipt(this, input);
-  }
-
-  private project(intake: MeetingIntake): ProducerAttentionReceiptV1 {
-    const taskRef = intake.entrustedWorkTaskRef;
-    if (!taskRef) throw new Error('linked meeting intake is missing entrusted Task coordinates');
-    const producer = producerCoordinate(this.producerId, intake.intakeId, intake.revision);
-    if (!meetingIntakeNeedsAttention(intake)) {
-      return producerAttentionReceiptV1Schema.parse({
-        eligible: false,
-        producer,
-        taskRef,
-        reEvaluateActionRef: reEvaluateRef(intake.intakeId),
-      });
-    }
-    const action = meetingAction(intake);
-    return producerAttentionReceiptV1Schema.parse({
-      eligible: true,
-      producer,
-      taskRef,
-      kind: intake.healthState === 'degraded' ? 'repair' : 'judgment',
-      reasonCode: action.reasonCode,
-      recommendation: action.recommendation,
-      salience: 'normal',
-      action: { actionRef: action.actionRef, expectedProducerRevision: intake.revision },
-      reEvaluateActionRef: reEvaluateRef(intake.intakeId),
-    });
   }
 }
 

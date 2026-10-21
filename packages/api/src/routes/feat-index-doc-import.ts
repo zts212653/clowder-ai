@@ -1,6 +1,7 @@
 import { existsSync, readdirSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
+import { deploymentDefaults } from '@cat-cafe/shared';
 import { parse as parseYaml } from 'yaml';
 import { parseActiveFeaturesFromBacklog } from './backlog-doc-import.js';
 
@@ -155,7 +156,7 @@ function toSortedEntries(entries: FeatIndexEntry[]): FeatIndexEntry[] {
 export async function readFeatIndexEntries(): Promise<FeatIndexEntry[]> {
   const root = findMonorepoRoot();
   const featuresDir = join(root, 'docs', 'features');
-  const backlogPath = join(root, 'docs', 'ROADMAP.md');
+  const backlogPath = join(root, deploymentDefaults.roadmapPath);
 
   const docEntries = await readFeatureDocEntries(featuresDir);
   const map = new Map<string, FeatureDocEntry>();
@@ -172,7 +173,7 @@ export async function readFeatIndexEntries(): Promise<FeatIndexEntry[]> {
   if (existsSync(backlogPath)) {
     try {
       const backlog = await readFile(backlogPath, 'utf-8');
-      const backlogRows = parseActiveFeaturesFromBacklog(backlog);
+      const backlogRows = parseActiveFeaturesFromBacklog(backlog, deploymentDefaults.roadmapPath);
       for (const row of backlogRows) {
         const current = map.get(row.id);
         if (!current) {
@@ -194,7 +195,7 @@ export async function readFeatIndexEntries(): Promise<FeatIndexEntry[]> {
         });
       }
     } catch {
-      // Ignore unreadable BACKLOG.md and keep feature-doc-only entries.
+      // Ignore an unreadable configured roadmap and keep feature-doc-only entries.
     }
   }
 

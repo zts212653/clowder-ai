@@ -1,6 +1,6 @@
 {
   "name": "cat-cafe-desktop",
-  "version": "0.10.1",
+  "version": "1.14.0",
   "description": "Clowder AI Desktop - Multi-Agent Collaboration Platform",
   "main": "main.js",
   "scripts": {
@@ -12,6 +12,7 @@
   "author": "Clowder AI",
   "license": "AGPL-3.0-only",
   "devDependencies": {
+    "@electron/asar": "3.4.1",
     "electron": "35.7.5",
     "electron-builder": "26.8.1"
   },
@@ -60,13 +61,34 @@
     "files": [
       "app-identity.js",
       "desktop-update-menu.js",
+      "lifecycle-diagnostics.js",
+      "app-lifecycle.js",
       "desktop-update-runtime.js",
       "main.js",
+      "window-close-policy.js",
+      "window-recovery.js",
+      "installation-lifecycle.js",
       "mac-install-location.js",
       "preload.js",
       "project-root.js",
       "renderer-link-policy.js",
+      "renderer-navigation.js",
       "service-manager.js",
+      "memory-fallback-consent.js",
+      "client-homes.js",
+      "subprocess-entry.js",
+      "desktop-template.js",
+      "api-startup-probe.mjs",
+      "api-startup-read-ahead.mjs",
+      "startup-failure-handler.js",
+      "startup-state.js",
+      "startup-timing.js",
+      "startup-services.js",
+      "shutdown-controller.js",
+      "visible-renderer.js",
+      "runtime-config.js",
+      "runtime-web-server.js",
+      "runtime-web-config.js",
       "update-checker.js",
       "update-downloader.js",
       "update-installer.js",
@@ -107,7 +129,15 @@
       },
       {
         "from": "../cat-cafe-skills",
-        "to": "cat-cafe-skills"
+        "to": "cat-cafe-skills",
+        "filter": [
+          "**/*",
+          "!**/.cat-cafe-shared-refs"
+        ]
+      },
+      {
+        "from": "../cat-cafe-skills/refs",
+        "to": "cat-cafe-skills/.cat-cafe-shared-refs"
       },
       {
         "from": "../.claude/hooks/user-level",
@@ -142,13 +172,19 @@
       {
         "from": "../assets",
         "to": "assets"
-      },
-      {
-        "from": "../packages/api/src/plugins",
-        "to": "plugins"
       }
     ],
-    "asar": false,
+    "asar": true,
+    "asarUnpack": [
+      "**/*.node",
+      "**/node_modules/@anthropic-ai/claude-agent-sdk-*/claude-agent-sdk.*.node",
+      "**/api-startup-probe.mjs",
+      "**/api-startup-read-ahead.mjs",
+      "**/runtime-web-server.js",
+      "**/runtime-web-config.js",
+      "**/startup-timing.js",
+      "**/installation-lifecycle.js"
+    ],
     "afterPack": "./afterPack.js"
   }
 }

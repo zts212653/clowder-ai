@@ -19,7 +19,7 @@
  */
 
 import type { CatId, CatRoutingError, MessageContent } from '@cat-cafe/shared';
-import { catRegistry, escapeRegExp } from '@cat-cafe/shared';
+import { catRegistry, deploymentDefaults, escapeRegExp } from '@cat-cafe/shared';
 import type {
   RoutingPreviewReason,
   RoutingPreviewReasonKind,
@@ -52,7 +52,14 @@ import type { ITaskStore } from '../../stores/ports/TaskStore.js';
 import type { IThreadStore, ThreadRoutingPolicyV1 } from '../../stores/ports/ThreadStore.js';
 import { DEFAULT_THREAD_ID } from '../../stores/ports/ThreadStore.js';
 import type { IWorkflowSopStore } from '../../stores/ports/WorkflowSopStore.js';
-import type { AgentMessage, AgentRouteIntent, AgentService, ClaudeCompactionHooksFactory } from '../../types.js';
+import { getTimelineOrderTime } from '../../stores/visibility.js';
+import type {
+  AgentMessage,
+  AgentRouteIntent,
+  AgentService,
+  ClaudeCompactionHooksFactory,
+  ToolExecutionPolicy,
+} from '../../types.js';
 import type { InvocationRegistry } from '../invocation/InvocationRegistry.js';
 import {
   type InvocationCapacitySnapshot,
@@ -428,7 +435,7 @@ function buildMentionData(configs: Record<string, import('@cat-cafe/shared').Cat
  * Options for AgentRouter constructor
  */
 export interface AgentRouterOptions {
-  collectiveContext?: import('../invocation/invoke-single-cat.js').InvocationDeps['collectiveContext'];
+  resolveTrustedImagePath?: (hmrId: string) => Promise<string | undefined>;
   agentRegistry: AgentRegistry;
   registry: InvocationRegistry;
   dotReplyTarget?: (
@@ -554,7 +561,7 @@ export class AgentRouter {
   private unavailableServices: ReadonlyMap<string, AgentRegistrationFailure> = new Map();
   private registry: InvocationRegistry;
   private messageStore: IMessageStore;
-  private collectiveContext: import('../invocation/invoke-single-cat.js').InvocationDeps['collectiveContext'];
+  private resolveTrustedImagePath?: (hmrId: string) => Promise<string | undefined>;
   private sessionManager: SessionManager;
   private deliveryCursorStore: DeliveryCursorStore;
   private threadStore: IThreadStore | null;
@@ -653,7 +660,7 @@ export class AgentRouter {
 
     this.registry = options.registry;
     this.messageStore = options.messageStore;
-    this.collectiveContext = options.collectiveContext;
+    this.resolveTrustedImagePath = options.resolveTrustedImagePath;
     this.sessionManager = new SessionManager(options.sessionStore);
     // #1200 P2-3: wire cursor canonicalizer for v1→v2 async resolution
     const canonicalizer = options.messageStore.canonicalizeCursor
@@ -758,11 +765,9 @@ export class AgentRouter {
     return service ? resolveInvocationCapacitySnapshot({ catId, service }) : undefined;
   }
 
-  supportsCollectiveParticipation(catId: string): boolean {
-    return (
-      this.isRoutableCat(catId) &&
-      this.services[catId]?.supportsToolExecutionPolicy?.({ mode: 'collective_participation' }) === true
-    );
+  /** Capability of the actual routable service; does not admit any particular invocation. */
+  supportsToolExecutionPolicy(catId: string, policy: ToolExecutionPolicy): boolean {
+    return this.isRoutableCat(catId) && this.services[catId]?.supportsToolExecutionPolicy?.(policy) === true;
   }
 
   private isRoutableCat(catId: string | null | undefined): catId is CatId {
@@ -1301,14 +1306,14 @@ export class AgentRouter {
 
   /** Build shared strategy dependencies (public for ModeOrchestrator) */
   getStrategyDeps(): RouteStrategyDeps {
-    const apiPort = process.env.API_SERVER_PORT ?? '3004';
+    const apiPort = process.env.API_SERVER_PORT ?? String(deploymentDefaults.apiPort);
     return {
       services: this.services,
       unavailableServices: this.unavailableServices,
       ...(this.routingDispatchPreflight ? { routingDispatchPreflight: this.routingDispatchPreflight } : {}),
       invocationDeps: {
+        ...(this.resolveTrustedImagePath ? { resolveTrustedImagePath: this.resolveTrustedImagePath } : {}),
         messageStore: this.messageStore,
-        ...(this.collectiveContext ? { collectiveContext: this.collectiveContext } : {}),
         registry: this.registry,
         sessionManager: this.sessionManager,
         threadStore: this.threadStore,

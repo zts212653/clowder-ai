@@ -6,6 +6,7 @@
 import './helpers/setup-cat-registry.js';
 import assert from 'node:assert/strict';
 import { after, before, describe, test } from 'node:test';
+import { getCoCreatorConfig } from '../dist/config/cat-config-loader.js';
 
 /** Helper: create a mock StoredMessage */
 function mockMsg(overrides) {
@@ -22,12 +23,12 @@ function mockMsg(overrides) {
 }
 
 describe('formatMessage', () => {
-  test('formats user message with co-creator', async () => {
+  test('formats user message with the configured familiar address', async () => {
     const { formatMessage } = await import('../dist/domains/cats/services/context/ContextAssembler.js');
     const msg = mockMsg({ content: '你好', timestamp: new Date('2026-02-07T14:02:00Z').getTime() });
     const result = formatMessage(msg);
     assert.ok(result.includes('14:02 UTC'));
-    assert.ok(result.includes('co-creator'));
+    assert.ok(result.includes(getCoCreatorConfig().nickname ?? 'co-creator'));
     assert.ok(result.includes('你好'));
   });
 
@@ -96,7 +97,7 @@ describe('assembleContext', () => {
     const { assembleContext } = await import('../dist/domains/cats/services/context/ContextAssembler.js');
     const result = assembleContext([mockMsg({ content: '你好世界' })]);
     assert.ok(result.contextText.includes('[对话历史 - 最近 1 条]'));
-    assert.ok(result.contextText.includes('co-creator'));
+    assert.ok(result.contextText.includes(getCoCreatorConfig().nickname ?? 'co-creator'));
     assert.ok(result.contextText.includes('你好世界'));
     assert.ok(result.contextText.endsWith('[/对话历史]'));
     assert.equal(result.messageCount, 1);
@@ -110,7 +111,7 @@ describe('assembleContext', () => {
       mockMsg({ catId: 'codex', content: '我也在', timestamp: 3000 }),
     ];
     const result = assembleContext(msgs);
-    assert.ok(result.contextText.includes('co-creator'));
+    assert.ok(result.contextText.includes(getCoCreatorConfig().nickname ?? 'co-creator'));
     assert.ok(result.contextText.includes('布偶猫'));
     assert.ok(result.contextText.includes('缅因猫'));
     assert.equal(result.messageCount, 3);

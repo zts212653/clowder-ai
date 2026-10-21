@@ -15,7 +15,6 @@ test('portable Redis and memory contracts survive the October resource audit', a
     'test/redis-message-parsers-z9-turn-roundtrip.test.js',
     'test/redis-rdb-first-helper.test.js',
     'test/redis-read-state-batch.test.js',
-    'test/stores/redis-community-issue-draft-rollback.test.js',
     'test/windows-portable-redis-lifecycle.test.js',
     'test/windows-portable-redis-tools.test.js',
     'test/windows-portable-redis-url.test.js',

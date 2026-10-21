@@ -44,7 +44,8 @@ describe('F322 reading header and transient actions', () => {
     const message = streamReply();
     h.render(message);
     const classic = h.q('message-header')!.innerHTML;
-    expect(classic).toContain('复制消息 ID');
+    // Copy is owned by MessageActions; a bare ChatMessage does not add a second header control.
+    expect(classic).not.toContain('复制消息 ID');
     // Approved classic parity keeps speech in MessageActions, outside the name row.
     expect(classic).not.toContain('播放语音');
     h.enableV2();

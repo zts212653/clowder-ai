@@ -46,6 +46,8 @@ async function syncDriftCompat(projectRoot, skillsSource, mountRules, _conflictC
   return syncDrift(projectRoot, skillsSource, mountRules, drift, opts);
 }
 
+const providerDirectory = (provider) => (provider === 'kimi' ? '.kimi-code' : `.${provider}`);
+
 let tempDir;
 let projectRoot;
 let skillsSource;
@@ -89,7 +91,7 @@ describe('DriftResolver (F228 Phase 2B)', () => {
     const report = await syncDriftCompat(projectRoot, skillsSource, DEFAULT_MOUNT_RULES, {});
     assert.deepEqual(report.mounted, ['tdd']);
     for (const p of ['claude', 'codex', 'gemini', 'kimi']) {
-      assert.ok(await exists(join(projectRoot, `.${p}/skills/tdd`)));
+      assert.ok(await exists(join(projectRoot, `${providerDirectory(p)}/skills/tdd`)));
     }
     // post-sync drift should be empty
     const after = await checkMount(projectRoot, skillsSource, DEFAULT_MOUNT_RULES);
@@ -114,7 +116,7 @@ describe('DriftResolver (F228 Phase 2B)', () => {
     assert.equal(await readlink(claudeLink), expectedSymlinkTarget(claudeLink, join(skillsSource, 'tdd')));
     for (const provider of ['codex', 'gemini', 'kimi']) {
       assert.equal(
-        await exists(join(projectRoot, `.${provider}/skills/tdd`)),
+        await exists(join(projectRoot, `${providerDirectory(provider)}/skills/tdd`)),
         false,
         `${provider} should not be remounted outside tdd.mountPaths`,
       );
@@ -201,7 +203,7 @@ describe('DriftResolver (F228 Phase 2B)', () => {
 
     for (const p of ['claude', 'codex', 'gemini', 'kimi']) {
       assert.equal(
-        await exists(join(projectRoot, `.${p}/skills/alpha`)),
+        await exists(join(projectRoot, `${providerDirectory(p)}/skills/alpha`)),
         false,
         `${p} mount should be rolled back when sync does not complete`,
       );
@@ -404,7 +406,7 @@ describe('DriftResolver (F228 Phase 2B)', () => {
 
     assert.deepEqual(report.overridden, ['tdd']);
     for (const provider of ['claude', 'codex', 'gemini', 'kimi']) {
-      const linkPath = join(projectRoot, `.${provider}/skills/tdd`);
+      const linkPath = join(projectRoot, `${providerDirectory(provider)}/skills/tdd`);
       const stat = await lstat(linkPath);
       assert.equal(stat.isSymbolicLink(), true, `${provider} should be remounted`);
       assert.equal(await readlink(linkPath), expectedSymlinkTarget(linkPath, join(skillsSource, 'tdd')));
@@ -492,7 +494,7 @@ describe('DriftResolver (F228 Phase 2B)', () => {
     assert.equal(codexStat.isSymbolicLink(), true, 'overridden codex should be managed symlink');
     // Gemini and kimi should also be mounted
     for (const provider of ['gemini', 'kimi']) {
-      const linkPath = join(projectRoot, `.${provider}/skills/tdd`);
+      const linkPath = join(projectRoot, `${providerDirectory(provider)}/skills/tdd`);
       assert.equal((await lstat(linkPath)).isSymbolicLink(), true, `${provider} should be auto-mounted`);
     }
   });
@@ -521,7 +523,7 @@ describe('DriftResolver (F228 Phase 2B)', () => {
     );
     // Non-conflicting providers should be mounted
     for (const provider of ['codex', 'gemini', 'kimi']) {
-      const linkPath = join(projectRoot, `.${provider}/skills/tdd`);
+      const linkPath = join(projectRoot, `${providerDirectory(provider)}/skills/tdd`);
       assert.equal(
         (await lstat(linkPath)).isSymbolicLink(),
         true,
@@ -676,7 +678,7 @@ describe('DriftResolver (F228 Phase 2B)', () => {
     // tdd must re-enable — no cascade tracking needed, disabledSkills is authoritative
     for (const provider of ['claude', 'codex', 'gemini', 'kimi']) {
       assert.ok(
-        await exists(join(projectRoot, `.${provider}/skills/tdd`)),
+        await exists(join(projectRoot, `${providerDirectory(provider)}/skills/tdd`)),
         `${provider} symlink must exist after global re-enable`,
       );
     }
@@ -818,7 +820,7 @@ describe('DriftResolver (F228 Phase 2B)', () => {
       mountPoints: {
         ...DEFAULT_MOUNT_RULES.mountPoints,
         claude: { enabled: true, path: '.claude/skills' },
-        kimi: { enabled: true, path: '.kimi/skills' },
+        kimi: { enabled: true, path: '.kimi-code/skills' },
       },
     };
     await syncProject(projectRoot, skillsSource, {
@@ -836,7 +838,7 @@ describe('DriftResolver (F228 Phase 2B)', () => {
       mountPoints: {
         ...DEFAULT_MOUNT_RULES.mountPoints,
         claude: { enabled: true, path: '.claude/skills' },
-        kimi: { enabled: false, path: '.kimi/skills' },
+        kimi: { enabled: false, path: '.kimi-code/skills' },
       },
     };
     // Add a new skill to trigger drift
@@ -869,7 +871,7 @@ describe('DriftResolver (F228 Phase 2B)', () => {
       ...DEFAULT_MOUNT_RULES,
       mountPoints: {
         ...DEFAULT_MOUNT_RULES.mountPoints,
-        kimi: { enabled: false, path: '.kimi/skills' },
+        kimi: { enabled: false, path: '.kimi-code/skills' },
       },
     };
 
@@ -887,7 +889,11 @@ describe('DriftResolver (F228 Phase 2B)', () => {
 
     // Symlinks: only claude should be mounted (kimi disabled)
     assert.ok(await exists(join(projectRoot, '.claude/skills/tdd')), 'active provider should be mounted');
-    assert.equal(await exists(join(projectRoot, '.kimi/skills/tdd')), false, 'disabled provider should NOT be mounted');
+    assert.equal(
+      await exists(join(projectRoot, '.kimi-code/skills/tdd')),
+      false,
+      'disabled provider should NOT be mounted',
+    );
 
     // Config: mountPaths must preserve declared policy including disabled kimi
     const config = await readCapabilitiesConfig(projectRoot);

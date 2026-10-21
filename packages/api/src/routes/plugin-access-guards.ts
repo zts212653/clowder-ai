@@ -6,6 +6,7 @@ import {
   resolveCapabilityWriteSessionUserId,
 } from '../config/capabilities/capability-write-guards.js';
 import { toolExecutionPolicyDenial } from '../domains/cats/services/agents/invocation/tool-execution-policy.js';
+import type {} from './callback-auth-prehandler.js';
 
 interface PluginAccess {
   operator: string;

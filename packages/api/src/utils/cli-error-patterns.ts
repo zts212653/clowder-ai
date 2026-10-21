@@ -169,7 +169,7 @@ export const CLASSIFIER_PATTERNS: Array<{ code: CliErrorReasonCode; regex: RegEx
   {
     code: 'auth_failed',
     regex:
-      /(\b401\b|Unauthorized|invalid api key|authentication failed|forbidden.*api|profile is not authenticated|Authentication required\. Please visit the URL to log in|authentication interrupted)/i,
+      /(\b401\b|Unauthorized|invalid api key|authentication failed|forbidden.*api|profile is not authenticated|Authentication required\. Please visit the URL to log in|authentication interrupted|Not logged in\s*[·.:-]?\s*Please run \/login|The provided authorization grant is invalid|provider managed:kimi-code has no credential configured)/i,
   },
   // F212 Phase E (cloud codex P1 fix per @co-creator organic 2026-05-29): server-side temporary
   // throttling is NOT a user quota problem. CC explicitly disambiguates with "(not your usage

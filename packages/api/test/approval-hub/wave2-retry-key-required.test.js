@@ -2,7 +2,7 @@ import '../helpers/setup-cat-registry.js';
 import assert from 'node:assert/strict';
 import { afterEach, beforeEach, describe, it } from 'node:test';
 import Fastify from 'fastify';
-import { proposedReviewAction } from './helpers.js';
+import { proposedTaskAction } from './helpers.js';
 
 describe('Wave 2 producer retry identity gate', () => {
   let callbackProposeEntityRoutes;
@@ -124,6 +124,7 @@ describe('Wave 2 producer retry identity gate', () => {
     const app = Fastify();
     apps.push(app);
     await app.register(callbacksRoutes, {
+      actionSuccessorAdmissionService: { async preflightStructuredTransferStanding() {} },
       registry,
       messageStore,
       threadStore,
@@ -144,7 +145,7 @@ describe('Wave 2 producer retry identity gate', () => {
         content: '@sonnet\nPlease take this work',
         targetCats: ['sonnet'],
         effectClass: 'assign_work',
-        proposedAction: proposedReviewAction(),
+        proposedAction: proposedTaskAction(),
       },
     });
 

@@ -1,3 +1,4 @@
+import { deploymentDefaults } from '@cat-cafe/shared';
 import { z } from 'zod';
 import { defineMcpMigrationFactory } from '../tool-governance-migration.js';
 
@@ -6,7 +7,7 @@ import { errorResult, successResult } from './file-tools.js';
 
 const defineTool = defineMcpMigrationFactory('signal-study-tools.ts', undefined, { authority: 'local-runtime' });
 
-const API_URL = process.env['CAT_CAFE_API_URL'] ?? 'http://localhost:3004';
+const API_URL = process.env['CAT_CAFE_API_URL'] ?? deploymentDefaults.apiBaseUrl;
 const SIGNAL_USER = process.env['CAT_CAFE_SIGNAL_USER']?.trim() || 'codex';
 
 async function apiJson(

@@ -30,11 +30,11 @@ BOOTSTRAP="$SKILLS_SRC/BOOTSTRAP.md"
 CLAUDE_SKILLS="$HOME/.claude/skills"
 CODEX_SKILLS="$HOME/.codex/skills"
 GEMINI_SKILLS="$HOME/.gemini/skills"
-KIMI_SKILLS="$HOME/.kimi/skills"
+KIMI_SKILLS="${KIMI_CODE_HOME:-$HOME/.kimi-code}/skills"
 PROJECT_CLAUDE_SKILLS="$WORKTREE_REPO/.claude/skills"
 PROJECT_CODEX_SKILLS="$WORKTREE_REPO/.codex/skills"
 PROJECT_GEMINI_SKILLS="$WORKTREE_REPO/.gemini/skills"
-PROJECT_KIMI_SKILLS="$WORKTREE_REPO/.kimi/skills"
+PROJECT_KIMI_SKILLS="$WORKTREE_REPO/.kimi-code/skills"
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -272,12 +272,12 @@ else
     printf "  ln -s %s %s/.claude/skills\n" "$SKILLS_SRC" "$WORKTREE_REPO"
     printf "  ln -s %s %s/.codex/skills\n" "$SKILLS_SRC" "$WORKTREE_REPO"
     printf "  ln -s %s %s/.gemini/skills\n" "$SKILLS_SRC" "$WORKTREE_REPO"
-    printf "  ln -s %s %s/.kimi/skills\n" "$SKILLS_SRC" "$WORKTREE_REPO"
+    printf "  ln -s %s %s/.kimi-code/skills\n" "$SKILLS_SRC" "$WORKTREE_REPO"
     printf "  # 或使用 HOME 级 per-skill fallback（兼容旧口径）\n"
     printf "  ln -s %s/{skill-name} ~/.claude/skills/{skill-name}\n" "$SKILLS_SRC"
     printf "  ln -s %s/{skill-name} ~/.codex/skills/{skill-name}\n" "$SKILLS_SRC"
     printf "  ln -s %s/{skill-name} ~/.gemini/skills/{skill-name}\n" "$SKILLS_SRC"
-    printf "  ln -s %s/{skill-name} ~/.kimi/skills/{skill-name}\n\n" "$SKILLS_SRC"
+    printf "  ln -s %s/{skill-name} ~/.kimi-code/skills/{skill-name}\n\n" "$SKILLS_SRC"
     printf "  * Claude 列同时覆盖 OpenCode（金渐层读取 ~/.claude/ 配置）\n\n"
   fi
   if [ "$reg_warnings" -gt 0 ]; then

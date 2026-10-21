@@ -1,6 +1,47 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
+for (const wake of [
+  { kind: 'legacy', reason: 'carrier_missing' },
+  { kind: 'action_successor', leaseId: 'lease-1', generation: 1, holderCatId: 'codex' },
+]) {
+  it(`${wake.kind} projection never starts a hidden corrective model invocation`, async () => {
+    const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
+    const appended = [];
+    let calls = 0;
+    const deps = createMockDeps(
+      {
+        codex: {
+          async *invoke() {
+            calls++;
+            yield {
+              type: 'text',
+              catId: 'codex',
+              content: calls === 1 ? 'Hello from CLI' : 'unwanted correction',
+              timestamp: Date.now(),
+            };
+            yield { type: 'done', catId: 'codex', timestamp: Date.now() };
+          },
+        },
+      },
+      appended,
+    );
+    deps.turnCustodyProjectionService = {
+      open: async () => ({ state: 'unknown_legacy', evidenceRefs: ['test:missing-carrier'] }),
+      close: async () => ({
+        state: 'unknown_legacy',
+        shouldBlock: true,
+        transitionObserved: false,
+        evidenceRefs: ['test:missing-carrier'],
+      }),
+    };
+    for await (const _ of routeSerial(deps, ['codex'], 'Hello', 'user1', 'thread1', { turnCustodyWake: wake })) void _;
+    assert.equal(calls, 1);
+    assert.ok(appended.some((message) => message.content === 'Hello from CLI'));
+    assert.ok(appended.every((message) => !message.content.includes('unwanted correction')));
+  });
+}
+
 /**
  * Verify that ACP error messages are persisted as system messages
  * so they survive F5 (page refresh) — the error badge should render

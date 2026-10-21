@@ -72,7 +72,7 @@ describe('ChatInput progressive add menu', () => {
     expect(menu?.textContent).toContain('引用 Thread 或文件');
     expect(menu?.textContent).toContain('上传附件');
     expect(menu?.textContent).toContain('悄悄话');
-    expect(menu?.textContent).toContain('游戏');
+    expect(menu?.textContent).not.toContain('游戏');
   });
 
   it('collapses the secondary menu when + is clicked again', () => {

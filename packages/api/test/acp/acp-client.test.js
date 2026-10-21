@@ -60,6 +60,61 @@ const INIT_RESULT = {
 };
 
 describe('AcpClient', () => {
+  it('uses advertised session/resume and preserves id omitted by the agent', async () => {
+    const { child, clientStdin, agentStdout } = createMockChild();
+    const methods = [];
+    clientStdin.on('data', (chunk) => {
+      for (const line of chunk.toString().trim().split('\n')) {
+        const msg = JSON.parse(line);
+        methods.push(msg.method);
+        agentRespond(
+          agentStdout,
+          msg.id,
+          msg.method === 'initialize'
+            ? { ...INIT_RESULT, agentCapabilities: { sessionCapabilities: { resume: {} } } }
+            : { configOptions: [] },
+        );
+      }
+    });
+    const nativeClient = new AcpClient({ command: 'fake', args: [], cwd: '/tmp', spawnFn: () => child });
+    try {
+      await nativeClient.initialize();
+      const resumed = await nativeClient.loadSession('native-session');
+      assert.equal(resumed.sessionId, 'native-session');
+      assert.ok(methods.includes('session/resume'));
+      assert.equal(methods.includes('session/load'), false);
+      await nativeClient.loadSession('native-session');
+      assert.equal(
+        methods.filter((method) => method === 'session/resume').length,
+        1,
+        'an active resume-only session is reused',
+      );
+    } finally {
+      await nativeClient.close();
+    }
+  });
+  it('preserves opaque empty values and returns the adopted config options', async () => {
+    const { child, clientStdin, agentStdout } = createMockChild();
+    const sent = [];
+    const options = [{ id: 'model', currentValue: '' }];
+    clientStdin.on('data', (chunk) => {
+      for (const line of chunk.toString().trim().split('\n')) {
+        const msg = JSON.parse(line);
+        sent.push(msg);
+        agentRespond(agentStdout, msg.id, msg.method === 'initialize' ? INIT_RESULT : { configOptions: options });
+      }
+    });
+    const nativeClient = new AcpClient({ command: 'fake', args: [], cwd: '/tmp', spawnFn: () => child });
+    try {
+      await nativeClient.initialize();
+      const response = await nativeClient.setSessionConfigOption('native-session', 'model', '');
+      assert.equal(sent.find((m) => m.method === 'session/set_config_option').params.value, '');
+      assert.deepEqual(response.configOptions, options);
+    } finally {
+      await nativeClient.close();
+    }
+  });
+
   let client = null;
 
   afterEach(async () => {

@@ -10,6 +10,7 @@
  */
 
 import type { ConciergeConfig } from '@cat-cafe/shared';
+import { deploymentDefaults } from '@cat-cafe/shared';
 
 // ---------------------------------------------------------------------------
 // Public API
@@ -31,7 +32,7 @@ export function buildConciergePromptLines(config: ConciergeConfig, _threadId?: s
     '',
     '**回答原则（anchor-first）：** 功能/记忆类回答必须带 1-3 个可点击 anchor（feature doc / guide / thread/message / release note）；多文档推断要标注"推断"；没有 anchor → 转接或明说不确定。',
     '',
-    '**功能发现知识源（限定）：** cat_cafe_feat_index、docs/ROADMAP.md、docs/features/、release notes、guide catalog（cat_cafe_get_available_guides）。',
+    `**功能发现知识源（限定）：** cat_cafe_feat_index、${deploymentDefaults.roadmapPath}、docs/features/、release notes、guide catalog（cat_cafe_get_available_guides）。`,
     '',
     '**工具白名单（只许使用）：**',
     '- search_evidence / graph_resolve / list_recent（记忆检索三入口）',

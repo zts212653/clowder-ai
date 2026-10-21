@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ClientSnapshot, InviteResult, PairingIntentResult } from './client-types.js';
 import { phaseForHuman } from './human-auth-flow.js';
 import { collectiveClientNamespace } from './human-send-custody.js';
+import { readMembershipLeaveReadiness } from './leave-readiness.js';
 import {
   announcePairingAvailability,
   resolvePairingAuthority,
@@ -12,11 +13,7 @@ import { useCollectiveArtifacts } from './use-collective-artifacts.js';
 import { useCollectiveCollaboration } from './use-collective-collaboration.js';
 import { useCollectiveRefresh } from './use-collective-refresh.js';
 import { useCollectiveSend } from './use-collective-send.js';
-import {
-  CollectiveClientRequestError,
-  collectiveClientErrorMessage,
-  useHumanAuthSession,
-} from './use-human-auth-session.js';
+import { CollectiveClientRequestError, useHumanAuthSession } from './use-human-auth-session.js';
 
 const initialSnapshot: ClientSnapshot = {
   phase: 'loading',
@@ -28,6 +25,9 @@ const initialSnapshot: ClientSnapshot = {
 
 export function useCollectiveClient() {
   const [snapshot, setSnapshot] = useState<ClientSnapshot>(initialSnapshot);
+  const activeCollectiveId = snapshot.collective?.collectiveId;
+  const activeCollectiveName = snapshot.collective?.name;
+  const activeCollectiveRole = snapshot.collective?.role;
   const currentNamespace = useRef<string>();
   currentNamespace.current = collectiveClientNamespace(snapshot);
   const { token, request, loadMe, invitationMode, bootstrap, authenticate, configureProvider } = useHumanAuthSession(
@@ -82,21 +82,23 @@ export function useCollectiveClient() {
     setSnapshot((current) => ({ ...current, notice: inviteUrl }));
   }, [request, snapshot.collective]);
 
+  const readLeaveReadiness = useCallback(async () => {
+    if (!activeCollectiveId) throw new Error('当前没有可检查的共同体');
+    return readMembershipLeaveReadiness(request, activeCollectiveId);
+  }, [activeCollectiveId, request]);
+
   const leaveCollective = useCallback(async () => {
-    const collective = snapshot.collective;
-    if (!collective || collective.role !== 'member') return;
-    if (!window.confirm('退出后，你的 Café 会立即停止读取和发送；公开历史与署名会保留。确认退出？')) return;
-    try {
-      await request('/api/memberships/self-leave', {
-        method: 'POST',
-        body: JSON.stringify({ collectiveId: collective.collectiveId }),
-      });
-      await recheckScope();
-      setSnapshot((current) => ({ ...current, notice: '已退出共同家园；公开历史与署名仍会保留。' }));
-    } catch (error) {
-      setSnapshot((current) => ({ ...current, error: collectiveClientErrorMessage(error) }));
-    }
-  }, [recheckScope, request, snapshot.collective]);
+    if (!activeCollectiveId || activeCollectiveRole !== 'member') return;
+    await request('/api/memberships/self-leave', {
+      method: 'POST',
+      body: JSON.stringify({ collectiveId: activeCollectiveId }),
+    });
+    await recheckScope();
+    setSnapshot((current) => ({
+      ...current,
+      notice: `已离开${activeCollectiveName ?? '共同体'}；公开历史和署名仍会保留。`,
+    }));
+  }, [activeCollectiveId, activeCollectiveName, activeCollectiveRole, recheckScope, request]);
 
   const selectCollective = useCallback(
     (collectiveId: string) => {
@@ -215,6 +217,7 @@ export function useCollectiveClient() {
     createCollective,
     sendMessage,
     createInvite,
+    readLeaveReadiness,
     leaveCollective,
     pairHost,
     selectCollective,

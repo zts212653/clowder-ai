@@ -2,7 +2,7 @@ import '../helpers/setup-cat-registry.js';
 import assert from 'node:assert/strict';
 import { afterEach, beforeEach, describe, it } from 'node:test';
 import Fastify from 'fastify';
-import { anchorApproval, proposedReviewAction } from './helpers.js';
+import { anchorApproval, proposedTaskAction } from './helpers.js';
 
 describe('Wave 2 anchored dedup fanout replay', () => {
   let callbackProposeEntityRoutes;
@@ -193,6 +193,7 @@ describe('Wave 2 anchored dedup fanout replay', () => {
     const app = Fastify();
     apps.push(app);
     await app.register(callbacksRoutes, {
+      actionSuccessorAdmissionService: { async preflightStructuredTransferStanding() {} },
       registry,
       messageStore,
       threadStore,
@@ -213,7 +214,7 @@ describe('Wave 2 anchored dedup fanout replay', () => {
         content: '@sonnet\nPlease take this work',
         targetCats: ['sonnet'],
         effectClass: 'assign_work',
-        proposedAction: proposedReviewAction(),
+        proposedAction: proposedTaskAction(),
         clientMessageId: 'dispatch-replay',
       },
     });

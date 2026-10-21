@@ -1,3 +1,6 @@
+import { advanceEntrustedTaskAuthority } from '../ports/EntrustedWorkRevision.js';
+import { reconcilePluginWaitTaskMutation } from '../ports/TaskPluginWait.js';
+import type { ReplacePluginWaitInput } from '../ports/TaskStoreContract.js';
 /**
  * Redis Task Store (毛线球)
  * Redis-backed task storage with same interface as in-memory TaskStore.
@@ -30,15 +33,11 @@ import {
   type TypedWaitRegistrationSnapshot,
 } from '../../../../ball-custody/TypedWaitRegistration.js';
 import type { DevelopmentWorkTransition } from '../ports/DevelopmentWorkTransition.js';
+import type { AttachEntrustedWorkArtifactInput } from '../ports/EntrustedWorkArtifactEvidence.js';
 import { automationGeneration, mergeTaskAutomationState } from '../ports/TaskAutomationState.js';
-import {
-  buildTaskDeploymentWaitReplacement,
-  deploymentWaitGeneration,
-  deploymentWaitReplacementMatches,
-  reconcileDeploymentWaitTaskMutation,
-} from '../ports/TaskDeploymentWaitState.js';
+import { reconcileDeploymentWaitTaskMutation } from '../ports/TaskDeploymentWaitState.js';
 import { createEntrustedTaskItem, createGenericTaskItem } from '../ports/TaskItemFactory.js';
-import { assertSubjectUpdateOwnership, type ITaskStore } from '../ports/TaskStore.js';
+import type { ITaskStore } from '../ports/TaskStore.js';
 import {
   type AdmitEntrustedWorkStoreInput,
   type AdmitEntrustedWorkStoreResult,
@@ -53,9 +52,11 @@ import {
   isEntrustedWorkSubjectKey,
   type ReplaceAutomationStateIfGenerationInput,
   type ReplaceDeploymentWaitIfGenerationInput,
+  type TaskSubjectUpsertCondition,
   type UpdateEntrustedWorkStoreInput,
   type UpdateEntrustedWorkStoreResult,
 } from '../ports/TaskStoreContract.js';
+import { buildSubjectTaskUpdate } from '../ports/TaskSubjectUpsert.js';
 import { buildTaskWaitReplacement } from '../ports/TaskWaitReplacement.js';
 import { TaskKeys } from '../redis-keys/task-keys.js';
 import { DEPLOYMENT_WAIT_INDEX, listDeploymentWaitProjectionCandidates } from './deployment-wait-index.js';
@@ -68,9 +69,12 @@ import { RedisTaskManagedWorkBindingStore } from './RedisTaskManagedWorkBindingS
 import { RedisTaskManagedWorkRegistrationStore } from './RedisTaskManagedWorkRegistrationStore.js';
 import {
   type AtomicSubjectCreateResult,
+  createEntrustedTaskWithPolicy,
   tryCreateTaskWithAtomicSubject,
+  upsertTaskWithSubjectSnapshot,
   writeTaskForSubjectOwner,
 } from './RedisTaskSubjectTransactions.js';
+import { replaceDeploymentWaitInSession, replacePluginWait } from './RedisTaskWaitTransactions.js';
 import { runWithExclusiveRedisWatchSession } from './RedisWatchSession.js';
 
 const DEFAULT_TTL = 0; // persistent — set >0 via env to enable expiry
@@ -81,30 +85,11 @@ const MAX_CONDITIONAL_TASK_UPDATE_RETRIES = 5;
 const MAX_ANCHOR_LIFETIME_RECONCILIATION_RETRIES = 5;
 const MAX_UNIQUE_SUBJECT_CREATE_RETRIES = 8;
 
-async function replaceDeploymentWaitInSession(
-  session: RedisClient,
-  key: string,
-  input: ReplaceDeploymentWaitIfGenerationInput,
-): Promise<TaskItem | null | undefined> {
-  const data = await session.hgetall(key);
-  if (!data?.id) return null;
-  const existing = hydrateTask(data);
-  if (!deploymentWaitReplacementMatches(existing, input)) return null;
-
-  const updated = buildTaskDeploymentWaitReplacement(existing, input);
-  if (input.waitRegistration) assertTypedWaitRegistrationInstallation(updated, input.waitRegistration);
-  const pipeline = session.multi();
-  pipeline.hset(key, serializeTask(updated));
-  pipeline.sadd(DEPLOYMENT_WAIT_INDEX, updated.id);
-  if (input.waitRegistration) {
-    pipeline.hset(key, TYPED_WAIT_REGISTRATION_FIELD, JSON.stringify(input.waitRegistration));
-  } else if (deploymentWaitGeneration(existing.deploymentWait) !== deploymentWaitGeneration(updated.deploymentWait)) {
-    pipeline.hdel(key, TYPED_WAIT_REGISTRATION_FIELD);
-  }
-  return (await pipeline.exec()) ? updated : undefined;
-}
-
 export class RedisTaskStore implements ITaskStore {
+  async replacePluginWait(taskId: string, input: ReplacePluginWaitInput): Promise<TaskItem | null> {
+    return replacePluginWait(this.redis, taskId, input);
+  }
+
   async getWaitRegistration(taskId: string): Promise<TypedWaitRegistrationSnapshot | null> {
     return hydrateWaitRegistration(await this.redis.hgetall(TaskKeys.detail(taskId)));
   }
@@ -214,7 +199,7 @@ export class RedisTaskStore implements ITaskStore {
     return null;
   }
 
-  async upsertBySubject(input: CreateTaskInput): Promise<TaskItem> {
+  async upsertBySubject(input: CreateTaskInput, condition?: TaskSubjectUpsertCondition): Promise<TaskItem> {
     const subjectKey = input.subjectKey;
     if (subjectKey && isEntrustedWorkSubjectKey(subjectKey)) {
       const existingId = await this.redis.get(TaskKeys.subject(subjectKey));
@@ -224,7 +209,18 @@ export class RedisTaskStore implements ITaskStore {
       }
       assertGenericTaskSubjectNamespaceAllowed(subjectKey);
     }
-    if (!subjectKey) return this.create(input);
+    if (!subjectKey) {
+      if (condition) throw new Error('Conditional subject upsert requires a subject key');
+      return this.create(input);
+    }
+    if (condition) {
+      const updated = await upsertTaskWithSubjectSnapshot(this.redis, input, condition);
+      await this.applyTtl(updated);
+      if (condition.expected && condition.expected.threadId !== updated.threadId) {
+        await this.applyThreadTtl(condition.expected.threadId);
+      }
+      return updated;
+    }
 
     const existingId = await this.redis.get(TaskKeys.subject(subjectKey));
     if (!existingId) {
@@ -256,25 +252,7 @@ export class RedisTaskStore implements ITaskStore {
       return this.createWithUniqueSubject(input);
     }
 
-    assertSubjectUpdateOwnership(sk, existing, input);
-    assertEntrustedWorkGenericUpsertAllowed(existing);
-
-    const now = Date.now();
-    const updated: TaskItem = reconcileDeploymentWaitTaskMutation(existing, {
-      ...existing,
-      threadId: input.threadId,
-      title: input.title,
-      ownerCatId: input.ownerCatId ?? existing.ownerCatId,
-      status: isTrackingKind(existing.kind) && existing.status === 'done' ? 'todo' : existing.status,
-      why: input.why,
-      userId: input.userId ?? existing.userId,
-      probe: input.probe !== undefined ? input.probe : existing.probe,
-      resolveMode: input.resolveMode !== undefined ? input.resolveMode : existing.resolveMode,
-      automationState: input.automationState
-        ? mergeTaskAutomationState(existing.automationState, input.automationState)
-        : existing.automationState,
-      updatedAt: now,
-    });
+    const updated = buildSubjectTaskUpdate(sk, existing, input);
 
     const written = await writeTaskForSubjectOwner(this.redis, existing, updated);
     if (written === 'stale') {
@@ -317,11 +295,11 @@ export class RedisTaskStore implements ITaskStore {
           }
 
           const existing = hydrateTask(data);
-          const updated: TaskItem = {
+          const updated = advanceEntrustedTaskAuthority(existing, {
             ...existing,
             automationState: mergeTaskAutomationState(existing.automationState, patch),
             updatedAt: Date.now(),
-          };
+          });
 
           const pipeline = session.multi();
           pipeline.hset(key, serializeTask(updated));
@@ -346,6 +324,7 @@ export class RedisTaskStore implements ITaskStore {
 
   async admitEntrustedWork(input: AdmitEntrustedWorkStoreInput): Promise<AdmitEntrustedWorkStoreResult> {
     if (input.entrustedWork.developmentScope) throw new Error('Development scope requires its typed Task action');
+    if (input.createOptions) return createEntrustedTaskWithPolicy(this.redis, input);
     return this.admitEntrustedWorkInternal(input, 0, 0);
   }
 
@@ -392,6 +371,10 @@ export class RedisTaskStore implements ITaskStore {
     input: CloseEntrustedWorkStoreInput,
   ): Promise<CloseEntrustedWorkStoreResult> {
     return this.entrustedWorkMutations.close(taskId, input);
+  }
+
+  attachEntrustedWorkArtifactEvidence(taskId: string, input: AttachEntrustedWorkArtifactInput) {
+    return this.entrustedWorkMutations.attachArtifact(taskId, input);
   }
 
   async updateEntrustedWork(
@@ -541,21 +524,24 @@ export class RedisTaskStore implements ITaskStore {
 
   private applyTaskUpdate(existing: TaskItem, input: UpdateTaskInput): TaskItem {
     assertEntrustedWorkGenericUpdateAllowed(existing);
-    return reconcileDeploymentWaitTaskMutation(existing, {
-      ...existing,
-      ...(input.title !== undefined ? { title: input.title } : {}),
-      ...(input.ownerCatId !== undefined ? { ownerCatId: input.ownerCatId } : {}),
-      ...(input.status !== undefined ? { status: input.status } : {}),
-      ...(input.why !== undefined ? { why: input.why } : {}),
-      ...(input.automationState !== undefined ? { automationState: input.automationState } : {}),
-      ...(input.probe !== undefined ? { probe: input.probe } : {}),
-      ...(input.resolveMode !== undefined ? { resolveMode: input.resolveMode } : {}),
-      // Generic task move support: callers that change threadId own the UX contract.
-      ...(input.threadId !== undefined ? { threadId: input.threadId } : {}),
-      // F193-E1 P1-4: allow patching dispatchGate
-      ...(input.dispatchGate !== undefined ? { dispatchGate: input.dispatchGate } : {}),
-      updatedAt: Date.now(),
-    });
+    return reconcilePluginWaitTaskMutation(
+      existing,
+      reconcileDeploymentWaitTaskMutation(existing, {
+        ...existing,
+        ...(input.title !== undefined ? { title: input.title } : {}),
+        ...(input.ownerCatId !== undefined ? { ownerCatId: input.ownerCatId } : {}),
+        ...(input.status !== undefined ? { status: input.status } : {}),
+        ...(input.why !== undefined ? { why: input.why } : {}),
+        ...(input.automationState !== undefined ? { automationState: input.automationState } : {}),
+        ...(input.probe !== undefined ? { probe: input.probe } : {}),
+        ...(input.resolveMode !== undefined ? { resolveMode: input.resolveMode } : {}),
+        // Generic task move support: callers that change threadId own the UX contract.
+        ...(input.threadId !== undefined ? { threadId: input.threadId } : {}),
+        // F193-E1 P1-4: allow patching dispatchGate
+        ...(input.dispatchGate !== undefined ? { dispatchGate: input.dispatchGate } : {}),
+        updatedAt: Date.now(),
+      }),
+    );
   }
 
   async deleteByThread(threadId: string): Promise<number> {

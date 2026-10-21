@@ -177,7 +177,8 @@ describe('preview-process managed lifecycle', () => {
       encoding: 'utf8',
       timeout: 5_000,
     });
-    assert.equal(stop.status, 0, stop.stderr || stop.stdout);
+    assert.equal(stop.status, process.platform === 'win32' ? 1 : 0, stop.stderr || stop.stdout);
+    if (process.platform === 'win32') assert.match(stop.stderr, /cleanup incomplete or failed; state retained/);
 
     const stopped = spawnSync(
       process.execPath,
@@ -186,6 +187,7 @@ describe('preview-process managed lifecycle', () => {
     );
     assert.equal(stopped.status, 1);
     assert.equal(JSON.parse(stopped.stdout).status, 'stopped');
+    if (process.platform === 'win32') assert.equal(JSON.parse(stopped.stdout).registered, true);
   });
 
   it('expires the owned preview process group without relying on a later doctor or reboot', () => {
@@ -205,7 +207,7 @@ describe('preview-process managed lifecycle', () => {
     );
 
     assert.equal(result.error, undefined, result.error?.message);
-    assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.status, process.platform === 'win32' ? 1 : 0, result.stderr);
     assert.ok(Date.now() - startedAt < 5_000, 'lease expiry must terminate without an external cleanup pass');
     assert.match(result.stderr, /lease expired.*terminating managed preview/);
   });

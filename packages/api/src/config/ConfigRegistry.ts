@@ -6,7 +6,7 @@
  * 安全：Redis URL 不暴露，只显示连接状态。
  */
 
-import { catRegistry } from '@cat-cafe/shared';
+import { catRegistry, deploymentDefaults } from '@cat-cafe/shared';
 import { DEFAULT_CLI_TIMEOUT_MS, readCliTimeoutMsFromEnv } from '../utils/cli-timeout.js';
 import { configStore } from './ConfigStore.js';
 import { getAllCatCapacities } from './cat-budgets.js';
@@ -67,7 +67,7 @@ export function collectConfigSnapshot(projectRoot?: string): ConfigSnapshot {
   const maxFiles = 5;
 
   // Server
-  const port = parseInt(env.API_SERVER_PORT ?? '3004', 10);
+  const port = parseInt(env.API_SERVER_PORT ?? String(deploymentDefaults.apiPort), 10);
   const host = env.API_SERVER_HOST ?? '127.0.0.1';
   const redis: 'connected' | 'memory' = env.REDIS_URL ? 'connected' : 'memory';
 
@@ -102,6 +102,7 @@ export function collectConfigSnapshot(projectRoot?: string): ConfigSnapshot {
   return {
     coCreator: {
       name: coCreator.name,
+      ...(coCreator.nickname ? { nickname: coCreator.nickname } : {}),
       aliases: [...coCreator.aliases],
       mentionPatterns: [...coCreator.mentionPatterns],
       ...(coCreator.timeZone ? { timeZone: coCreator.timeZone } : {}),

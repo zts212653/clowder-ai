@@ -80,6 +80,7 @@ jobs:
 
       - name: Build macOS DMG (${{ matrix.arch }})
         env:
+          NODE_OPTIONS: --max-old-space-size=4096
           CATCAFE_VERSION: ${{ inputs.version }}
         run: |
           chmod +x desktop/scripts/build-mac.sh

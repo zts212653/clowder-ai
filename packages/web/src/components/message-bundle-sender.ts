@@ -18,7 +18,7 @@ export function messageBundleSenderLabel(
       return actor ? `${connector} · ${actor}` : connector;
     }
     case 'plugin':
-      return `Plugin · ${from.instanceId}`;
+      return '插件';
     case 'system':
       return from.service;
   }

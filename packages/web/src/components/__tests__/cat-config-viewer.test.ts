@@ -128,15 +128,16 @@ describe('CatOverviewTab', () => {
     expect(html).toContain('Owner');
     expect(html).toContain('#E29578');
     expect(html).toContain('/avatars/owner-custom.png');
-    expect(html.indexOf('Co-worker')).toBeLessThan(html.indexOf('布偶猫 · 宪宪'));
-    expect(html).toContain('全部');
+    expect(html.indexOf('Co-worker')).toBeLessThan(html.indexOf('data-testid="cat-card-opus"'));
     expect(html).toContain('CLI（OAuth）');
     expect(html).toContain('CLI（配置）');
     expect(html).toContain('已停用');
-    expect(html.indexOf('+ 添加成员')).toBeLessThan(html.indexOf('布偶猫 · 宪宪'));
-    expect(html).toContain('布偶猫 · 宪宪');
-    expect(html).toContain('缅因猫 · 砚砚');
-    expect(html).toContain('孟加拉猫 · 斑斑');
+    expect(html.indexOf('+ 添加成员')).toBeLessThan(html.indexOf('data-testid="cat-card-opus"'));
+    expect(html).toContain('布偶猫 Opus');
+    expect(html).toContain('缅因猫 Codex');
+    expect(html).toContain('昵称：砚砚');
+    expect(html).toContain('孟加拉猫 Antigravity');
+    expect(html).toContain('昵称：斑斑');
     expect(html).toContain('CLI（OAuth）账号');
     expect(html).toContain('CLI（配置） · sponsor1');
     expect(html).toContain('已启用');
@@ -179,7 +180,7 @@ describe('CatOverviewTab', () => {
 
     expect(guideTarget).toBeTruthy();
     expect(guideTarget?.getAttribute('role')).toBe('button');
-    expect(guideTarget?.textContent).toContain('布偶猫 · 宪宪');
+    expect(guideTarget?.textContent).toContain('布偶猫 Opus');
   });
 
   it('does not offer deletion for a protected built-in cloud identity', () => {

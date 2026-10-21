@@ -3,16 +3,14 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { test } from 'node:test';
 import { collectiveContentTextProposalReceiptSchema, collectiveEventSourceIdentity } from '@cat-cafe/shared';
 import Fastify from 'fastify';
 import { readArtifactJsonPages } from '../../collective-client/src/collective-artifact-client.js';
 import { InvocationRegistry } from '../src/domains/cats/services/agents/invocation/InvocationRegistry.js';
 import { MessageStore } from '../src/domains/cats/services/stores/ports/MessageStore.js';
-import { CollectiveCurrentContext } from '../src/domains/plugin/builtin-runtime/collective-current-context.js';
-import { collectiveSender } from '../src/domains/plugin/builtin-runtime/collective-ingress-routing.js';
-import { registerCollectiveParticipationCallbacks } from '../src/routes/callback-collective-participation-routes.js';
 import { collectiveArtifactOwnerFixture } from './collective-artifact-owner.fixture.js';
+import { loadCollectiveModule, test } from './helpers/f202-collective-installed-business.js';
+import { installCollectiveNativeFixture } from './helpers/f202-collective-native.fixture.js';
 
 for (const selectionMode of ['existing-annotation', 'same-send-selection', 'escaped-64k-patch'] as const) {
   test(`real callback uses ${selectionMode} while independently authenticated Human adoption remains separate`, async (t) => {
@@ -131,14 +129,33 @@ for (const selectionMode of ['existing-annotation', 'same-send-selection', 'esca
     const source = collectiveEventSourceIdentity(ask);
     if (!source) throw new Error('Expected an exact public request source');
     const messages = new MessageStore();
+    const instanceId = 'pi_collective';
+    const { collectiveSender } = await loadCollectiveModule('collective-ingress-routing.js');
+    const native = await loadCollectiveModule('public-native-methods.js');
+    await f.connector.sync(f.connection.connectionId);
+    const route = await f.connector.getHostRoute(f.connection.connectionId);
+    await f.connector.beginInboxRouting(f.connection.connectionId, ask.eventId, route.revision);
     const message = messages.append({
       userId: 'real-local-owner',
       threadId: 'private-channel',
-      from: { kind: 'external', connectorId: 'collective', sender: collectiveSender(ask) },
+      from: { kind: 'plugin', instanceId },
       content: ask.body,
       mentions: [],
       timestamp: Date.now(),
-      source: { connector: 'collective', label: 'Collective', meta: { participation: source } },
+      extra: {
+        pluginMessage: {
+          instanceId,
+          revision: 1,
+          elements: [],
+          appendOps: [],
+          presentation: {
+            connector: 'collective',
+            label: 'Collective',
+            sender: collectiveSender(ask),
+            meta: { participation: source },
+          },
+        },
+      },
     });
     const registry = new InvocationRegistry();
     const auth = await registry.create(
@@ -147,30 +164,32 @@ for (const selectionMode of ['existing-annotation', 'same-send-selection', 'esca
       'private-channel',
       undefined,
       undefined,
-      { mode: 'collective_participation' },
+      {
+        mode: 'plugin_native',
+        pluginInstanceId: instanceId,
+        contributionId: native.COLLECTIVE_NATIVE_ID,
+        actionMethods: native.COLLECTIVE_PUBLIC_METHODS,
+      },
       message.id,
       'unknown',
-      undefined,
-      { kind: 'collective-participation', originTriggerMessageId: message.id, source },
     );
     approvedInvocationId = auth.invocationId;
-    const context = new CollectiveCurrentContext({
-      connector: () => f.connector,
-      messageStore: messages,
-      threadStore: { get: () => ({ createdBy: 'real-local-owner' }) },
-    });
     const app = Fastify();
     t.after(() => app.close());
-    await registerCollectiveParticipationCallbacks(app, { registry, context });
-    const headers = { 'x-invocation-id': auth.invocationId, 'x-callback-token': auth.callbackToken };
+    const token = await installCollectiveNativeFixture({ app, f, registry, messages, instanceId, message, auth });
+    const headers = {
+      'x-invocation-id': auth.invocationId,
+      'x-callback-token': auth.callbackToken,
+      'x-clowder-plugin-action-token': token,
+    };
     const current = await app.inject({
       method: 'POST',
-      url: '/api/callbacks/collective-current-context',
+      url: '/api/plugin-runtime/action',
       headers,
-      payload: {},
+      payload: { method: 'collective.context.current', input: {} },
     });
     assert.equal(current.statusCode, 200, current.body);
-    const discovered = current.json();
+    const discovered = current.json().result;
     assert.equal(discovered.artifactRequests.requests[0].artifactId, f.artifact.artifactId);
     const readCommand = { kind: 'read', artifactId: f.artifact.artifactId };
     const call = async (
@@ -182,13 +201,13 @@ for (const selectionMode of ['existing-annotation', 'same-send-selection', 'esca
       const waiting = app
         .inject({
           method: 'POST',
-          url: '/api/callbacks/collective-artifact-command',
+          url: '/api/plugin-runtime/action',
           headers: credentials,
-          payload: { contextRef, command },
+          payload: { method: 'collective.artifact.command', input: { contextRef, command } },
         })
         .then((response) => {
           settled = true;
-          return response;
+          return { statusCode: response.statusCode, body: response.body, json: () => response.json().result };
         });
       for (let i = 0; i < 60 && !settled; i += 1) {
         await f.connector.sync(f.connection.connectionId);
@@ -196,13 +215,13 @@ for (const selectionMode of ['existing-annotation', 'same-send-selection', 'esca
       }
       return waiting;
     };
-    assert.equal((await call(readCommand, 'not-this-invocation')).statusCode, 403);
+    assert.equal((await call(readCommand, 'not-this-invocation')).statusCode, 502);
     assert.equal(
       (await call(readCommand, discovered.contextRef, { ...headers, 'x-callback-token': 'forged' })).statusCode,
       401,
     );
-    assert.equal((await call({ kind: 'apply', artifactId: f.artifact.artifactId })).statusCode, 400);
-    assert.equal((await call({ ...readCommand, artifactId: 'another-artifact' })).statusCode, 403);
+    assert.equal((await call({ kind: 'apply', artifactId: f.artifact.artifactId })).statusCode, 502);
+    assert.equal((await call({ ...readCommand, artifactId: 'another-artifact' })).statusCode, 502);
     const read = await call(readCommand);
     assert.equal(read.statusCode, 200, read.body);
     const ownerView = (await readArtifactJsonPages(async (page) => {
@@ -260,7 +279,7 @@ for (const selectionMode of ['existing-annotation', 'same-send-selection', 'esca
         }
         return result;
       };
-      assert.equal((await call(command)).statusCode, 409);
+      assert.equal((await call(command)).statusCode, 502);
       assert.equal(f.modifications.text.proposals(command.requestId).length, 1);
     }
     const proposed = await call(command);
@@ -324,7 +343,7 @@ for (const selectionMode of ['existing-annotation', 'same-send-selection', 'esca
       access: 'revoked',
       requestId: 'callback-revoke-requester',
     });
-    assert.equal((await call(readCommand)).statusCode, 403);
-    assert.equal((await call(command)).statusCode, 403);
+    assert.equal((await call(readCommand)).statusCode, 502);
+    assert.equal((await call(command)).statusCode, 502);
   });
 }

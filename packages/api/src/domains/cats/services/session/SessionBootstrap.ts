@@ -11,6 +11,7 @@
  */
 
 import type { CatId } from '@cat-cafe/shared';
+import { deploymentDefaults } from '@cat-cafe/shared';
 import { estimateTokens } from '../../../../utils/token-counter.js';
 import type { PushRecallPresentation } from '../../../memory/f200-types.js';
 import { formatRecallPointer } from '../agents/routing/context-transport.js';
@@ -260,7 +261,9 @@ export async function buildSessionBootstrap(
       const thread = await opts.threadStore.get(threadId);
       const query = thread?.title ?? '';
       if (query && query.length > 2) {
-        const apiUrl = process.env.CAT_CAFE_API_URL ?? `http://localhost:${process.env.API_SERVER_PORT ?? '3004'}`;
+        const apiUrl =
+          process.env.CAT_CAFE_API_URL ??
+          `http://localhost:${process.env.API_SERVER_PORT ?? String(deploymentDefaults.apiPort)}`;
         const params = new URLSearchParams({ q: query, limit: '5' });
         const controller = new AbortController();
         const timeout = setTimeout(() => controller.abort(), 500);

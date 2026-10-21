@@ -76,7 +76,7 @@ const REASON_TEXT: Record<CliErrorReasonCode, { summary: string; hint: string }>
   },
   auth_failed: {
     summary: 'API 认证失败',
-    hint: '检查 provider API key 或 CLI 登录态是否正确、未过期。AGY/Antigravity CLI 需要用同一个 HOME/profile 先运行 `agy` 完成登录。',
+    hint: '请在这个成员实际使用的 CLI HOME/profile 下完成登录，或检查该连接的 API key 是否有效。已安装工具不代表已登录。',
   },
   quota_exceeded: {
     summary: 'API 配额超限',

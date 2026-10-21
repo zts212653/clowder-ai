@@ -2,11 +2,10 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { test } from 'node:test';
 import { setTimeout } from 'node:timers/promises';
-import { CollectiveConnector, ConnectorTransportError } from '../../collective-connector/src/index.js';
 import { collectiveMediaHttpFixture } from './collective-media-http.fixture.js';
 import { mediaRangeFixture } from './collective-media-range.fixture.js';
+import { CollectiveConnector, ConnectorTransportError, test } from './helpers/f202-collective-installed-business.js';
 
 test('an independently paired reader Cafe receives the original exact PNG through the binary HTTP owner relay', async (t) => {
   const f = await collectiveMediaHttpFixture(t);

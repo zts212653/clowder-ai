@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { test } from 'node:test';
+import { desktopWindowContribution } from '../dist/domains/plugin/desktop-window-runtime/admission.js';
 import { validateHostPluginManifest } from '../dist/domains/plugin/desktop-window-runtime/presentation-manifest.js';
 import { resolveCompanionArchiveContract } from '../dist/domains/plugin/desktop-window-runtime/published-companion-v2.js';
 import { managerEntryFixture, publishedLetterContract } from './f317-manager-entry.fixture.js';
@@ -33,7 +34,7 @@ test('published letter releases require their exact archive digests while earlie
   }
 });
 
-test('current published bridge1.6 passes the letter structure without admitting unknown releases or bridge pairs', () => {
+test('current manifest ABI admits compatible bridge declarations while desktop execution retains its structural boundary', () => {
   const base = desktopWindowManifest(undefined, '1.3.0');
   const manifest = {
     ...base,
@@ -41,16 +42,26 @@ test('current published bridge1.6 passes the letter structure without admitting 
     version: latestVersion,
     contributions: base.contributions.map((row) => ({ ...row, bridgeVersion: '1.6.0' })),
   };
-  assert.equal(validateHostPluginManifest(manifest).valid, true);
-  for (const bad of [
+  // Schema compatibility is not release authenticity: the preceding test fences exact archive coordinates.
+  for (const compatible of [
+    manifest,
     { ...manifest, pluginId: 'foreign.companion' },
-    { ...manifest, version: '0.1.0-alpha.999' },
-    { ...manifest, contributions: manifest.contributions.map((row) => ({ ...row, bridgeVersion: '1.4.0' })) },
-    { ...manifest, contributions: manifest.contributions.map((row) => ({ ...row, bridgeVersion: '1.5.0' })) },
+    { ...manifest, version: '0.1.0-alpha.27' },
+  ]) {
+    assert.equal(validateHostPluginManifest(compatible).valid, true);
+  }
+  assert.equal(
+    validateHostPluginManifest({
+      ...manifest,
+      contributions: manifest.contributions.map((row) => ({ ...row, bridgeVersion: '99.0.0' })),
+    }).valid,
+    false,
+  );
+  for (const bad of [
     { ...manifest, contributions: [...manifest.contributions, { ...manifest.contributions[0], id: 'second' }] },
     { ...manifest, runtime: { transport: 'stdio', entrypoint: 'main.js' } },
   ])
-    assert.equal(validateHostPluginManifest(bad).valid, false);
+    assert.equal(desktopWindowContribution(bad), undefined);
 });
 
 test('production Manager installs the current published letter and rejects a stale digest before download', async (t) => {
@@ -76,30 +87,33 @@ test('production Manager installs the current published letter and rejects a sta
   await f.assertVersion(latestVersion);
 });
 
-test('production details upgrade the previous published letter in place without activation', async (t) => {
+test('strict catalog admission upgrades the previous published letter in place without activation', async (t) => {
   const f = await managerEntryFixture(t, fixtureOptions);
-  f.setOld(true);
+  await f.setOld(true);
   const old = f.releaseEntry();
-  const installed = await f.request('POST', '/api/plugins/official/companion/install', {
-    expectedCatalogVersion: old.version,
-    expectedPackageDigest: old.packageDigest,
+  const installed = await f.request('POST', '/api/plugin-manager/plugins/install', {
+    source: { kind: 'catalog', catalogId: old.catalogId },
+    expectedVersion: old.version,
+    expectedDigest: old.packageDigest,
   });
-  assert.equal(installed.statusCode, 200, installed.payload);
+  assert.equal(installed.statusCode, 201, installed.payload);
   const original = await f.assertVersion(previousVersion);
-  f.setOld(false);
+  await f.setOld(false);
   const detail = await f.request('GET', detailPath);
   assert.equal(detail.statusCode, 200, detail.payload);
   assert.equal(detail.json().plugin.installedVersion, previousVersion);
   assert.equal(detail.json().plugin.availableVersion, latestVersion);
-  const listed = await f.request('GET', '/api/plugins/official');
+  const listed = await f.request('GET', '/api/plugin-manager/plugins');
   const info = listed.json().plugins.find((row) => row.pluginId === 'official.companion');
-  assert.equal(info.updateAvailable, true);
-  const upgraded = await f.request('POST', `/api/plugins/official/${original.pluginInstanceId}/update`, {
-    expectedRevision: info.instance.lifecycleRevision,
-    expectedCatalogVersion: info.availableVersion,
-    expectedPackageDigest: info.packageDigest,
+  assert.equal(info.availableVersion !== info.installedVersion, true);
+  assert.equal(Object.hasOwn(info, 'installSources'), false);
+  const release = f.releaseEntry();
+  const upgraded = await f.request('POST', '/api/plugin-manager/plugins/install', {
+    source: { kind: 'catalog', catalogId: release.catalogId },
+    expectedVersion: release.version,
+    expectedDigest: release.packageDigest,
   });
-  assert.equal(upgraded.statusCode, 200, upgraded.payload);
+  assert.equal(upgraded.statusCode, 201, upgraded.payload);
   assert.equal((await f.assertVersion(latestVersion)).pluginInstanceId, original.pluginInstanceId);
 });
 

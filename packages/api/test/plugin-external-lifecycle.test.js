@@ -17,7 +17,7 @@ function manifest(pluginId = 'official.feishu-meeting-intake') {
     version: '0.1.0-alpha.1',
     contractVersion: '0.1.0',
     name: 'Feishu Meeting Intake',
-    features: [{ id: 'source', name: 'Source', resources: [], capabilities: ['events.publish'] }],
+    features: [{ id: 'source', name: 'Source', resources: [], capabilities: ['messaging.send'] }],
     runtime: { transport: 'stdio', entrypoint: 'dist/entrypoint.js' },
   };
 }
@@ -47,10 +47,11 @@ async function harness(overrides = {}) {
     computedPackageDigest: DIGEST,
     expectedPackageDigest: DIGEST,
     packagePluginId: pluginId,
-    effectiveGrants: ['events.publish'],
+    effectiveGrants: ['messaging.send'],
   });
   const calls = [];
   const supervisor = {
+    ...(overrides.configRefresh ? { configRefresh: overrides.configRefresh } : {}),
     start: overrides.start ?? (async (instanceId) => calls.push(`start:${instanceId}`)),
     stop:
       overrides.stop ??
@@ -584,5 +585,53 @@ test('maintenance shares the lifecycle queue so a concurrent owner action loses 
 
   await maintenance;
   await assert.rejects(disable, lifecycleError('STALE_REVISION'));
+  assert.equal((await store.snapshot()).instances[0].activationState, 'enabled');
+});
+
+test('configuration refresh preserves enabled intent and uses the existing runtime hook', async () => {
+  const events = [];
+  const { store, lifecycle, calls } = await harness({ configRefresh: async () => events.push('refresh') });
+  await lifecycle.prepare('pi_official', 1);
+  await lifecycle.enable('pi_official', 2);
+  await store.transaction((tx) => {
+    const current = tx.instances.get('pi_official');
+    tx.instances.put({ ...current, runtimeState: 'healthy' });
+  });
+  await lifecycle.runWithRuntimeSuspended({
+    instanceId: 'pi_official',
+    expectedRevision: 4,
+    stopReason: 'configuration_update',
+    resumeFailureCode: 'CONFIGURATION_RESUME_FAILED',
+    operation: async (current) => {
+      assert.equal(current.runtimeState, 'healthy');
+      events.push('save');
+    },
+  });
+  assert.deepEqual(events, ['save', 'refresh']);
+  assert.deepEqual(calls, ['start:pi_official']);
+  assert.equal((await store.snapshot()).instances[0].activationState, 'enabled');
+});
+
+test('configuration refresh without a hook saves in place without restarting the runtime', async () => {
+  const { store, lifecycle, calls } = await harness();
+  await lifecycle.prepare('pi_official', 1);
+  await lifecycle.enable('pi_official', 2);
+  await store.transaction((tx) => {
+    const current = tx.instances.get('pi_official');
+    tx.instances.put({ ...current, runtimeState: 'healthy' });
+  });
+  let saved = false;
+  await lifecycle.runWithRuntimeSuspended({
+    instanceId: 'pi_official',
+    expectedRevision: 4,
+    stopReason: 'configuration_update',
+    resumeFailureCode: 'CONFIGURATION_RESUME_FAILED',
+    operation: async (current) => {
+      assert.equal(current.runtimeState, 'healthy');
+      saved = true;
+    },
+  });
+  assert.equal(saved, true);
+  assert.deepEqual(calls, ['start:pi_official']);
   assert.equal((await store.snapshot()).instances[0].activationState, 'enabled');
 });

@@ -6,6 +6,7 @@ import { isAbsolute, join } from 'node:path';
 // Paths arrive as JSON on stdin, never as interpolated PowerShell source.
 const PRIVATE_DIRECTORY_SCRIPT = `
 $ErrorActionPreference = 'Stop'
+$ProgressPreference = 'SilentlyContinue'
 try {
   [Console]::InputEncoding = [System.Text.UTF8Encoding]::new($false)
   $request = [Console]::In.ReadToEnd() | ConvertFrom-Json
@@ -72,7 +73,7 @@ try {
             ($rule.PropagationFlags -band $inheritOnly) -eq 0 -and
             $trusted -notcontains $rule.IdentityReference.Value -and
             ([int]$rule.FileSystemRights -band 0xD0040) -ne 0) {
-          throw 'ACP bootstrap parent permits unsafe directory replacement'
+          throw "ACP bootstrap parent permits unsafe directory replacement: $($parent.FullName) allows $($rule.IdentityReference.Value) $($rule.FileSystemRights)"
         }
       }
       $parent = $parent.Parent

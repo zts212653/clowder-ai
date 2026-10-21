@@ -118,7 +118,8 @@ export class StaticFeatureAuthority {
 
   commit(executionLease: string): Promise<StaticFeatureLease> {
     return this.withLease(executionLease, 'provisioning', async (record, tx, inventory) => {
-      const manifest = inventory.packages.get(record.packageRevision)!.manifest;
+      const manifest = inventory.packages.get(record.packageRevision)?.manifest;
+      if (!manifest) throw denied('Plugin version is incompatible');
       const live = {
         ...record,
         state: 'active' as const,
@@ -279,6 +280,7 @@ export class StaticFeatureAuthority {
       instance.runtimeState !== 'healthy' ||
       instance.packageDigest !== binding.packageDigest ||
       pkg?.packageState !== 'installed' ||
+      pkg.manifest === null ||
       grants?.grantRevision !== binding.grantRevision ||
       !matchesStaticFeatureGrants(this.admission, grants.effectiveGrants)
     ) {

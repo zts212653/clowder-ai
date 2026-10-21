@@ -68,16 +68,8 @@ describe('TemplateRegistry', () => {
     assert.ok(spec.run.execute);
   });
 
-  test('repo-activity template creates valid TaskSpec', () => {
-    const t = templateRegistry.get('repo-activity');
-    const spec = t.createSpec('dyn-test-3', {
-      trigger: { type: 'interval', ms: 3600_000 },
-      params: { repo: 'owner/repo' },
-      deliveryThreadId: 'thread-ghi',
-    });
-    assert.equal(spec.id, 'dyn-test-3');
-    assert.ok(spec.admission.gate);
-    assert.ok(spec.run.execute);
+  test('retired GitHub repo-activity is not a Host template', () => {
+    assert.equal(templateRegistry.get('repo-activity'), null);
   });
 
   // Phase 4: reminder gate is now live — returns run:true when deliveryThreadId set
@@ -104,19 +96,6 @@ describe('TemplateRegistry', () => {
     });
     const result = await spec.admission.gate({ taskId: 'dyn-stub-wd', lastRunAt: null, tickCount: 0 });
     assert.equal(result.run, true, 'web-digest gate should be live with url + deliveryThreadId');
-    assert.equal(result.workItems.length, 1);
-  });
-
-  // Phase 4: repo-activity gate is now live
-  test('repo-activity gate returns run=true with repo + deliveryThreadId (Phase 4)', async () => {
-    const t = templateRegistry.get('repo-activity');
-    const spec = t.createSpec('dyn-stub-ra', {
-      trigger: { type: 'interval', ms: 3600000 },
-      params: { repo: 'owner/repo' },
-      deliveryThreadId: 'thread-xyz',
-    });
-    const result = await spec.admission.gate({ taskId: 'dyn-stub-ra', lastRunAt: null, tickCount: 0 });
-    assert.equal(result.run, true, 'repo-activity gate should be live with repo + deliveryThreadId');
     assert.equal(result.workItems.length, 1);
   });
 });

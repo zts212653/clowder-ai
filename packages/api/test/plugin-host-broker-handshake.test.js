@@ -49,7 +49,7 @@ describe('K-2B Host Broker handshake', () => {
       pluginInstanceId: INSTANCE_ID,
       brokerSessionId: 'bs-1',
       grantRevision: 1,
-      effectiveGrants: ['events.publish'],
+      effectiveGrants: ['messaging.send'],
       bindingNonce: 'nonce-1',
     });
     assert.equal(await connection.ready({ bindingNonce: binding.bindingNonce }), null);
@@ -64,7 +64,7 @@ describe('K-2B Host Broker handshake', () => {
 
   it('treats reordered effective grants as the same Host authority', async () => {
     const { connection, inventory, store } = await harness({
-      inventoryOptions: { effectiveGrants: ['events.publish', 'message.event.subscribe'] },
+      inventoryOptions: { effectiveGrants: ['messaging.send', 'message.event.subscribe'] },
     });
 
     const binding = await connection.hello(candidateHello());
@@ -72,7 +72,7 @@ describe('K-2B Host Broker handshake', () => {
       const grants = transaction.grants.get(INSTANCE_ID);
       transaction.grants.put({
         ...grants,
-        effectiveGrants: ['message.event.subscribe', 'events.publish'],
+        effectiveGrants: ['message.event.subscribe', 'messaging.send'],
       });
     });
 

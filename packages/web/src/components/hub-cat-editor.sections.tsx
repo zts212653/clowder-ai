@@ -3,10 +3,11 @@
 import type { BuiltinCloudIdentityProtectedField, BuiltinCloudIdentityProtection } from '@cat-cafe/shared';
 import { useMemo, useRef } from 'react';
 import type { CatData } from '@/hooks/useCatData';
+import { useCoCreatorDisplay } from '@/hooks/useCoCreatorConfig';
 import { AvatarImageWithFallback } from './AvatarImageWithFallback';
 import { MemberAccountFollowing } from './accounts/MemberAccountFollowing';
 import type { ProfileItem } from './hub-accounts.types';
-import { usesAgyNative } from './hub-cat-editor.agy';
+import { usesAgyAcp, usesAgyNative } from './hub-cat-editor.agy';
 import {
   autoSlug,
   CLIENT_OPTIONS,
@@ -88,6 +89,7 @@ export function IdentitySection({
   onAvatarUpload: (file: File) => Promise<void>;
   onRefAudioUpload: (file: File) => Promise<void>;
 }) {
+  const owner = useCoCreatorDisplay();
   const page = useMemberEditorPresentation();
   const t = useEditorText();
   const strengthTags = splitStrengthTags(form.strengths);
@@ -103,7 +105,16 @@ export function IdentitySection({
             ariaLabel="Name"
             value={form.name}
             onChange={(value) => {
-              onChange({ name: value, displayName: value, catId: autoSlug(value, form.catId) });
+              const catId = autoSlug(value, form.catId);
+              const useDefaultAlias =
+                form.configurationSource === 'native_tool' &&
+                (!form.mentionPatterns || form.mentionPatterns === '@' + form.catId);
+              onChange({
+                name: value,
+                displayName: value,
+                catId,
+                ...(useDefaultAlias ? { mentionPatterns: '@' + catId } : {}),
+              });
             }}
             required
             placeholder="成员显示名称，如 我的助手"
@@ -137,7 +148,7 @@ export function IdentitySection({
         ariaLabel="Nickname"
         value={form.nickname}
         onChange={(value) => onChange({ nickname: value })}
-        placeholder="可选，co-creator给的昵称"
+        placeholder={`可选，${owner.nickname}给的昵称`}
       />
       <TextField
         label="显示后缀"
@@ -517,7 +528,9 @@ export function AccountSection({
   const copy = useMembersCopy();
   const selectedProfile = availableProfiles.find((p) => p.id === form.accountRef);
   const native = usesAgyNative(form);
-  const callHint = native ? null : buildCallHint(form.clientId, selectedProfile, form.defaultModel, form.provider);
+  const officialAcp = usesAgyAcp(form);
+  const callHint =
+    native || officialAcp ? null : buildCallHint(form.clientId, selectedProfile, form.defaultModel, form.provider);
   const selectedModel = form.defaultModel.trim();
   const modelNotListed = selectedModel.length > 0 && modelOptions.length > 0 && !modelOptions.includes(selectedModel);
   const modelSuggestions = useMemo(
@@ -550,6 +563,7 @@ export function AccountSection({
               cliEffort: '',
               carrier: nextCarrier,
               agyNativeEnabled: nextClient === 'google',
+              agyAcpEnabled: false,
               ...(nextClient === 'google'
                 ? { agyProfileEnabled: true, agyProfileId: form.agyProfileId || form.catId }
                 : {}),
@@ -563,24 +577,43 @@ export function AccountSection({
           <SelectField
             label="接入方式"
             ariaLabel={page ? 'Transport' : '接入方式'}
-            value={form.clientId === 'google' ? (native ? 'agy-native' : 'retired') : form.carrier}
+            value={
+              form.clientId === 'google' ? (native ? 'agy-native' : officialAcp ? 'agy-acp' : 'retired') : form.carrier
+            }
             options={[
               ...(form.clientId === 'google'
-                ? !native
+                ? !native && !officialAcp
                   ? [{ value: 'retired', label: '旧入口已退役，请配置 Native' }]
                   : []
                 : carrierOptionsForClient(form.clientId)),
-              ...(form.clientId === 'google' ? [{ value: 'agy-native', label: 'AGY Native' }] : []),
+              ...(form.clientId === 'google'
+                ? [
+                    { value: 'agy-native', label: 'AGY Native' },
+                    { value: 'agy-acp', label: t('AGY 官方 ACP') },
+                  ]
+                : []),
             ]}
             onChange={(value) => {
               if (value === 'agy-native') {
-                onChange({ carrier: 'cli', agyNativeEnabled: true });
+                onChange({ carrier: 'cli', agyNativeEnabled: true, agyAcpEnabled: false });
+                return;
+              }
+              if (value === 'agy-acp') {
+                onChange({
+                  carrier: 'acp',
+                  agyAcpEnabled: true,
+                  agyNativeEnabled: false,
+                  acpCommand: 'agy_acp_server.par',
+                  acpStartupArgs: '',
+                  acpTransport: 'stdio',
+                });
                 return;
               }
               const carrier = value as HubCatEditorFormState['carrier'];
               onChange({
                 carrier,
                 agyNativeEnabled: false,
+                agyAcpEnabled: false,
                 ...(carrier === 'acp' && !form.acpCommand.trim()
                   ? { acpCommand: defaultAcpCommandForClient(form.clientId) }
                   : {}),
@@ -668,7 +701,7 @@ export function AccountSection({
                     : '模型标识符，如 claude-sonnet-4-5'
               }
             />
-            {native ? <AgyNativeFields form={form} onChange={onChange} /> : null}
+            {native || officialAcp ? <AgyNativeFields form={form} onChange={onChange} /> : null}
             {modelNotListed ? (
               <div className="rounded-[10px] bg-[var(--console-field-bg,var(--console-card-bg))] px-3 py-2">
                 <p className="text-xs leading-4 text-conn-amber-text">
@@ -735,18 +768,26 @@ export function AccountSection({
                   value={form.acpCommand}
                   onChange={(value) => onChange({ acpCommand: value })}
                   required
-                  placeholder={defaultAcpCommandForClient(form.clientId) || 'agent-cli'}
+                  placeholder={
+                    officialAcp ? 'agy_acp_server.par' : defaultAcpCommandForClient(form.clientId) || 'agent-cli'
+                  }
                 />
                 <TextField
                   label="ACP Startup Args"
                   value={form.acpStartupArgs}
                   onChange={(value) => onChange({ acpStartupArgs: value })}
-                  required
-                  placeholder={defaultAcpStartupArgsForClient(form.clientId) || '--acp'}
+                  required={!officialAcp}
+                  placeholder={officialAcp ? '' : defaultAcpStartupArgsForClient(form.clientId) || '--acp'}
                 />
                 <p className="-mt-1 text-micro leading-4 text-cafe-muted">
-                  空格分隔，如 <code className="text-cafe-secondary">acp --pure</code> 或{' '}
-                  <code className="text-cafe-secondary">--acp --mode agent</code>。带空格的值用引号包裹。
+                  {officialAcp ? (
+                    t('官方 ACP 可留空；Command 填已安装程序的路径。')
+                  ) : (
+                    <>
+                      空格分隔，如 <code className="text-cafe-secondary">acp --pure</code> 或{' '}
+                      <code className="text-cafe-secondary">--acp --mode agent</code>。带空格的值用引号包裹。
+                    </>
+                  )}
                 </p>
                 <TextField
                   label="ACP Max Processes"

@@ -2,8 +2,8 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { setTimeout } from 'node:timers/promises';
-import { CollectiveConnector } from '../../collective-connector/src/index.js';
 import { collectiveMediaHttpFixture } from './collective-media-http.fixture.js';
+import { CollectiveConnector } from './helpers/f202-collective-installed-business.js';
 
 export async function mediaRangeFixture(t: { after(fn: () => Promise<unknown>): void }, mime = 'image/png') {
   const cleanup: Array<() => Promise<unknown>> = [];

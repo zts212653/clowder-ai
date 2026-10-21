@@ -825,7 +825,7 @@ export interface DiscoveryPaths {
   claudeConfig: string; // e.g. <projectRoot>/.mcp.json
   codexConfig: string; // e.g. <projectRoot>/.codex/config.toml
   geminiConfig: string; // e.g. <projectRoot>/.gemini/settings.json
-  kimiConfig: string; // e.g. <projectRoot>/.kimi/mcp.json
+  kimiConfig: string; // e.g. <projectRoot>/.kimi-code/mcp.json
   antigravityConfig?: string; // e.g. ~/.gemini/antigravity/mcp_config.json
 }
 

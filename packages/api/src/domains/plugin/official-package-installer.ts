@@ -1,6 +1,5 @@
 import { lstat, readFile } from 'node:fs/promises';
 import { isAbsolute, relative, resolve, sep } from 'node:path';
-import type { SignalSchemaCatalog } from '@clowder-ai/plugin-contract';
 import { fetchOfficialPackageArchive, registeredBundledArchive } from './bundled-package-source.js';
 import { staticEditorContributions } from './content-editor-runtime/admission.js';
 import { desktopWindowContribution } from './desktop-window-runtime/admission.js';
@@ -8,8 +7,15 @@ import { FilesystemVerifiedPluginPackageLocator, type VerifiedPluginPackage } fr
 import type { PluginManifestValidator } from './external-runtime/package-staging.js';
 import { reportPackageArchiveFailure } from './external-runtime/package-staging-diagnostics.js';
 import { snapshotPluginSurfaceAssets } from './external-runtime/package-surface-assets.js';
+import { grantsWithinRequest } from './host-inventory/contract-policy.js';
 import type { HostInventoryControlPlane } from './host-inventory/control-plane.js';
-import { type PackageAdmissionCandidate, PluginInventoryError } from './host-inventory/types.js';
+import { requireExecutableManifest } from './host-inventory/stored-manifest.js';
+import {
+  type InventoryMutationResult,
+  type PackageAdmissionCandidate,
+  PluginInventoryError,
+  type PluginPackageRecord,
+} from './host-inventory/types.js';
 import { LEGACY_BUNDLED_MANIFESTS } from './legacy-bundled-manifests.js';
 import {
   compareOfficialPluginVersions,
@@ -32,7 +38,7 @@ import {
   publishPluginPackageArchive,
   verifyPluginPackageDigest,
 } from './official-package-archive.js';
-import { OfficialPluginInstallError } from './official-package-errors.js';
+import { OfficialPluginInstallError, throwDataDirectoryConflict } from './official-package-errors.js';
 
 export interface OfficialPluginPackageInstallerOptions {
   readonly inventory: HostInventoryControlPlane;
@@ -73,7 +79,7 @@ function pathInside(root: string, candidate: string): boolean {
 async function readDeclaredSignalSchemas(
   rootDir: string,
   manifest: { readonly signals?: { readonly provides?: readonly { readonly schemaRef: string }[] } },
-): Promise<SignalSchemaCatalog> {
+): Promise<PluginPackageRecord['signalSchemas']> {
   const catalog: Record<string, Readonly<Record<string, unknown>>> = {};
   for (const declaration of manifest.signals?.provides ?? []) {
     const schemaPath = resolve(rootDir, declaration.schemaRef);
@@ -113,22 +119,34 @@ export class OfficialPluginPackageInstaller {
     this.packagesRoot = resolve(options.packagesRoot);
   }
 
-  async install(catalogId: string, expectedRelease: OfficialPluginReleaseFence) {
+  async install(
+    catalogId: string,
+    expectedRelease: OfficialPluginReleaseFence,
+    admitVerified?: (candidate: PackageAdmissionCandidate) => Promise<InventoryMutationResult>,
+  ) {
     const entry = await this.catalogEntry(catalogId);
     assertExpectedRelease(entry, expectedRelease);
     const existing = await this.existingExactInstall(entry);
     if (existing) {
       const snapshot = await this.options.inventory.store.snapshot();
       const installed = snapshot.packages.find((pkg) => pkg.packageDigest === entry.packageDigest);
-      if (!installed || !desktopWindowContribution(installed.manifest) || !this.options.prepareDesktopComponent)
+      if (
+        !installed?.manifest ||
+        !desktopWindowContribution(installed.manifest) ||
+        !this.options.prepareDesktopComponent
+      )
         return existing;
       // Explicit reinstall also repairs an absent Host desktop component, using
       // the same verified archive and current catalog grant fence.
       return this.withVerifiedPackage(entry, async () => existing);
     }
 
+    // The Manager's replacement callback shares rollback with local admission, but
+    // official releases still obey inventory-backed continuity after Host restart.
+    if (admitVerified) await this.assertNewerReplacement(entry);
     try {
       return await this.withVerifiedPackage(entry, async (candidate) => {
+        if (admitVerified) return admitVerified(candidate);
         try {
           return await this.options.inventory.installPackage(candidate);
         } catch (error) {
@@ -136,6 +154,7 @@ export class OfficialPluginPackageInstaller {
             const raced = await this.existingExactInstall(entry);
             if (raced) return raced;
           }
+          throwDataDirectoryConflict(error);
           throw new OfficialPluginInstallError('INVENTORY_REJECTED', 'official package inventory admission failed', {
             cause: error,
           });
@@ -176,6 +195,7 @@ export class OfficialPluginPackageInstaller {
     const installedPackage = snapshot.packages.find((candidate) => candidate.packageDigest === instance.packageDigest);
     if (instance.packageDigest === entry.packageDigest) {
       assertInstalledPackageVersion(entry, installedPackage?.version);
+      if (installedPackage) requireExecutableManifest(installedPackage);
       return {
         pluginInstanceId,
         packageDigest: instance.packageDigest,
@@ -220,6 +240,7 @@ export class OfficialPluginPackageInstaller {
               cause: error,
             });
           }
+          throwDataDirectoryConflict(error);
           throw new OfficialPluginInstallError('INVENTORY_REJECTED', 'official package inventory update failed', {
             cause: error,
           });
@@ -316,7 +337,7 @@ export class OfficialPluginPackageInstaller {
       });
     }
     try {
-      if (entry.distribution === 'bundled' && located.manifest.runtime.transport !== 'builtin') {
+      if (entry.distribution === 'bundled' && located.manifest.runtime?.transport !== 'builtin') {
         throw new OfficialPluginInstallError(
           'UNSUPPORTED_TRANSPORT',
           'bundled archive must retain its builtin runtime',
@@ -337,7 +358,11 @@ export class OfficialPluginPackageInstaller {
           'package presentation metadata differs from the official catalog',
         );
       }
-      if (located.manifest.runtime.transport !== 'stdio' && located.manifest.runtime.transport !== 'builtin') {
+      if (
+        located.manifest.runtime !== undefined &&
+        located.manifest.runtime?.transport !== 'stdio' &&
+        located.manifest.runtime?.transport !== 'builtin'
+      ) {
         throw new OfficialPluginInstallError('UNSUPPORTED_TRANSPORT', 'official package has no supported Host runtime');
       }
       const staticEditors = staticEditorContributions(located.manifest);
@@ -384,13 +409,12 @@ export class OfficialPluginPackageInstaller {
         computedPackageDigest: entry.packageDigest,
         expectedPackageDigest: entry.packageDigest,
         packagePluginId: entry.pluginId,
-        effectiveGrants: entry.effectiveGrants,
+        effectiveGrants: grantsWithinRequest(entry.effectiveGrants, located.manifest),
         signalSchemas,
         provenance: {
           kind: 'catalog',
           catalogId: entry.catalogId,
           packageName: entry.packageName,
-          ownerAuthRequired: entry.ownerAuth !== undefined,
         },
       });
     } finally {
@@ -417,7 +441,7 @@ export class OfficialPluginPackageInstaller {
         'bundled manifest identity differs from catalog',
       );
     }
-    if (manifest.runtime.transport !== 'builtin') {
+    if (manifest.runtime?.transport !== 'builtin') {
       throw new OfficialPluginInstallError('UNSUPPORTED_TRANSPORT', 'bundled package is not a builtin runtime');
     }
     if (bundledManifestDigest(manifest) !== entry.packageDigest) {
@@ -428,9 +452,28 @@ export class OfficialPluginPackageInstaller {
       computedPackageDigest: entry.packageDigest,
       expectedPackageDigest: entry.packageDigest,
       packagePluginId: entry.pluginId,
-      effectiveGrants: entry.effectiveGrants,
+      effectiveGrants: grantsWithinRequest(entry.effectiveGrants, manifest),
       signalSchemas: {},
+      provenance: { kind: 'catalog', catalogId: entry.catalogId, packageName: entry.packageName },
     });
+  }
+
+  private async assertNewerReplacement(entry: OfficialPluginCatalogEntry): Promise<void> {
+    const snapshot = await this.options.inventory.store.snapshot();
+    const known = snapshot.packages.find((record) => record.packageDigest === entry.packageDigest);
+    if (known) assertInstalledPackageVersion(entry, known.version);
+    const instance = snapshot.instances.find(
+      (candidate) => candidate.pluginId === entry.pluginId && candidate.lifecycleState === 'installed',
+    );
+    if (!instance) return;
+    const installed = snapshot.packages.find((record) => record.packageDigest === instance.packageDigest);
+    const comparison = installed ? compareOfficialPluginVersions(entry.version, installed.version) : undefined;
+    if (comparison === undefined || comparison <= 0) {
+      throw new OfficialPluginInstallError(
+        'UPDATE_NOT_NEWER',
+        'official catalog release is not newer than the installed package',
+      );
+    }
   }
 
   private async existingExactInstall(entry: OfficialPluginCatalogEntry) {
@@ -441,6 +484,7 @@ export class OfficialPluginPackageInstaller {
     if (!instance || instance.packageDigest !== entry.packageDigest) return undefined;
     const installedPackage = snapshot.packages.find((candidate) => candidate.packageDigest === instance.packageDigest);
     assertInstalledPackageVersion(entry, installedPackage?.version);
+    if (installedPackage) requireExecutableManifest(installedPackage);
     const grants = snapshot.grants.find((candidate) => candidate.pluginInstanceId === instance.pluginInstanceId);
     if (!grants) return undefined;
     return {

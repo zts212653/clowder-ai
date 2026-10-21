@@ -4,16 +4,13 @@
   "private": true,
   "description": "Your AI team collaboration space",
   "scripts": {
+    "agy:acp:login": "pnpm --filter @cat-cafe/api exec tsx src/scripts/agy-acp-login.ts",
     "init": "./scripts/init-cafe.sh",
     "preinstall": "node scripts/check-node-runtime.mjs",
     "gate": "bash ./scripts/pre-merge-check.sh",
     "merge:clowder": "node scripts/clowder-merge-execution.mjs",
     "guards:install": "bash ./scripts/install-git-guards.sh",
     "start": "node ./scripts/start-entry.mjs start",
-    "collective:start": "pnpm --filter @cat-cafe/collective-service start",
-    "collective:dev": "pnpm --filter @cat-cafe/collective-service dev",
-    "test:f290-runtime-journey": "pnpm --filter @cat-cafe/collective-service build && pnpm --filter @cat-cafe/web build && node --test packages/web/test/browser/f290-collective-runtime-journey.test.mjs",
-    "test:f290-shared-artifacts": "node packages/web/scripts/ensure-browser-test-artifacts.cjs && bash packages/api/scripts/with-test-home.sh node packages/web/scripts/run-with-node-env-test.mjs node --import tsx --test --test-concurrency=1 packages/web/test/browser/f290-shared-artifacts.test.mjs packages/web/test/browser/f290-shared-artifact-management.test.mjs packages/web/test/browser/f290-retained-media.test.mjs",
     "stop": "./scripts/start-dev.sh --stop",
     "dev:stop": "./scripts/start-dev.sh --stop",
     "runtime:stop": "./scripts/runtime-worktree.sh stop",
@@ -64,7 +61,7 @@
     "build": "pnpm -r run build",
     "build:app-assist": "node desktop/scripts/build-app-assist.cjs",
     "lint": "pnpm -r run lint",
-    "check:sources": "pnpm check:brand-guard && pnpm check:no-provider-canary-residue && pnpm check:paw-feel-disposition-boundaries && pnpm check:f290-product-copy && pnpm check:f290-workbench-boundary && pnpm check:dir-size && pnpm check:daemon-lifecycle && pnpm check:capability-tips && pnpm check:co-creation-docs-lane && pnpm check:review-completion-routing && pnpm check:skills:references && pnpm check:skills:surfaces && pnpm check:env-registry && pnpm check:env-example && pnpm check:worktree-reaper && pnpm check:node-runtime-guard && pnpm check:prompt-time-apis && pnpm check:followup-tails && pnpm check:scripts-ascii-only && pnpm check:f212-reconciliation-eval && pnpm check:site-css",
+    "check:sources": "pnpm check:no-provider-canary-residue && pnpm check:paw-feel-disposition-boundaries && pnpm check:f290-product-copy && pnpm check:f290-workbench-boundary && pnpm check:dir-size && pnpm check:daemon-lifecycle && pnpm check:capability-tips && pnpm check:co-creation-docs-lane && pnpm check:review-completion-routing && pnpm check:skills:references && pnpm check:skills:surfaces && pnpm check:env-registry && pnpm check:env-example && pnpm check:worktree-reaper && pnpm check:node-runtime-guard && pnpm check:prompt-time-apis && pnpm check:followup-tails && pnpm check:scripts-ascii-only && pnpm check:f212-reconciliation-eval && pnpm check:site-css && pnpm check:brand-guard",
     "check:installed": "pnpm check:sidebar-projection-boundary && pnpm biome check . --diagnostic-level=error && pnpm check:biome-review-worktrees && pnpm check:sop-definitions && pnpm check:design-gate-real-interaction && pnpm check:design-md && pnpm check:skills:manifest && pnpm check:env-ports && pnpm check:start-profile-isolation && pnpm check:guides && pnpm check:no-codex-provider-exit-suppression && pnpm check:whisper-dispatch && pnpm check:tts-runtime && pnpm check:site-integrity",
     "check:artifacts": "pnpm check:paw-feel-disposition-capacity && pnpm check:mcp-surface-governance && pnpm check:features && pnpm check:eval-metric-glossary:prepared && pnpm check:capability-tips-enablement && pnpm check:pre-merge-gate",
     "check": "pnpm check:sources && pnpm check:installed && pnpm check:artifacts",
@@ -97,7 +94,7 @@
     "check:deps": "depcruise packages/api/src packages/shared/src --config .dependency-cruiser.cjs",
     "check:lockfile": "pnpm install --frozen-lockfile",
     "check:daemon-lifecycle": "node --test --test-concurrency=1 scripts/daemon-state.test.mjs scripts/daemon-state-timezone.test.mjs scripts/daemon-identity-argv.test.mjs scripts/daemon-lifecycle-contract.test.mjs scripts/daemon-stop-operation.test.mjs scripts/lib/self-host-guard.test.mjs",
-    "check:env-ports": "node --test scripts/check-env-port-drift.test.mjs scripts/check-sync-manifest-runtime-closure.test.mjs scripts/f317-page-action-export.test.mjs scripts/sync-to-opensource-commit.test.mjs",
+    "check:env-ports": "node --test scripts/check-env-port-drift.test.mjs scripts/check-sync-manifest-runtime-closure.test.mjs scripts/f317-page-action-export.test.mjs scripts/sync-to-opensource-commit.test.mjs scripts/deployment-defaults.test.mjs",
     "check:env-registry": "node --test scripts/check-env-registry.test.mjs",
     "check:env-example": "node --test scripts/check-env-example.test.mjs",
     "check:worktree-port-offset": "node --test scripts/derive-worktree-ports.test.mjs && node scripts/check-worktree-port-offset.mjs",
@@ -149,7 +146,7 @@
     "check:archive-dedup": "node scripts/check-archive-dedup.mjs",
     "fseventsd:observe": "python3 -I -S -B scripts/macos/fseventsd_recovery.py --observe",
     "check:fseventsd-recovery": "python3 -I -S -B scripts/macos/test_fseventsd_recovery.py && python3 -I -S -B scripts/macos/test_fseventsd_recovery_native.py && node --test scripts/lib/gate-resource-receipts-noop.test.mjs",
-    "check:brand-guard:home": "node --test scripts/intake-from-opensource.test.mjs scripts/lib/intake-gh-retry.test.mjs"
+    "check:brand-guard:home": "node --test scripts/intake-from-opensource.test.mjs scripts/lib/intake-gh-retry.test.mjs scripts/public-brand-validation.test.mjs"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.4.1",
@@ -171,5 +168,10 @@
     "autoFixAllowlist": [
       "biome"
     ]
+  },
+  "pnpm": {
+    "overrides": {
+      "@clowder-ai/plugin-sdk@0.2.0-beta.21>@clowder-ai/plugin-contract": "file:packages/api/vendor/clowder-ai-plugin-contract-0.1.0-beta.37-c1-785543498768.tgz"
+    }
   }
 }

@@ -50,15 +50,14 @@ export function anchorApproval(
   return committed && typeof committed.then === 'function' ? committed.then(() => envelope) : envelope;
 }
 
-export function proposedReviewAction(overrides = {}) {
+export function proposedTaskAction(overrides = {}) {
   return {
-    subjectRef: 'pr:owner/repo#42',
-    actionFamily: 'review',
-    successorSlot: 'reviewer',
+    subjectRef: 'subject:task:work-42',
+    actionFamily: 'implement',
+    successorSlot: 'implementer',
     mode: 'single',
     terminalPredicate: {
-      kind: 'review_delivered',
-      headSha: 'a'.repeat(40),
+      kind: 'task_done',
     },
     ...overrides,
   };

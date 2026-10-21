@@ -49,7 +49,7 @@ describe('cat_cafe_read_profile MCP tool', () => {
   test('schema exposes transport identity selector and optional layer, never target identity', async () => {
     const { readProfileInputSchema } = await import('../dist/tools/callback-tools.js');
     const keys = Object.keys(readProfileInputSchema).sort();
-    assert.deepEqual(keys, ['agentKeyCatId', 'layer']);
+    assert.deepEqual(keys, ['agentKeyCatId', 'expectedRevision', 'layer']);
   });
 
   test('registration description carries routing boundaries and URI trigger', async () => {
@@ -72,6 +72,19 @@ describe('cat_cafe_read_profile MCP tool', () => {
     assert.equal(readProfileInputSchema.layer.safeParse('primer').success, true);
     assert.equal(readProfileInputSchema.layer.safeParse('corpus').success, true);
     assert.equal(readProfileInputSchema.layer.safeParse('capsule').success, false, 'capsule rejected');
+  });
+
+  test('F321 forwards the expected revision without exposing a target identity', async () => {
+    const { handleReadProfile, readProfileInputSchema } = await import('../dist/tools/callback-tools.js');
+    let capturedUrl;
+    globalThis.fetch = async (url) => {
+      capturedUrl = url;
+      return { ok: true, json: async () => ({ content: 'CURRENT' }) };
+    };
+    const expectedRevision = `sha256:${'a'.repeat(64)}`;
+    await handleReadProfile({ expectedRevision });
+    assert.equal(new URL(capturedUrl).searchParams.get('expectedRevision'), expectedRevision);
+    assert.equal(readProfileInputSchema.expectedRevision.safeParse('unsafe').success, false);
   });
 
   test('passes layer as query parameter when supplied', async () => {

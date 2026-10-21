@@ -168,6 +168,14 @@
     "roleTemplateId": "turkish-van"
   },
   {
+    "id": "dsh",
+    "breed": "dsh",
+    "group": "其他",
+    "label": "鲸鲸",
+    "src": "/avatars/family/dsh.png",
+    "roleTemplateId": "dsh"
+  },
+  {
     "id": "glm52",
     "breed": "dragon-li",
     "group": "其他",

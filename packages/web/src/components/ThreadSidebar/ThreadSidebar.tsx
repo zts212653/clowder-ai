@@ -1605,6 +1605,7 @@ export function ThreadSidebar({ onClose, className, routeThreadId, activeDestina
       revealAttentionPreview,
       attentionArrangeMode,
       attentionMemberSort,
+      isV2,
       attentionPendingSort,
       attentionLoadState,
       changeAttentionMemberSort,

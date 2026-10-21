@@ -22,9 +22,9 @@ async function fixture() {
     exposed = true,
     available = true;
   const source = messages.append({
+    from: { kind: 'user', userId: 'owner' },
     userId: 'owner',
     threadId: thread.id,
-    from: { kind: 'user', userId: 'owner' },
     content: '开始听 Chrome',
     mentions: [],
     timestamp: Date.now(),
@@ -82,9 +82,9 @@ test('reads Host owner text; source exposure and owner/current call are mandator
 test('later direct owner input supersedes old consent; user speaking cannot admit a request', async () => {
   const f = await fixture();
   f.messages.append({
+    from: { kind: 'user', userId: 'owner' },
     userId: 'owner',
     threadId: f.principal.threadId,
-    from: { kind: 'user', userId: 'owner' },
     content: '别录音',
     mentions: [],
     timestamp: Date.now(),

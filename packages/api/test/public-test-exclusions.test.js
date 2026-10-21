@@ -250,14 +250,13 @@ test('resolver excludes private evidence consumers but keeps self-contained publ
   for (const file of [
     'test/f254-freshness-replay-provider.test.js',
     'test/f254-provider-native-freshness.test.js',
-    'test/cicd-router.test.js',
+    'test/capabilities-route.test.js',
     'test/embed-runtime-policy.test.js',
     'test/f254-freshness-instruction-surface.test.js',
     'test/harness-eval/design-gate-episode-source-provider.test.js',
     'test/harness-eval/eval-capability-tips-enable-gate.test.js',
     'test/harness-eval/measurement-bundle-census.test.js',
     'test/system-prompt-builder.test.js',
-    'test/weixin-mp-path-security.test.js',
   ]) {
     assert.ok(resolved.selectedFiles.includes(file), `${file} should remain a public behavior contract`);
   }
@@ -271,9 +270,9 @@ test('focused public selection accepts only explicit files from the live selecte
   assert.deepEqual(
     selectFocusedPublicTestFiles(
       resolved,
-      'test/cicd-router.test.js,test/harness-eval/eval-capability-tips-enable-gate.test.js',
+      'test/capabilities-route.test.js,test/harness-eval/eval-capability-tips-enable-gate.test.js',
     ),
-    ['test/cicd-router.test.js', 'test/harness-eval/eval-capability-tips-enable-gate.test.js'],
+    ['test/capabilities-route.test.js', 'test/harness-eval/eval-capability-tips-enable-gate.test.js'],
   );
   assert.throws(
     () => selectFocusedPublicTestFiles(resolved, 'test/harness-eval/publish-verdict-memory.test.js'),
@@ -281,14 +280,14 @@ test('focused public selection accepts only explicit files from the live selecte
   );
   assert.throws(() => selectFocusedPublicTestFiles(resolved, 'test/not-real.test.js'), /does not exist/);
   assert.throws(
-    () => selectFocusedPublicTestFiles(resolved, 'test/cicd-router.test.js,test/cicd-router.test.js'),
+    () => selectFocusedPublicTestFiles(resolved, 'test/capabilities-route.test.js,test/capabilities-route.test.js'),
     /duplicate/,
   );
 
   const fullManifest = buildPublicTestManifest(resolved);
   const focusedManifest = buildPublicTestManifest(
     resolved,
-    selectFocusedPublicTestFiles(resolved, 'test/cicd-router.test.js,test/system-prompt-builder.test.js'),
+    selectFocusedPublicTestFiles(resolved, 'test/capabilities-route.test.js,test/system-prompt-builder.test.js'),
   );
   assert.match(fullManifest.selectionHash, /^[a-f0-9]{64}$/);
   assert.match(fullManifest.exclusionRegistryHash, /^[a-f0-9]{64}$/);

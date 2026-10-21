@@ -15,6 +15,7 @@ interface SettingsRowProps {
   meta?: ReactNode;
   badges?: ReactNode;
   actions?: ReactNode;
+  stackActionsOnMobile?: boolean;
   dragHandle?: ReactNode;
   children?: ReactNode;
   className?: string;
@@ -55,6 +56,7 @@ export function SettingsRow({
   meta,
   badges,
   actions,
+  stackActionsOnMobile = false,
   dragHandle,
   children,
   className,
@@ -88,7 +90,7 @@ export function SettingsRow({
       tabIndex={onClick ? 0 : undefined}
       {...rest}
     >
-      <div className="flex items-center gap-3">
+      <div className={`flex items-center gap-3 ${stackActionsOnMobile ? 'flex-wrap sm:flex-nowrap' : ''}`}>
         {dragHandle && <div className="shrink-0 cursor-grab text-cafe-muted">{dragHandle}</div>}
         {icon && <div className="shrink-0">{icon}</div>}
         <div className="min-w-0 flex-1">
@@ -98,7 +100,13 @@ export function SettingsRow({
           </div>
           <SettingsRowMeta meta={meta} />
         </div>
-        {actions && <div className="flex shrink-0 items-center gap-2">{actions}</div>}
+        {actions && (
+          <div
+            className={`flex shrink-0 items-center gap-2 ${stackActionsOnMobile ? 'w-full justify-end sm:w-auto' : ''}`}
+          >
+            {actions}
+          </div>
+        )}
         {isExpandable && (
           <button
             type="button"

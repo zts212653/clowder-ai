@@ -1,9 +1,10 @@
 import { WIRE_VERSION } from '@clowder-ai/plugin-contract';
-import type { BuiltinPluginRuntime } from '../builtin-runtime/hybrid-supervisor.js';
+import type { BundledPluginRuntime } from '../builtin-runtime/carriers/bundled-runtime-carrier.js';
 import { startStaticSurfaceServer } from '../external-runtime/static-surface-server.js';
 import type { VerifiedPluginPackage } from '../external-runtime/types.js';
 import type { BuiltinBrokerConnection } from '../host-broker/builtin-loopback.js';
 import { StaticFeatureAuthority } from '../host-broker/static-feature-authority.js';
+import type { ExecutablePluginPackageRecord } from '../host-inventory/types.js';
 import { desktopWindowContribution } from './admission.js';
 import { unexpectedDesktopLossId } from './desktop-loss.js';
 import { DesktopWindowObserver } from './observer.js';
@@ -16,7 +17,7 @@ import type {
 } from './types.js';
 
 /** One owner desktop body; observations are ephemeral, while installation, grants and leases remain in their stores. */
-export class DesktopWindowPluginRuntime implements BuiltinPluginRuntime {
+export class DesktopWindowPluginRuntime implements BundledPluginRuntime {
   readonly features: StaticFeatureAuthority;
   private active: ActiveWindow | undefined;
   private starting: { id: string; controller: AbortController; promise: Promise<void> } | undefined;
@@ -42,6 +43,10 @@ export class DesktopWindowPluginRuntime implements BuiltinPluginRuntime {
         if (this.active !== run || run.closing) throw new Error('desktop ended during package verification');
       },
     });
+  }
+
+  claims(packageRecord: Pick<ExecutablePluginPackageRecord, 'manifest'>): boolean {
+    return desktopWindowContribution(packageRecord.manifest) !== undefined;
   }
 
   start(id: string): Promise<void> {
@@ -127,7 +132,7 @@ export class DesktopWindowPluginRuntime implements BuiltinPluginRuntime {
       const snapshot = await this.options.inventory.snapshot();
       const instance = snapshot.instances.find((r) => r.pluginInstanceId === id && r.lifecycleState === 'installed');
       const installed = instance && snapshot.packages.find((r) => r.packageDigest === instance.packageDigest);
-      const contribution = installed && desktopWindowContribution(installed.manifest);
+      const contribution = installed?.manifest && desktopWindowContribution(installed.manifest);
       if (!instance || !installed || !contribution) throw new Error('unsupported desktop companion');
       pkg = await this.options.packages.resolveInstalledPackage(instance.packageDigest);
       if (JSON.stringify(pkg.manifest) !== JSON.stringify(installed.manifest))

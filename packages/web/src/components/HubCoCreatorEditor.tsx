@@ -110,6 +110,7 @@ export function HubCoCreatorEditor({ open, coCreator, onClose, onSaved }: HubCoC
       }
       primeCoCreatorConfigCache({
         name: cleanedName,
+        ...(current.nickname !== undefined ? { nickname: current.nickname } : {}),
         aliases: uniqueTags(aliases.map((alias) => alias.trim())),
         mentionPatterns: cleanedMentions,
         avatar: avatar.trim() || '',
@@ -248,7 +249,7 @@ export function HubCoCreatorEditor({ open, coCreator, onClose, onSaved }: HubCoC
                   tags={mentionPatterns}
                   onChange={(next) => setMentionPatterns(next.map(normalizeMentionTag).filter(Boolean))}
                   addLabel="+ 添加"
-                  placeholder="@co-creator"
+                  placeholder={current.mentionPatterns[0] ?? '@co-creator'}
                   emptyLabel="(至少保留 1 个，否则无法 @)"
                   tone="green"
                   normalize={normalizeMentionTag}

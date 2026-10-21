@@ -10,11 +10,7 @@ import { OutputVerifiedDetector } from '../domains/memory/output-verified-detect
 import { RecallMetricsComputer } from '../domains/memory/RecallMetricsComputer.js';
 import { RecallMetricsReader } from '../domains/memory/RecallMetricsReader.js';
 import { SqliteSignalSources } from '../domains/memory/SqliteSignalSources.js';
-import {
-  type SignalMessageStore,
-  type SignalTaskStore,
-  ThreadAwareSignalSources,
-} from '../domains/memory/ThreadAwareSignalSources.js';
+import { type SignalMessageStore, ThreadAwareSignalSources } from '../domains/memory/ThreadAwareSignalSources.js';
 import { TrajectoryQueryService } from '../domains/memory/TrajectoryQueryService.js';
 import { resolveHeaderUserId } from '../utils/request-identity.js';
 import { type RecallSourceReaders, readRecallSourceViews } from './recall-candidate-view.js';
@@ -30,7 +26,6 @@ export interface RecallMetricsRoutesOptions {
   evidenceDb: Database.Database;
   /** Optional: pass messageStore + taskStore to enable AC-D2.1/D2.2/D2.3 auto-detection. */
   messageStore?: SignalMessageStore & RecallReplyMessageStore;
-  taskStore?: SignalTaskStore;
   personMemoryStore?: RecallSourceReaders['personMemoryStore'];
   cueSourceReader?: RecallSourceReaders['cueSourceReader'];
   /** Optional: pass threadStore to enable thread ownership validation on /api/recall/events. */
@@ -141,10 +136,9 @@ export const recallMetricsRoutes: FastifyPluginAsync<RecallMetricsRoutesOptions>
     const unverified = trajectoryService.listRecent({ verified: false, days, limit: 100, oldestFirst: true });
     // AC-D2: Use ThreadAwareSignalSources when messageStore + taskStore are available;
     // fall back to SqliteSignalSources (v1 behavior) otherwise.
-    const sources =
-      opts.messageStore && opts.taskStore
-        ? new ThreadAwareSignalSources(opts.evidenceDb, opts.messageStore, opts.taskStore)
-        : new SqliteSignalSources(opts.evidenceDb);
+    const sources = opts.messageStore
+      ? new ThreadAwareSignalSources(opts.evidenceDb, opts.messageStore)
+      : new SqliteSignalSources(opts.evidenceDb);
     const detector = new OutputVerifiedDetector(sources);
 
     let verifiedCount = 0;

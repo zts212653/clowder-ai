@@ -10,11 +10,10 @@ import {
   DISPATCH_PROPOSED_ACTION_CAPABILITIES,
 } from '@cat-cafe/shared';
 
-export type ActionTerminalCompletionResolverId = 'review_delivery' | 'task_done_status';
-export type ActionTerminalFreshnessResolverId = 'community_current_head' | 'task_active_owner';
-export type ActionTerminalCompletionProducerId = 'external_review_verdict' | 'task_status_transition';
+export type ActionTerminalCompletionResolverId = 'task_done_status';
+export type ActionTerminalFreshnessResolverId = 'task_active_owner';
+export type ActionTerminalCompletionProducerId = 'task_status_transition';
 export type ActionTerminalRuntimePortId =
-  | 'community_projection'
   | 'message_store'
   | 'task_store'
   | 'action_successor_preflight'
@@ -96,54 +95,6 @@ function canonicalizeSubjectRef(value: string): string {
   );
 }
 
-function requirePrSubject(kind: ActionTerminalPredicateKind, subjectRef: string): void {
-  if (!subjectRef.startsWith('pr:')) {
-    throw new ActionTerminalPredicateError('predicate_subject_unsupported', `${kind} requires a PR subject`);
-  }
-}
-
-function requireCanonicalGitObjectId(value: string, field: string): string {
-  if (!/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(value)) {
-    throw new ActionTerminalPredicateError(
-      'invalid_predicate_parameter',
-      `${field} must be a canonical 40- or 64-character lowercase Git OID`,
-    );
-  }
-  return value;
-}
-
-function parseReviewDeliveredPredicate(input: unknown): ActionTerminalPredicateInput {
-  const parsed = actionTerminalPredicateInputSchema.safeParse(input);
-  if (!parsed.success || parsed.data.kind !== 'review_delivered') {
-    throw new ActionTerminalPredicateError(
-      'invalid_predicate_parameter',
-      'review_delivered predicate does not match its registered schema',
-    );
-  }
-  return parsed.data;
-}
-
-function canonicalizeReviewDelivered(
-  subjectRef: string,
-  predicate: ActionTerminalPredicateInput,
-): Omit<CanonicalActionTerminalPredicate, 'digest'> {
-  if (predicate.kind !== 'review_delivered') {
-    throw new ActionTerminalPredicateError(
-      'invalid_predicate_parameter',
-      'review_delivered canonicalizer received another predicate kind',
-    );
-  }
-  requirePrSubject(predicate.kind, subjectRef);
-  const headSha = requireCanonicalGitObjectId(predicate.headSha, 'headSha');
-  return {
-    kind: predicate.kind,
-    subjectRef,
-    identityKey: `${predicate.kind}\u001f${subjectRef}`,
-    freshnessKey: `head:${headSha}`,
-    headSha,
-  };
-}
-
 function parseTaskDonePredicate(input: unknown): ActionTerminalPredicateInput {
   const parsed = actionTerminalPredicateInputSchema.safeParse(input);
   if (!parsed.success || parsed.data.kind !== 'task_done') {
@@ -186,18 +137,8 @@ function canonicalizeTaskDone(
  */
 export const ACTION_TERMINAL_CAPABILITY_REGISTRY: readonly ActionTerminalCapability[] = Object.freeze([
   {
-    actionFamily: 'review',
-    kind: 'review_delivered',
-    schema: parseReviewDeliveredPredicate,
-    canonicalizer: canonicalizeReviewDelivered,
-    completionResolver: 'review_delivery',
-    freshnessResolver: 'community_current_head',
-    producers: ['external_review_verdict'],
-    requiredPorts: ['community_projection', 'action_successor_preflight', 'action_successor_completion'],
-  },
-  {
-    actionFamily: DISPATCH_PROPOSED_ACTION_CAPABILITIES[1].actionFamily,
-    kind: DISPATCH_PROPOSED_ACTION_CAPABILITIES[1].terminalPredicateKind,
+    actionFamily: DISPATCH_PROPOSED_ACTION_CAPABILITIES[0].actionFamily,
+    kind: DISPATCH_PROPOSED_ACTION_CAPABILITIES[0].terminalPredicateKind,
     schema: parseTaskDonePredicate,
     canonicalizer: canonicalizeTaskDone,
     completionResolver: 'task_done_status',

@@ -13,20 +13,21 @@ import type {
   PluginManagerPackageSource,
 } from '@cat-cafe/shared';
 import type { Capability, PluginManifest } from '@clowder-ai/plugin-contract';
-import type {
-  PluginInstanceRecord,
-  PluginInventorySnapshot,
-  PluginPackageRecord,
-  PluginRuntimeErrorRecord,
-} from '../host-inventory/types.js';
+import { pluginRuntimeDiagnostic } from '../diagnostics/plugin-runtime-diagnostic.js';
+import type { PluginInstanceRecord, PluginInventorySnapshot, PluginPackageRecord } from '../host-inventory/types.js';
+import { sourceSemver } from './local-directory-semver.js';
 
 /** Catalog-owned metadata required to render an available plugin before installation. */
 export interface PluginManagerCatalogCandidate {
   readonly catalogId: string;
+  readonly sourceLabel?: string;
+  /** A catalog candidate with a current validated manifest, never an inventory fallback. */
+  readonly compatibleReplacement?: boolean;
   readonly pluginId: string;
   readonly packageName: string;
   readonly version: string;
-  readonly packageDigest: string;
+  readonly packageDigest: string | null;
+  readonly directorySource?: Extract<PluginManagerPackageSource, { kind: 'git' }>;
   readonly displayName: string;
   readonly description?: PluginDescription;
   readonly icon?: PluginIconSpec;
@@ -57,7 +58,6 @@ export interface DerivePluginManagerActionsInput {
 }
 
 function capabilityKind(capability: Capability): PluginManagerCapability['kind'] {
-  if (capability.startsWith('events.')) return 'events';
   if (capability.startsWith('messaging.') || capability === 'onMessage') return 'messaging';
   if (capability.startsWith('schedule.')) return 'schedule';
   if (capability.startsWith('windows.') || capability.startsWith('whisper.')) return 'identity';
@@ -189,16 +189,6 @@ function intentState(
   return 'disabled';
 }
 
-function diagnostic(error: PluginRuntimeErrorRecord | undefined, revision: number) {
-  if (!error) return undefined;
-  return {
-    code: error.code,
-    message: `Plugin runtime reported ${error.code}.`,
-    occurredAt: error.occurredAt,
-    revision,
-  };
-}
-
 function candidatePackage(
   candidate: PluginManagerCatalogCandidate,
   snapshot: PluginInventorySnapshot,
@@ -219,9 +209,24 @@ function candidateSource(
     return {
       kind: provenance.kind,
       packageName: provenance.packageName ?? null,
-      trust: 'local-trusted',
+      trust: 'unverified',
+      ...(provenance.dependencyClosure === undefined ? {} : { dependencyClosure: provenance.dependencyClosure }),
     };
   }
+  if (provenance?.kind === 'git') {
+    return {
+      kind: 'git',
+      url: provenance.url,
+      packageName: provenance.packageName ?? null,
+      trust: 'unverified',
+      ...(provenance.dependencyClosure === undefined ? {} : { dependencyClosure: provenance.dependencyClosure }),
+    };
+  }
+  if (packageRecord && provenance?.kind !== 'catalog') {
+    if (packageRecord.manifest === null) return { kind: 'local-archive', packageName: null, trust: 'unverified' };
+    throw new Error('Installed plugin package is missing admitted source provenance');
+  }
+  if (candidate.directorySource && !packageRecord) return candidate.directorySource;
   return {
     kind: 'catalog',
     catalogId: candidate.catalogId,
@@ -279,9 +284,12 @@ function projectCapabilities(
   }));
 }
 
-function runtimeDiagnostic(instance: PluginInstanceRecord | undefined) {
-  if (!instance?.lastRuntimeError) return {};
-  return { diagnostic: diagnostic(instance.lastRuntimeError, instance.lifecycleRevision) };
+function runtimeDiagnostic(
+  instance: PluginInstanceRecord | undefined,
+  grant: Parameters<typeof pluginRuntimeDiagnostic>[1],
+) {
+  const diagnostic = pluginRuntimeDiagnostic(instance, grant);
+  return diagnostic === undefined ? {} : { diagnostic };
 }
 
 export function projectPluginManagerCatalogCandidate(
@@ -293,7 +301,8 @@ export function projectPluginManagerCatalogCandidate(
     (item) => item.pluginId === candidate.pluginId && item.lifecycleState === 'installed',
   );
   const packageRecord = candidatePackage(candidate, snapshot, instance);
-  const installedManifest = instance ? packageRecord?.manifest : undefined;
+  const installedManifest = instance ? (packageRecord?.manifest ?? undefined) : undefined;
+  const incompatible = packageRecord?.manifest === null;
   const grant = instance
     ? snapshot.grants.find((item) => item.pluginInstanceId === instance.pluginInstanceId)
     : undefined;
@@ -309,10 +318,17 @@ export function projectPluginManagerCatalogCandidate(
     overrides.activeCapabilityIds ?? [],
   );
 
+  const newerCompatible =
+    candidate.compatibleReplacement === true &&
+    packageRecord !== undefined &&
+    sourceSemver.valid(candidate.version) !== null &&
+    sourceSemver.valid(packageRecord.version) !== null &&
+    sourceSemver.gt(candidate.version, packageRecord.version);
+
   return {
     pluginId: candidate.pluginId,
     pluginInstanceId: instance?.pluginInstanceId ?? null,
-    displayName: installedManifest?.name ?? candidate.displayName,
+    displayName: installedManifest?.name ?? packageRecord?.incompatibleManifest?.name ?? candidate.displayName,
     ...candidatePresentation(candidate, installedManifest),
     source: candidateSource(candidate, packageRecord),
     availableVersion: candidate.version,
@@ -322,10 +338,32 @@ export function projectPluginManagerCatalogCandidate(
     config,
     auth,
     intent,
-    live,
+    live: incompatible ? 'stopped' : live,
+    ...(instance?.activationState === 'error' ? { activationFailed: true } : {}),
     lifecycleRevision: instance?.lifecycleRevision ?? null,
-    capabilitySummary,
-    actions: derivePluginManagerActions({ artifact, config, auth, intent, activationTransition }),
-    ...runtimeDiagnostic(instance),
+    capabilitySummary: incompatible ? [] : capabilitySummary,
+    actions: incompatible
+      ? {
+          install: newerCompatible,
+          setEnabled: false,
+          uninstall: true,
+          blockingReasons: ['package-incompatible'],
+        }
+      : {
+          ...derivePluginManagerActions({ artifact, config, auth, intent, activationTransition }),
+          ...(artifact === 'installed' && newerCompatible && !activationTransition ? { install: true } : {}),
+        },
+    ...(incompatible
+      ? {
+          diagnostic: {
+            code: 'PACKAGE_INCOMPATIBLE',
+            message: newerCompatible
+              ? '插件版本与当前 Host 不兼容，已停止运行。配置与数据已保留，可安装兼容更新。'
+              : '插件版本与当前 Host 不兼容，已停止运行。配置与数据已保留；当前无可用更新。',
+            occurredAt: packageRecord.updatedAt,
+            revision: instance?.lifecycleRevision ?? null,
+          },
+        }
+      : runtimeDiagnostic(instance, grant)),
   };
 }

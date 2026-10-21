@@ -284,7 +284,7 @@ export interface RouteOptions {
   humanDispositionInvocationOrigin?: HumanDispositionInvocationOrigin;
   /** Canonical Queue source class for admission/retry policy. */
   routingQueueSource?: 'user' | 'connector' | 'agent' | 'system';
-  /** Immutable Host domain scope forwarded to children; it limits execution, never grants authority. */
+  /** Retained legacy record discriminator. The retired Host executor is rejected; current plugins use public invocation. */
   executionScope?: 'collective-participation' | 'collective-work';
   /** F167 Phase T: exact protocol wake carrier for this route, never inferred from response prose. */
   turnCustodyWake?: import('../../../../ball-custody/TurnCustodyProjectionService.js').TurnCustodyWakeProvenance;
@@ -976,16 +976,16 @@ export function toStoredToolEvent(
   if (!msg.toolEventId?.startsWith(prefix)) msg.toolEventId = `${prefix}${randomUUID()}`;
   if (executionRef) msg.toolExecutionRef = executionRef;
   const instance = { id: msg.toolEventId, ...(msg.toolExecutionRef ? { executionRef: msg.toolExecutionRef } : {}) };
+  let inputDetail: string | undefined;
+  if (msg.toolInput !== undefined) {
+    try {
+      inputDetail = truncateDetail(JSON.stringify(msg.toolInput), 200);
+    } catch {
+      inputDetail = '[unserializable]';
+    }
+  }
   if (msg.type === 'tool_use') {
     const toolName = msg.toolName ?? 'unknown';
-    let detail: string | undefined;
-    if (msg.toolInput) {
-      try {
-        detail = truncateDetail(JSON.stringify(msg.toolInput), 200);
-      } catch {
-        detail = '[unserializable]';
-      }
-    }
     return {
       ...instance,
       type: 'tool_use',
@@ -993,7 +993,7 @@ export function toStoredToolEvent(
       // R6 maintainer: persist native tool name as data field (decoupled from display label).
       // Hydrate prefers this for span naming; label parse becomes legacy fallback only.
       toolName,
-      ...(detail ? { detail } : {}),
+      ...(inputDetail !== undefined ? { detail: inputDetail } : {}),
       timestamp: msg.timestamp,
       ...(msg.toolUseId ? { toolUseId: msg.toolUseId } : {}),
       ...(msg.toolTracing ? { tracing: msg.toolTracing } : {}),
@@ -1009,6 +1009,7 @@ export function toStoredToolEvent(
       type: 'tool_result',
       label: `${msg.catId as string} ← result`,
       detail,
+      ...(inputDetail !== undefined ? { inputDetail } : {}),
       timestamp: msg.timestamp,
       ...(msg.toolUseId ? { toolUseId: msg.toolUseId } : {}),
       ...(msg.toolResultStatus ? { status: msg.toolResultStatus } : {}),

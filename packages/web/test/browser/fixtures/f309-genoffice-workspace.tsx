@@ -4,7 +4,7 @@ import '@/app/console-tokens.css';
 import '@/app/console-controls.css';
 import '@/app/connector-tokens.css';
 import '@/app/globals.css';
-import { OfficialPluginsPanel } from '@/components/settings/OfficialPluginsPanel';
+import { PluginManagerLiveContent } from '@/components/settings/plugin-manager/PluginManagerLiveContent';
 import { F307FileOwnerSurface } from '@/components/workbench/F307FileOwnerSurface';
 import { createFileSurface } from '@/components/workbench/real-surface-adapters';
 
@@ -12,7 +12,7 @@ const surface = createFileSurface({ worktreeId: 'genoffice-acceptance', path: 's
 createRoot(document.getElementById('root')!).render(
   <main>
     <section aria-label="插件设置">
-      <OfficialPluginsPanel />
+      <PluginManagerLiveContent />
     </section>
     <section aria-label="Workspace 文档" style={{ height: 900 }}>
       <F307FileOwnerSurface surface={surface} onRequestDetach={() => undefined} />

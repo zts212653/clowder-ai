@@ -187,9 +187,11 @@ test(
       await page.getByTestId('message-disposition-trigger').click();
       await page.locator('[data-disposition-option="continue_current"]').click();
       assert.equal(await page.getByTestId('message-disposition-panel').count(), 0);
-      assert.match(await page.getByTestId('message-disposition-trigger').innerText(), /接着当前工作/);
+      assert.match(await page.getByTestId('message-disposition-trigger').innerText(), /引导当前回复/);
       await page.getByTestId('message-disposition-trigger').click();
-      assert.match(await page.getByTestId('message-disposition-panel').innerText(), /仅这一次/);
+      assert.equal(await page.locator('[data-disposition-scope=thread]').count(), 1);
+      assert.equal(await page.locator('[data-disposition-scope=global]').count(), 1);
+      assert.doesNotMatch(await page.getByTestId('message-disposition-panel').innerText(), /仅这一次/);
       assert.equal(
         await page.locator('[data-disposition-option="continue_current"]').getAttribute('aria-pressed'),
         'true',

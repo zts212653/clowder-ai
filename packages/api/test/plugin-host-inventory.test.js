@@ -60,9 +60,19 @@ function harness() {
 }
 
 describe('K-2A contract-native inventory', () => {
-  it('pins the API and runtime boundary to plugin-contract beta.21', () => {
-    assert.equal(packageJson.dependencies['@clowder-ai/plugin-contract'], '0.1.0-beta.21');
-    assert.equal(PLUGIN_CONTRACT_PACKAGE_VERSION, '0.1.0-beta.21');
+  it('pins the API and runtime boundary to the consumed plugin-contract beta.37 archive', () => {
+    assert.equal(
+      packageJson.dependencies['@clowder-ai/plugin-contract'],
+      'file:vendor/clowder-ai-plugin-contract-0.1.0-beta.37-c1-785543498768.tgz',
+    );
+    const archive = readFileSync(
+      new URL('../vendor/clowder-ai-plugin-contract-0.1.0-beta.37-c1-785543498768.tgz', import.meta.url),
+    );
+    assert.equal(
+      createHash('sha256').update(archive).digest('hex'),
+      '785543498768f4e65fca2f1c60ff9a9c45693f45a304692a73042cc13e50a713',
+    );
+    assert.equal(PLUGIN_CONTRACT_PACKAGE_VERSION, '0.1.0-beta.37');
     assert.equal(PLUGIN_CONTRACT_VERSION, '0.1.0');
     assert.deepEqual(PLUGIN_MANIFEST_CONTRACT_VERSIONS, [
       '0.1.0',
@@ -74,6 +84,10 @@ describe('K-2A contract-native inventory', () => {
       '0.1.0-beta.19',
       '0.1.0-beta.20',
       '0.1.0-beta.21',
+      '0.1.0-beta.22',
+      '0.1.0-beta.24',
+      '0.1.0-beta.25',
+      '0.1.0-beta.37',
     ]);
   });
 
@@ -117,14 +131,22 @@ describe('K-2A contract-native inventory', () => {
     assert.equal(snapshot.grants[0].grantRevision, 1);
   });
 
-  it('admits the exact consumed prerelease contract alongside the stable manifest line', async () => {
-    const { store, controlPlane } = harness();
-    const packageManifest = manifest({ contractVersion: PLUGIN_CONTRACT_PACKAGE_VERSION });
+  it('admits the installed beta.20, beta.21, beta.22 and beta.24 lines and the consumed beta.25 line', async () => {
+    for (const contractVersion of [
+      '0.1.0-beta.20',
+      '0.1.0-beta.21',
+      '0.1.0-beta.22',
+      '0.1.0-beta.24',
+      PLUGIN_CONTRACT_PACKAGE_VERSION,
+    ]) {
+      const { store, controlPlane } = harness();
+      const packageManifest = manifest({ contractVersion });
 
-    await controlPlane.installPackage(candidate({ manifest: packageManifest }));
+      await controlPlane.installPackage(candidate({ manifest: packageManifest }));
 
-    const snapshot = await store.snapshot();
-    assert.equal(snapshot.packages[0].contractVersion, PLUGIN_CONTRACT_PACKAGE_VERSION);
+      const snapshot = await store.snapshot();
+      assert.equal(snapshot.packages[0].contractVersion, contractVersion);
+    }
   });
 
   for (const contractVersion of [
@@ -148,7 +170,7 @@ describe('K-2A contract-native inventory', () => {
   it('rejects an unlisted future beta without admitting any inventory', async () => {
     const { store, controlPlane } = harness();
     await assert.rejects(
-      controlPlane.installPackage(candidate({ manifest: manifest({ contractVersion: '0.1.0-beta.22' }) })),
+      controlPlane.installPackage(candidate({ manifest: manifest({ contractVersion: '0.1.0-beta.99' }) })),
       { code: 'CONTRACT_VERSION_MISMATCH' },
     );
     assert.deepEqual((await store.snapshot()).packages, []);

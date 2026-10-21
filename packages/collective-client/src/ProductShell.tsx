@@ -8,7 +8,6 @@ function DestinationTitle({
   onHome,
   meta,
   canSteward,
-  canLeave,
   onInvite,
   onCafe,
   onReplayGuide,
@@ -21,7 +20,6 @@ function DestinationTitle({
   readonly onHome?: () => void;
   readonly meta?: ReactNode;
   readonly canSteward: boolean;
-  readonly canLeave: boolean;
   readonly onInvite: () => void;
   readonly onCafe?: () => void;
   readonly onReplayGuide?: () => void;
@@ -32,7 +30,7 @@ function DestinationTitle({
 }) {
   const t = useCollectiveText();
   if (!collective) return <h1>{t('共同家园')}</h1>;
-  const hasMenu = Boolean(onHome || canSteward || onCafe || onReplayGuide || (canLeave && onLeave));
+  const hasMenu = Boolean(onHome || canSteward || onCafe || onReplayGuide || onLeave);
   if (!hasMenu) return <h1>{collective.name}</h1>;
   const action = (callback: () => void) => (event: MouseEvent<HTMLButtonElement>) => {
     event.currentTarget.closest('details')?.removeAttribute('open');
@@ -84,7 +82,7 @@ function DestinationTitle({
             {t('再看一遍介绍')}
           </button>
         )}
-        {canLeave && onLeave && (
+        {onLeave && (
           <button type="button" className="collective-menu-muted" onClick={action(onLeave)}>
             {t('离开共同体…')}
           </button>
@@ -104,7 +102,6 @@ export function ProductShell({
   canSteward,
   canPair,
   pairNudge = false,
-  canLeave = false,
   notice,
   onInvite,
   onPair,
@@ -129,7 +126,6 @@ export function ProductShell({
   readonly canSteward: boolean;
   readonly canPair: boolean;
   readonly pairNudge?: boolean;
-  readonly canLeave?: boolean;
   readonly notice?: string;
   readonly onInvite: () => void;
   readonly onPair: () => void;
@@ -172,7 +168,6 @@ export function ProductShell({
             onHome={onHome}
             meta={headerMeta}
             canSteward={canSteward}
-            canLeave={canLeave}
             onInvite={onInvite}
             onCafe={onCafe}
             onReplayGuide={onReplayGuide}

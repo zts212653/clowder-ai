@@ -1,13 +1,3 @@
-/**
- * ActionRenderer — generic connector action state machine renderer (AC-A26)
- *
- * Replaces WeixinQrPanel / FeishuQrPanel / WeComBotSetupPanel with a single
- * data-driven component that renders from YAML manifest action definitions.
- *
- * Render types: button, polling, img, status
- * State machine: reads currentAction from operation state, advances via action endpoint.
- */
-
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -16,14 +6,27 @@ import { type PlatformOperationStatus } from '../../HubConfigIcons';
 import { ActionPanelBody, type ActionPhase, ConnectedBanner, type ResultState } from './ActionRendererParts';
 import {
   type ActionApiResult,
+  type ActionRendererTarget,
+  actionCallFailure,
+  actionRequest,
   classifyPollResult,
   deriveActionState,
+  operationResetRequest,
   phaseForAction,
   toResultState,
 } from './ActionRendererState';
+import {
+  awaitingOwnerMessage,
+  confirmedActionRequest,
+  invocationAllowed,
+  useActionConfirmation,
+} from './actionConfirmation';
+import { LiveStatusActionRenderer } from './LiveStatusActionRenderer';
+import { OperationRowsRenderer } from './OperationRowsRenderer';
+import { useActionPollingSession } from './useActionPollingSession';
 
 export interface ActionRendererProps {
-  connectorId: string;
+  target: ActionRendererTarget;
   /** Operation definition + state from the status API. */
   operation: PlatformOperationStatus;
   /** Platform-level configured state; used when legacy config exists before operation state. */
@@ -36,10 +39,33 @@ export interface ActionRendererProps {
   themeColor?: string;
 }
 
-// ── Main component ──
+export function ActionRenderer(props: ActionRendererProps) {
+  const actions = props.operation.actions;
+  // F202 W2-3 h1: an operation that lists rows is rendered as a row list with per-row actions.
+  const listAction = actions.find((action) => action.resultRender === 'rows');
+  if (listAction) return <OperationRowsRenderer {...props} listAction={listAction} />;
+  const firstAction = actions[0];
+  const revokeAction = actions.find(
+    (action) => action.render === 'button' && action.next === firstAction?.id && firstAction.next === action.id,
+  );
+  const statusAction = actions.find((action) => action.render === 'status' || action.render === 'polling');
+  // The live-status renderer checks its status action by itself, so it cannot take one that asks
+  // for confirmation; such an operation stays on the sequenced renderer, which never runs it alone.
+  if (firstAction?.render === 'button' && statusAction && statusAction.confirm === undefined && revokeAction) {
+    return (
+      <LiveStatusActionRenderer
+        {...props}
+        armAction={firstAction}
+        statusAction={statusAction}
+        revokeAction={revokeAction}
+      />
+    );
+  }
+  return <SequencedActionRenderer {...props} />;
+}
 
-export function ActionRenderer({
-  connectorId,
+function SequencedActionRenderer({
+  target,
   operation,
   configured,
   pendingConfigValues,
@@ -48,7 +74,7 @@ export function ActionRenderer({
 }: ActionRendererProps) {
   const actions = operation.actions;
   const firstAction = actions[0];
-  const disconnectAction = actions.find((a) => a.id === 'disconnect' || a.next === firstAction?.id);
+  const disconnectAction = actions.find((a) => a.id !== firstAction?.id && a.next === firstAction?.id);
   const disconnectId = disconnectAction?.id;
   const initialState = deriveActionState(operation, actions, configured, disconnectId, firstAction?.id);
 
@@ -56,44 +82,50 @@ export function ActionRenderer({
   const [lastResult, setLastResult] = useState<ResultState | undefined>(() => initialState.lastResult);
   const [currentActionId, setCurrentActionId] = useState(() => initialState.currentActionId);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
-  const pollRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const expireRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const { pollRef, expireRef, beginRequest, beginPolling, retainsSnapshot, stopTimers } = useActionPollingSession();
   const abortedRef = useRef(false);
   const autoStartedRef = useRef(false);
+  const requestEpoch = useRef(0);
+  const pollingInputKey = JSON.stringify([target, operation.name, actions, configured, pendingConfigValues ?? {}]);
+  const confirmAction = useActionConfirmation();
 
-  const stopTimers = useCallback(() => {
-    if (pollRef.current) {
-      clearTimeout(pollRef.current);
-      pollRef.current = null;
-    }
-    if (expireRef.current) {
-      clearTimeout(expireRef.current);
-      expireRef.current = null;
-    }
-  }, []);
-
-  useEffect(() => () => stopTimers(), [stopTimers]);
+  useEffect(
+    () => () => {
+      requestEpoch.current += 1;
+      abortedRef.current = true;
+      stopTimers();
+    },
+    [stopTimers],
+  );
+  useEffect(() => {
+    if (lastResult?.render !== 'status') return;
+    const timer = setTimeout(() => setLastResult(undefined), 4000);
+    return () => clearTimeout(timer);
+  }, [lastResult]);
 
   useEffect(() => {
     const nextState = deriveActionState(operation, actions, configured, disconnectId, firstAction?.id);
+    if (retainsSnapshot(nextState.currentActionId, pollingInputKey, operation.updatedAt)) return;
+    requestEpoch.current += 1;
+    abortedRef.current = true;
     stopTimers();
     autoStartedRef.current = false;
     setCurrentActionId(nextState.currentActionId);
     setLastResult(nextState.lastResult);
     setPhase(nextState.phase);
     setErrorMsg(null);
-  }, [actions, configured, disconnectId, firstAction?.id, operation, stopTimers]);
+  }, [pollingInputKey, actions, retainsSnapshot, configured, disconnectId, firstAction?.id, operation, stopTimers]);
 
+  /** Every request goes through here; `confirmed` is true only right after the owner confirmed. */
   const executeAction = useCallback(
-    async (actionId: string): Promise<ActionApiResult | null> => {
+    async (actionId: string, confirmed = false): Promise<ActionApiResult | null> => {
+      const action = actions.find((a) => a.id === actionId);
+      if (action && !invocationAllowed(action.confirm, confirmed)) {
+        return { ok: false, label: awaitingOwnerMessage(action.label) };
+      }
       try {
-        const url = `/api/connectors/${encodeURIComponent(connectorId)}/actions/${encodeURIComponent(operation.name)}/${encodeURIComponent(actionId)}`;
-        const requestInit: RequestInit = { method: 'POST' };
-        if (pendingConfigValues && Object.keys(pendingConfigValues).length > 0) {
-          requestInit.headers = { 'content-type': 'application/json' };
-          requestInit.body = JSON.stringify({ values: pendingConfigValues });
-        }
-        const res = await apiFetch(url, requestInit);
+        const request = actionRequest(target, operation.name, actionId, pendingConfigValues);
+        const res = await apiFetch(request.url, confirmedActionRequest(request.init, action?.confirm, confirmed));
         if (!res.ok) {
           const err = await res.json().catch(() => ({}));
           return { ok: false, label: (err as { error?: string }).error ?? 'Request failed' };
@@ -103,25 +135,18 @@ export function ActionRenderer({
         return null;
       }
     },
-    [connectorId, operation.name, pendingConfigValues],
+    [actions, operation.name, pendingConfigValues, target],
   );
 
-  const resetOperation = useCallback(
-    async (currentAction: string): Promise<boolean> => {
-      try {
-        const url = `/api/connectors/${encodeURIComponent(connectorId)}/operations/${encodeURIComponent(operation.name)}/reset`;
-        const res = await apiFetch(url, {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ currentAction }),
-        });
-        return res.ok;
-      } catch {
-        return false;
-      }
-    },
-    [connectorId, operation.name],
-  );
+  const resetOperation = useCallback(async (): Promise<boolean> => {
+    try {
+      const request = operationResetRequest(target, operation.name);
+      const res = await apiFetch(request.url, request.init);
+      return res.ok;
+    } catch {
+      return false;
+    }
+  }, [operation.name, target]);
 
   /** Transition to the next action's phase after a successful result. */
   const advanceTo = useCallback(
@@ -135,7 +160,7 @@ export function ActionRenderer({
 
   const startPolling = useCallback(
     (actionId: string, intervalMs = 2500, restoredUpdatedAt?: number) => {
-      stopTimers();
+      beginPolling(actionId, pollingInputKey, restoredUpdatedAt);
       abortedRef.current = false;
 
       const action = actions.find((a) => a.id === actionId);
@@ -143,10 +168,11 @@ export function ActionRenderer({
       const elapsedMs = typeof restoredUpdatedAt === 'number' ? Math.max(0, Date.now() - restoredUpdatedAt) : 0;
       const remainingTimeoutMs = timeoutMs - elapsedMs;
 
+      const epoch = requestEpoch.current;
       const poll = async () => {
-        if (abortedRef.current) return;
+        if (abortedRef.current || epoch !== requestEpoch.current) return;
         const result = await executeAction(actionId);
-        if (abortedRef.current) return;
+        if (abortedRef.current || epoch !== requestEpoch.current) return;
 
         const verdict = classifyPollResult(result, action?.render);
         if (verdict.outcome === 'retry') {
@@ -162,7 +188,7 @@ export function ActionRenderer({
         if (verdict.outcome === 'terminal') {
           stopTimers();
           if (action?.rollback) {
-            void resetOperation(action.rollback).finally(() => {
+            void resetOperation().finally(() => {
               onStatusChange?.();
             });
             setCurrentActionId(action.rollback);
@@ -193,7 +219,7 @@ export function ActionRenderer({
         abortedRef.current = true;
         stopTimers();
         if (action?.rollback) {
-          void resetOperation(action.rollback).finally(() => {
+          void resetOperation().finally(() => {
             onStatusChange?.();
           });
           setCurrentActionId(action.rollback);
@@ -215,35 +241,49 @@ export function ActionRenderer({
       pollRef.current = setTimeout(poll, 100);
       expireRef.current = setTimeout(expire, remainingTimeoutMs);
     },
-    [actions, advanceTo, executeAction, onStatusChange, resetOperation, stopTimers],
+    [
+      actions,
+      beginPolling,
+      advanceTo,
+      executeAction,
+      expireRef,
+      onStatusChange,
+      pollRef,
+      pollingInputKey,
+      resetOperation,
+      stopTimers,
+    ],
   );
 
-  // P1-3 fix: auto-resume polling when mounted with persisted polling state
   useEffect(() => {
     if (phase === 'polling' && currentActionId && !autoStartedRef.current && !pollRef.current) {
       autoStartedRef.current = true;
       startPolling(currentActionId, undefined, operation.updatedAt);
     }
-  }, [phase, currentActionId, operation.updatedAt, startPolling]);
+  }, [phase, currentActionId, operation.updatedAt, pollRef, startPolling]);
 
   const handleAction = useCallback(
     async (actionId: string) => {
       const action = actions.find((a) => a.id === actionId);
-      if (!action) return;
+      if (!action || !(await confirmAction(action.label, action.confirm))) return;
 
+      const nextDef = actions.find((candidate) => candidate.id === action.next);
+      if (nextDef?.render === 'polling') beginRequest(actionId, nextDef.id, pollingInputKey, operation.updatedAt);
+      const epoch = ++requestEpoch.current;
+      setLastResult(undefined);
       setPhase('loading');
       setErrorMsg(null);
-      const result = await executeAction(actionId);
-
-      if (!result || !result.ok) {
+      const result = await executeAction(actionId, true);
+      if (epoch !== requestEpoch.current) return;
+      const failure = actionCallFailure(result);
+      if (!result || failure !== null) {
+        stopTimers();
         setPhase('error');
-        setErrorMsg(result?.label ?? 'Network error');
+        setErrorMsg(failure);
         return;
       }
       setLastResult(toResultState(result));
 
-      // If next action is polling, start polling loop
-      const nextDef = action.next ? actions.find((a) => a.id === action.next) : null;
       if (nextDef?.render === 'polling') {
         setCurrentActionId(nextDef.id);
         setPhase('polling');
@@ -254,15 +294,28 @@ export function ActionRenderer({
         setPhase('result');
       }
     },
-    [actions, advanceTo, executeAction, startPolling],
+    [
+      actions,
+      advanceTo,
+      beginRequest,
+      confirmAction,
+      executeAction,
+      operation.updatedAt,
+      pollingInputKey,
+      startPolling,
+      stopTimers,
+    ],
   );
 
   const handleDisconnect = useCallback(async () => {
-    if (!disconnectAction) return;
+    if (!disconnectAction || !(await confirmAction(disconnectAction.label, disconnectAction.confirm))) return;
+    const epoch = ++requestEpoch.current;
+    setLastResult(undefined);
     setPhase('disconnecting');
     setErrorMsg(null);
 
-    const result = await executeAction(disconnectAction.id);
+    const result = await executeAction(disconnectAction.id, true);
+    if (epoch !== requestEpoch.current) return;
     if (!result || !result.ok) {
       setPhase('connected');
       return;
@@ -271,14 +324,12 @@ export function ActionRenderer({
     setLastResult(undefined);
     setPhase('idle');
     onStatusChange?.();
-  }, [disconnectAction, executeAction, firstAction, onStatusChange]);
-
-  // ── Dispatch to the appropriate sub-view ──
+  }, [confirmAction, disconnectAction, executeAction, firstAction, onStatusChange]);
 
   if (phase === 'connected' || phase === 'disconnecting') {
     return (
       <ConnectedBanner
-        connectorId={connectorId}
+        connectorId={target.id}
         label={lastResult?.label ?? 'Connected'}
         disconnectLabel={disconnectAction?.label}
         disconnecting={phase === 'disconnecting'}
@@ -291,7 +342,7 @@ export function ActionRenderer({
 
   return (
     <ActionPanelBody
-      connectorId={connectorId}
+      connectorId={target.id}
       phase={phase}
       currentAction={currentAction}
       lastResult={lastResult}

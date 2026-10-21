@@ -1,15 +1,13 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
-  type BuiltinPluginRuntime,
-  HybridPluginRuntimeSupervisor,
-} from '../src/domains/plugin/builtin-runtime/hybrid-supervisor.js';
+  type BundledPluginRuntime,
+  BundledPluginRuntimeCarrier,
+} from '../src/domains/plugin/builtin-runtime/carriers/bundled-runtime-carrier.js';
+import { CHATGPT_DOT_PLUGIN_MANIFEST } from '../src/domains/plugin/chatgpt-dot-manifest.js';
 import { HostInventoryControlPlane } from '../src/domains/plugin/host-inventory/control-plane.js';
 import { MemoryPluginInventoryStore } from '../src/domains/plugin/host-inventory/stores.js';
-import {
-  COLLECTIVE_CONNECTOR_PLUGIN_MANIFEST,
-  OFFICIAL_PLUGIN_CATALOG,
-} from '../src/domains/plugin/official-catalog.js';
+import { OFFICIAL_PLUGIN_CATALOG } from '../src/domains/plugin/official-catalog.js';
 
 function deferred() {
   let resolve!: () => void;
@@ -19,12 +17,12 @@ function deferred() {
   return { promise, resolve };
 }
 
-async function fixture(runtime: BuiltinPluginRuntime) {
+async function fixture(runtime: Omit<BundledPluginRuntime, 'claims'>) {
   const store = new MemoryPluginInventoryStore();
   const inventory = new HostInventoryControlPlane(store);
-  const entry = OFFICIAL_PLUGIN_CATALOG.find((row) => row.catalogId === 'collective-connector')!;
+  const entry = OFFICIAL_PLUGIN_CATALOG.find((row) => row.catalogId === 'chatgpt-dot')!;
   const installed = await inventory.installPackage({
-    manifest: COLLECTIVE_CONNECTOR_PLUGIN_MANIFEST,
+    manifest: CHATGPT_DOT_PLUGIN_MANIFEST,
     computedPackageDigest: entry.packageDigest,
     expectedPackageDigest: entry.packageDigest,
     packagePluginId: entry.pluginId,
@@ -38,27 +36,17 @@ async function fixture(runtime: BuiltinPluginRuntime) {
       activationState: 'enabled',
     });
   });
-  const unused = async (): Promise<never> => {
-    throw new Error('external runtime must not run');
-  };
-  const supervisor = new HybridPluginRuntimeSupervisor({
+  const supervisor = new BundledPluginRuntimeCarrier({
     inventory: store,
-    builtinRuntimes: new Map([[entry.pluginId, runtime]]),
-    external: {
-      start: unused,
-      stop: unused,
-      stopAll: unused,
-      deliver: unused,
-      recoverAfterRestart: unused,
-      handshakeTimeoutMs: 1000,
-    },
+    runtimes: [{ claims: ({ manifest }) => manifest.pluginId === entry.pluginId, ...runtime }],
   });
   return { store, supervisor, id: installed.pluginInstanceId };
 }
 
-test('a late cancelled builtin startup cannot stop or overwrite its replacement', async () => {
+test('cancelled builtin startup is joined and cleaned before its replacement starts', async () => {
   const started = deferred();
   const completeOldStart = deferred();
+  const stopEntered = deferred();
   let starts = 0;
   let stops = 0;
   const f = await fixture({
@@ -70,16 +58,21 @@ test('a late cancelled builtin startup cannot stop or overwrite its replacement'
     },
     async stop() {
       stops++;
+      stopEntered.resolve();
     },
   });
   const oldStart = f.supervisor.start(f.id);
   const rejected = assert.rejects(oldStart, /cancelled/);
   await started.promise;
-  await f.supervisor.stop(f.id);
-  await f.supervisor.start(f.id);
+  const stopping = f.supervisor.stop(f.id);
+  await stopEntered.promise;
+  await assert.rejects(f.supervisor.start(f.id), /already has a builtin runtime owner/);
   completeOldStart.resolve();
   await rejected;
-  assert.equal(stops, 1, 'late completion must not stop the replacement runtime');
+  await stopping;
+  assert.equal(stops, 2, 'stop must clean allocations made by the cancelled startup tail');
+  await f.supervisor.start(f.id);
+  assert.equal(stops, 2, 'replacement must not inherit pending cleanup');
   assert.equal((await f.store.snapshot()).instances[0]!.runtimeState, 'healthy');
   await f.supervisor.stop(f.id);
 });

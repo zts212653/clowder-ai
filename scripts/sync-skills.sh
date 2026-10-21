@@ -12,7 +12,7 @@
 #   3. HOME 级  ~/.claude/skills/          （Claude Code 全局）
 #   4. HOME 级  ~/.codex/skills/           （Codex）
 #   5. HOME 级  ~/.gemini/skills/          （Gemini）
-#   6. HOME 级  ~/.kimi/skills/            （Kimi）
+#   6. HOME 级  ~/.kimi-code/skills/       （Kimi）
 #
 # 注：ADR-025 第 3 条规定用户级目录不默认承载官方 skills；
 #     contributor 想全局共享 cat-cafe-skills/ 需显式 `--user` opt-in。
@@ -46,7 +46,7 @@ fi
 HOME_CLAUDE="$HOME/.claude/skills"
 HOME_CODEX="$HOME/.codex/skills"
 HOME_GEMINI="$HOME/.gemini/skills"
-HOME_KIMI="$HOME/.kimi/skills"
+HOME_KIMI="${KIMI_CODE_HOME:-$HOME/.kimi-code}/skills"
 
 DRY_RUN=false
 USER_MODE=false
@@ -61,7 +61,7 @@ for arg in "$@"; do
     -h|--help)
       printf "Usage: pnpm sync:skills [--dry-run] [--user] [--all] [--verbose]\n"
       printf "  --dry-run   Show what would change without writing.\n"
-      printf "  --user      Also mount HOME-level symlinks at ~/.{claude,codex,gemini,kimi}/skills/.\n"
+      printf "  --user      Also mount HOME-level symlinks at ~/.{claude,codex,gemini,kimi-code}/skills/.\n"
       printf "              Default: project-level only (ADR-025 第 3 条).\n"
       printf "  --all       Repair every eligible worktree instead of only the invoking one.\n"
       printf "  --verbose   Print individual mount actions in addition to the summary.\n"
@@ -167,10 +167,12 @@ for wt in "${worktree_paths[@]}"; do
   fi
 
   # ADR-025: project-level mount covers all 4 providers (claude/codex/gemini/kimi),
-  # aligned with governance-bootstrap. .codex/ .gemini/ .kimi/ are gitignored at
+  # aligned with governance-bootstrap. .codex/ .gemini/ .kimi-code/ are gitignored at
   # repo root so generated symlinks won't dirty git status; .claude/skills is tracked.
   for provider in claude codex gemini kimi; do
-    wt_skills="$wt/.${provider}/skills"
+    provider_dir=".${provider}"
+    if [ "$provider" = kimi ]; then provider_dir=".kimi-code"; fi
+    wt_skills="$wt/$provider_dir/skills"
     provider_targets=$((provider_targets + 1))
 
     # Provider-dir guard (mirrors skill-sync.ts shouldSkipDirectoryLevelSkillsSymlink):
@@ -181,7 +183,7 @@ for wt in "${worktree_paths[@]}"; do
     case "$(classify_provider_dir "$wt_skills" "$wt_skills_src" "$HOME_SKILLS_SRC")" in
       skip)
         dir_mounted=$((dir_mounted + 1))
-        log_action "$wt_label (.${provider}): dir-level mount OK (skip per-skill)"
+        log_action "$wt_label ($provider_dir): dir-level mount OK (skip per-skill)"
         continue
         ;;
       invalid)
@@ -201,7 +203,7 @@ for wt in "${worktree_paths[@]}"; do
     # but plain per-skill writes would create broken symlinks (cloud P2
     # round 3 on PR #2325 line 220).
     if [ ! -d "$wt/cat-cafe-skills" ]; then
-      printf "  ${YELLOW}skip${NC} %s (.${provider}): no %s/cat-cafe-skills/\n" "$wt_label" "$wt_label"
+      printf "  ${YELLOW}skip${NC} %s ($provider_dir): no %s/cat-cafe-skills/\n" "$wt_label" "$wt_label"
       continue
     fi
 
@@ -232,7 +234,7 @@ for wt in "${worktree_paths[@]}"; do
       [ "$created" -gt "$before" ] && synced=$((synced + 1))
     done
     if $VERBOSE && [ "$synced" -gt 0 ]; then
-      log_action "$wt_label (.${provider}): $synced repaired"
+      log_action "$wt_label ($provider_dir): $synced repaired"
     fi
   done
 done
@@ -241,7 +243,7 @@ done
 
 if $USER_MODE; then
   collect_skill_names "$HOME_SKILLS_SRC"
-  printf "\n${BOLD}[HOME]${NC} ~/.{claude,codex,gemini,kimi}/skills/ (--user opt-in)\n"
+  printf "\n${BOLD}[HOME]${NC} ~/.{claude,codex,gemini,kimi-code}/skills/ (--user opt-in)\n"
   printf "HOME targets: %s, %s, %s, %s\n" "$HOME_CLAUDE" "$HOME_CODEX" "$HOME_GEMINI" "$HOME_KIMI"
   sync_shared_refs "$HOME_CLAUDE" "$HOME_SKILLS_SRC/refs"
   sync_shared_refs "$HOME_CODEX" "$HOME_SKILLS_SRC/refs"
@@ -256,7 +258,7 @@ if $USER_MODE; then
 else
   printf "\n${BOLD}[HOME]${NC} skipped (default project-level only)\n"
   printf "  ${YELLOW}Note${NC}: HOME-level skill mount is now opt-in per ADR-025.\n"
-  printf "  Run \`pnpm sync:skills --user\` to mount ~/.{claude,codex,gemini,kimi}/skills/.\n"
+  printf "  Run \`pnpm sync:skills --user\` to mount ~/.{claude,codex,gemini,kimi-code}/skills/.\n"
 fi
 
 # ─── Part 3: Write sync state ───

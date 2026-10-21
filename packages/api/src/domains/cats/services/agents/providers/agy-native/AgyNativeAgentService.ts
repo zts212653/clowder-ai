@@ -217,7 +217,7 @@ export class AgyNativeAgentService implements AgentService {
       const body = await this.l0CompilerFn({
         catId: this.catId as string,
         userId: compactionControl?.userId ?? options?.callbackEnv?.CAT_CAFE_USER_ID,
-        projection: options?.toolExecutionPolicy?.mode === 'collective_participation' ? 'public' : 'owner',
+        projection: 'owner',
       });
       const launch = await prepareAgyNativeLaunch({
         catId: this.catId,

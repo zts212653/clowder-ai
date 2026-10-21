@@ -31,8 +31,6 @@ test('coordinate consumer requires exact registered main lineage and frozen comp
   for (const [key, value] of [
     ['CAT_CAFE_DEPLOYMENT_ID', 'runtime'],
     ['CAT_CAFE_DATA_DIR', f.mainRoot],
-    ['COLLECTIVE_SERVICE_PORT', '5211'],
-    ['COLLECTIVE_SERVICE_ALLOWED_HOST_ORIGINS', 'http://localhost:3011'],
     ['CAT_CAFE_SIDECAR_LIFECYCLE_DISABLED', '0'],
     ['CAT_CAFE_PROVISION_GLOBAL_SIDECAR', '1'],
     ['FRONTEND_URL', 'https://foreign.invalid'],
@@ -48,9 +46,14 @@ test('named coordinates neutralize global sidecar provisioning', (t) => {
   const f = namedAlphaFixture(t);
   const c = coordinates(f, { targetSha: f.head });
   assert.equal(namedAlphaEnvironment(c).CAT_CAFE_PROVISION_GLOBAL_SIDECAR, '0');
+  assert.deepEqual(Object.keys(c.ports), ['frontend', 'api', 'preview', 'redis']);
+  assert.equal(
+    Object.keys(namedAlphaEnvironment(c)).some((key) => key.includes('COLLECTIVE')),
+    false,
+  );
 });
 
-test('named coordinates protect actual sidecar and cloud defaults in every tuple role', (t) => {
+test('named coordinates protect actual Host sidecar defaults in every tuple role', (t) => {
   const f = namedAlphaFixture(t);
   const manifest = readFileSync(
     new URL('../../packages/api/src/domains/services/service-manifest.ts', import.meta.url),
@@ -59,11 +62,9 @@ test('named coordinates protect actual sidecar and cloud defaults in every tuple
   const servicePorts = [...manifest.matchAll(/^\s+port: (\d+),$/gm)].map((match) => Number(match[1]));
   const launcher = readFileSync(new URL('../start-dev.sh', import.meta.url), 'utf8');
   const proxyPort = Number(launcher.match(/PROXY_PORT=\$\{ANTHROPIC_PROXY_PORT:-(\d+)\}/)[1]);
-  const cloud = readFileSync(new URL('../f247-cloud-services.mjs', import.meta.url), 'utf8');
-  const cloudPort = Number(cloud.match(/DEFAULT_REMOTE_PORT = '(\d+)'/)[1]);
   assert.equal(servicePorts.length, 5, 'actual service manifest supplies the five sidecar defaults');
-  for (const port of [...servicePorts, proxyPort, cloudPort]) {
-    for (let index = 0; index < 5; index += 1) {
+  for (const port of [...servicePorts, proxyPort]) {
+    for (let index = 0; index < 4; index += 1) {
       const tuple = NAMED_ALPHA_PORTS.split(',');
       tuple[index] = String(port);
       assert.throws(() => coordinates(f, { ports: tuple.join(',') }), /non-protected/);
@@ -73,14 +74,14 @@ test('named coordinates protect actual sidecar and cloud defaults in every tuple
 
 test('every tuple role rejects runtime, old Alpha and protected Redis aliases', (t) => {
   const f = namedAlphaFixture(t);
-  for (const port of [3001, 3002, 3011, 3012, 4100, 4111, 5201, 5211, 6379, 6099, 6397, 6398, 6399, 6401]) {
-    for (let index = 0; index < 5; index += 1) {
+  for (const port of [3001, 3002, 3011, 3012, 3098, 4100, 4111, 5201, 5211, 6379, 6099, 6397, 6398, 6399, 6401]) {
+    for (let index = 0; index < 4; index += 1) {
       const tuple = NAMED_ALPHA_PORTS.split(',');
       tuple[index] = String(port);
       assert.throws(() => coordinates(f, { ports: tuple.join(',') }), /non-protected/);
     }
   }
-  for (const ports of ['5311,5312,5411,5511,015397', '5311,5312,5411,5511,65536', '5311,5312,5411,5311,15397'])
+  for (const ports of ['5311,5312,5411,015397', '5311,5312,5411,65536', '5311,5312,5411,5311'])
     assert.throws(() => coordinates(f, { ports }), /port tuple|non-protected/);
   for (const instance of ['../runtime', 'runtime/main-sync', 'f290;rm', 'F290', 'a--b'])
     assert.throws(() => coordinates(f, { instance }), /instance/);

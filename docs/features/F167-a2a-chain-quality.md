@@ -5,7 +5,7 @@ topics: [a2a, collaboration, harness-engineering, agent-readiness]
 doc_kind: spec
 created: 2026-04-17
 updated: 2026-10-18
-tips_exempt: "Renewed 2026-10-18 for the parent-bound approved-child and legacy orphan-carrier repairs: they correct the existing cat-side structured-transfer, Task execution, development-return, and Queue custody paths without adding an end-user action or a new tool; usage remains described by the existing entrusted-work, structured-transfer, and development-return surfaces. Returned-delegate succession, exact-source read authority, orphan-carrier recovery, and KD-33 event-wait completion remain internal protocol behavior taught by their existing tool surfaces."
+tips_exempt: "Renewed 2026-10-18 for the parent-bound approved-child and legacy orphan-carrier repairs: they correct the existing cat-side structured-transfer, Task execution, development-return, and Queue custody paths without adding an end-user action or a new tool; usage remains described by the existing entrusted-work, structured-transfer, and development-return surfaces. Returned-delegate succession, exact-source read authority, orphan-carrier recovery, and KD-33 event-wait completion remain internal protocol behavior taught by their existing tool surfaces. C1 also withdraws the retired Host external-review recovery admission; the existing operator surfaces remain unchanged. Renewal 2026-10-21 restores the explicit public retirement notice after intake; no replacement tool or user action is introduced."
 user_journey_exempt: protocol behavior has no direct UI surface; end-to-end custody is dogfooded through the real MCP/task path
 mcp_admission_status: accepted
 mcp_admission_ref: "file:docs/features/F167-a2a-chain-quality.md"
@@ -18,11 +18,6 @@ mcp_admission_claims:
   - ref: "file:docs/features/F167-a2a-chain-quality.md"
     toolName: cat_cafe_complete_a2a_dispatch
     resourceFamily: task-workflow
-    boundaryKind: authority-boundary
-    decision: accepted
-  - ref: "file:docs/features/F167-a2a-chain-quality.md"
-    toolName: cat_cafe_recover_external_review_verdict
-    resourceFamily: tracking-review
     boundaryKind: authority-boundary
     decision: accepted
   - ref: "file:docs/features/F167-a2a-chain-quality.md"
@@ -43,6 +38,8 @@ mcp_admission_claims:
 ---
 
 # F167: A2A Chain Quality — 乒乓球熔断 + 虚空传球检测 + 角色护栏
+
+> **C1 当前准入边界**：`cat_cafe_recover_external_review_verdict` 已退役，无同名插件替代，已撤销其准入声明。下文相关实现记录保留为历史，不作为当前工具准入依据。
 
 > **Status**: in-progress | **Owner**: Ragdoll | **Priority**: P0
 

@@ -16,12 +16,16 @@ const { canonicalizeActionTerminalPredicate } = await import(
 );
 const { claimActionSuccessor } = await import('../dist/domains/ball-custody/action-successor-state-machine.js');
 
-const reviewPredicate = (headSha) =>
-  canonicalizeActionTerminalPredicate({
-    actionFamily: 'review',
-    subjectRef: 'pr:owner/repo#2868',
-    predicate: { kind: 'review_delivered', headSha },
-  });
+// Exercise revision CAS independently of the production Task resolver.
+const frozenPredicate = (revision) => ({
+  ...canonicalizeActionTerminalPredicate({
+    actionFamily: 'implement',
+    subjectRef: 'subject:task:work-2868',
+    predicate: { kind: 'task_done' },
+  }),
+  freshnessKey: `test-revision:${revision}`,
+  digest: `test-predicate:${revision}`,
+});
 
 const taskPredicate = () =>
   canonicalizeActionTerminalPredicate({
@@ -33,9 +37,9 @@ const taskPredicate = () =>
 const claimInput = (overrides = {}) => ({
   leaseId: 'lease-1',
   tenantScope: 'user-1',
-  subjectRef: 'pr:owner/repo#2868',
-  actionFamily: 'merge',
-  successorSlot: 'reviewer',
+  subjectRef: 'subject:task:work-2868',
+  actionFamily: 'implement',
+  successorSlot: 'implementer',
   mode: 'single',
   holderCatIds: ['codex-terra'],
   dispatchId: 'dispatch-1',
@@ -45,7 +49,7 @@ const claimInput = (overrides = {}) => ({
   predecessorThreadId: 'thread-source',
   issuerStandingEvidenceRef: 'message:request-1',
   evidenceRefs: ['message:request-1'],
-  terminalPredicate: reviewPredicate('aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'),
+  terminalPredicate: frozenPredicate('aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'),
   now: 100,
   ...overrides,
 });
@@ -127,10 +131,10 @@ describe('RedisActionSuccessorLeaseStore', { skip: redisIsolationSkipReason(REDI
     const legacy = {
       leaseId: 'lease-legacy',
       tenantScope: 'user-1',
-      subjectRef: 'pr:owner/repo#2868',
-      actionFamily: 'merge',
-      successorSlot: 'reviewer',
-      key: 'user-1\u001fpr:owner/repo#2868\u001fmerge\u001freviewer',
+      subjectRef: 'subject:task:work-2868',
+      actionFamily: 'implement',
+      successorSlot: 'implementer',
+      key: 'user-1\u001fsubject:task:work-2868\u001fimplement\u001fimplementer',
       mode: 'single',
       holderCatIds: ['codex-terra'],
       dispatchId: 'dispatch-legacy',
@@ -272,9 +276,9 @@ describe('RedisActionSuccessorLeaseStore', { skip: redisIsolationSkipReason(REDI
   });
 
   it('atomically installs the incoming terminal predicate on replacement', async () => {
-    const oldPredicate = reviewPredicate('aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa');
-    const newPredicate = reviewPredicate('bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb');
-    const claimed = await store.claim(claimInput({ actionFamily: 'review', terminalPredicate: oldPredicate }));
+    const oldPredicate = frozenPredicate('aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa');
+    const newPredicate = frozenPredicate('bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb');
+    const claimed = await store.claim(claimInput({ actionFamily: 'implement', terminalPredicate: oldPredicate }));
     await store.commitOutcome(claimed.lease.leaseId, {
       generation: 1,
       catId: 'codex-terra',
@@ -342,20 +346,20 @@ describe('RedisActionSuccessorLeaseStore', { skip: redisIsolationSkipReason(REDI
   it('atomically continues exactly one fresh subject revision on a new lease under the same key', async () => {
     const claimed = await store.claim(
       claimInput({
-        actionFamily: 'review',
-        terminalPredicate: reviewPredicate('aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'),
+        actionFamily: 'implement',
+        terminalPredicate: frozenPredicate('aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'),
       }),
     );
     const candidate = await store.recordCompletionCandidate(claimed.lease.leaseId, {
       generation: 1,
       catId: 'codex-terra',
-      evidenceRefs: ['community:pr:owner/repo#2868:review:g1'],
+      evidenceRefs: ['community:subject:task:work-2868:review:g1'],
       now: 110,
     });
     const completed = await store.commitCompletionVerdict(claimed.lease.leaseId, {
       generation: 1,
       catId: 'codex-terra',
-      verdict: verifiedCompletionVerdict(candidate.lease, 'codex-terra', 'community:pr:owner/repo#2868:review:g1'),
+      verdict: verifiedCompletionVerdict(candidate.lease, 'codex-terra', 'community:subject:task:work-2868:review:g1'),
       now: 111,
     });
     assert.equal(completed.outcome, 'committed');
@@ -363,7 +367,7 @@ describe('RedisActionSuccessorLeaseStore', { skip: redisIsolationSkipReason(REDI
     const input = {
       successorLeaseId: 'lease-fresh-head-b',
       expectedGeneration: 1,
-      terminalPredicate: reviewPredicate('bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'),
+      terminalPredicate: frozenPredicate('bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'),
       holderCatIds: ['codex-terra'],
       holderThreadId: 'thread-target',
       claimOrigin: 'structured_transfer',
@@ -371,7 +375,7 @@ describe('RedisActionSuccessorLeaseStore', { skip: redisIsolationSkipReason(REDI
       predecessorThreadId: 'thread-source',
       dispatchId: 'dispatch-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
       issuerStandingEvidenceRef: 'message:request-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
-      evidenceRef: 'community:pr:owner/repo#2868:head:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+      evidenceRef: 'community:subject:task:work-2868:head:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
       now: 120,
     };
     const [a, b] = await Promise.all([
@@ -404,7 +408,7 @@ describe('RedisActionSuccessorLeaseStore', { skip: redisIsolationSkipReason(REDI
   });
 
   it('atomically upgrades a completed legacy generation to a predicate-backed revision', async () => {
-    const predicateBacked = claimActionSuccessor(null, claimInput({ actionFamily: 'review' })).lease;
+    const predicateBacked = claimActionSuccessor(null, claimInput({ actionFamily: 'implement' })).lease;
     const {
       terminalPredicate: _terminalPredicate,
       terminalPredicateState: _terminalPredicateState,
@@ -434,7 +438,7 @@ describe('RedisActionSuccessorLeaseStore', { skip: redisIsolationSkipReason(REDI
     const continued = await store.continueFreshRevision(legacyLease.leaseId, {
       successorLeaseId: 'lease-fresh-head-legacy',
       expectedGeneration: 1,
-      terminalPredicate: reviewPredicate('bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'),
+      terminalPredicate: frozenPredicate('bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'),
       holderCatIds: ['codex-terra'],
       holderThreadId: 'thread-target',
       claimOrigin: 'structured_transfer',
@@ -442,7 +446,7 @@ describe('RedisActionSuccessorLeaseStore', { skip: redisIsolationSkipReason(REDI
       predecessorThreadId: 'thread-source',
       dispatchId: 'dispatch-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
       issuerStandingEvidenceRef: 'message:request-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
-      evidenceRef: 'community:pr:owner/repo#2868:head:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+      evidenceRef: 'community:subject:task:work-2868:head:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
       now: 120,
     });
 
@@ -455,12 +459,12 @@ describe('RedisActionSuccessorLeaseStore', { skip: redisIsolationSkipReason(REDI
   });
 
   it('atomically exposes output for the verified holder without reopening admission', async () => {
-    const predicate = reviewPredicate('aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa');
-    const claimed = await store.claim(claimInput({ actionFamily: 'review', terminalPredicate: predicate }));
+    const predicate = frozenPredicate('aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa');
+    const claimed = await store.claim(claimInput({ actionFamily: 'implement', terminalPredicate: predicate }));
     const candidate = await store.recordCompletionCandidate(claimed.lease.leaseId, {
       generation: 1,
       catId: 'codex-terra',
-      evidenceRefs: ['community:pr:owner/repo#2868:review:g1'],
+      evidenceRefs: ['community:subject:task:work-2868:review:g1'],
       now: 110,
     });
     await store.commitCompletionVerdict(claimed.lease.leaseId, {
@@ -469,7 +473,7 @@ describe('RedisActionSuccessorLeaseStore', { skip: redisIsolationSkipReason(REDI
       verdict: verifiedCompletionVerdict(
         candidate.lease,
         'codex-terra',
-        'community:pr:owner/repo#2868:review:g1',
+        'community:subject:task:work-2868:review:g1',
         predicate,
       ),
       now: 111,
@@ -508,10 +512,10 @@ describe('RedisActionSuccessorLeaseStore', { skip: redisIsolationSkipReason(REDI
   });
 
   it('keeps concurrent completion candidates isolated per holder', async () => {
-    const predicate = reviewPredicate('cccccccccccccccccccccccccccccccccccccccc');
+    const predicate = frozenPredicate('cccccccccccccccccccccccccccccccccccccccc');
     const claimed = await store.claim(
       claimInput({
-        actionFamily: 'review',
+        actionFamily: 'implement',
         mode: 'parallel',
         holderCatIds: ['codex-terra', 'opus'],
         parallelIntent: 'independent_review',
@@ -523,13 +527,13 @@ describe('RedisActionSuccessorLeaseStore', { skip: redisIsolationSkipReason(REDI
       store.recordCompletionCandidate(claimed.lease.leaseId, {
         generation: 1,
         catId: 'codex-terra',
-        evidenceRefs: ['community:pr:owner/repo#2868:review:terra'],
+        evidenceRefs: ['community:subject:task:work-2868:review:terra'],
         now: 110,
       }),
       store.recordCompletionCandidate(claimed.lease.leaseId, {
         generation: 1,
         catId: 'opus',
-        evidenceRefs: ['community:pr:owner/repo#2868:review:opus'],
+        evidenceRefs: ['community:subject:task:work-2868:review:opus'],
         now: 111,
       }),
     ]);
@@ -562,7 +566,7 @@ describe('RedisActionSuccessorLeaseStore', { skip: redisIsolationSkipReason(REDI
       verdict: verifiedCompletionVerdict(
         persisted,
         'codex-terra',
-        'community:pr:owner/repo#2868:review:terra',
+        'community:subject:task:work-2868:review:terra',
         predicate,
       ),
       now: 113,
@@ -575,7 +579,7 @@ describe('RedisActionSuccessorLeaseStore', { skip: redisIsolationSkipReason(REDI
       verdict: verifiedCompletionVerdict(
         terraFailed.lease,
         'opus',
-        'community:pr:owner/repo#2868:review:opus',
+        'community:subject:task:work-2868:review:opus',
         predicate,
       ),
       now: 114,
@@ -586,10 +590,10 @@ describe('RedisActionSuccessorLeaseStore', { skip: redisIsolationSkipReason(REDI
   });
 
   it('keeps a parallel lease active until a failed holder follows a verified success', async () => {
-    const predicate = reviewPredicate('dddddddddddddddddddddddddddddddddddddddd');
+    const predicate = frozenPredicate('dddddddddddddddddddddddddddddddddddddddd');
     const claimed = await store.claim(
       claimInput({
-        actionFamily: 'review',
+        actionFamily: 'implement',
         mode: 'parallel',
         holderCatIds: ['codex-terra', 'opus'],
         parallelIntent: 'independent_review',
@@ -600,7 +604,7 @@ describe('RedisActionSuccessorLeaseStore', { skip: redisIsolationSkipReason(REDI
     const candidate = await store.recordCompletionCandidate(claimed.lease.leaseId, {
       generation: 1,
       catId: 'opus',
-      evidenceRefs: ['community:pr:owner/repo#2868:review:opus'],
+      evidenceRefs: ['community:subject:task:work-2868:review:opus'],
       now: 110,
     });
     const opusCommitted = await store.commitCompletionVerdict(claimed.lease.leaseId, {
@@ -609,7 +613,7 @@ describe('RedisActionSuccessorLeaseStore', { skip: redisIsolationSkipReason(REDI
       verdict: verifiedCompletionVerdict(
         candidate.lease,
         'opus',
-        'community:pr:owner/repo#2868:review:opus',
+        'community:subject:task:work-2868:review:opus',
         predicate,
       ),
       now: 111,
@@ -633,33 +637,33 @@ describe('RedisActionSuccessorLeaseStore', { skip: redisIsolationSkipReason(REDI
   it('persists fresh-revision claim provenance without retaining the prior predecessor route', async () => {
     const claimed = await store.claim(
       claimInput({
-        actionFamily: 'review',
-        terminalPredicate: reviewPredicate('aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'),
+        actionFamily: 'implement',
+        terminalPredicate: frozenPredicate('aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'),
       }),
     );
     const candidate = await store.recordCompletionCandidate(claimed.lease.leaseId, {
       generation: 1,
       catId: 'codex-terra',
-      evidenceRefs: ['community:pr:owner/repo#2868:review:g1'],
+      evidenceRefs: ['community:subject:task:work-2868:review:g1'],
       now: 110,
     });
     await store.commitCompletionVerdict(claimed.lease.leaseId, {
       generation: 1,
       catId: 'codex-terra',
-      verdict: verifiedCompletionVerdict(candidate.lease, 'codex-terra', 'community:pr:owner/repo#2868:review:g1'),
+      verdict: verifiedCompletionVerdict(candidate.lease, 'codex-terra', 'community:subject:task:work-2868:review:g1'),
       now: 111,
     });
 
     const result = await store.continueFreshRevision(claimed.lease.leaseId, {
       successorLeaseId: 'lease-fresh-head-existing-standing',
       expectedGeneration: 1,
-      terminalPredicate: reviewPredicate('bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'),
+      terminalPredicate: frozenPredicate('bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'),
       holderCatIds: ['codex-sol'],
       holderThreadId: 'thread-source',
       claimOrigin: 'existing_standing',
       dispatchId: 'dispatch-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-self',
       issuerStandingEvidenceRef: 'grounding:verified-owner',
-      evidenceRef: 'community:pr:owner/repo#2868:head:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+      evidenceRef: 'community:subject:task:work-2868:head:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
       now: 120,
     });
 
@@ -673,14 +677,14 @@ describe('RedisActionSuccessorLeaseStore', { skip: redisIsolationSkipReason(REDI
   it('rejects a completion verdict when terminal truth appears after candidate verification', async () => {
     const claimed = await store.claim(
       claimInput({
-        actionFamily: 'review',
-        terminalPredicate: reviewPredicate('aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'),
+        actionFamily: 'implement',
+        terminalPredicate: frozenPredicate('aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'),
       }),
     );
     const candidate = await store.recordCompletionCandidate(claimed.lease.leaseId, {
       generation: 1,
       catId: 'codex-terra',
-      evidenceRefs: ['community:pr:owner/repo#2868:review:g1'],
+      evidenceRefs: ['community:subject:task:work-2868:review:g1'],
       now: 110,
     });
     await store.markSubjectTerminal({
@@ -693,7 +697,7 @@ describe('RedisActionSuccessorLeaseStore', { skip: redisIsolationSkipReason(REDI
     const result = await store.commitCompletionVerdict(claimed.lease.leaseId, {
       generation: 1,
       catId: 'codex-terra',
-      verdict: verifiedCompletionVerdict(candidate.lease, 'codex-terra', 'community:pr:owner/repo#2868:review:g1'),
+      verdict: verifiedCompletionVerdict(candidate.lease, 'codex-terra', 'community:subject:task:work-2868:review:g1'),
       now: 112,
     });
 
@@ -706,20 +710,20 @@ describe('RedisActionSuccessorLeaseStore', { skip: redisIsolationSkipReason(REDI
   it('rejects a fresh revision when terminal truth appears after freshness verification', async () => {
     const claimed = await store.claim(
       claimInput({
-        actionFamily: 'review',
-        terminalPredicate: reviewPredicate('aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'),
+        actionFamily: 'implement',
+        terminalPredicate: frozenPredicate('aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'),
       }),
     );
     const candidate = await store.recordCompletionCandidate(claimed.lease.leaseId, {
       generation: 1,
       catId: 'codex-terra',
-      evidenceRefs: ['community:pr:owner/repo#2868:review:g1'],
+      evidenceRefs: ['community:subject:task:work-2868:review:g1'],
       now: 110,
     });
     const completed = await store.commitCompletionVerdict(claimed.lease.leaseId, {
       generation: 1,
       catId: 'codex-terra',
-      verdict: verifiedCompletionVerdict(candidate.lease, 'codex-terra', 'community:pr:owner/repo#2868:review:g1'),
+      verdict: verifiedCompletionVerdict(candidate.lease, 'codex-terra', 'community:subject:task:work-2868:review:g1'),
       now: 111,
     });
     assert.equal(completed.outcome, 'committed');
@@ -733,7 +737,7 @@ describe('RedisActionSuccessorLeaseStore', { skip: redisIsolationSkipReason(REDI
     const result = await store.continueFreshRevision(claimed.lease.leaseId, {
       successorLeaseId: 'lease-fresh-head-terminal-subject',
       expectedGeneration: 1,
-      terminalPredicate: reviewPredicate('bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'),
+      terminalPredicate: frozenPredicate('bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'),
       holderCatIds: ['codex-terra'],
       holderThreadId: 'thread-target',
       claimOrigin: 'structured_transfer',
@@ -741,7 +745,7 @@ describe('RedisActionSuccessorLeaseStore', { skip: redisIsolationSkipReason(REDI
       predecessorThreadId: 'thread-source',
       dispatchId: 'dispatch-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
       issuerStandingEvidenceRef: 'message:request-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
-      evidenceRef: 'community:pr:owner/repo#2868:head:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+      evidenceRef: 'community:subject:task:work-2868:head:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
       now: 113,
     });
 
@@ -838,8 +842,8 @@ describe('RedisActionSuccessorLeaseStore', { skip: redisIsolationSkipReason(REDI
   });
 
   it('atomically retires one stale pending dispatch with unavailable holder truth and keeps it replaceable', async () => {
-    const oldPredicate = reviewPredicate('aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa');
-    const claimed = await store.claim(claimInput({ actionFamily: 'review', terminalPredicate: oldPredicate }));
+    const oldPredicate = frozenPredicate('aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa');
+    const claimed = await store.claim(claimInput({ actionFamily: 'implement', terminalPredicate: oldPredicate }));
     const pending = {
       ...claimed.lease,
       dispatchDeliveryState: 'pending',
@@ -880,7 +884,7 @@ describe('RedisActionSuccessorLeaseStore', { skip: redisIsolationSkipReason(REDI
       dispatchId: 'dispatch-current-head',
       issuerStandingEvidenceRef: 'message:current-head-request',
       evidenceRef: 'message:current-head-request',
-      terminalPredicate: reviewPredicate('bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'),
+      terminalPredicate: frozenPredicate('bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'),
       now: 130,
     });
     assert.equal(replacement.outcome, 'replaced');
@@ -888,8 +892,8 @@ describe('RedisActionSuccessorLeaseStore', { skip: redisIsolationSkipReason(REDI
   });
 
   it('linearizes a verified attempt against a newer-head retirement on the exact lease revision', async () => {
-    const oldPredicate = reviewPredicate('aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa');
-    const claimed = await store.claim(claimInput({ actionFamily: 'review', terminalPredicate: oldPredicate }));
+    const oldPredicate = frozenPredicate('aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa');
+    const claimed = await store.claim(claimInput({ actionFamily: 'implement', terminalPredicate: oldPredicate }));
     const pending = {
       ...claimed.lease,
       dispatchDeliveryState: 'pending',
@@ -934,8 +938,8 @@ describe('RedisActionSuccessorLeaseStore', { skip: redisIsolationSkipReason(REDI
   });
 
   it('linearizes a post-attempt delivery reservation against newer-head retirement before carrier entry', async () => {
-    const oldPredicate = reviewPredicate('aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa');
-    const claimed = await store.claim(claimInput({ actionFamily: 'review', terminalPredicate: oldPredicate }));
+    const oldPredicate = frozenPredicate('aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa');
+    const claimed = await store.claim(claimInput({ actionFamily: 'implement', terminalPredicate: oldPredicate }));
     const pending = {
       ...claimed.lease,
       dispatchDeliveryState: 'pending',
@@ -995,8 +999,8 @@ describe('RedisActionSuccessorLeaseStore', { skip: redisIsolationSkipReason(REDI
   });
 
   it('does not retire delivered, terminal-holder, stale-generation, or subject-terminal dispatch truth', async () => {
-    const predicate = reviewPredicate('aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa');
-    const claimed = await store.claim(claimInput({ actionFamily: 'review', terminalPredicate: predicate }));
+    const predicate = frozenPredicate('aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa');
+    const claimed = await store.claim(claimInput({ actionFamily: 'implement', terminalPredicate: predicate }));
     const pending = {
       ...claimed.lease,
       dispatchDeliveryState: 'pending',
@@ -1074,7 +1078,7 @@ describe('RedisActionSuccessorLeaseStore', { skip: redisIsolationSkipReason(REDI
     await store.markSubjectTerminal({
       subjectRef: pending.subjectRef,
       state: 'closed',
-      evidenceRef: 'github:pr:owner/repo#2868:closed',
+      evidenceRef: 'github:subject:task:work-2868:closed',
       now: 121,
     });
     assert.equal(
@@ -1093,7 +1097,7 @@ describe('RedisActionSuccessorLeaseStore', { skip: redisIsolationSkipReason(REDI
   });
 
   it('allows exactly one returned-holder reattach and fences every stale replay', async () => {
-    const claimed = await store.claim(claimInput({ actionFamily: 'review' }));
+    const claimed = await store.claim(claimInput({ actionFamily: 'implement' }));
     const returned = await store.returnToPredecessor(claimed.lease.leaseId, {
       expectedGeneration: 1,
       rejectingCatId: 'codex-terra',
@@ -1109,7 +1113,7 @@ describe('RedisActionSuccessorLeaseStore', { skip: redisIsolationSkipReason(REDI
       now: 121,
     });
     assert.equal(delivered.outcome, 'delivered');
-    const freshPredicate = reviewPredicate('bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb');
+    const freshPredicate = frozenPredicate('bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb');
     const attempts = await Promise.all(
       Array.from({ length: 12 }, (_, index) =>
         store.replace(returned.lease.leaseId, {
@@ -1201,9 +1205,9 @@ describe('RedisActionSuccessorLeaseStore', { skip: redisIsolationSkipReason(REDI
   it('does not enumerate a pre-cutover direct local-review return for startup wake recovery', async () => {
     const claimed = await store.claim(
       claimInput({
-        actionFamily: 'review',
-        successorSlot: 'reviewer',
-        terminalPredicate: reviewPredicate('a'.repeat(40)),
+        actionFamily: 'implement',
+        successorSlot: 'implementer',
+        terminalPredicate: frozenPredicate('a'.repeat(40)),
       }),
     );
     const returned = await store.returnToPredecessor(claimed.lease.leaseId, {
@@ -1215,7 +1219,18 @@ describe('RedisActionSuccessorLeaseStore', { skip: redisIsolationSkipReason(REDI
       now: 120,
     });
     assert.equal(returned.outcome, 'returned');
-    assert.equal(returned.lease.returnDeliveryState, 'pending', 'historical state remains readable');
+    const historical = {
+      ...returned.lease,
+      actionFamily: 'review',
+      successorSlot: 'reviewer',
+      terminalPredicate: { ...returned.lease.terminalPredicate, kind: 'review_delivered' },
+    };
+    await redis.set(ActionSuccessorKeys.detail(historical.leaseId), JSON.stringify(historical));
+    assert.equal(
+      (await store.get(historical.leaseId)).returnDeliveryState,
+      'pending',
+      'historical state remains readable',
+    );
     assert.deepEqual(await store.listPendingReturns(), [], 'historical local review must remain inert');
   });
 
@@ -1287,12 +1302,12 @@ describe('RedisActionSuccessorLeaseStore', { skip: redisIsolationSkipReason(REDI
   it('terminal subject truth blocks new claims and stale preflight', async () => {
     const claimed = await store.claim(claimInput());
     const terminal = await store.markSubjectTerminal({
-      subjectRef: 'PR:Owner/Repo#2868',
+      subjectRef: 'SUBJECT:TASK:work-2868',
       state: 'merged',
       evidenceRef: 'github:pr:2868:merged',
       now: 200,
     });
-    assert.equal(terminal.subjectRef, 'pr:owner/repo#2868');
+    assert.equal(terminal.subjectRef, 'subject:task:work-2868');
     assert.equal(await redis.ttl(ActionSuccessorKeys.subjectTerminal(terminal.subjectRef)), -1);
 
     const blocked = await store.claim(
@@ -1308,8 +1323,8 @@ describe('RedisActionSuccessorLeaseStore', { skip: redisIsolationSkipReason(REDI
   });
 
   it('atomically rejects a completion candidate after subject terminal truth appears', async () => {
-    const predicate = reviewPredicate('aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa');
-    const claimed = await store.claim(claimInput({ actionFamily: 'review', terminalPredicate: predicate }));
+    const predicate = frozenPredicate('aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa');
+    const claimed = await store.claim(claimInput({ actionFamily: 'implement', terminalPredicate: predicate }));
     await store.markSubjectTerminal({
       subjectRef: claimed.lease.subjectRef,
       state: 'closed',
@@ -1320,7 +1335,7 @@ describe('RedisActionSuccessorLeaseStore', { skip: redisIsolationSkipReason(REDI
     const result = await store.recordCompletionCandidate(claimed.lease.leaseId, {
       generation: 1,
       catId: 'codex-terra',
-      evidenceRefs: ['community:pr:owner/repo#2868:review:g1'],
+      evidenceRefs: ['community:subject:task:work-2868:review:g1'],
       now: 151,
     });
 
@@ -1355,7 +1370,7 @@ describe('RedisActionSuccessorLeaseStore', { skip: redisIsolationSkipReason(REDI
     const claimed = await store.claim(claimInput());
     assert.deepEqual(await store.preflight(claimed.lease.leaseId, 1), { ok: true, reason: 'active' });
     await store.markSubjectTerminal({
-      subjectRef: 'pr:owner/repo#2868',
+      subjectRef: 'subject:task:work-2868',
       state: 'merged',
       evidenceRef: 'github:merged',
       now: 160,
@@ -1375,21 +1390,21 @@ describe('RedisActionSuccessorLeaseStore', { skip: redisIsolationSkipReason(REDI
 
   it('retires a stale terminal marker on newer reopen truth without deleting its history', async () => {
     await store.markSubjectTerminal({
-      subjectRef: 'pr:owner/repo#2868',
+      subjectRef: 'subject:task:work-2868',
       state: 'closed',
       evidenceRef: 'github:closed',
       now: 200,
     });
     assert.equal(
-      await store.clearSubjectTerminal('pr:owner/repo#2868', {
+      await store.clearSubjectTerminal('subject:task:work-2868', {
         evidenceRef: 'github:reopened',
         now: 250,
       }),
       true,
     );
-    assert.equal(await store.getSubjectTerminal('pr:owner/repo#2868'), null);
-    assert.equal(await redis.scard(ActionSuccessorKeys.subjectTerminalHistory('pr:owner/repo#2868')), 2);
-    assert.equal(await redis.ttl(ActionSuccessorKeys.subjectTerminalHistory('pr:owner/repo#2868')), -1);
+    assert.equal(await store.getSubjectTerminal('subject:task:work-2868'), null);
+    assert.equal(await redis.scard(ActionSuccessorKeys.subjectTerminalHistory('subject:task:work-2868')), 2);
+    assert.equal(await redis.ttl(ActionSuccessorKeys.subjectTerminalHistory('subject:task:work-2868')), -1);
   });
   describe('refreshHandledCarrier (F167 carrier refresh)', () => {
     const directClaim = (overrides = {}) =>

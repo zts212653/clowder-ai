@@ -14,6 +14,8 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { resolveCliCommand } from '../../../../utils/cli-resolve.js';
 
+import { type ClientAuthDeps, detectClientAuth } from './client-auth.js';
+
 const execFileAsync = promisify(execFile);
 
 export interface DetectedClient {
@@ -36,6 +38,10 @@ export interface DetectedClient {
   version?: string;
   /** Whether an API key env var is set for this provider */
   hasApiKey: boolean;
+  /** Whether a usable local CLI credential (or API key) was detected. */
+  authenticated: boolean;
+  authType: 'environment' | 'native' | 'none';
+  accountRef?: string;
 }
 
 interface CliSpec {
@@ -88,7 +94,7 @@ const defaultExistsOnPath: ExistsOnPath = async (cli) => {
   }
 };
 
-async function checkCli(spec: CliSpec, existsOnPath: ExistsOnPath): Promise<DetectedClient> {
+async function checkCli(spec: CliSpec, existsOnPath: ExistsOnPath, auth?: ClientAuthDeps): Promise<DetectedClient> {
   // A throwing probe must NOT propagate — one bad CLI shouldn't tank the
   // whole detection. Treat any error as "not installed" (same observable
   // result as a probe that resolved false).
@@ -104,7 +110,7 @@ async function checkCli(spec: CliSpec, existsOnPath: ExistsOnPath): Promise<Dete
     label: spec.label,
     cli: spec.cli,
     installed,
-    hasApiKey: spec.envKey ? Boolean(process.env[spec.envKey]) : false,
+    ...detectClientAuth(spec.client, spec.envKey, auth),
   };
 }
 
@@ -112,14 +118,20 @@ async function checkCli(spec: CliSpec, existsOnPath: ExistsOnPath): Promise<Dete
  * Detect all available CLI clients in parallel.
  * Pass a stub `existsOnPath` from tests to avoid touching the real filesystem.
  */
-export async function detectAvailableClients(deps?: { existsOnPath?: ExistsOnPath }): Promise<DetectedClient[]> {
+export async function detectAvailableClients(deps?: {
+  existsOnPath?: ExistsOnPath;
+  auth?: ClientAuthDeps;
+}): Promise<DetectedClient[]> {
   const probe = deps?.existsOnPath ?? defaultExistsOnPath;
-  const results = await Promise.all(CLI_SPECS.map((spec) => checkCli(spec, probe)));
+  const results = await Promise.all(CLI_SPECS.map((spec) => checkCli(spec, probe, deps?.auth)));
   return results;
 }
 
 /** Return only clients that are installed. */
-export async function getInstalledClients(deps?: { existsOnPath?: ExistsOnPath }): Promise<DetectedClient[]> {
+export async function getInstalledClients(deps?: {
+  existsOnPath?: ExistsOnPath;
+  auth?: ClientAuthDeps;
+}): Promise<DetectedClient[]> {
   const all = await detectAvailableClients(deps);
   return all.filter((c) => c.installed);
 }

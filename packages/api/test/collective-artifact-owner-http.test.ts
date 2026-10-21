@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { test } from 'node:test';
-import { CollectiveConnectorBuiltinRuntime } from '../src/domains/plugin/builtin-runtime/collective-connector-runtime.js';
 import { collectiveArtifactOwnerFixture } from './collective-artifact-owner.fixture.js';
+import { test } from './helpers/f202-collective-installed-business.js';
+import { collectiveModuleFixture } from './helpers/f202-collective-module.fixture.js';
 
 test('two independent authenticated sessions share canonical Markdown and a real source-bound annotation over HTTP and Connector', async (t) => {
   const f = await collectiveArtifactOwnerFixture(t);
@@ -63,27 +63,30 @@ test('two independent authenticated sessions share canonical Markdown and a real
   assert.equal((await f.request(f.owner.sessionToken, 'read', {}, 'owner-after-revoke')).status, 200);
 });
 
-test('the real builtin lifecycle reattaches the existing owner port after a Connector restart', async (t) => {
+test('the installed module lifecycle reattaches the retained owner after restart without changing connection identity', async (t) => {
   const f = await collectiveArtifactOwnerFixture(t);
-  const runtime = new CollectiveConnectorBuiltinRuntime({
-    dataDirectory: join(f.root, 'connector'),
-    verifyAgent: async () => false,
-    openConnector: async () => f.connector,
-    syncIntervalMs: 60000,
-  });
   let calls = 0;
-  runtime.setArtifactOwner({
+  const owner = {
     execute: async (operation, authority) => {
-      calls += 1;
+      calls++;
       return f.port.execute(operation, authority);
     },
-  });
-  await runtime.start('fixture-plugin');
+  };
+  const module = await collectiveModuleFixture(t, f, owner);
+  f.useBackgroundSync();
+  await module.start();
   assert.equal((await f.request(f.member.sessionToken, 'read', {}, 'before-restart')).status, 200);
-  await runtime.stop('fixture-plugin', 'test restart');
-  await runtime.start('fixture-plugin');
-  t.after(() => runtime.stop('fixture-plugin', 'test complete'));
+  const stateFile = join(module.dataPath, 'connector', 'collective-connector.json');
+  const before = JSON.parse(await readFile(stateFile, 'utf8'));
+  await module.stop();
+  await module.start();
   assert.equal((await f.request(f.member.sessionToken, 'read', {}, 'after-restart')).status, 200);
+  const after = JSON.parse(await readFile(stateFile, 'utf8'));
+  assert.deepEqual(Object.keys(after.connections), Object.keys(before.connections));
+  assert.equal(
+    after.connections[f.connection.connectionId].endpointCredential,
+    before.connections[f.connection.connectionId].endpointCredential,
+  );
   assert.equal(calls, 2);
 });
 

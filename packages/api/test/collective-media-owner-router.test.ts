@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict';
 import { join } from 'node:path';
-import { test } from 'node:test';
 import { ArtifactReviewStore } from '../src/domains/collaborative-content/artifact-review/store.js';
 import { createCollectiveArtifactOwner } from '../src/domains/collaborative-content/collective-artifact/owner-router.js';
 import { collectiveArtifactOwnerFixture } from './collective-artifact-owner.fixture.js';
 import { collectiveMediaHttpFixture } from './collective-media-http.fixture.js';
 import { publishedCollectiveFixture } from './collective-published-media.fixture.js';
+import { test } from './helpers/f202-collective-installed-business.js';
 
 test('production composition dispatches by retained owner MIME rather than a caller payload', async (t) => {
   const f = await collectiveMediaHttpFixture(t);

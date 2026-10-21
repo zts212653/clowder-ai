@@ -10,7 +10,6 @@ import { routingPreflightNotice } from './routing-preflight-notice.js';
  * entry; this function never extends its own execution worklist.
  */
 
-import crypto from 'node:crypto';
 import {
   type CatConfig,
   type CatId,
@@ -18,7 +17,6 @@ import {
   createCatId,
   type OutputCommitDecision,
   type QueueTerminalConsumptionWitness,
-  type RichBlock,
   resolveWorkflowSopSkill,
 } from '@cat-cafe/shared';
 import type { Span } from '@opentelemetry/api';
@@ -55,7 +53,6 @@ import {
   legacyGuardWithoutActiveCustodyTotal,
   lineStartDetected,
   routingEventWaitBypassTotal,
-  routingEventWaitFalseBypassTotal,
   routingEventWaitRedundantHoldPreventedTotal,
   routingEventWaitRejectedTotal,
   routingSyntaxCorrectionDetected,
@@ -98,7 +95,6 @@ import {
 import {
   compareTurnCustodyShadow,
   type TurnCustodyProjection,
-  type TurnCustodyWakeProvenance,
 } from '../../../../ball-custody/TurnCustodyProjectionService.js';
 import {
   buildA2ADispatchTurnCustodyWake,
@@ -144,11 +140,9 @@ import {
 } from '../../context/SystemPromptBuilder.js';
 import { mayDeleteDraft } from '../../freshness/FreshnessDraftCustody.js';
 import { formatDegradationMessage } from '../../orchestration/DegradationPolicy.js';
-import { AuditEventTypes, getEventAuditLog } from '../../orchestration/EventAuditLog.js';
 import { mergePresentationCounts, type PresentationCounts } from '../../session/context/context-surface-projection.js';
 import { buildSessionBootstrap, MAX_SESSION_BOOTSTRAP_TOKENS } from '../../session/SessionBootstrap.js';
 import { createMessageDeliveryBoundary } from '../../stores/message-delivery-boundary.js';
-import { messageFrom } from '../../stores/message-from.js';
 import {
   type AppendMessageInput,
   commitLifecycleResponseFromAppendInput,
@@ -163,7 +157,7 @@ import {
   type TurnExecutionKind,
   type TurnExecutionMessageProjection,
 } from '../../stores/ports/TurnExecutionStore.js';
-import { canViewMessage, isOwnerVisibleManagedHoldConnector } from '../../stores/visibility.js';
+import { isOwnerVisibleManagedHoldConnector } from '../../stores/visibility.js';
 import { classifyTool } from '../../tool-usage/classify.js';
 import { deriveResultSummary } from '../../tool-usage/derive-result-summary.js';
 import { normalizeMcpToolName } from '../../tool-usage/normalize-mcp-tool-name.js';
@@ -219,7 +213,6 @@ import {
   computeContextBudget,
   contextProjectionFromEpochDecision,
   createIdempotentPendingProjectionQueue,
-  createLeakedToolCallStreamStripper,
   createRoutingMessageTransform,
   detectContextDegradation,
   explicitPromptForIncrementalContext,
@@ -251,14 +244,6 @@ const log = createModuleLogger('route-serial');
 // (shared across serial + parallel strategies — see sharedCandidateTracker/sharedNudgeCooldown)
 
 const BALL_CUSTODY_INVOCATION_HEARTBEAT_MIN_INTERVAL_MS = 30_000;
-
-export function buildTurnCustodyStopGateRemedialPrompt(_wake: TurnCustodyWakeProvenance): string {
-  return (
-    '[F167 球权停止门] 本次唤醒携带的协议球尚未发生可验证状态迁移。\n' +
-    '请只完成一次与当前协议球匹配的结构化动作，不要重做或改写刚才的工作：完成候选、结构化传球、returnToPredecessor、hold_ball 或已注册的 eventWait。\n' +
-    '必须调用现有结构化工具；不要用纯文本 @、口头“持球”或礼貌 ACK 代替状态迁移。'
-  );
-}
 
 /**
  * F233 Phase B (B2): fire-and-forget 旁路写 ball.void_pass（声明持球但无 hold_ball / 无行首 @ / 无 structured 路由）。
@@ -790,7 +775,7 @@ export async function* routeSerial(
       try {
         await close(checkpoint);
       } catch (err) {
-        log.warn({ threadId, err }, 'F167 Phase T turn-custody stop-gate close failed');
+        log.warn({ threadId, err }, 'Turn-custody observation failed');
       }
     }
   };
@@ -803,7 +788,6 @@ export async function* routeSerial(
         preparationCheckpointAt = memberPreparationStartedAt;
         preparationTimings.length = 0;
       }
-      let stopGateRemedialAttempted = false;
       let routingDispatchPreflightDecision: RoutingPreflightDecisionV1 | undefined;
 
       // F-parallel-cancel: per-cat signal — canceling one cat skips ONLY that cat, not the
@@ -847,6 +831,19 @@ export async function* routeSerial(
           continue;
         }
       }
+      // Retained Queue records may name the retired Host-only Collective executor.
+      // Its scope must never silently become an ordinary, unrestricted invocation.
+      if (options.executionScope) {
+        yield {
+          type: 'error',
+          catId,
+          errorCode: 'legacy_execution_scope_retired',
+          error: '旧 Collective 执行入口已迁出，请从已安装插件重新发起。',
+          timestamp: Date.now(),
+        };
+        index++;
+        continue;
+      }
       // F148 OQ-2: briefing→invocation link + context eval
       let briefingMessageId: string | undefined;
       let briefingCoverageMap: import('./context-transport.js').CoverageMap | undefined;
@@ -887,6 +884,7 @@ export async function* routeSerial(
       const streamReplyTo = activeA2ATriggerMessageId ?? queueTriggerReplyTo;
       const turnTriggerMessageId = streamReplyTo ?? currentUserMessageId ?? a2aTriggerMessageId;
       const turnTriggerMessage = turnTriggerMessageId ? await deps.messageStore.getById(turnTriggerMessageId) : null;
+      const turnTriggerThreadId = turnTriggerMessage?.threadId === threadId ? threadId : undefined;
       const collectiveBoundTurn = isCollectiveBoundResponse(options.executionScope, turnTriggerMessage);
       const streamReplyPreview = streamReplyTo
         ? await hydrateReplyPreview(deps.messageStore, streamReplyTo)
@@ -1045,11 +1043,9 @@ export async function* routeSerial(
       // the same cat from being misattributed to the earlier projection.
       await flushTurnCustodyShadowCloses('next_turn_boundary');
       let turnCustodyProjection: TurnCustodyProjection | undefined;
-      // Ordinary messages and managed continuations are already closed by the
-      // source -> Queue -> response lifecycle. Do not route them through the
-      // legacy turn-custody gate, even as a covered-empty shadow projection.
-      // Exact action successors and genuinely legacy wakes retain that gate;
-      // non-obligation coordination still records its terminal witness below.
+      // Queue owns completion. These remaining projections only record transition
+      // telemetry and the silent coordination witness; none can invoke a model.
+      // Ordinary chat and managed continuations need no additional observation.
       if (
         deps.turnCustodyProjectionService &&
         turnCustodyWake.kind !== 'structured' &&
@@ -1953,7 +1949,6 @@ export async function* routeSerial(
         ...(options.asrPersonMemoryScenes?.length ? { asrPersonMemoryScenes: options.asrPersonMemoryScenes } : {}),
         ...(memoryCueLegacyFallbacks.length > 0 ? { memoryCueLegacyFallbacks } : {}),
         ...(options.toolExecutionPolicy ? { toolExecutionPolicy: options.toolExecutionPolicy } : {}),
-        ...(options.executionScope ? { executionScope: options.executionScope } : {}),
         executionKind: initialExecutionKind,
         ...(options.beforeOutputCommit ? { outputFenced: true } : {}),
         executionCausal: {
@@ -2401,7 +2396,7 @@ export async function* routeSerial(
         return observesLegacyRoutingBlock({ ...input, hasTerminalCoordinationExit });
       };
 
-      const scheduleTurnCustodyStopGate = async (legacyObservedBlock: boolean): Promise<void> => {
+      const scheduleTurnCustodyObservation = async (legacyObservedBlock: boolean): Promise<void> => {
         if (turnCustodyShadowRecorded || !turnCustodyProjection || !deps.turnCustodyProjectionService) return;
         turnCustodyShadowRecorded = true;
         const projection = turnCustodyProjection;
@@ -2516,507 +2511,12 @@ export async function* routeSerial(
               classification,
               evidenceRefs: newDecision.evidenceRefs,
             },
-            'F167 Phase T turn-custody stop-gate verdict',
+            'Turn-custody transition observation',
           );
 
-          if (!newDecision.shouldBlock || hadError || !actionOutputCommitAllowed || stopGateRemedialAttempted) {
-            return;
-          }
-
-          const originalOwnInvocationId = ownInvocationId;
-          const originalDoneMsg = doneMsg;
-          const originalTextContent = textContent;
-          const originalOutputProjection = outputProjection;
-          const originalPersistedMetadata = persistedMetadata;
-          try {
-            await runTurnCustodyStopGateRemedial('', [], []);
-            const remediatedDecision = await deps.turnCustodyProjectionService!.close(projection);
-            if (remediatedDecision.shouldBlock) {
-              // Internal lifecycle diagnostics stay in telemetry. They must not
-              // manufacture a persisted/broadcast conversation message that
-              // presentation layers then have to hide.
-              log.warn(
-                {
-                  threadId,
-                  catId: catId as string,
-                  state: remediatedDecision.state,
-                  transitionObserved: remediatedDecision.transitionObserved,
-                  evidenceRefs: remediatedDecision.evidenceRefs,
-                },
-                'F167 Phase T remediation ended without a custody transition',
-              );
-            }
-            if (turnStoredMessageId && deps.invocationDeps.turnExecutionStore) {
-              const projections = await readTurnExecutionProjections(originalOwnInvocationId);
-              if (Object.keys(projections).length > 0) {
-                await deps.messageStore.augmentStreamMetadata(turnStoredMessageId, { extra: projections });
-              }
-            }
-          } finally {
-            ownInvocationId = originalOwnInvocationId;
-            doneMsg = originalDoneMsg;
-            textContent = originalTextContent;
-            outputProjection = originalOutputProjection;
-            persistedMetadata = originalPersistedMetadata;
-          }
+          // Observation only. Queue/action fences own deterministic completion;
+          // a missing transition must never trigger a second model conversation.
         });
-      };
-
-      const runTurnCustodyStopGateRemedial = async (
-        originalStoredContentBeforeRemedial: string,
-        originalRichBlocksBeforeRemedial: RichBlock[],
-        originalToolEventsBeforeRemedial: StoredToolEvent[],
-      ): Promise<{
-        storedContent: string;
-        routingContent: string;
-        allRichBlocks: RichBlock[];
-        a2aMentions: CatId[];
-        hasCoCreatorLineStartMention: boolean;
-        hasLocalCoCreatorLineStartMention: boolean;
-        streamEvents: AgentMessage[];
-      }> => {
-        let remedialRoutingPreflightNotice: AgentMessage | undefined;
-        let remedialRoutingDispatchPreflightDecision: RoutingPreflightDecisionV1 | undefined;
-        if (deps.routingDispatchPreflight) {
-          remedialRoutingDispatchPreflightDecision = await preflightRoutingDispatch(deps.routingDispatchPreflight, {
-            ownerId: userId,
-            targetCatIds: [catId],
-            ...(options.routingContextIntent ? { intent: options.routingContextIntent } : {}),
-          });
-          const receipt = routingDispatchPreflightReceipt(remedialRoutingDispatchPreflightDecision, catId);
-          if (receipt.target.disposition !== 'allowed') {
-            remedialRoutingPreflightNotice = {
-              type: 'system_info',
-              catId,
-              content: JSON.stringify(receipt),
-              timestamp: Date.now(),
-            };
-          }
-          if (receipt.target.disposition === 'rejected') {
-            stopGateRemedialAttempted = true;
-            return {
-              storedContent: originalStoredContentBeforeRemedial,
-              routingContent: '',
-              allRichBlocks: originalRichBlocksBeforeRemedial,
-              a2aMentions: [],
-              hasCoCreatorLineStartMention: false,
-              hasLocalCoCreatorLineStartMention: false,
-              streamEvents: remedialRoutingPreflightNotice ? [remedialRoutingPreflightNotice] : [],
-            };
-          }
-        }
-        stopGateRemedialAttempted = true;
-        const originalVisibleInvocationIdBeforeRemedial = ownInvocationId;
-        const originalOutputProjectionBeforeRemedial = outputProjection;
-        const originalDeferredVoiceInvocationIdBeforeRemedial = deferredVoiceInvocationId;
-        const originalDeferredVoiceTextChunksBeforeRemedial = [...deferredVoiceTextChunks];
-        const originalToolNamesBeforeRemedial = [...collectedToolNames];
-        resetDeferredVoice();
-
-        if (deps.draftStore && ownInvocationId) {
-          deps.draftStore.delete(userId, threadId, ownInvocationId)?.catch?.(noop);
-        }
-
-        textContent = '';
-        outputProjection = undefined;
-        thinkingChunks.splice(0, thinkingChunks.length);
-        persistedMetadata = undefined;
-        remoteCancellation.reset();
-        doneMsg = undefined;
-        collectedToolEvents.splice(0, collectedToolEvents.length);
-        collectedToolNames.splice(0, collectedToolNames.length);
-        structuredTargetCats.clear();
-        streamRichBlocks.splice(0, streamRichBlocks.length);
-        pendingToolResults.splice(0, pendingToolResults.length);
-        verifiedConciergeToolTargets.reset();
-        pendingCallbackRoutingExits.splice(0, pendingCallbackRoutingExits.length);
-        confirmedCallbackRoutingGuardMentions.clear();
-        confirmedCallbackRoutingGuardHasCoCreatorLineStartMention = false;
-        confirmedLocalCallbackRoutingHasCoCreatorLineStartMention = false;
-        callbackPosts.reset();
-        ownInvocationId = undefined;
-
-        const remedialStreamEvents: AgentMessage[] = remedialRoutingPreflightNotice
-          ? [remedialRoutingPreflightNotice]
-          : [];
-        const remedialStripper = createLeakedToolCallStreamStripper();
-        const remedialService = getService(deps.services, catId, deps.unavailableServices);
-        const resolvedRemedialCapacitySnapshot = await resolveInvocationCapacitySnapshot({
-          catId,
-          service: remedialService,
-        });
-        let remedialCapacitySnapshot = resolvedRemedialCapacitySnapshot;
-        const turnCustodyRemedialPrompt = buildTurnCustodyStopGateRemedialPrompt(turnCustodyWake);
-        const rebuildRemedialPromptAfterSessionSeal = rebuildSessionBootstrap
-          ? async () => {
-              const refreshed = await rebuildSessionBootstrap();
-              if (!refreshed) {
-                log.warn(
-                  { catId, threadId },
-                  '[routeSerial] remedial session bootstrap rebuild returned no sealed prior; degrading to bare remedial prompt',
-                );
-                return turnCustodyRemedialPrompt;
-              }
-              if (refreshed.pushRecallPresentations?.length) {
-                currentPushRecallPresentations.push(...refreshed.pushRecallPresentations);
-              }
-              return `${refreshed.text}\n\n---\n\n${turnCustodyRemedialPrompt}`;
-            }
-          : undefined;
-        let remedialPrompt = turnCustodyRemedialPrompt;
-        remedialCapacitySnapshot = await applyActiveSessionCapacityPin({
-          snapshot: remedialCapacitySnapshot,
-          catId,
-          threadId,
-          userId,
-          sessionChainStore: deps.invocationDeps.sessionChainStore,
-        });
-        const remedialSessionPolicySnapshot = resolveManagedSessionPolicySnapshot({
-          catId: catId as string,
-          evidence: {
-            capacitySnapshot: remedialCapacitySnapshot,
-            // Remedial invocations own a fresh evidence epoch too.
-            authoritativeUsage: false,
-            sessionRotation: Boolean(deps.invocationDeps.sessionChainStore && deps.invocationDeps.sessionSealer),
-            continuityBootstrap: Boolean(rebuildRemedialPromptAfterSessionSeal),
-          },
-        });
-        const sealed = await sealBeforeInvocationIfNeeded({
-          snapshot: remedialCapacitySnapshot,
-          catId,
-          threadId,
-          userId,
-          sessionChainStore: deps.invocationDeps.sessionChainStore,
-          sessionSealer: deps.invocationDeps.sessionSealer,
-          policySnapshot: remedialSessionPolicySnapshot,
-          clearProviderSession: () => deps.invocationDeps.sessionManager.delete(userId, catId, threadId),
-        });
-        if (sealed) {
-          remedialCapacitySnapshot = resolvedRemedialCapacitySnapshot;
-          if (!rebuildRemedialPromptAfterSessionSeal) {
-            throw new Error('pre_invocation_capacity_seal_requires_prompt_rebuild');
-          }
-          remedialPrompt = await rebuildRemedialPromptAfterSessionSeal();
-        }
-        for await (const remedialMsg of invokeSingleCat(deps.invocationDeps, {
-          onRemoteExecutionDispatched: remoteCancellation.onDispatched,
-          ...(options.routeIntent ? { routeIntent: options.routeIntent } : {}),
-          ...(options.routingContextIntent ? { routingContextIntent: options.routingContextIntent } : {}),
-          ...(remedialRoutingDispatchPreflightDecision
-            ? { routingDispatchPreflightDecision: remedialRoutingDispatchPreflightDecision }
-            : {}),
-          catId,
-          service: remedialService,
-          capacitySnapshot: remedialCapacitySnapshot,
-          sessionPolicySnapshot: remedialSessionPolicySnapshot,
-          prompt: remedialPrompt,
-          ...(rebuildRemedialPromptAfterSessionSeal
-            ? { rebuildPromptAfterSessionSeal: rebuildRemedialPromptAfterSessionSeal }
-            : {}),
-          userId,
-          ownerAuthProvenance,
-          threadId,
-          invocationOrigin: resolveInvocationOrigin(options.humanDispositionInvocationOrigin),
-          routeTopology: 'serial',
-          ...(catSignal ? { signal: catSignal } : {}),
-          ...(onMemberTimeout ? { onMemberTimeout } : {}),
-          ...(staticIdentity ? { systemPrompt: staticIdentity } : {}),
-          ...(options.parentInvocationId ? { parentInvocationId: options.parentInvocationId } : {}),
-          continuityCapsule,
-          ...(streamReplyTo ? { a2aTriggerMessageId: streamReplyTo } : {}),
-          ...(options.routeSpan ? { routeSpan: options.routeSpan } : {}),
-          invocationSpanRef,
-          ...(options.toolExecutionPolicy ? { toolExecutionPolicy: options.toolExecutionPolicy } : {}),
-          ...(options.executionScope ? { executionScope: options.executionScope } : {}),
-          executionKind: 'routing_guard',
-          ...(options.beforeOutputCommit ? { outputFenced: true } : {}),
-          executionCausal: {
-            ...((streamReplyTo ?? currentUserMessageId ?? a2aTriggerMessageId)
-              ? { triggerMessageId: streamReplyTo ?? currentUserMessageId ?? a2aTriggerMessageId }
-              : {}),
-            routingGuardReason: 'missing_routing_exit',
-          },
-          isLastCat: false,
-        })) {
-          if (catSignal?.aborted) break;
-
-          const remedialMsgs: AgentMessage[] = [];
-          if (remedialMsg.type === 'text' && remedialMsg.content) {
-            remedialMsgs.push({ ...remedialMsg, content: remedialStripper.push(remedialMsg.content) });
-          } else if (remedialMsg.type === 'done') {
-            const flushedText = remedialStripper.flush();
-            if (flushedText) {
-              remedialMsgs.push({
-                type: 'text',
-                catId,
-                content: flushedText,
-                timestamp: remedialMsg.timestamp,
-              });
-            }
-            remedialMsgs.push(remedialMsg);
-          } else {
-            remedialMsgs.push(remedialMsg);
-          }
-
-          for (const effectiveMsg of remedialMsgs) {
-            if (effectiveMsg.type === 'system_info' && effectiveMsg.content && !ownInvocationId) {
-              try {
-                const parsed = JSON.parse(effectiveMsg.content);
-                if (
-                  parsed.type === 'invocation_created' &&
-                  typeof parsed.invocationId === 'string' &&
-                  parsed.invocationId.length > 0
-                ) {
-                  ownInvocationId = parsed.invocationId;
-                  rememberTurnExecutionProjection(parsed.invocationId, 'routing_guard');
-                  emitBallInvocationStarted(deps.ballCustody, threadId, ownInvocationId, catId as string);
-                  if (voiceMode) {
-                    deferredVoiceInvocationId = ownInvocationId;
-                  }
-                }
-              } catch {
-                /* ignore parse errors */
-              }
-            }
-
-            if (effectiveMsg.type === 'text' && effectiveMsg.content) {
-              textContent = accumulateTextAggregate(
-                textContent,
-                effectiveMsg.content,
-                (effectiveMsg as { textMode?: 'append' | 'replace' }).textMode,
-              );
-              if (voiceMode) {
-                deferredVoiceTextChunks.push(effectiveMsg.content);
-              }
-            }
-
-            if (effectiveMsg.type === 'system_info' && effectiveMsg.content) {
-              if (isUserFacingSystemInfoContent(effectiveMsg.content)) {
-                sawUserFacingSystemInfo = true;
-                userFacingSystemInfoContents.push(effectiveMsg.content);
-              }
-              try {
-                const parsed = JSON.parse(effectiveMsg.content);
-                if (parsed.type === 'thinking' && typeof parsed.text === 'string') {
-                  thinkingChunks.splice(0, thinkingChunks.length, ...appendThinkingChunk(thinkingChunks, parsed.text));
-                }
-                if (parsed.type === 'rich_block' && parsed.block && isValidRichBlock(parsed.block)) {
-                  streamRichBlocks.push(parsed.block);
-                }
-                if (parsed.type === 'invocation_usage' && parsed.usage) {
-                  routeTotalTokens += (parsed.usage.inputTokens ?? 0) + (parsed.usage.outputTokens ?? 0);
-                }
-                persistedMetadata = withTimeoutDiagnostics(persistedMetadata, parsed);
-              } catch {
-                /* ignore parse errors */
-              }
-            }
-
-            const toolEvt = toStoredToolEvent(effectiveMsg, ownInvocationId);
-            if (toolEvt) {
-              collectedToolEvents.push(toolEvt);
-            }
-            verifiedConciergeToolTargets.observe(effectiveMsg);
-
-            if (effectiveMsg.type === 'tool_use') {
-              for (const target of collectStructuredTargetCatsFromInput(effectiveMsg.toolInput)) {
-                structuredTargetCats.add(target);
-              }
-            }
-            if (effectiveMsg.type === 'tool_use' && effectiveMsg.toolName) {
-              collectedToolNames.push(effectiveMsg.toolName);
-              pendingToolResults.push({
-                toolName: effectiveMsg.toolName,
-                ...(effectiveMsg.toolUseId ? { toolUseId: effectiveMsg.toolUseId } : {}),
-              });
-              const callbackExit = collectCallbackContentRoutingExit(
-                effectiveMsg.toolName,
-                effectiveMsg.toolInput,
-                catId,
-                effectiveMsg.toolUseId,
-              );
-              if (callbackExit) pendingCallbackRoutingExits.push(callbackExit);
-            }
-            if (effectiveMsg.type === 'tool_result') {
-              const callbackResult = parseCallbackPostResult(effectiveMsg.content);
-              const completedToolName = consumePendingToolResult(
-                pendingToolResults,
-                effectiveMsg,
-                callbackResult.confirmed,
-                Boolean(callbackResult.messageId && callbackResult.threadId),
-              );
-              if (completedToolName && isPostMessageToolName(completedToolName.toolName) && callbackResult.confirmed) {
-                callbackPosts.recordConfirmedPost(callbackResult);
-              }
-              if (completedToolName) {
-                const settledExit = settleCallbackRoutingExit(completedToolName, callbackResult.confirmed);
-                emitConfirmedCallbackBallHandedCvo(
-                  callbackResult.confirmed,
-                  settledExit,
-                  callbackResult.messageId,
-                  callbackResult.threadId,
-                );
-              }
-            }
-
-            if (effectiveMsg.metadata) {
-              persistedMetadata = mergeMessageMetadataSnapshots(persistedMetadata, effectiveMsg.metadata);
-            }
-            if (effectiveMsg.type === 'done') {
-              doneMsg = effectiveMsg;
-            } else {
-              const streamEvent = toStreamEvent(effectiveMsg);
-              if (streamEvent) remedialStreamEvents.push(streamEvent);
-            }
-          }
-        }
-
-        const remedialSanitized = sanitizeInjectedContent(textContent);
-        const remedialExtracted = extractRichFromText(remedialSanitized);
-        const remedialCleanText = remedialExtracted.cleanText;
-        // The structured stop gate never treats remedial prose as custody truth or user-visible
-        // replacement content. Only confirmed tool results may close the projection.
-        const preservesOriginalVisibleContent =
-          originalStoredContentBeforeRemedial.length > 0 ||
-          originalToolEventsBeforeRemedial.length > 0 ||
-          originalRichBlocksBeforeRemedial.length > 0;
-        visibleContentInvocationIdOverride = preservesOriginalVisibleContent
-          ? originalVisibleInvocationIdBeforeRemedial
-          : undefined;
-        const remedialStoredContent = preservesOriginalVisibleContent
-          ? originalStoredContentBeforeRemedial
-          : remedialCleanText;
-        const remedialRoutingContent = '';
-        const baseRichBlocks = preservesOriginalVisibleContent ? originalRichBlocksBeforeRemedial : [];
-        // When preserving first-pass content, drop ALL remedial-produced rich blocks.
-        // streamRichBlocks was cleared before remedial (line ~1875) and re-populated only
-        // from remedial streaming; remedialExtracted.blocks come from remedial text.
-        // Both are orphaned context from hidden remedial prose — the remedial turn is
-        // an exit patch, not a revised answer.
-        let remedialAllRichBlocks = preservesOriginalVisibleContent
-          ? [...baseRichBlocks]
-          : [...baseRichBlocks, ...remedialExtracted.blocks, ...streamRichBlocks];
-        // Replacement text becomes a new persisted message and discards invalid first-pass evidence.
-        // Exit-only remedials keep the original visible content, so preserve original tool evidence too.
-        if (preservesOriginalVisibleContent && originalToolEventsBeforeRemedial.length > 0) {
-          const remedialToolEvents = [...collectedToolEvents];
-          const remedialToolNames = [...collectedToolNames];
-          collectedToolEvents.splice(
-            0,
-            collectedToolEvents.length,
-            ...originalToolEventsBeforeRemedial,
-            ...remedialToolEvents,
-          );
-          collectedToolNames.splice(
-            0,
-            collectedToolNames.length,
-            ...originalToolNamesBeforeRemedial,
-            ...remedialToolNames,
-          );
-        }
-        textContent = remedialStoredContent;
-        outputProjection = preservesOriginalVisibleContent ? originalOutputProjectionBeforeRemedial : undefined;
-        if (outputProjection) for (const event of collectedToolEvents) outputProjection.tool(event);
-        // When preserving first-pass content, always clear remedial voice chunks so
-        // hidden remedial prose (e.g. "好的，我来传球") is never spoken. Then restore
-        // original voice chunks if the first pass had any text to speak.
-        if (preservesOriginalVisibleContent) {
-          resetDeferredVoice();
-          if (originalDeferredVoiceTextChunksBeforeRemedial.length > 0) {
-            deferredVoiceInvocationId = originalDeferredVoiceInvocationIdBeforeRemedial;
-            deferredVoiceTextChunks.push(...originalDeferredVoiceTextChunksBeforeRemedial);
-          }
-        }
-
-        if (!voiceMode) {
-          const voiceSynth = getVoiceBlockSynthesizer();
-          if (voiceSynth && remedialAllRichBlocks.some((b) => b.kind === 'audio' && 'text' in b)) {
-            try {
-              remedialAllRichBlocks = await voiceSynth.resolveVoiceBlocks(remedialAllRichBlocks, catId as string);
-            } catch (err) {
-              log.error({ catId: catId as string, err }, 'Voice block synthesis failed for custody stop-gate remedial');
-            }
-          }
-        }
-
-        const remedialA2aMentions: CatId[] = [];
-        const remedialHasCoCreatorLineStartMention = false;
-        const remedialHasLocalCoCreatorLineStartMention = false;
-        const isRemedialLifecycleBoundary = (event: AgentMessage): boolean => {
-          if (event.type !== 'system_info' || !event.content) return false;
-          try {
-            const parsed = JSON.parse(event.content);
-            return parsed.type === 'invocation_created';
-          } catch {
-            return false;
-          }
-        };
-        // Structured remediation is hidden auxiliary execution. Its lifecycle/tool evidence remains
-        // inspectable, while prose and rich output never become a second visible answer.
-        const isRemedialRichBlockStreamEvent = (event: AgentMessage): boolean => {
-          if (event.type !== 'system_info' || !event.content) return false;
-          try {
-            return JSON.parse(event.content).type === 'rich_block';
-          } catch {
-            return false;
-          }
-        };
-        const visibleRemedialSourceStreamEvents = remedialStreamEvents.filter(
-          (event) => event.type !== 'text' && !isRemedialRichBlockStreamEvent(event),
-        );
-        const visibleRemedialEvidenceStreamEvents: AgentMessage[] = [];
-        const remedialLifecycleStreamEvents: AgentMessage[] = [];
-        for (const event of visibleRemedialSourceStreamEvents) {
-          if (
-            preservesOriginalVisibleContent &&
-            originalVisibleInvocationIdBeforeRemedial &&
-            isRemedialLifecycleBoundary(event)
-          ) {
-            remedialLifecycleStreamEvents.push(event);
-            continue;
-          }
-          visibleRemedialEvidenceStreamEvents.push(
-            preservesOriginalVisibleContent && originalVisibleInvocationIdBeforeRemedial
-              ? { ...event, invocationId: originalVisibleInvocationIdBeforeRemedial }
-              : event,
-          );
-        }
-        // Stream replay for preserved content: use the STORED (post-extraction) content rather than
-        // raw buffered text events, so Route B cc_rich fences don't leak into the live stream.
-        // For tool-only or rich-only first passes where stored content is '', emit no text events.
-        const originalVisibleStreamEventsForRemedialTurn = preservesOriginalVisibleContent
-          ? originalStoredContentBeforeRemedial
-            ? [
-                {
-                  type: 'text' as AgentMessageType,
-                  catId,
-                  content: originalStoredContentBeforeRemedial,
-                  invocationId: originalVisibleInvocationIdBeforeRemedial ?? undefined,
-                  timestamp: Date.now(),
-                } as AgentMessage,
-              ]
-            : []
-          : [];
-
-        const streamEvents = preservesOriginalVisibleContent
-          ? [
-              ...originalVisibleStreamEventsForRemedialTurn,
-              ...visibleRemedialEvidenceStreamEvents,
-              ...remedialLifecycleStreamEvents,
-            ]
-          : remedialStreamEvents;
-
-        return {
-          storedContent: remedialStoredContent,
-          routingContent: remedialRoutingContent,
-          allRichBlocks: remedialAllRichBlocks,
-          a2aMentions: remedialA2aMentions,
-          hasCoCreatorLineStartMention: remedialHasCoCreatorLineStartMention,
-          hasLocalCoCreatorLineStartMention: remedialHasLocalCoCreatorLineStartMention,
-          // Exit-only remedials validate preserved content instead of replacing it; replay the visible
-          // text and routing-exit evidence before the remedial boundary can replace that turn.
-          streamEvents: streamEvents.map(projectLiveTurnExecution),
-        };
       };
 
       const noTextLegacyObservedBlock = Boolean(
@@ -3030,10 +2530,10 @@ export async function* routeSerial(
             hasCoCreatorLineStartMention: hasRoutingExitCoCreatorLineStartMention(''),
           }),
       );
-      if (!textContent) await scheduleTurnCustodyStopGate(noTextLegacyObservedBlock);
+      if (!textContent) await scheduleTurnCustodyObservation(noTextLegacyObservedBlock);
 
       let outputCommitDecision: OutputCommitDecision | undefined;
-      if (!actionOutputCommitAllowed && textContent) await scheduleTurnCustodyStopGate(false);
+      if (!actionOutputCommitAllowed && textContent) await scheduleTurnCustodyObservation(false);
 
       const cancellationDiagnostics = remoteCancellation.afterAbort(catSignal);
       if (cancellationDiagnostics) {
@@ -3131,8 +2631,7 @@ export async function* routeSerial(
 
         // A2A mention detection (缅因猫 P1-3: only after full text accumulated)
         // Line-start @mention = always actionable (no keyword gate)
-        // Collective relay uses the authenticated post-message carrier. Plain prose cannot mint an unscoped queue item.
-        a2aMentions = collectiveBoundTurn ? [] : parseA2AMentions(storedContent, catId);
+        a2aMentions = parseA2AMentions(storedContent, catId);
 
         // clowder-ai#489: baseline counter — line-start mentions
         if (a2aMentions.length > 0) {
@@ -3152,7 +2651,7 @@ export async function* routeSerial(
               hasCoCreatorLineStartMention: routingExitHasCoCreatorLineStartMention,
             }),
         );
-        await scheduleTurnCustodyStopGate(textLegacyObservedBlock);
+        await scheduleTurnCustodyObservation(textLegacyObservedBlock);
         // This response is its own durable source. Callback exits can satisfy the
         // turn guard, but their targets belong to their callback message, not this
         // response. Its explicit mentions must survive earlier posts to the same cat.
@@ -3538,7 +3037,13 @@ export async function* routeSerial(
                   }
                 : {}),
               ...(turnTriggerMessageId
-                ? { causal: { kind: 'invocation_reply' as const, triggerMessageId: turnTriggerMessageId } }
+                ? {
+                    causal: {
+                      kind: 'invocation_reply' as const,
+                      triggerMessageId: turnTriggerMessageId,
+                      ...(turnTriggerThreadId ? { triggerThreadId: turnTriggerThreadId } : {}),
+                    },
+                  }
                 : {}),
               ...executionProjections,
               ...(doneMsg?.tracing ? { tracing: doneMsg.tracing } : {}),
@@ -3820,7 +3325,13 @@ export async function* routeSerial(
                     }
                   : {}),
                 ...(turnTriggerMessageId
-                  ? { causal: { kind: 'invocation_reply' as const, triggerMessageId: turnTriggerMessageId } }
+                  ? {
+                      causal: {
+                        kind: 'invocation_reply' as const,
+                        triggerMessageId: turnTriggerMessageId,
+                        ...(turnTriggerThreadId ? { triggerThreadId: turnTriggerThreadId } : {}),
+                      },
+                    }
                   : {}),
                 ...executionProjections,
                 ...(doneMsg?.tracing ? { tracing: doneMsg.tracing } : {}),
@@ -3972,7 +3483,13 @@ export async function* routeSerial(
                         }
                       : {}),
                     ...(turnTriggerMessageId
-                      ? { causal: { kind: 'invocation_reply' as const, triggerMessageId: turnTriggerMessageId } }
+                      ? {
+                          causal: {
+                            kind: 'invocation_reply' as const,
+                            triggerMessageId: turnTriggerMessageId,
+                            ...(turnTriggerThreadId ? { triggerThreadId: turnTriggerThreadId } : {}),
+                          },
+                        }
                       : {}),
                     ...executionProjections,
                     ...(doneMsg?.tracing ? { tracing: doneMsg.tracing } : {}),
@@ -4284,7 +3801,7 @@ export async function* routeSerial(
       index++;
     }
   } finally {
-    // Phase T stop gate is a turn-settled verdict: current output persistence,
+    // Turn-custody observation is recorded after the turn settles: current output persistence,
     // operator handoff writes, and inline child receiver-boundary handoffs must all
     // have had a chance to establish machine evidence before the projection closes.
     await flushTurnCustodyShadowCloses('route_settled');

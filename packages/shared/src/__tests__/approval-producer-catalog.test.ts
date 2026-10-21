@@ -25,11 +25,18 @@ describe('F246 Approval producer catalog', () => {
       'F221',
       'F321',
       'F276',
-      'F292',
       'F306',
     ]);
     assert.equal('F028' in APPROVAL_PRODUCER_CATALOG, false);
     assert.equal('authorization' in APPROVAL_PRODUCER_CATALOG, false);
+  });
+
+  it('does not admit the retired Host meeting-intake producer', () => {
+    assert.equal(Object.hasOwn(APPROVAL_PRODUCER_CATALOG, 'F292'), false);
+    assert.equal(
+      APPROVAL_PRODUCER_IDS.some((id: string) => id === 'F292'),
+      false,
+    );
   });
 
   it('owns decision routing and source policy metadata', () => {

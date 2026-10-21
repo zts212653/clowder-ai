@@ -29,6 +29,7 @@ export function serializeTask(task: TaskItem): Record<string, string> {
     probe: task.probe ? JSON.stringify(task.probe) : '',
     resolveMode: task.resolveMode ?? '',
   };
+  if (task.pluginWait) out.pluginWait = JSON.stringify(task.pluginWait);
   if (task.automationState) out.automationState = JSON.stringify(task.automationState);
   if (task.deploymentWait) out.deploymentWait = JSON.stringify(task.deploymentWait);
   if (task.relatedFeatureId) out.relatedFeatureId = task.relatedFeatureId;
@@ -54,6 +55,7 @@ export function hydrateTask(data: Record<string, string>): TaskItem {
     userId: data.userId || undefined,
     resolveMode: data.resolveMode ? (data.resolveMode as TaskItem['resolveMode']) : undefined,
   };
+  hydrated = parseJsonField(hydrated, 'pluginWait', data.pluginWait);
   hydrated = parseJsonField(hydrated, 'automationState', data.automationState);
   hydrated = parseJsonField(hydrated, 'deploymentWait', data.deploymentWait);
   hydrated = parseJsonField(hydrated, 'probe', data.probe);

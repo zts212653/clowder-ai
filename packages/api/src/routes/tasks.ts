@@ -1,3 +1,4 @@
+import type { PreparedArtifactReader } from '../domains/growing/ports/PreparedArtifactReader.js';
 /**
  * Task CRUD Routes (毛线球)
  *
@@ -15,7 +16,6 @@ import { z } from 'zod';
 import { MAX_BALL_CUSTODY_HTTP_PROBE_TIMEOUT_MS } from '../domains/ball-custody/BallCustodyProbeTaskSpec.js';
 import type { ITaskStore } from '../domains/cats/services/stores/ports/TaskStore.js';
 import { isEntrustedWorkTerminalActionRequiredError } from '../domains/cats/services/stores/ports/TaskStoreContract.js';
-import type { GitHubWaitLifecycleService } from '../domains/github-signals/GitHubWaitLifecycleService.js';
 import {
   EntrustedWorkHumanTerminalError,
   type EntrustedWorkHumanTerminalResult,
@@ -34,7 +34,7 @@ import {
 export interface TasksRoutesOptions {
   taskStore: ITaskStore;
   socketManager: SocketManager;
-  waitLifecycleHolder?: { current?: GitHubWaitLifecycleService };
+  artifactReader?: PreparedArtifactReader;
   deploymentWaitLifecycleHolder?: { current?: DeploymentWaitLifecycleService };
   humanTerminal?: EntrustedWorkHumanTerminalService;
 }
@@ -44,22 +44,29 @@ type WaitCancelLifecycle = {
 };
 
 type CancelWaitSelection =
-  | { readonly ok: true; readonly lifecycle: WaitCancelLifecycle }
+  | { readonly ok: true; readonly kind: 'plugin' }
+  | { readonly ok: true; readonly kind: 'deployment'; readonly lifecycle: WaitCancelLifecycle }
   | { readonly ok: false; readonly status: 403 | 409 | 503; readonly error: string };
 
 function selectCancelableWait(task: TaskItem, userId: string, options: TasksRoutesOptions): CancelWaitSelection {
   if (!task.userId || task.userId !== userId) return { ok: false, status: 403, error: 'Not your wait' };
-  if (task.status === 'done' || (task.entrustedWork && task.entrustedWork.closure.state !== 'open')) {
+  if (task.entrustedWork && task.entrustedWork.closure.state !== 'open') {
     return { ok: false, status: 409, error: 'Task has no active wait' };
   }
-  const lifecycle =
-    task.kind === 'work' && (task.deploymentWait?.await || task.deploymentWait?.waitOutcome?.delivery === 'pending')
-      ? options.deploymentWaitLifecycleHolder?.current
-      : task.kind === 'pr_tracking' && task.automationState?.await
-        ? options.waitLifecycleHolder?.current
-        : null;
-  if (lifecycle === null) return { ok: false, status: 409, error: 'Task has no active wait' };
-  return lifecycle ? { ok: true, lifecycle } : { ok: false, status: 503, error: 'Wait lifecycle unavailable' };
+  if (
+    task.kind === 'work' &&
+    (task.deploymentWait?.await || task.deploymentWait?.waitOutcome?.delivery === 'pending')
+  ) {
+    if (task.status === 'done') return { ok: false, status: 409, error: 'Task has no active wait' };
+    const lifecycle = options.deploymentWaitLifecycleHolder?.current;
+    return lifecycle
+      ? { ok: true, kind: 'deployment', lifecycle }
+      : { ok: false, status: 503, error: 'Wait lifecycle unavailable' };
+  }
+  const wait = task.pluginWait;
+  return !task.entrustedWork && wait && !wait.invalidated && (wait.await || wait.waitOutcome?.delivery === 'pending')
+    ? { ok: true, kind: 'plugin' }
+    : { ok: false, status: 409, error: 'Task has no active wait' };
 }
 
 const VALID_STATUSES = ['todo', 'doing', 'blocked', 'done'] as const;
@@ -230,14 +237,6 @@ export const tasksRoutes: FastifyPluginAsync<TasksRoutesOptions> = async (app, o
     }
 
     const before = await taskStore.get(id);
-    if (
-      before?.kind === 'pr_tracking' &&
-      before.automationState?.await &&
-      result.data.ownerCatId !== undefined &&
-      result.data.ownerCatId !== before.ownerCatId
-    ) {
-      await opts.waitLifecycleHolder?.current?.ownerChanged(id);
-    }
     await terminalizeDeploymentWaitForPatch(before, result.data, opts.deploymentWaitLifecycleHolder);
     let updated: TaskItem | null;
     try {
@@ -278,15 +277,42 @@ export const tasksRoutes: FastifyPluginAsync<TasksRoutesOptions> = async (app, o
       return { error: 'Request body must be empty', details: body.error.issues };
     }
     const { id } = request.params as { id: string };
-    const task = await taskStore.get(id);
-    if (!task) {
+    const current = await taskStore.get(id);
+    if (!current) {
       reply.status(404);
       return { error: 'Task not found' };
     }
+    const task = structuredClone(current);
     const selection = selectCancelableWait(task, userId, opts);
     if (!selection.ok) {
       reply.status(selection.status);
       return { error: selection.error };
+    }
+    if (selection.kind === 'plugin') {
+      const wait = task.pluginWait!;
+      const { await: _active, registration: _registration, ...rest } = wait;
+      const updated = await taskStore.replacePluginWait(task.id, {
+        expectedStatus: task.status,
+        expectedState: wait,
+        expectedGeneration: wait.generation,
+        state: {
+          ...rest,
+          invalidated: 'user_cancel',
+          waitOutcome: {
+            outcomeId: `task:${task.id}:g${wait.generation}:user_cancel`,
+            generation: wait.generation,
+            ownerFence: { kind: 'containing_task', generation: wait.generation },
+            reason: 'user_cancel',
+            delivery: 'not_applicable',
+          },
+        },
+      });
+      if (!updated) {
+        reply.status(409);
+        return { error: 'Wait changed before cancellation' };
+      }
+      socketManager.broadcastToRoom(`thread:${updated.threadId}`, 'task_updated', updated);
+      return { status: 'cancelled', result: updated.pluginWait?.waitOutcome };
     }
     const result = await selection.lifecycle.cancel(task.id, { kind: 'user', userId });
     const updated = await taskStore.get(task.id);

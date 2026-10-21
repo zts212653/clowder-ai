@@ -14,6 +14,7 @@ export function MemberListHost({
   onRetryConfig,
   cats,
   onAdd,
+  onDetect,
   onEdit,
   onEditCoCreator,
   onToggle,
@@ -28,6 +29,7 @@ export function MemberListHost({
   onRetryConfig?: () => void;
   cats: CatData[];
   onAdd: () => void;
+  onDetect?: () => void;
   onEdit: (cat: CatData) => void;
   onEditCoCreator: () => void;
   onToggle: (cat: CatData) => void;
@@ -44,6 +46,7 @@ export function MemberListHost({
           config={config}
           cats={cats}
           onAddMember={onAdd}
+          onDetectMembers={onDetect}
           onEditMember={onEdit}
           onEditCoCreator={onEditCoCreator}
           onToggleAvailability={onToggle}

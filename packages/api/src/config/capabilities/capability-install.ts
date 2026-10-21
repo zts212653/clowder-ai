@@ -1,7 +1,7 @@
 import type { CapabilityEntry, McpInstallPreview, McpInstallRequest } from '@cat-cafe/shared';
 import { MARKETPLACE_ECOSYSTEMS } from '@cat-cafe/shared';
 
-const CLI_CONFIGS = ['.mcp.json', '.codex/config.toml', '.gemini/settings.json', '.kimi/mcp.json'];
+const CLI_CONFIGS = ['.mcp.json', '.codex/config.toml', '.gemini/settings.json', '.kimi-code/mcp.json'];
 
 export function buildInstallPreview(req: McpInstallRequest, existingCaps?: CapabilityEntry[]): McpInstallPreview {
   if (!req.id || typeof req.id !== 'string') {

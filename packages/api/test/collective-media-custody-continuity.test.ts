@@ -1,10 +1,9 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { test } from 'node:test';
 import { setTimeout } from 'node:timers/promises';
-import { CollectiveConnector } from '@cat-cafe/collective-connector';
 import { collectiveMediaHttpFixture } from './collective-media-http.fixture.js';
+import { CollectiveConnector, test } from './helpers/f202-collective-installed-business.js';
 
 test('the same retained owner explicitly rebinds after revoke and restart while the old endpoint stays fenced', async (t) => {
   const f = await collectiveMediaHttpFixture(t);

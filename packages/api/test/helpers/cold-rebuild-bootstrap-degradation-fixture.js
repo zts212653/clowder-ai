@@ -12,8 +12,6 @@ export const SERIAL_DEGRADED_MESSAGE =
   '[routeSerial] session bootstrap rebuild returned no sealed prior; degrading to initial bootstrap context';
 export const PARALLEL_DEGRADED_MESSAGE =
   '[routeParallel] session bootstrap rebuild returned no sealed prior; degrading to initial bootstrap context';
-export const REMEDIAL_DEGRADED_MESSAGE =
-  '[routeSerial] remedial session bootstrap rebuild returned no sealed prior; degrading to bare remedial prompt';
 
 const moduleLoggers = new Map();
 const originalModuleWarns = new Map();

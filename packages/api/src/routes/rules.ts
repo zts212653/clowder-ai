@@ -261,8 +261,8 @@ async function findSkillPath(root: string, name: string, projectPath?: string): 
     join(home, '.codex', 'skills'),
     join(projectRoot, '.gemini', 'skills'),
     join(home, '.gemini', 'skills'),
-    join(projectRoot, '.kimi', 'skills'),
-    join(home, '.kimi', 'skills'),
+    join(projectRoot, '.kimi-code', 'skills'),
+    join(home, '.kimi-code', 'skills'),
   ];
   for (const dir of candidateDirs) {
     const candidate = join(dir, name, 'SKILL.md');

@@ -23,7 +23,8 @@ import {
 
 const DELIVER_INPUT = {
   deliveryId: 'delivery-stdio-1',
-  threadHandle: { kind: 'thread_handle', handle: 'thread-handle-1' },
+  kind: 'message',
+  threadId: 'thread-1',
   envelope: {
     messageId: 'message-1',
     revision: 1,
@@ -44,7 +45,7 @@ function manifestWithCapabilities(...capabilities) {
     ...manifest,
     features: manifest.features.map((feature) => ({
       ...feature,
-      capabilities: [...feature.capabilities, ...capabilities],
+      capabilities: [...new Set([...feature.capabilities, ...capabilities])],
     })),
   };
 }
@@ -77,7 +78,7 @@ async function runningHarness({ effectiveGrants, manifest, methods = [] }) {
 
 test('Host delivers to the exact active stdio runtime only after onMessage authority succeeds', async () => {
   const manifest = manifestWithCapabilities('onMessage');
-  const harness = await runningHarness({ effectiveGrants: ['events.publish', 'onMessage'], manifest });
+  const harness = await runningHarness({ effectiveGrants: ['messaging.send', 'onMessage'], manifest });
 
   const pending = harness.supervisor.deliver(EXTERNAL_INSTANCE_ID, DELIVER_INPUT);
   const request = await readFrame(harness.child);
@@ -101,7 +102,7 @@ test('stdio maps a K-1 MessagingError to the published DOMAIN_ERROR without clos
   const messaging = createMessagingDomain({ messageStore: new MessageStore() });
   const manifest = manifestWithCapabilities('messaging.send');
   const harness = await runningHarness({
-    effectiveGrants: ['events.publish', 'messaging.send'],
+    effectiveGrants: ['messaging.send'],
     manifest,
     methods: createMessagingBrokerHandlers({ messaging }),
   });
@@ -142,7 +143,7 @@ test('stdio preserves the published snapshot-unavailable reason without closing 
   };
   const manifest = manifestWithCapabilities('message.event.subscribe');
   const harness = await runningHarness({
-    effectiveGrants: ['events.publish', 'message.event.subscribe'],
+    effectiveGrants: ['messaging.send', 'message.event.subscribe'],
     manifest,
     methods: createMessagingBrokerHandlers({ messaging }),
   });
@@ -164,7 +165,7 @@ test('stdio preserves the published snapshot-unavailable reason without closing 
 
 test('Host delivery without onMessage authority fails closed before writing a stdio request', async () => {
   const manifest = externalManifest();
-  const harness = await runningHarness({ effectiveGrants: ['events.publish'], manifest });
+  const harness = await runningHarness({ effectiveGrants: ['messaging.send'], manifest });
 
   await assert.rejects(
     harness.supervisor.deliver(EXTERNAL_INSTANCE_ID, DELIVER_INPUT),

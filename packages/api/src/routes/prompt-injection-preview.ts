@@ -31,7 +31,7 @@ const NATIVE_L0_CLIENT_IDS = new Set(['anthropic', 'openai', 'opencode']);
 
 /**
  * kimi injects L0 natively only when the new kimi-code CLI is the resolvable
- * binary (legacy `kimi-cli` has no native channel) — probe the machine instead
+ * Kimi Code binary — probe the machine instead
  * of hard-coding the clientId (gpt52 review on PR #3201).
  */
 function isNativeL0Client(clientId: string): boolean {

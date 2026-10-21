@@ -1,4 +1,4 @@
-import type { CompanionErrorCode } from '@clowder-ai/plugin-contract';
+import type { CompanionErrorCode } from '@clowder-ai/plugin-contract-beta21';
 import type { FastifyInstance } from 'fastify';
 
 export class CompanionBridgeError extends Error {

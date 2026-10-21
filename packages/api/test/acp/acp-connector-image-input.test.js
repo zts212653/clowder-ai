@@ -1,61 +1,17 @@
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { InvocationQueue } from '../../dist/domains/cats/services/agents/invocation/InvocationQueue.js';
-import { PersistedQueueDelivery } from '../../dist/domains/cats/services/agents/invocation/PersistedQueueDelivery.js';
 import { AcpAgentService } from '../../dist/domains/cats/services/agents/providers/acp/AcpAgentService.js';
 import { readAcpImageBlocks } from '../../dist/domains/cats/services/agents/providers/acp/acp-image-input.js';
-import { MessageStore } from '../../dist/domains/cats/services/stores/ports/MessageStore.js';
-import { ConnectorRouter } from '../../dist/infrastructure/connectors/ConnectorRouter.js';
-import { ConnectorMediaService } from '../../dist/infrastructure/connectors/media/ConnectorMediaService.js';
+import { FileMessagingMediaLedger } from '../../dist/domains/messaging/media-ledger.js';
 import { imageFixture, SYNTHETIC_PNG } from '../helpers/acp-image-fixture.js';
-
-async function routeDownloadedImage(mediaService) {
-  let contentBlocks;
-  const messageStore = new MessageStore();
-  const queue = new InvocationQueue(undefined, {
-    resolveTargets: async (requested) => (requested.length ? [...requested] : ['codex']),
-  });
-  const persistedQueueDelivery = new PersistedQueueDelivery({
-    messages: messageStore,
-    queue,
-    async progress(entry) {
-      assert.deepEqual((await queue.getDurableEntry(entry.threadId, entry.id)).targets, ['codex']);
-      contentBlocks = (await messageStore.getById(entry.payload.messageId)).contentBlocks;
-      return 'owned_deferred_busy';
-    },
-  });
-  const router = new ConnectorRouter({
-    bindingStore: {
-      async getByExternal() {
-        return { threadId: 'T1', userId: 'u1' };
-      },
-    },
-    dedup: { isDuplicate: () => false },
-    messageStore,
-    persistedQueueDelivery,
-    threadStore: {
-      async get() {
-        return { id: 'T1', title: 'Image probe' };
-      },
-    },
-    defaultUserId: 'u1',
-    defaultCatId: 'codex',
-    log: { info() {}, warn() {}, error() {}, debug() {} },
-    mediaService,
-  });
-  await router.route('feishu', 'chat1', 'Describe this image.', 'external1', [
-    { type: 'image', platformKey: 'image1' },
-  ]);
-  assert.equal(contentBlocks?.length, 1);
-  return contentBlocks;
-}
 
 for (const transport of ['stdio', 'httpstream']) {
   for (const scenario of [
-    'connector-router',
+    'host-media-ledger',
+    'retained-media-route',
     'mixed-roots',
     'default-root',
     'traversal',
@@ -64,7 +20,7 @@ for (const transport of ['stdio', 'httpstream']) {
     'missing',
   ]) {
     test(`ACP ${transport} connector image: ${scenario}`, async () => {
-      const root = await mkdtemp(join(tmpdir(), 'acp-connector-image-'));
+      const root = await realpath(await mkdtemp(join(tmpdir(), 'acp-connector-image-')));
       const oldMediaDir = process.env.CONNECTOR_MEDIA_DIR;
       const oldCwd = process.cwd();
       const mediaDir = scenario === 'default-root' ? join(root, 'data/connector-media') : join(root, 'connector-media');
@@ -78,9 +34,19 @@ for (const transport of ['stdio', 'httpstream']) {
           delete process.env.CONNECTOR_MEDIA_DIR;
           process.chdir(root);
         }
-        const mediaService = new ConnectorMediaService({ mediaDir });
-        mediaService.registerDownloadFn('feishu', async () => SYNTHETIC_PNG);
-        let contentBlocks = await routeDownloadedImage(mediaService);
+        // Legacy URL reading remains supported; plugin ingress now owns bytes through the Host ledger.
+        await writeFile(join(mediaDir, 'downloaded.png'), SYNTHETIC_PNG);
+        let contentBlocks = [{ type: 'image', url: '/api/connector-media/downloaded.png' }];
+        let resolveTrustedImagePath;
+        if (scenario === 'host-media-ledger') {
+          const ledger = new FileMessagingMediaLedger(join(root, 'host-media'));
+          const hmrId = await ledger.register(SYNTHETIC_PNG, {
+            ownerInstanceId: 'fixture-plugin',
+            mimeType: 'image/png',
+          });
+          contentBlocks = [{ type: 'image', url: `hmr:${hmrId}` }];
+          resolveTrustedImagePath = (id) => ledger.resolveTrustedBlobPath(id);
+        }
         if (scenario === 'mixed-roots') {
           await writeFile(join(uploadDir, 'web.png'), SYNTHETIC_PNG);
           contentBlocks = [{ type: 'image', url: '/uploads/web.png' }, ...contentBlocks];
@@ -114,7 +80,11 @@ for (const transport of ['stdio', 'httpstream']) {
           },
         });
         const events = [];
-        for await (const event of service.invoke('Describe this image.', { uploadDir, contentBlocks }))
+        for await (const event of service.invoke('Describe this image.', {
+          uploadDir,
+          contentBlocks,
+          resolveTrustedImagePath,
+        }))
           events.push(event);
         const errors = events.filter((e) => e.type === 'error');
         const prompts = fixture.captured.filter((m) => m.method === 'session/prompt');

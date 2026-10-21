@@ -41,7 +41,85 @@ jobs:
         run: >-
           node --test
           scripts/run-preserving-signal-exit.test.mjs
+          scripts/preview-detached-identity.test.mjs
+          scripts/preview-lease-command.test.mjs
           packages/web/test/sanitize-widget-types.test.mjs
+          packages/web/test/browser/native-team-a2a-proof.test.mjs packages/web/test/native-team-cleanup.test.mjs
+          packages/web/test/browser/native-codex-history-policy.test.mjs
+          packages/web/test/browser/native-team-startup-ready.test.mjs
+      - name: Native authentication and lazy SDK contracts (no live accounts)
+        shell: bash
+        run: >-
+          pnpm --filter @cat-cafe/api exec bash ./scripts/with-test-home.sh
+          node --import tsx --test --test-concurrency=1
+          test/native-runtime-readiness.test.ts
+          test/native-dsh-discovery.test.ts
+          test/dsh-catalog-boundary.test.ts
+          test/native-claude-api-readiness.test.ts
+          test/native-mcp-first-run.test.ts
+          test/f318-claude-sdk-lazy-load.test.ts
+          test/f318-claude-sdk.test.ts
+          test/f318-claude-sdk-custody.test.ts
+          test/f318-claude-sdk-launch.test.ts
+      - name: Desktop isolation and installer profile contracts
+        run: >-
+          node --test
+          desktop/runtime-config.test.js
+          desktop/instance-upgrade.test.js
+          desktop/instance-data-boundary.test.js
+          desktop/runtime-web-server.test.js
+          desktop/runtime-web-config.test.js
+          desktop/service-startup.test.js
+          desktop/main-renderer-lifecycle.test.js
+          desktop/startup-timing.test.js
+          desktop/visible-renderer.test.js
+          desktop/renderer-navigation.test.js
+          desktop/installation-lifecycle.test.js
+          desktop/service-manager-isolation.test.js
+          desktop/client-homes.test.js
+          desktop/configure-client-homes.test.js
+          desktop/build-release-policy.test.js
+          desktop/service-manager.test.js
+          desktop/post-install-profile.test.js
+          desktop/frozen-runtime-export.test.mjs
+          desktop/workspace-runtime-modules.test.mjs
+          desktop/extract-runtime-archive.test.cjs
+          desktop/runtime-archive-progress.test.mjs
+          desktop/built-web-assets.test.mjs
+          desktop/api-bundle.test.mjs
+          desktop/api-dependency-bundle.test.mjs
+          desktop/runtime-package-bundle.test.mjs
+          desktop/runtime-dependency-selection.test.mjs
+          desktop/api-startup-probe.test.mjs
+          desktop/api-startup-read-ahead.test.mjs
+          desktop/api-startup-cold-budget.test.mjs
+          desktop/shutdown-controller.test.js
+          desktop/profile-desktop-startup.test.mjs
+          desktop/api-puppeteer-lazy-boundary.test.mjs
+          packages/api/test/lazy-heavy-imports.test.js
+          desktop/dsh-test-connection.test.mjs
+          desktop/rebuild-frozen-dependencies.test.mjs
+          desktop/installer-integrity.test.mjs
+      - name: Install Inno Setup
+        # P2-5: the native installer tests compile desktop/installer/cat-cafe.iss
+        # with the real Inno compiler, which windows-latest does not ship. This
+        # installs the same Chocolatey package the release build uses (Inno Setup
+        # 7 when available) and exports its path for the test harness.
+        shell: pwsh
+        run: |
+          choco install innosetup -y --no-progress
+          $iscc = @(
+            'C:\Program Files\Inno Setup 7\ISCC.exe',
+            'C:\Program Files (x86)\Inno Setup 6\ISCC.exe'
+          ) | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
+          if (-not $iscc) { throw 'Native Inno compiler was not found after installation' }
+          "ISCC_EXE=$iscc" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          & $iscc /? | Select-Object -First 1
+      - name: Native installer preparation and menu behavior
+        run: >-
+          node --test
+          desktop/installer-preparation-log.test.js
+          desktop/installer-no-icons.test.js
       - name: Build the actual web application
         run: pnpm --filter @cat-cafe/web build
       - name: Widget sanitization behavior
@@ -165,16 +243,16 @@ jobs:
         run: |
           echo "commit=$env:GITHUB_SHA" | Tee-Object artifact-identity.txt
           Get-Content artifact-identity.txt
-      - name: Package the API artifact (pnpm deploy)
+      - name: Package the API artifact from the source lock
         run: >-
-          $env:CAT_CAFE_SKIP_NODE_RUNTIME_GUARD = "1";
-          pnpm --filter @cat-cafe/api --prod --config.node-linker=hoisted deploy ${{ runner.temp }}\clowder-deploy
+          node desktop/scripts/frozen-runtime-deploy.mjs . ${{ runner.temp }}\clowder-deploy-root api
       - name: Stage the installed layout (installer file contract)
         shell: pwsh
         run: |
           $install = "${{ runner.temp }}\clowder-install"
           New-Item -ItemType Directory -Force -Path "$install\packages" | Out-Null
-          Copy-Item -Recurse "${{ runner.temp }}\clowder-deploy" "$install\packages\api"
+          Copy-Item -Recurse "${{ runner.temp }}\clowder-deploy-root\api" "$install\packages\api"
+          Copy-Item -Recurse "${{ runner.temp }}\clowder-deploy-root\dependencies" "$install\node_modules"
           New-Item -ItemType Directory -Force -Path "$install\.claude\hooks" | Out-Null
           Copy-Item ".claude\hooks\f24-compaction.mjs" "$install\.claude\hooks\f24-compaction.mjs"
           Write-Host "staged install root: $install"
@@ -183,3 +261,11 @@ jobs:
         env:
           CAT_CAFE_INSTALLED_LAYOUT_ROOT: ${{ runner.temp }}\clowder-install
         run: node --test packages/api/test/f296-installed-layout.test.js
+      - name: Retain isolated frozen-startup failure logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-frozen-startup-logs-${{ github.sha }}
+          path: ${{ runner.temp }}/.startup-profile-*/build.log
+          include-hidden-files: true
+          if-no-files-found: warn

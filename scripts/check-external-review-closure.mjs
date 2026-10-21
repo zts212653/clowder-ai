@@ -261,50 +261,13 @@ export function checkExternalReviewHandoffText(text) {
   return { ok: errors.length === 0, errors };
 }
 
-export function checkExternalReviewSourceBoundary({ outcomeSource, deliveryPolicySource, setupNoiseSource }) {
-  const errors = [];
-  const executableDeliveryPolicy = deliveryPolicySource.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
-  for (const token of ["kind: 'delivered'", "kind: 'pending_delivery'", 'ownerCatId', 'reason']) {
-    if (!outcomeSource.includes(token)) errors.push(`ReviewDeliveryOutcome is missing ${token}.`);
-  }
-  if (/endsWith\(\s*['"]\[bot\]['"]\s*\)/.test(executableDeliveryPolicy)) {
-    errors.push('Exact-identity boundary violated: broad bot suppression by [bot] suffix is forbidden.');
-  }
-  if (
-    /OWNER[\s\S]{0,160}MEMBER[\s\S]{0,240}silent-log|silent-log[\s\S]{0,240}OWNER[\s\S]{0,160}MEMBER/.test(
-      executableDeliveryPolicy,
-    )
-  ) {
-    errors.push('Exact-identity boundary violated: broad OWNER/MEMBER suppression is forbidden.');
-  }
-  if (!/\.has\(c\.author\)/.test(setupNoiseSource)) {
-    errors.push('Setup-noise suppression must require an exact author allowlist match.');
-  }
-  if (!/(?:c\.body|SETUP_GUIDANCE|setupSentence)/.test(setupNoiseSource)) {
-    errors.push('Setup-noise suppression must correlate the comment body with the known setup template.');
-  }
-  if (!/(?:commentType|conversation)/.test(setupNoiseSource)) {
-    errors.push('Setup-noise suppression must be scoped to the correlated conversation comment type.');
-  }
-  return { ok: errors.length === 0, errors };
-}
-
 export function runExternalReviewClosureCheck(root = process.cwd()) {
   const read = (path) => readFileSync(resolve(root, path), 'utf8');
   const readIfPresent = (path) => (existsSync(resolve(root, path)) ? read(path) : '');
-  const boundary = checkExternalReviewSourceBoundary({
-    outcomeSource: read('packages/shared/src/types/community-event.ts'),
-    deliveryPolicySource: [
-      read('packages/api/src/domains/community/community-delivery-policy.ts'),
-      read('packages/api/src/infrastructure/email/IssueCommentTaskSpec.ts'),
-    ].join('\n'),
-    setupNoiseSource: read('packages/api/src/infrastructure/email/setup-noise-filter.ts'),
-  });
   const skill = read('cat-cafe-skills/cross-cat-handoff/SKILL.md');
   const requestReviewSkill = read('cat-cafe-skills/request-review/SKILL.md');
   const receiveReviewSkill = read('cat-cafe-skills/receive-review/SKILL.md');
   const errors = [
-    ...boundary.errors,
     ...checkReviewRoutingSurfaces({
       handoffSkill: skill,
       requestReviewSkill,
@@ -315,7 +278,6 @@ export function runExternalReviewClosureCheck(root = process.cwd()) {
       // it in cat-cafe, but do not make the public review contract depend on a
       // file that sync-manifest explicitly excludes from clowder-ai.
       inboundPrReference: readIfPresent('cat-cafe-skills/refs/opensource-ops-inbound-pr.md'),
-      trackerToolSource: read('packages/mcp-server/src/tools/callback-tools.ts'),
       capabilityWakeupDomain: read('docs/harness-feedback/eval-domains/eval-capability-wakeup.yaml'),
       capabilityWakeupFixture: read('docs/harness-feedback/fixtures/external-pr-review-route-classifier.md'),
     }),

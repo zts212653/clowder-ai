@@ -78,7 +78,11 @@ export function readDrafts(item: ApprovalHubItem): PersonMemoryDraftView[] {
   });
 }
 
-export function kindLabel(kind: PersonMemoryDraftView['claimKind'], language: ShellLanguage = 'zh'): string {
+export function kindLabel(
+  kind: PersonMemoryDraftView['claimKind'],
+  language: ShellLanguage = 'zh',
+  ownerName = 'ME',
+): string {
   if (language === 'en')
     return kind === 'reported_fact'
       ? 'Fact'
@@ -88,12 +92,16 @@ export function kindLabel(kind: PersonMemoryDraftView['claimKind'], language: Sh
           ? 'Relationship'
           : 'Interaction';
   if (kind === 'reported_fact') return '事实';
-  if (kind === 'user_assessment') return 'You 判断';
+  if (kind === 'user_assessment') return `${ownerName} 判断`;
   if (kind === 'relationship') return '人物关系';
   return '互动事件';
 }
 
-export function sourceLabel(role: PersonMemoryDraftView['sourceRole'], language: ShellLanguage = 'zh'): string {
+export function sourceLabel(
+  role: PersonMemoryDraftView['sourceRole'],
+  language: ShellLanguage = 'zh',
+  ownerName = 'ME',
+): string {
   if (language === 'en') return role === 'owner_explicit' ? 'Owner statement' : 'Third party quoted by owner';
-  return role === 'owner_explicit' ? 'You 明确陈述' : 'You 引述第三方';
+  return role === 'owner_explicit' ? `${ownerName} 明确陈述` : `${ownerName} 引述第三方`;
 }

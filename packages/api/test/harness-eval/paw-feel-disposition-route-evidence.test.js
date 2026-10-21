@@ -82,20 +82,11 @@ describe('PawFeelFixEvidenceResolver', () => {
           : { ok: false, reason: 'lease_not_active' };
       },
     };
-    const truthResolver = new ActionSubjectTruthResolver(
-      leaseStore,
-      {
-        async get() {
-          return null;
-        },
+    const truthResolver = new ActionSubjectTruthResolver(leaseStore, {
+      async get(taskId) {
+        return taskId === storedTask.id ? storedTask : null;
       },
-      undefined,
-      {
-        async get(taskId) {
-          return taskId === storedTask.id ? storedTask : null;
-        },
-      },
-    );
+    });
     const admission = new ActionSuccessorAdmissionService(leaseStore, truthResolver);
     const admitted = await admission.admit({
       tenantScope: 'user-1',

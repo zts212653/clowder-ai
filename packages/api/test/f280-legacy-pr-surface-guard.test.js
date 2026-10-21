@@ -8,26 +8,7 @@ const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
 const sourceRoots = ['packages/api/src', 'packages/mcp-server/src', 'packages/shared/src'];
 const legacyFieldPattern = /\b(wakePolicy|trackingInstructions|eventWait|detectEventCallback)\b/g;
 
-const allowedRegions = [
-  {
-    path: 'packages/api/src/domains/ball-custody/PrWaitMigrationService.ts',
-    label: 'one-time atomic PR legacy migration',
-    start: 'const LEGACY_KEYS',
-    end: undefined,
-  },
-  {
-    path: 'packages/api/src/domains/ball-custody/IssueWaitMigrationService.ts',
-    label: 'one-time atomic issue legacy migration',
-    start: 'const LEGACY_KEYS',
-    end: undefined,
-  },
-  {
-    path: 'packages/api/src/domains/cats/services/agents/routing/route-serial.ts',
-    label: 'structured custody stop-gate vocabulary',
-    start: 'export function buildTurnCustodyStopGateRemedialPrompt',
-    end: 'function emitBallVoidPass',
-  },
-];
+const allowedRegions = [];
 
 function sourceFiles(root) {
   const entries = readdirSync(root, { withFileTypes: true });
@@ -47,7 +28,7 @@ function bounds(source, region) {
 }
 
 describe('F280 legacy wait surface guard', () => {
-  it('allows legacy fields only in exact one-time migration modules and custody vocabulary', () => {
+  it('keeps retired legacy wait fields out of production', () => {
     const files = sourceRoots.flatMap((root) => sourceFiles(resolve(repoRoot, root)));
     const hits = [];
     for (const path of files) {

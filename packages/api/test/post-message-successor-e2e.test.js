@@ -359,7 +359,7 @@ test('direct local review action custody is retired before ActionSuccessor admis
   });
 
   assert.equal(response.statusCode, 400);
-  assert.equal(response.json().kind, 'unsupported_direct_action');
+  assert.equal(response.json().error, 'Invalid request body');
   assert.equal(harness.admissionCalls.length, 0);
   assert.equal(harness.messageStore.getByThreadIncludingQueued(harness.thread.id, 20, 'user-1').length, 0);
 });

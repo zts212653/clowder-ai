@@ -392,7 +392,7 @@ export function registerCallbackTaskRoutes(
       }
       // An authenticated current same-Task delegate may register Artifact evidence.
       // The callback scope guard permits only artifactRefs + revision for this capability.
-      if (existing.ownerCatId !== actor.catId && record.collectiveWorkBinding?.taskId !== existing.id) {
+      if (existing.ownerCatId !== actor.catId) {
         reply.status(403);
         return { error: 'Entrusted work is owned by another cat' };
       }

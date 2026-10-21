@@ -283,7 +283,7 @@ test('■ stops the run through the same cancel request, then re-reads the execu
   await session.page.waitForFunction(() => true);
   await expectCalls(session, [
     `POST /api/threads/${THREAD}/executions/live/exec-opus/cancel`,
-    'GET /api/executions/active?projectPath=%2Fpreview',
+    'GET /api/executions/active?scope=all',
   ]);
   assert.deepEqual(session.calls[0].body, { catId: 'opus' });
   finish(session);
@@ -339,7 +339,7 @@ test('several runs: one ■ per run in the panel, each stopping only its own run
     .click();
   await expectCalls(session, [
     `POST /api/threads/${THREAD}/executions/live/exec-codex/cancel`,
-    'GET /api/executions/active?projectPath=%2Fpreview',
+    'GET /api/executions/active?scope=all',
   ]);
   finish(session);
   await session.page.close();

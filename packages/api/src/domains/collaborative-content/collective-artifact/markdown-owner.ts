@@ -1,8 +1,3 @@
-import {
-  type CollectiveArtifactOwnerPort,
-  type CollectiveArtifactOwnerResult,
-  ConnectorTransportError,
-} from '@cat-cafe/collective-connector';
 import { type CollectiveArtifactRelayOperation, collectiveArtifactHistoryPageSchema } from '@cat-cafe/shared';
 import { ZodError } from 'zod';
 import { collectiveContentScopeRef } from '../../video-studio/content-owner/collective-scope.js';
@@ -27,6 +22,7 @@ import { publishCollectiveMarkdown, recoverCollectiveMarkdownPublication } from 
 import { readCollectiveMarkdown } from './markdown-read.js';
 import { CollectiveMarkdownReviews } from './markdown-reviews.js';
 import { recoverCollectiveSettlements } from './markdown-settlement-recovery.js';
+import { type CollectiveArtifactOwnerPort, type CollectiveArtifactOwnerResult } from './owner-port.js';
 import { CollectiveArtifactScopeQueue } from './scope-serial-queue.js';
 
 export class CollectiveMarkdownOwner implements CollectiveArtifactOwnerPort {
@@ -181,7 +177,7 @@ function ownerErrorCode(error: unknown): 'access_denied' | 'conflict' | 'invalid
     if (['revision_conflict', 'source_changed', 'operation_reused'].includes(error.code)) return 'conflict';
     return 'invalid_request';
   }
-  if (error instanceof ConnectorTransportError) {
+  if (error instanceof Error && 'statusCode' in error && typeof error.statusCode === 'number') {
     const codes: Record<number, 'access_denied' | 'conflict'> = { 403: 'access_denied', 409: 'conflict' };
     return codes[error.statusCode ?? 0] ?? 'owner_unavailable';
   }

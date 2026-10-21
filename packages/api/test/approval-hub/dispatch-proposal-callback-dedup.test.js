@@ -13,7 +13,7 @@ import '../helpers/setup-cat-registry.js';
 import assert from 'node:assert/strict';
 import { beforeEach, describe, it } from 'node:test';
 import Fastify from 'fastify';
-import { proposedReviewAction } from './helpers.js';
+import { proposedTaskAction } from './helpers.js';
 
 // Pre-existing proposal that "won" the race
 const WINNER_PROPOSAL_ID = 'dp-winner-existing';
@@ -138,6 +138,7 @@ describe('F246 Phase J: callbacks.ts dedup guard (Sol R6 regression)', () => {
 
     app = Fastify();
     await app.register(callbacksRoutes, {
+      actionSuccessorAdmissionService: { async preflightStructuredTransferStanding() {} },
       registry,
       messageStore,
       threadStore,
@@ -175,7 +176,7 @@ describe('F246 Phase J: callbacks.ts dedup guard (Sol R6 regression)', () => {
         content: '@sonnet\nPlease fix the bug',
         targetCats: ['sonnet'],
         effectClass: 'assign_work',
-        proposedAction: proposedReviewAction(),
+        proposedAction: proposedTaskAction(),
         clientMessageId: 'dedup-race-test',
       },
     });
@@ -209,7 +210,7 @@ describe('F246 Phase J: callbacks.ts dedup guard (Sol R6 regression)', () => {
         content: '@sonnet\nPlease fix the bug',
         targetCats: ['sonnet'],
         effectClass: 'assign_work',
-        proposedAction: proposedReviewAction(),
+        proposedAction: proposedTaskAction(),
         clientMessageId: 'dedup-no-emit',
       },
     });

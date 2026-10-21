@@ -1,3 +1,4 @@
+import { getCoCreatorDisplay } from '../../../config/co-creator-display.js';
 /**
  * Timezone-consistent timestamp formatting for agent prompts.
  *
@@ -116,7 +117,11 @@ export function formatPromptTime(epochMs: number, options?: PromptTimeFormatOpti
   const utc = utcDateTime(epochMs);
   const timeZone = resolvePromptTimeZone(options);
   if (!timeZone) return withAge(utc, epochMs, options);
-  return withAge(`co-creator本地 ${dateTimeInZone(epochMs, timeZone)} ${timeZone} / ${utc}`, epochMs, options);
+  return withAge(
+    `${getCoCreatorDisplay().nickname}本地 ${dateTimeInZone(epochMs, timeZone)} ${timeZone} / ${utc}`,
+    epochMs,
+    options,
+  );
 }
 
 /** Format a from–to range for prompt injection. */
@@ -124,5 +129,5 @@ export function formatPromptTimeRange(fromMs: number, toMs: number, options?: Pr
   const utc = `${dateTimeInZone(fromMs, 'UTC')} — ${dateTimeInZone(toMs, 'UTC')} UTC`;
   const timeZone = resolvePromptTimeZone(options);
   if (!timeZone) return utc;
-  return `co-creator本地 ${dateTimeInZone(fromMs, timeZone)} — ${dateTimeInZone(toMs, timeZone)} ${timeZone} / ${utc}`;
+  return `${getCoCreatorDisplay().nickname}本地 ${dateTimeInZone(fromMs, timeZone)} — ${dateTimeInZone(toMs, timeZone)} ${timeZone} / ${utc}`;
 }

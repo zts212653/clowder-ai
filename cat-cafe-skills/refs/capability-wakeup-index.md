@@ -284,16 +284,7 @@ opus-47 原把 `workspace-navigator` / `rich-messaging` / `browser-preview` 一�
 **场景 trigger**：Siamese / Antigravity carrier 或 model sticky 行为异常
 **Source**：`docs/architecture/cli-integration.md` + F210
 
-### 23. `enterprise-workflow` — 飞书 / 企微 IM 产物
-
-**坏直觉**：只想到普通 chat
-**场景 trigger**：
-- 文档 / 表格 / 待办 / 会议 / 日程
-- 一句话生成完整工作流
-
-**Pipeline**：`lark-*` skill 家族（lark-doc / lark-base / lark-task / lark-calendar / etc.）
-
-### 24. `capability-evolution` — F311 能力进化入口
+### 23. `capability-evolution` — F311 能力进化入口
 
 **坏直觉**：听到“你们能进化什么”只加载通用 `self-evolution` 讲理念；听到“我们来进化 X”或直接的 Agent / 业务结果，只给建议，不启动已经上线的 Program
 

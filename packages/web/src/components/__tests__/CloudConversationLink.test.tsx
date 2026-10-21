@@ -6,16 +6,40 @@ vi.mock('@/utils/api-client', () => ({ apiFetch: vi.fn() }));
 
 import { CloudConversationLink } from '@/components/CloudConversationLink';
 import { apiFetch } from '@/utils/api-client';
+import {
+  buttonByText,
+  candidate,
+  FakeHost,
+  flush,
+  gate,
+  jsonResponse,
+  REVIEW,
+  STARS,
+} from './cloud-route-test-fixtures';
 
 const mockApiFetch = vi.mocked(apiFetch);
 
-function jsonResponse(body: unknown, status = 200): Response {
-  return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
+/**
+ * Two threads, each connected to its own conversation. Both conversations are authorized — the list is
+ * the extension's, the same for every thread — and have no title, so the panel shows their ids.
+ */
+function connectedThreads(): [FakeHost, FakeHost] {
+  const conversations = [candidate('conversation-old'), candidate('conversation-new')];
+  return conversations.map((conversation) => {
+    const host = new FakeHost(conversation.conversationId.replace('conversation', 'thread'));
+    host.bindings = { 'gpt-pro': conversation.chatUrl };
+    host.candidates = conversations;
+    return host;
+  }) as [FakeHost, FakeHost];
 }
 
-async function flushEffects() {
-  await act(async () => {
-    await Promise.resolve();
+function serve(...hosts: FakeHost[]) {
+  mockApiFetch.mockImplementation(async (path, init, options) => {
+    for (const host of hosts) {
+      const answer = host.handle(path, init, options);
+      if (answer) return answer;
+    }
+    return jsonResponse({ error: 'not found' }, 404);
   });
 }
 
@@ -48,69 +72,85 @@ describe('CloudConversationLink', () => {
     delete (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT;
   });
 
-  it('shows the bound ChatGPT conversation and offers exact copy and user-initiated open actions', async () => {
-    const conversationId = '6a928d55-ed7c-83ee-adbf-56bef0ffe336';
-    const chatUrl = `https://chatgpt.com/c/${conversationId}`;
+  async function render(threadId: string) {
+    await act(async () => root.render(<CloudConversationLink threadId={threadId} />));
+    await flush();
+  }
+
+  it('folds to the connected conversation with open, copy and change', async () => {
+    const host = new FakeHost('thread-owner');
+    host.bindings = { 'gpt-pro': STARS.chatUrl };
+    serve(host);
     const writeText = vi.fn().mockResolvedValue(undefined);
     Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
-    mockApiFetch.mockResolvedValue(jsonResponse({ bindings: { 'gpt-pro': chatUrl } }));
 
-    await act(async () => root.render(<CloudConversationLink threadId="thread-owner" />));
-    await flushEffects();
+    await render('thread-owner');
 
-    expect(mockApiFetch).toHaveBeenCalledWith('/api/threads/thread-owner/cloud-bindings', expect.any(Object));
-    expect(container.textContent).toContain(conversationId);
+    expect(container.textContent).toContain('ChatGPT 会话 @gpt-pro');
+    expect(container.textContent).toContain('已连接');
+    expect(container.textContent).toContain(STARS.displayTitle);
+    const open = [...container.querySelectorAll<HTMLAnchorElement>('a')].find((a) => a.textContent === '打开会话');
+    expect(open?.getAttribute('href')).toBe(STARS.chatUrl);
+    expect(open?.getAttribute('target')).toBe('_blank');
+    expect(open?.getAttribute('rel')).toBe('noopener noreferrer');
+    expect(buttonByText(container, '更换')).toBeDefined();
+    expect(container.querySelector('input[type="radio"]')).toBeNull();
 
-    const openLink = container.querySelector<HTMLAnchorElement>('a[aria-label="在 ChatGPT 中打开当前会话"]');
-    expect(openLink?.getAttribute('href')).toBe(chatUrl);
-    expect(openLink?.getAttribute('target')).toBe('_blank');
-    expect(openLink?.getAttribute('rel')).toBe('noopener noreferrer');
-
-    await act(async () => {
-      container.querySelector<HTMLButtonElement>('button[aria-label="复制 ChatGPT 会话链接"]')?.click();
-      await Promise.resolve();
-    });
-    expect(writeText).toHaveBeenCalledWith(chatUrl);
+    await act(async () => buttonByText(container, '复制链接')?.click());
+    await flush();
+    expect(writeText).toHaveBeenCalledWith(STARS.chatUrl);
     expect(container.textContent).toContain('已复制');
   });
 
-  it('keeps the thread truth visible when no ChatGPT conversation is bound', async () => {
-    mockApiFetch.mockResolvedValue(jsonResponse({ bindings: {} }));
+  it('offers the authorized conversations right away when the thread has none', async () => {
+    serve(new FakeHost('thread-empty'));
 
-    await act(async () => root.render(<CloudConversationLink threadId="thread-empty" />));
-    await flushEffects();
+    await render('thread-empty');
 
-    expect(container.textContent).toContain('未绑定');
-    expect(container.textContent).toContain('ChatGPT 对话');
-    expect(container.textContent).toContain('先在目标会话点击扩展的「授权此会话」');
+    expect(container.textContent).toContain('未连接');
+    expect(container.querySelectorAll('input[type="radio"]')).toHaveLength(3);
+    expect(buttonByText(container, '连接这个会话')?.disabled).toBe(true);
+    expect(buttonByText(container, '断开连接')).toBeUndefined();
+  });
+
+  it('guides the owner to authorize a conversation when there is none', async () => {
+    const host = new FakeHost('thread-empty');
+    host.candidates = [];
+    serve(host);
+
+    await render('thread-empty');
+
+    expect(container.textContent).toContain('未连接');
+    expect(container.textContent).toContain('还没有已授权的会话');
     expect(container.querySelector('a[href="https://chatgpt.com/"]')).not.toBeNull();
-    expect(container.querySelector('a[href^="/settings"]')?.getAttribute('href')).toBe(
-      '/settings?s=plugins&threadId=thread-empty#personal-chatgpt-pro',
-    );
-    expect(container.querySelector('a[aria-label="在 ChatGPT 中打开当前会话"]')).toBeNull();
+    expect(container.querySelector('input[type="radio"]')).toBeNull();
+  });
+
+  it('no longer sends the owner to the settings page for anything', async () => {
+    for (const binding of [undefined, STARS.chatUrl, 'https://example.com/not-chatgpt']) {
+      const host = new FakeHost(`thread-${binding ?? 'none'}`);
+      if (binding) host.bindings = { 'gpt-pro': binding };
+      serve(host);
+      await render(host.threadId);
+      expect(container.querySelector('a[href^="/settings"]')).toBeNull();
+    }
   });
 
   it('does not let a delayed prior-thread binding overwrite the current thread', async () => {
-    let resolveOldBinding!: (body: { bindings: { 'gpt-pro': string } }) => void;
-    const oldBindingBody = new Promise<{ bindings: { 'gpt-pro': string } }>((resolve) => {
-      resolveOldBinding = resolve;
-    });
-    mockApiFetch
-      .mockResolvedValueOnce({
-        ok: true,
-        status: 200,
-        json: () => oldBindingBody,
-      } as Response)
-      .mockResolvedValueOnce(jsonResponse({ bindings: { 'gpt-pro': 'https://chatgpt.com/c/conversation-new' } }));
+    const oldHost = new FakeHost('thread-old');
+    oldHost.bindings = { 'gpt-pro': 'https://chatgpt.com/c/conversation-old' };
+    const held = gate();
+    oldHost.readPlan = [{ gate: held.promise }];
+    const newHost = new FakeHost('thread-new');
+    newHost.bindings = { 'gpt-pro': 'https://chatgpt.com/c/conversation-new' };
+    serve(oldHost, newHost);
 
-    await act(async () => root.render(<CloudConversationLink threadId="thread-old" />));
-    await flushEffects();
-    await act(async () => root.render(<CloudConversationLink threadId="thread-new" />));
-    await flushEffects();
+    await render('thread-old');
+    await render('thread-new');
     expect(container.textContent).toContain('conversation-new');
 
-    resolveOldBinding({ bindings: { 'gpt-pro': 'https://chatgpt.com/c/conversation-old' } });
-    await flushEffects();
+    held.open();
+    await flush();
 
     expect(container.textContent).toContain('conversation-new');
     expect(container.textContent).not.toContain('conversation-old');
@@ -123,27 +163,20 @@ describe('CloudConversationLink', () => {
     });
     const writeText = vi.fn().mockReturnValueOnce(oldCopy);
     Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
-    mockApiFetch
-      .mockResolvedValueOnce(jsonResponse({ bindings: { 'gpt-pro': 'https://chatgpt.com/c/conversation-old' } }))
-      .mockResolvedValueOnce(jsonResponse({ bindings: { 'gpt-pro': 'https://chatgpt.com/c/conversation-new' } }));
+    const [oldHost, newHost] = connectedThreads();
+    serve(oldHost, newHost);
 
-    await act(async () => root.render(<CloudConversationLink threadId="thread-old" />));
-    await flushEffects();
-    act(() => {
-      container.querySelector<HTMLButtonElement>('button[aria-label="复制 ChatGPT 会话链接"]')?.click();
-    });
+    await render('thread-old');
+    act(() => buttonByText(container, '复制链接')?.click());
     expect(writeText).toHaveBeenCalledWith('https://chatgpt.com/c/conversation-old');
 
-    await act(async () => root.render(<CloudConversationLink threadId="thread-new" />));
-    await flushEffects();
+    await render('thread-new');
     expect(container.textContent).toContain('conversation-new');
-    expect(container.textContent).toContain('复制链接');
 
     const setTimeoutSpy = vi.spyOn(globalThis, 'setTimeout');
     await act(async () => resolveOldCopy());
-    await flushEffects();
+    await flush();
 
-    expect(container.textContent).toContain('conversation-new');
     expect(container.textContent).toContain('复制链接');
     expect(container.textContent).not.toContain('已复制');
     expect(setTimeoutSpy).not.toHaveBeenCalled();
@@ -156,48 +189,71 @@ describe('CloudConversationLink', () => {
     });
     const writeText = vi.fn().mockReturnValueOnce(oldCopy);
     Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
-    mockApiFetch
-      .mockResolvedValueOnce(jsonResponse({ bindings: { 'gpt-pro': 'https://chatgpt.com/c/conversation-old' } }))
-      .mockResolvedValueOnce(jsonResponse({ bindings: { 'gpt-pro': 'https://chatgpt.com/c/conversation-new' } }));
+    const [oldHost, newHost] = connectedThreads();
+    serve(oldHost, newHost);
 
-    await act(async () => root.render(<CloudConversationLink threadId="thread-old" />));
-    await flushEffects();
-    act(() => {
-      container.querySelector<HTMLButtonElement>('button[aria-label="复制 ChatGPT 会话链接"]')?.click();
-    });
-
-    await act(async () => root.render(<CloudConversationLink threadId="thread-new" />));
-    await flushEffects();
-    expect(container.textContent).toContain('conversation-new');
+    await render('thread-old');
+    act(() => buttonByText(container, '复制链接')?.click());
+    await render('thread-new');
 
     await act(async () => rejectOldCopy(new Error('old clipboard failed')));
-    await flushEffects();
+    await flush();
 
     expect(container.textContent).toContain('conversation-new');
     expect(container.textContent).toContain('复制链接');
     expect(container.textContent).not.toContain('复制失败');
   });
 
-  it('does not leak owner-only binding truth to an unauthorized viewer', async () => {
-    mockApiFetch.mockResolvedValue(jsonResponse({ error: 'forbidden' }, 403));
+  it('shows only that the conversation is the owner’s to see, with no actions', async () => {
+    mockApiFetch.mockImplementation(async (path) =>
+      String(path).endsWith('/cloud-bindings') ? jsonResponse({ error: 'forbidden' }, 403) : jsonResponse({}, 403),
+    );
 
-    await act(async () => root.render(<CloudConversationLink threadId="thread-foreign" />));
-    await flushEffects();
+    await render('thread-foreign');
 
-    expect(container.textContent).toContain('仅 thread owner 可见');
+    expect(container.textContent).toContain('仅对话所有者可见');
     expect(container.querySelector('a')).toBeNull();
+    expect(container.querySelector('button')).toBeNull();
   });
 
-  it('refuses to turn a non-canonical binding value into a clickable link', async () => {
-    mockApiFetch.mockResolvedValue(jsonResponse({ bindings: { 'gpt-pro': 'https://example.com/not-chatgpt' } }));
+  it('refuses to turn a non-canonical binding value into a link, and offers a new choice', async () => {
+    const host = new FakeHost('thread-invalid');
+    host.bindings = { 'gpt-pro': 'https://example.com/not-chatgpt' };
+    serve(host);
 
-    await act(async () => root.render(<CloudConversationLink threadId="thread-invalid" />));
-    await flushEffects();
+    await render('thread-invalid');
 
-    expect(container.textContent).toContain('绑定记录无效');
-    expect(container.querySelector('a[aria-label="在 ChatGPT 中打开当前会话"]')).toBeNull();
-    expect(container.querySelector('a[href^="/settings"]')?.getAttribute('href')).toBe(
-      '/settings?s=plugins&threadId=thread-invalid#personal-chatgpt-pro',
-    );
+    expect(container.textContent).toContain('连接记录无效');
+    expect(container.querySelector('a[href="https://example.com/not-chatgpt"]')).toBeNull();
+    expect(container.querySelectorAll('input[type="radio"]')).toHaveLength(3);
+    expect(buttonByText(container, '连接这个会话')).toBeDefined();
+  });
+
+  // F202 h3c-2 — the panel shows the binding of the cat the Host resolves as the cloud cat.
+  it('reads the binding of the configured cloud cat, whatever its id', async () => {
+    const host = new FakeHost('thread-alt');
+    host.cloudCat = { status: 'resolved', catId: 'cloud-alt' };
+    host.bindings = { 'cloud-alt': REVIEW.chatUrl, 'gpt-pro': STARS.chatUrl };
+    serve(host);
+
+    await render('thread-alt');
+
+    expect(container.textContent).toContain('@cloud-alt');
+    expect(container.textContent).toContain(REVIEW.displayTitle);
+    expect(container.textContent).not.toContain(STARS.displayTitle);
+  });
+
+  it.each([
+    ['no cloud cat is configured', { status: 'unavailable' }],
+    ['several cats share the cloud provider', { status: 'ambiguous', catIds: ['cloud-alt', 'cloud-beta'] }],
+  ])('shows nothing when %s', async (_case, cloudCat) => {
+    const host = new FakeHost('thread-none');
+    host.cloudCat = cloudCat;
+    host.bindings = { 'cloud-alt': STARS.chatUrl };
+    serve(host);
+
+    await render('thread-none');
+
+    expect(container.querySelector('[data-testid="cloud-conversation-link"]')).toBeNull();
   });
 });

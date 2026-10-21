@@ -57,12 +57,19 @@ function mergeCallbackEnv(
 export function materializeSessionMcpServers(
   baseServers: AcpMcpServer[],
   callbackEnv?: Record<string, string>,
+  credentialFileOnly = false,
 ): AcpMcpServer[] {
   if (!callbackEnv || Object.keys(callbackEnv).length === 0) return baseServers;
 
   return baseServers.map((server) => {
     if (!isCatCafeStdioServer(server)) return server;
-    return { ...server, env: mergeCallbackEnv(server.env, callbackEnv) };
+    const env = mergeCallbackEnv(server.env, callbackEnv);
+    return {
+      ...server,
+      env: credentialFileOnly
+        ? env.filter((entry) => entry.name !== 'CAT_CAFE_INVOCATION_ID' && entry.name !== 'CAT_CAFE_CALLBACK_TOKEN')
+        : env,
+    };
   });
 }
 

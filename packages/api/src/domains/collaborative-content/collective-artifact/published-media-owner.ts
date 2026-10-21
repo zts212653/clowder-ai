@@ -1,4 +1,3 @@
-import type { CollectiveArtifactOwnerPort, CollectiveArtifactOwnerResult } from '@cat-cafe/collective-connector';
 import { type CollectiveMediaShareScope, collectiveMediaShareScopeSchema } from '@cat-cafe/shared';
 import type { MediaReviewPrincipal } from '../../video-studio/content-owner/published-media-access.js';
 import type { PublishedMediaService } from '../../video-studio/content-owner/published-media-service.js';
@@ -9,6 +8,7 @@ import { actOnCollectiveMediaReview } from './media-review-actions.js';
 import { CollectiveMediaReviews } from './media-reviews.js';
 import { type SharedPublishedMediaAsset, sharedMediaAsset } from './media-source.js';
 import { collectiveMediaView } from './media-view.js';
+import type { CollectiveArtifactOwnerPort, CollectiveArtifactOwnerResult } from './owner-port.js';
 import { mediaOwnerError, publishedMediaReadPort } from './published-media-read.js';
 import { CollectiveArtifactScopeQueue } from './scope-serial-queue.js';
 
@@ -25,15 +25,19 @@ export class CollectivePublishedMediaOwner implements CollectiveArtifactOwnerPor
     this.reviews = new CollectiveMediaReviews(deps.reviews, deps.ownerUserId);
     this.media = publishedMediaReadPort(deps, this.reviews);
   }
-  listRetained(userId: string, after?: string) {
+  async listRetained(userId: string, after?: string, authorizeEffect?: () => Promise<void>) {
     if (userId !== this.deps.ownerUserId) throw new WorkspaceContentReviewError('access_denied');
-    return this.deps.media.listRetained({ userId, actor: { kind: 'human', actorId: userId } }, after);
+    await authorizeEffect?.();
+    const result = await this.deps.media.listRetained({ userId, actor: { kind: 'human', actorId: userId } }, after);
+    await authorizeEffect?.();
+    return result;
   }
   async prepareShare(input: {
     contentRef: string;
     ownerRevision: number;
     scope: CollectiveMediaShareScope;
     principal: MediaReviewPrincipal;
+    authorizeEffect?: () => Promise<void>;
   }): Promise<SharedPublishedMediaAsset> {
     if (
       input.principal.userId !== this.deps.ownerUserId ||
@@ -43,10 +47,13 @@ export class CollectivePublishedMediaOwner implements CollectiveArtifactOwnerPor
       throw new WorkspaceContentReviewError('access_denied');
     const scope = collectiveMediaShareScopeSchema.parse(input.scope);
     return this.queue.run(input.contentRef, async () => {
+      await input.authorizeEffect?.();
       const asset = sharedMediaAsset(
         await this.deps.media.read(input.contentRef, input.ownerRevision, input.principal),
       );
+      await input.authorizeEffect?.();
       this.reviews.bind(scope, asset);
+      await input.authorizeEffect?.();
       return asset;
     });
   }

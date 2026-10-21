@@ -1,5 +1,6 @@
 'use client';
 
+import { deploymentDefaults } from '@cat-cafe/shared';
 import { useState } from 'react';
 import { apiFetch } from '@/utils/api-client';
 
@@ -11,7 +12,7 @@ interface ImportProjectModalProps {
 export function ImportProjectModal({ onClose, onImported }: ImportProjectModalProps) {
   const [name, setName] = useState('');
   const [sourcePath, setSourcePath] = useState('');
-  const [backlogPath, setBacklogPath] = useState('docs/ROADMAP.md');
+  const [backlogPath, setBacklogPath] = useState(deploymentDefaults.roadmapPath);
   const [description, setDescription] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);

@@ -9,27 +9,14 @@ const webRoot = resolve(testDir, '..', '..', '..');
 const appDir = resolve(webRoot, 'src', 'app');
 
 describe('global css architecture', () => {
-  it('loads split global css files from the root layout', () => {
+  it('keeps the base global CSS in the root module graph', () => {
     const layoutSource = readFileSync(resolve(appDir, 'layout.tsx'), 'utf8');
 
     /* globals.css is the only CSS still loaded via JS import */
     expect(layoutSource).toContain("import './globals.css';");
 
-    /* All other token/control sheets are served as static <link> tags via /vendor/app/ */
-    const vendorSheets = [
-      'theme-tokens.css',
-      'cat-persona-tokens.css',
-      'cat-persona-derived.css',
-      'connector-tokens.css',
-      'theme-extras.css',
-      'console-tokens.css',
-      'console-shell.css',
-      'console-controls.css',
-      'shell-v2.css',
-    ];
-    for (const sheet of vendorSheets) {
-      expect(layoutSource).toContain(`/vendor/app/${sheet}`);
-    }
+    // Static stylesheet order and bytes are checked on the actual rendered head
+    // in layout-stylesheet-identity.test.tsx.
   });
 
   it('lets the new-conversation composer overlap its artwork without an opaque host rectangle', () => {

@@ -8,7 +8,7 @@ import {
   HostBrokerControlPlane,
   HostBrokerError,
 } from '../dist/domains/plugin/host-broker/index.js';
-import { candidateHello, INSTANCE_ID, readyInventory } from './plugin-host-broker-helpers.js';
+import { candidateHello, INSTANCE_ID, messageSendReceipt, readyInventory } from './plugin-host-broker-helpers.js';
 
 async function activePersistedHarness(path) {
   const inventory = await readyInventory();
@@ -41,12 +41,12 @@ describe('K-2B persisted restart normalization', () => {
         pluginInstanceId: INSTANCE_ID,
         packageDigest: candidateHello().packageDigest,
         grantRevision: 1,
-        method: 'events.publish',
+        method: 'messaging.send',
         settlementKey: 'settlement-1',
         inputDigest: 'digest-1',
         phase: 'settled_success',
         revision: 2,
-        result: { publicationId: 'pub-1', disposition: 'accepted' },
+        result: messageSendReceipt('msg-1'),
         createdAt: 5_000,
         updatedAt: 5_001,
       });
@@ -100,7 +100,7 @@ describe('K-2B persisted restart normalization', () => {
       pluginInstanceId: INSTANCE_ID,
       packageDigest: candidateHello().packageDigest,
       grantRevision: 1,
-      method: 'events.publish',
+      method: 'messaging.send',
       settlementKey: 'settlement-forged',
       inputDigest: 'digest-forged',
       phase: 'settled_success',
@@ -141,5 +141,45 @@ describe('K-2B persisted restart normalization', () => {
       /simulated rename failure/,
     );
     assert.deepEqual(await store.snapshot(), before);
+  });
+});
+
+describe('retired contract history', () => {
+  it('preserves obsolete grant and method receipts without admitting their runtime authority', async () => {
+    const { readFileSync } = await import('node:fs');
+    const root = mkdtempSync(join(os.tmpdir(), 'broker-retired-contract-'));
+    const path = join(root, 'broker.json');
+    const { inventory, store } = await activePersistedHarness(path);
+    const old = await store.snapshot();
+    old.sessions[0].effectiveGrants = ['events.publish'];
+    old.calls.push({
+      ledgerKey: 'old-call',
+      brokerSessionId: 'bs-restart',
+      runtimeLeaseId: 'lease-restart',
+      pluginInstanceId: INSTANCE_ID,
+      packageDigest: candidateHello().packageDigest,
+      grantRevision: 1,
+      method: 'events.publish',
+      settlementKey: 'old-settlement',
+      inputDigest: 'old-input',
+      phase: 'settled_success',
+      revision: 2,
+      result: { accepted: true },
+      createdAt: 5000,
+      updatedAt: 5001,
+    });
+    writeFileSync(path, JSON.stringify(old));
+    const restartedStore = new FileHostBrokerStore(path);
+    const broker = new HostBrokerControlPlane({ inventory, store: restartedStore, now: () => 9000 });
+    assert.equal(await broker.recoverAfterRestart(), 1);
+    const recovered = await restartedStore.snapshot();
+    assert.deepEqual(recovered.calls, old.calls);
+    assert.deepEqual(recovered.sessions[0].effectiveGrants, ['events.publish']);
+    assert.equal(recovered.sessions[0].phase, 'closed');
+    assert.equal(recovered.runtimeLeases[0].state, 'closed');
+    const corrupt = JSON.parse(readFileSync(path, 'utf8'));
+    corrupt.sessions[0].effectiveGrants = ['events.publish', 'events.publish'];
+    writeFileSync(path, JSON.stringify(corrupt));
+    await assert.rejects(new FileHostBrokerStore(path).snapshot(), { code: 'CORRUPT_SNAPSHOT' });
   });
 });

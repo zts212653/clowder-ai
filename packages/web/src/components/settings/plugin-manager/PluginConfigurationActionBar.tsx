@@ -1,0 +1,75 @@
+'use client';
+
+/**
+ * PluginConfigurationActionBar — save/test buttons + status display for a plugin configuration.
+ * Shared save and test controls for declared plugin configuration.
+ */
+
+import { WifiIcon } from '../../HubConfigIcons';
+
+interface Props {
+  pluginId: string;
+  saveResult: { type: 'success' | 'error'; message: string } | null;
+  saving: boolean;
+  onSave: () => void;
+  /** Save only applies to visible value fields; operation-only plugins should not show a dead save button. */
+  showSave?: boolean;
+  saveDisabled?: boolean;
+  /** Show test button only when the plugin has a test handler (YAML action or built-in). */
+  showTest?: boolean;
+  testing: boolean;
+  onTest: () => void;
+}
+
+export function PluginConfigurationActionBar({
+  pluginId,
+  saveResult,
+  saving,
+  onSave,
+  showSave = true,
+  saveDisabled = false,
+  showTest = true,
+  testing,
+  onTest,
+}: Props) {
+  return (
+    <>
+      {saveResult && (
+        <div
+          className={`rounded-2xl px-3 py-2 text-xs ${
+            saveResult.type === 'success'
+              ? 'bg-conn-emerald-bg text-conn-emerald-text border border-conn-emerald-ring'
+              : 'bg-conn-red-bg text-conn-red-text border border-conn-red-ring'
+          }`}
+          data-testid="save-result"
+        >
+          {saveResult.message}
+        </div>
+      )}
+      <div className="flex items-center justify-end gap-2">
+        {showTest && (
+          <button
+            type="button"
+            className="console-button-secondary text-sm disabled:opacity-50"
+            onClick={onTest}
+            disabled={testing}
+          >
+            <WifiIcon />
+            {testing ? '测试中...' : '测试连接'}
+          </button>
+        )}
+        {showSave && (
+          <button
+            type="button"
+            onClick={onSave}
+            disabled={saving || saveDisabled}
+            className="console-button-primary text-sm disabled:opacity-50"
+            data-testid={`save-${pluginId}`}
+          >
+            {saving ? '保存中...' : '保存配置'}
+          </button>
+        )}
+      </div>
+    </>
+  );
+}

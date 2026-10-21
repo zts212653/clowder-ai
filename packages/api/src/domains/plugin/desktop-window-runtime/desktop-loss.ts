@@ -20,7 +20,10 @@ function unexpectedDesktopLosses(snapshot: PluginInventorySnapshot, pluginId: st
       instance.activationState === 'enabled' &&
       (instance.runtimeState === 'crashed' || hasRetainedDesktopLoss(instance)) &&
       snapshot.packages.some(
-        (pkg) => pkg.packageDigest === instance.packageDigest && desktopWindowContribution(pkg.manifest) !== undefined,
+        (pkg) =>
+          pkg.packageDigest === instance.packageDigest &&
+          pkg.manifest !== null &&
+          desktopWindowContribution(pkg.manifest) !== undefined,
       ),
   );
 }

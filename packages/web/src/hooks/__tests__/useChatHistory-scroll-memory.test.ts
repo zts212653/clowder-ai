@@ -1459,8 +1459,11 @@ describe('useChatHistory scroll memory (#27)', () => {
     expect(endEl.scrollIntoView).toHaveBeenCalledWith({ behavior: 'smooth' });
   });
 
-  it('does not rewind or cancel native End scrolling when a queued layout correction catches up', async () => {
-    const threadId = 'thread-end-correction-frame';
+  it.each([
+    'layout',
+    'stream',
+  ] as const)('does not cancel native End scrolling when %s reflows an already-recorded frame', async (source) => {
+    const threadId = `thread-end-correction-frame-${source}`;
     const messages = [makeMsg('m1', 1), makeMsg('m2', 2)];
     useChatStore.setState({
       currentThreadId: threadId,
@@ -1475,7 +1478,8 @@ describe('useChatHistory scroll memory (#27)', () => {
     defineMutableNumberProp(el, 'clientHeight', 600);
     defineMutableNumberProp(el, 'scrollHeight', 1500);
     el.getBoundingClientRect = () => ({ top: 100, bottom: 700 }) as DOMRect;
-    appendMessageBoundary(el, 'm1', () => ({ top: 200 - top.get(), bottom: 1000 - top.get() }));
+    let contentTop = 200;
+    appendMessageBoundary(el, 'm1', () => ({ top: contentTop - top.get(), bottom: contentTop + 800 - top.get() }));
     cancelInitialRestoreWithWheel(el, -1);
     act(() => capturedHook?.handleScroll());
 
@@ -1494,5 +1498,30 @@ describe('useChatHistory scroll memory (#27)', () => {
     // Even assigning the current coordinate interrupts an ongoing native scroll.
     expect(writes).not.toHaveBeenCalled();
     expect(readChatScrollState(threadId)?.top).toBe(450);
+
+    // The last native frame is already saved, but the gesture is still in flight.
+    // A deferred row above shrinks; re-anchoring now would abort the browser's End animation.
+    contentTop -= 80;
+    act(() => {
+      if (source === 'layout') window.dispatchEvent(new Event(CHAT_LAYOUT_CHANGED_EVENT));
+      else useChatStore.getState().patchMessage('m2', { content: 'deferred content is now measured' });
+      flushAnimationFrames();
+    });
+    expect(top.get()).toBe(450);
+    expect(writes).not.toHaveBeenCalled();
+
+    // A native scroll observation records the new geometry. Once the gesture ends,
+    // later layout changes must again preserve the reader's position.
+    act(() => {
+      capturedHook?.handleScroll();
+      el.dispatchEvent(new Event('scrollend'));
+    });
+    contentTop += 40;
+    act(() => {
+      window.dispatchEvent(new Event(CHAT_LAYOUT_CHANGED_EVENT));
+      flushAnimationFrames();
+    });
+    expect(top.get()).toBe(490);
+    expect(writes).toHaveBeenCalledOnce();
   });
 });

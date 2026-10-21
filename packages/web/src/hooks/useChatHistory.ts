@@ -102,7 +102,7 @@ type NavigationSettleResult =
   | { kind: 'retry' }
   | { kind: 'settled'; sample: NavigationSettleSample }
   | { kind: 'expired' };
-type NativeScrollInput = { startTop: number; observationFrame: number | null };
+type NativeScrollInput = { startTop: number; observationFrame: number | null; bottomTarget?: number };
 
 export type { CapturedChatReadingRef, ChatReadingRef, ChatReadingSnapshot } from '@/utils/chat-scroll-memory';
 
@@ -192,9 +192,18 @@ export function resolveScrollAnchor(
   return prev?.anchor === 'bottom' ? 'bottom' : 'offset';
 }
 
-function hasUnrecordedUserScroll(el: HTMLElement, saved: SavedScrollState, userScrolling: boolean): boolean {
+function hasUserScrollInProgress(
+  el: HTMLElement,
+  saved: SavedScrollState,
+  userScrolling: boolean,
+  input: NativeScrollInput | null,
+): boolean {
   const recordedTop = Math.min(saved.top, Math.max(0, el.scrollHeight - el.clientHeight));
-  return userScrolling && el.scrollTop !== recordedTop;
+  const inputStartTop = input ? Math.min(input.startTop, Math.max(0, el.scrollHeight - el.clientHeight)) : recordedTop;
+  // Saving one native frame does not finish its animation. A passive geometry
+  // correction between recorded frames would also cancel End/PageDown/wheel.
+  // A click with no native movement still permits ordinary reading reflow.
+  return userScrolling && (el.scrollTop !== recordedTop || el.scrollTop !== inputStartTop);
 }
 
 function rememberScrollState(threadId: string, el: HTMLElement, userScrolledUp = false, preserveOffsetAnchor = false) {
@@ -1064,9 +1073,9 @@ export function useChatHistory(threadId: string) {
         // was queued. Reflow must align the current position, not rewind it.
         const saved = readChatScrollState(scheduledForThread);
         if (!el || !saved || useChatStore.getState().currentThreadId !== scheduledForThread) return;
-        // Native pixels can precede their scroll event. Let that event record the
-        // new reading anchor before a passive reflow writes the previous one.
-        if (hasUnrecordedUserScroll(el, saved, userScrollIntentRef.current)) return;
+        // The browser owns the moving viewport until its native gesture ends,
+        // including the interval after a scroll event has saved the last frame.
+        if (hasUserScrollInProgress(el, saved, userScrollIntentRef.current, userScrollInputRef.current)) return;
         const beforeCorrection = captureRestoreWritePosition(
           el,
           useChatStore.getState().getThreadState(scheduledForThread).messages,
@@ -2094,7 +2103,7 @@ export function useChatHistory(threadId: string) {
     // replace bottom-follow with a reading anchor. Streaming must not reclaim
     // that pending movement through this synchronous timeline writer.
     if (saved.anchor === 'bottom' && userScrollIntentRef.current && userScrollUpRef.current) return;
-    if (hasUnrecordedUserScroll(el, saved, userScrollIntentRef.current)) return;
+    if (hasUserScrollInProgress(el, saved, userScrollIntentRef.current, userScrollInputRef.current)) return;
 
     const anchor: TimelineScrollAnchor | undefined =
       saved.anchor === 'bottom'
@@ -2422,6 +2431,15 @@ export function useChatHistory(threadId: string) {
       if (userScrollUpRef.current && input && !hasNativeUpwardMovement(el, input.startTop)) {
         return;
       }
+      if (input?.bottomTarget !== undefined) {
+        // Native End uses the bottom measured at keydown. Deferred rows may grow
+        // while it moves, so reaching that old target completes the native leg,
+        // then the existing bottom owner follows the actual destination.
+        const target = Math.min(input.bottomTarget, Math.max(0, el.scrollHeight - el.clientHeight));
+        if (el.scrollTop < target - 1) return;
+        jumpToLatest();
+        return;
+      }
       clearUserScrollIntent();
     };
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -2445,6 +2463,16 @@ export function useChatHistory(threadId: string) {
         (event.key === ' ' && !event.shiftKey);
       if (upward || downward) {
         markScrollIntent(upward);
+        const input = userScrollInputRef.current;
+        const targetsChat =
+          target instanceof Node &&
+          (el.contains(target) || target === document.body || target === document.documentElement);
+        if (event.key === 'End' && targetsChat && input) {
+          // The same input lifetime is revoked by newer input, navigation and
+          // thread changes; ordinary PageDown/wheel keep offset-reading intent.
+          input.bottomTarget = Math.max(0, el.scrollHeight - el.clientHeight);
+          if (el.scrollTop >= input.bottomTarget - 1) jumpToLatest();
+        }
       }
     };
 
@@ -2470,7 +2498,7 @@ export function useChatHistory(threadId: string) {
       el.removeEventListener('scrollend', finishNativeScroll);
       window.removeEventListener('keydown', handleKeyDown);
     };
-  }, [markScrollIntent, clearUserScrollIntent]);
+  }, [markScrollIntent, clearUserScrollIntent, jumpToLatest]);
 
   // Load more when scrolled to top + clowder-ai#27 continuous scroll save
   const handleScroll = useCallback(() => {

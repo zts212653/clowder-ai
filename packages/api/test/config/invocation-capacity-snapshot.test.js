@@ -232,6 +232,29 @@ describe('#1208 invocation-owned capacity snapshot', () => {
     }
   });
 
+  it('keeps a custom-model native window while preserving the home runtime model override', async () => {
+    registerTestCat(1_000_000, 'deepseek-flash');
+    const envKey = 'CAT_CAPACITY_OWNER_TEST_MODEL';
+    const previous = process.env[envKey];
+
+    try {
+      for (const model of ['deepseek-flash', 'gpt-5.3']) {
+        process.env[envKey] = model;
+        const snapshot = await resolveInvocationCapacitySnapshot({
+          catId: TEST_CAT_ID,
+          service: service(),
+        });
+        assert.equal(snapshot.model, model);
+        assert.equal(snapshot.capacity.source, 'manual');
+        assert.equal(snapshot.capacity.windowTokens, 1_000_000);
+        assert.equal(snapshot.nativeWindowTokens, 1_000_000);
+      }
+    } finally {
+      if (previous === undefined) delete process.env[envKey];
+      else process.env[envKey] = previous;
+    }
+  });
+
   it('does not treat generic provider capabilities as proof of an invocation-bound catalog window', async () => {
     registerTestCat(undefined, 'claude-opus-4-6');
     const snapshot = await resolveInvocationCapacitySnapshot({

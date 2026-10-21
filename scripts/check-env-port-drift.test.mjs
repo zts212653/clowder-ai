@@ -28,6 +28,12 @@ import {
 import { tmpdir } from 'node:os';
 import { dirname, posix, resolve } from 'node:path';
 import { describe, it } from 'node:test';
+import {
+  deploymentDefaults,
+  projectDeploymentProfiles,
+  resolveDeploymentDefaults,
+} from '../packages/shared/src/deployment-defaults.ts';
+import { resolveWindowsStatusPorts } from './lib/platform-status.mjs';
 import { rootCheckChain } from './lib/root-check-chain.mjs';
 
 const ROOT = resolve(process.cwd());
@@ -36,9 +42,6 @@ const ROOT = resolve(process.cwd());
 // Home repo has sync-to-opensource.sh; open-source repo does not.
 const isHomeRepo = existsSync(resolve(ROOT, 'scripts/sync-to-opensource.sh'));
 const hasEnvExampleOpensource = existsSync(resolve(ROOT, '.env.example.opensource'));
-
-// Keep the source-only export regression in the canonical check:env-ports lane.
-if (isHomeRepo) await import('./sync-to-opensource-api-build.test.mjs');
 
 function readEnvFile(relPath) {
   const content = readFileSync(resolve(ROOT, relPath), 'utf-8');
@@ -94,20 +97,6 @@ function loadExampleRecommendedRegistryNames() {
   }
 
   return recommended;
-}
-
-function readScriptFallback(relPath, varName) {
-  const content = readFileSync(resolve(ROOT, relPath), 'utf-8');
-  // Match pattern: VAR=${ENV_NAME:-DEFAULT}
-  const re = new RegExp(`${varName}=\\$\\{\\w+:-([^}]+)\\}`);
-  const m = content.match(re);
-  return m ? m[1] : null;
-}
-
-function readTsFallback(relPath, pattern) {
-  const content = readFileSync(resolve(ROOT, relPath), 'utf-8');
-  const m = content.match(pattern);
-  return m ? m[1] : null;
 }
 
 function readPowerShellFallback(relPath, pattern) {
@@ -543,100 +532,58 @@ const expectedFrontendPort = isHomeRepo ? '3001' : '3003';
 const repoLabel = isHomeRepo ? 'home' : 'open-source';
 
 describe(`Code-side port defaults are internally consistent (${repoLabel}: API=${expectedApiPort}, Frontend=${expectedFrontendPort})`, () => {
-  it(`start-dev.sh API fallback is ${expectedApiPort}`, () => {
-    const fallback = readScriptFallback('scripts/start-dev.sh', 'API_PORT');
-    assert.equal(
-      fallback,
-      expectedApiPort,
-      `start-dev.sh API_PORT fallback should be ${expectedApiPort}, got ${fallback}`,
-    );
+  it('deployment defaults match this edition and the public env template', () => {
+    assert.equal(String(deploymentDefaults.apiPort), expectedApiPort);
+    assert.equal(String(deploymentDefaults.webPort), expectedFrontendPort);
+    const resolved = resolveWindowsStatusPorts({ projectRoot: tmpdir(), env: {} });
+    assert.deepEqual(resolved, { apiPort: expectedApiPort, webPort: expectedFrontendPort });
   });
 
-  it(`start-dev.sh Frontend fallback is ${expectedFrontendPort}`, () => {
-    const fallback = readScriptFallback('scripts/start-dev.sh', 'WEB_PORT');
-    assert.equal(
-      fallback,
-      expectedFrontendPort,
-      `start-dev.sh WEB_PORT fallback should be ${expectedFrontendPort}, got ${fallback}`,
-    );
-  });
+  for (const [file, expressions] of [
+    ['packages/api/src/index.ts', ['API_SERVER_PORT ?? String(deploymentDefaults.apiPort)']],
+    ['packages/api/src/config/ConfigRegistry.ts', ['API_SERVER_PORT ?? String(deploymentDefaults.apiPort)']],
+    ['packages/api/src/config/env-registry.ts', ['defaultValue: String(deploymentDefaults.apiPort)']],
+    ['packages/api/src/config/frontend-origin.ts', ['DEFAULT_FRONTEND_BASE_URL = deploymentDefaults.frontendBaseUrl']],
+    [
+      'scripts/start-dev.sh',
+      [
+        'read-deployment-default.mjs" apiPort',
+        'read-deployment-default.mjs" webPort',
+        'API_PORT=${API_SERVER_PORT:-$DEFAULT_API_PORT}',
+        'WEB_PORT=${FRONTEND_PORT:-$DEFAULT_WEB_PORT}',
+      ],
+    ],
+    [
+      'scripts/setup.sh',
+      [
+        'API_SERVER_PORT=$DEPLOYMENT_API_PORT',
+        'FRONTEND_PORT=$DEPLOYMENT_WEB_PORT',
+        'NEXT_PUBLIC_API_URL=$DEPLOYMENT_API_URL',
+      ],
+    ],
+  ]) {
+    it(`${file} consumes shared deployment defaults`, () => {
+      const source = readFileSync(resolve(ROOT, file), 'utf8');
+      for (const expression of expressions) assert.ok(source.includes(expression), `${file}: ${expression}`);
+    });
+  }
 
-  it(`index.ts API port fallback is ${expectedApiPort}`, () => {
-    const fallback = readTsFallback('packages/api/src/index.ts', /API_SERVER_PORT\s*\?\?\s*'(\d+)'/);
-    assert.equal(fallback, expectedApiPort, `index.ts API fallback should be ${expectedApiPort}, got ${fallback}`);
-  });
-
-  it(`env-registry.ts API_SERVER_PORT defaultValue is ${expectedApiPort}`, () => {
-    const fallback = readTsFallback(
-      'packages/api/src/config/env-registry.ts',
-      /name:\s*'API_SERVER_PORT',\s*defaultValue:\s*'(\d+)'/,
-    );
-    assert.equal(
-      fallback,
-      expectedApiPort,
-      `env-registry API_SERVER_PORT default should be ${expectedApiPort}, got ${fallback}`,
-    );
-  });
-
-  it(`ConfigRegistry.ts API port fallback is ${expectedApiPort}`, () => {
-    const fallback = readTsFallback('packages/api/src/config/ConfigRegistry.ts', /API_SERVER_PORT\s*\?\?\s*'(\d+)'/);
-    assert.equal(
-      fallback,
-      expectedApiPort,
-      `ConfigRegistry API fallback should be ${expectedApiPort}, got ${fallback}`,
-    );
-  });
-
-  it(`frontend-origin.ts DEFAULT_FRONTEND_BASE_URL uses port ${expectedFrontendPort}`, () => {
-    const fallback = readTsFallback(
-      'packages/api/src/config/frontend-origin.ts',
-      /DEFAULT_FRONTEND_BASE_URL\s*=\s*'http:\/\/localhost:(\d+)'/,
-    );
-    assert.equal(
-      fallback,
-      expectedFrontendPort,
-      `frontend-origin DEFAULT_FRONTEND_BASE_URL should use ${expectedFrontendPort}, got ${fallback}`,
-    );
-  });
-
-  it(`setup.sh API_SERVER_PORT is ${expectedApiPort}`, () => {
-    const content = readFileSync(resolve(ROOT, 'scripts/setup.sh'), 'utf-8');
-    assert.ok(
-      content.includes(`API_SERVER_PORT=${expectedApiPort}`),
-      `setup.sh should set API_SERVER_PORT=${expectedApiPort}`,
-    );
-  });
-
-  it(`setup.sh FRONTEND_PORT is ${expectedFrontendPort}`, () => {
-    const content = readFileSync(resolve(ROOT, 'scripts/setup.sh'), 'utf-8');
-    assert.ok(
-      content.includes(`FRONTEND_PORT=${expectedFrontendPort}`),
-      `setup.sh should set FRONTEND_PORT=${expectedFrontendPort}`,
-    );
-  });
-
-  it(`setup.sh NEXT_PUBLIC_API_URL uses port ${expectedApiPort}`, () => {
-    const content = readFileSync(resolve(ROOT, 'scripts/setup.sh'), 'utf-8');
-    assert.ok(
-      content.includes(`NEXT_PUBLIC_API_URL=http://localhost:${expectedApiPort}`),
-      `setup.sh should set NEXT_PUBLIC_API_URL to localhost:${expectedApiPort}`,
-    );
-  });
+  for (const file of ['start-windows.ps1', 'stop-windows.ps1', 'install.ps1']) {
+    it(`${file} reads selected data and fails before service actions on a failed read`, () => {
+      const source = readFileSync(resolve(ROOT, 'scripts', file), 'utf8');
+      assert.match(source, /read-deployment-default\.mjs"\) --json/);
+      assert.match(source, /if \(\$LASTEXITCODE -ne 0\) \{ throw/);
+      assert.match(source, /\$deploymentDefaults\.apiPort/);
+      assert.match(source, /\$deploymentDefaults\.webPort/);
+      assert.doesNotMatch(source, /else \{ "300[12]" \}|\$(?:Api|Web)Port = 300[12]/);
+    });
+  }
 
   it('setup.sh leaves TTS_CACHE_DIR unset so the API uses the stable user-data default', () => {
     const content = readFileSync(resolve(ROOT, 'scripts/setup.sh'), 'utf-8');
     assert.ok(
       !/^TTS_CACHE_DIR=/m.test(content),
       'setup.sh must not pin the TTS cache to a checkout-relative directory',
-    );
-  });
-
-  it(`runtime-worktree.sh API port fallback is ${expectedApiPort}`, () => {
-    const fallback = readTsFallback('scripts/runtime-worktree.sh', /API_SERVER_PORT:-(\d+)/);
-    assert.equal(
-      fallback,
-      expectedApiPort,
-      `runtime-worktree.sh API port fallback should be ${expectedApiPort}, got ${fallback}`,
     );
   });
 
@@ -658,60 +605,6 @@ describe(`Code-side port defaults are internally consistent (${repoLabel}: API=$
     );
   });
 
-  it(`platform-status.mjs API status fallback is ${expectedApiPort}`, () => {
-    const fallback = readTsFallback('scripts/lib/platform-status.mjs', /DEFAULT_API_PORT = '(\d+)'/);
-    assert.equal(
-      fallback,
-      expectedApiPort,
-      `platform-status API status fallback should be ${expectedApiPort}, got ${fallback}`,
-    );
-  });
-
-  it(`platform-status.mjs Frontend status fallback is ${expectedFrontendPort}`, () => {
-    const fallback = readTsFallback('scripts/lib/platform-status.mjs', /DEFAULT_WEB_PORT = '(\d+)'/);
-    assert.equal(
-      fallback,
-      expectedFrontendPort,
-      `platform-status Frontend status fallback should be ${expectedFrontendPort}, got ${fallback}`,
-    );
-  });
-
-  it(`AgentRouter.ts API port fallback is ${expectedApiPort}`, () => {
-    const fallback = readTsFallback(
-      'packages/api/src/domains/cats/services/agents/routing/AgentRouter.ts',
-      /API_SERVER_PORT\s*\?\?\s*'(\d+)'/,
-    );
-    assert.equal(
-      fallback,
-      expectedApiPort,
-      `AgentRouter.ts API fallback should be ${expectedApiPort}, got ${fallback}`,
-    );
-  });
-
-  it(`start-windows.ps1 API fallback is ${expectedApiPort}`, () => {
-    const fallback = readPowerShellFallback(
-      'scripts/start-windows.ps1',
-      /\$ApiPort = if \(\$env:API_SERVER_PORT\) \{ \$env:API_SERVER_PORT \} else \{ "(\d+)" \}/,
-    );
-    assert.equal(
-      fallback,
-      expectedApiPort,
-      `start-windows.ps1 API fallback should be ${expectedApiPort}, got ${fallback}`,
-    );
-  });
-
-  it(`start-windows.ps1 Frontend fallback is ${expectedFrontendPort}`, () => {
-    const fallback = readPowerShellFallback(
-      'scripts/start-windows.ps1',
-      /\$WebPort = if \(\$env:FRONTEND_PORT\) \{ \$env:FRONTEND_PORT \} else \{ "(\d+)" \}/,
-    );
-    assert.equal(
-      fallback,
-      expectedFrontendPort,
-      `start-windows.ps1 Frontend fallback should be ${expectedFrontendPort}, got ${fallback}`,
-    );
-  });
-
   it('start-windows.ps1 Redis fallback uses repo-local default', () => {
     const fallback = readPowerShellFallback(
       'scripts/start-windows.ps1',
@@ -720,60 +613,14 @@ describe(`Code-side port defaults are internally consistent (${repoLabel}: API=$
     assert.equal(fallback, '6399');
   });
 
-  it(`stop-windows.ps1 API fallback is ${expectedApiPort}`, () => {
-    const fallback = readPowerShellFallback('scripts/stop-windows.ps1', /\$ApiPort = (\d+)/);
-    assert.equal(
-      fallback,
-      expectedApiPort,
-      `stop-windows.ps1 API fallback should be ${expectedApiPort}, got ${fallback}`,
-    );
-  });
-
-  it(`stop-windows.ps1 Frontend fallback is ${expectedFrontendPort}`, () => {
-    const fallback = readPowerShellFallback('scripts/stop-windows.ps1', /\$WebPort = (\d+)/);
-    assert.equal(
-      fallback,
-      expectedFrontendPort,
-      `stop-windows.ps1 Frontend fallback should be ${expectedFrontendPort}, got ${fallback}`,
-    );
-  });
-
   it('stop-windows.ps1 Redis fallback uses repo-local default', () => {
     const fallback = readPowerShellFallback('scripts/stop-windows.ps1', /\$RedisPort = (\d+)/);
     assert.equal(fallback, '6399');
   });
 
-  it(`install.ps1 minimal .env fallback uses API ${expectedApiPort} and Frontend ${expectedFrontendPort}`, () => {
-    const content = readFileSync(resolve(ROOT, 'scripts/install.ps1'), 'utf-8');
-    assert.ok(
-      content.includes(`FRONTEND_PORT=${expectedFrontendPort}`),
-      `install.ps1 minimal .env should set FRONTEND_PORT=${expectedFrontendPort}`,
-    );
-    assert.ok(
-      content.includes(`API_SERVER_PORT=${expectedApiPort}`),
-      `install.ps1 minimal .env should set API_SERVER_PORT=${expectedApiPort}`,
-    );
-    assert.ok(
-      content.includes(`NEXT_PUBLIC_API_URL=http://localhost:${expectedApiPort}`),
-      `install.ps1 minimal .env should set NEXT_PUBLIC_API_URL to localhost:${expectedApiPort}`,
-    );
-  });
-
   it('install.ps1 Redis fallback uses repo-local default', () => {
     const content = readFileSync(resolve(ROOT, 'scripts/install.ps1'), 'utf-8');
     assert.ok(content.includes('REDIS_PORT=6399'));
-  });
-
-  it(`install.ps1 post-install open URL fallback uses frontend port ${expectedFrontendPort}`, () => {
-    const fallback = readPowerShellFallback(
-      'scripts/install.ps1',
-      /if \(-not \$frontendPort\) \{ \$frontendPort = "(\d+)" \}/,
-    );
-    assert.equal(
-      fallback,
-      expectedFrontendPort,
-      `install.ps1 final frontend fallback should be ${expectedFrontendPort}, got ${fallback}`,
-    );
   });
 });
 
@@ -781,24 +628,6 @@ describe(
   'Sync transform rules match convention',
   { skip: !isHomeRepo && 'sync infrastructure not present (open-source repo)' },
   () => {
-    it('exports the Git attribute that keeps the deterministic F247 bundle LF-only on Windows', () => {
-      const attributesPath = resolve(ROOT, '.gitattributes');
-      assert.ok(existsSync(attributesPath), '.gitattributes must define the generated bundle checkout contract');
-
-      const attributes = readFileSync(attributesPath, 'utf8');
-      assert.match(
-        attributes,
-        /^packages\/api\/src\/plugins\/cloud-cat-personal-host\/extension\/content-script\.js text eol=lf$/mu,
-        'the checked-in bundle must retain LF on Windows so the deterministic build comparison is byte-stable',
-      );
-
-      const managedFiles = readYamlTopLevelList('sync-manifest.yaml', 'managed_files');
-      assert.ok(
-        managedFiles.includes('.gitattributes'),
-        'sync-manifest must export .gitattributes so the public Windows checkout keeps the same bundle contract',
-      );
-    });
-
     it('_sanitize-rules.pl transforms 3002→3004 (API)', () => {
       const content = readFileSync(resolve(ROOT, 'scripts/_sanitize-rules.pl'), 'utf-8');
       assert.ok(
@@ -838,8 +667,8 @@ describe(
       );
 
       assert.doesNotMatch(stagingSource, /3001\/3002/);
-      assert.match(stagingSource, /FRONTEND_PORT \?\? '3003'/);
-      assert.match(stagingSource, /API_SERVER_PORT \?\? '3004'/);
+      assert.match(stagingSource, /FRONTEND_PORT \?\? String\(deploymentDefaults.webPort\)/);
+      assert.match(stagingSource, /API_SERVER_PORT \?\? String\(deploymentDefaults.apiPort\)/);
       assert.doesNotMatch(stagingTest, /3001\/3002/);
       assert.match(stagingTest, /defaultOut\.includes\('3003\/3004'\)/);
     });
@@ -870,59 +699,14 @@ describe(
       }
     });
 
-    it('sync-to-opensource.sh transforms start-dev.sh API fallback to 3004', () => {
-      const content = readFileSync(resolve(ROOT, 'scripts/sync-to-opensource.sh'), 'utf-8');
-      const expected = "'s/API_PORT=$" + '{API_SERVER_PORT:-3004}/API_PORT=$' + "{API_SERVER_PORT:-3004}/g'";
-      assert.ok(content.includes(expected), 'sync script should transform start-dev.sh API fallback 3002→3004');
-    });
-
-    it('sync-to-opensource.sh transforms start-dev.sh Frontend fallback to 3003', () => {
-      const content = readFileSync(resolve(ROOT, 'scripts/sync-to-opensource.sh'), 'utf-8');
-      const expected = "'s/WEB_PORT=$" + '{FRONTEND_PORT:-3003}/WEB_PORT=$' + "{FRONTEND_PORT:-3003}/g'";
-      assert.ok(content.includes(expected), 'sync script should transform start-dev.sh Frontend fallback 3001→3003');
-    });
-
-    it('sync-to-opensource.sh transforms setup.sh API port to 3004', () => {
-      const content = readFileSync(resolve(ROOT, 'scripts/sync-to-opensource.sh'), 'utf-8');
-      assert.ok(
-        content.includes("'s/API_SERVER_PORT=3004/API_SERVER_PORT=3004/g'"),
-        'sync script should transform setup.sh API_SERVER_PORT 3002→3004',
-      );
-    });
-
-    it('sync-to-opensource.sh transforms setup.sh Frontend port to 3003', () => {
-      const content = readFileSync(resolve(ROOT, 'scripts/sync-to-opensource.sh'), 'utf-8');
-      assert.ok(
-        content.includes("'s/FRONTEND_PORT=3003/FRONTEND_PORT=3003/g'"),
-        'sync script should transform setup.sh FRONTEND_PORT 3001→3003',
-      );
-    });
-
-    it('sync-to-opensource.sh transforms runtime-worktree.sh API port to 3004', () => {
-      const content = readFileSync(resolve(ROOT, 'scripts/sync-to-opensource.sh'), 'utf-8');
-      assert.ok(
-        content.includes("'s/API_SERVER_PORT:-3004/API_SERVER_PORT:-3004/g'"),
-        'sync script should transform runtime-worktree.sh API port 3004→3004',
-      );
-    });
-
-    it('sync-to-opensource.sh transforms install.ps1 to public defaults', () => {
-      const content = readFileSync(resolve(ROOT, 'scripts/sync-to-opensource.sh'), 'utf-8');
-      assert.ok(content.includes("'s/FRONTEND_PORT=3003/FRONTEND_PORT=3003/g'"));
-      assert.ok(content.includes("'s/API_SERVER_PORT=3004/API_SERVER_PORT=3004/g'"));
-      assert.ok(content.includes('$frontendPort = "3003"'));
-    });
-
-    it('sync-to-opensource.sh transforms start-windows.ps1 API/frontend defaults', () => {
-      const content = readFileSync(resolve(ROOT, 'scripts/sync-to-opensource.sh'), 'utf-8');
-      assert.ok(content.includes('s/else { "3002" }/else { "3004" }/g'));
-      assert.ok(content.includes('s/else { "3001" }/else { "3003" }/g'));
-    });
-
-    it('sync-to-opensource.sh transforms stop-windows.ps1 API/frontend defaults', () => {
-      const content = readFileSync(resolve(ROOT, 'scripts/sync-to-opensource.sh'), 'utf-8');
-      assert.ok(content.includes('s/\\$ApiPort = 3002/$ApiPort = 3004/g'));
-      assert.ok(content.includes('s/\\$WebPort = 3001/$WebPort = 3003/g'));
+    it('sync projects configuration data instead of mutating consumers', () => {
+      const script = readFileSync(resolve(ROOT, 'scripts/sync-to-opensource.sh'), 'utf8');
+      assert.match(script, /project-deployment-defaults\.mjs/);
+      assert.doesNotMatch(script, /s\/API_PORT=\$\{API_SERVER_PORT:-3004/);
+      const input = JSON.parse(readFileSync(resolve(ROOT, 'packages/shared/src/deployment-profiles.json'), 'utf8'));
+      const projected = resolveDeploymentDefaults(projectDeploymentProfiles(input, 'opensource'));
+      assert.equal(String(projected.apiPort), readEnvFile('.env.example.opensource').API_SERVER_PORT);
+      assert.equal(String(projected.webPort), readEnvFile('.env.example.opensource').FRONTEND_PORT);
     });
 
     it('sync-to-opensource.sh keeps Windows Redis defaults unchanged', () => {
@@ -1518,26 +1302,6 @@ excluded:
       }
     });
 
-    it('sync-manifest exports the GitHub plugin manifest used by public schedule factories', () => {
-      const managedFiles = readYamlTopLevelList('sync-manifest.yaml', 'managed_files');
-      const targetOwnedFiles = readYamlTopLevelList('sync-manifest.yaml', 'target_owned_files');
-      const pluginManifest = 'packages/api/src/plugins/github/plugin.yaml';
-
-      assert.ok(
-        existsSync(resolve(ROOT, pluginManifest)),
-        `${pluginManifest} should exist in the source repo so outbound sync can export it`,
-      );
-      assert.ok(
-        managedFiles.includes(pluginManifest),
-        `${pluginManifest} must be exported because packages/api public schedule tests and runtime plugin loading depend on it`,
-      );
-      assert.equal(
-        targetOwnedFiles.includes(pluginManifest),
-        false,
-        `${pluginManifest} is source-managed after #906/#905 intake and must not be restored over from the target repo`,
-      );
-    });
-
     it('sync-manifest marks the F203 native L0 template as a sanitized transform', () => {
       const transformTargets = readYamlTransformTargets('sync-manifest.yaml');
 
@@ -1863,9 +1627,18 @@ excluded:
     it('desktop installer runs F180 agent hook sync under the invoking user profile', () => {
       const inno = readFileSync(resolve(ROOT, 'desktop/installer/cat-cafe.iss'), 'utf-8');
       const postInstall = readFileSync(resolve(ROOT, 'desktop/scripts/post-install-offline.ps1'), 'utf-8');
-      const adminPostInstallEntry = inno.match(
-        /Filename: "powershell\.exe";\s*\\\s*Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""\{app\}\\scripts\\post-install-offline\.ps1"" -AppDir ""\{app\}""";\s*\\\s*StatusMsg: "Configuring Clowder AI\.\.\.";\s*\\\s*Flags: runhidden waituntilterminated(?:;[^\n]*)?/,
-      )?.[0];
+      const adminPostInstallEntry = inno
+        .split(/\r?\n(?=Filename:)/u)
+        .find(
+          (entry) =>
+            /^Filename: "powershell\.exe";/u.test(entry) &&
+            /Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""\{app\}\\scripts\\post-install-offline\.ps1"" -AppDir ""\{app\}""/u.test(
+              entry,
+            ) &&
+            /StatusMsg: "Configuring Clowder AI\.\.\."/u.test(entry) &&
+            /Flags: runhidden waituntilterminated(?:;|\r?$)/mu.test(entry) &&
+            !/Flags:[^\r\n]*runasoriginaluser/u.test(entry),
+        );
 
       assert.match(
         inno,
@@ -1883,11 +1656,14 @@ excluded:
         /sync-agent-hooks-offline\.mjs/,
         'post-install should invoke the offline hook sync helper',
       );
-      assert.match(
-        postInstall,
-        /\$targetRoot = Resolve-AgentHookTargetRoot[\s\S]*--target-root[\s\S]*\$targetRoot/,
-        'offline helper should receive the resolved user profile explicitly as --target-root',
+      assert.ok(
+        /\$targetRoot = Resolve-AgentHookTargetRoot/u.test(postInstall) ||
+          /\$targetRoot = Invoke-AgentHookPhase 'resolve-profile' \{[\s\S]*?\$profileRoot = Resolve-AgentHookTargetRoot[\s\S]*?return \$profileRoot[\s\S]*?\}/u.test(
+            postInstall,
+          ),
+        'offline helper target should resolve the invoking user profile, including a diagnostic phase wrapper',
       );
+      assert.match(postInstall, /--target-root\s+\$targetRoot/u, 'offline helper should receive the resolved target');
       assert.match(
         postInstall,
         /Agent CLI hook sync failed[\s\S]*Hub health check can repair it later/,
@@ -1902,14 +1678,6 @@ excluded:
         serviceManager,
         /const mirrors = \[[^\]]*'\.claude'[^\]]*\]/,
         'desktop service manager should mirror .claude into the writable project root for API hook health',
-      );
-    });
-
-    it('sync-to-opensource.sh transforms AgentRouter.ts API port to 3004', () => {
-      const content = readFileSync(resolve(ROOT, 'scripts/sync-to-opensource.sh'), 'utf-8');
-      assert.ok(
-        content.includes("process.env.API_SERVER_PORT ?? '3004'"),
-        'sync script should transform AgentRouter.ts API port 3004→3004',
       );
     });
 

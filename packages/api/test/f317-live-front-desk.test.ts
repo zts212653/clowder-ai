@@ -68,6 +68,8 @@ test('every tool the guidance names is mounted for Live; capture tools are never
   assert.doesNotMatch(deep, /audio_capture|开始录音了|已经开始录/);
   const meeting = LIVE_FRONT_DESK_SCENES.find((scene) => scene.id === 'meeting');
   assert.ok(meeting);
+  assert.doesNotMatch(meeting.deep, /read_meeting_artifact/);
+  assert.match(meeting.deep, /resourceRef 只是引用/);
   assert.match(meeting.deep, /三件事/, 'joining, reading an existing capture and starting a recording stay distinct');
   assert.match(meeting.deep, /不能只丢一句/, 'a missing tool is explained, not bounced back as a manual click');
 });

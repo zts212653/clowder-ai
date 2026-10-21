@@ -1,6 +1,5 @@
 import { createHash } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
-import type { CollectiveArtifactOwnerPort } from '@cat-cafe/collective-connector';
 import {
   type CollectiveArtifactConstraint,
   type CollectiveArtifactRelayOperation,
@@ -13,6 +12,7 @@ import {
 import type { ProjectContentOwnerService } from '../../video-studio/content-owner/service.js';
 import type { LoadedProjectContentV1 } from '../../video-studio/content-owner/types.js';
 import { WorkspaceContentReviewError } from '../workspace-review/errors.js';
+import type { CollectiveArtifactOwnerPort } from './owner-port.js';
 
 export interface AdmittedCollectiveMarkdown {
   constraint: CollectiveArtifactConstraint;

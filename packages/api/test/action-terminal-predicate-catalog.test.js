@@ -26,14 +26,6 @@ describe('F167 S.1-b ActionTerminalPredicateCatalog', () => {
       })),
       [
         {
-          actionFamily: 'review',
-          kind: 'review_delivered',
-          completionResolver: 'review_delivery',
-          freshnessResolver: 'community_current_head',
-          producers: ['external_review_verdict'],
-          requiredPorts: ['community_projection', 'action_successor_preflight', 'action_successor_completion'],
-        },
-        {
           actionFamily: 'implement',
           kind: 'task_done',
           completionResolver: 'task_done_status',
@@ -46,14 +38,13 @@ describe('F167 S.1-b ActionTerminalPredicateCatalog', () => {
 
     const ready = {
       runtimePorts: {
-        community_projection: {},
         task_store: {},
         action_successor_preflight: () => {},
         action_successor_completion: () => {},
       },
-      completionResolvers: new Set(['review_delivery', 'task_done_status']),
-      freshnessResolvers: new Set(['community_current_head', 'task_active_owner']),
-      producers: new Set(['external_review_verdict', 'task_status_transition']),
+      completionResolvers: new Set(['task_done_status']),
+      freshnessResolvers: new Set(['task_active_owner']),
+      producers: new Set(['task_status_transition']),
     };
     assert.doesNotThrow(() => assertActionTerminalCapabilityRegistryReady(ready));
     assert.throws(
@@ -62,26 +53,12 @@ describe('F167 S.1-b ActionTerminalPredicateCatalog', () => {
           ...ready,
           runtimePorts: { ...ready.runtimePorts, action_successor_completion: undefined },
         }),
-      /review:review_delivered requires runtime port action_successor_completion/,
+      /implement:task_done requires runtime port action_successor_completion/,
     );
     assert.throws(
       () => assertActionTerminalCapabilityRegistryReady({ ...ready, producers: new Set() }),
-      /review:review_delivered requires producer external_review_verdict/,
+      /implement:task_done requires producer task_status_transition/,
     );
-  });
-
-  it('binds a review predicate to the canonical PR subject without putting HEAD in the action key', () => {
-    const predicate = canonicalizeActionTerminalPredicate({
-      actionFamily: 'review',
-      subjectRef: 'pr:Owner/Repo#3018',
-      predicate: { kind: 'review_delivered', headSha: FULL_HEAD_SHA },
-    });
-
-    assert.equal(predicate.subjectRef, 'pr:owner/repo#3018');
-    assert.equal(predicate.identityKey, 'review_delivered\u001fpr:owner/repo#3018');
-    assert.equal(predicate.freshnessKey, `head:${FULL_HEAD_SHA}`);
-    assert.match(predicate.digest, /^[a-f0-9]{64}$/);
-    assert.equal(predicate.identityKey.includes(FULL_HEAD_SHA), false);
   });
 
   it('binds task completion to one canonical task subject', () => {
@@ -119,7 +96,7 @@ describe('F167 S.1-b ActionTerminalPredicateCatalog', () => {
     );
   });
 
-  it('rejects abbreviated HEADs even when an internal caller bypasses the shared schema', () => {
+  it('rejects removed review predicates even when an internal caller bypasses the shared schema', () => {
     assert.throws(
       () =>
         canonicalizeActionTerminalPredicate({
@@ -127,7 +104,7 @@ describe('F167 S.1-b ActionTerminalPredicateCatalog', () => {
           subjectRef: 'pr:owner/repo#3018',
           predicate: { kind: 'review_delivered', headSha: '405400f406c7' },
         }),
-      (error) => error instanceof ActionTerminalPredicateError && error.code === 'invalid_predicate_parameter',
+      (error) => error instanceof ActionTerminalPredicateError && error.code === 'predicate_not_allowed',
     );
   });
 

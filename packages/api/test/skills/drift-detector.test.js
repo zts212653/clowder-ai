@@ -34,6 +34,8 @@ async function checkMount(projectRoot, skillsSource, mountRules, opts = {}) {
   });
 }
 
+const providerDirectory = (provider) => (provider === 'kimi' ? '.kimi-code' : `.${provider}`);
+
 let tempDir;
 let projectRoot;
 let skillsSource;
@@ -44,20 +46,20 @@ async function makeSkill(name) {
 }
 
 async function mountManagedLink(provider, skillName) {
-  const dir = join(projectRoot, `.${provider}`, 'skills');
+  const dir = join(projectRoot, providerDirectory(provider), 'skills');
   await mkdir(dir, { recursive: true });
   await symlink(join(skillsSource, skillName), join(dir, skillName));
 }
 
 async function mountManagedRelativeLink(provider, skillName) {
-  const dir = join(projectRoot, `.${provider}`, 'skills');
+  const dir = join(projectRoot, providerDirectory(provider), 'skills');
   await mkdir(dir, { recursive: true });
   await symlink(relative(dir, join(skillsSource, skillName)), join(dir, skillName));
 }
 
 async function mountLegacySkillsRoot(provider) {
-  await mkdir(join(projectRoot, `.${provider}`), { recursive: true });
-  await symlink(skillsSource, join(projectRoot, `.${provider}`, 'skills'));
+  await mkdir(join(projectRoot, providerDirectory(provider)), { recursive: true });
+  await symlink(skillsSource, join(projectRoot, providerDirectory(provider), 'skills'));
 }
 
 describe('DriftDetector (F228 Phase 2)', () => {
@@ -441,7 +443,7 @@ describe('DriftDetector (F228 Phase 2)', () => {
     assert.equal(blocked.conflicts[0].kind, 'directory');
   });
 
-  test('disabled standard provider is not scanned (skill in .kimi/skills/ ignored)', async () => {
+  test('disabled standard provider is not scanned (skill in .kimi-code/skills/ ignored)', async () => {
     await makeSkill('tdd');
     await mountManagedLink('kimi', 'tdd');
     // disable kimi — only claude/codex/gemini matter
@@ -449,7 +451,7 @@ describe('DriftDetector (F228 Phase 2)', () => {
       ...DEFAULT_MOUNT_RULES,
       mountPoints: {
         ...DEFAULT_MOUNT_RULES.mountPoints,
-        kimi: { enabled: false, path: '.kimi/skills' },
+        kimi: { enabled: false, path: '.kimi-code/skills' },
       },
     };
     const result = await checkMount(projectRoot, skillsSource, rules);

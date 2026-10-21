@@ -53,7 +53,10 @@ export async function regenerateStartupCliConfigs(
   }
   return withCapabilityLock(projectRoot, async () => {
     let config = await readCapabilitiesConfig(projectRoot);
-    if (!config) return { projectRoot, generated: false, healed: false };
+    // An explicitly empty registry is a user choice. Only the first-run owner
+    // may initialize an absent file; startup regeneration cannot turn an empty
+    // one into a newly enabled collaboration surface.
+    if (!config || config.capabilities.length === 0) return { projectRoot, generated: false, healed: false };
 
     const runtimeRoot = env.CAT_CAFE_RUNTIME_ROOT?.trim();
     const healed = healCatCafeMcpTopology(

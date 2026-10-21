@@ -2,7 +2,9 @@
  * F075 Phase C — Achievement badge definitions
  * Static catalog of all unlockable achievements (operator + daily).
  */
+
 import type { Achievement } from '@cat-cafe/shared';
+import { getCoCreatorDisplay } from '../../config/co-creator-display.js';
 
 type AchievementDef = Omit<Achievement, 'unlockedAt'>;
 
@@ -37,7 +39,9 @@ const BOOTCAMP_ACHIEVEMENTS: AchievementDef[] = [
     id: 'bootcamp-first-decision',
     icon: 'target',
     label: '第一次拍板',
-    description: '做出第一个 operator 决策',
+    get description() {
+      return `做出第一个 ${getCoCreatorDisplay().role} 决策`;
+    },
     category: 'cvo',
   },
   {
@@ -75,7 +79,14 @@ const CVO_LEVELS = [
   { level: 2, title: '正式员工', description: '能独立完成任务', threshold: 2 },
   { level: 3, title: '高级工程猫', description: '技术骨干', threshold: 4 },
   { level: 4, title: '技术专家猫', description: '架构级能力', threshold: 6 },
-  { level: 5, title: '首席铲码官', description: 'operator — Chief Vibe Officer', threshold: 7 },
+  {
+    level: 5,
+    title: '首席铲码官',
+    get description() {
+      return `${getCoCreatorDisplay().role} — Chief Vibe Officer`;
+    },
+    threshold: 7,
+  },
 ] as const;
 
 /**

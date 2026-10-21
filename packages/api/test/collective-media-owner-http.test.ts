@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict';
 import { readdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { test } from 'node:test';
 import sharp from 'sharp';
 import { collectiveMediaBinding } from '../src/domains/collaborative-content/collective-artifact/media-source.js';
 import { collectiveMediaHttpFixture } from './collective-media-http.fixture.js';
 import { reviewCat } from './helpers/artifact-review-fixture.js';
+import { test } from './helpers/f202-collective-installed-business.js';
 
 for (const mime of ['image/png', 'video/mp4'])
   test(`two authenticated Humans read exact retained ${mime}, share one durable discussion and lose access independently`, async (t) => {

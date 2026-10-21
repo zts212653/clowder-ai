@@ -1,8 +1,4 @@
 import { isDeepStrictEqual } from 'node:util';
-import type {
-  CollectiveArtifactCustodyTransferPort,
-  CollectiveCustodyOwnerAuthority,
-} from '@cat-cafe/collective-connector';
 import {
   COLLECTIVE_CUSTODY_PAGE_BYTES,
   type CollectiveArtifactCustodyTransfer,
@@ -26,6 +22,7 @@ import {
 } from './custody-owner-support.js';
 import { CollectiveArtifactTargetOwner } from './custody-target-owner.js';
 import { reconcileCollectiveDisposition } from './markdown-modification-apply.js';
+import type { CollectiveArtifactCustodyTransferPort, CollectiveCustodyOwnerAuthority } from './owner-port.js';
 
 export class CollectiveArtifactTransferOwner implements CollectiveArtifactCustodyTransferPort {
   private readonly journal: CollectiveArtifactTransferJournal;

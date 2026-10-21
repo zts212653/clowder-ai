@@ -14,18 +14,6 @@
 
 skills:
 
-  collective-participation:
-    category: "协作交互"
-    description: >
-      Collective Channel 中具名猫的授权上下文读取、事项判断与原处回复。
-      Use when: 公共 Channel 请求你参与、要判断这句话是哪件事和能不能接，或已接纳的 Work 要回到原来源。
-      Not for: 私人历史检索、选择任意 Channel、授予本地 owner 权限、新建委托，或自己把请求宣布成已接下的工作。
-      Output: 范围内上下文与对事项的判断；选择表达时发送具名回复，返回真实送达状态。
-    triggers: ["Collective 请求", "Channel 参与", "回到原来源"]
-    not_for: ["私人历史检索", "委托授权", "任意 Channel 发言", "自行宣布接下工作"]
-    output: "授权公共上下文、事项判断与具名回复回执"
-    next: []
-
   # ── 功能生命周期 ──
   feat-lifecycle:
     category: "开发流程"
@@ -1219,57 +1207,6 @@ skills:
     sop_step: null
     merged_from: null
     feature: "F066"
-
-  # ── 企业 IM 工作流 (F162) ──
-  enterprise-workflow:
-    category: "创作与媒体"
-    description: >
-      企业 IM 工作流自动化：文档、表格、待办/任务、会议/日程一键创建。
-      Use when: operator要求创建企微/飞书的文档/表格/待办/会议/日程/幻灯片，或"一句话生成完整工作流"。
-      Not for: 普通聊天、消息收发（那是 F088 Transport Plane 的活）。
-      Output: 资源链接（文档 URL、企微会议链接、日程 summary 等）通过 callback 返回。
-    triggers:
-      - "创建文档"
-      - "写个文档"
-      - "create doc"
-      - "建个表格"
-      - "创建表格"
-      - "smart table"
-      - "多维表"
-      - "bitable"
-      - "建个待办"
-      - "创建待办"
-      - "todo"
-      - "创建任务"
-      - "task"
-      - "约个会"
-      - "创建会议"
-      - "create meeting"
-      - "创建日程"
-      - "calendar event"
-      - "幻灯片"
-      - "slides"
-      - "deck"
-      - "整理成文档"
-      - "拆成任务"
-      - "golden chain"
-      - "黄金链路"
-      - "工作流"
-      - "enterprise workflow"
-      - "飞书"
-      - "feishu"
-      - "lark"
-      - "企微"
-      - "wecom"
-      - "企业微信"
-    not_for:
-      - "普通聊天"
-      - "消息收发"
-    output: "Enterprise resource links returned through callback"
-    next: []
-    sop_step: null
-    merged_from: null
-    feature: "F162"
 
   # ── Workspace 导航 (F131) ──
   workspace-navigator:

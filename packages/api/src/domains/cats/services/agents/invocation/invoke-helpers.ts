@@ -115,6 +115,8 @@ export function isTransientCliExitCode1(message: string | undefined): boolean {
   // formatCliExitError appends the classified reasonCode to the message, so the tag is the
   // reliable channel here; the humanized text is i18n-mutable and must not be matched on.
   if (/\[incompatible_cli_arguments\]/.test(message)) return false;
+  // A rejected or missing login needs owner action; repeating it cannot restore credentials.
+  if (/\[auth_failed\]/.test(message)) return false;
   return true;
 }
 

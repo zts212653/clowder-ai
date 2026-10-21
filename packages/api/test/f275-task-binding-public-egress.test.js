@@ -14,18 +14,6 @@ function assertNoPrivateIdentity(value) {
   assert.equal(encoded.includes(PRIVATE_BINDING.attemptId), false);
 }
 
-function createCommunityIssueStore() {
-  return {
-    listByRepo: async () => [],
-    listAll: async () => [],
-    get: async () => null,
-    getByRepoAndNumber: async () => null,
-    create: async () => null,
-    update: async () => null,
-    delete: async () => false,
-  };
-}
-
 describe('F275 private PR task binding public egress', () => {
   let taskStore;
   let task;
@@ -75,27 +63,6 @@ describe('F275 private PR task binding public egress', () => {
     assertNoPrivateIdentity(detail.body);
     assertNoPrivateIdentity(update.body);
     assertNoPrivateIdentity(events);
-    assert.deepEqual(taskStore.getManagedWorkBinding(task.id), PRIVATE_BINDING);
-    await app.close();
-  });
-
-  test('community board projection omits the private binding', async () => {
-    const { communityIssueRoutes } = await import('../dist/routes/community-issues.js');
-    const app = Fastify();
-    await app.register(communityIssueRoutes, {
-      communityIssueStore: createCommunityIssueStore(),
-      taskStore,
-      socketManager: { broadcastToRoom() {}, emitToUser() {} },
-    });
-
-    const response = await app.inject({ method: 'GET', url: '/api/community-board?repo=owner/repo' });
-
-    assert.equal(response.statusCode, 200);
-    assert.equal(
-      response.json().prItems.some((item) => item.taskId === task.id),
-      true,
-    );
-    assertNoPrivateIdentity(response.body);
     assert.deepEqual(taskStore.getManagedWorkBinding(task.id), PRIVATE_BINDING);
     await app.close();
   });

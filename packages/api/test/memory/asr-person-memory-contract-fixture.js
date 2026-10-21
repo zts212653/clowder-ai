@@ -22,20 +22,55 @@ export const artifact = {
   instructionPolicy: 'data_only',
 };
 
+export async function memorySceneFixture({ now = 1_200, consumerCatId = 'codex-sol', threadId = 'thread-1' } = {}) {
+  const {
+    ASR_PERSON_MEMORY_REFLEX_ENTRY_V1: reflex,
+    asrPersonMemoryDynamicSceneEntryV1Schema,
+    writeOpportunityGenerationId,
+  } = await import('@cat-cafe/shared');
+  const dedupeLineage = `write_lineage_${'a'.repeat(32)}`;
+  return asrPersonMemoryDynamicSceneEntryV1Schema.parse({
+    v: 1,
+    kind: 'memory_write_opportunity',
+    surface: 'dynamic_context',
+    opportunity: {
+      v: 1,
+      opportunityId: writeOpportunityGenerationId(dedupeLineage, 1),
+      reflexId: reflex.reflexId,
+      reflexVersion: reflex.version,
+      generation: 1,
+      producer: reflex.producer,
+      consumer: { kind: 'cat', catId: consumerCatId },
+      scope: { ownerUserId: 'owner-1', threadId },
+      observedAt: now - 10,
+      eligibleAt: now,
+      expiresAt: now + reflex.expiryMs,
+      sourceCoordinates: ['speaker_1', 'speaker_2'].map((externalSpeakerId, index) => ({
+        kind: 'asr_transcript_segment',
+        artifactId: intake.intakeId,
+        sourceHandle: artifact.sourceHandle,
+        sourceRevision: artifact.sourceRevision,
+        segment: { unit: 'utf8_byte', start: 0, end: artifact.byteLength },
+        speaker: {
+          externalSpeakerId,
+          label: index === 0 ? 'Alden' : 'Bao',
+          attributionRevision: `sha256:${'c'.repeat(64)}`,
+          attributionCeiling: 'owner_confirmed_mapping',
+        },
+      })),
+      epistemicCeiling: reflex.epistemicCeiling,
+      destination: { lane: 'person_memory', proposalContract: reflex.immediateTargetByLane.person_memory },
+      dedupeLineage,
+      rearmPredicate: reflex.rearmPredicate,
+    },
+  });
+}
+
 export async function contractTrialFixture(options = {}) {
-  const { buildAsrPersonMemoryDynamicScenes } = await import(
-    '../../dist/domains/signal-intake/AsrPersonMemorySceneBuilder.js'
-  );
   const { AsrPersonMemoryContractTrial, MemoryContractTrialTraceBuffer } = await import(
     '../../dist/domains/memory/people/AsrPersonMemoryContractTrial.js'
   );
-  const scene = buildAsrPersonMemoryDynamicScenes({
-    intake,
-    artifact,
-    threadId: 'thread-1',
-    consumerCatId: 'codex-sol',
-    now: 1_200,
-  })[0];
+  const scene = await memorySceneFixture();
   const trace = new MemoryContractTrialTraceBuffer();
   const defaultVerifier = (evidence) =>
     evidence?.kind === 'f296_opportunity_presentation_v1'

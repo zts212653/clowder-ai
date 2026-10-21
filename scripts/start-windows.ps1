@@ -60,7 +60,6 @@ $ProjectRoot = Split-Path -Parent $ScriptDir
 Set-Location $ProjectRoot
 
 $Profile_ = $env:CAT_CAFE_PROFILE  # set by start-entry.mjs when --profile=* is given
-$connectorGatewayAutostartOverride = [System.Environment]::GetEnvironmentVariable("CONNECTOR_GATEWAY_AUTOSTART", "Process")
 Write-Host "Clowder AI - Windows Startup" -ForegroundColor Cyan
 Write-Host "=========================="
 if ($Profile_) { Write-Host "  Profile: $Profile_" -ForegroundColor Cyan }
@@ -98,14 +97,6 @@ if (Test-Path $envFile) {
     Write-Ok ".env loaded"
 } else {
     Write-Warn ".env not found - using defaults"
-}
-
-# -- Restore connector launcher authority after dotenv -------
-# Project dotenv is configuration, not permission to attach real IM connectors.
-if ([string]::IsNullOrEmpty($connectorGatewayAutostartOverride)) {
-    [System.Environment]::SetEnvironmentVariable("CONNECTOR_GATEWAY_AUTOSTART", $null, "Process")
-} else {
-    [System.Environment]::SetEnvironmentVariable("CONNECTOR_GATEWAY_AUTOSTART", $connectorGatewayAutostartOverride, "Process")
 }
 
 function Preserve-ServiceFlagForApiLifecycle {
@@ -178,9 +169,13 @@ if (-not $pnpmCommand) {
 }
 Write-Ok "pnpm: $pnpmCommand"
 
+$deploymentJson = & (Get-Command node -ErrorAction Stop) (Join-Path $ProjectRoot "scripts/read-deployment-default.mjs") --json
+if ($LASTEXITCODE -ne 0) { throw "Could not read deployment defaults" }
+$deploymentDefaults = $deploymentJson | ConvertFrom-Json -ErrorAction Stop
+
 # -- Ports ---------------------------------------------------
-$ApiPort = if ($env:API_SERVER_PORT) { $env:API_SERVER_PORT } else { "3004" }
-$WebPort = if ($env:FRONTEND_PORT) { $env:FRONTEND_PORT } else { "3003" }
+$ApiPort = if ($env:API_SERVER_PORT) { $env:API_SERVER_PORT } else { [string]$deploymentDefaults.apiPort }
+$WebPort = if ($env:FRONTEND_PORT) { $env:FRONTEND_PORT } else { [string]$deploymentDefaults.webPort }
 $RedisPort = if ($env:REDIS_PORT) { $env:REDIS_PORT } else { "6399" }
 $RunDir = Join-Path $ProjectRoot ".cat-cafe/run/windows"
 $ApiPidFile = Join-Path $RunDir "api-$ApiPort.pid"
@@ -516,13 +511,6 @@ try {
     # -Dev controls whether the API runs in development or production mode.
     $apiNodeEnv = if ($Dev) { 'development' } else { 'production' }
     $globalSidecarOwner = if ($useRedis -and -not $Dev) { "1" } else { $null }
-    $connectorGatewayAutostart = if ($env:CONNECTOR_GATEWAY_AUTOSTART) {
-        $env:CONNECTOR_GATEWAY_AUTOSTART
-    } elseif (-not $Dev) {
-        "1"
-    } else {
-        "0"
-    }
     $runtimeRootMarker = if (-not $Dev) { $ProjectRoot } else { $null }
     $workspaceRootMarker = if (-not $Dev) {
         if ($env:CAT_CAFE_WORKSPACE_ROOT) { $env:CAT_CAFE_WORKSPACE_ROOT } else { $ProjectRoot }
@@ -546,7 +534,6 @@ try {
         CAT_CAFE_SERVICE_EMBED_ENABLED = $env:CAT_CAFE_SERVICE_EMBED_ENABLED
         CAT_CAFE_SERVICE_AUDIO_ENABLED = $env:CAT_CAFE_SERVICE_AUDIO_ENABLED
         CAT_CAFE_PROVISION_GLOBAL_SIDECAR = $globalSidecarOwner
-        CONNECTOR_GATEWAY_AUTOSTART = $connectorGatewayAutostart
         CAT_CAFE_RUNTIME_ROOT = $runtimeRootMarker
         CAT_CAFE_WORKSPACE_ROOT = $workspaceRootMarker
     }

@@ -61,6 +61,24 @@ describe('callback read-profile route', () => {
     assert.ok(body.revision?.startsWith('sha256:'), 'revision included in primer read');
   });
 
+  it('F321 rejects a stale relationship handle after correction without returning either body', async () => {
+    const path = repository.primerPath(repository.scope('alice', 'codex-sol'));
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, 'OLD PRIVATE NAME', 'utf8');
+    const first = await getProfile('alice', 'codex-sol');
+    const { revision } = first.json();
+    writeFileSync(path, 'NEW PRIVATE NAME', 'utf8');
+    const { invocationId, callbackToken } = await registry.create('alice', 'codex-sol', 'thread_1');
+    const response = await app.inject({
+      method: 'GET',
+      url: `/api/callbacks/profile?expectedRevision=${encodeURIComponent(revision)}`,
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+    });
+    assert.equal(response.statusCode, 409);
+    assert.equal(response.json().error, 'profile_revision_changed');
+    assert.doesNotMatch(response.body, /OLD PRIVATE NAME|NEW PRIVATE NAME/);
+  });
+
   it('does not cross user roots for the same cat', async () => {
     const alice = repository.scope('alice', 'codex');
     const path = repository.primerPath(alice);

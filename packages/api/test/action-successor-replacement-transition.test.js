@@ -12,9 +12,9 @@ const { claimActionSuccessor, recordActionSuccessorOutcome, replaceActionSuccess
 );
 
 const predicate = canonicalizeActionTerminalPredicate({
-  actionFamily: 'review',
-  subjectRef: 'pr:owner/repo#2868',
-  predicate: { kind: 'review_delivered', headSha: 'a'.repeat(40) },
+  actionFamily: 'implement',
+  subjectRef: 'subject:task:work-2868',
+  predicate: { kind: 'task_done' },
 });
 const route = { ownerCatId: 'codex-sol', ownerThreadId: 'thread-source', childThreadId: 'thread-target' };
 
@@ -22,9 +22,9 @@ function activeLease() {
   return claimActionSuccessor(null, {
     leaseId: 'lease-transition',
     tenantScope: 'user-1',
-    subjectRef: 'pr:owner/repo#2868',
-    actionFamily: 'review',
-    successorSlot: 'reviewer',
+    subjectRef: 'subject:task:work-2868',
+    actionFamily: 'implement',
+    successorSlot: 'implementer',
     mode: 'single',
     holderCatIds: ['codex-terra'],
     holderThreadId: route.childThreadId,
@@ -50,7 +50,7 @@ function replacementInput(overrides = {}) {
     dispatchId: 'dispatch-replacement',
     terminalPredicate: predicate,
     evidenceRef: 'message:replacement',
-    freshnessEvidenceRef: 'community:pr:owner/repo#2868:head:a',
+    freshnessEvidenceRef: 'community:subject:task:work-2868:head:a',
     delegateEvidenceRef: 'proposal:approved-reviewer',
     now: 130,
     ...overrides,
@@ -86,7 +86,7 @@ describe('F167 durable replacement generation edges', () => {
         evidenceRefs: [
           'runtime:quota-exhausted',
           'message:replacement',
-          'community:pr:owner/repo#2868:head:a',
+          'community:subject:task:work-2868:head:a',
           'proposal:approved-reviewer',
         ],
         at: 130,

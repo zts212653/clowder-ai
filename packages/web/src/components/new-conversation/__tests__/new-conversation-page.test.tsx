@@ -202,6 +202,39 @@ describe('F322 new conversation page', () => {
     expect(landingArtworkForHour(22)).toBe('night');
   });
 
+  it.each([
+    'zh',
+    'en',
+  ] as const)('keeps %s collaboration and real setup independent of failed owner admission', (language) => {
+    writeShellLanguage(language);
+    const admission = baseAdmission();
+    admission.ready = false;
+    admission.loadFailed = true;
+    mocks.admission = admission;
+    const show = vi.fn();
+    const navigate = vi.fn();
+    act(() =>
+      root.render(
+        <NewConversationPage
+          sidebarOpen
+          statusPanelOpen={false}
+          hasWorkspaceActivity={false}
+          onToggleSidebar={vi.fn()}
+          onToggleStatusPanel={vi.fn()}
+          onNavigate={navigate}
+          onShowCollaboration={show}
+        />,
+      ),
+    );
+    const watch = container.querySelector<HTMLButtonElement>('[data-testid="empty-state-bootcamp"]');
+    expect(watch?.textContent).toBe(language === 'zh' ? '看看团队如何协作' : 'See the team collaborate');
+    expect(container.querySelector('a')?.getAttribute('href')).toBe('/settings?s=members&view=setup');
+    act(() => watch?.click());
+    expect(show).toHaveBeenCalledOnce();
+    expect(admission.send).not.toHaveBeenCalled();
+    expect(navigate).not.toHaveBeenCalled();
+  });
+
   it('reveals the original conversation after restoring its saved workspace, without sending', () => {
     const navigate = vi.fn();
     let closedThread: string | undefined;

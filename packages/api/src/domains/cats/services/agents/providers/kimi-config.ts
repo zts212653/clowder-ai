@@ -5,50 +5,17 @@
  * paths, and provides session/context reading helpers.
  */
 
-import { existsSync, promises as fs, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
-import { homedir } from 'node:os';
-import { dirname, join, normalize, resolve } from 'node:path';
-import {
-  CAT_CAFE_SPLIT_ENTRYPOINTS,
-  expandManagedMcpNamesForUserMerge,
-  MCP_CALLBACK_ENV_KEYS,
-  resolveCatCafeNodeCommand,
-  resolvePencilCommand,
-  resolveServersForCat,
-  summarizeMcpInjection,
-} from '../../../../../config/capabilities/capability-orchestrator.js';
-import {
-  assertMappedCapabilitySource,
-  isSameCapabilityRoot,
-  resolveInvokeCapabilityRoot,
-} from '../../../../../config/capabilities/invoke-capability-root.js';
-import { isManagedCatCafeSplit } from '../../../../../config/capabilities/mcp-constants.js';
-import {
-  resolveMcpArgs,
-  resolveMcpCommand,
-  resolveMcpWorkingDir,
-} from '../../../../../config/capabilities/mcp-launch-paths.js';
-import { isRetiredGithubMcpConfigEntry } from '../../../../../config/capabilities/retired-github-mcp.js';
+import { existsSync, promises as fs, readFileSync, realpathSync } from 'node:fs';
+import { join, normalize, resolve } from 'node:path';
 import { createModuleLogger } from '../../../../../infrastructure/logger.js';
+import { type KimiRuntimePaths, resolveKimiRuntimePaths } from '../../../../../utils/kimi-cli-runtime.js';
 
 const log = createModuleLogger('kimi-config');
 
 export const DEFAULT_KIMI_BASE_URL = 'https://api.moonshot.ai/v1';
 export const DEFAULT_KIMI_MODEL_ALIAS = 'kimi-code/kimi-for-coding';
 
-export { MCP_CALLBACK_ENV_KEYS as CAT_CAFE_CALLBACK_ENV_KEYS };
-
 const KIMI_CONTEXT_TAIL_BYTES = 64 * 1024;
-
-function resolveMcpWorkspaceRoot(workingDirectory?: string): string {
-  const explicitAllowed = process.env.ALLOWED_WORKSPACE_DIRS?.trim();
-  if (explicitAllowed) return explicitAllowed;
-  const threadWorkspace = workingDirectory?.trim();
-  if (threadWorkspace) return resolve(threadWorkspace);
-  const explicitWorkspace = process.env.CAT_CAFE_WORKSPACE_ROOT?.trim();
-  if (explicitWorkspace) return explicitWorkspace;
-  return process.cwd();
-}
 
 function normalizeKimiApiBaseUrl(baseUrl: string): string {
   const trimmed = baseUrl.trim();
@@ -71,14 +38,12 @@ export interface KimiModelConfigInfo {
   maxContextSize?: number;
 }
 
-export function resolveKimiShareDir(callbackEnv?: Record<string, string>): string {
-  return callbackEnv?.KIMI_SHARE_DIR || process.env.KIMI_SHARE_DIR || resolve(homedir(), '.kimi');
+export function resolveKimiShareDir(callbackEnv?: Record<string, string>, paths?: KimiRuntimePaths): string {
+  return (paths ?? resolveKimiRuntimePaths(callbackEnv ?? {})).shareDir;
 }
 
-export function resolveKimiConfigPath(callbackEnv?: Record<string, string>): string {
-  const explicit = callbackEnv?.KIMI_CONFIG_FILE || process.env.KIMI_CONFIG_FILE;
-  if (explicit) return resolve(explicit);
-  return join(resolveKimiShareDir(callbackEnv), 'config.toml');
+export function resolveKimiConfigPath(callbackEnv?: Record<string, string>, paths?: KimiRuntimePaths): string {
+  return (paths ?? resolveKimiRuntimePaths(callbackEnv ?? {})).configPath;
 }
 
 export function normalizeKimiWorkDirPath(candidate: string): string {
@@ -90,10 +55,14 @@ export function normalizeKimiWorkDirPath(candidate: string): string {
   }
 }
 
-export function readKimiModelConfigInfo(modelAlias: string, callbackEnv?: Record<string, string>): KimiModelConfigInfo {
+export function readKimiModelConfigInfo(
+  modelAlias: string,
+  callbackEnv?: Record<string, string>,
+  paths?: KimiRuntimePaths,
+): KimiModelConfigInfo {
   const fallbackCapabilities: string[] =
     modelAlias === DEFAULT_KIMI_MODEL_ALIAS ? ['thinking', 'image_in', 'video_in'] : [];
-  const configPath = resolveKimiConfigPath(callbackEnv);
+  const configPath = resolveKimiConfigPath(callbackEnv, paths);
   if (!existsSync(configPath)) {
     return {
       defaultThinking: fallbackCapabilities.includes('thinking'),
@@ -146,11 +115,37 @@ export function readKimiModelConfigInfo(modelAlias: string, callbackEnv?: Record
   }
 }
 
-export function resolveKimiModelAlias(model: string, callbackEnv?: Record<string, string>): string {
+/**
+ * Observe the model selected by the local CLI's own config.toml.
+ *
+ * This is identity evidence only: a native_tool member without an explicit
+ * model deliberately lets the CLI own the request, so the observed value must
+ * never be injected as `--model`. Returns undefined when the config cannot be
+ * read, which keeps callers conservative instead of guessing a model.
+ */
+export function readKimiConfiguredModel(
+  callbackEnv?: Record<string, string>,
+  paths?: KimiRuntimePaths,
+): string | undefined {
+  const configPath = resolveKimiConfigPath(callbackEnv, paths);
+  try {
+    const raw = readFileSync(configPath, 'utf-8');
+    const value = raw.match(/^\s*default_model\s*=\s*["']([^"']+)["']/m)?.[1]?.trim();
+    return value || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+export function resolveKimiModelAlias(
+  model: string,
+  callbackEnv?: Record<string, string>,
+  paths?: KimiRuntimePaths,
+): string {
   if (callbackEnv?.CAT_CAFE_KIMI_API_KEY) return model;
   if (model.includes('/')) return model;
 
-  const configPath = resolveKimiConfigPath(callbackEnv);
+  const configPath = resolveKimiConfigPath(callbackEnv, paths);
   if (existsSync(configPath)) {
     try {
       const raw = readFileSync(configPath, 'utf-8');
@@ -164,8 +159,12 @@ export function resolveKimiModelAlias(model: string, callbackEnv?: Record<string
   return DEFAULT_KIMI_MODEL_ALIAS;
 }
 
-export function readKimiSessionId(workingDirectory: string, callbackEnv?: Record<string, string>): string | undefined {
-  const shareDir = resolveKimiShareDir(callbackEnv);
+export function readKimiSessionId(
+  workingDirectory: string,
+  callbackEnv?: Record<string, string>,
+  paths?: KimiRuntimePaths,
+): string | undefined {
+  const shareDir = resolveKimiShareDir(callbackEnv, paths);
   const statePath = join(shareDir, 'kimi.json');
   if (!existsSync(statePath)) return undefined;
   try {
@@ -231,8 +230,9 @@ async function findKimiSessionContextFile(shareDir: string, sessionId: string): 
 export async function readKimiContextUsedTokens(
   sessionId: string,
   callbackEnv?: Record<string, string>,
+  paths?: KimiRuntimePaths,
 ): Promise<number | undefined> {
-  const contextFile = await findKimiSessionContextFile(resolveKimiShareDir(callbackEnv), sessionId);
+  const contextFile = await findKimiSessionContextFile(resolveKimiShareDir(callbackEnv, paths), sessionId);
   if (!contextFile) return undefined;
   const tail = await readTailUtf8(contextFile, KIMI_CONTEXT_TAIL_BYTES);
   if (!tail) return undefined;
@@ -262,160 +262,4 @@ export function buildApiKeyEnv(model: string, callbackEnv?: Record<string, strin
     KIMI_MODEL_MAX_CONTEXT_SIZE: callbackEnv?.KIMI_MODEL_MAX_CONTEXT_SIZE || '262144',
     ...(callbackEnv?.KIMI_MODEL_CAPABILITIES ? { KIMI_MODEL_CAPABILITIES: callbackEnv.KIMI_MODEL_CAPABILITIES } : {}),
   };
-}
-
-export async function writeMcpConfigFile(
-  workingDirectory: string,
-  mcpServerPath: string,
-  callbackEnv?: Record<string, string>,
-): Promise<string | null> {
-  if (!callbackEnv || !mcpServerPath) return null;
-
-  // #712: Build MCP config from capabilities.json (source of truth for managed
-  // servers), then merge user project .kimi/mcp.json as base layer to preserve
-  // user-owned servers (e.g. `filesystem`). Our entries take precedence.
-  const mcpServers: Record<string, Record<string, unknown>> = {};
-  const catCafeEnv: Record<string, string> = {
-    ALLOWED_WORKSPACE_DIRS: resolveMcpWorkspaceRoot(workingDirectory),
-  };
-  for (const key of MCP_CALLBACK_ENV_KEYS) {
-    const value = callbackEnv[key];
-    if (value) catCafeEnv[key] = value;
-  }
-  const distDir = dirname(mcpServerPath);
-  const binaryProjectRoot = resolve(distDir, '../../..');
-  const capabilitiesProjectRoot = await resolveInvokeCapabilityRoot(binaryProjectRoot);
-  const catId = callbackEnv.CAT_CAFE_CAT_ID;
-
-  let resolved = false;
-  const managedMcpServerNames = new Set<string>();
-  try {
-    // F249: Project config is the single truth source for MCP resolution.
-    // Try project first; fall back to global for uninitialized projects.
-    let capConfig = null;
-    let configSourceRoot = capabilitiesProjectRoot;
-    let accessScope: 'global' | 'project' = 'global';
-    if (workingDirectory && !isSameCapabilityRoot(workingDirectory, capabilitiesProjectRoot)) {
-      try {
-        const projectRaw = readFileSync(join(workingDirectory, '.cat-cafe', 'capabilities.json'), 'utf-8');
-        const parsed = JSON.parse(projectRaw);
-        if (parsed?.version === 1 || parsed?.version === 2) {
-          capConfig = parsed;
-          configSourceRoot = workingDirectory;
-          accessScope = 'project';
-        }
-      } catch {
-        /* No project config — fall back to global */
-      }
-    }
-    if (!capConfig) {
-      const raw = readFileSync(join(capabilitiesProjectRoot, '.cat-cafe', 'capabilities.json'), 'utf-8');
-      const parsed = JSON.parse(raw);
-      if (parsed?.version === 1 || parsed?.version === 2) capConfig = parsed;
-    }
-    if (capConfig && catId) {
-      for (const s of resolveServersForCat(capConfig, catId, { accessScope }) as Array<{
-        name: string;
-        enabled: boolean;
-        command: string;
-        args: string[];
-        env?: Record<string, string>;
-        resolver?: string;
-        transport?: string;
-        url?: string;
-        headers?: Record<string, string>;
-        workingDir?: string;
-        source: string;
-      }>) {
-        managedMcpServerNames.add(s.name);
-        if (!s.enabled) continue;
-        if (isManagedCatCafeSplit(s)) {
-          const ep = CAT_CAFE_SPLIT_ENTRYPOINTS.get(s.name)!;
-          const epPath = join(distDir, ep);
-          if (existsSync(epPath)) {
-            mcpServers[s.name] = {
-              command: resolveCatCafeNodeCommand(),
-              args: [epPath],
-              env: catCafeEnv,
-            };
-          }
-        } else if (s.resolver === 'pencil') {
-          const pencil = await resolvePencilCommand({ projectRoot: configSourceRoot });
-          if (pencil) mcpServers[s.name] = { command: pencil.command, args: pencil.args };
-        } else if (s.transport === 'streamableHttp' && s.url) {
-          const entry: Record<string, unknown> = { type: 'http', url: s.url };
-          if (s.headers && Object.keys(s.headers).length > 0) entry.headers = s.headers;
-          mcpServers[s.name] = entry;
-        } else if (s.command) {
-          const workingDir = resolveMcpWorkingDir(s.workingDir, configSourceRoot);
-          const entry: Record<string, unknown> = {
-            command: resolveMcpCommand(s.command, workingDir, configSourceRoot),
-            args: resolveMcpArgs(s.args, workingDir, configSourceRoot),
-          };
-          if (s.env && Object.keys(s.env).length > 0) entry.env = s.env;
-          if (workingDir) entry.cwd = workingDir;
-          mcpServers[s.name] = entry;
-        }
-      }
-      resolved = true;
-    }
-  } catch {
-    // best-effort fallback below
-  }
-
-  assertMappedCapabilitySource(resolved, binaryProjectRoot, capabilitiesProjectRoot);
-  if (!resolved) {
-    for (const [name, entrypoint] of CAT_CAFE_SPLIT_ENTRYPOINTS) {
-      const entrypointPath = join(distDir, entrypoint);
-      if (existsSync(entrypointPath)) {
-        mcpServers[name] = {
-          command: resolveCatCafeNodeCommand(),
-          args: [entrypointPath],
-          env: catCafeEnv,
-        };
-      }
-    }
-  }
-
-  // Merge user project .kimi/mcp.json: include user-owned servers (e.g.
-  // `filesystem`) that are NOT managed by capabilities.json. Our managed
-  // entries always take precedence — stale user copies are ignored.
-  try {
-    const userConfigPath = join(workingDirectory, '.kimi', 'mcp.json');
-    if (existsSync(userConfigPath)) {
-      const userRaw = readFileSync(userConfigPath, 'utf-8');
-      const userConfig = JSON.parse(userRaw) as { mcpServers?: Record<string, unknown> };
-      if (userConfig.mcpServers && typeof userConfig.mcpServers === 'object') {
-        const excludedMcpServerNames = expandManagedMcpNamesForUserMerge([
-          ...managedMcpServerNames,
-          ...Object.keys(mcpServers),
-        ]);
-        for (const [name, entry] of Object.entries(userConfig.mcpServers)) {
-          if (isRetiredGithubMcpConfigEntry(name, entry)) continue;
-          if (!excludedMcpServerNames.has(name) && !(name in mcpServers) && entry && typeof entry === 'object') {
-            mcpServers[name] = entry as Record<string, unknown>;
-          }
-        }
-      }
-    }
-  } catch {
-    // best-effort: unreadable user config → capabilities-only
-  }
-
-  log.debug(
-    summarizeMcpInjection(mcpServers, {
-      catId,
-      resolvedFrom: resolved ? 'capabilities.json' : 'fallback',
-      provider: 'kimi',
-    }),
-    '#712: MCP invoke-time injection',
-  );
-
-  const nextConfig = { mcpServers };
-  const shareDir = resolveKimiShareDir(callbackEnv);
-  mkdirSync(shareDir, { recursive: true });
-  const dir = mkdtempSync(join(shareDir, 'tmp-mcp-'));
-  const path = join(dir, 'mcp.json');
-  writeFileSync(path, JSON.stringify(nextConfig), { encoding: 'utf8', mode: 0o600 });
-  return path;
 }

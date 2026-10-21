@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { test } from 'node:test';
 import { CODEX_LIVE_POLICY_ARGS } from '../src/domains/cats/services/agents/providers/codex-live-policy.js';
-import { probeCollectiveCodex } from './fixtures/collective-codex-native-probe.mjs';
+import { probeCodexNativePolicy } from './fixtures/codex-native-policy-probe.mjs';
 
 test(
   'installed Codex applies Live native restrictions while retaining an explicitly configured MCP',
@@ -13,7 +13,7 @@ test(
   async () => {
     // Reuse the synthetic local provider/MCP fixture, not its public-participation launch policy.
     // This proves native executable restrictions, not Live callback auth or its 27-tool inventory.
-    const result = await probeCollectiveCodex({ policyArgs: [...CODEX_LIVE_POLICY_ARGS, '--sandbox', 'read-only'] });
+    const result = await probeCodexNativePolicy({ policyArgs: [...CODEX_LIVE_POLICY_ARGS, '--sandbox', 'read-only'] });
     const diagnostic = `timing=${JSON.stringify(result.timing)} requests=${result.requests.length} callbacks=${result.callbacks.length} stdout=${result.stdout.slice(-2000)} stderr=${result.stderr.slice(-2000)}`;
     assert.equal(result.timedOut, false, `native probe timed out: ${diagnostic}`);
     assert.equal(result.exitCode, 0, result.stderr);
@@ -49,7 +49,7 @@ test(
     timeout: 55_000,
   },
   async () => {
-    const result = await probeCollectiveCodex({
+    const result = await probeCodexNativePolicy({
       policyArgs: [...CODEX_LIVE_POLICY_ARGS, '--sandbox', 'read-only'],
       nativeSubtask: true,
     });

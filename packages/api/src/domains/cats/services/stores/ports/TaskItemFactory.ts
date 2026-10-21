@@ -40,6 +40,6 @@ export function createEntrustedTaskItem(input: AdmitEntrustedWorkStoreInput, now
     createdAt: now,
     updatedAt: now,
     userId: input.task.userId,
-    entrustedWork: entrustedWorkV1Schema.parse(input.entrustedWork),
+    entrustedWork: entrustedWorkV1Schema.parse({ ...input.entrustedWork, executionAuthorityRevision: 1 }),
   };
 }

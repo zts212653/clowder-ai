@@ -73,7 +73,7 @@ describe('annotation draft during incoming-message layout changes', () => {
     const textarea = await openDraft();
     for (let incomingCount = 1; incomingCount <= 3; incomingCount++) {
       await act(async () => {
-        owner.pending();
+        owner.pending(() => false);
         root.render(<Harness selectionPresent={false} incomingCount={incomingCount} />);
       });
       expect(editor()).toBe(textarea);
@@ -97,7 +97,7 @@ describe('annotation draft during incoming-message layout changes', () => {
     expect(trigger.hasAttribute('inert')).toBe(true);
     await act(async () => owner.settle(true, true));
     expect(trigger.hasAttribute('inert')).toBe(false);
-    await act(async () => owner.pending());
+    await act(async () => owner.pending(() => false));
     expect(trigger.hasAttribute('inert')).toBe(true);
   });
 

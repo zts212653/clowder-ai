@@ -70,6 +70,8 @@ export interface ConnectorSource {
   readonly label: string;
   /** Emoji or icon URL for avatar position */
   readonly icon: string;
+  /** Optional theme color from the plugin's declared presentation identity. */
+  readonly themeColor?: string;
   /** Link to original source (e.g., PR URL) */
   readonly url?: string;
   /** Connector-specific metadata (e.g. presentation='system_notice', debugging, routing) */

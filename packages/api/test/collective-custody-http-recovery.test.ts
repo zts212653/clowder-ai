@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
-import { test } from 'node:test';
 import { custodyHttpFixture } from './collective-custody-http.fixture.js';
+import { test } from './helpers/f202-collective-installed-business.js';
 
 for (const lostAt of ['ready', 'accept-before', 'accept', 'finalized']) {
   test(`real custody restarts source, target and Service after a lost ${lostAt} exchange`, async (t) => {

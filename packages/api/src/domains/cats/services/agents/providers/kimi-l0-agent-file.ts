@@ -32,13 +32,13 @@ export const KIMI_V2_ENGINE_ENV_KEY = 'KIMI_CODE_EXPERIMENTAL_FLAG';
 
 /**
  * Whether the native `--agent-file` L0 channel is usable on this machine:
- * only the new kimi-code CLI (`kimi`) supports it; the legacy `kimi-cli`
- * (preferred by resolution order when both exist) has no native channel.
+ * Kimi Code (`kimi`) is the only supported runtime. A retired `kimi-cli`
+ * installation must not disable the native channel.
  * Shared by KimiAgentService.injectsL0Natively() and the F237 compiled-preview
  * route so both agree on whether kimi cats inject L0 natively *here*.
  */
 export function isKimiNativeL0ChannelAvailable(): boolean {
-  return resolveCliCommand('kimi-cli') === null && resolveCliCommand('kimi') !== null;
+  return resolveCliCommand('kimi') !== null;
 }
 
 export interface KimiL0AgentFileOptions {

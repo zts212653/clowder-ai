@@ -97,12 +97,15 @@ function toolEventPayload(tool: ToolEvent): Record<string, unknown> {
     return {
       type: 'tool_use',
       toolName: tool.label,
+      ...(tool.executionRef ? { toolExecutionRef: tool.executionRef } : {}),
       ...(toolUseId ? { toolUseId } : {}),
       ...(tool.detail ? { toolInput: tool.detail } : {}),
     };
   }
   return {
     type: 'tool_result',
+    ...(tool.executionRef ? { toolExecutionRef: tool.executionRef } : {}),
+    ...(tool.inputDetail !== undefined ? { toolInput: tool.inputDetail } : {}),
     ...(toolUseId ? { toolUseId } : {}),
     ...(tool.detail ? { content: tool.detail } : {}),
     ...(tool.status ? { status: tool.status } : {}),

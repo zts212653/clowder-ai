@@ -1,4 +1,3 @@
-import type { CollectiveConnector } from '@cat-cafe/collective-connector';
 import {
   type IgnoredItemSnapshot,
   ignoredItemSnapshotSchema,
@@ -10,7 +9,10 @@ import type { IMessageStore } from '../domains/cats/services/stores/ports/Messag
 import type { RuntimeInteractionPendingReadSource } from '../domains/runtime-interaction/ports/RuntimeInteractionStore.js';
 import { readVerifiedRuntimeInteractionPresentation } from '../domains/runtime-interaction/RuntimeInteractionCardPublisher.js';
 import { normalizeRuntimeInteractionRecord } from '../domains/runtime-interaction/RuntimeInteractionRecordModel.js';
-import { readCollectiveAccountabilityAttentionSource } from './companion-collective-accountability-source.js';
+import {
+  type CollectiveAccountabilitySource,
+  readCollectiveAccountabilityAttentionSource,
+} from './companion-collective-accountability-source.js';
 import { projectCompanionDecisions } from './companion-decision-projection.js';
 import {
   approvalsSourceSchema,
@@ -42,7 +44,7 @@ export async function readCompanionDecisionProjection(
   runtimeInteractionStore?: RuntimeInteractionPendingReadSource,
   personalPreferences?: DecisionPersonalPreferenceReadOptions,
   sourceMessageStore?: OriginalApprovalCardMessageStore,
-  collectiveConnector?: () => CollectiveConnector | undefined,
+  readCollectiveAccountability?: CollectiveAccountabilitySource,
 ) {
   const config = {
     approvals: {
@@ -97,7 +99,7 @@ export async function readCompanionDecisionProjection(
     messageStore ? readUserMentionTodos(messageStore, userId, mentionOptions) : undefined,
     runtimeInteractionStore ? readStructuredChoices(runtimeInteractionStore, userId, sourceMessageStore) : undefined,
     personalPreferences ? readDecisionPersonalPreferences(personalPreferences, userId) : undefined,
-    collectiveConnector ? readCollectiveAccountabilityAttentionSource(collectiveConnector(), userId) : undefined,
+    readCollectiveAccountabilityAttentionSource(readCollectiveAccountability, userId),
   ]);
   const approvalBody = approvals.body ? approvalsSourceSchema.parse(approvals.body) : undefined;
   const originalApprovalCards = approvalBody

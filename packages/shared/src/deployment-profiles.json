@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "activeProfile": "opensource",
+  "profiles": {
+    "opensource": {
+      "apiPort": 3004,
+      "webPort": 3003,
+      "envRegistryFrontendPort": 3003,
+      "corsOrigins": ["http://localhost:3000", "http://localhost:3003", "https://cafe.clowder-ai.com"],
+      "roadmapPath": "docs/ROADMAP.md"
+    }
+  }
+}

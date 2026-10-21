@@ -50,7 +50,7 @@ export class WorkspaceEditorService {
       .filter((instance) => instance.lifecycleState === 'installed')
       .flatMap((instance) => {
         const pkg = snapshot.packages.find((value) => value.packageDigest === instance.packageDigest);
-        if (!pkg) return [];
+        if (!pkg?.manifest) return [];
         return staticEditorContributions(pkg.manifest)
           .filter((value) => value.mediaTypes.includes(DOCX_MEDIA_TYPE))
           .map((contribution) => ({ instance, pkg, contribution }));

@@ -15,7 +15,6 @@ export const domainApprovalCopy = defineShellCopy({
     unknownCompletion: '以原请求的完成要求为准',
     completions: {
       pr_merged: '提议的改动已合入',
-      review_delivered: '审查结论已送回',
       ci_passed: '持续集成检查通过',
       test_passed: '指定测试通过',
       durable_verdict: '结论已正式记录',
@@ -90,7 +89,6 @@ export const domainApprovalCopy = defineShellCopy({
     unknownCompletion: 'Follow the original completion requirement',
     completions: {
       pr_merged: 'The proposed change is merged',
-      review_delivered: 'The review verdict is delivered',
       ci_passed: 'CI checks pass',
       test_passed: 'The specified test passes',
       durable_verdict: 'The verdict is durably recorded',

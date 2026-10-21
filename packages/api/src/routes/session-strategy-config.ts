@@ -1,3 +1,4 @@
+import { saveSpan } from '../utils/member-save-diagnostics.js';
 /**
  * F33 Phase 3: Session Strategy Configuration Routes
  *
@@ -128,7 +129,9 @@ export const sessionStrategyConfigRoutes: FastifyPluginAsync<SessionStrategyRout
 
     // Zod .optional() produces `T | undefined` for nested props; our type uses optional-only.
     // Shapes are equivalent at runtime after validation.
-    await setRuntimeOverride(catId, override as unknown as Partial<SessionStrategyConfig>);
+    await saveSpan('strategy.persist', () =>
+      setRuntimeOverride(catId, override as unknown as Partial<SessionStrategyConfig>),
+    );
     request.log.info({ operator, catId, override }, 'session strategy override set');
 
     // Return the new effective config after applying the override

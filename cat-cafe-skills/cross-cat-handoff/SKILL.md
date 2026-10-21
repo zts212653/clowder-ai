@@ -1,6 +1,6 @@
 ---
 name: cross-cat-handoff
-tips_exempt: "2026-09-23：反例表去掉写死猫名，只改猫间路由措辞；未新增用户可直接发起的操作。"
+tips_exempt: "C1 routes the existing external-review receipt through the installed GitHub plugin tool; this agent-only transport correction introduces no end-user action."
 description: "跨猫交接与 review 双路由。Use when: 交接、exact-HEAD external PR review task 或 PR tracking。Not for: 自己任务。Output: 足够接手的交接与适用的责任/审查回执。"
 triggers:
   - "交接"
@@ -81,7 +81,7 @@ PR 就强制 GitHub comment。入口发现 formal + no-comment 冲突时，先�
 ## External Review Verdict Delivery Custody
 
 当 action successor 为外部仓库 PR 产出正式 review 结论时，结论不是交接终点。本轮必须调用
-`cat_cafe_record_external_review_verdict`，把当前 HEAD 的 verdict 与以下二选一结果原子回写：
+`github_record_external_review_verdict`，把当前 HEAD 的 verdict 与以下二选一结果原子回写：
 
 1. `delivered`：review/comment 已写入同一 GitHub PR，附可验证的 delivery proof URL。
 2. `pending_delivery`：GitHub 写入未发生，附具体 reason；owner 由 callback 身份在服务端写入并持久保存。

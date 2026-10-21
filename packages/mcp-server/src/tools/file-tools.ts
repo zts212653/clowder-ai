@@ -204,18 +204,28 @@ export async function handleReadFileSlice(input: {
   let usedContentChars = 0;
   let nextSlice: { startLine: number; charOffset: number } | undefined;
   let invalidOffset = false;
+  let inFrontmatter = false;
+  let documentBodyLine: number | undefined;
   const stream = fs.createReadStream(filePath, { encoding: 'utf-8' });
   const reader = createInterface({ input: stream, crlfDelay: Infinity });
 
   try {
     for await (const line of reader) {
       currentLine++;
-      if (currentLine < input.startLine) continue;
       if (currentLine > endLine) {
+        nextSlice ??= { startLine: currentLine, charOffset: 0 };
+        // Locate the body without returning unrequested content or scanning an unbounded prelude.
+        if (inFrontmatter && currentLine <= endLine + MAX_FILE_SLICE_LINES) {
+          if (/^(---|\.\.\.)\s*$/.test(line)) documentBodyLine = currentLine + 1;
+          else continue;
+        }
         reader.close();
         stream.destroy();
         break;
       }
+      if (currentLine === 1) inFrontmatter = /\.md$/i.test(filePath) && line.replace(/^\uFEFF/, '').trim() === '---';
+      else if (inFrontmatter && /^(---|\.\.\.)\s*$/.test(line)) inFrontmatter = false;
+      if (currentLine < input.startLine) continue;
       const offset = currentLine === input.startLine ? (input.charOffset ?? 0) : 0;
       if (offset > line.length) {
         invalidOffset = true;
@@ -253,10 +263,14 @@ export async function handleReadFileSlice(input: {
   }
 
   const actualEndLine = input.startLine + lines.length - 1;
-  const continuation = nextSlice
-    ? `\nNext slice: cat_cafe_read_file_slice(path=${JSON.stringify(input.path)}, startLine=${nextSlice.startLine}, endLine=${endLine}, charOffset=${nextSlice.charOffset})`
+  const nextEndLine = nextSlice && nextSlice.startLine > endLine ? nextSlice.startLine + requestedLines - 1 : endLine;
+  const bodyNavigation = documentBodyLine
+    ? `\nDocument body: cat_cafe_read_file_slice(path=${JSON.stringify(input.path)}, startLine=${documentBodyLine}, endLine=${documentBodyLine + DEFAULT_FILE_SLICE_LINES - 1})`
     : '';
-  const text = `File slice: ${displayPath}:${input.startLine}-${actualEndLine}\n${lines.join('\n')}${continuation}`;
+  const continuation = nextSlice
+    ? `\nSource continues beyond this slice; read applicable remaining sections before concluding its current rules.${inFrontmatter ? ' This slice ends inside YAML frontmatter; the document body has not been read.' : ''}\nNext slice: cat_cafe_read_file_slice(path=${JSON.stringify(input.path)}, startLine=${nextSlice.startLine}, endLine=${nextEndLine}, charOffset=${nextSlice.charOffset})`
+    : '';
+  const text = `File slice: ${displayPath}:${input.startLine}-${actualEndLine}${bodyNavigation}\n${lines.join('\n')}${continuation}`;
   if (text.length > FILE_SLICE_RESPONSE_MAX_CHARS) {
     return errorResult('File slice source path exceeds the bounded response budget; use a shorter permitted path');
   }

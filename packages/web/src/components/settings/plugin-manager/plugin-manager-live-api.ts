@@ -44,8 +44,12 @@ function fixtureDetail(detail: ConsolePluginManagerDetail | undefined): Partial<
         }),
     readme: detail.readme,
     ...(detail.setupSteps === undefined ? {} : { setupSteps: detail.setupSteps }),
+    ...(detail.permissions === undefined ? {} : { permissions: detail.permissions }),
+    ...(detail.steps === undefined ? {} : { steps: detail.steps }),
+    ...(detail.testable === undefined ? {} : { testable: detail.testable }),
     ...(detail.docsUrl === undefined ? {} : { docsUrl: detail.docsUrl }),
     ...(detail.configFields === undefined ? {} : { configFields: detail.configFields }),
+    ...(detail.bindings === undefined ? {} : { bindings: detail.bindings }),
   };
 }
 
@@ -64,9 +68,23 @@ export function designFixture(
     ...(plugin.iconBg === undefined ? {} : { iconBg: plugin.iconBg }),
     publisher: plugin.publisher ?? (plugin.source.trust === 'official' ? 'Clowder AI' : 'Local Host'),
     packageName: packageName(plugin),
-    source: plugin.source.kind === 'catalog' ? 'catalog' : 'local',
-    trust: plugin.source.trust === 'official' ? 'official' : 'local-trusted',
-    ...(plugin.source.kind === 'compatibility' ? { sourceAdapter: plugin.source.adapter } : {}),
+    source:
+      plugin.source.kind === 'catalog' || (plugin.source.kind === 'git' && plugin.source.marketplace)
+        ? 'catalog'
+        : 'local',
+    trust: plugin.source.trust,
+    ...(plugin.source.kind === 'git'
+      ? {
+          repositoryName:
+            plugin.source.url
+              .replace(/\.git$/, '')
+              .split(/[/:]/)
+              .at(-1) || '插件仓库',
+        }
+      : {}),
+    ...('dependencyClosure' in plugin.source && plugin.source.dependencyClosure !== undefined
+      ? { dependencyClosure: plugin.source.dependencyClosure }
+      : {}),
     availableVersion: plugin.availableVersion ?? plugin.installedVersion ?? 'unknown',
     installedVersion: plugin.installedVersion,
     artifact: plugin.artifact,
@@ -74,6 +92,7 @@ export function designFixture(
     auth: plugin.auth,
     intent: plugin.intent,
     live: plugin.live,
+    ...(plugin.activationFailed === undefined ? {} : { activationFailed: plugin.activationFailed }),
     readme,
     capabilities: capabilities.map((capability) => ({
       name: capability.name,
@@ -185,31 +204,12 @@ export async function fetchManagerList(search: string, afterMutation: boolean): 
   return value;
 }
 
-function legacyConfigurationUpdates(updates: readonly ConfigurationUpdate[]) {
-  return updates.map(({ key, value }) => ({ name: key, value }));
-}
-
 export function configurationRequest(
   plugin: PluginManagerListItem | undefined,
   updates: readonly ConfigurationUpdate[],
 ): { readonly path: string; readonly init: RequestInit } | undefined {
   if (!plugin || plugin.artifact !== 'installed') return undefined;
   const encodedId = encodeURIComponent(plugin.pluginId);
-  if (plugin.source.kind === 'compatibility') {
-    const repositoryLocal = plugin.source.adapter === 'repository-local';
-    return {
-      path: repositoryLocal ? `/api/plugins/${encodedId}/config` : `/api/connectors/${encodedId}/config`,
-      init: {
-        method: repositoryLocal ? 'POST' : 'PUT',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify(
-          repositoryLocal
-            ? { updates: legacyConfigurationUpdates(updates) }
-            : { fields: legacyConfigurationUpdates(updates) },
-        ),
-      },
-    };
-  }
   if (plugin.lifecycleRevision === null) return undefined;
   return {
     path: `/api/plugin-manager/plugins/${encodedId}/contributions/configuration`,

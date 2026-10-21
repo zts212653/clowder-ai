@@ -12,12 +12,17 @@ import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { getMemoizedMcpHostVersion } from '../../dist/domains/cats/services/agents/providers/mcp-schema-delivery-capability.js';
 import { CanonicalTasteMemoryCueSource } from '../../dist/domains/memory/cue/sources/TasteMemoryCueSource.js';
+import {
+  HostInventoryControlPlane,
+  LocalPluginPackageAdmission,
+  MemoryPluginInventoryStore,
+} from '../../dist/domains/plugin/index.js';
 import { clearEnvironmentCache, getEnvironmentProfile } from '../../dist/domains/services/environment-detector.js';
 import { FileTasteRepository } from '../../dist/domains/taste/services/TasteRepository.js';
-import { installPlugin, uninstallPlugin } from '../../dist/infrastructure/connectors/plugins/plugin-installer.js';
 import { PromptCaptureStore } from '../../dist/infrastructure/debug/prompt-capture-store.js';
 import { loadEvalHubSummaryAsync } from '../../dist/infrastructure/harness-eval/hub/eval-hub-read-model.js';
 import { fetchAndCreateMainReader } from '../../dist/infrastructure/harness-eval/publish-verdict/publication/replay-detection.js';
+import { manifest } from '../plugin-official-package-installer.fixture.js';
 
 const exec = promisify(execFile);
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../../../..');
@@ -109,13 +114,16 @@ try {
     await executable(name, `setTimeout(()=>console.log('arm64\\n3.12.1'),100)`);
   await executable('fixture-provider', `setTimeout(()=>console.log('fixture-cli 1.2.3'),400)`);
   const pluginRoot = join(fixture, 'plugins');
-  const packageRoot = join(fixture, 'archive/fixture-plugin');
+  const packageRoot = join(fixture, 'archive/package');
   await mkdir(packageRoot, { recursive: true });
-  await writeFile(join(packageRoot, 'connector.yaml'), 'id: fixture-plugin\nname: Fixture\n');
-  await writeFile(join(packageRoot, 'index.js'), 'export default {};');
+  await mkdir(join(packageRoot, 'dist'));
+  await mkdir(join(packageRoot, 'schemas'));
+  await writeFile(join(packageRoot, 'manifest.json'), JSON.stringify(manifest()));
+  await writeFile(join(packageRoot, 'dist/entrypoint.js'), 'export default {};');
+  await writeFile(join(packageRoot, 'schemas/official.test.v1.schema.json'), '{"type":"object"}');
   for (let i = 0; i < 1500; i++) await writeFile(join(packageRoot, `${i}.txt`), 'fixture');
   const archive = join(fixture, 'plugin.tar.gz');
-  await exec('tar', ['czf', archive, '-C', join(fixture, 'archive'), 'fixture-plugin']);
+  await exec('tar', ['czf', archive, '-C', join(fixture, 'archive'), 'package']);
   const captures = new PromptCaptureStore({ baseDir: join(fixture, 'captures') });
   const capture = {
     captureId: randomUUID(),
@@ -153,9 +161,19 @@ try {
     assert.equal(result.payload.totalCount, 88);
     return { count: result.payload.totalCount };
   });
+  // Own the workload: the public repo need not retain a growing process ledger.
+  const harnessFeedbackRoot = join(fixture, 'docs/harness-feedback');
+  await mkdir(join(harnessFeedbackRoot, 'verdicts'), { recursive: true });
+  await mkdir(join(harnessFeedbackRoot, 'eval-domains'));
+  for (let i = 0; i < 1200; i++) {
+    await writeFile(
+      join(harnessFeedbackRoot, `verdicts/fixture-${i}.md`),
+      '---\nfeedback_type: fixture\n---\nIsolated parsing workload.\n',
+    );
+  }
   await measure('R07', async () => {
-    const summary = await loadEvalHubSummaryAsync({ harnessFeedbackRoot: join(repoRoot, 'docs/harness-feedback') });
-    assert.ok(summary.counts.total > 100);
+    const summary = await loadEvalHubSummaryAsync({ harnessFeedbackRoot });
+    assert.equal(summary.counts.total, 0, 'fixture documents are parsed but are not live verdicts');
     return summary.counts;
   });
   await measure('R08', async () => {
@@ -192,11 +210,18 @@ try {
     (result) => ({ payloadBytes: result.effectivePrompt.length, ownerVerified: true }),
   );
   await measure('R12', async () => {
-    const installed = await installPlugin(pluginRoot, archive, new Set());
-    assert.equal(installed.action, 'installed');
-    const uninstalled = await uninstallPlugin(pluginRoot, 'fixture-plugin');
-    assert.equal(uninstalled.action, 'uninstalled');
-    return { files: 1502, install: installed.action, uninstall: uninstalled.action };
+    const inventory = new MemoryPluginInventoryStore();
+    const admission = new LocalPluginPackageAdmission({
+      inventory: new HostInventoryControlPlane(inventory),
+      packagesRoot: pluginRoot,
+      grantPolicy: () => ['events.publish'],
+    });
+    const installed = await admission.install({ kind: 'local-archive', path: archive });
+    assert.equal(installed.pluginId, 'official.test-source');
+    const state = await inventory.snapshot();
+    assert.equal(state.instances.length, 1);
+    assert.equal(state.instances[0].runtimeState, 'stopped');
+    return { files: 1503, install: 'installed', instanceId: installed.pluginInstanceId };
   });
   if (output) {
     await mkdir(dirname(resolve(output)), { recursive: true });

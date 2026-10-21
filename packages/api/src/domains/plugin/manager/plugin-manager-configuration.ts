@@ -1,20 +1,36 @@
-import type { PluginManagerConfigField, PluginManagerConfigureRequest } from '@cat-cafe/shared';
-import type { ConfigurationField } from '@clowder-ai/plugin-contract';
+import {
+  isPluginConfigurationFieldRequired,
+  type PluginManagerConfigField,
+  type PluginManagerConfigureRequest,
+} from '@cat-cafe/shared';
+import { type ExternalPluginLifecycleService, PluginLifecycleError } from '../external-plugin-lifecycle.js';
 import type { PluginInventoryStore, PluginInventoryTransaction } from '../host-inventory/ports.js';
 import type { PluginInstanceRecord, PluginPackageRecord } from '../host-inventory/types.js';
-import { readPluginConfig, writePluginConfig } from '../plugin-config-store.js';
+import type { OperationState } from '../operations/operation-state-machine.js';
+import { assertOperationCommit, type PluginOperationCommitFence } from '../operations/plugin-operation-fence.js';
+import {
+  readPluginConfig,
+  readPluginOperationState,
+  writePluginConfig,
+  writePluginOperationState,
+} from '../plugin-config-store.js';
+import { chromeSetupPolicy } from './chrome-setup/personal-chrome-setup-policy.js';
 import { effectivePluginConfigurationValue } from './plugin-configuration-values.js';
+import {
+  type ContractConfigurationField,
+  type ContractOperationField,
+  configFieldProjection,
+  operationFieldProjection,
+} from './plugin-manager-field-projection.js';
 import { type PluginManagerConfigurationPort, PluginManagerServiceError } from './plugin-manager-service.js';
 
-const SECRET_MASK = '••••••';
 const CONFIGURATION_KEY = /^[A-Za-z][A-Za-z0-9._-]*$/;
-
-type ContractConfigurationField = ConfigurationField;
 
 export interface HostPluginConfigurationServiceOptions {
   readonly projectRoot: string;
   readonly inventory: PluginInventoryStore;
   readonly now?: () => number;
+  readonly lifecycle?: Pick<ExternalPluginLifecycleService, 'runWithRuntimeSuspended'>;
 }
 
 function configError(message: string): PluginManagerServiceError {
@@ -22,7 +38,15 @@ function configError(message: string): PluginManagerServiceError {
 }
 
 function manifestConfiguration(record: PluginPackageRecord): readonly ContractConfigurationField[] {
-  return record.manifest.configuration ?? [];
+  return (record.manifest?.configuration ?? []).filter(
+    (field): field is ContractConfigurationField => field.kind !== 'operation',
+  );
+}
+
+function manifestOperation(record: PluginPackageRecord, operationKey: string): ContractOperationField | undefined {
+  return (record.manifest?.configuration ?? []).find(
+    (field): field is ContractOperationField => field.kind === 'operation' && field.key === operationKey,
+  );
 }
 
 function currentPackage(
@@ -37,24 +61,6 @@ function currentPackage(
     throw new PluginManagerServiceError('CONFIGURATION_UNAVAILABLE', 'Installed plugin package is unavailable');
   }
   return { instance, packageRecord };
-}
-
-function projection(
-  field: ContractConfigurationField,
-  stored: Readonly<Record<string, string>>,
-): PluginManagerConfigField {
-  const value = effectivePluginConfigurationValue(field, stored[field.key]);
-  return {
-    key: field.key,
-    label: field.label,
-    kind: field.kind,
-    required: field.required,
-    ...(field.description === undefined ? {} : { description: field.description }),
-    ...(field.default === undefined ? {} : { default: field.default }),
-    ...(field.options === undefined ? {} : { options: field.options.map((option) => ({ ...option })) }),
-    currentValue: value === undefined ? null : field.kind === 'secret' ? SECRET_MASK : value,
-    sensitive: field.kind === 'secret',
-  };
 }
 
 type ValueValidator = (field: ContractConfigurationField, value: string) => void;
@@ -99,7 +105,13 @@ function requiredFieldsReady(
   stored: Readonly<Record<string, string>>,
 ): boolean {
   return fields.every((field) => {
-    if (!field.required) return true;
+    if (
+      !isPluginConfigurationFieldRequired(field, (key) => {
+        const referenced = fields.find((candidate) => candidate.key === key);
+        return referenced ? effectivePluginConfigurationValue(referenced, stored[key]) : undefined;
+      })
+    )
+      return true;
     return effectivePluginConfigurationValue(field, stored[field.key]) !== undefined;
   });
 }
@@ -123,16 +135,18 @@ function assertConfigurationFence(instance: PluginInstanceRecord, expectedRevisi
       `Expected lifecycle revision ${expectedRevision}, current ${instance.lifecycleRevision}`,
     );
   }
-  if (instance.activationState !== 'disabled' || instance.runtimeState !== 'stopped') {
-    throw new PluginManagerServiceError('ACTION_NOT_ALLOWED', 'Disable the plugin before changing its configuration');
+  if (instance.activationState === 'enabling' || instance.activationState === 'disabling') {
+    throw new PluginManagerServiceError('ACTION_NOT_ALLOWED', 'Plugin activation is changing');
   }
 }
 
 function validateUpdates(
   fields: readonly ContractConfigurationField[],
   updates: PluginManagerConfigureRequest['updates'],
+  allowEmpty = false,
 ): void {
-  if (updates.length === 0 || updates.length > 256) throw configError('Configuration updates are invalid');
+  if ((!allowEmpty && updates.length === 0) || updates.length > 256)
+    throw configError('Configuration updates are invalid');
   const byKey = new Map(fields.map((field) => [field.key, field]));
   const seen = new Set<string>();
   for (const update of updates) {
@@ -169,9 +183,14 @@ function configureTransaction(input: {
   readonly pluginInstanceId: string;
   readonly request: PluginManagerConfigureRequest;
   readonly now: number;
+  readonly allowEmpty?: boolean;
+  readonly liveRefresh?: boolean;
 }): void {
   const current = requireConfigurationTarget(input.transaction, input.pluginId, input.pluginInstanceId);
   assertConfigurationFence(current.instance, input.request.expectedRevision);
+  if (current.instance.runtimeState !== 'stopped' && !input.liveRefresh) {
+    throw new PluginManagerServiceError('ACTION_NOT_ALLOWED', 'Configuration requires the runtime to be suspended');
+  }
   const fields = manifestConfiguration(current.packageRecord);
   if (fields.length === 0) {
     throw new PluginManagerServiceError(
@@ -179,7 +198,7 @@ function configureTransaction(input: {
       'Plugin does not declare a configuration contribution',
     );
   }
-  validateUpdates(fields, input.request.updates);
+  validateUpdates(fields, input.request.updates, input.allowEmpty);
   const next = updatedValues(readPluginConfig(input.projectRoot, input.pluginId), input.request.updates);
   writePluginConfig(
     input.projectRoot,
@@ -211,14 +230,131 @@ export class HostPluginConfigurationService implements PluginManagerConfiguratio
     if (!packageRecord) {
       throw new PluginManagerServiceError('CONFIGURATION_UNAVAILABLE', 'Installed plugin package is unavailable');
     }
+    if (packageRecord.manifest === null) return [];
     const stored = readPluginConfig(this.options.projectRoot, pluginId);
-    return manifestConfiguration(packageRecord).map((field) => projection(field, stored));
+    const fields = manifestConfiguration(packageRecord);
+    const hostSetup = chromeSetupPolicy(packageRecord);
+    return [
+      ...(hostSetup ? [operationFieldProjection(hostSetup, undefined, [], {})] : []),
+      ...(packageRecord.manifest.configuration ?? []).map((field) =>
+        field.kind === 'operation'
+          ? operationFieldProjection(
+              field,
+              readPluginOperationState(this.options.projectRoot, pluginId, field.key),
+              fields,
+              stored,
+            )
+          : configFieldProjection(field, fields, stored),
+      ),
+    ];
+  }
+
+  async readActionInput(pluginId: string): Promise<Readonly<Record<string, unknown>>> {
+    const snapshot = await this.options.inventory.snapshot();
+    const instance = snapshot.instances.find(
+      (candidate) => candidate.pluginId === pluginId && candidate.lifecycleState === 'installed',
+    );
+    if (!instance) return {};
+    const packageRecord = snapshot.packages.find((candidate) => candidate.packageDigest === instance.packageDigest);
+    if (!packageRecord) {
+      throw new PluginManagerServiceError('CONFIGURATION_UNAVAILABLE', 'Installed plugin package is unavailable');
+    }
+    const stored = readPluginConfig(this.options.projectRoot, pluginId);
+    const values: Record<string, unknown> = {};
+    for (const field of manifestConfiguration(packageRecord)) {
+      if (field.kind === 'secret') continue;
+      const value = effectivePluginConfigurationValue(field, stored[field.key]);
+      if (value !== undefined) values[field.key] = value;
+    }
+    return values;
+  }
+
+  async readOperationState(pluginId: string, operationKey: string): Promise<OperationState | undefined> {
+    return readPluginOperationState(this.options.projectRoot, pluginId, operationKey);
+  }
+
+  async writeOperationState(
+    pluginId: string,
+    operationKey: string,
+    state: OperationState,
+    fence?: PluginOperationCommitFence,
+  ): Promise<void> {
+    if (fence) {
+      await this.options.inventory.transaction((transaction) => {
+        assertOperationCommit(fence, transaction, pluginId);
+        writePluginOperationState(this.options.projectRoot, pluginId, operationKey, state);
+      });
+      return;
+    }
+    writePluginOperationState(this.options.projectRoot, pluginId, operationKey, state);
+  }
+
+  async clearOperationState(pluginId: string, operationKey: string): Promise<void> {
+    writePluginOperationState(this.options.projectRoot, pluginId, operationKey, undefined);
+  }
+
+  async configureOperationTargets(
+    pluginId: string,
+    pluginInstanceId: string,
+    operationKey: string,
+    values: Readonly<Record<string, string>>,
+    fence?: PluginOperationCommitFence,
+  ): Promise<readonly string[]> {
+    if (fence) {
+      return this.options.inventory.transaction((transaction) => {
+        assertOperationCommit(fence, transaction, pluginId);
+        const instance = transaction.instances.getCurrent(pluginId);
+        const record = instance && transaction.packages.get(instance.packageDigest);
+        if (!instance || instance.pluginInstanceId !== pluginInstanceId || !record)
+          throw new PluginManagerServiceError('ACTION_NOT_ALLOWED', 'Plugin instance changed');
+        return this.writeOperationTargets(pluginId, operationKey, values, record);
+      });
+    }
+    const snapshot = await this.options.inventory.snapshot();
+    const instance = snapshot.instances.find(
+      (candidate) =>
+        candidate.pluginId === pluginId &&
+        candidate.pluginInstanceId === pluginInstanceId &&
+        candidate.lifecycleState === 'installed',
+    );
+    const packageRecord = instance
+      ? snapshot.packages.find((candidate) => candidate.packageDigest === instance.packageDigest)
+      : undefined;
+    if (!instance || !packageRecord) {
+      throw new PluginManagerServiceError('ACTION_NOT_ALLOWED', 'Plugin is not the current installed instance');
+    }
+    return this.writeOperationTargets(pluginId, operationKey, values, packageRecord);
+  }
+
+  private writeOperationTargets(
+    pluginId: string,
+    operationKey: string,
+    values: Readonly<Record<string, string>>,
+    packageRecord: PluginPackageRecord,
+  ): readonly string[] {
+    const operation = manifestOperation(packageRecord, operationKey);
+    if (!operation) throw configError(`Operation ${operationKey} is not declared by this plugin`);
+    const targetKeys = new Set(operation.target ?? []);
+    const fields = new Map(manifestConfiguration(packageRecord).map((field) => [field.key, field]));
+    const updates: { name: string; value: string }[] = [];
+    for (const [key, value] of Object.entries(values)) {
+      const field = fields.get(key);
+      if (!targetKeys.has(key) || !field) throw configError(`Operation target ${key} is not declared by this plugin`);
+      validateValue(field, value);
+      updates.push({ name: key, value });
+    }
+    return writePluginConfig(this.options.projectRoot, pluginId, updates).changedKeys;
   }
 
   async reconcile(pluginId: string, pluginInstanceId: string): Promise<void> {
     await this.options.inventory.transaction((transaction) => {
       const current = requireConfigurationTarget(transaction, pluginId, pluginInstanceId);
-      if (current.instance.activationState !== 'disabled' || current.instance.runtimeState !== 'stopped') return;
+      if (
+        current.packageRecord.manifest === null ||
+        current.instance.runtimeState !== 'stopped' ||
+        ['enabling', 'disabling'].includes(current.instance.activationState)
+      )
+        return;
       const fields = manifestConfiguration(current.packageRecord);
       const stored = readPluginConfig(this.options.projectRoot, pluginId);
       const configReadiness = requiredFieldsReady(fields, stored) ? 'ready' : 'incomplete';
@@ -232,16 +368,70 @@ export class HostPluginConfigurationService implements PluginManagerConfiguratio
     });
   }
 
+  async completeOperation(pluginId: string, pluginInstanceId: string, expectedRevision: number): Promise<void> {
+    await this.configureInternal(pluginId, pluginInstanceId, { expectedRevision, updates: [] }, true);
+  }
+
   async configure(pluginId: string, pluginInstanceId: string, request: PluginManagerConfigureRequest): Promise<void> {
-    await this.options.inventory.transaction((transaction) => {
-      configureTransaction({
-        transaction,
-        projectRoot: this.options.projectRoot,
-        pluginId,
-        pluginInstanceId,
-        request,
-        now: this.now(),
+    return this.configureInternal(pluginId, pluginInstanceId, request, false);
+  }
+
+  private async configureInternal(
+    pluginId: string,
+    pluginInstanceId: string,
+    request: PluginManagerConfigureRequest,
+    allowEmpty: boolean,
+  ): Promise<void> {
+    const persist = (expectedRevision: number, liveRefresh = false) =>
+      this.options.inventory.transaction((transaction) => {
+        configureTransaction({
+          transaction,
+          projectRoot: this.options.projectRoot,
+          pluginId,
+          pluginInstanceId,
+          request: { ...request, expectedRevision },
+          allowEmpty,
+          liveRefresh,
+          now: this.now(),
+        });
       });
-    });
+    if (!this.options.lifecycle) return persist(request.expectedRevision);
+    let persisted = false;
+    try {
+      await this.options.lifecycle.runWithRuntimeSuspended({
+        instanceId: pluginInstanceId,
+        expectedRevision: request.expectedRevision,
+        stopReason: 'configuration_update',
+        resumeFailureCode: 'CONFIGURATION_RESUME_FAILED',
+        preflight: () =>
+          this.options.inventory.transaction((transaction) => {
+            const current = requireConfigurationTarget(transaction, pluginId, pluginInstanceId);
+            assertConfigurationFence(current.instance, request.expectedRevision);
+            const fields = manifestConfiguration(current.packageRecord);
+            if (fields.length === 0) {
+              throw new PluginManagerServiceError('CONFIGURATION_UNAVAILABLE', 'Plugin does not declare configuration');
+            }
+            validateUpdates(fields, request.updates, allowEmpty);
+          }),
+        operation: async (stopped) => {
+          await persist(stopped.lifecycleRevision, stopped.runtimeState !== 'stopped');
+          persisted = true;
+        },
+      });
+    } catch (error) {
+      if (!(error instanceof PluginLifecycleError)) throw error;
+      if (error.code === 'STALE_REVISION' || error.code === 'STALE_INSTANCE') {
+        throw new PluginManagerServiceError('STALE_REVISION', error.message);
+      }
+      if (error.code === 'CONFIGURATION_RESUME_FAILED') {
+        throw new PluginManagerServiceError(
+          'RUNTIME_START_FAILED',
+          persisted
+            ? 'Configuration saved, but the plugin could not restart'
+            : 'Configuration failed, and the previous runtime could not be restored',
+        );
+      }
+      throw new PluginManagerServiceError('ACTION_NOT_ALLOWED', error.message);
+    }
   }
 }

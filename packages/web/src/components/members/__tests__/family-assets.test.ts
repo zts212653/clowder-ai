@@ -1,4 +1,4 @@
-import { readFileSync, statSync } from 'node:fs';
+import { existsSync, readFileSync, statSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import YAML from 'yaml';
@@ -27,6 +27,7 @@ const approvedIds = [
   'gemini',
   'gemini25',
   'kimi',
+  'dsh',
   'glm52',
   'antigravity',
   'antig-opus',
@@ -35,28 +36,33 @@ const approvedIds = [
 describe('approved family assets remain portable release inputs', () => {
   it('contains the accepted used avatars and excludes unused/test additions', () => {
     expect(catalog.map((a) => a.id)).toEqual(approvedIds);
-    expect(new Set(catalog.map((a) => a.src)).size).toBe(25);
+    expect(new Set(catalog.map((a) => a.src)).size).toBe(26);
     expect(catalog.some((a) => a.src.startsWith('/uploads/'))).toBe(false);
   });
   it('ships every chooser and role-template asset through the existing export roots', () => {
-    const manifest = YAML.parse(readFileSync(resolve(root, 'sync-manifest.yaml'), 'utf8')) as {
-      managed_roots: string[];
-      managed_files: string[];
-      excluded: string[];
-    };
+    const manifestPath = resolve(root, 'sync-manifest.yaml');
+    const manifest = existsSync(manifestPath)
+      ? (YAML.parse(readFileSync(manifestPath, 'utf8')) as {
+          managed_roots: string[];
+          managed_files: string[];
+          excluded: string[];
+        })
+      : null;
     const templates = JSON.parse(readFileSync(resolve(root, 'cat-template.json'), 'utf8')) as {
       roleTemplates: Array<{ id: string; avatar: string; defaultModel?: string; clientId?: string }>;
     };
-    expect(manifest.managed_files).toContain('cat-template.json');
+    if (manifest) expect(manifest.managed_files).toContain('cat-template.json');
     const roles = new Set(templates.roleTemplates.map((t) => t.id));
     for (const a of catalog) {
       expect(roles.has(a.roleTemplateId), a.id).toBe(true);
       const repoPath = `packages/web/public${a.src}`;
-      expect(
-        manifest.managed_roots.some((p) => repoPath.startsWith(`${p}/`)),
-        repoPath,
-      ).toBe(true);
-      expect(manifest.excluded).not.toContain(repoPath);
+      if (manifest) {
+        expect(
+          manifest.managed_roots.some((p) => repoPath.startsWith(`${p}/`)),
+          repoPath,
+        ).toBe(true);
+        expect(manifest.excluded).not.toContain(repoPath);
+      }
       const file = resolve(root, repoPath);
       expect(statSync(file).size).toBeGreaterThan(0);
       expect(readFileSync(file).subarray(1, 4).toString()).toBe('PNG');

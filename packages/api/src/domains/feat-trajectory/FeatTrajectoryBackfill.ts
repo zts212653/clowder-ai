@@ -41,7 +41,7 @@ export interface FeatTrajectoryBackfillResult {
  * Run historical backfill. Returns summary; does not exit.
  *
  * Caller (script entry) responsible for:
- * - Building deps (Redis connection, RealGitRunner, RealGhClient, etc.)
+ * - Building deps (Redis connection, local Git runner, etc.)
  * - Cleanup (close Redis, etc.)
  * - Exit code based on result (non-zero on 0 snapshots = likely misconfig)
  */

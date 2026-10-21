@@ -6,6 +6,7 @@ import {
   type PawFeelResponsibilityProjection,
 } from '@cat-cafe/shared';
 import type { RedisClient } from '@cat-cafe/shared/utils';
+import { getCoCreatorDisplay } from '../../../config/co-creator-display.js';
 
 const DUTY_NOTICE_KEY = 'paw-feel:disposition:duty-notice';
 const SYSTEM_THREAD_ID = 'thread_eval_friction' as const;
@@ -232,7 +233,7 @@ export function buildPawFeelDutyNotice(
   const status = !completeDuty
     ? '值班配置不完整，不能进入运营闭环'
     : slaTier === 'cvo_breach'
-      ? '已超过 72h，Primary 继续负责；Workspace 向 operator 标红'
+      ? `已超过 72h，Primary 继续负责；Workspace 向 ${getCoCreatorDisplay().role} 标红`
       : slaTier === 'overdue'
         ? '已超过 24h，Primary 继续负责'
         : '等待值班猫审阅';
@@ -247,7 +248,7 @@ export function buildPawFeelDutyNotice(
     `待审 ${reviewBundleCount} 个 bundle / ${items.length} 条 raw signal；最久 ${hours}h；${status}。`,
     dutyLine,
     `工作台：${inboxHref}`,
-    '处理契约：分页或 10/20/50 条上限只限制单次工具调用或上下文切片，不是任务终点；当班猫必须沿同一责任链持续续跑，直到 active=0，或每个剩余 actionable bundle 均有真实 task + named owner + active F167 lease、等待 operator 审批的 durable proposal，或带证据 ref 的 explicit blocker。signature-waiting 必须继续由合法独立 signer 完成 exact candidate，或转为 explicit blocker，不能提前结账。仅有 owner、task、transport receipt 或 chat prose 都不是终点；预算将尽时必须建立结构化续跑，不得静默等下一轮 cron。',
+    `处理契约：分页或 10/20/50 条上限只限制单次工具调用或上下文切片，不是任务终点；当班猫必须沿同一责任链持续续跑，直到 active=0，或每个剩余 actionable bundle 均有真实 task + named owner + active F167 lease、等待 ${getCoCreatorDisplay().role} 审批的 durable proposal，或带证据 ref 的 explicit blocker。signature-waiting 必须继续由合法独立 signer 完成 exact candidate，或转为 explicit blocker，不能提前结账。仅有 owner、task、transport receipt 或 chat prose 都不是终点；预算将尽时必须建立结构化续跑，不得静默等下一轮 cron。`,
     '',
     '代表原消息（每 bundle 至多一个；本通知不复制 marker 正文）：',
     ...representativeSources.map((sourceMessageId) => `- ${sourceMessageId}`),

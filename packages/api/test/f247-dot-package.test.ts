@@ -17,7 +17,11 @@ test('one cloud GPT entry enables dot collaboration without installing another C
   assert.equal(dot.distribution, 'bundled');
   assert.equal(dot.packageName, '@cat-cafe/chatgpt-dot');
   assert.deepEqual(dot.effectiveGrants, [], 'installation does not authorize events or source access');
-  assert.ok(OFFICIAL_PLUGIN_CATALOG.some((entry) => entry.pluginId === 'official.collective-connector'));
+  assert.equal(
+    OFFICIAL_PLUGIN_CATALOG.some((entry) => entry.pluginId === 'official.collective-connector'),
+    false,
+    'Collective is distributed by the external plugin repository, not bundled into Host',
+  );
 });
 
 test('dot installs through Host inventory once, and its real Manager row stays disabled until configured', async (t) => {

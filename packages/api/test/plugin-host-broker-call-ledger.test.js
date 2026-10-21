@@ -6,41 +6,45 @@ import {
   HostBrokerError,
   MemoryHostBrokerStore,
 } from '../dist/domains/plugin/host-broker/index.js';
-import { candidateHello, eventsPublishInput, INSTANCE_ID, readyInventory } from './plugin-host-broker-helpers.js';
+import {
+  candidateHello,
+  INSTANCE_ID,
+  messageSendInput,
+  messageSendReceipt,
+  readyInventory,
+} from './plugin-host-broker-helpers.js';
 
 function isBrokerError(code) {
   return (error) => error instanceof HostBrokerError && error.code === code;
 }
 
-function fakeEventsHandler(overrides = {}) {
+function fakeMessageHandler(overrides = {}) {
   let dispatchCount = 0;
   const settlements = new Map();
   return {
-    method: 'events.publish',
+    method: 'messaging.send',
     validateInput: (value) =>
       value &&
       typeof value === 'object' &&
-      typeof value.signalType === 'string' &&
+      typeof value.address?.handle === 'string' &&
       typeof value.idempotencyKey === 'string'
         ? { valid: true, value: structuredClone(value) }
         : { valid: false },
     validateResult: (value) =>
-      value &&
-      typeof value === 'object' &&
-      typeof value.publicationId === 'string' &&
-      (value.disposition === 'accepted' || value.disposition === 'duplicate'),
+      value && typeof value === 'object' && typeof value.messageId === 'string' && value.revision === 1,
     settlementKey: (context, input) =>
-      `${context.pluginInstanceId}\u0000${input.signalType}\u0000${input.idempotencyKey}`,
+      `${context.pluginInstanceId}\u0000${input.address.handle}\u0000${input.idempotencyKey}`,
     dispatch: async (context, input) => {
       dispatchCount += 1;
       if (overrides.dispatch) return overrides.dispatch({ context, input, settlements });
-      const result = { publicationId: `pub-${input.idempotencyKey}`, disposition: 'accepted' };
-      settlements.set(`${context.pluginInstanceId}\u0000${input.signalType}\u0000${input.idempotencyKey}`, result);
+      const result = messageSendReceipt(`pub-${input.idempotencyKey}`);
+      settlements.set(`${context.pluginInstanceId}\u0000${input.address.handle}\u0000${input.idempotencyKey}`, result);
       return result;
     },
     lookupSettlement: async (context, input) =>
       structuredClone(
-        settlements.get(`${context.pluginInstanceId}\u0000${input.signalType}\u0000${input.idempotencyKey}`) ?? null,
+        settlements.get(`${context.pluginInstanceId}\u0000${input.address.handle}\u0000${input.idempotencyKey}`) ??
+          null,
       ),
     serializePreEffectError: () => null,
     restoreSettledError: (error) => Object.assign(new Error(error.message), { code: error.code }),
@@ -74,10 +78,10 @@ async function activeHarness(handler, options = {}) {
 
 describe('K-2B durable Broker call ledger', () => {
   it('rejects ready-but-unregistered and handshake rows before any durable claim', async () => {
-    const handler = fakeEventsHandler();
+    const handler = fakeMessageHandler();
     const { connection, store } = await activeHarness(handler);
 
-    await assert.rejects(connection.call('messaging.send', {}), isBrokerError('METHOD_NOT_REGISTERED'));
+    await assert.rejects(connection.call('messaging.subscribe', {}), isBrokerError('METHOD_NOT_REGISTERED'));
     await assert.rejects(connection.call('broker.hello', {}), isBrokerError('METHOD_NOT_REGISTERED'));
     assert.equal((await store.snapshot()).calls.length, 0);
     assert.equal(handler.dispatchCount(), 0);
@@ -88,46 +92,49 @@ describe('K-2B durable Broker call ledger', () => {
     const blocked = new Promise((resolve) => {
       releaseDispatch = resolve;
     });
-    const handler = fakeEventsHandler({
+    const handler = fakeMessageHandler({
       dispatch: async ({ context, input, settlements }) => {
         await blocked;
-        const result = { publicationId: 'pub-concurrent', disposition: 'accepted' };
-        settlements.set(`${context.pluginInstanceId}\u0000${input.signalType}\u0000${input.idempotencyKey}`, result);
+        const result = messageSendReceipt('pub-concurrent');
+        settlements.set(
+          `${context.pluginInstanceId}\u0000${input.address.handle}\u0000${input.idempotencyKey}`,
+          result,
+        );
         return result;
       },
     });
     const { connection, store } = await activeHarness(handler);
-    const input = eventsPublishInput({ idempotencyKey: 'concurrent' });
+    const input = messageSendInput({ idempotencyKey: 'concurrent' });
 
-    const first = connection.call('events.publish', input);
+    const first = connection.call('messaging.send', input);
     await new Promise((resolve) => setImmediate(resolve));
-    await assert.rejects(connection.call('events.publish', input), isBrokerError('CALL_IN_FLIGHT'));
+    await assert.rejects(connection.call('messaging.send', input), isBrokerError('CALL_IN_FLIGHT'));
     releaseDispatch();
     const result = await first;
 
-    assert.deepEqual(result, { publicationId: 'pub-concurrent', disposition: 'accepted' });
-    assert.deepEqual(await connection.call('events.publish', input), result);
+    assert.deepEqual(result, messageSendReceipt('pub-concurrent'));
+    assert.deepEqual(await connection.call('messaging.send', input), result);
     assert.equal(handler.dispatchCount(), 1);
     assert.equal((await store.snapshot()).calls[0].phase, 'settled_success');
   });
 
   it('binds a settlement key to one canonical input digest', async () => {
-    const handler = fakeEventsHandler();
+    const handler = fakeMessageHandler();
     const { connection } = await activeHarness(handler);
-    const first = eventsPublishInput({ idempotencyKey: 'same-key', payload: { version: 1 } });
-    const conflicting = eventsPublishInput({ idempotencyKey: 'same-key', payload: { version: 2 } });
+    const first = messageSendInput({ idempotencyKey: 'same-key', sourceEventId: 'version-1' });
+    const conflicting = messageSendInput({ idempotencyKey: 'same-key', sourceEventId: 'version-2' });
 
-    await connection.call('events.publish', first);
-    await assert.rejects(connection.call('events.publish', conflicting), isBrokerError('CALL_CONFLICT'));
+    await connection.call('messaging.send', first);
+    await assert.rejects(connection.call('messaging.send', conflicting), isBrokerError('CALL_CONFLICT'));
     assert.equal(handler.dispatchCount(), 1);
   });
 
   it('recovers a dispatched call from the domain settlement without blind redispatch', async () => {
     let failAfterSettlement = true;
-    const handler = fakeEventsHandler({
+    const handler = fakeMessageHandler({
       dispatch: async ({ context, input, settlements }) => {
-        const key = `${context.pluginInstanceId}\u0000${input.signalType}\u0000${input.idempotencyKey}`;
-        const result = { publicationId: 'pub-recovered', disposition: 'accepted' };
+        const key = `${context.pluginInstanceId}\u0000${input.address.handle}\u0000${input.idempotencyKey}`;
+        const result = messageSendReceipt('pub-recovered');
         settlements.set(key, result);
         if (failAfterSettlement) {
           failAfterSettlement = false;
@@ -137,25 +144,22 @@ describe('K-2B durable Broker call ledger', () => {
       },
     });
     const { connection, store } = await activeHarness(handler);
-    const input = eventsPublishInput({ idempotencyKey: 'recover-me' });
+    const input = messageSendInput({ idempotencyKey: 'recover-me' });
 
-    await assert.rejects(connection.call('events.publish', input), /simulated transport loss/);
+    await assert.rejects(connection.call('messaging.send', input), /simulated transport loss/);
     assert.equal((await store.snapshot()).calls[0].phase, 'dispatched');
 
-    assert.deepEqual(await connection.call('events.publish', input), {
-      publicationId: 'pub-recovered',
-      disposition: 'accepted',
-    });
+    assert.deepEqual(await connection.call('messaging.send', input), messageSendReceipt('pub-recovered'));
     assert.equal(handler.dispatchCount(), 1);
     assert.equal((await store.snapshot()).calls[0].phase, 'settled_success');
   });
 
   it('lets one exact retry acquire an abandoned durable claim before dispatch', async () => {
-    const handler = fakeEventsHandler();
+    const handler = fakeMessageHandler();
     const { connection, store } = await activeHarness(handler);
-    const input = eventsPublishInput({ idempotencyKey: 'abandoned-claim' });
-    const settlementKey = `${INSTANCE_ID}\u0000${input.signalType}\u0000${input.idempotencyKey}`;
-    const ledgerKey = digestBrokerValue([INSTANCE_ID, 'events.publish', settlementKey]);
+    const input = messageSendInput({ idempotencyKey: 'abandoned-claim' });
+    const settlementKey = `${INSTANCE_ID}\u0000${input.address.handle}\u0000${input.idempotencyKey}`;
+    const ledgerKey = digestBrokerValue([INSTANCE_ID, 'messaging.send', settlementKey]);
     const [session] = (await store.snapshot()).sessions;
     await store.transaction((transaction) => {
       transaction.calls.put({
@@ -165,7 +169,7 @@ describe('K-2B durable Broker call ledger', () => {
         pluginInstanceId: INSTANCE_ID,
         packageDigest: session.packageDigest,
         grantRevision: session.grantRevision,
-        method: 'events.publish',
+        method: 'messaging.send',
         settlementKey,
         inputDigest: digestBrokerValue(input),
         phase: 'claimed',
@@ -175,10 +179,7 @@ describe('K-2B durable Broker call ledger', () => {
       });
     });
 
-    assert.deepEqual(await connection.call('events.publish', input), {
-      publicationId: 'pub-abandoned-claim',
-      disposition: 'accepted',
-    });
+    assert.deepEqual(await connection.call('messaging.send', input), messageSendReceipt('pub-abandoned-claim'));
     assert.equal(handler.dispatchCount(), 1);
     const [call] = (await store.snapshot()).calls;
     assert.equal(call.phase, 'settled_success');
@@ -186,54 +187,41 @@ describe('K-2B durable Broker call ledger', () => {
   });
 
   it('rechecks grants and runtime expiry on every call', async () => {
-    const revokedHandler = fakeEventsHandler();
+    const revokedHandler = fakeMessageHandler();
     const revoked = await activeHarness(revokedHandler);
     await revoked.inventory.transaction((transaction) => {
       const grant = transaction.grants.get(INSTANCE_ID);
       transaction.grants.put({ ...grant, grantRevision: grant.grantRevision + 1, effectiveGrants: [] });
     });
     await assert.rejects(
-      revoked.connection.call('events.publish', eventsPublishInput()),
+      revoked.connection.call('messaging.send', messageSendInput()),
       isBrokerError('AUTHORITY_CHANGED'),
     );
     assert.equal(revokedHandler.dispatchCount(), 0);
 
-    const expiredHandler = fakeEventsHandler();
+    const expiredHandler = fakeMessageHandler();
     const expired = await activeHarness(expiredHandler);
     expired.setNow(15_001);
     await assert.rejects(
-      expired.connection.call('events.publish', eventsPublishInput()),
+      expired.connection.call('messaging.send', messageSendInput()),
       isBrokerError('SESSION_NOT_ACTIVE'),
     );
     assert.equal(expiredHandler.dispatchCount(), 0);
   });
 
   it('rejects a capability absent at handshake without misclassifying authority drift', async () => {
-    const handler = fakeEventsHandler();
+    const handler = fakeMessageHandler();
     const { connection, store } = await activeHarness(handler, { effectiveGrants: [] });
 
-    await assert.rejects(connection.call('events.publish', eventsPublishInput()), isBrokerError('CAPABILITY_DENIED'));
+    await assert.rejects(connection.call('messaging.send', messageSendInput()), isBrokerError('CAPABILITY_DENIED'));
     assert.equal(handler.dispatchCount(), 0);
     assert.equal((await store.snapshot()).sessions[0].phase, 'active');
   });
 
-  it('admits an owner-requested historical signal only through the exact active runtime ledger', async () => {
-    const handler = fakeEventsHandler();
-    const { broker, connection, store } = await activeHarness(handler);
-    const input = eventsPublishInput({ idempotencyKey: 'owner-history' });
-
-    const accepted = await broker.publishOwnerImportedSignal(INSTANCE_ID, input);
-    const replay = await broker.publishOwnerImportedSignal(INSTANCE_ID, input);
-    assert.deepEqual(accepted, { publicationId: 'pub-owner-history', disposition: 'accepted' });
-    assert.deepEqual(replay, accepted);
-    assert.equal(handler.dispatchCount(), 1);
-    assert.equal((await store.snapshot()).calls[0].phase, 'settled_success');
-
-    await connection.close('owner-history-test');
-    await assert.rejects(
-      broker.publishOwnerImportedSignal(INSTANCE_ID, eventsPublishInput({ idempotencyKey: 'after-close' })),
-      isBrokerError('INSTANCE_NOT_READY'),
-    );
-    assert.equal(handler.dispatchCount(), 1);
+  it('does not expose the retired owner-import event bypass', async () => {
+    const { broker, connection, store } = await activeHarness(fakeMessageHandler());
+    assert.equal('publishOwnerImportedSignal' in broker, false);
+    await assert.rejects(connection.call('events.publish', {}), isBrokerError('METHOD_NOT_READY'));
+    assert.equal((await store.snapshot()).calls.length, 0);
   });
 });

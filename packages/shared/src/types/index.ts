@@ -87,7 +87,7 @@ export type {
   ManagedCommandCancelTarget,
 } from './active-execution.js';
 // F178 Phase B: agent-key record + verify result
-export type { AgentKeyRecord, AgentKeyVerifyResult } from './agent-key.js';
+export type { AgentKeyRecord, AgentKeyScope, AgentKeyVerifyResult } from './agent-key.js';
 // F178 Phase B: agent-key reason taxonomy
 export {
   AGENT_KEY_FAILURE_REASONS,
@@ -292,7 +292,9 @@ export {
   CAT_CARRIERS,
   type CatCarrier,
   catClientSupportsCarrier,
+  catClientSupportsNativeTool,
   getCatCarrierOptions,
+  NATIVE_TOOL_CLIENTS,
 } from './cat-carrier.js';
 // F182: Cat routing error types
 export type { CatAlternative, CatRoutingError } from './cat-routing.js';
@@ -308,6 +310,12 @@ export {
   legacyAccountFamilyForRef,
   protocolForClient,
 } from './client-routing.js';
+// F202 h3c-1: refusals of a thread cloud-binding write that prove nothing was written
+export {
+  CLOUD_BINDING_REFUSALS,
+  type CloudBindingRefusal,
+  isCloudBindingRefusal,
+} from './cloud-binding-refusals.js';
 export type {
   CloudBridgeDomFingerprintV1,
   CloudBridgeFailureDiagnosticV1,
@@ -1318,6 +1326,10 @@ export type {
   PluginManagerSetEnabledRequest,
   PluginManagerUninstallRequest,
   PluginManifest,
+  PluginMarketplaceSelection,
+  PluginOperationRow,
+  PluginOperationRowAction,
+  PluginOperationRows,
   PluginResourceDef,
   PluginResourceStatus,
   PluginStatus,
@@ -1328,6 +1340,7 @@ export {
   pluginDescriptionVariants,
   resolvePluginDescription,
 } from './plugin.js';
+export type { PluginWaitState, PluginWaitUpdate } from './plugin-wait.js';
 export {
   DEFERRED_PERSON_MEMORY_CLERK_DISPOSITIONS,
   DEFERRED_PERSON_MEMORY_RECEIPT_STATES,

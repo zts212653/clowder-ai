@@ -88,7 +88,7 @@ for (const presentation of ['classic', 'v2'] as const) {
         ),
       );
       await render();
-      for (const label of ['You', 'Cat gemini-argon', 'custom-hook · Alice', 'Plugin · plugin-one', 'scheduler'])
+      for (const label of ['You', 'Cat gemini-argon', 'custom-hook · Alice', '插件', 'scheduler'])
         expect(host.textContent).toContain(label);
       await toggle();
       for (const actor of actors) expect(host.textContent).toContain(`Body ${actor.kind}`);

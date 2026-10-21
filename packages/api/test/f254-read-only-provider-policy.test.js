@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
-import { readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, it } from 'node:test';
 import { ensureFakeCliOnPath } from './helpers/fake-cli-path.js';
 import { fakeL0Compiler } from './helpers/fake-l0-compiler.js';
@@ -57,49 +59,70 @@ describe('F254 provider-native read-only enforcement', () => {
     assert.equal(captured.env.CAT_CAFE_READONLY, 'true');
   });
 
-  it('Codex forces read-only sandbox, never approval, and suppresses user/MCP capability layers', async () => {
-    const { CodexAgentService } = await import('../dist/domains/cats/services/agents/providers/CodexAgentService.js');
-    let captured;
-    const service = new CodexAgentService({
-      catId: 'codex-sol',
-      model: 'gpt-test',
-      carrierMode: 'exec_json',
-      l0CompilerFn: fakeL0Compiler,
-    });
-    await collect(
-      service.invoke('supplement check', {
-        toolExecutionPolicy: POLICY,
-        callbackEnv: {
-          CAT_CAFE_READONLY: 'true',
-          CAT_CAFE_API_URL: 'http://127.0.0.1:3004',
-          CAT_CAFE_INVOCATION_ID: 'inv-read-only',
-          CAT_CAFE_CALLBACK_TOKEN: 'tok-read-only',
-          CAT_CAFE_CAT_ID: 'codex-sol',
-        },
-        accountEnv: { CAT_CAFE_READONLY: 'false' },
-        cliConfigArgs: ['--sandbox danger-full-access --config approval_policy="on-request"'],
-        spawnCliOverride: async function* (options) {
-          captured = options;
-          yield { type: 'thread.started', thread_id: 'thread-codex-read-only' };
-          yield { type: 'turn.completed' };
-        },
-      }),
-    );
+  for (const inGitRepository of [false, true]) {
+    for (const resume of [false, true]) {
+      it(`Codex read-only ${resume ? 'resume' : 'exec'} supports ${inGitRepository ? 'Git' : 'non-Git'} workspaces without granting capabilities`, async (t) => {
+        const workingDirectory = mkdtempSync(join(tmpdir(), 'codex-read-only-'));
+        t.after(() => rmSync(workingDirectory, { recursive: true, force: true }));
+        if (inGitRepository) mkdirSync(join(workingDirectory, '.git'));
+        const { CodexAgentService } = await import(
+          '../dist/domains/cats/services/agents/providers/CodexAgentService.js'
+        );
+        let captured;
+        const service = new CodexAgentService({
+          catId: 'codex-sol',
+          model: 'gpt-test',
+          carrierMode: 'exec_json',
+          l0CompilerFn: fakeL0Compiler,
+        });
+        await collect(
+          service.invoke('supplement check', {
+            workingDirectory,
+            ...(resume ? { sessionId: 'thread-codex-read-only' } : {}),
+            toolExecutionPolicy: POLICY,
+            callbackEnv: {
+              CAT_CAFE_READONLY: 'true',
+              CAT_CAFE_API_URL: 'http://127.0.0.1:3004',
+              CAT_CAFE_INVOCATION_ID: 'inv-read-only',
+              CAT_CAFE_CALLBACK_TOKEN: 'tok-read-only',
+              CAT_CAFE_CAT_ID: 'codex-sol',
+            },
+            accountEnv: { CAT_CAFE_READONLY: 'false' },
+            cliConfigArgs: ['--sandbox danger-full-access --config approval_policy="on-request"'],
+            spawnCliOverride: async function* (options) {
+              captured = options;
+              yield { type: 'thread.started', thread_id: 'thread-codex-read-only' };
+              yield { type: 'turn.completed' };
+            },
+          }),
+        );
 
-    assert.equal(service.supportsToolExecutionPolicy(POLICY), true);
-    const args = captured.args;
-    assert.equal(args[args.indexOf('--sandbox') + 1], 'read-only');
-    assert.ok(args.includes('approval_policy="never"'));
-    assert.ok(args.includes('--ignore-user-config'));
-    assert.ok(args.includes('mcp_servers={}'));
-    assert.ok(args.includes('apps._default.enabled=false'));
-    assert.equal(args.includes('danger-full-access'), false);
-    assert.equal(
-      args.some((arg) => arg.startsWith('mcp_servers.cat-cafe')),
-      false,
-    );
-    assert.equal(captured.env.CAT_CAFE_READONLY, 'true');
-  });
+        assert.equal(service.supportsToolExecutionPolicy(POLICY), true);
+        const args = captured.args;
+        assert.equal(args.includes('--skip-git-repo-check'), !inGitRepository);
+        if (resume) {
+          assert.deepEqual(args.slice(0, 3), ['exec', 'resume', 'thread-codex-read-only']);
+          assert.ok(args.includes('sandbox_mode="read-only"'));
+          assert.equal(args.includes('--sandbox'), false);
+        } else {
+          assert.equal(args[0], 'exec');
+          assert.equal(args[args.indexOf('--sandbox') + 1], 'read-only');
+        }
+        assert.equal(args.includes('--add-dir'), false);
+        assert.ok(args.includes('approval_policy="never"'));
+        assert.equal(args.includes('approval_policy="on-request"'), false);
+        assert.ok(args.includes('--ignore-user-config'));
+        assert.ok(args.includes('mcp_servers={}'));
+        assert.ok(args.includes('apps._default.enabled=false'));
+        assert.equal(args.includes('danger-full-access'), false);
+        assert.equal(
+          args.some((arg) => arg.startsWith('mcp_servers.cat-cafe')),
+          false,
+        );
+        assert.equal(captured.env.CAT_CAFE_READONLY, 'true');
+      });
+    }
+  }
 
   it('OpenCode selects a pure read-only agent whose inline policy overrides project grants', async () => {
     const { OpenCodeAgentService } = await import(

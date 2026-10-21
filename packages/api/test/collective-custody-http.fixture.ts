@@ -2,14 +2,17 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { setTimeout } from 'node:timers/promises';
-import { CollectiveConnector } from '../../collective-connector/src/index.js';
-import { CollectiveServiceStore, startCollectiveServer } from '../../collective-service/src/index.js';
 import { ArtifactReviewStore } from '../src/domains/collaborative-content/artifact-review/store.js';
 import { CollectiveMarkdownOwner } from '../src/domains/collaborative-content/collective-artifact/markdown-owner.js';
 import { WorkspaceContentReviewStore } from '../src/domains/collaborative-content/workspace-review/store.js';
 import { ProjectContentOwnerService } from '../src/domains/video-studio/content-owner/service.js';
 import { collectiveArtifactOwnerFixture } from './collective-artifact-owner.fixture.js';
 import { emptyCustodyOwner } from './collective-custody-transfer.fixture.js';
+import {
+  CollectiveConnector,
+  CollectiveServiceStore,
+  startCollectiveServer,
+} from './helpers/f202-collective-installed-business.js';
 
 export async function custodyHttpFixture(
   t: { after(fn: () => Promise<unknown>): void },

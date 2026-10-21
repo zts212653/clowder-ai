@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { beforeEach, describe, it } from 'node:test';
 import Fastify from 'fastify';
 import { canonicalTestMessageInput } from '../helpers/message-from-fixtures.js';
-import { proposedReviewAction } from './helpers.js';
+import { proposedTaskAction } from './helpers.js';
 
 function createSucceedingIngress() {
   return {
@@ -87,6 +87,7 @@ describe('P1-1/P1-4: F193 dispatch proposal ingress failure', () => {
 
     const app = Fastify();
     await app.register(callbacksRoutes, {
+      actionSuccessorAdmissionService: { async preflightStructuredTransferStanding() {} },
       registry,
       messageStore,
       threadStore,
@@ -116,7 +117,7 @@ describe('P1-1/P1-4: F193 dispatch proposal ingress failure', () => {
     content: '@sonnet\nPlease fix the bug',
     targetCats: ['sonnet'],
     effectClass: 'assign_work',
-    proposedAction: proposedReviewAction(),
+    proposedAction: proposedTaskAction(),
     clientMessageId,
   });
 
@@ -202,6 +203,7 @@ describe('P1-1/P1-4: F193 dispatch proposal ingress failure', () => {
     const auth = await registry.create('user-1', 'opus', source.id);
     const app = Fastify();
     await app.register(callbacksRoutes, {
+      actionSuccessorAdmissionService: { async preflightStructuredTransferStanding() {} },
       registry,
       messageStore,
       threadStore,
@@ -227,7 +229,7 @@ describe('P1-1/P1-4: F193 dispatch proposal ingress failure', () => {
       content: '@sonnet\nPlease fix the original bug',
       targetCats: ['sonnet'],
       effectClass: 'assign_work',
-      proposedAction: proposedReviewAction(),
+      proposedAction: proposedTaskAction(),
       clientMessageId: 'dispatch-with-ingress-a',
     };
     const first = await app.inject({
@@ -268,7 +270,7 @@ describe('P1-1/P1-4: F193 dispatch proposal ingress failure', () => {
         content: '@sonnet\nPlease fix the updated bug',
         targetCats: ['sonnet'],
         effectClass: 'assign_work',
-        proposedAction: proposedReviewAction(),
+        proposedAction: proposedTaskAction(),
         clientMessageId: 'dispatch-no-ingress-b',
       };
       const res = await brokenApp.inject({

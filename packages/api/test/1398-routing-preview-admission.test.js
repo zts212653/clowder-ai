@@ -328,3 +328,97 @@ for (const scenario of cases) {
     assert.equal(f.queue.list(f.thread.id, 'owner').length, 1);
   });
 }
+
+for (const scenario of [
+  ...cases,
+  {
+    name: 'unrecognized mention',
+    content: '@missing-member continue',
+    arrange: (f) => f.reply('codex'),
+    expected: ['codex'],
+  },
+  {
+    name: 'removed member mention',
+    content: '@removed-member continue',
+    arrange: (f) => f.reply('codex'),
+    expected: ['codex'],
+  },
+]) {
+  test(`plugin conversation uses the actual user queue routing: ${scenario.name}`, async (t) => {
+    const { createMessagingDomain } = await import('../dist/domains/messaging/index.js');
+    const { createPluginMessagingHost } = await import('../dist/domains/plugin/host-surface/plugin-messaging-host.js');
+    const { createPluginConversationDelivery } = await import(
+      '../dist/domains/plugin/host-surface/plugin-conversation-delivery.js'
+    );
+    const f = await fixture(t);
+    scenario.arrange(f);
+    const content = scenario.content ?? 'Continue the conversation';
+    const expected = await f.router.resolveSendTargets([], f.thread.id, content);
+    const messaging = createMessagingDomain({
+      messageStore: f.messages,
+      invokeTrigger: createPluginConversationDelivery({ messageStore: f.messages, queue: f.queue, router: f.router }),
+    });
+    const host = createPluginMessagingHost({
+      pluginId: 'dev.fixture.notification',
+      pluginInstanceId: 'plugin-notification',
+      ownerUserId: 'owner',
+      effectiveGrants: ['messaging.send'],
+      threadStore: f.threads,
+      messageStore: f.messages,
+      messaging,
+      manifest: {
+        pluginId: 'dev.fixture.notification',
+        contributions: [{ type: 'identity', id: 'notification', displayName: 'Notification' }],
+        features: [
+          {
+            id: 'notification',
+            contributions: [{ type: 'identity', id: 'notification' }],
+            capabilities: ['messaging.send'],
+          },
+        ],
+      },
+    });
+    const input = {
+      threadId: f.thread.id,
+      idempotencyKey: randomUUID(),
+      wake: 'auto',
+      payload: {
+        provenance: { epistemicStatus: 'observation' },
+        elements: [{ elementId: 'text', kind: 'text', payload: { text: content } }],
+      },
+    };
+    const receipt = await host.send(input);
+    assert.deepEqual(await host.send(input), receipt);
+    assert.equal(f.messages.getById(receipt.messageId).content, content);
+    const entries = f.queue.list(f.thread.id, 'owner');
+    assert.equal(entries.length, 1);
+    assert.deepEqual(entries[0].targets, expected);
+    assert.deepEqual(entries[0].targets, scenario.expected);
+    assert.equal(entries[0].kind, 'conversation_input');
+    // Exercise the real queue drain; substitute only the model invocation boundary.
+    const delivered = Promise.withResolvers();
+    f.router.routeExecution = async function* (userId, body, threadId, _unused, targets, _history, options) {
+      delivered.resolve({ body, targets });
+      await options.onLifecycleInvocationStarted({
+        userId,
+        threadId,
+        catId: targets[0],
+        invocationId: randomUUID(),
+        parentInvocationId: options.parentInvocationId,
+        startedAt: Date.now(),
+      });
+      yield { type: 'done', catId: targets[0], isFinal: true, timestamp: Date.now() };
+    };
+    const processor = new QueueProcessor({
+      queue: f.queue,
+      invocationTracker: new InvocationTracker(),
+      invocationRecordStore: new InvocationRecordStore(),
+      messageStore: f.messages,
+      router: f.router,
+      socketManager: { emitToUser() {}, broadcastAgentMessage() {}, broadcastToRoom() {} },
+      log: { info() {}, warn() {}, error() {} },
+    });
+    assert.equal((await processor.processNext(f.thread.id, 'owner')).started, true);
+    assert.deepEqual(await delivered.promise, { body: content, targets: scenario.expected });
+  });
+}

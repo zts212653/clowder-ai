@@ -2,6 +2,7 @@
 
 import type { Achievement, CvoLevel, GameStats, SillyCatEntry } from '@cat-cafe/shared';
 import { useCatNameResolver } from '@/hooks/useCatNameResolver';
+import { useCoCreatorDisplay } from '@/hooks/useCoCreatorConfig';
 import { CatAvatar } from './CatAvatar';
 import { CafeIcon } from './rich/CafeIcons';
 
@@ -112,6 +113,7 @@ export function AchievementWall({ achievements }: { achievements: Achievement[] 
 
 /** Phase C: operator level card */
 export function CvoLevelCard({ level }: { level: CvoLevel }) {
+  const owner = useCoCreatorDisplay();
   const pct = Math.round(level.progress * 100);
   return (
     <div className="flex flex-col gap-3">
@@ -134,7 +136,7 @@ export function CvoLevelCard({ level }: { level: CvoLevel }) {
       </div>
       {level.nextTitle && (
         <span className="text-label" style={{ color: 'var(--cafe-text-muted)' }}>
-          距离「{level.nextTitle}」还需 {level.needed} 个 operator 成就
+          距离「{level.nextTitle}」还需 {level.needed} 个 {owner.role} 成就
         </span>
       )}
     </div>

@@ -53,6 +53,7 @@ export function parseActionSuccessorLease(raw: string | null): ActionSuccessorLe
   );
   const base = {
     ...lease,
+
     claimOrigin: lease.claimOrigin ?? 'structured_transfer',
     holderThreadId: lease.holderThreadId ?? 'legacy:unknown',
     issuerStandingEvidenceRef: lease.issuerStandingEvidenceRef ?? lease.evidenceRefs[0] ?? 'legacy:unknown',

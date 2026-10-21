@@ -7,13 +7,13 @@ import {
   HANDSHAKE_REJECTED_CODE,
   INTERNAL_ERROR_CODE,
   INVALID_PARAMS_CODE,
-  type M0CDeliverInput,
-  type M0CDeliverResult,
+  isPluginDeliveryInput,
   MESSAGING_ROW_METHODS,
   PARSE_ERROR_CODE,
+  type PluginDeliveryInput,
+  type PluginDeliveryReceipt,
   SNAPSHOT_UNAVAILABLE_CODE,
   SNAPSHOT_UNAVAILABLE_MESSAGE,
-  validateMessagingRowInput,
   type WireMethodName,
 } from '@clowder-ai/plugin-contract';
 import {
@@ -41,7 +41,7 @@ export interface ExternalStdioBrokerTransportOptions {
 
 export interface ExternalStdioBrokerTransport {
   ping(): Promise<void>;
-  call(method: 'host.messaging.deliver', input: M0CDeliverInput): Promise<M0CDeliverResult>;
+  call(method: 'host.messaging.deliver', input: PluginDeliveryInput): Promise<PluginDeliveryReceipt>;
   close(): void;
 }
 
@@ -337,11 +337,10 @@ export function createExternalStdioBrokerTransport(
   return {
     ping,
     call: (method, input) => {
-      const validation = validateMessagingRowInput(method, input);
-      if (!validation.valid) {
+      if (!isPluginDeliveryInput(input)) {
         return Promise.reject(new TypeError(`${method} input failed the published contract`));
       }
-      return sendHostRequest<M0CDeliverResult>(method, validation.value as unknown as JsonObject);
+      return sendHostRequest<PluginDeliveryReceipt>(method, input as unknown as JsonObject);
     },
     close: () => {
       closing = true;

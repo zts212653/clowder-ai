@@ -20,7 +20,6 @@ export type ApprovalProducerId =
   | 'F260'
   | 'F266'
   | 'F276'
-  | 'F292'
   | 'F306'
   | 'F321';
 
@@ -78,7 +77,7 @@ export type ApprovalNavigation =
 export type ApprovalItemStatus = 'pending' | 'stale';
 
 /** Canonical renderer affordance. Legacy recovery modes stop at the API registry boundary. */
-export type ApprovalDecisionMode = 'approve-reject' | 'claim-select' | 'meeting-intake';
+export type ApprovalDecisionMode = 'approve-reject' | 'claim-select';
 export type LegacyApprovalDecisionMode = ApprovalDecisionMode | 'resume-only';
 
 /** Unified DTO that all producer adapters return. */

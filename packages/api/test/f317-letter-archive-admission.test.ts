@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { companionCommandValidator } from '../src/domains/plugin/desktop-window-runtime/admission.js';
+import {
+  companionCommandValidator,
+  desktopWindowContribution,
+} from '../src/domains/plugin/desktop-window-runtime/admission.js';
 import {
   validateHostCompanionCommand,
   validateHostCompanionReply,
@@ -51,7 +54,7 @@ test('letter commands and replies use beta.28 while old archives keep strict v1 
   }
 });
 
-test('alpha.25 bridge1.5 retains the single builtin window boundary and old package bridge pair', () => {
+test('current schema admits bridge1.5 structurally while the runtime keeps a single builtin window', () => {
   const base = desktopWindowManifest(undefined, '1.3.0');
   const letter = {
     ...base,
@@ -62,12 +65,18 @@ test('alpha.25 bridge1.5 retains the single builtin window boundary and old pack
   const accepted = validateHostPluginManifest(letter);
   assert.equal(accepted.valid, true);
   if (accepted.valid) assert.deepEqual(accepted.manifest, letter);
-  for (const bad of [
+  // Current Contract supports these declarations generally. Exact archive/bridge
+  // authority is checked by resolveCompanionArchiveContract, covered above.
+  for (const structural of [
     { ...letter, pluginId: 'foreign' },
     { ...letter, version: '0.1.0-alpha.24' },
     { ...letter, contributions: letter.contributions?.map((c) => ({ ...c, bridgeVersion: '1.4.0' })) },
+  ])
+    assert.equal(validateHostPluginManifest(structural).valid, true);
+  assert.ok(desktopWindowContribution(letter));
+  for (const bad of [
     { ...letter, contributions: [...(letter.contributions ?? []), { ...letter.contributions?.[0], id: 'second' }] },
     { ...letter, runtime: { transport: 'stdio', entrypoint: 'main.js' } },
   ])
-    assert.equal(validateHostPluginManifest(bad).valid, false);
+    assert.equal(desktopWindowContribution(bad as typeof letter), undefined);
 });

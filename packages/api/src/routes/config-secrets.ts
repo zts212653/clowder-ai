@@ -1,19 +1,15 @@
 /**
- * Config Secrets Route — F136 Phase 2
+ * Config Secrets Route — Host configuration
  *
- * POST /api/config/secrets — write connector tokens via Hub config wizard.
+ * POST /api/config/secrets — write Host web-push credentials.
  * Allowlist-gated, loopback-guarded, audit-logged (keys only, never values).
  */
 
 import { resolve } from 'node:path';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { applyConnectorSecretUpdates } from '../config/connector-secret-updater.js';
-import {
-  requireConnectorWriteOwner,
-  resolveConnectorSessionUserId,
-  validateConnectorSecretUpdate,
-} from '../config/connector-secret-write-guards.js';
+import { applyHostSecretUpdates } from '../config/host-secret-updater.js';
+import { requireOwnerWrite, resolveSessionUserId, validateHostSecretUpdate } from '../config/owner-write-guards.js';
 import { AuditEventTypes, getEventAuditLog } from '../domains/cats/services/orchestration/EventAuditLog.js';
 import { resolveActiveProjectRoot } from '../utils/active-project-root.js';
 import { isDirectLoopbackRequest } from '../utils/loopback-request.js';
@@ -38,7 +34,7 @@ interface ConfigSecretsRoutesOptions {
 }
 
 function validateSecretUpdate(update: { name: string; value: string | null }): string | null {
-  return validateConnectorSecretUpdate(update);
+  return validateHostSecretUpdate(update);
 }
 
 export async function configSecretsRoutes(app: FastifyInstance, opts: ConfigSecretsRoutesOptions = {}): Promise<void> {
@@ -60,13 +56,13 @@ export async function configSecretsRoutes(app: FastifyInstance, opts: ConfigSecr
       return { error: 'Invalid request', details: parsed.error.issues };
     }
 
-    const operator = resolveConnectorSessionUserId(request);
+    const operator = resolveSessionUserId(request);
     if (!operator) {
       reply.status(401);
       return { error: 'Identity required (session cookie)' };
     }
 
-    const ownerError = requireConnectorWriteOwner(operator);
+    const ownerError = requireOwnerWrite(operator);
     if (ownerError) {
       reply.status(ownerError.status);
       return { error: ownerError.error };
@@ -83,7 +79,7 @@ export async function configSecretsRoutes(app: FastifyInstance, opts: ConfigSecr
       updates.set(update.name, update.value);
     }
 
-    await applyConnectorSecretUpdates(
+    await applyHostSecretUpdates(
       [...updates.entries()].map(([name, value]) => ({ name, value })),
       { envFilePath },
     );

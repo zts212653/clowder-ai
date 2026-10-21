@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { access, chmod, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { access, chmod, mkdir, mkdtemp, readdir, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
@@ -11,7 +11,6 @@ import {
   MemoryPluginInventoryStore,
   packageDirectoryName,
 } from '../dist/domains/plugin/index.js';
-import { installPlugin, resolvePluginsDir } from '../dist/infrastructure/connectors/plugins/plugin-installer.js';
 import { manifest } from './plugin-official-package-installer.fixture.js';
 
 // Build fixture bytes without tar so fixture creation cannot mask a consumer's
@@ -64,7 +63,7 @@ test('local directory admission packages and verifies real bytes with the select
     const admission = new LocalPluginPackageAdmission({
       inventory: new HostInventoryControlPlane(store),
       packagesRoot,
-      grantPolicy: () => ['events.publish'],
+      grantPolicy: () => ['messaging.send'],
     });
 
     const result = await admission.install({ kind: 'local-directory', path: source });
@@ -73,7 +72,7 @@ test('local directory admission packages and verifies real bytes with the select
     const snapshot = await store.snapshot();
     assert.equal(snapshot.instances.length, 1);
     assert.equal(snapshot.instances[0].runtimeState, 'stopped');
-    assert.deepEqual(snapshot.grants[0].effectiveGrants, ['events.publish']);
+    assert.deepEqual(snapshot.grants[0].effectiveGrants, ['messaging.send']);
     const bytes = await readFile(join(packagesRoot, packageDirectoryName(result.packageDigest), 'package.tgz'));
     assert.equal(result.packageDigest, `sha512-${createHash('sha512').update(bytes).digest('base64')}`);
     assert.equal(await readFile(join(source, 'dist', 'entrypoint.js'), 'utf8'), entrypoint);
@@ -84,42 +83,46 @@ test('local directory admission packages and verifies real bytes with the select
   });
 });
 
-function connectorBytes(id, entrypoint = 'throw new Error("installer must not execute this");\n') {
+function pluginBytes(version = '0.1.0-alpha.1') {
   return archive([
-    [
-      `${id}/connector.yaml`,
-      `id: ${id}\nname: Portable Connector\ndocs_url: https://example.com\nconfig: []\nsteps:\n  - text: Step 1\n  - text: Step 2\n  - text: Step 3\n`,
-    ],
-    [`${id}/index.js`, entrypoint],
+    ['package/manifest.json', JSON.stringify(manifest({ version, signals: undefined }))],
+    ['package/dist/entrypoint.js', 'throw new Error("admission must not execute this");\n'],
   ]);
 }
 
-test('connector installation and update accept an absolute archive path without changing its bytes or config', async () => {
+test('archive admission preserves source bytes and rejects duplicate installation without changing configuration', async () => {
   await privateRoot(async (root) => {
     const sourceArchive = join(root, 'source package ; $literal.tgz');
-    const bytes = connectorBytes('portable-test');
-    await writeFile(sourceArchive, bytes);
-    const projectRoot = join(root, 'project root');
-    const first = await installPlugin(projectRoot, sourceArchive, new Set());
-    assert.equal(first.action, 'installed', JSON.stringify(first));
-    assert.equal(first.id, 'portable-test');
-    const configPath = join(projectRoot, '.cat-cafe', 'im-connector-config', 'portable-test.json');
-    await mkdir(join(configPath, '..'), { recursive: true });
-    await writeFile(configPath, '{"owner":"preserve"}');
-
-    const second = await installPlugin(projectRoot, sourceArchive, new Set());
-    assert.equal(second.action, 'updated', JSON.stringify(second));
-    assert.deepEqual(await readFile(sourceArchive), bytes);
-    assert.equal(await readFile(configPath, 'utf8'), '{"owner":"preserve"}');
-    await access(join(resolvePluginsDir(projectRoot), 'portable-test', 'index.js'));
-    assert.equal(
-      (await readdir(resolvePluginsDir(projectRoot))).some((name) => name.startsWith('.tmp-install-')),
-      false,
+    const store = new MemoryPluginInventoryStore();
+    const packagesRoot = join(root, 'Host packages');
+    const admission = new LocalPluginPackageAdmission({
+      inventory: new HostInventoryControlPlane(store),
+      packagesRoot,
+      grantPolicy: () => ['messaging.send'],
+    });
+    await writeFile(sourceArchive, pluginBytes());
+    const first = await admission.install({ kind: 'local-archive', path: sourceArchive });
+    await store.transaction((tx) =>
+      tx.instances.put({
+        ...tx.instances.get(first.pluginInstanceId),
+        configReadiness: 'ready',
+      }),
     );
+    const before = await store.snapshot();
+    const bytes = await readFile(sourceArchive);
+    await assert.rejects(
+      admission.install({ kind: 'local-archive', path: sourceArchive }),
+      /inventory admission failed/,
+    );
+    assert.deepEqual(await readFile(sourceArchive), bytes);
+    const snapshot = await store.snapshot();
+    assert.equal(snapshot.instances.length, 1);
+    assert.deepEqual(snapshot.instances, before.instances);
+    await access(join(packagesRoot, packageDirectoryName(first.packageDigest), 'package.tgz'));
   });
 });
 
-test('connector tar portability preserves archive-layout rejection and cleanup', async () => {
+test('archive portability preserves layout rejection without publishing inventory', async () => {
   await privateRoot(async (root) => {
     const sourceArchive = join(root, 'multiple roots.tgz');
     await writeFile(
@@ -129,16 +132,19 @@ test('connector tar portability preserves archive-layout rejection and cleanup',
         ['second/index.js', 'two'],
       ]),
     );
-    const projectRoot = join(root, 'project');
-    const result = await installPlugin(projectRoot, sourceArchive, new Set());
-    assert.equal(result.code, 'INVALID_ARCHIVE', JSON.stringify(result));
-    assert.match(result.message, /exactly one top-level directory/);
-    assert.deepEqual(await readdir(resolvePluginsDir(projectRoot)), []);
+    const store = new MemoryPluginInventoryStore();
+    const admission = new LocalPluginPackageAdmission({
+      inventory: new HostInventoryControlPlane(store),
+      packagesRoot: join(root, 'packages'),
+      grantPolicy: () => [],
+    });
+    await assert.rejects(admission.install({ kind: 'local-archive', path: sourceArchive }), /archive|package/i);
+    assert.equal((await store.snapshot()).instances.length, 0);
   });
 });
 
 test(
-  'both consumers keep tar archive operands local to a private cwd',
+  'directory and archive admission keep tar operands local to a private cwd',
   { skip: process.platform === 'win32' },
   async () => {
     await privateRoot(async (root) => {
@@ -166,19 +172,25 @@ test(
       const admission = new LocalPluginPackageAdmission({
         inventory: new HostInventoryControlPlane(new MemoryPluginInventoryStore()),
         packagesRoot: join(root, 'packages'),
-        grantPolicy: () => ['events.publish'],
+        grantPolicy: () => ['messaging.send'],
         tarBin: probePath,
       });
       const admitted = await admission.install({ kind: 'local-directory', path: source });
       assert.equal(admitted.pluginId, 'official.test-source');
-      const sourceArchive = join(root, 'connector.tgz');
-      await writeFile(sourceArchive, connectorBytes('portable-test'));
-      const installed = await installPlugin(join(root, 'project'), sourceArchive, new Set(), { tarBin: probePath });
-      assert.equal(installed.action, 'installed', JSON.stringify(installed));
+      const sourceArchive = join(root, 'update.tgz');
+      await writeFile(sourceArchive, pluginBytes('0.1.0-alpha.2'));
+      const archiveAdmission = new LocalPluginPackageAdmission({
+        inventory: new HostInventoryControlPlane(new MemoryPluginInventoryStore()),
+        packagesRoot: join(root, 'archive packages'),
+        grantPolicy: () => ['messaging.send'],
+        tarBin: probePath,
+      });
+      await archiveAdmission.install({ kind: 'local-archive', path: sourceArchive });
       const calls = (await readFile(recordedPath, 'utf8')).trim().split('\n').map(JSON.parse);
-      assert.equal(calls.length, 5, 'local packing, three verified staging operations and connector extraction');
+      assert.equal(calls.length, 7, 'directory packing plus three verified staging calls per admission');
       assert.match(calls[0].cwd, /\.local-directory-/);
-      assert.match(calls[4].cwd, /\.tmp-install-/);
+      const physicalRoot = await realpath(root);
+      assert.ok(calls.every((call) => call.cwd.startsWith(physicalRoot)));
     });
   },
 );

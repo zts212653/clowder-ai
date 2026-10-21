@@ -76,7 +76,7 @@ export const DEFAULT_MOUNT_RULES: MountRules = {
     claude: { enabled: true, path: '.claude/skills' },
     codex: { enabled: true, path: '.codex/skills' },
     gemini: { enabled: true, path: '.gemini/skills' },
-    kimi: { enabled: true, path: '.kimi/skills' },
+    kimi: { enabled: true, path: '.kimi-code/skills' },
   },
   customPaths: [],
 };

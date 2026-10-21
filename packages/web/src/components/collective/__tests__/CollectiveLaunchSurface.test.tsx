@@ -101,6 +101,9 @@ describe('CollectiveLaunchSurface', () => {
     await act(async () => root.render(<CollectiveLaunchSurface initialServiceUrl="http://localhost:5201" />));
     await flush();
 
+    expect(
+      mockApiFetch.mock.calls.some(([url]) => url === '/api/plugins/official.collective-connector/connections'),
+    ).toBe(true);
     expect(container.textContent).toContain('先安装并启用 Collective Connector');
     expect(container.querySelector('iframe')).toBeNull();
     expect(container.querySelector('a[href="/settings?s=plugins"]')).not.toBeNull();
@@ -108,7 +111,7 @@ describe('CollectiveLaunchSurface', () => {
 
   it('creates the independent local Service without a terminal and opens its one-time bootstrap in the canonical Client', async () => {
     mockApiFetch.mockImplementation(async (url, init) => {
-      if (url === '/api/plugins/collective-connector/service/provision' && init?.method === 'POST') {
+      if (url === '/api/plugins/official.collective-connector/service/provision' && init?.method === 'POST') {
         return response({
           service: {
             state: 'setup_required',
@@ -147,7 +150,7 @@ describe('CollectiveLaunchSurface', () => {
       await Promise.resolve();
     });
 
-    expect(mockApiFetch).toHaveBeenCalledWith('/api/plugins/collective-connector/service/provision', {
+    expect(mockApiFetch).toHaveBeenCalledWith('/api/plugins/official.collective-connector/service/provision', {
       method: 'POST',
     });
     expect(container.querySelector('iframe')?.src).toBe(
@@ -158,7 +161,7 @@ describe('CollectiveLaunchSurface', () => {
   it('embeds the canonical Service client and accepts pairing only from that exact frame and origin', async () => {
     let paired = false;
     mockApiFetch.mockImplementation(async (url, init) => {
-      if (url === '/api/plugins/collective-connector/entry-roster') {
+      if (url === '/api/plugins/official.collective-connector/entry-roster') {
         return response({
           fingerprint: 'a'.repeat(64),
           cats: [
@@ -167,10 +170,10 @@ describe('CollectiveLaunchSurface', () => {
           ],
         });
       }
-      if (url === '/api/plugins/collective-connector' && !paired) {
+      if (url === '/api/plugins/official.collective-connector/connections' && !paired) {
         return response({ runtimeStatus: 'active', connections: [] });
       }
-      if (url === '/api/plugins/collective-connector/pair' && init?.method === 'POST') {
+      if (url === '/api/plugins/official.collective-connector/pair' && init?.method === 'POST') {
         paired = true;
         return response({ connectionId: 'con_12345678' });
       }
@@ -230,7 +233,9 @@ describe('CollectiveLaunchSurface', () => {
       );
       await Promise.resolve();
     });
-    expect(mockApiFetch.mock.calls.some(([url]) => url === '/api/plugins/collective-connector/pair')).toBe(false);
+    expect(mockApiFetch.mock.calls.some(([url]) => url === '/api/plugins/official.collective-connector/pair')).toBe(
+      false,
+    );
 
     await act(async () => {
       window.dispatchEvent(
@@ -244,7 +249,9 @@ describe('CollectiveLaunchSurface', () => {
       await Promise.resolve();
     });
 
-    expect(mockApiFetch.mock.calls.some(([url]) => url === '/api/plugins/collective-connector/pair')).toBe(false);
+    expect(mockApiFetch.mock.calls.some(([url]) => url === '/api/plugins/official.collective-connector/pair')).toBe(
+      false,
+    );
     expect(container.textContent).toContain('缅因猫（Sol）');
     expect(container.textContent).toContain('一起写代码');
     const solChoice = container.querySelector<HTMLInputElement>('input[aria-label="带入 缅因猫（Sol）"]');
@@ -259,7 +266,7 @@ describe('CollectiveLaunchSurface', () => {
       await Promise.resolve();
     });
 
-    const pairCall = mockApiFetch.mock.calls.find(([url]) => url === '/api/plugins/collective-connector/pair');
+    const pairCall = mockApiFetch.mock.calls.find(([url]) => url === '/api/plugins/official.collective-connector/pair');
     expect(pairCall?.[1]).toMatchObject({ method: 'POST' });
     expect(JSON.parse(String(pairCall?.[1]?.body))).toEqual({
       serviceUrl: 'http://localhost:5201',
@@ -285,12 +292,14 @@ describe('CollectiveLaunchSurface', () => {
       Array.from(container.querySelectorAll('button')).find((button) => button.textContent?.includes('确认带入'))
         ?.disabled,
     ).toBe(true);
-    expect(mockApiFetch.mock.calls.filter(([url]) => url === '/api/plugins/collective-connector/pair')).toHaveLength(1);
+    expect(
+      mockApiFetch.mock.calls.filter(([url]) => url === '/api/plugins/official.collective-connector/pair'),
+    ).toHaveLength(1);
   });
 
   it('returns to the bring-in review when several old endpoint records were revoked', async () => {
     mockApiFetch.mockImplementation(async (url) =>
-      url === '/api/plugins/collective-connector/entry-roster'
+      url === '/api/plugins/official.collective-connector/entry-roster'
         ? response({ fingerprint: 'a'.repeat(64), cats: [{ id: 'codex-sol', displayName: 'Sol', eligible: true }] })
         : response({
             runtimeStatus: 'active',
@@ -329,7 +338,7 @@ describe('CollectiveLaunchSurface', () => {
   it('recovers the entry roster after a transient read failure without pairing early', async () => {
     let reads = 0;
     mockApiFetch.mockImplementation(async (url) => {
-      if (url === '/api/plugins/collective-connector/entry-roster') {
+      if (url === '/api/plugins/official.collective-connector/entry-roster') {
         reads += 1;
         return reads === 1
           ? response({ error: 'unavailable' }, 503)
@@ -360,7 +369,9 @@ describe('CollectiveLaunchSurface', () => {
     });
     expect(container.textContent).toContain('Sol');
     expect(reads).toBe(2);
-    expect(mockApiFetch.mock.calls.some(([url]) => url === '/api/plugins/collective-connector/pair')).toBe(false);
+    expect(mockApiFetch.mock.calls.some(([url]) => url === '/api/plugins/official.collective-connector/pair')).toBe(
+      false,
+    );
   });
 
   it('enables re-pair only after the exact iframe reports a restored steward session', async () => {

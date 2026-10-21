@@ -8,7 +8,10 @@ import {
   waitContinuationCarriersMatch,
 } from './wait-continuation-carrier.js';
 
-type WakeQueueEntry = Pick<QueueEntry, 'execution' | 'from' | 'payload' | 'sourceCategory' | 'targets' | 'threadId'>;
+type WakeQueueEntry = Pick<
+  QueueEntry,
+  'execution' | 'from' | 'kind' | 'payload' | 'sourceCategory' | 'targets' | 'threadId'
+>;
 
 function exactTargetCatId(entry: WakeQueueEntry): string | undefined {
   return entry.targets.length === 1 ? entry.targets[0] : undefined;
@@ -180,6 +183,9 @@ export async function resolveQueueTurnCustodyWake(
     };
   }
   if (entry.from.kind === 'user') return { kind: 'unstructured', source: 'user_chat' };
+  if (entry.from.kind === 'plugin' && entry.kind === 'conversation_input' && !entry.sourceCategory) {
+    return { kind: 'unstructured', source: 'user_chat' };
+  }
   if (entry.sourceCategory === 'scheduled') return resolveScheduledWake(entry, messageStore);
   if (entry.sourceCategory === 'freshness') return { kind: 'unstructured', source: 'protocol_decline' };
   if (entry.sourceCategory === 'a2a') return resolveA2AWake(entry, messageStore);
@@ -205,14 +211,7 @@ export function turnCustodyWakeSourceCategory(wake: TurnCustodyWakeProvenance): 
   if (wake.kind === 'non_obligation') return 'a2a';
   if (wake.kind === 'structured') {
     if (wake.protocol === 'hold') return 'scheduled';
-    if (
-      wake.protocol === 'dispatch' ||
-      wake.protocol === 'assign_work' ||
-      wake.protocol === 'coordination' ||
-      wake.protocol === 'callback'
-    ) {
-      return 'a2a';
-    }
+    if (wake.protocol === 'dispatch') return 'a2a';
     return 'unknown';
   }
   if (wake.source === 'user_chat') return 'user';

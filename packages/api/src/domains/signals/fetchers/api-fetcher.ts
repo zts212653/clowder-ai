@@ -17,6 +17,7 @@ type FetchLike = (url: string, options?: ApiFetchOptions) => Promise<JsonRespons
 type GitHubPatResolver = () => string | undefined;
 
 export interface ApiFetcherOptions {
+  /** Optional caller-owned credential resolver; the fetcher never reads process environment credentials. */
   readonly getGitHubPat?: GitHubPatResolver | undefined;
 }
 
@@ -127,11 +128,14 @@ function cleanToken(token: string | undefined): string | undefined {
   return trimmed && trimmed.length > 0 ? trimmed : undefined;
 }
 
-function resolveHeaders(source: SignalSource, getGitHubPat: GitHubPatResolver): Record<string, string> | undefined {
+function resolveHeaders(
+  source: SignalSource,
+  getGitHubPat: GitHubPatResolver | undefined,
+): Record<string, string> | undefined {
   const base = source.fetch.headers ?? {};
   if (!isGitHubApiUrl(source.url)) return source.fetch.headers;
 
-  const pat = cleanToken(getGitHubPat());
+  const pat = cleanToken(getGitHubPat?.());
   if (!pat) return source.fetch.headers;
 
   return { ...base, Authorization: `Bearer ${pat}` };
@@ -139,11 +143,11 @@ function resolveHeaders(source: SignalSource, getGitHubPat: GitHubPatResolver): 
 
 export class ApiFetcher implements Fetcher {
   private readonly fetchImpl: FetchLike;
-  private readonly getGitHubPat: GitHubPatResolver;
+  private readonly getGitHubPat: GitHubPatResolver | undefined;
 
   constructor(fetchImpl?: FetchLike, options: ApiFetcherOptions = {}) {
     this.fetchImpl = fetchImpl ?? (globalThis.fetch as unknown as FetchLike);
-    this.getGitHubPat = options.getGitHubPat ?? (() => process.env.GITHUB_MCP_PAT);
+    this.getGitHubPat = options.getGitHubPat;
   }
 
   canHandle(source: SignalSource): boolean {

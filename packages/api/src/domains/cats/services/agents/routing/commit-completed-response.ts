@@ -14,10 +14,7 @@ export function isCollectiveBoundResponse(
   source: StoredMessage | null,
 ): boolean {
   return (
-    scope === 'collective-work' ||
-    scope === 'collective-participation' ||
-    source?.source?.connector === 'collective' ||
-    Boolean(source?.extra?.collectiveWorkInvocationV1 || source?.extra?.collectiveWorkDelegationV1)
+    scope === 'collective-work' || scope === 'collective-participation' || source?.source?.connector === 'collective'
   );
 }
 

@@ -35,54 +35,54 @@ function gateKeepingThreadStore(threadId) {
 const noopMetric = { add() {} };
 
 describe('F167 PR-O3: gate-keeping guard policy patch', () => {
-  // ── register_pr_tracking: always blocked (regression) ─────────
+  // ── implementation_wait: always blocked (regression) ─────────
   test('PR tracking stays blocked in gate-keeping thread (regression)', async () => {
     const { checkGateKeepingGuard } = await importGuard();
     const result = await checkGateKeepingGuard({
       threadStore: gateKeepingThreadStore('t1'),
       threadId: 't1',
-      tool: 'register_pr_tracking',
+      tool: 'implementation_wait',
       metric: noopMetric,
     });
     assert.equal(result.outcome, 'blocked');
-    assert.equal(result.blockedResponse?.tool, 'register_pr_tracking');
+    assert.equal(result.blockedResponse?.tool, 'implementation_wait');
   });
 
-  // ── register_issue_tracking: keeper-owned → allowed ───────────
+  // ── intake_wait: keeper-owned → allowed ───────────
   test('keeper-owned issue tracking allowed in gate-keeping thread', async () => {
     const { checkGateKeepingGuard } = await importGuard();
     const result = await checkGateKeepingGuard({
       threadStore: gateKeepingThreadStore('t2'),
       threadId: 't2',
-      tool: 'register_issue_tracking',
+      tool: 'intake_wait',
       metric: noopMetric,
-      policyContext: { issueOwnership: 'keeper' },
+      policyContext: { subjectOwnership: 'keeper' },
     });
     assert.equal(result.outcome, 'allowed_by_policy');
     assert.equal(result.blockedResponse, undefined);
   });
 
-  // ── register_issue_tracking: distributed → blocked ────────────
+  // ── intake_wait: distributed → blocked ────────────
   test('distributed issue tracking blocked in gate-keeping thread', async () => {
     const { checkGateKeepingGuard } = await importGuard();
     const result = await checkGateKeepingGuard({
       threadStore: gateKeepingThreadStore('t3'),
       threadId: 't3',
-      tool: 'register_issue_tracking',
+      tool: 'intake_wait',
       metric: noopMetric,
-      policyContext: { issueOwnership: 'distributed' },
+      policyContext: { subjectOwnership: 'distributed' },
     });
     assert.equal(result.outcome, 'blocked');
-    assert.equal(result.blockedResponse?.tool, 'register_issue_tracking');
+    assert.equal(result.blockedResponse?.tool, 'intake_wait');
   });
 
-  // ── register_issue_tracking: no ownership hint → blocked (default safe) ──
+  // ── intake_wait: no ownership hint → blocked (default safe) ──
   test('issue tracking without ownership hint blocked in gate-keeping thread (default safe)', async () => {
     const { checkGateKeepingGuard } = await importGuard();
     const result = await checkGateKeepingGuard({
       threadStore: gateKeepingThreadStore('t4'),
       threadId: 't4',
-      tool: 'register_issue_tracking',
+      tool: 'intake_wait',
       metric: noopMetric,
       // no policyContext → default behavior = blocked
     });

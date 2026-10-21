@@ -21,6 +21,7 @@ import {
   startScrollProbeTrace,
   waitForScrollProbe,
 } from './f322-native-scroll-probe-state.mjs';
+import { verifySelectionDuringPeerGrowth } from './f322-selection-pending.journey.mjs';
 
 const sheetCases = [
   { name: 'retained-compact', overflow: false, offscreen: false },
@@ -299,6 +300,9 @@ export async function runActionOwnerNextJourney(browser, evidenceDir) {
       );
     await recordCase(browser, host, trace, results, out, 'author-translation', false, 1440, (owned) =>
       changeAuthorWithoutResize(owned, out),
+    );
+    await recordCase(browser, host, trace, results, out, 'selection-peer-growth', false, 1440, (owned) =>
+      verifySelectionDuringPeerGrowth(owned, out),
     );
   } finally {
     await host.close();

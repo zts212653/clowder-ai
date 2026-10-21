@@ -1,3 +1,4 @@
+import { getCoCreatorDisplay } from '../config/co-creator-display.js';
 /**
  * F167 Phase C1: Hold Ball Callback Routes
  * POST /api/callbacks/hold-ball — register ball hold + schedule wake-up via reminder template
@@ -327,9 +328,12 @@ const holdBallSchema = z
       return true;
     },
     {
-      message:
-        'waitSourceRef is required when using wakeAfterMs — declare what external condition ' +
-        'you are polling. If waiting for a human reply, use @co-creator instead of hold_ball.',
+      get message() {
+        return (
+          'waitSourceRef is required when using wakeAfterMs — declare what external condition ' +
+          `you are polling. If waiting for a human reply, use ${getCoCreatorDisplay().mention} instead of hold_ball.`
+        );
+      },
     },
   );
 
@@ -906,7 +910,7 @@ export function registerCallbackHoldBallRoutes(app: FastifyInstance, deps: HoldB
       return {
         error:
           `maxHoldsPerWindow (${MAX_HOLDS_PER_WINDOW} per ~1h window) reached. ` +
-          'You MUST pass the ball now: @ another cat or @co-creator.',
+          `You MUST pass the ball now: @ another cat or ${getCoCreatorDisplay().mention}.`,
         holdsInWindow: admission.count,
         maxHoldsPerWindow: MAX_HOLDS_PER_WINDOW,
         windowMs: HOLD_WINDOW_MS,

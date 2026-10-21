@@ -1,7 +1,7 @@
 import { isDeepStrictEqual } from 'node:util';
-import type { CollectiveArtifactOwnerPort } from '@cat-cafe/collective-connector';
 import type { PublishedMediaService } from '../../video-studio/content-owner/published-media-service.js';
 import { CollectiveMarkdownOwner } from './markdown-owner.js';
+import type { CollectiveArtifactOwnerPort } from './owner-port.js';
 import { CollectivePublishedMediaOwner } from './published-media-owner.js';
 import { mediaOwnerError } from './published-media-read.js';
 

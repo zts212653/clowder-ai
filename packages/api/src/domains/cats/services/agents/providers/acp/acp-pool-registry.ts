@@ -1,3 +1,5 @@
+import { saveSpan } from '../../../../../../utils/member-save-diagnostics.js';
+
 export interface ClosableAcpPool {
   closeAll(): Promise<void>;
 }
@@ -19,7 +21,7 @@ export async function closeStaleAcpPools<TPool extends ClosableAcpPool>(
     if (activeProfileIds.has(profileId)) continue;
 
     try {
-      await pool.closeAll();
+      await saveSpan('pool.acp.close', () => pool.closeAll(), { catId: profileId });
     } catch (err) {
       options.onCloseError?.(err, profileId, reason);
     } finally {

@@ -118,6 +118,27 @@ test('member PATCH persists, exposes and reconciles an explicit AGY Native profi
   }
 });
 
+test('member PATCH persists official ACP, returns it after refresh and preserves identity on explicit Native return', async () => {
+  const f = await fixture(profile);
+  const acpProfile = { ...profile, carrier: 'acp' };
+  const acp = { command: '/installed/agy_acp_server.par', startupArgs: [] };
+  try {
+    const response = await f.patch({ carrier: 'acp', acp, defaultModel: profile.model, agyProfile: acpProfile });
+    assert.equal(response.statusCode, 200, response.body);
+    assert.deepEqual(f.persisted().agyProfile, acpProfile);
+    const refreshed = await f.app.inject({ method: 'GET', url: '/api/cats' });
+    const cat = refreshed.json().cats.find((cat) => cat.id === 'gemini38');
+    assert.equal(cat.carrier, 'acp');
+    assert.deepEqual(cat.agyProfile, acpProfile);
+    assert.equal(cat.id, 'gemini38');
+    const returned = await f.patch({ carrier: 'cli', acp: null, defaultModel: profile.model, agyProfile: profile });
+    assert.equal(returned.statusCode, 200, returned.body);
+    assert.deepEqual(returned.json().cat.agyProfile, profile);
+  } finally {
+    await f.close();
+  }
+});
+
 test('Native profile mutation rejects unsafe or conflicting settings before persistence', async () => {
   const f = await fixture();
   try {

@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { EventEmitter } from 'node:events';
+import { saveSpan } from '../utils/member-save-diagnostics.js';
 
 // ── Types ──
 
@@ -44,9 +45,16 @@ class ConfigEventBus extends EventEmitter {
    */
   async emitChangeAsync(event: ConfigChangeEvent): Promise<void> {
     const promises: Promise<void>[] = [];
-    for (const listener of this.listeners(CONFIG_CHANGE)) {
+    for (const [index, listener] of this.listeners(CONFIG_CHANGE).entries()) {
       try {
-        const result = (listener as (e: ConfigChangeEvent) => void | Promise<void>)(event);
+        const result = saveSpan(
+          'config.listener',
+          () => (listener as (e: ConfigChangeEvent) => void | Promise<void>)(event),
+          {
+            listener: index,
+            changeSetId: event.changeSetId,
+          },
+        );
         if (result && typeof (result as Promise<void>).then === 'function') {
           promises.push(result as Promise<void>);
         }

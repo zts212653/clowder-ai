@@ -82,7 +82,7 @@ describe('F247 AC-B1c-1: GET /api/threads/:id/cloud-bindings (owner-only)', () =
       headers: AUTH_OWNER,
     });
     assert.equal(res.statusCode, 200);
-    assert.deepEqual(res.json(), { bindings: {} });
+    assert.deepEqual(res.json().bindings, {});
   });
 
   it('owner reads existing bindings', async () => {
@@ -97,7 +97,7 @@ describe('F247 AC-B1c-1: GET /api/threads/:id/cloud-bindings (owner-only)', () =
       headers: AUTH_OWNER,
     });
     assert.equal(res.statusCode, 200);
-    assert.deepEqual(res.json(), { bindings: { codex: 'https://chatgpt.com/c/abc' } });
+    assert.deepEqual(res.json().bindings, { codex: 'https://chatgpt.com/c/abc' });
   });
 
   it('non-owner gets 403', async () => {

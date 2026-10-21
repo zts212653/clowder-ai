@@ -61,9 +61,12 @@ function markMatches(states: State[], order: number[], content: string): Uint8Ar
  */
 export function literalTermCoverage(words: string[]): (content: string) => number {
   const unique = [...new Set(words.filter(Boolean))];
-  // A single pattern needs no automaton. Use the native linear substring scan
-  // for the common CJK-membership query rather than walking every UTF-16 unit.
-  if (unique.length === 1) return (content) => Number(content.includes(unique[0]));
+  // Native substring search avoids a JavaScript visit to every character for
+  // short natural queries. The fixed bound keeps work <= 4 native scans;
+  // larger queries retain the automaton rather than scaling scans with terms.
+  if (unique.length <= 4) {
+    return (content) => unique.reduce((count, word) => count + Number(content.includes(word)), 0);
+  }
   const { states, ends } = buildTrie(unique);
   const order = linkFailures(states);
   return (content) => {

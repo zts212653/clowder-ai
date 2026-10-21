@@ -84,10 +84,12 @@ function finishAuthError(errorCode: ReturnType<typeof parseHumanAuthErrorCode>, 
 }
 
 async function initializeHumanSession(context: AuthBootContext): Promise<void> {
-  const [meta, authProviders] = await Promise.all([
-    context.request<CollectiveMeta>('/api/meta'),
-    context.request<{ readonly providers: readonly HumanAuthProviderStatus[] }>('/api/auth/providers'),
-  ]);
+  const meta = await context.request<CollectiveMeta>('/api/meta');
+  if (context.isCancelled()) return;
+  const authProviders = await context.request<{ readonly providers: readonly HumanAuthProviderStatus[] }>(
+    '/api/auth/providers',
+  );
+  if (context.isCancelled()) return;
   context.setSnapshot((current) => ({ ...current, meta, providers: authProviders.providers }));
   if (finishProviderSetupCallback(context)) return;
   const callbackSearch = new URLSearchParams(location.search);
@@ -128,8 +130,10 @@ export function useHumanAuthSession(snapshot: ClientSnapshot, setSnapshot: Dispa
   const token = useRef<string | null>(null);
   const authWindow = useRef<Window | null>(null);
 
-  const request = useCallback(async <Result>(path: string, init?: RequestInit): Promise<Result> => {
-    const response = await fetch(path, {
+  // One browser-service request per instance; share the lane across effect replays and refreshes.
+  const requestTail = useRef<Promise<void>>(Promise.resolve());
+  const request = useCallback(<Result>(path: string, init?: RequestInit): Promise<Result> => {
+    const options: RequestInit = {
       ...init,
       credentials: 'same-origin',
       headers: {
@@ -137,15 +141,25 @@ export function useHumanAuthSession(snapshot: ClientSnapshot, setSnapshot: Dispa
         ...(token.current ? { authorization: `Bearer ${token.current}` } : {}),
         ...init?.headers,
       },
+    };
+    const result = requestTail.current.then(async () => {
+      options.signal?.throwIfAborted();
+      const response = await fetch(path, options);
+      const payload = (await response.json()) as Result & { error?: { message?: string } };
+      if (!response.ok) {
+        throw new CollectiveClientRequestError(
+          response.status,
+          payload.error?.message ?? `请求失败（${response.status}）`,
+        );
+      }
+      return payload;
     });
-    const payload = (await response.json()) as Result & { error?: { message?: string } };
-    if (!response.ok) {
-      throw new CollectiveClientRequestError(
-        response.status,
-        payload.error?.message ?? `请求失败（${response.status}）`,
-      );
-    }
-    return payload;
+    // Settle the lane after either outcome, without retrying or hiding this request's failure.
+    requestTail.current = result.then(
+      () => undefined,
+      () => undefined,
+    );
+    return result;
   }, []);
 
   const loadMe = useCallback(async () => {

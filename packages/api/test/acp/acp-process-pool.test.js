@@ -342,6 +342,26 @@ describe('AcpProcessPool', () => {
       resumeLease.release();
     });
 
+    test('strict session custody rejects re-acquire without stealing or cancelling the active owner', async () => {
+      const { AcpProcessPool } = await import(
+        '../../dist/domains/cats/services/agents/providers/acp/AcpProcessPool.js'
+      );
+      pool = new AcpProcessPool(
+        defaultPoolConfig,
+        { ...nonMultiplexedVariantConfig, rejectActiveSessionLease: true },
+        createMockClient,
+      );
+      const first = await pool.acquire(key1);
+      pool.rememberSession(key1, 'active-sess', first);
+      await assert.rejects(pool.acquire(key1, { sessionId: 'active-sess' }), /active.*lease|busy/i);
+      assert.equal(pool.getMetrics().activeLeaseCount, 1);
+      assert.equal(first.client.isAlive, true);
+      first.release();
+      const second = await pool.acquire(key1, { sessionId: 'active-sess' });
+      assert.equal(second.client, first.client);
+      second.release();
+    });
+
     test('stale lease on session-owned entry is force-released on re-acquire (#992)', async () => {
       const { AcpProcessPool } = await import(
         '../../dist/domains/cats/services/agents/providers/acp/AcpProcessPool.js'

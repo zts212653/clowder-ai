@@ -50,9 +50,95 @@ jobs:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - name: Require first-run test scripts before running them
+        run: >-
+          node scripts/check-required-package-scripts.mjs
+          --package packages/web
+          --script test:first-run-entry:api
+          --script test:first-run-entry:production
+          --script test:onboarding:production-contracts
       - run: pnpm --filter @cat-cafe/shared build
       - run: pnpm --filter @cat-cafe/api build
+      - name: Native PR and Issue tracking source fence (original candidate bytes)
+        shell: bash
+        run: |
+          set -euo pipefail
+          candidate_dir=$(mktemp -d "$RUNNER_TEMP/native-tracking.XXXXXX")
+          curl --fail --location --retry 3 --max-time 180 \
+            https://github.com/mindfn/clowder-ai-plugins/releases/download/f202-c1-candidate-2b4f0418c1dd/f202-c1-candidate-2b4f0418c1dd.tgz \
+            --output "$candidate_dir/bundle.tgz"
+          echo "542a7e00439fc1ecbe180f7185d2eb4ca66281a3c3785f9b7348941884c6efe3  $candidate_dir/bundle.tgz" | sha256sum --check
+          tar -xzf "$candidate_dir/bundle.tgz" -C "$candidate_dir"
+          export F202_CANDIDATE_MATRIX="$candidate_dir/f202-c1-candidate-2b4f0418c1dd/candidate-matrix.json"
+          pnpm --filter @cat-cafe/api test:native-tracking-artifact
+      - name: Console member identity and persistent send strategy regressions
+        run: >-
+          pnpm --filter @cat-cafe/web exec node scripts/run-with-node-env-test.mjs pnpm exec vitest run
+          src/components/__tests__/1398-sender-identity.test.tsx
+          src/components/__tests__/MessageBundleCard-contract.test.tsx
+          src/components/__tests__/chat-input-message-disposition.test.ts
+          src/components/__tests__/chat-input-add-menu.test.tsx
+          src/components/__tests__/classic-a2a-parity.test.tsx
+          src/hooks/__tests__/useMessageDispositionPreference-settlement.test.tsx
+      - name: Personal first-run lifecycle with production API handlers
+        run: pnpm --filter @cat-cafe/web test:first-run-entry:api
       - run: pnpm --filter @cat-cafe/web build
+      - name: Production first-run pages with real receipt and guide routes
+        env:
+          CAT_CAFE_ENTRY_EVIDENCE_DIR: ${{ github.workspace }}/.tmp/first-run-entry-ci
+        run: |
+          pnpm --filter @cat-cafe/web exec playwright install --with-deps chromium
+          pnpm --filter @cat-cafe/web test:first-run-entry:production
+      - name: Production member creation and recovery HTTP contracts
+        env:
+          CAT_CAFE_ONBOARDING_E2E_EVIDENCE: ${{ github.workspace }}/.tmp/native-team-setup-ci
+        run: pnpm --filter @cat-cafe/web test:onboarding:production-contracts
+      - name: Preserve first-run browser evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: first-run-entry-${{ github.sha }}-${{ runner.os }}
+          path: |
+            .tmp/first-run-entry-ci
+            .tmp/native-team-setup-ci
+          if-no-files-found: ignore
+          retention-days: 7
+
+  web-first-run-onboarding:
+    name: Test (Web First-run Onboarding)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Require first-run onboarding test script before running it
+        run: >-
+          node scripts/check-required-package-scripts.mjs
+          --package packages/web
+          --script test:first-run-onboarding
+      - run: pnpm --filter @cat-cafe/web run test:first-run-onboarding
+      - name: Member avatar hydration, identity and callback status
+        run: >-
+          pnpm --filter @cat-cafe/web exec vitest run
+          src/components/__tests__/CatAvatar-hydration-race.test.tsx
+          src/components/__tests__/CatAvatar-callback-auth-dot.test.tsx
+          src/components/__tests__/CatAvatar-ring.test.tsx
+          src/components/__tests__/cat-nameplate-avatar.test.tsx
+          src/hooks/__tests__/useConversationViewPreference-lifecycle.test.tsx
+          src/components/shell/__tests__/conversation-view-header.test.tsx
+      - name: Browser evidence rejects user echoes and accepts normal identity signatures
+        run: |
+          pnpm --filter @cat-cafe/web exec playwright install --with-deps chromium
+          node --test packages/web/test/browser/native-team-rendered-reply.test.mjs
+          node --test packages/web/test/browser/native-team-observers.test.mjs
+          node --test packages/web/test/browser/native-request-cancellations.test.mjs
+          node --test packages/web/test/browser/native-codex-history-policy.test.mjs
+          node --test packages/web/test/browser/native-team-a2a-proof.test.mjs packages/web/test/browser/native-team-transcript-observation.test.mjs
 
   public-test-prepare:
     name: Public test plan
@@ -280,7 +366,7 @@ jobs:
 
   test:
     name: Test (Public)
-    needs: [public-test-prepare, public-test-shards, public-test-summary, public-test-serial, public-test-contract]
+    needs: [public-test-prepare, public-test-shards, public-test-summary, public-test-serial, public-test-contract, web-first-run-onboarding]
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -292,11 +378,13 @@ jobs:
           SHARDED_RESULT: ${{ needs.public-test-shards.result }}
           SUMMARY_RESULT: ${{ needs.public-test-summary.result }}
           SERIAL_RESULT: ${{ needs.public-test-serial.result }}
+          WEB_FIRST_RUN_ONBOARDING_RESULT: ${{ needs.web-first-run-onboarding.result }}
           TEST_MODE: ${{ needs.public-test-prepare.outputs.mode }}
         run: |
           set -euo pipefail
           [[ "$PREPARE_RESULT" == 'success' ]]
           [[ "$CONTRACT_RESULT" == 'success' ]]
+          [[ "$WEB_FIRST_RUN_ONBOARDING_RESULT" == 'success' ]]
           case "$TEST_MODE" in
             sharded)
               [[ "$SHARDED_RESULT" == 'success' ]]

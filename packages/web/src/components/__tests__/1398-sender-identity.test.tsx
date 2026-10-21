@@ -9,6 +9,7 @@ import type { ChatMessage as Message } from '@/stores/chat-types';
 import { useChatStore } from '@/stores/chatStore';
 import { AppendedInputReceipts } from '../AppendedInputReceipts';
 import { ChatMessage } from '../ChatMessage';
+import { ConnectorBubble } from '../ConnectorBubble';
 import { MessageNavigator } from '../MessageNavigator';
 import { SortableQueueEntryRow } from '../QueueEntryRow';
 import { ReplyPill } from '../ReplyPill';
@@ -18,6 +19,7 @@ Object.assign(globalThis, { React });
 vi.mock('@/hooks/useCoCreatorConfig', () => ({
   useCoCreatorConfig: () => ({
     name: 'lang',
+    avatar: '/human.png',
     aliases: [],
     mentionPatterns: [],
     color: { primary: '#123456', secondary: '#eeeeee' },
@@ -37,13 +39,157 @@ vi.mock('@/hooks/useCatData', () => ({
   formatCatName: (cat: CatData) => cat.displayName,
 }));
 const identity = {
-  from: { kind: 'external' as const, connectorId: 'github-wait' },
-  source: { connector: 'github-wait', label: 'GitHub Wait', icon: '🐙' },
+  from: { kind: 'external' as const, connectorId: 'scheduler' },
+  source: { connector: 'scheduler', label: '定时任务', icon: 'scheduler' },
 };
 afterEach(() => useChatStore.setState({ currentThreadId: '', messages: [], replyToMessage: null }));
 
 describe('1398 canonical sender identity across Queue and reply surfaces', () => {
-  it('quotes GitHub Wait with its own name and registry icon, never as the operator', () => {
+  it.each([
+    { from: { kind: 'user', userId: 'owner' }, type: 'user', image: '/human.png', color: '#123456' },
+    { from: { kind: 'agent', catId: 'cat-1' }, type: 'assistant', image: '/member.png', color: '#123789' },
+    {
+      from: { kind: 'plugin', instanceId: 'pi-image' },
+      type: 'connector',
+      image: '/api/plugin-manager/plugins/example.chat/icon',
+      color: '#07c160',
+    },
+  ] as const)('uses the same full-size member avatar for $type messages', ({ from, type, image, color }) => {
+    const html = renderToStaticMarkup(
+      <ChatMessage
+        message={{
+          id: 'member-body',
+          type,
+          from,
+          content: 'Hello',
+          timestamp: 100,
+          ...(from.kind === 'agent' ? { catId: from.catId } : {}),
+          ...(from.kind === 'plugin'
+            ? { source: { connector: 'custom-chat', label: 'Example Chat', icon: image, themeColor: color } }
+            : {}),
+        }}
+        getCatById={getCatById}
+      />,
+    );
+    const container = document.createElement('div');
+    container.innerHTML = html;
+    const frame = container.querySelector('[data-sender-avatar="message"]') as HTMLElement;
+    expect(frame).not.toBeNull();
+    expect(frame.classList.contains('w-8')).toBe(true);
+    expect(frame.classList.contains('h-8')).toBe(true);
+    expect(frame.style.boxShadow).toBe('');
+    const ring = frame.querySelector('[data-member-avatar-ring]') as HTMLElement;
+    expect(ring.style.boxShadow).toBe(`inset 0 0 0 1px ${color}`);
+    const avatar = frame.querySelector('img') as HTMLImageElement;
+    expect(avatar.getAttribute('src')).toBe(image);
+    expect(avatar.classList.contains('w-full')).toBe(true);
+    expect(avatar.classList.contains('h-full')).toBe(true);
+    expect(frame.parentElement?.closest('[style*="box-shadow"]')).toBeNull();
+  });
+
+  it.each([
+    'user',
+    'agent',
+    'plugin',
+  ] as const)('keeps the shared frame when a %s avatar fails to load', async (kind) => {
+    const host = document.createElement('div');
+    const root = createRoot(host);
+    const from: MessageFrom =
+      kind === 'user'
+        ? { kind, userId: 'owner' }
+        : kind === 'agent'
+          ? { kind, catId: member.id }
+          : { kind, instanceId: 'pi-avatar' };
+    const onEdit = vi.fn();
+    await act(async () =>
+      root.render(
+        <ChatMessage
+          message={{
+            id: 'failed-image',
+            from,
+            type: kind === 'user' ? 'user' : kind === 'agent' ? 'assistant' : 'connector',
+            catId: kind === 'agent' ? member.id : undefined,
+            content: 'Hello',
+            timestamp: 100,
+            source: kind === 'plugin' ? { connector: 'custom-chat', label: 'Chat', icon: '/missing.png' } : undefined,
+          }}
+          getCatById={getCatById}
+          onEditCat={onEdit}
+          onEditCoCreator={onEdit}
+        />,
+      ),
+    );
+    const frame = host.querySelector('[data-sender-avatar="message"]') as HTMLElement;
+    const img = frame.querySelector('img') as HTMLImageElement;
+    await act(async () => img.dispatchEvent(new Event('error')));
+    expect(img.src).toMatch(/^data:image\/svg\+xml;base64,/u);
+    expect(host.querySelector('[data-sender-avatar="message"]')).toBe(frame);
+    expect(img.className).toContain('w-full h-full');
+    if (kind !== 'plugin') {
+      await act(async () => frame.click());
+      expect(onEdit).toHaveBeenCalledOnce();
+    }
+    await act(async () => root.unmount());
+  });
+
+  it('uses the same member frame for a symbolic connector and ordinary fallback color', () => {
+    const html = renderToStaticMarkup(
+      <ConnectorBubble
+        message={{
+          id: 'symbol',
+          type: 'connector',
+          content: 'Hello',
+          timestamp: 100,
+          from: { kind: 'plugin', instanceId: 'pi-symbol' },
+          source: { connector: 'custom-symbol', label: 'Symbol Bot', icon: 'message' },
+        }}
+      />,
+    );
+    const container = document.createElement('div');
+    container.innerHTML = html;
+    const frame = container.querySelector('[data-sender-avatar="message"]') as HTMLElement;
+    expect(frame).not.toBeNull();
+    expect((frame.querySelector('[data-member-avatar-ring]') as HTMLElement).style.boxShadow).toBe(
+      'inset 0 0 0 1px #64748B',
+    );
+    expect(frame.querySelector('svg')).not.toBeNull();
+    expect(frame.querySelector('img')).toBeNull();
+  });
+
+  it('shows plugin package identity and declared color without an opaque routing ID', () => {
+    const input = {
+      from: { kind: 'plugin' as const, instanceId: 'pi-chat' },
+      source: {
+        connector: 'custom-chat',
+        label: 'Example Chat',
+        icon: '/api/plugin-manager/plugins/example.chat/icon',
+        themeColor: '#07c160',
+        sender: { id: 'opaque@provider' },
+      },
+    };
+    const sender = resolveMessageSender(input, getCatById, { name: 'lang', aliases: [], mentionPatterns: [] });
+    expect(sender.label).toBe('Example Chat');
+    expect(sender.color).toBe('#07c160');
+    const html = renderToStaticMarkup(
+      <ReplyPill
+        replyPreview={{ ...input, senderCatId: null, content: 'Hi' }}
+        replyToId="source"
+        getCatById={() => undefined}
+      />,
+    );
+    expect(html).toContain('/api/plugin-manager/plugins/example.chat/icon');
+    expect(html).not.toContain('opaque@provider');
+    const bubble = renderToStaticMarkup(
+      <ConnectorBubble
+        message={{ ...input, id: 'plugin-message', type: 'connector', content: 'Hello', timestamp: 100 } as Message}
+      />,
+    );
+    expect(bubble).toContain('color:#07c160');
+    expect(bubble).toContain('background-color:color-mix(in srgb, #07c160 10%, var(--cafe-surface))');
+    expect(bubble).not.toContain('opaque@provider');
+  });
+
+  it('quotes 定时任务 with its own name and registry icon, never as the operator', () => {
     const html = renderToStaticMarkup(
       <ReplyPill
         replyPreview={{ senderCatId: null, content: 'CI finished', ...identity }}
@@ -51,9 +197,28 @@ describe('1398 canonical sender identity across Queue and reply surfaces', () =>
         getCatById={() => undefined}
       />,
     );
-    expect(html).toContain('GitHub Wait');
+    expect(html).toContain('定时任务');
     expect(html).not.toContain('lang');
     expect(html).toContain('<svg');
+  });
+  it('renders plugin message icons and sender names without changing the plugin identity', () => {
+    const input = {
+      from: { kind: 'plugin' as const, instanceId: 'wechat-instance' },
+      source: { connector: 'wechat-plugin', label: 'WeChat', icon: 'message', sender: { id: 'alice', name: 'Alice' } },
+    };
+    const sender = resolveMessageSender(input, getCatById, { name: 'lang', aliases: [], mentionPatterns: [] });
+    expect(sender.label).toBe('WeChat · Alice');
+    expect(sender.isCoCreator).toBe(false);
+    const html = renderToStaticMarkup(
+      <ReplyPill
+        replyPreview={{ ...input, senderCatId: null, content: 'Hi' }}
+        replyToId="source"
+        getCatById={() => undefined}
+      />,
+    );
+    expect(html).toContain('<svg');
+    expect(html).not.toContain('>message<');
+    expect(input.from).toEqual({ kind: 'plugin', instanceId: 'wechat-instance' });
   });
   it('uses the same identity in the input reply preview', () => {
     const html = renderToStaticMarkup(
@@ -63,7 +228,7 @@ describe('1398 canonical sender identity across Queue and reply surfaces', () =>
         onClear={() => {}}
       />,
     );
-    expect(html).toContain('GitHub Wait');
+    expect(html).toContain('定时任务');
     expect(html).not.toContain('lang');
   });
   it('renders a queued external source with its connector icon rather than a generic cat avatar', () => {
@@ -95,7 +260,7 @@ describe('1398 canonical sender identity across Queue and reply surfaces', () =>
       />,
     );
     const route = html.slice(html.indexOf('data-testid="queue-route-q"'));
-    expect(route).toContain('GitHub Wait');
+    expect(route).toContain('定时任务');
     expect(route).toContain('<svg');
     expect(route).not.toContain('<img');
   });
@@ -110,7 +275,7 @@ describe('1398 canonical sender identity across Queue and reply surfaces', () =>
     expect(html).not.toContain('lang');
   });
   const cases: { name: string; from: MessageFrom; source?: ConnectorSource; label: string }[] = [
-    { name: 'github', ...identity, label: 'GitHub Wait' },
+    { name: 'github', ...identity, label: '定时任务' },
     {
       name: 'named external actor',
       from: { kind: 'external', connectorId: 'custom', sender: { id: 'actor', name: 'Alice' } },
@@ -124,7 +289,7 @@ describe('1398 canonical sender identity across Queue and reply surfaces', () =>
       label: 'Custom Feed',
     },
     { name: 'unregistered source', from: { kind: 'external', connectorId: 'unregistered' }, label: 'unregistered' },
-    { name: 'plugin', from: { kind: 'plugin', instanceId: 'plugin-instance' }, label: 'Plugin · plugin-instance' },
+    { name: 'plugin', from: { kind: 'plugin', instanceId: 'plugin-instance' }, label: '插件' },
     { name: 'system', from: { kind: 'system', service: 'system-service' }, label: 'system-service' },
     { name: 'user', from: { kind: 'user', userId: 'owner' }, label: 'lang' },
     { name: 'agent', from: { kind: 'agent', catId: member.id }, label: 'Member One' },
@@ -243,7 +408,7 @@ describe('1398 canonical sender identity across Queue and reply surfaces', () =>
       getCatById,
       { name: 'lang', aliases: [], mentionPatterns: [] },
     );
-    expect(sender.label).toBe('GitHub Wait');
+    expect(sender.label).toBe('定时任务');
     expect(sender.fallbackIcon).toBeUndefined();
   });
   it('does not use legacy catId or source to guess an absent from', () => {
@@ -266,7 +431,7 @@ describe('1398 canonical sender identity across Queue and reply surfaces', () =>
           messages: [{ id: 'source', type: 'connector', content: 'content', timestamp: 1, ...identity } as Message],
         }),
       );
-      expect(container.textContent).toContain('GitHub Wait');
+      expect(container.textContent).toContain('定时任务');
       expect(container.textContent).not.toContain('lang');
       useChatStore.getState().setReplyTo(draft);
       expect(useChatStore.getState().replyToMessage?.from).toEqual(identity.from);

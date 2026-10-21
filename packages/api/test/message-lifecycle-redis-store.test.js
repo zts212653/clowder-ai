@@ -52,6 +52,38 @@ describe(
       await redis.quit();
     });
 
+    test('serializes five concurrent dispatchRef appends for one fan-out source', async () => {
+      const input = await store.append(
+        canonicalFixture({
+          userId: 'owner-redis',
+          threadId: 'thread-redis-fanout',
+          catId: null,
+          content: '@all hello',
+          mentions: ['opus', 'codex', 'dsh', 'kimi', 'pi'],
+          timestamp: 200,
+        }),
+      );
+      const orderKey = input.lifecycle?.orderKey ?? `${input.timestamp}:${input.id}`;
+      const targets = ['opus', 'codex', 'dsh', 'kimi', 'pi'];
+      const results = await Promise.all(
+        targets.map((targetId, index) =>
+          store.advanceLifecycleInputDispatch(input.id, {
+            orderKey,
+            targetId,
+            phase: 'dispatched',
+            statusMessageId: `${input.id}-response-${targetId}`,
+            dispatchedAt: 200 + index,
+          }),
+        ),
+      );
+      assert.equal(
+        results.filter((result) => result.kind === 'applied' || result.kind === 'replayed').length,
+        targets.length,
+      );
+      const refs = (await store.getById(input.id)).lifecycle.dispatchRefs;
+      assert.deepEqual(refs.map((ref) => ref.targetId).sort(), [...targets].sort());
+    });
+
     test('atomically attaches one Queue input to every Redis-backed processing Active Run', async () => {
       const input = await store.append(
         canonicalFixture({

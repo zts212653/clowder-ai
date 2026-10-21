@@ -8,8 +8,6 @@ import { MessageStore } from '../src/domains/cats/services/stores/ports/MessageS
 import { packageDirectoryName } from '../src/domains/plugin/external-runtime/filesystem-package-locator.js';
 import { OfficialPluginPackageInstaller } from '../src/domains/plugin/official-package-installer.js';
 import { createDormantPluginRuntimeComposition } from '../src/domains/plugin/runtime-composition.js';
-import { MemoryMeetingIntakeStore } from '../src/domains/signal-intake/MeetingIntakeStore.js';
-import { MemorySignalRouteStore } from '../src/domains/signal-intake/SignalRouteStore.js';
 import { sessionAuthPlugin, sessionRoute } from '../src/infrastructure/session-auth.js';
 import { registerConciergeDesktopRoutes } from '../src/routes/concierge-desktop.js';
 import { desktopWindowManifest, windowHtml } from './f317-window.fixture.js';
@@ -23,8 +21,6 @@ test('sleep beyond TTL stays fenced until an owner restore creates fresh desktop
   let bridgeRequests = 0;
   const runtime = createDormantPluginRuntimeComposition({
     projectRoot: f.root,
-    routes: new MemorySignalRouteStore(),
-    intakes: new MemoryMeetingIntakeStore(),
     messageStore: new MessageStore(),
     now: () => now,
     // This isolated archive is paired by its computed immutable digest, exactly

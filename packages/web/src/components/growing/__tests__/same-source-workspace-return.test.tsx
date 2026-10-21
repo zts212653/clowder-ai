@@ -66,16 +66,8 @@ describe('F310 same-source Workspace return', () => {
       producerId: 'F128',
       proposalId: 'proposal/one',
     });
-    expect(resolveEntrustedWorkActionTarget('/api/meeting-intakes/intake%2Fone/confirm')).toEqual({
-      kind: 'approval',
-      producerId: 'F292',
-      proposalId: 'intake/one',
-    });
-    expect(resolveEntrustedWorkActionTarget('/api/meeting-intakes/intake-1/retry')).toEqual({
-      kind: 'approval',
-      producerId: 'F292',
-      proposalId: 'intake-1',
-    });
+    expect(resolveEntrustedWorkActionTarget('/api/meeting-intakes/intake%2Fone/confirm')).toBeNull();
+    expect(resolveEntrustedWorkActionTarget('/api/meeting-intakes/intake-1/retry')).toBeNull();
     expect(resolveEntrustedWorkActionTarget('/api/tasks/task-1')).toBeNull();
     expect(
       resolveEntrustedWorkActionTarget(

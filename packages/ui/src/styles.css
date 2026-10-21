@@ -60,17 +60,13 @@ html[data-shell="v2"] {
 }
 .cafe-nameplate-avatar {
   position: absolute;
+  display: inline-flex;
   left: 0;
   bottom: -2px;
   width: 32px;
   height: 32px;
   border-radius: 50%;
   box-shadow: 0 0 0 2px var(--shell-work);
-}
-.cafe-nameplate-avatar > * {
-  width: 32px;
-  height: 32px;
-  border-radius: 50%;
 }
 .cafe-nameplate-name {
   min-width: 0;

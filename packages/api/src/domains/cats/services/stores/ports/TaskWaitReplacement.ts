@@ -1,5 +1,6 @@
 import type { ManagedWorkBinding, TaskItem } from '@cat-cafe/shared';
 import { isTrackingKind } from '@cat-cafe/shared';
+import { advanceEntrustedTaskAuthority } from './EntrustedWorkRevision.js';
 import { reconcileDeploymentWaitTaskMutation } from './TaskDeploymentWaitState.js';
 import { createManagedWorkBindingConflict } from './TaskManagedWorkBinding.js';
 import type { ReplaceAutomationStateIfGenerationInput } from './TaskStoreContract.js';
@@ -58,21 +59,24 @@ export function buildTaskWaitReplacement(
 ): TaskItem {
   assertTrackingRegistration(existing, input, currentBinding);
   const registration = input.trackingRegistration;
-  return reconcileDeploymentWaitTaskMutation(existing, {
-    ...existing,
-    ...(registration
-      ? {
-          threadId: registration.threadId,
-          title: registration.title,
-          ownerCatId: registration.ownerCatId ?? existing.ownerCatId,
-          userId: registration.userId ?? existing.userId,
-          why: registration.why,
-          status: existing.status === 'done' ? 'todo' : existing.status,
-        }
-      : {}),
-    automationState: input.automationState,
-    ...(input.why !== undefined ? { why: input.why } : {}),
-    ...(input.status !== undefined ? { status: input.status } : {}),
-    updatedAt: Date.now(),
-  });
+  return advanceEntrustedTaskAuthority(
+    existing,
+    reconcileDeploymentWaitTaskMutation(existing, {
+      ...existing,
+      ...(registration
+        ? {
+            threadId: registration.threadId,
+            title: registration.title,
+            ownerCatId: registration.ownerCatId ?? existing.ownerCatId,
+            userId: registration.userId ?? existing.userId,
+            why: registration.why,
+            status: existing.status === 'done' ? 'todo' : existing.status,
+          }
+        : {}),
+      automationState: input.automationState,
+      ...(input.why !== undefined ? { why: input.why } : {}),
+      ...(input.status !== undefined ? { status: input.status } : {}),
+      updatedAt: Date.now(),
+    }),
+  );
 }

@@ -427,11 +427,11 @@ describe('RedisDispatchProposalStore', { skip: redisIsolationSkipReason(REDIS_UR
 
   it('Phase J: proposed action envelope round-trips through Redis', async () => {
     const proposedAction = {
-      subjectRef: 'pr:owner/repo#42',
-      actionFamily: 'review',
-      successorSlot: 'reviewer',
+      subjectRef: 'subject:task:work-42',
+      actionFamily: 'implement',
+      successorSlot: 'implementer',
       mode: 'single',
-      terminalPredicate: { kind: 'review_delivered', headSha: 'a'.repeat(40) },
+      terminalPredicate: { kind: 'task_done' },
     };
     await store.create({
       ...baseInput,
@@ -813,11 +813,11 @@ describe('RedisDispatchProposalStore', { skip: redisIsolationSkipReason(REDIS_UR
 
   it('#1291 Gate 1: Redis canonical admission carries pending and rejected decisions across invocations', async () => {
     const proposedAction = {
-      subjectRef: 'pr:owner/repo#42',
-      actionFamily: 'review',
-      successorSlot: 'reviewer',
+      subjectRef: 'subject:task:work-42',
+      actionFamily: 'implement',
+      successorSlot: 'implementer',
       mode: 'single',
-      terminalPredicate: { kind: 'review_delivered', headSha: 'a'.repeat(40) },
+      terminalPredicate: { kind: 'task_done' },
     };
     await store.create({ ...baseInput, proposedAction });
     const canonicalActionKey = computeDispatchCanonicalActionKey(baseInput.ownerUserId, proposedAction);
@@ -855,7 +855,7 @@ describe('RedisDispatchProposalStore', { skip: redisIsolationSkipReason(REDIS_UR
     assert.deepEqual(
       await store.findCanonicalAdmissionBlocks({
         ownerUserId: baseInput.ownerUserId,
-        canonicalSubjectRef: 'pr:owner/repo#42',
+        canonicalSubjectRef: 'subject:task:work-42',
       }),
       [{ proposalId: baseInput.proposalId, status: 'rejected' }],
     );
@@ -863,11 +863,11 @@ describe('RedisDispatchProposalStore', { skip: redisIsolationSkipReason(REDIS_UR
 
   it('#1291 Gate 1 RED: canonical admission uses a bounded candidate index instead of scanning user history', async () => {
     const proposedAction = {
-      subjectRef: 'pr:owner/repo#43',
-      actionFamily: 'review',
-      successorSlot: 'reviewer',
+      subjectRef: 'subject:task:work-43',
+      actionFamily: 'implement',
+      successorSlot: 'implementer',
       mode: 'single',
-      terminalPredicate: { kind: 'review_delivered', headSha: 'b'.repeat(40) },
+      terminalPredicate: { kind: 'task_done' },
     };
     await store.create({ ...baseInput, proposalId: 'dp-canonical-bounded', proposedAction });
     const canonicalActionKey = computeDispatchCanonicalActionKey(baseInput.ownerUserId, proposedAction);
@@ -893,11 +893,11 @@ describe('RedisDispatchProposalStore', { skip: redisIsolationSkipReason(REDIS_UR
 
   it('#1291 Gate 1: a first canonical lookup backfills historic pending/rejected proposal hashes before allowing', async () => {
     const proposedAction = {
-      subjectRef: 'pr:owner/repo#46',
-      actionFamily: 'review',
-      successorSlot: 'reviewer',
+      subjectRef: 'subject:task:work-46',
+      actionFamily: 'implement',
+      successorSlot: 'implementer',
       mode: 'single',
-      terminalPredicate: { kind: 'review_delivered', headSha: 'e'.repeat(40) },
+      terminalPredicate: { kind: 'task_done' },
     };
     await redis.hset(
       'dispatch-proposal:dp-canonical-historic',
@@ -941,11 +941,11 @@ describe('RedisDispatchProposalStore', { skip: redisIsolationSkipReason(REDIS_UR
 
   it('#1291 Gate 1 RED: a null canonical-index Redis result fails closed', async () => {
     const proposedAction = {
-      subjectRef: 'pr:owner/repo#44',
-      actionFamily: 'review',
-      successorSlot: 'reviewer',
+      subjectRef: 'subject:task:work-44',
+      actionFamily: 'implement',
+      successorSlot: 'implementer',
       mode: 'single',
-      terminalPredicate: { kind: 'review_delivered', headSha: 'c'.repeat(40) },
+      terminalPredicate: { kind: 'task_done' },
     };
     await store.create({ ...baseInput, proposalId: 'dp-canonical-null', proposedAction });
     const canonicalActionKey = computeDispatchCanonicalActionKey(baseInput.ownerUserId, proposedAction);
@@ -966,11 +966,11 @@ describe('RedisDispatchProposalStore', { skip: redisIsolationSkipReason(REDIS_UR
 
   it('#1291 Gate 1 RED: a decision created after preflight cannot slip past the F167 claim boundary', async () => {
     const proposedAction = {
-      subjectRef: 'pr:owner/repo#45',
-      actionFamily: 'review',
-      successorSlot: 'reviewer',
+      subjectRef: 'subject:task:work-45',
+      actionFamily: 'implement',
+      successorSlot: 'implementer',
       mode: 'single',
-      terminalPredicate: { kind: 'review_delivered', headSha: 'd'.repeat(40) },
+      terminalPredicate: { kind: 'task_done' },
     };
     const canonicalActionKey = computeDispatchCanonicalActionKey(baseInput.ownerUserId, proposedAction);
     assert.deepEqual(

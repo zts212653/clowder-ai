@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { test } from 'node:test';
 import { collectiveContentScopeRef } from '../src/domains/video-studio/content-owner/collective-scope.js';
 import { custodyHttpFixture } from './collective-custody-http.fixture.js';
+import { test } from './helpers/f202-collective-installed-business.js';
 
 test('real HTTP and two production Connectors transfer the full owner unit and keep the original shared artifact readable', async (t) => {
   const f = await custodyHttpFixture(t);

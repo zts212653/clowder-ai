@@ -5,6 +5,7 @@
 
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { deploymentDefaults } from '@cat-cafe/shared';
 import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
 import { ContradictionDetector } from '../domains/memory/f163-contradiction-detector.js';
@@ -65,12 +66,12 @@ export function gatherDiskAnchors(docsRoot?: string): Set<string> | undefined {
     // features dir may not exist
   }
   try {
-    const backlog = readFileSync(join(docsRoot, 'BACKLOG.md'), 'utf-8');
+    const backlog = readFileSync(join(docsRoot, deploymentDefaults.roadmapPath.slice('docs/'.length)), 'utf-8');
     for (const m of backlog.matchAll(/\|\s*(F\d{3})\s*\|/g)) {
       anchors.add(m[1]!);
     }
   } catch {
-    // BACKLOG.md may not exist
+    // The configured roadmap may not exist.
   }
   return anchors.size > 0 ? anchors : undefined;
 }

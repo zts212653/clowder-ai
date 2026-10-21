@@ -41,6 +41,12 @@ async function cloudClient(t) {
   process.env.CAT_CAFE_API_URL = 'http://127.0.0.1:49999';
   process.env.CAT_CAFE_DESKTOP_MODE = 'cloud-pro-phase0';
   process.env.CAT_CAFE_READONLY = 'true';
+  globalThis.fetch = async (url, init) => {
+    if (new URL(String(url)).pathname === '/api/config') {
+      return new Response(JSON.stringify({ config: { coCreator: { name: 'Nora', mentionPatterns: ['@nora'] } } }));
+    }
+    return realFetch(url, init);
+  };
   const server = new McpServer({ name: 'cloud-contract', version: '1' });
   registerCollabToolset(server);
   registerMemoryToolset(server);
@@ -95,7 +101,7 @@ test('cloud schema distinguishes root sends from returns and rejects invocation-
   assert.match(post.description, /proactive|root/i);
   assert.match(post.description, /complete.*answer|final.*answer/i);
   assert.match(post.description, /reply to the human.*omit targetCats/i);
-  assert.match(post.description, /@co-creator/);
+  assert.match(post.description, /@nora/);
   assert.match(post.inputSchema.properties.targetCats.description, /not.*human|human.*not/i);
   assert.ok(!post.inputSchema.required?.includes('targetCats'));
   assert.doesNotMatch(post.description, /Do NOT use this for routine replies/i);

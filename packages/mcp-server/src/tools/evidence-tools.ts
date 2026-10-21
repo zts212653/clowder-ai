@@ -7,6 +7,7 @@
  */
 
 import {
+  deploymentDefaults,
   EXPANSION_HEALTH_SOURCE_REVISION,
   type ExpansionFunnelMeta,
   type ExpansionHintTargetRef,
@@ -24,7 +25,7 @@ import { type CoverageToolData, renderCoverageToolResponse } from './evidence-co
 import type { ToolResult } from './file-tools.js';
 import { errorResult, successResult } from './file-tools.js';
 
-const API_URL = process.env['CAT_CAFE_API_URL'] ?? 'http://localhost:3004';
+const API_URL = process.env['CAT_CAFE_API_URL'] ?? deploymentDefaults.apiBaseUrl;
 const COVERAGE_OUTER_HTTP_BUDGET_MS = 16_000;
 
 const DOC_SOURCE_TYPES = new Set(['feature', 'decision', 'phase', 'architecture', 'lesson', 'plan', 'research']);

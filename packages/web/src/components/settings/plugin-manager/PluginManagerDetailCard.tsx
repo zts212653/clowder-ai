@@ -7,8 +7,14 @@ import { MarkdownContent } from '../../MarkdownContent';
 import { settingsResourceCardClass, settingsResourceRowClass } from '../../SettingsResourceCard';
 import { SettingsText } from '../primitives/SettingsText';
 import { DotConnectionDetail } from './DotConnectionDetail';
+import PluginConnectorSettings from './PluginConnectorSettings';
+import { PluginManagerBindings } from './PluginManagerBindings';
 import { PluginManagerConfigurationSection } from './PluginManagerConfigurationSection';
+import { PluginManagerDetailPrelude } from './PluginManagerDetailPrelude';
+import { PluginSourceLabel } from './PluginSourceLabel';
 import { PluginVisual } from './PluginVisual';
+import type { PluginManagerPresentation } from './plugin-manager-attention';
+import { pluginCapabilityKind, pluginCapabilityName } from './plugin-manager-copy';
 import type { PluginManagerDesignFixture } from './plugin-manager-fixtures';
 
 function SectionHeading({ children }: { children: string }) {
@@ -17,6 +23,12 @@ function SectionHeading({ children }: { children: string }) {
       {children}
     </SettingsText>
   );
+}
+
+function dependencyClosureLabel(plugin: PluginManagerDesignFixture): string | undefined {
+  if (plugin.dependencyClosure === 'shipped') return '本机自带依赖 · 仅限本机开发';
+  if (plugin.dependencyClosure === 'materialized') return '安装时解析依赖';
+  return undefined;
 }
 
 const contributionKindLabel: Record<string, string> = {
@@ -36,11 +48,25 @@ const contributionKindLabel: Record<string, string> = {
   'desktop-window': 'Desktop Window',
 };
 
+// The full manifest remains available to Host consumers; this is the owner-facing capability view.
+const userCapabilityKinds = new Set([
+  'mcp',
+  'skill',
+  'schedule',
+  'direct-tool',
+  'limb',
+  'ui',
+  'content-editor-provider',
+  'desktop-window',
+]);
+
 interface CapabilityDocItem {
   key: string;
   kind: string;
   name: string;
+  identifier: string;
   description?: string;
+  originalName?: string;
 }
 
 function CapabilityDocRow({ item }: { item: CapabilityDocItem }) {
@@ -48,14 +74,21 @@ function CapabilityDocRow({ item }: { item: CapabilityDocItem }) {
     <li className="list-disc">
       <SettingsText as="p" variant="sm" tone="secondary">
         <span className="font-medium text-cafe">{item.name}</span>
+        {item.originalName && (
+          <code className="ml-1 break-all font-mono text-xs text-cafe-muted">{item.originalName}</code>
+        )}
         {item.description === undefined ? null : <span> — {item.description}</span>}
       </SettingsText>
     </li>
   );
 }
 
-function capabilityDocItems(plugin: PluginManagerDesignFixture): CapabilityDocItem[] {
-  return (plugin.contributions ?? []).flatMap((contribution) => {
+function capabilityDocItems(
+  plugin: PluginManagerDesignFixture,
+  presentation: PluginManagerPresentation,
+): CapabilityDocItem[] {
+  const items: CapabilityDocItem[] = (plugin.contributions ?? []).flatMap((contribution) => {
+    if (!userCapabilityKinds.has(contribution.kind)) return [];
     const tools =
       contribution.kind === 'mcp' ? (plugin.tools ?? []).filter((tool) => tool.contributionId === contribution.id) : [];
     if (tools.length > 0) {
@@ -63,6 +96,7 @@ function capabilityDocItems(plugin: PluginManagerDesignFixture): CapabilityDocIt
         key: `${contribution.id}:${tool.name}`,
         kind: 'mcp',
         name: tool.name,
+        identifier: tool.name,
         ...(tool.description === undefined ? {} : { description: tool.description }),
       }));
     }
@@ -71,10 +105,18 @@ function capabilityDocItems(plugin: PluginManagerDesignFixture): CapabilityDocIt
         key: contribution.id,
         kind: contribution.kind,
         name: contribution.name,
+        identifier: contribution.id,
         ...(contribution.description === undefined ? {} : { description: contribution.description }),
       },
     ];
   });
+  return presentation === 'v1'
+    ? items
+    : items.map((item) => {
+        const name = pluginCapabilityName(plugin.id, item.name);
+        const originalName = name === item.name ? item.identifier : item.name;
+        return { ...item, name, ...(originalName === name ? {} : { originalName }) };
+      });
 }
 
 function groupCapabilityDocs(items: readonly CapabilityDocItem[]) {
@@ -91,14 +133,16 @@ function CapabilityDocumentation({
   plugin,
   installed,
   groups,
+  presentation,
 }: {
   plugin: PluginManagerDesignFixture;
   installed: boolean;
   groups: readonly { kind: string; items: CapabilityDocItem[] }[];
+  presentation: PluginManagerPresentation;
 }) {
   return (
     <section className="space-y-3" data-plugin-detail-section="capability-docs">
-      <SectionHeading>能力说明</SectionHeading>
+      <SectionHeading>{presentation === 'v2' ? '能力' : '能力说明'}</SectionHeading>
       {plugin.readme.state === 'loading' ? (
         <SettingsText as="p" variant="sm" tone="muted">
           README 加载中…
@@ -125,7 +169,7 @@ function CapabilityDocumentation({
           {groups.map(({ kind, items }) => (
             <section key={kind} className="space-y-1.5" data-contribution-kind={kind}>
               <SettingsText as="h5" variant="xs" tone="muted" className="font-semibold">
-                {contributionKindLabel[kind] ?? kind}
+                {presentation === 'v2' ? pluginCapabilityKind(kind) : (contributionKindLabel[kind] ?? kind)}
               </SettingsText>
               {kind === 'mcp' && plugin.live === 'running' && plugin.tools === undefined && (
                 <SettingsText as="p" variant="xs" tone="muted">
@@ -152,6 +196,8 @@ function CapabilityDocumentation({
 export function PluginManagerDetailCard({
   plugin,
   locale,
+  presentation = 'v1',
+  onOperationChange,
   busy = false,
   onSaveConfig,
   configurationValidationRequest = 0,
@@ -160,6 +206,8 @@ export function PluginManagerDetailCard({
 }: {
   plugin: PluginManagerDesignFixture;
   locale: string;
+  presentation?: PluginManagerPresentation;
+  onOperationChange?: () => void;
   busy?: boolean;
   onSaveConfig?: (updates: readonly { key: string; value: string | null }[]) => void;
   configurationValidationRequest?: number;
@@ -168,8 +216,9 @@ export function PluginManagerDetailCard({
 }) {
   const installed = plugin.artifact === 'installed';
   const description = resolvePluginDescription(plugin.description, locale);
-  const capabilityItems = capabilityDocItems(plugin);
+  const capabilityItems = capabilityDocItems(plugin, presentation);
   const capabilityGroups = groupCapabilityDocs(capabilityItems);
+  const closureLabel = dependencyClosureLabel(plugin);
 
   return (
     <article data-testid="plugin-manager-detail" className={settingsResourceCardClass}>
@@ -182,21 +231,34 @@ export function PluginManagerDetailCard({
               <SettingsText as="h3" variant="sm" tone="default" className="font-semibold">
                 {plugin.displayName}
               </SettingsText>
+              <PluginSourceLabel trust={plugin.trust} repositoryName={plugin.repositoryName} />
               <SettingsText as="p" variant="xs" tone="muted" className="mt-0.5 break-all">
                 {plugin.installedVersion ?? plugin.availableVersion} · {plugin.packageName} · {plugin.publisher}
               </SettingsText>
+              {plugin.installedVersion && plugin.availableVersion !== plugin.installedVersion && (
+                <SettingsText as="p" variant="xs" tone="secondary">
+                  仓库可用版本：{plugin.availableVersion}
+                </SettingsText>
+              )}
+              {closureLabel === undefined ? null : (
+                <SettingsText as="p" variant="xs" tone="muted" className="mt-0.5">
+                  {closureLabel}
+                </SettingsText>
+              )}
             </div>
           </div>
         </section>
 
-        <section className="space-y-2" data-plugin-detail-section="introduction">
-          <SectionHeading>插件简介</SectionHeading>
-          <SettingsText as="p" variant="sm" tone="secondary">
-            {description}
-          </SettingsText>
-        </section>
+        {presentation === 'v1' && (
+          <section className="space-y-2" data-plugin-detail-section="introduction">
+            <SectionHeading>插件简介</SectionHeading>
+            <SettingsText as="p" variant="sm" tone="secondary">
+              {description}
+            </SettingsText>
+          </section>
+        )}
 
-        {plugin.diagnostic && (
+        {presentation === 'v1' && plugin.diagnostic && (
           <div className="flex items-start gap-2 rounded-xl bg-conn-amber-bg px-3 py-2.5">
             <HubIcon name="alert-triangle" className="mt-0.5 h-4 w-4 shrink-0 text-conn-amber-text" />
             <SettingsText as="p" variant="sm" tone="amber">
@@ -216,13 +278,38 @@ export function PluginManagerDetailCard({
           <>
             <PluginManagerConfigurationSection
               plugin={plugin}
+              presentation={presentation}
+              beforeConfiguration={
+                presentation === 'v2' ? (
+                  <PluginManagerDetailPrelude plugin={plugin} description={description} />
+                ) : undefined
+              }
+              onOperationChange={onOperationChange}
               busy={busy}
               onSaveConfig={onSaveConfig}
               validationRequest={configurationValidationRequest}
               saved={configurationSaved}
             />
 
-            <CapabilityDocumentation plugin={plugin} installed={installed} groups={capabilityGroups} />
+            {installed && plugin.permissions && (
+              <PluginConnectorSettings key={plugin.id} pluginId={plugin.id} pluginLabel={plugin.permissions.label} />
+            )}
+
+            {plugin.bindings !== undefined && (
+              <PluginManagerBindings
+                key={plugin.id}
+                pluginId={plugin.id}
+                bindings={plugin.bindings}
+                onChange={onOperationChange}
+              />
+            )}
+
+            <CapabilityDocumentation
+              plugin={plugin}
+              installed={installed}
+              groups={capabilityGroups}
+              presentation={presentation}
+            />
           </>
         )}
       </div>

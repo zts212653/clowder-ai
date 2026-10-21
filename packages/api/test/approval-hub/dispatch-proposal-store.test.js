@@ -416,11 +416,11 @@ describe('DispatchProposalStore (in-memory)', () => {
   it('#1291 Gate 1: canonical admission matches full action identity across invocation boundaries', async () => {
     const store = new InMemoryDispatchProposalStore();
     const proposedAction = {
-      subjectRef: 'pr:owner/repo#42',
-      actionFamily: 'review',
-      successorSlot: 'reviewer',
+      subjectRef: 'subject:task:work-42',
+      actionFamily: 'implement',
+      successorSlot: 'implementer',
       mode: 'single',
-      terminalPredicate: { kind: 'review_delivered', headSha: 'a'.repeat(40) },
+      terminalPredicate: { kind: 'task_done' },
     };
     await store.create(createInput({ proposedAction }));
     const canonicalActionKey = computeDispatchCanonicalActionKey('user-1', proposedAction);
@@ -445,7 +445,7 @@ describe('DispatchProposalStore (in-memory)', () => {
     assert.deepEqual(
       await store.findCanonicalAdmissionBlocks({
         ownerUserId: 'user-1',
-        canonicalSubjectRef: 'pr:owner/repo#42',
+        canonicalSubjectRef: 'subject:task:work-42',
       }),
       [{ proposalId: 'dp-001', status: 'rejected' }],
       'a weak carrier can only nominate the rejected canonical action for denial',
@@ -457,8 +457,8 @@ describe('DispatchProposalStore (in-memory)', () => {
       get subjectRef() {
         throw new Error('canonical subject resolver fault');
       },
-      actionFamily: 'review',
-      successorSlot: 'reviewer',
+      actionFamily: 'implement',
+      successorSlot: 'implementer',
     };
     assert.throws(
       () => tryComputeDispatchCanonicalActionKey('user-1', actionWithUnexpectedFault),
@@ -467,8 +467,8 @@ describe('DispatchProposalStore (in-memory)', () => {
     assert.equal(
       tryComputeDispatchCanonicalActionKey('user-1', {
         subjectRef: 'not a canonical subject',
-        actionFamily: 'review',
-        successorSlot: 'reviewer',
+        actionFamily: 'implement',
+        successorSlot: 'implementer',
       }),
       undefined,
       'malformed carrier identity stays non-matchable without widening it to a partial key',

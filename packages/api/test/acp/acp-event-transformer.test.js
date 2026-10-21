@@ -13,6 +13,44 @@ const catId = 'gemini';
 const metadata = { provider: 'google', model: 'gemini-2.5-pro' };
 
 describe('transformAcpEvent', () => {
+  it('preserves ACP native tool ids, failed outcomes and raw result across sparse updates', () => {
+    const state = createAcpSessionState();
+    const use = transformAcpEvent(
+      {
+        sessionId: 'session',
+        update: {
+          sessionUpdate: 'tool_call',
+          toolCallId: 'official-call',
+          title: 'run_command',
+          kind: 'execute',
+          status: 'pending',
+          rawInput: { CommandLine: 'echo hi' },
+        },
+      },
+      catId,
+      metadata,
+      state,
+    );
+    assert.equal(use.toolUseId, 'official-call');
+    const result = transformAcpEvent(
+      {
+        sessionId: 'session',
+        update: {
+          sessionUpdate: 'tool_call_update',
+          toolCallId: 'official-call',
+          status: 'failed',
+          rawOutput: 'Rejected by user',
+        },
+      },
+      catId,
+      metadata,
+      state,
+    );
+    assert.equal(result.toolUseId, 'official-call');
+    assert.equal(result.toolName, 'run_command');
+    assert.equal(result.toolResultStatus, 'error');
+    assert.equal(result.content, 'Rejected by user');
+  });
   it('usage_update normalizes authoritative ACP context usage', () => {
     const update = {
       sessionId: 's1',

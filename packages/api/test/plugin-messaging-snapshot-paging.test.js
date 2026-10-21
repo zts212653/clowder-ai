@@ -241,7 +241,7 @@ describe('M0-C frozen snapshot paging', () => {
         maxItems: 1,
         pageToken: page.nextPageToken,
       }),
-      (error) => error?.reason === 'VIEW_EXPIRED',
+      (error) => error?.code === 'STALE_CURSOR',
     );
   });
 
@@ -254,7 +254,7 @@ describe('M0-C frozen snapshot paging', () => {
       'utf8',
     ).toString('base64url');
 
-    await assert.rejects(service.ack(CTX, subscriptionId, prematureAck), (error) => error?.code === 'PERMISSION');
+    await assert.rejects(service.ack(CTX, subscriptionId, prematureAck), (error) => error?.code === 'STALE_CURSOR');
     const unread = await service.read(CTX, subscriptionId, { limit: 32 });
     assert.deepEqual(
       unread.events.map((event) => event.sequence),
@@ -284,12 +284,13 @@ describe('M0-C frozen snapshot paging', () => {
     );
   });
 
-  test('a tokenless retry replays an intermediate snapshot page and its exact successor entitlement', async () => {
+  test('a tokenless retry replays frozen items but rotates the successor entitlement', async () => {
     const { subscriptionId } = await setupSubscription();
 
     const lostFirst = await service.snapshotPage(CTX, { subscriptionId, maxItems: 1 });
     const recovered = await service.snapshotPage(CTX, { subscriptionId, maxItems: 2 });
-    assert.deepEqual(recovered, lostFirst, 'retry input cannot resize or replace the already committed page result');
+    assert.deepEqual(recovered.items, lostFirst.items, 'retry input cannot resize or replace the frozen page');
+    assert.notEqual(recovered.nextPageToken, lostFirst.nextPageToken, 'a replay must rotate its bounded lease');
 
     const final = await service.snapshotPage(CTX, {
       subscriptionId,
@@ -312,7 +313,8 @@ describe('M0-C frozen snapshot paging', () => {
     assert.equal(lostFinal.nextPageToken, null);
 
     const recovered = await service.snapshotPage(CTX, { subscriptionId, maxItems: 1 });
-    assert.deepEqual(recovered, lostFinal, 'recovery must replay the persisted result without consuming state twice');
+    assert.deepEqual(recovered.items, lostFinal.items, 'recovery must replay frozen items without consuming twice');
+    assert.notEqual(recovered.snapshotAckToken, lostFinal.snapshotAckToken, 'recovery rotates the ack lease');
     await service.ack(CTX, subscriptionId, recovered.snapshotAckToken);
     const afterAck = await service.read(CTX, subscriptionId, { limit: 32 });
     assert.deepEqual(afterAck.events, []);

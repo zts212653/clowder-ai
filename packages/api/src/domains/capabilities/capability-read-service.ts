@@ -298,7 +298,7 @@ async function readProjectSkillMeta(
     candidates.push({ name, dir: join(projectSkillsDir, name) });
     candidates.push({ name, dir: join(projectRoot, '.codex', 'skills', name) });
     candidates.push({ name, dir: join(projectRoot, '.gemini', 'skills', name) });
-    candidates.push({ name, dir: join(projectRoot, '.kimi', 'skills', name) });
+    candidates.push({ name, dir: join(projectRoot, '.kimi-code', 'skills', name) });
   }
   const results = await Promise.all(
     candidates.map(async ({ name, dir }) => ({ name, state: await readSkillMetaState(dir) })),

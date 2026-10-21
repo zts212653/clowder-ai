@@ -326,7 +326,7 @@ const { ManagedRunner } = await import(process.env.JOB_RUNNER_MODULE);
 const { principal, jobId } = JSON.parse(process.env.JOB_TEST_INPUT);
 const service = new ManagedJobService();
 const { admission } = service.start(principal, jobId, new ManagedRunner());
-process.stdout.write(JSON.stringify(await admission) + '\\n');
+process.stdout.write('JOB_TEST_ADMISSION:' + JSON.stringify(await admission) + '\\n');
 setInterval(() => {}, 1000);
 `;
 
@@ -354,9 +354,10 @@ async function startOwner(t, root, jobId) {
   });
   await until(() => {
     if (child.exitCode !== null) throw new Error(`owner exited ${child.exitCode}: ${errors}`);
-    return out.includes('\n');
+    return out.split('\n').some((line) => line.startsWith('JOB_TEST_ADMISSION:'));
   }, 'worker admitted');
-  assert.equal(JSON.parse(out.split('\n')[0]).spawned, true);
+  const receipt = out.split('\n').find((line) => line.startsWith('JOB_TEST_ADMISSION:'));
+  assert.equal(JSON.parse(receipt.slice('JOB_TEST_ADMISSION:'.length)).spawned, true, receipt);
   return child;
 }
 

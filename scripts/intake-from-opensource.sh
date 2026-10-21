@@ -19,7 +19,7 @@ SOURCE_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 TARGET_DIR="$SOURCE_DIR/../clowder-ai"
 INTAKE_LEDGER="$SOURCE_DIR/docs/ops/opensource-intake-ledger.json"
 TARGET_REPO="zts212653/clowder-ai"
-SOURCE_REPO="zts212653/cat-cafe"
+SOURCE_REPO="zts212653/clowder-ai"
 
 resolve_target_main_head() {
   if git -C "$TARGET_DIR" remote get-url origin >/dev/null 2>&1; then
@@ -397,13 +397,8 @@ BRAND_EXPECTATIONS=(
   # api-client.ts — comment AND real brand identity (F156: header → session cookie)
   "packages/web/src/utils/api-client.ts|must_not_contain|client for Clowder AI|comment should reference Clowder AI"
   "packages/web/src/utils/api-client.ts|must_contain|HttpOnly session cookie|identity uses session cookie (F156 D-1)"
-  # connector command deep links — home runtime fallback must stay on 3001; public sync transforms it to 3003.
-  "packages/api/src/infrastructure/connectors/connector-gateway-bootstrap.ts|must_not_contain|http://localhost:3003|connector command fallback should use Clowder AI frontend port"
-  "packages/api/src/infrastructure/connectors/connector-gateway-bootstrap.ts|must_contain|http://localhost:3003|connector command fallback should use Clowder AI frontend port"
-  # adapter media URLs — must not hardcode opensource ports (3003/3004); use API_SERVER_PORT env fallback.
-  # Outbound sync transforms 3002→3004; intake must catch un-reversed port references.
-  "packages/api/src/infrastructure/connectors/im-connectors/weixin/WeixinAdapter.ts|must_not_contain|localhost:3004|Weixin media fallback should use runtime API_SERVER_PORT not hardcoded opensource port"
-  "packages/api/src/infrastructure/connectors/im-connectors/weixin/WeixinAdapter.ts|must_not_contain|localhost:3003|Weixin media fallback should not reference opensource frontend port"
+  # Edition data is owned by the home deployment, even when consumers are shared.
+  "packages/shared/src/deployment-profiles.json|must_contain|\"activeProfile\"[[:space:]]*:[[:space:]]*\"home\"|active deployment profile must remain home"
   # API port drift guard — outbound sync transforms 3002→3004; intake must catch un-reversed drift.
   # These are high-risk files checked out from clowder-ai during intake.
   "packages/api/src/index.ts|must_not_contain|?? '3004'|API server port fallback should be 3002 (home), not 3004 (opensource)"

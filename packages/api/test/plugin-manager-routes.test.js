@@ -3,6 +3,8 @@ import { test } from 'node:test';
 import Fastify from 'fastify';
 
 import { PluginManagerServiceError } from '../dist/domains/plugin/index.js';
+import { PluginManagerBindings } from '../dist/domains/plugin/manager/plugin-manager-bindings.js';
+import { MemoryConnectorThreadBindingStore } from '../dist/infrastructure/connectors/ConnectorThreadBindingStore.js';
 import { pluginManagerUploadRoutes, registerPluginManagerRoutes } from '../dist/routes/plugin-manager-routes.js';
 
 const ownerUserId = process.env.DEFAULT_OWNER_USER_ID ?? 'owner-user';
@@ -49,6 +51,7 @@ async function harness({
   asset,
   documentation,
   contributions,
+  bindings,
 } = {}) {
   const calls = [];
   const audits = [];
@@ -68,6 +71,10 @@ async function harness({
     install: async (request) => {
       calls.push(['install', request]);
       return { pluginId: 'official.video', pluginInstanceId: 'pi_video' };
+    },
+    update: async (pluginId, request) => {
+      calls.push(['update', pluginId, request]);
+      return { pluginId, pluginInstanceId: 'pi_video' };
     },
     setEnabled: async (pluginId, request) => {
       calls.push(['set-enabled', pluginId, request]);
@@ -93,6 +100,7 @@ async function harness({
     ...(asset ? { asset } : {}),
     ...(documentation ? { documentation } : {}),
     ...(contributions ? { contributions } : {}),
+    ...(bindings ? { bindings } : {}),
     ...(callbackRegistry ? { callbackRegistry } : {}),
     auditLog: {
       append: async (event) => {
@@ -106,6 +114,120 @@ async function harness({
   await app.ready();
   return { app, audits, calls };
 }
+
+test('detail and crafted disconnect preserve Host-reserved binding while ordinary disconnect works', async () => {
+  const store = new MemoryConnectorThreadBindingStore();
+  const reserved = store.bind('official.video', '__plugin_system_thread__', 'system-thread', ownerUserId);
+  store.bind('official.video', 'room', 'external-thread', ownerUserId);
+  const { app } = await harness({
+    overrides: {
+      get: async () => ({ plugin: { ...listed.plugins[0], artifact: 'installed' }, catalog: listed.catalog }),
+    },
+    bindings: new PluginManagerBindings(store, { get: async (id) => ({ createdBy: ownerUserId, title: id }) }),
+  });
+  try {
+    const detail = await app.inject({
+      method: 'GET',
+      url: '/api/plugin-manager/plugins/official.video',
+      headers: readHeaders,
+    });
+    assert.equal(detail.statusCode, 200);
+    const rows = detail.json().plugin.bindings;
+    assert.deepEqual(
+      rows.map((row) => row.key),
+      ['room'],
+    );
+    const url = '/api/plugin-manager/plugins/official.video/bindings/disconnect';
+    const rejected = await app.inject({
+      method: 'POST',
+      url,
+      headers: writeHeaders,
+      payload: {
+        key: reserved.externalChatId,
+        threadId: reserved.threadId,
+        createdAt: reserved.createdAt,
+        confirmed: true,
+      },
+    });
+    assert.equal(rejected.statusCode, 409);
+    assert.deepEqual(store.getByExternal('official.video', reserved.externalChatId), reserved);
+    const removed = await app.inject({
+      method: 'POST',
+      url,
+      headers: writeHeaders,
+      payload: { key: rows[0].key, threadId: rows[0].threadId, createdAt: rows[0].createdAt, confirmed: true },
+    });
+    assert.equal(removed.statusCode, 200);
+    assert.equal(store.getByExternal('official.video', 'room'), null);
+    assert.deepEqual(store.getByExternal('official.video', reserved.externalChatId), reserved);
+  } finally {
+    await app.close();
+  }
+});
+
+test('binding projection is owner-scoped and disconnect rejects missing confirmation and stale bindings', async () => {
+  const received = [];
+  const shown = { key: 'room/1', threadId: 'thread-1', createdAt: 42 };
+  const { app } = await harness({
+    overrides: {
+      get: async () => ({ plugin: { ...listed.plugins[0], artifact: 'installed' }, catalog: listed.catalog }),
+    },
+    bindings: {
+      list: async (...args) => {
+        received.push(args);
+        return [{ ...shown, threadTitle: 'My thread' }];
+      },
+      disconnect: async (...args) => {
+        received.push(args);
+        return false;
+      },
+    },
+  });
+  try {
+    const detail = await app.inject({
+      method: 'GET',
+      url: '/api/plugin-manager/plugins/official.video',
+      headers: readHeaders,
+    });
+    assert.equal(detail.json().plugin.bindings[0].threadTitle, 'My thread');
+    assert.deepEqual(received, [['official.video', ownerUserId]]);
+    const url = '/api/plugin-manager/plugins/official.video/bindings/disconnect';
+    assert.equal((await app.inject({ method: 'POST', url, headers: writeHeaders, payload: shown })).statusCode, 400);
+    assert.equal(
+      (
+        await app.inject({
+          method: 'POST',
+          url,
+          headers: { host: writeHeaders.host, origin: writeHeaders.origin },
+          payload: { ...shown, confirmed: true },
+        })
+      ).statusCode,
+      401,
+    );
+    const stale = await app.inject({
+      method: 'POST',
+      url,
+      headers: writeHeaders,
+      payload: { ...shown, confirmed: true },
+    });
+    assert.equal(stale.statusCode, 409);
+    assert.equal(stale.json().code, 'STALE_BINDING');
+    assert.deepEqual(received[1], ['official.video', ownerUserId, { ...shown, confirmed: true }]);
+    assert.equal(
+      (
+        await app.inject({
+          method: 'POST',
+          url,
+          headers: writeHeaders,
+          payload: { ...shown, confirmed: true, userId: 'victim' },
+        })
+      ).statusCode,
+      400,
+    );
+  } finally {
+    await app.close();
+  }
+});
 
 test('serves package icons as authenticated same-origin resources with active-content confinement', async () => {
   const bytes = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"><path d="M0 0h1v1H0z"/></svg>');
@@ -223,7 +345,7 @@ function verifiedCallbackRegistry({ policy } = {}) {
   };
 }
 
-test('exposes exactly the six canonical Manager state/lifecycle operations through one service', async () => {
+test('exposes canonical Manager state/lifecycle operations and version update through one service', async () => {
   const { app, audits, calls } = await harness();
   try {
     assert.equal((await app.inject({ method: 'GET', url: '/api/plugin-manager/plugins' })).statusCode, 401);
@@ -299,8 +421,26 @@ test('exposes exactly the six canonical Manager state/lifecycle operations throu
 
     assert.equal(
       (await app.inject({ method: 'POST', url: '/api/plugin-manager/plugins/official.video/update' })).statusCode,
-      404,
+      403,
     );
+    const update = await app.inject({
+      method: 'POST',
+      url: '/api/plugin-manager/plugins/official.video/update',
+      headers: writeHeaders,
+      remoteAddress: '127.0.0.1',
+      payload: { expectedVersion: '1.1.0', expectedRevision: 3 },
+    });
+    assert.equal(update.statusCode, 200, update.payload);
+    assert.deepEqual(calls.at(-1), ['update', 'official.video', { expectedVersion: '1.1.0', expectedRevision: 3 }]);
+    assert.equal(audits.at(-1).data.operation, 'update');
+    const invalidUpdate = await app.inject({
+      method: 'POST',
+      url: '/api/plugin-manager/plugins/official.video/update',
+      headers: writeHeaders,
+      remoteAddress: '127.0.0.1',
+      payload: { expectedVersion: '1.1.0', expectedRevision: 3, source: { kind: 'git', url: 'https://other.invalid' } },
+    });
+    assert.equal(invalidUpdate.statusCode, 400);
     assert.equal(
       (await app.inject({ method: 'POST', url: '/api/plugin-manager/plugins/official.video/repair' })).statusCode,
       404,
@@ -400,7 +540,7 @@ test('verified Agent principal can read and mutate through the same owner/loopba
   }
 });
 
-test('verified Agent principal discovers and invokes only active Host-supervised plugin tools', async () => {
+test('verified Agent principal discovers and invokes only active plugin-declared direct tools', async () => {
   const contributionCalls = [];
   const inputSchema = {
     type: 'object',
@@ -491,7 +631,10 @@ test('verified Agent principal discovers and invokes only active Host-supervised
 });
 
 test('every restricted Agent policy is denied before Manager mutations and contribution calls', async () => {
-  for (const policy of [{ mode: 'read_only', replayDeniedToolNames: [] }, { mode: 'collective_participation' }]) {
+  for (const policy of [
+    { mode: 'read_only', replayDeniedToolNames: [] },
+    { mode: 'callback_allowlist', allowedCallbackRoutes: [] },
+  ]) {
     const readOnlyHarness = await harness({ callbackRegistry: verifiedCallbackRegistry({ policy }) });
     try {
       const read = await readOnlyHarness.app.inject({
@@ -505,7 +648,10 @@ test('every restricted Agent policy is denied before Manager mutations and contr
         },
         remoteAddress: '127.0.0.1',
       });
-      assert.equal(read.statusCode, 200, read.payload);
+      assert.equal(read.statusCode, policy.mode === 'read_only' ? 200 : 403, read.payload);
+      if (policy.mode === 'callback_allowlist') {
+        assert.equal(read.json().reason, 'callback_allowlist_tool_policy');
+      }
 
       const denied = await readOnlyHarness.app.inject({
         method: 'POST',
@@ -538,7 +684,7 @@ test('every restricted Agent policy is denied before Manager mutations and contr
       });
       assert.equal(contributionDenied.statusCode, 403, `${policy.mode}: ${contributionDenied.payload}`);
       assert.deepEqual(readOnlyHarness.audits, []);
-      assert.deepEqual(readOnlyHarness.calls, [['list']]);
+      assert.deepEqual(readOnlyHarness.calls, policy.mode === 'read_only' ? [['list']] : []);
     } finally {
       await readOnlyHarness.app.close();
     }
@@ -713,6 +859,35 @@ test('local path install audit records source kind but never persists the raw pa
     assert.equal(response.statusCode, 201, response.payload);
     assert.equal(audits[0].data.sourceKind, 'local-archive');
     assert.equal(JSON.stringify(audits[0]).includes('/private/tmp/secret-name.tgz'), false);
+  } finally {
+    await app.close();
+  }
+});
+
+test('git install passes the closed source through one Manager route without auditing the repository URL', async () => {
+  const { app, audits, calls } = await harness();
+  const url = 'https://git.example.invalid/plugins/example.git';
+  try {
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/plugin-manager/plugins/install',
+      headers: writeHeaders,
+      remoteAddress: '127.0.0.1',
+      payload: { source: { kind: 'git', url } },
+    });
+    assert.equal(response.statusCode, 201, response.payload);
+    assert.deepEqual(calls, [['install', { source: { kind: 'git', url } }]]);
+    assert.equal(audits[0].data.sourceKind, 'git');
+    assert.equal(JSON.stringify(audits[0]).includes(url), false);
+
+    const invalid = await app.inject({
+      method: 'POST',
+      url: '/api/plugin-manager/plugins/install',
+      headers: writeHeaders,
+      remoteAddress: '127.0.0.1',
+      payload: { source: { kind: 'git', url, extra: true } },
+    });
+    assert.equal(invalid.statusCode, 400, invalid.payload);
   } finally {
     await app.close();
   }

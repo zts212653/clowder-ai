@@ -2,15 +2,13 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { canonicalTestMessageInput } from '../helpers/message-from-fixtures.js';
 
-const HEAD_SHA = 'a'.repeat(40);
-
 const lease = {
   leaseId: 'lease-action-1',
-  key: 'user-1\u001fpr:owner/repo#42\u001freview\u001freviewer',
+  key: 'user-1\u001fsubject:task:work-42\u001fimplement\u001fimplementer',
   tenantScope: 'user-1',
-  subjectRef: 'pr:owner/repo#42',
-  actionFamily: 'review',
-  successorSlot: 'reviewer',
+  subjectRef: 'subject:task:work-42',
+  actionFamily: 'implement',
+  successorSlot: 'implementer',
   mode: 'single',
   holderCatIds: ['codex-terra'],
   dispatchId: 'approval:dp-action-1',
@@ -26,12 +24,11 @@ const lease = {
   evidenceRefs: ['approval:dp-action-1'],
   terminalPredicateState: { kind: 'predicate_backed' },
   terminalPredicate: {
-    kind: 'review_delivered',
-    subjectRef: 'pr:owner/repo#42',
-    identityKey: 'review_delivered\u001fpr:owner/repo#42',
-    freshnessKey: `head:${HEAD_SHA}`,
+    kind: 'task_done',
+    subjectRef: 'subject:task:work-42',
+    identityKey: 'task_done\u001fsubject:task:work-42',
+    freshnessKey: 'task:work-42',
     digest: 'predicate-digest',
-    headSha: HEAD_SHA,
   },
   returnTransitions: [],
   dispatchDeliveryState: 'pending',
@@ -45,7 +42,7 @@ const verifiedTruthResolver = {
   async resolveFreshness(predicate) {
     return {
       status: 'verified',
-      evidenceRef: `community:${predicate.subjectRef}:head:${HEAD_SHA}`,
+      evidenceRef: `task:${predicate.subjectRef}:active`,
       freshnessKey: predicate.freshnessKey,
     };
   },
@@ -58,14 +55,14 @@ const proposal = {
   senderCatId: 'codex-sol',
   ownerUserId: 'user-1',
   effectClass: 'assign_work',
-  content: 'Review exact HEAD.',
+  content: 'Complete the assigned Task.',
   targetCats: ['codex-terra'],
   proposedAction: {
-    subjectRef: 'pr:owner/repo#42',
-    actionFamily: 'review',
-    successorSlot: 'reviewer',
+    subjectRef: 'subject:task:work-42',
+    actionFamily: 'implement',
+    successorSlot: 'implementer',
     mode: 'single',
-    terminalPredicate: { kind: 'review_delivered', headSha: 'a'.repeat(40) },
+    terminalPredicate: { kind: 'task_done' },
   },
   envelopeDigest: 'sha256:proposal',
   status: 'approved',
@@ -111,7 +108,7 @@ test('message append and enqueue faults retry one exact fenced carrier without f
           assert.equal(id, current.leaseId);
           assert.equal(input.expectedGeneration, current.generation);
           assert.equal(input.expectedPredicateDigest, current.terminalPredicate.digest);
-          assert.equal(input.freshnessEvidenceRef, `community:${current.subjectRef}:head:${HEAD_SHA}`);
+          assert.equal(input.freshnessEvidenceRef, `task:${current.subjectRef}:active`);
           if (current.dispatchDeliveryState !== 'pending') {
             return { outcome: 'dispatch_not_pending', lease: current };
           }
@@ -321,7 +318,7 @@ test('stable approved-carrier retry produces one fenced queue dispatch', async (
       threadId: 'thread-target',
       userId: 'user-1',
       catId: 'codex-sol',
-      content: 'Review exact HEAD.',
+      content: 'Complete the assigned Task.',
       mentions: ['codex-terra'],
       origin: 'callback',
       timestamp: 2_000,

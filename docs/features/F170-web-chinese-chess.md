@@ -1,11 +1,11 @@
 ---
 feature_ids: [F170]
-tips_exempt: "The reopened scope records chess and replay requirements plus an external plugin prototype; the Host gameplay/replay journey remains unaccepted, so this specification must not advertise a newly available entry."
+tips_exempt: "Renewed 2026-10-21 for the C1 Host grant intake and isolated installed-plugin turn/restart evidence. The playable candidate still awaits its documented CODEOWNER/merge/release steps; replay, resignation and chess-strength work remain open, so this record must not advertise a newly available public entry."
 related_features: [F093, F311]
 topics: [game, frontend, companionship, replay, plugin]
 doc_kind: spec
 created: 2026-04-20
-updated: 2026-09-27
+updated: 2026-10-20
 description: "让人和猫在同一张可靠棋盘上认真对弈，流畅落子、保存多盘棋谱，并一起回看关键转折与学到的棋理。"
 description_source: model
 description_author: codex-astra
@@ -14,7 +14,7 @@ description_updated_at: 2026-09-27T02:04:07Z
 
 # F170: Web Chinese Chess — 网页象棋、人猫对弈与复盘
 
-> **Status**: in-progress（插件基础已合入 clowder-ai-plugins#65；Astra 已验 packed MCP，Host 棋盘接入、真实对弈与 D4/E/F2–F3 仍开放） | **Owner**: 小星星·Maine Coon（@codex-astra, gpt-6-astra；原 A/B owner：Ragdoll） | **Priority**: P2
+> **Status**: in-progress（插件基础已合入 #65；安装后真实回合与恢复已实测，#66 最终独立审查通过，待 CODEOWNER 批准及合入发布；D4/E/F2–F3 仍开放） | **Owner**: 小星星·Maine Coon（@codex-astra, gpt-6-astra；原 A/B owner：Ragdoll） | **Priority**: P2
 
 ## Why
 
@@ -57,6 +57,14 @@ You 明确要求：“F170这个特性最好做成的是插件形式，不要硬
 - [clowder-ai-plugins#65](https://github.com/zts212653/clowder-ai-plugins/pull/65) 已合入 `d5cc46aac57d8b746056dd98989f7993586067dd`，与 Kimi 独立批准的 `b7872e723feddd0194526ea10deb54f1956186bd` 具有同一代码树；[合入后 CI](https://github.com/zts212653/clowder-ai-plugins/actions/runs/36329448240) 通过。
 - 这是代码及发布物形态的局面工具验收；尚未发布象棋 npm 包或加入 machine catalog，未切换原棋盘。完整“安装→绑定→确认落子→猫亲选→页面应招”仍未验收，R7 保持开放。
 - Host 已有 Broker/ThreadHandle 基础，仍需消费通用受限 UI、授权目标/存储、受控唤醒与候选提交通道。F202 接口协调已实际路由至 `[thread-id]`，消息 `private-source-id`；原 Task `private-source-id` 的 owner 仍为 Astra，不能因子线程终报关闭整体验收。
+
+### 2026-10-20 可玩插件续办
+
+operator 在原执行 thread 明确要求“推进到可玩可用然后合入”（`[thread-id]#private-source-id`）。由 @codex61-sol 沿原责任继续，不另立 Feature，也不把整个 D/E/F 宣称完成。
+
+- [插件 #66](https://github.com/zts212653/clowder-ai-plugins/pull/66) 已迁移为消费现行 F202 C1 的真实 module/MCP 插件，最终候选 `8f339c3fb5ecd145e24826815231b94af7c419f8`，版本 `0.1.0-alpha.2`；契约草案不再作为集成前提。候选包已真实安装、启用并由普通 owner invocation 调用。两项远端 CI 成功，Kimi 完整独立批准同一 HEAD 并判断“可玩可用”约定兑现（`private-source-id`）。另一方 CODEOWNER 批准仍待完成，尚未合入或发布。
+- [Host #1637](https://github.com/zts212653/clowder-ai/pull/1637) 已于 2026-10-20T09:20:48Z 合入 `c086765ddb7181722f03f9f53c7a7ee17a29f147`。仅为官方包配置三个 owner 级普通 grant，包内再绑定 user/thread/cat；不是 Host 逐盘 ACL。家里对应吸收 [#5790](https://github.com/zts212653/clowder-ai/pull/5790) 已合入 `0b0fd3aecd499b65e4296989efee69cfeeb62c6c`，Kimi 正式批准、61/61 通过；原生 strict record/advance 后 ledger 提交 `96cf9c67b1a2c534027e8c288ef528626effd790` 已推送，水位覆盖 `c086765d`。
+- 当前交付仅支持同机本地棋盘、默认人执红；原私人棋谱没有读取或修改。npm、live catalog 与生产安装仍按各自实际结果确认；多盘回放、复盘、认输策略及棋力判断保持原有开放范围。
 
 ## What
 

@@ -1,5 +1,6 @@
 import { isDeepStrictEqual } from 'node:util';
 import type { DeploymentWaitStateV1, TaskItem } from '@cat-cafe/shared';
+import { advanceEntrustedTaskAuthority } from './EntrustedWorkRevision.js';
 import type { ReplaceDeploymentWaitIfGenerationInput } from './TaskStoreContract.js';
 
 export function deploymentWaitGeneration(state: DeploymentWaitStateV1 | undefined): number | null {
@@ -122,10 +123,10 @@ export function buildTaskDeploymentWaitReplacement(
     throw new Error('terminal work cannot register or advance a deployment wait');
   }
   assertState(input.deploymentWait);
-  return {
+  return advanceEntrustedTaskAuthority(existing, {
     ...existing,
     deploymentWait: input.deploymentWait,
     ...(input.status !== undefined ? { status: input.status } : {}),
     updatedAt: Date.now(),
-  };
+  });
 }

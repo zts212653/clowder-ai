@@ -13,17 +13,17 @@ const { canonicalizeActionTerminalPredicate } = await import(
 
 function createCompletionStates(mode = 'parallel') {
   const predicate = canonicalizeActionTerminalPredicate({
-    actionFamily: 'review',
-    subjectRef: 'pr:owner/repo#2868',
-    predicate: { kind: 'review_delivered', headSha: 'cccccccccccccccccccccccccccccccccccccccc' },
+    actionFamily: 'implement',
+    subjectRef: 'subject:task:work-2868',
+    predicate: { kind: 'task_done' },
   });
   const holderCatIds = mode === 'single' ? ['codex-terra'] : ['codex-terra', 'opus'];
   const claimed = claimActionSuccessor(null, {
     leaseId: 'lease-parallel',
     tenantScope: 'user-1',
-    subjectRef: 'pr:owner/repo#2868',
-    actionFamily: 'review',
-    successorSlot: 'reviewer',
+    subjectRef: 'subject:task:work-2868',
+    actionFamily: 'implement',
+    successorSlot: 'implementer',
     mode,
     holderCatIds,
     ...(mode === 'parallel' ? { parallelIntent: 'independent_review' } : {}),
@@ -40,7 +40,7 @@ function createCompletionStates(mode = 'parallel') {
   const candidate = recordActionCompletionCandidate(claimed, {
     generation: 1,
     catId: 'codex-terra',
-    evidenceRefs: ['community:pr:owner/repo#2868:review:terra'],
+    evidenceRefs: ['community:subject:task:work-2868:review:terra'],
     now: 110,
   });
   const snapshot = candidate.completionCandidates['codex-terra'];
@@ -49,7 +49,7 @@ function createCompletionStates(mode = 'parallel') {
     catId: 'codex-terra',
     verdict: {
       status: 'verified',
-      evidenceRef: 'community:pr:owner/repo#2868:review:terra',
+      evidenceRef: 'community:subject:task:work-2868:review:terra',
       predicateDigest: predicate.digest,
       freshnessKey: predicate.freshnessKey,
       candidateRevision: snapshot.candidateRevision,
@@ -77,7 +77,7 @@ it('treats a successful parallel holder completion replay as committed while pee
       leaseId: 'lease-parallel',
       generation: 1,
       catId: 'codex-terra',
-      evidenceRefs: ['community:pr:owner/repo#2868:review:terra'],
+      evidenceRefs: ['community:subject:task:work-2868:review:terra'],
       now: 120,
     }),
     { outcome: 'committed', leaseId: 'lease-parallel', generation: 1 },
@@ -103,7 +103,7 @@ it('treats a candidate CAS loss to exact same-generation success as committed', 
       leaseId: 'lease-parallel',
       generation: 1,
       catId: 'codex-terra',
-      evidenceRefs: ['community:pr:owner/repo#2868:review:terra'],
+      evidenceRefs: ['community:subject:task:work-2868:review:terra'],
       now: 120,
     }),
     { outcome: 'committed', leaseId: 'lease-parallel', generation: 1 },
@@ -123,7 +123,7 @@ it('treats a verdict CAS loss to exact same-generation success as committed', as
   const truthResolver = {
     resolveCompletion: mock.fn(async () => ({
       status: 'verified',
-      evidenceRef: 'community:pr:owner/repo#2868:review:terra',
+      evidenceRef: 'community:subject:task:work-2868:review:terra',
       predicateDigest: predicate.digest,
       freshnessKey: predicate.freshnessKey,
       candidateRevision: snapshot.candidateRevision,
@@ -137,7 +137,7 @@ it('treats a verdict CAS loss to exact same-generation success as committed', as
       leaseId: 'lease-parallel',
       generation: 1,
       catId: 'codex-terra',
-      evidenceRefs: ['community:pr:owner/repo#2868:review:terra'],
+      evidenceRefs: ['community:subject:task:work-2868:review:terra'],
       now: 120,
     }),
     { outcome: 'committed', leaseId: 'lease-parallel', generation: 1 },
@@ -207,7 +207,7 @@ it('reconciles Queue and tracking projections on the first terminal commit and s
     leaseId: claimed.leaseId,
     generation: claimed.generation,
     catId: 'codex-terra',
-    evidenceRefs: ['community:pr:owner/repo#2868:review:terra'],
+    evidenceRefs: ['community:subject:task:work-2868:review:terra'],
     now: 120,
   };
 

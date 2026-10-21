@@ -2,19 +2,18 @@ import { createHash } from 'node:crypto';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { CollectiveConnector, type CollectiveConnectorOptions } from '@cat-cafe/collective-connector';
-import { participationFixture } from '../../collective-service/src/__tests__/participation-fixture.js';
-import { startCollectiveServer } from '../../collective-service/src/index.js';
 import { ArtifactReviewStore } from '../src/domains/collaborative-content/artifact-review/store.js';
 import { CollectiveMarkdownOwner } from '../src/domains/collaborative-content/collective-artifact/markdown-owner.js';
 import { WorkspaceContentReviewStore } from '../src/domains/collaborative-content/workspace-review/store.js';
 import { collectiveContentScopeRef } from '../src/domains/video-studio/content-owner/collective-scope.js';
 import { ProjectContentOwnerService } from '../src/domains/video-studio/content-owner/service.js';
+import { CollectiveConnector, startCollectiveServer } from './helpers/f202-collective-installed-business.js';
+import { participationFixture } from './helpers/f202-collective-participation.fixture.js';
 
 export async function collectiveArtifactOwnerFixture(
   t: { after(fn: () => Promise<unknown>): void },
   options: {
-    verifyAgent?: CollectiveConnectorOptions['verifyAgent'];
+    verifyAgent?: (agent: { catId: string; sessionRef: string }) => Promise<boolean>;
     text?: string;
     additionalHostOrigins?: readonly string[];
   } = {},
@@ -126,6 +125,7 @@ export async function collectiveArtifactOwnerFixture(
   modifications = new ArtifactReviewStore(join(root, 'artifact-reviews.sqlite'));
   const port = new CollectiveMarkdownOwner({ owner, reviews, modifications, ownerUserId: 'real-local-owner' });
   connector.setArtifactOwner(port);
+  let automaticSync = false;
   const request = async (
     token: string,
     action: string,
@@ -164,7 +164,7 @@ export async function collectiveArtifactOwnerFixture(
       if (settled) break;
       await new Promise<void>((resolve) => setTimeout(resolve, 5));
     }
-    if (admitted) await connector.sync(connection.connectionId);
+    if (admitted && !automaticSync) await connector.sync(connection.connectionId);
     return waiting;
   };
   // Test-only inspection of the private endpoint file; production only uses the Connector capability.
@@ -180,6 +180,9 @@ export async function collectiveArtifactOwnerFixture(
   }
   return {
     ...f,
+    useBackgroundSync: () => {
+      automaticSync = true;
+    },
     root,
     server,
     connector,

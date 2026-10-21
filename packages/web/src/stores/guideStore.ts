@@ -36,6 +36,8 @@ export interface OrchestrationFlow {
   id: string;
   name: string;
   description?: string;
+  /** Informational reminders never capture focus or block interaction. */
+  nonBlocking?: boolean;
   steps: OrchestrationStep[];
 }
 
@@ -62,6 +64,8 @@ export interface GuideServerEvent {
 
 interface GuideState {
   session: GuideSession | null;
+  /** Recoverable definition-load failure; completion still belongs to the original receipt owner. */
+  startFailure: { guideId: string; threadId: string; message: string } | null;
   /** True once the backend has acknowledged guide completion */
   completionPersisted: boolean;
   /** True when completion callback failed permanently — overlay shows error instead of dismiss */
@@ -103,6 +107,7 @@ let sessionCounter = 0;
 
 export const useGuideStore = create<GuideState>((set, get) => ({
   session: null,
+  startFailure: null,
   completionPersisted: false,
   completionFailed: false,
   pendingStart: null,
@@ -111,6 +116,7 @@ export const useGuideStore = create<GuideState>((set, get) => ({
   startGuide: (flow, threadId) => {
     sessionCounter += 1;
     set({
+      startFailure: null,
       completionPersisted: false,
       completionFailed: false,
       session: {
@@ -169,7 +175,7 @@ export const useGuideStore = create<GuideState>((set, get) => ({
       if (state.session.sessionId !== sessionId || state.session.phase !== 'complete') {
         return state;
       }
-      return { completionPersisted: true };
+      return { completionPersisted: true, completionFailed: false };
     }),
 
   markCompletionFailed: (sessionId) =>
@@ -201,7 +207,7 @@ export const useGuideStore = create<GuideState>((set, get) => ({
 
     switch (event.action) {
       case 'start':
-        set({ pendingStart: { guideId: event.guideId, threadId: event.threadId } });
+        set({ startFailure: null, pendingStart: { guideId: event.guideId, threadId: event.threadId } });
         break;
       case 'control_next':
       case 'control_skip':

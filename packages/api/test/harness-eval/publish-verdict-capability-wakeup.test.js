@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { after, before, describe, it } from 'node:test';
 import { createCapabilityWakeupGeneratorAdapter } from '../../dist/infrastructure/harness-eval/publish-verdict/capability-wakeup-generator-adapter.js';
 import { handlePublishVerdict } from '../../dist/infrastructure/harness-eval/publish-verdict/publish-verdict.js';
-import { seedCanonicalMeasurementCensusState } from './publish-verdict-fixtures.js';
+import { seedCanonicalMeasurementCensusState, unreachablePublisher } from './publish-verdict-fixtures.js';
 
 /**
  * F192 Phase H 收尾 PR-2 — end-to-end test: handler dispatches to capability-wakeup
@@ -294,7 +294,7 @@ sla:
     // generator → 501. This proves the route-layer dispatch contract: handler depends
     // on deps.generator presence, not on domain hardcoding.
     const result = await handlePublishVerdict(
-      { harnessFeedbackRoot: root /* generator omitted */ },
+      { gitPublisher: unreachablePublisher, harnessFeedbackRoot: root /* generator omitted */ },
       {
         packet: buildCwPacket({ id: 'vhp-cw-no-gen' }),
         domain: 'eval:capability-wakeup',

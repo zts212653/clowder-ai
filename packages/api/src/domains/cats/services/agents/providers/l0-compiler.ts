@@ -30,6 +30,7 @@ import {
   DEFAULT_PROFILE_USER_ID,
 } from '@cat-cafe/shared/profile-contract';
 import { profilePointerEmitted } from '../../../../../infrastructure/telemetry/instruments.js';
+import { saveSpan } from '../../../../../utils/member-save-diagnostics.js';
 import { FileProfileRepository } from '../../profile/ProfileRepository.js';
 import { L0DependencySignatureTracker } from './l0-dependency-signature.js';
 import { type L0CacheGeneration, L0ProfileCache, type L0Projection } from './l0-profile-cache.js';
@@ -75,7 +76,7 @@ export async function warmL0Cache(
 ): Promise<void> {
   await Promise.all(
     catIds.map((catId) =>
-      compileL0ViaSubprocess({ catId, userId }).catch((err: unknown) => {
+      saveSpan('l0.compile', () => compileL0ViaSubprocess({ catId, userId }), { catId }).catch((err: unknown) => {
         logger?.warn({ catId, err: (err as Error).message }, 'L0 pre-compile failed at startup (will retry on invoke)');
       }),
     ),
@@ -155,8 +156,7 @@ type L0ProjectionContext =
 
 function resolveProjection(options: CompileL0Options): L0Projection {
   if (options.projection === undefined) return 'owner';
-  if (options.projection === 'owner' || options.projection === 'public' || options.projection === 'collective-work')
-    return options.projection;
+  if (options.projection === 'owner' || options.projection === 'public') return options.projection;
   throw new Error(`Unsupported L0 projection: ${String(options.projection)}`);
 }
 

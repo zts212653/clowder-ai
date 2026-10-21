@@ -43,8 +43,8 @@ describe('F202 terminal Plugin Manager Design Gate', () => {
     expect(container.textContent).not.toContain('需处理');
   });
 
-  it('limits the default recommendation shelf to three catalog candidates but searches all matches', async () => {
-    const candidates = Array.from({ length: 5 }, (_, index) => ({
+  it('shows five recommendations, expands the rest, and searches all matches', async () => {
+    const candidates = Array.from({ length: 7 }, (_, index) => ({
       ...PLUGIN_MANAGER_DESIGN_FIXTURES[2],
       id: `recommended-${index + 1}`,
       displayName: `推荐插件 ${index + 1}`,
@@ -53,7 +53,10 @@ describe('F202 terminal Plugin Manager Design Gate', () => {
       root.render(<PluginManagerContent fixtures={[PLUGIN_MANAGER_DESIGN_FIXTURES[0], ...candidates]} />),
     );
 
-    expect(container.querySelectorAll('[data-plugin-section="recommended"] [data-plugin-id]')).toHaveLength(3);
+    expect(container.querySelectorAll('[data-plugin-section="recommended"] [data-plugin-id]')).toHaveLength(5);
+
+    await act(async () => button(container, '查看更多插件')?.click());
+    expect(container.querySelectorAll('[data-plugin-section="recommended"] [data-plugin-id]')).toHaveLength(7);
 
     const search = container.querySelector('input[aria-label="搜索插件"]') as HTMLInputElement | null;
     await act(async () => {
@@ -62,7 +65,7 @@ describe('F202 terminal Plugin Manager Design Gate', () => {
       search?.dispatchEvent(new Event('input', { bubbles: true }));
     });
 
-    expect(container.querySelectorAll('[data-plugin-section="recommended"] [data-plugin-id]')).toHaveLength(5);
+    expect(container.querySelectorAll('[data-plugin-section="recommended"] [data-plugin-id]')).toHaveLength(7);
   });
 
   it('uses a filled accessible selection state without the persistent accent outline', async () => {
@@ -98,7 +101,7 @@ describe('F202 terminal Plugin Manager Design Gate', () => {
 
     expect(container.querySelectorAll('[data-plugin-id]')).toHaveLength(2);
     expect(container.textContent).toContain('视频分析');
-    expect(container.textContent).toContain('本地视频生成');
+    expect(container.textContent).toContain('Video Generation');
   });
 
   it('expresses installed state only through toggle and uninstall actions', async () => {
@@ -115,28 +118,9 @@ describe('F202 terminal Plugin Manager Design Gate', () => {
     expect(detail?.querySelector('button[aria-label^="卸载"]')).toBeNull();
     expect(detail?.textContent).not.toContain('已安装');
     expect(detail?.textContent).not.toContain('未安装');
-    expect(detail?.textContent).toContain('事件输入');
+    expect(detail?.textContent).not.toContain('事件输入');
     expect(container.textContent).not.toContain('更新');
     expect(container.textContent).not.toContain('修复');
-  });
-
-  it('does not draw a fake lifecycle toggle for read-only compatibility rows', async () => {
-    const compatibility = {
-      ...PLUGIN_MANAGER_DESIGN_FIXTURES[0],
-      sourceAdapter: 'repository-local' as const,
-      actions: {
-        install: false,
-        setEnabled: false,
-        uninstall: false,
-        blockingReasons: ['compatibility-read-only'],
-      },
-    };
-
-    await act(async () => root.render(<PluginManagerContent fixtures={[compatibility]} />));
-
-    const row = container.querySelector('[data-plugin-id="github"]');
-    expect(row?.querySelector('button[aria-pressed]')).toBeNull();
-    expect(row?.querySelector('button[aria-label^="卸载"]')).toBeNull();
   });
 
   it('keeps a blocked lifecycle toggle actionable and routes it to configuration', async () => {
@@ -275,12 +259,23 @@ describe('F202 terminal Plugin Manager Design Gate', () => {
     expect(container.textContent).toContain('Plugin package archive failed Host verification.');
   });
 
-  it('places offline install in the page toolbar, outside the list column', async () => {
-    await act(async () => root.render(<PluginManagerContent fixtures={PLUGIN_MANAGER_DESIGN_FIXTURES} />));
+  it('places directory install and repository settings in the page toolbar', async () => {
+    await act(async () =>
+      root.render(
+        <PluginManagerContent
+          fixtures={PLUGIN_MANAGER_DESIGN_FIXTURES}
+          onDirectoryInstall={vi.fn()}
+          onMarketplaceChange={vi.fn()}
+        />,
+      ),
+    );
 
     const toolbar = container.querySelector('[data-plugin-manager-toolbar]');
     const list = container.querySelector('[data-mobile-panel="list"]');
-    expect(toolbar?.textContent).toContain('离线安装');
+    expect(toolbar?.textContent).toContain('从本地目录安装');
+    expect(toolbar?.querySelector('[aria-label="管理插件仓库"]')).not.toBeNull();
+    expect(container.textContent).not.toContain('离线安装');
+    expect(container.textContent).not.toContain('从 Git 安装');
     expect(list?.textContent).not.toContain('离线安装');
     expect(toolbar?.className).toContain('justify-end');
   });
@@ -390,7 +385,7 @@ describe('F202 terminal Plugin Manager Design Gate', () => {
       tools: [
         {
           contributionId: 'video-analysis-toolset',
-          name: 'video_analysis',
+          name: 'video_analysis_execute',
           description: '分析远程视频并返回结构化结果。',
         },
       ],
@@ -401,10 +396,40 @@ describe('F202 terminal Plugin Manager Design Gate', () => {
     const detail = container.querySelector('[data-testid="plugin-manager-detail"]');
     const capabilityRow = detail?.querySelector('[data-contribution-kind="mcp"] li');
     expect(detail?.textContent).toContain('MCP');
-    expect(capabilityRow?.textContent).toBe('video_analysis — 分析远程视频并返回结构化结果。');
+    expect(capabilityRow?.textContent).toBe('video_analysis_execute — 分析远程视频并返回结构化结果。');
     expect(capabilityRow?.querySelectorAll('p')).toHaveLength(1);
     expect(detail?.textContent?.match(/Analyze video/g) ?? []).toHaveLength(0);
     expect(detail?.textContent).not.toContain('插件未提供用途说明。');
+  });
+
+  it.each(['v1', 'v2'] as const)('shows callable capabilities without internal wiring in %s', async (presentation) => {
+    const contributions = [
+      ...Array.from({ length: 29 }, (_, i) => ({
+        id: `community-http-${i + 1}`,
+        name: `community-http-${i + 1}`,
+        kind: 'webhook' as const,
+      })),
+      { id: 'github-notification', name: 'github-notification', kind: 'identity' as const },
+      { id: 'github-wait', name: 'github-wait', kind: 'identity' as const },
+      ...(['mcp', 'skill', 'schedule', 'direct-tool', 'limb', 'ui', 'desktop-window'] as const).map((kind) => ({
+        id: `public-${kind}`,
+        name: `public-${kind}`,
+        kind,
+      })),
+    ];
+    const plugin = {
+      ...PLUGIN_MANAGER_DESIGN_FIXTURES[0],
+      contributions,
+      tools: [{ contributionId: 'public-mcp', name: 'github_read' }],
+    };
+    await act(async () => root.render(<PluginManagerContent fixtures={[plugin]} presentation={presentation} />));
+    const detail = container.querySelector('[data-testid="plugin-manager-detail"]');
+    expect(detail?.textContent).not.toMatch(/community-http|github-notification|github-wait/);
+    expect(detail?.textContent).toContain('github_read');
+    for (const kind of ['mcp', 'skill', 'schedule', 'direct-tool', 'limb', 'ui', 'desktop-window']) {
+      expect(detail?.querySelector(`[data-contribution-kind="${kind}"]`)).not.toBeNull();
+    }
+    expect(plugin.contributions).toHaveLength(38);
   });
 
   it('labels content editor provider contributions from the manifest without Host-specific copy', async () => {

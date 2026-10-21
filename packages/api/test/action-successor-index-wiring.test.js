@@ -49,15 +49,8 @@ describe('F167 successor runtime wiring', () => {
     );
   });
 
-  it('boot-asserts the admitted predicate capability and wires both producer ports non-optionally', () => {
-    const verdictWiring = block('let externalReviewVerdictService:', 'const callbackOpts = {');
-    assert.match(verdictWiring, /assertActionTerminalCapabilityRegistryReady\(/);
-    assert.match(verdictWiring, /action_successor_preflight: preflightActionLease/);
-    assert.match(verdictWiring, /action_successor_completion: completeActionLease/);
-    assert.match(verdictWiring, /preflightLease: preflightActionLease/);
-    assert.match(verdictWiring, /completeActionLease,/);
-    assert.doesNotMatch(verdictWiring, /local_review_verdict/);
-    assert.doesNotMatch(verdictWiring, /\.\.\.\(actionSuccessor(?:LeaseStore|CompletionService)/);
+  it('keeps plugin business out of the Task truth resolver', () => {
+    assert.doesNotMatch(source, /pluginPredicateProvider|predicateProvider:|authorizeDispatchRecovery/);
   });
 
   it('keeps local review out of action lease settlement and recovery wiring', () => {

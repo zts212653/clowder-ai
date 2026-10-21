@@ -10,19 +10,19 @@ import {
 import { reconcileActionSuccessorEnqueue } from '../dist/domains/ball-custody/reconcile-action-successor-enqueue.js';
 
 const terminalPredicate = canonicalizeActionTerminalPredicate({
-  actionFamily: 'review',
-  subjectRef: 'pr:owner/repo#4058',
-  predicate: { kind: 'review_delivered', headSha: 'a'.repeat(40) },
+  actionFamily: 'implement',
+  subjectRef: 'subject:task:work-4058',
+  predicate: { kind: 'task_done' },
 });
 
 function lease(overrides = {}) {
   return {
     leaseId: 'lease-review-4058',
-    key: 'user-1|pr:owner/repo#4058|review|reviewer',
+    key: 'user-1|subject:task:work-4058|implement|implementer',
     tenantScope: 'user-1',
-    subjectRef: 'pr:owner/repo#4058',
-    actionFamily: 'review',
-    successorSlot: 'reviewer',
+    subjectRef: 'subject:task:work-4058',
+    actionFamily: 'implement',
+    successorSlot: 'implementer',
     mode: 'single',
     holderCatIds: ['opus5'],
     dispatchId: 'cross-post:review-4058-old',
@@ -57,11 +57,11 @@ function request(overrides = {}) {
     evidenceRef: 'callback:new-invocation:review-4058-reentry',
     now: 200,
     action: {
-      subjectRef: 'pr:owner/repo#4058',
-      actionFamily: 'review',
-      successorSlot: 'reviewer',
+      subjectRef: 'subject:task:work-4058',
+      actionFamily: 'implement',
+      successorSlot: 'implementer',
       mode: 'single',
-      terminalPredicate: { kind: 'review_delivered', headSha: 'a'.repeat(40) },
+      terminalPredicate: { kind: 'task_done' },
     },
     ...overrides,
   };
@@ -145,7 +145,8 @@ describe('direct action successor carrier recovery', () => {
         request({
           action: {
             ...request().action,
-            terminalPredicate: { kind: 'review_delivered', headSha: 'b'.repeat(40) },
+            subjectRef: 'subject:task:another-task',
+            terminalPredicate: { kind: 'task_done' },
           },
         }),
       ),

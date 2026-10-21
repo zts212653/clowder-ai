@@ -12,9 +12,14 @@ import { ThemeApplier } from '@/components/ThemeApplier';
 import { ThemeProvider } from '@/components/ThemeProvider';
 import { ToastContainer } from '@/components/ToastContainer';
 import { ConfirmProvider } from '@/components/useConfirm';
+import vendorStylesheets from '@/generated/vendor-stylesheets.json';
 import { META_THEME_COLOR } from '@/lib/color-defaults';
 import { buildPwaRetirementScript } from '@/lib/pwa-retirement-script';
+import { runtimeApiOriginFromPort } from '@/lib/runtime-api-origin';
 import './globals.css';
+
+// The document must carry this process's API port, never a statically baked build port.
+export const dynamic = 'force-dynamic';
 
 export const viewport: Viewport = {
   width: 'device-width',
@@ -56,18 +61,12 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       data-cat-cafe-build-revision={embeddedBrowserBuildRevision}
       data-cat-cafe-pwa-retirement={pwaEnabled ? 'enabled' : 'disabled'}
       data-pwa-cleanup-state={pwaEnabled ? 'enabled' : 'pending'}
+      data-cat-cafe-api-origin={runtimeApiOriginFromPort(process.env.API_SERVER_PORT)}
     >
       <head>
-        <link rel="stylesheet" href="/vendor/app/theme-tokens.css" />
-        <link rel="stylesheet" href="/vendor/app/cat-persona-tokens.css" />
-        <link rel="stylesheet" href="/vendor/app/cat-persona-derived.css" />
-        <link rel="stylesheet" href="/vendor/app/connector-tokens.css" />
-        <link rel="stylesheet" href="/vendor/app/theme-extras.css" />
-        <link rel="stylesheet" href="/vendor/app/console-tokens.css" />
-        <link rel="stylesheet" href="/vendor/app/console-shell.css" />
-        <link rel="stylesheet" href="/vendor/app/console-controls.css" />
-        <link rel="stylesheet" href="/vendor/app/shell-v2.css" />
-        <link rel="stylesheet" href="/vendor/xterm/xterm.css" />
+        {vendorStylesheets.map((href) => (
+          <link key={href} rel="stylesheet" href={href} />
+        ))}
       </head>
       <body className="min-h-screen">
         {pwaRetirementScript ? (

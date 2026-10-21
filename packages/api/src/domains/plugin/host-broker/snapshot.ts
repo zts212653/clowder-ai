@@ -1,13 +1,10 @@
 import {
-  type Capability,
   validateBindingNonce,
   validateCandidateHello,
   validateContractVersion,
-  validateEffectiveGrants,
   validatePackageDigest,
   validatePluginId,
   validateWireVersion,
-  WIRE_METHOD_NAMES,
 } from '@clowder-ai/plugin-contract';
 import { parseStaticFeatureLedger } from './static-feature-ledger.js';
 import type {
@@ -30,7 +27,6 @@ const SESSION_PHASES = new Set<BrokerSessionPhase>([
 ]);
 const LEASE_STATES = new Set<BrokerRuntimeLeaseState>(['pending', 'live', 'expired', 'revoked', 'closed']);
 const CALL_PHASES = new Set<BrokerCallPhase>(['claimed', 'dispatched', 'settled_success', 'settled_error']);
-const METHODS = new Set<string>(WIRE_METHOD_NAMES);
 
 function corrupt(message: string): never {
   throw new HostBrokerError('CORRUPT_SNAPSHOT', message);
@@ -95,12 +91,17 @@ function sessionIdentity(raw: Record<string, unknown>, label: string) {
   return { pluginId, packageDigest, contractVersion, wireVersion, candidate };
 }
 
-function sessionEffectiveGrants(value: unknown, label: string): Capability[] | undefined {
+// Stored sessions survive contract changes; live authority is always revalidated against inventory.
+function sessionEffectiveGrants(value: unknown, label: string): string[] | undefined {
   if (value === undefined) return undefined;
-  if (!Array.isArray(value) || !value.every((grant) => typeof grant === 'string') || !validateEffectiveGrants(value)) {
+  if (
+    !Array.isArray(value) ||
+    !value.every((grant) => typeof grant === 'string' && grant.trim().length > 0) ||
+    new Set(value).size !== value.length
+  ) {
     corrupt(`${label}.effectiveGrants is invalid`);
   }
-  return [...value] as Capability[];
+  return [...value];
 }
 
 function assertSessionPhase(
@@ -108,7 +109,7 @@ function assertSessionPhase(
   authority: {
     readonly candidate: unknown;
     readonly grantRevision?: number;
-    readonly effectiveGrants?: readonly Capability[];
+    readonly effectiveGrants?: readonly string[];
     readonly bindingNonce?: string;
     readonly activeLeaseExpiresAt?: number;
   },
@@ -229,7 +230,7 @@ function parseCall(value: unknown, index: number): BrokerCallRecord {
   const label = `calls[${index}]`;
   const raw = object(value, label);
   const method = string(raw.method, `${label}.method`);
-  if (!METHODS.has(method)) corrupt(`${label}.method is not in the public registry`);
+  // This is a historical receipt, not registration of a callable method.
   const packageDigest = string(raw.packageDigest, `${label}.packageDigest`);
   if (!validatePackageDigest(packageDigest)) corrupt(`${label}.packageDigest is invalid`);
   const phase = enumValue(raw.phase, CALL_PHASES, `${label}.phase`);
@@ -244,7 +245,7 @@ function parseCall(value: unknown, index: number): BrokerCallRecord {
     pluginInstanceId: string(raw.pluginInstanceId, `${label}.pluginInstanceId`),
     packageDigest,
     grantRevision: positiveRevision(raw.grantRevision, `${label}.grantRevision`),
-    method: method as BrokerCallRecord['method'],
+    method,
     settlementKey: string(raw.settlementKey, `${label}.settlementKey`),
     inputDigest: string(raw.inputDigest, `${label}.inputDigest`),
     phase,

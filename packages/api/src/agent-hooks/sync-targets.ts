@@ -74,7 +74,7 @@ export function checkDrift(target: SyncTarget): DriftResult {
   };
 }
 
-export function applySync(target: SyncTarget, dryRun: boolean): void {
+export function applySync(target: SyncTarget, dryRun: boolean, quiet = false): void {
   const rendered = target.render();
 
   if (dryRun) {
@@ -92,7 +92,7 @@ export function applySync(target: SyncTarget, dryRun: boolean): void {
   if (target.executable || target.targetPath.endsWith('.sh')) {
     chmodSync(target.targetPath, 0o755);
   }
-  console.log(`synced ${target.name} -> ${target.targetPath}`);
+  if (!quiet) console.log(`synced ${target.name} -> ${target.targetPath}`);
 }
 
 function readUserHook(projectRoot: string, name: string): string {

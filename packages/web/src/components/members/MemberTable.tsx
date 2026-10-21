@@ -6,10 +6,13 @@ import type { ConfigData } from '../config-viewer-types';
 import type { RoutingContextQueryState } from '../routing-context/useRoutingContext';
 import { useMembersCopy, useMemberText } from './editor-presentation';
 import { MemberAccountName } from './MemberAccountName';
+import { MemberIdentityDetails } from './MemberIdentityDetails';
+import { MemberRuntimeSummary } from './MemberRuntimeSummary';
 import { MemberStatus } from './MemberStatus';
-import { memberClientName, memberStatus, memberTransport } from './member-projection';
+import { memberStatus, memberTransport } from './member-projection';
 import { useMemberClock } from './useMemberClock';
 import type { useMemberList } from './useMemberList';
+import { useMemberLoginCheck } from './useMemberLoginCheck';
 export function MemberTable({
   config,
   visible,
@@ -39,6 +42,7 @@ export function MemberTable({
   const t = useMemberText();
   const copy = useMembersCopy();
   const now = useMemberClock(routing.data);
+  const loginFor = useMemberLoginCheck(list.allCats.some((cat) => cat.configurationSource === 'native_tool'));
   return (
     <div className="member-table-scroll">
       <p id={sortHelpId} className="sr-only">
@@ -140,43 +144,35 @@ export function MemberTable({
                   <AvatarImageWithFallback src={cat.avatar} alt="" className="member-avatar" />
                   <span>
                     <strong>{cat.nickname || cat.displayName}</strong>
-                    <small>
-                      {cat.breedDisplayName || cat.displayName} · {cat.id}
-                    </small>
+                    <small>{cat.breedDisplayName || cat.displayName}</small>
                   </span>
                 </button>
+                <MemberIdentityDetails cat={cat} onEdit={() => onEditMember(cat)} />
               </td>
               <td>
-                {memberClientName(cat)} · {cat.defaultModel || t('未设置')}
+                <MemberRuntimeSummary cat={cat} />
               </td>
               <td>
                 <MemberAccountName cat={cat} accounts={list.accounts} />
               </td>
-              <td>
-                {t(memberTransport(cat))} ·{' '}
-                {list.accounts.find((p) => p.id === cat.accountRef)?.authType === 'oauth'
-                  ? t('账号登录')
-                  : list.accounts.find((p) => p.id === cat.accountRef)?.authType === 'api_key'
-                    ? t('配置账号')
-                    : t('认证未确认')}
-              </td>
+              <td>{t(memberTransport(cat))}</td>
               <td>
                 <MemberStatus
                   status={
                     routing.loading && !routing.data
                       ? { label: '读取中', detail: '', tone: 'unknown' }
-                      : memberStatus(cat, routing.data, routing.error, now)
+                      : memberStatus(cat, routing.data, routing.error, now, loginFor(cat))
                   }
                 />
               </td>
               <td>
-                <details>
+                <details className="member-aliases">
                   <summary>
                     {cat.mentionPatterns.length
                       ? copy.aliasCount(cat.mentionPatterns[0], cat.mentionPatterns.length)
                       : t('未设置')}
                   </summary>
-                  {cat.mentionPatterns.join('、')}
+                  <div>{cat.mentionPatterns.join('、')}</div>
                 </details>
               </td>
               <td>

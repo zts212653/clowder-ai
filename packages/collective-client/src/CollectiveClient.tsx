@@ -33,11 +33,9 @@ function LiveCollectiveClient({ embedded }: { readonly embedded: boolean }) {
       connection={snapshot.connection}
       canSteward={canSteward}
       canPair={canPair}
-      canLeave={false}
       notice={snapshot.notice}
       onInvite={() => void client.createInvite()}
       onPair={() => void client.pairHost()}
-      onLeave={() => undefined}
     >
       {snapshot.restrictedScope ? (
         <CollectiveScopeRecovery

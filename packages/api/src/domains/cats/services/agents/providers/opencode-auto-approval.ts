@@ -4,6 +4,7 @@ import { isCliError, isCliPlainTextResult, isCliTimeout, spawnCli } from '../../
 const log = createModuleLogger('opencode-agent');
 
 export const OPENCODE_AUTO_APPROVE_FLAG = '--auto';
+export const OPENCODE_STANDALONE_FLAG = '--standalone';
 const OPENCODE_DEFAULT_AUTO_APPROVE_FLAGS = [
   OPENCODE_AUTO_APPROVE_FLAG,
   '--dangerously-skip-permissions',
@@ -21,7 +22,12 @@ const OPENCODE_AUTO_APPROVE_UNAVAILABLE_MESSAGE =
 const OPENCODE_AUTO_APPROVE_PROBE_FAILED_MESSAGE =
   'Unable to confirm OpenCode auto-approval flag support; continuing without default approval flag injection.';
 
-export type OpenCodeAutoApproveProbeResult = { approvalFlag?: string; warning?: string; cacheable?: boolean };
+export type OpenCodeAutoApproveProbeResult = {
+  approvalFlag?: string;
+  standalone?: boolean;
+  warning?: string;
+  cacheable?: boolean;
+};
 export type OpenCodeAutoApproveProbeFn = (options: {
   command: string;
   cwd?: string;
@@ -45,6 +51,41 @@ export function parseOpenCodeCliConfigArgs(cliConfigArgs?: readonly string[]): s
 
 export function userControlsOpenCodeAutoApprove(userFlags: ReadonlySet<string>): boolean {
   return Array.from(OPENCODE_AUTO_APPROVE_FLAG_ALIASES).some((flag) => userFlags.has(flag));
+}
+
+function hasStandaloneBooleanValue(flag: string, value = ''): boolean {
+  return flag === OPENCODE_STANDALONE_FLAG && /^(?:true|false|0|1)$/.test(value);
+}
+
+/** Transport alone may cross the read-only/finalizer argument boundary. */
+export function getOpenCodeTransportArgs(cliConfigArgs?: readonly string[]): string[] {
+  const userParts = parseOpenCodeCliConfigArgs(cliConfigArgs);
+  const transport: string[] = [];
+  for (let i = 0; i < userParts.length && userParts[i] !== '--'; i++) {
+    const name = getCliFlagName(userParts[i]);
+    if ([OPENCODE_STANDALONE_FLAG, '--no-standalone'].includes(name ?? '')) {
+      transport.push(userParts[i]);
+      if (hasStandaloneBooleanValue(userParts[i], userParts[i + 1])) {
+        transport.push(userParts[++i]);
+      }
+    } else if (name === '--server') {
+      transport.push(userParts[i]);
+      if (userParts[i] === '--server' && userParts[i + 1] && !userParts[i + 1].startsWith('-')) {
+        transport.push(userParts[++i]);
+      }
+    }
+  }
+  return transport;
+}
+
+export function usesSharedOpenCodeServer(transport: readonly string[]): boolean {
+  return transport.some((part, index) => {
+    const name = getCliFlagName(part);
+    if (name === '--server' || name === '--no-standalone') return true;
+    if (name !== OPENCODE_STANDALONE_FLAG) return false;
+    if (part !== OPENCODE_STANDALONE_FLAG) return part !== '--standalone=true';
+    return /^(?:false|0)$/.test(transport[index + 1] ?? '');
+  });
 }
 
 async function probeOpenCodeHelp(
@@ -98,14 +139,16 @@ export async function probeOpenCodeAutoApproveSupport(
     return { warning: OPENCODE_AUTO_APPROVE_PROBE_FAILED_MESSAGE, cacheable: false };
   }
 
+  const standalone = /(?:^|\s)--standalone(?=\s|[=,]|$)/m.test(visibleHelp.helpText);
+
   for (const flag of OPENCODE_DEFAULT_AUTO_APPROVE_FLAGS) {
-    if (visibleHelp.helpText.includes(flag)) return { approvalFlag: flag };
+    if (visibleHelp.helpText.includes(flag)) return { approvalFlag: flag, standalone };
   }
 
   // Do not probe unadvertised aliases with `run <flag> --help`. Some yargs
   // versions process `--help` before validating unknown flags, so that command
   // exits 0 even when the candidate would make a real invocation exit 1.
-  return { warning: OPENCODE_AUTO_APPROVE_UNAVAILABLE_MESSAGE, cacheable: true };
+  return { warning: OPENCODE_AUTO_APPROVE_UNAVAILABLE_MESSAGE, cacheable: true, standalone };
 }
 
 function isOpenCodeAutoApproveProbeCacheable(result: OpenCodeAutoApproveProbeResult): boolean {

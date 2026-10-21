@@ -1,6 +1,7 @@
 'use client';
 import type { ApprovalHubItem } from '@cat-cafe/shared';
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCoCreatorDisplay } from '@/hooks/useCoCreatorConfig';
 import { useApprovalHubStore } from '@/stores/approvalHubStore';
 import { type ApprovalWriteKind, useApprovalHost, useGuardedWrite, useReportEditing } from './ApprovalHost';
 import { EventDraftDetails, kindLabel, readDrafts, sourceLabel } from './PersonMemoryDraftDetails';
@@ -25,6 +26,7 @@ export function PersonMemoryClaimSelector({
 }) {
   const t = useShellCopy(personMemorySelectionCopy),
     language = useShellLanguage();
+  const ownerName = useCoCreatorDisplay().name;
   const drafts = useMemo(() => readDrafts(item), [item]);
   const displayName = typeof item.detail.displayName === 'string' ? item.detail.displayName : t.unnamed;
   const replacesProposalId =
@@ -104,7 +106,7 @@ export function PersonMemoryClaimSelector({
           <div key={draft.draftId} className="flex items-start gap-2 rounded-md border border-[var(--cafe-border)] p-2">
             <input
               type="checkbox"
-              aria-label={t.select(kindLabel(draft.claimKind, language), draft.normalizedDraft)}
+              aria-label={t.select(kindLabel(draft.claimKind, language, ownerName), draft.normalizedDraft)}
               checked={selectedDraftIds.has(draft.draftId)}
               onChange={() => toggleDraft(draft.draftId)}
               disabled={Boolean(deciding)}
@@ -113,7 +115,7 @@ export function PersonMemoryClaimSelector({
             <span className="min-w-0 space-y-1">
               <span className="block text-sm">{draft.normalizedDraft}</span>
               <span className="block text-micro opacity-65">
-                {kindLabel(draft.claimKind, language)} · {sourceLabel(draft.sourceRole, language)}
+                {kindLabel(draft.claimKind, language, ownerName)} · {sourceLabel(draft.sourceRole, language, ownerName)}
               </span>
               <details>
                 <summary className="shell-focusable cursor-pointer text-xs">{t.original}</summary>

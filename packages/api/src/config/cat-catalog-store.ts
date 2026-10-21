@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
 import { dirname, relative, resolve, sep } from 'node:path';
 import type { CatCafeConfig, ClientId, RosterEntry } from '@cat-cafe/shared';
+import { type NativeToolIdentity, nativeToolIdentityFor } from '@cat-cafe/shared';
 import { resolveBuiltinClientForProvider } from './account-resolver.js';
 import {
   GEMINI35_CAT_ID,
@@ -758,6 +759,98 @@ function readBootstrapSourceConfig(templatePath: string): { catalog: CatCafeConf
   };
 }
 
+function stringField(record: Record<string, unknown>, field: string): string | undefined {
+  const value = record[field];
+  return typeof value === 'string' ? value : undefined;
+}
+
+function replaceExactLegacyString(
+  target: Record<string, unknown>,
+  field: string,
+  legacy: string,
+  next: string,
+): boolean {
+  if (!next || next === legacy) return false;
+  if (stringField(target, field) !== legacy) return false;
+  target[field] = next;
+  return true;
+}
+
+/** Rename only when both visible-name fields are still the old default. */
+function replaceExactLegacyName(target: Record<string, unknown>, identity: NativeToolIdentity): boolean {
+  const currentName = stringField(target, 'name');
+  const currentDisplayName = stringField(target, 'displayName');
+  const legacy = identity.legacy.name;
+  const nameIsLegacy =
+    currentName === legacy &&
+    (currentDisplayName === legacy || currentDisplayName === undefined || currentDisplayName === '');
+  if (!nameIsLegacy) return false;
+  let changed = false;
+  if (currentName !== identity.name) {
+    target.name = identity.name;
+    changed = true;
+  }
+  if (currentDisplayName !== identity.name) {
+    target.displayName = identity.name;
+    changed = true;
+  }
+  return changed;
+}
+
+function repairLegacyIdentityRecord(record: Record<string, unknown>, identity: NativeToolIdentity): boolean {
+  let changed = replaceExactLegacyName(record, identity);
+  changed = replaceExactLegacyString(record, 'nickname', identity.legacy.nickname, identity.nickname) || changed;
+  changed = replaceExactLegacyString(record, 'avatar', identity.legacy.avatar, identity.avatar) || changed;
+  changed =
+    replaceExactLegacyString(record, 'roleDescription', identity.legacy.roleDescription, identity.roleDescription) ||
+    changed;
+  changed =
+    replaceExactLegacyString(record, 'personality', identity.legacy.personality, identity.personality) || changed;
+  changed =
+    replaceExactLegacyString(record, 'teamStrengths', identity.legacy.teamStrengths, identity.teamStrengths) || changed;
+  return changed;
+}
+
+/**
+ * Repair native-tool members created before their cat identity existed.
+ * Only exact legacy defaults are replaced, so a user's own edits are kept.
+ * Idempotent: after the first successful pass every field no longer matches.
+ */
+export function repairLegacyNativeToolIdentities(catalog: { breeds?: Array<Record<string, unknown>> }): boolean {
+  let changed = false;
+  for (const breed of catalog.breeds ?? []) {
+    const variants = Array.isArray(breed.variants) ? (breed.variants as Array<Record<string, unknown>>) : [];
+    const defaultVariant = variants.find((variant) => variant.id === breed.defaultVariantId) ?? variants[0];
+    const identity = nativeToolIdentityFor({
+      clientId: defaultVariant ? stringField(defaultVariant, 'clientId') : undefined,
+      catId:
+        (defaultVariant ? stringField(defaultVariant, 'catId') : undefined) ??
+        stringField(breed, 'catId') ??
+        stringField(breed, 'id'),
+      acp: defaultVariant?.acp,
+    });
+    if (!identity) continue;
+    changed = repairLegacyIdentityRecord(breed, identity) || changed;
+    for (const variant of variants) {
+      changed = repairLegacyIdentityRecord(variant, identity) || changed;
+    }
+  }
+  return changed;
+}
+
+function repairLegacyNativeIdentityFile(catalogPath: string): boolean {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(readFileSync(catalogPath, 'utf-8'));
+  } catch {
+    return false;
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return false;
+  if (!repairLegacyNativeToolIdentities(parsed as { breeds?: Array<Record<string, unknown>> })) return false;
+  writeFileAtomic(catalogPath, `${JSON.stringify(parsed, null, 2)}\n`);
+  return true;
+}
+
 // NOTE: Repairing existing empty catalogs (e.g. Windows reinstall where user-data
 // dir survives) is intentionally NOT done here — we cannot distinguish "broken
 // install with empty breeds" from "user intentionally deleted all members".
@@ -784,6 +877,9 @@ export function bootstrapCatCatalog(projectRoot: string, templatePath: string): 
     // Persist template-added variants into already-enabled runtime breeds so
     // read and write paths agree after upgrades.
     persistMissingTemplateVariants(projectRoot, catalogPath, templatePath);
+    // Replace pre-identity native-tool defaults (Kimi/DSH/Pi) that older
+    // releases persisted. Exact legacy strings only; user edits stay.
+    repairLegacyNativeIdentityFile(catalogPath);
     return catalogPath;
   }
 

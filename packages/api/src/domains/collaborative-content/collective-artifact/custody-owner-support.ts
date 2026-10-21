@@ -1,6 +1,5 @@
 import { createHash } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
-import type { CollectiveCustodyOwnerAuthority, CollectiveCustodyOwnerOperation } from '@cat-cafe/collective-connector';
 import {
   type CollectiveArtifactCustodyTransfer,
   type CollectiveCustodyPrepared,
@@ -13,6 +12,7 @@ import type { ArtifactReviewStore } from '../artifact-review/store.js';
 import type { WorkspaceContentReviewStore } from '../workspace-review/store.js';
 import type { CollectiveArtifactCustodyBundle } from './custody-bundle.js';
 import { type CollectiveCustodyJournalEntry, transferIdentity } from './custody-journal.js';
+import type { CollectiveCustodyOwnerAuthority, CollectiveCustodyOwnerOperation } from './owner-port.js';
 import type { CollectiveArtifactScopeQueue } from './scope-serial-queue.js';
 
 export interface CollectiveCustodyOwners {

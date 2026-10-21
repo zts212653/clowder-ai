@@ -10,10 +10,13 @@
  * - Serializes concurrent reconciles via promise chain (P1-2 fix)
  */
 
+import { saveSpan } from '../utils/member-save-diagnostics.js';
 import { type ConfigChangeEvent, configEventBus } from './config-event-bus.js';
 
 export interface CatCatalogSubscriberOpts {
   onReconcile: () => Promise<void>;
+  /** Optional cache preparation; routing must already be usable when onReconcile resolves. */
+  onWarm?: () => Promise<void>;
   log: {
     info(...args: unknown[]): void;
     warn(...args: unknown[]): void;
@@ -35,8 +38,17 @@ export function createCatCatalogSubscriber(opts: CatCatalogSubscriberOpts): CatC
     if (!isCatCatalogChange(event)) return;
     opts.log.info('[CatCatalogSubscriber] Cat catalog changed, reconciling registry...');
     // Chain onto previous reconcile — serializes concurrent events (P1-2)
-    pending = pending
-      .then(() => opts.onReconcile())
+    pending = saveSpan('registry.queue', () => pending, { changeSetId: event.changeSetId })
+      .then(() => saveSpan('registry.reconcile', () => opts.onReconcile(), { changeSetId: event.changeSetId }))
+      .then(() => {
+        // Saving waits for live routing, never for an optional subprocess cache warmup.
+        // The L0 cache invalidates in-flight generations on the next reconcile.
+        void Promise.resolve()
+          .then(() => saveSpan('l0.warm', () => opts.onWarm?.(), { background: true, changeSetId: event.changeSetId }))
+          .catch((err) => {
+            opts.log.warn('[CatCatalogSubscriber] Background warmup failed (will retry on invoke):', err);
+          });
+      })
       .catch((err) => {
         opts.log.warn('[CatCatalogSubscriber] Reconcile failed:', err);
       });

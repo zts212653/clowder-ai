@@ -15,11 +15,10 @@ import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import {
   captureProcessIdentity,
-  captureReadableIdentity,
+  captureSpawnedIdentity,
   identityInspectionIsUnreadable,
   inspectProcessIdentity,
   observeProcessIdentity,
-  spawnedIdentityRefusal,
   waitUntilIdentityGone,
 } from './process-identity.mjs';
 
@@ -105,15 +104,13 @@ export function writeDaemonState({
   ports,
   captureIdentity = captureProcessIdentity,
 }) {
+  const expectedRoot = canonicalPath(projectRoot);
   let identity;
   try {
-    identity = captureReadableIdentity(pid, { capture: captureIdentity });
+    identity = captureSpawnedIdentity(pid, expectedRoot, launchToken, { capture: captureIdentity });
   } catch (error) {
     throw new DaemonStateError(error.reason ?? 'spawned-process-identity-unreadable', error.message, error.details);
   }
-  const expectedRoot = canonicalPath(projectRoot);
-  const refusal = spawnedIdentityRefusal(pid, identity, expectedRoot, launchToken);
-  if (refusal) throw new DaemonStateError(refusal.reason, refusal.message, refusal.details);
   const state = stateFromIdentity({
     pid,
     identity,

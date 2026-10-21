@@ -1,3 +1,4 @@
+import { deploymentDefaults } from '@cat-cafe/shared';
 import { z } from 'zod';
 import { defineMcpCanonicalFactory } from '../tool-governance-migration.js';
 import type { ToolResult } from './file-tools.js';
@@ -46,7 +47,7 @@ export async function handleRealtimeCompanionStop(input: { thread_id: string }):
 async function companionRequest(threadId: string, suffix: string, init?: RequestInit): Promise<ToolResult> {
   const catId = process.env.CAT_CAFE_CAT_ID?.trim();
   if (!catId) return errorResult('The current cat identity is required for a realtime companion session.');
-  const apiUrl = (process.env.CAT_CAFE_API_URL ?? 'http://127.0.0.1:3004').replace(/\/$/, '');
+  const apiUrl = (process.env.CAT_CAFE_API_URL ?? deploymentDefaults.apiLoopbackUrl).replace(/\/$/, '');
   const userId = process.env.CAT_CAFE_USER_ID ?? 'default-user';
   try {
     const response = await fetch(

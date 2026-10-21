@@ -21,6 +21,9 @@ function getCatModelEnvKey(catId: string): string {
  * 运行时读 catRegistry（.cat-cafe/cat-catalog.json），环境变量可 override。
  */
 export function getCatModel(catName: string, configuredFallback?: string): string {
+  if (catRegistry.tryGet(catName)?.config.configurationSource === 'native_tool') {
+    return catRegistry.tryGet(catName)!.config.defaultModel;
+  }
   // 1. 环境变量最高优先 (dynamic key: CAT_{CATID}_MODEL)
   const envKey = getCatModelEnvKey(catName);
   const envValue = process.env[envKey]?.trim();

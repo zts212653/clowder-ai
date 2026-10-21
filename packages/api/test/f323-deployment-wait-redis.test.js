@@ -321,17 +321,19 @@ describe('F323 deployment wait Redis aggregate', () => {
       autoRenew: false,
       createdAt: 100,
     };
-    assert.ok(
-      await store.replaceDeploymentWaitIfGeneration(task.id, {
-        expectedGeneration: null,
-        expectedDeploymentWait: task.deploymentWait,
-        expectedUpdatedAt: task.updatedAt,
-        deploymentWait: { await: active },
-      }),
-    );
+    const waiting = await store.replaceDeploymentWaitIfGeneration(task.id, {
+      expectedGeneration: null,
+      expectedDeploymentWait: task.deploymentWait,
+      expectedUpdatedAt: task.updatedAt,
+      deploymentWait: { await: active },
+    });
+    assert.ok(waiting?.entrustedWork);
+    const closure = { ...entrustedWork.closure, state: 'satisfied', evidenceRefs: ['artifact:verified'] };
+    assert.equal((await store.closeEntrustedWork(task.id, { expectedRevision: 1, closure })).kind, 'revision_conflict');
+    assert.deepEqual(await new RedisTaskStore(redis).get(task.id), waiting);
     const closed = await store.closeEntrustedWork(task.id, {
-      expectedRevision: 1,
-      closure: { ...entrustedWork.closure, state: 'satisfied', evidenceRefs: ['artifact:verified'] },
+      expectedRevision: waiting.entrustedWork.revision,
+      closure,
     });
     assert.equal(closed.kind, 'closed');
     const stored = await new RedisTaskStore(redis).get(task.id);

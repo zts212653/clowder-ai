@@ -65,7 +65,7 @@ async function retrieveVectors(
             lexical,
             meta.candidateLimit,
             accept,
-            options.sort === 'relevance' ? messageLiteralRelevance(query)?.compareExact : undefined,
+            options.sort === 'relevance' ? messageLiteralRelevance(query)?.compareHybrid : undefined,
           );
     meta.semanticCandidatesLimited = true;
     return passages;

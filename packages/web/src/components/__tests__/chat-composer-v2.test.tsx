@@ -101,6 +101,16 @@ function button(label: string) {
 }
 
 describe('v2 two-level composer', () => {
+  it('anchors typed mention choices to the composer card instead of the full-width chat rail', () => {
+    renderComposer();
+    typeInto('@');
+    const menu = [...container.querySelectorAll('div')].find(
+      (el) => el.textContent?.includes('↑↓ 选择') && el.classList.contains('absolute'),
+    );
+    expect(menu).toBeDefined();
+    expect(menu?.closest('[data-testid="chat-input-composer-row"]')).not.toBeNull();
+  });
+
   it('offers a choice only during work and consumes it on this send without changing defaults', async () => {
     useChatStore.setState({
       hasActiveInvocation: true,

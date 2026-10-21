@@ -3,12 +3,11 @@ import { mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
-
 import {
   DEADLINE_EXPIRED_CODE,
   DEADLINE_EXPIRED_MESSAGE,
-  validateEventsPublishInput,
-  validateEventsPublishResult,
+  validateMessagingRowInput,
+  validateMessagingRowResult,
 } from '@clowder-ai/plugin-contract';
 import { MAX_NDJSON_FRAME_BYTES } from '@clowder-ai/plugin-contract/conformance';
 import { ExternalPluginRuntimeSupervisor } from '../dist/domains/plugin/external-runtime/index.js';
@@ -19,29 +18,30 @@ import {
   EXTERNAL_INSTANCE_ID,
   externalCandidate,
   externalManifest,
-  externalPublishInput,
+  externalSendInput,
   FakePluginProcessAdapter,
   readFrame,
   sendFrame,
   wireRequest,
 } from './plugin-external-runtime-helpers.js';
+import { messageSendReceipt } from './plugin-host-broker-helpers.js';
 
-function eventsHandler(dispatches) {
+function messageHandler(dispatches) {
   return {
-    method: 'events.publish',
+    method: 'messaging.send',
     validateInput(value) {
-      const validation = validateEventsPublishInput(value);
+      const validation = validateMessagingRowInput('messaging.send', value);
       return validation.valid ? { valid: true, value: validation.value } : { valid: false };
     },
     validateResult(value) {
-      return validateEventsPublishResult(value).valid;
+      return validateMessagingRowResult('messaging.send', value).valid;
     },
     settlementKey(_context, input) {
-      return `${input.signalType}:${input.idempotencyKey}`;
+      return `${input.address.handle}:${input.idempotencyKey}`;
     },
     async dispatch(_context, input) {
       dispatches.push(structuredClone(input));
-      return { publicationId: 'publication-1', disposition: 'accepted' };
+      return messageSendReceipt('message-1');
     },
     async lookupSettlement() {
       return null;
@@ -58,7 +58,7 @@ function eventsHandler(dispatches) {
 async function runningHarness() {
   const rootDir = await mkdtemp(join(tmpdir(), 'cat-cafe-k2d-stdio-'));
   const dispatches = [];
-  const harness = await createExternalRuntimeHarness({ rootDir, methods: [eventsHandler(dispatches)] });
+  const harness = await createExternalRuntimeHarness({ rootDir, methods: [messageHandler(dispatches)] });
   const processes = new FakePluginProcessAdapter();
   const supervisor = new ExternalPluginRuntimeSupervisor({
     inventory: harness.inventory,
@@ -82,16 +82,16 @@ async function runningHarness() {
   return { ...harness, child, dispatches, handle, processes, supervisor, handshake };
 }
 
-test('stdio hello/ready and events.publish use the existing Broker session and ledger', async () => {
+test('stdio hello/ready and messaging.send use the existing Broker session and ledger', async () => {
   const harness = await runningHarness();
   assert.equal(harness.handshake.hello.result.pluginInstanceId, EXTERNAL_INSTANCE_ID);
   assert.equal(harness.handshake.ready.result, null);
 
-  sendFrame(harness.child, wireRequest('publish-1', 'events.publish', externalPublishInput()));
+  sendFrame(harness.child, wireRequest('publish-1', 'messaging.send', externalSendInput()));
   assert.deepEqual(await readFrame(harness.child), {
     jsonrpc: '2.0',
     id: 'publish-1',
-    result: { publicationId: 'publication-1', disposition: 'accepted' },
+    result: messageSendReceipt('message-1'),
   });
   assert.equal(harness.dispatches.length, 1);
 
@@ -106,7 +106,7 @@ test('stdio hello/ready and events.publish use the existing Broker session and l
 test('expired call metadata rejects before Broker dispatch with the published deadline error', async () => {
   const harness = await runningHarness();
 
-  sendFrame(harness.child, wireRequest('publish-expired', 'events.publish', externalPublishInput(), Date.now() - 1));
+  sendFrame(harness.child, wireRequest('publish-expired', 'messaging.send', externalSendInput(), Date.now() - 1));
   const response = await readFrame(harness.child);
   assert.equal(response.id, 'publish-expired');
   assert.equal(response.error.code, DEADLINE_EXPIRED_CODE);
@@ -135,7 +135,7 @@ test('non-canonical and oversized frames close authority with zero business disp
   await t.test('non-canonical', async () => {
     const harness = await runningHarness();
     harness.child.stdout.write(
-      '{ "jsonrpc":"2.0","id":"publish-1","method":"events.publish","params":{"meta":{"deadlineUnixMs":1},"input":{}}}\n',
+      '{ "jsonrpc":"2.0","id":"publish-1","method":"messaging.send","params":{"meta":{"deadlineUnixMs":1},"input":{}}}\n',
     );
     await harness.child.exited;
     assert.equal(harness.child.terminateCalls, 1);
@@ -180,7 +180,7 @@ test('unexpected child exit closes the Broker session and marks runtime crashed'
 
 test('one transient unavailable exit is replaced without an unbounded restart loop', async () => {
   const rootDir = await mkdtemp(join(tmpdir(), 'cat-cafe-k2d-transient-recovery-'));
-  const harness = await createExternalRuntimeHarness({ rootDir, methods: [eventsHandler([])] });
+  const harness = await createExternalRuntimeHarness({ rootDir, methods: [messageHandler([])] });
   const processes = new FakePluginProcessAdapter();
   const supervisor = new ExternalPluginRuntimeSupervisor({
     inventory: harness.inventory,
@@ -278,7 +278,7 @@ test('authority revocation closes transport on the next call with zero new effec
     const grants = transaction.grants.get(EXTERNAL_INSTANCE_ID);
     transaction.grants.put({ ...grants, effectiveGrants: [], grantRevision: grants.grantRevision + 1 });
   });
-  sendFrame(harness.child, wireRequest('publish-revoked', 'events.publish', externalPublishInput()));
+  sendFrame(harness.child, wireRequest('publish-revoked', 'messaging.send', externalSendInput()));
   const response = await readFrame(harness.child);
   assert.equal(response.error.code, -32603);
   await harness.child.exited;
@@ -293,7 +293,7 @@ test('Host pings the active child and renews the exact runtime lease before idle
   const dispatches = [];
   const harness = await createExternalRuntimeHarness({
     rootDir,
-    methods: [eventsHandler(dispatches)],
+    methods: [messageHandler(dispatches)],
     activeLeaseTtlMs: 120,
   });
   const processes = new FakePluginProcessAdapter();
@@ -330,11 +330,11 @@ test('Host pings the active child and renews the exact runtime lease before idle
   assert.ok(renewed.runtimeLeases[0].expiresAt > initialExpiry);
   assert.equal(renewed.sessions[0].activeLeaseExpiresAt, renewed.runtimeLeases[0].expiresAt);
 
-  sendFrame(child, wireRequest('publish-after-idle', 'events.publish', externalPublishInput()));
+  sendFrame(child, wireRequest('publish-after-idle', 'messaging.send', externalSendInput()));
   assert.deepEqual(await readFrame(child), {
     jsonrpc: '2.0',
     id: 'publish-after-idle',
-    result: { publicationId: 'publication-1', disposition: 'accepted' },
+    result: messageSendReceipt('message-1'),
   });
   assert.equal(dispatches.length, 1);
   await supervisor.stop(EXTERNAL_INSTANCE_ID);
@@ -347,7 +347,7 @@ test('wall-clock lease expiry after system suspend replaces the session without 
   let now = 1_000;
   const harness = await createExternalRuntimeHarness({
     rootDir,
-    methods: [eventsHandler(dispatches)],
+    methods: [messageHandler(dispatches)],
     activeLeaseTtlMs: 100,
     now: () => now,
   });
@@ -395,8 +395,8 @@ test('wall-clock lease expiry after system suspend replaces the session without 
   assert.equal(inventory.instances[0].activationState, 'enabled');
   assert.equal(inventory.instances[0].runtimeState, 'healthy');
 
-  sendFrame(replacement, wireRequest('publish-after-resume', 'events.publish', externalPublishInput()));
-  assert.equal((await readFrame(replacement)).result.disposition, 'accepted');
+  sendFrame(replacement, wireRequest('publish-after-resume', 'messaging.send', externalSendInput()));
+  assert.equal((await readFrame(replacement)).result.messageId, 'message-1');
   assert.equal(dispatches.length, 1);
   await supervisor.stop(EXTERNAL_INSTANCE_ID);
 });
@@ -698,4 +698,40 @@ test('missing Host ping response after authority revocation never restarts the r
   const inventory = await harness.inventory.snapshot();
   assert.equal(inventory.instances[0].activationState, 'error');
   assert.equal(inventory.instances[0].runtimeState, 'crashed');
+});
+
+test('a successful stdio start verifies admitted package bytes exactly once', async () => {
+  const rootDir = await mkdtemp(join(tmpdir(), 'cat-cafe-k2d-stdio-integrity-'));
+  const harness = await createExternalRuntimeHarness({ rootDir, methods: [messageHandler([])] });
+  const processes = new FakePluginProcessAdapter();
+  let integrityCalls = 0;
+  const supervisor = new ExternalPluginRuntimeSupervisor({
+    inventory: harness.inventory,
+    broker: harness.broker,
+    packages: {
+      async resolveInstalledPackage() {
+        return {
+          rootDir,
+          manifest: externalManifest(),
+          verifyIntegrity: async () => {
+            integrityCalls += 1;
+          },
+          release: async () => undefined,
+        };
+      },
+    },
+    processes,
+  });
+
+  const starting = supervisor.start(EXTERNAL_INSTANCE_ID);
+  const child = await processes.nextProcess();
+  await completeExternalHandshake(child);
+  await starting;
+
+  assert.equal(
+    integrityCalls,
+    1,
+    'the entrypoint authority is the single integrity gate: a second full-tree snapshot per start is pure waste',
+  );
+  await supervisor.stop(EXTERNAL_INSTANCE_ID);
 });

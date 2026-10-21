@@ -1,6 +1,5 @@
 /** Encoded-result budgeting and deterministic frozen snapshot page assembly. */
 
-import { randomUUID } from 'node:crypto';
 import {
   type M0CSnapshotResult,
   MESSAGING_ROW_ENCODED_BYTE_BOUNDS,
@@ -29,6 +28,7 @@ export function assembleSnapshotPage(
   snapshot: SnapshotViewRecord,
   offset: number,
   availableItems: M0CSnapshotResult['items'],
+  leaseSessionId: string,
 ): SnapshotPageAssembly {
   for (let count = availableItems.length; count >= 0; count -= 1) {
     if (count === 0 && offset < snapshot.itemCount) break;
@@ -39,12 +39,12 @@ export function assembleSnapshotPage(
       const result: M0CSnapshotResult = {
         items,
         nextPageToken: null,
-        snapshotAckToken: encodeSnapshotAckToken(subscriptionId, snapshot),
+        snapshotAckToken: encodeSnapshotAckToken(subscriptionId, snapshot, leaseSessionId),
       };
       if (resultFits('messaging.snapshot', result)) return { result, nextOffset, traversalComplete };
       continue;
     }
-    const nextPageTokenId = randomUUID();
+    const nextPageTokenId = leaseSessionId;
     const result: M0CSnapshotResult = {
       items,
       nextPageToken: encodeSnapshotPageToken(subscriptionId, snapshot.snapshotId, nextOffset, nextPageTokenId),

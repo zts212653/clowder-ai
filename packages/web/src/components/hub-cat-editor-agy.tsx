@@ -19,7 +19,7 @@ export function AgyNativeFields({
   return (
     <div className="space-y-2" data-testid="agy-native-settings">
       <SelectField
-        label={t('启用 Native')}
+        label={form.agyAcpEnabled ? copy.acpEnabled : t('启用 Native')}
         value={form.agyProfileEnabled === false ? 'false' : 'true'}
         options={[
           { value: 'true', label: t('开启') },
@@ -58,13 +58,29 @@ export function AgyNativeFields({
         />
       )}
       <p className="text-xs leading-5 text-cafe-secondary">
-        {t(
-          '使用此隔离 Profile 中已登录的个人 OAuth。Model 填实际 ID（如 gemini-3.8-flash-high）。首次使用前需完成该 Profile 的登录；保存设置不会启动模型。',
-        )}
+        {form.agyAcpEnabled
+          ? copy.acpLogin
+          : t(
+              '使用此隔离 Profile 中已登录的个人 OAuth。Model 填实际 ID（如 gemini-3.8-flash-high）。首次使用前需完成该 Profile 的登录；保存设置不会启动模型。',
+            )}
       </p>
       <p className="text-xs leading-5 text-cafe-muted">
-        {form.agyAutoApprove ? copy.automaticDescription : copy.restrictedDescription} {copy.bindingChange}
+        {form.agyAutoApprove
+          ? copy.automaticDescription
+          : form.agyAcpEnabled
+            ? copy.acpRestricted
+            : copy.restrictedDescription}{' '}
+        {form.agyAcpEnabled ? copy.acpBinding : copy.bindingChange}
       </p>
+      {form.agyAcpEnabled ? (
+        <>
+          <p className="text-xs leading-5 text-cafe-muted">{copy.acpQueue}</p>
+          <details className="text-xs leading-5 text-cafe-secondary">
+            <summary>{copy.acpSetup}</summary>
+            <code className="break-all">pnpm agy:acp:login --cat {form.catId}</code>
+          </details>
+        </>
+      ) : null}
     </div>
   );
 }

@@ -1,20 +1,28 @@
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { delimiter, join } from 'node:path';
 import { PassThrough } from 'node:stream';
-import { mock, test } from 'node:test';
+import { after, mock, test } from 'node:test';
+import { isolateKimiTestEnvironment } from './helpers/kimi-test-environment.js';
+import { emitEvents as emitKimiEvents } from './helpers/provider-archive-test-helpers.js';
+
+after(isolateKimiTestEnvironment());
 
 // Ensure `kimi` (new kimi-code) and `kimi-cli` (legacy) are resolvable on CI even
-// when the real CLI is not installed. resolveCliCommand prefers `kimi-cli` first.
+// when the real CLI is not installed. The retired shim must never win selection.
 const stubBinDir = mkdtempSync(join(tmpdir(), 'kimi-stub-bin-'));
 writeFileSync(join(stubBinDir, 'kimi'), '#!/bin/sh\nexit 1\n', { mode: 0o755 });
 writeFileSync(join(stubBinDir, 'kimi-cli'), '#!/bin/sh\nexit 1\n', { mode: 0o755 });
-process.env.PATH = `${stubBinDir}:${process.env.PATH}`;
+process.env.PATH = `${stubBinDir}${delimiter}${process.env.PATH}`;
 
 const { KimiAgentService } = await import('../dist/domains/cats/services/agents/providers/KimiAgentService.js');
 const { invalidateCliCommand } = await import('../dist/utils/cli-resolve.js');
+
+function createKimiAgentService(options = {}) {
+  return new KimiAgentService({ l0CompilerFn: async () => 'OWNED-TEST-IDENTITY', ...options });
+}
 
 function writeCapabilitiesConfig(projectRoot, capabilities) {
   mkdirSync(join(projectRoot, '.cat-cafe'), { recursive: true });
@@ -74,19 +82,11 @@ function createMockSpawnFn(proc) {
   return mock.fn(() => proc);
 }
 
-function emitKimiEvents(proc, events) {
-  for (const event of events) {
-    proc.stdout.write(`${JSON.stringify(event)}\n`);
-  }
-  proc.stdout.end();
-  proc._emitter.emit('exit', 0, null);
-}
-
 test('yields text, tool_use, inferred session_init, and done on print-mode success', async () => {
   const shareDir = mkdtempSync(join(tmpdir(), 'kimi-share-'));
   const proc = createMockProcess();
   const spawnFn = createMockSpawnFn(proc);
-  const service = new KimiAgentService({ spawnFn, model: 'kimi-k2.5' });
+  const service = createKimiAgentService({ spawnFn, model: 'kimi-k2.5' });
 
   try {
     mkdirSync(shareDir, { recursive: true });
@@ -109,7 +109,7 @@ test('yields text, tool_use, inferred session_init, and done on print-mode succe
 
     const promise = collect(
       service.invoke('Hello', {
-        callbackEnv: { KIMI_SHARE_DIR: shareDir },
+        callbackEnv: { KIMI_CODE_HOME: shareDir },
       }),
     );
 
@@ -147,10 +147,10 @@ test('yields text, tool_use, inferred session_init, and done on print-mode succe
     assert.equal(msgs[5].type, 'done');
 
     const args = spawnFn.mock.calls[0].arguments[1];
-    assert.ok(args.includes('--print'));
+    assert.ok(!args.includes('--print'));
     assert.ok(args.includes('--output-format'));
     assert.ok(args.includes('stream-json'));
-    assert.ok(args.includes('--prompt'));
+    assert.ok(args.includes('-p'));
   } finally {
     rmSync(shareDir, { recursive: true, force: true });
   }
@@ -162,7 +162,7 @@ test('infers session_init from kimi.json when workingDirectory is a symlink alia
   const worktreeAlias = join(tmpdir(), `kimi-worktree-alias-${Date.now()}`);
   const proc = createMockProcess();
   const spawnFn = createMockSpawnFn(proc);
-  const service = new KimiAgentService({ spawnFn, model: 'kimi-k2.5' });
+  const service = createKimiAgentService({ spawnFn, model: 'kimi-k2.5' });
 
   try {
     symlinkSync(worktreeRoot, worktreeAlias, process.platform === 'win32' ? 'junction' : 'dir');
@@ -185,7 +185,7 @@ test('infers session_init from kimi.json when workingDirectory is a symlink alia
     const promise = collect(
       service.invoke('Hello', {
         workingDirectory: worktreeAlias,
-        callbackEnv: { KIMI_SHARE_DIR: shareDir },
+        callbackEnv: { KIMI_CODE_HOME: shareDir },
       }),
     );
 
@@ -200,40 +200,17 @@ test('infers session_init from kimi.json when workingDirectory is a symlink alia
   }
 });
 
-test('uses --session for resume and emits session_init immediately', async () => {
-  const proc = createMockProcess();
-  const spawnFn = createMockSpawnFn(proc);
-  const service = new KimiAgentService({ spawnFn, model: 'kimi-k2.5' });
-
-  const promise = collect(service.invoke('Continue', { sessionId: 'resume-kimi-456' }));
-  await new Promise((resolve) => setImmediate(resolve));
-  emitKimiEvents(proc, [{ role: 'assistant', content: 'Resumed Kimi.' }]);
-  const msgs = await promise;
-
-  assert.equal(msgs[0].type, 'session_init');
-  assert.equal(msgs[0].sessionId, 'resume-kimi-456');
-  assert.equal(msgs[1].type, 'text');
-  assert.equal(msgs[1].content, 'Resumed Kimi.');
-  assert.equal(msgs[2].type, 'system_info');
-  assert.match(msgs[2].content, /provider_capability/);
-
-  const args = spawnFn.mock.calls[0].arguments[1];
-  const sessionFlagIndex = args.indexOf('--session');
-  assert.ok(sessionFlagIndex >= 0);
-  assert.equal(args[sessionFlagIndex + 1], 'resume-kimi-456');
-});
-
 test('maps bare oauth kimi model names to configured model alias', async () => {
   const shareDir = mkdtempSync(join(tmpdir(), 'kimi-config-share-'));
   const proc = createMockProcess();
   const spawnFn = createMockSpawnFn(proc);
-  const service = new KimiAgentService({ spawnFn, model: 'kimi-k2.5' });
+  const service = createKimiAgentService({ spawnFn, model: 'kimi-k2.5' });
 
   try {
     writeFileSync(join(shareDir, 'config.toml'), 'default_model = "kimi-code/kimi-for-coding"\n', 'utf8');
     const promise = collect(
       service.invoke('Hello', {
-        callbackEnv: { KIMI_SHARE_DIR: shareDir },
+        callbackEnv: { KIMI_CODE_HOME: shareDir },
       }),
     );
     emitKimiEvents(proc, [{ role: 'assistant', content: 'ok' }]);
@@ -251,14 +228,14 @@ test('maps bare oauth kimi model names to configured model alias', async () => {
 test('api-key mode injects kimi env overrides instead of embedding secrets in argv', async () => {
   const proc = createMockProcess();
   const spawnFn = createMockSpawnFn(proc);
-  const service = new KimiAgentService({ spawnFn, model: 'kimi-code/kimi-for-coding' });
+  const service = createKimiAgentService({ spawnFn, model: 'kimi-code/kimi-for-coding' });
 
   const promise = collect(
     service.invoke('Hello', {
       callbackEnv: {
         CAT_CAFE_KIMI_API_KEY: 'sk-kimi-secret',
         CAT_CAFE_KIMI_BASE_URL: 'https://api.moonshot.ai/v1',
-        KIMI_SHARE_DIR: mkdtempSync(join(tmpdir(), 'kimi-share-api-key-')),
+        KIMI_CODE_HOME: mkdtempSync(join(tmpdir(), 'kimi-share-api-key-')),
       },
     }),
   );
@@ -280,7 +257,7 @@ test('api-key mode maps selected model into official kimi env overrides', async 
   const shareDir = mkdtempSync(join(tmpdir(), 'kimi-share-config-shape-'));
   const proc = createMockProcess();
   const spawnFn = createMockSpawnFn(proc);
-  const service = new KimiAgentService({ spawnFn, model: 'kimi-k2.5' });
+  const service = createKimiAgentService({ spawnFn, model: 'kimi-k2.5' });
 
   try {
     const promise = collect(
@@ -288,12 +265,11 @@ test('api-key mode maps selected model into official kimi env overrides', async 
         callbackEnv: {
           CAT_CAFE_KIMI_API_KEY: 'sk-kimi-secret',
           CAT_CAFE_KIMI_BASE_URL: 'https://api.moonshot.ai/v1',
-          KIMI_SHARE_DIR: shareDir,
+          KIMI_CODE_HOME: shareDir,
         },
       }),
     );
-    // #712: writeMcpConfigFile is now async — flush microtask queue so the
-    // generator reaches spawnCli before we inspect spawnFn.mock.calls.
+    // Flush native identity compilation before inspecting the spawn call.
     await new Promise((r) => setImmediate(r));
     const args = spawnFn.mock.calls[0].arguments[1];
     const env = spawnFn.mock.calls[0].arguments[2]?.env ?? {};
@@ -311,14 +287,14 @@ test('api-key mode maps selected model into official kimi env overrides', async 
 test('api-key mode normalizes legacy kimi code base url to /coding/v1', async () => {
   const proc = createMockProcess();
   const spawnFn = createMockSpawnFn(proc);
-  const service = new KimiAgentService({ spawnFn, model: 'kimi-code/kimi-for-coding' });
+  const service = createKimiAgentService({ spawnFn, model: 'kimi-code/kimi-for-coding' });
 
   const promise = collect(
     service.invoke('Hello', {
       callbackEnv: {
         CAT_CAFE_KIMI_API_KEY: 'sk-kimi-secret',
         CAT_CAFE_KIMI_BASE_URL: 'https://api.kimi.com/coding/',
-        KIMI_SHARE_DIR: mkdtempSync(join(tmpdir(), 'kimi-share-legacy-coding-base-')),
+        KIMI_CODE_HOME: mkdtempSync(join(tmpdir(), 'kimi-share-legacy-coding-base-')),
       },
     }),
   );
@@ -333,11 +309,11 @@ test('injects resolved kimi thinking effort into spawn env', async () => {
   const { getCatEffort } = await import('../dist/config/cat-config-loader.js');
   const proc = createMockProcess();
   const spawnFn = createMockSpawnFn(proc);
-  const service = new KimiAgentService({ spawnFn, model: 'kimi-code/k3' });
+  const service = createKimiAgentService({ spawnFn, model: 'kimi-code/k3' });
 
   const promise = collect(
     service.invoke('Hello', {
-      callbackEnv: { KIMI_SHARE_DIR: mkdtempSync(join(tmpdir(), 'kimi-share-effort-')) },
+      callbackEnv: { KIMI_CODE_HOME: mkdtempSync(join(tmpdir(), 'kimi-share-effort-')) },
     }),
   );
   emitKimiEvents(proc, [{ role: 'assistant', content: 'ok' }]);
@@ -353,7 +329,7 @@ test('boolean-thinking kimi models keep CLI thinking config without effort env',
   const spawnFn = createMockSpawnFn(proc);
   // kimi-for-coding declares thinking/always_thinking but no support_efforts —
   // the harness must not invent tiers the model does not have.
-  const service = new KimiAgentService({ spawnFn, model: 'kimi-code/kimi-for-coding' });
+  const service = createKimiAgentService({ spawnFn, model: 'kimi-code/kimi-for-coding' });
 
   const previousParentEffort = process.env.KIMI_MODEL_THINKING_EFFORT;
   process.env.KIMI_MODEL_THINKING_EFFORT = 'forced-parent';
@@ -362,7 +338,7 @@ test('boolean-thinking kimi models keep CLI thinking config without effort env',
       service.invoke('Hello', {
         reasoningEffortOverride: 'max',
         callbackEnv: {
-          KIMI_SHARE_DIR: mkdtempSync(join(tmpdir(), 'kimi-share-effort-boolean-')),
+          KIMI_CODE_HOME: mkdtempSync(join(tmpdir(), 'kimi-share-effort-boolean-')),
           KIMI_MODEL_THINKING_EFFORT: 'forced-callback',
         },
       }),
@@ -386,12 +362,12 @@ test('boolean-thinking kimi models keep CLI thinking config without effort env',
 test('thread effort override wins for kimi spawn env', async () => {
   const proc = createMockProcess();
   const spawnFn = createMockSpawnFn(proc);
-  const service = new KimiAgentService({ spawnFn, model: 'kimi-code/k3' });
+  const service = createKimiAgentService({ spawnFn, model: 'kimi-code/k3' });
 
   const promise = collect(
     service.invoke('Hello', {
       reasoningEffortOverride: 'max',
-      callbackEnv: { KIMI_SHARE_DIR: mkdtempSync(join(tmpdir(), 'kimi-share-effort-override-')) },
+      callbackEnv: { KIMI_CODE_HOME: mkdtempSync(join(tmpdir(), 'kimi-share-effort-override-')) },
     }),
   );
   emitKimiEvents(proc, [{ role: 'assistant', content: 'ok' }]);
@@ -405,13 +381,13 @@ test('incompatible thread effort override fails closed to inherited kimi effort'
   const { getCatEffort } = await import('../dist/config/cat-config-loader.js');
   const proc = createMockProcess();
   const spawnFn = createMockSpawnFn(proc);
-  const service = new KimiAgentService({ spawnFn, model: 'kimi-code/k3' });
+  const service = createKimiAgentService({ spawnFn, model: 'kimi-code/k3' });
 
   const promise = collect(
     service.invoke('Hello', {
       // kimi supports low/high/max — medium is an anthropic/openai value
       reasoningEffortOverride: 'medium',
-      callbackEnv: { KIMI_SHARE_DIR: mkdtempSync(join(tmpdir(), 'kimi-share-effort-stale-')) },
+      callbackEnv: { KIMI_CODE_HOME: mkdtempSync(join(tmpdir(), 'kimi-share-effort-stale-')) },
     }),
   );
   emitKimiEvents(proc, [{ role: 'assistant', content: 'ok' }]);
@@ -422,284 +398,10 @@ test('incompatible thread effort override fails closed to inherited kimi effort'
   assert.equal(env.KIMI_MODEL_THINKING_EFFORT, expected);
 });
 
-test('injects cat-cafe MCP config file when callback env is present', async () => {
-  const shareDir = mkdtempSync(join(tmpdir(), 'kimi-share-mcp-'));
-  const projectDir = mkdtempSync(join(tmpdir(), 'kimi-project-mcp-'));
-  const mcpServerDir = mkdtempSync(join(tmpdir(), 'kimi-mcp-server-'));
+test('keeps the native user prompt unwrapped and adds local image path hints', async () => {
   const proc = createMockProcess();
   const spawnFn = createMockSpawnFn(proc);
-  const service = new KimiAgentService({
-    spawnFn,
-    model: 'kimi-code/kimi-for-coding',
-    mcpServerPath: join(mcpServerDir, 'index.js'),
-  });
-
-  try {
-    mkdirSync(join(projectDir, '.kimi'), { recursive: true });
-    writeFileSync(
-      join(projectDir, '.kimi', 'mcp.json'),
-      JSON.stringify({
-        mcpServers: {
-          filesystem: { command: 'npx', args: ['-y', '@mcp/fs'] },
-          github: { type: 'http', url: 'https://api.githubcopilot.com/mcp/' },
-        },
-      }),
-      'utf8',
-    );
-    writeFileSync(join(mcpServerDir, 'index.js'), '// stub', 'utf8');
-    // #712: Create split entrypoint stubs so the fallback path finds them
-    for (const entry of ['collab.js', 'memory.js', 'signals.js', 'limb.js', 'finance.js']) {
-      writeFileSync(join(mcpServerDir, entry), '// stub', 'utf8');
-    }
-
-    const promise = collect(
-      service.invoke('Hello', {
-        workingDirectory: projectDir,
-        callbackEnv: {
-          KIMI_SHARE_DIR: shareDir,
-          CAT_CAFE_API_URL: 'http://127.0.0.1:3004',
-          CAT_CAFE_INVOCATION_ID: 'invoke-123',
-          CAT_CAFE_CALLBACK_TOKEN: 'token-123',
-        },
-      }),
-    );
-    // #712: writeMcpConfigFile is now async — flush microtask queue so the
-    // generator reaches spawnCli before we inspect spawnFn.mock.calls.
-    await new Promise((r) => setImmediate(r));
-    const args = spawnFn.mock.calls[0].arguments[1];
-    const mcpFlagIndex = args.indexOf('--mcp-config-file');
-    assert.ok(mcpFlagIndex >= 0);
-    const mcpPath = args[mcpFlagIndex + 1];
-    const mcpConfig = JSON.parse(readFileSync(mcpPath, 'utf8'));
-    assert.ok(mcpConfig.mcpServers['cat-cafe-collab'], 'split server cat-cafe-collab expected');
-    assert.ok(mcpConfig.mcpServers['cat-cafe-memory'], 'split server cat-cafe-memory expected');
-    assert.ok(mcpConfig.mcpServers.filesystem);
-    assert.equal(mcpConfig.mcpServers.github, undefined, 'retired GitHub MCP must not be merged');
-    assert.equal(mcpConfig.mcpServers['cat-cafe-collab'].command, process.execPath);
-    assert.equal(mcpConfig.mcpServers['cat-cafe-collab'].env.CAT_CAFE_API_URL, 'http://127.0.0.1:3004');
-    assert.equal(mcpConfig.mcpServers['cat-cafe-collab'].env.CAT_CAFE_INVOCATION_ID, 'invoke-123');
-    assert.equal(mcpConfig.mcpServers['cat-cafe-collab'].env.CAT_CAFE_CALLBACK_TOKEN, 'token-123');
-    assert.equal(mcpConfig.mcpServers['cat-cafe'], undefined, 'monolith must not be injected');
-
-    emitKimiEvents(proc, [{ role: 'assistant', content: 'ok' }]);
-    await promise;
-  } finally {
-    rmSync(shareDir, { recursive: true, force: true });
-    rmSync(projectDir, { recursive: true, force: true });
-    rmSync(mcpServerDir, { recursive: true, force: true });
-  }
-});
-
-test('Kimi MCP config reads capabilities from runtime root while cwd is user project', async () => {
-  const shareDir = mkdtempSync(join(tmpdir(), 'kimi-share-cap-root-'));
-  const projectDir = mkdtempSync(join(tmpdir(), 'kimi-project-cap-root-'));
-  const runtimeRoot = mkdtempSync(join(tmpdir(), 'kimi-runtime-cap-root-'));
-  const mcpServerDir = join(runtimeRoot, 'packages', 'mcp-server', 'dist');
-  const proc = createMockProcess();
-  const spawnFn = createMockSpawnFn(proc);
-  const service = new KimiAgentService({
-    spawnFn,
-    model: 'kimi-code/kimi-for-coding',
-    mcpServerPath: join(mcpServerDir, 'index.js'),
-  });
-
-  try {
-    mkdirSync(mcpServerDir, { recursive: true });
-    writeFileSync(join(mcpServerDir, 'index.js'), '// stub', 'utf8');
-    for (const entry of ['collab.js', 'memory.js', 'signals.js', 'limb.js', 'finance.js']) {
-      writeFileSync(join(mcpServerDir, entry), '// stub', 'utf8');
-    }
-    writeCapabilitiesConfig(runtimeRoot, [
-      {
-        id: 'cat-cafe-collab',
-        type: 'mcp',
-        globalEnabled: false,
-        source: 'cat-cafe',
-        mcpServer: { command: 'node', args: [] },
-      },
-      {
-        id: 'cat-cafe-memory',
-        type: 'mcp',
-        globalEnabled: true,
-        source: 'cat-cafe',
-        mcpServer: { command: 'node', args: [] },
-      },
-    ]);
-
-    const promise = collect(
-      service.invoke('Hello', {
-        workingDirectory: projectDir,
-        callbackEnv: {
-          KIMI_SHARE_DIR: shareDir,
-          CAT_CAFE_API_URL: 'http://127.0.0.1:3004',
-          CAT_CAFE_INVOCATION_ID: 'invoke-cap-root',
-          CAT_CAFE_CALLBACK_TOKEN: 'token-cap-root',
-          CAT_CAFE_CAT_ID: 'opus',
-        },
-      }),
-    );
-    await new Promise((r) => setImmediate(r));
-    const args = spawnFn.mock.calls[0].arguments[1];
-    const mcpPath = args[args.indexOf('--mcp-config-file') + 1];
-    const mcpConfig = JSON.parse(readFileSync(mcpPath, 'utf8'));
-    assert.equal(
-      mcpConfig.mcpServers['cat-cafe-collab'],
-      undefined,
-      'disabled runtime capability must not be injected',
-    );
-    assert.ok(mcpConfig.mcpServers['cat-cafe-memory'], 'enabled runtime capability must be injected');
-
-    emitKimiEvents(proc, [{ role: 'assistant', content: 'ok' }]);
-    await promise;
-  } finally {
-    rmSync(shareDir, { recursive: true, force: true });
-    rmSync(projectDir, { recursive: true, force: true });
-    rmSync(runtimeRoot, { recursive: true, force: true });
-  }
-});
-
-test('Kimi MCP merge excludes disabled capability-managed user entries', async () => {
-  const shareDir = mkdtempSync(join(tmpdir(), 'kimi-share-disabled-merge-'));
-  const projectDir = mkdtempSync(join(tmpdir(), 'kimi-project-disabled-merge-'));
-  const runtimeRoot = mkdtempSync(join(tmpdir(), 'kimi-runtime-disabled-merge-'));
-  const mcpServerDir = join(runtimeRoot, 'packages', 'mcp-server', 'dist');
-  const proc = createMockProcess();
-  const spawnFn = createMockSpawnFn(proc);
-  const service = new KimiAgentService({
-    spawnFn,
-    model: 'kimi-code/kimi-for-coding',
-    mcpServerPath: join(mcpServerDir, 'index.js'),
-  });
-
-  try {
-    mkdirSync(join(projectDir, '.kimi'), { recursive: true });
-    mkdirSync(mcpServerDir, { recursive: true });
-    writeFileSync(join(mcpServerDir, 'index.js'), '// stub', 'utf8');
-    for (const entry of ['collab.js', 'memory.js', 'signals.js', 'limb.js', 'finance.js']) {
-      writeFileSync(join(mcpServerDir, entry), '// stub', 'utf8');
-    }
-    writeCapabilitiesConfig(runtimeRoot, [
-      {
-        id: 'filesystem',
-        type: 'mcp',
-        globalEnabled: false,
-        source: 'external',
-        mcpServer: { command: 'npx', args: ['-y', '@mcp/fs'] },
-      },
-      {
-        id: 'cat-cafe-memory',
-        type: 'mcp',
-        globalEnabled: true,
-        source: 'cat-cafe',
-        mcpServer: { command: 'node', args: [] },
-      },
-    ]);
-    writeFileSync(
-      join(projectDir, '.kimi', 'mcp.json'),
-      JSON.stringify({
-        mcpServers: {
-          filesystem: { command: 'npx', args: ['-y', '@mcp/fs-stale'] },
-          'cat-cafe': { command: 'node', args: ['legacy-monolith.js'] },
-          'my-tool': { command: 'node', args: ['tool.js'] },
-        },
-      }),
-      'utf8',
-    );
-
-    const promise = collect(
-      service.invoke('Hello', {
-        workingDirectory: projectDir,
-        callbackEnv: {
-          KIMI_SHARE_DIR: shareDir,
-          CAT_CAFE_API_URL: 'http://127.0.0.1:3004',
-          CAT_CAFE_INVOCATION_ID: 'invoke-disabled-merge',
-          CAT_CAFE_CALLBACK_TOKEN: 'token-disabled-merge',
-          CAT_CAFE_CAT_ID: 'opus',
-        },
-      }),
-    );
-    await new Promise((r) => setImmediate(r));
-    const args = spawnFn.mock.calls[0].arguments[1];
-    const mcpPath = args[args.indexOf('--mcp-config-file') + 1];
-    const mcpConfig = JSON.parse(readFileSync(mcpPath, 'utf8'));
-    assert.equal(
-      mcpConfig.mcpServers.filesystem,
-      undefined,
-      'disabled capability must not be re-added from .kimi/mcp.json',
-    );
-    assert.equal(
-      mcpConfig.mcpServers['cat-cafe'],
-      undefined,
-      'legacy monolith alias must not be re-added from .kimi/mcp.json',
-    );
-    assert.ok(mcpConfig.mcpServers['my-tool'], 'unmanaged user server should still be merged');
-    assert.ok(mcpConfig.mcpServers['cat-cafe-memory'], 'enabled capability should still be injected');
-
-    emitKimiEvents(proc, [{ role: 'assistant', content: 'ok' }]);
-    await promise;
-  } finally {
-    rmSync(shareDir, { recursive: true, force: true });
-    rmSync(projectDir, { recursive: true, force: true });
-    rmSync(runtimeRoot, { recursive: true, force: true });
-  }
-});
-
-test('creates Kimi share dir before writing temp MCP config on fresh setups', async () => {
-  const root = mkdtempSync(join(tmpdir(), 'kimi-fresh-root-'));
-  const shareDir = join(root, 'does-not-exist-yet');
-  const projectDir = mkdtempSync(join(tmpdir(), 'kimi-fresh-project-'));
-  const mcpServerDir = mkdtempSync(join(tmpdir(), 'kimi-fresh-mcp-'));
-  const proc = createMockProcess();
-  const spawnFn = createMockSpawnFn(proc);
-  const service = new KimiAgentService({
-    spawnFn,
-    model: 'kimi-code/kimi-for-coding',
-    mcpServerPath: join(mcpServerDir, 'index.js'),
-  });
-
-  try {
-    writeFileSync(join(mcpServerDir, 'index.js'), '// stub', 'utf8');
-    // #712: Create split entrypoint stubs so the fallback path finds them
-    for (const entry of ['collab.js', 'memory.js', 'signals.js', 'limb.js', 'finance.js']) {
-      writeFileSync(join(mcpServerDir, entry), '// stub', 'utf8');
-    }
-    const promise = collect(
-      service.invoke('Hello', {
-        workingDirectory: projectDir,
-        callbackEnv: {
-          KIMI_SHARE_DIR: shareDir,
-          CAT_CAFE_API_URL: 'http://127.0.0.1:3004',
-          CAT_CAFE_INVOCATION_ID: 'invoke-fresh',
-          CAT_CAFE_CALLBACK_TOKEN: 'token-fresh',
-        },
-      }),
-    );
-    // #712: writeMcpConfigFile is now async — flush microtask queue so the
-    // generator reaches spawnCli before we inspect spawnFn.mock.calls.
-    await new Promise((r) => setImmediate(r));
-
-    const args = spawnFn.mock.calls[0].arguments[1];
-    const mcpFlagIndex = args.indexOf('--mcp-config-file');
-    assert.ok(mcpFlagIndex >= 0);
-    const mcpPath = args[mcpFlagIndex + 1];
-    const content = readFileSync(mcpPath, 'utf8');
-    assert.ok(content.includes('cat-cafe-collab'), 'split server expected in config');
-    assert.ok(!content.includes('"cat-cafe"'), 'monolith must not appear in config');
-
-    emitKimiEvents(proc, [{ role: 'assistant', content: 'ok' }]);
-    const msgs = await promise;
-    assert.equal(msgs.at(-1)?.type, 'done');
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-    rmSync(projectDir, { recursive: true, force: true });
-    rmSync(mcpServerDir, { recursive: true, force: true });
-  }
-});
-
-test('wraps system prompt separately and adds local image path hints', async () => {
-  const proc = createMockProcess();
-  const spawnFn = createMockSpawnFn(proc);
-  const service = new KimiAgentService({ spawnFn, model: 'kimi-code/kimi-for-coding' });
+  const service = createKimiAgentService({ spawnFn, model: 'kimi-code/kimi-for-coding' });
   const uploadDir = mkdtempSync(join(tmpdir(), 'kimi-upload-'));
   const imagePath = join(uploadDir, 'example.png');
   writeFileSync(imagePath, 'fake-image', 'utf8');
@@ -716,25 +418,24 @@ test('wraps system prompt separately and adds local image path hints', async () 
     await promise;
 
     const args = spawnFn.mock.calls[0].arguments[1];
-    const promptFlagIndex = args.indexOf('--prompt');
+    const promptFlagIndex = args.indexOf('-p');
     assert.ok(promptFlagIndex >= 0);
     const effectivePrompt = args[promptFlagIndex + 1];
-    assert.match(effectivePrompt, /<system_instructions>/);
-    assert.match(effectivePrompt, /你是梵花猫/);
+    assert.doesNotMatch(effectivePrompt, /<system_instructions>/);
     assert.match(effectivePrompt, /example\.png/);
   } finally {
     rmSync(uploadDir, { recursive: true, force: true });
   }
 });
 
-test('enables thinking mode, parses think blocks, and grants image directories to kimi-cli', async () => {
+test('parses thinking and grants image directories without retired CLI flags', async () => {
   const shareDir = mkdtempSync(join(tmpdir(), 'kimi-config-cap-'));
   const uploadDir = mkdtempSync(join(tmpdir(), 'kimi-image-cap-'));
   const imagePath = join(uploadDir, 'diagram.png');
   writeFileSync(imagePath, 'fake-image', 'utf8');
   const proc = createMockProcess();
   const spawnFn = createMockSpawnFn(proc);
-  const service = new KimiAgentService({ spawnFn, model: 'kimi-code/kimi-for-coding' });
+  const service = createKimiAgentService({ spawnFn, model: 'kimi-code/kimi-for-coding' });
 
   try {
     writeFileSync(
@@ -751,7 +452,7 @@ test('enables thinking mode, parses think blocks, and grants image directories t
 
     const promise = collect(
       service.invoke('看看这张图', {
-        callbackEnv: { KIMI_SHARE_DIR: shareDir },
+        callbackEnv: { KIMI_CODE_HOME: shareDir },
         contentBlocks: [{ type: 'image', url: '/uploads/diagram.png' }],
         uploadDir,
       }),
@@ -778,7 +479,7 @@ test('enables thinking mode, parses think blocks, and grants image directories t
     assert.match(msgs[2].content, /图片路径提示/);
 
     const args = spawnFn.mock.calls[0].arguments[1];
-    assert.ok(args.includes('--thinking'));
+    assert.ok(!args.includes('--thinking'));
     const addDirIndex = args.indexOf('--add-dir');
     assert.ok(addDirIndex >= 0);
     assert.equal(args[addDirIndex + 1], uploadDir);
@@ -791,7 +492,7 @@ test('enables thinking mode, parses think blocks, and grants image directories t
 test('does not emit thinking unavailable if a later assistant event includes thinking', async () => {
   const proc = createMockProcess();
   const spawnFn = createMockSpawnFn(proc);
-  const service = new KimiAgentService({ spawnFn, model: 'kimi-code/kimi-for-coding' });
+  const service = createKimiAgentService({ spawnFn, model: 'kimi-code/kimi-for-coding' });
 
   const promise = collect(service.invoke('Hello'));
   emitKimiEvents(proc, [
@@ -823,7 +524,7 @@ test('extracts session id from non-json resume hint lines in print mode', async 
     yield { role: 'assistant', content: 'done' };
   }
 
-  const service = new KimiAgentService({ model: 'kimi-code/kimi-for-coding' });
+  const service = createKimiAgentService({ model: 'kimi-code/kimi-for-coding' });
   const msgs = await collect(service.invoke('Hello', { spawnCliOverride }));
   const session = msgs.find((msg) => msg.type === 'session_init');
   assert.equal(session?.sessionId, 'ab5188ae-f3e8-4f72-baec-48a53c665e9a');
@@ -832,7 +533,7 @@ test('extracts session id from non-json resume hint lines in print mode', async 
 test('captures usage and session id from kimi stream events when available', async () => {
   const proc = createMockProcess();
   const spawnFn = createMockSpawnFn(proc);
-  const service = new KimiAgentService({ spawnFn, model: 'kimi-code/kimi-for-coding' });
+  const service = createKimiAgentService({ spawnFn, model: 'kimi-code/kimi-for-coding' });
 
   const promise = collect(service.invoke('Hello'));
   emitKimiEvents(proc, [
@@ -860,7 +561,7 @@ test('captures usage and session id from kimi stream events when available', asy
 test('estimates API-equivalent costUsd on done for priced Kimi models', async () => {
   const proc = createMockProcess();
   const spawnFn = createMockSpawnFn(proc);
-  const service = new KimiAgentService({ spawnFn, model: 'kimi-code/kimi-for-coding' });
+  const service = createKimiAgentService({ spawnFn, model: 'kimi-code/kimi-for-coding' });
 
   const promise = collect(service.invoke('Hello'));
   emitKimiEvents(proc, [
@@ -885,7 +586,7 @@ test('estimates API-equivalent costUsd on done for priced Kimi models', async ()
 test('omits cost when raw usage reports cached_input_tokens (unproven subset contract)', async () => {
   const proc = createMockProcess();
   const spawnFn = createMockSpawnFn(proc);
-  const service = new KimiAgentService({ spawnFn, model: 'kimi-code/kimi-for-coding' });
+  const service = createKimiAgentService({ spawnFn, model: 'kimi-code/kimi-for-coding' });
 
   const promise = collect(service.invoke('Hello'));
   emitKimiEvents(proc, [
@@ -935,13 +636,20 @@ test('does not bill the snapshot when raw stats carry only context tokens', asyn
 
   const proc = createMockProcess();
   const spawnFn = createMockSpawnFn(proc);
-  const service = new KimiAgentService({ spawnFn, model: 'kimi-code/kimi-for-coding' });
+  const service = createKimiAgentService({ spawnFn, model: 'kimi-code/kimi-for-coding' });
 
   try {
+    writeFingerprintStore(shareDir, {
+      [`kimi:${sessionId}`]: {
+        fingerprint: computeKimiL0Fingerprint('OWNED-TEST-IDENTITY'),
+        catId: 'kimi',
+        updatedAt: 1,
+      },
+    });
     const promise = collect(
       service.invoke('Hello', {
         sessionId,
-        callbackEnv: { KIMI_SHARE_DIR: shareDir },
+        callbackEnv: { KIMI_CODE_HOME: shareDir },
       }),
     );
     await new Promise((resolve) => setImmediate(resolve));
@@ -964,7 +672,7 @@ test('does not bill the snapshot when raw stats carry only context tokens', asyn
 test('does not estimate when raw usage carries only total_tokens', async () => {
   const proc = createMockProcess();
   const spawnFn = createMockSpawnFn(proc);
-  const service = new KimiAgentService({ spawnFn, model: 'kimi-code/kimi-for-coding' });
+  const service = createKimiAgentService({ spawnFn, model: 'kimi-code/kimi-for-coding' });
 
   const promise = collect(service.invoke('Hello'));
   emitKimiEvents(proc, [
@@ -985,7 +693,7 @@ test('does not estimate when raw usage carries only total_tokens', async () => {
 test('leaves costUsd unset for unverified Kimi model aliases (no guessing)', async () => {
   const proc = createMockProcess();
   const spawnFn = createMockSpawnFn(proc);
-  const service = new KimiAgentService({ spawnFn, model: 'kimi-code/kimi-for-coding-v1' });
+  const service = createKimiAgentService({ spawnFn, model: 'kimi-code/kimi-for-coding-v1' });
 
   const promise = collect(service.invoke('Hello'));
   emitKimiEvents(proc, [
@@ -1031,13 +739,20 @@ test('enriches done metadata with local Kimi context snapshot for session-chain 
 
   const proc = createMockProcess();
   const spawnFn = createMockSpawnFn(proc);
-  const service = new KimiAgentService({ spawnFn, model: 'kimi-code/kimi-for-coding' });
+  const service = createKimiAgentService({ spawnFn, model: 'kimi-code/kimi-for-coding' });
 
   try {
+    writeFingerprintStore(shareDir, {
+      [`kimi:${sessionId}`]: {
+        fingerprint: computeKimiL0Fingerprint('OWNED-TEST-IDENTITY'),
+        catId: 'kimi',
+        updatedAt: 1,
+      },
+    });
     const promise = collect(
       service.invoke('Hello', {
         sessionId,
-        callbackEnv: { KIMI_SHARE_DIR: shareDir },
+        callbackEnv: { KIMI_CODE_HOME: shareDir },
       }),
     );
     await new Promise((resolve) => setImmediate(resolve));
@@ -1059,7 +774,7 @@ test('enriches done metadata with local Kimi context snapshot for session-chain 
   }
 });
 
-test('non-legacy kimi fallback: only kimi exists, no kimi-cli, meta events for session resume', async () => {
+test('native Kimi Code parses meta events for session resume', async () => {
   // Isolate PATH: a bin dir with only `kimi` (no `kimi-cli`).  Keep a skeleton system
   // PATH so `which` itself is findable; the stub `kimi-cli` from the top-level setup
   // is NOT present.  A temp HOME ensures the fallback directory search in
@@ -1082,7 +797,7 @@ test('non-legacy kimi fallback: only kimi exists, no kimi-cli, meta events for s
     // Native mode compiles L0 via --agent-file — stub the compiler so this
     // parser/transport test does not depend on the real L0 pipeline.
     const l0CompilerFn = mock.fn(async () => 'L0_STUB');
-    const service = new KimiAgentService({ spawnFn, model: 'kimi-code/kimi-for-coding', l0CompilerFn });
+    const service = createKimiAgentService({ spawnFn, model: 'kimi-code/kimi-for-coding', l0CompilerFn });
 
     const promise = collect(service.invoke('Hello'));
 
@@ -1137,88 +852,22 @@ test('non-legacy kimi fallback: only kimi exists, no kimi-cli, meta events for s
   }
 });
 
-test('both kimi-cli and kimi absent: error emitted without leaking tempMcpConfig dir (regression guard for #944 intake P1 found by opus-48)', async () => {
-  // Isolate PATH: no kimi or kimi-cli anywhere; temp HOME prevents fallback search.
-  const emptyBinDir = mkdtempSync(join(tmpdir(), 'kimi-empty-bin-'));
-  const tempHome = mkdtempSync(join(tmpdir(), 'kimi-empty-home-'));
-  const tempShareDir = mkdtempSync(join(tmpdir(), 'kimi-share-empty-'));
-
-  const savedPath = process.env.PATH;
-  const savedHome = process.env.HOME;
-  process.env.PATH = `${emptyBinDir}:/usr/bin:/bin`;
-  process.env.HOME = tempHome;
-
-  invalidateCliCommand('kimi-cli');
-  invalidateCliCommand('kimi');
-
-  try {
-    const proc = createMockProcess();
-    const spawnFn = createMockSpawnFn(proc);
-    // mcpServerPath non-empty + callbackEnv non-empty are the two preconditions for
-    // writeMcpConfigFile() to actually create a tmp-mcp-* dir (per kimi-config.ts:252).
-    // If the not-found early-return happened AFTER tempMcpConfig creation (the bug),
-    // the dir would be left behind because finally cleanup is gated by the try block.
-    const service = new KimiAgentService({
-      spawnFn,
-      mcpServerPath: '/dummy/cat-cafe-mcp-server.js',
-    });
-
-    // KIMI_SHARE_DIR routes writeMcpConfigFile()'s tmp-mcp-* prefix into our temp area,
-    // so we can assert no dir is created there.
-    const msgs = await collect(
-      service.invoke('Hello', {
-        callbackEnv: { KIMI_SHARE_DIR: tempShareDir },
-      }),
-    );
-
-    // Should emit error + done (not-found path)
-    const err = msgs.find((m) => m.type === 'error');
-    assert.ok(err, 'expected error event when both kimi-cli and kimi are absent');
-    const done = msgs.find((m) => m.type === 'done');
-    assert.ok(done, 'expected done event after error');
-
-    // spawn should NOT have been called (kimi binary absent)
-    assert.equal(spawnFn.mock.calls.length, 0, 'spawn should not be called when binary absent');
-
-    // CRITICAL: no tmp-mcp-* dir leaked in shareDir (the regression we are guarding).
-    // Before the fix (intake commit e939be0), tempMcpConfig was created BEFORE the
-    // not-found check, so the dir survived because the try/finally was never entered.
-    const { readdirSync } = await import('node:fs');
-    const entries = readdirSync(tempShareDir).filter((name) => name.startsWith('tmp-mcp-'));
-    assert.equal(
-      entries.length,
-      0,
-      `tempMcpConfig leak: expected 0 tmp-mcp-* dirs in shareDir, found ${entries.length} (${entries.join(', ')})`,
-    );
-  } finally {
-    process.env.PATH = savedPath;
-    process.env.HOME = savedHome;
-    rmSync(emptyBinDir, { recursive: true, force: true });
-    rmSync(tempHome, { recursive: true, force: true });
-    rmSync(tempShareDir, { recursive: true, force: true });
-    invalidateCliCommand('kimi-cli');
-    invalidateCliCommand('kimi');
-  }
-});
-
-// ---------------------------------------------------------------------------
-// F203 Phase J — kimi native L0 channel (--agent-file + v2 engine)
-// ---------------------------------------------------------------------------
-
-/** PATH isolation helper: only `kimi` resolvable (no legacy `kimi-cli`). */
-function enterNonLegacyKimiPath(t) {
+function enterNonLegacyKimiPath() {
   const binDir = mkdtempSync(join(tmpdir(), 'kimi-native-l0-bin-'));
   writeFileSync(join(binDir, 'kimi'), '#!/bin/sh\nexit 1\n', { mode: 0o755 });
   const savedPath = process.env.PATH;
   const savedHome = process.env.HOME;
+  const savedUserProfile = process.env.USERPROFILE;
   const tempHome = mkdtempSync(join(tmpdir(), 'kimi-native-l0-home-'));
-  process.env.PATH = `${binDir}:/usr/bin:/bin`;
+  process.env.PATH = [binDir, '/usr/bin', '/bin'].join(delimiter);
   process.env.HOME = tempHome;
+  process.env.USERPROFILE = tempHome;
   invalidateCliCommand('kimi-cli');
   invalidateCliCommand('kimi');
   return () => {
     process.env.PATH = savedPath;
     process.env.HOME = savedHome;
+    process.env.USERPROFILE = savedUserProfile;
     rmSync(binDir, { recursive: true, force: true });
     rmSync(tempHome, { recursive: true, force: true });
     invalidateCliCommand('kimi-cli');
@@ -1226,15 +875,15 @@ function enterNonLegacyKimiPath(t) {
   };
 }
 
-test('injectsL0Natively is false when legacy kimi-cli is resolvable', async () => {
-  const service = new KimiAgentService({ model: 'kimi-code/kimi-for-coding' });
-  assert.equal(service.injectsL0Natively(), false);
+test('injectsL0Natively stays true when an obsolete kimi-cli shim is also resolvable', async () => {
+  const service = createKimiAgentService({ model: 'kimi-code/kimi-for-coding' });
+  assert.equal(service.injectsL0Natively(), true);
 });
 
 test('injectsL0Natively is true when only new kimi (kimi-code) is resolvable', async () => {
   const restore = enterNonLegacyKimiPath();
   try {
-    const service = new KimiAgentService({ model: 'kimi-code/kimi-for-coding' });
+    const service = createKimiAgentService({ model: 'kimi-code/kimi-for-coding' });
     assert.equal(service.injectsL0Natively(), true);
   } finally {
     restore();
@@ -1247,7 +896,7 @@ test('native L0: passes --agent-file with compiled L0 + pack, v2 env flag, no pr
     const proc = createMockProcess();
     const spawnFn = createMockSpawnFn(proc);
     const l0CompilerFn = mock.fn(async () => 'L0_COMPILED_IDENTITY_MARKER');
-    const service = new KimiAgentService({ spawnFn, model: 'kimi-code/k3', l0CompilerFn });
+    const service = createKimiAgentService({ spawnFn, model: 'kimi-code/k3', l0CompilerFn });
 
     const promise = collect(
       service.invoke('Hello', {
@@ -1313,7 +962,7 @@ test('native L0: compile failure is fail-closed (error + done, no spawn, no temp
     const l0CompilerFn = mock.fn(async () => {
       throw new Error('boom');
     });
-    const service = new KimiAgentService({
+    const service = createKimiAgentService({
       spawnFn,
       model: 'kimi-code/k3',
       l0CompilerFn,
@@ -1322,7 +971,7 @@ test('native L0: compile failure is fail-closed (error + done, no spawn, no temp
 
     const msgs = await collect(
       service.invoke('Hello', {
-        callbackEnv: { KIMI_SHARE_DIR: tempShareDir, CAT_CAFE_API_URL: 'http://127.0.0.1:3004' },
+        callbackEnv: { KIMI_CODE_HOME: tempShareDir, CAT_CAFE_API_URL: 'http://127.0.0.1:3004' },
       }),
     );
 
@@ -1348,7 +997,7 @@ test('native L0: user cliConfigArgs cannot override --agent-file / --agent', asy
     const proc = createMockProcess();
     const spawnFn = createMockSpawnFn(proc);
     const l0CompilerFn = mock.fn(async () => 'L0_X');
-    const service = new KimiAgentService({ spawnFn, model: 'kimi-code/k3', l0CompilerFn });
+    const service = createKimiAgentService({ spawnFn, model: 'kimi-code/k3', l0CompilerFn });
 
     const promise = collect(
       service.invoke('Hello', {
@@ -1381,7 +1030,7 @@ test('native L0: declares --agent-file as managed argv provenance for diagnostic
       yield { role: 'assistant', content: 'ok' };
     }
     const l0CompilerFn = mock.fn(async () => 'L0_X');
-    const service = new KimiAgentService({ model: 'kimi-code/k3', l0CompilerFn });
+    const service = createKimiAgentService({ model: 'kimi-code/k3', l0CompilerFn });
 
     await collect(service.invoke('Hello', { spawnCliOverride }));
 
@@ -1389,27 +1038,6 @@ test('native L0: declares --agent-file as managed argv provenance for diagnostic
   } finally {
     restore();
   }
-});
-
-test('legacy kimi-cli: no --agent-file, no v2 env flag, prompt keeps <system_instructions> wrap', async () => {
-  const proc = createMockProcess();
-  const spawnFn = createMockSpawnFn(proc);
-  const l0CompilerFn = mock.fn(async () => 'L0_SHOULD_NOT_BE_COMPILED');
-  const service = new KimiAgentService({ spawnFn, model: 'kimi-code/kimi-for-coding', l0CompilerFn });
-
-  const promise = collect(service.invoke('Hello', { systemPrompt: 'IDENTITY_WRAP' }));
-  emitKimiEvents(proc, [{ role: 'assistant', content: 'ok' }]);
-  await promise;
-
-  const args = spawnFn.mock.calls[0].arguments[1];
-  assert.ok(!args.includes('--agent-file'));
-  const env = spawnFn.mock.calls[0].arguments[2]?.env ?? {};
-  assert.ok(!('KIMI_CODE_EXPERIMENTAL_FLAG' in env));
-  const promptFlagIndex = args.indexOf('--prompt');
-  assert.ok(promptFlagIndex >= 0);
-  assert.match(args[promptFlagIndex + 1], /<system_instructions>/);
-  assert.match(args[promptFlagIndex + 1], /IDENTITY_WRAP/);
-  assert.equal(l0CompilerFn.mock.calls.length, 0, 'legacy path must not compile L0');
 });
 
 // ---------------------------------------------------------------------------
@@ -1442,10 +1070,10 @@ test('native L0 resume: matching fingerprint honors --session', async () => {
     const proc = createMockProcess();
     const spawnFn = createMockSpawnFn(proc);
     const l0CompilerFn = mock.fn(async () => 'L0_V1');
-    const service = new KimiAgentService({ spawnFn, model: 'kimi-code/k3', l0CompilerFn });
+    const service = createKimiAgentService({ spawnFn, model: 'kimi-code/k3', l0CompilerFn });
 
     const promise = collect(
-      service.invoke('Continue', { sessionId: 'sess-match', callbackEnv: { KIMI_SHARE_DIR: shareDir } }),
+      service.invoke('Continue', { sessionId: 'sess-match', callbackEnv: { KIMI_CODE_HOME: shareDir } }),
     );
     await new Promise((r) => setImmediate(r));
     emitKimiEvents(proc, [{ role: 'assistant', content: 'resumed' }]);
@@ -1483,13 +1111,13 @@ test('native L0 resume: compiles L0 for the fingerprint gate but passes no agent
     const proc = createMockProcess();
     const spawnFn = createMockSpawnFn(proc);
     const l0CompilerFn = mock.fn(async () => 'L0_V1');
-    const service = new KimiAgentService({ spawnFn, model: 'kimi-code/k3', l0CompilerFn });
+    const service = createKimiAgentService({ spawnFn, model: 'kimi-code/k3', l0CompilerFn });
 
     const promise = collect(
       service.invoke('Continue', {
         sessionId: 'sess-bound',
         systemPrompt: 'PACK_CONTENT',
-        callbackEnv: { KIMI_SHARE_DIR: shareDir },
+        callbackEnv: { KIMI_CODE_HOME: shareDir },
       }),
     );
     await new Promise((r) => setImmediate(r));
@@ -1522,13 +1150,13 @@ test('native L0 resume: cliConfigArgs cannot swap the fingerprint-verified sessi
     const proc = createMockProcess();
     const spawnFn = createMockSpawnFn(proc);
     const l0CompilerFn = mock.fn(async () => 'L0_V1');
-    const service = new KimiAgentService({ spawnFn, model: 'kimi-code/k3', l0CompilerFn });
+    const service = createKimiAgentService({ spawnFn, model: 'kimi-code/k3', l0CompilerFn });
 
     const promise = collect(
       service.invoke('Continue', {
         sessionId: 'sess-verified',
         cliConfigArgs: ['--session sess-unverified'],
-        callbackEnv: { KIMI_SHARE_DIR: shareDir },
+        callbackEnv: { KIMI_CODE_HOME: shareDir },
       }),
     );
     await new Promise((r) => setImmediate(r));
@@ -1565,13 +1193,13 @@ test('native L0 resume: attached-value session spellings (-S<id> / --session=<id
     const proc = createMockProcess();
     const spawnFn = createMockSpawnFn(proc);
     const l0CompilerFn = mock.fn(async () => 'L0_V1');
-    const service = new KimiAgentService({ spawnFn, model: 'kimi-code/k3', l0CompilerFn });
+    const service = createKimiAgentService({ spawnFn, model: 'kimi-code/k3', l0CompilerFn });
 
     const promise = collect(
       service.invoke('Continue', {
         sessionId: 'sess-verified',
         cliConfigArgs: ['-Ssneaky-one', '--session=sneaky-two'],
-        callbackEnv: { KIMI_SHARE_DIR: shareDir },
+        callbackEnv: { KIMI_CODE_HOME: shareDir },
       }),
     );
     await new Promise((r) => setImmediate(r));
@@ -1595,13 +1223,13 @@ test('native L0 fresh start: cliConfigArgs cannot sneak --continue past the fing
     const proc = createMockProcess();
     const spawnFn = createMockSpawnFn(proc);
     const l0CompilerFn = mock.fn(async () => 'L0_V2');
-    const service = new KimiAgentService({ spawnFn, model: 'kimi-code/k3', l0CompilerFn });
+    const service = createKimiAgentService({ spawnFn, model: 'kimi-code/k3', l0CompilerFn });
 
     const promise = collect(
       service.invoke('Hello', {
         // no sessionId → fresh bind, --agent-file is carried
         cliConfigArgs: ['--continue', '--verbose'],
-        callbackEnv: { KIMI_SHARE_DIR: shareDir },
+        callbackEnv: { KIMI_CODE_HOME: shareDir },
       }),
     );
     await new Promise((r) => setImmediate(r));
@@ -1630,10 +1258,10 @@ test('native L0 resume: stale fingerprint forces fresh session (no --session) + 
     const proc = createMockProcess();
     const spawnFn = createMockSpawnFn(proc);
     const l0CompilerFn = mock.fn(async () => 'L0_V2');
-    const service = new KimiAgentService({ spawnFn, model: 'kimi-code/k3', l0CompilerFn });
+    const service = createKimiAgentService({ spawnFn, model: 'kimi-code/k3', l0CompilerFn });
 
     const promise = collect(
-      service.invoke('Continue', { sessionId: 'sess-old', callbackEnv: { KIMI_SHARE_DIR: shareDir } }),
+      service.invoke('Continue', { sessionId: 'sess-old', callbackEnv: { KIMI_CODE_HOME: shareDir } }),
     );
     await new Promise((r) => setImmediate(r));
     emitKimiEvents(proc, [
@@ -1665,10 +1293,10 @@ test('native L0 resume: unknown session (no fingerprint record) is unverifiable 
     const proc = createMockProcess();
     const spawnFn = createMockSpawnFn(proc);
     const l0CompilerFn = mock.fn(async () => 'L0_V2');
-    const service = new KimiAgentService({ spawnFn, model: 'kimi-code/k3', l0CompilerFn });
+    const service = createKimiAgentService({ spawnFn, model: 'kimi-code/k3', l0CompilerFn });
 
     const promise = collect(
-      service.invoke('Continue', { sessionId: 'sess-unknown', callbackEnv: { KIMI_SHARE_DIR: shareDir } }),
+      service.invoke('Continue', { sessionId: 'sess-unknown', callbackEnv: { KIMI_CODE_HOME: shareDir } }),
     );
     await new Promise((r) => setImmediate(r));
     emitKimiEvents(proc, [{ role: 'assistant', content: 'fresh' }]);
@@ -1692,9 +1320,9 @@ test('native L0 first invoke: records fingerprint for the new session after sess
     const proc = createMockProcess();
     const spawnFn = createMockSpawnFn(proc);
     const l0CompilerFn = mock.fn(async () => 'L0_V3');
-    const service = new KimiAgentService({ spawnFn, model: 'kimi-code/k3', l0CompilerFn });
+    const service = createKimiAgentService({ spawnFn, model: 'kimi-code/k3', l0CompilerFn });
 
-    const promise = collect(service.invoke('Hello', { callbackEnv: { KIMI_SHARE_DIR: shareDir } }));
+    const promise = collect(service.invoke('Hello', { callbackEnv: { KIMI_CODE_HOME: shareDir } }));
     await new Promise((r) => setImmediate(r));
     emitKimiEvents(proc, [
       { role: 'meta', type: 'session.resume_hint', session_id: 'sess-first' },
@@ -1722,10 +1350,10 @@ test('native L0 resume: fingerprint store is cat-scoped (another cat never match
     const proc = createMockProcess();
     const spawnFn = createMockSpawnFn(proc);
     const l0CompilerFn = mock.fn(async () => 'L0_V1');
-    const service = new KimiAgentService({ spawnFn, model: 'kimi-code/k3', l0CompilerFn });
+    const service = createKimiAgentService({ spawnFn, model: 'kimi-code/k3', l0CompilerFn });
 
     const promise = collect(
-      service.invoke('Continue', { sessionId: 'sess-shared', callbackEnv: { KIMI_SHARE_DIR: shareDir } }),
+      service.invoke('Continue', { sessionId: 'sess-shared', callbackEnv: { KIMI_CODE_HOME: shareDir } }),
     );
     await new Promise((r) => setImmediate(r));
     emitKimiEvents(proc, [{ role: 'assistant', content: 'fresh' }]);
@@ -1752,10 +1380,10 @@ test('native L0 resume: rejected old session id is never recorded with the new f
     const proc = createMockProcess();
     const spawnFn = createMockSpawnFn(proc);
     const l0CompilerFn = mock.fn(async () => 'L0_V2');
-    const service = new KimiAgentService({ spawnFn, model: 'kimi-code/k3', l0CompilerFn });
+    const service = createKimiAgentService({ spawnFn, model: 'kimi-code/k3', l0CompilerFn });
 
     const promise = collect(
-      service.invoke('Continue', { sessionId: 'sess-old', callbackEnv: { KIMI_SHARE_DIR: shareDir } }),
+      service.invoke('Continue', { sessionId: 'sess-old', callbackEnv: { KIMI_CODE_HOME: shareDir } }),
     );
     await new Promise((r) => setImmediate(r));
     // CLI (pathologically) echoes the REJECTED old id — must not be recorded.
@@ -1787,10 +1415,10 @@ test('native L0 resume: rejected id must not consume the session-init slot; real
     const proc = createMockProcess();
     const spawnFn = createMockSpawnFn(proc);
     const l0CompilerFn = mock.fn(async () => 'L0_V2');
-    const service = new KimiAgentService({ spawnFn, model: 'kimi-code/k3', l0CompilerFn });
+    const service = createKimiAgentService({ spawnFn, model: 'kimi-code/k3', l0CompilerFn });
 
     const promise = collect(
-      service.invoke('Continue', { sessionId: 'sess-old', callbackEnv: { KIMI_SHARE_DIR: shareDir } }),
+      service.invoke('Continue', { sessionId: 'sess-old', callbackEnv: { KIMI_CODE_HOME: shareDir } }),
     );
     await new Promise((r) => setImmediate(r));
     // Rejected id arrives FIRST (resume_hint), real new id arrives later via assistant event.
@@ -1823,7 +1451,7 @@ test('native L0 resume: rejected id in non-JSON resume hint line does not consum
       'kimi:sess-old': { fingerprint: computeKimiL0Fingerprint('L0_OLD'), catId: 'kimi', updatedAt: 1 },
     });
     const l0CompilerFn = mock.fn(async () => 'L0_V2');
-    const service = new KimiAgentService({ model: 'kimi-code/k3', l0CompilerFn });
+    const service = createKimiAgentService({ model: 'kimi-code/k3', l0CompilerFn });
 
     async function* spawnCliOverride() {
       yield { line: 'To resume this session: kimi -r sess-old', error: 'Failed to parse JSON line' };
@@ -1833,7 +1461,7 @@ test('native L0 resume: rejected id in non-JSON resume hint line does not consum
     const msgs = await collect(
       service.invoke('Continue', {
         sessionId: 'sess-old',
-        callbackEnv: { KIMI_SHARE_DIR: shareDir },
+        callbackEnv: { KIMI_CODE_HOME: shareDir },
         spawnCliOverride,
       }),
     );
@@ -1856,7 +1484,7 @@ test('native L0: valid new id from non-JSON line is recorded (next resume would 
   const shareDir = mkdtempSync(join(tmpdir(), 'kimi-fp-line-record-'));
   try {
     const l0CompilerFn = mock.fn(async () => 'L0_V4');
-    const service = new KimiAgentService({ model: 'kimi-code/k3', l0CompilerFn });
+    const service = createKimiAgentService({ model: 'kimi-code/k3', l0CompilerFn });
 
     async function* spawnCliOverride() {
       yield { line: 'To resume this session: kimi -r sess-line-new', error: 'Failed to parse JSON line' };
@@ -1864,7 +1492,7 @@ test('native L0: valid new id from non-JSON line is recorded (next resume would 
     }
 
     const msgs = await collect(
-      service.invoke('Hello', { callbackEnv: { KIMI_SHARE_DIR: shareDir }, spawnCliOverride }),
+      service.invoke('Hello', { callbackEnv: { KIMI_CODE_HOME: shareDir }, spawnCliOverride }),
     );
 
     const sessionInit = msgs.find((m) => m.type === 'session_init');

@@ -34,6 +34,27 @@ async function withClosingUnixWebSocket(reason, run) {
   }
 }
 
+test('unix host allows native cold initialization beyond ten seconds', { timeout: 20_000 }, async () => {
+  const directory = createCodexSocketDirectory();
+  const socketPath = join(directory, 'cold.sock');
+  let host;
+  try {
+    host = await spawnCodexAppServerHost({
+      command: process.execPath,
+      args: [
+        '-e',
+        `setTimeout(() => require('node:net').createServer().listen(${JSON.stringify(socketPath)}), 11_000)`,
+      ],
+      socketDirectory: directory,
+      socketPath,
+    });
+    assert.equal(host.isAlive, true);
+  } finally {
+    await host?.close();
+    await removeCodexSocketDirectory(directory);
+  }
+});
+
 test('unix websocket preserves the provider terminal diagnostic for replacement classification', async () => {
   await withClosingUnixWebSocket('Max payload size exceeded', async (session) => {
     await assert.rejects(

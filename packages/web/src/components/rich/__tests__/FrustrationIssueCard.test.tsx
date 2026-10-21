@@ -254,7 +254,7 @@ describe('FrustrationIssueCard', () => {
 
   // ── UX-2: collapse behavior ───────────────────────────────
 
-  it('collapses to one-line summary after confirm action', async () => {
+  it('keeps confirmed feedback expanded for explicit draft creation', async () => {
     vi.mocked(apiFetch).mockImplementation((url, init) => {
       const path = String(url);
       if (path.endsWith('/status')) {
@@ -279,12 +279,12 @@ describe('FrustrationIssueCard', () => {
       confirmButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
 
-    // After confirm, card stays expanded (F235: "Publish to Community" button must be visible)
+    // After confirm, card stays expanded (F235: "创建 GitHub 草稿" button must be visible)
     await vi.waitFor(() => expect(container.textContent).toContain('已记录'));
     // Body remains visible — card is NOT collapsed after confirm (unlike skip/false_positive)
     expect(container.textContent).toContain('模型工具调用解析失败');
     // F235: Community publish flow should render
-    expect(container.textContent).toContain('Publish to Community');
+    expect(container.textContent).toContain('创建 GitHub 草稿');
   });
 
   it('expands collapsed card on click', async () => {

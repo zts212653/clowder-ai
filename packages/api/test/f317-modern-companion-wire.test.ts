@@ -58,3 +58,20 @@ test('typed delivery receipts preserve stable send/message/call identity only on
   assert.equal(validateHostCompanionReply(delivery, legacy), false);
   assert.equal(validateHostCompanionReply({ ...delivery, played: true }, modern), false);
 });
+
+test('archive-selected text receipts stay versioned when the manifest contract is upgraded', () => {
+  const legacyReceipt = { kind: 'delivery', delivery: 'accepted' };
+  const typedReceipt = {
+    ...legacyReceipt,
+    clientMessageId: '11111111-1111-4111-8111-111111111111',
+    messageId: 'message-a',
+    callId: '22222222-2222-4222-8222-222222222222',
+  };
+  assert.equal(validateHostCompanionReply(legacyReceipt, legacy), true);
+  assert.equal(validateHostCompanionReply(legacyReceipt, '0.1.0-beta.32' as never), false);
+  assert.equal(validateHostCompanionReply(typedReceipt, legacy), false);
+  for (const contract of [modern, '0.1.0-beta.24'] as const) {
+    assert.equal(validateHostCompanionReply(typedReceipt, contract), true);
+    assert.equal(validateHostCompanionReply(legacyReceipt, contract), false);
+  }
+});

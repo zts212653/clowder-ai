@@ -1,4 +1,7 @@
+'use client';
+
 import type { EntrustedWorkOwnerReadV1 } from '@cat-cafe/shared';
+import { useCoCreatorDisplay } from '@/hooks/useCoCreatorConfig';
 import { preparedArtifactPresentation } from './prepared-artifact-presentation';
 
 const CURRENT_LABELS = {
@@ -27,8 +30,8 @@ function milestoneLabel(brief: EntrustedWorkOwnerReadV1['brief']): string {
   return 'unknown';
 }
 
-function nextOwnerLabel(nextOwner: EntrustedWorkOwnerReadV1['brief']['nextOwner']): string {
-  if (nextOwner.kind === 'human') return 'You';
+function nextOwnerLabel(nextOwner: EntrustedWorkOwnerReadV1['brief']['nextOwner'], ownerName: string): string {
+  if (nextOwner.kind === 'human') return ownerName;
   if (nextOwner.kind === 'cat') return nextOwner.ownerRef.replace(/^cat:/, '');
   return 'unknown';
 }
@@ -54,6 +57,7 @@ export function EntrustedWorkBrief({
   /** Readable name of the prepared work; the raw ref stays in the details below. */
   artifactLabel?: string;
 }) {
+  const ownerName = useCoCreatorDisplay().name;
   const { brief, preparedArtifact } = ownerRead;
   const outcome = brief.outcome.state === 'known' ? brief.outcome.value : 'unknown';
   const artifact = preparedArtifact
@@ -86,7 +90,7 @@ export function EntrustedWorkBrief({
         <div className="min-w-0">
           <dt className="text-micro font-medium text-cafe-muted">下一步</dt>
           <dd className="mt-0.5 break-words text-xs font-semibold text-cafe-black">
-            {nextOwnerLabel(brief.nextOwner)}
+            {nextOwnerLabel(brief.nextOwner, ownerName)}
           </dd>
         </div>
         <div className="min-w-0">

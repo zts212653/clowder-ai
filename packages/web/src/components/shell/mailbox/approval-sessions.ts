@@ -94,7 +94,7 @@ const REFUSAL_NOTICE = '这件事刚刚有变化，这次没有提交。已重�
 
 /** Original producer cards report their request when they do not create a Hub store attempt. */
 const isSelfReportedKind = (kind: ApprovalRequestEvent['kind']) =>
-  kind === 'meeting-intake' || kind === 'producer-card' || kind === 'person-memory-undo';
+  kind === 'producer-card' || kind === 'person-memory-undo';
 
 const isHttpStatus = (value: unknown): value is number =>
   Number.isInteger(value) && (value as number) >= 100 && (value as number) <= 599;

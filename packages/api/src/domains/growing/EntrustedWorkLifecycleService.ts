@@ -69,6 +69,7 @@ export type EntrustedWorkLifecycleErrorCode =
   | 'ENTRUSTED_WORK_SOURCE_CUSTODY_MISMATCH'
   | 'ENTRUSTED_WORK_NOT_FOUND'
   | 'ENTRUSTED_WORK_CONTRACT_MISSING'
+  | 'ENTRUSTED_WORK_THREAD_CONFLICT'
   | 'ENTRUSTED_WORK_REVISION_CONFLICT'
   | 'ENTRUSTED_WORK_ALREADY_CLOSED'
   | 'ENTRUSTED_WORK_NO_OP';
@@ -84,6 +85,7 @@ export class EntrustedWorkLifecycleError extends Error {
 }
 
 export interface EntrustedWorkLifecycleOptions {
+  readonly expectedThreadId?: string;
   readonly now?: () => number;
   readonly custodyGrantRegistry?: F310CustodyGrantRegistryV1;
   readonly onChanged?: (ownerUserId: string) => void;
@@ -96,6 +98,7 @@ export interface EntrustedWorkAdmissionSourceContext {
 }
 
 export class EntrustedWorkLifecycleService {
+  private readonly expectedThreadId: string | undefined;
   private readonly now: () => number;
   private readonly custodyGrantRegistry: F310CustodyGrantRegistryV1;
   private readonly onChanged: EntrustedWorkLifecycleOptions['onChanged'];
@@ -105,6 +108,7 @@ export class EntrustedWorkLifecycleService {
     private readonly tasks: ITaskStore,
     options: EntrustedWorkLifecycleOptions = {},
   ) {
+    this.expectedThreadId = options.expectedThreadId;
     this.now = options.now ?? Date.now;
     this.onChanged = options.onChanged;
     this.artifactReader = options.artifactReader;
@@ -220,6 +224,7 @@ export class EntrustedWorkLifecycleService {
     await beforeWrite?.();
     const result = await this.tasks.closeEntrustedWork(command.taskId, {
       expectedRevision: command.expectedRevision,
+      ...(this.expectedThreadId === undefined ? {} : { expectedThreadId: this.expectedThreadId }),
       closure: command.closure as EntrustedWorkTerminalClosure,
       ...(artifactSnapshot ? { artifactSnapshot } : {}),
     });
@@ -234,6 +239,8 @@ export class EntrustedWorkLifecycleService {
           'ENTRUSTED_WORK_CONTRACT_MISSING',
           'Task does not own an entrusted-work contract',
         );
+      case 'thread_conflict':
+        throw new EntrustedWorkLifecycleError('ENTRUSTED_WORK_THREAD_CONFLICT', 'Task thread is no longer current');
       case 'revision_conflict':
         throw new EntrustedWorkLifecycleError(
           'ENTRUSTED_WORK_REVISION_CONFLICT',
@@ -257,6 +264,7 @@ export class EntrustedWorkLifecycleService {
     }
     const result = await this.tasks.updateEntrustedWork(command.taskId, {
       expectedRevision: command.expectedRevision,
+      ...(this.expectedThreadId === undefined ? {} : { expectedThreadId: this.expectedThreadId }),
       ...(command.status !== undefined ? { status: command.status } : {}),
       ...(command.time !== undefined ? { time: command.time } : {}),
       ...(command.artifactRefs !== undefined ? { artifactRefs: command.artifactRefs } : {}),
@@ -273,6 +281,8 @@ export class EntrustedWorkLifecycleService {
           'ENTRUSTED_WORK_CONTRACT_MISSING',
           'Task does not own an entrusted-work contract',
         );
+      case 'thread_conflict':
+        throw new EntrustedWorkLifecycleError('ENTRUSTED_WORK_THREAD_CONFLICT', 'Task thread is no longer current');
       case 'revision_conflict':
         throw new EntrustedWorkLifecycleError(
           'ENTRUSTED_WORK_REVISION_CONFLICT',

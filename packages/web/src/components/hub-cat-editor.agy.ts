@@ -5,12 +5,18 @@ export function usesAgyNative(form: Pick<HubCatEditorFormState, 'clientId' | 'ca
   return form.clientId === 'google' && form.carrier !== 'acp' && form.agyNativeEnabled === true;
 }
 
+export function usesAgyAcp(form: Pick<HubCatEditorFormState, 'clientId' | 'carrier' | 'agyAcpEnabled'>) {
+  return form.clientId === 'google' && form.carrier === 'acp' && form.agyAcpEnabled === true;
+}
+
 export function buildAgyProfilePatch(
   form: HubCatEditorFormState,
   cat?: CatData | null,
   accountAuthType?: 'oauth' | 'api_key' | null,
 ): Record<string, unknown> {
-  if (!usesAgyNative(form)) return cat?.agyProfile?.carrier === 'native' ? { agyProfile: null } : {};
+  const acp = usesAgyAcp(form);
+  if (!usesAgyNative(form) && !acp)
+    return cat?.agyProfile?.carrier === 'native' || cat?.agyProfile?.carrier === 'acp' ? { agyProfile: null } : {};
   if (accountAuthType === 'api_key') throw new Error('AGY Native 需要隔离 Profile 中已登录的个人 OAuth');
   const profileId = form.agyProfileId?.trim() || form.catId.trim();
   if (!/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,79}$/.test(profileId)) throw new Error('隔离 Profile ID 格式无效');
@@ -33,7 +39,7 @@ export function buildAgyProfilePatch(
   return {
     agyProfile: {
       enabled: form.agyProfileEnabled ?? true,
-      carrier: 'native',
+      carrier: acp ? 'acp' : 'native',
       profileId,
       ...(homeRoot ? { homeRoot } : {}),
       model,

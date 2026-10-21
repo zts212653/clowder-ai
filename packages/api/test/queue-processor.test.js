@@ -1262,6 +1262,40 @@ describe('QueueProcessor over the source-row pending Queue', () => {
     assert.ok(response.lifecycle.startedAt > source.timelineOrderAt);
   });
 
+  it('re-reads the delivered source before dispatching lifecycle input identity', async () => {
+    const harness = createHarness();
+    const originalGetById = harness.messageStore.getById.bind(harness.messageStore);
+    // Redis returns a fresh object for each read. Keep the initial queued snapshot
+    // separate from the delivered row that admission writes before dispatch.
+    // Stay synchronous: the reserved-id guard reads getById() without awaiting, and
+    // a promise (always truthy) would be mistaken for an existing message.
+    harness.messageStore.getById = mock.fn((messageId) => {
+      const message = originalGetById(messageId);
+      return message ? structuredClone(message) : null;
+    });
+    const originalMarkDelivered = harness.messageStore.markDelivered.bind(harness.messageStore);
+    harness.messageStore.markDelivered = mock.fn(async (messageId, deliveredAt) => {
+      const result = await originalMarkDelivered(messageId, deliveredAt);
+      const message = await originalGetById(messageId);
+      if (message && !message.lifecycle) {
+        message.lifecycle = {
+          kind: 'input',
+          orderKey: `${deliveredAt}:${messageId}`,
+          dispatchRefs: [],
+        };
+      }
+      return result;
+    });
+
+    const admitted = await admitMessage(harness);
+    assert.equal((await harness.processor.processNext('thread-1', 'user-1')).started, true);
+    await waitFor(() => harness.invocationRecordStore.records.get('inv-1')?.status === 'succeeded');
+
+    const source = await harness.messageStore.getById(admitted.message.id);
+    assert.equal(source.deliveryStatus, 'delivered');
+    assert.equal(source.lifecycle.dispatchRefs[0].phase, 'dispatched');
+  });
+
   it('preserves the enqueue clock floor if the durable Queue clock runs ahead of wall time', async () => {
     const harness = createHarness();
     harness.queue.lastEnqueuedAt = Date.now() + 10_000;

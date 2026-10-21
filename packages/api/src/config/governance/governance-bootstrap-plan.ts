@@ -13,7 +13,7 @@ const PROVIDER_SKILLS_DIRS: Record<GovernanceProvider, string> = {
   claude: '.claude/skills',
   codex: '.codex/skills',
   gemini: '.gemini/skills',
-  kimi: '.kimi/skills',
+  kimi: '.kimi-code/skills',
 };
 const SHARED_REFS_ALIAS = '.cat-cafe-shared-refs';
 export const LEGACY_GOVERNANCE_REPORT = '.cat-cafe/governance-bootstrap-report.json';

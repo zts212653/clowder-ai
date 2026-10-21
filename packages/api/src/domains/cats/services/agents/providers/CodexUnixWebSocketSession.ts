@@ -20,7 +20,9 @@ import { codexHostServedModels } from './codex-served-model.js';
 /** Bounded stderr kept per host for socket-readiness diagnostics (pre-F319 value). */
 const HOST_STDERR_TAIL_CHARS = 8_192;
 
-const SOCKET_READY_TIMEOUT_MS = 10_000;
+// Native cold startup can index an existing rollout history before opening its socket.
+// Keep one bounded startup budget rather than interrupting that initialization at ten seconds.
+const SOCKET_READY_TIMEOUT_MS = 120_000;
 const CLOSE_GRACE_MS = 1_500;
 const MAX_TERMINAL_DIAGNOSTIC_LENGTH = 256;
 const SESSION_SCOPED_ENV_KEYS = new Set<string>([...MCP_CALLBACK_ENV_KEYS, 'CAT_CAFE_CREDENTIAL_FILE']);

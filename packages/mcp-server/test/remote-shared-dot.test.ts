@@ -24,6 +24,11 @@ test('one installed MCP URL discovers dot events and tools while preserving Pro 
   await writeFile(keyFile, key, { mode: 0o600 });
   const seen: Array<{ path: string; key: unknown; invocation: unknown; method: string }> = [];
   const host = createServer(async (req, res) => {
+    if (req.method === 'GET' && req.url === '/api/config') {
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ config: { coCreator: { name: 'Nora', mentionPatterns: ['@nora'] } } }));
+      return;
+    }
     const chunks: Buffer[] = [];
     for await (const chunk of req) chunks.push(Buffer.from(chunk));
     const rpc = JSON.parse(Buffer.concat(chunks).toString());

@@ -7,8 +7,9 @@ import { boundedMenuPosition } from './message-actions-menu-geometry';
 import {
   authorFacts,
   boundedActionPosition,
+  messageIsReadable,
   needsCompactControl,
-  ownerAllowsActions,
+  readActionPort,
 } from './message-actions-overlay-geometry';
 import {
   type ActionPlaneEntry,
@@ -62,6 +63,7 @@ export function MessageActionsOverlay({
     const row = owner.current;
     if (!node || !row) return;
     const column = row.closest<HTMLElement>('[data-thread-chat-reading-column]') ?? row;
+    const port = column.closest<HTMLElement>('[data-chat-container]');
     columnRef.current = column;
     const initialControl = node.firstElementChild?.getBoundingClientRect();
     const entry: ActionPlaneEntry = {
@@ -71,7 +73,7 @@ export function MessageActionsOverlay({
       authorLine: anchor.parentElement,
       suspend() {
         hideActionPlane(node);
-        ownership.pending();
+        ownership.pending(() => messageIsReadable(row, readActionPort(port)));
       },
       retire() {
         hideActionPlane(node);
@@ -90,13 +92,7 @@ export function MessageActionsOverlay({
         const position = boundedActionPosition(slot, context.column, control, context.port, facts, isUser, compact);
         const fullSize = { width: fullWidth.current, height: fullHeight.current };
         const nextCompact = needsCompactControl(slot, context.column, fullSize, facts, isUser, context.compact);
-        const ownerBox = row.getBoundingClientRect();
-        const messageAvailable =
-          ownerAllowsActions(row) &&
-          ownerBox.bottom > context.port.top &&
-          ownerBox.top < context.port.bottom &&
-          ownerBox.right > context.port.left &&
-          ownerBox.left < context.port.right;
+        const messageAvailable = messageIsReadable(row, context.port);
         const available = position.available && messageAvailable;
         const menu = node.querySelector<HTMLElement>('[data-message-actions-menu]');
         const menuAnchor = node.querySelector<HTMLElement>('button[aria-haspopup="menu"]')?.getBoundingClientRect();

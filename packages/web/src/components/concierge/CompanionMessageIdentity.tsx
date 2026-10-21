@@ -1,7 +1,9 @@
 import type { CompanionIdentitySnapshotV1 } from '@cat-cafe/shared';
 import { projectCompanionIdentity } from '@cat-cafe/shared';
 import { useCatData } from '@/hooks/useCatData';
+import { resolveMessageSender } from '@/lib/resolve-sender';
 import { CatAvatar } from '../CatAvatar';
+import { SenderAvatar } from '../SenderAvatar';
 
 const LEGACY_PORTRAIT_IDS: Record<string, string> = {
   'fable-5': 'claude-fable-5',
@@ -15,14 +17,21 @@ export function CompanionAvatar({
   partnerName,
   size = 32,
   status,
+  messagePresentation = false,
 }: {
   catId: string;
   partnerName?: string;
   size?: number;
   status?: 'streaming' | 'error';
+  messagePresentation?: boolean;
 }) {
   const { getCatById } = useCatData();
   const portraitCatId = getCatById(catId) ? catId : (LEGACY_PORTRAIT_IDS[catId] ?? catId);
+  const sender = resolveMessageSender({ from: { kind: 'agent', catId: portraitCatId } }, getCatById, {
+    name: '',
+    aliases: [],
+    mentionPatterns: [],
+  });
   return (
     <span
       data-testid="companion-avatar"
@@ -31,7 +40,15 @@ export function CompanionAvatar({
       aria-label={`${partnerName ?? catId}的猫猫球伴随头像`}
       className="relative inline-flex"
     >
-      <CatAvatar catId={portraitCatId} size={size} status={status} />
+      {messagePresentation ? (
+        <SenderAvatar
+          sender={{ ...sender, avatar: getCatById(portraitCatId)?.avatar || `/avatars/${portraitCatId}.png` }}
+          presentation="message"
+          streaming={status === 'streaming'}
+        />
+      ) : (
+        <CatAvatar catId={portraitCatId} size={size} status={status} />
+      )}
       <span
         aria-hidden="true"
         className="absolute -bottom-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full border border-cafe bg-cafe-accent text-micro font-bold leading-none text-[var(--cafe-accent-foreground)]"
@@ -45,7 +62,7 @@ export function CompanionAvatar({
 /** A saved Live message keeps the selected cat's face while the message keeps its real author. */
 export function CompanionMessageAvatar({ identity }: { identity: CompanionIdentitySnapshotV1 }) {
   const view = projectCompanionIdentity(identity);
-  return <CompanionAvatar catId={view.avatarCatId} partnerName={identity.partner.displayName} />;
+  return <CompanionAvatar catId={view.avatarCatId} partnerName={identity.partner.displayName} messagePresentation />;
 }
 
 export function CompanionMessageIdentity({

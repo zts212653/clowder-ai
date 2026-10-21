@@ -2,7 +2,6 @@ import assert from 'node:assert/strict';
 import { readdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { Readable } from 'node:stream';
-import { test } from 'node:test';
 import { setTimeout } from 'node:timers/promises';
 import {
   type CollectiveArtifactMediaOperation,
@@ -10,8 +9,8 @@ import {
   collectiveMediaDescriptorHeader,
   collectiveMediaRelaySlots,
 } from '@cat-cafe/shared';
-import { ConnectorTransportError } from '../../collective-connector/src/index.js';
 import { mediaRangeFixture } from './collective-media-range.fixture.js';
+import { ConnectorTransportError, test } from './helpers/f202-collective-installed-business.js';
 
 function gate() {
   let resolve = () => {};

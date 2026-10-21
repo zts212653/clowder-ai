@@ -1,7 +1,5 @@
 import { createHash } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
-import type { CollectiveArtifactOwnerPort } from '@cat-cafe/collective-connector';
-import { ConnectorTransportError } from '@cat-cafe/collective-connector';
 import {
   collectiveArtifactPublicationOperationSchema,
   collectiveArtifactPublicationReceiptSchema,
@@ -12,6 +10,7 @@ import {
   collectiveContentScopeSchema,
 } from '../../video-studio/content-owner/collective-scope.js';
 import type { ProjectContentOwnerService } from '../../video-studio/content-owner/service.js';
+import type { CollectiveArtifactOwnerPort } from './owner-port.js';
 
 /** A selected upload becomes canonical bytes only at the existing owner's fresh-authorized commit boundary. */
 export async function publishCollectiveMarkdown(
@@ -22,7 +21,7 @@ export async function publishCollectiveMarkdown(
   const { publication, bytesBase64 } = collectiveArtifactPublicationOperationSchema.parse(operation);
   const authorizeEffect = async () => {
     if (!isDeepStrictEqual(await authority.reauthorize(), publication))
-      throw new ConnectorTransportError('Publication authority changed', 403);
+      throw Object.assign(new Error('Publication authority changed'), { statusCode: 403 });
   };
   await authorizeEffect();
   const bytes = Buffer.from(bytesBase64, 'base64');

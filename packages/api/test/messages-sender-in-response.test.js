@@ -216,3 +216,45 @@ describe('GET /api/messages source.sender serialization', () => {
     assert.equal(msg.source.sender.name, undefined, 'name should not be fabricated');
   });
 });
+
+it('plugin history preserves canonical member identity and its persisted presentation', async () => {
+  const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
+  const { messagesRoutes } = await import('../dist/routes/messages.js');
+  const messages = new MessageStore();
+  const presentation = { connector: 'weixin', label: '微信', icon: 'message', sender: { id: 'sender', name: 'Alice' } };
+  const stored = messages.append({
+    userId: 'test-user',
+    threadId: 'thread-1',
+    from: { kind: 'plugin', instanceId: 'plugin-instance' },
+    content: 'hello',
+    mentions: [],
+    timestamp: Date.now(),
+    extra: {
+      pluginMessage: {
+        instanceId: 'plugin-instance',
+        revision: 1,
+        presentation,
+        provenance: { origin: { kind: 'plugin', instanceId: 'plugin-instance' }, epistemicStatus: 'observation' },
+        elements: [{ elementId: 'text', kind: 'text', payload: { text: 'hello' } }],
+        appendOps: [],
+      },
+    },
+  });
+  assert.equal(stored.source, undefined);
+  const app = Fastify();
+  try {
+    await app.register(messagesRoutes, buildDeps({ messageStore: messages }));
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/messages?threadId=thread-1',
+      headers: { 'x-cat-cafe-user': 'test-user' },
+    });
+    assert.equal(response.statusCode, 200, response.body);
+    const projected = response.json().messages.find((m) => m.id === stored.id);
+    assert.deepEqual(projected.from, stored.from);
+    assert.equal(projected.type, 'connector');
+    assert.deepEqual(projected.source, presentation);
+  } finally {
+    await app.close();
+  }
+});

@@ -1,7 +1,13 @@
 import type { TaskItem } from '@cat-cafe/shared';
 import type { RedisClient } from '@cat-cafe/shared/utils';
 import { developmentScopeKey } from '../ports/DevelopmentWorkTransition.js';
+import {
+  type AttachEntrustedWorkArtifactInput,
+  captureEntrustedWorkArtifactInput,
+  prepareEntrustedWorkArtifactEvidence,
+} from '../ports/EntrustedWorkArtifactEvidence.js';
 import { prepareEntrustedWorkUpdate } from '../ports/EntrustedWorkContractUpdate.js';
+import { advanceEntrustedWorkRevision } from '../ports/EntrustedWorkRevision.js';
 import { reconcileDeploymentWaitTaskMutation } from '../ports/TaskDeploymentWaitState.js';
 import type {
   CloseEntrustedWorkStoreInput,
@@ -14,8 +20,22 @@ import { hydrateTask, serializeTask } from './RedisTaskCodec.js';
 
 const MAX_CONDITIONAL_TASK_UPDATE_RETRIES = 5;
 
+const ATTACH_ARTIFACT_EVIDENCE_LUA = `
+-- TASK_ATTACH_ARTIFACT_EVIDENCE: compare the entire observed Task hash, not just refs.
+local fields = cjson.decode(ARGV[1])
+local count = 0
+for field, value in pairs(fields) do
+  count = count + 1
+  if redis.call('HGET', KEYS[1], field) ~= value then return 0 end
+end
+if redis.call('HLEN', KEYS[1]) ~= count then return 0 end
+redis.call('HSET', KEYS[1], 'entrustedWork', ARGV[2], 'updatedAt', ARGV[3])
+return 1
+`;
+
 const CLOSE_ENTRUSTED_WORK_LUA = `
 -- F310_CLOSE_ENTRUSTED_WORK
+if ARGV[7] ~= '' and redis.call('HGET', KEYS[1], 'threadId') ~= ARGV[7] then return 0 end
 local current = redis.call('HGET', KEYS[1], 'entrustedWork')
 if not current then
   return -1
@@ -34,6 +54,7 @@ return 1
 
 const UPDATE_ENTRUSTED_WORK_LUA = `
 -- F310_UPDATE_ENTRUSTED_WORK
+if ARGV[5] ~= '' and redis.call('HGET', KEYS[1], 'threadId') ~= ARGV[5] then return 0 end
 local current = redis.call('HGET', KEYS[1], 'entrustedWork')
 if not current then
   return -1
@@ -53,12 +74,40 @@ export class RedisTaskEntrustedWorkMutationStore {
     private readonly waitForInFlightTaskWrite: () => Promise<void>,
   ) {}
 
+  async attachArtifact(taskId: string, raw: AttachEntrustedWorkArtifactInput) {
+    const input = captureEntrustedWorkArtifactInput(raw);
+    const key = TaskKeys.detail(taskId);
+    for (let attempt = 0; attempt < MAX_CONDITIONAL_TASK_UPDATE_RETRIES; attempt++) {
+      const data = await this.redis.hgetall(key);
+      if (!data?.id) return { kind: 'not_found' as const };
+      const prepared = prepareEntrustedWorkArtifactEvidence(hydrateTask(data), input);
+      if (prepared.kind !== 'attached') return prepared;
+      const serialized = serializeTask(prepared.task);
+      const changed = await this.redis.eval(
+        ATTACH_ARTIFACT_EVIDENCE_LUA,
+        1,
+        key,
+        JSON.stringify(data),
+        serialized.entrustedWork,
+        serialized.updatedAt,
+      );
+      if (changed === 1) {
+        await this.applyTtl(prepared.task);
+        return prepared;
+      }
+      await this.waitForInFlightTaskWrite();
+    }
+    throw new Error(`RedisTaskStore attach artifact: CAS exhausted for ${taskId}`);
+  }
+
   async close(taskId: string, input: CloseEntrustedWorkStoreInput): Promise<CloseEntrustedWorkStoreResult> {
     const key = TaskKeys.detail(taskId);
     for (let attempt = 0; attempt < MAX_CONDITIONAL_TASK_UPDATE_RETRIES; attempt += 1) {
       const data = await this.redis.hgetall(key);
       if (!data || !data.id) return { kind: 'not_found' };
       const existing = hydrateTask(data);
+      if (input.expectedThreadId !== undefined && existing.threadId !== input.expectedThreadId)
+        return { kind: 'thread_conflict', task: existing };
       if (!existing.entrustedWork) return { kind: 'not_entrusted', task: existing };
       if (existing.entrustedWork.closure.state !== 'open') return { kind: 'already_closed', task: existing };
       if (existing.entrustedWork.revision !== input.expectedRevision) {
@@ -71,7 +120,7 @@ export class RedisTaskEntrustedWorkMutationStore {
         status: 'done',
         entrustedWork: {
           ...openWork,
-          revision: existing.entrustedWork.revision + 1,
+          ...advanceEntrustedWorkRevision(existing.entrustedWork),
           closure: input.closure,
           ...(input.closure.state === 'satisfied'
             ? {
@@ -98,6 +147,7 @@ export class RedisTaskEntrustedWorkMutationStore {
         existing.id,
         data.deploymentWait ?? '',
         serialized.deploymentWait ?? '',
+        input.expectedThreadId ?? '',
       );
       if (result === 1) {
         await this.applyTtl(updated);
@@ -132,6 +182,7 @@ export class RedisTaskEntrustedWorkMutationStore {
         serialized.entrustedWork,
         serialized.updatedAt,
         serialized.status,
+        input.expectedThreadId ?? '',
       );
       if (result === 1) {
         await this.applyTtl(updated);

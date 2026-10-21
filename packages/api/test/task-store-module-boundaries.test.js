@@ -10,6 +10,11 @@ const moduleBudgets = [
   // alone is not a responsibility boundary. Its collection query now delegates
   // to RedisTaskCollectionReader, whose focused budget remains below.
   {
+    path: '../src/domains/cats/services/stores/ports/TaskEntrustedAdmission.ts',
+    maxLines: 350,
+    reason: 'keep entrusted Task admission and conflict policy separate from generic Task storage',
+  },
+  {
     path: '../src/domains/cats/services/stores/ports/TaskItemFactory.ts',
     maxLines: 350,
     reason: 'keep Task construction separate from storage mutation',

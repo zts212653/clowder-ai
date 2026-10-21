@@ -4,7 +4,7 @@ import { after, before, describe, it } from 'node:test';
 
 import { handlePublishVerdict } from '../../dist/infrastructure/harness-eval/publish-verdict/publish-verdict.js';
 import { setupHarnessFeedback } from './eval-manual-trigger-fixtures.js';
-import { buildPacket } from './publish-verdict-fixtures.js';
+import { buildPacket, unreachablePublisher } from './publish-verdict-fixtures.js';
 
 /**
  * F192 Phase H — AC-H3: callback auth + domain allowlist tests.
@@ -24,7 +24,7 @@ describe('handlePublishVerdict — AC-H3 auth + domain allowlist', () => {
 
   it('returns 401 unauthenticated when catId not provided', async () => {
     const result = await handlePublishVerdict(
-      { harnessFeedbackRoot: root },
+      { gitPublisher: unreachablePublisher, harnessFeedbackRoot: root },
       { packet: buildPacket({ domainId: 'eval:a2a' }), domain: 'eval:a2a', catId: '' },
     );
     assert.ok('error' in result);
@@ -35,7 +35,7 @@ describe('handlePublishVerdict — AC-H3 auth + domain allowlist', () => {
   it('returns 403 not_allowed when catId is not the registered eval cat for this domain', async () => {
     // eval:a2a registered cat is 'codex'; 'opus-47' is eval:memory's cat
     const result = await handlePublishVerdict(
-      { harnessFeedbackRoot: root },
+      { gitPublisher: unreachablePublisher, harnessFeedbackRoot: root },
       { packet: buildPacket({ domainId: 'eval:a2a' }), domain: 'eval:a2a', catId: 'opus-47' },
     );
     assert.ok('error' in result);
@@ -50,7 +50,7 @@ describe('handlePublishVerdict — AC-H3 auth + domain allowlist', () => {
     // → 501 unsupported_generator (not 500 from default-throw). This test asserts
     // auth passes → 501 (= got PAST auth to generator check).
     const result = await handlePublishVerdict(
-      { harnessFeedbackRoot: root /* generator omitted */ },
+      { gitPublisher: unreachablePublisher, harnessFeedbackRoot: root /* generator omitted */ },
       {
         packet: buildPacket({ domainId: 'eval:a2a' }),
         domain: 'eval:a2a',
@@ -80,7 +80,7 @@ describe('handlePublishVerdict — AC-H3 auth + domain allowlist', () => {
     };
     // Override cat 'opus-47' should now PASS auth (would have been 403 before fix)
     const result = await handlePublishVerdict(
-      { harnessFeedbackRoot: root, redis: mockRedis /* generator omitted */ },
+      { gitPublisher: unreachablePublisher, harnessFeedbackRoot: root, redis: mockRedis /* generator omitted */ },
       {
         packet: buildPacket({ domainId: 'eval:a2a' }),
         domain: 'eval:a2a',
@@ -106,7 +106,7 @@ describe('handlePublishVerdict — AC-H3 auth + domain allowlist', () => {
     };
     // Static 'codex' should now FAIL because override redirected to 'opus-47'
     const result = await handlePublishVerdict(
-      { harnessFeedbackRoot: root, redis: mockRedis },
+      { gitPublisher: unreachablePublisher, harnessFeedbackRoot: root, redis: mockRedis },
       {
         packet: buildPacket({ domainId: 'eval:a2a' }),
         domain: 'eval:a2a',
@@ -128,7 +128,7 @@ describe('handlePublishVerdict — AC-H3 auth + domain allowlist', () => {
     };
     // Static 'codex' should PASS auth (Redis failed silently, fallback OK)
     const result = await handlePublishVerdict(
-      { harnessFeedbackRoot: root, redis: flakyRedis },
+      { gitPublisher: unreachablePublisher, harnessFeedbackRoot: root, redis: flakyRedis },
       {
         packet: buildPacket({ domainId: 'eval:a2a' }),
         domain: 'eval:a2a',
@@ -145,7 +145,7 @@ describe('handlePublishVerdict — AC-H3 auth + domain allowlist', () => {
   // 砚砚 R1 P1 #2: eval:a2a requires sourceRefs, tool NEVER 造 evidence
   it('returns 400 missing_evidence_refs when eval:a2a publish lacks sourceRefs', async () => {
     const result = await handlePublishVerdict(
-      { harnessFeedbackRoot: root },
+      { gitPublisher: unreachablePublisher, harnessFeedbackRoot: root },
       {
         packet: buildPacket({ domainId: 'eval:a2a' }),
         domain: 'eval:a2a',
@@ -168,7 +168,7 @@ describe('handlePublishVerdict — AC-H3 auth + domain allowlist', () => {
         const sourceRefs = { snapshotName: 'ok.yaml', attributionName: 'ok.yaml' };
         sourceRefs[field] = bad;
         const result = await handlePublishVerdict(
-          { harnessFeedbackRoot: root },
+          { gitPublisher: unreachablePublisher, harnessFeedbackRoot: root },
           { packet: buildPacket({ domainId: 'eval:a2a' }), domain: 'eval:a2a', catId: 'codex', sourceRefs },
         );
         assert.ok('error' in result, `${field}=${JSON.stringify(bad)} should reject`);
@@ -186,7 +186,7 @@ describe('handlePublishVerdict — AC-H3 auth + domain allowlist', () => {
         const sourceRefs = { snapshotName: 'ok.yaml', attributionName: 'ok.yaml' };
         sourceRefs[field] = bad;
         const result = await handlePublishVerdict(
-          { harnessFeedbackRoot: root },
+          { gitPublisher: unreachablePublisher, harnessFeedbackRoot: root },
           { packet: buildPacket({ domainId: 'eval:a2a' }), domain: 'eval:a2a', catId: 'codex', sourceRefs },
         );
         assert.ok('error' in result, `${field}='${bad}' should reject`);

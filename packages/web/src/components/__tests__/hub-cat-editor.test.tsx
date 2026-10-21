@@ -1256,9 +1256,9 @@ describe('HubCatEditor', () => {
     expect(carrierOptionsForClient('acp').map((option) => option.value)).toEqual(['acp']);
   });
 
-  it('seeds a create draft with the first carrier supported by its client', () => {
+  it('seeds a create draft with the supported default carrier for its client', () => {
     expect(initialState(null, { clientId: 'acp', defaultModel: '' }).carrier).toBe('acp');
-    expect(initialState(null, { clientId: 'openai', defaultModel: '' }).carrier).toBe('cli');
+    expect(initialState(null, { clientId: 'openai', defaultModel: '' }).carrier).toBe('app_server');
   });
 
   it('getAcpWarning returns kimi login warning when kimi + ACP', () => {
@@ -1545,6 +1545,12 @@ describe('HubCatEditor', () => {
     await act(async () => {
       root.render(React.createElement(HubCatEditor, { open: true, onClose: vi.fn(), onSaved }));
     });
+    await flushEffects();
+    await changeField(
+      queryField<HTMLSelectElement>(container, 'select[aria-label="配置方式"]'),
+      'managed_account',
+      'change',
+    );
     await flushEffects();
 
     expect(document.body.textContent).toContain('用哪个号');
@@ -2396,6 +2402,12 @@ describe('HubCatEditor', () => {
       root.render(React.createElement(HubCatEditor, { open: true, onClose: vi.fn(), onSaved: vi.fn() }));
     });
     await flushEffects();
+    await changeField(
+      queryField<HTMLSelectElement>(container, 'select[aria-label="配置方式"]'),
+      'managed_account',
+      'change',
+    );
+    await flushEffects();
 
     expect(
       Array.from(queryField<HTMLSelectElement>(container, 'select[aria-label="Client"]').options).map(
@@ -2452,6 +2464,12 @@ describe('HubCatEditor', () => {
     await act(async () => {
       root.render(React.createElement(HubCatEditor, { open: true, onClose: vi.fn(), onSaved: vi.fn() }));
     });
+    await flushEffects();
+    await changeField(
+      queryField<HTMLSelectElement>(container, 'select[aria-label="配置方式"]'),
+      'managed_account',
+      'change',
+    );
     await flushEffects();
 
     await changeField(queryField(container, 'select[aria-label="Client"]'), 'openai', 'change');
@@ -3412,6 +3430,12 @@ describe('HubCatEditor', () => {
       root.render(React.createElement(HubCatEditor, { open: true, onClose: vi.fn(), onSaved: vi.fn() }));
     });
     await flushEffects();
+    await changeField(
+      queryField<HTMLSelectElement>(container, 'select[aria-label="配置方式"]'),
+      'managed_account',
+      'change',
+    );
+    await flushEffects();
 
     await changeField(queryField(container, 'input[aria-label="Name"]'), '火花猫');
     await changeField(queryField(container, 'input[aria-label="Avatar"]'), '/avatars/spark.png');
@@ -4031,6 +4055,12 @@ describe('HubCatEditor', () => {
     await act(async () => {
       root.render(React.createElement(HubCatEditor, { open: true, onClose: vi.fn(), onSaved }));
     });
+    await flushEffects();
+    await changeField(
+      queryField<HTMLSelectElement>(container, 'select[aria-label="配置方式"]'),
+      'managed_account',
+      'change',
+    );
     await flushEffects();
 
     await changeField(queryField(container, 'input[aria-label="Name"]'), '运行时审查猫');

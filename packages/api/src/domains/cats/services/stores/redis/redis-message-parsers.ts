@@ -23,9 +23,6 @@ import {
   asrPersonMemoryDynamicSceneEntryV1Schema,
   CatRoutingErrorSchema,
   catOwnedSeedCueCarrierV1Schema,
-  collectiveOwnerAdmissionV1Schema,
-  collectiveWorkDelegationV1Schema,
-  collectiveWorkInvocationV1Schema,
   companionIdentitySnapshotV1Schema,
   contentModificationReceiptV1Schema,
   contentModificationSourceMessageV1Schema,
@@ -256,10 +253,6 @@ type ExtraCarrierPersistence = ExtraCarrierPersistenceClassification<{
   coveredA2AFailureReturns: 'parsed';
   contentModificationRequestV1: 'parsed';
   contentModificationReceiptV1: 'parsed';
-  collectiveOwnerAdmissionV1: 'parsed';
-  collectiveWorkInvocationV1: 'parsed';
-  collectiveWorkDelegationV1: 'parsed';
-  collectiveAuthorizationInvalid: 'derived';
   semanticEvent: 'parsed';
   runtimeInteractionReturn: 'parsed';
   runtimeInteractionCard: 'parsed';
@@ -270,6 +263,7 @@ type ExtraCarrierPersistence = ExtraCarrierPersistenceClassification<{
   rich: 'parsed';
   callbackRichRequestDigest: 'parsed';
   isExplicitPost: 'parsed';
+  mediaPublication: 'parsed';
   stream: 'parsed';
   causal: 'parsed';
   dotAsk: 'parsed';
@@ -536,28 +530,6 @@ export function safeParseExtra(raw: string | undefined): StoredMessage['extra'] 
     );
     if (entrustedWorkTerminalReceipt.success) {
       result.entrustedWorkHumanTerminalReceiptV1 = entrustedWorkTerminalReceipt.data;
-      hasField = true;
-    }
-    if (parsed.collectiveOwnerAdmissionV1 !== undefined) {
-      const admission = collectiveOwnerAdmissionV1Schema.safeParse(parsed.collectiveOwnerAdmissionV1);
-      if (admission.success) result.collectiveOwnerAdmissionV1 = admission.data;
-      else result.collectiveAuthorizationInvalid = true;
-      hasField = true;
-    }
-    if (parsed.collectiveWorkInvocationV1 !== undefined) {
-      const invocation = collectiveWorkInvocationV1Schema.safeParse(parsed.collectiveWorkInvocationV1);
-      if (invocation.success) result.collectiveWorkInvocationV1 = invocation.data;
-      else result.collectiveAuthorizationInvalid = true;
-      hasField = true;
-    }
-    if (parsed.collectiveWorkDelegationV1 !== undefined) {
-      const delegation = collectiveWorkDelegationV1Schema.safeParse(parsed.collectiveWorkDelegationV1);
-      if (delegation.success) result.collectiveWorkDelegationV1 = delegation.data;
-      else result.collectiveAuthorizationInvalid = true;
-      hasField = true;
-    }
-    if (parsed.collectiveAuthorizationInvalid === true) {
-      result.collectiveAuthorizationInvalid = true;
       hasField = true;
     }
 
@@ -918,6 +890,12 @@ export function safeParseExtra(raw: string | undefined): StoredMessage['extra'] 
     }
     if (parsed.isExplicitPost === true) {
       result.isExplicitPost = true;
+      hasField = true;
+    }
+
+    // F202 W2-5b: write-once marker — the outbound media job owns this message's publication.
+    if (parsed.mediaPublication === 'deferred') {
+      result.mediaPublication = 'deferred';
       hasField = true;
     }
 

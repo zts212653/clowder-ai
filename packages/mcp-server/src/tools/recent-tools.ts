@@ -11,7 +11,7 @@ import { defineMcpMigrationFactory } from '../tool-governance-migration.js';
  * (future); v1 only sees public/internal collections.
  */
 
-import { formatRecallMeta } from '@cat-cafe/shared';
+import { deploymentDefaults, formatRecallMeta } from '@cat-cafe/shared';
 import { z } from 'zod';
 import type { ToolResult } from './file-tools.js';
 import { errorResult, successResult } from './file-tools.js';
@@ -21,7 +21,7 @@ const defineTool = defineMcpMigrationFactory('recent-tools.ts', undefined, {
   authority: 'local-runtime',
 });
 
-const API_URL = process.env['CAT_CAFE_API_URL'] ?? 'http://localhost:3004';
+const API_URL = process.env['CAT_CAFE_API_URL'] ?? deploymentDefaults.apiBaseUrl;
 
 export const listRecentInputSchema = {
   scope: z

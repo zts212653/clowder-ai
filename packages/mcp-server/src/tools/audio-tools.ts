@@ -1,3 +1,4 @@
+import { deploymentDefaults } from '@cat-cafe/shared';
 import { defineMcpCanonicalFactory, defineMcpMigrationFactory } from '../tool-governance-migration.js';
 
 /**
@@ -23,7 +24,7 @@ const defineCanonicalTool = defineMcpCanonicalFactory('audio-tools.ts', undefine
   authority: 'local-runtime',
 });
 
-const API_URL = process.env.CAT_CAFE_API_URL ?? 'http://127.0.0.1:3004';
+const API_URL = process.env.CAT_CAFE_API_URL ?? deploymentDefaults.apiLoopbackUrl;
 const USER_ID = process.env.CAT_CAFE_USER_ID ?? 'default-user';
 const AUDIO_INPUT_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 

@@ -5,7 +5,9 @@ import type { ReactNode } from 'react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useConfirm } from '@/components/useConfirm';
 import { apiFetch } from '@/utils/api-client';
+import type { SettingsPageHeaderProps } from '../SettingsPageHeader';
 import { PluginManagerContent } from './PluginManagerContent';
+import type { PluginManagerPresentation } from './plugin-manager-attention';
 import type { PluginManagerDesignFixture } from './plugin-manager-fixtures';
 import {
   type ConfigurationUpdate,
@@ -20,11 +22,18 @@ import {
 
 const POLL_INTERVAL_MS = 5_000;
 const EMPTY_COMPATIBILITY: readonly PluginManagerDesignFixture[] = [];
+// Dependency preparation alone may take five minutes; allow checkout and package admission as well.
+const INSTALL_TIMEOUT_MS = 10 * 60_000;
+const INSTALL_UNCONFIRMED = '安装结果尚未确认，后台可能仍在处理。请查看插件列表确认状态，避免重复安装。';
 
 export function PluginManagerLiveContent({
+  presentation = 'v1',
+  pageHeader,
   compatibilityFixtures = EMPTY_COMPATIBILITY,
   renderCompatibilityDetail,
 }: {
+  presentation?: PluginManagerPresentation;
+  pageHeader?: Omit<SettingsPageHeaderProps, 'children'>;
   compatibilityFixtures?: readonly PluginManagerDesignFixture[];
   renderCompatibilityDetail?: (pluginId: string, plugin: PluginManagerDesignFixture) => ReactNode | undefined;
 } = {}) {
@@ -41,6 +50,8 @@ export function PluginManagerLiveContent({
   const listGeneration = useRef(0);
   const detailGeneration = useRef(0);
   const mounted = useRef(true);
+  const initialSelection = useRef<string | null>(null);
+  const [initialDetailPluginId, setInitialDetailPluginId] = useState<string | null>(null);
   const enableRequests = useRef(new Set<string>());
 
   const loadDetail = useCallback(async (pluginId: string, afterMutation = false) => {
@@ -104,6 +115,13 @@ export function PluginManagerLiveContent({
         if (!mounted.current) return;
         if (generation !== listGeneration.current) return value;
         setSnapshot(value);
+        const requested = initialSelection.current;
+        initialSelection.current = null;
+        if (requested && value.plugins.some((plugin) => plugin.pluginId === requested)) {
+          setInitialDetailPluginId(requested);
+          selectPlugin(requested);
+          return;
+        }
         const current = selectedPluginIdRef.current;
         if (current && value.plugins.some((plugin) => plugin.pluginId === current)) {
           await loadDetail(current, afterMutation);
@@ -114,11 +132,12 @@ export function PluginManagerLiveContent({
         setError('插件列表加载失败；现有状态没有被改写。');
       }
     },
-    [loadDetail],
+    [loadDetail, selectPlugin],
   );
 
   useEffect(() => {
     mounted.current = true;
+    initialSelection.current = new URLSearchParams(window.location.search).get('plugin');
     void loadList('');
     const timer = window.setInterval(() => void loadList(query.current), POLL_INTERVAL_MS);
     return () => {
@@ -146,13 +165,14 @@ export function PluginManagerLiveContent({
         const response = await apiFetch(request.path, request.init);
         if (!response.ok) {
           const failure = await responseError(response, `配置保存失败 (${response.status})`);
+          await refresh();
           setError(failure.message);
           return;
         }
         setConfigurationSavedPluginId(pluginId);
         await refresh();
       } catch {
-        setError('配置保存失败；现有配置没有被改写。');
+        setError('未能确认配置保存结果，请刷新后检查。');
       } finally {
         setBusyPluginId(null);
       }
@@ -165,11 +185,15 @@ export function PluginManagerLiveContent({
       setBusyPluginId(pluginId);
       setError(null);
       try {
-        const response = await apiFetch(path, {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify(body),
-        });
+        const response = await apiFetch(
+          path,
+          {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify(body),
+          },
+          path.endsWith('/install') || path.endsWith('/update') ? { mutationTimeoutMs: INSTALL_TIMEOUT_MS } : undefined,
+        );
         if (!response.ok) {
           const failure = await responseError(response, `插件操作失败 (${response.status})`);
           await refresh();
@@ -182,10 +206,38 @@ export function PluginManagerLiveContent({
         }
         await refresh();
       } catch {
-        setError('插件操作失败；现有状态没有被改写。');
+        await refresh();
+        setError(path.endsWith('/install') ? INSTALL_UNCONFIRMED : '操作结果尚未确认，请查看最新插件状态。');
       } finally {
         setBusyPluginId(null);
       }
+    },
+    [refresh],
+  );
+
+  const installFromDirectory = useCallback(
+    async (path: string) => {
+      setError(null);
+      let response: Response;
+      try {
+        response = await apiFetch(
+          '/api/plugin-manager/plugins/install',
+          {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ source: { kind: 'local-directory', path } }),
+          },
+          { mutationTimeoutMs: INSTALL_TIMEOUT_MS },
+        );
+      } catch {
+        await refresh();
+        throw new Error(INSTALL_UNCONFIRMED);
+      }
+      if (!response.ok) {
+        const failure = await responseError(response, `本地插件安装失败 (${response.status})`);
+        throw new Error(failure.message);
+      }
+      await refresh();
     },
     [refresh],
   );
@@ -235,6 +287,9 @@ export function PluginManagerLiveContent({
 
   return (
     <PluginManagerContent
+      pageHeader={pageHeader}
+      presentation={presentation}
+      initialDetailPluginId={initialDetailPluginId}
       fixtures={[...fixtures, ...compatibilityPresentation]}
       renderCompatibilityDetail={renderCompatibilityDetail}
       onStateChanged={refresh}
@@ -253,6 +308,19 @@ export function PluginManagerLiveContent({
       }}
       onInstall={(pluginId) => {
         const plugin = plugins.find((candidate) => candidate.pluginId === pluginId);
+        if (plugin?.artifact === 'installed') {
+          void mutate(pluginId, `/api/plugin-manager/plugins/${encodeURIComponent(pluginId)}/update`, {
+            expectedVersion: plugin.availableVersion,
+            expectedRevision: plugin.lifecycleRevision,
+          });
+          return;
+        }
+        if (plugin?.source.kind === 'git' && plugin.source.marketplace) {
+          void mutate(pluginId, '/api/plugin-manager/plugins/install', {
+            source: { kind: 'git', url: plugin.source.url, marketplace: plugin.source.marketplace },
+          });
+          return;
+        }
         if (
           !plugin ||
           plugin.source.kind !== 'catalog' ||
@@ -268,6 +336,8 @@ export function PluginManagerLiveContent({
           expectedDigest: plugin.packageDigest,
         });
       }}
+      onMarketplaceChange={refresh}
+      onDirectoryInstall={installFromDirectory}
       onSetEnabled={(pluginId, enabled) => {
         const plugin = plugins.find((candidate) => candidate.pluginId === pluginId);
         if (!plugin || plugin.lifecycleRevision === null) {
@@ -305,6 +375,7 @@ export function PluginManagerLiveContent({
         })();
       }}
       onConfigure={(pluginId, updates) => void configure(pluginId, updates)}
+      onOperationChange={(pluginId) => void loadDetail(pluginId, true)}
     />
   );
 }
