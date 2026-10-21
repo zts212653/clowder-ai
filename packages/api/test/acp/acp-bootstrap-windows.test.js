@@ -90,6 +90,32 @@ describe('Windows PowerShell child environment', () => {
   }
 });
 
+describe('Windows ACL verifier failure reporting', () => {
+  for (const [label, stderr] of [
+    ['undefined', undefined],
+    ['null', null],
+    ['empty string', ''],
+    ['whitespace', ' \r\n'],
+    ['empty buffer', Buffer.alloc(0)],
+  ]) {
+    it(`reports unavailable verification for ${label} stderr`, () => {
+      const stub = mock.method(childProcess, 'execFileSync', () => {
+        throw Object.assign(new Error('spawn failed'), { stderr });
+      });
+      syncBuiltinESMExports();
+      try {
+        assert.throws(() => ensureWindowsAcpBootstrapDirectories(tmpdir(), join(tmpdir(), 'fixture-cwd')), {
+          code: 'VERIFICATION_UNAVAILABLE',
+          message: 'Windows ACP bootstrap privacy check failed: verification unavailable',
+        });
+      } finally {
+        stub.mock.restore();
+        syncBuiltinESMExports();
+      }
+    });
+  }
+});
+
 describe('native Windows ACP bootstrap privacy', { skip: process.platform !== 'win32' }, () => {
   const fixtures = new Set();
   const fixture = () => {

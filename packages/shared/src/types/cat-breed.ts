@@ -260,6 +260,8 @@ export interface CredentialEntry {
  */
 export interface CatCafeConfigV1 {
   readonly version: 1;
+  /** Persisted enrollment policy; retain it when parsing or writing a catalog. */
+  readonly memberInitialization?: string;
   readonly breeds: readonly CatBreed[];
   readonly selectedAccountRefs?: Readonly<Record<string, string>>;
 }
@@ -289,6 +291,8 @@ export interface CoCreatorConfig {
  */
 export interface CatCafeConfigV2 {
   readonly version: 2;
+  /** Persisted enrollment policy; retain it when parsing or writing a catalog. */
+  readonly memberInitialization?: string;
   readonly breeds: readonly CatBreed[];
   readonly selectedAccountRefs?: Readonly<Record<string, string>>;
   readonly roster: Roster;

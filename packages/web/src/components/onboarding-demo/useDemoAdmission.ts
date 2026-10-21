@@ -6,6 +6,7 @@ interface Receipt {
   userId: string;
   version: string;
   status: 'not_started' | 'dismissed' | 'completed';
+  autoEligible?: boolean;
 }
 /** Playback remains local; admission/completion belongs to authenticated server preferences. */
 export function useDemoAdmission(enabled: boolean, onOpen: () => void, autoEligible = true) {
@@ -31,7 +32,7 @@ export function useDemoAdmission(enabled: boolean, onOpen: () => void, autoEligi
         completed.current = value.status === 'completed';
         if (completed.current) pending.current = null;
         if (!pending.current) setError('');
-        if (autoEligible && value.status === 'not_started' && !autoOpened.current) {
+        if (autoEligible && value.autoEligible === true && value.status === 'not_started' && !autoOpened.current) {
           autoOpened.current = true;
           onOpen();
         }

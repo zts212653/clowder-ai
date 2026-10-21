@@ -109,6 +109,8 @@ test('native Codex creation follows its third-party config without weakening exp
     }
     config(`model_provider="fixture"\n${provider}`);
     writeCatalogAccount(root, 'codex', { authType: 'oauth', clientId: 'openai' });
+    const nativeWithAppDefault = await create();
+    assert.equal(nativeWithAppDefault.statusCode, 201, 'an unrelated app default cannot control native admission');
     const explicit = await create({ accountRef: 'codex' });
     assert.equal(explicit.statusCode, 400, explicit.body);
     assert.equal(readFileSync(join(home, 'auth.json'), 'utf8'), 'fixture-native-auth-owned-by-cli');

@@ -1,4 +1,5 @@
 import type { RuntimeProviderProfile } from '../../../../../config/account-resolver.js';
+import { usesNativeToolConfiguration } from '../../../../../config/cat-account-binding.js';
 import { finalizeCodexAccountEnvironment } from '../../../../../config/codex-account-environment.js';
 import { resolveCodexAccountLaunch, resolveCodexApiExecutionHome } from '../../../../../config/codex-account-launch.js';
 import { codexCliConfig } from '../../../../../config/codex-launch-config.js';
@@ -1456,8 +1457,15 @@ export class CodexAgentService implements AgentService {
   ): Pick<AgentCarrierSessionOptions, 'command' | 'args' | 'cwd' | 'env'> {
     if (!localInspection && (this.carrierMode !== 'app_server' || !this.appServerHostPool))
       throw new Error('codex_native_capability_source_unsupported');
-    const selected = account ?? { id: 'codex', authType: 'oauth' as const, client: 'openai' as const };
-    if (selected.authType === 'api_key' && !selected.apiKey)
+    const nativeTool = usesNativeToolConfiguration(catRegistry.tryGet(this.catId)?.config);
+    const selected = (nativeTool ? undefined : account) ?? {
+      id: 'codex',
+      authType: 'oauth' as const,
+      client: 'openai' as const,
+      ...(nativeTool ? { syntheticNative: true } : {}),
+    };
+    const explicitApiAccount = selected.authType === 'api_key' && !selected.syntheticNative;
+    if (explicitApiAccount && !selected.apiKey)
       throw new Error('codex_native_capability_source_credentials_unavailable');
     const accountEnv = Object.fromEntries(
       Object.entries(selected.envVars ?? {}).filter(
@@ -1465,18 +1473,17 @@ export class CodexAgentService implements AgentService {
           /^[A-Z_][A-Za-z0-9_]*$/.test(key) && !key.startsWith('CAT_CAFE_') && !hasSupportedEnvTemplate(value),
       ),
     );
-    const mapped =
-      selected.authType === 'api_key'
-        ? resolveEnvMap(
-            'openai',
-            undefined,
-            { apiKey: selected.apiKey, baseUrl: selected.baseUrl, baseModel: this.model },
-            extractUserEnvTemplates(selected.envVars ?? {}),
-          )
-        : {};
+    const mapped = explicitApiAccount
+      ? resolveEnvMap(
+          'openai',
+          undefined,
+          { apiKey: selected.apiKey, baseUrl: selected.baseUrl, baseModel: this.model },
+          extractUserEnvTemplates(selected.envVars ?? {}),
+        )
+      : {};
     const customBaseUrl =
       (mapped.OPENAI_BASE_URL ?? mapped.OPENAI_API_BASE ?? accountEnv.OPENAI_BASE_URL ?? accountEnv.OPENAI_API_BASE) ||
-      (selected.authType === 'api_key' ? CODEX_API_DEFAULT_BASE_URL : undefined);
+      (explicitApiAccount ? CODEX_API_DEFAULT_BASE_URL : undefined);
     const selectedApiEnv = { ...mapped, ...accountEnv };
     const env = Object.fromEntries(
       Object.entries(buildChildEnv(selectedApiEnv, { workingDirectory: cwd })).filter(
@@ -1488,9 +1495,9 @@ export class CodexAgentService implements AgentService {
       assertCodexSharedStateRoots(descriptor.accountOwnerRoot, { launch: descriptor });
     if (descriptor.managed) assertCodexManagedPlatformSupport(descriptor.credentialHome, this.cliCommand);
     const args = ['app-server', '--stdio'];
-    if (selected.authType === 'api_key') {
+    if (descriptor.authMode === 'api_key') {
       if (customBaseUrl) args.push(...buildCodexCustomProviderArgs(customBaseUrl, 'api_key'));
-    } else args.push('--config', 'model_provider="openai"');
+    } else if (descriptor.authMode === 'oauth') args.push('--config', 'model_provider="openai"');
     const memberConfigArgs = stripReservedCodexSystemConfigs(
       cliConfigArgs.flatMap((arg) => arg.trim().split(/\s+/)),
       this.catId as string,
@@ -1507,7 +1514,7 @@ export class CodexAgentService implements AgentService {
       delete selectedApiEnv.OPENAI_API_BASE;
     }
     const executionHome =
-      selected.authType === 'api_key' && customBaseUrl
+      descriptor.authMode === 'api_key' && customBaseUrl
         ? resolveCodexApiExecutionHome(descriptor, customBaseUrl, cwd, env)
         : undefined;
     if (executionHome) {
@@ -1685,6 +1692,7 @@ export class CodexAgentService implements AgentService {
     /** exec_json can only carry frozen bytes; undefined means "preflight, app_server only". */
     const execStdinInput = effectivePromptSource.kind === 'frozen' ? effectivePromptSource.prompt : undefined;
     const nativeTool = catRegistry.tryGet(this.catId)?.config.configurationSource === 'native_tool';
+    const nativeAuthentication = usesNativeToolConfiguration(catRegistry.tryGet(this.catId)?.config);
     const effectiveModel =
       options?.callbackEnv?.CAT_CAFE_OPENAI_MODEL_OVERRIDE ?? (nativeTool ? getCatModel(this.catId) : this.model);
     const imagePaths = native
@@ -1804,8 +1812,7 @@ export class CodexAgentService implements AgentService {
     const catalogRequested = carrierMode === 'exec_json' && isCodexCustomCatalogModel(effectiveModel);
     const catalogApplied = modelCatalogArgs.length > 0;
     const authMode =
-      options?.codexAccountLaunch?.authMode ??
-      (nativeTool && !options?.callbackEnv?.CODEX_AUTH_MODE ? 'auto' : getCodexAuthMode(options?.callbackEnv));
+      options?.codexAccountLaunch?.authMode ?? (nativeAuthentication ? 'auto' : getCodexAuthMode(options?.callbackEnv));
     const requestedServiceTier = resolveCodexSpeed({
       clientId: 'openai',
       authType: authMode === 'oauth' || authMode === 'api_key' ? authMode : undefined,
@@ -1860,11 +1867,11 @@ export class CodexAgentService implements AgentService {
       servedModelObservation === 'on';
     const oauthTransport = getCodexOAuthTransport();
     const builtinOpenaiProviderArgs: string[] =
-      !nativeTool && !customBaseUrl && authMode === 'oauth' && oauthTransport === 'builtin'
+      !nativeAuthentication && !customBaseUrl && authMode === 'oauth' && oauthTransport === 'builtin'
         ? ['--config', 'model_provider="openai"']
         : [];
     const openaiHttpsProviderArgs: string[] =
-      !nativeTool && !customBaseUrl && authMode === 'oauth' && oauthTransport === 'https'
+      !nativeAuthentication && !customBaseUrl && authMode === 'oauth' && oauthTransport === 'https'
         ? [
             '--config',
             'model_provider="openai_https"',
@@ -2148,7 +2155,7 @@ export class CodexAgentService implements AgentService {
       const homeIsolated = !!native || (authMode === 'api_key' && !!customBaseUrl);
       const codexEnv = native
         ? { ...native.env }
-        : withVerdictGhGuardEnv(nativeTool ? rawEnv : applyAuthMode(rawEnv, authMode));
+        : withVerdictGhGuardEnv(nativeAuthentication ? rawEnv : applyAuthMode(rawEnv, authMode));
 
       // Diagnostic logging: critical env state for debugging CLI startup failures
       log.info(

@@ -47,13 +47,13 @@ import { context, SpanStatusCode, trace } from '@opentelemetry/api';
 import {
   providerRequiresThreadWorkspace,
   resolveBuiltinClientForProvider,
-  resolveForClient,
   validateRuntimeProviderBinding,
 } from '../../../../../config/account-resolver.js';
 import { AccountStoreVerdictError } from '../../../../../config/account-store-format.js';
 import { resolveBoundAccountRefForCat } from '../../../../../config/cat-account-binding.js';
 import { buildCatGitIdentityEnv } from '../../../../../config/cat-git-identity.js';
 import { getCatModel } from '../../../../../config/cat-models.js';
+import { resolveCatRuntimeAccount } from '../../../../../config/cat-runtime-account.js';
 import { resolveCodexAccountLaunch } from '../../../../../config/codex-account-launch.js';
 import { codexExecutionAccountSnapshot } from '../../../../../config/codex-execution-account.js';
 import { parseOpenCodeModel, resolveEffectiveOpenCodeModel } from '../../../../../config/opencode-model.js';
@@ -2871,10 +2871,10 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
     const projectRoot = resolveActiveProjectRoot(process.cwd());
     const effectiveAccountRef = resolveBoundAccountRefForCat(projectRoot, catId, catConfig);
     const resolveRuntimeAccount = async () => {
-      if (!builtinClient || (catConfig?.configurationSource === 'native_tool' && !effectiveAccountRef)) return null;
+      if (!builtinClient) return null;
       // Yield to event loop so preflight warnings are delivered before account resolution.
       await Promise.resolve();
-      const runtime = resolveForClient(projectRoot, builtinClient, effectiveAccountRef);
+      const runtime = resolveCatRuntimeAccount(projectRoot, catId, builtinClient, catConfig);
       if (effectiveAccountRef && !runtime) {
         throw new Error(`bound account "${effectiveAccountRef}" not found`);
       }

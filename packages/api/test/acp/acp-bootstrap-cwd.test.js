@@ -13,6 +13,7 @@ import {
 import { tmpdir } from 'node:os';
 import { basename, dirname, isAbsolute, join, relative, resolve, win32 } from 'node:path';
 import { after, afterEach, before, describe, it } from 'node:test';
+import { WindowsAcpBootstrapError } from '../../dist/domains/cats/services/agents/providers/acp/bootstrap/acp-bootstrap-windows-error.js';
 
 const {
   isPathWithinRoot,
@@ -122,7 +123,8 @@ describe('acp bootstrap cwd', () => {
       mkdirSync(fallbackRoot, { recursive: true });
       const windowsEnsure = (root, cwd) => {
         if (resolve(root) === resolve(primaryRoot)) {
-          throw new Error(
+          throw new WindowsAcpBootstrapError(
+            'PARENT_REPLACEMENT',
             'ACP bootstrap parent permits unsafe directory replacement: C:\\Temp allows S-1-5-21-x Modify',
           );
         }

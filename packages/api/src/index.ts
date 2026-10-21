@@ -38,14 +38,10 @@ import fastifyCookie from '@fastify/cookie';
 import cors from '@fastify/cors';
 import fastifyWebsocket from '@fastify/websocket';
 import Fastify, { type FastifyReply } from 'fastify';
-import {
-  resolveAnthropicRuntimeProfile,
-  resolveForClient,
-  validateRuntimeProviderBinding,
-} from './config/account-resolver.js';
+import { resolveAnthropicRuntimeProfile, validateRuntimeProviderBinding } from './config/account-resolver.js';
 import { resolveInvokeCapabilityRoot } from './config/capabilities/invoke-capability-root.js';
 import { regenerateStartupCliConfigs } from './config/capabilities/startup-cli-config.js';
-import { resolveBoundAccountRefForCat } from './config/cat-account-binding.js';
+import { resolveBoundAccountRefForCat, usesNativeToolConfiguration } from './config/cat-account-binding.js';
 import {
   bootstrapDefaultCatCatalog,
   getAcpConfig,
@@ -57,6 +53,7 @@ import {
 } from './config/cat-config-loader.js';
 import { getCatModel } from './config/cat-models.js';
 import { reconcileCatRegistry } from './config/cat-registry-reconciliation.js';
+import { resolveCatRuntimeAccount } from './config/cat-runtime-account.js';
 import { configEventBus } from './config/config-event-bus.js';
 import {
   createThreadDeepLinkUrl,
@@ -6280,17 +6277,14 @@ async function main(): Promise<void> {
           if (!selectedCatId) throw new Error('Codex provider source owner unavailable');
           const projectRoot = resolveActiveProjectRoot(process.cwd());
           const catConfig = catRegistry.tryGet(selectedCatId)?.config;
-          const account = resolveForClient(
-            projectRoot,
-            'openai',
-            resolveBoundAccountRefForCat(projectRoot, selectedCatId, catConfig),
-          );
-          if (!account) throw new Error('Codex provider source account unavailable');
-          const accountError = validateRuntimeProviderBinding('openai', account, catConfig?.defaultModel);
+          const account = resolveCatRuntimeAccount(projectRoot, selectedCatId, 'openai', catConfig);
+          if (!account && !usesNativeToolConfiguration(catConfig))
+            throw new Error('Codex provider source account unavailable');
+          const accountError = account && validateRuntimeProviderBinding('openai', account, catConfig?.defaultModel);
           if (accountError) throw new Error(accountError);
           try {
             return await codexCapabilityService.requestNativeCapabilitySource({
-              account,
+              ...(account ? { account } : {}),
               cliConfigArgs: catConfig?.cliConfigArgs,
               invocationId: 'marketplace-capability-source:' + randomUUID(),
               timeoutMs: 8_000,
@@ -6359,15 +6353,16 @@ async function main(): Promise<void> {
     )
       throw new Error('Session tool unavailable');
     const projectRoot = resolveActiveProjectRoot();
-    const account = resolveForClient(
-      projectRoot,
-      'openai',
-      resolveBoundAccountRefForCat(projectRoot, catId, catConfig),
-    );
-    if (!account) throw new Error('Codex account unavailable');
-    const accountError = validateRuntimeProviderBinding('openai', account, catConfig.defaultModel);
+    const account = resolveCatRuntimeAccount(projectRoot, catId, 'openai', catConfig);
+    if (!account && !usesNativeToolConfiguration(catConfig)) throw new Error('Codex account unavailable');
+    const accountError = account && validateRuntimeProviderBinding('openai', account, catConfig.defaultModel);
     if (accountError) throw new Error(accountError);
-    return { service: agentRegistry.get(catId), account, cliConfigArgs: catConfig.cliConfigArgs, cwd: projectRoot };
+    return {
+      service: agentRegistry.get(catId),
+      ...(account ? { account } : {}),
+      cliConfigArgs: catConfig.cliConfigArgs,
+      cwd: projectRoot,
+    };
   };
   const inspectLocalSession = async (catId: string, sessionId: string) => {
     const catConfig = catRegistry.tryGet(catId)?.config;

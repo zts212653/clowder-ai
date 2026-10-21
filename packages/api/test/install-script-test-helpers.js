@@ -38,7 +38,8 @@ export {
 export function runSourceOnlySnippet(snippet) {
   const result = spawnSync(
     'bash',
-    ['-lc', `set -e\nsource "${installScript}" --source-only >/dev/null 2>&1\n${snippet}`],
+    // Source-only skips the installer's project discovery; helpers still need its real source root.
+    ['-lc', `set -e\nsource "${installScript}" --source-only >/dev/null 2>&1\nPROJECT_DIR="${repoRoot}"\n${snippet}`],
     { encoding: 'utf8' },
   );
 

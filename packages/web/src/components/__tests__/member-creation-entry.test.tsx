@@ -91,3 +91,16 @@ it('waits for the initial roster, then preserves the zero-start journey as roles
   expect(host.textContent).toContain('默认团队推荐');
   expect(back).not.toHaveBeenCalled();
 });
+
+it('keeps detection pending after a failed roster read while preserving explicit manual creation', async () => {
+  state.query = 's=members&view=setup';
+  state.hasFetched = false;
+  state.isLoading = false;
+  await render();
+  expect(host.textContent).toContain('暂时无法读取已有伙伴');
+  expect(host.textContent).not.toContain('默认团队推荐');
+  expect(back).not.toHaveBeenCalled();
+  act(() => [...host.querySelectorAll('button')].find((button) => button.textContent === '手动创建单个伙伴')?.click());
+  expect(host.textContent).toContain('单个伙伴配置');
+  expect(state.replace).toHaveBeenCalledWith('/settings?s=members&view=add&manual=1', { scroll: false });
+});

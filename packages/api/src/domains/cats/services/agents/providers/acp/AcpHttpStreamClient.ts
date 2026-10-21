@@ -119,12 +119,11 @@ export class AcpHttpStreamClient {
     // #712: Re-create bootstrap CWD if cleaned up by OS temp-dir rotation or agent exit.
     // Skip when a test spawnFn is injected — the directory may be a fake path
     // (e.g. '/my/project') that can't be created on CI runners.
-    if (!this.config.spawnFn) {
+    if (!this.config.spawnFn && !(IS_WINDOWS && this.config.verifyBootstrapCwd)) {
       mkdirSync(this.config.cwd, { recursive: true, mode: 0o700 });
     }
     // #1203: Capture the cwd's directory identity at spawn so isCwdIntact can
     // detect delete→recreate at the same path, not just deletion.
-    this.cwdIdentityTracker.capture();
 
     const spawnOpts: SpawnOptions & { stdio: ['pipe', 'pipe', 'pipe'] } = {
       cwd: this.config.cwd,
@@ -150,6 +149,8 @@ export class AcpHttpStreamClient {
       spawnOpts.env = supervised.env;
     }
 
+    if (IS_WINDOWS && !this.config.spawnFn) this.config.verifyBootstrapCwd?.(command, args, childEnv);
+    this.cwdIdentityTracker.capture();
     this.child = doSpawn(command, args, spawnOpts) as ChildProcess;
 
     // Stderr: capacity detection (shared with stdio client)

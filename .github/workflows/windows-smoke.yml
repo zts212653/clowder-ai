@@ -185,12 +185,18 @@ jobs:
           packages/api/test/acp/acp-bootstrap-windows.test.js
           packages/api/test/acp/acp-service-factory.test.js
           packages/api/test/acp/acp-registration-availability.test.js
+          packages/api/test/acp/acp-bootstrap-ancestor-security.test.js
+          packages/api/test/acp/acp-bootstrap-relocation.test.js
+          packages/api/test/acp/acp-bootstrap-spawn-recheck.test.js
+          packages/api/test/acp/acp-bootstrap-startup-policy.test.js
           packages/api/test/account-credential-identity.test.js
           packages/api/test/account-store-adjudication.test.js
         env:
           NODE_ENV: test
           CAT_CAFE_GLOBAL_CONFIG_ROOT: ${{ runner.temp }}/acp-bootstrap-config
           REDIS_URL: redis://127.0.0.1:0
+        # volume-root and audited-runtime tests require explicitly selected native fixtures:
+        # ACP_BOOTSTRAP_TEST_VOLUME and ACP_DSH_AUDITED_ENTRY (see issue1653 verification report).
       - name: ACP pool and client lifecycle regressions
         run: >-
           node --test --test-concurrency=2 --test-timeout=60000

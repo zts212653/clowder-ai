@@ -81,6 +81,8 @@ export interface AcpClientConfig {
   args: string[];
   /** Working directory for the ACP process */
   cwd: string;
+  /** Factory-owned Windows verification, bound to the root in the pool signature. */
+  verifyBootstrapCwd?: (command: string, args: string[], env: NodeJS.ProcessEnv) => void;
   /** Extra env vars to pass to the process */
   env?: Record<string, string>;
   /** Isolated subscription profiles must not inherit API keys or host credentials. */
@@ -258,12 +260,11 @@ export class AcpClient {
     // message misleadingly points at the command path.
     // Skip when a test spawnFn is injected — the directory may be a fake path
     // (e.g. '/my/project') that can't be created on CI runners.
-    if (!this.config.spawnFn) {
+    if (!this.config.spawnFn && !(IS_WINDOWS && this.config.verifyBootstrapCwd)) {
       mkdirSync(this.config.cwd, { recursive: true, mode: 0o700 });
     }
     // #1203: Capture the cwd's directory identity at spawn so isCwdIntact can
     // detect delete→recreate at the same path, not just deletion.
-    this.cwdIdentityTracker.capture();
 
     const spawnOpts: SpawnOptions & { stdio: ['pipe', 'pipe', 'pipe'] } = {
       cwd: this.config.cwd,
@@ -300,6 +301,8 @@ export class AcpClient {
       spawnOpts.env = supervised.env;
     }
 
+    if (IS_WINDOWS && !this.config.spawnFn) this.config.verifyBootstrapCwd?.(command, args, childEnv);
+    this.cwdIdentityTracker.capture();
     this.child = doSpawn(command, args, spawnOpts) as ChildProcess;
 
     this.child.stderr?.on('data', (chunk: Buffer) => {

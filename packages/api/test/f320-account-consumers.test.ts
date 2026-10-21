@@ -80,7 +80,7 @@ for (const explicit of [false, true])
               const home = launch.env?.CODEX_HOME;
               assert.equal(typeof home, 'string');
               assert.ok(existsSync(home!), 'actual spawn receives an existing explicit home');
-              assert.equal(statSync(home!).mode & 0o777, 0o700);
+              if (process.platform !== 'win32') assert.equal(statSync(home!).mode & 0o777, 0o700);
               homes.push(home!);
               return {
                 alive: true,

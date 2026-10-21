@@ -586,7 +586,7 @@ function InteractiveChatContainer({ threadId }: ChatContainerProps) {
   const demoAdmission = useDemoAdmission(
     threadId === 'default',
     handleStartFirstRunQuest,
-    registryKnown && !registryRefreshing && cats.length === 0,
+    registryKnown && !registryRefreshing,
   );
   const currentBootcampState = storeThreads.find((thread) => thread.id === threadId)?.bootcampState;
   const currentBootcampPhase = currentBootcampState?.phase;

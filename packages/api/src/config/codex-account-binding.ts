@@ -5,6 +5,7 @@ import {
   resolveByAccountRef,
   validateRuntimeProviderBinding,
 } from './account-resolver.js';
+import { usesNativeToolConfiguration } from './cat-account-binding.js';
 import { toAllCatConfigs } from './cat-config-loader.js';
 import { inspectCodexLogin } from './codex-account-identity.js';
 import { resolveCodexAccountLaunch } from './codex-account-launch.js';
@@ -48,11 +49,14 @@ export function assertCodexMemberMutationReady(
     !bindingConfirmed
   )
     return; // Read/edit an existing binding without requiring reauthentication.
-  const profile = resolveByAccountRef(projectRoot, accountRef);
+  const nativeTool = usesNativeToolConfiguration(next);
+  const profile = nativeTool
+    ? { id: 'codex', authType: 'oauth' as const, client: 'openai' as const, syntheticNative: true }
+    : resolveByAccountRef(projectRoot, accountRef);
   if (!profile) throw new Error('Codex account not found');
   const compatibilityError = validateRuntimeProviderBinding('openai', profile, next.defaultModel);
   if (compatibilityError) throw new Error(compatibilityError);
-  if (next.configurationSource === 'native_tool' && !next.accountRef && profile.syntheticNative) {
+  if (nativeTool) {
     const launch = resolveCodexAccountLaunch(profile, { cwd: projectRoot });
     // Match CodexAgentService's member argument tokenization. Explicit account
     // selection and account-switch operations retain their existing auth contract.

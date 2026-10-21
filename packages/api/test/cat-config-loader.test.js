@@ -2113,7 +2113,7 @@ describe('#772: template breeds must not leak into runtime', () => {
     }
   });
 
-  it('bootstrapDefaultCatCatalog registers allowlisted glm52 breed when no runtime catalog exists', () => {
+  it('bootstrapDefaultCatCatalog keeps template breeds out of a new runtime catalog', () => {
     const projectDir = mkdtempSync(join(tmpdir(), 'cat-glm52-bootstrap-'));
     const templatePath = join(projectDir, 'cat-template.json');
     writeFileSync(
@@ -2138,8 +2138,8 @@ describe('#772: template breeds must not leak into runtime', () => {
     try {
       const config = bootstrapDefaultCatCatalog(templatePath);
       const all = toAllCatConfigs(config);
-      assert.ok(all.glm52, 'glm52 should become a runtime cat after bootstrap');
-      assert.equal(getCatFamily('glm52', config), 'dragon-li');
+      assert.deepEqual(all, {}, 'neither the first template breed nor allowlisted GLM is enrolled automatically');
+      assert.equal(getCatFamily('glm52', config), undefined);
     } finally {
       _resetCachedConfig();
     }

@@ -32,6 +32,7 @@ import {
 } from '@cat-cafe/shared';
 import { z } from 'zod';
 import { createModuleLogger } from '../infrastructure/logger.js';
+import { isUserSelectedCatalog } from './cat-catalog-initialization.js';
 import { bootstrapCatCatalog, type CatCatalogReadOptions, readCatCatalogRaw } from './cat-catalog-store.js';
 import { resolveProjectTemplatePath } from './project-template-path.js';
 import {
@@ -313,6 +314,7 @@ const coCreatorConfigSchema = z.object({
 /** Version 1: breeds only (legacy) */
 const catCafeConfigSchemaV1 = z.object({
   version: z.literal(1),
+  memberInitialization: z.string().min(1).optional(),
   breeds: z.array(catBreedSchema),
   selectedAccountRefs: z.record(z.string(), z.string().min(1)).optional(),
 });
@@ -321,6 +323,7 @@ const catCafeConfigSchemaV1 = z.object({
 const catCafeConfigSchemaV2 = z
   .object({
     version: z.literal(2),
+    memberInitialization: z.string().min(1).optional(),
     breeds: z.array(catBreedSchema),
     selectedAccountRefs: z.record(z.string(), z.string().min(1)).optional(),
     roster: z.record(z.string(), rosterEntrySchema),
@@ -524,6 +527,11 @@ function removeUnavailableTemplateVariants(
 
       const catId = variant.catId ?? breed.catId;
       if (!catId) return true;
+      // New installations must not gain unselected variants through read-side merging.
+      if (isUserSelectedCatalog(catalogJson)) {
+        removedCatIds.add(catId);
+        return false;
+      }
       const input = {
         breedId: breed.id,
         variantId: variant.id,

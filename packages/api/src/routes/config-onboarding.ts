@@ -1,6 +1,8 @@
 import type { UserPreferences } from '@cat-cafe/shared';
 import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
+import { isUserSelectedCatalog } from '../config/cat-catalog-initialization.js';
+import { readCatCatalogRaw } from '../config/cat-catalog-store.js';
 import { readUserPreferencesStrict, updateUserPreferences } from '../config/user-preferences-store.js';
 import { resolveSessionUserId } from '../utils/request-identity.js';
 
@@ -9,10 +11,28 @@ const entryInput = z.object({ status: z.enum(['pending', 'dismissed', 'completed
 
 /** Personal receipts share the existing atomic preference owner, not the transient F155 session. */
 export const configOnboardingRoutes: FastifyPluginAsync<{ projectRoot: string }> = async (app, { projectRoot }) => {
+  const autoEligible = () => {
+    try {
+      const raw = readCatCatalogRaw(projectRoot, { persistMigrations: false });
+      const catalog: unknown = raw ? JSON.parse(raw) : null;
+      return (
+        isUserSelectedCatalog(catalog) &&
+        catalog !== null &&
+        typeof catalog === 'object' &&
+        'breeds' in catalog &&
+        Array.isArray(catalog.breeds) &&
+        catalog.breeds.length === 0
+      );
+    } catch {
+      app.log.warn('Onboarding catalog unavailable; automatic guide disabled');
+      return false;
+    }
+  };
   const snapshot = (userId: string, version: string, preferences: UserPreferences) => ({
     userId,
     version,
     status: preferences.onboardingGuides?.[`${encodeURIComponent(userId)}:${version}`]?.status ?? 'not_started',
+    ...(version === 'collaboration-v1' ? { autoEligible: autoEligible() } : {}),
   });
   const register = (path: string, version: string, inputSchema: typeof entryInput | typeof demoInput) => {
     app.get(path, async (request, reply) => {

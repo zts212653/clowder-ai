@@ -38,13 +38,27 @@ it('keeps personal admission readable but does not automatically offer setup to 
   await act(async () => root.render(<ExistingTeam />));
   expect(open).not.toHaveBeenCalled();
 });
+it('does not infer a first install from an empty registry without server provenance', async () => {
+  vi.mocked(apiFetch).mockResolvedValue(
+    Response.json({ userId: 'owner', version: 'collaboration-v1', status: 'not_started', autoEligible: false }),
+  );
+  await act(async () => root.render(<Probe />));
+  expect(open).not.toHaveBeenCalled();
+});
+it('does not infer first-install eligibility from an older server response', async () => {
+  vi.mocked(apiFetch).mockResolvedValue(
+    Response.json({ userId: 'owner', version: 'collaboration-v1', status: 'not_started' }),
+  );
+  await act(async () => root.render(<Probe />));
+  expect(open).not.toHaveBeenCalled();
+});
 it.each([
   'not_started',
   'dismissed',
   'completed',
 ])('automatically opens only an unexecuted authenticated guide: %s', async (status) => {
   vi.mocked(apiFetch).mockResolvedValue(
-    new Response(JSON.stringify({ userId: 'owner', version: 'collaboration-v1', status })),
+    new Response(JSON.stringify({ userId: 'owner', version: 'collaboration-v1', status, autoEligible: true })),
   );
   await act(async () => root.render(<Probe />));
   expect(open).toHaveBeenCalledTimes(status === 'not_started' ? 1 : 0);
@@ -73,7 +87,9 @@ it('retries a failed admission read instead of offering an inert retry', async (
   await act(async () => root.render(<Probe />));
   expect(host.textContent).toContain('无法读取');
   vi.mocked(apiFetch).mockResolvedValueOnce(
-    new Response(JSON.stringify({ userId: 'owner', version: 'collaboration-v1', status: 'not_started' })),
+    new Response(
+      JSON.stringify({ userId: 'owner', version: 'collaboration-v1', status: 'not_started', autoEligible: true }),
+    ),
   );
   await act(async () => admission.retry());
   expect(apiFetch).toHaveBeenCalledTimes(2);

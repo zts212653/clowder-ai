@@ -6,6 +6,13 @@ function trimBinding(value: unknown): string | undefined {
   return trimmed.length > 0 ? trimmed : undefined;
 }
 
+/** A native member without an explicit account delegates provider/auth selection to its CLI. */
+export function usesNativeToolConfiguration(
+  catConfig: Pick<CatConfig, 'configurationSource' | 'accountRef'> | null | undefined,
+): boolean {
+  return catConfig?.configurationSource === 'native_tool' && !trimBinding(catConfig.accountRef);
+}
+
 /**
  * Resolve the bound accountRef for runtime and editor flows.
  *

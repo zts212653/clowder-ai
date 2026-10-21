@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileS
 import { dirname, relative, resolve, sep } from 'node:path';
 import type { CatCafeConfig, ClientId, RosterEntry } from '@cat-cafe/shared';
 import { type NativeToolIdentity, nativeToolIdentityFor } from '@cat-cafe/shared';
+import { createModuleLogger } from '../infrastructure/logger.js';
 import { resolveBuiltinClientForProvider } from './account-resolver.js';
 import {
   GEMINI35_CAT_ID,
@@ -12,11 +13,7 @@ import {
   resolveAgyGeminiDefaultModel,
 } from './agy-gemini-models.js';
 import { inheritFullyBlockedMcpCapabilitiesForNewCatsSync } from './capabilities/capability-orchestrator.js';
-import {
-  pickSeedBreed,
-  pruneRosterToRuntimeBreeds,
-  type RuntimeBreedWithCatIds,
-} from './cat-catalog-bootstrap-roster.js';
+import { isUserSelectedCatalog, USER_SELECTED_INITIALIZATION } from './cat-catalog-initialization.js';
 import {
   isTemplateBreedBackfillAllowed,
   isTemplateVariantBackfillAllowed,
@@ -27,6 +24,7 @@ import { readRepairedVoiceRefTexts } from './voice-ref-text-repair.js';
 
 const CONFIG_SUBDIR = '.cat-cafe';
 const CAT_CATALOG_FILENAME = 'cat-catalog.json';
+const log = createModuleLogger('cat-catalog');
 
 function safePath(projectRoot: string, ...segments: string[]): string {
   const root = resolve(projectRoot);
@@ -384,6 +382,7 @@ function persistMissingTemplateBreeds(projectRoot: string, catalogPath: string, 
   }
 
   const catalog = JSON.parse(catalogRaw) as CatCafeConfig;
+  if (isUserSelectedCatalog(catalog)) return false;
   const template = JSON.parse(templateRaw) as CatCafeConfig;
   const next = structuredClone(catalog) as CatCafeConfig;
   const nextBreeds = next.breeds as unknown as Record<string, unknown>[];
@@ -452,6 +451,7 @@ function persistMissingTemplateVariants(projectRoot: string, catalogPath: string
   }
 
   const catalog = JSON.parse(catalogRaw) as CatCafeConfig;
+  if (isUserSelectedCatalog(catalog)) return false;
   const template = JSON.parse(templateRaw) as CatCafeConfig;
   const next = structuredClone(catalog) as CatCafeConfig;
   const templateBreeds = new Map<string, Record<string, unknown>>();
@@ -599,6 +599,7 @@ function syncGemini35TemplateUpgrade(catalogPath: string, templatePath: string):
   }
 
   const catalog = JSON.parse(catalogRaw) as CatCafeConfig;
+  if (isUserSelectedCatalog(catalog)) return false;
   const template = JSON.parse(templateRaw) as CatCafeConfig;
   const templateBreed = (template.breeds as unknown as Record<string, unknown>[]).find(isGemini35Breed);
   if (!templateBreed) return false;
@@ -886,36 +887,16 @@ export function bootstrapCatCatalog(projectRoot: string, templatePath: string): 
   const { catalog: template } = readBootstrapSourceConfig(templatePath);
   const { catalog: migratedCatalog } = migrateCatalogVariants(template);
 
-  // #948: Seed the first breed from the template so the app starts with at least
-  // one usable member. Without this, the registry is empty and the frontend
-  // crashes before the first-run wizard is reachable.
-  // In dev environments (template has no breeds), start empty — developers use
-  // the wizard or manual config to add members.
-  const seedBreed = pickSeedBreed(migratedCatalog);
-
-  let runtimeCatalog: CatCafeConfig;
-  if (seedBreed) {
-    const seedBreeds = [seedBreed as CatCafeConfig['breeds'][number]];
-    runtimeCatalog = {
-      ...migratedCatalog,
-      breeds: seedBreeds,
-    };
-    if ('roster' in runtimeCatalog) {
-      (runtimeCatalog as { roster: Record<string, RosterEntry> }).roster = pruneRosterToRuntimeBreeds(
-        runtimeCatalog.roster as Record<string, RosterEntry>,
-        seedBreeds as RuntimeBreedWithCatIds[],
-        OWNER_ROSTER_KEY,
-        buildOwnerRosterEntry(),
-      );
-    }
-  } else {
-    // Template has no breeds — start empty (first-run wizard guides member addition).
-    runtimeCatalog = createEmptyRuntimeCatalog(migratedCatalog);
-  }
+  // #1651: Templates are an add-member menu. Detection and owner confirmation
+  // create actual members; the empty registry is a supported first-run state.
+  const runtimeCatalog = {
+    ...createEmptyRuntimeCatalog(migratedCatalog),
+    memberInitialization: USER_SELECTED_INITIALIZATION,
+  };
 
   mkdirSync(dirname(catalogPath), { recursive: true });
   writeFileAtomic(catalogPath, `${JSON.stringify(runtimeCatalog, null, 2)}\n`);
-  persistMissingTemplateBreeds(projectRoot, catalogPath, templatePath);
+  log.info('首次启动：已创建空成员目录；项目自带角色模板仅供选择，检测并确认添加后才会创建成员。');
   return catalogPath;
 }
 
