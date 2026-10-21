@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { entrustedWorkTaskExecutionV1Schema } from './entrusted-work-human-terminal.js';
 import { preparedArtifactSnapshotV1Schema } from './growing-artifact.js';
 import { developmentScopeV1Schema, developmentTaskRefSchema } from './growing-development.js';
+import { entrustedTaskDataControllerV1Schema } from './task-data-controller.js';
 
 const boundedRef = z.string().trim().min(1).max(1_000);
 const boundedText = z.string().trim().min(1).max(4_000);
@@ -190,6 +191,8 @@ export const entrustedWorkV1Schema = z
     revision: revisionSchema,
     /** Host-owned execution epoch. Absent on legacy contracts; never inferred from aggregate revision. */
     executionAuthorityRevision: z.number().int().positive().max(Number.MAX_SAFE_INTEGER).optional(),
+    /** Current data-maintenance authority. This never replaces immutable admission or business execution authority. */
+    dataController: entrustedTaskDataControllerV1Schema.optional(),
     admission: entrustedAdmissionSchema,
     developmentScope: developmentScopeV1Schema.optional(),
     parentTaskRef: developmentTaskRefSchema.optional(),

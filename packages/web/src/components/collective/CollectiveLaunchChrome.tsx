@@ -1,5 +1,6 @@
 'use client';
 
+import { deploymentDefaults } from '@cat-cafe/shared';
 import type { CollectiveConnectionProjection, CollectiveConnectorStatus } from './collective-client';
 import { normalizeCollectiveServiceUrl } from './collective-client';
 import { localServiceAction, localServiceDescription } from './collective-launch-copy';
@@ -70,7 +71,8 @@ export function CollectiveServiceSetup({
         <p className="text-xs font-semibold uppercase tracking-wider text-cafe-accent">Collective Service</p>
         <h1 className="mt-2 text-2xl font-semibold text-cafe-primary">建立共同家园</h1>
         <p className="mt-3 text-sm leading-6 text-cafe-secondary">
-          Clowder AI 会创建并守护一份独立运行的本机 Service。登录凭据由 Service 保存，不需要打开终端或复制 secret。
+          {deploymentDefaults.brand.displayName} 会创建并守护一份独立运行的本机 Service。登录凭据由 Service
+          保存，不需要打开终端或复制 secret。
         </p>
         <button
           type="button"
@@ -149,7 +151,7 @@ export function CollectiveLaunchNotice({
       role={signInNotice ? 'status' : error ? 'alert' : 'status'}
       className={`absolute inset-x-0 top-0 z-10 px-4 py-2 text-center text-xs ${signInNotice ? 'border-b border-[var(--console-border-soft)] bg-[var(--shell-work)] text-cafe-secondary' : error ? 'bg-conn-red-bg text-conn-red-text' : 'bg-conn-amber-bg text-conn-amber-text'}`}
     >
-      {t(error ?? 'Clowder AI 正在安全托管连接凭据…')}
+      {t(error ?? `${deploymentDefaults.brand.displayName} 正在安全托管连接凭据…`)}
     </div>
   );
 }

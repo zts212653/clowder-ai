@@ -1,10 +1,17 @@
 import { type EvolutionExplorationNodeV1, refIdentity } from '@cat-cafe/shared';
 
 export const LINEAGE_NODE_SIZE = { width: 176, height: 112 };
-export const HISTORICAL_LINEAGE_NODE_SIZE = { width: 136, height: 88 };
+// Historical geometry reserves the largest rendered card. Cards without an
+// origin/current note stay compact in CSS while annotated cards use the full
+// height, so edge routing and camera bounds never undercount visible content.
+export const HISTORICAL_LINEAGE_NODE_SIZE = { width: 136, height: 128 };
 export const HISTORICAL_LINEAGE_MIN_ZOOM = 0.9;
-const HISTORICAL_LINEAGE_COLUMN_GAP = 160;
-const HISTORICAL_LINEAGE_ROW_GAP = 120;
+// Historical cards keep a fixed readable screen width while the canvas zooms.
+// At the 0.9 readability floor, 176 world pixels leave 22.4 visible pixels
+// between 136px cards, so an authored adjacent edge reads as a line, not a divider.
+const HISTORICAL_LINEAGE_COLUMN_GAP = 176;
+// The largest fixed-screen 128px cards still keep a ~23px vertical gap at 0.9 zoom.
+const HISTORICAL_LINEAGE_ROW_GAP = 168;
 
 export interface LineageRoutePoint {
   x: number;

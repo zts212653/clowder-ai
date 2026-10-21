@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { AppTooltip } from '@/components/AppTooltip';
 import { useIMEGuard } from '@/hooks/useIMEGuard';
 
 /** Detect OS for the "reveal in file manager" menu label. Returns a label + icon kind.
@@ -153,17 +154,27 @@ export function SectionGroup({
             />
           </div>
         ) : (
-          <button
-            type="button"
-            onClick={onToggle}
-            className="flex min-w-0 flex-1 items-center gap-1.5 text-left"
-            title={projectPath && projectPath !== 'default' ? projectPath : undefined}
+          <AppTooltip
+            label={label}
+            detail={projectPath && projectPath !== 'default' ? projectPath : undefined}
+            intent="content"
+            side="right"
+            onlyWhenTruncated={!projectPath || projectPath === 'default'}
+            multiline
           >
-            <SectionChevron isCollapsed={isCollapsed} />
-            {iconPath && <SectionIcon iconPath={iconPath} iconColor={iconColor} />}
-            {isProjectPinned && <PinSectionIcon />}
-            <span className="min-w-0 flex-1 truncate text-xs font-medium text-cafe-secondary">{label}</span>
-          </button>
+            <button
+              type="button"
+              onClick={onToggle}
+              className="flex min-w-0 flex-1 items-center gap-1.5 text-left"
+              aria-label={label}
+              data-project-path={projectPath || undefined}
+            >
+              <SectionChevron isCollapsed={isCollapsed} />
+              {iconPath && <SectionIcon iconPath={iconPath} iconColor={iconColor} />}
+              {isProjectPinned && <PinSectionIcon />}
+              <span className="min-w-0 flex-1 truncate text-xs font-medium text-cafe-secondary">{label}</span>
+            </button>
+          </AppTooltip>
         )}
 
         {/* Governance dot */}
@@ -385,24 +396,26 @@ function ActionButton({
   children: React.ReactNode;
 }) {
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      onKeyDown={(e) => {
-        if ((e.key === 'Enter' || e.key === ' ') && !e.repeat) {
-          e.preventDefault();
-          e.stopPropagation();
-          onClick(e as unknown as React.MouseEvent);
-        }
-      }}
-      className={`ml-0.5 flex-shrink-0 transition-all text-cafe-muted hover:text-cafe-secondary ${className ?? ''}`}
-      title={title}
-      data-testid={testId}
-    >
-      <svg aria-hidden="true" className="w-3 h-3" viewBox="0 0 16 16" fill="currentColor">
-        {children}
-      </svg>
-    </button>
+    <AppTooltip label={title} intent="icon" side="right">
+      <button
+        type="button"
+        onClick={onClick}
+        onKeyDown={(e) => {
+          if ((e.key === 'Enter' || e.key === ' ') && !e.repeat) {
+            e.preventDefault();
+            e.stopPropagation();
+            onClick(e as unknown as React.MouseEvent);
+          }
+        }}
+        className={`ml-0.5 flex-shrink-0 transition-all text-cafe-muted hover:text-cafe-secondary ${className ?? ''}`}
+        aria-label={title}
+        data-testid={testId}
+      >
+        <svg aria-hidden="true" className="w-3 h-3" viewBox="0 0 16 16" fill="currentColor">
+          {children}
+        </svg>
+      </button>
+    </AppTooltip>
   );
 }
 

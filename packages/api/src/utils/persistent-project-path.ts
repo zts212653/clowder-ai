@@ -1,3 +1,4 @@
+import { deploymentDefaults } from '@cat-cafe/shared';
 /**
  * Persistent project-path boundary.
  *
@@ -201,7 +202,7 @@ export async function validateExternalProjectPathDetailed(
       return {
         ok: false,
         reason: 'cat_cafe_root_invalid',
-        message: `Clowder AI root is invalid: ${root.message ?? root.reason}`,
+        message: `${deploymentDefaults.brand.name} root is invalid: ${root.message ?? root.reason}`,
       };
     }
     if (!ownedRoots.some((existing) => pathsEqual(existing, root.path))) ownedRoots.push(root.path);
@@ -211,7 +212,7 @@ export async function validateExternalProjectPathDetailed(
     return {
       ok: false,
       reason: 'cat_cafe_owned_path',
-      message: 'Portable governance can only bootstrap an external project, not Clowder AI or its descendants',
+      message: `Portable governance can only bootstrap an external project, not ${deploymentDefaults.brand.name} or its descendants`,
     };
   }
   return target;

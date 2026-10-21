@@ -1427,6 +1427,7 @@ export type {
   ThreadProposal,
 } from './proposal.js';
 export { suggestedReportingModeForWorkMode } from './proposal.js';
+export type { ApprovedTaskContractV1, TaskContractContinuationV1 } from './proposal-task-contract.js';
 export {
   isProviderSemanticEvent,
   normalizeThreadGoalObjective,
@@ -1689,6 +1690,14 @@ export type {
   UpdateTaskInput,
 } from './task.js';
 export { extractFeatureIds, isTrackingKind, TASK_FEATURE_ID_MAX_LENGTH, taskFeatureIdSchema } from './task.js';
+export {
+  type EntrustedTaskDataControllerCoordinatesV1,
+  type EntrustedTaskDataControllerReceiptV1,
+  type EntrustedTaskDataControllerV1,
+  entrustedTaskDataControllerCoordinatesV1Schema,
+  entrustedTaskDataControllerReceiptV1Schema,
+  entrustedTaskDataControllerV1Schema,
+} from './task-data-controller.js';
 // F193 Phase E: SuggestedCrossPostAction + DispatchGateState re-exported via task.ts
 // (canonical source: cross-thread-affordance.ts; E2/E4 consumers can also import directly)
 // Taste Proposal types (F221 品味信号捕获)

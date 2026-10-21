@@ -8,6 +8,7 @@ import { startReviewHost } from './fixtures/f309-artifact-review-host.mjs';
 import { mediaFixture } from './fixtures/f309-artifact-review-media.mjs';
 import { openReviewPanel } from './fixtures/f309-artwork-controls.mjs';
 import './f309-publication-display.journey.mjs';
+import './f326-work-response.journey.mjs';
 
 async function setup(t, name, kind = 'png') {
   const root = await mkdtemp(path.join(tmpdir(), `f309-passive-${name}-`));

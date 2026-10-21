@@ -40,7 +40,7 @@ export function ArtworkVideoPlayback({
     };
   }, [video]);
   return (
-    <div className="flex items-center gap-3">
+    <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2">
       <button
         type="button"
         aria-label={paused ? t.play : t.pause}
@@ -59,7 +59,7 @@ export function ArtworkVideoPlayback({
       <input
         type="range"
         aria-label={t.position}
-        className="min-w-0 flex-1 accent-cafe-accent"
+        className="min-w-16 flex-1 accent-cafe-accent"
         min="0"
         max={duration}
         step="any"

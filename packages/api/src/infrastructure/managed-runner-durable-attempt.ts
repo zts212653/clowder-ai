@@ -14,11 +14,7 @@ import {
   DURABLE_GATE_RESUME_EPOCH_ENV,
   durableGateRecoveryReadyPath,
 } from '../domains/ball-custody/durable-managed-gate-recovery-child-contract.js';
-import {
-  readUnixProcessSnapshotSync,
-  sameUnixProcess,
-  type UnixProcessIdentity,
-} from '../utils/cli-process-ownership.js';
+import { readUnixProcessSnapshot, sameUnixProcess, type UnixProcessIdentity } from '../utils/cli-process-ownership.js';
 
 export interface DurableManagedGateAttempt {
   readonly attemptToken: string;
@@ -73,14 +69,14 @@ function hasAttemptToken(commandAndEnvironment: string | undefined, attemptToken
   return commandAndEnvironment?.split(/\s+/u).includes(marker) ?? false;
 }
 
-function attemptMembers(attemptToken: string): UnixProcessIdentity[] | null {
-  const snapshot = readUnixProcessSnapshotSync({ includeEnvironment: true });
+async function attemptMembers(attemptToken: string): Promise<UnixProcessIdentity[] | null> {
+  const snapshot = await readUnixProcessSnapshot({ includeEnvironment: true });
   if (snapshot === null) return null;
   const candidates = [...snapshot.values()].filter(
     (entry) => entry.pid !== process.pid && hasAttemptToken(entry.commandAndEnvironment, attemptToken),
   );
   if (candidates.length === 0) return [];
-  const verified = readUnixProcessSnapshotSync({
+  const verified = await readUnixProcessSnapshot({
     includeEnvironment: true,
     pids: candidates.map((entry) => entry.pid),
   });
@@ -121,7 +117,7 @@ export async function cleanupDurableManagedGateAttempt(
   let forced = false;
   const signals: DurableManagedGateCleanupSignal[] = [];
   while (Date.now() - startedAt <= budgetMs) {
-    const members = attemptMembers(attemptToken);
+    const members = await attemptMembers(attemptToken);
     if (members === null) return { proven: false, signals };
     if (members.length === 0) return { proven: true, signals };
     const shouldForce = Date.now() - startedAt >= Math.max(pollMs, Math.floor(budgetMs / 2));
@@ -129,5 +125,5 @@ export async function cleanupDurableManagedGateAttempt(
     signals.push(...signalMembers(members, forced ? 'SIGKILL' : 'SIGTERM'));
     await sleep(pollMs);
   }
-  return { proven: attemptMembers(attemptToken)?.length === 0, signals };
+  return { proven: (await attemptMembers(attemptToken))?.length === 0, signals };
 }

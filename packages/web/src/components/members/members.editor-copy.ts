@@ -1,3 +1,4 @@
+import { deploymentDefaults } from '@cat-cafe/shared';
 export const editorCopy = {
   zh: {
     '正在读取成员配置…': '正在读取成员配置…',
@@ -138,11 +139,10 @@ export const editorCopy = {
     '展开后可配置 TTS clone 参考音频和文本。': 'Expand to configure voice cloning with reference audio and text.',
     检测到云端身份配置异常: 'Invalid cloud identity settings',
     云端身份已保护: 'Cloud identity settings locked',
-    protectedCloudDescription:
-      '@gpt-pro is Clowder AI’s built-in ChatGPT Pro cloud member and connects to Clowder AI through Remote MCP. Its family, client, model ID, account binding and connection settings are fixed. You can edit its name, avatar, nickname and role details, and add mention names. Its primary mention name, @gpt-pro, stays fixed, and it does not use a local runtime. Add a separate member for local Codex.',
+    protectedCloudDescription: `@gpt-pro is ${deploymentDefaults.brand.displayName}’s built-in ChatGPT Pro cloud member and connects to ${deploymentDefaults.brand.displayName} through Remote MCP. Its family, client, model ID, account binding and connection settings are fixed. You can edit its name, avatar, nickname and role details, and add mention names. Its primary mention name, @gpt-pro, stays fixed, and it does not use a local runtime. Add a separate member for local Codex.`,
     'ChatGPT Pro 云端': 'ChatGPT Pro cloud',
     模型身份: 'Model ID',
-    回程工具: 'Clowder AI connection',
+    回程工具: `${deploymentDefaults.brand.displayName} connection`,
     'Remote MCP 已开启': 'Remote MCP enabled',
     本地运行时: 'Local runtime',
     未启用: 'Not used',

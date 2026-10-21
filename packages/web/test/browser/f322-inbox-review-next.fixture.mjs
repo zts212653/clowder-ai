@@ -32,6 +32,28 @@ export async function createNextReviewFixture(root) {
   try {
     fixture = await createInboxProposalFixture({
       ownerUserId: 'operator',
+      // This bounded review host owns no collective requests. Supply the unrelated source explicitly;
+      // omitting its port correctly produces an uncertain global read and prevents Inbox commits.
+      collectiveAccountability: async (owner) => {
+        assert.equal(owner, 'operator');
+        const observedAt = Date.now();
+        return {
+          status: 200,
+          body: {
+            data: {
+              items: [],
+              reasons: [],
+              state: {
+                coverage: 'pending_f290_collective_accountability_requests',
+                status: 'available',
+                exhaustiveness: 'complete',
+                startedAt: observedAt,
+                observedAt,
+              },
+            },
+          },
+        };
+      },
       readIgnoredPreferences: (owner) => readIgnoredItemPreferences(root, owner),
       participantIds: ['codex61-sol', 'codex-astra'],
       messageStore: review.messages,

@@ -199,7 +199,7 @@ export class AgyNativeAgentService implements AgentService {
       { type: 'error', catId: this.catId, errorCode: code, error: message, metadata, timestamp: Date.now() },
       { type: 'done', catId: this.catId, errorCode: code, metadata, timestamp: Date.now() },
     ];
-    let disposeCredentials: (() => void) | undefined;
+    let disposeCredentials: (() => void | Promise<void>) | undefined;
     try {
       if (hasUnsupportedNativeOverrides(this.model, this.profile, options)) {
         throw new Error('AGY native requires an explicit profile/model and refuses CLI or account env overrides');
@@ -260,7 +260,7 @@ export class AgyNativeAgentService implements AgentService {
         options?.signal,
       )) {
         if (observation.kind === 'init') {
-          launch.bindSession(observation.sessionId);
+          await launch.bindSession(observation.sessionId);
           await continuityInput?.acceptVerifiedInit(observation.sessionId);
           metadata.sessionId = observation.sessionId;
           yield {
@@ -273,6 +273,23 @@ export class AgyNativeAgentService implements AgentService {
           };
         } else if (observation.kind === 'step') {
           yield* progress.step(observation.event);
+        } else if (observation.kind === 'liveness') {
+          log.warn(
+            {
+              catId: this.catId,
+              invocationId: options?.invocationId,
+              level: observation.warning.level,
+              silenceMs: observation.warning.silenceDurationMs,
+            },
+            'Native AGY liveness warning',
+          );
+          yield {
+            type: 'system_info',
+            catId: this.catId,
+            metadata,
+            timestamp: Date.now(),
+            content: JSON.stringify({ type: 'liveness_warning', ...observation.warning }),
+          };
         } else observed = observation.observed;
       }
       if (!observed) throw new Error('AGY native stream ended without a terminal observation');
@@ -301,7 +318,7 @@ export class AgyNativeAgentService implements AgentService {
         cancelled ? 'AGY native turn was cancelled' : error instanceof Error ? error.message : String(error),
       );
     } finally {
-      disposeCredentials?.();
+      await disposeCredentials?.();
     }
   }
 }

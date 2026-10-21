@@ -148,7 +148,7 @@ test('a callback cannot supply the server-derived publication selector', async (
   assert.equal(f.store.pendingVersion(f.request.record.progress.review!.reviewId), null);
 });
 
-test('accepted exact publication survives owner failure and recovery after its child ends', async (t) => {
+test('accepted exact publication survives owner failure without read-authorized execution after its child ends', async (t) => {
   const f = await fixture(t);
   const first = f.publish('append');
   const second = f.publish('append');
@@ -171,11 +171,10 @@ test('accepted exact publication survives owner failure and recovery after its c
   });
   f.media.publishVersion = publish;
   const recovered = await f.reviews.read(reviewId, f.human);
-  assert.equal(recovered.review.rounds.at(-1)?.asset.ownerRevision, 2);
-  assert.ok(
-    [first.id, second.id].some((id) => recovered.review.rounds.at(-1)?.asset.sourcePublication.sourceRef.endsWith(id)),
-  );
-  assert.equal(f.store.pendingVersion(reviewId), null);
+  assert.equal(recovered.review.rounds.at(-1)?.asset.ownerRevision, 1);
+  assert.deepEqual(f.store.pendingVersion(reviewId), pending);
+  const source = pending.payload.publicationSource as { messageId: string };
+  assert.ok([first.id, second.id].includes(source.messageId));
   assert.equal(f.carriers().length, 1);
 });
 

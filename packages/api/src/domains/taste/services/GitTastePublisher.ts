@@ -2,6 +2,7 @@ import { execFile } from 'node:child_process';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { deploymentDefaults } from '@cat-cafe/shared';
 import { retainPublishedTasteSnapshot } from './PublishedTasteSnapshot.js';
 
 export interface GitTastePublicationAttempt {
@@ -105,7 +106,7 @@ async function prepareCheckout(sourceRoot: string, checkoutRoot: string, branchN
   await runGit(sourceRoot, ['clone', '--no-checkout', '--shared', sourceRoot, checkoutRoot]);
   await runGit(checkoutRoot, ['remote', 'set-url', 'origin', originUrl]);
   await runGit(checkoutRoot, ['config', 'core.hooksPath', hooksPath]);
-  await runGit(checkoutRoot, ['config', 'user.name', 'Clowder AI Taste Publisher']);
+  await runGit(checkoutRoot, ['config', 'user.name', `${deploymentDefaults.brand.name} Taste Publisher`]);
   await runGit(checkoutRoot, ['config', 'user.email', 'taste-publisher@cat-cafe.local']);
   await runGit(checkoutRoot, ['fetch', '--no-tags', 'origin', '+refs/heads/main:refs/remotes/origin/main']);
   const baseSha = await runGit(checkoutRoot, ['rev-parse', 'refs/remotes/origin/main']);

@@ -12,6 +12,7 @@ import type { ContentModificationChatProjection } from './chat-projection.js';
 import type { ModificationFileLineage } from './file-lineage.js';
 import type { ContentModificationRecord } from './journal.js';
 import { ContentModificationJournalError } from './journal-errors.js';
+import { isModificationResultRound } from './media-response-round.js';
 import type { ContentTextModificationService } from './text/text-service.js';
 import { ModificationTextError } from './text/text-store.js';
 
@@ -67,8 +68,13 @@ export class ContentModificationResultService {
         .map((item) => item.record.progress.review!.round!),
     );
     const candidates: ModificationCandidate[] = [];
-    for (const returned of view.review.rounds.filter(
-      (round) => round.number > (bound.round ?? 0) && round.number <= lastResultRound,
+    for (const returned of view.review.rounds.filter((round) =>
+      isModificationResultRound(round, {
+        requestId: record.requestId,
+        round: bound.round ?? 0,
+        reviewRevision: original.revision,
+        lastResultRound,
+      }),
     )) {
       if (returned.responseAuthor?.kind !== 'cat' || returned.responseAuthor.actorId !== record.payload.targetCatId)
         throw new ModificationTextError('task_changed');

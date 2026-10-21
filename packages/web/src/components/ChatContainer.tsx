@@ -1,5 +1,6 @@
 'use client';
 
+import { deploymentDefaults } from '@cat-cafe/shared';
 import Link from 'next/link';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useShallow } from 'zustand/react/shallow';
@@ -1150,7 +1151,7 @@ function InteractiveChatContainer({ threadId }: ChatContainerProps) {
                 emptyState={
                   <div className="text-center mt-20">
                     <PawIcon className="w-12 h-12 text-cafe-muted mx-auto mb-4" />
-                    <p className="text-lg text-cafe-secondary mb-1">欢迎来到 Clowder AI!</p>
+                    <p className="text-lg text-cafe-secondary mb-1">欢迎来到 {deploymentDefaults.brand.displayName}!</p>
                     <p className="text-sm text-cafe-muted" suppressHydrationWarning>
                       {cats.length > 0 ? '选择一位伙伴，开始你的下一个目标' : '先看看猫猫如何协作，再创建自己的伙伴'}
                     </p>

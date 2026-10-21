@@ -5,6 +5,8 @@ import { existsSync, readdirSync, unwatchFile, watch, watchFile } from 'node:fs'
 import { createRequire } from 'node:module';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { deploymentDefaults } from '../../shared/src/deployment-defaults.ts';
+import { syncBrandManifest } from './sync-brand-manifest.mjs';
 import { copyAsset } from './vendor-asset-publication.mjs';
 import { appGlobalCssFiles, syncStylesheets } from './vendor-stylesheets.mjs';
 
@@ -140,6 +142,7 @@ function watchAppGlobalCss() {
 }
 
 function syncVendorAssets() {
+  syncBrandManifest(webRoot, deploymentDefaults.brand);
   copyVadAssets();
   copyOnnxRuntimeAssets();
   copyEsbuildWasm();

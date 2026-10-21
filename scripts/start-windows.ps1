@@ -59,8 +59,12 @@ $ScriptDir = Split-Path -Parent $ScriptPath
 $ProjectRoot = Split-Path -Parent $ScriptDir
 Set-Location $ProjectRoot
 
+$deploymentJson = & (Get-Command node -ErrorAction Stop) (Join-Path $ProjectRoot "scripts/read-deployment-default.mjs") --json
+if ($LASTEXITCODE -ne 0) { throw "Could not read deployment defaults" }
+$deploymentDefaults = $deploymentJson | ConvertFrom-Json -ErrorAction Stop
+
 $Profile_ = $env:CAT_CAFE_PROFILE  # set by start-entry.mjs when --profile=* is given
-Write-Host "Clowder AI - Windows Startup" -ForegroundColor Cyan
+Write-Host "$($deploymentDefaults.brand.name) - Windows Startup" -ForegroundColor Cyan
 Write-Host "=========================="
 if ($Profile_) { Write-Host "  Profile: $Profile_" -ForegroundColor Cyan }
 
@@ -116,40 +120,12 @@ Preserve-ServiceFlagForApiLifecycle -SourceName "AUDIO_SERVICE_ENABLED" -TargetN
 # -- Apply profile defaults (mirrors start-dev.sh apply_profile_defaults) --
 # Profile defaults are fallbacks: .env value wins if set, otherwise profile default applies.
 $profileDefaults = @{}
-switch ($Profile_) {
-    'opensource' {
-        $profileDefaults = @{
-            ANTHROPIC_PROXY_ENABLED = '0'; ASR_ENABLED = '0'
-            TTS_ENABLED = '0'; LLM_POSTPROCESS_ENABLED = '0'
-            MESSAGE_TTL_SECONDS = '0'; THREAD_TTL_SECONDS = '0'
-            TASK_TTL_SECONDS = '0'; SUMMARY_TTL_SECONDS = '0'
-            REDIS_PROFILE = 'opensource'
-        }
-    }
-    'production' {
-        $profileDefaults = @{
-            ANTHROPIC_PROXY_ENABLED = '0'; ASR_ENABLED = '0'
-            TTS_ENABLED = '0'; LLM_POSTPROCESS_ENABLED = '0'
-            MESSAGE_TTL_SECONDS = '0'; THREAD_TTL_SECONDS = '0'
-            TASK_TTL_SECONDS = '0'; SUMMARY_TTL_SECONDS = '0'
-            REDIS_PROFILE = 'opensource'
-        }
-    }
-    'dev' {
-        $profileDefaults = @{
-            ANTHROPIC_PROXY_ENABLED = '1'; ASR_ENABLED = '1'
-            TTS_ENABLED = '1'; LLM_POSTPROCESS_ENABLED = '1'
-            MESSAGE_TTL_SECONDS = '0'; THREAD_TTL_SECONDS = '0'
-            TASK_TTL_SECONDS = '0'; SUMMARY_TTL_SECONDS = '0'
-            REDIS_PROFILE = 'dev'
-        }
-    }
-    default {
-        if ($Profile_) {
-            Write-Err "Unknown profile '$Profile_'. Valid: dev, production, opensource"
-            exit 1
-        }
-    }
+$startupProfile = if ($Profile_) { $Profile_ } else { "unprofiled" }
+$startupJson = & (Get-Command node -ErrorAction Stop) (Join-Path $ProjectRoot "scripts/read-deployment-default.mjs") --startup-profile $startupProfile win32
+if ($LASTEXITCODE -ne 0) { throw "Could not read startup profile defaults" }
+$startupDefaults = $startupJson | ConvertFrom-Json -ErrorAction Stop
+foreach ($property in $startupDefaults.PSObject.Properties) {
+    $profileDefaults[$property.Name] = [string]$property.Value
 }
 # resolve_config: env override > profile default
 foreach ($entry in $profileDefaults.GetEnumerator()) {
@@ -168,10 +144,6 @@ if (-not $pnpmCommand) {
     exit 1
 }
 Write-Ok "pnpm: $pnpmCommand"
-
-$deploymentJson = & (Get-Command node -ErrorAction Stop) (Join-Path $ProjectRoot "scripts/read-deployment-default.mjs") --json
-if ($LASTEXITCODE -ne 0) { throw "Could not read deployment defaults" }
-$deploymentDefaults = $deploymentJson | ConvertFrom-Json -ErrorAction Stop
 
 # -- Ports ---------------------------------------------------
 $ApiPort = if ($env:API_SERVER_PORT) { $env:API_SERVER_PORT } else { [string]$deploymentDefaults.apiPort }
@@ -640,7 +612,7 @@ try {
 
     Write-Host ""
     Write-Host "  ========================================" -ForegroundColor Green
-    Write-Host "  Clowder AI started!" -ForegroundColor Green
+    Write-Host "  $($deploymentDefaults.brand.name) started!" -ForegroundColor Green
     Write-Host "  ========================================" -ForegroundColor Green
     Write-Host ""
     Write-Host "  Frontend: http://localhost:$WebPort"

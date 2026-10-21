@@ -116,7 +116,7 @@ describe('readable lineage at different scales', () => {
     );
 
     expect(first.zoom).toBe(HISTORICAL_LINEAGE_MIN_ZOOM);
-    expect(minimumScreenGap).toBeGreaterThanOrEqual(8);
+    expect(minimumScreenGap).toBeGreaterThanOrEqual(16);
     expect(first.x).toBeGreaterThan(last.x);
     expect(first.x).toBeGreaterThanOrEqual(0);
     expect(map.width * last.zoom + last.x).toBeLessThanOrEqual(892);

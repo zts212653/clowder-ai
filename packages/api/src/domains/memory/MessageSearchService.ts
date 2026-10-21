@@ -24,6 +24,7 @@ import type { IEvidenceStore, SearchOptions } from './interfaces.js';
 import type { MessagePassageCandidate, MessagePassageSearchExecution } from './message-passage-search-types.js';
 import { boundMessageSearchResponse, MESSAGE_SEARCH_RESPONSE_BUDGET } from './message-search-budget.js';
 import { buildSearchableMessageContent } from './message-search-content.js';
+import { observeMessageSearchExecution } from './message-search-execution.js';
 import {
   projectMessageSearchHighlights,
   projectMessageSearchSnippet,
@@ -311,29 +312,41 @@ export class MessageSearchService {
     principal: MessageSearchPrincipal,
     context: MessageSearchExecutionContext = {},
   ): Promise<MessageSearchResponse> {
+    const observe = observeMessageSearchExecution();
     checkSearchExecution(context);
 
     const limit = input.limit ?? 20;
     if (!principal.userId) throw new MessageSearchAccessError('Search identity is not accessible');
     if (!input.query.trim() || input.query.length > 2000) throw new Error('Invalid message search query');
     if (!Number.isInteger(limit) || limit < 1 || limit > 20) throw new Error('Invalid message search limit');
-    const threads = await this.readableThreads(input, principal, context);
-    await this.requireSource(input, principal);
-    checkSearchExecution(context);
+    const threads = await observe(
+      'visibility',
+      () => this.readableThreads(input, principal, context),
+      () => checkSearchExecution(context),
+    );
+    await observe(
+      'source-admission',
+      () => this.requireSource(input, principal),
+      () => checkSearchExecution(context),
+    );
     const reader = this.deps.evidenceStore.searchMessagePassages;
     if (!reader || !this.deps.evidenceStore.readMessagePassageState)
       throw new Error('Message passage retrieval unavailable');
-    const execution = await reader.call(this.deps.evidenceStore, input.query, {
-      ...context,
-      visibleThreadIds: [...threads.keys()],
-      threadId: input.threadId,
-      sort: input.sort ?? 'time',
-      mode: input.mode ?? 'hybrid',
-      excludeSource: principal.source,
-      dateFrom: input.dateFrom,
-      dateTo: input.dateTo,
-    });
-    const results = await this.projectCandidates(input, principal, threads, execution.passages, context);
+    const execution = await observe('retrieval', () =>
+      reader.call(this.deps.evidenceStore, input.query, {
+        ...context,
+        visibleThreadIds: [...threads.keys()],
+        threadId: input.threadId,
+        sort: input.sort ?? 'time',
+        mode: input.mode ?? 'hybrid',
+        excludeSource: principal.source,
+        dateFrom: input.dateFrom,
+        dateTo: input.dateTo,
+      }),
+    );
+    const results = await observe('canonical-projection', () =>
+      this.projectCandidates(input, principal, threads, execution.passages, context),
+    );
     return boundMessageSearchResponse({
       searchId: randomUUID(),
       query: input.query,

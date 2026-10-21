@@ -3,7 +3,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { createCatId } from '@cat-cafe/shared';
+import { createCatId, deploymentDefaults } from '@cat-cafe/shared';
 import Fastify from 'fastify';
 import sharp from 'sharp';
 import { AgentKeyRegistry } from '../src/domains/cats/services/agents/agent-key/AgentKeyRegistry.js';
@@ -119,6 +119,13 @@ test('installed Pro connection → dot events → canonical reply and private or
       assert.equal(response.statusCode, 200, response.payload);
       return response.json();
     };
+    const originalBrand = deploymentDefaults.brand.displayName;
+    try {
+      deploymentDefaults.brand.displayName = 'Fixture Dot Product';
+      assert.equal((await rpc('initialize', {})).result.serverInfo.name, 'Fixture Dot Product dot');
+    } finally {
+      deploymentDefaults.brand.displayName = originalBrand;
+    }
     assert.deepEqual((await rpc('server/discover', {})).result.supportedVersions, ['2026-07-28']);
     assert.equal((await rpc('events/list', {})).result.events[0].name, 'dot.summoned');
     assert.ok(

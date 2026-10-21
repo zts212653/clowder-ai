@@ -786,7 +786,7 @@ export default { create() { return { async start() {
     assert.equal((await runtime.inventoryStore.snapshot()).instances[0].lifecycleState, 'retired');
   });
 
-  it('fails closed for legacy inventory whose admission provenance cannot be proven', async () => {
+  it('keeps installed legacy inventory visible with unknown origin when catalog discovery is offline', async () => {
     let offline = false;
     const { composition, entry, runtime } = await harness({ offline: () => offline });
     await composition.manager.install({
@@ -802,7 +802,12 @@ export default { create() { return { async start() {
     });
     offline = true;
 
-    assert.deepEqual((await composition.manager.list()).plugins, [], 'only admitted packages are projected');
+    const before = await runtime.inventoryStore.snapshot();
+    const listed = (await composition.manager.list()).plugins;
+    assert.equal(listed.length, 1);
+    assert.equal(listed[0].pluginId, entry.pluginId);
+    assert.deepEqual(listed[0].source, { kind: 'unknown', packageName: null, trust: 'unknown' });
+    assert.deepEqual(await runtime.inventoryStore.snapshot(), before, 'legacy display does not rewrite admission');
   });
 
   it('admits a local archive without persisting its raw host path or granting requested authority', async () => {

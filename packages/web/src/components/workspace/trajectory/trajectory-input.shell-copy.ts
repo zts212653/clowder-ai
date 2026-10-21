@@ -1,4 +1,5 @@
 import type { RequestGenerationTerminalEvent } from '@cat-cafe/shared';
+import { deploymentDefaults } from '@cat-cafe/shared';
 import { defineShellCopy } from '@/components/shell/shell-copy';
 
 type ContextMode = 'cold' | 'hot' | 'exact' | 'unsupported' | 'unknown';
@@ -29,7 +30,7 @@ export const trajectoryInputCopy = defineShellCopy(
       expand: '展开实际提交内容',
       sourceUnknown: '来源或版本当前无法核验。',
       tools: '工具',
-      schemas: 'Clowder AI 接口',
+      schemas: `${deploymentDefaults.brand.displayName} 接口`,
       servers: '声明服务',
       providerObserved: '服务方观测',
       compactions: '压缩',
@@ -62,7 +63,7 @@ export const trajectoryInputCopy = defineShellCopy(
         `${{ cold: '冷启动', hot: '热上下文', exact: '确切', unsupported: '不支持', unknown: '未知' }[mode]}${epoch === undefined ? '' : ` · 版本 ${epoch}`}`,
       toolStates: { exact: '确切', declared_only: '仅声明', unsupported: '不支持', unknown: '未知' },
       toolsSummary: (surface: string, schemas: string, servers: string, observed: string): string =>
-        `工具：${surface} · Clowder AI 接口：${schemas} · 声明服务：${servers} · 服务方观测：${observed}`,
+        `工具：${surface} · ${deploymentDefaults.brand.displayName} 接口：${schemas} · 声明服务：${servers} · 服务方观测：${observed}`,
       channelSummary: (length: number | undefined, digest: string, decision: string | undefined): string =>
         `${length === undefined ? '字节数未报告' : `${length} 字节`} · 摘要 ${digest}${decision === undefined ? '' : ` · ${decision}`}`,
       retryReasons: {
@@ -103,7 +104,7 @@ export const trajectoryInputCopy = defineShellCopy(
       expand: 'Expand submitted content',
       sourceUnknown: 'The source or revision could not be verified.',
       tools: 'Tools',
-      schemas: 'Clowder AI schemas',
+      schemas: `${deploymentDefaults.brand.displayName} schemas`,
       servers: 'Declared servers',
       providerObserved: 'Provider observed',
       compactions: 'Compactions',
@@ -137,7 +138,7 @@ export const trajectoryInputCopy = defineShellCopy(
         `${{ cold: 'Cold start', hot: 'Warm context', exact: 'Exact', unsupported: 'Unsupported', unknown: 'Unknown' }[mode]}${epoch === undefined ? '' : ` · Epoch ${epoch}`}`,
       toolStates: { exact: 'Exact', declared_only: 'Declared only', unsupported: 'Unsupported', unknown: 'Unknown' },
       toolsSummary: (surface: string, schemas: string, servers: string, observed: string): string =>
-        `Tools: ${surface} · Clowder AI schemas: ${schemas} · Declared servers: ${servers} · Provider observed: ${observed}`,
+        `Tools: ${surface} · ${deploymentDefaults.brand.displayName} schemas: ${schemas} · Declared servers: ${servers} · Provider observed: ${observed}`,
       channelSummary: (length: number | undefined, digest: string, decision: string | undefined): string =>
         `${length === undefined ? 'Byte count not reported' : `${length} ${length === 1 ? 'byte' : 'bytes'}`} · Digest ${digest}${decision === undefined ? '' : ` · ${decision}`}`,
       retryReasons: {

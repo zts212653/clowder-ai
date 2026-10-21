@@ -27,7 +27,7 @@ export interface PluginManagerDesignFixture {
   iconBg?: string;
   publisher: string;
   packageName: string;
-  source: 'catalog' | 'local';
+  source: 'catalog' | 'local' | 'unknown';
   repositoryName?: string;
   trust: 'official' | 'first-party' | 'unverified' | 'unknown';
   dependencyClosure?: 'shipped' | 'materialized';

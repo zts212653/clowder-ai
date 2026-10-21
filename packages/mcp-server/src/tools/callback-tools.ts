@@ -1,3 +1,4 @@
+import { deploymentDefaults } from '@cat-cafe/shared';
 import { defineMcpCanonicalFactory, defineMcpMigrationFactory } from '../tool-governance-migration.js';
 
 /**
@@ -193,8 +194,7 @@ export function getCallbackConfig(options?: AgentKeyOptions): CallbackConfig | n
   };
 }
 
-export const NO_CONFIG_ERROR =
-  'Clowder AI callback not configured. Missing callback credentials, agent-key credentials, or required agentKeyCatId for shared Antigravity MCP.';
+export const NO_CONFIG_ERROR = `${deploymentDefaults.brand.displayName} callback not configured. Missing callback credentials, agent-key credentials, or required agentKeyCatId for shared Antigravity MCP.`;
 // ============ HTTP helpers ============
 
 export function buildAuthHeaders(config: CallbackConfig): Record<string, string> {
@@ -2540,6 +2540,47 @@ export async function handleWithdrawThreadProposal(input: { proposalId: string }
   return result;
 }
 
+export const continueApprovedTaskInputSchema = {
+  proposalId: z
+    .string()
+    .trim()
+    .min(1)
+    .max(200)
+    .describe('Exact approved F128 proposal for the original Task and child'),
+  taskId: z.string().trim().min(1).max(200).describe('Original canonical Task ID; never a replacement or child Task'),
+  clientRequestId: z
+    .string()
+    .trim()
+    .min(1)
+    .max(200)
+    .describe('Stable reconciliation retry key, reused unchanged for this proposal and Task'),
+};
+
+export async function handleContinueApprovedTask(input: {
+  proposalId: string;
+  taskId: string;
+  clientRequestId: string;
+}): Promise<ToolResult> {
+  const result = await callbackPost('/api/callbacks/continue-approved-task', {
+    proposalId: input.proposalId,
+    taskId: input.taskId,
+    clientRequestId: input.clientRequestId,
+  });
+  if (!result.isError) {
+    const block = result.content.find((item) => item.type === 'text');
+    if (block?.type === 'text') {
+      try {
+        const data = JSON.parse(block.text);
+        if (data.status === 'stale_ignored')
+          return errorResult('Task approval was NOT continued: this invocation was superseded.');
+      } catch {
+        /* Preserve transport errors verbatim. */
+      }
+    }
+  }
+  return result;
+}
+
 // ============ F225: Cat-Initiated Session Handoff ============
 
 export const proposeSessionHandoffInputSchema = {
@@ -3295,7 +3336,7 @@ export async function handleSetReadMode(input: { mode: 'anchor' | 'full' }): Pro
   if (!modePath) {
     return errorResult(
       'Cannot set read mode: CAT_CAFE_INVOCATION_ID is unavailable from the credential file or environment. ' +
-        'This tool requires a Clowder AI managed session.',
+        `This tool requires a ${deploymentDefaults.brand.displayName} managed session.`,
     );
   }
 
@@ -3938,7 +3979,7 @@ export const callbackTools = [
     description:
       'Create a rich block (card, diff, checklist, file, media_gallery, audio, interactive, or html_widget) attached to the current message. ' +
       'Use card for status/decisions, diff for code changes, checklist for inline todos, file for existing documents/audio/video, media_gallery for images, audio for voice, interactive for user selection/confirmation, html_widget for custom inline HTML. ' +
-      'Use this when the user wants to see, hear, or interact with the result directly in Clowder AI Chat (for example: show me, draw an HTML demo, or send a screenshot); the user does not need to say "rich text". Use html_widget for a self-contained HTML/demo, media_gallery for existing screenshots/images, and browser-preview for a complex localhost or multi-page app. ' +
+      `Use this when the user wants to see, hear, or interact with the result directly in ${deploymentDefaults.brand.name} Chat (for example: show me, draw an HTML demo, or send a screenshot); the user does not need to say "rich text". Use html_widget for a self-contained HTML/demo, media_gallery for existing screenshots/images, and browser-preview for a complex localhost or multi-page app. ` +
       'NOT for discussing or editing HTML without a visible-delivery request. ' +
       'Use this for long structured replies/reports with lists, tables, code blocks, diffs, status fields, or multi-step checklists; F192 rich-messaging wakeup treats plain long Markdown with these signals and no rich block as a miss. ' +
       'NOT for: persistent task tracking across sessions (use create_task for 🧶 毛线球). NOT for: document generation/export (use generate_document). ' +
@@ -4150,6 +4191,30 @@ export const callbackTools = [
       authority: 'callback-owner',
       risk: { level: 'write', openWorld: false },
       runtimeProfiles: ['full'],
+    },
+  }),
+  defineCanonicalTool({
+    name: 'cat_cafe_continue_approved_task',
+    description:
+      'Append a permanent execution-contract continuation receipt to one existing approved Task proposal. ' +
+      'Use when: the original Task owner, in its original thread, must reconcile a complete generic Task approval before structured implementation dispatch. ' +
+      'NOT for: approving a proposal, changing Task ownership or scope, starting implementation, or replacing the exact five-field developmentScope path. ' +
+      'Output: continued/replayed with the original receipt, or a rejection with no new authority or dispatch. The server derives the contract; callers supply only proposalId, taskId and a stable retry key. ' +
+      'GOTCHA: child seed, READY and read-only investigation are not implementation leases. After this receipt, use the normal single implement carrier for the original approved child and target.',
+    inputSchema: continueApprovedTaskInputSchema,
+    handler: handleContinueApprovedTask,
+    governance: {
+      implementationExport: 'handleContinueApprovedTask',
+      resourceFamily: 'thread-proposal',
+      action: 'continue-approved-task',
+      authority: 'callback-owner',
+      risk: { level: 'write', openWorld: false },
+      runtimeProfiles: ['full'],
+      standaloneReason: {
+        disposition: 'accepted-boundary',
+        kind: 'authority-boundary',
+        admissionRef: 'file:docs/architecture/f167-approved-task-continuation.md',
+      },
     },
   }),
   // F225: Cat-initiated session handoff (user approves before the current session is sealed + continued)
@@ -4619,9 +4684,9 @@ export const callbackTools = [
       'this is your escape hatch to drill into specific file sections after anchor. ' +
       'Workflow: set_read_mode("anchor") → Read/Grep gives locator → ' +
       'Read(file_path=..., offset=X, limit=Y) for the real slice. ' +
-      'GOTCHA: Mode is per-invocation (scoped to the current Clowder AI session, ' +
+      `GOTCHA: Mode is per-invocation (scoped to the current ${deploymentDefaults.brand.displayName} session, ` +
       'cleaned up on session end). Does NOT persist across sessions. ' +
-      'GOTCHA: Requires Clowder AI managed session (CAT_CAFE_INVOCATION_ID).',
+      `GOTCHA: Requires ${deploymentDefaults.brand.displayName} managed session (CAT_CAFE_INVOCATION_ID).`,
     inputSchema: setReadModeInputSchema,
     handler: handleSetReadMode,
     governance: {

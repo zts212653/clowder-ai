@@ -140,6 +140,88 @@ function shellFailureDetails(result) {
 }
 
 describe('start-dev strict profile isolation', () => {
+  it('renders the startup banner from the same selected deployment artifact', () => {
+    const sandboxDir = createSandbox();
+    try {
+      const file = join(sandboxDir, 'packages/shared/src/deployment-profiles.json');
+      const input = JSON.parse(readFileSync(file, 'utf8'));
+      input.profiles[input.activeProfile].brand.displayName = 'Startup Fixture Écran';
+      writeFileSync(file, JSON.stringify(input));
+      const result = runSourceOnly({ sandboxDir, extraArgs: ['--memory'] });
+      assert.equal(result.status, 0, shellFailureDetails(result));
+      assert.ok(result.stdout.startsWith('🐱 Startup Fixture Écran 启动\n'), result.stdout);
+    } finally {
+      rmSync(sandboxDir, { recursive: true, force: true });
+    }
+  });
+
+  it('reads unprofiled startup defaults instead of a second shell definition', () => {
+    const sandboxDir = createSandbox();
+    try {
+      const file = join(sandboxDir, 'packages/shared/src/deployment-profiles.json');
+      const input = JSON.parse(readFileSync(file, 'utf8'));
+      input.startupProfiles.unprofiled = structuredClone(input.startupProfiles.dev);
+      input.startupProfiles.unprofiled.common.ANTHROPIC_PROXY_ENABLED = '1';
+      input.startupProfiles.unprofiled.common.REDIS_PROFILE = 'opensource';
+      writeFileSync(file, JSON.stringify(input));
+      const commands =
+        'source scripts/start-dev.sh --source-only --memory >/dev/null && trap - EXIT INT TERM && printf "%s/%s" "$ANTHROPIC_PROXY_ENABLED" "$REDIS_PROFILE"';
+      const result = spawnSync('bash', ['-c', commands], {
+        cwd: sandboxDir,
+        env: { PATH: process.env.PATH },
+        encoding: 'utf8',
+      });
+      assert.equal(result.status, 0, shellFailureDetails(result));
+      assert.equal(result.stdout, '1/opensource');
+      const overridden = spawnSync('bash', ['-c', commands], {
+        cwd: sandboxDir,
+        env: { PATH: process.env.PATH, ANTHROPIC_PROXY_ENABLED: '0', REDIS_PROFILE: 'dev' },
+        encoding: 'utf8',
+      });
+      assert.equal(overridden.status, 0, shellFailureDetails(overridden));
+      assert.equal(overridden.stdout, '0/dev');
+    } finally {
+      rmSync(sandboxDir, { recursive: true, force: true });
+    }
+  });
+
+  it('reads synthetic startup switches from the deployment artifact while preserving explicit overrides', () => {
+    const sandboxDir = createSandbox();
+    try {
+      const file = join(sandboxDir, 'packages/shared/src/deployment-profiles.json');
+      const input = JSON.parse(readFileSync(file, 'utf8'));
+      input.startupProfiles = {
+        dev: {
+          common: {
+            ANTHROPIC_PROXY_ENABLED: '0',
+            ASR_ENABLED: '1',
+            TTS_ENABLED: '0',
+            LLM_POSTPROCESS_ENABLED: '0',
+            MESSAGE_TTL_SECONDS: '0',
+            THREAD_TTL_SECONDS: '0',
+            TASK_TTL_SECONDS: '0',
+            SUMMARY_TTL_SECONDS: '0',
+            REDIS_PROFILE: 'opensource',
+          },
+          posix: { AUDIO_SERVICE_ENABLED: '0' },
+          win32: { ASR_ENABLED: '0' },
+        },
+      };
+      writeFileSync(file, JSON.stringify(input));
+      const commands = [
+        'source scripts/start-dev.sh --source-only --profile=dev',
+        'printf "PROXY=%s\\nREDIS_PROFILE=%s\\nAPI_ASR=%s\\n" "$ANTHROPIC_PROXY_ENABLED" "$REDIS_PROFILE" "$CAT_CAFE_SERVICE_ASR_ENABLED"',
+      ];
+      let result = runSourceOnly({ sandboxDir, commands });
+      assert.equal(result.status, 0, shellFailureDetails(result));
+      assert.match(result.stdout, /PROXY=0\nREDIS_PROFILE=opensource\nAPI_ASR=\n/);
+      result = runSourceOnly({ sandboxDir, commands, env: { ANTHROPIC_PROXY_ENABLED: '1', ASR_ENABLED: '0' } });
+      assert.equal(result.status, 0, shellFailureDetails(result));
+      assert.match(result.stdout, /PROXY=1\nREDIS_PROFILE=opensource\nAPI_ASR=0/);
+    } finally {
+      rmSync(sandboxDir, { recursive: true, force: true });
+    }
+  });
   it('reuses wrapper-verified production artifacts without changing user start arguments', () => {
     const sandboxDir = createSandbox();
     try {
@@ -795,9 +877,25 @@ guard_fn=guard_port_kill_ownership
   it('start-windows.ps1 applies profile defaults matching start-dev.sh opensource profile', () => {
     const ps1 = readFileSync(resolve(ROOT, 'scripts/start-windows.ps1'), 'utf8');
 
-    assert.match(ps1, /'opensource'/, 'start-windows.ps1 must define opensource profile');
-    assert.match(ps1, /'production'/, 'start-windows.ps1 must define production profile');
-    assert.match(ps1, /'dev'/, 'start-windows.ps1 must define dev profile');
+    assert.ok(
+      ps1.includes('--startup-profile $startupProfile win32'),
+      'Windows must consume the source startup artifact',
+    );
+    for (const profile of ['dev', 'production', 'opensource']) {
+      const result = spawnSync(
+        process.execPath,
+        ['scripts/read-deployment-default.mjs', '--startup-profile', profile, 'win32'],
+        { cwd: ROOT, encoding: 'utf8' },
+      );
+      assert.equal(result.status, 0, result.stderr);
+      const defaults = JSON.parse(result.stdout);
+      assert.equal(defaults.ANTHROPIC_PROXY_ENABLED, profile === 'dev' ? '1' : '0');
+      assert.equal(defaults.ASR_ENABLED, profile === 'dev' ? '1' : '0');
+      assert.equal(defaults.TTS_ENABLED, profile === 'dev' ? '1' : '0');
+      assert.equal(defaults.LLM_POSTPROCESS_ENABLED, profile === 'dev' ? '1' : '0');
+      for (const key of ['MESSAGE_TTL_SECONDS', 'THREAD_TTL_SECONDS', 'TASK_TTL_SECONDS', 'SUMMARY_TTL_SECONDS'])
+        assert.equal(defaults[key], '0');
+    }
 
     assert.ok(
       ps1.includes('GetEnvironmentVariable'),

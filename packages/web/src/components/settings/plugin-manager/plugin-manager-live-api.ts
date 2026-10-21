@@ -66,12 +66,20 @@ export function designFixture(
     description: plugin.description ?? plugin.displayName,
     icon: plugin.icon ?? 'blocks',
     ...(plugin.iconBg === undefined ? {} : { iconBg: plugin.iconBg }),
-    publisher: plugin.publisher ?? (plugin.source.trust === 'official' ? 'Clowder AI' : 'Local Host'),
+    publisher:
+      plugin.publisher ??
+      (plugin.source.kind === 'unknown'
+        ? '发布者未记录'
+        : plugin.source.trust === 'official'
+          ? 'Clowder AI'
+          : 'Local Host'),
     packageName: packageName(plugin),
     source:
-      plugin.source.kind === 'catalog' || (plugin.source.kind === 'git' && plugin.source.marketplace)
-        ? 'catalog'
-        : 'local',
+      plugin.source.kind === 'unknown'
+        ? 'unknown'
+        : plugin.source.kind === 'catalog' || (plugin.source.kind === 'git' && plugin.source.marketplace)
+          ? 'catalog'
+          : 'local',
     trust: plugin.source.trust,
     ...(plugin.source.kind === 'git'
       ? {

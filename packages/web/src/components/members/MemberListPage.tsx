@@ -49,7 +49,7 @@ export function MemberListPage({
       (transport === 'all' || memberTransport(cat) === transport),
   );
   return (
-    <section className="members-v2" data-testid="member-list-page">
+    <section className="members-v2 member-list" data-testid="member-list-page">
       <header className="member-list-heading">
         <div>
           <h2>{t('成员与运行时')}</h2>

@@ -18,8 +18,6 @@ NC='\033[0m'
 SOURCE_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 TARGET_DIR="$SOURCE_DIR/../clowder-ai"
 INTAKE_LEDGER="$SOURCE_DIR/docs/ops/opensource-intake-ledger.json"
-TARGET_REPO="zts212653/clowder-ai"
-SOURCE_REPO="zts212653/clowder-ai"
 
 resolve_target_main_head() {
   if git -C "$TARGET_DIR" remote get-url origin >/dev/null 2>&1; then
@@ -385,20 +383,24 @@ BRAND_EXPECTATIONS=(
   "packages/web/src/app/layout.tsx|must_not_contain|Your AI team collaboration space|description should be Chinese"
   "packages/web/src/app/layout.tsx|must_contain|favicon.svg|favicon declaration required"
   "packages/web/src/app/layout.tsx|must_contain|icon-192x192.png|PWA icon declaration required"
+  "packages/web/src/app/layout.tsx|must_contain|deploymentDefaults[.]brand[.]name|metadata reads the selected deployment brand"
+  "packages/web/src/app/layout.tsx|must_contain|deploymentDefaults[.]brand[.]tagline|description reads the selected deployment tagline"
   # SplitPaneView.tsx
   "packages/web/src/components/SplitPaneView.tsx|must_not_contain|Clowder AI|brand should be Clowder AI"
+  "packages/web/src/components/SplitPaneView.tsx|must_contain|deploymentDefaults[.]brand[.]name|split header reads the selected deployment brand"
   # manifest.json
   "packages/web/public/manifest.json|must_not_contain|Clowder|name should be Clowder AI"
   # ChatContainerHeader.tsx — surface text AND semantic fields
   "packages/web/src/components/ChatContainerHeader.tsx|must_not_contain|Clowder AI|brand should be Clowder AI"
-  "packages/web/src/components/ChatContainerHeader.tsx|must_contain|Cat Caf|must have Clowder AI brand"
-  "packages/web/src/components/ChatContainerHeader.tsx|must_contain|'cat-cafe'|INTERNAL_BASENAMES must include cat-cafe"
-  "packages/web/src/components/ChatContainerHeader.tsx|must_contain|'cat-cafe-runtime'|INTERNAL_BASENAMES must include cat-cafe-runtime"
+  "packages/web/src/components/ChatContainerHeader.tsx|must_contain|deploymentDefaults[.]brand[.]displayName|header reads the selected deployment brand"
+  "packages/web/src/components/ThreadIndicator.tsx|must_contain|'cat-cafe'|INTERNAL_BASENAMES must include cat-cafe"
+  "packages/web/src/components/ThreadIndicator.tsx|must_contain|'cat-cafe-runtime'|INTERNAL_BASENAMES must include cat-cafe-runtime"
   # api-client.ts — comment AND real brand identity (F156: header → session cookie)
   "packages/web/src/utils/api-client.ts|must_not_contain|client for Clowder AI|comment should reference Clowder AI"
   "packages/web/src/utils/api-client.ts|must_contain|HttpOnly session cookie|identity uses session cookie (F156 D-1)"
   # Edition data is owned by the home deployment, even when consumers are shared.
   "packages/shared/src/deployment-profiles.json|must_contain|\"activeProfile\"[[:space:]]*:[[:space:]]*\"home\"|active deployment profile must remain home"
+  "packages/shared/src/deployment-profiles.json|file_exists||deployment display configuration must exist"
   # API port drift guard — outbound sync transforms 3002→3004; intake must catch un-reversed drift.
   # These are high-risk files checked out from clowder-ai during intake.
   "packages/api/src/index.ts|must_not_contain|?? '3004'|API server port fallback should be 3002 (home), not 3004 (opensource)"
@@ -492,6 +494,22 @@ run_brand_validation() {
     echo "  Brand Guard scope: $scope_path_count $scope_label file(s)"
   fi
   _BRAND_VIOLATION_COUNT=0
+  # Validate generated display data against the same staged dictionary. Public
+  # profile vocabulary is legitimate here; replacing home display values is not.
+  if _brand_file_exists 'packages/shared/src/deployment-profiles.json'; then
+    local brand_args=("$SOURCE_DIR/scripts/project-deployment-defaults.mjs" "$SOURCE_DIR/packages/shared/src/deployment-profiles.json" --check-brands home)
+    if [ "$FROM_INDEX" = true ]; then brand_args+=(--from-index); fi
+    local brand_status=0
+    node "${brand_args[@]}" || brand_status=$?
+    if [ "$brand_status" -ne 0 ]; then
+      if [ "$brand_status" -eq 2 ]; then
+        echo -e "${RED}  ✗ deployment brand failed canonical dictionary validation${NC}"
+      else
+        echo -e "${RED}  ✗ deployment brand checker failed (exit $brand_status); see diagnostic above${NC}"
+      fi
+      _BRAND_VIOLATION_COUNT=$((_BRAND_VIOLATION_COUNT + 1))
+    fi
+  fi
   # ── Phase 1: Legacy BRAND_EXPECTATIONS (specific must_contain/must_not_contain rules) ──
   for expectation in "${BRAND_EXPECTATIONS[@]}"; do
     IFS='|' read -r file check_type pattern desc <<< "$expectation"
@@ -1152,11 +1170,11 @@ run_absorbed_record_guard() {
   # entirely, not by the regex shape. (砚砚 review of cat-cafe#2520 caught
   # an over-loosening that would have accepted `evil/clowder-ai/pull/N`.)
   local issue_source_ref_ok
-  issue_source_ref_ok=$(echo "$intent_info" | SOURCE_PR="$PR_NUMBER" node -e "const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf-8')); const body=String(d.body||''); const n=process.env.SOURCE_PR; const ok=body.includes('clowder-ai#'+n) || body.includes('zts212653/clowder-ai/pull/'+n); console.log(ok ? 'yes' : 'no')")
+  issue_source_ref_ok=$(echo "$intent_info" | SOURCE_PR="$PR_NUMBER" PUBLIC_REPOSITORY="$TARGET_REPO" node -e "const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf-8')); const body=String(d.body||''); const n=process.env.SOURCE_PR; const ok=body.includes('clowder-ai#'+n) || body.includes(process.env.PUBLIC_REPOSITORY+'/pull/'+n); console.log(ok ? 'yes' : 'no')")
   if [ "$issue_source_ref_ok" != "yes" ]; then
     echo -e "${RED}✗ Intake Intent Issue #$INTENT_ISSUE must reference source PR clowder-ai#$PR_NUMBER${NC}"
     echo "  Expected one of: literal 'clowder-ai#$PR_NUMBER' substring,"
-    echo "  OR a Markdown/URL containing 'zts212653/clowder-ai/pull/$PR_NUMBER'."
+    echo "  OR a Markdown/URL containing '$TARGET_REPO/pull/$PR_NUMBER'."
     return 1
   fi
 
@@ -1194,7 +1212,7 @@ run_absorbed_record_guard() {
   fi
 
   local absorb_pr_source_ref_ok
-  absorb_pr_source_ref_ok=$(echo "$absorb_pr_info" | SOURCE_PR="$PR_NUMBER" node -e "const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf-8')); const body=String(d.body||''); const n=process.env.SOURCE_PR; const ok=body.includes('clowder-ai#'+n) || body.includes('zts212653/clowder-ai/pull/'+n); console.log(ok ? 'yes' : 'no')")
+  absorb_pr_source_ref_ok=$(echo "$absorb_pr_info" | SOURCE_PR="$PR_NUMBER" PUBLIC_REPOSITORY="$TARGET_REPO" node -e "const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf-8')); const body=String(d.body||''); const n=process.env.SOURCE_PR; const ok=body.includes('clowder-ai#'+n) || body.includes(process.env.PUBLIC_REPOSITORY+'/pull/'+n); console.log(ok ? 'yes' : 'no')")
   if [ "$absorb_pr_source_ref_ok" != "yes" ]; then
     echo -e "${RED}✗ Absorb PR #$ABSORB_PR body must reference source PR clowder-ai#$PR_NUMBER${NC}"
     return 1
@@ -1385,6 +1403,10 @@ fi
 # ── Record decision (happy path) ──
 # Records a per-PR decision in entries[]. Does NOT advance last_reviewed_target_head.
 # Use --advance-ledger after recording all PRs to advance the gate.
+# GitHub operations use fixed source/target roles, independent of runtime edition.
+TARGET_REPO="$(node "$SOURCE_DIR/scripts/brand-dictionary-helper.mjs" --repository public)"
+SOURCE_REPO="$(node "$SOURCE_DIR/scripts/brand-dictionary-helper.mjs" --repository home)"
+
 if [ "$RECORD_DECISION" = true ]; then
   if [ -z "$PR_NUMBER" ]; then
     echo -e "${RED}✗ --record requires --pr <number>${NC}"; exit 1

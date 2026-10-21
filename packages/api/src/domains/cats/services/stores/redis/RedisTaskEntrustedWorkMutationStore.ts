@@ -12,6 +12,7 @@ import { reconcileDeploymentWaitTaskMutation } from '../ports/TaskDeploymentWait
 import type {
   CloseEntrustedWorkStoreInput,
   CloseEntrustedWorkStoreResult,
+  TaskMutationWriteFence,
   UpdateEntrustedWorkStoreInput,
   UpdateEntrustedWorkStoreResult,
 } from '../ports/TaskStoreContract.js';
@@ -100,7 +101,11 @@ export class RedisTaskEntrustedWorkMutationStore {
     throw new Error(`RedisTaskStore attach artifact: CAS exhausted for ${taskId}`);
   }
 
-  async close(taskId: string, input: CloseEntrustedWorkStoreInput): Promise<CloseEntrustedWorkStoreResult> {
+  async close(
+    taskId: string,
+    input: CloseEntrustedWorkStoreInput,
+    writeFence?: TaskMutationWriteFence,
+  ): Promise<CloseEntrustedWorkStoreResult> {
     const key = TaskKeys.detail(taskId);
     for (let attempt = 0; attempt < MAX_CONDITIONAL_TASK_UPDATE_RETRIES; attempt += 1) {
       const data = await this.redis.hgetall(key);
@@ -134,6 +139,7 @@ export class RedisTaskEntrustedWorkMutationStore {
         updatedAt: Date.now(),
       });
       const serialized = serializeTask(updated);
+      await writeFence?.assertCurrent();
       const result = await this.redis.eval(
         CLOSE_ENTRUSTED_WORK_LUA,
         existing.entrustedWork.developmentScope && existing.userId ? 2 : 1,
@@ -159,7 +165,11 @@ export class RedisTaskEntrustedWorkMutationStore {
     throw new Error(`RedisTaskStore closeEntrustedWork: CAS exhausted for ${taskId}`);
   }
 
-  async update(taskId: string, input: UpdateEntrustedWorkStoreInput): Promise<UpdateEntrustedWorkStoreResult> {
+  async update(
+    taskId: string,
+    input: UpdateEntrustedWorkStoreInput,
+    writeFence?: TaskMutationWriteFence,
+  ): Promise<UpdateEntrustedWorkStoreResult> {
     const key = TaskKeys.detail(taskId);
     for (let attempt = 0; attempt < MAX_CONDITIONAL_TASK_UPDATE_RETRIES; attempt += 1) {
       const data = await this.redis.hgetall(key);
@@ -174,6 +184,7 @@ export class RedisTaskEntrustedWorkMutationStore {
         updatedAt: Date.now(),
       };
       const serialized = serializeTask(updated);
+      await writeFence?.assertCurrent();
       const result = await this.redis.eval(
         UPDATE_ENTRUSTED_WORK_LUA,
         1,

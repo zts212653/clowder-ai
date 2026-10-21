@@ -17,6 +17,7 @@ export function useArtifactLightbox(hostThreadId: string) {
     artifact: ThreadArtifactDTO | GlobalArtifactDTO,
     origin: WorkspaceFileNavigationOrigin | undefined,
   ): boolean => {
+    if (artifact.type === 'video' && artifact.work?.contentRef.startsWith('work:')) return false;
     const url = artifact.url;
     // Published rich-file PNGs retain the catalogue's file type; the existing owner still admits their bytes.
     const image = artifact.type === 'image' || (artifact.type === 'file' && inferFileKind(artifact.name) === 'image');

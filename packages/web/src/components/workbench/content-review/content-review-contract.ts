@@ -1,5 +1,6 @@
 import type {
   ArtifactReviewActor,
+  ArtifactReviewAnchor,
   WorkspaceContentAnnotation,
   WorkspaceContentReview,
   WorkspaceContentReviewAction,
@@ -58,6 +59,14 @@ export interface ContentLandingCapabilities {
   historyReadOnly: boolean;
 }
 export interface ContentReviewWorkflow {
+  responseDiscussion?: ReactNode;
+  videoWork?: boolean;
+  playbackHidden?: boolean;
+  onPlaybackTime?: (seconds: number) => void;
+  chapterNavigation?: ReactNode;
+  seekRequest?: { id: number; seconds: number };
+  markRequest?: number;
+  selectionRequest?: { id: number; anchor: ArtifactReviewAnchor };
   mediaSource?: { src: string | null; downloadSrc?: string | null; error: string | null };
   panel?: ReactNode;
   annotationMaxLength?: number;

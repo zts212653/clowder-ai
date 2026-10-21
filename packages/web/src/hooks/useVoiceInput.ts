@@ -1,5 +1,6 @@
 'use client';
 
+import { deploymentDefaults } from '@cat-cafe/shared';
 import { useCallback, useMemo, useRef, useState } from 'react';
 import { useVoiceSettingsStore } from '@/stores/voiceSettingsStore';
 import { apiFetch } from '@/utils/api-client';
@@ -25,7 +26,7 @@ const DEFAULT_LLM_POSTPROCESS_URL = normalizeLoopbackUrl(
 );
 
 const defaultPrompt = (nickname: string) =>
-  '这是 Clowder AI 猫猫协作项目的对话。宪宪是布偶猫（Claude Opus），砚砚是缅因猫（Codex）。' +
+  `这是 ${deploymentDefaults.brand.displayName} 猫猫协作项目的对话。宪宪是布偶猫（Claude Opus），砚砚是缅因猫（Codex）。` +
   `${nickname}经常说：帮我看看、开个 worktree、跑一下测试、review 一下、rebase 到 main。` +
   '技术栈：MCP, Redis, Fastify, TypeScript, Whisper, NDJSON, Zustand, WebSocket, ' +
   'InvocationRecord, Hindsight, Codex, Gemini, Claude, Opus, Sonnet, Haiku, ADR, Lua, CAS。';

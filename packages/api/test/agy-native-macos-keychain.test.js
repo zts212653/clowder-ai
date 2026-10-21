@@ -89,7 +89,7 @@ test(
       for (const plan of plans) {
         const home = plan.cliOptions.env.HOME;
         security(home, ['delete-keychain', join(home, 'Library/Keychains/cat-cafe.keychain-db')]);
-        plan.disposeCredentials?.();
+        await plan.disposeCredentials?.();
       }
       rmSync(root, { recursive: true, force: true });
     }

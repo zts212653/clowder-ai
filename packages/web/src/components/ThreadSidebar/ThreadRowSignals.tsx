@@ -13,11 +13,18 @@ interface RowSignalInput {
   unreadCount: number;
   hasUserMention: boolean;
   hasDraft: boolean;
+  hasPendingDecision?: boolean;
 }
 
 /** True when a v2 row has anything to say on its second line. */
 export function hasThreadRowSignals(input: RowSignalInput): boolean {
-  return input.presence.status !== 'idle' || input.unreadCount > 0 || input.hasUserMention || input.hasDraft;
+  return (
+    input.presence.status !== 'idle' ||
+    input.unreadCount > 0 ||
+    input.hasUserMention ||
+    input.hasDraft ||
+    Boolean(input.hasPendingDecision)
+  );
 }
 
 export function sidebarStatusTextColor(role: 'info' | 'success' | 'warning' | 'critical'): string {
@@ -258,22 +265,42 @@ export function ThreadSignalPills({
   hasUserMention,
   mentionCount,
   hasDraft = false,
+  hasPendingDecision = false,
   testIdPrefix = 'thread-row',
 }: {
   unreadCount: number;
   hasUserMention: boolean;
   mentionCount?: number;
   hasDraft?: boolean;
+  hasPendingDecision?: boolean;
   testIdPrefix?: string;
 }) {
   const copy = useShellCopy(threadSignalsCopy);
-  if (!hasDraft && !hasUserMention && unreadCount === 0) return null;
+  if (!hasDraft && !hasUserMention && unreadCount === 0 && !hasPendingDecision) return null;
   const unreadText = unreadCount > 99 ? '99+' : String(unreadCount);
   return (
     <div
       className="ml-auto flex max-w-full flex-none flex-wrap items-center justify-end gap-1"
       data-testid={`${testIdPrefix}-pills`}
     >
+      {hasPendingDecision && (
+        <span data-signal-badge className="inline-flex h-5 flex-none items-center gap-1">
+          <span
+            aria-hidden="true"
+            className="h-1.5 w-1.5 flex-none rounded-full"
+            style={{ background: 'var(--semantic-warning)' }}
+          />
+          <span
+            role="img"
+            aria-label={copy.needsDecision}
+            className="text-label font-medium"
+            style={{ color: sidebarStatusTextColor('warning') }}
+            data-testid="thread-row-pending-decision"
+          >
+            {copy.needsDecision}
+          </span>
+        </span>
+      )}
       {hasDraft && (
         <span data-signal-badge className="inline-flex h-5 flex-none items-center">
           <span
@@ -352,13 +379,20 @@ export function SidebarSignalLayout({
 /** Canonical presence on the left; independent badges flow right. Optional words yield first. */
 export function ThreadRowSignals(props: RowSignalInput) {
   if (!hasThreadRowSignals(props)) return null;
-  const { presence, unreadCount, hasUserMention, hasDraft } = props;
+  const { presence, unreadCount, hasUserMention, hasDraft, hasPendingDecision } = props;
   const hasPresence = presence.status !== 'idle';
   return (
     <SidebarSignalLayout
       testId="thread-row-signals"
       presence={hasPresence ? <PresenceState presence={presence} /> : null}
-      badges={<ThreadSignalPills unreadCount={unreadCount} hasUserMention={hasUserMention} hasDraft={hasDraft} />}
+      badges={
+        <ThreadSignalPills
+          unreadCount={unreadCount}
+          hasUserMention={hasUserMention}
+          hasDraft={hasDraft}
+          hasPendingDecision={hasPendingDecision}
+        />
+      }
     />
   );
 }

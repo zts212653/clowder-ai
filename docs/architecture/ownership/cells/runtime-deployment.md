@@ -10,6 +10,10 @@ code_anchors:
   - packages/shared/src/deployment-defaults.ts
   - scripts/read-deployment-default.mjs
   - scripts/project-deployment-defaults.mjs
+  - scripts/deployment-brand-config.mjs
+  - scripts/brand-dictionary-helper.mjs
+  - scripts/start-windows.ps1
+  - scripts/lib/platform-status.mjs
   - scripts/runtime-worktree.sh
   - scripts/start-dev.sh
   - scripts/alpha-worktree.sh
@@ -33,6 +37,7 @@ code_anchors:
   - packages/api/src/routes/runtime-deployment-routes.ts
 doc_anchors:
   - feature-specs/2026-10-20-f330-deployment-defaults.md
+  - feature-specs/2026-10-21-f330-phase-a-final.md
   - docs/decisions/039-runtime-passive-freeze.md
   - docs/features/F300-self-sensing-home-state-awareness.md
   - docs/features/F323-runtime-restart-coordination.md
@@ -128,3 +133,11 @@ The public build selects only its public profile before compilation; shared cons
 The data belongs to the deployment artifact and takes effect on build/start. It creates no new process,
 port rebinding, credential store, lifecycle authority or restart permission. The existing frozen Git target
 and prepared-artifact checks cover changes to this source file.
+
+F330 derives display brands and repository coordinates from `assets/brand-dictionary.yaml` into that
+runtime JSON; an index-aware consistency check rejects drift. Maintenance source and target repository
+roles read the same canonical coordinates, independently of the selected runtime edition. Explicit
+repository allowlists and immutable origin attestations remain authority/provenance, not deployment
+defaults. Startup profiles own existing Unix/Windows default values while each launcher retains explicit
+environment precedence and mandatory isolation/lifecycle overrides. Desktop installation identity and
+release artifacts remain outside this Phase A contract.

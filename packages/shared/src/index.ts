@@ -134,6 +134,7 @@ export * from './types/executable-action-successor.js';
 export * from './types/home-state.js';
 // Export all types
 export * from './types/index.js';
+export * from './types/living-work.js';
 // F314: one accepted-source contract shared by API persistence and MCP producers.
 export * from './types/local-review.js';
 export * from './types/media-publication-source.js';
@@ -144,6 +145,7 @@ export * from './types/message-publication-landing.js';
 export * from './types/output-message.js';
 export * from './types/video-project.js';
 export * from './types/video-project-review.js';
+export * from './types/work-video.js';
 export * from './types/workspace-content-review.js';
 export * from './utils/local-session-import.js';
 export * from './utils/media-byte-range.js';

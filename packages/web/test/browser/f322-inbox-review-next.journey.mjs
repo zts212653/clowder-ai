@@ -121,6 +121,11 @@ export async function verifyNextReview({ t, language, width, evidenceRoot }) {
   assert.equal(read.identity.ownerUserId, 'operator');
   assert.equal(read.status, 'available');
   assert.equal(read.consistency.state, 'verified');
+  assert.equal(read.sources.needsMe.status, 'available');
+  assert.equal(read.sources.needsMe.exhaustiveness, 'complete');
+  assert.equal(read.sources.approvals.status, 'available');
+  assert.equal(read.sources.collectiveAccountabilityRequests.status, 'available');
+  assert.equal(read.sources.collectiveAccountabilityRequests.exhaustiveness, 'complete');
   const item = read.items.find((item) => item.decisionRef === `f309.content_review:${prepared.reviewId}`);
   assert.ok(item);
   await card.locator('summary').filter({ hasText: label.preview }).click();

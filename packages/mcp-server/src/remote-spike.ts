@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { deploymentDefaults } from '@cat-cafe/shared';
 
 /**
  * Clowder AI MCP Server — Remote Spike Entry (F247 Phase B1a v4)
@@ -169,7 +170,7 @@ function validateB1aEnv(): void {
   if (!process.env.CAT_CAFE_API_URL) {
     errors.push(
       'CAT_CAFE_API_URL missing — getCallbackConfig() returns null without it, ' +
-        'all collab/memory tools would fail as "Clowder AI callback not configured".',
+        `all collab/memory tools would fail as "${deploymentDefaults.brand.displayName} callback not configured".`,
     );
   }
   // 砚砚 R12 P2: spike-server may be spawned from an existing cat invocation and

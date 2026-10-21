@@ -7,6 +7,7 @@ import {
   type ArtifactReviewReceipt,
   artifactReviewSchema,
   type WorkspaceContentReview,
+  type WorkVersionRecord,
 } from '@cat-cafe/shared';
 import Database from 'better-sqlite3';
 import { ContentAcceptanceStore } from '../modification/acceptance-store.js';
@@ -15,6 +16,8 @@ import { ContentModificationJournal } from '../modification/journal.js';
 import type { MediaPublicationReturnIntent } from '../modification/media-publication/media-publication-return.js';
 import { registerPublicationRecovery } from '../modification/publication-recovery-registration.js';
 import { ModificationTextStore } from '../modification/text/text-store.js';
+import { acceptedWorkResponseSchema, isWorkResponseIntent } from '../works/review-response-contract.js';
+import { WorkVersionStore } from '../works/version-store.js';
 import { WorkspaceContentReviewError } from '../workspace-review/errors.js';
 import {
   WorkspaceContentReviewStore,
@@ -88,6 +91,7 @@ export class ArtifactReviewStore {
   readonly text: ModificationTextStore;
   readonly acceptances: ContentAcceptanceStore;
   readonly collectiveCustody: CollectiveModificationCustody;
+  readonly works: WorkVersionStore;
 
   constructor(path: string) {
     mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
@@ -126,6 +130,7 @@ export class ArtifactReviewStore {
     this.text = new ModificationTextStore(this.database);
     this.acceptances = new ContentAcceptanceStore(this.database);
     this.collectiveCustody = new CollectiveModificationCustody(this.database);
+    this.works = new WorkVersionStore(this.database);
   }
 
   close(): void {
@@ -270,17 +275,24 @@ export class ArtifactReviewStore {
         if (!current) throw new ArtifactReviewError('not_found');
         const requestId =
           payload !== null && typeof payload === 'object' && 'requestId' in payload ? payload.requestId : undefined;
-        assertModificationResponseReference(this, current, { requestId }, input.actor);
+        const workIntent = isWorkResponseIntent(payload) ? acceptedWorkResponseSchema.parse(payload) : undefined;
+        assertModificationResponseReference(
+          this,
+          current,
+          { requestId: workIntent?.command.reviewResponse?.requestId ?? requestId },
+          input.actor,
+          workIntent ? input.round : undefined,
+        );
         if (current.revision !== input.expectedRevision) throw new ArtifactReviewError('revision_conflict');
         const pending = this.pendingVersion(input.reviewId);
         if (pending) {
           assertSameReservation(pending, input);
           return;
         }
-        const round = current.rounds.at(-1);
+        const round = workIntent ? current.rounds.find((item) => item.number === input.round) : current.rounds.at(-1);
         if (round?.ledgerRef) {
           this.assertLedgerWritable(round.ledgerRef);
-          const command = acceptedVersionSchema.parse(payload);
+          const command = workIntent ? workIntent.command.reviewResponse! : acceptedVersionSchema.parse(payload);
           if (command.expectedLedgerRevision !== round.ledgerRevision)
             throw new ArtifactReviewError('revision_conflict');
         }
@@ -296,8 +308,41 @@ export class ArtifactReviewStore {
   finishVersion(
     input: ReviewMutation,
     transition: (review: ArtifactReview, receiptRef: string) => ArtifactReview,
+    workVersion?: WorkVersionRecord,
   ): ReviewMutationResult {
-    return this.commitMutation(input, transition, true, 'applied');
+    if (!workVersion) return this.commitMutation(input, transition, true, 'applied');
+    // Both projections and pending removal use this original connection. A failed
+    // Work record must roll the review/audit/outbox back, leaving owner recovery possible.
+    return this.database
+      .transaction(() => {
+        const replay = this.replay(input);
+        if (replay) {
+          const retained = this.works.get(workVersion.ownerUserId, workVersion.contentRef, workVersion.ownerRevision);
+          if (
+            workVersion.operationId !== input.operationId ||
+            workVersion.ownerUserId !== replay.review.task.ownerUserId ||
+            workVersion.contentRef !== replay.review.contentRef ||
+            retained?.operationId !== input.operationId ||
+            retained.receiptRef !== workVersion.receiptRef
+          )
+            throw new ArtifactReviewError('operation_reused');
+          this.works.recordVersion(workVersion);
+          return replay;
+        }
+        const result = this.commitMutation(input, transition, true, 'applied');
+        const asset = result.review.rounds.at(-1)?.asset;
+        if (
+          workVersion.operationId !== input.operationId ||
+          workVersion.ownerUserId !== result.review.task.ownerUserId ||
+          workVersion.contentRef !== result.review.contentRef ||
+          asset?.ownerRevision !== workVersion.ownerRevision ||
+          asset.ownerReceiptRef !== workVersion.receiptRef
+        )
+          throw new ArtifactReviewError('operation_reused');
+        this.works.recordVersion(workVersion);
+        return result;
+      })
+      .immediate();
   }
 
   abortVersion(input: ReviewMutation): ReviewMutationResult {
@@ -307,6 +352,26 @@ export class ArtifactReviewStore {
       true,
       'aborted',
     );
+  }
+
+  /** Caller holds the F138 content lock and has proved no receipt can still appear. */
+  abortWorkVersion(input: ReviewMutation, resolution: ReviewMutation): ReviewMutationResult {
+    return this.database
+      .transaction(() => {
+        if (
+          resolution.actor.kind !== 'human' ||
+          resolution.reviewId !== input.reviewId ||
+          resolution.expectedRevision !== input.expectedRevision + 1
+        )
+          throw new ArtifactReviewError('human_required');
+        this.abortVersion(input);
+        return this.mutate(resolution, (review) => ({
+          ...review,
+          revision: review.revision + 1,
+          updatedAt: resolution.now,
+        }));
+      })
+      .immediate();
   }
 
   private commitMutation(

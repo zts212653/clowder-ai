@@ -7,6 +7,7 @@ import { spawn as nodeSpawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { deploymentDefaults } from '@cat-cafe/shared';
 import type { Span } from '@opentelemetry/api';
 import { context, SpanStatusCode, trace } from '@opentelemetry/api';
 import { createModuleLogger } from '../infrastructure/logger.js';
@@ -112,7 +113,9 @@ export function withVerdictGhGuardEnv<T extends Record<string, string | null | u
   }
   if (!mutable.CAT_CAFE_VERDICT_REPO_FULL_NAME) {
     mutable.CAT_CAFE_VERDICT_REPO_FULL_NAME =
-      process.env.CAT_CAFE_VERDICT_REPO_FULL_NAME ?? process.env.CAT_CAFE_REPO_FULL_NAME ?? 'zts212653/clowder-ai';
+      process.env.CAT_CAFE_VERDICT_REPO_FULL_NAME ??
+      process.env.CAT_CAFE_REPO_FULL_NAME ??
+      deploymentDefaults.repositoryFullName;
   }
   return env;
 }

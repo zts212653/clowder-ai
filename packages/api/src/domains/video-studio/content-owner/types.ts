@@ -47,7 +47,14 @@ export interface VideoContentOperationContextV1 {
     | 'video-project:self-review';
   readonly requestDigest: `sha256:${string}`;
 }
-export type ContentOperationContextV1 = VideoContentOperationContextV1 | CollectiveContentOperationContextV1;
+export interface WorkContentOperationContextV1 {
+  readonly kind: 'work:create' | 'work:submit';
+  readonly requestDigest: `sha256:${string}`;
+}
+export type ContentOperationContextV1 =
+  | VideoContentOperationContextV1
+  | CollectiveContentOperationContextV1
+  | WorkContentOperationContextV1;
 
 /** Immutable authority coordinates established by an explicit prepared-publication import. */
 export interface TaskContentPublicationScopeV1 {
@@ -77,7 +84,17 @@ export type ContentPublicationScopeV1 =
   | TaskContentPublicationScopeV1
   | MessageContentPublicationScopeV1
   | WorkspaceSnapshotPublicationScopeV1
-  | EvolutionSnapshotPublicationScopeV1;
+  | EvolutionSnapshotPublicationScopeV1
+  | WorkPublicationScopeV1;
+
+/** Independent works retain their original production authority, not a mutable source path or message. */
+export interface WorkPublicationScopeV1 {
+  readonly kind: 'work';
+  readonly ownerUserId: string;
+  readonly threadId: string;
+  readonly creationOperationId: string;
+  readonly createdBy: ContentActorV1;
+}
 
 export interface EvolutionSnapshotPublicationScopeV1 {
   readonly kind: 'evolution-snapshot';
@@ -90,6 +107,10 @@ export interface EvolutionSnapshotPublicationScopeV1 {
 
 export function isTaskPublicationScope(scope: ContentPublicationScopeV1): scope is TaskContentPublicationScopeV1 {
   return !('kind' in scope);
+}
+
+export function isWorkPublicationScope(scope: ContentPublicationScopeV1 | undefined): scope is WorkPublicationScopeV1 {
+  return scope !== undefined && 'kind' in scope && scope.kind === 'work';
 }
 
 export interface ContentSourcePublicationV1 {

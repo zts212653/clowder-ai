@@ -400,13 +400,10 @@ export function ThreadSidebar({ onClose, className, routeThreadId, activeDestina
   );
 
   // I-1: Show confirmation dialog instead of deleting immediately
-  const handleDeleteRequest = useCallback(
-    (threadId: string) => {
-      const thread = threads.find((t) => t.id === threadId);
-      if (thread) setDeleteTarget(thread);
-    },
-    [threads],
-  );
+  const handleDeleteRequest = useCallback((threadId: string) => {
+    const thread = projectSidebarRows(useSidebarProjectionStore.getState()).find((row) => row.id === threadId);
+    if (thread) setDeleteTarget(thread);
+  }, []);
 
   const handleDeleteConfirm = useCallback(async () => {
     if (!deleteTarget) return;
@@ -526,7 +523,11 @@ export function ThreadSidebar({ onClose, className, routeThreadId, activeDestina
         hasUserMention: false,
       });
       useChatStore.getState().clearUnread(threadId);
-      if (threadId === currentConversationId) return;
+      // Read selection at the action boundary so changing it does not replace
+      // every memoized row's onSelect handler. A Café destination still needs
+      // navigation back to the remembered conversation.
+      const selectedConversationId = activeDestination === null ? useChatStore.getState().currentThreadId : null;
+      if (threadId === selectedConversationId) return;
       // Let the new thread restore projectPath after the route switch.
       // Pre-navigation global store writes can stall SPA thread navigation.
       navigateToThread(threadId);
@@ -535,7 +536,7 @@ export function ThreadSidebar({ onClose, className, routeThreadId, activeDestina
         onClose?.();
       }
     },
-    [currentConversationId, navigateToThread, onClose],
+    [activeDestination, navigateToThread, onClose],
   );
 
   // F095 Phase F: Project action handlers
@@ -607,7 +608,7 @@ export function ThreadSidebar({ onClose, className, routeThreadId, activeDestina
     collapsedPeek: attentionCollapsedPeek,
     toggleCollapsedPeek: toggleAttentionCollapsedPeek,
   } = useAttentionClusters(liveThreads, currentThreadId, normalizedQuery);
-  const groupDecisions = useGroupDecisions(isV2 && attentionClusters.length > 0);
+  const groupDecisions = useGroupDecisions(isV2);
   const [attentionArrangeMode, setAttentionArrangeMode] = useState(false);
   const [searchGroupRequest, setSearchGroupRequest] = useState<SearchGroupRequest | null>(null);
   const searchGroupOperation = useRef(0);
@@ -618,6 +619,7 @@ export function ThreadSidebar({ onClose, className, routeThreadId, activeDestina
     setAttentionArrangeMode(false);
     setSearchGroupRequest(request);
   }, []);
+  const organizeThread = useCallback((threadId: string) => openSearchGroup({ query: '', threadId }), [openSearchGroup]);
   const searchGroupMatches = useMemo(
     () =>
       normalizedQuery
@@ -1098,7 +1100,7 @@ export function ThreadSidebar({ onClose, className, routeThreadId, activeDestina
       })),
     [activeTabContent.threads],
   );
-  const threadRowHeight = useSidebarRowHeight(liveThreads, currentConversationId, isV2);
+  const threadRowHeight = useSidebarRowHeight(liveThreads, currentConversationId, isV2, groupDecisions);
   const attentionRowHeight = useCallback(
     (row: AttentionListRow) => {
       if (!isV2) return 80;
@@ -1453,17 +1455,14 @@ export function ThreadSidebar({ onClose, className, routeThreadId, activeDestina
             onToggleFavorite={handleToggleFavorite}
             onUpdatePreferredCats={handleUpdatePreferredCats}
             onUpdateLabels={handleUpdateLabels}
-            onOrganize={
-              groupable && attentionLoadState === 'ready'
-                ? () => openSearchGroup({ query: '', threadId: thread.id })
-                : undefined
-            }
+            onOrganize={groupable && attentionLoadState === 'ready' ? organizeThread : undefined}
             onReplay={handleReplay}
             isPinned={thread.pinned}
             isFavorited={thread.favorited}
             presence={thread.presence}
             unreadCount={thread.unreadCount}
             hasUserMention={thread.hasUserMention}
+            hasPendingDecision={groupDecisions.status === 'ready' && groupDecisions.threadIds.has(thread.id)}
             projectPath={thread.projectPath}
             indented={indented}
             preferredCats={thread.preferredCats}
@@ -1477,10 +1476,11 @@ export function ThreadSidebar({ onClose, className, routeThreadId, activeDestina
     [
       attentionArrangeMode,
       attentionLoadState,
-      openSearchGroup,
+      organizeThread,
       commitAttentionThreadDrop,
       currentConversationId,
       draggedAttentionThreadId,
+      groupDecisions,
       handleDeleteRequest,
       handleRename,
       handleReplay,

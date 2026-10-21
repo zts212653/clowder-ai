@@ -1,6 +1,5 @@
 ---
 name: anime-forge
-tips_exempt: "2026-10-14: pointers updated after the promo director skill was removed and the continuity reference moved here; no process change. Earlier, 2026-10-07 settings-first change: character, scene, prop and voice settings are confirmed before any frame is drawn, and storyboard frames are drawn once in final style (no grey sketches, no separate final-art pass); earlier the same day: one-line story and minimal sample before the full animatic. No new user-facing command or operation."
 description: >
   讲角色自己故事的动画短片：先把故事验明白（考证真事、一句话、剧本、冷读），再为最危险那一段定设定、做最小样张；样张过了出全片正式风格的分镜图，拼成动态分镜，最后后期；
   只有少数几格要「活起来」时才走图生视频。
@@ -8,7 +7,7 @@ description: >
   给已有剧本做设定、声音稿、分镜、动态分镜、精绘或后期。
   Not for: 推产品、讲功能的片子，哪怕主角是猫、片里有剧情（用 video-forge）；
   录屏剪辑（用 video-forge）；单张图或单页漫画（用 image-generation）；PPT（用 ppt-forge）。
-  Output: 带真事对照的剧本 md、设定图、声音稿、分镜表、分镜图、动态分镜粗片，以及 Console 里能直接播的成片。
+  Output: 带真事对照的剧本 md、设定图、声音稿、分镜表、分镜图、动态分镜粗片，以及 Works 视频作品和确定版本的成片卡。
 ---
 
 # Anime Forge：讲角色自己故事的动画短片
@@ -53,10 +52,14 @@ EP0 第一次是剧本写完就出精细插画、拼成片，前 55 秒每张都
 | 6 最小样张 | 只为那一段花钱：这段台词合成、逐句回听；按实际时长排这段时间轴；按设定直接画 2–4 格正式风格的画面，拼成 10–20 秒小粗片 | **看这一小段**：好不好笑、看不看得懂、认不认得出角色 | 小粗片 |
 | 7 全篇声音稿 | 样张过了，再把全篇旁白和台词 TTS，每句 Whisper 回听；量出每句真实秒数，回填分镜表 | —（猫自己用） | `../video-forge/scripts/tts-check.py` |
 | 8 分镜图 | 先补齐其余场景、道具的设定；开画前报张数、分几批；按设定一格一张，直接画正式风格；每批先把成品的脸和设定并排对一遍再往下 | — | 设定目录 + 分镜图目录 + manifest + 对照图 |
-| 9 动态分镜 | 分镜图按声音稿的时间拼成粗片（推、拉、摇，角色分层呼吸）；渲染前跑 `../video-forge/scripts/timeline-check.py` | **主审关**，他报时间码 | Remotion 粗片 |
+| 9 动态分镜 | 分镜图按声音稿的时间拼成粗片（推、拉、摇，角色分层呼吸）；渲染前跑 `../video-forge/scripts/timeline-check.py` | **主审关**，在剪辑台直接标一刻／一段／全片 | Remotion 粗片 |
 | 10 后期 | 角色和背景分层，做视差、眨眼、耳朵尾巴差分、盖章震动、转场；换真音效；配乐、混音。少数几格要「活起来」，再走 `refs/i2v-route.md` | 成片 | Console 内联播放的成片 |
 
-声音稿、Whisper 回听、时间轴、音效底线、10MB 交片上限，video-forge 和本 skill 共用一份：`../.cat-cafe-shared-refs/video-voice-and-timeline.md`。
+声音稿、Whisper 回听、时间轴、音效底线、另发聊天附件的 10MB 上限，video-forge 和本 skill 共用一份：`../.cat-cafe-shared-refs/video-voice-and-timeline.md`。
+
+## 交片与改片
+
+样张、动态分镜和成片按各自真实交付的版本，走 [视频作品交付](../.cat-cafe-shared-refs/video-work-delivery.md)：`cat_cafe_work` 保存同一件作品，再发固定版本卡；原文件不搬家。改片先读原意见，下一版附逐条回应和可核的新位置，You 在片上判断「已改／还不对」。不把脚本、检查页或任意一次渲染当作交片前置，也不把未交付的中间输出灌进版本列表。这一入口只改变交付与反馈，不替本 skill 决定故事和制作顺序。
 
 **分工**：导演一只猫（剧本定稿、分镜表、声音稿、剪辑、配乐）；画师一只能生图的猫（派之前看 dossier 常驻席位）；考证交子代理；You 拍板。冷读人数按理解风险定：先找一只没看过剧本的常规池猫；片子重要或第一位读者没看懂，再加一位。不叫醒稀缺席位。
 

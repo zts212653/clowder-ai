@@ -1,4 +1,5 @@
 import * as sqliteVec from 'sqlite-vec';
+import { createSqliteReadDiagnostics } from '../../infrastructure/sqlite-read-diagnostics.js';
 import { CatCafeScanner } from './CatCafeScanner.js';
 import { checkpointMemoryDatabase } from './checkpoint-memory-database.js';
 import { GenericRepoScanner } from './GenericRepoScanner.js';
@@ -11,6 +12,7 @@ import {
   type MemoryProcessJob,
   type ParentMessage,
 } from './memory-process-protocol.js';
+import type { MemoryReadDiagnostic } from './memory-read-execution.js';
 import { PassageVectorStore } from './PassageVectorStore.js';
 import { projectEntityMentions } from './project-entity-mentions.js';
 import { repackPassageVectorDatabase } from './repack-passage-vectors.js';
@@ -50,7 +52,11 @@ function embeddingProxy(snapshot: EmbeddingSnapshot): IEmbeddingService {
   };
 }
 
-async function execute(job: MemoryProcessJob, started: () => void): Promise<unknown> {
+async function execute(
+  job: MemoryProcessJob,
+  started: () => void,
+  report: (event: MemoryReadDiagnostic) => void,
+): Promise<unknown> {
   if (job.kind === 'scan') {
     started();
     const scanner = job.scanner === 'cat-cafe' ? new CatCafeScanner(job.excludes) : new GenericRepoScanner();
@@ -64,11 +70,14 @@ async function execute(job: MemoryProcessJob, started: () => void): Promise<unkn
     started();
     return repackPassageVectorDatabase(job.dbPath);
   }
+  const readJob = job.kind === 'message-search';
+  if (readJob) report({ phase: 'database-initialization' });
   const store = new SqliteEvidenceStore(job.dbPath, undefined, {
     workerMode: 'read',
     ...(job.kind === 'search' ? { sourceRoot: job.sourceRoot, sourceRef: job.sourceRef } : {}),
   });
   await store.initialize();
+  let detachReadDiagnostics: (() => void) | undefined;
   try {
     const db = store.getDb();
     // Register existing vec0 tables; this does not create/migrate or mutate them.
@@ -77,6 +86,13 @@ async function execute(job: MemoryProcessJob, started: () => void): Promise<unkn
     } catch {
       /* vec0 remains an optional accelerator */
     }
+    if (readJob)
+      detachReadDiagnostics = createSqliteReadDiagnostics({
+        onSlowRead() {},
+        maxReports: 20,
+        onReadStarted: (sql) => report({ phase: 'sql-start', sql }),
+        onReadFinished: (sql) => report({ phase: 'sql-finish', sql }),
+      })(db);
     started();
     switch (job.kind) {
       case 'search':
@@ -101,6 +117,7 @@ async function execute(job: MemoryProcessJob, started: () => void): Promise<unkn
         return projectEntityMentions(db, job.stagingPath, job);
     }
   } finally {
+    detachReadDiagnostics?.();
     store.close();
   }
 }
@@ -116,7 +133,11 @@ process.on('message', (message: ParentMessage) => {
     process.stderr.write(memoryProcessStderrBoundary(message.stderrToken, message.id, 'end'));
     send(result);
   };
-  void execute(message.job, () => send({ type: 'started', id: message.id, pid: process.pid })).then(
+  void execute(
+    message.job,
+    () => send({ type: 'started', id: message.id, pid: process.pid }),
+    (diagnostic) => send({ type: 'read-diagnostic', id: message.id, diagnostic }),
+  ).then(
     (value) => finish({ type: 'result', id: message.id, value }),
     (error) => finish({ type: 'result', id: message.id, error: encodeProcessError(error) }),
   );

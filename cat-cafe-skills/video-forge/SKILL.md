@@ -1,13 +1,12 @@
 ---
 name: video-forge
-tips_exempt: "Cut 2026-10-14: removed the house method, taste rules, director layer and film statistics; what remains is home facts, You's decided preferences and real pitfalls. No new user-facing entry or command."
 description: >
   家里用 Remotion 做视频要知道的事：工程在哪、本机配音和回听怎么调、You 定过的片子规矩、真踩过的坑、怎么在 Console 里交片。
   Use when: 要做或改一支视频（宣传片、产品界面演示、讲解片、动态排版、录屏剪辑），包括主角是家里的猫、片里有剧情的产品宣传片；
   或给片子配音、对时间轴、交片。
   Not for: 只查某个 Remotion API 怎么写（读官方 remotion-best-practices skill 的 rules/）；
   目的就是讲角色自己故事的动画短片（用 anime-forge）；PPT（用 ppt-forge）。
-  Output: Remotion 工程 + Console 里能直接播的片子。
+  Output: Remotion 工程 + Works 中的视频作品与确定版本的交片卡；修改沿原作品续版、回应原意见。
   GOTCHA: 本 skill 不教怎么拍得好看，那靠你自己看片的眼光；2026-10-14 前的长版方法和审美条文把猫带成了「走流程」，已删。
 ---
 
@@ -52,7 +51,9 @@ description: >
 
 ## 交片
 
-Console 里要能直接播，别只贴路径：mp4 放主仓 `.cat-cafe/evidence/<主题>/`，发 `kind: "file"`、`mimeType: "video/mp4"`、`url: "/api/workspace/file/raw?worktreeId=cat-cafe&path=.cat-cafe/evidence/<主题>/<文件>.mp4"` 的 rich block，发之前 curl 一遍确认返回 200。聊天里的上限约 10MB，压法见 `../.cat-cafe-shared-refs/video-voice-and-timeline.md` §5。附一句：这一版改了什么、要他看哪里（时间码）、还有什么没做完。
+用 `cat_cafe_work` 保存作品，再发布它的固定版本卡，让 You 从 Works 或聊天直接进剪辑台批注。具体调用见 [视频作品交付](../.cat-cafe-shared-refs/video-work-delivery.md)。原文件留在实际制作仓，不要求搬到主仓、先写脚本或补 Remotion 合同；高清母版可直接登记，10MB 是另行发送聊天附件的限制，不是作品版本的上限。
+
+改片前读同一份原意见，交新版用原 `contentRef` 和读取到的 `expectedOwnerRevision`，附「改了什么」。按原回报命令回应逐条意见及可核的新位置；猫说已调整后，仍等 You 在片上选「已改／还不对」。不要把续版当作意见自动通过，也不要让 You 回聊天手写时间点。
 
 ## 和别的 skill 的区别
 

@@ -46,6 +46,7 @@ export interface ThreadItemProps {
   presence: SidebarPresence;
   unreadCount: number;
   hasUserMention: boolean;
+  hasPendingDecision?: boolean;
   projectPath?: string;
   indented?: boolean;
   preferredCats?: readonly string[];
@@ -73,6 +74,7 @@ function ThreadItemComponent({
   presence,
   unreadCount,
   hasUserMention,
+  hasPendingDecision,
   projectPath,
   indented,
   preferredCats,
@@ -426,6 +428,7 @@ function ThreadItemComponent({
           unreadCount={unreadCount}
           hasUserMention={hasUserMention}
           hasDraft={hasDraft}
+          hasPendingDecision={hasPendingDecision}
         />
       ) : (
         <>

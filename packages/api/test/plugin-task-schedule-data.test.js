@@ -36,7 +36,28 @@ async function fixture(tasks = new TaskStore()) {
     readThreadStore: threads,
     assertCurrent: async () => {},
     onTaskDataChanged: (task) => changes.push(task.id),
-    admission: { messageStore: messages, isCatAvailable: (id) => id === 'codex', assertCurrent: async () => {} },
+    admission: {
+      messageStore: messages,
+      isCatAvailable: (id) => id === 'codex',
+      assertCurrent: async () => {},
+      readCurrentDataControllerAuthority: async () => ({
+        pluginId: 'fixture',
+        pluginInstanceId: 'instance',
+        moduleRef: 'plugin:fixture',
+        lifecycleRevision: 1,
+        grantRevision: 1,
+        effectiveGrants: ['task.read', 'task.write', 'task.admitEntrusted'],
+      }),
+      withCurrentDataControllerAuthority: async (run) =>
+        run({
+          pluginId: 'fixture',
+          pluginInstanceId: 'instance',
+          moduleRef: 'plugin:fixture',
+          lifecycleRevision: 1,
+          grantRevision: 1,
+          effectiveGrants: ['task.read', 'task.write', 'task.admitEntrusted'],
+        }),
+    },
   };
   const host = createPluginTaskHost(deps);
   const data = {

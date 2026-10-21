@@ -16,6 +16,7 @@ import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { validateEffectiveGrants, validateManifest } from '@clowder-ai/plugin-contract';
 import { MessageStore } from '../dist/domains/cats/services/stores/ports/MessageStore.js';
+import { TaskStore } from '../dist/domains/cats/services/stores/ports/TaskStore.js';
 import { ThreadStore } from '../dist/domains/cats/services/stores/ports/ThreadStore.js';
 import {
   createDormantPluginRuntimeComposition,
@@ -239,6 +240,8 @@ const GITHUB = [
   'thread.listMetadata',
   'thread.write',
   'messaging.send',
+  'task.read',
+  'task.write',
 ];
 
 test('GitHub operations receives only its requested shipped capabilities without retiring the legacy source', () => {
@@ -259,17 +262,51 @@ test('GitHub operations receives only its requested shipped capabilities without
 });
 
 test('installed GitHub operations cannot widen its Host grants through its manifest', async () => {
-  const host = await installed(manifest('official.github-operations', [...GITHUB, 'task.read']));
+  const host = await installed(
+    manifest('official.github-operations', [...GITHUB, 'thread.readContent', 'task.admitEntrusted']),
+    `export default { create() { return { async start(host) { return {
+      actions: {
+        'probe.read-task': async () => host.tasks.get({ id: 'task-1' }),
+        'probe.read-thread': async () => host.threads.get('selected-thread')
+      }, async stop() {}
+    }; } }; } };`,
+  );
   try {
     assert.deepEqual(sorted(host.grants.effectiveGrants), sorted(GITHUB));
     await host.enable();
+    assert.equal(await host.runtime.supervisor.invoke(host.pluginInstanceId, 'probe.read-task', {}), null);
     await assert.rejects(
-      host.runtime.supervisor.invoke(host.pluginInstanceId, 'probe.read-task', {}),
-      (error) => error?.code === 'DELIVERY_REJECTED' && /lacks task\.read/.test(error.message),
+      host.runtime.supervisor.invoke(host.pluginInstanceId, 'probe.read-thread', {}),
+      (error) => error?.code === 'DELIVERY_REJECTED' && /lacks thread\.readContent/.test(error.message),
     );
   } finally {
     await host.shutdown();
   }
+});
+
+test('GitHub migration Task grants reach existing packages only when requested', async () => {
+  const store = new MemoryPluginInventoryStore();
+  const inventory = new HostInventoryControlPlane(store, { createInstanceId: () => 'pi_github', now: () => 1 });
+  const current = manifest('official.github-operations', GITHUB);
+  const digest = `sha512-${createHash('sha512').update('approved-github-migration').digest('base64')}`;
+  await inventory.installPackage({
+    manifest: current,
+    computedPackageDigest: digest,
+    expectedPackageDigest: digest,
+    packagePluginId: current.pluginId,
+    effectiveGrants: GITHUB.filter((c) => !c.startsWith('task.')),
+  });
+  const changes = await reconcileOfficialPluginGrants({
+    store,
+    inventory,
+    hostPolicies: OFFICIAL_PLUGIN_HOST_POLICIES,
+  });
+  assert.deepEqual(sorted(changes[0]?.added ?? []), ['task.read', 'task.write']);
+  assert.deepEqual(sorted((await store.snapshot()).grants[0].effectiveGrants), sorted(GITHUB));
+  assert.deepEqual(
+    await reconcileOfficialPluginGrants({ store, inventory, hostPolicies: OFFICIAL_PLUGIN_HOST_POLICIES }),
+    [],
+  );
 });
 
 test('meeting intake reads the selected thread with four grants, never unrelated capabilities', async () => {
@@ -373,6 +410,7 @@ async function installed(packageManifest, source = moduleSource) {
     projectRoot,
     messageStore: new MessageStore(),
     threadStore: new ThreadStore(),
+    taskStore: new TaskStore(),
     threadBindingStore: new MemoryConnectorThreadBindingStore(),
     threadOwnerUserId: 'owner-1',
     contract: { manifestContractVersions: ['0.1.0'], validateEffectiveGrants, validateManifest },

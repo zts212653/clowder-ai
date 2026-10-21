@@ -1,12 +1,13 @@
 'use client';
 import { useId, useRef } from 'react';
 import type { CatData } from '@/hooks/useCatData';
+import { AppTooltip } from '../AppTooltip';
 import { AvatarImageWithFallback } from '../AvatarImageWithFallback';
 import type { ConfigData } from '../config-viewer-types';
 import type { RoutingContextQueryState } from '../routing-context/useRoutingContext';
 import { useMembersCopy, useMemberText } from './editor-presentation';
 import { MemberAccountName } from './MemberAccountName';
-import { MemberIdentityDetails } from './MemberIdentityDetails';
+import { MemberConnectionSummary } from './MemberConnectionSummary';
 import { MemberRuntimeSummary } from './MemberRuntimeSummary';
 import { MemberStatus } from './MemberStatus';
 import { memberStatus, memberTransport } from './member-projection';
@@ -63,7 +64,7 @@ export function MemberTable({
         </thead>
         <tbody>
           {config.coCreator && filter !== 'disabled' && transport === 'all' && (
-            <tr>
+            <tr className="member-co-creator">
               <td />
               <td>
                 <button type="button" className="member-name" onClick={onEditCoCreator}>
@@ -140,14 +141,19 @@ export function MemberTable({
                 </div>
               </td>
               <td>
-                <button type="button" className="member-name" onClick={() => onEditMember(cat)}>
-                  <AvatarImageWithFallback src={cat.avatar} alt="" className="member-avatar" />
-                  <span>
-                    <strong>{cat.nickname || cat.displayName}</strong>
-                    <small>{cat.breedDisplayName || cat.displayName}</small>
-                  </span>
-                </button>
-                <MemberIdentityDetails cat={cat} onEdit={() => onEditMember(cat)} />
+                <AppTooltip
+                  label={`${cat.nickname || cat.displayName} · ${cat.breedDisplayName || cat.displayName}`}
+                  intent="content"
+                  multiline
+                >
+                  <button type="button" className="member-name" onClick={() => onEditMember(cat)}>
+                    <AvatarImageWithFallback src={cat.avatar} alt="" className="member-avatar" />
+                    <span>
+                      <strong>{cat.nickname || cat.displayName}</strong>
+                      <small>{cat.breedDisplayName || cat.displayName}</small>
+                    </span>
+                  </button>
+                </AppTooltip>
               </td>
               <td>
                 <MemberRuntimeSummary cat={cat} />
@@ -155,9 +161,16 @@ export function MemberTable({
               <td>
                 <MemberAccountName cat={cat} accounts={list.accounts} />
               </td>
-              <td>{t(memberTransport(cat))}</td>
+              <td>
+                <AppTooltip label={t(memberTransport(cat))} intent="content">
+                  <button type="button" className="member-cell-text">
+                    {t(memberTransport(cat))}
+                  </button>
+                </AppTooltip>
+              </td>
               <td>
                 <MemberStatus
+                  catId={cat.id}
                   status={
                     routing.loading && !routing.data
                       ? { label: '读取中', detail: '', tone: 'unknown' }
@@ -166,14 +179,18 @@ export function MemberTable({
                 />
               </td>
               <td>
-                <details className="member-aliases">
-                  <summary>
+                <AppTooltip
+                  label={cat.mentionPatterns.join(' · ') || t('未设置')}
+                  intent="content"
+                  multiline
+                  showOnClick
+                >
+                  <button type="button" className="member-aliases">
                     {cat.mentionPatterns.length
                       ? copy.aliasCount(cat.mentionPatterns[0], cat.mentionPatterns.length)
                       : t('未设置')}
-                  </summary>
-                  <div>{cat.mentionPatterns.join('、')}</div>
-                </details>
+                  </button>
+                </AppTooltip>
               </td>
               <td>
                 <button
@@ -188,6 +205,7 @@ export function MemberTable({
                   <span />
                 </button>
               </td>
+              <MemberConnectionSummary cat={cat} accounts={list.accounts} />
             </tr>
           ))}
         </tbody>

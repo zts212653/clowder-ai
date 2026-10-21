@@ -11,6 +11,7 @@ import {
   unlinkSync,
   writeFileSync,
 } from 'node:fs';
+import { readFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import { debuglog } from 'node:util';
@@ -400,7 +401,7 @@ export function readUnixProcessSnapshot(
         timeout: CLI_PROCESS_SNAPSHOT_TIMEOUT_MS,
         maxBuffer: options.includeEnvironment ? 32 * 1024 * 1024 : 4 * 1024 * 1024,
       },
-      (error, stdout, stderr) => {
+      async (error, stdout, stderr) => {
         if (typeof stdout !== 'string') {
           resolveSnapshot(null);
           return;
@@ -417,7 +418,13 @@ export function readUnixProcessSnapshot(
         for (const line of stdout.split('\n')) {
           const entry = parseSnapshotLine(line, options.includeEnvironment === true);
           if (!entry) continue;
-          attachLinuxProcEnvironment(entry, options.includeEnvironment === true);
+          if (options.includeEnvironment && process.platform === 'linux') {
+            try {
+              entry.commandAndEnvironment = decodeLinuxProcEnvironment(await readFile(`/proc/${entry.pid}/environ`));
+            } catch {
+              delete entry.commandAndEnvironment;
+            }
+          }
           snapshot.set(entry.pid, entry);
         }
         resolveSnapshot(snapshot);

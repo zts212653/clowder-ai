@@ -1,4 +1,6 @@
 'use client';
+
+import { deploymentDefaults } from '@cat-cafe/shared';
 import { useEffect, useRef, useState } from 'react';
 import { z } from 'zod';
 import { apiFetch } from '@/utils/api-client';
@@ -186,7 +188,8 @@ export function WorkspaceRootConnectionPanel({
   return (
     <div data-testid="workspace-root-connection" className="space-y-3 p-4 text-sm">
       <p>
-        连接后，该目录（包含其中其他文件）将加入当前 Clowder AI 的 Workspace 共享目录列表，可跨对话使用；可移除连接。
+        连接后，该目录（包含其中其他文件）将加入当前 {deploymentDefaults.brand.displayName} 的 Workspace
+        共享目录列表，可跨对话使用；可移除连接。
       </p>
       <p>
         {connection.name} · {connection.path}

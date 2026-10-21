@@ -25,7 +25,7 @@ import { resolveArtifactReviewTarget } from './artifact-review-surface';
 import { resolveEvolutionMediaTarget } from './evolution-media-surface';
 import { fileObjectIdentity, matchesFileObjectIdentity } from './file-object-identity';
 import { resolveMessagePublicationSource } from './message-publication-surface';
-import { resolvePublicationTarget } from './publication-surface';
+import { createPublicationSurface, parsePublicationTarget, resolvePublicationTarget } from './publication-surface';
 import { PULL_REQUEST_CHANGES_OWNER } from './pull-request-changes-surface';
 
 export { createPullRequestChangesSurface, resolvePullRequestChangesTarget } from './pull-request-changes-surface';
@@ -249,11 +249,22 @@ export function resolveEvolutionProgramId(surface: WorkspaceSurfaceDescriptor): 
   return surface.objectRef.id;
 }
 
+function independentWorkTarget(artifact: ThreadArtifactDTO | GlobalArtifactDTO) {
+  return artifact.work?.contentRef.startsWith('work:') ? parsePublicationTarget(artifact.work) : null;
+}
+
 export function createArtifactSurface(input: {
   threadId: string;
   artifact: ThreadArtifactDTO | GlobalArtifactDTO;
   navigationOrigin?: WorkspaceSurfaceDescriptor['navigationOrigin'];
 }): WorkspaceSurfaceDescriptor {
+  const publication = independentWorkTarget(input.artifact);
+  if (publication)
+    return createPublicationSurface({
+      ...publication,
+      title: input.artifact.name,
+      navigationOrigin: input.navigationOrigin,
+    });
   const ownerThreadId = 'threadId' in input.artifact ? input.artifact.threadId : input.threadId;
   const review = input.artifact.type === 'pr';
   const objectId = artifactObjectId(input.artifact);

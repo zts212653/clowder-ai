@@ -16,20 +16,34 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { projectDeploymentProfiles, resolveDeploymentDefaults } from '../packages/shared/src/deployment-defaults.ts';
+import {
+  projectDeploymentProfiles,
+  resolveDeploymentDefaults,
+  resolveStartupDefaults,
+} from '../packages/shared/src/deployment-defaults.ts';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const profile = (webPort, apiPort, reportPort) => ({
+  repositoryFullName: 'synthetic-owner/fixture-repo',
   apiPort,
   webPort,
   envRegistryFrontendPort: reportPort,
   corsOrigins: [`http://localhost:${webPort}`, 'https://team.example'],
   roadmapPath: `docs/plans/ACTIVE-${webPort}.md`,
+  brand: {
+    name: 'Fixture',
+    displayName: 'Fixture UI',
+    shortName: 'F',
+    hubName: 'Fixture Hub',
+    tagline: 'Fixture team',
+  },
 });
 const fixture = () => ({
   schemaVersion: 1,
   activeProfile: 'home',
   profiles: { home: profile(4510, 4599, 4400), opensource: profile(4620, 4699, 4620) },
+  startupProfiles: JSON.parse(readFileSync(join(root, 'packages/shared/src/deployment-profiles.json'), 'utf8'))
+    .startupProfiles,
 });
 
 test('configured defaults keep listen ports, documentation defaults and CORS distinct', () => {
@@ -43,6 +57,38 @@ test('configured defaults keep listen ports, documentation defaults and CORS dis
   assert.deepEqual(actual.corsOrigins, ['http://localhost:4510', 'https://team.example']);
 });
 
+test('deployment repository coordinates come from the selected profile', () => {
+  const input = fixture();
+  input.profiles.home.repositoryFullName = 'synthetic-owner/home-repo';
+  input.profiles.opensource.repositoryFullName = 'synthetic-owner/public-repo';
+  assert.equal(resolveDeploymentDefaults(input).repositoryFullName, 'synthetic-owner/home-repo');
+  assert.equal(resolveDeploymentDefaults(input).repositoryUrl, 'https://github.com/synthetic-owner/home-repo');
+  assert.equal(
+    resolveDeploymentDefaults(projectDeploymentProfiles(input, 'opensource')).repositoryFullName,
+    'synthetic-owner/public-repo',
+  );
+  for (const value of ['', 'owner', '../repo', 'owner/repo/more', 'owner/repo\n', 'owner/repo;touch x']) {
+    input.profiles.home.repositoryFullName = value;
+    assert.throws(() => resolveDeploymentDefaults(input), /repositoryFullName/, value);
+  }
+});
+
+test('startup profile values are validated before any shell assignment', () => {
+  const input = fixture();
+  const common = input.startupProfiles.dev.common;
+  for (const value of ['2', '$(touch /tmp/not-executed)', '1\nPATH=bad']) {
+    common.ANTHROPIC_PROXY_ENABLED = value;
+    assert.throws(() => resolveStartupDefaults('dev', 'posix', input), /Invalid startup value/);
+  }
+  common.ANTHROPIC_PROXY_ENABLED = '1';
+  common.PATH = 'bad';
+  assert.throws(() => resolveStartupDefaults('dev', 'posix', input), /Invalid startup setting PATH/);
+  delete common.PATH;
+  delete common.MESSAGE_TTL_SECONDS;
+  assert.throws(() => resolveStartupDefaults('dev', 'posix', input), /Missing startup setting/);
+  assert.throws(() => resolveStartupDefaults('unknown', 'posix', fixture()), /Invalid startup profile/);
+});
+
 test('public projection selects configuration data and removes the inactive home values', () => {
   const input = fixture();
   const original = structuredClone(input);
@@ -52,6 +98,7 @@ test('public projection selects configuration data and removes the inactive home
     schemaVersion: 1,
     activeProfile: 'opensource',
     profiles: { opensource: input.profiles.opensource },
+    startupProfiles: input.startupProfiles,
   });
   assert.deepEqual(projectDeploymentProfiles(projected, 'opensource'), projected);
   assert.equal(resolveDeploymentDefaults(projected).apiPort, 4699);
@@ -207,13 +254,19 @@ test('launch scripts can read and project the same defaults in a fresh checkout 
     'packages/shared/src/deployment-defaults.ts',
     'scripts/read-deployment-default.mjs',
     'scripts/project-deployment-defaults.mjs',
+    'scripts/brand-dictionary-helper.mjs',
+    'scripts/deployment-brand-config.mjs',
+    'assets/brand-dictionary.yaml',
   ]) {
+    mkdirSync(dirname(join(checkout, file)), { recursive: true });
     cpSync(join(root, file), join(checkout, file));
   }
   const config = join(checkout, 'packages/shared/src/deployment-profiles.json');
   writeFileSync(config, JSON.stringify(fixture()));
   const run = (script, ...args) =>
     execFileSync(process.execPath, [join(checkout, 'scripts', script), ...args], { cwd: checkout, encoding: 'utf8' });
+  assert.equal(run('read-deployment-default.mjs', 'brand.name').trim(), 'Fixture');
+  assert.equal(run('read-deployment-default.mjs', 'brand.displayName').trim(), 'Fixture UI');
   assert.equal(run('read-deployment-default.mjs', 'apiPort').trim(), '4599');
   assert.equal(run('read-deployment-default.mjs', 'webPort').trim(), '4510');
   assert.equal(run('read-deployment-default.mjs', 'apiBaseUrl').trim(), 'http://localhost:4599');

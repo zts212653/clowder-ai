@@ -267,7 +267,7 @@ test('Manager strictly replaces an incompatible install from a compatible archiv
   const projected = (await manager.get(oldManifest.pluginId)).plugin;
   assert.equal(projected.actions.install, true);
   assert.equal(projected.packageDigest, digest('old'));
-  assert.equal(projected.source.kind, 'local-archive');
+  assert.deepEqual(projected.source, { kind: 'unknown', packageName: null, trust: 'unknown' });
   const request = { expectedVersion: projected.availableVersion, expectedRevision: projected.lifecycleRevision };
   const before = await runtime.inventoryStore.snapshot();
   await assert.rejects(manager.update(oldManifest.pluginId, request));

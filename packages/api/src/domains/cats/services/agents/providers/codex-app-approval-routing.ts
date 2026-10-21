@@ -1,3 +1,4 @@
+import { deploymentDefaults } from '@cat-cafe/shared';
 export type CodexApprovalSurface = 'interactive' | 'unavailable';
 
 export type CodexAppApprovalFailureCode = 'user_rejected' | 'confirmation_unavailable';
@@ -31,9 +32,9 @@ export function isReservedCodexAppApprovalConfigKey(key: string): boolean {
   );
 }
 
-export const CAT_CAFE_GITHUB_ROUTING_INSTRUCTIONS = `# Clowder AI GitHub routing
+export const CAT_CAFE_GITHUB_ROUTING_INSTRUCTIONS = `# ${deploymentDefaults.brand.displayName} GitHub routing
 
-- GitHub MCP and GitHub App tools are retired for repository operations in Clowder AI. Do not install or invoke them.
+- GitHub MCP and GitHub App tools are retired for repository operations in ${deploymentDefaults.brand.displayName}. Do not install or invoke them.
 - Use the repository's canonical \`gh\` CLI path for both reads and writes.
 - This changes transport only; it does not grant authority. Continue to follow merge-gate, review, operator, and irreversible-operation boundaries.`;
 
@@ -74,8 +75,7 @@ export function classifyCodexGithubAppApprovalFailure(input: {
   if (input.approvalSurface === 'unavailable') {
     return {
       reasonCode: 'confirmation_unavailable',
-      message:
-        'GitHub App confirmation is unavailable in this Clowder AI invocation. Use the canonical gh CLI under merge-gate when the write is already authorized; otherwise report the exact missing authority. No permission was expanded.',
+      message: `GitHub App confirmation is unavailable in this ${deploymentDefaults.brand.displayName} invocation. Use the canonical gh CLI under merge-gate when the write is already authorized; otherwise report the exact missing authority. No permission was expanded.`,
     };
   }
 

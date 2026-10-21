@@ -32,6 +32,7 @@ import {
   reviewSubjectRefSchema,
   runtimeConversationResponseSchema,
   VersionBoundContextAttachmentsSchema,
+  workReferenceCardSchema,
 } from '@cat-cafe/shared';
 import type { FastifyBaseLogger, FastifyPluginAsync, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
@@ -186,6 +187,7 @@ import { CallbackAuthSystemMessageNotifier } from './callback-auth-system-messag
 import { recordCallbackAuthFailure } from './callback-auth-telemetry.js';
 import { registerCallbackBootcampRoutes } from './callback-bootcamp-routes.js';
 import { type NamedCatContentHolder, registerCallbackContentEditorRoutes } from './callback-content-editor-routes.js';
+import { registerCallbackContinueApprovedTaskRoutes } from './callback-continue-approved-task-routes.js';
 import { registerCallbackDeferPersonMemoryRoutes } from './callback-defer-person-memory-routes.js';
 import {
   type DeploymentObservationProvider,
@@ -1133,6 +1135,7 @@ const richBlockSchema = z.discriminatedUnion('kind', [
     v: z.literal(1),
     title: z.string(),
     bodyMarkdown: z.string().optional(),
+    meta: workReferenceCardSchema.shape.meta.optional(),
     tone: z.enum(['info', 'success', 'warning', 'danger']).optional(),
     fields: z.array(z.object({ label: z.string(), value: z.string() })).optional(),
   }),
@@ -5844,6 +5847,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       ...(opts.approvalIngress ? { approvalIngress: opts.approvalIngress } : {}),
       ...(taskStore ? { taskLookup: taskStore } : {}),
     });
+    registerCallbackContinueApprovedTaskRoutes(app, { registry, proposalStore: opts.proposalStore });
     registerCallbackWithdrawThreadProposalRoutes(app, { registry, proposalStore: opts.proposalStore, socketManager });
   }
 

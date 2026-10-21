@@ -2,6 +2,8 @@ import { createHash } from 'node:crypto';
 import { lstatSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { deploymentDefaults } from '@cat-cafe/shared';
+import { stringify } from 'yaml';
 import { AGY_NATIVE_READ_TOOLS, AGY_NATIVE_TOOLS } from './agy-native-tools.js';
 
 export interface AgyNativeAgentFileInput {
@@ -81,7 +83,7 @@ export function materializeAgyNativeAgentFile(input: AgyNativeAgentFileInput): {
   const markdown = [
     '---',
     `name: ${agentName}`,
-    'description: Clowder AI native identity',
+    stringify({ description: `${deploymentDefaults.brand.displayName} native identity` }, { lineWidth: 0 }).trimEnd(),
     'mainAgent: true',
     'subagent: false',
     ...(autoApprove || input.tools?.includes('run_command') ? [] : ['commandExecutionPolicy: off']),

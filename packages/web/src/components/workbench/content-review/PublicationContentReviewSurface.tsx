@@ -10,6 +10,7 @@ import { useWorkspaceSurfaceVisibility } from '../WorkspaceSurfaceVisibility';
 import { ContentLandingHeader } from './ContentLandingHeader';
 import { ContentReviewSurface } from './ContentReviewSurface';
 import { useWorkspaceContentReview } from './useWorkspaceContentReview';
+import { VideoWorkReview } from './VideoWorkReview';
 
 type Props = {
   contentRef: string;
@@ -127,6 +128,24 @@ function PublicationSurface({
     historical && review.view
       ? { ...review, view: { ...review.view, canWrite: false, historyReadOnly: true } }
       : review;
+  if (
+    contentRef.startsWith('work:') &&
+    verifiedAsset?.attempt === attempt &&
+    verifiedAsset.asset.media.kind === 'video'
+  )
+    return (
+      <VideoWorkReview
+        asset={verifiedAsset.asset}
+        latest={latest}
+        review={effective}
+        title={title}
+        onBack={onBack}
+        onVersionChange={onVersionChange}
+        leadingAction={leadingAction}
+        fullWindowAction={fullWindowAction}
+        navigationOrigin={navigationOrigin}
+      />
+    );
   return (
     <ContentReviewSurface
       review={effective}

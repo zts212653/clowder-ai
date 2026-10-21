@@ -4,11 +4,24 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { projectCompanionDecisions } from '../../../api/src/routes/companion-decision-projection.ts';
-import { decisionQualified } from '../../../api/src/routes/companion-decision-qualification.ts';
+import { tsImport } from 'tsx/esm/api';
 import { chromium } from '../../../ppt-forge/node_modules/playwright/index.mjs';
-import { startReviewHost } from './fixtures/f309-artifact-review-host.mjs';
 import { mediaFixture } from './fixtures/f309-artifact-review-media.mjs';
+
+// API source uses emitted .js specifiers; native Node type stripping does not resolve them to .ts.
+const repoRoot = fileURLToPath(new URL('../../../../', import.meta.url));
+const { projectCompanionDecisions } = await tsImport(
+  path.join(repoRoot, 'packages/api/src/routes/companion-decision-projection.ts'),
+  import.meta.url,
+);
+const { decisionQualified } = await tsImport(
+  path.join(repoRoot, 'packages/api/src/routes/companion-decision-qualification.ts'),
+  import.meta.url,
+);
+const { startReviewHost } = await tsImport(
+  path.join(repoRoot, 'packages/web/test/browser/fixtures/f309-artifact-review-host.mjs'),
+  import.meta.url,
+);
 
 const entryPath = fileURLToPath(new URL('./fixtures/f322-inbox-review-host.tsx', import.meta.url));
 const evidenceRoot = process.env.F322_INBOX_REVIEW_EVIDENCE ?? path.join(tmpdir(), `f322-inbox-review-${process.pid}`);
@@ -186,6 +199,9 @@ for (const language of ['zh', 'en'])
 for (const language of ['zh', 'en'])
   for (const width of [1440, 390])
     test(`F322 actual Next review and exact original result ${language} ${width}`, { timeout: 180000 }, async (t) => {
-      const { verifyNextReview } = await import('./f322-inbox-review-next.journey.mjs');
+      const { verifyNextReview } = await tsImport(
+        path.join(repoRoot, 'packages/web/test/browser/f322-inbox-review-next.journey.mjs'),
+        import.meta.url,
+      );
       await verifyNextReview({ t, language, width, evidenceRoot });
     });

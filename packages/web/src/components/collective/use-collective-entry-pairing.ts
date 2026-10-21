@@ -1,6 +1,7 @@
 'use client';
 
 import type { CollectivePairingIntentMessage } from '@cat-cafe/shared';
+import { deploymentDefaults } from '@cat-cafe/shared';
 import { useCallback, useState } from 'react';
 import { apiFetch } from '@/utils/api-client';
 
@@ -28,7 +29,7 @@ export function useCollectiveEntryPairing(onPaired: (connectionId: string) => Pr
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({
             serviceUrl: pending.serviceUrl,
-            endpointLabel: `Clowder AI on ${window.location.host}`,
+            endpointLabel: `${deploymentDefaults.brand.displayName} on ${window.location.host}`,
             intent: pending.intent,
             ...selection,
           }),

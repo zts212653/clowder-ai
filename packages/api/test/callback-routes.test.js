@@ -4428,6 +4428,41 @@ describe('Callback Routes', () => {
     assert.equal(msgs[0].invocationId, invocationId, 'create-rich-block broadcast must include invocationId');
   });
 
+  test('a fixed Work card survives the real callback buffer and message publication', async () => {
+    const app = await createApp();
+    const thread = threadStore.create('user-1', 'Fixed Work references');
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus', thread.id);
+    const headers = { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken };
+    const meta = { kind: 'work_reference', reference: { contentRef: `work:${'a'.repeat(64)}`, ownerRevision: 1 } };
+    const block = { id: 'fixed-work-v1', kind: 'card', v: 1, title: 'A film', bodyMarkdown: 'First cut', meta };
+    const attached = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/create-rich-block',
+      headers,
+      payload: { block },
+    });
+    assert.equal(attached.statusCode, 200, attached.body);
+    const published = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/post-message',
+      headers,
+      payload: { content: 'Delivered v1' },
+    });
+    assert.equal(published.statusCode, 200, published.body);
+    const saved = messageStore.getRecent(10).find((message) => message.threadId === thread.id);
+    assert.deepEqual(saved.extra.rich.blocks[0].meta, meta, 'the card must retain its immutable owner coordinates');
+    const invalid = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/create-rich-block',
+      headers,
+      payload: {
+        block: { ...block, id: 'invalid-work', meta: { ...meta, reference: { ...meta.reference, ownerRevision: 0 } } },
+      },
+    });
+    assert.equal(invalid.statusCode, 400, 'malformed references must not become ordinary success cards');
+    await app.close();
+  });
+
   test('create-rich-block names the response its turn is streaming into', async () => {
     const threadId = 'thread-crb-response';
     const { invocationId, callbackToken } = await registry.create('user-1', 'opus', threadId);

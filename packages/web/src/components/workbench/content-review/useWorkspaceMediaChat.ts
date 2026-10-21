@@ -157,7 +157,13 @@ export function useWorkspaceMediaChat({
   const addWorkRef = useRef(addWork);
   addWorkRef.current = addWork;
   const referenceKey = JSON.stringify(chatMedia);
-  const mayReference = visible && referenceOnOpen && !!chatMedia && view.canWrite && view.sourceState === 'current';
+  const mayReference =
+    visible &&
+    referenceOnOpen &&
+    !workflow?.videoWork &&
+    !!chatMedia &&
+    view.canWrite &&
+    view.sourceState === 'current';
   const whole = chatMedia && addMediaWork([], chatMedia);
   useRegisterWorkspaceChatWork(
     threadId ?? null,
@@ -172,14 +178,19 @@ export function useWorkspaceMediaChat({
     isWorkVisible,
   );
   useEffect(() => {
-    // Classic retains its existing open-time behavior; v2 reads the visible work only at explicit send.
+    // Legacy classic images retain open-time reference behavior. Video Works wait for an explicit mark;
+    // v2 reads the visible work only at explicit send.
     if (!isV2 && mayReference) addWorkRef.current();
   }, [isV2, mayReference, referenceKey, threadId]);
   return {
     target: chatMedia,
     offered: target?.kind === 'media_anchor',
     wholeWorkOffered:
-      !!mime && !!mediaChatMime(mime) && !!chatMedia && (isV2 || view.canWrite) && view.sourceState === 'current',
+      !!mime &&
+      !!mediaChatMime(mime) &&
+      !!chatMedia &&
+      (isV2 || workflow?.videoWork || view.canWrite) &&
+      view.sourceState === 'current',
     add,
     addSelection,
     addWork,

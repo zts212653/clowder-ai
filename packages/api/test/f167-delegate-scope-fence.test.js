@@ -242,10 +242,10 @@ describe('F167 R5 — proposal card 执行范围 visibility', () => {
     assert.ok(scopeField.value.includes('aaaaaaaa'), 'must show truncated revision');
   });
 
-  test('card omits 执行范围 when no scope', () => {
+  test('generic Task card identifies the complete proposal contract as 执行范围', () => {
     const card = buildProposalCardBlock(cardProposal({ subjectTaskId: TASK_ID }));
     const scopeField = card.fields.find((f) => f.label === '执行范围');
-    assert.equal(scopeField, undefined, '执行范围 must not appear without scope');
+    assert.match(scopeField?.value ?? '', /本提案完整合同/);
   });
 
   test('card omits 执行范围 when no subjectTaskId (even if scope present)', () => {

@@ -11,6 +11,40 @@ import { threadsRoutes } from '../src/routes/threads.js';
 const owner = 'works-page-owner';
 const headers = { 'x-cat-cafe-user': owner };
 
+test('owner works are paged even when no message or Task ever published them', async () => {
+  const artifact = {
+    type: 'video' as const,
+    name: '独立保存的片子',
+    catId: 'codex61-sol',
+    createdAt: 1,
+    sourceMessageId: null,
+    work: { contentRef: `work:${'b'.repeat(64)}`, ownerRevision: 2, currentOwnerRevision: 2 },
+  };
+  const input = {
+    userId: owner,
+    threads: [{ id: 'T', createdBy: owner }],
+    tasks: { listByThreadPage: async () => ({ tasks: [] }) },
+    messages: {
+      getByThreadBeforeBounded: async () => ({ messages: [], scannedCount: 0, storageRoundTrips: 1, exhausted: true }),
+    },
+    accepted: async () => [],
+    ownedWorks: async (_threadId: string, after?: string, snapshot?: string) => {
+      if (after) {
+        assert.equal(after, 'next-work');
+        assert.equal(snapshot, 'owner-snapshot');
+        return { artifacts: [{ ...artifact, name: '第二件', ref: 'second' }], snapshot: 'owner-snapshot' };
+      }
+      return { artifacts: [artifact], nextCursor: 'next-work', snapshot: 'owner-snapshot' };
+    },
+  };
+  const first = await readGlobalWorksPage(input);
+  assert.equal(first.artifacts[0]?.name, artifact.name);
+  assert.equal(first.complete, false);
+  const second = await readGlobalWorksPage({ ...input, cursor: first.nextCursor });
+  assert.equal(second.artifacts[0]?.name, '第二件');
+  assert.equal(second.complete, true);
+});
+
 test('cursor positions cannot retain revoked thread access, and failed source reads never become an empty success', async () => {
   const input = {
     userId: owner,

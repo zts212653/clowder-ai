@@ -1,9 +1,6 @@
-import type { AlphaRevisionConsumer, DurableManagedGateJob } from './managed-job-types.js';
+import type { AlphaRevisionConsumer, DurableManagedGateJob, ManagedJobSource } from './managed-job-types.js';
 
-export interface ManagedJobSource {
-  readonly originInvocationId?: string;
-  readonly originScheduleId?: string;
-}
+export type { ManagedJobSource } from './managed-job-types.js';
 
 export function validAlphaRevisionConsumer(value: unknown): value is AlphaRevisionConsumer {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false;

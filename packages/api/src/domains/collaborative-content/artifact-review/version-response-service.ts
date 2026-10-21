@@ -53,7 +53,7 @@ export class ArtifactVersionResponseService {
     principal: MediaReviewPrincipal,
     review: ArtifactReview,
     publicationSource?: (
-      mode: 'admit' | 'replay',
+      mode: 'admit' | 'replay' | 'effect',
     ) => MessageMediaPublicationSource | undefined | Promise<MessageMediaPublicationSource | undefined>,
   ): Promise<ReviewMutationResult> {
     const command = respondWithMediaVersionSchema.parse(raw);
@@ -72,8 +72,9 @@ export class ArtifactVersionResponseService {
       await publicationSource?.('replay');
       // Reuse the accepted selector only after the existing reservation checks this actor and exact request fingerprint.
       this.deps.store.reserveVersion(mutation, pending.payload);
-      const resumed = await this.recover(review, principal);
-      if (resumed) return resumed;
+      return this.resume(review, pending.input, acceptedVersionSchema.parse(pending.payload), principal, async () => {
+        await publicationSource?.('effect');
+      });
     }
     const task = await this.deps.media.access.authorize(review.task.taskId, principal, {
       expectedRevision: command.expectedTaskRevision,
@@ -89,7 +90,9 @@ export class ArtifactVersionResponseService {
     const source = await publicationSource?.('admit');
     const accepted = source ? { ...command, publicationSource: source } : command;
     this.deps.store.reserveVersion(mutation, accepted);
-    return this.resume(review, mutation, accepted, principal);
+    return this.resume(review, mutation, accepted, principal, async () => {
+      await publicationSource?.('effect');
+    });
   }
 
   async recover(review: ArtifactReview, viewer: MediaReviewPrincipal): Promise<ReviewMutationResult | null> {
@@ -109,14 +112,9 @@ export class ArtifactVersionResponseService {
       viewer,
     );
     if (observed !== null) return this.project(review, pending.input, command, observed, viewer);
-    // The persisted accepted intent is the actor proof. It may resume only while the same canonical owner and Task revision authorize it.
-    const original: MediaReviewPrincipal = {
-      userId: review.task.ownerUserId,
-      threadId: review.task.threadId,
-      contentTaskId: review.task.taskId,
-      actor: { kind: 'cat', actorId: pending.input.actor.actorId },
-    };
-    return this.resume(review, pending.input, command, original);
+    // A sealed intent proves what was accepted, not that the producer is still authorized to execute.
+    // Only an explicit respond call with a currently authenticated caller may resume an uncommitted effect.
+    return null;
   }
 
   private async resume(
@@ -124,6 +122,7 @@ export class ArtifactVersionResponseService {
     mutation: ReviewMutation,
     command: AcceptedVersion,
     principal: MediaReviewPrincipal,
+    authorizeEffect: () => Promise<void>,
   ): Promise<ReviewMutationResult> {
     const operationId = reviewVersionOperationId(review.reviewId, command.operationId);
     try {
@@ -139,6 +138,7 @@ export class ArtifactVersionResponseService {
         ...(command.publicationSource ? { publicationSource: command.publicationSource } : {}),
         operationId,
         principal,
+        authorizeEffect,
       });
       return this.deps.store.finishVersion(mutation, (current) =>
         appendRespondedVersion(current, {

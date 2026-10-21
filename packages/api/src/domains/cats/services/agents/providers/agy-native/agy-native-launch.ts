@@ -17,11 +17,12 @@ import { prepareAgyNativeKeychain } from './agy-native-keychain.js';
 import { executionOwnerEnv, isolatedOAuthEnv } from './agy-native-launch-env.js';
 import { materializeAgyNativeMcpConfig, validateAgyNativeAccountMcp } from './agy-native-mcp-config.js';
 import { type AgyNativePermissionMode, buildAgyNativePolicy } from './agy-native-policy.js';
-import { acquireAgyNativeProfileTurn, waitForAgyNativeProfileTurn } from './agy-native-profile-turn.js';
+import { waitForAgyNativeProfileTurn } from './agy-native-profile-turn.js';
 import { createAgyNativeRunProfile } from './agy-native-run-profile.js';
 import { materializeAgyNativeSettings } from './agy-native-settings.js';
 import { materializeAgyNativeSkills, retireAgyNativeLegacySkillAlias } from './agy-native-skills.js';
 import { AGY_NATIVE_MCP_TOOLS } from './agy-native-tools.js';
+import { acquireAgyNativeProfileTurnAsync } from './profile-turn/async.js';
 
 export interface AgyNativeLaunchInput {
   readonly catId: CatId;
@@ -43,8 +44,8 @@ export interface AgyNativeLaunchPlan {
   readonly agentTools: readonly string[];
   readonly binding: Omit<NativeSessionBinding, 'cliSessionId'>;
   readonly resumeSessionId?: string;
-  readonly bindSession: (sessionId: string) => void;
-  readonly disposeCredentials?: () => void;
+  readonly bindSession: (sessionId: string) => void | Promise<void>;
+  readonly disposeCredentials?: () => void | Promise<void>;
 }
 
 function assertNoUntrustedProfilePrograms(home: string): void {
@@ -134,10 +135,10 @@ export async function prepareAgyNativeLaunch(input: AgyNativeLaunchInput): Promi
     preparation: true,
   });
   let disposeCredentials: (() => void) | undefined;
-  let releaseSession: (() => void) | undefined;
-  let releaseStartup: (() => void) | undefined;
+  let releaseSession: (() => Promise<void>) | undefined;
+  let releaseStartup: (() => Promise<void>) | undefined;
   let runProfile: ReturnType<typeof createAgyNativeRunProfile> | undefined;
-  const dispose = () => {
+  const dispose = async () => {
     try {
       disposeCredentials?.();
     } finally {
@@ -145,10 +146,13 @@ export async function prepareAgyNativeLaunch(input: AgyNativeLaunchInput): Promi
         runProfile?.dispose();
       } finally {
         try {
-          releaseSession?.();
+          await releaseSession?.();
         } finally {
-          releaseStartup?.();
-          releaseProfile();
+          try {
+            await releaseStartup?.();
+          } finally {
+            await releaseProfile();
+          }
         }
       }
     }
@@ -166,7 +170,7 @@ export async function prepareAgyNativeLaunch(input: AgyNativeLaunchInput): Promi
       retainTrustedWorkspaces: true,
     });
     retireAgyNativeLegacySkillAlias(home);
-    releaseProfile();
+    await releaseProfile();
     runProfile = createAgyNativeRunProfile(home);
     const configHome = runProfile.home;
     const agent = materializeAgyNativeAgentFile({
@@ -211,7 +215,12 @@ export async function prepareAgyNativeLaunch(input: AgyNativeLaunchInput): Promi
     const sessionScope = (conversationId: string) => ({ conversationId, runHome: configHome });
     if (resume && options?.sessionId) {
       releaseSession = input.controlOperation
-        ? acquireAgyNativeProfileTurn(home, ownerInvocationId, sessionScope(options.sessionId))
+        ? await acquireAgyNativeProfileTurnAsync(
+            home,
+            ownerInvocationId,
+            sessionScope(options.sessionId),
+            options.signal,
+          )
         : await waitForAgyNativeProfileTurn(home, ownerInvocationId, options.signal, sessionScope(options.sessionId));
     }
     const nativeInput = prepareAgyNativeInput(
@@ -274,6 +283,7 @@ export async function prepareAgyNativeLaunch(input: AgyNativeLaunchInput): Promi
       ...(options?.invocationId ? { invocationId: options.invocationId } : {}),
       ...(options?.cliSessionId ? { cliSessionId: options.cliSessionId } : {}),
       ...(options?.parentSpan ? { parentSpan: options.parentSpan } : {}),
+      ...(options?.livenessProbe ? { livenessProbe: options.livenessProbe } : {}),
     };
     disposeCredentials = await materializeTaskMcp(configHome, input, options?.callbackEnv);
     // CLI 1.3.5 treats a concurrent index-open lock error as corruption and
@@ -303,14 +313,19 @@ export async function prepareAgyNativeLaunch(input: AgyNativeLaunchInput): Promi
         agentName: agent.agentName,
       },
       ...(resume && options?.sessionId ? { resumeSessionId: options.sessionId } : {}),
-      bindSession: (sessionId) => {
-        releaseSession ??= acquireAgyNativeProfileTurn(home, ownerInvocationId, sessionScope(sessionId));
-        releaseStartup?.();
+      bindSession: async (sessionId) => {
+        releaseSession ??= await acquireAgyNativeProfileTurnAsync(
+          home,
+          ownerInvocationId,
+          sessionScope(sessionId),
+          options?.signal,
+        );
+        await releaseStartup?.();
       },
       disposeCredentials: dispose,
     };
   } catch (error) {
-    dispose();
+    await dispose();
     throw error;
   }
 }

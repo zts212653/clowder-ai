@@ -1,6 +1,7 @@
 /* eslint-disable @next/next/no-css-tags -- Global CSS that does not need Next processing
  * (xterm vendor + app-level token/control styles) is served as static stylesheets to
  * bypass Next dev's flight CSS loader which chokes on class selectors and non-root CSS. */
+import { deploymentDefaults } from '@cat-cafe/shared';
 import type { Metadata, Viewport } from 'next';
 import { AppShell } from '@/components/AppShell';
 import { BrakeModal } from '@/components/BrakeModal';
@@ -29,8 +30,8 @@ export const viewport: Viewport = {
 };
 
 export const metadata: Metadata = {
-  title: 'Clowder AI',
-  description: 'Your AI team collaboration space',
+  title: deploymentDefaults.brand.name,
+  description: deploymentDefaults.brand.tagline,
   manifest: '/manifest.json',
   icons: {
     icon: [
@@ -43,7 +44,7 @@ export const metadata: Metadata = {
   appleWebApp: {
     capable: true,
     statusBarStyle: 'default',
-    title: 'Clowder AI',
+    title: deploymentDefaults.brand.name,
   },
 };
 

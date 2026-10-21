@@ -3,6 +3,9 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { useState } from 'react';
 import { type CatData, formatCatName } from '@/hooks/useCatData';
 import type { MemberSaveTrace } from '@/utils/member-save-trace';
+import { usesAgyAcp, usesAgyNative } from '../../hub-cat-editor.agy';
+import { MemberCurrentStatus } from '../../members/MemberCurrentStatus';
+import { MemberIdentity } from '../../members/MemberIdentity';
 import { MemberAdditionalFields } from './MemberAdditionalFields';
 import { MemberChangeSummary } from './MemberChangeSummary';
 import { MemberCloudIdentity } from './MemberCloudIdentity';
@@ -48,16 +51,19 @@ export function MemberSettingsPage({
   const { draft, accounts, ready, saving, dirtyCount } = editor;
   const { form, baseline, section } = draft;
   const identity = accounts.find((account) => account.id === form.accountRef);
-  const tool =
-    form.carrier === 'acp'
-      ? /dsh|deepseek/i.test(form.acpCommand + form.acpStartupArgs)
-        ? 'DSH'
-        : 'ACP'
-      : form.clientId === 'openai'
-        ? 'Codex'
-        : form.clientId === 'anthropic'
-          ? 'Claude Code'
-          : form.clientId;
+  const tool = usesAgyAcp(form)
+    ? t('AGY 官方 ACP', 'AGY official ACP')
+    : usesAgyNative(form)
+      ? 'AGY Native'
+      : form.carrier === 'acp'
+        ? /dsh|deepseek/i.test(form.acpCommand + form.acpStartupArgs)
+          ? 'DSH'
+          : 'ACP'
+        : form.clientId === 'openai'
+          ? 'Codex'
+          : form.clientId === 'anthropic'
+            ? 'Claude Code'
+            : form.clientId;
   const accountLabel =
     identity?.displayName || identity?.name || form.accountRef || t('使用工具当前配置', 'Current tool configuration');
   const query = new URLSearchParams(searchParams.toString());
@@ -84,6 +90,12 @@ export function MemberSettingsPage({
           <h1 className="break-words text-2xl font-semibold">
             {cat ? formatCatName(form) : t('添加猫猫伙伴', 'Add a teammate')}
           </h1>
+          {cat && (
+            <>
+              <MemberIdentity id={cat.id} />
+              <MemberCurrentStatus cat={cat} />
+            </>
+          )}
           <p className="mt-2 break-words text-sm text-cafe-secondary" data-testid="member-identity-summary">
             {tool}
             {form.accountRef ? ` · ${accountLabel}` : ''}

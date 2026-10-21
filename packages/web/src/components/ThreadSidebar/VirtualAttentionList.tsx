@@ -53,12 +53,13 @@ export const VirtualAttentionList = forwardRef<VirtualThreadListHandle, VirtualA
       start: 0,
       end: Math.min(rows.length, Math.ceil(FALLBACK_VIEWPORT_HEIGHT_PX / ROW_HEIGHT_PX) + OVERSCAN_ROWS),
     }));
-    const measured = useMeasuredSidebarRows(rows, listRef, scrollContainerRef, !!getRowHeight, range);
+    const measured = useMeasuredSidebarRows(rows, listRef, scrollContainerRef, getRowHeight, range);
     const offsets = useMemo(() => {
       const result = [0];
       for (const row of rows) {
         const cached = measured.get(row.key);
-        const height = getRowHeight && cached?.row === row ? cached.height : (getRowHeight?.(row) ?? ROW_HEIGHT_PX);
+        const estimate = getRowHeight?.(row) ?? ROW_HEIGHT_PX;
+        const height = getRowHeight && cached?.row === row && cached.estimate === estimate ? cached.height : estimate;
         result.push(result[result.length - 1] + height);
       }
       return result;

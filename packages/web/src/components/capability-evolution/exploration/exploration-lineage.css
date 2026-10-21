@@ -154,6 +154,9 @@
   width: 136px;
   height: 88px;
 }
+.exploration-lineage[data-historical="true"] .exploration-node-wrap[data-has-meta="true"] {
+  height: 128px;
+}
 .exploration-lineage[data-historical="true"] .exploration-node {
   padding: 8px 10px;
   gap: 2px;
@@ -182,10 +185,8 @@
   line-height: 1.25;
 }
 .exploration-lineage[data-historical="true"] .exploration-node-meta {
-  display: -webkit-box;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
-  overflow: hidden;
+  display: block;
+  overflow-wrap: anywhere;
   line-height: 1.2;
 }
 .exploration-node-summary {
@@ -248,6 +249,9 @@
 .exploration-lineage[data-historical="true"][data-density="compact"] .exploration-node-wrap {
   width: 136px;
   height: 88px;
+}
+.exploration-lineage[data-historical="true"][data-density="compact"] .exploration-node-wrap[data-has-meta="true"] {
+  height: 128px;
 }
 .exploration-lineage[data-historical="true"][data-density="compact"] .exploration-node {
   padding: 8px 10px;

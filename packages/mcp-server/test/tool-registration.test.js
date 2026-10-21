@@ -298,6 +298,7 @@ describe('MCP Server Tool Registration', () => {
       'cat_cafe_multi_mention',
       'cat_cafe_start_vote',
       'cat_cafe_propose_thread',
+      'cat_cafe_continue_approved_task',
       'cat_cafe_propose_session_handoff',
       'cat_cafe_propose_profile_update',
       'cat_cafe_propose_taste',

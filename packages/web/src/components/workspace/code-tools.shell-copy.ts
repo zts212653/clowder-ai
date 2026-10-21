@@ -1,3 +1,4 @@
+import { deploymentDefaults } from '@cat-cafe/shared';
 /**
  * F322 v2 代码组工具页（Git / 变更 / 终端 / 页面预览 / 控制台）的中英文案（北极星 §1.13
  * 末尾词表 +「界面上的字」表；AC-B6–B8）。zh 是已上线版本逐字原文；en 以词表的英文列
@@ -89,7 +90,7 @@ export const codeToolsCopy = defineShellCopy(
         newTabTitle: '新标签页',
         gatewayUnavailable: '预览网关不可用',
         invalidUrl: '请输入有效的 localhost 地址（例如 localhost:5173）',
-        hubPageWarning: '这看起来是 Clowder AI Hub 页面，不是 dev 服务器；页面预览面向 Vite、Next.js 等 dev 服务。',
+        hubPageWarning: `这看起来是 ${deploymentDefaults.brand.displayName} Hub 页面，不是 dev 服务器；页面预览面向 Vite、Next.js 等 dev 服务。`,
         portNotAllowed: '该端口不允许预览',
         hmrConnected: (port: number) => `热更新已连接 · localhost:${port}`,
         hmrDisconnected: '热更新已断开。',
@@ -200,8 +201,7 @@ export const codeToolsCopy = defineShellCopy(
         newTabTitle: 'New tab',
         gatewayUnavailable: 'Preview gateway unavailable',
         invalidUrl: 'Enter a valid localhost URL (e.g. localhost:5173)',
-        hubPageWarning:
-          'This looks like a Clowder AI Hub page, not a dev server. Preview is for dev servers such as Vite or Next.js.',
+        hubPageWarning: `This looks like a ${deploymentDefaults.brand.displayName} Hub page, not a dev server. Preview is for dev servers such as Vite or Next.js.`,
         portNotAllowed: "This port can't be previewed",
         hmrConnected: (port: number) => `Hot reload connected · localhost:${port}`,
         hmrDisconnected: 'Hot reload disconnected.',

@@ -1,7 +1,12 @@
 'use client';
 import type { ReactNode } from 'react';
-import { carrierOptionsForClient, type HubCatEditorFormState } from '../../hub-cat-editor.model';
+import { usesAgyAcp, usesAgyNative } from '../../hub-cat-editor.agy';
+import type { HubCatEditorFormState } from '../../hub-cat-editor.model';
+import { AgyNativeFields } from '../../hub-cat-editor-agy';
+import { MemberCarrierSelect } from '../../hub-cat-editor-carrier';
 import { SelectField, TextField } from '../../hub-cat-editor-fields';
+import { MemberCopyContext, MemberEditorPresentation } from '../../members/editor-presentation';
+import { membersCopy } from '../../members/members.shell-copy';
 import type { MemberField } from './MemberAdditionalFields';
 import type { MemberText } from './MemberRuntimeFields';
 
@@ -16,6 +21,8 @@ export function MemberAdvancedFields({
   t: MemberText;
   fields: (items: MemberField[]) => ReactNode;
 }) {
+  const agy = usesAgyNative(form) || usesAgyAcp(form);
+  const language = t('zh', 'en') === 'en' ? 'en' : 'zh';
   return (
     <div className="space-y-5">
       <h2 className="text-lg font-semibold">{t('高级接入', 'Advanced connection')}</h2>
@@ -25,13 +32,15 @@ export function MemberAdvancedFields({
           'The adapter defines the protocol. A program name does not change it.',
         )}
       </p>
-      <SelectField
-        label={t('接入方式', 'Adapter')}
-        value={form.carrier}
-        options={carrierOptionsForClient(form.clientId)}
-        onChange={(value) => patch({ carrier: value as HubCatEditorFormState['carrier'] })}
-      />
-      {form.carrier === 'acp' && (
+      <MemberCarrierSelect label={t('接入方式', 'Adapter')} form={form} onChange={patch} t={t} />
+      {agy && (
+        <MemberEditorPresentation.Provider value>
+          <MemberCopyContext.Provider value={membersCopy[language]}>
+            <AgyNativeFields form={form} onChange={patch} language={language} />
+          </MemberCopyContext.Provider>
+        </MemberEditorPresentation.Provider>
+      )}
+      {form.carrier === 'acp' && !agy && (
         <>
           <TextField
             label={t('启动程序', 'Program')}
@@ -64,7 +73,7 @@ export function MemberAdvancedFields({
           ])}
         </>
       )}
-      {form.carrier !== 'acp' && (
+      {form.carrier !== 'acp' && !agy && (
         <label className="block text-sm">
           {t('额外 CLI 参数（每行一项）', 'Extra CLI arguments (one per line)')}
           <textarea
@@ -85,10 +94,15 @@ export function MemberAdvancedFields({
         MCP
       </label>
       <p className="text-sm text-cafe-secondary">
-        {t(
-          '已有权限、沙箱和未显示的扩展配置会保留。账号凭据在“账户与密钥”管理。',
-          'Existing permissions, sandbox and unlisted extensions are preserved. Manage credentials in Accounts & keys.',
-        )}
+        {agy
+          ? t(
+              '个人授权保存在此隔离 Profile 中；保存配置不会登录，也不会调用模型。',
+              'Personal authorization stays in this isolated Profile. Saving configuration does not sign in or call a model.',
+            )
+          : t(
+              '已有权限、沙箱和未显示的扩展配置会保留。账号凭据在“账户与密钥”管理。',
+              'Existing permissions, sandbox and unlisted extensions are preserved. Manage credentials in Accounts & keys.',
+            )}
       </p>
     </div>
   );

@@ -12,14 +12,22 @@ const defineTool = defineMcpCanonicalFactory('realtime-companion-tools.ts', unde
 const ADMISSION_REF = 'file:docs/features/F306-codex-app-capability-parity.md' as const;
 
 export const realtimeCompanionStartInputSchema = {
-  thread_id: z.string().trim().min(1).describe('Existing Clowder AI thread bound to the current native cat session'),
+  thread_id: z
+    .string()
+    .trim()
+    .min(1)
+    .describe(`Existing ${deploymentDefaults.brand.displayName} thread bound to the current native cat session`),
   consumer: z
     .enum(['watch_video', 'meeting_companion'])
     .describe('Named experimental journey; arbitrary realtime or raw-host consumers are not accepted'),
 };
 
 export const realtimeCompanionStatusInputSchema = {
-  thread_id: z.string().trim().min(1).describe('Clowder AI thread whose current-cat companion status should be read'),
+  thread_id: z
+    .string()
+    .trim()
+    .min(1)
+    .describe(`${deploymentDefaults.brand.displayName} thread whose current-cat companion status should be read`),
 };
 
 export const realtimeCompanionStopInputSchema = realtimeCompanionStatusInputSchema;
@@ -73,7 +81,7 @@ async function companionRequest(threadId: string, suffix: string, init?: Request
     return successResult(JSON.stringify(data ?? { status: response.status }, null, 2));
   } catch (error) {
     return errorResult(
-      `Cannot reach Clowder AI API at ${apiUrl}: ${error instanceof Error ? error.message : String(error)}`,
+      `Cannot reach ${deploymentDefaults.brand.displayName} API at ${apiUrl}: ${error instanceof Error ? error.message : String(error)}`,
     );
   }
 }
@@ -92,8 +100,7 @@ function parseJson(value: string): Record<string, unknown> | null {
 export const realtimeCompanionTools = [
   defineTool({
     name: 'cat_cafe_realtime_companion_start',
-    description:
-      'Start the narrow experimental Codex Realtime companion for the current cat and exact thread. Use when: running in Alpha after the user explicitly asks for watch-video commentary or meeting companionship and F195 audio capture is already active on that same thread. NOT for: non-Alpha deployments, starting a microphone, arbitrary realtime prompts, raw host control, or background always-on listening. Output: an active text-only companion session; transcript remains owned by F195 and replies use the existing Clowder AI message store.',
+    description: `Start the narrow experimental Codex Realtime companion for the current cat and exact thread. Use when: running in Alpha after the user explicitly asks for watch-video commentary or meeting companionship and F195 audio capture is already active on that same thread. NOT for: non-Alpha deployments, starting a microphone, arbitrary realtime prompts, raw host control, or background always-on listening. Output: an active text-only companion session; transcript remains owned by F195 and replies use the existing ${deploymentDefaults.brand.displayName} message store.`,
     inputSchema: realtimeCompanionStartInputSchema,
     handler: handleRealtimeCompanionStart,
     governance: {
@@ -111,8 +118,7 @@ export const realtimeCompanionTools = [
   }),
   defineTool({
     name: 'cat_cafe_realtime_companion_status',
-    description:
-      'Read whether the current cat has an active experimental realtime companion on an exact Clowder AI thread. Use when: running in Alpha to check readiness after start, confirm shutdown, or diagnose a missing companion reply. NOT for: non-Alpha availability claims, reading transcript content, or starting/inspecting F195 audio capture. Output: read-only active/inactive state plus the bound consumer and native session coordinates when active.',
+    description: `Read whether the current cat has an active experimental realtime companion on an exact ${deploymentDefaults.brand.displayName} thread. Use when: running in Alpha to check readiness after start, confirm shutdown, or diagnose a missing companion reply. NOT for: non-Alpha availability claims, reading transcript content, or starting/inspecting F195 audio capture. Output: read-only active/inactive state plus the bound consumer and native session coordinates when active.`,
     inputSchema: realtimeCompanionStatusInputSchema,
     handler: handleRealtimeCompanionStatus,
     governance: {

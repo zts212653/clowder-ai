@@ -1,0 +1,38 @@
+import { defineShellCopy } from '../shell/shell-copy';
+export const quotaCopy = defineShellCopy(
+  {
+    zh: {
+      column: '额度',
+      check: '查额度',
+      refresh: '刷新额度',
+      retry: '重试',
+      querying: '正在查询…',
+      unavailable: '额度读不到',
+      unsupported: '这一家没有额度接口',
+      nearLimit: '接近上限',
+      resetDue: '已到重置时间',
+      resetUnknown: '重置时间未知',
+      left: (percent: string) => `剩 ${percent}%`,
+      resetIn: (relative: string) => `${relative}重置`,
+      updated: (time: string) => `上次 ${time}`,
+      stale: (time: string) => `没刷新上 · 显示的是 ${time} 的`,
+    },
+    en: {
+      column: 'Quota',
+      check: 'Check quota',
+      refresh: 'Refresh quota',
+      retry: 'Retry',
+      querying: 'Checking…',
+      unavailable: 'Quota unavailable',
+      unsupported: 'No quota API for this provider',
+      nearLimit: 'Near limit',
+      resetDue: 'Reset due',
+      resetUnknown: 'Reset time unknown',
+      left: (percent: string) => `${percent}% left`,
+      resetIn: (relative: string) => `Resets ${relative}`,
+      updated: (time: string) => `Last checked ${time}`,
+      stale: (time: string) => `Refresh failed · Showing the reading from ${time}`,
+    },
+  },
+  { samples: { left: [['46'], ['12']], resetIn: [['in 6 days']], updated: [['01:35']], stale: [['01:35']] } },
+);

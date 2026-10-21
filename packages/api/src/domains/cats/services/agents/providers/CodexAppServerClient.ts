@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { deploymentDefaults } from '@cat-cafe/shared';
 import {
   CodexActiveWriterRecoveryError,
   type CodexNativeResumeReplacementProvenance,
@@ -291,7 +292,7 @@ export class CodexAppServerClient {
     this.lifecycle.armInactivityTimeout(timeoutMs, timeoutHandler);
     try {
       await this.request('initialize', {
-        clientInfo: { name: 'cat-cafe', title: 'Clowder AI', version: '1' },
+        clientInfo: { name: 'cat-cafe', title: `${deploymentDefaults.brand.displayName}`, version: '1' },
         capabilities: recoveryInstruction || input.collaborationMode || input.live ? { experimentalApi: true } : {},
       });
       await this.write({ method: 'initialized' });

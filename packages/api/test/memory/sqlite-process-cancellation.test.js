@@ -58,3 +58,71 @@ test('abort kills active native SQL and queued cancellation does not start anoth
   assert.ok(performance.now() - start < 100);
   assert.deepEqual(await store.search('definitely-absent', { deadlineAt: Date.now() + 10_000 }), []);
 });
+
+test('a canceled message reader retains its own bounded pre-return native witness', async (t) => {
+  const root = mkdtempSync(join(tmpdir(), 'message-read-witness-'));
+  const store = new SqliteEvidenceStore(join(root, 'evidence.sqlite'));
+  await store.initialize();
+  t.after(() => {
+    store.close();
+    rmSync(root, { recursive: true, force: true });
+  });
+  const db = store.getDb();
+  db.prepare(
+    "INSERT INTO evidence_docs(anchor,kind,status,title,summary,updated_at) VALUES ('thread-fixture','thread','active','fixture','','2026-01-01')",
+  ).run();
+  const insert = db.prepare(
+    "INSERT INTO evidence_passages(doc_anchor,passage_id,content,position,created_at) VALUES ('thread-fixture',?,?,?,'2026-01-01T00:00:00Z')",
+  );
+  const words = Array.from({ length: 1000 }, (_, i) => String.fromCodePoint(0x4e00 + i));
+  db.transaction(() => {
+    for (let i = 0; i < 10000; i++)
+      insert.run(`msg-${i}`, `${words.at(-1)}${'甲'.repeat(1000)} private-body-canary`, i);
+  })();
+  const controller = new AbortController();
+  const events = channel('cat-cafe.memory-process');
+  let pid = 0;
+  let cancelAt = 0;
+  const subscriber = (event) => {
+    if (event.kind !== 'message-search' || pid) return;
+    pid = event.pid;
+    setTimeout(() => {
+      cancelAt = performance.now();
+      controller.abort(new DOMException('controlled deadline', 'TimeoutError'));
+    }, 25);
+  };
+  events.subscribe(subscriber);
+  t.after(() => events.unsubscribe(subscriber));
+  await assert.rejects(
+    store.searchMessagePassages(words.join(' '), {
+      mode: 'lexical',
+      sort: 'relevance',
+      visibleThreadIds: ['fixture'],
+      signal: controller.signal,
+    }),
+    (error) => {
+      assert.equal(error, controller.signal.reason);
+      const evidence = error.memoryProcess;
+      assert.ok(evidence, 'a killed native message reader must retain its request-scoped progress');
+      assert.equal(evidence.kind, 'message-search');
+      assert.equal(evidence.pid, pid);
+      assert.ok(evidence.queueMs >= 0 && evidence.elapsedMs >= evidence.queueMs);
+      assert.match(evidence.lastObservedSql?.sqlFingerprint ?? '', /^[a-f0-9]{64}$/);
+      assert.ok(evidence.lastObservedSql.caller.some((line) => line.includes('message-passage-lexical')));
+      assert.doesNotMatch(JSON.stringify(evidence), /private-body|SELECT|FROM evidence_passages/);
+      return true;
+    },
+  );
+  assert.ok(performance.now() - cancelAt < 250, 'diagnostics must not delay native cancellation');
+  let exited = false;
+  for (let i = 0; i < 50; i++) {
+    try {
+      process.kill(pid, 0);
+    } catch {
+      exited = true;
+      break;
+    }
+    await pause(10);
+  }
+  assert.ok(exited, 'the observed message reader must actually exit');
+});

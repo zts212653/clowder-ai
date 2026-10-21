@@ -1,0 +1,38 @@
+import { defineShellCopy } from '@/components/shell/shell-copy';
+export const reviewResponsesCopy = defineShellCopy(
+  {
+    zh: {
+      title: '这一版对原意见的回应',
+      original: '原意见',
+      adjusted: '猫已调整',
+      unchanged: '猫保留原样',
+      unmapped: '新版位置未定位，原意见仍在原版。',
+      located: '新版位置已登记。',
+      result: '查看新版位置',
+      source: '看原意见所在版本',
+      accepted: '已改',
+      reopened: '还不对',
+      pending: '等待你的判断',
+      acceptedState: '你已确认：已改',
+      reopenedState: '你已确认：还不对',
+      version: (n: number) => `第 ${n} 版`,
+    },
+    en: {
+      title: 'How this version responds',
+      original: 'Original feedback',
+      adjusted: 'Cat adjusted',
+      unchanged: 'Cat kept unchanged',
+      unmapped: 'New position not located. Feedback remains on its original version.',
+      located: 'New position recorded.',
+      result: 'View new position',
+      source: 'Open original feedback version',
+      accepted: 'Fixed',
+      reopened: 'Still wrong',
+      pending: 'Awaiting your judgment',
+      acceptedState: 'You confirmed: fixed',
+      reopenedState: 'You confirmed: still wrong',
+      version: (n: number) => `Version ${n}`,
+    },
+  },
+  { samples: { version: [[1], [4], [15]] } },
+);

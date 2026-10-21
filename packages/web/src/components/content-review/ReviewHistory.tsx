@@ -15,6 +15,7 @@ const labels: Record<string, string> = {
   submit_feedback: '交还修改意见',
   decide: '作出审阅结论',
   reopen: '重新打开审阅',
+  judge_response: '判断这版对原意见的修改',
   respond_with_version: '发布新版并逐条回应',
   retire_attention: '撤回过时的判断请求',
 };
@@ -126,6 +127,11 @@ export function ReviewHistory({
               ) : null}
               {body ? (
                 <p className="mt-2 whitespace-pre-wrap break-words leading-5 text-cafe-secondary">{body}</p>
+              ) : null}
+              {entry.kind === 'judge_response' ? (
+                <p className="mt-2">
+                  第 {String(action?.resultOwnerRevision)} 版 · {action?.outcome === 'accepted' ? '已改' : '还不对'}
+                </p>
               ) : null}
               <time className="mt-2 block text-micro text-cafe-muted" dateTime={entry.receipt.createdAt}>
                 {new Date(entry.receipt.createdAt).toLocaleString()}

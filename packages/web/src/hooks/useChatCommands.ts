@@ -1,5 +1,6 @@
 'use client';
 
+import { deploymentDefaults } from '@cat-cafe/shared';
 import { useRouter } from 'next/navigation';
 import { useCallback, useMemo } from 'react';
 import { useShallow } from 'zustand/react/shallow';
@@ -21,7 +22,7 @@ export function isCommandInvocation(input: string, command: string): boolean {
 
 /** Format ConfigSnapshot into readable multi-line text for /config display */
 function formatConfigForDisplay(config: ConfigSnapshot): string {
-  const lines: string[] = ['[配置] Clowder AI 运行配置', ''];
+  const lines: string[] = [`[配置] ${deploymentDefaults.brand.displayName} 运行配置`, ''];
 
   // Per-cat capacity truth (#1208: no independent prompt-policy knobs)
   if (config.perCatCapacities) {

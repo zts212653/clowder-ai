@@ -47,10 +47,11 @@ export function assertModificationResponseReference(
   review: ArtifactReview,
   command: { requestId?: unknown },
   actor: ArtifactReviewAuditActor,
+  sourceRound?: number,
 ) {
   const current = store.get(review.reviewId);
   if (!current) throw new ArtifactReviewError('not_found');
-  const request = currentReviewModification(store, current);
+  const request = currentReviewModification(store, current, sourceRound);
   if (!request && command.requestId === undefined) return; // Pre-F309 Task reviews retain their original contract.
   if (
     !request ||

@@ -1,6 +1,7 @@
 'use client';
 
 import type { BuiltinCloudIdentityProtectedField, BuiltinCloudIdentityProtection } from '@cat-cafe/shared';
+import { deploymentDefaults } from '@cat-cafe/shared';
 import { useMemo, useRef } from 'react';
 import type { CatData } from '@/hooks/useCatData';
 import { useCoCreatorDisplay } from '@/hooks/useCoCreatorConfig';
@@ -22,6 +23,7 @@ import {
   splitStrengthTags,
 } from './hub-cat-editor.model';
 import { AgyNativeFields } from './hub-cat-editor-agy';
+import { MemberCarrierSelect } from './hub-cat-editor-carrier';
 import { CatColorField } from './hub-cat-editor-color-field';
 import { SectionCard, SelectField, TextField } from './hub-cat-editor-fields';
 import { VoiceConfigSection } from './hub-cat-editor-voice';
@@ -412,7 +414,8 @@ export function ProtectedCloudIdentitySection({
               copy.protectedCloudDescription
             ) : (
               <>
-                @gpt-pro 是 Clowder AI 的固定云端入口。它必须保持 ChatGPT Pro 与 Remote MCP 身份，云端回复才能回到正确的
+                @gpt-pro 是 {deploymentDefaults.brand.displayName} 的固定云端入口。它必须保持 ChatGPT Pro 与 Remote MCP
+                身份，云端回复才能回到正确的
                 Thread；因此这里不允许改所属家族、Client、模型、账号或本地运行方式。可以增加别名，主句柄 @gpt-pro
                 固定。需要本地 Codex，请新建另一位成员。
               </>
@@ -574,56 +577,7 @@ export function AccountSection({
         />
 
         {carrierOptionsForClient(form.clientId).length > 1 || form.clientId === 'acp' || form.clientId === 'google' ? (
-          <SelectField
-            label="接入方式"
-            ariaLabel={page ? 'Transport' : '接入方式'}
-            value={
-              form.clientId === 'google' ? (native ? 'agy-native' : officialAcp ? 'agy-acp' : 'retired') : form.carrier
-            }
-            options={[
-              ...(form.clientId === 'google'
-                ? !native && !officialAcp
-                  ? [{ value: 'retired', label: '旧入口已退役，请配置 Native' }]
-                  : []
-                : carrierOptionsForClient(form.clientId)),
-              ...(form.clientId === 'google'
-                ? [
-                    { value: 'agy-native', label: 'AGY Native' },
-                    { value: 'agy-acp', label: t('AGY 官方 ACP') },
-                  ]
-                : []),
-            ]}
-            onChange={(value) => {
-              if (value === 'agy-native') {
-                onChange({ carrier: 'cli', agyNativeEnabled: true, agyAcpEnabled: false });
-                return;
-              }
-              if (value === 'agy-acp') {
-                onChange({
-                  carrier: 'acp',
-                  agyAcpEnabled: true,
-                  agyNativeEnabled: false,
-                  acpCommand: 'agy_acp_server.par',
-                  acpStartupArgs: '',
-                  acpTransport: 'stdio',
-                });
-                return;
-              }
-              const carrier = value as HubCatEditorFormState['carrier'];
-              onChange({
-                carrier,
-                agyNativeEnabled: false,
-                agyAcpEnabled: false,
-                ...(carrier === 'acp' && !form.acpCommand.trim()
-                  ? { acpCommand: defaultAcpCommandForClient(form.clientId) }
-                  : {}),
-                ...(carrier === 'acp' && !form.acpStartupArgs.trim()
-                  ? { acpStartupArgs: defaultAcpStartupArgsForClient(form.clientId) }
-                  : {}),
-              });
-            }}
-            required
-          />
+          <MemberCarrierSelect form={form} onChange={onChange} ariaLabel={page ? 'Transport' : '接入方式'} />
         ) : null}
 
         {(() => {
@@ -819,7 +773,7 @@ export function AccountSection({
         <p className="-mt-1 text-micro leading-4 text-cafe-muted">
           {page
             ? t('发送消息、查记忆等协作工具。关闭后这个成员只能回复，不能使用这些工具协作。')
-            : '控制该成员是否接收 Clowder AI MCP 工具（post_message、search_evidence 等）。关闭后该成员无法使用协作和记忆工具。'}
+            : `控制该成员是否接收 ${deploymentDefaults.brand.name} MCP 工具（post_message、search_evidence 等）。关闭后该成员无法使用协作和记忆工具。`}
         </p>
       </div>
     </SectionCard>

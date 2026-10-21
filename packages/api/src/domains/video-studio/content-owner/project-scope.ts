@@ -20,6 +20,13 @@ export function validateContentOperationContext(
   }
   if (context === undefined) return;
   if (
+    (context.kind === 'work:create' || context.kind === 'work:submit') &&
+    !scope &&
+    /^sha256:[a-f0-9]{64}$/.test(context.requestDigest) &&
+    Object.keys(context).every((key) => key === 'kind' || key === 'requestDigest')
+  )
+    return;
+  if (
     !scope ||
     !context ||
     typeof context !== 'object' ||

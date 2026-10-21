@@ -22,6 +22,7 @@ export async function createInboxProposalFixture({
   configureRuntime,
   configureApprovals,
   configureOwnedReads,
+  collectiveAccountability,
   readIgnoredPreferences,
   ownerUserId = 'default-user',
   participantIds = ['codex61-sol'],
@@ -169,6 +170,7 @@ export async function createInboxProposalFixture({
     else app.get('/api/entrusted-work/needs-me', async () => ({ ownerReads: [], coverage: { state: 'complete' } }));
     await app.register(companionDecisionRoutes, {
       ownerUserId: owner,
+      collectiveAccountability,
       messageStore: messages,
       threadStore: threads,
       runtimeInteractionStore: runtime?.store ?? {

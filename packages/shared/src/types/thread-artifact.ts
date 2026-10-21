@@ -72,6 +72,9 @@ export interface GlobalArtifactWork {
   contentRef: string;
   ownerRevision: number;
   currentOwnerRevision: number;
+  /** Source-provenanced production time for this fixed version, distinct from catalogue import order. */
+  versionCreatedAt?: number;
+  versionTimeSource?: string;
 }
 
 /** GET /api/artifacts 响应 */

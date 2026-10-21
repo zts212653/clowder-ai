@@ -68,6 +68,7 @@ import {
   type AppliedWorkspaceReceiptMessage,
   projectAppliedWorkspaceReceipts,
 } from '../domains/collaborative-content/modification/accepted-workspace-artifacts.js';
+import { readIndependentThreadWorks } from '../domains/collaborative-content/works/catalogue.js';
 import { projectThreadRelations } from '../domains/thread-navigation/thread-relation-projection.js';
 import type { GlobalArtifactWorkLineageResolverHolder } from '../domains/video-studio/content-owner/global-artifact-work-lineage.js';
 import { createModuleLogger } from '../infrastructure/logger.js';
@@ -543,7 +544,8 @@ async function projectGlobalArtifactWorkLineage(
   workLineage: 'resolved' | 'unavailable';
 }> {
   const resolver = holder?.current;
-  if (!resolver) return { artifacts, total: artifacts.length, workLineage: 'unavailable' };
+  if (!resolver)
+    return { artifacts: withoutWorkLineage(artifacts), total: artifacts.length, workLineage: 'unavailable' };
   try {
     const works = await resolver.resolve({ ownerUserId, artifacts });
     if (works.length !== artifacts.length) throw new Error('Artifact work lineage result length mismatch');
@@ -554,8 +556,12 @@ async function projectGlobalArtifactWorkLineage(
     return { artifacts: projected, total: projected.length, workLineage: 'resolved' };
   } catch (error) {
     log.warn({ err: error }, 'F309 artifact work lineage unavailable');
-    return { artifacts, total: artifacts.length, workLineage: 'unavailable' };
+    return { artifacts: withoutWorkLineage(artifacts), total: artifacts.length, workLineage: 'unavailable' };
   }
+}
+
+function withoutWorkLineage(artifacts: readonly GlobalArtifactDTO[]) {
+  return artifacts.map(({ work: _unavailableWork, ...artifact }) => artifact);
 }
 
 // Accepted-file availability is independent of the F138 work-lineage contract.
@@ -1698,6 +1704,8 @@ export const threadsRoutes: FastifyPluginAsync<ThreadsRoutesOptions> = async (ap
       }),
       worksView ? (opts.prTitleReader ?? pluginPrTitleReader(app, request)) : undefined,
     );
+    if (worksView)
+      artifacts.push(...(await readIndependentThreadWorks(opts.artifactWorkLineage?.independent, userId, threadId)));
     const projected = await projectGlobalArtifactWorkLineage(
       opts.artifactWorkLineage,
       userId,
@@ -1781,6 +1789,7 @@ export const threadsRoutes: FastifyPluginAsync<ThreadsRoutesOptions> = async (ap
       if (!query.success) return reply.code(400).send({ error: 'Invalid paged works query' });
       const started = performance.now();
       try {
+        const independentWorks = opts.artifactWorkLineage?.independent;
         const page = await readGlobalWorksPage({
           userId,
           cursor: query.data.cursor,
@@ -1797,6 +1806,12 @@ export const threadsRoutes: FastifyPluginAsync<ThreadsRoutesOptions> = async (ap
             if (!result.complete) throw new WorksPageError('Accepted work source unavailable', 503);
             return result.artifacts;
           },
+          ...(independentWorks
+            ? {
+                ownedWorks: (threadId: string, after?: string, snapshot?: string) =>
+                  independentWorks.readThread({ ownerUserId: userId, threadId, after, snapshot }),
+              }
+            : {}),
         });
         const artifacts = await readArtifactPrTitles(page.artifacts, opts.prTitleReader);
         const projected = await projectGlobalArtifactWorkLineage(opts.artifactWorkLineage, userId, artifacts);
@@ -1872,6 +1887,10 @@ export const threadsRoutes: FastifyPluginAsync<ThreadsRoutesOptions> = async (ap
             prTasks,
             fileLedger: worksView ? [] : fileLedger,
           });
+          if (worksView)
+            artifacts.push(
+              ...(await readIndependentThreadWorks(opts.artifactWorkLineage?.independent, userId, thread.id)),
+            );
           perThread[index] = artifacts.map((a) => ({
             ...a,
             threadId: thread.id,

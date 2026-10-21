@@ -693,6 +693,23 @@ describe('MCP Callback Tools', () => {
     assert.equal(result.isError, undefined);
   });
 
+  test('handleContinueApprovedTask forwards only exact coordinates and never treats a stale invocation as success', async () => {
+    const { handleContinueApprovedTask } = await import('../dist/tools/callback-tools.js');
+    let captured;
+    globalThis.fetch = async (url, options) => {
+      captured = { url, options };
+      return { ok: true, json: async () => ({ outcome: 'continued', receipt: { receiptId: 'receipt-1' } }) };
+    };
+    const input = { proposalId: 'proposal-1', taskId: 'task-1', clientRequestId: 'stable-retry' };
+    assert.equal((await handleContinueApprovedTask(input)).isError, undefined);
+    assert.match(captured.url, /\/api\/callbacks\/continue-approved-task$/);
+    assert.deepEqual(JSON.parse(captured.options.body), input);
+    assert.equal(captured.options.headers['x-invocation-id'], 'test-invocation');
+    assert.equal(captured.options.headers['x-callback-token'], 'test-token');
+    globalThis.fetch = async () => ({ ok: true, json: async () => ({ status: 'stale_ignored' }) });
+    assert.equal((await handleContinueApprovedTask(input)).isError, true);
+  });
+
   test('handleWithdrawThreadProposal forwards the exact proposalId with invocation auth', async () => {
     const { handleWithdrawThreadProposal } = await import('../dist/tools/callback-tools.js');
     let capturedUrl, capturedOptions;

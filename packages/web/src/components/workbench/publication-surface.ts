@@ -3,9 +3,10 @@ import { z } from 'zod';
 import type { WorkspaceFileNavigationOrigin } from '@/stores/chat-types';
 import type { WorkspaceSurfaceDescriptor } from './workbench-contract';
 
+export const publicationContentRefSchema = z.string().regex(/^(?:prepared-media|work):[a-f0-9]{64}$/);
 const coordinate = z
   .object({
-    contentRef: z.string().regex(/^prepared-media:[a-f0-9]{64}$/),
+    contentRef: publicationContentRefSchema,
     ownerRevision: z.number().int().positive().safe(),
     /**
      * The review a Host receipt is committed to. A work can be a round of several reviews and the generic entry remembers

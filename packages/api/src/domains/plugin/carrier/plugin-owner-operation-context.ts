@@ -7,13 +7,17 @@ export interface PluginOwnerOperationContext {
   readonly operationKey: string;
   readonly actionId: string;
   readonly requestId: string;
+  /** Host-authenticated confirmation marker for the exact declared action. */
+  readonly confirmed?: boolean;
   readonly signal: AbortSignal;
+  /** Request/session/activation fence with no inventory I/O; safe while inventory is transaction-locked. */
+  assertWriteCurrent(): void;
   assertCurrent(): Promise<void>;
 }
 
 export class PluginOwnerOperationExpiredError extends Error {
   constructor() {
-    super('Plugin owner operation is no longer current');
+    super('Plugin owner operation expired or is no longer current');
   }
 }
 
@@ -88,15 +92,22 @@ export async function consumeOwnerOperationInvocation<T>(
   issued.request.bindActivation?.(assertActivation, activationSignal);
   const call = new AbortController();
   const signal = AbortSignal.any([call.signal, issued.request.signal, ...(activationSignal ? [activationSignal] : [])]);
-  const assertCurrent = async () => {
+  const assertWriteCurrent = () => {
     try {
       if (signal.aborted) throw new PluginOwnerOperationExpiredError();
       issued.request.assertCurrent();
       assertActivation();
-      await issued.assertCurrent();
-      issued.request.assertCurrent();
-      assertActivation();
       if (signal.aborted) throw new PluginOwnerOperationExpiredError();
+    } catch (error) {
+      call.abort();
+      throw error;
+    }
+  };
+  const assertCurrent = async () => {
+    try {
+      assertWriteCurrent();
+      await issued.assertCurrent();
+      assertWriteCurrent();
     } catch (error) {
       call.abort();
       throw error;
@@ -109,7 +120,9 @@ export async function consumeOwnerOperationInvocation<T>(
     operationKey: issued.request.operationKey,
     actionId: issued.request.actionId,
     requestId: issued.request.requestId,
+    confirmed: issued.request.confirmed === true,
     signal,
+    assertWriteCurrent,
     assertCurrent,
   });
   try {

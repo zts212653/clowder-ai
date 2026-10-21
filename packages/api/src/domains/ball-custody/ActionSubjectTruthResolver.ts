@@ -173,6 +173,7 @@ export class ActionSubjectTruthResolver {
           task.ownerCatId,
           task.userId,
           task.developmentScope,
+          task.title,
         )) ?? [];
       return {
         status: 'verified',

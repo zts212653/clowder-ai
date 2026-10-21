@@ -37,6 +37,7 @@ describe('F167 R3-P1-1 — subjectTaskId production persistence (create→list�
       createdBy: TENANT,
       subjectTaskId: TASK_ID,
       subjectTaskTitle: 'Implement feature X',
+      initialMessage: 'Implement feature X, verify and return the result.',
     });
 
     // Verify subjectTaskId is persisted on the created proposal
@@ -107,6 +108,8 @@ describe('F167 R3-P1-1 — subjectTaskId production persistence (create→list�
       projectPath: '/test',
       createdBy: TENANT,
       subjectTaskId: TASK_ID,
+      subjectTaskTitle: 'Implement original work',
+      initialMessage: 'Implement original work and return verified results.',
       ...overrides,
     });
     const approve = (proposalId, childThreadId) => {

@@ -55,6 +55,22 @@ export async function resolveWorkspaceSnapshot(
   return {
     scope,
     publication,
+    ...(current.mime === 'video/mp4'
+      ? {
+          openVideo: async () => {
+            const opened = await workspace.openMedia({
+              principal: { userId: principal.userId },
+              locator: current.locator,
+              expectedRevision: source.expectedSourceRevision,
+            });
+            if (opened.contentRef !== current.contentRef) {
+              opened.stream.destroy();
+              throw new MediaOwnerError('publication_changed');
+            }
+            return opened;
+          },
+        }
+      : {}),
     load: async () => {
       const opened = await workspace.openMedia({
         principal: { userId: principal.userId },

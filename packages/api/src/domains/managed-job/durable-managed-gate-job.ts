@@ -239,8 +239,9 @@ function reconcileImmutableTerminal(
   now: number,
   supervisorLeaseMs?: number,
 ): DurableGateRecord | null {
+  if (record?.state === 'terminal') return record;
   const receipt = readDurableTerminalReceipt(job);
-  if (!receipt || record?.state === 'terminal') return record;
+  if (!receipt) return record;
   const terminal = terminalRecordFromReceipt(job, record, receipt);
   if (claimDurableGateSupervisor(job, { now, leaseMs: supervisorLeaseMs })) {
     writeDurableGateRecord(job, terminal, { now });

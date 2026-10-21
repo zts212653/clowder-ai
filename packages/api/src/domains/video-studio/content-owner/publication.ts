@@ -1,13 +1,30 @@
 import { createHash } from 'node:crypto';
 import { mediaPublicationSourceSchema, type WorkspaceMediaSnapshotSource } from '@cat-cafe/shared';
+import { validateActor } from './input-validation.js';
 import { evolutionSnapshotPublication } from './published-evolution-media.js';
 import {
   type ContentPublicationScopeV1,
   type ContentSourcePublicationV1,
   type EvolutionSnapshotPublicationScopeV1,
   isTaskPublicationScope,
+  type MessageContentPublicationScopeV1,
+  type WorkPublicationScopeV1,
   type WorkspaceSnapshotPublicationScopeV1,
 } from './types.js';
+
+export function workPublicationContentRef(scope: WorkPublicationScopeV1): string {
+  return `work:${createHash('sha256')
+    .update(
+      JSON.stringify([
+        scope.ownerUserId,
+        scope.createdBy.kind,
+        scope.createdBy.actorId,
+        scope.threadId,
+        scope.creationOperationId,
+      ]),
+    )
+    .digest('hex')}`;
+}
 
 export function samePublicationScope(
   left: ContentPublicationScopeV1 | undefined,
@@ -16,6 +33,14 @@ export function samePublicationScope(
   if (!left || left.ownerUserId !== right.ownerUserId || left.threadId !== right.threadId) return false;
   if (isTaskPublicationScope(left)) return isTaskPublicationScope(right) && left.taskId === right.taskId;
   if (isTaskPublicationScope(right) || left.kind !== right.kind) return false;
+  if (left.kind === 'work' || right.kind === 'work')
+    return (
+      left.kind === 'work' &&
+      right.kind === 'work' &&
+      left.creationOperationId === right.creationOperationId &&
+      left.createdBy.kind === right.createdBy.kind &&
+      left.createdBy.actorId === right.createdBy.actorId
+    );
   if (
     (left.kind === 'workspace-snapshot' || left.kind === 'evolution-snapshot') &&
     (right.kind === 'workspace-snapshot' || right.kind === 'evolution-snapshot') &&
@@ -76,6 +101,32 @@ function validateEvolutionOrigin(
   return true;
 }
 
+function validateWorkOrigin(scope: WorkPublicationScopeV1, publication: ContentSourcePublicationV1) {
+  requirePublicationIdentity(scope.creationOperationId, 256);
+  validateActor(scope.createdBy);
+  if (
+    Object.keys(scope).some(
+      (key) => !['kind', 'ownerUserId', 'threadId', 'creationOperationId', 'createdBy'].includes(key),
+    ) ||
+    publication.threadId !== scope.threadId ||
+    !publication.sourceRef.startsWith('workspace:') ||
+    !/^sha256:[a-f0-9]{64}$/.test(publication.revision)
+  )
+    throw new TypeError('Invalid work publication');
+}
+
+function validateSourceScope(
+  scope: MessageContentPublicationScopeV1 | WorkspaceSnapshotPublicationScopeV1 | EvolutionSnapshotPublicationScopeV1,
+  publication: ContentSourcePublicationV1,
+) {
+  const source = mediaPublicationSourceSchema.parse(scope.source);
+  if (scope.kind !== source.kind || source.threadId !== scope.threadId)
+    throw new TypeError('Invalid publication scope');
+  if (scope.kind === 'workspace-snapshot') return validateSnapshotOrigin(scope, publication);
+  if (scope.kind === 'evolution-snapshot') return validateEvolutionOrigin(scope, publication);
+  return false;
+}
+
 /** Provenance is supplied only by the publication reader, never from a browser actor claim. */
 export function validateContentPublication(
   scope: ContentPublicationScopeV1 | undefined,
@@ -96,13 +147,10 @@ export function validateContentPublication(
     requirePublicationIdentity(scope.taskId);
     if (publication.threadId && publication.threadId !== scope.threadId)
       throw new TypeError('Task publication thread changed');
-  } else {
-    const source = mediaPublicationSourceSchema.parse(scope.source);
-    if (scope.kind !== source.kind || source.threadId !== scope.threadId)
-      throw new TypeError('Invalid publication scope');
-    if (scope.kind === 'workspace-snapshot' && validateSnapshotOrigin(scope, publication)) return;
-    if (scope.kind === 'evolution-snapshot' && validateEvolutionOrigin(scope, publication)) return;
-  }
+  } else if (scope.kind === 'work') {
+    validateWorkOrigin(scope, publication);
+    return;
+  } else if (validateSourceScope(scope, publication)) return;
   if (publication.threadId) requirePublicationIdentity(publication.threadId);
   if (!publication.sourceRef.startsWith(`message:${publication.threadId ?? scope.threadId}:`)) {
     throw new TypeError('Publication source belongs to another thread');

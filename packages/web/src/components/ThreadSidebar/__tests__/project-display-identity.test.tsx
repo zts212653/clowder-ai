@@ -58,7 +58,8 @@ describe('Windows project display preserves project identity (#1585)', () => {
   });
 
   function projectHeading(path: string) {
-    const button = Array.from(harness.container.querySelectorAll('button')).find((item) => item.title === path);
+    const buttons = Array.from(harness.container.querySelectorAll<HTMLButtonElement>('button[data-project-path]'));
+    const button = buttons.find((btn) => btn.getAttribute('data-project-path') === path);
     if (!button) throw new Error(`Project heading missing: ${path}`);
     return button;
   }

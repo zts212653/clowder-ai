@@ -13,7 +13,7 @@ export const templates = {
     changes: (count: number) => `${count} 处修改未保存`,
     requiredFields: (fields: string[]) => `还差 ${fields.length} 项才能添加：${fields.join('、')}。`,
     filterCount: (label: string, count: number) => `${label} ${count}`,
-    aliasCount: (handle: string, count: number) => (count > 1 ? `${handle} 等 ${count} 个` : handle),
+    aliasCount: (handle: string, count: number) => (count > 1 ? `${handle} +${count - 1}` : handle),
     until: (time: number) => `至 ${new Date(time).toLocaleString('zh-CN')}`,
     sortLabel: (name: string) => `排序${name}`,
     upLabel: (name: string) => `上移${name}`,
@@ -39,7 +39,7 @@ export const templates = {
       return `${n} more ${n === 1 ? 'field' : 'fields'} needed to add: ${list}.`;
     },
     filterCount: (label: string, count: number) => `${label} ${count}`,
-    aliasCount: (handle: string, count: number) => (count > 1 ? `${handle} and ${count - 1} more` : handle),
+    aliasCount: (handle: string, count: number) => (count > 1 ? `${handle} +${count - 1}` : handle),
     until: (time: number) => `Until ${new Date(time).toLocaleString('en-US')}`,
     sortLabel: (name: string) => `Reorder ${name}`,
     upLabel: (name: string) => `Move ${name} up`,

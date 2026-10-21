@@ -23,6 +23,8 @@ function fixture() {
     'scripts/lib/intake-gh-retry.sh',
     'scripts/lib/intake-brand-paths.mjs',
     'scripts/brand-dictionary-helper.mjs',
+    'scripts/deployment-brand-config.mjs',
+    'scripts/project-deployment-defaults.mjs',
     'assets/brand-dictionary.yaml',
     'packages/shared/src/deployment-defaults.ts',
     'packages/shared/src/deployment-profiles.json',
@@ -58,7 +60,10 @@ function fixture() {
     '.sync-provenance.json',
     JSON.stringify({ source_commit_sha: 'a'.repeat(40), target_head_sha: 'b'.repeat(40), manifest_version: 3 }),
   );
-  write('packages/web/src/app/layout.tsx', 'Clowder AI Your AI team collaboration space favicon.svg icon-192x192.png');
+  write(
+    'packages/web/src/app/layout.tsx',
+    'deploymentDefaults.brand.name deploymentDefaults.brand.tagline favicon.svg icon-192x192.png',
+  );
   write('packages/api/src/config/frontend-origin.ts', "const DEFAULT_FRONTEND_BASE_URL = 'http://localhost:3003'");
   write('packages/web/public/icons/favicon.svg', '<svg/>');
   write('docs/ROADMAP.md', '# Roadmap\n');
@@ -79,6 +84,52 @@ test('public export validates its staged brand and port instead of contradictory
   const r = f.run();
   assert.equal(r.status, 0, r.stdout + r.stderr);
   assert.match(r.stdout, /Public Brand Guard/);
+});
+
+test('public guard rejects staged brand drift despite an unstaged repair', () => {
+  const f = fixture();
+  const path = 'packages/shared/src/deployment-profiles.json';
+  const original = readFileSync(resolve(f.dir, path), 'utf8');
+  const input = JSON.parse(original);
+  input.profiles.opensource.brand.name = 'Unrelated product';
+  f.write(path, JSON.stringify(input));
+  f.stage();
+  f.write(path, original);
+  const result = f.run();
+  assert.notEqual(result.status, 0, result.stdout + result.stderr);
+  assert.match(result.stdout + result.stderr, /brand.*canonical dictionary/i);
+});
+
+test('public guard reads staged dictionary display values, not an unstaged repair', () => {
+  const f = fixture();
+  const path = 'assets/brand-dictionary.yaml';
+  const original = readFileSync(resolve(f.dir, path), 'utf8');
+  // Public sanitization can make home/public labels identical. Mutate the
+  // selected dictionary side, never the first matching display literal.
+  const changed = original.replace(
+    /(^ {2}- id: product[.]primary[\s\S]*?^ {4}public:[\s\S]*?^ {6}display:)[^\n]*/m,
+    '$1 "Synthetic changed display"',
+  );
+  assert.notEqual(changed, original);
+  f.write(path, changed);
+  f.stage();
+  f.write(path, original);
+  const result = f.run();
+  assert.notEqual(result.status, 0, result.stdout + result.stderr);
+  assert.match(result.stdout + result.stderr, /canonical dictionary/);
+});
+
+test('public guard rejects a stale staged PWA brand despite an unstaged repair', () => {
+  const f = fixture();
+  const path = 'packages/web/public/manifest.json';
+  const config = JSON.parse(readFileSync(resolve(f.dir, 'packages/shared/src/deployment-profiles.json'), 'utf8'));
+  const brand = config.profiles.opensource.brand;
+  f.write(path, JSON.stringify({ name: 'Unrelated product', short_name: brand.shortName, description: brand.tagline }));
+  f.stage();
+  f.write(path, JSON.stringify({ name: brand.displayName, short_name: brand.shortName, description: brand.tagline }));
+  const result = f.run();
+  assert.notEqual(result.status, 0, result.stdout + result.stderr);
+  assert.match(result.stdout + result.stderr, /manifest name differs/);
 });
 
 test('public guard rejects a missing staged roadmap even when the worktree restores it', () => {
@@ -226,7 +277,7 @@ test('home exporter keeps the existing inbound guard and rejects public branding
   f.stage();
   const r = f.run();
   assert.notEqual(r.status, 0);
-  assert.match(r.stdout + r.stderr, /contains 'Clowder AI'/);
+  assert.match(r.stdout + r.stderr, /Expected home deployment profile/);
   assert.doesNotMatch(r.stdout, /Public Brand Guard/);
 });
 
@@ -285,12 +336,17 @@ test('staged favicon removal is rejected even when the worktree copy remains', (
 });
 
 for (const [name, path, body, diagnostic] of [
-  ['SplitPane brand', 'packages/web/src/components/SplitPaneView.tsx', '<h1>猫猫咖啡</h1>', /missing Clowder AI/],
+  [
+    'SplitPane brand',
+    'packages/web/src/components/SplitPaneView.tsx',
+    '<h1>猫猫咖啡</h1>',
+    /missing deploymentDefaults.brand.name/,
+  ],
   [
     'layout tagline',
     'packages/web/src/app/layout.tsx',
     'Clowder AI favicon.svg icon-192x192.png',
-    /missing Your AI team/,
+    /missing deploymentDefaults.brand.tagline/,
   ],
   [
     'API client brand',
@@ -345,6 +401,11 @@ test('public configured frontend default checks staged profile data and rejects 
         envRegistryFrontendPort: 3003,
         corsOrigins: ['http://localhost:3003'],
         roadmapPath: 'docs/ROADMAP.md',
+        repositoryFullName: JSON.parse(
+          readFileSync(resolve(source, 'packages/shared/src/deployment-profiles.json'), 'utf8'),
+        ).profiles.opensource.repositoryFullName,
+        brand: JSON.parse(readFileSync(resolve(source, 'packages/shared/src/deployment-profiles.json'), 'utf8'))
+          .profiles.opensource.brand,
       },
     },
   };
@@ -357,5 +418,5 @@ test('public configured frontend default checks staged profile data and rejects 
   f.write(file, JSON.stringify(config));
   result = f.run();
   assert.notEqual(result.status, 0);
-  assert.match(result.stdout + result.stderr, /public deployment/);
+  assert.match(result.stdout + result.stderr, /Expected opensource deployment profile/);
 });

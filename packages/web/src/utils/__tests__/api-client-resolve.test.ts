@@ -14,6 +14,8 @@ vi.mock('@cat-cafe/shared', async (importOriginal) => {
           envRegistryFrontendPort: 4510,
           corsOrigins: ['http://localhost:4510'],
           roadmapPath: 'docs/ACTIVE.md',
+          repositoryFullName: 'synthetic-owner/browser-fixture',
+          brand: actual.deploymentDefaults.brand,
         },
       },
     }),

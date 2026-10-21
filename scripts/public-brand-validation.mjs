@@ -3,6 +3,7 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import { lstatSync, readFileSync } from 'node:fs';
 import { resolveDeploymentDefaults } from '../packages/shared/src/deployment-defaults.ts';
 import { classifyPath, getHomeTerms, getPublicTerms, parseDictionary } from './brand-dictionary-helper.mjs';
+import { assertDeploymentBrands } from './deployment-brand-config.mjs';
 
 const fromIndex = process.argv.includes('--from-index');
 const git = (...args) =>
@@ -47,6 +48,7 @@ try {
   }
   if (exists('packages/shared/src/deployment-profiles.json')) {
     const file = JSON.parse(read('packages/shared/src/deployment-profiles.json'));
+    assertDeploymentBrands(file, parseDictionary(read('assets/brand-dictionary.yaml')), 'opensource');
     const defaults = resolveDeploymentDefaults(file);
     if (
       file.activeProfile !== 'opensource' ||
@@ -74,11 +76,12 @@ try {
   const required = new Map([
     [
       'packages/web/src/app/layout.tsx',
-      ['Clowder AI', 'Your AI team collaboration space', 'favicon.svg', 'icon-192x192.png'],
+      ['deploymentDefaults.brand.name', 'deploymentDefaults.brand.tagline', 'favicon.svg', 'icon-192x192.png'],
     ],
-    ['packages/web/public/manifest.json', ['Clowder AI']],
-    ['packages/web/src/components/SplitPaneView.tsx', ['Clowder AI']],
-    ['packages/web/src/components/ChatContainerHeader.tsx', ['Clowder AI', "'cat-cafe'", "'cat-cafe-runtime'"]],
+    ['packages/web/public/manifest.json', []],
+    ['packages/web/src/components/SplitPaneView.tsx', ['deploymentDefaults.brand.name']],
+    ['packages/web/src/components/ChatContainerHeader.tsx', ['deploymentDefaults.brand.displayName']],
+    ['packages/web/src/components/ThreadIndicator.tsx', ["'cat-cafe'", "'cat-cafe-runtime'"]],
     ['packages/web/src/utils/api-client.ts', ['HttpOnly session cookie', 'client for Clowder AI']],
     ['packages/api/src/index.ts', []],
     ['packages/api/src/config/frontend-origin.ts', []],
@@ -116,6 +119,17 @@ try {
     const policy = classifyPath(path, dictionary).classification;
     if (!required.has(path) && !['brand-sensitive', 'manual-port'].includes(policy)) continue;
     const body = read(path);
+    if (path === 'packages/web/public/manifest.json') {
+      const manifest = JSON.parse(body);
+      const { brand } = resolveDeploymentDefaults(JSON.parse(read('packages/shared/src/deployment-profiles.json')));
+      for (const [field, value] of Object.entries({
+        name: brand.displayName,
+        short_name: brand.shortName,
+        description: brand.tagline,
+      })) {
+        if (manifest[field] !== value) fail(`manifest ${field} differs from the selected deployment brand`);
+      }
+    }
     for (const term of required.get(path) ?? []) {
       if (!body.includes(term))
         fail(`${path}: missing ${term}${term.includes(':3003') ? ' (public frontend port)' : ''}`);

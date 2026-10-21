@@ -115,7 +115,7 @@ export const actArtifactReviewInputSchema = {
     'Exact version round the annotation, reply or judgment request addresses.',
   ),
   action: artifactReviewCommandSchema.shape.action.describe(
-    'Attributed point/region annotation, reply/edit/resolve, add_visual_marks or delete your own visual mark; owner request_judgment. Human decision/reopen/request_image_edit actions are rejected for cats. Drawings use source-media pixels and real video ticks; authors come from authentication.',
+    'Attributed point/region annotation, reply/edit/resolve, add_visual_marks or delete your own visual mark; owner request_judgment. Human decision/reopen/judge_response/request_image_edit actions are rejected for cats. Drawings use source-media pixels and real video ticks; authors come from authentication.',
   ),
 };
 export const respondArtifactReviewInputSchema = {

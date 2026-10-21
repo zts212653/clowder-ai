@@ -25,6 +25,7 @@ import {
   prepareEvolutionModification,
 } from './evolution-binding.js';
 import { inspectLegacyModification } from './legacy-review-binding.js';
+import { assertModificationStoryEvidence } from './story-evidence.js';
 
 type MediaPrepared = Extract<NonNullable<ContentModificationProgress['prepared']>, { kind: 'media' }>;
 
@@ -42,6 +43,7 @@ export class ModificationMediaBinding implements ModificationContentPort {
 
   async inspect(payload: ContentModificationRequest, principal: MediaReviewPrincipal, resuming: boolean) {
     if (principal.actor.kind !== 'human') throw new ArtifactReviewError('human_required');
+    await assertModificationStoryEvidence(this.deps, payload, principal);
     const source = payload.source;
     if (source.kind === 'video-project') throw new ArtifactReviewError('invalid_action');
     if (source.kind === 'artifact-review') {
@@ -150,6 +152,7 @@ export class ModificationMediaBinding implements ModificationContentPort {
     record: ContentModificationRecord,
     principal: MediaReviewPrincipal,
   ): Promise<() => NonNullable<ContentModificationProgress['review']>> {
+    await assertModificationStoryEvidence(this.deps, record.payload, principal);
     const prepared = record.progress.prepared,
       taskRef = record.progress.task;
     if (principal.actor.kind !== 'human' || !prepared || prepared.kind !== 'media' || !taskRef)

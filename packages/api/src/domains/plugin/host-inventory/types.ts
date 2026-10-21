@@ -15,7 +15,7 @@ export type PluginPackageProvenance =
       readonly kind: 'catalog';
       readonly catalogId: string;
       readonly packageName: string;
-      /** Immutable admission metadata; absent legacy records fail closed while discovery is offline. */
+      /** Optional admission-time hint; older installations do not acquire an origin from current discovery. */
       readonly ownerAuthRequired?: boolean;
     }
   | {

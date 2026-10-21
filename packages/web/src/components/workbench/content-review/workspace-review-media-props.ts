@@ -10,6 +10,12 @@ import type { PendingChatMark } from '@/components/content-review/ReviewPendingC
 import type { ContentReviewAnnotation, ContentReviewVisualMark } from './content-review-contract';
 import type { CanvasFocusRequest, DiscussionFocusRequest } from './workspace-review-media-focus';
 export interface WorkspaceReviewMediaProps {
+  readonly seekRequest?: { id: number; seconds: number };
+  readonly markRequest?: number;
+  readonly selectionRequest?: { id: number; anchor: ArtifactReviewAnchor };
+  readonly playbackHidden?: boolean;
+  readonly onPlaybackTime?: (seconds: number) => void;
+  readonly chapterNavigation?: ReactNode;
   readonly originalUrl?: string;
   readonly filename?: string;
   readonly mime?: string;

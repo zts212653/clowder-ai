@@ -18,6 +18,7 @@ import {
   resolveEvolutionReviewSource,
 } from './evolution-review-source.js';
 import {
+  assertPublicationAnchorEvidence,
   type PublicationReviewPort,
   type PublicationReviewTarget,
   readPublicationReview,
@@ -169,6 +170,16 @@ export class WorkspaceContentReviewService {
       review: view.review,
       target: input.target,
     });
+    if ('anchor' in anchor && anchor.anchor.kind === 'video-range' && anchor.anchor.storyEvidence) {
+      const source = view.review.source;
+      if (source.kind !== 'publication') throw new WorkspaceContentReviewError('invalid_action');
+      await assertPublicationAnchorEvidence(
+        this.options.publications,
+        source.publication,
+        anchor.anchor,
+        input.principal,
+      );
+    }
     const result = this.options.store.mutate(mutation, (review) => ({
       ...review,
       revision: review.revision + 1,

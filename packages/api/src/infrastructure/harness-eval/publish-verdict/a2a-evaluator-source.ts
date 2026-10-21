@@ -3,12 +3,12 @@ import { createHash } from 'node:crypto';
 import { closeSync, constants, fstatSync, openSync, readSync, realpathSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { promisify } from 'node:util';
+import { deploymentDefaults } from '@cat-cafe/shared';
 import type { A2aEvaluatorSource } from './verdict-source-types.js';
 
 const exec = promisify(execFile);
 const CHECKOUT_NAME = 'cat-cafe-eval-a2a-current';
-// Keep the deployment coordinate plain so the canonical public exporter rewrites it.
-const CANONICAL_REPOSITORY = 'zts212653/clowder-ai';
+const CANONICAL_REPOSITORY = deploymentDefaults.repositoryFullName;
 const CANONICAL_ORIGINS = new Set(
   ['https://github.com/', 'git@github.com:', 'ssh://git@github.com/'].flatMap((prefix) => [
     `${prefix}${CANONICAL_REPOSITORY}`,

@@ -4,10 +4,11 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { getRepositoryCoordinates } from './brand-dictionary-helper.mjs';
 import { classifyStatusChecks, observeMergePrTruth } from './lib/clowder-merge-check-evidence.mjs';
 
-export const CLOWDER_REPOSITORY = 'zts212653/clowder-ai';
-export const CAT_CAFE_REPOSITORY = 'zts212653/clowder-ai';
+export const CLOWDER_REPOSITORY = getRepositoryCoordinates().public;
+export const CAT_CAFE_REPOSITORY = getRepositoryCoordinates().home;
 const CAFE_MESSAGE_ID = /^\d{16,}-\d{6}-[0-9a-f]{8}$/i;
 const INTAKE_DECISIONS = new Set(['absorbed', 'public-only', 'rejected']);
 
@@ -156,7 +157,9 @@ function validateIntakePlan(intakePlan, prNumber) {
       );
     }
     const body = String(truth.body ?? '').toLowerCase();
-    const sourceRef = new RegExp(String.raw`(?:clowder-ai#${prNumber}\b|/zts212653/clowder-ai/pull/${prNumber}\b)`);
+    const sourceRef = new RegExp(
+      String.raw`(?:clowder-ai#${prNumber}\b|/${CLOWDER_REPOSITORY.replaceAll('.', '\\.')}/pull/${prNumber}\b)`,
+    );
     if (!sourceRef.test(body)) {
       return blocked(
         'intake_intent_issue_source_mismatch',

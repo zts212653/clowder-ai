@@ -22,6 +22,8 @@ export const SIGNAL_SOURCE_LABELS = {
   health_probe: '健康检查',
   dispatch_success: '最近一次接活顺利完成',
 };
+/** Recovery is evidence for availability, rather than a fifth current state. */
+export const memberStatusLabel = (status: MemberStatus) => (status.label === '已恢复' ? '可用' : status.label);
 export function memberSignalDeadline(signal: { validUntil?: number; resetAt?: number }): number {
   return Math.min(signal.validUntil ?? Infinity, signal.resetAt ?? Infinity);
 }

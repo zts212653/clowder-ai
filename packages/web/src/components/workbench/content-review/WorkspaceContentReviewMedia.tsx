@@ -26,6 +26,8 @@ import { VideoArtworkControls } from '@/components/content-review/VideoArtworkCo
 import { useShellPresentation } from '@/components/shell/shell-presentation';
 import { useF307ExperienceWorkbenchStore } from '@/components/workbench/experience-workbench-store';
 import { useWorkspacePreviewIntent } from '../WorkspacePreviewIntent';
+import { useWorkspaceSurfaceVisibility } from '../WorkspaceSurfaceVisibility';
+import { useVideoWorkRequests } from './useVideoWorkRequests';
 import { WorkspaceReviewMarkupToolbar } from './WorkspaceReviewMarkupToolbar';
 import { WorkspaceReviewMediaElement } from './WorkspaceReviewMediaElement';
 import { workspaceFrameAnchor } from './workspace-content-review-anchors';
@@ -33,6 +35,12 @@ import { useCanvasFocus, useDiscussionVideoSeek } from './workspace-review-media
 import type { WorkspaceReviewMediaProps } from './workspace-review-media-props';
 
 export function WorkspaceContentReviewMedia({
+  seekRequest,
+  markRequest = 0,
+  selectionRequest,
+  playbackHidden = false,
+  onPlaybackTime,
+  chapterNavigation,
   reviewId,
   sourceRevision,
   src,
@@ -69,9 +77,10 @@ export function WorkspaceContentReviewMedia({
   byteLength,
 }: WorkspaceReviewMediaProps) {
   const draftStarted = useWorkspacePreviewIntent();
+  const visible = useWorkspaceSurfaceVisibility();
   const isV2 = useShellPresentation() === 'v2';
   const gallery = useArtworkGallery();
-  const chatSelection = imageChatPrimary && isV2;
+  const chatSelection = imageChatPrimary && (isV2 || media.kind === 'video');
   const artwork = useRef<HTMLDivElement>(null);
   const video = useRef<HTMLVideoElement>(null);
   const stage = useRef<HTMLDivElement>(null);
@@ -112,6 +121,21 @@ export function WorkspaceContentReviewMedia({
     src,
     media.kind === 'video' ? JSON.stringify([reviewId, sourceRevision, media.streamId]) : undefined,
   );
+  const markQueued = useVideoWorkRequests({
+    video,
+    media,
+    frameTime,
+    visible,
+    selectable,
+    markRequest,
+    selectionRequest,
+    playbackHidden,
+    seekRequest,
+    seekTo,
+    setSeconds,
+    setMode,
+    onSelect: onAnchorSelected,
+  });
   const frame =
     media.kind === 'video' && frameTime !== null
       ? { streamId: media.streamId, tick: browserTimeToTick(frameTime, media) }
@@ -299,6 +323,9 @@ export function WorkspaceContentReviewMedia({
       data-artwork-video-player={media.kind === 'video' ? '' : undefined}
     >
       {saveNotice ? <output className="px-3 text-xs text-cafe-muted">{saveNotice}</output> : null}
+      {markQueued && selectable && frameTime === null ? (
+        <output className="px-3 text-xs text-cafe-muted">等待当前画面解码后标记…</output>
+      ) : null}
       {markup.readError || markup.storageError ? (
         <p role="alert" className={`${styles.artworkNotice} px-3 text-xs text-cafe-error`}>
           {markup.readError ? (
@@ -354,7 +381,10 @@ export function WorkspaceContentReviewMedia({
             customControls={imageChatPrimary}
             onSeeking={onSeeking}
             onSeeked={onSeeked}
-            onSeconds={setSeconds}
+            onSeconds={(next) => {
+              setSeconds(next);
+              onPlaybackTime?.(next);
+            }}
             onError={setLoadError}
           />
           {src && !error ? overlay : null}
@@ -403,6 +433,7 @@ export function WorkspaceContentReviewMedia({
       ) : (
         toolbar
       )}
+      {chapterNavigation}
       {error && src ? (
         <p role="alert" className="px-3 text-xs text-cafe-error">
           {error}

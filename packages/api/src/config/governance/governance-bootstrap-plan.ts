@@ -1,3 +1,4 @@
+import { deploymentDefaults } from '@cat-cafe/shared';
 /** Pure filesystem planning for F302 install/undo previews. */
 
 import { createHash } from 'node:crypto';
@@ -295,7 +296,7 @@ async function planProjectSkills(
               file,
               action: 'skipped',
               group: 'project-skills',
-              reason: 'selected Skill is not installed in Clowder AI',
+              reason: `selected Skill is not installed in ${deploymentDefaults.brand.displayName}`,
             },
       );
     }

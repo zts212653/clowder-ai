@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import type {
+  ArtifactReviewAnchor,
   ReviewedMediaAsset,
   WorkspaceContentReview,
   WorkspaceContentReviewView,
@@ -20,12 +21,32 @@ export interface PublicationReviewTarget {
   readonly contentRef: string;
   readonly ownerRevision: number;
 }
-export type PublicationReviewPort = Pick<PublishedMediaService, 'read' | 'currentRevision'>;
+export type PublicationReviewPort = Pick<PublishedMediaService, 'read' | 'currentRevision'> &
+  Partial<Pick<PublishedMediaService, 'assertAnchorEvidence'>>;
 
 function humanPrincipal(principal: WorkspaceReviewPrincipal): MediaReviewPrincipal {
   if (principal.actor.kind !== 'human' || principal.actor.actorId !== principal.userId)
     throw new WorkspaceContentReviewError('access_denied');
   return { userId: principal.userId, actor: principal.actor };
+}
+
+export async function assertPublicationAnchorEvidence(
+  port: PublicationReviewPort | undefined,
+  target: PublicationReviewTarget,
+  anchor: ArtifactReviewAnchor,
+  principal: WorkspaceReviewPrincipal,
+) {
+  if (!port?.assertAnchorEvidence) throw new WorkspaceContentReviewError('invalid_action');
+  try {
+    await port.assertAnchorEvidence(target, anchor, humanPrincipal(principal));
+  } catch (error) {
+    if (error instanceof MediaOwnerError) {
+      if (error.code === 'invalid_media') throw new WorkspaceContentReviewError('invalid_action');
+      if (error.code === 'access_denied') throw new WorkspaceContentReviewError('access_denied');
+      if (error.code === 'not_found') throw new WorkspaceContentReviewError('source_unavailable');
+    }
+    throw error;
+  }
 }
 
 export function publicationLedgerSource(

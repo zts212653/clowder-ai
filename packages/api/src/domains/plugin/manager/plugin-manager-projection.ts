@@ -223,8 +223,8 @@ function candidateSource(
     };
   }
   if (packageRecord && provenance?.kind !== 'catalog') {
-    if (packageRecord.manifest === null) return { kind: 'local-archive', packageName: null, trust: 'unverified' };
-    throw new Error('Installed plugin package is missing admitted source provenance');
+    // Display existing installations without inventing an admission source or changing their authority.
+    return { kind: 'unknown', packageName: null, trust: 'unknown' };
   }
   if (candidate.directorySource && !packageRecord) return candidate.directorySource;
   return {

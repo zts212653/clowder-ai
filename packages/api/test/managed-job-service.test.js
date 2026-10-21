@@ -94,6 +94,8 @@ test('submission is durable, principal scoped, deduplicated and admits before an
   const restored = new ManagedJobService(root);
   assert.equal(restored.get(principal, job.jobId).state, 'queued');
   assert.throws(() => restored.get({ ...principal, catId: 'another-cat' }, job.jobId), /not_found/);
+  await assert.rejects(restored.reconcileJob({ ...principal, catId: 'another-cat' }, job.jobId), /not_found/);
+  assert.equal((await restored.reconcileJob(principal, job.jobId)).inspection.state, 'pending');
   assert.throws(() => restored.cancel({ ...principal, userId: 'another-user' }, job.jobId), /not_found/);
   assert.throws(() => restored.tail({ ...principal, threadId: 'another-thread' }, job.jobId), /not_found/);
   assert.throws(() => restored.start(principal, job.jobId, new ManagedRunner()), /not_admitted/);

@@ -1,3 +1,4 @@
+import { deploymentDefaults } from '@cat-cafe/shared';
 import type { PluginManifest } from '@clowder-ai/plugin-contract';
 
 /** Frozen manifest-only registrations preceding archive releases. Never derive these from a newer release. */
@@ -7,7 +8,7 @@ export const LEGACY_BUNDLED_MANIFESTS = [
     version: '0.1.0',
     contractVersion: '0.1.0',
     name: 'Collective Connector',
-    description: 'Pairs this Clowder AI Host with an independent Collective Service.',
+    description: `Pairs this ${deploymentDefaults.brand.displayName} Host with an independent Collective Service.`,
     features: [
       {
         id: 'collective-connection',

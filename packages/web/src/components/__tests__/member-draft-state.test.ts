@@ -27,6 +27,52 @@ const original = {
 } as CatData;
 
 describe('member drafts survive navigation and concurrent edits', () => {
+  it('isolates AGY profile permissions per tool and restores the exact persisted profile draft', () => {
+    const agy = {
+      ...original,
+      clientId: 'google',
+      carrier: 'acp',
+      defaultModel: 'gemini-4-argon-high',
+      agyProfile: {
+        enabled: false,
+        carrier: 'acp',
+        profileId: 'isolated-argon',
+        homeRoot: '/profiles',
+        model: 'gemini-4-argon-high',
+        autoApprove: true,
+        trustedWorkspaces: ['/approved'],
+      },
+      acp: { command: '/installed/agy_acp_server.par', startupArgs: [] },
+    } as CatData;
+    const start: MemberDraft = {
+      version: 1,
+      baseline: agy,
+      form: initialState(agy),
+      section: 'advanced',
+      templateId: null,
+    };
+    const away = switchMemberRuntime(start, {
+      id: 'codex',
+      label: 'Codex',
+      clientId: 'openai',
+      installed: true,
+      models: [],
+    });
+    expect(away.form.agyAcpEnabled).toBe(false);
+    expect(away.form.agyAutoApprove).toBe(false);
+    expect(away.form.agyHomeRoot).toBe('');
+    persistMemberDraft('agy-roundtrip', away);
+    const back = switchMemberRuntime(readMemberDraft('agy-roundtrip')!, {
+      id: 'agy',
+      label: 'AGY ACP',
+      clientId: 'google',
+      installed: true,
+      models: [],
+      acp: { command: agy.acp!.command, startupArgs: [] },
+    });
+    expect(back.form).toEqual(start.form);
+    expect(buildMemberPatchPayload(back.form, agy)).toEqual({});
+  });
   it('preserves ACP commands, pool settings and hidden extensions across a persisted runtime round trip', () => {
     const acpCat = {
       ...original,

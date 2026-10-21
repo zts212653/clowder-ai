@@ -229,9 +229,10 @@ export function useArtifactReview(reviewId: string) {
         setError('上一项保存结果还未确认，请先重试原操作。');
         return false;
       }
+      const ledgerRound = action.kind === 'judge_response' ? action.sourceRound : round;
       return send({
-        ...(latest.review.rounds.find((item) => item.number === round)?.ledgerRef
-          ? { expectedLedgerRevision: latest.review.rounds.find((item) => item.number === round)?.ledgerRevision }
+        ...(latest.review.rounds.find((item) => item.number === ledgerRound)?.ledgerRef
+          ? { expectedLedgerRevision: latest.review.rounds.find((item) => item.number === ledgerRound)?.ledgerRevision }
           : {}),
         reviewId,
         expectedRevision: latest.review.revision,

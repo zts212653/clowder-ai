@@ -1,3 +1,4 @@
+import { deploymentDefaults } from '@cat-cafe/shared';
 import { defineShellCopy } from '../shell/shell-copy';
 import { continuationCopy } from './members.continuation-copy';
 import { membersCopySamples } from './members.copy-samples';
@@ -22,6 +23,9 @@ export const membersCopy = defineShellCopy(
       '添加或登录账号 ↗': '添加或登录账号 ↗',
       '账号页在新标签页打开，这里的草稿会保留。保存成员后生效。':
         '账号页在新标签页打开，这里的草稿会保留。保存成员后生效。',
+      复制: '复制',
+      已复制: '已复制',
+      '复制失败，请选中文字复制': '复制失败，请选中文字复制',
       读取中: '读取中',
       '正在读取成员名单…': '正在读取成员名单…',
       成员名单读取失败: '成员名单读取失败',
@@ -142,7 +146,7 @@ export const membersCopy = defineShellCopy(
       已撤回: '已撤回',
       已失效: '已失效',
       客户端: '客户端',
-      'Clowder AI 工具': 'Clowder AI 工具',
+      'Clowder AI 工具': `${deploymentDefaults.brand.displayName} 工具`,
       思考深度: '推理强度',
       启动命令: '启动命令',
       服务商名称: '服务商名称',
@@ -179,6 +183,9 @@ export const membersCopy = defineShellCopy(
       ...membersHelpCopy.zh,
     },
     en: {
+      复制: 'Copy',
+      已复制: 'Copied',
+      '复制失败，请选中文字复制': 'Copy failed. Select and copy the text.',
       ...editorCopy.en,
       ...nativeCopy.en,
       ...continuationCopy.en,
@@ -316,7 +323,7 @@ export const membersCopy = defineShellCopy(
       已撤回: 'Retracted',
       已失效: 'Expired',
       客户端: 'Client',
-      'Clowder AI 工具': 'Clowder AI tools',
+      'Clowder AI 工具': `${deploymentDefaults.brand.displayName} tools`,
       思考深度: 'Reasoning effort',
       启动命令: 'Launch command',
       服务商名称: 'Provider name',

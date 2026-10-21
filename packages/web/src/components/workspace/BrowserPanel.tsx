@@ -1,6 +1,6 @@
 'use client';
 
-import { buildPreviewGatewayUrl } from '@cat-cafe/shared';
+import { buildPreviewGatewayUrl, deploymentDefaults } from '@cat-cafe/shared';
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { useShellCopy } from '@/components/shell/shell-copy';
 import { useShellPresentation } from '@/components/shell/shell-presentation';
@@ -30,8 +30,7 @@ const CLASSIC_COPY: PreviewCopy = {
   newTabTitle: 'New Tab',
   gatewayUnavailable: 'Preview gateway not available',
   invalidUrl: 'Enter a valid localhost URL (e.g. localhost:5173)',
-  hubPageWarning:
-    'This URL looks like a Clowder AI Hub page, not a dev server. Preview is designed for dev servers (Vite, Next.js, etc.).',
+  hubPageWarning: `This URL looks like a ${deploymentDefaults.brand.displayName} Hub page, not a dev server. Preview is designed for dev servers (Vite, Next.js, etc.).`,
   portNotAllowed: 'Port not allowed',
   hmrConnected: (port: number) => `HMR connected · localhost:${port}`,
   hmrDisconnected: 'HMR disconnected.',

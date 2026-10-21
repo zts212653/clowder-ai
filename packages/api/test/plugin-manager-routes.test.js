@@ -790,6 +790,25 @@ test('closed request validation rejects ambiguous or extra mutation fields', asy
   }
 });
 
+test('an unknown read origin is not an installation request source or an admission bypass', async () => {
+  const { app, audits, calls } = await harness();
+  try {
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/plugin-manager/plugins/install',
+      headers: writeHeaders,
+      remoteAddress: '127.0.0.1',
+      payload: { source: { kind: 'unknown', packageName: null, trust: 'unknown' } },
+    });
+    assert.equal(response.statusCode, 400, response.body);
+    assert.equal(response.json().code, 'INVALID_REQUEST');
+    assert.deepEqual(audits, []);
+    assert.deepEqual(calls, []);
+  } finally {
+    await app.close();
+  }
+});
+
 test('audit admission is fail-closed and happens before each mutation', async () => {
   let serviceCalls = 0;
   const { app, calls } = await harness({

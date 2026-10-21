@@ -1,3 +1,5 @@
+import { deploymentDefaults } from '@cat-cafe/shared';
+
 /**
  * F120: Preview URL parsing + Clowder AI Hub URL detection.
  * Extracted as pure function for testability.
@@ -37,7 +39,7 @@ export function parsePreviewUrl(input: string): ParsedPreviewUrl {
   for (const pattern of HUB_PATH_PATTERNS) {
     if (pattern.test(path)) {
       warning =
-        'This URL looks like a Clowder AI Hub page, not a dev server. ' +
+        `This URL looks like a ${deploymentDefaults.brand.displayName} Hub page, not a dev server. ` +
         'Preview is designed for dev servers (Vite, Next.js, etc.).';
       break;
     }

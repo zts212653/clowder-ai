@@ -1,5 +1,6 @@
 import type { EntityConflictResolutionRequest } from '@cat-cafe/shared';
-import type { EmbedModelInfo, EntityMutationContext, EntityRecord, EvidenceItem, SearchOptions } from './interfaces.js';
+import type { EmbedModelInfo, EntityMutationContext, EntityRecord, SearchOptions } from './interfaces.js';
+import type { MemoryReadDiagnostic } from './memory-read-execution.js';
 import type { MessagePassageSearchOptions } from './message-passage-search-types.js';
 
 export type EmbeddingSnapshot = {
@@ -55,6 +56,7 @@ export type ParentMessage =
       error?: ProcessError;
     };
 export type ChildMessage =
+  | { type: 'read-diagnostic'; id: number; diagnostic: MemoryReadDiagnostic }
   | { type: 'result'; id: number; value?: unknown; error?: ProcessError }
   | { type: 'started'; id: number; pid: number }
   | { type: 'embedding'; id: number; method: 'load' | 'reprobeIfNeeded' | 'embed'; texts?: string[] };

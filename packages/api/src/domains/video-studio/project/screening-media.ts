@@ -1,13 +1,12 @@
 import { createHash } from 'node:crypto';
 import type { WorkspaceContentSourceService } from '../../workspace/workspace-content-source.js';
-import { probeImmutableMedia } from '../content-owner/published-media-probe.js';
+import { probeImmutableVideoFile } from '../content-owner/published-media-probe.js';
 import {
   ContentOwnerConflictError,
   ContentOwnerIdempotencyError,
   ContentOwnerNotFoundError,
   type ProjectContentOwnerService,
 } from '../content-owner/service.js';
-import { digestBytes } from '../content-owner/store.js';
 import type { VideoProjectMediaScopeV1 } from '../content-owner/types.js';
 import { sameProjectValue } from './document-mutations.js';
 import {
@@ -47,14 +46,7 @@ export async function freezeProjectScreeningMedia(
     opened.stream.destroy();
     throw new VideoProjectScreeningError('invalid_screening');
   }
-  const bytes = await collectSourceBytes(opened, input.source.expectedSourceRevision);
-  const length = bytes.length;
-  const verified = await deps.workspace.describe({
-    principal: { userId: input.principal.userId },
-    locator: source.locator,
-  });
-  if (verified.contentRef !== source.contentRef || verified.revision !== input.source.expectedSourceRevision)
-    throw new VideoProjectScreeningError('media_changed');
+  const length = opened.byteLength;
   const scope: VideoProjectMediaScopeV1 = {
     kind: 'video-project-screening',
     ownerUserId: input.principal.userId,
@@ -68,16 +60,26 @@ export async function freezeProjectScreeningMedia(
     registeredBy: input.principal.actor,
     registeredAt: deps.now?.() ?? new Date().toISOString(),
   };
-  await deps.projects.authorize({ ...input, permission: 'write' });
-  if (input.principal.actor.kind === 'cat') await deps.authorizeCatSource?.(input);
   try {
-    const receipt = await deps.owner.importContent({
+    const receipt = await deps.owner.importStream({
       contentRef,
-      bytes,
+      stream: opened.stream,
+      byteLength: length,
+      blobDigest: input.source.expectedSourceRevision as `sha256:${string}`,
       mediaType: 'video/mp4',
       actor: input.principal.actor,
       operationId: input.operationId,
       projectMediaScope: scope,
+      authorizeEffect: async () => {
+        const verified = await deps.workspace.describe({
+          principal: { userId: input.principal.userId },
+          locator: source.locator,
+        });
+        if (verified.contentRef !== source.contentRef || verified.revision !== input.source.expectedSourceRevision)
+          throw new VideoProjectScreeningError('media_changed');
+        await deps.projects.authorize({ ...input, permission: 'write' });
+        if (input.principal.actor.kind === 'cat') await deps.authorizeCatSource?.(input);
+      },
     });
     return { contentRef, blobDigest: receipt.blobDigest, byteLength: length, media: opened.media, scope };
   } catch (error) {
@@ -86,7 +88,7 @@ export async function freezeProjectScreeningMedia(
     if (
       !retained.projectMediaScope ||
       retained.projectMediaScope.requestDigest !== requestDigest ||
-      retained.blobDigest !== digestBytes(bytes) ||
+      retained.blobDigest !== input.source.expectedSourceRevision ||
       !sameProjectValue(retained.projectMediaScope.registeredBy, input.principal.actor)
     )
       throw error;
@@ -97,6 +99,8 @@ export async function freezeProjectScreeningMedia(
       media: opened.media,
       scope: retained.projectMediaScope,
     };
+  } finally {
+    opened.stream.destroy();
   }
 }
 
@@ -107,38 +111,19 @@ async function findRetainedMedia(
   requestDigest: `sha256:${string}`,
 ) {
   try {
-    const existing = await deps.owner.load(contentRef, 1);
+    const existing = await deps.owner.describe(contentRef, 1);
     const scope = existing.projectMediaScope;
     if (!scope || scope.requestDigest !== requestDigest || !sameProjectValue(scope.registeredBy, input.principal.actor))
       throw new ContentOwnerIdempotencyError(input.contentRef, input.operationId);
-    const media = await probeImmutableMedia(existing.bytes, 'video/mp4');
-    if (media.kind !== 'video') throw new VideoProjectScreeningError('invalid_screening');
-    return { contentRef, blobDigest: existing.blobDigest, byteLength: existing.bytes.length, media, scope };
+    const opened = await deps.owner.open(contentRef, 1);
+    try {
+      const media = await probeImmutableVideoFile(opened.path);
+      return { contentRef, blobDigest: existing.blobDigest, byteLength: existing.byteLength, media, scope };
+    } finally {
+      await opened.handle.close();
+    }
   } catch (error) {
     if (!(error instanceof ContentOwnerNotFoundError)) throw error;
     return null;
   }
-}
-
-async function collectSourceBytes(
-  opened: import('../../workspace/workspace-content-source.js').OpenWorkspaceMediaV1,
-  expectedRevision: string,
-) {
-  const chunks: Buffer[] = [];
-  let length = 0;
-  try {
-    for await (const chunk of opened.stream) {
-      if (!Buffer.isBuffer(chunk)) throw new VideoProjectScreeningError('invalid_screening');
-      length += chunk.length;
-      if (length > opened.byteLength || length > 256 * 1024 * 1024)
-        throw new VideoProjectScreeningError('invalid_screening');
-      chunks.push(chunk);
-    }
-  } finally {
-    opened.stream.destroy();
-  }
-  const bytes = Buffer.concat(chunks, length);
-  if (length !== opened.byteLength || digestBytes(bytes) !== expectedRevision)
-    throw new VideoProjectScreeningError('media_changed');
-  return bytes;
 }

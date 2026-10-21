@@ -32,6 +32,16 @@ function added(result: ReturnType<typeof addMediaSelection>) {
 }
 
 describe('video places in the one original Chat attachment', () => {
+  it('freezes paragraph text and metadata revision in the original version-bound selection', () => {
+    const story = {
+      ...RANGE,
+      storyEvidence: { paragraphId: 'opening', metadataRevision: 3, quote: '原来的话\n保留换行' },
+    };
+    const attachment = added(addMediaSelection([], VIDEO, story));
+    expect(attachment.selections[0]?.selection).toEqual(story);
+    expect(MediaContextAttachmentSchema.parse(attachment).selections[0]?.selection).toEqual(story);
+  });
+
   it('carries the original stream, ticks, frame region and version without converting their coordinates', () => {
     const attachment = added(addMediaSelection([], VIDEO, RANGE, '把这一段缩短'));
     expect(attachment.mediaType).toBe('video/mp4');

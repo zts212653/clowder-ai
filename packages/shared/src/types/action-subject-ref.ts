@@ -1,7 +1,8 @@
 import { z } from 'zod';
+import { deploymentDefaults } from '../deployment-defaults.js';
 
 export const ACTION_SUBJECT_REF_DESCRIPTION =
-  'subjectRef must use pr:<owner>/<repo>#<positive-number> (for example pr:zts212653/clowder-ai#2943) ' +
+  `subjectRef must use pr:<owner>/<repo>#<positive-number> (for example pr:${deploymentDefaults.repositoryFullName}#2943) ` +
   'or subject:<namespace>:<opaque-id>. GitHub URL forms and SHA suffixes such as github:owner/repo#2943@abc123 are invalid.';
 
 export const ACTION_SUBJECT_REF_MAX_LENGTH = 240;

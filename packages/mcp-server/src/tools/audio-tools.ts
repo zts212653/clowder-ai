@@ -47,7 +47,7 @@ export async function shutdownActiveAudioCapture(): Promise<void> {
 }
 
 function audioError(err: unknown): string {
-  return `Cannot reach Clowder AI API at ${API_URL}: ${err instanceof Error ? err.message : String(err)}`;
+  return `Cannot reach ${deploymentDefaults.brand.displayName} API at ${API_URL}: ${err instanceof Error ? err.message : String(err)}`;
 }
 
 // ── Schemas ──────────────────────────────────────────────────

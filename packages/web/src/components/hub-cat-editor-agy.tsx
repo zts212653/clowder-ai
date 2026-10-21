@@ -8,14 +8,16 @@ import { useShellCopy } from './shell/shell-copy';
 export function AgyNativeFields({
   form,
   onChange,
+  language,
 }: {
   form: HubCatEditorFormState;
   onChange: (patch: Partial<HubCatEditorFormState>) => void;
+  language?: 'zh' | 'en';
 }) {
   const t = useEditorText();
   const translated = useShellCopy(agyNativeCopy);
   const page = useMemberEditorPresentation();
-  const copy = page ? translated : agyNativeCopy.zh;
+  const copy = language ? agyNativeCopy[language] : page ? translated : agyNativeCopy.zh;
   return (
     <div className="space-y-2" data-testid="agy-native-settings">
       <SelectField

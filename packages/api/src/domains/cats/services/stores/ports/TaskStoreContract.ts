@@ -23,6 +23,10 @@ import type {
   AttachEntrustedWorkArtifactInput,
   AttachEntrustedWorkArtifactResult,
 } from './EntrustedWorkArtifactEvidence.js';
+import type {
+  EntrustedTaskDataControllerTransition,
+  EntrustedTaskDataControllerTransitionResult,
+} from './TaskDataControllerTransition.js';
 
 export const ENTRUSTED_WORK_TERMINAL_ACTION_REQUIRED = 'ENTRUSTED_WORK_TERMINAL_ACTION_REQUIRED' as const;
 export const ENTRUSTED_WORK_ADMISSION_CONFLICT = 'ENTRUSTED_WORK_ADMISSION_CONFLICT' as const;
@@ -33,6 +37,11 @@ export const TASK_SUBJECT_SNAPSHOT_CONFLICT = 'TASK_SUBJECT_SNAPSHOT_CONFLICT' a
 /** Internal read/authorize/write fence. Null asserts that the subject is still absent. */
 export interface TaskSubjectUpsertCondition {
   readonly expected: TaskItem | null;
+}
+
+/** Host-owned liveness fence checked at the aggregate's actual write boundary. */
+export interface TaskMutationWriteFence {
+  assertCurrent(): void | Promise<void>;
 }
 
 export function createTaskSubjectSnapshotConflictError(subjectKey: string): Error & { code: string } {
@@ -195,6 +204,10 @@ export function assertEntrustedWorkGenericUpsertAllowed(task: TaskItem): void {
 export class TaskPageCursorExpiredError extends Error {}
 
 export interface ITaskStore {
+  transitionEntrustedTaskDataController(
+    input: EntrustedTaskDataControllerTransition,
+    writeFence?: TaskMutationWriteFence,
+  ): EntrustedTaskDataControllerTransitionResult | Promise<EntrustedTaskDataControllerTransitionResult>;
   replacePluginWait(taskId: string, input: ReplacePluginWaitInput): TaskItem | null | Promise<TaskItem | null>;
   hasDevelopmentSource(query: DevelopmentSourceQuery): boolean | Promise<boolean>;
   findDevelopmentWork(userId: string, scope: DevelopmentScopeV1): TaskItem[] | Promise<TaskItem[]>;
@@ -243,10 +256,12 @@ export interface ITaskStore {
   closeEntrustedWork(
     taskId: string,
     input: CloseEntrustedWorkStoreInput,
+    writeFence?: TaskMutationWriteFence,
   ): CloseEntrustedWorkStoreResult | Promise<CloseEntrustedWorkStoreResult>;
   updateEntrustedWork(
     taskId: string,
     input: UpdateEntrustedWorkStoreInput,
+    writeFence?: TaskMutationWriteFence,
   ): UpdateEntrustedWorkStoreResult | Promise<UpdateEntrustedWorkStoreResult>;
   /** Internal verified-publication append; never the generic callback artifactRefs replacement. */
   attachEntrustedWorkArtifactEvidence(

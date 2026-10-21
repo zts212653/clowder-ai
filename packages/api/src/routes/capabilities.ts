@@ -1,3 +1,4 @@
+import { deploymentDefaults } from '@cat-cafe/shared';
 /**
  * Capabilities Route — F041 统一能力看板 API
  *
@@ -891,7 +892,7 @@ export const capabilitiesRoutes: FastifyPluginAsync = async (app) => {
       return {
         error:
           validatedResult.reason === 'cat_cafe_owned_path'
-            ? 'Cannot confirm governance inside Clowder AI; choose an external project'
+            ? `Cannot confirm governance inside ${deploymentDefaults.brand.name}; choose an external project`
             : 'Invalid project path',
       };
     }

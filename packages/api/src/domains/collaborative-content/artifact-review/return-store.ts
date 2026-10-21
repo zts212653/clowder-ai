@@ -28,7 +28,14 @@ export interface ReviewReturnIntent extends ReviewReturnTarget {
   contentRef: string;
   ownerRevision: number;
   state: 'pending' | 'queued' | 'retired';
-  kind: 'submit_feedback' | 'decide' | 'reopen' | 'request_image_edit' | 'request_media_edit' | 'supersede_request';
+  kind:
+    | 'submit_feedback'
+    | 'decide'
+    | 'reopen'
+    | 'request_image_edit'
+    | 'request_media_edit'
+    | 'supersede_request'
+    | 'judge_response';
   createdAt: string;
   messageId?: string;
   retirementReason?: string;
@@ -75,7 +82,8 @@ export class ArtifactReviewReturnStore {
       kind !== 'reopen' &&
       kind !== 'request_image_edit' &&
       kind !== 'request_media_edit' &&
-      kind !== 'supersede_request'
+      kind !== 'supersede_request' &&
+      kind !== 'judge_response'
     )
       return;
     const round = review.rounds.find((item) => item.number === input.round);

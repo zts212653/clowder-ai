@@ -354,3 +354,4 @@ export {
   recordRequestReviewOwnerFactInputSchema,
   skillConsumptionTools,
 } from './skill-consumption-tools.js';
+export { workTools } from './work-tools.js';

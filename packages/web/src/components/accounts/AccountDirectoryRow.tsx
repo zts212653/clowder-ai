@@ -3,6 +3,7 @@ import { Fragment, useState } from 'react';
 import { AvatarImageWithFallback } from '../AvatarImageWithFallback';
 import { accountRequest } from '../codex-accounts/account-request';
 import { CodexQuotaControl } from '../codex-accounts/CodexQuotaControl';
+import { quotaCopy } from '../codex-accounts/quota.shell-copy';
 import type { AccountMember, ProfileItem } from '../hub-accounts.types';
 import { useShellCopy } from '../shell/shell-copy';
 import { useShellLanguage } from '../shell/shell-language';
@@ -36,8 +37,15 @@ export function AccountDirectoryRow({
   actionError?: string;
 }) {
   const t = useShellCopy(accountsCopy);
+  const quota = useShellCopy(quotaCopy);
   const language = useShellLanguage();
   const displayName = accountDisplayName(account, t);
+  const native = account.builtin && account.authType === 'oauth';
+  const identityDetail = native
+    ? account.nativeLogin?.officialDefault === false
+      ? account.nativeLogin.home
+      : t.nativeManaged
+    : (account.codex?.identity?.email ?? account.baseUrl ?? '');
   const confirm = useConfirm();
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -51,7 +59,6 @@ export function AccountDirectoryRow({
   const failed = ['failed', 'timeout', 'interrupted', 'canceled', 'superseded'].includes(attempt?.state ?? '');
   const active = members.filter((m) => m.available);
   const duplicate = accounts.find((p) => p.id === attempt?.duplicateAccountRef);
-  const native = account.builtin && account.authType === 'oauth';
   const id = `account-row-${encodeURIComponent(account.id)}`;
   async function login(action: string, extra: Record<string, unknown> = {}) {
     setBusy(true);
@@ -129,27 +136,54 @@ export function AccountDirectoryRow({
   return (
     <Fragment>
       <tr data-account-id={account.id} id={id} tabIndex={-1}>
-        <td className="account-provider">{provider}</td>
+        <td className="account-provider" title={provider}>
+          {provider}
+        </td>
         <td>
-          <button type="button" className="account-name" aria-expanded={open} onClick={() => setOpen(!open)}>
+          <button
+            type="button"
+            className="account-name"
+            title={displayName}
+            aria-expanded={open}
+            onClick={() => setOpen(!open)}
+          >
             {displayName}
           </button>
-          <small>
-            {native
-              ? account.nativeLogin?.officialDefault === false
-                ? account.nativeLogin.home
-                : t.nativeManaged
-              : (account.codex?.identity?.email ?? account.baseUrl ?? '')}
+          <small className="account-cell-text" title={identityDetail}>
+            {identityDetail}
           </small>
         </td>
         <td>
           <span className={`account-state ${status.ready ? 'account-state-ready' : ''}`}>{status.label}</span>
-          <small>{status.detail}</small>
+          <small className="account-cell-text" title={status.detail}>
+            {status.detail}
+          </small>
+        </td>
+        <td className="account-quota-cell">
+          {account.clientId === 'openai' && account.authType === 'oauth' ? (
+            status.ready ? (
+              <CodexQuotaControl
+                accountRef={account.id}
+                observation={account.quota}
+                reload={refresh}
+                managed={!!account.codex}
+                identity={account.codex?.identity}
+              />
+            ) : (
+              <small>{t.noQuota}</small>
+            )
+          ) : (
+            <small>{account.authType === 'api_key' ? t.providerBalance : quota.unsupported}</small>
+          )}
         </td>
         <td>
           <div className="account-followers">
             {used && <span className="account-used">{t.inUse}</span>}
-            {!used && active.some((m) => m.bindingMode === 'override') && <span>{t.override}</span>}
+            {!used && active.some((m) => m.bindingMode === 'override') && (
+              <span className="account-binding" title={t.override}>
+                {t.override}
+              </span>
+            )}
             {active.slice(0, 5).map((m) => (
               <AvatarImageWithFallback
                 key={m.id}
@@ -210,7 +244,7 @@ export function AccountDirectoryRow({
       </tr>
       {(open || error || actionError) && (
         <tr className="account-expanded">
-          <td colSpan={5}>
+          <td colSpan={6}>
             {(error || actionError) && <p role="alert">{error ? accountMessage(error, language) : actionError}</p>}
             {open && (
               <div className="account-details">
@@ -293,20 +327,6 @@ export function AccountDirectoryRow({
                     )}
                   </div>
                 )}
-                {account.clientId === 'openai' && status.ready && (
-                  <CodexQuotaControl
-                    accountRef={account.id}
-                    observation={account.quota}
-                    reload={refresh}
-                    managed={!!account.codex}
-                    identity={account.codex?.identity}
-                  />
-                )}
-                {account.authType === 'api_key' ? (
-                  <p>{t.providerBalance}</p>
-                ) : account.clientId === 'openai' && !status.ready ? (
-                  <p>{t.noQuota}</p>
-                ) : null}
                 {(account.codex || account.nativeLogin) && (
                   <details>
                     <summary>{t.loginDetails}</summary>

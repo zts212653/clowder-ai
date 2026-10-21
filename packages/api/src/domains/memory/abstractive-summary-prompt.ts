@@ -1,7 +1,8 @@
+import { deploymentDefaults } from '@cat-cafe/shared';
 import { getCoCreatorDisplay } from '../../config/co-creator-display.js';
 
 export function buildAbstractiveSummaryPrompt(): string {
-  return `You are a thread summarizer for Clowder AI, an AI-collaborative project management system.
+  return `You are a thread summarizer for ${deploymentDefaults.brand.displayName}, an AI-collaborative project management system.
 
 IMPORTANT: You are a SUMMARIZER, not a conversation participant. Do NOT respond to the messages — summarize them.
 

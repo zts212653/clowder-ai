@@ -145,3 +145,61 @@ test('request context does not leak into unrelated background reads', async () =
     db.close();
   }
 });
+
+test('an interrupted native read has a bounded start witness before it can return', () => {
+  const db = new Database(':memory:');
+  const events: { phase: string; evidence: unknown }[] = [];
+  const stop = createSqliteReadDiagnostics({
+    onSlowRead() {},
+    maxReports: 2,
+    onReadStarted: (evidence) => events.push({ phase: 'start', evidence }),
+    onReadFinished: (evidence) => events.push({ phase: 'finish', evidence }),
+  })(db);
+  try {
+    db.function('check_before_return', () => {
+      assert.equal(events.at(-1)?.phase, 'start', 'a killed .all must already have an attributable witness');
+      return 'private-returned-canary';
+    });
+    const statement = db.prepare('SELECT check_before_return() AS content, ? AS bound');
+    for (let i = 0; i < 2; i++) assert.equal(statement.all('private-binding-canary').length, 1);
+    assert.deepEqual(
+      events.map((e) => e.phase),
+      ['start', 'finish', 'start', 'finish'],
+    );
+    assert.doesNotMatch(JSON.stringify(events), /private-|SELECT|check_before_return/);
+    db.prepare('SELECT 3').all();
+    assert.equal(events.length, 4, 'start and finish pairs share one bounded observation budget');
+  } finally {
+    stop();
+    db.close();
+  }
+});
+
+test('start metadata and paired diagnostic sink failures cannot replace native results', () => {
+  for (const metadataFails of [false, true]) {
+    const db = new Database(':memory:');
+    const fail = () => {
+      throw new Error('diagnostic unavailable');
+    };
+    const stop = createSqliteReadDiagnostics({
+      onSlowRead: fail,
+      onReadStarted: fail,
+      onReadFinished: fail,
+      ...(metadataFails ? { getRequestId: fail } : {}),
+    })(db);
+    try {
+      assert.deepEqual(db.prepare('SELECT ? AS n').all(42), [{ n: 42 }]);
+      const original = new Error('native failure');
+      db.function('broken_native', () => {
+        throw original;
+      });
+      assert.throws(
+        () => db.prepare('SELECT broken_native()').all(),
+        (error) => error === original,
+      );
+    } finally {
+      stop();
+      db.close();
+    }
+  }
+});

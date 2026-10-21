@@ -75,7 +75,8 @@ source "$SCRIPT_DIR/lib/redis-rdb-first.sh"
 source "$SCRIPT_DIR/download-source-overrides.sh"
 cd "$PROJECT_DIR"
 
-echo "🐱 Clowder AI 启动"
+STARTUP_DISPLAY_NAME="$(node "$SCRIPT_DIR/read-deployment-default.mjs" brand.displayName)"
+printf '🐱 %s 启动\n' "$STARTUP_DISPLAY_NAME"
 echo "================"
 
 # 颜色定义
@@ -388,63 +389,20 @@ normalize_raw_dev_redis_defaults() {
 
 # Profile 默认值（env 变量优先，profile 作 fallback）
 apply_profile_defaults() {
-    local profile="$1"
+    local profile="${1:-unprofiled}"
     # Clear previous profile state
     unset _PROF_ANTHROPIC_PROXY_ENABLED _PROF_ASR_ENABLED _PROF_TTS_ENABLED
     unset _PROF_LLM_POSTPROCESS_ENABLED _PROF_AUDIO_SERVICE_ENABLED _PROF_REDIS_PROFILE
     unset _PROF_MESSAGE_TTL_SECONDS _PROF_THREAD_TTL_SECONDS
     unset _PROF_TASK_TTL_SECONDS _PROF_SUMMARY_TTL_SECONDS
-    case "$profile" in
-        dev)
-            _PROF_ANTHROPIC_PROXY_ENABLED=1
-            # Sidecar lifecycle is owned by the API startup reconciler. The dev
-            # profile keeps proxy ON but no longer auto-spawns ML sidecars here.
-            # Enable services in Console; the API starts them via lifecycle routes.
-            _PROF_ASR_ENABLED=0
-            _PROF_TTS_ENABLED=0
-            _PROF_LLM_POSTPROCESS_ENABLED=0
-            _PROF_AUDIO_SERVICE_ENABLED=0
-            _PROF_MESSAGE_TTL_SECONDS=0
-            _PROF_THREAD_TTL_SECONDS=0
-            _PROF_TASK_TTL_SECONDS=0
-            _PROF_SUMMARY_TTL_SECONDS=0
-            _PROF_REDIS_PROFILE=dev
-            ;;
-        production)
-            _PROF_ANTHROPIC_PROXY_ENABLED=0
-            _PROF_ASR_ENABLED=0
-            _PROF_TTS_ENABLED=0
-            _PROF_LLM_POSTPROCESS_ENABLED=0
-            _PROF_AUDIO_SERVICE_ENABLED=0
-            _PROF_MESSAGE_TTL_SECONDS=0
-            _PROF_THREAD_TTL_SECONDS=0
-            _PROF_TASK_TTL_SECONDS=0
-            _PROF_SUMMARY_TTL_SECONDS=0
-            _PROF_REDIS_PROFILE=opensource
-            ;;
-        opensource)
-            _PROF_ANTHROPIC_PROXY_ENABLED=0
-            _PROF_ASR_ENABLED=0
-            _PROF_TTS_ENABLED=0
-            _PROF_LLM_POSTPROCESS_ENABLED=0
-            _PROF_AUDIO_SERVICE_ENABLED=0
-            _PROF_MESSAGE_TTL_SECONDS=0
-            _PROF_THREAD_TTL_SECONDS=0
-            _PROF_TASK_TTL_SECONDS=0
-            _PROF_SUMMARY_TTL_SECONDS=0
-            _PROF_REDIS_PROFILE=opensource
-            ;;
-        "")
-            # No profile — all _PROF_ vars stay unset, existing behavior preserved
-            ;;
-        *)
-            echo -e "${RED}ERROR: Unknown profile '$profile'. Valid: dev, production, opensource${NC}"
-            exit 1
-            ;;
-    esac
+    local defaults key value
+    defaults="$(node "$SCRIPT_DIR/read-deployment-default.mjs" --startup-profile "$profile" posix --shell)" || return 1
+    while IFS='=' read -r key value; do
+        printf -v "_PROF_${key}" '%s' "$value"
+    done <<< "$defaults"
 }
 
-apply_profile_defaults "$PROFILE"
+apply_profile_defaults "$PROFILE" || exit 1
 
 # resolve_config: env override > profile default (sets var + _SRC_ annotation)
 # Usage: resolve_config "VAR_NAME" — sets VAR_NAME and _SRC_VAR_NAME in current shell
@@ -456,7 +414,11 @@ resolve_config() {
     if [ -n "$env_val" ]; then
         eval "_SRC_${var_name}=\".env override\""
     elif [ -n "$prof_val" ]; then
-        eval "_SRC_${var_name}=\"profile default ($PROFILE)\""
+        if [ -n "$PROFILE" ]; then
+            eval "_SRC_${var_name}=\"profile default ($PROFILE)\""
+        else
+            eval "_SRC_${var_name}=\"built-in default\""
+        fi
         eval "${var_name}=\"${prof_val}\""
     else
         eval "_SRC_${var_name}=\"built-in default\""
@@ -503,17 +465,7 @@ resolve_config "TASK_TTL_SECONDS"
 resolve_config "SUMMARY_TTL_SECONDS"
 resolve_config "REDIS_PROFILE"
 
-# Apply built-in fallbacks for vars with no profile and no env
-: "${ANTHROPIC_PROXY_ENABLED:=0}"
-: "${ASR_ENABLED:=0}"
-: "${TTS_ENABLED:=0}"
-: "${LLM_POSTPROCESS_ENABLED:=0}"
-: "${AUDIO_SERVICE_ENABLED:=0}"
-: "${MESSAGE_TTL_SECONDS:=0}"
-: "${THREAD_TTL_SECONDS:=0}"
-: "${TASK_TTL_SECONDS:=0}"
-: "${SUMMARY_TTL_SECONDS:=0}"
-: "${REDIS_PROFILE:=dev}"
+# The unprofiled fallback values are resolved from the same deployment artifact.
 
 derive_embed_enabled() {
     # EMBED_MODE controls the API in-process embedding mode (off/shadow/on).
@@ -1491,7 +1443,7 @@ maybe_start_f247_cloud_services() {
         node "$helper" stop-owned --owner-file="$F247_CLOUD_OWNER_FILE" >/dev/null 2>&1 || true
         rm -f "$F247_CLOUD_OWNER_FILE"
         F247_CLOUD_OWNER_FILE=""
-        echo -e "${YELLOW}  ⚠ F247 cloud supporting services degraded; local Clowder AI startup will continue.${NC}"
+        printf '%b  ⚠ F247 cloud supporting services degraded; local %s startup will continue.%b\n' "$YELLOW" "$STARTUP_DISPLAY_NAME" "$NC"
         return 0
     fi
 
@@ -2003,9 +1955,9 @@ main() {
     echo ""
     echo "========================"
     if [ "$API_READY" = true ]; then
-        echo -e "${GREEN}🎉 Clowder AI 已就绪！${NC}"
+        printf '%b🎉 %s 已就绪！%b\n' "$GREEN" "$STARTUP_DISPLAY_NAME" "$NC"
     else
-        echo -e "${YELLOW}Clowder AI 已监听，但 API 尚未就绪${NC}"
+        printf '%b%s 已监听，但 API 尚未就绪%b\n' "$YELLOW" "$STARTUP_DISPLAY_NAME" "$NC"
     fi
     [ -n "$PROFILE" ] && echo -e "  Profile: ${CYAN}${PROFILE}${NC}"
     echo ""
@@ -2052,7 +2004,7 @@ fi
 if [[ "${1:-}" == "--stop" ]] || [[ "${1:-}" == "stop" ]]; then
     maybe_migrate_legacy_daemon_state
     daemon_state stop
-    echo "Clowder AI $DAEMON_DEPLOYMENT_ID daemon 已停止 🐾"
+    printf '%s %s daemon 已停止 🐾\n' "$STARTUP_DISPLAY_NAME" "$DAEMON_DEPLOYMENT_ID"
     exit 0
 fi
 
@@ -2081,7 +2033,7 @@ if [ "$DAEMON_MODE" = true ]; then
     done
 
     DAEMON_LAUNCH_TOKEN=$(node -e "console.log(require('node:crypto').randomUUID())")
-    echo "🐱 Clowder AI 以后台模式启动..."
+    printf '🐱 %s 以后台模式启动...\n' "$STARTUP_DISPLAY_NAME"
     echo "  Deployment: $DAEMON_DEPLOYMENT_ID"
     echo "  日志输出: $DAEMON_LOG_FILE"
     launch_daemon_child "$0" "$DAEMON_LAUNCH_TOKEN" "${RESTART_ARGS[@]}"

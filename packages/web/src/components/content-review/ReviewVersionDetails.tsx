@@ -1,26 +1,22 @@
-import type { ArtifactReviewRound } from '@cat-cafe/shared';
 import type { ReactNode } from 'react';
-import { ReviewActor } from './ReviewActor';
 import { ReviewHistory } from './ReviewHistory';
 import { ReviewToolbarIcon } from './ReviewToolbarIcon';
 import toolbar from './review-toolbar.module.css';
 import styles from './review-workspace.module.css';
 
 export function ReviewVersionDetails({
-  round,
+  responseControl,
   reviewId,
   revision,
   ownerUserId,
   onClose,
-  onPreviousRound,
   contextControl,
 }: {
-  round: ArtifactReviewRound;
+  responseControl?: ReactNode;
   reviewId: string;
   revision: number;
   ownerUserId: string;
   onClose: () => void;
-  onPreviousRound: () => void;
   contextControl?: ReactNode;
 }) {
   return (
@@ -36,29 +32,7 @@ export function ReviewVersionDetails({
       </div>
       <div className={styles.drawerBody}>
         {contextControl}
-        {round.responses.length ? (
-          <section className="rounded-xl border border-cafe-subtle p-4" aria-label="猫对上一版的回应">
-            <h3 className="text-sm font-semibold text-cafe-black">这一版怎样回应了你的意见</h3>
-            {round.responseAuthor ? (
-              <div className="mt-2">
-                <ReviewActor actor={round.responseAuthor} ownerUserId={ownerUserId} />
-              </div>
-            ) : null}
-            <ol className="mt-3 space-y-2">
-              {round.responses.map((response) => (
-                <li key={response.annotationId} className="text-sm leading-6 text-cafe-secondary">
-                  <span className="mr-2 text-xs font-semibold text-cafe-accent">
-                    {response.disposition === 'addressed' ? '已调整' : '保留原样'}
-                  </span>
-                  <span className="whitespace-pre-wrap break-words">{response.explanation}</span>
-                  <button type="button" className="ml-2 text-xs text-cafe-accent" onClick={onPreviousRound}>
-                    看原标注
-                  </button>
-                </li>
-              ))}
-            </ol>
-          </section>
-        ) : null}
+        {responseControl}
         <ReviewHistory reviewId={reviewId} revision={revision} ownerUserId={ownerUserId} />
       </div>
     </aside>

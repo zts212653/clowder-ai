@@ -63,7 +63,7 @@ export function buildWindowsStatus({
   if (!existsSync(runDir)) {
     return {
       exitCode: 1,
-      lines: [`Clowder AI Windows services not running (no run directory: ${runDir})`],
+      lines: [`${deploymentDefaults.brand.name} Windows services not running (no run directory: ${runDir})`],
     };
   }
 
@@ -73,7 +73,7 @@ export function buildWindowsStatus({
     { pidFile: `web-${webPort}.pid`, running: false },
   ];
 
-  const lines = ['Clowder AI Windows status'];
+  const lines = [`${deploymentDefaults.brand.name} Windows status`];
   for (const service of requiredServices) {
     const pidPath = resolve(runDir, service.pidFile);
     const label = basename(service.pidFile, '.pid');

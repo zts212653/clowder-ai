@@ -1,5 +1,6 @@
 import { mkdir, mkdtemp, open, rename, rm } from 'node:fs/promises';
 import { join } from 'node:path';
+import { type ContentStream, writeOwnerPayload } from '../stream-content.js';
 import type { ProjectContentStateV1 } from './manifest.js';
 
 /** A refused first publication must never leave a half-manifest in the canonical catalogue. */
@@ -7,7 +8,7 @@ export async function commitInitialOwnerState(input: {
   root: string;
   target: string;
   state: ProjectContentStateV1;
-  bytes: Uint8Array;
+  bytes: Uint8Array | ContentStream;
   authorizeEffect: () => Promise<void>;
 }) {
   await mkdir(input.root, { recursive: true, mode: 0o700 });
@@ -25,10 +26,10 @@ export async function commitInitialOwnerState(input: {
   }
 }
 
-async function durableFile(path: string, bytes: Uint8Array) {
+async function durableFile(path: string, bytes: Uint8Array | ContentStream) {
   const handle = await open(path, 'wx', 0o600);
   try {
-    await handle.writeFile(bytes);
+    await writeOwnerPayload(handle, bytes);
     await handle.sync();
   } finally {
     await handle.close();

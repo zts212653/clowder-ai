@@ -1,10 +1,35 @@
 'use client';
 
 import type { MediaContextAttachment } from '@cat-cafe/shared';
+import { useState } from 'react';
 import { useChatStore } from '@/stores/chatStore';
 import { removeMediaSelectionFromChat } from './content-review/media-chat-composer';
 import { mediaSelectionLabel } from './content-review/media-chat-selection';
 import { useShellLanguage } from './shell/shell-language';
+
+function StoryQuote({
+  selection,
+  english,
+}: {
+  selection: MediaContextAttachment['selections'][number]['selection'];
+  english: boolean;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  if (selection.kind !== 'video-range' || !selection.storyEvidence) return null;
+  return (
+    <span className="min-w-0">
+      <button
+        type="button"
+        aria-expanded={expanded}
+        onClick={() => setExpanded(!expanded)}
+        className="text-cafe-accent"
+      >
+        {english ? 'Quoted paragraph' : '段落原文'}
+      </button>
+      {expanded ? <span className="block whitespace-pre-wrap break-words">{selection.storyEvidence.quote}</span> : null}
+    </span>
+  );
+}
 
 /**
  * The places a person circled, as numbered tags. A gallery keeps its stable cross-work ids; a legacy single work
@@ -84,6 +109,7 @@ export function ContextMediaSelections({
               ) : null}
             </>
           )}
+          <StoryQuote selection={item.selection} english={english} />
           {removable ? (
             <button
               type="button"

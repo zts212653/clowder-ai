@@ -1,3 +1,4 @@
+import { deploymentDefaults } from '@cat-cafe/shared';
 import { defineShellCopy } from '@/components/shell/shell-copy';
 
 export const sessionChainCopy = defineShellCopy(
@@ -63,7 +64,7 @@ export const sessionChainCopy = defineShellCopy(
       runtimeConversationId: '运行对话 ID',
       stopBeforeCompact: '请先停止该 Agent，再压缩原生上下文',
       verifyTarget: '有多条未封存记录，请先核对目标会话',
-      compactHint: '请求 provider 原生压缩并保留 Clowder AI continuity',
+      compactHint: `请求 provider 原生压缩并保留 ${deploymentDefaults.brand.displayName} continuity`,
       compacting: '压缩中…',
       compact: '原生压缩',
       stopBeforeSeal: '请先停止该 Agent，再封存会话',
@@ -206,7 +207,7 @@ export const sessionChainCopy = defineShellCopy(
       runtimeConversationId: 'Runtime conversation ID',
       stopBeforeCompact: 'Stop this agent before compacting its native context',
       verifyTarget: 'Multiple unarchived records; verify the target session first',
-      compactHint: 'Request native provider compaction and preserve Clowder AI continuity',
+      compactHint: `Request native provider compaction and preserve ${deploymentDefaults.brand.displayName} continuity`,
       compacting: 'Compacting…',
       compact: 'Native compaction',
       stopBeforeSeal: 'Stop this agent before archiving its session',

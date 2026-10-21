@@ -284,6 +284,7 @@ export function ExplorationLineage({
               data-selected={key === selected}
               data-current={currentKeys.has(key)}
               data-adopted={adoptedKeys.has(key)}
+              data-has-meta={Boolean(lineageNodeMeta(key, currentKeys, adoptedKeys, nodeNotes))}
               data-label-side={labels.get(key)?.side ?? (x > positioned.width / 2 ? 'end' : 'start')}
               data-label-visible={labels.has(key)}
               data-label-above={labels.get(key)?.above ?? false}

@@ -30,19 +30,33 @@ term_classes:
     description: Home-only governance phrases and cultural shorthand.
   code_identifier:
     description: Identifiers retained for compatibility unless separately migrated.
+  deployment_coordinate:
+    description: Repository coordinates for deployment and fixed maintenance roles; never an authorization grant.
 
 terms:
+  - id: deployment.repository
+    class: deployment_coordinate
+    severity: P2
+    home:
+      canonical: "zts212653/clowder-ai"
+    public:
+      canonical: "zts212653/clowder-ai"
+
   - id: product.primary
     class: brand
     severity: P1
     home:
       canonical: "Clowder AI"
+      display: "Clowder AI"
+      short: "Clowder AI"
       variants:
         - "Clowder AI"
         - "Clowder AI"
         - "猫猫咖啡"
     public:
       canonical: "Clowder AI"
+      display: "Clowder AI"
+      short: "Clowder AI"
       variants:
         - "Clowder AI"
     contexts:
@@ -65,11 +79,13 @@ terms:
     severity: P1
     home:
       canonical: "Clowder AI Hub"
+      display: "Clowder AI Hub"
       variants:
         - "Clowder AI Hub"
         - "Clowder AI Hub"
     public:
       canonical: "Clowder AI Hub"
+      display: "Clowder AI Hub"
       variants:
         - "Clowder AI Hub"
 

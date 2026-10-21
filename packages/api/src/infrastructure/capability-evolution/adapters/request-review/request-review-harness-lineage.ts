@@ -7,6 +7,7 @@ import {
   type OwnerTruthRefV1,
   refIdentity,
 } from '@cat-cafe/shared';
+import { ARCHIVE_SOURCE_REPOSITORY_URL } from '../archive-source-repository.js';
 import {
   type RequestReviewHarnessLineageIndex,
   requestReviewHarnessLineageIndexSchema,
@@ -48,15 +49,15 @@ function sourceHref(index: RequestReviewHarnessLineageIndex, link?: string | nul
   const raw = link || 'README.md';
   const [file, anchor] = raw.split('#', 2);
   const path = posix.normalize(posix.join('docs/discussions/f314-incident-archive', file || 'README.md'));
-  return `https://github.com/zts212653/clowder-ai/blob/${index.snapshotCommit}/${path}${anchor ? `#${anchor}` : ''}`;
+  return `${ARCHIVE_SOURCE_REPOSITORY_URL}/blob/${index.snapshotCommit}/${path}${anchor ? `#${anchor}` : ''}`;
 }
 
 function commitHref(commit: { fullSha?: string; sha: string }): string {
-  return `https://github.com/zts212653/clowder-ai/commit/${commit.fullSha ?? commit.sha}`;
+  return `${ARCHIVE_SOURCE_REPOSITORY_URL}/commit/${commit.fullSha ?? commit.sha}`;
 }
 
 function ownerReviewHref(index: RequestReviewHarnessLineageIndex): string {
-  return `https://github.com/zts212653/clowder-ai/blob/${index.ownerReviewCommit}/${posix.normalize(index.ownerReviewRef)}`;
+  return `${ARCHIVE_SOURCE_REPOSITORY_URL}/blob/${index.ownerReviewCommit}/${posix.normalize(index.ownerReviewRef)}`;
 }
 
 function conditions(

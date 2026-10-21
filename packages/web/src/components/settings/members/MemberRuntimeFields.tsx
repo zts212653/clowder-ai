@@ -3,6 +3,7 @@ import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { apiFetch } from '@/utils/api-client';
 import type { ProfileItem } from '../../hub-accounts.types';
+import { usesAgyAcp, usesAgyNative } from '../../hub-cat-editor.agy';
 import { builtinAccountIdForClient, filterAccounts, type HubCatEditorFormState } from '../../hub-cat-editor.model';
 import { SelectField } from '../../hub-cat-editor-fields';
 import { KimiLoginHelp } from './KimiLoginHelp';
@@ -77,8 +78,9 @@ export function MemberRuntimeFields({
     ),
   ];
   const selected = tools.find((item) => matchesRuntime(form, item));
+  const agy = usesAgyNative(form) || usesAgyAcp(form);
   const tool =
-    selected?.label ??
+    (usesAgyAcp(form) ? t('AGY 官方 ACP', 'AGY official ACP') : usesAgyNative(form) ? 'AGY Native' : selected?.label) ??
     (form.clientId === 'openai'
       ? 'Codex'
       : form.clientId === 'anthropic'
@@ -124,11 +126,19 @@ export function MemberRuntimeFields({
   );
   const follow = t(native ? `跟随 ${tool} 设置` : '跟随连接设置', `Follow ${native ? tool : 'connection'} settings`);
   const accountOptions = [
-    { value: '', label: t(`使用 ${tool} 当前配置`, `Use current ${tool} configuration`), disabled: false },
+    {
+      value: '',
+      label: agy
+        ? t('使用隔离 Profile 的个人登录', 'Use personal sign-in in the isolated Profile')
+        : t(`使用 ${tool} 当前配置`, `Use current ${tool} configuration`),
+      disabled: false,
+    },
     ...availableAccounts.map((item) => ({
       value: item.id,
       label: item.displayName || item.name,
-      disabled: native && item.authType === 'oauth' && item.id !== builtinAccountIdForClient(form.clientId),
+      disabled:
+        (agy && item.authType === 'api_key') ||
+        (native && item.authType === 'oauth' && item.id !== builtinAccountIdForClient(form.clientId)),
     })),
   ];
   if (form.accountRef && !identity)
@@ -272,6 +282,14 @@ export function MemberRuntimeFields({
           </p>
         )}
       </div>
+      {!nativeSetup && agy && (
+        <p className="text-sm text-cafe-secondary">
+          {t(
+            '身份使用“高级接入”中的隔离 Profile；个人登录与执行权限也在那里配置。保存不会登录或调用模型。',
+            'Identity uses the isolated Profile in Advanced connection. Configure personal sign-in and execution permissions there. Saving does not sign in or call a model.',
+          )}
+        </p>
+      )}
       {!nativeSetup && (
         <div className="border-t border-[var(--console-border-soft)] pt-4">
           {accountOptions.length > 1 ? (
@@ -281,14 +299,16 @@ export function MemberRuntimeFields({
               options={accountOptions}
               onChange={(accountRef) => patch({ accountRef })}
             />
-          ) : (
+          ) : !agy ? (
             <p className="text-sm text-cafe-secondary">
               {t(`使用 ${tool} 当前配置`, `Using current ${tool} configuration`)}
             </p>
+          ) : null}
+          {!agy && (
+            <Link href={accountHref} className="mt-1 inline-flex min-h-10 items-center text-sm text-cafe-accent">
+              {t('管理连接', 'Manage connections')} →
+            </Link>
           )}
-          <Link href={accountHref} className="mt-1 inline-flex min-h-10 items-center text-sm text-cafe-accent">
-            {t('管理连接', 'Manage connections')} →
-          </Link>
         </div>
       )}
       {!nativeSetup && (

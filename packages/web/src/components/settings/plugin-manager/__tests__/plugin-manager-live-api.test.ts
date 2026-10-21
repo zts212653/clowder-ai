@@ -2,10 +2,37 @@ import { beforeEach, expect, it, vi } from 'vitest';
 
 vi.mock('@/utils/api-client', () => ({ apiFetch: vi.fn() }));
 
+import type { PluginManagerListItem } from '@cat-cafe/shared';
 import { apiFetch } from '@/utils/api-client';
-import { fetchManagerDetail } from '../plugin-manager-live-api';
+import { designFixture, fetchManagerDetail } from '../plugin-manager-live-api';
 
 const mockFetch = vi.mocked(apiFetch);
+
+it('shows unknown historical origin without calling it a local or catalog source or changing Host actions', () => {
+  const plugin: PluginManagerListItem = {
+    pluginId: 'official.chatgpt-dot',
+    pluginInstanceId: 'legacy-dot',
+    packageDigest: null,
+    lifecycleRevision: 4,
+    displayName: 'Installed Dot',
+    source: { kind: 'unknown', packageName: null, trust: 'unknown' },
+    availableVersion: '0.1.1',
+    installedVersion: '0.1.0',
+    artifact: 'installed',
+    config: 'ready',
+    auth: 'connected',
+    intent: 'enabled',
+    live: 'running',
+    capabilitySummary: [],
+    actions: { install: false, setEnabled: true, uninstall: true, blockingReasons: [] },
+  };
+  const fixture = designFixture(plugin, undefined, { state: 'absent' });
+  expect(fixture.source).toBe('unknown');
+  expect(fixture.trust).toBe('unknown');
+  expect(fixture.publisher).toBe('发布者未记录');
+  expect(fixture.actions).toEqual(plugin.actions);
+  expect(fixture.live).toBe('running');
+});
 beforeEach(() => {
   mockFetch.mockReset();
 });

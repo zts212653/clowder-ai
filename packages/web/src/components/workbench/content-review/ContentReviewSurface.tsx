@@ -46,6 +46,7 @@ export function ContentReviewSurface({
   workflow,
   publication,
   fileReader,
+  sidebar,
 }: {
   readonly review: ContentReviewController;
   readonly path: string;
@@ -66,6 +67,7 @@ export function ContentReviewSurface({
   readonly workflow?: ContentReviewWorkflow;
   readonly publication?: PublicationDisplayRequest;
   readonly fileReader?: (controls: ContentFileReaderControls) => ReactNode;
+  readonly sidebar?: ReactNode;
 }) {
   const draftStarted = useWorkspacePreviewIntent();
   const root = useRef<HTMLElement>(null);
@@ -144,39 +146,45 @@ export function ContentReviewSurface({
           <p className="p-4 text-sm text-cafe-muted">正在打开作品…</p>
         ) : null}
         {review.view ? (
-          <WorkspaceContentReviewProjection
-            capabilities={capabilities ?? contentReviewCapabilities(review.view)}
-            workflow={workflow}
-            view={review.view}
-            path={path}
-            sourceText={sourceText}
-            sourceTextRevision={sourceTextRevision}
-            scrollToLine={scrollToLine}
-            fileReader={fileReader ? { selection, openRequest, modificationDisabled } : undefined}
-            draft={review.draft}
-            target={review.target}
-            busy={review.busy}
-            activeAnnotationId={review.activeAnnotationId}
-            setDraft={(body) => {
-              review.setDraft(body);
-              if (body.length > 0) draftStarted?.();
-            }}
-            setTarget={(target) => {
-              review.setTarget(target);
-              if (target !== null) draftStarted?.();
-            }}
-            setActiveAnnotationId={review.setActiveAnnotationId}
-            submitAnnotation={review.submitAnnotation}
-            legacyText={review.legacyText}
-            refreshSource={review.refreshSource}
-            act={review.act}
-            onApplied={async (writtenRevision) => {
-              await onApplied?.(writtenRevision);
-              // Accepting confirms exactly the written revision. Move only onto that one; if it is unknown, or
-              // the file has since become something else, the drift banner stays and asks the person.
-              if (writtenRevision) await review.refreshSource({ expectedSourceRevision: writtenRevision });
-            }}
-          />
+          <div
+            data-video-work-body={workflow?.videoWork ? '' : undefined}
+            className={sidebar ? 'flex min-h-0 min-w-0 flex-1' : 'contents'}
+          >
+            {sidebar}
+            <WorkspaceContentReviewProjection
+              capabilities={capabilities ?? contentReviewCapabilities(review.view)}
+              workflow={workflow}
+              view={review.view}
+              path={path}
+              sourceText={sourceText}
+              sourceTextRevision={sourceTextRevision}
+              scrollToLine={scrollToLine}
+              fileReader={fileReader ? { selection, openRequest, modificationDisabled } : undefined}
+              draft={review.draft}
+              target={review.target}
+              busy={review.busy}
+              activeAnnotationId={review.activeAnnotationId}
+              setDraft={(body) => {
+                review.setDraft(body);
+                if (body.length > 0) draftStarted?.();
+              }}
+              setTarget={(target) => {
+                review.setTarget(target);
+                if (target !== null) draftStarted?.();
+              }}
+              setActiveAnnotationId={review.setActiveAnnotationId}
+              submitAnnotation={review.submitAnnotation}
+              legacyText={review.legacyText}
+              refreshSource={review.refreshSource}
+              act={review.act}
+              onApplied={async (writtenRevision) => {
+                await onApplied?.(writtenRevision);
+                // Accepting confirms exactly the written revision. Move only onto that one; if it is unknown, or
+                // the file has since become something else, the drift banner stays and asks the person.
+                if (writtenRevision) await review.refreshSource({ expectedSourceRevision: writtenRevision });
+              }}
+            />
+          </div>
         ) : null}
         {workflow?.panel}
         {gallery?.items[gallery.index]?.caption ? (

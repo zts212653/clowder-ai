@@ -23,6 +23,7 @@ import { HandoffProposalCard, isHandoffProposalCardBlock } from './HandoffPropos
 import { HtmlWidgetBlock } from './HtmlWidgetBlock';
 import { InteractiveBlock } from './InteractiveBlock';
 import { InteractiveBlockGroup } from './InteractiveBlockGroup';
+import { LivingWorkCard } from './LivingWorkCard';
 import { MediaGalleryBlock } from './MediaGalleryBlock';
 import { OriginalDomainApprovalCard } from './OriginalDomainApprovalCard';
 import { OriginalEvalRepairCard } from './OriginalEvalRepairCard';
@@ -95,6 +96,7 @@ function RichCardRenderer({
   confirmations?: CardConfirmationEntry[];
   publication?: PublishedMessageCoordinate;
 }) {
+  if (block.meta?.kind === 'work_reference') return <LivingWorkCard block={block} messageId={messageId} />;
   if (isDomainApprovalPublication(block)) return <OriginalDomainApprovalCard block={block} coordinate={publication} />;
   if (isCorrectionPublication(block)) return <OriginalMemoryCorrectionCard block={block} coordinate={publication} />;
   if (isEvalRepairPublication(block)) return <OriginalEvalRepairCard block={block} coordinate={publication} />;

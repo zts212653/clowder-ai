@@ -1,3 +1,4 @@
+import { deploymentDefaults } from '@cat-cafe/shared';
 /**
  * AcpAgentService — Generic AgentService implementation backed by ACP protocol.
  *
@@ -1211,11 +1212,11 @@ function toUserFacingError(providerName: string, errorCode: string, errorMsg: st
   const base = `${errorCode}: ${errorMsg}`;
   switch (errorCode) {
     case 'agent_busy':
-      return `${base}\n⚠️ ${label} 正在处理内部轮次（如后台任务完成通知），自动重试后仍被占用。非 Clowder AI 系统故障，稍后重试即可。`;
+      return `${base}\n⚠️ ${label} 正在处理内部轮次（如后台任务完成通知），自动重试后仍被占用。非 ${deploymentDefaults.brand.displayName} 系统故障，稍后重试即可。`;
     case 'model_capacity':
-      return `${base}\n⚠️ ${label} 服务端容量不足（服务器繁忙），非 Clowder AI 系统故障。`;
+      return `${base}\n⚠️ ${label} 服务端容量不足（服务器繁忙），非 ${deploymentDefaults.brand.displayName} 系统故障。`;
     case 'stream_idle_stall':
-      return `${base}\n⚠️ ${label} 服务端响应中断（服务器可能繁忙或不稳定），非 Clowder AI 系统故障。`;
+      return `${base}\n⚠️ ${label} 服务端响应中断（服务器可能繁忙或不稳定），非 ${deploymentDefaults.brand.displayName} 系统故障。`;
     case 'turn_budget_exceeded': {
       // #1186: Derive actual timeout from error message instead of hardcoding 15m.
       // AcpTimeoutError format: "...did not respond within ${ms}ms"
@@ -1229,7 +1230,7 @@ function toUserFacingError(providerName: string, errorCode: string, errorMsg: st
       return `${base}\n⚠️ ACP agent 启动失败（本地进程异常）。`;
     case 'prompt_failure':
       if (/Premature close|ECONNRESET|socket hang up/i.test(errorMsg)) {
-        return `${base}\n⚠️ ${label} 与服务端连接中断（Premature close），非 Clowder AI 系统故障。`;
+        return `${base}\n⚠️ ${label} 与服务端连接中断（Premature close），非 ${deploymentDefaults.brand.displayName} 系统故障。`;
       }
       return base;
     default:

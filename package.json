@@ -146,7 +146,7 @@
     "check:archive-dedup": "node scripts/check-archive-dedup.mjs",
     "fseventsd:observe": "python3 -I -S -B scripts/macos/fseventsd_recovery.py --observe",
     "check:fseventsd-recovery": "python3 -I -S -B scripts/macos/test_fseventsd_recovery.py && python3 -I -S -B scripts/macos/test_fseventsd_recovery_native.py && node --test scripts/lib/gate-resource-receipts-noop.test.mjs",
-    "check:brand-guard:home": "node --test scripts/intake-from-opensource.test.mjs scripts/lib/intake-gh-retry.test.mjs scripts/public-brand-validation.test.mjs"
+    "check:brand-guard:home": "node --test scripts/deployment-brand.test.mjs scripts/intake-from-opensource.test.mjs scripts/lib/intake-gh-retry.test.mjs scripts/public-brand-validation.test.mjs"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.4.1",

@@ -2,6 +2,7 @@ import type { EntrustedWorkOwnerReadV1, GlobalArtifactDTO } from '@cat-cafe/shar
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { primeCoCreatorConfigCache, resetCoCreatorConfigCacheForTest } from '@/hooks/useCoCreatorConfig';
 import { NeedsMeOwnerSurface, ProductScheduleOwnerSurface } from '../GrowingOwnerSurfaces';
 import { createWorkspaceDestinationSurface } from '../real-surface-adapters';
 
@@ -113,6 +114,9 @@ describe('F310 prepared Artifact loading in real owner surfaces', () => {
 
   beforeEach(() => {
     vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+    resetCoCreatorConfigCacheForTest();
+    // This owner-data loading fixture supplies its independent display config explicitly.
+    primeCoCreatorConfigCache({ name: 'Prepared owner', aliases: [], mentionPatterns: ['@prepared-owner'] });
     mocks.ownerReads = [preparedOwnerRead()];
     mocks.fetch.mockReset();
     mocks.navigate.mockReset();
@@ -132,6 +136,7 @@ describe('F310 prepared Artifact loading in real owner surfaces', () => {
 
   afterEach(() => {
     act(() => root.unmount());
+    resetCoCreatorConfigCacheForTest();
     container.remove();
     vi.unstubAllGlobals();
   });
@@ -170,6 +175,12 @@ describe('F310 prepared Artifact loading in real owner surfaces', () => {
   async function loadCatalog(artifacts: GlobalArtifactDTO[]) {
     await act(async () => finishCatalog(new Response(JSON.stringify({ threadId: 'thread-source', artifacts }))));
   }
+
+  it('renders the configured human owner without adding an owner-data dependency', async () => {
+    await render('needs-me');
+    expect(container.querySelector('[data-testid="entrusted-work-brief"]')?.textContent).toContain('Prepared owner');
+    expect(mocks.fetch.mock.calls.map(([path]) => path)).toEqual(['/api/threads/thread-source/artifacts']);
+  });
 
   it.each([
     'product-schedule',

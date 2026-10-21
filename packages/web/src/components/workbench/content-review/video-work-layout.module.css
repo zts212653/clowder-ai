@@ -1,0 +1,78 @@
+.desk {
+  container-type: inline-size;
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+.desk [data-video-work-canvas] {
+  --video-journal-width: 260px;
+  padding-right: var(--video-journal-width);
+}
+.desk [data-video-work-canvas] > [data-testid="workspace-review-artwork"]:not(:fullscreen) {
+  flex: 0 0 auto;
+  height: clamp(260px, 45cqw, 560px);
+  min-height: 0;
+}
+.desk [data-video-work-canvas] > [data-testid="workspace-review-artwork"]:fullscreen {
+  flex: 1 1 auto;
+  height: 100%;
+  min-height: 0;
+  margin: 0;
+}
+.desk [data-artwork-video-player]:not(:fullscreen) > [data-artwork-video-viewport] {
+  /* The image canvas reserves space for floating tools above and below it.
+     A video has its own controls in normal flow, so keep that room for the film. */
+  margin: 12px 12px 0;
+}
+.desk [aria-label="作品讨论"] {
+  width: var(--video-journal-width);
+}
+.desk [data-video-work-sidebar] {
+  width: 220px;
+}
+@container (max-width: 1000px) {
+  .desk [data-video-work-canvas] {
+    --video-journal-width: 230px;
+  }
+  .desk [data-video-work-sidebar] {
+    width: 180px;
+  }
+}
+@container (max-width: 720px) {
+  .desk [data-video-work-canvas] {
+    padding-right: 0;
+  }
+  .desk [aria-label="作品讨论"] {
+    position: relative;
+    width: 100%;
+    flex: 0 0 220px;
+  }
+  .desk [data-video-work-sidebar] {
+    width: 160px;
+  }
+}
+@container (max-width: 520px) {
+  .desk [data-video-work-body] {
+    flex-direction: column;
+    overflow-y: auto;
+  }
+  .desk [data-video-work-sidebar] {
+    width: 100%;
+    max-height: 180px;
+  }
+  .desk [data-video-work-canvas] {
+    flex: 0 0 auto;
+    overflow: visible;
+  }
+  .desk [data-video-work-canvas] > [data-testid="workspace-review-artwork"]:not(:fullscreen) {
+    height: 300px;
+  }
+}
+
+.desk [data-video-discussion-open="false"] {
+  padding-right: 0;
+}
+.desk [data-video-work-comparison] {
+  overflow-wrap: anywhere;
+}

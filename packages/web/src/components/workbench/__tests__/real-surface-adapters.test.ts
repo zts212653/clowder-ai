@@ -1,5 +1,6 @@
 import type { ActiveExecutionProjection, GlobalArtifactDTO, ThreadArtifactDTO } from '@cat-cafe/shared';
 import { describe, expect, it } from 'vitest';
+import { resolvePublicationTarget } from '../publication-surface';
 import {
   createAgentRunSurface,
   createArtifactSurface,
@@ -25,6 +26,29 @@ import { createInitialWorkbenchState } from '../workbench-model';
 import { restoreWorkbenchState } from '../workbench-restore';
 
 describe('F307 real surface adapters', () => {
+  it('opens a silently retained video through its exact owner version without inventing a message', () => {
+    const work = { contentRef: `work:${'c'.repeat(64)}`, ownerRevision: 2, currentOwnerRevision: 3 };
+    const artifact: GlobalArtifactDTO = {
+      type: 'video',
+      name: '真实成片',
+      sourceMessageId: null,
+      catId: 'codex61-sol',
+      createdAt: 1,
+      threadId: 'source-thread',
+      threadTitle: '影片',
+      work,
+    };
+    const surface = createArtifactSurface({
+      threadId: 'host-thread',
+      artifact,
+      navigationOrigin: { kind: 'workspace-home-search', query: '真实成片' },
+    });
+    expect(surface.ownerStateRef.owner).toBe('f138-publication');
+    expect(resolvePublicationTarget(surface)).toEqual({ contentRef: work.contentRef, ownerRevision: 2 });
+    expect(surface.navigationOrigin).toEqual({ kind: 'workspace-home-search', query: '真实成片' });
+    expect(restoreWorkbenchState(createInitialWorkbenchState([surface])).surfaces).toEqual([surface]);
+    expect(JSON.stringify(surface)).not.toContain('sourceMessageId');
+  });
   it.each([
     { name: 'guide.md', type: 'file' as const, context: 'Markdown' },
     { name: 'guide.MARKDOWN', type: 'file' as const, context: 'Markdown' },

@@ -148,6 +148,20 @@ describe('VirtualAttentionList nearest visibility', () => {
     expect(scroller.scrollTop).toBe(288);
     vi.unstubAllGlobals();
   });
+  it('releases the measured virtual slot when the same row leaves its reading-height hold', () => {
+    let contentHeight = 120;
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      return rect(0, this.dataset.rowKey === 'thread:thread-0' ? contentHeight : 0);
+    });
+    const handleRef = createRef<VirtualThreadListHandle>();
+    act(() => root.render(<Harness handleRef={handleRef} getRowHeight={(row) => (row === rows[0] ? 120 : 72)} />));
+    const next = () => host.querySelector('[data-row-key="thread:thread-1"]')?.parentElement?.style.top;
+    expect(next()).toBe('120px');
+    contentHeight = 40;
+    act(() => root.render(<Harness handleRef={handleRef} getRowHeight={(row) => (row === rows[0] ? 40 : 72)} />));
+    expect(next()).toBe('40px');
+    expect(host.querySelector<HTMLElement>('[data-testid="virtual-attention-list"]')?.style.height).toBe('7168px');
+  });
   it('positions and locates compact rows with mixed one-line and two-line heights', () => {
     const handleRef = createRef<VirtualThreadListHandle>();
     const getRowHeight = (row: AttentionListRow) => (row.key === 'thread:thread-0' ? 32 : 52);
@@ -163,5 +177,98 @@ describe('VirtualAttentionList nearest visibility', () => {
     act(() => handleRef.current?.scrollToIndex(50));
     expect(scroller.scrollTop).toBe(2486);
     expect(host.querySelector('[data-row-key="thread:thread-50"]')).not.toBeNull();
+  });
+  it('invalidates offscreen measurement cache when pending decisions change', () => {
+    const handleRef = createRef<VirtualThreadListHandle>();
+    let decisions = new Set<string>();
+
+    // Mock getBoundingClientRect to return real heights matching getRowHeight
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      const key = this.dataset.rowKey;
+      if (!key) return rect(0, 0);
+      const threadId = key.split(':')[1];
+      const height = decisions.has(threadId) ? 76 : 52;
+      return rect(0, height);
+    });
+
+    // Test control ref with explicit type
+    const updateDecisionsRef = { current: null as ((newDecisions: Set<string>) => void) | null };
+
+    function DynamicHarness() {
+      const scrollContainerRef = useRef<HTMLDivElement>(null);
+      const [groupDecisions, setGroupDecisions] = React.useState<{ status: 'ready'; threadIds: Set<string> }>({
+        status: 'ready',
+        threadIds: decisions,
+      });
+      // Home ties measured cache entries to the canonical height estimate. Keep that
+      // estimate reactive to decision changes, as ThreadSidebar's callback does.
+      const getRowHeight = React.useCallback(
+        (row: AttentionListRow) => {
+          const threadId = row.kind === 'thread' ? row.thread.id : '';
+          return groupDecisions.threadIds.has(threadId) ? 76 : 52;
+        },
+        [groupDecisions],
+      );
+      // Expose setter for test control via typed ref
+      updateDecisionsRef.current = (newDecisions: Set<string>) => {
+        decisions = newDecisions;
+        setGroupDecisions({ status: 'ready', threadIds: newDecisions });
+      };
+      return (
+        <div ref={scrollContainerRef} data-testid="scroller">
+          <div data-scroll-occluder="true">Tabs</div>
+          <VirtualAttentionList
+            ref={handleRef}
+            rows={rows}
+            getRowHeight={getRowHeight}
+            scrollContainerRef={scrollContainerRef}
+            renderItem={(row) => <div data-row-key={row.key}>{row.key}</div>}
+          />
+        </div>
+      );
+    }
+
+    act(() => root.render(<DynamicHarness />));
+    const scroller = host.querySelector('[data-testid="scroller"]') as HTMLDivElement;
+    const list = host.querySelector('[data-testid="virtual-attention-list"]') as HTMLDivElement;
+    Object.defineProperty(scroller, 'clientHeight', { value: 640, configurable: true });
+
+    // Initial: all 52px, total = 52 * 100 = 5200px
+    expect(list.style.height).toBe('5200px');
+
+    // Scroll to make row 50 visible and measure it (enters cache with 52px)
+    act(() => handleRef.current?.scrollToIndex(50));
+    expect(host.querySelector('[data-row-key="thread:thread-50"]')).not.toBeNull();
+
+    // Scroll row 50 offscreen (back to top)
+    act(() => {
+      scroller.scrollTop = 0;
+      scroller.dispatchEvent(new Event('scroll'));
+    });
+    expect(host.querySelector('[data-row-key="thread:thread-50"]')).toBeNull();
+
+    // Add decision for thread-50 (should invalidate cache)
+    act(() => {
+      updateDecisionsRef.current?.(new Set(['thread-50']));
+    });
+
+    // Total should update immediately: 52*99 + 76 = 5224px
+    // Cache invalidation ensures offscreen row uses new height, not stale 52px
+    expect(list.style.height).toBe('5224px');
+
+    // Scroll thread-50 offscreen again before removing decision
+    act(() => {
+      scroller.scrollTop = 0;
+      scroller.dispatchEvent(new Event('scroll'));
+    });
+    expect(host.querySelector('[data-row-key="thread:thread-50"]')).toBeNull();
+
+    // Remove decision (thread-50 still offscreen)
+    act(() => {
+      updateDecisionsRef.current?.(new Set());
+    });
+
+    // Total should return to 5200px immediately (cache invalidated again)
+    expect(list.style.height).toBe('5200px');
   });
 });

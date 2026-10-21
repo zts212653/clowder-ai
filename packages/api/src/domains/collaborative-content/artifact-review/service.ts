@@ -12,6 +12,7 @@ import {
 import { MediaOwnerError } from '../../video-studio/content-owner/media-errors.js';
 import { type MediaReviewPrincipal, withContentTask } from '../../video-studio/content-owner/published-media-access.js';
 import type { PublishedMediaService } from '../../video-studio/content-owner/published-media-service.js';
+import { isWorkResponseIntent } from '../works/review-response-contract.js';
 import { ArtifactReviewError } from './errors.js';
 import { commitReviewAction } from './linked-review-action.js';
 import { currentReviewModification } from './modification-request-reference.js';
@@ -24,7 +25,7 @@ import {
   reviewRetainsArtifact,
 } from './review-authority.js';
 import { createReviewCandidate } from './review-candidate.js';
-import type { ArtifactReviewStore, ReviewMutation } from './store.js';
+import type { ArtifactReviewStore, ReviewMutation, ReviewMutationResult } from './store.js';
 import { ArtifactVersionResponseService } from './version-response-service.js';
 
 export interface ArtifactReviewServiceDeps {
@@ -37,10 +38,17 @@ export class ArtifactReviewService {
   readonly versions: ArtifactVersionResponseService;
   private readonly now: () => string;
   private committedProjection?: (reviewId: string) => Promise<void>;
+  private workResponseRecovery?: (
+    review: ArtifactReview,
+    principal: MediaReviewPrincipal,
+  ) => Promise<ReviewMutationResult | null>;
+  setWorkResponseRecovery(recover: NonNullable<ArtifactReviewService['workResponseRecovery']>): void {
+    this.workResponseRecovery = recover;
+  }
   private publicationResponse?: (
     command: RespondWithMediaVersion,
     principal: MediaReviewPrincipal,
-    mode: 'admit' | 'replay',
+    mode: 'admit' | 'replay' | 'effect',
   ) => Promise<import('@cat-cafe/shared').MessageMediaPublicationSource | undefined>;
   setPublicationResponseGuard(guard: NonNullable<ArtifactReviewService['publicationResponse']>): void {
     this.publicationResponse = guard;
@@ -49,6 +57,9 @@ export class ArtifactReviewService {
   /** Composition installs the durable Host projection; canonical operations remain the authority. */
   setCommittedProjection(project: (reviewId: string) => Promise<void>): void {
     this.committedProjection = project;
+  }
+  async projectCommitted(reviewId: string): Promise<void> {
+    await this.committedProjection?.(reviewId);
   }
   constructor(private readonly deps: ArtifactReviewServiceDeps) {
     this.now = deps.now ?? (() => new Date().toISOString());
@@ -104,8 +115,13 @@ export class ArtifactReviewService {
     await this.authorizeReview(review, principal);
     if (this.deps.store.pendingVersion(reviewId)) {
       try {
-        await this.versions.recover(review, principal);
-        await this.committedProjection?.(reviewId);
+        const pending = this.deps.store.pendingVersion(reviewId)!;
+        if (isWorkResponseIntent(pending.payload) && !this.workResponseRecovery)
+          throw new MediaOwnerError('media_unavailable');
+        const recovered = isWorkResponseIntent(pending.payload)
+          ? await this.workResponseRecovery!(review, principal)
+          : await this.versions.recover(review, principal);
+        if (recovered) await this.committedProjection?.(reviewId);
       } catch (error) {
         if (!(error instanceof MediaOwnerError) || this.deps.store.pendingVersion(reviewId)) throw error;
       }
@@ -120,7 +136,8 @@ export class ArtifactReviewService {
     const task = await this.authorizeReview(review, principal);
     const currentOwnerRevision = await this.deps.media.currentRevision(review.contentRef, principal);
     const authorityState = reviewAuthorityState(review, task, currentOwnerRevision);
-    const pendingVersion = this.deps.store.pendingVersion(reviewId) !== null;
+    const pending = this.deps.store.pendingVersion(reviewId);
+    const pendingVersion = pending !== null;
     const revision = task.entrustedWork?.revision;
     const delivery = this.deps.store.returns.latest(reviewId);
     const modification = currentReviewModification(this.deps.store, review);
@@ -136,6 +153,16 @@ export class ArtifactReviewService {
           }
         : {}),
       pendingVersion,
+      ...(pending && isWorkResponseIntent(pending.payload)
+        ? {
+            pendingSubmission: {
+              kind: 'work-submit-response' as const,
+              operationId: pending.input.operationId,
+              sourceRound: pending.input.round,
+              expectedReviewRevision: pending.input.expectedRevision,
+            },
+          }
+        : {}),
       authority: {
         state: authorityState,
         taskRevision: revision,
@@ -192,9 +219,15 @@ export class ArtifactReviewService {
     });
     const currentOwnerRevision = await this.deps.media.currentRevision(review.contentRef, principal);
     const state = reviewAuthorityState(review, task, currentOwnerRevision);
-    if (state === 'asset_changed') throw new ArtifactReviewError('asset_changed');
+    const judgingRetainedResponse = command.action.kind === 'judge_response' && state === 'asset_changed';
+    if (state === 'asset_changed' && !judgingRetainedResponse) throw new ArtifactReviewError('asset_changed');
     const renewing = command.action.kind === 'request_judgment' && isCurrentArtifactLinked(task, review);
-    if (state !== 'current' && !renewing) throw new ArtifactReviewError('task_changed');
+    if (state !== 'current' && !renewing && !judgingRetainedResponse) throw new ArtifactReviewError('task_changed');
+    if (command.action.kind === 'annotate') {
+      const round = review.rounds.find((item) => item.number === command.round);
+      if (!round) throw new ArtifactReviewError('invalid_action');
+      await this.deps.media.assertAnchorEvidence(round.asset, command.action.anchor, principal);
+    }
     if (command.action.kind === 'request_judgment' && !isCurrentArtifactLinked(task, review))
       throw new ArtifactReviewError('task_changed');
     review = this.requireReview(command.reviewId);

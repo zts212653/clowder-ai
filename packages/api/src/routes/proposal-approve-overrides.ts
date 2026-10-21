@@ -76,6 +76,18 @@ export async function resolveApproveOverrides(
 
   const finalPreferredCats = (overrides.preferredCats ?? proposal.preferredCats) as CatId[];
   const finalInitialMessage = resolveInitialMessage(proposal.initialMessage, overrides.initialMessage);
+  if (
+    proposal.approvalContractInvalid ||
+    (proposal.subjectTaskId &&
+      !proposal.approvedDevelopmentScope &&
+      (!proposal.subjectTaskTitle?.trim() || !finalInitialMessage?.trim() || !finalPreferredCats.length))
+  ) {
+    return {
+      ok: false,
+      status: 400,
+      error: 'Generic Task approval requires a task title, complete initial message and execution targets',
+    };
+  }
   const finalDeclaredWorkMode = overrides.declaredWorkMode ?? proposal.declaredWorkMode;
   const finalReportingMode =
     overrides.reportingMode ?? proposal.reportingMode ?? suggestedReportingModeForWorkMode(finalDeclaredWorkMode);

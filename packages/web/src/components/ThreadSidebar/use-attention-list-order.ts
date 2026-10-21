@@ -66,8 +66,11 @@ interface ReadingSession {
   heights: Readonly<Record<string, number>>;
 }
 
-/** Remember layout, never facts: clearing reply signals must not move the next
- * click target until the pointer leaves the list. */
+// Protect a quick following click, then reclaim empty space even while hovering.
+const READING_HEIGHT_HOLD_MS = 500;
+
+/** Placement lasts for the reading session; geometry only lasts for a short
+ * interaction window. Neither may keep obsolete unread or working facts. */
 export function useSidebarReadingSession(surfaceRef: RefObject<HTMLElement>, enabled: boolean, scope: string) {
   const [session, setSession] = useState<ReadingSession>({ scope, held: false, heights: {} });
   useEffect(() => {
@@ -76,6 +79,8 @@ export function useSidebarReadingSession(surfaceRef: RefObject<HTMLElement>, ena
       setSession({ scope, held: false, heights: {} });
       return;
     }
+    let releaseTimer: ReturnType<typeof setTimeout> | undefined;
+    let protecting = false;
     const enter = () => {
       const heights = Object.fromEntries(
         [...surface.querySelectorAll<HTMLElement>('[data-sidebar-row-key]')].flatMap((row) => {
@@ -84,14 +89,24 @@ export function useSidebarReadingSession(surfaceRef: RefObject<HTMLElement>, ena
           return key && height > 0 ? [[key, height]] : [];
         }),
       );
+      protecting = true;
+      clearTimeout(releaseTimer);
       setSession({ scope, held: true, heights });
+      releaseTimer = setTimeout(() => {
+        protecting = false;
+        setSession((current) => (current.scope === scope ? { ...current, heights: {} } : current));
+      }, READING_HEIGHT_HOLD_MS);
     };
-    const leave = () => setSession({ scope, held: false, heights: {} });
+    const leave = () => {
+      protecting = false;
+      clearTimeout(releaseTimer);
+      setSession({ scope, held: false, heights: {} });
+    };
     // Virtualization mounts rows inside the child without rendering this hook.
-    // Admit their dimensions too; later fact updates can grow but not shrink them.
+    // Join the current window without extending its deadline on live updates.
     const observer = new MutationObserver(() => {
       setSession((current) => {
-        if (!current.held || current.scope !== scope) return current;
+        if (!protecting || !current.held || current.scope !== scope) return current;
         const growth = [...surface.querySelectorAll<HTMLElement>('[data-sidebar-row-key]')].flatMap((row) => {
           const key = row.dataset.sidebarRowKey;
           const height = row.getBoundingClientRect().height;
@@ -103,9 +118,12 @@ export function useSidebarReadingSession(surfaceRef: RefObject<HTMLElement>, ena
     observer.observe(surface, { childList: true, subtree: true });
     if (surface.matches(':hover')) enter();
     surface.addEventListener('pointerenter', enter);
+    surface.addEventListener('pointerdown', enter);
     surface.addEventListener('pointerleave', leave);
     return () => {
+      clearTimeout(releaseTimer);
       surface.removeEventListener('pointerenter', enter);
+      surface.removeEventListener('pointerdown', enter);
       surface.removeEventListener('pointerleave', leave);
       observer.disconnect();
     };

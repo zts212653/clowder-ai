@@ -86,7 +86,8 @@ export const OFFICIAL_PLUGIN_HOST_POLICIES: readonly MachineCatalogHostPolicy[] 
   { pluginId: 'official.connector.xiaoyi', effectiveGrants: connectorGrants('streams.read') },
   {
     pluginId: 'official.github-operations',
-    // Declared schedules, private state and owner-bound notifications; no legacy cutover implied.
+    // Owner-approved tracking continuation: generic owner-scoped Task reads and
+    // pluginWait CAS writes. No timeline read or entrusted-work admission.
     effectiveGrants: [
       'schedule.register',
       'plugin.config.read',
@@ -96,6 +97,8 @@ export const OFFICIAL_PLUGIN_HOST_POLICIES: readonly MachineCatalogHostPolicy[] 
       'thread.listMetadata',
       'thread.write',
       'messaging.send',
+      'task.read',
+      'task.write',
     ],
   },
   {

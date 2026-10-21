@@ -6,7 +6,7 @@ import {
   type UnixProcessIdentity,
 } from '../../utils/cli-process-ownership.js';
 import type { DurableManagedGateJob } from './durable-managed-gate-job.js';
-import { openSupervisorStore, transaction } from './managed-job-database.js';
+import { closeSupervisorStore, openSupervisorStore, transaction } from './managed-job-database.js';
 import { writeManagedJobLedger } from './managed-job-ledger.js';
 
 export const CURRENT_DURABLE_GATE_SUPERVISOR_EPOCH = randomUUID();
@@ -120,7 +120,7 @@ export function claimDurableGateSupervisor(
       return { supervisorEpoch: job.supervisorEpoch, fencingToken, leaseUntil };
     });
   } finally {
-    database.close();
+    closeSupervisorStore(database);
   }
 }
 
@@ -175,6 +175,6 @@ export function writeDurableGateRecordFenced(
       return true;
     });
   } finally {
-    database.close();
+    closeSupervisorStore(database);
   }
 }

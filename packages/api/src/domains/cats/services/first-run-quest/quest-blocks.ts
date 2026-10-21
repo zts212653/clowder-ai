@@ -1,3 +1,4 @@
+import { deploymentDefaults } from '@cat-cafe/shared';
 /**
  * F171: Interactive block definitions for First-Run Quest.
  * These are sent to the frontend as rich blocks for the gamified UI.
@@ -33,7 +34,7 @@ export const QUEST_TASKS = [
   {
     id: 'FRQ-3',
     icon: '📝',
-    label: 'Hello Clowder AI',
+    label: `Hello ${deploymentDefaults.brand.name}`,
     description: '创建一个欢迎页面，展示你的 AI 团队 (~3分钟)',
     difficulty: 1,
   },

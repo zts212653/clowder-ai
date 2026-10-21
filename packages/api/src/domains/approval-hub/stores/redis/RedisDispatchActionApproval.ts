@@ -6,10 +6,12 @@ import {
   parseActionSubjectTerminal,
   parseActionSuccessorLease,
 } from '../../../ball-custody/action-successor-redis-codecs.js';
+import { ActionSuccessorStandingError } from '../../../ball-custody/action-successor-standing.js';
 import {
   type ClaimActionSuccessorInput,
   claimActionSuccessor,
 } from '../../../ball-custody/action-successor-state-machine.js';
+import { runTaskContinuationFencedCommand } from '../../../ball-custody/approved-task-continuation-fence.js';
 import { type OwnerAuthProvenance, requireOwnerAuthProvenance } from '../../../cats/services/owner-auth-provenance.js';
 import { DispatchProposalKeys } from '../../../cats/services/stores/redis-keys/proposals/dispatch-proposal-keys.js';
 
@@ -152,24 +154,30 @@ export async function approveRedisDispatchProposalWithActionClaim(
     dispatchDeliveryAttemptCount: 0,
   };
   const provenance = requireOwnerAuthProvenance(ownerAuthProvenance);
-  const raw = (await redis.eval(
-    APPROVE_AND_CLAIM_ACTION_LUA,
-    7,
-    DispatchProposalKeys.detail(proposal.proposalId),
-    DispatchProposalKeys.userPending(proposal.ownerUserId),
-    DispatchProposalKeys.userSettled(proposal.ownerUserId),
-    ActionSuccessorKeys.detail(candidate.leaseId),
-    ActionSuccessorKeys.identity(candidate),
-    ActionSuccessorKeys.subjectTerminal(candidate.subjectRef),
-    ActionSuccessorKeys.ALL,
-    String(input.now),
-    userId,
-    proposal.proposalId,
-    input.dispatchId,
-    JSON.stringify(candidate),
-    proposal.envelopeDigest,
-    provenance,
-  )) as [string, string];
+  const fenced = await runTaskContinuationFencedCommand(redis, candidate, {
+    script: APPROVE_AND_CLAIM_ACTION_LUA,
+    keys: [
+      DispatchProposalKeys.detail(proposal.proposalId),
+      DispatchProposalKeys.userPending(proposal.ownerUserId),
+      DispatchProposalKeys.userSettled(proposal.ownerUserId),
+      ActionSuccessorKeys.detail(candidate.leaseId),
+      ActionSuccessorKeys.identity(candidate),
+      ActionSuccessorKeys.subjectTerminal(candidate.subjectRef),
+      ActionSuccessorKeys.ALL,
+    ],
+    args: [
+      String(input.now),
+      userId,
+      proposal.proposalId,
+      input.dispatchId,
+      JSON.stringify(candidate),
+      proposal.envelopeDigest,
+      provenance,
+    ],
+  });
+  if (!fenced.ok)
+    throw new ActionSuccessorStandingError('mismatch', 'approved Task contract changed before lease admission');
+  const raw = fenced.result as [string, string];
   const [outcome, payload] = raw;
   if (outcome === 'subject_terminal') {
     const terminal = parseActionSubjectTerminal(payload);

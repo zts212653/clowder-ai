@@ -115,11 +115,15 @@ describe('client source trust is descriptive, not an install or enable gate', ()
   }
   it('a missing admission origin cannot borrow a current catalog identity', () => {
     const snapshot = installedSnapshot();
+    const admitted = projectPluginManagerCatalogCandidate(candidate, snapshot);
     delete snapshot.packages[0].provenance;
-    assert.throws(
-      () => projectPluginManagerCatalogCandidate(candidate, snapshot),
-      /missing admitted source provenance/,
-    );
+    const before = structuredClone(snapshot);
+    const result = projectPluginManagerCatalogCandidate(candidate, snapshot);
+    assert.deepEqual(result.source, { kind: 'unknown', packageName: null, trust: 'unknown' });
+    const { source: _admittedSource, ...admittedFacts } = admitted;
+    const { source: _unknownSource, ...legacyFacts } = result;
+    assert.deepEqual(legacyFacts, admittedFacts, 'origin labels do not change existing Host facts or actions');
+    assert.deepEqual(snapshot, before, 'reading cannot manufacture admission provenance');
   });
 });
 

@@ -1,6 +1,6 @@
 'use client';
 
-import type { ContextAttachment } from '@cat-cafe/shared';
+import { type ContextAttachment, deploymentDefaults } from '@cat-cafe/shared';
 import { useCallback, useMemo } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import {
@@ -113,7 +113,7 @@ export function SplitPaneView({
       <header className="border-b border-cafe-subtle px-5 py-3 bg-cafe-surface flex items-center gap-2 flex-shrink-0">
         <PawIcon className="text-2xl" />
         <div className="flex-1 min-w-0">
-          <h1 className="text-lg font-bold text-cafe-black">Clowder AI</h1>
+          <h1 className="text-lg font-bold text-cafe-black">{deploymentDefaults.brand.name}</h1>
           <p className="text-xs text-cafe-secondary">分屏模式</p>
         </div>
         <span className="text-micro text-cafe-muted hidden sm:inline mr-1">⌘\ 切换</span>

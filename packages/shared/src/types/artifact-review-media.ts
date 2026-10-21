@@ -64,6 +64,15 @@ export const artifactReviewAnchorSchema = z
         streamId: id,
         startTick: tick,
         endTick: tick,
+        /** A quoted paragraph belongs to this exact media version and retained metadata revision. */
+        storyEvidence: z
+          .object({
+            paragraphId: z.string().min(1).max(256),
+            metadataRevision: positive,
+            quote: z.string().min(1).max(12000),
+          })
+          .strict()
+          .optional(),
         frameRegion: z
           .object({ tick, ...region })
           .strict()

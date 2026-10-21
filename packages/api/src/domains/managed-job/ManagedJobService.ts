@@ -2,13 +2,9 @@ import { createHash } from 'node:crypto';
 import { existsSync, realpathSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { isMainThread } from 'node:worker_threads';
 import type { ManagedRunner, ManagedRunnerStartResult } from '../../infrastructure/managed-runner.js';
-import { cleanupDurableManagedGateAttempt } from '../../infrastructure/managed-runner-durable-attempt.js';
-import {
-  readUnixProcessSnapshotSync,
-  resolveCatCafeDataRoot,
-  sameUnixProcess,
-} from '../../utils/cli-process-ownership.js';
+import { resolveCatCafeDataRoot } from '../../utils/cli-process-ownership.js';
 import { findMonorepoRoot } from '../../utils/monorepo-root.js';
 import {
   createResumableDurableManagedGateJob,
@@ -18,7 +14,6 @@ import {
   cancelDurableManagedGateJob,
   type DurableManagedGateJob,
   initializeDurableManagedGateJob,
-  inspectDurableManagedGateJob,
   isDurableManagedGateCommand,
   type ManagedJobPrincipal,
 } from './durable-managed-gate-job.js';
@@ -28,32 +23,27 @@ import {
   writeDurableGateRecord,
 } from './durable-managed-gate-job-store.js';
 import { CURRENT_DURABLE_GATE_SUPERVISOR_EPOCH } from './durable-managed-gate-supervisor.js';
-import { isManagedJobAdmitted, type ManagedJobSource, validManagedJobSource } from './managed-job-admission.js';
-import { observeManagedJobHealth, publishManagedJobCensus } from './managed-job-health.js';
+import { isManagedJobAdmitted, validManagedJobSource } from './managed-job-admission.js';
+import { withSupervisorStores } from './managed-job-database.js';
+import { observeManagedJobHealthSnapshot, publishManagedJobCensus } from './managed-job-health.js';
 import { listManagedJobLedger, managedJobPrincipalKey, readManagedJobTransitions } from './managed-job-ledger.js';
 import { readManagedJobLogTail } from './managed-job-log.js';
-import type { AlphaRevisionConsumer } from './managed-job-types.js';
+import { reconcileManagedJobDescriptor } from './managed-job-reconcile-descriptor.js';
+import {
+  type ManagedJobObservation,
+  type ManagedJobReconciliationRequest,
+  reconcileManagedJobsOffLoop,
+} from './managed-job-reconciliation.js';
+import type { ManagedJobAccess, ManagedJobSubmission } from './managed-job-types.js';
 
-export interface ManagedJobSubmission extends ManagedJobSource {
-  readonly command: string;
-  readonly cwd?: string;
-  readonly originTaskId: string;
-  readonly consumer?: AlphaRevisionConsumer;
-  readonly idempotencyKey: string;
-  readonly retryOfJobId?: string;
-  readonly executionSlaMs: number;
-  readonly wakeTarget: DurableManagedGateJob['wakeTarget'];
-}
-
-export type ManagedJobAccess =
-  | ManagedJobPrincipal
-  | { readonly kind: 'operator'; readonly userId: string; readonly threadId: string };
+export type { ManagedJobAccess, ManagedJobSubmission } from './managed-job-types.js';
 
 export class ManagedJobService {
   constructor(
     private readonly dataRoot = resolveCatCafeDataRoot(),
     private readonly maxConcurrent = 4,
     private readonly operatorUserId?: string,
+    private readonly supervisorEpoch: string = CURRENT_DURABLE_GATE_SUPERVISOR_EPOCH,
   ) {}
 
   private locator(jobId: string): DurableManagedGateJob {
@@ -307,34 +297,64 @@ export class ManagedJobService {
   }
 
   /** Reconnect one authorized consumer without scanning unrelated jobs on each poll. */
-  async reconcileJob(principal: ManagedJobAccess, jobId: string, now = Date.now()) {
-    return this.reconcileDescriptor(this.authorized(principal, jobId), now);
+  async reconcileJob(principal: ManagedJobAccess, jobId: string, now = Date.now()): Promise<ManagedJobObservation> {
+    if (!isMainThread)
+      return withSupervisorStores(async () =>
+        reconcileManagedJobDescriptor(this.authorized(principal, jobId), now, this.supervisorEpoch),
+      );
+    const row = await reconcileManagedJobsOffLoop<ManagedJobObservation>({
+      kind: 'one',
+      principal,
+      jobId,
+      now,
+      dataRoot: this.dataRoot,
+      maxConcurrent: this.maxConcurrent,
+      operatorUserId: this.operatorUserId,
+      supervisorEpoch: this.supervisorEpoch,
+    });
+    this.observe(row, now);
+    return row;
   }
 
-  private async reconcileDescriptor(job: DurableManagedGateJob, now: number) {
-    const record = readDurableGateRecord(job);
-    if (record?.state !== 'terminal' && record?.ownerIdentity && record.attemptToken && !record.cleanupProven) {
-      const snapshot = readUnixProcessSnapshotSync({ pids: [record.ownerIdentity.pid] });
-      if (snapshot !== null && !sameUnixProcess(record.ownerIdentity, snapshot.get(record.ownerIdentity.pid))) {
-        const cleanup = await cleanupDurableManagedGateAttempt(record.attemptToken, 3000, 100);
-        if (cleanup.proven)
-          writeDurableGateRecord(
-            { ...job, supervisorEpoch: CURRENT_DURABLE_GATE_SUPERVISOR_EPOCH },
-            { ...rawDurableGateRecord(job), cleanupProven: true, updatedAt: Date.now() },
-          );
-      }
-    }
-    const inspection = inspectDurableManagedGateJob(job, { now });
-    const history =
-      job.recordStorage === 'sqlite_v1' ? readManagedJobTransitions(job) : [rawDurableGateRecord(job) ?? {}];
-    const health = observeManagedJobHealth(job, inspection, history, now);
-    return { job, inspection, health };
+  private observe(row: ManagedJobObservation, now: number): void {
+    observeManagedJobHealthSnapshot(row.job, row.inspection, row.health, row.observation, now);
   }
 
-  async reconcile(legacyJobs: readonly DurableManagedGateJob[] = [], now = Date.now()) {
-    const results = [];
-    for (const job of [...this.list(), ...legacyJobs]) results.push(await this.reconcileDescriptor(job, now));
+  async reconcile(
+    legacyJobs: readonly DurableManagedGateJob[] = [],
+    now = Date.now(),
+  ): Promise<ManagedJobObservation[]> {
+    if (!isMainThread)
+      return withSupervisorStores(async () => {
+        const results: ManagedJobObservation[] = [];
+        for (const job of [...this.list(), ...legacyJobs])
+          results.push(await reconcileManagedJobDescriptor(job, now, this.supervisorEpoch));
+        return results;
+      });
+    const results = await reconcileManagedJobsOffLoop<ManagedJobObservation[]>({
+      kind: 'all',
+      legacyJobs,
+      now,
+      dataRoot: this.dataRoot,
+      maxConcurrent: this.maxConcurrent,
+      operatorUserId: this.operatorUserId,
+      supervisorEpoch: this.supervisorEpoch,
+    });
+    for (const row of results) this.observe(row, now);
     publishManagedJobCensus(results.map(({ health }) => health));
     return results;
   }
+}
+
+/** Trusted worker entry: preserve the API's supervisor epoch and process birth identity. */
+export function reconcileManagedJobsInWorker(input: ManagedJobReconciliationRequest) {
+  const service = new ManagedJobService(
+    input.dataRoot,
+    input.maxConcurrent,
+    input.operatorUserId,
+    input.supervisorEpoch,
+  );
+  return input.kind === 'one'
+    ? service.reconcileJob(input.principal, input.jobId, input.now)
+    : service.reconcile(input.legacyJobs, input.now);
 }

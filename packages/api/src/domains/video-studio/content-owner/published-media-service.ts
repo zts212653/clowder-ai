@@ -1,18 +1,22 @@
 import {
+  type ArtifactReviewAnchor,
   type MediaPublicationSource,
   type ReviewedMediaAsset,
   reviewedMediaAssetSchema,
   reviewedMediaTypeSchema,
 } from '@cat-cafe/shared';
 import { MediaOwnerError } from './media-errors.js';
-import { findMessagePublicationLanding, MessagePublicationChoiceRequired } from './message-publication-landing.js';
+import { findMessagePublicationLanding } from './message-publication-landing.js';
 import { publishedMediaContentRef, samePublicationScope } from './publication.js';
+import { type PublishedAnchorEvidenceVerifier, verifyPublishedAnchorEvidence } from './published-anchor-evidence.js';
 import { type MediaReviewPrincipal, PublishedMediaAccess, withContentTask } from './published-media-access.js';
-import { probeImmutableMedia } from './published-media-probe.js';
+import { listRetainedPublishedMedia } from './published-media-catalogue.js';
+import { importPreparedPublication, preparePublishedSource } from './published-media-preparation.js';
+import { probeImmutableMedia, probeImmutableVideoFile } from './published-media-probe.js';
 import type { PublishedMediaSource } from './published-media-source.js';
-import { ContentOwnerConflictError, ContentOwnerNotFoundError, type ProjectContentOwnerService } from './service.js';
-import { digestBytes } from './store.js';
-import { type ContentPublicationScopeV1, type ContentSourcePublicationV1, isTaskPublicationScope } from './types.js';
+import { type PublishedMediaVersionInput, publishMediaVersion } from './published-media-version.js';
+import { ContentOwnerNotFoundError, type ProjectContentOwnerService } from './service.js';
+import { type ContentPublicationScopeV1, isTaskPublicationScope } from './types.js';
 
 interface PublicationInput {
   taskId: string;
@@ -23,7 +27,7 @@ interface PublicationInput {
   principal: MediaReviewPrincipal;
 }
 
-interface SourcePublicationInput {
+export interface SourcePublicationInput {
   source: MediaPublicationSource;
   operationId: string;
   principal: MediaReviewPrincipal;
@@ -33,6 +37,20 @@ interface SourcePublicationInput {
 export class PublishedMediaService {
   readonly access: PublishedMediaAccess;
   private readonly metadata = new Map<string, ReviewedMediaAsset['media']>();
+  private anchorEvidenceVerifier?: PublishedAnchorEvidenceVerifier;
+
+  /** F309 owns retained paragraph metadata; the media owner only fences its exact-version admission. */
+  setAnchorEvidenceVerifier(verifier: PublishedAnchorEvidenceVerifier) {
+    this.anchorEvidenceVerifier = verifier;
+  }
+
+  async assertAnchorEvidence(
+    reference: { contentRef: string; ownerRevision: number },
+    anchor: ArtifactReviewAnchor,
+    principal: MediaReviewPrincipal,
+  ) {
+    return verifyPublishedAnchorEvidence(this, reference, anchor, principal, this.anchorEvidenceVerifier);
+  }
   constructor(
     private readonly deps: {
       owner: ProjectContentOwnerService;
@@ -44,31 +62,7 @@ export class PublishedMediaService {
   }
 
   async prepare(input: PublicationInput | SourcePublicationInput): Promise<ReviewedMediaAsset> {
-    if ('source' in input) {
-      if (
-        typeof input.operationId !== 'string' ||
-        !input.operationId ||
-        input.operationId.length > 256 ||
-        input.operationId.trim() !== input.operationId ||
-        input.operationId.includes('\0')
-      )
-        throw new MediaOwnerError('invalid_media');
-      if (input.source.kind === 'message') {
-        const landing = await findMessagePublicationLanding(this.deps, this, {
-          source: input.source,
-          principal: input.principal,
-        });
-        if (landing?.status === 'resolved') return landing.asset;
-        if (landing) throw new MessagePublicationChoiceRequired(landing);
-      }
-      const existing = await this.findPreparedSource(input);
-      if (existing) return existing;
-      const source = await this.deps.sources.resolveSource(input.source, input.operationId, input.principal);
-      const loaded = await source.load();
-      return this.importPublication(source.scope, { ...loaded, publication: source.publication }, input, () =>
-        this.access.authorizeScope(source.scope, input.principal),
-      );
-    }
+    if ('source' in input) return preparePublishedSource(this.deps, this, this.remember.bind(this), input);
     const task = await this.access.authorize(input.taskId, input.principal, {
       expectedRevision: input.expectedTaskRevision,
     });
@@ -81,7 +75,7 @@ export class PublishedMediaService {
       artifactRef: input.artifactRef,
       expectedArtifactRevision: input.expectedArtifactRevision,
     });
-    return this.importPublication(scope, source, input, () =>
+    return importPreparedPublication(this.deps, this, this.remember.bind(this), scope, source, input, () =>
       this.access.authorize(task.id, input.principal, {
         expectedRevision: input.expectedTaskRevision,
       }),
@@ -114,96 +108,10 @@ export class PublishedMediaService {
     }
   }
 
-  private async importPublication(
-    scope: ContentPublicationScopeV1,
-    source: { bytes: Buffer; mediaType: ReviewedMediaAsset['mediaType']; publication: ContentSourcePublicationV1 },
-    input: { operationId: string; principal: MediaReviewPrincipal },
-    revalidate: () => Promise<unknown>,
-  ): Promise<ReviewedMediaAsset> {
-    const media = await probeImmutableMedia(source.bytes, source.mediaType);
-    const contentRef = publishedMediaContentRef(scope, source.publication);
-    await revalidate();
-    await this.deps.sources.assertVisible(scope, source.publication, input.principal);
-    try {
-      await this.deps.owner.importContent({
-        contentRef,
-        bytes: source.bytes,
-        mediaType: source.mediaType,
-        actor: input.principal.actor,
-        operationId: input.operationId,
-        publicationScope: scope,
-        sourcePublication: source.publication,
-      });
-    } catch (error) {
-      if (!(error instanceof ContentOwnerConflictError)) throw error;
-      const original = await this.deps.owner.describe(contentRef, 1);
-      if (
-        original.blobDigest !== digestBytes(source.bytes) ||
-        !samePublicationScope(original.publicationScope, scope)
-      ) {
-        throw new MediaOwnerError('publication_changed');
-      }
-    }
-    this.remember(digestBytes(source.bytes), media);
-    return this.read(contentRef, 1, input.principal);
-  }
-
-  async publishVersion(
-    input: PublicationInput & {
-      contentRef: string;
-      expectedOwnerRevision: number;
-      publicationSource?: import('@cat-cafe/shared').MessageMediaPublicationSource;
-    },
-  ): Promise<ReviewedMediaAsset> {
-    input = { ...input, principal: withContentTask(input.principal, input.taskId) };
-    const current = await this.deps.owner.describe(input.contentRef);
-    await this.access.authorizeScope(current.publicationScope, input.principal, false, input.contentRef);
-    const task = await this.access.authorize(input.taskId, input.principal, {
-      expectedRevision: input.expectedTaskRevision,
-    });
-    if (input.principal.actor.kind !== 'cat' || task.ownerCatId !== input.principal.actor.actorId)
-      throw new MediaOwnerError('access_denied');
-    const scope = current.publicationScope;
-    if (!scope) throw new MediaOwnerError('access_denied');
-    if (isTaskPublicationScope(scope) && scope.taskId !== task.id) throw new MediaOwnerError('task_changed');
-    if (!isTaskPublicationScope(scope))
-      await this.access.authorizePublicationTask(input.contentRef, input.principal, false);
-    const source = await this.deps.sources.read({
-      scope: { ownerUserId: scope.ownerUserId, threadId: task.threadId, taskId: task.id },
-      principal: input.principal,
-      taskRevision: input.expectedTaskRevision,
-      artifactRef: input.artifactRef,
-      expectedArtifactRevision: input.expectedArtifactRevision,
-      ...(input.publicationSource ? { publicationSource: input.publicationSource } : {}),
-    });
-    if (source.mediaType !== current.mediaType) throw new MediaOwnerError('invalid_media');
-    const media = await probeImmutableMedia(source.bytes, source.mediaType);
-    const publication = {
-      ...source.publication,
-      ...(task.threadId !== scope.threadId ? { threadId: task.threadId } : {}),
-    };
-    await this.access.authorize(input.taskId, input.principal, { expectedRevision: input.expectedTaskRevision });
-    await this.deps.sources.assertVisible(scope, publication, input.principal);
-    const receipt = await this.deps.owner.settle({
-      contentRef: input.contentRef,
-      expectedOwnerRevision: input.expectedOwnerRevision,
-      bytes: source.bytes,
-      actor: input.principal.actor,
-      operationId: input.operationId,
-      sourcePublication: publication,
-    });
-    this.remember(receipt.blobDigest, media);
-    // Return the actual owner effect to its projection coordinator even if authority changes afterwards.
-    // Every external read/response still goes through the service's fresh authorization fence.
-    return reviewedMediaAssetSchema.parse({
-      contentRef: input.contentRef,
-      ownerRevision: receipt.ownerRevision,
-      blobDigest: receipt.blobDigest,
-      mediaType: source.mediaType,
-      media,
-      sourcePublication: publication,
-      ownerReceiptRef: receipt.receiptId,
-    });
+  async publishVersion(input: PublishedMediaVersionInput): Promise<ReviewedMediaAsset> {
+    const asset = await publishMediaVersion(this.deps, input);
+    this.remember(asset.blobDigest, asset.media);
+    return asset;
   }
 
   async read(contentRef: string, ownerRevision: number, principal: MediaReviewPrincipal): Promise<ReviewedMediaAsset> {
@@ -215,8 +123,17 @@ export class PublishedMediaService {
     if (!mime.success) throw new MediaOwnerError('invalid_media');
     let media = this.metadata.get(description.blobDigest);
     if (!media) {
-      const loaded = await this.deps.owner.load(contentRef, ownerRevision);
-      media = await probeImmutableMedia(loaded.bytes, mime.data);
+      if (mime.data === 'video/mp4') {
+        const opened = await this.deps.owner.open(contentRef, ownerRevision);
+        try {
+          media = await probeImmutableVideoFile(opened.path);
+        } finally {
+          await opened.handle.close();
+        }
+      } else {
+        const loaded = await this.deps.owner.load(contentRef, ownerRevision);
+        media = await probeImmutableMedia(loaded.bytes, mime.data);
+      }
       this.remember(description.blobDigest, media);
     }
     const receipt = (await this.deps.owner.listOutbox(contentRef)).find((item) => item.ownerRevision === ownerRevision);
@@ -234,30 +151,9 @@ export class PublishedMediaService {
     });
   }
 
-  /** Local Human picker; discovery never substitutes for the original read and source visibility checks. */
-  async listRetained(principal: MediaReviewPrincipal, after?: string) {
-    if (principal.actor.kind !== 'human' || principal.actor.actorId !== principal.userId)
-      throw new MediaOwnerError('access_denied');
-    const page = await this.deps.owner.listRetainedMedia(principal.userId, after);
-    const items: { contentRef: string; ownerRevision: number; label: string; mediaType: 'image/png' | 'video/mp4' }[] =
-      [];
-    for (const candidate of page.items) {
-      try {
-        const asset = await this.read(candidate.contentRef, candidate.ownerRevision, principal);
-        if (asset.mediaType !== 'image/png' && asset.mediaType !== 'video/mp4') continue;
-        const label =
-          asset.sourcePublication.artifactRef.split('/').at(-1) || (asset.mediaType === 'image/png' ? '图片' : '视频');
-        items.push({ ...candidate, label, mediaType: asset.mediaType });
-      } catch (error) {
-        if (
-          error instanceof MediaOwnerError &&
-          ['access_denied', 'not_found', 'publication_changed'].includes(error.code)
-        )
-          continue;
-        throw error;
-      }
-    }
-    return { items, ...(page.nextCursor ? { nextCursor: page.nextCursor } : {}) };
+  /** Local Human picker; every discovered version is reauthorized. */
+  listRetained(principal: MediaReviewPrincipal, after?: string) {
+    return listRetainedPublishedMedia(this.deps.owner, this, principal, after);
   }
 
   async describe(contentRef: string, ownerRevision: number | undefined, principal: MediaReviewPrincipal) {

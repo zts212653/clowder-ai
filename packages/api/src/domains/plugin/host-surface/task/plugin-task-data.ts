@@ -1,12 +1,6 @@
 import { createHash } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
-import {
-  type CreateTaskInput,
-  entrustedWorkTerminalActionV1Schema,
-  entrustedWorkUpdateActionV1Schema,
-  type RegisteredCustodyGrantV1,
-  type TaskItem,
-} from '@cat-cafe/shared';
+import { type CreateTaskInput, type RegisteredCustodyGrantV1, type TaskItem } from '@cat-cafe/shared';
 import { z } from 'zod';
 import {
   EntrustedWorkLifecycleError,
@@ -18,6 +12,14 @@ import { currentOwnerOperation } from '../../carrier/plugin-owner-operation-cont
 import { snapshotPluginProtocolData } from '../../carrier/plugin-protocol-data.js';
 import { ExternalPluginRuntimeError } from '../../external-runtime/types.js';
 import type { PluginTaskHostDeps } from './plugin-task-host.js';
+import {
+  createPluginTaskWriteFence,
+  mutateCurrentPluginTaskWorkData,
+  pluginTaskDataAuthorityRef,
+  pluginTaskWorkMutationSchema,
+} from './plugin-task-write-fence.js';
+
+export type { PluginTaskWorkMutation } from './plugin-task-write-fence.js';
 
 const definition = z
   .object({
@@ -28,11 +30,6 @@ const definition = z
   })
   .strict();
 export type PluginTaskWorkData = z.infer<typeof definition>;
-const mutation = z.union([
-  entrustedWorkUpdateActionV1Schema.omit({ taskId: true, status: true }),
-  entrustedWorkTerminalActionV1Schema,
-]);
-export type PluginTaskWorkMutation = z.infer<typeof mutation>;
 
 /** Store hydration may include absent optional fields; omit them from the public JSON record. */
 function snapshotTask(task: TaskItem): TaskItem {
@@ -44,12 +41,6 @@ function snapshotTask(task: TaskItem): TaskItem {
 function refuse(message: string): never {
   throw new ExternalPluginRuntimeError('DELIVERY_REJECTED', message);
 }
-function authority(instanceId: string, subjectKey: string) {
-  return `plugin-task-data:${createHash('sha256')
-    .update(JSON.stringify([instanceId, subjectKey]))
-    .digest('hex')}`;
-}
-
 /** Existing Task data lifecycle only. No execution receipt, Queue or Registry dependency. */
 function context(deps: PluginTaskHostDeps) {
   if (!deps.effectiveGrants.includes('task.write')) refuse('Plugin lacks task.write');
@@ -80,8 +71,8 @@ function context(deps: PluginTaskHostDeps) {
     await deps.assertCurrent?.();
     await services.assertCurrent();
   };
-  const checkTask = async (task: Pick<TaskItem, 'userId' | 'threadId' | 'ownerCatId'>) => {
-    await current();
+  const writeFence = createPluginTaskWriteFence({ native, owner, operation });
+  const assertTaskOwner = async (task: Pick<TaskItem, 'userId' | 'threadId' | 'ownerCatId'>) => {
     const thread = await threads.get(task.threadId);
     if (
       task.userId !== userId ||
@@ -96,9 +87,26 @@ function context(deps: PluginTaskHostDeps) {
       refuse('Task data owner/thread/participant unavailable');
     if (native && (native.catId !== task.ownerCatId || native.threadId !== task.threadId))
       refuse('Task data is outside current invocation');
+  };
+  const checkTask = async (task: Pick<TaskItem, 'userId' | 'threadId' | 'ownerCatId'>) => {
+    await current();
+    await assertTaskOwner(task);
     await current();
   };
-  return { instanceId, userId, tasks, services, threads, native, owner, operation, current, checkTask };
+  return {
+    instanceId,
+    userId,
+    tasks,
+    services,
+    threads,
+    native,
+    owner,
+    operation,
+    current,
+    writeFence,
+    assertTaskOwner,
+    checkTask,
+  };
 }
 
 export async function createPluginTaskWorkData(
@@ -143,7 +151,7 @@ export async function createPluginTaskWorkData(
   };
   const source = await readSource();
   const sourceRef = `message:${source.id}`,
-    authorityRef = authority(c.instanceId, task.subjectKey);
+    authorityRef = pluginTaskDataAuthorityRef(c.instanceId, task.subjectKey);
   // Same installed-capability authority as the existing plugin admission path;
   // it asserts no remote business authorization. No carrier message is created.
   const grant: RegisteredCustodyGrantV1 = {
@@ -227,7 +235,7 @@ export async function updatePluginTaskWorkData(
   expectedThreadId?: string,
 ): Promise<TaskItem | null> {
   const input = z
-    .object({ status: z.enum(['todo', 'doing', 'blocked']).optional(), entrustedWork: mutation })
+    .object({ status: z.enum(['todo', 'doing', 'blocked']).optional(), entrustedWork: pluginTaskWorkMutationSchema })
     .strict()
     .parse(snapshotPluginProtocolData(raw));
   const c = context(deps);
@@ -235,41 +243,29 @@ export async function updatePluginTaskWorkData(
   const task = await c.tasks.get(taskId);
   if (!task || (expectedThreadId !== undefined && task.threadId !== expectedThreadId)) return null;
   await c.checkTask(task);
-  const work = task.entrustedWork;
-  if (
-    !task.subjectKey ||
-    !work ||
-    work.admission.basis !== 'authorized_source' ||
-    work.admission.authorityRef !== authority(c.instanceId, task.subjectKey)
-  )
-    refuse('Task contract does not belong to this installation');
-  const lifecycle = new EntrustedWorkLifecycleService(c.tasks, {
-    artifactReader: deps.artifactReader,
-    expectedThreadId,
-  });
+  if (!task.subjectKey || !task.entrustedWork) refuse('Task contract does not belong to this installation');
   const change = input.entrustedWork;
-  if (
-    'time' in change &&
-    change.time &&
-    Object.values(change.time).some((f) => f && !work.admission.sourceRefs.includes(f.sourceRef))
-  )
-    refuse('Task time must cite its recorded source');
   if ('closure' in change && input.status !== undefined) refuse('Terminal closure cannot include a nonterminal status');
   await c.current();
-  let result: TaskItem;
+  let result: TaskItem | null;
   try {
-    result =
-      'closure' in change
-        ? await lifecycle.close({ taskId, ...change })
-        : await lifecycle.update({
-            taskId,
-            ...change,
-            ...(input.status === undefined ? {} : { status: input.status }),
-          });
+    result = await mutateCurrentPluginTaskWorkData({
+      taskId,
+      expectedThreadId,
+      instanceId: c.instanceId,
+      tasks: c.tasks,
+      services: c.services,
+      artifactReader: deps.artifactReader,
+      writeFence: c.writeFence,
+      assertTaskOwner: c.assertTaskOwner,
+      change,
+      status: input.status,
+    });
   } catch (error) {
     if (error instanceof EntrustedWorkLifecycleError && error.code === 'ENTRUSTED_WORK_THREAD_CONFLICT') return null;
     throw error;
   }
+  if (!result) return null;
   deps.onTaskDataChanged?.(result);
   await c.current();
   return snapshotTask(result);

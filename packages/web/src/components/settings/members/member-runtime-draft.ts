@@ -36,6 +36,13 @@ const runtimeFields = [
   'acpTransport',
   'acpMaxLiveProcesses',
   'acpIdleTtlMinutes',
+  'agyNativeEnabled',
+  'agyAcpEnabled',
+  'agyProfileEnabled',
+  'agyAutoApprove',
+  'agyProfileId',
+  'agyHomeRoot',
+  'agyTrustedWorkspaces',
 ] as const;
 type RuntimeFields = Pick<HubCatEditorFormState, (typeof runtimeFields)[number]>;
 export type RuntimeDrafts = Record<string, RuntimeFields>;

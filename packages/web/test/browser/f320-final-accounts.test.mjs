@@ -42,7 +42,7 @@ test(
       await native.getByText('Codex App 登录（本机默认）', { exact: true }).waitFor();
       await native.getByText('正在用', { exact: true }).waitFor();
       assert.equal(await page.getByRole('button', { name: '+ 添加账号', exact: true }).count(), 1);
-      assert.equal(await list.getByRole('button', { name: '查询此账号额度' }).count(), 0);
+      assert.equal(await native.getByRole('button', { name: '查额度', exact: true }).count(), 0);
       await page.getByRole('button', { name: '+ 添加账号', exact: true }).click();
       await page.getByRole('button', { name: 'Codex · 登录另一个账号', exact: true }).click();
       assert.deepEqual(
@@ -84,8 +84,9 @@ test(
       const ref = await row.getAttribute('data-account-id');
       await row.getByRole('button', { name: '主号', exact: true }).click();
       const details = page.locator(`#account-row-${encodeURIComponent(ref)} + .account-expanded`);
-      await details.getByRole('button', { name: '查询此账号额度', exact: true }).click();
-      await details.getByText(/剩余 70%/).waitFor();
+      await row.getByRole('button', { name: '查额度', exact: true }).click();
+      await row.getByText(/剩 70%/).waitFor();
+      assert.equal(await details.getByRole('meter').count(), 0);
       const before = await preview.reply('fixture original account');
       assert.equal(before.accountRef, 'codex');
       await row.getByRole('button', { name: '换成这个', exact: true }).click();

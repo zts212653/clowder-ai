@@ -133,7 +133,7 @@ export function WorkspaceContentReviewProjection({
     source.kind !== 'collective-artifact' &&
     source.kind !== 'collective-media' &&
     !!mediaChatMime(source.mime) &&
-    (source.media.kind === 'image' || isV2);
+    (source.media.kind === 'image' || isV2 || Boolean(workflow?.videoWork));
   const mediaRoot = useRef<HTMLDivElement>(null);
   const mediaChat = useWorkspaceMediaChat({
     view,
@@ -292,9 +292,24 @@ export function WorkspaceContentReviewProjection({
   return (
     <div
       ref={mediaRoot}
-      className={`${styles.workspace} ${imageChatPrimary ? styles.imageWorkspace : ''}`}
+      className={`${styles.workspace} ${imageChatPrimary ? styles.imageWorkspace : ''} ${workflow?.videoWork ? styles.videoWorkspace : ''}`}
       data-comparing={comparing ? 'true' : undefined}
+      data-video-work-canvas={workflow?.videoWork ? '' : undefined}
+      data-video-discussion-open={workflow?.videoWork ? String(discussionOpen) : undefined}
+      style={workflow?.playbackHidden ? { display: 'none' } : undefined}
     >
+      {workflow?.videoWork ? (
+        <div className="flex shrink-0 justify-end px-3 pt-2">
+          <button
+            type="button"
+            className="rounded border border-cafe-subtle px-2 py-1 text-xs"
+            aria-expanded={discussionOpen}
+            onClick={() => setDiscussionOpen(!discussionOpen)}
+          >
+            一起讨论{view.review.annotations.length ? ` · ${view.review.annotations.length}` : ''}
+          </button>
+        </div>
+      ) : null}
       {sourceState}
       {imageChatPrimary ? <ImageWorkProgress target={mediaChat.target} /> : null}
       {imageChatPrimary && draft.trim() ? (
@@ -305,6 +320,12 @@ export function WorkspaceContentReviewProjection({
       ) : null}
       {view.sourceState === 'current' ? (
         <WorkspaceContentReviewMedia
+          seekRequest={workflow?.seekRequest}
+          markRequest={workflow?.markRequest}
+          selectionRequest={workflow?.selectionRequest}
+          playbackHidden={workflow?.playbackHidden}
+          onPlaybackTime={workflow?.onPlaybackTime}
+          chapterNavigation={workflow?.chapterNavigation}
           draftKey={workflow?.canvasDraftKey}
           canMarkup={capabilities.markup.state === 'available'}
           key={`${view.review.reviewId}:${source.revision}`}
@@ -411,7 +432,13 @@ export function WorkspaceContentReviewProjection({
               <ReviewToolbarIcon name="close" />
             </button>
           </div>
-          <div className={styles.drawerBody}>{comments}</div>
+          <div className={styles.drawerBody}>
+            {workflow?.videoWork && !view.review.annotations.length ? (
+              <p className="p-3 text-xs text-cafe-muted">没标的都算通过。</p>
+            ) : null}
+            {workflow?.responseDiscussion}
+            {comments}
+          </div>
         </aside>
       ) : null}
     </div>

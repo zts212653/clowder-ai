@@ -2,13 +2,14 @@ import type { ContextAttachment } from '@cat-cafe/shared';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { writeShellPresentation } from '@/components/shell/shell-presentation';
 import { getContextAttachmentDraft, syncContextAttachmentDraftToStorage } from '@/components/thread-drafts';
 import { useChatStore } from '@/stores/chatStore';
 import type { ContentReviewView, ContentReviewWorkflow } from '../content-review-contract';
 import { useWorkspaceMediaChat } from '../useWorkspaceMediaChat';
 import { AddToChatButton, AddToChatNotice } from '../WorkspaceMediaChatControls';
 import type { WorkspaceAnnotationTarget } from '../workspace-review-draft';
-import { mediaView } from './WorkspaceContentReviewSurface.fixture';
+import { mediaView, videoDiscussionView } from './WorkspaceContentReviewSurface.fixture';
 
 const THREAD = 'thread-hook';
 const ANCHOR = { kind: 'image-region', x: 1, y: 2, width: 3, height: 4 } as const;
@@ -25,6 +26,7 @@ function Probe(props: {
   target: WorkspaceAnnotationTarget | null;
   /** The words typed for the circled place. */
   draft?: string;
+  referenceOnOpen?: boolean;
 }) {
   const chat = useWorkspaceMediaChat({ path: 'cover.png', draft: '', setDraft, setTarget, ...props });
   return (
@@ -102,4 +104,11 @@ it('uses the work a surface names for itself instead of deriving one from the fi
   expect(attachment).toMatchObject({ kind: 'media', title: '窄屏设计稿', source: named.source });
   expect(setTarget).toHaveBeenCalledWith(null);
   expect(setDraft).toHaveBeenCalledWith('');
+});
+
+it('opening a video Work in classic leaves the original composer unchanged', async () => {
+  writeShellPresentation('classic');
+  await render({ view: videoDiscussionView(), workflow: { videoWork: true }, target: null, referenceOnOpen: true });
+  expect(useChatStore.getState().pendingChatInsert).toBeNull();
+  expect(getContextAttachmentDraft(THREAD)).toEqual([]);
 });

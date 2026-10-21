@@ -2,6 +2,8 @@ import type { Readable } from 'node:stream';
 import type { ImmutableMedia, ReviewedMediaType } from '@cat-cafe/shared';
 
 export const MAX_WORKSPACE_COLLABORATION_BYTES = 64 * 1024 * 1024;
+/** Video snapshots stream to disk; text and image collaboration retain their existing limit. */
+export const MAX_WORKSPACE_VIDEO_BYTES = 2 * 1024 * 1024 * 1024;
 
 export interface WorkspaceContentLocatorV1 {
   readonly worktreeId: string;

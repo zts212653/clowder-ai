@@ -7,6 +7,7 @@ import {
   timestampSchema,
 } from '@cat-cafe/shared';
 import { z } from 'zod';
+import { ARCHIVE_SOURCE_REPOSITORY_URL } from '../archive-source-repository.js';
 import type { MicroduckBlocked } from '../microduck-owner-contract.js';
 import { PROGRAM_ADAPTER_MEDIA_MAX_BYTES } from '../program-adapter-media-contract.js';
 
@@ -147,7 +148,7 @@ const ownerRef = (ownerStateRef: string, version?: string): OwnerTruthRefV1 => (
 const sourceRef = (entry: FootballResource): OwnerTruthRefV1 =>
   ownerRef(`${entry.kind === 'video' ? 'preparation-media' : 'repo-material'}:sha256:${entry.sha256}`, entry.sha256);
 const ownerHref = (publication: FootballPublication, path: string): string =>
-  `https://github.com/zts212653/clowder-ai/blob/${publication.resourceCommit}/${path}`;
+  `${ARCHIVE_SOURCE_REPOSITORY_URL}/blob/${publication.resourceCommit}/${path}`;
 
 async function readPublication(readBytes: ReadBytes): Promise<{ bytes: Uint8Array; value: FootballPublication }> {
   const bytes = await readBytes(MICRODUCK_FOOTBALL_PUBLICATION_PATH);

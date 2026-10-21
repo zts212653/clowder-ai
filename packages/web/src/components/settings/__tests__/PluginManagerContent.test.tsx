@@ -229,6 +229,31 @@ describe('F202 live Plugin Manager Console wiring', () => {
     expect(mockApiFetch.mock.calls.some(([url]) => url === '/api/plugins/personal-chrome')).toBe(false);
   });
 
+  it('keeps a historical installed plugin visible with the existing unknown-origin label in list and detail', async () => {
+    const legacy = {
+      ...managerPlugin({ installed: true, pluginId: 'dev.clowder.genoffice-docx', displayName: 'Installed GenOffice' }),
+      source: { kind: 'unknown', packageName: null, trust: 'unknown' },
+    };
+    mockApiFetch.mockImplementation(async (url) => {
+      if (url === '/api/plugin-manager/plugins') return json(response(legacy));
+      if (url === `/api/plugin-manager/plugins/${legacy.pluginId}`)
+        return json({
+          plugin: { ...legacy, capabilities: legacy.capabilitySummary, configFields: [] },
+          catalog: { status: 'fresh', refreshedAt: 1000 },
+        });
+      return json({}, 404);
+    });
+    await act(async () => root.render(<PluginsContent />));
+    await flushEffects();
+    const row = container.querySelector(`[data-plugin-id="${legacy.pluginId}"]`);
+    expect(row).not.toBeNull();
+    expect(row?.querySelector('[data-plugin-source-trust="unknown"]')?.textContent).toContain('缺少安装来源记录');
+    expect(container.querySelector('[data-testid="plugin-manager-detail"]')?.textContent).toContain(
+      'Installed GenOffice',
+    );
+    expect(mockApiFetch.mock.calls.every(([, options]) => !options?.method || options.method === 'GET')).toBe(true);
+  });
+
   it('preserves manifest colors in repository compatibility rows and their detail cards', async () => {
     window.history.replaceState({}, '', '/settings?s=plugins');
     const repository = {

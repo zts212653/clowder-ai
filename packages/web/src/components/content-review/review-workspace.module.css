@@ -264,6 +264,32 @@
   overscroll-behavior: contain;
   padding: 16px;
 }
+.videoWorkspace {
+  padding-right: 280px;
+}
+.videoWorkspace .drawer {
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 280px;
+  border-radius: 0;
+  box-shadow: none;
+}
+.videoWorkspace .artwork {
+  min-height: min(340px, 45vh);
+  margin: 0;
+  border-radius: 0;
+}
+@media (max-width: 900px) {
+  .videoWorkspace {
+    padding-right: 0;
+  }
+  .videoWorkspace .drawer {
+    position: relative;
+    flex: 0 0 220px;
+    width: 100%;
+  }
+}
 .badgeButton {
   display: flex;
   height: 32px;

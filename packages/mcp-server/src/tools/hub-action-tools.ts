@@ -1,4 +1,8 @@
-import { type PreviewVisiblePageAdmission, previewVisiblePageAdmissionSchema } from '@cat-cafe/shared';
+import {
+  deploymentDefaults,
+  type PreviewVisiblePageAdmission,
+  previewVisiblePageAdmissionSchema,
+} from '@cat-cafe/shared';
 import { z } from 'zod';
 import { defineMcpCanonicalFactory, defineMcpMigrationFactory } from '../tool-governance-migration.js';
 
@@ -20,12 +24,12 @@ const optionalContextSchemas = {
     .string()
     .min(1)
     .optional()
-    .describe('Current Clowder AI thread id; pass when available to avoid tab leakage.'),
+    .describe(`Current ${deploymentDefaults.brand.name} thread id; pass when available to avoid tab leakage.`),
   worktreeId: z
     .string()
     .min(1)
     .optional()
-    .describe('Target Clowder AI worktree id; pass when the action is worktree-scoped.'),
+    .describe(`Target ${deploymentDefaults.brand.name} worktree id; pass when the action is worktree-scoped.`),
   catId: z.string().min(1).optional().describe('Calling cat id for audit/probe correlation.'),
   agentKeyCatId: z
     .string()
@@ -58,7 +62,7 @@ export const workspaceNavigateInputSchema = {
     .min(1)
     .optional()
     .describe(
-      'Authenticated Clowder AI thread scope. Required for agent-key auth because persistent MCP has no invocation thread; omit for invocation auth to use its bound thread.',
+      `Authenticated ${deploymentDefaults.brand.name} thread scope. Required for agent-key auth because persistent MCP has no invocation thread; omit for invocation auth to use its bound thread.`,
     ),
   catId: optionalContextSchemas.catId,
   agentKeyCatId: optionalContextSchemas.agentKeyCatId,

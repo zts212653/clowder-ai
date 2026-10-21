@@ -387,7 +387,7 @@ export const ENV_VARS: EnvDefinition[] = [
   },
   {
     name: 'CAT_CAFE_REPO_FULL_NAME',
-    defaultValue: 'zts212653/clowder-ai',
+    defaultValue: deploymentDefaults.repositoryFullName,
     description: 'F233 Phase C feat trajectory collector 调 gh CLI 用的 owner/repo（GitHub PR 元数据查询）',
     category: 'server',
     sensitive: false,
@@ -395,7 +395,7 @@ export const ENV_VARS: EnvDefinition[] = [
   },
   {
     name: 'CAT_CAFE_VERDICT_REPO_FULL_NAME',
-    defaultValue: 'CAT_CAFE_REPO_FULL_NAME or zts212653/clowder-ai',
+    defaultValue: `CAT_CAFE_REPO_FULL_NAME or ${deploymentDefaults.repositoryFullName}`,
     description:
       'F248 verdict publisher canonical owner/repo; automatic, pre-push, and managed agent-shell publication fail closed on target mismatch',
     category: 'server',
@@ -782,8 +782,7 @@ export const ENV_VARS: EnvDefinition[] = [
   {
     name: 'CAT_CAFE_RUNTIME_ROOT',
     defaultValue: '(未设置 → process.cwd())',
-    description:
-      'F061: Clowder AI runtime 二进制根目录（runtime startup 自动 export 为 $RUNTIME_DIR），优先级高于 capability orchestrator 的 auto-detection，用于 Antigravity MCP config args 路径',
+    description: `F061: ${deploymentDefaults.brand.name} runtime 二进制根目录（runtime startup 自动 export 为 $RUNTIME_DIR），优先级高于 capability orchestrator 的 auto-detection，用于 Antigravity MCP config args 路径`,
     category: 'server',
     sensitive: false,
     runtimeEditable: false,
@@ -1443,8 +1442,7 @@ export const ENV_VARS: EnvDefinition[] = [
   {
     name: 'CAT_CAFE_CODEX_SERVED_MODEL_OBSERVATION',
     defaultValue: 'on',
-    description:
-      'F319：记录上游自述的应答模型（on 默认：无自定义 base_url 的 Codex 会话——不论 Clowder AI 的认证标签——在原生传输上加 trace（websocket 帧 / SSE 事件），不改传输；off 回到 F319 之前的启动方式）',
+    description: `F319：记录上游自述的应答模型（on 默认：无自定义 base_url 的 Codex 会话——不论 ${deploymentDefaults.brand.displayName} 的认证标签——在原生传输上加 trace（websocket 帧 / SSE 事件），不改传输；off 回到 F319 之前的启动方式）`,
     category: 'codex',
     sensitive: false,
     runtimeEditable: true,
@@ -1694,7 +1692,7 @@ export const ENV_VARS: EnvDefinition[] = [
   {
     name: 'NEXT_PUBLIC_COLLECTIVE_SERVICE_URL',
     defaultValue: 'http://localhost:5201',
-    description: 'Clowder AI「进入 Collective」默认打开的独立 Service 地址',
+    description: `${deploymentDefaults.brand.name}「进入 Collective」默认打开的独立 Service 地址`,
     category: 'frontend',
     sensitive: false,
     runtimeEditable: false,

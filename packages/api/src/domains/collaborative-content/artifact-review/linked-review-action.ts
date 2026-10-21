@@ -1,4 +1,4 @@
-import type { ArtifactReview } from '@cat-cafe/shared';
+import { type ArtifactReview, artifactReviewCommandSchema } from '@cat-cafe/shared';
 import { ledgerFromRound, requireRoundLedger } from './canonical-ledger.js';
 import { ArtifactReviewError } from './errors.js';
 import type { ArtifactReviewStore, ReviewMutation, ReviewMutationResult } from './store.js';
@@ -12,14 +12,17 @@ export function commitReviewAction(
 ): ReviewMutationResult {
   const current = store.get(input.reviewId);
   if (!current) throw new ArtifactReviewError('not_found');
-  const round = current.rounds.find((item) => item.number === input.round);
+  const action = input.kind === 'judge_response' ? artifactReviewCommandSchema.parse(input.request).action : undefined;
+  const ledgerRound = action?.kind === 'judge_response' ? action.sourceRound : input.round;
+  const round = current.rounds.find((item) => item.number === ledgerRound);
   if (!round?.ledgerRef) return store.mutate(input, transition);
-  if (round !== current.rounds.at(-1) && input.kind !== 'reply') throw new ArtifactReviewError('asset_changed');
+  if (round !== current.rounds.at(-1) && input.kind !== 'reply' && input.kind !== 'judge_response')
+    throw new ArtifactReviewError('asset_changed');
   if (input.actor.kind === 'owner') throw new ArtifactReviewError('invalid_action');
   const ledger = requireRoundLedger(store.ledgers, current, round);
   if (ledger.revision !== expectedLedgerRevision) throw new ArtifactReviewError('revision_conflict');
   const next = transition(current, receiptReference(input.reviewId, input.operationId));
-  const nextRound = next.rounds.find((item) => item.number === input.round);
+  const nextRound = next.rounds.find((item) => item.number === ledgerRound);
   if (!nextRound) throw new ArtifactReviewError('invalid_action');
   return store.mutateWithLedger(
     input,

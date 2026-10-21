@@ -1,6 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { z } from 'zod';
+import { ARCHIVE_SOURCE_REPOSITORY_URL } from '../archive-source-repository.js';
 import type { MicroduckLocalEvidenceOptions } from '../microduck-local-owner-evidence.js';
 import { ArchiveIntegrityError, archiveRef, digestBytes } from './archive-reader.js';
 
@@ -72,7 +73,7 @@ const annotationSchema = z.object({
 });
 export const cortexSourceRef = archiveRef('cortex-publication', CORTEX_MANIFEST_SHA);
 export const cortexHref = (path: string) =>
-  `https://github.com/zts212653/clowder-ai/blob/${CORTEX_SOURCE_COMMIT}/${CORTEX_ARCHIVE_ROOT}/${path}`;
+  `${ARCHIVE_SOURCE_REPOSITORY_URL}/blob/${CORTEX_SOURCE_COMMIT}/${CORTEX_ARCHIVE_ROOT}/${path}`;
 
 export function createCortexReader(options: MicroduckLocalEvidenceOptions) {
   const rawRead = options.readBytes ?? (async (path: string) => new Uint8Array(await readFile(path)));

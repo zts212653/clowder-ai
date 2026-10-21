@@ -14,7 +14,7 @@ import { isDurableOwnerReadEvidence, resolveVisibleReplyParent } from '../../cat
 import type { EvolutionMediaReadPort } from '../../collaborative-content/workspace-review/evolution-review-source.js';
 import type { PreparedArtifactReader } from '../../growing/EntrustedWorkOwnerReadService.js';
 import { MediaOwnerError } from './media-errors.js';
-import { publishedMediaContentRef, workspaceSnapshotSourceRef } from './publication.js';
+import { publishedMediaContentRef, workPublicationContentRef, workspaceSnapshotSourceRef } from './publication.js';
 import {
   evolutionSnapshotPublication,
   readEvolutionSnapshotSource,
@@ -110,6 +110,11 @@ export class PublishedMediaSource {
     principal: MediaReviewPrincipal,
   ): Promise<void> {
     if (scope.ownerUserId !== principal.userId) throw new MediaOwnerError('access_denied');
+    if (!isTaskPublicationScope(scope) && scope.kind === 'work') {
+      // Retained work revisions survive source-file changes. Their live boundary is the owning thread.
+      await this.deps.access.authorizeScope(scope, principal, true, workPublicationContentRef(scope));
+      return;
+    }
     if (!isTaskPublicationScope(scope)) {
       const origin = await this.originPublication(scope, principal);
       // Derive the exact original identity here, including for returned versions. Call order is not authority.
@@ -128,6 +133,14 @@ export class PublishedMediaSource {
   }
 
   async originDetails(scope: ContentPublicationScopeV1, principal: MediaReviewPrincipal) {
+    if (!isTaskPublicationScope(scope) && scope.kind === 'work') {
+      await this.deps.access.authorizeScope(scope, principal, true, workPublicationContentRef(scope));
+      return {
+        title: '作品',
+        sourceRef: `work-operation:${scope.creationOperationId}`,
+        ...(scope.createdBy.kind === 'cat' ? { publisherCatId: scope.createdBy.actorId } : {}),
+      };
+    }
     if (!isTaskPublicationScope(scope) && scope.kind === 'evolution-snapshot') {
       const original = await readEvolutionSnapshotSource(this.deps.evolution, scope.source, principal);
       return { title: original.label, sourceRef: scope.sourceContentRef };

@@ -1032,7 +1032,7 @@ skills:
       或给片子配音、对时间轴、交片。
       Not for: 只查某个 Remotion API 怎么写（读官方 remotion-best-practices skill 的 rules/）；
       目的就是讲角色自己故事的动画短片（用 anime-forge）；PPT（用 ppt-forge）。
-      Output: Remotion 工程 + Console 里能直接播的片子。
+      Output: Remotion 工程 + Works 中的视频作品与确定版本的交片卡；修改沿原作品续版、回应原意见。
       GOTCHA: 本 skill 不教怎么拍得好看，那靠你自己看片的眼光；2026-10-14 前的长版方法和审美条文把猫带成了「走流程」，已删。
     triggers:
       - "做视频"
@@ -1046,7 +1046,7 @@ skills:
       - "只查 Remotion API 用法"
       - "讲角色自己故事的动画短片"
       - "PPT"
-    output: "Remotion project + inline-playable film in Console"
+    output: "Remotion project + retained video work + fixed-version card and original-feedback response"
     next: ["rich-messaging", "anime-forge"]
     sop_step: null
     merged_from: null
@@ -1059,7 +1059,7 @@ skills:
       给已有剧本做设定、声音稿、分镜、动态分镜、精绘或后期。
       Not for: 推产品、讲功能的片子，哪怕主角是猫、片里有剧情（用 video-forge）；
       录屏剪辑（用 video-forge）；单张图或单页漫画（用 image-generation）；PPT（用 ppt-forge）。
-      Output: 带真事对照的剧本 md、设定图、声音稿、分镜表、分镜图、动态分镜粗片，以及 Console 里能直接播的成片。
+      Output: 带真事对照的剧本 md、设定图、声音稿、分镜表、分镜图、动态分镜粗片，以及 Works 视频作品和确定版本的成片卡。
       GOTCHA: 按片子目的分流，不按有没有猫角色分：推产品的片子即使主角是猫也走 video-forge（要画的角色段落照本 skill 的画稿开头）；
       先出漂亮图再想故事会做成看不懂的幻灯片（EP0 实测）；画清猫脸的画稿第一段抄 assets/art-brief-header.md。
     triggers:
@@ -1080,7 +1080,7 @@ skills:
       - "录屏剪辑"
       - "单张图或单页漫画"
       - "PPT"
-    output: "Researched script + voice draft + storyboard + motion animatic + final art + inline-playable cut"
+    output: "Researched script + voice draft + storyboard + motion animatic + final art + retained video work and fixed-version card"
     next: ["image-generation", "video-forge", "rich-messaging"]
     sop_step: null
     merged_from: null

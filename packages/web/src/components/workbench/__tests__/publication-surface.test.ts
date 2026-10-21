@@ -6,6 +6,22 @@ import { createInitialWorkbenchState, restoreWorkbenchState } from '../workbench
 
 const contentRef = `prepared-media:${'a'.repeat(64)}`;
 describe('canonical publication Workspace target', () => {
+  it('opens and restores a fixed independent work version without a source message or a new surface owner', () => {
+    const workRef = `work:${'c'.repeat(64)}`;
+    expect(parsePublicationTarget({ contentRef: workRef, ownerRevision: 3 })).toEqual({
+      contentRef: workRef,
+      ownerRevision: 3,
+    });
+    const surface = createPublicationSurface({ contentRef: workRef, ownerRevision: 3, title: '真实视频作品' });
+    const restored = restoreWorkbenchState(
+      { ...createInitialWorkbenchState(), surfaces: [surface], activeSurfaceId: surface.id },
+      { isOwnerRefAvailable: isRealSurfaceOwnerAvailable },
+    );
+    expect(restored.surfaces.map(resolvePublicationTarget)).toEqual([{ contentRef: workRef, ownerRevision: 3 }]);
+    expect(surface.ownerStateRef.owner).toBe('f138-publication');
+    expect(surface.messagePublicationSource).toBeUndefined();
+    expect(parsePublicationTarget({ contentRef: `widget:${'c'.repeat(64)}`, ownerRevision: 3 })).toBeNull();
+  });
   it('restores an unresolved exact item without inventing a publication or admitting a forged descriptor', () => {
     const source = {
       kind: 'message' as const,

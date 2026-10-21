@@ -1,5 +1,6 @@
 import type { CatId, CliDiagnostics } from '@cat-cafe/shared';
 import { isCliError, isCliTimeout, isLivenessWarning } from '../../../../../../utils/cli-spawn.js';
+import type { LivenessWarningEvent } from '../../../../../../utils/ProcessLivenessProbe.js';
 import { sanitizeCliStderr } from '../../../../../../utils/sanitize-cli-stderr.js';
 import type { AgentMessage, MessageMetadata } from '../../../types.js';
 import {
@@ -31,6 +32,7 @@ export interface AgyNativeObservedTurn {
 export type AgyNativeStreamObservation =
   | { readonly kind: 'init'; readonly sessionId: string }
   | { readonly kind: 'step'; readonly event: Extract<AgyStreamJsonEvent, { kind: 'step' }> }
+  | { readonly kind: 'liveness'; readonly warning: LivenessWarningEvent }
   | { readonly kind: 'complete'; readonly observed: AgyNativeObservedTurn };
 
 const MAX_AGY_NATIVE_STREAM_CHARS = 8 * 1024 * 1024;
@@ -68,7 +70,10 @@ export async function* observeAgyNativeTurn(
       transportError = raw.message;
       continue;
     }
-    if (isLivenessWarning(raw)) continue;
+    if (isLivenessWarning(raw)) {
+      yield { kind: 'liveness', warning: raw };
+      continue;
+    }
     const record = readAgyNativeEnvelope(raw);
     if (record.event === 'init') {
       if (resultCount > 0) throw new Error('AGY native init followed a terminal result');

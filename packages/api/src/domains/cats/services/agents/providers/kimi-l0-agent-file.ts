@@ -1,3 +1,5 @@
+import { deploymentDefaults } from '@cat-cafe/shared';
+import { stringify } from 'yaml';
 /**
  * F203 Phase J — kimi-code native L0 channel.
  *
@@ -61,7 +63,12 @@ export function buildKimiL0AgentFileContent(options: KimiL0AgentFileOptions): st
   const sections = [
     '---',
     `name: cat-cafe-l0-${toKebabCase(options.catId)}`,
-    `description: Clowder AI managed L0 identity prompt for ${options.catId} (generated, do not edit)`,
+    stringify(
+      {
+        description: `${deploymentDefaults.brand.displayName} managed L0 identity prompt for ${options.catId} (generated, do not edit)`,
+      },
+      { lineWidth: 0 },
+    ).trimEnd(),
     '---',
     '',
     '${base_prompt}',

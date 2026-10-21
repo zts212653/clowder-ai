@@ -23,6 +23,7 @@ import { registerEntrustedWorkReadRoutes } from '../../../../api/src/routes/entr
 import { registerPublishedContentRoutes } from '../../../../api/src/routes/published-content-routes.ts';
 import { registerWorkspaceContentReviewRoutes } from '../../../../api/src/routes/workspace-content-review-routes.ts';
 import { createLiveReviewFixture } from '../../../../api/test/helpers/artifact-review-live-fixture.ts';
+import { registerReviewWorkFixture } from './f326-review-work-host.mjs';
 
 const WEB_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
 const apiRequire = createRequire(path.resolve(WEB_ROOT, '../api/package.json'));
@@ -36,7 +37,7 @@ const tailwind = webRequire('tailwindcss'),
 export async function startReviewHost(
   root,
   mediaType,
-  { port = 0, clientRevision, entryPath, workspaceComparison = false } = {},
+  { port = 0, clientRevision, entryPath, workspaceComparison = false, workSubmissions = false } = {},
 ) {
   assert.ok(Number.isInteger(port) && port >= 0 && port <= 65535);
   if (clientRevision !== undefined) assert.match(clientRevision, /^[a-f0-9]{40}$/);
@@ -131,7 +132,17 @@ export async function startReviewHost(
     return reply.type(name.endsWith('.png') ? 'image/png' : 'video/mp4').send(await readFile(path.join(root, name)));
   });
   const registry = new InvocationRegistry();
-  const credentials = await registry.create('operator', 'codex-astra', f.thread.id);
+  const credentials = await registry.create(
+    'operator',
+    'codex-astra',
+    f.thread.id,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    workSubmissions ? 'strict' : 'unknown',
+  );
+  if (workSubmissions) await registerReviewWorkFixture({ app, fixture: f, workspace, registry });
   await app.register(async (scope) => {
     registerCallbackAuthHook(scope, registry);
     registerCallbackTaskRoutes(scope, {

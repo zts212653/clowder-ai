@@ -7,6 +7,7 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 import { setTimeout as delay } from 'node:timers/promises';
 import Database from 'better-sqlite3';
+import { retiredProcessIdentity } from './helpers/retired-process-identity.js';
 
 const moduleUrl = new URL(
   '../dist/domains/cats/services/agents/providers/agy-native/agy-native-profile-turn.js',
@@ -101,7 +102,8 @@ test('Native profile takeover waits for dead owner descendants, then retires onl
 });
 
 for (const redirected of [false, true]) {
-  test(`orphan cleanup is scoped to its own run (redirected=${redirected})`, () => {
+  test(`orphan cleanup is scoped to its own run (redirected=${redirected})`, async (t) => {
+    const retired = await retiredProcessIdentity(t);
     const home = mkdtempSync(join(tmpdir(), 'f325-orphan-scope-'));
     const a = join(home, '.cat-cafe-native-runs/run-aaaa');
     const b = join(home, '.cat-cafe-native-runs/run-bbbb');
@@ -117,7 +119,8 @@ for (const redirected of [false, true]) {
       const owner = JSON.parse(
         db.prepare('SELECT owner FROM native_conversation_turn WHERE conversation_id = ?').get('A').owner,
       );
-      owner.identity.pid = 2147483647;
+      owner.identity = retired;
+      owner.dataRoot = join(home, 'isolated-data');
       db.prepare('UPDATE native_conversation_turn SET owner = ? WHERE conversation_id = ?').run(
         JSON.stringify(owner),
         'A',

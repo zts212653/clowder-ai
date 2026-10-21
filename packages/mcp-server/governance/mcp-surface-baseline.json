@@ -44,7 +44,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleAckMentions",
-      "protectedImplementationDigest": "sha256:9214aa41f576685af0ee629c41a841b3f7f56e93acae90c27e87ed31a26848c5"
+      "protectedImplementationDigest": "sha256:c76b5c0dc8f558921bd204dc8159f1f4af03b59d30dd556eee29f30c1e38cf11"
     },
     {
       "name": "cat_cafe_act_artifact_review",
@@ -187,6 +187,33 @@
                             "maximum": 9007199254740991,
                             "minimum": -9007199254740991,
                             "type": "integer"
+                          },
+                          "storyEvidence": {
+                            "additionalProperties": false,
+                            "properties": {
+                              "metadataRevision": {
+                                "exclusiveMinimum": 0,
+                                "maximum": 9007199254740991,
+                                "minimum": -9007199254740991,
+                                "type": "integer"
+                              },
+                              "paragraphId": {
+                                "maxLength": 256,
+                                "minLength": 1,
+                                "type": "string"
+                              },
+                              "quote": {
+                                "maxLength": 12000,
+                                "minLength": 1,
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "paragraphId",
+                              "metadataRevision",
+                              "quote"
+                            ],
+                            "type": "object"
                           },
                           "streamId": {
                             "maxLength": 128,
@@ -760,6 +787,39 @@
               {
                 "additionalProperties": false,
                 "properties": {
+                  "annotationId": {
+                    "$ref": "#/properties/action/anyOf/0/properties/annotationId"
+                  },
+                  "kind": {
+                    "const": "judge_response",
+                    "type": "string"
+                  },
+                  "outcome": {
+                    "enum": [
+                      "accepted",
+                      "reopened"
+                    ],
+                    "type": "string"
+                  },
+                  "resultOwnerRevision": {
+                    "$ref": "#/properties/expectedLedgerRevision"
+                  },
+                  "sourceRound": {
+                    "$ref": "#/properties/expectedLedgerRevision"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "sourceRound",
+                  "annotationId",
+                  "resultOwnerRevision",
+                  "outcome"
+                ],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
                   "judgmentNeeded": {
                     "$ref": "#/properties/action/anyOf/0/properties/body"
                   },
@@ -839,7 +899,7 @@
                 "type": "object"
               }
             ],
-            "description": "Attributed point/region annotation, reply/edit/resolve, add_visual_marks or delete your own visual mark; owner request_judgment. Human decision/reopen/request_image_edit actions are rejected for cats. Drawings use source-media pixels and real video ticks; authors come from authentication."
+            "description": "Attributed point/region annotation, reply/edit/resolve, add_visual_marks or delete your own visual mark; owner request_judgment. Human decision/reopen/judge_response/request_image_edit actions are rejected for cats. Drawings use source-media pixels and real video ticks; authors come from authentication."
           },
           "agentKeyCatId": {
             "description": "Persistent-agent identity selector; omit with invocation auth.",
@@ -898,7 +958,7 @@
         ],
         "type": "object"
       },
-      "inputSchemaDigest": "sha256:089249b27359e8af7b654ac7b5a8974ac446451364ec35deacfd8ea0689a42a1",
+      "inputSchemaDigest": "sha256:620ce7dc8273fccf5b326c6cb315538359b7d7a0e92d47b9ca0a4f07dc4b1f22",
       "annotations": {
         "destructiveHint": false,
         "openWorldHint": false,
@@ -913,7 +973,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/artifact-review-tools.js#handleActArtifactReview",
-      "protectedImplementationDigest": "sha256:b253d703c2c5a7329f8ab27c0c8952569c1d6ca6c0fda186cf0e58d6cd10b669"
+      "protectedImplementationDigest": "sha256:3d159c591d10c35a3aaa0937ccd4bf04f74e58d2b12868ea724390eb56758d52"
     },
     {
       "name": "cat_cafe_admit_entrusted_work",
@@ -1199,7 +1259,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleAdmitEntrustedWork",
-      "protectedImplementationDigest": "sha256:9214aa41f576685af0ee629c41a841b3f7f56e93acae90c27e87ed31a26848c5"
+      "protectedImplementationDigest": "sha256:c76b5c0dc8f558921bd204dc8159f1f4af03b59d30dd556eee29f30c1e38cf11"
     },
     {
       "name": "cat_cafe_advance_evolution_program_change",
@@ -1535,7 +1595,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleAmendPersonInteraction",
-      "protectedImplementationDigest": "sha256:9214aa41f576685af0ee629c41a841b3f7f56e93acae90c27e87ed31a26848c5"
+      "protectedImplementationDigest": "sha256:c76b5c0dc8f558921bd204dc8159f1f4af03b59d30dd556eee29f30c1e38cf11"
     },
     {
       "name": "cat_cafe_audio_capture_start",
@@ -1702,7 +1762,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/audio-tools.js#handleAudioCaptureStart",
-      "protectedImplementationDigest": "sha256:7bd309bbd7a084eb3e1c37e03173bc8ee1741f40fc32b80df04406b192ed56f2"
+      "protectedImplementationDigest": "sha256:b173f5b10b793663907aaf08d14ebba258b5945c5e8ec92df3684f97ab02525f"
     },
     {
       "name": "cat_cafe_audio_capture_status",
@@ -1737,7 +1797,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/audio-tools.js#handleAudioCaptureStatus",
-      "protectedImplementationDigest": "sha256:7bd309bbd7a084eb3e1c37e03173bc8ee1741f40fc32b80df04406b192ed56f2"
+      "protectedImplementationDigest": "sha256:b173f5b10b793663907aaf08d14ebba258b5945c5e8ec92df3684f97ab02525f"
     },
     {
       "name": "cat_cafe_audio_capture_stop",
@@ -1772,7 +1832,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/audio-tools.js#handleAudioCaptureStop",
-      "protectedImplementationDigest": "sha256:7bd309bbd7a084eb3e1c37e03173bc8ee1741f40fc32b80df04406b192ed56f2"
+      "protectedImplementationDigest": "sha256:b173f5b10b793663907aaf08d14ebba258b5945c5e8ec92df3684f97ab02525f"
     },
     {
       "name": "cat_cafe_audio_enroll_speakers",
@@ -1846,7 +1906,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/audio-tools.js#handleAudioEnrollSpeakers",
-      "protectedImplementationDigest": "sha256:7bd309bbd7a084eb3e1c37e03173bc8ee1741f40fc32b80df04406b192ed56f2"
+      "protectedImplementationDigest": "sha256:b173f5b10b793663907aaf08d14ebba258b5945c5e8ec92df3684f97ab02525f"
     },
     {
       "name": "cat_cafe_audio_list_sources",
@@ -1881,7 +1941,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/audio-tools.js#handleAudioListSources",
-      "protectedImplementationDigest": "sha256:7bd309bbd7a084eb3e1c37e03173bc8ee1741f40fc32b80df04406b192ed56f2"
+      "protectedImplementationDigest": "sha256:b173f5b10b793663907aaf08d14ebba258b5945c5e8ec92df3684f97ab02525f"
     },
     {
       "name": "cat_cafe_audio_read_transcript",
@@ -1946,7 +2006,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/audio-tools.js#handleAudioReadTranscript",
-      "protectedImplementationDigest": "sha256:7bd309bbd7a084eb3e1c37e03173bc8ee1741f40fc32b80df04406b192ed56f2"
+      "protectedImplementationDigest": "sha256:b173f5b10b793663907aaf08d14ebba258b5945c5e8ec92df3684f97ab02525f"
     },
     {
       "name": "cat_cafe_audio_set_advisory_mode",
@@ -1993,7 +2053,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/audio-tools.js#handleAudioSetAdvisoryMode",
-      "protectedImplementationDigest": "sha256:7bd309bbd7a084eb3e1c37e03173bc8ee1741f40fc32b80df04406b192ed56f2"
+      "protectedImplementationDigest": "sha256:b173f5b10b793663907aaf08d14ebba258b5945c5e8ec92df3684f97ab02525f"
     },
     {
       "name": "cat_cafe_audio_set_talking_points",
@@ -2039,7 +2099,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/audio-tools.js#handleAudioSetTalkingPoints",
-      "protectedImplementationDigest": "sha256:7bd309bbd7a084eb3e1c37e03173bc8ee1741f40fc32b80df04406b192ed56f2"
+      "protectedImplementationDigest": "sha256:b173f5b10b793663907aaf08d14ebba258b5945c5e8ec92df3684f97ab02525f"
     },
     {
       "name": "cat_cafe_backfill_events",
@@ -2080,7 +2140,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/event-memory-tools.js#handleBackfillEvents",
-      "protectedImplementationDigest": "sha256:ba01ddb6310dcbda58653ff66efd63c0e58316bca49d3d5fa6c28b8b3bf084ac"
+      "protectedImplementationDigest": "sha256:f42d61c0dd4c2dc2f901c1839c5072e8bd96673e3a97f3bbedb4811ace4f6103"
     },
     {
       "name": "cat_cafe_begin_evolution_preparation_work",
@@ -2240,7 +2300,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/skill-consumption-tools.js#handleBindRequestReviewConsumption",
-      "protectedImplementationDigest": "sha256:23f3fb257af2c1cb8cd2a00d0d1d16571b21d22bafbf869edf420ec624e226d0"
+      "protectedImplementationDigest": "sha256:2cb7661096aa99484de245ac56470e36b1cfb1f34721a5da08c8e4591b309cd8"
     },
     {
       "name": "cat_cafe_bootcamp_env_check",
@@ -2284,7 +2344,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleBootcampEnvCheck",
-      "protectedImplementationDigest": "sha256:9214aa41f576685af0ee629c41a841b3f7f56e93acae90c27e87ed31a26848c5"
+      "protectedImplementationDigest": "sha256:c76b5c0dc8f558921bd204dc8159f1f4af03b59d30dd556eee29f30c1e38cf11"
     },
     {
       "name": "cat_cafe_capabilities_snapshot",
@@ -2965,7 +3025,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleCloseEntrustedWork",
-      "protectedImplementationDigest": "sha256:9214aa41f576685af0ee629c41a841b3f7f56e93acae90c27e87ed31a26848c5"
+      "protectedImplementationDigest": "sha256:c76b5c0dc8f558921bd204dc8159f1f4af03b59d30dd556eee29f30c1e38cf11"
     },
     {
       "name": "cat_cafe_constitute_evolution_program",
@@ -3128,6 +3188,64 @@
       "protectedImplementationDigest": "sha256:54e2a9a7db5ea3b93192bf3dfbc3d9734a165d31d9d9274d7b9451293212753d"
     },
     {
+      "name": "cat_cafe_continue_approved_task",
+      "serverFamily": "collab",
+      "resourceFamily": "thread-proposal",
+      "actions": [
+        "continue-approved-task"
+      ],
+      "activeState": "canonical",
+      "description": "Append a permanent execution-contract continuation receipt to one existing approved Task proposal. Use when: the original Task owner, in its original thread, must reconcile a complete generic Task approval before structured implementation dispatch. NOT for: approving a proposal, changing Task ownership or scope, starting implementation, or replacing the exact five-field developmentScope path. Output: continued/replayed with the original receipt, or a rejection with no new authority or dispatch. The server derives the contract; callers supply only proposalId, taskId and a stable retry key. GOTCHA: child seed, READY and read-only investigation are not implementation leases. After this receipt, use the normal single implement carrier for the original approved child and target.",
+      "descriptionDigest": "sha256:d76e38b2c2fcdf0ab0928e17666d3b2703b599b115bad2f3a352f43ec39a13ea",
+      "descriptionCharacters": 784,
+      "descriptionTokensCl100kBase": 139,
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "additionalProperties": false,
+        "properties": {
+          "clientRequestId": {
+            "description": "Stable reconciliation retry key, reused unchanged for this proposal and Task",
+            "maxLength": 200,
+            "minLength": 1,
+            "type": "string"
+          },
+          "proposalId": {
+            "description": "Exact approved F128 proposal for the original Task and child",
+            "maxLength": 200,
+            "minLength": 1,
+            "type": "string"
+          },
+          "taskId": {
+            "description": "Original canonical Task ID; never a replacement or child Task",
+            "maxLength": 200,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "proposalId",
+          "taskId",
+          "clientRequestId"
+        ],
+        "type": "object"
+      },
+      "inputSchemaDigest": "sha256:0e65bac986c367bbb49128f80deb9f6ea4fcfca7ed5e76f3bf8153704c0b9aaf",
+      "annotations": {
+        "destructiveHint": false,
+        "openWorldHint": false,
+        "readOnlyHint": false
+      },
+      "runtimeProfiles": [
+        "full"
+      ],
+      "schemaDelivery": {
+        "evidenceRef": "file:packages/mcp-server/src/tools/callback-tools.ts",
+        "policy": "host-default"
+      },
+      "implementationRef": "module:./tools/callback-tools.js#handleContinueApprovedTask",
+      "protectedImplementationDigest": "sha256:c76b5c0dc8f558921bd204dc8159f1f4af03b59d30dd556eee29f30c1e38cf11"
+    },
+    {
       "name": "cat_cafe_correct_person_claim",
       "serverFamily": "collab",
       "resourceFamily": "person-memory",
@@ -3253,7 +3371,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleCorrectPersonClaim",
-      "protectedImplementationDigest": "sha256:9214aa41f576685af0ee629c41a841b3f7f56e93acae90c27e87ed31a26848c5"
+      "protectedImplementationDigest": "sha256:c76b5c0dc8f558921bd204dc8159f1f4af03b59d30dd556eee29f30c1e38cf11"
     },
     {
       "name": "cat_cafe_create_rich_block",
@@ -3383,7 +3501,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleCreateRichBlock",
-      "protectedImplementationDigest": "sha256:9214aa41f576685af0ee629c41a841b3f7f56e93acae90c27e87ed31a26848c5"
+      "protectedImplementationDigest": "sha256:c76b5c0dc8f558921bd204dc8159f1f4af03b59d30dd556eee29f30c1e38cf11"
     },
     {
       "name": "cat_cafe_create_task",
@@ -3477,7 +3595,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleCreateTask",
-      "protectedImplementationDigest": "sha256:9214aa41f576685af0ee629c41a841b3f7f56e93acae90c27e87ed31a26848c5"
+      "protectedImplementationDigest": "sha256:c76b5c0dc8f558921bd204dc8159f1f4af03b59d30dd556eee29f30c1e38cf11"
     },
     {
       "name": "cat_cafe_cross_post_message",
@@ -3805,7 +3923,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleCrossPostMessage",
-      "protectedImplementationDigest": "sha256:9214aa41f576685af0ee629c41a841b3f7f56e93acae90c27e87ed31a26848c5"
+      "protectedImplementationDigest": "sha256:c76b5c0dc8f558921bd204dc8159f1f4af03b59d30dd556eee29f30c1e38cf11"
     },
     {
       "name": "cat_cafe_defer_person_memory_delta",
@@ -3985,7 +4103,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleDeferPersonMemoryDelta",
-      "protectedImplementationDigest": "sha256:9214aa41f576685af0ee629c41a841b3f7f56e93acae90c27e87ed31a26848c5"
+      "protectedImplementationDigest": "sha256:c76b5c0dc8f558921bd204dc8159f1f4af03b59d30dd556eee29f30c1e38cf11"
     },
     {
       "name": "cat_cafe_development_return",
@@ -4523,7 +4641,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/skill-consumption-tools.js#handleDismissRequestReviewConsumption",
-      "protectedImplementationDigest": "sha256:23f3fb257af2c1cb8cd2a00d0d1d16571b21d22bafbf869edf420ec624e226d0"
+      "protectedImplementationDigest": "sha256:2cb7661096aa99484de245ac56470e36b1cfb1f34721a5da08c8e4591b309cd8"
     },
     {
       "name": "cat_cafe_dismiss_skill_consumption",
@@ -4576,7 +4694,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/skill-consumption-tools.js#handleDismissSkillConsumption",
-      "protectedImplementationDigest": "sha256:23f3fb257af2c1cb8cd2a00d0d1d16571b21d22bafbf869edf420ec624e226d0"
+      "protectedImplementationDigest": "sha256:2cb7661096aa99484de245ac56470e36b1cfb1f34721a5da08c8e4591b309cd8"
     },
     {
       "name": "cat_cafe_dispose_deferred_person_memory",
@@ -4656,7 +4774,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleDisposeDeferredPersonMemory",
-      "protectedImplementationDigest": "sha256:9214aa41f576685af0ee629c41a841b3f7f56e93acae90c27e87ed31a26848c5"
+      "protectedImplementationDigest": "sha256:c76b5c0dc8f558921bd204dc8159f1f4af03b59d30dd556eee29f30c1e38cf11"
     },
     {
       "name": "cat_cafe_drill_memory_cue",
@@ -4706,7 +4824,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleDrillMemoryCue",
-      "protectedImplementationDigest": "sha256:9214aa41f576685af0ee629c41a841b3f7f56e93acae90c27e87ed31a26848c5"
+      "protectedImplementationDigest": "sha256:c76b5c0dc8f558921bd204dc8159f1f4af03b59d30dd556eee29f30c1e38cf11"
     },
     {
       "name": "cat_cafe_drill_person_memory",
@@ -4803,7 +4921,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleDrillPersonMemory",
-      "protectedImplementationDigest": "sha256:9214aa41f576685af0ee629c41a841b3f7f56e93acae90c27e87ed31a26848c5"
+      "protectedImplementationDigest": "sha256:c76b5c0dc8f558921bd204dc8159f1f4af03b59d30dd556eee29f30c1e38cf11"
     },
     {
       "name": "cat_cafe_edit_office_document",
@@ -4993,7 +5111,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleFeatIndex",
-      "protectedImplementationDigest": "sha256:9214aa41f576685af0ee629c41a841b3f7f56e93acae90c27e87ed31a26848c5"
+      "protectedImplementationDigest": "sha256:c76b5c0dc8f558921bd204dc8159f1f4af03b59d30dd556eee29f30c1e38cf11"
     },
     {
       "name": "cat_cafe_finance_query",
@@ -5133,7 +5251,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleForgetDeferredPersonMemory",
-      "protectedImplementationDigest": "sha256:9214aa41f576685af0ee629c41a841b3f7f56e93acae90c27e87ed31a26848c5"
+      "protectedImplementationDigest": "sha256:c76b5c0dc8f558921bd204dc8159f1f4af03b59d30dd556eee29f30c1e38cf11"
     },
     {
       "name": "cat_cafe_forget_person",
@@ -5183,7 +5301,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleForgetPerson",
-      "protectedImplementationDigest": "sha256:9214aa41f576685af0ee629c41a841b3f7f56e93acae90c27e87ed31a26848c5"
+      "protectedImplementationDigest": "sha256:c76b5c0dc8f558921bd204dc8159f1f4af03b59d30dd556eee29f30c1e38cf11"
     },
     {
       "name": "cat_cafe_forget_person_memory_proposal",
@@ -5233,7 +5351,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleForgetPersonMemoryProposal",
-      "protectedImplementationDigest": "sha256:9214aa41f576685af0ee629c41a841b3f7f56e93acae90c27e87ed31a26848c5"
+      "protectedImplementationDigest": "sha256:c76b5c0dc8f558921bd204dc8159f1f4af03b59d30dd556eee29f30c1e38cf11"
     },
     {
       "name": "cat_cafe_generate_document",
@@ -5293,7 +5411,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleGenerateDocument",
-      "protectedImplementationDigest": "sha256:9214aa41f576685af0ee629c41a841b3f7f56e93acae90c27e87ed31a26848c5"
+      "protectedImplementationDigest": "sha256:c76b5c0dc8f558921bd204dc8159f1f4af03b59d30dd556eee29f30c1e38cf11"
     },
     {
       "name": "cat_cafe_get_available_guides",
@@ -5329,7 +5447,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleGetAvailableGuides",
-      "protectedImplementationDigest": "sha256:9214aa41f576685af0ee629c41a841b3f7f56e93acae90c27e87ed31a26848c5"
+      "protectedImplementationDigest": "sha256:c76b5c0dc8f558921bd204dc8159f1f4af03b59d30dd556eee29f30c1e38cf11"
     },
     {
       "name": "cat_cafe_get_custody_events",
@@ -5380,7 +5498,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleGetCustodyEvents",
-      "protectedImplementationDigest": "sha256:9214aa41f576685af0ee629c41a841b3f7f56e93acae90c27e87ed31a26848c5"
+      "protectedImplementationDigest": "sha256:c76b5c0dc8f558921bd204dc8159f1f4af03b59d30dd556eee29f30c1e38cf11"
     },
     {
       "name": "cat_cafe_get_evolution_program",
@@ -5519,7 +5637,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleGetHoldStatus",
-      "protectedImplementationDigest": "sha256:9214aa41f576685af0ee629c41a841b3f7f56e93acae90c27e87ed31a26848c5"
+      "protectedImplementationDigest": "sha256:c76b5c0dc8f558921bd204dc8159f1f4af03b59d30dd556eee29f30c1e38cf11"
     },
     {
       "name": "cat_cafe_get_message",
@@ -5585,7 +5703,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleGetMessage",
-      "protectedImplementationDigest": "sha256:9214aa41f576685af0ee629c41a841b3f7f56e93acae90c27e87ed31a26848c5"
+      "protectedImplementationDigest": "sha256:c76b5c0dc8f558921bd204dc8159f1f4af03b59d30dd556eee29f30c1e38cf11"
     },
     {
       "name": "cat_cafe_get_pending_decisions",
@@ -5634,7 +5752,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleGetPendingDecisions",
-      "protectedImplementationDigest": "sha256:9214aa41f576685af0ee629c41a841b3f7f56e93acae90c27e87ed31a26848c5"
+      "protectedImplementationDigest": "sha256:c76b5c0dc8f558921bd204dc8159f1f4af03b59d30dd556eee29f30c1e38cf11"
     },
     {
       "name": "cat_cafe_get_pending_mentions",
@@ -5681,7 +5799,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleGetPendingMentions",
-      "protectedImplementationDigest": "sha256:9214aa41f576685af0ee629c41a841b3f7f56e93acae90c27e87ed31a26848c5"
+      "protectedImplementationDigest": "sha256:c76b5c0dc8f558921bd204dc8159f1f4af03b59d30dd556eee29f30c1e38cf11"
     },
     {
       "name": "cat_cafe_get_person_memory_proposal_status",
@@ -5732,7 +5850,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleGetPersonMemoryProposalStatus",
-      "protectedImplementationDigest": "sha256:9214aa41f576685af0ee629c41a841b3f7f56e93acae90c27e87ed31a26848c5"
+      "protectedImplementationDigest": "sha256:c76b5c0dc8f558921bd204dc8159f1f4af03b59d30dd556eee29f30c1e38cf11"
     },
     {
       "name": "cat_cafe_get_recall_metrics",
@@ -5858,7 +5976,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleGetRunningWork",
-      "protectedImplementationDigest": "sha256:9214aa41f576685af0ee629c41a841b3f7f56e93acae90c27e87ed31a26848c5"
+      "protectedImplementationDigest": "sha256:c76b5c0dc8f558921bd204dc8159f1f4af03b59d30dd556eee29f30c1e38cf11"
     },
     {
       "name": "cat_cafe_get_thread_cats",
@@ -5907,7 +6025,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleGetThreadCats",
-      "protectedImplementationDigest": "sha256:9214aa41f576685af0ee629c41a841b3f7f56e93acae90c27e87ed31a26848c5"
+      "protectedImplementationDigest": "sha256:c76b5c0dc8f558921bd204dc8159f1f4af03b59d30dd556eee29f30c1e38cf11"
     },
     {
       "name": "cat_cafe_get_thread_context",
@@ -6013,7 +6131,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleGetThreadContext",
-      "protectedImplementationDigest": "sha256:9214aa41f576685af0ee629c41a841b3f7f56e93acae90c27e87ed31a26848c5"
+      "protectedImplementationDigest": "sha256:c76b5c0dc8f558921bd204dc8159f1f4af03b59d30dd556eee29f30c1e38cf11"
     },
     {
       "name": "cat_cafe_get_thread_metadata",
@@ -6047,7 +6165,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleGetThreadMetadata",
-      "protectedImplementationDigest": "sha256:9214aa41f576685af0ee629c41a841b3f7f56e93acae90c27e87ed31a26848c5"
+      "protectedImplementationDigest": "sha256:c76b5c0dc8f558921bd204dc8159f1f4af03b59d30dd556eee29f30c1e38cf11"
     },
     {
       "name": "cat_cafe_get_workflow_sop",
@@ -6096,7 +6214,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleGetWorkflowSop",
-      "protectedImplementationDigest": "sha256:9214aa41f576685af0ee629c41a841b3f7f56e93acae90c27e87ed31a26848c5"
+      "protectedImplementationDigest": "sha256:c76b5c0dc8f558921bd204dc8159f1f4af03b59d30dd556eee29f30c1e38cf11"
     },
     {
       "name": "cat_cafe_graph_resolve",
@@ -6162,7 +6280,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/graph-tools.js#handleGraphResolve",
-      "protectedImplementationDigest": "sha256:583c750876ebacebdeba48b1fa3b9448f6ef5789892a75237b79e726dd62b995"
+      "protectedImplementationDigest": "sha256:3d9d634522264eae12ec30c76e33886fc4982dd04980b3282753acbdde9bd3d7"
     },
     {
       "name": "cat_cafe_guide_control",
@@ -6210,7 +6328,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleGuideControl",
-      "protectedImplementationDigest": "sha256:9214aa41f576685af0ee629c41a841b3f7f56e93acae90c27e87ed31a26848c5"
+      "protectedImplementationDigest": "sha256:c76b5c0dc8f558921bd204dc8159f1f4af03b59d30dd556eee29f30c1e38cf11"
     },
     {
       "name": "cat_cafe_hold_ball",
@@ -6358,7 +6476,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleHoldBall",
-      "protectedImplementationDigest": "sha256:9214aa41f576685af0ee629c41a841b3f7f56e93acae90c27e87ed31a26848c5"
+      "protectedImplementationDigest": "sha256:c76b5c0dc8f558921bd204dc8159f1f4af03b59d30dd556eee29f30c1e38cf11"
     },
     {
       "name": "cat_cafe_home_action",
@@ -7338,7 +7456,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/event-memory-tools.js#handleListEvents",
-      "protectedImplementationDigest": "sha256:ba01ddb6310dcbda58653ff66efd63c0e58316bca49d3d5fa6c28b8b3bf084ac"
+      "protectedImplementationDigest": "sha256:f42d61c0dd4c2dc2f901c1839c5072e8bd96673e3a97f3bbedb4811ace4f6103"
     },
     {
       "name": "cat_cafe_list_external_runtime_sessions",
@@ -7392,7 +7510,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/external-runtime-session-tools.js#handleListExternalRuntimeSessions",
-      "protectedImplementationDigest": "sha256:2f349d3ac96a9f651a8d733baaaef86d384c87f3c0f4092b9d41f763f0f57c94"
+      "protectedImplementationDigest": "sha256:c781edb47fb903ad500da81fc438f077965f2b8b6ca77ab28920baa3f59a5882"
     },
     {
       "name": "cat_cafe_list_labels",
@@ -7440,7 +7558,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleListLabels",
-      "protectedImplementationDigest": "sha256:9214aa41f576685af0ee629c41a841b3f7f56e93acae90c27e87ed31a26848c5"
+      "protectedImplementationDigest": "sha256:c76b5c0dc8f558921bd204dc8159f1f4af03b59d30dd556eee29f30c1e38cf11"
     },
     {
       "name": "cat_cafe_list_paw_feel_inbox",
@@ -7611,7 +7729,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/recent-tools.js#handleListRecent",
-      "protectedImplementationDigest": "sha256:19e8524f69c5c5366d867b5dd9c8842891db2ccd20720ab3db16adb78c3e1da2"
+      "protectedImplementationDigest": "sha256:6ffbba78fb3085395975ecaff44bc31d4823abb21e38114003e2e35a66ff76e2"
     },
     {
       "name": "cat_cafe_list_schedule_templates",
@@ -7790,7 +7908,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleListTasks",
-      "protectedImplementationDigest": "sha256:9214aa41f576685af0ee629c41a841b3f7f56e93acae90c27e87ed31a26848c5"
+      "protectedImplementationDigest": "sha256:c76b5c0dc8f558921bd204dc8159f1f4af03b59d30dd556eee29f30c1e38cf11"
     },
     {
       "name": "cat_cafe_list_threads",
@@ -7852,7 +7970,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleListThreads",
-      "protectedImplementationDigest": "sha256:9214aa41f576685af0ee629c41a841b3f7f56e93acae90c27e87ed31a26848c5"
+      "protectedImplementationDigest": "sha256:c76b5c0dc8f558921bd204dc8159f1f4af03b59d30dd556eee29f30c1e38cf11"
     },
     {
       "name": "cat_cafe_manage_conversation_decision",
@@ -8452,7 +8570,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleMultiMention",
-      "protectedImplementationDigest": "sha256:9214aa41f576685af0ee629c41a841b3f7f56e93acae90c27e87ed31a26848c5"
+      "protectedImplementationDigest": "sha256:c76b5c0dc8f558921bd204dc8159f1f4af03b59d30dd556eee29f30c1e38cf11"
     },
     {
       "name": "cat_cafe_nominate_for_global",
@@ -8569,7 +8687,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleOfferCustody",
-      "protectedImplementationDigest": "sha256:9214aa41f576685af0ee629c41a841b3f7f56e93acae90c27e87ed31a26848c5"
+      "protectedImplementationDigest": "sha256:c76b5c0dc8f558921bd204dc8159f1f4af03b59d30dd556eee29f30c1e38cf11"
     },
     {
       "name": "cat_cafe_open_evolution_round",
@@ -8725,7 +8843,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/skill-consumption-tools.js#handleOpenWithWorkspaceNavigator",
-      "protectedImplementationDigest": "sha256:23f3fb257af2c1cb8cd2a00d0d1d16571b21d22bafbf869edf420ec624e226d0"
+      "protectedImplementationDigest": "sha256:2cb7661096aa99484de245ac56470e36b1cfb1f34721a5da08c8e4591b309cd8"
     },
     {
       "name": "cat_cafe_page_action_inspect",
@@ -9461,6 +9579,33 @@
                                     "minimum": -9007199254740991,
                                     "type": "integer"
                                   },
+                                  "storyEvidence": {
+                                    "additionalProperties": false,
+                                    "properties": {
+                                      "metadataRevision": {
+                                        "exclusiveMinimum": 0,
+                                        "maximum": 9007199254740991,
+                                        "minimum": -9007199254740991,
+                                        "type": "integer"
+                                      },
+                                      "paragraphId": {
+                                        "maxLength": 256,
+                                        "minLength": 1,
+                                        "type": "string"
+                                      },
+                                      "quote": {
+                                        "maxLength": 12000,
+                                        "minLength": 1,
+                                        "type": "string"
+                                      }
+                                    },
+                                    "required": [
+                                      "paragraphId",
+                                      "metadataRevision",
+                                      "quote"
+                                    ],
+                                    "type": "object"
+                                  },
                                   "streamId": {
                                     "$ref": "#/properties/contextAttachments/items/anyOf/3/properties/selections/items/properties/id"
                                   }
@@ -10187,7 +10332,7 @@
         ],
         "type": "object"
       },
-      "inputSchemaDigest": "sha256:287a1866f1f93bb01dc2e28e49445f9f2326366dc8fb8d6faadb6eb6670d00e4",
+      "inputSchemaDigest": "sha256:d9430cd89dfd4fa3f8b33ea381495b05c68812b0d123835670e996eb058a9861",
       "annotations": {
         "destructiveHint": false,
         "openWorldHint": false,
@@ -10205,7 +10350,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handlePostMessage",
-      "protectedImplementationDigest": "sha256:9214aa41f576685af0ee629c41a841b3f7f56e93acae90c27e87ed31a26848c5"
+      "protectedImplementationDigest": "sha256:c76b5c0dc8f558921bd204dc8159f1f4af03b59d30dd556eee29f30c1e38cf11"
     },
     {
       "name": "cat_cafe_prepare_artifact_review",
@@ -10288,7 +10433,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/artifact-review-tools.js#handlePrepareArtifactReview",
-      "protectedImplementationDigest": "sha256:b253d703c2c5a7329f8ab27c0c8952569c1d6ca6c0fda186cf0e58d6cd10b669"
+      "protectedImplementationDigest": "sha256:3d159c591d10c35a3aaa0937ccd4bf04f74e58d2b12868ea724390eb56758d52"
     },
     {
       "name": "cat_cafe_prepare_request_review_consumption",
@@ -10399,7 +10544,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/skill-consumption-tools.js#handlePrepareRequestReviewConsumption",
-      "protectedImplementationDigest": "sha256:23f3fb257af2c1cb8cd2a00d0d1d16571b21d22bafbf869edf420ec624e226d0"
+      "protectedImplementationDigest": "sha256:2cb7661096aa99484de245ac56470e36b1cfb1f34721a5da08c8e4591b309cd8"
     },
     {
       "name": "cat_cafe_prepare_skill_consumption",
@@ -10442,7 +10587,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/skill-consumption-tools.js#handlePrepareSkillConsumption",
-      "protectedImplementationDigest": "sha256:23f3fb257af2c1cb8cd2a00d0d1d16571b21d22bafbf869edf420ec624e226d0"
+      "protectedImplementationDigest": "sha256:2cb7661096aa99484de245ac56470e36b1cfb1f34721a5da08c8e4591b309cd8"
     },
     {
       "name": "cat_cafe_preview_cat_life_settings",
@@ -10713,7 +10858,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/hub-action-tools.js#handlePreviewOpen",
-      "protectedImplementationDigest": "sha256:55ec62659538905317894a80c2880fa940e3ec83e80dd00b250b447c85b9f26a"
+      "protectedImplementationDigest": "sha256:9b47c56bc3660825ed764bfc5a77b125c1ac37bf2050665bd0b2c630959b8a4a"
     },
     {
       "name": "cat_cafe_preview_scheduled_task",
@@ -10923,7 +11068,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleProposeEntity",
-      "protectedImplementationDigest": "sha256:9214aa41f576685af0ee629c41a841b3f7f56e93acae90c27e87ed31a26848c5"
+      "protectedImplementationDigest": "sha256:c76b5c0dc8f558921bd204dc8159f1f4af03b59d30dd556eee29f30c1e38cf11"
     },
     {
       "name": "cat_cafe_propose_eval_repair",
@@ -11099,7 +11244,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleProposeEventMemoryCorrection",
-      "protectedImplementationDigest": "sha256:9214aa41f576685af0ee629c41a841b3f7f56e93acae90c27e87ed31a26848c5"
+      "protectedImplementationDigest": "sha256:c76b5c0dc8f558921bd204dc8159f1f4af03b59d30dd556eee29f30c1e38cf11"
     },
     {
       "name": "cat_cafe_propose_person_memory",
@@ -12009,7 +12154,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleProposePersonMemory",
-      "protectedImplementationDigest": "sha256:9214aa41f576685af0ee629c41a841b3f7f56e93acae90c27e87ed31a26848c5"
+      "protectedImplementationDigest": "sha256:c76b5c0dc8f558921bd204dc8159f1f4af03b59d30dd556eee29f30c1e38cf11"
     },
     {
       "name": "cat_cafe_propose_profile_update",
@@ -12088,7 +12233,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleProposeProfileUpdate",
-      "protectedImplementationDigest": "sha256:9214aa41f576685af0ee629c41a841b3f7f56e93acae90c27e87ed31a26848c5"
+      "protectedImplementationDigest": "sha256:c76b5c0dc8f558921bd204dc8159f1f4af03b59d30dd556eee29f30c1e38cf11"
     },
     {
       "name": "cat_cafe_propose_session_handoff",
@@ -12165,7 +12310,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleProposeSessionHandoff",
-      "protectedImplementationDigest": "sha256:9214aa41f576685af0ee629c41a841b3f7f56e93acae90c27e87ed31a26848c5"
+      "protectedImplementationDigest": "sha256:c76b5c0dc8f558921bd204dc8159f1f4af03b59d30dd556eee29f30c1e38cf11"
     },
     {
       "name": "cat_cafe_propose_taste",
@@ -12353,7 +12498,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleProposeTaste",
-      "protectedImplementationDigest": "sha256:9214aa41f576685af0ee629c41a841b3f7f56e93acae90c27e87ed31a26848c5"
+      "protectedImplementationDigest": "sha256:c76b5c0dc8f558921bd204dc8159f1f4af03b59d30dd556eee29f30c1e38cf11"
     },
     {
       "name": "cat_cafe_propose_thread",
@@ -12461,7 +12606,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleProposeThread",
-      "protectedImplementationDigest": "sha256:9214aa41f576685af0ee629c41a841b3f7f56e93acae90c27e87ed31a26848c5"
+      "protectedImplementationDigest": "sha256:c76b5c0dc8f558921bd204dc8159f1f4af03b59d30dd556eee29f30c1e38cf11"
     },
     {
       "name": "cat_cafe_publish_harness_history",
@@ -13689,7 +13834,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/artifact-review-tools.js#handleReadArtifactReview",
-      "protectedImplementationDigest": "sha256:b253d703c2c5a7329f8ab27c0c8952569c1d6ca6c0fda186cf0e58d6cd10b669"
+      "protectedImplementationDigest": "sha256:3d159c591d10c35a3aaa0937ccd4bf04f74e58d2b12868ea724390eb56758d52"
     },
     {
       "name": "cat_cafe_read_content_modification",
@@ -13977,7 +14122,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/external-runtime-session-tools.js#handleReadExternalRuntimeSession",
-      "protectedImplementationDigest": "sha256:2f349d3ac96a9f651a8d733baaaef86d384c87f3c0f4092b9d41f763f0f57c94"
+      "protectedImplementationDigest": "sha256:c781edb47fb903ad500da81fc438f077965f2b8b6ca77ab28920baa3f59a5882"
     },
     {
       "name": "cat_cafe_read_file_slice",
@@ -14157,7 +14302,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleReadProfile",
-      "protectedImplementationDigest": "sha256:9214aa41f576685af0ee629c41a841b3f7f56e93acae90c27e87ed31a26848c5"
+      "protectedImplementationDigest": "sha256:c76b5c0dc8f558921bd204dc8159f1f4af03b59d30dd556eee29f30c1e38cf11"
     },
     {
       "name": "cat_cafe_read_session_digest",
@@ -14334,7 +14479,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/realtime-companion-tools.js#handleRealtimeCompanionStart",
-      "protectedImplementationDigest": "sha256:9fa3ca6833528fe182eedbbc2d8092c39bc919475eaf576f518ff2524104019e"
+      "protectedImplementationDigest": "sha256:a560c0f0439a5c900c6e65a551c427485de80e29328c01110f487b9bd106dc4a"
     },
     {
       "name": "cat_cafe_realtime_companion_status",
@@ -14378,7 +14523,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/realtime-companion-tools.js#handleRealtimeCompanionStatus",
-      "protectedImplementationDigest": "sha256:9fa3ca6833528fe182eedbbc2d8092c39bc919475eaf576f518ff2524104019e"
+      "protectedImplementationDigest": "sha256:a560c0f0439a5c900c6e65a551c427485de80e29328c01110f487b9bd106dc4a"
     },
     {
       "name": "cat_cafe_realtime_companion_stop",
@@ -14422,7 +14567,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/realtime-companion-tools.js#handleRealtimeCompanionStop",
-      "protectedImplementationDigest": "sha256:9fa3ca6833528fe182eedbbc2d8092c39bc919475eaf576f518ff2524104019e"
+      "protectedImplementationDigest": "sha256:a560c0f0439a5c900c6e65a551c427485de80e29328c01110f487b9bd106dc4a"
     },
     {
       "name": "cat_cafe_rebind_evolution_program_measurement",
@@ -14564,7 +14709,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleRecallPersonRelationship",
-      "protectedImplementationDigest": "sha256:9214aa41f576685af0ee629c41a841b3f7f56e93acae90c27e87ed31a26848c5"
+      "protectedImplementationDigest": "sha256:c76b5c0dc8f558921bd204dc8159f1f4af03b59d30dd556eee29f30c1e38cf11"
     },
     {
       "name": "cat_cafe_record_eval_lifecycle",
@@ -15088,7 +15233,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleRecordMemoryCueOutcome",
-      "protectedImplementationDigest": "sha256:9214aa41f576685af0ee629c41a841b3f7f56e93acae90c27e87ed31a26848c5"
+      "protectedImplementationDigest": "sha256:c76b5c0dc8f558921bd204dc8159f1f4af03b59d30dd556eee29f30c1e38cf11"
     },
     {
       "name": "cat_cafe_record_proactive_memory_abstention",
@@ -15162,7 +15307,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleRecordProactiveMemoryAbstention",
-      "protectedImplementationDigest": "sha256:9214aa41f576685af0ee629c41a841b3f7f56e93acae90c27e87ed31a26848c5"
+      "protectedImplementationDigest": "sha256:c76b5c0dc8f558921bd204dc8159f1f4af03b59d30dd556eee29f30c1e38cf11"
     },
     {
       "name": "cat_cafe_record_request_review_consumption",
@@ -15213,7 +15358,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/skill-consumption-tools.js#handleRecordRequestReviewConsumption",
-      "protectedImplementationDigest": "sha256:23f3fb257af2c1cb8cd2a00d0d1d16571b21d22bafbf869edf420ec624e226d0"
+      "protectedImplementationDigest": "sha256:2cb7661096aa99484de245ac56470e36b1cfb1f34721a5da08c8e4591b309cd8"
     },
     {
       "name": "cat_cafe_record_request_review_owner_fact",
@@ -15546,7 +15691,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/skill-consumption-tools.js#handleRecordRequestReviewOwnerFact",
-      "protectedImplementationDigest": "sha256:23f3fb257af2c1cb8cd2a00d0d1d16571b21d22bafbf869edf420ec624e226d0"
+      "protectedImplementationDigest": "sha256:2cb7661096aa99484de245ac56470e36b1cfb1f34721a5da08c8e4591b309cd8"
     },
     {
       "name": "cat_cafe_redact_person_memory_item",
@@ -15620,7 +15765,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleRedactPersonMemoryItem",
-      "protectedImplementationDigest": "sha256:9214aa41f576685af0ee629c41a841b3f7f56e93acae90c27e87ed31a26848c5"
+      "protectedImplementationDigest": "sha256:c76b5c0dc8f558921bd204dc8159f1f4af03b59d30dd556eee29f30c1e38cf11"
     },
     {
       "name": "cat_cafe_register_deployment_wait",
@@ -15732,7 +15877,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleRegisterDeploymentWait",
-      "protectedImplementationDigest": "sha256:9214aa41f576685af0ee629c41a841b3f7f56e93acae90c27e87ed31a26848c5"
+      "protectedImplementationDigest": "sha256:c76b5c0dc8f558921bd204dc8159f1f4af03b59d30dd556eee29f30c1e38cf11"
     },
     {
       "name": "cat_cafe_register_external_runtime_session",
@@ -15855,7 +16000,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/external-runtime-session-tools.js#handleRegisterExternalRuntimeSession",
-      "protectedImplementationDigest": "sha256:2f349d3ac96a9f651a8d733baaaef86d384c87f3c0f4092b9d41f763f0f57c94"
+      "protectedImplementationDigest": "sha256:c781edb47fb903ad500da81fc438f077965f2b8b6ca77ab28920baa3f59a5882"
     },
     {
       "name": "cat_cafe_register_scheduled_task",
@@ -16479,7 +16624,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/artifact-review-tools.js#handleRespondArtifactReview",
-      "protectedImplementationDigest": "sha256:b253d703c2c5a7329f8ab27c0c8952569c1d6ca6c0fda186cf0e58d6cd10b669"
+      "protectedImplementationDigest": "sha256:3d159c591d10c35a3aaa0937ccd4bf04f74e58d2b12868ea724390eb56758d52"
     },
     {
       "name": "cat_cafe_respond_content_modification",
@@ -16669,7 +16814,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-memory-tools.js#handleCallbackRetainMemory",
-      "protectedImplementationDigest": "sha256:379acb6bc579758296b6aeb468f22fc631285f7df77b0acc184d181aeca0305b"
+      "protectedImplementationDigest": "sha256:2e7248094355d428d5f0da8c97dfa7f0af2bb964cc2a86826a267b6a8708fe58"
     },
     {
       "name": "cat_cafe_retire_person_claim",
@@ -16732,7 +16877,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleRetirePersonClaim",
-      "protectedImplementationDigest": "sha256:9214aa41f576685af0ee629c41a841b3f7f56e93acae90c27e87ed31a26848c5"
+      "protectedImplementationDigest": "sha256:c76b5c0dc8f558921bd204dc8159f1f4af03b59d30dd556eee29f30c1e38cf11"
     },
     {
       "name": "cat_cafe_retry_custody_admission",
@@ -16875,7 +17020,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleRetryCustodyAdmission",
-      "protectedImplementationDigest": "sha256:9214aa41f576685af0ee629c41a841b3f7f56e93acae90c27e87ed31a26848c5"
+      "protectedImplementationDigest": "sha256:c76b5c0dc8f558921bd204dc8159f1f4af03b59d30dd556eee29f30c1e38cf11"
     },
     {
       "name": "cat_cafe_review_distillation",
@@ -17199,7 +17344,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleSetReadMode",
-      "protectedImplementationDigest": "sha256:9214aa41f576685af0ee629c41a841b3f7f56e93acae90c27e87ed31a26848c5"
+      "protectedImplementationDigest": "sha256:c76b5c0dc8f558921bd204dc8159f1f4af03b59d30dd556eee29f30c1e38cf11"
     },
     {
       "name": "cat_cafe_set_thread_metadata",
@@ -17372,7 +17517,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleSetThreadMetadata",
-      "protectedImplementationDigest": "sha256:9214aa41f576685af0ee629c41a841b3f7f56e93acae90c27e87ed31a26848c5"
+      "protectedImplementationDigest": "sha256:c76b5c0dc8f558921bd204dc8159f1f4af03b59d30dd556eee29f30c1e38cf11"
     },
     {
       "name": "cat_cafe_settle_present_loop",
@@ -18074,7 +18219,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleStartGuide",
-      "protectedImplementationDigest": "sha256:9214aa41f576685af0ee629c41a841b3f7f56e93acae90c27e87ed31a26848c5"
+      "protectedImplementationDigest": "sha256:c76b5c0dc8f558921bd204dc8159f1f4af03b59d30dd556eee29f30c1e38cf11"
     },
     {
       "name": "cat_cafe_start_vote",
@@ -18152,7 +18297,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleStartVote",
-      "protectedImplementationDigest": "sha256:9214aa41f576685af0ee629c41a841b3f7f56e93acae90c27e87ed31a26848c5"
+      "protectedImplementationDigest": "sha256:c76b5c0dc8f558921bd204dc8159f1f4af03b59d30dd556eee29f30c1e38cf11"
     },
     {
       "name": "cat_cafe_submit_evolution_preparation",
@@ -19346,7 +19491,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/event-memory-tools.js#handleTeleport",
-      "protectedImplementationDigest": "sha256:ba01ddb6310dcbda58653ff66efd63c0e58316bca49d3d5fa6c28b8b3bf084ac"
+      "protectedImplementationDigest": "sha256:f42d61c0dd4c2dc2f901c1839c5072e8bd96673e3a97f3bbedb4811ace4f6103"
     },
     {
       "name": "cat_cafe_triage_paw_feel",
@@ -19807,7 +19952,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleUpdateBootcampState",
-      "protectedImplementationDigest": "sha256:9214aa41f576685af0ee629c41a841b3f7f56e93acae90c27e87ed31a26848c5"
+      "protectedImplementationDigest": "sha256:c76b5c0dc8f558921bd204dc8159f1f4af03b59d30dd556eee29f30c1e38cf11"
     },
     {
       "name": "cat_cafe_update_entrusted_work",
@@ -19986,7 +20131,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleUpdateEntrustedWork",
-      "protectedImplementationDigest": "sha256:9214aa41f576685af0ee629c41a841b3f7f56e93acae90c27e87ed31a26848c5"
+      "protectedImplementationDigest": "sha256:c76b5c0dc8f558921bd204dc8159f1f4af03b59d30dd556eee29f30c1e38cf11"
     },
     {
       "name": "cat_cafe_update_evolution_program",
@@ -20333,7 +20478,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleUpdateGuideState",
-      "protectedImplementationDigest": "sha256:9214aa41f576685af0ee629c41a841b3f7f56e93acae90c27e87ed31a26848c5"
+      "protectedImplementationDigest": "sha256:c76b5c0dc8f558921bd204dc8159f1f4af03b59d30dd556eee29f30c1e38cf11"
     },
     {
       "name": "cat_cafe_update_task",
@@ -20422,7 +20567,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleUpdateTask",
-      "protectedImplementationDigest": "sha256:9214aa41f576685af0ee629c41a841b3f7f56e93acae90c27e87ed31a26848c5"
+      "protectedImplementationDigest": "sha256:c76b5c0dc8f558921bd204dc8159f1f4af03b59d30dd556eee29f30c1e38cf11"
     },
     {
       "name": "cat_cafe_update_workflow",
@@ -20572,7 +20717,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleUpdateWorkflow",
-      "protectedImplementationDigest": "sha256:9214aa41f576685af0ee629c41a841b3f7f56e93acae90c27e87ed31a26848c5"
+      "protectedImplementationDigest": "sha256:c76b5c0dc8f558921bd204dc8159f1f4af03b59d30dd556eee29f30c1e38cf11"
     },
     {
       "name": "cat_cafe_video_project_command",
@@ -21245,7 +21390,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleWithdrawDeferredPersonMemory",
-      "protectedImplementationDigest": "sha256:9214aa41f576685af0ee629c41a841b3f7f56e93acae90c27e87ed31a26848c5"
+      "protectedImplementationDigest": "sha256:c76b5c0dc8f558921bd204dc8159f1f4af03b59d30dd556eee29f30c1e38cf11"
     },
     {
       "name": "cat_cafe_withdraw_thread_proposal",
@@ -21289,7 +21434,1094 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleWithdrawThreadProposal",
-      "protectedImplementationDigest": "sha256:9214aa41f576685af0ee629c41a841b3f7f56e93acae90c27e87ed31a26848c5"
+      "protectedImplementationDigest": "sha256:c76b5c0dc8f558921bd204dc8159f1f4af03b59d30dd556eee29f30c1e38cf11"
+    },
+    {
+      "name": "cat_cafe_work",
+      "serverFamily": "collab",
+      "resourceFamily": "collaborative-content",
+      "actions": [
+        "update"
+      ],
+      "activeState": "canonical",
+      "description": "Save a work or explicitly submit its next version to the shared content owner. Use when: delivering a completed video, reading a fixed work version, responding to original review opinions while submitting that same next version, finding an interrupted submission, or publishing its fixed-version chat card. Not for: rendering, arbitrary host paths, changing another author’s work without a current grant, accepting Human opinions, or treating a filename/widget block as work identity. Output: create/submit persist immutable bytes and a CAS/idempotency receipt with contentRef + ownerRevision and stay silent in chat; publish-reference alone attaches the exact owner card to the current message. Other actions return snapshot-fenced JSON-text pages: join every json chunk and reuse the unchanged command/operationId for continuation. GOTCHA: a saved version and an attached card are separate effects; retry an unconfirmed card with its original reference, never by submitting another version. Current invocation and source-root permissions are rechecked; source messages and self-reported directors are not grants.",
+      "descriptionDigest": "sha256:609e310191497e48c0d1fd6a2ed0d493a30c3fa177c33990e449e5f39581ea45",
+      "descriptionCharacters": 1114,
+      "descriptionTokensCl100kBase": 203,
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "additionalProperties": false,
+        "properties": {
+          "command": {
+            "anyOf": [
+              {
+                "anyOf": [
+                  {
+                    "additionalProperties": false,
+                    "properties": {
+                      "action": {
+                        "const": "create",
+                        "type": "string"
+                      },
+                      "changeSummary": {
+                        "maxLength": 4000,
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "operationId": {
+                        "maxLength": 256,
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "source": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "expectedSourceRevision": {
+                            "pattern": "^sha256:[a-f0-9]{64}$",
+                            "type": "string"
+                          },
+                          "path": {
+                            "maxLength": 2048,
+                            "minLength": 1,
+                            "type": "string"
+                          },
+                          "worktreeId": {
+                            "$ref": "#/properties/command/anyOf/0/anyOf/0/properties/operationId"
+                          }
+                        },
+                        "required": [
+                          "worktreeId",
+                          "path",
+                          "expectedSourceRevision"
+                        ],
+                        "type": "object"
+                      },
+                      "title": {
+                        "maxLength": 240,
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "versionLabel": {
+                        "maxLength": 128,
+                        "minLength": 1,
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "action",
+                      "operationId",
+                      "title",
+                      "changeSummary",
+                      "source"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "additionalProperties": false,
+                    "properties": {
+                      "action": {
+                        "const": "submit",
+                        "type": "string"
+                      },
+                      "changeSummary": {
+                        "$ref": "#/properties/command/anyOf/0/anyOf/0/properties/changeSummary"
+                      },
+                      "contentRef": {
+                        "maxLength": 2048,
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "expectedOwnerRevision": {
+                        "exclusiveMinimum": 0,
+                        "maximum": 9007199254740991,
+                        "minimum": -9007199254740991,
+                        "type": "integer"
+                      },
+                      "operationId": {
+                        "$ref": "#/properties/command/anyOf/0/anyOf/0/properties/operationId"
+                      },
+                      "reviewResponse": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "expectedLedgerRevision": {
+                            "exclusiveMinimum": 0,
+                            "maximum": 9007199254740991,
+                            "minimum": -9007199254740991,
+                            "type": "integer"
+                          },
+                          "expectedReviewRevision": {
+                            "exclusiveMinimum": 0,
+                            "maximum": 9007199254740991,
+                            "minimum": -9007199254740991,
+                            "type": "integer"
+                          },
+                          "expectedTaskRevision": {
+                            "exclusiveMinimum": 0,
+                            "maximum": 9007199254740991,
+                            "minimum": -9007199254740991,
+                            "type": "integer"
+                          },
+                          "requestId": {
+                            "$ref": "#/properties/command/anyOf/0/anyOf/0/properties/operationId"
+                          },
+                          "responses": {
+                            "items": {
+                              "additionalProperties": false,
+                              "properties": {
+                                "annotationId": {
+                                  "maxLength": 128,
+                                  "minLength": 1,
+                                  "type": "string"
+                                },
+                                "disposition": {
+                                  "enum": [
+                                    "addressed",
+                                    "unchanged"
+                                  ],
+                                  "type": "string"
+                                },
+                                "explanation": {
+                                  "maxLength": 8000,
+                                  "minLength": 1,
+                                  "type": "string"
+                                },
+                                "resultAnchor": {
+                                  "anyOf": [
+                                    {
+                                      "additionalProperties": false,
+                                      "properties": {
+                                        "height": {
+                                          "exclusiveMinimum": 0,
+                                          "type": "number"
+                                        },
+                                        "kind": {
+                                          "const": "image-region",
+                                          "type": "string"
+                                        },
+                                        "width": {
+                                          "exclusiveMinimum": 0,
+                                          "type": "number"
+                                        },
+                                        "x": {
+                                          "minimum": 0,
+                                          "type": "number"
+                                        },
+                                        "y": {
+                                          "minimum": 0,
+                                          "type": "number"
+                                        }
+                                      },
+                                      "required": [
+                                        "kind",
+                                        "x",
+                                        "y",
+                                        "width",
+                                        "height"
+                                      ],
+                                      "type": "object"
+                                    },
+                                    {
+                                      "additionalProperties": false,
+                                      "properties": {
+                                        "kind": {
+                                          "const": "image-point",
+                                          "type": "string"
+                                        },
+                                        "x": {
+                                          "minimum": 0,
+                                          "type": "number"
+                                        },
+                                        "y": {
+                                          "minimum": 0,
+                                          "type": "number"
+                                        }
+                                      },
+                                      "required": [
+                                        "kind",
+                                        "x",
+                                        "y"
+                                      ],
+                                      "type": "object"
+                                    },
+                                    {
+                                      "additionalProperties": false,
+                                      "properties": {
+                                        "endTick": {
+                                          "$ref": "#/properties/command/anyOf/0/anyOf/1/properties/reviewResponse/properties/responses/items/properties/resultAnchor/anyOf/2/properties/startTick"
+                                        },
+                                        "framePoint": {
+                                          "additionalProperties": false,
+                                          "properties": {
+                                            "tick": {
+                                              "$ref": "#/properties/command/anyOf/0/anyOf/1/properties/reviewResponse/properties/responses/items/properties/resultAnchor/anyOf/2/properties/startTick"
+                                            },
+                                            "x": {
+                                              "$ref": "#/properties/command/anyOf/0/anyOf/1/properties/reviewResponse/properties/responses/items/properties/resultAnchor/anyOf/1/properties/x"
+                                            },
+                                            "y": {
+                                              "$ref": "#/properties/command/anyOf/0/anyOf/1/properties/reviewResponse/properties/responses/items/properties/resultAnchor/anyOf/1/properties/y"
+                                            }
+                                          },
+                                          "required": [
+                                            "tick",
+                                            "x",
+                                            "y"
+                                          ],
+                                          "type": "object"
+                                        },
+                                        "frameRegion": {
+                                          "additionalProperties": false,
+                                          "properties": {
+                                            "height": {
+                                              "$ref": "#/properties/command/anyOf/0/anyOf/1/properties/reviewResponse/properties/responses/items/properties/resultAnchor/anyOf/0/properties/height"
+                                            },
+                                            "tick": {
+                                              "$ref": "#/properties/command/anyOf/0/anyOf/1/properties/reviewResponse/properties/responses/items/properties/resultAnchor/anyOf/2/properties/startTick"
+                                            },
+                                            "width": {
+                                              "$ref": "#/properties/command/anyOf/0/anyOf/1/properties/reviewResponse/properties/responses/items/properties/resultAnchor/anyOf/0/properties/width"
+                                            },
+                                            "x": {
+                                              "$ref": "#/properties/command/anyOf/0/anyOf/1/properties/reviewResponse/properties/responses/items/properties/resultAnchor/anyOf/0/properties/x"
+                                            },
+                                            "y": {
+                                              "$ref": "#/properties/command/anyOf/0/anyOf/1/properties/reviewResponse/properties/responses/items/properties/resultAnchor/anyOf/0/properties/y"
+                                            }
+                                          },
+                                          "required": [
+                                            "tick",
+                                            "x",
+                                            "y",
+                                            "width",
+                                            "height"
+                                          ],
+                                          "type": "object"
+                                        },
+                                        "kind": {
+                                          "const": "video-range",
+                                          "type": "string"
+                                        },
+                                        "startTick": {
+                                          "maximum": 9007199254740991,
+                                          "minimum": -9007199254740991,
+                                          "type": "integer"
+                                        },
+                                        "storyEvidence": {
+                                          "additionalProperties": false,
+                                          "properties": {
+                                            "metadataRevision": {
+                                              "exclusiveMinimum": 0,
+                                              "maximum": 9007199254740991,
+                                              "minimum": -9007199254740991,
+                                              "type": "integer"
+                                            },
+                                            "paragraphId": {
+                                              "maxLength": 256,
+                                              "minLength": 1,
+                                              "type": "string"
+                                            },
+                                            "quote": {
+                                              "maxLength": 12000,
+                                              "minLength": 1,
+                                              "type": "string"
+                                            }
+                                          },
+                                          "required": [
+                                            "paragraphId",
+                                            "metadataRevision",
+                                            "quote"
+                                          ],
+                                          "type": "object"
+                                        },
+                                        "streamId": {
+                                          "maxLength": 128,
+                                          "minLength": 1,
+                                          "type": "string"
+                                        }
+                                      },
+                                      "required": [
+                                        "kind",
+                                        "streamId",
+                                        "startTick",
+                                        "endTick"
+                                      ],
+                                      "type": "object"
+                                    }
+                                  ]
+                                }
+                              },
+                              "required": [
+                                "annotationId",
+                                "disposition",
+                                "explanation"
+                              ],
+                              "type": "object"
+                            },
+                            "maxItems": 500,
+                            "type": "array"
+                          },
+                          "reviewId": {
+                            "$ref": "#/properties/command/anyOf/0/anyOf/0/properties/operationId"
+                          },
+                          "sourceRound": {
+                            "exclusiveMinimum": 0,
+                            "maximum": 9007199254740991,
+                            "minimum": -9007199254740991,
+                            "type": "integer"
+                          }
+                        },
+                        "required": [
+                          "reviewId",
+                          "sourceRound",
+                          "expectedReviewRevision",
+                          "expectedTaskRevision",
+                          "responses"
+                        ],
+                        "type": "object"
+                      },
+                      "source": {
+                        "$ref": "#/properties/command/anyOf/0/anyOf/0/properties/source"
+                      },
+                      "title": {
+                        "$ref": "#/properties/command/anyOf/0/anyOf/0/properties/title"
+                      },
+                      "versionLabel": {
+                        "$ref": "#/properties/command/anyOf/0/anyOf/0/properties/versionLabel"
+                      }
+                    },
+                    "required": [
+                      "action",
+                      "operationId",
+                      "title",
+                      "changeSummary",
+                      "source",
+                      "contentRef",
+                      "expectedOwnerRevision"
+                    ],
+                    "type": "object"
+                  }
+                ]
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "action": {
+                    "const": "set-context",
+                    "type": "string"
+                  },
+                  "context": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "assets": {
+                        "items": {
+                          "additionalProperties": false,
+                          "properties": {
+                            "asset": {
+                              "additionalProperties": false,
+                              "properties": {
+                                "id": {
+                                  "maxLength": 256,
+                                  "minLength": 1,
+                                  "type": "string"
+                                },
+                                "kind": {
+                                  "maxLength": 256,
+                                  "minLength": 1,
+                                  "type": "string"
+                                },
+                                "name": {
+                                  "maxLength": 1000,
+                                  "minLength": 1,
+                                  "type": "string"
+                                },
+                                "versions": {
+                                  "items": {
+                                    "additionalProperties": false,
+                                    "properties": {
+                                      "byteLength": {
+                                        "maximum": 9007199254740991,
+                                        "minimum": -9007199254740991,
+                                        "type": "integer"
+                                      },
+                                      "durationTicks": {
+                                        "$ref": "#/properties/command/anyOf/1/properties/context/properties/assets/items/properties/asset/properties/versions/items/properties/width"
+                                      },
+                                      "height": {
+                                        "$ref": "#/properties/command/anyOf/1/properties/context/properties/assets/items/properties/asset/properties/versions/items/properties/width"
+                                      },
+                                      "id": {
+                                        "$ref": "#/properties/command/anyOf/1/properties/context/properties/assets/items/properties/asset/properties/id"
+                                      },
+                                      "locator": {
+                                        "additionalProperties": false,
+                                        "properties": {
+                                          "kind": {
+                                            "const": "workspace",
+                                            "type": "string"
+                                          },
+                                          "path": {
+                                            "maxLength": 2048,
+                                            "minLength": 1,
+                                            "type": "string"
+                                          },
+                                          "rootId": {
+                                            "$ref": "#/properties/command/anyOf/1/properties/context/properties/assets/items/properties/asset/properties/id"
+                                          }
+                                        },
+                                        "required": [
+                                          "kind",
+                                          "rootId",
+                                          "path"
+                                        ],
+                                        "type": "object"
+                                      },
+                                      "mediaType": {
+                                        "maxLength": 256,
+                                        "minLength": 1,
+                                        "type": "string"
+                                      },
+                                      "origin": {
+                                        "additionalProperties": false,
+                                        "properties": {
+                                          "actor": {
+                                            "anyOf": [
+                                              {
+                                                "anyOf": [
+                                                  {
+                                                    "additionalProperties": false,
+                                                    "properties": {
+                                                      "actorId": {
+                                                        "$ref": "#/properties/command/anyOf/1/properties/context/properties/assets/items/properties/asset/properties/id"
+                                                      },
+                                                      "kind": {
+                                                        "const": "human",
+                                                        "type": "string"
+                                                      }
+                                                    },
+                                                    "required": [
+                                                      "kind",
+                                                      "actorId"
+                                                    ],
+                                                    "type": "object"
+                                                  },
+                                                  {
+                                                    "additionalProperties": false,
+                                                    "properties": {
+                                                      "actorId": {
+                                                        "$ref": "#/properties/command/anyOf/1/properties/context/properties/assets/items/properties/asset/properties/id"
+                                                      },
+                                                      "kind": {
+                                                        "const": "cat",
+                                                        "type": "string"
+                                                      }
+                                                    },
+                                                    "required": [
+                                                      "kind",
+                                                      "actorId"
+                                                    ],
+                                                    "type": "object"
+                                                  }
+                                                ]
+                                              },
+                                              {
+                                                "type": "null"
+                                              }
+                                            ]
+                                          },
+                                          "at": {
+                                            "$ref": "#/properties/command/anyOf/1/properties/context/properties/assets/items/properties/asset/properties/versions/items/properties/recordedAt"
+                                          },
+                                          "converter": {
+                                            "additionalProperties": false,
+                                            "properties": {
+                                              "id": {
+                                                "$ref": "#/properties/command/anyOf/1/properties/context/properties/assets/items/properties/asset/properties/id"
+                                              },
+                                              "version": {
+                                                "$ref": "#/properties/command/anyOf/1/properties/context/properties/assets/items/properties/asset/properties/id"
+                                              }
+                                            },
+                                            "required": [
+                                              "id",
+                                              "version"
+                                            ],
+                                            "type": "object"
+                                          },
+                                          "kind": {
+                                            "enum": [
+                                              "imported",
+                                              "created"
+                                            ],
+                                            "type": "string"
+                                          },
+                                          "refs": {
+                                            "items": {
+                                              "$ref": "#/properties/command/anyOf/1/properties/context/properties/assets/items/properties/asset/properties/id"
+                                            },
+                                            "maxItems": 1000,
+                                            "type": "array"
+                                          },
+                                          "sources": {
+                                            "items": {
+                                              "additionalProperties": false,
+                                              "properties": {
+                                                "digest": {
+                                                  "$ref": "#/properties/command/anyOf/1/properties/context/properties/provenance/items/properties/digest"
+                                                },
+                                                "ref": {
+                                                  "maxLength": 2048,
+                                                  "minLength": 1,
+                                                  "type": "string"
+                                                }
+                                              },
+                                              "required": [
+                                                "ref",
+                                                "digest"
+                                              ],
+                                              "type": "object"
+                                            },
+                                            "maxItems": 10000,
+                                            "type": "array"
+                                          }
+                                        },
+                                        "required": [
+                                          "kind",
+                                          "actor",
+                                          "at",
+                                          "refs"
+                                        ],
+                                        "type": "object"
+                                      },
+                                      "recordedAt": {
+                                        "format": "date-time",
+                                        "maxLength": 64,
+                                        "type": "string"
+                                      },
+                                      "rotation": {
+                                        "enum": [
+                                          0,
+                                          90,
+                                          180,
+                                          270
+                                        ],
+                                        "type": "number"
+                                      },
+                                      "sha256": {
+                                        "$ref": "#/properties/command/anyOf/1/properties/context/properties/provenance/items/properties/digest"
+                                      },
+                                      "width": {
+                                        "exclusiveMinimum": 0,
+                                        "maximum": 9007199254740991,
+                                        "minimum": -9007199254740991,
+                                        "type": "integer"
+                                      }
+                                    },
+                                    "required": [
+                                      "id",
+                                      "mediaType",
+                                      "byteLength",
+                                      "sha256",
+                                      "locator",
+                                      "recordedAt",
+                                      "origin"
+                                    ],
+                                    "type": "object"
+                                  },
+                                  "maxItems": 10000,
+                                  "minItems": 1,
+                                  "type": "array"
+                                }
+                              },
+                              "required": [
+                                "id",
+                                "name",
+                                "kind",
+                                "versions"
+                              ],
+                              "type": "object"
+                            },
+                            "uses": {
+                              "items": {
+                                "maxLength": 2000,
+                                "minLength": 1,
+                                "type": "string"
+                              },
+                              "maxItems": 1000,
+                              "minItems": 1,
+                              "type": "array"
+                            },
+                            "versionId": {
+                              "maxLength": 256,
+                              "minLength": 1,
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "asset",
+                            "versionId",
+                            "uses"
+                          ],
+                          "type": "object"
+                        },
+                        "maxItems": 10000,
+                        "type": "array"
+                      },
+                      "chapters": {
+                        "items": {
+                          "additionalProperties": false,
+                          "properties": {
+                            "endPts": {
+                              "$ref": "#/properties/command/anyOf/1/properties/context/properties/chapters/items/properties/startPts"
+                            },
+                            "id": {
+                              "maxLength": 256,
+                              "minLength": 1,
+                              "type": "string"
+                            },
+                            "label": {
+                              "maxLength": 256,
+                              "minLength": 1,
+                              "type": "string"
+                            },
+                            "sourceId": {
+                              "maxLength": 2048,
+                              "minLength": 1,
+                              "type": "string"
+                            },
+                            "startPts": {
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            },
+                            "streamId": {
+                              "maxLength": 128,
+                              "minLength": 1,
+                              "type": "string"
+                            },
+                            "title": {
+                              "maxLength": 1000,
+                              "minLength": 1,
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "id",
+                            "title",
+                            "streamId",
+                            "startPts",
+                            "endPts"
+                          ],
+                          "type": "object"
+                        },
+                        "maxItems": 1000,
+                        "type": "array"
+                      },
+                      "extractorVersion": {
+                        "maxLength": 128,
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "format": {
+                        "const": "video",
+                        "type": "string"
+                      },
+                      "production": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "createdAt": {
+                            "format": "date-time",
+                            "type": "string"
+                          },
+                          "sourceRef": {
+                            "maxLength": 2048,
+                            "minLength": 1,
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "createdAt",
+                          "sourceRef"
+                        ],
+                        "type": "object"
+                      },
+                      "provenance": {
+                        "items": {
+                          "additionalProperties": false,
+                          "properties": {
+                            "digest": {
+                              "pattern": "^sha256:[a-f0-9]{64}$",
+                              "type": "string"
+                            },
+                            "ref": {
+                              "maxLength": 2048,
+                              "minLength": 1,
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "ref",
+                            "digest"
+                          ],
+                          "type": "object"
+                        },
+                        "maxItems": 100,
+                        "minItems": 1,
+                        "type": "array"
+                      },
+                      "sourceBinding": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "reviewId": {
+                            "maxLength": 256,
+                            "minLength": 1,
+                            "type": "string"
+                          },
+                          "screeningId": {
+                            "maxLength": 256,
+                            "minLength": 1,
+                            "type": "string"
+                          },
+                          "sourceDigest": {
+                            "$ref": "#/properties/command/anyOf/1/properties/context/properties/provenance/items/properties/digest"
+                          },
+                          "sourceOwnerRevision": {
+                            "exclusiveMinimum": 0,
+                            "maximum": 9007199254740991,
+                            "minimum": -9007199254740991,
+                            "type": "integer"
+                          },
+                          "sourceProjectContentRef": {
+                            "maxLength": 2048,
+                            "minLength": 1,
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "sourceProjectContentRef",
+                          "sourceOwnerRevision",
+                          "sourceDigest"
+                        ],
+                        "type": "object"
+                      },
+                      "story": {
+                        "items": {
+                          "additionalProperties": false,
+                          "properties": {
+                            "chapterId": {
+                              "maxLength": 256,
+                              "minLength": 1,
+                              "type": "string"
+                            },
+                            "derived": {
+                              "type": "boolean"
+                            },
+                            "endPts": {
+                              "$ref": "#/properties/command/anyOf/1/properties/context/properties/chapters/items/properties/startPts"
+                            },
+                            "id": {
+                              "maxLength": 256,
+                              "minLength": 1,
+                              "type": "string"
+                            },
+                            "sourceId": {
+                              "maxLength": 2048,
+                              "minLength": 1,
+                              "type": "string"
+                            },
+                            "startPts": {
+                              "$ref": "#/properties/command/anyOf/1/properties/context/properties/chapters/items/properties/startPts"
+                            },
+                            "streamId": {
+                              "maxLength": 128,
+                              "minLength": 1,
+                              "type": "string"
+                            },
+                            "text": {
+                              "maxLength": 12000,
+                              "type": "string"
+                            },
+                            "title": {
+                              "maxLength": 1000,
+                              "minLength": 1,
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "id",
+                            "title",
+                            "streamId",
+                            "startPts",
+                            "endPts"
+                          ],
+                          "type": "object"
+                        },
+                        "maxItems": 10000,
+                        "type": "array"
+                      }
+                    },
+                    "required": [
+                      "format",
+                      "extractorVersion",
+                      "provenance",
+                      "story",
+                      "assets"
+                    ],
+                    "type": "object"
+                  },
+                  "expectedMetadataRevision": {
+                    "maximum": 9007199254740991,
+                    "minimum": -9007199254740991,
+                    "type": "integer"
+                  },
+                  "operationId": {
+                    "$ref": "#/properties/command/anyOf/0/anyOf/0/properties/operationId"
+                  },
+                  "reference": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "contentRef": {
+                        "$ref": "#/properties/command/anyOf/0/anyOf/1/properties/contentRef"
+                      },
+                      "ownerRevision": {
+                        "exclusiveMinimum": 0,
+                        "maximum": 9007199254740991,
+                        "minimum": -9007199254740991,
+                        "type": "integer"
+                      }
+                    },
+                    "required": [
+                      "contentRef",
+                      "ownerRevision"
+                    ],
+                    "type": "object"
+                  }
+                },
+                "required": [
+                  "action",
+                  "reference",
+                  "operationId",
+                  "expectedMetadataRevision",
+                  "context"
+                ],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "action": {
+                    "const": "import-context",
+                    "type": "string"
+                  },
+                  "expectedMetadataRevision": {
+                    "$ref": "#/properties/command/anyOf/1/properties/expectedMetadataRevision"
+                  },
+                  "operationId": {
+                    "$ref": "#/properties/command/anyOf/0/anyOf/0/properties/operationId"
+                  },
+                  "reference": {
+                    "$ref": "#/properties/command/anyOf/1/properties/reference"
+                  },
+                  "source": {
+                    "$ref": "#/properties/command/anyOf/0/anyOf/0/properties/source"
+                  }
+                },
+                "required": [
+                  "reference",
+                  "operationId",
+                  "expectedMetadataRevision",
+                  "action",
+                  "source"
+                ],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "action": {
+                    "const": "resolve-review-submission",
+                    "type": "string"
+                  },
+                  "expectedReviewRevision": {
+                    "exclusiveMinimum": 0,
+                    "maximum": 9007199254740991,
+                    "minimum": -9007199254740991,
+                    "type": "integer"
+                  },
+                  "operationId": {
+                    "$ref": "#/properties/command/anyOf/0/anyOf/0/properties/operationId"
+                  },
+                  "pendingOperationId": {
+                    "$ref": "#/properties/command/anyOf/0/anyOf/0/properties/operationId"
+                  },
+                  "reviewId": {
+                    "$ref": "#/properties/command/anyOf/0/anyOf/0/properties/operationId"
+                  },
+                  "sourceRound": {
+                    "exclusiveMinimum": 0,
+                    "maximum": 9007199254740991,
+                    "minimum": -9007199254740991,
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "action",
+                  "reviewId",
+                  "sourceRound",
+                  "expectedReviewRevision",
+                  "pendingOperationId",
+                  "operationId"
+                ],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "action": {
+                    "const": "read-context",
+                    "type": "string"
+                  },
+                  "metadataRevision": {
+                    "exclusiveMinimum": 0,
+                    "maximum": 9007199254740991,
+                    "minimum": -9007199254740991,
+                    "type": "integer"
+                  },
+                  "reference": {
+                    "$ref": "#/properties/command/anyOf/1/properties/reference"
+                  }
+                },
+                "required": [
+                  "action",
+                  "reference"
+                ],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "action": {
+                    "const": "read",
+                    "type": "string"
+                  },
+                  "reference": {
+                    "$ref": "#/properties/command/anyOf/1/properties/reference"
+                  }
+                },
+                "required": [
+                  "action",
+                  "reference"
+                ],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "action": {
+                    "const": "publish-reference",
+                    "type": "string"
+                  },
+                  "reference": {
+                    "$ref": "#/properties/command/anyOf/1/properties/reference"
+                  }
+                },
+                "required": [
+                  "action",
+                  "reference"
+                ],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "action": {
+                    "const": "inspect-source",
+                    "type": "string"
+                  },
+                  "locator": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "path": {
+                        "$ref": "#/properties/command/anyOf/0/anyOf/0/properties/source/properties/path"
+                      },
+                      "worktreeId": {
+                        "$ref": "#/properties/command/anyOf/0/anyOf/0/properties/operationId"
+                      }
+                    },
+                    "required": [
+                      "worktreeId",
+                      "path"
+                    ],
+                    "type": "object"
+                  }
+                },
+                "required": [
+                  "action",
+                  "locator"
+                ],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "action": {
+                    "const": "list",
+                    "type": "string"
+                  },
+                  "after": {
+                    "$ref": "#/properties/command/anyOf/0/anyOf/1/properties/contentRef"
+                  },
+                  "catalogueSnapshot": {
+                    "pattern": "^sha256:[a-f0-9]{64}$",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "action"
+                ],
+                "type": "object"
+              }
+            ],
+            "description": "inspect-source resolves a registered Workspace MP4 locator to its exact digest. create saves a new work; submit uses the same contentRef, expectedOwnerRevision, new source and changeSummary. Optional submit.reviewResponse attaches responses to an original reviewId/sourceRound with current review/Task CAS, requestId when present, and per-opinion explanations. If the source round has ledgerRef, also copy that round’s ledgerRevision into expectedLedgerRevision; it is separate from the review revision. resultAnchor uses the inspected NEW source clock; omit it when unmapped. This produces one owner version and its original review projection, never Human acceptance. Reuse operationId only for the identical complete intent, including responses; after version_saved retry that exact command, never publish another version. Large-file operations wait up to 180 seconds without automatic HTTP retries. An unconfirmed result may already be saved: read/list first, then retry the identical operation only if needed. resolve-review-submission is direct-Human-only, not a cat action. read requires fixed {contentRef,ownerRevision}; list discovers retained versions. publish-reference alone attaches the fixed-version card to the current message, without resubmitting bytes. set-context saves a small video index with expectedMetadataRevision CAS; import-context reads a complete video index from a registered F063 JSON locator + expectedSourceRevision (UTF-8, maximum 2 MiB), preserving the 32 KiB command limit. read-context reads the current or a fixed metadata revision. Replays retain the original index even if its source file was removed. Indexing never publishes a film version. This video index import does not admit HTML/PPT/body input; each format keeps its own boundary."
+          },
+          "contentTaskId": {
+            "description": "Original F309 publication-modification Task ID when reading or submitting entrusted content. Context only: the live Task owner, exact content grant and original Human source are rechecked. Never create a Task merely to import your own work.",
+            "maxLength": 128,
+            "minLength": 1,
+            "type": "string"
+          },
+          "cursor": {
+            "default": 0,
+            "description": "Copy nextCursor with the unchanged command and expectedSnapshot; join json chunks before parsing.",
+            "maximum": 16777216,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "expectedSnapshot": {
+            "description": "Copy snapshot for every continuation page. A changed result is rejected.",
+            "pattern": "^sha256:[a-f0-9]{64}$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "command"
+        ],
+        "type": "object"
+      },
+      "inputSchemaDigest": "sha256:a4af314558529c46bab5cf151f7c61d02ee984faa44afee5f45b0f39befa155f",
+      "annotations": {
+        "destructiveHint": false,
+        "openWorldHint": false,
+        "readOnlyHint": false
+      },
+      "runtimeProfiles": [
+        "full"
+      ],
+      "schemaDelivery": {
+        "evidenceRef": "file:packages/mcp-server/src/tools/work-tools.ts",
+        "policy": "host-default"
+      },
+      "implementationRef": "module:./tools/work-tools.js#handleWorkCommand",
+      "protectedImplementationDigest": "sha256:a19dcad9e107f90a274fe33142714ead873ffce862b081d2d3dd48e6e785e90c"
     },
     {
       "name": "cat_cafe_workspace_navigate",
@@ -21367,7 +22599,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/hub-action-tools.js#handleWorkspaceNavigate",
-      "protectedImplementationDigest": "sha256:55ec62659538905317894a80c2880fa940e3ec83e80dd00b250b447c85b9f26a"
+      "protectedImplementationDigest": "sha256:9b47c56bc3660825ed764bfc5a77b125c1ac37bf2050665bd0b2c630959b8a4a"
     },
     {
       "name": "limb_bind_embodiment",

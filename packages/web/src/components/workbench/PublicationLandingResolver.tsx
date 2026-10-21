@@ -71,6 +71,9 @@ export function PublicationLandingResolver({
   // beside it; it neither takes the work away nor is entered on its own.
   const showingWork = useRef<string | null>(null);
   const { contentRef, ownerRevision, reviewId: boundReviewId } = target;
+  // A fixed Work reference opens its video desk. Related Task reviews remain explicit actions;
+  // a previous Task choice or shared ledger never replaces this version's story and materials.
+  const workEntry = contentRef.startsWith('work:') && !boundReviewId;
   const targetKey = JSON.stringify([contentRef, ownerRevision]);
   const scope = scopeOf(contentRef, ownerRevision, boundReviewId);
   const catalogue = storedCatalogue?.targetKey === scope ? storedCatalogue : null;
@@ -102,8 +105,8 @@ export function PublicationLandingResolver({
         }
         const workOnScreen = showingWork.current === JSON.stringify([contentRef, ownerRevision]);
         const only = result.contexts.length === 1 ? result.contexts[0] : undefined;
-        // A review on the work's own canonical ledger (ledgerRef) is the same discussion: Step1 keeps
-        // entering it. Only an independent Task review is continued by name from a generic entry.
+        // Legacy media entries retain their shared-ledger behavior. A Work entry keeps its format
+        // desk below; independent Task reviews are still continued by name.
         const enterOnly = only && !(confirmSingleContext && !only.ledgerRef) && !workOnScreen;
         // A target bound to a review (a Host receipt for a request committed to it) is entered in that review or not
         // at all: what the generic entry remembered, or the only other review there is, says nothing about it.
@@ -111,14 +114,16 @@ export function PublicationLandingResolver({
           ? result.contexts.some((item) => item.reviewId === boundReviewId)
             ? boundReviewId
             : null
-          : saved
-            ? result.contexts.some((item) => item.reviewId === saved)
-              ? saved
-              : null
-            : enterOnly
-              ? only.reviewId
-              : null;
-        if (!boundReviewId && saved && !next && result.contexts.length)
+          : workEntry
+            ? null
+            : saved
+              ? result.contexts.some((item) => item.reviewId === saved)
+                ? saved
+                : null
+              : enterOnly
+                ? only.reviewId
+                : null;
+        if (!boundReviewId && !workEntry && saved && !next && result.contexts.length)
           setError('上次选择的讨论当前不可用，请明确选择要继续的委托。');
         if (next)
           try {
@@ -136,13 +141,13 @@ export function PublicationLandingResolver({
         }
       });
     return () => abort.abort();
-  }, [contentRef, ownerRevision, boundReviewId, attempt, confirmSingleContext]);
+  }, [contentRef, ownerRevision, boundReviewId, attempt, confirmSingleContext, workEntry]);
   const chosen = catalogue?.contexts.find((item) => item.reviewId === selection);
   // A bound target is entered in its review or not at all, so what is chosen must be exactly that review. When it is
   // not one of this work's reviews, the work is not shown in its place, nor a sibling's review.
   const boundMissing = Boolean(boundReviewId && catalogue && chosen?.reviewId !== boundReviewId);
   const resolved =
-    catalogue && !boundMissing && (catalogue.contexts.length === 0 || chosen)
+    catalogue && !boundMissing && (catalogue.contexts.length === 0 || chosen || workEntry)
       ? publicationContextSurface({ contentRef, ownerRevision }, sourceSurface.title, chosen)
       : null;
   const resolvedKey = resolved ? JSON.stringify(resolved) : null;
@@ -161,7 +166,7 @@ export function PublicationLandingResolver({
     }
     setSelection(id);
   };
-  const besideWork = reviewsBesideWork(catalogue, chosen, showingWork.current === targetKey);
+  const besideWork = reviewsBesideWork(catalogue, chosen, workEntry || showingWork.current === targetKey);
   if (resolved?.id === sourceSurface.id || besideWork)
     return (
       <WorkInPlace contexts={besideWork} onChoose={choose}>
@@ -227,9 +232,12 @@ function WorkInPlace({
   children: ReactNode;
 }) {
   return (
-    <>
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col">
       {contexts ? (
-        <section aria-label="关联的任务审阅" className="mx-3 mt-2 rounded-lg border border-cafe-subtle p-2 text-xs">
+        <section
+          aria-label="关联的任务审阅"
+          className="mx-3 mt-2 shrink-0 rounded-lg border border-cafe-subtle p-2 text-xs"
+        >
           <p className="text-cafe-muted">这件作品现在关联了猫的任务审阅：</p>
           {contexts.map((context) => (
             <button
@@ -244,7 +252,7 @@ function WorkInPlace({
         </section>
       ) : null}
       {children}
-    </>
+    </div>
   );
 }
 

@@ -20,6 +20,14 @@ import {
   type PluginTaskWorkMutation,
   updatePluginTaskWorkData,
 } from './plugin-task-data.js';
+import {
+  bindPluginTaskDataController,
+  currentTaskDataControllerProjection,
+  type PluginTaskDataControllerBindInput,
+  type PluginTaskDataControllerMutationResult,
+  type PluginTaskDataControllerRevokeInput,
+  revokePluginTaskDataController,
+} from './plugin-task-data-controller.js';
 import type { PluginTaskAdmissionServices } from './plugin-task-data-services.js';
 import { assertPluginTaskGovernance } from './plugin-task-governance.js';
 import { type PluginTaskReadItem, projectOwnedPluginTasks } from './plugin-task-read.js';
@@ -73,6 +81,8 @@ export interface PluginTaskHost {
     patch: PluginTaskUpdateInput,
     conditions?: PluginTaskUpdateConditions,
   ): Promise<TaskItem | null>;
+  bindDataController(input: PluginTaskDataControllerBindInput): Promise<PluginTaskDataControllerMutationResult>;
+  revokeDataController(input: PluginTaskDataControllerRevokeInput): Promise<PluginTaskDataControllerMutationResult>;
 }
 
 export interface PluginTaskHostDeps {
@@ -207,7 +217,13 @@ export function createPluginTaskHost(input: PluginTaskHostDeps): PluginTaskHost 
       await current();
       const tasks = structuredClone(await operation(store));
       await current();
-      const result = await projectOwnedPluginTasks(tasks, readOwnerUserId, input.readThreadStore);
+      const controllerCurrency = await currentTaskDataControllerProjection(
+        tasks,
+        input.pluginInstanceId,
+        input.admission,
+      );
+      await current();
+      const result = await projectOwnedPluginTasks(tasks, readOwnerUserId, input.readThreadStore, controllerCurrency);
       await current();
       return result;
     };
@@ -218,6 +234,8 @@ export function createPluginTaskHost(input: PluginTaskHostDeps): PluginTaskHost 
     return after;
   };
   return {
+    bindDataController: (value) => bindPluginTaskDataController(input, value),
+    revokeDataController: (value) => revokePluginTaskDataController(input, value),
     get: async (selector) => {
       objectKeys(selector, ['id', 'subjectKey'], 'task selector');
       if (Object.keys(selector).length !== 1)

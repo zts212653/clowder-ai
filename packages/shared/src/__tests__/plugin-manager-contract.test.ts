@@ -64,6 +64,14 @@ describe('F202 terminal Plugin Manager contract', () => {
     expectTypeOf<Extract<PluginManagerPackageSource, { kind: 'legacy' | 'compatibility' }>>().toBeNever();
   });
 
+  it('represents an installed package with unrecorded origin without claiming a distribution source', () => {
+    expectTypeOf<Extract<PluginManagerPackageSource, { kind: 'unknown' }>>().toEqualTypeOf<{
+      kind: 'unknown';
+      packageName: null;
+      trust: 'unknown';
+    }>();
+  });
+
   it('keeps owner dependency closure provenance visible without changing trust', () => {
     expectTypeOf<Extract<PluginManagerPackageSource, { kind: 'local-directory' | 'local-archive' }>>().toEqualTypeOf<{
       kind: 'local-directory' | 'local-archive';

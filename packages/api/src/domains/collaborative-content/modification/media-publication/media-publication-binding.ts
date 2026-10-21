@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { readFile, stat } from 'node:fs/promises';
 import { basename, extname } from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
-import type { ContentModificationRecord, TurnExecutionRecord } from '@cat-cafe/shared';
+import type { ContentModificationRecord, RespondWithMediaVersion, TurnExecutionRecord } from '@cat-cafe/shared';
 import { MAX_IMAGE_FILE_SIZE } from '../../../../utils/image-storage.js';
 import type { CodexNativeImageEvidenceReader } from '../../../cats/services/agents/providers/CodexNativeImageEvidenceReader.js';
 import { CODEX_IMAGE_MIME_BY_EXTENSION } from '../../../cats/services/agents/providers/codex-image-scanner.js';
@@ -26,6 +26,7 @@ import { readModificationSourceExecution } from './source-execution.js';
 export { sameAudience } from './media-publication-caller.js';
 
 import { hasUniqueMediaProducerRequest, isBoundMediaModificationReturn } from '../bindings/media-return-binding.js';
+import { assertRecoveryResponse } from '../publication-recovery-registration.js';
 import { assertModificationSourceAuthority } from '../request-authority.js';
 
 export class MediaPublicationBinding {
@@ -41,7 +42,7 @@ export class MediaPublicationBinding {
     },
   ) {}
 
-  async frame(record: ContentModificationRecord) {
+  async frame(record: ContentModificationRecord, pendingOperationId?: string) {
     const current = this.deps.store.requests.get(record.requestId, record.ownerUserId);
     const reference = current?.progress.review;
     const taskReference = current?.progress.task;
@@ -66,7 +67,8 @@ export class MediaPublicationBinding {
       round.decision?.receiptRef !== reference.receiptRef ||
       reviewAuthorityState(review, task, round.asset.ownerRevision) !== 'current' ||
       currentReviewModification(this.deps.store, review)?.requestId !== current.requestId ||
-      this.deps.store.pendingVersion(review.reviewId)
+      (this.deps.store.pendingVersion(review.reviewId) &&
+        this.deps.store.pendingVersion(review.reviewId)?.input.operationId !== pendingOperationId)
     )
       return;
     const revision = await this.deps.media.currentRevision(review.contentRef, {
@@ -150,11 +152,12 @@ export class MediaPublicationBinding {
     return source;
   }
 
-  async validate(intent: MediaPublicationReturnIntent) {
-    const selected = this.deps.store.returns.publicationForRequest(intent.requestId);
-    if (selected && selected.receiptRef !== intent.receiptRef) return;
-    const record = this.deps.store.requests.get(intent.requestId, intent.ownerUserId);
-    const frame = record ? await this.frame(record) : undefined;
+  async validate(
+    intent: MediaPublicationReturnIntent,
+    response: RespondWithMediaVersion | undefined = intent.recovery?.response,
+  ) {
+    const frame = await this.acceptedFrame(intent, response);
+    const record = frame?.record;
     if (
       !frame ||
       frame.review.revision !== intent.reviewRevision ||
@@ -206,6 +209,18 @@ export class MediaPublicationBinding {
     return { ...frame, producer, source, publication };
   }
 
+  private async acceptedFrame(intent: MediaPublicationReturnIntent, response?: RespondWithMediaVersion) {
+    const selected = this.deps.store.returns.publicationForRequest(intent.requestId);
+    if (selected && selected.receiptRef !== intent.receiptRef) return;
+    const record = this.deps.store.requests.get(intent.requestId, intent.ownerUserId);
+    const pending = this.deps.store.pendingVersion(intent.reviewId);
+    if (pending) {
+      if (!response) return;
+      assertRecoveryResponse(this.deps.store, intent, response);
+    }
+    return record ? this.frame(record, pending ? response?.operationId : undefined) : undefined;
+  }
+
   uniqueProducer(record: ContentModificationRecord, child: TurnExecutionRecord) {
     return hasUniqueMediaProducerRequest(
       {
@@ -218,8 +233,12 @@ export class MediaPublicationBinding {
     );
   }
 
-  async currentCaller(intent: MediaPublicationReturnIntent, invocationId: string | undefined) {
-    if (!invocationId || !(await this.validate(intent))) return false;
+  async currentCaller(
+    intent: MediaPublicationReturnIntent,
+    invocationId: string | undefined,
+    response?: RespondWithMediaVersion,
+  ) {
+    if (!invocationId || !(await this.validate(intent, response))) return false;
     return (await witnessedPublicationCaller(this.deps, intent, invocationId))?.status === 'running';
   }
 

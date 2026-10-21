@@ -2,6 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, lstatSync, readFileSync, realpathSync } from 'node:fs';
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { alphaCheckoutRefusal, observeAlphaGit as git } from './alpha-identity-diagnostics.mjs';
 
 export const ALPHA_COORDINATE_VERSION = 1;
 // Runtime/standard Alpha/Redis, retained Host sidecar defaults and launcher proxy.
@@ -43,16 +44,6 @@ export function assertNamedAlphaNotServing(coordinates, { readCwds = readProcess
     throw new Error('Named Alpha checkout has a live process; preserve its serving tree');
 }
 
-function git(root, args) {
-  return execFileSync('git', args, {
-    cwd: root,
-    encoding: 'utf8',
-    timeout: 5_000,
-    maxBuffer: 4 * 1024 * 1024,
-    stdio: ['ignore', 'pipe', 'pipe'],
-  }).trim();
-}
-
 function physicalDirectory(raw) {
   if (typeof raw !== 'string' || !SAFE_PATH.test(raw) || !isAbsolute(raw)) throw new Error('Invalid Alpha directory');
   const absolute = resolve(raw);
@@ -76,11 +67,13 @@ function assertNotLinked(path) {
 }
 
 function assertMain(root) {
-  const common = realpathSync(git(root, ['rev-parse', '--path-format=absolute', '--git-common-dir']));
+  const common = realpathSync(
+    git(root, ['rev-parse', '--path-format=absolute', '--git-common-dir'], 'main.common-directory'),
+  );
   if (
     basename(root) !== 'cat-cafe' ||
     common !== join(root, '.git') ||
-    git(root, ['branch', '--show-current']) !== 'main'
+    git(root, ['branch', '--show-current'], 'main.branch') !== 'main'
   )
     throw new Error('Named Alpha requires the actual main checkout');
   const controls = [
@@ -94,10 +87,10 @@ function assertMain(root) {
     'scripts/lib/alpha-identity-diagnostics.mjs',
   ];
   try {
-    git(root, ['ls-files', '--error-unmatch', '--', ...controls]);
-    git(root, ['diff', '--exit-code', 'HEAD', '--', ...controls]);
-  } catch {
-    throw new Error('Named Alpha requires committed unchanged launcher controls');
+    git(root, ['ls-files', '--error-unmatch', '--', ...controls], 'main.controls-tracked');
+    git(root, ['diff', '--exit-code', 'HEAD', '--', ...controls], 'main.controls-clean');
+  } catch (cause) {
+    throw alphaCheckoutRefusal('Named Alpha requires committed unchanged launcher controls', cause);
   }
   return common;
 }
@@ -166,7 +159,7 @@ export function assertNamedAlphaCheckout(coordinates, { requireBuilds = false, r
   const { mainRoot, alphaRoot, branch, targetSha } = coordinates;
   const root = physicalDirectory(alphaRoot);
   const common = assertMain(mainRoot);
-  const registered = git(mainRoot, ['worktree', 'list', '--porcelain'])
+  const registered = git(mainRoot, ['worktree', 'list', '--porcelain'], 'checkout.registration')
     .split('\n\n')
     .some(
       (record) =>
@@ -174,17 +167,19 @@ export function assertNamedAlphaCheckout(coordinates, { requireBuilds = false, r
     );
   if (
     !registered ||
-    realpathSync(git(root, ['rev-parse', '--path-format=absolute', '--git-common-dir'])) !== common ||
-    git(root, ['branch', '--show-current']) !== branch
+    realpathSync(
+      git(root, ['rev-parse', '--path-format=absolute', '--git-common-dir'], 'checkout.common-directory'),
+    ) !== common ||
+    git(root, ['branch', '--show-current'], 'checkout.branch') !== branch
   )
     throw new Error('Named Alpha checkout is not registered under its exact main branch');
-  if (git(root, ['status', '--porcelain=v1', '--untracked-files=no']))
+  if (git(root, ['status', '--porcelain=v1', '--untracked-files=no'], 'checkout.tracked-status'))
     throw new Error('Named Alpha has tracked changes');
-  const head = git(root, ['rev-parse', 'HEAD']);
+  const head = git(root, ['rev-parse', 'HEAD'], 'checkout.head');
   try {
-    git(mainRoot, ['merge-base', '--is-ancestor', head, 'refs/remotes/origin/main']);
-  } catch {
-    throw new Error('Named Alpha revision is outside main lineage');
+    git(mainRoot, ['merge-base', '--is-ancestor', head, 'refs/remotes/origin/main'], 'checkout.main-lineage');
+  } catch (cause) {
+    throw alphaCheckoutRefusal('Named Alpha revision is outside main lineage', cause);
   }
   if ((requireTarget && !targetSha) || (targetSha && head !== targetSha))
     throw new Error('Named Alpha target revision changed');

@@ -455,6 +455,15 @@ describe('public merge entry without home automatic-intake runtime', () => {
     t.after(() => rmSync(root, { recursive: true, force: true }));
     const scripts = path.join(root, 'scripts');
     mkdirSync(path.join(scripts, 'lib'), { recursive: true });
+    mkdirSync(path.join(root, 'assets'));
+    copyFileSync(
+      new URL('./brand-dictionary-helper.mjs', import.meta.url),
+      path.join(scripts, 'brand-dictionary-helper.mjs'),
+    );
+    copyFileSync(
+      new URL('../assets/brand-dictionary.yaml', import.meta.url),
+      path.join(root, 'assets/brand-dictionary.yaml'),
+    );
     const entry = path.join(scripts, 'clowder-merge-execution.mjs');
     copyFileSync(SCRIPT_PATH, entry);
     copyFileSync(

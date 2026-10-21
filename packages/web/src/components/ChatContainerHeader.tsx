@@ -1,3 +1,4 @@
+import { deploymentDefaults } from '@cat-cafe/shared';
 import { HeaderFrame } from '@cat-cafe/ui';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
@@ -130,7 +131,7 @@ export function ChatContainerHeader({
         </button>
         <CatCafeLogo className="h-16 w-auto -my-3" />
         <div className="flex-1 min-w-0">
-          <h1 className="text-lg font-bold text-cafe-black">Clowder AI</h1>
+          <h1 className="text-lg font-bold text-cafe-black">{deploymentDefaults.brand.displayName}</h1>
           <div className="flex items-center gap-2 min-w-0">
             <ThreadIndicator threadId={threadId} />
             {/* F198 Phase C AC-C5: Daemon active indicator */}

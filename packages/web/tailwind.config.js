@@ -6,6 +6,9 @@ module.exports = {
   content: ['./src/**/*.{js,ts,jsx,tsx,mdx}', '../shared/src/**/*.{js,ts}'],
   theme: {
     extend: {
+      fontFamily: {
+        sans: 'var(--font-sans)',
+      },
       fontSize: {
         /* token-based (from typography-tokens.json — includes micro/label/compact with lineHeight) */
         ...typographyTokens.fontSize,

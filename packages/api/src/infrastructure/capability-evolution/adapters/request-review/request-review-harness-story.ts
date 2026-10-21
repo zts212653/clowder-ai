@@ -1,4 +1,5 @@
 import type { EvolutionExplorationNodeV1, OwnerTruthRefV1 } from '@cat-cafe/shared';
+import { ARCHIVE_SOURCE_REPOSITORY_URL } from '../archive-source-repository.js';
 import type {
   RequestReviewHarnessLineageIndex,
   RequestReviewHarnessLineageIndexLegacy,
@@ -28,7 +29,7 @@ export function harnessStorySource(index: RequestReviewHarnessLineageIndex, id: 
   return {
     label: entry.label,
     ref: harnessStorySourceRef(index, id),
-    href: `https://github.com/zts212653/clowder-ai/blob/${index.snapshotCommit}/${entry.path}`,
+    href: `${ARCHIVE_SOURCE_REPOSITORY_URL}/blob/${index.snapshotCommit}/${entry.path}`,
   };
 }
 

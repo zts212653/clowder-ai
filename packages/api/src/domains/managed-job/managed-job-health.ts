@@ -97,7 +97,7 @@ function telemetry() {
   return instruments;
 }
 
-export function observeManagedJobHealth(
+export function collectManagedJobHealth(
   job: DurableManagedGateJob,
   inspection: DurableGateInspection,
   history: readonly RecordValue[],
@@ -109,7 +109,17 @@ export function observeManagedJobHealth(
   } catch {
     // Log rotation must not block job reconciliation; the terminal hash receipt remains authoritative.
   }
-  const latest = history.at(-1) ?? {};
+  return health;
+}
+
+/** The API owns observation deduplication even when I/O ran in a short-lived worker. */
+export function observeManagedJobHealthSnapshot(
+  job: DurableManagedGateJob,
+  inspection: DurableGateInspection,
+  health: ManagedJobHealth,
+  latest: RecordValue,
+  now: number,
+): ManagedJobHealth {
   const revision = number(latest.revision) || number(latest.updatedAt);
   const previous = seen.get(job.jobId);
   const signature = `${revision}:${inspection.state}`;
@@ -151,6 +161,21 @@ export function observeManagedJobHealth(
     seen.set(job.jobId, { signature, adopted: previous?.adopted === true || inspection.state === 'adopted' });
   }
   return health;
+}
+
+export function observeManagedJobHealth(
+  job: DurableManagedGateJob,
+  inspection: DurableGateInspection,
+  history: readonly RecordValue[],
+  now: number,
+): ManagedJobHealth {
+  return observeManagedJobHealthSnapshot(
+    job,
+    inspection,
+    collectManagedJobHealth(job, inspection, history, now),
+    history.at(-1) ?? {},
+    now,
+  );
 }
 
 export function publishManagedJobCensus(health: readonly ManagedJobHealth[]): void {

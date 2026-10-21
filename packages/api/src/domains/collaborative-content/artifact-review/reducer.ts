@@ -3,14 +3,17 @@ import {
   type ArtifactReviewAction,
   type ArtifactReviewActor,
   type ArtifactReviewResponse,
+  type ArtifactReviewResponseRecord,
   type ArtifactReviewRound,
   artifactReviewSchema,
   type ReviewedMediaAsset,
 } from '@cat-cafe/shared';
+import { assertMediaAnchor } from './anchors.js';
 import { annotate, editAnnotationBody, replyToAnnotation, setAnnotationState } from './annotation-actions.js';
 import { addVisualMarks, deleteVisualMark, requestImageEdit, requestMediaEdit } from './artwork-actions.js';
 import { publicationLedgerId } from './canonical-ledger.js';
 import { ArtifactReviewError } from './errors.js';
+import { judgeResponse } from './response-judgment.js';
 
 interface ReviewActionContext {
   action: ArtifactReviewAction;
@@ -28,11 +31,13 @@ export function applyArtifactReviewAction(current: ArtifactReview, context: Revi
   const latest = next.rounds.at(-1);
   if (!round || !latest) throw new ArtifactReviewError('not_found');
   const { action, now } = context;
-  if (round !== latest && action.kind !== 'reply') throw new ArtifactReviewError('asset_changed');
+  if (round !== latest && action.kind !== 'reply' && action.kind !== 'judge_response')
+    throw new ArtifactReviewError('asset_changed');
   if (
     (round.state === 'approved' || round.state === 'superseded') &&
     action.kind !== 'reply' &&
-    action.kind !== 'reopen'
+    action.kind !== 'reopen' &&
+    action.kind !== 'judge_response'
   ) {
     throw new ArtifactReviewError('invalid_action', 'Reopen this round before changing its reviewed content');
   }
@@ -71,6 +76,9 @@ export function applyArtifactReviewAction(current: ArtifactReview, context: Revi
       break;
     case 'set_annotation_state':
       setAnnotationState(round, action, context);
+      break;
+    case 'judge_response':
+      judgeResponse(next, round, action, context);
       break;
     case 'request_judgment':
       requestJudgment(round, action, context);
@@ -145,7 +153,9 @@ export function appendRespondedVersion(
   current: ArtifactReview,
   input: {
     asset: ReviewedMediaAsset;
-    responses: ArtifactReviewResponse[];
+    responses: ArtifactReviewResponseRecord[];
+    sourceRound?: number;
+    sourceRequestId?: string;
     actor: ArtifactReviewActor;
     now: string;
   },
@@ -159,7 +169,18 @@ export function appendRespondedVersion(
     input.asset.mediaType !== previous.asset.mediaType
   )
     throw new ArtifactReviewError('asset_changed');
-  assertVersionResponses(previous, input.responses);
+  const source =
+    input.sourceRound === undefined ? previous : next.rounds.find((round) => round.number === input.sourceRound);
+  if (!source) throw new ArtifactReviewError('invalid_action');
+  assertVersionResponses(source, input.responses);
+  for (const response of input.responses) {
+    if (!response.resultAnchor) continue;
+    assertMediaAnchor(response.resultAnchor, input.asset.media);
+    // New-version paragraph metadata does not exist at publication admission.
+    // A caller must not borrow an old quote as evidence for a new result position.
+    if (response.resultAnchor.kind === 'video-range' && response.resultAnchor.storyEvidence)
+      throw new ArtifactReviewError('invalid_anchor');
+  }
   if (previous.state !== 'approved' && previous.state !== 'changes_requested') previous.state = 'superseded';
   next.rounds.push({
     ...(previous.ledgerRef ? { ledgerRef: publicationLedgerId(current.task.ownerUserId, input.asset) } : {}),
@@ -170,6 +191,17 @@ export function appendRespondedVersion(
     annotations: [],
     responses: input.responses,
     responseAuthor: input.actor,
+    ...(input.sourceRound !== undefined
+      ? {
+          responseSource: {
+            round: source.number,
+            ownerRevision: source.asset.ownerRevision,
+            reviewRevision: current.revision,
+            ...(input.sourceRequestId ? { requestId: input.sourceRequestId } : {}),
+            ...(source.ledgerRef ? { ledgerRef: source.ledgerRef, ledgerRevision: source.ledgerRevision } : {}),
+          },
+        }
+      : {}),
   });
   next.revision += 1;
   next.updatedAt = input.now;

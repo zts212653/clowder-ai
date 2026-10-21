@@ -35,6 +35,7 @@ import {
 import type { DevelopmentWorkTransition } from '../ports/DevelopmentWorkTransition.js';
 import type { AttachEntrustedWorkArtifactInput } from '../ports/EntrustedWorkArtifactEvidence.js';
 import { automationGeneration, mergeTaskAutomationState } from '../ports/TaskAutomationState.js';
+import type { EntrustedTaskDataControllerTransition } from '../ports/TaskDataControllerTransition.js';
 import { reconcileDeploymentWaitTaskMutation } from '../ports/TaskDeploymentWaitState.js';
 import { createEntrustedTaskItem, createGenericTaskItem } from '../ports/TaskItemFactory.js';
 import type { ITaskStore } from '../ports/TaskStore.js';
@@ -52,6 +53,7 @@ import {
   isEntrustedWorkSubjectKey,
   type ReplaceAutomationStateIfGenerationInput,
   type ReplaceDeploymentWaitIfGenerationInput,
+  type TaskMutationWriteFence,
   type TaskSubjectUpsertCondition,
   type UpdateEntrustedWorkStoreInput,
   type UpdateEntrustedWorkStoreResult,
@@ -62,6 +64,7 @@ import { TaskKeys } from '../redis-keys/task-keys.js';
 import { DEPLOYMENT_WAIT_INDEX, listDeploymentWaitProjectionCandidates } from './deployment-wait-index.js';
 import { hydrateTask, hydrateWaitRegistration, serializeTask } from './RedisTaskCodec.js';
 import { fetchRedisTasksByIds, readRedisTaskThreadPage } from './RedisTaskCollectionReader.js';
+import { RedisTaskDataControllerStore } from './RedisTaskDataControllerStore.js';
 import { RedisTaskDevelopmentWorkStore } from './RedisTaskDevelopmentWorkStore.js';
 import { RedisTaskEntrustedWorkMutationStore } from './RedisTaskEntrustedWorkMutationStore.js';
 import { deleteGenericTasks } from './RedisTaskGenericDeletion.js';
@@ -95,6 +98,7 @@ export class RedisTaskStore implements ITaskStore {
   }
   private readonly redis: RedisClient;
   private readonly developmentWork: RedisTaskDevelopmentWorkStore;
+  private readonly dataControllers: RedisTaskDataControllerStore;
   findDevelopmentWork(userId: string, scope: DevelopmentScopeV1) {
     return this.developmentWork.find(userId, scope);
   }
@@ -112,6 +116,11 @@ export class RedisTaskStore implements ITaskStore {
   constructor(redis: RedisClient, options?: { ttlSeconds?: number }) {
     this.redis = redis;
     this.developmentWork = new RedisTaskDevelopmentWorkStore(redis);
+    this.dataControllers = new RedisTaskDataControllerStore(
+      redis,
+      (task) => this.applyTtl(task),
+      () => this.waitForInFlightTaskWrite(),
+    );
     this.managedWorkBindings = new RedisTaskManagedWorkBindingStore(redis);
     this.managedWorkRegistration = new RedisTaskManagedWorkRegistrationStore(redis, {
       mergeAutomationState: mergeTaskAutomationState,
@@ -130,6 +139,13 @@ export class RedisTaskStore implements ITaskStore {
     } else {
       this.ttlSeconds = Math.floor(raw);
     }
+  }
+
+  transitionEntrustedTaskDataController(
+    input: EntrustedTaskDataControllerTransition,
+    writeFence?: TaskMutationWriteFence,
+  ) {
+    return this.dataControllers.transition(input, writeFence);
   }
 
   async create(input: CreateTaskInput): Promise<TaskItem> {
@@ -369,8 +385,9 @@ export class RedisTaskStore implements ITaskStore {
   async closeEntrustedWork(
     taskId: string,
     input: CloseEntrustedWorkStoreInput,
+    writeFence?: TaskMutationWriteFence,
   ): Promise<CloseEntrustedWorkStoreResult> {
-    return this.entrustedWorkMutations.close(taskId, input);
+    return this.entrustedWorkMutations.close(taskId, input, writeFence);
   }
 
   attachEntrustedWorkArtifactEvidence(taskId: string, input: AttachEntrustedWorkArtifactInput) {
@@ -380,8 +397,9 @@ export class RedisTaskStore implements ITaskStore {
   async updateEntrustedWork(
     taskId: string,
     input: UpdateEntrustedWorkStoreInput,
+    writeFence?: TaskMutationWriteFence,
   ): Promise<UpdateEntrustedWorkStoreResult> {
-    return this.entrustedWorkMutations.update(taskId, input);
+    return this.entrustedWorkMutations.update(taskId, input, writeFence);
   }
 
   async replaceAutomationStateIfGeneration(
@@ -585,6 +603,7 @@ export class RedisTaskStore implements ITaskStore {
     for (let attempt = 0; attempt < MAX_ANCHOR_LIFETIME_RECONCILIATION_RETRIES; attempt += 1) {
       const mode =
         current.entrustedWork?.developmentScope ||
+        current.entrustedWork?.dataController ||
         current.deploymentWait ||
         (isTrackingKind(current.kind) && current.status !== 'done')
           ? 'persist'

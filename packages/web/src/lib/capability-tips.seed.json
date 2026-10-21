@@ -1004,16 +1004,28 @@
   {
     "id": "feature-f325-official-acp",
     "kind": "feature",
-    "sourceRef": { "path": "docs/ops/agy-acp-setup.md", "anchor": "# 使用 AGY 官方 ACP" },
-    "structureSource": { "path": "packages/web/src/components/hub-cat-editor.sections.tsx", "anchor": "agy-acp" },
-    "bodySource": { "path": "docs/ops/agy-acp-setup.md", "anchor": "# 使用 AGY 官方 ACP" },
+    "sourceRef": {
+      "path": "docs/ops/agy-acp-setup.md",
+      "anchor": "# 使用 AGY 官方 ACP"
+    },
+    "structureSource": {
+      "path": "packages/web/src/components/hub-cat-editor-carrier.tsx",
+      "anchor": "agy-acp"
+    },
+    "bodySource": {
+      "path": "docs/ops/agy-acp-setup.md",
+      "anchor": "# 使用 AGY 官方 ACP"
+    },
     "contexts": ["concierge_open", "feature_dev"],
     "audience": ["cvo", "developer"],
     "body": "想让 AGY 成员通过官方 ACP 工作？在成员设置中选择 Google → AGY 官方 ACP，保存程序路径、Profile 与权限，再按登录说明完成独立的个人订阅登录，回正常 Chat 新建会话。旧历史保留；活动回合中的新消息沿队列接收。",
     "action": {
       "type": "open_source",
       "label": "查看 ACP 安装与登录",
-      "sourceRef": { "path": "docs/ops/agy-acp-setup.md", "anchor": "# 使用 AGY 官方 ACP" }
+      "sourceRef": {
+        "path": "docs/ops/agy-acp-setup.md",
+        "anchor": "# 使用 AGY 官方 ACP"
+      }
     },
     "owner": "codex61-sol"
   },
@@ -2229,7 +2241,10 @@
     "contexts": ["thinking", "long_running"],
     "audience": ["cvo"],
     "body": "微信公众号插件已就绪：设置 → 插件 → WeChat Official Account → 配置 App ID 和 App Secret 并启用。猫猫可以帮你把 Markdown 转成微信格式、上传图片、创建草稿、一键发布文章。",
-    "action": { "type": "open_concierge_draft", "label": "了解更多" },
+    "action": {
+      "type": "open_concierge_draft",
+      "label": "了解更多"
+    },
     "owner": "opus"
   },
   {
@@ -3252,5 +3267,55 @@
       "draftPrompt": "请在现有开发交付进化项目里查看错题谱系的最新内容；保留我当前阅读位置，需要换稿时提示我。"
     },
     "owner": "codex-astra"
+  },
+  {
+    "id": "feature-f326-video-work-delivery",
+    "kind": "workflow",
+    "sourceRef": {
+      "path": "cat-cafe-skills/video-forge/SKILL.md",
+      "anchor": "## 交片"
+    },
+    "structureSource": {
+      "path": "packages/mcp-server/src/tools/work-tools.ts",
+      "anchor": "cat_cafe_work"
+    },
+    "bodySource": {
+      "path": "cat-cafe-skills/refs/video-work-delivery.md",
+      "anchor": "## 保存和发卡是两次动作"
+    },
+    "contexts": ["concierge_open", "pet_waiting_for_user"],
+    "audience": ["all"],
+    "body": "猫交的片子可以从 Works 的「视频」找回。对某个地方不满意，打开作品模式，选这一刻、这一段或全片写意见；不用回聊天里手抄时间点。聊天里的交片卡始终打开当时交出的版本。",
+    "action": {
+      "type": "open_concierge_draft",
+      "label": "带我找片并标意见",
+      "draftPrompt": "请带我在 Works 的视频作品中找到已交付的片子，打开固定版本并在片上标一条意见，保留我原来的聊天草稿。"
+    },
+    "owner": "codex61-sol"
+  },
+  {
+    "id": "feature-f326-animation-response-judgment",
+    "kind": "workflow",
+    "sourceRef": {
+      "path": "cat-cafe-skills/anime-forge/SKILL.md",
+      "anchor": "## 交片与改片"
+    },
+    "structureSource": {
+      "path": "packages/web/src/components/content-review/ReviewResponseJudgments.tsx",
+      "anchor": "ReviewResponseJudgments"
+    },
+    "bodySource": {
+      "path": "cat-cafe-skills/refs/video-work-delivery.md",
+      "anchor": "回报"
+    },
+    "contexts": ["concierge_open", "pet_waiting_for_user"],
+    "audience": ["all"],
+    "body": "动画交出修改版后，展开「这一版对原意见的回应」，可以回看原版，也能看猫标明的新版位置。看过再点「已改」或「还不对」；猫回报已调整，不会替你确认通过。",
+    "action": {
+      "type": "open_concierge_draft",
+      "label": "带我检查修改回应",
+      "draftPrompt": "请带我打开动画作品的修改回应，对照原版和新版位置，说明如何确认已改或重新指出还不对。"
+    },
+    "owner": "codex61-sol"
   }
 ]

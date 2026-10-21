@@ -844,7 +844,7 @@ export class InventoryPluginManagerInstalledPackages implements PluginManagerIns
     const plugins: PluginManagerDetail[] = [];
     for (const instance of inventory.instances.filter((candidate) => candidate.lifecycleState === 'installed')) {
       const packageRecord = inventory.packages.find((candidate) => candidate.packageDigest === instance.packageDigest);
-      if (!packageRecord || (!packageRecord.provenance && packageRecord.manifest !== null)) continue;
+      if (!packageRecord) continue;
       const candidate = inventoryCandidate(packageRecord);
       const projected = projectPluginManagerCatalogCandidate(candidate, inventory, {
         activeCapabilityIds: await managerActiveCapabilities(
@@ -855,35 +855,8 @@ export class InventoryPluginManagerInstalledPackages implements PluginManagerIns
           configured,
         ),
       });
-      const provenance = packageRecord.provenance ?? { kind: 'local-archive' as const };
       plugins.push({
         ...projected,
-        source:
-          provenance.kind === 'catalog'
-            ? {
-                kind: 'catalog' as const,
-                catalogId: provenance.catalogId,
-                packageName: provenance.packageName,
-                trust: 'official' as const,
-              }
-            : provenance.kind === 'git'
-              ? {
-                  kind: 'git' as const,
-                  url: provenance.url,
-                  packageName: provenance.packageName ?? null,
-                  trust: 'unverified' as const,
-                  ...(provenance.dependencyClosure === undefined
-                    ? {}
-                    : { dependencyClosure: provenance.dependencyClosure }),
-                }
-              : {
-                  kind: provenance.kind,
-                  packageName: provenance.packageName ?? null,
-                  trust: 'unverified' as const,
-                  ...(provenance.dependencyClosure === undefined
-                    ? {}
-                    : { dependencyClosure: provenance.dependencyClosure }),
-                },
         capabilities: projected.capabilitySummary.map((capability) => ({ ...capability })),
         contributions: (packageRecord.manifest
           ? pluginManagerContributionsFromManifest(packageRecord.manifest)
