@@ -1,14 +1,13 @@
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { isAbsolute, join } from 'node:path';
-import type {
-  PluginManagerConfigureRequest,
-  PluginManagerInstallRequest,
-  PluginManagerSetEnabledRequest,
-  PluginManagerUninstallRequest,
+import { isAbsolute } from 'node:path';
+import {
+  PluginArchiveReplacementConfirmationSchema,
+  type PluginManagerConfigureRequest,
+  type PluginManagerInstallRequest,
+  type PluginManagerSetEnabledRequest,
+  type PluginManagerUninstallRequest,
 } from '@cat-cafe/shared';
 import multipart from '@fastify/multipart';
-import type { FastifyInstance, FastifyPluginAsync, FastifyReply, FastifyRequest } from 'fastify';
+import type { FastifyInstance, FastifyPluginAsync, FastifyReply } from 'fastify';
 import { z } from 'zod';
 import {
   AuditEventTypes,
@@ -19,6 +18,7 @@ import type { PluginRuntimeCarrierRouter } from '../domains/plugin/carrier/runti
 import {
   ExternalPluginRuntimeError,
   LocalPluginPackageAdmissionError,
+  PluginArchiveReplacementError,
   PluginLifecycleError,
   PluginManagerPackageAssetError,
   type PluginManagerPackageAssetPort,
@@ -37,6 +37,7 @@ import {
   requirePluginReadAccess,
   requirePluginWriteAccess,
 } from './plugin-access-guards.js';
+import { installPluginUpload, PluginManagerUploadError, readPluginUpload } from './plugin-manager-upload.js';
 
 type PluginManagerRouteService = Pick<
   PluginManagerService,
@@ -99,10 +100,18 @@ const localInstallSchema = z
   .object({
     source: z
       .object({
-        kind: z.enum(['local-directory', 'local-archive']),
+        kind: z.literal('local-directory'),
         path: z.string().trim().min(1).max(4_096).refine(isAbsolute),
       })
       .strict(),
+  })
+  .strict();
+const archiveInstallSchema = z
+  .object({
+    source: z
+      .object({ kind: z.literal('local-archive'), path: z.string().trim().min(1).max(4_096).refine(isAbsolute) })
+      .strict(),
+    replacement: PluginArchiveReplacementConfirmationSchema.optional(),
   })
   .strict();
 const gitInstallSchema = z
@@ -125,7 +134,7 @@ const gitInstallSchema = z
       .strict(),
   })
   .strict();
-const installSchema = z.union([catalogInstallSchema, localInstallSchema, gitInstallSchema]);
+const installSchema = z.union([catalogInstallSchema, localInstallSchema, archiveInstallSchema, gitInstallSchema]);
 const setEnabledSchema = z.object({ enabled: z.boolean(), expectedRevision: lifecycleRevisionSchema }).strict();
 const uninstallSchema = z.object({ expectedRevision: lifecycleRevisionSchema }).strict();
 const configureSchema = z
@@ -224,6 +233,13 @@ function officialInstallStatus(code: OfficialPluginInstallError['code']): number
 }
 
 function sendManagerError(reply: FastifyReply, error: unknown) {
+  if (error instanceof PluginArchiveReplacementError) {
+    return reply.status(409).send({
+      error: error.message,
+      code: error.code,
+      ...(error.replacement ? { replacement: error.replacement } : {}),
+    });
+  }
   if (
     error instanceof PluginLifecycleError &&
     (error.code === 'UPDATE_RESUME_FAILED' || error.code === 'UPDATE_ROLLBACK_RESUME_FAILED')
@@ -250,70 +266,6 @@ function sendContributionError(reply: FastifyReply, error: unknown) {
     return reply.status(status).send({ error: error.message, code: error.code });
   }
   return reply.status(500).send({ error: 'Plugin contribution operation failed', code: 'CONTRIBUTION_FAILED' });
-}
-
-class PluginManagerUploadError extends Error {
-  constructor(
-    readonly status: number,
-    readonly code: 'AUDIT_UNAVAILABLE' | 'INVALID_UPLOAD' | 'NO_FILE' | 'PACKAGE_TOO_LARGE',
-    message: string,
-  ) {
-    super(message);
-    this.name = 'PluginManagerUploadError';
-  }
-}
-
-function translateUploadReadError(error: unknown): PluginManagerUploadError {
-  if (error instanceof PluginManagerUploadError) return error;
-  const code = typeof error === 'object' && error !== null && 'code' in error ? String(error.code) : '';
-  if (code === 'FST_REQ_FILE_TOO_LARGE') {
-    return new PluginManagerUploadError(413, 'PACKAGE_TOO_LARGE', 'Plugin package exceeds the Host size limit');
-  }
-  return new PluginManagerUploadError(400, 'INVALID_UPLOAD', 'Invalid upload');
-}
-
-async function readPluginUpload(request: FastifyRequest): Promise<Buffer> {
-  let bytes: Buffer | undefined;
-  try {
-    for await (const part of request.parts()) {
-      if (part.type !== 'file' || part.fieldname !== 'file' || bytes !== undefined) {
-        if (part.type === 'file') await part.toBuffer();
-        throw new PluginManagerUploadError(400, 'INVALID_UPLOAD', 'Invalid upload');
-      }
-      bytes = await part.toBuffer();
-    }
-  } catch (error) {
-    throw translateUploadReadError(error);
-  }
-  if (!bytes || bytes.byteLength === 0) {
-    throw new PluginManagerUploadError(400, 'NO_FILE', 'No plugin archive uploaded');
-  }
-  return bytes;
-}
-
-async function installPluginUpload(
-  bytes: Buffer,
-  operator: string,
-  manager: PluginManagerRouteService,
-  auditLog: Pick<EventAuditLog, 'append'>,
-): Promise<unknown> {
-  const temporaryRoot = await mkdtemp(join(tmpdir(), 'cat-cafe-plugin-upload-'));
-  const archivePath = join(temporaryRoot, 'package.tgz');
-  try {
-    await writeFile(archivePath, bytes, { flag: 'wx', mode: 0o600 });
-    try {
-      await appendMutationAudit(auditLog, {
-        operator,
-        operation: 'install',
-        sourceKind: 'local-archive',
-      });
-    } catch {
-      throw new PluginManagerUploadError(503, 'AUDIT_UNAVAILABLE', 'Plugin audit log is unavailable');
-    }
-    return await manager.install({ source: { kind: 'local-archive', path: archivePath } });
-  } finally {
-    await rm(temporaryRoot, { recursive: true, force: true });
-  }
 }
 
 async function appendMutationAudit(
@@ -653,7 +605,7 @@ export function registerPluginManagerRoutes(app: FastifyInstance, options: Plugi
 /** Browser transport adapter for the same local-archive Manager install operation. */
 export const pluginManagerUploadRoutes: FastifyPluginAsync<PluginManagerRouteOptions> = async (app, options) => {
   await app.register(multipart, {
-    limits: { fileSize: MAX_PLUGIN_PACKAGE_BYTES, files: 1, fields: 0, parts: 1 },
+    limits: { fileSize: MAX_PLUGIN_PACKAGE_BYTES, files: 1, fields: 1, fieldSize: 2048, parts: 2 },
   });
   const auditLog = options.auditLog ?? getEventAuditLog();
 
@@ -663,7 +615,9 @@ export const pluginManagerUploadRoutes: FastifyPluginAsync<PluginManagerRouteOpt
 
     try {
       const bytes = await readPluginUpload(request);
-      const installed = await installPluginUpload(bytes, access.operator, options.manager, auditLog);
+      const installed = await installPluginUpload(bytes, options.manager, () =>
+        appendMutationAudit(auditLog, { operator: access.operator, operation: 'install', sourceKind: 'local-archive' }),
+      );
       return reply.status(201).send(installed);
     } catch (error) {
       if (error instanceof PluginManagerUploadError) {

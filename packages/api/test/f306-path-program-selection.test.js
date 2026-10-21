@@ -108,9 +108,14 @@ test('canonical repository gh wrapper needs exact code and ordinary node/delegat
   writeFileSync(gh, wrapper, { mode: 0o700 });
   const command = `env CAT_CAFE_REAL_GH_PATH=${realGh} PATH=${protectedBin}:${nodeBin}:${ordinaryBin}:/usr/bin:/bin gh pr status`;
   parity(command, 'allow');
+  writeFileSync(gh, Buffer.concat([wrapper, Buffer.from('\n// unreviewed mutation\n')]), { mode: 0o700 });
+  parity(command, 'deny');
   writeFileSync(gh, '#!/bin/sh\nexec custom-tool "$@"\n', { mode: 0o700 });
   parity(command, 'deny');
   writeFileSync(gh, wrapper, { mode: 0o700 });
+  const protectedDelegate = join(protectedBin, 'gh-delegate');
+  writeFileSync(protectedDelegate, '#!/bin/sh\nexit 0\n', { mode: 0o700 });
+  parity(command.replace(`CAT_CAFE_REAL_GH_PATH=${realGh}`, `CAT_CAFE_REAL_GH_PATH=${protectedDelegate}`), 'deny');
   const git = join(protectedBin, 'git');
   writeFileSync(git, '#!/bin/sh\nexit 0\n', { mode: 0o700 });
   parity(command.replace('pr status', 'pr create --title example'), 'deny');

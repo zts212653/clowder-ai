@@ -327,7 +327,7 @@ export function SettingsContent({ section, initialEditCatId }: SettingsContentPr
 
   return (
     <div className={section === 'members' ? `mx-auto w-full ${editorOpen ? 'max-w-5xl' : 'max-w-6xl'}` : undefined}>
-      {!(section === 'members' && (editorOpen || isV2)) && (
+      {section !== 'plugins' && !(section === 'members' && (editorOpen || isV2)) && (
         <SettingsPageHeader
           title={section === 'accounts' ? accountsText.title : (sectionText(section)?.title ?? meta.label)}
           subtitle={

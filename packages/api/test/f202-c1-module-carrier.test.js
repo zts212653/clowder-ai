@@ -1205,24 +1205,55 @@ test('real module Task data writes reach original Schedule projection and change
       return {actions:{},stop(){}};
     }}}};
   `);
-  const changes = [];
-  const host = hostOf(
-    [{ manifest: manifest(), rootDir, effectiveGrants: ['task.read', 'task.write', 'task.admitEntrusted'] }],
-    {
-      taskServices: {
-        taskStore: tasks,
-        taskArtifactReader: artifactReader,
-        taskOwnerUserId: 'owner',
-        taskThreadStore: threads,
-        taskAdmission: async () => ({
-          messageStore: messages,
-          isCatAvailable: (id) => id === 'codex',
-          assertCurrent: async () => {},
-        }),
-        onTaskDataChanged: (task) => changes.push(task.id),
-      },
+  const controllerAuthority = Object.freeze({
+    pluginId: 'dev.clowder.module-fixture',
+    pluginInstanceId: 'instance-0',
+    moduleRef: 'plugin:dev.clowder.module-fixture',
+    lifecycleRevision: 1,
+    grantRevision: 1,
+    effectiveGrants: ['task.read', 'task.write', 'task.admitEntrusted'],
+  });
+  const taskAdmission = (includeControllerAuthority) => async () => ({
+    messageStore: messages,
+    isCatAvailable: (id) => id === 'codex',
+    assertCurrent: async () => {},
+    ...(includeControllerAuthority
+      ? {
+          readCurrentDataControllerAuthority: async () => controllerAuthority,
+          withCurrentDataControllerAuthority: async (run) => run(controllerAuthority),
+        }
+      : {}),
+  });
+  const record = { manifest: manifest(), rootDir, effectiveGrants: controllerAuthority.effectiveGrants };
+  const missingAuthorityHost = hostOf([record], {
+    taskServices: {
+      taskStore: new TaskStore(),
+      taskArtifactReader: artifactReader,
+      taskOwnerUserId: 'owner',
+      taskThreadStore: threads,
+      taskAdmission: taskAdmission(false),
     },
+  });
+  await assert.rejects(
+    missingAuthorityHost.router.start('instance-0'),
+    (error) => {
+      assert.equal(error.code, 'DELIVERY_REJECTED');
+      assert.match(error.message, /Host Task data-controller authority is unavailable/);
+      return true;
+    },
+    'real module writes must fail closed when Host controller authority is not wired',
   );
+  const changes = [];
+  const host = hostOf([record], {
+    taskServices: {
+      taskStore: tasks,
+      taskArtifactReader: artifactReader,
+      taskOwnerUserId: 'owner',
+      taskThreadStore: threads,
+      taskAdmission: taskAdmission(true),
+      onTaskDataChanged: (task) => changes.push(task.id),
+    },
+  });
   await host.router.start('instance-0');
   const schedule = await new EntrustedWorkOwnerReadService({
     tasks,

@@ -1,8 +1,9 @@
 import { isAbsolute } from 'node:path';
-import type {
-  PluginManagerInstallRequest,
-  PluginManagerSetEnabledRequest,
-  PluginManagerUninstallRequest,
+import {
+  PluginArchiveReplacementConfirmationSchema,
+  type PluginManagerInstallRequest,
+  type PluginManagerSetEnabledRequest,
+  type PluginManagerUninstallRequest,
 } from '@cat-cafe/shared';
 import { z } from 'zod';
 import { defineMcpCanonicalFactory } from '../tool-governance-migration.js';
@@ -76,7 +77,7 @@ const localInstallSchema = z
   .object({
     source: z
       .object({
-        kind: z.enum(['local-directory', 'local-archive']),
+        kind: z.literal('local-directory'),
         path: z
           .string()
           .trim()
@@ -103,8 +104,27 @@ const gitInstallSchema = z
       .strict(),
   })
   .strict();
+const archiveInstallSchema = z
+  .object({
+    source: z
+      .object({
+        kind: z.literal('local-archive'),
+        path: z
+          .string()
+          .trim()
+          .min(1)
+          .max(4_096)
+          .refine(isAbsolute)
+          .describe('Absolute owner-selected .tgz archive path.'),
+      })
+      .strict(),
+    replacement: PluginArchiveReplacementConfirmationSchema.optional().describe(
+      'Exact confirmation from the Host replacement offer; send only after the owner confirms this archive replacement.',
+    ),
+  })
+  .strict();
 const pluginInstallRequestSchema = z
-  .union([catalogInstallSchema, localInstallSchema, gitInstallSchema])
+  .union([catalogInstallSchema, localInstallSchema, archiveInstallSchema, gitInstallSchema])
   .describe('Closed Host Manager install request. Catalog installs are version/digest fenced.');
 
 export const pluginListInputSchema = {};
@@ -367,7 +387,7 @@ export const pluginManagementTools = [
   defineTool({
     name: 'plugin_install',
     description:
-      'Install a catalog candidate, git repository, or local directory/archive through Host package admission and inventory. Use only when the user explicitly asks to install/add that plugin. NOT for: arbitrary npm search, enable, update, repair, or bypassing package verification. Output/side effect: admits an immutable verified package and disabled instance, returning its ids; catalog requests require the exact observed version/digest, git clones are bounded and non-interactive, and local code is never imported into the API process.',
+      'Install a catalog candidate, git repository, or local directory/archive through Host package admission. Use when the user explicitly asks to install a plugin or replace its legacy installation with a selected archive. NOT for: arbitrary npm search, enable, general repair, or bypassing verification. Output/side effect: admits verified bytes and returns instance ids; a legacy archive replacement preserves the instance and data and applies the confirmed Host-policy grants. GOTCHA: ARCHIVE_REPLACEMENT_CONFIRMATION_REQUIRED changes no installed state; present the offer to the owner and retry with its exact replacement.confirmation only after confirmation. Stale confirmations require a new offer. Catalog requests require the observed version/digest.',
     inputSchema: pluginInstallInputSchema,
     handler: handlers.install,
     governance: {

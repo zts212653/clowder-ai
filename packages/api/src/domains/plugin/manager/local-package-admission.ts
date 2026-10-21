@@ -4,6 +4,7 @@ import { constants as fsConstants } from 'node:fs';
 import { type FileHandle, lstat, mkdir, mkdtemp, open, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { isAbsolute, relative, resolve, sep } from 'node:path';
 import { promisify } from 'node:util';
+import type { PluginArchiveReplacementConfirmation } from '@cat-cafe/shared';
 import type { Capability, PluginManifest } from '@clowder-ai/plugin-contract';
 import type { ExternalPluginLifecycleService } from '../external-plugin-lifecycle.js';
 import { FilesystemVerifiedPluginPackageLocator } from '../external-runtime/filesystem-package-locator.js';
@@ -19,6 +20,7 @@ import {
   type PluginPackageRecord,
 } from '../host-inventory/types.js';
 import { MAX_PLUGIN_PACKAGE_BYTES, publishPluginPackageArchive } from '../official-package-archive.js';
+import { confirmLegacyArchiveReplacement } from './local-archive-replacement.js';
 import { prepareLocalDirectoryDistribution } from './local-directory-distribution.js';
 import type { LocalDirectoryOperation } from './local-directory-operation.js';
 import { inspectLocalDirectorySource } from './local-directory-source.js';
@@ -62,6 +64,7 @@ export interface LocalPluginPackageAdmissionOptions {
 }
 
 export interface LocalPluginAdmissionFence {
+  readonly replacement?: PluginArchiveReplacementConfirmation;
   readonly expectedDigest?: string;
   /** Repository discovery selects an identity before package preparation runs. */
   readonly expectedPackage?: { readonly pluginId: string; readonly version: string; readonly packageName: string };
@@ -442,20 +445,29 @@ export class LocalPluginPackageAdmission {
         throw sourceError('prepared directory does not match the selected package identity');
       }
       const admittedProvenance = { ...provenance, ...packageMetadata };
-      await publishPluginPackageArchive(this.packagesRoot, digest, bytes);
-      const installed = await this.admitCandidate(source, inventoryAtRequest, {
+      const candidate = {
         manifest: located.manifest,
         computedPackageDigest: digest,
         expectedPackageDigest: digest,
         packagePluginId: located.manifest.pluginId,
-        effectiveGrants,
+        effectiveGrants: [...effectiveGrants],
         signalSchemas,
         provenance: admittedProvenance,
-      });
+      };
+      const legacyReplacement = confirmLegacyArchiveReplacement(
+        source.kind,
+        inventoryAtRequest,
+        candidate,
+        fence.replacement,
+        this.options.inventory.options.contract,
+      );
+      await publishPluginPackageArchive(this.packagesRoot, digest, bytes);
+      const installed = await this.admitCandidate(source, inventoryAtRequest, candidate, legacyReplacement);
       return { pluginId: located.manifest.pluginId, ...installed };
     } catch (error) {
-      await this.recordAdmissionFailure(error, provenance, digest);
-      throw error;
+      const failure = error instanceof PluginInventoryError ? inventoryAdmissionError(error) : error;
+      await this.recordAdmissionFailure(failure, provenance, digest);
+      throw failure;
     } finally {
       await located.release();
     }
@@ -476,6 +488,7 @@ export class LocalPluginPackageAdmission {
     source: LocalPluginPackageSource | { readonly kind: 'catalog' },
     inventoryAtRequest: PluginInventorySnapshot,
     candidate: PackageAdmissionCandidate,
+    legacyReplacement = false,
   ): Promise<InventoryMutationResult> {
     try {
       const current = inventoryAtRequest.instances.find(
@@ -488,7 +501,8 @@ export class LocalPluginPackageAdmission {
       // installed npm package. Discovery alone never reaches this admission path.
       const localUpdate =
         current !== undefined &&
-        (source.kind === 'local-directory' ||
+        (legacyReplacement ||
+          source.kind === 'local-directory' ||
           source.kind === 'catalog' ||
           (candidate.provenance?.kind === source.kind &&
             previousPackage?.provenance?.kind === source.kind &&

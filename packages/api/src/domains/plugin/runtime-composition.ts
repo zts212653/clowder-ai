@@ -1076,7 +1076,9 @@ export function createPluginManagerRuntimeComposition(
         const installed =
           request.source.kind === 'git'
             ? await gitAdmission.install(request.source)
-            : await localAdmission.install(request.source);
+            : await localAdmission.install(request.source, {
+                ...('replacement' in request ? { replacement: request.replacement } : {}),
+              });
         return { pluginId: installed.pluginId, pluginInstanceId: installed.pluginInstanceId };
       },
     },

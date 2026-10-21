@@ -229,6 +229,60 @@ describe('F202 live Plugin Manager Console wiring', () => {
     expect(mockApiFetch.mock.calls.some(([url]) => url === '/api/plugins/personal-chrome')).toBe(false);
   });
 
+  it('reaches archive confirmation from the live Manager toolbar and refreshes after installation', async () => {
+    let installed = false;
+    const confirmation = {
+      pluginId: 'dev.clowder.video-analysis',
+      pluginInstanceId: 'pi_video',
+      currentPackageDigest: digest,
+      candidatePackageDigest: digest,
+      expectedLifecycleRevision: 7,
+      expectedGrantRevision: 1,
+      candidateEffectiveGrants: [],
+    };
+    mockApiFetch.mockImplementation(async (url, init) => {
+      if (url === '/api/plugin-manager/plugins') return json(response(managerPlugin({ installed })));
+      if (url === '/api/plugin-manager/plugins/dev.clowder.video-analysis')
+        return json(detail(managerPlugin({ installed })));
+      if (url === '/api/plugin-manager/plugins/install/upload') {
+        const body = init?.body as FormData;
+        if (!body.has('replacement'))
+          return json(
+            {
+              code: 'ARCHIVE_REPLACEMENT_CONFIRMATION_REQUIRED',
+              replacement: {
+                confirmation,
+                displayName: 'Video Analysis',
+                currentVersion: '0.1.0',
+                candidateVersion: '0.2.0',
+              },
+            },
+            409,
+          );
+        expect(JSON.parse(body.get('replacement') as string)).toEqual(confirmation);
+        installed = true;
+        return json({ pluginId: confirmation.pluginId, pluginInstanceId: confirmation.pluginInstanceId }, 201);
+      }
+      return json({}, 404);
+    });
+    await act(async () => root.render(<PluginsContent />));
+    await flushEffects();
+    const input = container.querySelector<HTMLInputElement>('[data-plugin-manager-toolbar] input[type="file"]');
+    expect(input, 'archive must be reachable from the real live Manager toolbar').not.toBeNull();
+    if (!input) return;
+    Object.defineProperty(input, 'files', { configurable: true, value: [new File(['fixture'], 'plugin.tgz')] });
+    await act(async () => input.dispatchEvent(new Event('change', { bubbles: true })));
+    expect(container.querySelector('[role="dialog"]')?.textContent).toContain('0.1.0 替换为 0.2.0');
+    expect(installed).toBe(false);
+    const confirm = [...container.querySelectorAll('button')].find((button) => button.textContent === '确认替换');
+    expect(confirm).toBeDefined();
+    await act(async () => confirm?.click());
+    await flushEffects();
+    expect(installed).toBe(true);
+    expect(mockApiFetch.mock.calls.filter(([url]) => url === '/api/plugin-manager/plugins').length).toBeGreaterThan(1);
+    expect(container.textContent).toContain('安装成功: dev.clowder.video-analysis');
+  });
+
   it('keeps a historical installed plugin visible with the existing unknown-origin label in list and detail', async () => {
     const legacy = {
       ...managerPlugin({ installed: true, pluginId: 'dev.clowder.genoffice-docx', displayName: 'Installed GenOffice' }),

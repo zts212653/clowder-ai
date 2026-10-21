@@ -407,7 +407,11 @@ export type PluginManagerInstallRequest =
       expectedDigest: string;
     }
   | {
-      source: { kind: 'local-directory' | 'local-archive'; path: string };
+      source: { kind: 'local-directory'; path: string };
+    }
+  | {
+      source: { kind: 'local-archive'; path: string };
+      replacement?: import('../plugin-archive-replacement.js').PluginArchiveReplacementConfirmation;
     }
   | {
       source: { kind: 'git'; url: string; marketplace?: PluginMarketplaceSelection };

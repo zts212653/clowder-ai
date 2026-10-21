@@ -10,7 +10,7 @@ import { snapshotPluginProtocolData } from '../../carrier/plugin-protocol-data.j
 import { ExternalPluginRuntimeError } from '../../external-runtime/types.js';
 import type { CurrentPluginTaskDataControllerAuthority } from './plugin-task-data-services.js';
 import type { PluginTaskHostDeps } from './plugin-task-host.js';
-import { type PluginTaskReadItem, projectPluginTaskRead } from './plugin-task-read.js';
+import { type PluginTaskReadItem, projectPluginTaskRead, readVerifiedHostReceipt } from './plugin-task-read.js';
 import { createPluginTaskWriteFence } from './plugin-task-write-fence.js';
 
 const ref = z.string().trim().min(1).max(1_000);
@@ -171,7 +171,11 @@ async function mutate(
     disposition: result.kind,
     receiptRef: result.receipt.receiptRef,
     bindingRevision: controller.bindingRevision,
-    task: projectPluginTaskRead(result.task, currentForCaller),
+    task: projectPluginTaskRead(
+      result.task,
+      currentForCaller,
+      await readVerifiedHostReceipt(result.task, ownerUserId, admission.messageStore),
+    ),
   }) as PluginTaskDataControllerMutationResult;
 }
 

@@ -1,6 +1,27 @@
 {
   "exceptions": [
     {
+      "path": "packages/api/src/domains/collaborative-content/artifact-review",
+      "owner": "codex-astra",
+      "reason": "2026-10-21 daily sync: reviewed #5799 adds response-judgment and response-judgment-return, taking this directory from 24 to 26 files. They share the review reducer, return intent, sealed audience and owner revision checks. Keep those reviewed boundaries intact for this export; reassess a response/return subgroup with its store imports before expiry.",
+      "expiresAt": "2026-10-31",
+      "ticket": "F326 / cat-cafe#5799 / clowder-ai#1649"
+    },
+    {
+      "path": "packages/api/src/domains/workspace",
+      "owner": "codex-astra",
+      "reason": "2026-10-21 daily sync: reviewed #5799 adds workspace-video-snapshot, taking this directory from 24 to 25 files. The request-scoped immutable copy shares the existing workspace source revision, stream lifetime and security errors. Reassess the content-source/video snapshot subgroup together before expiry rather than move one authority-sensitive adapter only to reduce this count.",
+      "expiresAt": "2026-10-31",
+      "ticket": "F063/F326 / cat-cafe#5799 / clowder-ai#1649"
+    },
+    {
+      "path": "packages/api/src/infrastructure/capability-evolution/adapters",
+      "owner": "codex-astra",
+      "reason": "2026-10-21 daily sync: reviewed #5854 adds archive-source-repository, taking this directory from 24 to 25 files. The shared immutable historical repository identity is consumed by the Microduck and request-review adapters; it must not become deployment branding. Reassess an archive-provenance module boundary with all consumers before expiry, preserving those signed source coordinates.",
+      "expiresAt": "2026-10-31",
+      "ticket": "F330/F311 / cat-cafe#5854 / clowder-ai#1649"
+    },
+    {
       "path": "packages/api/src/domains/collaborative-content/collective-artifact",
       "owner": "codex61-sol",
       "reason": "2026-10-18 W4 source fix-forward: #5670 introduced 28 files for shared Markdown, retained media and custody transfer. Keep the independently reviewed owner/receipt boundaries stable during Alpha acceptance; reassess Markdown, media and custody subdirectories together with their import directions before expiry.",

@@ -259,13 +259,14 @@ describe('F202 terminal Plugin Manager Design Gate', () => {
     expect(container.textContent).toContain('Plugin package archive failed Host verification.');
   });
 
-  it('places directory install and repository settings in the page toolbar', async () => {
+  it('places directory/archive install and repository settings in the page toolbar', async () => {
     await act(async () =>
       root.render(
         <PluginManagerContent
           fixtures={PLUGIN_MANAGER_DESIGN_FIXTURES}
           onDirectoryInstall={vi.fn()}
           onMarketplaceChange={vi.fn()}
+          onStateChanged={vi.fn()}
         />,
       ),
     );
@@ -273,6 +274,8 @@ describe('F202 terminal Plugin Manager Design Gate', () => {
     const toolbar = container.querySelector('[data-plugin-manager-toolbar]');
     const list = container.querySelector('[data-mobile-panel="list"]');
     expect(toolbar?.textContent).toContain('从本地目录安装');
+    expect(toolbar?.textContent).toContain('从安装包安装');
+    expect(toolbar?.querySelector('input[type="file"]')).not.toBeNull();
     expect(toolbar?.querySelector('[aria-label="管理插件仓库"]')).not.toBeNull();
     expect(container.textContent).not.toContain('离线安装');
     expect(container.textContent).not.toContain('从 Git 安装');

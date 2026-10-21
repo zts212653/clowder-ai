@@ -322,6 +322,75 @@ function multipartFile(bytes, { fieldName = 'file', filename = 'plugin.tgz' } = 
   };
 }
 
+const archiveReplacement = {
+  pluginId: 'official.video',
+  pluginInstanceId: 'pi_video',
+  currentPackageDigest: `sha512-${'A'.repeat(86)}==`,
+  candidatePackageDigest: `sha512-${'B'.repeat(85)}A==`,
+  expectedLifecycleRevision: 8,
+  expectedGrantRevision: 1,
+  candidateEffectiveGrants: [],
+};
+
+for (const fields of [
+  [['replacement', '{bad json']],
+  [['replacement', JSON.stringify({ ...archiveReplacement, unexpected: true })]],
+  [
+    ['replacement', JSON.stringify(archiveReplacement)],
+    ['replacement', JSON.stringify(archiveReplacement)],
+  ],
+  [['unknown', JSON.stringify(archiveReplacement)]],
+  [['replacement', ' '.repeat(3000)]],
+]) {
+  test(`upload rejects invalid replacement fields without audit or admission: ${JSON.stringify(fields).slice(0, 95)}`, async () => {
+    const { app, audits, calls } = await harness({ upload: true });
+    const boundary = '----replacement-validation';
+    const payload = Buffer.from(
+      fields
+        .map(([key, value]) => `--${boundary}\r\nContent-Disposition: form-data; name="${key}"\r\n\r\n${value}\r\n`)
+        .join('') +
+        `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="plugin.tgz"\r\nContent-Type: application/gzip\r\n\r\nbytes\r\n--${boundary}--\r\n`,
+    );
+    try {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/api/plugin-manager/plugins/install/upload',
+        remoteAddress: '127.0.0.1',
+        headers: { ...writeHeaders, 'content-type': `multipart/form-data; boundary=${boundary}` },
+        payload,
+      });
+      assert.equal(response.statusCode, 400, response.payload);
+      assert.deepEqual(audits, []);
+      assert.deepEqual(calls, []);
+    } finally {
+      await app.close();
+    }
+  });
+}
+
+for (const source of [
+  { kind: 'local-directory', path: '/tmp/plugin' },
+  { kind: 'git', url: 'https://example.test/plugin.git' },
+]) {
+  test(`JSON install rejects archive confirmation for ${source.kind}`, async () => {
+    const { app, calls, audits } = await harness();
+    try {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/api/plugin-manager/plugins/install',
+        headers: writeHeaders,
+        remoteAddress: '127.0.0.1',
+        payload: { source, replacement: archiveReplacement },
+      });
+      assert.equal(response.statusCode, 400);
+      assert.deepEqual(calls, []);
+      assert.deepEqual(audits, []);
+    } finally {
+      await app.close();
+    }
+  });
+}
+
 function verifiedCallbackRegistry({ policy } = {}) {
   return {
     verify: async (invocationId, callbackToken) =>

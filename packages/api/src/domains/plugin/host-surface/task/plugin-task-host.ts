@@ -223,7 +223,13 @@ export function createPluginTaskHost(input: PluginTaskHostDeps): PluginTaskHost 
         input.admission,
       );
       await current();
-      const result = await projectOwnedPluginTasks(tasks, readOwnerUserId, input.readThreadStore, controllerCurrency);
+      const result = await projectOwnedPluginTasks(
+        tasks,
+        readOwnerUserId,
+        input.readThreadStore,
+        controllerCurrency,
+        input.admission?.messageStore,
+      );
       await current();
       return result;
     };

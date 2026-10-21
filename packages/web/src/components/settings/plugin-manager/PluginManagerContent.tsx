@@ -7,6 +7,7 @@ import { HubIcon } from '../../hub-icons';
 import { settingsResourceCardClass } from '../../SettingsResourceCard';
 import { SettingsText } from '../primitives/SettingsText';
 import { SettingsPageHeader, type SettingsPageHeaderProps } from '../SettingsPageHeader';
+import { PluginArchiveInstallButton } from './PluginArchiveInstallButton';
 import { PluginDirectoryInstallButton } from './PluginDirectoryInstallButton';
 import { PluginManagerDetailCard } from './PluginManagerDetailCard';
 import { PluginListRow, PluginListSection } from './PluginManagerList';
@@ -17,21 +18,24 @@ import type { PluginManagerDesignFixture } from './plugin-manager-fixtures';
 function PluginManagerToolbar({
   onMarketplaceChange,
   onDirectoryInstall,
+  onArchiveInstalled,
 }: {
   onMarketplaceChange?: (() => Promise<void>) | undefined;
   onDirectoryInstall?: ((path: string) => Promise<void>) | undefined;
+  onArchiveInstalled?: (() => void | Promise<void>) | undefined;
 }) {
   return (
-    <div data-plugin-manager-toolbar className="flex flex-wrap justify-end gap-2">
+    <div data-plugin-manager-toolbar className="flex flex-wrap items-start justify-end gap-2">
       <a
         href="/docs/plugin-development.md"
         target="_blank"
         rel="noopener noreferrer"
-        className="console-inline-link self-center text-xs"
+        className="console-inline-link pt-1.5 text-xs"
       >
         插件开发文档
       </a>
       {onDirectoryInstall && <PluginDirectoryInstallButton onInstall={onDirectoryInstall} />}
+      {onArchiveInstalled && <PluginArchiveInstallButton label="从安装包安装" onInstalled={onArchiveInstalled} />}
       <PluginMarketplaceSettings onChange={onMarketplaceChange} />
     </div>
   );
@@ -200,10 +204,18 @@ export function PluginManagerContent({
     <section data-testid="plugin-manager" className="flex h-full min-h-0 flex-1 flex-col gap-3.5 overflow-hidden">
       {pageHeader ? (
         <SettingsPageHeader {...pageHeader}>
-          <PluginManagerToolbar onMarketplaceChange={onMarketplaceChange} onDirectoryInstall={onDirectoryInstall} />
+          <PluginManagerToolbar
+            onMarketplaceChange={onMarketplaceChange}
+            onDirectoryInstall={onDirectoryInstall}
+            onArchiveInstalled={onStateChanged}
+          />
         </SettingsPageHeader>
       ) : (
-        <PluginManagerToolbar onMarketplaceChange={onMarketplaceChange} onDirectoryInstall={onDirectoryInstall} />
+        <PluginManagerToolbar
+          onMarketplaceChange={onMarketplaceChange}
+          onDirectoryInstall={onDirectoryInstall}
+          onArchiveInstalled={onStateChanged}
+        />
       )}
 
       {catalogStatus !== 'fresh' && (

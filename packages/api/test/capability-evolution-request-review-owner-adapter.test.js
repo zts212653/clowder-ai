@@ -18,6 +18,9 @@ const FAKE_BLOB_OID_SKILL = 'a'.repeat(40);
 const FAKE_PARENT_BLOB_OID_SKILL = 'b'.repeat(40);
 const FAKE_HEAD_OID = 'c'.repeat(40);
 const FAKE_PARENT_COMMIT_OID = 'd'.repeat(40);
+// F314 fixtures describe immutable source history, independent of the deployment
+// repository. Keep the identity structured so export cannot rewrite the expected origin.
+const F314_SOURCE_REPOSITORY_URL = ['https://github.com', 'zts212653', 'cat-cafe'].join('/');
 const CURRENT_ANCHOR = [
   'Review-Subject-Ref: <pr:owner/repo#N>',
   'Accepted-Source-Ref: <exact anchor>',
@@ -760,10 +763,7 @@ describe('F100 request-review owner adapter', () => {
       assert.equal(result.nodes.length, 2);
       assert.ok(result.nodes.every((entry) => entry.kind === 'public_archive'));
       assert.ok(result.nodes.every((entry) => entry.parentEdges.length === 0));
-      assert.equal(
-        result.nodes[0].changes[0].ownerHref,
-        `https://github.com/zts212653/clowder-ai/commit/${'2'.repeat(40)}`,
-      );
+      assert.equal(result.nodes[0].changes[0].ownerHref, `${F314_SOURCE_REPOSITORY_URL}/commit/${'2'.repeat(40)}`);
       assert.match(result.nodes[0].summary, /不代表发布、加载或采用/);
       assert.ok(result.blockers.some((entry) => entry.code === 'historical_index_not_adoption'));
     });
@@ -779,7 +779,7 @@ describe('F100 request-review owner adapter', () => {
       assert.match(experiment.conditions.limitation, /实际沿用版本未确认/);
       assert.equal(
         experiment.conditions.preparationRefs.find((entry) => entry.label === 'F314 owner 核对').href,
-        `https://github.com/zts212653/clowder-ai/blob/${'6'.repeat(40)}/docs/discussions/f314-incident-archive/lineage/2026-10-14-owner-review.md`,
+        `${F314_SOURCE_REPOSITORY_URL}/blob/${'6'.repeat(40)}/docs/discussions/f314-incident-archive/lineage/2026-10-14-owner-review.md`,
       );
 
       const selected = await adapter.explorationReview({
@@ -795,7 +795,7 @@ describe('F100 request-review owner adapter', () => {
       assert.match(selected.details[0].records[0].result.label, /不是版本效用判定/);
       assert.equal(
         selected.details[0].records[0].sources[0].href,
-        `https://github.com/zts212653/clowder-ai/blob/${'1'.repeat(40)}/docs/discussions/2026-09-19-continuous-team-collaboration/README.md#case-f`,
+        `${F314_SOURCE_REPOSITORY_URL}/blob/${'1'.repeat(40)}/docs/discussions/2026-09-19-continuous-team-collaboration/README.md#case-f`,
       );
     });
 

@@ -56,3 +56,76 @@ it('preserves the server rejection and does not announce installation', async ()
   expect(container.textContent).toContain('归档校验失败');
   expect(onInstalled).not.toHaveBeenCalled();
 });
+
+const replacement = {
+  displayName: '旧插件',
+  currentVersion: '0.1.0',
+  candidateVersion: '0.2.0',
+  confirmation: {
+    pluginId: 'example.plugin',
+    pluginInstanceId: 'pi_original',
+    currentPackageDigest: `sha512-${'A'.repeat(86)}==`,
+    candidatePackageDigest: `sha512-${'B'.repeat(85)}A==`,
+    expectedLifecycleRevision: 8,
+    expectedGrantRevision: 1,
+    candidateEffectiveGrants: [],
+  },
+};
+
+function offered() {
+  return Response.json({ code: 'ARCHIVE_REPLACEMENT_CONFIRMATION_REQUIRED', replacement }, { status: 409 });
+}
+
+async function clickButton(label: string) {
+  const button = [...container.querySelectorAll('button')].find((element) => element.textContent === label);
+  if (!button) throw new Error(`Missing button: ${label}`);
+  await act(async () => button.click());
+}
+
+it('shows the actual versions and keeps the selected File for explicit confirmation', async () => {
+  vi.mocked(apiFetch)
+    .mockResolvedValueOnce(offered())
+    .mockResolvedValueOnce(Response.json({ pluginId: 'example.plugin' }));
+  await select('plugin.tgz');
+  expect(apiFetch).toHaveBeenCalledTimes(1);
+  expect(onInstalled).not.toHaveBeenCalled();
+  expect(container.querySelector('[role="dialog"]')?.textContent).toContain('0.1.0 替换为 0.2.0');
+  const original = (vi.mocked(apiFetch).mock.calls[0][1]?.body as FormData).get('file');
+  await clickButton('确认替换');
+  expect(apiFetch).toHaveBeenCalledTimes(2);
+  const body = vi.mocked(apiFetch).mock.calls[1][1]?.body as FormData;
+  expect(body.get('file')).toBe(original);
+  expect(JSON.parse(body.get('replacement') as string)).toEqual(replacement.confirmation);
+  expect(onInstalled).toHaveBeenCalledOnce();
+  expect(container.querySelector('[role="dialog"]')).toBeNull();
+});
+
+it('cancelling the offer does not retry or announce installation', async () => {
+  vi.mocked(apiFetch).mockResolvedValueOnce(offered());
+  await select('plugin.tgz');
+  await clickButton('取消');
+  expect(apiFetch).toHaveBeenCalledTimes(1);
+  expect(onInstalled).not.toHaveBeenCalled();
+  expect(container.querySelector('[role="dialog"]')).toBeNull();
+  expect(container.querySelector('input')?.disabled).toBe(false);
+});
+
+it('a stale confirmation ends the attempt without an automatic retry', async () => {
+  vi.mocked(apiFetch)
+    .mockResolvedValueOnce(offered())
+    .mockResolvedValueOnce(
+      Response.json(
+        {
+          code: 'STALE_ARCHIVE_REPLACEMENT',
+          error: '插件已变化，请重新选择插件包',
+        },
+        { status: 409 },
+      ),
+    );
+  await select('plugin.tgz');
+  await clickButton('确认替换');
+  expect(apiFetch).toHaveBeenCalledTimes(2);
+  expect(onInstalled).not.toHaveBeenCalled();
+  expect(container.textContent).toContain('插件已变化');
+  expect(container.querySelector('[role="dialog"]')).toBeNull();
+});

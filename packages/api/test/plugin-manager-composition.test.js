@@ -12,10 +12,85 @@ import {
   createPluginManagerRuntimeComposition,
 } from '../dist/domains/plugin/index.js';
 import { InstalledPluginOperations } from '../dist/domains/plugin/operations/plugin-operation-routes.js';
-import { registerPluginManagerRoutes } from '../dist/routes/plugin-manager-routes.js';
+import { pluginManagerUploadRoutes, registerPluginManagerRoutes } from '../dist/routes/plugin-manager-routes.js';
 import { catalogEntry, manifest, packageArchive } from './plugin-official-package-installer.fixture.js';
 
 const roots = [];
+
+it('real Manager JSON and upload routes confirm replacement of the same legacy instance', async () => {
+  const { composition, entry, projectRoot, runtime } = await harness();
+  const installed = await composition.manager.install({
+    source: { kind: 'catalog', catalogId: entry.catalogId },
+    expectedVersion: entry.version,
+    expectedDigest: entry.packageDigest,
+  });
+  await runtime.inventoryStore.transaction((tx) => {
+    const { provenance: _oldSource, ...legacy } = tx.packages.get(entry.packageDigest);
+    tx.packages.put(legacy);
+  });
+  const before = await runtime.inventoryStore.snapshot();
+  const next = await packageArchive({ packageManifest: manifest({ version: '0.2.0' }) });
+  const path = join(projectRoot, 'replacement.tgz');
+  await writeFile(path, next.bytes);
+  const app = Fastify();
+  const owner = process.env.DEFAULT_OWNER_USER_ID ?? 'owner-user';
+  app.addHook('preHandler', async (request) => {
+    request.sessionUserId = request.headers['x-test-session-user'];
+  });
+  const options = { manager: composition.manager, auditLog: { append: async () => {} } };
+  registerPluginManagerRoutes(app, options);
+  await app.register(pluginManagerUploadRoutes, options);
+  const headers = { host: 'localhost:3004', origin: 'http://localhost:5173', 'x-test-session-user': owner };
+  try {
+    const offer = await app.inject({
+      method: 'POST',
+      url: '/api/plugin-manager/plugins/install',
+      headers,
+      remoteAddress: '127.0.0.1',
+      payload: { source: { kind: 'local-archive', path } },
+    });
+    assert.equal(offer.statusCode, 409, offer.payload);
+    assert.equal(offer.json().code, 'ARCHIVE_REPLACEMENT_CONFIRMATION_REQUIRED');
+    assert.deepEqual(await runtime.inventoryStore.snapshot(), before);
+    const replacement = offer.json().replacement.confirmation;
+    assert.equal(replacement.pluginInstanceId, installed.pluginInstanceId);
+    const boundary = 'legacy-replacement-boundary';
+    const payload = Buffer.concat([
+      Buffer.from(
+        `--${boundary}\r\nContent-Disposition: form-data; name="replacement"\r\n\r\n${JSON.stringify(replacement)}\r\n`,
+      ),
+      Buffer.from(
+        `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="replacement.tgz"\r\nContent-Type: application/gzip\r\n\r\n`,
+      ),
+      next.bytes,
+      Buffer.from(`\r\n--${boundary}--\r\n`),
+    ]);
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/plugin-manager/plugins/install/upload',
+      remoteAddress: '127.0.0.1',
+      headers: { ...headers, 'content-type': `multipart/form-data; boundary=${boundary}` },
+      payload,
+    });
+    assert.equal(response.statusCode, 201, response.payload);
+    assert.equal(response.json().pluginInstanceId, installed.pluginInstanceId);
+    const after = await runtime.inventoryStore.snapshot();
+    assert.equal(after.instances.length, 1);
+    assert.equal(after.instances[0].packageDigest, next.integrity);
+    const stale = await app.inject({
+      method: 'POST',
+      url: '/api/plugin-manager/plugins/install',
+      headers,
+      remoteAddress: '127.0.0.1',
+      payload: { source: { kind: 'local-archive', path }, replacement },
+    });
+    assert.equal(stale.statusCode, 409, stale.payload);
+    assert.equal(stale.json().code, 'STALE_ARCHIVE_REPLACEMENT');
+    assert.deepEqual(await runtime.inventoryStore.snapshot(), after);
+  } finally {
+    await app.close();
+  }
+});
 
 afterEach(async () => {
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));

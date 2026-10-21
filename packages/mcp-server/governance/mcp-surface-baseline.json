@@ -22972,7 +22972,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/plugin-management-tools.js#handlePluginCall",
-      "protectedImplementationDigest": "sha256:4d26284076a2d5f39da367874bd4ff7574d13398c7485c365472640c418b8079"
+      "protectedImplementationDigest": "sha256:c4b4735e133b0a3af4c5315b272b78891ed17e356ea11ab672c6fb2dc8d58f91"
     },
     {
       "name": "plugin_get",
@@ -23019,7 +23019,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/plugin-management-tools.js#handlePluginGet",
-      "protectedImplementationDigest": "sha256:4d26284076a2d5f39da367874bd4ff7574d13398c7485c365472640c418b8079"
+      "protectedImplementationDigest": "sha256:c4b4735e133b0a3af4c5315b272b78891ed17e356ea11ab672c6fb2dc8d58f91"
     },
     {
       "name": "plugin_install",
@@ -23029,10 +23029,10 @@
         "install"
       ],
       "activeState": "canonical",
-      "description": "Install a catalog candidate, git repository, or local directory/archive through Host package admission and inventory. Use only when the user explicitly asks to install/add that plugin. NOT for: arbitrary npm search, enable, update, repair, or bypassing package verification. Output/side effect: admits an immutable verified package and disabled instance, returning its ids; catalog requests require the exact observed version/digest, git clones are bounded and non-interactive, and local code is never imported into the API process.",
-      "descriptionDigest": "sha256:401295bac111fa03dbaeaa253b7a5cf82695ba59be9713453549a68b51488168",
-      "descriptionCharacters": 532,
-      "descriptionTokensCl100kBase": 99,
+      "description": "Install a catalog candidate, git repository, or local directory/archive through Host package admission. Use when the user explicitly asks to install a plugin or replace its legacy installation with a selected archive. NOT for: arbitrary npm search, enable, general repair, or bypassing verification. Output/side effect: admits verified bytes and returns instance ids; a legacy archive replacement preserves the instance and data and applies the confirmed Host-policy grants. GOTCHA: ARCHIVE_REPLACEMENT_CONFIRMATION_REQUIRED changes no installed state; present the offer to the owner and retry with its exact replacement.confirmation only after confirmation. Stale confirmations require a new offer. Catalog requests require the observed version/digest.",
+      "descriptionDigest": "sha256:873bfe441076fa9772dc81643ea28dca60baaa39e66d8c7522df849b58bfdc24",
+      "descriptionCharacters": 753,
+      "descriptionTokensCl100kBase": 136,
       "inputSchema": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "additionalProperties": false,
@@ -23088,14 +23088,91 @@
                     "additionalProperties": false,
                     "properties": {
                       "kind": {
-                        "enum": [
-                          "local-directory",
-                          "local-archive"
-                        ],
+                        "const": "local-directory",
                         "type": "string"
                       },
                       "path": {
                         "description": "Absolute local directory or .tgz archive path selected by the user.",
+                        "maxLength": 4096,
+                        "minLength": 1,
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "path"
+                    ],
+                    "type": "object"
+                  }
+                },
+                "required": [
+                  "source"
+                ],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "replacement": {
+                    "additionalProperties": false,
+                    "description": "Exact confirmation from the Host replacement offer; send only after the owner confirms this archive replacement.",
+                    "properties": {
+                      "candidateEffectiveGrants": {
+                        "items": {
+                          "maxLength": 128,
+                          "minLength": 1,
+                          "type": "string"
+                        },
+                        "maxItems": 256,
+                        "type": "array"
+                      },
+                      "candidatePackageDigest": {
+                        "$ref": "#/properties/request/anyOf/2/properties/replacement/properties/currentPackageDigest"
+                      },
+                      "currentPackageDigest": {
+                        "pattern": "^sha512-[A-Za-z0-9+/]{85}[AQgw]==$",
+                        "type": "string"
+                      },
+                      "expectedGrantRevision": {
+                        "$ref": "#/properties/request/anyOf/2/properties/replacement/properties/expectedLifecycleRevision"
+                      },
+                      "expectedLifecycleRevision": {
+                        "maximum": 9007199254740991,
+                        "minimum": 1,
+                        "type": "integer"
+                      },
+                      "pluginId": {
+                        "maxLength": 128,
+                        "minLength": 1,
+                        "pattern": "^[a-z0-9][a-z0-9._-]*$",
+                        "type": "string"
+                      },
+                      "pluginInstanceId": {
+                        "maxLength": 256,
+                        "minLength": 1,
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "pluginId",
+                      "pluginInstanceId",
+                      "currentPackageDigest",
+                      "candidatePackageDigest",
+                      "expectedLifecycleRevision",
+                      "expectedGrantRevision",
+                      "candidateEffectiveGrants"
+                    ],
+                    "type": "object"
+                  },
+                  "source": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "kind": {
+                        "const": "local-archive",
+                        "type": "string"
+                      },
+                      "path": {
+                        "description": "Absolute owner-selected .tgz archive path.",
                         "maxLength": 4096,
                         "minLength": 1,
                         "type": "string"
@@ -23151,7 +23228,7 @@
         ],
         "type": "object"
       },
-      "inputSchemaDigest": "sha256:2b59f7134d674071f7737364842db0e26d8966d905f802401dbf43748d11481a",
+      "inputSchemaDigest": "sha256:e9ca4c495907b2b9722f0bdeb2026d08b7fe25772297354c1051b76b9ff3327d",
       "annotations": {
         "destructiveHint": false,
         "openWorldHint": true,
@@ -23166,7 +23243,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/plugin-management-tools.js#handlePluginInstall",
-      "protectedImplementationDigest": "sha256:4d26284076a2d5f39da367874bd4ff7574d13398c7485c365472640c418b8079"
+      "protectedImplementationDigest": "sha256:c4b4735e133b0a3af4c5315b272b78891ed17e356ea11ab672c6fb2dc8d58f91"
     },
     {
       "name": "plugin_list",
@@ -23202,7 +23279,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/plugin-management-tools.js#handlePluginList",
-      "protectedImplementationDigest": "sha256:4d26284076a2d5f39da367874bd4ff7574d13398c7485c365472640c418b8079"
+      "protectedImplementationDigest": "sha256:c4b4735e133b0a3af4c5315b272b78891ed17e356ea11ab672c6fb2dc8d58f91"
     },
     {
       "name": "plugin_list_tools",
@@ -23249,7 +23326,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/plugin-management-tools.js#handlePluginListTools",
-      "protectedImplementationDigest": "sha256:4d26284076a2d5f39da367874bd4ff7574d13398c7485c365472640c418b8079"
+      "protectedImplementationDigest": "sha256:c4b4735e133b0a3af4c5315b272b78891ed17e356ea11ab672c6fb2dc8d58f91"
     },
     {
       "name": "plugin_search",
@@ -23295,7 +23372,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/plugin-management-tools.js#handlePluginSearch",
-      "protectedImplementationDigest": "sha256:4d26284076a2d5f39da367874bd4ff7574d13398c7485c365472640c418b8079"
+      "protectedImplementationDigest": "sha256:c4b4735e133b0a3af4c5315b272b78891ed17e356ea11ab672c6fb2dc8d58f91"
     },
     {
       "name": "plugin_set_enabled",
@@ -23353,7 +23430,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/plugin-management-tools.js#handlePluginSetEnabled",
-      "protectedImplementationDigest": "sha256:4d26284076a2d5f39da367874bd4ff7574d13398c7485c365472640c418b8079"
+      "protectedImplementationDigest": "sha256:c4b4735e133b0a3af4c5315b272b78891ed17e356ea11ab672c6fb2dc8d58f91"
     },
     {
       "name": "plugin_uninstall",
@@ -23406,7 +23483,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/plugin-management-tools.js#handlePluginUninstall",
-      "protectedImplementationDigest": "sha256:4d26284076a2d5f39da367874bd4ff7574d13398c7485c365472640c418b8079"
+      "protectedImplementationDigest": "sha256:c4b4735e133b0a3af4c5315b272b78891ed17e356ea11ab672c6fb2dc8d58f91"
     },
     {
       "name": "signal_delete_article",

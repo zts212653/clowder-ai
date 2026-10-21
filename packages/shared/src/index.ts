@@ -69,6 +69,7 @@ export type {
 } from './message-search.js';
 // First-party host-tool identities shared by onboarding discovery and catalog repair.
 export * from './native-tool-identities.js';
+export * from './plugin-archive-replacement.js';
 export * from './plugin-configuration-required.js';
 // Browser Preview Gateway request identity shared by API and Web.
 export * from './preview-gateway.js';
