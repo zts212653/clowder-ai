@@ -48,7 +48,7 @@
     "worktree:check": "node ./scripts/worktree-reaper.mjs --check",
     "check:worktree-reaper": "node --test scripts/lib/worktree-reaper-core.test.mjs scripts/worktree-reaper.test.mjs scripts/worktree-reaper-closure.test.mjs scripts/worktree-light.test.mjs scripts/worktree-consumers.test.mjs scripts/worktree-trim.test.mjs scripts/worktree-finish.test.mjs scripts/worktree-finish-merged-at.test.mjs scripts/worktree-finish-disk.test.mjs scripts/worktree-finish-open-file.test.mjs scripts/worktree-finish-process.test.mjs scripts/worktree-finish-recovery.test.mjs && pnpm check:archive-dedup",
     "preview:process": "node ./scripts/preview-process.mjs",
-    "test:preview-lifecycle": "node --test --test-concurrency=1 scripts/preview-process.test.mjs scripts/preview-process-stop.test.mjs scripts/preview-process-cleanup.test.mjs scripts/preview-named-alpha-cleanup.test.mjs",
+    "test:preview-lifecycle": "node --test --test-concurrency=1 scripts/preview-fixture-readiness.test.mjs scripts/preview-process.test.mjs scripts/preview-process-stop.test.mjs scripts/preview-process-cleanup.test.mjs scripts/preview-named-alpha-cleanup.test.mjs",
     "threads:sync": "./scripts/thread-exports-sync.sh sync",
     "threads:status": "./scripts/thread-exports-sync.sh status",
     "threads:export:redis": "node ./scripts/export-threads-from-redis.mjs",

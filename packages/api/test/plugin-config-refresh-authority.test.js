@@ -2,6 +2,7 @@ import './helpers/setup-cat-registry.js';
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { TaskStore } from '../dist/domains/cats/services/stores/ports/TaskStore.js';
+import { withCurrentOwnerOperation } from '../dist/domains/plugin/carrier/plugin-owner-operation-context.js';
 import { createPluginManagerRuntimeComposition } from '../dist/domains/plugin/index.js';
 import { neutralFixture } from './helpers/neutral-host-fixture.js';
 import { catalogEntry } from './plugin-official-package-installer.fixture.js';
@@ -112,11 +113,44 @@ test('real configure keeps entrusted Task data mutations live and stop revokes r
   };
   const host = f.host();
   const task = await host.tasks.create(input, { onConflict: 'update' });
+  assert.ok(task.subjectKey);
+  assert.ok(task.ownerCatId);
+  assert.ok(task.entrustedWork?.admission.authorityRef);
+  const bound = await withCurrentOwnerOperation(
+    {
+      kind: 'owner-operation',
+      userId: f.owner,
+      pluginInstanceId: f.installed.pluginInstanceId,
+      operationKey: 'work',
+      actionId: 'bind-before-config-refresh',
+      requestId: 'config-refresh-controller-binding',
+      confirmed: true,
+      signal: new AbortController().signal,
+      assertWriteCurrent: () => {},
+      assertCurrent: async () => {},
+    },
+    () =>
+      host.tasks.bindDataController({
+        taskId: task.id,
+        expectedTaskRevision: task.entrustedWork.revision,
+        operationId: 'bind-before-config-refresh',
+        expected: {
+          ownerCatId: task.ownerCatId,
+          threadId: task.threadId,
+          subjectKey: task.subjectKey,
+          firstSourceRef: `message:${source.id}`,
+          admissionAuthorityRef: task.entrustedWork.admission.authorityRef,
+        },
+      }),
+  );
+  assert.equal(bound.task.entrustedWork.dataController.currentForCaller, true);
   await f.save('updated');
+  const refreshed = await host.tasks.get({ id: task.id });
+  assert.equal(refreshed.entrustedWork.dataController.currentForCaller, true);
   assert.equal((await host.tasks.create(input, { onConflict: 'update' })).id, task.id);
   const updated = await host.tasks.update(task.id, {
     entrustedWork: {
-      expectedRevision: task.entrustedWork.revision,
+      expectedRevision: refreshed.entrustedWork.revision,
       time: { businessDeadline: { value: 1900000100000, sourceRef: `message:${source.id}` } },
     },
   });

@@ -36,15 +36,18 @@ export async function createPluginTaskAdmissionServices(deps: {
   const instance = initial.instances.find((i) => i.pluginInstanceId === deps.pluginInstanceId);
   const grant = initial.grants.find((g) => g.pluginInstanceId === deps.pluginInstanceId);
   if (!instance || !grant || instance.packageDigest !== deps.packageDigest) refuse('Task installation unavailable');
+  // Config saves advance the inventory revision without replacing this activation.
+  // Keep its starting revision as the durable controller epoch; assertActivation owns
+  // stop/restart invalidation, while package and grant fences remain live inventory checks.
   const grantRevision = grant.grantRevision;
-  const lifecycleRevision = instance.lifecycleRevision;
+  const activationLifecycleRevision = instance.lifecycleRevision;
   const pluginId = instance.pluginId;
   const requiredGrants = ['task.read', 'task.write', 'task.admitEntrusted'] as const;
   const authority = (effectiveGrants: readonly string[]): CurrentPluginTaskDataControllerAuthority => ({
     pluginId,
     pluginInstanceId: deps.pluginInstanceId,
     moduleRef: `plugin:${pluginId}`,
-    lifecycleRevision,
+    lifecycleRevision: activationLifecycleRevision,
     grantRevision,
     effectiveGrants: [...effectiveGrants],
   });
@@ -61,7 +64,6 @@ export async function createPluginTaskAdmissionServices(deps: {
       live.activationState !== 'enabled' ||
       live.configReadiness !== 'ready' ||
       live.packageDigest !== deps.packageDigest ||
-      live.lifecycleRevision !== lifecycleRevision ||
       packageState !== 'installed' ||
       grants?.grantRevision !== grantRevision ||
       requiredGrants.some((required) => !grants.effectiveGrants.includes(required))
@@ -89,7 +91,6 @@ export async function createPluginTaskAdmissionServices(deps: {
         live.activationState !== 'enabled' ||
         live.configReadiness !== 'ready' ||
         live.packageDigest !== deps.packageDigest ||
-        live.lifecycleRevision !== lifecycleRevision ||
         pkg?.packageState !== 'installed' ||
         grants?.grantRevision !== grantRevision ||
         !grants.effectiveGrants.includes('task.admitEntrusted')
