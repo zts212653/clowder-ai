@@ -1,8 +1,10 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
+import { coCreatorDisplay } from '@cat-cafe/shared';
 import Fastify from 'fastify';
 import './helpers/setup-cat-registry.js';
+import { getCoCreatorConfig } from '../dist/config/cat-config-loader.js';
 import { InvocationQueue } from '../dist/domains/cats/services/agents/invocation/InvocationQueue.js';
 import { InvocationRegistry } from '../dist/domains/cats/services/agents/invocation/InvocationRegistry.js';
 import { InMemoryTurnExecutionStore } from '../dist/domains/cats/services/stores/memory/InMemoryTurnExecutionStore.js';
@@ -114,7 +116,8 @@ test('runtime quote source retains the paired owner comment and original provena
       assert.match(projected.content, /可以啊 你喊他继续啊/);
       assert.equal(projected.contentLength, projected.content.length);
       assert.equal(projected.truncated, false);
-      assert.equal(projected.speaker, 'co-creator');
+      const coCreator = getCoCreatorConfig();
+      assert.equal(projected.speaker, coCreator.nickname ?? coCreatorDisplay(coCreator).nickname);
     }
     assert.equal(context.json().messages[0].content, drill.json().message.content);
   } finally {
@@ -148,7 +151,8 @@ for (const outerComment of ['', '请按这段批注继续']) {
       assert.equal(complete.message, drill.json().message.content);
       assert.equal(complete.contentLength, complete.message.length);
       assert.equal(complete.requiresDrill, false);
-      assert.equal(complete.from, 'co-creator');
+      const coCreator = getCoCreatorConfig();
+      assert.equal(complete.from, coCreator.nickname ?? coCreatorDisplay(coCreator).nickname);
       if (outerComment) assert.ok(complete.message.startsWith(outerComment));
       assert.ok(excerpt.message.length > 0);
       assert.equal(excerpt.contentLength, complete.contentLength);

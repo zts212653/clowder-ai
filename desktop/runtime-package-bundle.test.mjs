@@ -57,6 +57,39 @@ test('canonical public entries share classes, singleton and JSON after a relocat
   assert.ok(result.sharedLoads < 12, 'many input leaves become shared generated chunks, not separate runtime loads');
 });
 
+test('static JSON imports retain native JSON identity after bundling and relocation', async (t) => {
+  const { base, root, shared, write } = runtimePackageFixture(t);
+  write(
+    `${shared}/dist/location.js`,
+    `import profile from './asset.json' with {type:'json'};
+    import {createRequire} from 'node:module';
+    const require=createRequire(import.meta.url);
+    export const importedProfile=profile;
+    export const requiredProfile=require('./asset.json');`,
+  );
+  const json = fs.readFileSync(path.join(root, shared, 'dist/asset.json'));
+  await bundleRuntimePackages(root);
+  const moved = path.join(base, 'moved-json');
+  fs.renameSync(root, moved);
+  const result = runRuntimeWitness(
+    moved,
+    `import {importedProfile,requiredProfile} from '@cat-cafe/shared';
+    import {importedProfile as subpathProfile} from '@cat-cafe/shared/location';
+    console.log(JSON.stringify({value:importedProfile.value,
+      sameRequire:importedProfile===requiredProfile,sameExport:importedProfile===subpathProfile}));`,
+  );
+  assert.deepEqual(result, { value: 7, sameRequire: true, sameExport: true });
+  assert.deepEqual(fs.readFileSync(path.join(moved, shared, 'dist/asset.json')), json);
+});
+
+test('a static JSON import cannot escape the canonical package dist boundary', async (t) => {
+  const { root, shared, write } = runtimePackageFixture(t);
+  write(`${shared}/outside.json`, '{"value":9}');
+  write(`${shared}/dist/location.js`, "export {default as asset} from '../outside.json' with {type:'json'};");
+  await assert.rejects(bundleRuntimePackages(root), /outside its package dist identity/);
+  assert.equal(fs.existsSync(path.join(root, shared, 'dist/.desktop-bundle')), false);
+});
+
 test('aliases of one real root are bundled once while different private versions keep identity', async (t) => {
   const { root, write, contract } = runtimePackageFixture(t);
   contract('dependencies/@clowder-ai/plugin-contract-beta27', '27');

@@ -167,9 +167,11 @@ function visitBlockArtifacts(b: RichBlock, msg: AggregatorMessage, visit: Artifa
       });
       return;
     case 'html_widget':
-      visit({ ...base, type: 'widget', name: b.title ?? 'Widget' });
+      // 只带定位，不带 HTML 正文：面板按坐标回原消息读取，并在读取时复核 kind。
+      visit({ ...base, type: 'widget', name: b.title ?? 'Widget', widgetBlockId: b.id });
       return;
     case 'interactive':
+      // interactive 是审批/选择控件，仍回原消息处理；不给块坐标，避免被当成 HTML 预览。
       visit({ ...base, type: 'widget', name: b.title ?? b.description ?? 'Interactive' });
       return;
     default:

@@ -15,7 +15,6 @@ export const OFFICIAL_PLUGIN_CATALOG_URL =
 
 const DEFAULT_CATALOG_TIMEOUT_MS = 5_000;
 const DEFAULT_CATALOG_MAX_BYTES = 256 * 1024;
-const DEFAULT_REFRESH_TTL_MS = 5 * 60_000;
 
 export interface LoadMachinePluginCatalogOptions {
   readonly fetchFn?: typeof fetch;
@@ -127,7 +126,6 @@ export interface MachineOfficialPluginCatalogOptions {
   readonly hostPolicies: readonly MachineCatalogHostPolicy[];
   /** Host-shipped packages have no remote archive; installation still uses Host inventory. */
   readonly bundledEntries?: readonly OfficialPluginCatalogEntry[];
-  readonly refreshTtlMs?: number;
   readonly now?: () => number;
 }
 
@@ -175,11 +173,9 @@ function projectEntry(
 export class MachineOfficialPluginCatalog implements OfficialPluginCatalogProvider {
   private readonly now: () => number;
   private readonly policies: ReadonlyMap<string, MachineCatalogHostPolicy>;
-  private readonly refreshTtlMs: number;
   private readonly trustedReleases = new Map<string, OfficialPluginCatalogEntry>();
   private readonly versionsByDigest = new Map<string, string>();
   private lastGoodEntries: readonly OfficialPluginCatalogEntry[] = [];
-  private lastAttemptAt: number | null = null;
   private checkedAt: number | null = null;
   private status: OfficialPluginCatalogSnapshot['status'] = 'bootstrap';
   private errorCode: OfficialPluginCatalogSnapshot['errorCode'];
@@ -191,14 +187,11 @@ export class MachineOfficialPluginCatalog implements OfficialPluginCatalogProvid
     }
     this.now = options.now ?? Date.now;
     this.policies = new Map(options.hostPolicies.map((policy) => [policy.pluginId, policy]));
-    this.refreshTtlMs = options.refreshTtlMs ?? DEFAULT_REFRESH_TTL_MS;
   }
 
   async snapshot(): Promise<OfficialPluginCatalogSnapshot> {
     const now = this.now();
     if (this.inFlight) return this.inFlight;
-    if (this.lastAttemptAt !== null && now - this.lastAttemptAt < this.refreshTtlMs) return this.project();
-    this.lastAttemptAt = now;
     this.inFlight = this.refresh(now).finally(() => {
       this.inFlight = undefined;
     });

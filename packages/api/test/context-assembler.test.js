@@ -1,3 +1,4 @@
+import { coCreatorDisplay } from '@cat-cafe/shared';
 /**
  * ContextAssembler Tests
  * 测试历史 context 组装和消息格式化
@@ -28,7 +29,8 @@ describe('formatMessage', () => {
     const msg = mockMsg({ content: '你好', timestamp: new Date('2026-02-07T14:02:00Z').getTime() });
     const result = formatMessage(msg);
     assert.ok(result.includes('14:02 UTC'));
-    assert.ok(result.includes(getCoCreatorConfig().nickname ?? 'co-creator'));
+    const coCreator = getCoCreatorConfig();
+    assert.ok(result.includes(` ${coCreator.nickname ?? coCreatorDisplay(coCreator).nickname}]`));
     assert.ok(result.includes('你好'));
   });
 
@@ -97,7 +99,8 @@ describe('assembleContext', () => {
     const { assembleContext } = await import('../dist/domains/cats/services/context/ContextAssembler.js');
     const result = assembleContext([mockMsg({ content: '你好世界' })]);
     assert.ok(result.contextText.includes('[对话历史 - 最近 1 条]'));
-    assert.ok(result.contextText.includes(getCoCreatorConfig().nickname ?? 'co-creator'));
+    const coCreator = getCoCreatorConfig();
+    assert.ok(result.contextText.includes(` ${coCreator.nickname ?? coCreatorDisplay(coCreator).nickname}]`));
     assert.ok(result.contextText.includes('你好世界'));
     assert.ok(result.contextText.endsWith('[/对话历史]'));
     assert.equal(result.messageCount, 1);
@@ -111,7 +114,8 @@ describe('assembleContext', () => {
       mockMsg({ catId: 'codex', content: '我也在', timestamp: 3000 }),
     ];
     const result = assembleContext(msgs);
-    assert.ok(result.contextText.includes(getCoCreatorConfig().nickname ?? 'co-creator'));
+    const coCreator = getCoCreatorConfig();
+    assert.ok(result.contextText.includes(` ${coCreator.nickname ?? coCreatorDisplay(coCreator).nickname}]`));
     assert.ok(result.contextText.includes('布偶猫'));
     assert.ok(result.contextText.includes('缅因猫'));
     assert.equal(result.messageCount, 3);
@@ -161,7 +165,11 @@ describe('assembleContext', () => {
     assert.ok(result.contextText.includes('你好'), 'user message should be included');
     assert.ok(result.contextText.includes('猫猫回复'), 'cat message should be included');
     assert.ok(!result.contextText.includes('stream_idle_stall'), 'system error should NOT enter prompt');
-    assert.ok(!result.contextText.includes('co-creator] Error:'), 'system error must not appear as co-creator');
+    const coCreator = getCoCreatorConfig();
+    assert.ok(
+      !result.contextText.includes(`${coCreator.nickname ?? coCreatorDisplay(coCreator).nickname}] Error:`),
+      'system error must not appear as the configured human',
+    );
   });
 
   test('includes delivered owner-bound managed hold facts for the shared user/cat view', async () => {
@@ -586,7 +594,11 @@ describe('assembleContext — F8 token-based truncation', () => {
     });
     const result = formatMessage(msg);
     assert.ok(result.includes('GitHub Review'), 'should use source.label instead of co-creator');
-    assert.ok(!result.includes('co-creator'), 'should NOT show co-creator for connector messages');
+    const coCreator = getCoCreatorConfig();
+    assert.ok(
+      !result.includes(` ${coCreator.nickname ?? coCreatorDisplay(coCreator).nickname}]`),
+      'connector must retain its own speaker',
+    );
     assert.ok(result.includes('GitHub Review 通知'));
   });
 });

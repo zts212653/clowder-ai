@@ -7,8 +7,9 @@
 
 import assert from 'node:assert/strict';
 import { beforeEach, describe, test } from 'node:test';
-import { isValidRichBlock } from '@cat-cafe/shared';
+import { coCreatorDisplay, isValidRichBlock } from '@cat-cafe/shared';
 import Fastify from 'fastify';
+import { getCoCreatorConfig } from '../dist/config/cat-config-loader.js';
 import {
   adaptInvocationQueue,
   adaptMessageStore,
@@ -1435,7 +1436,8 @@ describe('Callback Routes', () => {
     // F236 AC-A1/A2: anchor-first shape — preview replaces the full content body.
     assert.equal(body.messages[0].preview, 'Message 1');
     assert.equal(body.messages[1].preview, 'Reply 1');
-    assert.equal(body.messages[0].speaker, 'co-creator'); // F236 R1: human → co-creator, never raw userId
+    const coCreator = getCoCreatorConfig();
+    assert.equal(body.messages[0].speaker, coCreator.nickname ?? coCreatorDisplay(coCreator).nickname); // configured human, never raw userId
     assert.ok(
       body.messages[1].speaker && body.messages[1].speaker !== 'user-1',
       'cat speaker resolved via sender-display, no internal id leak',

@@ -5,7 +5,7 @@ import type { PluginInventoryStore } from '../host-inventory/ports.js';
 import type { OfficialPluginPackageInstaller } from '../official-package-installer.js';
 import type { DormantPluginRuntimeComposition, PluginManagerRuntimeComposition } from '../runtime-composition.js';
 import { loadMachinePluginCatalog, OFFICIAL_PLUGIN_CATALOG_URL } from './machine-catalog-provider.js';
-import type { OfficialPluginCatalogProvider } from './official-catalog-provider.js';
+import type { OfficialPluginCatalogProvider, OfficialPluginCatalogSnapshot } from './official-catalog-provider.js';
 
 export interface InitialPluginSelection {
   readonly schemaVersion: 1;
@@ -15,10 +15,15 @@ export interface InitialPluginInstallationOptions {
   readonly statePath: string;
   readonly inventory: PluginInventoryStore;
   readonly catalog: OfficialPluginCatalogProvider;
-  readonly installer: Pick<OfficialPluginPackageInstaller, 'install'>;
+  readonly installer: Pick<OfficialPluginPackageInstaller, 'install' | 'installFromSnapshot'>;
   readonly loadSelection: () => Promise<unknown>;
   readonly reconcile?: (pluginId: string, instanceId: string) => Promise<void>;
-  readonly activate: (pluginId: string, instanceId: string, expectedRevision: number) => Promise<void>;
+  readonly activate: (
+    pluginId: string,
+    instanceId: string,
+    expectedRevision: number,
+    catalogSnapshot: OfficialPluginCatalogSnapshot,
+  ) => Promise<void>;
   readonly onFailure: (pluginId: string, error: unknown) => void;
 }
 
@@ -36,6 +41,10 @@ interface InitialPluginRecord {
 interface Journal {
   schemaVersion: 1;
   plugins: InitialPluginRecord[];
+}
+interface InitialPluginPlan {
+  readonly journal: Journal;
+  readonly catalogSnapshot?: OfficialPluginCatalogSnapshot;
 }
 
 export function parseInitialPluginSelection(value: unknown): InitialPluginSelection {
@@ -85,15 +94,15 @@ async function saveJournal(statePath: string, journal: Journal): Promise<void> {
   await writeFile(temporary, `${JSON.stringify(journal)}\n`, { mode: 0o600 });
   await rename(temporary, statePath);
 }
-async function begin(options: InitialPluginInstallationOptions): Promise<Journal> {
+async function begin(options: InitialPluginInstallationOptions): Promise<InitialPluginPlan> {
   const existing = await loadJournal(options.statePath);
-  if (existing) return existing;
+  if (existing) return { journal: existing };
   const inventory = await options.inventory.snapshot();
   // Includes uninstall tombstones: existing users are never treated as a fresh Host.
   if (inventory.instances.length || inventory.packages.length) {
     const journal: Journal = { schemaVersion: 1, plugins: [] };
     await saveJournal(options.statePath, journal);
-    return journal;
+    return { journal };
   }
   const selection = parseInitialPluginSelection(await options.loadSelection());
   const catalog = await options.catalog.snapshot();
@@ -112,12 +121,13 @@ async function begin(options: InitialPluginInstallationOptions): Promise<Journal
   });
   const journal: Journal = { schemaVersion: 1, plugins };
   await saveJournal(options.statePath, journal);
-  return journal;
+  return { journal, catalogSnapshot: catalog };
 }
 async function prepareInstance(
   options: InitialPluginInstallationOptions,
   journal: Journal,
   p: InitialPluginRecord,
+  catalogSnapshot?: OfficialPluginCatalogSnapshot,
 ): Promise<void> {
   if (!p.instanceId) {
     const history = (await options.inventory.snapshot()).instances.filter((i) => i.pluginId === p.pluginId);
@@ -127,10 +137,7 @@ async function prepareInstance(
       await saveJournal(options.statePath, journal);
       return;
     }
-    const installed = await options.installer.install(p.catalogId, {
-      version: p.version,
-      packageDigest: p.packageDigest,
-    });
+    const installed = await installInitialRelease(options, p, catalogSnapshot);
     const instance = (await options.inventory.snapshot()).instances.find(
       (i) => i.pluginInstanceId === installed.pluginInstanceId,
     );
@@ -164,24 +171,49 @@ async function prepareInstance(
   }
   await saveJournal(options.statePath, journal);
 }
-async function installPending(options: InitialPluginInstallationOptions, journal: Journal): Promise<void> {
+async function installInitialRelease(
+  options: InitialPluginInstallationOptions,
+  p: InitialPluginRecord,
+  catalogSnapshot?: OfficialPluginCatalogSnapshot,
+) {
+  const release = { version: p.version, packageDigest: p.packageDigest };
+  return catalogSnapshot
+    ? options.installer.installFromSnapshot(catalogSnapshot, p.catalogId, release)
+    : options.installer.install(p.catalogId, release);
+}
+async function installPending(options: InitialPluginInstallationOptions, plan: InitialPluginPlan): Promise<void> {
+  const { journal, catalogSnapshot } = plan;
   for (const p of journal.plugins) {
     if (p.done || p.prepared) continue;
     try {
-      await prepareInstance(options, journal, p);
+      await prepareInstance(options, journal, p, catalogSnapshot);
     } catch (error) {
       options.onFailure(p.pluginId, error);
     }
   }
 }
-async function activateInstalled(options: InitialPluginInstallationOptions, journal: Journal): Promise<void> {
+async function operationCatalogSnapshot(
+  options: InitialPluginInstallationOptions,
+  plan: InitialPluginPlan,
+): Promise<OfficialPluginCatalogSnapshot> {
+  if (plan.catalogSnapshot) return plan.catalogSnapshot;
+  try {
+    return await options.catalog.snapshot();
+  } catch {
+    return { entries: [], status: 'degraded', checkedAt: null, errorCode: 'CATALOG_FETCH_FAILED' };
+  }
+}
+async function activateInstalled(options: InitialPluginInstallationOptions, plan: InitialPluginPlan): Promise<void> {
+  const { journal } = plan;
+  if (!journal.plugins.some((p) => !p.done && p.prepared && p.instanceId && p.revision !== undefined)) return;
+  const catalogSnapshot = await operationCatalogSnapshot(options, plan);
   for (const p of journal.plugins) {
     if (p.done || !p.prepared || !p.instanceId || p.revision === undefined) continue;
     try {
       const instance = (await options.inventory.snapshot()).instances.find((i) => i.pluginInstanceId === p.instanceId);
       // Any user/lifecycle change wins over the initial default, including uninstall.
       if (instance?.lifecycleState === 'installed' && instance.lifecycleRevision === p.revision)
-        await options.activate(p.pluginId, p.instanceId, p.revision);
+        await options.activate(p.pluginId, p.instanceId, p.revision, catalogSnapshot);
       p.done = true;
       await saveJournal(options.statePath, journal);
     } catch (error) {
@@ -191,9 +223,13 @@ async function activateInstalled(options: InitialPluginInstallationOptions, jour
 }
 /** Called before recovery; activation is explicitly deferred until the Host has listened. */
 export async function prepareInitialPluginInstallation(options: InitialPluginInstallationOptions) {
-  const journal = await begin(options);
-  await installPending(options, journal);
-  return { activate: () => activateInstalled(options, journal) };
+  const initialPlan = await begin(options);
+  const plan =
+    initialPlan.catalogSnapshot || !initialPlan.journal.plugins.some((p) => !p.done)
+      ? initialPlan
+      : { ...initialPlan, catalogSnapshot: await operationCatalogSnapshot(options, initialPlan) };
+  await installPending(options, plan);
+  return { activate: () => activateInstalled(options, plan) };
 }
 
 /** The same Manager installation/configuration/lifecycle used by explicit owner operations. */
@@ -205,6 +241,7 @@ export function prepareHostInitialPlugins(options: {
   readonly onFailure: InitialPluginInstallationOptions['onFailure'];
 }) {
   const { runtime, managerRuntime } = options;
+  let managerCatalogSnapshot: ReturnType<typeof managerRuntime.officialCatalog.projectSnapshot> | undefined;
   return prepareInitialPluginInstallation({
     statePath: join(dirname(runtime.paths.inventorySnapshotPath), PLUGIN_HOST_ENTRIES.initialInstallation),
     inventory: runtime.inventoryStore,
@@ -214,13 +251,17 @@ export function prepareHostInitialPlugins(options: {
       options.loadSelection ??
       (() => loadMachinePluginCatalog(new URL('initial-plugins.json', OFFICIAL_PLUGIN_CATALOG_URL).href)),
     reconcile: (pluginId, instanceId) => managerRuntime.configuration.reconcile(pluginId, instanceId),
-    activate: async (pluginId, instanceId, expectedRevision) => {
+    activate: async (pluginId, instanceId, expectedRevision, catalogSnapshot) => {
       const instance = (await runtime.inventoryStore.snapshot()).instances.find(
         (i) => i.pluginInstanceId === instanceId,
       );
       // Configuration requiring user input remains visible and disabled in Settings.
       if (instance?.configReadiness !== 'ready') return;
-      await managerRuntime.manager.setEnabled(pluginId, { enabled: true, expectedRevision });
+      managerCatalogSnapshot ??= managerRuntime.officialCatalog.projectSnapshot(catalogSnapshot);
+      await managerRuntime.manager.setEnabledFromCatalogSnapshot(managerCatalogSnapshot, pluginId, {
+        enabled: true,
+        expectedRevision,
+      });
     },
     onFailure: options.onFailure,
   });

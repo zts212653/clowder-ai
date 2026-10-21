@@ -6,7 +6,6 @@ import { withFrozenDependencyResolution } from './frozen-dependency-resolution.m
 import { fileHash, inside, runtimePackageExports, runtimePackageRoots } from './runtime-package-bundle-graph.mjs';
 import { runtimePackageInput } from './runtime-package-bundle-inputs.mjs';
 
-const tools = createRequire(import.meta.url);
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 // tsx/esbuild are owned by the API workspace. Resolve them from that explicit
 // package boundary instead of relying on a hoisted root node_modules layout.
@@ -74,6 +73,14 @@ export async function planRuntimePackage(root, packageRoot) {
             if (original !== (await resolve(args.path, dist, args.kind)))
               throw new Error(`Runtime package would change external dependency identity: ${args.path}`);
             return { path: args.path, external: true };
+          });
+          builder.onResolve({ filter: /^\.{1,2}\/.*\.json$/ }, async (args) => {
+            if (args.pluginData?.identityProbe) return;
+            const canonical = remember(await resolve(args.path, args.resolveDir, args.kind));
+            JSON.parse(fs.readFileSync(canonical, 'utf8'));
+            // Keep the native JSON module/cache shared with createRequire and
+            // public JSON exports, using the same asset after relocation.
+            return { path: `./${relative(outdir, canonical)}`, external: true };
           });
           builder.onLoad({ filter: /.*/ }, async (args) => {
             const canonical = remember(args.path);

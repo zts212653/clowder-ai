@@ -1,9 +1,16 @@
 import assert from 'node:assert/strict';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { describe, it } from 'node:test';
+import { deploymentDefaults } from '@cat-cafe/shared';
 import { gatherDiskAnchors } from '../dist/routes/f163-audit-routes.js';
+
+function writeConfiguredRoadmap(docsRoot, content) {
+  const path = join(docsRoot, deploymentDefaults.roadmapPath.slice('docs/'.length));
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, content);
+}
 
 describe('gatherDiskAnchors', () => {
   it('extracts anchors from docs/features/ filenames (with and without hyphen)', () => {
@@ -25,10 +32,10 @@ describe('gatherDiskAnchors', () => {
     }
   });
 
-  it('extracts anchors from BACKLOG.md table rows', () => {
+  it('extracts anchors from the configured roadmap table rows', () => {
     const root = mkdtempSync(join(tmpdir(), 'disk-anchors-'));
-    writeFileSync(
-      join(root, 'BACKLOG.md'),
+    writeConfiguredRoadmap(
+      root,
       [
         '| F038 | Skills 梳理 | parked | 三猫 |',
         '| F044 | Channel System | spec | 布偶猫 |',
@@ -52,13 +59,13 @@ describe('gatherDiskAnchors', () => {
     const featDir = join(root, 'features');
     mkdirSync(featDir);
     writeFileSync(join(featDir, 'F188-library.md'), '');
-    writeFileSync(join(root, 'BACKLOG.md'), '| F042 | New feat | spec | 猫 |\n');
+    writeConfiguredRoadmap(root, '| F042 | New feat | spec | 猫 |\n');
 
     try {
       const anchors = gatherDiskAnchors(root);
       assert.ok(anchors, 'should return anchors');
       assert.ok(anchors.has('F188'), 'from features/ dir');
-      assert.ok(anchors.has('F042'), 'from BACKLOG.md');
+      assert.ok(anchors.has('F042'), 'from the configured roadmap');
       assert.equal(anchors.size, 2);
     } finally {
       rmSync(root, { recursive: true });

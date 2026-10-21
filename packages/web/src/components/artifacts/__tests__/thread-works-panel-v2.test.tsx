@@ -416,3 +416,42 @@ it('shows loading rather than a fabricated zero while retrying a failed refresh'
   expect(host.querySelector('.v2-works-count')?.textContent).not.toContain('0 works');
   expect(host.querySelector('.v2-works-count')?.textContent).toContain('Reading');
 });
+
+it('opens a coordinate-backed html_widget inside Works, but keeps an interactive card going back to its message', async () => {
+  const widget: ThreadArtifactDTO = {
+    type: 'widget',
+    name: '同名',
+    catId: 'codex61-sol',
+    createdAt: 500,
+    sourceMessageId: 'msg-html',
+    widgetBlockId: 'block-a',
+  };
+  const interactive: ThreadArtifactDTO = {
+    type: 'widget',
+    name: '选择方案',
+    catId: 'codex61-sol',
+    createdAt: 400,
+    sourceMessageId: 'msg-choice',
+  };
+  data.fetch.mockImplementation(async () =>
+    Response.json({
+      threadId: 'work-source',
+      artifacts: [widget, interactive],
+      workLineage: 'resolved',
+      view: 'works',
+      complete: true,
+      total: 2,
+    }),
+  );
+  useChatStore.setState({ currentThreadId: 'work-source', rightPanelOpen: true });
+  await act(async () => root.render(<ThreadWorksPanelV2 threadId="work-source" onSelectArtifact={open} />));
+
+  const cards = host.querySelectorAll<HTMLButtonElement>('[data-testid="workspace-home-artifact-card"]');
+  expect(cards).toHaveLength(2);
+  await act(async () => cards[0].click());
+  expect(open).toHaveBeenCalledExactlyOnceWith(widget, expect.objectContaining({ kind: 'artifact-list' }));
+
+  await act(async () => cards[1].click());
+  expect(open).toHaveBeenCalledTimes(1);
+  expect(useChatStore.getState().rightPanelOpen).toBe(false);
+});

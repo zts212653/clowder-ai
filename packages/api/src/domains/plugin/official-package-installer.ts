@@ -20,6 +20,7 @@ import { LEGACY_BUNDLED_MANIFESTS } from './legacy-bundled-manifests.js';
 import {
   compareOfficialPluginVersions,
   type OfficialPluginCatalogProvider,
+  type OfficialPluginCatalogSnapshot,
   StaticOfficialPluginCatalog,
 } from './manager/official-catalog-provider.js';
 import {
@@ -125,6 +126,31 @@ export class OfficialPluginPackageInstaller {
     admitVerified?: (candidate: PackageAdmissionCandidate) => Promise<InventoryMutationResult>,
   ) {
     const entry = await this.catalogEntry(catalogId);
+    return this.installEntry(entry, expectedRelease, admitVerified);
+  }
+
+  /** Keeps one already-validated catalog operation on the snapshot that selected its release. */
+  async installFromSnapshot(
+    snapshot: OfficialPluginCatalogSnapshot,
+    catalogId: string,
+    expectedRelease: OfficialPluginReleaseFence,
+    admitVerified?: (candidate: PackageAdmissionCandidate) => Promise<InventoryMutationResult>,
+  ) {
+    if (snapshot.status !== 'fresh') {
+      throw new OfficialPluginInstallError('STALE_CATALOG', 'official catalog snapshot is not current');
+    }
+    const entry = snapshot.entries.find((candidate) => candidate.catalogId === catalogId);
+    if (!entry) {
+      throw new OfficialPluginInstallError('UNKNOWN_CATALOG_ID', `unknown official plugin ${catalogId}`);
+    }
+    return this.installEntry(entry, expectedRelease, admitVerified);
+  }
+
+  private async installEntry(
+    entry: OfficialPluginCatalogEntry,
+    expectedRelease: OfficialPluginReleaseFence,
+    admitVerified?: (candidate: PackageAdmissionCandidate) => Promise<InventoryMutationResult>,
+  ) {
     assertExpectedRelease(entry, expectedRelease);
     const existing = await this.existingExactInstall(entry);
     if (existing) {

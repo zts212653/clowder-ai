@@ -26,6 +26,15 @@ export interface ThreadArtifactDTO {
   url?: string;
   /** Exact item within the durable source message; URL/name never disambiguate a publication. */
   publicationItem?: MessageMediaItemSelector;
+  /**
+   * `html_widget` 在原消息 `extra.rich.blocks` 里的块 id。
+   *
+   * 只回答「哪条消息里的哪个 HTML 块」，不是作品 ID、不是版本号，也不含正文。
+   * 由服务端从已持久化的原块生成；读取正文时必须重新核对 thread / message / block id
+   * 以及 `kind === 'html_widget'`，不能只按标题或数组里第一个 widget 命中。
+   * 没有这个字段的 widget 产物（interactive 卡片、旧数据）不能进 HTML 预览。
+   */
+  widgetBlockId?: string;
   /** 去重键（PR ref `org/repo#123` / 文件路径）；同 ref 取最新 */
   ref?: string;
   /** File-ledger owner key, independent of display name/update time. Not execution-root proof. */

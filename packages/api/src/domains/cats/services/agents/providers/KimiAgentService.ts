@@ -62,6 +62,7 @@ import {
   lookupKimiL0Fingerprint,
   recordKimiL0Fingerprint,
 } from './kimi-l0-session-fingerprint.js';
+import { type KimiMcpLease, prepareKimiMcpConfig } from './kimi-mcp-config.js';
 import { compileL0ViaSubprocess } from './l0-compiler.js';
 
 const log = createModuleLogger('kimi-agent');
@@ -104,10 +105,12 @@ export class KimiAgentService implements AgentService {
   /** #780: Raw NDJSON archive for post-mortem diagnostics */
   private readonly rawArchive: RawArchiveSink;
   private readonly l0CompilerFn: typeof compileL0ViaSubprocess;
+  private readonly mcpServerPath: string | undefined;
 
   constructor(options?: KimiAgentServiceOptions) {
     this.catId = options?.catId ?? createCatId('kimi');
     this.spawnFn = options?.spawnFn;
+    this.mcpServerPath = options?.mcpServerPath ?? process.env.CAT_CAFE_MCP_SERVER_PATH;
     this.model = options?.model ?? getCatModel(this.catId as string);
     this.rawArchive = options?.rawArchive ?? new CliRawArchive();
     this.l0CompilerFn = options?.l0CompilerFn ?? compileL0ViaSubprocess;
@@ -322,7 +325,13 @@ export class KimiAgentService implements AgentService {
       args.push(...deduped, ...userParts);
     }
 
+    let mcpLease: KimiMcpLease | undefined;
     try {
+      mcpLease = await prepareKimiMcpConfig({
+        callbackEnv: { ...(options?.callbackEnv ?? {}), ...(options?.accountEnv ?? {}) },
+        workingDirectory: options?.workingDirectory,
+        mcpServerPath: this.mcpServerPath,
+      });
       let emittedSessionInit = Boolean(effectiveResumeSessionId);
       let sawModelOutput = false;
       let emittedImageCapability = false;
@@ -381,6 +390,7 @@ export class KimiAgentService implements AgentService {
           ...(options?.callbackEnv ?? {}),
           ...(apiKeyEnv ?? {}),
           ...(options?.accountEnv ?? {}),
+          ...mcpLease.env,
           KIMI_MODEL_THINKING_EFFORT: effortLevel,
           // Native mode requires the kimi-code v2 engine for --agent-file.
           [KIMI_V2_ENGINE_ENV_KEY]: '1',
@@ -714,6 +724,7 @@ export class KimiAgentService implements AgentService {
       yield { type: 'done', catId: this.catId, metadata, timestamp: Date.now() };
     } finally {
       removeKimiL0AgentFileDir(l0AgentFilePath);
+      await mcpLease?.dispose();
     }
   }
 }

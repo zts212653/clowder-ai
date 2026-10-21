@@ -67,22 +67,10 @@ describe('F247 default plugin owner and recovery entry', () => {
   it('opens the current cloud entry for an existing old-name installation without reinstalling', async () => {
     window.history.replaceState({}, '', '/settings?s=plugins');
     const dot = { ...managerPlugin(), displayName: 'ChatGPT dot' };
-    const local = {
-      id: 'local-reader',
-      name: '本地资料',
-      version: '1.0.0',
-      status: 'configured',
-      configured: true,
-      config: [],
-      resources: [],
-      hasHealthCheck: false,
-    };
     mockApiFetch.mockImplementation(async (url) => {
       if (url === '/api/plugin-manager/plugins') return json(response(dot));
       if (url === '/api/plugin-manager/plugins/official.chatgpt-dot') return json(detail(dot));
       if (url === '/api/plugin-manager/plugins/official.chatgpt-dot/documentation') return json({});
-      if (url === '/api/plugins') return json({ plugins: [local] });
-      if (url === '/api/plugins/official') return json({ plugins: [] });
       if (url === '/api/plugins/chatgpt-dot/connection')
         return json({
           installed: true,
@@ -100,8 +88,7 @@ describe('F247 default plugin owner and recovery entry', () => {
     expect(container.querySelectorAll('[data-plugin-id="official.chatgpt-dot"]')).toHaveLength(1);
     expect(container.querySelector('[aria-label="启用dot协作"]')).not.toBeNull();
     expect(container.querySelector('[aria-label="卸载dot协作"]')).not.toBeNull();
-    expect(container.querySelectorAll('[data-plugin-id="personal-chrome-host"]')).toHaveLength(1);
-    expect(container.querySelectorAll('[data-plugin-id="local-reader"]')).toHaveLength(1);
+    expect(mockApiFetch).toHaveBeenCalledWith('/api/plugin-manager/plugins');
     const dotRow = container.querySelector('[data-plugin-id="official.chatgpt-dot"]');
     const dotButton = Array.from(dotRow?.querySelectorAll('button') ?? []).find((candidate) =>
       candidate.textContent?.includes('ChatGPT 云端'),
@@ -114,12 +101,8 @@ describe('F247 default plugin owner and recovery entry', () => {
     expect(container.textContent).not.toContain('收到过原图');
     expect(dot.displayName).toBe('ChatGPT dot');
     expect(mockApiFetch.mock.calls.some(([url]) => String(url).endsWith('/install'))).toBe(false);
-    const proButton = Array.from(container.querySelectorAll('button')).find((candidate) =>
-      candidate.textContent?.includes('ChatGPT 浏览器辅助'),
-    );
-    await act(async () => proButton?.click());
-    await flushEffects();
-    expect(mockApiFetch.mock.calls.some(([url]) => url === '/api/plugins/personal-chrome')).toBe(true);
+    const retiredHostReads = ['/api/plugins', '/api/plugins/official', '/api/plugins/personal-chrome'];
+    expect(mockApiFetch.mock.calls.some(([url]) => retiredHostReads.includes(String(url)))).toBe(false);
   });
 
   it('explains a blocked dot enable and opens the existing ChatGPT plugin page without changing settings', async () => {
@@ -228,13 +211,14 @@ describe('F247 default plugin owner and recovery entry', () => {
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ enabled: true, expectedRevision: 9 }),
       },
+      { mutationTimeoutMs: 5 * 60_000 },
     ]);
     expect(container.querySelector('[aria-label="禁用dot协作"]')?.getAttribute('aria-pressed')).toBe('true');
     expect(container.querySelector('[data-plugin-list-row] output')).toBeNull();
     expect(container.textContent).not.toContain('验证通过后才能启用 dot 协作');
   });
 
-  it('honors the explicit enable read even when a later poll owns the UI snapshot', async () => {
+  it('honors the explicit enable read without relying on an idle poll', async () => {
     vi.useFakeTimers();
     try {
       let ready = false;
@@ -270,11 +254,11 @@ describe('F247 default plugin owner and recovery entry', () => {
       await flushEffects();
       await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="启用dot协作"]')?.click());
       expect(listReads).toBe(2);
-      ready = true;
       await act(async () => vi.advanceTimersByTime(5000));
       await flushEffects();
-      expect(listReads).toBe(3);
+      expect(listReads).toBe(2);
       expect(mockApiFetch.mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(0);
+      ready = true;
       await act(async () => releaseClickRead(json(response(current()))));
       await flushEffects();
       const posts = mockApiFetch.mock.calls.filter(([, init]) => init?.method === 'POST');

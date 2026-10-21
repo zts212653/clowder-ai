@@ -1,11 +1,12 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { access, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
+import { access, mkdir, mkdtemp, open, readdir, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { delimiter, dirname, join } from 'node:path';
 import { afterEach, test } from 'node:test';
 import { gzipSync } from 'node:zlib';
-
+import { FilesystemVerifiedPluginPackageLocator } from '../dist/domains/plugin/external-runtime/filesystem-package-locator.js';
 import {
   ExternalPluginLifecycleService,
   FilePluginPackageQuarantineStore,
@@ -45,7 +46,7 @@ async function writeLocalPackage(root, packageManifest = manifest(), entrypoint 
   );
 }
 
-async function harness({ quarantine = false, grantPolicy } = {}) {
+async function harness({ quarantine = false, grantPolicy, npmBin } = {}) {
   const packagesRoot = await tempRoot('cat-cafe-f202-local-packages-');
   const store = new MemoryPluginInventoryStore();
   const inventory = new HostInventoryControlPlane(store, {
@@ -61,9 +62,42 @@ async function harness({ quarantine = false, grantPolicy } = {}) {
     grantPolicy:
       grantPolicy ??
       (async (packageManifest) => packageManifest.features.flatMap((feature) => [...feature.capabilities])),
+    ...(npmBin ? { npmBin } : {}),
     ...(quarantineStore ? { quarantine: quarantineStore } : {}),
   });
   return { admission, inventory, packagesRoot, store, quarantines: quarantineStore };
+}
+
+// Real npm CLI invoked through a generated shim. The shim mutates the original
+// source while npm is packing the sealed snapshot, which is exactly the race the
+// final source recheck must reject.
+function npmCliEntrypoint() {
+  const relative = join('node_modules', 'npm', 'bin', 'npm-cli.js');
+  const candidates = [join(dirname(process.execPath), relative)];
+  for (const bin of (process.env.PATH ?? '').split(delimiter)) {
+    if (!bin) continue;
+    candidates.push(join(bin, relative), join(bin, '..', 'lib', relative));
+  }
+  return candidates.find((candidate) => existsSync(candidate));
+}
+
+async function npmShim(mutation) {
+  const npmCli = npmCliEntrypoint();
+  assert.ok(npmCli, 'the npm CLI entrypoint is required for the source-change regression');
+  const shimPath = join(await tempRoot('cat-cafe-local-npm-shim-'), 'npm-shim.mjs');
+  const source = `import { spawnSync } from 'node:child_process';
+import { writeFileSync } from 'node:fs';
+const args = process.argv.slice(2);
+if (args[0] === 'pack' && args.some((value) => value.startsWith('--pack-destination='))) {
+${mutation}
+}
+const result = spawnSync(process.execPath, [${JSON.stringify(npmCli)}, ...args], {
+  stdio: ['ignore', 'inherit', 'inherit'],
+});
+process.exit(result.status ?? 1);
+`;
+  await writeFile(shimPath, source, 'utf8');
+  return shimPath;
 }
 
 function octal(value, width) {
@@ -142,6 +176,248 @@ test('copies a local directory into an immutable canonical archive before invent
   await access(join(packagesRoot, packageDirectoryName(result.packageDigest), 'package.tgz'));
   await assert.rejects(access(sideEffect), { code: 'ENOENT' });
   assert.equal((await store.snapshot()).instances.length, 1);
+});
+
+test('packages a local directory whose source path resembles pnpm .pnpm', async () => {
+  const root = await tempRoot('cat-cafe-local-pnpm-path-');
+  const sourceRoot = join(root, 'node_modules', '.pnpm', 'fixture@1.0.0', 'node_modules', 'fixture');
+  await writeLocalPackage(sourceRoot);
+  await writeFile(
+    join(sourceRoot, 'package.json'),
+    `${JSON.stringify({ name: '@clowder-ai/official-test-source', version: '1.0.0' })}\n`,
+    'utf8',
+  );
+  const { admission } = await harness();
+
+  const result = await admission.install({ kind: 'local-directory', path: sourceRoot });
+
+  assert.equal(result.pluginId, 'official.test-source');
+  assert.match(result.packageDigest, /^sha512-[A-Za-z0-9+/]{86}==$/);
+});
+
+test('publishes nested node_modules fixtures without copying the root dependency directory', async () => {
+  const sourceRoot = await tempRoot('cat-cafe-local-nested-node-modules-');
+  await writeLocalPackage(sourceRoot);
+  await writeFile(
+    join(sourceRoot, 'package.json'),
+    `${JSON.stringify({ name: '@clowder-ai/official-test-source', version: '1.0.0' })}\n`,
+    'utf8',
+  );
+  const member = 'test/fixtures/eval/node_modules/file1.js';
+  await mkdir(join(sourceRoot, 'test/fixtures/eval/node_modules'), { recursive: true });
+  await writeFile(join(sourceRoot, member), 'module.exports = 17;\n', 'utf8');
+  await mkdir(join(sourceRoot, 'node_modules/unlisted-dependency'), { recursive: true });
+  await writeFile(join(sourceRoot, 'node_modules/unlisted-dependency/index.js'), 'module.exports = 0;\n', 'utf8');
+  const { admission, packagesRoot } = await harness();
+
+  const result = await admission.install({ kind: 'local-directory', path: sourceRoot });
+  const located = await new FilesystemVerifiedPluginPackageLocator(packagesRoot).resolveInstalledPackage(
+    result.packageDigest,
+  );
+  try {
+    assert.equal(await readFile(join(located.rootDir, member), 'utf8'), 'module.exports = 17;\n');
+    await assert.rejects(access(join(located.rootDir, 'node_modules/unlisted-dependency/index.js')));
+  } finally {
+    await located.release();
+  }
+});
+
+test('rejects a published member added to the source while npm packs the sealed snapshot', async () => {
+  const sourceRoot = await tempRoot('cat-cafe-local-late-member-');
+  await writeLocalPackage(sourceRoot);
+  await writeFile(
+    join(sourceRoot, 'package.json'),
+    `${JSON.stringify({ name: '@clowder-ai/official-test-source', version: '1.0.0' })}\n`,
+    'utf8',
+  );
+  const late = join(sourceRoot, 'late.js');
+  const shim = await npmShim(`  writeFileSync(${JSON.stringify(late)}, 'module.exports = 1;\\n');`);
+  const { admission, store } = await harness({ npmBin: shim });
+
+  await assert.rejects(
+    admission.install({ kind: 'local-directory', path: sourceRoot }),
+    (error) => error.code === 'INVALID_LOCAL_SOURCE' && error.cause?.code === 'DEPENDENCY_SOURCE_CHANGED',
+  );
+  assert.equal(await readFile(late, 'utf8'), 'module.exports = 1;\n', 'the shim must mutate the original source');
+  assert.deepEqual((await store.snapshot()).instances, []);
+  assert.deepEqual((await store.snapshot()).packages, []);
+});
+
+test('rejects an .npmignore edited while npm packs the sealed snapshot', async () => {
+  const sourceRoot = await tempRoot('cat-cafe-local-ignore-change-');
+  await writeLocalPackage(sourceRoot);
+  await writeFile(
+    join(sourceRoot, 'package.json'),
+    `${JSON.stringify({ name: '@clowder-ai/official-test-source', version: '1.0.0' })}\n`,
+    'utf8',
+  );
+  // Same byte length before and after, so a size-only comparison cannot see the
+  // selection change; the recheck also hashes selection files.
+  const npmIgnore = join(sourceRoot, '.npmignore');
+  await writeFile(npmIgnore, 'dist\n', 'utf8');
+  const shim = await npmShim(`  writeFileSync(${JSON.stringify(npmIgnore)}, 'test\\n');`);
+  const { admission, store } = await harness({ npmBin: shim });
+
+  await assert.rejects(
+    admission.install({ kind: 'local-directory', path: sourceRoot }),
+    (error) => error.code === 'INVALID_LOCAL_SOURCE' && error.cause?.code === 'DEPENDENCY_SOURCE_CHANGED',
+  );
+  assert.equal(await readFile(npmIgnore, 'utf8'), 'test\n', 'the shim must rewrite the selection file');
+  assert.deepEqual((await store.snapshot()).instances, []);
+  assert.deepEqual((await store.snapshot()).packages, []);
+});
+
+test('bounds pack source copies before an ignored large cache is duplicated', async () => {
+  const sourceRoot = await tempRoot('cat-cafe-local-ignored-cache-');
+  await writeLocalPackage(sourceRoot);
+  await writeFile(
+    join(sourceRoot, 'package.json'),
+    `${JSON.stringify({ name: '@clowder-ai/official-test-source', version: '1.0.0' })}\n`,
+    'utf8',
+  );
+  await writeFile(join(sourceRoot, '.npmignore'), 'cache\n', 'utf8');
+  await mkdir(join(sourceRoot, 'cache'));
+  const handle = await open(join(sourceRoot, 'cache/ignored.bin'), 'w');
+  try {
+    await handle.truncate(65 * 1024 * 1024);
+  } finally {
+    await handle.close();
+  }
+  const { admission, packagesRoot, store } = await harness();
+
+  await assert.rejects(
+    admission.install({ kind: 'local-directory', path: sourceRoot }),
+    (error) => error.code === 'INVALID_LOCAL_SOURCE' && error.cause?.code === 'DEPENDENCY_PREPARATION_LIMIT',
+  );
+  assert.deepEqual((await store.snapshot()).instances, []);
+  assert.equal(
+    (await readdir(packagesRoot)).some((entry) => entry.startsWith('.directory-prepare-')),
+    false,
+  );
+});
+
+test('applies the pack source budget across every package in the dependency graph', async () => {
+  const workspace = await tempRoot('cat-cafe-local-shared-budget-');
+  const sourceRoot = join(workspace, 'packages', 'plugin');
+  const dependencyRoot = join(workspace, 'packages', 'runtime');
+  await writeLocalPackage(sourceRoot);
+  await writeLocalPackage(dependencyRoot);
+  await writeFile(
+    join(sourceRoot, 'package.json'),
+    `${JSON.stringify({
+      name: '@clowder-ai/official-test-source',
+      version: '1.0.0',
+      dependencies: { 'runtime-dependency': '1.0.0' },
+    })}\n`,
+    'utf8',
+  );
+  await writeFile(
+    join(dependencyRoot, 'package.json'),
+    `${JSON.stringify({ name: 'runtime-dependency', version: '1.0.0' })}\n`,
+    'utf8',
+  );
+  await writeFile(join(workspace, 'pnpm-workspace.yaml'), "packages:\n  - 'packages/*'\n", 'utf8');
+  await writeFile(
+    join(workspace, 'pnpm-lock.yaml'),
+    `lockfileVersion: '9.0'
+
+importers:
+  .: {}
+  packages/plugin:
+    dependencies:
+      runtime-dependency:
+        specifier: 1.0.0
+        version: link:../runtime
+  packages/runtime: {}
+
+packages: {}
+snapshots: {}
+`,
+    'utf8',
+  );
+  await mkdir(join(sourceRoot, 'node_modules'), { recursive: true });
+  await symlink(
+    dependencyRoot,
+    join(sourceRoot, 'node_modules', 'runtime-dependency'),
+    process.platform === 'win32' ? 'junction' : 'dir',
+  );
+  for (const root of [sourceRoot, dependencyRoot]) {
+    await writeFile(join(root, '.npmignore'), 'cache\n', 'utf8');
+    await mkdir(join(root, 'cache'));
+    const handle = await open(join(root, 'cache/ignored.bin'), 'w');
+    try {
+      await handle.truncate(40 * 1024 * 1024);
+    } finally {
+      await handle.close();
+    }
+  }
+  const { admission, packagesRoot, store } = await harness();
+
+  await assert.rejects(
+    admission.install({ kind: 'local-directory', path: sourceRoot }),
+    (error) => error.code === 'INVALID_LOCAL_SOURCE' && error.cause?.code === 'DEPENDENCY_PREPARATION_LIMIT',
+  );
+  assert.deepEqual((await store.snapshot()).instances, []);
+  assert.equal(
+    (await readdir(packagesRoot)).some((entry) => entry.startsWith('.directory-prepare-')),
+    false,
+  );
+});
+
+test('cancels an in-flight pack source copy and releases its staging directory', async () => {
+  const sourceRoot = await tempRoot('cat-cafe-local-copy-cancel-');
+  await writeLocalPackage(sourceRoot);
+  await writeFile(
+    join(sourceRoot, 'package.json'),
+    `${JSON.stringify({ name: '@clowder-ai/official-test-source', version: '1.0.0' })}\n`,
+    'utf8',
+  );
+  await mkdir(join(sourceRoot, 'bulk'));
+  for (let index = 0; index < 400; index++)
+    await writeFile(join(sourceRoot, `bulk/file-${index}.txt`), 'x'.repeat(1024), 'utf8');
+  const { admission, packagesRoot, store } = await harness();
+  const controller = new AbortController();
+  const reason = new Error('pack source copy cancelled');
+  let copySeen = false;
+  let observing = false;
+  let observationError;
+  const timer = setInterval(async () => {
+    if (observing || copySeen) return;
+    observing = true;
+    try {
+      const entries = await readdir(packagesRoot).catch((error) => {
+        if (error.code === 'ENOENT') return [];
+        throw error;
+      });
+      for (const entry of entries.filter((name) => name.startsWith('.directory-prepare-'))) {
+        const packSource = join(packagesRoot, entry, 'pack-sources', '0');
+        if (!existsSync(packSource)) continue;
+        copySeen = true;
+        controller.abort(reason);
+      }
+    } catch (error) {
+      observationError = error;
+      controller.abort(error);
+    } finally {
+      observing = false;
+    }
+  }, 1);
+  try {
+    await assert.rejects(
+      admission.install({ kind: 'local-directory', path: sourceRoot }, { signal: controller.signal }),
+      (error) => error === reason || error.cause === reason,
+    );
+    assert.equal(observationError, undefined);
+    assert.equal(copySeen, true, 'cancel only after the bounded copy starts');
+    assert.deepEqual((await store.snapshot()).instances, []);
+    assert.deepEqual((await store.snapshot()).packages, []);
+    assert.equal(
+      (await readdir(packagesRoot)).some((entry) => entry.startsWith('.directory-prepare-')),
+      false,
+    );
+  } finally {
+    clearInterval(timer);
+  }
 });
 
 test('quarantines a local package rejected by Host grant admission', async () => {

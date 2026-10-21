@@ -13,7 +13,13 @@ import { WORKSPACE_MODE_META, type WorkspaceMode } from '@/lib/workspace-modes';
 import type { TeamWorkspaceSubject } from '@/stores/chat-types';
 import { artifactObjectId } from './artifact-object-key';
 
-export { artifactObjectId, legacyArtifactObjectId, parseArtifactObjectId } from './artifact-object-key';
+export {
+  artifactObjectId,
+  legacyArtifactObjectId,
+  parseArtifactObjectId,
+  sameWidgetCoordinate,
+  widgetArtifactObjectId,
+} from './artifact-object-key';
 
 import { resolveArtifactReviewTarget } from './artifact-review-surface';
 import { resolveEvolutionMediaTarget } from './evolution-media-surface';

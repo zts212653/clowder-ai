@@ -82,7 +82,9 @@ export async function packageArchive({
     await writeFile(target, contents);
   }
   const archivePath = join(sourceRoot, 'package.tgz');
-  await execFileAsync('tar', ['czf', archivePath, '-C', sourceRoot, 'package']);
+  // Keep the archive operand free of a Windows drive colon; GNU tar can parse
+  // `D:\...` as a remote host. The Host-owned fixture root is the cwd.
+  await execFileAsync('tar', ['czf', 'package.tgz', '-C', '.', 'package'], { cwd: sourceRoot });
   const bytes = await readFile(archivePath);
   const integrity = `sha512-${createHash('sha512').update(bytes).digest('base64')}`;
   return { bytes, integrity };

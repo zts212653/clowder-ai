@@ -18,7 +18,15 @@
  */
 
 import { type CapabilitiesConfig, type CatId, catRegistry } from '@cat-cafe/shared';
-import { readCapabilitiesConfig } from '../../../../../../config/capabilities/capability-orchestrator.js';
+import {
+  readCapabilitiesConfig,
+  resolveBinaryRoot,
+} from '../../../../../../config/capabilities/capability-orchestrator.js';
+import {
+  assertMappedCapabilitySource,
+  isSameCapabilityRoot,
+  resolveInvokeCapabilityRoot,
+} from '../../../../../../config/capabilities/invoke-capability-root.js';
 import { getCatEffort } from '../../../../../../config/cat-config-loader.js';
 import { getCatModel } from '../../../../../../config/cat-models.js';
 import { createModuleLogger } from '../../../../../../infrastructure/logger.js';
@@ -502,12 +510,16 @@ export class AcpAgentService implements AgentService {
       // P1-2: check project-local capabilities.json first, fall back to runtime root.
       const userProjectRoot = options?.workingDirectory;
       let baseMcpServers: AcpMcpServer[];
-      if (this.mcpWhitelist !== null) {
+      if (!this.mcpSupportEnabled) {
+        baseMcpServers = [];
+      } else if (this.mcpWhitelist !== null) {
+        const binaryRoot = resolveBinaryRoot(this.projectRoot);
+        const capabilitiesRoot = await resolveInvokeCapabilityRoot(binaryRoot);
         let capConfig: CapabilitiesConfig | null = null;
         // Track which root supplied capabilities.json — external MCP entries
         // with relative paths must resolve against the config source, not runtime root.
-        let configSourceRoot = this.projectRoot;
-        if (this.mcpSupportEnabled && userProjectRoot && userProjectRoot !== this.projectRoot) {
+        let configSourceRoot = capabilitiesRoot;
+        if (this.mcpSupportEnabled && userProjectRoot && !isSameCapabilityRoot(userProjectRoot, capabilitiesRoot)) {
           try {
             capConfig = await readCapabilitiesConfig(userProjectRoot);
             configSourceRoot = userProjectRoot;
@@ -517,12 +529,13 @@ export class AcpAgentService implements AgentService {
         }
         if (!capConfig) {
           try {
-            capConfig = await readCapabilitiesConfig(this.projectRoot);
-            configSourceRoot = this.projectRoot;
+            capConfig = await readCapabilitiesConfig(capabilitiesRoot);
+            configSourceRoot = capabilitiesRoot;
           } catch {
             /* best-effort — resolveAcpMcpServers handles null config */
           }
         }
+        if (this.mcpSupportEnabled) assertMappedCapabilitySource(capConfig !== null, binaryRoot, capabilitiesRoot);
         const disabled = resolveDisabledServerIds(this.projectRoot, this.catId as string, capConfig);
         baseMcpServers = await resolveAcpMcpServers(this.projectRoot, this.mcpWhitelist, undefined, {
           mcpSupport: this.mcpSupportEnabled,

@@ -1,13 +1,106 @@
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { spawn, spawnSync } from 'node:child_process';
+import { once } from 'node:events';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { terminateChild } from '../scripts/with-test-home.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const withTestHome = resolve(__dirname, '../scripts/with-test-home.sh');
+const withTestHome = resolve(__dirname, '../scripts/with-test-home.mjs');
+
+function run(args) {
+  return spawnSync(process.execPath, [withTestHome, ...args], {
+    cwd: resolve(__dirname, '..'),
+    encoding: 'utf8',
+    timeout: 30_000,
+  });
+}
+
+const isWindows = process.platform === 'win32';
+
+async function waitForFile(path, timeoutMs = 10_000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (existsSync(path)) return;
+    await new Promise((resolveWait) => setTimeout(resolveWait, 50));
+  }
+  throw new Error(`timed out waiting for ${path}`);
+}
+
+for (const signal of ['SIGINT', 'SIGTERM']) {
+  test(
+    `with-test-home waits for a delayed descendant before removing HOME on ${signal}`,
+    { skip: isWindows, timeout: 20_000 },
+    async () => {
+      const root = mkdtempSync(join(tmpdir(), 'delayed-descendant-'));
+      const parentFile = join(root, 'parent.json');
+      const readyFile = join(root, 'grandchild-ready');
+      const resultFile = join(root, 'grandchild-result.json');
+      const grandchild = `
+        const { existsSync, writeFileSync } = require('node:fs');
+        process.on('SIGTERM', () => {});
+        process.on('SIGINT', () => {});
+        writeFileSync(process.env.DELAYED_READY, 'ready');
+        setTimeout(() => {
+          writeFileSync(process.env.DELAYED_RESULT, JSON.stringify({
+            homeExists: existsSync(process.env.HOME),
+            home: process.env.HOME,
+            at: Date.now(),
+          }));
+          process.exit(0);
+        }, 1200);
+        setInterval(() => {}, 1000);
+      `;
+      const parent = `
+        const { spawn } = require('node:child_process');
+        const { writeFileSync } = require('node:fs');
+        const child = spawn(process.execPath, ['-e', ${JSON.stringify(grandchild)}], { stdio: 'ignore' });
+        writeFileSync(process.env.DELAYED_PARENT, JSON.stringify({ pid: child.pid, home: process.env.HOME }));
+        setInterval(() => {}, 1000);
+      `;
+
+      const wrapper = spawn(process.execPath, [withTestHome, 'node', '-e', parent], {
+        cwd: resolve(__dirname, '..'),
+        env: {
+          ...process.env,
+          DELAYED_PARENT: parentFile,
+          DELAYED_READY: readyFile,
+          DELAYED_RESULT: resultFile,
+        },
+        stdio: ['ignore', 'ignore', 'pipe'],
+      });
+      let stderr = '';
+      wrapper.stderr.on('data', (chunk) => {
+        stderr += chunk;
+      });
+
+      try {
+        await waitForFile(readyFile);
+        const observed = JSON.parse(readFileSync(parentFile, 'utf8'));
+        const started = Date.now();
+        wrapper.kill(signal);
+        await Promise.race([
+          once(wrapper, 'close'),
+          new Promise((_, reject) =>
+            setTimeout(() => reject(new Error(`wrapper did not exit after ${signal}: ${stderr}`)), 15_000),
+          ),
+        ]);
+        const elapsed = Date.now() - started;
+        await waitForFile(resultFile);
+        const descendant = JSON.parse(readFileSync(resultFile, 'utf8'));
+        assert.equal(descendant.homeExists, true, 'descendant must not observe a removed HOME');
+        assert.equal(existsSync(observed.home), false, 'HOME must be removed after the descendant exits');
+        assert.ok(elapsed >= 800, `wrapper exited before the delayed descendant (${elapsed}ms)`);
+      } finally {
+        if (wrapper.exitCode === null && wrapper.signalCode === null) wrapper.kill('SIGKILL');
+        rmSync(root, { recursive: true, force: true });
+      }
+    },
+  );
+}
 
 test('with-test-home isolates installer writes from inherited account roots and legacy HOME', () => {
   const outerRoot = mkdtempSync(join(tmpdir(), 'account-root-sentinel-'));
@@ -44,7 +137,7 @@ test('with-test-home isolates installer writes from inherited account roots and 
       const credentials = JSON.parse(readFileSync(join(process.env.HOME, '.cat-cafe/credentials.json'), 'utf8'));
       console.log(JSON.stringify({ ids: Object.keys(accounts), credentialIds: Object.keys(credentials) }));
     `;
-    const result = spawnSync('bash', [withTestHome, 'node', '-e', probe, installer], {
+    const result = spawnSync(process.execPath, [withTestHome, 'node', '-e', probe, installer], {
       cwd: resolve(__dirname, '..'),
       env: { ...process.env, HOME: outerHome, CAT_CAFE_GLOBAL_CONFIG_ROOT: outerRoot },
       encoding: 'utf8',
@@ -64,7 +157,7 @@ test('with-test-home isolates installer writes from inherited account roots and 
 
 test('with-test-home enables write guards despite inherited sandbox bypass flags', () => {
   const result = spawnSync(
-    'bash',
+    process.execPath,
     [
       withTestHome,
       'node',
@@ -82,7 +175,7 @@ test('with-test-home enables write guards despite inherited sandbox bypass flags
 });
 
 test('with-test-home forces NODE_ENV=test even when outer shell is production', () => {
-  const result = spawnSync('bash', [withTestHome, 'node', '-p', 'process.env.NODE_ENV'], {
+  const result = spawnSync(process.execPath, [withTestHome, 'node', '-p', 'process.env.NODE_ENV'], {
     cwd: resolve(__dirname, '..'),
     env: {
       ...process.env,
@@ -96,7 +189,7 @@ test('with-test-home forces NODE_ENV=test even when outer shell is production', 
 });
 
 test('with-test-home strips runtime default cat override from outer shell', () => {
-  const result = spawnSync('bash', [withTestHome, 'node', '-p', 'process.env.DEFAULT_CAT_ID ?? ""'], {
+  const result = spawnSync(process.execPath, [withTestHome, 'node', '-p', 'process.env.DEFAULT_CAT_ID ?? ""'], {
     cwd: resolve(__dirname, '..'),
     env: {
       ...process.env,
@@ -110,7 +203,7 @@ test('with-test-home strips runtime default cat override from outer shell', () =
 });
 
 test('with-test-home strips runtime API host binding from outer shell', () => {
-  const result = spawnSync('bash', [withTestHome, 'node', '-p', 'process.env.API_SERVER_HOST ?? ""'], {
+  const result = spawnSync(process.execPath, [withTestHome, 'node', '-p', 'process.env.API_SERVER_HOST ?? ""'], {
     cwd: resolve(__dirname, '..'),
     env: {
       ...process.env,
@@ -124,7 +217,7 @@ test('with-test-home strips runtime API host binding from outer shell', () => {
 });
 
 test('with-test-home strips the runtime Codex carrier from outer shell', () => {
-  const result = spawnSync('bash', [withTestHome, 'node', '-p', 'process.env.CAT_CAFE_CODEX_CARRIER ?? ""'], {
+  const result = spawnSync(process.execPath, [withTestHome, 'node', '-p', 'process.env.CAT_CAFE_CODEX_CARRIER ?? ""'], {
     cwd: resolve(__dirname, '..'),
     env: {
       ...process.env,
@@ -138,14 +231,18 @@ test('with-test-home strips the runtime Codex carrier from outer shell', () => {
 });
 
 test('with-test-home strips the runtime Claude carrier from outer shell', () => {
-  const result = spawnSync('bash', [withTestHome, 'node', '-p', 'process.env.CAT_CAFE_CLAUDE_CARRIER ?? ""'], {
-    cwd: resolve(__dirname, '..'),
-    env: {
-      ...process.env,
-      CAT_CAFE_CLAUDE_CARRIER: 'bg_daemon',
+  const result = spawnSync(
+    process.execPath,
+    [withTestHome, 'node', '-p', 'process.env.CAT_CAFE_CLAUDE_CARRIER ?? ""'],
+    {
+      cwd: resolve(__dirname, '..'),
+      env: {
+        ...process.env,
+        CAT_CAFE_CLAUDE_CARRIER: 'bg_daemon',
+      },
+      encoding: 'utf8',
     },
-    encoding: 'utf8',
-  });
+  );
 
   assert.equal(result.status, 0, result.stderr);
   assert.equal(result.stdout.trim(), '');
@@ -153,7 +250,7 @@ test('with-test-home strips the runtime Claude carrier from outer shell', () => 
 
 for (const field of ['CODEX_HOME', 'CODEX_SQLITE_HOME']) {
   test(`with-test-home strips inherited ${field} before account fixtures load`, () => {
-    const result = spawnSync('bash', [withTestHome, 'node', '-p', `process.env.${field} ?? ""`], {
+    const result = spawnSync(process.execPath, [withTestHome, 'node', '-p', `process.env.${field} ?? ""`], {
       cwd: resolve(__dirname, '..'),
       env: { ...process.env, [field]: '/outer-owned-codex-fixture' },
       encoding: 'utf8',
@@ -174,7 +271,7 @@ test('with-test-home allows the child fixture to select its own Codex roots', ()
       marker: process.env.TEST_HOME_FIXTURE_MARKER,
     }));
   `;
-  const result = spawnSync('bash', [withTestHome, 'node', '-e', probe], {
+  const result = spawnSync(process.execPath, [withTestHome, 'node', '-e', probe], {
     cwd: resolve(__dirname, '..'),
     env: {
       ...process.env,
@@ -203,7 +300,7 @@ test('with-test-home pins REDIS_URL when the outer shell has none', () => {
   delete outer.REDIS_URL;
   delete outer.CAT_CAFE_REDIS_TEST_ISOLATED;
 
-  const result = spawnSync('bash', [withTestHome, 'node', '-p', REDIS_URL_PROBE], {
+  const result = spawnSync(process.execPath, [withTestHome, 'node', '-p', REDIS_URL_PROBE], {
     cwd: resolve(__dirname, '..'),
     env: outer,
     encoding: 'utf8',
@@ -214,7 +311,7 @@ test('with-test-home pins REDIS_URL when the outer shell has none', () => {
 });
 
 test('with-test-home overrides an inherited REDIS_URL instead of trusting it', () => {
-  const result = spawnSync('bash', [withTestHome, 'node', '-p', REDIS_URL_PROBE], {
+  const result = spawnSync(process.execPath, [withTestHome, 'node', '-p', REDIS_URL_PROBE], {
     cwd: resolve(__dirname, '..'),
     env: {
       ...process.env,
@@ -229,7 +326,7 @@ test('with-test-home overrides an inherited REDIS_URL instead of trusting it', (
 });
 
 test('with-test-home rejects an isolated flag without a runner lease before executing the command', () => {
-  const result = spawnSync('bash', [withTestHome, 'node', '-p', REDIS_URL_PROBE], {
+  const result = spawnSync(process.execPath, [withTestHome, 'node', '-p', REDIS_URL_PROBE], {
     env: {
       ...process.env,
       REDIS_URL: 'redis://127.0.0.1:6947/15',
@@ -245,7 +342,7 @@ test('with-test-home rejects an isolated flag without a runner lease before exec
 
 test('non-isolated sandbox clears inherited Redis paths and binds an unreachable endpoint', () => {
   const result = spawnSync(
-    'bash',
+    process.execPath,
     [
       withTestHome,
       'node',
@@ -269,4 +366,78 @@ test('non-isolated sandbox clears inherited Redis paths and binds an unreachable
   );
   assert.equal(result.status, 0, result.stderr);
   assert.deepEqual(JSON.parse(result.stdout), ['redis://127.0.0.1:0', null, null, null, null]);
+});
+
+test('with-test-home propagates the child exit code', () => {
+  const result = spawnSync(process.execPath, [withTestHome, 'node', '-e', 'process.exit(7)'], {
+    cwd: resolve(__dirname, '..'),
+    encoding: 'utf8',
+  });
+  assert.equal(result.status, 7);
+});
+
+test('with-test-home removes the temporary HOME after the child exits', () => {
+  const result = spawnSync(process.execPath, [withTestHome, 'node', '-p', 'process.env.HOME'], {
+    cwd: resolve(__dirname, '..'),
+    env: { ...process.env, HOME: join(tmpdir(), 'outer-home-sentinel') },
+    encoding: 'utf8',
+  });
+  assert.equal(result.status, 0, result.stderr);
+  const testHome = result.stdout.trim();
+  assert.ok(testHome);
+  assert.notEqual(testHome, join(tmpdir(), 'outer-home-sentinel'));
+  assert.equal(existsSync(testHome), false);
+});
+
+test('with-test-home forwards explicit --env assignments', () => {
+  const result = spawnSync(
+    process.execPath,
+    [withTestHome, '--env', 'WITH_TEST_HOME_FLAG=forwarded', 'node', '-p', 'process.env.WITH_TEST_HOME_FLAG'],
+    {
+      cwd: resolve(__dirname, '..'),
+      env: { ...process.env, WITH_TEST_HOME_FLAG: 'outer' },
+      encoding: 'utf8',
+    },
+  );
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.stdout.trim(), 'forwarded');
+});
+
+test('passes path arguments containing spaces unchanged', () => {
+  const output = run(['node', '-e', 'console.log(process.argv.slice(1).join("|"))', 'path with spaces/测试.test.js']);
+  assert.equal(output.status, 0, output.stderr);
+  assert.equal(output.stdout.trim(), 'path with spaces/测试.test.js');
+});
+
+test('terminateChild kills the direct child and its descendants', async () => {
+  const parent = spawn(
+    process.execPath,
+    [
+      '-e',
+      "const {spawn}=require('node:child_process');const c=spawn(process.execPath,['-e','setInterval(()=>{},1000)'],{stdio:'ignore'});console.log(c.pid);setInterval(()=>{},1000);",
+    ],
+    {
+      detached: process.platform !== 'win32',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    },
+  );
+  const [chunk] = await once(parent.stdout, 'data');
+  const grandchildPid = Number(String(chunk).trim());
+  assert.ok(grandchildPid > 0, `expected grandchild pid, got ${chunk}`);
+  terminateChild(parent, 'SIGTERM');
+  await Promise.race([
+    once(parent, 'close'),
+    new Promise((_, reject) => setTimeout(() => reject(new Error('parent did not exit')), 10_000)),
+  ]);
+  const deadline = Date.now() + 10_000;
+  while (Date.now() < deadline) {
+    try {
+      process.kill(grandchildPid, 0);
+    } catch (error) {
+      if (error.code === 'ESRCH') return;
+      throw error;
+    }
+    await new Promise((resolveWait) => setTimeout(resolveWait, 100));
+  }
+  assert.fail('grandchild process is still running');
 });

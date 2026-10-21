@@ -59,6 +59,7 @@ import type {
 } from '../domains/cats/services/stores/ports/ThreadStore.js';
 import {
   isDurableOwnerReadEvidence,
+  isThreadMessageVisibleToViewer,
   passesManagedHoldViewerBoundary,
   SYSTEM_USER_IDS,
 } from '../domains/cats/services/stores/visibility.js';
@@ -1715,6 +1716,55 @@ export const threadsRoutes: FastifyPluginAsync<ThreadsRoutesOptions> = async (ap
         : {}),
     };
   });
+
+  // F232 PR-A: GET /api/threads/:threadId/artifacts/:messageId/blocks/:blockId — read one html_widget.
+  // Same identity, thread admission and message visibility as the catalogue route directly above;
+  // a block the catalogue lists must be readable, and a block it cannot list must not be.
+  app.get<{ Params: { threadId: string; messageId: string; blockId: string } }>(
+    '/api/threads/:threadId/artifacts/:messageId/blocks/:blockId',
+    async (request, reply) => {
+      reply.header('Cache-Control', 'private, no-store');
+      const userId = resolveUserId(request, {});
+      if (!userId) {
+        reply.status(401);
+        return { error: 'Identity required' };
+      }
+      const { threadId, messageId, blockId } = request.params;
+      const thread = await threadStore.get(threadId);
+      if (!thread) {
+        reply.status(404);
+        return { error: 'Thread not found' };
+      }
+      if (thread.createdBy !== userId && thread.createdBy !== 'system') {
+        reply.status(403);
+        return { error: 'Access denied' };
+      }
+      const message = messageStore ? await messageStore.getById(messageId) : null;
+      // One response for "not this thread", "not visible to you" and "no such block":
+      // never leak whether the message exists outside the catalogue.
+      if (!message || message.threadId !== threadId || !isThreadMessageVisibleToViewer(message, userId)) {
+        reply.status(404);
+        return { error: 'widget_block_unavailable' };
+      }
+      const block = (message.extra?.rich?.blocks ?? []).find((candidate) => candidate.id === blockId);
+      if (!block || block.kind !== 'html_widget') {
+        reply.status(404);
+        return { error: 'widget_block_unavailable' };
+      }
+      return {
+        threadId,
+        messageId,
+        block: {
+          id: block.id,
+          kind: block.kind,
+          v: block.v,
+          html: block.html,
+          ...(block.title === undefined ? {} : { title: block.title }),
+          ...(block.height === undefined ? {} : { height: block.height }),
+        },
+      };
+    },
+  );
 
   // F232 Phase B: GET /api/artifacts — global artifact aggregation across all user threads (AC-B1, AC-B2).
   // Projects each historical page, reusing the full Phase A artifact aggregation contract.

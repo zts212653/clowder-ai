@@ -2,6 +2,8 @@
 
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
+import { coCreatorDisplay } from '@cat-cafe/shared';
+import { getCoCreatorConfig } from '../dist/config/cat-config-loader.js';
 import { DEFAULT_HIERARCHICAL_CONTEXT } from '../dist/config/hierarchical-context-config.js';
 import {
   buildCoverageMap,
@@ -825,9 +827,11 @@ describe('F148 Phase C: formatAnchors', () => {
       lines[0].includes('GitHub CI'),
       `connector anchor should show source.label 'GitHub CI', got: ${lines[0]}`,
     );
+    const coCreator = getCoCreatorConfig();
+    const humanLabel = coCreator.nickname ?? coCreatorDisplay(coCreator).nickname;
     assert.ok(
-      !lines[0].includes('co-creator'),
-      `connector anchor must NOT be misattributed as co-creator, got: ${lines[0]}`,
+      !lines[0].includes(`@${humanLabel}:`),
+      `connector anchor must NOT be attributed to the human: ${lines[0]}`,
     );
   });
 
@@ -849,7 +853,12 @@ describe('F148 Phase C: formatAnchors', () => {
     ];
     const lines = formatAnchors(anchors, 500);
     assert.equal(lines.length, 2);
-    assert.ok(lines[0].includes('co-creator'), `user anchor should show 'co-creator', got: ${lines[0]}`);
+    const coCreator = getCoCreatorConfig();
+    const humanLabel = coCreator.nickname ?? coCreatorDisplay(coCreator).nickname;
+    assert.ok(
+      lines[0].startsWith(`[Thread opener @${humanLabel}: ${anchors[0].message.id}]`),
+      `user anchor must show the configured human label, got: ${lines[0]}`,
+    );
     assert.ok(
       lines[1].includes('opus') || lines[1].includes('宪宪') || lines[1].includes('布偶猫'),
       `cat anchor should include speaker name, got: ${lines[1]}`,

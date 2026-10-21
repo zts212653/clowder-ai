@@ -16,10 +16,15 @@ import {
   CAT_CAFE_SPLIT_ENTRYPOINTS,
   expandManagedMcpNamesForUserMerge,
   isMcpEnabledForCat,
+  resolveBinaryRoot,
   resolveCatCafeNodeCommand,
   resolvePencilCommand,
   SENSITIVE_KEY_PATTERNS,
 } from '../../../../../../config/capabilities/capability-orchestrator.js';
+import {
+  assertMappedCapabilitySource,
+  resolveDeclaredCapabilityRoot,
+} from '../../../../../../config/capabilities/invoke-capability-root.js';
 import {
   isRetiredGithubMcpCapability,
   isRetiredGithubMcpConfigEntry,
@@ -87,7 +92,7 @@ export function resolveBuiltinCatCafeServer(projectRoot: string, name: string): 
   return {
     name,
     command: resolveCatCafeNodeCommand(),
-    args: [resolve(projectRoot, MCP_SERVER_DIST, entry)],
+    args: [resolve(resolveBinaryRoot(projectRoot), MCP_SERVER_DIST, entry)],
     env: [],
   };
 }
@@ -263,8 +268,10 @@ export async function resolveAcpMcpServers(
   const disabled = opts?.disabledServerIds;
   // Use pre-loaded config from factory when available (proper API path);
   // fall back to direct read only for backward compat / tests.
+  const configSourceRoot = opts?.configSourceRoot ?? resolveDeclaredCapabilityRoot() ?? projectRoot;
   const capConfig =
-    opts?.capabilitiesConfig !== undefined ? opts.capabilitiesConfig : readCapabilitiesConfigSync(projectRoot);
+    opts?.capabilitiesConfig !== undefined ? opts.capabilitiesConfig : readCapabilitiesConfigSync(configSourceRoot);
+  assertMappedCapabilitySource(capConfig !== null, resolveBinaryRoot(projectRoot), configSourceRoot);
   const retiredCapabilityIds = new Set(
     capConfig?.capabilities.filter(isRetiredGithubMcpCapability).map((capability) => capability.id) ?? [],
   );
@@ -283,8 +290,7 @@ export async function resolveAcpMcpServers(
           .filter((c) => c.type === 'mcp' && !disabled?.has(c.id) && !retiredCapabilityIds.has(c.id))
           .map((c) => c.id)
       : [];
-    const hasCatCafe = allEnabledIds.some((id) => id === 'cat-cafe' || CAT_CAFE_SPLIT_ENTRYPOINTS.has(id));
-    effectiveWhitelist = hasCatCafe ? allEnabledIds : ['cat-cafe', ...allEnabledIds];
+    effectiveWhitelist = capConfig ? allEnabledIds : ['cat-cafe'];
     log.info(
       { catId: opts?.catId, effectiveWhitelist, source: capConfig ? 'capabilities.json' : 'fallback' },
       '#712: empty whitelist + mcpSupport=true → all enabled project MCPs',
@@ -322,7 +328,7 @@ export async function resolveAcpMcpServers(
   // Phase 2: resolve externals from capabilities.json (#712)
   // Use configSourceRoot for relative path resolution — external MCPs from a
   // project-local capabilities.json must resolve relative to that project, not the runtime root.
-  const externalRoot = opts?.configSourceRoot ?? projectRoot;
+  const externalRoot = configSourceRoot;
   const missing: string[] = [];
   if (externalNames.length > 0) {
     if (capConfig) {

@@ -301,6 +301,24 @@ export class PluginManagerService {
 
   async setEnabled(pluginId: string, request: PluginManagerSetEnabledRequest): Promise<PluginManagerMutationResult> {
     const current = (await this.get(pluginId)).plugin;
+    return this.setEnabledCurrent(pluginId, request, current);
+  }
+
+  /** Keeps one already-started operation on the catalog snapshot that selected its plugins. */
+  async setEnabledFromCatalogSnapshot(
+    catalog: PluginManagerCatalogSnapshot,
+    pluginId: string,
+    request: PluginManagerSetEnabledRequest,
+  ): Promise<PluginManagerMutationResult> {
+    const current = await this.getFromCatalogSnapshot(pluginId, catalog);
+    return this.setEnabledCurrent(pluginId, request, current);
+  }
+
+  private async setEnabledCurrent(
+    pluginId: string,
+    request: PluginManagerSetEnabledRequest,
+    current: PluginManagerDetail,
+  ): Promise<PluginManagerMutationResult> {
     const instance = this.requireCurrentInstance(current, request.expectedRevision);
     if (current.diagnostic?.code === 'PACKAGE_INCOMPATIBLE')
       throw new PluginManagerServiceError(
@@ -375,12 +393,25 @@ export class PluginManagerService {
     await this.options.configuration.reconcile(installed.pluginId, installed.pluginInstanceId);
   }
 
-  private async project(query?: string): Promise<{
+  private async getFromCatalogSnapshot(
+    pluginId: string,
+    catalog: PluginManagerCatalogSnapshot,
+  ): Promise<PluginManagerDetail> {
+    const result = await this.project(undefined, catalog);
+    const projected = result.entries.find((candidate) => candidate.plugin.pluginId === pluginId);
+    if (!projected) throw new PluginManagerServiceError('PLUGIN_NOT_FOUND', `Unknown plugin ${pluginId}`);
+    return projected.detail ?? detailFromListItem(projected.plugin);
+  }
+
+  private async project(
+    query?: string,
+    fixedCatalog?: PluginManagerCatalogSnapshot,
+  ): Promise<{
     readonly response: PluginManagerListResponse;
     readonly entries: readonly { readonly plugin: PluginManagerListItem; readonly detail?: PluginManagerDetail }[];
   }> {
     const [catalog, inventory, installedPackages, quarantines] = await Promise.all([
-      this.readCatalog(),
+      fixedCatalog ?? this.readCatalog(),
       this.options.inventory.snapshot(),
       this.options.installedPackages?.list() ?? Promise.resolve([]),
       this.options.quarantine?.list() ?? Promise.resolve([]),

@@ -1,81 +1,104 @@
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
-import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
 import { PUBLIC_TEST_DENY_REDIS_URL } from '../scripts/public-test-isolation-preflight.mjs';
+import { run } from '../scripts/run-public-tests.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const packageJsonPath = resolve(__dirname, '../package.json');
-const runPublicTestsPath = resolve(__dirname, '../scripts/run-public-tests.sh');
+const runPublicTestsPath = resolve(__dirname, '../scripts/run-public-tests.mjs');
 const resolverPath = resolve(__dirname, '../scripts/resolve-public-test-files.mjs');
+const REDIS_NAMESPACE_PRELOAD = 'redis-test-db-namespace.mjs';
 
-test('test:public delegates to run-public-tests.sh, never inline grep -v', () => {
+/**
+ * The fixture is generated after the official Redis runner signed its manifest.
+ * It cannot be in that manifest, so it must run in an explicit non-Redis child
+ * context even when this test itself is selected by `test:redis`.
+ */
+function withoutRedisRunnerEnv(base = process.env) {
+  const env = { ...base };
+  for (const key of Object.keys(env)) {
+    if (key.startsWith('CAT_CAFE_REDIS_TEST_')) delete env[key];
+  }
+  if (env.NODE_OPTIONS) {
+    env.NODE_OPTIONS = env.NODE_OPTIONS.split(/\s+/)
+      .filter((token) => !token.includes(REDIS_NAMESPACE_PRELOAD))
+      .join(' ');
+    if (!env.NODE_OPTIONS) delete env.NODE_OPTIONS;
+  }
+  return env;
+}
+
+test('test:public delegates to the Node public runner and keeps shard wiring', () => {
   const pkg = JSON.parse(readFileSync(packageJsonPath, 'utf8'));
   const script = pkg.scripts?.['test:public'] ?? '';
   const prepared = pkg.scripts?.['test:public:prepared'] ?? '';
   const shard = pkg.scripts?.['test:public:shard'] ?? '';
   const summary = pkg.scripts?.['test:public:summary'] ?? '';
 
-  // P1 fix (codex review #2326): npm script must hand off to run-public-tests.sh
-  // so resolver failures fail-propagate. Inline $(node resolver.mjs) inside the
-  // node --test argv would discard the exit code and let Node walk the whole tree.
+  // The prepared entry must hand off to a file-based runner so resolver
+  // failures fail-propagate; inlining the resolver in node --test argv would
+  // discard its exit code and let Node walk the whole tree.
   assert.match(script, /test:public:prepared/, script);
-  assert.match(prepared, /bash \.\/scripts\/run-public-tests\.sh/, prepared);
-  assert.match(shard, /with-test-home\.sh node \.\/scripts\/run-public-test-shard\.mjs/, shard);
+  assert.match(prepared, /with-test-home\.mjs/, prepared);
+  assert.match(prepared, /node \.\/scripts\/run-public-tests\.mjs/, prepared);
+  assert.match(shard, /with-test-home\.mjs.*run-public-test-shard\.mjs/, shard);
   assert.match(summary, /summarize-public-test-shards\.mjs/, summary);
   assert.doesNotMatch(script, /\$\(node \.\/scripts\/resolve-public-test-files\.mjs\)/, script);
   assert.doesNotMatch(script, /grep -v/, script);
 });
 
-test('run-public-tests.sh exists, is executable, and routes through the resolver with strict shell flags', () => {
-  assert.ok(existsSync(runPublicTestsPath), 'run-public-tests.sh must exist');
-  const mode = statSync(runPublicTestsPath).mode;
-  // owner execute bit
-  assert.ok((mode & 0o100) !== 0, 'run-public-tests.sh must be owner-executable');
-
+test('run-public-tests.mjs fails closed and preserves the serial Redis deny boundary', () => {
   const source = readFileSync(runPublicTestsPath, 'utf8');
-  assert.match(source, /set -euo pipefail/, 'strict shell flags required for fail-propagation');
-  assert.match(source, /node \.\/scripts\/resolve-public-test-files\.mjs/, 'must call the resolver');
-  assert.match(source, /refusing to run/i, 'must guard against empty / failed resolver output');
+  assert.match(source, /resolve-public-test-files\.mjs/, 'must call the resolver');
+  assert.match(source, /empty file set/i, 'must guard against an empty resolver result');
+  assert.match(source, /PUBLIC_TEST_REDIS_URL/, 'must own the Redis deny endpoint');
+  assert.match(source, /REDIS_URL:\s*PUBLIC_TEST_REDIS_URL/, 'must inject the deny endpoint');
 });
 
 test('resolve-public-test-files.mjs still exists as the registry source', () => {
-  assert.ok(existsSync(resolverPath), 'resolver script must exist');
+  assert.ok(readFileSync(resolverPath, 'utf8').length > 0, 'resolver script must exist');
 });
 
-test('serial public lane overrides the test-home Redis default before executing any selected test', () => {
+test('serial public lane overrides a legal isolated runner URL before executing tests', async () => {
   const root = mkdtempSync(join(tmpdir(), 'public-serial-redis-boundary-'));
-  const scripts = join(root, 'scripts');
-  const bin = join(root, 'bin');
-  mkdirSync(scripts);
-  mkdirSync(bin);
-  cpSync(runPublicTestsPath, join(scripts, 'run-public-tests.sh'));
-  cpSync(resolve(__dirname, '../scripts/with-test-home.sh'), join(scripts, 'with-test-home.sh'));
-  // Probe the real shell entry without running the whole test set or opening a socket.
-  const node = join(bin, 'node');
+  const fixture = join(root, 'redis-boundary.test.mjs');
+  const output = join(root, 'observed-redis.txt');
   writeFileSync(
-    node,
-    `#!${process.execPath}
-if (process.argv.includes('./scripts/resolve-public-test-files.mjs')) {
-  console.log('test/selected-fixture.test.js');
-} else {
-  console.log(JSON.stringify({ redis: process.env.REDIS_URL, args: process.argv.slice(2) }));
-}
-`,
+    fixture,
+    `import { test } from 'node:test';
+     import { writeFileSync } from 'node:fs';
+     test('record child isolation', () => {
+       writeFileSync(process.env.PUBLIC_REDIS_PROBE_OUT, JSON.stringify({
+         redis: process.env.REDIS_URL ?? '',
+         isolated: process.env.CAT_CAFE_REDIS_TEST_ISOLATED ?? null,
+         manifest: process.env.CAT_CAFE_REDIS_TEST_DB_MANIFEST ?? null,
+         nodeOptions: process.env.NODE_OPTIONS ?? '',
+       }));
+     });`,
   );
-  chmodSync(node, 0o755);
-  const result = spawnSync('bash', [join(scripts, 'with-test-home.sh'), 'bash', join(scripts, 'run-public-tests.sh')], {
-    cwd: root,
-    env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, REDIS_URL: 'redis://127.0.0.1:6399' },
-    encoding: 'utf8',
-  });
-  assert.equal(result.status, 0, result.stderr);
-  const probe = JSON.parse(result.stdout);
-  assert.equal(probe.redis, PUBLIC_TEST_DENY_REDIS_URL);
-  assert.ok(probe.args.includes('--test'));
-  assert.ok(probe.args.includes('test/selected-fixture.test.js'));
+
+  const previousProbe = process.env.PUBLIC_REDIS_PROBE_OUT;
+  const previousRedis = process.env.REDIS_URL;
+  process.env.PUBLIC_REDIS_PROBE_OUT = output;
+  process.env.REDIS_URL = 'redis://127.0.0.1:6921/2867';
+  try {
+    const outcome = await run([fixture], { env: withoutRedisRunnerEnv() });
+    assert.equal(outcome.code, 0, `public runner exited ${outcome.code}`);
+    const observed = JSON.parse(readFileSync(output, 'utf8'));
+    assert.equal(observed.redis, PUBLIC_TEST_DENY_REDIS_URL);
+    assert.equal(observed.isolated, null);
+    assert.equal(observed.manifest, null);
+    assert.doesNotMatch(observed.nodeOptions, /redis-test-db-namespace\.mjs/);
+  } finally {
+    if (previousProbe === undefined) delete process.env.PUBLIC_REDIS_PROBE_OUT;
+    else process.env.PUBLIC_REDIS_PROBE_OUT = previousProbe;
+    if (previousRedis === undefined) delete process.env.REDIS_URL;
+    else process.env.REDIS_URL = previousRedis;
+    rmSync(root, { recursive: true, force: true });
+  }
 });

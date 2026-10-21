@@ -784,7 +784,9 @@ test('native Kimi Code parses meta events for session resume', async () => {
 
   const savedPath = process.env.PATH;
   const savedHome = process.env.HOME;
-  process.env.PATH = `${nonLegacyBinDir}:/usr/bin:/bin`;
+  const systemBins =
+    process.platform === 'win32' ? [join(process.env.SystemRoot ?? 'C:\\Windows', 'System32')] : ['/usr/bin', '/bin'];
+  process.env.PATH = [nonLegacyBinDir, ...systemBins].join(delimiter);
   const tempHome = mkdtempSync(join(tmpdir(), 'kimi-nonlegacy-home-'));
   process.env.HOME = tempHome;
 
@@ -823,7 +825,7 @@ test('native Kimi Code parses meta events for session resume', async () => {
 
     // command is `kimi` (ends with /kimi, not /kimi-cli)
     const command = spawnFn.mock.calls[0].arguments[0];
-    assert.ok(command.includes('/kimi') && !command.includes('/kimi-cli'));
+    assert.equal(command, join(nonLegacyBinDir, 'kimi'));
 
     // args: has --output-format stream-json and -p, no legacy-only flags
     const args = spawnFn.mock.calls[0].arguments[1];

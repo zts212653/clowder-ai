@@ -86,7 +86,10 @@ import { GitMarketplaceCatalog } from './manager/marketplace/git-marketplace-cat
 import { prepareMarketplaceDirectory } from './manager/marketplace/git-marketplace-preparation.js';
 import type { GitMarketplaceRepository } from './manager/marketplace/git-marketplace-repository.js';
 import type { GitMarketplaceSources } from './manager/marketplace/git-marketplace-sources.js';
-import type { OfficialPluginCatalogProvider } from './manager/official-catalog-provider.js';
+import type {
+  OfficialPluginCatalogProvider,
+  OfficialPluginCatalogSnapshot,
+} from './manager/official-catalog-provider.js';
 import { HostPluginConfigurationService } from './manager/plugin-manager-configuration.js';
 import {
   type PluginManagerCatalogCandidate,
@@ -701,6 +704,10 @@ export class OfficialPluginManagerCatalogAdapter implements PluginManagerCatalog
 
   async snapshot(): Promise<PluginManagerCatalogSnapshot> {
     const releaseSnapshot = await this.provider.snapshot();
+    return this.projectSnapshot(releaseSnapshot);
+  }
+
+  projectSnapshot(releaseSnapshot: OfficialPluginCatalogSnapshot): PluginManagerCatalogSnapshot {
     const manifests = validatedManifestMap(this.packageManifests, this.manifestValidator);
     const candidates: PluginManagerCatalogCandidate[] = [];
     let metadataMismatch = false;
@@ -950,6 +957,7 @@ export interface PluginManagerRuntimeCompositionOptions {
 
 export interface PluginManagerRuntimeComposition {
   readonly manager: PluginManagerService;
+  readonly officialCatalog: OfficialPluginManagerCatalogAdapter;
   readonly configuration: HostPluginConfigurationService;
   readonly officialInstaller: OfficialPluginPackageInstaller;
   readonly officialRouteInstaller: OfficialPluginPackageInstaller;
@@ -1119,6 +1127,7 @@ export function createPluginManagerRuntimeComposition(
   });
   return {
     manager,
+    officialCatalog: baseCatalog,
     configuration,
     officialInstaller,
     officialRouteInstaller,

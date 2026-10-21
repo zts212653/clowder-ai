@@ -43,6 +43,7 @@ import {
   resolveForClient,
   validateRuntimeProviderBinding,
 } from './config/account-resolver.js';
+import { resolveInvokeCapabilityRoot } from './config/capabilities/invoke-capability-root.js';
 import { regenerateStartupCliConfigs } from './config/capabilities/startup-cli-config.js';
 import { resolveBoundAccountRefForCat } from './config/cat-account-binding.js';
 import {
@@ -4780,7 +4781,7 @@ async function main(): Promise<void> {
   // into it. Native invoke-time MCP resolution must work without visiting Settings.
   const { initializeFirstRunCapabilities } = await import('./config/capabilities/first-run-capabilities.js');
   const capabilityInitialization = await initializeFirstRunCapabilities(
-    resolveActiveProjectRoot(),
+    await resolveInvokeCapabilityRoot(runtimeEntrypointRoot),
     runtimeEntrypointRoot,
   );
   if (capabilityInitialization.status === 'unreadable') {

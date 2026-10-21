@@ -9,6 +9,7 @@ import {
   withCapabilityLock,
   writeCapabilitiesConfig,
 } from './capability-orchestrator.js';
+import { resolveDeclaredCapabilityRoot } from './invoke-capability-root.js';
 
 export interface StartupCliConfigContext {
   projectRoot: string;
@@ -26,7 +27,7 @@ export function resolveStartupCliConfigContext(
   env: NodeJS.ProcessEnv = process.env,
 ): StartupCliConfigContext {
   const explicitWorkspace = env.CAT_CAFE_WORKSPACE_ROOT?.trim();
-  const projectRoot = findMonorepoRoot(explicitWorkspace || start);
+  const projectRoot = resolveDeclaredCapabilityRoot(env) ?? findMonorepoRoot(explicitWorkspace || start);
   return {
     projectRoot,
     paths: {

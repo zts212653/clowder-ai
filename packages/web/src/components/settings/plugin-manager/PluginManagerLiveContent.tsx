@@ -20,11 +20,20 @@ import {
   responseError,
 } from './plugin-manager-live-api';
 
-const POLL_INTERVAL_MS = 5_000;
 const EMPTY_COMPATIBILITY: readonly PluginManagerDesignFixture[] = [];
 // Dependency preparation alone may take five minutes; allow checkout and package admission as well.
 const INSTALL_TIMEOUT_MS = 10 * 60_000;
+// Lifecycle writes may stop a runtime and spend up to four minutes starting it before returning.
+const LIFECYCLE_TIMEOUT_MS = 5 * 60_000;
 const INSTALL_UNCONFIRMED = '安装结果尚未确认，后台可能仍在处理。请查看插件列表确认状态，避免重复安装。';
+
+function mutationRequestOptions(path: string): { mutationTimeoutMs: number } | undefined {
+  if (path.endsWith('/install') || path.endsWith('/update')) return { mutationTimeoutMs: INSTALL_TIMEOUT_MS };
+  if (path.endsWith('/set-enabled') || path.endsWith('/uninstall') || path.endsWith('/contributions/configuration')) {
+    return { mutationTimeoutMs: LIFECYCLE_TIMEOUT_MS };
+  }
+  return undefined;
+}
 
 export function PluginManagerLiveContent({
   presentation = 'v1',
@@ -139,10 +148,8 @@ export function PluginManagerLiveContent({
     mounted.current = true;
     initialSelection.current = new URLSearchParams(window.location.search).get('plugin');
     void loadList('');
-    const timer = window.setInterval(() => void loadList(query.current), POLL_INTERVAL_MS);
     return () => {
       mounted.current = false;
-      window.clearInterval(timer);
     };
   }, [loadList]);
 
@@ -162,7 +169,7 @@ export function PluginManagerLiveContent({
       setError(null);
       setConfigurationSavedPluginId(null);
       try {
-        const response = await apiFetch(request.path, request.init);
+        const response = await apiFetch(request.path, request.init, mutationRequestOptions(request.path));
         if (!response.ok) {
           const failure = await responseError(response, `配置保存失败 (${response.status})`);
           await refresh();
@@ -172,6 +179,7 @@ export function PluginManagerLiveContent({
         setConfigurationSavedPluginId(pluginId);
         await refresh();
       } catch {
+        await refresh();
         setError('未能确认配置保存结果，请刷新后检查。');
       } finally {
         setBusyPluginId(null);
@@ -192,7 +200,7 @@ export function PluginManagerLiveContent({
             headers: { 'content-type': 'application/json' },
             body: JSON.stringify(body),
           },
-          path.endsWith('/install') || path.endsWith('/update') ? { mutationTimeoutMs: INSTALL_TIMEOUT_MS } : undefined,
+          mutationRequestOptions(path),
         );
         if (!response.ok) {
           const failure = await responseError(response, `插件操作失败 (${response.status})`);

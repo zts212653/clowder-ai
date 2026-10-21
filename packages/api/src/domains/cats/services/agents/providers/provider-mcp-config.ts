@@ -41,6 +41,8 @@ export async function resolveProviderMcpConfigResolution(input: {
   mcpServerPath: string;
   credentialFile?: string;
   provider?: string;
+  /** Native clients may inherit a Git-root MCP file while executing in a child directory. */
+  projectMcpRoot?: string;
 }): Promise<{ servers: Record<string, Record<string, unknown>>; source: 'capabilities.json' | 'fallback' }> {
   const distDir = dirname(input.mcpServerPath);
   const binaryProjectRoot = resolve(distDir, '../../..');
@@ -86,6 +88,13 @@ export async function resolveProviderMcpConfigResolution(input: {
       if (parsed?.version === 1 || parsed?.version === 2) capConfig = parsed;
     }
     if (capConfig && catId) {
+      if (input.provider === 'kimi') {
+        // Retired or unusable descriptors may be absent from resolveServersForCat.
+        // Their host-owned names must still exclude stale project definitions.
+        for (const cap of capConfig.capabilities) {
+          if (cap.type === 'mcp') managedMcpServerNames.add(cap.id.replace(/:/g, '__'));
+        }
+      }
       for (const s of resolveServersForCat(capConfig, catId, { accessScope })) {
         managedMcpServerNames.add(s.name);
         if (!s.enabled) continue;
@@ -142,20 +151,28 @@ export async function resolveProviderMcpConfigResolution(input: {
   // --strict-mcp-config still applies: only the merged set is active.
   if (input.workingDirectory) {
     try {
-      const userMcpPath = join(input.workingDirectory, '.mcp.json');
-      if (existsSync(userMcpPath)) {
-        const userMcp = JSON.parse(readFileSync(userMcpPath, 'utf-8')) as {
-          mcpServers?: Record<string, unknown>;
-        };
-        if (userMcp.mcpServers && typeof userMcp.mcpServers === 'object') {
-          const excludedMcpServerNames = expandManagedMcpNamesForUserMerge([
-            ...managedMcpServerNames,
-            ...Object.keys(mcpServers),
-          ]);
-          for (const [name, entry] of Object.entries(userMcp.mcpServers)) {
-            if (isRetiredGithubMcpConfigEntry(name, entry)) continue;
-            if (!excludedMcpServerNames.has(name) && !(name in mcpServers) && entry && typeof entry === 'object') {
-              mcpServers[name] = entry as Record<string, unknown>;
+      const excludedMcpServerNames = expandManagedMcpNamesForUserMerge([
+        ...managedMcpServerNames,
+        ...Object.keys(mcpServers),
+        ...(input.provider === 'kimi' ? CAT_CAFE_SPLIT_ENTRYPOINTS.keys() : []),
+      ]);
+      const roots = new Set([input.projectMcpRoot ?? input.workingDirectory, input.workingDirectory]);
+      for (const userMcpRoot of roots) {
+        const userMcpPath = join(userMcpRoot, '.mcp.json');
+        if (existsSync(userMcpPath)) {
+          const userMcp = JSON.parse(readFileSync(userMcpPath, 'utf-8')) as {
+            mcpServers?: Record<string, unknown>;
+          };
+          if (userMcp.mcpServers && typeof userMcp.mcpServers === 'object') {
+            for (const [name, entry] of Object.entries(userMcp.mcpServers)) {
+              if (isRetiredGithubMcpConfigEntry(name, entry)) continue;
+              if (!excludedMcpServerNames.has(name) && entry && typeof entry === 'object') {
+                const server = { ...(entry as Record<string, unknown>) };
+                if (input.projectMcpRoot && typeof server.command === 'string') {
+                  server.cwd = resolve(userMcpRoot, typeof server.cwd === 'string' ? server.cwd : '.');
+                }
+                mcpServers[name] = server;
+              }
             }
           }
         }

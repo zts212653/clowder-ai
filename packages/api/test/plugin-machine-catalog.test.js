@@ -223,7 +223,6 @@ test('retains the last canonical machine catalog when a later read fails', async
         effectiveGrants: [],
       },
     ],
-    refreshTtlMs: 0,
     now: () => now,
   });
 
@@ -238,7 +237,33 @@ test('retains the last canonical machine catalog when a later read fails', async
   assert.equal(JSON.stringify(degraded).includes('private upstream detail'), false);
 });
 
-test('coalesces concurrent refreshes and reuses catalog truth within the refresh TTL', async () => {
+test('retries a failed catalog read on the next snapshot request', async () => {
+  let loadCount = 0;
+  let now = 5_500;
+  const provider = new MachineOfficialPluginCatalog({
+    loadCatalog: async () => {
+      loadCount += 1;
+      if (loadCount === 1) throw new Error('temporary network failure');
+      return rawCatalog();
+    },
+    validateCatalog: canonicalValidator,
+    hostPolicies: [],
+    now: () => now,
+  });
+
+  const degraded = await provider.snapshot();
+  assert.equal(degraded.status, 'degraded');
+  assert.equal(degraded.errorCode, 'CATALOG_FETCH_FAILED');
+  assert.equal(loadCount, 1);
+
+  now += 1;
+  const recovered = await provider.snapshot();
+  assert.equal(recovered.status, 'fresh');
+  assert.equal(recovered.checkedAt, now);
+  assert.equal(loadCount, 2);
+});
+
+test('coalesces only concurrent refreshes and reloads the catalog on the next snapshot request', async () => {
   let loadCount = 0;
   let now = 6_000;
   let releaseFirstLoad;
@@ -258,7 +283,6 @@ test('coalesces concurrent refreshes and reuses catalog truth within the refresh
         effectiveGrants: [],
       },
     ],
-    refreshTtlMs: 1_000,
     now: () => now,
   });
 
@@ -269,14 +293,10 @@ test('coalesces concurrent refreshes and reuses catalog truth within the refresh
   const [firstSnapshot, concurrentSnapshot] = await Promise.all([first, concurrent]);
   assert.deepEqual(concurrentSnapshot, firstSnapshot);
 
-  now = 6_999;
-  assert.deepEqual(await provider.snapshot(), firstSnapshot);
-  assert.equal(loadCount, 1);
-
-  now = 7_001;
+  now = 6_001;
   const refreshed = await provider.snapshot();
   assert.equal(loadCount, 2);
-  assert.equal(refreshed.checkedAt, 7_001);
+  assert.equal(refreshed.checkedAt, 6_001);
 });
 
 test('loads the configured machine catalog through a bounded HTTPS-only reader', async () => {
@@ -370,7 +390,6 @@ for (const [name, mutate, code] of [
       loadCatalog: async () => raw,
       validateCatalog: canonicalValidator,
       hostPolicies: [],
-      refreshTtlMs: 1,
       now: () => now,
     });
     const first = await provider.snapshot();
@@ -394,7 +413,6 @@ test('continuity retains historical digest bindings across upgrades and temporar
     loadCatalog: async () => raw,
     validateCatalog: canonicalValidator,
     hostPolicies: [],
-    refreshTtlMs: 0,
   });
   await provider.snapshot();
   raw = releaseCatalog('2.0.0', 2);

@@ -121,9 +121,9 @@ describe('F232 AC-A7 classifyArtifactView — 产物 → 内容查看策略', ()
     expect(classifyArtifactView({ type: 'video', name: 'missing.mp4' })).toBe('fallback');
   });
 
-  // F232 polish: widget type support
-  it('widget → fallback (跳回原消息看内容)', () => {
-    expect(classifyArtifactView({ type: 'widget', name: '架构图' })).toBe('fallback');
+  // F232 PR-A: 有坐标的 html_widget 在面板内沙盒预览；无坐标的由详情页回退到原消息。
+  it('widget → widget view (面板内预览，坐标缺失由详情页回退)', () => {
+    expect(classifyArtifactView({ type: 'widget', name: '架构图' })).toBe('widget');
   });
 });
 

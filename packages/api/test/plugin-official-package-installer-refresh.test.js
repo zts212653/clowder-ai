@@ -59,6 +59,40 @@ test('explicit install rejects when the provider advances past the owner-confirm
   assert.equal((await store.snapshot()).instances.length, 0);
 });
 
+test('a first-start snapshot installs its captured release without rereading the provider', async () => {
+  const alpha4Manifest = manifest({ version: '0.1.0-alpha.4' });
+  const alpha4Archive = await packageArchive({ packageManifest: alpha4Manifest });
+  const alpha4 = catalogEntry(alpha4Archive.integrity, {
+    version: alpha4Manifest.version,
+    archiveUrl: 'https://registry.npmjs.org/@clowder-ai/official-test-source/-/official-test-source-0.1.0-alpha.4.tgz',
+  });
+  let catalogReads = 0;
+  const store = new MemoryPluginInventoryStore();
+  const installer = new OfficialPluginPackageInstaller({
+    inventory: new HostInventoryControlPlane(store, {
+      createInstanceId: () => 'pi_official',
+      now: () => 10_000,
+    }),
+    packagesRoot: await mkdtemp(join(tmpdir(), 'cat-cafe-initial-snapshot-')),
+    catalogProvider: {
+      snapshot: async () => {
+        catalogReads += 1;
+        throw new Error('catalog should not be reread inside the operation');
+      },
+    },
+    fetchArchive: async () => alpha4Archive.bytes,
+  });
+
+  await installer.installFromSnapshot(
+    { entries: [alpha4], status: 'fresh', checkedAt: 1_000 },
+    alpha4.catalogId,
+    releaseFence(alpha4),
+  );
+
+  assert.equal(catalogReads, 0);
+  assert.equal((await store.snapshot()).instances[0].packageDigest, alpha4.packageDigest);
+});
+
 test('one installer observes a newer provider snapshot and preserves a stopped error projection', async () => {
   const alpha4Manifest = manifest({ version: '0.1.0-alpha.4' });
   const alpha5Manifest = manifest({ version: '0.1.0-alpha.5' });
