@@ -3,6 +3,12 @@ import { readFileSync } from 'node:fs';
 import { parse } from 'yaml';
 
 const workflow = parse(readFileSync(new URL('../workflows/ci.yml', import.meta.url), 'utf8'));
+const lintCheckout = workflow.jobs.lint.steps.find((step) => step.uses === 'actions/checkout@v4');
+assert.equal(
+  lintCheckout?.with?.['fetch-depth'],
+  0,
+  'the lint job runs MCP lineage checks and must fetch complete Git history',
+);
 const runtimeJobs = ['public-test-prepare', 'public-test-shards', 'public-test-summary'];
 const versions = runtimeJobs.map((jobName) => {
   const setupNode = workflow.jobs[jobName].steps.find((step) => step.uses === 'actions/setup-node@v4');
