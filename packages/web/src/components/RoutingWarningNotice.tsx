@@ -15,6 +15,8 @@ function formatRoutingWarning(warning: CatRoutingError): string {
       return `${warning.droppedMentions.map((catId) => `@${catId}`).join('、')} 已有 terminal ACK，未触发新回复。`;
     case 'cat_not_found':
       return `${warning.mention} 不存在，已跳过。`;
+    case 'credential_required':
+      return `@${warning.displayName} 需要配置凭据，已跳过。请使用 /config 配置后重试。`;
   }
 
   const exhaustive: never = warning;

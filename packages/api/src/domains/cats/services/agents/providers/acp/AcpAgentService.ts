@@ -30,6 +30,8 @@ import {
 import { getCatEffort } from '../../../../../../config/cat-config-loader.js';
 import { getCatModel } from '../../../../../../config/cat-models.js';
 import { createModuleLogger } from '../../../../../../infrastructure/logger.js';
+import { sanitizeCliStderr } from '../../../../../../utils/sanitize-cli-stderr.js';
+import { memberConfigurationRevision } from '../../../../../../config/member-config-revision.js';
 import { createPromptDigest } from '../../../context/prompt-digest.js';
 import type {
   AgentMessage,
@@ -194,6 +196,12 @@ export class AcpAgentService implements AgentService {
   private readonly agentBusyRetryDelaysMs: number[];
   /** Becomes true only after this concrete ACP service observes usable standard usage telemetry. */
   private observedUsageUpdate = false;
+  /** #1668 W2: Connection readiness observations by identity scope */
+  private connectionObservations = new Map<string, import('../../../types.js').ConnectionReadinessSnapshot>();
+  /** #1668 W2: Per-identity attempt counters for late-arrival fence */
+  private identityAttempts = new Map<string, number>();
+  /** #1668 W2: Member configuration revision bound to this service instance */
+  private readonly memberRevision: string | undefined;
 
   constructor(config: AcpAgentServiceConfig) {
     this.catId = config.catId;
@@ -209,6 +217,13 @@ export class AcpAgentService implements AgentService {
     this.mcpSupportEnabled = config.mcpSupport !== false;
     this.idleTtlMs = config.idleTtlMs ?? DEFAULT_ACP_IDLE_TTL_MS;
     this.agentBusyRetryDelaysMs = config.agentBusyRetryDelaysMs ?? DEFAULT_AGENT_BUSY_RETRY_DELAYS_MS;
+
+    // #1668 W2: Capture member configuration revision at construction
+    try {
+      this.memberRevision = memberConfigurationRevision(this.projectRoot, this.catId);
+    } catch {
+      this.memberRevision = undefined;
+    }
   }
 
   contextCapability(): import('../../../types.js').AgentContextCapability {
@@ -298,6 +313,18 @@ export class AcpAgentService implements AgentService {
       this.modelName = value;
       metadata.model = value;
     };
+
+    // #1668 W2: Capture connection identity and attempt BEFORE any await
+    const cwd = options?.workingDirectory ?? this.projectRoot;
+    const connectionScope: import('../../../types.js').ConnectionIdentityScope = {
+      memberRevision: this.memberRevision,
+      cwd,
+      provider: this.providerName !== 'acp' ? this.providerName : undefined,
+      model: this.modelName !== 'acp' ? this.modelName : undefined,
+    };
+    const connectionKey = this.buildConnectionKey(connectionScope);
+    const attemptNumber = this.getNextAttempt(connectionKey);
+
     // Diagnostic context: threadId + invocationId for correlating thread-specific failures
     const threadId = options?.auditContext?.threadId;
     const invocationId = options?.auditContext?.invocationId;
@@ -325,11 +352,14 @@ export class AcpAgentService implements AgentService {
       lease = await this.pool.acquire(this.poolKey, { sessionId: options?.sessionId });
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);
-      log.error({ ...ctx, err: errMsg }, 'ACP init failure');
+      // R4-2: Sanitize init failure errors before logging and user display
+      const sanitizedLog = sanitizeCliStderr(errMsg);
+      const sanitizedUser = sanitizeCliStderr(errMsg);
+      log.error({ ...ctx, err: sanitizedLog }, 'ACP init failure');
       yield {
         type: 'error',
         catId: this.catId,
-        error: `init_failure: ${errMsg}`,
+        error: `init_failure: ${sanitizedUser}`,
         errorCode: 'init_failure',
         metadata,
         timestamp: Date.now(),
@@ -356,7 +386,6 @@ export class AcpAgentService implements AgentService {
       clearRecentCapacitySignal(): void;
       readonly promptCapabilities?: AcpPromptCapabilities;
     };
-    const cwd = options?.workingDirectory ?? this.projectRoot;
     let sessionId: string | undefined;
     let promptPhase: PromptPhase = 'not_started';
 
@@ -898,6 +927,10 @@ export class AcpAgentService implements AgentService {
           const retryThinking = flushAcpThinking(retryState, this.catId, metadata);
           if (retryThinking) yield retryThinking;
           client.clearRecentCapacitySignal();
+
+          // #1668 W2: Record successful retry, clearing any prior credential_required
+          this.recordConnectionSuccess(connectionScope, attemptNumber);
+
           yield { type: 'done', catId: this.catId, metadata, timestamp: Date.now() };
           return; // Exit — retry path handled completion
         } catch (retryErr) {
@@ -905,11 +938,14 @@ export class AcpAgentService implements AgentService {
             sealActivePromptSession(sessionId);
           }
           const retryErrMsg = retryErr instanceof Error ? retryErr.message : String(retryErr);
-          log.error({ ...ctx, sessionId, err: retryErrMsg }, '#1091: retry with fresh session also failed');
+          // R4-2: Sanitize retry failure errors before logging and user display
+          const sanitizedLog = sanitizeCliStderr(retryErrMsg);
+          const sanitizedUser = sanitizeCliStderr(retryErrMsg);
+          log.error({ ...ctx, sessionId, err: sanitizedLog }, '#1091: retry with fresh session also failed');
           yield {
             type: 'error',
             catId: this.catId,
-            error: `resume_empty_retry_failed: ${retryErrMsg}`,
+            error: `resume_empty_retry_failed: ${sanitizedUser}`,
             errorCode: 'prompt_failure',
             metadata,
             timestamp: Date.now(),
@@ -924,6 +960,9 @@ export class AcpAgentService implements AgentService {
       if (trailingThinking) yield trailingThinking;
       // Successful prompt — provider has recovered; clear stale capacity signal
       client.clearRecentCapacitySignal();
+
+      // #1668 W2: Record successful connection, clearing any prior credential_required
+      this.recordConnectionSuccess(connectionScope, attemptNumber);
 
       yield { type: 'done', catId: this.catId, metadata, timestamp: Date.now() };
     } catch (err) {
@@ -946,7 +985,16 @@ export class AcpAgentService implements AgentService {
       if (pendingThinking) yield pendingThinking;
 
       const { errorCode, errorMsg } = classifyError(err, capacitySignal, client.recentCapacitySignal);
-      log.error({ ...ctx, errorCode, err: errorMsg, sessionId, eventCount, waitedMs }, 'ACP prompt failure');
+
+      // #1668 W2: Record credential_required observation for connection readiness
+      // Use resolved cwd (from options.workingDirectory or projectRoot fallback)
+      if (errorCode === 'credential_required') {
+        this.recordCredentialRequired(connectionScope, errorMsg, attemptNumber);
+      }
+
+      // R4-2: Sanitize error message before logging to prevent credential leakage
+      const sanitizedForLog = sanitizeCliStderr(errorMsg);
+      log.error({ ...ctx, errorCode, err: sanitizedForLog, sessionId, eventCount, waitedMs }, 'ACP prompt failure');
       yield {
         type: 'error',
         catId: this.catId,
@@ -963,6 +1011,108 @@ export class AcpAgentService implements AgentService {
       }
       lease.release();
     }
+  }
+
+  /** #1668 W2: Read connection readiness snapshot for a specific identity scope.
+   *  Returns observed credential status after actual invocations; unknown when no evidence. */
+  connectionReadiness(scope: import('../../../types.js').ConnectionIdentityScope): import('../../../types.js').ConnectionReadinessSnapshot {
+    // Revision isolation: query must specify memberRevision to match this instance
+    // undefined query is not a wildcard — production must send current revision
+    if (scope.memberRevision === undefined) {
+      return {
+        status: 'unknown',
+        observedAt: Date.now(),
+      };
+    }
+
+    // Strict revision match required
+    if (scope.memberRevision !== this.memberRevision) {
+      return {
+        status: 'unknown',
+        observedAt: Date.now(),
+      };
+    }
+
+    // Build key with service's own identity defaults when not provided
+    // Preserve all explicit scope fields (accountRef, provider, model, cwd)
+    const queryScope: import('../../../types.js').ConnectionIdentityScope = {
+      ...scope,
+      provider: scope.provider ?? (this.providerName !== 'acp' ? this.providerName : undefined),
+      model: scope.model ?? (this.modelName !== 'acp' ? this.modelName : undefined),
+    };
+
+    const key = this.buildConnectionKey(queryScope);
+    const cached = this.connectionObservations.get(key);
+    if (!cached) {
+      return {
+        status: 'unknown',
+        observedAt: Date.now(),
+      };
+    }
+
+    // Late-arrival fence: check if this observation is stale
+    const currentAttempt = this.identityAttempts.get(key) ?? 0;
+    const cachedAttempt = cached.generation ? Number(cached.generation) : 0;
+    if (cachedAttempt < currentAttempt) {
+      // Observation is from an older attempt, newer one hasn't completed yet
+      return {
+        status: 'unknown',
+        observedAt: Date.now(),
+      };
+    }
+
+    return cached;
+  }
+
+  /** #1668 W2: Build identity key for connection observation isolation */
+  private buildConnectionKey(scope: import('../../../types.js').ConnectionIdentityScope): string {
+    // Note: memberRevision checked at query entrance; not part of key.
+    // Each service instance corresponds to one member configuration generation.
+    return JSON.stringify({
+      cwd: scope.cwd,
+      provider: scope.provider ?? '',
+      model: scope.model ?? '',
+      account: scope.accountRef ?? '',
+    });
+  }
+
+  /** #1668 W2: Get and increment attempt counter for this identity */
+  private getNextAttempt(key: string): number {
+    const next = (this.identityAttempts.get(key) ?? 0) + 1;
+    this.identityAttempts.set(key, next);
+    return next;
+  }
+
+  /** #1668 W2: Record credential_required observation after confirmed failure */
+  private recordCredentialRequired(scope: import('../../../types.js').ConnectionIdentityScope, reason: string, attempt: number): void {
+    const key = this.buildConnectionKey(scope);
+    const cached = this.connectionObservations.get(key);
+    // Late-arrival fence: don't overwrite newer observations
+    if (cached && cached.generation !== undefined && Number(cached.generation) > attempt) {
+      return;
+    }
+    this.connectionObservations.set(key, {
+      status: 'credential_required',
+      observedAt: Date.now(),
+      reason: 'MISSING_CREDENTIAL',
+      guidance: '请在 Hub > 账号设置中添加 API key，或在原生工具中配置凭据。',
+      generation: String(attempt),
+    });
+  }
+
+  /** #1668 W2: Record successful invocation, clearing any prior credential_required */
+  private recordConnectionSuccess(scope: import('../../../types.js').ConnectionIdentityScope, attempt: number): void {
+    const key = this.buildConnectionKey(scope);
+    const cached = this.connectionObservations.get(key);
+    // Late-arrival fence: don't overwrite newer observations
+    if (cached && cached.generation !== undefined && Number(cached.generation) > attempt) {
+      return;
+    }
+    this.connectionObservations.set(key, {
+      status: 'ready',
+      observedAt: Date.now(),
+      generation: String(attempt),
+    });
   }
 }
 
@@ -1038,16 +1188,42 @@ function classifyError(
         : null;
     const fullMsg = dataDetail ? `${err.message} — ${dataDetail}` : err.message;
 
+    // Priority order: structured error codes → specific patterns → generic fallback
+    // R4-3: Check error code first (capacity -32000, busy -32001) before text patterns
+
+    // 1. Check busy by error code (highest priority for -32001)
     if (isAgentBusyError(err)) {
-      // turn.agent_busy after busy-retry exhaustion — agent-internal turn still active
       return { errorCode: 'agent_busy', errorMsg: fullMsg };
     }
-    if (err.code === -32000 || fullMsg.includes('capacity')) {
+
+    // 2. Check capacity by error code -32000 (takes precedence over text patterns)
+    if (err.code === -32000) {
       return { errorCode: 'model_capacity', errorMsg: fullMsg };
     }
+
+    // 3. Check MCP errors to avoid misclassifying tool auth as model credential issues
     if (/\bmcp\b/i.test(fullMsg)) {
       return { errorCode: 'mcp_pollution', errorMsg: fullMsg };
     }
+
+    // 4. Check for model credential-related errors (narrowed patterns from known providers)
+    // DSH structured: "no API key for provider route", "store <PROVIDER>_API_KEY through"
+    // Avoid generic "token" which can match pagination tokens or capacity retry tokens
+    if (
+      /no\s+API\s+key\s+for\s+provider/i.test(fullMsg) ||
+      /store\s+\w+_API_KEY\s+through/i.test(fullMsg) ||
+      /credential.*(required|missing|invalid|expired)/i.test(fullMsg) ||
+      /api[_\s]?key.*(missing|required|invalid)/i.test(fullMsg) ||
+      /auth(?:entication)?\s+(?:fail|invalid|error)|unauthenticated/i.test(fullMsg)
+    ) {
+      return { errorCode: 'credential_required', errorMsg: fullMsg };
+    }
+
+    // 5. Capacity text pattern (after credential check, for non--32000 capacity errors)
+    if (/capacity.*(?:exhaust|exceed|limit)/i.test(fullMsg)) {
+      return { errorCode: 'model_capacity', errorMsg: fullMsg };
+    }
+
     return { errorCode: 'prompt_failure', errorMsg: fullMsg };
   }
   if (err instanceof AcpTimeoutError) {
@@ -1081,11 +1257,16 @@ function classifyError(
 
 /** Map internal error codes to user-friendly messages that clarify the failure source.
  *  Format: `{errorCode}: {errorMsg}\n{user-facing explanation}`
- *  The errorCode prefix is preserved for machine grep-ability (tests + invoke-helpers). */
+ *  The errorCode prefix is preserved for machine grep-ability (tests + invoke-helpers).
+ *  R4-2: Sanitizes errorMsg before returning to prevent credential leakage. */
 function toUserFacingError(providerName: string, errorCode: string, errorMsg: string): string {
   const label = providerName === 'acp' ? 'ACP agent' : providerName;
-  const base = `${errorCode}: ${errorMsg}`;
+  // R4-2: Sanitize error message at the unified outbound boundary
+  const sanitized = sanitizeCliStderr(errorMsg);
+  const base = `${errorCode}: ${sanitized}`;
   switch (errorCode) {
+    case 'credential_required':
+      return `${base}\n⚠️ 凭据缺失或无效。请在 Hub > 账号设置中添加 API key，或在原生工具中配置凭据。`;
     case 'agent_busy':
       return `${base}\n⚠️ ${label} 正在处理内部轮次（如后台任务完成通知），自动重试后仍被占用。非 Clowder AI 系统故障，稍后重试即可。`;
     case 'model_capacity':
@@ -1095,7 +1276,7 @@ function toUserFacingError(providerName: string, errorCode: string, errorMsg: st
     case 'turn_budget_exceeded': {
       // #1186: Derive actual timeout from error message instead of hardcoding 15m.
       // AcpTimeoutError format: "...did not respond within ${ms}ms"
-      const budgetMatch = errorMsg.match(/within (\d+)ms/);
+      const budgetMatch = sanitized.match(/within (\d+)ms/);
       const budgetMinutes = budgetMatch ? Math.round(Number(budgetMatch[1]) / 60_000) : '?';
       return `${base}\n⚠️ 本轮对话时间预算用完（${budgetMinutes}分钟），agent 可能在执行复杂工具链。非故障，可重试。`;
     }
@@ -1104,7 +1285,7 @@ function toUserFacingError(providerName: string, errorCode: string, errorMsg: st
     case 'init_failure':
       return `${base}\n⚠️ ACP agent 启动失败（本地进程异常）。`;
     case 'prompt_failure':
-      if (/Premature close|ECONNRESET|socket hang up/i.test(errorMsg)) {
+      if (/Premature close|ECONNRESET|socket hang up/i.test(sanitized)) {
         return `${base}\n⚠️ ${label} 与服务端连接中断（Premature close），非 Clowder AI 系统故障。`;
       }
       return base;

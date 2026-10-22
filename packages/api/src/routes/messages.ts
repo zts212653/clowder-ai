@@ -556,7 +556,7 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
           persist: true,
           allowFallback: false,
         });
-    const { targetCats: resolvedTargetCats, intent } = routingResult;
+    const { targetCats: resolvedTargetCats, intent, routing_warnings } = routingResult; // #1668: Extract warnings
     // F35: When sending a whisper, override routing targets to only whisperTo recipients.
     // This prevents non-recipient cats from being invoked and seeing whisper content.
     const sourceTargetCats =
@@ -636,6 +636,7 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
         : {}),
       ...(liveSessionId ? { liveAdmission: { sessionId: liveSessionId, targetId: targetCats[0]! } } : {}),
       ...(admittedMessageBundle ? { messageBundle: admittedMessageBundle.carrier } : {}),
+      ...(routing_warnings.length > 0 ? { routingWarnings: routing_warnings } : {}), // #1668: Store warnings
     };
     const sourcePayloadWrite: { extra: NonNullable<StoredMessage['extra']> } | Record<string, never> =
       Object.keys(sourcePayloadExtra).length > 0 ? { extra: sourcePayloadExtra } : {};

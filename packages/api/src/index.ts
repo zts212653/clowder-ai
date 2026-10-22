@@ -2558,8 +2558,74 @@ async function main(): Promise<void> {
     postCompactContext: ({ cliSessionId }) => inProcessCompactionSurface.postCompactContextFor(cliSessionId),
   });
   let trustedImagePathResolver: (hmrId: string) => Promise<string | undefined> = async () => undefined;
+
+  // #1668 W1: Resolve connection identity scope for readiness filtering
+  // Reuses same cwd resolution logic as invoke-single-cat.ts (preview only, no writes)
+  const resolveConnectionScope = async (
+    catId: string,
+    threadId: string,
+  ): Promise<import('./domains/cats/services/types.js').ConnectionIdentityScope | undefined> => {
+    try {
+      // Revision from runtime catalog root (where service was constructed)
+      const projectRoot = resolveActiveProjectRoot(process.cwd());
+      const { memberConfigurationRevision } = await import('./config/member-config-revision.js');
+      const revision = memberConfigurationRevision(projectRoot, catId);
+
+      // Working directory from thread's projectPath (same logic as invoke, read-only)
+      let workingDirectory: string | undefined;
+      if (threadStore) {
+        try {
+          const thread = await threadStore.get(threadId);
+          if (thread?.projectPath && thread.projectPath !== 'default') {
+            // Skip virtual game paths
+            if (!thread.projectPath.startsWith('games/')) {
+              const { resolvePersistentProjectPathDetailed } = await import('./utils/persistent-project-path.js');
+              const validated = await resolvePersistentProjectPathDetailed(thread.projectPath);
+              if (validated.ok) {
+                workingDirectory = validated.path;
+              } else {
+                // Validation failed, cannot trust this cwd
+                return undefined;
+              }
+            } else {
+              // Virtual game path, cannot use as cwd
+              return undefined;
+            }
+          } else if (thread?.bootcampState) {
+            const { resolveBootcampWorkspaceRoot } = await import(
+              './domains/cats/services/bootcamp/workspace-root.js'
+            );
+            const bootcamp = await resolveBootcampWorkspaceRoot();
+            if (bootcamp.ok) {
+              workingDirectory = bootcamp.projectPath;
+            } else {
+              return undefined;
+            }
+          }
+          // Note: opencode default workspace intentionally excluded from readiness preview
+        } catch {
+          // Thread not found or error
+          return undefined;
+        }
+      }
+
+      if (!workingDirectory) {
+        // No trusted workspace available
+        return undefined;
+      }
+
+      return {
+        memberRevision: revision,
+        cwd: workingDirectory,
+      };
+    } catch {
+      return undefined;
+    }
+  };
+
   router = new AgentRouter({
     resolveTrustedImagePath: async (hmrId) => trustedImagePathResolver(hmrId),
+    resolveConnectionScope,
 
     agentRegistry,
     registry,
@@ -3180,6 +3246,12 @@ async function main(): Promise<void> {
   await app.register(catsRoutes, {
     resolveContextCapacitySnapshot: (catId) => router.contextCapacitySnapshot(catId),
     resolveCarrierCapability: (catId) => router.freshnessCarrierCapability(catId),
+    // #1668: Inject connection readiness resolver with safety checks
+    resolveConnectionReadiness: (catId, scope) => {
+      if (!agentRegistry.has(catId)) return undefined;
+      const service = agentRegistry.get(catId);
+      return service.connectionReadiness?.(scope);
+    },
   });
   await app.register(routingContextRoutes, {
     ...(routingContextRuntime ? { runtime: routingContextRuntime } : {}),

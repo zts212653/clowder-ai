@@ -28,6 +28,7 @@ import type {
 import type { SessionStore } from '@cat-cafe/shared/utils';
 import { context as ctxApi, SpanStatusCode, trace } from '@opentelemetry/api';
 import { getDefaultCatId, isCatAvailable } from '../../../../../config/cat-config-loader.js';
+import { memberConfigurationRevision } from '../../../../../config/member-config-revision.js';
 import { createModuleLogger } from '../../../../../infrastructure/logger.js';
 import {
   ROUTING_INTENT,
@@ -447,6 +448,8 @@ export interface AgentRouterOptions {
   sessionStore?: SessionStore;
   deliveryCursorStore?: DeliveryCursorStore;
   threadStore?: IThreadStore;
+  /** #1668 W1: Resolve connection identity scope for readiness filtering */
+  resolveConnectionScope?: (catId: string, threadId: string) => Promise<import('../../types.js').ConnectionIdentityScope | undefined>;
   /** F24: Session chain store for context health tracking */
   sessionChainStore?: ISessionChainStore;
   /** F296 B3b-1: persistent context epoch and cold/hot mode owner. */
@@ -574,6 +577,7 @@ export class AgentRouter {
   private routingContextPromptProjection?: import('../../../../routing-context/RoutingContextPromptProjector.js').RoutingContextPromptProjectionPort;
   private routingDispatchPreflight?: import('../../../../routing-context/RoutingDispatchPreflightPort.js').RoutingDispatchPreflightPort;
   private routingDispatchSignalObserver?: import('../../../../routing-context/RoutingDispatchSignalContract.js').RoutingDispatchTerminalObserver;
+  private resolveConnectionScope?: (catId: string, threadId: string) => Promise<import('../../types.js').ConnectionIdentityScope | undefined>;
   private writeOpportunityTerminalLedger?: import('../invocation/invoke-single-cat.js').InvocationDeps['writeOpportunityTerminalLedger'];
   private writeOpportunityDeliveryStore?: import('../invocation/invoke-single-cat.js').InvocationDeps['writeOpportunityDeliveryStore'];
   private runtimeSessionStore: IRuntimeSessionStore | undefined;
@@ -678,6 +682,7 @@ export class AgentRouter {
     this.routingContextPromptProjection = options.routingContextPromptProjection;
     this.routingDispatchPreflight = options.routingDispatchPreflight;
     this.routingDispatchSignalObserver = options.routingDispatchSignalObserver;
+    this.resolveConnectionScope = options.resolveConnectionScope;
     this.writeOpportunityTerminalLedger = options.writeOpportunityTerminalLedger;
     this.writeOpportunityDeliveryStore = options.writeOpportunityDeliveryStore;
     this.runtimeSessionStore = options.runtimeSessionStore;
@@ -786,6 +791,67 @@ export class AgentRouter {
     return filtered;
   }
 
+  /** #1668 W1: Filter routable cats with connectionReadiness check for auto-candidates.
+   *  Explicit mentions bypass the check (allow retry).
+   *  Returns { filtered: included cats, skipped: excluded with reasons } */
+  private async filterRoutableCatsWithReadiness(
+    catIds: Iterable<string | null | undefined>,
+    threadId: string,
+    explicitMentions: Set<string> = new Set(),
+  ): Promise<{ filtered: CatId[]; skipped: Array<{ catId: CatId; reason: string }> }> {
+    const filtered: CatId[] = [];
+    const skipped: Array<{ catId: CatId; reason: string }> = [];
+    const seen = new Set<string>();
+
+    for (const catId of catIds) {
+      if (!this.isRoutableCat(catId)) continue;
+      if (seen.has(catId)) continue;
+      seen.add(catId);
+
+      // Explicit mentions always pass (allow retry)
+      if (explicitMentions.has(catId)) {
+        filtered.push(catId);
+        continue;
+      }
+
+      // Check connectionReadiness for auto-candidates
+      const service = this.services[catId];
+      if (service?.connectionReadiness) {
+        try {
+          // Resolve trustworthy connection scope (revision from catalog root, cwd from thread)
+          const scope = this.resolveConnectionScope
+            ? await this.resolveConnectionScope(catId, threadId)
+            : undefined;
+
+          if (!scope) {
+            // No trusted scope available, fail-open (include the cat)
+            log.debug({ catId, threadId }, '#1668: no connection scope, including in @all');
+            filtered.push(catId);
+            continue;
+          }
+
+          const snapshot = service.connectionReadiness(scope);
+
+          if (snapshot.status === 'credential_required') {
+            const reason = snapshot.reason || 'MISSING_CREDENTIAL';
+            log.info(
+              { catId, threadId, reason },
+              '#1668: @all skipping member with credential_required',
+            );
+            skipped.push({ catId, reason });
+            continue; // Skip this auto-candidate
+          }
+        } catch (err) {
+          log.warn({ catId, threadId, err }, '#1668: connectionReadiness check failed');
+          // On error, include the cat (fail-open)
+        }
+      }
+
+      filtered.push(catId);
+    }
+    return { filtered, skipped };
+  }
+
   private filterKnownCats(catIds: Iterable<string | null | undefined>): CatId[] {
     const configs = catRegistry.getAllConfigs();
     return [...new Set(catIds)].filter(
@@ -842,10 +908,14 @@ export class AgentRouter {
       throw new Error('Invalid explicit member identity');
     }
     if (exact) return this.resolveExplicitTargets(requested, threadId);
-    const targets =
-      requested.length > 0
-        ? requested
-        : (await this.resolveTargetsAndIntent(content, threadId, { persist: false, allowFallback: false })).targetCats;
+    const intentResult = await this.resolveTargetsAndIntent(content, threadId, { persist: false, allowFallback: false });
+    const targets = requested.length > 0 ? requested : intentResult.targetCats;
+
+    // #1668: If group mention with zero targets (all credential_required), don't fall back
+    if (requested.length === 0 && targets.length === 0 && intentResult.hasMentions) {
+      return []; // Empty explicit group, no implicit fallback
+    }
+
     return this.resolveConversationTargetsAtAdmission(targets, threadId, content);
   }
 
@@ -1021,7 +1091,7 @@ export class AgentRouter {
     message: string,
     threadId: string,
     options?: { allowFallback?: boolean },
-  ): Promise<{ cats: CatId[]; matchPosition: number } | null> {
+  ): Promise<{ cats: CatId[]; matchPosition: number; skipped: Array<{ catId: CatId; reason: string }> } | null> {
     const lowerMessage = this.normalizeSpeechMentions(message).toLowerCase();
 
     /** Find first boundary-valid match position, or -1 if not found */
@@ -1042,6 +1112,7 @@ export class AgentRouter {
       resolve: () => Promise<CatId[] | null>;
     }
     const patterns: GroupPattern[] = [];
+    const skippedMembers: Array<{ catId: CatId; reason: string }> = []; // #1668: collect skipped from all patterns
 
     // Thread-scoped patterns
     for (const pattern of ['@全体参与者', '@thread', '@本帖']) {
@@ -1071,20 +1142,26 @@ export class AgentRouter {
     patterns.push({
       pattern: '@全体',
       resolve: async () => {
-        const allCats = this.filterRoutableCats(Object.keys(this.services));
-        if (allCats.length > 0) return allCats;
+        const result = await this.filterRoutableCatsWithReadiness(Object.keys(this.services), threadId);
+        skippedMembers.push(...result.skipped);
+        if (result.filtered.length > 0) return result.filtered;
         if (options?.allowFallback === false) return [];
-        const fallback = this.pickFallbackCat(new Set());
+        // #1668: Don't select skipped members as fallback
+        const exclude = new Set(result.skipped.map(s => s.catId));
+        const fallback = this.pickFallbackCat(exclude);
         return fallback ? [fallback] : [];
       },
     });
     patterns.push({
       pattern: '@all',
       resolve: async () => {
-        const allCats = this.filterRoutableCats(Object.keys(this.services));
-        if (allCats.length > 0) return allCats;
+        const result = await this.filterRoutableCatsWithReadiness(Object.keys(this.services), threadId);
+        skippedMembers.push(...result.skipped);
+        if (result.filtered.length > 0) return result.filtered;
         if (options?.allowFallback === false) return [];
-        const fallback = this.pickFallbackCat(new Set());
+        // #1668: Don't select skipped members as fallback
+        const exclude = new Set(result.skipped.map(s => s.catId));
+        const fallback = this.pickFallbackCat(exclude);
         return fallback ? [fallback] : [];
       },
     });
@@ -1096,7 +1173,7 @@ export class AgentRouter {
       const pos = findMatchPosition(pattern);
       if (pos >= 0) {
         const cats = await resolve();
-        return cats ? { cats, matchPosition: pos } : null;
+        return cats ? { cats, matchPosition: pos, skipped: skippedMembers } : null;
       }
     }
 
@@ -1120,7 +1197,7 @@ export class AgentRouter {
     message: string,
     threadId: string,
     options?: { allowGroupFallback?: boolean },
-  ): Promise<{ mentions: CatId[]; routing_warnings: CatRoutingError[] }> {
+  ): Promise<{ mentions: CatId[]; routing_warnings: CatRoutingError[]; hasGroupMention: boolean }> {
     const groupResult = await this.parseGroupMentions(message, threadId, {
       allowFallback: options?.allowGroupFallback,
     });
@@ -1141,12 +1218,23 @@ export class AgentRouter {
         }
       }
 
+      // #1668: Generate warnings for skipped members (exclude explicit mentions)
+      const explicitMentions = new Set<string>([...before, ...after].map(String));
+      const actuallySkipped = groupResult.skipped.filter(s => !explicitMentions.has(s.catId));
+      const skippedWarnings: CatRoutingError[] = actuallySkipped.map(s => ({
+        kind: 'credential_required' as const,
+        catId: s.catId,
+        displayName: catRegistry.getAllConfigs()[s.catId]?.displayName || s.catId,
+        reason: s.reason,
+      }));
+
       return {
         mentions: [...before, ...groupResult.cats, ...after],
-        routing_warnings: [],
+        routing_warnings: [...individual.routing_warnings, ...skippedWarnings],
+        hasGroupMention: true, // #1668: Preserve group identification even if zero targets
       };
     }
-    return this.parseMentions(message);
+    return { ...this.parseMentions(message), hasGroupMention: false };
   }
 
   private applyRoutingPolicyForPreview(
@@ -1174,9 +1262,10 @@ export class AgentRouter {
     threadId: string,
     options?: { prospectivePreferredCats?: readonly CatId[]; publicConversation?: boolean },
   ): Promise<RoutingPreviewResponse> {
-    const { mentions: mentionedCats } = await this.parseAllMentions(message, threadId, {
+    const allMentions = await this.parseAllMentions(message, threadId, {
       allowGroupFallback: !options?.publicConversation,
     });
+    const mentionedCats = allMentions.mentions;
     // Common conversation admission can select an available recipient. Exact
     // callers retain named identities so an unavailable member reports its cause.
     const targets = options?.publicConversation ? this.filterRoutableCats(mentionedCats) : mentionedCats;
@@ -1190,6 +1279,18 @@ export class AgentRouter {
         ...(unavailableTargets.length ? { unavailableTargets } : {}),
       };
     }
+
+    // #1668: If group mention identified but yielded zero targets (all credential_required),
+    // don't fall back to implicit targets. Return empty with explicit reason.
+    if (allMentions.hasGroupMention) {
+      const unavailableTargets = this.filterKnownCats(mentionedCats).filter((id) => !this.isRoutableCat(id));
+      return {
+        targetCats: [],
+        reason: { kind: 'current_message_mentions' },
+        ...(unavailableTargets.length ? { unavailableTargets } : {}),
+      };
+    }
+
     const result = await this.resolveImplicitTargetPreview(message, threadId, options);
     const unavailableTargets = this.filterKnownCats(mentionedCats).filter((id) => !this.isRoutableCat(id));
     return unavailableTargets.length
@@ -1417,7 +1518,8 @@ export class AgentRouter {
     const allMentions = await this.parseAllMentions(message, resolvedThreadId, {
       allowGroupFallback: options?.allowFallback !== false,
     });
-    const hasMentions = allMentions.mentions.length > 0;
+    // #1668: hasMentions tracks group identification, not just final target count
+    const hasMentions = allMentions.mentions.length > 0 || allMentions.hasGroupMention;
     const routing_warnings = allMentions.routing_warnings;
     let targetCats: CatId[];
     if (options?.allowFallback === false) {

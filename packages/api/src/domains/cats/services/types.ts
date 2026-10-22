@@ -30,6 +30,36 @@ import type { CodexSessionReplacementProvenance } from './runtime-session/CodexS
 import type { AntigravitySessionLifecycle } from './runtime-session/LegacyAntigravityLifecycle.js';
 import type { TurnExecutionMessageProjection } from './stores/ports/TurnExecutionStore.js';
 
+/** #1668 W2: Identity scope for connection readiness queries.
+ *  Service isolates observations by member revision, account, provider, model, cwd. */
+export interface ConnectionIdentityScope {
+  /** Current member configuration revision (SHA256 hash from memberConfigurationRevision) */
+  memberRevision: string | undefined;
+  /** Working directory for this connection */
+  cwd: string;
+  /** Effective provider name (e.g., 'deepseek-official', 'kimi') */
+  provider?: string;
+  /** Effective model name */
+  model?: string;
+  /** Account reference if explicitly bound */
+  accountRef?: string;
+}
+
+/** #1668 W2: Connection readiness snapshot for a specific identity.
+ *  Observed state after actual invocations; not predictive. */
+export interface ConnectionReadinessSnapshot {
+  /** Observed status */
+  status: 'ready' | 'credential_required' | 'unknown';
+  /** When this observation was made */
+  observedAt: number;
+  /** Safe diagnostic code (e.g., 'MISSING_API_KEY') */
+  reason?: string;
+  /** User-facing guidance for credential_required */
+  guidance?: string;
+  /** Opaque generation token to detect stale observations */
+  generation?: string;
+}
+
 /** F8: Unified token usage type across all three cats.
  *  inputTokens = TOTAL input tokens (new + cached). Normalised at extraction
  *  so that the field has the same semantics regardless of provider.
@@ -1364,6 +1394,13 @@ export interface AgentService {
    * cliSessionId path unchanged.
    */
   usesChainKeyResume?(): boolean;
+
+  /**
+   * #1668 W2: Connection readiness snapshot for native runtime credential state.
+   * Returns the current observed connection status for a specific identity scope.
+   * Used by Router and API to skip unavailable members in @all and display status.
+   */
+  connectionReadiness?(scope: ConnectionIdentityScope): ConnectionReadinessSnapshot;
 }
 
 /**

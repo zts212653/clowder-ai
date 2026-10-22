@@ -12,7 +12,8 @@ export type CatRoutingError =
   | { kind: 'cat_not_found'; mention: string; alternatives: CatAlternative[] }
   | { kind: 'cat_disabled'; catId: CatId; displayName: string; alternatives: CatAlternative[] }
   | { kind: 'target_not_in_thread'; catId: CatId; threadId: string }
-  | { kind: 'suppressed_by_terminal_ack'; droppedMentions: CatId[] };
+  | { kind: 'suppressed_by_terminal_ack'; droppedMentions: CatId[] }
+  | { kind: 'credential_required'; catId: CatId; displayName: string; reason?: string };
 
 const NonEmptyStringSchema = z.string().min(1);
 const CatIdSchema = NonEmptyStringSchema.transform((value) => value as CatId);
@@ -54,6 +55,14 @@ export const CatRoutingErrorSchema: z.ZodType<CatRoutingError, z.ZodTypeDef, unk
     .object({
       kind: z.literal('suppressed_by_terminal_ack'),
       droppedMentions: z.array(CatIdSchema),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal('credential_required'),
+      catId: CatIdSchema,
+      displayName: NonEmptyStringSchema,
+      reason: NonEmptyStringSchema.optional(),
     })
     .strict(),
 ]);

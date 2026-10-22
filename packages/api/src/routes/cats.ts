@@ -1,3 +1,4 @@
+import type { ConnectionReadinessSnapshot, ConnectionIdentityScope } from '../domains/cats/services/types.js';
 import { dshLauncherProfileState, InvalidDshProfile } from './native-dsh-profile.js';
 import { discoverNativeRuntimesWithReadiness } from './native-runtimes.js';
 import { registerRuntimeCatalogRoute } from './runtime-catalog-route.js';
@@ -735,6 +736,7 @@ async function toCatResponse(
   resolveEffectiveAccountRef: (cat: CatConfig) => Promise<string | undefined>,
   resolveContextCapacitySnapshot?: (catId: CatId) => InvocationCapacitySnapshot | undefined,
   resolveCarrierCapability?: (catId: CatId) => FreshnessCarrierCapability | undefined,
+  resolveConnectionReadiness?: (catId: CatId, scope: ConnectionIdentityScope) => ConnectionReadinessSnapshot | undefined,
 ) {
   return saveSpan(
     'response.member',
@@ -744,6 +746,13 @@ async function toCatResponse(
       const contextCapability = contextSnapshot?.capability;
       const effectiveAccountRef = await resolveEffectiveAccountRef(cat);
       const carrierCapability = resolveCarrierCapability?.(cat.id);
+
+      // #1668: Resolve connection readiness for credential diagnosis
+      const memberRevision = memberConfigurationRevision(projectRoot, cat.id);
+      const connectionReadiness = memberRevision && resolveConnectionReadiness?.(cat.id, {
+        memberRevision,
+        cwd: projectRoot,
+      });
       const persistedIdentityCat = persistedBuiltinCloudIdentityCat(projectRoot, cat);
       const identityProtection = projectBuiltinCloudIdentityProtection(
         builtinCloudIdentityCandidate({ cat: persistedIdentityCat, accountRef: effectiveAccountRef, acp: acpConfig }),
@@ -820,6 +829,7 @@ async function toCatResponse(
         ...(acpConfig ? { acp: acpConfig } : {}),
         ...(cat.agyProfile ? { agyProfile: publicAgyProfile(cat.agyProfile) } : {}),
         ...(identityProtection ? { identityProtection } : {}),
+        ...(connectionReadiness ? { connectionReadiness } : {}), // #1668: Add readiness status
         roster: metadata.roster
           ? {
               family: metadata.roster.family,
@@ -904,6 +914,7 @@ interface CatsRoutesOptions {
   resolveContextCapacitySnapshot?: (catId: CatId) => InvocationCapacitySnapshot | undefined;
   nativeRuntimeDiscovery?: typeof discoverNativeRuntimesWithReadiness;
   resolveCarrierCapability?: (catId: CatId) => FreshnessCarrierCapability | undefined;
+  resolveConnectionReadiness?: (catId: CatId, scope: ConnectionIdentityScope) => ConnectionReadinessSnapshot | undefined;
 }
 
 export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opts) => {
@@ -974,6 +985,7 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opt
             resolveEffectiveAccountRef,
             opts.resolveContextCapacitySnapshot,
             opts.resolveCarrierCapability,
+            opts.resolveConnectionReadiness,
           ),
         ),
       ),
@@ -1290,6 +1302,8 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opt
         metadata(cat.id),
         resolveEffectiveAccountRef,
         opts.resolveContextCapacitySnapshot,
+        opts.resolveCarrierCapability,
+        opts.resolveConnectionReadiness,
       ),
       updatedBy: operator,
       ...(replayed ? { idempotent: true } : {}),
@@ -1721,6 +1735,8 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opt
           metadata(cat.id),
           resolveEffectiveAccountRef,
           opts.resolveContextCapacitySnapshot,
+          opts.resolveCarrierCapability,
+          opts.resolveConnectionReadiness,
         ),
         updatedBy: operator,
       };
