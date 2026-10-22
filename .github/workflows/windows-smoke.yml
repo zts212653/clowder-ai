@@ -47,6 +47,8 @@ jobs:
           packages/web/test/browser/native-team-a2a-proof.test.mjs packages/web/test/native-team-cleanup.test.mjs
           packages/web/test/browser/native-codex-history-policy.test.mjs
           packages/web/test/browser/native-team-startup-ready.test.mjs
+      - name: Intranet deployment Windows parent and API job persistence
+        run: node --test scripts/prepare-intranet-deployment.test.mjs scripts/intranet-deployment-startup.test.mjs
       - name: Native authentication and lazy SDK contracts (no live accounts)
         shell: bash
         run: >-
@@ -178,7 +180,7 @@ jobs:
           REQUIRE_OPENCODE_MODEL_ID_TEST: '1'
       - name: Windows ACP bootstrap private directories and test isolation
         run: >-
-          node --import ./packages/api/test/helpers/setup-cat-registry.js --test
+          node --import tsx --import ./packages/api/test/helpers/setup-cat-registry.js --test
           --test-concurrency=2 --test-timeout=60000
           packages/api/test/acp/acp-bootstrap-cwd.test.js
           packages/api/test/acp/acp-bootstrap-platform.test.js
@@ -189,6 +191,12 @@ jobs:
           packages/api/test/acp/acp-bootstrap-relocation.test.js
           packages/api/test/acp/acp-bootstrap-spawn-recheck.test.js
           packages/api/test/acp/acp-bootstrap-startup-policy.test.js
+          packages/api/test/acp/acp-bootstrap-generic-selection.test.ts
+          packages/api/test/acp/acp-bootstrap-explicit-root.test.ts
+          packages/api/test/acp/acp-bootstrap-strict-native.test.ts
+          packages/api/test/acp/acp-bootstrap-posix-preservation.test.ts
+          packages/api/test/acp/acp-bootstrap-check-route.test.ts
+          packages/api/test/agent-session-contract/acp-factory-recovery.test.ts
           packages/api/test/account-credential-identity.test.js
           packages/api/test/account-store-adjudication.test.js
         env:
@@ -197,6 +205,17 @@ jobs:
           REDIS_URL: redis://127.0.0.1:0
         # volume-root and audited-runtime tests require explicitly selected native fixtures:
         # ACP_BOOTSTRAP_TEST_VOLUME and ACP_DSH_AUDITED_ENTRY (see issue1653 verification report).
+      - name: ACP deployment policies and fenced bootstrap configuration recovery
+        run: >-
+          node --import ./packages/api/test/helpers/setup-cat-registry.js --test
+          --test-concurrency=2 --test-timeout=60000
+          packages/api/test/acp/acp-compatibility-policy.test.js
+          packages/api/test/acp-bootstrap-config-recovery.test.js
+          packages/api/test/acp-bootstrap-root-identity.test.js
+          packages/api/test/plugin-config-write-boundary.test.js
+        env:
+          NODE_ENV: test
+          REDIS_URL: redis://127.0.0.1:0
       - name: ACP pool and client lifecycle regressions
         run: >-
           node --test --test-concurrency=2 --test-timeout=60000

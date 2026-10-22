@@ -1,6 +1,5 @@
 'use client';
 
-import { pluginDescriptionVariants } from '@cat-cafe/shared';
 import type { ReactNode } from 'react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { HubIcon } from '../../hub-icons';
@@ -11,9 +10,11 @@ import { PluginArchiveInstallButton } from './PluginArchiveInstallButton';
 import { PluginDirectoryInstallButton } from './PluginDirectoryInstallButton';
 import { PluginManagerDetailCard } from './PluginManagerDetailCard';
 import { PluginListRow, PluginListSection } from './PluginManagerList';
+import { PluginManagerNotice } from './PluginManagerNotice';
 import { PluginMarketplaceSettings } from './PluginMarketplaceSettings';
 import { installedPluginGroups, type PluginManagerPresentation } from './plugin-manager-attention';
 import type { PluginManagerDesignFixture } from './plugin-manager-fixtures';
+import { matchesPluginSearch } from './plugin-manager-search';
 
 function PluginManagerToolbar({
   onMarketplaceChange,
@@ -46,25 +47,6 @@ function blockedEnableReason(plugin: PluginManagerDesignFixture) {
   return plugin.auth === 'connected'
     ? '还在等待 dot 读原文并回帖；两处都完成后才能开启。'
     : '请先完成订阅和两处往返验证，再启用 dot。';
-}
-
-function PluginManagerError({ message }: { message: string | null | undefined }) {
-  if (!message) return null;
-  return (
-    <div role="alert" className="rounded-xl bg-conn-red-bg px-3 py-2.5 text-sm text-conn-red-text">
-      {message}
-    </div>
-  );
-}
-
-function matchesSearch(plugin: PluginManagerDesignFixture, query: string): boolean {
-  const normalized = query.trim().toLocaleLowerCase();
-  if (normalized.length === 0) return true;
-  return `${plugin.id} ${plugin.displayName} ${pluginDescriptionVariants(plugin.description).join(' ')} ${plugin.packageName} ${plugin.publisher} ${plugin.capabilities
-    .map((capability) => `${capability.name} ${capability.description}`)
-    .join(' ')}`
-    .toLocaleLowerCase()
-    .includes(normalized);
 }
 
 function usePluginSelection(
@@ -101,6 +83,7 @@ export function PluginManagerContent({
   catalogMessage,
   loading = false,
   error,
+  warning,
   busyPluginId = null,
   selectedPluginId,
   linkedPluginId = null,
@@ -127,6 +110,7 @@ export function PluginManagerContent({
   catalogMessage?: string;
   loading?: boolean;
   error?: string | null;
+  warning?: string | null;
   busyPluginId?: string | null;
   selectedPluginId?: string | null;
   linkedPluginId?: string | null;
@@ -153,7 +137,7 @@ export function PluginManagerContent({
   const [mobileDetailOpen, setMobileDetailOpen] = useState(false);
   const [configurationValidation, setConfigurationValidation] = useState({ pluginId: '', request: 0 });
 
-  const filtered = useMemo(() => fixtures.filter((plugin) => matchesSearch(plugin, query)), [fixtures, query]);
+  const filtered = useMemo(() => fixtures.filter((plugin) => matchesPluginSearch(plugin, query)), [fixtures, query]);
   const leadingGroups = installedPluginGroups(filtered, presentation);
   const recommendationPool = filtered.filter((plugin) => plugin.artifact === 'absent' && plugin.source === 'catalog');
   const recommendedPlugins = query.trim() ? recommendationPool : recommendationPool.slice(0, availableLimit);
@@ -227,7 +211,7 @@ export function PluginManagerContent({
         </div>
       )}
 
-      <PluginManagerError message={error} />
+      <PluginManagerNotice message={error ?? warning} warning={!error && !!warning} />
 
       <div className="grid min-h-0 flex-1 gap-3.5 overflow-hidden lg:grid-cols-[minmax(17rem,0.82fr)_minmax(0,1.5fr)]">
         <div

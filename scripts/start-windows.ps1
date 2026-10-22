@@ -86,22 +86,10 @@ if ($env:CAT_CAFE_STRICT_PROFILE_DEFAULTS -eq "1" -and $Profile_) {
 
 # -- Load .env -----------------------------------------------
 $envFile = Join-Path $ProjectRoot ".env"
-if (Test-Path $envFile) {
-    Get-Content $envFile | ForEach-Object {
-        $line = $_.Trim()
-        if ($line -and -not $line.StartsWith("#")) {
-            $parts = $line -split "=", 2
-            if ($parts.Count -eq 2) {
-                $key = $parts[0].Trim()
-                $val = $parts[1].Trim().Trim('"').Trim("'")
-                [System.Environment]::SetEnvironmentVariable($key, $val, "Process")
-            }
-        }
-    }
-    Write-Ok ".env loaded"
-} else {
-    Write-Warn ".env not found - using defaults"
-}
+. (Join-Path $ProjectRoot 'scripts/lib/host-dotenv.ps1')
+Import-HostDotEnv -Path $envFile
+$acpModes = Get-AcpDeploymentModes
+Write-Ok ("ACP bootstrap={0}; audit requested={1}, effective={2}; restart required to change" -f $acpModes.Bootstrap, $acpModes.RequestedAudit, $acpModes.EffectiveAudit)
 
 function Preserve-ServiceFlagForApiLifecycle {
     param([string]$SourceName, [string]$TargetName)
@@ -525,19 +513,9 @@ try {
         Set-Location (Join-Path $root "packages/api")
         # Load .env into job process (Start-Job inherits parent env,
         # but re-load to be safe if process env was not fully propagated)
-        if (Test-Path $envFile) {
-            Get-Content $envFile | ForEach-Object {
-                $line = $_.Trim()
-                if ($line -and -not $line.StartsWith("#")) {
-                    $parts = $line -split "=", 2
-                    if ($parts.Count -eq 2) {
-                        $k = $parts[0].Trim()
-                        $v = $parts[1].Trim().Trim('"').Trim("'")
-                        [System.Environment]::SetEnvironmentVariable($k, $v, "Process")
-                    }
-                }
-            }
-        }
+        . (Join-Path $root 'scripts/lib/host-dotenv.ps1')
+        Import-HostDotEnv -Path $envFile
+        $null = Get-AcpDeploymentModes
         foreach ($entry in $runtimeEnvOverrides.GetEnumerator()) {
             if ($null -eq $entry.Value -or $entry.Value -eq "") {
                 [System.Environment]::SetEnvironmentVariable($entry.Key, $null, "Process")

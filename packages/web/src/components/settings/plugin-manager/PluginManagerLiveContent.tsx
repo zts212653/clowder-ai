@@ -1,17 +1,12 @@
 'use client';
 
 import type { PluginManagerListResponse } from '@cat-cafe/shared';
-import type { ReactNode } from 'react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useConfirm } from '@/components/useConfirm';
 import { apiFetch } from '@/utils/api-client';
-import type { SettingsPageHeaderProps } from '../SettingsPageHeader';
 import { PluginManagerContent } from './PluginManagerContent';
-import type { PluginManagerPresentation } from './plugin-manager-attention';
 import type { PluginManagerDesignFixture } from './plugin-manager-fixtures';
 import {
-  type ConfigurationUpdate,
-  configurationRequest,
   type DetailLoadState,
   designFixture,
   detailProjection,
@@ -19,38 +14,25 @@ import {
   fetchManagerList,
   responseError,
 } from './plugin-manager-live-api';
+import type { PluginManagerLiveContentProps } from './plugin-manager-live-types';
+import { INSTALL_TIMEOUT_MS, mutationRequestOptions } from './plugin-manager-mutation-options';
+import { usePluginConfigurationSave } from './usePluginConfigurationSave';
 
 const EMPTY_COMPATIBILITY: readonly PluginManagerDesignFixture[] = [];
-// Dependency preparation alone may take five minutes; allow checkout and package admission as well.
-const INSTALL_TIMEOUT_MS = 10 * 60_000;
-// Lifecycle writes may stop a runtime and spend up to four minutes starting it before returning.
-const LIFECYCLE_TIMEOUT_MS = 5 * 60_000;
 const INSTALL_UNCONFIRMED = '安装结果尚未确认，后台可能仍在处理。请查看插件列表确认状态，避免重复安装。';
-
-function mutationRequestOptions(path: string): { mutationTimeoutMs: number } | undefined {
-  if (path.endsWith('/install') || path.endsWith('/update')) return { mutationTimeoutMs: INSTALL_TIMEOUT_MS };
-  if (path.endsWith('/set-enabled') || path.endsWith('/uninstall') || path.endsWith('/contributions/configuration')) {
-    return { mutationTimeoutMs: LIFECYCLE_TIMEOUT_MS };
-  }
-  return undefined;
-}
 
 export function PluginManagerLiveContent({
   presentation = 'v1',
   pageHeader,
   compatibilityFixtures = EMPTY_COMPATIBILITY,
   renderCompatibilityDetail,
-}: {
-  presentation?: PluginManagerPresentation;
-  pageHeader?: Omit<SettingsPageHeaderProps, 'children'>;
-  compatibilityFixtures?: readonly PluginManagerDesignFixture[];
-  renderCompatibilityDetail?: (pluginId: string, plugin: PluginManagerDesignFixture) => ReactNode | undefined;
-} = {}) {
+}: PluginManagerLiveContentProps = {}) {
   const confirm = useConfirm();
   const [snapshot, setSnapshot] = useState<PluginManagerListResponse | null>(null);
   const [detailState, setDetailState] = useState<DetailLoadState>({ state: 'idle' });
   const [busyPluginId, setBusyPluginId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [warning, setWarning] = useState<string | null>(null);
   const [selectedPluginId, setSelectedPluginId] = useState<string | null>(null);
   const [linkedPluginId, setLinkedPluginId] = useState<string | null>(null);
   const [configurationSavedPluginId, setConfigurationSavedPluginId] = useState<string | null>(null);
@@ -157,36 +139,14 @@ export function PluginManagerLiveContent({
     await loadList(query.current, true);
   }, [loadList]);
 
-  const configure = useCallback(
-    async (pluginId: string, updates: readonly ConfigurationUpdate[]) => {
-      const plugin = snapshot?.plugins.find((candidate) => candidate.pluginId === pluginId);
-      const request = configurationRequest(plugin, updates);
-      if (!request) {
-        setError('该插件没有可用的配置贡献。');
-        return;
-      }
-      setBusyPluginId(pluginId);
-      setError(null);
-      setConfigurationSavedPluginId(null);
-      try {
-        const response = await apiFetch(request.path, request.init, mutationRequestOptions(request.path));
-        if (!response.ok) {
-          const failure = await responseError(response, `配置保存失败 (${response.status})`);
-          await refresh();
-          setError(failure.message);
-          return;
-        }
-        setConfigurationSavedPluginId(pluginId);
-        await refresh();
-      } catch {
-        await refresh();
-        setError('未能确认配置保存结果，请刷新后检查。');
-      } finally {
-        setBusyPluginId(null);
-      }
-    },
-    [refresh, snapshot],
-  );
+  const configure = usePluginConfigurationSave({
+    snapshot,
+    refresh,
+    onBusy: setBusyPluginId,
+    onError: setError,
+    onWarning: setWarning,
+    onSaved: setConfigurationSavedPluginId,
+  });
 
   const mutate = useCallback(
     async (pluginId: string, path: string, body: unknown) => {
@@ -306,6 +266,7 @@ export function PluginManagerLiveContent({
       catalogMessage={snapshot?.catalog.message}
       loading={snapshot === null && error === null}
       error={error}
+      warning={warning}
       busyPluginId={busyPluginId}
       selectedPluginId={selectedPluginId}
       linkedPluginId={linkedPluginId}

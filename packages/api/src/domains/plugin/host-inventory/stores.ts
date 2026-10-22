@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import type { PackageAdmissionContractRuntime } from './manifest-verifier.js';
+import { acquirePluginMutationLease } from './mutation-lease.js';
 import type {
   GrantStore,
   PackageInventoryStore,
@@ -203,30 +204,35 @@ export class FilePluginInventoryStore implements PluginInventoryStore {
 
   async transaction<T>(work: (transaction: PluginInventoryTransaction) => Promise<T> | T): Promise<T> {
     return this.queue.run(async () => {
-      const candidate = transactionFor(await this.load(), this.contract);
-      const result = await work(candidate.transaction);
-      const next = candidate.snapshot();
-      await this.fileOps.mkdir(dirname(this.path), { recursive: true });
-      const temporaryPath = `${this.path}.tmp-${process.pid}-${randomUUID()}`;
-      await this.fileOps.writeFile(
-        temporaryPath,
-        `${JSON.stringify({ ...next, packages: next.packages.map(serializeInventoryPackage) }, null, 2)}\n`,
-        {
-          encoding: 'utf8',
-          mode: 0o600,
-        },
-      );
+      const release = acquirePluginMutationLease(dirname(this.path));
       try {
-        await this.fileOps.rename(temporaryPath, this.path);
-      } catch (error) {
+        const candidate = transactionFor(await this.load(), this.contract);
+        const result = await work(candidate.transaction);
+        const next = candidate.snapshot();
+        await this.fileOps.mkdir(dirname(this.path), { recursive: true });
+        const temporaryPath = `${this.path}.tmp-${process.pid}-${randomUUID()}`;
+        await this.fileOps.writeFile(
+          temporaryPath,
+          `${JSON.stringify({ ...next, packages: next.packages.map(serializeInventoryPackage) }, null, 2)}\n`,
+          {
+            encoding: 'utf8',
+            mode: 0o600,
+          },
+        );
         try {
-          await this.fileOps.unlink(temporaryPath);
-        } catch {
-          // Preserve the commit failure; temporary cleanup is best effort.
+          await this.fileOps.rename(temporaryPath, this.path);
+        } catch (error) {
+          try {
+            await this.fileOps.unlink(temporaryPath);
+          } catch {
+            // Preserve the commit failure; temporary cleanup is best effort.
+          }
+          throw error;
         }
-        throw error;
+        return result;
+      } finally {
+        release();
       }
-      return result;
     });
   }
 }

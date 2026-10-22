@@ -1,6 +1,8 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { configEventBus, createChangeSetId } from '../../config/config-event-bus.js';
+import { acquirePluginMutationLease } from './host-inventory/mutation-lease.js';
+import { pluginHostRoot } from './host-inventory/plugin-host-layout.js';
 import type { OperationState } from './operations/operation-state-machine.js';
 
 const CONFIG_DIR = '.cat-cafe';
@@ -92,57 +94,79 @@ export function writePluginOperationState(
   operationKey: string,
   state: OperationState | undefined,
 ): void {
-  const document = readRawConfig(projectRoot, pluginId);
-  const previous = document[OPERATIONS_KEY];
-  const operations =
-    typeof previous === 'object' && previous !== null && !Array.isArray(previous)
-      ? { ...(previous as Record<string, unknown>) }
-      : {};
-  if (state === undefined) delete operations[operationKey];
-  else operations[operationKey] = operationState(state);
-  if (Object.keys(operations).length === 0) delete document[OPERATIONS_KEY];
-  else document[OPERATIONS_KEY] = operations;
+  const release = acquirePluginMutationLease(pluginHostRoot(projectRoot));
+  try {
+    const document = readRawConfig(projectRoot, pluginId);
+    const previous = document[OPERATIONS_KEY];
+    const operations =
+      typeof previous === 'object' && previous !== null && !Array.isArray(previous)
+        ? { ...(previous as Record<string, unknown>) }
+        : {};
+    if (state === undefined) delete operations[operationKey];
+    else operations[operationKey] = operationState(state);
+    if (Object.keys(operations).length === 0) delete document[OPERATIONS_KEY];
+    else document[OPERATIONS_KEY] = operations;
 
-  const dir = resolvePluginConfigDir(projectRoot);
-  mkdirSync(dir, { recursive: true });
-  writeFileAtomic(resolvePluginConfigPath(projectRoot, pluginId), `${JSON.stringify(document, null, 2)}\n`);
+    const dir = resolvePluginConfigDir(projectRoot);
+    mkdirSync(dir, { recursive: true });
+    writeFileAtomic(resolvePluginConfigPath(projectRoot, pluginId), `${JSON.stringify(document, null, 2)}\n`);
+  } finally {
+    release();
+  }
 }
 
 export function writePluginConfig(
   projectRoot: string,
   pluginId: string,
   updates: { name: string; value: string | null }[],
+  options: { beforeWrite?: () => void } = {},
 ): { changedKeys: string[] } {
-  const dir = resolvePluginConfigDir(projectRoot);
-  mkdirSync(dir, { recursive: true });
+  const release = acquirePluginMutationLease(pluginHostRoot(projectRoot));
+  try {
+    options.beforeWrite?.();
+    const dir = resolvePluginConfigDir(projectRoot);
+    mkdirSync(dir, { recursive: true });
 
-  const existing = readRawConfig(projectRoot, pluginId);
-  const changedKeys: string[] = [];
+    const existing = readRawConfig(projectRoot, pluginId);
+    const changedKeys: string[] = [];
 
-  for (const { name, value } of updates) {
-    const oldVal = existing[name] ?? '';
-    const newVal = value ?? '';
-    if (oldVal !== newVal) changedKeys.push(name);
+    for (const { name, value } of updates) {
+      const oldVal = existing[name] ?? '';
+      const newVal = value ?? '';
+      if (oldVal !== newVal) changedKeys.push(name);
 
-    if (value == null || value === '') {
-      existing[name] = null;
-    } else {
-      existing[name] = value;
+      if (value == null || value === '') {
+        existing[name] = null;
+      } else {
+        existing[name] = value;
+      }
     }
+
+    const configPath = resolvePluginConfigPath(projectRoot, pluginId);
+    writeFileAtomic(configPath, `${JSON.stringify(existing, null, 2)}\n`);
+
+    if (changedKeys.length > 0) {
+      configEventBus.emitChange({
+        source: 'secrets',
+        scope: 'key',
+        changedKeys,
+        changeSetId: createChangeSetId(),
+        timestamp: Date.now(),
+      });
+    }
+
+    return { changedKeys };
+  } finally {
+    release();
   }
+}
 
-  const configPath = resolvePluginConfigPath(projectRoot, pluginId);
-  writeFileAtomic(configPath, `${JSON.stringify(existing, null, 2)}\n`);
-
-  if (changedKeys.length > 0) {
-    configEventBus.emitChange({
-      source: 'secrets',
-      scope: 'key',
-      changedKeys,
-      changeSetId: createChangeSetId(),
-      timestamp: Date.now(),
-    });
+/** Exact bytes for fenced admission; unlike ordinary projections this never hides read errors. */
+export function readPluginConfigText(projectRoot: string, pluginId: string): string | undefined {
+  try {
+    return readFileSync(resolvePluginConfigPath(projectRoot, pluginId), 'utf8');
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
+    throw error;
   }
-
-  return { changedKeys };
 }

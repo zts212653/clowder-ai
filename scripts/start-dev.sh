@@ -168,11 +168,29 @@ if [ -f .env ]; then
     set +a
 fi
 
+# A prepared source Host persists its ACP policies in .env on every platform.
+# Keep .env.local's existing behavior for all unrelated settings.
+_ACP_PERSIST_KEYS=""
+if [ -f .env ] && grep -q '^# Clowder intranet preparation:' .env; then
+    for _acp_key in CAT_CAFE_WINDOWS_ACP_BOOTSTRAP_MODE CAT_CAFE_ACP_BOOTSTRAP_CONFIG_AUDIT_MODE AUDIT_LOG_DIR; do
+        if grep -Eq "^[[:space:]]*${_acp_key}[[:space:]]*=" .env; then
+            printf -v "_ACP_PERSIST_${_acp_key}" '%s' "${!_acp_key-}"
+            _ACP_PERSIST_KEYS="$_ACP_PERSIST_KEYS $_acp_key"
+        fi
+    done
+fi
 if [ -f .env.local ]; then
     set -a
     source .env.local
     set +a
 fi
+
+for _acp_key in $_ACP_PERSIST_KEYS; do
+    _acp_saved="_ACP_PERSIST_${_acp_key}"
+    export "$_acp_key=${!_acp_saved}"
+    unset "$_acp_saved"
+done
+unset _ACP_PERSIST_KEYS _acp_key _acp_saved
 
 # This launcher-only proof must never be inherited by the API or an agent
 # command it spawns. Dotenv cannot grant it; only the pre-dotenv wrapper can.
