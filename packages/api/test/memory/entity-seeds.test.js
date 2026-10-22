@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, it } from 'node:test';
+import { fileURLToPath } from 'node:url';
 import Fastify from 'fastify';
 
 const MOCK_HINDSIGHT = {
@@ -14,20 +15,17 @@ const MOCK_HINDSIGHT = {
 };
 
 describe('F209 entity seeds', () => {
-  it('resolves the default git-tracked seed file from built API dist', async () => {
+  it('resolves the optional packaged seed location and accepts an absent installation seed', async (t) => {
     const { getDefaultEntitySeedPath, loadExplicitEntitySeeds } = await import(
       '../../dist/domains/memory/entity-seeds.js'
     );
-
-    const defaultPath = getDefaultEntitySeedPath();
-    assert.ok(defaultPath.endsWith('/config/entity-seeds.json'), defaultPath);
-    assert.equal(existsSync(defaultPath), true);
-
-    const seeds = loadExplicitEntitySeeds(defaultPath);
-    const operator = seeds.find((entity) => entity.entityId === 'person:operator');
-    assert.ok(operator, 'default seed file should include person:operator');
-    assert.ok(operator.aliases.includes('operator'));
-    assert.ok(operator.aliases.includes('co-creator'));
+    assert.equal(
+      getDefaultEntitySeedPath(),
+      fileURLToPath(new URL('../../../../config/entity-seeds.json', import.meta.url)),
+    );
+    const root = mkdtempSync(join(tmpdir(), 'entity-seed-absence-'));
+    t.after(() => rmSync(root, { recursive: true, force: true }));
+    assert.deepEqual(loadExplicitEntitySeeds(join(root, 'absent-seeds.json')), []);
   });
 
   it('loads explicit person seeds and one-way roster cat aliases on memory startup', async () => {
@@ -46,10 +44,10 @@ describe('F209 entity seeds', () => {
           version: 1,
           entities: [
             {
-              entityId: 'person:operator',
+              entityId: 'person:fixture-owner',
               type: 'person',
-              canonicalName: 'You',
-              aliases: ['operator', 'co-creator', 'operator', 'you'],
+              canonicalName: 'Fixture Person',
+              aliases: ['case-person', 'case-surface', 'case-role', 'case-owner'],
               provenance: [
                 {
                   source: 'F209 Phase B.1 test seed',
@@ -79,40 +77,19 @@ describe('F209 entity seeds', () => {
         entitySeedPath: seedPath,
       });
 
-      const operator = await services.store.getEntity('person:operator');
-      assert.ok(operator, 'explicit person seed should be loaded');
-      assert.deepEqual(operator.aliases.sort(), ['operator', 'you', 'operator', 'co-creator'].sort());
-      assert.equal(operator.provenance[0]?.source, 'F209 Phase B.1 test seed');
+      const person = await services.store.getEntity('person:fixture-owner');
+      assert.ok(person, 'explicit person seed should be loaded');
+      assert.deepEqual(person.aliases.sort(), ['case-person', 'case-surface', 'case-role', 'case-owner'].sort());
+      assert.equal(person.provenance[0]?.source, 'F209 Phase B.1 test seed');
 
-      const codex = await services.store.getEntity('cat:codex');
-      assert.ok(codex, 'cat roster should seed retrieval anchors');
-      assert.equal(codex.type, 'cat');
-      assert.equal(codex.canonicalName, 'codex', 'cat canonical name should be a specific retrieval anchor');
-      assert.ok(codex.aliases.includes('@codex'), 'raw roster mention should be preserved');
-      assert.ok(codex.aliases.includes('codex'), 'bare cat id should be searchable');
-      assert.equal(codex.aliases.includes('砚砚'), false, 'shared nicknames should not become specific cat aliases');
-      assert.equal(codex.aliases.includes('maine-coon'), false, 'breed id should not become a cat alias');
-      assert.equal(codex.aliases.includes('缅因猫'), false, 'bare breed mention should not become a cat alias');
-      assert.ok(codex.aliases.includes('@缅因猫'), 'explicit raw breed mention can remain a routed alias');
-      assert.equal(codex.provenance[0]?.source, 'F032 roster');
-
-      const gpt52 = await services.store.getEntity('cat:gpt52');
-      assert.ok(gpt52, 'same-family variants should seed retrieval anchors');
-      assert.equal(gpt52.aliases.includes('砚砚'), false, 'shared nicknames should not leak onto variants');
-
-      const opus = await services.store.getEntity('cat:opus');
-      assert.ok(opus, 'default breed cat should seed retrieval anchors');
-      assert.equal(opus.canonicalName, 'opus', 'family-level display names should not become canonical names');
-      assert.equal(opus.aliases.includes('布偶猫'), false, 'bare breed display name should not become a cat alias');
-      assert.equal(opus.aliases.includes('宪宪'), false, 'shared breed nicknames should not become cat aliases');
-      assert.ok(opus.aliases.includes('@布偶猫'), 'explicit raw breed mention can remain a routed alias');
-
-      const opus47 = await services.store.getEntity('cat:opus-47');
-      assert.ok(opus47, 'variant cats should seed retrieval anchors');
-      assert.equal(opus47.canonicalName, '布偶猫 Opus 4.7', 'specific variant name can be canonical');
-      assert.equal(opus47.aliases.includes('布偶猫'), false, 'breed display name should not become a variant alias');
-      assert.equal(opus47.aliases.includes('Opus 4.7'), false, 'variant label should not become a cat alias');
-      assert.ok(opus47.aliases.includes('布偶猫4.7'), 'explicit variant mention should remain searchable');
+      const { loadCatConfig, toAllCatConfigs } = await import('../../dist/config/cat-config-loader.js');
+      for (const id of Object.keys(toAllCatConfigs(loadCatConfig()))) {
+        const cat = await services.store.getEntity(`cat:${id}`);
+        assert.ok(cat, `shipped roster ${id} must seed a retrieval anchor`);
+        assert.equal(cat.type, 'cat');
+        assert.ok(cat.aliases.includes(`@${id}`));
+        assert.equal(cat.provenance[0]?.source, 'F032 roster');
+      }
 
       const { default: Database } = await import('better-sqlite3');
       const auditDb = new Database(sqlitePath, { readonly: true });
@@ -185,7 +162,7 @@ describe('F209 entity seeds', () => {
     }
   });
 
-  it('lets /api/evidence/search find operator evidence that only mentions co-creator after seed load', async () => {
+  it('lets /api/evidence/search find case-role evidence that only mentions case-surface after seed load', async () => {
     const { createMemoryServices } = await import('../../dist/domains/memory/factory.js');
     const { evidenceRoutes } = await import('../../dist/routes/evidence.js');
 
@@ -202,10 +179,10 @@ describe('F209 entity seeds', () => {
           version: 1,
           entities: [
             {
-              entityId: 'person:operator',
+              entityId: 'person:fixture-owner',
               type: 'person',
-              canonicalName: 'You',
-              aliases: ['operator', 'co-creator', 'operator', 'you'],
+              canonicalName: 'Fixture Person',
+              aliases: ['case-person', 'case-surface', 'case-role', 'case-owner'],
               provenance: [{ source: 'F209 Phase B.1 test seed', anchor: 'F209', date: '2026-05-23' }],
               updatedAt: '2026-05-23T00:00:00.000Z',
             },
@@ -234,7 +211,7 @@ describe('F209 entity seeds', () => {
           kind: 'thread',
           status: 'active',
           title: 'Alias dogfood thread',
-          summary: 'co-creator asked whether the evidence recall dogfood loop is real.',
+          summary: 'case-surface asked whether the evidence recall dogfood loop is real.',
           updatedAt: '2026-05-23T00:00:00.000Z',
         },
       ]);
@@ -249,7 +226,7 @@ describe('F209 entity seeds', () => {
 
       const res = await app.inject({
         method: 'GET',
-        url: '/api/evidence/search?q=operator&limit=5',
+        url: '/api/evidence/search?q=case-role&limit=5',
       });
       await app.close();
 
@@ -257,10 +234,10 @@ describe('F209 entity seeds', () => {
       const body = res.json();
       const results = body.results;
       const hit = results.find((item) => item.anchor === 'thread-f209-b1-dogfood');
-      assert.ok(hit, 'operator query should retrieve evidence that only contains co-creator');
-      assert.equal(hit.matchReason, 'entity:person:operator');
-      assert.equal(hit.entityMatches?.[0]?.matchedAlias, 'operator');
-      assert.equal(hit.entityMatches?.[0]?.surface, 'co-creator');
+      assert.ok(hit, 'case-role query should retrieve evidence that only contains case-surface');
+      assert.equal(hit.matchReason, 'entity:person:fixture-owner');
+      assert.equal(hit.entityMatches?.[0]?.matchedAlias, 'case-role');
+      assert.equal(hit.entityMatches?.[0]?.surface, 'case-surface');
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

@@ -59,3 +59,5 @@ jobs:
           node scripts/preview-launchd-native-diagnostic.mjs
           node --test --test-concurrency=1 scripts/preview-lease-command.test.mjs scripts/preview-launchd-identity.test.mjs scripts/preview-process.test.mjs scripts/preview-process-stop.test.mjs scripts/preview-process-cleanup.test.mjs scripts/preview-named-alpha-cleanup.test.mjs
           TZ=America/Los_Angeles node --test scripts/preview-process-stop.test.mjs
+      - name: Stale-process entrypoint guard
+        run: node --test scripts/cleanup-stale-dev-processes.test.mjs

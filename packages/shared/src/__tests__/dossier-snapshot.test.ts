@@ -1,7 +1,6 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, test, vi } from 'vitest';
 import { _resetDossierCache, loadDossierProfiles, loadDossierSnapshot } from '../dossier/load-dossier-profiles.js';
 import { parseDossierProfilesWithDiagnostics } from '../dossier/parse-dossier-profiles.js';
@@ -45,13 +44,6 @@ describe('dossier read snapshots', () => {
     expect(loadDossierSnapshot(root)).toMatchObject({ state: 'loaded', diagnostics: [] });
     rmSync(path);
     expect(loadDossierSnapshot(root).state).toBe('absent');
-  });
-
-  test('canonical dossier produces no syntax or identity diagnostics', () => {
-    const root = fileURLToPath(new URL('../../../../', import.meta.url));
-    const snapshot = loadDossierSnapshot(root);
-    expect(snapshot).toMatchObject({ state: 'loaded', diagnostics: [] });
-    expect(snapshot.profiles.size).toBeGreaterThan(0);
   });
 });
 

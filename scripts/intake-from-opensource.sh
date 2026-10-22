@@ -108,7 +108,6 @@ is_public_only() {
     # Generated/replaced files
     LICENSE|.env.example) return 0 ;;
     .github/pull_request_template.md) return 0 ;;
-    CLAUDE.md|AGENTS.md|GEMINI.md) return 0 ;;
     cat-config.json) return 0 ;;
     docs/ROADMAP.md|docs/public-lessons.md|docs/README.md) return 0 ;;
     .sync-provenance.json) return 0 ;;

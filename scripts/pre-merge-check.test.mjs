@@ -493,11 +493,23 @@ describe('artifact check reuse after API tests', () => {
       assert.match(apiScripts['test:prompt-budget'], / test\/system-prompt-builder\.test\.js$/);
       const full = expand('check:artifacts');
       const remaining = expand('check:artifacts:after-api-tests');
+      assert.match(
+        scripts['check:source-evidence:after-api-tests'],
+        /source-tests\/\*\*\/\*\.test\.js/u,
+        'the source-proof lane must cover the files removed from the remainder',
+      );
       const withoutApiTests = (commands) =>
         commands.flatMap((command) => {
           if (/^pnpm --filter @cat-cafe\/(?:api|shared) build$/u.test(command)) return [];
           if (command === 'pnpm --filter @cat-cafe/api test:prompt-budget') return [];
-          const remainder = command.replace(/ packages\/api\/test\/(?:[\w-]+\/)?[\w.-]+\.test\.js/gu, '');
+          const remainder = command.replace(
+            / packages\/api\/(?:test|source-tests)\/(?:[\w-]+\/)?[\w.-]+\.test\.js/gu,
+            (entry) => {
+              const testPath = entry.trim();
+              assert.ok(existsSync(path.join(repoRoot, testPath)), `artifact test does not exist: ${testPath}`);
+              return '';
+            },
+          );
           return remainder === 'node --test' ? [] : [remainder];
         });
       assert.ok(full.some((command) => command.includes('packages/api/test/')));

@@ -1,17 +1,17 @@
 // @ts-check
 
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
-import { resolve } from 'node:path';
 import { describe, it } from 'node:test';
 
-import { parse } from 'yaml';
+import {
+  createMeasurementCertificateFixture,
+  createMeasurementResultFixture,
+} from './helpers/measurement-certificate-fixture.js';
 
 const SHA_A = 'a'.repeat(64);
 const SHA_B = 'b'.repeat(64);
 const SHA_C = 'c'.repeat(64);
 const SHA_D = 'd'.repeat(64);
-const repoRoot = resolve(import.meta.dirname, '../../../..');
 
 async function moduleUnderTest() {
   return import('../../dist/infrastructure/harness-eval/measurement/measurement-decision-proof.js');
@@ -25,15 +25,9 @@ async function publicModuleUnderTest() {
   return import('../../dist/infrastructure/harness-eval/index.js');
 }
 
-async function readYaml(ref) {
-  return parse(await readFile(resolve(repoRoot, ref), 'utf8'));
-}
-
 async function validInputs() {
-  const certificate = await readYaml('docs/harness-feedback/certificates/f267-memory-search-quality.yaml');
-  const result = await readYaml(
-    'docs/harness-feedback/measurement-results/f267-memory-search-quality-negative-control-v1.yaml',
-  );
+  const certificate = await createMeasurementCertificateFixture({ domainId: 'eval:memory' });
+  const result = createMeasurementResultFixture(certificate);
   const proof = {
     kind: 'f267-measurement-decision-proof-candidate',
     schemaVersion: 1,
@@ -236,14 +230,15 @@ describe('F267 measurement decision proof', () => {
     );
 
     const wrongCohort = structuredClone(proof);
-    wrongCohort.optimizerExposure.cohortSha256 = SHA_A;
+    const differentDigest = result.cohort.sha256 === SHA_A ? SHA_B : SHA_A;
+    wrongCohort.optimizerExposure.cohortSha256 = differentDigest;
     assert.throws(
       () => assessMeasurementDecisionProofCandidate(certificate, result, wrongCohort),
       /optimizer exposure does not match/i,
     );
 
     const wrongRole = structuredClone(proof);
-    wrongRole.evidenceRole.cohortSha256 = SHA_A;
+    wrongRole.evidenceRole.cohortSha256 = differentDigest;
     assert.throws(
       () => assessMeasurementDecisionProofCandidate(certificate, result, wrongRole),
       /evidence role does not match/i,

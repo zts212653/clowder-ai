@@ -19,6 +19,8 @@ import { fileURLToPath } from 'node:url';
 import {
   projectDeploymentProfiles,
   resolveDeploymentDefaults,
+  resolveL0Projections,
+  resolvePromptTemplateVariables,
   resolveStartupDefaults,
 } from '../packages/shared/src/deployment-defaults.ts';
 
@@ -44,6 +46,42 @@ const fixture = () => ({
   profiles: { home: profile(4510, 4599, 4400), opensource: profile(4620, 4699, 4620) },
   startupProfiles: JSON.parse(readFileSync(join(root, 'packages/shared/src/deployment-profiles.json'), 'utf8'))
     .startupProfiles,
+});
+
+test('prompt policy is selected and survives public projection without inactive vocabulary', () => {
+  const input = fixture();
+  for (const [name, value] of Object.entries(input.profiles)) {
+    value.promptPolicy = {
+      coCreatorRole: `owner ${name}`,
+      decisionRole: `decision ${name}`,
+      runtimeSafetyRule: `storage ${name}`,
+      acceptanceRule: `acceptance ${name}`,
+      modifyDataBoundary: `modify ${name}`,
+      capabilityQualifier: '',
+    };
+  }
+  const before = structuredClone(input);
+  assert.equal(resolvePromptTemplateVariables(input).CO_CREATOR_ROLE, 'owner home');
+  const projected = projectDeploymentProfiles(input, 'opensource');
+  assert.equal(resolvePromptTemplateVariables(projected).CO_CREATOR_ROLE, 'owner opensource');
+  assert.equal(resolvePromptTemplateVariables(projected).CAPABILITY_QUALIFIER, '');
+  assert.equal(JSON.stringify(projected).includes('owner home'), false);
+  assert.deepEqual(projectDeploymentProfiles(projected, 'opensource'), projected);
+  assert.deepEqual(input, before);
+});
+
+test('prompt policy fails closed on missing or multiline data, with no home vocabulary fallback', () => {
+  const input = fixture();
+  assert.throws(() => resolvePromptTemplateVariables(input), /promptPolicy/);
+  const actual = JSON.parse(readFileSync(join(root, 'packages/shared/src/deployment-profiles.json'), 'utf8'));
+  for (const key of Object.keys(Object.values(actual.profiles)[0].promptPolicy)) {
+    for (const value of [undefined, 42, 'bad\nline', 'x'.repeat(1025)]) {
+      const copy = structuredClone(actual);
+      copy.profiles[copy.activeProfile].promptPolicy[key] = value;
+      assert.throws(() => resolvePromptTemplateVariables(copy), /promptPolicy/);
+      assert.throws(() => projectDeploymentProfiles(copy, copy.activeProfile), /promptPolicy/);
+    }
+  }
 });
 
 test('configured defaults keep listen ports, documentation defaults and CORS distinct', () => {
@@ -311,4 +349,21 @@ test('actual Unix launcher uses configured defaults and preserves explicit overr
   assert.equal(run({ API_SERVER_PORT: '4781', FRONTEND_PORT: '4780' }), '4781/4780');
   assert.equal(run({ API_SERVER_PORT: '', FRONTEND_PORT: '' }), '4599/4510');
   assert.equal(run({ API_SERVER_PORT: '0', FRONTEND_PORT: '0' }), '0/0');
+});
+
+test('L0 projection policy retains home Work but public and legacy profiles stay owner/public', () => {
+  const input = fixture();
+  input.profiles.home.l0Projections = ['owner', 'public', 'collective-work'];
+  input.profiles.opensource.l0Projections = ['owner', 'public'];
+  const home = projectDeploymentProfiles(input, 'home');
+  const publicProfile = projectDeploymentProfiles(input, 'opensource');
+  assert.deepEqual(resolveL0Projections(home), ['owner', 'public', 'collective-work']);
+  assert.deepEqual(resolveL0Projections(publicProfile), ['owner', 'public']);
+  assert.deepEqual(projectDeploymentProfiles(publicProfile, 'opensource'), publicProfile);
+  assert.deepEqual(resolveL0Projections(fixture()), ['owner', 'public']);
+  for (const value of [null, [], ['owner'], ['owner', 'public', 'unknown'], ['owner', 'public', 'public']]) {
+    const invalid = fixture();
+    invalid.profiles.home.l0Projections = value;
+    assert.throws(() => resolveL0Projections(invalid), /l0Projections/);
+  }
 });

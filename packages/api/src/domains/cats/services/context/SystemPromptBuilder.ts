@@ -361,7 +361,7 @@ function ensureMergeGateSourceProvenanceTrigger(content: string): string {
  * Excludes the current cat. Returns null if no teammates.
  */
 /** @internal F237 — exported for ContextAssembler bridge */
-export function buildTeammateRoster(currentCatId: CatId): string | null {
+export function buildTeammateRoster(currentCatId: CatId, projectRoot = findMonorepoRoot()): string | null {
   const allConfigs = getAllConfigs();
   const entries = Object.entries(allConfigs).filter(([id]) => id !== currentCatId && isCatAvailable(id));
   if (entries.length === 0) return null;
@@ -373,7 +373,6 @@ export function buildTeammateRoster(currentCatId: CatId): string | null {
       : config.nickname
         ? `${config.displayName}/${config.nickname}`
         : config.displayName;
-    const projectRoot = findMonorepoRoot();
     const pronouns = getDossierL0Pronouns(id, projectRoot)?.split('/')[0]?.trim();
     const rosterLabel = pronouns ? `${config.nickname ?? label}（${pronouns}）` : label;
     const mention = pickVariantMention(id, config);

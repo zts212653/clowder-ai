@@ -14,17 +14,7 @@
  */
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { createHash } from 'node:crypto';
-import {
-  copyFileSync,
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  readdirSync,
-  readFileSync,
-  rmSync,
-  writeFileSync,
-} from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, posix, resolve } from 'node:path';
 import { describe, it } from 'node:test';
@@ -32,6 +22,7 @@ import {
   deploymentDefaults,
   projectDeploymentProfiles,
   resolveDeploymentDefaults,
+  resolvePromptTemplateVariables,
 } from '../packages/shared/src/deployment-defaults.ts';
 import { resolveWindowsStatusPorts } from './lib/platform-status.mjs';
 import { rootCheckChain } from './lib/root-check-chain.mjs';
@@ -42,6 +33,10 @@ const ROOT = resolve(process.cwd());
 // Home repo has sync-to-opensource.sh; open-source repo does not.
 const isHomeRepo = existsSync(resolve(ROOT, 'scripts/sync-to-opensource.sh'));
 const hasEnvExampleOpensource = existsSync(resolve(ROOT, '.env.example.opensource'));
+const homeScriptPolicy = isHomeRepo ? JSON.parse(readFileSync(resolve(ROOT, 'package.home.json'), 'utf8')) : null;
+const homeScriptNames = homeScriptPolicy
+  ? new Set([...Object.keys(homeScriptPolicy.scripts), ...homeScriptPolicy.retiredNames])
+  : new Set();
 
 function readEnvFile(relPath) {
   const content = readFileSync(resolve(ROOT, relPath), 'utf-8');
@@ -174,7 +169,25 @@ function isManagedPath(relPath, managedRoots, managedFiles, managedScripts) {
 }
 
 function buildExportedRootScripts(sourceScripts) {
-  const scripts = { ...sourceScripts };
+  // Run the home-only projection as the exporter does; the shared test module
+  // must not acquire a private runtime import dependency.
+  const tempRoot = mkdtempSync(resolve(tmpdir(), 'cat-cafe-home-command-projection-'));
+  const packagePath = resolve(tempRoot, 'package.json');
+  let scripts;
+  try {
+    writeFileSync(packagePath, JSON.stringify({ scripts: sourceScripts }));
+    execFileSync(process.execPath, [
+      resolve(ROOT, 'scripts/home-package-scripts.mjs'),
+      '--public',
+      '--target',
+      packagePath,
+      '--root',
+      ROOT,
+    ]);
+    scripts = JSON.parse(readFileSync(packagePath, 'utf8')).scripts;
+  } finally {
+    rmSync(tempRoot, { recursive: true, force: true });
+  }
   if (scripts['check:brand-guard']) scripts['check:brand-guard:home'] = scripts['check:brand-guard'];
   scripts['check:brand-guard'] =
     'node --test scripts/public-brand-validation.test.mjs scripts/lib/intake-gh-retry.test.mjs';
@@ -194,96 +207,6 @@ function buildExportedRootScripts(sourceScripts) {
   if (!rootCheckChain(scripts).split(' && ').includes('pnpm check:start-profile-isolation')) {
     scripts.check += ' && pnpm check:start-profile-isolation';
   }
-  for (const [name, command] of Object.entries(scripts)) {
-    scripts[name] = command
-      .split(' && ')
-      .filter((segment) => segment !== 'pnpm test:architecture-ownership')
-      .join(' && ');
-  }
-  delete scripts['check:architecture-ownership'];
-  delete scripts['test:architecture-ownership'];
-
-  const internalScripts = [
-    'check:artifacts:after-api-tests',
-    'check:measurement-bundles:after-api-tests',
-    'check:capability-tips-enablement:after-api-tests',
-    'check:prompt-budget:after-api-tests',
-    'check:browser-consumers',
-    'sync:train',
-    'antigravity:smoke',
-    'check:hmac-salt',
-    'check:antigravity-smoke',
-    'check:incident-containment',
-    'check:sync-export',
-    'check:web-global-css-imports',
-    'check:settings-primitives',
-    'check:root-debris',
-    'check:source-hygiene',
-    'check:f223-action-tracking',
-    'check:docs-discovery',
-    // Shared-red ownership is backed by the home gate receipt/database control
-    // plane. The public repository cannot verify or resolve those identities.
-    'gate:shared-red',
-    // Memory Architecture Closure reads lane-owned manifests that are not part
-    // of the curated public source tree. Must mirror sync-to-opensource.sh.
-    'gen:memory-architecture-closure',
-    'check:memory-architecture-catalog',
-    'gate:memory-architecture-closure',
-    // F267 measurement validity audits the complete home evidence archive, which
-    // the curated public export intentionally does not contain.
-    'check:measurement-bundles',
-    // F267 component hashes resolve private home certificate revisions and must
-    // be removed from both the exported script table and check:features chain.
-    'check:measurement-component-hashes',
-    // F251 sibling guard hard-depends on sync-manifest.yaml (not exported). Mirrors the shell list.
-    'check:sync-docs-runtime-assets',
-    // F238 Phase D: reverse-sanitizer detect-only CLI — internal boundary tooling
-    // (PR #2333). Must mirror sync-to-opensource.sh internalScripts list.
-    'check:reverse-sanitizer',
-    'check:boundary-roundtrip',
-    // Outbound boundary guards load scripts/_sanitize-rules.pl, which is internal by
-    // construction. Mirrors sync-to-opensource.sh internalScripts.
-    'check:outbound-sanitizer',
-    // Privacy gate test — references F207 internal incident context; home-only.
-    'check:export-privacy-gate',
-    // F251 Task 4b — public delta gate test suite (classifier + cli + wire + replay).
-    // Home-only sync-pipeline harness; mirrors sync-to-opensource.sh internalScripts.
-    'check:sync-public-delta-gate',
-    // F251 Task 5 — Public Behavior Change Reporter (KD-11). Home-only sync-pipeline harness.
-    'check:public-behavior-impact',
-    // F251 AC-A6 — 30-day retroactive eval helper. Home-only, single-shot.
-    'check:f251-v1-eval',
-    // F247 B1d — home-only cloud-cat supporting service lifecycle helper.
-    // References mcp.clowder-ai.com, local Cloudflare tunnel config, and
-    // gpt-pro agent-key paths; strip from public package scripts.
-    'start:cloud',
-    'cloud:status',
-    'cloud:doctor',
-    'cloud:copy-url',
-    'cloud:stop',
-    'check:f247-cloud-services',
-    // F256 Phase A hook regression tests live in test/hooks/, which is not exported.
-    'check:hooks',
-    // Prompt-budget guard (#4686 + follow-up): native L0 tokens + builder-prompt chars against
-    // the HOME roster; the L0 test and the dossier stay home-only. Mirrors sync-to-opensource.sh.
-    'check:prompt-budget',
-    // F068 primary-worktree post-checkout guard + local event log are home-only.
-    'eval:post-checkout-guard',
-    'clean:root-debris',
-    'guards:check',
-  ];
-  for (const scriptName of internalScripts) {
-    delete scripts[scriptName];
-    for (const [name, command] of Object.entries(scripts)) {
-      scripts[name] = command
-        .split(' && ')
-        .filter((segment) => segment !== `pnpm ${scriptName}` && segment !== `pnpm run ${scriptName}`)
-        .join(' && ');
-    }
-  }
-  for (const key of Object.keys(scripts)) {
-    if (key.startsWith('desktop:')) delete scripts[key];
-  }
   return scripts;
 }
 
@@ -300,6 +223,15 @@ function executePackageScriptsTransform(sourceScripts, marker = 'PACKAGE_JSON_TR
   const packagePath = resolve(tempRoot, 'package.json');
   writeFileSync(packagePath, `${JSON.stringify({ scripts: sourceScripts }, null, 2)}\n`);
   try {
+    if (marker === 'PACKAGE_JSON_TRANSFORM_EOF')
+      execFileSync(process.execPath, [
+        resolve(ROOT, 'scripts/home-package-scripts.mjs'),
+        '--public',
+        '--target',
+        packagePath,
+        '--root',
+        ROOT,
+      ]);
     execFileSync('node', ['-', packagePath], {
       cwd: ROOT,
       encoding: 'utf8',
@@ -1010,6 +942,14 @@ excluded:
       writeFileSync(packagePath, JSON.stringify(readJsonFile('package.json')));
       const transform = content.match(/<<'PACKAGE_JSON_TRANSFORM_EOF'\n([\s\S]*?)\nPACKAGE_JSON_TRANSFORM_EOF/);
       assert.ok(transform, 'execute the actual root package projection');
+      execFileSync(process.execPath, [
+        resolve(ROOT, 'scripts/home-package-scripts.mjs'),
+        '--public',
+        '--target',
+        packagePath,
+        '--root',
+        ROOT,
+      ]);
       execFileSync(process.execPath, ['-', packagePath], { input: transform[1] });
       const actualScripts = JSON.parse(readFileSync(packagePath, 'utf8')).scripts;
       assert.ok(!Object.keys(actualScripts).some((name) => name.endsWith(':after-api-tests')));
@@ -1037,38 +977,38 @@ excluded:
         assert.ok(exportedScripts[match[1]], `public pnpm check reaches a deleted script: ${step}`);
       }
       assert.ok(
-        content.includes('delete pkg.scripts["check:architecture-ownership"]'),
+        homeScriptNames.has('check:architecture-ownership') && !actualScripts['check:architecture-ownership'],
         'public package.json should not expose check:architecture-ownership without exporting its script target',
       );
       assert.ok(
-        content.includes('delete pkg.scripts["test:architecture-ownership"]'),
+        homeScriptNames.has('test:architecture-ownership') && !actualScripts['test:architecture-ownership'],
         'public package.json should not expose test:architecture-ownership without exporting its script target',
       );
       assert.ok(
-        content.includes('.filter((segment) => segment !== "pnpm test:architecture-ownership")') &&
+        !rootCheckChain(actualScripts).includes('pnpm test:architecture-ownership') &&
           !rootCheckChain(exportedScripts).split(' && ').includes('pnpm test:architecture-ownership'),
         'public package.json should remove the source-only architecture ownership test from every check chain',
       );
       assert.ok(
-        content.includes('"check:f223-action-tracking"'),
+        homeScriptNames.has('check:f223-action-tracking'),
         'public package.json should drop source-only F223 action tracking because its inventory truth source is not exported',
       );
       assert.ok(
-        content.includes('"check:docs-discovery"'),
+        homeScriptNames.has('check:docs-discovery'),
         'public package.json should drop source-only docs discovery checks because public docs export is partial',
       );
       assert.ok(
-        content.includes('"check:measurement-bundles"'),
+        homeScriptNames.has('check:measurement-bundles'),
         'public package.json should drop the home-only measurement bundle audit because public evidence is partial',
       );
       assert.ok(
-        content.includes('"check:measurement-component-hashes"') &&
+        homeScriptNames.has('check:measurement-component-hashes') &&
           !exportedScripts['check:measurement-component-hashes'] &&
           !exportedScripts['check:features'].includes('check:measurement-component-hashes'),
         'public package.json should remove the home-only component hash audit from both its definition and nested feature chain',
       );
       assert.ok(
-        content.includes('"eval:post-checkout-guard"') && !exportedScripts['eval:post-checkout-guard'],
+        homeScriptNames.has('eval:post-checkout-guard') && !actualScripts['eval:post-checkout-guard'],
         'public package.json should drop the home-only primary-worktree guard evaluator',
       );
       assert.ok(
@@ -1116,7 +1056,7 @@ excluded:
       assert.deepEqual(
         buildExportedRootScripts(sourceScripts),
         executePackageScriptsTransform(sourceScripts),
-        'buildExportedRootScripts must mirror the PACKAGE_JSON_TRANSFORM_EOF program in scripts/sync-to-opensource.sh — update both when adding an internal-only script',
+        'public variant composition and the canonical home command policy must match the actual package projection',
       );
     });
 
@@ -1325,10 +1265,15 @@ excluded:
       assert.doesNotMatch(sanitized, /Clowder AI 的护城河是情感壁垒不是技术壁垒/);
     });
 
-    it('public F237 segmented L4 template sanitization removes home-only runtime rules', () => {
+    it('public F237 segmented L4 renders profile safety data after canonical sanitization', () => {
       const sourceL4 = readFileSync(resolve(ROOT, 'assets/prompt-templates/l4-iron-laws.md'), 'utf-8');
-      const sanitized = sanitizeFixture('assets/prompt-templates/l4-iron-laws.md', sourceL4);
+      const template = sanitizeFixture('assets/prompt-templates/l4-iron-laws.md', sourceL4);
+      const input = JSON.parse(readFileSync(resolve(ROOT, 'packages/shared/src/deployment-profiles.json'), 'utf8'));
+      const values = resolvePromptTemplateVariables(projectDeploymentProfiles(input, 'opensource'));
+      const sanitized = template.replace(/\{\{(\w+)\}\}/g, (match, key) => values[key] ?? match);
 
+      assert.match(template, /\{\{RUNTIME_SAFETY_RULE\}\}/);
+      assert.match(template, /\{\{ACCEPTANCE_RULE\}\}/);
       assert.match(sanitized, /\*\*Runtime data safety\*\*/);
       assert.match(sanitized, /\*\*Release acceptance channel\*\*/);
       assert.doesNotMatch(sanitized, /Redis production Redis \(sacred\)/);
@@ -1414,75 +1359,6 @@ excluded:
         invokeSingleCatTest,
         /assertStagingPromptContract/,
         'invoke-single-cat ADR-038 prompt assertions must keep source strict while allowing public export to omit raw staging strings',
-      );
-    });
-
-    it('public governance hash helper rebases drift guard to sanitized shared-rules headings', () => {
-      const tempRoot = mkdtempSync(resolve(tmpdir(), 'cat-cafe-public-governance-hash-'));
-      try {
-        const sharedRulesPath = resolve(tempRoot, 'cat-cafe-skills/refs/shared-rules.md');
-        const testFilePath = resolve(tempRoot, 'packages/api/test/system-prompt-builder.test.js');
-        const helperDir = resolve(tempRoot, 'helper path with spaces');
-        const helperPath = resolve(helperDir, 'update-public-governance-hash.mjs');
-        mkdirSync(dirname(sharedRulesPath), { recursive: true });
-        mkdirSync(dirname(testFilePath), { recursive: true });
-        mkdirSync(helperDir, { recursive: true });
-        copyFileSync(resolve(ROOT, 'scripts/update-public-governance-hash.mjs'), helperPath);
-
-        const publicSharedRules = [
-          '### P1. 面向终态，不绕路',
-          '### W3. 用户是 operator，不是甲方路由器',
-          '### W8. 共享视图——人猫共创家园，产物天然该在共享工作空间里可见',
-          '',
-        ].join('\n');
-        writeFileSync(sharedRulesPath, publicSharedRules);
-        writeFileSync(testFilePath, "const PINNED_HASH = '89989b48ac64c6ee';\n");
-
-        execFileSync('node', [helperPath, sharedRulesPath, testFilePath]);
-
-        const expectedHash = createHash('sha256')
-          .update(
-            publicSharedRules
-              .split('\n')
-              .filter((line) => /^###?\s+(P\d|W\d)/.test(line))
-              .sort()
-              .join('\n'),
-          )
-          .digest('hex')
-          .slice(0, 16);
-        const updatedTest = readFileSync(testFilePath, 'utf-8');
-        assert.match(updatedTest, new RegExp(`const PINNED_HASH = '${expectedHash}';`));
-        assert.doesNotMatch(updatedTest, /89989b48ac64c6ee/);
-      } finally {
-        rmSync(tempRoot, { recursive: true, force: true });
-      }
-    });
-
-    it('sync-to-opensource.sh rebases public governance hash after comprehensive sanitization', () => {
-      const content = readSyncScript();
-
-      assert.match(
-        content,
-        /scripts\/update-public-governance-hash\.mjs/,
-        'sync should call the public governance hash helper after sanitizer changes shared-rules.md',
-      );
-      assert.match(
-        content,
-        /cat-cafe-skills\/refs\/shared-rules\.md[\s\S]*packages\/api\/test\/system-prompt-builder\.test\.js/,
-        'sync should derive the public PINNED_HASH from the exported shared-rules.md and patch the exported test',
-      );
-    });
-
-    it('sync-manifest exports the public governance hash helper used by public env-port checks', () => {
-      const managedScripts = readYamlTopLevelList('sync-manifest.yaml', 'managed_scripts');
-
-      assert.ok(
-        managedScripts.includes('scripts/check-env-port-drift.test.mjs'),
-        'public check:env-ports exports check-env-port-drift.test.mjs',
-      );
-      assert.ok(
-        managedScripts.includes('scripts/update-public-governance-hash.mjs'),
-        'check-env-port-drift.test.mjs copies the governance hash helper and needs it in public checkouts',
       );
     });
 

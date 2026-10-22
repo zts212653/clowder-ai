@@ -1,8 +1,12 @@
 import { createHash } from 'node:crypto';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, join } from 'node:path';
 
-import { parse, stringify } from 'yaml';
+import { stringify } from 'yaml';
+import {
+  createMeasurementCertificateFixture,
+  createMeasurementResultFixture,
+} from './helpers/measurement-certificate-fixture.js';
 
 export const PROGRAM_ID = 'evolution-program:bcc336788a7df9d6075b1efb4c0a7e68';
 const SOURCE_ID = 'evolution-program-bcc336788a7df9d6075b1efb4c0a7e68';
@@ -19,7 +23,6 @@ const DEFAULT_SOURCE_OPTIONS = Object.freeze({
 const SOURCE_REVISION = '7ee1440c30770c7a0e4bd9e226349b65264904b3';
 export const MANIFEST_REVISION = 'a3d4141d93015b21749e180656bfa23548b82049';
 export const SOURCE_REF = `docs/harness-feedback/measurement-sources/capability-evolution/${SOURCE_ID}.yaml`;
-const sourceRepoRoot = resolve(import.meta.dirname, '../../../..');
 
 export function sha256(bytes) {
   return createHash('sha256').update(bytes).digest('hex');
@@ -112,23 +115,11 @@ function ownerObject(objectType, ownerFeatureId, payload) {
 }
 
 export async function validSourceManifest(options = {}) {
-  const certificate = parse(
-    await readFile(join(sourceRepoRoot, 'docs/harness-feedback/certificates/f267-memory-search-quality.yaml'), 'utf8'),
-  );
-  const result = parse(
-    await readFile(
-      join(
-        sourceRepoRoot,
-        'docs/harness-feedback/measurement-results/f267-memory-search-quality-negative-control-v1.yaml',
-      ),
-      'utf8',
-    ),
-  );
-  return sourceManifestFromEvidence(certificate, result, options);
+  const certificate = await createMeasurementCertificateFixture();
+  return sourceManifestFromEvidence(certificate, createMeasurementResultFixture(certificate), options);
 }
 
-// Pure assembly lets portable contracts use synthetic evidence while home integration
-// suites keep reading the real owner artifacts through validSourceManifest.
+// Hash-consistent owner objects remain explicit fixtures, never live installation evidence.
 export function sourceManifestFromEvidence(certificate, result, options = {}) {
   const sourceOptions = { ...DEFAULT_SOURCE_OPTIONS, ...options };
   const projection = program(sourceOptions).program;

@@ -20,7 +20,7 @@ maine-coon: |
   ### 执行纪律
   - 加载 Skill 后直接执行第一步（产出 > 复述）
   - 声明 = 执行：说"我进 merge gate"必须同 turn 加载 skill 并执行
-  - 中间产物留在代码里；跨猫路由与面向co-creator的进度按共享约定区分
+  - 中间产物留在代码里；跨猫路由与面向{{CO_CREATOR_ROLE}}的进度按共享约定区分
   - 若识别到角色不匹配或方向有问题，先通知对方再执行（Rule 0）
   - serial/handoff 场景且需要对方行动 → @ 对应猫（parallel 模式各自独立，不互 @）
   - 收到 review 意见：独立判断，认为自己对就 push back（Rule 0），不全盘接受
@@ -53,5 +53,5 @@ golden-chinchilla: |
   我这条消息结尾有没有 @ 下一棒？没有 → 是真的不需要，还是我忘了？
 
   ### 金渐层家族治理（OpenCode 专属）
-  OMOC Sisyphus 只编排自己的 sub-agent，不编排其他猫。opencode 原生 MCP 和 Clowder AI MCP 需避免 tool 名冲突。
-  `question` 工具已 deny——co-creator通过 Hub 交互，不走 OpenCode TUI 弹窗。提问用回复文本或 `cat_cafe_create_rich_block(kind=interactive)`。
+  OMOC Sisyphus 只编排自己的 sub-agent，不编排其他猫。opencode 原生 MCP 和 {{PRODUCT_DISPLAY_NAME}} MCP 需避免 tool 名冲突。
+  `question` 工具已 deny——{{CO_CREATOR_ROLE}}通过 Hub 交互，不走 OpenCode TUI 弹窗。提问用回复文本或 `cat_cafe_create_rich_block(kind=interactive)`。

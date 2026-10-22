@@ -1,6 +1,6 @@
 ---
 name: eval-design
-tips_exempt: "2026-10-01 adds pre-comparison detectability, stochastic-generation rebuild variance, selection-exposed sets and a monotonicity probe to existing eval design; no new product action or surface."
+tips_exempt: "2026-10-22 refines existing judge calibration and method-comparison guidance with bounded controls and cost accounting; no new product action or surface."
 description: "Use when: 要判断 Agent 是否专业、省心或真正改善，需设计判断依据、指标、校准，或修改/审计 eval。Not for: 单次交付(quality-gate)、外部claim(source-audit)、摩擦诊断(code-as-harness)。Output: 测量与校准草案或指标出生证（纵向eval含触发契约），或病名+处置。"
 ---
 
@@ -56,6 +56,12 @@ E0 划的是**自治上限**：外部新 bit 缺位，不得宣称开放价值 c
 改善——但不否决候选生成、分诊、shadow、灰度等局部自动化。建前定资格，运行中
 随 runway 持续重验。judge 联网算不算破圈 → 宪法 E0 联网三分判：查事实=真升级 /
 查人群资料=换仓库的老本 / 接该用户本人历史=真破圈（破圈靠接上真值，不靠搜索动作）。
+
+静态读候选的 judge 可用于初筛或排序，不能代替改动效果的实际比较。judge 将影响
+采用/退役且误判风险未校准时，可在隔离材料中注入能独立确认的缺陷，并保留正常
+对照，分别检查错放、错杀及其对具体决定的影响；换模型、规约或任务分布时按失效
+条件复核。不照搬外部论文的阈值，不给普通 review 新增固定审计。缺陷注入只校准
+所覆盖的错误类型；判得严也可能失去区分力，不能只看错放减少。
 
 ## 一、指标出生证契约（适用字段缺一不发牌照）
 
@@ -187,6 +193,15 @@ intervention_card:
 环境可达范围与独立验收条件可比，计入生成、判定和学习成本，允许实际选材不同。
 比较方法版本时也计入开发与评估方法本身的成本。这不取消固定候选的同批重放，
 也不改写已有项目冻结的试验；适用对照与原文入口见选材与方法研究索引。
+比较改进方法时从相同或明确配对的起始资产出发，保持证据可达范围、干预权限与
+预算可比；候选份数相同不代表预算相同。分别记提案/搜索、验证、人工精力及其他
+与当前决定相关的成本；一次通读直改、现行方法或精简版可作低成本对照，按问题选。
+只存下不同方案而未执行，最多比较方案与提案成本，不能证明改进效果或方法优劣。
+
+在两版都有有效观测的配对二元任务中，可同时报告修好、弄坏、保持成功的数量；
+回归保留率为该配对集内两版都成功的数量除以旧版成功数量。分母为零写不可估计；
+缺测单列未知，报告配对覆盖与不确定性，不外推未配对任务。不把该比例设成全项目固定指标，连续/开放价值结果保留
+自己的判法与风险维度。上述校准与比较例子的来源和适用边界不构成本地效用证明。
 F311 项目选好试验后回到[实际学习循环](../capability-evolution/refs/learning-loop.md)
 执行与接回结果，不停在干预证草稿。
 

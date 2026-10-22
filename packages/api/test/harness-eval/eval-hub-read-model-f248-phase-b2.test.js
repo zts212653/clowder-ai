@@ -1,21 +1,34 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { fileURLToPath } from 'node:url';
 import { loadEvalHubSummary } from '../../dist/infrastructure/harness-eval/hub/eval-hub-read-model.js';
-
-const repoHarnessFeedbackRoot = fileURLToPath(new URL('../../../../docs/harness-feedback', import.meta.url));
+import { createEvalHubRoot, writeEvalHubVerdict } from './eval-hub-corpus-fixture.js';
 
 describe('F248 Phase B2 operator narrative projection', () => {
-  it('turns the committed anchor-first empty window into an insufficient-evidence card', () => {
+  it('turns an independent empty window into an insufficient-evidence card', (t) => {
+    const repoHarnessFeedbackRoot = createEvalHubRoot(t);
+    writeEvalHubVerdict(repoHarnessFeedbackRoot, {
+      verdictId: 'fixture-anchor-first-empty-window',
+      domainId: 'eval:anchor-first',
+      featureId: 'F203',
+      componentId: 'anchor-first',
+      durationHours: 24,
+      components: [
+        {
+          id: 'anchor-first',
+          name: 'Fixture anchor',
+          activationCounts: { observations: 0 },
+          frictionCounts: {},
+          confidence: 'low',
+        },
+      ],
+    });
     const summary = loadEvalHubSummary({
       harnessFeedbackRoot: repoHarnessFeedbackRoot,
       now: new Date('2026-07-09T19:27:00.000Z'),
     });
-    const item = summary.items.find(
-      (candidate) => candidate.id === '2026-06-28-eval-anchor-first-empty-window-keep-observe',
-    );
+    const item = summary.items.find((candidate) => candidate.id === 'fixture-anchor-first-empty-window');
 
-    assert.ok(item, 'committed anchor-first empty-window verdict must remain readable');
+    assert.ok(item, 'independent empty-window verdict must be readable');
     assert.ok(item.operatorNarrative, 'read model must project one structured operator narrative');
     assert.equal(item.operatorNarrative.evidenceQuality, 'insufficient');
     assert.match(item.operatorNarrative.headline, /数据还不够/);

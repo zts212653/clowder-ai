@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { existsSync } from 'node:fs';
+import { existsSync, realpathSync } from 'node:fs';
 import { readdir, readFile } from 'node:fs/promises';
 import { posix, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -242,12 +242,24 @@ export function validatePublicTestExclusions(registry, options = {}) {
   return registry;
 }
 
+async function defaultAuditProfile(repoRoot) {
+  const path = resolve(repoRoot, '.sync-provenance.json');
+  if (!existsSync(path)) return 'source';
+  const provenance = JSON.parse(await readFile(path, 'utf8'));
+  // An empty target is the canonical writer's explicit source-only export.
+  // A preserved target (and legacy provenance) retains the public audit, which
+  // includes target-owned tests. Never pick an audit by whichever count passes.
+  if (provenance?.target_head_sha !== '') return 'public';
+  if (!SHA_PATTERN.test(provenance.source_commit_sha ?? ''))
+    throw new Error('source-managed export requires a pinned source commit');
+  return 'source';
+}
+
 export async function resolvePublicTestFiles(options = {}) {
   const packageRoot = options.packageRoot ?? fileURLToPath(new URL('..', import.meta.url));
   const configPath = options.configPath ?? DEFAULT_CONFIG_PATH;
   const repoRoot = resolve(packageRoot, '..', '..');
-  const auditProfile =
-    options.auditProfile ?? (existsSync(resolve(repoRoot, '.sync-provenance.json')) ? 'public' : 'source');
+  const auditProfile = options.auditProfile ?? (await defaultAuditProfile(repoRoot));
   const allTestFiles = await listTestFiles(resolve(packageRoot, 'test'));
   const registry = await loadPublicTestExclusions({ configPath });
   const validated = validatePublicTestExclusions(registry, {
@@ -317,7 +329,7 @@ async function main() {
   process.stdout.write(selectedFiles.join('\n'));
 }
 
-const invokedPath = process.argv[1] ? resolve(process.argv[1]) : '';
+const invokedPath = process.argv[1] && existsSync(process.argv[1]) ? realpathSync(process.argv[1]) : '';
 const modulePath = fileURLToPath(import.meta.url);
 
 if (invokedPath === modulePath) {

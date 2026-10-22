@@ -15,7 +15,16 @@
         "hubName": "Clowder AI Hub",
         "tagline": "Your AI team collaboration space"
       },
-      "repositoryFullName": "zts212653/clowder-ai"
+      "repositoryFullName": "zts212653/clowder-ai",
+      "l0Projections": ["owner", "public"],
+      "promptPolicy": {
+        "coCreatorRole": "co-creator",
+        "decisionRole": "operator",
+        "runtimeSafetyRule": "1. **Runtime data safety** — Use isolated development/test data stores; never point local experiments at production user data",
+        "acceptanceRule": "4. **Release acceptance channel** — Validate merged changes in an isolated acceptance environment; test unmerged work in a feature checkout",
+        "modifyDataBoundary": "修改生产数据边界",
+        "capabilityQualifier": ""
+      }
     }
   },
   "startupProfiles": {

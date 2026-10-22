@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { lstat, readFile, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, readdir, readFile, realpath, rm, writeFile } from 'node:fs/promises';
+import { dirname, isAbsolute, join, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { gunzipSync, gzipSync } from 'node:zlib';
+import { canonicalGzip } from './canonical-gzip.mjs';
 
 /** A deterministic USTAR containing only the producer's regular files. No filesystem metadata enters the SRI. */
 export function tarArchive(files) {
@@ -29,18 +30,20 @@ export function tarArchive(files) {
   return Buffer.concat([...blocks, Buffer.alloc(1024)]);
 }
 
-/** Shared artifact writer; producers validate schema before calling, exporters use their filtered JSON. */
+/** Build outputs from canonical manifests and regular SVG inputs; callers validate the manifest schema. */
 export async function generateBundledPluginArtifacts(
   pluginRoot,
   definitions,
-  { check = false, formatIndex = (text) => text } = {},
+  { check = false, sourceRoot = pluginRoot } = {},
 ) {
-  async function generatedFile(url, expected) {
-    if (check) {
-      assert.deepEqual(await readFile(url), Buffer.from(expected), `stale bundled artifact: ${fileURLToPath(url)}`);
-    } else {
-      await writeFile(url, expected);
-    }
+  const outputRoot = fileURLToPath(new URL('bundled-packages', pluginRoot));
+  const output = new Map();
+  function recordFile(url, bytes) {
+    const path = fileURLToPath(url);
+    const name = relative(outputRoot, path);
+    assert.ok(name && !isAbsolute(name) && name !== '..' && !name.startsWith(`..${sep}`));
+    assert.ok(!output.has(path), `duplicate bundled artifact: ${path}`);
+    output.set(path, Buffer.from(bytes));
   }
 
   const records = [];
@@ -49,29 +52,42 @@ export async function generateBundledPluginArtifacts(
     assert.ok(/^\d+\.\d+\.\d+$/.test(manifest.version));
     assert.ok(/^assets\/[a-z-]+\.svg$/.test(manifest.icon.src));
     const relativeRoot = `bundled-packages/${catalogId}/${manifest.version}/`;
-    const iconPath = new URL(`${relativeRoot}${manifest.icon.src}`, pluginRoot);
-    const stat = await lstat(iconPath);
-    assert.ok(stat.isFile() && !stat.isSymbolicLink(), 'bundled source icon must be a regular file');
+    const iconPath = new URL(`${relativeRoot}${manifest.icon.src}`, sourceRoot);
+    const rootPath = await realpath(sourceRoot);
+    const sourcePath = fileURLToPath(iconPath);
+    const actualPath = await realpath(iconPath);
+    const inside = relative(rootPath, actualPath);
+    assert.ok(
+      inside && !isAbsolute(inside) && inside !== '..' && !inside.startsWith(`..${sep}`),
+      'bundled source icon must remain inside the source root',
+    );
+    // Root aliases (e.g. macOS /tmp) are allowed. Every component below the
+    // canonical root must be unlinked, including directory symlinks/junctions.
+    const components = relative(fileURLToPath(sourceRoot), sourcePath).split(sep);
+    let current = rootPath;
+    for (const [index, component] of components.entries()) {
+      current = join(current, component);
+      const stat = await lstat(current);
+      assert.ok(!stat.isSymbolicLink(), 'bundled source must not contain links/junctions');
+      assert.ok(
+        index === components.length - 1 ? stat.isFile() : stat.isDirectory(),
+        'bundled source icon must be a regular file with directory ancestors',
+      );
+    }
     const manifestBytes = Buffer.from(`${JSON.stringify(manifest, null, 2)}\n`);
+    const iconBytes = await readFile(iconPath);
     const tarBytes = tarArchive([
       { name: 'package/manifest.json', bytes: manifestBytes },
-      { name: `package/${manifest.icon.src}`, bytes: await readFile(iconPath) },
+      { name: `package/${manifest.icon.src}`, bytes: iconBytes },
     ]);
     const archivePath = `${catalogId}/${manifest.version}/package.tgz`;
     const archiveUrl = new URL(`bundled-packages/${archivePath}`, pluginRoot);
-    await generatedFile(new URL(`${relativeRoot}manifest.json`, pluginRoot), manifestBytes);
-    // zlib versions/platforms can encode identical USTAR bytes differently. Check
-    // canonical content, then bind the index to the exact shipped compressed bytes.
-    const bytes = check ? await readFile(archiveUrl) : gzipSync(tarBytes, { level: 9 });
-    if (check) {
-      assert.deepEqual(
-        gunzipSync(bytes, { maxOutputLength: tarBytes.length }),
-        tarBytes,
-        `stale bundled artifact: ${fileURLToPath(archiveUrl)}`,
-      );
-    } else {
-      await writeFile(archiveUrl, bytes);
-    }
+    recordFile(new URL(`${relativeRoot}manifest.json`, pluginRoot), manifestBytes);
+    recordFile(new URL(`${relativeRoot}${manifest.icon.src}`, pluginRoot), iconBytes);
+    // Release identity is exact compressed bytes, not just decoded TAR content.
+    // The encoder uses fixed metadata/stored DEFLATE and never invokes zlib.
+    const bytes = canonicalGzip(tarBytes);
+    recordFile(archiveUrl, bytes);
     records.push({
       catalogId,
       pluginId: manifest.pluginId,
@@ -81,8 +97,39 @@ export async function generateBundledPluginArtifacts(
       archivePath,
     });
   }
-  const indexSource =
-    `// Generated by scripts/generate-bundled-plugin-packages.mts from the canonical producer manifests and SVG bytes.\n` +
-    `export const BUNDLED_PACKAGE_ARCHIVES = ${JSON.stringify(Object.fromEntries(records.map((record) => [record.catalogId, record])), null, 2)} as const;\n`;
-  await generatedFile(new URL('bundled-package-index.ts', pluginRoot), formatIndex(indexSource));
+  recordFile(
+    new URL('bundled-packages/index.json', pluginRoot),
+    `${JSON.stringify(Object.fromEntries(records.map((record) => [record.catalogId, record])), null, 2)}\n`,
+  );
+  // Read and validate every input before publishing anything. This namespace
+  // belongs entirely to this producer; adjacent dist files are never removed.
+  if (!check) {
+    // rm unlinks an output symlink/junction rather than following its target.
+    await rm(outputRoot, { recursive: true, force: true });
+    for (const [path, bytes] of output) {
+      await mkdir(dirname(path), { recursive: true });
+      await writeFile(path, bytes);
+    }
+    return;
+  }
+  const expectedEntries = new Set();
+  for (const path of output.keys()) {
+    for (let name = relative(outputRoot, path); name !== '.'; name = dirname(name)) expectedEntries.add(name);
+  }
+  const actualEntries = [];
+  async function inspect(directory) {
+    const stat = await lstat(directory);
+    assert.ok(stat.isDirectory() && !stat.isSymbolicLink(), `stale bundled artifact set: ${directory}`);
+    for (const entry of await readdir(directory, { withFileTypes: true })) {
+      const path = join(directory, entry.name);
+      assert.ok(entry.isFile() || entry.isDirectory(), `stale bundled artifact set: ${path}`);
+      actualEntries.push(relative(outputRoot, path));
+      if (entry.isDirectory()) await inspect(path);
+    }
+  }
+  await inspect(outputRoot);
+  assert.deepEqual(actualEntries.sort(), [...expectedEntries].sort(), 'stale bundled artifact set');
+  for (const [path, bytes] of output) {
+    assert.deepEqual(await readFile(path), bytes, `stale bundled artifact: ${path}`);
+  }
 }

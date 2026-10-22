@@ -100,6 +100,25 @@ export function useAccountDirectory() {
     }, 2000);
     return () => clearInterval(timer);
   }, [waiting, refresh]);
+  const renewalPending = data?.providers.some(
+    (p) =>
+      p.quota?.status === 'unavailable' &&
+      (p.quota.failure?.kind === 'renewal_required' || /登录凭据已过期/.test(p.quota.error ?? '')),
+  );
+  useEffect(() => {
+    if (!renewalPending) return;
+    const check = () => {
+      if (document.visibilityState === 'visible') void refresh();
+    };
+    const timer = setInterval(check, 15000);
+    document.addEventListener('visibilitychange', check);
+    window.addEventListener('focus', check);
+    return () => {
+      clearInterval(timer);
+      document.removeEventListener('visibilitychange', check);
+      window.removeEventListener('focus', check);
+    };
+  }, [renewalPending, refresh]);
   useEffect(() => {
     const reconcile = () => {
       void refresh();

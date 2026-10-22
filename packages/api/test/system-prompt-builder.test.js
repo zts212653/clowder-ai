@@ -5,15 +5,15 @@
 
 import './helpers/setup-cat-registry.js';
 import assert from 'node:assert/strict';
-import { existsSync, readFileSync } from 'node:fs';
-import { dirname, resolve } from 'node:path';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { dirname, join, resolve } from 'node:path';
 import { describe, mock, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { catRegistry } from '@cat-cafe/shared';
 
 const REPO_ROOT_TEMPLATE = resolve(dirname(fileURLToPath(import.meta.url)), '../../..', 'cat-template.json');
 const CAT_TEMPLATE_PATH = REPO_ROOT_TEMPLATE;
-const CAT_DOSSIER_PATH = resolve(dirname(fileURLToPath(import.meta.url)), '../../../docs/team/cat-dossier.md');
 const FULL_RUNTIME_PROMPT_CHAR_BUDGET = 7050; // 6500→6700→7050: gemini35 + gpt-pro roster growth
 
 function assertWithinFullRuntimePromptBudget(prompt) {
@@ -720,21 +720,17 @@ describe('SystemPromptBuilder', () => {
     assert.ok(!rosterSection.includes('| 布偶猫/宪宪'), 'Opus default should not list itself');
   });
 
-  test('buildStaticIdentity roster hydrates Fable from the dossier or uses the public fallback', async () => {
+  test('roster hydrates an explicit dossier fixture and falls back without that installation', async (t) => {
     await withFreshRuntimeRegistry(async () => {
-      const { buildStaticIdentity } = await import('../dist/domains/cats/services/context/SystemPromptBuilder.js');
-      const identity = buildStaticIdentity('codex');
-      const fableRow = identity
-        .split('## 队友名册')[1]
-        ?.split('\n')
-        .find((line) => line.includes('claude-fable-5'));
-
-      assert.ok(fableRow, 'codex roster should include Fable');
-      if (existsSync(CAT_DOSSIER_PATH)) {
-        assert.match(fableRow, /宪宪（他）/, 'home roster must hydrate Fable pronouns from the dossier');
-      } else {
-        assert.match(fableRow, /新猫，待校准/, 'public roster must keep the generic config fallback without a dossier');
-      }
+      const { buildTeammateRoster } = await import('../dist/domains/cats/services/context/SystemPromptBuilder.js');
+      const { writeDossierFixture } = await import('./helpers/dossier-fixture.js');
+      const root = mkdtempSync(join(tmpdir(), 'api-roster-dossier-'));
+      t.after(() => rmSync(root, { recursive: true, force: true }));
+      writeDossierFixture(root);
+      const roster = buildTeammateRoster('codex', root);
+      assert.match(roster, /（戊）/);
+      assert.match(roster, /fixture-roster-canary/);
+      assert.doesNotMatch(buildTeammateRoster('codex', join(root, 'absent')), /（戊）|fixture-roster-canary/);
     });
   });
 
@@ -2121,30 +2117,30 @@ describe('SystemPromptBuilder', () => {
     const { resolve } = await import('node:path');
     const { createHash } = await import('node:crypto');
 
-    // Extract world-view / principle section headings from shared-rules.md
     const rulesPath = resolve(import.meta.dirname, '../../../cat-cafe-skills/refs/shared-rules.md');
     const rulesText = readFileSync(rulesPath, 'utf8');
-    const headings = rulesText
-      .split('\n')
-      .filter((l) => /^###?\s+(P\d|W\d)/.test(l))
-      .sort()
-      .join('\n');
-    const hash = createHash('sha256').update(headings).digest('hex').slice(0, 16);
-
-    // Pin: update this hash whenever you add/remove/rename P* or W* sections
-    // in shared-rules.md, AND update GOVERNANCE_L0_DIGEST in SystemPromptBuilder.ts
-    const PINNED_HASH = '1b137442fdbb0d1c';
-    if (PINNED_HASH === '${PLACEHOLDER}') {
-      // First run — print hash for pinning
-      console.log(`[drift-guard] shared-rules headings hash: ${hash} — pin this value`);
-      return; // skip assertion on first run
-    }
-    assert.equal(
-      hash,
-      PINNED_HASH,
-      `shared-rules.md P*/W* headings changed (got ${hash}, pinned ${PINNED_HASH}). ` +
-        'Update GOVERNANCE_L0_DIGEST in SystemPromptBuilder.ts to match, then update PINNED_HASH here.',
+    const built = JSON.parse(
+      readFileSync(new URL('../dist/domains/cats/services/context/governance-build.json', import.meta.url), 'utf8'),
     );
+    const sha256 = (text) => createHash('sha256').update(text).digest('hex');
+    assert.equal(built.schemaVersion, 1);
+    assert.equal(built.source, 'cat-cafe-skills/refs/shared-rules.md');
+    assert.equal(built.sourceSha256, sha256(rulesText), 'governance source changed after build; rebuild the API');
+    const { getGovernanceDigest } = await import('../dist/domains/cats/services/context/SystemPromptBuilder.js');
+    const prompt = getGovernanceDigest();
+    assert.equal(built.compiledSha256, sha256(prompt), 'runtime governance differs from its build projection');
+    const headings = [...rulesText.matchAll(/^###\s+([PW]\d)\.\s+(.+)$/gm)];
+    assert.equal(headings.length, 13);
+    for (const [, key, text] of headings) {
+      assert.ok(
+        prompt.includes(
+          `- **${key}** ${text
+            .replace(/\*\*|`/g, '')
+            .replace(/\s+/g, ' ')
+            .trim()}`,
+        ),
+      );
+    }
   });
 
   // ── F182 Phase B: Roster invisibility guard ─────────────────────────────────────────────────

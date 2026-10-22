@@ -59,7 +59,7 @@
     "build": "tsc",
     "prepare": "tsc",
     "dev": "tsc --watch",
-    "clean": "rm -rf dist",
+    "clean": "node ../../scripts/clean-path.mjs dist",
     "lint": "tsc --noEmit",
     "test": "vitest run"
   },

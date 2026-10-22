@@ -1,7 +1,19 @@
 import assert from 'node:assert/strict';
-import { describe, it } from 'node:test';
-
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterEach, beforeEach, describe, it } from 'node:test';
+import { parse, stringify } from 'yaml';
 import { createF311E0EvalRepairOwnerBindingProvider } from '../../dist/infrastructure/capability-evolution/change/f311-e0-eval-repair-owner-provider.js';
+import { writeF311OwnerBindingFixture } from './f311-owner-binding-fixture.js';
+
+let fixtureRoot;
+let fixturePaths;
+beforeEach(() => {
+  fixtureRoot = mkdtempSync(join(tmpdir(), 'f311-owner-binding-'));
+  fixturePaths = writeF311OwnerBindingFixture(fixtureRoot);
+});
+afterEach(() => rmSync(fixtureRoot, { recursive: true, force: true }));
 
 const PROGRAM_ID = 'evolution-program:bcc336788a7df9d6075b1efb4c0a7e68';
 const PROGRAM_REF = { ownerFeatureId: 'F311', ownerStateRef: PROGRAM_ID };
@@ -27,7 +39,7 @@ function provider(overrides = {}) {
     originTriggerMessageId: PRINCIPAL.originMessageId,
   };
   return createF311E0EvalRepairOwnerBindingProvider({
-    repoRoot: new URL('../../../..', import.meta.url).pathname,
+    repoRoot: fixtureRoot,
     ownerUserId: OWNER_USER_ID,
     programReader: {
       async get(programId) {
@@ -140,5 +152,16 @@ describe('F311 E0 canonical eval-repair owner provider', () => {
       decisionAuthorityRef: directOwner.authorityRef,
     });
     assert.deepEqual(decision, { status: 'blocked', reason: 'owner_authorization_missing' });
+  });
+  it('rejects divergent owner facts and missing required files rather than borrowing installation truth', async () => {
+    const path = join(fixtureRoot, fixturePaths.bindingPath);
+    const original = readFileSync(path, 'utf8');
+    const binding = parse(original);
+    binding.valueOwnerRef.ownerStateRef = 'user:foreign-owner';
+    writeFileSync(path, stringify(binding));
+    await assert.rejects(provider().resolve(), /diverges from canonical owner inputs/);
+    writeFileSync(path, original);
+    rmSync(join(fixtureRoot, fixturePaths.charterPath));
+    await assert.rejects(provider().resolve(), /ENOENT/);
   });
 });

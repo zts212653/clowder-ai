@@ -16,8 +16,8 @@
    - **2a 轮询模式**（无回调覆盖）→ 调用 `cat_cafe_hold_ball({ wakeAfterMs, waitSourceRef: { kind, value, expectedSignal, slaUntilMs } })` + 定时唤醒检查。**必须声明等什么**（waitSourceRef），不声明 = 400 拒绝。如果你等的是人回复，走选项 1 或 3，不走 hold_ball
    - **2b 事件驱动**（已有结构化回调 + EYES>0）→ 纯事件驱动，**不调用 / 不续约 hold_ball**（F167 KD-27）
    - **2c 命令托管**（要跑本地命令等结果：`pnpm gate` / `pnpm test` / build）→ 调用 `cat_cafe_hold_ball({ wakeWhen: { command } })`，服务端托管命令并在完成后带结果（exit code + 输出尾部）唤醒。**替代 `run_in_background` + 手动轮询**——命令完成时你会被自动 re-invoke 并收到结构化结果
-3. **只有co-creator本人才能做** → `@co-creator`（仅以下硬条件）：
-   - **不可逆操作**：删数据 / force push / 合第三方 PR / close feat / 修改生产数据边界
+3. **只有{{CO_CREATOR_ROLE}}本人才能做** → `@co-creator`（仅以下硬条件）：
+   - **不可逆操作**：删数据 / force push / 合第三方 PR / close feat / {{MODIFY_DATA_BOUNDARY}}
    - **愿景级决策**：改 VISION / 砍整块 feat / 开新 family / 重定 Phase
    - **跨猫僵局**：2+ 猫已直接冲突、push back 两轮无共识
 

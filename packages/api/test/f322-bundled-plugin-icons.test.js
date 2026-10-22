@@ -47,7 +47,7 @@ for (const pluginId of ['official.chatgpt-dot']) {
     assert.ok(manifest);
     assert.ok(entry);
     assert.equal(typeof manifest.icon, 'object', 'the canonical bundled manifest must declare its packaged icon');
-    assert.notEqual(manifest.version, '0.1.0', 'a newly declared asset cannot rewrite the old immutable release');
+    assert.equal(manifest.version, '0.1.2', 'canonical encoding is a new release, not a rewrite of 0.1.1');
     const root = await mkdtemp(join(tmpdir(), 'f322-bundled-icons-'));
     roots.push(root);
     const store = new MemoryPluginInventoryStore();
@@ -91,7 +91,7 @@ test('unknown identities, versions, digests and caller-selected paths cannot sel
   for (const delta of [
     { catalogId: '../chatgpt-dot' },
     { pluginId: 'unknown.builtin' },
-    { version: '0.1.2' },
+    { version: '99.0.0' },
     { packageDigest: `sha512-${Buffer.alloc(64).toString('base64')}` },
     { archiveUrl: 'file:///etc/passwd' },
   ]) {
@@ -207,36 +207,53 @@ test('the shared registry downloader retains its npm HTTPS boundary', async () =
   await assert.rejects(fetchOfficialPackageArchive({ ...entry, archiveUrl: 'https://example.invalid/plugin.tgz' }));
 });
 
-test('real compiled dist reads all fixed archives from outside the source cwd', async () => {
-  const provider = new URL('../dist/domains/plugin/bundled-package-source.js', import.meta.url).href;
-  const catalog = new URL('../dist/domains/plugin/official-catalog.js', import.meta.url).href;
-  const code =
-    `const {fetchOfficialPackageArchive}=await import(${JSON.stringify(provider)});` +
-    `const {OFFICIAL_PLUGIN_CATALOG}=await import(${JSON.stringify(catalog)});` +
-    `const {createHash}=await import('node:crypto');const rows=[];` +
-    `for(const row of OFFICIAL_PLUGIN_CATALOG.filter(x=>x.bundledFormat==='archive')){` +
-    `const bytes=await fetchOfficialPackageArchive(row);rows.push({id:row.pluginId,bytes:bytes.length,` +
-    `digest:'sha512-'+createHash('sha512').update(bytes).digest('base64')});}` +
-    `process.stdout.write(JSON.stringify(rows));`;
-  const { stdout } = await promisify(execFile)(process.execPath, ['--input-type=module', '-e', code], {
-    cwd: tmpdir(),
+for (const layout of ['src', 'dist']) {
+  test(`real ${layout} reads built archives from outside the source cwd`, async () => {
+    const provider = new URL(
+      `../${layout}/domains/plugin/bundled-package-source.${layout === 'src' ? 'ts' : 'js'}`,
+      import.meta.url,
+    ).href;
+    const catalog = new URL(
+      `../${layout}/domains/plugin/official-catalog.${layout === 'src' ? 'ts' : 'js'}`,
+      import.meta.url,
+    ).href;
+    const code =
+      `const {fetchOfficialPackageArchive}=await import(${JSON.stringify(provider)});` +
+      `const {OFFICIAL_PLUGIN_CATALOG}=await import(${JSON.stringify(catalog)});` +
+      `const {createHash}=await import('node:crypto');const rows=[];` +
+      `for(const row of OFFICIAL_PLUGIN_CATALOG.filter(x=>x.bundledFormat==='archive')){` +
+      `const bytes=await fetchOfficialPackageArchive(row);rows.push({id:row.pluginId,bytes:bytes.length,` +
+      `digest:'sha512-'+createHash('sha512').update(bytes).digest('base64')});}` +
+      `process.stdout.write(JSON.stringify(rows));`;
+    const { stdout } = await promisify(execFile)(
+      process.execPath,
+      [
+        ...(layout === 'src' ? ['--import', new URL('../node_modules/tsx/dist/loader.mjs', import.meta.url).href] : []),
+        '--input-type=module',
+        '-e',
+        code,
+      ],
+      {
+        cwd: tmpdir(),
+      },
+    );
+    const rows = JSON.parse(stdout);
+    assert.equal(rows.length, OFFICIAL_BUNDLED_CATALOG_ENTRIES.length);
+    for (const row of rows) {
+      const expected = OFFICIAL_PLUGIN_CATALOG.find((entry) => entry.pluginId === row.id);
+      assert.ok(expected);
+      assert.equal(row.digest, expected.packageDigest);
+      const bytes = await fetchOfficialPackageArchive(expected);
+      assert.equal(row.bytes, bytes.length);
+      assert.equal(row.digest, `sha512-${createHash('sha512').update(bytes).digest('base64')}`);
+    }
   });
-  const rows = JSON.parse(stdout);
-  assert.equal(rows.length, OFFICIAL_BUNDLED_CATALOG_ENTRIES.length);
-  for (const row of rows) {
-    const expected = OFFICIAL_PLUGIN_CATALOG.find((entry) => entry.pluginId === row.id);
-    assert.ok(expected);
-    assert.equal(row.digest, expected.packageDigest);
-    const bytes = await fetchOfficialPackageArchive(expected);
-    assert.equal(row.bytes, bytes.length);
-    assert.equal(row.digest, `sha512-${createHash('sha512').update(bytes).digest('base64')}`);
-  }
-});
+}
 
 // The release contract includes canonical manifest + asset bytes + generated SRI.
 test('shipped bundled artifacts match their canonical producer inputs', async () => {
-  const script = new URL('../scripts/generate-bundled-plugin-packages.mts', import.meta.url);
-  await promisify(execFile)(process.execPath, ['--import', 'tsx', script.pathname, '--check'], {
+  const script = new URL('../scripts/copy-bundled-plugin-packages.mjs', import.meta.url);
+  await promisify(execFile)(process.execPath, [script.pathname, '--check'], {
     cwd: new URL('..', import.meta.url),
   });
 });

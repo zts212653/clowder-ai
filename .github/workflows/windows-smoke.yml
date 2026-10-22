@@ -210,6 +210,8 @@ jobs:
           node --test packages/api/test/cli-spawn-win.test.js
           node --test packages/api/test/process-liveness-probe.test.js
           node --test packages/api/test/pick-directory.test.js
+      - name: Windows stale-process entrypoint guard
+        run: node --test scripts/cleanup-stale-dev-processes.test.mjs
       # #1542: the compaction launch plan must hold on Windows (realpath
       # backslash semantics, junction escapes, canonical containment).
       - name: F296 compaction launch plan (Windows paths)

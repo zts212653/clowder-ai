@@ -57,7 +57,7 @@ if [ -n "$UNTRACKED_DOCS" ]; then
   WARNINGS="${WARNINGS}
 ⚠️ 收尾检查：docs/ 下有未跟踪的 .md 文件（可能是你写的，也可能是别的猫正在写）：
 ${UNTRACKED_DOCS}
-→ 是你写的，先 commit push 再收工；不是你写的别动，也别拿去问co-creator
+→ 是你写的，先 commit push 再收工；不是你写的别动，也别拿去问${CO_CREATOR_ROLE}
 "
 fi
 
@@ -67,7 +67,7 @@ if [ -n "$ROOT_IMAGES" ]; then
   WARNINGS="${WARNINGS}
 ⚠️ 收尾检查：根目录有图片文件（截图应放 assets/screenshots/）：
 ${ROOT_IMAGES}
-→ 别走！首个发现者直接收拾，不跨线程协调、不问 operator：截图 mv assets/screenshots/（不 commit）；设计稿 → designs/；未知文件不删
+→ 别走！首个发现者直接收拾，不跨线程协调、不问 ${DECISION_ROLE}：截图 mv assets/screenshots/（不 commit）；设计稿 → designs/；未知文件不删
 "
 fi
 
@@ -79,7 +79,7 @@ if [ -n "$ROOT_CLUTTER" ]; then
   WARNINGS="${WARNINGS}
 ⚠️ 收尾检查：根目录有杂物文件：
 ${ROOT_CLUTTER}
-→ 是你放的就收走再收工；不是你放的别动，也别拿去问co-creator；未知文件不删
+→ 是你放的就收走再收工；不是你放的别动，也别拿去问${CO_CREATOR_ROLE}；未知文件不删
 "
 fi
 

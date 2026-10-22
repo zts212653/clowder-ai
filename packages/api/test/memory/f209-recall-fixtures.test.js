@@ -1,7 +1,7 @@
 /**
  * F200 HW-5: F209 Fixture Recall@k Wrapper
  *
- * Validates that F209 Phase A/B/C fixture files exist, are parseable,
+ * Exercises independent Phase A/B/C fixture files that are parseable,
  * and can be consumed by a recall@k evaluation runner.
  *
  * The runner itself is a typed utility that:
@@ -14,18 +14,15 @@
  */
 
 import assert from 'node:assert/strict';
-import { existsSync } from 'node:fs';
-import { dirname, join } from 'node:path';
-import { describe, it } from 'node:test';
-import { fileURLToPath } from 'node:url';
+import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { after, describe, it } from 'node:test';
+import { writeF209RecallFixtures } from '../helpers/f209-recall-fixture.js';
 
-const ROOT = (() => {
-  let dir = dirname(fileURLToPath(import.meta.url));
-  while (dir !== '/' && !existsSync(join(dir, '.git'))) {
-    dir = dirname(dir);
-  }
-  return dir;
-})();
+const ROOT = mkdtempSync(join(tmpdir(), 'f209-parser-fixture-'));
+writeF209RecallFixtures(ROOT);
+after(() => rmSync(ROOT, { recursive: true, force: true }));
 
 const FIXTURE_PATHS = [
   'docs/eval/f209-phase-a-raw-retrieval-fixtures.md',
@@ -64,7 +61,7 @@ describe('F200 HW-5: F209 fixture recall@k wrapper', () => {
 
       // Fixture 1: semantic raw
       const f1 = fixtures[0];
-      assert.equal(f1.query, 'care logistics');
+      assert.equal(f1.query, 'fixture semantic');
       assert.equal(f1.scope, 'threads');
       assert.equal(f1.mode, 'semantic');
       assert.equal(f1.depth, 'raw');
@@ -78,7 +75,7 @@ describe('F200 HW-5: F209 fixture recall@k wrapper', () => {
 
       // Fixture 2: hybrid raw
       const f2 = fixtures[1];
-      assert.equal(f2.query, 'appointment');
+      assert.equal(f2.query, 'fixture hybrid');
       assert.equal(f2.mode, 'hybrid');
       assert.equal(f2.kind, 'recall', 'fixture with explicit query is recall');
     });
@@ -91,7 +88,7 @@ describe('F200 HW-5: F209 fixture recall@k wrapper', () => {
       assert.equal(fixtures.length, 3, 'Phase B has 3 fixtures');
 
       // Fixture 1: operator alias — has query but anchor has no glob → drilldown
-      assert.equal(fixtures[0].query, 'operator');
+      assert.equal(fixtures[0].query, 'fixture owner');
       assert.equal(fixtures[0].mode, 'lexical');
       assert.equal(fixtures[0].kind, 'drilldown', 'F1 has query but non-glob anchor');
 
@@ -111,7 +108,7 @@ describe('F200 HW-5: F209 fixture recall@k wrapper', () => {
 
       // P1-2 Round 2 fix: fixture 1 has Search query but anchor has no glob → drilldown
       assert.equal(fixtures[0].kind, 'drilldown', 'fixture 1 has query but non-glob anchor');
-      assert.equal(fixtures[0].query, 'care logistics');
+      assert.equal(fixtures[0].query, 'fixture semantic');
       // Cloud review P2: multi-backtick anchor field must extract the glob, not first span
       assert.equal(fixtures[1].kind, 'drilldown', 'fixture 2 has no Search query');
       assert.equal(fixtures[1].expectedAnchorPattern, 'session-*', 'must extract glob from multi-backtick field');
@@ -152,7 +149,7 @@ describe('F200 HW-5: F209 fixture recall@k wrapper', () => {
 
       const fixture = {
         name: 'test-fixture',
-        query: 'care logistics',
+        query: 'fixture semantic',
         scope: 'threads',
         mode: 'semantic',
         depth: 'raw',
@@ -167,7 +164,7 @@ describe('F200 HW-5: F209 fixture recall@k wrapper', () => {
 
       assert.equal(result.hit, true, 'should hit — thread-abc matches thread-*');
       assert.equal(result.rank, 1, 'rank is 1-indexed position');
-      assert.equal(result.query, 'care logistics');
+      assert.equal(result.query, 'fixture semantic');
       assert.equal(result.mode, 'semantic');
       assert.equal(result.depth, 'raw');
       assert.equal(result.degraded, false);
@@ -185,7 +182,7 @@ describe('F200 HW-5: F209 fixture recall@k wrapper', () => {
 
       const fixture = {
         name: 'miss-fixture',
-        query: 'operator',
+        query: 'fixture owner',
         scope: 'docs',
         mode: 'lexical',
         depth: 'summary',

@@ -63,7 +63,7 @@
     "lint": "pnpm -r run lint",
     "check:sources": "pnpm check:no-provider-canary-residue && pnpm check:paw-feel-disposition-boundaries && pnpm check:f290-product-copy && pnpm check:f290-workbench-boundary && pnpm check:dir-size && pnpm check:daemon-lifecycle && pnpm check:capability-tips && pnpm check:co-creation-docs-lane && pnpm check:review-completion-routing && pnpm check:skills:references && pnpm check:skills:surfaces && pnpm check:env-registry && pnpm check:env-example && pnpm check:worktree-reaper && pnpm check:node-runtime-guard && pnpm check:prompt-time-apis && pnpm check:followup-tails && pnpm check:scripts-ascii-only && pnpm check:f212-reconciliation-eval && pnpm check:site-css && pnpm check:brand-guard",
     "check:installed": "pnpm check:sidebar-projection-boundary && pnpm biome check . --diagnostic-level=error && pnpm check:biome-review-worktrees && pnpm check:sop-definitions && pnpm check:design-gate-real-interaction && pnpm check:design-md && pnpm check:skills:manifest && pnpm check:env-ports && pnpm check:start-profile-isolation && pnpm check:guides && pnpm check:no-codex-provider-exit-suppression && pnpm check:whisper-dispatch && pnpm check:tts-runtime && pnpm check:site-integrity",
-    "check:artifacts": "pnpm check:paw-feel-disposition-capacity && pnpm check:mcp-surface-governance && pnpm check:features && pnpm check:eval-metric-glossary:prepared && pnpm check:capability-tips-enablement && pnpm check:pre-merge-gate",
+    "check:artifacts": "pnpm check:paw-feel-disposition-capacity && pnpm check:mcp-surface-governance && pnpm check:features && pnpm check:eval-metric-glossary:prepared && pnpm check:capability-tips-enablement && pnpm check:pre-merge-gate && pnpm check:dossier-prompts",
     "check": "pnpm check:sources && pnpm check:installed && pnpm check:artifacts",
     "check:f290-product-copy": "node --test scripts/check-f290-product-copy.test.mjs && node scripts/check-f290-product-copy.mjs",
     "check:f290-workbench-boundary": "node --test scripts/check-f290-workbench-boundary.test.mjs && node scripts/check-f290-workbench-boundary.mjs",
@@ -133,9 +133,9 @@
     "rescue:claude:thinking": "node ./scripts/rescue-claude-thinking-signature.mjs",
     "proxy:anthropic": "node ./scripts/anthropic-proxy.mjs",
     "logs:health": "bash ./scripts/logs-health.sh",
-    "clean": "pnpm -r run clean && rm -rf node_modules",
+    "clean": "pnpm -r run clean && node scripts/clean-path.mjs node_modules",
     "check:start-profile-isolation": "node --test scripts/start-dev-profile-isolation.test.mjs scripts/start-dev-named-alpha-redis-lease.test.mjs",
-    "check:node-runtime-guard": "node --test scripts/node-runtime-guard.test.mjs",
+    "check:node-runtime-guard": "node --test scripts/node-runtime-guard.test.mjs scripts/clean-path.test.mjs scripts/cleanup-stale-dev-processes.entrypoint.test.mjs",
     "check:brand-dictionary": "node --test scripts/brand-dictionary-helper.test.mjs",
     "check:brand-guard": "node --test scripts/public-brand-validation.test.mjs scripts/lib/intake-gh-retry.test.mjs",
     "check:site-integrity": "node --test site/site-integrity.test.mjs",
@@ -146,6 +146,7 @@
     "check:archive-dedup": "node scripts/check-archive-dedup.mjs",
     "fseventsd:observe": "python3 -I -S -B scripts/macos/fseventsd_recovery.py --observe",
     "check:fseventsd-recovery": "python3 -I -S -B scripts/macos/test_fseventsd_recovery.py && python3 -I -S -B scripts/macos/test_fseventsd_recovery_native.py && node --test scripts/lib/gate-resource-receipts-noop.test.mjs",
+    "check:dossier-prompts": "node --test scripts/dossier-prompt-fixture.test.mjs",
     "check:brand-guard:home": "node --test scripts/deployment-brand.test.mjs scripts/intake-from-opensource.test.mjs scripts/lib/intake-gh-retry.test.mjs scripts/public-brand-validation.test.mjs"
   },
   "devDependencies": {

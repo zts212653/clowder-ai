@@ -1718,6 +1718,9 @@ describe('intake-from-opensource.sh --record strict guard (absorbed)', () => {
       ['README.ja-JP.md', 'README.opensource.ja-JP.md'],
       ['SETUP.md', 'SETUP.md'],
       ['CONTRIBUTING.md', 'CONTRIBUTING.md'],
+      ['CLAUDE.md', 'CLAUDE.opensource.md'],
+      ['AGENTS.md', 'AGENTS.opensource.md'],
+      ['GEMINI.md', 'GEMINI.opensource.md'],
     ];
     const f = makeRecordFixture({
       targetPrFiles: mappings.map(([path]) => ({ path })),
@@ -1748,6 +1751,58 @@ describe('intake-from-opensource.sh --record strict guard (absorbed)', () => {
       { PATH: `${f.mockBin}:${process.env.PATH}` },
     );
     assert.match(output, /Recorded PR #495 → absorbed/);
+  });
+
+  it('rejects each public agent guide absorption when its canonical source is absent from the reviewed diff', () => {
+    const observations = [];
+    for (const target of ['CLAUDE.md', 'AGENTS.md', 'GEMINI.md']) {
+      const source = target.replace('.md', '.opensource.md');
+      const f = makeRecordFixture({
+        targetPrFiles: [{ path: target }],
+        absorbPrFiles: [{ path: 'packages/shared/src/fixture.ts' }],
+        issueBody: [
+          'Source: clowder-ai#495',
+          '## Per-File Decision Table',
+          '| File | Change | Decision | Reason |',
+          `| ${target} | public guide | manual-port | preserve community work |`,
+        ].join('\n'),
+      });
+      fixtures.push(f.sandboxRoot);
+      const result = runResult(
+        'bash',
+        [
+          SOURCE_SCRIPT,
+          '--record',
+          '--pr',
+          '495',
+          '--decision',
+          'absorbed',
+          '--intent-issue',
+          '1234',
+          '--absorb-pr',
+          '1236',
+          '--review-proof',
+          'https://github.com/zts212653/clowder-ai/pull/1236#issuecomment-1',
+        ],
+        f.repoRoot,
+        { PATH: `${f.mockBin}:${process.env.PATH}` },
+      );
+      observations.push({
+        target,
+        rejected: result.status !== 0,
+        sourceNamed: (result.stdout + result.stderr).includes(`${target} -> ${source}`),
+        ledgerEmpty: JSON.parse(readFileSync(f.ledgerPath, 'utf8')).entries.length === 0,
+      });
+    }
+    assert.deepEqual(
+      observations,
+      ['CLAUDE.md', 'AGENTS.md', 'GEMINI.md'].map((target) => ({
+        target,
+        rejected: true,
+        sourceNamed: true,
+        ledgerEmpty: true,
+      })),
+    );
   });
 
   it('rejects a partially ported localized README and does not write an absorbed record', () => {

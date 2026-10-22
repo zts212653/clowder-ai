@@ -40,7 +40,7 @@ import { accessSync, existsSync, readFileSync, realpathSync, writeFileSync } fro
 import { homedir } from 'node:os';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { catRegistry } from '@cat-cafe/shared';
+import { catRegistry, resolveL0Projections, resolvePromptTemplateVariables } from '@cat-cafe/shared';
 import { getDossierL0Pronouns, getDossierL0RoutingNote, getDossierL0SelfDescription } from '@cat-cafe/shared/dossier';
 import {
   CURRENT_CORPUS_PROFILE_URI,
@@ -198,10 +198,15 @@ function parseWorkflowTriggersFile(filePath) {
   const result = {};
   for (const [breed, content] of Object.entries(parsed)) {
     if (typeof content === 'string') {
-      result[breed] = ensureMergeGateSourceProvenanceTrigger(content.trimEnd());
+      result[breed] = ensureMergeGateSourceProvenanceTrigger(renderEditionVariables(content.trimEnd()));
     }
   }
   return result;
+}
+
+function renderEditionVariables(template, dynamic = {}) {
+  const variables = { ...resolvePromptTemplateVariables(), ...dynamic };
+  return template.replace(/\{\{(\w+)\}\}/g, (match, key) => (Object.hasOwn(variables, key) ? variables[key] : match));
 }
 
 function ensureMergeGateSourceProvenanceTrigger(content) {
@@ -236,7 +241,7 @@ function loadWorkflowTriggers() {
   }
 }
 
-function buildIdentityBlock(config, runtimeModel) {
+function buildIdentityBlock(config, runtimeModel, dossierRoot) {
   const lines = [];
   const nameLabel = config.nickname
     ? `${config.displayName}/${config.nickname}（${config.name}）`
@@ -245,7 +250,7 @@ function buildIdentityBlock(config, runtimeModel) {
   if (config.nickname) {
     lines.push(`昵称 "${config.nickname}" 的由来见 \`docs/stories/cat-names/\`。`);
   }
-  const selfDescription = getDossierL0SelfDescription(config.catId, REPO_ROOT);
+  const selfDescription = getDossierL0SelfDescription(config.catId, dossierRoot);
   if (selfDescription) {
     lines.push(`角色与自我校准：${selfDescription}`);
   } else {
@@ -306,11 +311,11 @@ function resolveModel(id, cfg) {
   return cfg.defaultModel ?? '';
 }
 
-function buildRosterRow(id, cfg) {
+function buildRosterRow(id, cfg, dossierRoot) {
   const mention = cfg.mentionPatterns?.[0] ?? `@${id}`;
   const model = resolveModel(id, cfg);
   const cell = model ? `${mention} · ${model}` : mention;
-  const pronouns = getDossierL0Pronouns(id, REPO_ROOT)?.split('/')[0]?.trim();
+  const pronouns = getDossierL0Pronouns(id, dossierRoot)?.split('/')[0]?.trim();
   // Chinese L0 only needs the Chinese pronoun. The dossier marker limits this
   // scarce surface to evidence-backed repeat failures instead of every profile.
   // Prefer the shorter nickname for marked rows so the reminder is token-negative.
@@ -322,12 +327,12 @@ function buildRosterRow(id, cfg) {
   // capability dossier. Prefer the explicit compact route note; keep config
   // caution as a compatibility fallback for runtime/custom cats that have not
   // yet acquired a structured dossier profile. Hard restrictions always stay.
-  const routingNote = getDossierL0RoutingNote(id, REPO_ROOT) ?? cfg.caution;
+  const routingNote = getDossierL0RoutingNote(id, dossierRoot) ?? cfg.caution;
   const routeContract = [routingNote, restrictions].filter(Boolean).join('；') || '—';
   return `| ${label} | ${cell} | ${routeContract} |`;
 }
 
-function buildTeammateRoster(currentCatId) {
+function buildTeammateRoster(currentCatId, dossierRoot) {
   const allConfigs = catRegistry.getAllConfigs();
   const teammates = filterAvailableTeammates(
     allConfigs,
@@ -338,7 +343,7 @@ function buildTeammateRoster(currentCatId) {
 
   const rows = ['## 队友名册', '| 猫猫 | @mention · 当前模型 | 路由边界 |', '|------|---------|------|'];
   for (const [id, cfg] of teammates) {
-    rows.push(buildRosterRow(id, cfg));
+    rows.push(buildRosterRow(id, cfg, dossierRoot));
   }
   return rows.join('\n');
 }
@@ -458,15 +463,16 @@ export function resolveUserCapsule(profileDir, relationshipKey) {
  * @param {string} options.catId - cat ID (must be registered in catRegistry)
  * @param {string} [options.runtimeModel] - resolved runtime model (e.g. claude-opus-4-7)
  * @param {string} [options.profileDir] - override for user profile directory (fixture isolation)
- * @param {'owner'|'public'} [options.projection='owner']
+ * @param {string} [options.dossierRoot] - explicit installation dossier root; defaults to the source repository
+ * @param {string} [options.projection='owner'] - must be supported by the active deployment's L0 projection policy
  * @returns {Promise<string>} compiled L0 ready for system-prompt injection
  */
 export async function compileL0(options) {
-  await bootstrapCatRegistry();
-  const { catId, runtimeModel, profileDir, projection = 'owner' } = options;
-  if (!['owner', 'public'].includes(projection)) {
+  const { catId, runtimeModel, profileDir, projection = 'owner', dossierRoot = REPO_ROOT } = options;
+  if (!resolveL0Projections().includes(projection)) {
     throw new Error(`compileL0: unsupported projection "${projection}"`);
   }
+  await bootstrapCatRegistry();
   const entry = catRegistry.tryGet(catId);
   if (!entry) {
     throw new Error(`compileL0: unknown catId "${catId}". Registered: ${catRegistry.getAllIds().join(', ')}`);
@@ -504,14 +510,16 @@ export async function compileL0(options) {
     result = result.replace(`{{${placeholder}}}`, loadL0SectionTemplate(filename));
   }
 
-  // Dynamic per-cat substitutions
-  return result
-    .replace('{{IDENTITY_BLOCK}}', buildIdentityBlock(config, runtimeModel))
-    .replace('{{USER_CAPSULE}}', capsuleSection)
-    .replace('{{TEAMMATE_ROSTER}}', buildTeammateRoster(catId))
-    .replace('{{GOVERNANCE_L0}}', governanceL0.content)
-    .replace('{{WORKFLOW_TRIGGERS}}', buildWorkflowTriggers(config.breedId, catId, config.displayName))
-    .replace('{{CVO_REF}}', renderCvoRef());
+  // One pass over source placeholders: inserted labels, capsules and overlays
+  // stay opaque, even when their data happens to contain a placeholder spelling.
+  return renderEditionVariables(result, {
+    IDENTITY_BLOCK: buildIdentityBlock(config, runtimeModel, dossierRoot),
+    USER_CAPSULE: capsuleSection,
+    TEAMMATE_ROSTER: buildTeammateRoster(catId, dossierRoot),
+    GOVERNANCE_L0: governanceL0.content,
+    WORKFLOW_TRIGGERS: buildWorkflowTriggers(config.breedId, catId, config.displayName),
+    CVO_REF: renderCvoRef(),
+  });
 }
 
 /**
@@ -543,7 +551,7 @@ if (isCliEntrypoint(import.meta.url, process.argv[1])) {
   const catIdx = args.indexOf('--cat');
   if (catIdx < 0 || !args[catIdx + 1]) {
     console.error(
-      'Usage: node scripts/compile-system-prompt-l0.mjs --cat <catId> [--out <path>] [--profile-dir <path>] [--projection owner|public]',
+      `Usage: node scripts/compile-system-prompt-l0.mjs --cat <catId> [--out <path>] [--profile-dir <path>] [--projection ${resolveL0Projections().join('|')}]`,
     );
     process.exit(2);
   }

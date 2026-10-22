@@ -1,16 +1,17 @@
 'use client';
 import type { AccountQuotaObservation, CodexAccountIdentity } from '@cat-cafe/shared';
+import { useEffect } from 'react';
 import { AppTooltip } from '../AppTooltip';
 import { accountMessage } from '../accounts/account-message';
 import { useShellCopy } from '../shell/shell-copy';
 import { useShellLanguage } from '../shell/shell-language';
+import { QuotaQueryFeedback, quotaQueryTime } from './QuotaQueryFeedback';
 import { quotaCopy } from './quota.shell-copy';
+import { remainingQuota as remaining } from './quota-state';
 import { useAccountQuota } from './useAccountQuota';
 import './codex-quota.css';
 
 type QuotaItem = AccountQuotaObservation['items'][number];
-const remaining = (item: QuotaItem) =>
-  Math.max(0, Math.min(100, item.percentKind === 'remaining' ? item.usedPercent : 100 - item.usedPercent));
 function windowLabel(label: string, language: 'zh' | 'en') {
   const weekly = /^(.*?)(?:每周使用限额|Weekly usage limit)$/i.exec(label);
   if (weekly) return `${weekly[1]}${language === 'zh' ? '本周' : 'Week'}`;
@@ -24,20 +25,25 @@ export function CodexQuotaControl(props: {
   reload: () => Promise<void>;
   managed?: boolean;
   identity?: CodexAccountIdentity;
+  allowReading?: boolean;
+  inUse?: boolean;
+  switchSuggestion?: { name: string; left: number };
+  onRelogin?: () => void;
+  onObservation?: (observation: AccountQuotaObservation | undefined) => void;
 }) {
   const t = useShellCopy(quotaCopy);
   const language = useShellLanguage();
   const locale = language === 'zh' ? 'zh-CN' : 'en-US';
-  const { observation, busy, error, query } = useAccountQuota(props);
-  const good = observation?.status === 'ok' && observation.items.length > 0;
-  const items = good ? observation.items : [];
+  const { observation, reading, busy, automatic, identityChanged, query } = useAccountQuota(props);
+  const { onObservation } = props;
+  useEffect(() => {
+    onObservation?.(observation);
+  }, [onObservation, observation]);
+  const good = !!reading?.items.length;
+  const items = good ? reading.items : [];
   const tightest = items.reduce((best, item, index) => (remaining(item) < remaining(items[best]) ? index : best), 0);
-  const time = observation
-    ? new Date(observation.observedAt).toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit', hour12: false })
-    : '';
-  const observedDate = observation ? new Date(observation.observedAt) : undefined;
-  const updated = observedDate ? `${observedDate.getMonth() + 1}/${observedDate.getDate()} ${time}` : '';
-  const failure = error || (observation && observation.status !== 'ok' ? observation.error || t.unavailable : '');
+  const updated = reading ? quotaQueryTime(reading.observedAt, language) : '';
+  const failure = observation?.status === 'unavailable' ? observation : undefined;
   const label = good ? t.refresh : failure ? t.retry : t.check;
   const resetLabel = (item: QuotaItem) => {
     const delta = item.resetsAt ? Date.parse(item.resetsAt) - Date.now() : NaN;
@@ -102,40 +108,57 @@ export function CodexQuotaControl(props: {
             })}
           </div>
         )}
-        {!good && failure && <span className="account-quota-unavailable">{t.unavailable} · </span>}
-        <AppTooltip label={good ? `${t.refresh} · ${t.updated(updated)}` : label}>
-          <button
-            type="button"
-            className={good ? 'account-quota-refresh' : 'account-button account-quota-query'}
-            aria-label={good ? t.refresh : undefined}
-            disabled={busy}
-            onClick={() => void query()}
-          >
-            <svg
-              className={busy ? 'account-quota-spinning' : undefined}
-              aria-hidden="true"
-              width="16"
-              height="16"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="1.8"
+        {(!failure || good) && (
+          <AppTooltip label={good ? `${t.refresh} · ${t.updated(updated)}` : label}>
+            <button
+              type="button"
+              className={good ? 'account-quota-refresh' : 'account-button account-quota-query'}
+              aria-label={good ? t.refresh : undefined}
+              disabled={busy}
+              onClick={() => void query()}
             >
-              <path d="M20 7v5h-5M20 12a8 8 0 1 0-2.3 5.7M20 12l-3-5" />
-            </svg>
-            {!good && (busy ? t.querying : label)}
-          </button>
-        </AppTooltip>
+              <svg
+                className={busy ? 'account-quota-spinning' : undefined}
+                aria-hidden="true"
+                width="16"
+                height="16"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.8"
+              >
+                <path d="M20 7v5h-5M20 12a8 8 0 1 0-2.3 5.7M20 12l-3-5" />
+              </svg>
+              {!good && (busy ? t.querying : label)}
+            </button>
+          </AppTooltip>
+        )}
       </div>
-      {good && failure && (
-        <small role="alert" className="account-quota-error">
-          {t.stale(time)} ·{' '}
-          <button type="button" disabled={busy} onClick={() => void query()}>
-            {t.retry}
-          </button>
-        </small>
+      {good && props.inUse && remaining(items[tightest]) < 20 && (
+        <p className="account-quota-switch-hint">
+          {remaining(items[tightest]) === 0 ? t.usedUp : t.nearLimit} ·{' '}
+          {props.switchSuggestion
+            ? t.switchHint(props.switchSuggestion.name, props.switchSuggestion.left.toFixed(0))
+            : t.noNextAccount}
+        </p>
       )}
-      {failure && <span className="sr-only">{accountMessage(failure, language)}</span>}
+      {identityChanged && <small className="account-quota-error">{t.identityChanged}</small>}
+      {automatic ? (
+        <p className="account-quota-renewed" role="status">
+          {t.renewed}
+        </p>
+      ) : (
+        failure && (
+          <QuotaQueryFeedback
+            observation={failure}
+            readingAt={reading?.observedAt}
+            busy={busy}
+            query={() => void query()}
+            onRelogin={props.onRelogin}
+            inUse={props.inUse}
+          />
+        )
+      )}
     </div>
   );
 }

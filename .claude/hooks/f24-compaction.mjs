@@ -2,11 +2,15 @@
 // Managed Claude compaction carrier (Node canonical, #1542 successor of #1456).
 // No shell utilities, no persistent local state, no project writes.
 // Credit: ported from #1456 (.claude/hooks/f24-compaction.mjs by @amazing-fish).
+let productName = '';
 async function main() {
   const invocationId = process.env.CAT_CAFE_INVOCATION_ID;
   const callbackToken = process.env.CAT_CAFE_CALLBACK_TOKEN;
   // Project settings also apply to ordinary Claude CLI sessions.
   if (!invocationId || !callbackToken) return;
+  // Installed carrier dependencies are rooted at the trusted install, never cwd.
+  const { deploymentDefaults } = await import('../../packages/api/dist/agent-hooks/deployment-defaults.js');
+  productName = deploymentDefaults.brand.name;
   let raw = '';
   for await (const chunk of process.stdin) {
     raw += chunk;
@@ -16,7 +20,7 @@ async function main() {
   if (typeof input.session_id !== 'string' || !input.session_id || input.session_id.length > 500) {
     throw new Error('hook_session_id_invalid');
   }
-  const port = process.env.API_SERVER_PORT ?? '3004';
+  const port = process.env.API_SERVER_PORT ?? String(deploymentDefaults.apiPort);
   if (!/^\d+$/.test(port) || Number(port) < 1 || Number(port) > 65535) throw new Error('hook_api_port_invalid');
   const headers = {
     'X-Invocation-Id': invocationId,
@@ -52,7 +56,7 @@ async function main() {
   const result = await response.json();
   if (phase === 'pre') {
     if (result.contextEpoch?.status !== 'observed') throw new Error('hook_compaction_not_observed');
-    console.log(JSON.stringify({ systemMessage: 'Clowder AI recorded this invocation context compaction.' }));
+    console.log(JSON.stringify({ systemMessage: `${productName} recorded this invocation context compaction.` }));
   } else {
     if (result.postCompact?.status !== 'projected' || typeof result.postCompact.contextPacket !== 'string') {
       throw new Error('hook_cold_projection_unavailable');
@@ -71,6 +75,6 @@ async function main() {
 main().catch((error) => {
   // Never print response bodies, callback credentials, or user payloads.
   const reason = /^hook_[a-z_0-9]+$/.test(error.message) ? error.message : 'hook_request_failed';
-  console.error(`Clowder AI compaction hook: ${reason}`);
+  console.error(`${productName ? `${productName} ` : ''}compaction hook: ${reason}`);
   process.exitCode = 1;
 });

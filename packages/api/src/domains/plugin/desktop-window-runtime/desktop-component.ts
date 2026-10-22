@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
-import { constants } from 'node:fs';
+import { constants, existsSync } from 'node:fs';
 import { access, copyFile, lstat, mkdir, mkdtemp, readFile, realpath, rename, rm } from 'node:fs/promises';
-import { isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { NodeExternalPluginProcessAdapter } from '../external-runtime/node-process-adapter.js';
 
 interface Options {
@@ -133,21 +133,30 @@ export function desktopComponentEnvironment(directory: string): NodeJS.ProcessEn
   return env;
 }
 
+/**
+ * npm is a .cmd launcher on Windows, and the plugin process adapter spawns with
+ * shell:false. Resolve the JavaScript CLI and run it with the current Node
+ * binary instead of handing a .cmd to CreateProcess.
+ */
+export function desktopNpmInvocation(args: readonly string[]): { command: string; args: string[] } {
+  if (process.platform !== 'win32') return { command: 'npm', args: [...args] };
+  const npmCli = resolve(dirname(process.execPath), 'node_modules', 'npm', 'bin', 'npm-cli.js');
+  if (!existsSync(npmCli)) {
+    throw new Error('npm CLI entrypoint is unavailable for the Host Node runtime');
+  }
+  return { command: process.execPath, args: [npmCli, ...args] };
+}
+
 async function runComponentStage(stage: 'dependencies' | 'electron', directory: string): Promise<void> {
   const env = desktopComponentEnvironment(directory);
+  const args =
+    stage === 'dependencies'
+      ? ['ci', '--include=dev', '--ignore-scripts', '--no-audit', '--no-fund', '--registry=https://registry.npmjs.org']
+      : [join(directory, 'node_modules/electron/install.js')];
+  const invocation = stage === 'dependencies' ? desktopNpmInvocation(args) : { command: process.execPath, args };
   const child = await new NodeExternalPluginProcessAdapter().spawn({
-    command: stage === 'dependencies' ? (process.platform === 'win32' ? 'npm.cmd' : 'npm') : process.execPath,
-    args:
-      stage === 'dependencies'
-        ? [
-            'ci',
-            '--include=dev',
-            '--ignore-scripts',
-            '--no-audit',
-            '--no-fund',
-            '--registry=https://registry.npmjs.org',
-          ]
-        : [join(directory, 'node_modules/electron/install.js')],
+    command: invocation.command,
+    args: invocation.args,
     cwd: directory,
     env,
   });

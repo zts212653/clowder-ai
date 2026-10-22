@@ -15,7 +15,6 @@
 INPUT=$(cat)
 SESSION_ID=$(echo "$INPUT" | jq -r '.session_id')
 
-API_PORT="${API_SERVER_PORT:-3004}"
 INVOCATION_ID="${CAT_CAFE_INVOCATION_ID:-}"
 CALLBACK_TOKEN="${CAT_CAFE_CALLBACK_TOKEN:-}"
 
@@ -48,6 +47,9 @@ if [ "$AGE" -gt 1800 ]; then
 fi
 
 # Fetch latest sealed session digest (best-effort)
+SCRIPT_ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd) || exit 1
+API_PORT="${API_SERVER_PORT:-$(node "$SCRIPT_ROOT/scripts/read-deployment-default.mjs" apiPort)}"
+if [ -z "$API_PORT" ]; then exit 1; fi
 DIGEST=$(curl -sf --max-time 5 \
   -H "X-Invocation-Id: ${INVOCATION_ID}" \
   -H "X-Callback-Token: ${CALLBACK_TOKEN}" \
@@ -55,7 +57,8 @@ DIGEST=$(curl -sf --max-time 5 \
 DIGEST_STATUS=$?
 
 if [ "$DIGEST_STATUS" -ne 0 ] || [ -z "$DIGEST" ]; then
-  CONTEXT_PACKET="[F296 post-compact unsupported: Clowder AI projection unavailable]"
+  PRODUCT_NAME=$(node "$SCRIPT_ROOT/scripts/read-deployment-default.mjs" brand.name) || exit 1
+  CONTEXT_PACKET="[F296 post-compact unsupported: ${PRODUCT_NAME} projection unavailable]"
 else
   PROJECTION_STATUS=$(echo "$DIGEST" | jq -r '.postCompact.status // "unsupported"')
   if [ "$PROJECTION_STATUS" = "projected" ]; then

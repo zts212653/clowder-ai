@@ -16,6 +16,19 @@ export interface DeploymentProfile {
   roadmapPath: string;
   brand: DeploymentBrand;
   repositoryFullName: string;
+  promptPolicy?: DeploymentPromptPolicy;
+  l0Projections?: L0Projection[];
+}
+
+export type L0Projection = 'owner' | 'public' | 'collective-work';
+
+export interface DeploymentPromptPolicy {
+  coCreatorRole: string;
+  decisionRole: string;
+  runtimeSafetyRule: string;
+  acceptanceRule: string;
+  modifyDataBoundary: string;
+  capabilityQualifier: string;
 }
 
 interface DeploymentProfiles {
@@ -115,7 +128,65 @@ function selectProfile(input: unknown, requested?: string): { name: string; prof
       roadmapPath: roadmapPath(selected.roadmapPath),
       brand: brand(selected.brand),
       repositoryFullName: repository(selected.repositoryFullName),
+      ...(selected.l0Projections === undefined ? {} : { l0Projections: l0Projections(selected.l0Projections) }),
     },
+  };
+}
+
+function l0Projections(value: unknown): L0Projection[] {
+  if (
+    !Array.isArray(value) ||
+    value.length !== new Set(value).size ||
+    !value.includes('owner') ||
+    !value.includes('public') ||
+    !value.every((item) => ['owner', 'public', 'collective-work'].includes(item))
+  )
+    throw new Error('Invalid deployment configuration: l0Projections must be a unique supported projection set');
+  return [...value] as L0Projection[];
+}
+
+/** Projection support is edition data, separate from vocabulary and user settings. */
+export function resolveL0Projections(input: unknown = profiles): L0Projection[] {
+  return selectProfile(input).profile.l0Projections ?? ['owner', 'public'];
+}
+
+function promptPolicy(value: unknown): DeploymentPromptPolicy {
+  const input = record(value, 'promptPolicy');
+  const text = (key: keyof DeploymentPromptPolicy): string => {
+    const item = input[key];
+    if (
+      typeof item !== 'string' ||
+      (key !== 'capabilityQualifier' && !item.trim()) ||
+      item.length > 1024 ||
+      // biome-ignore lint/suspicious/noControlCharactersInRegex: policy values are single-line template data.
+      /[\u0000-\u001f\u007f]/.test(item)
+    )
+      throw new Error(`Invalid deployment configuration: promptPolicy.${key} must be single-line text`);
+    return item;
+  };
+  return {
+    coCreatorRole: text('coCreatorRole'),
+    decisionRole: text('decisionRole'),
+    runtimeSafetyRule: text('runtimeSafetyRule'),
+    acceptanceRule: text('acceptanceRule'),
+    modifyDataBoundary: text('modifyDataBoundary'),
+    capabilityQualifier: text('capabilityQualifier'),
+  };
+}
+
+/** Edition vocabulary is independent of participant visibility and user overlays. */
+export function resolvePromptTemplateVariables(input: unknown = profiles): Record<string, string> {
+  const { name, profile } = selectProfile(input);
+  const available = record(record(input, 'file').profiles, 'profiles');
+  const policy = promptPolicy(record(available[name], `profile ${name}`).promptPolicy);
+  return {
+    PRODUCT_DISPLAY_NAME: profile.brand.displayName,
+    CO_CREATOR_ROLE: policy.coCreatorRole,
+    DECISION_ROLE: policy.decisionRole,
+    RUNTIME_SAFETY_RULE: policy.runtimeSafetyRule,
+    ACCEPTANCE_RULE: policy.acceptanceRule,
+    MODIFY_DATA_BOUNDARY: policy.modifyDataBoundary,
+    CAPABILITY_QUALIFIER: policy.capabilityQualifier,
   };
 }
 
@@ -134,6 +205,8 @@ export function resolveDeploymentDefaults(input: unknown = profiles) {
 /** Public build projection changes data, never the shared consumers' source code. */
 export function projectDeploymentProfiles(input: unknown, requested: string): DeploymentProfiles {
   const { name, profile } = selectProfile(input, requested);
+  const selected = record(record(record(input, 'file').profiles, 'profiles')[name], `profile ${name}`);
+  if (selected.promptPolicy !== undefined) profile.promptPolicy = promptPolicy(selected.promptPolicy);
   const startupProfiles = record(record(input, 'file').startupProfiles, 'startupProfiles');
   for (const startup of ['dev', 'production', 'opensource', 'unprofiled']) {
     for (const platform of ['posix', 'win32'] as const) resolveStartupDefaults(startup, platform, input);

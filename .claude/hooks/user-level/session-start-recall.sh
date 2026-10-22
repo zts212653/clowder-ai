@@ -121,7 +121,7 @@ if [ -n "$UNTRACKED_DOCS" ]; then
   WARNINGS="${WARNINGS}
 ⚠️ docs/ 下有未跟踪的 .md 文件（可能是你写的，也可能是别的猫正在写）：
 ${UNTRACKED_DOCS}
-→ 是你写的就 commit push；不是你写的别动，也别拿去问co-creator或跨线程催（写它的猫可能正在提交）
+→ 是你写的就 commit push；不是你写的别动，也别拿去问${CO_CREATOR_ROLE}或跨线程催（写它的猫可能正在提交）
 "
 fi
 
@@ -131,7 +131,7 @@ if [ -n "$ROOT_IMAGES" ]; then
   WARNINGS="${WARNINGS}
 ⚠️ 根目录有图片文件（截图应放 assets/screenshots/，设计稿放 designs/）：
 ${ROOT_IMAGES}
-→ 首个发现者直接处置，不等 owner、不跨线程协调、不问 operator：截图 → mv assets/screenshots/（gitignored，本体不 commit）；明显设计稿 → designs/；未知文件不删。FYI 仅在零成本定位来源时事后发一行
+→ 首个发现者直接处置，不等 owner、不跨线程协调、不问 ${DECISION_ROLE}：截图 → mv assets/screenshots/（gitignored，本体不 commit）；明显设计稿 → designs/；未知文件不删。FYI 仅在零成本定位来源时事后发一行
 "
 fi
 
@@ -143,7 +143,7 @@ if [ -n "$ROOT_CLUTTER" ]; then
   WARNINGS="${WARNINGS}
 ⚠️ 根目录有不该在这里的文件：
 ${ROOT_CLUTTER}
-→ 是你放的就收走（截图 → assets/screenshots/，设计稿 → designs/）；不是你放的别动，也别拿去问co-creator；未知文件不删
+→ 是你放的就收走（截图 → assets/screenshots/，设计稿 → designs/）；不是你放的别动，也别拿去问${CO_CREATOR_ROLE}；未知文件不删
 "
 fi
 

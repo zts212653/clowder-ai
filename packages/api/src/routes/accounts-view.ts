@@ -3,6 +3,7 @@ import { readAccountStoreSnapshot } from '../config/account-store-snapshot.js';
 import { claudeTokenStatus } from '../config/claude-token-account.js';
 import { codexManagedStatus } from '../config/codex-account-identity.js';
 import { nativeCodexAccountView } from './accounts-native-view.js';
+import { projectQuotaRenewal } from './accounts-quota-feedback.js';
 // clowder-ai#340: Derive client identity from well-known account IDs, not stored protocol.
 /** Synthesize a ProviderProfileView-compatible object from AccountConfig. */
 export function accountToView(id: string, account: AccountConfig, apiKeyPresent: boolean, projectRoot?: string) {
@@ -13,16 +14,19 @@ export function accountToView(id: string, account: AccountConfig, apiKeyPresent:
   const codexStatus = codexView?.status;
   const quota =
     account.codex &&
-    account.quota?.status === 'ok' &&
+    (account.quota?.status === 'ok' || account.quota?.lastSuccess) &&
     (codexStatus !== 'ready' || !accountQuotaOwnerMatches(account.quota, id, account.codex.identity))
       ? {
           ...account.quota,
           status: 'unavailable' as const,
           items: [],
+          lastSuccess: undefined,
+          renewedCredentialVersion: undefined,
+          failure: { kind: 'signin_required' as const },
           error: codexStatus === 'ready' ? '额度身份未确认，请重新查询此账号' : '请先处理此账号的官方登录',
         }
       : account.quota;
-  const nativeView =
+  const nativeView: Partial<ReturnType<typeof nativeCodexAccountView>> =
     projectRoot && clientId === 'openai' && account.authType === 'oauth' && !account.codex
       ? nativeCodexAccountView(projectRoot, id)
       : {};
@@ -34,7 +38,18 @@ export function accountToView(id: string, account: AccountConfig, apiKeyPresent:
     ...(!isBuiltin ? { displayName: account.displayName ?? id } : {}),
     authType: account.authType,
     builtin: isBuiltin,
-    ...(quota ? { quota } : {}),
+    ...(quota
+      ? {
+          quota: projectQuotaRenewal(
+            quota,
+            codexStatus === 'ready'
+              ? account.codex?.credentialHome
+              : !account.codex
+                ? nativeView.nativeLogin?.home
+                : undefined,
+          ),
+        }
+      : {}),
     kind: isBuiltin ? 'builtin' : account.authType,
     ...(account.claude
       ? {

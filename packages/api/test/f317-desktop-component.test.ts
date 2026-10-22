@@ -7,6 +7,7 @@ import { test } from 'node:test';
 import {
   DesktopWindowComponent,
   desktopComponentEnvironment,
+  desktopNpmInvocation,
 } from '../src/domains/plugin/desktop-window-runtime/desktop-component.js';
 
 test('the real npm CLI can load the isolated Host component environment without reading user credentials', async (t) => {
@@ -17,10 +18,29 @@ test('the real npm CLI can load the isolated Host component environment without 
   await mkdir(env.HOME);
   await writeFile(join(env.HOME, '.npmrc'), 'registry=https://owner-private.invalid/\n');
   assert.ok(!Object.keys(env).some((key) => /TOKEN|SECRET|NODE_OPTIONS/.test(key)));
-  const result = spawnSync('npm', ['config', 'get', 'registry'], { cwd: root, env, encoding: 'utf8', timeout: 5000 });
+  const invocation = desktopNpmInvocation(['config', 'get', 'registry']);
+  const result = spawnSync(invocation.command, invocation.args, {
+    cwd: root,
+    env,
+    encoding: 'utf8',
+    timeout: 5000,
+  });
   assert.equal(result.status, 0, result.stderr);
   assert.equal(result.stdout.trim(), 'https://registry.npmjs.org/');
 });
+
+test(
+  'Windows desktop dependency install uses the npm JavaScript entrypoint, not npm.cmd',
+  { skip: process.platform !== 'win32' },
+  () => {
+    const invocation = desktopNpmInvocation(['--version']);
+    assert.equal(invocation.command, process.execPath);
+    assert.match(invocation.args[0] ?? '', /npm-cli\.js$/);
+    const result = spawnSync(invocation.command, invocation.args, { encoding: 'utf8', timeout: 5000 });
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(result.stdout.trim(), /^\d+\.\d+\.\d+/);
+  },
+);
 
 test('component preparation consumes only the Host lock and publishes one complete executable', async (t) => {
   const root = await mkdtemp(join(tmpdir(), 'f317-component-'));

@@ -1937,6 +1937,12 @@
       "name": "团队仓当上游",
       "status": "in-progress | **Owner**: Ragdoll (@opus55，指挥 Phase A/B) · 小星星 (@codex-astra，指挥 Phase C–E) | **Priority**: P1",
       "file": "F330-team-repo-upstream.md"
+    },
+    {
+      "id": "F331",
+      "name": "Feature Demos｜30 秒看一个功能",
+      "status": "in-progress | **Owner**: Ragdoll (@opus55，片子与片单) · 家里的Maine Coon（Phase B 代码，由 You 派） | **Priority**: P2",
+      "file": "F331-feature-demos.md"
     }
   ]
 }

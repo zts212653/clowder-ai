@@ -17,7 +17,9 @@ TRIGGER=$(echo "$INPUT" | jq -r '.trigger')
 LOG_FILE="/tmp/cat-cafe-hook-diagnostic.log"
 echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] pre-compact fired, session=$SESSION_ID, trigger=$TRIGGER" >> "$LOG_FILE"
 
-API_PORT="${API_SERVER_PORT:-3004}"
+SCRIPT_ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd) || exit 1
+API_PORT="${API_SERVER_PORT:-$(node "$SCRIPT_ROOT/scripts/read-deployment-default.mjs" apiPort)}"
+if [ -z "$API_PORT" ]; then exit 1; fi
 INVOCATION_ID="${CAT_CAFE_INVOCATION_ID:-}"
 CALLBACK_TOKEN="${CAT_CAFE_CALLBACK_TOKEN:-}"
 
