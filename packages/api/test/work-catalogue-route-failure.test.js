@@ -2,10 +2,10 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { setImmediate } from 'node:timers/promises';
 import Fastify from 'fastify';
-import { MessageStore } from '../src/domains/cats/services/stores/ports/MessageStore.js';
-import { TaskStore } from '../src/domains/cats/services/stores/ports/TaskStore.js';
-import { WorkCatalogue } from '../src/domains/collaborative-content/works/catalogue.js';
-import { threadsRoutes } from '../src/routes/threads.js';
+import { MessageStore } from '../dist/domains/cats/services/stores/ports/MessageStore.js';
+import { TaskStore } from '../dist/domains/cats/services/stores/ports/TaskStore.js';
+import { WorkCatalogue } from '../dist/domains/collaborative-content/works/catalogue.js';
+import { threadsRoutes } from '../dist/routes/threads.js';
 import { workCatalogueFixture } from './helpers/work-catalogue-fixture.js';
 
 test(

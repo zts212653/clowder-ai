@@ -5,9 +5,9 @@ import { syncBuiltinESMExports } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Readable } from 'node:stream';
-import { ArtifactReviewStore } from '../../src/domains/collaborative-content/artifact-review/store.js';
-import { LivingWorkService } from '../../src/domains/collaborative-content/works/service.js';
-import { ProjectContentOwnerService } from '../../src/domains/video-studio/content-owner/service.js';
+import { ArtifactReviewStore } from '../../dist/domains/collaborative-content/artifact-review/store.js';
+import { LivingWorkService } from '../../dist/domains/collaborative-content/works/service.js';
+import { ProjectContentOwnerService } from '../../dist/domains/video-studio/content-owner/service.js';
 
 export const principal = (threadId = 'selected-thread', userId = 'owner') => ({
   userId,

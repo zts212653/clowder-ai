@@ -6,10 +6,10 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Readable } from 'node:stream';
 import { test } from 'node:test';
-import { ArtifactReviewStore } from '../src/domains/collaborative-content/artifact-review/store.js';
-import { readIndependentThreadWorks, WorkCatalogue } from '../src/domains/collaborative-content/works/catalogue.js';
-import { LivingWorkService } from '../src/domains/collaborative-content/works/service.js';
-import { ProjectContentOwnerService } from '../src/domains/video-studio/content-owner/service.js';
+import { ArtifactReviewStore } from '../dist/domains/collaborative-content/artifact-review/store.js';
+import { readIndependentThreadWorks, WorkCatalogue } from '../dist/domains/collaborative-content/works/catalogue.js';
+import { LivingWorkService } from '../dist/domains/collaborative-content/works/service.js';
+import { ProjectContentOwnerService } from '../dist/domains/video-studio/content-owner/service.js';
 
 test('complete independent Works reads canonical manifests at most twice, with fresh selected versions', async (t) => {
   const root = await mkdtemp(join(tmpdir(), 'task229-work-catalogue-'));

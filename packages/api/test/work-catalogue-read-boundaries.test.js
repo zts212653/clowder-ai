@@ -2,8 +2,8 @@ import assert from 'node:assert/strict';
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { readIndependentThreadWorks, WorkCatalogue } from '../src/domains/collaborative-content/works/catalogue.js';
-import { MediaOwnerError } from '../src/domains/video-studio/content-owner/media-errors.js';
+import { readIndependentThreadWorks, WorkCatalogue } from '../dist/domains/collaborative-content/works/catalogue.js';
+import { MediaOwnerError } from '../dist/domains/video-studio/content-owner/media-errors.js';
 import { principal, workCatalogueFixture } from './helpers/work-catalogue-fixture.js';
 
 test('request-local Works retains ten-item pages, current annotations, owner/thread filtering and fresh later requests', async (t) => {
