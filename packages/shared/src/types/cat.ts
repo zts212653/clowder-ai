@@ -72,6 +72,8 @@ export interface CatConfig {
   readonly accountRef?: string;
   /** Native tools own authentication and omitted model/effort defaults. */
   readonly configurationSource?: 'native_tool' | 'managed_account';
+  /** Explicit runtime choice: null uses the member's native/manual carrier; absent keeps legacy bindings. */
+  readonly agentProvider?: string | null;
   /** clowder-ai#340 P5: CLI client identity (renamed from `provider`). */
   readonly clientId: ClientId;
   /** Canonical, config-resolved member access mode. */

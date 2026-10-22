@@ -1775,6 +1775,119 @@ test('third-party model (glm-5): omits --model flag and injects ANTHROPIC_MODEL 
   assert.equal(spawnOpts.env.ANTHROPIC_MODEL, 'glm-5', 'ANTHROPIC_MODEL env var must be set to glm-5');
 });
 
+test('third-party model (glm-5.3-flash): injects the member native context window for Claude CLI', async () => {
+  const proc = createMockProcess();
+  const spawnFn = createMockSpawnFn(proc);
+  const service = createClaudeAgentService({ spawnFn, model: 'claude-test-model' });
+
+  const promise = collect(
+    service.invoke('hello', {
+      callbackEnv: {
+        CAT_CAFE_ANTHROPIC_PROFILE_MODE: 'api_key',
+        CAT_CAFE_ANTHROPIC_API_KEY: 'sk-bigmodel',
+        CAT_CAFE_ANTHROPIC_MODEL_OVERRIDE: 'glm-5.3-flash',
+      },
+      contextNativeWindowTokens: 1_000_000,
+    }),
+  );
+  await emitClaudeEvents(proc, [{ type: 'result', subtype: 'success' }]);
+  await promise;
+
+  const spawnOpts = spawnFn.mock.calls[0].arguments[2];
+  assert.equal(
+    spawnOpts.env.CLAUDE_CODE_MAX_CONTEXT_TOKENS,
+    '1000000',
+    'unknown third-party models must receive the configured native window instead of the CLI default',
+  );
+});
+
+test('third-party model: explicit null native window suppresses the effective-capacity fallback', async () => {
+  const proc = createMockProcess();
+  const spawnFn = createMockSpawnFn(proc);
+  const service = createClaudeAgentService({ spawnFn, model: 'claude-test-model' });
+
+  const promise = collect(
+    service.invoke('hello', {
+      callbackEnv: {
+        CAT_CAFE_ANTHROPIC_PROFILE_MODE: 'api_key',
+        CAT_CAFE_ANTHROPIC_API_KEY: 'sk-bigmodel',
+        CAT_CAFE_ANTHROPIC_MODEL_OVERRIDE: 'glm-5.3-flash',
+      },
+      contextNativeWindowTokens: null,
+      contextCapacity: {
+        windowTokens: 1_000_000,
+        inputCeilingTokens: 984_000,
+        source: 'manual',
+        provenance: 'Member context window -> 1,000,000 tokens',
+        actionable: true,
+      },
+    }),
+  );
+  await emitClaudeEvents(proc, [{ type: 'result', subtype: 'success' }]);
+  await promise;
+
+  const spawnOpts = spawnFn.mock.calls[0].arguments[2];
+  assert.equal(
+    spawnOpts.env.CLAUDE_CODE_MAX_CONTEXT_TOKENS,
+    undefined,
+    'null means this invocation has no config-owned native window and must not inject one',
+  );
+});
+
+test('third-party model: absent native configuration never recycles effective capacity', async () => {
+  const proc = createMockProcess();
+  const spawnFn = createMockSpawnFn(proc);
+  const service = createClaudeAgentService({ spawnFn, model: 'claude-test-model' });
+
+  const promise = collect(
+    service.invoke('hello', {
+      callbackEnv: {
+        CAT_CAFE_ANTHROPIC_PROFILE_MODE: 'api_key',
+        CAT_CAFE_ANTHROPIC_API_KEY: 'sk-bigmodel',
+        CAT_CAFE_ANTHROPIC_MODEL_OVERRIDE: 'glm-5.3-flash',
+      },
+      contextCapacity: {
+        windowTokens: 1_000_000,
+        inputCeilingTokens: 984_000,
+        source: 'manual',
+        provenance: 'Member context window -> 1,000,000 tokens',
+        actionable: true,
+      },
+    }),
+  );
+  await emitClaudeEvents(proc, [{ type: 'result', subtype: 'success' }]);
+  await promise;
+
+  const spawnOpts = spawnFn.mock.calls[0].arguments[2];
+  assert.equal(spawnOpts.env.CLAUDE_CODE_MAX_CONTEXT_TOKENS, undefined);
+});
+
+test('native Anthropic model never receives CLAUDE_CODE_MAX_CONTEXT_TOKENS', async () => {
+  const proc = createMockProcess();
+  const spawnFn = createMockSpawnFn(proc);
+  const service = createClaudeAgentService({ spawnFn, model: 'claude-test-model' });
+
+  const promise = collect(
+    service.invoke('hello', {
+      callbackEnv: {
+        CAT_CAFE_ANTHROPIC_PROFILE_MODE: 'api_key',
+        CAT_CAFE_ANTHROPIC_API_KEY: 'sk-anthropic',
+        CAT_CAFE_ANTHROPIC_MODEL_OVERRIDE: 'claude-sonnet-4-6',
+      },
+      contextNativeWindowTokens: 1_000_000,
+    }),
+  );
+  await emitClaudeEvents(proc, [{ type: 'result', subtype: 'success' }]);
+  await promise;
+
+  const spawnOpts = spawnFn.mock.calls[0].arguments[2];
+  assert.equal(
+    spawnOpts.env.CLAUDE_CODE_MAX_CONTEXT_TOKENS,
+    undefined,
+    'native Anthropic model windows are owned by the CLI and must not be overridden',
+  );
+});
+
 test('native Anthropic model (claude-sonnet-4-6): keeps --model flag, no ANTHROPIC_MODEL env var', async () => {
   const proc = createMockProcess();
   const spawnFn = createMockSpawnFn(proc);

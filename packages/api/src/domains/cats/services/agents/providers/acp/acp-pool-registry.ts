@@ -1,4 +1,5 @@
 import { saveSpan } from '../../../../../../utils/member-save-diagnostics.js';
+import { retireAcpServicePool } from './acp-service-pool-lease.js';
 
 export interface ClosableAcpPool {
   closeAll(): Promise<void>;
@@ -21,11 +22,11 @@ export async function closeStaleAcpPools<TPool extends ClosableAcpPool>(
     if (activeProfileIds.has(profileId)) continue;
 
     try {
-      await saveSpan('pool.acp.close', () => pool.closeAll(), { catId: profileId });
+      await saveSpan('pool.acp.close', () => retireAcpServicePool(pool), { catId: profileId });
     } catch (err) {
       options.onCloseError?.(err, profileId, reason);
     } finally {
-      registry.delete(profileId);
+      if (registry.get(profileId) === pool) registry.delete(profileId);
       closedProfileIds.push(profileId);
     }
   }

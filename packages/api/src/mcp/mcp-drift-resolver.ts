@@ -9,11 +9,8 @@
  */
 
 import type { CapabilitiesConfig, CapabilityEntry } from '@cat-cafe/shared';
-import {
-  readCapabilitiesConfig,
-  withCapabilityLock,
-  writeCapabilitiesConfig,
-} from '../config/capabilities/capability-orchestrator.js';
+import { withCapabilityLock, writeCapabilitiesConfig } from '../config/capabilities/capability-orchestrator.js';
+import { readMcpSyncConfig } from './mcp-config-state.js';
 import type { McpDriftResult, McpIssue } from './mcp-drift-detector.js';
 import { computeGlobalMcpHash, extractMcpEntries } from './mcp-sync-engine.js';
 
@@ -82,13 +79,10 @@ async function syncMcpDriftUnlocked(
   const resolutionMap = new Map((resolutions ?? []).map((r) => [r.mcpId, r.decision]));
 
   // Read configs
-  const globalConfig = await readCapabilitiesConfig(catCafeRoot);
+  const globalConfig = await readMcpSyncConfig(catCafeRoot, 'global');
   const globalMcpMap = new Map(extractMcpEntries(globalConfig).map((e) => [e.id, e]));
 
-  let projectConfig = await readCapabilitiesConfig(projectRoot);
-  if (!projectConfig) {
-    projectConfig = { version: 2, capabilities: [] };
-  }
+  const projectConfig = await readMcpSyncConfig(projectRoot, 'project');
 
   // Process each issue
   for (const issue of drift.issues) {

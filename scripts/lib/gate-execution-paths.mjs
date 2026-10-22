@@ -24,6 +24,7 @@ export const GATE_EXECUTION_PATHS = Object.freeze([
   'scripts/lib/alpha-identity-diagnostics.mjs',
   'scripts/lib/alpha-coordinates.mjs',
   'scripts/lib/process-identity.mjs',
+  'scripts/lib/process-birth-identity.mjs',
   'scripts/lib/process-tree.mjs',
   'scripts/lib/gate-terminal-receipt.mjs',
   'scripts/lib/gate-resume-contract.mjs',

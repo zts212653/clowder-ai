@@ -3,8 +3,49 @@ import assert from 'node:assert/strict';
 import { existsSync, mkdirSync, readFileSync, realpathSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { prepareCodexNativeLaunch } from '../src/domains/cats/services/agents/providers/codex-plugin-native-launch.js';
+import {
+  linkCodexPluginAuth,
+  prepareCodexNativeLaunch,
+} from '../src/domains/cats/services/agents/providers/codex-plugin-native-launch.js';
 import { ownedManagedFixture } from './helpers/f320-owned-account.js';
+
+test('Windows auth link EPERM becomes an actionable native OAuth diagnostic', () => {
+  const denied = Object.assign(new Error('symlink denied'), { code: 'EPERM' });
+  let failure: (Error & { code?: string; cause?: unknown }) | undefined;
+  try {
+    linkCodexPluginAuth(
+      '/canonical/auth.json',
+      '/private/auth.json',
+      () => {
+        throw denied;
+      },
+      'win32',
+    );
+  } catch (error) {
+    failure = error as Error & { code?: string; cause?: unknown };
+  }
+  assert.ok(failure, 'the EPERM must be converted, not swallowed');
+  assert.equal(failure.code, 'PLUGIN_NATIVE_AUTH_LINK_UNAVAILABLE');
+  assert.match(failure.message, /Developer Mode|symlink privilege/);
+  assert.match(failure.message, /API-key authentication/);
+  assert.equal(failure.cause, denied);
+});
+
+test('non-Windows auth link failures keep their original error', () => {
+  const denied = Object.assign(new Error('symlink denied'), { code: 'EPERM' });
+  assert.throws(
+    () =>
+      linkCodexPluginAuth(
+        '/canonical/auth.json',
+        '/private/auth.json',
+        () => {
+          throw denied;
+        },
+        'linux',
+      ),
+    (error: NodeJS.ErrnoException) => error === denied,
+  );
+});
 
 // The native preparation boundary is real; no provider process or external account is used.
 // Native public execution supports exec_json only; ordinary account/carrier tests remain in F320.

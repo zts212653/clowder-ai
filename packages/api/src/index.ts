@@ -1,4 +1,16 @@
+import { reportAcpHostPolicy, resolveAcpHostPolicy } from './config/acp-host-policy.js';
 import { AgentServiceUnavailableError } from './domains/cats/services/agents/registry/AgentServiceUnavailableError.js';
+import { createRefreshingAcpSessionProvider } from './domains/cats/services/agents/session-contract/acp-session-provider.js';
+import {
+  SessionImplementationRegistry,
+  sessionImplementationKey,
+} from './domains/cats/services/agents/session-contract/implementation-registry.js';
+import { resolveMemberSessionRef } from './domains/cats/services/agents/session-contract/plugin-agent-provider.js';
+import {
+  RegisteredSessionAgentService,
+  selectSessionAgentService,
+} from './domains/cats/services/agents/session-contract/registered-session-agent-service.js';
+import { readSessionContractSettings } from './domains/cats/services/agents/session-contract/session-contract-settings.js';
 import {
   createHostMediaPathResolver,
   hostMediaPathRootsFromEnv,
@@ -8,6 +20,7 @@ import { createListenAssetSpeech } from './domains/messaging/outbound-media/spee
 import { createPublishingMessageStore } from './domains/messaging/publishing-message-store.js';
 import { createMessagingStores } from './domains/messaging/stores/factory.js';
 import { SubscriptionDrainScheduler } from './domains/messaging/subscription-drain-scheduler.js';
+import { declaredAgentSessionProviders } from './domains/plugin/declared/declared-agent-session-providers.js';
 import { PLUGIN_HOST_ENTRIES, pluginHostRoot } from './domains/plugin/host-inventory/plugin-host-layout.js';
 import { createPluginConversationDelivery } from './domains/plugin/host-surface/plugin-conversation-delivery.js';
 import { catRegistryMentionPatterns } from './infrastructure/connectors/mention-parser.js';
@@ -612,6 +625,7 @@ function hasRuntimeSessionDrain(service: AgentService): service is AgentService 
 
 async function main(): Promise<void> {
   startupMilestone('module-graph-loaded');
+  const acpHostPolicy = resolveAcpHostPolicy();
   let managedCommandWakeRecovery: ManagedCommandWakeRecoverySweep | undefined;
   const { logger: customLogger, isDebugMode, LOG_DIR_PATH } = await import('./infrastructure/logger.js');
   let sessionHookAuthenticationReady = (): boolean => false;
@@ -625,6 +639,7 @@ async function main(): Promise<void> {
   const { saveSpan } = await import('./utils/member-save-diagnostics.js');
 
   const app = Fastify({ logger: customLogger as unknown as import('fastify').FastifyBaseLogger });
+  reportAcpHostPolicy(app.log, acpHostPolicy);
   const messageReadDiagnostics = registerMessageReadDiagnostics(app);
   const privateUserId = (process.env.CAT_CAFE_USER_ID ?? 'default-user').trim();
   let runtimeDeploymentRevision: string | null = null;
@@ -1982,6 +1997,10 @@ async function main(): Promise<void> {
 
   // ── F149 Phase C: ACP process pool registry (variantId → AcpProcessPool) ──
   const acpPoolRegistry: AcpPoolRegistry = new Map();
+  const sessionContractSettings = readSessionContractSettings(process.env);
+  for (const warning of sessionContractSettings.warnings) app.log.warn(warning);
+  const sessionImplementations = new SessionImplementationRegistry();
+  const registeredSessionServices = new Map<string, RegisteredSessionAgentService>();
   // F254: Codex app-server warm hosts are profile-scoped and survive catalog refreshes.
   const codexAppServerPoolRegistry: CodexAppServerPoolRegistry = new Map();
   const nativeRealtimeCompanionEnabled = isNativeRealtimeCompanionDeployment(process.env.CAT_CAFE_DEPLOYMENT_ID);
@@ -1989,144 +2008,198 @@ async function main(): Promise<void> {
   // ── F32-b: AgentRegistry (catId → AgentService) — one instance per cat ──
   // Each cat gets its own AgentService instance with its catId + model.
   const agentRegistry = new AgentRegistry();
-  const syncAgentRegistry = async (configs: Record<string, CatConfig>, warmPrompts = true) => {
-    agentRegistry.reset();
-    clearL0Cache(); // Invalidate stale L0 compilations from previous sync
-    const projectRoot = resolveActiveProjectRoot();
-    const activeAcpProfileIds = new Set<string>();
-    const activeCodexProfileIds = new Set<string>();
-    for (const [id, config] of Object.entries(configs)) {
-      await saveSpan(
-        'registry.member',
-        async () => {
-          const catId = config.id;
-          // F32-b P1 fix: do NOT pass model here — let constructors resolve via
-          // getCatModel(catId) which respects env override (CAT_*_MODEL > config > fallback)
-          let service: AgentService;
-
-          // ── F161: Generic ACP transport path (provider-agnostic) ──
-          // Carrier selection is resolved once by cat-config-loader. The ACP block
-          // below contains only launch details; its mere presence is not routing truth.
-          const acpConfig = config.carrier === 'acp' ? getAcpConfig(id, projectRoot) : undefined;
-          if (config.carrier === 'acp') {
-            if (!acpConfig) {
-              app.log.warn(`[api] Cat "${id}" selects carrier=acp but has no ACP config. It will not be routable.`);
-              return;
-            }
-            activeAcpProfileIds.add(id);
-            let acpService: Awaited<ReturnType<typeof createAcpServiceForConfig>>;
-            try {
-              acpService = await createAcpServiceForConfig({
-                projectRoot,
-                profileId: id,
-                config,
-                effectiveModel: getCatModel(id),
-                acpConfig,
-                poolRegistry: acpPoolRegistry,
-                log: app.log,
-                onUnavailable: (reason) => agentRegistry.markUnavailable(id, reason),
-              });
-            } catch (error) {
-              // A single member's bootstrap/privacy failure must not keep the API
-              // from listening; degrade that member and keep every other cat.
-              const reason = error instanceof Error ? error.message : String(error);
-              app.log.warn(`[api] Cat "${id}" ACP startup failed; marking it unavailable: ${reason}`);
-              agentRegistry.markUnavailable(id, { code: 'ACP_BOOTSTRAP_UNAVAILABLE', message: reason });
-              return;
-            }
-            if (!acpService) return;
-            service = acpService;
-          } else
-            switch (config.clientId) {
-              // ── Provider-specific CLI paths (non-ACP) ──
-              case 'anthropic': {
-                if (config.carrier === 'sdk') {
-                  service = new ClaudeSdkAgentService({ catId });
-                } else {
-                  const { createClaudeAgentServiceForCanary } = await import(
-                    './domains/cats/services/agents/providers/claude-carrier-factory.js'
-                  );
-                  service = createClaudeAgentServiceForCanary(catId);
+  let sessionConfigurationRevision = 0;
+  const syncAgentRegistry = async (configs: Record<string, CatConfig>, warmPrompts = true) =>
+    agentRegistry.refresh(async () => {
+      sessionConfigurationRevision++;
+      clearL0Cache(); // Invalidate stale L0 compilations from previous sync
+      const projectRoot = resolveActiveProjectRoot();
+      const activeAcpProfileIds = new Set<string>();
+      const activeRegisteredSessionIds = new Set<string>();
+      const activeCodexProfileIds = new Set<string>();
+      for (const [id, config] of Object.entries(configs)) {
+        await saveSpan(
+          'registry.member',
+          async () => {
+            const catId = config.id;
+            // F32-b P1 fix: do NOT pass model here — let constructors resolve via
+            // getCatModel(catId) which respects env override (CAT_*_MODEL > config > fallback)
+            const service = await selectSessionAgentService<
+              AgentService | undefined | Promise<AgentService | undefined>
+            >(
+              resolveMemberSessionRef(
+                config.agentProvider,
+                sessionContractSettings.bindings.get(id),
+                config.carrier === 'acp' ? getAcpConfig(id, projectRoot)?.agentProvider : undefined,
+              ),
+              async (sessionRef) => {
+                activeAcpProfileIds.add(id);
+                activeRegisteredSessionIds.add(id);
+                const previous = registeredSessionServices.get(id);
+                if (previous && previous.implementationKey !== sessionImplementationKey(sessionRef)) {
+                  await previous.releaseAll('member_binding_changed');
+                  registeredSessionServices.delete(id);
                 }
-                break;
-              }
-              case 'openai': {
-                activeCodexProfileIds.add(id);
-                const appServerHostPool = getOrCreateCodexAppServerPool(codexAppServerPoolRegistry, id);
-                service = new CodexAgentService({
-                  catId,
-                  appServerHostPool,
-                  carrierMode: config.carrier === 'app_server' ? 'app_server' : 'exec_json',
-                  nativeRealtimeCompanionEnabled,
-                });
-                break;
-              }
-              case 'google':
+                const registered =
+                  registeredSessionServices.get(id) ??
+                  new RegisteredSessionAgentService({
+                    catId,
+                    ref: sessionRef,
+                    registry: sessionImplementations,
+                    metadata: { provider: config.provider ?? 'acp', model: getCatModel(id) },
+                    log: app.log,
+                  });
+                registeredSessionServices.set(id, registered);
                 try {
-                  service = createGoogleAgentService(catId, config.agyProfile);
+                  await registered.prepare();
                 } catch (error) {
-                  if (!(error instanceof AgentServiceUnavailableError)) throw error;
-                  agentRegistry.markUnavailable(id, error.reason);
+                  const message = error instanceof Error ? error.message : String(error);
+                  agentRegistry.markUnavailable(id, { code: 'ACP_BOOTSTRAP_UNAVAILABLE', message });
+                  app.log.warn({ catId: id, err: error }, 'Plugin ACP member preparation failed');
                   return;
                 }
-                break;
-              case 'kimi':
-                service = new KimiAgentService({ catId });
-                break;
-              case 'antigravity':
-                agentRegistry.markUnavailable(id, {
-                  code: 'AGY_IDE_EXECUTION_RETIRED',
-                  message: 'AGY IDE 执行入口已退役。请在成员设置选择 Google 的 AGY Native 入口；成员身份与历史保留。',
-                });
-                return;
-              case 'opencode':
-                service = new OpenCodeAgentService({ catId });
-                break;
-              case 'catagent': {
-                const { CatAgentService } = await import(
-                  './domains/cats/services/agents/providers/catagent/CatAgentService.js'
-                );
-                service = new CatAgentService({ catId, projectRoot: findMonorepoRoot(), catConfig: config });
-                break;
-              }
-              case 'a2a': {
-                const { A2AAgentService } = await import('./domains/cats/services/agents/providers/A2AAgentService.js');
-                const envKey = `CAT_${id.toUpperCase()}_A2A_URL`;
-                const a2aUrl = process.env[envKey] ?? '';
-                if (!a2aUrl) {
-                  app.log.warn(`[api] A2A cat "${id}" missing ${envKey} env var. It will not be routable.`);
-                  return;
-                }
-                service = new A2AAgentService({ catId, config: { url: a2aUrl } });
-                break;
-              }
-              default:
-                app.log.warn(`[api] Unknown client "${config.clientId}" for cat "${id}". It will not be routable.`);
-                return;
-            }
-          agentRegistry.register(id, service);
+                return registered;
+              },
+              async () => {
+                let service: AgentService;
+                // ── F161: Generic ACP transport path (provider-agnostic) ──
+                // Carrier selection is resolved once by cat-config-loader. The ACP block
+                // below contains only launch details; its mere presence is not routing truth.
+                const acpConfig = config.carrier === 'acp' ? getAcpConfig(id, projectRoot) : undefined;
+                if (config.carrier === 'acp') {
+                  if (!acpConfig) {
+                    app.log.warn(
+                      `[api] Cat "${id}" selects carrier=acp but has no ACP config. It will not be routable.`,
+                    );
+                    return;
+                  }
+                  activeAcpProfileIds.add(id);
+                  let acpService: Awaited<ReturnType<typeof createAcpServiceForConfig>>;
+                  try {
+                    acpService = await createAcpServiceForConfig({
+                      projectRoot,
+                      profileId: id,
+                      config,
+                      effectiveModel: getCatModel(id),
+                      acpConfig,
+                      poolRegistry: acpPoolRegistry,
+                      log: app.log,
+                      onUnavailable: (reason) => agentRegistry.markUnavailable(id, reason),
+                    });
+                  } catch (error) {
+                    // A single member's bootstrap/privacy failure must not keep the API
+                    // from listening; degrade that member and keep every other cat.
+                    const reason = error instanceof Error ? error.message : String(error);
+                    app.log.warn(`[api] Cat "${id}" ACP startup failed; marking it unavailable: ${reason}`);
+                    agentRegistry.markUnavailable(id, { code: 'ACP_BOOTSTRAP_UNAVAILABLE', message: reason });
+                    return;
+                  }
+                  if (!acpService) return;
+                  service = acpService;
+                } else
+                  switch (config.clientId) {
+                    // ── Provider-specific CLI paths (non-ACP) ──
+                    case 'anthropic': {
+                      if (config.carrier === 'sdk') {
+                        service = new ClaudeSdkAgentService({ catId });
+                      } else {
+                        const { createClaudeAgentServiceForCanary } = await import(
+                          './domains/cats/services/agents/providers/claude-carrier-factory.js'
+                        );
+                        service = createClaudeAgentServiceForCanary(catId);
+                      }
+                      break;
+                    }
+                    case 'openai': {
+                      activeCodexProfileIds.add(id);
+                      const appServerHostPool = getOrCreateCodexAppServerPool(codexAppServerPoolRegistry, id);
+                      service = new CodexAgentService({
+                        catId,
+                        appServerHostPool,
+                        carrierMode: config.carrier === 'app_server' ? 'app_server' : 'exec_json',
+                        nativeRealtimeCompanionEnabled,
+                      });
+                      break;
+                    }
+                    case 'google':
+                      try {
+                        service = createGoogleAgentService(catId, config.agyProfile);
+                      } catch (error) {
+                        if (!(error instanceof AgentServiceUnavailableError)) throw error;
+                        agentRegistry.markUnavailable(id, error.reason);
+                        return;
+                      }
+                      break;
+                    case 'kimi':
+                      service = new KimiAgentService({ catId });
+                      break;
+                    case 'antigravity':
+                      agentRegistry.markUnavailable(id, {
+                        code: 'AGY_IDE_EXECUTION_RETIRED',
+                        message:
+                          'AGY IDE 执行入口已退役。请在成员设置选择 Google 的 AGY Native 入口；成员身份与历史保留。',
+                      });
+                      return;
+                    case 'opencode':
+                      service = new OpenCodeAgentService({ catId });
+                      break;
+                    case 'catagent': {
+                      const { CatAgentService } = await import(
+                        './domains/cats/services/agents/providers/catagent/CatAgentService.js'
+                      );
+                      service = new CatAgentService({ catId, projectRoot: findMonorepoRoot(), catConfig: config });
+                      break;
+                    }
+                    case 'a2a': {
+                      const { A2AAgentService } = await import(
+                        './domains/cats/services/agents/providers/A2AAgentService.js'
+                      );
+                      const envKey = `CAT_${id.toUpperCase()}_A2A_URL`;
+                      const a2aUrl = process.env[envKey] ?? '';
+                      if (!a2aUrl) {
+                        app.log.warn(`[api] A2A cat "${id}" missing ${envKey} env var. It will not be routable.`);
+                        return;
+                      }
+                      service = new A2AAgentService({ catId, config: { url: a2aUrl } });
+                      break;
+                    }
+                    default:
+                      app.log.warn(
+                        `[api] Unknown client "${config.clientId}" for cat "${id}". It will not be routable.`,
+                      );
+                      return;
+                  }
+                return service;
+              },
+            );
+            if (service) agentRegistry.register(id, service);
+          },
+          { catId: id },
+        );
+      }
+      for (const [id, registered] of registeredSessionServices) {
+        if (activeRegisteredSessionIds.has(id)) continue;
+        await registered.releaseAll('member_removed');
+        registeredSessionServices.delete(id);
+      }
+      await closeStaleAcpPools(acpPoolRegistry, activeAcpProfileIds, {
+        reason: 'config-sync',
+        onCloseError: (err, profileId, reason) => {
+          app.log.warn({ err, profileId, reason }, 'ACP registry sync failed to close stale member pool');
         },
-        { catId: id },
-      );
-    }
-    await closeStaleAcpPools(acpPoolRegistry, activeAcpProfileIds, {
-      reason: 'config-sync',
-      onCloseError: (err, profileId, reason) => {
-        app.log.warn({ err, profileId, reason }, 'ACP registry sync failed to close stale member pool');
-      },
-    });
-    await closeStaleCodexAppServerPools(codexAppServerPoolRegistry, activeCodexProfileIds, (err, profileId) => {
-      app.log.warn({ err, profileId }, 'Codex app-server registry sync failed to close stale member pool');
-    });
-    if (router) saveSpan('registry.router', () => router.refreshFromRegistry(agentRegistry));
+      });
+      await closeStaleCodexAppServerPools(codexAppServerPoolRegistry, activeCodexProfileIds, (err, profileId) => {
+        app.log.warn({ err, profileId }, 'Codex app-server registry sync failed to close stale member pool');
+      });
+      if (router) saveSpan('registry.router', () => router.refreshFromRegistry(agentRegistry));
 
-    // Pre-compile L0 system prompts for all registered cats in parallel.
-    // Avoids per-invocation subprocess overhead and ensures L0 is ready
-    // before the first message — also bypasses Windows NTFS junction
-    // issues that resolve by the time the user actually interacts (#802).
-    const registeredCatIds = Object.keys(configs).filter((id) => agentRegistry.has(id));
-    if (warmPrompts) await warmL0Cache(registeredCatIds, app.log);
-  };
+      // Pre-compile L0 system prompts for all registered cats in parallel.
+      // Avoids per-invocation subprocess overhead and ensures L0 is ready
+      // before the first message — also bypasses Windows NTFS junction
+      // issues that resolve by the time the user actually interacts (#802).
+      const registeredCatIds = Object.keys(configs).filter((id) => agentRegistry.has(id));
+      if (warmPrompts) await warmL0Cache(registeredCatIds, app.log);
+    });
   await syncAgentRegistry(catRegistry.getAllConfigs());
 
   // F321: one optional curator, using the existing native service and summary storage.
@@ -4843,6 +4916,34 @@ async function main(): Promise<void> {
   const collectiveArtifactOwnerHolder: import('./domains/plugin/host-surface/collective-artifact-owner.js').CollectiveArtifactOwnerHolder =
     {};
   const pluginRuntime = cloudConversations.createRuntime({
+    agentSessionProviders: (packages, configuration) =>
+      declaredAgentSessionProviders({
+        configuration,
+        log: app.log,
+        settings: sessionContractSettings,
+        packages,
+        registry: sessionImplementations,
+        services: registeredSessionServices,
+        createProvider: (declaration, { catId }) =>
+          createRefreshingAcpSessionProvider({
+            catId,
+            scope: acpPoolRegistry,
+            revision: () => sessionConfigurationRevision,
+            createService: () => {
+              const config = catRegistry.getAllConfigs()[catId];
+              if (!config) throw new Error('Plugin ACP member unavailable');
+              return createAcpServiceForConfig({
+                projectRoot: resolveActiveProjectRoot(),
+                profileId: catId,
+                config,
+                effectiveModel: getCatModel(catId),
+                acpConfig: declaration.acp,
+                poolRegistry: acpPoolRegistry,
+                log: app.log,
+              });
+            },
+          }),
+      }),
     collectiveArtifactOwner: collectiveArtifactOwnerHolder,
     taskArtifactReader: preparedArtifactReader,
     limbRegistry,
@@ -5172,6 +5273,20 @@ async function main(): Promise<void> {
   });
   const { pluginManagerUploadRoutes, registerPluginManagerRoutes } = await import('./routes/plugin-manager-routes.js');
   const { registerPluginMarketplaceRoutes } = await import('./routes/plugin-marketplace-routes.js');
+  const { registerAgentClientLibraryRoutes } = await import('./routes/agent-client-library-routes.js');
+  registerAgentClientLibraryRoutes(app, {
+    inventory: pluginRuntime.inventoryStore,
+    packages: pluginRuntime.packages,
+    registry: sessionImplementations,
+    configuration: {
+      readConfig: async (instanceId, key) => {
+        const snapshot = await pluginRuntime.inventoryStore.snapshot();
+        const instance = snapshot.instances.find((instance) => instance.pluginInstanceId === instanceId);
+        if (!instance) return undefined;
+        return (await pluginManagerRuntime.configuration.readActionInput(instance.pluginId))[key];
+      },
+    },
+  });
   registerPluginMarketplaceRoutes(app, marketplaceSources);
   const { PluginManagerBindings } = await import('./domains/plugin/manager/plugin-manager-bindings.js');
   await app.register(async (managerApp) => {

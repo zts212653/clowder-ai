@@ -62,7 +62,7 @@ export function discoverNativeRuntimes(projectRoot: string) {
   });
   const acp = Object.values(catRegistry.getAllConfigs()).flatMap((cat) => {
     const config = getAcpConfig(cat.id, projectRoot);
-    if (!config) return [];
+    if (!config || (cat.agentProvider !== undefined ? cat.agentProvider : config.agentProvider)) return [];
     const command = isAbsolute(config.command) ? config.command : resolveCliCommand(config.command);
     const entry = config.startupArgs.find((arg) => /(?:\.m?js|\.cjs)$/.test(arg));
     const installed = Boolean(command && existsSync(command) && (!entry || existsSync(resolve(projectRoot, entry))));

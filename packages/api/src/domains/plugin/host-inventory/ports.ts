@@ -27,5 +27,11 @@ export interface PluginInventoryTransaction {
 
 export interface PluginInventoryStore {
   snapshot(): Promise<PluginInventorySnapshot>;
-  transaction<T>(work: (transaction: PluginInventoryTransaction) => Promise<T> | T): Promise<T>;
+  transaction<T>(
+    work: (transaction: PluginInventoryTransaction) => Promise<T> | T,
+    options?: {
+      /** Synchronous compensation runs before the transaction queue is released. */
+      onCommitFailure?(): void;
+    },
+  ): Promise<T>;
 }

@@ -15,6 +15,16 @@ function values(options: unknown): Array<{ value: string; name?: string }> {
     return values(option.options);
   });
 }
+function matchesModelAlias(option: { value: string; name?: string }, requested: string): boolean {
+  if (option.name === requested) return true;
+  try {
+    const parsed: unknown = JSON.parse(option.value);
+    return Array.isArray(parsed) && parsed.length === 2 && parsed[1] === requested;
+  } catch {
+    const separator = option.value.indexOf('/');
+    return separator > 0 && option.value.slice(separator + 1) === requested;
+  }
+}
 export function resolveSessionOption(
   session: { configOptions?: unknown },
   kind: 'model' | 'thought_level',
@@ -30,21 +40,14 @@ export function resolveSessionOption(
   const advertised = values(descriptor.options);
   let matches = advertised.filter((option) => option.value === requested);
   if (matches.length === 0 && kind === 'model') {
-    matches = advertised.filter((option) => {
-      if (option.name === requested) return true;
-      try {
-        const parsed: unknown = JSON.parse(option.value);
-        return Array.isArray(parsed) && parsed.length === 2 && parsed[1] === requested;
-      } catch {
-        return false;
-      }
-    });
+    matches = advertised.filter((option) => matchesModelAlias(option, requested));
   }
-  if (matches.length !== 1) throw new Error(`ACP ${kind} 选项无效或不唯一: ${requested}`);
+  const [matched] = matches;
+  if (matches.length !== 1 || !matched) throw new Error(`ACP ${kind} 选项无效或不唯一: ${requested}`);
   return {
     configId: descriptor.id,
-    value: matches[0]!.value,
-    unchanged: descriptor.currentValue === matches[0]!.value,
+    value: matched.value,
+    unchanged: descriptor.currentValue === matched.value,
   };
 }
 export async function applySessionConfiguration(

@@ -129,9 +129,27 @@ test(
 test('manual creation remains available from the automatic configuration path', { timeout: 30000 }, async () => {
   const state = await setup();
   try {
+    assert.equal(
+      state.requests.some(({ path }) => path === '/api/agent-providers'),
+      false,
+    );
+    let catalogReads = 0;
+    // Only the ordinary editor reached below consumes the plugin tool catalog.
+    // Other first-run cases keep rejecting this unmodeled dependency.
+    await state.context.route('**/api/agent-providers', (route) => {
+      assert.equal(route.request().method(), 'GET');
+      catalogReads++;
+      return route.fulfill({ json: { libraries: [] } });
+    });
+    const catalogRead = state.page.waitForResponse(
+      (response) =>
+        new URL(response.url()).pathname === '/api/agent-providers' && response.request().method() === 'GET',
+    );
     await state.page.getByRole('button', { name: '手动创建单个伙伴', exact: true }).click();
     await state.panel.waitFor({ state: 'hidden' });
     await state.page.waitForURL((url) => url.searchParams.get('manual') === '1');
+    await catalogRead;
+    assert.equal(catalogReads, 1);
     assert.equal(new URL(state.page.url()).searchParams.get('manual'), '1');
     assert.equal(state.writes.length, 0);
     assert.deepEqual(state.errors, []);

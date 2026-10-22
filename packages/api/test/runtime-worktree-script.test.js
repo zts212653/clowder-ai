@@ -53,6 +53,7 @@ function createTempProject(name) {
   for (const file of [
     'daemon-state.mjs',
     'process-identity.mjs',
+    'process-birth-identity.mjs',
     'daemon-health-probe.mjs',
     'daemon-stop-operation.mjs',
     'daemon-stop-record.mjs',

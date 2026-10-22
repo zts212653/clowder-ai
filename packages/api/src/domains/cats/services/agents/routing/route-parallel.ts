@@ -1,3 +1,4 @@
+import { InvocationServiceScope } from '../invocation/invocation-service-scope.js';
 import { isRoutingOwnerAttempt } from './routing-owner-attempt.js';
 import { routingPreflightNotice } from './routing-preflight-notice.js';
 /**
@@ -185,6 +186,23 @@ export async function* routeParallel(
   userId: string,
   threadId: string,
   options: RouteOptions = {},
+): AsyncIterable<AgentMessage> {
+  const invocationServices = new InvocationServiceScope();
+  try {
+    yield* routeParallelPrepared(deps, targetCats, message, userId, threadId, options, invocationServices);
+  } finally {
+    await invocationServices.dispose();
+  }
+}
+
+async function* routeParallelPrepared(
+  deps: RouteStrategyDeps,
+  targetCats: CatId[],
+  message: string,
+  userId: string,
+  threadId: string,
+  options: RouteOptions,
+  invocationServices: InvocationServiceScope,
 ): AsyncIterable<AgentMessage> {
   const {
     contentBlocks,
@@ -537,6 +555,7 @@ export async function* routeParallel(
       let service: AgentService;
       try {
         service = getService(deps.services, catId, deps.unavailableServices);
+        service = invocationServices.pin(service);
       } catch (error) {
         if (!(error instanceof AgentServiceUnavailableError)) throw error;
         unavailableCats.add(catId);

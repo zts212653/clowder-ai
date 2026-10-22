@@ -184,6 +184,11 @@ export function registerCallbackAuthHook(
     const tool = callbackToolFromUrl(request.url);
     if (!invocationId || !callbackToken) {
       recordCallbackAuthFailure({ reason: 'missing_creds', tool });
+      if (request.routeOptions.url === '/api/plugin-runtime/action')
+        request.log.warn(
+          { event: 'plugin_native_auth', stage: 'callback_prehandler', reason: 'missing_creds' },
+          'Native plugin callback authentication rejected',
+        );
       reply.status(401).send(makeCallbackAuthError('missing_creds'));
       return;
     }
@@ -196,6 +201,11 @@ export function registerCallbackAuthHook(
     const result = await registry.verify(invocationId, callbackToken);
     if (!result.ok) {
       recordCallbackAuthFailure({ reason: result.reason, tool });
+      if (request.routeOptions.url === '/api/plugin-runtime/action')
+        request.log.warn(
+          { event: 'plugin_native_auth', stage: 'callback_prehandler', reason: result.reason },
+          'Native plugin callback authentication rejected',
+        );
       // Surface in-context using the snapshot captured before verify ran.
       // Notifier handles the surface decision (skips stale_invocation, etc).
       if (options.notifier && recordSnapshot) {

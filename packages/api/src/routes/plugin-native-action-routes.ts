@@ -19,6 +19,23 @@ const bodySchema = z.object({ method: z.string().min(1).max(256), input: z.unkno
 
 /** Native plugin MCP transport; business identity never comes from tool arguments. */
 export const pluginNativeActionRoutes: FastifyPluginAsync<PluginNativeActionRouteOptions> = async (app, options) => {
+  // Presence and registry lookups only: never log headers, tokens, body, or package exceptions.
+  app.addHook('preHandler', async (request) => {
+    const token = request.headers['x-clowder-plugin-action-token'];
+    const parsed = bodySchema.safeParse(request.body);
+    request.log.info(
+      {
+        event: 'plugin_native_auth',
+        stage: 'received',
+        hasInvocationId: typeof request.headers['x-invocation-id'] === 'string',
+        hasCallbackToken: typeof request.headers['x-callback-token'] === 'string',
+        hasActivationToken: typeof token === 'string',
+        declaredTargetKnown:
+          typeof token === 'string' && parsed.success && Boolean(options.actions.target(token, parsed.data.method)),
+      },
+      'Native plugin action received',
+    );
+  });
   registerCallbackAuthHook(app, options.registry, {
     pluginNativeActionTarget: (request) => {
       const token = request.headers['x-clowder-plugin-action-token'];
@@ -33,13 +50,33 @@ export const pluginNativeActionRoutes: FastifyPluginAsync<PluginNativeActionRout
     const callbackToken = request.headers['x-callback-token'];
     const token = request.headers['x-clowder-plugin-action-token'];
     if (typeof invocationId !== 'string' || typeof callbackToken !== 'string' || typeof token !== 'string') {
+      request.log.warn(
+        { event: 'plugin_native_auth', stage: 'headers', reason: 'missing_credentials' },
+        'Native plugin action rejected',
+      );
       return reply.status(401).send({ error: 'Native plugin invocation credentials required' });
     }
     const parsed = bodySchema.safeParse(request.body);
     if (!parsed.success) return reply.status(400).send({ error: 'Invalid plugin action input' });
     const verified = await options.registry.verifyLatest(invocationId, callbackToken);
-    if (!verified.ok) return reply.status(401).send({ error: 'Invocation is not current' });
+    if (!verified.ok) {
+      request.log.warn(
+        { event: 'plugin_native_auth', stage: 'invocation_currentness', reason: verified.reason },
+        'Native plugin action rejected',
+      );
+      return reply.status(401).send({ error: 'Invocation is not current' });
+    }
     const { record } = verified;
+    request.log.info(
+      {
+        event: 'plugin_native_auth',
+        stage: 'invocation_verified',
+        invocationId: record.invocationId,
+        threadId: record.threadId,
+        catId: record.catId,
+      },
+      'Native plugin invocation verified',
+    );
     let fence: ReturnType<typeof captureNativeCallbackCurrentness> | undefined;
     const onAbort = () => fence?.close();
     const onClose = () => {
@@ -64,11 +101,26 @@ export const pluginNativeActionRoutes: FastifyPluginAsync<PluginNativeActionRout
         assertCurrent: fence.assertCurrent,
         assertInvocationCurrent: fence.assertInvocationCurrent,
       });
+      request.log.info({ event: 'plugin_native_auth', stage: 'completed' }, 'Native plugin action completed');
       return { result };
     } catch (error) {
-      if (error instanceof NativePluginActionError)
+      if (error instanceof NativePluginActionError) {
+        request.log.warn(
+          {
+            event: 'plugin_native_auth',
+            stage: error.statusCode === 401 ? 'activation' : 'action_authority',
+            reason: error.statusCode === 401 ? 'inactive_connection' : 'action_refused',
+            statusCode: error.statusCode,
+          },
+          'Native plugin action rejected',
+        );
         return reply.status(error.statusCode).send({ error: error.message });
+      }
       // Package failures may contain provider secrets; do not serialize arbitrary exception text.
+      request.log.warn(
+        { event: 'plugin_native_auth', stage: 'execution', reason: 'plugin_runtime_failure' },
+        'Native plugin action failed',
+      );
       return reply.status(502).send({ error: 'Plugin action failed' });
     } finally {
       fence?.close();

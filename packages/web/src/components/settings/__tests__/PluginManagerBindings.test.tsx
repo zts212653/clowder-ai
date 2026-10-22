@@ -39,7 +39,31 @@ it('lists external bindings, keeps cancellation inert, and refreshes a stale dis
     await act(async () =>
       root.render(<PluginManagerBindings pluginId="any.plugin" bindings={[]} onChange={refresh} />),
     );
-    expect(container.textContent).toContain('暂无会话绑定');
+    expect(container.querySelector('[data-plugin-detail-section="bindings"]')).toBeNull();
+  } finally {
+    await act(async () => root.unmount());
+    container.remove();
+  }
+});
+
+it('omits an empty binding section for any plugin and reveals actual bindings when they appear', async () => {
+  const container = document.createElement('div');
+  document.body.appendChild(container);
+  const root = createRoot(container);
+  try {
+    await act(async () => root.render(<PluginManagerBindings pluginId="arbitrary.tool" bindings={[]} />));
+    expect(container.textContent).toBe('');
+    expect(fetch).not.toHaveBeenCalled();
+    await act(async () =>
+      root.render(
+        <PluginManagerBindings
+          pluginId="arbitrary.tool"
+          bindings={[{ key: 'external-chat', threadId: 'thread', threadTitle: 'Bound chat', createdAt: 1 }]}
+        />,
+      ),
+    );
+    expect(container.textContent).toContain('Bound chat');
+    expect(container.querySelector('[data-plugin-detail-section="bindings"]')).not.toBeNull();
   } finally {
     await act(async () => root.unmount());
     container.remove();

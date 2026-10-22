@@ -35,6 +35,11 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter @cat-cafe/shared build
       - run: pnpm --filter @cat-cafe/api build
+      - name: Plugin native auth link diagnostic
+        run: >-
+          pnpm --filter @cat-cafe/api exec node ./scripts/with-test-home.mjs
+          node --import tsx --test --test-timeout=60000 --test-name-pattern="auth link"
+          test/f320-plugin-account.test.ts
       - name: Workspace root cold-store, HTTP and persistence regressions
         run: node packages/api/scripts/test-workspace-roots.mjs
       - name: Windows web build and duplicate Trusted Types regression
@@ -178,7 +183,7 @@ jobs:
           REQUIRE_OPENCODE_MODEL_ID_TEST: '1'
       - name: Windows ACP bootstrap private directories and test isolation
         run: >-
-          node --import ./packages/api/test/helpers/setup-cat-registry.js --test
+          node --import tsx --import ./packages/api/test/helpers/setup-cat-registry.js --test
           --test-concurrency=2 --test-timeout=60000
           packages/api/test/acp/acp-bootstrap-cwd.test.js
           packages/api/test/acp/acp-bootstrap-platform.test.js
@@ -189,6 +194,17 @@ jobs:
           packages/api/test/acp/acp-bootstrap-relocation.test.js
           packages/api/test/acp/acp-bootstrap-spawn-recheck.test.js
           packages/api/test/acp/acp-bootstrap-startup-policy.test.js
+          packages/api/test/acp/acp-bootstrap-generic-selection.test.ts
+          packages/api/test/acp/acp-bootstrap-explicit-root.test.ts
+          packages/api/test/acp/acp-bootstrap-strict-native.test.ts
+          packages/api/test/acp/acp-bootstrap-posix-preservation.test.ts
+          packages/api/test/acp/acp-bootstrap-check-route.test.ts
+          packages/api/test/acp/acp-host-policy-matrix.test.ts
+          packages/api/test/acp/acp-directory-identity.test.ts
+          packages/api/test/acp-bootstrap-config-recovery.test.js
+          packages/api/test/plugin-inventory-writer-lease.test.js
+          packages/api/test/audit-log-retry.test.js
+          packages/api/test/agent-session-contract/acp-factory-recovery.test.ts
           packages/api/test/account-credential-identity.test.js
           packages/api/test/account-store-adjudication.test.js
         env:
@@ -210,8 +226,12 @@ jobs:
           node --test packages/api/test/cli-spawn-win.test.js
           node --test packages/api/test/process-liveness-probe.test.js
           node --test packages/api/test/pick-directory.test.js
+      - name: Browser env wrapper regression
+        run: node --test --test-name-pattern='applies --env' packages/web/test/run-with-node-env-test.test.cjs
       - name: Windows stale-process entrypoint guard
         run: node --test scripts/cleanup-stale-dev-processes.test.mjs
+      - name: API dev supervisor regression
+        run: node --test packages/api/test/dev-supervisor.test.js
       # #1542: the compaction launch plan must hold on Windows (realpath
       # backslash semantics, junction escapes, canonical containment).
       - name: F296 compaction launch plan (Windows paths)

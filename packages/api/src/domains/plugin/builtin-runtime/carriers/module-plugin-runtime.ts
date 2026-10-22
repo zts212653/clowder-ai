@@ -282,7 +282,7 @@ export class ModulePluginRuntime implements BundledPluginRuntime {
       for (const field of resolved) if (field.kind !== 'secret') moduleConfigValue(field);
       const settingsHost = await createModuleSettingsHost(
         { pluginInstanceId, packageRecord, effectiveGrants },
-        this.options,
+        { ...this.options, variantMode: 'runtime' },
         async () => assertActivation(),
       );
       const threads = this.options.threads

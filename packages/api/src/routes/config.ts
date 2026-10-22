@@ -126,6 +126,7 @@ const runtimeStatusQuerySchema = z.object({
 interface ConfigRoutesOptions {
   auditLog?: {
     append(input: { type: string; threadId?: string; data: Record<string, unknown> }): Promise<unknown>;
+    getDirectory?(): string;
   };
   envFilePath?: string;
   projectRoot?: string;
@@ -337,7 +338,7 @@ export async function configRoutes(app: FastifyInstance, opts: ConfigRoutesOptio
         projectRoot,
         homeDir: home,
         dataDirs: {
-          auditLogs: resolve(apiCwd, process.env.AUDIT_LOG_DIR ?? './data/audit-logs'),
+          auditLogs: auditLog.getDirectory?.() ?? getEventAuditLog().getDirectory(),
           // F212 Phase F (cloud codex R3 P2 on 3083d7c5f + R4 P2-#2 on fc69597675): use
           // the path the pino destination CAPTURED at logger import. Reading process.env.
           // LOG_DIR directly would let runtime `PATCH /api/config/env` edits change what

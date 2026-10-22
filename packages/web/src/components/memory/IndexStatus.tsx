@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { apiFetch } from '@/utils/api-client';
+import { EvidenceFeatureFlag, type EvidenceFlag } from './EvidenceFeatureFlag';
 import { MemoryReadError } from './page/MemoryReadError';
 import { memoryTime } from './page/memory-time';
 import { RebuildButton } from './RebuildButton';
@@ -211,14 +212,9 @@ export function parseRebuildJob(raw: RawRebuildJob): RebuildJobData {
 
 // ── Env Config types + helpers ──
 
-interface EnvVar {
-  name: string;
-  defaultValue: string;
-  description: string;
+interface EnvVar extends EvidenceFlag {
   category: string;
   sensitive: boolean;
-  currentValue: string | null;
-  allowedValues?: string[];
 }
 
 interface EnvSummaryResponse {
@@ -465,48 +461,14 @@ export function IndexStatus({
       {evidenceVars.length > 0 && (
         <div id="evidence-feature-flags" className="rounded-lg bg-[var(--console-card-bg)] p-3 transition-shadow">
           <h3 className="mb-2 text-xs font-semibold text-cafe-black">功能开关</h3>
-          {evidenceVars.map((v) => {
-            const isOn = v.currentValue === 'on';
-            const hasMultiValues = v.allowedValues && v.allowedValues.length > 2;
-            const isUpdating = updatingKey === v.name;
-            const current = v.currentValue ?? v.defaultValue;
-            return (
-              <div key={v.name} className="flex items-center justify-between rounded-lg px-2 py-2">
-                <div className="min-w-0 flex-1 pr-3">
-                  <div className="break-words text-xs font-medium text-cafe-black">{v.name}</div>
-                  <div className="text-micro text-cafe-secondary">{v.description}</div>
-                </div>
-                {hasMultiValues ? (
-                  <button
-                    type="button"
-                    disabled={isUpdating}
-                    onClick={() => cycleEnvVar(v.name, v.currentValue, v.allowedValues)}
-                    className={`rounded px-2 py-0.5 text-micro font-medium transition-colors ${
-                      current === 'on' || current === 'apply'
-                        ? 'bg-cafe-accent text-[var(--cafe-surface)] hover:bg-cafe-accent-hover'
-                        : current === 'off'
-                          ? 'bg-[var(--console-field-bg)] text-cafe-secondary hover:bg-[var(--console-hover-bg)]'
-                          : 'bg-conn-amber-bg text-conn-amber-text hover:opacity-80'
-                    } ${isUpdating ? 'opacity-50' : ''}`}
-                    title={`点击切换: ${v.allowedValues!.join(' → ')}`}
-                  >
-                    {current}
-                  </button>
-                ) : (
-                  <button
-                    type="button"
-                    disabled={isUpdating}
-                    onClick={() => cycleEnvVar(v.name, v.currentValue)}
-                    className={`relative h-5 w-9 rounded-full transition-colors ${isOn ? 'bg-cafe-accent' : 'bg-[var(--console-field-bg)]'} ${isUpdating ? 'opacity-50' : ''}`}
-                  >
-                    <span
-                      className={`absolute top-0.5 left-0.5 h-4 w-4 rounded-full bg-[var(--cafe-surface)] shadow transition-transform ${isOn ? 'translate-x-4' : ''}`}
-                    />
-                  </button>
-                )}
-              </div>
-            );
-          })}
+          {evidenceVars.map((flag) => (
+            <EvidenceFeatureFlag
+              key={flag.name}
+              flag={flag}
+              updating={updatingKey === flag.name}
+              onCycle={cycleEnvVar}
+            />
+          ))}
         </div>
       )}
 
@@ -514,7 +476,7 @@ export function IndexStatus({
       {configVars.length > 0 && (
         <div id="evidence-config-vars" className="rounded-lg bg-[var(--console-card-bg)] p-3 transition-shadow">
           <h3 className="mb-2 text-xs font-semibold text-cafe-black">配置参考</h3>
-          <p className="mb-2 text-micro text-cafe-secondary">以下配置需在 .env 中设置，修改后重启生效。</p>
+          <p className="mb-2 text-micro text-cafe-secondary">配置值仅供参考，请在对应功能的设置或启动配置中管理。</p>
           {configVars.map((v) => (
             <div key={v.name} className="rounded-lg px-2 py-2">
               <div className="flex items-center justify-between">

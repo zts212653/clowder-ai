@@ -81,6 +81,19 @@ describe('AGY Native member settings', () => {
     };
     const form = initialState(member);
     expect(form.agyAcpEnabled).toBe(true);
+    await act(async () =>
+      root.render(
+        <AccountSection
+          form={form}
+          modelOptions={[]}
+          availableProfiles={[]}
+          loadingProfiles={false}
+          onChange={onChange}
+        />,
+      ),
+    );
+    expect(container.querySelector('select[aria-label="插件 ACP client"]')).toBeNull();
+    expect(container.querySelector('input[aria-label="ACP Command"]')).not.toBeNull();
     const payload = buildCatPatchPayload(form, member, { accountAuthType: 'oauth' });
     expect(payload.agyProfile).toEqual(acpProfile);
     expect(payload.acp).toEqual(member.acp);

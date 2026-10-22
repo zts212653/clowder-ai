@@ -115,6 +115,11 @@ const catVariantSchema = z
     mentionPatterns: z.array(mentionPatternSchema).optional(), // F32-b: variant-level mentions
     source: z.string().optional(), // #441: legacy field, ignored — kept in schema for old catalog read compat
     configurationSource: z.enum(['native_tool', 'managed_account']).optional(),
+    agentProvider: z
+      .string()
+      .regex(/^plugin:[a-z0-9][a-z0-9._-]{0,127}\/[a-z0-9][a-z0-9._-]{0,63}$/)
+      .nullable()
+      .optional(),
     accountRef: z.string().min(1).optional(), // F127: concrete account binding
     accountBindingMode: z.enum(['follow', 'override']).optional(),
     creationReceipt: z.object({ requestHash: z.string().length(64), payloadHash: z.string().length(64) }).optional(),
@@ -765,6 +770,7 @@ export function toAllCatConfigs(config: CatCafeConfig): Record<string, CatConfig
         mentionPatterns,
         ...(variant.accountRef != null ? { accountRef: variant.accountRef } : {}),
         ...(variant.configurationSource ? { configurationSource: variant.configurationSource } : {}),
+        ...(variant.agentProvider !== undefined ? { agentProvider: variant.agentProvider } : {}),
         ...(variant.accountBindingMode ? { accountBindingMode: variant.accountBindingMode } : {}),
         clientId: variant.clientId as ClientId, // #252: Zod now accepts any string; downstream switch/case has default branches
         carrier: resolveCatCarrier(variant as CarrierCompatInput),
@@ -1163,8 +1169,12 @@ export function getCatContextWindowConfig(
 // ── F149: ACP config accessor (raw variant field, not in CatConfig type) ──────
 
 export interface AcpVariantConfig {
+  /** Stable plugin reference; the Host resolves launch settings from the active plugin. */
+  agentProvider?: string;
   command: string;
   startupArgs: string[];
+  /** Optional owner-selected absolute root; full directory checks, no automatic relocation. */
+  bootstrapRoot?: string;
   /** F161 Phase C: ACP wire transport. 'stdio' = NDJSON over stdin/stdout (default). 'httpstream' = spawn process that listens on HTTP port. */
   transport?: 'stdio' | 'httpstream';
   /** Required for httpstream until ACP publishes a stable HTTP transport spec. */

@@ -181,17 +181,24 @@ async function fetchContributionTools(
 export async function fetchManagerDetail(
   pluginId: string,
   afterMutation: boolean,
+  local = false,
 ): Promise<ConsolePluginManagerDetail> {
-  const path = `/api/plugin-manager/plugins/${encodeURIComponent(pluginId)}`;
+  const encodedId = encodeURIComponent(pluginId);
+  const path = local ? `/api/plugin-manager/plugins/_local/${encodedId}` : `/api/plugin-manager/plugins/${encodedId}`;
+  const resourcePath = `/api/plugin-manager/plugins/${encodedId}`;
   const [response, documentation] = await Promise.all([
     afterMutation ? apiFetch(path, undefined, { afterCurrentGet: true }) : apiFetch(path),
-    pluginId === 'official.chatgpt-dot' ? Promise.resolve({ state: 'absent' } as const) : fetchDocumentation(path),
+    pluginId === 'official.chatgpt-dot'
+      ? Promise.resolve({ state: 'absent' } as const)
+      : fetchDocumentation(resourcePath),
   ]);
   if (!response.ok) throw new Error(`detail request failed (${response.status})`);
   const value: unknown = await response.json();
   if (!isDetailResponse(value)) throw new Error('detail response is invalid');
   const tools =
-    value.plugin.artifact === 'installed' && value.plugin.live === 'running' ? await fetchContributionTools(path) : [];
+    value.plugin.artifact === 'installed' && value.plugin.live === 'running'
+      ? await fetchContributionTools(resourcePath)
+      : [];
   return {
     ...value.plugin,
     readme: documentation,
@@ -199,12 +206,14 @@ export async function fetchManagerDetail(
   };
 }
 
-export async function fetchManagerList(search: string, afterMutation: boolean): Promise<PluginManagerListResponse> {
+export async function fetchManagerList(
+  search: string,
+  afterMutation: boolean,
+  local = false,
+): Promise<PluginManagerListResponse> {
   const normalized = search.trim();
-  const path =
-    normalized.length === 0
-      ? '/api/plugin-manager/plugins'
-      : `/api/plugin-manager/plugins/search?q=${encodeURIComponent(normalized)}`;
+  const prefix = local ? '/api/plugin-manager/plugins/_local' : '/api/plugin-manager/plugins';
+  const path = normalized.length === 0 ? prefix : `${prefix}/search?q=${encodeURIComponent(normalized)}`;
   const response = afterMutation ? await apiFetch(path, undefined, { afterCurrentGet: true }) : await apiFetch(path);
   if (!response.ok) throw new Error(`list request failed (${response.status})`);
   const value: unknown = await response.json();

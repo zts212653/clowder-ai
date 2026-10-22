@@ -3,6 +3,11 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('@/utils/api-client', () => ({ apiFetch: vi.fn() }));
+// Operation HTTP responses are one-shot bodies; library discovery has its own
+// real-hook diagnostic suite and must not consume this operation-only fixture.
+vi.mock('@/hooks/useAgentClientLibraries', () => ({
+  useAgentClientLibraries: () => ({ libraries: [], loading: false, error: '' }),
+}));
 
 import { apiFetch } from '@/utils/api-client';
 import { PluginManagerConfigurationSection } from '../plugin-manager/PluginManagerConfigurationSection';

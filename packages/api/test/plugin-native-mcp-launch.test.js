@@ -131,6 +131,15 @@ test('native launch resolves a frozen exact activation descriptor without trusti
       contributionId: 'native',
       method,
     });
+  assert.equal(
+    f.config().capabilities[0].mcpServer.env?.CLOWDER_PLUGIN_ACTION_TOKEN,
+    f.router.nativeActions.environmentReferences('instance-a', 'native').CLOWDER_PLUGIN_ACTION_TOKEN,
+  );
+  assert.equal(
+    f.config().capabilities[0].mcpServer.env?.CLOWDER_PLUGIN_ACTION_PATH,
+    f.router.nativeActions.environmentReferences('instance-a', 'native').CLOWDER_PLUGIN_ACTION_PATH,
+  );
+  assert.equal(first.env.CLOWDER_PLUGIN_ACTION_PATH, '/api/plugin-runtime/action');
   const ambient = f.config().capabilities[0];
   ambient.mcpServer.command = '/ambient-command';
   ambient.mcpServer.env.CLOWDER_PLUGIN_ACTION_TOKEN = 'ambient-token';
@@ -210,7 +219,11 @@ test('native launch binds same-plugin instances to distinct Host tokens and neve
   assert.equal(f.router.nativeActions.target(first.env.CLOWDER_PLUGIN_ACTION_TOKEN, 'native.read'), undefined);
   await f.router.start('instance-a');
   const restarted = await f.router.resolveNativeMcpLaunch(policy());
-  assert.notEqual(restarted.env.CLOWDER_PLUGIN_ACTION_TOKEN, first.env.CLOWDER_PLUGIN_ACTION_TOKEN);
+  assert.equal(
+    restarted.env.CLOWDER_PLUGIN_ACTION_TOKEN,
+    first.env.CLOWDER_PLUGIN_ACTION_TOKEN,
+    'enable/disable must not rotate Host-lifetime connection credentials',
+  );
 });
 
 test('native launch rechecks stop intent after asynchronous inventory admission', async (t) => {

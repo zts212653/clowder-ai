@@ -71,6 +71,7 @@
       "mac-install-location.js",
       "preload.js",
       "project-root.js",
+      "plugin-network-bridge.js",
       "renderer-link-policy.js",
       "renderer-navigation.js",
       "service-manager.js",

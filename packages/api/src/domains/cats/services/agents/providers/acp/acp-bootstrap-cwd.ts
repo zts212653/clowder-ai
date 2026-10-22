@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { chmodSync, existsSync, lstatSync, mkdirSync, realpathSync } from 'node:fs';
 import { tmpdir, userInfo } from 'node:os';
-import { basename, isAbsolute, join, type PlatformPath, posix, relative, resolve, win32 } from 'node:path';
+import { basename, dirname, isAbsolute, join, type PlatformPath, posix, relative, resolve, win32 } from 'node:path';
 import { ensureWindowsAcpBootstrapDirectories } from './acp-bootstrap-windows-directory.js';
 import {
   ensureWindowsAcpBootstrapRoot,
@@ -11,6 +11,10 @@ import {
 
 const SAFE_SEGMENT_RE = /[^a-zA-Z0-9._-]+/g;
 const OWNER_ONLY_MODE = 0o700;
+
+interface AcpBootstrapDirectoryOptions extends WindowsAcpRootOptions {
+  preserveExistingPermissions?: boolean;
+}
 
 function sanitizeSegment(value: string, fallback: string): string {
   const sanitized = value.replace(SAFE_SEGMENT_RE, '-').replace(/^-+|-+$/g, '');
@@ -97,6 +101,42 @@ function enforceOwnerOnlyPermissions(path: string): void {
   }
 }
 
+function ensurePrivatePosixDirectory(path: string): void {
+  try {
+    mkdirSync(path, { mode: OWNER_ONLY_MODE });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+  }
+  assertRealDirectory(path, 'ACP bootstrap directory');
+  const stat = lstatSync(path);
+  if (
+    typeof process.getuid !== 'function' ||
+    stat.uid !== process.getuid() ||
+    (stat.mode & 0o7777) !== OWNER_ONLY_MODE
+  ) {
+    throw new Error(`ACP bootstrap directory must already be owned by the current user with mode 0700: ${path}`);
+  }
+}
+
+function assertTrustedPosixAncestors(path: string, visited = new Set<string>()): void {
+  if (visited.has(path)) return;
+  visited.add(path);
+  const stat = lstatSync(path);
+  if (typeof process.getuid !== 'function' || (stat.uid !== 0 && stat.uid !== process.getuid())) {
+    throw new Error(`ACP bootstrap ancestor has an untrusted owner: ${path}`);
+  }
+  if (stat.isSymbolicLink()) {
+    // Both the link's logical parent chain and its canonical target must be
+    // trusted. This permits system-owned /tmp links on macOS, not alias bypasses.
+    assertTrustedPosixAncestors(realpathSync(path), visited);
+  } else if (!stat.isDirectory() || ((stat.mode & 0o022) !== 0 && (stat.mode & 0o1000) === 0)) {
+    // Sticky /tmp protects entries owned by this user or root from replacement.
+    throw new Error(`ACP bootstrap ancestor allows unsafe directory replacement: ${path}`);
+  }
+  const parent = dirname(path);
+  if (parent !== path) assertTrustedPosixAncestors(parent, visited);
+}
+
 /**
  * Gemini ACP initialize is sensitive to project-level .gemini/settings.json when
  * launched directly from repo cwd. Bootstrap from an isolated tmp dir, then pass
@@ -113,7 +153,7 @@ export function resolveAcpBootstrapCwd(
   // Only the production default root may relocate. Callers that inject a root
   // (tests, isolated fixtures) keep the fail-closed contract they assert.
   allowWindowsFallback = bootstrapRoot === resolveAcpBootstrapRoot(),
-  windowsOptions: WindowsAcpRootOptions = {},
+  options: AcpBootstrapDirectoryOptions = {},
 ): string {
   const normalizedProjectRoot = resolve(projectRoot);
   const projectSlug = sanitizeSegment(basename(normalizedProjectRoot), 'project');
@@ -125,15 +165,14 @@ export function resolveAcpBootstrapCwd(
   if (process.platform === 'win32') {
     // Creates with a private DACL atomically; existing directories are only
     // inspected, never repaired. Windows chmod cannot enforce this boundary.
-    root = ensureWindowsAcpBootstrapRoot(
-      root,
-      leaf,
-      windowsEnsure,
-      windowsFallbackRoot,
-      allowWindowsFallback,
-      windowsOptions,
-    );
+    root = ensureWindowsAcpBootstrapRoot(root, leaf, windowsEnsure, windowsFallbackRoot, allowWindowsFallback, options);
     dir = join(root, leaf);
+  } else if (options.preserveExistingPermissions) {
+    // User-selected roots and diagnostics must never chmod an existing path.
+    // Only the final component is created; its parent must already exist.
+    assertTrustedPosixAncestors(dirname(root));
+    ensurePrivatePosixDirectory(root);
+    ensurePrivatePosixDirectory(dir);
   } else {
     mkdirSync(root, { recursive: true, mode: OWNER_ONLY_MODE });
     assertRealDirectory(root, 'ACP bootstrap root');

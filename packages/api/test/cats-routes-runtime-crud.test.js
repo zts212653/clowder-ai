@@ -4260,6 +4260,35 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
     assert.equal(fetched.cli, undefined, 'GET confirms cli removed after PATCH cli:null');
   });
 
+  it('plugin agentProvider cannot change either protected cloud identity', async () => {
+    const projectRoot = createProjectRootFromRepoTemplate();
+    const catalogPath = join(projectRoot, '.cat-cafe', 'cat-catalog.json');
+    const Fastify = (await import('fastify')).default;
+    const { catsRoutes } = await import('../dist/routes/cats.js');
+    const app = Fastify();
+    await app.register(catsRoutes);
+    const before = readFileSync(catalogPath, 'utf8');
+    for (const id of ['gpt-pro', 'gpt-dot']) {
+      const response = await app.inject({
+        method: 'PATCH',
+        url: `/api/cats/${id}`,
+        headers: { 'x-cat-cafe-user': 'codex' },
+        payload: { agentProvider: 'plugin:official.acp-clients/dsh' },
+      });
+      assert.equal(response.statusCode, 409, response.body);
+      assert.equal(response.json().code, 'BUILTIN_CLOUD_IDENTITY_PROTECTED');
+      assert.equal(readFileSync(catalogPath, 'utf8'), before);
+    }
+    const unchanged = await app.inject({
+      method: 'PATCH',
+      url: '/api/cats/gpt-pro',
+      headers: { 'x-cat-cafe-user': 'codex' },
+      payload: { agentProvider: null },
+    });
+    assert.equal(unchanged.statusCode, 200, unchanged.body);
+    await app.close();
+  });
+
   it('F247: built-in gpt-pro rejects identity mutation atomically while profile edits remain available', async () => {
     const projectRoot = createProjectRootFromRepoTemplate();
     const catalogPath = join(projectRoot, '.cat-cafe', 'cat-catalog.json');
@@ -4316,6 +4345,7 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
         'commandArgs',
         'cliConfigArgs',
         'acp',
+        'agentProvider',
       ],
       driftedFields: [],
     });
@@ -4485,6 +4515,7 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
     );
     assert.ok(variant, 'repo template must contain the built-in gpt-pro variant');
     variant.defaultModel = 'gpt-5.6-sol';
+    variant.agentProvider = 'plugin:official.acp-clients/dsh';
     delete variant.provider;
     variant.mcpSupport = false;
     variant.cli = { command: 'codex', outputFormat: 'json' };
@@ -4503,7 +4534,7 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
     assert.equal(drifted.identityProtection.state, 'drifted');
     assert.deepEqual(
       [...drifted.identityProtection.driftedFields].sort(),
-      ['cli', 'defaultModel', 'mcpSupport', 'mentionPatterns', 'provider'].sort(),
+      ['cli', 'defaultModel', 'mcpSupport', 'mentionPatterns', 'provider', 'agentProvider'].sort(),
     );
 
     const profileOnlyEdit = await app.inject({
@@ -4543,6 +4574,7 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
     assert.equal(repaired.statusCode, 200, repaired.body);
     const repairedCat = JSON.parse(repaired.body).cat;
     assert.equal(repairedCat.defaultModel, 'gpt-pro');
+    assert.equal(repairedCat.agentProvider, null);
     assert.equal(repairedCat.provider, 'openai-chatgpt-pro');
     assert.equal(repairedCat.mcpSupport, true);
     assert.equal(repairedCat.cli, undefined);

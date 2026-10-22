@@ -37,6 +37,7 @@ const labels: Record<keyof HubCatEditorFormState, [string, string]> = {
   provider: ['供应商', 'Provider'],
   mcpSupport: ['MCP 工具', 'MCP tools'],
   acpTransport: ['ACP 传输', 'ACP transport'],
+  acpAgentProvider: ['插件 ACP client', '接入'],
   acpCommand: ['ACP 程序', 'ACP command'],
   acpStartupArgs: ['ACP 启动参数', 'ACP arguments'],
   acpMaxLiveProcesses: ['ACP 进程上限', 'ACP process limit'],

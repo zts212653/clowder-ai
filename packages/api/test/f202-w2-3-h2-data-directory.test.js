@@ -219,7 +219,7 @@ test('the production composition gives a granted module its directory under the 
   const runtime = createDormantPluginRuntimeComposition({
     projectRoot,
     messageStore: new MessageStore(),
-    contract: { manifestContractVersions: ['0.1.0'], validateEffectiveGrants, validateManifest },
+    contract: { manifestContractRange: '0.1.0', validateEffectiveGrants, validateManifest },
   });
   const composition = createPluginManagerRuntimeComposition({
     runtime,

@@ -111,6 +111,43 @@ test('projects canonical machine catalog release truth while Host policy remains
   });
 });
 
+test('projects the Host bundle locally without starting remote catalog discovery', async () => {
+  let remoteLoads = 0;
+  const bundled = {
+    catalogId: 'chatgpt-dot',
+    pluginId: 'official.chatgpt-dot',
+    packageName: '@clowder-ai/chatgpt-dot',
+    version: '0.1.0',
+    distribution: 'bundled',
+    archiveUrl: 'builtin://chatgpt-dot',
+    packageDigest: digest,
+    effectiveGrants: [],
+    presentation: {
+      displayName: 'ChatGPT Dot',
+      publisher: 'Clowder AI',
+    },
+  };
+  const provider = new MachineOfficialPluginCatalog({
+    loadCatalog: async () => {
+      remoteLoads += 1;
+      return new Promise(() => {});
+    },
+    validateCatalog: canonicalValidator,
+    hostPolicies: [],
+    bundledEntries: [bundled],
+  });
+  const catalog = new OfficialPluginManagerCatalogAdapter(provider, []);
+
+  const snapshot = await catalog.localSnapshot();
+
+  assert.equal(remoteLoads, 0);
+  assert.equal(snapshot.status, 'loading');
+  assert.deepEqual(
+    snapshot.candidates.map((candidate) => candidate.pluginId),
+    ['official.chatgpt-dot'],
+  );
+});
+
 test('uses the same Host-owned grants for local development archives as catalog releases', () => {
   const policies = [
     {

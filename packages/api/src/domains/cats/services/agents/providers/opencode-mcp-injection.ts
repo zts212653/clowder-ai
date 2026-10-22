@@ -1,3 +1,4 @@
+import { resolveEnvReferences } from '../../../../../utils/env-references.js';
 /**
  * OpenCode MCP injection — capabilities.json → OpenCode MCP config at invoke time.
  *
@@ -16,10 +17,8 @@ import {
   resolveCatCafeNodeCommand,
   resolveServersForCat,
 } from '../../../../../config/capabilities/capability-orchestrator.js';
-import {
-  assertMappedCapabilitySource,
-  isSameCapabilityRoot,
-} from '../../../../../config/capabilities/invoke-capability-root.js';
+import { assertMappedCapabilitySource } from '../../../../../config/capabilities/invoke-capability-root.js';
+import { readInvocationMcpConfig } from '../../../../../config/capabilities/invoke-mcp-config.js';
 import {
   toOpenCodeMcpEntry,
   toOpenCodeRemoteMcpEntry,
@@ -62,29 +61,15 @@ export function buildOpenCodeMcpSync(
   try {
     // F249: Project config is the single truth source for MCP resolution.
     // Try project first; fall back to global for uninitialized projects.
-    let capConfig = null;
-    let configSourceRoot = capabilityRoot;
-    let accessScope: 'global' | 'project' = 'global';
-    if (workingDirectory && !isSameCapabilityRoot(workingDirectory, capabilityRoot)) {
-      try {
-        const projectRaw = readFileSync(join(workingDirectory, '.cat-cafe', 'capabilities.json'), 'utf-8');
-        const parsed = JSON.parse(projectRaw);
-        if (parsed?.version === 1 || parsed?.version === 2) {
-          capConfig = parsed;
-          configSourceRoot = workingDirectory;
-          accessScope = 'project';
-        }
-      } catch {
-        /* No project config — fall back to global */
-      }
-    }
-    if (!capConfig) {
-      const raw = readFileSync(join(capabilityRoot, '.cat-cafe', 'capabilities.json'), 'utf-8');
-      const parsed = JSON.parse(raw);
-      if (parsed?.version === 1 || parsed?.version === 2) capConfig = parsed;
-    }
+    const {
+      config: capConfig,
+      configSourceRoot,
+      accessScope,
+    } = readInvocationMcpConfig(capabilityRoot, workingDirectory);
     if (capConfig && catId) {
-      for (const s of resolveServersForCat(capConfig, catId, { accessScope }) as Array<{
+      for (const s of resolveServersForCat(capConfig, catId, {
+        accessScope,
+      }) as Array<{
         name: string;
         enabled: boolean;
         command: string;
@@ -119,7 +104,7 @@ export function buildOpenCodeMcpSync(
           mcp[s.name] = toOpenCodeMcpEntry({
             command: resolveMcpCommand(s.command, workingDir, configSourceRoot),
             args: resolveMcpArgs(s.args, workingDir, configSourceRoot),
-            env: s.env,
+            env: s.env ? resolveEnvReferences(s.env) : undefined,
           });
         }
       }

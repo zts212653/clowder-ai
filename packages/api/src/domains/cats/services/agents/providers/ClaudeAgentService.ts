@@ -244,8 +244,25 @@ function removePreCompactSettingsTempDir(path: string | undefined): void {
  * - Windows git bash path resolution
  * - subscription mode → strip all ANTHROPIC_* (avoid silent api_key billing)
  * - api_key mode → inject ANTHROPIC_API_KEY / BASE_URL / model override
+ * - unknown third-party models → inject CLAUDE_CODE_MAX_CONTEXT_TOKENS from
+ *   member config, because the CLI otherwise assumes its 200k default window
  */
-export function buildClaudeEnvOverrides(callbackEnv?: Record<string, string>): Record<string, string | null> {
+export interface ClaudeEnvWindowOptions {
+  /** Raw/native provider window owned by member config; never an effective session capacity. */
+  contextNativeWindowTokens?: number | null;
+}
+
+function resolveClaudeNativeWindowTokens(windowOptions?: ClaudeEnvWindowOptions): number | undefined {
+  const nativeWindowTokens = windowOptions?.contextNativeWindowTokens;
+  return typeof nativeWindowTokens === 'number' && Number.isSafeInteger(nativeWindowTokens) && nativeWindowTokens > 0
+    ? nativeWindowTokens
+    : undefined;
+}
+
+export function buildClaudeEnvOverrides(
+  callbackEnv?: Record<string, string>,
+  windowOptions?: ClaudeEnvWindowOptions,
+): Record<string, string | null> {
   const env: Record<string, string | null> = { ...(callbackEnv ?? {}) };
 
   env.CLAUDECODE = null;
@@ -281,6 +298,16 @@ export function buildClaudeEnvOverrides(callbackEnv?: Record<string, string>): R
     const effectiveModel = modelOverride || undefined;
     if (effectiveModel && !isKnownAnthropicModel(effectiveModel)) {
       env.ANTHROPIC_MODEL = effectiveModel;
+
+      // Plain custom IDs can use the member-owned native window. The CLI owns
+      // recognized Claude IDs/aliases and [1m] spellings; leave those alone.
+      // https://code.claude.com/docs/en/model-config#which-ids-claude_code_max_context_tokens-applies-to
+      // Never feed a contracted effective/pinned window back into native configuration.
+      const nativeWindowTokens = resolveClaudeNativeWindowTokens(windowOptions);
+      const cliOwnedWindow = /claude-|^(?:default|best|fable|opus(?:plan)?|sonnet|haiku)$|\[1m\]/i.test(effectiveModel);
+      if (nativeWindowTokens !== undefined && !cliOwnedWindow) {
+        env.CLAUDE_CODE_MAX_CONTEXT_TOKENS = String(nativeWindowTokens);
+      }
     }
   } else if (mode === 'subscription') {
     // Subscription mode must not inherit shell-level Anthropic credentials.
@@ -625,7 +652,9 @@ export class ClaudeAgentService implements AgentService {
       }
 
       let sawResultError = false;
-      const envOverrides = buildClaudeEnvOverrides(options?.callbackEnv);
+      const envOverrides = buildClaudeEnvOverrides(options?.callbackEnv, {
+        contextNativeWindowTokens: options?.contextNativeWindowTokens,
+      });
       // F171: Account env vars applied LAST — user overrides provider-injected values
       if (options?.accountEnv) {
         for (const [k, v] of Object.entries(options.accountEnv)) envOverrides[k] = v;

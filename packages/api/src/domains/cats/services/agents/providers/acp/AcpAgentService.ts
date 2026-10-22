@@ -18,16 +18,13 @@ import { deploymentDefaults } from '@cat-cafe/shared';
  *   - System prompt: prepended to prompt text (ACP agents have no system prompt flag)
  */
 
-import { type CapabilitiesConfig, type CatId, catRegistry } from '@cat-cafe/shared';
-import {
-  readCapabilitiesConfig,
-  resolveBinaryRoot,
-} from '../../../../../../config/capabilities/capability-orchestrator.js';
+import { type CatId, catRegistry } from '@cat-cafe/shared';
+import { resolveBinaryRoot } from '../../../../../../config/capabilities/capability-orchestrator.js';
 import {
   assertMappedCapabilitySource,
-  isSameCapabilityRoot,
   resolveInvokeCapabilityRoot,
 } from '../../../../../../config/capabilities/invoke-capability-root.js';
+import { readInvocationMcpConfig } from '../../../../../../config/capabilities/invoke-mcp-config.js';
 import { getCatEffort } from '../../../../../../config/cat-config-loader.js';
 import { getCatModel } from '../../../../../../config/cat-models.js';
 import { createModuleLogger } from '../../../../../../infrastructure/logger.js';
@@ -211,6 +208,10 @@ export class AcpAgentService implements AgentService {
   private readonly agentBusyRetryDelaysMs: number[];
   /** Becomes true only after this concrete ACP service observes usable standard usage telemetry. */
   private observedUsageUpdate = false;
+
+  async releaseSession(nativeSessionId: string): Promise<void> {
+    await this.pool.releaseSession(this.poolKey, nativeSessionId);
+  }
 
   constructor(config: AcpAgentServiceConfig) {
     this.antigravity = config.antigravity;
@@ -518,26 +519,7 @@ export class AcpAgentService implements AgentService {
       } else if (this.mcpWhitelist !== null) {
         const binaryRoot = resolveBinaryRoot(this.projectRoot);
         const capabilitiesRoot = await resolveInvokeCapabilityRoot(binaryRoot);
-        let capConfig: CapabilitiesConfig | null = null;
-        // Track which root supplied capabilities.json — external MCP entries
-        // with relative paths must resolve against the config source, not runtime root.
-        let configSourceRoot = capabilitiesRoot;
-        if (this.mcpSupportEnabled && userProjectRoot && !isSameCapabilityRoot(userProjectRoot, capabilitiesRoot)) {
-          try {
-            capConfig = await readCapabilitiesConfig(userProjectRoot);
-            configSourceRoot = userProjectRoot;
-          } catch {
-            /* No project-local config — fall back to runtime root */
-          }
-        }
-        if (!capConfig) {
-          try {
-            capConfig = await readCapabilitiesConfig(capabilitiesRoot);
-            configSourceRoot = capabilitiesRoot;
-          } catch {
-            /* best-effort — resolveAcpMcpServers handles null config */
-          }
-        }
+        const { config: capConfig, configSourceRoot } = readInvocationMcpConfig(capabilitiesRoot, userProjectRoot);
         if (this.mcpSupportEnabled) assertMappedCapabilitySource(capConfig !== null, binaryRoot, capabilitiesRoot);
         const disabled = resolveDisabledServerIds(this.projectRoot, this.catId as string, capConfig);
         baseMcpServers = await resolveAcpMcpServers(this.projectRoot, this.mcpWhitelist, undefined, {

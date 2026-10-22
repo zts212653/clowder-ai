@@ -1,5 +1,6 @@
 import { pathToFileURL } from 'node:url';
 import { consumeOwnerOperationInvocation } from '../../carrier/plugin-owner-operation-context.js';
+import { declaresConfigurationVariants, resolveVariant } from '../../configuration-variant-consumption.js';
 import { verifyPackageEntrypoint } from '../../external-runtime/package-entrypoint-authority.js';
 import type { VerifiedPluginPackage } from '../../external-runtime/types.js';
 import { ExternalPluginRuntimeError } from '../../external-runtime/types.js';
@@ -124,17 +125,63 @@ export async function createModuleSettingsHost(
     storage?: PluginPrivateStoragePort;
     dataDirectoryParent?: string;
     log: ModulePluginSettingsHost['log'];
+    /**
+     * `runtime` (the carrier start() path) fail-closes the settings surface on
+     * variant declarations: the variant is resolved once, lazily, and an
+     * unselected/invalid declaration makes every read refuse, while fields of
+     * inactive branches return `undefined` without touching the store.
+     * `management` (settings actions, uninstall, probes) keeps the legacy
+     * pass-through so owners can always reach every declared field.
+     */
+    variantMode?: 'runtime' | 'management';
   },
   current: () => Promise<void>,
 ): Promise<ModulePluginSettingsHost> {
   const record = snapshotModuleAuthority(input.packageRecord);
   const grants = snapshotModuleAuthority(input.effectiveGrants);
+  const variantRuntime = options.variantMode === 'runtime' && declaresConfigurationVariants(record.manifest);
+  let variantResolutionPromise: Promise<ReturnType<typeof resolveVariant>> | undefined;
+  const variantResolution = () => {
+    variantResolutionPromise ??= (async () => {
+      const variants = record.manifest.configurationVariants;
+      if (!variants) return { status: 'unselected' as const };
+      const discriminatorField = record.manifest.configuration?.find(
+        (item) => item.key === variants.discriminator && item.kind !== 'operation',
+      );
+      const capability = discriminatorField?.kind === 'secret' ? 'secret.read' : 'plugin.config.read';
+      let stored: unknown;
+      // The grant discipline the projection uses: no grant, no store read —
+      // the contract then falls back to the discriminator field's default.
+      if (discriminatorField && grants.includes(capability)) {
+        stored =
+          discriminatorField.kind === 'secret'
+            ? await options.configuration.readSecret(input.pluginInstanceId, variants.discriminator)
+            : await options.configuration.readConfig(input.pluginInstanceId, variants.discriminator);
+      }
+      return resolveVariant(record.manifest, stored === undefined ? {} : { [variants.discriminator]: stored });
+    })();
+    return variantResolutionPromise;
+  };
   const read = async (key: string, secret: boolean) => {
     await current();
     const field = record.manifest.configuration?.find(
       (item) => item.key === key && item.kind !== 'operation' && (item.kind === 'secret') === secret,
     );
     if (!field) return undefined;
+    if (variantRuntime) {
+      const resolution = await variantResolution();
+      if (resolution.status !== 'selected')
+        throw new ExternalPluginRuntimeError(
+          'DELIVERY_REJECTED',
+          `Configuration variant is ${resolution.status}; runtime reads are refused until a branch is selected`,
+        );
+      const variants = record.manifest.configurationVariants;
+      const branch = variants?.branches.find((item) => item.id === resolution.branchId);
+      const claimedByBranch = variants?.branches.some((item) => item.fields.includes(key)) ?? false;
+      // Inactive-branch fields are never delivered to the runtime: no store
+      // read, no error, just absence — mirroring the startup projection.
+      if (claimedByBranch && !(branch?.fields.includes(key) ?? false)) return undefined;
+    }
     const capability = secret ? 'secret.read' : 'plugin.config.read';
     if (!grants.includes(capability))
       throw new ExternalPluginRuntimeError('DELIVERY_REJECTED', `Settings lacks ${capability}`);

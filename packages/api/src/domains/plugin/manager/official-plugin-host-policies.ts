@@ -39,6 +39,7 @@ function connectorGrants(...unused: readonly (typeof CONNECTOR_GRANTS)[number][]
  * only ever receive what its entry lists and its manifest requests.
  */
 export const OFFICIAL_PLUGIN_HOST_POLICIES: readonly MachineCatalogHostPolicy[] = [
+  { pluginId: 'official.acp-clients', effectiveGrants: ['plugin.config.read'] },
   { pluginId: 'dev.clowder.genoffice-docx', effectiveGrants: [] },
   {
     pluginId: 'dev.clowder.xiangqi',

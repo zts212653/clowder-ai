@@ -76,7 +76,7 @@ async function installed({ capabilities, contributions = [], configuration, file
     threadStore: new ThreadStore(),
     threadBindingStore: new MemoryConnectorThreadBindingStore(),
     threadOwnerUserId: 'owner-1',
-    contract: { manifestContractVersions: ['0.1.0'], validateEffectiveGrants, validateManifest },
+    contract: { manifestContractRange: '0.1.0', validateEffectiveGrants, validateManifest },
     mcpConfigIO: {
       readConfig: async () => null,
       writeAndRegenCli: async () => assert.fail('a refused MCP must never be written'),

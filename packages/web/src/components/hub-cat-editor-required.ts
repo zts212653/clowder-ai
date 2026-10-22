@@ -12,7 +12,12 @@ export function requiredHubCatFields(
 ) {
   const errors: Record<string, boolean> = {};
   const errorMessages: string[] = [];
-  if (detailed && form.clientId !== 'antigravity' && (!form.accountRef.trim() || !selectedProfile)) {
+  if (
+    detailed &&
+    form.configurationSource !== 'native_tool' &&
+    form.clientId !== 'antigravity' &&
+    (!form.accountRef.trim() || !selectedProfile)
+  ) {
     errors.account = true;
     errors.Account = true;
     errorMessages.push('账号');

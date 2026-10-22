@@ -71,6 +71,7 @@ export interface AcpPoolClient {
   readonly isSafeForSingleFlightReuse?: boolean;
   /** Session-scoped counterpart used to seal only the cancelled logical session on multiplexed carriers. */
   isSessionSafeForReuse?(sessionId: string): boolean;
+  closeSession?(sessionId: string): Promise<void>;
   initialize(): Promise<unknown>;
   close(): Promise<void>;
 }
@@ -259,6 +260,13 @@ export class AcpProcessPool {
 
     const entry = await spawnPromise;
     return this.createLease(entry, poolKey, canResumeRequestedSession);
+  }
+
+  async releaseSession(poolKey: PoolKey, sessionId: string): Promise<void> {
+    const key = serializeSessionKey(poolKey, sessionId);
+    const owner = this.sessionOwners.get(key);
+    this.sessionOwners.delete(key);
+    await owner?.client.closeSession?.(sessionId);
   }
 
   /** Seal a logical session after local termination without provider quiescence. */

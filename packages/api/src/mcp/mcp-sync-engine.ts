@@ -8,11 +8,8 @@
 
 import { createHash } from 'node:crypto';
 import type { CapabilitiesConfig, CapabilityEntry } from '@cat-cafe/shared';
-import {
-  readCapabilitiesConfig,
-  withCapabilityLock,
-  writeCapabilitiesConfig,
-} from '../config/capabilities/capability-orchestrator.js';
+import { withCapabilityLock, writeCapabilitiesConfig } from '../config/capabilities/capability-orchestrator.js';
+import { readMcpSyncConfig } from './mcp-config-state.js';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -132,15 +129,12 @@ async function syncMcpProjectUnlocked(
   const skipped: string[] = [];
 
   // 1. Read global MCP entries (from caller or fresh read)
-  const globalMcpEntries = opts?.globalMcpEntries ?? extractMcpEntries(await readCapabilitiesConfig(catCafeRoot));
+  const globalMcpEntries = opts?.globalMcpEntries ?? extractMcpEntries(await readMcpSyncConfig(catCafeRoot, 'global'));
   const globalMcpMap = new Map(globalMcpEntries.map((e) => [e.id, e]));
   const syncedHash = computeGlobalMcpHash(globalMcpEntries);
 
   // 2. Read project config (create minimal if missing)
-  let projectConfig = await readCapabilitiesConfig(projectRoot);
-  if (!projectConfig) {
-    projectConfig = { version: 2, capabilities: [] };
-  }
+  const projectConfig = await readMcpSyncConfig(projectRoot, 'project');
 
   const projectMcpMap = new Map<string, CapabilityEntry>();
   for (const cap of projectConfig.capabilities) {

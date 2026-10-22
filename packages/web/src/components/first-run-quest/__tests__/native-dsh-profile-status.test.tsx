@@ -63,21 +63,28 @@ it.each([
   expect(apiFetch).not.toHaveBeenCalled();
 });
 it.each([
-  false,
-  true,
-])('explains the DSH catalog status and preserves inherited settings (invalid=%s)', async (invalid) => {
+  { invalid: false, nativeSetup: false },
+  { invalid: true, nativeSetup: false },
+  { invalid: false, nativeSetup: true },
+  { invalid: true, nativeSetup: true },
+])('preserves DSH settings and scopes discovery (invalid=$invalid, nativeSetup=$nativeSetup)', async ({
+  invalid,
+  nativeSetup,
+}) => {
   const peer = runtime(invalid);
   vi.mocked(apiFetch).mockImplementation(
     async (path) =>
       new Response(
         JSON.stringify(
-          path === '/api/cats/native-runtimes'
-            ? { runtimes: [peer] }
-            : {
-                status: invalid ? 'unavailable' : 'configured',
-                models: [],
-                message: invalid ? 'acp_profile_invalid' : 'acp_profile_missing',
-              },
+          path === '/api/agent-providers'
+            ? { libraries: [] }
+            : path === '/api/cats/native-runtimes'
+              ? { runtimes: [peer] }
+              : {
+                  status: invalid ? 'unavailable' : 'configured',
+                  models: [],
+                  message: invalid ? 'acp_profile_invalid' : 'acp_profile_missing',
+                },
         ),
       ),
   );
@@ -86,6 +93,7 @@ it.each([
   await act(async () =>
     root.render(
       <MemberRuntimeFields
+        nativeSetup={nativeSetup}
         form={{ ...initialState(), ...runtimeDefaults(peer) }}
         accounts={[]}
         patch={patch}
@@ -96,17 +104,28 @@ it.each([
       />,
     ),
   );
-  expect(host.querySelector('option[value=dsh]')?.textContent).toContain(
-    invalid ? '已安装 · ACP 配置异常' : '已安装 · 首次连接初始化 ACP',
-  );
+  if (nativeSetup) expect(host.querySelector('option[value=dsh]')).toBeNull();
+  else
+    expect(host.querySelector('option[value=dsh]')?.textContent).toContain(
+      invalid ? '已安装 · ACP 配置异常' : '已安装 · 首次连接初始化 ACP',
+    );
   expect(host.textContent).toContain(invalid ? '修复现有 ACP 配置' : '实际连接时由 DSH 准备');
   expect(host.textContent).toContain(invalid ? '不会自动覆盖' : '浏览和创建伙伴不会初始化');
   expect(host.textContent).not.toContain('已检测登录');
   expect(patch).not.toHaveBeenCalled();
   expect(validity).toHaveBeenLastCalledWith(!invalid);
+  expect(new Set(vi.mocked(apiFetch).mock.calls.map(([path]) => path))).toEqual(
+    new Set([
+      '/api/cats/native-runtimes',
+      '/api/cats/runtime-models',
+      ...(!nativeSetup ? ['/api/agent-providers'] : []),
+    ]),
+  );
   expect(
     vi
       .mocked(apiFetch)
-      .mock.calls.every(([path]) => path === '/api/cats/native-runtimes' || path === '/api/cats/runtime-models'),
+      .mock.calls.every(([path, options]) =>
+        path === '/api/cats/runtime-models' ? options?.method === 'POST' : !options?.method || options.method === 'GET',
+      ),
   ).toBe(true);
 });

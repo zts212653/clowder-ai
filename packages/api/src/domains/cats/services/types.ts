@@ -1044,6 +1044,8 @@ export interface LocalSessionReadInput {
 }
 
 export interface AgentServiceOptions {
+  /** Host logical SessionRecord identity; sessionId remains the native resume id. */
+  hostSessionId?: string;
   /** Binding restored from the canonical SessionRecord, including across API restarts. */
   nativeSessionBinding?: import('@cat-cafe/shared').NativeSessionBinding;
   /** Imported histories must never be silently replaced by a fresh native session. */
@@ -1224,6 +1226,10 @@ export interface ProviderRequestGenerationCommitV1 {
  * Interface that all agent services must implement
  */
 export interface AgentService {
+  /** Pin one prepared carrier generation before Host policy, L0 and capacity admission. Idempotent on a pinned view. */
+  forInvocation?(): AgentService;
+  /** Release a pinned Host invocation even when policy/preflight exits before a provider iterator starts. Idempotent. */
+  releaseInvocation?(): Promise<void>;
   /**
    * Invoke the agent with a prompt and stream back messages
    * @param prompt The user's prompt/message

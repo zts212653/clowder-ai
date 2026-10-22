@@ -2,13 +2,16 @@ import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { join } from 'node:path';
 import { test } from 'node:test';
+import { fileURLToPath } from 'node:url';
 import { verifyAcpBootstrap } from '../../dist/domains/cats/services/agents/providers/acp/bootstrap/acp-bootstrap-context.js';
 import { auditedWindowsAcpStartup } from '../../dist/domains/cats/services/agents/providers/acp/bootstrap/acp-bootstrap-startup-policy.js';
 
 const windows = { skip: process.platform !== 'win32' };
-const bridge = resolve('packages/api/dist/domains/cats/services/agents/providers/pi/pi-acp-bridge.js');
+const bridge = fileURLToPath(
+  new URL('../../dist/domains/cats/services/agents/providers/pi/pi-acp-bridge.js', import.meta.url),
+);
 const args = [bridge, '--pi-command', process.execPath];
 const cleanEnv = { NODE_OPTIONS: '', NODE_PATH: '' };
 
@@ -60,6 +63,8 @@ test('Pi initialize completes without launching Pi or using ancestor instruction
 test('cold-start verification fails closed if the admitted startup environment changes', windows, () => {
   const root = mkdtempSync(join(tmpdir(), 'acp-policy-recheck-'));
   const env = { ...cleanEnv };
+  const previousMode = process.env.CAT_CAFE_WINDOWS_ACP_BOOTSTRAP_MODE;
+  process.env.CAT_CAFE_WINDOWS_ACP_BOOTSTRAP_MODE = 'trusted-host';
   try {
     const context = verifyAcpBootstrap(
       { projectRoot: root, command: process.execPath, args, poolKey: { projectPath: root, providerProfile: 'pi' } },
@@ -70,6 +75,8 @@ test('cold-start verification fails closed if the admitted startup environment c
     env.NODE_OPTIONS = '--require unsafe.js';
     assert.throws(() => context.verifyCwd(), /startup.*changed/i);
   } finally {
+    if (previousMode === undefined) delete process.env.CAT_CAFE_WINDOWS_ACP_BOOTSTRAP_MODE;
+    else process.env.CAT_CAFE_WINDOWS_ACP_BOOTSTRAP_MODE = previousMode;
     rmSync(root, { recursive: true, force: true });
   }
 });

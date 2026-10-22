@@ -113,7 +113,7 @@ test('production composition delivers concurrent cat replies exactly once to an 
     threadStore,
     threadBindingStore: new MemoryConnectorThreadBindingStore(),
     threadOwnerUserId: 'owner-1',
-    contract: { manifestContractVersions: ['0.1.0'], validateEffectiveGrants, validateManifest },
+    contract: { manifestContractRange: '0.1.0', validateEffectiveGrants, validateManifest },
   });
   scheduler.attach(runtime.subscriptionDelivery);
   const manager = createPluginManagerRuntimeComposition({

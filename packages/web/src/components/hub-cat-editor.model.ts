@@ -55,6 +55,7 @@ export interface HubCatEditorFormState {
   agyTrustedWorkspaces?: string;
   acpTransport: 'stdio' | 'httpstream';
   acpCommand: string;
+  acpAgentProvider?: string | null;
   acpStartupArgs: string;
   acpMaxLiveProcesses: string;
   acpIdleTtlMinutes: string;
@@ -418,6 +419,7 @@ export function initialState(cat?: CatData | null, draft?: HubCatEditorDraft | n
     agyHomeRoot: cat?.agyProfile?.homeRoot ?? '',
     agyTrustedWorkspaces: cat?.agyProfile?.trustedWorkspaces?.join('\n') ?? '',
     acpTransport: (acpConfig?.transport as 'stdio' | 'httpstream' | undefined) ?? 'stdio',
+    acpAgentProvider: cat?.agentProvider !== undefined ? cat.agentProvider : acpConfig?.agentProvider,
     acpCommand: acpConfig?.command ?? defaultAcpCommandForClient(clientId),
     acpStartupArgs:
       (acpConfig?.startupArgs ? serializeCommandArgs(acpConfig.startupArgs) : undefined) ??

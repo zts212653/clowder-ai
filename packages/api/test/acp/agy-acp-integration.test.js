@@ -218,43 +218,66 @@ for (const mode of [{ stopReason: 'cancelled' }, { stopReason: 'refusal' }, { pr
     assert.equal(f.calls.filter(([name]) => name === 'prompt').length, 1);
   });
 
-test('AGY ACP refreshes principal credentials before resume and passes only their file to host MCP', async () => {
-  let seen;
-  const f = fixture({
-    mcpServers: [{ name: 'cat-cafe-memory', command: process.execPath, args: [], env: [] }],
-    onResume: (args) => {
-      const path = args[2][0].env.find((entry) => entry.name === 'CAT_CAFE_CREDENTIAL_FILE').value;
-      seen = JSON.parse(readFileSync(path, 'utf8'));
-    },
+for (const nativePlugin of [false, true]) {
+  test(`AGY ACP refreshes credentials before resume and uses only their file for ${nativePlugin ? 'native-plugin' : 'host'} MCP`, async () => {
+    let seen;
+    let resumeEnv;
+    const f = fixture({
+      mcpServers: [
+        {
+          name: nativePlugin ? 'plugin-fixture' : 'cat-cafe-memory',
+          command: process.execPath,
+          args: [],
+          env: nativePlugin ? [{ name: 'CLOWDER_PLUGIN_ACTION_TOKEN', value: 'synthetic-action' }] : [],
+        },
+      ],
+      onResume: (args) => {
+        resumeEnv = Object.fromEntries(args[2][0].env.map(({ name, value }) => [name, value]));
+        const path = resumeEnv.CAT_CAFE_CREDENTIAL_FILE;
+        seen = JSON.parse(readFileSync(path, 'utf8'));
+      },
+    });
+    const previous = process.env.CAT_CAFE_MCP_CREDS_DIR;
+    process.env.CAT_CAFE_MCP_CREDS_DIR = f.home;
+    const callbackEnv = {
+      CAT_CAFE_API_URL: 'http://127.0.0.1:3102',
+      CAT_CAFE_THREAD_ID: 'thread-credential',
+      CAT_CAFE_CAT_ID: 'gemini-argon',
+      CAT_CAFE_INVOCATION_ID: 'first',
+      CAT_CAFE_CALLBACK_TOKEN: 'synthetic-first',
+    };
+    try {
+      const events = await Array.fromAsync(f.service.invoke('first', { ...f.options, callbackEnv }));
+      const setup = f.calls.find(([name]) => name === 'new');
+      assert.equal(
+        setup[2][0].env.some((entry) => ['CAT_CAFE_INVOCATION_ID', 'CAT_CAFE_CALLBACK_TOKEN'].includes(entry.name)),
+        false,
+      );
+      const binding = events.find((event) => event.nativeSessionBinding).nativeSessionBinding;
+      await Array.fromAsync(
+        f.service.invoke('second', {
+          ...f.options,
+          sessionId: 'acp-original',
+          nativeSessionBinding: binding,
+          callbackEnv: {
+            ...callbackEnv,
+            CAT_CAFE_INVOCATION_ID: 'second',
+            CAT_CAFE_CALLBACK_TOKEN: 'synthetic-second',
+          },
+        }),
+      );
+      assert.equal(seen.invocationId, 'second');
+      assert.equal(seen.callbackToken, 'synthetic-second');
+      assert.equal(Object.hasOwn(resumeEnv, 'CAT_CAFE_INVOCATION_ID'), false);
+      assert.equal(Object.hasOwn(resumeEnv, 'CAT_CAFE_CALLBACK_TOKEN'), false);
+      assert.equal(
+        resumeEnv.CAT_CAFE_CREDENTIAL_FILE,
+        setup[2][0].env.find((entry) => entry.name === 'CAT_CAFE_CREDENTIAL_FILE').value,
+      );
+      if (nativePlugin) assert.equal(resumeEnv.CLOWDER_PLUGIN_ACTION_TOKEN, 'synthetic-action');
+    } finally {
+      if (previous === undefined) delete process.env.CAT_CAFE_MCP_CREDS_DIR;
+      else process.env.CAT_CAFE_MCP_CREDS_DIR = previous;
+    }
   });
-  const previous = process.env.CAT_CAFE_MCP_CREDS_DIR;
-  process.env.CAT_CAFE_MCP_CREDS_DIR = f.home;
-  const callbackEnv = {
-    CAT_CAFE_API_URL: 'http://127.0.0.1:3102',
-    CAT_CAFE_THREAD_ID: 'thread-credential',
-    CAT_CAFE_CAT_ID: 'gemini-argon',
-    CAT_CAFE_INVOCATION_ID: 'first',
-    CAT_CAFE_CALLBACK_TOKEN: 'synthetic-first',
-  };
-  try {
-    const events = await Array.fromAsync(f.service.invoke('first', { ...f.options, callbackEnv }));
-    const setup = f.calls.find(([name]) => name === 'new');
-    assert.equal(
-      setup[2][0].env.some((entry) => ['CAT_CAFE_INVOCATION_ID', 'CAT_CAFE_CALLBACK_TOKEN'].includes(entry.name)),
-      false,
-    );
-    const binding = events.find((event) => event.nativeSessionBinding).nativeSessionBinding;
-    await Array.fromAsync(
-      f.service.invoke('second', {
-        ...f.options,
-        sessionId: 'acp-original',
-        nativeSessionBinding: binding,
-        callbackEnv: { ...callbackEnv, CAT_CAFE_INVOCATION_ID: 'second', CAT_CAFE_CALLBACK_TOKEN: 'synthetic-second' },
-      }),
-    );
-    assert.equal(seen.invocationId, 'second');
-  } finally {
-    if (previous === undefined) delete process.env.CAT_CAFE_MCP_CREDS_DIR;
-    else process.env.CAT_CAFE_MCP_CREDS_DIR = previous;
-  }
-});
+}

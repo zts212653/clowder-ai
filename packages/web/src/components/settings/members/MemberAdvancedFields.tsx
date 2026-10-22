@@ -32,7 +32,12 @@ export function MemberAdvancedFields({
           'The adapter defines the protocol. A program name does not change it.',
         )}
       </p>
-      <MemberCarrierSelect label={t('接入方式', 'Adapter')} form={form} onChange={patch} t={t} />
+      <MemberCarrierSelect
+        label={t('接入方式', 'Adapter')}
+        form={form}
+        onChange={(change) => patch({ ...change, acpAgentProvider: null })}
+        t={t}
+      />
       {agy && (
         <MemberEditorPresentation.Provider value>
           <MemberCopyContext.Provider value={membersCopy[language]}>
@@ -40,7 +45,15 @@ export function MemberAdvancedFields({
           </MemberCopyContext.Provider>
         </MemberEditorPresentation.Provider>
       )}
-      {form.carrier === 'acp' && !agy && (
+      {form.acpAgentProvider && (
+        <p className="text-sm text-cafe-secondary">
+          {t(
+            '启动配置由插件管理。请在插件集成中修改对应 client。',
+            'The plugin owns launch settings. Edit this client in Plugin integrations.',
+          )}
+        </p>
+      )}
+      {form.carrier === 'acp' && !agy && !form.acpAgentProvider && (
         <>
           <TextField
             label={t('启动程序', 'Program')}

@@ -158,6 +158,23 @@ test('run-with-node-env-test forces NODE_ENV=test for node commands', () => {
   assert.equal(result.status, 0, result.stderr || result.stdout);
 });
 
+test('run-with-node-env-test applies --env to the child command', () => {
+  const result = spawnSync(
+    process.execPath,
+    [
+      runnerPath,
+      '--env',
+      'F309_INDEPENDENT_CAT=1',
+      process.execPath,
+      '-e',
+      "if (process.env.F309_INDEPENDENT_CAT !== '1') process.exit(11)",
+    ],
+    { cwd: webRoot, encoding: 'utf8' },
+  );
+
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+});
+
 test('published browser lease fixture closes every local library import', () => {
   const copiedLibraries = new Set(leaseLibraryPaths);
   const missingDependencies = leaseLibraryPaths.flatMap((name) =>

@@ -5,6 +5,7 @@ import {
   type PluginDeliveryReceipt,
 } from '@clowder-ai/plugin-contract';
 import type { ToolExecutionPolicy } from '../../cats/services/types.js';
+import { activateDeclaredMcp } from '../declared/declared-mcp-resources.js';
 import {
   type DeclaredPluginTool,
   type DeclaredPluginWebhook,
@@ -120,6 +121,7 @@ export class PluginRuntimeCarrierRouter implements PluginRuntimeLifecyclePort {
         this.resources && {
           ...this.resources,
           nativeActionEnvironment: (contributionId) => this.nativeActions.environment(pluginInstanceId, contributionId),
+          nativeActionEnvironmentReferences: (id) => this.nativeActions.environmentReferences(pluginInstanceId, id),
         },
       );
       await this.#runtimeContributions.activate(
@@ -145,14 +147,14 @@ export class PluginRuntimeCarrierRouter implements PluginRuntimeLifecyclePort {
     const pkg = instance && snapshot.packages.find((item) => item.packageDigest === instance.packageDigest);
     if (pkg?.manifest === null) {
       await this.beforeStop?.(pluginInstanceId, reason);
-      this.#runtimeContributions.deactivate(pluginInstanceId);
+      await this.#runtimeContributions.deactivate(pluginInstanceId);
       if (removesPluginOwnedResources(reason)) await removeDeclaredStaticResources(pkg.pluginId, this.resources);
       return;
     }
     const admission = await this.#admission(pluginInstanceId);
     const carrier = this.#selectAdmission(admission);
     await this.beforeStop?.(pluginInstanceId, reason);
-    this.#runtimeContributions.deactivate(pluginInstanceId);
+    await this.#runtimeContributions.deactivate(pluginInstanceId);
     await carrier.stop(pluginInstanceId, reason);
     if (removesPluginOwnedResources(reason)) {
       await removeDeclaredStaticResources(admission.packageRecord.pluginId, this.resources);
@@ -170,8 +172,23 @@ export class PluginRuntimeCarrierRouter implements PluginRuntimeLifecyclePort {
   }
 
   async configRefresh(pluginInstanceId: string): Promise<void> {
-    const carrier = this.#selectAdmission(await this.#admission(pluginInstanceId));
+    const generation = this.nativeActions.generation(pluginInstanceId);
+    const admission = await this.#admission(pluginInstanceId);
+    const carrier = this.#selectAdmission(admission);
+    this.#nativeMcpLaunches.deactivate(pluginInstanceId);
     await carrier.configRefresh?.(pluginInstanceId);
+    // Configuration saves also change declared MCP env. Reuse the mutation
+    // pipeline so project copies refresh without rotating the live action token.
+    const launches = await activateDeclaredMcp(
+      admission,
+      this.resources && {
+        ...this.resources,
+        nativeActionEnvironment: (contributionId) => this.nativeActions.environment(pluginInstanceId, contributionId),
+        nativeActionEnvironmentReferences: (id) => this.nativeActions.environmentReferences(pluginInstanceId, id),
+      },
+    );
+    this.#nativeMcpLaunches.activate(admission, generation, launches);
+    await this.#runtimeContributions.refreshAgentSessionProviders(admission);
   }
 
   async stopAll(reason = 'host_shutdown'): Promise<void> {
@@ -181,7 +198,7 @@ export class PluginRuntimeCarrierRouter implements PluginRuntimeLifecyclePort {
       const inventory = await this.inventory.snapshot();
       await Promise.all(inventory.instances.map((instance) => this.beforeStop?.(instance.pluginInstanceId, reason)));
     }
-    this.#runtimeContributions.deactivateAll();
+    await this.#runtimeContributions.deactivateAll();
     const carrierResults = await Promise.allSettled(this.#carriers.map((carrier) => carrier.stopAll(reason)));
     const carrierFailure = carrierResults.find(
       (result): result is PromiseRejectedResult => result.status === 'rejected',
@@ -312,7 +329,7 @@ export class PluginRuntimeCarrierRouter implements PluginRuntimeLifecyclePort {
       rollbackErrors.push(error);
     }
     try {
-      this.#runtimeContributions.deactivate(admission.instance.pluginInstanceId);
+      await this.#runtimeContributions.deactivate(admission.instance.pluginInstanceId);
       await removeDeclaredStaticResources(admission.packageRecord.pluginId, this.resources);
     } catch (error) {
       rollbackErrors.push(error);

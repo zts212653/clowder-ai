@@ -85,7 +85,7 @@ function optionalPositiveInteger(raw: string, fieldName: string): number | undef
   return parsed;
 }
 
-const ACP_FORM_OWNED_KEYS = new Set(['command', 'startupArgs', 'transport', 'pool']);
+const ACP_FORM_OWNED_KEYS = new Set(['agentProvider', 'command', 'startupArgs', 'transport', 'pool']);
 
 function preserveHiddenAcpFields(cat?: CatData | null): Record<string, unknown> {
   if (!cat?.acp) return {};
@@ -93,6 +93,7 @@ function preserveHiddenAcpFields(cat?: CatData | null): Record<string, unknown> 
 }
 
 function buildAcpTransportConfig(form: HubCatEditorFormState, cat?: CatData | null) {
+  if (form.acpAgentProvider) return { command: 'plugin-agent', startupArgs: [] };
   const transport = form.acpTransport ?? 'stdio';
   const officialAgy = usesAgyAcp(form);
   const command =
@@ -101,7 +102,6 @@ function buildAcpTransportConfig(form: HubCatEditorFormState, cat?: CatData | nu
   const startupArgs = splitCommandArgs(
     trimText(form.acpStartupArgs) || (officialAgy ? '' : defaultAcpStartupArgsForClient(form.clientId, transport)),
   );
-  if (startupArgs.length === 0 && !officialAgy) throw new Error('ACP Startup Args 不能为空');
   const maxLiveProcesses = optionalPositiveInteger(form.acpMaxLiveProcesses, 'ACP Max Processes');
   const idleTtlMinutes = optionalPositiveInteger(form.acpIdleTtlMinutes, 'ACP Idle TTL');
   const savedTtl = cat?.acp?.pool?.idleTtlMs;
@@ -174,6 +174,16 @@ export function buildCatPayload(form: HubCatEditorFormState, cat?: CatData | nul
   const createName = name || displayName;
   const updateName = name || displayName || cat?.name || cat?.displayName || '';
   const nativeTool = form.configurationSource === 'native_tool';
+  const changedRuntime =
+    cat &&
+    (form.clientId !== cat.clientId ||
+      (cat.carrier !== undefined && form.carrier !== cat.carrier) ||
+      (form.carrier === 'acp' &&
+        cat.acp &&
+        (form.acpCommand.trim() !== cat.acp.command ||
+          JSON.stringify(splitCommandArgs(form.acpStartupArgs)) !== JSON.stringify(cat.acp.startupArgs) ||
+          form.acpTransport !== (cat.acp.transport ?? 'stdio'))));
+  const agentProvider = form.acpAgentProvider !== undefined ? form.acpAgentProvider : changedRuntime ? null : undefined;
   const trimmedAccountRef = resolveFormAccountRef(form);
   const accountRefPatch =
     trimmedAccountRef.length > 0
@@ -208,6 +218,7 @@ export function buildCatPayload(form: HubCatEditorFormState, cat?: CatData | nul
   const voiceConfigPatch: Record<string, unknown> =
     voiceConfig !== undefined ? { voiceConfig } : cat?.voiceConfig ? { voiceConfig: null } : {};
   const common = {
+    ...(agentProvider !== undefined ? { agentProvider: form.carrier === 'acp' ? agentProvider || null : null } : {}),
     ...(form.configurationSource && !cat?.identityProtection ? { configurationSource: form.configurationSource } : {}),
     displayName,
     variantLabel: trimText(form.variantLabel),

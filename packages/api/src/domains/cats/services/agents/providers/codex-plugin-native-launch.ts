@@ -13,6 +13,34 @@ import { CODEX_LIVE_DISABLED_FEATURES } from './codex-live-policy.js';
 const AUTH_KEYS = ['OPENAI_API_KEY', 'OPENAI_ORG_ID', 'OPENAI_ORGANIZATION', 'OPENAI_PROJECT_ID'] as const;
 const MINIMAL_PATH = `${dirname(process.execPath)}:/usr/bin:/bin`;
 
+type LinkFile = (target: string, path: string) => void;
+
+/** Windows standard users cannot create file symlinks without Developer Mode.
+ * Keep the failure closed, but make the missing prerequisite diagnosable instead
+ * of surfacing a raw EPERM from an internal temporary path.
+ */
+export function linkCodexPluginAuth(
+  authFile: string,
+  target: string,
+  link: LinkFile = symlinkSync,
+  platform: NodeJS.Platform = process.platform,
+): void {
+  try {
+    link(authFile, target);
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (platform === 'win32' && (code === 'EPERM' || code === 'EACCES')) {
+      throw Object.assign(
+        new Error(
+          'plugin_native_auth_link_unavailable: native OAuth requires linking auth.json into a private Codex home, but this Windows user cannot create symlinks. Enable Developer Mode/symlink privilege or use API-key authentication.',
+        ),
+        { code: 'PLUGIN_NATIVE_AUTH_LINK_UNAVAILABLE', cause: error },
+      );
+    }
+    throw error;
+  }
+}
+
 export interface PreparedCodexNativeLaunch {
   readonly kind: 'public';
   readonly options: AgentServiceOptions;
@@ -125,7 +153,7 @@ export async function prepareCodexNativeLaunch(
       // Project only the existing account's auth file, never user config/rules/plugins.
       const auth = realpathSync(join(credentialHome, 'auth.json'));
       if (!statSync(auth).isFile()) throw new Error('plugin_native_auth_file_unavailable');
-      symlinkSync(auth, join(codexHome, 'auth.json'));
+      linkCodexPluginAuth(auth, join(codexHome, 'auth.json'));
     }
 
     const specPath = join(controlRoot, 'mcp.json');

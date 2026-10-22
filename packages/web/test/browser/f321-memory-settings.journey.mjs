@@ -56,6 +56,7 @@ const flag = {
   currentValue: 'off',
   description: '消费重排序',
   sensitive: false,
+  runtimeEditable: true,
   allowedValues: ['off', 'shadow', 'on'],
 };
 const service = {
@@ -92,6 +93,8 @@ export function registerMemorySettingsTests(getRuntime) {
     assert.ok(runtime, 'existing governed browser must be ready');
     const context = await runtime.browser.newContext({ viewport: { width, height: 960 } });
     const page = await context.newPage();
+    // Settings uses synthetic HTTP owners; the shared shell must not register with a live socket server.
+    await page.routeWebSocket('**/socket.io/**', (socket) => socket.close());
     const requests = [];
     const errors = [];
     const trace = [];
@@ -171,6 +174,13 @@ export function registerMemorySettingsTests(getRuntime) {
         await pane.getByText('样本不足：3 / 20').first().waitFor();
         assert.match(v.page.url(), /\/settings\?s=ops&ops=memory/);
         assert.match(await pane.innerText(), /索引与召回[\s\S]*重建索引[\s\S]*召回功能标志/);
+        for (const name of ['EMBED_MODE', 'F102_ABSTRACTIVE']) {
+          const badge = pane.getByTestId(`feature-readonly-${name}`);
+          assert.match(await badge.innerText(), /off · 只读/);
+          assert.equal(await badge.locator('..').getByRole('button').count(), 0);
+        }
+        assert.match(await pane.innerText(), /off 不会停用已启用的服务/);
+        assert.match(await pane.innerText(), /实际状态以本页“记忆整理”的持久开关为准/);
         assert.equal(
           await v.page.getByRole('button', { name: '索引与召回', exact: true }).getAttribute('aria-pressed'),
           'true',
@@ -271,7 +281,19 @@ function settingsResponse(key, mode, effectiveMode) {
   const body = {
     '/api/session': { userId: 'owner' },
     '/api/evidence/status': index,
-    '/api/config/env-summary': { variables: [{ ...flag, currentValue: effectiveMode }] },
+    '/api/config/env-summary': {
+      variables: [
+        { ...flag, currentValue: effectiveMode },
+        { ...flag, name: 'EMBED_MODE', currentValue: 'off', runtimeEditable: false },
+        {
+          ...flag,
+          name: 'F102_ABSTRACTIVE',
+          currentValue: 'off',
+          runtimeEditable: undefined,
+          allowedValues: undefined,
+        },
+      ],
+    },
     '/api/recall/flags': { f200: { consumptionRerank: effectiveMode } },
     '/api/services': { services: [service] },
     '/api/services/embedding-model/install-preview': null,

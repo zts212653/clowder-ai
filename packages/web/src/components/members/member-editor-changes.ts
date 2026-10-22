@@ -37,6 +37,7 @@ const fields: Record<FormKey, MemberFieldLabels> = {
   agyHomeRoot: ['Profile 根目录', 'Profile root directory'],
   agyTrustedWorkspaces: ['批准工作区', 'Approved workspaces'],
   acpTransport: ['ACP 传输', 'ACP transport'],
+  acpAgentProvider: ['插件 ACP client', '接入'],
   acpCommand: ['ACP 启动命令', 'ACP command', 'ACP Command'],
   acpStartupArgs: ['ACP 启动参数', 'ACP startup arguments', 'ACP Startup Args'],
   acpMaxLiveProcesses: ['最多进程数', 'Maximum processes', 'ACP Max Processes'],

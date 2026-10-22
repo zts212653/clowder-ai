@@ -5,6 +5,7 @@ import { createModuleLogger } from '../../infrastructure/logger.js';
 import { packageDirectoryName } from './external-runtime/index.js';
 import type { OfficialPluginCatalogEntry } from './official-catalog.js';
 import { OfficialPluginInstallError } from './official-package-errors.js';
+import { fetchPluginNetworkResource } from './plugin-network-fetch.js';
 
 const ARCHIVE_FILENAME = 'package.tgz';
 export const MAX_PLUGIN_PACKAGE_BYTES = 32 * 1024 * 1024;
@@ -81,7 +82,7 @@ export async function downloadCatalogArchive(entry: OfficialPluginCatalogEntry):
     let response: Response | null = null;
     const progress = { bytesReceived: 0 };
     try {
-      response = await fetch(url, {
+      response = await fetchPluginNetworkResource(url, {
         redirect: 'error',
         signal: AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS),
         headers: { accept: 'application/octet-stream' },

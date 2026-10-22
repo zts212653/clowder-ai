@@ -29,6 +29,7 @@ export interface CatData {
   /** clowder-ai#340 P5: CLI client identity (renamed from provider). */
   clientId: string;
   configurationSource?: 'native_tool' | 'managed_account';
+  agentProvider?: string | null;
   /** Canonical member access mode resolved by the server config boundary. */
   carrier: CatCarrier;
   defaultModel: string;
@@ -54,6 +55,7 @@ export interface CatData {
   provider?: string;
   /** F161: ACP transport config. Presence means this member runs through ACP instead of legacy CLI. */
   acp?: {
+    agentProvider?: string;
     command: string;
     startupArgs: string[];
     /** F161 Phase C: wire transport. 'stdio' (default) or 'httpstream'. */

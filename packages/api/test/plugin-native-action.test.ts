@@ -157,7 +157,7 @@ test('stop invalidates an in-flight call before its task mutation, and reload ne
   finish();
   await assert.rejects(pending);
   assert.equal(writes, 0);
-  await assert.rejects(actions.call(token, 'example.run', {}, caller()));
+  assert.equal(await actions.call(token, 'example.run', {}, caller()), undefined);
 });
 
 test('late startup cannot create a connection after stop intent', () => {
@@ -254,4 +254,42 @@ test('concurrent requests keep caller identity isolated and nested other-package
   assert.equal(first.invocationId, 'first');
   assert.equal(second.invocationId, 'second');
   await assert.rejects(first.assertCurrent());
+});
+
+test('connection credentials stay stable for one Host and do not survive a Host restart', async () => {
+  const { actions, authority } = fixture();
+  actions.activate(authority as never, 0, async () => 'first');
+  const token = actions.environment('instance', 'example').CLOWDER_PLUGIN_ACTION_TOKEN!;
+  actions.deactivate('instance');
+  await assert.rejects(actions.call(token, 'example.run', {}, caller()));
+  actions.activate(authority as never, actions.generation('instance'), async () => 'enabled-again');
+  assert.equal(actions.environment('instance', 'example').CLOWDER_PLUGIN_ACTION_TOKEN, token);
+  assert.equal(await actions.call(token, 'example.run', {}, caller()), 'enabled-again');
+  const restarted = new NativePluginActions(async () => authority as never);
+  restarted.activate(authority as never, 0, async () => 'new-host');
+  assert.notEqual(restarted.environment('instance', 'example').CLOWDER_PLUGIN_ACTION_TOKEN, token);
+  await assert.rejects(restarted.call(token, 'example.run', {}, caller()));
+});
+
+test('MCP registration uses a stable process-env reference across Host replacement', async () => {
+  const { actions, authority } = fixture();
+  actions.activate(authority as never, 0, async () => ({ ok: true }));
+  const refs = actions.environmentReferences('instance', 'example');
+  assert.match(refs.CLOWDER_PLUGIN_ACTION_TOKEN!, /^\$\{CLOWDER_PLUGIN_[A-F0-9]+_ACTION_TOKEN\}$/);
+  const env = pluginMcpEnvironment({ source: 'plugin', env: { ...refs } }, {})!;
+  assert.equal(env.CLOWDER_PLUGIN_ACTION_TOKEN, actions.environment('instance', 'example').CLOWDER_PLUGIN_ACTION_TOKEN);
+  const previousToken = env.CLOWDER_PLUGIN_ACTION_TOKEN;
+  const replacement = new NativePluginActions(async () => authority as never);
+  replacement.activate(authority as never, 0, async () => ({ ok: true }));
+  assert.deepEqual(replacement.environmentReferences('instance', 'example'), refs);
+  const fresh = pluginMcpEnvironment({ source: 'plugin', env: { ...refs } }, {})!;
+  assert.notEqual(fresh.CLOWDER_PLUGIN_ACTION_TOKEN, previousToken);
+  assert.equal(
+    fresh.CLOWDER_PLUGIN_ACTION_TOKEN,
+    replacement.environment('instance', 'example').CLOWDER_PLUGIN_ACTION_TOKEN,
+  );
+  replacement.deactivate('instance');
+  await assert.rejects(replacement.call(fresh.CLOWDER_PLUGIN_ACTION_TOKEN, 'example.run', {}, caller()), {
+    statusCode: 401,
+  });
 });

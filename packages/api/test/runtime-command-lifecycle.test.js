@@ -85,6 +85,7 @@ function createFixture() {
     'scripts/lib/node-runtime-guard.sh',
     'scripts/lib/daemon-state.mjs',
     'scripts/lib/process-identity.mjs',
+    'scripts/lib/process-birth-identity.mjs',
     'scripts/lib/daemon-health-probe.mjs',
     `${operationPrefix}-operation.mjs`,
     `${operationPrefix}-record.mjs`,

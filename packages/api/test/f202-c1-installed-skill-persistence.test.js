@@ -33,7 +33,7 @@ function createRuntime(projectRoot, options = {}) {
     projectRoot,
     ...options,
     messageStore: new MessageStore(),
-    contract: { manifestContractVersions: ['0.1.0'], validateEffectiveGrants, validateManifest },
+    contract: { manifestContractRange: '0.1.0', validateEffectiveGrants, validateManifest },
   });
 }
 

@@ -16,6 +16,7 @@ import { dirname, join, resolve } from 'node:path';
 import {
   captureProcessIdentity,
   captureSpawnedIdentity,
+  compareStableBirth,
   identityInspectionIsUnreadable,
   inspectProcessIdentity,
   observeProcessIdentity,
@@ -217,7 +218,11 @@ function refuseUnverifiedStop(paths, pid) {
  */
 function matchesExpectedIdentity(expected, state, identity) {
   if (expected.pid !== state.pid) return false;
-  if (expected.startedAt && identity?.startedAt && expected.startedAt !== identity.startedAt) return false;
+  const stableBirth = compareStableBirth(expected, identity);
+  if (stableBirth === false) return false;
+  if (stableBirth !== true && expected.startedAt && identity?.startedAt && expected.startedAt !== identity.startedAt) {
+    return false;
+  }
   return !(expected.command && identity?.command && expected.command !== identity.command);
 }
 

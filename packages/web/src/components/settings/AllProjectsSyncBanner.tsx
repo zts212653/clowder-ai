@@ -40,7 +40,7 @@ export function AllProjectsSyncBanner({
   if (scopes.length === 0) {
     return <p className="text-xs text-cafe-muted">未发现项目</p>;
   }
-  if (issueScopeCount === 0) {
+  if (issueScopeCount === 0 && !error) {
     return <p className="text-xs text-cafe-muted">✓ 全部 {label} 同步一致</p>;
   }
 
@@ -48,7 +48,7 @@ export function AllProjectsSyncBanner({
     <div className="rounded-lg border border-conn-amber-ring bg-conn-amber-bg px-4 py-3">
       <div className="flex flex-wrap items-center gap-3">
         <p className="text-sm font-bold text-conn-amber-text">
-          检测到 {issueScopeCount} 处 {label} 异常
+          {issueScopeCount > 0 ? `检测到 ${issueScopeCount} 处 ${label} 异常` : `${label} 同步未完成`}
         </p>
         <button
           type="button"
@@ -59,13 +59,14 @@ export function AllProjectsSyncBanner({
         </button>
       </div>
 
-      {error && <p className="mt-1 text-xs text-conn-red-text">⚠ {error}</p>}
+      {error && <p className="mt-1 whitespace-pre-line text-xs text-conn-red-text">⚠ {error}</p>}
 
       {showDetail && (
         <AllProjectsIssueDetailDialog
           type={type}
           scopes={scopesWithIssues}
           syncing={syncing}
+          error={error}
           onClose={() => setShowDetail(false)}
           onSyncAll={onSyncAll}
           onSyncScope={onSyncScope}
@@ -79,6 +80,7 @@ function AllProjectsIssueDetailDialog({
   type,
   scopes,
   syncing,
+  error,
   onClose,
   onSyncAll,
   onSyncScope,
@@ -86,6 +88,7 @@ function AllProjectsIssueDetailDialog({
   type: DriftType;
   scopes: ScopeIssues[];
   syncing: boolean;
+  error: string | null;
   onClose: () => void;
   onSyncAll: () => void;
   onSyncScope?: (projectPath?: string) => void;
@@ -115,6 +118,12 @@ function AllProjectsIssueDetailDialog({
           ×
         </button>
       </div>
+
+      {error && (
+        <p role="alert" className="mt-2 whitespace-pre-line text-xs text-conn-red-text">
+          {error}
+        </p>
+      )}
 
       <div className="mt-3 min-h-0 flex-1 space-y-2 overflow-y-auto text-xs">
         {scopes.length === 0 && <p className="text-cafe-muted">暂无 {label} 异常详情。</p>}

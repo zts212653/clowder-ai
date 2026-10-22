@@ -28,7 +28,7 @@ import {
 
 const DIGEST = `sha512-${createHash('sha512').update('w26b-record').digest('base64')}`;
 const OTHER_DIGEST = `sha512-${createHash('sha512').update('w26b-record-other-version').digest('base64')}`;
-const CONTRACT = { manifestContractVersions: ['0.1.0'], validateEffectiveGrants, validateManifest };
+const CONTRACT = { manifestContractRange: '0.1.0', validateEffectiveGrants, validateManifest };
 const FAILURE = { code: 'UNEXPECTED_RUNTIME_FAILURE', exitCode: null, signal: null, occurredAt: 5_000 };
 const DETAIL = {
   kind: 'capability_not_granted',

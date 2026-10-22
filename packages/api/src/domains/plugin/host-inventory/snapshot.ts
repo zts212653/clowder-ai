@@ -1,4 +1,8 @@
-import { DEFAULT_PLUGIN_CONTRACT_RUNTIME, requestedCapabilitiesForManifest } from './contract-policy.js';
+import {
+  DEFAULT_PLUGIN_CONTRACT_RUNTIME,
+  isManifestContractSupported,
+  requestedCapabilitiesForManifest,
+} from './contract-policy.js';
 import type { PackageAdmissionContractRuntime } from './manifest-verifier.js';
 import { parseRuntimeErrorDetail } from './runtime-failure-record.js';
 import { storedManifest } from './stored-manifest.js';
@@ -201,7 +205,8 @@ function parsePackage(value: unknown, index: number, contract: PackageAdmissionC
   const persistedManifest = raw.manifest === null ? raw.incompatibleManifest : raw.manifest;
   const stored = storedManifest(persistedManifest, `packages[${index}].manifest`);
   const validation = contract.validateManifest(persistedManifest);
-  const compatible = validation.valid && contract.manifestContractVersions.includes(stored.contractVersion);
+  const compatible =
+    validation.valid && isManifestContractSupported(stored.contractVersion, contract.manifestContractRange);
   const record: PluginPackageRecord = {
     packageDigest: string(raw.packageDigest, `packages[${index}].packageDigest`),
     pluginId: string(raw.pluginId, `packages[${index}].pluginId`),

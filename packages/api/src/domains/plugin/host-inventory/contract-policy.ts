@@ -1,39 +1,31 @@
+import { createRequire } from 'node:module';
 import { type Capability, type PluginManifest, validateEffectiveGrants } from '@clowder-ai/plugin-contract';
 import { validateHostPluginManifest } from '../desktop-window-runtime/presentation-manifest.js';
 
 /** Exact npm package consumed by this Host build. */
-export const PLUGIN_CONTRACT_PACKAGE_VERSION = '0.1.0-beta.37' as const;
-/** Manifest compatibility line declared by admitted plugins. */
+export const PLUGIN_CONTRACT_PACKAGE_VERSION = '0.2.0' as const;
+/** Baseline manifest protocol; independent of the SDK and contract npm package releases. */
 export const PLUGIN_CONTRACT_VERSION = '0.1.0' as const;
-/** Published Train B packages still declare this beta manifest line. */
-export const PUBLISHED_PLUGIN_MANIFEST_CONTRACT_VERSION = '0.1.0-beta.13' as const;
 /**
- * Train B and C1 packages already admitted under earlier beta lines remain installed
- * (beta.15–beta.22, beta.24). The Host never consumed beta.23 (a version-only sync), so no manifest declares
- * it here.
+ * The earliest supported historical protocol through the version this Host implements.
+ * Advancing the package alone never rewrites a plugin's declared requirement.
+ * A breaking protocol change must explicitly narrow this compatibility range.
  */
-export const PREVIOUS_PLUGIN_MANIFEST_CONTRACT_VERSIONS = [
-  '0.1.0-beta.15',
-  '0.1.0-beta.16',
-  '0.1.0-beta.17',
-  '0.1.0-beta.18',
-  '0.1.0-beta.19',
-  '0.1.0-beta.20',
-  '0.1.0-beta.21',
-  '0.1.0-beta.22',
-  '0.1.0-beta.24',
-  '0.1.0-beta.25',
-] as const;
-/** Exact manifest contract versions admitted during the beta-to-stable migration. */
-export const PLUGIN_MANIFEST_CONTRACT_VERSIONS = [
-  PLUGIN_CONTRACT_VERSION,
-  PUBLISHED_PLUGIN_MANIFEST_CONTRACT_VERSION,
-  ...PREVIOUS_PLUGIN_MANIFEST_CONTRACT_VERSIONS,
-  PLUGIN_CONTRACT_PACKAGE_VERSION,
-] as const;
+export const PLUGIN_MANIFEST_CONTRACT_RANGE = `>=0.1.0-beta.13 <=${PLUGIN_CONTRACT_PACKAGE_VERSION}`;
+
+// This is the API's direct locked dependency, not an npm-internal or hoisted copy.
+const semver = createRequire(import.meta.url)('semver') as {
+  satisfies(version: string, range: string, options: { includePrerelease: boolean }): boolean;
+};
+
+export function isManifestContractSupported(version: string, range: string): boolean {
+  // Historical beta declarations are part of the supported protocol interval.
+  // They still have to satisfy both bounds; future prereleases are not enabled globally.
+  return semver.satisfies(version, range, { includePrerelease: true });
+}
 
 export const DEFAULT_PLUGIN_CONTRACT_RUNTIME = {
-  manifestContractVersions: PLUGIN_MANIFEST_CONTRACT_VERSIONS,
+  manifestContractRange: PLUGIN_MANIFEST_CONTRACT_RANGE,
   validateManifest: validateHostPluginManifest,
   validateEffectiveGrants,
 };

@@ -105,6 +105,17 @@ export class GitMarketplaceCatalog implements PluginManagerCatalogPort {
     };
   }
 
+  async localSnapshot(): Promise<PluginManagerCatalogSnapshot> {
+    return (
+      (await this.options.base.localSnapshot?.()) ?? {
+        candidates: [],
+        status: 'loading',
+        refreshedAt: null,
+        message: 'Loading available plugins; installed plugins are ready.',
+      }
+    );
+  }
+
   private async packageEntry(pluginId: string) {
     for (const { source, catalog } of await this.options.sources.catalogs()) {
       if (!source.commit || !validMarketplacePackages(catalog)) continue;

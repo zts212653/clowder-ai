@@ -34,6 +34,73 @@ function candidate() {
 }
 
 describe('K-2A persisted restart normalization', () => {
+  it('uses the same narrowed compatibility range for admission and persisted packages', async (t) => {
+    const root = mkdtempSync(join(os.tmpdir(), 'plugin-inventory-narrow-contract-range-'));
+    t.after(() => rmSync(root, { recursive: true, force: true }));
+    const path = join(root, 'inventory.json');
+    const originalStore = new FilePluginInventoryStore(path);
+    const original = new HostInventoryControlPlane(originalStore, { createInstanceId: () => 'pi_range' });
+    const admitted = candidate();
+    admitted.manifest.contractVersion = '0.1.1';
+    await original.installPackage(admitted);
+    const before = await originalStore.snapshot();
+    const bytes = readFileSync(path, 'utf8');
+    const contract = {
+      manifestContractRange: '>=0.1.0-beta.13 <0.1.1 || >=0.2.0 <=0.2.0',
+      validateManifest,
+      validateEffectiveGrants,
+    };
+    const store = new FilePluginInventoryStore(path, { contract });
+    const current = new HostInventoryControlPlane(store, { contract });
+    await assert.rejects(current.installPackage(admitted), { code: 'CONTRACT_VERSION_MISMATCH' });
+    const recovered = await store.snapshot();
+    assert.equal(recovered.packages[0].manifest, null);
+    assert.deepEqual(recovered.packages[0].incompatibleManifest, before.packages[0].manifest);
+    assert.deepEqual(recovered.instances, before.instances);
+    assert.deepEqual(recovered.grants, before.grants);
+    assert.equal(readFileSync(path, 'utf8'), bytes);
+
+    admitted.manifest.contractVersion = '0.2.0';
+    const compatibleStore = new FilePluginInventoryStore(join(root, 'compatible.json'), { contract });
+    await new HostInventoryControlPlane(compatibleStore, { contract }).installPackage(admitted);
+    assert.equal((await compatibleStore.snapshot()).packages[0].contractVersion, '0.2.0');
+  });
+
+  it('restores an in-range declaration without a release-specific entry or rewriting its authority', async (t) => {
+    const root = mkdtempSync(join(os.tmpdir(), 'plugin-inventory-contract-range-'));
+    t.after(() => rmSync(root, { recursive: true, force: true }));
+    const path = join(root, 'inventory.json');
+    const previousContract = {
+      manifestContractRange: '0.1.1',
+      validateManifest,
+      validateEffectiveGrants,
+    };
+    const firstStore = new FilePluginInventoryStore(path, { contract: previousContract });
+    const first = new HostInventoryControlPlane(firstStore, {
+      contract: previousContract,
+      createInstanceId: () => 'pi_range',
+      now: () => 3_000,
+    });
+    const admitted = candidate();
+    admitted.manifest.contractVersion = '0.1.1';
+    await first.installPackage(admitted);
+    await firstStore.transaction((tx) => {
+      tx.instances.put({
+        ...tx.instances.get('pi_range'),
+        configReadiness: 'ready',
+        activationState: 'enabled',
+        runtimeState: 'stopped',
+      });
+    });
+    const before = await firstStore.snapshot();
+    const bytes = readFileSync(path, 'utf8');
+    const restoredStore = new FilePluginInventoryStore(path);
+    const restored = new HostInventoryControlPlane(restoredStore, { now: () => 4_000 });
+    assert.equal(await restored.recoverAfterRestart(), 0);
+    assert.deepEqual(await restoredStore.snapshot(), before);
+    assert.equal(readFileSync(path, 'utf8'), bytes);
+  });
+
   it('opens inventory admitted by the published beta.15 Host without changing persisted authority', async (t) => {
     const root = mkdtempSync(join(os.tmpdir(), 'plugin-inventory-beta15-upgrade-'));
     t.after(() => rmSync(root, { recursive: true, force: true }));
@@ -41,7 +108,7 @@ describe('K-2A persisted restart normalization', () => {
     // Public Host b1fe2966 admitted these exact versions before the beta.16 bump.
     // Keep real manifest/grant validators; only the historical version policy differs.
     const previousContract = {
-      manifestContractVersions: ['0.1.0', '0.1.0-beta.13', '0.1.0-beta.15'],
+      manifestContractRange: '0.1.0 || 0.1.0-beta.13 || 0.1.0-beta.15',
       validateManifest,
       validateEffectiveGrants,
     };

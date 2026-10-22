@@ -413,7 +413,7 @@ async function installed(packageManifest, source = moduleSource) {
     taskStore: new TaskStore(),
     threadBindingStore: new MemoryConnectorThreadBindingStore(),
     threadOwnerUserId: 'owner-1',
-    contract: { manifestContractVersions: ['0.1.0'], validateEffectiveGrants, validateManifest },
+    contract: { manifestContractRange: '0.1.0', validateEffectiveGrants, validateManifest },
   });
   const composition = createPluginManagerRuntimeComposition({
     runtime,

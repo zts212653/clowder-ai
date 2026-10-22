@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { configEventBus, createChangeSetId } from '../../config/config-event-bus.js';
@@ -14,6 +15,16 @@ function resolvePluginConfigPath(projectRoot: string, pluginId: string): string 
   return resolve(resolvePluginConfigDir(projectRoot), `${pluginId}.json`);
 }
 
+/** Exact-text CAS input; unlike readPluginConfig this never normalizes or suppresses malformed data. */
+export function readPluginConfigText(projectRoot: string, pluginId: string): string | undefined {
+  try {
+    return readFileSync(resolvePluginConfigPath(projectRoot, pluginId), 'utf8');
+  } catch (error) {
+    if (error instanceof Error && 'code' in error && error.code === 'ENOENT') return undefined;
+    throw error;
+  }
+}
+
 function writeFileAtomic(filePath: string, content: string): void {
   const tempPath = `${filePath}.tmp-${process.pid}-${Date.now()}`;
   writeFileSync(tempPath, content, { encoding: 'utf-8', mode: 0o600 });
@@ -27,6 +38,27 @@ function writeFileAtomic(filePath: string, content: string): void {
     }
     throw error;
   }
+}
+
+/** Only consumed while the inventory writer queue is still held. Preserve all unknown file edits. */
+export function restorePluginConfigText(
+  projectRoot: string,
+  pluginId: string,
+  expected: string,
+  previous: string | undefined,
+): void {
+  if (readPluginConfigText(projectRoot, pluginId) !== expected)
+    throw new Error('Configuration changed before compensation; refresh before recovery');
+  const path = resolvePluginConfigPath(projectRoot, pluginId);
+  if (previous === undefined) renameSync(path, `${path}.retained-failed-${randomUUID()}`);
+  else writeFileAtomic(path, previous);
+  configEventBus.emitChange({
+    source: 'secrets',
+    scope: 'file',
+    changedKeys: [],
+    changeSetId: createChangeSetId(),
+    timestamp: Date.now(),
+  });
 }
 
 type StoredDocument = Record<string, unknown>;

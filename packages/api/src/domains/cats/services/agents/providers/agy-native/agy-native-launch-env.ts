@@ -2,7 +2,7 @@ import { join } from 'node:path';
 import type { AgentServiceOptions } from '../../../types.js';
 
 export function isolatedOAuthEnv(home: string): Record<string, string | null> {
-  return {
+  const env: Record<string, string | null> = {
     PATH: process.env.PATH ?? '/usr/bin:/bin',
     LANG: process.env.LANG ?? 'en_US.UTF-8',
     TMPDIR: process.env.TMPDIR ?? '/tmp',
@@ -34,6 +34,22 @@ export function isolatedOAuthEnv(home: string): Record<string, string | null> {
     CAT_CAFE_RUNTIME_ROOT: process.env.CAT_CAFE_RUNTIME_ROOT ?? null,
     CAT_CAFE_HOST_NODE_ID: process.env.CAT_CAFE_HOST_NODE_ID ?? null,
   };
+  // OAuth and model requests still need the host's configured network route.
+  // Keep casing and bypass lists intact without inheriting credentials or hooks.
+  for (const key of [
+    'HTTP_PROXY',
+    'http_proxy',
+    'HTTPS_PROXY',
+    'https_proxy',
+    'ALL_PROXY',
+    'all_proxy',
+    'NO_PROXY',
+    'no_proxy',
+  ]) {
+    const value = process.env[key];
+    if (value !== undefined) env[key] = value;
+  }
+  return env;
 }
 
 export function executionOwnerEnv(options?: AgentServiceOptions): Record<string, string> {

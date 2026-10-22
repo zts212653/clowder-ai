@@ -17,6 +17,7 @@ import { hostCapabilityRefusal } from '../host-surface/host-capability-refusal.j
 import { effectivePluginConfigurationValue } from '../manager/plugin-configuration-values.js';
 import type { PluginRuntimeConfigurationPort } from '../manifest-configuration-projection.js';
 import type { CloudConversationHostLease, CloudConversationHostRegistry } from './cloud-conversation-host-registry.js';
+import type { AgentSessionProviderLifecycle } from './declared-agent-session-providers.js';
 import {
   admitCloudConversationHosts,
   type DeclaredActionSurface,
@@ -35,6 +36,7 @@ export interface DeclaredScheduleTaskRunner {
 }
 
 export interface DeclaredRuntimeContributionHost {
+  readonly agentSessionProviders?: AgentSessionProviderLifecycle;
   readonly packages: VerifiedPluginPackageLocator;
   readonly limbRegistry?: LimbRegistry;
   readonly taskRunner?: DeclaredScheduleTaskRunner;
@@ -45,6 +47,7 @@ export interface DeclaredRuntimeContributionHost {
 }
 
 interface ActiveRuntimeContributions {
+  readonly releaseAgentProvider?: () => Promise<void>;
   readonly lifetime: AbortController;
   readonly pluginId: string;
   readonly pluginInstanceId: string;
@@ -108,6 +111,7 @@ export class DeclaredRuntimeContributions {
     const scheduleTaskIds: string[] = [];
     const cloudHostLeases: CloudConversationHostLease[] = [];
     const cloudHostRegistry = this.host.cloudConversationHosts;
+    let releaseAgentProvider: (() => Promise<void>) | undefined;
     try {
       if (schedules.length > 0 && !admission.effectiveGrants.includes('schedule.register')) {
         throw hostCapabilityRefusal(
@@ -133,7 +137,9 @@ export class DeclaredRuntimeContributions {
         scheduleTaskIds.push(task.id);
       }
       registerCloudConversationHosts(admission, cloudHosts, cloudHostRegistry, actions, cloudHostLeases);
+      releaseAgentProvider = await this.host.agentSessionProviders?.activate(admission);
       this.#active.set(pluginInstanceId, {
+        releaseAgentProvider,
         lifetime: new AbortController(),
         pluginId: admission.packageRecord.pluginId,
         pluginInstanceId,
@@ -145,21 +151,36 @@ export class DeclaredRuntimeContributions {
         invoke,
       });
     } catch (error) {
+      await releaseAgentProvider?.();
       this.#remove({ limbNodeIds, scheduleTaskIds, cloudHostLeases });
       throw error;
     }
   }
 
-  deactivate(pluginInstanceId: string): void {
+  async deactivate(pluginInstanceId: string): Promise<void> {
     const active = this.#active.get(pluginInstanceId);
     if (!active) return;
     this.#active.delete(pluginInstanceId);
     active.lifetime.abort();
     this.#remove(active);
+    await active.releaseAgentProvider?.();
   }
 
-  deactivateAll(): void {
-    for (const pluginInstanceId of [...this.#active.keys()]) this.deactivate(pluginInstanceId);
+  async refreshAgentSessionProviders(admission: PluginRuntimeAdmission): Promise<void> {
+    const id = admission.instance.pluginInstanceId;
+    const active = this.#active.get(id);
+    if (!active?.releaseAgentProvider) return;
+    const pending = { ...active, releaseAgentProvider: undefined };
+    this.#active.set(id, pending);
+    await active.releaseAgentProvider();
+    const releaseAgentProvider = await this.host.agentSessionProviders?.activate(admission);
+    if (this.#active.get(id) === pending && !active.lifetime.signal.aborted) {
+      this.#active.set(id, { ...pending, releaseAgentProvider });
+    } else await releaseAgentProvider?.();
+  }
+
+  async deactivateAll(): Promise<void> {
+    await Promise.all([...this.#active.keys()].map((id) => this.deactivate(id)));
   }
 
   listPluginTools(pluginId: string): readonly DeclaredPluginTool[] | undefined {

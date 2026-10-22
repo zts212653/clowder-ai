@@ -81,6 +81,11 @@ function SelectField({
             {option.label}
           </option>
         ))}
+        {field.configurationVariants === true && (value || field.currentValue || '') === '' ? (
+          <option value="" disabled>
+            请选择
+          </option>
+        ) : null}
       </select>
       <ValidationMessage errorId={errorId} error={error} />
     </div>

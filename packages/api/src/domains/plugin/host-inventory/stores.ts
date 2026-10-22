@@ -17,6 +17,7 @@ import {
 import { serializeInventoryPackage } from './stored-manifest.js';
 import type { PluginGrantRecord, PluginInstanceRecord, PluginInventorySnapshot, PluginPackageRecord } from './types.js';
 import { PluginInventoryError } from './types.js';
+import { canonicalInventoryPath, requireInventoryWriterLease } from './writer-lease.js';
 
 interface TransactionState {
   readonly packages: Map<string, PluginPackageRecord>;
@@ -110,10 +111,11 @@ class TransactionQueue {
 const fileTransactionQueues = new Map<string, TransactionQueue>();
 
 function fileQueue(path: string): TransactionQueue {
-  let queue = fileTransactionQueues.get(path);
+  const key = canonicalInventoryPath(path);
+  let queue = fileTransactionQueues.get(key);
   if (!queue) {
     queue = new TransactionQueue();
-    fileTransactionQueues.set(path, queue);
+    fileTransactionQueues.set(key, queue);
   }
   return queue;
 }
@@ -152,12 +154,20 @@ export class MemoryPluginInventoryStore implements PluginInventoryStore {
     return clonePluginInventorySnapshot(this.state);
   }
 
-  async transaction<T>(work: (transaction: PluginInventoryTransaction) => Promise<T> | T): Promise<T> {
+  async transaction<T>(
+    work: (transaction: PluginInventoryTransaction) => Promise<T> | T,
+    options?: { onCommitFailure?(): void },
+  ): Promise<T> {
     return this.queue.run(async () => {
-      const candidate = transactionFor(this.state, this.options.contract);
-      const result = await work(candidate.transaction);
-      this.state = candidate.snapshot();
-      return result;
+      try {
+        const candidate = transactionFor(this.state, this.options.contract);
+        const result = await work(candidate.transaction);
+        this.state = candidate.snapshot();
+        return result;
+      } catch (error) {
+        options?.onCommitFailure?.();
+        throw error;
+      }
     });
   }
 }
@@ -201,32 +211,43 @@ export class FilePluginInventoryStore implements PluginInventoryStore {
     return clonePluginInventorySnapshot(await this.load());
   }
 
-  async transaction<T>(work: (transaction: PluginInventoryTransaction) => Promise<T> | T): Promise<T> {
+  async transaction<T>(
+    work: (transaction: PluginInventoryTransaction) => Promise<T> | T,
+    options?: { onCommitFailure?(): void },
+  ): Promise<T> {
     return this.queue.run(async () => {
-      const candidate = transactionFor(await this.load(), this.contract);
-      const result = await work(candidate.transaction);
-      const next = candidate.snapshot();
-      await this.fileOps.mkdir(dirname(this.path), { recursive: true });
-      const temporaryPath = `${this.path}.tmp-${process.pid}-${randomUUID()}`;
-      await this.fileOps.writeFile(
-        temporaryPath,
-        `${JSON.stringify({ ...next, packages: next.packages.map(serializeInventoryPackage) }, null, 2)}\n`,
-        {
-          encoding: 'utf8',
-          mode: 0o600,
-        },
-      );
+      const releaseWriter = requireInventoryWriterLease(this.path);
       try {
-        await this.fileOps.rename(temporaryPath, this.path);
-      } catch (error) {
+        const candidate = transactionFor(await this.load(), this.contract);
+        const result = await work(candidate.transaction);
+        const next = candidate.snapshot();
+        await this.fileOps.mkdir(dirname(this.path), { recursive: true });
+        const temporaryPath = `${this.path}.tmp-${process.pid}-${randomUUID()}`;
+        await this.fileOps.writeFile(
+          temporaryPath,
+          `${JSON.stringify({ ...next, packages: next.packages.map(serializeInventoryPackage) }, null, 2)}\n`,
+          {
+            encoding: 'utf8',
+            mode: 0o600,
+          },
+        );
         try {
-          await this.fileOps.unlink(temporaryPath);
-        } catch {
-          // Preserve the commit failure; temporary cleanup is best effort.
+          await this.fileOps.rename(temporaryPath, this.path);
+        } catch (error) {
+          try {
+            await this.fileOps.unlink(temporaryPath);
+          } catch {
+            // Preserve the commit failure; temporary cleanup is best effort.
+          }
+          throw error;
         }
+        return result;
+      } catch (error) {
+        options?.onCommitFailure?.();
         throw error;
+      } finally {
+        releaseWriter();
       }
-      return result;
     });
   }
 }

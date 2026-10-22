@@ -136,7 +136,7 @@ test('module plugins receive isolated persistent storage with revision-fenced co
     projectRoot,
     messageStore: new MessageStore(),
     redis,
-    contract: { manifestContractVersions: ['0.1.0'], validateEffectiveGrants, validateManifest },
+    contract: { manifestContractRange: '0.1.0', validateEffectiveGrants, validateManifest },
   });
   const composition = createPluginManagerRuntimeComposition({
     runtime,
@@ -313,7 +313,7 @@ test('module plugin storage fails closed when the package lacks the matching gra
     projectRoot,
     messageStore: new MessageStore(),
     redis: new FakeStorageRedis(),
-    contract: { manifestContractVersions: ['0.1.0'], validateEffectiveGrants, validateManifest },
+    contract: { manifestContractRange: '0.1.0', validateEffectiveGrants, validateManifest },
   });
   const composition = createPluginManagerRuntimeComposition({
     runtime,

@@ -90,6 +90,53 @@ async function fixture(t, prepare) {
   return { root, upstream, git, url, publish, repository, sources, store, catalog, refreshErrors };
 }
 
+test('local catalog projection delegates to the Host bundle without touching repository sources', async () => {
+  let remoteReads = 0;
+  let localReads = 0;
+  let sourceReads = 0;
+  const bundled = {
+    catalogId: 'chatgpt-dot',
+    pluginId: 'official.chatgpt-dot',
+    packageName: '@clowder-ai/chatgpt-dot',
+    version: '0.1.0',
+    packageDigest: 'sha512-bundled',
+    displayName: 'ChatGPT Dot',
+    ownerAuthRequired: false,
+    capabilities: [],
+  };
+  const catalog = new GitMarketplaceCatalog({
+    base: {
+      snapshot: async () => {
+        remoteReads += 1;
+        return new Promise(() => {});
+      },
+      localSnapshot: async () => {
+        localReads += 1;
+        return { candidates: [bundled], status: 'stale', refreshedAt: null };
+      },
+    },
+    sources: {
+      catalogs: async () => {
+        sourceReads += 1;
+        return [];
+      },
+      list: async () => {
+        sourceReads += 1;
+        return [];
+      },
+    },
+    repository: {},
+    localAdmission: {},
+  });
+
+  const snapshot = await catalog.localSnapshot();
+
+  assert.equal(remoteReads, 0);
+  assert.equal(localReads, 1);
+  assert.equal(sourceReads, 0);
+  assert.deepEqual(snapshot.candidates, [bundled]);
+});
+
 test('repository metadata, icon, directory install and later pull share the existing inventory', async (t) => {
   const f = await fixture(t);
   const candidate = (await f.catalog.snapshot()).candidates[0];

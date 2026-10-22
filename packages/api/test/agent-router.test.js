@@ -417,6 +417,87 @@ after(() => {
 });
 
 describe('AgentRouter', () => {
+  for (const mode of ['serial', 'parallel'])
+    test(`${mode} releases pinned services when Host capacity preflight fails before launch`, async () => {
+      const { AgentRouter } = await import('../dist/domains/cats/services/agents/routing/AgentRouter.js');
+      const pinned = ['opus', 'codex'].map((catId) => ({
+        ...createMockAgentService(catId, 'must not launch'),
+        contextCapability() {
+          throw new Error('pin capacity preflight refused');
+        },
+        releaseInvocation: mock.fn(async () => {}),
+      }));
+      const roots = pinned.map((view) => ({ forInvocation: mock.fn(() => view), invoke: view.invoke }));
+      const router = new AgentRouter(
+        await migrateRouterOpts({
+          claudeService: roots[0],
+          codexService: roots[1],
+          geminiService: createMockAgentService('gemini'),
+          registry: createMockRegistry(),
+          messageStore: createMockMessageStore(),
+          threadStore: createMockThreadStore(),
+        }),
+      );
+      await assert.rejects(async () => {
+        for await (const _ of router.route(
+          'owner',
+          `${mode === 'parallel' ? '#ideate' : '#execute'} @opus @codex blocked`,
+          `pin-refusal-${mode}`,
+        )) {
+        }
+      }, /pin capacity preflight refused/);
+      let selected = 0;
+      for (let i = 0; i < roots.length; i++) {
+        assert.equal(pinned[i].invoke.mock.callCount(), 0);
+        if (!roots[i].forInvocation.mock.callCount()) continue;
+        selected++;
+        assert.ok(
+          pinned[i].releaseInvocation.mock.callCount() > 0,
+          'every selected service releases even without an iterator',
+        );
+      }
+      assert.ok(selected > 0);
+    });
+
+  for (const mode of ['serial', 'parallel'])
+    test(`${mode} reads native L0 and launches from the same invocation view`, async () => {
+      const { AgentRouter } = await import('../dist/domains/cats/services/agents/routing/AgentRouter.js');
+      let unpinnedL0Reads = 0;
+      const pinned = ['opus', 'codex'].map((catId) => ({
+        ...createMockAgentService(catId, 'pinned response'),
+        injectsL0Natively: mock.fn(() => true),
+      }));
+      const roots = pinned.map((view) => ({
+        forInvocation: mock.fn(() => view),
+        injectsL0Natively: () => {
+          unpinnedL0Reads++;
+          return false;
+        },
+        async *invoke() {
+          assert.fail('mutable root carrier was launched');
+        },
+      }));
+      const router = new AgentRouter(
+        await migrateRouterOpts({
+          claudeService: roots[0],
+          codexService: roots[1],
+          geminiService: createMockAgentService('gemini'),
+          registry: createMockRegistry(),
+          messageStore: createMockMessageStore(),
+          threadStore: createMockThreadStore(),
+        }),
+      );
+      const message = `${mode === 'parallel' ? '#ideate' : '#execute'} @opus @codex test snapshot`;
+      for await (const _event of router.route('user-1', message, `pinned-${mode}`)) {
+        /* consume real routing */
+      }
+      assert.equal(unpinnedL0Reads, 0, 'L0 assembly must not read the mutable root');
+      for (let i = 0; i < pinned.length; i++) {
+        assert.equal(roots[i].forInvocation.mock.callCount(), 1);
+        assert.ok(pinned[i].injectsL0Natively.mock.callCount() > 0);
+        assert.equal(pinned[i].invoke.mock.callCount(), 1);
+      }
+    });
   test('routeExecution preserves lifecycle and active-run callbacks through the strategy boundary', async () => {
     const { AgentRouter } = await import('../dist/domains/cats/services/agents/routing/AgentRouter.js');
     const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');

@@ -199,6 +199,8 @@ export interface PlatformFieldStatus {
   inputType?: 'text' | 'number' | 'url';
   /** Select options (only for type: select). */
   options?: Array<{ value: string; label: string }>;
+  /** Variant-discriminated select: show an explicit unselected placeholder instead of falling back to the first option. */
+  configurationVariants?: boolean;
   currentValue: string | null;
 }
 

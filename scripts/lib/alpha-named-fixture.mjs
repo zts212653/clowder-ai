@@ -35,6 +35,7 @@ export function namedAlphaFixture(t) {
     'scripts/lib/alpha-identity-diagnostics.mjs',
     'scripts/lib/alpha-redis-leases.mjs',
     'scripts/lib/process-identity.mjs',
+    'scripts/lib/process-birth-identity.mjs',
     'scripts/lib/process-tree.mjs',
     'scripts/read-deployment-default.mjs',
     'packages/shared/src/deployment-defaults.ts',

@@ -295,7 +295,7 @@ test('an admitted in-test media-source plugin is invoked through the production 
       onMessagePublished: () => {
         wakes += 1;
       },
-      contract: { manifestContractVersions: ['0.1.0'], validateEffectiveGrants, validateManifest },
+      contract: { manifestContractRange: '0.1.0', validateEffectiveGrants, validateManifest },
     });
     const manager = createPluginManagerRuntimeComposition({
       runtime,

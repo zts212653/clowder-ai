@@ -90,6 +90,7 @@ export interface RuntimeCatInput {
   mentionPatterns: string[];
   accountRef?: string;
   configurationSource?: 'native_tool' | 'managed_account';
+  agentProvider?: string | null;
   roleDescription: string;
   personality?: string;
   teamStrengths?: string;
@@ -127,6 +128,7 @@ export interface RuntimeCatUpdate {
   mentionPatterns?: string[];
   accountRef?: string | null;
   configurationSource?: 'native_tool' | 'managed_account' | null;
+  agentProvider?: string | null;
   accountBindingMode?: 'follow' | 'override';
   roleDescription?: string;
   personality?: string;
@@ -333,6 +335,7 @@ function createBreedFromInput(input: RuntimeCatInput): CatBreed {
         clientId: input.clientId,
         ...(input.creationReceipt ? { creationReceipt: input.creationReceipt } : {}),
         ...(input.configurationSource ? { configurationSource: input.configurationSource } : {}),
+        ...(input.agentProvider !== undefined ? { agentProvider: input.agentProvider } : {}),
         carrier: input.carrier,
         ...(input.variantLabel != null && input.variantLabel.trim().length > 0
           ? { variantLabel: input.variantLabel.trim() }
@@ -610,6 +613,7 @@ export function updateRuntimeCat(projectRoot: string, catId: string, patch: Runt
     if (patch.configurationSource) variant.configurationSource = patch.configurationSource;
     else delete variant.configurationSource;
   }
+  if (patch.agentProvider !== undefined) variant.agentProvider = patch.agentProvider;
   if (patch.personality !== undefined) {
     if (patch.personality && patch.personality.trim().length > 0) {
       variant.personality = patch.personality;

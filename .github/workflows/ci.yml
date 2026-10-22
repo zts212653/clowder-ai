@@ -40,6 +40,10 @@ jobs:
           python3 -B .github/scripts/public-test-namespace-init.test.py
           sudo --preserve-env "$(command -v node)" --test .github/scripts/run-public-test-distributable.test.mjs
       - run: pnpm check
+      - name: API dev supervisor regression
+        run: node --test packages/api/test/dev-supervisor.test.js
+      - name: Browser env wrapper regression
+        run: node --test --test-name-pattern='applies --env' packages/web/test/run-with-node-env-test.test.cjs
 
   build:
     name: Build
@@ -61,6 +65,18 @@ jobs:
           --script test:onboarding:production-contracts
       - run: pnpm --filter @cat-cafe/shared build
       - run: pnpm --filter @cat-cafe/api build
+      - name: ACP Host policy matrix and existing Unix permissions
+        run: >-
+          node --import tsx --test
+          packages/api/test/acp/acp-bootstrap-posix-preservation.test.ts
+          packages/api/test/acp/acp-host-policy-matrix.test.ts
+      - name: Audit diagnostics respect explicit paths
+        run: node --test scripts/logs-health-audit.test.mjs
+      - name: Plugin native auth link diagnostic
+        run: >-
+          pnpm --filter @cat-cafe/api exec node ./scripts/with-test-home.mjs
+          node --import tsx --test --test-timeout=60000 --test-name-pattern="auth link"
+          test/f320-plugin-account.test.ts
       - name: Native PR and Issue tracking source fence (original candidate bytes)
         shell: bash
         run: |

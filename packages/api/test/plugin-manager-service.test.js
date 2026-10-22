@@ -56,6 +56,7 @@ function service({
   lifecycle,
   configuration,
   quarantine,
+  stateProjection,
 } = {}) {
   return new PluginManagerService({
     catalog: {
@@ -68,6 +69,7 @@ function service({
     },
     inventory: { snapshot: async () => inventory },
     installedPackages: { list: async () => installedPackages },
+    ...(stateProjection === undefined ? {} : { stateProjection }),
     ...(installer === undefined ? {} : { installer }),
     ...(lifecycle === undefined ? {} : { lifecycle }),
     ...(configuration === undefined ? {} : { configuration }),
@@ -168,6 +170,159 @@ function installedInventory(overrides = {}) {
 }
 
 describe('F202 terminal Plugin Manager service', () => {
+  it('projects Host-bundled candidates without awaiting remote catalog discovery', async () => {
+    let remoteCatalogReads = 0;
+    let localCatalogReads = 0;
+    const manager = new PluginManagerService({
+      catalog: {
+        snapshot: async () => {
+          remoteCatalogReads += 1;
+          return new Promise(() => {});
+        },
+        localSnapshot: async () => {
+          localCatalogReads += 1;
+          return {
+            candidates: [published],
+            status: 'stale',
+            refreshedAt: null,
+          };
+        },
+      },
+      inventory: { snapshot: async () => emptyInventory },
+      installedPackages: { list: async () => [] },
+    });
+
+    const result = await Promise.race([
+      manager.listLocal(),
+      new Promise((resolve) => setTimeout(() => resolve('remote-blocked-bundled-state'), 100)),
+    ]);
+
+    assert.notEqual(result, 'remote-blocked-bundled-state');
+    assert.equal(remoteCatalogReads, 0);
+    assert.equal(localCatalogReads, 1);
+    assert.deepEqual(
+      result.plugins.map((plugin) => plugin.pluginId),
+      [published.pluginId],
+    );
+  });
+
+  it('projects installed plugins without awaiting remote catalog discovery', async () => {
+    let catalogReads = 0;
+    const neverSettles = new Promise(() => {});
+    const manager = new PluginManagerService({
+      catalog: {
+        snapshot: async () => {
+          catalogReads += 1;
+          return neverSettles;
+        },
+      },
+      inventory: { snapshot: async () => emptyInventory },
+      installedPackages: { list: async () => [bundledGithub] },
+    });
+
+    const result = await Promise.race([
+      manager.listLocal(),
+      new Promise((resolve) => setTimeout(() => resolve('remote-blocked-local-state'), 100)),
+    ]);
+
+    assert.notEqual(result, 'remote-blocked-local-state');
+    assert.equal(catalogReads, 0);
+    assert.deepEqual(
+      result.plugins.map((plugin) => plugin.pluginId),
+      ['github'],
+    );
+    assert.deepEqual(result.catalog, {
+      status: 'loading',
+      refreshedAt: null,
+      message: 'Loading available plugins; installed plugins are ready.',
+    });
+  });
+
+  it('operates on installed plugins without awaiting remote catalog discovery', async () => {
+    let catalogReads = 0;
+    const lifecycleCalls = [];
+    const manager = new PluginManagerService({
+      catalog: {
+        snapshot: async () => {
+          catalogReads += 1;
+          return new Promise(() => {});
+        },
+      },
+      inventory: { snapshot: async () => emptyInventory },
+      installedPackages: { list: async () => [bundledGithub] },
+      lifecycle: {
+        setEnabled: async (...args) => lifecycleCalls.push(args),
+        uninstall: async () => {},
+      },
+    });
+
+    const result = await Promise.race([
+      manager.setEnabled('github', { enabled: false, expectedRevision: 1 }),
+      new Promise((resolve) => setTimeout(() => resolve('remote-blocked-operation'), 100)),
+    ]);
+
+    assert.notEqual(result, 'remote-blocked-operation');
+    assert.equal(catalogReads, 0);
+    assert.deepEqual(lifecycleCalls, [['instance:github', false, 1]]);
+  });
+
+  it('applies the live state projection to local installed rows before authorizing lifecycle writes', async () => {
+    let projectionCalls = 0;
+    const lifecycleCalls = [];
+    const installed = {
+      ...bundledGithub,
+      pluginId: published.pluginId,
+      pluginInstanceId: 'pi_video',
+      displayName: published.displayName,
+      source: {
+        kind: 'catalog',
+        catalogId: published.catalogId,
+        packageName: published.packageName,
+        trust: 'official',
+      },
+      installedVersion: published.version,
+      availableVersion: published.version,
+      packageDigest: published.packageDigest,
+      auth: 'connected',
+      config: 'ready',
+      intent: 'disabled',
+      live: 'stopped',
+      lifecycleRevision: 3,
+      capabilitySummary: [],
+      capabilities: [],
+    };
+    const manager = service({
+      inventory: installedInventory(),
+      installedPackages: [installed],
+      stateProjection: {
+        read: async () => {
+          projectionCalls += 1;
+          return { authState: 'disconnected', configState: 'incomplete', intentState: 'disabled' };
+        },
+      },
+      lifecycle: {
+        setEnabled: async (...args) => lifecycleCalls.push(args),
+        uninstall: async () => {},
+      },
+    });
+
+    const canonical = (await manager.get(published.pluginId)).plugin;
+    const local = (await manager.getLocal(published.pluginId)).plugin;
+    assert.deepEqual(
+      { auth: local.auth, config: local.config, actions: local.actions },
+      { auth: canonical.auth, config: canonical.config, actions: canonical.actions },
+    );
+    assert.equal(local.auth, 'disconnected');
+    assert.equal(local.config, 'incomplete');
+    assert.equal(local.actions.setEnabled, false);
+    await assert.rejects(
+      manager.setEnabled(published.pluginId, { enabled: true, expectedRevision: 3 }),
+      (error) => error?.code === 'ACTION_NOT_ALLOWED',
+    );
+    assert.equal(projectionCalls, 3);
+    assert.deepEqual(lifecycleCalls, []);
+  });
+
   it('returns installed package contributions in detail without treating grants as tools', async () => {
     const manager = service({ inventory: installedInventory() });
 

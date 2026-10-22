@@ -7,8 +7,9 @@
  */
 
 import { catRegistry } from '@cat-cafe/shared';
-import { readCapabilitiesConfig, withCapabilityLock } from '../config/capabilities/capability-orchestrator.js';
+import { withCapabilityLock } from '../config/capabilities/capability-orchestrator.js';
 import { listAllProjectPaths } from '../config/governance/list-all-projects.js';
+import { readMcpSyncConfig } from './mcp-config-state.js';
 import { extractMcpEntries, type SyncMcpProjectResult, syncMcpProject } from './mcp-sync-engine.js';
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -39,8 +40,7 @@ async function syncMcpAllUnlocked(catCafeRoot: string): Promise<SyncMcpAllResult
   let skippedCount = 0;
 
   // 1. Read global config and build cascade sets
-  const mainConfig = await readCapabilitiesConfig(catCafeRoot);
-  const globalMcpEntries = extractMcpEntries(mainConfig);
+  const globalMcpEntries = extractMcpEntries(await readMcpSyncConfig(catCafeRoot, 'global'));
 
   // MCPs that are globally disabled → cascade as disabled to projects
   const globalDisabledMcps = new Set(

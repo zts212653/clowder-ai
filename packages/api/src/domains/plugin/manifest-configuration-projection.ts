@@ -38,6 +38,11 @@
 
 import { isPluginConfigurationFieldRequired } from '@cat-cafe/shared';
 import type { ConfigurationField, PluginManifest } from '@clowder-ai/plugin-contract';
+import {
+  effectiveConfiguration,
+  resolveVariant,
+  variantFieldRequiredness,
+} from './configuration-variant-consumption.js';
 import { hostCapabilityRefusal } from './host-surface/host-capability-refusal.js';
 import { effectivePluginConfigurationValue } from './manager/plugin-configuration-values.js';
 
@@ -57,7 +62,9 @@ export type ManifestConfigurationProjectionFailure =
       readonly key: string;
       readonly kind: ConfigurationField['kind'];
       readonly grant: string;
-    };
+    }
+  | { readonly reason: 'variant_unselected' }
+  | { readonly reason: 'variant_invalid'; readonly value: unknown };
 
 export class ManifestConfigurationProjectionError extends Error {
   constructor(readonly failure: ManifestConfigurationProjectionFailure) {
@@ -71,6 +78,12 @@ export class ManifestConfigurationProjectionError extends Error {
     }
     if (failure.reason === 'grant_unavailable') {
       return `required ${failure.kind} ${failure.key} needs the ${failure.grant} grant this instance does not hold`;
+    }
+    if (failure.reason === 'variant_unselected') {
+      return 'configuration variant is unselected: no discriminator value is stored and none is declared as its default';
+    }
+    if (failure.reason === 'variant_invalid') {
+      return `configuration variant discriminator value ${JSON.stringify(failure.value)} matches no declared branch`;
     }
     return `required ${failure.kind} ${failure.key} is unavailable`;
   }
@@ -145,10 +158,14 @@ export async function resolveManifestConfiguration(
   input: ManifestConfigurationProjectionInput,
 ): Promise<readonly ResolvedConfigurationField[]> {
   const grants = new Set(input.effectiveGrants);
-  const resolved: ResolvedConfigurationField[] = [];
   // Operations describe owner actions and have no config/secret value to project.
   // Their target fields carry the resulting values and retain their own grants.
   const fields = (input.manifest.configuration ?? []).filter((field) => field.kind !== 'operation');
+  const variants = input.manifest.configurationVariants;
+  if (variants !== undefined) {
+    return resolveVariantManifestConfiguration(input, grants, fields, variants);
+  }
+  const resolved: ResolvedConfigurationField[] = [];
   const byKey = new Map(fields.map((field) => [field.key, field]));
   const values = new Map<string, Promise<string | undefined>>();
   async function effectiveValue(field: ConfigurationField): Promise<string | undefined> {
@@ -172,6 +189,82 @@ export async function resolveManifestConfiguration(
     const referencedValue = referenced ? await effectiveValue(referenced) : undefined;
     const required = isPluginConfigurationFieldRequired(field, () => referencedValue);
     const entry = await resolveDeclaredField(field, grants, required, () => effectiveValue(field));
+    if (entry !== undefined) resolved.push(entry);
+  }
+  return resolved;
+}
+
+/**
+ * Variant-declared resolution (design §3.3). The contract owns branch
+ * selection, default application, and requiredness; the Host only feeds it
+ * grant-checked raw stored values and delivers the resulting active set.
+ *
+ * Fail-closed on the two non-`selected` statuses: a package whose variant is
+ * unselected or invalid must not start, and inactive-branch fields are never
+ * read into the runtime (they are absent from `effectiveValues`, so the
+ * delivery loop below skips them without touching the store).
+ */
+async function resolveVariantManifestConfiguration(
+  input: ManifestConfigurationProjectionInput,
+  grants: ReadonlySet<string>,
+  fields: readonly ConfigurationField[],
+  variants: NonNullable<PluginManifest['configurationVariants']>,
+): Promise<readonly ResolvedConfigurationField[]> {
+  const rawValues = new Map<string, Promise<unknown>>();
+  function rawValue(field: ConfigurationField): Promise<unknown> {
+    let pending = rawValues.get(field.key);
+    if (!pending) {
+      pending = (async () => {
+        // Same grant discipline as the legacy path: no grant, no store read.
+        // The contract then applies the declared default for that field.
+        if (!grants.has(requiredGrant(field))) return undefined;
+        return field.kind === 'secret'
+          ? input.configuration.readSecret(input.pluginInstanceId, field.key)
+          : input.configuration.readConfig(input.pluginInstanceId, field.key);
+      })();
+      rawValues.set(field.key, pending);
+    }
+    return pending;
+  }
+  // Phase 1: resolve the branch from the discriminator alone (grant-gated;
+  // the contract falls back to the discriminator field's declared default).
+  // Fail-closed before any other store read: an unselected or invalid
+  // variant must not start, and we must not know what an inactive branch
+  // stores.
+  const probe: Record<string, unknown> = {};
+  const discriminatorField = fields.find((field) => field.key === variants.discriminator);
+  if (discriminatorField) {
+    const value = await rawValue(discriminatorField);
+    if (value !== undefined) probe[variants.discriminator] = value;
+  }
+  const resolution = resolveVariant(input.manifest, probe);
+  if (resolution.status === 'unselected') {
+    throw new ManifestConfigurationProjectionError({ reason: 'variant_unselected' });
+  }
+  if (resolution.status === 'invalid') {
+    throw new ManifestConfigurationProjectionError({ reason: 'variant_invalid', value: resolution.value });
+  }
+  // Phase 2: read only what the selected branch may deliver — common fields
+  // (claimed by no branch) plus the selected branch's fields. Inactive-branch
+  // fields are never touched in the store.
+  const claimedKeys = new Set<string>();
+  for (const branch of variants.branches) for (const key of branch.fields) claimedKeys.add(key);
+  const activeBranch = variants.branches.find((branch) => branch.id === resolution.branchId);
+  const activeKeys = new Set(activeBranch?.fields ?? []);
+  const stored: Record<string, unknown> = {};
+  for (const field of fields) {
+    if (claimedKeys.has(field.key) && !activeKeys.has(field.key)) continue;
+    const value = await rawValue(field);
+    if (value !== undefined) stored[field.key] = value;
+  }
+  const { effectiveValues } = effectiveConfiguration(input.manifest, stored);
+  const resolved: ResolvedConfigurationField[] = [];
+  for (const field of fields) {
+    if (!Object.hasOwn(effectiveValues, field.key)) continue;
+    const required = variantFieldRequiredness(field, effectiveValues);
+    const entry = await resolveDeclaredField(field, grants, required, async () =>
+      effectivePluginConfigurationValue(field, effectiveValues[field.key]),
+    );
     if (entry !== undefined) resolved.push(entry);
   }
   return resolved;

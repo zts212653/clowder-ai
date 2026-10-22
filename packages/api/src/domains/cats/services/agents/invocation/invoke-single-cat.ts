@@ -1,4 +1,5 @@
 import { claudeExecutionAccountSnapshot, redactClaudeLaunchToken } from '../../../../../config/claude-token-account.js';
+import { InvocationServiceScope } from './invocation-service-scope.js';
 import {
   isConfirmedNativeAuthFailure,
   NATIVE_AUTH_CONTINUATION_PROMPT,
@@ -1385,8 +1386,18 @@ export interface InvocationParams {
  * - Storing the final response in messageStore
  */
 export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationParams): AsyncIterable<AgentMessage> {
+  const services = new InvocationServiceScope();
+  try {
+    yield* invokePreparedSingleCat(deps, { ...params, service: services.pin(params.service) });
+  } finally {
+    await services.dispose();
+  }
+}
+
+async function* invokePreparedSingleCat(deps: InvocationDeps, params: InvocationParams): AsyncIterable<AgentMessage> {
   const { registry, sessionManager, threadStore, apiUrl } = deps;
-  const { catId, service, userId, threadId, isLastCat, signal: callerSignal } = params;
+  const { catId, userId, threadId, isLastCat, signal: callerSignal } = params;
+  const service = params.service.forInvocation?.() ?? params.service;
   let prompt = params.prompt;
   const invocationPromptAdditions: string[] = [];
   const originTriggerMessageId = params.a2aTriggerMessageId ?? params.executionCausal?.triggerMessageId;
@@ -5358,6 +5369,7 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
       }
       const generationRecorder = requestGenerationRecorder;
       const options: AgentServiceOptions = {
+        hostSessionId: activeSessionRecordForResume?.id,
         ...(sessionId ? { sessionId } : {}),
         ...baseOptions,
         ...(params.liveCompanion

@@ -77,7 +77,7 @@ test('module plugin task reads and writes require their respective grants', asyn
     projectRoot,
     messageStore: new MessageStore(),
     taskStore: new TaskStore(),
-    contract: { manifestContractVersions: ['0.1.0'], validateEffectiveGrants, validateManifest },
+    contract: { manifestContractRange: '0.1.0', validateEffectiveGrants, validateManifest },
   });
   const composition = createPluginManagerRuntimeComposition({
     runtime,
@@ -133,7 +133,7 @@ test('module plugins create, read, and update ordinary tasks through the Host ta
     taskStore,
     threadStore,
     threadOwnerUserId: 'owner',
-    contract: { manifestContractVersions: ['0.1.0'], validateEffectiveGrants, validateManifest },
+    contract: { manifestContractRange: '0.1.0', validateEffectiveGrants, validateManifest },
   });
   const composition = createPluginManagerRuntimeComposition({
     runtime,

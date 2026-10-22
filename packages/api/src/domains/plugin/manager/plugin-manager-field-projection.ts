@@ -3,7 +3,7 @@
  * methods stay Host-private, and row actions are exposed only for the rows renderer (F202 W2-3 h1).
  */
 import { isPluginConfigurationFieldRequired, type PluginManagerConfigField } from '@cat-cafe/shared';
-import type { ConfigurationField } from '@clowder-ai/plugin-contract';
+import type { ConfigurationField, PluginManifest } from '@clowder-ai/plugin-contract';
 import type { OperationState } from '../operations/operation-state-machine.js';
 import { effectivePluginConfigurationValue } from './plugin-configuration-values.js';
 
@@ -11,6 +11,33 @@ const SECRET_MASK = '••••••';
 
 export type ContractConfigurationField = Exclude<ConfigurationField, { readonly kind: 'operation' }>;
 export type ContractOperationField = Extract<ConfigurationField, { readonly kind: 'operation' }>;
+
+/**
+ * Console-safe projection of a manifest's configurationVariants (design §3.1).
+ * The declaration is projected only when its discriminator is a plain,
+ * non-secret, non-operation select — the one shape the design admits — so the
+ * web form can safely re-derive the active field set from a draft. Anything
+ * else omits the projection and the form keeps its legacy behavior while the
+ * runtime-side consumers fail closed on the contract's own resolution.
+ */
+export function projectConfigurationVariants(
+  manifest: PluginManifest | null | undefined,
+): PluginManagerConfigField['configurationVariants'] {
+  const variants = manifest?.configurationVariants;
+  if (!variants) return undefined;
+  const discriminator = (manifest?.configuration ?? []).find(
+    (field) => field.key === variants.discriminator && field.kind !== 'operation' && field.kind !== 'secret',
+  );
+  if (!discriminator) return undefined;
+  return {
+    discriminator: variants.discriminator,
+    branches: variants.branches.map((branch) => ({
+      id: branch.id,
+      when: branch.when,
+      fields: [...branch.fields],
+    })),
+  };
+}
 
 type ContractOperationAction = ContractOperationField['actions'][number];
 type StandaloneAction = NonNullable<PluginManagerConfigField['actions']>[number];
@@ -32,6 +59,7 @@ export function configFieldProjection(
   field: ContractConfigurationField,
   fields: readonly ContractConfigurationField[],
   stored: Readonly<Record<string, string>>,
+  configurationVariants?: PluginManagerConfigField['configurationVariants'],
 ): PluginManagerConfigField {
   const value = effectivePluginConfigurationValue(field, stored[field.key]);
   return {
@@ -40,6 +68,7 @@ export function configFieldProjection(
     kind: field.kind,
     required: field.required,
     ...(field.hidden === undefined ? {} : { hidden: field.hidden }),
+    ...(configurationVariants === undefined ? {} : { configurationVariants }),
     ...(field.requiredWhen === undefined ? {} : { requiredWhen: { ...field.requiredWhen } }),
     ...(field.requiredWhen === undefined
       ? {}

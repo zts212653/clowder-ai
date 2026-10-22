@@ -52,9 +52,9 @@ test('installs only the exact catalog artifact and admits schemas from those byt
   await access(join(packagesRoot, packageDirectoryName(archive.integrity), 'package.tgz'));
 });
 
-test('installs a package built against the exact consumed prerelease contract', async () => {
+test('installs a package declaring the contract implemented by this Host', async () => {
   const packageManifest = manifest({
-    // The installed version is authoritative for both registry and vendored dependencies.
+    // A plugin may explicitly require the protocol implemented by this build.
     contractVersion: PLUGIN_CONTRACT_PACKAGE_VERSION,
   });
   const archive = await packageArchive({ packageManifest });
@@ -66,30 +66,49 @@ test('installs a package built against the exact consumed prerelease contract', 
   assert.equal((await store.snapshot()).packages[0].contractVersion, PLUGIN_CONTRACT_PACKAGE_VERSION);
 });
 
-test('quarantines a catalog package rejected by the Host contract allowlist', async () => {
-  const packageManifest = manifest({ contractVersion: '0.1.0-beta.14' });
-  const archive = await packageArchive({ packageManifest });
+test('installs an in-range declaration absent from the previous release list', async () => {
+  const contractVersion = '0.1.0-beta.14';
+  const archive = await packageArchive({ packageManifest: manifest({ contractVersion }) });
   const entry = catalogEntry(archive.integrity);
-  const { packagesRoot, inventory, store } = await harness(archive, entry);
-  const quarantines = new FilePluginPackageQuarantineStore(join(packagesRoot, 'quarantines.json'), {
-    now: () => 10_000,
-  });
-  const installer = new OfficialPluginPackageInstaller({
-    inventory,
-    packagesRoot,
-    catalog: [entry],
-    fetchArchive: async () => archive.bytes,
-    quarantine: quarantines,
-  });
+  const { store, installer } = await harness(archive, entry);
 
-  await assert.rejects(installer.install(entry.catalogId, releaseFence(entry)), isInstallError('INVENTORY_REJECTED'));
+  const installed = await installer.install(entry.catalogId, releaseFence(entry));
 
-  assert.equal((await store.snapshot()).instances.length, 0);
-  const [rejected] = await quarantines.list();
-  assert.equal(rejected.pluginId, entry.pluginId);
-  assert.equal(rejected.packageDigest, archive.integrity);
-  assert.equal(rejected.failure.code, 'CONTRACT_VERSION_MISMATCH');
+  const snapshot = await store.snapshot();
+  assert.equal(snapshot.packages[0].manifest.contractVersion, contractVersion);
+  assert.equal(snapshot.instances[0].pluginInstanceId, installed.pluginInstanceId);
+  assert.equal(snapshot.packages[0].packageDigest, archive.integrity);
 });
+
+for (const contractVersion of ['0.1.0-beta.12', '0.2.1-beta.1', '0.2.1']) {
+  test(`quarantines ${contractVersion} outside the Host supported contract range`, async () => {
+    const packageManifest = manifest({ contractVersion });
+    const archive = await packageArchive({ packageManifest });
+    const entry = catalogEntry(archive.integrity);
+    const { packagesRoot, inventory, store } = await harness(archive, entry);
+    const quarantines = new FilePluginPackageQuarantineStore(join(packagesRoot, 'quarantines.json'), {
+      now: () => 10_000,
+    });
+    const installer = new OfficialPluginPackageInstaller({
+      inventory,
+      packagesRoot,
+      catalog: [entry],
+      fetchArchive: async () => archive.bytes,
+      quarantine: quarantines,
+    });
+
+    await assert.rejects(installer.install(entry.catalogId, releaseFence(entry)), isInstallError('INVENTORY_REJECTED'));
+
+    const snapshot = await store.snapshot();
+    assert.deepEqual(snapshot.instances, []);
+    assert.deepEqual(snapshot.packages, []);
+    assert.deepEqual(snapshot.grants, []);
+    const [rejected] = await quarantines.list();
+    assert.equal(rejected.pluginId, entry.pluginId);
+    assert.equal(rejected.packageDigest, archive.integrity);
+    assert.equal(rejected.failure.code, 'CONTRACT_VERSION_MISMATCH');
+  });
+}
 
 test('same exact catalog install is idempotent and does not mint a second instance', async () => {
   const archive = await packageArchive();

@@ -79,12 +79,11 @@ export function ensureWindowsAcpBootstrapRoot(
       return fallback;
     }
   }
-  if (options.allowVolumeRootDelete) {
-    for (const candidate of (options.volumeRoots ?? volumeRoots)()) {
-      if (attempt(candidate)) {
-        console.warn(`[acp] Windows ACP bootstrap relocated to ${candidate}; rejected ${rejected.join('; ')}`);
-        return candidate;
-      }
+  // Discovery is not an exemption: unknown clients keep every strict ACL check.
+  for (const candidate of (options.volumeRoots ?? volumeRoots)()) {
+    if (attempt(candidate)) {
+      console.warn(`[acp] Windows ACP bootstrap relocated to ${candidate}; rejected ${rejected.join('; ')}`);
+      return candidate;
     }
   }
   throw new Error(`No trusted Windows ACP bootstrap root: ${rejected.join('; ')}`);

@@ -22,11 +22,12 @@
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import type { CapabilitiesConfig, CapabilityEntry } from '@cat-cafe/shared';
+import { readMcpSyncConfig } from '../../mcp/mcp-config-state.js';
+import { syncMcpAll } from '../../mcp/mcp-sync-all.js';
 import { appendAuditEntry } from './capability-audit.js';
 import {
   type CliConfigPaths,
   healCatCafeMcpTopology,
-  readCapabilitiesConfig,
   reconcileMcpRuntimeConfig,
   withCapabilityLock,
   writeCapabilitiesConfig,
@@ -36,10 +37,13 @@ import {
 
 /** Pluggable config I/O — separates orchestration logic from storage. */
 export interface McpConfigIO {
-  readConfig: () => Promise<CapabilitiesConfig | null>;
+  /** Mutation reads require the authoritative Host registry; projections may observe an uninitialized one. */
+  readConfig: (purpose?: 'mutation') => Promise<CapabilitiesConfig | null>;
   /** Write config AND regenerate CLI config files. */
   writeAndRegenCli: (config: CapabilitiesConfig) => Promise<void>;
   withLock: <T>(fn: () => Promise<T>) => Promise<T>;
+  /** Cascade committed registry changes; custom in-memory adapters may omit it. */
+  syncProjects?: () => Promise<void>;
 }
 
 /** Default file-based I/O adapter — reads/writes capabilities.json + CLI configs. */
@@ -49,12 +53,15 @@ export function fileBasedMcpIO(projectRoot: string, cliConfigPaths?: CliConfigPa
     antigravity: join(homedir(), '.gemini', 'antigravity', 'mcp_config.json'),
   };
   return {
-    readConfig: () => readCapabilitiesConfig(projectRoot),
+    readConfig: (purpose) => readMcpSyncConfig(projectRoot, purpose === 'mutation' ? 'global' : 'project'),
     writeAndRegenCli: async (config) => {
       await writeCapabilitiesConfig(projectRoot, config);
       await reconcileMcpRuntimeConfig(config, paths, projectRoot);
     },
     withLock: (fn) => withCapabilityLock(projectRoot, fn),
+    syncProjects: async () => {
+      await syncMcpAll(projectRoot);
+    },
   };
 }
 
@@ -91,7 +98,7 @@ export async function installMcpCapability(
   opts?: McpServiceOpts,
 ): Promise<{ before: CapabilityEntry | null; after: CapabilityEntry }> {
   return io.withLock(async () => {
-    let config: CapabilitiesConfig = (await io.readConfig()) ?? { version: 1, capabilities: [] };
+    let config: CapabilitiesConfig = (await io.readConfig('mutation')) ?? { version: 1, capabilities: [] };
     const snapshot = structuredClone(config);
 
     if (opts?.catCafeRepoRoot) {
@@ -138,10 +145,12 @@ export async function installMcpCapability(
 
     try {
       await io.writeAndRegenCli(config);
+      await io.syncProjects?.();
     } catch (err) {
       // Rollback to pre-mutation state on write/CLI failure
       try {
         await io.writeAndRegenCli(snapshot);
+        await io.syncProjects?.();
       } catch {
         /* best-effort rollback */
       }
@@ -179,7 +188,7 @@ export async function removeMcpCapability(
   opts?: McpRemoveOpts,
 ): Promise<{ before: CapabilityEntry | null }> {
   return io.withLock(async () => {
-    const config = await io.readConfig();
+    const config = await io.readConfig('mutation');
     if (!config) return { before: null };
 
     let nextConfig = structuredClone(config);
@@ -217,9 +226,11 @@ export async function removeMcpCapability(
       }
 
       await io.writeAndRegenCli(nextConfig);
+      await io.syncProjects?.();
     } catch (err) {
       try {
         await io.writeAndRegenCli(snapshot);
+        await io.syncProjects?.();
       } catch {
         /* best-effort rollback */
       }

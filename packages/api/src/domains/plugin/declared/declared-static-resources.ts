@@ -26,6 +26,7 @@ export interface DeclaredStaticResourceHost {
   readonly resourcesRoot?: string;
   readonly configuration: PluginRuntimeConfigurationPort;
   readonly mcpConfigIO?: McpConfigIO;
+  readonly nativeActionEnvironmentReferences?: (contributionId: string) => Readonly<Record<string, string>>;
   readonly nativeActionEnvironment?: (contributionId: string) => Readonly<Record<string, string>>;
 }
 

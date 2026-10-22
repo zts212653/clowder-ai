@@ -1,0 +1,7 @@
+{
+  "pluginId": "local.agent-session-reference",
+  "version": "0.1.0",
+  "contractVersion": "0.1.0",
+  "name": "ACP 会话参考插件",
+  "features": [{ "id": "agent", "name": "ACP Agent", "resources": [], "capabilities": [] }]
+}

@@ -16,7 +16,7 @@ export interface RuntimeChoice {
   modelSource?: 'tool_config' | 'tool_recent';
   defaultsStatus?: 'configured_only' | 'unconfigured' | 'session_only';
   configuredEffort?: string;
-  acp?: { command: string; startupArgs: string[]; transport?: 'stdio' | 'httpstream' };
+  acp?: { agentProvider?: string; command: string; startupArgs: string[]; transport?: 'stdio' | 'httpstream' };
 }
 
 const runtimeFields = [
@@ -32,6 +32,7 @@ const runtimeFields = [
   'provider',
   'mcpSupport',
   'acpCommand',
+  'acpAgentProvider',
   'acpStartupArgs',
   'acpTransport',
   'acpMaxLiveProcesses',
@@ -51,7 +52,7 @@ function runtimeKey(form: RuntimeFields): string {
   return JSON.stringify([
     form.clientId,
     resolveDraftCarrier(form) === 'acp'
-      ? [form.acpCommand, splitCommandArgs(form.acpStartupArgs), form.acpTransport]
+      ? [form.acpAgentProvider ?? '', form.acpCommand, splitCommandArgs(form.acpStartupArgs), form.acpTransport]
       : null,
   ]);
 }
@@ -71,6 +72,7 @@ export function rememberedRuntimes(drafts: RuntimeDrafts = {}): RuntimeChoice[] 
     ...(resolveDraftCarrier(form) === 'acp'
       ? {
           acp: {
+            ...(form.acpAgentProvider ? { agentProvider: form.acpAgentProvider } : {}),
             command: form.acpCommand,
             startupArgs: splitCommandArgs(form.acpStartupArgs),
             transport: form.acpTransport,
@@ -95,6 +97,7 @@ export function runtimeDefaults(next: RuntimeChoice): RuntimeFields {
     provider: '',
     carrier: next.acp ? 'acp' : next.clientId === 'openai' ? 'app_server' : 'cli',
     acpCommand: next.acp?.command ?? '',
+    acpAgentProvider: next.acp?.agentProvider ?? null,
     acpStartupArgs: next.acp ? serializeCommandArgs(next.acp.startupArgs) : '',
     acpTransport: next.acp?.transport ?? 'stdio',
     acpMaxLiveProcesses: '',

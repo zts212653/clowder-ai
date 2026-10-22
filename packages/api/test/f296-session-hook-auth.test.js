@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import { describe, test } from 'node:test';
 
 const { buildChildEnv } = await import('../dist/utils/cli-spawn.js');
+const { ENV_VARS } = await import('../dist/config/env-registry.js');
 
 describe('F296 invocation-scoped session hook authentication', () => {
   test('generic child environments never inherit the legacy process-scoped hook bearer', () => {
@@ -19,11 +20,13 @@ describe('F296 invocation-scoped session hook authentication', () => {
 
   test('production composition gives session hooks the callback registry without creating another secret', () => {
     const indexSource = readFileSync(new URL('../src/index.ts', import.meta.url), 'utf8');
-    const registrySource = readFileSync(new URL('../src/config/env-registry.ts', import.meta.url), 'utf8');
 
     assert.match(indexSource, /callbackRegistry:\s*registry/);
     assert.match(indexSource, /hookAuthenticationReady:\s*sessionHookAuthenticationReady/);
     assert.doesNotMatch(indexSource, /initializeSessionHookAuthentication|sessionHookAuth\.token/);
-    assert.doesNotMatch(registrySource, /CAT_CAFE_HOOK_TOKEN/);
+    assert.equal(
+      ENV_VARS.some(({ name }) => name === 'CAT_CAFE_HOOK_TOKEN'),
+      false,
+    );
   });
 });

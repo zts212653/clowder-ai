@@ -662,6 +662,8 @@ describe('F325 one-turn native AGY carrier', () => {
 
   test('launches one native L0 session with isolated HOME, canonical tools, and typed final', async () => {
     const f = fixture();
+    const previousProxy = process.env.HTTPS_PROXY;
+    process.env.HTTPS_PROXY = 'http://native-proxy.example:8080';
     try {
       let launch;
       let prepared;
@@ -692,6 +694,7 @@ describe('F325 one-turn native AGY carrier', () => {
       assert.match(prepared.nativeInstructions[0].body, /F325-TEST-CAT/);
       assert.equal(prepared.runtime.protocol, 'stream-json');
       assert.equal(launch.env.HOME, realpathSync(join(f.base, 'profiles', 'gemini38')));
+      assert.equal(launch.env.HTTPS_PROXY, 'http://native-proxy.example:8080');
       assert.equal(launch.env.GEMINI_API_KEY, null);
       assert.equal(launch.env.CAT_CAFE_AGENT_KEY_SECRET, null);
       assert.equal(launch.env.CAT_CAFE_AGENT_KEY_FILES, null);
@@ -718,6 +721,8 @@ describe('F325 one-turn native AGY carrier', () => {
       assert.equal(events[1].content, 'Hello from native AGY.\n');
       assert.equal(events[2].errorCode, undefined);
     } finally {
+      if (previousProxy === undefined) delete process.env.HTTPS_PROXY;
+      else process.env.HTTPS_PROXY = previousProxy;
       f.cleanup();
     }
   });

@@ -258,6 +258,24 @@ export interface PluginManagerConfigOption {
   docsUrl?: string;
 }
 
+/**
+ * Console-safe projection of a manifest's `configurationVariants`
+ * (configurationVariants, design §3.1). The declaration's discriminator is
+ * always a plain (non-secret) select, so the constrained `when` fragments and
+ * branch field lists are safe to expose. The web form feeds this plus the
+ * current draft through the contract package's pure functions — the same
+ * implementation the server uses — so a mode switch re-derives the active
+ * field set instantly, without saving and without a server round-trip.
+ */
+export interface PluginManagerConfigurationVariants {
+  discriminator: string;
+  branches: ReadonlyArray<{
+    id: string;
+    when: Readonly<Record<string, unknown>>;
+    fields: readonly string[];
+  }>;
+}
+
 /** Console/Agent-safe projection of a typed configuration contribution. */
 export interface PluginManagerConfigField {
   key: string;
@@ -270,6 +288,12 @@ export interface PluginManagerConfigField {
     key: string;
     value: string | number | boolean | readonly (string | number | boolean)[];
   };
+  /**
+   * Present on every projected field when the manifest declares configuration
+   * variants; identical across the fields of one plugin. Absent for pre-0.2.0
+   * manifests, whose form keeps the legacy behavior.
+   */
+  configurationVariants?: PluginManagerConfigurationVariants;
   /** Server-evaluated condition for a masked secret selector whose value cannot be projected. */
   requiredNow?: boolean;
   default?: string | number | boolean | string[];
@@ -380,7 +404,7 @@ export interface PluginManagerDetail extends PluginManagerListItem {
 }
 
 export interface PluginManagerCatalogProjection {
-  status: 'fresh' | 'stale' | 'degraded' | 'unavailable';
+  status: 'loading' | 'fresh' | 'stale' | 'degraded' | 'unavailable';
   refreshedAt: number | null;
   message?: string;
 }

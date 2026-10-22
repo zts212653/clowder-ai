@@ -1,17 +1,12 @@
 'use client';
 
 import type { PluginManagerListResponse } from '@cat-cafe/shared';
-import type { ReactNode } from 'react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useConfirm } from '@/components/useConfirm';
 import { apiFetch } from '@/utils/api-client';
-import type { SettingsPageHeaderProps } from '../SettingsPageHeader';
 import { PluginManagerContent } from './PluginManagerContent';
-import type { PluginManagerPresentation } from './plugin-manager-attention';
 import type { PluginManagerDesignFixture } from './plugin-manager-fixtures';
 import {
-  type ConfigurationUpdate,
-  configurationRequest,
   type DetailLoadState,
   designFixture,
   detailProjection,
@@ -19,38 +14,25 @@ import {
   fetchManagerList,
   responseError,
 } from './plugin-manager-live-api';
+import type { PluginManagerLiveContentProps } from './plugin-manager-live-types';
+import { INSTALL_TIMEOUT_MS, mutationRequestOptions } from './plugin-manager-mutation-options';
+import { usePluginConfigurationSave } from './usePluginConfigurationSave';
 
 const EMPTY_COMPATIBILITY: readonly PluginManagerDesignFixture[] = [];
-// Dependency preparation alone may take five minutes; allow checkout and package admission as well.
-const INSTALL_TIMEOUT_MS = 10 * 60_000;
-// Lifecycle writes may stop a runtime and spend up to four minutes starting it before returning.
-const LIFECYCLE_TIMEOUT_MS = 5 * 60_000;
 const INSTALL_UNCONFIRMED = '安装结果尚未确认，后台可能仍在处理。请查看插件列表确认状态，避免重复安装。';
-
-function mutationRequestOptions(path: string): { mutationTimeoutMs: number } | undefined {
-  if (path.endsWith('/install') || path.endsWith('/update')) return { mutationTimeoutMs: INSTALL_TIMEOUT_MS };
-  if (path.endsWith('/set-enabled') || path.endsWith('/uninstall') || path.endsWith('/contributions/configuration')) {
-    return { mutationTimeoutMs: LIFECYCLE_TIMEOUT_MS };
-  }
-  return undefined;
-}
 
 export function PluginManagerLiveContent({
   presentation = 'v1',
   pageHeader,
   compatibilityFixtures = EMPTY_COMPATIBILITY,
   renderCompatibilityDetail,
-}: {
-  presentation?: PluginManagerPresentation;
-  pageHeader?: Omit<SettingsPageHeaderProps, 'children'>;
-  compatibilityFixtures?: readonly PluginManagerDesignFixture[];
-  renderCompatibilityDetail?: (pluginId: string, plugin: PluginManagerDesignFixture) => ReactNode | undefined;
-} = {}) {
+}: PluginManagerLiveContentProps = {}) {
   const confirm = useConfirm();
   const [snapshot, setSnapshot] = useState<PluginManagerListResponse | null>(null);
   const [detailState, setDetailState] = useState<DetailLoadState>({ state: 'idle' });
   const [busyPluginId, setBusyPluginId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [warning, setWarning] = useState<string | null>(null);
   const [selectedPluginId, setSelectedPluginId] = useState<string | null>(null);
   const [linkedPluginId, setLinkedPluginId] = useState<string | null>(null);
   const [configurationSavedPluginId, setConfigurationSavedPluginId] = useState<string | null>(null);
@@ -59,11 +41,12 @@ export function PluginManagerLiveContent({
   const listGeneration = useRef(0);
   const detailGeneration = useRef(0);
   const mounted = useRef(true);
+  const localPluginIds = useRef(new Set<string>());
   const initialSelection = useRef<string | null>(null);
   const [initialDetailPluginId, setInitialDetailPluginId] = useState<string | null>(null);
   const enableRequests = useRef(new Set<string>());
 
-  const loadDetail = useCallback(async (pluginId: string, afterMutation = false) => {
+  const loadDetail = useCallback(async (pluginId: string, afterMutation = false, local = false) => {
     const generation = ++detailGeneration.current;
     setDetailState((current) =>
       (current.state === 'ready' || current.state === 'unavailable') && current.pluginId === pluginId
@@ -71,7 +54,7 @@ export function PluginManagerLiveContent({
         : { state: 'loading', pluginId },
     );
     try {
-      const value = await fetchManagerDetail(pluginId, afterMutation);
+      const value = await fetchManagerDetail(pluginId, afterMutation, local);
       if (!mounted.current || generation !== detailGeneration.current) return;
       setDetailState({ state: 'ready', pluginId, detail: value });
     } catch {
@@ -80,19 +63,25 @@ export function PluginManagerLiveContent({
     }
   }, []);
 
+  const loadCurrentDetail = useCallback(
+    (pluginId: string, afterMutation = false) =>
+      loadDetail(pluginId, afterMutation, localPluginIds.current.has(pluginId)),
+    [loadDetail],
+  );
+
   const selectPlugin = useCallback(
     (pluginId: string | null) => {
       selectedPluginIdRef.current = pluginId;
       setSelectedPluginId(pluginId);
       setConfigurationSavedPluginId((current) => (current === pluginId ? current : null));
       if (pluginId && !compatibilityFixtures.some((plugin) => plugin.id === pluginId)) {
-        void loadDetail(pluginId);
+        void loadCurrentDetail(pluginId);
         return;
       }
       detailGeneration.current += 1;
       setDetailState({ state: 'idle' });
     },
-    [loadDetail, compatibilityFixtures],
+    [loadCurrentDetail, compatibilityFixtures],
   );
   const linkedSelection = useRef(selectPlugin);
   linkedSelection.current = selectPlugin;
@@ -116,32 +105,84 @@ export function PluginManagerLiveContent({
     return () => window.removeEventListener('hashchange', selectLinkedPlugin);
   }, [catalogReady]);
 
+  const commitListSnapshot = useCallback(
+    async (
+      value: PluginManagerListResponse,
+      generation: number,
+      afterMutation: boolean,
+      local: boolean,
+      localInventory?: PluginManagerListResponse,
+    ): Promise<boolean> => {
+      if (!mounted.current || generation !== listGeneration.current) return false;
+      if (localInventory) localPluginIds.current = new Set(localInventory.plugins.map((plugin) => plugin.pluginId));
+      setSnapshot(value);
+      const requested = initialSelection.current;
+      if (requested && value.plugins.some((plugin) => plugin.pluginId === requested)) {
+        initialSelection.current = null;
+        setInitialDetailPluginId(requested);
+        selectPlugin(requested);
+        return true;
+      }
+      if (!local) initialSelection.current = null;
+      const current = selectedPluginIdRef.current;
+      if (current && value.plugins.some((plugin) => plugin.pluginId === current)) {
+        await loadCurrentDetail(current, afterMutation);
+      }
+      return true;
+    },
+    [loadCurrentDetail, selectPlugin],
+  );
+
+  const hydrateRemoteList = useCallback(
+    async (search: string, generation: number, afterMutation: boolean, localCommitted: boolean) => {
+      try {
+        const value = await fetchManagerList(search, afterMutation);
+        await commitListSnapshot(value, generation, afterMutation, false);
+        return value;
+      } catch {
+        if (!mounted.current || generation !== listGeneration.current) return;
+        if (localCommitted) {
+          setSnapshot((current) =>
+            current === null
+              ? current
+              : {
+                  ...current,
+                  catalog: {
+                    status: 'unavailable',
+                    refreshedAt: null,
+                    message: '目录暂时不可用；已安装插件仍可管理，稍后再次打开或搜索会重新加载。',
+                  },
+                },
+          );
+          return;
+        }
+        setError('插件列表加载失败；现有状态没有被改写。');
+      }
+    },
+    [commitListSnapshot],
+  );
+
   const loadList = useCallback(
     async (search: string, afterMutation = false) => {
       const generation = ++listGeneration.current;
       try {
-        const value = await fetchManagerList(search, afterMutation);
-        if (!mounted.current) return;
-        if (generation !== listGeneration.current) return value;
-        setSnapshot(value);
-        const requested = initialSelection.current;
-        initialSelection.current = null;
-        if (requested && value.plugins.some((plugin) => plugin.pluginId === requested)) {
-          setInitialDetailPluginId(requested);
-          selectPlugin(requested);
-          return;
-        }
-        const current = selectedPluginIdRef.current;
-        if (current && value.plugins.some((plugin) => plugin.pluginId === current)) {
-          await loadDetail(current, afterMutation);
-        }
-        return value;
+        const normalizedSearch = search.trim();
+        const localInventoryPromise = fetchManagerList('', afterMutation, true);
+        const localValuePromise =
+          normalizedSearch.length === 0
+            ? localInventoryPromise
+            : fetchManagerList(normalizedSearch, afterMutation, true);
+        const [localInventory, localValue] = await Promise.all([localInventoryPromise, localValuePromise]);
+        const localCommitted = await commitListSnapshot(localValue, generation, afterMutation, true, localInventory);
+        if (!localCommitted) return localValue;
+        void hydrateRemoteList(search, generation, afterMutation, true);
+        return localValue;
       } catch {
-        if (!mounted.current || generation !== listGeneration.current) return;
-        setError('插件列表加载失败；现有状态没有被改写。');
+        // Older Hosts and partially upgraded desktop bundles can still fall through to canonical discovery.
+        return hydrateRemoteList(search, generation, afterMutation, false);
       }
     },
-    [loadDetail, selectPlugin],
+    [commitListSnapshot, hydrateRemoteList],
   );
 
   useEffect(() => {
@@ -157,36 +198,14 @@ export function PluginManagerLiveContent({
     await loadList(query.current, true);
   }, [loadList]);
 
-  const configure = useCallback(
-    async (pluginId: string, updates: readonly ConfigurationUpdate[]) => {
-      const plugin = snapshot?.plugins.find((candidate) => candidate.pluginId === pluginId);
-      const request = configurationRequest(plugin, updates);
-      if (!request) {
-        setError('该插件没有可用的配置贡献。');
-        return;
-      }
-      setBusyPluginId(pluginId);
-      setError(null);
-      setConfigurationSavedPluginId(null);
-      try {
-        const response = await apiFetch(request.path, request.init, mutationRequestOptions(request.path));
-        if (!response.ok) {
-          const failure = await responseError(response, `配置保存失败 (${response.status})`);
-          await refresh();
-          setError(failure.message);
-          return;
-        }
-        setConfigurationSavedPluginId(pluginId);
-        await refresh();
-      } catch {
-        await refresh();
-        setError('未能确认配置保存结果，请刷新后检查。');
-      } finally {
-        setBusyPluginId(null);
-      }
-    },
-    [refresh, snapshot],
-  );
+  const configure = usePluginConfigurationSave({
+    snapshot,
+    refresh,
+    onBusy: setBusyPluginId,
+    onError: setError,
+    onWarning: setWarning,
+    onSaved: setConfigurationSavedPluginId,
+  });
 
   const mutate = useCallback(
     async (pluginId: string, path: string, body: unknown) => {
@@ -306,6 +325,7 @@ export function PluginManagerLiveContent({
       catalogMessage={snapshot?.catalog.message}
       loading={snapshot === null && error === null}
       error={error}
+      warning={warning}
       busyPluginId={busyPluginId}
       selectedPluginId={selectedPluginId}
       linkedPluginId={linkedPluginId}
@@ -383,7 +403,7 @@ export function PluginManagerLiveContent({
         })();
       }}
       onConfigure={(pluginId, updates) => void configure(pluginId, updates)}
-      onOperationChange={(pluginId) => void loadDetail(pluginId, true)}
+      onOperationChange={(pluginId) => void loadCurrentDetail(pluginId, true)}
     />
   );
 }

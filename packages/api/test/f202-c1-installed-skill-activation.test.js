@@ -60,7 +60,7 @@ test('enabling a locally installed package registers its declared skill capabili
   const runtime = createDormantPluginRuntimeComposition({
     projectRoot,
     messageStore: new MessageStore(),
-    contract: { manifestContractVersions: ['0.1.0'], validateEffectiveGrants, validateManifest },
+    contract: { manifestContractRange: '0.1.0', validateEffectiveGrants, validateManifest },
   });
   const composition = createPluginManagerRuntimeComposition({
     runtime,
@@ -174,7 +174,7 @@ test('a skill activation failure leaves no capability registered by the package'
   const runtime = createDormantPluginRuntimeComposition({
     projectRoot,
     messageStore: new MessageStore(),
-    contract: { manifestContractVersions: ['0.1.0'], validateEffectiveGrants, validateManifest },
+    contract: { manifestContractRange: '0.1.0', validateEffectiveGrants, validateManifest },
   });
   const composition = createPluginManagerRuntimeComposition({
     runtime,

@@ -201,6 +201,10 @@ test('stop rejects stale process identity instead of trusting a reused PID', asy
   });
   const state = JSON.parse(readFileSync(paths.stateFile, 'utf8'));
   state.process.startedAt = 'definitely-not-this-process';
+  // A reused PID has a different incarnation. On Linux the stable /proc birth
+  // marker proves it; on every platform a stale launch token does too.
+  if (Number.isSafeInteger(state.process.procStartTicks)) state.process.procStartTicks += 1;
+  state.process.launchToken = 'stale-reused-pid-token';
   writeFileSync(paths.stateFile, `${JSON.stringify(state, null, 2)}\n`);
 
   await assert.rejects(

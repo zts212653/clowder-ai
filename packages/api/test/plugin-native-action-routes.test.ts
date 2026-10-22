@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { Writable } from 'node:stream';
 import { test } from 'node:test';
 import { type McpContribution, validateManifest } from '@clowder-ai/plugin-contract';
 import Fastify from 'fastify';
@@ -7,8 +8,20 @@ import { NativePluginActions } from '../src/domains/plugin/declared/native-plugi
 import { pluginNativeActionRoutes } from '../src/routes/plugin-native-action-routes.js';
 
 test('native route authenticates separately, captures optional source, and refuses stale/foreign calls', async () => {
-  const app = Fastify();
+  const logs: Record<string, unknown>[] = [];
+  const app = Fastify({
+    logger: {
+      level: 'info',
+      stream: new Writable({
+        write(chunk, _encoding, done) {
+          logs.push(JSON.parse(chunk.toString()));
+          done();
+        },
+      }),
+    },
+  });
   let current = true;
+  let latestCurrent = true;
   let sourceExists = true;
   let deleted = false;
   let writes = 0;
@@ -75,7 +88,12 @@ test('native route authenticates separately, captures optional source, and refus
   });
   await app.register(pluginNativeActionRoutes, {
     actions,
-    registry: { verify, verifyLatest: verify, isStartupRecoveryComplete: () => true } as never,
+    registry: {
+      verify,
+      verifyLatest: async (id: string, token: string) =>
+        latestCurrent ? verify(id, token) : { ok: false, reason: 'stale_invocation' },
+      isStartupRecoveryComplete: () => true,
+    } as never,
     sources: {
       invocationTracker: {
         getActiveSlots: () => [
@@ -131,9 +149,23 @@ test('native route authenticates separately, captures optional source, and refus
     deleted = true;
     assert.equal((await app.inject(request)).statusCode, 410);
     deleted = false;
+    latestCurrent = false;
+    assert.equal((await app.inject(request)).statusCode, 401);
+    latestCurrent = true;
     current = false;
     assert.equal((await app.inject(request)).statusCode, 401);
     assert.equal(writes, 2);
+    const diagnostics = logs.filter((row) => row.event === 'plugin_native_auth');
+    assert.ok(diagnostics.some((row) => row.stage === 'headers' && row.reason === 'missing_credentials'));
+    assert.ok(diagnostics.some((row) => row.stage === 'callback_prehandler' && row.reason === 'invalid_token'));
+    assert.ok(diagnostics.some((row) => row.stage === 'invocation_currentness' && row.reason === 'stale_invocation'));
+    assert.ok(diagnostics.some((row) => row.stage === 'activation' && row.reason === 'inactive_connection'));
+    assert.ok(diagnostics.some((row) => row.stage === 'completed'));
+    assert.ok(diagnostics.every((row) => typeof row.reqId === 'string'));
+    const encoded = JSON.stringify(diagnostics);
+    assert.equal(encoded.includes(request.headers['x-callback-token']), false);
+    assert.equal(encoded.includes(request.headers['x-clowder-plugin-action-token']), false);
+    assert.equal(encoded.includes('spoof'), false);
   } finally {
     await app.close();
   }

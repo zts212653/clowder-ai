@@ -1,4 +1,5 @@
 import type { RuntimeProviderProfile } from '../../../../../config/account-resolver.js';
+import { readInvocationMcpConfig } from '../../../../../config/capabilities/invoke-mcp-config.js';
 import { usesNativeToolConfiguration } from '../../../../../config/cat-account-binding.js';
 import { finalizeCodexAccountEnvironment } from '../../../../../config/codex-account-environment.js';
 import { resolveCodexAccountLaunch, resolveCodexApiExecutionHome } from '../../../../../config/codex-account-launch.js';
@@ -58,7 +59,6 @@ import {
 } from '../../../../../config/capabilities/capability-orchestrator.js';
 import {
   assertMappedCapabilitySource,
-  isSameCapabilityRoot,
   resolveInvokeCapabilityRoot,
 } from '../../../../../config/capabilities/invoke-capability-root.js';
 import {
@@ -884,32 +884,15 @@ async function buildCatCafeMcpArgs(
   try {
     // F249: Project config is the single truth source for MCP resolution.
     // Try project first; fall back to global for uninitialized projects.
-    let capConfig = null;
-    // #712 P2-2: track which root supplied the config so relative paths
-    // in external MCP entries resolve against the correct base directory.
-    let configSourceRoot = capabilitiesProjectRoot;
-    let accessScope: 'global' | 'project' = 'global';
-    if (workingDirectory && !isSameCapabilityRoot(workingDirectory, capabilitiesProjectRoot)) {
-      try {
-        const projectRaw = readFileSync(join(workingDirectory, '.cat-cafe', 'capabilities.json'), 'utf-8');
-        const parsed = JSON.parse(projectRaw);
-        if (parsed?.version === 1 || parsed?.version === 2) {
-          capConfig = parsed;
-          configSourceRoot = workingDirectory;
-          accessScope = 'project';
-        }
-      } catch {
-        /* No project config — fall back to global */
-      }
-    }
-    if (!capConfig) {
-      const raw = readFileSync(join(capabilitiesProjectRoot, '.cat-cafe', 'capabilities.json'), 'utf-8');
-      const parsed = JSON.parse(raw);
-      if (parsed?.version === 1 || parsed?.version === 2) capConfig = parsed;
-      configSourceRoot = capabilitiesProjectRoot;
-    }
+    const {
+      config: capConfig,
+      configSourceRoot,
+      accessScope,
+    } = readInvocationMcpConfig(capabilitiesProjectRoot, workingDirectory);
     if (capConfig && catId) {
-      for (const s of resolveServersForCat(capConfig, catId, { accessScope }) as Array<{
+      for (const s of resolveServersForCat(capConfig, catId, {
+        accessScope,
+      }) as Array<{
         name: string;
         enabled: boolean;
         command: string;
@@ -1027,7 +1010,6 @@ async function buildCatCafeMcpArgs(
         let cmd: string | undefined;
         let cmdArgs: string[] | undefined;
         let envEntries: Record<string, string> | undefined;
-        let pluginCredentialFile: string | undefined;
         const isCatCafe = isManagedCatCafeSplit(s);
         const workingDir = resolveCodexMcpWorkingDir(s.workingDir, configSourceRoot);
 
@@ -1043,17 +1025,15 @@ async function buildCatCafeMcpArgs(
           envEntries = pluginMcpEnvironment(s, callbackEnv);
         }
         if (!cmd) continue;
-        if (s.source === 'plugin' && envEntries?.CLOWDER_PLUGIN_ACTION_TOKEN) {
-          // The pool rebinds this Host-owned path when replacing a session.
-          // Keep it in MCP config, not frozen inside the opaque secret wrapper.
-          pluginCredentialFile = envEntries.CAT_CAFE_CREDENTIAL_FILE;
-          delete envEntries.CAT_CAFE_CREDENTIAL_FILE;
-        }
         if (envEntries) {
+          // Pooled replacement hosts rebind session paths through server.env.
+          // A frozen wrapper copy would override the newly bound credential file.
+          const wrapperEnv = { ...envEntries };
+          for (const key of MCP_SESSION_ENV_KEYS) delete wrapperEnv[key];
           const wrapped = writeCodexMcpEnvWrapper({
             command: cmd,
             args: cmdArgs ?? [],
-            env: envEntries,
+            env: wrapperEnv,
             ...(workingDir ? { cwd: workingDir } : {}),
           });
           cmd = wrapped.command;
@@ -1070,11 +1050,9 @@ async function buildCatCafeMcpArgs(
           '--config',
           `mcp_servers.${tomlName}.enabled=true`,
         );
-        if (pluginCredentialFile) {
-          args.push(
-            '--config',
-            `mcp_servers.${tomlName}.env.CAT_CAFE_CREDENTIAL_FILE=${toTomlString(pluginCredentialFile)}`,
-          );
+        for (const key of MCP_SESSION_ENV_KEYS) {
+          const value = envEntries?.[key];
+          if (value) args.push('--config', `mcp_servers.${tomlName}.env.${key}=${toTomlString(value)}`);
         }
         if (isCatCafe) {
           args.push('--config', `mcp_servers.${tomlName}.default_tools_approval_mode="approve"`);

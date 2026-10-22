@@ -20,6 +20,17 @@ const CALLBACK_ENV = {
 };
 
 describe('materializeSessionMcpServers', () => {
+  it('accepts existing stdio registrations without an env field', () => {
+    const base = [{ name: 'cat-cafe-collab', command: 'node', args: ['collab.js'] }];
+    assert.strictEqual(materializeSessionMcpServers(base), base);
+    const withCallbacks = materializeSessionMcpServers(base, CALLBACK_ENV);
+    assert.equal(
+      withCallbacks[0].env.find((entry) => entry.name === 'CAT_CAFE_INVOCATION_ID').value,
+      CALLBACK_ENV.CAT_CAFE_INVOCATION_ID,
+    );
+    assert.equal(Object.hasOwn(base[0], 'env'), false);
+  });
+
   it('injects callback env into cat-cafe-* stdio servers', () => {
     const base = [
       { name: 'cat-cafe-collab', command: 'node', args: ['collab.js'], env: [] },
@@ -120,6 +131,40 @@ describe('materializeSessionMcpServers', () => {
     materializeSessionMcpServers(base, CALLBACK_ENV);
     assert.deepStrictEqual(base, original, 'Input should not be mutated');
   });
+
+  for (const credentialFileOnly of [false, true]) {
+    it(`preserves native-action transport credentials with file-only=${credentialFileOnly}`, () => {
+      const base = [
+        {
+          name: 'plugin-fixture',
+          command: 'node',
+          args: [],
+          env: [
+            { name: 'CLOWDER_PLUGIN_ACTION_TOKEN', value: 'synthetic-action' },
+            { name: 'CLOWDER_PLUGIN_ACTION_PATH', value: '/api/plugin-runtime/action' },
+            { name: 'CAT_CAFE_INVOCATION_ID', value: 'stale-invocation' },
+            { name: 'CAT_CAFE_CALLBACK_TOKEN', value: 'stale-callback' },
+          ],
+        },
+      ];
+      const before = structuredClone(base);
+      const callbackEnv = { ...CALLBACK_ENV, CAT_CAFE_CREDENTIAL_FILE: '/synthetic/session.json' };
+      const result = materializeSessionMcpServers(base, callbackEnv, credentialFileOnly);
+      const env = Object.fromEntries(result[0].env.map(({ name, value }) => [name, value]));
+      assert.equal(env.CLOWDER_PLUGIN_ACTION_TOKEN, 'synthetic-action');
+      assert.equal(env.CLOWDER_PLUGIN_ACTION_PATH, '/api/plugin-runtime/action');
+      assert.equal(env.CAT_CAFE_CREDENTIAL_FILE, callbackEnv.CAT_CAFE_CREDENTIAL_FILE);
+      assert.equal(env.CAT_CAFE_API_URL, callbackEnv.CAT_CAFE_API_URL);
+      if (credentialFileOnly) {
+        assert.equal(Object.hasOwn(env, 'CAT_CAFE_INVOCATION_ID'), false);
+        assert.equal(Object.hasOwn(env, 'CAT_CAFE_CALLBACK_TOKEN'), false);
+      } else {
+        assert.equal(env.CAT_CAFE_INVOCATION_ID, callbackEnv.CAT_CAFE_INVOCATION_ID);
+        assert.equal(env.CAT_CAFE_CALLBACK_TOKEN, callbackEnv.CAT_CAFE_CALLBACK_TOKEN);
+      }
+      assert.deepEqual(base, before);
+    });
+  }
 
   it('only injects known callback env keys, ignores extras', () => {
     const base = [{ name: 'cat-cafe-collab', command: 'node', args: [], env: [] }];

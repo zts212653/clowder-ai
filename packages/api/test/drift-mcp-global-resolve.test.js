@@ -12,7 +12,7 @@
  */
 
 import assert from 'node:assert/strict';
-import { mkdtemp, realpath, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, it } from 'node:test';
@@ -36,6 +36,10 @@ let app;
 beforeEach(async () => {
   previousEnv = Object.fromEntries(ENV_KEYS.map((key) => [key, process.env[key]]));
   workspace = await realpath(await mkdtemp(join(tmpdir(), 'drift-global-resolve-')));
+  // These routing tests need an authoritative global source, even when it is empty.
+  // An absent/unreadable source must not be interpreted as an empty registry.
+  await mkdir(join(workspace, '.cat-cafe'));
+  await writeFile(join(workspace, '.cat-cafe/capabilities.json'), JSON.stringify({ version: 2, capabilities: [] }));
   // Omitted projectPath must exercise the real global route, with writes confined to this fixture.
   Object.assign(process.env, {
     DEFAULT_OWNER_USER_ID: AUTH_HEADERS['x-test-session-user'],
@@ -101,6 +105,35 @@ describe('#1050 — MCP drift resolve without projectPath', () => {
     assert.equal(res.statusCode, 400);
     assert.equal(res.json().error, 'Invalid project path');
   });
+
+  for (const state of ['absent', 'corrupt']) {
+    it(`refuses an ${state} global source without changing project configuration`, async () => {
+      const globalPath = join(workspace, '.cat-cafe/capabilities.json');
+      if (state === 'absent') await rm(globalPath);
+      else await writeFile(globalPath, '{ broken registry');
+      const projectDirectory = join(workspace, 'consumer', '.cat-cafe');
+      const projectPath = join(projectDirectory, 'capabilities.json');
+      const original = JSON.stringify({
+        version: 2,
+        capabilities: [{ id: 'keep-local', type: 'mcp', enabled: true, source: 'external' }],
+      });
+      await mkdir(projectDirectory, { recursive: true });
+      await writeFile(projectPath, original);
+
+      const res = await app.inject({
+        method: 'POST',
+        url: '/api/drift/resolve',
+        headers: AUTH_HEADERS,
+        payload: { type: 'mcp', action: 'sync' },
+      });
+
+      assert.equal(res.statusCode, 500, res.body);
+      assert.match(res.json().message, /Cannot synchronize global capabilities/);
+      assert.equal(await readFile(projectPath, 'utf8'), original);
+      if (state === 'absent') await assert.rejects(readFile(globalPath), { code: 'ENOENT' });
+      else assert.equal(await readFile(globalPath, 'utf8'), '{ broken registry');
+    });
+  }
 });
 
 describe('#1049 Phase D — conflictPolicy parameter validation', () => {

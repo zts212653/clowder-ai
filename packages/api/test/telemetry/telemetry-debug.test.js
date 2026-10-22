@@ -20,10 +20,10 @@ const { ExportResultCode } = await import('@opentelemetry/core');
 const { NodeTracerProvider, SimpleSpanProcessor } = await import('@opentelemetry/sdk-trace-node');
 const { RedactingSpanProcessor } = await import('../../dist/infrastructure/telemetry/redactor.js');
 const { shouldEnableDebugMode } = await import('../../dist/infrastructure/telemetry/init.js');
+const { ENV_VARS } = await import('../../dist/config/env-registry.js');
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const INIT_SRC = resolve(__dirname, '../../src/infrastructure/telemetry/init.ts');
-const ENV_REGISTRY_SRC = resolve(__dirname, '../../src/config/env-registry.ts');
 
 /** Exporter that snapshots span attributes at export() time (not refs). */
 class SnapshotExporter {
@@ -130,16 +130,11 @@ test('F153 TELEMETRY_DEBUG: guardrail call-site is after config merge', () => {
 // ── Env registry ───────────────────────────────────────────────────
 
 test('F153 TELEMETRY_DEBUG: both vars registered and locked in env-registry', () => {
-  const src = readFileSync(ENV_REGISTRY_SRC, 'utf8');
-  assert.ok(src.includes("name: 'TELEMETRY_DEBUG'"), 'TELEMETRY_DEBUG in registry');
-  assert.ok(src.includes("name: 'TELEMETRY_DEBUG_FORCE'"), 'TELEMETRY_DEBUG_FORCE in registry');
-
-  // Verify both are locked from Hub UI
   for (const varName of ['TELEMETRY_DEBUG', 'TELEMETRY_DEBUG_FORCE']) {
-    const idx = src.indexOf(`name: '${varName}'`);
-    const block = src.slice(idx, src.indexOf('},', idx) + 2);
-    assert.ok(block.includes('hubVisible: false'), `${varName} must be hubVisible: false`);
-    assert.ok(block.includes('runtimeEditable: false'), `${varName} must be runtimeEditable: false`);
+    const definition = ENV_VARS.find(({ name }) => name === varName);
+    assert.ok(definition, `${varName} in registry`);
+    assert.equal(definition.hubVisible, false, `${varName} must be hubVisible: false`);
+    assert.equal(definition.runtimeEditable, false, `${varName} must be runtimeEditable: false`);
   }
 });
 

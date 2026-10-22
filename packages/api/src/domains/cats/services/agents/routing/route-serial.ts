@@ -1,4 +1,5 @@
 import type { RoutingPreflightDecisionV1 } from '@cat-cafe/shared';
+import { InvocationServiceScope } from '../invocation/invocation-service-scope.js';
 import { isRoutingOwnerAttempt } from './routing-owner-attempt.js';
 import { routingPreflightNotice } from './routing-preflight-notice.js';
 /**
@@ -471,6 +472,7 @@ export async function* routeSerial(
   threadId: string,
   options: RouteOptions = {},
 ): AsyncIterable<AgentMessage> {
+  const invocationServices = new InvocationServiceScope();
   const preparationStartedAt = performance.now();
   let memberPreparationStartedAt = preparationStartedAt;
   let preparationCheckpointAt = preparationStartedAt;
@@ -963,6 +965,7 @@ export async function* routeSerial(
       checkpointPreparation('source_and_pack');
       try {
         service = getService(deps.services, catId, deps.unavailableServices);
+        service = invocationServices.pin(service);
       } catch (error) {
         if (!(error instanceof AgentServiceUnavailableError)) throw error;
         yield { type: 'error', catId, content: error.message, error: error.message, timestamp: Date.now() };
@@ -3801,6 +3804,7 @@ export async function* routeSerial(
       index++;
     }
   } finally {
+    await invocationServices.dispose();
     // Turn-custody observation is recorded after the turn settles: current output persistence,
     // operator handoff writes, and inline child receiver-boundary handoffs must all
     // have had a chance to establish machine evidence before the projection closes.

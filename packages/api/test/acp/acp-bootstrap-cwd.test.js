@@ -58,7 +58,17 @@ describe('acp bootstrap cwd', () => {
 
   // All resolveAcpBootstrapCwd() calls in this suite go through the injected
   // throwaway root — the production root is never created, listed, or deleted.
-  const testBootstrapCwd = (projectRoot, profile) => resolveAcpBootstrapCwd(projectRoot, profile, testBootstrapRoot);
+  const testBootstrapCwd = (projectRoot, profile) => {
+    const previous = process.env.CAT_CAFE_WINDOWS_ACP_BOOTSTRAP_MODE;
+    // Directory naming and leaf privacy do not attest the runner's Temp ancestors.
+    if (process.platform === 'win32') process.env.CAT_CAFE_WINDOWS_ACP_BOOTSTRAP_MODE = 'trusted-host';
+    try {
+      return resolveAcpBootstrapCwd(projectRoot, profile, testBootstrapRoot);
+    } finally {
+      if (previous === undefined) delete process.env.CAT_CAFE_WINDOWS_ACP_BOOTSTRAP_MODE;
+      else process.env.CAT_CAFE_WINDOWS_ACP_BOOTSTRAP_MODE = previous;
+    }
+  };
 
   before(() => {
     // Portable throwaway root — never a hard-coded '/tmp' (PR #1207 sweep):

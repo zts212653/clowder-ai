@@ -1,4 +1,4 @@
-import { randomBytes } from 'node:crypto';
+import { createHash, createHmac, randomBytes } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import type { PluginNativeActionTarget } from '../../cats/services/types.js';
 import { type PluginCallContext, withPluginCallContext } from '../carrier/plugin-call-context.js';
@@ -22,6 +22,8 @@ interface Binding {
 
 /** A native MCP transport can call only actions belonging to its current local activation. */
 export class NativePluginActions {
+  // One secret per Host lifetime. Enable/disable changes authority, not credentials.
+  readonly #hostSecret = randomBytes(32);
   readonly #bindings = new Map<string, Binding>();
   readonly #tokens = new Map<
     string,
@@ -56,7 +58,9 @@ export class NativePluginActions {
     for (const contribution of admission.packageRecord.manifest.contributions ?? []) {
       if (contribution.type === 'mcp' && allowed.has(contribution.id) && contribution.actions?.length) {
         connections.set(contribution.id, {
-          token: randomBytes(32).toString('hex'),
+          token: createHmac('sha256', this.#hostSecret)
+            .update(JSON.stringify([instanceId, contribution.id]))
+            .digest('hex'),
           methods: new Set(contribution.actions.map((action) => action.method)),
         });
       }
@@ -68,8 +72,11 @@ export class NativePluginActions {
       invoke,
     };
     this.#bindings.set(instanceId, binding);
-    for (const [contributionId, connection] of connections)
+    for (const [contributionId, connection] of connections) {
       this.#tokens.set(connection.token, { binding, contributionId, methods: connection.methods });
+      process.env[this.environmentKey(instanceId, contributionId, 'TOKEN')] = connection.token;
+      process.env[this.environmentKey(instanceId, contributionId, 'PATH')] = '/api/plugin-runtime/action';
+    }
   }
 
   /** Resolve policy coordinates from the active Host-issued token, not package-supplied identity. */
@@ -91,6 +98,23 @@ export class NativePluginActions {
       CLOWDER_PLUGIN_ACTION_TOKEN: connection.token,
       CLOWDER_PLUGIN_ACTION_PATH: '/api/plugin-runtime/action',
     };
+  }
+
+  /** Durable MCP registration stores a reference, while its value belongs to this Host process. */
+  environmentReferences(instanceId: string, contributionId: string): Readonly<Record<string, string>> {
+    if (!this.#bindings.get(instanceId)?.connections.has(contributionId)) return {};
+    return {
+      CLOWDER_PLUGIN_ACTION_TOKEN: `\${${this.environmentKey(instanceId, contributionId, 'TOKEN')}}`,
+      CLOWDER_PLUGIN_ACTION_PATH: `\${${this.environmentKey(instanceId, contributionId, 'PATH')}}`,
+    };
+  }
+
+  private environmentKey(instanceId: string, contributionId: string, field: 'TOKEN' | 'PATH'): string {
+    const id = createHash('sha256')
+      .update(JSON.stringify([instanceId, contributionId]))
+      .digest('hex')
+      .toUpperCase();
+    return `CLOWDER_PLUGIN_${id}_ACTION_${field}`;
   }
 
   deactivate(instanceId: string): void {

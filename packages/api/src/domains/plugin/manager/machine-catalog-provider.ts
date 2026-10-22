@@ -3,6 +3,7 @@ import type { PluginDescription, PluginIconSpec } from '@cat-cafe/shared';
 import type { Capability, PluginManifest } from '@clowder-ai/plugin-contract';
 import { grantsWithinRequest } from '../host-inventory/contract-policy.js';
 import type { OfficialPluginCatalogEntry } from '../official-catalog.js';
+import { fetchPluginNetworkResource } from '../plugin-network-fetch.js';
 import {
   compareOfficialPluginVersions,
   type OfficialPluginCatalogProvider,
@@ -72,7 +73,7 @@ export async function loadMachinePluginCatalog(
   options: LoadMachinePluginCatalogOptions = {},
 ): Promise<unknown> {
   const url = assertCatalogUrl(catalogUrl);
-  const fetchFn = options.fetchFn ?? fetch;
+  const fetchFn = options.fetchFn ?? fetchPluginNetworkResource;
   const response = await fetchFn(url, {
     headers: { accept: 'application/json' },
     redirect: 'error',
@@ -196,6 +197,10 @@ export class MachineOfficialPluginCatalog implements OfficialPluginCatalogProvid
       this.inFlight = undefined;
     });
     return this.inFlight;
+  }
+
+  localSnapshot(): OfficialPluginCatalogSnapshot {
+    return this.project();
   }
 
   private async refresh(checkedAt: number): Promise<OfficialPluginCatalogSnapshot> {

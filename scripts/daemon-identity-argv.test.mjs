@@ -15,7 +15,12 @@ import {
   stopDaemon,
   writeDaemonState,
 } from './lib/daemon-state.mjs';
-import { captureReadableIdentity } from './lib/process-identity.mjs';
+import {
+  captureReadableIdentity,
+  compareStableBirth,
+  compareStoredIdentity,
+  PROCESS_START_TIME_FORMAT,
+} from './lib/process-identity.mjs';
 
 /**
  * F300 daemon identity: an unreadable argv is "unknown", never "a different
@@ -133,6 +138,72 @@ test('capture reports an unreadable argv as unavailable rather than as a command
   assert.equal(readable.argvAvailable, true);
   assert.match(readable.command, /--cat-cafe-daemon-token=capture-token/);
   assert.equal(typeof readable.ucomm, 'string');
+});
+
+const STABLE_MARKER_TOKEN = '--cat-cafe-daemon-token=stable-marker-token';
+
+function stableMarkerFixture(overrides = {}) {
+  return {
+    startedAt: 'Tue Oct 20 16:01:27 2026',
+    startedAtEpochMs: 1792512087000,
+    startedAtFormat: PROCESS_START_TIME_FORMAT,
+    command: `node daemon.js ${STABLE_MARKER_TOKEN}`,
+    cwd: '/runtime',
+    argvAvailable: true,
+    procStartTicks: 123456,
+    bootId: 'boot-a',
+    ...overrides,
+  };
+}
+
+test('a stable /proc birth marker takes precedence over a shifted wall-clock lstart', () => {
+  const state = {
+    process: {
+      ...stableMarkerFixture({ startedAt: 'Tue Oct 20 00:36:57 2026', startedAtEpochMs: 1792456617000 }),
+      launchToken: 'stable-marker-token',
+    },
+  };
+  const live = stableMarkerFixture({ startedAt: 'Tue Oct 20 16:01:27 2026' });
+
+  assert.equal(compareStoredIdentity(state, live), 'match');
+});
+
+test('a different stable birth marker remains a conclusive mismatch', () => {
+  const state = {
+    process: {
+      ...stableMarkerFixture({ startedAt: 'Tue Oct 20 00:36:57 2026', procStartTicks: 999999 }),
+      launchToken: 'stable-marker-token',
+    },
+  };
+  const live = stableMarkerFixture();
+
+  assert.equal(compareStoredIdentity(state, live), 'mismatch');
+});
+
+test('an unreadable argv with a matching stable marker stays unknown, not mismatched', () => {
+  const state = {
+    process: {
+      ...stableMarkerFixture({ startedAt: 'Tue Oct 20 00:36:57 2026' }),
+      launchToken: 'stable-marker-token',
+    },
+  };
+  const live = stableMarkerFixture({ command: '(node)', argvAvailable: false });
+
+  assert.equal(compareStoredIdentity(state, live), 'unknown');
+});
+
+test('an incomplete Linux marker cannot override the frozen wall-clock fallback', () => {
+  const stored = stableMarkerFixture();
+  for (const partial of [{ bootId: undefined }, { bootId: '' }, { procStartTicks: -1 }]) {
+    assert.equal(compareStableBirth(stored, { ...stored, ...partial }), undefined);
+  }
+  assert.equal(compareStableBirth(stored, { ...stored, bootId: 'another-boot' }), false);
+});
+
+test('an unreadable pre-marker process stays unknown when only its wall-clock birth changes', () => {
+  const stored = stableMarkerFixture({ procStartTicks: undefined, bootId: undefined });
+  const live = unreadable({ ...stored, startedAtEpochMs: stored.startedAtEpochMs + 24_420_000 });
+  assert.equal(compareStoredIdentity({ process: { ...stored, launchToken: 'stable-marker-token' } }, live), 'unknown');
 });
 
 test('writing state re-reads a transiently unreadable argv instead of calling it a mismatch', async () => {
@@ -315,36 +386,49 @@ test('inspection gives an unreadable argv its own fail-closed reason', async () 
   assert.equal(inspection.reason, 'process-argv-unavailable');
 });
 
-test('a stop never records "terminated" on the strength of an unreadable argv', async () => {
-  const fixture = createFixture();
-  const launchToken = 'stop-token';
-  const child = await spawnFakeDaemon(fixture.runtimeRoot, launchToken, { ignoreSigterm: true });
-  const paths = writeState({ ...fixture, child, launchToken });
+for (const clockJump of [false, true]) {
+  test(`a stop never records "terminated" on unreadable argv${clockJump ? ' after a pre-marker clock jump' : ''}`, async () => {
+    const fixture = createFixture();
+    const launchToken = 'stop-token';
+    const child = await spawnFakeDaemon(fixture.runtimeRoot, launchToken, { ignoreSigterm: true });
+    const paths = writeState({ ...fixture, child, launchToken });
+    if (clockJump) {
+      const state = JSON.parse(readFileSync(paths.stateFile, 'utf8'));
+      delete state.process.procStartTicks;
+      delete state.process.bootId;
+      writeFileSync(paths.stateFile, `${JSON.stringify(state)}\n`);
+    }
 
-  // The first read is readable, so the stop really opens against a running
-  // daemon and signals it. Every later read cannot see the argv - exactly the
-  // window in which the old code decided the daemon was gone.
-  let calls = 0;
-  const captureIdentity = (pid) => {
-    calls += 1;
-    const identity = calls === 1 ? captureReadableIdentity(pid) : captureProcessIdentity(pid);
-    return calls === 1 ? identity : unreadable(identity);
-  };
+    // The first read is readable, so the stop really opens against a running
+    // daemon and signals it. Every later read cannot see the argv - exactly the
+    // window in which the old code decided the daemon was gone.
+    let calls = 0;
+    const captureIdentity = (pid) => {
+      calls += 1;
+      const identity = calls === 1 ? captureReadableIdentity(pid) : captureProcessIdentity(pid);
+      return calls === 1
+        ? identity
+        : unreadable({
+            ...identity,
+            ...(clockJump ? { startedAtEpochMs: identity.startedAtEpochMs + 24_420_000 } : {}),
+          });
+    };
 
-  await assert.rejects(
-    stopDaemon({
-      paths,
-      expectedProjectRoot: fixture.runtimeRoot,
-      expectedDeploymentId: 'runtime',
-      graceMs: 200,
-      captureIdentity,
-    }),
-    (error) => error instanceof DaemonStateError && error.reason === 'stop-outcome-unknown',
-  );
-  assert.equal(existsSync(paths.stateFile), true, 'state must survive an unverifiable stop');
-  const audit = existsSync(paths.auditFile) ? readFileSync(paths.auditFile, 'utf8') : '';
-  assert.doesNotMatch(audit, /"outcome":"terminated"/);
-});
+    await assert.rejects(
+      stopDaemon({
+        paths,
+        expectedProjectRoot: fixture.runtimeRoot,
+        expectedDeploymentId: 'runtime',
+        graceMs: 200,
+        captureIdentity,
+      }),
+      (error) => error instanceof DaemonStateError && error.reason === 'stop-outcome-unknown',
+    );
+    assert.equal(existsSync(paths.stateFile), true, 'state must survive an unverifiable stop');
+    const audit = existsSync(paths.auditFile) ? readFileSync(paths.auditFile, 'utf8') : '';
+    assert.doesNotMatch(audit, /"outcome":"terminated"/);
+  });
+}
 
 function unreadableField(field, empty = false) {
   return (pid) =>

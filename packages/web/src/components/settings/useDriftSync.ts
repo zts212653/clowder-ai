@@ -68,7 +68,10 @@ export function useDriftSync({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ type, projectPath: projectPath ?? undefined }),
       });
-      if (!res.ok) throw new Error(`${type} 异常检测失败 (${res.status})`);
+      if (!res.ok) {
+        const body = (await res.json().catch(() => ({}))) as { message?: string; error?: string };
+        throw new Error(body.message ?? body.error ?? `${type} 异常检测失败 (${res.status})`);
+      }
       const payload = (await res.json()) as { result?: DriftCheckResult };
       return payload.result ?? { issues: [], driftHash: '' };
     },
@@ -80,30 +83,25 @@ export function useDriftSync({
     async (paths: string[]) => {
       const generation = ++reportsFetchGen.current;
       const isCurrent = () => reportsFetchGen.current === generation;
-      const [globalDrift, projectDrifts] = await Promise.all([
-        driftFor(undefined),
-        // Per-project: catch individually so one invalid/stale project doesn't
-        // kill the entire batch. A failed project shows as a synthetic issue
-        // instead of silently hiding all drift results.
-        Promise.all(
-          paths.map(async (path) => {
-            try {
-              return [path, await driftFor(path)] as const;
-            } catch (err) {
-              const label = path.split('/').pop() ?? path;
-              const msg = err instanceof Error ? err.message : '检测失败';
-              const failIssue: DriftIssue = {
-                id: '__check-failed',
-                issueType: 'check-failed',
-                message: `项目 ${label} 异常检测失败: ${msg}`,
-              };
-              return [path, { issues: [failIssue], driftHash: '' } as DriftCheckResult] as const;
-            }
-          }),
-        ),
-      ]);
+      // Each scope retains its own result, including global failures.
+      const reports = await Promise.all(
+        [undefined, ...paths].map(async (path) => {
+          const key = path ?? GLOBAL_SCOPE_KEY;
+          try {
+            return [key, await driftFor(path)] as const;
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : '检测失败';
+            const failIssue: DriftIssue = {
+              id: '__check-failed',
+              issueType: 'check-failed',
+              message: `${path ? `项目 ${path}` : '全局'} 异常检测失败: ${msg}`,
+            };
+            return [key, { issues: [failIssue], driftHash: '' } as DriftCheckResult] as const;
+          }
+        }),
+      );
       if (!isCurrent()) return;
-      setScopeDrift({ [GLOBAL_SCOPE_KEY]: globalDrift, ...Object.fromEntries(projectDrifts) });
+      setScopeDrift(Object.fromEntries(reports));
     },
     [driftFor],
   );
@@ -151,8 +149,8 @@ export function useDriftSync({
         body: JSON.stringify({ type, action, projectPath: projectPath ?? undefined }),
       });
       if (!res.ok) {
-        const body = (await res.json().catch(() => ({}))) as { error?: string };
-        throw new Error(body.error ?? `Sync failed (${res.status})`);
+        const body = (await res.json().catch(() => ({}))) as { message?: string; error?: string };
+        throw new Error(body.message ?? body.error ?? `Sync failed (${res.status})`);
       }
     },
     [type],
@@ -177,16 +175,24 @@ export function useDriftSync({
   const handleSyncAllScopes = useCallback(async () => {
     setSyncing(true);
     setSyncAllError(null);
+    const failures: string[] = [];
     try {
       // Skills have a global cascade step; MCP resolve is project-scoped.
-      if (type === 'skill') await resolveScope('sync', undefined);
-      for (const path of projectPaths) {
-        await resolveScope('sync', path);
+      const scopes = type === 'skill' ? [undefined, ...projectPaths] : projectPaths;
+      for (const path of scopes) {
+        try {
+          await resolveScope('sync', path);
+        } catch (err) {
+          failures.push(`${path ?? '全局'}: ${err instanceof Error ? err.message : '同步失败'}`);
+        }
       }
-      await fetchScopeReports(projectPaths);
-    } catch (err) {
-      setSyncAllError(err instanceof Error ? err.message : '全部同步失败');
+      try {
+        await fetchScopeReports(projectPaths);
+      } catch (err) {
+        failures.push(`刷新状态: ${err instanceof Error ? err.message : '加载失败'}`);
+      }
     } finally {
+      setSyncAllError(failures.length > 0 ? failures.join('\n') : null);
       setSyncing(false);
     }
   }, [fetchScopeReports, projectPaths, resolveScope, type]);

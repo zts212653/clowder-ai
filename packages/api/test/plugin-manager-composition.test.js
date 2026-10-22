@@ -171,7 +171,7 @@ async function harness({
 
 function contributionContractRuntime() {
   return {
-    manifestContractVersions: ['0.1.0'],
+    manifestContractRange: '0.1.0',
     validateEffectiveGrants,
     validateManifest,
   };

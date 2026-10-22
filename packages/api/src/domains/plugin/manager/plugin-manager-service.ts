@@ -31,6 +31,8 @@ export interface PluginManagerCatalogSnapshot {
 
 export interface PluginManagerCatalogPort {
   snapshot(): Promise<PluginManagerCatalogSnapshot>;
+  /** Host-owned entries available without remote discovery or repository refresh. */
+  localSnapshot?(): Promise<PluginManagerCatalogSnapshot>;
 }
 
 export interface PluginManagerInstalledPackagesPort {
@@ -73,6 +75,11 @@ export interface PluginManagerConfigurationPort {
   /** Reconcile static defaults/no-required-fields immediately after idempotent admission. */
   reconcile?(pluginId: string, pluginInstanceId: string): Promise<void>;
   configure(pluginId: string, pluginInstanceId: string, request: PluginManagerConfigureRequest): Promise<void>;
+  configureBootstrapRoot?(
+    pluginId: string,
+    pluginInstanceId: string,
+    request: PluginManagerConfigureRequest,
+  ): Promise<void>;
 }
 
 export interface PluginManagerServiceOptions {
@@ -95,6 +102,7 @@ export type PluginManagerServiceErrorCode =
   | 'LIFECYCLE_UNAVAILABLE'
   | 'RUNTIME_START_FAILED'
   | 'CONFIGURATION_UNAVAILABLE'
+  | 'AUDIT_UNAVAILABLE'
   | 'INVALID_CONFIGURATION';
 
 export class PluginManagerServiceError extends Error {
@@ -112,6 +120,13 @@ const unavailableCatalog: PluginManagerCatalogSnapshot = {
   status: 'unavailable',
   refreshedAt: null,
   message: 'Plugin catalog is unavailable.',
+};
+
+const loadingCatalog: PluginManagerCatalogSnapshot = {
+  candidates: [],
+  status: 'loading',
+  refreshedAt: null,
+  message: 'Loading available plugins; installed plugins are ready.',
 };
 
 function catalogProjection(snapshot: PluginManagerCatalogSnapshot): PluginManagerCatalogProjection {
@@ -141,6 +156,48 @@ function detailFromListItem(plugin: PluginManagerListItem): PluginManagerDetail 
     ...plugin,
     capabilities: plugin.capabilitySummary.map((capability) => ({ ...capability })),
     configFields: [],
+  };
+}
+
+function installedCandidate(plugin: PluginManagerDetail): PluginManagerCatalogCandidate {
+  return {
+    catalogId: plugin.source.kind === 'catalog' ? plugin.source.catalogId : `inventory:${plugin.pluginId}`,
+    pluginId: plugin.pluginId,
+    packageName: plugin.source.packageName ?? `local:${plugin.pluginId}`,
+    version: plugin.installedVersion ?? plugin.availableVersion ?? '0.0.0',
+    packageDigest: plugin.packageDigest,
+    ...(plugin.source.kind === 'git' ? { directorySource: plugin.source } : {}),
+    displayName: plugin.displayName,
+    ...(plugin.description === undefined ? {} : { description: plugin.description }),
+    ...(plugin.icon === undefined ? {} : { icon: plugin.icon }),
+    ...(plugin.iconBg === undefined ? {} : { iconBg: plugin.iconBg }),
+    ...(plugin.publisher === undefined ? {} : { publisher: plugin.publisher }),
+    ownerAuthRequired: plugin.auth !== 'not-required',
+    capabilities: plugin.capabilities.map(({ active: _active, ...capability }) => capability),
+    ...(plugin.contributions === undefined ? {} : { contributions: plugin.contributions }),
+  };
+}
+
+function installedOverrides(plugin: PluginManagerDetail): PluginManagerProjectionOverrides {
+  return {
+    authState: plugin.auth,
+    configState: plugin.config,
+    intentState: plugin.intent,
+    activeCapabilityIds: plugin.capabilities
+      .filter((capability) => capability.active)
+      .map((capability) => capability.id),
+  };
+}
+
+function mergeInstalledProjection(plugin: PluginManagerDetail, projected: PluginManagerListItem): PluginManagerDetail {
+  const active = new Map(projected.capabilitySummary.map((capability) => [capability.id, capability.active]));
+  return {
+    ...plugin,
+    ...projected,
+    capabilities: plugin.capabilities.map((capability) => ({
+      ...capability,
+      active: active.get(capability.id) ?? false,
+    })),
   };
 }
 
@@ -198,12 +255,36 @@ export class PluginManagerService {
     return (await this.project()).response;
   }
 
+  async listLocal(): Promise<PluginManagerListResponse> {
+    return (await this.project(undefined, await this.readLocalCatalog())).response;
+  }
+
   async search(query: string): Promise<PluginManagerListResponse> {
     return (await this.project(query)).response;
   }
 
+  async searchLocal(query: string): Promise<PluginManagerListResponse> {
+    return (await this.project(query, await this.readLocalCatalog())).response;
+  }
+
   async get(pluginId: string): Promise<PluginManagerDetailResponse> {
     const result = await this.project();
+    return this.detailFromProjection(pluginId, result);
+  }
+
+  async getLocal(pluginId: string): Promise<PluginManagerDetailResponse> {
+    const result = await this.project(undefined, await this.readLocalCatalog());
+    return this.detailFromProjection(pluginId, result);
+  }
+
+  private async readLocalCatalog(): Promise<PluginManagerCatalogSnapshot> {
+    return (await this.options.catalog.localSnapshot?.()) ?? loadingCatalog;
+  }
+
+  private async detailFromProjection(
+    pluginId: string,
+    result: Awaited<ReturnType<PluginManagerService['project']>>,
+  ): Promise<PluginManagerDetailResponse> {
     const projected = result.entries.find((candidate) => candidate.plugin.pluginId === pluginId);
     if (!projected) throw new PluginManagerServiceError('PLUGIN_NOT_FOUND', `Unknown plugin ${pluginId}`);
     const detail = projected.detail ?? detailFromListItem(projected.plugin);
@@ -217,8 +298,19 @@ export class PluginManagerService {
     };
   }
 
+  private async getInstalled(pluginId: string): Promise<PluginManagerDetailResponse> {
+    try {
+      return await this.getLocal(pluginId);
+    } catch (error) {
+      // Older embedders may not provide the installed-package projection yet. Keep
+      // them compatible without making the normal Host path wait for the catalog.
+      if (!(error instanceof PluginManagerServiceError) || error.code !== 'PLUGIN_NOT_FOUND') throw error;
+      return this.get(pluginId);
+    }
+  }
+
   async configure(pluginId: string, request: PluginManagerConfigureRequest): Promise<PluginManagerMutationResult> {
-    const current = (await this.get(pluginId)).plugin;
+    const current = (await this.getInstalled(pluginId)).plugin;
     const instance = this.requireCurrentInstance(current, request.expectedRevision);
     if (!this.options.configuration) {
       throw new PluginManagerServiceError(
@@ -227,6 +319,18 @@ export class PluginManagerService {
       );
     }
     await this.options.configuration.configure(pluginId, instance.pluginInstanceId, request);
+    return { pluginId, pluginInstanceId: instance.pluginInstanceId };
+  }
+
+  async configureBootstrapRoot(
+    pluginId: string,
+    request: PluginManagerConfigureRequest,
+  ): Promise<PluginManagerMutationResult> {
+    const current = (await this.get(pluginId)).plugin;
+    const instance = this.requireCurrentInstance(current, request.expectedRevision);
+    if (!this.options.configuration?.configureBootstrapRoot)
+      throw new PluginManagerServiceError('AUDIT_UNAVAILABLE', 'Plugin audit log is unavailable');
+    await this.options.configuration.configureBootstrapRoot(pluginId, instance.pluginInstanceId, request);
     return { pluginId, pluginInstanceId: instance.pluginInstanceId };
   }
 
@@ -300,7 +404,7 @@ export class PluginManagerService {
   }
 
   async setEnabled(pluginId: string, request: PluginManagerSetEnabledRequest): Promise<PluginManagerMutationResult> {
-    const current = (await this.get(pluginId)).plugin;
+    const current = (await this.getInstalled(pluginId)).plugin;
     return this.setEnabledCurrent(pluginId, request, current);
   }
 
@@ -339,7 +443,7 @@ export class PluginManagerService {
   }
 
   async uninstall(pluginId: string, request: PluginManagerUninstallRequest): Promise<PluginManagerMutationResult> {
-    const current = (await this.get(pluginId)).plugin;
+    const current = (await this.getInstalled(pluginId)).plugin;
     if (current.artifact === 'quarantined') {
       return this.removeQuarantinedPackage(pluginId, current, request.expectedRevision);
     }
@@ -403,6 +507,23 @@ export class PluginManagerService {
     return projected.detail ?? detailFromListItem(projected.plugin);
   }
 
+  private async projectInstalled(
+    installed: PluginManagerDetail,
+    inventory: PluginInventorySnapshot,
+  ): Promise<{ readonly plugin: PluginManagerListItem; readonly detail: PluginManagerDetail }> {
+    const hasCurrentInstance = inventory.instances.some(
+      (instance) => instance.pluginId === installed.pluginId && instance.lifecycleState === 'installed',
+    );
+    if (!hasCurrentInstance) return { plugin: installed, detail: installed };
+    const candidate = installedCandidate(installed);
+    const overrides = {
+      ...installedOverrides(installed),
+      ...((await this.options.stateProjection?.read(candidate, inventory)) ?? {}),
+    };
+    const projected = projectPluginManagerCatalogCandidate(candidate, inventory, overrides);
+    return { plugin: projected, detail: mergeInstalledProjection(installed, projected) };
+  }
+
   private async project(
     query?: string,
     fixedCatalog?: PluginManagerCatalogSnapshot,
@@ -433,8 +554,9 @@ export class PluginManagerService {
     for (const entry of projectedPublished) {
       if (!byPluginId.has(entry.plugin.pluginId)) byPluginId.set(entry.plugin.pluginId, entry);
     }
-    for (const plugin of installedPackages) {
-      if (!byPluginId.has(plugin.pluginId)) byPluginId.set(plugin.pluginId, { plugin, detail: plugin });
+    for (const installed of installedPackages) {
+      if (byPluginId.has(installed.pluginId)) continue;
+      byPluginId.set(installed.pluginId, await this.projectInstalled(installed, inventory));
     }
     for (const plugin of quarantines) {
       const current = byPluginId.get(plugin.pluginId);
