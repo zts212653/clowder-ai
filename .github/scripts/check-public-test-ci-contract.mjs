@@ -122,11 +122,27 @@ for (const [pattern, message] of [
 ]) {
   assert.match(distributableLauncher, pattern, message);
 }
+assert.doesNotMatch(
+  summaryStep.run,
+  /--max-critical-path-ms\b/,
+  'public-test coverage must not fail solely because runner-dependent timing exceeds a target',
+);
 assert.match(
   summaryStep.run,
-  /--max-critical-path-ms 600000(?:\s|$)/,
-  'public-test evidence must fail when the measured critical path exceeds 10 minutes',
+  /::warning title=Public test timing::/,
+  'public-test timing above the optimization target must remain visible as a warning',
 );
+assert.match(
+  summaryStep.run,
+  /GITHUB_STEP_SUMMARY/,
+  'public-test timing and runner consumption must remain visible in the job summary',
+);
+for (const job of ['public-test-shards', 'public-test-summary', 'public-test-serial']) {
+  assert.ok(
+    Number.isInteger(workflow.jobs[job]['timeout-minutes']) && workflow.jobs[job]['timeout-minutes'] > 0,
+    `${job} must retain a bounded job timeout for stuck processes`,
+  );
+}
 
 process.stdout.write(
   `public-test CI contract OK (Node ${versions[0]}, owner ${distributableShardStep.env.DEFAULT_OWNER_USER_ID})\n`,
