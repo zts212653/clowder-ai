@@ -1,15 +1,17 @@
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import net from 'node:net';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { it } from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { stopManagedPreview } from './lib/preview-process-stop.mjs';
 import { readProcessIdentity } from './preview-process-launchers.mjs';
 
 const SCRIPT_PATH = join(dirname(fileURLToPath(import.meta.url)), 'preview-process.mjs');
+const LEASE_RUNNER_PATH = join(dirname(fileURLToPath(import.meta.url)), 'preview-process-lease-runner.mjs');
 
 function reservePort() {
   return new Promise((resolve, reject) => {
@@ -116,3 +118,80 @@ it(
     }
   },
 );
+
+for (const outcome of ['complete', 'owner failure', 'missing receipt']) {
+  it(
+    `an unreaped supervisor with ${outcome} keeps the cleanup receipt contract`,
+    { skip: process.platform === 'win32' && 'Requires POSIX zombie observation' },
+    async () => {
+      const root = mkdtempSync(join(tmpdir(), 'preview-unreaped-'));
+      const completionPath = join(root, 'completion.json');
+      const readyPath = join(root, 'ready');
+      const finishPath = join(root, 'finish');
+      const recordPath = join(root, 'record.json');
+      const expiresAt = new Date(Date.now() + 60_000).toISOString();
+      const exitCode = outcome === 'owner failure' ? 7 : 0;
+      const program = `
+        const fs = require('node:fs');
+        fs.writeFileSync(process.env.CAT_CAFE_PREVIEW_CLEANUP_RESULT,
+          JSON.stringify({pid:process.pid,processGroupId:process.pid,exitCode:${exitCode}}));
+        fs.writeFileSync(${JSON.stringify(readyPath)}, 'ready');
+        setInterval(() => { if (fs.existsSync(${JSON.stringify(finishPath)})) process.exit(${exitCode}); }, 10);
+      `;
+      const runner = spawn(
+        process.execPath,
+        [
+          LEASE_RUNNER_PATH,
+          '--expires-at',
+          expiresAt,
+          '--completion-path',
+          completionPath,
+          '--',
+          process.execPath,
+          '-e',
+          program,
+        ],
+        { stdio: 'ignore' },
+      );
+      try {
+        const readyDeadline = Date.now() + 5_000;
+        while (!existsSync(readyPath) && Date.now() < readyDeadline) {
+          await new Promise((resolve) => setTimeout(resolve, 10));
+        }
+        assert.ok(existsSync(readyPath), 'the real supervisor must own a ready child');
+        const identity = readProcessIdentity(runner.pid);
+        assert.ok(identity);
+        const record = { pid: runner.pid, ...identity, expiresAt, completionPath };
+        writeFileSync(recordPath, JSON.stringify(record));
+        const port = await reservePort();
+        writeFileSync(finishPath, 'finish');
+        // Keep Node's child watcher from reaping this owned runner, so the
+        // otherwise brief ps/exit race is deterministic without faking ps.
+        const exitDeadline = Date.now() + 5_000;
+        let state = '';
+        while (Date.now() < exitDeadline) {
+          Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20);
+          state = spawnSync('ps', ['-p', String(runner.pid), '-o', 'stat='], { encoding: 'utf8' }).stdout.trim();
+          if (state.startsWith('Z')) break;
+        }
+        assert.match(state, /^Z/, 'the test must hold an actual unreaped supervisor');
+        assert.equal(JSON.parse(readFileSync(completionPath, 'utf8')).exitCode, exitCode);
+        if (outcome === 'missing receipt') rmSync(completionPath);
+        const stop = stopManagedPreview({ recordPath, port }, { status: 'stopped', record });
+        if (outcome === 'complete') {
+          await stop;
+          assert.equal(existsSync(recordPath), false);
+        } else {
+          await assert.rejects(stop, /cleanup incomplete or failed/);
+          assert.equal(existsSync(recordPath), true, 'unproven cleanup must retain its evidence');
+        }
+      } finally {
+        if (runner.exitCode === null && runner.signalCode === null) {
+          runner.kill('SIGTERM');
+          await new Promise((resolve) => runner.once('exit', resolve));
+        }
+        rmSync(root, { recursive: true, force: true });
+      }
+    },
+  );
+}

@@ -26,25 +26,33 @@ function identityProbeFixture(directory, port, pidFile, mode) {
   const argv = mode.startsWith('argv-');
   const command = argv ? 'ps' : 'lsof';
   const native = execFileSync('which', [command], { encoding: 'utf8' }).trim();
+  const quote = (value) => `'${value.replaceAll("'", "'\\''")}'`;
   writeFileSync(
     join(bin, command),
-    `#!${process.execPath}
-const fs = require('node:fs');
-const args = process.argv.slice(2);
-const target = ${
-      argv
-        ? `args.includes('command=') && fs.existsSync(${JSON.stringify(pidFile)}) &&
-  args[args.indexOf('-p') + 1] === fs.readFileSync(${JSON.stringify(pidFile)}, 'utf8').trim()`
-        : `args.includes('-iTCP:${port}')`
-    };
-if (target && fs.existsSync(${JSON.stringify(armed)}) &&
-    (${JSON.stringify(mode)}.endsWith('always') || !fs.existsSync(${JSON.stringify(observed)}))) {
-  fs.appendFileSync(${JSON.stringify(observed)}, ${JSON.stringify(argv ? 'argv unavailable\n' : 'timeout\n')});
-  ${argv ? "process.stdout.write('(redis-server)\\n');" : 'setTimeout(() => process.exit(1), 10000);'}
-} else {
-  const result = require('node:child_process').spawnSync(${JSON.stringify(native)}, args, { stdio: 'inherit' });
-  process.exit(result.status ?? 1);
+    `#!/bin/sh
+target=false
+${
+  argv
+    ? `previous= selected_pid= command_read=false
+for arg do
+  [ "$previous" != -p ] || selected_pid="$arg"
+  [ "$arg" != command= ] || command_read=true
+  previous="$arg"
+done
+if [ "$command_read" = true ] && [ -f ${quote(pidFile)} ]; then
+  IFS= read -r fixture_pid < ${quote(pidFile)}
+  [ "$selected_pid" != "$fixture_pid" ] || target=true
+fi`
+    : `for arg do [ "$arg" != '-iTCP:${port}' ] || target=true; done`
 }
+if [ "$target" = true ] && [ -f ${quote(armed)} ] &&
+   { ${mode.endsWith('always') ? 'true' : `[ ! -f ${quote(observed)} ]`}; }; then
+  printf '%s\\n' ${quote(argv ? 'argv unavailable' : 'timeout')} >> ${quote(observed)}
+  ${argv ? "printf '%s\\n' '(redis-server)'; exit 0" : 'exec sleep 10'}
+fi
+# Keep healthy native observations within their real identity budget; a Node
+# wrapper for every ps/lsof call adds unrelated startup time to the retry.
+exec ${quote(native)} "$@"
 `,
     { mode: 0o755 },
   );

@@ -1,5 +1,5 @@
 import { saveSpan } from '../../../../../../utils/member-save-diagnostics.js';
-import { retireAcpServicePool } from './acp-service-pool-lease.js';
+import { retireAcpServicePool } from './pool/acp-service-pool-lease.js';
 
 export interface ClosableAcpPool {
   closeAll(): Promise<void>;

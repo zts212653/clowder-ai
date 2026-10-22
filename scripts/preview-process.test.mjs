@@ -146,6 +146,11 @@ describe('preview-process managed lifecycle', () => {
       assert.equal(launchd.status, 0, launchd.stderr || launchd.stdout);
       assert.match(launchd.stdout, new RegExp(`\\bpid = ${record.pid}\\b`));
       assert.match(launchd.stdout, /\bruns = 1\b/);
+      assert.match(
+        launchd.stdout,
+        /spawn type = Interactive\b/i,
+        'an explicitly requested preview must not inherit daemon CPU/IO throttling that times out its identity probes',
+      );
       assert.doesNotMatch(
         launchd.stdout,
         /properties = keepalive/,

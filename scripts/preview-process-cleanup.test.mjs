@@ -225,11 +225,31 @@ test('lease expiry also waits for a reported wrapped launcher cleanup', async (t
 
 test('a changed process identity cannot be signalled using the stored launchd PID', async (t) => {
   const f = await fixture(t);
-  writeFileSync(f.recordPath, JSON.stringify({ ...f.record, processCommand: 'different incarnation' }));
   try {
-    assert.equal(f.run('stop').status, 1);
-    assert.equal(f.events(), '', 'an identity mismatch must not start cleanup');
+    for (const field of ['processCommand', 'processStartedAt']) {
+      writeFileSync(f.recordPath, JSON.stringify({ ...f.record, [field]: 'different incarnation' }));
+      for (const completed of [false, true]) {
+        if (completed) {
+          writeFileSync(
+            f.record.completionPath,
+            JSON.stringify({
+              pid: f.record.pid,
+              expiresAt: f.record.expiresAt,
+              exitCode: 0,
+              forced: false,
+            }),
+          );
+        }
+        const stopped = f.run('stop');
+        assert.equal(stopped.status, 1, stopped.stderr || stopped.stdout);
+        assert.match(stopped.stderr, /exact process ownership is not proven/);
+        assert.equal(f.events(), '', 'a mismatched live identity must never be signalled, even with a receipt');
+        assert.ok(existsSync(f.recordPath));
+      }
+      rmSync(f.record.completionPath, { force: true });
+    }
   } finally {
+    rmSync(f.record.completionPath, { force: true });
     writeFileSync(f.recordPath, JSON.stringify(f.record));
   }
 });

@@ -23,12 +23,6 @@ import { AcpProcessPool, DEFAULT_ACP_IDLE_TTL_MS } from './AcpProcessPool.js';
 // for invoke-time resolution (#712 P1-1).
 import { createAcpPoolSpawnSignature } from './acp-pool-signature.js';
 import { skipAcpProfile } from './acp-registration-failure.js';
-import {
-  type AcpServicePoolLease,
-  bindAcpServicePoolLease,
-  retainAcpServicePool,
-  retireAcpServicePool,
-} from './acp-service-pool-lease.js';
 import { tryPrepareAcpProcessEnv } from './acp-spawn-env.js';
 import { denyAgyAcpPermission } from './agy/agy-acp-permission.js';
 import { prepareAgyAcpProfile } from './agy/agy-acp-profile.js';
@@ -39,6 +33,12 @@ import {
   type VerifiedAcpBootstrapContext,
   verifyAcpBootstrap,
 } from './bootstrap/acp-bootstrap-context.js';
+import {
+  type AcpServicePoolLease,
+  bindAcpServicePoolLease,
+  retainAcpServicePool,
+  retireAcpServicePool,
+} from './pool/acp-service-pool-lease.js';
 
 export type AcpPoolRegistry = Map<string, AcpProcessPool>;
 

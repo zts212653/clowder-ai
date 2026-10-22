@@ -1,5 +1,5 @@
-import type { AgentService } from '../../../types.js';
-import type { AcpProcessPool } from './AcpProcessPool.js';
+import type { AgentService } from '../../../../types.js';
+import type { AcpProcessPool } from '../AcpProcessPool.js';
 
 interface PoolOwnership {
   count: number;
