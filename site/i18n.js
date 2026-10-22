@@ -22,6 +22,7 @@ window.I18N = {
     'nav.scenarios': `Scenarios`,
     'nav.quickstart': `Quick Start`,
     'nav.firststeps': `First Steps`,
+    'nav.demos': `Demos`,
     'nav.roadmap': `Roadmap`,
     'nav.journey': `Journey`,
     'a11y.language': `Switch language`,
@@ -30,6 +31,7 @@ window.I18N = {
     'home.a11y.addaccount': `Add a model account in Clowder AI`,
     'home.a11y.addmember': `Add an AI team member in Clowder AI`,
     'home.a11y.startconversation': `Start a conversation with the AI team`,
+    'home.a11y.demo.proposals': `Demo: a cat proposes new conversations`,
 
     // ── Hero ──
     'hero.tagline': `Open Source Multi-Model AI Platform`,
@@ -147,6 +149,19 @@ window.I18N = {
     'firststeps.s2.desc': `Add team members with their own model, identity, and personality. They'll share context and collaborate.`,
     'firststeps.s3.title': `Say Hi`,
     'firststeps.s3.desc': `Open a thread and send your first message. Watch your AI team come alive and start working together.`,
+
+    // ── Demos: each one replays a real conversation from Cat Cafe ──
+    'demos.title': `See a Feature in 30 Seconds`,
+    'demos.subtitle': `Each demo replays a real conversation from the team that builds Clowder AI. Watch it, then say the same thing to your own cats.`,
+    'demos.try': `Try saying`,
+    'demos.watch': `Watch demo`,
+    'demos.next.title': `Which feature next?`,
+    'demos.next.desc': `Tell us in the community which demo you want to see.`,
+    'demos.proposals.video': `assets/demos/conversation-proposals.en.mp4`,
+    'demos.proposals.source': `From community issue #82`,
+    'demos.proposals.title': `Conversation Proposals`,
+    'demos.proposals.desc': `Hand one big job to a team of cats. A cat splits it into separate pieces of work and fills in a card for each: what, why, and which cat. Approve a card and its conversation opens; say no and the cat revises it.`,
+    'demos.proposals.try': `“This is a big job. Split it into threads and open a new conversation for each.”`,
 
     // ── Roadmap ──
     'roadmap.title': `Roadmap`,
@@ -277,6 +292,7 @@ window.I18N = {
     'nav.scenarios': `应用场景`,
     'nav.quickstart': `快速开始`,
     'nav.firststeps': `上手步骤`,
+    'nav.demos': `功能演示`,
     'nav.roadmap': `路线图`,
     'nav.journey': `发展历程`,
     'a11y.language': `切换语言`,
@@ -285,6 +301,7 @@ window.I18N = {
     'home.a11y.addaccount': `在 Clowder AI 中添加模型账号`,
     'home.a11y.addmember': `在 Clowder AI 中添加 AI 团队成员`,
     'home.a11y.startconversation': `与 AI 团队开始对话`,
+    'home.a11y.demo.proposals': `演示：猫猫提议开新对话`,
 
     // ── Hero ──
     'hero.tagline': `开源多模型 AI 团队平台`,
@@ -402,6 +419,19 @@ window.I18N = {
     'firststeps.s2.desc': `添加团队成员，每个都有自己的模型、身份与个性。它们会共享上下文、协同工作。`,
     'firststeps.s3.title': `打个招呼`,
     'firststeps.s3.desc': `打开一个线程，发出第一条消息。看着你的 AI 团队活起来、开始一起干活。`,
+
+    // ── 功能演示：每支都是 Cat Cafe 家里真实发生过的一段对话 ──
+    'demos.title': `30 秒看一个功能`,
+    'demos.subtitle': `每支演示都是我们团队日常里真实发生过的一段对话。看完，就能照着跟你的猫说。`,
+    'demos.try': `试试这样跟猫说`,
+    'demos.watch': `观看演示`,
+    'demos.next.title': `下一支想看哪个功能？`,
+    'demos.next.desc': `在社区里告诉我们。`,
+    'demos.proposals.video': `assets/demos/conversation-proposals.zh.mp4`,
+    'demos.proposals.source': `来自社区 issue #82`,
+    'demos.proposals.title': `新对话提议`,
+    'demos.proposals.desc': `一件大事交给一群猫：猫把它拆成几条线，每条写好做什么、为什么、交给谁。你点同意，新对话就开好了；也可以说不，猫改好再交回来。`,
+    'demos.proposals.try': `「这件事挺大，你拆成几条线，开新对话分头去做。」`,
 
     // ── Roadmap ──
     'roadmap.title': `路线图`,

@@ -117,7 +117,7 @@ export interface MessageIdScanPage {
 export const COORDINATION_TERMINAL_SCAN_PAGE_SIZE = 100;
 
 export interface ThreadMessageReadOptions {
-  /** Artifact reads need publication/visibility/receipt fields, never conversation text or tool traces. */
+  /** Select artifact hash fields, omitting named top-level payloads; contentBlocks and extra are not trimmed. */
   artifactProjection?: boolean;
   /** Include queued cat-authored speech that is already published to the timeline. */
   includeQueuedCatMessages?: boolean;
@@ -309,6 +309,10 @@ export interface StoredMessage {
   metadata?: MessageMetadata;
   /** F022+F052+F098-C1+F153-F: Extensible extra data (rich blocks, stream metadata, cross-post origin, explicit targets, tracing pointers) */
   extra?: {
+    /** Read-only pre-plugin Host receipt; new admission belongs to the plugin Task controller. */
+    collectiveOwnerAdmissionV1?: import('@cat-cafe/shared').CollectiveOwnerAdmissionV1;
+    /** Retain malformed/revoked legacy provenance so hydration can never revive it. */
+    collectiveAuthorizationInvalid?: true;
     /** Optional references into this message's one normalized full body. */
     outputLayout?: import('@cat-cafe/shared').MessageOutputLayoutV1;
     /** Server-written admission provenance for the original response's failure return, not another owner. */
@@ -751,8 +755,10 @@ export type AppendMessageInput = Omit<
   | 'recall'
   | 'sourceParseFailure'
   | 'companionDeliveryReceipt'
+  | 'extra'
 > & {
   from: MessageFrom;
+  extra?: Omit<NonNullable<StoredMessage['extra']>, 'collectiveOwnerAdmissionV1' | 'collectiveAuthorizationInvalid'>;
   threadId?: string;
   /** Append may initialize only queued state; terminal delivery metadata belongs to transition methods. */
   deliveryStatus?: 'queued';
@@ -1755,6 +1761,15 @@ export function isValidCustodyOfferTransition(
 /** Validate every caller-controlled field that affects persistent message order. */
 export function assertValidAppendMessageInput(msg: AppendMessageInput): void {
   if ('companionDeliveryReceipt' in msg) throw new TypeError('Host delivery acceptance requires its original producer');
+  for (const key of [
+    'collectiveOwnerAdmissionV1',
+    'collectiveAuthorizationInvalid',
+    'collectiveWorkInvocationV1',
+    'collectiveWorkDelegationV1',
+  ]) {
+    if (msg.extra && key in msg.extra)
+      throw new TypeError('append() cannot write read-only legacy Collective metadata');
+  }
   assertValidAppendDeliveryMetadata(msg);
   if (msg.extra?.dotAsk) {
     const ask = msg.extra.dotAsk;
@@ -1854,8 +1869,12 @@ export function mergeMessageExtra(
     evolutionPreparationSubmissionV1: _stripPreparation,
     dotAsk: _stripDotAsk,
     deliveryBoundary: _stripBoundary,
+    collectiveOwnerAdmissionV1: _stripCollectiveAdmission,
+    collectiveAuthorizationInvalid: _stripCollectiveInvalid,
+    collectiveWorkInvocationV1: _stripCollectiveInvocation,
+    collectiveWorkDelegationV1: _stripCollectiveDelegation,
     ...incomingHost
-  } = incoming ?? {};
+  } = (incoming ?? {}) as Record<string, unknown>;
   const merged = { ...(existing ?? {}), ...incomingHost };
   const rich = mergeRichExtra(existing?.rich, incoming?.rich);
   if (rich) merged.rich = rich;
@@ -3637,6 +3656,10 @@ export class MessageStore {
       evolutionPreparationSubmissionV1: _stripPreparation,
       dotAsk: _stripDotAsk,
       deliveryBoundary: _stripBoundary,
+      collectiveOwnerAdmissionV1: _stripCollectiveAdmission,
+      collectiveAuthorizationInvalid: _stripCollectiveInvalid,
+      collectiveWorkInvocationV1: _stripCollectiveInvocation,
+      collectiveWorkDelegationV1: _stripCollectiveDelegation,
       ...hostOnly
     } = extra as Record<string, unknown>;
     msg.extra = { ...msg.extra, ...hostOnly };

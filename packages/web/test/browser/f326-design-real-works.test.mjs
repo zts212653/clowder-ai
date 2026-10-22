@@ -5,6 +5,7 @@ import { test } from 'node:test';
 import { chromium } from '../../../ppt-forge/node_modules/playwright/index.mjs';
 import { ensureWorkspaceOpen } from './f307-workspace-open.mjs';
 import { readAuthorDraft } from './f326-real-works-composer.journey.mjs';
+import { decodedSeek } from './f326-screening-journey.harness.mjs';
 
 test(
   'real film chapters, exact chapter alignment, grouped sequences, covers and source dates survive the original Works path',
@@ -14,6 +15,7 @@ test(
       api = process.env.F326_DESIGN_API;
     assert.ok(
       (web === 'http://127.0.0.1:3463' && api === 'http://127.0.0.1:3464') ||
+        (web === 'http://127.0.0.1:3465' && api === 'http://127.0.0.1:3466') ||
         (web === 'http://127.0.0.1:3461' && api === 'http://127.0.0.1:3462'),
       'Only owned candidate or named Alpha; never runtime',
     );
@@ -277,6 +279,32 @@ test(
         firstCover: await covers.locator('img').getAttribute('src'),
       };
       await page.screenshot({ path: path.join(evidence, 'sequences-and-current-covers.png'), fullPage: true });
+      const smallChapterBar = await surface.getByRole('navigation', { name: '影片章节' }).boundingBox();
+      const sixChapterViewport = await video.boundingBox();
+      observations.sixChapterViewport = sixChapterViewport;
+      assert.ok(sixChapterViewport.height > 140);
+      await sidebar.getByRole('combobox', { name: '故事线或素材' }).selectOption('story');
+      // A seek to the already presented, paused timestamp need not emit another video frame.
+      observations.sixChapterFrame = await decodedSeek(video, expectedNew + 1);
+      await page.screenshot({ path: path.join(evidence, 'six-chapters.png'), fullPage: true });
+      await surface.getByRole('button', { name: '‹ 作品', exact: true }).click();
+      const manyChapters = library.works.find((row) => row.key === 'builder-day');
+      await panel.getByTestId('workspace-home-artifact-card').filter({ hasText: manyChapters.title }).click();
+      const chapterBar = surface.getByRole('navigation', { name: '影片章节' });
+      await chapterBar.getByRole('button').nth(48).waitFor();
+      assert.equal(await chapterBar.getByRole('button').count(), 49);
+      const videoFrame = surface.locator('[data-testid="workspace-review-artwork"] video');
+      await videoFrame.waitFor();
+      const manyViewport = await videoFrame.boundingBox();
+      assert.ok(manyViewport.height > 140, '49 chapters must retain the film viewport');
+      observations.manyChapterFrame = await decodedSeek(videoFrame, 5);
+      assert.ok(Math.abs((await chapterBar.boundingBox()).height - smallChapterBar.height) < 2);
+      assert.ok(await chapterBar.evaluate((node) => node.scrollWidth <= node.clientWidth));
+      const lastChapter = chapterBar.getByRole('button').last();
+      await lastChapter.focus();
+      await chapterBar.getByRole('tooltip').waitFor();
+      observations.manyChapterViewport = manyViewport;
+      await page.screenshot({ path: path.join(evidence, 'forty-nine-chapters.png'), fullPage: true });
       assert.deepEqual(await readAuthorDraft(page, library.threadId), []);
       assert.deepEqual(errors, []);
       outcome = 'passed';

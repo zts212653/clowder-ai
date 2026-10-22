@@ -1,4 +1,7 @@
-/** Keep the original authority and visibility inputs; exclude prose, thinking, metadata and toolEvents. */
+/**
+ * Keep authority/visibility inputs; omit top-level content, thinking, metadata and toolEvents.
+ * contentBlocks and extra remain complete serialized fields, including prose/tool payloads.
+ */
 export const MESSAGE_ARTIFACT_FIELDS = [
   'id',
   'threadId',

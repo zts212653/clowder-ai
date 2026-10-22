@@ -17,6 +17,7 @@ import { withOwnerUncertaintyIndex } from './owner-uncertainty-lua.js';
 import { readOwnerUncertainty } from './owner-uncertainty-read.js';
 import { recordRedisCompanionAcceptance } from './redis-companion-acceptance.js';
 import { artifactMessageHash, MESSAGE_ARTIFACT_FIELDS } from './redis-message-artifact-fields.js';
+import { readArtifactBeforeRange, readArtifactMessagePage } from './redis-message-artifact-page.js';
 import { evidenceMessageHash, MESSAGE_EVIDENCE_FIELDS } from './redis-message-evidence-fields.js';
 import {
   HANDLE_USER_MENTIONS_LUA,
@@ -2743,6 +2744,7 @@ export class RedisMessageStore {
         options,
         hydrate: (ids) => this.hydrateMessages(ids, { strict: true }),
       });
+    if (options?.artifactProjection) return readArtifactMessagePage(this, threadId, n, userId, options);
     const key = MessageKeys.thread(threadId);
     return this.fetchVisibleDesc(
       key,
@@ -3247,6 +3249,11 @@ export class RedisMessageStore {
     options?: ThreadMessageReadOptions,
   ): Promise<StoredMessage[]> {
     const n = limit ?? DEFAULT_LIMIT;
+    if (options?.artifactProjection)
+      return readArtifactMessagePage(this, threadId, n, userId, options, {
+        timestamp,
+        ...(beforeId ? { id: beforeId } : {}),
+      });
     const key = MessageKeys.thread(threadId);
     const userFilter = userId ? (m: StoredMessage) => m.userId === userId || isSystemUserMessage(m) : undefined;
     const isVisible = resolveThreadMessageVisibility(options, userId);
@@ -3303,7 +3310,7 @@ export class RedisMessageStore {
     let nextCursor: BoundedThreadMessagePage['nextCursor'];
 
     let cursorRank: number | null | undefined;
-    if (beforeId) {
+    if (beforeId && !options?.artifactProjection) {
       cursorRank = await this.redis.zrevrank(key, beforeId);
       storageRoundTrips += 1;
     }
@@ -3311,7 +3318,9 @@ export class RedisMessageStore {
     while (result.length < resultTarget && scannedCount < rawLimit) {
       const count = Math.min(chunkSize, rawLimit - scannedCount);
       let raw: string[];
-      if (cursorRank !== null && cursorRank !== undefined) {
+      if (beforeId && options?.artifactProjection) {
+        raw = await readArtifactBeforeRange(this.redis, key, timestamp, beforeId, offset, count);
+      } else if (cursorRank !== null && cursorRank !== undefined) {
         const start = cursorRank + 1 + offset;
         raw = await this.redis.zrevrange(key, start, start + count - 1, 'WITHSCORES');
       } else {
@@ -3609,6 +3618,10 @@ export class RedisMessageStore {
       evolutionPreparationSubmissionV1: _stripPreparation,
       dotAsk: _stripDotAsk,
       deliveryBoundary: _stripBoundary,
+      collectiveOwnerAdmissionV1: _stripCollectiveAdmission,
+      collectiveAuthorizationInvalid: _stripCollectiveInvalid,
+      collectiveWorkInvocationV1: _stripCollectiveInvocation,
+      collectiveWorkDelegationV1: _stripCollectiveDelegation,
       ...hostPatch
     } = extra as Record<string, unknown>;
     const merged = { ...current, ...hostPatch };

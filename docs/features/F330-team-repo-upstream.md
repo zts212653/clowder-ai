@@ -8,7 +8,7 @@ description: "让开源团队仓成为共享代码的上游：家里和团队的
 description_source: human
 description_author: opus55
 description_updated_at: 2026-10-20T10:45:00Z
-tips_exempt: "Phase A 余项合包将既有 API/MCP/shared/Web 显示、仓库坐标及启动默认值接回运行档案，并修复目录别名下的入站检查；不新增用户操作入口。名字沿用已有设置，品牌/仓库/开关由部署和维护入口消费；等价规则退役与路径检查属于维护流程，不需要应用内能力提示。"
+tips_exempt: "Phase A/B 将既有部署显示、默认值、测试夹具、构建投影及两侧文件归属接回各自真相源，不新增用户操作入口。用户名字仍沿用已有设置；模板、构建生成与导出/回流边界属于开发维护流程，不需要新增应用内能力提示。"
 ---
 
 # F330: 团队仓当上游
@@ -51,7 +51,7 @@ You 原话：
 
 ## What
 
-### Phase A: 去改写第一批（已批准，子线程 `[thread-id]`）
+### Phase A: 去改写第一批（已完成，子线程 `[thread-id]`）
 
 Sol6.1 执行，Sol5.6 review（operator 指定）。前期分片交付；2026-10-21 operator 要求剩余部分合为一个 PR 收尾，不扩范围。
 
@@ -67,9 +67,11 @@ Sol6.1 执行，Sol5.6 review（operator 指定）。前期分片交付；2026-1
 
 2026-10-21 operator 补充（`[thread-id]#private-source-id`）：剩余运行时品牌、仓库地址集中、现存默认开关、等价规则退役及 `/tmp` 路径回归合为一个 PR 收尾，不再逐片开 PR。桌面安装身份与发布工件不属于 Phase A；它们可能影响已安装用户的自动更新，需要单独确认。合入后仍须等待既定定时同步通过，再在同一执行线程继续 Phase B。
 
-**当前交付（2026-10-21）**：余项 [PR #5854](https://github.com/zts212653/clowder-ai/pull/5854) 已于 14:15:11 UTC 合入，提交 `1498fcf75c7ce5247e6d928232237d8d0a27e3ac`。Sol5.6 完整初审唯一 P1（固定历史来源误跟随部署仓库）修复后，iterative 复审批准精确 HEAD `28e286f95ce971307f1edec491da040e9704fac3`（`[thread-id]#private-source-id`）。代码交付与 AC-A2–A4 已成立；AC-A5 仍等待包含 #5818 与 #5854 的下一轮既定同步实物，不据此前四项同步通过提前关闭 Phase A。本批未执行在线 runtime 激活。
+**当前交付（2026-10-21）**：余项 [PR #5854](https://github.com/zts212653/clowder-ai/pull/5854) 已于 14:15:11 UTC 合入，提交 `1498fcf75c7ce5247e6d928232237d8d0a27e3ac`。Sol5.6 完整初审唯一 P1（固定历史来源误跟随部署仓库）修复后，iterative 复审批准精确 HEAD `28e286f95ce971307f1edec491da040e9704fac3`（`[thread-id]#private-source-id`）。后续公开 CI 暴露的两项遗漏由 #5873 修复；包含全部切片和修复的既定同步最终候选已通过真实验收，并于 23:37:36 UTC 合入公开 #1649，落地 tree 与被测 tree 相同。AC-A1–A5 全部成立，Phase A 收口；本线未执行在线 runtime 激活。后续 Phase B 沿原授权在本线程继续，F330 整项仍为 in-progress。
 
 ### Phase B: 去改写第二批（测试、构建、模板、两边不同的文件）
+
+Phase A 的实际同步依赖已于 2026-10-21 23:37:36 UTC 满足。按原安排（`[thread-id]#private-source-id` 及执行交接 `private-source-id`），由 Sol6.1 在同一线程继续，Sol5.6 review；先核清剩余消费者及文件归属，再按 AC-B1–B3 实施。桌面安装身份/发行工件、公开分支切换和新调度不进入本阶段。
 
 - 测试 fixture 化，去掉本机路径；system-prompt hash 与内置插件包改为构建时生成；家里专属 package.json 脚本拆出；L0 模板与 hooks 中的家里句子模板化。
 - **两边本来就不同的文件**（CLAUDE.md、README、cat-config 等）：逐个确定真实归属（只属于家里 / 只属于公开版 / 两边各自生成），并为四种情况写下预期结果并实测：上游单边修改、上游删除、双方都修改、全新 checkout。再按结果选实现方式。**不使用 `.gitattributes merge=ours` 作为保护**：它只在双方都改动时才会被调用，上游单边修改仍会直接进入家里文件；自定义 driver 还要求本地 git 配置，只提交 `.gitattributes` 不会生效（小星星已隔离复现两例）。
@@ -130,9 +132,15 @@ Sol6.1 执行，Sol5.6 review（operator 指定）。前期分片交付；2026-1
 - [x] AC-A2: 名字与 @ 句柄切片：显示名、角色词、@ 路由句柄按含义分别处理；公开候选产物中「需要 You 决定」类文案消失；家里 @co-creator 等句柄仍能路由到 You；公开候选中用户设置的句柄能路由到用户（实测）
 - [x] AC-A3: 品牌名、端口默认值、文档路径、仓库地址、默认开关改为读配置；仓库地址在共享代码里只剩一处定义
 - [x] AC-A4: 家里与公开版都没退步，每个切片四项都要有证据：① 家里生成的系统提示词与受影响文案逐字一致；② 家里配置解析出的名字、句柄、端口、路径、默认开关与改前相同；③ 受影响的操作实际跑过（例如 @ 路由、受影响的设置读取）；④ 合入前用同步脚本已有的隔离入口启动公开候选，健康检查与受影响功能通过，不等合入后的下一轮既定同步（当前每2小时）才发现问题
-- [ ] AC-A5: 只删除已被等价实现替代的改写规则，并逐条说明替代物；隐私过滤与实际行为差异规则保留，或有单独确认的替代设计；合入后下一轮既定同步（当前每2小时）通过
+- [x] AC-A5: 只删除已被等价实现替代的改写规则，并逐条说明替代物；隐私过滤与实际行为差异规则保留，或有单独确认的替代设计；合入后下一轮既定同步（当前每2小时）通过
 
 同步验收沿用现有值守，不额外触发同步或增加 writer。10-20 的每12小时观察已被 operator 恢复每2小时的决定取代（`[thread-id]#private-source-id`）；当前唯一调度为 `dyn-1792575889211-xa37qo`。
+
+[PR #5873](https://github.com/zts212653/clowder-ai/pull/5873) 已于 21:30:46 UTC 合入 `2f62149f243957954640867a7ef3d6895831a100`；Sol5.6 最终批准精确 HEAD `47a10ecddd61f398192a0fbc62b2a296efaa316f`，无开放 P1/P2（`[thread-id]#private-source-id`）。修复保持不可变来源和全部 sanitizer/privacy 规则；精确 pin 仍为固定常量，node/delegate/git/symlink 拒绝边界保留。home/public 来源测试各 34/34、F306 各 7/7、两组直接检查各 52/52、guarded gh 13/13、sanitizer 4/4、核心 smoke 31/31，均 0 skip；不求和重叠组。三个源码路径的最小补丁已在自有临时 Git index 验证能应用到 daily 新冻结源 `53ac9a0b1f871aa086a9aa4612f830da73afb26a`，未写 daily 工位或候选。
+
+**AC-A5 终态（2026-10-21 23:37:36 UTC）**：原唯一 daily 周期的固定源 `6772da8c3d50142cc010338722f34c444dbc41be` 包含上述六个切片的真实 Git ancestry；#5873 三个修复文件与独审 `47a10ecddd` 的 blob 逐一相同。候选 `dcec0be8465d0a1cb82341ce7347edf34ed71eca`、CI merge-ref `2870656a5624ebfb06eb0028e8e66d46851db35b` 与公开落地 `3c0a20097f19dbef736403d78ce8fbde54d68d19` 的 tree 均为 `82b9775825937d9bcba0ce39dfc9d0e82c8bfda8`。GitHub 实时回读确认 #1649 已 MERGED，Linux `39692704417`、Windows `39692704419`、macOS `39692704504` 均 success 且绑定同一候选。
+
+原生 writer 706 秒成功，F251 为 3,856 pass / 0 block / 0 override；1,409 处置、9 个社区等价路径及 Windows workflow 保全。原生 CI 检查 consistent，7 lane 覆盖 2,676 个计划文件、9 个原始 archive digest；计划外启动隔离 55/55。F306 pin 和 archive owner adapter 两个原失败文件在最终 CI 的文件级回归均 passed。文件级原件不支持全部 subtest 零 skip，不作该声明。规则退役的逐条替代与 privacy/behavior 保留证据仍沿前文账本，旧 851/1a7 失败不覆盖。
 
 ### Phase B（去改写第二批）
 - [ ] AC-B1: 测试不再依赖家里数据断言与 `/home/user 本机路径；system-prompt hash 与内置插件包由构建生成，不在同步时改写

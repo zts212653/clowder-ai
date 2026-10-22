@@ -1,6 +1,8 @@
 import type { SourceScope } from './approved-scope.js';
 import type { Source, SourceModules } from './archive.js';
+import { commentOverlapReader } from './comment-overlap.js';
 import { type PureSourceHelpers, type Reader, readEligibleTask } from './eligible-task.js';
+import { coalesceSparseScans } from './sparse-scan.js';
 
 export type { PureSourceHelpers } from './eligible-task.js';
 
@@ -59,11 +61,12 @@ export async function collectEligibleGitHubSource(
   sourceDigest: SourceModules['sourceDigest'],
 ): Promise<Source> {
   const tasks = await eligibleTasks(reader, scope, signal, helpers, sourceDigest);
-  const repos = await helpers.legacyRepositories(reader, scope, signal);
+  const overlap = commentOverlapReader(coalesceSparseScans(reader), scope, signal);
+  const repos = await helpers.legacyRepositories(overlap.reader, scope, signal);
   signal.throwIfAborted();
   return {
     v: 1,
-    id: `legacy-redis:${sourceDigest({ scope, census: tasks.census, claims: repos.claims })}`,
+    id: `legacy-redis:${sourceDigest({ scope, census: tasks.census, claims: repos.claims, commentWindow: overlap.census() })}`,
     userId: scope.ownerUserId,
     sourceRef: scope.sourceRef,
     capturedAt: Date.now(),

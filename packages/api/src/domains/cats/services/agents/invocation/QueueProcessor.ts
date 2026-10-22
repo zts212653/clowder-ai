@@ -83,6 +83,7 @@ import {
   type AgentMessage,
   mergeTokenUsage,
   type TokenUsage,
+  type ToolExecutionPolicy,
 } from '../../types.js';
 import { extractImagePaths } from '../providers/image-paths.js';
 import { userFacingSystemInfoNoticeContent } from '../routing/persist-system-info-warnings.js';
@@ -2404,6 +2405,7 @@ export class QueueProcessor {
     threadId: string;
     userId: string;
     ownerAuthProvenance: import('./owner-auth-provenance.js').OwnerAuthProvenance;
+    toolExecutionPolicy?: ToolExecutionPolicy;
     catId: string;
     capsule?: CollaborationContinuityCapsuleV1 | null;
     excludeEntryId?: string;
@@ -2468,6 +2470,7 @@ export class QueueProcessor {
       userId,
       kind: 'private_input',
       ownerAuthProvenance,
+      ...(input.toolExecutionPolicy ? { readOnlyToolPolicy: input.toolExecutionPolicy } : {}),
       content: formatContinuationPrompt(capsule),
       sourceCategory: 'continuation',
       sourceId: continuationKey,
@@ -5155,6 +5158,7 @@ export class QueueProcessor {
         {
           ...(liveCall ? { liveCompanion: liveCall } : {}),
           ownerAuthProvenance: entry.execution.ownerAuthProvenance,
+          ...(entry.execution.readOnlyToolPolicy ? { toolExecutionPolicy: entry.execution.readOnlyToolPolicy } : {}),
           humanDispositionInvocationOrigin: 'queue_replay',
           routingQueueSource: source,
           ...(routingOwnerRetryTarget ? { routingOwnerRetryTarget } : {}),
@@ -6332,6 +6336,7 @@ export class QueueProcessor {
           threadId,
           userId,
           ownerAuthProvenance: entry.execution.ownerAuthProvenance,
+          ...(entry.execution.readOnlyToolPolicy ? { toolExecutionPolicy: entry.execution.readOnlyToolPolicy } : {}),
           catId: continuationCapsule.catId,
           capsule: continuationCapsule,
         });

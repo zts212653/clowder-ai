@@ -4779,10 +4779,8 @@ async function main(): Promise<void> {
   // Seed only an absent registry before plugin activation can persist schedules
   // into it. Native invoke-time MCP resolution must work without visiting Settings.
   const { initializeFirstRunCapabilities } = await import('./config/capabilities/first-run-capabilities.js');
-  const capabilityInitialization = await initializeFirstRunCapabilities(
-    await resolveInvokeCapabilityRoot(runtimeEntrypointRoot),
-    runtimeEntrypointRoot,
-  );
+  const pluginCapabilityRoot = await resolveInvokeCapabilityRoot(runtimeEntrypointRoot);
+  const capabilityInitialization = await initializeFirstRunCapabilities(pluginCapabilityRoot, runtimeEntrypointRoot);
   if (capabilityInitialization.status === 'unreadable') {
     app.log.warn('[api] Existing capabilities are unreadable; preserved without enabling default tools');
   }
@@ -4861,6 +4859,7 @@ async function main(): Promise<void> {
       ],
     ]),
     projectRoot: pluginProjectRoot,
+    capabilityProjectRoot: pluginCapabilityRoot,
     editorParentOrigin: new URL(resolveFrontendBaseUrl(process.env, app.log)).origin,
     desktopExecutor: {
       open: async (launch) =>
@@ -7465,6 +7464,7 @@ async function main(): Promise<void> {
       const deploymentWaitLifecycle = new DeploymentWaitLifecycleService({
         taskStore,
         messageStore,
+        authorizationRegistry: registry,
         deliveryDeps,
         eventLog: waitEventLog,
         log: app.log,

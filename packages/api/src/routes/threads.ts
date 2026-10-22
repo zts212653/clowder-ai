@@ -25,11 +25,10 @@ import {
   type PrTitleReader,
   readArtifactPrTitles,
 } from '../domains/cats/services/agents/routing/thread-artifact-pr-titles.js';
+import { observeThreadArtifactRead } from '../domains/cats/services/agents/routing/thread-artifact-read-diagnostics.js';
 import {
   aggregateProjectedThreadArtifacts,
-  collectAllThreadMessages,
   collectThreadMessageArtifacts,
-  projectMessageArtifacts,
 } from '../domains/cats/services/agents/routing/thread-artifacts-aggregator.js';
 import { threadWorksPrs } from '../domains/cats/services/agents/routing/thread-works-prs.js';
 import { resolveBootcampWorkspaceRoot } from '../domains/cats/services/bootcamp/workspace-root.js';
@@ -1670,59 +1669,76 @@ export const threadsRoutes: FastifyPluginAsync<ThreadsRoutesOptions> = async (ap
       return { error: 'Access denied' };
     }
 
-    // P1 fix (砚砚 review): 分页扫全量消息，getByThread 默认 limit=50 会吞掉 >50 条 thread 的早期产物
-    const messages = messageStore ? await collectAllThreadMessages(messageStore, threadId, userId) : [];
-    const allTasks = taskStore ? await taskStore.listByThread(threadId) : [];
-    // F232 P1 (cloud review): system thread（createdBy='system'，shared default thread）任何认证用户
-    // 都通过上面的 access guard，但 PR tracking task 带注册者 userId（user-specific）。必须按 userId 过滤，
-    // 否则 shared system thread 上 Alice 会看到 Bob 的 PR titles/refs。messages 已由
-    // collectAllThreadMessages(userId) scoped；ledger 是 thread 级产物记录（updatedBy=cat/'user'，非
-    // user 私有数据），无需过滤。
-    const prTasks = worksView
-      ? threadWorksPrs(allTasks, userId, thread.createdBy)
-      : allTasks.filter((t) => t.kind === 'pr_tracking' && t.userId === userId);
-    const mem = worksView ? null : await threadStore.getThreadMemory(threadId);
-    // P1 fix (砚砚 review): ledger 含 file/plan/feature-doc 文档产物（F148 类型），不止 file；都映射为面板 file 类，不静默丢
-    const persistedFileLedger = (mem?.recentArtifacts ?? []).filter(
-      (a) => a.type === 'file' || a.type === 'plan' || a.type === 'feature-doc',
-    );
-    const liveFileLedger = worksView
-      ? []
-      : await collectLiveFileLedger(opts.sessionChainStore, opts.transcriptWriter, threadId, userId);
-    const fileLedger = [...persistedFileLedger, ...liveFileLedger];
-    const acceptedFiles = await readAcceptedWorkspaceArtifacts(
-      opts.acceptedWorkspaceArtifacts,
-      userId,
-      threadId,
-      projectAppliedWorkspaceReceipts(messages),
-    );
-    const artifacts = await readArtifactPrTitles(
-      aggregateProjectedThreadArtifacts({
-        messageArtifacts: [...projectMessageArtifacts(messages), ...acceptedFiles.artifacts],
-        prTasks,
-        fileLedger: worksView ? [] : fileLedger,
-      }),
-      worksView ? (opts.prTitleReader ?? pluginPrTitleReader(app, request)) : undefined,
-    );
-    if (worksView)
-      artifacts.push(...(await readIndependentThreadWorks(opts.artifactWorkLineage?.independent, userId, threadId)));
-    const projected = await projectGlobalArtifactWorkLineage(
-      opts.artifactWorkLineage,
-      userId,
-      artifacts.map((artifact) => ({ ...artifact, threadId, threadTitle: thread.title ?? '' })),
-    );
-    return {
-      threadId,
-      artifacts: projected.artifacts.map(({ threadId: _threadId, threadTitle: _threadTitle, ...artifact }) => artifact),
-      workLineage: projected.workLineage,
-      ...(worksView
-        ? {
-            view: 'works',
-            total: projectThreadWorks(projected.artifacts, projected.workLineage === 'resolved').length,
-            complete: !!messageStore && !!taskStore && acceptedFiles.complete,
-          }
-        : {}),
-    };
+    return observeThreadArtifactRead(request.log, async (measure) => {
+      // Scan complete publication history, retiring raw message pages after both projections.
+      const receipts: AppliedWorkspaceReceiptMessage[] = [];
+      const messageArtifacts = messageStore
+        ? await measure('messages', () =>
+            collectThreadMessageArtifacts(messageStore, threadId, userId, (page) => {
+              receipts.push(...projectAppliedWorkspaceReceipts(page));
+            }),
+          )
+        : [];
+      const allTasks = taskStore ? await measure('tasks', () => taskStore.listByThread(threadId)) : [];
+      // F232 P1 (cloud review): system thread（createdBy='system'，shared default thread）任何认证用户
+      // 都通过上面的 access guard，但 PR tracking task 带注册者 userId（user-specific）。必须按 userId 过滤，
+      // 否则 shared system thread 上 Alice 会看到 Bob 的 PR titles/refs。消息分页已按 userId scoped；ledger 是 thread 级产物记录（updatedBy=cat/'user'，非
+      // user 私有数据），无需过滤。
+      const prTasks = worksView
+        ? threadWorksPrs(allTasks, userId, thread.createdBy)
+        : allTasks.filter((t) => t.kind === 'pr_tracking' && t.userId === userId);
+      const mem = worksView ? null : await measure('memory', () => threadStore.getThreadMemory(threadId));
+      // P1 fix (砚砚 review): ledger 含 file/plan/feature-doc 文档产物（F148 类型），不止 file；都映射为面板 file 类，不静默丢
+      const persistedFileLedger = (mem?.recentArtifacts ?? []).filter(
+        (a) => a.type === 'file' || a.type === 'plan' || a.type === 'feature-doc',
+      );
+      const liveFileLedger = worksView
+        ? []
+        : await measure('liveFiles', () =>
+            collectLiveFileLedger(opts.sessionChainStore, opts.transcriptWriter, threadId, userId),
+          );
+      const fileLedger = [...persistedFileLedger, ...liveFileLedger];
+      const acceptedFiles = await measure('acceptedFiles', () =>
+        readAcceptedWorkspaceArtifacts(opts.acceptedWorkspaceArtifacts, userId, threadId, receipts),
+      );
+      const artifacts = await measure('prTitles', () =>
+        readArtifactPrTitles(
+          aggregateProjectedThreadArtifacts({
+            messageArtifacts: [...messageArtifacts, ...acceptedFiles.artifacts],
+            prTasks,
+            fileLedger: worksView ? [] : fileLedger,
+          }),
+          worksView ? (opts.prTitleReader ?? pluginPrTitleReader(app, request)) : undefined,
+        ),
+      );
+      if (worksView)
+        artifacts.push(
+          ...(await measure('independentWorks', () =>
+            readIndependentThreadWorks(opts.artifactWorkLineage?.independent, userId, threadId),
+          )),
+        );
+      const projected = await measure('lineage', () =>
+        projectGlobalArtifactWorkLineage(
+          opts.artifactWorkLineage,
+          userId,
+          artifacts.map((artifact) => ({ ...artifact, threadId, threadTitle: thread.title ?? '' })),
+        ),
+      );
+      return {
+        threadId,
+        artifacts: projected.artifacts.map(
+          ({ threadId: _threadId, threadTitle: _threadTitle, ...artifact }) => artifact,
+        ),
+        workLineage: projected.workLineage,
+        ...(worksView
+          ? {
+              view: 'works',
+              total: projectThreadWorks(projected.artifacts, projected.workLineage === 'resolved').length,
+              complete: !!messageStore && !!taskStore && acceptedFiles.complete,
+            }
+          : {}),
+      };
+    });
   });
 
   // F232 PR-A: GET /api/threads/:threadId/artifacts/:messageId/blocks/:blockId — read one html_widget.

@@ -28,6 +28,14 @@ Clowder AI is the platform layer that turns isolated AI agents into a real team.
 
 > 📹 **[Full platform walkthrough (3:45)](https://github.com/user-attachments/assets/8e470aba-8fe6-4aa5-a476-c2cd81d1630f)**
 
+### See a Feature in 30 Seconds
+
+Each demo replays a real conversation from the team that builds Clowder AI. Watch it, then say the same thing to your own cats.
+
+[![Conversation Proposals demo: five proposal cards, approved and running](site/assets/demos/conversation-proposals.jpg)](https://zts212653.github.io/clowder-ai/#demos)
+
+**Conversation Proposals** — Hand one big job to a team of cats. A cat splits it into separate pieces of work and fills in a card for each: what, why, and which cat. Approve a card and its conversation opens; say no and the cat revises it. [Watch demo (0:48)](https://zts212653.github.io/clowder-ai/#demos) · started as community issue [#82](https://github.com/zts212653/clowder-ai/issues/82)
+
 ## Quick Start
 
 ### Desktop Installer

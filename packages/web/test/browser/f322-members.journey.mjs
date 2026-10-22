@@ -247,3 +247,42 @@ test('wide, narrow, dark and classic production surfaces; every approved avatar 
     }
   }
 });
+
+// Real table layout catches intrinsic button widths painting across cell borders.
+test('long member text stays in its column and reveals full text on hover and focus', async () => {
+  const { context, page, state } = await scene();
+  try {
+    Object.assign(state.cats[2], {
+      defaultModel: 'gemini-4-argon-high-with-a-long-native-model-name',
+      accountRef: state.accounts[0].id,
+      mentionPatterns: ['@a-very-long-member-handle-that-must-not-cover-the-switch'],
+    });
+    state.accounts[0].displayName = 'A very long OAuth account name that must stay inside its column';
+    await page.reload();
+    const row = page.locator('tr[data-cat-id="fixture-c"]');
+    await row.waitFor();
+    for (const selector of ['.member-runtime-summary', '.member-cell-text', '.member-aliases']) {
+      const trigger = row.locator(selector).first();
+      const bounds = await trigger.evaluate((el) => ({
+        right: el.getBoundingClientRect().right,
+        cellRight: el.closest('td').getBoundingClientRect().right,
+        clipped: el.scrollWidth > el.clientWidth,
+      }));
+      assert.ok(bounds.right <= bounds.cellRight, `${selector} must stay inside its cell`);
+      assert.equal(bounds.clipped, true, `${selector} actually exercises truncation`);
+      await trigger.hover();
+      const tip = page.getByRole('tooltip');
+      await tip.waitFor();
+      assert.equal(await tip.innerText(), await trigger.textContent());
+      await page.mouse.move(0, 0);
+      await page.keyboard.press('Tab');
+      await trigger.focus();
+      await tip.waitFor();
+      assert.equal(await tip.innerText(), await trigger.textContent());
+      await page.keyboard.press('Escape');
+    }
+    if (screenshots) await page.screenshot({ path: path.join(screenshots, 'long-member-columns.png') });
+  } finally {
+    await context.close();
+  }
+});

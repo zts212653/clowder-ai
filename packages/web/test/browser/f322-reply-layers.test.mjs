@@ -205,6 +205,37 @@ async function open({
 
 const measure = (page, id) => page.evaluate(measureReply(), id);
 
+test('Activity hover and focus preserve containment, geometry and record disclosure', async () => {
+  const { page, errors, unexpected } = await open({ width: 720, viewportWidth: 1440 });
+  try {
+    const row = page.locator('[data-message-id="r-done"]');
+    const boundary = row.locator('xpath=ancestor::*[@data-message-viewport-boundary][1]');
+    const toggle = row.getByTestId('reply-record-toggle');
+    await toggle.scrollIntoViewIfNeeded();
+    const before = await boundary.boundingBox();
+    const box = await toggle.boundingBox();
+    for (const offset of [-4, 4, box.height - 1, box.height + 4]) {
+      await page.mouse.move(box.x + 12, box.y + offset);
+      await page.waitForTimeout(30);
+      assert.equal(await boundary.evaluate((el) => getComputedStyle(el).contentVisibility), 'auto');
+      const after = await boundary.boundingBox();
+      assert.equal(after.y, before.y);
+      assert.equal(after.height, before.height);
+      assert.equal(await toggle.getAttribute('aria-expanded'), 'false');
+    }
+    await toggle.focus();
+    assert.equal(await boundary.evaluate((el) => getComputedStyle(el).contentVisibility), 'auto');
+    await toggle.press('Enter');
+    assert.equal(await toggle.getAttribute('aria-expanded'), 'true');
+    await toggle.press('Enter');
+    assert.equal(await toggle.getAttribute('aria-expanded'), 'false');
+    assert.deepEqual(errors, []);
+    assert.deepEqual(unexpected, []);
+  } finally {
+    await page.close();
+  }
+});
+
 test('failed primary executions disclose their reason, survive reload and identify the collapsed member', async () => {
   const { page, errors, unexpected } = await open({ failureVisibility: true });
   try {

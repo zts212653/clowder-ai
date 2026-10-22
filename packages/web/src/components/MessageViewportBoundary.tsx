@@ -17,13 +17,11 @@ const OFFSCREEN_MESSAGE_STYLE: CSSProperties = {
   containIntrinsicSize: 'auto 240px',
 };
 
-// `content-visibility: auto` also paint-contains descendants. The message toolbar floats above
-// its row, so lift that containment only while the real row is interactive.
-// `flow-root` keeps the row's height the same in both states: the containment of `auto` holds the
-// bubble's bottom margin inside the row, and without a block formatting context of its own the
-// hovered `visible` state let that margin collapse out, so each row under the pointer lost 16px.
-// With native scroll anchoring off in the chat container, that showed as the view jumping.
-const CONTENT_VISIBILITY_CLASS =
+// Classic's in-row toolbar needs to escape paint containment while interactive.
+// V2 actions and tooltips are body portals: keep its containment stable as the pointer
+// crosses Activity, instead of invalidating the row's layout/paint at every hover edge.
+const CONTENT_VISIBILITY_CLASS = '[content-visibility:auto]';
+const CLASSIC_CONTENT_VISIBILITY_CLASS =
   '[content-visibility:auto] hover:[content-visibility:visible] focus-within:[content-visibility:visible]';
 
 // F322 B §1.16: the cat's 32px face hangs 4px above its nameplate, with a 2px ring around it. `content-visibility:auto`
@@ -122,7 +120,7 @@ export function MessageViewportBoundary({
       className={
         shellPresentation === 'v2'
           ? `${CONTENT_VISIBILITY_CLASS} ${FACE_OVERFLOW_CLASS} ${STABLE_MESSAGE_FLOW_CLASS}`
-          : `${CONTENT_VISIBILITY_CLASS} ${STABLE_MESSAGE_FLOW_CLASS}`
+          : `${CLASSIC_CONTENT_VISIBILITY_CLASS} ${STABLE_MESSAGE_FLOW_CLASS}`
       }
       {...(!mounted && messageId ? { 'data-deferred-message-id': messageId } : {})}
       style={mounted ? OFFSCREEN_MESSAGE_STYLE : { ...OFFSCREEN_MESSAGE_STYLE, minHeight: '240px' }}

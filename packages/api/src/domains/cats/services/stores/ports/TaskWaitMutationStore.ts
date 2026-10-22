@@ -55,7 +55,8 @@ export class TaskWaitMutationStore {
     if (!deploymentWaitReplacementMatches(existing, input)) return null;
 
     const updated = buildTaskDeploymentWaitReplacement(existing, input);
-    if (input.waitRegistration) assertTypedWaitRegistrationInstallation(updated, input.waitRegistration);
+    if (input.waitRegistration)
+      assertTypedWaitRegistrationInstallation(updated, input.waitRegistration, this.waitRegistrations.get(taskId));
     this.commitWaitRegistration(
       taskId,
       input.waitRegistration,

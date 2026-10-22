@@ -101,8 +101,6 @@ describe('MessageViewportBoundary', () => {
       expect(className).not.toContain('-mt-1.5');
       expect(className).toContain('flow-root');
       expect(className).toContain('[content-visibility:auto]');
-      expect(className).toContain('hover:[content-visibility:visible]');
-      expect(className).toContain('focus-within:[content-visibility:visible]');
     });
   });
 

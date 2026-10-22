@@ -2,6 +2,7 @@ import type { TaskItem } from '@cat-cafe/shared';
 import type { RedisClient } from '@cat-cafe/shared/utils';
 import {
   assertTypedWaitRegistrationInstallation,
+  parseTypedWaitRegistration,
   TYPED_WAIT_REGISTRATION_FIELD,
 } from '../../../../ball-custody/TypedWaitRegistration.js';
 import {
@@ -29,7 +30,12 @@ export async function replaceDeploymentWaitInSession(
   if (!deploymentWaitReplacementMatches(existing, input)) return null;
 
   const updated = buildTaskDeploymentWaitReplacement(existing, input);
-  if (input.waitRegistration) assertTypedWaitRegistrationInstallation(updated, input.waitRegistration);
+  if (input.waitRegistration)
+    assertTypedWaitRegistrationInstallation(
+      updated,
+      input.waitRegistration,
+      parseTypedWaitRegistration(data[TYPED_WAIT_REGISTRATION_FIELD]),
+    );
   const pipeline = session.multi();
   pipeline.hset(key, serializeTask(updated));
   pipeline.sadd(DEPLOYMENT_WAIT_INDEX, updated.id);

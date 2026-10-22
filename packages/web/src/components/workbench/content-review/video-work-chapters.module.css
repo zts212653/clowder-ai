@@ -1,0 +1,80 @@
+.navigation {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+  min-width: 0;
+  padding: 4px 12px;
+  font-size: var(--console-font-xs);
+}
+.current {
+  order: 1;
+  display: block;
+  flex: 0 1 auto;
+  max-width: 35%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: end;
+  line-height: 20px;
+  color: var(--cafe-text-secondary);
+}
+.bar {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  height: 24px;
+  overflow: clip;
+  border-radius: 4px;
+}
+.segment {
+  position: relative;
+  flex-basis: 0;
+  min-width: 0;
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+  box-shadow: inset -1px 0 0 var(--cafe-border-subtle);
+  background: color-mix(in srgb, var(--cafe-accent) 24%, var(--cafe-surface-elevated));
+  color: var(--cafe-text);
+}
+.segment:nth-child(even) {
+  background: color-mix(in srgb, var(--cafe-accent) 12%, var(--cafe-surface-elevated));
+}
+.segment[aria-current="true"] {
+  background: var(--cafe-accent);
+  color: var(--cafe-accent-foreground);
+}
+.segment:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 2px var(--cafe-text);
+}
+.label {
+  position: absolute;
+  inset-inline-start: 6px;
+  top: 0;
+  width: max-content;
+  visibility: hidden;
+  white-space: nowrap;
+  line-height: 24px;
+  pointer-events: none;
+}
+.segment[data-label-fits="true"] .label {
+  visibility: visible;
+}
+.tooltip {
+  position: absolute;
+  z-index: 6;
+  inset-inline-end: 12px;
+  bottom: calc(100% + 4px);
+  max-width: calc(100% - 24px);
+  padding: 6px 8px;
+  border: 1px solid var(--cafe-border-subtle);
+  border-radius: 6px;
+  background: var(--cafe-surface-canvas);
+  color: var(--cafe-text);
+  box-shadow: var(--shadow-elevation-1);
+  overflow-wrap: anywhere;
+  pointer-events: none;
+}

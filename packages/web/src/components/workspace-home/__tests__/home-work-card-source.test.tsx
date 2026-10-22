@@ -9,6 +9,50 @@ vi.mock('@/utils/api-client', () => ({ API_URL: '', apiFetch }));
 
 import { WorkCard } from '../HomeWorkCard';
 
+it('localizes untitled image cards while preserving authored names and download names', async () => {
+  vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+  const { writeShellLanguage } = await import('@/components/shell/shell-language');
+  const host = document.createElement('div');
+  const root = createRoot(host);
+  try {
+    for (const [language, name, expected] of [
+      ['en', '图片', 'Image'],
+      ['zh', '图片', '图片'],
+      ['en', '我的图片.png', '我的图片.png'],
+    ] as const) {
+      await act(async () => {
+        writeShellLanguage(language);
+        root.render(
+          <WorkCard
+            artifact={{
+              type: 'image',
+              name,
+              url: '/uploads/original.png',
+              catId: null,
+              createdAt: 1,
+              sourceMessageId: null,
+              publicationItem: { kind: 'content-block', index: 0 },
+            }}
+            summary={false}
+            metadata="IMAGE"
+            worktreeId={null}
+            onSelect={vi.fn()}
+          />,
+        );
+      });
+      expect(host.querySelector('.home-work-label')?.textContent).toBe(expected);
+      expect(host.querySelector('img')?.alt).toBe(expected);
+      expect(host.querySelector('a[download]')?.getAttribute('download')).toBe(name);
+    }
+  } finally {
+    act(() => {
+      root.unmount();
+      writeShellLanguage('zh');
+    });
+    vi.unstubAllGlobals();
+  }
+});
+
 it('downloads the original asset and filename without opening its reader or forwarding cookies to an external asset', async () => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
   const fetchAsset = vi.fn(async () => ({ ok: true, blob: async () => new Blob(['image bytes']) }));

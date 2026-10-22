@@ -8,6 +8,13 @@ import { API_URL } from '@/utils/api-client';
 import { artifactObjectId } from '../workbench/real-surface-adapters';
 import { workspaceV3Copy } from './workspace-v3.shell-copy';
 
+function workCardLabel(artifact: ThreadArtifactDTO, imageLabel: string): string {
+  // The content-block producer supplies this generic name for untitled images.
+  const untitled =
+    !artifact.name.trim() || (artifact.publicationItem?.kind === 'content-block' && artifact.name === '图片');
+  return artifact.type === 'image' && untitled ? imageLabel : artifact.name;
+}
+
 function PaperPreview({ artifact }: { artifact: ThreadArtifactDTO }) {
   // Relative ref needs the original saved-location owner. A Home card has no execution-root proof.
   const body = useArtifactContent(artifact, null, !!artifact.url);
@@ -35,6 +42,7 @@ export function WorkCard({
 }) {
   const t = useShellCopy(workspaceV3Copy);
   const url = artifact.url ? resolveAssetUrl(artifact.url, API_URL) : null;
+  const label = workCardLabel(artifact, t.image);
   const [downloading, setDownloading] = useState(false);
   const [downloadFailed, setDownloadFailed] = useState(false);
   const [failedPreview, setFailedPreview] = useState<string | null>(null);
@@ -79,8 +87,13 @@ export function WorkCard({
         className={`home-work-card shell-focusable ${compact ? 'home-work-summary' : ''}`}
         onClick={(event) => onSelect(event.currentTarget)}
       >
-        <WorkVisual artifact={artifact} summary={compact} onImageError={() => setFailedPreview(url ?? null)} />
-        <span className="home-work-label text-compact">{artifact.name}</span>
+        <WorkVisual
+          artifact={artifact}
+          label={label}
+          summary={compact}
+          onImageError={() => setFailedPreview(url ?? null)}
+        />
+        <span className="home-work-label text-compact">{label}</span>
         <small className="home-work-meta text-xs">{compact ? `${kind} · ${metadata}` : metadata}</small>
         {failedPreview === url && url && <output className="text-xs">{t.noPreview}</output>}
       </button>
@@ -129,10 +142,12 @@ function WorkKind({ artifact, summary }: { artifact: ThreadArtifactDTO; summary:
 }
 function WorkVisual({
   artifact,
+  label,
   summary,
   onImageError,
 }: {
   artifact: ThreadArtifactDTO;
+  label: string;
   summary: boolean;
   onImageError: () => void;
 }) {
@@ -140,7 +155,7 @@ function WorkVisual({
   if (artifact.type === 'image' && artifact.url)
     return (
       // biome-ignore lint/performance/noImgElement: original publication URL; preserve authenticated asset semantics.
-      <img src={resolveAssetUrl(artifact.url, API_URL)} alt={artifact.name} onError={onImageError} />
+      <img src={resolveAssetUrl(artifact.url, API_URL)} alt={label} onError={onImageError} />
     );
   if (classifyArtifactView(artifact) === 'text' && /\.(md|markdown)$/i.test(artifact.name))
     return <PaperPreview artifact={artifact} />;

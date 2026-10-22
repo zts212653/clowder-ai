@@ -38,7 +38,7 @@ export async function approvedArchiveModules(archive: string) {
     createHash('sha256').update(bytes).digest('hex') !== APPROVAL.archiveSha256 ||
     `sha512-${createHash('sha512').update(bytes).digest('base64')}` !== APPROVAL.archiveDigest
   )
-    throw new Error('Only the exact approved alpha.18 archive may supply source readers');
+    throw new Error('Only the exact approved alpha.19 archive may supply source readers');
   const directory = await mkdtemp(join(tmpdir(), 'github-approved-source-'));
   try {
     // Existing Host verifier supplies traversal/link/type checks and a private
@@ -48,7 +48,7 @@ export async function approvedArchiveModules(archive: string) {
       bytes,
     );
     try {
-      if (located.manifest.pluginId !== 'official.github-operations' || located.manifest.version !== '0.1.0-alpha.18')
+      if (located.manifest.pluginId !== 'official.github-operations' || located.manifest.version !== '0.1.0-alpha.19')
         throw new Error('Approved archive manifest mismatch');
       await located.verifyIntegrity();
       const load = (name: string) => import(pathToFileURL(join(located.rootDir, 'dist', `${name}.js`)).href);

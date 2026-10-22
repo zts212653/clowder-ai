@@ -8,11 +8,21 @@
 .desk [data-video-work-canvas] {
   --video-journal-width: 260px;
   padding-right: var(--video-journal-width);
+  overflow-y: auto;
 }
 .desk [data-video-work-canvas] > [data-testid="workspace-review-artwork"]:not(:fullscreen) {
   flex: 0 0 auto;
-  height: clamp(260px, 45cqw, 560px);
+  height: auto;
   min-height: 0;
+}
+.desk
+  [data-video-work-canvas]
+  > [data-testid="workspace-review-artwork"]:not(:fullscreen)
+  > [data-artwork-video-viewport] {
+  flex: 0 0 auto;
+  height: auto;
+  aspect-ratio: 16 / 9;
+  max-height: 50vh;
 }
 .desk [data-video-work-canvas] > [data-testid="workspace-review-artwork"]:fullscreen {
   flex: 1 1 auto;
@@ -64,9 +74,6 @@
   .desk [data-video-work-canvas] {
     flex: 0 0 auto;
     overflow: visible;
-  }
-  .desk [data-video-work-canvas] > [data-testid="workspace-review-artwork"]:not(:fullscreen) {
-    height: 300px;
   }
 }
 

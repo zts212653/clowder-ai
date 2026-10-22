@@ -17,6 +17,7 @@ import type { InvocationTracker } from '../domains/cats/services/agents/invocati
 import type { IMessageStore } from '../domains/cats/services/stores/ports/MessageStore.js';
 import { deploymentWaitGeneration } from '../domains/cats/services/stores/ports/TaskDeploymentWaitState.js';
 import type { ITaskStore } from '../domains/cats/services/stores/ports/TaskStore.js';
+import { captureDeploymentWaitAuthorization } from '../domains/runtime-deployment/DeploymentWaitAuthorization.js';
 import type { DeploymentWaitLifecycleService } from '../domains/runtime-deployment/DeploymentWaitLifecycleService.js';
 import { requireCallbackAuth } from './callback-auth-prehandler.js';
 import { captureDeploymentWaitSource } from './callback-typed-wait-source.js';
@@ -203,7 +204,13 @@ async function performRegistration(
 
   const previousGeneration = deploymentWaitGeneration(task.deploymentWait) ?? 0;
   const awaitState = buildAwaitState(registration, observation, previousGeneration + 1);
-  const receipt = createTypedWaitRegistration({ task, active: awaitState, invocationId: auth.invocationId, source });
+  const receipt = createTypedWaitRegistration({
+    task,
+    active: awaitState,
+    invocationId: auth.invocationId,
+    source,
+    authorization: captureDeploymentWaitAuthorization(auth),
+  });
   if (!receipt || !(await deps.registry.isLatest(auth.invocationId))) {
     return result(409, { error: 'Invocation no longer owns deployment wait registration' });
   }

@@ -1,17 +1,39 @@
 import { createHash } from 'node:crypto';
+import { isDeepStrictEqual } from 'node:util';
 import { type DeploymentAwaitStateV1, deploymentWaitPredicateSchema, type TaskItem } from '@cat-cafe/shared';
 import { z } from 'zod';
+import { parseToolExecutionPolicy } from '../cats/services/agents/invocation/tool-execution-policy.js';
+import { receiptOwnsOutcome } from '../runtime-deployment/DeploymentWaitAuthority.js';
 import { isLivePluginWait } from './PluginWaitContinuation.js';
 
 const nonEmpty = z.string().min(1);
 const generation = z.number().int().positive().safe();
 export const TYPED_WAIT_REGISTRATION_FIELD = 'typedWaitRegistration';
 
+const authorizationSchema = z
+  .object({
+    ownerAuthProvenance: z.enum(['strict', 'compatibility_fallback', 'unknown']),
+    toolExecutionPolicy: z
+      .unknown()
+      .transform((value, context) => {
+        try {
+          return parseToolExecutionPolicy(JSON.stringify(value));
+        } catch {
+          context.addIssue({ code: 'custom', message: 'invalid continuation tool policy' });
+          return z.NEVER;
+        }
+      })
+      .optional(),
+  })
+  .strict();
+
 // Decode historical stored receipts without deleting data; only deployment/plugin waits confer live authority.
 const receiptSchema = z
   .object({
     v: z.literal(1),
     invocationId: nonEmpty,
+    /** Server-authenticated facts, sealed atomically with the Task wait; never callback payload. */
+    authorization: authorizationSchema.optional(),
     source: z
       .object({
         kind: z.enum(['primary', 'adopted_hold']),
@@ -55,6 +77,7 @@ const receiptSchema = z
 
 /** Private Task aggregate field, atomically installed with its await generation. */
 export type TypedWaitRegistration = z.infer<typeof receiptSchema>;
+export type TypedWaitAuthorization = z.infer<typeof authorizationSchema>;
 export type TypedWaitSource = TypedWaitRegistration['source'];
 export interface TypedWaitRegistrationSnapshot {
   readonly task: TaskItem;
@@ -118,6 +141,7 @@ export function createTypedWaitRegistration(input: {
   readonly active: SupportedAwaitState;
   readonly invocationId: string;
   readonly source: TypedWaitSource;
+  readonly authorization?: TypedWaitAuthorization;
 }): TypedWaitRegistration | null {
   const { task, active, source, invocationId } = input;
   if (!active.subjectRef.startsWith('deployment:') || task.kind !== 'work') return null;
@@ -126,6 +150,7 @@ export function createTypedWaitRegistration(input: {
   return parseTypedWaitRegistration({
     v: 1,
     invocationId,
+    ...(input.authorization ? { authorization: input.authorization } : {}),
     source,
     taskId: task.id,
     taskKind: task.kind,
@@ -185,7 +210,26 @@ export function isLiveTypedWaitRegistration(
   );
 }
 
-export function assertTypedWaitRegistrationInstallation(task: TaskItem, receipt: TypedWaitRegistration): void {
+export function assertTypedWaitRegistrationInstallation(
+  task: TaskItem,
+  receipt: TypedWaitRegistration,
+  previousReceipt?: TypedWaitRegistration | null,
+): void {
+  const outcome = task.deploymentWait?.waitOutcome;
+  // A verified legacy publication may seal only the missing auth snapshot, never replace the
+  // original receipt/source after its await was consumed. Stores read previousReceipt in the same CAS.
+  if (
+    outcome &&
+    !task.deploymentWait?.await &&
+    previousReceipt &&
+    !previousReceipt.authorization &&
+    receipt.authorization &&
+    parseTypedWaitRegistration(receipt) &&
+    outcome.registeredAt === previousReceipt.registeredAt &&
+    receiptOwnsOutcome(task, outcome, previousReceipt, true) &&
+    isDeepStrictEqual({ ...receipt, authorization: undefined }, { ...previousReceipt, authorization: undefined })
+  )
+    return;
   if (
     !isLiveTypedWaitRegistration(
       { task, receipt },

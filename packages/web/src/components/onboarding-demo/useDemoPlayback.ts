@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { DEMO_EVENTS } from './demo-story';
+import { DEMO_EVENTS, type DemoEvent } from './demo-story';
 import { reportOnboardingTiming } from './onboarding-performance';
 
 interface Playback {
@@ -12,7 +12,7 @@ interface Playback {
 const initial: Playback = { version: 1, index: -1, paused: true };
 
 // This is a browser-local demo bookmark, not an account's onboarding completion.
-export function useDemoPlayback(scope: string) {
+export function useDemoPlayback(scope: string, events: readonly DemoEvent[] = DEMO_EVENTS) {
   const key = `cat-cafe:scripted-onboarding:v1:${scope}`;
   const [state, setState] = useState<Playback>(initial);
   const [ready, setReady] = useState(false);
@@ -32,9 +32,9 @@ export function useDemoPlayback(scope: string) {
         typeof saved.index === 'number' &&
         Number.isInteger(saved.index) &&
         saved.index >= -1 &&
-        saved.index <= DEMO_EVENTS.length
+        saved.index <= events.length
       ) {
-        index = saved.index < DEMO_EVENTS.length ? Math.max(0, saved.index) : 0;
+        index = saved.index < events.length ? Math.max(0, saved.index) : 0;
       }
     } catch {
       /* Storage is optional; the demo also works in private browsing. */
@@ -43,7 +43,7 @@ export function useDemoPlayback(scope: string) {
     // bookmark replays without requiring another click.
     setState({ version: 1, index, paused: false });
     setReady(true);
-  }, [key]);
+  }, [key, events.length]);
   useEffect(() => {
     if (!ready) return;
     try {
@@ -53,7 +53,7 @@ export function useDemoPlayback(scope: string) {
     }
   }, [key, ready, state]);
   useEffect(() => {
-    const event = DEMO_EVENTS[state.index];
+    const event = events[state.index];
     if (lastIndex.current !== state.index) {
       elapsed.current = 0;
       setElapsedMs(0);
@@ -84,8 +84,8 @@ export function useDemoPlayback(scope: string) {
       clearInterval(progress);
       clearTimeout(timer);
     };
-  }, [ready, state.index, state.paused]);
-  const event = DEMO_EVENTS[state.index];
+  }, [ready, state.index, state.paused, events]);
+  const event = events[state.index];
   const isCat = event && event.speaker !== 'user' && event.speaker !== 'system';
   // A state.index change renders once before the effect resets elapsedMs. Treat
   // that boundary as the new event's zero point so the previous event's final
@@ -111,7 +111,7 @@ export function useDemoPlayback(scope: string) {
     phase,
     characters,
     ready,
-    finished: state.index === DEMO_EVENTS.length,
+    finished: state.index === events.length,
     start: () => setState({ version: 1, index: 0, paused: false }),
     toggle: () => setState((current) => ({ ...current, paused: !current.paused })),
   };

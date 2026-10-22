@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -890,6 +891,77 @@ test('replacement host rotates credentials while leaving the superseded host fil
   assert.notEqual(replacementPath, oldPath, 'a different host must not receive the superseded host credential path');
   assert.equal(JSON.parse(readFileSync(oldPath, 'utf8')).invocationId, 'replacement-seed');
   assert.equal(JSON.parse(readFileSync(replacementPath, 'utf8')).invocationId, 'replacement-next');
+});
+
+test('plugin MCP wrapper follows the replacement host credential file instead of a completed turn', async () => {
+  const configPath = join(credsDir, '.cat-cafe', 'capabilities.json');
+  const originalConfig = readFileSync(configPath, 'utf8');
+  const fixture = join(credsDir, 'plugin-credential-probe.mjs');
+  writeFileSync(
+    fixture,
+    [
+      "import { readFileSync } from 'node:fs';",
+      "const credential = JSON.parse(readFileSync(process.env.CAT_CAFE_CREDENTIAL_FILE, 'utf8'));",
+      'console.log(JSON.stringify({ invocationId: credential.invocationId }));',
+    ].join('\n'),
+  );
+  const config = JSON.parse(originalConfig);
+  config.capabilities.push({
+    id: 'plugin:official.github-operations:github-tracking',
+    type: 'mcp',
+    source: 'plugin',
+    enabled: true,
+    pluginId: 'official.github-operations',
+    mcpServer: {
+      command: process.execPath,
+      args: [fixture],
+      env: {
+        CLOWDER_PLUGIN_ACTION_TOKEN: 'a'.repeat(64),
+        CLOWDER_PLUGIN_ACTION_PATH: '/api/plugin-runtime/action',
+      },
+    },
+  });
+  writeFileSync(configPath, JSON.stringify(config));
+  try {
+    const pool = new FakeHostPool();
+    const service = new CodexAgentService({
+      carrierMode: 'app_server',
+      appServerHostPool: pool,
+      cliCommand: process.execPath,
+      l0CompilerFn: fakeL0Compiler,
+      model: 'gpt-5.3-codex',
+    });
+    await drain(
+      service.invoke('seed plugin transport', {
+        workingDirectory: credsDir,
+        invocationId: 'plugin-seed',
+        callbackEnv: callbackEnv('plugin-seed', 'seed-token'),
+      }),
+    );
+    const seedStart = pool.wires[0].writes.find((m) => m.method === 'thread/start');
+    const oldPath = managedCredentialPath(seedStart);
+    pool.replacementSessionIds.add('codex-thread-1');
+    await drain(
+      service.invoke('replacement plugin transport', {
+        workingDirectory: credsDir,
+        invocationId: 'plugin-current',
+        sessionId: 'codex-thread-1',
+        callbackEnv: callbackEnv('plugin-current', 'current-token'),
+      }),
+    );
+    const resume = pool.wires.at(-1).writes.find((m) => m.method === 'thread/resume');
+    const server = Object.entries(resume.params.config.mcp_servers).find(([id]) => id.includes('github-tracking'))?.[1];
+    assert.ok(server, 'the declared plugin must remain available');
+    const result = JSON.parse(
+      execFileSync(server.command, server.args, { env: { ...process.env, ...server.env }, encoding: 'utf8' }),
+    );
+    assert.equal(result.invocationId, 'plugin-current');
+    assert.equal(JSON.parse(readFileSync(oldPath, 'utf8')).invocationId, 'plugin-seed');
+    assert.doesNotMatch(JSON.stringify(resume), /seed-token|current-token|CAT_CAFE_CALLBACK_TOKEN/);
+  } finally {
+    writeFileSync(configPath, originalConfig);
+    rmSync(fixture, { force: true });
+  }
 });
 
 for (const conflict of [false, true])

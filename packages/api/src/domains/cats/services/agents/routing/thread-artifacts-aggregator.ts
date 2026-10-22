@@ -33,14 +33,14 @@ async function* readThreadMessagePages(
   threadId: string,
   userId?: string,
   pageSize: number = THREAD_SCAN_PAGE,
+  artifactProjection = false,
 ): AsyncGenerator<StoredMessage[]> {
+  const options = { includeQueuedCatMessages: true, ...(artifactProjection ? { artifactProjection: true } : {}) };
   let cursor: { ts: number; id: string } | undefined;
   for (;;) {
     const page = cursor
-      ? await store.getByThreadBefore(threadId, cursor.ts, pageSize, cursor.id, userId, {
-          includeQueuedCatMessages: true,
-        })
-      : await store.getByThread(threadId, pageSize, userId, { includeQueuedCatMessages: true });
+      ? await store.getByThreadBefore(threadId, cursor.ts, pageSize, cursor.id, userId, options)
+      : await store.getByThread(threadId, pageSize, userId, options);
     if (page.length === 0) break;
     yield page;
     if (page.length < pageSize) break;
@@ -72,7 +72,7 @@ export async function collectThreadMessageArtifacts(
   observePage?: (page: readonly StoredMessage[]) => void,
 ): Promise<ThreadArtifactDTO[]> {
   const artifacts: ThreadArtifactDTO[] = [];
-  for await (const page of readThreadMessagePages(store, threadId, userId)) {
+  for await (const page of readThreadMessagePages(store, threadId, userId, THREAD_SCAN_PAGE, true)) {
     observePage?.(page);
     // Preserve traversal order: equal-time ref replacement and no-ref ties depend on it.
     for (const artifact of projectMessageArtifacts(page)) artifacts.push(artifact);

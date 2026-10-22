@@ -2,13 +2,14 @@ import type { IgnoredItemSnapshot, UnifiedAttentionItemV1 } from '@cat-cafe/shar
 import { act, createRef } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { binding, block, cardRef, request } from '../../../rich/__tests__/runtime-conversation-test-fixtures';
 import { MailboxPanel } from '../../MailboxPanel';
 import { parseUnifiedAttentionRead } from '../../parse-unified-attention';
 import { writeShellLanguage } from '../../shell-language';
 import { deriveMailboxPanelState } from '../../unified-mailbox-state';
 import type { UnifiedAttentionView } from '../../use-unified-attention';
 import { useApprovalSessions } from '../use-approval-sessions';
-import { OWNER, okRead } from './mailbox-fixtures';
+import { collectiveResultRow, OWNER, okRead, storeItem } from './mailbox-fixtures';
 
 const mocks = vi.hoisted(() => ({ apiFetch: vi.fn() }));
 vi.mock('@/utils/api-client', () => ({ apiFetch: mocks.apiFetch }));
@@ -598,7 +599,7 @@ function unrelatedCollectiveFailure() {
     status: 'unavailable',
     exhaustiveness: 'unknown',
   };
-  r.consistency = { state: 'uncertain', reasons: ['collective_accountability_connection_read_failed'] };
+  r.consistency = { state: 'uncertain', reasons: ['collective_accountability_plugin_unavailable'] };
   delete r.totalCount;
   delete r.attentionCount;
   if (r.personalView)
@@ -615,6 +616,52 @@ function unrelatedCollectiveFailure() {
   expect(parseUnifiedAttentionRead(r), 'real unified parser accepts the partial source combination').not.toBeNull();
 }
 describe('Personal actions keep independent source eligibility', () => {
+  it.each([
+    'chat selection',
+    'approval',
+    'linked work',
+  ] as const)('known %s personal ignore stays usable during the unrelated plugin outage', async (kind) => {
+    unrelatedCollectiveFailure();
+    if (view.result.kind !== 'ok') throw new Error('Fixture');
+    const row: UnifiedAttentionItemV1 =
+      kind === 'linked work'
+        ? collectiveResultRow()
+        : {
+            decisionRef: 'known-decision',
+            kind: kind === 'approval' ? 'approval' : 'judgment',
+            summary: 'Current owner decision',
+            linkedNeedsMe: [],
+            ...(kind === 'approval'
+              ? { approval: storeItem() }
+              : {
+                  runtimeInteraction: {
+                    interactionId: binding.interactionId,
+                    revision: 5,
+                    sourceKind: 'conversation_decision' as const,
+                    kind: 'conversation_decision' as const,
+                    requesterCatId: request.owner.catId,
+                    createdAt: request.createdAt,
+                    title: request.title,
+                    cardRef,
+                    presentation: block,
+                    allowTextResponse: true,
+                  },
+                }),
+          };
+    row.preferenceCoordinate = { ...coordinate, decisionRef: row.decisionRef };
+    view.result.read.items = [row];
+    await render();
+    await click('mailbox-item-toggle');
+    await click('mailbox-item-ignore');
+    expect(writes()).toHaveLength(1);
+    expect(JSON.parse(writes()[0][1].body)).toMatchObject({
+      expectedOwnerUserId: OWNER,
+      expectedRevision: 4,
+      ignore: [row.preferenceCoordinate],
+      restore: [],
+    });
+    expect(mocks.apiFetch.mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(0);
+  });
   it('control: healthy exact mention/preferences permits one personal PATCH', async () => {
     knownHealthySources();
     await render();

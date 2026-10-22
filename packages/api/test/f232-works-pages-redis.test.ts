@@ -15,7 +15,7 @@ import {
 } from './helpers/redis-test-helpers.js';
 
 test(
-  'paged Works on Redis bounds raw rows, preserves timestamp ties/gallery items/tasks and never hydrates tool traces',
+  'paged Works on Redis bounds raw rows, preserves timestamp ties/gallery items/tasks and omits top-level toolEvents',
   { skip: redisIsolationSkipReason(process.env.REDIS_URL) },
   async (t) => {
     assertRedisIsolationOrThrow(process.env.REDIS_URL, 'WorksPages');

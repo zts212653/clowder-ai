@@ -1027,6 +1027,7 @@ async function buildCatCafeMcpArgs(
         let cmd: string | undefined;
         let cmdArgs: string[] | undefined;
         let envEntries: Record<string, string> | undefined;
+        let pluginCredentialFile: string | undefined;
         const isCatCafe = isManagedCatCafeSplit(s);
         const workingDir = resolveCodexMcpWorkingDir(s.workingDir, configSourceRoot);
 
@@ -1042,6 +1043,12 @@ async function buildCatCafeMcpArgs(
           envEntries = pluginMcpEnvironment(s, callbackEnv);
         }
         if (!cmd) continue;
+        if (s.source === 'plugin' && envEntries?.CLOWDER_PLUGIN_ACTION_TOKEN) {
+          // The pool rebinds this Host-owned path when replacing a session.
+          // Keep it in MCP config, not frozen inside the opaque secret wrapper.
+          pluginCredentialFile = envEntries.CAT_CAFE_CREDENTIAL_FILE;
+          delete envEntries.CAT_CAFE_CREDENTIAL_FILE;
+        }
         if (envEntries) {
           const wrapped = writeCodexMcpEnvWrapper({
             command: cmd,
@@ -1063,6 +1070,12 @@ async function buildCatCafeMcpArgs(
           '--config',
           `mcp_servers.${tomlName}.enabled=true`,
         );
+        if (pluginCredentialFile) {
+          args.push(
+            '--config',
+            `mcp_servers.${tomlName}.env.CAT_CAFE_CREDENTIAL_FILE=${toTomlString(pluginCredentialFile)}`,
+          );
+        }
         if (isCatCafe) {
           args.push('--config', `mcp_servers.${tomlName}.default_tools_approval_mode="approve"`);
           args.push(

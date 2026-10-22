@@ -76,10 +76,12 @@ function applyLang(lang) {
     ['data-i18n-label', 'label'],
     ['data-i18n-aria-label', 'aria-label'],
     ['data-i18n-title', 'title'],
+    // Demo videos carry burned-in subtitles, so each language has its own file.
+    ['data-i18n-src', 'src'],
   ]) {
     document.querySelectorAll(`[${keyAttr}]`).forEach((el) => {
       const key = el.getAttribute(keyAttr);
-      if (dict[key]) el.setAttribute(targetAttr, dict[key]);
+      if (dict[key] && el.getAttribute(targetAttr) !== dict[key]) el.setAttribute(targetAttr, dict[key]);
     });
   }
   // Re-localize download buttons whose label was replaced with textContent at
@@ -163,9 +165,10 @@ function initFloatingToc() {
   const toc = document.getElementById('floating-toc');
   if (!toc) return;
 
-  const sections = ['features', 'scenarios', 'quickstart', 'first-steps', 'roadmap'];
-  const sectionEls = sections.map((id) => document.getElementById(id)).filter(Boolean);
   const tocLinks = toc.querySelectorAll('.toc-link');
+  // Observe exactly the sections the TOC links to, so a new link highlights without a second list to update.
+  const sections = [...tocLinks].map((link) => link.dataset.section);
+  const sectionEls = sections.map((id) => document.getElementById(id)).filter(Boolean);
 
   // Show/hide TOC based on scroll position
   const heroEnd = document.querySelector('#features');
@@ -225,6 +228,19 @@ function initWalkthroughVideos() {
 
   syncPlayback();
   reducedMotion.addEventListener?.('change', syncPlayback);
+}
+
+// Demo videos have sound and never autoplay; the "Watch demo" button starts
+// the matching video. Language switches only swap the file (applyLang).
+function initDemoVideos() {
+  document.querySelectorAll('[data-demo-play]').forEach((button) => {
+    const video = document.getElementById(button.getAttribute('data-demo-play'));
+    if (!video) return;
+    button.addEventListener('click', () => {
+      video.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      video.play().catch(() => {});
+    });
+  });
 }
 
 // ===== Auto-fetch latest release for download buttons =====
@@ -302,6 +318,7 @@ document.addEventListener('DOMContentLoaded', () => {
   initTimeline();
   initNavScroll();
   initWalkthroughVideos();
+  initDemoVideos();
   initFloatingToc();
   initReleaseLinks();
 });

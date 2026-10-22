@@ -19,8 +19,14 @@ export interface MailboxPersonalActions {
 }
 
 type Undo = { owner: string; coordinates: UnifiedAttentionPreferenceCoordinate[]; source: PersonalActionSource };
-const sourceOf = (item: UnifiedAttentionItemV1): PersonalActionSource =>
-  item.kind === 'user_mention' && item.userMention ? 'mentions' : 'all';
+const sourceOf = (item: UnifiedAttentionItemV1): PersonalActionSource => {
+  if (item.collectiveAccountabilityRequest) return 'all';
+  if (item.kind === 'user_mention' && item.userMention) return 'mentions';
+  if (item.runtimeInteraction || item.choiceRequest) return 'structuredChoices';
+  if (item.approval) return 'approvals';
+  if (item.linkedNeedsMe.length > 0) return 'needsMe';
+  return 'all';
+};
 
 /** Owner-private writes retain their identity/revision fence; each operation proves its own source. */
 export function useMailboxPersonalPreferences(view: UnifiedAttentionView) {

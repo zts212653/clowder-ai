@@ -119,7 +119,7 @@ ACP 原生 L0 缺口已证；You 已选择保留个人 OAuth 与原生 L0，继�
 
 #### Open issue：Native 命令长时间静默 {#native-command-stall}
 
-- 状态：open，底层工具未返回的直接原因未知；已定位 Native 漏传 livenessProbe、观察器丢弃 warning 的呈现缺口。
+- 状态：open，底层工具未返回的直接原因未知；Native 漏传 livenessProbe、观察器丢弃 warning 的呈现缺口已修复并加载。
 
 复用 ACP service/pool、L0 compiler、F174/F178 principal、F286 MCP surface、F254 freshness、
 F296 context、F299 trajectory 与 F183/F306 semantic events。补真实 native instruction、

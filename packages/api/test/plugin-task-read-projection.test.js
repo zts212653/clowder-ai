@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import { safeParseExtra, serializeExtra } from '../dist/domains/cats/services/stores/redis/redis-message-parsers.js';
 import { withPluginCallContext } from '../dist/domains/plugin/carrier/plugin-call-context.js';
 import { createPluginTaskHost } from '../dist/domains/plugin/host-surface/task/plugin-task-host.js';
 
@@ -107,7 +108,10 @@ test('all task read slots expose only a verified old Host admission coordinate f
   };
   const admission = {
     messageStore: {
-      getById: async (id) => (id === receipt.id ? structuredClone(receipt) : undefined),
+      getById: async (id) =>
+        id === receipt.id
+          ? { ...structuredClone(receipt), extra: safeParseExtra(serializeExtra(receipt.extra)) }
+          : undefined,
     },
     isCatAvailable: () => true,
     assertCurrent: async () => {},

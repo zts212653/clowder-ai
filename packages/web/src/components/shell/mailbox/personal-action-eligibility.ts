@@ -1,13 +1,13 @@
 import type { UnifiedAttentionReadV1, UnifiedAttentionSourceRead } from '@cat-cafe/shared';
 
-export type PersonalActionSource = 'mentions' | 'all';
+export type PersonalActionSource = 'mentions' | 'structuredChoices' | 'approvals' | 'needsMe' | 'all';
 export type PersonalActionRefusal = 'refreshing' | 'saving' | 'identity' | 'preferences' | 'changed' | 'source';
 
 function complete(source: UnifiedAttentionSourceRead | undefined): boolean {
   return source?.status === 'available' && source.exhaustiveness === 'complete';
 }
 
-/** Global counts need every source. A mention's personal presentation only needs its own proven source. */
+/** Global counts need every source. A personal presentation action needs its own proven producer. */
 export function personalSourceRefusal(
   read: UnifiedAttentionReadV1,
   source: PersonalActionSource,
@@ -20,15 +20,19 @@ export function personalSourceRefusal(
   )
     return null;
 
-  // This is the known, source-attributed failure. Unknown reasons and identity conflicts remain unverified.
+  // Both Host generations attribute this outage to Collective. Identity/invalid states and unknown reasons stay blocked.
   if (
-    source === 'mentions' &&
-    complete(read.sources.userMentions) &&
+    source !== 'all' &&
+    complete(read.sources[source === 'mentions' ? 'userMentions' : source]) &&
     complete(read.sources.personalPreferences) &&
     read.status === 'partial' &&
     read.sources.collectiveAccountabilityRequests?.status === 'unavailable' &&
     read.consistency.reasons.length > 0 &&
-    read.consistency.reasons.every((reason) => reason === 'collective_accountability_connection_read_failed') &&
+    read.consistency.reasons.every(
+      (reason) =>
+        reason === 'collective_accountability_connection_read_failed' ||
+        reason === 'collective_accountability_plugin_unavailable',
+    ) &&
     Object.entries(read.sources).every(
       ([name, value]) => name === 'collectiveAccountabilityRequests' || complete(value),
     )

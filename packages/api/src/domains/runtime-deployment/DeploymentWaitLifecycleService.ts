@@ -11,6 +11,7 @@ import type {
   ConnectorDeliveryInput,
 } from '../../infrastructure/email/deliver-connector-message.js';
 import type { IWaitLifecycleEventLog } from '../ball-custody/WaitLifecycleEventLog.js';
+import type { InvocationRegistry } from '../cats/services/agents/invocation/InvocationRegistry.js';
 import type { IMessageStore } from '../cats/services/stores/ports/MessageStore.js';
 import type { ITaskStore } from '../cats/services/stores/ports/TaskStore.js';
 import type { ITurnExecutionStore } from '../cats/services/stores/ports/TurnExecutionStore.js';
@@ -44,7 +45,9 @@ export type DeploymentWaitLifecycleResult =
 
 export interface DeploymentWaitLifecycleServiceOptions {
   readonly taskStore: ITaskStore;
-  readonly messageStore?: Pick<IMessageStore, 'appendIdempotent' | 'getByIdempotencyKey'>;
+  readonly messageStore?: Pick<IMessageStore, 'appendIdempotent' | 'getByIdempotencyKey' | 'getById'>;
+  /** Exact historical source proof for receipts written before authorization snapshots existed. */
+  readonly authorizationRegistry?: Pick<InvocationRegistry, 'peekRecord'>;
   readonly deliveryDeps: ConnectorDeliveryDeps;
   readonly eventLog?: IWaitLifecycleEventLog;
   readonly log: {

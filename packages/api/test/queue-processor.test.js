@@ -2525,6 +2525,49 @@ describe('deployment continuation at the canonical Queue boundary', () => {
       meta: { waitContinuationCarrier: carrier },
     },
   };
+  it('passes the persisted deployment tool policy to the actual execution route', async () => {
+    const policy = {
+      mode: 'callback_allowlist',
+      allowedCallbackRoutes: ['POST /api/callbacks/register-deployment-wait'],
+    };
+    const h = createHarness({ deploymentWaitStartGuard: { check: async () => ({ ok: true }) } });
+    const admitted = await admitMessage(h, { ...waiting, readOnlyToolPolicy: policy });
+    assert.equal((await h.processor.processNext('thread-1', 'user-1')).started, true);
+    await waitFor(() => h.router.routeExecution.mock.calls.length === 1);
+    const options = h.router.routeExecution.mock.calls[0].arguments[6];
+    assert.equal(options.ownerAuthProvenance, 'strict');
+    assert.deepEqual(options.toolExecutionPolicy, policy);
+    await waitFor(() => h.queue.getEntrySnapshot('thread-1', 'user-1', admitted.entry.id) === null);
+  });
+
+  it('automatic continuation keeps its original tool restrictions', async () => {
+    const policy = {
+      mode: 'callback_allowlist',
+      allowedCallbackRoutes: ['POST /api/callbacks/register-deployment-wait'],
+    };
+    const h = createHarness();
+    const result = await h.processor.enqueueContinuation({
+      threadId: 'thread-1',
+      userId: 'user-1',
+      ownerAuthProvenance: 'strict',
+      toolExecutionPolicy: policy,
+      catId: 'opus',
+      capsule: {
+        v: 1,
+        threadId: 'thread-1',
+        catId: 'opus',
+        invocationId: 'restricted-turn',
+        mode: 'independent',
+        a2aEnabled: true,
+        ballState: 'in_progress',
+        continuationReason: 'threshold_seal',
+        createdAt: Date.now(),
+      },
+    });
+    assert.equal(result.outcome, 'enqueued');
+    assert.deepEqual(result.entry.execution.readOnlyToolPolicy, policy);
+  });
+
   it('unknown runtime readiness preserves the pending source without creating an invocation', async () => {
     const h = createHarness();
     const admitted = await admitMessage(h, waiting);

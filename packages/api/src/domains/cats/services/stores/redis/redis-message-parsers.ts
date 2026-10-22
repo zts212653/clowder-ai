@@ -23,6 +23,7 @@ import {
   asrPersonMemoryDynamicSceneEntryV1Schema,
   CatRoutingErrorSchema,
   catOwnedSeedCueCarrierV1Schema,
+  collectiveOwnerAdmissionV1Schema,
   companionIdentitySnapshotV1Schema,
   contentModificationReceiptV1Schema,
   contentModificationSourceMessageV1Schema,
@@ -248,6 +249,8 @@ type ExtraCarrierPersistenceClassification<
  * Every StoredMessage.extra key must be classified when it is introduced.
  */
 type ExtraCarrierPersistence = ExtraCarrierPersistenceClassification<{
+  collectiveOwnerAdmissionV1: 'parsed';
+  collectiveAuthorizationInvalid: 'derived';
   outputLayout: 'parsed';
   a2aFailureReturn: 'parsed';
   coveredA2AFailureReturns: 'parsed';
@@ -512,6 +515,21 @@ export function safeParseExtra(raw: string | undefined): StoredMessage['extra'] 
     const outputLayout = readMessageOutputLayout(parsed.outputLayout);
     if (outputLayout) result.outputLayout = outputLayout;
     let hasField = modification.success || modificationReceipt.success || outputLayout !== undefined;
+    // Legacy receipts remain readable after plugin migration, never executable invocation/delegation carriers.
+    if (parsed.collectiveOwnerAdmissionV1 !== undefined) {
+      const admission = collectiveOwnerAdmissionV1Schema.safeParse(parsed.collectiveOwnerAdmissionV1);
+      if (admission.success) result.collectiveOwnerAdmissionV1 = admission.data;
+      else result.collectiveAuthorizationInvalid = true;
+      hasField = true;
+    }
+    if (
+      parsed.collectiveAuthorizationInvalid !== undefined ||
+      parsed.collectiveWorkInvocationV1 !== undefined ||
+      parsed.collectiveWorkDelegationV1 !== undefined
+    ) {
+      result.collectiveAuthorizationInvalid = true;
+      hasField = true;
+    }
     const failureReturn = parseA2AFailureReturn(parsed.a2aFailureReturn);
     if (failureReturn) {
       result.a2aFailureReturn = failureReturn;

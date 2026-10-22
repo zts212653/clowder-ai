@@ -2,6 +2,7 @@ import { isDeepStrictEqual } from 'node:util';
 import { type CatId, createCatId, type MessageWorkDisposition, type WaitContinuationCarrierV1 } from '@cat-cafe/shared';
 import type { OwnerAuthProvenance } from '../../owner-auth-provenance.js';
 import type { AppendMessageInput, IMessageStore, StoredMessage } from '../../stores/ports/MessageStore.js';
+import type { ToolExecutionPolicy } from '../../types.js';
 import type { InvocationQueue, QueueEntry } from './InvocationQueue.js';
 import type { OwnedQueueProgress, PersistedCarrierResult } from './PersistedQueueCarrier.js';
 import { queueEntryId } from './queue-ledger/QueueLedger.js';
@@ -26,6 +27,8 @@ interface PersistedQueueDeliveryBaseInput {
   from?: StoredMessage['from'];
   /** Verified owner provenance for producers that carry an explicit authorization. */
   ownerAuthProvenance?: OwnerAuthProvenance;
+  /** An authenticated producer must preserve restrictions on its continuation. */
+  toolExecutionPolicy?: ToolExecutionPolicy;
   /** Producer hint about which skill this input needs; carried on the Queue row, not inferred. */
   suggestedSkill?: string;
   /** Explicit producer category; an ordinary return does not create a carrier. */
@@ -170,6 +173,7 @@ export class PersistedQueueDelivery implements PersistedQueueDeliveryPort {
         // `strict` value is what grants a ManagedWorkBinding (managed-work-invocation-binding.ts),
         // so inheriting it by default would hand external input the owner's managed-work authority.
         ownerAuthProvenance: input.ownerAuthProvenance ?? 'unknown',
+        ...(input.toolExecutionPolicy ? { readOnlyToolPolicy: input.toolExecutionPolicy } : {}),
         idempotencyKey: input.idempotencyKey,
         content: input.content,
         from,

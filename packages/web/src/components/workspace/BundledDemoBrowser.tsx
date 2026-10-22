@@ -1,24 +1,20 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { DEMO_DELIVERABLE_HTML } from '../onboarding-demo/demo-deliverable';
+import { getDemoDeliverableHtml } from '../onboarding-demo/demo-deliverable';
 import type { DemoPreviewStage } from '../onboarding-demo/demo-story';
-
-const stages: Record<DemoPreviewStage, string> = {
-  waiting: '等待设计',
-  design: '设计草图',
-  architecture: '方案整合',
-  initial: '初版实现',
-  review: '审查与修正',
-  final: '已完善 · 可操作',
-};
+import { onboardingPlayerCopy } from '../onboarding-demo/onboarding-player.shell-copy';
+import { useShellCopy } from '../shell/shell-copy';
+import { useShellLanguage } from '../shell/shell-language';
 
 /** Only a fixed, bundled page can enter this mode; it never probes local services. */
 export function BundledDemoBrowser({ onReady, stage = 'final' }: { onReady?: () => void; stage?: DemoPreviewStage }) {
+  const language = useShellLanguage();
+  const t = useShellCopy(onboardingPlayerCopy);
   const frame = useRef<HTMLIFrameElement>(null);
   const readyCallback = useRef(onReady);
   readyCallback.current = onReady;
-  const [attempt, setAttempt] = useState(0);
+  const [attempt, setAttempt] = useState(() => ({ id: 0, html: getDemoDeliverableHtml(language) }));
   const [loaded, setLoaded] = useState(false);
   const stageRef = useRef(stage);
   stageRef.current = stage;
@@ -54,27 +50,27 @@ export function BundledDemoBrowser({ onReady, stage = 'final' }: { onReady?: () 
       clearTimeout(timeout);
       window.removeEventListener('message', receive);
     };
-  }, [attempt]);
+  }, [attempt.id]);
   useEffect(() => {
     if (!loaded) return;
     setStatus('loading');
     ackTimer.current = setTimeout(() => setStatus('failed'), 10_000);
-    frame.current?.contentWindow?.postMessage({ type: 'clowder-onboarding-stage', version: 1, stage }, '*');
+    frame.current?.contentWindow?.postMessage({ type: 'clowder-onboarding-stage', version: 1, stage, language }, '*');
     return () => {
       if (ackTimer.current) clearTimeout(ackTimer.current);
     };
-  }, [stage, loaded, attempt]);
+  }, [stage, loaded, attempt.id, language]);
   return (
-    <section className="flex h-full min-h-0 flex-col" aria-label="演示成果浏览器" data-preview-stage={stage}>
+    <section className="flex h-full min-h-0 flex-col" aria-label={t.browser} data-preview-stage={stage}>
       <div className="flex flex-wrap items-center gap-2 border-b border-[var(--console-border-soft)] bg-[var(--console-panel-bg)] px-4 py-3 text-xs">
-        <span className="font-semibold">浏览器 · 今天待办</span>
-        <span className="min-w-0 flex-1 rounded px-2 py-1 text-cafe-secondary">{stages[stage]}</span>
+        <span className="font-semibold">{t.browserTitle}</span>
+        <span className="min-w-0 flex-1 rounded px-2 py-1 text-cafe-secondary">{t.stages[stage]}</span>
         <button
           type="button"
-          onClick={() => setAttempt((value) => value + 1)}
+          onClick={() => setAttempt((value) => ({ id: value.id + 1, html: getDemoDeliverableHtml(language) }))}
           className="rounded-lg border border-[var(--console-border-soft)] px-3 py-1.5"
         >
-          重新打开
+          {t.reopen}
         </button>
       </div>
       {status !== 'ready' && (
@@ -82,14 +78,14 @@ export function BundledDemoBrowser({ onReady, stage = 'final' }: { onReady?: () 
           role="status"
           className="bg-[var(--semantic-warning-surface)] px-4 py-2 text-sm text-[var(--semantic-warning)]"
         >
-          {status === 'loading' ? '正在打开成果…' : '成果暂时没有打开。请点击“重新打开”，无需安装或登录任何工具。'}
+          {status === 'loading' ? t.opening : t.failed}
         </div>
       )}
       <iframe
-        key={attempt}
+        key={attempt.id}
         ref={frame}
-        title="今天待办 · 演示成果"
-        srcDoc={DEMO_DELIVERABLE_HTML}
+        title={t.documentTitle}
+        srcDoc={attempt.html}
         sandbox="allow-scripts"
         onError={() => setStatus('failed')}
         className="min-h-0 w-full flex-1 border-0 bg-[var(--console-card-bg)]"

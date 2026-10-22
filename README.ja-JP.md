@@ -28,6 +28,14 @@ Clowder AI は、孤立した AI エージェントを本物のチームに変�
 
 > 📹 **[プラットフォーム全体デモ (3:45)](https://github.com/user-attachments/assets/8e470aba-8fe6-4aa5-a476-c2cd81d1630f)**
 
+### 30 秒でわかる、ひとつの機能
+
+どのデモも、Clowder AI を作っているチームで実際に交わされた会話の再現です。見たら、同じことをあなたの猫に話しかけてみてください。
+
+[![新しい会話の提案デモ：5 枚の提案カードが承認され、作業が始まる](site/assets/demos/conversation-proposals.jpg)](https://zts212653.github.io/clowder-ai/#demos)
+
+**新しい会話の提案** — 大きな仕事を猫のチームに任せると、猫がそれをいくつかの流れに分け、それぞれに「何を・なぜ・誰が」を書いたカードを作ります。承認すれば新しい会話が開き、断れば猫が直して出し直します。[デモを見る (0:48、英語字幕)](https://zts212653.github.io/clowder-ai/#demos) · コミュニティの issue [#82](https://github.com/zts212653/clowder-ai/issues/82) から生まれた機能です
+
 ## クイックスタート
 
 ### デスクトップインストーラー

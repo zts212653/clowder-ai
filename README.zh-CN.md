@@ -28,6 +28,14 @@ Clowder AI 是把孤立的 AI agent 变成真正团队的平台层 — 持久身
 
 > 📹 **[完整平台演示 (3:45)](https://github.com/user-attachments/assets/8e470aba-8fe6-4aa5-a476-c2cd81d1630f)**
 
+### 30 秒看一个功能
+
+每支演示都是我们团队日常里真实发生过的一段对话。看完，就能照着跟你的猫说。
+
+[![新对话提议演示：五张提议卡，同意后开工](site/assets/demos/conversation-proposals.jpg)](https://zts212653.github.io/clowder-ai/#demos)
+
+**新对话提议** — 一件大事交给一群猫：猫把它拆成几条线，每条写好做什么、为什么、交给谁。你点同意，新对话就开好了；也可以说不，猫改好再交回来。[观看演示 (0:48)](https://zts212653.github.io/clowder-ai/#demos) · 来自社区 issue [#82](https://github.com/zts212653/clowder-ai/issues/82)
+
 ## 快速开始
 
 ### 桌面安装包

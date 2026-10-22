@@ -44,7 +44,7 @@ export function bindInputs(messages, principals) {
   return tracker;
 }
 
-export async function fixture({ included = true, observe, staleCurrentObservation = false } = {}) {
+export async function fixture({ included = true, observe, staleCurrentObservation = false, authorization = {} } = {}) {
   const app = Fastify({ logger: false });
   const taskStore = new TaskStore();
   const messageStore = adaptMessageStore(new MessageStore());
@@ -66,6 +66,7 @@ export async function fixture({ included = true, observe, staleCurrentObservatio
     createdAt: 100,
     expiresAt: null,
     state: 'active',
+    ...authorization,
   };
   const registry = {
     async verify(invocationId, token) {
@@ -75,6 +76,9 @@ export async function fixture({ included = true, observe, staleCurrentObservatio
     },
     async isLatest(invocationId) {
       return invocationId === auth.invocationId;
+    },
+    async peekRecord(invocationId) {
+      return invocationId === auth.invocationId ? auth : null;
     },
   };
   const invocationTracker = bindInputs(messageStore, [{ auth, origin }]);
@@ -127,6 +131,7 @@ export async function fixture({ included = true, observe, staleCurrentObservatio
     deliveryDeps: connector.deliveryDeps,
     log: { info() {}, warn() {}, error() {} },
     currentObservation,
+    authorizationRegistry: registry,
   });
   registerCallbackDeploymentWaitRoutes(app, {
     taskStore,
@@ -151,6 +156,7 @@ export async function fixture({ included = true, observe, staleCurrentObservatio
     connector,
     observation,
     lifecycle,
+    registry,
   };
 }
 

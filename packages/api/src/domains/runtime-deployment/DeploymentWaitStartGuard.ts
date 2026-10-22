@@ -11,6 +11,7 @@ import type { IMessageStore } from '../cats/services/stores/ports/MessageStore.j
 import { deploymentWaitGeneration } from '../cats/services/stores/ports/TaskDeploymentWaitState.js';
 import type { ITaskStore } from '../cats/services/stores/ports/TaskStore.js';
 import { receiptOwnsOutcome } from './DeploymentWaitAuthority.js';
+import { resolveDeploymentWaitAuthorization } from './DeploymentWaitAuthorization.js';
 
 export interface DeploymentWaitStartIdentity {
   readonly messageId: string;
@@ -116,6 +117,12 @@ export class DeploymentWaitStartGuard {
           return { ok: false, reason: 'authority_stale' };
       }
       return { ok: false, reason: 'evidence_stale' };
+    }
+    if (
+      snapshot.receipt?.authorization &&
+      !(await resolveDeploymentWaitAuthorization(snapshot.receipt, { messageStore: this.deps.messageStore }))
+    ) {
+      return { ok: false, reason: 'authority_stale' };
     }
     const current = await this.deps.taskStore.getWaitRegistration(carrier.waitId);
     return !!current?.task.deploymentWait?.waitOutcome &&

@@ -129,6 +129,9 @@ export interface DormantPluginRuntimeCompositionOptions {
   readonly builtinRuntimes?: ReadonlyMap<string, BuiltinPluginRuntime>;
   readonly taskArtifactReader?: import('../growing/ports/PreparedArtifactReader.js').PreparedArtifactReader;
   readonly projectRoot: string;
+  /** Persistent capability authority used by native invocations and Settings;
+   * package/config/inventory storage retains its existing projectRoot. */
+  readonly capabilityProjectRoot?: string;
   readonly paths?: PluginRuntimePersistencePaths;
   readonly messageStore: IMessageStore;
   readonly lifecyclePresentation?: LifecycleDeliveryDeps['presentation'];
@@ -436,7 +439,8 @@ export function createDormantPluginRuntimeComposition(
     : undefined;
   // Every admitted instance takes this one path; the carrier is selected from the
   // package's own manifest, most specific claim first (F202 C1 clauses 1/2/6).
-  const mcpConfigIO = options.mcpConfigIO ?? fileBasedMcpIO(options.projectRoot);
+  const capabilityProjectRoot = options.capabilityProjectRoot ?? options.projectRoot;
+  const mcpConfigIO = options.mcpConfigIO ?? fileBasedMcpIO(capabilityProjectRoot);
   const builtinPackages =
     options.builtinPackages ??
     new FilesystemBuiltinPluginPackageMaterializer({
@@ -526,7 +530,7 @@ export function createDormantPluginRuntimeComposition(
   const supervisor = new PluginRuntimeCarrierRouter(
     inventoryStore,
     {
-      projectRoot: options.projectRoot,
+      projectRoot: capabilityProjectRoot,
       packages,
       mcpPackages: builtinPackages,
       resourcesRoot: resolve(dirname(paths.inventorySnapshotPath), PLUGIN_HOST_ENTRIES.resources),

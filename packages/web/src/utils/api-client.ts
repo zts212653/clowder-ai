@@ -6,7 +6,11 @@
  * - First call lazily establishes session, subsequent calls reuse the cookie
  */
 
+import { resolveShellCopy } from '../components/shell/shell-copy';
+import { readShellLanguage } from '../components/shell/shell-language';
+import { readShellPresentation } from '../components/shell/shell-presentation';
 import { useToastStore } from '../stores/toastStore';
+import { apiClientCopy } from './api-client.shell-copy';
 
 import { markApiGetGeneration } from './api-get-generation';
 import { resolveApiUrl } from './api-origin';
@@ -36,10 +40,11 @@ export function reportApiConnectionFailure(error: unknown): boolean {
   const now = Date.now();
   if (now - lastConnectionFailureAt >= 5_000) {
     lastConnectionFailureAt = now;
+    const t = connectionCopy();
     useToastStore.getState().addToast({
       type: 'error',
-      title: '后端连接异常',
-      message: '未能取得后端响应，请检查服务并刷新确认操作结果。',
+      title: t.connectionTitle,
+      message: t.connectionMessage,
       duration: 5000,
     });
   }
@@ -79,14 +84,19 @@ interface GetCoordinationState {
 const coordinatedGets = new Map<string, GetCoordinationState>();
 let nextGetGeneration = 0;
 
+function connectionCopy() {
+  return resolveShellCopy(apiClientCopy, readShellPresentation() === 'v2' ? readShellLanguage() : 'zh');
+}
+
 function notifySessionFailure() {
   const now = Date.now();
   if (now - lastSessionFailureToastAt < 3000) return;
   lastSessionFailureToastAt = now;
+  const t = connectionCopy();
   useToastStore.getState().addToast({
     type: 'error',
-    title: '会话恢复失败',
-    message: '登录态没有自动恢复成功。请稍后重试；如果仍无响应，再刷新页面。',
+    title: t.sessionTitle,
+    message: t.sessionMessage,
     duration: 6000,
   });
 }
