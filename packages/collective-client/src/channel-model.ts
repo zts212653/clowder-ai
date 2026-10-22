@@ -53,8 +53,8 @@ export function targetLabel(target: CollectiveTarget): string | undefined {
   return undefined;
 }
 
-export function formatEventTime(acceptedAt: string): string {
-  return new Intl.DateTimeFormat('zh-CN', {
+export function formatEventTime(acceptedAt: string, language: 'zh' | 'en' = 'zh'): string {
+  return new Intl.DateTimeFormat(language === 'en' ? 'en-US' : 'zh-CN', {
     hour: '2-digit',
     minute: '2-digit',
   }).format(new Date(acceptedAt));

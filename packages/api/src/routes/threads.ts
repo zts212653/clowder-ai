@@ -67,7 +67,10 @@ import {
   type AppliedWorkspaceReceiptMessage,
   projectAppliedWorkspaceReceipts,
 } from '../domains/collaborative-content/modification/accepted-workspace-artifacts.js';
-import { readIndependentThreadWorks } from '../domains/collaborative-content/works/catalogue.js';
+import {
+  readIndependentThreadWorks,
+  withIndependentWorksRead,
+} from '../domains/collaborative-content/works/catalogue.js';
 import { projectThreadRelations } from '../domains/thread-navigation/thread-relation-projection.js';
 import type { GlobalArtifactWorkLineageResolverHolder } from '../domains/video-studio/content-owner/global-artifact-work-lineage.js';
 import { createModuleLogger } from '../infrastructure/logger.js';
@@ -1799,149 +1802,147 @@ export const threadsRoutes: FastifyPluginAsync<ThreadsRoutesOptions> = async (ap
       return { error: 'Identity required' };
     }
 
-    const rawQuery = request.query as Record<string, unknown>;
-    if (rawQuery.view === 'works' && rawQuery.read === 'pages') {
-      const query = pagedWorksQuerySchema.safeParse(rawQuery);
-      if (!query.success) return reply.code(400).send({ error: 'Invalid paged works query' });
-      const started = performance.now();
-      try {
-        const independentWorks = opts.artifactWorkLineage?.independent;
-        const page = await readGlobalWorksPage({
-          userId,
-          cursor: query.data.cursor,
-          threads: await threadStore.list(userId),
-          messages: messageStore,
-          tasks: taskStore,
-          accepted: async (threadId, messages) => {
-            const result = await readAcceptedWorkspaceArtifacts(
-              opts.acceptedWorkspaceArtifacts,
-              userId,
-              threadId,
-              projectAppliedWorkspaceReceipts(messages),
-            );
-            if (!result.complete) throw new WorksPageError('Accepted work source unavailable', 503);
-            return result.artifacts;
-          },
-          ...(independentWorks
-            ? {
-                ownedWorks: (threadId: string, after?: string, snapshot?: string) =>
-                  independentWorks.readThread({ ownerUserId: userId, threadId, after, snapshot }),
-              }
-            : {}),
-        });
-        const artifacts = await readArtifactPrTitles(page.artifacts, opts.prTitleReader);
-        const projected = await projectGlobalArtifactWorkLineage(opts.artifactWorkLineage, userId, artifacts);
-        request.log.info(
-          { worksPage: { ...page.cost, durationMs: performance.now() - started, complete: page.complete } },
-          'Bounded global works page',
-        );
-        return {
-          artifacts: projected.artifacts,
-          workLineage: projected.workLineage,
-          pageTotal: projected.artifacts.length,
-          view: 'works',
-          complete: page.complete,
-          ...(page.nextCursor ? { nextCursor: page.nextCursor } : {}),
-        };
-      } catch (error) {
-        if (error instanceof WorksPageError) return reply.code(error.statusCode).send({ error: error.message });
-        throw error;
-      }
-    }
-    const worksView = rawQuery.view === 'works';
-    if (worksView && !worksQuerySchema.safeParse(rawQuery).success)
-      return reply.code(400).send({ error: 'Invalid works view query' });
-    if (Object.hasOwn(rawQuery, 'view') && !worksView) {
-      const parsed = recentWorksQuerySchema.safeParse(rawQuery);
-      if (!parsed.success) {
-        reply.status(400);
-        return { error: 'Invalid recent works query' };
-      }
-      return readRecentWorksView({
-        userId,
-        limit: parsed.data.limit,
-        threadStore,
-        messageStore,
-        artifactWorkLineage: opts.artifactWorkLineage,
-      });
-    }
-
-    const userThreads = await threadStore.list(userId);
-
-    // Bound raw-message reads while retaining the original thread order for equal-time ties.
-    const perThread = new Array<GlobalArtifactDTO[]>(userThreads.length);
-    const threadEntries = userThreads.entries();
-    let scanFailed = false;
-    let worksComplete = !!messageStore && !!taskStore;
-    const workers = Array.from({ length: Math.min(4, userThreads.length) }, async () => {
-      for (const [index, thread] of threadEntries) {
-        if (scanFailed) break;
+    return withIndependentWorksRead(opts.artifactWorkLineage?.independent, userId, async (independentWorks) => {
+      const rawQuery = request.query as Record<string, unknown>;
+      if (rawQuery.view === 'works' && rawQuery.read === 'pages') {
+        const query = pagedWorksQuerySchema.safeParse(rawQuery);
+        if (!query.success) return reply.code(400).send({ error: 'Invalid paged works query' });
+        const started = performance.now();
         try {
-          const receipts: AppliedWorkspaceReceiptMessage[] = [];
-          const messageArtifacts = messageStore
-            ? await collectThreadMessageArtifacts(messageStore, thread.id, userId, (page) => {
-                receipts.push(...projectAppliedWorkspaceReceipts(page));
-              })
-            : [];
-          const acceptedFiles = await readAcceptedWorkspaceArtifacts(
-            opts.acceptedWorkspaceArtifacts,
+          const page = await readGlobalWorksPage({
             userId,
-            thread.id,
-            receipts,
-          );
-          if (!acceptedFiles.complete) worksComplete = false;
-          const allTasks = taskStore ? await taskStore.listByThread(thread.id) : [];
-          const prTasks = worksView
-            ? threadWorksPrs(allTasks, userId, thread.createdBy)
-            : allTasks.filter((t) => t.kind === 'pr_tracking' && t.userId === userId);
-          const mem = worksView ? null : await threadStore.getThreadMemory(thread.id);
-          const fileLedger = (mem?.recentArtifacts ?? []).filter(
-            (a) => a.type === 'file' || a.type === 'plan' || a.type === 'feature-doc',
-          );
-          const artifacts = aggregateProjectedThreadArtifacts({
-            messageArtifacts: [...messageArtifacts, ...acceptedFiles.artifacts],
-            prTasks,
-            fileLedger: worksView ? [] : fileLedger,
+            cursor: query.data.cursor,
+            threads: await threadStore.list(userId),
+            messages: messageStore,
+            tasks: taskStore,
+            accepted: async (threadId, messages) => {
+              const result = await readAcceptedWorkspaceArtifacts(
+                opts.acceptedWorkspaceArtifacts,
+                userId,
+                threadId,
+                projectAppliedWorkspaceReceipts(messages),
+              );
+              if (!result.complete) throw new WorksPageError('Accepted work source unavailable', 503);
+              return result.artifacts;
+            },
+            ...(independentWorks
+              ? {
+                  ownedWorks: (threadId: string, after?: string, snapshot?: string) =>
+                    independentWorks.readThread({ ownerUserId: userId, threadId, after, snapshot }),
+                }
+              : {}),
           });
-          if (worksView)
-            artifacts.push(
-              ...(await readIndependentThreadWorks(opts.artifactWorkLineage?.independent, userId, thread.id)),
-            );
-          perThread[index] = artifacts.map((a) => ({
-            ...a,
-            threadId: thread.id,
-            threadTitle: thread.title ?? thread.id,
-          }));
+          const artifacts = await readArtifactPrTitles(page.artifacts, opts.prTitleReader);
+          const projected = await projectGlobalArtifactWorkLineage(opts.artifactWorkLineage, userId, artifacts);
+          request.log.info(
+            { worksPage: { ...page.cost, durationMs: performance.now() - started, complete: page.complete } },
+            'Bounded global works page',
+          );
+          return {
+            artifacts: projected.artifacts,
+            workLineage: projected.workLineage,
+            pageTotal: projected.artifacts.length,
+            view: 'works',
+            complete: page.complete,
+            ...(page.nextCursor ? { nextCursor: page.nextCursor } : {}),
+          };
         } catch (error) {
-          scanFailed = true;
+          if (error instanceof WorksPageError) return reply.code(error.statusCode).send({ error: error.message });
           throw error;
         }
       }
-    });
-    // A failed request admits no new work; already-started reads settle before returning.
-    const settled = await Promise.allSettled(workers);
-    const failed = settled.find((result) => result.status === 'rejected');
-    if (failed?.status === 'rejected') throw failed.reason;
-
-    // Flatten + sort descending by createdAt
-    const all = filterGlobalArtifacts(
-      perThread.flat().sort((a, b) => b.createdAt - a.createdAt),
-      rawQuery as { type?: string; cat?: string; q?: string | string[] },
-    );
-
-    const titled = await readArtifactPrTitles(
-      all,
-      worksView ? (opts.prTitleReader ?? pluginPrTitleReader(app, request)) : undefined,
-    );
-    const projected = await projectGlobalArtifactWorkLineage(opts.artifactWorkLineage, userId, titled);
-    return worksView
-      ? {
-          ...projected,
-          view: 'works',
-          total: projectThreadWorks(projected.artifacts, projected.workLineage === 'resolved').length,
-          complete: worksComplete,
+      const worksView = rawQuery.view === 'works';
+      if (worksView && !worksQuerySchema.safeParse(rawQuery).success)
+        return reply.code(400).send({ error: 'Invalid works view query' });
+      if (Object.hasOwn(rawQuery, 'view') && !worksView) {
+        const parsed = recentWorksQuerySchema.safeParse(rawQuery);
+        if (!parsed.success) {
+          reply.status(400);
+          return { error: 'Invalid recent works query' };
         }
-      : projected;
+        return readRecentWorksView({
+          userId,
+          limit: parsed.data.limit,
+          threadStore,
+          messageStore,
+          artifactWorkLineage: opts.artifactWorkLineage,
+        });
+      }
+
+      const userThreads = await threadStore.list(userId);
+
+      // Bound raw-message reads while retaining the original thread order for equal-time ties.
+      const perThread = new Array<GlobalArtifactDTO[]>(userThreads.length);
+      const threadEntries = userThreads.entries();
+      let scanFailed = false;
+      let worksComplete = !!messageStore && !!taskStore;
+      const workers = Array.from({ length: Math.min(4, userThreads.length) }, async () => {
+        for (const [index, thread] of threadEntries) {
+          if (scanFailed) break;
+          try {
+            const receipts: AppliedWorkspaceReceiptMessage[] = [];
+            const messageArtifacts = messageStore
+              ? await collectThreadMessageArtifacts(messageStore, thread.id, userId, (page) => {
+                  receipts.push(...projectAppliedWorkspaceReceipts(page));
+                })
+              : [];
+            const acceptedFiles = await readAcceptedWorkspaceArtifacts(
+              opts.acceptedWorkspaceArtifacts,
+              userId,
+              thread.id,
+              receipts,
+            );
+            if (!acceptedFiles.complete) worksComplete = false;
+            const allTasks = taskStore ? await taskStore.listByThread(thread.id) : [];
+            const prTasks = worksView
+              ? threadWorksPrs(allTasks, userId, thread.createdBy)
+              : allTasks.filter((t) => t.kind === 'pr_tracking' && t.userId === userId);
+            const mem = worksView ? null : await threadStore.getThreadMemory(thread.id);
+            const fileLedger = (mem?.recentArtifacts ?? []).filter(
+              (a) => a.type === 'file' || a.type === 'plan' || a.type === 'feature-doc',
+            );
+            const artifacts = aggregateProjectedThreadArtifacts({
+              messageArtifacts: [...messageArtifacts, ...acceptedFiles.artifacts],
+              prTasks,
+              fileLedger: worksView ? [] : fileLedger,
+            });
+            if (worksView) artifacts.push(...(await readIndependentThreadWorks(independentWorks, userId, thread.id)));
+            perThread[index] = artifacts.map((a) => ({
+              ...a,
+              threadId: thread.id,
+              threadTitle: thread.title ?? thread.id,
+            }));
+          } catch (error) {
+            scanFailed = true;
+            throw error;
+          }
+        }
+      });
+      // A failed request admits no new work; already-started reads settle before returning.
+      const settled = await Promise.allSettled(workers);
+      const failed = settled.find((result) => result.status === 'rejected');
+      if (failed?.status === 'rejected') throw failed.reason;
+
+      // Flatten + sort descending by createdAt
+      const all = filterGlobalArtifacts(
+        perThread.flat().sort((a, b) => b.createdAt - a.createdAt),
+        rawQuery as { type?: string; cat?: string; q?: string | string[] },
+      );
+
+      const titled = await readArtifactPrTitles(
+        all,
+        worksView ? (opts.prTitleReader ?? pluginPrTitleReader(app, request)) : undefined,
+      );
+      const projected = await projectGlobalArtifactWorkLineage(opts.artifactWorkLineage, userId, titled);
+      return worksView
+        ? {
+            ...projected,
+            view: 'works',
+            total: projectThreadWorks(projected.artifacts, projected.workLineage === 'resolved').length,
+            complete: worksComplete,
+          }
+        : projected;
+    });
   });
 
   // F35: PATCH /api/threads/:id/reveal — reveal all whispers in a thread

@@ -295,6 +295,12 @@ export class ProjectContentOwnerService {
     return this.store.listRetainedMedia(ownerUserId, after);
   }
 
+  /** Canonical read projection, never a persisted catalogue or an authorization grant. */
+  retainedMediaHeads(ownerUserId: string) {
+    validateIdentity(ownerUserId, 'ownerUserId');
+    return this.store.retainedMediaHeads(ownerUserId);
+  }
+
   /** Internal batch lookup; read projections must freshly authorize each resulting coordinate. */
   findSourcePublicationsBatch(input: Parameters<ProjectContentOwnerStore['findSourcePublicationsBatch']>[0]) {
     return this.store.findSourcePublicationsBatch(input);

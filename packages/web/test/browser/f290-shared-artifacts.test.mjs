@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 import { collectiveEventSourceIdentity } from '@cat-cafe/shared';
 import { collectiveArtifactOwnerFixture } from '../../../api/test/collective-artifact-owner.fixture.ts';
+import { loadCollectiveModule } from '../../../api/test/helpers/f202-collective-installed-business.js';
 import { checkSharedArtifactAnnotationPages } from './helpers/shared-artifact-annotation-pages-journey.mjs';
 import { cancelSharedRequestAfterProposalRace } from './helpers/shared-artifact-control-race-journey.mjs';
 import { checkSharedArtifactLibrary } from './helpers/shared-artifact-library-journey.mjs';
@@ -13,7 +14,7 @@ import { sendSharedRequestAfterLostReply } from './helpers/shared-artifact-reque
 import { checkSharedArtifactReview } from './helpers/shared-artifact-review-journey.mjs';
 
 test(
-  'normal Client publishes Markdown to its real owner and an independent member reads it beside the original Topic',
+  'normal Client promotes a completed Work result to its real owner and an independent member collaborates on it',
   { timeout: 90000 },
   async (t) => {
     // Use installed browser binaries, while all browser profiles and application data stay in the test sandbox.
@@ -28,7 +29,7 @@ test(
     const f = await collectiveArtifactOwnerFixture(t, {
       verifyAgent: async (agent) => agent.catId === 'codex-sol' && agent.sessionRef === 'browser-agent-invocation',
     });
-    await f.connector.setHostRoute(
+    const hostRoute = await f.connector.setHostRoute(
       f.connection.connectionId,
       {
         localOwnerUserId: 'real-local-owner',
@@ -45,16 +46,101 @@ test(
       1,
     );
     await f.connector.publishParticipation(f.connection.connectionId);
-    const proposedWork = await f.store.proposeCollectiveWork(f.owner.sessionToken, {
+    await f.connector.sync(f.connection.connectionId);
+    await f.store.registerCollectiveWorkPolicy(f.owner.sessionToken, {
       ...f.coordinates,
-      sourceEventId: f.source.eventId,
-      requestId: 'shared-guide-original-work',
+      connectionId: f.connection.connectionId,
+      expectedRevision: 0,
+      requestId: 'shared-guide-work-policy',
+      decisionMode: 'automatic',
+      grants: [
+        {
+          grantRef: 'shared-guide-grant',
+          catIds: ['codex-sol'],
+          channelIds: ['general'],
+          requestingHumanIds: 'channel_members',
+          requestKinds: ['guide'],
+          expiresAt: null,
+        },
+      ],
     });
-    const originalWork = await f.store.commitCollectiveWork(f.owner.sessionToken, {
+    const assignedWork = await f.store.acceptCollectiveWorkAsAgent(f.serviceEndpointCredential, {
       ...f.coordinates,
-      workId: proposedWork.workId,
-      expectedRevision: proposedWork.revision,
-      requestId: 'shared-guide-human-responsibility',
+      connectionId: f.connection.connectionId,
+      participationRevision: hostRoute.revision,
+      sourceEventId: f.source.eventId,
+      requestId: 'shared-guide-agent-acceptance',
+      catId: 'codex-sol',
+      sessionRef: 'browser-agent-invocation',
+      grantRef: 'shared-guide-grant',
+      grantRevision: 1,
+      requestKind: 'guide',
+      title: '共同协作指南',
+      intendedOutcome: f.source.body,
+    });
+    await f.store.recordCollectiveWorkHostAdmission(f.serviceEndpointCredential, {
+      ...f.coordinates,
+      connectionId: f.connection.connectionId,
+      workId: assignedWork.workId,
+      assignmentEventId: assignedWork.assignmentEventId,
+      operationRef: 'shared-guide-agent-acceptance',
+      grantRef: 'shared-guide-grant',
+      grantRevision: 1,
+      disposition: { state: 'admitted', receiptRef: 'host:shared-guide-task' },
+    });
+    const text = '# 共同协作指南\n\n两名独立认证成员阅读同一份正文。\n\n## 原讨论\n版本和来源一起保留。\n';
+    const bytes = Buffer.from(text);
+    const contentDigest = `sha256:${createHash('sha256').update(bytes).digest('hex')}`;
+    const fileId = `wrf_${createHash('sha256').update('shared-guide-result-file').digest('hex')}`;
+    const fileName = `cwork-${createHash('sha256').update('shared-guide-capture').digest('hex').slice(0, 32)}-${contentDigest.slice('sha256:'.length)}.md`;
+    const { collectiveWorkResultFilePath } = await loadCollectiveModule('business/contracts/index.js');
+    const publicHref = new URL(collectiveWorkResultFilePath({ fileId, fileName }), f.server.url).toString();
+    const resultEvent = await f.store.postAgentMessage(
+      f.serviceEndpointCredential,
+      {
+        ...f.coordinates,
+        connectionId: f.connection.connectionId,
+        clientEventId: 'shared-guide-original-result',
+        participationRevision: hostRoute.revision,
+        agent: {
+          agentId: 'codex-sol',
+          catId: 'codex-sol',
+          displayName: 'Sol',
+          sessionRef: 'browser-agent-invocation',
+        },
+        target: { kind: 'message', eventId: assignedWork.assignmentEventId },
+        replyToEventId: assignedWork.assignmentEventId,
+        workResultIntent: {
+          assignmentEventId: assignedWork.assignmentEventId,
+          assignmentCatId: 'codex-sol',
+          participationRevision: hostRoute.revision,
+          resultRevision: 1,
+        },
+        workResultFile: {
+          v: 1,
+          fileId,
+          sourceHref: `/uploads/${fileName}`,
+          fileName,
+          mediaType: 'text/markdown',
+          contentDigest,
+          byteLength: bytes.length,
+          contentBase64: bytes.toString('base64'),
+        },
+        body: `《共同协作指南》第1版：[打开结果](${publicHref})。`,
+      },
+      f.server.url,
+    );
+    const readyWork = f.store
+      .listCollectiveCollaboration(f.owner.sessionToken, f.coordinates.collectiveId)
+      .works.find((work) => work.workId === assignedWork.workId);
+    assert.ok(readyWork);
+    const originalWork = await f.store.acceptCollectiveWorkResult(f.owner.sessionToken, {
+      ...f.coordinates,
+      workId: readyWork.workId,
+      expectedRevision: readyWork.revision,
+      requestId: 'accept-shared-guide-result',
+      resultEventId: resultEvent.eventId,
+      resultRevision: 1,
     });
     const browser = await chromium.launch({ headless: true });
     const shots = process.env.F290_SCREENSHOTS;
@@ -95,15 +181,6 @@ test(
         pages.push(page);
       }
       const [owner, member] = pages;
-      const text = '# 共同协作指南\n\n两名独立认证成员阅读同一份正文。\n\n## 原讨论\n版本和来源一起保留。\n';
-      await owner.locator('.message').first().hover();
-      await owner.locator('.message-action-more').first().click();
-      await owner.getByRole('menuitem', { name: '分享作品…' }).click();
-      await owner
-        .getByLabel('Markdown 文件')
-        .setInputFiles({ name: '共同协作指南.md', mimeType: 'text/markdown', buffer: Buffer.from(text) });
-      await owner.getByLabel('作品存放在').selectOption({ label: 'Canonical content Café' });
-      await owner.getByLabel('属于任务').selectOption(originalWork.workId);
       const ownerResponse = owner.waitForResponse(
         (response) =>
           response.url().endsWith('/api/artifacts/owner/request') &&
@@ -111,9 +188,15 @@ test(
           response.request().postDataJSON().action === 'read',
       );
       void ownerResponse.catch(() => undefined);
-      await owner.getByRole('button', { name: '分享作品', exact: true }).click();
-      await owner.getByRole('heading', { name: '共同协作指南', exact: true }).waitFor();
-      await member.getByRole('button', { name: '频道作品', exact: true }).click();
+      await capture(owner, 'completed-work-channel');
+      await owner.locator(`#collective-event-${f.source.eventId} .reply-vitals`).click();
+      await owner.getByRole('complementary', { name: '话题', exact: true }).waitFor();
+      await owner.getByRole('button', { name: '打开结果', exact: true }).click();
+      await owner
+        .getByRole('region', { name: '作品模式', exact: true })
+        .locator('.shared-artifact-header strong')
+        .getByText('共同协作指南', { exact: true })
+        .waitFor();
       const memberResponse = member.waitForResponse(
         (response) =>
           response.url().endsWith('/api/artifacts/owner/request') &&
@@ -121,12 +204,14 @@ test(
           response.request().postDataJSON().action === 'read',
       );
       void memberResponse.catch(() => undefined);
+      await member.locator(`#collective-event-${f.source.eventId} .reply-vitals`).click();
+      await member.getByRole('complementary', { name: '话题', exact: true }).waitFor();
+      await member.getByRole('button', { name: '打开结果', exact: true }).click();
       await member
-        .getByRole('complementary', { name: '频道作品', exact: true })
-        .locator('.shared-artifact-card')
-        .filter({ hasText: '共同协作指南' })
-        .click();
-      await member.getByRole('heading', { name: '共同协作指南', exact: true }).waitFor();
+        .getByRole('region', { name: '作品模式', exact: true })
+        .locator('.shared-artifact-header strong')
+        .getByText('共同协作指南', { exact: true })
+        .waitFor();
       const ownerRead = (await (await ownerResponse).json()).value;
       const memberRead = (await (await memberResponse).json()).value;
       assert.equal(ownerRead.blobDigest, `sha256:${createHash('sha256').update(text).digest('hex')}`);
@@ -163,7 +248,13 @@ test(
         .locator('[data-testid="collective-home"] .shared-artifact-card')
         .filter({ hasText: '共同协作指南' })
         .click();
-      await member.getByRole('heading', { name: '共同协作指南', exact: true }).waitFor();
+      await member
+        .getByRole('region', { name: '作品模式', exact: true })
+        .locator('.shared-artifact-header strong')
+        .getByText('共同协作指南', { exact: true })
+        .waitFor();
+      await member.locator('.shared-artifact-document').waitFor();
+      await capture(member, 'reopen-from-home');
       assert.equal(
         await member
           .locator('.context-panel .topic-message .message-body')
@@ -326,7 +417,9 @@ test(
         .listCollectiveCollaboration(f.owner.sessionToken, f.coordinates.collectiveId)
         .works.find((work) => work.workId === originalWork.workId);
       assert.equal(retainedWork.lifecycle, originalWork.lifecycle);
-      assert.equal(retainedWork.resultEventId, undefined);
+      assert.equal(retainedWork.revision, originalWork.revision);
+      assert.equal(retainedWork.resultEventId, resultEvent.eventId);
+      assert.equal(retainedWork.resultRevision, 1);
       await member
         .locator('.shared-artifact-document')
         .getByText('两名各自登录的成员阅读同一份正文。', { exact: true })
@@ -445,11 +538,73 @@ test(
       });
       await checkSharedArtifactReview({ page: owner, capture });
       await checkSharedArtifactAnnotationPages({ page: owner, capture });
+      const englishContext = await browser.newContext({ viewport: { width: 1440, height: 960 } });
+      contexts.push(englishContext);
+      await englishContext.addInitScript(
+        ({ origin, token }) => {
+          if (location.origin === origin) sessionStorage.setItem(`collective-session:${origin}`, token);
+        },
+        { origin: f.server.url, token: f.owner.sessionToken },
+      );
+      const english = await englishContext.newPage();
+      english.setDefaultTimeout(15000);
+      english.on('pageerror', (error) => pageErrors.push(error.message));
+      await english.goto(`${f.server.url}/?collectiveId=${f.coordinates.collectiveId}&channelId=general&lang=en`, {
+        waitUntil: 'networkidle',
+      });
+      await english.getByRole('navigation', { name: 'Channels', exact: true }).waitFor();
+      await english.getByRole('button', { name: 'All works', exact: true }).click();
+      await english
+        .getByRole('region', { name: 'All works', exact: true })
+        .locator('.shared-artifact-card')
+        .filter({ hasText: '共同协作指南' })
+        .click();
+      const englishSurface = english.getByRole('region', { name: 'Work mode', exact: true });
+      await englishSurface
+        .locator('.shared-artifact-header strong')
+        .getByText('共同协作指南', { exact: true })
+        .waitFor();
+      await englishSurface.locator('.shared-artifact-document').waitFor();
+      await englishSurface.getByRole('button', { name: 'Version history', exact: true }).waitFor();
+      await english.getByRole('complementary', { name: 'Thread', exact: true }).waitFor();
+      const englishVersion = englishSurface.locator('.shared-artifact-header select');
+      await englishVersion.waitFor();
+      assert.equal(await englishVersion.inputValue(), '2');
+      assert.equal(await english.locator('html').getAttribute('lang'), 'en');
+      assert.equal(await english.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true);
+      const englishChrome = await english
+        .locator('.destination-scroll, .shared-artifact-header, .shared-artifact-footer')
+        .allInnerTexts();
+      assert.doesNotMatch(englishChrome.join('\n'), /全部作品|成员|频道|作品信息|版本记录|讨论|回到原讨论/u);
+      await capture(english, 'english-artifact-1440');
+      await english.setViewportSize({ width: 390, height: 844 });
+      assert.equal(await english.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true);
+      await englishSurface.getByRole('button', { name: 'Discussion', exact: true }).waitFor();
+      const englishHistoryResponse = english.waitForResponse(
+        (response) =>
+          response.url().endsWith('/api/artifacts/history') &&
+          response.request().postDataJSON().artifactId === publishedWork.artifactId &&
+          response.status() === 200,
+      );
+      await englishSurface.getByRole('button', { name: 'Version history', exact: true }).click();
+      const englishHistoryPage = await (await englishHistoryResponse).json();
+      assert.deepEqual(
+        englishHistoryPage.versions.map((version) => version.ownerRevision),
+        [2, 1],
+      );
+      const englishHistory = english.getByRole('dialog', { name: 'Version history', exact: true });
+      await englishHistory.waitFor();
+      await english.waitForFunction(() => document.querySelectorAll('.shared-artifact-history li').length === 2);
+      assert.deepEqual(await englishHistory.locator('h3').allTextContents(), ['Version 2 · Viewing', 'Version 1']);
+      await englishHistory.locator('li').first().scrollIntoViewIfNeeded();
+      await capture(english, 'english-history-390');
+      await englishHistory.getByRole('button', { name: 'Close version history', exact: true }).click();
       await owner.getByRole('button', { name: '回到原讨论', exact: true }).click();
       const returnedWork = owner
         .locator(`.channel-flow #collective-event-${f.source.eventId}`)
         .getByRole('region', { name: `任务 · ${originalWork.title}`, exact: true });
-      await returnedWork.getByRole('button', { name: '标记完成', exact: true }).waitFor();
+      await returnedWork.waitFor();
+      assert.equal(await returnedWork.getAttribute('data-work-lifecycle'), 'completed');
       await owner.waitForFunction(
         (id) => document.getElementById(`collective-event-${id}`)?.dataset.highlighted === 'true',
         f.source.eventId,

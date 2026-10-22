@@ -1,30 +1,33 @@
 import type { CollectiveArtifactManagement } from '@cat-cafe/shared';
 import { useState } from 'react';
 import type { SharedArtifact } from './collective-artifact-client.js';
+import { useCollectiveLanguage, useCollectiveText } from './collective-copy.js';
 import { SharedArtifactCustody } from './SharedArtifactCustody.js';
 import { artifactMemberLabel } from './shared-artifact-member-label.js';
 import { useSharedArtifacts } from './use-collective-artifacts.js';
 import { useSharedArtifactManagement } from './use-shared-artifact-management.js';
 
 export function SharedArtifactManagement({ artifact }: { readonly artifact: SharedArtifact }) {
+  const language = useCollectiveLanguage();
+  const t = useCollectiveText();
   const shared = useSharedArtifacts();
   const management = useSharedArtifactManagement(artifact);
   const { api, value, pending, unconfirmed } = management;
   const blocked = pending || unconfirmed;
   return (
-    <section className="shared-artifact-management" aria-label="权限与保管">
-      <h2>权限与保管</h2>
-      {!value && !management.error && <output>正在核对…</output>}
-      {management.error && <p role="alert">{management.error}</p>}
+    <section className="shared-artifact-management" aria-label={t('权限与保管')}>
+      <h2>{t('权限与保管')}</h2>
+      {!value && !management.error && <output>{t('正在核对…')}</output>}
+      {management.error && <p role="alert">{t(management.error)}</p>}
       {unconfirmed && (
         <div role="status">
-          <p>上次操作尚未确认。</p>
+          <p>{t('上次操作尚未确认。')}</p>
           <button
             type="button"
             disabled={pending}
             onClick={() => void management.run(async () => api?.recover(artifact))}
           >
-            核对上次操作
+            {t('核对上次操作')}
           </button>
         </div>
       )}
@@ -32,8 +35,8 @@ export function SharedArtifactManagement({ artifact }: { readonly artifact: Shar
         <>
           {value.canManageAccess && (
             <div>
-              <h3>成员的作品权限</h3>
-              <p>修改只作用于这件作品，采用权限由你明确授予。</p>
+              <h3>{t('成员的作品权限')}</h3>
+              <p>{t('修改只作用于这件作品，采用权限由你明确授予。')}</p>
               {value.members.map(
                 (member) =>
                   member.access &&
@@ -56,13 +59,15 @@ export function SharedArtifactManagement({ artifact }: { readonly artifact: Shar
           <SharedArtifactCustody artifact={artifact} management={management} />
           {value.nextOffset !== undefined && (
             <button type="button" disabled={blocked} onClick={() => void management.more()}>
-              更多成员（已读 {value.members.length}/{value.total}）
+              {language === 'en'
+                ? `More members (${value.members.length}/${value.total} read)`
+                : `更多成员（已读 ${value.members.length}/${value.total}）`}
             </button>
           )}
         </>
       )}
       <button type="button" disabled={pending} onClick={() => void management.refresh()}>
-        重新读取权限与保管
+        {t('重新读取权限与保管')}
       </button>
     </section>
   );
@@ -79,24 +84,26 @@ function ArtifactMemberPermission({
   readonly disabled: boolean;
   readonly onSave: (access: 'read' | 'apply' | 'revoked') => void;
 }) {
+  const language = useCollectiveLanguage();
+  const t = useCollectiveText();
   const [access, setAccess] = useState(member.access ?? 'read');
   return (
     <div className="shared-artifact-member-permission">
       <label>
         {label}
         <select
-          aria-label={`${label}的作品权限`}
+          aria-label={language === 'en' ? `${label}'s work access` : `${label}的作品权限`}
           value={access}
           disabled={disabled}
           onChange={(event) => setAccess(event.target.value as typeof access)}
         >
-          <option value="read">查看、批注与请猫修改</option>
-          <option value="apply">也可采用修改</option>
-          <option value="revoked">停止访问</option>
+          <option value="read">{t('查看、批注与请猫修改')}</option>
+          <option value="apply">{t('也可采用修改')}</option>
+          <option value="revoked">{t('停止访问')}</option>
         </select>
       </label>
       <button type="button" disabled={disabled || access === member.access} onClick={() => onSave(access)}>
-        更新{label}的权限
+        {language === 'en' ? `Update ${label}'s access` : `更新${label}的权限`}
       </button>
     </div>
   );

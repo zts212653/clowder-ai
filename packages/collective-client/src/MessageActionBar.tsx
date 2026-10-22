@@ -2,6 +2,7 @@ import { COLLECTIVE_REACTION_EMOJIS } from '@cat-cafe/shared';
 import { type RefObject, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { CollectiveIcon } from './CollectiveIcon.js';
 import type { CollectiveReactionEmoji } from './client-types.js';
+import { useCollectiveLanguage, useCollectiveText } from './collective-copy.js';
 
 type OpenPanel = 'menu' | 'reactions';
 
@@ -30,6 +31,8 @@ export function MessageActionBar({
   readonly onProposeWork?: () => void;
   readonly onPublishArtifact?: () => void;
 }) {
+  const language = useCollectiveLanguage();
+  const t = useCollectiveText();
   const [open, setOpen] = useState<OpenPanel>();
   const rootRef = useRef<HTMLDivElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
@@ -107,13 +110,13 @@ export function MessageActionBar({
   };
 
   return (
-    <div ref={rootRef} className="message-actions" role="toolbar" aria-label="消息操作">
+    <div ref={rootRef} className="message-actions" role="toolbar" aria-label={t('消息操作')}>
       {canReact && (
         <button
           ref={reactionTriggerRef}
           type="button"
           className="message-action-primary"
-          aria-label="添加回应"
+          aria-label={t('添加回应')}
           aria-expanded={open === 'reactions'}
           aria-controls={open === 'reactions' ? reactionId : undefined}
           disabled={pendingReaction !== undefined}
@@ -126,7 +129,7 @@ export function MessageActionBar({
         <button
           type="button"
           className="message-action-primary"
-          aria-label={`回复 ${eventLabel}`}
+          aria-label={language === 'en' ? `Reply to ${eventLabel}` : `回复 ${eventLabel}`}
           onClick={() => run(onReply)}
         >
           <CollectiveIcon kind="reply" />
@@ -137,7 +140,7 @@ export function MessageActionBar({
           ref={moreTriggerRef}
           type="button"
           className="message-action-more"
-          aria-label="更多消息动作"
+          aria-label={t('更多消息动作')}
           aria-expanded={open === 'menu'}
           aria-controls={open === 'menu' ? menuId : undefined}
           onClick={() => setOpen((current) => (current === 'menu' ? undefined : 'menu'))}
@@ -146,12 +149,12 @@ export function MessageActionBar({
         </button>
       )}
       {open === 'reactions' && onSetReaction && (
-        <div ref={panelRef} id={reactionId} className="reaction-picker" role="toolbar" aria-label="选择回应">
+        <div ref={panelRef} id={reactionId} className="reaction-picker" role="toolbar" aria-label={t('选择回应')}>
           {COLLECTIVE_REACTION_EMOJIS.map((emoji) => (
             <button
               key={emoji}
               type="button"
-              aria-label={`用 ${emoji} 回应`}
+              aria-label={language === 'en' ? `React with ${emoji}` : `用 ${emoji} 回应`}
               aria-pressed={activeReactions.has(emoji)}
               disabled={pendingReaction !== undefined}
               onClick={() => {
@@ -165,35 +168,35 @@ export function MessageActionBar({
         </div>
       )}
       {open === 'menu' && (
-        <div ref={panelRef} id={menuId} className="message-action-menu" role="menu" aria-label="更多消息动作">
+        <div ref={panelRef} id={menuId} className="message-action-menu" role="menu" aria-label={t('更多消息动作')}>
           {canReact && (
             <button type="button" role="menuitem" onClick={() => setOpen('reactions')}>
-              用表情回应
+              {t('用表情回应')}
             </button>
           )}
           {onReply && (
             <button type="button" role="menuitem" onClick={() => run(onReply)}>
-              回复 {eventLabel}
+              {language === 'en' ? 'Reply to' : '回复'} {eventLabel}
             </button>
           )}
           {onMention && (
             <button type="button" role="menuitem" onClick={() => run(onMention)}>
-              提到 {eventLabel}
+              {language === 'en' ? 'Mention' : '提到'} {eventLabel}
             </button>
           )}
           {onStartVote && (
             <button type="button" role="menuitem" onClick={() => run(onStartVote)}>
-              发起随手投票
+              {t('发起随手投票')}
             </button>
           )}
           {onProposeWork && (
             <button type="button" role="menuitem" onClick={() => run(onProposeWork)}>
-              建成任务
+              {t('建成任务')}
             </button>
           )}
           {onPublishArtifact && (
             <button type="button" role="menuitem" onClick={() => run(onPublishArtifact)}>
-              分享作品…
+              {t('分享作品…')}
             </button>
           )}
         </div>

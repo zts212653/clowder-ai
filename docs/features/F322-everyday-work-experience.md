@@ -4,7 +4,7 @@ related_features: [F056, F083, F147, F229, F232, F269, F277, F283, F284, F290, F
 topics: [frontend, ux, discoverability, navigation, continuity, accessibility]
 doc_kind: spec
 created: 2026-09-27
-updated: 2026-10-21
+updated: 2026-10-22
 description: "把日常主屏与跨面板操作整理成看得懂、找得到、能继续的工作体验，并逐项结算已有前端承诺。"
 description_source: model
 description_author: codex-astra

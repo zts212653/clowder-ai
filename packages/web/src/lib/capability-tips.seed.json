@@ -2748,7 +2748,7 @@
     },
     "contexts": ["thinking", "long_running", "concierge_open"],
     "audience": ["all"],
-    "body": "结果待确认时，负责人可在原 Work 卡填写反馈并点“退回修改”。在当前授权与家内执行条件仍有效时，修订沿原工作继续，旧结果与反馈保留；新版回来后再确认当前结果，无需另开工作。",
+    "body": "Markdown 结果可直接点进作品阅读、批注，让猫提交候选并明确采用；采用只推进作品版本，不会重复验收 Work。结果仍待确认时，也可在原 Work 卡填写反馈并点“退回修改”，沿原工作继续修订。",
     "action": {
       "type": "open_capability_surface",
       "label": "查看 Collective 工作",

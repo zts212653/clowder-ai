@@ -10,6 +10,7 @@ import type {
   CollectiveVoteProjection,
   CollectiveWorkProjection,
 } from './client-types.js';
+import { useCollectiveLanguage, useCollectiveText } from './collective-copy.js';
 import { MessageInteraction } from './MessageInteraction.js';
 import { MessageReceipt } from './MessageReceipt.js';
 import { authorPresentation } from './message-presentation.js';
@@ -47,6 +48,8 @@ export function ChannelMessage({
   showTime = true,
 }: ChannelMessageProps) {
   const v2 = useRoomPresentation(presentation) === 'v2';
+  const language = useCollectiveLanguage();
+  const t = useCollectiveText();
   const author = authorPresentation(thread.root, currentHumanId);
   const { root, replies } = thread;
   const body = (
@@ -82,8 +85,14 @@ export function ChannelMessage({
     replies.length > 0 ? (
       <button type="button" className="reply-vitals" onClick={() => onOpenTopic(root.eventId)}>
         <span className="reply-summary">
-          <strong>{replies.length} 条回复</strong>
-          <small>最近 {formatEventTime(replies.at(-1)?.acceptedAt ?? root.acceptedAt)}</small>
+          <strong>
+            {language === 'en'
+              ? `${replies.length} ${replies.length === 1 ? 'reply' : 'replies'}`
+              : `${replies.length} 条回复`}
+          </strong>
+          <small>
+            {t('最近')} {formatEventTime(replies.at(-1)?.acceptedAt ?? root.acceptedAt, language)}
+          </small>
         </span>
         <span className="reply-preview">
           {replies.slice(-2).map((reply) => (
@@ -113,7 +122,7 @@ export function ChannelMessage({
           <CollectiveNameplate event={root} participants={participants} onOpen={() => onOpenMember(root)} />
           {(!v2 || showTime) && (
             <time className={v2 ? 'message-time' : undefined} dateTime={root.acceptedAt}>
-              {formatEventTime(root.acceptedAt)}
+              {formatEventTime(root.acceptedAt, language)}
             </time>
           )}
         </header>

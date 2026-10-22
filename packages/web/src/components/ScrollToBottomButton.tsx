@@ -2,6 +2,8 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AppTooltip } from './AppTooltip';
+import { scrollNavigationCopy } from './scroll-navigation.shell-copy';
+import { useShellCopy } from './shell/shell-copy';
 
 const CHAT_LAYOUT_CHANGED_EVENT = 'catcafe:chat-layout-changed';
 
@@ -29,6 +31,7 @@ export function ScrollToBottomButton({
   /** v2 shares the navigation rail with the message piano; classic keeps its overlay. */
   placement?: 'overlay' | 'rail';
 }) {
+  const words = useShellCopy(scrollNavigationCopy);
   const [visible, setVisible] = useState(false);
   // The visibility last handed to React. While a reply streams, `recomputeSignal` changes on nearly every commit; a
   // same-value setState from an effect is still a scheduled update while this component has work pending, and a
@@ -118,23 +121,23 @@ export function ScrollToBottomButton({
   const button = (
     <button
       type="button"
-      aria-label="到最新"
+      aria-label={words.latest}
       className={classes}
       onClick={handleClick}
-      title={placement === 'rail' ? undefined : '跳到对话底部'}
+      title={placement === 'rail' ? undefined : words.bottom}
     >
       {placement === 'rail' ? (
         <svg aria-hidden="true" viewBox="0 0 20 20" className="h-4 w-4" fill="none">
           <path d="M10 3v10m0 0 4-4m-4 4-4-4M4 17h12" stroke="currentColor" strokeLinecap="round" />
         </svg>
       ) : (
-        '↓ 到最新'
+        `↓ ${words.latest}`
       )}
     </button>
   );
 
   return placement === 'rail' ? (
-    <AppTooltip label="到最新" side="top">
+    <AppTooltip label={words.latest} side="top">
       {button}
     </AppTooltip>
   ) : (

@@ -76,10 +76,12 @@ export function saveChannelPosition(namespace: string, channelId: string) {
   }
 }
 
-export function eventDayLabel(value: string) {
+export function eventDayLabel(value: string, language: 'zh' | 'en' = 'zh') {
   const date = new Date(value);
   const now = new Date();
   return date.toDateString() === now.toDateString()
-    ? '今天'
-    : new Intl.DateTimeFormat('zh-CN', { month: 'long', day: 'numeric' }).format(date);
+    ? language === 'en'
+      ? 'Today'
+      : '今天'
+    : new Intl.DateTimeFormat(language === 'en' ? 'en-US' : 'zh-CN', { month: 'long', day: 'numeric' }).format(date);
 }

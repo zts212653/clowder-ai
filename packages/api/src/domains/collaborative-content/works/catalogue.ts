@@ -1,9 +1,11 @@
 import type { ThreadArtifactDTO } from '@cat-cafe/shared';
 import { MediaOwnerError } from '../../video-studio/content-owner/media-errors.js';
+import type { WorkListReader } from './catalogue-read.js';
 import type { WorkContextStore } from './context-store.js';
 import type { LivingWorkService } from './service.js';
 
 export interface IndependentWorkCataloguePort {
+  withRead?<T>(ownerUserId: string, consume: (reader: IndependentWorkCataloguePort) => Promise<T>): Promise<T>;
   readThread(input: { ownerUserId: string; threadId: string; after?: string; snapshot?: string }): Promise<{
     artifacts: ThreadArtifactDTO[];
     snapshot: string;
@@ -17,8 +19,19 @@ export class WorkCatalogue implements IndependentWorkCataloguePort {
     private readonly service: LivingWorkService,
     private readonly contexts?: Pick<WorkContextStore, 'get'>,
   ) {}
+  withRead<T>(ownerUserId: string, consume: (reader: IndependentWorkCataloguePort) => Promise<T>) {
+    return this.service.withCatalogueRead(ownerUserId, (reader) =>
+      consume({ readThread: (input) => this.readThreadFrom(reader, input) }),
+    );
+  }
   async readThread(input: { ownerUserId: string; threadId: string; after?: string; snapshot?: string }) {
-    const page = await this.service.list(
+    return this.readThreadFrom(this.service, input);
+  }
+  private async readThreadFrom(
+    service: WorkListReader,
+    input: Parameters<IndependentWorkCataloguePort['readThread']>[0],
+  ) {
+    const page = await service.list(
       { userId: input.ownerUserId, threadId: input.threadId, actor: { kind: 'human', actorId: input.ownerUserId } },
       input.after,
       input.snapshot,
@@ -56,15 +69,26 @@ export async function readIndependentThreadWorks(
   threadId: string,
 ) {
   if (!port) return [];
-  const artifacts: ThreadArtifactDTO[] = [];
-  let after: string | undefined;
-  let snapshot: string | undefined;
-  do {
-    const page = await port.readThread({ ownerUserId, threadId, after, snapshot });
-    artifacts.push(...page.artifacts);
-    if (page.nextCursor === after && after) throw new MediaOwnerError('media_unavailable');
-    after = page.nextCursor;
-    snapshot = page.snapshot;
-  } while (after);
-  return artifacts;
+  return withIndependentWorksRead(port, ownerUserId, async (reader) => {
+    if (!reader) return [];
+    const artifacts: ThreadArtifactDTO[] = [];
+    let after: string | undefined;
+    let snapshot: string | undefined;
+    do {
+      const page = await reader.readThread({ ownerUserId, threadId, after, snapshot });
+      artifacts.push(...page.artifacts);
+      if (page.nextCursor === after && after) throw new MediaOwnerError('media_unavailable');
+      after = page.nextCursor;
+      snapshot = page.snapshot;
+    } while (after);
+    return artifacts;
+  });
+}
+
+export function withIndependentWorksRead<T>(
+  port: IndependentWorkCataloguePort | undefined,
+  ownerUserId: string,
+  consume: (reader: IndependentWorkCataloguePort | undefined) => Promise<T>,
+): Promise<T> {
+  return port?.withRead ? port.withRead(ownerUserId, consume) : consume(port);
 }

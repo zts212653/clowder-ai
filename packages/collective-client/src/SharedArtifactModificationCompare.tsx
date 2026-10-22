@@ -2,6 +2,7 @@ import type { CollectiveModificationProjection } from '@cat-cafe/shared';
 import { useEffect, useRef, useState } from 'react';
 import { CollectiveClientRequestError } from './client-request.js';
 import type { SharedArtifact } from './collective-artifact-client.js';
+import { useCollectiveLanguage, useCollectiveText } from './collective-copy.js';
 import { useSharedArtifactReading } from './SharedArtifactReading.js';
 import type { SharedArtifactModificationPreview } from './shared-artifact-modification-client.js';
 import { useSharedArtifacts } from './use-collective-artifacts.js';
@@ -20,6 +21,8 @@ export function SharedArtifactModificationCompare({
   readonly onClose: () => void;
   readonly onRework?: () => void;
 }) {
+  const language = useCollectiveLanguage();
+  const t = useCollectiveText();
   const shared = useSharedArtifacts();
   const reading = useSharedArtifactReading();
   const control = useSharedArtifactControl(artifact, request);
@@ -101,31 +104,33 @@ export function SharedArtifactModificationCompare({
     }
   };
   return (
-    <section className="shared-artifact-compare" aria-label="修改前后对比">
+    <section className="shared-artifact-compare" aria-label={t('修改前后对比')}>
       <header>
         <strong>
-          {shared?.catName(request.target.humanId, request.target.catId)}提交的修改 · 基于第 {request.ownerRevision} 版
+          {language === 'en'
+            ? `${shared?.catName(request.target.humanId, request.target.catId)}'s changes · based on version ${request.ownerRevision}`
+            : `${shared?.catName(request.target.humanId, request.target.catId)}提交的修改 · 基于第 ${request.ownerRevision} 版`}
         </strong>
         <button type="button" onClick={onClose}>
-          返回作品
+          {t('返回作品')}
         </button>
       </header>
-      {!preview && !error && <output>正在读取对照…</output>}
+      {!preview && !error && <output>{t('正在读取对照…')}</output>}
       {preview && (
         <>
           <p>{preview.proposal.response}</p>
           {preview.proposal.edits.map((edit, index) => (
             <div key={`${edit.start}:${edit.end}:${index}`} className="shared-artifact-edit">
               <div>
-                <h3>原文</h3>
+                <h3>{t('原文')}</h3>
                 <pre>
-                  <del>{edit.expectedText || '（此处原无内容）'}</del>
+                  <del>{edit.expectedText || t('（此处原无内容）')}</del>
                 </pre>
               </div>
               <div>
-                <h3>修改后</h3>
+                <h3>{t('修改后')}</h3>
                 <pre>
-                  <ins>{edit.replacement || '（删除此处内容）'}</ins>
+                  <ins>{edit.replacement || t('（删除此处内容）')}</ins>
                 </pre>
               </div>
             </div>
@@ -139,35 +144,39 @@ export function SharedArtifactModificationCompare({
             disabled={!preview || pending || control.pending}
             onClick={() => void control.resolve('reject')}
           >
-            {control.pending ? '正在核对决定…' : '不采用'}
+            {t(control.pending ? '正在核对决定…' : '不采用')}
           </button>
         )}
         {adopted ? (
-          <output>已采用为第 {adopted} 版</output>
+          <output>{language === 'en' ? `Adopted as version ${adopted}` : `已采用为第 ${adopted} 版`}</output>
         ) : control.closed ? (
-          <output>{closedRequestLabel(control.request)}</output>
+          <output>{t(closedRequestLabel(control.request))}</output>
         ) : stale ? (
           <div>
             <p>
-              这份修改基于第 {request.ownerRevision} 版，现在已是第 {latest} 版
+              {language === 'en'
+                ? `These changes are based on version ${request.ownerRevision}; the work is now version ${latest}.`
+                : `这份修改基于第 ${request.ownerRevision} 版，现在已是第 ${latest} 版`}
             </p>
             <button
               type="button"
               disabled={!preview || !reading || latestVersion?.ownerRevision !== latest}
               onClick={rework}
             >
-              请{shared?.catName(request.target.humanId, request.target.catId)}基于第 {latest} 版重做…
+              {language === 'en'
+                ? `Ask ${shared?.catName(request.target.humanId, request.target.catId)} to redo this from version ${latest}…`
+                : `请${shared?.catName(request.target.humanId, request.target.catId)}基于第 ${latest} 版重做…`}
             </button>
           </div>
         ) : !artifact.canApply ? (
-          <p>采用由有权成员决定，你仍可参与讨论。</p>
+          <p>{t('采用由有权成员决定，你仍可参与讨论。')}</p>
         ) : (
           <button type="button" disabled={!preview || pending || control.pending} onClick={() => void adopt()}>
-            {pending ? '正在核对采用回执…' : '采用'}
+            {t(pending ? '正在核对采用回执…' : '采用')}
           </button>
         )}
-        {control.error && <p role="alert">{control.error}</p>}
-        {error && !adopted && <p role="alert">{error}</p>}
+        {control.error && <p role="alert">{t(control.error)}</p>}
+        {error && !adopted && <p role="alert">{t(error)}</p>}
       </footer>
     </section>
   );

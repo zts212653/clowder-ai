@@ -1,6 +1,7 @@
 'use client';
 
 import type { ActiveExecutionProjection } from '@cat-cafe/shared';
+import { type ReactNode, useEffect, useRef, useState } from 'react';
 import { CatAvatar } from '@/components/CatAvatar';
 import { executionRowCopy } from '@/components/execution-row/execution-row.shell-copy';
 import { useShellCopy } from '@/components/shell/shell-copy';
@@ -18,6 +19,8 @@ export function HomeExecutionRow({
   here,
   now,
   onSelectExecution,
+  detail,
+  detailRevision,
 }: {
   execution: ActiveExecutionProjection;
   threadTitle: string;
@@ -25,7 +28,21 @@ export function HomeExecutionRow({
   here: boolean;
   now: number;
   onSelectExecution?: (execution: ActiveExecutionProjection) => void;
+  detail?: ReactNode;
+  detailRevision?: number;
 }) {
+  const row = useRef<HTMLElement>(null);
+  const [highlighted, setHighlighted] = useState(false);
+  useEffect(() => {
+    if (detailRevision === undefined) {
+      setHighlighted(false);
+      return;
+    }
+    row.current?.scrollIntoView({ block: 'nearest' });
+    setHighlighted(true);
+    const timer = window.setTimeout(() => setHighlighted(false), 3200);
+    return () => window.clearTimeout(timer);
+  }, [detailRevision]);
   const t = useShellCopy(homeCopy);
   const rowWords = useShellCopy(executionRowCopy);
   const words = useShellCopy(workspaceV3Copy);
@@ -35,7 +52,9 @@ export function HomeExecutionRow({
   const status = isCommand ? rowWords.compact.managed(activity) : rowWords.compact.working;
   return (
     <article
+      ref={row}
       className="home-live-row"
+      data-execution-jump-focus={highlighted ? 'true' : undefined}
       data-testid="workspace-running-object"
       data-here={here ? 'true' : undefined}
       data-execution-id={execution.executionId}
@@ -80,6 +99,7 @@ export function HomeExecutionRow({
         </button>
         <HomeExecutionStopControl execution={execution} name={catName} />
       </div>
+      {detail}
     </article>
   );
 }

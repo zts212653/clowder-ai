@@ -313,6 +313,8 @@ export class AcpAgentService implements AgentService {
             if (next.done) {
               if (this.antigravity && next.value !== 'end_turn')
                 throw new Error(`AGY ACP prompt stopped: ${String(next.value)}`);
+              if (!signal?.aborted && typeof next.value === 'string' && next.value !== 'end_turn')
+                throw new Error(`ACP prompt stopped: ${next.value}`);
               break;
             }
             yieldedEvents++;
@@ -803,6 +805,7 @@ export class AcpAgentService implements AgentService {
       };
       log.info({ ...ctx, sessionId, promptDigest, idleTtlMs: this.idleTtlMs }, 'ACP promptStream starting');
       eventCount = 0;
+      let hasResponseOutput = false;
       promptPhase = 'active_unacknowledged';
       for await (const event of this.promptStreamWithBusyRetry(
         client,
@@ -883,6 +886,7 @@ export class AcpAgentService implements AgentService {
         }
 
         if (!result) continue;
+        hasResponseOutput ||= (Array.isArray(result) ? result : [result]).some(hasAcpResponseOutput);
         if (Array.isArray(result)) {
           for (const msg of result) yield msg;
         } else {
@@ -967,6 +971,7 @@ export class AcpAgentService implements AgentService {
 
           const retryState = createAcpSessionState();
           let retryEventCount = 0;
+          let retryHasResponseOutput = false;
           log.info({ ...ctx, sessionId: freshSessionId }, '#1091: retry promptStream on fresh session');
           promptPhase = 'active_unacknowledged';
           for await (const event of this.promptStreamWithBusyRetry(
@@ -1006,6 +1011,7 @@ export class AcpAgentService implements AgentService {
             retryEventCount++;
             const result = transformAcpEvent(event, this.catId, metadata, retryState);
             if (!result) continue;
+            retryHasResponseOutput ||= (Array.isArray(result) ? result : [result]).some(hasAcpResponseOutput);
             if (Array.isArray(result)) {
               for (const msg of result) yield msg;
             } else {
@@ -1018,6 +1024,7 @@ export class AcpAgentService implements AgentService {
           // Flush trailing thinking from retry
           const retryThinking = flushAcpThinking(retryState, this.catId, metadata);
           if (retryThinking) yield retryThinking;
+          if (!retryHasResponseOutput && !options?.signal?.aborted) throw new AcpEmptyResponseError(this.providerName);
           client.clearRecentCapacitySignal();
           yield { type: 'done', catId: this.catId, metadata, timestamp: Date.now() };
           return; // Exit — retry path handled completion
@@ -1031,7 +1038,7 @@ export class AcpAgentService implements AgentService {
             type: 'error',
             catId: this.catId,
             error: `resume_empty_retry_failed: ${retryErrMsg}`,
-            errorCode: 'prompt_failure',
+            errorCode: retryErr instanceof AcpEmptyResponseError ? 'empty_response' : 'prompt_failure',
             metadata,
             timestamp: Date.now(),
           };
@@ -1043,6 +1050,7 @@ export class AcpAgentService implements AgentService {
       // Flush any remaining accumulated thinking before done.
       const trailingThinking = flushAcpThinking(acpState, this.catId, metadata);
       if (trailingThinking) yield trailingThinking;
+      if (!hasResponseOutput && !options?.signal?.aborted) throw new AcpEmptyResponseError(this.providerName);
       // Successful prompt — provider has recovered; clear stale capacity signal
       client.clearRecentCapacitySignal();
 
@@ -1145,6 +1153,26 @@ function makeCapacityWarning(
 /** Max age (ms) for client-level capacity signal to be used as fallback evidence. */
 const RECENT_SIGNAL_MAX_AGE_MS = 10 * 60 * 1000;
 
+/** Control/usage events prove transport activity, not that the agent answered. */
+function hasAcpResponseOutput(message: AgentMessage): boolean {
+  return (
+    (message.type === 'text' && Boolean(message.content?.trim())) ||
+    message.type === 'tool_use' ||
+    message.type === 'tool_result'
+  );
+}
+
+/** Some providers resolve failed turns as end_turn without forwarding a cause. */
+class AcpEmptyResponseError extends Error {
+  constructor(providerName: string) {
+    super(
+      `${providerName} 未返回可用回复或工具调用，无法确认本轮成功。` +
+        '上游未提供失败原因；请检查该成员的额度、登录状态及执行记录后重试。',
+    );
+    this.name = 'AcpEmptyResponseError';
+  }
+}
+
 /** Pattern for stream idle stall errors thrown by AcpClient idle watchdog. */
 const STREAM_IDLE_RE = /Stream idle|STREAM_IDLE_STALL/i;
 
@@ -1153,6 +1181,7 @@ function classifyError(
   capacitySignal: AcpCapacitySignal | null | undefined,
   clientRecentSignal?: AcpCapacitySignal | null,
 ): { errorCode: string; errorMsg: string } {
+  if (err instanceof AcpEmptyResponseError) return { errorCode: 'empty_response', errorMsg: err.message };
   if (err instanceof AcpImageInputError) return { errorCode: err.code, errorMsg: err.message };
   if (err instanceof AcpProtocolError) {
     // JSON-RPC data.error carries the real cause (e.g. Kimi wraps exceptions

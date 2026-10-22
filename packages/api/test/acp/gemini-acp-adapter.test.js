@@ -1954,7 +1954,10 @@ describe('GeminiAcpAdapter integration', () => {
       async *promptStream() {
         if (invokeCount === 1) {
           // Invoke 1: succeeds — yields content, no throw
-          yield { type: 'content', content: [{ type: 'text', text: 'ok' }] };
+          yield {
+            sessionId: `recovery-sess-${invokeCount}`,
+            update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'ok' } },
+          };
         } else {
           // Invoke 2: pure timeout — unrelated to Google capacity
           throw new AcpTimeoutError('session/prompt', 120000);
@@ -1984,6 +1987,10 @@ describe('GeminiAcpAdapter integration', () => {
       'Invoke 1 should complete successfully',
     );
     assert.ok(!msgs1.some((m) => m.type === 'error'), 'Invoke 1 should have no errors');
+    assert.ok(
+      msgs1.some((m) => m.type === 'text' && m.content === 'ok'),
+      'recovery must include a real ACP reply',
+    );
 
     // --- Invoke 2: timeout, but provider had recovered → must be turn_budget_exceeded ---
     const msgs2 = [];

@@ -1,6 +1,7 @@
 import { Nameplate } from '@cat-cafe/ui';
 import { actorDisplayName } from './channel-model.js';
 import type { CollectiveEventEnvelope, CollectiveParticipant } from './client-types.js';
+import { useCollectiveLanguage } from './collective-copy.js';
 import { participantLabel } from './participant-label.js';
 import { MessageAvatar } from './TopicMessage.js';
 
@@ -13,6 +14,7 @@ export function CollectiveNameplate({
   readonly participants: readonly CollectiveParticipant[];
   readonly onOpen?: () => void;
 }) {
+  const language = useCollectiveLanguage();
   const actor = event.actor;
   const id = actor.kind === 'agent' ? actor.provenance.catId : actor.humanId;
   const safeId = /^[a-zA-Z0-9_-]+$/.test(id) ? id : 'cocreator';
@@ -47,7 +49,7 @@ export function CollectiveNameplate({
             type="button"
             className="avatar-button"
             onClick={onOpen}
-            aria-label={`查看 ${actorDisplayName(event)}`}
+            aria-label={language === 'en' ? `View ${actorDisplayName(event)}` : `查看 ${actorDisplayName(event)}`}
           >
             <MessageAvatar event={event} participants={participants} />
           </button>

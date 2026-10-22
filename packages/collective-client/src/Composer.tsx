@@ -10,7 +10,7 @@ import type {
   CollectiveRecipient,
   DeliveryState,
 } from './client-types.js';
-import { useCollectiveText } from './collective-copy.js';
+import { useCollectiveLanguage, useCollectiveText } from './collective-copy.js';
 import {
   clearConfirmedComposerDraft,
   type ReplySelection,
@@ -89,6 +89,7 @@ export function Composer({
   readonly replyEvents?: readonly CollectiveEventEnvelope[];
 }) {
   const t = useCollectiveText();
+  const language = useCollectiveLanguage();
   const draftKey = `collective-draft:${namespace}:${channelId}:${rootEventId ?? 'channel'}`;
   const [draft, setDraft] = useState(() => readDraft(draftKey));
   const attachment = useSharedArtifactComposer(draft, setDraft, rootEventId);
@@ -112,7 +113,11 @@ export function Composer({
   const replyEvent = replyEvents?.find((event) => event.eventId === draft.replyToEventId);
   const replyError = replyDraftError(draft, replyEvents, participants, channelId);
   const unresolved = /(^|\s)@/u.test(draft.body);
-  const inputPlaceholder = replyEvent ? `回复 ${actorDisplayName(replyEvent)} 的消息` : placeholder;
+  const inputPlaceholder = replyEvent
+    ? language === 'en'
+      ? `Reply to ${actorDisplayName(replyEvent)}`
+      : `回复 ${actorDisplayName(replyEvent)} 的消息`
+    : placeholder;
   const query = (mentionQuery ?? '').toLocaleLowerCase();
   const options = [
     ...participants
@@ -128,7 +133,7 @@ export function Composer({
     ...humans.map((human) => ({
       key: human.humanId,
       label: human.displayName,
-      detail: '成员 · 人',
+      detail: t('成员 · 人'),
       recipient: { kind: 'human' as const, humanId: human.humanId },
       kind: 'human' as const,
       avatarUrl: human.avatarUrl,
@@ -247,18 +252,20 @@ export function Composer({
       )}
       <SharedArtifactQuoteTags attachment={attachment} />
       {replyEvent && (
-        <div className="composer-recipient" role="group" aria-label="回复来源">
+        <div className="composer-recipient" role="group" aria-label={t('回复来源')}>
           <span>
-            回复 {actorDisplayName(replyEvent)}：{replyEvent.body.replace(/\s+/gu, ' ').slice(0, 60)}
+            {language === 'en' ? 'Reply to' : '回复'} {actorDisplayName(replyEvent)}
+            {language === 'en' ? ': ' : '：'}
+            {replyEvent.body.replace(/\s+/gu, ' ').slice(0, 60)}
           </span>
         </div>
       )}
       {draft.recipient.kind !== 'channel' && (
         <div className="composer-recipient">
-          <span>@{draft.recipientLabel || '已选成员'}</span>
+          <span>@{draft.recipientLabel || t('已选成员')}</span>
           <button
             type="button"
-            aria-label="移除 @"
+            aria-label={t('移除 @')}
             onClick={() => {
               setDraft((current) => ({
                 ...current,
@@ -276,12 +283,12 @@ export function Composer({
       )}
       {(replyError || !available) && (
         <p role="alert" className="composer-warning">
-          {replyError ?? '参与设置已变化，请重新选择成员；消息尚未发送。'}
+          {replyError ? t(replyError) : t('参与设置已变化，请重新选择成员；消息尚未发送。')}
         </p>
       )}
       {unresolved && mentionQuery === undefined && (
         <p role="alert" className="composer-warning">
-          请用 @ 选择当前频道的成员，或移除没选中的 @。
+          {t('请用 @ 选择当前频道的成员，或移除没选中的 @。')}
         </p>
       )}
       {expanded && (
@@ -335,12 +342,12 @@ export function Composer({
       </ComposerFrame>
       {storageNotice && (
         <p className="composer-warning" role="status">
-          {storageNotice}
+          {t(storageNotice)}
         </p>
       )}
       {delivery.kind !== 'idle' && (
         <p className={`delivery-state delivery-${delivery.kind}`} role="status">
-          {delivery.label}
+          {t(delivery.label)}
         </p>
       )}
     </form>

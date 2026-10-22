@@ -116,6 +116,7 @@ export async function runF322BExecutionLocationJourney({
     await page.keyboard.press('Enter');
     await bubble.getByTestId('reply-record').waitFor();
     assert.equal(await record.getAttribute('aria-expanded'), 'true');
+    await bubble.locator('xpath=self::*[@data-message-jump-focus="true"]').waitFor();
     assert.equal(await bubble.getAttribute('data-message-jump-focus'), 'true');
     assert.equal(await composer.inputValue(), '这份草稿和选择不能被定位动作改掉');
     assert.deepEqual(await composer.evaluate((input) => [input.selectionStart, input.selectionEnd]), [3, 8]);
@@ -134,7 +135,12 @@ export async function runF322BExecutionLocationJourney({
         'Original tool remains in the working set',
       );
     }
-    await detail.locator('pre').getByText('pnpm gate # 受控样本，不会执行', { exact: true }).waitFor();
+    const homeRow = detail.locator('xpath=ancestor::*[@data-testid="workspace-running-object"]');
+    assert.equal(await homeRow.count(), 1, 'Details expand under the exact running row');
+    assert.equal(await homeRow.getAttribute('data-execution-jump-focus'), 'true');
+    await detail.getByTestId('execution-command').waitFor();
+    assert.equal(await detail.getByTestId('execution-command').textContent(), 'pnpm gate # 受控样本，不会执行');
+    await detail.locator('summary').click();
     assert.equal(
       await detail.locator('time').getAttribute('dateTime'),
       new Date(fixture.managed.startedAt).toISOString(),
@@ -142,9 +148,9 @@ export async function runF322BExecutionLocationJourney({
     assert.equal(await detail.getByRole('link').getAttribute('href'), `/thread/${threadId}`);
     assert.equal(await composer.inputValue(), '这份草稿和选择不能被定位动作改掉');
     await page.screenshot({ path: `/tmp/f322-b-native-command-${viewport.width}-${language}.png` });
-    await detail.getByRole('button', { name: language === 'zh' ? /^停止/ : /^Stop / }).click();
+    await homeRow.locator('.home-execution-stop button').click();
     const confirmation = page.getByRole('dialog', {
-      name: language === 'zh' ? '停止全量门禁？' : 'Stop full gate?',
+      name: language === 'zh' ? '停止小太阳·砚砚的这次执行？' : 'Stop this execution by 小太阳·砚砚?',
     });
     await confirmation.waitFor();
     assert.deepEqual(
@@ -165,25 +171,25 @@ export async function runF322BExecutionLocationJourney({
       fixture.calls.filter((call) => call.startsWith('DELETE ')),
       [],
     );
-    await detail.getByRole('button', { name: language === 'zh' ? /^停止/ : /^Stop / }).click();
+    await homeRow.locator('.home-execution-stop button').click();
     fixture.setExecutions([
       { ...fixture.managed, cancelability: { state: 'not_cancelable', reason: 'terminalizing' } },
     ]);
-    await detail
+    await homeRow
       .getByText(language === 'zh' ? '正在收尾，已不可停止' : 'Finishing; can no longer stop', { exact: true })
       .waitFor();
     assert.equal(await confirmation.count(), 0);
     assert.equal(
-      await detail.evaluate((element) => element.contains(document.activeElement)),
+      await homeRow.evaluate((element) => element.contains(document.activeElement)),
       true,
-      'Capability loss must leave focus in this execution detail',
+      'Capability loss must leave focus in this execution row',
     );
     assert.deepEqual(
       fixture.calls.filter((call) => call.startsWith('DELETE ')),
       [],
     );
     fixture.setExecutions([fixture.managed]);
-    await detail.getByRole('button', { name: language === 'zh' ? /^停止/ : /^Stop / }).click();
+    await homeRow.locator('.home-execution-stop button').click();
     await page.screenshot({ path: `/tmp/f322-b-native-stop-confirm-${viewport.width}-${language}.png` });
     await confirm.click();
     await detail

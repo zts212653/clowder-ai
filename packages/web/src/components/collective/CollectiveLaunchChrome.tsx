@@ -129,7 +129,7 @@ export function CollectiveLaunchNotice({
   connectorError,
   worldError,
   sessionRequired,
-  workError,
+  workNotice,
   pairingError,
   entryError,
   entryBusy,
@@ -137,21 +137,22 @@ export function CollectiveLaunchNotice({
   readonly connectorError?: string;
   readonly worldError?: string;
   readonly sessionRequired?: boolean;
-  readonly workError?: string;
+  readonly workNotice?: string;
   readonly pairingError?: string;
   readonly entryError?: string;
   readonly entryBusy?: boolean;
 }) {
   const t = useCollectiveText();
-  const error = connectorError ?? worldError ?? workError ?? pairingError ?? entryError;
+  const error = connectorError ?? worldError ?? pairingError ?? entryError;
+  const notice = workNotice;
   const signInNotice = sessionRequired && error === worldError;
-  if (!error && !entryBusy) return null;
+  if (!error && !notice && !entryBusy) return null;
   return (
     <div
       role={signInNotice ? 'status' : error ? 'alert' : 'status'}
       className={`absolute inset-x-0 top-0 z-10 px-4 py-2 text-center text-xs ${signInNotice ? 'border-b border-[var(--console-border-soft)] bg-[var(--shell-work)] text-cafe-secondary' : error ? 'bg-conn-red-bg text-conn-red-text' : 'bg-conn-amber-bg text-conn-amber-text'}`}
     >
-      {t(error ?? `${deploymentDefaults.brand.displayName} 正在安全托管连接凭据…`)}
+      {t(error ?? notice ?? `${deploymentDefaults.brand.displayName} 正在安全托管连接凭据…`)}
     </div>
   );
 }

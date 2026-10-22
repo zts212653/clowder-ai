@@ -5,6 +5,7 @@ import { useEffect, useState } from 'react';
 import { apiFetch } from '@/utils/api-client';
 import { ExecutionCancelButton } from '../ExecutionCancelButton';
 import { useShellCopy } from '../shell/shell-copy';
+import { ManagedCommandLine } from './ManagedCommandLine';
 import { managedJobCopy } from './managed-job.shell-copy';
 
 const ACTIVE = new Set(['queued', 'running', 'cancelling']);
@@ -63,6 +64,7 @@ export function ManagedJobCard({
   catId,
   title,
   refreshKey,
+  presentation = 'card',
 }: {
   taskId: string;
   jobId: string;
@@ -70,8 +72,10 @@ export function ManagedJobCard({
   catId?: string;
   title?: string;
   refreshKey?: string;
+  presentation?: 'card' | 'inline';
 }) {
   const words = useShellCopy(managedJobCopy);
+  const inline = presentation === 'inline';
   const [expanded, setExpanded] = useState(false);
   const [detail, setDetail] = useState<JobDetail | null>(null);
   const [unavailable, setUnavailable] = useState(false);
@@ -121,27 +125,42 @@ export function ManagedJobCard({
   const elapsed = detail ? Math.max(0, Math.round((detail.durationMs ?? Date.now() - detail.createdAt) / 1000)) : null;
   return (
     <section data-testid="managed-job-card" data-job-id={jobId} className="min-w-0 space-y-3">
-      <div className="flex flex-wrap items-start justify-between gap-2">
-        <span className="text-sm font-medium text-cafe-text">{title || words.title}</span>
-        <span
-          role="status"
-          className={`text-xs ${unavailable ? 'text-cafe-muted' : failed ? 'text-conn-red-text' : 'text-cafe-secondary'}`}
-        >
-          {unavailable ? words.unavailable : detail ? words.state[detail.state] : words.loading}
-        </span>
-      </div>
+      {!inline ? (
+        <div className="flex flex-wrap items-start justify-between gap-2">
+          <span className="text-sm font-medium text-cafe-text">{title || words.title}</span>
+          <span
+            role="status"
+            className={`text-xs ${unavailable ? 'text-cafe-muted' : failed ? 'text-conn-red-text' : 'text-cafe-secondary'}`}
+          >
+            {unavailable ? words.unavailable : detail ? words.state[detail.state] : words.loading}
+          </span>
+        </div>
+      ) : unavailable ? (
+        <output className="text-xs text-cafe-muted">{words.unavailable}</output>
+      ) : !detail ? (
+        <output className="text-xs text-cafe-muted">{words.loading}</output>
+      ) : null}
       {unavailable ? <p className="text-xs text-cafe-muted">{words.reconnect}</p> : null}
-      {detail ? (
+      {detail && inline ? (
+        <ManagedCommandLine command={detail.command} />
+      ) : detail ? (
         <pre className="whitespace-pre-wrap break-all text-xs text-cafe-secondary">{detail.command}</pre>
       ) : null}
       <div className="flex items-center justify-between gap-3 text-xs text-cafe-muted">
         {elapsed !== null ? <span>{words.elapsed(elapsed)}</span> : <span />}
-        {execution && !unavailable ? (
+        {execution && !unavailable && !inline ? (
           <ExecutionCancelButton execution={execution} label={words.stop} pendingLabel={words.stopping} />
         ) : null}
       </div>
-      <details onToggle={(event) => setExpanded(event.currentTarget.open)}>
-        <summary className="shell-focusable cursor-pointer text-xs text-cafe-muted">{words.details}</summary>
+      <details className={inline ? 'group' : undefined} onToggle={(event) => setExpanded(event.currentTarget.open)}>
+        <summary className={`shell-focusable cursor-pointer text-xs text-cafe-muted${inline ? ' list-none' : ''}`}>
+          {words.details}
+          {inline ? (
+            <span aria-hidden="true" className="ml-1 inline-block group-open:rotate-90">
+              ›
+            </span>
+          ) : null}
+        </summary>
         {expanded ? (
           <div className="mt-3 space-y-3 text-xs">
             {detail?.exitCode !== undefined ? <p>{words.exit(detail.exitCode)}</p> : null}

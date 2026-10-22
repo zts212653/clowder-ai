@@ -1041,7 +1041,7 @@
     {
       "id": "F170",
       "name": "Web Chinese Chess — 网页象棋、人猫对弈与复盘",
-      "status": "in-progress（插件基础已合入 #65；安装后真实回合与恢复已实测，#66 最终独立审查通过，待 CODEOWNER 批准及合入发布；D4/E/F2–F3 仍开放） | **Owner**: 小星星·Maine Coon（@codex-astra, gpt-6-astra；原 A/B owner：Ragdoll） | **Priority**: P2",
+      "status": "in-progress（可玩 C1 插件 #66 已合入；安装后真实回合与恢复已实测，发布/生产安装另核；剩余性能、认输、回放与棋力工作依 operator 指令待后续唤起） | **Owner**: 小星星·Maine Coon（@codex-astra, gpt-6-astra；原 A/B owner：Ragdoll） | **Priority**: P2",
       "file": "F170-web-chinese-chess.md"
     },
     {

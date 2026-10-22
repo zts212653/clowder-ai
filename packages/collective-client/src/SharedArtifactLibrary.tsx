@@ -50,7 +50,7 @@ export function SharedArtifactLibrary({
   }, [active]);
   if (!shared) return null;
   // Retain filters and the return position without duplicating the channel's cards or controls in the DOM.
-  if (!active) return <section ref={scroll} hidden className="shared-artifact-library" aria-label={title} />;
+  if (!active) return <section ref={scroll} hidden className="shared-artifact-library" aria-label={t(title)} />;
   if (presentation === 'channel')
     return (
       <section className="channel-artifact-list" aria-label={t('频道作品')}>
@@ -73,7 +73,7 @@ export function SharedArtifactLibrary({
         if (active) position.current = event.currentTarget.scrollTop;
       }}
       className="shared-artifact-library"
-      aria-label={title}
+      aria-label={t(title)}
     >
       <header>
         {onOpenNavigation && (

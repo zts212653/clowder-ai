@@ -34,5 +34,12 @@ export const quotaCopy = defineShellCopy(
       stale: (time: string) => `Refresh failed · Showing the reading from ${time}`,
     },
   },
-  { samples: { left: [['46'], ['12']], resetIn: [['in 6 days']], updated: [['01:35']], stale: [['01:35']] } },
+  {
+    samples: {
+      left: [['46'], ['12']],
+      resetIn: [['in 6 days'], ['in 2 hours']],
+      updated: [['01:35'], ['10/21 14:59']],
+      stale: [['01:35'], ['14:59']],
+    },
+  },
 );

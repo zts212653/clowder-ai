@@ -4,6 +4,7 @@ import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { expect, it, vi } from 'vitest';
 import type { SharedArtifact, SharedMarkdownView } from '../collective-artifact-client.js';
+import { SharedArtifactAnnotations } from '../SharedArtifactAnnotations.js';
 import { SharedArtifactModificationCompare } from '../SharedArtifactModificationCompare.js';
 import { SharedArtifactRequestCards } from '../SharedArtifactRequestCards.js';
 import { CollectiveArtifactContext, type CollectiveArtifactState } from '../use-collective-artifacts.js';
@@ -79,5 +80,104 @@ it('lets the requester cancel only its request and an authorized adopter decline
     expect(Array.from(host.querySelectorAll('button')).some((button) => button.textContent === '采用')).toBe(false);
   } finally {
     await act(async () => root.unmount());
+  }
+});
+
+it('keeps annotation, cat-change, comparison, and adoption controls in English', async () => {
+  window.history.replaceState({}, '', '/?lang=en');
+  const request = {
+    requestId: 'request-english',
+    revision: 2,
+    state: 'proposal_ready',
+    ownerRevision: 1,
+    requestingHumanId: 'requester',
+    target: { humanId: 'cat-owner', catId: 'sol' },
+    annotationIds: ['annotation-english'],
+    latestProposalRef: 'candidate-english',
+    sourceEventId: 'source',
+    requestEventId: 'request-event',
+  } as CollectiveModificationProjection;
+  const artifact = {
+    serviceInstanceId: 'service',
+    collectiveId: 'collective',
+    artifactId: 'artifact-english',
+    contentRef: 'content-english',
+    sourceEventId: 'source',
+    sourceLocation: { channelId: 'general' },
+    canApply: true,
+    accessRevision: 1,
+    versions: [{ ownerRevision: 1, blobDigest: `sha256:${'a'.repeat(64)}` }],
+  } as unknown as SharedArtifact;
+  const view = {
+    contentRef: artifact.contentRef,
+    ownerRevision: 1,
+    blobDigest: `sha256:${'a'.repeat(64)}`,
+    text: 'Exact result',
+    view: {
+      canWrite: true,
+      review: {
+        revision: 1,
+        annotations: [
+          {
+            id: 'annotation-english',
+            author: { actorId: 'requester' },
+            anchor: { quote: 'Exact result' },
+            body: 'Please verify this sentence.',
+            state: 'open',
+          },
+        ],
+      },
+      annotationPage: { offset: 0, total: 1 },
+    },
+    modifications: { requests: [request], total: 1, offset: 0 },
+  } as unknown as SharedMarkdownView;
+  const state = {
+    catalogue: [artifact],
+    humanId: 'requester',
+    humanName: () => 'You',
+    catName: () => 'Sol',
+    sourceMessage: () => ({ body: 'Please revise this section.' }),
+    refresh: async () => {},
+    compare: vi.fn(),
+    api: {
+      receipts: async () => [],
+      previewModification: async () => ({
+        request,
+        currentOwnerRevision: 1,
+        proposal: {
+          response: 'I clarified the sentence.',
+          edits: [{ start: 0, end: 5, expectedText: 'Exact', replacement: 'Verified' }],
+        },
+      }),
+    },
+  } as unknown as CollectiveArtifactState;
+  const host = document.createElement('div');
+  const root = createRoot(host);
+  try {
+    await act(async () =>
+      root.render(
+        <CollectiveArtifactContext.Provider value={state}>
+          <SharedArtifactAnnotations view={view} onOpenDiscussion={() => undefined} />
+          <SharedArtifactRequestCards view={view} />
+        </CollectiveArtifactContext.Provider>,
+      ),
+    );
+    expect(host.textContent).toContain('Resolve annotation');
+    expect(host.textContent).toContain('View comparison');
+    expect(host.innerHTML).not.toMatch(/[\u3400-\u9fff]/u);
+
+    await act(async () =>
+      root.render(
+        <CollectiveArtifactContext.Provider value={state}>
+          <SharedArtifactModificationCompare artifact={artifact} request={request} onClose={() => undefined} />
+        </CollectiveArtifactContext.Provider>,
+      ),
+    );
+    expect(host.textContent).toContain('I clarified the sentence.');
+    expect(host.textContent).toContain('Adopt');
+    expect(host.innerHTML).not.toMatch(/[\u3400-\u9fff]/u);
+  } finally {
+    await act(async () => root.unmount());
+    window.history.replaceState({}, '', '/');
   }
 });

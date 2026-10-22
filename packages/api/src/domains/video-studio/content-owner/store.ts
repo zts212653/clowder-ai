@@ -6,7 +6,7 @@ import { CollectiveContentCustodyFence } from './collective-custody-fence.js';
 import { commitInitialOwnerState } from './state/initial-commit.js';
 import { type ProjectContentStateV1, parseProjectContentState } from './state/manifest.js';
 import { type ContentStream, writeOwnerPayload } from './stream-content.js';
-import type { VideoProjectScopeV1 } from './types.js';
+import type { ContentPublicationScopeV1, VideoProjectScopeV1 } from './types.js';
 
 export type { ProjectContentStateV1 } from './state/manifest.js';
 
@@ -22,6 +22,12 @@ export interface SourcePublicationMatch {
   readonly contentRef: string;
   readonly ownerRevision: number;
   readonly sourceRevision: string;
+}
+
+export interface RetainedMediaHead {
+  readonly contentRef: string;
+  readonly ownerRevision: number;
+  readonly publicationScope: ContentPublicationScopeV1;
 }
 
 export class ProjectContentOwnerStore {
@@ -116,24 +122,32 @@ export class ProjectContentOwnerStore {
   async listRetainedMedia(ownerUserId: string, after = '', limit = 30) {
     if (!Number.isSafeInteger(limit) || limit < 1 || limit > 30) throw new TypeError('Invalid media page');
     const items: { contentRef: string; ownerRevision: number }[] = [];
-    const directory = await openOwnerManifestDirectory(this.rootDir);
-    if (directory)
-      for await (const entry of directory) {
-        const state = await readOwnerManifest(this.rootDir, entry);
-        if (
-          state?.publicationScope?.ownerUserId !== ownerUserId ||
-          state.contentRef.localeCompare(after) <= 0 ||
-          !['image/png', 'video/mp4'].includes(state.mediaType)
-        )
-          continue;
-        items.push({ contentRef: state.contentRef, ownerRevision: state.currentOwnerRevision });
-        items.sort((a, b) => a.contentRef.localeCompare(b.contentRef));
-        if (items.length > limit + 1) items.pop();
-      }
+    for await (const head of this.retainedMediaHeads(ownerUserId)) {
+      if (head.contentRef.localeCompare(after) <= 0) continue;
+      items.push({ contentRef: head.contentRef, ownerRevision: head.ownerRevision });
+      items.sort((a, b) => a.contentRef.localeCompare(b.contentRef));
+      if (items.length > limit + 1) items.pop();
+    }
     return {
       items: items.slice(0, limit),
       ...(items.length > limit ? { nextCursor: items[limit - 1]?.contentRef } : {}),
     };
+  }
+
+  /** One canonical manifest walk. The consumer bounds retention and freshly authorizes selected versions. */
+  async *retainedMediaHeads(ownerUserId: string): AsyncGenerator<RetainedMediaHead> {
+    const directory = await openOwnerManifestDirectory(this.rootDir);
+    if (!directory) return;
+    for await (const entry of directory) {
+      const state = await readOwnerManifest(this.rootDir, entry);
+      if (state?.publicationScope?.ownerUserId !== ownerUserId || !['image/png', 'video/mp4'].includes(state.mediaType))
+        continue;
+      yield {
+        contentRef: state.contentRef,
+        ownerRevision: state.currentOwnerRevision,
+        publicationScope: { ...state.publicationScope },
+      };
+    }
   }
 
   async commitInitialState(

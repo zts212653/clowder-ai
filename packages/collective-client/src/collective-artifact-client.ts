@@ -28,6 +28,21 @@ import {
 } from './shared-artifact-review-client.js';
 
 export type SharedArtifact = z.infer<typeof collectiveArtifactProjectionSchema>;
+const workResultArtifactResolutionSchema = z.discriminatedUnion('status', [
+  z
+    .object({
+      status: z.literal('published'),
+      mayPromote: z.literal(false),
+      artifact: collectiveArtifactProjectionSchema,
+    })
+    .strict(),
+  z
+    .object({
+      status: z.enum(['unpublished', 'pending']),
+      mayPromote: z.boolean(),
+    })
+    .strict(),
+]);
 export type SharedArtifactOperation = (
   artifact: SharedArtifact,
   action: CollectiveArtifactAction,
@@ -204,6 +219,25 @@ export function collectiveArtifactClient(request: ClientRequest, coordinates: Co
     // The receipt remains recoverable after completion; selecting the same publication cannot create another work.
     return collectiveArtifactProjectionSchema.parse(artifact);
   };
+  const promoteWorkResult = async (fileId: string) => {
+    const result = await post<{ publication: { status: string; artifact?: unknown } }>('publications/promote-result', {
+      ...coordinates,
+      fileId,
+    });
+    if (result.publication.status !== 'published' || !result.publication.artifact)
+      throw new Error('结果作品仍在同步，请稍后重试。');
+    return collectiveArtifactProjectionSchema.parse(result.publication.artifact);
+  };
+  const openWorkResult = async (fileId: string) => {
+    const result = await post<{ resolution: unknown }>('publications/resolve-result', { ...coordinates, fileId });
+    const resolution = workResultArtifactResolutionSchema.parse(result.resolution);
+    if (resolution.status === 'published') return resolution.artifact;
+    if (!resolution.mayPromote)
+      throw new Error(
+        resolution.status === 'pending' ? '结果作品仍在同步，请稍后重试。' : '结果作品尚未发布，请稍后重试。',
+      );
+    return promoteWorkResult(fileId);
+  };
   const sendFeedback = (input: Parameters<typeof sendSharedArtifactFeedback>[3]) =>
     sendSharedArtifactFeedback(request, namespace, operation, input);
   const resolveModification = (
@@ -270,6 +304,7 @@ export function collectiveArtifactClient(request: ClientRequest, coordinates: Co
     read,
     moreRequests,
     publish,
+    openWorkResult,
     operation,
     request,
     sendFeedback,

@@ -2,7 +2,10 @@ import { type ReactNode, useState } from 'react';
 import ReactMarkdown, { type Components, defaultUrlTransform } from 'react-markdown';
 import remarkBreaks from 'remark-breaks';
 import remarkGfm from 'remark-gfm';
+import { useCollectiveText } from './collective-copy.js';
+import { useSharedArtifacts } from './use-collective-artifacts.js';
 import {
+  type CollectiveWorkResultFileAddress,
   collectiveWorkResultFileAddress,
   currentCollectiveSessionToken,
   openCollectiveWorkResultFile,
@@ -30,17 +33,41 @@ function SafeLink({ href, children }: { readonly href: string; readonly children
   );
 }
 
-function AuthenticatedWorkResultFile({ href, children }: { readonly href: string; readonly children: ReactNode }) {
+function AuthenticatedWorkResultFile({
+  address,
+  children,
+}: {
+  readonly address: CollectiveWorkResultFileAddress;
+  readonly children: ReactNode;
+}) {
+  const shared = useSharedArtifacts();
+  const t = useCollectiveText();
+  const promotable = address.fileName.toLocaleLowerCase().endsWith('.md');
+  const [pending, setPending] = useState(false);
   const [failed, setFailed] = useState(false);
   const open = () => {
-    const sessionToken = currentCollectiveSessionToken();
-    if (!sessionToken) {
-      setFailed(true);
-      return;
-    }
+    if (pending) return;
     setFailed(false);
-    const popup = window.open('about:blank', '_blank');
-    void openCollectiveWorkResultFile(href, sessionToken, popup).catch(() => setFailed(true));
+    setPending(true);
+    let action: Promise<void>;
+    if (promotable) {
+      const promote = shared?.openWorkResultFile;
+      if (!promote) {
+        setFailed(true);
+        setPending(false);
+        return;
+      }
+      action = promote(address);
+    } else {
+      const sessionToken = currentCollectiveSessionToken();
+      if (!sessionToken) {
+        setFailed(true);
+        setPending(false);
+        return;
+      }
+      action = openCollectiveWorkResultFile(address, sessionToken, window.open('about:blank', '_blank'));
+    }
+    void action.catch(() => setFailed(true)).finally(() => setPending(false));
   };
   return (
     <>
@@ -48,11 +75,17 @@ function AuthenticatedWorkResultFile({ href, children }: { readonly href: string
         type="button"
         className="message-markdown-authenticated-file"
         data-collective-work-result-file=""
+        aria-busy={pending}
+        disabled={pending}
         onClick={open}
       >
-        {children}
+        {pending ? t('正在打开作品…') : children}
       </button>
-      {failed && <output>文件暂时无法打开，请刷新后重试。</output>}
+      {failed && (
+        <output>
+          {t(promotable ? '结果作品暂时无法打开；原结果仍已保留，可以稍后重试。' : '文件暂时无法打开，请刷新后重试。')}
+        </output>
+      )}
     </>
   );
 }
@@ -93,8 +126,8 @@ export function MessageMarkdown({
         components={{
           ...sourceComponents,
           a: ({ children, href }) => {
-            if (href && collectiveWorkResultFileAddress(href))
-              return <AuthenticatedWorkResultFile href={href}>{children}</AuthenticatedWorkResultFile>;
+            const result = href ? collectiveWorkResultFileAddress(href) : undefined;
+            if (result) return <AuthenticatedWorkResultFile address={result}>{children}</AuthenticatedWorkResultFile>;
             return isSafeWebLink(href) ? (
               <SafeLink href={href}>{children}</SafeLink>
             ) : (

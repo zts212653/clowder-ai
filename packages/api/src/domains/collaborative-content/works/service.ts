@@ -19,15 +19,18 @@ import {
 } from '../../video-studio/content-owner/service.js';
 import type { ContentStream } from '../../video-studio/content-owner/stream-content.js';
 import {
-  type ContentActorV1,
   type ContentSettlementReceiptV1,
   type ContentSourcePublicationV1,
   isWorkPublicationScope,
   type WorkPublicationScopeV1,
 } from '../../video-studio/content-owner/types.js';
+import { type WorkListReader, withWorkCatalogueRead } from './catalogue-read.js';
 import type { WorkReviewResponseService } from './review-response.js';
+import type { WorkAuthorizationInput, WorkPrincipal, WorkReadResult } from './types.js';
 import { workVersionRecord } from './version-record.js';
 import type { WorkVersionStore } from './version-store.js';
+
+export type { WorkAuthorizationInput, WorkPrincipal } from './types.js';
 
 export interface OpenWorkSource extends ContentStream {
   readonly mediaType: 'video/mp4';
@@ -44,19 +47,6 @@ export interface WorkSourcePort {
     byteLength: number;
     media?: ImmutableMedia;
   }>;
-}
-/** Minted by direct-owner or verified callback routes; actor fields are never accepted in the public DTO. */
-export interface WorkPrincipal {
-  readonly userId: string;
-  readonly threadId: string;
-  readonly actor: ContentActorV1;
-  readonly invocationId?: string;
-  readonly contentTaskId?: string;
-}
-export interface WorkAuthorizationInput {
-  readonly principal: WorkPrincipal;
-  readonly permission: 'read' | 'write';
-  readonly scope?: WorkPublicationScopeV1;
 }
 
 export class WorkProjectionPendingError extends Error {
@@ -169,7 +159,7 @@ export class LivingWorkService {
     return this.deps.responses.resolve(command, principal);
   }
 
-  async read(raw: WorkReference, principal: WorkPrincipal) {
+  async read(raw: WorkReference, principal: WorkPrincipal): Promise<WorkReadResult> {
     const reference = workReferenceSchema.parse(raw);
     const description = await this.deps.owner.describe(reference.contentRef, reference.ownerRevision);
     const scope = description.publicationScope;
@@ -196,40 +186,13 @@ export class LivingWorkService {
   }
 
   async list(principal: WorkPrincipal, after?: string, expectedSnapshot?: string, threadFilter?: string) {
-    await this.deps.authorize({ principal, permission: 'read' });
-    const heads = await this.catalogueHeads(principal.userId);
-    const visible = await this.visibleHeads(heads, principal, threadFilter);
-    const snapshot = sha(JSON.stringify(visible));
-    if ((after && !expectedSnapshot) || (expectedSnapshot && expectedSnapshot !== snapshot))
-      throw new MediaOwnerError('publication_changed');
-    const remaining = visible.filter((item) => !after || item.contentRef.localeCompare(after) > 0);
-    const page = remaining.slice(0, 10);
-    const items = await Promise.all(page.map((reference) => this.read(reference, principal)));
-    if (JSON.stringify(heads) !== JSON.stringify(await this.catalogueHeads(principal.userId)))
-      throw new MediaOwnerError('publication_changed');
-    for (const item of items) {
-      const scope = item.description.publicationScope;
-      if (!isWorkPublicationScope(scope)) throw new MediaOwnerError('access_denied');
-      await this.deps.authorize({ principal, permission: 'read', scope });
-    }
-    return { items, snapshot, ...(remaining.length > page.length ? { nextCursor: page.at(-1)?.contentRef } : {}) };
+    return this.withCatalogueRead(principal.userId, (reader) =>
+      reader.list(principal, after, expectedSnapshot, threadFilter),
+    );
   }
 
-  private async visibleHeads(heads: readonly WorkReference[], principal: WorkPrincipal, threadFilter?: string) {
-    const visible = [];
-    for (const reference of heads) {
-      const description = await this.deps.owner.describe(reference.contentRef, reference.ownerRevision);
-      if (!isWorkPublicationScope(description.publicationScope)) continue;
-      if (threadFilter && description.publicationScope.threadId !== threadFilter) continue;
-      try {
-        await this.deps.authorize({ principal, permission: 'read', scope: description.publicationScope });
-        visible.push(reference);
-      } catch (error) {
-        if (error instanceof MediaOwnerError && error.code === 'access_denied') continue;
-        throw error;
-      }
-    }
-    return visible;
+  withCatalogueRead<T>(ownerUserId: string, consume: (reader: WorkListReader) => Promise<T>): Promise<T> {
+    return withWorkCatalogueRead({ ...this.deps, read: this.read.bind(this) }, ownerUserId, consume);
   }
 
   async inspectSource(locator: Omit<WorkWorkspaceSource, 'expectedSourceRevision'>, principal: WorkPrincipal) {
@@ -253,18 +216,6 @@ export class LivingWorkService {
       if (error instanceof ContentOwnerNotFoundError) return null;
       throw error;
     }
-  }
-
-  private async catalogueHeads(ownerUserId: string) {
-    const heads: WorkReference[] = [];
-    let after: string | undefined;
-    do {
-      const page = await this.deps.owner.listRetainedMedia(ownerUserId, after);
-      heads.push(...page.items);
-      if (heads.length > 10000) throw new MediaOwnerError('media_unavailable');
-      after = page.nextCursor;
-    } while (after);
-    return heads;
   }
 
   private project(

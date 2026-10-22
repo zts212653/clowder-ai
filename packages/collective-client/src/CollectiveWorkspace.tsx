@@ -11,6 +11,7 @@ import {
   writeLibraryTarget,
 } from './channel-navigation.js';
 import type { CollectiveEventEnvelope, CollectiveWorkProjection } from './client-types.js';
+import { useCollectiveLanguage, useCollectiveText } from './collective-copy.js';
 import { type RoadmapReturn, visibleCollectiveCats } from './collective-workspace-model.js';
 import { FirstEntryOverlays } from './first-entry/FirstEntryOverlays.js';
 import { useFirstEntryGuide } from './first-entry/use-first-entry-guide.js';
@@ -37,6 +38,8 @@ export function CollectiveWorkspace({
   readonly embedded: boolean;
   readonly client: ReturnType<typeof useCollectiveClient>;
 }) {
+  const language = useCollectiveLanguage();
+  const t = useCollectiveText();
   const { snapshot } = client;
   const namespace = collectiveClientNamespace(snapshot) ?? '';
   const previousNamespace = useRef(namespace);
@@ -259,7 +262,7 @@ export function CollectiveWorkspace({
     artifactNavigation.discard();
     const roadmap = snapshot.collaboration?.roadmaps.find((candidate) => candidate.roadmapId === view.roadmapId);
     setRoadmapViews((current) => ({ ...current, [channelId]: view }));
-    setRoadmapReturn({ channelId, label: roadmap?.title ?? '项目', view });
+    setRoadmapReturn({ channelId, label: roadmap?.title ?? t('项目'), view });
     setFocusEventId(eventId);
     setDestination('channel');
     setContent('conversation');
@@ -338,6 +341,10 @@ export function CollectiveWorkspace({
           ...client.artifacts,
           open: artifactNavigation.open,
           close: artifactNavigation.close,
+          openWorkResultFile: async (address) => {
+            const artifact = await client.artifacts?.resolveWorkResultFile(address);
+            if (artifact) artifactNavigation.open(artifact);
+          },
           returnLabel: artifactNavigation.returnLabel,
           returnToSource: selectChannel,
         }
@@ -359,8 +366,10 @@ export function CollectiveWorkspace({
             pairNudge={firstEntry.phase === 'browsing'}
             headerMeta={
               members
-                ? `${members.cafes.length} 个 Café · ${members.humans.length + visibleCats.length} 位成员`
-                : '正在读取成员…'
+                ? language === 'en'
+                  ? `${members.cafes.length} ${members.cafes.length === 1 ? 'Café' : 'Cafés'} · ${members.humans.length + visibleCats.length} ${members.humans.length + visibleCats.length === 1 ? 'member' : 'members'}`
+                  : `${members.cafes.length} 个 Café · ${members.humans.length + visibleCats.length} 位成员`
+                : t('正在读取成员…')
             }
             notice={snapshot.notice}
             onInvite={() => void client.createInvite()}
@@ -415,7 +424,7 @@ export function CollectiveWorkspace({
           >
             <SharedArtifactLibrary
               key={namespace}
-              title="全部作品"
+              title={t('全部作品')}
               active={destination === 'library'}
               filterable
               requestedChannel={libraryChannel}

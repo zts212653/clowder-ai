@@ -1,5 +1,6 @@
 import { useRef } from 'react';
 import type { SharedArtifact } from './collective-artifact-client.js';
+import { useCollectiveLanguage, useCollectiveText } from './collective-copy.js';
 import { SharedArtifactAnnotations } from './SharedArtifactAnnotations.js';
 import { SharedArtifactDocument } from './SharedArtifactDocument.js';
 import { SharedArtifactModificationCompare } from './SharedArtifactModificationCompare.js';
@@ -15,6 +16,8 @@ export function SharedArtifactSurface({
   readonly onReturnToSource: (channelId: string, eventId: string) => void;
   readonly onOpenDiscussion: () => void;
 }) {
+  const language = useCollectiveLanguage();
+  const t = useCollectiveText();
   const shared = useSharedArtifacts();
   const artifact = shared?.catalogue.find((item) => item.artifactId === shared.selected?.artifactId);
   const selectedRevision = shared?.selected?.ownerRevision;
@@ -36,16 +39,16 @@ export function SharedArtifactSurface({
   };
   if (artifact && (artifact.mediaType === 'image/png' || artifact.mediaType === 'video/mp4'))
     return (
-      <section className="shared-artifact-state" aria-label="作品模式">
+      <section className="shared-artifact-state" aria-label={t('作品模式')}>
         <h2>{artifact.title}</h2>
-        <p>在已连接的 Café 中查看画面与批注。独立窗口请从自己的 Café 打开共同体。</p>
+        <p>{t('在已连接的 Café 中查看画面与批注。独立窗口请从自己的 Café 打开共同体。')}</p>
         <button type="button" onClick={returnToSource}>
-          返回原讨论
+          {t('返回原讨论')}
         </button>
       </section>
     );
   return (
-    <section className="shared-artifact-surface" aria-label="作品模式">
+    <section className="shared-artifact-surface" aria-label={t('作品模式')}>
       <SharedArtifactToolbar
         key={infoKey}
         artifact={artifact}
@@ -56,34 +59,36 @@ export function SharedArtifactSurface({
       />
       {inaccessible ? (
         <div className="shared-artifact-state" role="alert">
-          <h2>你已无法查看这件作品</h2>
-          <p>作品内容和引用已关闭。你的登录仍然保留。</p>
+          <h2>{t('你已无法查看这件作品')}</h2>
+          <p>{t('作品内容和引用已关闭。你的登录仍然保留。')}</p>
           <button type="button" onClick={shared.close}>
-            返回频道
+            {t('返回频道')}
           </button>
         </div>
       ) : unavailable || error ? (
         <div className="shared-artifact-state" role="alert">
-          <h2>暂时无法打开作品</h2>
+          <h2>{t('暂时无法打开作品')}</h2>
           <p>
             {artifact?.availability === 'owner_unavailable'
-              ? '内容所在的 Café 暂时不可用，讨论和草稿仍在原处。'
-              : (error?.message ?? '正在重新连接共同体。')}
+              ? t('内容所在的 Café 暂时不可用，讨论和草稿仍在原处。')
+              : t(error?.message ?? '正在重新连接共同体。')}
           </p>
           <button type="button" onClick={() => void shared.refresh()}>
-            重新读取
+            {t('重新读取')}
           </button>
         </div>
       ) : !view ? (
-        <output className="shared-artifact-state">正在读取作品…</output>
+        <output className="shared-artifact-state">{t('正在读取作品…')}</output>
       ) : null}
       {view && artifact && (
         <>
           {view.view.historyReadOnly && (
             <p className="shared-artifact-history-banner">
-              第 {view.ownerRevision} 版 · 历史版本，只读查看{' '}
+              {language === 'en'
+                ? `Version ${view.ownerRevision} · historical version, read only `
+                : `第 ${view.ownerRevision} 版 · 历史版本，只读查看 `}
               <button type="button" onClick={() => shared.open(artifact)}>
-                回到最新版
+                {t('回到最新版')}
               </button>
             </p>
           )}
@@ -102,9 +107,13 @@ export function SharedArtifactSurface({
             </div>
           )}
           <footer className="shared-artifact-footer">
-            <span>第 {view.ownerRevision} 版 · 与成员阅读同一份正文</span>
+            <span>
+              {language === 'en'
+                ? `Version ${view.ownerRevision} · reading the same document as other members`
+                : `第 ${view.ownerRevision} 版 · 与成员阅读同一份正文`}
+            </span>
             <button type="button" onClick={returnToSource}>
-              回到原讨论
+              {t('回到原讨论')}
             </button>
           </footer>
         </>

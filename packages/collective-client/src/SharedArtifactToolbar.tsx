@@ -1,5 +1,6 @@
 import { useRef, useState } from 'react';
 import type { SharedArtifact } from './collective-artifact-client.js';
+import { useCollectiveLanguage, useCollectiveText } from './collective-copy.js';
 import { SharedArtifactHistory } from './SharedArtifactHistory.js';
 import { SharedArtifactInformation } from './SharedArtifactInformation.js';
 import { useSharedArtifacts } from './use-collective-artifacts.js';
@@ -18,6 +19,8 @@ export function SharedArtifactToolbar({
   readonly onReturnToSource: () => void;
   readonly onOpenDiscussion: () => void;
 }) {
+  const language = useCollectiveLanguage();
+  const t = useCollectiveText();
   const shared = useSharedArtifacts();
   const [panel, setPanel] = useState<'information' | 'history'>();
   const infoToggle = useRef<HTMLButtonElement>(null);
@@ -34,8 +37,8 @@ export function SharedArtifactToolbar({
           }}
           aria-expanded={infoOpen}
         >
-          <strong>{artifact?.title ?? '共同作品'}</strong>
-          <span>作品信息 ⌄</span>
+          <strong>{artifact?.title ?? t('共同作品')}</strong>
+          <span>{t('作品信息')} ⌄</span>
         </button>
         <div>
           {artifact && (
@@ -47,28 +50,30 @@ export function SharedArtifactToolbar({
               }}
               aria-expanded={panel === 'history'}
             >
-              版本记录
+              {t('版本记录')}
             </button>
           )}
           <button type="button" className="shared-discussion-toggle" onClick={onOpenDiscussion}>
-            讨论
+            {t('讨论')}
           </button>
           {artifact && (
             <label>
-              版本
+              {t('版本')}
               <select value={ownerRevision} onChange={(event) => shared?.open(artifact, Number(event.target.value))}>
                 {ownerRevision !== undefined && ownerRevision !== artifact.versions.at(-1)?.ownerRevision && (
-                  <option value={ownerRevision}>第 {ownerRevision} 版</option>
+                  <option value={ownerRevision}>
+                    {language === 'en' ? `Version ${ownerRevision}` : `第 ${ownerRevision} 版`}
+                  </option>
                 )}
                 {artifact.versions.slice(-1).map((version) => (
                   <option key={version.ownerRevision} value={version.ownerRevision}>
-                    第 {version.ownerRevision} 版
+                    {language === 'en' ? `Version ${version.ownerRevision}` : `第 ${version.ownerRevision} 版`}
                   </option>
                 ))}
               </select>
             </label>
           )}
-          <button type="button" aria-label={shared?.returnLabel ?? '关闭作品'} onClick={shared?.close}>
+          <button type="button" aria-label={t(shared?.returnLabel ?? '关闭作品')} onClick={shared?.close}>
             {shared?.returnLabel && shared?.returnLabel !== '关闭作品' ? '←' : '×'}
           </button>
         </div>

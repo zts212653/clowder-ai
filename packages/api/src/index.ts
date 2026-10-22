@@ -247,6 +247,7 @@ import {
 } from './domains/growing/EntrustedWorkOwnerReadService.js';
 import { EntrustedWorkTaskExecutionService } from './domains/growing/EntrustedWorkTaskExecutionService.js';
 import { F232PreparedArtifactReader } from './domains/growing/F232PreparedArtifactReader.js';
+import { F290CollectiveWorkResultPluginAdapter } from './domains/growing/F290CollectiveWorkResultPluginAdapter.js';
 import { F246NeedsMeProducerAdapter, F306NeedsMeProducerAdapter } from './domains/growing/NeedsMeProducerAdapter.js';
 import { NeedsMeProducerCatalog } from './domains/growing/NeedsMeProducerCatalog.js';
 import { ActivityTracker } from './domains/health/ActivityTracker.js';
@@ -5103,12 +5104,17 @@ async function main(): Promise<void> {
   const { createCollectiveAccountabilitySource } = await import(
     './routes/companion-collective-accountability-source.js'
   );
-  collectiveAttentionReader = createCollectiveAccountabilitySource(
-    new InstalledPluginOperations({
-      inventory: pluginRuntime.inventoryStore,
-      configuration: pluginManagerRuntime.configuration,
-      invocation: pluginRuntime.supervisor,
-    }),
+  const collectiveSourceOperations = new InstalledPluginOperations({
+    inventory: pluginRuntime.inventoryStore,
+    configuration: pluginManagerRuntime.configuration,
+    invocation: pluginRuntime.supervisor,
+  });
+  collectiveAttentionReader = createCollectiveAccountabilitySource(collectiveSourceOperations, privateUserId);
+  const { createCollectiveWorkResultAttentionSource } = await import(
+    './domains/plugin/host-surface/collective-work-result-attention.js'
+  );
+  const collectiveWorkResultAttentionSource = createCollectiveWorkResultAttentionSource(
+    collectiveSourceOperations,
     privateUserId,
   );
   await app.register(pluginOperationRoutes, { operations: installedPluginOperations });
@@ -5771,8 +5777,9 @@ async function main(): Promise<void> {
       new F246NeedsMeProducerAdapter(approvalProducerRegistry),
       new F306NeedsMeProducerAdapter(runtimeInteractionRuntime.store),
       artifactReview.producer,
+      new F290CollectiveWorkResultPluginAdapter(collectiveWorkResultAttentionSource),
     ],
-    ['f246.approval', 'f306.runtime_interaction', 'f309.content_review'],
+    ['f246.approval', 'f306.runtime_interaction', 'f309.content_review', 'f290.collective_work_result'],
   );
   const { DevelopmentReturnService } = await import(
     './infrastructure/scheduler/development-return/DevelopmentReturnService.js'

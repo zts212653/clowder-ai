@@ -184,7 +184,7 @@ describe('ExecutionRow (F322 original-B)', () => {
     const cancel = mocks.apiFetch.mock.calls.find((c) => String(c[0]).endsWith('/cancel'));
     expect(cancel?.[0]).toBe(`/api/threads/${THREAD}/executions/live/exec-opus/cancel`);
     expect(cancel?.[1]).toMatchObject({ method: 'POST', body: JSON.stringify({ catId: 'opus' }) });
-    expect(calls()).toContain('GET /api/executions/active?projectPath=%2Fproject%2Fcafe');
+    expect(calls()).toContain('GET /api/executions/active?scope=all');
   });
 
   it('2  ■ on a managed command deletes the hold-ball task', async () => {

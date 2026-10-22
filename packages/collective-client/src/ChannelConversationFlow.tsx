@@ -11,6 +11,7 @@ import type {
   CollectiveVoteProjection,
   CollectiveWorkProjection,
 } from './client-types.js';
+import { useCollectiveLanguage, useCollectiveText } from './collective-copy.js';
 import { isLastOfSelfRun, isLastOfSelfRunInTopic } from './message-presentation.js';
 import { TopicMessage } from './TopicMessage.js';
 import type { InformalVoteDraft } from './VoteCard.js';
@@ -53,25 +54,34 @@ export function ChannelConversationFlow({
   readonly presentation?: 'v2' | 'classic';
   readonly children?: ReactNode;
 }) {
+  const language = useCollectiveLanguage();
+  const t = useCollectiveText();
   return (
     <div ref={flowRef} className="channel-flow" aria-live="polite">
       {threads.length === 0 && !children ? (
         <div className="channel-empty">
-          <h2>{search ? '没有找到相关讨论' : '这里还很安静'}</h2>
-          <p>{search ? '换一个关键词，或者从左边进入频道。' : `${humanName}，从一句话开始吧。`}</p>
+          <h2>{t(search ? '没有找到相关讨论' : '这里还很安静')}</h2>
+          <p>
+            {search
+              ? t('换一个关键词，或者从左边进入频道。')
+              : language === 'en'
+                ? `${humanName}, start with a message.`
+                : `${humanName}，从一句话开始吧。`}
+          </p>
         </div>
       ) : (
         threads.map((thread, index) => (
           <div key={thread.root.eventId}>
             {(!index ||
-              eventDayLabel(threads[index - 1]?.root.acceptedAt) !== eventDayLabel(thread.root.acceptedAt)) && (
+              eventDayLabel(threads[index - 1]?.root.acceptedAt, language) !==
+                eventDayLabel(thread.root.acceptedAt, language)) && (
               <div className="day-divider">
-                <span>{eventDayLabel(thread.root.acceptedAt)}</span>
+                <span>{eventDayLabel(thread.root.acceptedAt, language)}</span>
               </div>
             )}
             {search && (
               <button type="button" className="search-source" onClick={() => actions.returnToRoot(thread.root)}>
-                # {eventChannelId(thread.root)} · 在频道中查看
+                # {eventChannelId(thread.root)} · {t('在频道中查看')}
               </button>
             )}
             <ChannelMessage
@@ -112,7 +122,7 @@ export function ChannelConversationFlow({
       {children}
       {legacy.length > 0 && !search && (
         <details className="legacy-history">
-          <summary>早期记录 · 位置尚未确认</summary>
+          <summary>{t('早期记录 · 位置尚未确认')}</summary>
           {legacy.map((event, index) => (
             <TopicMessage
               key={event.eventId}

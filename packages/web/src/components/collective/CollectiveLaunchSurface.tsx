@@ -135,7 +135,7 @@ export function CollectiveLaunchSurface({
         connectorError={error}
         worldError={world.error}
         sessionRequired={world.sessionRequired}
-        workError={workResult.error}
+        workNotice={workResult.notice}
         pairingError={pairingBridge.error}
         entryError={entry.error}
         entryBusy={entry.busy}

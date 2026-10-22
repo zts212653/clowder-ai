@@ -21,9 +21,17 @@
 }
 [data-shell="v2"] .home-live-row {
   display: flex;
+  flex-wrap: wrap;
   align-items: flex-start;
   gap: 6px;
   padding: 10px 0;
+}
+[data-shell="v2"] .home-live-row[data-execution-jump-focus="true"] {
+  background: var(--shell-selected);
+}
+[data-shell="v2"] .home-execution-detail {
+  flex: 0 0 100%;
+  padding: 2px 0 4px 25px;
 }
 [data-shell="v2"] .home-live-heading {
   display: flex;

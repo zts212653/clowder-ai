@@ -7,10 +7,13 @@ import { useShellLanguage } from '@/components/shell/shell-language';
 import { ThreadChatLink } from '@/components/workspace/ThreadChatLink';
 import { useActiveExecutionStore } from '@/stores/activeExecutionStore';
 import { apiFetch } from '@/utils/api-client';
+import { ManagedCommandLine } from '../managed-job/ManagedCommandLine';
 import { ManagedJobCard } from '../managed-job/ManagedJobCard';
+import { managedJobCopy } from '../managed-job/managed-job.shell-copy';
 import { executionDetailCopy } from './execution-detail.shell-copy';
 import { clearExecutionDetailRequest, useExecutionDetailRequest } from './execution-detail-request';
-import { ManagedExecutionStopControl } from './ManagedExecutionStopControl';
+import { formatElapsed } from './format';
+import { useHomeClock } from './use-home-clock';
 
 function record(value: unknown): Record<string, unknown> | undefined {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -72,6 +75,8 @@ export function ManagedExecutionDetail({ threadId }: { threadId?: string }) {
       ? candidate
       : undefined;
   const words = useShellCopy(executionDetailCopy);
+  const jobWords = useShellCopy(managedJobCopy);
+  const now = useHomeClock(!!execution, 1000);
   const language = useShellLanguage();
   const [detail, setDetail] = useState<{ key: string; value: CommandDetail | null } | null>(null);
   const [attempt, setAttempt] = useState(0);
@@ -125,16 +130,10 @@ export function ManagedExecutionDetail({ threadId }: { threadId?: string }) {
     <section
       ref={ref}
       tabIndex={-1}
-      className="home-card home-execution-detail"
+      className="home-execution-detail min-w-0"
       data-testid="workspace-execution-detail"
       aria-label={words.title}
     >
-      <header className="home-card-head">
-        <h3 className="home-card-title text-sm">{words.title}</h3>
-        <button type="button" className="home-btn shell-focusable ml-auto" onClick={clearExecutionDetailRequest}>
-          {words.close}
-        </button>
-      </header>
       {loading ? (
         <output className="text-xs text-cafe-muted">{words.loading}</output>
       ) : value && execution ? (
@@ -144,34 +143,37 @@ export function ManagedExecutionDetail({ threadId }: { threadId?: string }) {
             jobId={value.jobId}
             threadId={execution.threadId}
             catId={execution.catId}
+            presentation="inline"
           />
         ) : (
           <>
-            <dl className="space-y-2 text-xs text-cafe-secondary">
-              <div>
-                <dt className="text-cafe-muted">{words.command}</dt>
-                <dd>
-                  <pre className="whitespace-pre-wrap break-all">{value.command}</pre>
-                </dd>
-              </div>
-              <div>
-                <dt className="text-cafe-muted">{words.started}</dt>
-                <dd>
-                  <time dateTime={new Date(value.startedAt).toISOString()}>
-                    {new Date(value.startedAt).toLocaleString(language === 'zh' ? 'zh-CN' : 'en-US', { hour12: false })}
-                  </time>
-                </dd>
-              </div>
-              <div>
-                <dt className="text-cafe-muted">{words.source}</dt>
-                <dd>
-                  <ThreadChatLink threadId={execution.threadId} className="shell-focusable underline">
-                    {execution.threadTitle ?? execution.threadId}
-                  </ThreadChatLink>
-                </dd>
-              </div>
-            </dl>
-            <ManagedExecutionStopControl key={key} execution={execution} returnFocusRef={ref} />
+            <ManagedCommandLine command={value.command} />
+            <span className="block text-xs text-cafe-muted">{formatElapsed(now - value.startedAt)}</span>
+            <details className="group">
+              <summary className="shell-focusable list-none cursor-pointer text-xs text-cafe-muted">
+                {jobWords.details} <span aria-hidden="true">›</span>
+              </summary>
+              <dl className="mt-2 space-y-2 text-xs text-cafe-secondary">
+                <div>
+                  <dt className="text-cafe-muted">{words.started}</dt>
+                  <dd>
+                    <time dateTime={new Date(value.startedAt).toISOString()}>
+                      {new Date(value.startedAt).toLocaleString(language === 'zh' ? 'zh-CN' : 'en-US', {
+                        hour12: false,
+                      })}
+                    </time>
+                  </dd>
+                </div>
+                <div>
+                  <dt className="text-cafe-muted">{words.source}</dt>
+                  <dd>
+                    <ThreadChatLink threadId={execution.threadId} className="shell-focusable underline">
+                      {execution.threadTitle ?? execution.threadId}
+                    </ThreadChatLink>
+                  </dd>
+                </div>
+              </dl>
+            </details>
           </>
         )
       ) : (
@@ -183,12 +185,19 @@ export function ManagedExecutionDetail({ threadId }: { threadId?: string }) {
               setDetail(null);
               setAttempt(attempt + 1);
             }}
-            className="home-btn shell-focusable"
+            className="shell-focusable ml-2"
           >
             {words.retry}
           </button>
         </div>
       )}
+      <button
+        type="button"
+        className="shell-focusable mt-1 text-xs text-cafe-muted"
+        onClick={clearExecutionDetailRequest}
+      >
+        {words.close}
+      </button>
     </section>
   );
 }

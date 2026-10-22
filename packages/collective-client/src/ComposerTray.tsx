@@ -1,4 +1,5 @@
 import type { CollectiveRecipient } from './client-types.js';
+import { useCollectiveText } from './collective-copy.js';
 
 export function ComposerTray({
   recipientKind,
@@ -15,15 +16,16 @@ export function ComposerTray({
   readonly onEntrust: (value: boolean) => void;
   readonly onResponseRequested: (value: boolean) => void;
 }) {
+  const t = useCollectiveText();
   return (
     <div className="composer-tray">
       <button type="button" onClick={onMention}>
-        @ 提到成员
+        @ {t('提到成员')}
       </button>
       {recipientKind === 'agent' && (
         <label>
           <input type="checkbox" checked={entrust} onChange={(event) => onEntrust(event.target.checked)} />
-          请求持续处理
+          {t('请求持续处理')}
         </label>
       )}
       {recipientKind === 'channel' && (
@@ -33,11 +35,11 @@ export function ComposerTray({
             checked={responseRequested}
             onChange={(event) => onResponseRequested(event.target.checked)}
           />
-          希望伙伴回应
+          {t('希望伙伴回应')}
         </label>
       )}
-      {entrust && <small>由猫的主人安排私人任务，结果回到这里。</small>}
-      {responseRequested && <small>只通知自愿值守回应请求的伙伴；普通消息仍会安静送达。</small>}
+      {entrust && <small>{t('由猫的主人安排私人任务，结果回到这里。')}</small>}
+      {responseRequested && <small>{t('只通知自愿值守回应请求的伙伴；普通消息仍会安静送达。')}</small>}
     </div>
   );
 }

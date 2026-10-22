@@ -1,41 +1,38 @@
 import { parseCollectiveWorkResultFilePath } from '@cat-cafe/shared';
 import { SESSION_KEY } from './use-human-auth-session.js';
 
-export function collectiveWorkResultFileAddress(href: string): { fileName: string; pathname: string } | undefined {
+export interface CollectiveWorkResultFileAddress {
+  readonly fileId: string;
+  readonly fileName: string;
+  readonly pathname: string;
+}
+
+export function collectiveWorkResultFileAddress(href: string): CollectiveWorkResultFileAddress | undefined {
   try {
     const url = new URL(href);
     if (url.protocol !== 'http:' && url.protocol !== 'https:') return undefined;
     const address = parseCollectiveWorkResultFilePath(url.pathname);
-    return address ? { fileName: address.fileName, pathname: url.pathname } : undefined;
+    return address ? { ...address, pathname: url.pathname } : undefined;
   } catch {
     return undefined;
   }
 }
 
-export function currentCollectiveWorkResultFile(href: string): { fileName: string; href: string } | undefined {
-  if (typeof location === 'undefined') return undefined;
-  const address = collectiveWorkResultFileAddress(href);
-  return address
-    ? { fileName: address.fileName, href: new URL(address.pathname, location.origin).toString() }
-    : undefined;
-}
-
 export function currentCollectiveSessionToken(): string | undefined {
-  if (typeof location === 'undefined') return undefined;
-  if (typeof sessionStorage === 'undefined') return undefined;
-  const token = sessionStorage.getItem(`${SESSION_KEY}:${location.origin}`);
-  return token === null ? undefined : token;
+  if (typeof location === 'undefined' || typeof sessionStorage === 'undefined') return undefined;
+  return sessionStorage.getItem(`${SESSION_KEY}:${location.origin}`) ?? undefined;
 }
 
+/** Non-Markdown results retain their original authenticated read path; credentials never follow the message URL origin. */
 export async function openCollectiveWorkResultFile(
-  href: string,
+  address: CollectiveWorkResultFileAddress,
   sessionToken: string,
   popup?: Window | null,
 ): Promise<void> {
-  const address = currentCollectiveWorkResultFile(href);
-  if (!address) throw new Error('Work result file belongs to another Service');
+  if (typeof location === 'undefined') throw new Error('Work result file belongs to another Service');
+  const href = new URL(address.pathname, location.origin).toString();
   try {
-    const response = await fetch(address.href, {
+    const response = await fetch(href, {
       cache: 'no-store',
       credentials: 'same-origin',
       headers: { authorization: `Bearer ${sessionToken}` },

@@ -5,6 +5,7 @@ import type { ClientSnapshot } from './client-types.js';
 import { collectiveArtifactClient, type SharedArtifact } from './collective-artifact-client.js';
 import { collectiveClientNamespace } from './human-send-custody.js';
 import { participantRecipient } from './participant-identity.js';
+import type { CollectiveWorkResultFileAddress } from './work-result-file-link.js';
 
 export function useCollectiveArtifacts(
   snapshot: ClientSnapshot,
@@ -78,6 +79,18 @@ export function useCollectiveArtifacts(
   );
   const beginPublication = useCallback((eventId: string) => setPublicationSource(eventId), []);
   const closePublication = useCallback(() => setPublicationSource(undefined), []);
+  const resolveWorkResultFile = useCallback(
+    async (address: CollectiveWorkResultFileAddress) => {
+      if (!api || namespace !== currentNamespace.current) throw new Error('作品服务当前不可用。');
+      const artifact = await api.openWorkResult(address.fileId);
+      if (namespace !== currentNamespace.current) throw new Error('共同家园已经切换，请从当前页面重新打开结果。');
+      setCatalogue((current) => [artifact, ...current.filter((item) => item.artifactId !== artifact.artifactId)]);
+      setStatus('ready');
+      setError(undefined);
+      return artifact;
+    },
+    [api, namespace],
+  );
   return {
     api,
     catalogue,
@@ -91,6 +104,7 @@ export function useCollectiveArtifacts(
     compare,
     beginPublication,
     closePublication,
+    resolveWorkResultFile,
     refreshDiscussion,
     humanId: snapshot.me?.human.humanId,
     members: snapshot.members,
@@ -125,6 +139,7 @@ export function useCollectiveArtifacts(
 export type CollectiveArtifactState = ReturnType<typeof useCollectiveArtifacts> & {
   returnToSource?: (channelId: string, eventId: string) => void;
   returnLabel?: string;
+  openWorkResultFile?: (address: CollectiveWorkResultFileAddress) => Promise<void>;
 };
 export const CollectiveArtifactContext = createContext<CollectiveArtifactState | undefined>(undefined);
 export const useSharedArtifacts = () => useContext(CollectiveArtifactContext);

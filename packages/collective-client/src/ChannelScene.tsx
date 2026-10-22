@@ -11,6 +11,7 @@ import { actorDisplayName, groupChannelThreads } from './channel-model.js';
 import { eventChannelId } from './channel-navigation.js';
 import type { ChannelSceneProps } from './channel-scene-props.js';
 import type { CollectiveEventEnvelope } from './client-types.js';
+import { useCollectiveText } from './collective-copy.js';
 import { DemoPlayback } from './first-entry/DemoPlayback.js';
 import { PublicChannelActivity } from './PublicChannelActivity.js';
 import { mentionSelectionForEvent } from './participant-identity.js';
@@ -20,6 +21,7 @@ import { SharedArtifactSurface } from './SharedArtifactSurface.js';
 import { useSharedArtifacts } from './use-collective-artifacts.js';
 
 export function ChannelScene(props: ChannelSceneProps) {
+  const t = useCollectiveText();
   const {
     collective,
     humanId,
@@ -236,7 +238,7 @@ export function ChannelScene(props: ChannelSceneProps) {
       <section
         className="channel-scene"
         hidden={Boolean(shared?.selected) || props.contextFullPage}
-        aria-label={search ? '搜索结果' : `# ${channelId}`}
+        aria-label={search ? t('搜索结果') : `# ${channelId}`}
       >
         {content !== 'roadmap' && (
           <ChannelHeader
@@ -285,7 +287,7 @@ export function ChannelScene(props: ChannelSceneProps) {
         )}
         {content === 'conversation' && roadmapReturnLabel && onReturnToRoadmap && (
           <button type="button" className="roadmap-return" onClick={onReturnToRoadmap}>
-            ← 返回 {roadmapReturnLabel}
+            ← {t('返回')} {roadmapReturnLabel}
           </button>
         )}
         {content === 'artifacts' ? (
@@ -402,7 +404,7 @@ export function ChannelScene(props: ChannelSceneProps) {
       </section>
       {rightPanel && !context && !topic && (
         <ChannelRightPanel
-          title={rightPanel === 'artifacts' ? '频道作品' : '频道任务'}
+          title={t(rightPanel === 'artifacts' ? '频道作品' : '频道任务')}
           onClose={() => setRightPanel(undefined)}
         >
           {rightPanel === 'artifacts' ? (
@@ -413,9 +415,9 @@ export function ChannelScene(props: ChannelSceneProps) {
               onOpenChannelLibrary={() => props.onOpenLibrary?.(channelId)}
             />
           ) : !collaboration ? (
-            <p>正在读取任务…</p>
+            <p>{t('正在读取任务…')}</p>
           ) : !channelWorks.length ? (
-            <p>这个频道还没有任务。</p>
+            <p>{t('这个频道还没有任务。')}</p>
           ) : (
             channelWorks.map((work) => (
               <CollectiveWorkCard
