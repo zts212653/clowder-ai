@@ -9,7 +9,7 @@ async function metadataPage(repo: string, since: string, page: number, signal: A
     const { stdout } = await execute(
       'gh',
       ['api', `repos/${repo}/issues/comments?${query}`, '--jq', 'map({id,updated_at,issue_url})'],
-      { signal, timeout: 15000, maxBuffer: 1024 * 1024 },
+      { signal, timeout: 15000, maxBuffer: 1024 * 1024, windowsHide: true },
     );
     return JSON.parse(stdout) as unknown;
   } catch {
