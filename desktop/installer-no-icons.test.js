@@ -1,9 +1,8 @@
 const assert = require('node:assert/strict');
-const { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } = require('node:fs');
-const { tmpdir } = require('node:os');
+const { existsSync, readFileSync, writeFileSync } = require('node:fs');
 const path = require('node:path');
-const { spawnSync } = require('node:child_process');
 const { test } = require('node:test');
+const { runNativeCommand, withTempRoot } = require('./test-helpers/native-installer-fixture.cjs');
 
 const compiler = [
   process.env.ISCC_EXE,
@@ -16,9 +15,8 @@ test(
   {
     skip: process.platform !== 'win32' || !compiler ? 'Requires Windows and the native Inno compiler' : false,
   },
-  () => {
-    const root = mkdtempSync(path.join(tmpdir(), 'pr1519-no-icons-'));
-    try {
+  async () => {
+    await withTempRoot('pr1519-no-icons-', async (root) => {
       const source = readFileSync(path.join(__dirname, 'installer/cat-cafe.iss'), 'utf8');
       const setup = source.split('[Setup]')[1].split(/\r?\n\[/)[0];
       // Consume the production Start Menu directives, including omitted/default values.
@@ -60,20 +58,16 @@ end;
 `,
         'utf8',
       );
-      const compiled = spawnSync(compiler, ['/Q', script], { encoding: 'utf8', timeout: 30000 });
+      const compiled = await runNativeCommand(root, 'compile', compiler, ['/Q', script]);
       assert.equal(compiled.status, 0, compiled.stdout + compiled.stderr);
       for (const noIcons of [false, true]) {
         const receipt = path.join(root, `${noIcons}.txt`);
         const args = ['/SP-', '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', `/ReceiptPath=${receipt}`];
         if (noIcons) args.push('/NOICONS');
-        const installed = spawnSync(path.join(root, 'probe.exe'), args, { encoding: 'utf8', timeout: 30000 });
+        const installed = await runNativeCommand(root, `setup-icons-${noIcons}`, path.join(root, 'probe.exe'), args);
         assert.equal(installed.status, 0, installed.stdout + installed.stderr);
         assert.equal(readFileSync(receipt, 'utf8'), String(noIcons), `WizardNoIcons must honor /NOICONS=${noIcons}`);
       }
-    } finally {
-      const parent = path.resolve(tmpdir()) + path.sep;
-      assert.ok(path.resolve(root).startsWith(parent) && path.basename(root).startsWith('pr1519-no-icons-'));
-      rmSync(root, { recursive: true, force: true });
-    }
+    });
   },
 );

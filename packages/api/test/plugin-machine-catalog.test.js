@@ -107,6 +107,7 @@ test('projects canonical machine catalog release truth while Host policy remains
     publisher: 'Clowder AI',
     ownerAuthRequired: false,
     compatibleReplacement: false,
+    updateRequiresValidation: true,
     capabilities: [],
   });
 });

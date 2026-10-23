@@ -3,18 +3,18 @@ import { test } from 'node:test';
 import { cueEnvelopeV1Schema } from '@cat-cafe/shared';
 import Database from 'better-sqlite3';
 import Fastify from 'fastify';
-import { createMemoryCueTools } from '../../../mcp-server/src/tools/memory-cue-tools.js';
+import { createMemoryCueTools } from '../../../mcp-server/dist/tools/memory-cue-tools.js';
 import {
   formatMemoryCues,
   renderMemoryCue,
   renderMemoryCuePointer,
   renderThreadOpeningClue,
-} from '../../src/domains/memory/cue/format-memory-cues.js';
-import { MemoryCueDrillHandleService } from '../../src/domains/memory/cue/MemoryCueDrillHandleService.js';
-import { MemoryCueEpisodeStore } from '../../src/domains/memory/cue/MemoryCueEpisodeStore.js';
-import { applyMigrations } from '../../src/domains/memory/schema.js';
-import { registerCallbackMemoryCueRoutes } from '../../src/routes/callback-memory-cue-routes.js';
-import { estimateTokens } from '../../src/utils/token-counter.js';
+} from '../../dist/domains/memory/cue/format-memory-cues.js';
+import { MemoryCueDrillHandleService } from '../../dist/domains/memory/cue/MemoryCueDrillHandleService.js';
+import { MemoryCueEpisodeStore } from '../../dist/domains/memory/cue/MemoryCueEpisodeStore.js';
+import { applyMigrations } from '../../dist/domains/memory/schema.js';
+import { registerCallbackMemoryCueRoutes } from '../../dist/routes/callback-memory-cue-routes.js';
+import { estimateTokens } from '../../dist/utils/token-counter.js';
 
 const scope = { ownerUserId: 'owner', threadId: 'thread', invocationId: 'invocation' };
 

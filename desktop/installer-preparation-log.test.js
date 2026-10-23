@@ -1,9 +1,8 @@
 const assert = require('node:assert/strict');
-const { spawnSync } = require('node:child_process');
 const fs = require('node:fs');
-const os = require('node:os');
 const path = require('node:path');
 const { test } = require('node:test');
+const { runNativeCommand, withTempRoot } = require('./test-helpers/native-installer-fixture.cjs');
 
 const compiler = [
   process.env.ISCC_EXE,
@@ -23,20 +22,9 @@ const extractionOutput = installerSource.slice(
 );
 const prepareToInstall = installerSource.slice(installerSource.indexOf('function PrepareToInstall'));
 
-function withTempRoot(prefix, run) {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
-  try {
-    run(root);
-  } finally {
-    assert.equal(path.dirname(root), os.tmpdir());
-    assert.match(path.basename(root), new RegExp(`^${prefix}`));
-    fs.rmSync(root, { recursive: true, force: true });
-  }
-}
-
 // Compile a throwaway native Setup that embeds the production PrepareToInstall
 // and ExtractionOutput procedures plus test-only helper payloads.
-function writeProbe(root, { createAppDir = false, helpers }) {
+async function writeProbe(root, { createAppDir = false, helpers }) {
   const helperSources = helpers
     .map(({ name, body }) => {
       const helper = path.join(root, name);
@@ -68,20 +56,20 @@ ${prepareToInstall}
 `,
     'utf8',
   );
-  const compiled = spawnSync(compiler, ['/Q', script], {
-    encoding: 'utf8',
-    timeout: 30000,
-    windowsHide: true,
-  });
+  const compiled = await runNativeCommand(root, 'compile', compiler, ['/Q', script]);
   assert.equal(compiled.status, 0, compiled.stdout + compiled.stderr);
 }
 
-function runProbe(root, args = []) {
+async function runProbe(root, args = []) {
   const log = path.join(root, 'setup.log');
-  const installed = spawnSync(
+  const installed = await runNativeCommand(
+    root,
+    'setup',
     path.join(root, 'probe.exe'),
     ['/SP-', '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', `/LOG=${log}`, ...args],
-    { encoding: 'utf8', timeout: 30000, windowsHide: true },
+    // Cold Windows PowerShell startup on hosted CI is not a product SLA.
+    // Keep it bounded, and fail with the real log plus owned-tree cleanup.
+    { timeoutMs: 120000 },
   );
   assert.equal(fs.existsSync(log), true, installed.stdout + installed.stderr);
   return { installed, recorded: fs.readFileSync(log, 'utf8') };
@@ -90,16 +78,16 @@ function runProbe(root, args = []) {
 const configureHelper = (body) => ({ name: 'configure-desktop-instance.ps1', body });
 const stopHelper = { name: 'stop-installed-desktop.ps1', body: 'exit 0\n' };
 
-test('native Setup records the actual identity-helper error before refusing installation', native, () => {
-  withTempRoot('pr1519-prepare-log-', (root) => {
-    writeProbe(root, {
+test('native Setup records the actual identity-helper error before refusing installation', native, async () => {
+  await withTempRoot('pr1519-prepare-log-', async (root) => {
+    await writeProbe(root, {
       // Only the helper result is a fault fixture: it must be the one failing.
       helpers: [
         configureHelper("[Console]::Error.WriteLine('PR1519_EXPECTED_IDENTITY_FAILURE'); exit 73\n"),
         stopHelper,
       ],
     });
-    const { installed, recorded } = runProbe(root);
+    const { installed, recorded } = await runProbe(root);
     assert.equal(installed.status, 7, installed.stdout + installed.stderr);
     assert.match(recorded, /Unable to preserve the target installation identity/);
     assert.match(
@@ -114,15 +102,15 @@ test('native Setup records the actual identity-helper error before refusing inst
 test(
   'native Setup rejects isolated ports without an InstanceRoot before creating the program directory',
   native,
-  () => {
-    withTempRoot('pr1519-prepare-args-', (root) => {
+  async () => {
+    await withTempRoot('pr1519-prepare-args-', async (root) => {
       // CreateAppDir=yes makes this a real fail-closed check: a regression that
       // ignores the ports would let the install proceed and create the directory.
-      writeProbe(root, {
+      await writeProbe(root, {
         createAppDir: true,
         helpers: [configureHelper("[Console]::Error.WriteLine('PR1519_HELPER_MUST_NOT_RUN'); exit 0\n"), stopHelper],
       });
-      const { installed, recorded } = runProbe(root, ['/FrontendPort=5150']);
+      const { installed, recorded } = await runProbe(root, ['/FrontendPort=5150']);
       assert.equal(installed.status, 7, installed.stdout + installed.stderr);
       assert.match(recorded, /Identity helper rejected: isolated port parameters require DesktopInstanceRoot/);
       assert.doesNotMatch(
@@ -135,13 +123,37 @@ test(
   },
 );
 
-test('native Setup keeps identity-helper stderr in the setup log even when the helper succeeds', native, () => {
-  withTempRoot('pr1519-prepare-stderr-', (root) => {
-    writeProbe(root, {
+test('native Setup keeps identity-helper stderr in the setup log even when the helper succeeds', native, async () => {
+  await withTempRoot('pr1519-prepare-stderr-', async (root) => {
+    await writeProbe(root, {
       helpers: [configureHelper("[Console]::Error.WriteLine('PR1519_STDERR_RETAINED'); exit 0\n"), stopHelper],
     });
-    const { installed, recorded } = runProbe(root);
+    const { installed, recorded } = await runProbe(root);
     assert.equal(installed.status, 0, installed.stdout + installed.stderr);
     assert.match(recorded, /PR1519_STDERR_RETAINED/, 'helper stderr must reach the Setup log on the success path too');
+  });
+});
+
+test('native Setup timeout reaps its bootstrap child before fixture removal', native, async () => {
+  await withTempRoot('pr1519-prepare-timeout-', async (root) => {
+    await writeProbe(root, {
+      helpers: [configureHelper('Start-Sleep -Seconds 60; exit 0\n'), stopHelper],
+    });
+    await assert.rejects(
+      runNativeCommand(
+        root,
+        'setup-timeout',
+        path.join(root, 'probe.exe'),
+        ['/SP-', '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', `/LOG=${path.join(root, 'setup.log')}`],
+        { timeoutMs: 2000 },
+      ),
+      (error) => {
+        assert.match(error.message, /timed out/);
+        assert.equal(error.cleanupError, undefined, 'tree termination must succeed, not only the timeout');
+        assert.throws(() => process.kill(error.pid, 0), { code: 'ESRCH' });
+        return true;
+      },
+    );
+    // withTempRoot must actually remove the fixture; EPERM remains a failure.
   });
 });

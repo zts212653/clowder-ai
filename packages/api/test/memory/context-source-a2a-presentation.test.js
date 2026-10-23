@@ -5,7 +5,7 @@ import { dirname, join } from 'node:path';
 import { test } from 'node:test';
 import Database from 'better-sqlite3';
 import Fastify from 'fastify';
-import { createMemoryCueTools } from '../../../mcp-server/src/tools/memory-cue-tools.js';
+import { createMemoryCueTools } from '../../../mcp-server/dist/tools/memory-cue-tools.js';
 import { buildActionSuccessorFence } from '../../dist/domains/ball-custody/ActionSuccessorAdmissionContract.js';
 import { canonicalizeActionTerminalPredicate } from '../../dist/domains/ball-custody/ActionTerminalPredicateCatalog.js';
 import { claimActionSuccessor } from '../../dist/domains/ball-custody/action-successor-state-machine.js';

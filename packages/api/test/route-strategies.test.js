@@ -1327,14 +1327,15 @@ describe('incremental current-message fallback integration', () => {
           threadId: 'thread_target',
           catId: 'opus',
           timestamp: timestamp - 2000,
-          content: 'The canonical PR discussion thread.',
+          // Literal hits keep this routing fixture independent of native inference.
+          content: currentText,
         },
         {
           id: 'message-other',
           threadId: 'thread_other',
           catId: 'opus',
           timestamp: timestamp - 1000,
-          content: 'A different valid result used for mismatch protection.',
+          content: currentText,
         },
       ].map((message) => [message.id, { timestamp, ...message, userId: 'user1', mentions: [] }]),
     );
@@ -1563,7 +1564,9 @@ describe('incremental current-message fallback integration', () => {
       threadId: 'thread_prefetch_candidate',
       userId: 'user1',
       catId: 'opus',
-      content: 'This candidate must never become the action target.',
+      // A duplicate question is a real literal search hit in the wrong thread.
+      // It must still lose to the verified lookup, without a live semantic judge.
+      content: currentText,
       mentions: [],
       timestamp,
     };

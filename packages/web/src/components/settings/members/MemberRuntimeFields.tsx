@@ -7,8 +7,9 @@ import type { ProfileItem } from '../../hub-accounts.types';
 import { usesAgyAcp, usesAgyNative } from '../../hub-cat-editor.agy';
 import { builtinAccountIdForClient, filterAccounts, type HubCatEditorFormState } from '../../hub-cat-editor.model';
 import { SelectField } from '../../hub-cat-editor-fields';
-import { KimiLoginHelp } from './KimiLoginHelp';
 import { MemberChoicePicker } from './MemberChoicePicker';
+import { MemberConfigurationDetails } from './MemberConfigurationDetails';
+import { MemberDshProviderSetup } from './MemberDshProviderSetup';
 import { matchesRuntime, type RuntimeChoice, type RuntimeDrafts, runtimeDefaults } from './member-runtime-draft';
 import { memberRuntimeOptions, memberRuntimeTools } from './member-runtime-tools';
 import { nativeAcpProfileMessage } from './native-acp-profile-status';
@@ -218,6 +219,17 @@ export function MemberRuntimeFields({
           {t('已检测登录 · 实际连接待验证', 'Sign-in detected · Connection not yet verified')}
         </p>
       )}
+      {native &&
+        !form.accountRef &&
+        form.clientId === 'acp' &&
+        /dsh|deepseek/i.test(form.acpCommand + form.acpStartupArgs) && (
+          <MemberDshProviderSetup
+            form={form}
+            runtimeId={selected?.id ?? (editing ? `acp:${form.catId}` : 'dsh')}
+            t={t}
+            patch={patch}
+          />
+        )}
       <div className="grid gap-4 sm:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)]">
         <MemberChoicePicker
           label={t('模型', 'Model')}
@@ -328,27 +340,13 @@ export function MemberRuntimeFields({
         </div>
       )}
       {!nativeSetup && (
-        <details className="text-sm text-cafe-secondary">
-          <summary className="min-h-10 cursor-pointer py-2">{t('配置详情', 'Configuration details')}</summary>
-          {defaultIdentity && form.clientId === 'kimi' && selected?.readiness && (
-            <KimiLoginHelp readiness={selected.readiness} t={t} />
-          )}
-          <p className="mb-3">
-            {t(
-              '只调整这位伙伴的偏好。安装状态和模型目录不代表调用已验证。',
-              'Changes apply to this teammate. Installation and model discovery do not verify an invocation.',
-            )}
-          </p>
-          <SelectField
-            label={t('默认值来源', 'Default source')}
-            value={form.configurationSource ?? 'managed_account'}
-            options={[
-              { value: 'native_tool', label: t('工具配置', 'Tool configuration') },
-              { value: 'managed_account', label: t('已有连接配置', 'Existing connection configuration') },
-            ]}
-            onChange={(value) => patch({ configurationSource: value as HubCatEditorFormState['configurationSource'] })}
-          />
-        </details>
+        <MemberConfigurationDetails
+          form={form}
+          patch={patch}
+          defaultIdentity={defaultIdentity}
+          readiness={selected?.readiness}
+          t={t}
+        />
       )}
     </div>
   );
