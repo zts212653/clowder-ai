@@ -96,7 +96,7 @@ function validateRevision(
   if (value.sourcePublication !== undefined && !isRecord(value.sourcePublication)) {
     throw corruptState(state.contentRef);
   }
-  validateContentPublication(state.publicationScope, value.sourcePublication);
+  validateContentPublication(state.publicationScope, value.sourcePublication, state.mediaType);
   return value as unknown as ProjectContentRevisionV1;
 }
 

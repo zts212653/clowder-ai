@@ -7,8 +7,10 @@ import { MAILBOX_NAVIGATE_EVENT } from '@/components/shell/mailbox/mailbox-navig
 import { writeShellPresentation } from '@/components/shell/shell-presentation';
 import { fileReturnLabel } from '@/components/workspace/V2WorkspaceFileChrome';
 import { createCapabilityEvolutionWorkspaceSurface } from '../capability-evolution-workspace-adapter';
+import { resolvePublicationTarget } from '../publication-surface';
 import {
   createApprovalActionSurface,
+  createArtifactSurface,
   createBrowserSurface,
   createContentEditorSurface,
   createEvolutionProgramSurface,
@@ -102,31 +104,52 @@ vi.mock('@/components/capability-evolution/CapabilityEvolutionWorkspace', () => 
   ),
 }));
 
+const htmlFixture = vi.hoisted(() => ({ enabled: false, contentRef: `work:${'a'.repeat(64)}` }));
 const artifactFixture = vi.hoisted(() => ({ revision: 7, threadId: 'thread-f310' }));
 vi.mock('@/utils/api-client', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/utils/api-client')>();
   return {
     ...actual,
     apiFetch: (path: string, ...args: Parameters<typeof actual.apiFetch> extends [string, ...infer R] ? R : never) =>
-      path === '/api/threads/thread-f310/artifacts'
+      path === '/api/works/command' && htmlFixture.enabled
         ? Promise.resolve(
-            new Response(
-              JSON.stringify({
-                threadId: artifactFixture.threadId,
-                artifacts: [
-                  {
-                    type: 'file',
-                    name: 'Tomorrow presentation',
-                    catId: 'codex-sol',
-                    createdAt: artifactFixture.revision,
-                    sourceMessageId: 'published',
-                    url: 'artifact:ppt:tomorrows-ppt',
-                  },
-                ],
-              }),
+            Response.json(
+              (() => {
+                const command = JSON.parse(String(args[0]?.body)).command;
+                return command.action === 'read'
+                  ? {
+                      reference: command.reference,
+                      currentOwnerRevision: 2,
+                      description: { mediaType: 'text/html' },
+                      version: { title: 'HTML owner' },
+                    }
+                  : {
+                      reference: command.reference,
+                      mediaType: 'text/html',
+                      html: `<button>version ${command.reference.ownerRevision}</button>`,
+                    };
+              })(),
             ),
           )
-        : actual.apiFetch(path, ...args),
+        : path === '/api/threads/thread-f310/artifacts'
+          ? Promise.resolve(
+              new Response(
+                JSON.stringify({
+                  threadId: artifactFixture.threadId,
+                  artifacts: [
+                    {
+                      type: 'file',
+                      name: 'Tomorrow presentation',
+                      catId: 'codex-sol',
+                      createdAt: artifactFixture.revision,
+                      sourceMessageId: 'published',
+                      url: 'artifact:ppt:tomorrows-ppt',
+                    },
+                  ],
+                }),
+              ),
+            )
+          : actual.apiFetch(path, ...args),
   };
 });
 
@@ -240,6 +263,7 @@ describe('F307 owner surface renderer', () => {
   let root: ReturnType<typeof createRoot>;
 
   beforeEach(() => {
+    htmlFixture.enabled = false;
     Object.assign(artifactFixture, { revision: 7, threadId: 'thread-f310' });
     container = document.createElement('div');
     document.body.appendChild(container);
@@ -249,6 +273,53 @@ describe('F307 owner surface renderer', () => {
   afterEach(() => {
     act(() => root.unmount());
     container.remove();
+  });
+
+  it('opens HTML in the original publication surface and changes only its fixed version while preserving the Works return', async () => {
+    htmlFixture.enabled = true;
+    const artifact: ThreadArtifactDTO = {
+      type: 'widget',
+      name: 'HTML owner',
+      catId: null,
+      createdAt: 1,
+      sourceMessageId: null,
+      work: { contentRef: htmlFixture.contentRef, ownerRevision: 2, currentOwnerRevision: 2 },
+    };
+    let surface = createArtifactSurface({ threadId: 'thread-a', artifact, navigationOrigin: listPr.origin });
+    const refresh = vi.fn(),
+      back = vi.fn();
+    const render = () =>
+      root.render(
+        <F307OwnerSurfaceRenderer
+          surface={surface}
+          hostThreadId="thread-a"
+          onOpenSurface={vi.fn()}
+          onOpenArtifactWithReturn={vi.fn()}
+          onRefreshSurface={refresh}
+          onRequestDetach={vi.fn()}
+          onReturnToFileOrigin={back}
+        />,
+      );
+    await act(async () => render());
+    expect(container.querySelector('iframe')?.getAttribute('srcdoc')).toContain('version 2');
+    const select = container.querySelector<HTMLSelectElement>('select[aria-label="作品版本"]');
+    expect(select).not.toBeNull();
+    act(() => {
+      if (select) {
+        select.value = '1';
+        select.dispatchEvent(new Event('change', { bubbles: true }));
+      }
+    });
+    expect(refresh).toHaveBeenCalledOnce();
+    const changed = refresh.mock.calls[0]?.[0];
+    expect(changed.id).toBe(surface.id);
+    expect(resolvePublicationTarget(changed)).toEqual({ contentRef: htmlFixture.contentRef, ownerRevision: 1 });
+    expect(changed.navigationOrigin).toEqual(listPr.origin);
+    surface = changed;
+    await act(async () => render());
+    expect(container.querySelector('iframe')?.getAttribute('srcdoc')).toContain('version 1');
+    act(() => [...container.querySelectorAll('button')].find((button) => button.textContent === '返回')?.click());
+    expect(back).toHaveBeenCalledWith(surface, listPr.origin);
   });
 
   it('suppresses Browser chrome in focus mode without replacing its owner surface', () => {

@@ -1,5 +1,13 @@
-import { type WorkCommand, workCommandSchema } from '@cat-cafe/shared';
-import type { FastifyInstance, FastifyReply } from 'fastify';
+import { Transform } from 'node:stream';
+import { MAX_HTML_WORK_COMMAND_BYTES, type WorkCommand, workCommandSchema } from '@cat-cafe/shared';
+import {
+  errorCodes,
+  type FastifyInstance,
+  type FastifyReply,
+  type FastifyRequest,
+  type preParsingAsyncHookHandler,
+  type preValidationAsyncHookHandler,
+} from 'fastify';
 import { z } from 'zod';
 import { WorkContextConflictError } from '../domains/collaborative-content/works/context-store.js';
 import { inspectWorkResult } from '../domains/collaborative-content/works/inspection.js';
@@ -9,6 +17,7 @@ import {
   WorkProjectionPendingError,
 } from '../domains/collaborative-content/works/service.js';
 import type { WorkVideoContextService } from '../domains/collaborative-content/works/video-context.js';
+import { ContentOwnerCapacityError } from '../domains/video-studio/content-owner/errors.js';
 import { MediaOwnerError } from '../domains/video-studio/content-owner/media-errors.js';
 import { WorkspaceContentSourceError } from '../domains/workspace/workspace-content-source.js';
 import { replyArtifactReviewError } from './artifact-review-route-errors.js';
@@ -18,6 +27,7 @@ import {
   requireCallbackPrincipal,
 } from './callback-auth-prehandler.js';
 import { directContentHuman } from './content-modification-routes.js';
+import { workCommandInputError } from './living-work-command-budget.js';
 
 const envelope = z.object({ threadId: z.string().min(1).max(128).optional(), command: workCommandSchema }).strict();
 const callbackEnvelope = envelope.extend({
@@ -48,6 +58,7 @@ async function run(
       ? contexts.save(command, principal)
       : contexts.read(command.reference, principal, command.metadataRevision);
   }
+  if (command.action === 'read-body') return service.readBody(command.reference, principal);
   if (command.action === 'read') return service.read(command.reference, principal);
   if (command.action === 'publish-reference') return service.reference(command.reference, principal);
   if (command.action === 'list') return service.list(principal, command.after, command.catalogueSnapshot);
@@ -56,6 +67,10 @@ async function run(
 }
 
 function fail(reply: FastifyReply, error: unknown) {
+  // Work validation responses have a fixed 27-byte budget. In particular, do
+  // not serialize nested union errors, unknown keys, or user-supplied values.
+  if (error instanceof z.ZodError) return reply.code(400).send({ error: 'invalid_request' });
+  if (error instanceof ContentOwnerCapacityError) return reply.code(409).send({ error: 'work_version_limit' });
   if (error instanceof WorkContextConflictError) return reply.code(409).send({ error: 'context_conflict' });
   if (error instanceof WorkProjectionPendingError)
     return reply.code(503).send({
@@ -78,6 +93,29 @@ function fail(reply: FastifyReply, error: unknown) {
   return replyArtifactReviewError(reply, error);
 }
 
+const streamedCommandBytes = new WeakMap<FastifyRequest, number>();
+const measureCommandBody: preParsingAsyncHookHandler = async (request, _reply, payload) => {
+  // Fastify rejects these at the headers without subscribing to a replacement
+  // stream. Leave that early path intact rather than emitting an unhandled error.
+  if (Number(request.headers['content-length']) > MAX_HTML_WORK_COMMAND_BYTES) return payload;
+  let bytes = 0;
+  return payload.pipe(
+    new Transform({
+      transform(chunk, _encoding, callback) {
+        bytes += Buffer.byteLength(chunk);
+        streamedCommandBytes.set(request, bytes);
+        if (bytes > MAX_HTML_WORK_COMMAND_BYTES) return callback(new errorCodes.FST_ERR_CTP_BODY_TOO_LARGE());
+        callback(null, chunk);
+      },
+    }),
+  );
+};
+
+const enforceCommandLimit: preValidationAsyncHookHandler = async (request, reply) => {
+  const error = workCommandInputError(request.body, streamedCommandBytes.get(request) ?? 0);
+  if (error) return reply.code(error === 'work_command_too_large' ? 413 : 400).send({ error });
+};
+
 export async function registerLivingWorkRoutes(
   app: FastifyInstance,
   deps: {
@@ -86,7 +124,12 @@ export async function registerLivingWorkRoutes(
     contexts?: WorkVideoContextService;
   },
 ) {
-  app.post('/api/works/command', { bodyLimit: 32 * 1024 }, async (request, reply) => {
+  const commandBodyOptions = {
+    bodyLimit: MAX_HTML_WORK_COMMAND_BYTES,
+    preParsing: measureCommandBody,
+    preValidation: enforceCommandLimit,
+  };
+  app.post('/api/works/command', commandBodyOptions, async (request, reply) => {
     reply.header('Cache-Control', 'private, no-store');
     const human = directContentHuman(request);
     if (!human) return reply.code(401).send({ error: 'identity_required' });
@@ -99,7 +142,7 @@ export async function registerLivingWorkRoutes(
   });
   await app.register(async (scope) => {
     registerCallbackAuthHook(scope, deps.registry);
-    scope.post('/api/callbacks/work', { bodyLimit: 32 * 1024 }, async (request, reply) => {
+    scope.post('/api/callbacks/work', commandBodyOptions, async (request, reply) => {
       reply.header('Cache-Control', 'private, no-store');
       const authenticated = requireCallbackPrincipal(request, reply);
       if (!authenticated) return;

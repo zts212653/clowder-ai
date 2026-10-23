@@ -43,13 +43,22 @@ export class WorkCatalogue implements IndependentWorkCataloguePort {
       // List has already authorized these exact owner versions. Metadata changes no pagination coordinates.
       const production = this.contexts?.get(input.ownerUserId, item.reference)?.context.production;
       return {
-        type: item.description.mediaType === 'video/mp4' ? 'video' : 'file',
+        type:
+          item.description.mediaType === 'text/html'
+            ? 'widget'
+            : item.description.mediaType === 'video/mp4'
+              ? 'video'
+              : 'file',
         name: item.version.title,
         catId: item.revision.committedBy.kind === 'cat' ? item.revision.committedBy.actorId : null,
         createdAt,
         sourceMessageId: null,
         ref: item.reference.contentRef,
-        url: `/api/content-publications/${encodeURIComponent(item.reference.contentRef)}/media/${item.reference.ownerRevision}`,
+        ...(item.description.mediaType === 'text/html'
+          ? {}
+          : {
+              url: `/api/content-publications/${encodeURIComponent(item.reference.contentRef)}/media/${item.reference.ownerRevision}`,
+            }),
         work: {
           ...item.reference,
           currentOwnerRevision: item.currentOwnerRevision,

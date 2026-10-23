@@ -173,7 +173,8 @@ export function ThreadWorksPanelV2({ threadId, width, onClose, onSelectArtifact,
     else if (artifact.type === 'image' && artifact.url) setSelected(artifact);
     // 有精确坐标的 HTML 原块在 Works 内直接预览；interactive 卡片和旧数据没有坐标，
     // 仍回原消息处理（审批/选择必须在聊天里承载）。
-    else if (artifact.type === 'widget' && !(artifact.sourceMessageId && artifact.widgetBlockId)) jump(artifact);
+    else if (artifact.type === 'widget' && !artifact.work && !(artifact.sourceMessageId && artifact.widgetBlockId))
+      jump(artifact);
     else open(artifact);
   };
   const image = selected && active.artifacts.find((item) => workKey(item) === workKey(selected));

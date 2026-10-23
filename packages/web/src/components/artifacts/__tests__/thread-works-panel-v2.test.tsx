@@ -455,3 +455,31 @@ it('opens a coordinate-backed html_widget inside Works, but keeps an interactive
   expect(open).toHaveBeenCalledTimes(1);
   expect(useChatStore.getState().rightPanelOpen).toBe(false);
 });
+
+it('opens an independent HTML owner version through the original Works callback without inventing message coordinates', async () => {
+  const html: ThreadArtifactDTO = {
+    type: 'widget',
+    name: 'Owner HTML',
+    catId: 'codex61-sol',
+    createdAt: 1,
+    sourceMessageId: null,
+    ref: `work:${'d'.repeat(64)}`,
+    work: { contentRef: `work:${'d'.repeat(64)}`, ownerRevision: 2, currentOwnerRevision: 2 },
+  };
+  data.fetch.mockResolvedValue(
+    Response.json({
+      threadId: 'work-source',
+      artifacts: [html],
+      workLineage: 'resolved',
+      view: 'works',
+      complete: true,
+    }),
+  );
+  await act(async () => root.render(<ThreadWorksPanelV2 threadId="work-source" onSelectArtifact={open} />));
+  const card = host.querySelector<HTMLButtonElement>('[data-testid="workspace-home-artifact-card"]');
+  await act(async () => card?.click());
+  expect(open).toHaveBeenCalledWith(
+    expect.objectContaining({ work: html.work, sourceMessageId: null }),
+    expect.objectContaining({ kind: 'artifact-list' }),
+  );
+});
