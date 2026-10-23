@@ -145,6 +145,32 @@ export async function createInboxOriginalApprovalFixture(language) {
           before,
           after,
           adapters: [new F225ApprovalAdapter(handoffs), new F231ApprovalAdapter(profiles)],
+          createExpired() {
+            const thread = threads.create(owner, 'Expired handoff original', 'default');
+            const origin = messages.append({
+              userId: owner,
+              threadId: thread.id,
+              from: { kind: 'user', userId: owner },
+              content: 'Controlled expiry source',
+              timestamp: Date.now(),
+            });
+            const session = sessions.create({ threadId: thread.id, userId: owner, catId: 'codex61-sol' });
+            const proposal = handoffs.create({
+              userId: owner,
+              sourceThreadId: thread.id,
+              sourceSessionId: session.id,
+              sourceCatId: 'codex61-sol',
+              sourceMessageId: origin.id,
+              note: {
+                done: 'Controlled closed original',
+                nextSteps: language === 'en' ? 'Continue the accepted verification.' : '继续已接受的验证。',
+              },
+            });
+            publish(handoffs, proposal, 'F225', buildHandoffProposalCardBlock(proposal), thread, origin);
+            const record = records.pop();
+            assert.equal(handoffs.markExpired(proposal.proposalId).status, 'expired');
+            return record;
+          },
           async readProfile() {
             const content = await readFile(file, 'utf8');
             assert.ok(content === before || content === after);

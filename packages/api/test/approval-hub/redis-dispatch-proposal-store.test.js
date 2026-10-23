@@ -117,6 +117,65 @@ describe('RedisDispatchProposalStore', { skip: redisIsolationSkipReason(REDIS_UR
     targetCats: ['sonnet'],
   };
 
+  async function historyUntilPrepared(subject = store) {
+    for (let batch = 0; batch < 30; batch++) {
+      try {
+        return await subject.listSettledByUser('user-1', 10);
+      } catch (error) {
+        if (error.code !== 'APPROVAL_HISTORY_PREPARING') throw error;
+      }
+    }
+    throw new Error('bounded history preparation did not complete');
+  }
+
+  it('indexes supersession atomically and removes the closure when staged publication rolls back', async () => {
+    await store.create({ ...baseInput, proposalId: 'closed-old', createdAt: 1000 });
+    await anchor('closed-old');
+    await store.create({ ...baseInput, proposalId: 'closed-new', createdAt: 2000 });
+    assert.equal(await redis.zscore('dispatch-proposal-user-settled:user-1', 'closed-old'), '2000');
+    const [row] = await historyUntilPrepared(new RedisDispatchProposalStore(redis));
+    assert.equal(row?.status, 'superseded');
+    assert.equal(row.supersededAt, 2000);
+    assert.equal(row.decidedBy, undefined);
+    await store.abortStaged('closed-new', 'publication failed');
+    assert.equal((await store.get('closed-old')).status, 'pending');
+    assert.equal(await redis.zscore('dispatch-proposal-user-settled:user-1', 'closed-old'), null);
+    assert.deepEqual(await historyUntilPrepared(), []);
+  });
+
+  it('cold-backfills legacy superseded history without inventing a decider or allowing a response', async () => {
+    await store.create({ ...baseInput, proposalId: 'legacy-old', createdAt: 1000 });
+    await anchor('legacy-old');
+    await store.create({ ...baseInput, proposalId: 'legacy-new', createdAt: 2000 });
+    await anchor('legacy-new');
+    await redis.hdel('dispatch-proposal:legacy-old', 'supersededAt');
+    await redis.del('dispatch-proposal-user-settled:user-1');
+    const [row] = await historyUntilPrepared(new RedisDispatchProposalStore(redis));
+    assert.equal(row?.proposalId, 'legacy-old');
+    assert.equal(row.supersededAt, 2000);
+    assert.equal(row.decidedBy, undefined);
+    assert.equal(await store.approve('legacy-old', 'user-1', 'strict'), null);
+    await redis.del('dispatch-proposal:legacy-new');
+    const [unknownTime] = await historyUntilPrepared();
+    assert.equal(unknownTime.supersededAt, 0, 'a missing successor cannot supply a fabricated closure date');
+  });
+
+  it('retains delivery-failure supersession as a closure instead of removing its historical member', async () => {
+    await store.create({ ...baseInput, proposalId: 'delivery-old', createdAt: 1000 });
+    await anchor('delivery-old');
+    await store.approve('delivery-old', 'user-1', 'strict');
+    await store.create({ ...baseInput, proposalId: 'delivery-new', createdAt: 2000 });
+    await anchor('delivery-new');
+    await store.revertToPending('delivery-old');
+    const [row] = await historyUntilPrepared();
+    assert.equal(row?.status, 'superseded');
+    assert.ok(row.supersededAt >= 2000);
+    assert.equal(row.decidedBy, undefined);
+    await redis.hdel('dispatch-proposal:delivery-old', 'supersededAt');
+    const [legacyRollback] = await historyUntilPrepared();
+    assert.equal(legacyRollback.supersededAt, 0, 'a legacy delivery rollback did not close at successor creation time');
+  });
+
   // --- create (Phase J: CreateDispatchProposalResult) ---
 
   it('create → returns { proposal, supersededProposals } shape', async () => {

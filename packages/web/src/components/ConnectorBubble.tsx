@@ -238,7 +238,11 @@ export function ConnectorBubble({
           refreshKey={holdStatusRefreshKey}
         />
       ) : hasBlocks ? (
-        <ContentBlocks blocks={message.contentBlocks!} publication={publication} />
+        <ContentBlocks
+          blocks={message.contentBlocks!}
+          publication={publication}
+          messageSource={threadId ? { threadId, messageId: message.id } : undefined}
+        />
       ) : unknownFeedback ? (
         <p className="text-xs text-cafe-muted">{t.unknown}</p>
       ) : withdrawnFeedback ? null : source.connector === HOST_CONTENT_REVIEW_CONNECTOR ? (

@@ -20,10 +20,15 @@ export function finalizeRedisProposalApproval(
       (raw.createdThreadId && raw.createdThreadId !== input.createdThreadId)
     )
       return null;
+    const indexKey = ProposalKeys.userSettled(raw.createdBy);
+    await session.watch(indexKey);
+    const indexType = await session.type(indexKey);
+    if (indexType !== 'none' && indexType !== 'zset') throw new Error('proposal history index type conflict');
     const updated = applyFinalize(hydrateProposal(raw), input, Date.now());
     const results = await session
       .multi()
       .hset(key, ...finalizedProposalFields(updated))
+      .zadd(indexKey, updated.approvedAt!, updated.proposalId)
       .exec();
     if (!results) return null;
     const error = results.find(([err]) => err)?.[0];

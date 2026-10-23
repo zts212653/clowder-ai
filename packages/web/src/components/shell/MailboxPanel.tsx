@@ -11,6 +11,7 @@ import { MailboxPeriodFilter } from './mailbox/MailboxPeriodFilter';
 import { MailboxPersonalNotice } from './mailbox/MailboxPersonalNotice';
 import { MailboxReadNotes } from './mailbox/MailboxReadNotes';
 import { MailboxRow } from './mailbox/MailboxRow';
+import { MailboxSettledResults } from './mailbox/MailboxSettledResults';
 import { mailboxEntryCopy } from './mailbox/mailbox-entry.shell-copy';
 import type { MailboxSection } from './mailbox/mailbox-navigation';
 import { type MailboxDisplayRow, useMailboxRows } from './mailbox/mailbox-rows';
@@ -275,6 +276,25 @@ export function MailboxPanel({
             <ul className="m-0 flex list-none flex-col gap-2 p-0">{rows.map(renderRow)}</ul>
           ) : null}
           <MailboxPagination read={read} onNextPage={view.nextPage} onPreviousPage={view.previousPage} />
+          {section === 'pending' && ownerUserId ? (
+            <MailboxSettledResults
+              key={ownerUserId}
+              ownerUserId={ownerUserId}
+              generation={view.resultGeneration}
+              verifyCurrent={() => view.resultGeneration === view.readsStarted()}
+              excludedKeys={rows.map((row) =>
+                row.kind === 'retained'
+                  ? row.key
+                  : row.item.approval
+                    ? row.key
+                    : row.item.runtimeInteraction
+                      ? JSON.stringify(['F306', row.item.runtimeInteraction.interactionId])
+                      : row.item.choiceRequest
+                        ? JSON.stringify(['F306', row.item.choiceRequest.interactionId])
+                        : row.key,
+              )}
+            />
+          ) : null}
           {canRetry ? (
             <div className="pt-1.5">
               <button

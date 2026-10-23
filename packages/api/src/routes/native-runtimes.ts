@@ -29,7 +29,7 @@ export function safeNativeStartup(command: string, startupArgs: readonly string[
   );
 }
 /** Discovery is read-only. No auth files, full agent launches, prompts or login probes. */
-export function discoverNativeRuntimes(projectRoot: string) {
+export function discoverNativeRuntimes(projectRoot: string, commandFor = resolveCliCommand) {
   const home = homedir();
   const codex = metadata(join(process.env.CODEX_HOME || join(home, '.codex'), 'config.toml'), true);
   const claude = metadata(join(process.env.CLAUDE_CONFIG_DIR || join(home, '.claude'), 'settings.json'));
@@ -39,7 +39,7 @@ export function discoverNativeRuntimes(projectRoot: string) {
       ['claude', 'Claude Code', 'anthropic'],
     ] as const
   ).map(([id, label, clientId]) => {
-    const command = resolveCliCommand(id);
+    const command = commandFor(id);
     const configuredModel = text(id === 'codex' ? codex.model : claude.model);
     const configuredEffort = text(id === 'codex' ? codex.model_reasoning_effort : claude.effortLevel);
     const models = new Set<string>();
@@ -63,7 +63,8 @@ export function discoverNativeRuntimes(projectRoot: string) {
   const acp = Object.values(catRegistry.getAllConfigs()).flatMap((cat) => {
     const config = getAcpConfig(cat.id, projectRoot);
     if (!config || (cat.agentProvider !== undefined ? cat.agentProvider : config.agentProvider)) return [];
-    const command = isAbsolute(config.command) ? config.command : resolveCliCommand(config.command);
+    const command = isAbsolute(config.command) ? config.command : commandFor(config.command);
+    const agy = cat.clientId === 'google' && cat.agyProfile?.carrier === 'acp';
     const entry = config.startupArgs.find((arg) => /(?:\.m?js|\.cjs)$/.test(arg));
     const installed = Boolean(command && existsSync(command) && (!entry || existsSync(resolve(projectRoot, entry))));
     const profileState = dshLauncherProfileState(config.command, config.startupArgs, projectRoot);
@@ -71,8 +72,13 @@ export function discoverNativeRuntimes(projectRoot: string) {
     return [
       {
         id: `acp:${cat.id}`,
-        label: /dsh|deepseek/i.test([config.command, ...config.startupArgs].join(' ')) ? 'DSH' : cat.displayName,
-        clientId: 'acp',
+        label: agy
+          ? 'AGY 官方 ACP'
+          : /dsh|deepseek/i.test([config.command, ...config.startupArgs].join(' '))
+            ? 'DSH'
+            : cat.displayName,
+        clientId: agy ? 'google' : 'acp',
+        ...(agy ? { agyCarrier: 'acp' as const } : {}),
         installed,
         ...(profileState && profileState !== 'custom_startup'
           ? { discoveryStatus: installed ? profileState : 'not_installed' }
@@ -93,8 +99,32 @@ export function discoverNativeRuntimes(projectRoot: string) {
   const dsh = acp.some((runtime) => runtime.label === 'DSH' && runtime.installed && runtime.acp)
     ? []
     : [discoverDshRuntime()];
+  const agyModels = Object.values(catRegistry.getAllConfigs())
+    .filter((cat) => cat.clientId === 'google' && cat.agyProfile?.enabled)
+    .flatMap((cat) => (cat.agyProfile?.model ? [cat.agyProfile.model] : []));
+  const agy = (
+    [
+      ['agy-native', 'AGY Native', 'agy', 'native'],
+      ...(!acp.some((runtime) => 'agyCarrier' in runtime)
+        ? [['agy-acp', 'AGY 官方 ACP', 'agy_acp_server.par', 'acp'] as const]
+        : []),
+    ] as const
+  ).map(([id, label, executable, agyCarrier]) => {
+    const command = commandFor(executable);
+    return {
+      id,
+      label,
+      clientId: 'google',
+      agyCarrier,
+      command: command ?? undefined,
+      installed: Boolean(command),
+      models: [...new Set(agyModels)],
+      defaultsStatus: 'configured_only',
+      ...(agyCarrier === 'acp' ? { acp: { command: executable, startupArgs: [], transport: 'stdio' as const } } : {}),
+    };
+  });
   return {
-    runtimes: [...builtins, ...acp, ...dsh, ...discoverAdditionalRuntimes(home)],
+    runtimes: [...builtins, ...acp, ...dsh, ...agy, ...discoverAdditionalRuntimes(home, commandFor)],
     authenticationStatus: 'not_checked',
   };
 }

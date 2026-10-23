@@ -150,6 +150,106 @@ describe('RedisRuntimeInteractionStore', { skip }, () => {
     assert.equal(await redis.pttl(RuntimeInteractionKeys.detail(request.interactionId)), -1);
   });
 
+  it('backfills owner history from legacy terminal hashes, with prefixed keys and TTL=0', async () => {
+    const historyIds = ['history-old', 'history-new', 'history-foreign'];
+    for (const [index, interactionId] of historyIds.entries()) {
+      const legacyRequest = {
+        ...request,
+        interactionId,
+        owner: { ...request.owner, userId: interactionId === 'history-foreign' ? 'other-owner' : 'history-owner' },
+        provider: { ...request.provider, requestId: interactionId },
+      };
+      await redis.hset(RuntimeInteractionKeys.detail(interactionId), {
+        request: JSON.stringify(legacyRequest),
+        status: 'answered',
+        hostEpoch: 'old-process',
+        cardRef: JSON.stringify({
+          threadId: 'thread-1',
+          messageId: interactionId,
+          blockId: `runtime-interaction:${interactionId}`,
+        }),
+        terminal: JSON.stringify({ status: 'answered', reasonCode: 'answered', settledAt: 1200 + index }),
+        updatedAt: String(1200 + index),
+      });
+    }
+    const before = await Promise.all(historyIds.map((id) => redis.hgetall(RuntimeInteractionKeys.detail(id))));
+    const results = await store2.listSettledByUser('history-owner', 1);
+    assert.deepEqual(
+      results.map((record) => record.request.interactionId),
+      ['history-new'],
+    );
+    assert.equal(results[0].revision, 1, 'legacy canonical records remain readable without migrations');
+    assert.deepEqual(
+      (await store2.listSettledByUser('history-owner', 5)).map((record) => record.request.interactionId),
+      ['history-new', 'history-old'],
+    );
+    assert.deepEqual(await store2.listSettledByUser('never-an-owner', 5), []);
+    assert.deepEqual(
+      await Promise.all(historyIds.map((id) => redis.hgetall(RuntimeInteractionKeys.detail(id)))),
+      before,
+      'derived history indexes never change canonical records',
+    );
+    for (const id of historyIds) assert.equal(await redis.pttl(RuntimeInteractionKeys.detail(id)), -1);
+  });
+
+  it('bounds legacy history preparation and warm reads independently of historical size', async () => {
+    const writes = redis.pipeline();
+    for (let i = 0; i < 601; i++) {
+      const id = `scale-history-${i}`;
+      writes.hset(RuntimeInteractionKeys.detail(id), {
+        request: JSON.stringify({ ...request, interactionId: id, owner: { ...request.owner, userId: 'scale-owner' } }),
+        status: 'answered',
+        hostEpoch: 'old',
+        updatedAt: String(2000 + i),
+        terminal: JSON.stringify({ status: 'answered', reasonCode: 'answered', settledAt: 2000 + i }),
+        cardRef: JSON.stringify({ threadId: 'thread-1', messageId: id, blockId: `runtime-interaction:${id}` }),
+      });
+    }
+    await writes.exec();
+    await redis.del('runtime-interaction:history-index:v1');
+    let detailReads = 0;
+    const original = { multi: redis.multi, pipeline: redis.pipeline, scan: redis.scan };
+    let scans = 0;
+    for (const method of ['multi', 'pipeline'])
+      redis[method] = function (...args) {
+        const pipeline = original[method].apply(this, args);
+        const read = pipeline.hgetall;
+        pipeline.hgetall = function (...args) {
+          detailReads++;
+          return read.apply(this, args);
+        };
+        return pipeline;
+      };
+    redis.scan = function (...args) {
+      scans++;
+      return original.scan.apply(this, args);
+    };
+    try {
+      let result;
+      for (let round = 0; round < 30 && !result; round++) {
+        detailReads = 0;
+        try {
+          result = await store2.listSettledByUser('scale-owner', 1);
+        } catch (error) {
+          assert.match(String(error), /history is being prepared/);
+        }
+        assert.ok(detailReads <= 201, `one read used ${detailReads} detail reads`);
+      }
+      assert.deepEqual(
+        result?.map((r) => r.request.interactionId),
+        ['scale-history-600'],
+      );
+      detailReads = 0;
+      scans = 0;
+      assert.equal((await store.listSettledByUser('scale-owner', 1)).length, 1);
+      assert.equal(scans, 0, 'warm reads never SCAN');
+      assert.equal(detailReads, 1, 'warm reads load only the requested owner window');
+      assert.equal((await store.listSettledByUser('foreign-owner', 1)).length, 0);
+    } finally {
+      Object.assign(redis, original);
+    }
+  });
+
   it('atomically rejects a second active interaction for one invocation', async () => {
     const first = {
       ...request,

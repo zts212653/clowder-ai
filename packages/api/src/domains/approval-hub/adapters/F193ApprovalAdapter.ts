@@ -61,7 +61,7 @@ function toItem(p: DispatchProposal): ApprovalItem | null {
 }
 
 function toSettledItem(p: DispatchProposal): SettledApprovalItem | null {
-  if (p.status !== 'approved' && p.status !== 'rejected') {
+  if (p.status !== 'approved' && p.status !== 'rejected' && p.status !== 'superseded') {
     throw new Error(`toSettledItem: unexpected status ${p.status} for proposal ${p.proposalId}`);
   }
   const navigation = projectApprovalNavigation(p, {
@@ -82,10 +82,14 @@ function toSettledItem(p: DispatchProposal): SettledApprovalItem | null {
       content: p.content,
       effectClass: p.effectClass,
       ...actionDetail(p),
+      ...(!(p.status === 'superseded' ? p.supersededAt : p.decidedAt) ? { closureTimeUnknown: true } : {}),
+      ...(p.status === 'approved' && p.deliveredMessageId
+        ? { canonicalEffectProofRef: `dispatch-message:${p.deliveredMessageId}` }
+        : {}),
     },
     navigation,
-    decidedAt: p.decidedAt ?? 0,
-    decidedBy: p.decidedBy ?? '',
+    decidedAt: p.status === 'superseded' ? (p.supersededAt ?? 0) : (p.decidedAt ?? 0),
+    decidedBy: p.status === 'superseded' ? '' : (p.decidedBy ?? ''),
     createdAt: p.createdAt,
   };
 }

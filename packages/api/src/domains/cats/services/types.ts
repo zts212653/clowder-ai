@@ -909,8 +909,8 @@ export interface AgentContextBinding {
 
 /** Provider-native identity for one exact, still-open Agent Client run. */
 export interface AgentClientActiveRunHandle {
-  readonly provider: 'openai_codex' | 'anthropic' | 'anthropic_acp' | 'opencode' | 'other';
-  readonly carrier: 'codex_app_server' | 'claude_agent_sdk' | 'acp' | 'other';
+  readonly provider: 'openai_codex' | 'anthropic' | 'anthropic_acp' | 'opencode' | 'google' | 'other';
+  readonly carrier: 'codex_app_server' | 'claude_agent_sdk' | 'acp' | 'agy_stream_json' | 'other';
   readonly threadId: string;
   readonly turnId: string;
 }
@@ -924,6 +924,8 @@ export interface AgentClientDispatchInput {
   readonly deliveryId?: string;
   /** Exact adapter evidence; delivery and Stop never wait for this callback. */
   readonly onInputRead?: () => Promise<void>;
+  /** Queued internal turns retain Queue custody until their own terminal result. */
+  readonly onInputCompleted?: (completed: boolean) => Promise<void>;
 }
 
 export interface AgentClientDispatchOptions {
@@ -953,7 +955,12 @@ export type AgentClientDispatchResult =
 /** Live-only adapter. Durable Queue/History state must never be stored here. */
 export interface AgentClientActiveRunDispatcher {
   readonly invocationId: string;
-  readonly capabilities: { readonly append: boolean; readonly steer: boolean; readonly inputReadReceipt?: boolean };
+  readonly capabilities: {
+    readonly append: boolean;
+    readonly steer: boolean;
+    readonly inputReadReceipt?: boolean;
+    readonly inputCompletionReceipt?: boolean;
+  };
   readonly handle: AgentClientActiveRunHandle;
   /** Exact native consumption of this run’s first input; never awaited by delivery or Stop. */
   readonly initialInputRead?: Promise<number>;

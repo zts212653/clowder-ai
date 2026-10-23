@@ -79,6 +79,7 @@ function toSettledItem(record: EvalRepairApprovalRecord, userId: string): Settle
   ) {
     return null;
   }
+  const resultTime = record.supersededByCaseActionRef ? record.closedAt : record.decidedAt;
   return {
     proposalId: proposal.proposalId,
     sourceFeatureId: 'F266',
@@ -88,6 +89,7 @@ function toSettledItem(record: EvalRepairApprovalRecord, userId: string): Settle
     summary: proposal.summary,
     detail: {
       ...proposal.detail,
+      ...(!resultTime ? { closureTimeUnknown: true } : {}),
       ...(record.materialization
         ? { canonicalEffectProofRef: record.materialization.custodyReceiptRef.ownerStateRef }
         : {}),
@@ -99,8 +101,8 @@ function toSettledItem(record: EvalRepairApprovalRecord, userId: string): Settle
     },
     decisionMode: 'approve-reject',
     createdAt: Date.parse(proposal.occurredAt),
-    decidedAt: Date.parse(record.decidedAt ?? proposal.occurredAt),
-    decidedBy: record.decision?.decidedByUserId ?? 'eval-repair-materializer',
+    decidedAt: resultTime ? Date.parse(resultTime) : 0,
+    decidedBy: record.supersededByCaseActionRef ? '' : (record.decision?.decidedByUserId ?? ''),
   };
 }
 

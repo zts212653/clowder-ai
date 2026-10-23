@@ -26,7 +26,7 @@ import {
   rebaseMemberDraft,
   templateForm,
 } from './member-editor-state';
-import { type RuntimeChoice, switchMemberRuntime } from './member-runtime-draft';
+import { patchMemberRuntime, type RuntimeChoice, switchMemberRuntime } from './member-runtime-draft';
 import { useMemberSaveTrace } from './useMemberSaveTrace';
 
 async function readResponse<T>(response: Response): Promise<T> {
@@ -183,7 +183,7 @@ export function useMemberEditor(
 
   const patch = useCallback((change: Partial<HubCatEditorFormState>) => {
     setNotice(null);
-    setDraft((previous) => ({ ...previous, form: { ...previous.form, ...change } }));
+    setDraft((previous) => patchMemberRuntime(previous, change));
   }, []);
   const switchRuntime = (next: RuntimeChoice) => {
     setNotice(null);

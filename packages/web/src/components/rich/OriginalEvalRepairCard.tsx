@@ -11,6 +11,7 @@ import { CardBlock } from './CardBlock';
 import { EvalRepairApprovalCard } from './EvalRepairApprovalCard';
 import { evalRepairCopy } from './eval-repair.shell-copy';
 import { evalRepairCandidate } from './eval-repair-model';
+import { ReconciledApprovalResult } from './ReconciledApprovalResult';
 import { type RepairCoordinate, readEvalRepairPending, readEvalRepairResult } from './read-eval-repair';
 
 /** The original published card uses the same canonical source/writer. Recognition and UI state confer no authority. */
@@ -75,9 +76,32 @@ export function OriginalEvalRepairCard({ block, coordinate }: { block: RichCardB
       writing.current = event.phase === 'start';
     },
   };
+  if (result) {
+    const line =
+      describeReconcile(
+        { kind: 'decided', terminal: result.terminal },
+        {
+          language,
+          ownerUserId: result.ownerUserId,
+          originalEffect: result.effect,
+        },
+      ).line ?? '';
+    return (
+      <ApprovalHostContext.Provider value={host}>
+        <div data-testid="eval-repair-result">
+          <ReconciledApprovalResult terminal={result.terminal} line={line}>
+            <CardBlock block={{ ...block, actions: undefined }} />
+            <button type="button" className="shell-focusable text-xs hover:underline" onClick={() => void refresh()}>
+              {t.reread}
+            </button>
+          </ReconciledApprovalResult>
+        </div>
+      </ApprovalHostContext.Provider>
+    );
+  }
   return (
     <ApprovalHostContext.Provider value={host}>
-      {last && !result ? (
+      {last ? (
         <EvalRepairApprovalCard
           item={last}
           beforeWrite={beforeWrite}
@@ -91,17 +115,7 @@ export function OriginalEvalRepairCard({ block, coordinate }: { block: RichCardB
           <CardBlock block={{ ...block, actions: undefined }} />
         </details>
       )}
-      {result ? (
-        <output data-testid="eval-repair-result" className="block text-sm">
-          {
-            describeReconcile(
-              { kind: 'decided', terminal: result.terminal },
-              { language, ownerUserId: result.ownerUserId, originalEffect: result.effect },
-            ).line
-          }
-        </output>
-      ) : null}
-      {!current && !result ? <p className="text-xs text-[var(--shell-muted)]">{t.unverified}</p> : null}
+      {!current ? <p className="text-xs text-[var(--shell-muted)]">{t.unverified}</p> : null}
       <button
         type="button"
         className="shell-nav-row shell-focusable rounded px-2 py-1 text-xs"

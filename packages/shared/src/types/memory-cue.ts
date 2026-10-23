@@ -4,6 +4,30 @@ import { contextSourcePayloadV1Schema } from './memory-cue-context.js';
 
 export const RECALL_OPPORTUNITY_CATALOG_VERSION = 7 as const;
 
+/** A selector within an already authenticated, revision-pinned canonical document. */
+export const memoryCueDocumentWindowRequestSchema = z
+  .object({
+    offset: z
+      .number()
+      .int()
+      .min(0)
+      .max(Number.MAX_SAFE_INTEGER)
+      .optional()
+      .describe('Zero-based UTF-16 code-unit offset; use nextOffset from the previous page.'),
+    query: z
+      .string()
+      .trim()
+      .min(1)
+      .max(200)
+      .optional()
+      .describe('Case-insensitive literal phrase or heading to locate in this document (1–200 characters).'),
+  })
+  .strict()
+  .refine((value) => value.offset === undefined || value.query === undefined, {
+    message: 'Use either offset (for example 4000) or query (for example "Release sequence"), not both.',
+  });
+export type MemoryCueDocumentWindowRequest = z.infer<typeof memoryCueDocumentWindowRequestSchema>;
+
 export const RECALL_RESOLVER_FAMILIES = [
   'person_entity',
   'operational_precedent',

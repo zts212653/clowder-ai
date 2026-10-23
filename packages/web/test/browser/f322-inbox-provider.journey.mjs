@@ -3,6 +3,13 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { openProviderHost } from './f322-inbox-provider-host.fixture.mjs';
 
+function providerRow(page, interactionId, kind) {
+  // Approval Hub/runtime aliases collapse to the canonical approval identity; other provider requests retain their F306 key.
+  const key =
+    kind === 'approval' ? JSON.stringify(['F306', interactionId]) : `f306.runtime_interaction:${interactionId}`;
+  return page.locator(`[data-testid="mailbox-item"][data-row-key='${key}']`);
+}
+
 /** The original provider, card and HTTP writer on both actual Next surfaces. */
 export async function verifyProviderCards({ t, language, width, root }) {
   const evidence = path.join(root, 'provider', `${language}-${width}`);
@@ -14,10 +21,7 @@ export async function verifyProviderCards({ t, language, width, root }) {
   for (const entry of entries) {
     if (entry.surface === 'inbox' && !(await page.getByTestId('mailbox-close').isVisible()))
       await page.getByTestId('mailbox-button').click();
-    const row =
-      entry.surface === 'inbox'
-        ? page.getByTestId('mailbox-item').filter({ hasText: entry.pending.request.title })
-        : null;
+    const row = entry.surface === 'inbox' ? providerRow(page, entry.pending.request.interactionId, entry.kind) : null;
     const card = row
       ? row.getByTestId('runtime-interaction-card')
       : page.locator(
@@ -96,7 +100,48 @@ export async function verifyProviderCards({ t, language, width, root }) {
     const posted = posts.filter((post) => post.path.includes(entry.pending.request.interactionId));
     assert.equal(posted.length, 1);
     assert.deepEqual(posted[0].body, { cardRef: entry.pending.cardRef, response: expected });
-    results.push({ surface: entry.surface, kind: entry.kind, initial: entry.pending, terminal, expected, bounds });
+    const result = card.getByTestId('decision-result-row');
+    await result.getByTestId('decision-result-label').waitFor();
+    const label = await result.getByTestId('decision-result-label').innerText();
+    assert.match(
+      label,
+      entry.kind === 'url' ? (language === 'en' ? /Declined/ : /已拒绝/) : language === 'en' ? /Approved/ : /已同意/,
+    );
+    assert.equal(
+      await result.getByTestId('decision-result-dot').getAttribute('data-status'),
+      entry.kind === 'url' ? 'rejected' : 'approved',
+    );
+    if (entry.kind === 'question') {
+      assert.match(label, /Alpha/);
+      assert.deepEqual(terminal.terminal.response.selectedOptionIndexes, { environment: [0] });
+      assert.equal(Object.hasOwn(terminal.terminal.response, 'answers'), false);
+    }
+    assert.equal(await result.getByTestId('decision-result-details').count(), 0);
+    assert.equal(await result.evaluate((el) => el.scrollWidth <= el.clientWidth + 1), true);
+    await card.screenshot({ path: path.join(evidence, `${entry.surface}-${entry.kind}-result.png`) });
+    await result.locator('button[aria-expanded=false]').click();
+    const details = result.getByTestId('decision-result-details');
+    await details.waitFor();
+    if (entry.kind === 'question')
+      await details.getByText(entry.pending.request.questions[0].question, { exact: true }).waitFor();
+    if (entry.kind === 'form' || entry.kind === 'url')
+      await details.getByText(entry.pending.request.message, { exact: true }).waitFor();
+    if (entry.kind === 'form')
+      await details.getByText(language === 'en' ? 'Enabled' : '启用', { exact: true }).waitFor();
+    assert.equal(await details.locator('input, select, textarea, form').count(), 0);
+    if (entry.kind === 'url') assert.equal(await details.locator('a').count(), 0, 'Declined URL stays read-only');
+    assert.equal(await result.evaluate((el) => el.scrollWidth <= el.clientWidth + 1), true);
+    await card.screenshot({ path: path.join(evidence, `${entry.surface}-${entry.kind}-details.png`) });
+    await result.locator('button[aria-expanded=true]').click();
+    results.push({
+      surface: entry.surface,
+      kind: entry.kind,
+      initial: entry.pending,
+      terminal,
+      expected,
+      bounds,
+      resultLabel: label,
+    });
   }
   assert.equal(posts.length, 8);
   if (await page.getByTestId('mailbox-close').isVisible()) await page.getByTestId('mailbox-close').click();
@@ -119,12 +164,27 @@ export async function verifyProviderCards({ t, language, width, root }) {
           : language === 'en'
             ? 'Request handled.'
             : '请求已处理。';
-    await card.getByText(terminalText, { exact: true }).waitFor();
-    assert.equal(await card.locator('button').count(), 0);
+    await card.getByTestId('decision-result-label').waitFor();
+    assert.equal(await card.getByTestId('decision-result-details').count(), 0);
+    assert.equal(await card.locator('button').count(), 1, 'Only the result disclosure remains');
+    await card.locator('button[aria-expanded=false]').click();
+    const details = card.getByTestId('decision-result-details');
+    await details.getByText(terminalText, { exact: true }).waitFor();
+    assert.equal(await details.locator('button').count(), 0, 'Disclosure must never restore a provider writer');
   }
   await page.getByTestId('mailbox-button').click();
-  for (const entry of entries)
-    assert.equal(await page.getByTestId('mailbox-item').filter({ hasText: entry.pending.request.title }).count(), 0);
+  for (const entry of entries) {
+    assert.equal(await providerRow(page, entry.pending.request.interactionId, entry.kind).count(), 0);
+    const result = page.locator(
+      `[data-testid="mailbox-settled-result"][data-decision-key='${JSON.stringify(['F306', entry.pending.request.interactionId])}']`,
+    );
+    await result.getByTestId('decision-result-label').waitFor();
+    if (entry.kind === 'question') assert.match(await result.innerText(), /Alpha/);
+    assert.equal(await result.getByTestId('decision-result-details').count(), 0);
+    await result.locator('button[aria-expanded=false]').click();
+    assert.equal(await result.locator('input,select,textarea,form').count(), 0);
+    await result.screenshot({ path: path.join(evidence, `${entry.surface}-${entry.kind}-reloaded-inbox.png`) });
+  }
   assert.equal((await f.store.readPendingIndexByUser('default-user')).records.length, 0);
   assert.deepEqual(f.queue.list(f.conversationThread.id, 'default-user'), []);
   assert.equal(f.mutations.filter((m) => m.path.endsWith('/messages') || m.path.includes('block-state')).length, 0);

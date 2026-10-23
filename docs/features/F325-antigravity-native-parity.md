@@ -1,6 +1,6 @@
 ---
 feature_ids: [F325]
-tips_exempt: "Renewed 2026-10-17 after merged native finish and live identity verification: This records repair toward normal member capability parity and still-incomplete acceptance, not a newly usable public entry. The former Task-only tool/file restrictions are not the product goal; add user-facing discovery when the complete working path is delivered and verified."
+tips_exempt: "Renewed 2026-10-23 for the member tool discovery regression: restoring existing AGY Native/official ACP identification and saved bindings in the existing Members settings page, not adding a new capability or guide. Overall parity and natural-use limits remain recorded separately."
 related_features: [F053, F061, F143, F149, F161, F174, F178, F194, F201, F203, F210, F211, F241, F254, F261, F286, F296, F299, F306, F318, F320, F323, F324]
 topics: [antigravity, acp, native-carrier, parity, migration, managed-job]
 doc_kind: spec
@@ -120,6 +120,26 @@ ACP 原生 L0 缺口已证；You 已选择保留个人 OAuth 与原生 L0，继�
 #### Open issue：Native 命令长时间静默 {#native-command-stall}
 
 - 状态：open，底层工具未返回的直接原因未知；Native 漏传 livenessProbe、观察器丢弃 warning 的呈现缺口已修复并加载。
+
+#### 工作单元：Native CLI 同进程续轮（Claude SDK 档）{#native-same-process-followup}
+
+- **来源 / 分工**：You source1329（`private-source-id`）。Sol6.1（@codex61-sol）写代码，Argon（@gemini-argon）独立审查，印印（@agy-opus55）指挥并在合入后最终验收。官方 ACP 的插话下一轮再做，本单不碰。
+- **目标**：AGY 猫正在运行时，同一 thread 里发给它的新消息不必再等这次运行结束、下次被叫起来才看到，而是写进同一个 AGY 进程，在当前这一轮结束后的下一轮处理。能力声明对齐 Claude SDK：`deliverySemantics: 'queued_internal_turn'`、`activeInvocationGuidance: 'supported'`。
+  - 上游支持：agy 1.4.5 `--input-format stream-json` 下，stdin 每进来一条消息就跑一轮、各出一个 `result`，关掉 stdin 后进程正常退出。运行中写入的消息会作为下一轮的 `user_input` step 被读到。
+  - 宿主有三处限制：`AgyNativeAgentService.ts` 的 `archiveNativeStream` 收到第一个 `result` 就关 stdin（L51）；`agy-native-turn.ts` 遇到第二个 result 就报错（L44），result 之后出现的 init/step 也会被拒（L79、L96）；能力写死成 `unsupported`（`AgyNativeAgentService.ts` L98-104）。
+  - 参照实现：`ClaudeSdkAgentService` 通过 `options.activeRunDispatch.register({ invocationId, capabilities, initialInputRead, handle, dispatch })` 接收运行中的消息（L182-215）。
+- **要做的**：
+  1. 调用里有 `activeRunDispatch` 时向它注册。能力写 `append: true`、`steer: false`、`inputReadReceipt: true`。stream-json 没有打断当前这一轮的接口，所以带 `force` 的请求要拒绝，不能假装支持。
+  2. `dispatch` 把消息编码成下一条 stream-json user 消息写进 stdin。只有看到对应的 `user_input` step DONE，才发"已读"回执（`onInputRead`）；写进 stdin 不算已读。
+  3. stdin 何时关：收到 result 时，如果还有已接受、但还没跑的消息，就不关；没有了才关 stdin，同时停止接收新消息。取消、报错、进程退出时立刻停止接收。
+  4. 一个进程多轮：观察器按轮切分。校验 init 只出现一次、`conversation_id` 不变；result 之后只允许接下一轮的 `user_input`。最后一轮结束才发 `done`。用量按轮计算，因为 result 里的用量是整个会话累计的。
+  5. `requestNativeCompaction`（`/compact`）和没有 `activeRunDispatch` 的调用，继续保持一问一答，行为不变。
+- **必须守住**（AC-B3）：
+  - 一条消息只有在它那一轮出了 SUCCESS result 后才算处理完。如果进程在那一轮出 result 前就结束、被取消或报错，这条消息要留在排队里，下一次调用照常处理，不能丢，也不能重复执行。
+  - A 的 result 已经出来、stdin 正在关的时候才到的消息，返回 `active_run_closed`，走现有排队，不能写进正在关闭的 stdin。
+  - 不读 `queuedMessages`，也不往 Profile 设置里加字段：实验已经证明它没用，宿主的设置白名单保持不变。认证、Profile、权限、MCP 凭据都不动；也不恢复已退役的"MCP 返回时顺带通知"（#1616）。
+- **验证**：先红后绿。用假 agy 进程（`spawnCliOverride` 或现有 `scripts/probes/f325-agy-native-*` 夹具）覆盖这几种情况：两轮都正常；A 运行中来了 B，随后 A 被取消；B 恰好在 A 的 result 之后到；第 2 轮报错；一问一答和 `/compact` 不回归。真实模型只由印印在合入加载后，用便宜模型走一次自然插话旅程，不另跑付费矩阵。
+- **不在范围内**：Codex 档的 `exact_active_turn`（目前没有上游接口）、官方 ACP 的插话、F325 close。
 
 复用 ACP service/pool、L0 compiler、F174/F178 principal、F286 MCP surface、F254 freshness、
 F296 context、F299 trajectory 与 F183/F306 semantic events。补真实 native instruction、

@@ -40,7 +40,16 @@ mcp_admission_claims:
 
 # F276: People & Relationship Memory — 人物与关系记忆
 
-> **Status**: Phase A/B + live proposal-status resolver + pending-card atomic
+> **Status**: closed (consolidated into F332; 未完成结果继续承接，非全部交付) | **Owner**: 小太阳·Maine Coon (@codex-sol, GPT-5.6 Sol) | **Priority**: P1
+
+## 2026-10-23 项目收拢至 F332
+
+You 在 `[thread-id]#private-source-id` 明确要求关闭旧记忆项目、
+保留有价值的结果并新立一项。本项目登记据此归入 [F332](F332-experience-informed-memory.md)；
+**本文件仍保留原合同及历史证据的权威，未被逐项替代的合同继续有效。**
+原 AC 实情、Task、owner、accepted scope 和等待不变；本次不声称全部完成、不关闭来源、不迁移数据。
+
+> **关闭前状态快照**: Phase A/B + live proposal-status resolver + pending-card atomic
 > replacement/withdrawal + cross-thread owner evidence + the operator-approved
 > known-person delta dual path are landed on main. The dual path keeps immediate
 > proposal and adds a content-free `capture/defer` receipt followed by one bounded,

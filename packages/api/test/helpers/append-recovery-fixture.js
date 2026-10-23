@@ -13,6 +13,7 @@ export async function appendRecoveryFixture(
     ledgerStore,
     visibility,
     inspectInput,
+    inputCompletionReceipt = false,
     routeExecution = async function* () {},
   } = {},
 ) {
@@ -88,7 +89,12 @@ export async function appendRecoveryFixture(
   );
   invocationTracker.bindAgentClientActiveRunDispatcher('thread', 'opus', {
     invocationId: 'turn',
-    capabilities: { append: true, steer: true, inputReadReceipt: true },
+    capabilities: {
+      append: true,
+      steer: true,
+      inputReadReceipt: true,
+      ...(inputCompletionReceipt ? { inputCompletionReceipt } : {}),
+    },
     handle: { provider: 'anthropic', carrier: 'claude_agent_sdk', threadId: 'native-thread', turnId: 'native-turn' },
     dispatch,
     ...(inspectInput ? { inspectInput } : {}),

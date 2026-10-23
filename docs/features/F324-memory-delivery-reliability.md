@@ -9,12 +9,21 @@ description: "让猫以可控的上下文成本取得可信、完整可续读的
 description_source: human
 description_author: codex-astra
 description_updated_at: 2026-09-27T12:29:12Z
-tips_exempt: "Renewed 2026-10-23: the boot48 graph/source reads, proposal projection and bounded audit receipts update acceptance evidence for existing memory and startup entry points. Remaining search, recovery and compaction gaps stay explicit; this status update introduces no new user action or discovery surface."
+tips_exempt: "Renewed 2026-10-23 for F332 consolidation and runtime-status reconciliation: graph/source reads, search/summary repairs and startup evidence reuse the existing memory and invocation entry points. Original Tasks, deployment waits and unfinished recovery/compaction outcomes continue; this update adds no user action or discovery surface."
 ---
 
 # F324: Memory Delivery Reliability｜记忆交付可靠性与上下文成本收口
 
-> **Status**: in-progress（A/B/C 原 Task 已 satisfied；D 的 AC-D1 PASS、AC-D2 PARTIAL；boot48 图谱主附身份/完整原文正式通过，F276读取投影与F278有界扫描已有正式证据；消息检索完整旅程、长尾/自然恢复及AC-D3仍未结） | **Owner**: Astra（@codex-astra, gpt-6-astra）与 Opus55（@opus55, claude-opus-5-5），本指挥 thread 全体猫共同负责驱动与愿景守护 | **Priority**: P1
+> **Status**: closed (consolidated into F332; 未完成结果继续承接，非全部交付) | **Owner**: Astra（@codex-astra, gpt-6-astra）与 Opus55（@opus55, claude-opus-5-5），本指挥 thread 全体猫共同负责驱动与愿景守护 | **Priority**: P1
+
+## 2026-10-23 项目收拢至 F332
+
+You 在 `[thread-id]#private-source-id` 明确要求关闭旧记忆项目、
+保留有价值的结果并新立一项。本项目登记据此归入 [F332](F332-experience-informed-memory.md)；
+**本文件仍保留原合同及历史证据的权威，未被逐项替代的合同继续有效。**
+原 AC 实情、Task、owner、accepted scope 和等待不变；本次不声称全部完成、不关闭来源、不迁移数据。
+
+> **关闭前状态快照**: in-progress（A/B/C 原 Task 已 satisfied；D 的 AC-D1 PASS、AC-D2 PARTIAL；boot48 图谱主附身份/完整原文正式通过，F276读取投影与F278有界扫描已有正式证据；消息检索完整旅程、长尾/自然恢复及AC-D3仍未结） | **Owner**: Astra（@codex-astra, gpt-6-astra）与 Opus55（@opus55, claude-opus-5-5），本指挥 thread 全体猫共同负责驱动与愿景守护 | **Priority**: P1
 
 ## Why
 

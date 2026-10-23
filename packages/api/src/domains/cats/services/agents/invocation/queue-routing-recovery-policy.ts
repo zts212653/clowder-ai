@@ -48,6 +48,7 @@ export function isOwnerRepeatableAppendTarget(
       !source._tombstone &&
       source.deliveryStatus !== 'canceled' &&
       entry.targets.includes(targetCatId) &&
+      !entry.delivery.appendPendingByTarget?.[targetCatId] &&
       !entry.execution.executionScope &&
       !entry.execution.liveSessionId &&
       failure?.acceptance === 'unknown' &&

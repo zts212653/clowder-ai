@@ -5,11 +5,13 @@ import path from 'node:path';
 import { test } from 'node:test';
 import { chromium } from '../../../ppt-forge/node_modules/playwright/index.mjs';
 import { registerNativeArtworkLightboxJourneys } from './f309-artwork-lightbox-native.mjs';
+import { registerF326C7ArtworkToolsJourney } from './f326-c7-artwork-tools.mjs';
 import { startReviewHost } from './fixtures/f309-artifact-review-host.mjs';
 import { mediaFixture } from './fixtures/f309-artifact-review-media.mjs';
 import { seedRetainedImageAnnotation, selectReviewMode } from './fixtures/f309-artwork-controls.mjs';
 
 registerNativeArtworkLightboxJourneys();
+registerF326C7ArtworkToolsJourney();
 
 const evidenceRoot = process.env.F309_BROWSER_EVIDENCE_DIR ? path.resolve(process.env.F309_BROWSER_EVIDENCE_DIR) : null;
 async function capture(page, name) {

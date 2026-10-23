@@ -1,5 +1,11 @@
 import { createHash } from 'node:crypto';
-import { type OwnerTruthRefV1, ownerTruthRefV1Schema, type RecallScopeV1 } from '@cat-cafe/shared';
+import {
+  type MemoryCueDocumentWindowRequest,
+  memoryCueDocumentWindowRequestSchema,
+  type OwnerTruthRefV1,
+  ownerTruthRefV1Schema,
+  type RecallScopeV1,
+} from '@cat-cafe/shared';
 import type { FastifyInstance, FastifyReply } from 'fastify';
 import { z } from 'zod';
 import {
@@ -33,6 +39,7 @@ const drillBodySchema = z
   .object({
     handle: z.string().trim().min(1).max(2_000),
     requestId: z.string().trim().min(1).max(200),
+    window: memoryCueDocumentWindowRequestSchema.optional(),
   })
   .strict();
 
@@ -189,8 +196,9 @@ async function readCurrentSource(
   consumerCatId: string,
   now: number,
   reply: FastifyReply,
+  window?: MemoryCueDocumentWindowRequest,
 ): Promise<CurrentMemoryCueSource | null> {
-  const source = await readMemoryCueCurrentSource(deps.sourceReader, coordinate, consumerCatId);
+  const source = await readMemoryCueCurrentSource(deps.sourceReader, coordinate, consumerCatId, window);
   if (source.status === 'source_read_failed') {
     reply.status(503).send({ error: 'source_read_failed', retryable: true });
     return null;
@@ -280,7 +288,16 @@ export function registerCallbackMemoryCueRoutes(app: FastifyInstance, deps: Call
     const now = deps.now();
     const coordinate = verifyCoordinate(deps, body.data.handle, serverScope(auth), auth.catId as string, now, reply);
     if (!coordinate) return;
-    const source = await readCurrentSource(deps, coordinate, auth.catId as string, now, reply);
+    if (
+      body.data.window &&
+      (coordinate.family !== 'evidence' || !/^(?:project-collection:|F\d{3,}$|ADR-\d{3}$)/.test(coordinate.anchor))
+    ) {
+      return reply.status(400).send({
+        error: 'window_not_supported',
+        details: 'window requires a canonical project document cue; omit window for other sources.',
+      });
+    }
+    const source = await readCurrentSource(deps, coordinate, auth.catId as string, now, reply, body.data.window);
     if (!source) return;
     if (!appendConsumptionOrReply(deps, coordinate, 'drilled', body.data.requestId, now, reply)) return;
     return { status: 'ok', payload: source.payload };

@@ -94,7 +94,8 @@ function ChatProposalRead({
   return (
     <div
       className={
-        proposal && (proposal.status === 'approved' || proposal.status === 'rejected')
+        proposal &&
+        (proposal.status === 'approved' || proposal.status === 'rejected' || proposal.status === 'withdrawn')
           ? 'min-w-0 py-1'
           : 'min-w-0 rounded-xl border border-[var(--shell-hairline)] p-3'
       }

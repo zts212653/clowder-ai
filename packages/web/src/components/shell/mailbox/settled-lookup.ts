@@ -1,3 +1,4 @@
+import { canonicalDomainEffect } from '@/stores/approval-domain-effect';
 import { apiFetch } from '@/utils/api-client';
 import type { SettledLookup, Terminal } from './approval-reconcile';
 import { lookupCreatedThread } from './created-thread-lookup';
@@ -29,9 +30,21 @@ function terminalOf(row: Record<string, unknown>): Terminal | null {
   const resolution = TERMINAL_RESOLUTIONS.find((candidate) => candidate === row.resolution);
   if (!resolution) return null;
   const decidedBy = typeof row.decidedBy === 'string' ? row.decidedBy.trim() : '';
+  const domainEffect = canonicalDomainEffect(row);
   return {
     resolution,
-    ...(typeof row.decidedAt === 'number' && Number.isFinite(row.decidedAt) ? { decidedAt: row.decidedAt } : {}),
+    ...(domainEffect ? { domainEffect } : {}),
+    ...(resolution === 'accepted' && (row.sourceFeatureId === 'F193' || row.sourceFeatureId === 'F260') && !domainEffect
+      ? { effectUnknown: true }
+      : {}),
+    ...(resolution === 'closed_without_decision' && (row.closedReason === 'expired' || row.closedReason === 'withdrawn')
+      ? { closedReason: row.closedReason }
+      : {}),
+    ...(!(isRecord(row.detail) && row.detail.closureTimeUnknown === true) &&
+    typeof row.decidedAt === 'number' &&
+    Number.isFinite(row.decidedAt)
+      ? { decidedAt: row.decidedAt }
+      : {}),
     ...(decidedBy ? { decidedBy } : {}),
   };
 }

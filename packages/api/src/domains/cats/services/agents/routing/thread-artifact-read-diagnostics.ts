@@ -1,4 +1,5 @@
 import type { FastifyBaseLogger } from 'fastify';
+import { observeSlowReadCpu } from '../../../../../infrastructure/slow-read-cpu-observer.js';
 import type {
   WorkCatalogueReadObserver,
   WorkCatalogueReadTiming,
@@ -23,6 +24,7 @@ export async function observeThreadArtifactRead<T>(
   ) => Promise<T>,
 ): Promise<T> {
   const started = performance.now();
+  const finishCpuObservation = observeSlowReadCpu(logger);
   const stages: Partial<Record<Stage, number>> = {};
   let independentWorkRead: WorkCatalogueReadTiming | undefined;
   let status = 'failed';
@@ -43,6 +45,7 @@ export async function observeThreadArtifactRead<T>(
     status = 'success';
     return result;
   } finally {
+    finishCpuObservation();
     const handlerElapsedMs = performance.now() - started;
     if (handlerElapsedMs >= 1000) {
       try {

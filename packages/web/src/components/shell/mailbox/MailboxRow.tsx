@@ -56,7 +56,13 @@ function SessionLineText({ hosted, approval }: { hosted: Hosted; approval: Appro
   const key = sessionKey(ownerUserId, approval);
   const session = sessions.get(key);
   const language = useShellLanguage();
-  const view = session ? describeReconcile(session.model.state, { language, ownerUserId }) : null;
+  const view = session
+    ? describeReconcile(session.model.state, {
+        language,
+        ownerUserId,
+        sourceFeatureId: approval.sourceFeatureId,
+      })
+    : null;
   if (!view?.line) return null;
   return (
     <div className="flex items-center gap-2 px-4 pb-3">

@@ -11,8 +11,12 @@ import { RichBlocks } from '../RichBlocks';
 
 vi.mock('@/utils/api-client', () => ({ apiFetch: vi.fn() }));
 let root: Root, container: HTMLDivElement, item: ApprovalHubItem, block: RichCardBlock;
-let phase: 'open' | 'accepted' | 'rejected', owner: string, failedRead: boolean, proof: boolean;
+let phase: 'open' | 'accepted' | 'rejected' | 'closed_without_decision',
+  owner: string,
+  failedRead: boolean,
+  proof: boolean;
 let deadSource: boolean, duplicateSource: boolean;
+let closedReason: unknown;
 const coordinate = { threadId: 'repair-thread', messageId: 'original-repair-card' };
 beforeEach(() => {
   vi.stubGlobal('React', React);
@@ -23,6 +27,7 @@ beforeEach(() => {
   deadSource = false;
   duplicateSource = false;
   phase = 'open';
+  closedReason = undefined;
   owner = 'owner-1';
   failedRead = false;
   proof = true;
@@ -107,9 +112,13 @@ beforeEach(() => {
                 {
                   ...item,
                   resolution: phase,
-                  materialization: proof
-                    ? { state: 'succeeded', effectProofRef: 'custody:original-repair' }
-                    : { state: 'outcome_unknown' },
+                  ...(closedReason !== undefined ? { closedReason } : {}),
+                  materialization:
+                    phase !== 'accepted'
+                      ? { state: 'not_started' }
+                      : proof
+                        ? { state: 'succeeded', effectProofRef: 'custody:original-repair' }
+                        : { state: 'outcome_unknown' },
                   decidedAt: Date.now(),
                   decidedBy: owner,
                   detail: { ...item.detail, ...(proof ? { canonicalEffectProofRef: 'custody:original-repair' } : {}) },
@@ -298,4 +307,27 @@ it('does not claim repair delivery from acceptance without its canonical custody
   expect(container.textContent).toContain('效果暂未确认');
   expect(container.textContent).not.toContain('修复工作已发起');
   expect(container.querySelector('[data-testid="approve-btn"]')).toBeNull();
+});
+
+it.each([
+  'withdrawn',
+  'expired',
+] as const)('preserves a canonical %s close reason in the original Chat result', async (reason) => {
+  phase = 'closed_without_decision';
+  closedReason = reason;
+  await render('Chat');
+  expect(container.querySelector('[data-testid="decision-result-dot"]')?.getAttribute('data-status')).toBe(reason);
+  expect(container.querySelector('[data-testid="decision-result-label"]')?.textContent).toContain(
+    reason === 'withdrawn' ? '已撤回' : '已过期',
+  );
+});
+
+it.each(['unknown-reason', 'accepted-with-withdrawal'])('does not propagate %s as a Chat closure', async (kind) => {
+  phase = kind === 'unknown-reason' ? 'closed_without_decision' : 'accepted';
+  closedReason = kind === 'unknown-reason' ? 'arbitrary-reason' : 'withdrawn';
+  await render('Chat');
+  expect(container.querySelector('[data-testid="decision-result-dot"]')?.getAttribute('data-status')).not.toBe(
+    'withdrawn',
+  );
+  expect(container.textContent).not.toContain('已撤回');
 });

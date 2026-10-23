@@ -9,10 +9,12 @@ import {
   readPublishedCorrection,
 } from '@/components/memory/page/read-correction-approval';
 import { readCorrectionResult } from '@/components/memory/page/read-correction-result';
-import { describeReconcile } from '@/components/shell/mailbox/approval-reconcile';
+import { describeReconcile, type Terminal } from '@/components/shell/mailbox/approval-reconcile';
 import { useShellCopy } from '@/components/shell/shell-copy';
 import { useShellLanguage } from '@/components/shell/shell-language';
 import { UNIFIED_ATTENTION_INVALIDATION_EVENTS } from '@/components/shell/use-unified-attention';
+import { CardBlock } from './CardBlock';
+import { ReconciledApprovalResult } from './ReconciledApprovalResult';
 
 /** A Chat card is a locator. Canonical publication membership and original owner memory supply its contents and writer. */
 export function OriginalMemoryCorrectionCard({
@@ -25,7 +27,7 @@ export function OriginalMemoryCorrectionCard({
   const t = useShellCopy(memoryCorrectionCopy),
     language = useShellLanguage();
   const [item, setItem] = useState<ApprovalHubItem | null>(null),
-    [line, setLine] = useState<string | null>(null);
+    [resultView, setResultView] = useState<{ terminal: Terminal; line: string } | null>(null);
   const [checking, setChecking] = useState(true),
     [writing, setWriting] = useState(false);
   const current = useRef<ApprovalHubItem | null>(null),
@@ -36,16 +38,16 @@ export function OriginalMemoryCorrectionCard({
     const round = ++generation.current;
     current.current = null;
     setChecking(true);
-    setLine(null);
+    setResultView(null);
     try {
       const next = threadId && messageId ? await readPublishedCorrection(block, { threadId, messageId }) : null;
-      let resultLine: string | null = null;
+      let resultView: { terminal: Terminal; line: string } | null = null;
       if (!next && threadId && messageId) {
         const proposalId = correctionPublicationCandidate(block);
         if (proposalId) {
           const result = await readCorrectionResult(proposalId, { threadId, messageId });
-          if (result)
-            resultLine = describeReconcile(
+          if (result) {
+            const line = describeReconcile(
               { kind: 'decided', terminal: result.terminal },
               {
                 language,
@@ -53,12 +55,14 @@ export function OriginalMemoryCorrectionCard({
                 originalEffect: result.effect ? 'memory-corrected' : undefined,
               },
             ).line;
+            if (line) resultView = { terminal: result.terminal, line };
+          }
         }
       }
       if (round !== generation.current) return;
       current.current = next;
       setItem(next);
-      setLine(resultLine);
+      setResultView(resultView);
     } catch {
       if (round === generation.current) setItem(null);
     } finally {
@@ -92,12 +96,19 @@ export function OriginalMemoryCorrectionCard({
     >
       {item ? (
         <MemoryCorrectionApprovalCard item={item} />
+      ) : resultView ? (
+        <div data-testid="memory-correction-chat-result">
+          <ReconciledApprovalResult terminal={resultView.terminal} line={resultView.line}>
+            <CardBlock block={{ ...block, actions: undefined }} />
+            <button type="button" className="shell-focusable text-xs hover:underline" onClick={() => void refresh()}>
+              {t.reread.事件}
+            </button>
+          </ReconciledApprovalResult>
+        </div>
       ) : (
-        <p data-testid={line ? 'memory-correction-chat-result' : undefined} className="text-sm text-cafe-muted">
-          {line ?? (checking ? t.checking : t.unavailable)}
-        </p>
+        <p className="text-sm text-cafe-muted">{checking ? t.checking : t.unavailable}</p>
       )}
-      {!item ? (
+      {!item && !resultView ? (
         <button
           type="button"
           className="shell-focusable rounded px-2 py-1 text-xs"

@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { useShellCopy } from '@/components/shell/shell-copy';
+import { ArtworkAnnotationToolbar } from './ArtworkAnnotationToolbar';
 import { useArtworkLightboxScope, useFloatingArtworkPresentation } from './ArtworkLightboxScope';
 import styles from './image-artwork.module.css';
 import { imageArtworkCopy } from './image-artwork.shell-copy';
@@ -53,22 +54,26 @@ export function ImageArtworkControls({
         children
       ) : (
         <section aria-label={t.tools} data-review-mode={mode}>
-          <div className={styles.dock} role="toolbar" aria-label={t.modes}>
-            <button
-              type="button"
-              disabled={!canAnnotate}
-              aria-pressed={mode === 'comment'}
-              onClick={() => onModeChange(mode === 'comment' ? 'view' : 'comment')}
-            >
-              <ReviewToolbarIcon name="rectangle" />
-              {t.circle}
-            </button>
-            <span className={styles.separator} aria-hidden />
-            <button type="button" disabled={!canMarkup} onClick={() => onModeChange('markup')}>
-              <ReviewToolbarIcon name="brush" />
-              {t.brush}
-            </button>
-          </div>
+          <ArtworkAnnotationToolbar
+            label={t.modes}
+            tools={[
+              {
+                id: 'select',
+                label: t.circle,
+                icon: 'rectangle',
+                disabled: !canAnnotate,
+                active: mode === 'comment',
+                onSelect: () => onModeChange(mode === 'comment' ? 'view' : 'comment'),
+              },
+              {
+                id: 'brush',
+                label: t.brush,
+                icon: 'brush',
+                disabled: !canMarkup,
+                onSelect: () => onModeChange('markup'),
+              },
+            ]}
+          />
         </section>
       )}
     </div>

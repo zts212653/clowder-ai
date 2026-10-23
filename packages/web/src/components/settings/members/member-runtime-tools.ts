@@ -37,10 +37,21 @@ export function memberRuntimeTools(
   ];
 }
 
+function runtimeStatus(item: RuntimeChoice, t: MemberText) {
+  if (item.id.startsWith('plugin:'))
+    return item.installed ? t('插件已启用', 'Plugin enabled') : t('插件未启用', 'Plugin disabled');
+  if (item.id.startsWith('draft:')) return t('已保留的配置', 'Retained configuration');
+  if (item.id.startsWith('manual:')) return t('手动配置', 'Manual configuration');
+  return (
+    nativeAcpProfileLabel(item.discoveryStatus, t) ??
+    (item.installed ? t('已安装', 'Installed') : t('未找到', 'Not found'))
+  );
+}
+
 export function memberRuntimeOptions(tools: RuntimeChoice[], t: MemberText) {
   return tools.map((item) => ({
     value: item.id,
     disabled: item.discoveryStatus === 'acp_profile_invalid' || (item.id.startsWith('plugin:') && !item.installed),
-    label: `${item.label} · ${item.id.startsWith('plugin:') ? t(item.installed ? '插件已启用' : '插件未启用', item.installed ? 'Plugin enabled' : 'Plugin disabled') : item.id.startsWith('draft:') ? t('已保留的配置', 'Retained configuration') : (nativeAcpProfileLabel(item.discoveryStatus, t) ?? (item.installed ? t('已安装', 'Installed') : t('未找到', 'Not found')))}`,
+    label: `${item.agyCarrier === 'acp' ? t('AGY 官方 ACP', 'AGY official ACP') : item.label} · ${runtimeStatus(item, t)}`,
   }));
 }

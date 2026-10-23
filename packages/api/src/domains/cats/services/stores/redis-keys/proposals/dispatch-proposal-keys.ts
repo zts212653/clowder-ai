@@ -14,8 +14,8 @@ export const DispatchProposalKeys = {
   userPending: (userId: string) => `dispatch-proposal-user-pending:${userId}`,
 
   /**
-   * F246 Phase F: Sorted set of settled (approved|rejected) proposal IDs for a user
-   * (score=decidedAt): dispatch-proposal-user-settled:{userId}
+   * F246 Phase F: Sorted set of settled (approved|rejected|superseded) proposal IDs for a user
+   * (score=decision or system closure time): dispatch-proposal-user-settled:{userId}
    */
   userSettled: (userId: string) => `dispatch-proposal-user-settled:${userId}`,
 

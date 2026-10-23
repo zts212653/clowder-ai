@@ -2,9 +2,11 @@
 feature_ids: [F315]
 related_features: [F056, F083, F246, F284, F293, F299, F305, F307, F310, F311, F322]
 topics: [workspace, ui, ux, readability, information-architecture, progressive-disclosure, product-language]
-tips_exempt: "Renewed 2026-10-02: F322 settlement and Status/Sessions repair evidence update existing-page acceptance truth, not a new destination; those pages must explain their states and actions in place."
+tips_exempt: "Renewed 2026-10-23: F315 administrative closure now points to F322 legacy settlement; this records succession without adding a capability or marking unverified pages complete. Existing pages still explain their states and actions in place."
 doc_kind: spec
 created: 2026-09-03
+updated: 2026-10-23
+superseded_by: F322
 description: "盘点并迁移现有 Workspace 用户表面，使首屏先回答发生了什么、是否需要行动与下一步是什么，同时保留按需可达的精确证据。"
 description_source: human
 description_author: codex-sol
@@ -13,7 +15,20 @@ description_updated_at: 2026-09-03T21:40:00-07:00
 
 # F315: Workspace Readability Remediation｜存量页面从内部对象回到用户任务
 
-> **Status**: in-progress | **Owner**: 小太阳·Maine Coon（@codex-sol, GPT-5.6 Sol） | **Priority**: P1
+> **Status**: done (superseded by F322; operator-directed scope consolidation) | **Completed**: 2026-10-23 | **Owner**: 小太阳·Maine Coon（@codex-sol, GPT-5.6 Sol） | **Priority**: P1
+> **Superseded by**: [F322](F322-everyday-work-experience.md)；关闭的是 F315 的独立项目登记，不是宣称所有旧页面与 AC 已验收。
+
+## 2026-10-23 关闭处置：由 F322 接替
+
+You 在 `[thread-id]#private-source-id`
+对 F315 明确要求：“这个基本被F322代替了？ 你来记录一下 这个结束，然后写上被F322代替，也关掉”。
+据此结束 F315 的独立推进与关闭等待；F322 的旧承诺车道及
+继续持有剩余结果、原领域责任和验收。没有新增实现、重开 v1 或关闭 F322。
+
+Phase A 的四条已达成 finding/归属证据保留；B/P/C/D 的 14 条旧未勾项按本次 operator
+`cvo_signoff` 从 F315 关闭前置中解除，逐项实际状态与原表不改写成 PASS。
+用户仍可感知的真实数据、窄屏、完整页面与全量结算差距继续在 F322 可见。
+记录该边界；下方带日期的 in-progress/待关闭描述保留为当时历史，不覆盖本处当前状态。
 >
 > **operator sources**:
 > - `[thread-id]#private-source-id`——Workspace 多数页面仍违背 F305，信息难读、内部概念过多；F305 关闭后应另立 Feature 盘点现状并治理。
@@ -207,6 +222,9 @@ F293、F310、F311 各自修复本页命中的 renderer、projection 或必要 s
 - [x] 前端需求已定义需求→真实壳证据映射。
 
 ## Acceptance Criteria
+
+> 关闭说明：下列原勾选是历史实证，不补勾。未勾项已由 2026-10-23 operator 接替关闭处置逐项登记，
+> 不再作为 F315 独立项目的未决关闭条件；实际交付和验收按 F322 及原迁移账继续。
 
 ### Phase A（三页 finding 与方案）
 

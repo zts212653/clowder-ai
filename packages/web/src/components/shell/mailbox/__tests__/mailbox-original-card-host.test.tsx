@@ -91,8 +91,8 @@ async function render(item: UnifiedAttentionItemV1, current = true, readOwner = 
   return sessions;
 }
 const primary = (kind: 'F225' | 'F231') =>
-  [...container.querySelectorAll('button')].find((b) =>
-    b.textContent?.includes(kind === 'F225' ? '批准并接力' : '批准并写入'),
+  [...container.querySelectorAll('button')].find(
+    (b) => !b.hasAttribute('aria-expanded') && b.textContent?.includes(kind === 'F225' ? '批准并接力' : '批准并写入'),
   );
 it.each([
   'F225',

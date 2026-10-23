@@ -17,7 +17,11 @@ export type FloatingArtwork = {
   surface: WorkspaceSurfaceDescriptor | null;
   openWorkspace?: () => Promise<boolean>;
   gallery?: ArtworkGallery;
-  reference?: { attachment: MediaContextAttachment; selectionId?: string };
+  reference?: {
+    attachment: MediaContextAttachment;
+    selectionId?: string;
+    origin?: { kind: 'composer'; threadId: string } | { kind: 'message'; threadId: string; messageId: string };
+  };
 };
 type Scope = {
   threadId: string;

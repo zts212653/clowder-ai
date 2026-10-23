@@ -39,6 +39,24 @@ const deliveryFailure = (over: Record<string, unknown> = {}) => ({
 });
 
 describe('isLifecycleStoredMessageMetadata — literal membership must not coerce', () => {
+  it('retains the native write receipt without allowing coercion at the persistence/socket boundary', () => {
+    const ref = { targetId: 'cat-1', statusMessageId: 'response-1', phase: 'dispatched', dispatchedAt: 1 };
+    expect(
+      isLifecycleStoredMessageMetadata({
+        kind: 'input',
+        orderKey: 'source-1',
+        dispatchRefs: [{ ...ref, appendAcceptance: 'written' }],
+      }),
+    ).toBe(true);
+    expect(
+      isLifecycleStoredMessageMetadata({
+        kind: 'input',
+        orderKey: 'source-1',
+        dispatchRefs: [{ ...ref, appendAcceptance: ['written'] }],
+      }),
+    ).toBe(false);
+  });
+
   it('accepts a well-formed response', () => {
     expect(isLifecycleStoredMessageMetadata(response())).toBe(true);
   });

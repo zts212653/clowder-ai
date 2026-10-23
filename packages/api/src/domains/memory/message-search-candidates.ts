@@ -23,9 +23,12 @@ export async function collectMessageSearchCandidates(input: {
     ? Date.parse(input.search.dateTo.length === 10 ? `${input.search.dateTo}T23:59:59.999Z` : input.search.dateTo)
     : Infinity;
   let literalWitnesses = 0;
-  const width = input.search.sort === 'relevance' ? 1 : 8;
-  for (let offset = 0; offset < input.candidates.length; offset += width) {
+  const limit = input.search.limit ?? 20;
+  for (let offset = 0; offset < input.candidates.length; ) {
     input.check();
+    // Overlap only independent canonical reads, retaining retrieval order below.
+    // Never read beyond the remaining literal page/witness budget on the fast path.
+    const width = input.search.sort === 'relevance' ? Math.min(8, limit + 1 - literalWitnesses) : 8;
     const projected = await Promise.all(
       input.candidates.slice(offset, offset + width).map(async (candidate) => {
         if (!validReference(candidate, input.threadIds, input.source)) return null;
@@ -33,6 +36,7 @@ export async function collectMessageSearchCandidates(input: {
         return input.project(candidate);
       }),
     );
+    offset += width;
     for (const row of projected) {
       input.check();
       if (!row) continue;
@@ -43,7 +47,7 @@ export async function collectMessageSearchCandidates(input: {
       rows.push(row);
       if (literalQueryEvidence(input.search.query, row.content)) literalWitnesses++;
       // Pending semantic rows preceding these literal witnesses are still judged.
-      if (input.search.sort === 'relevance' && literalWitnesses > (input.search.limit ?? 20)) return rows;
+      if (input.search.sort === 'relevance' && literalWitnesses > limit) return rows;
     }
   }
   if (input.search.sort !== 'relevance')

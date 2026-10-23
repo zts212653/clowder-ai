@@ -1,7 +1,33 @@
 import type { RichCardBlock } from '@cat-cafe/shared';
+import type { ReactNode } from 'react';
 import { MarkdownContent } from '@/components/MarkdownContent';
 import { originalApprovalCopy } from '../shell/mailbox/original-approval.shell-copy';
 import { useShellCopy } from '../shell/shell-copy';
+import { ApprovalResultRow } from './ApprovalResultRow';
+
+export function ProfileUpdateResult({
+  block,
+  status,
+  actions,
+  error,
+}: {
+  block: RichCardBlock;
+  status: 'approved' | 'rejected';
+  actions?: ReactNode;
+  error: string | null;
+}) {
+  const original = useShellCopy(originalApprovalCopy);
+  const label = status === 'approved' ? original.approvedProfile : original.rejectedProfile;
+  return (
+    <ApprovalResultRow status={status} label={label}>
+      <h3 className="text-sm font-semibold">{original.profileTitle}</h3>
+      <ProfileUpdateCardContent block={block} />
+      <output data-testid="original-approval-terminal">{label}</output>
+      {actions}
+      {error ? <p role="alert">{error}</p> : null}
+    </ApprovalResultRow>
+  );
+}
 
 /** Decode only the producer's fenced before/after layout, never decision authority. Unrecognized content stays intact. */
 export function profileUpdateDiff(body: string) {

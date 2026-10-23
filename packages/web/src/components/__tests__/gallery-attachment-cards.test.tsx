@@ -59,6 +59,7 @@ function Probe() {
         data-testid="opened"
         data-index={scope?.work?.gallery?.index}
         data-place={scope?.work?.reference?.selectionId}
+        data-origin={JSON.stringify(scope?.work?.reference?.origin)}
       >
         {scope?.work?.title}
       </output>
@@ -130,6 +131,27 @@ it('a restored composer tag reopens its original image and place without replaci
   expect(mocks.apiFetch.mock.calls.some(([url]) => url.includes('/prepare'))).toBe(false);
   expect(container.querySelector('textarea')).toBe(composer);
   expect(composer?.value).toBe('原来的话');
+});
+it('keeps the opinion message coordinates separate from a gallery publication grant', async () => {
+  await act(async () =>
+    root.render(
+      <ArtworkLightboxProvider threadId={THREAD}>
+        <ContentBlocks
+          blocks={[{ type: 'context_attachment', attachment: attachment(0) }]}
+          messageSource={{ threadId: THREAD, messageId: 'queued-opinion' }}
+        />
+        <Probe />
+      </ArtworkLightboxProvider>,
+    ),
+  );
+  const place = container.querySelector<HTMLButtonElement>('button[aria-label="打开图 1 · 第 3 处"]');
+  expect(place).not.toBeNull();
+  await act(async () => place?.click());
+  expect(JSON.parse(container.querySelector('[data-testid="opened"]')?.getAttribute('data-origin') ?? 'null')).toEqual({
+    kind: 'message',
+    threadId: THREAD,
+    messageId: 'queued-opinion',
+  });
 });
 it('never overlays a stored circle onto changed workspace bytes or guesses another source message', async () => {
   const changed = { ...mediaView(), sourceState: 'changed' as const };

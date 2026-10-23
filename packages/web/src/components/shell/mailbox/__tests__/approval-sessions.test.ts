@@ -15,7 +15,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { DecisionAttempt, DecisionAttemptState } from '@/stores/approval-decision-attempts';
 import type { MailboxRead } from '../../unified-mailbox-state';
 import { describeReconcile, type SettledLookup } from '../approval-reconcile';
-import { type ApprovalSession, createApprovalSessions, sessionKey } from '../approval-sessions';
+import { type ApprovalSession, createApprovalSessions, type SessionsDeps, sessionKey } from '../approval-sessions';
 import { approvalRow, NOW, OWNER, okRead, storeItem, visibleApproval } from './mailbox-fixtures';
 
 const ADDRESS = { sourceFeatureId: 'F128', proposalId: 'p-1' };
@@ -29,7 +29,13 @@ const found = (resolution: 'accepted' | 'rejected' | 'closed_without_decision' =
 
 const tick = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
 
-function harness(options: { items?: ApprovalHubItem[]; attempts?: Record<string, DecisionAttempt> } = {}) {
+function harness(
+  options: {
+    items?: ApprovalHubItem[];
+    attempts?: Record<string, DecisionAttempt>;
+    confirmTerminal?: SessionsDeps['confirmTerminal'];
+  } = {},
+) {
   const item = storeItem();
   let started = 1;
   let latest: { result: MailboxRead; generation: number | null } = {
@@ -53,6 +59,7 @@ function harness(options: { items?: ApprovalHubItem[]; attempts?: Record<string,
     latestRead: () => latest,
     now: () => NOW,
     lookupSettled: vi.fn(async () => settled),
+    ...(options.confirmTerminal ? { confirmTerminal: options.confirmTerminal } : {}),
   };
   const sessions = createApprovalSessions(deps);
   const open = () =>
@@ -105,6 +112,67 @@ function harness(options: { items?: ApprovalHubItem[]; attempts?: Record<string,
 
 const listed = (h: ReturnType<typeof harness>) => okRead([approvalRow(h.item)]);
 const gone = () => okRead([]);
+
+describe('independent canonical terminal read', () => {
+  it('does not resurrect a closed session when its confirmation answers late', async () => {
+    let finish!: (terminal: { resolution: 'accepted' }) => void;
+    let signal: AbortSignal | undefined;
+    const h = harness({
+      confirmTerminal: (input) => {
+        signal = input.signal;
+        return new Promise((resolve) => {
+          finish = resolve;
+        });
+      },
+    });
+    h.open();
+    h.attempt(1, accepted200);
+    await tick();
+    h.sessions.close(KEY);
+    expect(signal?.aborted).toBe(true);
+    finish({ resolution: 'accepted' });
+    await tick();
+    expect(h.sessions.get(KEY)).toBeUndefined();
+  });
+
+  it('cannot let an older attempt decide a newer write or bypass its current read authority', async () => {
+    const finishes: Array<(terminal: { resolution: 'accepted' | 'rejected' }) => void> = [];
+    const h = harness({
+      confirmTerminal: () =>
+        new Promise((resolve) => {
+          finishes.push(resolve);
+        }),
+    });
+    h.open();
+    h.attempt(1, accepted200);
+    await tick();
+    h.attempt(2, { phase: 'submitting' });
+    finishes[0]({ resolution: 'accepted' });
+    await tick();
+    expect(h.state()).toEqual({ kind: 'writing', attemptId: 2 });
+    h.attempt(2, accepted200);
+    await tick();
+    finishes[1]({ resolution: 'rejected' });
+    await tick();
+    expect(h.state()).toMatchObject({ kind: 'decided', terminal: { resolution: 'rejected' } });
+    expect(h.sessions.authorize(KEY)).toBe(false);
+  });
+
+  it('retains the original reconciliation when the independent read throws', async () => {
+    const h = harness({
+      confirmTerminal: () => {
+        throw new Error('reader unavailable');
+      },
+    });
+    h.open();
+    h.attempt(1, accepted200);
+    await tick();
+    expect(h.state().kind).toBe('confirming');
+    h.setSettled(found());
+    await h.answer(gone());
+    expect(h.state().kind).toBe('decided');
+  });
+});
 
 describe('open', () => {
   it('starts an idle session for this owner, producer and proposal, and keeps what was shown', () => {
@@ -469,6 +537,28 @@ describe('reads that must not count', () => {
 });
 
 describe('producers whose card reports its own request', () => {
+  it('an exact successful partial Undo permits a new decision only after fresh aligned pending evidence', async () => {
+    const h = harness();
+    h.open();
+    h.sessions.hostReport(KEY, { phase: 'start', kind: 'person-memory-undo' });
+    h.sessions.hostReport(KEY, { phase: 'end', kind: 'person-memory-undo', outcome: 'settled', status: 200 });
+    expect(h.view().actions).toBe('held');
+    expect(h.sessions.authorize(KEY)).toBe(false);
+    await h.answer(listed(h));
+    expect(h.state().kind).toBe('still_open');
+    expect(h.view().actions).toBe('allowed');
+    expect(h.sessions.authorize(KEY)).toBe(true);
+  });
+  it('an Undo with unknown response remains locked even if a later pending row exists', async () => {
+    const h = harness();
+    h.open();
+    h.sessions.hostReport(KEY, { phase: 'start', kind: 'person-memory-undo' });
+    h.sessions.hostReport(KEY, { phase: 'end', kind: 'person-memory-undo', outcome: 'network-error' });
+    await h.answer(listed(h));
+    expect(h.view().actions).toBe('held');
+    expect(h.sessions.authorize(KEY)).toBe(false);
+  });
+
   it('follows an original native card without inventing a Hub attempt or successful result', async () => {
     const h = harness();
     h.open();

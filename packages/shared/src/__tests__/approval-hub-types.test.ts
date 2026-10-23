@@ -3,7 +3,7 @@
  */
 
 import assert from 'node:assert/strict';
-import { describe, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import type {
   ApprovalDecisionMode,
   ApprovalEnvelope,
@@ -186,6 +186,7 @@ describe('canonical Approval lifecycle projection', () => {
     assert.deepEqual(normalizeApprovalLifecycleProjection({ status }), {
       resolution,
       materialization: { state: materialization },
+      ...(status === 'withdrawn' ? { closedReason: status } : {}),
     });
   });
 
@@ -294,5 +295,32 @@ describe('unified attention preserves the canonical approval renderer contract',
       },
     };
     assert.deepEqual(unifiedAttentionApprovalsSourceSchema.parse({ items: [anchored] }).items[0], anchored);
+  });
+});
+
+describe('canonical closed approval result projection', () => {
+  it.each([
+    'expired',
+    'withdrawn',
+  ] as const)('preserves the original %s reason without inventing a decision or execution', (status) => {
+    expect(normalizeApprovalLifecycleProjection({ status })).toEqual({
+      resolution: 'closed_without_decision',
+      materialization: { state: 'not_started' },
+      closedReason: status,
+    });
+  });
+  it('does not guess a reason for a legacy closed row', () => {
+    expect(normalizeApprovalLifecycleProjection({ status: 'closed_without_decision' })).not.toHaveProperty(
+      'closedReason',
+    );
+  });
+  it('does not accept a closed reason attached to an approved decision', () => {
+    expect(
+      approvalLifecycleProjectionSchema.safeParse({
+        resolution: 'accepted',
+        materialization: { state: 'outcome_unknown' },
+        closedReason: 'expired',
+      }).success,
+    ).toBe(false);
   });
 });

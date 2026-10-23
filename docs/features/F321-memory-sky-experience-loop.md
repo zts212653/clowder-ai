@@ -13,7 +13,16 @@ description_updated_at: 2026-09-25T17:48:00Z
 
 # F321: 记忆星空与「经历 → 下一次」｜Memory Sky & Experience Loop
 
-> **Status**: in-progress | **Owner**: Ragdoll（@opus55, claude-opus-5-5）任指挥猫——编排、排序与验收，不写实现；各 Phase 执行猫另派 | **Priority**: P1
+> **Status**: closed (consolidated into F332; 未完成结果继续承接，非全部交付) | **Owner**: Ragdoll（@opus55, claude-opus-5-5）任指挥猫——编排、排序与验收，不写实现；各 Phase 执行猫另派 | **Priority**: P1
+
+## 2026-10-23 项目收拢至 F332
+
+You 在 `[thread-id]#private-source-id` 明确要求关闭旧记忆项目、
+保留有价值的结果并新立一项。本项目登记据此归入 [F332](F332-experience-informed-memory.md)；
+**本文件仍保留原合同及历史证据的权威，未被逐项替代的合同继续有效。**
+原 AC 实情、Task、owner、accepted scope 和等待不变；本次不声称全部完成、不关闭来源、不迁移数据。
+
+> **关闭前状态快照**: in-progress | **Owner**: Ragdoll（@opus55, claude-opus-5-5）任指挥猫——编排、排序与验收，不写实现；各 Phase 执行猫另派 | **Priority**: P1
 
 ## Why
 

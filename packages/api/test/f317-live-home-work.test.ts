@@ -123,3 +123,139 @@ test('conversation without an explicit open request and an ambiguous version do 
     await f.close();
   }
 });
+
+test('two valid Home pages expose a real page question, then open the exact publication only on the chosen page', async () => {
+  const f = await fixture(true);
+  try {
+    const second = f.addPage('/settings?s=plugins');
+    f.choosePage('ASK');
+    const question = (await f.request()).json();
+    assert.equal(question.status, 'ask');
+    assert.match(question.reason, /页面1/);
+    assert.match(question.reason, /页面2/);
+    assert.match(question.reason, /settings/);
+    assert.deepEqual(f.deliveries, []);
+    f.choosePage('C1');
+    const result = (await f.request('在页面2打开伙伴刚交的回家清单第2版')).json();
+    assert.equal(result.status, 'applied');
+    const offered = f.inputs.filter((input) => input.candidates[0]?.id.startsWith('home-page-'));
+    assert.equal(offered.length, 2);
+    assert.equal(offered[1].candidates.length, 2);
+    assert.match(offered[1].candidates[1].label, /settings/);
+    assert.deepEqual(f.deliveries, [second.clientId]);
+    assert.deepEqual((f.grants[0] as { action: { artifact: unknown } }).action.artifact, f.artifact);
+  } finally {
+    await f.close();
+  }
+});
+
+for (const missing of ['hidden', 'invalid', 'unresponsive'] as const)
+  test(`a ${missing} Home page gives actionable discovery evidence before selecting a publication`, async () => {
+    const f = await fixture();
+    try {
+      f.replies(
+        missing === 'hidden' ? [null] : missing === 'invalid' ? [{ ...f.pages[0], clientToken: randomUUID() }] : [],
+      );
+      const result = (await f.request()).json();
+      assert.equal(result.status, 'unavailable');
+      assert.match(
+        result.reason,
+        new RegExp(
+          missing === 'hidden' ? 'not_visible' : missing === 'invalid' ? 'capability_invalid' : 'unresponsive',
+        ),
+      );
+      assert.deepEqual(f.inputs, []);
+      assert.deepEqual(f.deliveries, []);
+    } finally {
+      await f.close();
+    }
+  });
+
+test('no connected Home page is distinct from hidden and expired observations', async () => {
+  const f = await fixture();
+  try {
+    const [page] = f.pages;
+    f.service.hub.unregisterClient('owner', page.clientId, page.clientToken);
+    f.replies([]);
+    const result = (await f.request()).json();
+    assert.equal(result.status, 'unavailable');
+    assert.match(result.reason, /home_not_connected/);
+    assert.deepEqual(f.inputs, []);
+  } finally {
+    await f.close();
+  }
+});
+
+for (const change of ['route', 'token', 'hidden', 'source', 'owner-intent', 'displayed-version'] as const)
+  test(`a multi-page publication selection cannot survive ${change} changing before consume`, async () => {
+    const f = await fixture(true);
+    try {
+      f.addPage('/settings?s=plugins');
+      f.choosePage('C1');
+      f.consume(async () => {
+        const selected = f.pages[1];
+        if (change === 'route') selected.route = '/thread/changed';
+        if (change === 'token')
+          selected.clientToken = f.service.hub.registerClient('owner', selected.clientId).clientToken;
+        if (change === 'hidden') f.replies([f.pages[0]]);
+        if (change === 'source') f.revokePublication();
+        if (change === 'owner-intent') await f.call.sendText('取消，不要打开', randomUUID());
+        if (change === 'displayed-version') f.wrongVersion();
+      });
+      const result = (await f.request('在页面2打开伙伴刚交的回家清单第2版')).json();
+      assert.notEqual(result.status, 'applied');
+      assert.ok(
+        f.grants.every((grant) => change === 'displayed-version' || (grant as { kind: string }).kind === 'blocked'),
+      );
+      assert.equal(f.deliveries.length, 1);
+    } finally {
+      await f.close();
+    }
+  });
+
+test('the same multi-page choice also binds ordinary Home navigation and hides window credentials from Jev', async () => {
+  const f = await fixture();
+  try {
+    f.hide();
+    const second = f.addPage('/settings?s=plugins');
+    f.choosePage('C1');
+    assert.equal((await f.request('在页面2打开回家清单那段对话')).json().status, 'applied');
+    assert.deepEqual(f.deliveries, [second.clientId]);
+    const grant = f.grants[0] as { clientId: string; baseRoute: string; action: { kind: string } };
+    assert.equal(grant.clientId, second.clientId);
+    assert.equal(grant.baseRoute, '/settings?s=plugins');
+    assert.equal(grant.action.kind, 'thread');
+    for (const page of f.pages) assert.ok(!JSON.stringify(f.inputs).includes(page.clientToken));
+  } finally {
+    await f.close();
+  }
+});
+
+test('an answer to an earlier page question cannot silently follow a renumbered page list', async () => {
+  const f = await fixture();
+  try {
+    const second = f.addPage('/settings?s=plugins');
+    f.choosePage('ASK');
+    assert.equal((await f.request()).json().status, 'ask');
+    f.replies([second]);
+    f.choosePage('C0');
+    const result = (await f.request('在页面1打开伙伴刚交的回家清单第2版')).json();
+    assert.equal(result.status, 'ask');
+    assert.match(result.reason, /变化/);
+    assert.deepEqual(f.deliveries, []);
+  } finally {
+    await f.close();
+  }
+});
+
+test('a single valid page is usable beside hidden and forged replies', async () => {
+  const f = await fixture();
+  try {
+    f.replies([null, { ...f.pages[0], clientId: randomUUID(), clientToken: randomUUID() }, f.pages[0]]);
+    assert.equal((await f.request()).json().status, 'applied');
+    assert.equal(f.inputs.length, 1, 'invalid and hidden pages cannot create a page selection');
+    assert.deepEqual(f.deliveries, [f.pages[0].clientId]);
+  } finally {
+    await f.close();
+  }
+});

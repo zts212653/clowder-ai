@@ -1,4 +1,5 @@
 import type { MessageSearchResponse } from '@cat-cafe/shared';
+import { observeQueryQualification } from './message-query-observation.js';
 import {
   candidateKey,
   literalQueryEvidence,
@@ -86,6 +87,7 @@ export class MessageQueryQualifier {
       batch.chars += row.content.length;
     }
     let nativeCalls = 0;
+    const observation = observeQueryQualification();
     await Promise.all(
       batches
         .map((batch) => batch.rows)
@@ -96,27 +98,49 @@ export class MessageQueryQualifier {
           nativeCalls++;
           const controller = new AbortController();
           const signal = context.signal ? AbortSignal.any([context.signal, controller.signal]) : controller.signal;
+          const batchObservation = observation.start(
+            rows.length,
+            rows.reduce((n, row) => n + row.content.length, 0),
+            context.deadlineAt,
+            context.onTrace,
+          );
+          const onAbort = () => batchObservation.abort();
+          signal.addEventListener('abort', onAbort, { once: true });
+          let failed = false;
           const timer = setTimeout(
             () => controller.abort(new DOMException('Qualification deadline', 'TimeoutError')),
             Math.max(0, context.deadlineAt - Date.now() - 2000),
           );
           try {
             const batch = qualificationBatch(query, rows);
-            const text = await this.run(batch, { ...context, signal });
+            const text = await this.run(batch, {
+              ...context,
+              signal,
+              onTrace: batchObservation.trace,
+            });
             if (!signal.aborted)
               for (const [key, decision] of parseQualification(text, batch, evidence)) decisions.set(key, decision);
           } catch (error) {
+            failed = true;
             context.onTrace?.({
               phase: 'qualification-unavailable',
               reason: error instanceof Error ? error.name : 'unknown',
             });
           } finally {
             clearTimeout(timer);
+            signal.removeEventListener('abort', onAbort);
+            batchObservation.finish(signal.aborted, failed);
             inFlight--;
           }
         }),
     );
-    context.signal?.throwIfAborted();
+    try {
+      context.signal?.throwIfAborted();
+      if (Date.now() >= context.deadlineAt) throw new DOMException('Message search deadline exceeded', 'TimeoutError');
+    } catch (error) {
+      observation.attach(error);
+      throw error;
+    }
     const counts = { supported: 0, rejected: 0, indeterminate: 0 };
     for (const decision of decisions.values()) counts[decision]++;
     const unassessed = candidates.length - decisions.size;

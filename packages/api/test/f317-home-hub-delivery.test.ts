@@ -62,7 +62,7 @@ function fixture() {
   };
 }
 
-test('owner-visible unfamiliar thread is offered, an unindexed foreign thread is absent, and two visible Hubs ask rather than fan out', async () => {
+test('owner-visible unfamiliar thread is offered, an unindexed foreign thread is absent, and distinct visible Hubs keep separate owner targets for selection', async () => {
   const f = fixture();
   const foreign = f.threads.create('another-owner', '/project');
   f.threads.updateTitle(foreign.id, '不该显示的目标');
@@ -74,7 +74,10 @@ test('owner-visible unfamiliar thread is offered, an unindexed foreign thread is
     f.state,
     { ...f.state, clientId: otherWindow, clientToken: f.delivery.registerClient('owner', otherWindow).clientToken },
   ]);
-  assert.deepEqual(await f.delivery.targets(f.request), []);
+  assert.deepEqual(
+    new Set((await f.delivery.targets(f.request)).map((target) => target.clientId)),
+    new Set([f.state.clientId, otherWindow]),
+  );
 });
 
 test('navigation needs one matching current capability and a real consumer receipt, not just an emitted event', async () => {

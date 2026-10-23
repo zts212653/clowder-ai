@@ -51,7 +51,7 @@ return 'ANCHORED'
 /** Same-closure replacement rotates current opaque pointers without minting another root. */
 export const COMMIT_DISPOSITION_REPLACEMENT_ENVELOPE_LUA = `
 ${PERSON_MEMORY_DISPOSITION_PREFLIGHT_LUA}
-if #KEYS ~= 8 or #ARGV ~= 10 then return 'INVALID_ARGUMENTS' end
+if #KEYS ~= 9 or #ARGV ~= 10 then return 'INVALID_ARGUMENTS' end
 if not allowed_type(KEYS[1], 'string')
   or not allowed_type(KEYS[2], 'zset')
   or not allowed_type(KEYS[3], 'string')
@@ -59,7 +59,8 @@ if not allowed_type(KEYS[1], 'string')
   or not allowed_type(KEYS[5], 'string')
   or not allowed_type(KEYS[6], 'string')
   or not allowed_type(KEYS[7], 'set')
-  or not allowed_type(KEYS[8], 'set') then
+  or not allowed_type(KEYS[8], 'set')
+  or not allowed_type(KEYS[9], 'zset') then
   return 'TYPE_CONFLICT'
 end
 if redis.call('EXISTS', KEYS[4]) == 1 then return 'NOT_AVAILABLE' end
@@ -100,6 +101,7 @@ redis.call('SET', KEYS[1], ARGV[3])
 redis.call('SET', KEYS[3], ARGV[4])
 redis.call('ZREM', KEYS[2], ARGV[7])
 redis.call('ZADD', KEYS[2], score, ARGV[6])
+redis.call('ZADD', KEYS[9], score, ARGV[7])
 redis.call('SET', KEYS[5], ARGV[9])
 return 'ANCHORED'
 `;

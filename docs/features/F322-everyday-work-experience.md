@@ -4,7 +4,7 @@ related_features: [F056, F083, F147, F229, F232, F269, F277, F283, F284, F290, F
 topics: [frontend, ux, discoverability, navigation, continuity, accessibility]
 doc_kind: spec
 created: 2026-09-27
-updated: 2026-10-22
+updated: 2026-10-23
 description: "把日常主屏与跨面板操作整理成看得懂、找得到、能继续的工作体验，并逐项结算已有前端承诺。"
 description_source: model
 description_author: codex-astra
@@ -728,6 +728,13 @@ F315 原三页最新实现核验与方案修订同 A 启动，不等全量 censu
 
 ### Phase D（旧承诺）
 
+**2026-10-23 F315 接替关闭**：You 在
+`[thread-id]#private-source-id`
+明确要求 F315 结束并记为被 F322 代替。F315 已按该授权关闭独立项目；其原 14 条未勾 AC
+保留实际证据状态，由本 D/E 与原领域 owner 继续按既有迁移账处理，不补写通过，也不关闭 F322。
+下方及带日期历史段落中的“整 D/F315 仍开放”只保留当时结论，当前 F315 状态回其
+[关闭处置](F315-workspace-readability-remediation.md#2026-10-23-关闭处置由-f322-接替)。
+
 - [ ] AC-D1: F315 原 14 条开放 AC 逐项关联到最新实现、执行责任和验收证据；前三页核验不受 census 阻塞，不用方案被接受冒充生产完成。
 - [ ] AC-D2: F056 / F269 与本次直接相关的 AC 有明确实施/保留边界；未承接的国际化、品牌等原承诺不静默取消。改动表面的既有暗色模式不退化，保已选主题与自定义偏好；第1段首份实物在深色及一套调过的自定义主题下验证表面层次、文字/图标/焦点和浮层对比，不用静态T1样值或主题能力存在代替验证。
 - [ ] AC-D3: 每个领域页面保留完整事实、来源、权限与合法 action；跨页一致性由 F322 收口，业务修法沿原 owner，不增加平行状态源。
@@ -741,7 +748,7 @@ F315 原三页最新实现核验与方案修订同 A 启动，不等全量 censu
 
 ## Dependencies
 
-- **Evolved from**: F284（contextual shell）、F315（Workspace 页面可读性）、F056（既有视觉语言迁移）。这是交付演进关系，不表示旧项已关闭。
+- **Evolved from**: F284（contextual shell）、F315（Workspace 页面可读性）、F056（既有视觉语言迁移）。F315 已于 2026-10-23 按 operator 指示被本 Feature 接替关闭；F284/F056 各自状态及本项目未完结果不由此改写。
 - **Related**: F147国际化（本批仅v2双语，整Hub旧AC保留）、F269 全文恢复、F277 分组、F297 Sidebar snapshot、F307 working set、F294 密度测试先例、F229 前台猫召回、F309 作品协作。
 - **Current host dependency**: F290 世界 / membership / 领域目的地与已合入的 Host world-directory adapter（#4830）；F322 外壳消费与整页验收待做。F310 全局 Needs Me 与 F246 审批独立；F322 不接管权限或复制计数。
 - **Parallel UI owners**: CVO942已把共同体前端归一交F290、记忆前端与重构交F321。两者进入同一Roadmap，复用设计语言和Host接入边界，原领域数据、权限与执行责任不迁移。F232/F309核作品准入与版本族，F322消费入口与可证计数。

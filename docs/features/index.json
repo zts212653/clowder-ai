@@ -921,7 +921,7 @@
     {
       "id": "F152",
       "name": "Expedition Memory — 外部项目记忆冷启动 + 经验回流",
-      "status": "in-progress（retained expedition/bootstrap scope） | **Owner**: Ragdoll | **Priority**: P1 | **Scope decision**: 2026-08-29 operator 批准只 sunset `global-distillation-f152` consumer surface；Phase 0/A/B 与 producer code 保留，durable artifacts 仅作 forensic evidence，不再进入 generic recall delivery。此决定不等于关闭整个 F152，也不是 utility verdict。",
+      "status": "closed (consolidated into F332; 未完成结果继续承接，非全部交付) | **Owner**: Ragdoll | **Priority**: P1",
       "file": "F152-expedition-memory.md"
     },
     {
@@ -1215,7 +1215,7 @@
     {
       "id": "F200",
       "name": "Memory Recall Eval — 基于猫真实行为的记忆系统反馈闭环",
-      "status": "in-progress | **Owner**: Ragdoll | **Priority**: P1",
+      "status": "closed (consolidated into F332; 未完成结果继续承接，非全部交付) | **Owner**: Ragdoll | **Priority**: P1",
       "file": "F200-memory-recall-eval.md"
     },
     {
@@ -1335,7 +1335,7 @@
     {
       "id": "F221",
       "name": "Taste Lane — per-user 品味导航",
-      "status": "in-progress | **Owner**: Ragdoll | **Priority**: P1",
+      "status": "closed (consolidated into F332; 未完成结果继续承接，非全部交付) | **Owner**: Ragdoll | **Priority**: P1",
       "file": "F221-taste-lane.md"
     },
     {
@@ -1371,7 +1371,7 @@
     {
       "id": "F227",
       "name": "Event Memory — 事件级记忆索引（拉闸记录）",
-      "status": "in-progress | **Owner**: Ragdoll Opus-4.8 | **Priority**: P1",
+      "status": "closed (consolidated into F332; 未完成结果继续承接，非全部交付) | **Owner**: Ragdoll Opus-4.8 | **Priority**: P1",
       "file": "F227-event-memory.md"
     },
     {
@@ -1395,7 +1395,7 @@
     {
       "id": "F231",
       "name": "启动胶囊 — per-user 画像注入与 L0 分层",
-      "status": "in-progress (Phase C 功能性完成；Phase D topology 代码已合入；live migration apply 暂停——relationship granularity 于 2026-07-12 重新打开，不能再把 individual primer 冲突预设为待合并内容) ；Phase E（shared profile corpus / owner-wide 层）**merged** PR #4416（squash `f7f0338bf7`，2026-09-08）——AC-E1/E2/E3 ✅） | **Owner**: Ragdoll（Ragdoll Fable-5）；topology repair owner: Maine Coon Sol | **Priority**: P1",
+      "status": "closed (consolidated into F332; 未完成结果继续承接，非全部交付) | **Owner**: Ragdoll（Ragdoll Fable-5）；topology repair owner: Maine Coon Sol | **Priority**: P1",
       "file": "F231-user-profile-capsule.md"
     },
     {
@@ -1455,7 +1455,7 @@
     {
       "id": "F243",
       "name": "Docs Discovery Profile — OKF-inspired metadata + generated index",
-      "status": "in-progress (Phase B/C + AC-C4 merged; Phase D baseline recorded; Phase E managed-index ownership moved to the post-merge finalizer on 2026-07-16; observation pending) | **Owner**: Ragdoll (Ragdoll Opus-4.7) | **Priority**: P1",
+      "status": "closed (consolidated into F332; 未完成结果继续承接，非全部交付) | **Owner**: Ragdoll (Ragdoll Opus-4.7) | **Priority**: P1",
       "file": "F243-docs-discovery-profile.md"
     },
     {
@@ -1527,7 +1527,7 @@
     {
       "id": "F256",
       "name": "Memory Search Strategy Evolution — 从被动召回到主动探索",
-      "status": "active | **Owner**: Ragdoll (opus-4.6) | **Priority**: P1",
+      "status": "closed (consolidated into F332; 未完成结果继续承接，非全部交付) | **Owner**: Ragdoll (opus-4.6) | **Priority**: P1",
       "file": "F256-memory-search-strategy-evolution.md"
     },
     {
@@ -1563,7 +1563,7 @@
     {
       "id": "F263",
       "name": "Memory Lifecycle Repair & Metrics — 记忆 lifecycle 修复与度量",
-      "status": "in-progress（Phase A/B/C complete；Phase D pending） | **Owner**: Ragdoll (fable-5，spec/plan own；Phase A/B 实现由 codex-sol 承接) | **Priority**: P1",
+      "status": "closed (consolidated into F332; 未完成结果继续承接，非全部交付) | **Owner**: Ragdoll (fable-5，spec/plan own；Phase A/B 实现由 codex-sol 承接) | **Priority**: P1",
       "file": "F263-memory-lifecycle-repair-and-metrics.md"
     },
     {
@@ -1605,7 +1605,7 @@
     {
       "id": "F271",
       "name": "Pragmatic Memory Reflection — 功利记忆写侧反射",
-      "status": "in-progress（Phase A + B implemented；Phase B 首次 live run 超时；Phase C 未开工） | **Owner**: Ragdoll（设计）+ 小太阳·Maine Coon（记忆边界） | **Priority**: P1",
+      "status": "closed (consolidated into F332; 未完成结果继续承接，非全部交付) | **Owner**: Ragdoll（设计）+ 小太阳·Maine Coon（记忆边界） | **Priority**: P1",
       "file": "F271-pragmatic-memory-reflection.md"
     },
     {
@@ -1635,7 +1635,7 @@
     {
       "id": "F276",
       "name": "People & Relationship Memory — 人物与关系记忆",
-      "status": "Phase A/B + live proposal-status resolver + pending-card atomic",
+      "status": "closed (consolidated into F332; 未完成结果继续承接，非全部交付) | **Owner**: 小太阳·Maine Coon (@codex-sol, GPT-5.6 Sol) | **Priority**: P1",
       "file": "F276-people-relationship-memory.md"
     },
     {
@@ -1845,19 +1845,19 @@
     {
       "id": "F314",
       "name": "Development Episode Alignment Experiment｜开发交付对齐自进化实验",
-      "status": "in-progress / Phase B accepted with its recorded exceptions; Phase C owner binding verified, operator accepts this period's insufficient anchor-effect evidence; bounded comparison delivered with content corrections, overall acceptance remains open | **Owner**: 小星星·Maine Coon（@codex-astra, GPT-6 Astra；方向与整体结果） | **Execution**: 小太阳·Maine Coon（@codex-sol, GPT-5.6 Sol；Task197；Task143 已完成） | **Priority**: P0",
+      "status": "in-progress / Phase B accepted with recorded exceptions; operator B accepts insufficient anchor evidence; method #5788 and published history v10 delivered, content/map design accepted; overall acceptance open, 18-cluster code refactor deferred | **Owner**: 小星星·Maine Coon（@codex-astra, GPT-6 Astra；方向与整体结果） | **Execution**: 小太阳·Maine Coon（@codex-sol, GPT-5.6 Sol；Task197；Task143 已完成） | **Priority**: P0",
       "file": "F314-development-episode-alignment-experiment.md"
     },
     {
       "id": "F315",
       "name": "Workspace Readability Remediation｜存量页面从内部对象回到用户任务",
-      "status": "in-progress | **Owner**: 小太阳·Maine Coon（@codex-sol, GPT-5.6 Sol） | **Priority**: P1",
+      "status": "done (superseded by F322; operator-directed scope consolidation) | **Completed**: 2026-10-23 | **Owner**: 小太阳·Maine Coon（@codex-sol, GPT-5.6 Sol） | **Priority**: P1",
       "file": "F315-workspace-readability-remediation.md"
     },
     {
       "id": "F316",
       "name": "Memory Coverage & Recall Truth｜记忆内容覆盖与真实召回验收",
-      "status": "in-progress | **Owner**: 小太阳·Maine Coon（@codex-sol, GPT-5.6 Sol）+ F316 总控线程责任猫 | **Priority**: P1",
+      "status": "closed (consolidated into F332; 未完成结果继续承接，非全部交付) | **Owner**: 小太阳·Maine Coon（@codex-sol, GPT-5.6 Sol）+ F316 总控线程责任猫 | **Priority**: P1",
       "file": "F316-memory-coverage-recall-truth.md"
     },
     {
@@ -1869,7 +1869,7 @@
     {
       "id": "F318",
       "name": "Claude Agent SDK Native Carrier — 对齐 Codex app-server 能力",
-      "status": "in-progress（Phase A ✅；Phase B SDK carrier 候选已合入（默认关闭）；freshness 通知能力已由 #1615 退役；Phase C/D 其余 carrier 能力未整体完成） | **Owner**: Ragdoll (@opus5, claude-opus-5) | **Priority**: P1",
+      "status": "done（operator 确认 A2A 整合后的当前接入完成；旧专项候选状态不再代表当前交付） | **Completed**: 2026-10-23 | **Owner**: Ragdoll (@opus5, claude-opus-5) | **Priority**: P1",
       "file": "F318-claude-agent-sdk-native-carrier.md"
     },
     {
@@ -1887,7 +1887,7 @@
     {
       "id": "F321",
       "name": "记忆星空与「经历 → 下一次」｜Memory Sky & Experience Loop",
-      "status": "in-progress | **Owner**: Ragdoll（@opus55, claude-opus-5-5）任指挥猫——编排、排序与验收，不写实现；各 Phase 执行猫另派 | **Priority**: P1",
+      "status": "closed (consolidated into F332; 未完成结果继续承接，非全部交付) | **Owner**: Ragdoll（@opus55, claude-opus-5-5）任指挥猫——编排、排序与验收，不写实现；各 Phase 执行猫另派 | **Priority**: P1",
       "file": "F321-memory-sky-experience-loop.md"
     },
     {
@@ -1905,7 +1905,7 @@
     {
       "id": "F324",
       "name": "Memory Delivery Reliability｜记忆交付可靠性与上下文成本收口",
-      "status": "in-progress（A/B/C 原 Task 已 satisfied；D 的 AC-D1 PASS、AC-D2 PARTIAL；boot48 图谱主附身份/完整原文正式通过，F276读取投影与F278有界扫描已有正式证据；消息检索完整旅程、长尾/自然恢复及AC-D3仍未结） | **Owner**: Astra（@codex-astra, gpt-6-astra）与 Opus55（@opus55, claude-opus-5-5），本指挥 thread 全体猫共同负责驱动与愿景守护 | **Priority**: P1",
+      "status": "closed (consolidated into F332; 未完成结果继续承接，非全部交付) | **Owner**: Astra（@codex-astra, gpt-6-astra）与 Opus55（@opus55, claude-opus-5-5），本指挥 thread 全体猫共同负责驱动与愿景守护 | **Priority**: P1",
       "file": "F324-memory-delivery-reliability.md"
     },
     {
@@ -1943,6 +1943,12 @@
       "name": "Feature Demos｜30 秒看一个功能",
       "status": "in-progress | **Owner**: Ragdoll (@opus55，片子与片单) · 家里的Maine Coon（Phase B 代码，由 You 派） | **Priority**: P2",
       "file": "F331-feature-demos.md"
+    },
+    {
+      "id": "F332",
+      "name": "经历参与判断 — 从共同经历到新情境的记忆",
+      "status": "in-progress (A1/A2/A3 读源修复已合入并通过 Alpha；其余设计/继承工作按原范围) | **Owner**: 小星星·Maine Coon (@codex-astra) | **Priority**: P1",
+      "file": "F332-experience-informed-memory.md"
     }
   ]
 }

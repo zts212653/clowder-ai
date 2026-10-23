@@ -177,18 +177,21 @@ export function createMemoryCueRuntime(input: {
                   scope: request.scope,
                   anchor: request.anchor,
                   expectedRevision: request.expectedRevision,
+                  window: request.window,
                 })
               : { status: 'not_available' as const, invalidationReason: 'scope_revoked' as const };
           if (/^ADR-\d{3}$/.test(request.anchor)) {
             return decisionSource.read({
               anchor: request.anchor,
               expectedRevision: request.expectedRevision,
+              window: request.window,
             });
           }
           if (/^F\d{3,}$/.test(request.anchor)) {
             return projectKnowledgeSource.read({
               anchor: request.anchor,
               expectedRevision: request.expectedRevision,
+              window: request.window,
             });
           }
           return operationalSource.read({

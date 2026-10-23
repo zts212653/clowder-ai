@@ -35,6 +35,17 @@ describe('F128ApprovalAdapter', () => {
     return proposal;
   };
 
+  it('retains requester withdrawal in owner history with the real closure time', async () => {
+    const store = new InMemoryProposalStore();
+    const proposal = createProposal(store);
+    const withdrawn = store.withdrawPending({ proposalId: proposal.proposalId, withdrawnBy: 'opus' });
+    const [row] = await new F128ApprovalAdapter(store).listSettled('user-1');
+    assert.equal(row?.status, 'withdrawn');
+    assert.equal(row?.decidedAt, withdrawn.withdrawnAt);
+    assert.equal(row?.decidedBy, 'opus');
+    assert.deepEqual(await new F128ApprovalAdapter(store).listSettled('foreign'), []);
+  });
+
   it('maps pending ThreadProposals to ApprovalItems', () => {
     const proposalStore = new InMemoryProposalStore();
     createProposal(proposalStore);

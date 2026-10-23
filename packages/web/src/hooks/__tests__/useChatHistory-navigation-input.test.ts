@@ -1557,6 +1557,48 @@ describe('useChatHistory navigation input owner', () => {
     });
   });
 
+  it.each([
+    117.5, 289.859375, 625,
+  ])('settles a fitting %ipx reply completely inside the history viewport after native arrival reflows', async (height) => {
+    const threadId = `short-reply-clipped-tail-${height}`;
+    const { el, top, second } = await openThread(threadId);
+    let shift = 0;
+    let renderedHeight = 93.5;
+    const viewport = { top: 129, bottom: 754, height: 625 };
+    el.getBoundingClientRect = () => viewport as DOMRect;
+    Object.defineProperty(el, 'clientHeight', { configurable: true, value: viewport.height });
+    Object.defineProperty(el, 'scrollHeight', { configurable: true, value: 5000 });
+    const rect = () =>
+      ({
+        top: 1500 + shift - top.get(),
+        bottom: 1500 + renderedHeight + shift - top.get(),
+        height: renderedHeight,
+      }) as DOMRect;
+    second.getBoundingClientRect = rect;
+    const target = second.querySelector<HTMLElement>('[data-message-id]')!;
+    target.getBoundingClientRect = rect;
+    target.scrollIntoView = vi.fn(() => top.set(1500 - viewport.top - (viewport.height - renderedHeight) / 2));
+
+    const receipt = capturedHook!.navigateToMessage('second');
+    act(() => flushAnimationFrames());
+    // A first native center alignment can be invalidated by deferred row
+    // layout. These are the two observed short heights and the exact-fit edge;
+    // the captured first-next target begins at 719.5 in a 129..754 viewport.
+    shift = 719.5 - (viewport.top + (viewport.height - renderedHeight) / 2);
+    renderedHeight = height;
+    await act(async () => {
+      for (let frame = 0; frame < 8; frame++) flushAnimationFrames();
+      await receipt;
+    });
+    expect(await receipt).toMatchObject({ status: 'settled', threadId, messageId: 'second' });
+    expect(target.getBoundingClientRect().top).toBeGreaterThanOrEqual(viewport.top - 1);
+    expect(target.getBoundingClientRect().bottom).toBeLessThanOrEqual(viewport.bottom + 1);
+    expect(readChatScrollState(threadId)).toMatchObject({
+      anchor: 'offset',
+      messageAnchor: { messageId: 'second', viewportOffsetPx: 0 },
+    });
+  });
+
   it('keeps a short reply centered when its full content remains visible', async () => {
     const { top, second } = await openThread('short-reply-centered');
     const rect = () => ({ top: 500 - top.get(), bottom: 800 - top.get(), height: 300 }) as DOMRect;

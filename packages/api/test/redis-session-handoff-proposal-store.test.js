@@ -228,6 +228,7 @@ describe('RedisSessionHandoffProposalStore', { skip: redisIsolationSkipReason(RE
   it('markExpired: pending|approving→expired, terminal stays', async () => {
     const p = await store.create(baseInput());
     assert.equal((await store.markExpired(p.proposalId)).status, 'expired');
+    assert.equal((await store.listSettledByUser('user_1'))[0]?.status, 'expired');
     const p2 = await store.create(baseInput());
     await store.claimForApproval(p2.proposalId);
     assert.equal((await store.markExpired(p2.proposalId)).status, 'expired', 'approving can expire');

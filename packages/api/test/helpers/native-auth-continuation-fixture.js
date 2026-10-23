@@ -171,6 +171,7 @@ export async function runNativeAuthContinuation(mode = 'confirmed', evidence = {
           if (unparsed !== undefined) yield unparsed;
           const unconfirmed = {
             'unknown-step': { step_type: 'future_native_effect' },
+            'anonymous-completion': { step_type: 'unknown', state: 'DONE', duration_seconds: 0.246786 },
             'unnamed-tool': { step_type: 'tool' },
             'blank-tool': { step_type: 'tool', tool_name: ' ' },
             'missing-step-index': { step_type: 'tool', tool_name: 'write_to_file', step_index: undefined },

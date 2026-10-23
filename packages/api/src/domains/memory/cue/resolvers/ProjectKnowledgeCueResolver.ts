@@ -41,7 +41,8 @@ export class ProjectKnowledgeCueResolver implements MemoryCueResolver {
         query: message.content,
         signal: context.signal,
       });
-      if (result.omission) context.recordOmission?.(result.omission);
+      for (const reason of result.omissions ?? (result.omission ? [result.omission] : []))
+        context.recordOmission?.(reason);
       return result.sources.map((source) =>
         buildCueEnvelope({
           opportunity,

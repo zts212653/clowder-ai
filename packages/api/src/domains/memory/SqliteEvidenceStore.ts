@@ -247,6 +247,15 @@ export class SqliteEvidenceStore implements IEvidenceStore {
     });
   }
 
+  async getEntityProposalEffectProof(
+    entityId: string,
+    proposalId: string,
+    ownerUserId: string,
+  ): Promise<string | null> {
+    this.ensureOpen();
+    return this.entityRegistry?.proposalEffectProof(entityId, proposalId, ownerUserId) ?? null;
+  }
+
   async getEntity(entityId: string): Promise<EntityRecord | null> {
     this.ensureOpen();
     return this.entityRegistry?.get(entityId) ?? null;

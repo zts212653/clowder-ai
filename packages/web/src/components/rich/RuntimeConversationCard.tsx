@@ -6,7 +6,9 @@ import type { RichInteractiveBlock } from '@/stores/chat-types';
 import { useChatStore } from '@/stores/chatStore';
 import { useShellCopy } from '../shell/shell-copy';
 import { syncReplyDraftToStorage } from '../thread-drafts';
+import { ApprovalResultRow } from './ApprovalResultRow';
 import { conversationDecisionCopy } from './conversation-decision.shell-copy';
+import { decisionResultCopy } from './decision-result.shell-copy';
 import { InteractiveBlock } from './InteractiveBlock';
 import {
   type ConversationRecord,
@@ -47,6 +49,7 @@ export function RuntimeConversationCard({
   onAnswerInText?: () => void;
 }) {
   const copy = useShellCopy(conversationDecisionCopy);
+  const resultCopy = useShellCopy(decisionResultCopy);
   const [record, setRecord] = useState<ConversationRecord | null>(null);
   const [owner, setOwner] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -179,6 +182,30 @@ export function RuntimeConversationCard({
           : terminal === 'defaulted'
             ? copy.defaulted
             : copy.expired;
+  if (aligned && record && record.status !== 'pending') {
+    const choices = record.request.presentation.options
+      .filter((option) => selectedIds.includes(option.id))
+      .map((option) => option.label);
+    const { label, status } = conversationResult(terminal, choices, copy, resultCopy);
+    return (
+      <section data-testid="runtime-conversation-card">
+        <div data-testid="conversation-decision-result">
+          <ApprovalResultRow status={status} label={label}>
+            <InteractiveBlock block={block} controller={{ copy, disabled: true, selectedIds, submit: () => {} }} />
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => void hydrate()}
+              className="shell-focusable text-xs hover:underline"
+            >
+              {copy.retry}
+            </button>
+            {secondaryActions}
+          </ApprovalResultRow>
+        </div>
+      </section>
+    );
+  }
   return (
     <section data-testid="runtime-conversation-card" className="space-y-3">
       <InteractiveBlock
@@ -211,3 +238,5 @@ export function RuntimeConversationCard({
     </section>
   );
 }
+
+import { conversationResult } from './conversation-result';

@@ -113,7 +113,13 @@ export async function readEvalRepairResult(
       ownerUserId: owner,
       terminal: {
         resolution,
-        ...(typeof settled.decidedAt === 'number' && Number.isFinite(settled.decidedAt)
+        ...(resolution === 'closed_without_decision' &&
+        (item.closedReason === 'expired' || item.closedReason === 'withdrawn')
+          ? { closedReason: item.closedReason }
+          : {}),
+        ...(item.detail.closureTimeUnknown !== true &&
+        typeof settled.decidedAt === 'number' &&
+        Number.isFinite(settled.decidedAt)
           ? { decidedAt: settled.decidedAt }
           : {}),
         ...(typeof settled.decidedBy === 'string' && settled.decidedBy ? { decidedBy: settled.decidedBy } : {}),

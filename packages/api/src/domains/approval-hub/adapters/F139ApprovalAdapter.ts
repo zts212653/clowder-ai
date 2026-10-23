@@ -2,6 +2,7 @@ import type { ApprovalItem, ScheduleMutationProposal, SettledApprovalItem } from
 import type { ScheduleMutationProposalStore } from '../../../infrastructure/scheduler/ScheduleMutationProposalStore.js';
 import type { IApprovalAdapter, ListSettledOpts } from '../ports/IApprovalAdapter.js';
 import { compactApprovalProjections, projectApprovalNavigation } from '../projectApprovalNavigation.js';
+import { projectSettledDecisionFacts } from '../settled-decision-facts.js';
 
 const DEFAULT_SETTLED_LIMIT = 50;
 
@@ -45,6 +46,7 @@ function toSettledItem(proposal: ScheduleMutationProposal): SettledApprovalItem 
   }
   const navigation = projectApprovalNavigation(proposal, {});
   if (!navigation) return null;
+  const decision = projectSettledDecisionFacts(proposal);
   return {
     proposalId: proposal.proposalId,
     sourceFeatureId: 'F139',
@@ -52,10 +54,10 @@ function toSettledItem(proposal: ScheduleMutationProposal): SettledApprovalItem 
     ownerUserId: proposal.ownerUserId,
     status: proposal.status,
     summary: summary(proposal),
-    detail: detail(proposal),
+    detail: { ...detail(proposal), ...decision.detail },
     navigation,
-    decidedAt: proposal.approvedAt ?? proposal.rejectedAt ?? 0,
-    decidedBy: proposal.approvedBy ?? proposal.rejectedBy ?? '',
+    decidedAt: decision.decidedAt,
+    decidedBy: decision.decidedBy,
     createdAt: proposal.createdAt,
   };
 }

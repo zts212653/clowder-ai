@@ -4,6 +4,7 @@ import type { UnifiedAttentionReadV1 } from '@cat-cafe/shared';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { apiFetch } from '@/utils/api-client';
 import { parseUnifiedAttentionRead } from './parse-unified-attention';
+import { UNIFIED_ATTENTION_INVALIDATION_EVENTS } from './unified-attention-events';
 import type { MailboxRead } from './unified-mailbox-state';
 
 /** F310's Host owner read. Pages remain independent owner-fenced reads, with 20 rows per request. */
@@ -11,15 +12,7 @@ export const UNIFIED_ATTENTION_PATH =
   '/api/concierge/work/decisions?view=unified&includeUserMentions=true&offset=0&limit=20&personalView=visible';
 
 /** The original invalidation chain: approvals (F246) and entrusted work / runtime interactions (F310). No new subscription. */
-export const UNIFIED_ATTENTION_INVALIDATION_EVENTS = [
-  'cat-cafe:proposal-updated',
-  'cat-cafe:proposal-created',
-  'cat-cafe:runtime-interaction-updated',
-  'cat-cafe:entrusted-work-projection-invalidated',
-  'cat-cafe:user-mention-updated',
-  'cat-cafe:ignored-item-preferences-updated',
-  'cat-cafe:collective-attention-invalidated',
-] as const;
+export { UNIFIED_ATTENTION_INVALIDATION_EVENTS } from './unified-attention-events';
 
 export type MentionPeriod = 'recent' | 'today' | 'week' | 'earlier' | 'handled';
 export type MailboxPersonalView = 'visible' | 'ignored';

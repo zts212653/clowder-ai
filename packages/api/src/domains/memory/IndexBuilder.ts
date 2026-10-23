@@ -43,6 +43,7 @@ import { type PassageVectorStore, passageVectorKey } from './PassageVectorStore.
 import { type DocumentPassageSource, replaceDocumentPassages } from './replace-document-passages.js';
 import type { SqliteEvidenceStore } from './SqliteEvidenceStore.js';
 import { SIGNAL_FLAGS } from './summary-config.js';
+import { projectThreadMessageSummary } from './thread-summary-projection.js';
 import type { VectorStore } from './VectorStore.js';
 import { createVectorInvalidator } from './vector-invalidation.js';
 
@@ -67,8 +68,9 @@ import { createVectorInvalidator } from './vector-invalidation.js';
  *  13 — pathToAuthority normalizes Windows backslash source paths (re-derive authority)
  *  14 — F321: quote text and owner comments backfill into canonical message passages
  *  15 — explicitly anchored supporting docs retain feature keywords across all scanners
+ *  16 — split lessons hash and index their exact section body rather than only the title
  */
-export const INDEXING_VERSION = 15;
+export const INDEXING_VERSION = 16;
 
 /** Higher number = higher priority for anchor ownership */
 const KIND_PRIORITY: Record<EvidenceKind, number> = {
@@ -1087,17 +1089,7 @@ export class IndexBuilder implements IIndexBuilder {
     let summary = '';
     if (this.messageListFn) {
       try {
-        const messages = (await this.messageListFn(thread.id, 100)).filter((message) => !suppressed.has(message.id));
-        if (messages.length > 0) {
-          const turns = messages
-            .map((message) => {
-              const content = buildSearchableMessageContent(message);
-              return content ? `[${message.catId ?? 'user'}] ${content}` : '';
-            })
-            .filter(Boolean);
-          const joined = turns.join('\n');
-          summary = joined.length > 3000 ? `${joined.slice(0, 2997)}...` : joined;
-        }
+        summary = projectThreadMessageSummary(await this.messageListFn(thread.id, 100), suppressed);
       } catch {
         // Message projection is fail-open; the title remains the minimal index body.
       }

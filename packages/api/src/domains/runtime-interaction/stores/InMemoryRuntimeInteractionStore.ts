@@ -219,6 +219,20 @@ export class InMemoryRuntimeInteractionStore implements RuntimeInteractionStore 
       .map(clone);
   }
 
+  async listSettledByUser(userId: string, limit: number): Promise<RuntimeInteractionRecord[]> {
+    return [...this.records.values()]
+      .filter(
+        (record) =>
+          record.request.owner.userId === userId &&
+          record.cardRef &&
+          record.terminal &&
+          !isRuntimeInteractionActive(record),
+      )
+      .sort((left, right) => right.terminal!.settledAt - left.terminal!.settledAt)
+      .slice(0, limit)
+      .map(clone);
+  }
+
   private invalidateMatching(
     predicate: (record: RuntimeInteractionRecord) => boolean,
     reasonCode: RuntimeInteractionTerminalReasonCode,

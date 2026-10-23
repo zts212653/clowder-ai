@@ -178,6 +178,11 @@ for (const language of ['zh', 'en'])
       const partialEffects = (await source.effects()).find((r) => r.proposalId === selected.proposalId);
       assert.equal(partialEffects.claims.length, 1);
       await freeze(page, card, path.join(evidence, 'Chat-partial.png'));
+      assert.equal(
+        await card.getByTestId('decision-result-label').count(),
+        0,
+        'A partial decision keeps the remaining selector open',
+      );
       await enabled(card.getByTestId('person-memory-undo'));
       const undone = await postThrough(page, selected, 'undo', responses, () =>
         card.getByTestId('person-memory-undo').click(),
@@ -203,15 +208,57 @@ for (const language of ['zh', 'en'])
       const complete = await approve(page, card, selected, responses);
       assert.equal(complete.status, 'materialized');
       assert.equal((await source.effects()).find((r) => r.proposalId === selected.proposalId).claims.length, 2);
+      await card.getByTestId('decision-result-label').waitFor();
+      await freeze(page, card, path.join(evidence, 'Chat-written-collapsed.png'));
+      await card.locator('button[aria-expanded="false"]').click();
       await enabled(card.getByTestId('person-memory-undo'));
       assert.match(await card.locator('h3').innerText(), /Lin Chat approve/);
       await freeze(page, card, path.join(evidence, 'Chat-written.png'));
+      await page.getByTestId('mailbox-button').click();
+      const coldWritten = page.locator(
+        `[data-testid="mailbox-settled-result"][data-decision-key='${JSON.stringify(['F276', selected.proposalId])}']`,
+      );
+      await coldWritten.getByTestId('decision-result-label').waitFor();
+      assert.match(
+        await coldWritten.getByTestId('decision-result-label').innerText(),
+        language === 'en' ? /Written to memory.*Lin Chat approve/ : /已写入.*Lin Chat approve/,
+      );
+      await freeze(page, coldWritten, path.join(evidence, 'Inbox-cold-materialized-collapsed.png'));
+      await coldWritten.locator('button[aria-expanded="false"]').click();
+      await coldWritten.getByTestId('approval-receipt-original').waitFor();
+      assert.match(
+        await coldWritten.getByTestId('approval-receipt-original').innerText(),
+        language === 'en' ? /Lin enjoys hiking/ : /林喜欢爬山/,
+      );
+      await enabled(coldWritten.getByTestId('person-memory-undo'));
+      assert.equal(
+        await coldWritten.locator('form, input, textarea, [data-testid="person-memory-approve-selected"]').count(),
+        0,
+      );
+      await freeze(page, coldWritten, path.join(evidence, 'Inbox-cold-materialized-original.png'));
+      await page.getByTestId('mailbox-close').click();
       await postThrough(page, selected, 'undo', responses, () => card.getByTestId('person-memory-undo').click());
       await card
         .getByTestId('person-memory-result')
-        .filter({ hasText: language === 'en' ? 'Withdrawn' : '已撤回' })
+        .filter({ hasText: language === 'en' ? 'This write was undone' : '已撤销本次写入' })
         .waitFor();
-      await reject(page, page.locator(`[data-rich-block-id="${rejected.block.id}"]`), rejected, responses);
+      const partialRejected = page.locator(`[data-rich-block-id="${rejected.block.id}"]`);
+      await enabled(partialRejected.getByTestId('person-memory-approve-selected'));
+      await partialRejected.locator('input[type="checkbox"]').nth(1).uncheck();
+      assert.equal((await approve(page, partialRejected, rejected, responses)).status, 'partially_materialized');
+      await page.waitForFunction(
+        (id) =>
+          document.querySelector(`[data-rich-block-id="${id}"]`)?.querySelectorAll('input[type="checkbox"]').length ===
+          1,
+        rejected.block.id,
+      );
+      await reject(page, partialRejected, rejected, responses);
+      await partialRejected
+        .getByTestId('decision-result-label')
+        .filter({ hasText: language === 'en' ? 'Part written' : '已写入部分' })
+        .waitFor();
+      assert.equal((await source.effects()).find((r) => r.proposalId === rejected.proposalId).claims.length, 1);
+
       await freeze(
         page,
         page.locator(`[data-rich-block-id="${rejected.block.id}"]`),
@@ -234,6 +281,24 @@ for (const language of ['zh', 'en'])
         assert.ok(openBox.x + openBox.width >= rowBox.x + rowBox.width - 32, 'Original actions stay right aligned');
         await freeze(page, current, path.join(evidence, `Inbox-${record.verb}-before.png`));
         if (record.verb === 'reject') {
+          // Historical partial Undo is retained as an epoch marker, then a fresh reject is the final disposition.
+          await current.locator('input[type="checkbox"]').nth(1).uncheck();
+          assert.equal((await approve(page, current, record, responses)).status, 'partially_materialized');
+          await enabled(current.getByTestId('person-memory-undo'));
+          assert.equal(
+            (
+              await postThrough(page, record, 'undo', responses, () =>
+                current.getByTestId('person-memory-undo').click(),
+              )
+            ).status,
+            'pending_approval',
+          );
+          await page.waitForFunction(
+            (id) =>
+              document.querySelector(`[data-testid="approval-item-${id}"]`)?.querySelectorAll('input[type="checkbox"]')
+                .length === 2,
+            record.proposalId,
+          );
           await reject(page, current, record, responses);
           continue;
         }
@@ -254,9 +319,10 @@ for (const language of ['zh', 'en'])
         await freeze(page, current, path.join(evidence, 'Inbox-partial.png'));
         const whole = await approve(page, current, record, responses);
         assert.equal(whole.status, 'materialized');
-        const result = panel
-          .getByTestId('mailbox-retained-result')
-          .filter({ has: page.getByTestId('person-memory-undo') });
+        const result = panel.getByTestId('mailbox-retained-result').filter({ hasText: 'Lin Inbox approve' });
+        await result.getByTestId('decision-result-label').waitFor();
+        await freeze(page, result, path.join(evidence, 'Inbox-result-collapsed.png'));
+        await result.locator('button[aria-expanded="false"]').click();
         await enabled(result.getByTestId('person-memory-undo'));
         assert.match(await result.getByTestId('person-memory-result-subject').innerText(), /Lin Inbox approve/);
         await freeze(page, result, path.join(evidence, 'Inbox-result-with-undo.png'));
@@ -264,21 +330,34 @@ for (const language of ['zh', 'en'])
           result.getByTestId('person-memory-undo').click(),
         );
         assert.equal(resultUndo.status, 'withdrawn');
-        await panel.getByTestId('person-memory-undo-result').waitFor();
+        await result
+          .getByTestId('decision-result-label')
+          .filter({
+            hasText: language === 'en' ? 'This write was undone' : '已撤销本次写入',
+          })
+          .waitFor();
+        await freeze(page, result, path.join(evidence, 'Inbox-undone-collapsed.png'));
+        await result.locator('button[aria-expanded="false"]').click();
+        await result.getByTestId('person-memory-undo-result').waitFor();
         await freeze(page, panel, path.join(evidence, 'Inbox-undone.png'));
       }
+      const replacement = await source.createReplacement(chatRecords[0].thread);
+      const personWritesBeforeCold = fixture.mutations.filter((request) =>
+        request.path.startsWith('/api/person-memory-proposals/'),
+      ).length;
       const effects = await source.effects();
       for (const record of source.records) {
         const effect = effects.find((r) => r.proposalId === record.proposalId);
         assert.equal(effect.candidate.state, record.verb === 'approve' ? 'withdrawn' : 'rejected');
         assert.equal(effect.candidateTtl, -1);
-        assert.equal(effect.claims.length, record.verb === 'approve' ? 1 : 0);
+        assert.equal(effect.claims.length, record.verb === 'approve' || record.entrance === 'Chat' ? 1 : 0);
       }
       await page.getByTestId('mailbox-close').click();
       assert.equal(await draft.inputValue(), draftText);
       await page.reload();
-      await page.locator(`[data-rich-block-id="${selected.block.id}"]`).getByTestId('person-memory-result').waitFor();
-      await page.locator(`[data-rich-block-id="${rejected.block.id}"]`).getByTestId('person-memory-result').waitFor();
+      await page.locator(`[data-rich-block-id="${selected.block.id}"]`).getByTestId('decision-result-label').waitFor();
+      await page.locator(`[data-rich-block-id="${selected.block.id}"] button[aria-expanded="false"]`).click();
+      await page.locator(`[data-rich-block-id="${rejected.block.id}"]`).getByTestId('decision-result-label').waitFor();
       assert.match(
         await page.locator(`[data-rich-block-id="${selected.block.id}"]`).locator('h3').innerText(),
         /Lin Chat approve/,
@@ -288,13 +367,124 @@ for (const language of ['zh', 'en'])
         page.locator(`[data-rich-block-id="${selected.block.id}"]`),
         path.join(evidence, 'Chat-cold-result.png'),
       );
+      assert.match(
+        await page
+          .locator(`[data-rich-block-id="${rejected.block.id}"]`)
+          .getByTestId('decision-result-label')
+          .innerText(),
+        language === 'en' ? /Part written.*Rest declined/ : /已写入部分.*已拒绝其余/,
+      );
+      await freeze(
+        page,
+        page.locator(`[data-rich-block-id="${rejected.block.id}"]`),
+        path.join(evidence, 'Chat-cold-part-written-rest-declined.png'),
+      );
+      const replacementChat = page.locator(`[data-rich-block-id="${replacement.original.block.id}"]`);
+      const closed = language === 'en' ? 'Closed' : '已关闭';
+      const withdrawn = language === 'en' ? 'Withdrawn' : '已撤回';
+      const undoneText = language === 'en' ? 'This write was undone' : '已撤销本次写入';
+      await replacementChat.getByTestId('decision-result-label').waitFor();
+      assert.ok((await replacementChat.getByTestId('decision-result-label').innerText()).includes(closed));
+      const chatDot = await replacementChat.getByTestId('decision-result-dot').boundingBox();
+      assert.equal(chatDot?.width, 8);
+      assert.equal(chatDot?.height, 8);
+      await replacementChat.locator('button[aria-expanded="false"]').click();
+      assert.equal(await replacementChat.getByTestId('person-memory-result').innerText(), closed);
+      assert.ok(!(await replacementChat.innerText()).includes(withdrawn));
+      assert.ok(!(await replacementChat.innerText()).includes(undoneText));
+      assert.equal(
+        await replacementChat.locator('form, input, select, textarea, [data-testid="person-memory-undo"]').count(),
+        0,
+      );
+      await freeze(
+        page,
+        replacementChat.getByTestId('decision-result-label'),
+        path.join(evidence, 'replacement-Chat-cold-header.png'),
+      );
+      await freeze(
+        page,
+        replacementChat.getByTestId('person-memory-result'),
+        path.join(evidence, 'replacement-Chat-cold-expanded.png'),
+      );
       await page.getByTestId('mailbox-button').click();
       await panel.getByTestId('approval-item-inbox-native-approve').waitFor();
-      for (const record of source.records)
+      for (const record of source.records) {
         assert.equal(await panel.getByTestId(`approval-item-${record.proposalId}`).count(), 0);
-      assert.ok(!fixture.reads.at(-1).items.some((item) => item.approval?.sourceFeatureId === 'F276'));
+        const receipt = panel.locator(
+          `[data-testid="mailbox-settled-result"][data-decision-key='${JSON.stringify(['F276', record.proposalId])}']`,
+        );
+        await receipt.getByTestId('decision-result-label').waitFor();
+        assert.match(
+          await receipt.getByTestId('decision-result-label').innerText(),
+          language === 'en' ? /Person memory/ : /记人的记忆/,
+        );
+        assert.match(
+          await receipt.getByTestId('decision-result-label').innerText(),
+          record.verb === 'approve'
+            ? language === 'en'
+              ? /This write was undone/
+              : /已撤销本次写入/
+            : record.entrance === 'Chat'
+              ? language === 'en'
+                ? /Part written.*Rest declined/
+                : /已写入部分.*已拒绝其余/
+              : language === 'en'
+                ? /Declined/
+                : /已拒绝/,
+        );
+        await freeze(page, receipt, path.join(evidence, `${record.proposalId}-cold-collapsed.png`));
+        assert.equal(
+          await receipt.getByTestId('decision-result-dot').getAttribute('data-status'),
+          record.verb === 'approve' ? 'withdrawn' : 'rejected',
+        );
+        await receipt.locator('button[aria-expanded="false"]').click();
+        await receipt.getByTestId('approval-receipt-original').waitFor();
+        assert.match(await receipt.getByTestId('approval-receipt-original').innerText(), /Hangzhou|杭州/);
+        assert.equal(
+          await receipt.locator('form, input, select, textarea, [data-testid="person-memory-undo"]').count(),
+          0,
+        );
+        const textAfterDisclosure = await receipt.getByTestId('decision-result-label').innerText();
+        if (record.verb === 'reject') {
+          assert.ok(!textAfterDisclosure.includes(language === 'en' ? 'This write was undone' : '已撤销本次写入'));
+          if (record.entrance === 'Chat')
+            assert.match(
+              textAfterDisclosure,
+              language === 'en' ? /Part written.*Rest declined/ : /已写入部分.*已拒绝其余/,
+            );
+        }
+        await freeze(page, receipt, path.join(evidence, `${record.proposalId}-cold-original.png`));
+      }
+      const replacementInbox = panel.locator(
+        `[data-testid="mailbox-settled-result"][data-decision-key='${JSON.stringify(['F276', replacement.original.proposalId])}']`,
+      );
+      await replacementInbox.getByTestId('decision-result-label').waitFor();
+      assert.ok((await replacementInbox.getByTestId('decision-result-label').innerText()).includes(closed));
+      const inboxDot = await replacementInbox.getByTestId('decision-result-dot').boundingBox();
+      assert.equal(inboxDot?.width, 8);
+      assert.equal(inboxDot?.height, 8);
+      await replacementInbox.locator('button[aria-expanded="false"]').click();
+      await replacementInbox.getByTestId('approval-receipt-original').waitFor();
+      assert.equal(await replacementInbox.locator('output').innerText(), closed);
+      assert.ok(!(await replacementInbox.innerText()).includes(withdrawn));
+      assert.ok(!(await replacementInbox.innerText()).includes(undoneText));
+      assert.equal(
+        await replacementInbox.locator('form, input, select, textarea, [data-testid="person-memory-undo"]').count(),
+        0,
+      );
+      await freeze(page, replacementInbox, path.join(evidence, 'replacement-Inbox-cold-expanded.png'));
+      const pendingPerson = fixture.reads.at(-1).items.filter((item) => item.approval?.sourceFeatureId === 'F276');
+      assert.deepEqual(
+        pendingPerson.map((item) => item.approval.proposalId),
+        [replacement.successor.proposalId],
+      );
+      assert.equal(
+        fixture.mutations.filter((request) => request.path.startsWith('/api/person-memory-proposals/')).length,
+        personWritesBeforeCold,
+        'Cold Chat/Inbox disclosure must not issue a person-memory write',
+      );
       assert.deepEqual(errors, []);
-      await freeze(page, panel, path.join(evidence, 'Inbox-cold-retired.png'));
+      await freeze(page, panel, path.join(evidence, 'Inbox-cold-results-retained.png'));
       await writeFile(
         path.join(evidence, 'proof.json'),
         JSON.stringify(
@@ -303,12 +493,13 @@ for (const language of ['zh', 'en'])
             width,
             responses,
             effects,
+            replacement,
             reads: fixture.reads,
             mutations: fixture.mutations,
             errors,
             draftPreserved: true,
             boundary:
-              'Actual Next, original F276 Ingress/adapter/decision routes and Redis Lua store on development6398/db15 with unique owned namespace. Partial selection, exact undo, reapprove after undo, feedback rejection and canonical cold retirement. No runtime/provider or whole17 acceptance.',
+              'Actual Next, original F276 Ingress/adapter/decision routes and Redis Lua store on development6398/db15 with unique owned namespace. Partial selection, exact undo, reapprove, feedback rejection and cold retained results. Replacement precondition uses real producer partial approve, Undo reopen and atomic successor publication; Chat/Inbox disclose the replaced original read-only and preserve the genuinely pending successor. No runtime/provider or whole17 acceptance.',
           },
           null,
           2,

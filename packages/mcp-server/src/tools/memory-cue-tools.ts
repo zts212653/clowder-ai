@@ -1,10 +1,15 @@
 import { randomUUID } from 'node:crypto';
+import { type MemoryCueDocumentWindowRequest, memoryCueDocumentWindowRequestSchema } from '@cat-cafe/shared';
 import { z } from 'zod';
-import { defineMcpMigrationFactory } from '../tool-governance-migration.js';
+import { defineMcpCanonicalFactory, defineMcpMigrationFactory } from '../tool-governance-migration.js';
 
 import type { ToolResult } from './file-tools.js';
 
 const defineTool = defineMcpMigrationFactory('memory-cue-tools.ts', './tools/callback-tools.js', {
+  resourceFamily: 'memory-cue',
+  authority: 'callback-owner-private',
+});
+const defineDocumentDrill = defineMcpCanonicalFactory('memory-cue-tools.ts', './tools/callback-tools.js', {
   resourceFamily: 'memory-cue',
   authority: 'callback-owner-private',
 });
@@ -28,6 +33,11 @@ const clientRequestIdSchema = z
 export const drillMemoryCueInputSchema = {
   handle: opaqueHandleSchema,
   clientRequestId: clientRequestIdSchema,
+  window: memoryCueDocumentWindowRequestSchema
+    .optional()
+    .describe(
+      'Canonical project documents only: locate a phrase with query, or continue with nextOffset as offset. Omit for the initial window. Never changes source or revision.',
+    ),
 };
 
 export const recordMemoryCueOutcomeInputSchema = {
@@ -37,10 +47,15 @@ export const recordMemoryCueOutcomeInputSchema = {
 };
 
 export function createMemoryCueTools(callbackPost: CallbackPost) {
-  const handleDrillMemoryCue = (input: { handle: string; clientRequestId?: string }) =>
+  const handleDrillMemoryCue = (input: {
+    handle: string;
+    clientRequestId?: string;
+    window?: MemoryCueDocumentWindowRequest;
+  }) =>
     callbackPost('/api/callbacks/memory-cues/drill', {
       handle: input.handle,
       requestId: input.clientRequestId ?? `memory-cue-drill-${randomUUID()}`,
+      ...(input.window ? { window: input.window } : {}),
     });
 
   const handleRecordMemoryCueOutcome = (input: {
@@ -58,14 +73,16 @@ export function createMemoryCueTools(callbackPost: CallbackPost) {
     handleDrillMemoryCue,
     handleRecordMemoryCueOutcome,
     tools: [
-      defineTool({
+      defineDocumentDrill({
         name: 'cat_cafe_drill_memory_cue',
         description:
           'Read the current canonical source behind an owner-authenticated CueEnvelope. ' +
-          'Use when its bounded projection is insufficient. ' +
-          'Output: owner-visible payload; not_available if gone or revoked; retryable source_read_failed on reader failure. ' +
+          'Use when its bounded projection is insufficient, or to locate a heading/phrase and continue a long project document. ' +
+          'Output: owner-visible payload; canonical project documents include sourcePath/sourceRevision, contentRange (UTF-16 code units, end exclusive), contentTruncated, nextOffset and location status. ' +
+          'Use window.query for case-insensitive literal lookup, or window.offset=nextOffset to continue with the same handle; each page contains at most 4000 code units. A not_found lookup returns the initial window honestly; nextOffset=null means end. ' +
+          'not_available if gone or revoked; retryable source_read_failed on reader failure. ' +
           'NOT for raw search, bulk recall, caller-supplied coordinates, or cross-thread replay. ' +
-          'GOTCHA: owner/thread/invocation scope, visibility, expiry, and current source revision are revalidated; restart, correction, or forget closes the handle.',
+          'GOTCHA: window is supported only for canonical project document cues; omit it for other families. Owner/thread/invocation scope, visibility, expiry, and current source revision are revalidated for every page; restart, correction, or forget closes the handle.',
         inputSchema: drillMemoryCueInputSchema,
         handler: handleDrillMemoryCue,
         governance: {

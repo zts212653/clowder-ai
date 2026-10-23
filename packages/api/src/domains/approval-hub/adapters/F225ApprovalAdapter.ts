@@ -5,9 +5,9 @@
  * ApprovalItem DTOs. inlineApprovable = false (F225 needs session context —
  * Hub shows a "jump to thread" action, not inline approve). Stale threshold: 24h.
  *
- * Phase G (F246): adds listSettled() — surfaces approved/rejected proposals in
+ * Settled history surfaces approved/rejected/expired proposals in
  * the approval history tab using listSettledByUser() added to the store.
- * decidedAt = updatedAt (set at approve/reject time); decidedBy = userId (always operator).
+ * decidedAt = updatedAt at the actual transition; expiry has no human decider.
  */
 
 import type { ApprovalItem, SessionHandoffProposal, SettledApprovalItem } from '@cat-cafe/shared';
@@ -70,14 +70,13 @@ function toSettledItem(p: SessionHandoffProposal): SettledApprovalItem | null {
     legacyMessageId: p.cardMessageId,
   });
   if (!navigation) return null;
-  // F225 has no dedicated decidedBy field — the decision-maker is always the operator (userId).
-  // updatedAt is set to Date.now() at approve/reject time, so it serves as decidedAt.
+  // Only approve/reject are operator decisions. System expiry retains its time without a human actor.
   return {
     proposalId: p.proposalId,
     sourceFeatureId: 'F225' as const,
     requesterCatId: p.sourceCatId,
     ownerUserId: p.userId,
-    status: p.status as 'approved' | 'rejected',
+    status: p.status as 'approved' | 'rejected' | 'expired',
     summary: `Session handoff: ${p.sourceCatId} → ${p.note.done.slice(0, 60)}`,
     detail: {
       done: p.note.done,
@@ -89,7 +88,7 @@ function toSettledItem(p: SessionHandoffProposal): SettledApprovalItem | null {
     },
     navigation,
     decidedAt: p.updatedAt,
-    decidedBy: p.userId,
+    decidedBy: p.status === 'expired' ? '' : p.userId,
     createdAt: p.createdAt,
   };
 }

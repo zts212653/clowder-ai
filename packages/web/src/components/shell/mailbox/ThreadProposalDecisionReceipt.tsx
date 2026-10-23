@@ -16,11 +16,17 @@ export function ThreadProposalDecisionReceipt({
   terminal,
   line,
   children,
+  authorizeOpen,
+  onExpandedChange,
+  resolveThreadId,
 }: {
   approval: UnifiedAttentionVisibleApproval;
-  terminal: Terminal & { resolution: 'accepted' | 'rejected' };
+  terminal: Terminal;
   line: string | null;
   children?: ReactNode;
+  authorizeOpen?: () => boolean;
+  onExpandedChange?: (expanded: boolean) => void;
+  resolveThreadId?: () => Promise<string | null>;
 }) {
   const { lead, title } = useApprovalHeading(approval);
   const t = useShellCopy(proposalResultCopy);
@@ -30,10 +36,19 @@ export function ThreadProposalDecisionReceipt({
     : null;
   return (
     <ThreadProposalResult
-      status={terminal.resolution === 'accepted' ? 'approved' : 'rejected'}
+      status={
+        terminal.resolution === 'accepted'
+          ? 'approved'
+          : terminal.resolution === 'rejected'
+            ? 'rejected'
+            : (terminal.closedReason ?? 'closed')
+      }
       decidedAt={terminal.decidedAt}
       effectUnknown={terminal.effectUnknown}
       threadId={terminal.effectUnknown ? undefined : terminal.threadId}
+      authorizeOpen={authorizeOpen}
+      onExpandedChange={onExpandedChange}
+      resolveThreadId={resolveThreadId}
     >
       <div>
         <span className="font-semibold">{lead} </span>

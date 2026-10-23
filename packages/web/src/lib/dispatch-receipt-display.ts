@@ -8,6 +8,7 @@ export function isUnconfirmedAppend(
     ref &&
       ref.inputRead?.status !== 'read' &&
       ref.appendAcceptance !== 'accepted' &&
+      ref.appendAcceptance !== 'written' &&
       (ref.appendAcceptance === 'pending' ||
         metadata?.appendFailures?.some(
           (failure) =>

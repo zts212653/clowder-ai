@@ -155,6 +155,10 @@ export function registerInformationJourneys(evidenceRoot) {
           render.push({ entrance: 'Chat', kind: record.kind, before, box: await card.boundingBox() });
           await page.screenshot({ path: path.join(evidence, `chat-${record.kind}-before.png`), fullPage: true });
           await press(page, card, record, 'reject', responses);
+          await card.getByTestId('decision-result-label').waitFor();
+          await freeze(page, card);
+          await page.screenshot({ path: path.join(evidence, `chat-${record.kind}-collapsed.png`), fullPage: true });
+          await card.locator('button[aria-expanded="false"]').click();
           await card.getByTestId('domain-approval-result').waitFor();
           await freeze(page, card);
           assert.match(
@@ -241,7 +245,7 @@ export function registerInformationJourneys(evidenceRoot) {
           await page.screenshot({ path: path.join(evidence, `inbox-${record.kind}-result.png`), fullPage: true });
         }
         const states = await readStates(source);
-        assert.ok(states.every((s) => s.proposal.status === (s.verb === 'approve' ? 'approved' : 'rejected')));
+        assert.ok(states.every((s) => s.proposal.status === (s.verb === 'reject' ? 'rejected' : 'approved')));
         const effects = await source.effects();
         assert.equal(effects.deliveries.length, 1);
         assert.equal(effects.targetMessages.length, 1);
@@ -259,16 +263,101 @@ export function registerInformationJourneys(evidenceRoot) {
           assert.ok(resultCards.some((text) => text.includes(kind)));
         await page.getByTestId('mailbox-close').click();
         assert.equal(await draft.inputValue(), draftText);
+        const [superseded] = await source.createSuperseded(chatRecords[0].thread);
         await page.reload();
-        for (const record of chatRecords)
-          await page
-            .locator(`[data-rich-block-id="${record.block.id}"]`)
-            .getByTestId('domain-approval-result')
-            .waitFor();
+        for (const record of chatRecords) {
+          const card = page.locator(`[data-rich-block-id="${record.block.id}"]`);
+          await card.getByTestId('decision-result-label').waitFor();
+          await card.locator('button[aria-expanded="false"]').click();
+          await card.getByTestId('domain-approval-result').waitFor();
+        }
         await page.screenshot({ path: path.join(evidence, 'chat-cold-results.png'), fullPage: true });
+        const oldChat = page.locator(`[data-rich-block-id="${superseded.block.id}"]`);
+        await oldChat.getByTestId('decision-result-label').waitFor();
+        assert.equal(await oldChat.getByTestId('decision-result-dot').getAttribute('data-status'), 'closed');
+        assert.equal(
+          await oldChat.locator('form, input, [data-testid="approve-btn"], [data-testid="reject-btn"]').count(),
+          0,
+        );
+        await oldChat.screenshot({ path: path.join(evidence, 'F193-superseded-chat-cold.png') });
         await page.getByTestId('mailbox-button').click();
         await page.getByTestId('approval-item-inbox-native-approve').waitFor();
         assert.equal(await page.locator('[data-testid^="approval-item-information-"]').count(), 0);
+        const oldInbox = page.locator(
+          `[data-testid="mailbox-settled-result"][data-decision-key='${JSON.stringify(['F193', superseded.proposalId])}']`,
+        );
+        await oldInbox.getByTestId('decision-result-label').waitFor();
+        assert.equal(await oldInbox.getByTestId('decision-result-dot').getAttribute('data-status'), 'closed');
+        await oldInbox.locator('button[aria-expanded="false"]').click();
+        assert.match(await oldInbox.innerText(), /This assignment was replaced by a newer request/);
+        assert.equal(
+          await oldInbox.locator('form, input, [data-testid="approve-btn"], [data-testid="reject-btn"]').count(),
+          0,
+        );
+        await oldInbox.screenshot({ path: path.join(evidence, 'F193-superseded-inbox-cold.png') });
+        const coldEffects = [];
+        await page.getByTestId('mailbox-close').click();
+        for (const verb of ['approve', 'unknown']) {
+          const records = source.records.filter((r) => r.verb === verb && ['F193', 'F260'].includes(r.kind));
+          await page.goto(`${base}/thread/${records[0].thread.id}?shell=v2`);
+          for (const record of records) {
+            const card = page.locator(`[data-rich-block-id="${record.block.id}"]`);
+            const expected =
+              verb === 'unknown'
+                ? language === 'en'
+                  ? 'Effect not yet confirmed'
+                  : '效果暂未确认'
+                : record.kind === 'F193'
+                  ? language === 'en'
+                    ? 'Original message delivered'
+                    : '原消息已送达'
+                  : language === 'en'
+                    ? 'Entity written'
+                    : '实体已写入';
+            await card.getByTestId('decision-result-label').filter({ hasText: expected }).waitFor();
+            await freeze(page, card);
+            await card.screenshot({ path: path.join(evidence, `${record.kind}-${verb}-chat-cold.png`) });
+            coldEffects.push({ entrance: 'Chat', kind: record.kind, verb, text: await card.innerText() });
+            await card.locator('button[aria-expanded="false"]').click();
+            assert.equal(
+              await card.locator('[data-testid="approve-btn"], [data-testid="reject-btn"], form, input').count(),
+              0,
+            );
+          }
+          await page.getByTestId('mailbox-button').click();
+          for (const record of records) {
+            const row = page.locator(
+              `[data-testid="mailbox-settled-result"][data-decision-key='${JSON.stringify([record.kind, record.proposalId])}']`,
+            );
+            const expected =
+              verb === 'unknown'
+                ? language === 'en'
+                  ? 'Effect not yet confirmed'
+                  : '效果暂未确认'
+                : record.kind === 'F193'
+                  ? language === 'en'
+                    ? 'Original message delivered'
+                    : '原消息已送达'
+                  : language === 'en'
+                    ? 'Entity written'
+                    : '实体已写入';
+            await row.getByTestId('decision-result-label').filter({ hasText: expected }).waitFor();
+            await freeze(page, row);
+            await row.screenshot({ path: path.join(evidence, `${record.kind}-${verb}-inbox-cold.png`) });
+            coldEffects.push({ entrance: 'Inbox', kind: record.kind, verb, text: await row.innerText() });
+            await row.locator('button[aria-expanded="false"]').click();
+            assert.equal(
+              await row.locator('[data-testid="approve-btn"], [data-testid="reject-btn"], form, input').count(),
+              0,
+            );
+          }
+          await page.getByTestId('mailbox-close').click();
+        }
+        assert.equal(
+          f.mutations.filter((m) => /^\/api\/(dispatch|taste|entity)-proposals\//.test(m.path)).length,
+          6,
+          'cold reads never restore writers',
+        );
         assert.deepEqual(errors, []);
         await writeFile(
           path.join(evidence, 'proof.json'),
@@ -279,10 +368,12 @@ export function registerInformationJourneys(evidenceRoot) {
               render,
               decisions,
               responses,
+              coldEffects,
               resultText,
               resultCards,
               states,
               effects,
+              supersededState: await source.dispatch.get(superseded.proposalId),
               mutations: f.mutations,
               reads: f.reads,
               errors,

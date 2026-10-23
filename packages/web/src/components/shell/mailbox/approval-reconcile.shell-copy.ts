@@ -3,6 +3,7 @@ import { defineShellCopy } from '../shell-copy';
 export const approvalReconcileCopy = defineShellCopy({
   zh: {
     resolutions: { accepted: '已同意', rejected: '已拒绝', closed_without_decision: '已结束，没有做决定' },
+    closedReasons: { expired: '已过期', withdrawn: '已撤回' },
     opened: '对话已开',
     effectUnknown: '效果暂未确认',
     originalEffects: {
@@ -43,6 +44,7 @@ export const approvalReconcileCopy = defineShellCopy({
   },
   en: {
     resolutions: { accepted: 'Approved', rejected: 'Rejected', closed_without_decision: 'Closed without a decision' },
+    closedReasons: { expired: 'Expired', withdrawn: 'Withdrawn' },
     opened: 'Conversation created',
     effectUnknown: 'Effect not yet confirmed',
     originalEffects: {

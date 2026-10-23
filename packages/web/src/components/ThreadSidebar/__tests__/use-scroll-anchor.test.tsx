@@ -147,4 +147,73 @@ describe('useScrollAnchor sticky visibility', () => {
 
     act(() => root.unmount());
   });
+
+  it('does not undo native scrolling before its delayed scroll notification on a status-only refresh', () => {
+    window.sessionStorage.removeItem('cat-cafe:sidebar:scrollTop');
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    const root = createRoot(host);
+    act(() => root.render(<Harness revision={0} />));
+    const scroller = host.querySelector('[data-testid="scroller"]') as HTMLDivElement;
+    scroller.scrollTop = 200;
+    act(() => scroller.dispatchEvent(new Event('scroll', { bubbles: true })));
+
+    // Browser scrolling and React's snapshot commit can precede the coalesced
+    // scroll event. A new snapshot has not moved the row in the document.
+    scroller.scrollTop = 272;
+    act(() => root.render(<Harness revision={1} />));
+    expect(scroller.scrollTop).toBe(272);
+    act(() => scroller.dispatchEvent(new Event('scroll', { bubbles: true })));
+    expect(window.sessionStorage.getItem('cat-cafe:sidebar:scrollTop')).toBe('272');
+    act(() => root.unmount());
+  });
+
+  it.each([
+    ['wheel', () => new WheelEvent('wheel', { bubbles: true, deltaY: -500 })],
+    ['touch', () => new Event('touchstart', { bubbles: true })],
+    ['scrollbar', () => new Event('pointerdown', { bubbles: true })],
+    ['keyboard', () => new KeyboardEvent('keydown', { bubbles: true, key: 'PageUp' })],
+  ] as const)('abandons an unreachable restore when the user browses via %s', (_label, input) => {
+    window.sessionStorage.setItem('cat-cafe:sidebar:scrollTop', '1200');
+    let top = 0;
+    vi.spyOn(HTMLElement.prototype, 'scrollTop', 'get').mockImplementation(() => top);
+    vi.spyOn(HTMLElement.prototype, 'scrollTop', 'set').mockImplementation((value) => {
+      top = Math.max(0, Math.min(1000, value));
+    });
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    const root = createRoot(host);
+    act(() => root.render(<Harness revision={0} />));
+    const scroller = host.querySelector('[data-testid="scroller"]') as HTMLDivElement;
+    expect(scroller.scrollTop).toBe(1000);
+
+    act(() => scroller.dispatchEvent(input()));
+    scroller.scrollTop = 500;
+    act(() => scroller.dispatchEvent(new Event('scroll', { bubbles: true })));
+    for (let revision = 1; revision <= 3; revision++) {
+      act(() => root.render(<Harness revision={revision} />));
+      expect(scroller.scrollTop).toBe(500);
+    }
+    act(() => root.unmount());
+  });
+
+  it('continues a pending restore after asynchronous list growth when the user has not intervened', () => {
+    window.sessionStorage.setItem('cat-cafe:sidebar:scrollTop', '1200');
+    let top = 0;
+    let maximum = 1000;
+    vi.spyOn(HTMLElement.prototype, 'scrollTop', 'get').mockImplementation(() => top);
+    vi.spyOn(HTMLElement.prototype, 'scrollTop', 'set').mockImplementation((value) => {
+      top = Math.max(0, Math.min(maximum, value));
+    });
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    const root = createRoot(host);
+    act(() => root.render(<Harness revision={0} />));
+    const scroller = host.querySelector('[data-testid="scroller"]') as HTMLDivElement;
+    expect(scroller.scrollTop).toBe(1000);
+    maximum = 2000;
+    act(() => root.render(<Harness revision={1} />));
+    expect(scroller.scrollTop).toBe(1200);
+    act(() => root.unmount());
+  });
 });

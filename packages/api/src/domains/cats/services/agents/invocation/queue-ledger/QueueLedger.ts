@@ -61,6 +61,8 @@ export interface QueueLedgerDelivery {
     string,
     Pick<LifecycleAppendFailure, 'targetId' | 'invocationId' | 'responseMessageId' | 'at'> & {
       dispatchStarted: boolean;
+      /** Keep this target after read/transport acceptance until its own successful internal turn. */
+      requiresCompletion?: boolean;
     }
   >;
   /** Definite refusals await a new run; uncertain inputs remain held while their original handoff is checked. */

@@ -3,6 +3,7 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { ArtworkGalleryScope } from '@/components/content-review/ArtworkGalleryScope';
+import { removeMediaSelectionFromChat } from '@/components/content-review/media-chat-composer';
 import { writeShellPresentation } from '@/components/shell/shell-presentation';
 import { getContextAttachmentDraft, syncContextAttachmentDraftToStorage } from '@/components/thread-drafts';
 import { useChatStore } from '@/stores/chatStore';
@@ -115,7 +116,7 @@ beforeEach(() => {
   (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   mocks.apiFetch.mockReset();
   syncContextAttachmentDraftToStorage(THREAD, []);
-  useChatStore.setState({ currentThreadId: THREAD, pendingChatInsert: null });
+  useChatStore.setState({ currentThreadId: THREAD, pendingChatInsert: null, queue: [] });
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
@@ -365,4 +366,142 @@ it('reopens a sent gallery place on the exact retained owner read and highlights
   ).toBe('true');
   expect(queued()).toBeNull();
   expect(getContextAttachmentDraft(THREAD)).toEqual([]);
+});
+
+const referenceAttachment = (): MediaContextAttachment => ({
+  v: 1,
+  id: 'live-reference',
+  kind: 'media',
+  title: 'cover.png',
+  mediaType: 'image/png',
+  source: {
+    kind: 'workspace',
+    locator: { worktreeId: 'worktree-a', path: 'cover.png' },
+    reviewId,
+    expectedReviewRevision: 1,
+    expectedSourceRevision: revision,
+  },
+  gallery: originalGallery.items[0].origin,
+  selections: [
+    { id: '3', selection: { kind: 'image-region', x: 10, y: 20, width: 30, height: 40 } },
+    { id: '4', selection: { kind: 'image-region', x: 60, y: 20, width: 30, height: 40 } },
+  ],
+});
+const markIds = () =>
+  [...container.querySelectorAll('[data-testid="review-pending-chat-mark"]')].map((node) =>
+    node.getAttribute('data-selection-id'),
+  );
+
+it('removing a composer place invalidates the opened reference snapshot and preserves its sibling', async () => {
+  writeShellPresentation('v2');
+  const attachment = referenceAttachment();
+  syncContextAttachmentDraftToStorage(THREAD, [attachment]);
+  const reference = { attachment, selectionId: '3', origin: { kind: 'composer' as const, threadId: THREAD } };
+  await mount(mediaView(), true, reference);
+  const originalMedia = container.querySelector('[data-testid="workspace-content-review-media"]');
+  expect(originalMedia).not.toBeNull();
+  expect(markIds()).toEqual(['3', '4']);
+  await act(async () => {
+    expect(removeMediaSelectionFromChat(THREAD, attachment.id, '3')).toBe(true);
+    const queued = useChatStore.getState().pendingChatInsert;
+    syncContextAttachmentDraftToStorage(THREAD, queued?.contextAttachments ?? []);
+    useChatStore.getState().setPendingChatInsert(null);
+  });
+  expect(markIds()).toEqual(['4']);
+  await act(async () => syncContextAttachmentDraftToStorage(THREAD, []));
+  expect(markIds()).toEqual([]);
+  expect(container.querySelector('[data-testid="workspace-content-review-media"]')).toBe(originalMedia);
+});
+
+it('deleting the sent opinion retracts its opened marks without removing a separate composer place', async () => {
+  writeShellPresentation('v2');
+  const attachment = referenceAttachment();
+  const message = {
+    id: 'sent-opinion',
+    type: 'user' as const,
+    content: '改这两处',
+    timestamp: 1,
+    contentBlocks: [{ type: 'context_attachment' as const, attachment }],
+  };
+  useChatStore.setState({ messages: [message] });
+  const reference = {
+    attachment,
+    selectionId: '3',
+    origin: { kind: 'message' as const, threadId: THREAD, messageId: message.id },
+  };
+  await mount(mediaView(), true, reference);
+  const originalMedia = container.querySelector('[data-testid="workspace-content-review-media"]');
+  expect(originalMedia).not.toBeNull();
+  expect(markIds()).toEqual(['3', '4']);
+  await act(async () => useChatStore.getState().removeThreadMessage(THREAD, message.id));
+  expect(markIds()).toEqual([]);
+  expect(container.querySelector('[data-testid="workspace-content-review-media"]')).toBe(originalMedia);
+  const separate = { ...attachment, id: 'own-draft', selections: [{ ...attachment.selections[1], id: '8' }] };
+  await act(async () => syncContextAttachmentDraftToStorage(THREAD, [separate]));
+  expect(markIds()).toEqual(['8']);
+  await act(async () => syncContextAttachmentDraftToStorage(THREAD, []));
+  expect(markIds()).toEqual([]);
+});
+
+it.each(['delivery', 'cancellation'])('keeps an opinion in its original Queue owner until %s', async (ending) => {
+  writeShellPresentation('v2');
+  const attachment = referenceAttachment();
+  const messageId = 'queued-opinion';
+  const contentBlocks = [{ type: 'context_attachment' as const, attachment }];
+  useChatStore.setState({
+    messages: [],
+    queue: [
+      {
+        id: 'queue-entry',
+        threadId: THREAD,
+        userId: 'operator',
+        content: '改这两处',
+        messageId,
+        mergedMessageIds: [],
+        from: { kind: 'user', userId: 'operator' },
+        targetCats: [],
+        intent: 'execute',
+        status: 'queued',
+        createdAt: 1,
+        messagePreview: { contentBlocks },
+      },
+    ],
+  });
+  const reference = { attachment, origin: { kind: 'message' as const, threadId: THREAD, messageId } };
+  await mount(mediaView(), true, reference);
+  expect(markIds()).toEqual(['3', '4']);
+  if (ending === 'cancellation') {
+    await act(async () => useChatStore.getState().setQueue(THREAD, []));
+    expect(markIds()).toEqual([]);
+    return;
+  }
+  // Delivery moves this exact input from Queue to History without losing marks.
+  await act(async () =>
+    useChatStore.setState({
+      queue: [],
+      messages: [{ id: messageId, type: 'user', content: '改这两处', timestamp: 1, contentBlocks }],
+    }),
+  );
+  expect(markIds()).toEqual(['3', '4']);
+  await act(async () => useChatStore.getState().removeThreadMessage(THREAD, messageId));
+  expect(markIds()).toEqual([]);
+});
+
+it('closing a removed gallery draft editor leaves its sibling mark and words intact', async () => {
+  writeShellPresentation('v2');
+  await mount(mediaView(), true);
+  await selectWholeImage();
+  const captured = queuedMedia()!;
+  expect(container.querySelector('textarea[aria-label="这处的话"]')).not.toBeNull();
+  const sibling = { ...captured.selections[0], id: '5', instruction: '保留这一处' };
+  await act(async () => {
+    syncContextAttachmentDraftToStorage(THREAD, [{ ...captured, selections: [...captured.selections, sibling] }]);
+    useChatStore.getState().setPendingChatInsert(null);
+  });
+  await act(async () => {
+    expect(removeMediaSelectionFromChat(THREAD, captured.id, captured.selections[0].id)).toBe(true);
+  });
+  expect(container.querySelector('textarea[aria-label="这处的话"]')).toBeNull();
+  expect(markIds()).toEqual(['5']);
+  expect(queuedMedia()?.selections[0]?.instruction).toBe('保留这一处');
 });

@@ -4,12 +4,21 @@ related_features: [F102, F153, F163, F188, F192, F263]
 topics: [memory, eval, observability, IR]
 doc_kind: spec
 created: 2026-05-14
-tips_exempt: Internal eval/observability — no user-facing capability or workflow change
+tips_exempt: "Renewed 2026-10-23 for F332 consolidation: existing recall-evaluation and observability work is carried into the outcome ledger with its original evidence and unfinished checks. This status update adds no evaluation control, user workflow or discovery surface."
 ---
 
 # F200: Memory Recall Eval — 基于猫真实行为的记忆系统反馈闭环
 
-> **Status**: in-progress | **Owner**: Ragdoll | **Priority**: P1
+> **Status**: closed (consolidated into F332; 未完成结果继续承接，非全部交付) | **Owner**: Ragdoll | **Priority**: P1
+
+## 2026-10-23 项目收拢至 F332
+
+You 在 `[thread-id]#private-source-id` 明确要求关闭旧记忆项目、
+保留有价值的结果并新立一项。本项目登记据此归入 [F332](F332-experience-informed-memory.md)；
+**本文件仍保留原合同及历史证据的权威，未被逐项替代的合同继续有效。**
+原 AC 实情、Task、owner、accepted scope 和等待不变；本次不声称全部完成、不关闭来源、不迁移数据。
+
+> **关闭前状态快照**: in-progress | **Owner**: Ragdoll | **Priority**: P1
 
 ## Why
 

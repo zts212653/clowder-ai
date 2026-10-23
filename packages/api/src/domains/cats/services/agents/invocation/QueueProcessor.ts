@@ -846,7 +846,7 @@ export class QueueProcessor {
       }
       rejected.push(targetId);
       if (
-        failure.acceptance === 'not_accepted' &&
+        failure.acceptance !== 'unknown' &&
         !invocationTracker.detachLifecycleActiveRunInputs?.(
           input.entry.threadId,
           targetId,
@@ -1093,7 +1093,15 @@ export class QueueProcessor {
     let sourceMessages: StoredMessage[] = [];
     try {
       const pending = Object.fromEntries(
-        input.expectedRuns.map((run) => [run.targetId, { ...run, at: seenAt, dispatchStarted: false }]),
+        input.expectedRuns.map((run, index) => [
+          run.targetId,
+          {
+            ...run,
+            at: seenAt,
+            dispatchStarted: false,
+            ...(dispatchers[index]?.capabilities.inputCompletionReceipt ? { requiresCompletion: true } : {}),
+          },
+        ]),
       );
       await queue.prepareLifecycleAppendHandoff(claimed, pending);
       const sourceMessagesBeforeAdmission = (
@@ -1166,7 +1174,15 @@ export class QueueProcessor {
       await queue.prepareLifecycleAppendHandoff(
         claimed,
         Object.fromEntries(
-          input.expectedRuns.map((run) => [run.targetId, { ...run, at: seenAt, dispatchStarted: true }]),
+          input.expectedRuns.map((run, index) => [
+            run.targetId,
+            {
+              ...run,
+              at: seenAt,
+              dispatchStarted: true,
+              ...(dispatchers[index]?.capabilities.inputCompletionReceipt ? { requiresCompletion: true } : {}),
+            },
+          ]),
         ),
         true,
       );
@@ -1200,6 +1216,39 @@ export class QueueProcessor {
                 ...(imagePaths.length > 0 ? { imagePaths } : {}),
                 messageIds: inputMessageIds,
                 deliveryId: appendDeliveryId(inputMessageIds[0]!, run.targetId, run.invocationId),
+                ...(dispatchers[index]!.capabilities.inputCompletionReceipt
+                  ? {
+                      onInputCompleted: async (completed: boolean) => {
+                        if (completed)
+                          await this.confirmLifecycleAppendAcceptance({
+                            threadId: input.threadId,
+                            userId: input.userId,
+                            ...run,
+                            messageIds: inputMessageIds,
+                          });
+                        else
+                          await this.compensateLifecycleAppendTargets({
+                            entry: claimed,
+                            inputMessageIds,
+                            failures: [
+                              {
+                                ...run,
+                                reason: 'provider_rejected',
+                                acceptance: 'incomplete',
+                                at: Math.max(Date.now(), seenAt + 1),
+                              },
+                            ],
+                          });
+                        await emitQueueUpdated(
+                          socketManager,
+                          input.userId,
+                          input.threadId,
+                          queue.list(input.threadId, input.userId),
+                          completed ? 'append_completed' : 'append_incomplete',
+                        );
+                      },
+                    }
+                  : {}),
                 ...(dispatchers[index]!.capabilities.inputReadReceipt
                   ? {
                       onInputRead: () =>
@@ -1229,6 +1278,7 @@ export class QueueProcessor {
           userId: input.userId,
           ...input.expectedRuns[index]!,
           messageIds: inputMessageIds,
+          awaitingCompletion: dispatchers[index]?.capabilities.inputCompletionReceipt === true,
         });
       }
       const failures: LifecycleAppendFailure[] = results.flatMap((result, index) =>
@@ -3237,7 +3287,7 @@ export class QueueProcessor {
     }
   }
 
-  /** Acceptance and model-read evidence are independent. An exact history item proves only receipt. */
+  /** A native stdin ACK proves a write; only its own successful result releases completion custody. */
   private async confirmLifecycleAppendAcceptance(input: {
     threadId: string;
     userId: string;
@@ -3245,6 +3295,7 @@ export class QueueProcessor {
     invocationId: string;
     responseMessageId: string;
     messageIds: readonly string[];
+    awaitingCompletion?: boolean;
   }): Promise<void> {
     const response = await this.deps.messageStore.getById(input.responseMessageId);
     if (
@@ -3254,13 +3305,24 @@ export class QueueProcessor {
       response.lifecycle.targetId !== input.targetId
     )
       throw new Error('Append acceptance lost its original receiver');
+    const writeAlreadyRecovered = (source: StoredMessage): boolean =>
+      input.awaitingCompletion === true &&
+      source.lifecycle?.appendFailures?.some(
+        (failure) =>
+          failure.targetId === input.targetId &&
+          failure.invocationId === input.invocationId &&
+          failure.responseMessageId === input.responseMessageId &&
+          failure.acceptance === 'incomplete',
+      ) === true;
     for (const messageId of input.messageIds) {
       const source = await this.deps.messageStore.getById(messageId);
       const ref = source?.lifecycle?.dispatchRefs?.find(
         (candidate) => candidate.targetId === input.targetId && candidate.statusMessageId === input.responseMessageId,
       );
-      if (!source || source.threadId !== input.threadId || source.userId !== input.userId || !ref)
+      if (!source || source.threadId !== input.threadId || source.userId !== input.userId)
         throw new Error('Append acceptance lost its original source binding');
+      if (writeAlreadyRecovered(source)) continue;
+      if (!ref) throw new Error('Append acceptance lost its original source binding');
       const acceptancePatch: LifecycleInputDispatchPatch = {
         ...lifecycleInputIdentityForStoredMessage(source),
         targetId: input.targetId,
@@ -3268,7 +3330,7 @@ export class QueueProcessor {
         ...(ref.phase === 'settled'
           ? { phase: 'settled' as const }
           : { phase: 'dispatched' as const, dispatchedAt: ref.dispatchedAt ?? source.timestamp }),
-        appendAcceptance: 'accepted',
+        appendAcceptance: input.awaitingCompletion ? 'written' : 'accepted',
       };
       let accepted = await this.deps.messageStore.advanceLifecycleInputDispatch(messageId, acceptancePatch);
       if (accepted.kind === 'conflict' && accepted.reason === 'contended') {
@@ -3279,15 +3341,18 @@ export class QueueProcessor {
           purpose: 'append_acceptance',
         });
       }
+      if (accepted.kind === 'conflict' && writeAlreadyRecovered(accepted.message)) continue;
       if (accepted.kind !== 'applied' && accepted.kind !== 'replayed')
         throw new Error('Append acceptance did not persist');
       this.emitLifecycleMessageUpdated(input.userId, accepted.message);
-      await this.deps.queue.retireReadAppendRecovery(
-        input.threadId,
-        messageId,
-        input.targetId,
-        input.responseMessageId,
-      );
+      if (!input.awaitingCompletion)
+        await this.deps.queue.retireReadAppendRecovery(
+          input.threadId,
+          messageId,
+          input.targetId,
+          input.responseMessageId,
+          true,
+        );
     }
   }
 
@@ -3334,15 +3399,27 @@ export class QueueProcessor {
             (candidate) =>
               candidate.targetId === pending.targetId && candidate.statusMessageId === pending.responseMessageId,
           );
-          if (ref?.appendAcceptance === 'accepted' || ref?.inputRead?.status === 'read') {
+          if (
+            ref?.appendAcceptance === 'accepted' ||
+            (!pending.requiresCompletion && ref?.inputRead?.status === 'read')
+          ) {
             await this.deps.queue.retireReadAppendRecovery(
               threadId,
               entry.payload.messageId,
               pending.targetId,
               pending.responseMessageId,
+              ref?.appendAcceptance === 'accepted',
+            );
+            await emitQueueUpdated(
+              this.deps.socketManager,
+              queueEntryOwnerId(entry),
+              threadId,
+              this.deps.queue.list(threadId, queueEntryOwnerId(entry)),
+              'append_confirmed',
             );
             continue;
           }
+          if (pending.requiresCompletion && this.isExactActiveRun(threadId, pending)) continue;
           await this.compensateLifecycleAppendTargets({
             entry,
             inputMessageIds: queueEntryMessageIds(entry),
@@ -3353,10 +3430,22 @@ export class QueueProcessor {
                 responseMessageId: pending.responseMessageId,
                 at: pending.at,
                 reason: 'exception',
-                acceptance: pending.dispatchStarted ? 'unknown' : 'not_accepted',
+                acceptance:
+                  pending.requiresCompletion && pending.dispatchStarted
+                    ? 'incomplete'
+                    : pending.dispatchStarted
+                      ? 'unknown'
+                      : 'not_accepted',
               },
             ],
           });
+          await emitQueueUpdated(
+            this.deps.socketManager,
+            queueEntryOwnerId(entry),
+            threadId,
+            this.deps.queue.list(threadId, queueEntryOwnerId(entry)),
+            'append_recovered',
+          );
         } catch (error) {
           this.retryDeferrals.defer(threadId, entry.id);
           this.deps.log.warn(
@@ -3372,6 +3461,7 @@ export class QueueProcessor {
           this.retryDeferrals.isDeferred(entry.id) ||
           !entry.targets.includes(failure.targetId) ||
           failure.acceptance !== 'unknown' ||
+          entry.delivery.appendPendingByTarget?.[failure.targetId]?.requiresCompletion ||
           !entry.payload.messageId
         )
           continue;

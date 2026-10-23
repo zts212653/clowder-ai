@@ -56,7 +56,7 @@ export async function readDomainApprovalResult(
     const terminal = result.terminal;
     if (terminal.resolution !== 'accepted') return { ownerUserId, terminal };
     const attempt = useApprovalHubStore.getState().decisionAttempts[candidate.proposalId];
-    let effect = domainAttemptEffect(attempt, ownerUserId, candidate.feature, coordinate);
+    let effect = terminal.domainEffect ?? domainAttemptEffect(attempt, ownerUserId, candidate.feature, coordinate);
     // F221's approved status is finalized only after its durable vignette checkpoint. A cold Chat read can recover it.
     if (!effect && candidate.feature === 'F221') effect = await tasteWriteEffect(candidate.proposalId);
     return {

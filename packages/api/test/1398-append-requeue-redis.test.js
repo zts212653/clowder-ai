@@ -240,3 +240,43 @@ test('Redis native read racing the recovery CAS prevents requeue and preserves t
   assert.equal(source.lifecycle.dispatchRefs[0].statusMessageId, f.response.id);
   assert.equal(source.lifecycle.appendFailures, undefined);
 });
+
+for (const completed of [true, false]) {
+  test(`Redis internal-turn completion (${completed}) retains Queue after read and survives reload`, async () => {
+    const client = owned.client(`case:${randomUUID()}:`);
+    const store = new RedisMessageStore(client, { ttlSeconds: 0 });
+    const ledger = new RedisQueueLedgerStore(client);
+    let input;
+    const f = await appendRecoveryFixture(
+      async (value) => {
+        input = value;
+        return {
+          accepted: true,
+          handle: { provider: 'google', carrier: 'agy_stream_json', threadId: 'native', turnId: 'first' },
+        };
+      },
+      { messageStore: store, ledgerStore: ledger, inputCompletionReceipt: true },
+    );
+    assert.equal((await f.append()).outcome, 'appended');
+    await input.onInputRead();
+    const reloaded = new RedisMessageStore(client, { ttlSeconds: 0 });
+    const queue = new InvocationQueue(new RedisQueueLedgerStore(client));
+    assert.equal(await queue.hydrateFromLedger(reloaded), 1);
+    const pending = await queue.getDurableEntry('thread', f.admission.entry.id);
+    assert.equal(pending.delivery.appendPendingByTarget.opus.requiresCompletion, true);
+    assert.equal((await reloaded.getById(f.admission.message.id)).lifecycle.dispatchRefs[0].inputRead.status, 'read');
+    await input.onInputCompleted(completed);
+    const row = await ledger.get('thread', f.admission.entry.id);
+    const source = await reloaded.getById(f.admission.message.id);
+    if (completed) {
+      assert.equal(row, null);
+      assert.equal(source.lifecycle.dispatchRefs[0].appendAcceptance, 'accepted');
+    } else {
+      assert.deepEqual(row.payload, f.admission.entry.payload);
+      assert.equal(row.delivery.appendRecoveryByTarget.opus.acceptance, 'incomplete');
+      assert.equal(source.lifecycle.dispatchRefs.length, 0);
+      assert.deepEqual(row.delivery.routingHeldTargetIds ?? [], []);
+    }
+    assert.equal(await client.ttl('msg:' + source.id), -1);
+  });
+}

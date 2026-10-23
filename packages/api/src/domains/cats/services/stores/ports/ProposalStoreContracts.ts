@@ -84,6 +84,7 @@ export interface IProposalStore {
   create(input: CreateProposalInput): ThreadProposal | Promise<ThreadProposal>;
   get(proposalId: string): ThreadProposal | null | Promise<ThreadProposal | null>;
   listByUser(userId: string, limit?: number): ThreadProposal[] | Promise<ThreadProposal[]>;
+  listSettledByUser(userId: string, limit?: number): ThreadProposal[] | Promise<ThreadProposal[]>;
   listPending(userId: string, limit?: number): ThreadProposal[] | Promise<ThreadProposal[]>;
   listByThread(threadId: string, limit?: number): ThreadProposal[] | Promise<ThreadProposal[]>;
   /** Complete authority scan; unlike product lists, this must not truncate. */

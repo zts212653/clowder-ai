@@ -14,7 +14,11 @@ import { readOriginalGallery } from './read-original-gallery';
 import { useChatArtworkEntry } from './useChatArtworkEntry';
 
 /** Presentation of an existing draft/message reference; never re-publishes, rewrites, sends or takes over that reference. */
-export function useGalleryAttachmentOpen(references: readonly MediaContextAttachment[]) {
+export function useGalleryAttachmentOpen(
+  references: readonly MediaContextAttachment[],
+  message?: { threadId: string; messageId: string },
+  fromComposer = false,
+) {
   const scope = useArtworkLightboxScope();
   const currentScope = useRef(scope);
   currentScope.current = scope;
@@ -104,7 +108,19 @@ export function useGalleryAttachmentOpen(references: readonly MediaContextAttach
                 if (next >= 0 && next < items.length && next !== index) void show(next, mode);
               },
             },
-            ...(reference ? { reference: { attachment: reference, ...(place ? { selectionId: place } : {}) } } : {}),
+            ...(reference
+              ? {
+                  reference: {
+                    attachment: reference,
+                    origin: message
+                      ? { kind: 'message' as const, ...message }
+                      : fromComposer
+                        ? { kind: 'composer' as const, threadId }
+                        : undefined,
+                    ...(place ? { selectionId: place } : {}),
+                  },
+                }
+              : {}),
             openWorkspace: () => show(index, 'work-mode', place),
           };
           return mode === 'work-mode' ? active.enterWorkMode(work, stamp) : active.open(work, stamp);

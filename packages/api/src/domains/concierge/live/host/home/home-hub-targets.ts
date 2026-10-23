@@ -19,7 +19,9 @@ export const homeHubStateSchema = z
   .strict();
 export type HomeHubState = z.infer<typeof homeHubStateSchema>;
 export type HomeOwnedTarget = HomeActionTarget & {
+  pageId: string;
   clientId: string;
+  clientToken: string;
   route: string;
   ownerAction:
     | { kind: 'thread'; threadId: string }
@@ -53,7 +55,9 @@ export function homeHubTargets(state: HomeHubState, visible: readonly Thread[], 
       label,
       operation,
       revision,
+      pageId: `home-page-${sha256(JSON.stringify(state))}`,
       clientId: state.clientId,
+      clientToken: state.clientToken,
       route: state.route,
       ownerAction,
     });

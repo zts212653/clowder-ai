@@ -219,6 +219,7 @@ function ChatMessageContent({
     canRenderReplyLayers(message, replyLayersPresentation),
   );
 
+  const messageSource = renderThreadId ? { threadId: renderThreadId, messageId: message.id } : undefined;
   const publication =
     renderThreadId && !message.isStreaming && !message.queuedEntryId
       ? {
@@ -727,7 +728,7 @@ function ChatMessageContent({
             }}
           />
         ) : hasBlocks ? (
-          <ContentBlocks blocks={message.contentBlocks!} publication={publication} />
+          <ContentBlocks blocks={message.contentBlocks!} publication={publication} messageSource={messageSource} />
         ) : (
           <CollapsibleMarkdown content={message.content} disclosureKey={bodyDisclosureKey} />
         )}
@@ -992,6 +993,7 @@ function ChatMessageContent({
     <ContentBlocks
       blocks={message.contentBlocks!}
       publication={publication}
+      messageSource={messageSource}
       fallbackText={mergedSpeechContent ?? message.content}
     />
   ) : hasTextContent ? (
@@ -1008,6 +1010,7 @@ function ChatMessageContent({
     <ContentBlocks
       blocks={message.contentBlocks!}
       publication={publication}
+      messageSource={messageSource}
       fallbackText={mergedSpeechContent ?? message.content}
     />
   ) : !isStreamOrigin && hasTextContent ? (

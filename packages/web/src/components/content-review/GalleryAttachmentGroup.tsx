@@ -10,13 +10,17 @@ export function GalleryAttachmentGroup({
   attachments,
   compact = false,
   onRemove,
+  message,
+  fromComposer = false,
 }: {
   attachments: readonly MediaContextAttachment[];
   compact?: boolean;
+  message?: { threadId: string; messageId: string };
+  fromComposer?: boolean;
   onRemove?: (id: string) => void;
 }) {
   const english = useShellLanguage() === 'en';
-  const opening = useGalleryAttachmentOpen(attachments);
+  const opening = useGalleryAttachmentOpen(attachments, message, fromComposer);
   const allImages = attachments.every((item) => item.mediaType !== 'video/mp4');
   const places = attachments.reduce((count, item) => count + item.selections.length, 0);
   const name = (attachment: MediaContextAttachment) =>

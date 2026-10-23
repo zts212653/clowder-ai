@@ -12,6 +12,7 @@ import type { LiveCompanionSessions } from '../../LiveCompanionSessions.js';
 import type { LiveContextScope } from '../live-controlled-context.js';
 import { HomeHubDelivery, type HomeHubEmitter } from './home-hub-delivery.js';
 import { type HomeOwnedTarget, homeComposerLiteralValues } from './home-hub-targets.js';
+import { HomePageSelection } from './home-page-selection.js';
 import { executeHomeWork, type HomeWorkActionPort, type HomeWorkTarget, homeWorkTargets } from './home-work-action.js';
 import { readLiveHomeRequest } from './live-home-request.js';
 
@@ -98,6 +99,9 @@ export class OwnerHomeActionService {
   private createEntry(call: LiveCompanionCall, principal: Principal): Entry {
     let entry: Entry;
     const scopes = new WeakMap<HomeActionRequest, LiveContextScope>();
+    const selector = this.deps.selector;
+    if (!selector) throw new Error('Home selector unavailable');
+    const pages = new HomePageSelection(this.hub.pages, selector);
     const selections = new WeakMap<HomeActionRequest, NonNullable<HomeActionResult['jev']>>();
     const controller = new HomeActionController({
       currentRequest: async () => {
@@ -110,8 +114,13 @@ export class OwnerHomeActionService {
         const assertCurrent = async () => {
           if (!(await this.isCurrent(request))) throw new Error('Home request changed');
         };
+        const selection = await pages.resolve(request, assertCurrent);
+        if (!('page' in selection)) {
+          entry.targets = [];
+          return selection;
+        }
         const scope = scopes.get(request);
-        const home = await this.hub.targets(request);
+        const home = await this.hub.targets(request, selection.page);
         const work = this.deps.work && scope ? homeWorkTargets(await this.deps.work.read(scope, assertCurrent)) : [];
         await assertCurrent();
         entry.targets = [...work, ...home.slice(0, 32 - work.length)];
@@ -139,9 +148,12 @@ export class OwnerHomeActionService {
         if ('publication' in owned) {
           const scope = scopes.get(request);
           if (!scope || !this.deps.work) return { status: 'stale' };
-          return executeHomeWork(this.hub, this.deps.work, scope, request, owned, async () => {
+          const assertCurrent = async () => {
             if (!(await this.isCurrent(request))) throw new Error('Home request changed');
-          });
+          };
+          const selection = await pages.resolve(request, assertCurrent);
+          if (!('page' in selection)) return selection;
+          return executeHomeWork(this.hub, this.deps.work, scope, request, owned, assertCurrent, selection.page);
         }
         return this.hub.execute(request, owned, choice);
       },

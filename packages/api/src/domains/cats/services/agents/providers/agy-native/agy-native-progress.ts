@@ -1,10 +1,12 @@
 import type { CatId } from '@cat-cafe/shared';
 import type { AgentMessage, MessageMetadata } from '../../../types.js';
+import { AgyStepEvidence } from '../agy-step-evidence.js';
 import type { AgyStreamJsonEvent } from '../agy-stream-json-parser.js';
 import { agyNativeToolIdentity, agyNativeToolResultContent } from './agy-native-tool-result.js';
 
 /** Incremental presentation only. Terminal authority stays with the completed turn. */
 export class AgyNativeProgress {
+  private readonly evidence = new AgyStepEvidence();
   private readonly started = new Map<string, { nativeName: string; emitted: boolean }>();
   private readonly finished = new Set<string>();
   private readonly parameters = new Map<number, Record<string, unknown>>();
@@ -17,7 +19,13 @@ export class AgyNativeProgress {
     private readonly metadata: MessageMetadata,
   ) {}
 
-  step(event: Extract<AgyStreamJsonEvent, { kind: 'step' }>): AgentMessage[] {
+  step(observed: Extract<AgyStreamJsonEvent, { kind: 'step' }>): AgentMessage[] {
+    const event = this.evidence.observe(observed);
+    if (event.anomalies.length && !this.errors.has(event.stepIndex))
+      this.errors.set(
+        event.stepIndex,
+        `Native tool result unconfirmed: ${event.anomalies.map((a) => a.detail).join('; ')}`,
+      );
     const messages: AgentMessage[] = [];
     if (
       event.stepType === 'checkpoint' &&

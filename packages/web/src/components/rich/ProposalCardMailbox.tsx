@@ -26,7 +26,7 @@ export function ProposalCardMailbox({
 }) {
   const t = useShellCopy(proposalCardCopy);
   const receiptCopy = useShellCopy(proposalResultCopy);
-  if (state.status === 'approved' || state.status === 'rejected') {
+  if (state.status === 'approved' || state.status === 'rejected' || state.status === 'withdrawn') {
     return (
       <article data-testid={`approval-item-${proposal.proposalId}`} className="min-w-0">
         <ThreadProposalResult
@@ -108,7 +108,7 @@ export function ProposalCardMailbox({
         </>
       ) : (
         <output className="flex flex-wrap items-center gap-2">
-          <span>{state.status === 'withdrawn' ? t.withdrawn : t.submitting}</span>
+          <span>{t.submitting}</span>
           {host.originalPlaceAction}
         </output>
       )}

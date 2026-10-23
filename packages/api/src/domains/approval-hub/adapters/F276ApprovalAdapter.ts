@@ -1,6 +1,7 @@
 import type { ApprovalItem, SettledApprovalItem } from '@cat-cafe/shared';
 import { projectCandidateInteractionInformedEvidence } from '../../memory/people/PersonMemoryInformedEvidence.js';
 import type { PersonMemoryStore, StoredPersonMemoryCandidate } from '../../memory/people/PersonMemoryStore.js';
+import { projectPersonMemoryRetainedEffects } from '../../memory/people/person-memory-proposal-status.js';
 import { ALL_PENDING_APPROVALS_LIMIT, type IApprovalAdapter, type ListSettledOpts } from '../ports/IApprovalAdapter.js';
 import { compactApprovalProjections, projectApprovalNavigation } from '../projectApprovalNavigation.js';
 
@@ -122,7 +123,7 @@ function toSettledItem(
   displayName?: string,
 ): SettledApprovalItem | null {
   const navigation = projectApprovalNavigation(candidate, {});
-  if (!navigation || (candidate.state !== 'materialized' && candidate.state !== 'rejected')) return null;
+  if (!navigation || !['materialized', 'rejected', 'withdrawn'].includes(candidate.state)) return null;
   const receipt = candidate.latestDecisionReceipt;
   if (candidate.state === 'materialized' && (!displayName || !receipt)) return null;
   const detail =
@@ -136,6 +137,8 @@ function toSettledItem(
           },
         }
       : {
+          ...(candidate.personDraft ? { displayName: candidate.personDraft.displayName } : {}),
+          ...(candidate.replacedByProposalId ? { replacedByProposalId: candidate.replacedByProposalId } : {}),
           ...(candidate.latestHumanDisposition
             ? { dispositionReason: candidate.latestHumanDisposition.reasonCode }
             : {}),
@@ -145,13 +148,29 @@ function toSettledItem(
     sourceFeatureId: 'F276',
     requesterCatId: candidate.requesterCatId,
     ownerUserId: candidate.ownerUserId,
-    status: candidate.state === 'materialized' ? 'approved' : 'rejected',
-    summary: candidate.state === 'materialized' ? `记住人物：${displayName}` : '人物提案（内容已清除）',
-    detail,
+    status:
+      candidate.state === 'materialized'
+        ? 'approved'
+        : candidate.state === 'rejected'
+          ? 'rejected'
+          : candidate.replacedByProposalId
+            ? 'superseded'
+            : 'withdrawn',
+    summary:
+      candidate.state === 'materialized'
+        ? `记住人物：${displayName}`
+        : candidate.state === 'rejected'
+          ? '人物提案（内容已清除）'
+          : '人物提案',
+    detail: {
+      ...detail,
+      ...projectPersonMemoryRetainedEffects(candidate),
+      ...(decidedAt === 0 ? { closureTimeUnknown: true } : {}),
+    },
     navigation,
     decisionMode: 'claim-select',
     decidedAt,
-    decidedBy: candidate.ownerUserId,
+    decidedBy: candidate.state === 'withdrawn' ? '' : candidate.ownerUserId,
     createdAt: candidate.createdAt,
   };
 }

@@ -1,3 +1,4 @@
+import { advanceSettledIndex, SettledIndexPreparingError } from '../../../../../utils/redis-settled-index.js';
 /**
  * Redis-backed F128 Proposal store.
  *
@@ -111,6 +112,29 @@ export class RedisProposalStore implements IProposalStore {
 
   async listByUser(userId: string, limit: number = DEFAULT_LIST_LIMIT): Promise<ThreadProposal[]> {
     return this.loadFromIndex(ProposalKeys.userList(userId), limit);
+  }
+
+  async listSettledByUser(userId: string, limit = DEFAULT_LIST_LIMIT): Promise<ThreadProposal[]> {
+    const ready = await advanceSettledIndex(this.redis, {
+      progressKey: 'proposals:history-index:v1',
+      prefix: 'proposal:',
+      type: 'hash',
+      entry: (raw, key) => {
+        const p = hydrateProposal(raw as Record<string, string>);
+        if (key !== ProposalKeys.detail(p.proposalId)) throw new Error('proposal history identity mismatch');
+        return ['approved', 'rejected', 'withdrawn'].includes(p.status)
+          ? {
+              indexKey: ProposalKeys.userSettled(p.createdBy),
+              id: p.proposalId,
+              score: p.withdrawnAt ?? p.approvedAt ?? p.rejectedAt ?? p.createdAt,
+            }
+          : null;
+      },
+    });
+    if (!ready) throw new SettledIndexPreparingError();
+    return (await this.loadFromIndex(ProposalKeys.userSettled(userId), limit)).filter(
+      (p) => p.createdBy === userId && ['approved', 'rejected', 'withdrawn'].includes(p.status),
+    );
   }
 
   async listPending(userId: string, limit: number = DEFAULT_LIST_LIMIT): Promise<ThreadProposal[]> {
@@ -252,6 +276,7 @@ export class RedisProposalStore implements IProposalStore {
     if (proposal) {
       pipeline.zrem(ProposalKeys.userList(proposal.createdBy), proposalId);
       pipeline.zrem(ProposalKeys.userPending(proposal.createdBy), proposalId);
+      pipeline.zrem(ProposalKeys.userSettled(proposal.createdBy), proposalId);
       pipeline.zrem(ProposalKeys.threadList(proposal.sourceThreadId), proposalId);
     }
     await pipeline.exec();
@@ -276,9 +301,10 @@ export class RedisProposalStore implements IProposalStore {
   ): Promise<boolean> {
     const result = (await this.redis.eval(
       CAS_TRANSITION_LUA,
-      2,
+      3,
       ProposalKeys.detail(proposalId),
       ProposalKeys.userPending(userId),
+      ProposalKeys.userSettled(userId),
       proposalId,
       expectedStatus,
       pendingIndexAction,

@@ -1,8 +1,9 @@
 import { createHash } from 'node:crypto';
-import { type BigIntStats, constants, type Dirent } from 'node:fs';
-import { type FileHandle, link, mkdir, open, opendir, readFile, rename, unlink } from 'node:fs/promises';
+import { type BigIntStats, constants } from 'node:fs';
+import { type FileHandle, link, mkdir, open, readFile, rename, unlink } from 'node:fs/promises';
 import { join } from 'node:path';
 import { CollectiveContentCustodyFence } from './collective-custody-fence.js';
+import { contentKey, readOwnerManifests } from './manifest-reader.js';
 import { commitInitialOwnerState } from './state/initial-commit.js';
 import { type ProjectContentStateV1, parseProjectContentState } from './state/manifest.js';
 import { type ContentStream, writeOwnerPayload } from './stream-content.js';
@@ -97,10 +98,7 @@ export class ProjectContentOwnerStore {
     const { matches, lookupIdsByPublication } = indexSourcePublicationLookups(inputs);
     if (inputs.length === 0) return matches;
 
-    const directory = await openOwnerManifestDirectory(this.rootDir);
-    if (!directory) return matches;
-    for await (const entry of directory) {
-      const state = await readOwnerManifest(this.rootDir, entry);
+    for await (const state of readOwnerManifests(this.rootDir)) {
       if (state) appendSourcePublicationMatches(state, lookupIdsByPublication, matches);
     }
     sortSourcePublicationMatches(matches);
@@ -110,10 +108,7 @@ export class ProjectContentOwnerStore {
   /** Discover projects through the same complete canonical manifest reader as publication batches. */
   async listVideoProjects(ownerUserId: string): Promise<{ contentRef: string; projectScope: VideoProjectScopeV1 }[]> {
     const matches: { contentRef: string; projectScope: VideoProjectScopeV1 }[] = [];
-    const directory = await openOwnerManifestDirectory(this.rootDir);
-    if (!directory) return matches;
-    for await (const entry of directory) {
-      const state = await readOwnerManifest(this.rootDir, entry);
+    for await (const state of readOwnerManifests(this.rootDir)) {
       if (state?.projectScope?.ownerUserId === ownerUserId)
         matches.push({ contentRef: state.contentRef, projectScope: { ...state.projectScope } });
     }
@@ -138,10 +133,7 @@ export class ProjectContentOwnerStore {
 
   /** One canonical manifest walk. The consumer bounds retention and freshly authorizes selected versions. */
   async *retainedMediaHeads(ownerUserId: string): AsyncGenerator<RetainedMediaHead> {
-    const directory = await openOwnerManifestDirectory(this.rootDir);
-    if (!directory) return;
-    for await (const entry of directory) {
-      const state = await readOwnerManifest(this.rootDir, entry);
+    for await (const state of readOwnerManifests(this.rootDir)) {
       if (state?.publicationScope?.ownerUserId !== ownerUserId || !['image/png', 'video/mp4'].includes(state.mediaType))
         continue;
       const revision = state.revisions[state.currentOwnerRevision - 1];
@@ -287,32 +279,6 @@ function indexSourcePublicationLookups(inputs: readonly SourcePublicationBatchLo
   return { matches, lookupIdsByPublication };
 }
 
-async function openOwnerManifestDirectory(rootDir: string): Promise<Awaited<ReturnType<typeof opendir>> | undefined> {
-  try {
-    return await opendir(rootDir);
-  } catch (error) {
-    if (isErrno(error, 'ENOENT')) return undefined;
-    throw error;
-  }
-}
-
-async function readOwnerManifest(rootDir: string, entry: Dirent): Promise<ProjectContentStateV1 | undefined> {
-  if (!entry.isDirectory()) return undefined;
-  if (!/^[a-f0-9]{64}$/.test(entry.name)) return undefined;
-  let raw: string;
-  try {
-    raw = await readFile(join(rootDir, entry.name, 'state.json'), 'utf8');
-  } catch (error) {
-    if (isErrno(error, 'ENOENT')) throw new Error(`Incomplete content owner manifest: ${entry.name}`, { cause: error });
-    throw error;
-  }
-  const identity: unknown = JSON.parse(raw);
-  if (!isRecord(identity)) throw new Error('Invalid content owner manifest identity');
-  if (typeof identity.contentRef !== 'string') throw new Error('Invalid content owner manifest identity');
-  if (contentKey(identity.contentRef) !== entry.name) throw new Error('Invalid content owner manifest identity');
-  return parseProjectContentState(raw, identity.contentRef);
-}
-
 function appendSourcePublicationMatches(
   state: ProjectContentStateV1,
   lookupIdsByPublication: ReadonlyMap<string, ReadonlySet<string>>,
@@ -377,10 +343,6 @@ async function verifyBlob(handle: FileHandle, byteLength: number, digest: `sha25
   if (`sha256:${hash.digest('hex')}` !== digest) throw new Error('Content blob digest mismatch');
 }
 
-function contentKey(contentRef: string): string {
-  return createHash('sha256').update(contentRef).digest('hex');
-}
-
 function publicationLookupKey(ownerUserId: string, sourceRef: string, artifactRef: string, revision: string): string {
   return JSON.stringify([ownerUserId, sourceRef, artifactRef, revision]);
 }
@@ -394,8 +356,4 @@ function cryptoRandomSuffix(): string {
 
 function isErrno(error: unknown, code: string): error is NodeJS.ErrnoException {
   return error instanceof Error && 'code' in error && error.code === code;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }

@@ -4,6 +4,7 @@ import type { CompanionWorkDestination } from '../../work/companion-work-navigat
 import type { LiveContextScope } from '../live-controlled-context.js';
 import { sha256 } from '../page-action/live-page-action-authority-contract.js';
 import type { HomeHubDelivery, HomeWorkPublication } from './home-hub-delivery.js';
+import type { HomeHubPage } from './home-hub-pages.js';
 
 /** C supplies only original publications already readable by this Host-bound cat. */
 export interface HomeWorkCandidate {
@@ -52,6 +53,7 @@ export async function executeHomeWork(
   request: HomeActionRequest,
   target: HomeWorkTarget,
   assertCurrent: () => Promise<void>,
+  page: HomeHubPage,
 ) {
   const status = await hub.openWork(
     request.userId,
@@ -70,6 +72,7 @@ export async function executeHomeWork(
     },
     assertCurrent,
     request.signal,
+    page,
   );
   return { status };
 }

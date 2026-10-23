@@ -59,9 +59,10 @@ describe('Plugin Manager v2 detail guidance', () => {
     expect([...container.querySelectorAll('code')].map((x) => x.textContent)).toContain('gh auth login');
     expect(container.textContent).not.toContain('Log in with the GitHub CLI');
   });
-  it('shows trusted catalog provenance in both the list and detail', () => {
+  it('keeps trusted catalog provenance in the detail and the list subtitle quiet', () => {
     render({ source: 'catalog', trust: 'official' });
-    expect(container.querySelectorAll('[data-plugin-source-trust="official"]').length).toBe(2);
+    expect(container.querySelectorAll('[data-plugin-source-trust="official"]').length).toBe(1);
+    expect(container.querySelector('[data-plugin-list-row] [data-plugin-source-trust]')).toBeNull();
     expect(container.textContent).toContain('可信来源');
   });
   it('labels local sources without disabling their existing controls', () => {
@@ -76,7 +77,8 @@ describe('Plugin Manager v2 detail guidance', () => {
     render({ source: 'local', trust: 'unknown' });
     const labels = [...container.querySelectorAll('[data-plugin-source-trust="unknown"]')];
     expect(labels).toHaveLength(2);
-    for (const label of labels) expect(label.textContent).toBe('来源未知 · 缺少安装来源记录');
+    expect(labels.map((label) => label.textContent)).toEqual(['来源未知', '来源未知 · 缺少安装来源记录']);
+    expect(labels[0]?.getAttribute('title')).toBe('来源未知 · 缺少安装来源记录');
     expect(container.textContent).not.toContain('非可信来源');
   });
   it('retains unknown instruction content as escaped text with inline code only', () => {
@@ -136,6 +138,18 @@ describe('Plugin Manager v2 detail guidance', () => {
     expect(container.textContent).toContain('诊断记录');
     expect(container.textContent).toContain('旧错误');
   });
+  it('keeps runtime guidance and folded raw diagnostics in the independent Dot detail', () => {
+    render({
+      id: 'official.chatgpt-dot',
+      activationFailed: true,
+      diagnostic: 'Plugin runtime reported UNEXPECTED_RUNTIME_FAILURE',
+    });
+    const notice = container.querySelector('[data-plugin-detail-section="attention"]');
+    expect(notice?.textContent).toContain('运行出错');
+    const diagnostic = notice?.querySelector('details');
+    expect(diagnostic?.textContent).toContain('UNEXPECTED_RUNTIME_FAILURE');
+    expect(diagnostic?.open).toBe(false);
+  });
   it('preserves v1 labels, plain steps and operation location', () => {
     render({ activationFailed: true }, 'v1');
     expect(container.textContent).toContain(step);
@@ -160,7 +174,7 @@ describe('Plugin Manager v2 detail guidance', () => {
       ],
     });
     await act(async () => container.querySelector<HTMLButtonElement>('[data-testid="github-action-check"]')?.click());
-    expect(fetch).not.toHaveBeenCalled();
+    expect(fetch.mock.calls.filter(([, options]) => options?.method === 'POST')).toHaveLength(0);
   });
   it('does not offer package operations before installation', () => {
     render({ artifact: 'quarantined', installedVersion: null });

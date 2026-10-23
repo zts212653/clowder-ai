@@ -77,6 +77,29 @@ async function render() {
     ),
   );
 }
+it('shows the actual public default selection as a gray result, without a response writer', async () => {
+  vi.mocked(apiFetch).mockImplementation(async (url) =>
+    url === '/api/session'
+      ? response({ userId: 'owner' })
+      : response({
+          interaction: {
+            ...record,
+            status: 'answered',
+            terminal: {
+              status: 'answered',
+              reasonCode: 'defaulted',
+              settledAt: 10000,
+              response: { kind: 'selection', selectedIds: ['alpha'] },
+            },
+          },
+        }),
+  );
+  await render();
+  const result = container.querySelector('[data-testid="decision-result-label"]');
+  expect(result?.textContent).toMatch(/^(?:Selected|已选择) · Alpha/);
+  expect(container.querySelector('[data-testid="decision-result-dot"]')?.getAttribute('data-status')).toBe('closed');
+  expect(vi.mocked(apiFetch).mock.calls.some(([, options]) => options?.method === 'POST')).toBe(false);
+});
 it('submits the server-bound original block through one canonical CAS writer, never ordinary chat/block-state', async () => {
   await render();
   await act(async () => button('Alpha').click());

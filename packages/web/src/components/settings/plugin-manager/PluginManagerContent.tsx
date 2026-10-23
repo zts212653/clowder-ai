@@ -5,44 +5,20 @@ import type { ReactNode } from 'react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { HubIcon } from '../../hub-icons';
 import { settingsResourceCardClass } from '../../SettingsResourceCard';
+import { useShellLanguage } from '../../shell/shell-language';
 import { SettingsText } from '../primitives/SettingsText';
 import { SettingsPageHeader, type SettingsPageHeaderProps } from '../SettingsPageHeader';
-import { PluginArchiveInstallButton } from './PluginArchiveInstallButton';
-import { PluginDirectoryInstallButton } from './PluginDirectoryInstallButton';
+import { PluginManagerToolbar } from './controls/PluginManagerToolbar';
+import { pluginManagerText } from './controls/plugin-manager.shell-copy';
 import { PluginManagerDetailCard } from './PluginManagerDetailCard';
 import { PluginListRow, PluginListSection } from './PluginManagerList';
 import { PluginManagerNotices } from './PluginManagerNotices';
-import { PluginMarketplaceSettings } from './PluginMarketplaceSettings';
 import { installedPluginGroups, type PluginManagerPresentation } from './plugin-manager-attention';
 import type { PluginManagerDesignFixture } from './plugin-manager-fixtures';
 
-function PluginManagerToolbar({
-  onMarketplaceChange,
-  onDirectoryInstall,
-  onArchiveInstalled,
-}: {
-  onMarketplaceChange?: (() => Promise<void>) | undefined;
-  onDirectoryInstall?: ((path: string) => Promise<void>) | undefined;
-  onArchiveInstalled?: (() => void | Promise<void>) | undefined;
-}) {
-  return (
-    <div data-plugin-manager-toolbar className="flex flex-wrap items-start justify-end gap-2">
-      <a
-        href="/docs/plugin-development.md"
-        target="_blank"
-        rel="noopener noreferrer"
-        className="console-inline-link pt-1.5 text-xs"
-      >
-        插件开发文档
-      </a>
-      {onDirectoryInstall && <PluginDirectoryInstallButton onInstall={onDirectoryInstall} />}
-      {onArchiveInstalled && <PluginArchiveInstallButton label="从安装包安装" onInstalled={onArchiveInstalled} />}
-      <PluginMarketplaceSettings onChange={onMarketplaceChange} />
-    </div>
-  );
-}
-
-function blockedEnableReason(plugin: PluginManagerDesignFixture) {
+function blockedEnableReason(plugin: PluginManagerDesignFixture, locale: string) {
+  if (plugin.actions?.blockingReasons.includes('package-incompatible'))
+    return pluginManagerText(locale).incompatibleHint;
   if (plugin.id !== 'official.chatgpt-dot') return '请先完成右侧配置或连接，再启用。';
   return plugin.auth === 'connected'
     ? '还在等待 dot 读原文并回帖；两处都完成后才能开启。'
@@ -112,7 +88,7 @@ export function PluginManagerContent({
   onConfigure,
   configurationSavedPluginId = null,
   onStateChanged,
-  locale = 'zh-CN',
+  locale: requestedLocale,
   renderCompatibilityDetail,
 }: {
   fixtures: readonly PluginManagerDesignFixture[];
@@ -143,6 +119,9 @@ export function PluginManagerContent({
   locale?: string;
   renderCompatibilityDetail?: (pluginId: string, plugin: PluginManagerDesignFixture) => ReactNode | undefined;
 }) {
+  const language = useShellLanguage();
+  const locale = requestedLocale ?? (presentation === 'v2' && language === 'en' ? 'en' : 'zh-CN');
+  const t = pluginManagerText(locale);
   const initialDetailOpened = useRef(false);
   const [query, setQuery] = useState('');
   const [availableLimit, setAvailableLimit] = useState(5);
@@ -150,14 +129,25 @@ export function PluginManagerContent({
   const [configurationValidation, setConfigurationValidation] = useState({ pluginId: '', request: 0 });
 
   const filtered = useMemo(() => fixtures.filter((plugin) => matchesSearch(plugin, query)), [fixtures, query]);
-  const leadingGroups = installedPluginGroups(filtered, presentation);
-  const recommendationPool = filtered.filter((plugin) => plugin.artifact === 'absent' && plugin.source === 'catalog');
+  const leadingGroups = installedPluginGroups(filtered, presentation, locale);
+  const recommendationPool = filtered.filter(
+    (plugin) => plugin.artifact === 'absent' && (presentation === 'v2' || plugin.source === 'catalog'),
+  );
   const recommendedPlugins = query.trim() ? recommendationPool : recommendationPool.slice(0, availableLimit);
   const hasMore = !query.trim() && recommendedPlugins.length < recommendationPool.length;
-  const otherPlugins = filtered.filter((plugin) => plugin.artifact === 'absent' && plugin.source !== 'catalog');
+  const otherPlugins = filtered.filter(
+    (plugin) => presentation === 'v1' && plugin.artifact === 'absent' && plugin.source !== 'catalog',
+  );
   const visible = [...leadingGroups.flatMap((group) => group.plugins), ...recommendationPool, ...otherPlugins];
   const selection = usePluginSelection(visible, selectedPluginId, onPluginSelect);
   const selected = selection.selected;
+  const requestEnable = (plugin: PluginManagerDesignFixture) => {
+    selection.select(plugin.id);
+    setMobileDetailOpen(true);
+    setConfigurationValidation((current) => ({ pluginId: plugin.id, request: current.request + 1 }));
+    if (onRequestEnable) void onRequestEnable(plugin.id);
+    else void onStateChanged?.();
+  };
   useEffect(() => {
     if (!initialDetailOpened.current && selected && (initialDetailPluginId ?? linkedPluginId) === selected.id) {
       initialDetailOpened.current = true;
@@ -180,18 +170,12 @@ export function PluginManagerContent({
         onInstall={() => onInstall?.(plugin.id)}
         onRepair={onRepair ? () => onRepair(plugin.id) : undefined}
         onSetEnabled={(enabled) => onSetEnabled?.(plugin.id, enabled)}
-        onBlockedToggle={() => {
-          selection.select(plugin.id);
-          setMobileDetailOpen(true);
-          setConfigurationValidation((current) => ({ pluginId: plugin.id, request: current.request + 1 }));
-          if (onRequestEnable) void onRequestEnable(plugin.id);
-          else void onStateChanged?.();
-        }}
+        onBlockedToggle={() => requestEnable(plugin)}
         onUninstall={() => onUninstall?.(plugin.id)}
         busy={busyPluginId === plugin.id}
         enableBlockedReason={
           configurationValidation.pluginId === plugin.id && plugin.actions?.setEnabled === false
-            ? blockedEnableReason(plugin)
+            ? blockedEnableReason(plugin, locale)
             : undefined
         }
       />
@@ -202,6 +186,7 @@ export function PluginManagerContent({
       {pageHeader ? (
         <SettingsPageHeader {...pageHeader}>
           <PluginManagerToolbar
+            locale={locale}
             onMarketplaceChange={onMarketplaceChange}
             onDirectoryInstall={onDirectoryInstall}
             onArchiveInstalled={onStateChanged}
@@ -209,6 +194,7 @@ export function PluginManagerContent({
         </SettingsPageHeader>
       ) : (
         <PluginManagerToolbar
+          locale={locale}
           onMarketplaceChange={onMarketplaceChange}
           onDirectoryInstall={onDirectoryInstall}
           onArchiveInstalled={onStateChanged}
@@ -231,14 +217,14 @@ export function PluginManagerContent({
             <label className={`${settingsResourceCardClass} flex min-w-0 items-center gap-2 px-3 py-2.5`}>
               <HubIcon name="search" className="h-4 w-4 shrink-0 text-cafe-muted" />
               <input
-                aria-label="搜索插件"
+                aria-label={t.search}
                 value={query}
                 onChange={(event) => {
                   setQuery(event.target.value);
                   setAvailableLimit(5);
                   onSearchChange?.(event.target.value);
                 }}
-                placeholder="搜索插件"
+                placeholder={t.search}
                 className="min-w-0 flex-1 bg-transparent text-sm text-cafe outline-none placeholder:text-cafe-muted"
               />
             </label>
@@ -276,13 +262,15 @@ export function PluginManagerContent({
                     title={title}
                     ariaLabel={ariaLabel}
                     rows={renderRows(plugins)}
+                    count={presentation === 'v2' ? plugins.length : undefined}
                   />
                 ))}
                 <PluginListSection
-                  kind="recommended"
-                  title="推荐"
-                  ariaLabel="推荐插件"
+                  kind={presentation === 'v2' ? 'available' : 'recommended'}
+                  title={presentation === 'v2' ? t.availableGroup : locale.startsWith('en') ? t.recommended : '推荐'}
+                  ariaLabel={presentation === 'v2' ? t.availableGroup : t.recommended}
                   rows={renderRows(recommendedPlugins)}
+                  count={presentation === 'v2' ? recommendationPool.length : undefined}
                 />
                 {hasMore && (
                   <button
@@ -290,10 +278,12 @@ export function PluginManagerContent({
                     onClick={() => setAvailableLimit((limit) => limit + 5)}
                     className="console-inline-link w-full py-2 text-sm"
                   >
-                    查看更多插件
+                    {t.viewMore}
                   </button>
                 )}
-                <PluginListSection kind="other" title="其他" ariaLabel="其他插件" rows={renderRows(otherPlugins)} />
+                {presentation === 'v1' && (
+                  <PluginListSection kind="other" title="其他" ariaLabel="其他插件" rows={renderRows(otherPlugins)} />
+                )}
               </>
             )}
           </div>
@@ -324,6 +314,11 @@ export function PluginManagerContent({
                   onOperationChange={() => onOperationChange?.(selected.id)}
                   locale={locale}
                   busy={busyPluginId === selected.id}
+                  onInstall={onInstall ? () => onInstall(selected.id) : undefined}
+                  onRepair={onRepair ? () => onRepair(selected.id) : undefined}
+                  onUninstall={onUninstall ? () => onUninstall(selected.id) : undefined}
+                  onSetEnabled={onSetEnabled ? (enabled) => onSetEnabled(selected.id, enabled) : undefined}
+                  onBlockedToggle={() => requestEnable(selected)}
                   configurationValidationRequest={
                     configurationValidation.pluginId === selected.id ? configurationValidation.request : 0
                   }

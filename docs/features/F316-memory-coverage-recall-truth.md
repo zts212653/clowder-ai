@@ -3,7 +3,7 @@ feature_ids: [F316]
 related_features: [F200, F209, F221, F231, F260, F276, F282, F287, F296, F312]
 topics: [memory, recall, coverage, profile, entity, person, taste, runtime-acceptance]
 doc_kind: spec
-tips_exempt: "Renewed 2026-09-09 for the accepted vision-guard checkbox/source-receipt reconciliation; no new memory behavior or user-invokable action is introduced by this documentation update."
+tips_exempt: "Renewed 2026-10-23 for F332 consolidation: memory-coverage claims, source receipts and unfinished real-use validation are carried forward through the existing memory readers and approval surfaces. This ledger/status change introduces no new memory action or discovery surface."
 created: 2026-09-04
 description: "让每类记忆都能说明自己记住了什么、何时该出现、能否精确读回，以及真实任务中是否确实帮助了猫。"
 description_source: human
@@ -13,7 +13,16 @@ description_updated_at: 2026-09-04T12:09:00Z
 
 # F316: Memory Coverage & Recall Truth｜记忆内容覆盖与真实召回验收
 
-> **Status**: in-progress | **Owner**: 小太阳·Maine Coon（@codex-sol, GPT-5.6 Sol）+ F316 总控线程责任猫 | **Priority**: P1
+> **Status**: closed (consolidated into F332; 未完成结果继续承接，非全部交付) | **Owner**: 小太阳·Maine Coon（@codex-sol, GPT-5.6 Sol）+ F316 总控线程责任猫 | **Priority**: P1
+
+## 2026-10-23 项目收拢至 F332
+
+You 在 `[thread-id]#private-source-id` 明确要求关闭旧记忆项目、
+保留有价值的结果并新立一项。本项目登记据此归入 [F332](F332-experience-informed-memory.md)；
+**本文件仍保留原合同及历史证据的权威，未被逐项替代的合同继续有效。**
+原 AC 实情、Task、owner、accepted scope 和等待不变；本次不声称全部完成、不关闭来源、不迁移数据。
+
+> **关闭前状态快照**: in-progress | **Owner**: 小太阳·Maine Coon（@codex-sol, GPT-5.6 Sol）+ F316 总控线程责任猫 | **Priority**: P1
 
 ## Why
 

@@ -4,6 +4,7 @@ import { useArtworkGallery, useArtworkReference } from '@/components/content-rev
 import {
   addMediaSelectionToChat,
   addMediaWorkToChat,
+  composerAttachments,
   removeMediaSelectionFromChat,
   updateMediaSelectionWordsInChat,
 } from '@/components/content-review/media-chat-composer';
@@ -57,7 +58,9 @@ export function useWorkspaceMediaChat({
   const isV2 = useShellPresentation() === 'v2';
   const gallery = useArtworkGallery();
   const reference = useArtworkReference();
-  const composerDraft = useComposerContextAttachments(threadId ?? '');
+  useComposerContextAttachments(threadId ?? '');
+  useChatStore((state) => state.pendingChatInsert);
+  const composerDraft = threadId ? composerAttachments(threadId) : [];
   const [notice, setNotice] = useState<{ kind: 'selection' | 'whole'; message: string } | null>(null);
   const source = view.currentSource ?? view.review.source;
   const mime =
@@ -86,7 +89,12 @@ export function useWorkspaceMediaChat({
   } | null>(null);
   const editingKey = JSON.stringify([threadId, chatMedia]);
   const editor =
-    editing && editing.key === editingKey && origin && threadId
+    editing &&
+    editing.key === editingKey &&
+    origin &&
+    threadId &&
+    pending?.id === editing.attachmentId &&
+    pending.selections.some((item) => item.id === editing.selectionId)
       ? {
           anchor: editing.anchor,
           selectionId: editing.selectionId,

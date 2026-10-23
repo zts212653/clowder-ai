@@ -196,7 +196,7 @@ export const APPROVAL_PRODUCER_CATALOG = {
     // not call ApprovalIngress, but this required catalog claim stays accurate if
     // shared ingress validation is reused later.
     systemOriginExemption: 'server_attested',
-    history: false,
+    history: true,
     humanDispositionReasonCodes: null,
   },
   F321: {

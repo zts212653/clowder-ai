@@ -23,6 +23,7 @@ const MAX_HANDLE_ATTEMPTS = 3;
 function terminalWithdrawn(
   candidate: StoredPersonMemoryCandidate,
   replacementId: StoredPersonMemoryCandidate['candidateId'],
+  closedAt: number,
 ): StoredPersonMemoryCandidate {
   const {
     personDraft: _personDraft,
@@ -37,6 +38,7 @@ function terminalWithdrawn(
     claimDrafts: [],
     remainingDraftIds: [],
     replacedByProposalId: replacementId,
+    closedAt,
   };
 }
 
@@ -154,7 +156,7 @@ export class PersonMemoryDispositionAnchor {
       ...anchoredInput,
       dispositionLineageBindingKey: closure.bindingKey,
     };
-    const withdrawn = terminalWithdrawn(original, candidate.candidateId);
+    const withdrawn = terminalWithdrawn(original, candidate.candidateId, presentedAt);
     const locatorKey = PersonMemoryKeys.dispositionLineageHandleLocator(
       candidate.ownerUserId,
       binding.opaqueLineageHandle,
@@ -166,7 +168,7 @@ export class PersonMemoryDispositionAnchor {
     const result = String(
       await this.redis.eval(
         COMMIT_DISPOSITION_REPLACEMENT_ENVELOPE_LUA,
-        8,
+        9,
         PersonMemoryKeys.candidate(candidate.ownerUserId, candidate.candidateId),
         PersonMemoryKeys.pending(candidate.ownerUserId),
         PersonMemoryKeys.candidate(candidate.ownerUserId, original.candidateId),
@@ -175,6 +177,7 @@ export class PersonMemoryDispositionAnchor {
         locatorKey,
         PersonMemoryKeys.personArtifacts(candidate.ownerUserId, closure.closurePersonId),
         membershipKey(closure),
+        PersonMemoryKeys.settled(candidate.ownerUserId),
         JSON.stringify(candidate),
         JSON.stringify(original),
         JSON.stringify(anchored),

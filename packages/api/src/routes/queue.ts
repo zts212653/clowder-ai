@@ -1870,7 +1870,7 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
     const guard = await guardThreadOwnership(request, reply, threadStore, threadId);
     if (!guard) return;
 
-    // Claim one exact ledger row at a time. Processing rows are the only business-level block.
+    // Claim one exact ledger row at a time; the canonical claim also protects in-flight Append custody.
     const cleared: QueueEntry[] = [];
     const candidates = invocationQueue.list(threadId, guard.userId);
     for (const candidate of candidates) {

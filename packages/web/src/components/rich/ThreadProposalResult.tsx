@@ -1,7 +1,9 @@
-import { type ReactNode, useId, useState } from 'react';
+import { type ReactNode, useRef, useState } from 'react';
 import { useShellCopy } from '@/components/shell/shell-copy';
 import { useShellLanguage } from '@/components/shell/shell-language';
 import { pushThreadRouteWithHistory } from '@/components/ThreadSidebar/thread-navigation';
+import { ApprovalResultRow, type DecisionResultStatus } from './ApprovalResultRow';
+import { decisionResultCopy } from './decision-result.shell-copy';
 import { proposalResultCopy } from './proposal-result.shell-copy';
 
 function resultTime(value: number | undefined, language: string): string | null {
@@ -22,71 +24,73 @@ export function ThreadProposalResult({
   effectUnknown = false,
   authorizeOpen,
   children,
+  onExpandedChange,
+  resolveThreadId,
 }: {
-  status: 'approved' | 'rejected';
+  status: DecisionResultStatus;
   decidedAt?: number;
   threadId?: string | null;
   openLocked?: boolean;
   effectUnknown?: boolean;
   authorizeOpen?: () => boolean;
   children: ReactNode;
+  onExpandedChange?: (expanded: boolean) => void;
+  resolveThreadId?: () => Promise<string | null>;
 }) {
   const t = useShellCopy(proposalResultCopy);
+  const resultCopy = useShellCopy(decisionResultCopy);
   const language = useShellLanguage();
-  const [expanded, setExpanded] = useState(false);
-  const id = useId();
+  const [opening, setOpening] = useState(false);
+  const openingRef = useRef(false);
   const time = resultTime(decidedAt, language);
   const label =
     status === 'approved'
       ? [t.approved, effectUnknown ? t.effectUnknown : threadId ? t.opened : null].filter(Boolean).join(' · ')
-      : [t.declined, time].filter(Boolean).join(' · ');
+      : [status === 'rejected' ? t.declined : resultCopy[status], time].filter(Boolean).join(' · ');
   return (
-    <div data-testid="thread-proposal-result" className="min-w-0 text-sm">
-      <div className="flex min-w-0 items-center gap-1.5">
-        <button
-          type="button"
-          aria-expanded={expanded}
-          aria-controls={id}
-          title={expanded ? t.collapse : t.details}
-          onClick={() => setExpanded((value) => !value)}
-          className="shell-focusable flex min-w-0 items-center gap-2 text-left hover:underline"
-        >
-          <span
-            aria-hidden="true"
-            data-testid="proposal-result-dot"
-            data-status={status}
-            className="h-1.5 w-1.5 shrink-0 rounded-full"
-            style={{ background: status === 'approved' ? 'var(--semantic-success)' : 'var(--semantic-critical)' }}
-          />
-          <span data-testid="proposal-result-label" className="truncate" title={label}>
-            {label}
-          </span>
-        </button>
-        {status === 'approved' && threadId ? (
-          <>
-            <span aria-hidden="true">·</span>
-            {/* A native href would let middle-click/context-menu skip the synchronous continuation guard. */}
-            <button
-              type="button"
-              data-testid="proposal-result-open"
-              disabled={openLocked}
-              aria-disabled={openLocked || undefined}
-              className="shell-focusable shrink-0 text-[var(--shell-body)] hover:underline disabled:opacity-50"
-              onClick={() => {
-                if (authorizeOpen && !authorizeOpen()) return;
-                pushThreadRouteWithHistory(threadId, window);
-              }}
-            >
-              {t.open}
-            </button>
-          </>
-        ) : null}
-      </div>
-      {expanded ? (
-        <div id={id} data-testid="proposal-result-details" className="mt-3 space-y-3">
-          {children}
-        </div>
-      ) : null}
+    <div data-testid="thread-proposal-result">
+      <ApprovalResultRow
+        status={status}
+        label={label}
+        testIdPrefix="proposal-result"
+        onExpandedChange={onExpandedChange}
+        actions={
+          status === 'approved' && (threadId || resolveThreadId) ? (
+            <>
+              <span aria-hidden="true">·</span>
+              {/* A native href would let middle-click/context-menu skip the synchronous continuation guard. */}
+              <button
+                type="button"
+                data-testid="proposal-result-open"
+                disabled={openLocked || opening}
+                aria-disabled={openLocked || undefined}
+                className="shell-focusable shrink-0 text-[var(--shell-body)] hover:underline disabled:opacity-50"
+                onClick={async () => {
+                  if (openingRef.current) return;
+                  if (authorizeOpen && !authorizeOpen()) return;
+                  if (threadId) {
+                    pushThreadRouteWithHistory(threadId, window);
+                    return;
+                  }
+                  openingRef.current = true;
+                  setOpening(true);
+                  try {
+                    const target = threadId ?? (await resolveThreadId?.());
+                    if (target && (!authorizeOpen || authorizeOpen())) pushThreadRouteWithHistory(target, window);
+                  } finally {
+                    openingRef.current = false;
+                    setOpening(false);
+                  }
+                }}
+              >
+                {t.open}
+              </button>
+            </>
+          ) : null
+        }
+      >
+        {children}
+      </ApprovalResultRow>
     </div>
   );
 }

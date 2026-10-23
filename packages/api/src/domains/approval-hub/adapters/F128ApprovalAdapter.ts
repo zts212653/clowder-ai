@@ -6,14 +6,15 @@
  * doesn't implement the full approve-time override form (AC-A4 强制跳转).
  * Stale threshold: 7 days.
  *
- * Phase G (F246): adds listSettled() — surfaces approved/rejected proposals
- * in the approval history tab using the existing listByUser() store method.
+ * Settled history includes requester withdrawal, read from the owner's bounded
+ * terminal index rather than a full scan of all user proposals.
  */
 
 import type { ApprovalItem, SettledApprovalItem, ThreadProposal } from '@cat-cafe/shared';
 import type { IProposalStore } from '../../cats/services/stores/ports/ProposalStore.js';
 import { ALL_PENDING_APPROVALS_LIMIT, type IApprovalAdapter, type ListSettledOpts } from '../ports/IApprovalAdapter.js';
 import { compactApprovalProjections, projectApprovalNavigation } from '../projectApprovalNavigation.js';
+import { projectSettledDecisionFacts } from '../settled-decision-facts.js';
 
 const F128_STALE_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 
@@ -30,16 +31,9 @@ export class F128ApprovalAdapter implements IApprovalAdapter {
 
   async listSettled(userId: string, opts?: ListSettledOpts): Promise<SettledApprovalItem[]> {
     const limit = opts?.limit ?? 50;
-    // listByUser returns ALL proposals (pending + settled) sorted by createdAt desc.
-    // We must collect ALL settled proposals first, then sort by decidedAt desc, then limit.
-    // Pass Number.MAX_SAFE_INTEGER to bypass the store's DEFAULT_LIST_LIMIT (100) — otherwise
-    // older proposals (beyond position 100 in createdAt-desc order) are silently excluded
-    // before filter+sort, causing recently-decided old proposals to disappear from the
-    // history tab when the user has many proposals total (P2 fix, F246-G).
-    const allRaw = this.proposalStore.listByUser(userId, Number.MAX_SAFE_INTEGER);
-    const all = Array.isArray(allRaw) ? allRaw : await allRaw;
+    const all = await this.proposalStore.listSettledByUser(userId, limit);
     return all
-      .filter((p) => p.status === 'approved' || p.status === 'rejected')
+      .filter((p) => p.status === 'approved' || p.status === 'rejected' || p.status === 'withdrawn')
       .map(toSettledItem)
       .filter((item): item is SettledApprovalItem => item !== null)
       .sort((a, b) => b.decidedAt - a.decidedAt)
@@ -82,17 +76,16 @@ function toSettledItem(p: ThreadProposal): SettledApprovalItem | null {
     legacyMessageId: p.cardMessageId,
   });
   if (!navigation) return null;
-  // Map approved/rejected timestamps: prefer dedicated fields, fall back to createdBy
-  const decidedAt = p.approvedAt ?? p.rejectedAt ?? p.createdAt;
-  const decidedBy = p.approvedBy ?? p.rejectedBy ?? p.createdBy;
+  const decision = projectSettledDecisionFacts(p);
   return {
     proposalId: p.proposalId,
     sourceFeatureId: 'F128' as const,
     requesterCatId: p.sourceCatId,
     ownerUserId: p.createdBy,
-    status: p.status as 'approved' | 'rejected',
+    status: p.status as 'approved' | 'rejected' | 'withdrawn',
     summary: `New thread: ${p.title}`,
     detail: {
+      ...decision.detail,
       title: p.title,
       reason: p.reason,
       parentThreadId: p.parentThreadId,
@@ -102,8 +95,8 @@ function toSettledItem(p: ThreadProposal): SettledApprovalItem | null {
       reportingMode: p.reportingMode,
     },
     navigation,
-    decidedAt,
-    decidedBy: decidedBy ?? 'unknown',
+    decidedAt: decision.decidedAt,
+    decidedBy: decision.decidedBy,
     createdAt: p.createdAt,
   };
 }

@@ -49,6 +49,7 @@ export function serializeDispatchProposal(proposal: DispatchProposal): string[] 
   }
   if (proposal.decidedBy) fields.push('decidedBy', proposal.decidedBy);
   if (proposal.supersededBy) fields.push('supersededBy', proposal.supersededBy);
+  if (proposal.supersededAt !== undefined) fields.push('supersededAt', String(proposal.supersededAt));
   if (proposal.envelopeDigest) {
     fields.push('envelopeDigest', proposal.envelopeDigest);
   }
@@ -90,6 +91,7 @@ export function hydrateDispatchProposal(raw: Record<string, string>): DispatchPr
     ...(raw.decidedAt ? { decidedAt: Number(raw.decidedAt) } : {}),
     ...(raw.decidedBy ? { decidedBy: raw.decidedBy } : {}),
     ...(raw.supersededBy ? { supersededBy: raw.supersededBy } : {}),
+    ...(raw.supersededAt ? { supersededAt: Number(raw.supersededAt) } : {}),
     ...(raw.envelopeDigest ? { envelopeDigest: raw.envelopeDigest } : {}),
     ...(raw.actionLeaseRef ? { actionLeaseRef: JSON.parse(raw.actionLeaseRef) } : {}),
     ...(publication ? { publication } : {}),

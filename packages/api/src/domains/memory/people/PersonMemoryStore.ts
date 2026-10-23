@@ -82,6 +82,7 @@ export interface StoredPersonMemoryCandidate
   dispositionLineageBindingKey?: string;
   latestDecisionReceipt?: PersonMemoryDecisionReceipt;
   latestUndoReceipt?: PersonMemoryUndoReceipt;
+  closedAt?: number;
   replacedByProposalId?: CaptureCandidateId;
 }
 

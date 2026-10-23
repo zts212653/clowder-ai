@@ -5689,15 +5689,24 @@ async function main(): Promise<void> {
     F306: bindLegacyApprovalProducer(new F306ApprovalAdapter(runtimeInteractionRuntime.store)),
     F321: bindLegacyApprovalProducer(new F321ApprovalAdapter(eventMemoryCorrectionProposalStore)),
     F260: bindLegacyApprovalProducer(
-      new F260ApprovalAdapter(entityProposalStore, (proposal) => {
-        if (!memoryServices.evidenceStore.inspectEntityConflict) {
-          throw new Error('F260: evidenceStore.inspectEntityConflict not available — Hub projection blocked');
-        }
-        return memoryServices.evidenceStore.inspectEntityConflict(
-          buildEntityRecord(proposal, proposal.ownerUserId),
-          proposal.ownerUserId,
-        );
-      }),
+      new F260ApprovalAdapter(
+        entityProposalStore,
+        (proposal) => {
+          if (!memoryServices.evidenceStore.inspectEntityConflict) {
+            throw new Error('F260: evidenceStore.inspectEntityConflict not available — Hub projection blocked');
+          }
+          return memoryServices.evidenceStore.inspectEntityConflict(
+            buildEntityRecord(proposal, proposal.ownerUserId),
+            proposal.ownerUserId,
+          );
+        },
+        (proposal) =>
+          memoryServices.evidenceStore.getEntityProposalEffectProof?.(
+            proposal.entityId,
+            proposal.proposalId,
+            proposal.ownerUserId,
+          ) ?? null,
+      ),
     ),
     F266: bindV1ApprovalProducer(f266ApprovalAdapter),
   });

@@ -55,6 +55,10 @@ describe('RedisDispatchProposalStore lineage abort recovery', { skip: redisIsola
       'dispatch-proposal-lineage:*',
       'dispatch-proposal-canonical-admission:*',
       'dispatch-proposal-canonical-admission-rebuild-completed-at',
+      'dispatch-proposal-negative-authorization:*',
+      'dispatch-proposal-legacy-negative-authorization:*',
+      'dispatch-proposal-negative-authorization-legacy-cutover',
+      'dispatch-proposal-negative-authorization-legacy-rebuild-completed-at',
     ]);
   }
 
@@ -164,5 +168,92 @@ describe('RedisDispatchProposalStore lineage abort recovery', { skip: redisIsola
       pending.map((proposal) => proposal.proposalId),
       ['dp-lineage-a'],
     );
+  });
+
+  it('restores delivery rollback custody when the approved predecessor fails before the staged successor aborts', async () => {
+    const proposedAction = {
+      subjectRef: 'subject:task:staged-delivery-retry',
+      actionFamily: 'implement',
+      successorSlot: 'implementer',
+      mode: 'single',
+      terminalPredicate: { kind: 'task_done' },
+    };
+    const input = { ...baseInput, sourceInvocationId: 'inv-staged-retry', proposedAction };
+    await store.create(input);
+    await anchor(input.proposalId);
+    await store.approve(input.proposalId, input.ownerUserId, 'strict');
+    await store.create({ ...input, proposalId: 'dp-revert-first-b', createdAt: 2000 });
+    assert.equal(await store.revertToPending(input.proposalId), null);
+    assert.equal((await store.get(input.proposalId)).status, 'superseded');
+    assert.notEqual(await redis.zscore('dispatch-proposal-user-settled:user-1', input.proposalId), null);
+    assert.equal(
+      await redis.hget('dispatch-proposal:dp-revert-first-b', 'supersededProposalIds'),
+      null,
+      'delivery rollback must not rewrite the create-time supersession receipt',
+    );
+
+    await store.abortStaged('dp-revert-first-b', 'card publication failed');
+
+    const restored = await store.get(input.proposalId);
+    assert.equal(restored.status, 'pending', 'an unpublished successor must return delivery retry custody');
+    assert.equal(restored.supersededBy, undefined);
+    assert.equal(restored.supersededAt, undefined);
+    assert.equal(await redis.get('dispatch-proposal-lineage:thread-sender:thread-target:opus'), input.proposalId);
+    assert.equal(await redis.zscore('dispatch-proposal-user-settled:user-1', input.proposalId), null);
+    assert.deepEqual(
+      (await store.listPendingByUser(input.ownerUserId)).map((p) => p.proposalId),
+      [input.proposalId],
+    );
+    assert.deepEqual(
+      await store.findCanonicalAdmissionBlocks({
+        ownerUserId: input.ownerUserId,
+        canonicalSubjectRef: proposedAction.subjectRef,
+      }),
+      [{ proposalId: input.proposalId, status: 'pending' }],
+    );
+    assert.deepEqual(await store.findNegativeAuthorizationBlocks(input), [
+      { proposalId: input.proposalId, status: 'pending', targetCats: ['sonnet'] },
+    ]);
+    assert.equal(await store.getApprovalOwnerAuthProvenance(input.proposalId), undefined);
+    await store.abortStaged('dp-revert-first-b', 'duplicate abort');
+    assert.equal((await store.get(input.proposalId)).status, 'pending');
+  });
+
+  it('keeps the direct pending predecessor ahead of an older failed delivery during staged abort', async () => {
+    await store.create({ ...baseInput, proposalId: 'old-approved', createdAt: 1000 });
+    await anchor('old-approved');
+    await store.approve('old-approved', 'user-1', 'strict');
+    await store.create({ ...baseInput, proposalId: 'current-pending', createdAt: 2000 });
+    await anchor('current-pending');
+    await store.create({ ...baseInput, proposalId: 'failed-staged', createdAt: 3000 });
+    await store.revertToPending('old-approved');
+    await store.abortStaged('failed-staged', 'publication failed');
+    assert.deepEqual(
+      (await store.listPendingByUser('user-1')).map((p) => p.proposalId),
+      ['current-pending'],
+    );
+    assert.equal((await store.get('old-approved')).supersededBy, 'current-pending');
+    assert.equal(await redis.zscore('dispatch-proposal-user-settled:user-1', 'current-pending'), null);
+  });
+
+  it('restores the newest failed delivery and reparents earlier failures when both outlive the staged holder', async () => {
+    for (const [proposalId, createdAt] of [
+      ['older-approved', 1000],
+      ['newer-approved', 2000],
+    ]) {
+      await store.create({ ...baseInput, proposalId, createdAt });
+      await anchor(proposalId);
+      await store.approve(proposalId, 'user-1', 'strict');
+    }
+    await store.create({ ...baseInput, proposalId: 'failed-staged', createdAt: 3000 });
+    await store.revertToPending('newer-approved');
+    await store.revertToPending('older-approved');
+    await store.abortStaged('failed-staged', 'publication failed');
+    assert.deepEqual(
+      (await store.listPendingByUser('user-1')).map((p) => p.proposalId),
+      ['newer-approved'],
+    );
+    assert.equal((await store.get('older-approved')).supersededBy, 'newer-approved');
+    assert.equal(await redis.zscore('dispatch-proposal-user-settled:user-1', 'newer-approved'), null);
   });
 });

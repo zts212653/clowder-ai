@@ -6,10 +6,13 @@ import { PersonMemoryClaimSelector } from '../PersonMemoryClaimSelector';
 import { useShellCopy } from '../shell/shell-copy';
 import { useApprovalItemActions } from '../useApprovalItemActions';
 import { ApprovalMember } from './ApprovalMember';
+import { ApprovalResultRow } from './ApprovalResultRow';
 import { CardBlock } from './CardBlock';
+import { decisionResultCopy } from './decision-result.shell-copy';
 import { PersonMemoryUndo } from './PersonMemoryUndo';
 import { personMemoryCopy } from './person-memory.shell-copy';
 import type { PersonMemoryCoordinate } from './person-memory-proposal-source';
+import { personMemoryOutcomeText, personMemoryResultLabel, personMemorySnapshotResult } from './person-memory-result';
 import { usePersonMemoryProposal } from './use-person-memory-proposal';
 
 /** The same original selector, original writer and exact owner receipt in Chat and every approval host. */
@@ -26,6 +29,7 @@ export function PersonMemoryApprovalCard({
 }) {
   const t = useShellCopy(personMemoryCopy),
     host = useApprovalHost();
+  const resultCopy = useShellCopy(decisionResultCopy);
   const ref = coordinate ?? (item?.navigation.state === 'anchored' ? item.navigation.approvalCardRef : undefined);
   const read = usePersonMemoryProposal(proposalId, ref, block);
   const last = useRef<{ proposalId: string; item: ApprovalHubItem } | null>(null);
@@ -34,23 +38,55 @@ export function PersonMemoryApprovalCard({
   const shown = read.source?.item ?? (!settled && last.current?.proposalId === proposalId ? last.current.item : null);
   const snapshot = read.source?.snapshot,
     receipt = snapshot?.decisionReceipt;
-  const label = snapshot
-    ? snapshot.status === 'materialized'
-      ? t.written
-      : snapshot.status === 'partially_materialized'
-        ? t.partial
-        : snapshot.status === 'rejected'
-          ? t.rejected
-          : snapshot.status === 'withdrawn'
-            ? t.withdrawn
-            : snapshot.status === 'not_now'
-              ? t.deferred
-              : null
-    : null;
+  const actual = snapshot ? personMemorySnapshotResult(snapshot) : null;
+  const label =
+    actual && snapshot?.status !== 'pending_approval'
+      ? personMemoryOutcomeText(actual.outcome, t, resultCopy, snapshot?.hasRetainedWrites === true)
+      : null;
   const participant = shown ?? item;
   const displayName =
     participant?.detail.displayName ??
     (isPersonMemoryProposalCardBlock(block) ? block.meta.subjectDisplayName : undefined);
+  if (settled && snapshot && label && actual) {
+    const result = actual;
+    const resultLabel = personMemoryResultLabel(
+      result.outcome,
+      typeof displayName === 'string' ? displayName : null,
+      t,
+      resultCopy,
+      snapshot.hasRetainedWrites === true,
+    );
+    return (
+      <article data-testid={`approval-item-${proposalId}`}>
+        <ApprovalResultRow status={result.status} label={resultLabel}>
+          {typeof displayName === 'string' ? <h3 className="font-semibold">{t.person(displayName)}</h3> : null}
+          {block ? <CardBlock block={{ ...block, actions: undefined }} /> : null}
+          <output data-testid="person-memory-result">{label}</output>
+          {receipt && !result.undoApplied ? (
+            <p data-testid="person-memory-receipt">
+              {t.receipt(
+                receipt.materializedClaimIds.length,
+                receipt.materializedRelationshipIds.length,
+                receipt.materializedEventIds.length,
+              )}
+            </p>
+          ) : null}
+          {ref ? (
+            <PersonMemoryUndo
+              proposalId={proposalId}
+              messageId={ref.messageId}
+              snapshot={snapshot}
+              afterWrite={() => read.refresh()}
+            />
+          ) : null}
+          {host.originalPlaceAction}
+          <button type="button" className="shell-focusable text-xs hover:underline" onClick={() => void read.refresh()}>
+            {t.reread}
+          </button>
+        </ApprovalResultRow>
+      </article>
+    );
+  }
   return (
     <article
       data-testid={`approval-item-${proposalId}`}

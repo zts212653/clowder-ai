@@ -71,6 +71,7 @@ function candidateAfterUndo(
           ? { approvedDraftIds, authorizedAt: candidate.approval?.authorizedAt ?? receipt.decidedAt }
           : undefined,
       latestUndoReceipt: undoReceipt,
+      closedAt: undoReceipt.undoneAt,
     };
   }
   const draftOrder = allCandidateDraftIds(candidate);
@@ -323,7 +324,7 @@ export async function undoPersonMemoryDecision(
   const updatedCandidate = candidateAfterUndo(candidate, decision, undoReceipt);
   plan.set(candidateKey, JSON.stringify(updatedCandidate));
   if (candidate.state === 'materialized') {
-    plan.zrem(PersonMemoryKeys.settled(owner), input.candidateId);
+    plan.zadd(PersonMemoryKeys.settled(owner), input.undoneAt, input.candidateId);
   }
   plan.sadd(PersonMemoryKeys.personArtifacts(owner, decision.personId), undoKey);
 

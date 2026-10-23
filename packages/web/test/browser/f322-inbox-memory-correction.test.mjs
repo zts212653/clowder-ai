@@ -146,6 +146,8 @@ for (const language of ['zh', 'en'])
       render.push({ entrance: 'Chat', text: chatText, box: await chat.boundingBox() });
       await page.screenshot({ path: path.join(evidence, 'chat-before.png'), fullPage: true });
       await decide(page, chat, rejected, rejectWord, responses);
+      await chat.getByTestId('decision-result-label').waitFor();
+      await chat.locator('button[aria-expanded="false"]').click();
       await chat.getByTestId('memory-correction-chat-result').waitFor();
       await freeze(page, chat);
       assert.match(await chat.innerText(), language === 'en' ? /Rejected.*You/ : /已拒绝.*你/);
@@ -208,6 +210,8 @@ for (const language of ['zh', 'en'])
       await page.getByTestId('mailbox-close').click();
       assert.equal(await draft.inputValue(), draftText);
       await page.reload();
+      await chat.getByTestId('decision-result-label').waitFor();
+      await chat.locator('button[aria-expanded="false"]').click();
       await chat.getByTestId('memory-correction-chat-result').waitFor();
       await page.screenshot({ path: path.join(evidence, 'chat-cold-result.png'), fullPage: true });
       await page.getByTestId('mailbox-button').click();
@@ -267,6 +271,8 @@ for (const language of ['zh', 'en'])
       await page.getByTestId('mailbox-close').click();
       assert.equal(await recoveryDraft.inputValue(), 'Preserved same-correction recovery draft');
       await page.reload();
+      await recoveryChat.getByTestId('decision-result-label').waitFor();
+      await recoveryChat.locator('button[aria-expanded="false"]').click();
       await recoveryChat.getByTestId('memory-correction-chat-result').waitFor();
       assert.match(await recoveryChat.innerText(), language === 'en' ? /Original memory corrected/ : /原记忆已更正/);
       await page.getByTestId('mailbox-button').click();

@@ -5,16 +5,16 @@ import { after, before, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { build } from 'vite';
 import { chromium } from '../../../ppt-forge/node_modules/playwright/index.mjs';
+import { registerMessageReadingVisibilityCases } from './message-reading-visibility.cases.mjs';
 
 const webRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const repoRoot = path.resolve(webRoot, '../..');
 const origin = 'https://f322-results.test';
 const evidence = path.join(repoRoot, '.cat-cafe/tmp/message-results-browser');
-const productionCss = [
-  ...(await fs.readFile(path.join(webRoot, 'src/app/layout.tsx'), 'utf8')).matchAll(
-    /href="(\/vendor\/app\/[^"]+\.css)"/g,
-  ),
-].map((match) => match[1]);
+const productionCss = JSON.parse(
+  await fs.readFile(path.join(webRoot, 'src/generated/vendor-stylesheets.json'), 'utf8'),
+);
+assert(productionCss.length > 0, 'load the same stylesheet manifest as the real document');
 let browser, script, css;
 const originalCwd = process.cwd();
 const records = Array.from({ length: 18 }, (_, index) => ({
@@ -125,7 +125,7 @@ async function open(
     if (url.pathname === '/proof.css') return route.fulfill({ contentType: 'text/css', body: css });
     if (productionCss.includes(url.pathname))
       return fs
-        .readFile(path.join(webRoot, 'src/app', path.basename(url.pathname)), 'utf8')
+        .readFile(path.join(webRoot, 'public', url.pathname.slice(1)), 'utf8')
         .then((body) => route.fulfill({ contentType: 'text/css', body }));
     if (url.pathname.startsWith('/api/')) {
       let body = { cats: [], tasks: [], queue: [], activeInvocations: [] };
@@ -214,6 +214,8 @@ async function open(
   await page.locator('[data-message-search-result]').first().waitFor();
   return { page, errors, queries, pages, releaseHistory };
 }
+
+registerMessageReadingVisibilityCases({ open, evidence });
 
 for (const width of [1440, 390]) {
   test(`search trip leaves the Workspace return clickable and resumes in Chat at ${width}px`, async () => {
@@ -519,7 +521,7 @@ test('global provenance, sorting and narrow dark layout keep real text and contr
     await page.waitForFunction(() => document.querySelector('[aria-pressed="true"]') !== null);
     assert.equal(queries.at(-1).messageSort, 'relevance');
     assert.equal(queries.at(-1).threadId, undefined);
-    assert(await page.getByText('索引覆盖范围尚未确认。', { exact: false }).isVisible());
+    await page.getByText('索引覆盖范围尚未确认。', { exact: false }).waitFor({ state: 'visible' });
     assert.equal(
       await page.evaluate(() => Math.max(document.documentElement.scrollWidth, document.body.scrollWidth) - innerWidth),
       0,

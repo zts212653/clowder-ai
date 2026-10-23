@@ -1,6 +1,6 @@
 'use client';
 import type { ReactNode } from 'react';
-import { useArtworkReference } from '@/components/content-review/ArtworkGalleryScope';
+import { useRetainedArtworkSource } from '@/components/content-review/ArtworkGalleryScope';
 import { ContentReviewSurface } from './ContentReviewSurface';
 import { useWorkspaceContentReview } from './useWorkspaceContentReview';
 
@@ -12,7 +12,7 @@ export function WorkspaceContentReviewSurface({ worktreeId, ...props }: Props) {
   return <FileReviewSurface key={JSON.stringify([worktreeId, props.path])} worktreeId={worktreeId} {...props} />;
 }
 function FileReviewSurface({ worktreeId, oversizedVideoReader, ...props }: Props) {
-  const reference = useArtworkReference()?.attachment.source;
+  const reference = useRetainedArtworkSource();
   const retained =
     reference?.kind === 'workspace' &&
     reference.locator.worktreeId === worktreeId &&

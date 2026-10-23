@@ -38,6 +38,19 @@ describe('F225ApprovalAdapter', () => {
 
   const withoutPublication = ({ publication: _publication, ...proposal }) => proposal;
 
+  it('retains expired handoffs after pending retirement with no decision writer', async () => {
+    const store = new InMemorySessionHandoffProposalStore();
+    const proposal = createHandoff(store);
+    const expired = store.markExpired(proposal.proposalId);
+    const adapter = new F225ApprovalAdapter(store);
+    assert.deepEqual(adapter.listPending('user-1'), []);
+    const [row] = await adapter.listSettled('user-1');
+    assert.equal(row?.status, 'expired');
+    assert.equal(row?.decidedAt, expired.updatedAt);
+    assert.equal(row?.decidedBy, '');
+    assert.deepEqual(await adapter.listSettled('foreign'), []);
+  });
+
   it('maps pending SessionHandoffProposals to ApprovalItems', () => {
     const store = new InMemorySessionHandoffProposalStore();
     createHandoff(store);

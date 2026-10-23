@@ -66,7 +66,13 @@ export function prepareLifecycleAppendRecovery(
   )
     return { kind: 'conflict', reason: 'receiver_changed' };
   const ref = lifecycle.dispatchRefs?.find((candidate) => candidate.targetId === targetId);
-  if (ref?.statusMessageId === response.id && (ref.inputRead?.status === 'read' || ref.appendAcceptance === 'accepted'))
+  const pending = currentEntry?.delivery.appendPendingByTarget?.[targetId];
+  const incomplete = failure.acceptance === 'incomplete';
+  if (
+    ref?.statusMessageId === response.id &&
+    (ref.appendAcceptance === 'accepted' ||
+      (!incomplete && !pending?.requiresCompletion && ref.inputRead?.status === 'read'))
+  )
     return { kind: 'already_received', messages: [source, response] };
   const previous = lifecycle.appendFailures?.find(
     (candidate) => candidate.targetId === targetId && candidate.invocationId === invocationId,
@@ -84,10 +90,11 @@ export function prepareLifecycleAppendRecovery(
     previous &&
     currentEntry?.delivery.appendRecoveryByTarget?.[targetId]?.invocationId === invocationId &&
     !input.checked &&
-    (failure.acceptance === 'not_accepted' ? !ref : ref?.statusMessageId === response.id)
+    (failure.acceptance !== 'unknown' ? !ref : ref?.statusMessageId === response.id)
   )
     return { kind: 'replayed', messages: [source, response], entry: currentEntry };
-  const pending = currentEntry?.delivery.appendPendingByTarget?.[targetId];
+  if (incomplete && (!pending?.requiresCompletion || pending.invocationId !== invocationId))
+    return { kind: 'conflict', reason: 'completion_not_available' };
   const neverHandedOff =
     !ref && pending?.invocationId === invocationId && !pending.dispatchStarted && failure.acceptance === 'not_accepted';
   if (ref?.statusMessageId !== response.id && !neverHandedOff) return { kind: 'conflict', reason: 'delivery_changed' };
@@ -102,7 +109,9 @@ export function prepareLifecycleAppendRecovery(
   )
     return { kind: 'conflict', reason: 'queue_identity_changed' };
   const restored = structuredClone(currentEntry);
-  if (restored.delivery.appendPendingByTarget) {
+  // An uncertain write is still the same unfinished native turn. Keep its
+  // completion fence until that turn succeeds or its original run ends.
+  if (restored.delivery.appendPendingByTarget && !(outcome.acceptance === 'unknown' && pending?.requiresCompletion)) {
     delete restored.delivery.appendPendingByTarget[targetId];
     if (!Object.keys(restored.delivery.appendPendingByTarget).length) delete restored.delivery.appendPendingByTarget;
   }
@@ -129,7 +138,7 @@ export function prepareLifecycleAppendRecovery(
     delete restored.terminalAt;
   }
   assertQueueLedgerEntry(restored);
-  const rejected = outcome.acceptance === 'not_accepted';
+  const rejected = outcome.acceptance !== 'unknown';
   return {
     kind: 'prepared',
     entry: restored,

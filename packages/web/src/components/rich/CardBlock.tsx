@@ -15,7 +15,7 @@ import { kickTeleportResolve, planTeleport } from '@/utils/teleport';
 import { originalApprovalCopy } from '../shell/mailbox/original-approval.shell-copy';
 import { useShellCopy } from '../shell/shell-copy';
 import { useShellPresentation } from '../shell/shell-presentation';
-import { ProfileUpdateCardContent } from './ProfileUpdateCardContent';
+import { ProfileUpdateCardContent, ProfileUpdateResult } from './ProfileUpdateCardContent';
 import {
   handleProfileUpdateDecisionAction,
   isProfileUpdateCardBlock,
@@ -102,7 +102,7 @@ export function CardBlock({
   const [copiedAction, setCopiedAction] = useState<string | null>(null);
   // F229 AC-B2: investigation job tracking after triage confirm with intent=investigate
   const [investigationJobId, setInvestigationJobId] = useState<string | null>(null);
-  const originalProfileStatus = useProfileUpdateTerminalSync({ block, messageId });
+  const originalProfileStatus = useProfileUpdateTerminalSync({ block, messageId, preserveDetails: profileCompact });
   const profileMailbox =
     host.presentation === 'mailbox' && block.actions?.some((a) => isProfileUpdateDecisionAction(a.action));
   const writeBlocked = useWriteBlocked(
@@ -511,6 +511,7 @@ export function CardBlock({
           copiedAction,
           guardedWrite,
           onSettled: setProfileStatus,
+          preserveDetails: profileCompact,
           messageId,
           payload,
           setCopiedAction,
@@ -538,10 +539,16 @@ export function CardBlock({
       handleTriageCancel,
       block,
       guardedWrite,
+      profileCompact,
       copiedAction,
       messageId,
     ],
   );
+
+  if (profileCompact && profileStatus)
+    return (
+      <ProfileUpdateResult block={block} status={profileStatus} actions={host.originalPlaceAction} error={error} />
+    );
 
   return (
     <div className={`border-l-4 rounded-r-lg p-3 ${toneStyle}`}>

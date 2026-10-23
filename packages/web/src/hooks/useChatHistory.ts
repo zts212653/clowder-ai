@@ -92,6 +92,7 @@ type NavigationSettleSample = {
   messageAnchor: MessageScrollAnchor;
   fullyOffscreen: boolean;
   clippedStart: boolean;
+  clippedFittingEnd: boolean;
 };
 type NavigationSettleState = {
   expiresAt: number;
@@ -271,6 +272,10 @@ function captureNavigationSettleSample(el: HTMLElement, messageId: string): Navi
     messageAnchor,
     fullyOffscreen: rect.bottom <= viewport.top || rect.top >= viewport.bottom,
     clippedStart: targetRect.height > 0 && targetRect.top < viewport.top - 1,
+    clippedFittingEnd:
+      targetRect.height > 0 &&
+      targetRect.height <= viewport.bottom - viewport.top &&
+      targetRect.bottom > viewport.bottom + 1,
   };
 }
 
@@ -295,13 +300,15 @@ function advanceNavigationSettle(
   // Deferred messages/images can shift the target after the first smooth scroll.
   // A stationary offscreen offset is not a completed navigation. Every reply
   // needs its header: earlier rows can shrink after native start/center alignment
-  // while leaving only the middle of that reply visible.
+  // while leaving only the middle of that reply visible. A reply that fits in
+  // this history viewport also needs its end; settling a clipped tail would
+  // preserve the wrong offset through later passive layout corrections.
   if (
     el &&
     sample &&
     state.previousSample &&
     isStableNavigationSample(state.previousSample, sample) &&
-    (sample.fullyOffscreen || sample.clippedStart)
+    (sample.fullyOffscreen || sample.clippedStart || sample.clippedFittingEnd)
   ) {
     restoreMessageScrollAnchor(el, { ...sample.messageAnchor, viewportOffsetPx: 0 });
     sample = captureNavigationSettleSample(el, messageId);

@@ -27,6 +27,7 @@ import {
   RedisCanonicalAdmissionUnavailableError,
 } from './RedisDispatchProposalCanonicalClaim.js';
 import { createRedisDispatchProposal } from './RedisDispatchProposalCreate.js';
+import { listRedisDispatchHistory } from './RedisDispatchProposalHistory.js';
 import {
   CAS_APPROVE_DISPATCH_PROPOSAL_LUA,
   CAS_REJECT_DISPATCH_PROPOSAL_LUA,
@@ -159,6 +160,7 @@ export class RedisDispatchProposalStore implements IDispatchProposalStore, Appro
       String(proposal.createdAt),
       proposalId,
       String(canonicalAdmissionKeys.length),
+      String(Date.now()),
       ...canonicalAdmissionFields,
     );
 
@@ -204,25 +206,7 @@ export class RedisDispatchProposalStore implements IDispatchProposalStore, Appro
   }
 
   async listSettledByUser(userId: string, limit: number): Promise<DispatchProposal[]> {
-    const settledKey = DispatchProposalKeys.userSettled(userId);
-    // Reverse order: newest first (highest score = most recent decidedAt)
-    const ids = await this.redis.zrevrange(settledKey, 0, limit - 1);
-    if (!ids.length) return [];
-
-    const pipeline = this.redis.pipeline();
-    for (const id of ids) {
-      pipeline.hgetall(DispatchProposalKeys.detail(id));
-    }
-    const results = await pipeline.exec();
-    if (!results) return [];
-
-    const proposals: DispatchProposal[] = [];
-    for (const [err, raw] of results) {
-      if (err || !raw || typeof raw !== 'object' || Object.keys(raw as Record<string, string>).length === 0) continue;
-      const p = hydrateDispatchProposal(raw as Record<string, string>);
-      if (p.status === 'approved' || p.status === 'rejected') proposals.push(p);
-    }
-    return proposals;
+    return listRedisDispatchHistory(this.redis, userId, limit);
   }
 
   async findByClientMessageId(clientMessageId: string, sourceThreadId: string): Promise<DispatchProposal | null> {
@@ -312,6 +296,7 @@ export class RedisDispatchProposalStore implements IDispatchProposalStore, Appro
     await abortRedisDispatchStaged(this.redis, {
       detailKey: DispatchProposalKeys.detail(proposalId),
       pendingKey: DispatchProposalKeys.userPending(proposal.ownerUserId),
+      settledKey: DispatchProposalKeys.userSettled(proposal.ownerUserId),
       lineageKey: lineageKeyRedis,
       proposalId,
       conditionalDeleteKey,

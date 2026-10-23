@@ -102,6 +102,18 @@ export class InMemoryProposalStore implements IProposalStore {
     return this.collect((p) => p.createdBy === userId, limit);
   }
 
+  listSettledByUser(userId: string, limit = DEFAULT_LIST_LIMIT): ThreadProposal[] {
+    return [...this.proposals.values()]
+      .filter((p) => p.createdBy === userId && ['approved', 'rejected', 'withdrawn'].includes(p.status))
+      .sort(
+        (a, b) =>
+          (b.withdrawnAt ?? b.approvedAt ?? b.rejectedAt ?? b.createdAt) -
+          (a.withdrawnAt ?? a.approvedAt ?? a.rejectedAt ?? a.createdAt),
+      )
+      .slice(0, limit)
+      .map(cloneProposal);
+  }
+
   listPending(userId: string, limit: number = DEFAULT_LIST_LIMIT): ThreadProposal[] {
     return this.collect((p) => p.createdBy === userId && p.status === 'pending', limit);
   }

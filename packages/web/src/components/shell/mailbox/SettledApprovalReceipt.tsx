@@ -1,0 +1,107 @@
+import type { RichCardBlock } from '@cat-cafe/shared';
+import { useEffect, useMemo, useState } from 'react';
+import { useShellCopy } from '../shell-copy';
+import { useShellLanguage } from '../shell-language';
+import { ApprovalDecisionReceipt } from './ApprovalDecisionReceipt';
+import { useApprovalHeading } from './approval-heading';
+import { describeReconcile, type ReconcileModel, type Terminal } from './approval-reconcile';
+import { lookupCreatedThread } from './created-thread-lookup';
+import { originalApprovalCopy } from './original-approval.shell-copy';
+import { readSettledOriginalBlock } from './settled-original-block';
+import { settledResultsCopy } from './settled-results.shell-copy';
+import { type SettledResultItem, settledResultKey } from './settled-results-source';
+import { useOriginalApprovalEffect } from './use-original-approval-effect';
+
+/** Canonical history is sufficient to state a decision. Only the producer's exact receipt can state its effect. */
+export function SettledApprovalReceipt({
+  item,
+  reread,
+  authorizeOpen,
+}: {
+  item: SettledResultItem;
+  reread: () => void;
+  authorizeOpen: () => boolean;
+}) {
+  const language = useShellLanguage(),
+    t = useShellCopy(settledResultsCopy);
+  const originalCopy = useShellCopy(originalApprovalCopy);
+  const [detailsRequested, setDetailsRequested] = useState(false);
+  const approval = useMemo(() => ({ ...item, inlineApprovable: false }), [item]);
+  const { title: proposalTitle } = useApprovalHeading(approval);
+  const title =
+    item.sourceFeatureId === 'F225' || item.sourceFeatureId === 'F231'
+      ? originalCopy.kind[item.sourceFeatureId]
+      : proposalTitle;
+  const [context, setContext] = useState<{
+    item: SettledResultItem;
+    block: RichCardBlock | null;
+    threadId: string | null;
+  } | null>(null);
+  useEffect(() => {
+    if (!detailsRequested) return;
+    const controller = new AbortController();
+    void Promise.all([
+      readSettledOriginalBlock(item, controller.signal),
+      item.sourceFeatureId === 'F128' && item.resolution === 'accepted'
+        ? lookupCreatedThread({ ...item, signal: controller.signal })
+        : null,
+    ])
+      .then(([block, threadId]) => {
+        if (!controller.signal.aborted) setContext({ item, block, threadId });
+      })
+      .catch(() => {});
+    return () => controller.abort();
+  }, [item, detailsRequested]);
+  const original = context?.item === item ? context : null;
+  const terminal: Terminal = useMemo(
+    () => ({
+      resolution: item.resolution,
+      ...(item.detail.closureTimeUnknown ? {} : { decidedAt: item.decidedAt }),
+      decidedBy: item.decidedBy,
+      ...(item.closedReason ? { closedReason: item.closedReason } : {}),
+      ...(original?.threadId ? { threadId: original.threadId } : {}),
+      ...(item.resolution === 'accepted' ? { effectUnknown: !original?.threadId } : {}),
+    }),
+    [item, original?.threadId],
+  );
+  const session = useMemo(
+    () => ({
+      key: settledResultKey(item),
+      ownerUserId: item.ownerUserId,
+      approval,
+      originalBlock: original?.block ?? undefined,
+      model: { seenAttemptId: 0, lastWrite: null, state: { kind: 'decided', terminal } } satisfies ReconcileModel,
+    }),
+    [item, approval, terminal, original?.block],
+  );
+  const effect = useOriginalApprovalEffect(session, detailsRequested);
+  const view = describeReconcile(session.model.state, {
+    language,
+    ownerUserId: item.ownerUserId,
+    sourceFeatureId: item.sourceFeatureId,
+    originalEffect: effect,
+  });
+  return (
+    <ApprovalDecisionReceipt
+      session={session}
+      terminal={terminal}
+      line={[view.line, title].filter(Boolean).join(' · ')}
+      heading={title}
+      authorizeOpen={authorizeOpen}
+      onExpandedChange={(expanded) => {
+        if (expanded) setDetailsRequested(true);
+      }}
+      deferProducerRead
+      resolveThreadId={
+        item.sourceFeatureId === 'F128' && item.resolution === 'accepted' ? () => lookupCreatedThread(item) : undefined
+      }
+    >
+      {['F225', 'F231', 'F276'].includes(item.sourceFeatureId) && !original?.block ? (
+        <p>{t.sourceUnavailable}</p>
+      ) : null}
+      <button type="button" className="shell-focusable text-xs hover:underline" onClick={reread}>
+        {t.reread}
+      </button>
+    </ApprovalDecisionReceipt>
+  );
+}

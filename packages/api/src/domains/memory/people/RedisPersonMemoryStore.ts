@@ -237,11 +237,11 @@ export class RedisPersonMemoryStore implements PersonMemoryStore {
   async withdrawCandidate(
     ownerUserId: string,
     candidateId: string,
-    _decidedAt: number,
+    decidedAt: number,
   ): Promise<StoredPersonMemoryCandidate> {
     const candidate = await this.getCandidateForOwner(ownerUserId, candidateId);
     if (!candidate) throw new Error('candidate not available');
-    const updated = terminalCandidate(candidate, 'withdrawn');
+    const updated = { ...terminalCandidate(candidate, 'withdrawn'), closedAt: decidedAt };
     const candidateKey = PersonMemoryKeys.candidate(ownerUserId, candidateId);
     const personId = candidatePersonId(candidate);
     const lineageKey = candidate.deltaFingerprint
@@ -252,6 +252,7 @@ export class RedisPersonMemoryStore implements PersonMemoryStore {
       PersonMemoryKeys.pending(ownerUserId),
       personId ? candidateForgetFence(candidate) : candidateKey,
       lineageKey ?? candidateKey,
+      PersonMemoryKeys.settled(ownerUserId),
     ];
     const result = String(
       await this.redis.eval(
@@ -263,6 +264,7 @@ export class RedisPersonMemoryStore implements PersonMemoryStore {
         personMemoryProposalLineageMarker(candidateId),
         lineageKey ? '1' : '0',
         personId ? '1' : '0',
+        String(decidedAt),
       ),
     );
     if (result !== 'UPDATED') throw new Error(`F276 withdraw failed: ${result}`);

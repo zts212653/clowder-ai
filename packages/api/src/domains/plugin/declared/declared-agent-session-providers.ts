@@ -51,6 +51,15 @@ export function declaredAgentSessionProviders(input: {
   return {
     async activate(admission) {
       if (input.settings.mode === 'off') return;
+      const { manifest, provenance } = admission.packageRecord;
+      // Historical Host-bundled packages have no admitted archive to discover providers in.
+      // Archive-admitted packages and executable modules still require full verification.
+      if (
+        provenance === undefined &&
+        manifest.runtime?.transport === 'builtin' &&
+        manifest.runtime.entrypoint === undefined
+      )
+        return;
       const pluginId = admission.packageRecord.pluginId;
       let providerId = 'unknown';
       const log = (result: string, reason?: string) =>

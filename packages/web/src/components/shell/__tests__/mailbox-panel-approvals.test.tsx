@@ -276,6 +276,8 @@ describe('the 待办 panel and the approvals it can host', () => {
       const retained = $('mailbox-retained-result');
       expect(retained).not.toBeNull();
       expect(retained?.textContent).toContain('已同意');
+      expect($('proposal-result-details')).toBeNull();
+      await act(async () => retained?.querySelector<HTMLButtonElement>('button[aria-expanded="false"]')?.click());
       // Named the way its row was named.
       expect(retained?.textContent).toContain('记一条品味');
     });
@@ -285,6 +287,9 @@ describe('the 待办 panel and the approvals it can host', () => {
       data.sessions = sessions;
       show(okRead([]));
       await openPanel();
+      await act(async () =>
+        $('mailbox-retained-result')?.querySelector<HTMLButtonElement>('button[aria-expanded="false"]')?.click(),
+      );
       await click('mailbox-retained-dismiss');
       expect(sessions.close).toHaveBeenCalledWith(KEY);
       expect($('mailbox-retained-result')).toBeNull();

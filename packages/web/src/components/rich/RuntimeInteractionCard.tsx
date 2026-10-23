@@ -7,10 +7,14 @@ import { apiFetch } from '@/utils/api-client';
 import { mailboxRuntimeCopy } from '../shell/mailbox/mailbox-runtime.shell-copy';
 import { useShellCopy } from '../shell/shell-copy';
 import { useShellPresentation } from '../shell/shell-presentation';
+import { ApprovalResultRow } from './ApprovalResultRow';
+import { decisionResultCopy } from './decision-result.shell-copy';
 import { CLASSIC_RUNTIME_INTERACTION_COPY, type RuntimeInteractionCopy } from './RuntimeInteractionCopy';
 import { RuntimeInteractionDecisionActions } from './RuntimeInteractionDecisionActions';
 import { RuntimeInteractionElicitationForm } from './RuntimeInteractionElicitationForm';
 import { RuntimeInteractionQuestionForm } from './RuntimeInteractionQuestionForm';
+import { RuntimeInteractionRequestDetails } from './RuntimeInteractionRequestDetails';
+import { runtimeDecisionResult } from './runtime-decision-result';
 
 export function isRuntimeInteractionCardBlock(block: RichCardBlock): boolean {
   return block.meta?.kind === 'runtime_interaction' && typeof block.meta.interactionId === 'string';
@@ -38,6 +42,7 @@ export function RuntimeInteractionCard({
   secondaryActions?: ReactNode;
 }) {
   const shellCopy = useShellCopy(mailboxRuntimeCopy);
+  const resultCopy = useShellCopy(decisionResultCopy);
   const isV2 = useShellPresentation() === 'v2';
   const copy = suppliedCopy ?? (isV2 ? shellCopy : CLASSIC_RUNTIME_INTERACTION_COPY);
   const interactionId = String(block.meta?.interactionId ?? '');
@@ -133,6 +138,25 @@ export function RuntimeInteractionCard({
     hostOwnerMatches &&
     Boolean(record?.cardRef && messageId === record.cardRef.messageId && block.id === record.cardRef.blockId);
 
+  if (
+    (isV2 || presentation === 'mailbox') &&
+    record &&
+    canonical &&
+    record.status !== 'staged' &&
+    record.status !== 'pending'
+  ) {
+    const result = runtimeDecisionResult(record, resultCopy, copy);
+    return (
+      <section data-testid="runtime-interaction-card">
+        <ApprovalResultRow status={result.status} label={result.label}>
+          <RuntimeInteractionRequestDetails request={record.request} />
+          <TerminalState record={record} copy={copy} />
+          {error ? <p role="alert">{error}</p> : null}
+          {secondaryActions}
+        </ApprovalResultRow>
+      </section>
+    );
+  }
   return (
     <section
       className={

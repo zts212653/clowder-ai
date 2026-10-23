@@ -252,7 +252,12 @@ export type RuntimeInteractionTerminalReasonCode =
 
 export type RuntimeInteractionRedactedResponse =
   | { kind: 'decision'; decisionId: string; submittedFieldIds?: string[] }
-  | { kind: 'answers'; answeredQuestionIds: string[]; secretQuestionIds: string[] }
+  | {
+      kind: 'answers';
+      answeredQuestionIds: string[];
+      secretQuestionIds: string[];
+      selectedOptionIndexes?: Record<string, number[]>;
+    }
   | RuntimeConversationRedactedResponse;
 
 export type RuntimeInteractionSource =
@@ -401,7 +406,27 @@ export function redactRuntimeInteractionResponse(
     request.kind === 'question'
       ? request.questions.filter((question) => question.isSecret).map((question) => question.id)
       : [];
-  return { kind: 'answers', answeredQuestionIds: Object.keys(response.answers), secretQuestionIds };
+  // Only finite, already-published options can be recovered for a result row.
+  // Secret choices and arbitrary answer text never enter the durable receipt.
+  const selectedOptionIndexes = Object.fromEntries(
+    request.kind === 'question'
+      ? request.questions
+          .filter((question) => !question.isSecret && question.options)
+          .flatMap((question) => {
+            const indexes =
+              question.options?.flatMap((option, index) =>
+                response.answers[question.id]?.includes(option.label) ? [index] : [],
+              ) ?? [];
+            return indexes.length ? [[question.id, indexes]] : [];
+          })
+      : [],
+  );
+  return {
+    kind: 'answers',
+    answeredQuestionIds: Object.keys(response.answers),
+    secretQuestionIds,
+    ...(Object.keys(selectedOptionIndexes).length ? { selectedOptionIndexes } : {}),
+  };
 }
 
 function assertUniqueIds(ids: string[], label: string, context: z.RefinementCtx): void {

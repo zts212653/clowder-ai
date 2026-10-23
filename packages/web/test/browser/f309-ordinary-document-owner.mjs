@@ -107,6 +107,7 @@ export async function startRealDocumentOwner(dataDir, { executionSource = 'carri
           tasks,
           registry,
           dataDir,
+          socketManager: socket,
         });
       // Use the production history projection, including its Host speaker and visibility rules.
       // Human send/provider dispatch is a separate declared boundary; never pretend an unused router ran.

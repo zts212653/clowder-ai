@@ -282,3 +282,44 @@ it.each([
   await act(async () => container.querySelector<HTMLButtonElement>('[data-testid="approve-btn"]')?.click());
   expect(container.querySelector('[data-testid="domain-approval-result"]')?.textContent).toContain('效果暂未确认');
 });
+
+it.each([
+  ['F193', '原消息已送达'],
+  ['F260', '实体已写入'],
+] as const)('cold %s Chat recovers a canonical effect without browser attempts', async (feature, label) => {
+  seed(feature);
+  proofAvailable = false;
+  const proof = 'canonical-effect';
+  settled = [
+    {
+      ...item,
+      detail: { ...item.detail, canonicalEffectProofRef: proof },
+      materialization: { state: 'succeeded', effectProofRef: proof },
+      resolution: 'accepted',
+      decidedAt: Date.now(),
+      decidedBy: 'owner-1',
+    },
+  ];
+  await act(async () => root.render(<RichBlocks blocks={[block]} publication={publication} />));
+  expect(container.querySelector('[data-testid="domain-approval-result"]')?.textContent).toContain(label);
+  expect(container.querySelector('[data-testid="approve-btn"]')).toBeNull();
+  expect(vi.mocked(apiFetch).mock.calls.some(([, options]) => options?.method === 'POST')).toBe(false);
+});
+
+it.each(['F193', 'F260'] as const)('cold %s keeps absent or mismatched durable proofs unknown', async (feature) => {
+  seed(feature);
+  proofAvailable = false;
+  settled = [
+    {
+      ...item,
+      detail: { ...item.detail, canonicalEffectProofRef: 'other-proof' },
+      materialization: { state: 'succeeded', effectProofRef: 'proof' },
+      resolution: 'accepted',
+      decidedAt: Date.now(),
+      decidedBy: 'owner-1',
+    },
+  ];
+  await act(async () => root.render(<RichBlocks blocks={[block]} publication={publication} />));
+  expect(container.querySelector('[data-testid="domain-approval-result"]')?.textContent).toContain('效果暂未确认');
+  expect(container.querySelector('[data-testid="approve-btn"]')).toBeNull();
+});

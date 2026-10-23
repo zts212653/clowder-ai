@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { apiFetch } from '@/utils/api-client';
-import { SettingsPrimaryButton } from '../primitives/SettingsPrimaryButton';
 import { SettingsSecondaryButton } from '../primitives/SettingsSecondaryButton';
 import { SettingsText } from '../primitives/SettingsText';
 import { dotActivationFeedback } from './dot-activation-feedback';
@@ -32,11 +31,13 @@ export function DotConnectionDetail({
   activationRequest = 0,
   activationAllowed = false,
   onStateChanged,
+  secondaryAction = false,
 }: {
   installed: boolean;
   activationRequest?: number;
   activationAllowed?: boolean;
   onStateChanged?: () => void | Promise<void>;
+  secondaryAction?: boolean;
 }) {
   const [status, setStatus] = useState<DotStatus | null>(null);
   const [setup, setSetup] = useState<DotStatus | null>(null);
@@ -141,7 +142,7 @@ export function DotConnectionDetail({
       <SettingsText as="h4" variant="sm" className="font-semibold">
         ChatGPT 云端 · dot 会话
       </SettingsText>
-      <SettingsText as="p" tone="secondary">
+      <SettingsText as="p" variant="sm" tone="secondary">
         沿用 ChatGPT 已连接的猫咖插件，把订阅说明发给你要接入的那只 dot。回复和图片回到各自的原对话。
       </SettingsText>
       {error && (
@@ -165,27 +166,27 @@ export function DotConnectionDetail({
         </div>
       )}
       {!installed ? (
-        <SettingsText as="p" tone="muted">
+        <SettingsText as="p" variant="sm" tone="muted">
           在左边开启本机 dot 协作支持，再为目标 dot 准备订阅。ChatGPT 已有的连接不用重装。
         </SettingsText>
       ) : !status ? (
-        <SettingsText as="p" tone="muted">
+        <SettingsText as="p" variant="sm" tone="muted">
           正在读取连接状态…
         </SettingsText>
       ) : (
         <>
           <dl className="space-y-2 text-sm">
-            <div className="flex justify-between gap-3">
+            <div className="grid grid-cols-[minmax(0,120px)_minmax(0,1fr)] gap-3 [&_dd]:min-w-0 [&_dd]:break-words">
               <dt>独立成员</dt>
               <dd>砚砚 · dot（@dot）</dd>
             </div>
             {status.ownerUserId && (
-              <div className="flex justify-between gap-3">
+              <div className="grid grid-cols-[minmax(0,120px)_minmax(0,1fr)] gap-3 [&_dd]:min-w-0 [&_dd]:break-words">
                 <dt>猫咖账号</dt>
                 <dd>{status.ownerUserId}</dd>
               </div>
             )}
-            <div className="flex justify-between gap-3">
+            <div className="grid grid-cols-[minmax(0,120px)_minmax(0,1fr)] gap-3 [&_dd]:min-w-0 [&_dd]:break-words">
               <dt>召唤订阅</dt>
               <dd>
                 {status.revoked
@@ -197,32 +198,37 @@ export function DotConnectionDetail({
                       : '等待目标 dot 订阅'}
               </dd>
             </div>
-            <div className="flex justify-between gap-3">
+            <div className="grid grid-cols-[minmax(0,120px)_minmax(0,1fr)] gap-3 [&_dd]:min-w-0 [&_dd]:break-words">
               <dt>原处回复</dt>
               <dd>{status.replyAt ? '收到过真实回复' : '尚未验证'}</dd>
             </div>
-            <div className="flex justify-between gap-3">
+            <div className="grid grid-cols-[minmax(0,120px)_minmax(0,1fr)] gap-3 [&_dd]:min-w-0 [&_dd]:break-words">
               <dt>原图</dt>
               <dd>{status.imageAt ? '收到过原图' : '尚未验证'}</dd>
             </div>
           </dl>
-          <SettingsText as="p" tone="muted">
+          <SettingsText as="p" variant="sm" tone="muted">
             你的召唤仅读取来源对话。Pro 会话与 dot 会话共用一个连接，名字和头像分别显示。断开 dot 订阅不影响 Pro。
           </SettingsText>
           {!status.endpointUrl && (
-            <SettingsText as="p" tone="muted">
+            <SettingsText as="p" variant="sm" tone="muted">
               云端连接地址尚未配置，连接资料准备好后会显示在这里。
             </SettingsText>
           )}
-          <SettingsPrimaryButton disabled={busy || !status.endpointUrl} onClick={() => void prepare()}>
+          <button
+            type="button"
+            className={`${secondaryAction ? 'console-button-secondary' : 'console-button-primary'} min-h-8 !font-medium disabled:opacity-50`}
+            disabled={busy || !status.endpointUrl}
+            onClick={() => void prepare()}
+          >
             {busy ? '准备中…' : status.paired ? '查看订阅说明' : '准备订阅说明'}
-          </SettingsPrimaryButton>
+          </button>
           {setup?.endpointUrl && (
             <div className="space-y-3 rounded-lg border border-cafe p-3">
-              <SettingsText as="p" tone="secondary">
+              <SettingsText as="p" variant="sm" tone="secondary">
                 只为目标 dot 准备订阅，无需重新添加猫咖插件或更换 Pro 的连接口令。把下面的说明发给你的 dot。
               </SettingsText>
-              <SettingsText as="p" tone="muted">
+              <SettingsText as="p" variant="sm" tone="muted">
                 若 ChatGPT 尚未连接猫咖，先按猫咖插件原有流程连接；不要另装一份 dot 连接。
               </SettingsText>
               <p className="break-words text-sm text-cafe-secondary">{setup.instructions}</p>
@@ -233,7 +239,7 @@ export function DotConnectionDetail({
           )}
           {status.paired && (
             <div className="space-y-3">
-              <SettingsText as="p" tone="secondary">
+              <SettingsText as="p" variant="sm" tone="secondary">
                 同时测两处原对话。收到、读过和回帖分别核实；两处都回到原处后再用左边开关启用。
               </SettingsText>
               <SettingsSecondaryButton

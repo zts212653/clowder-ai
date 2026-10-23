@@ -9,6 +9,7 @@ import { originalApprovalCopy } from '../shell/mailbox/original-approval.shell-c
 import { useShellCopy } from '../shell/shell-copy';
 import { useShellPresentation } from '../shell/shell-presentation';
 import { HandoffCardContent } from './HandoffCardContent';
+import { HandoffResultRow } from './HandoffResultRow';
 
 type Status = 'pending' | 'approving' | 'approved' | 'rejected' | 'expired';
 
@@ -232,6 +233,19 @@ export function HandoffProposalCard({ block }: { block: RichCardBlock; messageId
       <div className="border border-conn-red-ring bg-[var(--semantic-critical-surface)] rounded-lg p-3 text-xs text-conn-red-text">
         Handoff card missing proposalId
       </div>
+    );
+  }
+
+  if (compact && settled) {
+    return (
+      <HandoffResultRow
+        status={status === 'approved' ? 'approved' : status === 'rejected' ? 'rejected' : 'expired'}
+        block={block}
+        title={title}
+        body={body}
+        error={error}
+        actions={host.originalPlaceAction}
+      />
     );
   }
 

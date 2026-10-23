@@ -9,6 +9,7 @@ import { UNIFIED_ATTENTION_INVALIDATION_EVENTS } from '@/components/shell/use-un
 import { CardBlock } from './CardBlock';
 import { DomainApprovalCard } from './DomainApprovalCard';
 import { domainApprovalCopy } from './domain-approval.shell-copy';
+import { ReconciledApprovalResult } from './ReconciledApprovalResult';
 import { readDomainApprovalResult } from './read-domain-approval-result';
 import {
   type DomainApprovalSource,
@@ -96,9 +97,33 @@ export function OriginalDomainApprovalCard({
       if (event.phase === 'end') onWriteSettled?.();
     },
   };
+  if (result) {
+    const line =
+      describeReconcile(
+        { kind: 'decided', terminal: result.terminal },
+        {
+          language,
+          ownerUserId: result.ownerUserId,
+          originalEffect: result.effect,
+        },
+      ).line ?? '';
+    return (
+      <ApprovalHostContext.Provider value={host}>
+        <div data-testid="domain-approval-result">
+          <ReconciledApprovalResult terminal={result.terminal} line={line}>
+            <CardBlock block={{ ...block, actions: undefined }} />
+            {secondaryActions}
+            <button type="button" className="shell-focusable text-xs hover:underline" onClick={() => void refresh()}>
+              {t.reread}
+            </button>
+          </ReconciledApprovalResult>
+        </div>
+      </ApprovalHostContext.Provider>
+    );
+  }
   return (
     <ApprovalHostContext.Provider value={host}>
-      {last && !result ? (
+      {last ? (
         <DomainApprovalCard
           item={last.item}
           beforeWrite={beforeWrite}
@@ -112,17 +137,7 @@ export function OriginalDomainApprovalCard({
           <CardBlock block={{ ...block, actions: undefined }} />
         </details>
       )}
-      {result ? (
-        <output className="block text-sm" data-testid="domain-approval-result">
-          {
-            describeReconcile(
-              { kind: 'decided', terminal: result.terminal },
-              { language, ownerUserId: result.ownerUserId, originalEffect: result.effect },
-            ).line
-          }
-        </output>
-      ) : null}
-      {!current && !result ? (
+      {!current ? (
         <p className="text-xs text-[var(--shell-muted)]" data-testid="domain-approval-unverified">
           {t.unverified}
         </p>

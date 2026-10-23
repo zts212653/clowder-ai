@@ -4,12 +4,21 @@ related_features: [F114, F102, F192, F095, F057, F187, F225, F287, F296, F312]
 topics: [memory, observability, harness, magic-words, navigation, cognitive-state]
 doc_kind: spec
 created: 2026-06-06
-tips_exempt: "Renewed 2026-09-27 for F324 Phase A: Event list bounds and exact event continuation repair existing cat-side reads; they add no user-invokable action or new Hub discovery surface."
+tips_exempt: "Renewed 2026-10-23 for F332 consolidation: event-list and exact-event readers keep their existing entry points, while unfinished event association and repair evidence retain their original owners. The project-status update introduces no new event action or Hub discovery surface."
 ---
 
 # F227: Event Memory — 事件级记忆索引（拉闸记录）
 
-> **Status**: in-progress | **Owner**: Ragdoll Opus-4.8 | **Priority**: P1
+> **Status**: closed (consolidated into F332; 未完成结果继续承接，非全部交付) | **Owner**: Ragdoll Opus-4.8 | **Priority**: P1
+
+## 2026-10-23 项目收拢至 F332
+
+You 在 `[thread-id]#private-source-id` 明确要求关闭旧记忆项目、
+保留有价值的结果并新立一项。本项目登记据此归入 [F332](F332-experience-informed-memory.md)；
+**本文件仍保留原合同及历史证据的权威，未被逐项替代的合同继续有效。**
+原 AC 实情、Task、owner、accepted scope 和等待不变；本次不声称全部完成、不关闭来源、不迁移数据。
+
+> **关闭前状态快照**: in-progress | **Owner**: Ragdoll Opus-4.8 | **Priority**: P1
 >
 > 家里话：**拉闸记录**（有味道，家族感）。对外 / 正式 UI / 社区化：**Event Memory** / 校准事件 / Alignment Events。
 > 产品内核：**事件级记忆索引**——不是"魔法词面板"，Magic Word 只是第一条 lane。

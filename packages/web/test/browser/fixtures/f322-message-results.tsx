@@ -76,6 +76,12 @@ function ControlledReadingSurface() {
             </button>
           )}
         </header>
+        <MessageSearchOverlay
+          threadId={threadId}
+          host={host}
+          available={available}
+          resolveSpeaker={(speaker) => (speaker === 'codex61-sol' ? '砚砚' : speaker === 'opus55' ? '宪宪' : speaker)}
+        />
         <div className="relative min-h-0 flex-1">
           <div
             ref={history.scrollContainerRef}
@@ -100,12 +106,6 @@ function ControlledReadingSurface() {
         <footer className="shrink-0 border-t border-[var(--console-border-soft)] p-4 text-sm text-cafe-secondary">
           原阅读表面 · Host 控件在浮层
         </footer>
-        <MessageSearchOverlay
-          threadId={threadId}
-          host={host}
-          available={available}
-          resolveSpeaker={(speaker) => (speaker === 'codex61-sol' ? '砚砚' : speaker === 'opus55' ? '宪宪' : speaker)}
-        />
       </div>
       {workspaceOpen && (
         <section

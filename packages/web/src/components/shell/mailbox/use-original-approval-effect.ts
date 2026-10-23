@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { correctionEffectConfirmed } from '@/components/memory/page/read-correction-result';
 import { readEvalRepairResult } from '@/components/rich/read-eval-repair';
 import { readScheduleSource, scheduleEffect } from '@/components/rich/read-schedule-approval';
-import { type DomainApprovalEffect, domainAttemptEffect } from '@/stores/approval-domain-effect';
+import { canonicalDomainEffect, type DomainApprovalEffect, domainAttemptEffect } from '@/stores/approval-domain-effect';
 import { useApprovalHubStore } from '@/stores/approvalHubStore';
 import { apiFetch } from '@/utils/api-client';
 import type { ApprovalSession } from './approval-sessions';
@@ -42,11 +42,14 @@ function confirmedEffect(
 }
 
 /** A producer's owner GET can confirm its historical effect even when the generic Hub adapter has no effect projection. */
-export function useOriginalApprovalEffect(session: ApprovalSession): OriginalApprovalEffect | null {
+export function useOriginalApprovalEffect(
+  session: Pick<ApprovalSession, 'approval' | 'model' | 'ownerUserId' | 'key'>,
+  readEnabled = true,
+): OriginalApprovalEffect | null {
   const { approval, model } = session;
   const feature = approval.sourceFeatureId;
   const originalSession = approval.detail.sourceSessionId;
-  const enabled =
+  const eligible =
     model.state.kind === 'decided' &&
     model.state.terminal?.resolution === 'accepted' &&
     (feature === 'F225' ||
@@ -57,6 +60,11 @@ export function useOriginalApprovalEffect(session: ApprovalSession): OriginalApp
       feature === 'F321' ||
       feature === 'F139' ||
       feature === 'F266');
+  const enabled = readEnabled && eligible;
+  const canonical =
+    model.state.kind === 'decided'
+      ? (model.state.terminal?.domainEffect ?? canonicalDomainEffect(approval))
+      : undefined;
   const attempt = useApprovalHubStore((s) => s.decisionAttempts[approval.proposalId]);
   const receipt =
     approval.navigation.state === 'anchored'
@@ -126,5 +134,5 @@ export function useOriginalApprovalEffect(session: ApprovalSession): OriginalApp
       current = false;
     };
   }, [enabled, feature, approval, session.ownerUserId, originalSession, key, receipt]);
-  return enabled ? (receipt ?? (confirmed?.key === key ? confirmed.effect : null)) : null;
+  return eligible ? (canonical ?? receipt ?? (enabled && confirmed?.key === key ? confirmed.effect : null)) : null;
 }

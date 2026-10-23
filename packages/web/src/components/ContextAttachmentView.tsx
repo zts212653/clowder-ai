@@ -256,7 +256,13 @@ export function ContextAttachmentList({
           );
           for (const member of group) renderedGalleries.add(member.id);
           return (
-            <GalleryAttachmentGroup key={attachment.id} attachments={group} compact={compact} onRemove={onRemove} />
+            <GalleryAttachmentGroup
+              key={attachment.id}
+              attachments={group}
+              compact={compact}
+              onRemove={onRemove}
+              fromComposer
+            />
           );
         }
         if (fileQuoteIds.has(attachment.id) && onRemove) {

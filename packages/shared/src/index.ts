@@ -83,6 +83,7 @@ export * from './recall-outcome.js';
 // NOT re-exported here — uses Node.js fs, same pattern as Redis utils.
 // Export registry (CatRegistry, catIdSchema, assertKnownCatId)
 export * from './registry/index.js';
+export * from './runtime-interaction-result.js';
 export * from './runtime-question-retirement.js';
 // Export all schemas
 export * from './schemas/index.js';

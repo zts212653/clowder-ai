@@ -146,7 +146,7 @@ for (const language of ['zh', 'en'])
       render.push({ entrance: 'Chat', text: chatText, box: await chat.boundingBox() });
       await page.screenshot({ path: path.join(evidence, 'chat-before.png'), fullPage: true });
       await decide(page, chat, rejected, rejectWord, responses);
-      await chat.getByTestId('schedule-approval-result').waitFor();
+      await chat.getByTestId('decision-result-label').waitFor();
       await freeze(page, chat);
       assert.match(await chat.innerText(), language === 'en' ? /Rejected.*You/ : /已拒绝.*你/);
       await page.screenshot({ path: path.join(evidence, 'chat-result.png'), fullPage: true });
@@ -202,6 +202,7 @@ for (const language of ['zh', 'en'])
           await card.getByRole('button', { name: resume, exact: true }).waitFor();
           const recoveryRead = f.reads.at(-1),
             recoveryItem = recoveryRead.items.find((item) => item.approval?.proposalId === record.proposalId);
+          assert.equal(recoveryRead.consistency.state, 'verified');
           assert.equal(recoveryItem.approval.resolution, 'accepted');
           assert.equal(recoveryItem.approval.inlineApprovable, false);
           assert.equal(recoveryItem.approval.materialization.state, 'outcome_unknown');
@@ -245,7 +246,7 @@ for (const language of ['zh', 'en'])
       await page.getByTestId('mailbox-close').click();
       assert.equal(await draft.inputValue(), draftText);
       await page.reload();
-      await chat.getByTestId('schedule-approval-result').waitFor();
+      await chat.getByTestId('decision-result-label').waitFor();
       await page.screenshot({ path: path.join(evidence, 'chat-cold-result.png'), fullPage: true });
       await page.getByTestId('mailbox-button').click();
       await page.getByTestId('approval-item-inbox-native-approve').waitFor();
@@ -253,7 +254,7 @@ for (const language of ['zh', 'en'])
       assert.equal(await pendingPanel.locator('[data-testid^="schedule-approval-schedule-"]').count(), 0);
       assert.equal(f.reads.at(-1).items.filter((item) => item.approval?.sourceFeatureId === 'F139').length, 0);
       // The rejected original card remains in Chat as a durable result after leaving the pending list.
-      assert.equal(await chat.getByTestId('schedule-approval-result').count(), 1);
+      assert.equal(await chat.getByTestId('decision-result-label').count(), 1);
       assert.equal(await chat.getByRole('button', { name: rejectWord, exact: true }).count(), 0);
       await freeze(page, pendingPanel);
       await page.screenshot({ path: path.join(evidence, 'pending-cold-retired.png'), fullPage: true });

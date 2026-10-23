@@ -55,7 +55,7 @@ describe('F246 Approval producer catalog', () => {
     assert.equal(approvalProducerMeta('F306').decisionEndpointBase, null);
     assert.equal(approvalProducerMeta('F306').decisionSurface, 'origin_card');
     assert.equal(approvalProducerMeta('F306').sourcePolicy, 'message-required');
-    assert.equal(approvalProducerMeta('F306').history, false);
+    assert.equal(approvalProducerMeta('F306').history, true);
     assert.equal(approvalProducerMeta('F321').decisionEndpointBase, '/api/event-memory-corrections');
     assert.equal(approvalProducerMeta('F321').sourcePolicy, 'message-or-event');
   });
@@ -69,7 +69,7 @@ describe('F246 Approval producer catalog', () => {
       if (entry.decisionSurface === 'approval_hub') assert.ok(entry.decisionEndpointBase?.startsWith('/api/'));
       else assert.equal(entry.decisionEndpointBase, null);
       assert.equal(entry.decisionSurface, producerId === 'F306' ? 'origin_card' : 'approval_hub');
-      assert.equal(entry.history, producerId !== 'F306');
+      assert.equal(entry.history, true);
     }
   });
 

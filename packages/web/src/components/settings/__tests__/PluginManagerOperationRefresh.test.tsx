@@ -79,7 +79,7 @@ describe('Plugin Manager operation refresh', () => {
     vi.restoreAllMocks();
   });
 
-  it('offers Repair and Update on the real failed-plugin row and refreshes after repair', async () => {
+  it('keeps Repair on the failed row, Update in its detail, and refreshes after repair', async () => {
     let repaired = false;
     mockApiFetch.mockImplementation(async (path, options) => {
       if (String(path).endsWith('/repair')) {
@@ -102,7 +102,8 @@ describe('Plugin Manager operation refresh', () => {
     await flushEffects();
     const row = container.querySelector(`[data-plugin-id="${plugin.pluginId}"]`);
     const buttons = () => [...(row?.querySelectorAll('button') ?? [])];
-    expect(buttons().some((button) => button.textContent === '更新')).toBe(true);
+    expect(buttons().some((button) => button.textContent === '更新')).toBe(false);
+    expect(container.querySelector('[data-plugin-detail-action="update"]')?.textContent).toBe('更新到 1.1.0');
     const repair = buttons().find((button) => button.textContent === '修复');
     expect(repair).toBeDefined();
     await act(async () => repair?.click());

@@ -249,6 +249,43 @@ describe('RuntimeInteractionService', () => {
     });
   });
 
+  it('retains public option indexes through the canonical terminal without retaining private or free answers', async () => {
+    const { service, store } = makeHarness();
+    const request = questionRequest();
+    if (request.kind !== 'question') throw new Error('expected a question');
+    request.questions[0].options = [{ label: 'Alpha' }, { label: 'Production' }];
+    request.questions[1].options = [{ label: 'Private A' }, { label: 'Private B' }];
+    request.questions.push({ id: 'comment', header: 'Comment', question: 'Anything else?' });
+    const providerWait = service.request(request);
+    const pending = await waitForStatus(store, request.interactionId, 'pending');
+    if (!pending.cardRef) throw new Error('expected the canonical card');
+    const response = {
+      kind: 'answers' as const,
+      answers: {
+        environment: ['Production'],
+        token: ['Private B'],
+        comment: ['unpublished free answer'],
+      },
+    };
+    await service.respond({
+      interactionId: request.interactionId,
+      ownerUserId: 'user-1',
+      cardRef: pending.cardRef,
+      response,
+    });
+    assert.deepEqual(await providerWait, response, 'the provider still receives the complete authorized response');
+    const restored = JSON.parse(JSON.stringify(await store.get(request.interactionId))) as RuntimeInteractionRecord;
+    assert.deepEqual(restored.terminal?.response, {
+      kind: 'answers',
+      answeredQuestionIds: ['environment', 'token', 'comment'],
+      secretQuestionIds: ['token'],
+      selectedOptionIndexes: { environment: [1] },
+    });
+    assert.doesNotMatch(JSON.stringify(restored.terminal), /Private B|unpublished free answer/);
+    const freshReader = makeHarness({ store, hostEpoch: 'new-reader' });
+    assert.deepEqual(await freshReader.store.get(request.interactionId), restored);
+  });
+
   it('settles an explicit question rejection before rejecting the same provider waiter', async () => {
     const { service, store } = makeHarness();
     let statusWhenRejected: RuntimeInteractionRecord['status'] | undefined;

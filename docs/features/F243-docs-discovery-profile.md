@@ -8,12 +8,21 @@ description: 定义知识型文档的稳定简介、来源字段和目录生成�
 description_source: human
 description_author: codex
 description_updated_at: 2026-06-30T17:55:01Z
-tips_exempt: "Renewed 2026-09-05 for the ADR-046 catalog-ownership clarification: this changes internal finalizer ownership guards only, with no new cat-facing capability or discoverable user workflow."
+tips_exempt: "Renewed 2026-10-23 for F332 consolidation: the existing document profile, generated index and finalizer remain authoritative; unfinished discovery outcomes are linked to the shared outcome ledger. This documentation-only change adds no navigation action or discovery surface."
 ---
 
 # F243: Docs Discovery Profile — OKF-inspired metadata + generated index
 
-> **Status**: in-progress (Phase B/C + AC-C4 merged; Phase D baseline recorded; Phase E managed-index ownership moved to the post-merge finalizer on 2026-07-16; observation pending) | **Owner**: Ragdoll (Ragdoll Opus-4.7) | **Priority**: P1
+> **Status**: closed (consolidated into F332; 未完成结果继续承接，非全部交付) | **Owner**: Ragdoll (Ragdoll Opus-4.7) | **Priority**: P1
+
+## 2026-10-23 项目收拢至 F332
+
+You 在 `[thread-id]#private-source-id` 明确要求关闭旧记忆项目、
+保留有价值的结果并新立一项。本项目登记据此归入 [F332](F332-experience-informed-memory.md)；
+**本文件仍保留原合同及历史证据的权威，未被逐项替代的合同继续有效。**
+原 AC 实情、Task、owner、accepted scope 和等待不变；本次不声称全部完成、不关闭来源、不迁移数据。
+
+> **关闭前状态快照**: in-progress (Phase B/C + AC-C4 merged; Phase D baseline recorded; Phase E managed-index ownership moved to the post-merge finalizer on 2026-07-16; observation pending) | **Owner**: Ragdoll (Ragdoll Opus-4.7) | **Priority**: P1
 
 Architecture cell: `memory`
 Map delta: none

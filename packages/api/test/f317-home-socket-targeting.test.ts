@@ -246,3 +246,87 @@ for (const registerAnotherWindow of [false, true]) {
     }
   });
 }
+
+test('two authenticated Home sockets deliver a publication only to the selected page', async () => {
+  const f = await fixture();
+  try {
+    const received: string[] = [];
+    const home = await Promise.all([f.connect(), f.connect()]);
+    const artifact = { contentRef: `prepared-media:${'a'.repeat(64)}`, ownerRevision: 2 };
+    for (const [index, socket] of home.entries()) {
+      const clientId = randomUUID();
+      const registered = await f.app.inject({
+        method: 'POST',
+        url: '/api/concierge/home/clients',
+        headers: f.headers,
+        payload: { clientId, socketId: socket.id },
+      });
+      assert.equal(registered.statusCode, 200);
+      const clientToken = registered.json().clientToken;
+      socket.on('home:inspect', (_data, ack) =>
+        ack({
+          clientId,
+          clientToken,
+          route: index === 0 ? '/' : '/settings',
+          threadId: f.thread.id,
+          composer: false,
+          sections: [],
+        }),
+      );
+      socket.on('home:execute', async (data, ack) => {
+        received.push(clientId);
+        const grant = await f.app.inject({
+          method: 'POST',
+          url: `/api/concierge/home/commands/${data.token}`,
+          headers: f.headers,
+          payload: { clientId, clientToken },
+        });
+        assert.equal(grant.json().kind, 'navigate');
+        ack({ token: data.token, clientId, clientToken, status: 'applied', artifact });
+      });
+    }
+    const discovery = await f.service.hub.pages.read('owner');
+    assert.ok('pages' in discovery);
+    assert.equal(discovery.pages.length, 2);
+    const selected = discovery.pages.find((page) => page.state.route === '/settings');
+    assert.ok(selected);
+    const result = await f.service.hub.openWork(
+      'owner',
+      async () => ({
+        source: {
+          kind: 'message',
+          threadId: f.thread.id,
+          messageId: 'original-v2',
+          messageRevision: '2',
+          item: { kind: 'content-block', index: 0 },
+          expectedUrl: '/uploads/v2.png',
+        },
+        artifact,
+      }),
+      async () => {},
+      new AbortController().signal,
+      selected,
+    );
+    assert.equal(result, 'applied');
+    assert.deepEqual(received, [selected.state.clientId]);
+    await f.app.inject({
+      method: 'DELETE',
+      url: `/api/concierge/home/clients/${selected.state.clientId}`,
+      headers: f.headers,
+      payload: { clientToken: selected.state.clientToken },
+    });
+    assert.equal(
+      await f.service.hub.openWork(
+        'owner',
+        async () => null,
+        async () => {},
+        new AbortController().signal,
+        selected,
+      ),
+      'blocked',
+    );
+    assert.equal(received.length, 1, 'losing the selected page never redirects to the other valid page');
+  } finally {
+    await f.close();
+  }
+});

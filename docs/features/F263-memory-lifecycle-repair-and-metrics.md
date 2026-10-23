@@ -2,7 +2,7 @@
 feature_ids: [F263]
 related_features: [F152, F186, F200, F227, F231, F237, F255, F256, F260, F271, F276]
 topics: [memory, lifecycle, eval, telemetry, contract, envelope, privacy, dashboard]
-tips_exempt: "Renewed 2026-10-02: AC-A5 records bounded topk envelopes and explicit omitted-appendix evidence for the existing search tool; response correctness changes without a new user action or discovery surface."
+tips_exempt: "Renewed 2026-10-23 for F332 consolidation: existing search envelopes, memory-consumption contracts and lifecycle measurements retain their entry points and evidence. Carrying their unfinished validation into F332 introduces no new dashboard, user control or discovery surface."
 doc_kind: spec
 created: 2026-07-11
 updated: 2026-07-27
@@ -14,7 +14,16 @@ description_updated_at: 2026-07-11T13:10:00Z
 
 # F263: Memory Lifecycle Repair & Metrics — 记忆 lifecycle 修复与度量
 
-> **Status**: in-progress（Phase A/B/C complete；Phase D pending） | **Owner**: Ragdoll (fable-5，spec/plan own；Phase A/B 实现由 codex-sol 承接) | **Priority**: P1
+> **Status**: closed (consolidated into F332; 未完成结果继续承接，非全部交付) | **Owner**: Ragdoll (fable-5，spec/plan own；Phase A/B 实现由 codex-sol 承接) | **Priority**: P1
+
+## 2026-10-23 项目收拢至 F332
+
+You 在 `[thread-id]#private-source-id` 明确要求关闭旧记忆项目、
+保留有价值的结果并新立一项。本项目登记据此归入 [F332](F332-experience-informed-memory.md)；
+**本文件仍保留原合同及历史证据的权威，未被逐项替代的合同继续有效。**
+原 AC 实情、Task、owner、accepted scope 和等待不变；本次不声称全部完成、不关闭来源、不迁移数据。
+
+> **关闭前状态快照**: in-progress（Phase A/B/C complete；Phase D pending） | **Owner**: Ragdoll (fable-5，spec/plan own；Phase A/B 实现由 codex-sol 承接) | **Priority**: P1
 
 Architecture cell: memory
 Map delta: complete — Phase C 已把 `LifecycleTraceStore`、`lifecycle_traces`、`VerificationEvent` 与 `ThreeAxisSnapshot` 回填既有 `memory` cell；未新建平行 Store / Router / cursor state。

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { catRegistry } from '@cat-cafe/shared';
+import { CLIENT_REQUEST_DIAGNOSTIC_HEADER, catRegistry } from '@cat-cafe/shared';
 import cookie from '@fastify/cookie';
 import Fastify from 'fastify';
 import '../../../api/test/helpers/setup-cat-registry.js';
@@ -106,7 +106,10 @@ export async function createInboxProposalFixture({
       reply
         .header('Access-Control-Allow-Origin', request.headers.origin ?? '*')
         .header('Access-Control-Allow-Credentials', 'true')
-        .header('Access-Control-Allow-Headers', 'Content-Type,x-cat-cafe-user,x-csrf-token')
+        .header(
+          'Access-Control-Allow-Headers',
+          `Content-Type,x-cat-cafe-user,x-csrf-token,${CLIENT_REQUEST_DIAGNOSTIC_HEADER}`,
+        )
         .header('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
       if (request.method === 'OPTIONS') return reply.send();
     });
@@ -138,6 +141,7 @@ export async function createInboxProposalFixture({
     approvalSources = await configureApprovals?.({ app, owner, messages, threads, socketManager });
     const registry = await createTestApprovalRegistry([
       new F128ApprovalAdapter(proposals),
+      ...(runtime?.approvalAdapter ? [runtime.approvalAdapter] : []),
       ...(approvalSources?.adapters ?? []),
     ]);
     await app.register(proposalRoutes, {
@@ -170,7 +174,30 @@ export async function createInboxProposalFixture({
     else app.get('/api/entrusted-work/needs-me', async () => ({ ownerReads: [], coverage: { state: 'complete' } }));
     await app.register(companionDecisionRoutes, {
       ownerUserId: owner,
-      collectiveAccountability,
+      // This disposable app owns no collective requests. An explicit failing source still stays unavailable;
+      // production's missing-plugin behavior is unchanged. Recovery requires a verified whole-inbox read.
+      collectiveAccountability:
+        collectiveAccountability ??
+        (async (principal) => {
+          assert.equal(principal, owner);
+          const observedAt = Date.now();
+          return {
+            status: 200,
+            body: {
+              data: {
+                items: [],
+                reasons: [],
+                state: {
+                  coverage: 'pending_f290_collective_accountability_requests',
+                  status: 'available',
+                  exhaustiveness: 'complete',
+                  startedAt: observedAt,
+                  observedAt,
+                },
+              },
+            },
+          };
+        }),
       messageStore: messages,
       threadStore: threads,
       runtimeInteractionStore: runtime?.store ?? {
@@ -216,7 +243,10 @@ export async function createInboxProposalFixture({
       return reply.send(Buffer.from(await response.arrayBuffer()));
     });
     await app.listen({ host: '127.0.0.1', port: 0 });
-    assert.equal((await registry.listPending(owner)).length, 2 + (approvalSources?.records.length ?? 0));
+    assert.equal(
+      (await registry.listPending(owner)).length,
+      2 + (approvalSources?.records.filter((record) => !record.initiallySettled).length ?? 0),
+    );
     return {
       apiPort: app.server.address().port,
       proposals,

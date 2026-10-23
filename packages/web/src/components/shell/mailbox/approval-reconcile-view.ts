@@ -2,9 +2,15 @@ import type { ShellLanguage } from '../shell-language';
 import type { ReconcileState, ReconcileView, Terminal, WriteSeen } from './approval-reconcile';
 import { approvalReconcileCopy } from './approval-reconcile.shell-copy';
 import { readTerminal } from './approval-reconcile-terminal';
+import { originalApprovalCopy } from './original-approval.shell-copy';
 import type { OriginalApprovalEffect } from './use-original-approval-effect';
 
-type Context = { language?: ShellLanguage; ownerUserId?: string; originalEffect?: OriginalApprovalEffect | null };
+type Context = {
+  language?: ShellLanguage;
+  ownerUserId?: string;
+  sourceFeatureId?: string;
+  originalEffect?: OriginalApprovalEffect | null;
+};
 type Copy = typeof approvalReconcileCopy.zh;
 
 function writeOutcome(write: WriteSeen | undefined): keyof Copy['confirming'] {
@@ -15,10 +21,23 @@ function writeOutcome(write: WriteSeen | undefined): keyof Copy['confirming'] {
 function decidedLine(terminal: Terminal, t: Copy, context: Context): string {
   const verified = readTerminal(terminal);
   if (!verified) return t.unknown;
-  const parts = [t.resolutions[verified.resolution]];
+  const original = originalApprovalCopy[context.language ?? 'zh'];
+  const effect = verified.resolution === 'accepted' ? context.originalEffect : null;
+  const originalResult =
+    effect === 'handoff-started'
+      ? original.handoffApproved
+      : effect === 'profile-written'
+        ? original.approvedProfile
+        : verified.resolution === 'rejected' && context.sourceFeatureId === 'F225'
+          ? original.handoffRejected
+          : null;
+  const parts = [
+    originalResult ??
+      (verified.closedReason ? t.closedReasons[verified.closedReason] : t.resolutions[verified.resolution]),
+  ];
   if (verified.threadId) parts.push(t.opened);
-  if (context.originalEffect) parts.push(t.originalEffects[context.originalEffect]);
-  else if (verified.effectUnknown) parts.push(t.effectUnknown);
+  if (effect && !originalResult) parts.push(t.originalEffects[effect]);
+  else if (!effect && verified.effectUnknown) parts.push(t.effectUnknown);
   if (verified.decidedAt !== undefined) {
     parts.push(
       new Date(verified.decidedAt).toLocaleString(context.language === 'en' ? 'en-US' : 'zh-CN', {

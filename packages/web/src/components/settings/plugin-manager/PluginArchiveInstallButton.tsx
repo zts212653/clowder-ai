@@ -11,7 +11,7 @@
  */
 
 import { type PluginArchiveReplacementOffer, PluginArchiveReplacementOfferSchema } from '@cat-cafe/shared';
-import { useRef, useState } from 'react';
+import { type ReactNode, useRef, useState } from 'react';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { apiFetch } from '@/utils/api-client';
 
@@ -21,6 +21,7 @@ interface Props {
   label?: string;
   docsHref?: string | false;
   docsLabel?: string;
+  renderTrigger?: (open: () => void, disabled: boolean) => ReactNode;
 }
 
 export function PluginArchiveInstallButton({
@@ -29,6 +30,7 @@ export function PluginArchiveInstallButton({
   label = '离线安装',
   docsHref = false,
   docsLabel = '插件开发文档',
+  renderTrigger,
 }: Props) {
   const [uploading, setUploading] = useState(false);
   const [pending, setPending] = useState<{ file: File; offer: PluginArchiveReplacementOffer } | null>(null);
@@ -73,24 +75,40 @@ export function PluginArchiveInstallButton({
   };
 
   return (
-    <div className="flex flex-col items-end gap-1.5">
-      <label
-        className={`inline-flex cursor-pointer items-center gap-1.5 rounded-lg border border-cafe-border px-3 py-1.5 text-xs font-medium text-cafe-secondary transition-colors hover:bg-cafe-hover ${uploading ? 'pointer-events-none opacity-50' : ''}`}
-        title="上传 .tar.gz / .tgz 插件包"
-      >
-        <UploadIcon />
-        {uploading ? '安装中...' : label}
-        <input
-          ref={fileInputRef}
-          type="file"
-          disabled={uploading || pending !== null}
-          className="hidden"
-          onChange={(e) => {
-            const f = e.target.files?.[0];
-            if (f) handleUpload(f);
-          }}
-        />
-      </label>
+    <div className={renderTrigger ? 'contents' : 'flex flex-col items-end gap-1.5'}>
+      {renderTrigger ? (
+        <>
+          {renderTrigger(() => fileInputRef.current?.click(), uploading || pending !== null)}
+          <input
+            ref={fileInputRef}
+            type="file"
+            disabled={uploading || pending !== null}
+            className="hidden"
+            onChange={(event) => {
+              const file = event.target.files?.[0];
+              if (file) void handleUpload(file);
+            }}
+          />
+        </>
+      ) : (
+        <label
+          className={`inline-flex cursor-pointer items-center gap-1.5 rounded-lg border border-cafe-border px-3 py-1.5 text-xs font-medium text-cafe-secondary transition-colors hover:bg-cafe-hover ${uploading ? 'pointer-events-none opacity-50' : ''}`}
+          title="上传 .tar.gz / .tgz 插件包"
+        >
+          <UploadIcon />
+          {uploading ? '安装中...' : label}
+          <input
+            ref={fileInputRef}
+            type="file"
+            disabled={uploading || pending !== null}
+            className="hidden"
+            onChange={(e) => {
+              const f = e.target.files?.[0];
+              if (f) handleUpload(f);
+            }}
+          />
+        </label>
+      )}
       {docsHref !== false && (
         <a
           href={docsHref}

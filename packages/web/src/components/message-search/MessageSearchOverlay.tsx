@@ -20,7 +20,11 @@ export function MessageSearchOverlay({
   if (!host.open && (!trip || trip.status === 'completed') && !host.notice) return null;
   return (
     <aside
-      className="absolute right-3 top-[calc(env(safe-area-inset-top,0px)+60px)] z-[70] w-[min(520px,calc(100%-24px))]"
+      className={
+        host.open
+          ? 'absolute right-3 top-[calc(env(safe-area-inset-top,0px)+60px)] z-[70] w-[min(520px,calc(100%-24px))]'
+          : 'z-[70] shrink-0 px-3 py-2'
+      }
       aria-label="消息找回"
     >
       {host.open ? (

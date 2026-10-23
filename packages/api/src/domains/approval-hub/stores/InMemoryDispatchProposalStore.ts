@@ -27,6 +27,7 @@ export class InMemoryDispatchProposalStore implements IDispatchProposalStore {
   private readonly lineageIndex = new Map<string, string>();
   private readonly negativeAuthorization = new InMemoryDispatchNegativeAuthorizationIndex();
   private readonly predecessorCustody = new Map<string, string>();
+  private readonly deliveryRollbackCustody = new Map<string, Set<string>>();
   private readonly approvalOwnerAuthProvenance = new Map<string, OwnerAuthProvenance>();
   private legacyCutoverAt: number | undefined;
   private legacyRebuildCompleted = false;
@@ -50,6 +51,7 @@ export class InMemoryDispatchProposalStore implements IDispatchProposalStore {
         if (existing.publication?.state === 'staged') return { proposal: { ...existing }, supersededProposals: [] };
         existing.status = 'superseded';
         existing.supersededBy = input.proposalId;
+        existing.supersededAt = now;
         supersededProposals.push({ ...existing });
       }
     }
@@ -106,8 +108,15 @@ export class InMemoryDispatchProposalStore implements IDispatchProposalStore {
     const currentHolder = this.lineageIndex.get(lineage);
     this.approvalOwnerAuthProvenance.delete(proposalId);
     if (currentHolder && currentHolder !== proposalId) {
+      const holder = this.proposals.get(currentHolder);
+      if (holder?.status === 'pending' && holder.publication?.state === 'staged') {
+        const predecessors = this.deliveryRollbackCustody.get(currentHolder) ?? new Set<string>();
+        predecessors.add(proposalId);
+        this.deliveryRollbackCustody.set(currentHolder, predecessors);
+      }
       proposal.status = 'superseded';
       proposal.supersededBy = currentHolder;
+      proposal.supersededAt = Date.now();
       proposal.decidedAt = undefined;
       proposal.decidedBy = undefined;
       this.negativeAuthorization.add(proposal);
@@ -198,9 +207,9 @@ export class InMemoryDispatchProposalStore implements IDispatchProposalStore {
     return [...this.proposals.values()]
       .filter(
         (proposal) =>
-          proposal.ownerUserId === userId && (proposal.status === 'approved' || proposal.status === 'rejected'),
+          proposal.ownerUserId === userId && ['approved', 'rejected', 'superseded'].includes(proposal.status),
       )
-      .sort((left, right) => (right.decidedAt ?? 0) - (left.decidedAt ?? 0))
+      .sort((left, right) => (right.supersededAt ?? right.decidedAt ?? 0) - (left.supersededAt ?? left.decidedAt ?? 0))
       .slice(0, limit)
       .map((proposal) => ({ ...proposal }));
   }
@@ -229,17 +238,28 @@ export class InMemoryDispatchProposalStore implements IDispatchProposalStore {
     const holderId = this.lineageIndex.get(lineage);
     if (holderId && holderId !== proposalId) return;
     const predecessorId = this.predecessorCustody.get(proposalId);
+    const predecessor = (id: string) => {
+      const candidate = this.proposals.get(id);
+      return candidate?.status === 'superseded' && candidate.supersededBy === proposalId ? candidate : undefined;
+    };
+    const deliveryPredecessors = [...(this.deliveryRollbackCustody.get(proposalId) ?? [])]
+      .flatMap((id) => predecessor(id) ?? [])
+      .sort((left, right) => right.createdAt - left.createdAt);
+    const restored = (predecessorId ? predecessor(predecessorId) : undefined) ?? deliveryPredecessors[0];
 
     this.negativeAuthorization.remove(proposal);
     this.proposals.delete(proposalId);
     this.approvalOwnerAuthProvenance.delete(proposalId);
     this.predecessorCustody.delete(proposalId);
+    this.deliveryRollbackCustody.delete(proposalId);
     this.lineageIndex.delete(lineage);
-    if (!predecessorId) return;
-    const predecessor = this.proposals.get(predecessorId);
-    if (predecessor?.status !== 'superseded' || predecessor.supersededBy !== proposalId) return;
-    predecessor.status = 'pending';
-    predecessor.supersededBy = undefined;
-    this.lineageIndex.set(lineage, predecessorId);
+    if (!restored) return;
+    for (const candidate of deliveryPredecessors) {
+      if (candidate.proposalId !== restored.proposalId) candidate.supersededBy = restored.proposalId;
+    }
+    restored.status = 'pending';
+    restored.supersededBy = undefined;
+    restored.supersededAt = undefined;
+    this.lineageIndex.set(lineage, restored.proposalId);
   }
 }

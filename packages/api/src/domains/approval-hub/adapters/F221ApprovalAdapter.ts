@@ -12,6 +12,7 @@ import type { ApprovalItem, SettledApprovalItem, TasteProposal } from '@cat-cafe
 import type { ITasteProposalStore } from '../../taste/stores/ports/TasteProposalStore.js';
 import { ALL_PENDING_APPROVALS_LIMIT, type IApprovalAdapter, type ListSettledOpts } from '../ports/IApprovalAdapter.js';
 import { compactApprovalProjections, projectApprovalNavigation } from '../projectApprovalNavigation.js';
+import { projectSettledDecisionFacts } from '../settled-decision-facts.js';
 
 const F221_STALE_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 const DEFAULT_SETTLED_LIMIT = 50;
@@ -84,6 +85,7 @@ function toSettledItem(p: TasteProposal): SettledApprovalItem | null {
     legacyMessageId: p.sourceMessageId,
   });
   if (!navigation) return null;
+  const decision = projectSettledDecisionFacts(p);
   return {
     proposalId: p.id,
     sourceFeatureId: 'F221' as const,
@@ -92,6 +94,7 @@ function toSettledItem(p: TasteProposal): SettledApprovalItem | null {
     status: p.status,
     summary: `${p.correctionTarget ? 'Taste correction' : 'Taste'} [${p.dimension}]: ${(p.takeaway ?? p.quote).slice(0, 60)}`,
     detail: {
+      ...decision.detail,
       scene: p.scene,
       quote: p.quote,
       ...(p.takeaway ? { takeaway: p.takeaway } : {}),
@@ -109,8 +112,8 @@ function toSettledItem(p: TasteProposal): SettledApprovalItem | null {
         : {}),
     },
     navigation,
-    decidedAt: p.approvedAt ?? p.rejectedAt ?? 0,
-    decidedBy: p.approvedBy ?? p.rejectedBy ?? '',
+    decidedAt: decision.decidedAt,
+    decidedBy: decision.decidedBy,
     createdAt: p.createdAt,
   };
 }

@@ -3,6 +3,10 @@
 import type { CustodyOfferV1 } from '@cat-cafe/shared';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { apiFetch } from '@/utils/api-client';
+import { useShellCopy } from '../shell/shell-copy';
+import { useShellPresentation } from '../shell/shell-presentation';
+import { ApprovalResultRow } from './ApprovalResultRow';
+import { decisionResultCopy } from './decision-result.shell-copy';
 
 interface CustodyOfferReadResponse {
   sourceMessageRevision: string;
@@ -43,6 +47,7 @@ export function CustodyOfferCard({
   sourceMessageId: string;
   expectedOffer: CustodyOfferV1;
 }) {
+  const isV2 = useShellPresentation() === 'v2';
   const [offer, setOffer] = useState<CustodyOfferV1 | null>(null);
   const [sourceRevision, setSourceRevision] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -109,7 +114,11 @@ export function CustodyOfferCard({
 
   return (
     <section
-      className="mt-3 max-w-full min-w-0 overflow-hidden rounded-2xl border border-cafe bg-cafe-surface p-3 shadow-sm"
+      className={
+        isV2 && canonical && offer?.disposition !== 'pending'
+          ? 'mt-3 min-w-0'
+          : 'mt-3 max-w-full min-w-0 overflow-hidden rounded-2xl border border-cafe bg-cafe-surface p-3 shadow-sm'
+      }
       data-testid="custody-offer-card"
     >
       {loading && !offer ? <p className="text-sm text-cafe-muted">正在同步托付状态…</p> : null}
@@ -144,6 +153,40 @@ function OfferState({
   disabled: boolean;
   onDecide: (decision: 'accept' | 'decline') => void;
 }) {
+  const isV2 = useShellPresentation() === 'v2';
+  const t = useShellCopy(decisionResultCopy);
+  if (isV2 && offer.disposition !== 'pending') {
+    const status =
+      offer.disposition === 'declined' ? 'rejected' : offer.disposition === 'dismissed' ? 'withdrawn' : 'approved';
+    const result =
+      offer.disposition === 'accepted' && offer.admission.state === 'resulted' ? offer.admission.result : null;
+    const outcome =
+      result?.result === 'needs_clarification'
+        ? t.clarification
+        : result?.result === 'resumed'
+          ? t.resumed
+          : result
+            ? t.custody
+            : t.custodyPending;
+    const label =
+      status === 'approved'
+        ? `${t.approved} · ${outcome}`
+        : status === 'rejected'
+          ? `${t.declined} · ${t.notTracked}`
+          : t.withdrawn;
+    return (
+      <ApprovalResultRow status={status} label={label}>
+        <p>{t.custodyTitle}</p>
+        <p>{status === 'approved' ? outcome : t.notTracked}</p>
+        <details>
+          <summary className="shell-focusable cursor-pointer text-xs">{t.technical}</summary>
+          <code className="break-all text-xs">
+            {result && result.result !== 'needs_clarification' ? result.ownerRef : offer.offerId}
+          </code>
+        </details>
+      </ApprovalResultRow>
+    );
+  }
   if (offer.disposition === 'pending') {
     return (
       <div className="min-w-0">

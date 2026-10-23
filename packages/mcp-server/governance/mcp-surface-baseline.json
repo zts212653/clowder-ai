@@ -4784,11 +4784,11 @@
       "actions": [
         "read"
       ],
-      "activeState": "migration-candidate",
-      "description": "Read the current canonical source behind an owner-authenticated CueEnvelope. Use when its bounded projection is insufficient. Output: owner-visible payload; not_available if gone or revoked; retryable source_read_failed on reader failure. NOT for raw search, bulk recall, caller-supplied coordinates, or cross-thread replay. GOTCHA: owner/thread/invocation scope, visibility, expiry, and current source revision are revalidated; restart, correction, or forget closes the handle.",
-      "descriptionDigest": "sha256:20bcc752a538dfcafcf01df52f5ff728afcdffc011a5dc325c68e686393dc96b",
-      "descriptionCharacters": 478,
-      "descriptionTokensCl100kBase": 93,
+      "activeState": "canonical",
+      "description": "Read the current canonical source behind an owner-authenticated CueEnvelope. Use when its bounded projection is insufficient, or to locate a heading/phrase and continue a long project document. Output: owner-visible payload; canonical project documents include sourcePath/sourceRevision, contentRange (UTF-16 code units, end exclusive), contentTruncated, nextOffset and location status. Use window.query for case-insensitive literal lookup, or window.offset=nextOffset to continue with the same handle; each page contains at most 4000 code units. A not_found lookup returns the initial window honestly; nextOffset=null means end. not_available if gone or revoked; retryable source_read_failed on reader failure. NOT for raw search, bulk recall, caller-supplied coordinates, or cross-thread replay. GOTCHA: window is supported only for canonical project document cues; omit it for other families. Owner/thread/invocation scope, visibility, expiry, and current source revision are revalidated for every page; restart, correction, or forget closes the handle.",
+      "descriptionDigest": "sha256:d4e802e9046e725524e16af93660b72b001fc5b1beff94b8343848b51767d7a9",
+      "descriptionCharacters": 1056,
+      "descriptionTokensCl100kBase": 207,
       "inputSchema": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "additionalProperties": false,
@@ -4804,6 +4804,25 @@
             "maxLength": 2000,
             "minLength": 1,
             "type": "string"
+          },
+          "window": {
+            "additionalProperties": false,
+            "description": "Canonical project documents only: locate a phrase with query, or continue with nextOffset as offset. Omit for the initial window. Never changes source or revision.",
+            "properties": {
+              "offset": {
+                "description": "Zero-based UTF-16 code-unit offset; use nextOffset from the previous page.",
+                "maximum": 9007199254740991,
+                "minimum": 0,
+                "type": "integer"
+              },
+              "query": {
+                "description": "Case-insensitive literal phrase or heading to locate in this document (1–200 characters).",
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
+              }
+            },
+            "type": "object"
           }
         },
         "required": [
@@ -4811,7 +4830,7 @@
         ],
         "type": "object"
       },
-      "inputSchemaDigest": "sha256:688ad736944999a172f79599f6b6e9929c9c2e62a772d90611d4ab74f6203471",
+      "inputSchemaDigest": "sha256:6d45ae60fd5719dbabc4f424aaa4dbcceee2ae865b7b1da6f189130d30a26e70",
       "annotations": {
         "destructiveHint": false,
         "openWorldHint": false,

@@ -14,6 +14,26 @@ const web = fileURLToPath(new URL('../..', import.meta.url)),
   tree = path.resolve(web, '../..');
 const root = process.env.F322_CONVERSATION_EVIDENCE ?? (await mkdtemp(path.join(os.tmpdir(), 'f322-conversation-')));
 if (!process.env.F322_CONVERSATION_EVIDENCE) after(() => rm(root, { recursive: true, force: true }));
+
+async function assertPublicChoiceVisible(label) {
+  assert.equal(
+    await label.evaluate((element) => {
+      const node = element.firstChild;
+      if (node?.nodeType !== Node.TEXT_NODE) return false;
+      const start = node.textContent.indexOf('Alpha');
+      if (start < 0) return false;
+      const range = document.createRange();
+      range.setStart(node, start);
+      range.setEnd(node, start + 'Alpha'.length);
+      const choice = range.getBoundingClientRect(),
+        label = element.getBoundingClientRect();
+      return choice.left >= label.left && choice.right <= label.right + 1;
+    }),
+    true,
+    'The actual public choice must be visible before the result label is truncated',
+  );
+}
+
 for (const language of ['zh', 'en'])
   for (const width of [1440, 390])
     test(`F322 canonical Chat and Inbox conversation answers ${language} ${width}`, { timeout: 240000 }, async (t) => {
@@ -189,12 +209,46 @@ for (const language of ['zh', 'en'])
         queued.map((entry) => entry.payload.messageId).sort(),
         [chatAfter.terminal.responseMessageId, textAfter.terminal.responseMessageId].sort(),
       );
+      const defaulted = await f.create('default-choice', {
+        deadlineAt: Date.now() + 100,
+        defaultResponse: { kind: 'selection', selectedIds: ['alpha'] },
+      });
+      await new Promise((resolve) => setTimeout(resolve, 120));
+      await f.service.reconcileConversationDeadlines();
+      const defaultTerminal = await f.store.get(defaulted.request.interactionId);
+      assert.equal(defaultTerminal.terminal.reasonCode, 'defaulted');
+      assert.deepEqual(defaultTerminal.terminal.response.selectedIds, ['alpha']);
       await page.reload();
       await target.getByTestId('conversation-decision-result').waitFor();
       await original.getByTestId('conversation-decision-result').waitFor();
       await page.screenshot({ path: path.join(evidence, 'text-settled-after-refresh.png'), fullPage: true });
+      const defaultChat = page
+        .locator(`[data-rich-block-id="${defaulted.cardRef.blockId}"]`)
+        .getByTestId('decision-result-row');
+      await defaultChat.getByTestId('decision-result-label').waitFor();
+      assert.match(await defaultChat.getByTestId('decision-result-label').innerText(), /Alpha/);
+      assert.equal(await defaultChat.getByTestId('decision-result-dot').getAttribute('data-status'), 'closed');
+      await assertPublicChoiceVisible(defaultChat.getByTestId('decision-result-label'));
+      await defaultChat.screenshot({ path: path.join(evidence, 'default-chat-collapsed.png') });
       await page.getByTestId('mailbox-button').click();
       await row.waitFor({ state: 'detached' });
+      for (const entry of [chat, inbox, defaulted]) {
+        const receipt = page.locator(
+          `[data-testid="mailbox-settled-result"][data-decision-key='${JSON.stringify(['F306', entry.request.interactionId])}']`,
+        );
+        await receipt.getByTestId('decision-result-label').waitFor();
+        if (entry === chat) assert.match(await receipt.getByTestId('decision-result-label').innerText(), /Alpha/);
+        if (entry === defaulted) {
+          assert.match(await receipt.getByTestId('decision-result-label').innerText(), /Alpha/);
+          assert.equal(await receipt.getByTestId('decision-result-dot').getAttribute('data-status'), 'closed');
+          await assertPublicChoiceVisible(receipt.getByTestId('decision-result-label'));
+        }
+        assert.equal(await receipt.getByTestId('decision-result-details').count(), 0);
+        await receipt.locator('button[aria-expanded="false"]').click();
+        await receipt.getByTestId('decision-result-details').waitFor();
+        assert.equal(await receipt.locator('input, select, textarea, form').count(), 0);
+        await receipt.screenshot({ path: path.join(evidence, `${entry.request.interactionId}-retained.png`) });
+      }
       assert.equal((await f.store.readPendingIndexByUser('default-user')).records.length, 0);
       assert.equal(f.mutations.filter((m) => m.path.includes('block-state')).length, 0);
       assert.deepEqual(errors, []);
@@ -208,6 +262,7 @@ for (const language of ['zh', 'en'])
             inbox,
             chatAfter,
             textAfter,
+            defaultTerminal,
             posts,
             returnMessages: f.messages
               .getByThreadIncludingQueued(f.conversationThread.id, 100, 'default-user')

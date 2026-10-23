@@ -24,6 +24,10 @@ export interface ScheduleApprovalProps {
 export function useScheduleApprovalController({ block, item, coordinate, messageId }: ScheduleApprovalProps) {
   const t = useShellCopy(scheduleApprovalCopy),
     language = useShellLanguage();
+  // Equal host data is the same read binding; a fresh object must not cancel an in-flight preparation.
+  const stableItem = useRef(item);
+  if (!sameScheduleValue(stableItem.current, item)) stableItem.current = item;
+  const readItem = stableItem.current;
   const proposalId =
     item?.sourceFeatureId === 'F139' ? item.proposalId : block ? schedulePublicationCandidate(block) : null;
   const ref = item?.navigation.state === 'anchored' ? item.navigation.approvalCardRef : coordinate;
@@ -48,7 +52,7 @@ export function useScheduleApprovalController({ block, item, coordinate, message
     try {
       const next =
         proposalId && threadId && cardMessageId
-          ? await readScheduleSource(proposalId, { threadId, messageId: cardMessageId }, item)
+          ? await readScheduleSource(proposalId, { threadId, messageId: cardMessageId }, readItem)
           : null;
       if (round !== generation.current || !mounted.current) return null;
       live.current = next;
@@ -64,7 +68,7 @@ export function useScheduleApprovalController({ block, item, coordinate, message
     } finally {
       if (round === generation.current && mounted.current) setChecking(false);
     }
-  }, [proposalId, threadId, cardMessageId, item, t.unavailable]);
+  }, [proposalId, threadId, cardMessageId, readItem, t.unavailable]);
   useEffect(() => {
     mounted.current = true;
     void refresh();

@@ -24,9 +24,17 @@ export const approvalLifecycleProjectionSchema = z
   .object({
     resolution: approvalResolutionSchema,
     materialization: approvalMaterializationSchema,
+    closedReason: z.enum(['expired', 'withdrawn']).optional(),
   })
   .strict()
   .superRefine((projection, ctx) => {
+    if (projection.closedReason && projection.resolution !== 'closed_without_decision') {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['closedReason'],
+        message: 'only a closed Approval may carry its original closure reason',
+      });
+    }
     if (projection.resolution !== 'accepted' && projection.materialization.state !== 'not_started') {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
@@ -81,9 +89,15 @@ export function normalizeApprovalLifecycleProjection(input: LegacyApprovalLifecy
       projection = { resolution: 'rejected', materialization: { state: 'not_started' } };
       break;
     case 'withdrawn':
+    case 'expired':
+      projection = {
+        resolution: 'closed_without_decision',
+        materialization: { state: 'not_started' },
+        closedReason: input.status,
+      };
+      break;
     case 'superseded':
     case 'stale':
-    case 'expired':
     case 'closed_without_decision':
       projection = { resolution: 'closed_without_decision', materialization: { state: 'not_started' } };
       break;

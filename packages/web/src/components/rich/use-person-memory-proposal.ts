@@ -1,13 +1,15 @@
 'use client';
 import type { ApprovalHubItem, RichCardBlock } from '@cat-cafe/shared';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { UNIFIED_ATTENTION_INVALIDATION_EVENTS } from '../shell/use-unified-attention';
+import { UNIFIED_ATTENTION_INVALIDATION_EVENTS } from '../shell/unified-attention-events';
 import { type PersonMemoryCoordinate, readPersonMemorySource } from './person-memory-proposal-source';
 
 export function usePersonMemoryProposal(
   proposalId: string,
   coordinate?: PersonMemoryCoordinate,
   block?: RichCardBlock,
+  expectedOwnerUserId?: string,
+  enabled = true,
 ) {
   const [source, setSource] = useState<Awaited<ReturnType<typeof readPersonMemorySource>>>(null);
   const [checked, setChecked] = useState(false),
@@ -22,7 +24,7 @@ export function usePersonMemoryProposal(
       setChecking(true);
       const next =
         threadId && messageId
-          ? await readPersonMemorySource(proposalId, { threadId, messageId }, block, expected)
+          ? await readPersonMemorySource(proposalId, { threadId, messageId }, block, expected, expectedOwnerUserId)
           : null;
       if (round !== generation.current) return null;
       current.current = next;
@@ -31,9 +33,10 @@ export function usePersonMemoryProposal(
       setChecking(false);
       return next;
     },
-    [proposalId, threadId, messageId, block],
+    [proposalId, threadId, messageId, block, expectedOwnerUserId],
   );
   useEffect(() => {
+    if (!enabled) return;
     current.current = null;
     setSource(null);
     setChecked(false);
@@ -47,7 +50,7 @@ export function usePersonMemoryProposal(
       current.current = null;
       for (const event of UNIFIED_ATTENTION_INVALIDATION_EVENTS) window.removeEventListener(event, invalidate);
     };
-  }, [refresh]);
+  }, [refresh, enabled]);
   const beforeWrite = useCallback(async () => {
     const prior = current.current;
     if (!prior?.item) return false;

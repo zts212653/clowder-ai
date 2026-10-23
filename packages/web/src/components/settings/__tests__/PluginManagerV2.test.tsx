@@ -32,13 +32,14 @@ describe('Plugin Manager v2 presentation', () => {
     vi.unstubAllGlobals();
   });
 
-  it('puts an installed runtime failure first, once, with its actual reason', () => {
+  it('puts a runtime failure first with a readable state and retains its diagnostic', () => {
     act(() => root.render(<PluginManagerContent presentation="v2" fixtures={[ready, candidate, failed]} />));
     expect(
       [...container.querySelectorAll('[data-plugin-section]')].map((node) => node.getAttribute('data-plugin-section')),
-    ).toEqual(['attention', 'installed', 'recommended']);
+    ).toEqual(['attention', 'installed', 'available']);
     const row = container.querySelector('[data-plugin-section="attention"] [data-plugin-id="failed"]');
-    expect(row?.textContent).toContain('连接被拒绝');
+    expect(row?.textContent).toContain('运行出错');
+    expect(row?.querySelector('[data-plugin-attention] [title]')?.getAttribute('title')).toBe('连接被拒绝');
     expect(row?.getAttribute('aria-current')).toBe('true');
     expect(container.querySelectorAll('[data-plugin-id="failed"]')).toHaveLength(1);
   });
@@ -84,14 +85,20 @@ describe('Plugin Manager v2 presentation', () => {
     expect(container.querySelector('[data-plugin-description]')?.className).toContain('line-clamp-2');
   });
 
-  it('uses a single-line description and keeps uninstall keyboard reachable', () => {
+  it('keeps provenance in the badge title and offers uninstall at the selected detail footer', () => {
     const onUninstall = vi.fn();
     act(() =>
       root.render(<PluginManagerContent presentation="v2" fixtures={[ready, failed]} onUninstall={onUninstall} />),
     );
     const row = container.querySelector('[data-plugin-id="github"]');
-    expect(row?.querySelector('[data-plugin-description]')?.className).toContain('truncate');
-    const uninstall = row?.querySelector('button[aria-label="卸载GitHub"]') as HTMLButtonElement;
+    expect(row?.querySelector('[data-plugin-source-trust]')?.getAttribute('title')).toBe(
+      '非可信来源 · 未经插件目录验证',
+    );
+    expect(row?.querySelector('details')).toBeNull();
+    act(() => row?.querySelector('button')?.click());
+    const uninstall = container.querySelector(
+      '[data-plugin-detail-section="provenance"] button[aria-label="卸载GitHub"]',
+    ) as HTMLButtonElement;
     expect(uninstall.tabIndex).toBe(0);
     expect(uninstall.disabled).toBe(false);
     act(() => {
@@ -108,7 +115,7 @@ describe('Plugin Manager v2 presentation', () => {
     };
     act(() => root.render(<PluginManagerContent presentation="v2" fixtures={[plugin]} />));
     const row = container.querySelector('[data-plugin-id="failed"]');
-    expect(row?.textContent).toContain('连接被拒绝');
+    expect(row?.textContent).toContain('运行出错');
     expect(row?.querySelector('[data-plugin-uninstall]')).toBeNull();
   });
 });

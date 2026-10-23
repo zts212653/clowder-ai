@@ -1020,7 +1020,7 @@ export type CommitLifecycleResponseTerminalResult =
 
 export type LifecycleInputDispatchPatch = {
   inputRead?: LifecycleInputReadReceipt;
-  appendAcceptance?: 'pending' | 'accepted';
+  appendAcceptance?: LifecycleDispatchRef['appendAcceptance'];
   orderKey: string;
   producerInvocationId?: string;
   targetId: string;
@@ -1215,7 +1215,7 @@ export function advanceLifecycleInputDispatchMetadata(
 ): LifecycleInputDispatchMetadataResult {
   if (patch.inputRead !== undefined && !isLifecycleInputReadReceipt(patch.inputRead))
     return { kind: 'conflict', reason: 'invalid_transition' };
-  if (patch.appendAcceptance !== undefined && !['pending', 'accepted'].includes(patch.appendAcceptance))
+  if (patch.appendAcceptance !== undefined && !['pending', 'written', 'accepted'].includes(patch.appendAcceptance))
     return { kind: 'conflict', reason: 'invalid_transition' };
   const identity = {
     kind: 'input' as const,
@@ -1223,7 +1223,11 @@ export function advanceLifecycleInputDispatchMetadata(
     ...(patch.producerInvocationId ? { producerInvocationId: patch.producerInvocationId } : {}),
   };
   if (!current) {
-    if (patch.phase !== 'dispatched' || patch.inputRead?.status === 'read')
+    if (
+      patch.phase !== 'dispatched' ||
+      patch.inputRead?.status === 'read' ||
+      (patch.appendAcceptance !== undefined && patch.appendAcceptance !== 'pending')
+    )
       return { kind: 'conflict', reason: 'invalid_transition' };
     return {
       kind: 'applied',
@@ -1253,7 +1257,13 @@ export function advanceLifecycleInputDispatchMetadata(
   if (matching.length > 1) return { kind: 'conflict', reason: 'duplicate_target' };
   const existing = matching[0];
   if (!existing) {
-    if (patch.phase !== 'dispatched' || patch.inputRead?.status === 'read')
+    // Receipts update an admitted exact receiver; a delayed ACK/read must never
+    // recreate a binding that incomplete-turn recovery already removed.
+    if (
+      patch.phase !== 'dispatched' ||
+      patch.inputRead?.status === 'read' ||
+      (patch.appendAcceptance !== undefined && patch.appendAcceptance !== 'pending')
+    )
       return { kind: 'conflict', reason: 'invalid_transition' };
     return {
       kind: 'applied',
@@ -1276,13 +1286,16 @@ export function advanceLifecycleInputDispatchMetadata(
   if (existing.statusMessageId !== patch.statusMessageId) {
     return { kind: 'conflict', reason: 'status_message_mismatch' };
   }
-  if (patch.appendAcceptance === 'accepted' && existing.appendAcceptance === 'pending') {
+  if (
+    (patch.appendAcceptance === 'accepted' && ['pending', 'written'].includes(existing.appendAcceptance ?? '')) ||
+    (patch.appendAcceptance === 'written' && existing.appendAcceptance === 'pending')
+  ) {
     return {
       kind: 'applied',
       lifecycle: {
         ...current,
         dispatchRefs: refs.map((ref) =>
-          ref.targetId === patch.targetId ? { ...ref, appendAcceptance: 'accepted' } : ref,
+          ref.targetId === patch.targetId ? { ...ref, appendAcceptance: patch.appendAcceptance } : ref,
         ),
       },
     };

@@ -259,7 +259,7 @@ export class InMemorySessionHandoffProposalStore implements ISessionHandoffPropo
   listSettledByUser(userId: string, limit = 100): SessionHandoffProposal[] {
     const result: SessionHandoffProposal[] = [];
     for (const p of this.proposals.values()) {
-      if (p.userId === userId && (p.status === 'approved' || p.status === 'rejected')) {
+      if (p.userId === userId && (p.status === 'approved' || p.status === 'rejected' || p.status === 'expired')) {
         result.push(clone(p));
       }
     }

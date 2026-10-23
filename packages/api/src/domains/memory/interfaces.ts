@@ -403,6 +403,8 @@ export interface IEvidenceStore {
     context: EntityMutationContext,
   ): Promise<void>;
   getEntity?(entityId: string): Promise<EntityRecord | null>;
+  /** Exact append-only writer revision; proposal status and user-supplied provenance are not proof. */
+  getEntityProposalEffectProof?(entityId: string, proposalId: string, ownerUserId: string): Promise<string | null>;
   resolveEntityAliases?(query: string): Promise<QueryEntityMatch[]>;
   refreshEntityMentions?(docAnchors?: string[]): Promise<void>;
   deleteByAnchor(anchor: string): Promise<void>;

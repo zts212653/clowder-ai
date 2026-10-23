@@ -180,6 +180,7 @@ export function assertQueueLedgerEntry(value: unknown): asserts value is QueueLe
         !isRecord(pending) ||
         pending.targetId !== targetId ||
         typeof pending.dispatchStarted !== 'boolean' ||
+        (pending.requiresCompletion !== undefined && typeof pending.requiresCompletion !== 'boolean') ||
         !isLifecycleAppendFailure({ ...pending, acceptance: 'unknown', reason: 'exception' })
       )
         throw new Error('queue Append pending target is invalid');

@@ -1,9 +1,9 @@
 'use client';
 import { useApprovalHost } from '@/components/ApprovalHost';
-import { describeReconcile } from '@/components/shell/mailbox/approval-reconcile';
 import { ApprovalMember } from './ApprovalMember';
 import { scheduleEffect } from './read-schedule-approval';
 import { ScheduleApprovalContent } from './ScheduleApprovalContent';
+import { ScheduleApprovalResult } from './ScheduleApprovalResult';
 import { type ScheduleApprovalProps, useScheduleApprovalController } from './useScheduleApprovalController';
 
 export { isScheduleMutationProposalCardBlock } from './read-schedule-approval';
@@ -34,6 +34,18 @@ export function ScheduleMutationProposalCard(props: ScheduleApprovalProps) {
         ...(proposal.status === 'approved' && !effect ? { effectUnknown: true } : {}),
       }
     : null;
+  if (terminal)
+    return (
+      <ScheduleApprovalResult
+        proposal={proposal}
+        terminal={terminal}
+        effect={effect}
+        error={error}
+        unknown={unknown}
+        reread={reread}
+      />
+    );
+
   return (
     <article
       data-testid={`schedule-approval-${proposal.proposalId}`}
@@ -47,18 +59,7 @@ export function ScheduleMutationProposalCard(props: ScheduleApprovalProps) {
           {new Date(proposal.createdAt).toLocaleString(language === 'en' ? 'en-US' : 'zh-CN')}
         </time>
       </header>
-      {terminal ? (
-        <output data-testid="schedule-approval-result">
-          {
-            describeReconcile(
-              { kind: 'decided', terminal },
-              { language, ownerUserId: proposal.ownerUserId, originalEffect: effect },
-            ).line
-          }
-        </output>
-      ) : (
-        <ScheduleApprovalContent proposal={proposal} />
-      )}
+      <ScheduleApprovalContent proposal={proposal} />
       {proposal.status === 'applying' ? <output className="block">{t.applying}</output> : null}
       {error ? (
         <p role="alert" className="text-conn-red-text">

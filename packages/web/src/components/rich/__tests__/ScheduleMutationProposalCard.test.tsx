@@ -1,5 +1,6 @@
 import type { ScheduleMutationProposal } from '@cat-cafe/shared';
 import React, { act } from 'react';
+import { flushSync } from 'react-dom';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ApprovalHostContext, PERMISSIVE_APPROVAL_HOST } from '@/components/ApprovalHost';
@@ -151,6 +152,23 @@ describe('original scheduled task, both hosts', () => {
     await act(async () => window.dispatchEvent(new Event('cat-cafe:proposal-updated')));
     expect(button('schedule-approve')).toBeNull();
     expect(container.textContent).toContain('已创建并注册');
+  });
+  it.each([
+    false,
+    true,
+  ])('rechecks substantive host changes while preserving equivalent recovery reads: changed=%s', async (changed) => {
+    proposal.status = 'applying';
+    const item = scheduleItem(proposal),
+      nextItem = structuredClone(item);
+    if (changed) nextItem.requesterCatId = 'foreign-cat';
+    await act(async () => root.render(<ApprovalItemCard item={item} />));
+    onRead = () => {
+      onRead = undefined;
+      flushSync(() => root.render(<ApprovalItemCard item={nextItem} />));
+    };
+    await click();
+    expect(sent()).toHaveLength(changed ? 0 : 1);
+    if (!changed) expect(container.textContent).toContain('定时任务已创建并注册');
   });
   it('preserves resume-only applying state and retries the original approve writer', async () => {
     proposal.status = 'applying';

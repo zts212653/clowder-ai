@@ -35,11 +35,16 @@ local binding = cjson.decode(redis.call('HGET', KEYS[1], 'returnBinding') or '{"
 if binding.kind ~= 'provider_waiter' then return 0 end
 local revision = tonumber(redis.call('HGET', KEYS[1], 'revision') or '1')
 if ARGV[6] ~= '' and revision ~= tonumber(ARGV[6]) then return 0 end
+local indexType = redis.call('TYPE', KEYS[5]).ok
+if indexType ~= 'none' and indexType ~= 'zset' then return redis.error_reply('runtime history index type conflict') end
 redis.call('HSET', KEYS[1], 'status', ARGV[2], 'terminal', ARGV[3], 'updatedAt', ARGV[4], 'revision', revision + 1)
 redis.call('HDEL', KEYS[1], 'submission')
 redis.call('ZREM', KEYS[2], ARGV[5])
 redis.call('SREM', KEYS[3], ARGV[5])
 redis.call('SREM', KEYS[4], ARGV[5])
+if redis.call('HEXISTS', KEYS[1], 'cardRef') == 1 then
+  redis.call('ZADD', KEYS[5], tonumber(cjson.decode(ARGV[3]).settledAt), ARGV[5])
+end
 return 1
 `;
 
@@ -48,11 +53,16 @@ local status = redis.call('HGET', KEYS[1], 'status')
 if status ~= 'staged' and status ~= 'pending' then return 0 end
 local revision = tonumber(redis.call('HGET', KEYS[1], 'revision') or '1')
 if ARGV[4] ~= '' and revision ~= tonumber(ARGV[4]) then return 0 end
+local indexType = redis.call('TYPE', KEYS[5]).ok
+if indexType ~= 'none' and indexType ~= 'zset' then return redis.error_reply('runtime history index type conflict') end
 redis.call('HSET', KEYS[1], 'status', 'invalidated', 'terminal', ARGV[1], 'updatedAt', ARGV[2], 'revision', revision + 1)
 redis.call('HDEL', KEYS[1], 'submission')
 redis.call('ZREM', KEYS[2], ARGV[3])
 redis.call('SREM', KEYS[3], ARGV[3])
 redis.call('SREM', KEYS[4], ARGV[3])
+if redis.call('HEXISTS', KEYS[1], 'cardRef') == 1 then
+  redis.call('ZADD', KEYS[5], tonumber(cjson.decode(ARGV[1]).settledAt), ARGV[3])
+end
 return 1
 `;
 
@@ -78,11 +88,16 @@ local revision = tonumber(redis.call('HGET', KEYS[1], 'revision') or '1')
 if revision ~= tonumber(ARGV[1]) then return 0 end
 local rawSubmission = redis.call('HGET', KEYS[1], 'submission')
 if not rawSubmission or cjson.decode(rawSubmission).operationId ~= ARGV[2] then return 0 end
+local indexType = redis.call('TYPE', KEYS[5]).ok
+if indexType ~= 'none' and indexType ~= 'zset' then return redis.error_reply('runtime history index type conflict') end
 redis.call('HSET', KEYS[1], 'status', ARGV[3], 'terminal', ARGV[4], 'updatedAt', ARGV[5], 'revision', revision + 1)
 redis.call('HDEL', KEYS[1], 'submission')
 redis.call('ZREM', KEYS[2], ARGV[6])
 redis.call('SREM', KEYS[3], ARGV[6])
 redis.call('SREM', KEYS[4], ARGV[6])
+if redis.call('HEXISTS', KEYS[1], 'cardRef') == 1 then
+  redis.call('ZADD', KEYS[5], tonumber(cjson.decode(ARGV[4]).settledAt), ARGV[6])
+end
 return 1
 `;
 
@@ -94,9 +109,14 @@ local binding = cjson.decode(redis.call('HGET', KEYS[1], 'returnBinding') or '{}
 if source.kind ~= 'conversation_decision' or binding.kind ~= 'conversation_turn' then return 0 end
 local revision = tonumber(redis.call('HGET', KEYS[1], 'revision') or '1')
 if revision ~= tonumber(ARGV[1]) then return 0 end
+local indexType = redis.call('TYPE', KEYS[5]).ok
+if indexType ~= 'none' and indexType ~= 'zset' then return redis.error_reply('runtime history index type conflict') end
 redis.call('HSET', KEYS[1], 'status', ARGV[2], 'terminal', ARGV[3], 'updatedAt', ARGV[4], 'revision', revision + 1)
 redis.call('ZREM', KEYS[2], ARGV[5])
 redis.call('SREM', KEYS[3], ARGV[5])
 redis.call('SREM', KEYS[4], ARGV[5])
+if redis.call('HEXISTS', KEYS[1], 'cardRef') == 1 then
+  redis.call('ZADD', KEYS[5], tonumber(cjson.decode(ARGV[3]).settledAt), ARGV[5])
+end
 return 1
 `;

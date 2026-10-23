@@ -4,10 +4,12 @@ import type { ArtifactReviewAnchor, ImmutableMedia } from '@cat-cafe/shared';
 import { type ReactNode, type RefObject, useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useShellCopy } from '@/components/shell/shell-copy';
+import { ArtworkAnnotationToolbar } from './ArtworkAnnotationToolbar';
 import { useArtworkLightboxScope, useFloatingArtworkPresentation } from './ArtworkLightboxScope';
 import { ArtworkVideoPlayback } from './ArtworkVideoPlayback';
 import type { ReviewCanvasMode } from './ReviewCanvasToolbar';
 import type { PendingChatMark } from './ReviewPendingChatMarks';
+import { ReviewToolbarIcon } from './ReviewToolbarIcon';
 import { browserTimeToTick, tickToBrowserTime } from './review-geometry';
 import { useArtworkVideoFullscreen } from './useArtworkVideoFullscreen';
 import { videoArtworkCopy } from './video-artwork.shell-copy';
@@ -88,46 +90,57 @@ export function VideoArtworkControls({
     endTick <= media.startTick + media.durationTicks &&
     endTick > startTick;
   const tools = (
-    <div className="flex flex-wrap items-center gap-2 px-3 py-1" role="toolbar" aria-label={t.tools}>
-      <button
-        type="button"
-        className="rounded-full border border-cafe-subtle px-3 py-1 text-xs"
-        disabled={!canAnnotate}
-        aria-expanded={rangeOpen}
-        onClick={() => {
-          video.current?.pause();
-          onModeChange('view');
-          setStart(String(seconds));
-          setEnd(String(duration));
-          setRangeOpen(!rangeOpen);
+    <div className="flex flex-wrap items-center gap-2 px-3 py-1">
+      <ArtworkAnnotationToolbar
+        label={t.tools}
+        tools={[
+          {
+            id: 'range',
+            label: t.range,
+            icon: 'range',
+            disabled: !canAnnotate,
+            active: rangeOpen,
+            expanded: rangeOpen,
+            onSelect: () => {
+              video.current?.pause();
+              onModeChange('view');
+              setStart(String(seconds));
+              setEnd(String(duration));
+              setRangeOpen(!rangeOpen);
+            },
+          },
+          {
+            id: 'frame',
+            label: t.frame,
+            icon: 'rectangle',
+            disabled: !canAnnotate || !paused || !frameReady,
+            active: mode === 'comment',
+            onSelect: () => {
+              setRangeOpen(false);
+              onModeChange('comment');
+              onFrame();
+            },
+          },
+        ]}
+        more={{
+          label: t.more,
+          children: (
+            <button
+              type="button"
+              disabled={!canMarkup || !paused || !frameReady}
+              onClick={() => onModeChange('markup')}
+            >
+              <ReviewToolbarIcon name="brush" />
+              {t.brush}
+            </button>
+          ),
         }}
-      >
-        {t.range}
-      </button>
-      <button
-        type="button"
-        className="rounded-full border border-cafe-subtle px-3 py-1 text-xs"
-        disabled={!canAnnotate || !paused || !frameReady}
-        aria-pressed={mode === 'comment'}
-        onClick={() => {
-          setRangeOpen(false);
-          onModeChange('comment');
-          onFrame();
-        }}
-      >
-        {t.frame}
-      </button>
+      />
       {!paused || !frameReady ? (
         <span role="status" className="text-xs text-cafe-muted">
           {t.notReady}
         </span>
       ) : null}
-      <details className="text-xs">
-        <summary aria-label={t.more}>⋯</summary>
-        <button type="button" disabled={!canMarkup || !paused || !frameReady} onClick={() => onModeChange('markup')}>
-          {t.brush}
-        </button>
-      </details>
       {mode === 'markup' ? children : null}
       {rangeOpen ? (
         <form

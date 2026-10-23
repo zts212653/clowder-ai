@@ -33,6 +33,44 @@ export async function listSettledPersonMemoryCandidates(
   ownerUserId: string,
   limit: number,
 ): Promise<StoredPersonMemorySettledCandidate[]> {
+  const ready = await advanceSettledIndex(redis, {
+    progressKey: 'person-memory:history-index:v2',
+    prefix: 'person-memory:candidate:',
+    type: 'string',
+    entry: async (raw, key) => {
+      const candidate = parseStoredCandidate(typeof raw === 'string' ? raw : null);
+      if (!candidate || key !== PersonMemoryKeys.candidate(candidate.ownerUserId, candidate.candidateId))
+        throw new Error('person memory history identity mismatch');
+      if (
+        candidate.publication.state !== 'anchored' ||
+        !['materialized', 'rejected', 'withdrawn'].includes(candidate.state)
+      )
+        return null;
+      let score =
+        candidate.state === 'withdrawn'
+          ? (candidate.closedAt ?? candidate.latestUndoReceipt?.undoneAt)
+          : candidate.state === 'materialized'
+            ? candidate.latestDecisionReceipt?.decidedAt
+            : candidate.humanDispositionLedgerEntry?.episode.decidedAt;
+      if (score === undefined && candidate.replacedByProposalId) {
+        const successor = parseStoredCandidate(
+          await redis.get(PersonMemoryKeys.candidate(candidate.ownerUserId, candidate.replacedByProposalId)),
+        );
+        if (successor?.ownerUserId === candidate.ownerUserId && successor.replacesProposalId === candidate.candidateId)
+          score = successor.presentedAt ?? successor.createdAt;
+      }
+      if (score === undefined && candidate.state === 'rejected') {
+        const suppression = await redis.get(PersonMemoryKeys.suppression(candidate.ownerUserId, candidate.candidateId));
+        if (suppression) score = (JSON.parse(suppression) as { createdAt?: number }).createdAt;
+      }
+      return {
+        indexKey: PersonMemoryKeys.settled(candidate.ownerUserId),
+        id: candidate.candidateId,
+        score: score ?? 0,
+      };
+    },
+  });
+  if (!ready) throw new SettledIndexPreparingError();
   const raw = await redis.zrevrange(PersonMemoryKeys.settled(ownerUserId), 0, Math.max(0, limit - 1), 'WITHSCORES');
   const records = await Promise.all(
     Array.from({ length: Math.floor(raw.length / 2) }, async (_, index) => {
@@ -40,9 +78,17 @@ export async function listSettledPersonMemoryCandidates(
       const score = Number(raw[index * 2 + 1]);
       if (!candidateId || !Number.isFinite(score)) return null;
       const [candidate] = await readCandidates(redis, ownerUserId, [candidateId]);
-      if (!candidate || (candidate.state !== 'materialized' && candidate.state !== 'rejected')) return null;
+      if (
+        !candidate ||
+        candidate.ownerUserId !== ownerUserId ||
+        candidate.publication.state !== 'anchored' ||
+        (candidate.state !== 'materialized' && candidate.state !== 'rejected' && candidate.state !== 'withdrawn')
+      )
+        return null;
       return { candidate, decidedAt: score };
     }),
   );
   return records.filter((record): record is NonNullable<typeof record> => record !== null);
 }
+
+import { advanceSettledIndex, SettledIndexPreparingError } from '../../../utils/redis-settled-index.js';

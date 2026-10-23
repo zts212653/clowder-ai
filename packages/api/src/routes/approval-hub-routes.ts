@@ -8,7 +8,8 @@
  * merge + sort by decidedAt desc, return SettledApprovalItem[].
  * F246 Phase F: Approval history view (AC-F5).
  *
- * No side effects. No cache. Fresh read-through every call (KD-3 v1).
+ * Fresh owner read-through. Legacy history may prepare bounded derived indexes;
+ * this endpoint never changes a canonical user decision or its payload.
  */
 
 import { performance } from 'node:perf_hooks';

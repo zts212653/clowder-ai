@@ -139,3 +139,56 @@ test('a temporary owner read outage never becomes permanent access revocation', 
   f.reviews.readCurrent = originalRead;
   assert.equal((await f.producer.listCurrentReceipts('operator')).length, 1);
 });
+
+test('retired judgment does not reopen its publication on every inbox read; a new judgment is still verified', async (t) => {
+  const f = await setup(t);
+  let view = (
+    await f.reviews.act(
+      command(f.view, { kind: 'request_judgment', summary: '待确认', judgmentNeeded: '请确认' }),
+      reviewCat,
+    )
+  ).view;
+  const task = f.task.current;
+  assert.ok(task?.entrustedWork);
+  f.task.current = { ...task, entrustedWork: { ...task.entrustedWork, revision: 2 } };
+  await f.producer.reEvaluate({
+    ownerUserId: 'operator',
+    producerSubjectRef: view.review.reviewId,
+    expectedProducerRevision: view.review.revision,
+    taskRef: { subjectRef: 'task:work:task-cover', observedRevision: view.review.task.observedRevision },
+    reEvaluateActionRef: `content-review:${view.review.reviewId}#reevaluate`,
+  });
+  const retired = f.store.get(view.review.reviewId);
+  assert.equal(retired?.rounds.at(-1)?.attentionRetiredReason, 'task_changed');
+  const originalRead = f.reviews.readCurrent.bind(f.reviews);
+  let sourceReads = 0;
+  f.reviews.readCurrent = async () => {
+    sourceReads += 1;
+    throw new MediaOwnerError('media_unavailable');
+  };
+  try {
+    assert.deepEqual(await f.producer.listCurrentReceipts('operator'), []);
+    assert.deepEqual(await f.producer.listCurrentReceipts('operator'), []);
+    assert.equal(sourceReads, 0, 'retired attention cannot require an irrelevant publication read');
+    assert.deepEqual(f.store.get(view.review.reviewId), retired, 'enumeration must remain read-only');
+  } finally {
+    f.reviews.readCurrent = originalRead;
+  }
+
+  view = await f.reviews.read(view.review.reviewId, reviewCat);
+  view = (
+    await f.reviews.act(
+      command(view, { kind: 'request_judgment', summary: '新版已核对', judgmentNeeded: '请确认新版' }),
+      reviewCat,
+    )
+  ).view;
+  sourceReads = 0;
+  f.reviews.readCurrent = async (...args) => {
+    sourceReads += 1;
+    return originalRead(...args);
+  };
+  const receipts = await f.producer.listCurrentReceipts('operator');
+  assert.equal(sourceReads, 1, 'new judgment must retain the actual owner check');
+  assert.equal(receipts.length, 1);
+  assert.equal(receipts[0]?.producer.revision, view.review.revision);
+});

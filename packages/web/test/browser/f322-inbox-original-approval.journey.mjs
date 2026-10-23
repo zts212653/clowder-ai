@@ -53,6 +53,23 @@ function decisionLabel(kind, language, verb) {
       ? 'Approve and write'
       : '批准并写入';
 }
+function resultSentence(kind, language, verb) {
+  if (kind === 'F225')
+    return verb === 'approve'
+      ? language === 'en'
+        ? /handoff started/i
+        : /接力已发起/
+      : language === 'en'
+        ? /current session continues/i
+        : /当前会话继续/;
+  return verb === 'approve'
+    ? language === 'en'
+      ? /written to your profile/i
+      : /已批准并写入档案/
+    : language === 'en'
+      ? /rejected|declined/i
+      : /已拒绝|已驳回/;
+}
 export function registerOriginalApprovalJourneys(evidenceRoot) {
   const inverse = process.env.F322_ORIGINAL_APPROVAL_INVERSE === '1';
   for (const language of ['zh', 'en'])
@@ -178,7 +195,20 @@ export function registerOriginalApprovalJourneys(evidenceRoot) {
             card.getByRole('button', { name: decisionLabel(record.kind, language, chatVerb), exact: true }),
             `/api/${prefix}/${record.proposalId}/${chatVerb}`,
           );
+          await card.getByTestId('decision-result-label').waitFor();
+          assert.match(
+            await card.getByTestId('decision-result-label').innerText(),
+            resultSentence(record.kind, language, chatVerb),
+          );
+          assert.equal(await card.getByTestId('original-approval-terminal').count(), 0);
+          await freezeVisibleCard(page, card);
+          await page.screenshot({ path: path.join(evidence, `chat-${record.kind}-collapsed.png`), fullPage: true });
+          await card.locator('button[aria-expanded="false"]').click();
           await card.getByTestId('original-approval-terminal').waitFor();
+          assert.match(
+            await card.getByTestId('original-approval-terminal').innerText(),
+            resultSentence(record.kind, language, chatVerb),
+          );
           await freezeVisibleCard(page, card);
           await page.screenshot({ path: path.join(evidence, `chat-${record.kind}-after.png`), fullPage: true });
         }
@@ -223,17 +253,12 @@ export function registerOriginalApprovalJourneys(evidenceRoot) {
           const settled =
             record.kind === 'F225' ? sources.handoffs.get(record.proposalId) : sources.profiles.get(record.proposalId);
           assert.equal(settled.status, inverse ? 'approved' : 'rejected');
-          const effect =
-            record.kind === 'F225'
-              ? language === 'en'
-                ? 'Handoff started'
-                : '接力已发起'
-              : language === 'en'
-                ? 'Profile written'
-                : '档案已写入';
           await page
+            .locator(
+              `[data-testid="mailbox-retained-result"][data-decision-key='${JSON.stringify([record.kind, record.proposalId])}']`,
+            )
             .getByTestId('mailbox-retained-line')
-            .filter({ hasText: inverse ? effect : language === 'en' ? 'Rejected' : '已拒绝' })
+            .filter({ hasText: resultSentence(record.kind, language, inboxVerb) })
             .first()
             .waitFor();
         }
@@ -260,11 +285,68 @@ export function registerOriginalApprovalJourneys(evidenceRoot) {
         assert.ok(resultText.every((text) => !text.includes('**') && !text.includes('default-user')));
         if (inverse) assert.ok(resultText.every((text) => !/Effect not yet confirmed|效果暂未确认/.test(text)));
         await page.screenshot({ path: path.join(evidence, 'inbox-results.png'), fullPage: true });
+        const expired = sources.createExpired();
+        const withdrawn = f.proposals.withdrawPending({
+          proposalId: f.records[1].proposalId,
+          withdrawnBy: 'codex61-sol',
+        });
+        assert.equal(withdrawn.status, 'withdrawn');
         await page.reload();
         await page.getByTestId('mailbox-button').click();
         await page.getByTestId('mailbox-panel').waitFor();
         await page.getByTestId('approval-item-inbox-native-approve').waitFor();
         assert.equal(await page.getByTestId('original-approval-card').count(), 0);
+        // Includes decisions made in Chat, without any local Inbox ApprovalSession.
+        for (const record of [...sources.records, expired]) {
+          const receipt = page.locator(
+            `[data-testid="mailbox-settled-result"][data-decision-key='${JSON.stringify([record.kind, record.proposalId])}']`,
+          );
+          await receipt.getByTestId('decision-result-label').waitFor();
+          if (record === expired)
+            assert.equal(await receipt.getByTestId('decision-result-dot').getAttribute('data-status'), 'expired');
+          if (record === expired)
+            assert.doesNotMatch(
+              await receipt.getByTestId('decision-result-label').innerText(),
+              /\bYou\b| · 你(?: ·|$)/,
+            );
+          assert.equal(await receipt.getByTestId('decision-result-details').count(), 0);
+          await receipt.locator('button[aria-expanded="false"]').click();
+          await receipt.getByTestId('approval-receipt-original').waitFor();
+          if (record !== expired) {
+            const canonical =
+              record.kind === 'F225'
+                ? sources.handoffs.get(record.proposalId)
+                : sources.profiles.get(record.proposalId);
+            const expected = resultSentence(
+              record.kind,
+              language,
+              canonical.status === 'approved' ? 'approve' : 'reject',
+            );
+            await receipt.getByTestId('original-approval-terminal').filter({ hasText: expected }).waitFor();
+            assert.match(await receipt.getByTestId('decision-result-label').innerText(), expected);
+          }
+          const originalText = await receipt.getByTestId('approval-receipt-original').textContent();
+          assert.ok(
+            originalText.includes(
+              record.kind === 'F225'
+                ? language === 'en'
+                  ? 'Continue the accepted verification.'
+                  : '继续已接受的验证。'
+                : 'Use concrete evidence.',
+            ),
+          );
+          for (const verb of ['approve', 'reject']) {
+            for (const button of await receipt
+              .getByRole('button', { name: decisionLabel(record.kind, language, verb), exact: true })
+              .all())
+              assert.equal(await button.isEnabled(), false);
+          }
+          assert.equal(
+            await receipt.locator('[data-testid="approve-btn"]:enabled, [data-testid="reject-btn"]:enabled').count(),
+            0,
+          );
+          await receipt.screenshot({ path: path.join(evidence, `${record.proposalId}-retained-after-reload.png`) });
+        }
         const settledResponse = await fetch(`http://127.0.0.1:${f.apiPort}/api/approval-hub/settled?limit=200`, {
           headers: { 'x-cat-cafe-user': 'default-user' },
         });
@@ -272,8 +354,44 @@ export function registerOriginalApprovalJourneys(evidenceRoot) {
         const settled = await settledResponse.json();
         assert.deepEqual(
           settled.items.map((r) => r.proposalId).sort(),
-          sources.records.map((r) => r.proposalId).sort(),
+          [...sources.records.map((r) => r.proposalId), expired.proposalId, withdrawn.proposalId].sort(),
         );
+        const withdrawnReceipt = page.locator(
+          `[data-testid="mailbox-settled-result"][data-decision-key='${JSON.stringify(['F128', withdrawn.proposalId])}']`,
+        );
+        await withdrawnReceipt.getByTestId('proposal-result-label').waitFor();
+        assert.equal(
+          await withdrawnReceipt.getByTestId('proposal-result-dot').getAttribute('data-status'),
+          'withdrawn',
+        );
+        await withdrawnReceipt.locator('button[aria-expanded="false"]').click();
+        assert.equal(
+          await withdrawnReceipt
+            .locator(
+              'form, input, textarea, [data-testid="approve-btn"], [data-testid="reject-btn"], [data-testid="proposal-result-open"]',
+            )
+            .count(),
+          0,
+        );
+        await withdrawnReceipt.screenshot({ path: path.join(evidence, 'F128-withdrawn-retained.png') });
+        await page.getByTestId('mailbox-close').click();
+        for (const record of [approvedRecord, sources.records[1], rejectedRecord]) {
+          await page.goto(`${base}/thread/${record.thread.id}?shell=v2`);
+          const current = page.locator(`[data-rich-block-id="${record.block.id}"]`);
+          const canonical =
+            record.kind === 'F225' ? sources.handoffs.get(record.proposalId) : sources.profiles.get(record.proposalId);
+          const expected = resultSentence(
+            record.kind,
+            language,
+            canonical.status === 'approved' ? 'approve' : 'reject',
+          );
+          await current.getByTestId('decision-result-label').filter({ hasText: expected }).waitFor();
+          await current.locator('button[aria-expanded="false"]').click();
+          assert.match(await current.getByTestId('original-approval-terminal').innerText(), expected);
+          assert.equal(await current.locator('form, input, textarea, select').count(), 0);
+          await freezeVisibleCard(page, current);
+          await current.screenshot({ path: path.join(evidence, `${record.proposalId}-Chat-cold-outcome.png`) });
+        }
         assert.equal(
           f.mutations.filter((m) => /^\/api\/(session-handoff|profile-updates)\/[^/]+\/(approve|reject)$/.test(m.path))
             .length,
@@ -305,6 +423,8 @@ export function registerOriginalApprovalJourneys(evidenceRoot) {
               queue: sources.queue.list(approvedRecord.thread.id, 'default-user'),
               seals: sources.seals,
               settled,
+              expired: sources.handoffs.get(expired.proposalId),
+              withdrawn,
               mutations: f.mutations,
               reads: f.reads,
               errors,

@@ -158,6 +158,15 @@ for (const language of ['zh', 'en'])
       await waitForHttp(`http://127.0.0.1:${webPort}/thread/${CALENDAR_THREAD}`, server);
       browser = await chromium.launch({ headless: true });
       const page = await browser.newPage({ viewport: { width, height: 1000 } });
+      const draftTraffic = [];
+      page.on('response', (response) => {
+        if (new URL(response.url()).pathname !== `/api/threads/${CALENDAR_THREAD}/composer-draft`) return;
+        draftTraffic.push({
+          method: response.request().method(),
+          status: response.status(),
+          body: response.request().postData(),
+        });
+      });
       await page.addInitScript((language) => {
         localStorage.setItem('cat-cafe:shell-presentation', 'v2');
         localStorage.setItem('cat-cafe:shell-language', language);
@@ -198,6 +207,14 @@ for (const language of ['zh', 'en'])
       try {
         await page.goto(`http://127.0.0.1:${webPort}/thread/${CALENDAR_THREAD}?shell=v2`);
         const draft = page.locator('[data-testid="chat-input-composer-row"] textarea');
+        const originalDraftSaved = page.waitForResponse(
+          (response) =>
+            new URL(response.url()).pathname === `/api/threads/${CALENDAR_THREAD}/composer-draft` &&
+            response.request().method() === 'PUT' &&
+            response.request().postDataJSON()?.text === 'Original unsent draft for the native-card parity journey',
+        );
+        // Observe from typing onward, but keep navigation racing the real asynchronous owner write.
+        void originalDraftSaved.catch(() => {});
         await draft.fill('Original unsent draft for the native-card parity journey');
         await draft.evaluate((el) => el.setSelectionRange(3, 8));
         const chatCard = page.locator('[data-chat-container]').getByTestId('approval-item-inbox-native-approve');
@@ -319,6 +336,7 @@ for (const language of ['zh', 'en'])
         const seed = fixture.messages.getByThread(created.id, 100, 'default-user');
         assert.equal(seed.length, 1);
         assert.match(seed[0].content, /Edited controlled task/);
+        assert.equal((await originalDraftSaved).status(), 200);
         assert.equal(
           fixture.original.getDraft(CALENDAR_THREAD)?.text,
           'Original unsent draft for the native-card parity journey',
@@ -460,6 +478,10 @@ for (const language of ['zh', 'en'])
           ),
         );
       } catch (error) {
+        await writeFile(
+          path.join(evidence, 'failure-draft.json'),
+          JSON.stringify({ originalDraft: fixture.original.getDraft(CALENDAR_THREAD), draftTraffic }, null, 2),
+        );
         await writeFile(path.join(evidence, 'failure.txt'), String(error.stack ?? error));
         await page.screenshot({ path: path.join(evidence, 'failure.png'), fullPage: true });
         await writeFile(path.join(evidence, 'failure.html'), await page.content());

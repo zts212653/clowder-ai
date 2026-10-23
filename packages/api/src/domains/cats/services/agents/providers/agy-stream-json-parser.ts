@@ -1,4 +1,4 @@
-import { agyStepEvidenceAnomalies } from './agy-step-evidence.js';
+import { AgyStepEvidence, isAgyAnonymousCompletion } from './agy-step-evidence.js';
 import { parseAgyResultFields, parseAgyToolFields } from './agy-stream-json-fields.js';
 
 /**
@@ -74,6 +74,8 @@ export type AgyStreamJsonEvent =
       readonly state: AgyStepState;
       readonly rawState: string;
       readonly stepType: string;
+      /** Recognized sparse marker with no asserted tool identity. Raw archive stays unchanged. */
+      readonly anonymousCompletion?: true;
       readonly textDelta: string | null;
       readonly toolName: string | null;
       readonly toolParameters: Record<string, unknown> | null;
@@ -101,10 +103,11 @@ export type AgyStreamJsonEvent =
 
 /**
  * 回合判定。`denied` / `protocol_error` / `incomplete` 都是独立状态，
- * 不得并入 `ok` 或 `error`。`protocol_error` 表示上游给了我们读不懂的东西——
+ * 不得并入 `ok` 或 `error`。`unconfirmed` 只证明完整回复，保留已识别稀疏标记的未知身份，
+ * 不确认工具结果或授权恢复。`protocol_error` 表示上游给了我们读不懂的东西——
  * 此时本回合**没有**确定结论可言，调用方必须当作不可信。
  */
-export type AgyTurnOutcome = 'ok' | 'denied' | 'protocol_error' | 'error' | 'empty' | 'incomplete';
+export type AgyTurnOutcome = 'ok' | 'unconfirmed' | 'denied' | 'protocol_error' | 'error' | 'empty' | 'incomplete';
 
 export interface AgyStreamJsonTurn {
   readonly conversationId: string | null;
@@ -114,6 +117,8 @@ export interface AgyStreamJsonTurn {
   readonly toolCalls: readonly AgyToolCall[];
   /** Every observed step is identifiable and complete, before filtering to named tools. */
   readonly stepsComplete: boolean;
+  /** Reply completion can be proven while these operation identities remain unconfirmed. */
+  readonly unconfirmedStepIndices: readonly number[];
   readonly deniedActions: readonly AgyDeniedAction[];
   readonly usage: AgyStreamJsonUsage;
   /** result.usage is cumulative session evidence. Only step usage bills this invocation. */
@@ -207,6 +212,7 @@ function parseStepEvent(step: Record<string, unknown>): AgyStreamJsonEvent {
     state: parseState(step.state),
     rawState: asString(step.state) ?? '',
     stepType: finishCompleted ? 'tool' : (asString(step.step_type) ?? 'unknown'),
+    ...(isAgyAnonymousCompletion(step) ? { anonymousCompletion: true as const } : {}),
     textDelta: asString(step.text_delta),
     toolName: finishCompleted ? 'finish' : asString(step.tool_name),
     ...parseAgyToolFields(step.tool_info),
@@ -265,6 +271,8 @@ function describeOutcome(
   anomalies: readonly AgyProtocolAnomaly[] = [],
 ): string {
   switch (outcome) {
+    case 'unconfirmed':
+      return 'AGY reply completed with unidentified step completion evidence';
     case 'protocol_error':
       return `AGY protocol drift — result is not trustworthy: ${anomalies.map((anomaly) => anomaly.detail).join('; ')}`;
     case 'denied': {
@@ -291,36 +299,26 @@ function describeOutcome(
  * 退回拼接 `text_delta`，并把 outcome 标成 `incomplete` 而不是假装成功。
  */
 interface TurnAccumulator {
+  readonly evidence: AgyStepEvidence;
   readonly toolCalls: Map<number, AgyToolCall>;
   readonly stepUsage: Map<number, AgyStreamJsonUsage>;
   readonly unknownEvents: string[];
   readonly anomalies: AgyProtocolAnomaly[];
   readonly deltas: string[];
-  readonly steps: Map<number, { type: string; state: AgyStepState; text: string }>;
+  readonly steps: Map<number, { type: string; state: AgyStepState; text: string; anonymousCompletion: boolean }>;
   conversationId: string | null;
   firstStepIndex: number | null;
   lastStepIndex: number | null;
   result: Extract<AgyStreamJsonEvent, { kind: 'result' }> | null;
 }
 
-function absorbStep(state: TurnAccumulator, event: Extract<AgyStreamJsonEvent, { kind: 'step' }>): void {
-  state.anomalies.push(
-    ...agyStepEvidenceAnomalies(
-      event,
-      state.steps.get(event.stepIndex)?.type,
-      state.toolCalls.get(event.stepIndex)?.toolName,
-    ),
-  );
+function absorbStep(state: TurnAccumulator, observed: Extract<AgyStreamJsonEvent, { kind: 'step' }>): void {
+  const event = state.evidence.observe(observed);
+  state.anomalies.push(...event.anomalies);
   state.conversationId ??= event.conversationId || null;
   if (event.stepIndex >= 0) {
     if (state.firstStepIndex === null) state.firstStepIndex = event.stepIndex;
     state.lastStepIndex = event.stepIndex;
-  }
-  if (event.state === 'UNKNOWN') {
-    state.anomalies.push({
-      kind: 'unknown_step_state',
-      detail: `step ${event.stepIndex} reported unrecognized state ${JSON.stringify(event.rawState)}`,
-    });
   }
   if (event.textDelta) state.deltas.push(event.textDelta);
   if (event.stepIndex >= 0) {
@@ -328,6 +326,7 @@ function absorbStep(state: TurnAccumulator, event: Extract<AgyStreamJsonEvent, {
     state.steps.set(event.stepIndex, {
       type: event.stepType,
       state: event.state,
+      anonymousCompletion: event.anonymousCompletion === true,
       text: event.stepType === 'agent_response' ? (previous?.text ?? '') + (event.textDelta ?? '') : '',
     });
   }
@@ -349,7 +348,9 @@ function absorbStep(state: TurnAccumulator, event: Extract<AgyStreamJsonEvent, {
     toolName: event.toolName,
     parameters: event.toolParameters ?? previous?.parameters ?? {},
     output: event.toolOutput ?? previous?.output ?? '',
-    errorMessage: event.toolErrorMessage ?? previous?.errorMessage ?? null,
+    errorMessage: event.anomalies.length
+      ? (previous?.errorMessage ?? event.toolErrorMessage ?? null)
+      : (event.toolErrorMessage ?? previous?.errorMessage ?? null),
     durationSeconds: event.durationSeconds ?? previous?.durationSeconds ?? null,
   });
 }
@@ -371,6 +372,7 @@ function decideOutcome(
 
 function accumulateTurn(lines: Iterable<string>): TurnAccumulator {
   const state: TurnAccumulator = {
+    evidence: new AgyStepEvidence(),
     toolCalls: new Map<number, AgyToolCall>(),
     stepUsage: new Map<number, AgyStreamJsonUsage>(),
     unknownEvents: [],
@@ -386,7 +388,7 @@ function accumulateTurn(lines: Iterable<string>): TurnAccumulator {
   for (const line of lines) {
     const event = parseAgyStreamJsonLine(line);
     if (!event) continue;
-    if (event.kind === 'step' || event.kind === 'result') state.anomalies.push(...event.anomalies);
+    if (event.kind === 'result') state.anomalies.push(...event.anomalies);
     if (event.kind === 'unknown') {
       state.unknownEvents.push(event.event);
       state.anomalies.push({ kind: 'unknown_event', detail: `unrecognized event ${event.event}` });
@@ -415,7 +417,7 @@ export function summarizeAgyStreamJsonTurn(lines: Iterable<string>): AgyStreamJs
   const finalText = result?.hasResponse ? result.response : state.deltas.join('');
   const upstreamStatus = result?.status ?? null;
   const anomalies = state.anomalies;
-  const outcome = decideOutcome(result, deniedActions, anomalies, finalText);
+  let outcome = decideOutcome(result, deniedActions, anomalies, finalText);
   const orderedToolCalls = [...state.toolCalls.values()].sort((a, b) => a.stepIndex - b.stepIndex);
   const usageSteps = [...state.stepUsage.entries()].sort(([a], [b]) => a - b);
   const turnUsage = usageSteps.length
@@ -432,6 +434,7 @@ export function summarizeAgyStreamJsonTurn(lines: Iterable<string>): AgyStreamJs
     : null;
   const latestUsage = usageSteps.at(-1)?.[1];
   const steps = [...state.steps.entries()];
+  const unconfirmedStepIndices = steps.filter(([, step]) => step.anonymousCompletion).map(([index]) => index);
   const inputs = steps.filter(([, step]) => step.type === 'user_input' && step.state === 'DONE');
   const inputIndex = inputs.length === 1 ? inputs[0]?.[0] : undefined;
   const finalStep = lastStepIndex === null ? undefined : state.steps.get(lastStepIndex);
@@ -457,6 +460,29 @@ export function summarizeAgyStreamJsonTurn(lines: Iterable<string>): AgyStreamJs
       ? lastStepIndex
       : null;
   const completedCompactionStep = completedCurrentStep && finalStep?.type === 'checkpoint' ? lastStepIndex : null;
+  if (outcome === 'ok' && unconfirmedStepIndices.length > 0) {
+    // The matching later response proves delivery only. It cannot identify the
+    // missing operation, authorize recovery, or supersede an error-message step.
+    const replyComplete =
+      inputIndex !== undefined &&
+      lastStepIndex !== null &&
+      lastStepIndex > inputIndex &&
+      unconfirmedStepIndices.every((index) => index > inputIndex && index < lastStepIndex) &&
+      finalStep?.type === 'agent_response' &&
+      finalStep.state === 'DONE' &&
+      finalStep.text.trim().length > 0 &&
+      state.deltas.join('').trim() === finalText.trim() &&
+      steps.every(
+        ([, step]) =>
+          (step.state === 'DONE' || (step.type === 'tool' && step.state === 'ERROR')) && step.type !== 'error_message',
+      );
+    outcome = replyComplete ? 'unconfirmed' : 'protocol_error';
+    if (!replyComplete)
+      anomalies.push({
+        kind: 'invalid_step_identity',
+        detail: 'anonymous completion has no matching complete current reply',
+      });
+  }
   const recoveredErrorSteps =
     completedResponseStep !== null || completedCompactionStep !== null
       ? steps.filter(([, step]) => step.type === 'error_message').map(([index]) => index)
@@ -468,7 +494,9 @@ export function summarizeAgyStreamJsonTurn(lines: Iterable<string>): AgyStreamJs
     lastStepIndex,
     finalText,
     toolCalls: orderedToolCalls,
-    stepsComplete: anomalies.length === 0 && steps.every(([, step]) => step.state === 'DONE'),
+    stepsComplete:
+      anomalies.length === 0 && unconfirmedStepIndices.length === 0 && steps.every(([, step]) => step.state === 'DONE'),
+    unconfirmedStepIndices,
     deniedActions,
     usage: result?.usage ?? EMPTY_USAGE,
     turnUsage,

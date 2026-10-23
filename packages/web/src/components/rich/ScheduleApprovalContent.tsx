@@ -118,7 +118,9 @@ export function ScheduleApprovalContent({ proposal }: { proposal: ScheduleMutati
       <p className="font-medium">
         {proposal.mutation.kind === 'create' ? t.create : t.delete}: {task.display.label}
       </p>
-      <p>{proposal.mutation.kind === 'create' ? t.createReason : t.deleteReason}</p>
+      {proposal.status === 'pending' ? (
+        <p>{proposal.mutation.kind === 'create' ? t.createReason : t.deleteReason}</p>
+      ) : null}
       <dl className="space-y-2">
         <div>
           <dt className="inline text-cafe-muted">{t.time}: </dt>

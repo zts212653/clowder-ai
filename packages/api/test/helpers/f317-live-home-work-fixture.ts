@@ -143,6 +143,10 @@ export async function homeWorkFixture(realSource = false) {
   let resolves = 0;
   const clientId = randomUUID();
   let clientToken = '';
+  const pages = [{ clientId, clientToken: '', route: '/', threadId, composer: false, sections: [] }];
+  let inspectReplies: unknown[] = pages;
+  const deliveries: string[] = [];
+  let pageChoice = 'C0';
   const deps = {
     ownerUserId: 'owner',
     sessions,
@@ -171,7 +175,11 @@ export async function homeWorkFixture(realSource = false) {
         return Response.json({
           model: 'jev-1.13',
           answers: {
-            target: { type: 'choice', choice, confidence: 1 },
+            target: {
+              type: 'choice',
+              choice: body.state.candidates[0]?.id.startsWith('home-page-') ? pageChoice : choice,
+              confidence: 1,
+            },
             value: { type: 'choice', choice: 'NONE', confidence: 1 },
           },
         });
@@ -180,12 +188,22 @@ export async function homeWorkFixture(realSource = false) {
     emitter: {
       emit() {},
       emitWithAck: async (_owner: string, event: string, data: unknown) => {
-        if (event === 'home:inspect')
-          return [{ clientId, clientToken, route: '/', threadId, composer: false, sections: [] }];
+        if (event === 'home:inspect') return inspectReplies;
+        const selected = pages.find((page) => page.clientId === (data as { clientId: string }).clientId);
+        if (!selected) return [];
+        deliveries.push(selected.clientId);
         await onConsume();
         const token = (data as { token: string }).token;
-        grants.push(await service.hub.consume('owner', token, clientId, clientToken));
-        return [{ token, clientId, clientToken, status: 'applied', artifact: ackArtifact }];
+        grants.push(await service.hub.consume('owner', token, selected.clientId, selected.clientToken));
+        return [
+          {
+            token,
+            clientId: selected.clientId,
+            clientToken: selected.clientToken,
+            status: 'applied',
+            artifact: ackArtifact,
+          },
+        ];
       },
     },
     record: async (_scope: LiveContextScope, result: { status: string }) => {
@@ -205,7 +223,8 @@ export async function homeWorkFixture(realSource = false) {
       })
     : deps.work;
   const service = new OwnerHomeActionService({ ...deps, work });
-  clientToken = service.hub.registerClient('owner', clientId).clientToken;
+  clientToken = service.hub.registerClient('owner', clientId, `socket-${clientId}`).clientToken;
+  pages[0].clientToken = clientToken;
   const app = Fastify();
   await app.register(f317LiveHomeRoutes, { registry, service });
   const invoke = () =>
@@ -227,6 +246,21 @@ export async function homeWorkFixture(realSource = false) {
     records,
     scopes,
     resolves: () => resolves,
+    pages,
+    deliveries,
+    replies: (value: unknown[]) => {
+      inspectReplies = value;
+    },
+    addPage: (route: string) => {
+      const id = randomUUID();
+      const token = service.hub.registerClient('owner', id, `socket-${id}`).clientToken;
+      const page = { clientId: id, clientToken: token, route, threadId, composer: false, sections: [] };
+      pages.push(page);
+      return page;
+    },
+    choosePage: (next: string) => {
+      pageChoice = next;
+    },
     voice: async (parts: readonly string[], session = 'rtc') => {
       await call.observe({ method: 'turn/started', params: { threadId: 'native', turn: { id: 'active' } } });
       await call.observe({

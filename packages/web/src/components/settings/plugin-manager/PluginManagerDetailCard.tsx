@@ -1,12 +1,13 @@
 'use client';
 
 import { resolvePluginDescription } from '@cat-cafe/shared';
-import { ExternalLinkIcon } from '../../HubConfigIcons';
 import { HubIcon } from '../../hub-icons';
-import { MarkdownContent } from '../../MarkdownContent';
 import { settingsResourceCardClass, settingsResourceRowClass } from '../../SettingsResourceCard';
 import { SettingsText } from '../primitives/SettingsText';
+import { PluginDetailFooter, PluginDetailHeader } from './controls/PluginManagerDetailChrome';
+import { pluginManagerText } from './controls/plugin-manager.shell-copy';
 import { DotConnectionDetail } from './DotConnectionDetail';
+import { PluginCapabilityDocumentation } from './PluginCapabilityDocumentation';
 import PluginConnectorSettings from './PluginConnectorSettings';
 import { PluginManagerBindings } from './PluginManagerBindings';
 import { PluginManagerConfigurationSection } from './PluginManagerConfigurationSection';
@@ -14,7 +15,6 @@ import { PluginManagerDetailPrelude } from './PluginManagerDetailPrelude';
 import { PluginSourceLabel } from './PluginSourceLabel';
 import { PluginVisual } from './PluginVisual';
 import type { PluginManagerPresentation } from './plugin-manager-attention';
-import { pluginCapabilityKind, pluginCapabilityName } from './plugin-manager-copy';
 import type { PluginManagerDesignFixture } from './plugin-manager-fixtures';
 
 function SectionHeading({ children }: { children: string }) {
@@ -31,168 +31,6 @@ function dependencyClosureLabel(plugin: PluginManagerDesignFixture): string | un
   return undefined;
 }
 
-const contributionKindLabel: Record<string, string> = {
-  mcp: 'MCP',
-  schedule: 'Scheduler',
-  skill: 'Skill',
-  'direct-tool': 'Tool',
-  limb: 'Limb',
-  webhook: 'Webhook',
-  messaging: 'Messaging',
-  events: 'Events',
-  identity: 'Identity',
-  connector: 'Connector',
-  service: 'Service',
-  ui: 'UI',
-  'content-editor-provider': 'Content Editor',
-  'desktop-window': 'Desktop Window',
-};
-
-// The full manifest remains available to Host consumers; this is the owner-facing capability view.
-const userCapabilityKinds = new Set([
-  'mcp',
-  'skill',
-  'schedule',
-  'direct-tool',
-  'limb',
-  'ui',
-  'content-editor-provider',
-  'desktop-window',
-]);
-
-interface CapabilityDocItem {
-  key: string;
-  kind: string;
-  name: string;
-  identifier: string;
-  description?: string;
-  originalName?: string;
-}
-
-function CapabilityDocRow({ item }: { item: CapabilityDocItem }) {
-  return (
-    <li className="list-disc">
-      <SettingsText as="p" variant="sm" tone="secondary">
-        <span className="font-medium text-cafe">{item.name}</span>
-        {item.originalName && (
-          <code className="ml-1 break-all font-mono text-xs text-cafe-muted">{item.originalName}</code>
-        )}
-        {item.description === undefined ? null : <span> — {item.description}</span>}
-      </SettingsText>
-    </li>
-  );
-}
-
-function capabilityDocItems(
-  plugin: PluginManagerDesignFixture,
-  presentation: PluginManagerPresentation,
-): CapabilityDocItem[] {
-  const items: CapabilityDocItem[] = (plugin.contributions ?? []).flatMap((contribution) => {
-    if (!userCapabilityKinds.has(contribution.kind)) return [];
-    const tools =
-      contribution.kind === 'mcp' ? (plugin.tools ?? []).filter((tool) => tool.contributionId === contribution.id) : [];
-    if (tools.length > 0) {
-      return tools.map((tool) => ({
-        key: `${contribution.id}:${tool.name}`,
-        kind: 'mcp',
-        name: tool.name,
-        identifier: tool.name,
-        ...(tool.description === undefined ? {} : { description: tool.description }),
-      }));
-    }
-    return [
-      {
-        key: contribution.id,
-        kind: contribution.kind,
-        name: contribution.name,
-        identifier: contribution.id,
-        ...(contribution.description === undefined ? {} : { description: contribution.description }),
-      },
-    ];
-  });
-  return presentation === 'v1'
-    ? items
-    : items.map((item) => {
-        const name = pluginCapabilityName(plugin.id, item.name);
-        const originalName = name === item.name ? item.identifier : item.name;
-        return { ...item, name, ...(originalName === name ? {} : { originalName }) };
-      });
-}
-
-function groupCapabilityDocs(items: readonly CapabilityDocItem[]) {
-  const groups = new Map<string, CapabilityDocItem[]>();
-  for (const item of items) {
-    const group = groups.get(item.kind) ?? [];
-    group.push(item);
-    groups.set(item.kind, group);
-  }
-  return [...groups].map(([kind, groupedItems]) => ({ kind, items: groupedItems }));
-}
-
-function CapabilityDocumentation({
-  plugin,
-  installed,
-  groups,
-  presentation,
-}: {
-  plugin: PluginManagerDesignFixture;
-  installed: boolean;
-  groups: readonly { kind: string; items: CapabilityDocItem[] }[];
-  presentation: PluginManagerPresentation;
-}) {
-  return (
-    <section className="space-y-3" data-plugin-detail-section="capability-docs">
-      <SectionHeading>{presentation === 'v2' ? '能力' : '能力说明'}</SectionHeading>
-      {plugin.readme.state === 'loading' ? (
-        <SettingsText as="p" variant="sm" tone="muted">
-          README 加载中…
-        </SettingsText>
-      ) : plugin.readme.state === 'unavailable' ? (
-        <SettingsText as="p" variant="sm" tone="muted">
-          README 暂不可用。
-        </SettingsText>
-      ) : plugin.readme.state === 'absent' ? null : (
-        <MarkdownContent content={plugin.readme.markdown} disableCommandPrefix />
-      )}
-      {plugin.docsUrl && (
-        <a href={plugin.docsUrl} target="_blank" rel="noopener noreferrer" className="console-inline-link">
-          <ExternalLinkIcon />
-          <span>查看插件文档</span>
-        </a>
-      )}
-      {plugin.contributions === undefined ? (
-        <SettingsText as="p" variant="sm" tone="muted">
-          {installed ? '能力信息暂不可用。' : '安装后可查看具体工具与用途。'}
-        </SettingsText>
-      ) : groups.length > 0 ? (
-        <div className="space-y-3">
-          {groups.map(({ kind, items }) => (
-            <section key={kind} className="space-y-1.5" data-contribution-kind={kind}>
-              <SettingsText as="h5" variant="xs" tone="muted" className="font-semibold">
-                {presentation === 'v2' ? pluginCapabilityKind(kind) : (contributionKindLabel[kind] ?? kind)}
-              </SettingsText>
-              {kind === 'mcp' && plugin.live === 'running' && plugin.tools === undefined && (
-                <SettingsText as="p" variant="xs" tone="muted">
-                  工具信息暂不可用。
-                </SettingsText>
-              )}
-              <ul className="space-y-1.5 pl-4">
-                {items.map((item) => (
-                  <CapabilityDocRow key={item.key} item={item} />
-                ))}
-              </ul>
-            </section>
-          ))}
-        </div>
-      ) : (
-        <SettingsText as="p" variant="sm" tone="muted">
-          此插件未声明可展示的工具或资源。
-        </SettingsText>
-      )}
-    </section>
-  );
-}
-
 export function PluginManagerDetailCard({
   plugin,
   locale,
@@ -203,6 +41,11 @@ export function PluginManagerDetailCard({
   configurationValidationRequest = 0,
   configurationSaved = false,
   onStateChanged,
+  onInstall,
+  onRepair,
+  onUninstall,
+  onSetEnabled,
+  onBlockedToggle,
 }: {
   plugin: PluginManagerDesignFixture;
   locale: string;
@@ -213,41 +56,57 @@ export function PluginManagerDetailCard({
   configurationValidationRequest?: number;
   configurationSaved?: boolean;
   onStateChanged?: () => void | Promise<void>;
+  onInstall?: (() => void) | undefined;
+  onRepair?: (() => void) | undefined;
+  onUninstall?: (() => void) | undefined;
+  onSetEnabled?: ((enabled: boolean) => void) | undefined;
+  onBlockedToggle?: (() => void) | undefined;
 }) {
   const installed = plugin.artifact === 'installed';
   const description = resolvePluginDescription(plugin.description, locale);
-  const capabilityItems = capabilityDocItems(plugin, presentation);
-  const capabilityGroups = groupCapabilityDocs(capabilityItems);
   const closureLabel = dependencyClosureLabel(plugin);
+  const t = pluginManagerText(locale);
 
   return (
     <article data-testid="plugin-manager-detail" className={settingsResourceCardClass}>
-      <div className="space-y-5 p-4">
-        <section className="space-y-2.5" data-plugin-detail-section="identity">
-          <SectionHeading>插件标识</SectionHeading>
-          <div className={`${settingsResourceRowClass} w-full px-0 py-0`}>
-            <PluginVisual icon={plugin.icon} iconBg={plugin.iconBg} name={plugin.displayName} size="large" />
-            <div className="min-w-0 flex-1">
-              <SettingsText as="h3" variant="sm" tone="default" className="font-semibold">
-                {plugin.displayName}
-              </SettingsText>
-              <PluginSourceLabel trust={plugin.trust} repositoryName={plugin.repositoryName} />
-              <SettingsText as="p" variant="xs" tone="muted" className="mt-0.5 break-all">
-                {plugin.installedVersion ?? plugin.availableVersion} · {plugin.packageName} · {plugin.publisher}
-              </SettingsText>
-              {plugin.installedVersion && plugin.availableVersion !== plugin.installedVersion && (
-                <SettingsText as="p" variant="xs" tone="secondary">
-                  仓库可用版本：{plugin.availableVersion}
+      <div className="max-w-[720px] space-y-5 p-4 text-sm [&_label]:text-sm">
+        {presentation === 'v2' && (
+          <PluginDetailHeader
+            plugin={plugin}
+            locale={locale}
+            busy={busy}
+            onInstall={onInstall}
+            onSetEnabled={onSetEnabled}
+            onBlockedToggle={onBlockedToggle}
+          />
+        )}
+        {presentation === 'v1' && (
+          <section className="space-y-2.5" data-plugin-detail-section="identity">
+            <SectionHeading>{t.identity}</SectionHeading>
+            <div className={`${settingsResourceRowClass} w-full px-0 py-0`}>
+              <PluginVisual icon={plugin.icon} iconBg={plugin.iconBg} name={plugin.displayName} size="large" />
+              <div className="min-w-0 flex-1">
+                <SettingsText as="h3" variant="sm" tone="default" className="font-semibold">
+                  {plugin.displayName}
                 </SettingsText>
-              )}
-              {closureLabel === undefined ? null : (
-                <SettingsText as="p" variant="xs" tone="muted" className="mt-0.5">
-                  {closureLabel}
+                <PluginSourceLabel trust={plugin.trust} repositoryName={plugin.repositoryName} locale={locale} />
+                <SettingsText as="p" variant="xs" tone="muted" className="mt-0.5 break-all !text-compact">
+                  {plugin.installedVersion ?? plugin.availableVersion} · {plugin.packageName} · {plugin.publisher}
                 </SettingsText>
-              )}
+                {plugin.installedVersion && plugin.availableVersion !== plugin.installedVersion && (
+                  <SettingsText as="p" variant="xs" tone="secondary" className="break-all !text-compact">
+                    {t.available(plugin.availableVersion)}
+                  </SettingsText>
+                )}
+                {closureLabel === undefined ? null : (
+                  <SettingsText as="p" variant="xs" tone="muted" className="mt-0.5">
+                    {closureLabel}
+                  </SettingsText>
+                )}
+              </div>
             </div>
-          </div>
-        </section>
+          </section>
+        )}
 
         {presentation === 'v1' && (
           <section className="space-y-2" data-plugin-detail-section="introduction">
@@ -268,12 +127,25 @@ export function PluginManagerDetailCard({
         )}
 
         {plugin.id === 'official.chatgpt-dot' ? (
-          <DotConnectionDetail
-            installed={installed}
-            activationRequest={configurationValidationRequest}
-            activationAllowed={plugin.intent === 'enabled' || plugin.actions?.setEnabled === true}
-            onStateChanged={onStateChanged}
-          />
+          <>
+            {presentation === 'v2' && (
+              <PluginManagerDetailPrelude
+                plugin={plugin}
+                description={description}
+                locale={locale}
+                busy={busy}
+                onInstall={onInstall}
+                onRepair={onRepair}
+              />
+            )}
+            <DotConnectionDetail
+              installed={installed}
+              activationRequest={configurationValidationRequest}
+              activationAllowed={plugin.intent === 'enabled' || plugin.actions?.setEnabled === true}
+              onStateChanged={onStateChanged}
+              secondaryAction
+            />
+          </>
         ) : (
           <>
             <PluginManagerConfigurationSection
@@ -281,7 +153,14 @@ export function PluginManagerDetailCard({
               presentation={presentation}
               beforeConfiguration={
                 presentation === 'v2' ? (
-                  <PluginManagerDetailPrelude plugin={plugin} description={description} />
+                  <PluginManagerDetailPrelude
+                    plugin={plugin}
+                    description={description}
+                    locale={locale}
+                    busy={busy}
+                    onInstall={onInstall}
+                    onRepair={onRepair}
+                  />
                 ) : undefined
               }
               onOperationChange={onOperationChange}
@@ -304,13 +183,11 @@ export function PluginManagerDetailCard({
               />
             )}
 
-            <CapabilityDocumentation
-              plugin={plugin}
-              installed={installed}
-              groups={capabilityGroups}
-              presentation={presentation}
-            />
+            <PluginCapabilityDocumentation plugin={plugin} presentation={presentation} />
           </>
+        )}
+        {presentation === 'v2' && (
+          <PluginDetailFooter plugin={plugin} locale={locale} busy={busy} onUninstall={onUninstall} />
         )}
       </div>
     </article>

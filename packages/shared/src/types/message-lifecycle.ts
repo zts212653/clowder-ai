@@ -85,8 +85,8 @@ export function isLifecycleInputReadReceipt(value: unknown): value is LifecycleI
 
 export type LifecycleDispatchRef = {
   readonly inputRead?: LifecycleInputReadReceipt;
-  /** Host admission precedes the provider ACK. Neither admission nor an exception proves acceptance. */
-  readonly appendAcceptance?: 'pending' | 'accepted';
+  /** pending = unknown write; written = native stdin ACK awaiting its own turn result; accepted = custody can retire. */
+  readonly appendAcceptance?: 'pending' | 'written' | 'accepted';
 } & (
   | {
       readonly targetId: string;
@@ -117,7 +117,8 @@ export interface LifecycleAppendFailure {
   readonly invocationId: string;
   readonly responseMessageId: string;
   readonly reason: 'active_run_mismatch' | 'active_run_closed' | 'invalid_input' | 'provider_rejected' | 'exception';
-  readonly acceptance: 'not_accepted' | 'unknown';
+  /** incomplete = the queued internal turn ended without its own successful result. */
+  readonly acceptance: 'not_accepted' | 'unknown' | 'incomplete';
   readonly at: number;
   /** Missing while the system checks the original handoff; absence is never a resend grant. */
   readonly checkedAt?: number;
@@ -133,7 +134,7 @@ export function isLifecycleAppendFailure(value: unknown): value is LifecycleAppe
     isFiniteTimestamp(candidate.at) &&
     (candidate.checkedAt === undefined ||
       (isFiniteTimestamp(candidate.checkedAt) && (candidate.checkedAt as number) >= (candidate.at as number))) &&
-    isOneOf(candidate.acceptance, ['not_accepted', 'unknown']) &&
+    isOneOf(candidate.acceptance, ['not_accepted', 'unknown', 'incomplete']) &&
     isOneOf(candidate.reason, [
       'active_run_mismatch',
       'active_run_closed',
@@ -275,7 +276,8 @@ function isDispatchRef(value: unknown): value is LifecycleDispatchRef {
     (candidate.phase === 'dispatched' || candidate.phase === 'settled') &&
     isNonEmptyString(candidate.statusMessageId) &&
     (candidate.dispatchedAt === undefined || isFiniteTimestamp(candidate.dispatchedAt)) &&
-    (candidate.appendAcceptance === undefined || isOneOf(candidate.appendAcceptance, ['pending', 'accepted'])) &&
+    (candidate.appendAcceptance === undefined ||
+      isOneOf(candidate.appendAcceptance, ['pending', 'written', 'accepted'])) &&
     (candidate.inputRead === undefined ||
       (isLifecycleInputReadReceipt(candidate.inputRead) &&
         (candidate.inputRead.status !== 'read' ||

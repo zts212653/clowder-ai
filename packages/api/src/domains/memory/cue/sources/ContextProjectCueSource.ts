@@ -1,11 +1,12 @@
 import { createHash } from 'node:crypto';
 import { realpath } from 'node:fs/promises';
-import type { RecallScopeV1 } from '@cat-cafe/shared';
+import type { MemoryCueDocumentWindowRequest, RecallScopeV1 } from '@cat-cafe/shared';
 import type { IThreadStore } from '../../../cats/services/stores/ports/ThreadStore.js';
 import { deriveProjectCollectionId } from '../../bootstrap-collection-bridge.js';
 import type { CollectionManifest } from '../../collection-types.js';
 import type { IEvidenceStore, IKnowledgeResolver } from '../../interfaces.js';
 import type { LibraryCatalog } from '../../LibraryCatalog.js';
+import { lessonSections } from '../../lesson-sections.js';
 import type { ContextSourceOmission } from '../context-source-omission.js';
 import type { MemoryCueSourceProjection } from '../MemoryCueResolverRegistry.js';
 import { canonicalProjectDocumentWindow, readCanonicalProjectDocument } from './canonical-project-document.js';
@@ -90,6 +91,7 @@ export class ContextProjectCueSource {
   async discover(input: { scope: RecallScopeV1; query: string; signal?: AbortSignal }): Promise<{
     sources: MemoryCueSourceProjection[];
     omission?: ContextSourceOmission;
+    omissions?: ContextSourceOmission[];
   }> {
     const bound = await this.bind(input.scope);
     if (!bound) return { sources: [], omission: 'scope_unavailable' };
@@ -110,13 +112,24 @@ export class ContextProjectCueSource {
       return { sources: [], omission: 'scope_unavailable' };
     }
     const sources: MemoryCueSourceProjection[] = [];
-    for (const hit of found.results) {
+    const omissions = new Set<ContextSourceOmission>();
+    for (const hit of found.results.slice(0, 5)) {
       input.signal?.throwIfAborted();
       const projection = await this.project(bound, hit.anchor);
-      if ('omission' in projection) return { sources: [], omission: projection.omission };
+      if ('omission' in projection) {
+        omissions.add(projection.omission);
+        continue;
+      }
       if (sources.length < 2) sources.push(projection.source);
     }
-    return { sources };
+    const finalBinding = await this.bind(input.scope);
+    if (!finalBinding || finalBinding.digest !== bound.digest) return { sources: [], omission: 'scope_unavailable' };
+    input.signal?.throwIfAborted();
+    return {
+      sources,
+      omissions: [...omissions],
+      omission: sources.length ? undefined : [...omissions][0],
+    };
   }
 
   private async project(
@@ -127,6 +140,7 @@ export class ContextProjectCueSource {
         source: MemoryCueSourceProjection;
         content: string;
         sourcePath: string;
+        defaultOffset?: number;
       }
     | { omission: ContextSourceOmission }
   > {
@@ -140,7 +154,13 @@ export class ContextProjectCueSource {
     if (indexed.vectorSourceHash !== indexed.sourceHash) return { omission: 'index_stale' };
     const document = await readCanonicalProjectDocument(bound.manifest.root, item.sourcePath);
     if (!document) return { omission: 'source_unavailable' };
-    if (!sha(document.content).startsWith(item.sourceHash)) return { omission: 'index_stale' };
+    const splitLesson =
+      item.kind === 'lesson' && item.sourcePath === 'lessons-learned.md' && /^LL-\d+$/.test(item.anchor);
+    const lesson = splitLesson
+      ? lessonSections(document.content).find((section) => section.anchor === item.anchor)
+      : undefined;
+    if (splitLesson && !lesson) return { omission: 'source_unavailable' };
+    if (!sha(lesson?.content ?? document.content).startsWith(item.sourceHash)) return { omission: 'index_stale' };
     const coordinate = encodeCoordinate({
       collectionId: bound.manifest.id,
       anchor: item.anchor,
@@ -150,6 +170,7 @@ export class ContextProjectCueSource {
     return {
       content: document.content,
       sourcePath: document.sourcePath,
+      ...(lesson ? { defaultOffset: lesson.start } : {}),
       source: {
         title: 'Current project source',
         summary: 'A current project source can be read.',
@@ -161,7 +182,12 @@ export class ContextProjectCueSource {
     };
   }
 
-  async read(input: { scope: RecallScopeV1; anchor: string; expectedRevision: string }) {
+  async read(input: {
+    scope: RecallScopeV1;
+    anchor: string;
+    expectedRevision: string;
+    window?: MemoryCueDocumentWindowRequest;
+  }) {
     const coordinate = projectCueCoordinate(input.anchor);
     const bound = coordinate ? await this.bind(input.scope) : null;
     if (!bound || !coordinate || coordinate.collectionId !== bound.manifest.id || coordinate.binding !== bound.digest) {
@@ -186,7 +212,10 @@ export class ContextProjectCueSource {
         collectionId: coordinate.collectionId,
         sourceRevision: current.source.revision,
         sourcePath: current.sourcePath,
-        ...canonicalProjectDocumentWindow(current.content),
+        ...canonicalProjectDocumentWindow(
+          current.content,
+          input.window ?? (current.defaultOffset === undefined ? {} : { offset: current.defaultOffset }),
+        ),
       },
     };
   }

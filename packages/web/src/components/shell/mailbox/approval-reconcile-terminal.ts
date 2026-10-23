@@ -14,11 +14,21 @@ export function readTerminal(value: unknown): Terminal | null {
   const decidedBy = typeof value.decidedBy === 'string' ? value.decidedBy.trim() : '';
   return {
     resolution,
+    ...(resolution === 'closed_without_decision' &&
+    (value.closedReason === 'expired' || value.closedReason === 'withdrawn')
+      ? { closedReason: value.closedReason }
+      : {}),
     ...(typeof value.decidedAt === 'number' && Number.isFinite(value.decidedAt) ? { decidedAt: value.decidedAt } : {}),
     ...(decidedBy ? { decidedBy } : {}),
     ...(resolution === 'accepted' && typeof value.threadId === 'string' && value.threadId.trim()
       ? { threadId: value.threadId }
       : {}),
     ...(resolution === 'accepted' && value.effectUnknown === true ? { effectUnknown: true } : {}),
+    ...(resolution === 'accepted' &&
+    (value.domainEffect === 'dispatch-delivered' ||
+      value.domainEffect === 'entity-written' ||
+      value.domainEffect === 'taste-written')
+      ? { domainEffect: value.domainEffect }
+      : {}),
   };
 }

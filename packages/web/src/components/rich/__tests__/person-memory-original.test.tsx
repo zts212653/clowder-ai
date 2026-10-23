@@ -3,10 +3,12 @@ import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { approvalRow, okRead, visibleApproval } from '@/components/shell/mailbox/__tests__/mailbox-fixtures';
+import { ApprovalDecisionReceipt } from '@/components/shell/mailbox/ApprovalDecisionReceipt';
 import { createApprovalSessions } from '@/components/shell/mailbox/approval-sessions';
 import { MailboxRow } from '@/components/shell/mailbox/MailboxRow';
 import { useApprovalHubStore } from '@/stores/approvalHubStore';
 import { apiFetch } from '@/utils/api-client';
+import { ApprovalHostContext, PERMISSIVE_APPROVAL_HOST } from '../../ApprovalHost';
 import { ApprovalItemCard } from '../../ApprovalItemCard';
 import { PersonMemoryProposalCard } from '../PersonMemoryProposalCard';
 import { PersonMemoryRetainedReceipt } from '../PersonMemoryRetainedReceipt';
@@ -14,12 +16,13 @@ import { PersonMemoryRetainedReceipt } from '../PersonMemoryRetainedReceipt';
 vi.mock('@/utils/api-client', () => ({ apiFetch: vi.fn() }));
 let root: Root, container: HTMLDivElement, item: ApprovalHubItem, block: RichCardBlock;
 let status: string, remaining: string[], wrongAnchor: boolean, deleted: boolean, owner: string;
-let decisionId: string | null, undone: boolean;
+let decisionId: string | null, undone: boolean, retainedWrites: boolean;
 const coordinate = { threadId: 'thread_people', messageId: 'person-card-original' };
 function snapshot() {
   return {
     proposalId: item.proposalId,
     status,
+    hasRetainedWrites: retainedWrites,
     remainingDraftIds: remaining,
     publicationState: 'anchored',
     approvalCardMessageId: wrongAnchor ? 'foreign-card' : coordinate.messageId,
@@ -33,7 +36,17 @@ function snapshot() {
           },
         }
       : {}),
-    ...(undone ? { undoReceipt: { requestId: 'undo-original', verdict: 'undone' } } : {}),
+    ...(undone
+      ? {
+          undoApplied: status === 'withdrawn',
+          undoReceipt: {
+            requestId: 'undo-original',
+            verdict: 'undone',
+            candidateId: item.proposalId,
+            candidateState: status === 'withdrawn' ? 'withdrawn' : 'pending_approval',
+          },
+        }
+      : {}),
   };
 }
 beforeEach(() => {
@@ -49,6 +62,7 @@ beforeEach(() => {
   owner = 'owner-1';
   decisionId = null;
   undone = false;
+  retainedWrites = false;
   item = {
     proposalId: 'person_candidate_original',
     sourceFeatureId: 'F276',
@@ -175,6 +189,13 @@ async function render(entrance: 'Chat' | 'Inbox') {
   );
 }
 async function click(testId: string) {
+  if (testId === 'person-memory-undo' && !container.querySelector(`[data-testid="${testId}"]`)) {
+    const disclosure = container.querySelector<HTMLButtonElement>(
+      '[data-testid="decision-result-row"] button[aria-expanded="false"]',
+    );
+    expect(disclosure).not.toBeNull();
+    await act(async () => disclosure?.click());
+  }
   await act(async () => container.querySelector<HTMLButtonElement>(`[data-testid="${testId}"]`)?.click());
 }
 for (const entrance of ['Chat', 'Inbox'] as const) {
@@ -198,7 +219,7 @@ for (const entrance of ['Chat', 'Inbox'] as const) {
       .mocked(apiFetch)
       .mock.calls.find(([url, init]) => String(url).endsWith('/undo') && init?.method === 'POST');
     expect(JSON.parse(String(undo?.[1]?.body)).decisionId).toBe(decisionId);
-    expect(container.textContent).toContain('已撤回');
+    expect(container.querySelector('[data-testid=person-memory-result]')?.textContent).toContain('已撤销本次写入');
     expect(container.querySelector('[data-testid="person-memory-undo"]')).toBeNull();
   });
   it(`${entrance}: refuses a changed publication immediately before writing`, async () => {
@@ -219,6 +240,12 @@ it('cold reads materialized receipt and undoes it without a pending list item', 
   decisionId = 'durable-original-decision';
   await render('Chat');
   expect(container.textContent).toContain('已写入');
+  expect(container.querySelector('[data-testid="decision-result-details"]')).toBeNull();
+  await act(async () =>
+    container
+      .querySelector<HTMLButtonElement>('[data-testid="decision-result-row"] button[aria-expanded="false"]')
+      ?.click(),
+  );
   expect(container.querySelector('h3')?.textContent).toContain('林');
   await click('person-memory-undo');
   expect(status).toBe('withdrawn');
@@ -309,6 +336,11 @@ it('a late older hydration cannot replace a fresh canonical socket reread', asyn
   expect(container.textContent).toContain('已写入');
   await act(async () => release(Response.json(older)));
   expect(container.textContent).toContain('已写入');
+  await act(async () =>
+    container
+      .querySelector<HTMLButtonElement>('[data-testid="decision-result-row"] button[aria-expanded="false"]')
+      ?.click(),
+  );
   expect(container.querySelector('[data-testid="person-memory-undo"]')).not.toBeNull();
 });
 
@@ -350,4 +382,147 @@ it('the retained Inbox result exposes the exact undo after its pending card has 
   await click('person-memory-undo');
   expect(status).toBe('withdrawn');
   expect(container.textContent).toContain('已撤销本次写入');
+});
+
+it.each([
+  'Chat',
+  'Inbox',
+] as const)('%s cold rejection distinguishes retained writes from declined remaining drafts', async (entrance) => {
+  status = 'rejected';
+  remaining = [];
+  decisionId = 'earlier-materialized-partial';
+  retainedWrites = true;
+  await render(entrance);
+  const label = container.querySelector('[data-testid=decision-result-label]')?.textContent;
+  expect(label).toContain('已写入部分');
+  expect(label).toContain('已拒绝其余');
+  expect(container.querySelector('[data-testid=decision-result-dot]')?.getAttribute('data-status')).toBe('rejected');
+  expect(container.querySelector('[data-testid=person-memory-undo]')).toBeNull();
+});
+
+it.each([
+  'unavailable',
+  'foreign-anchor',
+  'reopened',
+  'foreign-owner',
+] as const)('keeps an exact retained result neutral and collapsed when producer truth is %s', async (kind) => {
+  status = kind === 'reopened' ? 'pending_approval' : 'materialized';
+  decisionId = 'exact-previous-decision';
+  wrongAnchor = kind === 'foreign-anchor';
+  if (kind === 'foreign-owner') owner = 'foreign-owner';
+  if (kind === 'unavailable') {
+    const original = vi.mocked(apiFetch).getMockImplementation()!;
+    vi.mocked(apiFetch).mockImplementation((path, init, options) =>
+      String(path).includes('/person-memory-proposals/')
+        ? Promise.resolve(Response.json({ error: 'unavailable' }, { status: 503 }))
+        : original(path, init, options),
+    );
+  }
+  await act(async () =>
+    root.render(
+      <ApprovalDecisionReceipt
+        session={{ approval: visibleApproval(item), ownerUserId: 'owner-1', originalBlock: block }}
+        terminal={{ resolution: 'accepted', decidedAt: 200, decidedBy: 'owner-1' }}
+        line="已同意 · 效果待确认"
+      />,
+    ),
+  );
+  expect(container.querySelector('[data-testid="decision-result-row"]')).not.toBeNull();
+  expect(container.querySelector('[data-testid="decision-result-dot"]')?.getAttribute('data-status')).toBe('closed');
+  expect(container.querySelector('[data-testid="decision-result-details"]')).toBeNull();
+  expect(container.querySelector('[data-testid="person-memory-undo"]')).toBeNull();
+  await act(async () => container.querySelector<HTMLButtonElement>('button[aria-expanded="false"]')?.click());
+  expect(container.querySelector('[data-testid="person-memory-undo"]')).toBeNull();
+  expect(container.querySelector<HTMLButtonElement>('[data-testid="approve-btn"]')?.disabled ?? true).toBe(true);
+  expect(vi.mocked(apiFetch).mock.calls.some(([, init]) => init?.method === 'POST')).toBe(false);
+});
+
+it('recovers a neutral retained receipt through a fresh owner read without reinstalling decision controls', async () => {
+  status = 'materialized';
+  remaining = [];
+  decisionId = 'recover-exact-decision';
+  const original = vi.mocked(apiFetch).getMockImplementation()!;
+  let unavailable = true;
+  vi.mocked(apiFetch).mockImplementation((path, init, options) =>
+    unavailable && String(path).includes('/person-memory-proposals/')
+      ? Promise.resolve(Response.json({ error: 'unavailable' }, { status: 503 }))
+      : original(path, init, options),
+  );
+  await act(async () =>
+    root.render(
+      <ApprovalDecisionReceipt
+        session={{ approval: visibleApproval(item), ownerUserId: 'owner-1', originalBlock: block }}
+        terminal={{ resolution: 'accepted', decidedAt: 200, decidedBy: 'owner-1' }}
+        line="已同意 · 效果待确认"
+      />,
+    ),
+  );
+  expect(container.querySelector('[data-testid="decision-result-dot"]')?.getAttribute('data-status')).toBe('closed');
+  await act(async () => container.querySelector<HTMLButtonElement>('button[aria-expanded="false"]')?.click());
+  unavailable = false;
+  const retry = [...container.querySelectorAll('button')].find((b) => b.textContent === '重新读取');
+  expect(retry).toBeDefined();
+  await act(async () => retry?.click());
+  expect(container.querySelector('[data-testid="decision-result-dot"]')?.getAttribute('data-status')).toBe('approved');
+  expect(container.querySelector('[data-testid="person-memory-undo"]')).not.toBeNull();
+  expect(container.querySelector<HTMLButtonElement>('[data-testid="approve-btn"]')?.disabled ?? true).toBe(true);
+  expect(vi.mocked(apiFetch).mock.calls.some(([, init]) => init?.method === 'POST')).toBe(false);
+});
+
+it('reports the actual Undo HTTP response so an Inbox host can distinguish a confirmed pending continuation', async () => {
+  status = 'partially_materialized';
+  decisionId = 'partial-decision';
+  remaining = ['person_draft_2'];
+  const reportRequest = vi.fn();
+  await act(async () =>
+    root.render(
+      <ApprovalHostContext.Provider value={{ ...PERMISSIVE_APPROVAL_HOST, reportRequest }}>
+        <ApprovalItemCard item={item} />
+      </ApprovalHostContext.Provider>,
+    ),
+  );
+  await click('person-memory-undo');
+  expect(reportRequest).toHaveBeenCalledWith({
+    phase: 'end',
+    kind: 'person-memory-undo',
+    outcome: 'settled',
+    status: 200,
+  });
+});
+
+it('a cold Chat replacement has the same closed meaning in its row and expanded original', async () => {
+  status = 'withdrawn';
+  remaining = [];
+  undone = true;
+  const original = vi.mocked(apiFetch).getMockImplementation()!;
+  vi.mocked(apiFetch).mockImplementation((path, init, options) =>
+    String(path).startsWith('/api/person-memory-proposals/')
+      ? Promise.resolve(
+          Response.json({
+            ...snapshot(),
+            replacedByProposalId: 'person_candidate_replacement',
+            undoApplied: false,
+            undoReceipt: {
+              requestId: 'historical-partial-undo',
+              verdict: 'undone',
+              candidateId: item.proposalId,
+              candidateState: 'pending_approval',
+            },
+          }),
+        )
+      : original(path, init, options),
+  );
+  await render('Chat');
+  expect(container.querySelector('[data-testid=decision-result-label]')?.textContent).toContain('已关闭');
+  await act(async () =>
+    container
+      .querySelector<HTMLButtonElement>('[data-testid=decision-result-row] button[aria-expanded="false"]')
+      ?.click(),
+  );
+  expect(container.querySelector('[data-testid=person-memory-result]')?.textContent).toContain('已关闭');
+  expect(container.textContent).not.toContain('已撤回');
+  expect(container.textContent).not.toContain('已撤销本次写入');
+  expect(container.querySelector('[data-testid=person-memory-undo]')).toBeNull();
+  expect(container.querySelector('[data-testid=person-memory-approve-selected]')).toBeNull();
+  expect(vi.mocked(apiFetch).mock.calls.some(([, init]) => init?.method === 'POST')).toBe(false);
 });

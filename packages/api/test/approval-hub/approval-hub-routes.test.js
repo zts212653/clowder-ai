@@ -531,3 +531,29 @@ describe('GET /api/approval-hub/settled', () => {
     assert.equal(body.count, 1, 'floor(1.5)=1 → at most 1 item returned');
   });
 });
+
+it('reports bounded history preparation as retryable 503 instead of an empty successful history', async (t) => {
+  const { SettledIndexPreparingError } = await import('../../dist/utils/redis-settled-index.js');
+  const { approvalHubRoutes } = await import('../../dist/routes/approval-hub-routes.js');
+  const api = Fastify();
+  t.after(() => api.close());
+  await api.register(approvalHubRoutes, {
+    registry: await createTestApprovalRegistry([
+      {
+        featureId: 'F306',
+        listPending: async () => [],
+        listSettled: async () => {
+          throw new SettledIndexPreparingError();
+        },
+      },
+    ]),
+  });
+  const response = await api.inject({
+    method: 'GET',
+    url: '/api/approval-hub/settled',
+    headers: { 'x-cat-cafe-user': 'user-1' },
+  });
+  assert.equal(response.statusCode, 503);
+  assert.equal(response.json().code, 'APPROVAL_HISTORY_PREPARING');
+  assert.equal(response.json().items, undefined);
+});

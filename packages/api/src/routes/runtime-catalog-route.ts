@@ -81,9 +81,9 @@ export function registerRuntimeCatalogRoute(app: FastifyInstance) {
         message: 'account_catalog',
       };
     }
-    // Kimi/OpenCode speak native JSON streams, not ACP JSON-RPC. Their readable
-    // model metadata remains useful without launching them with an alien protocol.
-    if (runtime.id === 'kimi' || runtime.id === 'opencode')
+    // Native streams cannot use ACP discovery. AGY ACP also needs its isolated
+    // profile launch contract, so this read path only returns configured models.
+    if ('agyCarrier' in runtime || runtime.id === 'kimi' || runtime.id === 'opencode')
       return {
         ...fallback,
         defaultModel: 'configuredModel' in runtime ? runtime.configuredModel : undefined,
