@@ -1,6 +1,7 @@
 import { existsSync, readdirSync, readFileSync, realpathSync, statSync } from 'node:fs';
 import { basename, join, relative } from 'node:path';
 import type { IndexStateManager } from './IndexStateManager.js';
+import { isPathInside, toPosixPath } from './path-utils.js';
 
 export interface ProjectSummary {
   projectName: string;
@@ -141,9 +142,9 @@ function isSecretFile(name: string): boolean {
 
 function isInsideProject(filePath: string, projectRoot: string): boolean {
   try {
-    const real = realpathSync(filePath);
-    const realRoot = realpathSync(projectRoot);
-    return real.startsWith(realRoot + '/') || real === realRoot;
+    // Separator-agnostic containment: `${root}/` never matches a win32 child path, which used to
+    // make every discovered document look "outside the project" and empty the tier summary.
+    return isPathInside(realpathSync(projectRoot), realpathSync(filePath));
   } catch {
     return false;
   }
@@ -190,7 +191,7 @@ function walkDocs(
     if (stat.isDirectory()) {
       results.push(...walkDocs(full, projectRoot, budget, depth + 1));
     } else if (stat.isFile()) {
-      const relPath = relative(projectRoot, full);
+      const relPath = toPosixPath(relative(projectRoot, full));
       const tier = classifyDoc(relPath);
       if (tier) {
         results.push({ path: relPath, tier });

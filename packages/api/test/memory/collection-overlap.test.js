@@ -7,9 +7,12 @@ import { afterEach, beforeEach, describe, test } from 'node:test';
 
 describe('collection overlap exclusion (AC-H1)', () => {
   let dir;
+  /** On-disk stores created by a test; closed in afterEach (see trackStore). */
+  let storesToClose;
 
   beforeEach(() => {
     dir = mkdtempSync(join(tmpdir(), 'overlap-'));
+    storesToClose = [];
     mkdirSync(join(dir, 'docs', 'features'), { recursive: true });
     mkdirSync(join(dir, 'docs', 'library', 'finance'), { recursive: true });
 
@@ -24,8 +27,24 @@ describe('collection overlap exclusion (AC-H1)', () => {
   });
 
   afterEach(() => {
+    // Windows cannot unlink a file that still has an open handle, so the stores must be closed
+    // before the temp dir holding their sqlite file is removed.
+    for (const store of storesToClose ?? []) {
+      try {
+        store.close();
+      } catch {
+        /* already closed */
+      }
+    }
+    storesToClose = [];
     rmSync(dir, { recursive: true, force: true });
   });
+
+  /** An on-disk store that is closed automatically in afterEach. */
+  const trackStore = (store) => {
+    storesToClose.push(store);
+    return store;
+  };
 
   test('computeChildExcludes returns relative glob for child roots inside parent', async () => {
     const { computeChildExcludes } = await import('../../dist/domains/memory/factory.js');
@@ -65,7 +84,7 @@ describe('collection overlap exclusion (AC-H1)', () => {
     const excludes = computeChildExcludes(parentRoot, childManifests);
 
     const dbPath = join(dir, 'parent.sqlite');
-    const store = new SqliteEvidenceStore(dbPath);
+    const store = trackStore(new SqliteEvidenceStore(dbPath));
     await store.initialize();
 
     const manifest = {
@@ -109,7 +128,7 @@ describe('collection overlap exclusion (AC-H1)', () => {
     const excludes = computeChildExcludes(parentRoot, childManifests);
 
     const dbPath = join(dir, 'indexbuilder.sqlite');
-    const store = new SqliteEvidenceStore(dbPath);
+    const store = trackStore(new SqliteEvidenceStore(dbPath));
     await store.initialize();
 
     const builder = new IndexBuilder(
@@ -147,7 +166,7 @@ describe('collection overlap exclusion (AC-H1)', () => {
     const excludes = computeChildExcludes(parentRoot, childManifests);
 
     const dbPath = join(dir, 'incremental.sqlite');
-    const store = new SqliteEvidenceStore(dbPath);
+    const store = trackStore(new SqliteEvidenceStore(dbPath));
     await store.initialize();
 
     const builder = new IndexBuilder(
@@ -180,7 +199,7 @@ describe('collection overlap exclusion (AC-H1)', () => {
 
     const parentRoot = join(dir, 'docs');
     const dbPath = join(dir, 'parent-rebuild.sqlite');
-    const store = new SqliteEvidenceStore(dbPath);
+    const store = trackStore(new SqliteEvidenceStore(dbPath));
     await store.initialize();
 
     // Phase 1: Index WITHOUT exclude (simulates current/historical state)
@@ -233,7 +252,7 @@ describe('collection overlap exclusion (AC-H1)', () => {
 
     const parentRoot = join(dir, 'docs');
     const dbPath = join(dir, 'runtime-exclude.sqlite');
-    const store = new SqliteEvidenceStore(dbPath);
+    const store = trackStore(new SqliteEvidenceStore(dbPath));
     await store.initialize();
 
     // Phase 1: Build WITHOUT excludes — child docs should be indexed
@@ -273,7 +292,7 @@ describe('collection overlap exclusion (AC-H1)', () => {
 
     const parentRoot = join(dir, 'docs');
     const dbPath = join(dir, 'immediate-cleanup.sqlite');
-    const store = new SqliteEvidenceStore(dbPath);
+    const store = trackStore(new SqliteEvidenceStore(dbPath));
     await store.initialize();
 
     // Phase 1: Build WITHOUT excludes — finance docs indexed
@@ -309,7 +328,7 @@ describe('collection overlap exclusion (AC-H1)', () => {
     const { SqliteEvidenceStore } = await import('../../dist/domains/memory/SqliteEvidenceStore.js');
 
     const dbPath = join(dir, 'like-escape.sqlite');
-    const store = new SqliteEvidenceStore(dbPath);
+    const store = trackStore(new SqliteEvidenceStore(dbPath));
     await store.initialize();
 
     const db = store.getDb();
@@ -341,7 +360,7 @@ describe('collection overlap exclusion (AC-H1)', () => {
     const { SqliteEvidenceStore } = await import('../../dist/domains/memory/SqliteEvidenceStore.js');
 
     const dbPath = join(dir, 'edge-purge.sqlite');
-    const store = new SqliteEvidenceStore(dbPath);
+    const store = trackStore(new SqliteEvidenceStore(dbPath));
     await store.initialize();
 
     const db = store.getDb();
@@ -377,7 +396,7 @@ describe('collection overlap exclusion (AC-H1)', () => {
 
     const parentRoot = join(dir, 'docs');
     const dbPath = join(dir, 'runtime-incremental.sqlite');
-    const store = new SqliteEvidenceStore(dbPath);
+    const store = trackStore(new SqliteEvidenceStore(dbPath));
     await store.initialize();
 
     // Start with no excludes
