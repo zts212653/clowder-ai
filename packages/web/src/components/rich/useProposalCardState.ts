@@ -13,6 +13,7 @@ import {
 import type { PublishedMessageCoordinate } from '@/components/content-review/usePublishedContent';
 import { useShellCopy } from '@/components/shell/shell-copy';
 import { pushThreadRouteWithHistory } from '@/components/ThreadSidebar/thread-navigation';
+import { recordThreadProposalDemoUse } from '@/lib/feature-demo-telemetry';
 import type { RichCardBlock } from '@/stores/chat-types';
 import { useChatStore } from '@/stores/chatStore';
 import { apiFetch } from '@/utils/api-client';
@@ -184,6 +185,7 @@ export function useProposalCardState({ block, proposal }: ProposalCardInput) {
         reportEvidence({ outcome: res.ok ? 'settled' : 'http-error', status: res.status });
         const data = (await res.json()) as { threadId?: string; error?: string };
         if (!res.ok) throw new Error(data.error ?? `HTTP ${res.status}`);
+        recordThreadProposalDemoUse(data);
         const newThreadId = data.threadId ?? null;
         setEffectiveReportingMode(editing ? edits.reportingMode : effectiveReportingMode);
         setEffectiveDeclaredWorkMode(editing ? edits.declaredWorkMode : effectiveDeclaredWorkMode);

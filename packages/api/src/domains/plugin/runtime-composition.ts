@@ -702,6 +702,9 @@ function managerCatalogCandidate(
     publisher: presentation?.publisher ?? (entry.packageName.startsWith('@clowder-ai/') ? 'Clowder AI' : undefined),
     ownerAuthRequired: false,
     compatibleReplacement: manifest !== undefined,
+    ...(manifest === undefined && entry.distribution === 'registry' && entry.archiveUrl && entry.packageDigest
+      ? { updateRequiresValidation: true }
+      : {}),
     capabilities: manifest ? pluginManagerCapabilitiesFromManifest(manifest) : [],
     ...(manifest === undefined ? {} : { contributions: pluginManagerContributionsFromManifest(manifest) }),
   };
@@ -1106,6 +1109,13 @@ export function createPluginManagerRuntimeComposition(
       },
     },
     lifecycle: {
+      repair: async (pluginInstanceId, expectedRevision) => {
+        try {
+          await options.runtime.lifecycle.repair(pluginInstanceId, expectedRevision);
+        } catch (error) {
+          lifecycleFailure(error);
+        }
+      },
       setEnabled: async (pluginInstanceId, enabled, expectedRevision) => {
         try {
           if (enabled) await options.runtime.lifecycle.enable(pluginInstanceId, expectedRevision);

@@ -46,7 +46,7 @@ export function ThreadWorksPanelV2({ threadId, width, onClose, onSelectArtifact,
   const floatingScope = useArtworkLightboxScope();
   const cardCopy = useShellCopy(workspaceV3Copy);
   const { getCatById } = useCatData();
-  const [scope, setScope] = useState(initialView?.scope ?? 'thread');
+  const [scope, setScope] = useState(initialView?.scope ?? (threadId === 'default' ? 'global' : 'thread'));
   const [filter, setFilter] = useState<Filter>(initialView?.filter ?? 'all');
   const [query, setQuery] = useState(initialView?.query ?? '');
   const grouping: GroupingMode = initialView?.grouping ?? 'time';
@@ -56,7 +56,7 @@ export function ThreadWorksPanelV2({ threadId, width, onClose, onSelectArtifact,
   const [notice, setNotice] = useState<string | undefined>();
   const previewOrigin = useRef<HTMLButtonElement | null>(null);
   const scroll = useRef<HTMLDivElement>(null);
-  const thread = useThreadArtifacts(threadId, 'works');
+  const thread = useThreadArtifacts(threadId === 'default' ? undefined : threadId, 'works');
   const global = useGlobalArtifacts(scope === 'global', { view: 'works' });
   const active = scope === 'global' ? global : thread;
   const globalWorks = useMemo(
@@ -202,6 +202,7 @@ export function ThreadWorksPanelV2({ threadId, width, onClose, onSelectArtifact,
                 type="button"
                 className="shell-focusable"
                 aria-pressed={scope === value}
+                disabled={value === 'thread' && threadId === 'default'}
                 onClick={() => {
                   setScope(value);
                   setFilter('all');

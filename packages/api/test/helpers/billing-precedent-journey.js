@@ -98,19 +98,23 @@ export async function assertBillingPrecedentJourney({ docsRoot, repoFullName, ex
   };
   const resolution = await service.resolve(promptInput);
   assert.equal(resolution.admittedOpportunityIds.length, 1);
-  assert.match(resolution.promptSegment, /LL-098: zero-step billing\/spending-limit/);
-  assert.match(resolution.promptSegment, /runner_id=0/);
-  assert.match(resolution.promptSegment, /steps=\[\]/);
-  assert.match(resolution.promptSegment, /complete source evidence and an exact external billing condition/);
-  assert.match(resolution.promptSegment, /state-only external infrastructure, not an owner action/);
-  assert.ok(
-    resolution.promptSegment.includes(expectedSourceText),
-    'the prompt must preserve the exact supplied source policy',
-  );
-  assert.match(resolution.promptSegment, /Drill: evidence mch1\./);
-  const cueId = resolution.promptSegment.match(/cue-id="([^"]+)"/)?.[1];
+  assert.doesNotMatch(resolution.promptSegment, /LL-098|runner_id|steps=|why-now/);
+  assert.ok(!resolution.promptSegment.includes(expectedSourceText), 'the pointer must not preload source policy');
+  assert.match(resolution.promptSegment, /^Family: evidence$/m);
+  const handle = resolution.promptSegment.match(/^Handle: (mch1\.[^\s]+)$/m)?.[1];
+  assert.ok(handle, 'the pointer must expose a bare, directly copyable opaque handle');
+  assert.match(resolution.promptSegment, /cat_cafe_drill_memory_cue\(handle=Handle\)/);
+  assert.match(resolution.promptSegment, /cat_cafe_record_memory_cue_outcome\(handle=Handle,/);
+  const receipt = resolution.deliveryReceipts[0];
+  const cueId = receipt?.cueId;
   assert.ok(cueId);
   assert.equal(resolution.deliveryReceipts.length, 1);
+  const original = await source.read({
+    anchor: receipt.event.sourceAnchor,
+    expectedRevision: receipt.event.sourceRevision,
+  });
+  assert.equal(original.status, 'ok');
+  assert.ok(original.payload.summary.includes(expectedSourceText), 'the original read preserves the supplied policy');
   assert.deepEqual(
     episodeStore.listByCue('owner-1', cueId).map((event) => event.consumptionOutcome),
     [],
@@ -125,6 +129,9 @@ export async function assertBillingPrecedentJourney({ docsRoot, repoFullName, ex
     ['presented'],
     'the receipt becomes durable only after an explicit provider-delivery confirmation',
   );
+  const verifiedHandle = handles.verify(handle, promptInput.serverScope, promptInput.now, 'codex-sol');
+  assert.equal(verifiedHandle.ok, true, 'the complete displayed Handle value verifies after delivery');
+  assert.equal(verifiedHandle.coordinate.revision, receipt.event.sourceRevision);
   for (let sample = 1; sample < 64; sample += 1) {
     const randomizedHandleResolution = await service.resolve(promptInput);
     assert.equal(

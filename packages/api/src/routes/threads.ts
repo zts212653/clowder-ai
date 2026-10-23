@@ -12,7 +12,6 @@ import { pluginPrTitleReader } from './plugin/pr-artifact-title-reader.js';
 
 import type { CatId, GlobalArtifactDTO, GlobalArtifactsResponse, ThreadArtifactDTO } from '@cat-cafe/shared';
 import { catIdSchema, projectThreadWorks } from '@cat-cafe/shared';
-import { projectRecentWorks } from '@cat-cafe/shared/recent-works';
 import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
 import type { InvocationQueue } from '../domains/cats/services/agents/invocation/InvocationQueue.js';
@@ -20,7 +19,6 @@ import type { InvocationTracker } from '../domains/cats/services/agents/invocati
 import type { QueueProcessor } from '../domains/cats/services/agents/invocation/QueueProcessor.js';
 import type { TaskProgressStore } from '../domains/cats/services/agents/invocation/TaskProgressStore.js';
 import { readGlobalWorksPage, WorksPageError } from '../domains/cats/services/agents/routing/global-works-page.js';
-import { collectRecentGlobalWorkCandidates } from '../domains/cats/services/agents/routing/recent-global-work-reader.js';
 import {
   type PrTitleReader,
   readArtifactPrTitles,
@@ -80,6 +78,7 @@ import { CHATGPT_CHAT_URL_REGEX } from '../utils/chatgpt-chat-url.js';
 import { migrateStoredProjectPath, resolvePersistentProjectPathDetailed } from '../utils/persistent-project-path.js';
 import { resolveStrictUserId, resolveUserId } from '../utils/request-identity.js';
 import { getMultiMentionOrchestrator } from './callback-multi-mention-routes.js';
+import { readRecentWorksView } from './recent-works-view.js';
 import {
   composeSidebarPresence,
   type SidebarPresence,
@@ -581,32 +580,6 @@ async function readAcceptedWorkspaceArtifacts(
     log.warn({ threadId }, 'Accepted workspace artifact owner unavailable');
     return { artifacts: [], complete: false };
   }
-}
-
-async function readRecentWorksView(input: {
-  userId: string;
-  limit: number;
-  threadStore: IThreadStore;
-  messageStore: IMessageStore | undefined;
-  artifactWorkLineage: GlobalArtifactWorkLineageResolverHolder | undefined;
-}): Promise<GlobalArtifactsResponse & { complete: boolean }> {
-  const userThreads = await input.threadStore.list(input.userId);
-  const scan = input.messageStore
-    ? await collectRecentGlobalWorkCandidates({
-        store: input.messageStore,
-        userId: input.userId,
-        threadTitles: new Map(userThreads.map((thread) => [thread.id, thread.title ?? thread.id])),
-        limit: input.limit,
-      })
-    : { artifacts: [], complete: false, scannedMessages: 0 };
-  const projected = await projectGlobalArtifactWorkLineage(input.artifactWorkLineage, input.userId, scan.artifacts);
-  const artifacts = projectRecentWorks(projected.artifacts, projected.workLineage, input.limit);
-  return {
-    artifacts,
-    total: artifacts.length,
-    workLineage: projected.workLineage,
-    complete: scan.complete,
-  };
 }
 
 function filterGlobalArtifacts(
@@ -1672,7 +1645,7 @@ export const threadsRoutes: FastifyPluginAsync<ThreadsRoutesOptions> = async (ap
       return { error: 'Access denied' };
     }
 
-    return observeThreadArtifactRead(request.log, async (measure) => {
+    return observeThreadArtifactRead(request.log, async (measure, recordWorkRead) => {
       // Scan complete publication history, retiring raw message pages after both projections.
       const receipts: AppliedWorkspaceReceiptMessage[] = [];
       const messageArtifacts = messageStore
@@ -1704,22 +1677,36 @@ export const threadsRoutes: FastifyPluginAsync<ThreadsRoutesOptions> = async (ap
       const acceptedFiles = await measure('acceptedFiles', () =>
         readAcceptedWorkspaceArtifacts(opts.acceptedWorkspaceArtifacts, userId, threadId, receipts),
       );
-      const artifacts = await measure('prTitles', () =>
-        readArtifactPrTitles(
-          aggregateProjectedThreadArtifacts({
-            messageArtifacts: [...messageArtifacts, ...acceptedFiles.artifacts],
-            prTasks,
-            fileLedger: worksView ? [] : fileLedger,
-          }),
-          worksView ? (opts.prTitleReader ?? pluginPrTitleReader(app, request)) : undefined,
-        ),
+      // Keep the owner scope open across both reads: its final manifest and
+      // authorization fence must follow title completion, as in the serial path.
+      const artifacts = await withIndependentWorksRead(
+        worksView ? opts.artifactWorkLineage?.independent : undefined,
+        userId,
+        async (independentWorks) => {
+          const reads = await Promise.allSettled([
+            measure('prTitles', () =>
+              readArtifactPrTitles(
+                aggregateProjectedThreadArtifacts({
+                  messageArtifacts: [...messageArtifacts, ...acceptedFiles.artifacts],
+                  prTasks,
+                  fileLedger: worksView ? [] : fileLedger,
+                }),
+                worksView ? (opts.prTitleReader ?? pluginPrTitleReader(app, request)) : undefined,
+              ),
+            ),
+            worksView
+              ? measure('independentWorks', () => readIndependentThreadWorks(independentWorks, userId, threadId))
+              : Promise.resolve([]),
+          ]);
+          const combined: ThreadArtifactDTO[] = [];
+          for (const read of reads) {
+            if (read.status === 'rejected') throw read.reason;
+            combined.push(...read.value);
+          }
+          return combined;
+        },
+        recordWorkRead,
       );
-      if (worksView)
-        artifacts.push(
-          ...(await measure('independentWorks', () =>
-            readIndependentThreadWorks(opts.artifactWorkLineage?.independent, userId, threadId),
-          )),
-        );
       const projected = await measure('lineage', () =>
         projectGlobalArtifactWorkLineage(
           opts.artifactWorkLineage,
@@ -1802,8 +1789,31 @@ export const threadsRoutes: FastifyPluginAsync<ThreadsRoutesOptions> = async (ap
       return { error: 'Identity required' };
     }
 
+    const rawQuery = request.query as Record<string, unknown>;
+    if (Object.hasOwn(rawQuery, 'view') && rawQuery.view !== 'works') {
+      const parsed = recentWorksQuerySchema.safeParse(rawQuery);
+      if (!parsed.success) {
+        reply.status(400);
+        return { error: 'Invalid recent works query' };
+      }
+      return readRecentWorksView({
+        userId,
+        limit: parsed.data.limit,
+        threadStore,
+        messageStore,
+        independent: opts.artifactWorkLineage?.independent,
+        resolveLineage: (artifacts) => projectGlobalArtifactWorkLineage(opts.artifactWorkLineage, userId, artifacts),
+        readAccepted: (threadId, messages) =>
+          readAcceptedWorkspaceArtifacts(
+            opts.acceptedWorkspaceArtifacts,
+            userId,
+            threadId,
+            projectAppliedWorkspaceReceipts(messages),
+          ),
+      });
+    }
+
     return withIndependentWorksRead(opts.artifactWorkLineage?.independent, userId, async (independentWorks) => {
-      const rawQuery = request.query as Record<string, unknown>;
       if (rawQuery.view === 'works' && rawQuery.read === 'pages') {
         const query = pagedWorksQuerySchema.safeParse(rawQuery);
         if (!query.success) return reply.code(400).send({ error: 'Invalid paged works query' });
@@ -1854,20 +1864,6 @@ export const threadsRoutes: FastifyPluginAsync<ThreadsRoutesOptions> = async (ap
       const worksView = rawQuery.view === 'works';
       if (worksView && !worksQuerySchema.safeParse(rawQuery).success)
         return reply.code(400).send({ error: 'Invalid works view query' });
-      if (Object.hasOwn(rawQuery, 'view') && !worksView) {
-        const parsed = recentWorksQuerySchema.safeParse(rawQuery);
-        if (!parsed.success) {
-          reply.status(400);
-          return { error: 'Invalid recent works query' };
-        }
-        return readRecentWorksView({
-          userId,
-          limit: parsed.data.limit,
-          threadStore,
-          messageStore,
-          artifactWorkLineage: opts.artifactWorkLineage,
-        });
-      }
 
       const userThreads = await threadStore.list(userId);
 

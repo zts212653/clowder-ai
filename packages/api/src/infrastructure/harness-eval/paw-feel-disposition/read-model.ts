@@ -15,6 +15,7 @@ import type { IPawFeelReconciliationCoverageStore } from './coverage-store.js';
 import type { PawFeelDutySignalSummary } from './duty-notice.js';
 import type { IPawFeelDispositionEventLog } from './event-log.js';
 import { awaitPawFeelRead, mapPawFeelReads } from './projection/bounded-reads.js';
+import { type PawFeelInboxAuditEntry, readPawFeelAuditSignals } from './projection/read-model-audit.js';
 import { loadPawFeelEventMap } from './projection/read-model-events.js';
 import { countPawFeelIssues, emptyPawFeelIssueCounts } from './projection/read-model-issue.js';
 import { buildPawFeelInboxItem } from './projection/read-model-item.js';
@@ -81,7 +82,6 @@ export class PawFeelDispositionReadModel {
     this.bundleSnapshotSigner = options.bundleSnapshotSigner ?? new PawFeelBundleSnapshotSigner();
     this.followUpResolver = options.followUpResolver ?? new PawFeelContinuingResponsibilityResolver();
   }
-
   async list(query: PawFeelInboxQuery = {}): Promise<PawFeelInboxPage> {
     query.signal?.throwIfAborted();
     const generatedAt = this.now();
@@ -225,6 +225,9 @@ export class PawFeelDispositionReadModel {
         responsibility: await this.resolveResponsibility(projection),
       })),
     );
+  }
+  readAuditSignals(signalIds: readonly string[], signal?: AbortSignal): Promise<PawFeelInboxAuditEntry[]> {
+    return readPawFeelAuditSignals({ ...this.options, signalIds, signal });
   }
 
   private async loadProjections(signal?: AbortSignal): Promise<PawFeelDispositionProjection[]> {

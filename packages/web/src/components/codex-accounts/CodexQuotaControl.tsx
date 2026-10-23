@@ -78,7 +78,9 @@ export function CodexQuotaControl(props: {
                       </button>
                     </AppTooltip>
                     <span className="account-quota-value">{t.left(value.toFixed(0))}</span>
-                    {value < 20 && <span className="account-quota-warning">{t.nearLimit}</span>}
+                    {value < 20 && (
+                      <span className="account-quota-warning">{value === 0 ? t.usedUp : t.nearLimit}</span>
+                    )}
                   </div>
                   <span
                     role="meter"

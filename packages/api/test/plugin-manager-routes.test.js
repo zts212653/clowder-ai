@@ -87,6 +87,10 @@ async function harness({
       calls.push(['update', pluginId, request]);
       return { pluginId, pluginInstanceId: 'pi_video' };
     },
+    repair: async (pluginId, request) => {
+      calls.push(['repair', pluginId, request]);
+      return { pluginId, pluginInstanceId: 'pi_video' };
+    },
     setEnabled: async (pluginId, request) => {
       calls.push(['set-enabled', pluginId, request]);
       return { pluginId, pluginInstanceId: 'pi_video' };
@@ -550,7 +554,7 @@ test('exposes canonical Manager state/lifecycle operations and version update th
     assert.equal(invalidUpdate.statusCode, 400);
     assert.equal(
       (await app.inject({ method: 'POST', url: '/api/plugin-manager/plugins/official.video/repair' })).statusCode,
-      404,
+      403,
     );
   } finally {
     await app.close();
@@ -1098,6 +1102,36 @@ test('home local detail scopes bindings to the verified session or callback user
     });
     assert.equal(rejected.statusCode, 401);
     assert.equal(owners.length, 2);
+  } finally {
+    await app.close();
+  }
+});
+
+test('repair retains the Manager owner, strict revision and audit boundaries', async () => {
+  const { app, calls, audits } = await harness();
+  try {
+    const path = '/api/plugin-manager/plugins/official.video/repair';
+    const denied = await app.inject({ method: 'POST', url: path, payload: { expectedRevision: 3 } });
+    assert.equal(denied.statusCode, 403);
+    const extra = await app.inject({
+      method: 'POST',
+      url: path,
+      headers: writeHeaders,
+      payload: { expectedRevision: 3, force: true },
+      remoteAddress: '127.0.0.1',
+    });
+    assert.equal(extra.statusCode, 400);
+    assert.equal(calls.length, 0);
+    const ok = await app.inject({
+      method: 'POST',
+      url: path,
+      headers: writeHeaders,
+      payload: { expectedRevision: 3 },
+      remoteAddress: '127.0.0.1',
+    });
+    assert.equal(ok.statusCode, 200, ok.payload);
+    assert.deepEqual(calls, [['repair', 'official.video', { expectedRevision: 3 }]]);
+    assert.equal(audits.at(-1).data.operation, 'repair');
   } finally {
     await app.close();
   }

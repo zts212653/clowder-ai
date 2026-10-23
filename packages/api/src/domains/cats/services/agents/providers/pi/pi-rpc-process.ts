@@ -2,6 +2,7 @@ import { type ChildProcessWithoutNullStreams, execFile, spawn } from 'node:child
 import { randomUUID } from 'node:crypto';
 import { StringDecoder } from 'node:string_decoder';
 import { resolveWindowsSpawnPlan } from '../../../../../../utils/cli-spawn-win.js';
+import { PiRpcDiagnostics, piErrorExcerpt } from './pi-rpc-diagnostics.js';
 
 export type PiRecord = Record<string, unknown>;
 export const record = (value: unknown): PiRecord =>
@@ -18,6 +19,7 @@ export class PiRpcProcess {
   private ended = false;
   private closing?: Promise<void>;
   readonly exited: Promise<void>;
+  private readonly diagnostics = new PiRpcDiagnostics();
 
   constructor(command: string, args: string[], cwd: string) {
     const plan = process.platform === 'win32' ? resolveWindowsSpawnPlan(command, args) : { command, args };
@@ -56,8 +58,8 @@ export class PiRpcProcess {
     this.child.stdin.on('error', streamFailed);
     this.child.stdout.on('error', streamFailed);
     this.child.stderr.on('error', streamFailed);
-    // Drain diagnostics without forwarding secrets or parsing stderr as a wire record.
-    this.child.stderr.resume();
+    this.child.stderr.on('data', (chunk: Buffer) => this.diagnostics.write(chunk));
+    this.child.stderr.once('end', () => this.diagnostics.end());
     this.child.on('error', () => this.fail(new Error('Pi CLI could not be started')));
     this.exited = new Promise((resolve) =>
       this.child.once('close', (code, signal) => {
@@ -75,6 +77,7 @@ export class PiRpcProcess {
 
   private fail(error: Error): void {
     if (this.failure) return;
+    error.message += this.diagnostics.context();
     this.failure = error;
     for (const pending of this.pending.values()) pending.reject(error);
     this.pending.clear();
@@ -96,7 +99,9 @@ export class PiRpcProcess {
       if (event.success === true) pending.resolve(record(event.data));
       else if (event.success === false)
         pending.reject(
-          new PiRpcRequestRejectedError('Pi rejected the RPC request; check its model and login configuration'),
+          new PiRpcRequestRejectedError(
+            `Pi rejected the RPC request: ${typeof event.error === 'string' ? piErrorExcerpt(event.error) : 'check its model and login configuration'}`,
+          ),
         );
       else pending.reject(new Error('Pi returned an invalid RPC response'));
       return;

@@ -10,6 +10,7 @@ export interface AcpPoolSpawnSignatureInput {
   idleTtlMs: number;
   transport?: 'stdio' | 'httpstream';
   supportsMultiplexing?: boolean;
+  protocolAdapter?: string;
   sessionPolicy?: unknown;
 }
 
@@ -26,6 +27,7 @@ export function createAcpPoolSpawnSignature(input: AcpPoolSpawnSignatureInput): 
     idleTtlMs: input.idleTtlMs,
     transport: input.transport ?? 'stdio',
     supportsMultiplexing: input.supportsMultiplexing === true,
+    protocolAdapter: input.protocolAdapter ?? null,
     ...(input.sessionPolicy ? { sessionPolicy: input.sessionPolicy } : {}),
   });
 }

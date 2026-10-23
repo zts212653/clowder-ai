@@ -4,6 +4,8 @@ title: Identity / Session
 summary: Agent identity、connector session binding、bubble identity、runtime session binding、context continuity、thread access policy 与 user profile 等 subcell 的边界。
 canonical_features: [F032, F088, F136, F171, F183, F211, F231, F262, F291, F296, F299, F320, F322]
 code_anchors:
+  - packages/api/src/domains/cats/services/agents/providers/pi/pi-session-store.ts
+  - packages/api/src/domains/cats/services/agents/providers/pi/pi-session-runner.ts
   - packages/api/src/domains/cats/services/cloud-bridge/dot/dot-identity.ts
   - cat-config.json
   - packages/api/src/config/cat-config-loader.ts
@@ -92,6 +94,7 @@ code_anchors:
   - packages/api/src/routes/callback-read-profile-routes.ts
   - packages/api/src/scripts/migrate-f231-profile.ts
 doc_anchors:
+  - docs/census/issue-1704-pi-native-state.md
   - docs/features/F320-multi-oauth-account-switching.md
   - feature-specs/2026-10-06-f320-codex-backend.md
   - docs/features/F032-agent-plugin-architecture.md

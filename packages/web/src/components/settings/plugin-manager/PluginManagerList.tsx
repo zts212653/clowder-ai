@@ -51,6 +51,7 @@ function PluginListActions({
   busy,
   onInstall,
   onSetEnabled,
+  onRepair,
   onBlockedToggle,
   onUninstall,
   quietUninstall,
@@ -64,6 +65,7 @@ function PluginListActions({
   busy: boolean;
   onInstall: (() => void) | undefined;
   onSetEnabled: ((enabled: boolean) => void) | undefined;
+  onRepair: (() => void) | undefined;
   onBlockedToggle: (() => void) | undefined;
   onUninstall: (() => void) | undefined;
   quietUninstall: boolean;
@@ -82,6 +84,11 @@ function PluginListActions({
       {installed && canInstall && (
         <SettingsPrimaryButton onClick={() => onInstall?.()} disabled={busy}>
           {busy ? <PluginInstallationProgress /> : '更新'}
+        </SettingsPrimaryButton>
+      )}
+      {installed && plugin.actions?.repair && onRepair && (
+        <SettingsPrimaryButton onClick={onRepair} disabled={busy}>
+          {busy ? '修复中…' : '修复'}
         </SettingsPrimaryButton>
       )}
       {installed && showLifecycleToggle && (
@@ -126,6 +133,7 @@ export function PluginListRow({
   onSelect,
   onInstall,
   onSetEnabled,
+  onRepair,
   onBlockedToggle,
   onUninstall,
   busy,
@@ -138,6 +146,7 @@ export function PluginListRow({
   onSelect: () => void;
   onInstall?: () => void;
   onSetEnabled?: (enabled: boolean) => void;
+  onRepair?: () => void;
   onBlockedToggle?: () => void;
   onUninstall?: () => void;
   busy: boolean;
@@ -204,6 +213,7 @@ export function PluginListRow({
             busy={busy}
             onInstall={onInstall}
             onSetEnabled={onSetEnabled}
+            onRepair={onRepair}
             onBlockedToggle={onBlockedToggle}
             onUninstall={onUninstall}
             quietUninstall={presentation === 'v2' && !selected}

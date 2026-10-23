@@ -87,6 +87,39 @@ redis_startup_ping
   assert.equal(result.stdout, 'SLEEP 1\nORIGINAL_PING\n');
 });
 
+test('unnamed startup cannot erase a failed daemon readiness with a later liveness check', () => {
+  const setup = source.match(/^setup_storage\(\) \{\n[\s\S]*?^\}/m)?.[0];
+  assert.ok(setup);
+  const result = spawnSync('bash', ['-e'], {
+    encoding: 'utf8',
+    input: `
+USE_REDIS=true
+CAT_CAFE_ALPHA_COORDINATES=
+REDIS_PORT=15397
+REDIS_DATA_DIR=/fixture/redis
+REDIS_DBFILE=dump.rdb
+REDIS_PIDFILE=/fixture/redis/pid
+REDIS_LOGFILE=/fixture/redis/log
+GREEN= YELLOW= RED= NC=
+ensure_redis_dirs() { :; }
+archive_redis_snapshot() { :; }
+redis_ping() { return 1; }
+redis-server() { :; }
+maybe_quarantine_stale_aof_dir() { :; }
+cat_cafe_redis_start_daemon() { echo READINESS_REFUSED >&2; return 1; }
+redis_startup_ping() { echo UNSAFE_LATER_CHECK; return 0; }
+assert_alpha_redis_runtime_dir() { :; }
+print_redis_runtime_info() { :; }
+${setup}
+setup_storage
+echo APPLICATION_WOULD_START
+`,
+  });
+  assert.equal(result.status, 1, result.stdout);
+  assert.match(result.stderr, /READINESS_REFUSED/);
+  assert.doesNotMatch(result.stdout, /UNSAFE_LATER_CHECK|APPLICATION_WOULD_START/);
+});
+
 test('capturing named Alpha Redis ownership publishes its lease before service startup', (t) => {
   const directory = mkdtempSync(join(tmpdir(), 'named-alpha-lease-wiring-'));
   t.after(() => rmSync(directory, { recursive: true, force: true }));

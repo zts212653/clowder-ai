@@ -3,11 +3,11 @@
 
 import { createHash, randomUUID } from 'node:crypto';
 import { createReadStream, existsSync, readdirSync, statSync } from 'node:fs';
-import { access, readdir, readFile } from 'node:fs/promises';
-import { isAbsolute, join, relative, resolve } from 'node:path';
+import { access, readFile } from 'node:fs/promises';
+import { join, relative, resolve } from 'node:path';
 import { createInterface } from 'node:readline';
 import { setImmediate as yieldToIo } from 'node:timers/promises';
-import { CatCafeScanner, extractFrontmatter, extractSupersedes, isFeatureDocPath } from './CatCafeScanner.js';
+import { CatCafeScanner } from './CatCafeScanner.js';
 import { GenericRepoScanner } from './GenericRepoScanner.js';
 import type {
   ConsistencyReport,
@@ -25,7 +25,16 @@ import type {
 export { KIND_DIRS } from './CatCafeScanner.js';
 
 import { mirrorDocAliases } from './doc-alias-mirror.js';
-import { extractDocLinkEdges, extractFeatureRefEdges, extractWikiLinkEdges } from './edge-extractors.js';
+import {
+  documentSourceClaims,
+  publishDocumentSourceClaims,
+  readDocumentSourceClaims,
+} from './document-source-claims.js';
+import {
+  DOCUMENT_SOURCE_EDGE_PREDICATE,
+  documentPathToAnchor,
+  extractDocumentSourceEdges,
+} from './document-source-edges.js';
 import { embedPassages, type PassageEmbeddingRow } from './embed-utils.js';
 import { isMarkdownSourcePath } from './MarkdownPassageIndexer.js';
 import { runMemoryScan } from './MemoryProcess.js';
@@ -57,8 +66,9 @@ import { createVectorInvalidator } from './vector-invalidation.js';
  *  12 — external-knowledge artifact roles, study tags, and authority backfill
  *  13 — pathToAuthority normalizes Windows backslash source paths (re-derive authority)
  *  14 — F321: quote text and owner comments backfill into canonical message passages
+ *  15 — explicitly anchored supporting docs retain feature keywords across all scanners
  */
-export const INDEXING_VERSION = 14;
+export const INDEXING_VERSION = 15;
 
 /** Higher number = higher priority for anchor ownership */
 const KIND_PRIORITY: Record<EvidenceKind, number> = {
@@ -389,113 +399,7 @@ export class IndexBuilder implements IIndexBuilder {
 
     report('indexing', 30);
 
-    // Phase D: auto-extract edges from frontmatter cross-references (AC-D18, KD-29)
-    // Phase F: clear both legacy 'related' and normalized 'related_to'; write 'related_to' with provenance
-    // M15: clear and rebuild temporal supersedes frontmatter edges in the same pass.
-    await this.store.runExclusive(() => {
-      this.store
-        .getDb()
-        .prepare(
-          "DELETE FROM edges WHERE relation IN ('related', 'related_to', 'supersedes') AND provenance = 'frontmatter'",
-        )
-        .run();
-    });
-
-    for (const scanned of scannedItems) {
-      await yieldToIo();
-      if (!scanned.rawContent) continue;
-      const fm = extractFrontmatter(scanned.rawContent);
-      if (!fm) continue;
-      // Use the item's already-assigned anchor (which respects path-based rules)
-      // instead of re-extracting from raw content (which could produce a stale/wrong anchor)
-      const anchor = scanned.item.anchor;
-      if (!anchor) continue;
-
-      for (const ref of extractSupersedes(fm)) {
-        if (ref !== anchor) {
-          await this.store.addEdge({
-            fromAnchor: anchor,
-            toAnchor: ref,
-            relation: 'supersedes',
-            provenance: 'frontmatter',
-          });
-        }
-      }
-
-      const relatedFeatures = fm.related_features;
-      if (Array.isArray(relatedFeatures)) {
-        for (const ref of relatedFeatures) {
-          if (typeof ref === 'string' && ref !== anchor) {
-            await this.store.addEdge({
-              fromAnchor: anchor,
-              toAnchor: ref,
-              relation: 'related_to',
-              provenance: 'frontmatter',
-            });
-          }
-        }
-      }
-
-      // Non-feature docs: promote feature_ids to graph edges (they no longer become anchors)
-      const featureIds = fm.feature_ids;
-      const sp = scanned.item.sourcePath ?? '';
-      if (Array.isArray(featureIds) && !isFeatureDocPath(sp)) {
-        for (const fid of featureIds) {
-          if (typeof fid === 'string' && fid !== anchor) {
-            await this.store.addEdge({
-              fromAnchor: anchor,
-              toAnchor: fid,
-              relation: 'related_to',
-              provenance: 'frontmatter',
-            });
-          }
-        }
-      }
-    }
-
-    // Phase C (F188): extract wikilink / doc_link / feature_ref edges from content
-    await this.store.runExclusive(() => {
-      this.store.getDb().prepare("DELETE FROM edges WHERE provenance = 'content'").run();
-    });
-
-    const toPosix = (p: string): string => p.replace(/\\/g, '/');
-    const sourcePathKey = (sourcePath: string): string =>
-      toPosix(isAbsolute(sourcePath) ? relative(this.scanRoot, sourcePath) : sourcePath);
-    const pathToAnchor = new Map<string, string>();
-    const setAlias = (key: string, anchor: string): void => {
-      if (!pathToAnchor.has(key)) pathToAnchor.set(key, anchor);
-    };
-    for (const scanned of scannedItems) {
-      await yieldToIo();
-      const sp = scanned.item.sourcePath;
-      if (sp) {
-        const key = sourcePathKey(sp);
-        pathToAnchor.set(key, scanned.item.anchor);
-        if (key.startsWith('docs/')) {
-          setAlias(key.slice('docs/'.length), scanned.item.anchor);
-        } else {
-          setAlias(`docs/${key}`, scanned.item.anchor);
-        }
-      }
-    }
-
-    for (const scanned of scannedItems) {
-      await yieldToIo();
-      if (!scanned.rawContent) continue;
-      const anchor = scanned.item.anchor;
-      if (!anchor) continue;
-
-      const body = scanned.rawContent.replace(/^---\n[\s\S]*?\n---\n?/, '');
-      const relSourcePath = scanned.item.sourcePath ? sourcePathKey(scanned.item.sourcePath) : undefined;
-      const allEdges = [
-        ...extractWikiLinkEdges(body, anchor),
-        ...extractFeatureRefEdges(body, anchor),
-        ...extractDocLinkEdges(body, anchor, pathToAnchor, relSourcePath),
-      ];
-      for (const edge of allEdges) {
-        await this.store.addEdge(edge);
-      }
-    }
+    await this.refreshRebuiltDocumentEdges(scannedItems);
 
     report('indexing', 40);
     await this.indexDocumentPassages(documentPassageSources);
@@ -566,6 +470,7 @@ export class IndexBuilder implements IIndexBuilder {
     } catch {
       // fail-open: lexical evidence remains usable without embeddings
     }
+    await publishDocumentSourceClaims(this.store, documentSourceClaims(scannedItems.map(({ item }) => item)));
     // Persist current indexing version so next startup can detect changes
     await this.storeIndexingVersion();
     await this.flushPendingMentions();
@@ -707,18 +612,7 @@ export class IndexBuilder implements IIndexBuilder {
       !vectorStore.checkMetaConsistency(model).consistent || (vectorStore.count() > 0 && !meta.embedding_model_id);
     if (modelChanged) {
       await this.store.runExclusive(() => {
-        // VectorStore.clearAll also clears embedding_meta. Keep the independent
-        // scanner version so a model switch does not force a corpus reparse on
-        // the next process start.
-        const indexingVersion = db.prepare("SELECT value FROM embedding_meta WHERE key = 'indexing_version'").get() as
-          | { value: string }
-          | undefined;
         vectorStore.clearAll();
-        if (indexingVersion) {
-          db.prepare("INSERT INTO embedding_meta (key, value) VALUES ('indexing_version', ?)").run(
-            indexingVersion.value,
-          );
-        }
         deps.passageVectorStore?.clearAll();
         db.prepare('DELETE FROM document_vector_sources').run();
       });
@@ -820,67 +714,72 @@ export class IndexBuilder implements IIndexBuilder {
     // This ensures that when a higher-priority owner is deleted and a lower-priority
     // doc is updated in the same batch, the deletion clears the way for the upsert.
     const toUpsert: Array<{ parsed: EvidenceItem; passages: string[]; rawContent?: string }> = [];
-    const toDelete: string[] = [];
+    const anchorsToDelete = new Set<string>();
+    const claims = await this.loadDocumentSourceClaims();
+    const affectedAnchors = new Set<string>();
     const documentPassageSources: DocumentPassageSource[] = [];
 
     for (const filePath of changedPaths) {
       const parsed = await this.parseSingleFile(filePath);
+      const path = relative(this.scanRoot, filePath);
+      const oldClaim = claims.get(path);
+      if (oldClaim) affectedAnchors.add(oldClaim);
+      if (parsed) {
+        claims.set(path, parsed.parsed.anchor);
+        affectedAnchors.add(parsed.parsed.anchor);
+      } else claims.delete(path);
+      // A changed explicit anchor transfers this source to a new identity. Release
+      // its old identity through the same deletion/backfill path as a removed file.
+      const previous = this.store
+        .getDb()
+        .prepare('SELECT anchor FROM evidence_docs WHERE source_path = ?')
+        .all(relative(this.scanRoot, filePath)) as Array<{ anchor: string }>;
+      for (const row of previous) {
+        if (!parsed || row.anchor !== parsed.parsed.anchor) anchorsToDelete.add(row.anchor);
+      }
       if (parsed) {
         toUpsert.push(parsed);
-      } else {
-        toDelete.push(filePath);
       }
     }
 
     // Pass 1: deletions (P1: sync vector deletion) + backfill from candidate docs
     const deletedAnchors: string[] = [];
-    for (const filePath of toDelete) {
-      // P1-5 fix: use scanRoot (not docsRoot) — source_path stored relative to scanRoot
-      const relPath = relative(this.scanRoot, filePath);
-      const db = this.store.getDb();
-      const row = db.prepare('SELECT anchor FROM evidence_docs WHERE source_path = ?').get(relPath) as
-        | { anchor: string }
-        | undefined;
-      if (row) {
-        await this.store.deleteByAnchor(row.anchor);
-        this.pendingDocumentVectorAnchors.delete(row.anchor);
-        await this.store.runExclusive(() =>
-          db.prepare('DELETE FROM document_vector_sources WHERE anchor = ?').run(row.anchor),
-        );
-        await this.refreshFrontmatterSupersedesEdges(row.anchor);
-        deletedAnchors.push(row.anchor);
-      }
+    // Even a losing source affected its shared anchor and may have suppressed a self-path link.
+    const pathLinkDependents = new Set(affectedAnchors);
+    const db = this.store.getDb();
+    for (const anchor of new Set([...affectedAnchors, ...anchorsToDelete])) {
+      const inbound = db
+        .prepare(
+          "SELECT DISTINCT from_anchor AS anchor FROM edges WHERE to_anchor = ? AND relation = 'doc_link' AND provenance = 'content'",
+        )
+        .all(anchor) as Array<{ anchor: string }>;
+      for (const source of inbound) pathLinkDependents.add(source.anchor);
+    }
+    for (const anchor of anchorsToDelete) {
+      await this.store.deleteByAnchor(anchor);
+      this.pendingDocumentVectorAnchors.delete(anchor);
+      await this.store.runExclusive(() =>
+        db.prepare('DELETE FROM document_vector_sources WHERE anchor = ?').run(anchor),
+      );
+      await this.refreshDocumentSourceEdges(anchor);
+      deletedAnchors.push(anchor);
     }
 
-    // Backfill: for each deleted anchor, scan for remaining docs that claim it
-    if (deletedAnchors.length > 0) {
-      const allScanned = await this.discover();
-      for (const anchor of deletedAnchors) {
-        const candidates = allScanned
-          .filter((s) => s.item.anchor === anchor)
-          .map((s) => ({
-            parsed: {
-              ...s.item,
-              sourceHash: s.rawContent
-                ? createHash('sha256').update(s.rawContent).digest('hex').slice(0, 16)
-                : undefined,
-              provenance: s.provenance,
-            } as EvidenceItem,
-            passages: s.passages,
-            rawContent: s.rawContent,
-          }));
-        if (candidates.length > 0) {
-          candidates.sort((a, b) => (KIND_PRIORITY[b.parsed.kind] ?? 0) - (KIND_PRIORITY[a.parsed.kind] ?? 0));
-          const best = candidates[0];
-          if (best && !toUpsert.some((u) => u.parsed.anchor === anchor)) {
-            toUpsert.push(best);
-          }
-        }
+    // Backfill only remaining claimants of retired identities; no corpus rediscovery.
+    for (const anchor of deletedAnchors) {
+      const candidates: typeof toUpsert = [];
+      for (const [path, claimedAnchor] of claims) {
+        if (claimedAnchor !== anchor) continue;
+        const candidate = await this.parseSingleFile(resolve(this.scanRoot, path));
+        if (candidate?.parsed.anchor === anchor) candidates.push(candidate);
       }
+      candidates.sort((a, b) => (KIND_PRIORITY[b.parsed.kind] ?? 0) - (KIND_PRIORITY[a.parsed.kind] ?? 0));
+      const best = candidates[0];
+      if (best && !toUpsert.some((item) => item.parsed.anchor === anchor)) toUpsert.push(best);
     }
 
     // Pass 2: upserts (with kind-priority guard) + embed new/changed docs
-    for (const { parsed, passages, rawContent } of toUpsert) {
+    for (const { parsed, passages } of toUpsert) {
       const existing = await this.store.getByAnchor(parsed.anchor);
       if (existing) {
         const existingPriority = KIND_PRIORITY[existing.kind] ?? 0;
@@ -894,7 +793,6 @@ export class IndexBuilder implements IIndexBuilder {
         isMarkdownSourcePath(parsed.sourcePath) ? { ...parsed, sourceHash: undefined } : parsed,
       );
       this.pendingDocumentVectorAnchors.add(parsed.anchor);
-      await this.refreshFrontmatterSupersedesEdges(parsed.anchor, rawContent);
       if (isMarkdownSourcePath(parsed.sourcePath)) {
         documentPassageSources.push({ item: parsed, passages });
       }
@@ -916,7 +814,11 @@ export class IndexBuilder implements IIndexBuilder {
       }
     }
 
+    await this.refreshIncrementalDocumentEdges(toUpsert, pathLinkDependents, claims);
+
     await this.indexDocumentPassages(documentPassageSources);
+
+    await publishDocumentSourceClaims(this.store, claims);
 
     // F260 Phase A: refresh doc_aliases after incremental doc changes.
     // delete-rebuild pattern is O(N) but correct; acceptable for Phase A shadow-only scope.
@@ -972,26 +874,80 @@ export class IndexBuilder implements IIndexBuilder {
     return null;
   }
 
-  private async refreshFrontmatterSupersedesEdges(anchor: string, rawContent = ''): Promise<void> {
+  private async refreshRebuiltDocumentEdges(scanned: import('./interfaces.js').ScannedEvidence[]): Promise<void> {
+    await this.store.runExclusive(() => {
+      this.store.getDb().prepare(`DELETE FROM edges WHERE ${DOCUMENT_SOURCE_EDGE_PREDICATE}`).run();
+    });
+    const owners = this.store
+      .getDb()
+      .prepare('SELECT anchor, source_path AS sourcePath FROM evidence_docs')
+      .all() as Array<{ anchor: string; sourcePath: string | null }>;
+    const winners = new Map(owners.map((row) => [row.anchor, row.sourcePath]));
+    const pathToAnchor = documentPathToAnchor(
+      scanned.map(({ item }) => item),
+      this.scanRoot,
+    );
+    for (const source of scanned) {
+      await yieldToIo();
+      if (!source.rawContent || winners.get(source.item.anchor) !== source.item.sourcePath) continue;
+      for (const edge of extractDocumentSourceEdges(source.item, source.rawContent, pathToAnchor, this.scanRoot)) {
+        await this.store.addEdge(edge);
+      }
+    }
+  }
+
+  private async loadDocumentSourceClaims(): Promise<Map<string, string>> {
+    const existing = readDocumentSourceClaims(this.store);
+    if (existing) return existing;
+    // Legacy direct incremental entry lacks loser history. Initialize its derived graph once,
+    // without rewriting document rows, passages or vectors. Normal startup rebuild already does this.
+    const scanned = await this.discover();
+    await this.refreshRebuiltDocumentEdges(scanned);
+    return documentSourceClaims(scanned.map(({ item }) => item));
+  }
+
+  private async refreshIncrementalDocumentEdges(
+    changed: Array<{ parsed: EvidenceItem; rawContent?: string }>,
+    pathLinkDependents: Set<string>,
+    claims: ReadonlyMap<string, string>,
+  ): Promise<void> {
+    const pathToAnchor = documentPathToAnchor(
+      [...claims].map(([sourcePath, anchor]) => ({ sourcePath, anchor })),
+      this.scanRoot,
+    );
+    const replacements = new Map<string, { parsed: EvidenceItem; rawContent?: string }>();
+    for (const change of changed) {
+      const winner = await this.store.getByAnchor(change.parsed.anchor);
+      if (winner?.sourcePath === change.parsed.sourcePath) replacements.set(change.parsed.anchor, change);
+    }
+    // A Markdown path still names the same file after rekey, unlike an explicit [[old-anchor]] reference.
+    // Reparse only sources whose resolved doc_link depended on an identity retired in this mutation.
+    for (const anchor of pathLinkDependents) {
+      if (replacements.has(anchor)) continue;
+      const current = await this.store.getByAnchor(anchor);
+      if (!current?.sourcePath) continue;
+      const parsed = await this.parseSingleFile(resolve(this.scanRoot, current.sourcePath));
+      if (parsed?.parsed.anchor === anchor) replacements.set(anchor, parsed);
+    }
+    for (const { parsed, rawContent } of replacements.values()) {
+      await this.refreshDocumentSourceEdges(parsed.anchor, rawContent, parsed.sourcePath, pathToAnchor);
+    }
+  }
+
+  private async refreshDocumentSourceEdges(
+    anchor: string,
+    rawContent = '',
+    sourcePath?: string,
+    pathToAnchor = new Map<string, string>(),
+  ): Promise<void> {
     await this.store.runExclusive(() => {
       this.store
         .getDb()
-        .prepare("DELETE FROM edges WHERE relation = 'supersedes' AND provenance = 'frontmatter' AND from_anchor = ?")
+        .prepare(`DELETE FROM edges WHERE from_anchor = ? AND ${DOCUMENT_SOURCE_EDGE_PREDICATE}`)
         .run(anchor);
     });
-
-    const fm = extractFrontmatter(rawContent);
-    if (!fm) return;
-
-    for (const ref of extractSupersedes(fm)) {
-      if (ref !== anchor) {
-        await this.store.addEdge({
-          fromAnchor: anchor,
-          toAnchor: ref,
-          relation: 'supersedes',
-          provenance: 'frontmatter',
-        });
-      }
+    for (const edge of extractDocumentSourceEdges({ anchor, sourcePath }, rawContent, pathToAnchor, this.scanRoot)) {
+      await this.store.addEdge(edge);
     }
   }
 

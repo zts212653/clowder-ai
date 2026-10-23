@@ -65,6 +65,43 @@ describe('Settings bridge uses the remounted original reading owner', () => {
     return { old, source };
   }
 
+  it('records which reader interrupted a return and links its single notice consumption', async () => {
+    const { source } = enter();
+    await bridge.returnToSource(source.id);
+    bridge.setRoute('/thread/origin', true);
+    const restore = deferred<Awaited<ReturnType<ChatReadingPort['restoreReadingRef']>>>();
+    const next = reader('replacement-owner');
+    next.restoreReadingRef = vi.fn(() => restore.promise);
+    const unregister = bridge.registerReadingPort(next, () => 'private origin title');
+    unregister();
+    const view = bridge.getSnapshot();
+    expect(bridge.consumeNotice(view)).toBe('interrupted');
+    expect(bridge.consumeNotice(view)).toBeNull();
+    restore.resolve({ status: 'interrupted' });
+    await tick();
+    const records = JSON.parse(localStorage.getItem('cat-cafe:connection-diagnostics:v1') ?? '[]') as Array<{
+      kind: string;
+      bridgeId?: string;
+      phase?: string;
+      cause?: string;
+      notice?: string;
+      noticeSeq?: number;
+    }>;
+    const created = records.findLast((record) => record.kind === 'settings_return' && record.phase === 'created');
+    expect(created).toBeDefined();
+    const own = records.filter((record) => record.bridgeId === created?.bridgeId);
+    expect(own).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ phase: 'cancel', cause: 'reader_unregistered' }),
+        expect.objectContaining({ phase: 'notice', notice: 'interrupted' }),
+      ]),
+    );
+    const consumed = own.filter((record) => record.phase === 'consumed');
+    expect(consumed).toHaveLength(1);
+    expect(consumed[0]?.noticeSeq).toBe(own.findLast((record) => record.phase === 'notice')?.noticeSeq);
+    expect(JSON.stringify(own)).not.toContain('private origin title');
+  });
+
   it('captures the actual source once at the settings entry, without copying a draft', () => {
     const old = reader();
     bridge.registerReadingPort(old, () => 'Actual origin title');

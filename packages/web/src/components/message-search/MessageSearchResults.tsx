@@ -18,14 +18,8 @@ export interface MessageSearchResultsProps {
 const buttonClass =
   'rounded-lg border border-[var(--console-border-soft)] px-3 py-1 text-xs text-cafe-secondary hover:bg-[var(--console-hover-bg)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent-500)]';
 
-function excerpt(text: string): string {
-  const sentences = text.match(/[^。！？.!?]*[。！？.!?]+|[^。！？.!?]+$/gu);
-  const firstTwo = sentences?.slice(0, 2).join('') ?? text;
-  return firstTwo.length < text.length ? `${firstTwo}…` : firstTwo;
-}
-
-function HighlightedExcerpt({ result }: { result: MessageSearchResult }) {
-  const text = excerpt(result.snippet.text);
+function HighlightedSnippet({ result }: { result: MessageSearchResult }) {
+  const text = result.snippet.text;
   const ranges = result.highlights
     .filter(
       (range) =>
@@ -67,6 +61,9 @@ function Coverage({ response }: { response: MessageSearchResponse }) {
         {meta.scope === 'thread' ? '检索范围：当前对话。' : '检索范围：全局（你可访问的对话）。'} 索引覆盖范围尚未确认。
       </p>
       <p>最近消息可能尚未入索引，延迟暂无法确认。</p>
+      {meta.qualification?.status === 'partial' && (
+        <p>{meta.qualification.unassessed + meta.qualification.indeterminate} 条候选尚未核对出结论，未作为匹配。</p>
+      )}
       {(meta.hasMore || meta.partial || meta.response.truncated || meta.semanticCandidatesLimited) && (
         <p>仅列出部分命中，不能据此判断没有其他消息。</p>
       )}
@@ -140,7 +137,9 @@ export function MessageSearchResults({
           </div>
           {response.results.length === 0 && (
             <p className="p-3 text-sm text-cafe-secondary" role="status">
-              本次检索未找到相关消息。
+              {response.meta.qualification?.status === 'partial'
+                ? '部分候选尚未核对完，暂不能判断是否有匹配。'
+                : '本次检索未找到相关消息。'}
             </p>
           )}
           <ol className="divide-y divide-[var(--console-border-soft)] px-3">
@@ -170,7 +169,7 @@ export function MessageSearchResults({
                     {index === 0 && response.meta.sort === 'time' && <span>本次结果中最早</span>}
                   </div>
                   <p className="break-words text-sm leading-6 text-cafe-secondary">
-                    <HighlightedExcerpt result={result} />
+                    <HighlightedSnippet result={result} />
                   </p>
                 </div>
                 {!readonly && (

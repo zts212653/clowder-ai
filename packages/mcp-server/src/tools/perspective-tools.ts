@@ -9,13 +9,16 @@ import { deploymentDefaults } from '@cat-cafe/shared';
 import { z } from 'zod';
 import type { ToolResult } from './file-tools.js';
 import { errorResult, successResult } from './file-tools.js';
+import { resolveInvocationEnv } from './invocation-auth.js';
 
 const defineTool = defineMcpMigrationFactory('perspective-tools.ts', undefined, {
   resourceFamily: 'evidence-navigation',
   authority: 'local-runtime',
 });
 
-const API_URL = process.env['CAT_CAFE_API_URL'] ?? deploymentDefaults.apiBaseUrl;
+function resolveApiUrl(): string {
+  return resolveInvocationEnv('CAT_CAFE_API_URL') ?? deploymentDefaults.apiBaseUrl;
+}
 
 type PerspectiveDrillDown = {
   tool: string;
@@ -80,7 +83,7 @@ export async function handleRunPerspective(input: {
   const params = new URLSearchParams();
   if (input.actorCatId) params.set('actorCatId', input.actorCatId);
   const query = params.toString();
-  const url = `${API_URL}/api/perspectives/${encodeURIComponent(featureId)}/${encodeURIComponent(slug)}/run${
+  const url = `${resolveApiUrl()}/api/perspectives/${encodeURIComponent(featureId)}/${encodeURIComponent(slug)}/run${
     query ? `?${query}` : ''
   }`;
 

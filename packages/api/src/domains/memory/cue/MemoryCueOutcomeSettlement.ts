@@ -39,6 +39,7 @@ export async function readMemoryCueCurrentSource(
 ): Promise<MemoryCueCurrentSourceResolution> {
   try {
     return await sourceReader.read({
+      opportunityId: coordinate.opportunityId,
       family: coordinate.family,
       anchor: coordinate.anchor,
       expectedRevision: coordinate.revision,

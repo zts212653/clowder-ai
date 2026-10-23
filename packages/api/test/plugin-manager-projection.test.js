@@ -261,7 +261,7 @@ describe('F202 terminal Plugin Manager projection', () => {
     }
   });
 
-  it('allows disable and uninstall after a crash without inventing repair', () => {
+  it('allows explicit repair alongside disable and uninstall after a crash', () => {
     const projected = projectPluginManagerCatalogCandidate(candidate, installedSnapshot({ runtimeState: 'crashed' }), {
       activeCapabilityIds: [],
     });
@@ -270,7 +270,7 @@ describe('F202 terminal Plugin Manager projection', () => {
     assert.equal(projected.live, 'crashed');
     assert.equal(projected.actions.setEnabled, true);
     assert.equal(projected.actions.uninstall, true);
-    assert.equal(Object.hasOwn(projected.actions, 'repair'), false);
+    assert.equal(projected.actions.repair, true);
   });
 
   it('exposes current activation failure independently of intent and historical diagnostics', () => {

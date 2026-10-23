@@ -1795,7 +1795,8 @@ test(
       const page = await context.newPage();
       await page.route('**/api/**', (route) => {
         const url = new URL(route.request().url());
-        if (url.pathname === '/api/entrusted-work/needs-me') return json(route, { ownerReads: [] });
+        if (url.pathname === '/api/entrusted-work/needs-me')
+          return json(route, { ownerReads: [], coverage: { state: 'complete' } });
         const response = realSurfaceApiResponse(route.request(), false);
         return json(route, response.body, response.status);
       });
@@ -1922,7 +1923,7 @@ test(
         await page.route('**/api/**', (route) => {
           const url = new URL(route.request().url());
           if (url.pathname === '/api/entrusted-work/owner-reads' || url.pathname === '/api/entrusted-work/needs-me') {
-            return json(route, { ownerReads: [ownerRead] });
+            return json(route, { ownerReads: [ownerRead], coverage: { state: 'complete' } });
           }
           const result = realSurfaceApiResponse(route.request(), false);
           return json(route, result.body, result.status);

@@ -70,6 +70,15 @@ async function desktopManager(
       },
     },
     desktopExecutor: {
+      prepare: async () => {
+        assert.equal(
+          (await runtime.brokerStore.snapshot()).sessions.filter((session) => session.state === 'active').length,
+          0,
+          'component preparation must finish before a runtime lease is opened',
+        );
+        observed.prepared++;
+        if (preparationFails) throw new Error('desktop component unavailable');
+      },
       open: async () => {
         observed.opens++;
         return {
@@ -274,6 +283,7 @@ test('Manager preserves official desktop preparation and routes enable/disable t
   assert.equal(observed.opens, 0, 'install never opens a desktop window');
   const prepared = await runtime.lifecycle.prepare(installed.pluginInstanceId, 1);
   await composition.manager.setEnabled(entry.pluginId, { enabled: true, expectedRevision: prepared.lifecycleRevision });
+  assert.equal(observed.prepared, 2, 'enable must prepare the current Host component, including after a Host update');
   assert.equal(observed.opens, 1, 'Manager must delegate this builtin to DesktopWindowPluginRuntime');
   assert.equal((await runtime.desktopWindows.presence()).pluginInstanceId, installed.pluginInstanceId);
   const current = (await composition.manager.get(entry.pluginId)).plugin;
@@ -303,4 +313,32 @@ test('Manager installer retains the closed desktop admission shape instead of ac
   });
   assert.equal(observed.prepared, 0);
   assert.equal((await runtime.inventoryStore.snapshot()).instances.length, 0);
+});
+
+test('Manager repairs a current failed desktop activation without changing its package or grants', async (t) => {
+  const { entry, observed, runtime, composition } = await desktopManager(t);
+  const installed = await composition.officialRouteInstaller.install(entry.catalogId, entry);
+  await runtime.lifecycle.prepare(installed.pluginInstanceId, 1);
+  await runtime.inventoryStore.transaction((tx) => {
+    const instance = tx.instances.get(installed.pluginInstanceId);
+    tx.instances.put({ ...instance, activationState: 'error', runtimeState: 'stopped' });
+  });
+  const before = await runtime.inventoryStore.snapshot();
+  const failed = (await composition.manager.getLocal(entry.pluginId)).plugin;
+  assert.equal(failed.actions.repair, true);
+  await assert.rejects(composition.manager.repair(entry.pluginId, { expectedRevision: failed.lifecycleRevision - 1 }), {
+    code: 'STALE_REVISION',
+  });
+  assert.equal(observed.opens, 0);
+  await composition.manager.repair(entry.pluginId, { expectedRevision: failed.lifecycleRevision });
+  const repaired = (await composition.manager.getLocal(entry.pluginId)).plugin;
+  assert.equal(repaired.live, 'running');
+  assert.notEqual(repaired.actions.repair, true);
+  assert.equal(repaired.pluginInstanceId, installed.pluginInstanceId);
+  assert.deepEqual((await runtime.inventoryStore.snapshot()).packages, before.packages);
+  assert.deepEqual((await runtime.inventoryStore.snapshot()).grants, before.grants);
+  await assert.rejects(composition.manager.repair(entry.pluginId, { expectedRevision: repaired.lifecycleRevision }), {
+    code: 'ACTION_NOT_ALLOWED',
+  });
+  assert.equal(observed.opens, 1);
 });

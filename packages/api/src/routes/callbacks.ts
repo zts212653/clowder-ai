@@ -936,6 +936,8 @@ export interface CallbackRoutesOptions {
   indexBuilder?: { markThreadDirty(threadId: string): void; flushDirtyThreads?(): number | Promise<number> };
   /** F102: DI memory services — SQLite-backed evidence store */
   evidenceStore: IEvidenceStore;
+  /** Optional shared publisher; caller authentication remains in callback routes. */
+  messageSearchService?: import('../domains/memory/MessageSearchService.js').MessageSearchService;
   markerQueue: IMarkerQueue;
   reflectionService: IReflectionService;
   /** F254 Phase B: Raw Redis client for freshness notice event log + state store */
@@ -5957,6 +5959,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
 
   await registerCallbackMemoryRoutes(app, {
     evidenceStore: opts.evidenceStore,
+    messageSearchService: opts.messageSearchService,
     messageStore: opts.messageStore,
     ...(opts.threadStore ? { threadStore: opts.threadStore } : {}),
     markerQueue: opts.markerQueue,

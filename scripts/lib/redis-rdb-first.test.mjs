@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
@@ -22,6 +23,7 @@ function fixture(t, { dbsize = null } = {}) {
   writeFileSync(
     join(bin, 'redis-cli'),
     `#!/bin/sh\necho "protocol $*" >> "$REDIS_HOOK_TEST_LOG"\ncase "$*" in
+      *" ping") echo PONG ;;
       *" dbsize") ${dbsize === 'unknown' ? "echo 'identity unreadable (argv unavailable)' >&2; exit 1" : `echo '${dbsize ?? '1'}'`} ;;
       *" config get appendonly") printf "appendonly\\nyes\\n" ;;
       *) echo OK ;;
@@ -30,12 +32,12 @@ function fixture(t, { dbsize = null } = {}) {
   );
   return {
     seedRdb: () => writeFileSync(join(directory, 'dump.rdb'), Buffer.alloc(4096, 1)),
-    run(options = '', callback = 'return 0') {
+    run(options = '', callback = 'return 0', setup = '') {
       return spawnSync(
         'bash',
         [
           '-c',
-          `set -e\nsource "$1"\nnamed_alpha_capture_redis_identity() { echo "fixed-capture $*" >> "$REDIS_HOOK_TEST_LOG"; ${callback}; }\ncat_cafe_redis_start_daemon --port 15123 --dir "$2" --pidfile "$2/redis.pid" ${options}\n`,
+          `set -e\nsource "$1"\n${setup}\ntrap 'echo "unverified=\${REDIS_STARTUP_DATA_UNVERIFIED:-false}" >> "$REDIS_HOOK_TEST_LOG"' EXIT\nnamed_alpha_capture_redis_identity() { echo "fixed-capture $*" >> "$REDIS_HOOK_TEST_LOG"; ${callback}; }\ncat_cafe_redis_start_daemon --port 15123 --dir "$2" --pidfile "$2/redis.pid" ${options}\n`,
           '_',
           new URL('./redis-rdb-first.sh', import.meta.url).pathname,
           directory,
@@ -107,5 +109,213 @@ test('capture refusal performs no Redis protocol and an arbitrary hook option ca
   );
   const arbitrary = fixture(t);
   assert.notEqual(arbitrary.run('--after-start forbidden').status, 0);
-  assert.deepEqual(arbitrary.calls(), ['']);
+  assert.deepEqual(arbitrary.calls(), ['unverified=false']);
+});
+
+// Inject protocol responses only; the production helper still decides when
+// DBSIZE and AOF may run. The shell sleep advances its real clock interface so
+// deadline cases take milliseconds rather than a full startup wait.
+function pingScenario(body, sleep = ':') {
+  return `
+: > "$REDIS_HOOK_TEST_LOG.pings"
+sleep() { ${sleep}; }
+redis-cli() {
+  case "$*" in
+    *" ping")
+      echo ping >> "$REDIS_HOOK_TEST_LOG.pings"
+      local attempt
+      attempt=$(wc -l < "$REDIS_HOOK_TEST_LOG.pings")
+      echo "ping-attempt=$attempt" >> "$REDIS_HOOK_TEST_LOG"
+      ${body}
+      ;;
+    *) command redis-cli "$@" ;;
+  esac
+}
+`;
+}
+
+test('RDB loading past the old poll count waits for PONG before DBSIZE or AOF', (t) => {
+  const f = fixture(t);
+  f.seedRdb();
+  const result = f.run(
+    '--named-alpha-ownership',
+    'return 0',
+    pingScenario(`
+    if [ "$attempt" -le 60 ]; then echo 'LOADING Redis is loading the dataset in memory'; else echo PONG; fi
+  `),
+  );
+  assert.equal(result.status, 0, result.stderr);
+  const calls = f.calls();
+  assert.equal(calls.filter((line) => line.startsWith('ping-attempt=')).length, 61);
+  const ready = calls.findIndex((line) => /ping-attempt=\s*61$/.test(line));
+  assert.ok(calls.findIndex((line) => line.endsWith(' dbsize')) > ready);
+  assert.ok(calls.findIndex((line) => line.includes('config set appendonly yes')) > ready);
+});
+
+for (const response of ['OK', 'NOAUTH Authentication required', 'ERR invalid command']) {
+  test(`successful CLI exit with ${response} refuses immediately without persistence writes`, (t) => {
+    const f = fixture(t);
+    f.seedRdb();
+    const result = f.run('--named-alpha-ownership', 'return 0', pingScenario(`echo '${response}'`));
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /PING.*(OK|NOAUTH|ERR)/);
+    assert.equal(f.calls().filter((line) => line.startsWith('ping-attempt=')).length, 1);
+    assert.doesNotMatch(f.calls().join('\n'), /dbsize|config set|shutdown/);
+    assert.equal(f.calls().at(-1), 'unverified=true');
+  });
+}
+
+test('loading deadline keeps data unverified and never starts DBSIZE or AOF', (t) => {
+  const f = fixture(t);
+  f.seedRdb();
+  const result = f.run(
+    '--named-alpha-ownership',
+    'return 0',
+    pingScenario("echo 'LOADING Redis is loading the dataset in memory'", 'SECONDS=$((SECONDS + 15))'),
+  );
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /readiness.*(budget|timed out)/);
+  assert.equal(f.calls().filter((line) => line.startsWith('ping-attempt=')).length, 2);
+  assert.doesNotMatch(f.calls().join('\n'), /dbsize|config set|shutdown/);
+  assert.equal(f.calls().at(-1), 'unverified=true');
+});
+
+test('identity refusal after LOADING is terminal and cannot become a loading retry', (t) => {
+  const f = fixture(t);
+  f.seedRdb();
+  const result = f.run(
+    '--named-alpha-ownership',
+    'return 0',
+    pingScenario(`
+    if [ "$attempt" -eq 1 ]; then echo 'LOADING Redis is loading the dataset in memory';
+    else echo 'identity unreadable (argv unavailable)' >&2; return 1; fi
+  `),
+  );
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /identity unreadable/);
+  assert.equal(f.calls().filter((line) => line.startsWith('ping-attempt=')).length, 2);
+  assert.doesNotMatch(f.calls().join('\n'), /dbsize|config set|shutdown/);
+});
+
+test('an AOF configuration error cannot become a successful CLI exit', (t) => {
+  const f = fixture(t);
+  f.seedRdb();
+  const result = f.run(
+    '--named-alpha-ownership',
+    'return 0',
+    `
+redis-cli() {
+  case "$*" in
+    *" config set appendfsync everysec")
+      echo 'ERR fixture persistence refusal'
+      case " $* " in *" -e "*) return 1 ;; *) return 0 ;; esac
+      ;;
+    *) command redis-cli "$@" ;;
+  esac
+}
+`,
+  );
+  assert.equal(result.status, 1);
+  assert.match(result.stdout + result.stderr, /ERR fixture persistence refusal/);
+  assert.doesNotMatch(f.calls().join('\n'), /config set appendonly yes/);
+});
+
+test('AOF confirmation preserves an identity refusal and never retries it', (t) => {
+  const f = fixture(t);
+  f.seedRdb();
+  const result = f.run(
+    '--named-alpha-ownership',
+    'return 0',
+    `
+sleep() { :; }
+redis-cli() {
+  case "$*" in
+    *" config get appendonly")
+      echo config-read-refusal >> "$REDIS_HOOK_TEST_LOG"
+      echo 'identity unreadable (argv unavailable)' >&2; return 1
+      ;;
+    *) command redis-cli "$@" ;;
+  esac
+}
+`,
+  );
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /identity unreadable/);
+  assert.equal(f.calls().filter((line) => line === 'config-read-refusal').length, 1);
+});
+
+test('a connection refusal may settle, but the generic caller still requires PONG', (t) => {
+  const f = fixture(t);
+  const result = f.run(
+    '',
+    'return 0',
+    pingScenario(`
+    if [ "$attempt" -eq 1 ]; then
+      echo 'Could not connect to Redis at 127.0.0.1:15123: Connection refused' >&2; return 1
+    fi
+    echo PONG
+  `),
+  );
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(f.calls().filter((line) => line.startsWith('ping-attempt=')).length, 2);
+});
+
+test('a PONG arriving after the fixed deadline cannot authorize persistence', (t) => {
+  const f = fixture(t);
+  f.seedRdb();
+  const result = f.run(
+    '--named-alpha-ownership',
+    'return 0',
+    pingScenario(
+      `
+    if [ "$attempt" -eq 1 ]; then echo 'LOADING Redis is loading the dataset in memory';
+    else /bin/sleep 2; echo PONG; fi
+  `,
+      'SECONDS=$((SECONDS + 29))',
+    ),
+  );
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /readiness.*budget exhausted/);
+  assert.doesNotMatch(f.calls().join('\n'), /dbsize|config set|shutdown/);
+});
+
+test('a connected server that never replies cannot hang the PING child', async (t) => {
+  const sockets = new Set();
+  const server = createServer((socket) => sockets.add(socket));
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => {
+    for (const socket of sockets) socket.destroy();
+    server.close();
+  });
+  const child = spawn(
+    'bash',
+    [
+      '-c',
+      'source "$1"; cat_cafe_redis_wait_for_ping "$2" 1 0',
+      '_',
+      new URL('./redis-rdb-first.sh', import.meta.url).pathname,
+      String(server.address().port),
+    ],
+    {
+      detached: true,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    },
+  );
+  let stderr = '';
+  let forced = false;
+  child.stderr.on('data', (data) => {
+    stderr += data;
+  });
+  const timer = setTimeout(() => {
+    forced = true;
+    // This group was created by the test; bound teardown even on the old hang.
+    process.kill(-child.pid, 'SIGKILL');
+  }, 5_000);
+  const code = await new Promise((resolve, reject) => {
+    child.on('error', reject);
+    child.on('close', resolve);
+  }).finally(() => clearTimeout(timer));
+  assert.equal(forced, false, 'production must terminate its PING, not the test watchdog');
+  assert.equal(code, 1);
+  assert.match(stderr, /PING command failed.*ETIMEDOUT/);
 });

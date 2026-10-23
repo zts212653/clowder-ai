@@ -12,6 +12,7 @@ import { ActivityBar } from './ActivityBar';
 import { ConciergeHost } from './concierge/ConciergeHost';
 import { HomeActionHost } from './concierge/HomeActionHost';
 import { DesktopUpdatePrompt } from './DesktopUpdatePrompt';
+import { FeatureDemoHost } from './FeatureDemoHost';
 import { ListenModePlayer } from './listen-mode/ListenModePlayer';
 import { reportOnboardingPageLoad } from './onboarding-demo/onboarding-performance';
 import { ShellDocumentLanguage } from './shell/ShellDocumentLanguage';
@@ -259,6 +260,7 @@ function AppShellContent({ children, pathname }: AppShellProps & { pathname: str
             {/* Shared companion config and desktop presence survive route changes.
           This initializer renders no web body; the rail opens the original conversation. */}
             <ConciergeHost />
+            <FeatureDemoHost />
             <HomeActionHost enabled={!isExport} />
             {/* F246 Phase C: Approval Hub moved to workspace panel tab — drawer removed */}
           </div>

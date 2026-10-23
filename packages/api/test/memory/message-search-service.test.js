@@ -14,6 +14,7 @@ describe('canonical message search projection', () => {
 
   beforeEach(async () => {
     const { MessageSearchService } = await import('../../dist/domains/memory/MessageSearchService.js');
+    const { MessageQueryQualifier } = await import('../../dist/domains/memory/message-query-qualifier.js');
     threads = new Map([
       ['visible', { id: 'visible', title: 'Canonical title', createdBy: 'owner' }],
       ['private', { id: 'private', title: 'Private title', createdBy: 'someone-else' }],
@@ -41,6 +42,10 @@ describe('canonical message search projection', () => {
       });
     }
     service = new MessageSearchService({
+      // These tests isolate canonical permission/projection, not semantic inference.
+      qualifier: new MessageQueryQualifier(async (batch) =>
+        JSON.stringify({ requestId: batch.requestId, rows: batch.rows.map((row) => [row.id, 'supported', row.body]) }),
+      ),
       evidenceStore: {
         readMessagePassageState: () => indexState,
         searchMessagePassages: async (_query, options) => {

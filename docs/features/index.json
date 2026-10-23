@@ -1041,7 +1041,7 @@
     {
       "id": "F170",
       "name": "Web Chinese Chess — 网页象棋、人猫对弈与复盘",
-      "status": "in-progress（可玩 C1 插件 #66 已合入；安装后真实回合与恢复已实测，发布/生产安装另核；剩余性能、认输、回放与棋力工作依 operator 指令待后续唤起） | **Owner**: 小星星·Maine Coon（@codex-astra, gpt-6-astra；原 A/B owner：Ragdoll） | **Priority**: P2",
+      "status": "in-progress（可玩 C1 插件 #66 已合入，alpha.2 已发布并入官方目录；当前 Host 未安装；剩余安装/体验验收、性能、认输、回放与棋力工作依 operator 指令待后续唤起） | **Owner**: 小星星·Maine Coon（@codex-astra, gpt-6-astra；原 A/B owner：Ragdoll） | **Priority**: P2",
       "file": "F170-web-chinese-chess.md"
     },
     {
@@ -1647,7 +1647,7 @@
     {
       "id": "F278",
       "name": "Paw-Feel Disposition Inbox — 爪感差责任收件箱",
-      "status": "done — Phase G merged and passed production acceptance; live duty remains active",
+      "status": "done — canonical ledger/disposition loop retained; automated duty and reconciliation are intentionally paused",
       "file": "F278-paw-feel-disposition-inbox.md"
     },
     {
@@ -1905,7 +1905,7 @@
     {
       "id": "F324",
       "name": "Memory Delivery Reliability｜记忆交付可靠性与上下文成本收口",
-      "status": "in-progress（A/B/C 原 Task 已 satisfied；D 的 AC-D1 PASS、AC-D2 PARTIAL；boot22 已加载 #5358，Codex cold/hot full read PASS、同参 message search 503；AC-D3 指挥愿景守护待完成） | **Owner**: Astra（@codex-astra, gpt-6-astra）与 Opus55（@opus55, claude-opus-5-5），本指挥 thread 全体猫共同负责驱动与愿景守护 | **Priority**: P1",
+      "status": "in-progress（A/B/C 原 Task 已 satisfied；D 的 AC-D1 PASS、AC-D2 PARTIAL；boot48 图谱主附身份/完整原文正式通过，F276读取投影与F278有界扫描已有正式证据；消息检索完整旅程、长尾/自然恢复及AC-D3仍未结） | **Owner**: Astra（@codex-astra, gpt-6-astra）与 Opus55（@opus55, claude-opus-5-5），本指挥 thread 全体猫共同负责驱动与愿景守护 | **Priority**: P1",
       "file": "F324-memory-delivery-reliability.md"
     },
     {

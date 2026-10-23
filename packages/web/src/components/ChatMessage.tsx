@@ -547,6 +547,8 @@ function ChatMessageContent({
         threadId={currentThreadId}
         timelineMessages={threadMessages}
         footer={dispatchLine}
+        getCatById={getCatById}
+        replyPreview={!isSchedulerReply ? resolvedReplyPreview : undefined}
       />
     );
   }

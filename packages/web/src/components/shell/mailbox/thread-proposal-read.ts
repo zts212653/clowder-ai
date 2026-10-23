@@ -48,7 +48,12 @@ async function readThreadProposal(proposalId: string, signal: AbortSignal): Prom
 }
 
 export function readableProposedFields(value: Record<string, unknown>): boolean {
-  const required = ['sourceThreadId', 'reason', 'projectPath', 'parentThreadId', 'title'];
+  return typeof value.sourceThreadId === 'string' && !!value.sourceThreadId.trim() && readableProposedDetails(value);
+}
+
+/** Display fields alone confer no producer identity or write authority. */
+export function readableProposedDetails(value: Record<string, unknown>): boolean {
+  const required = ['reason', 'projectPath', 'parentThreadId', 'title'];
   if (required.some((field) => typeof value[field] !== 'string' || !(value[field] as string).trim())) return false;
   if (
     value.reportingMode !== undefined &&

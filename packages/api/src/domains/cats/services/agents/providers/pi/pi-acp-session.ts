@@ -1,9 +1,9 @@
-import { randomUUID } from 'node:crypto';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { rmSync } from 'node:fs';
 import { PiAcpEvents } from './pi-acp-events.js';
 import { type PiRecord, PiRpcProcess, PiRpcRequestRejectedError, record } from './pi-rpc-process.js';
+import { piSessionLaunch } from './pi-session-launch.js';
+import { piMcpExtension } from './pi-session-mcp.js';
+import { assertPiNativeIdentity, type PiSessionSlot } from './pi-session-store.js';
 
 type Option = { value: string; name: string };
 function isUnknownModelPart(value: string): boolean {
@@ -24,51 +24,10 @@ function modelOption(value: unknown): Option | undefined {
     : undefined;
 }
 
-/** Session-only MCP registrations; never edit the user's Pi agent directory or project config. */
-function mcpExtension(servers: unknown): { directory?: string; args: string[] } {
-  if (!Array.isArray(servers) || servers.length === 0) return { args: [] };
-  const prefix = `clowder-${randomUUID().slice(0, 8)}-`;
-  const registrations = servers.map((value) => {
-    const server = record(value);
-    if (
-      typeof server.name !== 'string' ||
-      typeof server.command !== 'string' ||
-      !Array.isArray(server.args) ||
-      !server.args.every((arg) => typeof arg === 'string') ||
-      server.type === 'http' ||
-      server.type === 'sse'
-    )
-      throw new Error('The Pi bridge supports stdio MCP servers only');
-    const env = Object.fromEntries(
-      (Array.isArray(server.env) ? server.env : []).map((item) => {
-        const entry = record(item);
-        if (typeof entry.name !== 'string' || typeof entry.value !== 'string')
-          throw new Error('Invalid Pi MCP environment');
-        return [entry.name, entry.value];
-      }),
-    );
-    return [
-      prefix + server.name.replace(/[^A-Za-z0-9_-]/g, '_'),
-      { command: server.command, args: server.args, env, exposure: 'direct' },
-    ];
-  });
-  const directory = mkdtempSync(join(tmpdir(), 'clowder-pi-mcp-'));
-  const entry = join(directory, 'session-mcp.mjs');
-  try {
-    writeFileSync(
-      entry,
-      `export default function(pi) { for (const [name, config] of ${JSON.stringify(registrations)}) pi.registerMcpServer(name, config); }\n`,
-      { mode: 0o600 },
-    );
-    return { directory, args: ['--extension', entry] };
-  } catch (error) {
-    rmSync(directory, { recursive: true, force: true });
-    throw error;
-  }
-}
-
 export class PiAcpSession {
-  readonly id = randomUUID();
+  get id(): string {
+    return this.slot.id;
+  }
   private readonly rpc: PiRpcProcess;
   private readonly directory?: string;
   private active?: { done: Promise<string>; cancel: () => void };
@@ -77,6 +36,9 @@ export class PiAcpSession {
   private thinking: string[] = [];
   private currentThinking?: string;
   private unavailable = false;
+  get available(): boolean {
+    return !this.unavailable;
+  }
 
   constructor(
     command: string,
@@ -84,11 +46,21 @@ export class PiAcpSession {
     cwd: string,
     servers: unknown,
     private readonly update: (value: PiRecord) => void,
+    readonly slot: PiSessionSlot,
   ) {
-    const extension = mcpExtension(servers);
+    const extension = piMcpExtension(slot.id, servers);
     this.directory = extension.directory;
     try {
-      this.rpc = new PiRpcProcess(command, [...args, '--mode', 'rpc', '--no-session', ...extension.args], cwd);
+      const sessionArgs = slot.file ? ['--session', slot.file] : ['--session-id', slot.id];
+      const launch = piSessionLaunch(
+        command,
+        [...args, '--mode', 'rpc', '--session-dir', slot.directory, ...sessionArgs, ...extension.args],
+        slot,
+      );
+      this.rpc = new PiRpcProcess(launch.command, launch.args, cwd);
+      this.rpc.onEvent((event) => {
+        if (event.type === '__exit') this.unavailable = true;
+      });
     } catch (error) {
       if (this.directory) rmSync(this.directory, { recursive: true, force: true });
       throw error;
@@ -102,6 +74,7 @@ export class PiAcpSession {
       this.rpc.request('get_available_models'),
       this.rpc.request('get_available_thinking_levels'),
     ]);
+    assertPiNativeIdentity(this.slot, state);
     const models = (Array.isArray(catalog.models) ? catalog.models : []).flatMap((value) => modelOption(value) ?? []);
     this.models = [...new Map(models.map((model) => [model.value, model])).values()];
     const currentModel = modelOption(state.model)?.value;
@@ -160,6 +133,8 @@ export class PiAcpSession {
   async prompt(blocks: unknown): Promise<PiRecord> {
     this.ensureAvailable();
     if (this.active) throw new Error('Pi is still completing the previous prompt');
+    await this.verifyIdentity();
+    if (this.active) throw new Error('Pi is still completing the previous prompt');
     if (
       !Array.isArray(blocks) ||
       blocks.some((block) => record(block).type !== 'text' || typeof record(block).text !== 'string')
@@ -201,12 +176,12 @@ export class PiAcpSession {
         this.rpc.request('prompt', { message }),
         done.then((stopReason) => ({ stopReason })),
       ]);
-      if ('stopReason' in accepted) return { stopReason: accepted.stopReason };
+      if ('stopReason' in accepted) return await this.completedTurn(String(accepted.stopReason), events);
       if (accepted.disposition === 'handled' && !finished) {
         definitivelyIdle = true;
         throw new Error('Pi handled this command without starting a model task; send a plain task prompt');
       }
-      return { stopReason: await done };
+      return await this.completedTurn(await done, events);
     } catch (error) {
       if (!finished && !definitivelyIdle && !(error instanceof PiRpcRequestRejectedError)) {
         this.unavailable = true;
@@ -255,5 +230,21 @@ export class PiAcpSession {
 
   private ensureAvailable(): void {
     if (this.unavailable) throw new Error('Pi 会话已结束，请新建会话；已有聊天记录仍保留。');
+  }
+
+  private async verifyIdentity(): Promise<void> {
+    const state = await this.rpc.request('get_state');
+    try {
+      assertPiNativeIdentity(this.slot, state);
+    } catch (error) {
+      this.unavailable = true;
+      await this.rpc.close();
+      throw error;
+    }
+  }
+
+  private async completedTurn(stopReason: string, events: PiAcpEvents): Promise<PiRecord> {
+    if (stopReason !== 'cancelled') await this.verifyIdentity();
+    return { stopReason, _meta: { pi: events.summary() } };
   }
 }

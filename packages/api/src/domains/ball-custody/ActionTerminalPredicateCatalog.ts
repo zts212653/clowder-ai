@@ -8,6 +8,7 @@ import {
   type ActionTerminalPredicateKind,
   actionTerminalPredicateInputSchema,
   DISPATCH_PROPOSED_ACTION_CAPABILITIES,
+  TASK_ACTION_SUBJECT_REF_DESCRIPTION,
 } from '@cat-cafe/shared';
 
 export type ActionTerminalCompletionResolverId = 'task_done_status';
@@ -119,7 +120,10 @@ function canonicalizeTaskDone(
   const task = /^subject:task:(\S{1,200})$/.exec(subjectRef);
   const taskId = task?.[1];
   if (!taskId) {
-    throw new ActionTerminalPredicateError('predicate_subject_unsupported', 'task_done requires a task subject');
+    throw new ActionTerminalPredicateError(
+      'predicate_subject_unsupported',
+      `task_done requires a task subject. ${TASK_ACTION_SUBJECT_REF_DESCRIPTION}`,
+    );
   }
   return {
     kind: predicate.kind,

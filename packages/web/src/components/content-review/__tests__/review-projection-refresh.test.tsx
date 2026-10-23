@@ -33,7 +33,7 @@ it('invalidation during an active owner read consumes a fresh generation, not th
     });
     await vi.waitFor(() => expect(reads).toHaveLength(2), { timeout: 500 });
     await act(async () => {
-      reads[1]?.(response({ ownerReads: [] }));
+      reads[1]?.(response({ ownerReads: [], coverage: { state: 'complete' } }));
     });
     expect(projection?.loading).toBe(false);
     expect(projection?.error).toBe(false);

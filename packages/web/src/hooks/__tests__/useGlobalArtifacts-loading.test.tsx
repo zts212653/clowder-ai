@@ -108,7 +108,9 @@ it('requests the bounded recent-works view and exposes an incomplete read', asyn
     await Promise.resolve();
   });
 
-  expect(apiFetch).toHaveBeenCalledWith('/api/artifacts?view=recent-works&limit=3', expect.any(Object));
+  expect(apiFetch).toHaveBeenCalledWith('/api/artifacts?view=recent-works&limit=3', expect.any(Object), {
+    afterCurrentGet: true,
+  });
   expect(renders[renders.length - 1]).toEqual({ loading: false, complete: false });
   act(() => root.unmount());
   host.remove();

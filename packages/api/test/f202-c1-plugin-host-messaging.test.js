@@ -367,7 +367,7 @@ describe('F202 C1 — plugin Host messaging.send', () => {
     assert.equal((await messages.getById(receipt.messageId))?.threadId, thread.id);
   });
 
-  test('selects one declared identity and preserves bounded url and metadata', async () => {
+  test('selects one declared identity and preserves metadata without a hidden navigation URL', async () => {
     const secondIdentity = {
       type: 'identity',
       id: 'release-bot',
@@ -385,7 +385,6 @@ describe('F202 C1 — plugin Host messaging.send', () => {
       draft(thread.id, {
         idempotencyKey: 'selected-identity',
         identity: 'release-bot',
-        url: 'https://example.test/pull/42',
         meta: { conversationLabel: 'Release room', nested: { ok: true } },
       }),
     );
@@ -394,21 +393,28 @@ describe('F202 C1 — plugin Host messaging.send', () => {
       connector: 'release-bot',
       label: 'Release Bot',
       icon: 'release-icon',
-      url: 'https://example.test/pull/42',
       meta: { conversationLabel: 'Release room', nested: { ok: true } },
     });
+
+    await assert.rejects(
+      () =>
+        host.send(
+          draft(thread.id, {
+            idempotencyKey: 'retired-hidden-url',
+            identity: 'release-bot',
+            url: 'https://example.test/pull/42',
+          }),
+        ),
+      (error) => error?.code === 'VALIDATION' && /unsupported fields: url/.test(error.message),
+    );
   });
 
-  test('rejects unsafe source urls, non-JSON metadata, and Host-owned metadata keys', async () => {
+  test('rejects non-JSON metadata and Host-owned metadata keys', async () => {
     const { host, threads } = await fixture();
     const thread = await threads.create(OWNER, 'Target');
     const cyclic = {};
     cyclic.self = cyclic;
 
-    await assert.rejects(
-      () => host.send(draft(thread.id, { idempotencyKey: 'bad-url', url: 'file:///tmp/secret' })),
-      (error) => error?.code === 'VALIDATION' && /url/.test(error.message),
-    );
     await assert.rejects(
       () => host.send(draft(thread.id, { idempotencyKey: 'cyclic-meta', meta: cyclic })),
       (error) => error?.code === 'VALIDATION' && /meta/.test(error.message),

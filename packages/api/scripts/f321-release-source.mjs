@@ -18,7 +18,14 @@ export function prepareReleaseSource(env) {
   for (const version of ['0.0.0-f321', '0.0.1-f321']) {
     writeFileSync(
       join(packageDir, 'package.json'),
-      JSON.stringify({ name: '@cat-cafe-fixture/reader', version, type: 'module', files: ['dist', 'README.md'] }),
+      JSON.stringify({
+        name: '@cat-cafe-fixture/reader',
+        version,
+        type: 'module',
+        main: './dist/index.js',
+        exports: './dist/index.js',
+        files: ['dist', 'README.md'],
+      }),
     );
     env.git('add', 'packages');
     env.git('commit', '--quiet', '-m', `Prepare isolated reader ${version}`);

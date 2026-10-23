@@ -1755,6 +1755,18 @@ export class SqliteEvidenceStore implements IEvidenceStore {
     return row ? rowToItem(row) : null;
   }
 
+  async getIndexedSourceRevision(
+    anchor: string,
+  ): Promise<{ sourceHash: string; vectorSourceHash: string | null } | null> {
+    this.ensureOpen();
+    const row = this.db
+      ?.prepare(`SELECT d.source_hash AS sourceHash, v.source_hash AS vectorSourceHash
+      FROM evidence_docs d LEFT JOIN document_vector_sources v ON v.anchor=d.anchor
+      WHERE d.anchor=? COLLATE NOCASE`)
+      .get(anchor) as { sourceHash: string | null; vectorSourceHash: string | null } | undefined;
+    return row?.sourceHash ? { sourceHash: row.sourceHash, vectorSourceHash: row.vectorSourceHash } : null;
+  }
+
   async health(): Promise<boolean> {
     try {
       if (!this.db || !this.db.open) return false;

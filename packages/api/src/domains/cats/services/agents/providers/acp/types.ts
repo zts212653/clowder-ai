@@ -61,6 +61,7 @@ export const ACP_METHODS = {
   sessionCancel: 'session/cancel', // notification (no response)
   sessionSetMode: 'session/set_mode',
   sessionSetConfigOption: 'session/set_config_option',
+  sessionSetModel: 'session/set_model',
 
   // Agent → Client notifications
   sessionUpdate: 'session/update',
@@ -69,6 +70,9 @@ export const ACP_METHODS = {
   requestPermission: 'session/request_permission',
   fsReadTextFile: 'fs/read_text_file',
   fsWriteTextFile: 'fs/write_text_file',
+
+  // iCode (Chrys) private extension requests
+  chrysRequestInput: '_chrys/request_input',
 } as const;
 
 // ─── Initialize ────────────────────────────────────────────────

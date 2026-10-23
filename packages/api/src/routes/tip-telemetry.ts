@@ -9,6 +9,11 @@
 import type { TipEventBatchAck } from '@cat-cafe/shared';
 import { TIP_MAX_AGE_MS, TipEventBatchSchema } from '@cat-cafe/shared';
 import type { FastifyPluginAsync } from 'fastify';
+import type {
+  CapabilityTipsUsageRow,
+  CapabilityTipsUsageSelector,
+} from '../infrastructure/harness-eval/capability-tips/capability-tips-usage-adapter.js';
+import { summarizeTipDemos } from './tip-demo-summary.js';
 import type { ITipEventSink } from './tip-telemetry-sink.js';
 
 export type {
@@ -28,6 +33,7 @@ export interface TipTelemetryRoutesOptions {
   sink: ITipEventSink;
   /** Injectable clock for boundary tests; production defaults to Date.now. */
   now?: () => number;
+  readUsage?: (selector: CapabilityTipsUsageSelector) => Promise<{ rows: readonly CapabilityTipsUsageRow[] }>;
 }
 
 const MAX_FUTURE_CLOCK_SKEW_MS = 5 * 60 * 1_000;
@@ -39,6 +45,35 @@ function rejectedBatchId(body: unknown): string {
 }
 
 export const tipTelemetryRoutes: FastifyPluginAsync<TipTelemetryRoutesOptions> = async (app, options) => {
+  app.get<{ Querystring: { days?: string } }>('/api/tip-telemetry/demos', async (request, reply) => {
+    const userId = (request as import('fastify').FastifyRequest & { sessionUserId?: string }).sessionUserId;
+    if (!userId) return reply.status(401).send({ error: 'Session required' });
+    const days = request.query.days === undefined ? 7 : Number(request.query.days);
+    if (!Number.isInteger(days) || days < 1 || days > 90)
+      return reply.status(400).send({ error: 'days must be an integer from 1 to 90' });
+    if (!options.readUsage) return reply.status(503).send({ error: 'Tip telemetry service temporarily unavailable' });
+    const dayMs = 86400000;
+    const endMs = Math.floor((options.now?.() ?? Date.now()) / dayMs) * dayMs + dayMs;
+    const selector = {
+      kind: 'capability-tips-usage-window' as const,
+      windowStartMs: endMs - days * dayMs,
+      windowEndMs: endMs,
+    };
+    try {
+      const usage = await options.readUsage(selector);
+      return {
+        ...summarizeTipDemos(usage.rows),
+        window: { startMs: selector.windowStartMs, endMs },
+        provenance: {
+          source: 'F268-durable-aggregates',
+          identityScope: 'deployment-aggregate',
+          aggregateRetentionDays: 90,
+        },
+      };
+    } catch {
+      return reply.status(503).send({ error: 'Tip telemetry service temporarily unavailable' });
+    }
+  });
   app.post<{ Body: unknown }>('/api/tip-telemetry/batch', async (request, reply) => {
     const userId = (request as import('fastify').FastifyRequest & { sessionUserId?: string }).sessionUserId;
     if (!userId) {

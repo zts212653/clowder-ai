@@ -29,7 +29,6 @@ const SEND_KEYS = new Set([
   'sender',
   'contentBlocks',
   'identity',
-  'url',
   'meta',
 ]);
 export type PluginMessagingSendInput = Omit<MessageDraft, 'address'> & {
@@ -38,7 +37,6 @@ export type PluginMessagingSendInput = Omit<MessageDraft, 'address'> & {
   readonly sender?: { readonly id: string; readonly name?: string };
   readonly contentBlocks?: readonly MessageContent[];
   readonly identity?: string;
-  readonly url?: string;
   readonly meta?: Readonly<Record<string, unknown>>;
 };
 
@@ -223,7 +221,6 @@ export function createPluginMessagingHost(input: PluginMessagingHostDeps): Plugi
       const { source, sender } = pluginMessageSourceOf(input.manifest, origin, {
         sender: record.sender,
         identity: record.identity,
-        url: record.url,
         meta: record.meta,
       });
       const scope = {

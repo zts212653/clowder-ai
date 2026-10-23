@@ -19,6 +19,7 @@ import { recordRedisCompanionAcceptance } from './redis-companion-acceptance.js'
 import { artifactMessageHash, MESSAGE_ARTIFACT_FIELDS } from './redis-message-artifact-fields.js';
 import { readArtifactBeforeRange, readArtifactMessagePage } from './redis-message-artifact-page.js';
 import { evidenceMessageHash, MESSAGE_EVIDENCE_FIELDS } from './redis-message-evidence-fields.js';
+import { MESSAGE_RECIPIENT_FIELDS, recipientMessageHash } from './redis-message-recipient-fields.js';
 import {
   HANDLE_USER_MENTIONS_LUA,
   MIGRATE_HANDLED_USER_MENTIONS_LUA,
@@ -2744,7 +2745,8 @@ export class RedisMessageStore {
         options,
         hydrate: (ids) => this.hydrateMessages(ids, { strict: true }),
       });
-    if (options?.artifactProjection) return readArtifactMessagePage(this, threadId, n, userId, options);
+    if (options?.artifactProjection || options?.recipientProjection)
+      return readArtifactMessagePage(this, threadId, n, userId, options);
     const key = MessageKeys.thread(threadId);
     return this.fetchVisibleDesc(
       key,
@@ -3249,7 +3251,7 @@ export class RedisMessageStore {
     options?: ThreadMessageReadOptions,
   ): Promise<StoredMessage[]> {
     const n = limit ?? DEFAULT_LIMIT;
-    if (options?.artifactProjection)
+    if (options?.artifactProjection || options?.recipientProjection)
       return readArtifactMessagePage(this, threadId, n, userId, options, {
         timestamp,
         ...(beforeId ? { id: beforeId } : {}),
@@ -3309,8 +3311,9 @@ export class RedisMessageStore {
     let offset = 0;
     let nextCursor: BoundedThreadMessagePage['nextCursor'];
 
+    const projected = options?.artifactProjection || options?.recipientProjection;
     let cursorRank: number | null | undefined;
-    if (beforeId && !options?.artifactProjection) {
+    if (beforeId && !projected) {
       cursorRank = await this.redis.zrevrank(key, beforeId);
       storageRoundTrips += 1;
     }
@@ -3318,7 +3321,7 @@ export class RedisMessageStore {
     while (result.length < resultTarget && scannedCount < rawLimit) {
       const count = Math.min(chunkSize, rawLimit - scannedCount);
       let raw: string[];
-      if (beforeId && options?.artifactProjection) {
+      if (beforeId && projected) {
         raw = await readArtifactBeforeRange(this.redis, key, timestamp, beforeId, offset, count);
       } else if (cursorRank !== null && cursorRank !== undefined) {
         const start = cursorRank + 1 + offset;
@@ -3348,7 +3351,11 @@ export class RedisMessageStore {
       if (validIds.length > 0) {
         const messages = await this.hydrateMessages(
           validIds,
-          options?.artifactProjection ? { artifactOnly: true, strict: true } : undefined,
+          options?.recipientProjection
+            ? { recipientOnly: true, strict: true }
+            : options?.artifactProjection
+              ? { artifactOnly: true, strict: true }
+              : undefined,
         );
         storageRoundTrips += 1;
         for (const message of messages) {
@@ -3633,7 +3640,10 @@ export class RedisMessageStore {
       pluginMessage ? JSON.stringify(pluginMessage) : '',
     );
     if (Number(updated) !== 1) return null;
-    return this.getById(id);
+    const result = await this.getById(id);
+    if (result && hostPatch.rich !== undefined && JSON.stringify(current?.rich) !== JSON.stringify(result.extra?.rich))
+      notifyMessageTimelineChange(this, result);
+    return result;
   }
 
   async compareAndTransitionCustodyOffer(
@@ -3695,6 +3705,7 @@ export class RedisMessageStore {
   async augmentStreamMetadata(id: string, patch: StreamMetadataAugmentInput): Promise<StoredMessage | null> {
     const msg = await this.getById(id);
     if (!msg) return null;
+    const previousRich = JSON.stringify(msg.extra?.rich);
     const augmented = applyStreamMetadataAugment(msg, patch);
     const fields: Record<string, string> = {};
     if (patch.thinking && augmented.thinking) fields.thinking = augmented.thinking;
@@ -3719,7 +3730,8 @@ export class RedisMessageStore {
       );
     }
     const updated = (await this.getById(id)) ?? augmented;
-    if (patch.mentionsUser) notifyMessageTimelineChange(this, updated);
+    if (patch.mentionsUser || (patch.extra?.rich && previousRich !== JSON.stringify(updated.extra?.rich)))
+      notifyMessageTimelineChange(this, updated);
     return updated;
   }
 
@@ -4213,12 +4225,14 @@ export class RedisMessageStore {
       humanOnly?: true;
       evidenceOnly?: true;
       artifactOnly?: true;
+      recipientOnly?: true;
     },
   ): Promise<StoredMessage[]> {
     const pipeline = this.redis.multi();
     for (const id of ids) {
       if (options?.humanOnly) pipeline.eval(HUMAN_SOURCE_HASH_LUA, 1, MessageKeys.detail(id));
       else if (options?.evidenceOnly) pipeline.hmget(MessageKeys.detail(id), ...MESSAGE_EVIDENCE_FIELDS);
+      else if (options?.recipientOnly) pipeline.hmget(MessageKeys.detail(id), ...MESSAGE_RECIPIENT_FIELDS);
       else if (options?.artifactOnly) pipeline.hmget(MessageKeys.detail(id), ...MESSAGE_ARTIFACT_FIELDS);
       else pipeline.hgetall(MessageKeys.detail(id));
     }
@@ -4245,24 +4259,27 @@ export class RedisMessageStore {
 
       if (options?.strict && results.length !== ids.length) throw new Error('Owner uncertainty hydration incomplete');
       const messages: StoredMessage[] = [];
-      for (const [err, data] of results) {
+      for (const [index, [err, data]] of results.entries()) {
         if (
           err ||
           !data ||
           typeof data !== 'object' ||
-          (options?.strict && !options.artifactOnly && Array.isArray(data))
+          (options?.strict && !options.artifactOnly && !options.recipientOnly && Array.isArray(data))
         ) {
           if (options?.strict) throw new Error('Owner uncertainty hydration failed');
           continue;
         }
-        const d = options?.artifactOnly
-          ? artifactMessageHash(data)
-          : options?.humanOnly
-            ? humanSourceHash(data)
-            : options?.evidenceOnly
-              ? evidenceMessageHash(data)
-              : (data as Record<string, string>);
+        const d = options?.recipientOnly
+          ? recipientMessageHash(data, ids[index])
+          : options?.artifactOnly
+            ? artifactMessageHash(data)
+            : options?.humanOnly
+              ? humanSourceHash(data)
+              : options?.evidenceOnly
+                ? evidenceMessageHash(data)
+                : (data as Record<string, string>);
         if (!d) {
+          if (options?.recipientOnly) throw new Error('Recipient source hydration failed');
           if (options?.artifactOnly) throw new Error('Artifact source hydration failed');
           continue;
         }

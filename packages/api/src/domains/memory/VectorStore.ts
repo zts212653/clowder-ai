@@ -64,7 +64,8 @@ export class VectorStore {
 
   clearAll(): void {
     this.db.exec('DELETE FROM evidence_vectors');
-    this.db.exec('DELETE FROM embedding_meta');
+    // Scanner bookkeeping shares this table but is independent of vector/model lifetime.
+    this.db.exec("DELETE FROM embedding_meta WHERE key NOT IN ('indexing_version', 'document_source_claims')");
   }
 
   count(): number {

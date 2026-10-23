@@ -49,14 +49,17 @@ it('recommends the greatest usable minimum across windows and excludes unavailab
   expect(nextQuotaAccount(fixture('healthy', 20), [main])).toBeUndefined();
   expect(nextQuotaAccount(used, [unavailable, mismatch, used])).toBeUndefined();
 });
-it('routes the in-use row switch action to the suggested account through the existing switch callback', async () => {
+it.each([
+  'zh',
+  'en',
+] as const)('names the target of the in-use %s switch action and preserves its callback', async (language) => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
-  writeShellLanguage('en');
+  writeShellLanguage(language);
   const host = document.createElement('div');
   document.body.append(host);
   const root = createRoot(host);
   const used = fixture('used', 0),
-    main = fixture('Main', 90),
+    main = fixture(language === 'zh' ? '主号' : 'Main', 90),
     onSwitch = vi.fn();
   try {
     await act(async () =>
@@ -78,8 +81,12 @@ it('routes the in-use row switch action to the suggested account through the exi
         </table>,
       ),
     );
-    expect(host.textContent).toContain('Used up · Switch to Main (90% left)');
-    const button = [...host.querySelectorAll('button')].find((x) => x.textContent === 'Use account');
+    expect(host.textContent).toContain(
+      language === 'zh' ? '已用完 · 换成 主号（剩 90%）' : 'Used up · Switch to Main (90% left)',
+    );
+    const buttons = [...host.querySelectorAll('button')];
+    expect(buttons.some((x) => x.textContent === (language === 'zh' ? '换成这个' : 'Use account'))).toBe(false);
+    const button = buttons.find((x) => x.textContent === (language === 'zh' ? '换成 主号' : 'Switch to Main'));
     expect(button).toBeTruthy();
     await act(async () => button!.click());
     expect(onSwitch).toHaveBeenCalledWith(main);

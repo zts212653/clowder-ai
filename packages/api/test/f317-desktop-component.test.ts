@@ -84,6 +84,15 @@ test('component preparation consumes only the Host lock and publishes one comple
   assert.deepEqual(stages, ['dependencies', 'electron']);
   assert.equal(await component.prepare(), a);
   assert.equal(stages.length, 2);
-  await writeFile(join(a, '../../path.txt'), '../../../outside');
+  // A Host update changes the exact component key without reinstalling the plugin.
+  await writeFile(
+    join(desktopRoot, 'package.json'),
+    JSON.stringify({ scripts: { check: 'new-host' }, devDependencies: { electron: version } }),
+  );
+  await assert.rejects(component.executable(), { code: 'ENOENT' });
+  const updated = await component.prepare();
+  assert.notEqual(updated, a);
+  assert.equal(stages.length, 4);
+  await writeFile(join(updated, '../../path.txt'), '../../../outside');
   await assert.rejects(component.executable());
 });

@@ -15,6 +15,8 @@ vi.mock('@/components/ImagePreview', () => ({ ImagePreview: () => null }));
 vi.mock('@/components/AttachmentPreview', () => ({ AttachmentPreview: () => null }));
 vi.mock('@/utils/compressImage', () => ({ compressImage: (file: File) => Promise.resolve(file) }));
 vi.mock('@/hooks/useCatData', () => ({
+  formatCatName: (cat: { displayName: string; variantLabel?: string }) =>
+    cat.variantLabel ? `${cat.displayName}（${cat.variantLabel}）` : cat.displayName,
   useCatData: () => ({
     cats: [
       {
@@ -136,7 +138,9 @@ describe('F264 author message disposition selector', () => {
 
   async function openDisposition() {
     await act(async () => {
-      document.querySelector<HTMLButtonElement>('button[aria-label="添加"]')?.click();
+      if (!document.querySelector('[data-testid="composer-add-menu"]')) {
+        document.querySelector<HTMLButtonElement>('button[aria-label="添加"]')?.click();
+      }
       await Promise.resolve();
     });
     const trigger = document.querySelector<HTMLButtonElement>('[data-testid="message-disposition-trigger"]');
@@ -167,30 +171,47 @@ describe('F264 author message disposition selector', () => {
     });
   }
 
-  it('persists the Thread strategy while idle and lets server admission resolve it', async () => {
+  it('uses the selected mode for one send then returns to the inherited default without a preference write', async () => {
     const onSend = vi.fn(async () => true);
-    await renderThreadInput({ threadId: 'thread-1', onSend, hasActiveInvocation: false });
+    await renderThreadInput({ threadId: 'thread-1', onSend, hasActiveInvocation: true });
     await chooseContinueCurrent();
-
     expect(document.querySelector('[data-testid="message-disposition-trigger"]')?.textContent).toContain(
-      '引导当前回复',
+      '接着当前工作',
     );
     await typeAndSend('顺手看一下问题 B');
-    expect(onSend).toHaveBeenCalledWith('顺手看一下问题 B', undefined, undefined, undefined);
-    expect(document.querySelector('[data-testid="message-disposition-trigger"]')?.textContent).toContain(
-      '引导当前回复',
+    expect(onSend).toHaveBeenLastCalledWith(
+      '顺手看一下问题 B',
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      'continue_current',
     );
+    expect(document.querySelector('[data-testid="message-disposition-trigger"]')?.textContent).toContain(
+      '作为下一件工作',
+    );
+    await typeAndSend('下一条按默认');
+    expect(onSend).toHaveBeenLastCalledWith('下一条按默认', undefined, undefined, undefined);
+    expect(mockApiFetch.mock.calls.some(([, init]) => init?.method === 'PUT')).toBe(false);
   });
 
-  it('retains the persistent Thread strategy when admission fails', async () => {
+  it('retains the one-shot choice when admission refuses the message', async () => {
     const onSend = vi.fn(async () => false);
-    await renderThreadInput({ threadId: 'thread-2', onSend, hasActiveInvocation: false });
+    await renderThreadInput({ threadId: 'thread-2', onSend, hasActiveInvocation: true });
     await chooseContinueCurrent();
     await typeAndSend('网络失败也别吃掉我的选择');
-
-    expect(onSend).toHaveBeenCalledWith('网络失败也别吃掉我的选择', undefined, undefined, undefined);
+    expect(onSend).toHaveBeenCalledWith(
+      '网络失败也别吃掉我的选择',
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      'continue_current',
+    );
     expect(document.querySelector('[data-testid="message-disposition-trigger"]')?.textContent).toContain(
-      '引导当前回复',
+      '接着当前工作',
     );
   });
 
@@ -223,7 +244,15 @@ describe('F264 author message disposition selector', () => {
       await Promise.resolve();
       await Promise.resolve();
     });
-    expect(onSend).toHaveBeenCalledWith('继续补充约束', undefined, undefined, undefined);
+    expect(onSend).toHaveBeenCalledWith(
+      '继续补充约束',
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      'continue_current',
+    );
     act(() =>
       useChatStore.setState({
         activeInvocations: { kimi: { catId: 'kimi', mode: 'execute' }, unknown: { catId: 'unknown', mode: 'execute' } },
@@ -274,65 +303,85 @@ describe('F264 author message disposition selector', () => {
     expect(document.querySelector('textarea')?.placeholder).toBe('自定义空闲提示');
   });
 
-  it('can persist the choice for this thread', async () => {
-    await renderThreadInput({ threadId: 'thread-4', onSend: vi.fn(), hasActiveInvocation: false });
-    await openDisposition();
-    await act(async () => {
-      document.querySelector<HTMLButtonElement>('[data-disposition-option="continue_current"]')?.click();
-      await Promise.resolve();
-      await Promise.resolve();
-    });
+  it.each(['classic', 'v2'] as const)('hides the one-shot choice while idle in %s', async (presentation) => {
+    await renderThreadInput({ threadId: 'idle', onSend: vi.fn(), hasActiveInvocation: false, presentation });
+    await act(async () => document.querySelector<HTMLButtonElement>('button[aria-label="添加"]')?.click());
+    expect(document.querySelector('[data-testid="message-disposition-trigger"]')).toBeNull();
+  });
 
-    const put = mockApiFetch.mock.calls.find((call) => {
-      if (call[0] !== '/api/config/message-disposition' || call[1]?.method !== 'PUT') return false;
-      return JSON.parse(String(call[1].body)).scope === 'thread';
-    });
-    expect(JSON.parse(String(put?.[1]?.body))).toEqual({
-      scope: 'thread',
-      threadId: 'thread-4',
-      disposition: 'continue_current',
-    });
-    expect(document.querySelector('[data-testid="message-disposition-trigger"]')?.textContent).toContain(
-      '引导当前回复',
+  it('offers only a one-message choice and no persistent scopes', async () => {
+    await renderThreadInput({ threadId: 'thread-simple', onSend: vi.fn(), hasActiveInvocation: true });
+    await openDisposition();
+    expect(document.querySelector('[data-disposition-scope]')).toBeNull();
+    expect(document.body.textContent).toContain('仅这一次');
+  });
+
+  it('hides the choice for idle whisper recipients while another cat is working', async () => {
+    useChatStore.setState({ activeInvocations: { opus: { catId: 'opus', mode: 'execute' } } });
+    await renderThreadInput({ threadId: 'idle-whisper', onSend: vi.fn(), hasActiveInvocation: true });
+    await act(async () => document.querySelector<HTMLButtonElement>('button[aria-label="添加"]')?.click());
+    await act(async () => document.querySelector<HTMLButtonElement>('[data-testid="composer-whisper"]')?.click());
+    const idle = [...container.querySelectorAll<HTMLButtonElement>('.absolute.bottom-full button')].find((button) =>
+      button.textContent?.includes('缅因猫（sol）'),
     );
+    expect(idle).toBeDefined();
+    await act(async () => idle?.dispatchEvent(new MouseEvent('mousedown', { bubbles: true })));
+    await act(async () => document.querySelector<HTMLButtonElement>('button[aria-label="添加"]')?.click());
+    expect(document.querySelector('[data-testid="message-disposition-trigger"]')).toBeNull();
   });
 
-  it('offers only persistent scopes without inheritance controls or redundant explanatory copy', async () => {
-    await renderThreadInput({ threadId: 'thread-simple', onSend: vi.fn(), hasActiveInvocation: false });
+  it('preserves an inherited global default after consuming a different one-shot choice', async () => {
+    vi.mocked(globalThis.fetch).mockImplementation(async () =>
+      jsonResponse(
+        dispositionSnapshot({ global: 'continue_current', effective: 'continue_current', source: 'global' }),
+      ),
+    );
+    const onSend = vi.fn(async () => true);
+    await renderThreadInput({ threadId: 'global-default', onSend, hasActiveInvocation: true });
     await openDisposition();
-
-    expect(document.querySelector('[data-disposition-scope="once"]')).toBeNull();
-    expect(document.querySelector('[data-disposition-scope="thread"]')).not.toBeNull();
-    expect(document.querySelector('[data-disposition-scope="global"]')).not.toBeNull();
-    expect(container.textContent).not.toContain('恢复继承');
-    expect(container.textContent).not.toContain('消息入队后按目标的实时状态执行');
-    expect(document.querySelector('[data-testid="message-disposition-onboarding"]')).toBeNull();
+    await act(async () => document.querySelector<HTMLButtonElement>('[data-disposition-option="next_work"]')?.click());
+    await typeAndSend('只有这一条排下一件');
+    expect(onSend).toHaveBeenLastCalledWith(
+      '只有这一条排下一件',
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      'next_work',
+    );
+    expect(
+      document.querySelector('[data-testid="message-disposition-trigger"]')?.getAttribute('data-disposition-source'),
+    ).toBe('global');
+    expect(document.querySelector('[data-testid="message-disposition-trigger"]')?.textContent).toContain(
+      '接着当前工作',
+    );
+    expect(mockApiFetch.mock.calls.some(([, init]) => init?.method === 'PUT')).toBe(false);
   });
 
-  it('saves the global default from the same selector', async () => {
-    await renderThreadInput({ threadId: 'thread-global', onSend: vi.fn(), hasActiveInvocation: false });
+  it('does not consume a newer choice when an older admission resolves', async () => {
+    let accept: ((accepted: boolean) => void) | undefined;
+    const onSend = vi.fn(
+      () =>
+        new Promise<boolean>((resolve) => {
+          accept = resolve;
+        }),
+    );
+    await renderThreadInput({ threadId: 'pending-send', onSend, hasActiveInvocation: true });
+    await chooseContinueCurrent();
+    await typeAndSend('first');
     await openDisposition();
+    await act(async () => document.querySelector<HTMLButtonElement>('[data-disposition-option="next_work"]')?.click());
     await act(async () => {
-      document.querySelector<HTMLButtonElement>('[data-disposition-scope="global"]')?.click();
-    });
-    await act(async () => {
-      document.querySelector<HTMLButtonElement>('[data-disposition-option="continue_current"]')?.click();
+      accept?.(true);
       await Promise.resolve();
     });
-    const put = mockApiFetch.mock.calls.find((call) => call[1]?.method === 'PUT');
-    expect(JSON.parse(String(put?.[1]?.body))).toEqual({ scope: 'global', disposition: 'continue_current' });
-  });
-
-  it('keeps the selector open and the saved value intact when persistence fails', async () => {
-    await renderThreadInput({ threadId: 'thread-failure', onSend: vi.fn(), hasActiveInvocation: false });
-    await openDisposition();
-    mockApiFetch.mockRejectedValueOnce(new Error('offline'));
-    await act(async () => {
-      document.querySelector<HTMLButtonElement>('[data-disposition-option="continue_current"]')?.click();
-      await Promise.resolve();
-    });
-    expect(document.querySelector('[role="alert"]')?.textContent).toBe('offline');
-    expect(document.querySelector('[data-disposition-option="next_work"]')?.getAttribute('aria-pressed')).toBe('true');
+    expect(
+      document.querySelector('[data-testid="message-disposition-trigger"]')?.getAttribute('data-disposition-source'),
+    ).toBe('once');
+    expect(document.querySelector('[data-testid="message-disposition-trigger"]')?.textContent).toContain(
+      '作为下一件工作',
+    );
   });
 
   it('keeps strategy independent of the current carrier capability', async () => {
@@ -369,14 +418,13 @@ describe('F264 author message disposition selector', () => {
         }),
       ),
     );
-    await renderThreadInput({ threadId: 'thread-inherited', onSend: vi.fn(), hasActiveInvocation: false });
+    await renderThreadInput({ threadId: 'thread-inherited', onSend: vi.fn(), hasActiveInvocation: true });
     await openDisposition();
 
     expect(document.querySelector('[data-testid="message-disposition-scope-state"]')).toBeNull();
     const selected = document.querySelector('[data-disposition-option="continue_current"]');
     expect(selected?.getAttribute('aria-pressed')).toBe('true');
-    expect(selected?.className).toContain('bg-cafe-surface-sunken');
-    expect(document.querySelector('[aria-label="偏好作用域"]')?.className).toContain('bg-cafe-surface');
+    expect(document.querySelector('[data-disposition-scope]')).toBeNull();
   });
 
   it('resets Thread A presentation before Thread B hydration completes', async () => {
@@ -402,7 +450,7 @@ describe('F264 author message disposition selector', () => {
       return Promise.resolve(jsonResponse(productSnapshot));
     });
 
-    await renderThreadInput({ threadId: 'thread-a', onSend: vi.fn(), hasActiveInvocation: false });
+    await renderThreadInput({ threadId: 'thread-a', onSend: vi.fn(), hasActiveInvocation: true });
     await openDisposition();
     await act(async () => {
       document.querySelector<HTMLButtonElement>('[data-disposition-option="next_work"]')?.click();
@@ -410,7 +458,7 @@ describe('F264 author message disposition selector', () => {
       await Promise.resolve();
     });
 
-    await renderThreadInput({ threadId: 'thread-b', onSend: vi.fn(), hasActiveInvocation: false });
+    await renderThreadInput({ threadId: 'thread-b', onSend: vi.fn(), hasActiveInvocation: true });
     await act(async () => {
       if (!document.querySelector('[data-testid="message-disposition-trigger"]')) {
         document.querySelector<HTMLButtonElement>('button[aria-label="添加"]')?.click();
@@ -418,7 +466,7 @@ describe('F264 author message disposition selector', () => {
       await Promise.resolve();
     });
     const triggerB = document.querySelector<HTMLButtonElement>('[data-testid="message-disposition-trigger"]');
-    expect(triggerB?.textContent).toContain('排队等待');
+    expect(triggerB?.textContent).toContain('作为下一件工作');
     expect(triggerB?.getAttribute('data-disposition-source')).toBe('product');
 
     await act(async () => {

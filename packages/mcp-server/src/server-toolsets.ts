@@ -39,6 +39,12 @@ export interface ToolsetEnv {
    * widen the surface on their own.
    */
   agentKeyUnion?: boolean;
+  /**
+   * Exact durable invocation policy projection (member MCP gateway). When
+   * present, only these tool names are registered; an empty array denies every
+   * tool. `undefined` means no durable policy and the profile surface applies.
+   */
+  allowedToolNames?: readonly string[];
 }
 
 /**
@@ -206,7 +212,11 @@ function registerTools(server: McpServer, tools: readonly ToolDef[], env: Toolse
     cb: RegisteredToolHandler,
   ) => RegisteredTool;
   const principal = resolvePostMessageRegistrationPrincipal(env);
+  const allowedToolNames = env.allowedToolNames ? new Set(env.allowedToolNames) : null;
   for (const tool of tools) {
+    // The durable invocation policy is an exact allowlist, not a profile:
+    // unregistered tools fail closed at tools/call.
+    if (allowedToolNames && !allowedToolNames.has(tool.name)) continue;
     const annotations = tool.annotations;
     const deliveryMeta = projectSchemaDeliveryMeta(tool);
     const registered = registerExplicit(

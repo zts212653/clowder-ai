@@ -4,7 +4,7 @@ related_features: [F102, F152, F186, F188, F192, F200, F209, F227, F231, F255, F
 topics: [memory, people, relationship, privacy, provenance, lifecycle]
 doc_kind: spec
 created: 2026-07-25
-updated: 2026-10-05
+updated: 2026-10-22
 tips_exempt: "Owner read APIs are a backend contract; user discovery belongs to the separate F321 memory-page integration."
 description: "为每位用户私域维护第三方人物、第一等关系与互动事件，并以有界关系卡按需解引用。"
 description_source: model
@@ -69,6 +69,23 @@ relationship-card projection；不新建 architecture cell，不创建平行 evi
 Why: F209/F260 拥有 workspace person identity root / locator，F231 只拥有 You profile
 与 cat↔You primer；F276 补齐 owner-private typed truth，但不得再造平行 person identity。
 
+### 2026-10-22 proposal-status consumer preservation boundary
+
+Architecture cell: `memory`
+
+Map delta: **none** — proposal-status discovery 复用既有 MessageStore `artifactProjection`，不新增
+store、queue、cache 或 status authority。
+
+Why: resolver 只用历史卡的 typed `extra` 发现 candidate，当前状态仍逐条由
+owner-private `PersonMemoryStore` 实时裁决；省掉顶层正文与 toolEvents 不能改变权限或结果语义。
+
+Canonical source: `PersonMemoryProposalStatusContextResolver.resolve` 与
+`ThreadMessageReadOptions.artifactProjection`。Consumer evidence:
+`rg -n "personMemoryProposalStatusContextResolver|PersonMemoryProposalStatusContextResolver" packages/api/src packages/api/test`。
+
+Claim guard: `person-memory-proposal-status-read-cost.test.js` 的真实 Redis fixture 在退回默认
+`getByThread` 时变红，并同时锁定 200 条边界、owner/system 可见性、顺序、top-8 与 live status。
+
 ### MCP admission boundary
 
 - `cat_cafe_defer_person_memory_delta` 是独立的 side-effect boundary：只持久化
@@ -130,6 +147,10 @@ operator 已经明确介绍过一个低频但高价值的具名人物、稳定�
   原子替换或撤回；PR #3296/#3326 让当前对话中的完整卡可绑定任意 owner-visible thread
   的精确 owner 来源。部署状态不得从 merge 或旧 snapshot 推断；2026-08-11 的 authenticated
   live status/recall 调用已证明该真实 case 的 materialized read path 可用。
+- live proposal-status discovery 保持最近 200 条 owner-visible timeline 与 top-8 排名合同，但消息读取只需
+  typed card 所在的完整 `extra`。该 consumer 复用 MessageStore `artifactProjection`，不再读取/解析顶层
+  content、thinking、metadata 或 toolEvents；`contentBlocks` 与完整 `extra` 仍按该既有 projection 保留，
+  当前状态继续逐 candidate 从 owner-private store 实时读取，旧卡 status 永不成为权威。
 - 跨 thread source bundle 将 approval card 固定在当前 invocation thread，同时保留每条
   原消息的真实 thread/ref；server 在 stage 与 publish 前逐条重验
   owner、owner authorship、connector absence、delivery、deletion/tombstone、visibility、

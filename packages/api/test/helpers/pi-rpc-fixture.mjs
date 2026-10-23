@@ -1,9 +1,15 @@
-import { existsSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 const root = process.argv[2];
 writeFileSync(path.join(root, 'started'), String(process.pid));
+const flag = (name) => process.argv[process.argv.indexOf(name) + 1];
+const nativeId = process.argv.includes('--session-id') ? flag('--session-id') : undefined;
+const sessionFile = process.argv.includes('--session')
+  ? flag('--session')
+  : nativeId && path.join(flag('--session-dir'), `fixture_${nativeId}.jsonl`);
+const sessionId = nativeId ?? (sessionFile && JSON.parse(readFileSync(sessionFile, 'utf8').split('\n')[0]).id);
 const extension = process.argv.indexOf('--extension');
 if (extension !== -1) {
   const module = await import(pathToFileURL(process.argv[extension + 1]).href);
@@ -33,7 +39,16 @@ process.stdin.on('data', (chunk) => {
     buffer = buffer.slice(index + 1);
     switch (command.type) {
       case 'get_state':
-        response(command, { model, thinkingLevel });
+        response(command, {
+          model,
+          thinkingLevel,
+          sessionId: existsSync(path.join(root, 'changed-native-id')) ? 'unexpected-session' : sessionId,
+          sessionFile:
+            sessionFile && existsSync(path.join(root, 'changed-native-file'))
+              ? path.join(path.dirname(sessionFile), 'replacement.jsonl')
+              : sessionFile,
+          isStreaming: false,
+        });
         break;
       case 'get_available_models':
         response(command, {
@@ -67,8 +82,27 @@ process.stdin.on('data', (chunk) => {
         send({ type: 'agent_settled', aborted: false });
         break;
       case 'prompt': {
+        if (sessionFile) {
+          const previous = existsSync(sessionFile) ? readFileSync(sessionFile, 'utf8') : '';
+          writeFileSync(path.join(root, 'seen-history.json'), JSON.stringify({ previous, sessionId }));
+          if (!previous)
+            writeFileSync(
+              sessionFile,
+              `${JSON.stringify({ type: 'session', version: 3, id: sessionId, cwd: process.cwd() })}\n`,
+            );
+          appendFileSync(
+            sessionFile,
+            `${JSON.stringify({ type: 'message', message: { role: 'user', content: command.message } })}\n`,
+          );
+        }
         if (command.message === 'rejected') {
-          send({ type: 'response', command: 'prompt', id: command.id, success: false });
+          send({
+            type: 'response',
+            command: 'prompt',
+            id: command.id,
+            success: false,
+            error: 'model is unavailable; api_key=secret-fixture-token',
+          });
           break;
         }
         if (command.message === 'handled') {
@@ -89,6 +123,34 @@ process.stdin.on('data', (chunk) => {
           send({
             type: 'message_end',
             message: { role: 'assistant', stopReason: 'error', errorMessage: 'provider denied' },
+          });
+          send({ type: 'agent_settled', aborted: false });
+          break;
+        }
+        // Adapted from whutzefengxie-ops/clowder-ai#14 (ecafa76d9), with Host empty_response semantics.
+        if (['empty', 'empty-string', 'empty-delta-final', 'thinking-only', 'tool-only'].includes(command.message)) {
+          if (command.message === 'empty-string' || command.message === 'empty-delta-final')
+            send({ type: 'message_update', assistantMessageEvent: { type: 'text_delta', delta: '' } });
+          if (command.message === 'thinking-only')
+            send({
+              type: 'message_update',
+              assistantMessageEvent: { type: 'thinking_delta', delta: 'private reasoning' },
+            });
+          if (command.message === 'tool-only') {
+            send({ type: 'tool_execution_start', toolCallId: 'receipt', toolName: 'receipt', args: {} });
+            send({
+              type: 'tool_execution_end',
+              toolCallId: 'receipt',
+              result: { content: [{ type: 'text', text: 'delivered' }] },
+            });
+          }
+          send({
+            type: 'message_end',
+            message: {
+              role: 'assistant',
+              content: [{ type: 'text', text: command.message === 'empty-delta-final' ? 'Recovered final text' : '' }],
+              stopReason: 'stop',
+            },
           });
           send({ type: 'agent_settled', aborted: false });
           break;

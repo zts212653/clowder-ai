@@ -164,7 +164,7 @@ describe('MCP Server Tool Registration', () => {
     );
   });
 
-  test('invocation action descriptions expose the canonical subjectRef grammar (F177 production friction)', async (t) => {
+  test('invocation action descriptions expose the supported Task identity (F167 dispatch guidance)', async (t) => {
     useInvocationAuth(t);
     const { createServer } = await import('../dist/index.js');
     const server = createServer();
@@ -173,9 +173,9 @@ describe('MCP Server Tool Registration', () => {
       const tool = server._registeredTools[toolName];
       assert.ok(tool, `${toolName} tool should exist`);
       const actionDescription = tool.inputSchema._def.shape().action.description;
-      assert.match(actionDescription, /pr:<owner>\/<repo>#<positive-number>/, toolName);
-      assert.match(actionDescription, /subject:<namespace>:<opaque-id>/, toolName);
-      assert.match(actionDescription, /SHA suffixes.*invalid/i, toolName);
+      assert.match(actionDescription, /subject:task:<taskId>/, toolName);
+      assert.match(actionDescription, /existing Task\.id/, toolName);
+      assert.match(actionDescription, /changing their prefix does not create Task authority/, toolName);
     }
   });
 
@@ -338,6 +338,7 @@ describe('MCP Server Tool Registration', () => {
       'cat_cafe_list_events',
       'cat_cafe_list_labels',
       'cat_cafe_list_paw_feel_inbox',
+      'cat_cafe_scan_paw_feel_inbox',
       'cat_cafe_list_schedule_templates',
       'cat_cafe_list_threads',
       'cat_cafe_post_message',

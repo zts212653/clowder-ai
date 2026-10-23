@@ -5,7 +5,12 @@ import {
   validateBriefAttentionAndMilestone,
   validateBriefTaskCoordinates,
 } from './entrusted-work-owner-read-validation.js';
-import { entrustedWorkV1Schema, NEEDS_ME_PRODUCER_IDS, producerAttentionReceiptV1Schema } from './growing.js';
+import {
+  entrustedWorkV1Schema,
+  NEEDS_ME_PRODUCER_IDS,
+  producerAttentionCoverageV1Schema,
+  producerAttentionReceiptV1Schema,
+} from './growing.js';
 import { preparedArtifactSnapshotV1Schema } from './growing-artifact.js';
 
 const boundedRef = z.string().trim().min(1).max(1_000);
@@ -143,7 +148,12 @@ export const entrustedWorkBriefV1Schema = z
     needsMe: z.discriminatedUnion('state', [
       z.object({ state: z.literal('needed'), evidence: producerEvidenceListV1Schema }).strict(),
       z.object({ state: z.literal('not_needed'), evidenceRef: boundedRef, revision: revisionSchema }).strict(),
-      z.object({ state: z.literal('unknown'), reason: z.literal('stale_owner_read') }).strict(),
+      z
+        .object({
+          state: z.literal('unknown'),
+          reason: z.enum(['stale_owner_read', 'attention_source_unavailable']),
+        })
+        .strict(),
     ]),
   })
   .strict();
@@ -173,6 +183,7 @@ export const entrustedWorkOwnerReadV1Schema = z
     terminal: entrustedWorkTerminalV1Schema.optional(),
     execution: entrustedWorkTaskExecutionV1Schema.optional(),
     timeRefs: z.array(entrustedWorkTimeRefV1Schema).max(64),
+    attentionCoverage: producerAttentionCoverageV1Schema.optional(),
     attentionReceipts: z.array(producerAttentionReceiptV1Schema).max(NEEDS_ME_PRODUCER_IDS.length),
   })
   .strict()

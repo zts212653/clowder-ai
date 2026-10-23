@@ -1,13 +1,12 @@
 import { createHash } from 'node:crypto';
-import { existsSync, readdirSync, readFileSync, realpathSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { homedir } from 'node:os';
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { resolveCliCommandOrBare } from '../../../../../../../utils/cli-resolve.js';
 import { resolveWindowsSpawnPlan } from '../../../../../../../utils/cli-spawn-win.js';
+import { isBuiltinPiBridgeArgs } from '../../pi/pi-bridge-launch.js';
 
-const PI_BRIDGE = fileURLToPath(new URL('../../pi/pi-acp-bridge.js', import.meta.url));
 const DSH_HASHES = {
   entry: '1a03dee18683483ff6a1b27b2a1e650230da6bcca9a0f55f7d81b3308c3f307f',
   '@deepseek-ai/dsh-app-boot': '234db45e1b3f8c683b5bc1f551948b2a2ec52a6468c7b6937725a23f1c0e0d96',
@@ -42,14 +41,7 @@ export function auditedWindowsAcpStartup(
     if (plan.shell || !/^node(?:\.exe)?$/i.test(basename(plan.command))) return undefined;
     const [entry, ...rest] = plan.args;
     if (!entry || !isAbsolute(entry)) return undefined;
-    if (
-      realpathSync(entry) === realpathSync(PI_BRIDGE) &&
-      rest.length === 2 &&
-      rest[0] === '--pi-command' &&
-      rest[1] &&
-      isAbsolute(rest[1])
-    )
-      return 'builtin-pi';
+    if (isBuiltinPiBridgeArgs(plan.args)) return 'builtin-pi';
     if (rest.length !== 2 || rest[0] !== '--profile' || rest[1] !== 'acp' || hash(entry) !== DSH_HASHES.entry)
       return undefined;
     if (

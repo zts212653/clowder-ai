@@ -331,15 +331,33 @@ for (const language of ['zh', 'en'])
         const coldChatResult = page.locator('[data-chat-container]').getByTestId('approval-item-inbox-native-approve');
         await coldChatResult
           .getByRole('button', {
-            name: language === 'en' ? 'Open new conversation' : '打开新对话',
+            name: language === 'en' ? 'Open ›' : '打开 ›',
             exact: true,
           })
           .waitFor();
         assert.match(
           await coldChatResult.innerText(),
-          language === 'en' ? /Approved · Conversation created/ : /已同意 · 对话已创建/,
+          language === 'en' ? /Approved · conversation opened/ : /已同意 · 对话已开/,
         );
         assert.equal(await coldChatResult.getByTestId('approve-btn').count(), 0);
+        assert.equal(await coldChatResult.getByTestId('proposal-result-details').count(), 0);
+        const summary = coldChatResult.getByTestId('proposal-result-label').locator('..');
+        await summary.scrollIntoViewIfNeeded();
+        await coldChatResult.screenshot({ path: path.join(evidence, 'chat-approved-result.png') });
+        const rowBefore = await coldChatResult.boundingBox();
+        assert.ok(rowBefore.height < 60, 'decided Chat proposal is a single result line');
+        await summary.focus();
+        await page.keyboard.press('Enter');
+        await coldChatResult.getByTestId('proposal-result-details').waitFor();
+        assert.match(await coldChatResult.innerText(), /Edited controlled child/);
+        await coldChatResult.getByTestId('proposal-initial-message').locator('summary').click();
+        await coldChatResult.screenshot({ path: path.join(evidence, 'chat-approved-details.png') });
+        await summary.click();
+        assert.equal(await coldChatResult.getByTestId('proposal-result-details').count(), 0);
+        await coldChatResult.getByTestId('proposal-result-open').click();
+        await page.waitForURL((url) => url.pathname === `/thread/${created.id}`);
+        await page.goto(`http://127.0.0.1:${webPort}/thread/${CALENDAR_THREAD}?shell=v2`);
+
         if (width === 1440) {
           const sidebarPin = page.locator(`[data-thread-id="${created.id}"]`).getByTestId('thread-pin-button');
           await sidebarPin.waitFor();
@@ -362,8 +380,8 @@ for (const language of ['zh', 'en'])
         await page.keyboard.press('Enter');
         assert.equal((await rejected).status(), 200);
         assert.equal(fixture.proposals.get('inbox-native-reject').status, 'rejected');
-        const resultLine = page.getByTestId('mailbox-retained-line').filter({
-          hasText: language === 'en' ? 'Rejected' : '已拒绝',
+        const resultLine = page.getByTestId('proposal-result-label').filter({
+          hasText: language === 'en' ? 'Declined' : '已拒绝',
         });
         await resultLine.waitFor();
         await page.waitForFunction(() => {
@@ -381,9 +399,26 @@ for (const language of ['zh', 'en'])
           box: await resultLine.boundingBox(),
         };
         assert.equal(resultPresentation.text.includes('default-user'), false);
-        assert.ok(resultPresentation.text.includes(language === 'en' ? 'You' : '你'));
+        assert.match(resultPresentation.text, / · \d{2}:\d{2}$/);
+        assert.equal(await resultLine.locator('..').getAttribute('aria-expanded'), 'false');
         assert.ok(resultPresentation.box.x >= 0 && resultPresentation.box.x + resultPresentation.box.width <= width);
         await page.screenshot({ path: path.join(evidence, 'rejected.png'), fullPage: true });
+        await resultLine.locator('..').click();
+        await page.getByTestId('proposal-result-details').waitFor();
+        assert.match(await page.getByTestId('proposal-result-details').innerText(), language === 'en' ? /You/ : /你/);
+        await page.getByTestId('mailbox-panel').screenshot({ path: path.join(evidence, 'inbox-declined-details.png') });
+        await page.getByTestId('mailbox-close').click();
+        await page.reload();
+        const rejectedCard = page.locator('[data-chat-container]').getByTestId('approval-item-inbox-native-reject');
+        await rejectedCard.getByTestId('proposal-result-label').waitFor();
+        await rejectedCard.scrollIntoViewIfNeeded();
+        assert.match(
+          await rejectedCard.innerText(),
+          language === 'en' ? /Declined · \d{2}:\d{2}/ : /已拒绝 · \d{2}:\d{2}/,
+        );
+        assert.equal(await rejectedCard.getByRole('link').count(), 0);
+        await rejectedCard.screenshot({ path: path.join(evidence, 'chat-declined-result.png') });
+
         const decisionWrites = fixture.mutations.filter((m) =>
           /^\/api\/proposals\/[^/]+\/(approve|reject)$/.test(m.path),
         );

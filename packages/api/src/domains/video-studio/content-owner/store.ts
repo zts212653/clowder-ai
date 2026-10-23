@@ -6,7 +6,7 @@ import { CollectiveContentCustodyFence } from './collective-custody-fence.js';
 import { commitInitialOwnerState } from './state/initial-commit.js';
 import { type ProjectContentStateV1, parseProjectContentState } from './state/manifest.js';
 import { type ContentStream, writeOwnerPayload } from './stream-content.js';
-import type { ContentPublicationScopeV1, VideoProjectScopeV1 } from './types.js';
+import type { ContentActorV1, ContentPublicationScopeV1, VideoProjectScopeV1 } from './types.js';
 
 export type { ProjectContentStateV1 } from './state/manifest.js';
 
@@ -28,6 +28,8 @@ export interface RetainedMediaHead {
   readonly contentRef: string;
   readonly ownerRevision: number;
   readonly publicationScope: ContentPublicationScopeV1;
+  readonly committedAt: string;
+  readonly committedBy: ContentActorV1;
 }
 
 export class ProjectContentOwnerStore {
@@ -142,10 +144,14 @@ export class ProjectContentOwnerStore {
       const state = await readOwnerManifest(this.rootDir, entry);
       if (state?.publicationScope?.ownerUserId !== ownerUserId || !['image/png', 'video/mp4'].includes(state.mediaType))
         continue;
+      const revision = state.revisions[state.currentOwnerRevision - 1];
+      if (!revision) throw new Error('Canonical current revision unavailable');
       yield {
         contentRef: state.contentRef,
         ownerRevision: state.currentOwnerRevision,
         publicationScope: { ...state.publicationScope },
+        committedAt: revision.committedAt,
+        committedBy: { ...revision.committedBy },
       };
     }
   }

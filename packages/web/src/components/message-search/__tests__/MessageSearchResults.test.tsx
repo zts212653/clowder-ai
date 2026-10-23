@@ -140,11 +140,11 @@ describe('shared message results', () => {
     expect(host.textContent).toContain('外部来源');
     expect(host.textContent).not.toContain('You');
   });
-  it('renders canonical excerpts and valid highlights as text, limited to two sentences', async () => {
+  it('preserves the complete canonical snippet and valid highlights as text', async () => {
     await open({ resolveSpeaker: () => '砚砚' });
     expect(host.textContent).toContain('砚砚');
     expect(host.querySelector('mark')?.textContent).toBe('琴键');
-    expect(host.textContent).not.toContain('第三句');
+    expect(host.textContent).toContain('第三句保留在原文。');
     expect(host.textContent).toContain('然后说阅读位置。');
     const payload = '<img src=x onerror=alert(1)>原文。';
     await open({
@@ -155,6 +155,37 @@ describe('shared message results', () => {
     expect(host.querySelector('[data-message-search-result] p img')).toBeNull();
     expect(host.querySelector('img[src="x"]')).toBeNull();
     expect(host.textContent).toContain(payload);
+  });
+  it.each([
+    'closure.state 是 cancelled，先保留旧上下文。现在请点击右侧的确认完成按钮。',
+    '先记录交接背景。再记录上一班安排。接班人会在夜间负责巡查。',
+  ])('keeps late qualification evidence in a semantic snippet: %s', async (text) => {
+    await open({
+      response: answer([
+        hit('qualified', {
+          snippet: { text, start: 240, end: 240 + text.length, source: 'body' },
+          match: 'semantic',
+          highlights: [],
+        }),
+      ]),
+    });
+    expect(host.querySelector('[data-message-search-result] p')?.textContent).toBe(text);
+    expect(host.querySelectorAll('mark')).toHaveLength(0);
+  });
+  it('keeps snippet-relative highlights after preceding sentence boundaries', async () => {
+    const text = '版本 v2.7 已记录。前两句只提供背景。最后出现琴键证据。';
+    const start = text.indexOf('琴键');
+    const response = answer([
+      hit('late-highlight', {
+        snippet: { text, start: 300, end: 300 + text.length, source: 'body' },
+        highlights: [{ start, end: start + 2 }],
+      }),
+    ]);
+    const original = structuredClone(response);
+    await open({ response });
+    expect(host.querySelector('[data-message-search-result] p')?.textContent).toBe(text);
+    expect(host.querySelector('mark')?.textContent).toBe('琴键');
+    expect(response).toEqual(original);
   });
   it('does not manufacture lexical highlights for a semantic match', async () => {
     await open({ response: answer([hit('meaning', { match: 'semantic', highlights: [] })]) });
@@ -207,5 +238,32 @@ describe('shared message results', () => {
     await open({ status: 'forbidden' });
     expect(host.textContent).toContain('无法访问此检索范围');
     expect(host.textContent).not.toContain('未找到');
+  });
+  it('does not describe unfinished qualification as a completed empty search', async () => {
+    const response = answer([]);
+    response.meta.qualification = {
+      status: 'partial',
+      examined: 8,
+      supported: 0,
+      rejected: 2,
+      indeterminate: 1,
+      unassessed: 5,
+    };
+    await open({ response });
+    expect(host.textContent).toContain('部分候选尚未核对完');
+    expect(host.textContent).not.toContain('本次检索未找到相关消息');
+  });
+  it('reports unassessed candidates even when some qualified results are visible', async () => {
+    const response = answer();
+    response.meta.qualification = {
+      status: 'partial',
+      examined: 8,
+      supported: 2,
+      rejected: 0,
+      indeterminate: 1,
+      unassessed: 5,
+    };
+    await open({ response });
+    expect(host.textContent).toContain('6 条候选尚未核对出结论');
   });
 });

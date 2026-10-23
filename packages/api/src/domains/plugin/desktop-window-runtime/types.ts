@@ -61,6 +61,8 @@ export interface DesktopWindowLaunch {
 }
 /** A trusted Host-owned executable, never a package-supplied main/preload script. */
 export interface DesktopWindowExecutor {
+  /** Prepare the Host component before opening expiring Broker/feature authority. */
+  prepare?(): Promise<void>;
   open(input: DesktopWindowLaunch): Promise<DesktopWindowHandle>;
 }
 export interface DesktopWindowHandle {

@@ -236,7 +236,7 @@ export async function appendMutationAudit(
   auditLog: Pick<EventAuditLog, 'append'>,
   input: {
     readonly operator: string;
-    readonly operation: 'install' | 'update' | 'set-enabled' | 'uninstall';
+    readonly operation: 'install' | 'update' | 'set-enabled' | 'repair' | 'uninstall';
     readonly pluginId?: string;
     readonly sourceKind?: 'catalog' | 'git' | 'local-directory' | 'local-archive';
     readonly expectedRevision?: number;

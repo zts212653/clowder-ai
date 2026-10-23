@@ -11,16 +11,19 @@ import { defineMcpMigrationFactory } from '../tool-governance-migration.js';
 import { deploymentDefaults } from '@cat-cafe/shared';
 import type { ToolResult } from './file-tools.js';
 import { errorResult, successResult } from './file-tools.js';
+import { resolveInvocationEnv } from './invocation-auth.js';
 
 const defineTool = defineMcpMigrationFactory('rich-block-rules-tool.ts', undefined, {
   resourceFamily: 'artifact-surface',
   authority: 'local-runtime',
 });
 
-const API_URL = process.env['CAT_CAFE_API_URL'] ?? deploymentDefaults.apiBaseUrl;
+function resolveApiUrl(): string {
+  return resolveInvocationEnv('CAT_CAFE_API_URL') ?? deploymentDefaults.apiBaseUrl;
+}
 
 export async function handleGetRichBlockRules(): Promise<ToolResult> {
-  const url = `${API_URL}/api/callbacks/rich-block-rules`;
+  const url = `${resolveApiUrl()}/api/callbacks/rich-block-rules`;
 
   try {
     const response = await fetch(url);

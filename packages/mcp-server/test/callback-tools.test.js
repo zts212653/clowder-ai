@@ -218,8 +218,8 @@ describe('MCP Callback Tools', () => {
     });
 
     assert.equal(result.isError, true);
-    assert.match(result.content[0].text, /pr:<owner>\/<repo>#<positive-number>/);
-    assert.match(result.content[0].text, /subject:<namespace>:<opaque-id>/);
+    assert.match(result.content[0].text, /subject:task:<taskId>/);
+    assert.match(result.content[0].text, /existing Task/);
     assert.equal(attempts, 0, 'invalid metadata must not reach the callback transport');
     assert.deepEqual(
       readdirSync(outboxDir).filter((name) => name.endsWith('.json')),
@@ -2334,8 +2334,8 @@ describe('MCP Callback Tools', () => {
     });
 
     assert.equal(result.isError, true);
-    assert.match(result.content[0].text, /pr:<owner>\/<repo>#<positive-number>/);
-    assert.match(result.content[0].text, /subject:<namespace>:<opaque-id>/);
+    assert.match(result.content[0].text, /subject:task:<taskId>/);
+    assert.match(result.content[0].text, /existing Task/);
     assert.equal(attempts, 0);
     assert.deepEqual(
       readdirSync(outboxDir).filter((name) => name.endsWith('.json')),

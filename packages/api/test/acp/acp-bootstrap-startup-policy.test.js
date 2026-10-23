@@ -36,6 +36,18 @@ test('only the exact built-in Pi bridge shape admits the volume policy', windows
   }
 });
 
+test('persistent builtin Pi scope flags retain the exact Windows startup audit', windows, () => {
+  const root = join(tmpdir(), 'pi-persistent-state');
+  const persistent = [...args, '--session-root', root, '--session-scope', 'a'.repeat(64)];
+  assert.equal(auditedWindowsAcpStartup(process.execPath, persistent, cleanEnv), 'builtin-pi');
+  for (const invalid of [
+    [...persistent, '--extension', 'untrusted.js'],
+    [...args, '--session-root', 'relative', '--session-scope', 'a'.repeat(64)],
+    [...args, '--session-root', root, '--session-scope', '../escape'],
+  ])
+    assert.equal(auditedWindowsAcpStartup(process.execPath, invalid, cleanEnv), undefined);
+});
+
 test('Pi initialize completes without launching Pi or using ancestor instructions', windows, () => {
   const root = mkdtempSync(join(tmpdir(), 'acp-pi-policy-'));
   try {

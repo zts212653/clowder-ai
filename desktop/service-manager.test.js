@@ -110,18 +110,20 @@ test('mirrors bundled plugins into the writable API project root', async () => {
   }
 });
 
-test('probes bundled plugin mirror and rebuilds it when the first read fails', async () => {
+test('recovers a reader failure without repeatedly rebuilding a correct junction', async () => {
   const installRoot = await mkdtemp(path.join(tmpdir(), 'service-manager-install-'));
   const userDataRoot = await mkdtemp(path.join(tmpdir(), 'service-manager-user-'));
   try {
-    for (const name of ['.claude', 'assets', 'docs', 'guides', 'packages', 'scripts']) {
+    for (const name of ['.claude', 'assets', 'guides', 'packages', 'scripts']) {
       seedMirrorSource(installRoot, name);
     }
+    seedMirrorSource(installRoot, 'docs', path.join('harness-feedback', 'eval-domains', 'eval-design-gate.yaml'));
     seedMirrorSource(installRoot, 'cat-cafe-skills', path.join('refs', 'shared-rules.md'));
+    seedMirrorSource(installRoot, 'cat-cafe-skills', path.join('custody-recognition', 'SKILL.md'));
     seedMirrorSource(installRoot, 'plugins', path.join('github', 'plugin.yaml'));
 
-    const pluginProbePath = path.join(userDataRoot, 'project', 'plugins', 'github', 'plugin.yaml');
-    const pluginMirrorPath = path.join(userDataRoot, 'project', 'plugins');
+    const pluginProbePath = path.join(userDataRoot, 'project', 'cat-cafe-skills', 'refs', 'shared-rules.md');
+    const pluginMirrorPath = path.join(userDataRoot, 'project', 'cat-cafe-skills');
     const originalReadFileSync = fs.readFileSync;
     const originalSymlinkSync = fs.symlinkSync;
     let pluginProbeReads = 0;
@@ -133,9 +135,7 @@ test('probes bundled plugin mirror and rebuilds it when the first read fails', a
     fs.readFileSync = function readFileSyncWithOnePluginProbeFailure(filePath, ...args) {
       if (filePath === pluginProbePath) {
         pluginProbeReads += 1;
-        if (pluginMirrorLinks < 2) {
-          throw new Error('simulated unreadable plugin junction');
-        }
+        throw Object.assign(new Error('simulated unreadable mirror in parent reader'), { code: 'UNKNOWN' });
       }
       return originalReadFileSync.call(this, filePath, ...args);
     };
@@ -144,13 +144,14 @@ test('probes bundled plugin mirror and rebuilds it when the first read fails', a
       const manager = new ServiceManager(installRoot, { frontendPort: 3003, apiPort: 3004 });
 
       manager._ensureUserDataDir(userDataRoot);
+      await manager._waitForProjectMirrors(userDataRoot, 2_000, process.execPath);
     } finally {
       fs.readFileSync = originalReadFileSync;
       fs.symlinkSync = originalSymlinkSync;
     }
 
-    assert.equal(pluginProbeReads, 2, 'plugin mirror should be probed, rebuilt, and verified');
-    assert.equal(pluginMirrorLinks, 2, 'plugin mirror should be recreated after the failed probe');
+    assert.ok(pluginProbeReads >= 1, 'startup must observe the failing parent reader');
+    assert.ok(pluginMirrorLinks <= 2, 'recovery must not repeatedly recreate the junction');
     assert.equal(existsSync(pluginProbePath), true);
   } finally {
     rmSync(installRoot, { recursive: true, force: true });

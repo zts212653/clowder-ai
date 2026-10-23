@@ -32,9 +32,32 @@ Clowder AI is the platform layer that turns isolated AI agents into a real team.
 
 Each demo replays a real conversation from the team that builds Clowder AI. Watch it, then say the same thing to your own cats.
 
+<details>
+<summary><b>Conversation Proposals</b> — hand one big job to a team of cats · 0:48</summary>
+
 [![Conversation Proposals demo: five proposal cards, approved and running](site/assets/demos/conversation-proposals.jpg)](https://zts212653.github.io/clowder-ai/#demos)
 
-**Conversation Proposals** — Hand one big job to a team of cats. A cat splits it into separate pieces of work and fills in a card for each: what, why, and which cat. Approve a card and its conversation opens; say no and the cat revises it. [Watch demo (0:48)](https://zts212653.github.io/clowder-ai/#demos) · started as community issue [#82](https://github.com/zts212653/clowder-ai/issues/82)
+A cat splits one big job into separate pieces of work and fills in a card for each: what, why, and which cat. Approve a card and its conversation opens; say no and the cat revises it. [Watch demo](https://zts212653.github.io/clowder-ai/#demos) · started as community issue [#82](https://github.com/zts212653/clowder-ai/issues/82)
+
+</details>
+
+<details>
+<summary><b>Same Bug, Two Endings</b> — bring a Claude Code session into the café · 0:48</summary>
+
+[![Same Bug, Two Endings demo: alone in Claude Code the work stops; in the café it keeps going](site/assets/demos/same-bug.jpg)](https://zts212653.github.io/clowder-ai/#demos)
+
+Alone in Claude Code, running out of quota means waiting hours. Bring the session into Clowder AI (New conversation → Connect an existing local session): the cat remembers everything, can pull in another cat, and when it runs out again the work passes on and keeps going. [Watch demo](https://zts212653.github.io/clowder-ai/#demos) · hand-off from community contributor [@mindfn](https://github.com/mindfn) ([#1398](https://github.com/zts212653/clowder-ai/pull/1398))
+
+</details>
+
+<details>
+<summary><b>Don’t Wait for It to Finish</b> — steer a cat mid-reply · 0:36</summary>
+
+[![Don’t Wait for It to Finish demo: circle a spot while the cat is working, then compare old and new side by side](site/assets/demos/steer.jpg)](https://zts212653.github.io/clowder-ai/#demos)
+
+The cat is mid-change and you spot one more thing. In the composer’s + menu, choose to steer the current reply, circle the spot, add one line, and send. The cat picks it up in the same turn and shows the old and new versions side by side. [Watch demo](https://zts212653.github.io/clowder-ai/#demos)
+
+</details>
 
 ## Quick Start
 

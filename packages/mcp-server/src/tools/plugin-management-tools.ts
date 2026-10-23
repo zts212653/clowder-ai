@@ -10,7 +10,7 @@ import { defineMcpCanonicalFactory } from '../tool-governance-migration.js';
 import { NO_CONFIG_ERROR } from './callback-tools.js';
 import type { ToolResult } from './file-tools.js';
 import { errorResult, successResult } from './file-tools.js';
-import { resolveInvocationCredentials } from './invocation-auth.js';
+import { resolveInvocationCredentials, resolveInvocationEnv } from './invocation-auth.js';
 
 const ADMISSION_REF = 'file:docs/features/F202-plugin-framework.md' as const;
 const defineTool = defineMcpCanonicalFactory('plugin-management-tools.ts', undefined, {
@@ -179,7 +179,7 @@ export interface PluginManagerHttpClientOptions {
 }
 
 function resolveCallbackAuth(): PluginManagerClientAuth | null {
-  const apiUrl = process.env.CAT_CAFE_API_URL?.trim();
+  const apiUrl = resolveInvocationEnv('CAT_CAFE_API_URL')?.trim();
   const { invocationId, callbackToken } = resolveInvocationCredentials();
   if (!apiUrl || !invocationId || !callbackToken) return null;
   return {

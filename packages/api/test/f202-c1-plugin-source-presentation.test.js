@@ -34,6 +34,14 @@ test('external plugin presentation uses package name/icon and declared identity 
     presentation: source,
   };
   assert.deepEqual(parsePluginMessageExtra(extra)?.presentation, source, 'identity survives persisted hydration');
+  assert.equal(
+    parsePluginMessageExtra({
+      ...extra,
+      presentation: { ...source, url: 'https://github.com/owner/repo/pull/42' },
+    }),
+    null,
+    'retired hidden navigation has no Host compatibility path',
+  );
 });
 
 function storedConversation() {

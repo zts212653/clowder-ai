@@ -19,6 +19,25 @@ import { PresentationLedgerKeys } from '../redis-keys/presentation-ledger-keys.j
 
 const DEFAULT_TTL = 0; // persistent
 
+function readPendingCompaction(raw?: string): Pick<ContextEpochRecord, 'pendingCompaction'> {
+  if (!raw) return {};
+  try {
+    const value: unknown = JSON.parse(raw);
+    if (!value || typeof value !== 'object') return {};
+    const x = value as Record<string, unknown>;
+    return typeof x.eventId === 'string' &&
+      x.eventId.length > 0 &&
+      typeof x.evidenceRef === 'string' &&
+      x.evidenceRef.length > 0 &&
+      typeof x.runtimeSessionId === 'string' &&
+      x.runtimeSessionId.length > 0
+      ? { pendingCompaction: { eventId: x.eventId, evidenceRef: x.evidenceRef, runtimeSessionId: x.runtimeSessionId } }
+      : {};
+  } catch {
+    return {};
+  }
+}
+
 /**
  * Compare-and-set. Rewrites the whole hash so a cleared binding actually
  * disappears (a lingering binding would let a later `resumed` claim match a
@@ -86,6 +105,7 @@ export class RedisContextEpochStore implements IContextEpochStore {
       contextMode: raw.contextMode === 'hot' ? 'hot' : 'cold',
       ...(raw.boundRuntimeSessionId ? { boundRuntimeSessionId: raw.boundRuntimeSessionId } : {}),
       lastTransitionRef: raw.lastTransitionRef ?? '',
+      ...readPendingCompaction(raw.pendingCompaction),
       consumedCompactionEventIds: consumed,
       ...(Number.isFinite(coldConsumedAtEpoch) && coldConsumedAtEpoch >= 1 ? { coldConsumedAtEpoch } : {}),
       version: Number.parseInt(raw.version ?? '0', 10) || 0,
@@ -103,6 +123,7 @@ export class RedisContextEpochStore implements IContextEpochStore {
       updatedAt: String(record.updatedAt),
     };
     if (record.boundRuntimeSessionId) fields.boundRuntimeSessionId = record.boundRuntimeSessionId;
+    if (record.pendingCompaction) fields.pendingCompaction = JSON.stringify(record.pendingCompaction);
     if (record.coldConsumedAtEpoch !== undefined) {
       fields.coldConsumedAtEpoch = String(record.coldConsumedAtEpoch);
     }

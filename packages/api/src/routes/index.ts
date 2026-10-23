@@ -56,6 +56,7 @@ export { messageBundleRoutes } from './message-bundles.js';
 export { messagesRoutes } from './messages.js';
 export { packsRoutes } from './packs.js';
 export { pawFeelDispositionRoutes } from './paw-feel-disposition.js';
+export { pawFeelInboxAuditScanRoutes } from './paw-feel-inbox-audit-scan.js';
 export { pawFeelLegacyCensusRoutes } from './paw-feel-legacy-census.js';
 export { perspectiveRoutes } from './perspectives.js';
 export { registerProfileUpdateDecisionRoutes } from './profile-update-decision-routes.js';

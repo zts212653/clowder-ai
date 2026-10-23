@@ -73,6 +73,30 @@ function captureProcessIdentity(pid) {
   writeFileSync(file, source);
 }
 
+async function stopRetainedFixtureRedis(raw, pidFile) {
+  if (!existsSync(pidFile)) return;
+  const proof = captureNamedAlphaRedisIdentity(raw);
+  const pgid = execFileSync('ps', ['-p', String(proof.pid), '-o', 'pgid='], { encoding: 'utf8' }).trim();
+  assert.equal(pgid, String(proof.pid), 'the test Redis daemon owns its process group');
+  verifyNamedAlphaRedisIdentity(raw, proof);
+  // Retained test-only data is disposable. SHUTDOWN can refuse during the
+  // initial AOF rewrite; stop this proven daemon and its rewrite child
+  // without saving, and prove exit before deleting any fixture directory.
+  process.kill(-proof.pid, 'SIGKILL');
+  let gone = false;
+  for (let attempt = 0; attempt < 250; attempt += 1) {
+    try {
+      process.kill(-proof.pid, 0);
+    } catch (error) {
+      if (error.code !== 'ESRCH') throw error;
+      gone = true;
+      break;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  assert.equal(gone, true, 'retain the fixture if its daemon did not exit');
+}
+
 export async function storageFixture(t, { unreadableAfterBoot = false } = {}) {
   const fixtureCleanup = [];
   // Keep all temporary Git/data paths until the actual owned Redis is stopped.
@@ -111,14 +135,14 @@ export async function storageFixture(t, { unreadableAfterBoot = false } = {}) {
   const redis = (...args) => {
     const proof = captureNamedAlphaRedisIdentity(raw);
     verifyNamedAlphaRedisIdentity(raw, proof);
-    return execFileSync('redis-cli', ['-h', '127.0.0.1', '-p', String(port), '--raw', ...args], {
+    return execFileSync('redis-cli', ['-e', '-h', '127.0.0.1', '-p', String(port), '--raw', ...args], {
       env,
       encoding: 'utf8',
       timeout: 5_000,
     }).trim();
   };
-  t.after(() => {
-    if (existsSync(pidFile)) redis('shutdown', 'nosave');
+  t.after(async () => {
+    await stopRetainedFixtureRedis(raw, pidFile);
     for (const cleanup of fixtureCleanup) cleanup();
   });
   function seedRdb() {
@@ -153,12 +177,16 @@ export async function storageFixture(t, { unreadableAfterBoot = false } = {}) {
     assert.equal(existsSync(join(directory, 'appendonlydir')), false);
     return original;
   }
-  function storage(extra = '', overrides = {}, { expectRetainedRedis = false, timeout = 40_000 } = {}) {
+  function storage(
+    extra = '',
+    overrides = {},
+    { expectRetainedRedis = false, timeout = 40_000, beforeExit = '' } = {},
+  ) {
     const consumer = `const m=await import(process.argv[1]); const {resolveNamedAlphaRuntimeBoundary}=m.default??m; const b=await resolveNamedAlphaRuntimeBoundary(process.env); const {readNamedAlphaRedisLeases}=await import(process.argv[2]); const leases=readNamedAlphaRedisLeases(); console.log('STORAGE_PROOF='+JSON.stringify({current:b.isCurrent(),redisUrl:process.env.REDIS_URL,sidecar:process.env.CAT_CAFE_PROVISION_GLOBAL_SIDECAR,leaseCount:leases.live.length}));`;
     const driver = join(f.directory, 'storage-driver.sh');
     writeFileSync(
       driver,
-      `set -e\n${extra}\nsetup_storage\nredis-cli -p "$REDIS_PORT" --raw get fixture-storage-marker > "$REDIS_DATA_DIR/recovered-marker"\nnode --import "$ALPHA_TEST_TSX" --input-type=module -e "$ALPHA_TEST_CONSUMER" "$ALPHA_TEST_MODULE" "$ALPHA_TEST_LEASE_MODULE"\n`,
+      `set -e\n${extra}\nsetup_storage\nredis-cli -p "$REDIS_PORT" --raw get fixture-storage-marker > "$REDIS_DATA_DIR/recovered-marker"\nnode --import "$ALPHA_TEST_TSX" --input-type=module -e "$ALPHA_TEST_CONSUMER" "$ALPHA_TEST_MODULE" "$ALPHA_TEST_LEASE_MODULE"\n${beforeExit}\n`,
     );
     const result = spawnSync('bash', ['./scripts/start-dev.sh', '--quick'], {
       cwd: f.alphaRoot,

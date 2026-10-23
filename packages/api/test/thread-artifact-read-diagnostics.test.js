@@ -66,3 +66,37 @@ test('slow artifact diagnostics attribute actual stages without payloads and pre
     'logging failure does not change an otherwise successful read',
   );
 });
+
+test('slow request logs the request-local Work phases including the final fence without payloads', async (t) => {
+  let clock = 0;
+  t.mock.method(performance, 'now', () => clock);
+  const entries = [];
+  const report = {
+    outcome: 'success',
+    elapsedMs: 1500,
+    phases: {
+      admission: 0,
+      discovery: 700,
+      visibility: 100,
+      selectedVersions: 200,
+      manifestValidation: 400,
+      finalAuthorization: 100,
+    },
+    counts: { pages: 2, heads: 12, selectedVersions: 12, returned: 12 },
+    mainLoop: { activeMs: 10, idleMs: 1490, utilization: 10 / 1500 },
+    privatePayload: 'private-payload-canary',
+  };
+  const result = await observeThreadArtifactRead(
+    { info: (entry) => entries.push(entry) },
+    async (_measure, recordWorkRead) => {
+      recordWorkRead(report);
+      clock += 1500;
+      return 'unchanged';
+    },
+  );
+  assert.equal(result, 'unchanged');
+  assert.equal(entries.length, 1);
+  const { privatePayload: _removed, ...expected } = report;
+  assert.deepEqual(entries[0].independentWorkRead, expected);
+  assert.doesNotMatch(JSON.stringify(entries), /private-payload-canary|privatePayload/);
+});

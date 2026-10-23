@@ -99,7 +99,13 @@ async function makeApp({
     },
     ...(withMessageStore ? { messageStore } : {}),
     taskStore: { listByThread: async () => [] },
-    ...(artifactWorkLineage ? { artifactWorkLineage: { current: artifactWorkLineage } } : {}),
+    artifactWorkLineage: {
+      current: artifactWorkLineage ?? { resolve: async ({ artifacts }) => artifacts.map(() => undefined) },
+      independent: {
+        readRecent: async () => ({ artifacts: [], complete: true }),
+        readThread: async () => ({ artifacts: [], snapshot: 'empty' }),
+      },
+    },
   });
   return app;
 }

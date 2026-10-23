@@ -77,6 +77,7 @@ export interface ContextEpochState {
    * Absent (legacy records) therefore reads as "unconsumed".
    */
   readonly coldConsumedAtEpoch?: number;
+  readonly pendingCompaction?: ContextEpochRecord['pendingCompaction'];
 }
 
 export interface ContextEpochTransitionResult {
@@ -116,6 +117,7 @@ function stateOf(input: {
   lastTransitionRef: string;
   consumedCompactionEventIds: readonly string[];
   coldConsumedAtEpoch?: number;
+  pendingCompaction?: ContextEpochRecord['pendingCompaction'];
 }): ContextEpochState {
   return {
     scopeKey: input.scopeKey,
@@ -124,6 +126,7 @@ function stateOf(input: {
     ...(input.boundRuntimeSessionId ? { boundRuntimeSessionId: input.boundRuntimeSessionId } : {}),
     lastTransitionRef: input.lastTransitionRef,
     consumedCompactionEventIds: input.consumedCompactionEventIds,
+    ...(input.pendingCompaction ? { pendingCompaction: input.pendingCompaction } : {}),
     ...(input.coldConsumedAtEpoch !== undefined ? { coldConsumedAtEpoch: input.coldConsumedAtEpoch } : {}),
   };
 }
@@ -166,6 +169,15 @@ export function applyAuthoritativeCompactionToEpoch(input: {
       ...(previous?.boundRuntimeSessionId ? { boundRuntimeSessionId: previous.boundRuntimeSessionId } : {}),
       lastTransitionRef: input.event.evidenceRef ?? `context-compaction:${input.event.eventId}`,
       consumedCompactionEventIds: withConsumedEvent(previous?.consumedCompactionEventIds ?? [], input.event.eventId),
+      ...(input.event.runtimeSessionId && input.event.evidenceRef
+        ? {
+            pendingCompaction: {
+              eventId: input.event.eventId,
+              evidenceRef: input.event.evidenceRef,
+              runtimeSessionId: input.event.runtimeSessionId,
+            },
+          }
+        : {}),
     }),
     transition: 'context_compacted',
     replayed: false,
@@ -316,6 +328,9 @@ export function applyContinuityToEpoch(input: {
           // Still not consumed: this resolve only decided to build cold. If the
           // invocation dies before delivery, the next one must be cold again.
           ...(previous.coldConsumedAtEpoch !== undefined ? { coldConsumedAtEpoch: previous.coldConsumedAtEpoch } : {}),
+          ...(coldAwaitingProjection && previous.pendingCompaction
+            ? { pendingCompaction: previous.pendingCompaction }
+            : {}),
         }),
         transition: 'resumed',
         normalizedDisposition: disposition,
@@ -378,6 +393,7 @@ export class ContextEpochOwner {
             ...(stored.boundRuntimeSessionId ? { boundRuntimeSessionId: stored.boundRuntimeSessionId } : {}),
             lastTransitionRef: stored.lastTransitionRef,
             consumedCompactionEventIds: stored.consumedCompactionEventIds ?? [],
+            ...(stored.pendingCompaction ? { pendingCompaction: stored.pendingCompaction } : {}),
             ...(stored.coldConsumedAtEpoch !== undefined ? { coldConsumedAtEpoch: stored.coldConsumedAtEpoch } : {}),
           })
         : null;
@@ -397,6 +413,7 @@ export class ContextEpochOwner {
         ...(result.state.boundRuntimeSessionId ? { boundRuntimeSessionId: result.state.boundRuntimeSessionId } : {}),
         lastTransitionRef: result.state.lastTransitionRef,
         consumedCompactionEventIds: result.state.consumedCompactionEventIds,
+        ...(result.state.pendingCompaction ? { pendingCompaction: result.state.pendingCompaction } : {}),
         ...(result.state.coldConsumedAtEpoch !== undefined
           ? { coldConsumedAtEpoch: result.state.coldConsumedAtEpoch }
           : {}),
@@ -486,6 +503,7 @@ export class ContextEpochOwner {
             ...(stored.boundRuntimeSessionId ? { boundRuntimeSessionId: stored.boundRuntimeSessionId } : {}),
             lastTransitionRef: stored.lastTransitionRef,
             consumedCompactionEventIds: stored.consumedCompactionEventIds ?? [],
+            ...(stored.pendingCompaction ? { pendingCompaction: stored.pendingCompaction } : {}),
             ...(stored.coldConsumedAtEpoch !== undefined ? { coldConsumedAtEpoch: stored.coldConsumedAtEpoch } : {}),
           })
         : null;
@@ -500,6 +518,7 @@ export class ContextEpochOwner {
         ...(result.state.boundRuntimeSessionId ? { boundRuntimeSessionId: result.state.boundRuntimeSessionId } : {}),
         lastTransitionRef: result.state.lastTransitionRef,
         consumedCompactionEventIds: result.state.consumedCompactionEventIds,
+        ...(result.state.pendingCompaction ? { pendingCompaction: result.state.pendingCompaction } : {}),
         ...(result.state.coldConsumedAtEpoch !== undefined
           ? { coldConsumedAtEpoch: result.state.coldConsumedAtEpoch }
           : {}),

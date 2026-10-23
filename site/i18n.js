@@ -32,6 +32,8 @@ window.I18N = {
     'home.a11y.addmember': `Add an AI team member in Clowder AI`,
     'home.a11y.startconversation': `Start a conversation with the AI team`,
     'home.a11y.demo.proposals': `Demo: a cat proposes new conversations`,
+    'home.a11y.demo.samebug': `Demo: the same bug with two endings`,
+    'home.a11y.demo.steer': `Demo: steer a cat while it is still replying`,
 
     // ── Hero ──
     'hero.tagline': `Open Source Multi-Model AI Platform`,
@@ -162,6 +164,15 @@ window.I18N = {
     'demos.proposals.title': `Conversation Proposals`,
     'demos.proposals.desc': `Hand one big job to a team of cats. A cat splits it into separate pieces of work and fills in a card for each: what, why, and which cat. Approve a card and its conversation opens; say no and the cat revises it.`,
     'demos.proposals.try': `“This is a big job. Split it into threads and open a new conversation for each.”`,
+    'demos.samebug.video': `assets/demos/same-bug.en.mp4`,
+    'demos.samebug.source': `Hand-off when a cat runs out: from community contributor @mindfn (#1398)`,
+    'demos.samebug.title': `Same Bug, Two Endings`,
+    'demos.samebug.desc': `Alone in Claude Code, running out of quota means waiting hours. Bring that session into Clowder AI instead: the cat remembers everything, can pull in another cat, and when it runs out again the work passes to the other cat and keeps going.`,
+    'demos.samebug.try': `“Keep fixing it. If you get stuck, bring in another cat.”`,
+    'demos.steer.video': `assets/demos/steer.en.mp4`,
+    'demos.steer.title': `Don’t Wait for It to Finish`,
+    'demos.steer.desc': `The cat is mid-change and you spot one more thing. In the composer’s + menu, choose to steer the current reply, circle the spot, add one line, and send. The cat picks it up in the same turn, then shows the old and new versions side by side.`,
+    'demos.steer.try': `“Make this button bigger.”`,
 
     // ── Roadmap ──
     'roadmap.title': `Roadmap`,
@@ -302,6 +313,8 @@ window.I18N = {
     'home.a11y.addmember': `在 Clowder AI 中添加 AI 团队成员`,
     'home.a11y.startconversation': `与 AI 团队开始对话`,
     'home.a11y.demo.proposals': `演示：猫猫提议开新对话`,
+    'home.a11y.demo.samebug': `演示：同一个 bug，两种结局`,
+    'home.a11y.demo.steer': `演示：不用等猫说完，直接引导`,
 
     // ── Hero ──
     'hero.tagline': `开源多模型 AI 团队平台`,
@@ -432,6 +445,15 @@ window.I18N = {
     'demos.proposals.title': `新对话提议`,
     'demos.proposals.desc': `一件大事交给一群猫：猫把它拆成几条线，每条写好做什么、为什么、交给谁。你点同意，新对话就开好了；也可以说不，猫改好再交回来。`,
     'demos.proposals.try': `「这件事挺大，你拆成几条线，开新对话分头去做。」`,
+    'demos.samebug.video': `assets/demos/same-bug.zh.mp4`,
+    'demos.samebug.source': `挂了有人接：来自社区贡献者 @mindfn 的 #1398`,
+    'demos.samebug.title': `同一个 bug，两种结局`,
+    'demos.samebug.desc': `只用 Claude Code 时，猫粮用完就只能干等几个小时。把这段会话接进猫咖：猫记得之前的一切，还能拉另一只猫一起看；它再没猫粮时，活自动交给另一只猫，不会停。`,
+    'demos.samebug.try': `「接着修，卡住了就找另一只猫一起看。」`,
+    'demos.steer.video': `assets/demos/steer.zh.mp4`,
+    'demos.steer.title': `不用等它说完`,
+    'demos.steer.desc': `猫正改着，你又想到一处：把发送策略选成「引导当前回复」，在画面上圈一处、说一句就发。猫在这一轮里接住，改完新旧两版并排，一眼就能定。`,
+    'demos.steer.try': `「这个按钮再大点。」`,
 
     // ── Roadmap ──
     'roadmap.title': `路线图`,

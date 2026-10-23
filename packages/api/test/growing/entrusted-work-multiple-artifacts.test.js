@@ -47,6 +47,9 @@ function fixture() {
       async listCurrentReceipts() {
         return receipts;
       },
+      async readCurrentReceipts() {
+        return { receipts, coverage: { state: 'complete' } };
+      },
     },
     artifactReader: {
       async readPreparedArtifact({ artifactRef, taskRevision }) {

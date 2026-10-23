@@ -266,6 +266,8 @@ export function mergePersistedPromptMessages(
 
 /** Common options for both strategies */
 export interface RouteOptions {
+  /** Server-owned ingress only; never copied from an HTTP/MCP request body. */
+  contextSourceIngress?: import('../../../../memory/cue/ContextSourceAdmission.js').ContextSourceIngress;
   /** Persist the exact policy refusal before publishing its receipt; Queue owns recovery. */
   onRoutingPreflightRejected?: (target: RoutingPreflightDecisionV1['targets'][number]) => Promise<void>;
   /** Server-owned one-shot owner click for this exact pending target. */
@@ -1639,7 +1641,7 @@ async function resolveRecentFilesTouched(
   try {
     const activeSession = await Promise.resolve(sessionChainStore.getActive(catId, threadId, userId));
     if (isHomeSession(activeSession) && activeSession.userId === userId) {
-      return transcriptWriter.getFilesTouched(activeSession.id, { threadId, catId });
+      return await transcriptWriter.getFilesTouched(activeSession.id, { threadId, catId });
     }
 
     const threadSessions = await Promise.resolve(sessionChainStore.getChainByThread(threadId));
@@ -1650,8 +1652,9 @@ async function resolveRecentFilesTouched(
           isHomeSession(session) && session.status === 'active' && session.catId === catId && session.userId === userId,
       );
     if (!callerSession) return [];
-    return transcriptWriter.getFilesTouched(callerSession.id, { threadId, catId: callerSession.catId });
+    return await transcriptWriter.getFilesTouched(callerSession.id, { threadId, catId: callerSession.catId });
   } catch {
+    log.warn({ threadId, catId }, 'Optional recent file observations unavailable; preserving authoritative context');
     return [];
   }
 }

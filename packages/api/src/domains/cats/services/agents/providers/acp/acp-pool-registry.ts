@@ -1,4 +1,5 @@
 import { saveSpan } from '../../../../../../utils/member-save-diagnostics.js';
+import { trackAcpPoolRetirement } from './pool/acp-pool-retirement-registry.js';
 import { retireAcpServicePool } from './pool/acp-service-pool-lease.js';
 
 export interface ClosableAcpPool {
@@ -22,7 +23,12 @@ export async function closeStaleAcpPools<TPool extends ClosableAcpPool>(
     if (activeProfileIds.has(profileId)) continue;
 
     try {
-      await saveSpan('pool.acp.close', () => retireAcpServicePool(pool), { catId: profileId });
+      const retirement = retireAcpServicePool(pool);
+      trackAcpPoolRetirement(registry, profileId, retirement.completion);
+      // Admission now reads the exit fence separately; never lend a closing registry entry.
+      if (registry.get(profileId) === pool) registry.delete(profileId);
+      if (!retirement.deferredForActiveWork)
+        await saveSpan('pool.acp.close', () => retirement.completion, { catId: profileId });
     } catch (err) {
       options.onCloseError?.(err, profileId, reason);
     } finally {

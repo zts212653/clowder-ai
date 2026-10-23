@@ -6,7 +6,7 @@ import { assertBillingPrecedentJourney } from '../helpers/billing-precedent-jour
 import { writeOperationalPrecedentFixture } from '../helpers/operational-precedent-fixture.js';
 
 describe('F287 D2 billing-only golden journey', () => {
-  test('admitted frame projects the LL-098 fixture with complete whyNow and no free-text search', async (t) => {
+  test('admitted pointer hides policy while the original fixture remains readable without free-text search', async (t) => {
     const docsRoot = mkdtempSync(join(tmpdir(), 'billing-precedent-source-'));
     t.after(() => rmSync(docsRoot, { recursive: true, force: true }));
     writeOperationalPrecedentFixture(docsRoot);

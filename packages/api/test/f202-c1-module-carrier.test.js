@@ -1258,7 +1258,10 @@ test('real module Task data writes reach original Schedule projection and change
   const schedule = await new EntrustedWorkOwnerReadService({
     tasks,
     artifactReader,
-    producerCatalog: { listCurrentReceipts: async () => [] },
+    producerCatalog: {
+      listCurrentReceipts: async () => [],
+      readCurrentReceipts: async () => ({ receipts: [], coverage: { state: 'complete' } }),
+    },
   }).listForOwner('owner', 'completed');
   assert.equal(schedule.length, 1);
   assert.equal(schedule[0].timeRefs.find((ref) => ref.role === 'business_deadline').value, 1900000000000);

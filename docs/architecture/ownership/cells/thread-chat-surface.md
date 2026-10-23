@@ -14,6 +14,7 @@ created: 2026-08-28
 updated: 2026-08-29
 canonical_features: [F229]
 code_anchors:
+  - packages/web/src/lib/feature-demo-trial.ts
   - packages/web/src/components/thread-chat/ThreadChatRuntimeProvider.tsx
   - packages/web/src/components/thread-chat/ThreadChatSurface.tsx
   - packages/web/src/components/thread-chat/ThreadChatExport.tsx
@@ -28,6 +29,7 @@ code_anchors:
   - packages/web/src/hooks/useSendMessage.ts
   - packages/web/src/hooks/useConnectionStatus.ts
 doc_anchors:
+  - feature-specs/2026-10-22-f331-demo-entry.md
   - docs/features/F229-cat-ball-concierge.md
   - feature-discussions/2026-08-27-f229-chat-surface-convergence.md
   - feature-specs/2026-08-27-f229-chat-runtime-owner-m1.md
@@ -35,6 +37,7 @@ doc_anchors:
   - feature-specs/2026-08-29-f229-chat-surface-vertical-m2-m4.md
 static_scan_hints: [ThreadChatRuntimeProvider, useThreadChatRuntime, ThreadChatSurface, ThreadChatDensity, useSocket, useChatHistory, useSendMessage, useThreadLiveness, splitPaneThreadIds]
 cited_by:
+  - {feature: F331, date: 2026-10-22, delta: "the demo trial consumes the original durable composer draft reader/writer before navigation; no parallel conversation or send owner"}
   - {feature: F229-M1a, date: 2026-08-28, delta: AppShell-scoped provider becomes the sole browser socket and visible-thread room owner; ChatContainer consumes the runtime registration while later history/send/surface migration remains explicit}
   - {feature: F229-M1b, date: 2026-08-29, delta: the AppShell runtime admits one bootstrap and one equal-key history request per thread while each mounted surface retains independent viewport state}
   - {feature: F229-M2-M4, date: 2026-08-29, delta: one ThreadChatSurface now owns the normal full and compact conversation path; Cat Ball is a density adapter and the legacy mini-chat core is deleted}

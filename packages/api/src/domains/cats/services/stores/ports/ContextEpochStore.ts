@@ -35,6 +35,8 @@ export interface ContextEpochRecord {
   readonly consumedCompactionEventIds?: readonly string[];
   /** F296: epoch whose cold has already been consumed by a projection. */
   readonly coldConsumedAtEpoch?: number;
+  /** Exact provider-authored edge retained until this epoch is actually delivered. */
+  readonly pendingCompaction?: { eventId: string; evidenceRef: string; runtimeSessionId: string };
   /** Optimistic-concurrency version. Every successful write increments it. */
   readonly version: number;
   readonly updatedAt: number;

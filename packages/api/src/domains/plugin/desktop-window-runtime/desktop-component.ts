@@ -11,7 +11,8 @@ interface Options {
 }
 
 /** Installs the Host's existing pinned Electron component, never a plugin executable.
- * Runs only after an explicit official-package install has verified its archive.
+ * Runs after verified installation or before an admitted desktop start.
+ * A Host update can change the lock/cache key while the plugin stays installed.
  * Staging is private; failed/parallel installs cannot expose a half-written binary.
  */
 export class DesktopWindowComponent {

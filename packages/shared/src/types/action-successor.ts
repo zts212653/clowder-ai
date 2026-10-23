@@ -1,5 +1,9 @@
 import { z } from 'zod';
-import { actionSubjectRefSchema } from './action-subject-ref.js';
+import { actionSubjectRefSchema, TASK_ACTION_SUBJECT_REF_DESCRIPTION } from './action-subject-ref.js';
+
+export const IMPLEMENT_TERMINAL_PREDICATE_DESCRIPTION =
+  'Required for new implement claims, including claimOrigin=existing_standing: terminalPredicate={kind:"task_done"}. ' +
+  'May be omitted only for returnToPredecessor.';
 
 export const ACTION_SUCCESSOR_ACTION_FAMILIES = [
   'review',
@@ -70,8 +74,8 @@ const implementDispatchProposedActionSchema = z
     subjectRef: z
       .string()
       // biome-ignore lint/suspicious/noControlCharactersInRegex: U+001F is the identity-key delimiter and must be excluded explicitly.
-      .regex(/^subject:task:[^\s\x1f]{1,200}$/)
-      .describe('Exact task subject: subject:task:<taskId>.'),
+      .regex(/^subject:task:[^\s\x1f]{1,200}$/, TASK_ACTION_SUBJECT_REF_DESCRIPTION)
+      .describe(TASK_ACTION_SUBJECT_REF_DESCRIPTION),
     actionFamily: z.literal(implementProposalCapability.actionFamily).describe('Executable family: implement.'),
     successorSlot: z
       .literal(implementProposalCapability.successorSlot)
@@ -253,7 +257,9 @@ function refineTerminalPredicate(value: ActionSuccessorMetadataValue, ctx: z.Ref
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
       path: ['terminalPredicate'],
-      message: 'new action custody requires a typed terminalPredicate',
+      message:
+        'new action custody requires a typed terminalPredicate' +
+        (value.actionFamily === 'implement' ? `. ${IMPLEMENT_TERMINAL_PREDICATE_DESCRIPTION}` : ''),
     });
   }
 }

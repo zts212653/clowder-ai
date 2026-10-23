@@ -1,8 +1,8 @@
+import { CAPABILITY_TIP_USAGE_EVENTS as USAGE_EVENTS } from '@cat-cafe/shared';
 import { TipTelemetryKeys } from '../../../routes/tip-telemetry-keys.js';
 
 const DAY_MS = 24 * 60 * 60 * 1_000;
 const MAX_WINDOW_MS = 90 * DAY_MS;
-const USAGE_EVENTS = ['capability_tip_exposed', 'capability_tip_action', 'capability_tip_dismissed'] as const;
 const OUTCOMES = ['shown', 'opened', 'dismissed', 'failed', 'none'] as const;
 const TRANSPORT_STATUSES = ['accepted', 'duplicate', 'rejected', 'conflict'] as const;
 
@@ -60,7 +60,13 @@ type UsageDiagnostics = CapabilityTipsUsageSnapshot['diagnostics'];
 
 export interface CapabilityTipsUsageRedis {
   options?: { keyPrefix?: string };
-  scan(cursor: string, ...args: (string | number)[]): Promise<[string, string[]]>;
+  scan(
+    cursor: string,
+    matchToken: 'MATCH',
+    pattern: string,
+    countToken: 'COUNT',
+    count: number,
+  ): Promise<[string, string[]]>;
   mget(...keys: string[]): Promise<(string | null)[]>;
 }
 

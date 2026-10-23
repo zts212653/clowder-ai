@@ -4,16 +4,17 @@ related_features: [F038, F148, F167, F188, F203, F209, F227, F231, F236, F237, F
 topics: [memory, context, retrieval, delivery, reliability, command]
 doc_kind: spec
 created: 2026-09-27
+updated: 2026-10-23
 description: "让猫以可控的上下文成本取得可信、完整可续读的记忆，减少旧消息回放、检索绕路与启动时的重复负担。"
 description_source: human
 description_author: codex-astra
 description_updated_at: 2026-09-27T12:29:12Z
-tips_exempt: "Renewed 2026-10-13: source cleanup and runtime acceptance status record progress and remaining evidence gaps for existing memory/startup behavior; related-feature metadata adds no new user action or discoverable entry."
+tips_exempt: "Renewed 2026-10-23: the boot48 graph/source reads, proposal projection and bounded audit receipts update acceptance evidence for existing memory and startup entry points. Remaining search, recovery and compaction gaps stay explicit; this status update introduces no new user action or discovery surface."
 ---
 
 # F324: Memory Delivery Reliability｜记忆交付可靠性与上下文成本收口
 
-> **Status**: in-progress（A/B/C 原 Task 已 satisfied；D 的 AC-D1 PASS、AC-D2 PARTIAL；boot22 已加载 #5358，Codex cold/hot full read PASS、同参 message search 503；AC-D3 指挥愿景守护待完成） | **Owner**: Astra（@codex-astra, gpt-6-astra）与 Opus55（@opus55, claude-opus-5-5），本指挥 thread 全体猫共同负责驱动与愿景守护 | **Priority**: P1
+> **Status**: in-progress（A/B/C 原 Task 已 satisfied；D 的 AC-D1 PASS、AC-D2 PARTIAL；boot48 图谱主附身份/完整原文正式通过，F276读取投影与F278有界扫描已有正式证据；消息检索完整旅程、长尾/自然恢复及AC-D3仍未结） | **Owner**: Astra（@codex-astra, gpt-6-astra）与 Opus55（@opus55, claude-opus-5-5），本指挥 thread 全体猫共同负责驱动与愿景守护 | **Priority**: P1
 
 ## Why
 
@@ -32,6 +33,12 @@ Opus55 审阅：`private-source-id`；Astra 边界核验：`private-source-id`�
 ## Current State / 现状基线
 
 本轮源码基线 `00cca7ddf62fe64a070224042c4259d72c81cdf1`；运行态测量不以该 SHA 冒充部署证明。
+
+**2026-10-23 当前运行验收**：Task528 gen5已在boot48/`0c3b28eb…`实际匹配，父独立核ready/三stamp及目标祖先。
+F229原参数图谱命中主文档，PetSkin独立可检索，两源7/3片正常读至EOF；父重组十次MCP返回并与loaded原文逐字节核对。
+F276自然resolver读取已走artifact projection，观察批次toolEvents解析为0；F278原Task913已完成两页共100条正式扫描，duty/reconciler仍暂停。
+F322正式UI一次“确认按钮”请求/导航状态已获限定PASS（actual hybrid、14.179s）；摘要二次截取丢资格证据P2及390原文可读性仍由原168/原C处理。历史Sol宽查询LIMITED PASS、特定事件与更广覆盖不混签。
+F321原首包Task001467已done/satisfied且g4已消费，解除该项依赖；Task229长尾及D的自然恢复/compaction/cue和D3继续原责任，旧503及历史缺值保留。
 
 **2026-09-28 交付更新**：A 已随 [#4858](https://github.com/zts212653/clowder-ai/pull/4858) 合入
 `77376ea15c53b8d1818ac6504008bb4365d1c08b`，AC-A1–A4 由非作者审查并经本 owner 核验证据，原 Task 已 satisfied。
@@ -169,7 +176,7 @@ Alpha 曾重生成共享 Gemini/AGY 配置；startup+GET 防复发随 #4946 / `6
 ## Dependencies
 
 - **Related**: 原合同表；F316/F321 保留独立目标与 authority。
-- **Blocked by**: 目标版本激活条件已在 boot22 满足；AC-D2 仍有同参 search 503、Gemini 完整迁移、真实 compaction 与自然 cue 缺口。不把这些诚实 FAIL/unknown 改造成重复模型矩阵或 F323 新前置。
+- **Blocked by**: 原Task528 gen5在boot48的加载与图谱正式旅程已满足；剩余为F322原Task168的摘要呈现P2/390可读性及原完整检索范围、Task229自然长尾观测、F325原Task2347的恢复边界、真实compaction/cue及D3。旧503的缺失阶段链按历史unknown保留，不改写为当前每次请求均503，不制造重复模型矩阵或F323新前置。
 - 按 operator 最新指示严格 A → B → C → D 串行；前一 Phase 完成并回流后才提下一张执行 thread 卡，D 的 live 验收另需版本就绪。
 
 ## Review Gate

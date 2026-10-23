@@ -14,7 +14,9 @@ import { apiClientCopy } from './api-client.shell-copy';
 
 import { markApiGetGeneration } from './api-get-generation';
 import { resolveApiUrl } from './api-origin';
-import { boundedFetch, waitForPromiseWithSignal } from './bounded-fetch';
+import { waitForPromiseWithSignal } from './bounded-fetch';
+import { configureConnectionDiagnostics, scheduleConnectionDiagnosticDelivery } from './connection-diagnostics';
+import { diagnosticFetch, recordConnectionNotice } from './connection-request-trace';
 import { tagSaveRequest, traceSaveTransport } from './member-save-trace';
 
 export { resolveApiUrl } from './api-origin';
@@ -28,6 +30,7 @@ let sessionGate: Promise<void> | null = null;
 let sessionRefresh: Promise<void> | null = null;
 let sessionCsrfToken: string | null = null;
 let lastSessionFailureToastAt = 0;
+configureConnectionDiagnostics(API_URL, () => sessionCsrfToken);
 
 const reportedConnectionErrors = new WeakSet<object>();
 let lastConnectionFailureAt = Number.NEGATIVE_INFINITY;
@@ -38,7 +41,8 @@ export function reportApiConnectionFailure(error: unknown): boolean {
   if (reportedConnectionErrors.has(error)) return true;
   reportedConnectionErrors.add(error);
   const now = Date.now();
-  if (now - lastConnectionFailureAt >= 5_000) {
+  const shown = now - lastConnectionFailureAt >= 5_000;
+  if (shown) {
     lastConnectionFailureAt = now;
     const t = connectionCopy();
     useToastStore.getState().addToast({
@@ -48,6 +52,7 @@ export function reportApiConnectionFailure(error: unknown): boolean {
       duration: 5000,
     });
   }
+  recordConnectionNotice(error, shown);
   return true;
 }
 
@@ -103,7 +108,7 @@ function notifySessionFailure() {
 
 function ensureSession(): Promise<void> {
   if (sessionGate) return sessionGate;
-  const gate = boundedFetch(`${API_URL}/api/session`, { credentials: 'include' }, SESSION_BOOTSTRAP_TIMEOUT_MS)
+  const gate = diagnosticFetch(API_URL, '/api/session', { credentials: 'include' }, SESSION_BOOTSTRAP_TIMEOUT_MS)
     .then(async (res) => {
       if (!res.ok) {
         throw new Error(`session bootstrap failed (${res.status})`);
@@ -112,6 +117,7 @@ function ensureSession(): Promise<void> {
         csrfToken?: unknown;
       } | null;
       sessionCsrfToken = typeof body?.csrfToken === 'string' && body.csrfToken ? body.csrfToken : null;
+      scheduleConnectionDiagnosticDelivery();
     })
     .catch((err) => {
       if (sessionGate === gate) {
@@ -134,8 +140,9 @@ export function refreshApiSession(): Promise<void> {
   const gate = (previous ?? Promise.resolve())
     .catch(() => undefined)
     .then(async () => {
-      const res = await boundedFetch(
-        `${API_URL}/api/session`,
+      const res = await diagnosticFetch(
+        API_URL,
+        '/api/session',
         { credentials: 'include' },
         SESSION_BOOTSTRAP_TIMEOUT_MS,
       );
@@ -144,6 +151,7 @@ export function refreshApiSession(): Promise<void> {
         csrfToken?: unknown;
       } | null;
       sessionCsrfToken = typeof body?.csrfToken === 'string' && body.csrfToken ? body.csrfToken : null;
+      scheduleConnectionDiagnosticDelivery();
     })
     .catch((err) => {
       if (sessionGate === gate) {
@@ -253,8 +261,9 @@ async function performSessionRequest(
     init,
     'http.attempt',
     () =>
-      boundedFetch(
-        `${API_URL}${path}`,
+      diagnosticFetch(
+        API_URL,
+        path,
         {
           ...normalized,
           credentials: 'include',
@@ -274,8 +283,9 @@ async function performSessionRequest(
     init,
     'http.attempt',
     () =>
-      boundedFetch(
-        `${API_URL}${path}`,
+      diagnosticFetch(
+        API_URL,
+        path,
         {
           ...refreshed,
           credentials: 'include',

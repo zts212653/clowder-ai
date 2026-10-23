@@ -34,6 +34,33 @@ export function describeCodexManagedLayout(projectRoot: string, accountRef: stri
     sqliteHome: source.sqliteHome,
   };
 }
+type LinkFile = (target: string, path: string) => void;
+
+/** Windows non-elevated users cannot create the file/directory links this layout needs.
+ * Keep the failure closed, but name the missing prerequisite instead of surfacing a raw EPERM.
+ */
+export function createCodexManagedLink(
+  target: string,
+  link: string,
+  linkFn: LinkFile = symlinkSync,
+  platform: NodeJS.Platform = process.platform,
+): void {
+  try {
+    linkFn(target, link);
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (platform === 'win32' && (code === 'EPERM' || code === 'EACCES')) {
+      throw Object.assign(
+        new Error(
+          'codex_managed_layout_symlink_unavailable: managed Codex layouts require directory and file links; enable Windows Developer Mode/symlink privilege or use a supported layout.',
+        ),
+        { code: 'codex_managed_layout_symlink_unavailable', cause: error },
+      );
+    }
+    throw error;
+  }
+}
+
 function ensureLink(target: string, link: string): void {
   try {
     const info = lstatSync(link);
@@ -43,7 +70,7 @@ function ensureLink(target: string, link: string): void {
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
   }
-  symlinkSync(target, link);
+  createCodexManagedLink(target, link);
 }
 /** Idempotent explicit preparation. Private auth/secrets/tmp/control files are never shared. */
 export function prepareCodexManagedLayout(layout: CodexManagedAccount, projectRoot?: string): CodexManagedAccount {

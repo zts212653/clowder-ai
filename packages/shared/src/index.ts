@@ -54,6 +54,7 @@ export * from './dot-mcp.js';
 export * from './eval-metric-ref.js';
 // First-party WebSocket Stop intent contract (API + Web single source).
 export * from './explicit-stop-intent.js';
+export * from './feature-demos.js';
 export * from './ignored-item-preference.js';
 export * from './markdown-link-safety.js';
 // Export shared text helpers
@@ -123,6 +124,7 @@ export * from './types/collective-work-matter.js';
 export * from './types/collective-work-policy.js';
 export { collectiveWorkResultMediaTypeForFileName } from './types/collective-work-return.js';
 export * from './types/collective-work-wake.js';
+export * from './types/connection-diagnostics.js';
 export * from './types/content-modification.js';
 export * from './types/content-modification-carrier.js';
 export * from './types/content-modification-control.js';

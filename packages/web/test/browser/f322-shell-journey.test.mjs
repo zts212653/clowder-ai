@@ -286,7 +286,7 @@ async function openProof({
         '/api/config/ignored-items': { ownerUserId: session.userId, revision: 0, entries: [] },
         '/api/approval-hub/pending': { items: [], count: 0 },
         // The classic presentation (reached by the theme test) still reads Needs Me for its own rail.
-        '/api/entrusted-work/needs-me': { ownerReads: [] },
+        '/api/entrusted-work/needs-me': { ownerReads: [], coverage: { state: 'complete' } },
         // The v2 conversation header's own reads (ThreadIndicator, DaemonActiveIndicator, cat roster).
         '/api/threads/thread-return': { id: 'thread-return', title: '返回原处的对话', projectPath: '/work/fixture' },
         '/api/threads/thread-return/active-pane': { active: false },

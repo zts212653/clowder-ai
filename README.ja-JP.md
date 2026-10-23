@@ -32,9 +32,32 @@ Clowder AI は、孤立した AI エージェントを本物のチームに変�
 
 どのデモも、Clowder AI を作っているチームで実際に交わされた会話の再現です。見たら、同じことをあなたの猫に話しかけてみてください。
 
+<details>
+<summary><b>新しい会話の提案</b> — 大きな仕事を猫のチームに任せる · 0:48</summary>
+
 [![新しい会話の提案デモ：5 枚の提案カードが承認され、作業が始まる](site/assets/demos/conversation-proposals.jpg)](https://zts212653.github.io/clowder-ai/#demos)
 
-**新しい会話の提案** — 大きな仕事を猫のチームに任せると、猫がそれをいくつかの流れに分け、それぞれに「何を・なぜ・誰が」を書いたカードを作ります。承認すれば新しい会話が開き、断れば猫が直して出し直します。[デモを見る (0:48、英語字幕)](https://zts212653.github.io/clowder-ai/#demos) · コミュニティの issue [#82](https://github.com/zts212653/clowder-ai/issues/82) から生まれた機能です
+猫が大きな仕事をいくつかの流れに分け、それぞれに「何を・なぜ・誰が」を書いたカードを作ります。承認すれば新しい会話が開き、断れば猫が直して出し直します。[デモを見る（英語字幕）](https://zts212653.github.io/clowder-ai/#demos) · コミュニティの issue [#82](https://github.com/zts212653/clowder-ai/issues/82) から生まれた機能です
+
+</details>
+
+<details>
+<summary><b>同じバグ、ふたつの結末</b> — Claude Code のセッションをカフェに持ち込む · 0:48</summary>
+
+[![同じバグ、ふたつの結末：Claude Code だけでは作業が止まり、カフェでは続く](site/assets/demos/same-bug.jpg)](https://zts212653.github.io/clowder-ai/#demos)
+
+Claude Code だけで作業していると、利用上限に達したら何時間も待つしかありません。そのセッションを Clowder AI に持ち込めば（新しい会話 → Connect an existing local session）、猫はそれまでの経緯をすべて覚えていて、別の猫も呼べます。また上限に達しても、作業は別の猫に引き継がれて止まりません。[デモを見る（英語字幕）](https://zts212653.github.io/clowder-ai/#demos) · 引き継ぎ機能はコミュニティ貢献者 [@mindfn](https://github.com/mindfn) の [#1398](https://github.com/zts212653/clowder-ai/pull/1398) から
+
+</details>
+
+<details>
+<summary><b>終わるまで待たなくていい</b> — 返答中の猫に追加の指示を出す · 0:36</summary>
+
+[![終わるまで待たなくていい：作業中の猫に丸で囲んでひとこと、旧版と新版を並べて比較](site/assets/demos/steer.jpg)](https://zts212653.github.io/clowder-ai/#demos)
+
+猫が修正している最中に、もう一か所気づいたら：入力欄の + メニューで今の返答を誘導するよう切り替え、画面の該当箇所を丸で囲み、ひとこと添えて送ります。猫は同じターンの中で受け取り、旧版と新版を並べて見せてくれます。[デモを見る（英語字幕）](https://zts212653.github.io/clowder-ai/#demos)
+
+</details>
 
 ## クイックスタート
 

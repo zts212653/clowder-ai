@@ -40,6 +40,7 @@ import {
 import { AcpCwdIdentityTracker } from './acp-cwd-identity.js';
 import { type AcpPromptInput, toAcpPromptContent } from './acp-prompt-content.js';
 import { AcpSessionBindingError, ActiveSessionCache } from './active-session-cache.js';
+import { shutdownAcpChild } from './lifecycle/acp-child-shutdown.js';
 import type {
   AcpAgentRequest,
   AcpInitializeResult,
@@ -85,6 +86,7 @@ export class AcpHttpStreamClient {
   private readonly liveSessions = new ActiveSessionCache();
   private child: ChildProcess | null = null;
   private closed = false;
+  private closing?: Promise<void>;
   private exited = false;
   /** Sessions whose local prompt ended before provider completion was acknowledged. */
   private readonly unquiescedSessionIds = new Set<string>();
@@ -623,24 +625,15 @@ export class AcpHttpStreamClient {
     if (cb) cb();
   }
 
-  async close(): Promise<void> {
-    this.liveSessions.clear();
-    if (this.closed) return;
-    this.closed = true;
+  close(): Promise<void> {
+    this.closing ??= this.closeOwnedProcess();
+    return this.closing;
+  }
 
-    if (this.child && !this.child.killed) {
-      await new Promise<void>((resolve) => {
-        const timer = setTimeout(() => {
-          if (this.child && !this.child.killed) this.child.kill('SIGKILL');
-          resolve();
-        }, KILL_GRACE_MS);
-        this.child!.once('exit', () => {
-          clearTimeout(timer);
-          resolve();
-        });
-        this.child!.kill('SIGTERM');
-      });
-    }
+  private async closeOwnedProcess(): Promise<void> {
+    this.liveSessions.clear();
+    this.closed = true;
+    if (this.child && !this.exited) await shutdownAcpChild(this.child, KILL_GRACE_MS, false);
   }
 
   get pid(): number | undefined {

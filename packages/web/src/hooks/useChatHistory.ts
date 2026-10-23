@@ -1349,7 +1349,7 @@ export function useChatHistory(threadId: string) {
               whisperTo?: string[];
               revealedAt?: number;
               isDraft?: boolean;
-              source?: { connector: string; label: string; icon: string; url?: string };
+              source?: { connector: string; label: string; icon: string };
               mentionsUser?: boolean;
               deliveredAt?: number;
               timelineOrderAt?: number;

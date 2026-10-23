@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { defineMcpCanonicalFactory } from '../tool-governance-migration.js';
 import type { ToolResult } from './file-tools.js';
 import { errorResult, successResult } from './file-tools.js';
+import { resolveInvocationEnv } from './invocation-auth.js';
 
 const defineTool = defineMcpCanonicalFactory('realtime-companion-tools.ts', undefined, {
   resourceFamily: 'audio',
@@ -10,6 +11,10 @@ const defineTool = defineMcpCanonicalFactory('realtime-companion-tools.ts', unde
 });
 
 const ADMISSION_REF = 'file:docs/features/F306-codex-app-capability-parity.md' as const;
+
+function resolveApiUrl(): string {
+  return (resolveInvocationEnv('CAT_CAFE_API_URL') ?? deploymentDefaults.apiLoopbackUrl).replace(/\/$/, '');
+}
 
 export const realtimeCompanionStartInputSchema = {
   thread_id: z
@@ -53,10 +58,10 @@ export async function handleRealtimeCompanionStop(input: { thread_id: string }):
 }
 
 async function companionRequest(threadId: string, suffix: string, init?: RequestInit): Promise<ToolResult> {
-  const catId = process.env.CAT_CAFE_CAT_ID?.trim();
+  const catId = resolveInvocationEnv('CAT_CAFE_CAT_ID')?.trim();
   if (!catId) return errorResult('The current cat identity is required for a realtime companion session.');
-  const apiUrl = (process.env.CAT_CAFE_API_URL ?? deploymentDefaults.apiLoopbackUrl).replace(/\/$/, '');
-  const userId = process.env.CAT_CAFE_USER_ID ?? 'default-user';
+  const apiUrl = resolveApiUrl();
+  const userId = resolveInvocationEnv('CAT_CAFE_USER_ID') ?? 'default-user';
   try {
     const response = await fetch(
       `${apiUrl}/api/threads/${encodeURIComponent(threadId.trim())}/realtime-companion${suffix}`,

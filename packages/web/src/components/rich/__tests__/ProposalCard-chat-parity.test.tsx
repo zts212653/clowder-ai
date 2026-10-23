@@ -2,6 +2,8 @@ import { createCatId, type ThreadProposal } from '@cat-cafe/shared';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { ApprovalHostContext, PERMISSIVE_APPROVAL_HOST } from '@/components/ApprovalHost';
+import { writeShellLanguage } from '@/components/shell/shell-language';
 import { writeShellPresentation } from '@/components/shell/shell-presentation';
 import type { RichCardBlock } from '@/stores/chat-types';
 import { apiFetch } from '@/utils/api-client';
@@ -76,6 +78,7 @@ afterEach(() => {
   act(() => root.unmount());
   host.remove();
   writeShellPresentation('classic');
+  writeShellLanguage('zh');
   vi.unstubAllGlobals();
 });
 async function render(card: React.ReactNode) {
@@ -103,16 +106,51 @@ it('keeps the first message formatted when the original seven-field editor opens
   expect(vi.mocked(apiFetch).mock.calls.filter((call) => call[1]?.method === 'POST')).toHaveLength(0);
 });
 
-it('restores the same human result from the original producer after a cold Chat read', async () => {
+it.each(['zh', 'en'] as const)('collapses an approved Chat proposal to the verified result in %s', async (language) => {
+  writeShellLanguage(language);
   vi.mocked(apiFetch).mockResolvedValue(
     Response.json({
       proposal: { ...proposal, status: 'approved', createdThreadId: 'created-thread' },
     }),
   );
   await render(<ProposalCard block={block} messageId="source-card-message" />);
-  expect(host.textContent).toContain('已同意 · 对话已创建');
-  expect([...host.querySelectorAll('button')].some((button) => button.textContent === '打开新对话')).toBe(true);
+  const result = host.querySelector('[data-testid="thread-proposal-result"]');
+  expect(result).not.toBeNull();
+  expect(result?.querySelector('[data-testid="proposal-result-label"]')?.textContent).toBe(
+    language === 'en' ? 'Approved · conversation opened' : '已同意 · 对话已开',
+  );
+  expect(result?.querySelector('[data-testid="proposal-result-dot"]')?.getAttribute('data-status')).toBe('approved');
+  expect(result?.querySelector('[data-testid="proposal-result-open"]')?.textContent).toBe(
+    language === 'en' ? 'Open ›' : '打开 ›',
+  );
+  expect(result?.querySelector('[href]')).toBeNull();
+  expect(host.querySelector('[data-testid="proposal-result-details"]')).toBeNull();
+  expect(host.textContent).not.toContain(proposal.reason);
+  expect(host.textContent).not.toContain(proposal.title);
   expect(host.querySelector('[data-testid="approve-btn"]')).toBeNull();
+  const toggle = result?.querySelector('button');
+  expect(toggle?.getAttribute('aria-expanded')).toBe('false');
+  await act(async () => toggle?.click());
+  expect(toggle?.getAttribute('aria-expanded')).toBe('true');
+  expect(host.textContent).toContain(proposal.title);
+  expect(host.textContent).toContain(proposal.reason);
+  expect(host.querySelector('[data-testid="proposal-initial-message"]')).not.toBeNull();
+  expect(host.textContent).toContain(language === 'en' ? 'Proposed by' : '谁提的');
+  expect(vi.mocked(apiFetch).mock.calls.every((call) => call[1]?.method !== 'POST')).toBe(true);
+});
+
+it.each(['zh', 'en'] as const)('shows a declined result with the canonical decision time in %s', async (language) => {
+  writeShellLanguage(language);
+  const rejectedAt = new Date(2026, 9, 22, 5, 44).getTime();
+  vi.mocked(apiFetch).mockResolvedValue(Response.json({ proposal: { ...proposal, status: 'rejected', rejectedAt } }));
+  await render(<ProposalCard block={block} messageId="source-card-message" />);
+  const result = host.querySelector('[data-testid="thread-proposal-result"]');
+  expect(result?.querySelector('[data-testid="proposal-result-label"]')?.textContent).toBe(
+    language === 'en' ? 'Declined · 05:44' : '已拒绝 · 05:44',
+  );
+  expect(result?.querySelector('[data-testid="proposal-result-dot"]')?.getAttribute('data-status')).toBe('rejected');
+  expect(result?.querySelector('a')).toBeNull();
+  expect(host.querySelector('[data-testid="proposal-result-details"]')).toBeNull();
 });
 
 it('does not expose an old actionable engineering card when the original owner read refuses it', async () => {
@@ -139,4 +177,82 @@ it.each([
   );
   expect(host.querySelector('[data-testid="approve-btn"]')).toBeNull();
   expect(host.querySelector(`[data-testid="approval-item-${proposal.proposalId}"]`)).toBeNull();
+});
+
+it('collapses a live terminal reread instead of trusting socket decision fields', async () => {
+  await render(<ProposalCard block={block} messageId="source-card-message" />);
+  expect(host.querySelector('[data-testid="approve-btn"]')).not.toBeNull();
+  vi.mocked(apiFetch).mockResolvedValue(Response.json({ proposal: { ...proposal, status: 'rejected' } }));
+  await act(async () =>
+    window.dispatchEvent(
+      new CustomEvent('cat-cafe:proposal-updated', {
+        detail: { proposalId: proposal.proposalId, status: 'approved', createdThreadId: 'forged-thread' },
+      }),
+    ),
+  );
+  expect(host.querySelector('[data-testid="proposal-result-label"]')?.textContent).toBe('已拒绝');
+  expect(host.querySelector('[data-testid="proposal-result-details"]')).toBeNull();
+  expect(host.querySelector('a')).toBeNull();
+});
+
+it('retains the host navigation fence on the result link, including a cold locked read', async () => {
+  vi.mocked(apiFetch).mockResolvedValue(
+    Response.json({ proposal: { ...proposal, status: 'approved', createdThreadId: 'created-thread' } }),
+  );
+  const authorizeWrite = vi.fn(() => false);
+  await render(
+    <ApprovalHostContext.Provider value={{ ...PERMISSIVE_APPROVAL_HOST, writesLocked: true, authorizeWrite }}>
+      <ProposalCard block={block} messageId="source-card-message" />
+    </ApprovalHostContext.Provider>,
+  );
+  const link = host.querySelector<HTMLElement>('[data-testid="proposal-result-open"]');
+  expect(link?.hasAttribute('href')).toBe(false);
+  expect(link?.getAttribute('aria-disabled')).toBe('true');
+  await act(async () => link?.click());
+  expect(authorizeWrite).not.toHaveBeenCalled();
+});
+
+it('rereads the original decision after a local decline even without a socket notification', async () => {
+  let declined = false;
+  const rejectedAt = new Date(2026, 9, 22, 5, 44).getTime();
+  vi.mocked(apiFetch).mockImplementation(async (_url, options) => {
+    if (options?.method === 'POST') {
+      declined = true;
+      return Response.json({ ok: true });
+    }
+    return Response.json({ proposal: declined ? { ...proposal, status: 'rejected', rejectedAt } : proposal });
+  });
+  await render(<ProposalCard block={block} messageId="source-card-message" />);
+  await act(async () => host.querySelector<HTMLButtonElement>('[data-testid="reject-btn"]')?.click());
+  expect(host.querySelector('[data-testid="proposal-result-label"]')?.textContent).toBe('已拒绝 · 05:44');
+  expect(host.querySelector('[data-testid="proposal-result-details"]')).toBeNull();
+  expect(vi.mocked(apiFetch).mock.calls.filter((call) => call[1]?.method === 'POST')).toHaveLength(1);
+});
+
+it.each([
+  false,
+  true,
+])('keeps native navigation private and honors live continuation authority (%s)', async (allowed) => {
+  vi.mocked(apiFetch).mockResolvedValue(
+    Response.json({ proposal: { ...proposal, status: 'approved', createdThreadId: 'created-thread' } }),
+  );
+  const authorizeWrite = vi.fn(() => allowed);
+  const navigate = vi.spyOn(window.history, 'pushState');
+  await render(
+    <ApprovalHostContext.Provider value={{ ...PERMISSIVE_APPROVAL_HOST, writesLocked: false, authorizeWrite }}>
+      <ProposalCard block={block} messageId="source-card-message" />
+    </ApprovalHostContext.Provider>,
+  );
+  expect(host.querySelector('[href]')).toBeNull();
+  const link = host.querySelector<HTMLElement>('[data-testid="proposal-result-open"]');
+  expect(link).not.toBeNull();
+  await act(async () => {
+    link?.click();
+    link?.dispatchEvent(new MouseEvent('auxclick', { bubbles: true, cancelable: true, button: 1 }));
+    link?.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2 }));
+  });
+  expect(authorizeWrite).toHaveBeenCalledWith('producer-card', { continuation: true });
+  if (allowed) expect(navigate).toHaveBeenCalledExactlyOnceWith({}, '', '/thread/created-thread');
+  else expect(navigate).not.toHaveBeenCalled();
+  navigate.mockRestore();
 });

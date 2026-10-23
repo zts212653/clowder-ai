@@ -30,6 +30,7 @@ test('concierge uses the common message projection with multiple per-thread hand
       sourceCoverage: 'unknown',
       degraded: true,
       effectiveMode: 'lexical',
+      qualification: { status: 'partial', examined: 8, supported: 2, rejected: 0, indeterminate: 1, unassessed: 5 },
     },
   };
   const context = await buildConciergeSearchContext({
@@ -57,6 +58,7 @@ test('concierge uses the common message projection with multiple per-thread hand
   assert.match(context.contextString, /Alpha Connector · Acceptance source/);
   assert.match(context.contextString, /延迟暂无法确认/);
   assert.match(context.contextString, /词法/);
+  assert.match(context.contextString, /6 条候选尚未核对出结论/);
   assert.equal(context.messageSearch.searchId, 'immutable-search');
 });
 

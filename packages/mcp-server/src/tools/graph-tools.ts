@@ -17,13 +17,16 @@ import { deploymentDefaults, formatRecallMeta } from '@cat-cafe/shared';
 import { z } from 'zod';
 import type { ToolResult } from './file-tools.js';
 import { errorResult, successResult } from './file-tools.js';
+import { resolveInvocationEnv } from './invocation-auth.js';
 
 const defineTool = defineMcpMigrationFactory('graph-tools.ts', undefined, {
   resourceFamily: 'evidence-navigation',
   authority: 'local-runtime',
 });
 
-const API_URL = process.env['CAT_CAFE_API_URL'] ?? deploymentDefaults.apiBaseUrl;
+function resolveApiUrl(): string {
+  return resolveInvocationEnv('CAT_CAFE_API_URL') ?? deploymentDefaults.apiBaseUrl;
+}
 
 const RELATION_TYPES = ['wikilink', 'doc_link', 'feature_ref', 'related_to'] as const;
 
@@ -126,7 +129,7 @@ export async function handleGraphResolve(input: {
     params.set('relations', input.relations.join(','));
   }
 
-  const url = `${API_URL}/api/library/graph/resolve?${params.toString()}`;
+  const url = `${resolveApiUrl()}/api/library/graph/resolve?${params.toString()}`;
 
   try {
     const response = await fetch(url);

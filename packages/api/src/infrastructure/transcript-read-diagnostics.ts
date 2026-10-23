@@ -4,9 +4,10 @@ import type {
 } from '../domains/cats/services/session/transcript-index/transcript-read-observer.js';
 import type { ModuleWorkerTiming } from '../utils/module-worker-timing.js';
 
-export type TranscriptReadStage = 'canonical' | 'generations';
+export type TranscriptReadStage = 'canonical' | 'generations' | 'files';
 export const REQUEST_GENERATIONS_OPERATION = 'GET /api/invocations/:invocationId/request-generations';
 interface Options {
+  operation?: string;
   onEvent: (event: Record<string, unknown>) => void;
   windowMs?: number;
   maxReports?: number;
@@ -27,8 +28,9 @@ function processFields(timing: ModuleWorkerTiming) {
   };
 }
 
-/** Only the two request-generations reads opt in; no ALS/request slots or payload retention. */
+/** Explicit callers opt in; no ALS/request slots or payload retention. */
 export function createTranscriptReadDiagnostics(options: Options) {
+  const operation = options.operation ?? REQUEST_GENERATIONS_OPERATION;
   const now = options.now ?? performance.now.bind(performance);
   const startedAt = now();
   const windowMs = options.windowMs ?? 15 * 60_000;
@@ -86,7 +88,7 @@ export function createTranscriptReadDiagnostics(options: Options) {
     clearTimeout(timer);
     emit({
       type: 'transcript_read_coverage_end',
-      operation: REQUEST_GENERATIONS_OPERATION,
+      operation,
       reason,
       elapsedMs: now() - startedAt,
       ...coverage,
@@ -116,7 +118,7 @@ export function createTranscriptReadDiagnostics(options: Options) {
     ++coverage.observedReads;
     const readSequence = ++sequence; // server-local; repeated client request-id values do not merge reads
     let completed = false;
-    const identity = { operation: REQUEST_GENERATIONS_OPERATION, requestId, stage, readSequence };
+    const identity = { operation, requestId, stage, readSequence };
     return {
       onRead(metrics: TranscriptReadMetrics) {
         if (completed || !isActive()) return;

@@ -106,6 +106,7 @@ export function PluginManagerContent({
   onMarketplaceChange,
   onDirectoryInstall,
   onSetEnabled,
+  onRepair,
   onRequestEnable,
   onUninstall,
   onConfigure,
@@ -133,6 +134,7 @@ export function PluginManagerContent({
   onMarketplaceChange?: () => Promise<void>;
   onDirectoryInstall?: (path: string) => Promise<void>;
   onSetEnabled?: (pluginId: string, enabled: boolean) => void;
+  onRepair?: (pluginId: string) => void;
   onRequestEnable?: (pluginId: string) => void | Promise<void>;
   onUninstall?: (pluginId: string) => void;
   onConfigure?: (pluginId: string, updates: readonly { key: string; value: string | null }[]) => void;
@@ -176,6 +178,7 @@ export function PluginManagerContent({
           setMobileDetailOpen(true);
         }}
         onInstall={() => onInstall?.(plugin.id)}
+        onRepair={onRepair ? () => onRepair(plugin.id) : undefined}
         onSetEnabled={(enabled) => onSetEnabled?.(plugin.id, enabled)}
         onBlockedToggle={() => {
           selection.select(plugin.id);

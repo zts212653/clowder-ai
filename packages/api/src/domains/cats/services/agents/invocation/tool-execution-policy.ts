@@ -143,3 +143,24 @@ export function toolExecutionPolicyDenial(
     ? { reason: 'replay_denied_tool', toolName }
     : { reason: 'read_only_tool_policy', toolName };
 }
+
+/**
+ * Project a durable invocation policy onto the exact tool names an in-process
+ * carrier may advertise and execute. `undefined` means the invocation has no
+ * durable policy (the family surface applies). Every current durable mode
+ * denies the MCP gateway surface: read_only denies all tools, while
+ * callback_allowlist and plugin_native are callback-route/plugin-action
+ * boundaries that an MCP tool name cannot represent, so they fail closed.
+ */
+export function toolExecutionPolicyAllowedToolNames(
+  policy: ToolExecutionPolicy | undefined,
+): readonly string[] | undefined {
+  if (!policy) return undefined;
+  const normalized = normalizeToolExecutionPolicy(policy);
+  switch (normalized.mode) {
+    case 'read_only':
+    case 'callback_allowlist':
+    case 'plugin_native':
+      return [];
+  }
+}

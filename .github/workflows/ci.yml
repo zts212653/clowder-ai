@@ -65,6 +65,11 @@ jobs:
           --script test:onboarding:production-contracts
       - run: pnpm --filter @cat-cafe/shared build
       - run: pnpm --filter @cat-cafe/api build
+      - name: Managed Codex layout link diagnostic
+        run: >-
+          pnpm --filter @cat-cafe/api exec node ./scripts/with-test-home.mjs
+          node --import tsx --test --test-timeout=60000 --test-name-pattern="managed layout"
+          test/codex-managed-layout-diagnostic.test.ts
       - name: ACP Host policy matrix and existing Unix permissions
         run: >-
           node --import tsx --test
@@ -164,6 +169,7 @@ jobs:
     timeout-minutes: 15
     outputs:
       mode: ${{ steps.contract.outputs.mode }}
+      plan-artifact-id: ${{ steps.plan_artifact.outputs.artifact-id }}
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -180,6 +186,7 @@ jobs:
             packages/api/scripts/plan-public-test-shards.mjs
             packages/api/scripts/run-public-test-shard.mjs
             packages/api/scripts/summarize-public-test-shards.mjs
+            packages/api/scripts/select-public-test-reports.mjs
             packages/api/scripts/public-test-provenance.mjs
             packages/api/scripts/resolve-public-test-files.mjs
           )
@@ -210,10 +217,11 @@ jobs:
           mkdir -p "$RUNNER_TEMP/public-test"
           pnpm --filter @cat-cafe/api run test:public:plan -- --output "$RUNNER_TEMP/public-test/plan.json"
       - name: Upload exact public-test plan
+        id: plan_artifact
         if: steps.contract.outputs.mode == 'sharded'
         uses: actions/upload-artifact@v4
         with:
-          name: public-test-plan-${{ github.sha }}
+          name: public-test-plan-${{ github.sha }}-attempt-${{ github.run_attempt }}
           path: ${{ runner.temp }}/public-test/plan.json
           if-no-files-found: error
 
@@ -245,8 +253,9 @@ jobs:
       - name: Download exact public-test plan
         uses: actions/download-artifact@v4
         with:
-          name: public-test-plan-${{ github.sha }}
+          artifact-ids: ${{ needs.public-test-prepare.outputs.plan-artifact-id }}
           path: ${{ runner.temp }}/public-test
+          merge-multiple: true
       - name: Install owned Redis test executables
         if: matrix.lane != 'serial-shared'
         run: |
@@ -291,9 +300,9 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: public-test-report-${{ github.sha }}-${{ matrix.lane }}
+          name: public-test-report-${{ github.sha }}-${{ matrix.lane }}-attempt-${{ github.run_attempt }}
           path: ${{ runner.temp }}/public-test/reports/${{ matrix.lane }}.json
-          if-no-files-found: warn
+          if-no-files-found: error
 
   public-test-summary:
     name: Public test evidence
@@ -309,18 +318,26 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 24.20.0
-      - name: Download exact plan and all lane reports
+      - name: Download exact public-test plan
         uses: actions/download-artifact@v4
         with:
-          pattern: public-test-*
-          path: ${{ runner.temp }}/public-test/artifacts
+          artifact-ids: ${{ needs.public-test-prepare.outputs.plan-artifact-id }}
+          path: ${{ runner.temp }}/public-test/plan
           merge-multiple: true
+      - name: Download all public-test report attempts without merging
+        uses: actions/download-artifact@v4
+        with:
+          pattern: public-test-report-${{ github.sha }}-*
+          path: ${{ runner.temp }}/public-test/artifacts
+          merge-multiple: false
       - name: Prove complete public-test coverage and summarize timing
         run: |
-          mkdir -p "$RUNNER_TEMP/public-test/reports"
-          find "$RUNNER_TEMP/public-test/artifacts" -name '*.json' -exec cp {} "$RUNNER_TEMP/public-test/reports/" \;
-          plan_path=$(find "$RUNNER_TEMP/public-test/artifacts" -name 'plan.json' -print -quit)
-          test -n "$plan_path"
+          plan_path="$RUNNER_TEMP/public-test/plan/plan.json"
+          node packages/api/scripts/select-public-test-reports.mjs \
+            --plan "$plan_path" \
+            --artifacts-dir "$RUNNER_TEMP/public-test/artifacts" \
+            --reports-dir "$RUNNER_TEMP/public-test/reports" \
+            --sha "$GITHUB_SHA" --attempt "$GITHUB_RUN_ATTEMPT"
           node packages/api/scripts/summarize-public-test-shards.mjs \
             --plan "$plan_path" \
             --reports-dir "$RUNNER_TEMP/public-test/reports" \
@@ -342,7 +359,7 @@ jobs:
       - name: Upload public-test evidence
         uses: actions/upload-artifact@v4
         with:
-          name: public-test-summary-${{ github.sha }}
+          name: public-test-summary-${{ github.sha }}-attempt-${{ github.run_attempt }}
           path: ${{ runner.temp }}/public-test/summary.json
           if-no-files-found: error
 

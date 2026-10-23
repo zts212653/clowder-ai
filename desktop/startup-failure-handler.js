@@ -1,4 +1,5 @@
 const { safeErrorMessage } = require('./update-network-diagnostics');
+const { getStartupErrorDiagnostics, logStartupErrorDiagnostics } = require('./startup-error-diagnostics');
 
 /** Share the visible startup failure path between first launch and window recovery. */
 function createStartupFailureHandler({
@@ -19,9 +20,11 @@ function createStartupFailureHandler({
     if (isQuitting()) return Promise.resolve();
     if (!handling) {
       const message = safeErrorMessage(error);
+      const diagnostics = getStartupErrorDiagnostics(error);
       setPhase('failed');
       dbg(`Desktop startup FAILED: ${message}`);
-      reportStartup('failed', message);
+      logStartupErrorDiagnostics(dbg, diagnostics);
+      reportStartup('failed', message, diagnostics);
       sendSplashStatus('Startup failed: 请查看启动错误与日志');
       // One failure owns the shutdown: later failures share the same promise, so
       // services are stopped once and the returned promise is never orphaned.

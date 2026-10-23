@@ -68,6 +68,9 @@ html[data-shell="v2"] {
   border-radius: 50%;
   box-shadow: 0 0 0 2px var(--shell-work);
 }
+.cafe-nameplate-avatar-square {
+  border-radius: 8px;
+}
 .cafe-nameplate-name {
   min-width: 0;
   overflow: hidden;

@@ -6,6 +6,7 @@ import {
   type CapabilityTipAudience,
   type CapabilityTipContext,
   type CapabilityTipSurface,
+  getFeatureDemo,
   selectCapabilityTip,
   type TipExposureState,
   validateCapabilityTipInventory,
@@ -20,7 +21,9 @@ import {
   markTipExposed,
   resetExposureScope,
 } from '@/lib/capabilityTipExposure';
+import { recordFeatureDemoStage } from '@/lib/feature-demo-telemetry';
 import { useConciergeStore } from '@/stores/conciergeStore';
+import { useFeatureDemoStore } from '@/stores/featureDemoStore';
 import { replyBodyCopy } from './reply-body.shell-copy';
 import { useShellCopy } from './shell/shell-copy';
 import { useShellPresentation } from './shell/shell-presentation';
@@ -67,6 +70,13 @@ function TipContent({
   const isV2 = useShellPresentation() === 'v2';
   const t = useShellCopy(replyBodyCopy);
   const surfaceHref = capabilitySurfaceHref(tip);
+  const demoSession = useMemo(
+    () => ({ demoId: tip.demoId ?? '', tipId: tip.id, context: matchedContext, surface }),
+    [tip, matchedContext, surface],
+  );
+  useEffect(() => {
+    if (getFeatureDemo(tip.demoId)) recordFeatureDemoStage(demoSession, 'exposed');
+  }, [tip.demoId, demoSession]);
   const recordAction = (actionType: 'open_concierge_draft' | 'open_capability_surface') => {
     recordCapabilityTipEvent({
       event: 'capability_tip_action',
@@ -86,7 +96,25 @@ function TipContent({
   return (
     <>
       <span className="shrink-0 font-medium text-cafe-secondary">{isV2 ? t.tip : 'Tip'}</span>
-      <span className="min-w-0 flex-1 break-words">{tip.body}</span>
+      <span className={`min-w-0 flex-1 break-words ${getFeatureDemo(tip.demoId) ? 'basis-full sm:basis-0' : ''}`}>
+        {tip.body}
+      </span>
+      {getFeatureDemo(tip.demoId) && (
+        <button
+          type="button"
+          data-testid="capability-tip-watch-demo"
+          onClick={() => {
+            recordFeatureDemoStage(demoSession, 'opened');
+            useFeatureDemoStore.getState().open(demoSession);
+          }}
+          className="inline-flex shrink-0 items-center gap-1 rounded-md bg-cafe-accent px-2 py-1 text-xs font-medium text-[var(--cafe-accent-foreground)] hover:opacity-90"
+        >
+          <svg aria-hidden="true" width="12" height="12" viewBox="0 0 12 12" fill="currentColor">
+            <path d="M3 1.5 10 6l-7 4.5z" />
+          </svg>
+          观看演示
+        </button>
+      )}
       {surfaceHref ? (
         <a
           data-testid="capability-tip-open-surface"
@@ -241,11 +269,17 @@ export function CapabilityTipStrip({
     <div
       data-testid="capability-tip-strip"
       data-tip-id={showContent ? tip.id : undefined}
-      className="tip-thinking mt-1 flex min-h-8 w-full max-w-full items-start gap-2 rounded-md border border-cafe bg-cafe-surface-elevated/70 px-2.5 py-2 text-xs leading-5 text-cafe-muted"
+      className={`tip-thinking mt-1 flex min-h-8 w-full max-w-full items-start gap-2 rounded-md border border-cafe bg-cafe-surface-elevated/70 px-2.5 py-2 text-xs leading-5 text-cafe-muted ${getFeatureDemo(tip?.demoId) ? 'flex-wrap' : ''}`}
       role="status"
     >
       {showContent ? (
-        <TipContent tip={tip} matchedContext={matchedContext} surface={surface} setSurfaceState={setSurfaceState} />
+        <TipContent
+          key={`${tip.id}:${rotationKey}`}
+          tip={tip}
+          matchedContext={matchedContext}
+          surface={surface}
+          setSurfaceState={setSurfaceState}
+        />
       ) : (
         <>
           <span className="sr-only">猫猫思考中</span>

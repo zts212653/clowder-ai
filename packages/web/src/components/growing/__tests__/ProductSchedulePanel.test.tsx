@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
   ownerReads: [] as EntrustedWorkOwnerReadV1[],
   loading: false,
   error: false,
+  partial: false,
   refetch: vi.fn(),
   projection: vi.fn(),
   resizeReading: null as (() => void) | null,
@@ -515,6 +516,7 @@ describe('F310 ProductSchedulePanel', () => {
     mocks.ownerReads = [];
     mocks.loading = false;
     mocks.error = false;
+    mocks.partial = false;
     mocks.refetch.mockReset();
     mocks.projection.mockReset();
     mocks.preferences = { ownerUserId: 'owner-1', revision: 0, entries: [] };
@@ -561,6 +563,21 @@ describe('F310 ProductSchedulePanel', () => {
   afterAll(() => {
     delete (globalThis as { React?: typeof React }).React;
     delete (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT;
+  });
+
+  it('keeps factual schedule rows visible while producer coverage is partial', async () => {
+    mocks.partial = true;
+    mocks.ownerReads = [
+      ownerRead({ id: 'partial', titleRef: 'message:partial', timeRole: 'review_by', time: now + 3_600_000 }),
+    ];
+
+    await act(async () => {
+      root.render(<ProductSchedulePanel now={() => now} />);
+    });
+
+    expect(container.textContent).toContain('仅部分读取，部分工作仍待确认');
+    expect(container.querySelector('[data-testid="product-schedule-item"]')).not.toBeNull();
+    expect(container.textContent).not.toContain('暂时无法读取工作与安排');
   });
 
   it('shows quiet and actionable admitted work in business-time order from typed owner reads', async () => {

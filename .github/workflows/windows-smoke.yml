@@ -35,6 +35,11 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter @cat-cafe/shared build
       - run: pnpm --filter @cat-cafe/api build
+      - name: Managed Codex layout link diagnostic
+        run: >-
+          pnpm --filter @cat-cafe/api exec node ./scripts/with-test-home.mjs
+          node --import tsx --test --test-timeout=60000 --test-name-pattern="managed layout"
+          test/codex-managed-layout-diagnostic.test.ts
       - name: Plugin native auth link diagnostic
         run: >-
           pnpm --filter @cat-cafe/api exec node ./scripts/with-test-home.mjs
@@ -75,6 +80,16 @@ jobs:
           desktop/runtime-web-server.test.js
           desktop/runtime-web-config.test.js
           desktop/service-startup.test.js
+          desktop/project-mirror-startup-recovery.test.js
+          desktop/project-resource-materialization.test.js
+          desktop/project-resource-redirection-guard.test.js
+          desktop/project-mirror-recovery.test.js
+          desktop/project-mirror-consumer.test.js
+          desktop/project-mirror-observability.test.js
+          desktop/project-mirror-diagnostic-history.test.js
+          desktop/startup-error-diagnostics.test.js
+          desktop/startup-mirror-diagnostics.test.js
+          desktop/startup-state.test.js
           desktop/main-renderer-lifecycle.test.js
           desktop/startup-timing.test.js
           desktop/visible-renderer.test.js
@@ -100,6 +115,8 @@ jobs:
           desktop/api-startup-cold-budget.test.mjs
           desktop/shutdown-controller.test.js
           desktop/profile-desktop-startup.test.mjs
+          desktop/profile-resources.test.cjs
+          desktop/profile-mirror-cancellation.test.js
           desktop/api-puppeteer-lazy-boundary.test.mjs
           packages/api/test/lazy-heavy-imports.test.js
           desktop/dsh-test-connection.test.mjs

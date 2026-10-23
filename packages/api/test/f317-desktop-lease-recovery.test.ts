@@ -6,8 +6,12 @@ import cookie from '@fastify/cookie';
 import Fastify from 'fastify';
 import { MessageStore } from '../src/domains/cats/services/stores/ports/MessageStore.js';
 import { packageDirectoryName } from '../src/domains/plugin/external-runtime/filesystem-package-locator.js';
+import { normalizePluginInstanceAfterRestart } from '../src/domains/plugin/host-inventory/restart-recovery.js';
 import { OfficialPluginPackageInstaller } from '../src/domains/plugin/official-package-installer.js';
-import { createDormantPluginRuntimeComposition } from '../src/domains/plugin/runtime-composition.js';
+import {
+  createDormantPluginRuntimeComposition,
+  createPluginManagerRuntimeComposition,
+} from '../src/domains/plugin/runtime-composition.js';
 import { sessionAuthPlugin, sessionRoute } from '../src/infrastructure/session-auth.js';
 import { registerConciergeDesktopRoutes } from '../src/routes/concierge-desktop.js';
 import { desktopWindowManifest, windowHtml } from './f317-window.fixture.js';
@@ -72,6 +76,23 @@ test('sleep beyond TTL stays fenced until an owner restore creates fresh desktop
   await assert.rejects(
     runtime.desktopWindows!.features.run(oldFeature.executionLease, async () => assert.fail('old effect')),
   );
+  // A real Host restart normalizes crashed -> enabled/stopped but retains the loss.
+  await runtime.inventoryStore.transaction((tx) => {
+    const instance = tx.instances.get(installed.pluginInstanceId)!;
+    const normalized = normalizePluginInstanceAfterRestart(instance, now);
+    assert.ok(normalized);
+    tx.instances.put(normalized);
+  });
+  const manager = createPluginManagerRuntimeComposition({
+    runtime,
+    catalogProvider: { snapshot: async () => ({ entries: [], status: 'fresh', checkedAt: now }) },
+    catalogManifests: [],
+  }).manager;
+  const retained = (await manager.getLocal('official.companion')).plugin;
+  assert.equal(retained.live, 'stopped');
+  assert.equal(retained.actions.repair, true, 'the same retained desktop loss must stay repairable after restart');
+  await manager.repair('official.companion', { expectedRevision: retained.lifecycleRevision! });
+  assert.equal(opens, 2);
   await app.register(cookie);
   await app.register(sessionAuthPlugin);
   await app.register(sessionRoute, { ownerUserId: 'default-user' });
@@ -100,6 +121,11 @@ test('sleep beyond TTL stays fenced until an owner restore creates fresh desktop
     installed.pluginInstanceId,
     (await runtime.inventoryStore.snapshot()).instances[0]!.lifecycleRevision,
   );
+  const disabledRow = (await manager.getLocal('official.companion')).plugin;
+  assert.notEqual(disabledRow.actions.repair, true);
+  await assert.rejects(manager.repair('official.companion', { expectedRevision: disabledRow.lifecycleRevision! }), {
+    code: 'ACTION_NOT_ALLOWED',
+  });
   const disabled = await app.inject({ method: 'POST', url: '/api/concierge/desktop/show', headers, payload: {} });
   assert.equal(disabled.statusCode, 409, 'owner disable cannot be re-enabled by restore');
   assert.equal(opens, 2);

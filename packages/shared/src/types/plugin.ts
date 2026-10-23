@@ -235,6 +235,8 @@ export interface PluginManagerDiagnostic {
 }
 
 export interface PluginManagerActions {
+  /** Explicit retry of a failed activation through the existing lifecycle authority. */
+  repair?: boolean;
   install: boolean;
   setEnabled: boolean;
   uninstall: boolean;

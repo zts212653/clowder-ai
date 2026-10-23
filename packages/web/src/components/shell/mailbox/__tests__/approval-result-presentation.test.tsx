@@ -84,7 +84,14 @@ it('the actual retained-result consumer supplies its verified owner and live she
   });
   session.model = {
     ...INITIAL_RECONCILE,
-    state: { kind: 'decided', terminal: { resolution: 'rejected', decidedBy: 'default-user' } },
+    state: {
+      kind: 'decided',
+      terminal: {
+        resolution: 'rejected',
+        decidedBy: 'default-user',
+        decidedAt: new Date(2026, 9, 22, 5, 44).getTime(),
+      },
+    },
   };
   const container = document.createElement('div');
   document.body.append(container);
@@ -97,7 +104,11 @@ it('the actual retained-result consumer supplies its verified owner and live she
     writeShellLanguage('en');
     root.render(<RetainedResult session={session} sessions={sessions} />);
   });
-  expect(container.querySelector('[data-testid="mailbox-retained-line"]')?.textContent).toBe('Rejected · You');
+  expect(container.querySelector('[data-testid="proposal-result-label"]')?.textContent).toBe('Declined · 05:44');
+  expect(container.querySelector('[data-testid="proposal-result-details"]')).toBeNull();
+  await act(async () =>
+    container.querySelector<HTMLButtonElement>('[data-testid="thread-proposal-result"] button')?.click(),
+  );
   expect(container.textContent).not.toContain('default-user');
   expect(container.querySelector('[data-testid="mailbox-retained-dismiss"]')?.textContent).toBe('Got it');
   expect(container.textContent).not.toContain('**A real result**');

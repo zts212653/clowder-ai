@@ -8,7 +8,7 @@ description: "让开源团队仓成为共享代码的上游：家里和团队的
 description_source: human
 description_author: opus55
 description_updated_at: 2026-10-20T10:45:00Z
-tips_exempt: "Phase A/B 将既有部署显示、默认值、测试夹具、构建投影及两侧文件归属接回各自真相源，不新增用户操作入口。用户名字仍沿用已有设置；模板、构建生成与导出/回流边界属于开发维护流程，不需要新增应用内能力提示。"
+tips_exempt: "2026-10-23 续核：本次补记 Phase B 的测试、构建、模板与文件归属验收，以及公开 compiler 的既有 edition 边界修复；名字仍沿用已有设置，维护者仍走原构建和同步入口。阶段收口记录不新增应用内操作或发现入口，也不表示 Phase C 发布流程已经启用。"
 ---
 
 # F330: 团队仓当上游
@@ -69,13 +69,15 @@ Sol6.1 执行，Sol5.6 review（operator 指定）。前期分片交付；2026-1
 
 **当前交付（2026-10-21）**：余项 [PR #5854](https://github.com/zts212653/clowder-ai/pull/5854) 已于 14:15:11 UTC 合入，提交 `1498fcf75c7ce5247e6d928232237d8d0a27e3ac`。Sol5.6 完整初审唯一 P1（固定历史来源误跟随部署仓库）修复后，iterative 复审批准精确 HEAD `28e286f95ce971307f1edec491da040e9704fac3`（`[thread-id]#private-source-id`）。后续公开 CI 暴露的两项遗漏由 #5873 修复；包含全部切片和修复的既定同步最终候选已通过真实验收，并于 23:37:36 UTC 合入公开 #1649，落地 tree 与被测 tree 相同。AC-A1–A5 全部成立，Phase A 收口；本线未执行在线 runtime 激活。后续 Phase B 沿原授权在本线程继续，F330 整项仍为 in-progress。
 
-### Phase B: 去改写第二批（测试、构建、模板、两边不同的文件）
+### Phase B: 去改写第二批（已完成，子线程 `[thread-id]`）
 
 Phase A 的实际同步依赖已于 2026-10-21 23:37:36 UTC 满足。按原安排（`[thread-id]#private-source-id` 及执行交接 `private-source-id`），由 Sol6.1 在同一线程继续，Sol5.6 review；先核清剩余消费者及文件归属，再按 AC-B1–B3 实施。桌面安装身份/发行工件、公开分支切换和新调度不进入本阶段。
 
 - 测试 fixture 化，去掉本机路径；system-prompt hash 与内置插件包改为构建时生成；家里专属 package.json 脚本拆出；L0 模板与 hooks 中的家里句子模板化。
 - **两边本来就不同的文件**（CLAUDE.md、README、cat-config 等）：逐个确定真实归属（只属于家里 / 只属于公开版 / 两边各自生成），并为四种情况写下预期结果并实测：上游单边修改、上游删除、双方都修改、全新 checkout。再按结果选实现方式。**不使用 `.gitattributes merge=ours` 作为保护**：它只在双方都改动时才会被调用，上游单边修改仍会直接进入家里文件；自定义 driver 还要求本地 git 配置，只提交 `.gitattributes` 不会生效（小星星已隔离复现两例）。
 - **依赖**：涉及名字的部分（测试断言、L0 模板、hash、插件包）要等 Phase A 确定名字与 @ 句柄的读取方式，否则会在同一批文件、同一份 `_sanitize-rules.pl` 与同一套验收基线上冲突。不涉及名字的部分（文件归属与四种情况实测、package.json 脚本拆分）可以先独立准备，合入与 Phase A 错开。
+
+**当前交付（2026-10-22）**：整阶段 [PR #5904](https://github.com/zts212653/clowder-ai/pull/5904) 于 08:54:53 UTC 合入 `112c97ecf182097f9b20ac1186a4c4465d2a8b56`。Sol5.6 完整实现审查及两轮迭代批准 `a390bfc3c1`（`private-source-id`）；Argon 跨族 gate meta-risk 审查修后批准最终 HEAD `581c80695e`（`private-source-id`）。实际 daily 消费又发现公开 compiler 退役 Work 选项被重开，沿原 source 责任修复的 [#5917](https://github.com/zts212653/clowder-ai/pull/5917) 于 10:00:59 UTC 合入 `03a143731ad8798d6150258845a64be38db21c02`，Sol5.6 独审批准 `0d73671c0c`（`private-source-id`）。home 保留 Work，public 仅 owner/public，同时保全 edition variables、单次渲染和 dossierRoot。原有隐私与行为差异边界未退役。
 
 ### Phase C: 发布层（next 汇流，main 发版）
 
@@ -143,9 +145,9 @@ Phase A 的实际同步依赖已于 2026-10-21 23:37:36 UTC 满足。按原安�
 原生 writer 706 秒成功，F251 为 3,856 pass / 0 block / 0 override；1,409 处置、9 个社区等价路径及 Windows workflow 保全。原生 CI 检查 consistent，7 lane 覆盖 2,676 个计划文件、9 个原始 archive digest；计划外启动隔离 55/55。F306 pin 和 archive owner adapter 两个原失败文件在最终 CI 的文件级回归均 passed。文件级原件不支持全部 subtest 零 skip，不作该声明。规则退役的逐条替代与 privacy/behavior 保留证据仍沿前文账本，旧 851/1a7 失败不覆盖。
 
 ### Phase B（去改写第二批）
-- [ ] AC-B1: 测试不再依赖家里数据断言与 `/home/user 本机路径；system-prompt hash 与内置插件包由构建生成，不在同步时改写
-- [ ] AC-B2: L0 模板与 hooks 中的家里句子改为模板变量，满足 AC-A4 的四项检查
-- [ ] AC-B3: 两边本来就不同的每个文件都有写明的归属，并在隔离仓库实测四种情况（上游单边修改、上游删除、双方修改、全新 checkout）的结果符合预期；不以 `.gitattributes merge=ours` 作为保护
+- [x] AC-B1: 测试不再依赖家里数据断言与 `/home/user 本机路径；system-prompt hash 与内置插件包由构建生成，不在同步时改写
+- [x] AC-B2: L0 模板与 hooks 中的家里句子改为模板变量，满足 AC-A4 的四项检查
+- [x] AC-B3: 两边本来就不同的每个文件都有写明的归属，并在隔离仓库实测四种情况（上游单边修改、上游删除、双方修改、全新 checkout）的结果符合预期；不以 `.gitattributes merge=ours` 作为保护
 
 ### Phase C（发布层）
 - [ ] AC-C1: next 快进到 main；next 上实际跑通与 main 相同的 CI（Linux 与 Windows）
@@ -174,7 +176,7 @@ Phase A 的实际同步依赖已于 2026-10-21 23:37:36 UTC 满足。按原安�
 | R2 | 「保证家里也高效开发且吃到开源仓的东西」 | AC-C3, AC-E2 | 完整旅程记录与对照数据 | [ ] |
 | R3 | 「如果新流程更费 token 还没现在稳定，那收益是什么」 | AC-E1, AC-E2, AC-F3 | 总 token / 耗时 / 人工介入的基线与对照 | [ ] |
 | R4 | 「开源仓得有 dev/next……发版本再进 main，保证 main 稳定」 | AC-C1–C4 | next/main 提交、CI、tag、hotfix 演练 | [ ] |
-| R5 | 「不喜欢 @you……内外不一样、对外不友好的统一掉」 | AC-A1–A3, AC-B1–B3 | 公开候选实测、分类计数 | [ ] |
+| R5 | 「不喜欢 @you……内外不一样、对外不友好的统一掉」 | AC-A1–A3, AC-B1–B3 | 公开候选实测、分类计数 | [x] |
 | R6 | 「别启动开源仓把家里搞废了」 | AC-A4, AC-F2 | 四项检查；隔离启动记录与守卫测试 | [ ] |
 | R7 | 转组织后 fork 和 star 保留 | AC-D1, AC-D2 | 转前转后数字对照 | [ ] |
 

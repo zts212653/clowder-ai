@@ -6,6 +6,8 @@ import type { IEventMemoryStore } from '../EventMemoryStore.js';
 import type { IEvidenceStore } from '../interfaces.js';
 import type { PersonMemoryRecallService } from '../people/PersonMemoryRecallService.js';
 import type { TasteMemoryLifecycleStore } from '../taste/TasteMemoryLifecycleStore.js';
+import { ContextSourceAdmission } from './ContextSourceAdmission.js';
+import type { ContextSourceOpportunityStore } from './ContextSourceOpportunityStore.js';
 import type { MemoryCueDrillHandleService } from './MemoryCueDrillHandleService.js';
 import type { MemoryCueEpisodeStore } from './MemoryCueEpisodeStore.js';
 import { MemoryCueInvocationPromptService } from './MemoryCueInvocationPromptService.js';
@@ -21,10 +23,12 @@ import { ProfileCueResolver } from './resolvers/ProfileCueResolver.js';
 import { ProjectKnowledgeCueResolver } from './resolvers/ProjectKnowledgeCueResolver.js';
 import { TasteCueResolver } from './resolvers/TasteCueResolver.js';
 import { CatOwnedSeedMemoryCueSource } from './sources/CatOwnedSeedMemoryCueSource.js';
+import { ContextProjectCueSource } from './sources/ContextProjectCueSource.js';
 import { DecisionMemoryCueSource } from './sources/DecisionMemoryCueSource.js';
 import { EventMemoryCueSource } from './sources/EventMemoryCueSource.js';
 import { CanonicalOperationalPrecedentCueSource } from './sources/OperationalPrecedentCueSource.js';
 import { PersonMemoryCueSource } from './sources/PersonMemoryCueSource.js';
+import { PrimerMemoryCueSource } from './sources/PrimerMemoryCueSource.js';
 import { ProfileMemoryCueSource } from './sources/ProfileMemoryCueSource.js';
 import { ProjectKnowledgeMemoryCueSource } from './sources/ProjectKnowledgeMemoryCueSource.js';
 import { CanonicalTasteMemoryCueSource } from './sources/TasteMemoryCueSource.js';
@@ -32,6 +36,7 @@ import type { ThreadOverviewMemoryCueSource } from './sources/ThreadOverviewMemo
 
 export interface MemoryCueRuntime {
   promptService: MemoryCueInvocationPromptService;
+  contextSourceAdmission?: ContextSourceAdmission;
   sourceReader: MemoryCueSourceReader;
   profileOpportunitySource: ProfileMemoryCueSource;
   eventOpportunitySource: EventMemoryCueSource;
@@ -41,6 +46,9 @@ export interface MemoryCueRuntime {
 /** Composition root for the source-backed read-only canonical lanes. */
 export function createMemoryCueRuntime(input: {
   threadOverviewSource?: ThreadOverviewMemoryCueSource;
+  contextProjectDiscovery?: ConstructorParameters<typeof ContextProjectCueSource>[0];
+  contextSourceOpportunityStore?: ContextSourceOpportunityStore;
+  contextSourceAuthorization?: Omit<ConstructorParameters<typeof ContextSourceAdmission>[0], 'store' | 'messages'>;
   episodeStore: MemoryCueEpisodeStore;
   handles: MemoryCueDrillHandleService;
   evidenceStore: Pick<IEvidenceStore, 'getByAnchor'>;
@@ -60,6 +68,10 @@ export function createMemoryCueRuntime(input: {
     : null;
   const operationalSource = new CanonicalOperationalPrecedentCueSource(input.evidenceStore);
   const tasteSource = new CanonicalTasteMemoryCueSource(input.tasteRepository, input.ownerUserId, input.tasteLifecycle);
+  const primerSource = new PrimerMemoryCueSource(input.profileRepository);
+  const contextProjectSource = input.contextProjectDiscovery
+    ? new ContextProjectCueSource(input.contextProjectDiscovery)
+    : undefined;
   const profileSource = new ProfileMemoryCueSource({
     ownerUserId: input.ownerUserId,
     repository: input.profileRepository,
@@ -86,17 +98,37 @@ export function createMemoryCueRuntime(input: {
     new PersonEntityCueResolver(personSource ?? { resolve: async () => null }, input.entityRegistry),
     new OperationalPrecedentCueResolver(operationalSource),
     new TasteCueResolver(tasteSource),
-    new ProfileCueResolver(profileSource),
+    new ProfileCueResolver(profileSource, primerSource),
     new EventCueResolver(eventSource),
     new DecisionCueResolver(decisionSource),
-    new ProjectKnowledgeCueResolver(projectKnowledgeSource),
+    new ProjectKnowledgeCueResolver(projectKnowledgeSource, contextProjectSource, input.messageStore),
     new CatOwnedSeedCueResolver(catOwnedSeedSource),
     input.threadOverviewSource ?? { family: 'thread_overview', resolverVersion: 1, resolve: async () => [] },
   ]);
   const plane = new MemoryCuePlaneService(registry, input.episodeStore);
-  return {
+  const contextSourceAdmission =
+    input.contextSourceOpportunityStore && input.contextSourceAuthorization
+      ? new ContextSourceAdmission({
+          ...input.contextSourceAuthorization,
+          messages: input.messageStore,
+          store: input.contextSourceOpportunityStore,
+        })
+      : undefined;
+  const runtime: MemoryCueRuntime = {
+    ...(contextSourceAdmission ? { contextSourceAdmission } : {}),
     promptService: new MemoryCueInvocationPromptService({
       plane,
+      sourceReader: { read: (request) => runtime.sourceReader.read(request) },
+      validateContextSource: (id, scope, cat, now) =>
+        contextSourceAdmission?.validate(id, scope, cat, now) ?? Promise.resolve(false),
+      recordOmission: (id, reason) => input.contextSourceOpportunityStore?.recordOmission(id, reason),
+      onProviderCommitted: (receipts, confirmation) => {
+        for (const receipt of receipts)
+          input.contextSourceOpportunityStore?.markProviderCommitted(
+            receipt.event.opportunityId,
+            confirmation.generationId,
+          );
+      },
       createDrillHandle: (coordinate) => input.handles.issue(coordinate),
     }),
     profileOpportunitySource: profileSource,
@@ -104,6 +136,21 @@ export function createMemoryCueRuntime(input: {
     ...(input.threadOverviewSource ? { threadOverviewOpportunitySource: input.threadOverviewSource } : {}),
     sourceReader: {
       async read(request) {
+        if (request.anchor.startsWith('project-collection:') || request.anchor.startsWith('profile:primer:')) {
+          if (
+            !request.opportunityId ||
+            !request.consumerCatId ||
+            !contextSourceAdmission ||
+            !(await contextSourceAdmission.validate(
+              request.opportunityId,
+              request.scope,
+              request.consumerCatId,
+              Date.now(),
+            ))
+          ) {
+            return { status: 'not_available', invalidationReason: 'scope_revoked' };
+          }
+        }
         if (request.family === 'thread_overview') {
           return input.threadOverviewSource
             ? input.threadOverviewSource.read({
@@ -124,6 +171,14 @@ export function createMemoryCueRuntime(input: {
             : { status: 'not_available' as const, invalidationReason: 'source_forgotten' as const };
         }
         if (request.family === 'evidence') {
+          if (request.anchor.startsWith('project-collection:'))
+            return contextProjectSource
+              ? contextProjectSource.read({
+                  scope: request.scope,
+                  anchor: request.anchor,
+                  expectedRevision: request.expectedRevision,
+                })
+              : { status: 'not_available' as const, invalidationReason: 'scope_revoked' as const };
           if (/^ADR-\d{3}$/.test(request.anchor)) {
             return decisionSource.read({
               anchor: request.anchor,
@@ -142,6 +197,13 @@ export function createMemoryCueRuntime(input: {
           });
         }
         if (request.family === 'profile') {
+          if (request.anchor.startsWith('profile:primer:'))
+            return primerSource.read({
+              ownerUserId: request.scope.ownerUserId,
+              consumerCatId: request.consumerCatId,
+              anchor: request.anchor,
+              expectedRevision: request.expectedRevision,
+            });
           return profileSource.read({
             ownerUserId: request.scope.ownerUserId,
             anchor: request.anchor,
@@ -175,4 +237,5 @@ export function createMemoryCueRuntime(input: {
       },
     },
   };
+  return runtime;
 }

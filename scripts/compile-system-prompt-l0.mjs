@@ -432,13 +432,17 @@ export function resolveUserCapsule(profileDir, relationshipKey) {
     // No corpus yet — no pointer line.
   }
 
+  const entries = [primerEntry, corpusEntry].filter(Boolean);
+  const pointers = entries.length
+    ? [...entries, '读源走本轮绑定的 Clowder AI 连接；勿用独立 App 的同名工具替代。'].join('\n')
+    : '';
+
   // State 1: missing / unreadable → pointer entries only, if any exist.
   // Capsule, primer, and corpus are independently optional profile layers.
   let raw;
   try {
     raw = readFileSync(capsulePath, 'utf8');
   } catch {
-    const pointers = [primerEntry, corpusEntry].filter(Boolean).join('\n');
     return pointers;
   }
 
@@ -447,10 +451,8 @@ export function resolveUserCapsule(profileDir, relationshipKey) {
   // later profile revision.
   let section = renderUserCapsuleSection(raw);
   if (!section) {
-    const pointers = [primerEntry, corpusEntry].filter(Boolean).join('\n');
     return pointers;
   }
-  const pointers = [primerEntry, corpusEntry].filter(Boolean).join('\n');
   if (pointers) section += `\n\n${pointers}`;
 
   return section;

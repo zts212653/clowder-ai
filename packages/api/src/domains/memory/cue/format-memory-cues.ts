@@ -45,7 +45,7 @@ function operationalKnowledgeAction(cue: CueEnvelopeV1): string[] {
   }
   if (cue.resolverFamily === 'project_knowledge') {
     return [
-      'Action: Drill before responding; record applied only if this exact feature source grounds the current task response, otherwise dismissed.',
+      'Action: Drill before responding; record applied only if this project source grounds the current task response, otherwise dismissed.',
     ];
   }
   return [];
@@ -69,6 +69,14 @@ function threadOverviewAction(cue: CueEnvelopeV1): string[] {
   ];
 }
 
+function drillInstructions(cue: CueEnvelopeV1): string[] {
+  return [
+    `Family: ${cue.drill.family}`,
+    `Handle: ${cue.drill.handle}`,
+    'Drill: cat_cafe_drill_memory_cue(handle=Handle); then cat_cafe_record_memory_cue_outcome(handle=Handle, outcome=applied|dismissed). Use the exact Handle value for both.',
+  ];
+}
+
 export function renderMemoryCue(cue: CueEnvelopeV1): string {
   return [
     `<memory-cue v="1" cue-id="${cue.cueId}" why-now="${cue.whyNow}">`,
@@ -77,7 +85,7 @@ export function renderMemoryCue(cue: CueEnvelopeV1): string {
     `Source: ${cue.source.anchor} @ ${cue.source.revision}${
       cue.source.asOf === undefined ? '' : ` asOf=${new Date(cue.source.asOf).toISOString()}`
     }`,
-    `Drill: ${cue.drill.family} ${cue.drill.handle}`,
+    ...drillInstructions(cue),
     ...explicitTasteAction(cue),
     ...profileAction(cue),
     ...eventAction(cue),
@@ -92,7 +100,7 @@ export function renderMemoryCue(cue: CueEnvelopeV1): string {
 export function renderMemoryCuePointer(cue: CueEnvelopeV1): string {
   return [
     `<recall-opportunity-pointer v="1" opportunity-id="${cue.opportunityId}">`,
-    `Drill: ${cue.drill.family} ${cue.drill.handle}`,
+    ...drillInstructions(cue),
     ...explicitTasteAction(cue),
     ...profileAction(cue),
     ...eventAction(cue),
@@ -105,7 +113,7 @@ export function renderMemoryCuePointer(cue: CueEnvelopeV1): string {
 
 export function formatMemoryCues(
   candidates: readonly CueEnvelopeV1[],
-  options: { maxTokens: number },
+  options: { maxTokens: number; pointerOnly?: boolean },
 ): FormattedMemoryCues {
   if (!Number.isInteger(options.maxTokens) || options.maxTokens <= 0) {
     return { cues: [], text: '', estimatedTokens: 0 };
@@ -114,7 +122,7 @@ export function formatMemoryCues(
   const blocks: string[] = [];
   let estimatedTokens = 0;
   for (const cue of candidates) {
-    const nextBlocks = [...blocks, renderMemoryCue(cue)];
+    const nextBlocks = [...blocks, options.pointerOnly ? renderMemoryCuePointer(cue) : renderMemoryCue(cue)];
     const nextText = nextBlocks.join('\n\n');
     const nextTokens = estimateTokens(nextText);
     if (nextTokens > options.maxTokens) continue;
@@ -129,7 +137,7 @@ export function renderThreadOpeningClue(cue: CueEnvelopeV1): string {
   return [
     `<thread-opening-clue v="1" source-tier="T2" cue-id="${cue.cueId}" opportunity-id="${cue.opportunityId}">`,
     ...threadOverviewAction(cue),
-    `Drill: ${cue.drill.family} ${cue.drill.handle}`,
+    ...drillInstructions(cue),
     '</thread-opening-clue>',
   ].join('\n');
 }

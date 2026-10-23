@@ -21,14 +21,19 @@ import {
   type Viewer,
 } from '../cats/services/stores/visibility.js';
 import type { IEvidenceStore, SearchOptions } from './interfaces.js';
-import type { MessagePassageCandidate, MessagePassageSearchExecution } from './message-passage-search-types.js';
-import { boundMessageSearchResponse, MESSAGE_SEARCH_RESPONSE_BUDGET } from './message-search-budget.js';
+import type { MessagePassageCandidate } from './message-passage-search-types.js';
+import { runNativeQueryBatch } from './message-query-native.js';
+import { candidateKey } from './message-query-protocol.js';
+import { MessageQueryQualifier } from './message-query-qualifier.js';
+import { boundMessageSearchResponse, messageSearchMeta } from './message-search-budget.js';
+import { type CanonicalSearchCandidate, collectMessageSearchCandidates } from './message-search-candidates.js';
 import { buildSearchableMessageContent } from './message-search-content.js';
 import { observeMessageSearchExecution } from './message-search-execution.js';
 import {
   projectMessageSearchHighlights,
   projectMessageSearchSnippet,
   projectMessageSearchSpeaker,
+  projectQualifiedSnippet,
 } from './message-search-projection.js';
 
 export interface MessageSearchPrincipal {
@@ -44,9 +49,13 @@ interface MessageSearchServiceDeps {
   evidenceStore: Pick<IEvidenceStore, 'searchMessagePassages' | 'readMessagePassageState'>;
   messageStore: Pick<IMessageStore, 'getById'>;
   threadStore: Pick<IThreadStore, 'get' | 'list'>;
+  qualifier?: MessageQueryQualifier;
+  onTrace?: (trace: Record<string, unknown>) => void;
 }
 
-type MessageSearchExecutionContext = Pick<SearchOptions, 'signal' | 'deadlineAt'>;
+type MessageSearchExecutionContext = Pick<SearchOptions, 'signal' | 'deadlineAt'> & {
+  onTrace?: (trace: Record<string, unknown>) => void;
+};
 
 function checkSearchExecution(context: MessageSearchExecutionContext): void {
   context.signal?.throwIfAborted();
@@ -58,38 +67,12 @@ export class MessageSearchAccessError extends Error {
   readonly statusCode = 403;
 }
 
-function searchMeta(
-  input: MessageSearchInput,
-  execution: MessagePassageSearchExecution,
-  count: number,
-  limit: number,
-): MessageSearchResponse['meta'] {
-  return {
-    scope: input.threadId ? 'thread' : 'global',
-    ...(input.threadId ? { threadId: input.threadId } : {}),
-    sort: input.sort ?? 'time',
-    requestedMode: input.mode ?? 'hybrid',
-    effectiveMode: execution.meta.effectiveMode,
-    degraded: execution.meta.degraded,
-    ...(execution.meta.degradeReason ? { degradeReason: execution.meta.degradeReason } : {}),
-    hasMore: count > limit,
-    partial: true,
-    candidateLimit: execution.meta.candidateLimit,
-    semanticCandidatesLimited: execution.meta.semanticCandidatesLimited,
-    sourceCoverage: 'unknown',
-    freshness: 'unknown',
-    response: {
-      budgetChars: MESSAGE_SEARCH_RESPONSE_BUDGET,
-      serializedChars: 0,
-      truncated: false,
-      continuation: 'unavailable',
-    },
-  };
-}
-
 /** Only this projection may turn indexed message candidates into readable results. */
 export class MessageSearchService {
-  constructor(private readonly deps: MessageSearchServiceDeps) {}
+  private readonly qualifier: MessageQueryQualifier;
+  constructor(private readonly deps: MessageSearchServiceDeps) {
+    this.qualifier = deps.qualifier ?? new MessageQueryQualifier(runNativeQueryBatch);
+  }
 
   private async readableThreads(
     input: MessageSearchInput,
@@ -148,7 +131,8 @@ export class MessageSearchService {
     principal: MessageSearchPrincipal,
     query: string,
     authority: Pick<IThreadStore, 'list'> = this.deps.threadStore,
-  ): Promise<MessageSearchResult | null> {
+    evidence?: string,
+  ): Promise<CanonicalSearchCandidate | null> {
     const message = await this.readableMessage(candidate, principal);
     if (!message || !Number.isFinite(message.timestamp)) return null;
     // Recheck current thread authority after retrieval/embedding, as grants can change.
@@ -173,21 +157,30 @@ export class MessageSearchService {
     const attachmentMatches =
       !bodyMatches && query.trim() && canonical.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase());
     const useBody = message.content.trim() && !attachmentMatches;
-    const excerpt = useBody
-      ? projectMessageSearchSnippet(message.content, 'body', query)
-      : projectMessageSearchSnippet(canonical, 'attachment-text', query);
+    const excerpt = evidence
+      ? projectQualifiedSnippet(message.content, canonical, evidence)
+      : useBody
+        ? projectMessageSearchSnippet(message.content, 'body', query)
+        : projectMessageSearchSnippet(canonical, 'attachment-text', query);
     return {
       threadId: thread.id,
       messageId: message.id,
-      threadTitle: indexState.suppressThreadTitle ? `原对话 (${thread.id})` : (thread.title ?? thread.id),
-      ...projectMessageSearchSpeaker(message),
-      timestamp: message.timestamp,
-      timelineOrderAt: getTimelineOrderTime(message),
-      snippet: excerpt,
-      highlights: projectMessageSearchHighlights(excerpt.text, query),
-      match: candidate.match,
+      content: canonical,
+      candidate,
       contentRevision: createHash('sha256').update(canonical).digest('hex'),
-      publiclyQuotable: canQuoteInPublicReply(message),
+      result: {
+        threadId: thread.id,
+        messageId: message.id,
+        threadTitle: indexState.suppressThreadTitle ? `原对话 (${thread.id})` : (thread.title ?? thread.id),
+        ...projectMessageSearchSpeaker(message),
+        timestamp: message.timestamp,
+        timelineOrderAt: getTimelineOrderTime(message),
+        snippet: excerpt,
+        highlights: projectMessageSearchHighlights(excerpt.text, query),
+        match: candidate.match,
+        contentRevision: createHash('sha256').update(canonical).digest('hex'),
+        publiclyQuotable: canQuoteInPublicReply(message),
+      },
     };
   }
 
@@ -216,57 +209,6 @@ export class MessageSearchService {
       !passesManagedHoldViewerBoundary(source, principal.userId)
     )
       throw new MessageSearchAccessError('Invocation source is not accessible');
-  }
-
-  private async projectCandidates(
-    input: MessageSearchInput,
-    principal: MessageSearchPrincipal,
-    threads: Map<string, Thread>,
-    candidates: MessagePassageCandidate[],
-    execution: MessageSearchExecutionContext,
-  ): Promise<MessageSearchResult[]> {
-    const results: MessageSearchResult[] = [];
-    const seen = new Set<string>();
-    const from = input.dateFrom ? Date.parse(input.dateFrom) : -Infinity;
-    const to = input.dateTo
-      ? Date.parse(input.dateTo.length === 10 ? `${input.dateTo}T23:59:59.999Z` : input.dateTo)
-      : Infinity;
-    const limit = input.limit ?? 20;
-    // A new snapshot after retrieval preserves grant revocation checks. It is
-    // read lazily only if current candidates need the user-index authority.
-    let currentVisibility: Promise<Thread[]> | undefined;
-    const authority = {
-      list: (userId: string) => (currentVisibility ??= Promise.resolve(this.deps.threadStore.list(userId))),
-    };
-    for (const candidate of candidates) {
-      checkSearchExecution(execution);
-      if (
-        candidate.docAnchor !== `thread-${candidate.threadId}` ||
-        candidate.passageId !== `msg-${candidate.messageId}`
-      )
-        continue;
-      if (!threads.has(candidate.threadId)) continue;
-      if (principal.source?.threadId === candidate.threadId && principal.source.messageId === candidate.messageId)
-        continue;
-      const key = JSON.stringify([candidate.threadId, candidate.messageId]);
-      if (seen.has(key)) continue;
-      const result = await this.project(candidate, principal, input.query, authority);
-      checkSearchExecution(execution);
-      if (!result) continue;
-      seen.add(key);
-      if (!(result.timestamp >= from && result.timestamp <= to)) continue;
-      results.push(result);
-      // Relevance order is already fixed by retrieval. One additional verified
-      // result proves hasMore; unreadable or out-of-window rows never count.
-      // Time order still requires the complete canonical timestamp projection.
-      if (input.sort === 'relevance' && results.length > limit) break;
-    }
-    if (input.sort !== 'relevance')
-      results.sort(
-        (a, b) =>
-          a.timestamp - b.timestamp || a.threadId.localeCompare(b.threadId) || a.messageId.localeCompare(b.messageId),
-      );
-    return results;
   }
 
   /** Re-admit exact coordinates at click time without reranking a saved result collection. */
@@ -302,8 +244,8 @@ export class MessageSearchService {
     if (!projected) return null;
     return {
       status: 'available',
-      target: { ...exactRef, contentRevision: projected.contentRevision },
-      updated: ref.contentRevision !== undefined && ref.contentRevision !== projected.contentRevision,
+      target: { ...exactRef, contentRevision: projected.result.contentRevision },
+      updated: ref.contentRevision !== undefined && ref.contentRevision !== projected.result.contentRevision,
     };
   }
 
@@ -312,7 +254,10 @@ export class MessageSearchService {
     principal: MessageSearchPrincipal,
     context: MessageSearchExecutionContext = {},
   ): Promise<MessageSearchResponse> {
-    const observe = observeMessageSearchExecution();
+    const deadlineAt = Math.min(context.deadlineAt ?? Infinity, Date.now() + 15_000);
+    context = { ...context, deadlineAt };
+    const onTrace = context.onTrace ?? this.deps.onTrace;
+    const observe = observeMessageSearchExecution(onTrace);
     checkSearchExecution(context);
 
     const limit = input.limit ?? 20;
@@ -344,14 +289,62 @@ export class MessageSearchService {
         dateTo: input.dateTo,
       }),
     );
-    const results = await observe('canonical-projection', () =>
-      this.projectCandidates(input, principal, threads, execution.passages, context),
+    let currentVisibility: Promise<Thread[]> | undefined;
+    const authority = {
+      list: () => (currentVisibility ??= Promise.resolve(this.deps.threadStore.list(principal.userId))),
+    };
+    const canonical = await observe('canonical-projection', () =>
+      collectMessageSearchCandidates({
+        search: input,
+        candidates: execution.passages,
+        threadIds: new Set(threads.keys()),
+        source: principal.source,
+        project: (candidate) => this.project(candidate, principal, input.query, authority),
+        check: () => checkSearchExecution(context),
+      }),
     );
+    const qualification = await observe('qualification', () =>
+      this.qualifier.qualify(input.query, canonical, {
+        userId: principal.userId,
+        resultLimit: limit,
+        deadlineAt,
+        signal: context.signal,
+        onTrace,
+      }),
+    );
+    const approved = canonical.filter((row) => qualification.decisions.get(candidateKey(row)) === 'supported');
+    const results: MessageSearchResult[] = [];
+    await observe('final-revalidation', async () => {
+      if (qualification.nativeCalls) await this.requireSource(input, principal);
+      // Refresh the authority snapshot after external inference; the original one
+      // cannot keep a revoked grant alive. Only rows needed for the page/witness are reread.
+      currentVisibility = undefined;
+      for (const row of approved) {
+        checkSearchExecution(context);
+        const fresh = qualification.nativeCalls
+          ? await this.project(
+              row.candidate,
+              principal,
+              input.query,
+              authority,
+              qualification.evidence.get(candidateKey(row)),
+            )
+          : row;
+        if (fresh && fresh.contentRevision === row.contentRevision) results.push(fresh.result);
+        else {
+          qualification.meta.supported--;
+          qualification.meta.unassessed++;
+          qualification.meta.status = 'partial';
+        }
+        if (results.length > limit) break;
+      }
+      checkSearchExecution(context);
+    });
     return boundMessageSearchResponse({
       searchId: randomUUID(),
       query: input.query,
       results: results.slice(0, limit),
-      meta: searchMeta(input, execution, results.length, limit),
+      meta: { ...messageSearchMeta(input, execution, results.length, limit), qualification: qualification.meta },
     });
   }
 }

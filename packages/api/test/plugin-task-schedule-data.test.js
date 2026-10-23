@@ -76,7 +76,10 @@ async function fixture(tasks = new TaskStore()) {
   };
   const ownerRead = new EntrustedWorkOwnerReadService({
     tasks,
-    producerCatalog: { listCurrentReceipts: async () => [] },
+    producerCatalog: {
+      listCurrentReceipts: async () => [],
+      readCurrentReceipts: async () => ({ receipts: [], coverage: { state: 'complete' } }),
+    },
   });
   return { tasks, messages, threads, thread, source, changes, deps, host, input, ownerRead };
 }
@@ -330,7 +333,10 @@ async function materialFixture() {
   const host = createPluginTaskHost({ ...f.deps, artifactReader });
   const ownerRead = new EntrustedWorkOwnerReadService({
     tasks: f.tasks,
-    producerCatalog: { listCurrentReceipts: async () => [] },
+    producerCatalog: {
+      listCurrentReceipts: async () => [],
+      readCurrentReceipts: async () => ({ receipts: [], coverage: { state: 'complete' } }),
+    },
     artifactReader,
   });
   return { ...f, host, ownerRead, artifactReader, artifactRef, publication };

@@ -14,6 +14,7 @@ import { describeReconcile } from './approval-reconcile';
 import { approvalReconcileCopy } from './approval-reconcile.shell-copy';
 import { type ApprovalSession, type ApprovalSessions } from './approval-sessions';
 import { originalApprovalCopy } from './original-approval.shell-copy';
+import { ThreadProposalDecisionReceipt } from './ThreadProposalDecisionReceipt';
 import { useOriginalApprovalEffect } from './use-original-approval-effect';
 
 const MUTED = { color: 'var(--shell-muted)' } as const;
@@ -62,6 +63,41 @@ export function RetainedResult({ session, sessions }: { session: ApprovalSession
       ? { ...state, terminal: { ...state.terminal, effectUnknown: true } }
       : state;
   const view = describeReconcile(displayed, { language, ownerUserId: session.ownerUserId, originalEffect });
+  if (
+    feature === 'F128' &&
+    state.kind === 'decided' &&
+    (state.terminal.resolution === 'accepted' || state.terminal.resolution === 'rejected')
+  ) {
+    return (
+      <li data-testid="mailbox-retained-result" data-state={state.kind} className="min-w-0 px-4 py-2 text-sm">
+        <ThreadProposalDecisionReceipt
+          approval={session.approval}
+          terminal={{ ...state.terminal, resolution: state.terminal.resolution }}
+          line={view.line}
+        >
+          {view.canReread ? (
+            <button
+              type="button"
+              data-testid="mailbox-retained-reread"
+              onClick={() => sessions.reread(session.key)}
+              className="shell-focusable text-xs"
+            >
+              {t.reread}
+            </button>
+          ) : null}
+          <button
+            type="button"
+            data-testid="mailbox-retained-dismiss"
+            onClick={() => sessions.close(session.key)}
+            className="shell-focusable text-xs"
+            style={MUTED}
+          >
+            {t.dismiss}
+          </button>
+        </ThreadProposalDecisionReceipt>
+      </li>
+    );
+  }
   return (
     <li
       data-testid="mailbox-retained-result"

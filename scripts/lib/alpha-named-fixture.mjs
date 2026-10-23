@@ -38,6 +38,15 @@ export function namedAlphaFixture(t) {
     'scripts/lib/process-birth-identity.mjs',
     'scripts/lib/process-tree.mjs',
     'scripts/read-deployment-default.mjs',
+    'scripts/worktree-new.mjs',
+    'scripts/worktree-reaper.mjs',
+    'scripts/lib/worktree-light.mjs',
+    'scripts/lib/worktree-process-refs.mjs',
+    'scripts/lib/worktree-quarantine.mjs',
+    'scripts/lib/worktree-reaper-core.mjs',
+    'scripts/lib/worktree-reaper-probes.mjs',
+    'scripts/lib/worktree-reaper-risk.mjs',
+    'scripts/lib/worktree-retention.mjs',
     'packages/shared/src/deployment-defaults.ts',
     'packages/shared/src/deployment-profiles.json',
     'packages/api/src/config/alpha-coordinates.ts',
@@ -66,6 +75,7 @@ export function namedAlphaFixture(t) {
   git(['config', 'user.name', 'Named Alpha Fixture']);
   git(['config', 'user.email', 'named-alpha@example.invalid']);
   git(['config', 'core.hooksPath', '/dev/null']);
+  git(['config', 'extensions.worktreeConfig', 'true']);
   git(['add', '.']);
   git(['commit', '-m', 'main fixture']);
   git(['init', '--bare', remote]);
@@ -97,11 +107,12 @@ export function namedAlphaFixture(t) {
     HOME: home,
     TERM: 'xterm',
     CAT_CAFE_SKIP_NODE_RUNTIME_GUARD: '1',
+    CAT_CAFE_CAT_ID: 'alpha-fixture-owner',
     ALPHA_TEST_CALLS: calls,
   };
   const run = (args, options = {}) =>
     spawnSync('bash', [join(mainRoot, 'scripts/alpha-worktree.sh'), ...args], {
-      cwd: mainRoot,
+      cwd: options.cwd ?? mainRoot,
       encoding: 'utf8',
       env: { ...env, ...options.env },
       timeout: 30_000,

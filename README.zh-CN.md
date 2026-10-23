@@ -32,9 +32,32 @@ Clowder AI 是把孤立的 AI agent 变成真正团队的平台层 — 持久身
 
 每支演示都是我们团队日常里真实发生过的一段对话。看完，就能照着跟你的猫说。
 
+<details>
+<summary><b>新对话提议</b> — 一件大事交给一群猫 · 0:48</summary>
+
 [![新对话提议演示：五张提议卡，同意后开工](site/assets/demos/conversation-proposals.jpg)](https://zts212653.github.io/clowder-ai/#demos)
 
-**新对话提议** — 一件大事交给一群猫：猫把它拆成几条线，每条写好做什么、为什么、交给谁。你点同意，新对话就开好了；也可以说不，猫改好再交回来。[观看演示 (0:48)](https://zts212653.github.io/clowder-ai/#demos) · 来自社区 issue [#82](https://github.com/zts212653/clowder-ai/issues/82)
+猫把一件大事拆成几条线，每条写好做什么、为什么、交给谁。你点同意，新对话就开好了；也可以说不，猫改好再交回来。[观看演示](https://zts212653.github.io/clowder-ai/#demos) · 来自社区 issue [#82](https://github.com/zts212653/clowder-ai/issues/82)
+
+</details>
+
+<details>
+<summary><b>同一个 bug，两种结局</b> — 把 Claude Code 的会话接进猫咖 · 0:48</summary>
+
+[![同一个 bug，两种结局：只有 Claude Code 时活停了，接进猫咖后活没停](site/assets/demos/same-bug.jpg)](https://zts212653.github.io/clowder-ai/#demos)
+
+只用 Claude Code 时，猫粮用完就只能干等几个小时。把这段会话接进猫咖（新对话 → 接上本机已有的会话）：猫记得之前的一切，还能拉另一只猫一起看；它再没猫粮时，活自动交给另一只猫，不会停。[观看演示](https://zts212653.github.io/clowder-ai/#demos) · 挂了有人接来自社区贡献者 [@mindfn](https://github.com/mindfn)（[#1398](https://github.com/zts212653/clowder-ai/pull/1398)）
+
+</details>
+
+<details>
+<summary><b>不用等它说完</b> — 猫还在改，就接着引导 · 0:36</summary>
+
+[![不用等它说完：猫正改着，圈一处说一句，新旧两版并排](site/assets/demos/steer.jpg)](https://zts212653.github.io/clowder-ai/#demos)
+
+猫正改着，你又想到一处：把发送策略选成「引导当前回复」，在画面上圈一处、说一句就发。猫在这一轮里接住，改完新旧两版并排，一眼就能定。[观看演示](https://zts212653.github.io/clowder-ai/#demos)
+
+</details>
 
 ## 快速开始
 

@@ -1,4 +1,6 @@
 ---
+anchor: doc:features/F155-scene-guidance-phase-a-spec
+tips_exempt: Memory identity metadata repair only; this supporting source keeps its existing content and parent feature behavior, with no new user action or capability.
 feature_ids: [F155]
 related_features: [F087, F110, F134, F099]
 topics: [guidance, ux, mcp, frontend, security]

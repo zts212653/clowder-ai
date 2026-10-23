@@ -1,4 +1,6 @@
 ---
+anchor: doc:features/F061-cdp-integration-retrospective
+tips_exempt: Memory identity metadata repair only; this supporting source keeps its existing content and parent feature behavior, with no new user action or capability.
 feature_ids: [F061]
 related_features: [F050, F060]
 topics: [cdp, antigravity, bengal-cat, browser-automation, dom-scraping, lessons-learned]

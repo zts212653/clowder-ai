@@ -57,6 +57,7 @@ import { normalizeJsonUnicode } from '../utils/json-unicode.js';
 import { buildThreadDeepLink } from '../utils/thread-deep-link.js';
 import { getDefaultUploadDir } from '../utils/upload-paths.js';
 import { registerGenerationMessagesRoute } from './generation-messages.js';
+import { observeMessageSend } from './message-send-diagnostics.js';
 import { importStoredProjectMessage } from './messages-project-review.js';
 import { captureSentComposerDraftConsumption } from './sent-composer-draft-consumption.js';
 import { admitThreadParticipants } from './thread-participant-admission.js';
@@ -293,6 +294,7 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
   const router = opts.router;
   // POST /api/messages - 发送消息（WebSocket 广播）
   app.post('/api/messages', async (request, reply) => {
+    const sendStartedAt = performance.now();
     let content: string;
     let legacyUserId: string | undefined;
     let threadId: string | undefined;
@@ -643,151 +645,172 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
     log.debug({ threadId: resolvedThreadId, targetCats, intent: intent.intent }, 'Queue ingress accepted');
 
     if (opts.invocationQueue) {
-      const queueInput = {
-        ...(liveSessionId ? { liveSessionId } : {}),
-        from: { kind: 'user' as const, userId },
-        threadId: resolvedThreadId,
-        userId,
-        kind: 'conversation_input' as const,
-        ownerAuthProvenance,
-        idempotencyKey: resolvedIdempotencyKey,
-        content,
-        targetCats,
-        ...(messageDisposition ? { messageDisposition } : {}),
-        onQueueEntriesAdmitted: async (
-          entries: readonly import('../domains/cats/services/agents/invocation/InvocationQueue.js').QueueEntry[],
-        ) => {
-          targetCats.splice(0, targetCats.length, ...(entries.flatMap((entry) => entry.targets) as CatId[]));
-          await publishAdmittedParticipants();
-        },
-        intent: intent.intent,
-      };
-      const enqueueResult = await opts.invocationQueue
-        .send(
-          opts.messageStore,
-          {
-            from: queueInput.from,
-            userId,
-            content,
-            // Routing fallback is server-owned metadata, not an @mention the user wrote.
-            mentions: sourceTargetCats,
-            timestamp: Date.now(),
+      const admissionQueue = opts.invocationQueue;
+      return observeMessageSend(
+        request.log,
+        reply.raw,
+        async (trace) => {
+          const queueInput = {
+            ...(liveSessionId ? { liveSessionId } : {}),
+            from: { kind: 'user' as const, userId },
             threadId: resolvedThreadId,
-            idempotencyKey: resolvedIdempotencyKey,
-            deliveryStatus: 'queued',
-            ...(contentBlocks ? { contentBlocks } : {}),
-            ...(whisperVisibility && whisperRecipients
-              ? { visibility: whisperVisibility, whisperTo: whisperRecipients }
-              : {}),
-            ...(replyTo ? { replyTo } : {}),
-            ...sourcePayloadWrite,
-          },
-          queueInput,
-        )
-        .catch(async (error: unknown) => {
-          if (!liveSessionId) throw error;
-          // The preflight replay lookup may precede another request's atomic
-          // admission. Only the immutable committed source can prove a conflict;
-          // an unknown write/read outcome must retain its original error.
-          const committed = await opts.messageStore.getByIdempotencyKey(
             userId,
-            resolvedThreadId,
-            resolvedIdempotencyKey,
+            kind: 'conversation_input' as const,
+            ownerAuthProvenance,
+            idempotencyKey: resolvedIdempotencyKey,
+            content,
+            targetCats,
+            ...(messageDisposition ? { messageDisposition } : {}),
+            onQueueEntriesAdmitted: async (
+              entries: readonly import('../domains/cats/services/agents/invocation/InvocationQueue.js').QueueEntry[],
+              message?: StoredMessage,
+            ) => {
+              trace.committed(message?.id);
+              targetCats.splice(0, targetCats.length, ...(entries.flatMap((entry) => entry.targets) as CatId[]));
+              await trace.measure('participants', publishAdmittedParticipants);
+            },
+            intent: intent.intent,
+          };
+          const enqueueResult = await trace.measure('queueAdmission', () =>
+            admissionQueue
+              .send(
+                opts.messageStore,
+                {
+                  from: queueInput.from,
+                  userId,
+                  content,
+                  // Routing fallback is server-owned metadata, not an @mention the user wrote.
+                  mentions: sourceTargetCats,
+                  timestamp: Date.now(),
+                  threadId: resolvedThreadId,
+                  idempotencyKey: resolvedIdempotencyKey,
+                  deliveryStatus: 'queued',
+                  ...(contentBlocks ? { contentBlocks } : {}),
+                  ...(whisperVisibility && whisperRecipients
+                    ? { visibility: whisperVisibility, whisperTo: whisperRecipients }
+                    : {}),
+                  ...(replyTo ? { replyTo } : {}),
+                  ...sourcePayloadWrite,
+                },
+                queueInput,
+              )
+              .catch(async (error: unknown) => {
+                if (!liveSessionId) throw error;
+                // The preflight replay lookup may precede another request's atomic
+                // admission. Only the immutable committed source can prove a conflict;
+                // an unknown write/read outcome must retain its original error.
+                const committed = await opts.messageStore.getByIdempotencyKey(
+                  userId,
+                  resolvedThreadId,
+                  resolvedIdempotencyKey,
+                );
+                if (!committed) throw error;
+                const receipt = committed.extra?.liveAdmission;
+                if (
+                  !receipt ||
+                  receipt.sessionId !== liveSessionId ||
+                  receipt.targetId !== targetCats[0] ||
+                  committed.content !== content ||
+                  committed.threadId !== resolvedThreadId ||
+                  committed.userId !== userId
+                ) {
+                  reply.code(409).send({ error: 'Live admission identity conflict', code: 'LIVE_ADMISSION_CONFLICT' });
+                  return null;
+                }
+                throw error;
+              }),
           );
-          if (!committed) throw error;
-          const receipt = committed.extra?.liveAdmission;
-          if (
-            !receipt ||
-            receipt.sessionId !== liveSessionId ||
-            receipt.targetId !== targetCats[0] ||
-            committed.content !== content ||
-            committed.threadId !== resolvedThreadId ||
-            committed.userId !== userId
-          ) {
-            reply.code(409).send({ error: 'Live admission identity conflict', code: 'LIVE_ADMISSION_CONFLICT' });
-            return null;
+          if (!enqueueResult) return;
+
+          // Queue full → 429, no message written (no ghost message)
+          if (enqueueResult.outcome === 'full') {
+            const fullQueue = await enrichQueueEntries(
+              admissionQueue.list(resolvedThreadId, userId),
+              opts.messageStore,
+            );
+            opts.socketManager.emitToUser(userId, 'queue_full_warning', {
+              threadId: resolvedThreadId,
+              source: 'user',
+              queueSize: admissionQueue.size(resolvedThreadId, userId),
+              queue: fullQueue,
+            });
+            reply.status(429);
+            return {
+              error: '消息队列已满',
+              code: 'QUEUE_FULL',
+              queueSize: admissionQueue.size(resolvedThreadId, userId),
+            };
           }
-          throw error;
-        });
-      if (!enqueueResult) return;
 
-      // Queue full → 429, no message written (no ghost message)
-      if (enqueueResult.outcome === 'full') {
-        const fullQueue = await enrichQueueEntries(
-          opts.invocationQueue.list(resolvedThreadId, userId),
-          opts.messageStore,
-        );
-        opts.socketManager.emitToUser(userId, 'queue_full_warning', {
-          threadId: resolvedThreadId,
-          source: 'user',
-          queueSize: opts.invocationQueue.size(resolvedThreadId, userId),
-          queue: fullQueue,
-        });
-        reply.status(429);
-        return {
-          error: '消息队列已满',
-          code: 'QUEUE_FULL',
-          queueSize: opts.invocationQueue.size(resolvedThreadId, userId),
-        };
-      }
+          trace.committed(enqueueResult.message?.id);
+          if (enqueueResult.message) {
+            await trace.measure('projectImport', () =>
+              importStoredProjectMessage(enqueueResult.message, opts.onStoredProjectMessage, (error) =>
+                request.log.warn({ err: error }, 'Saved project opinion awaits ledger synchronization'),
+              ),
+            );
+          }
+          const storedUserMessageId = enqueueResult.message?.id ?? null;
+          if (!enqueueResult.deduped && storedUserMessageId) {
+            // F192 Phase G AC-G12 / F227: detect magic words after the atomic admission commits.
+            void tryDetectMagicWords(
+              content,
+              resolvedThreadId,
+              targetCats,
+              storedUserMessageId,
+              userId,
+              opts.onMagicWordDetected,
+            );
+          }
 
-      if (enqueueResult.message) {
-        await importStoredProjectMessage(enqueueResult.message, opts.onStoredProjectMessage, (error) =>
-          request.log.warn({ err: error }, 'Saved project opinion awaits ledger synchronization'),
-        );
-      }
-      const storedUserMessageId = enqueueResult.message?.id ?? null;
-      if (!enqueueResult.deduped && storedUserMessageId) {
-        // F192 Phase G AC-G12 / F227: detect magic words after the atomic admission commits.
-        void tryDetectMagicWords(
-          content,
-          resolvedThreadId,
-          targetCats,
-          storedUserMessageId,
-          userId,
-          opts.onMagicWordDetected,
-        );
-      }
+          const admittedEntries = enqueueResult.entries ?? (enqueueResult.entry ? [enqueueResult.entry] : []);
+          // Common send signals Queue progress; HTTP acknowledges durable admission only.
+          const admittedInvocationQueue = admissionQueue;
+          const admittedEntryStillQueued =
+            admittedEntries.length === 0 ||
+            admittedEntries.some(
+              (admittedEntry) =>
+                admittedInvocationQueue.getEntrySnapshot(resolvedThreadId, userId, admittedEntry.id) !== null,
+            );
 
-      const admittedEntries = enqueueResult.entries ?? (enqueueResult.entry ? [enqueueResult.entry] : []);
-      // Common send signals Queue progress; HTTP acknowledges durable admission only.
-      const admittedInvocationQueue = opts.invocationQueue;
-      const admittedEntryStillQueued =
-        admittedEntries.length === 0 ||
-        admittedEntries.some(
-          (admittedEntry) =>
-            admittedInvocationQueue.getEntrySnapshot(resolvedThreadId, userId, admittedEntry.id) !== null,
-        );
+          // Emit queue update to this user only (privacy: scopeKey isolation)
+          // appendExactEntry owns its own committed projection. Keep the generic
+          // enqueue event only when custody remains in Queue.
+          if (admittedEntryStillQueued) {
+            await trace.measure('queueUpdate', () =>
+              emitQueueUpdated(
+                opts.socketManager,
+                userId,
+                resolvedThreadId,
+                admissionQueue.list(resolvedThreadId, userId),
+                enqueueResult.outcome,
+              ),
+            );
+          }
 
-      // Emit queue update to this user only (privacy: scopeKey isolation)
-      // appendExactEntry owns its own committed projection. Keep the generic
-      // enqueue event only when custody remains in Queue.
-      if (admittedEntryStillQueued) {
-        await emitQueueUpdated(
-          opts.socketManager,
-          userId,
-          resolvedThreadId,
-          opts.invocationQueue.list(resolvedThreadId, userId),
-          enqueueResult.outcome,
-        );
-      }
+          await trace.measure('holds', () => tryAutoCancelPendingHolds(resolvedThreadId, opts.holdBallCancelDeps));
 
-      await tryAutoCancelPendingHolds(resolvedThreadId, opts.holdBallCancelDeps);
-
-      reply.status(202);
-      return {
-        status: 'queued',
-        queuePosition: enqueueResult.queuePosition,
-        entryId: enqueueResult.entry?.id,
-        entries: admittedEntries.flatMap((entry) =>
-          queueEntryTargetCats(entry).map((targetCatId) => ({ entryId: entry.id, targetCatId })),
-        ),
-        merged: false,
-        ...(storedUserMessageId ? { userMessageId: storedUserMessageId } : {}),
-        ...(await readUserMessageReceipt(opts.messageStore, storedUserMessageId, receiptOwner, enqueueResult.message)),
-        ...(await consumeSentDraft(enqueueResult.deduped ? null : (enqueueResult.message ?? null))),
-        ...(admittedMessageBundle && storedUserMessageId ? { messageBundleId: storedUserMessageId } : {}),
-      };
+          reply.status(202);
+          return {
+            status: 'queued',
+            queuePosition: enqueueResult.queuePosition,
+            entryId: enqueueResult.entry?.id,
+            entries: admittedEntries.flatMap((entry) =>
+              queueEntryTargetCats(entry).map((targetCatId) => ({ entryId: entry.id, targetCatId })),
+            ),
+            merged: false,
+            ...(storedUserMessageId ? { userMessageId: storedUserMessageId } : {}),
+            ...(await trace.measure('receipt', () =>
+              readUserMessageReceipt(opts.messageStore, storedUserMessageId, receiptOwner, enqueueResult.message),
+            )),
+            ...(await trace.measure('draft', () =>
+              consumeSentDraft(enqueueResult.deduped ? null : (enqueueResult.message ?? null)),
+            )),
+            ...(admittedMessageBundle && storedUserMessageId ? { messageBundleId: storedUserMessageId } : {}),
+          };
+        },
+        sendStartedAt,
+      );
     }
   });
 
@@ -1118,7 +1141,6 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
                 label: source.label,
                 icon: source.icon,
                 ...(source.themeColor ? { themeColor: source.themeColor } : {}),
-                ...(source.url ? { url: source.url } : {}),
                 ...(source.meta ? { meta: source.meta } : {}),
                 ...(source.sender ? { sender: source.sender } : {}),
               },

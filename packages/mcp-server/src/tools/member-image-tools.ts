@@ -4,9 +4,9 @@ import { isAbsolute } from 'node:path';
 import { z } from 'zod';
 import { defineMcpCanonicalFactory } from '../tool-governance-migration.js';
 import { isPathAllowed } from '../utils/path-validator.js';
-import { callbackPost, getCallbackConfig } from './callback-tools.js';
+import { callbackPost } from './callback-tools.js';
 import { errorResult } from './file-tools.js';
-import { withInvocationCredentials } from './invocation-auth.js';
+import { resolveInvocationCredentials, withInvocationCredentials } from './invocation-auth.js';
 
 const MAX_BYTES = 10 * 1024 * 1024;
 // Darwin's atomic whole-path no-symlink flag; Node does not export this SDK constant.
@@ -81,23 +81,22 @@ export async function readMemberImage(path: string): Promise<{ sourcePath: strin
 }
 
 export async function handlePublishImage(input: z.infer<z.ZodObject<typeof publishImageInputSchema>>) {
-  const config = getCallbackConfig();
-  if (!config?.invocationId || !config.callbackToken)
+  // Preserve the full inherited scope: this nested entry must not drop the
+  // gateway-bound apiUrl/identity down to bare invocation credentials.
+  const credentials = resolveInvocationCredentials();
+  if (!credentials.invocationId || !credentials.callbackToken)
     return errorResult('Image publication requires current invocation callback credentials');
   try {
-    return await withInvocationCredentials(
-      { invocationId: config.invocationId, callbackToken: config.callbackToken },
-      async () => {
-        const image = await readMemberImage(input.path);
-        return callbackPost('/api/callbacks/publish-image', {
-          publicationKey: input.publicationKey,
-          sourcePath: image.sourcePath,
-          imageBase64: image.bytes.toString('base64'),
-          ...(input.title ? { title: input.title } : {}),
-          ...(input.alt !== undefined ? { alt: input.alt } : {}),
-        });
-      },
-    );
+    return await withInvocationCredentials({ ...credentials }, async () => {
+      const image = await readMemberImage(input.path);
+      return callbackPost('/api/callbacks/publish-image', {
+        publicationKey: input.publicationKey,
+        sourcePath: image.sourcePath,
+        imageBase64: image.bytes.toString('base64'),
+        ...(input.title ? { title: input.title } : {}),
+        ...(input.alt !== undefined ? { alt: input.alt } : {}),
+      });
+    });
   } catch (error) {
     return errorResult(error instanceof Error ? error.message : 'Image publication failed');
   }

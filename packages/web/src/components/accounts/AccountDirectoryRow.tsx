@@ -219,7 +219,13 @@ export function AccountDirectoryRow({
             busy={busy}
             used={used}
             memberCount={members.length}
-            label={action ? t[action] : ''}
+            label={
+              action === 'switch' && suggestion
+                ? quota.switchTo(accountDisplayName(suggestion.account, t))
+                : action
+                  ? t[action]
+                  : ''
+            }
             open={open}
             canRelogin={!waiting && !review}
             onAction={() =>

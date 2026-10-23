@@ -26,6 +26,7 @@ export async function imageFixture(transport, cwd, { image = true, resumeEmpty =
     killed: false,
     on: emitter.on.bind(emitter),
     once: emitter.once.bind(emitter),
+    removeListener: emitter.removeListener.bind(emitter),
     kill() {
       child.killed = true;
       stdout.end();

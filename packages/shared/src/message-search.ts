@@ -58,6 +58,15 @@ export interface MessageSearchResponse {
     semanticCandidatesLimited: boolean;
     sourceCoverage: 'unknown';
     freshness: 'unknown';
+    /** Counts cover canonical rows examined in this request, not the entire history/index. */
+    qualification?: {
+      status: 'complete' | 'partial';
+      examined: number;
+      supported: number;
+      rejected: number;
+      indeterminate: number;
+      unassessed: number;
+    };
     response: { budgetChars: number; serializedChars: number; truncated: boolean; continuation: 'unavailable' };
   };
 }

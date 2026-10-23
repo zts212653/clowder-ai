@@ -24,8 +24,12 @@ import { composeCoverageIntentNudge } from './evidence-coverage-nudge.js';
 import { type CoverageToolData, renderCoverageToolResponse } from './evidence-coverage-response.js';
 import type { ToolResult } from './file-tools.js';
 import { errorResult, successResult } from './file-tools.js';
+import { resolveInvocationEnv } from './invocation-auth.js';
 
-const API_URL = process.env['CAT_CAFE_API_URL'] ?? deploymentDefaults.apiBaseUrl;
+function resolveApiUrl(): string {
+  return resolveInvocationEnv('CAT_CAFE_API_URL') ?? deploymentDefaults.apiBaseUrl;
+}
+
 const COVERAGE_OUTER_HTTP_BUDGET_MS = 16_000;
 
 const DOC_SOURCE_TYPES = new Set(['feature', 'decision', 'phase', 'architecture', 'lesson', 'plan', 'research']);
@@ -192,7 +196,7 @@ export async function handleSearchEvidence(
   if (input.dateTo) params.set('dateTo', input.dateTo);
   if (input.contextWindow != null) params.set('contextWindow', String(input.contextWindow));
   if (input.threadId) params.set('threadId', input.threadId);
-  const currentThreadId = process.env['CAT_CAFE_THREAD_ID']?.trim();
+  const currentThreadId = resolveInvocationEnv('CAT_CAFE_THREAD_ID')?.trim();
   if (currentThreadId) params.set('currentThreadId', currentThreadId);
   params.set('dimension', dimension);
   if (input.collections) params.set('collections', input.collections);
@@ -201,7 +205,7 @@ export async function handleSearchEvidence(
   if (input.coverage_offset != null) params.set('coverage_offset', String(input.coverage_offset));
   if (input.include_expansion === false) params.set('include_expansion', 'false');
 
-  const url = `${API_URL}/api/evidence/search?${params.toString()}`;
+  const url = `${resolveApiUrl()}/api/evidence/search?${params.toString()}`;
   const queryLabel = JSON.stringify(input.query);
   const outerDeadlineSignal =
     input.intent === 'coverage' ? AbortSignal.timeout(COVERAGE_OUTER_HTTP_BUDGET_MS) : undefined;
@@ -211,7 +215,7 @@ export async function handleSearchEvidence(
       : (outerDeadlineSignal ?? extra?.signal);
 
   try {
-    const userId = process.env['CAT_CAFE_USER_ID']?.trim();
+    const userId = resolveInvocationEnv('CAT_CAFE_USER_ID')?.trim();
     const internalHeaders: Record<string, string> = {};
     if (userId) internalHeaders['x-cat-cafe-user'] = userId;
     if (currentThreadId) internalHeaders['x-cat-cafe-thread-id'] = currentThreadId;

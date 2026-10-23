@@ -1938,6 +1938,11 @@ export async function* routeSerial(
         ownerAuthProvenance,
         threadId,
         invocationOrigin: resolveInvocationOrigin(options.humanDispositionInvocationOrigin),
+        contextSourceIngress:
+          options.contextSourceIngress ??
+          (options.humanDispositionInvocationOrigin === 'direct_owner' && options.currentUserMessageId
+            ? { kind: 'owner', sourceMessageId: options.currentUserMessageId }
+            : undefined),
         routeTopology: 'serial',
         ...(targetContentBlocks ? { contentBlocks: targetContentBlocks } : {}),
         ...(targetUploadDir ? { uploadDir: targetUploadDir } : {}),

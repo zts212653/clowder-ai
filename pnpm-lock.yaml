@@ -44,6 +44,9 @@ importers:
       '@anthropic-ai/claude-agent-sdk':
         specifier: 0.3.285
         version: 0.3.285(@anthropic-ai/sdk@0.129.0(zod@3.25.76))(@modelcontextprotocol/sdk@1.30.0(zod@3.25.76))(zod@3.25.76)
+      '@cat-cafe/mcp-server':
+        specifier: workspace:*
+        version: link:../mcp-server
       '@cat-cafe/shared':
         specifier: workspace:*
         version: link:../shared

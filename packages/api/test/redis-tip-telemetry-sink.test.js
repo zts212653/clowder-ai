@@ -5,7 +5,7 @@
  * Verifies the Lua script atomic receipt+aggregate write works against real Redis.
  * Uses the isolated Redis harness on a disposable non-6399 port.
  *
- * Run: pnpm --filter @cat-cafe/api test:redis -- --grep "tip-telemetry-sink"
+ * Run: pnpm --filter @cat-cafe/api test:redis -- node --test test/redis-tip-telemetry-sink.test.js
  *
  * Sol R2 fixes:
  * - Removed manual prefix duplication (ioredis keyPrefix handles namespacing)
@@ -228,5 +228,37 @@ describe('F268 RedisTipEventSink (production path)', { skip: redisIsolationSkipR
     // Verify TTL is set (14d = 1209600s) — proves Lua atomic write
     const ttl = await redis.ttl(logicalKey);
     assert.ok(ttl > 1209000 && ttl <= 1209600, `TTL should be ~14d, got ${ttl}`);
+  });
+  it('F331 demo observations persist and deduplicate before the existing source adapter computes rates', async () => {
+    const { RedisTipEventSink } = await import('../dist/routes/tip-telemetry.js');
+    const { summarizeTipDemos } = await import('../dist/routes/tip-demo-summary.js');
+    const timestamp = Date.UTC(2026, 9, 22, 12);
+    const base = {
+      tipId: 'capability-propose-thread',
+      context: 'thinking',
+      surface: 'pending_bubble',
+      outcome: 'shown',
+      timestamp,
+    };
+    const events = [
+      ...Array.from({ length: 4 }, () => ({ ...base, event: 'capability_tip_demo_exposed' })),
+      ...Array.from({ length: 2 }, () => ({ ...base, event: 'capability_tip_demo_opened' })),
+      { ...base, event: 'capability_tip_demo_completed' },
+      { ...base, event: 'capability_tip_demo_used' },
+    ];
+    const batch = makeBatch('a50e8400-e29b-41d4-a716-446655440331', events);
+    assert.equal((await sink.ingest(batch, 'owner-demo')).status, 'accepted');
+    const restartedSink = new RedisTipEventSink(redis);
+    assert.equal((await restartedSink.ingest(batch, 'owner-demo')).status, 'duplicate');
+    const snapshot = await usageAdapter.resolve({
+      kind: 'capability-tips-usage-window',
+      windowStartMs: Date.UTC(2026, 9, 22),
+      windowEndMs: Date.UTC(2026, 9, 23),
+    });
+    const result = summarizeTipDemos(snapshot.rows);
+    assert.equal(result.demos[0].exposed, 4);
+    assert.equal(result.demos[0].watchRate, 0.5);
+    assert.equal(result.demos[0].completionRate, 0.5);
+    assert.equal(result.demos[0].useAfterCompletionRate, 1);
   });
 });

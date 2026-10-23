@@ -72,8 +72,6 @@ export interface ConnectorSource {
   readonly icon: string;
   /** Optional theme color from the plugin's declared presentation identity. */
   readonly themeColor?: string;
-  /** Link to original source (e.g., PR URL) */
-  readonly url?: string;
   /** Connector-specific metadata (e.g. presentation='system_notice', debugging, routing) */
   readonly meta?: Readonly<Record<string, unknown>>;
   /** F134: Original sender info for group chat messages (message-level binding, not thread-level) */

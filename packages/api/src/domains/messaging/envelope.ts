@@ -60,6 +60,12 @@ function hasOnlyKeys(value: Record<string, unknown>, allowed: readonly string[])
   return keys.length <= allowed.length && keys.every((key) => allowed.includes(key));
 }
 
+const PLUGIN_PRESENTATION_KEYS = ['connector', 'label', 'icon', 'themeColor', 'sender', 'meta'] as const;
+
+function projectKnownFields(value: Record<string, unknown>, allowed: readonly string[]): Record<string, unknown> {
+  return Object.fromEntries(Object.entries(value).filter(([key]) => allowed.includes(key)));
+}
+
 function isBoundedString(value: unknown, maxLength: number): value is string {
   return isBoundedScalarString(value, maxLength);
 }
@@ -337,7 +343,7 @@ function hasContractValidPayload(raw: Record<string, unknown>): boolean {
   return validation.valid;
 }
 
-/** Single strict parser shared by memory projection and Redis hydration. */
+/** Strict parser for the current writer/admission contract. */
 export function parsePluginMessageExtra(raw: unknown): PluginMessageExtra | null {
   if (!isRecord(raw)) return null;
   if (!hasOnlyKeys(raw, PLUGIN_MESSAGE_EXTRA_KEYS)) return null;
@@ -348,13 +354,12 @@ export function parsePluginMessageExtra(raw: unknown): PluginMessageExtra | null
       typeof raw.presentation.label !== 'string' ||
       typeof raw.presentation.icon !== 'string' ||
       (raw.presentation.themeColor !== undefined && typeof raw.presentation.themeColor !== 'string') ||
-      (raw.presentation.url !== undefined && typeof raw.presentation.url !== 'string') ||
       (raw.presentation.meta !== undefined && !isRecord(raw.presentation.meta)) ||
       (raw.presentation.sender !== undefined &&
         (!isRecord(raw.presentation.sender) ||
           typeof raw.presentation.sender.id !== 'string' ||
           (raw.presentation.sender.name !== undefined && typeof raw.presentation.sender.name !== 'string'))) ||
-      !hasOnlyKeys(raw.presentation, ['connector', 'label', 'icon', 'themeColor', 'url', 'sender', 'meta']))
+      !hasOnlyKeys(raw.presentation, PLUGIN_PRESENTATION_KEYS))
   )
     return null;
   if (!isBoundedString(raw.instanceId, 256)) return null;
@@ -369,9 +374,22 @@ export function parsePluginMessageExtra(raw: unknown): PluginMessageExtra | null
   return raw as unknown as PluginMessageExtra;
 }
 
+/**
+ * Persisted messages may outlive presentation-only fields. Project the current
+ * presentation contract before strict validation so unknown historical UI
+ * metadata cannot invalidate the canonical message payload.
+ */
+export function parsePersistedPluginMessageExtra(raw: unknown): PluginMessageExtra | null {
+  if (!isRecord(raw) || !isRecord(raw.presentation)) return parsePluginMessageExtra(raw);
+  return parsePluginMessageExtra({
+    ...raw,
+    presentation: projectKnownFields(raw.presentation, PLUGIN_PRESENTATION_KEYS),
+  });
+}
+
 /** Runtime narrowing for extra.pluginMessage (fail-closed: malformed → null). */
 export function readPluginMessageExtra(msg: StoredMessage): PluginMessageExtra | null {
-  return parsePluginMessageExtra(msg.extra?.pluginMessage);
+  return parsePersistedPluginMessageExtra(msg.extra?.pluginMessage);
 }
 
 function audienceOf(msg: StoredMessage): CanonicalAudience {

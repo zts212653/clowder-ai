@@ -1,6 +1,6 @@
 ---
 name: cross-cat-handoff
-tips_exempt: "C1 routes the existing external-review receipt through the installed GitHub plugin tool; this agent-only transport correction introduces no end-user action."
+tips_exempt: "2026-10-22: Task dispatch guidance corrects agent-only calling instructions; no new end-user operation or authority."
 description: "跨猫交接与 review 双路由。Use when: 交接、exact-HEAD external PR review task 或 PR tracking。Not for: 自己任务。Output: 足够接手的交接与适用的责任/审查回执。"
 triggers:
   - "交接"
@@ -30,13 +30,23 @@ triggers:
 
 ## Action Successor Single-Flight
 
-当交接会实际唤醒下一只猫时，先判断它是不是某个支持 structured successor 的动作。local cat review 已退出此路径；implement/task_done 与 external review 等仍受下面规则约束。若是，交接信之外还要携带结构化身份：
+先区分已有责任的通知与实现委派。普通 `@` 可以提醒已有 owner；它不产生新的实现授权。当前消息工具的直接 `action` 只支持 Task-backed `implement/task_done`，local cat review 用普通 A2A，外部 review 按下节的专属入口。实现委派除工作包外，还须携带实际 Task 的结构化身份：
 
 ```text
-subjectRef + actionFamily + successorSlot
+action: {
+  subjectRef: "subject:task:<现有 Task.id>",
+  actionFamily: "implement",
+  successorSlot: "implementer",
+  mode: "single",
+  terminalPredicate: { kind: "task_done" }
+}
 ```
 
-例如：`pr:owner/repo#2868 + merge + reviewer`。`threadId`、catId、requestId 不进身份；换 thread 或换 carrier 仍是同一动作。
+调用同时提供 `clientMessageId` 和明确 `targetCats`。Task 必须覆盖本次工作，目标猫与 thread 必须具有当前 owner/delegate standing；`threadId`、catId、requestId 不是责任对象。资产/文件/Feature 编号写在工作包或成果引用里，不能改个前缀冒充 Task。复用旧 thread 不等于复用旧 Task 或旧批次批准。
+
+`terminalPredicate` 在公开 schema 中可选，是为了兼容 `returnToPredecessor`；新实现 claim（包括 `existing_standing`）仍必须传。`existing_standing + groundingEvidenceRef` 只证明已有 standing 的自接，不因同 catId 或一条人类原话自动授予另一个 thread 的 delegate 资格。没有已核 Task/委派关系时，按 `custody-recognition` 解析原责任与当前 scope，再走对应批准/委派入口；不要捏造 Task、用已完成旧 Task 套新工作或删掉 `action` 绕拒收。原任务内已合法启动的执行不补投第二份。
+
+`acceptedSourceRef/acceptedRevision` 是 `localReviewVerdict` 的字段，不是实现派发的授权参数。实现工作包在 `content` 引用人类来源，权限仍由 Task/standing 解析；不要为通过参数校验加一个假的 review verdict。
 
 - 默认 `mode=single`：一个 holder。前一 successor 仍 active 时，接受 `safe_wait`，不要再召唤下一只。
 - 同 thread 普通单猫通知 → `post_message` / 行首 `@`；同 thread structured single successor → `post_message(action.mode=single)`；跨 thread → `cross_post_message(action)`；真正并行聚合 → `multi_mention(mode=parallel)`。

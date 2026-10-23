@@ -1,7 +1,13 @@
-type SearchPhase = 'visibility' | 'source-admission' | 'retrieval' | 'canonical-projection';
+type SearchPhase =
+  | 'visibility'
+  | 'source-admission'
+  | 'retrieval'
+  | 'canonical-projection'
+  | 'qualification'
+  | 'final-revalidation';
 
 /** Error-only operational evidence. Query, principal and canonical bodies are never captured. */
-export function observeMessageSearchExecution() {
+export function observeMessageSearchExecution(onTrace?: (trace: Record<string, unknown>) => void) {
   const started = performance.now();
   const completedPhases: Partial<Record<SearchPhase, number>> = {};
   return async <T>(phase: SearchPhase, run: () => T | Promise<T>, check?: () => void): Promise<T> => {
@@ -10,6 +16,7 @@ export function observeMessageSearchExecution() {
       const result = await run();
       check?.();
       completedPhases[phase] = performance.now() - entered;
+      onTrace?.({ phase, elapsedMs: performance.now() - started, phaseElapsedMs: completedPhases[phase] });
       return result;
     } catch (error) {
       if (error instanceof Error) {

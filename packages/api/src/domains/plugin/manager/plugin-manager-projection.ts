@@ -13,6 +13,7 @@ import type {
   PluginManagerPackageSource,
 } from '@cat-cafe/shared';
 import type { Capability, PluginManifest } from '@clowder-ai/plugin-contract';
+import { hasRetainedDesktopLoss } from '../desktop-window-runtime/desktop-loss.js';
 import { pluginRuntimeDiagnostic } from '../diagnostics/plugin-runtime-diagnostic.js';
 import type { PluginInstanceRecord, PluginInventorySnapshot, PluginPackageRecord } from '../host-inventory/types.js';
 import { sourceSemver } from './local-directory-semver.js';
@@ -23,6 +24,8 @@ export interface PluginManagerCatalogCandidate {
   readonly sourceLabel?: string;
   /** A catalog candidate with a current validated manifest, never an inventory fallback. */
   readonly compatibleReplacement?: boolean;
+  /** Trusted exact archive release; full package compatibility is checked before replacement. */
+  readonly updateRequiresValidation?: boolean;
   readonly pluginId: string;
   readonly packageName: string;
   readonly version: string;
@@ -318,8 +321,8 @@ export function projectPluginManagerCatalogCandidate(
     overrides.activeCapabilityIds ?? [],
   );
 
-  const newerCompatible =
-    candidate.compatibleReplacement === true &&
+  const newerRelease =
+    (candidate.compatibleReplacement === true || candidate.updateRequiresValidation === true) &&
     packageRecord !== undefined &&
     sourceSemver.valid(candidate.version) !== null &&
     sourceSemver.valid(packageRecord.version) !== null &&
@@ -344,21 +347,30 @@ export function projectPluginManagerCatalogCandidate(
     capabilitySummary: incompatible ? [] : capabilitySummary,
     actions: incompatible
       ? {
-          install: newerCompatible,
+          install: newerRelease,
           setEnabled: false,
           uninstall: true,
           blockingReasons: ['package-incompatible'],
         }
       : {
           ...derivePluginManagerActions({ artifact, config, auth, intent, activationTransition }),
-          ...(artifact === 'installed' && newerCompatible && !activationTransition ? { install: true } : {}),
+          ...(artifact === 'installed' &&
+          config === 'ready' &&
+          (auth === 'connected' || auth === 'not-required') &&
+          !activationTransition &&
+          (instance?.activationState === 'error' ||
+            (intent === 'enabled' && live === 'crashed') ||
+            (instance?.pluginId === 'official.companion' && hasRetainedDesktopLoss(instance)))
+            ? { repair: true }
+            : {}),
+          ...(artifact === 'installed' && newerRelease && !activationTransition ? { install: true } : {}),
         },
     ...(incompatible
       ? {
           diagnostic: {
             code: 'PACKAGE_INCOMPATIBLE',
-            message: newerCompatible
-              ? '插件版本与当前 Host 不兼容，已停止运行。配置与数据已保留，可安装兼容更新。'
+            message: newerRelease
+              ? '插件版本与当前 Host 不兼容，已停止运行。配置与数据已保留，可尝试更新，安装前会校验兼容性。'
               : '插件版本与当前 Host 不兼容，已停止运行。配置与数据已保留；当前无可用更新。',
             occurredAt: packageRecord.updatedAt,
             revision: instance?.lifecycleRevision ?? null,

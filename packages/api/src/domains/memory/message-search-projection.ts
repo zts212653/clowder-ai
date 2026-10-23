@@ -22,6 +22,23 @@ export function projectMessageSearchSnippet(
   return { text: text.slice(start, start + end), start, end: start + end, source };
 }
 
+/** Locate native evidence in original text, retaining original UTF-16 offsets.
+ * Canonical whitespace normalization must never be presented as original byte offsets. */
+export function projectQualifiedSnippet(
+  body: string,
+  canonical: string,
+  quote: string,
+): MessageSearchResult['snippet'] {
+  const escaped = quote
+    .trim()
+    .split(/\s+/u)
+    .map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+    .join('\\s+');
+  const original = new RegExp(escaped, 'u').exec(body);
+  if (original) return projectMessageSearchSnippet(body, 'body', original[0]);
+  return projectMessageSearchSnippet(canonical, 'attachment-text', quote);
+}
+
 export function projectMessageSearchHighlights(text: string, query: string): MessageSearchResult['highlights'] {
   const escaped = query.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   if (!escaped) return [];

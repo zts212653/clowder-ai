@@ -55,6 +55,7 @@ export {
   ACTION_SUBJECT_REF_MAX_LENGTH,
   ACTION_SUBJECT_REF_PATTERN,
   actionSubjectRefSchema,
+  TASK_ACTION_SUBJECT_REF_DESCRIPTION,
 } from './action-subject-ref.js';
 export {
   ACTION_SUCCESSOR_ACTION_FAMILIES,
@@ -732,8 +733,10 @@ export {
   type NeedsMeProducerId,
   PHASE_B_NEEDS_ME_PRODUCER_IDS,
   type PhaseBNeedsMeProducerId,
+  type ProducerAttentionCoverageV1,
   type ProducerAttentionReceiptV1,
   type ProducerAttentionReevaluationLinkV1,
+  producerAttentionCoverageV1Schema,
   producerAttentionReceiptV1Schema,
   producerAttentionReevaluationLinkV1Schema,
 } from './growing.js';
@@ -978,6 +981,8 @@ export {
 } from './memory-architecture-closure.js';
 // F287 Phase C: bounded Memory Cue Plane shared contract.
 export {
+  type AuthorizedTaskSourcesOpportunityV1,
+  authorizedTaskSourcesOpportunityV1Schema,
   type CatOwnedSeedCueCarrierV1,
   type CueEnvelopeV1,
   catOwnedSeedCueCarrierV1Schema,
@@ -986,6 +991,8 @@ export {
   type DeliveryDecisionOpportunityV1,
   deliveryDecisionCueCarrierV1Schema,
   deliveryDecisionOpportunityV1Schema,
+  type FreshContextSourcesOpportunityV1,
+  freshContextSourcesOpportunityV1Schema,
   isCueEnvelopeV1,
   isRecallOpportunityV1,
   type JudgmentSurfaceEnteredOpportunityV1,
@@ -1012,6 +1019,7 @@ export {
   type ThreadOpenedOpportunityV1,
   threadOpenedOpportunityV1Schema,
 } from './memory-cue.js';
+export { type ContextSourceEvidenceV1, contextSourceEvidenceV1Schema } from './memory-cue-context.js';
 export * from './memory-owner-lifecycle.js';
 export * from './memory-owner-views.js';
 export {

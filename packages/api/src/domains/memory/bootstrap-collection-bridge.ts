@@ -11,7 +11,7 @@ import { resolveCollectionScanner } from './scanner-resolver.js';
 import { ensureVectorTable } from './schema.js';
 import { VectorStore } from './VectorStore.js';
 
-function deriveCollectionId(projectPath: string): string {
+export function deriveProjectCollectionId(projectPath: string): string {
   let name = basename(projectPath)
     .toLowerCase()
     .replace(/[^a-z0-9-]/g, '-');
@@ -28,7 +28,7 @@ export async function ensureProjectCollection(
   getEmbeddingService?: () => IEmbeddingService | undefined,
 ): Promise<{ docsIndexed: number; durationMs: number }> {
   const startMs = Date.now();
-  const collectionId = deriveCollectionId(projectPath);
+  const collectionId = deriveProjectCollectionId(projectPath);
 
   let manifest = catalog.get(collectionId);
   let store = stores.get(collectionId) as SqliteEvidenceStore | undefined;

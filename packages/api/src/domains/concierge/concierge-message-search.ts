@@ -52,6 +52,9 @@ export async function buildConciergeMessageSearchContext(
     );
   }
   lines.push(`范围：${response.meta.scope === 'thread' ? '当前对话' : '全局可读对话'}；排序：按时间。`);
+  const qualification = response.meta.qualification;
+  if (qualification?.status === 'partial')
+    lines.push(`${qualification.unassessed + qualification.indeterminate} 条候选尚未核对出结论，不能将其当作不相关。`);
   if (response.meta.degraded) lines.push('本次检索已降级到词法；语义命中可能不完整。');
   lines.push('这是有限索引候选，不代表完整历史或第一次；最近消息可能尚未入索引，延迟暂无法确认。', '');
   const hidden = response.results.some((result) => !result.publiclyQuotable);

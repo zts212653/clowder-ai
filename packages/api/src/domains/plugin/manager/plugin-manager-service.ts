@@ -60,6 +60,7 @@ export interface PluginManagerInstallPort {
 }
 
 export interface PluginManagerLifecyclePort {
+  repair?(pluginInstanceId: string, expectedRevision: number): Promise<void>;
   setEnabled(pluginInstanceId: string, enabled: boolean, expectedRevision: number): Promise<void>;
   uninstall(pluginInstanceId: string, expectedRevision: number): Promise<void>;
 }
@@ -382,11 +383,15 @@ export class PluginManagerService {
     const current = (await this.get(pluginId)).plugin;
     this.requireCurrentInstance(current, request.expectedRevision);
     if (!current.actions.install || current.availableVersion !== request.expectedVersion) {
-      throw new PluginManagerServiceError('ACTION_NOT_ALLOWED', 'No newer compatible plugin version is available');
+      throw new PluginManagerServiceError('ACTION_NOT_ALLOWED', 'No newer plugin release is available');
     }
     const catalog = await this.readCatalog();
     const candidate = catalog.candidates.find((item) => item.pluginId === pluginId);
-    if (!candidate || candidate.compatibleReplacement !== true || candidate.version !== request.expectedVersion) {
+    if (
+      !candidate ||
+      (candidate.compatibleReplacement !== true && candidate.updateRequiresValidation !== true) ||
+      candidate.version !== request.expectedVersion
+    ) {
       throw new PluginManagerServiceError('CATALOG_MISMATCH', 'Plugin update changed; refresh the plugin list');
     }
     const git = candidate.directorySource;
@@ -439,6 +444,19 @@ export class PluginManagerService {
       throw new PluginManagerServiceError('LIFECYCLE_UNAVAILABLE', 'Plugin lifecycle control is unavailable');
     }
     await this.options.lifecycle.setEnabled(instance.pluginInstanceId, request.enabled, request.expectedRevision);
+    return { pluginId, pluginInstanceId: instance.pluginInstanceId };
+  }
+
+  async repair(pluginId: string, request: { expectedRevision: number }): Promise<PluginManagerMutationResult> {
+    const current = (await this.getInstalled(pluginId)).plugin;
+    const instance = this.requireCurrentInstance(current, request.expectedRevision);
+    if (!current.actions.repair) {
+      throw new PluginManagerServiceError('ACTION_NOT_ALLOWED', 'Plugin does not have a repairable activation failure');
+    }
+    if (!this.options.lifecycle?.repair) {
+      throw new PluginManagerServiceError('LIFECYCLE_UNAVAILABLE', 'Plugin repair is unavailable');
+    }
+    await this.options.lifecycle.repair(instance.pluginInstanceId, request.expectedRevision);
     return { pluginId, pluginInstanceId: instance.pluginInstanceId };
   }
 

@@ -489,4 +489,62 @@ describe('ASR → F276 F296 adapter', () => {
     assert.equal(receipts[0].outcome, 'delivered');
     assert.equal(receipts[0].generationId, `sha256:${createHash('sha256').update(prompts[1]).digest('hex')}`);
   });
+  for (const reason of ['reservation_superseded', 'context_epoch_retired'])
+    it(`${reason}: rejected write projections cannot become delivered records or receipts`, async () => {
+      const now = Date.now();
+      const scene = await sceneAt(now);
+      const authority = dispositionAuthority();
+      const writes = [];
+      authority.writeOpportunityDeliveryStore.recordDelivered = async (record) => writes.push(record);
+      const ledger = presentationLedger();
+      ledger.commit = async () => ({ committed: false, reason });
+      const service = {
+        contextCapability: () => CODEX_EXEC,
+        async *invoke(prompt) {
+          assert.match(prompt, /person-memory-write-opportunity/);
+          yield { type: 'text', catId: 'codex', content: 'handled', timestamp: now + 1 };
+          yield { type: 'done', catId: 'codex', timestamp: now + 2 };
+        },
+      };
+      const messages = [];
+      for await (const message of invokeSingleCat(
+        {
+          ...authority,
+          registry: {
+            create: async () => ({ invocationId: 'inv-asr-f276', callbackToken: 'token-asr-f276' }),
+            verify: async () => ({ ok: false }),
+          },
+          sessionManager: {
+            get: async () => undefined,
+            store: async () => {},
+            delete: async () => {},
+            resolveWorkingDirectory: () => '/tmp/test',
+          },
+          threadStore: null,
+          apiUrl: 'http://127.0.0.1:3004',
+          contextEpochOwner: new ContextEpochOwner(new InMemoryContextEpochStore()),
+          presentationLedger: ledger,
+        },
+        {
+          catId: 'codex',
+          service,
+          prompt: 'meeting prompt',
+          userId: 'owner-1',
+          threadId: 'thread-1',
+          ownerAuthProvenance: 'unknown',
+          invocationOrigin: 'interactive',
+          routeTopology: 'serial',
+          asrPersonMemoryScenes: [boundScene(scene)],
+          isLastCat: true,
+        },
+      ))
+        messages.push(message);
+      assert.deepEqual(writes, []);
+      const receipts = parseSystemInfo(messages, 'write_opportunity_presentation_receipt');
+      assert.deepEqual(
+        receipts.map((r) => r.outcome),
+        ['omitted'],
+      );
+      assert.equal(receipts[0].opportunities[0].opportunityId, scene.opportunity.opportunityId);
+    });
 });

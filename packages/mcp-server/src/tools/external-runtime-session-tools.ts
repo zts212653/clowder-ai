@@ -5,20 +5,23 @@ import { defineMcpMigrationFactory } from '../tool-governance-migration.js';
 import { callbackPost } from './callback-tools.js';
 import type { ToolResult } from './file-tools.js';
 import { errorResult, successResult } from './file-tools.js';
+import { resolveInvocationEnv } from './invocation-auth.js';
 
 const defineTool = defineMcpMigrationFactory('external-runtime-session-tools.ts', undefined, {
   resourceFamily: 'runtime-session',
   authority: 'callback-owner',
 });
 
-const API_URL = process.env['CAT_CAFE_API_URL'] ?? deploymentDefaults.apiBaseUrl;
+function resolveApiUrl(): string {
+  return resolveInvocationEnv('CAT_CAFE_API_URL') ?? deploymentDefaults.apiBaseUrl;
+}
 
 function resolveToolUserId(): string {
-  return process.env['CAT_CAFE_USER_ID'] ?? 'default-user';
+  return resolveInvocationEnv('CAT_CAFE_USER_ID') ?? 'default-user';
 }
 
 function resolveToolCatId(): string | undefined {
-  return process.env['CAT_CAFE_CAT_ID'];
+  return resolveInvocationEnv('CAT_CAFE_CAT_ID');
 }
 
 function buildUserAuthHeaders(): Record<string, string> {
@@ -112,12 +115,12 @@ export async function handleListExternalRuntimeSessions(input: {
   if (input.catId) params.set('catId', input.catId);
   if (input.limit !== undefined) params.set('limit', String(input.limit));
   const qs = params.toString();
-  const url = `${API_URL}/api/external-runtime-sessions${qs ? `?${qs}` : ''}`;
+  const url = `${resolveApiUrl()}/api/external-runtime-sessions${qs ? `?${qs}` : ''}`;
   return fetchExternalRuntimeSessionJson(url, 'List external runtime sessions failed');
 }
 
 export async function handleReadExternalRuntimeSession(input: { sessionId: string }): Promise<ToolResult> {
-  const url = `${API_URL}/api/external-runtime-sessions/${encodeURIComponent(input.sessionId)}`;
+  const url = `${resolveApiUrl()}/api/external-runtime-sessions/${encodeURIComponent(input.sessionId)}`;
   return fetchExternalRuntimeSessionJson(url, 'Read external runtime session failed');
 }
 

@@ -12,6 +12,7 @@ import { z } from 'zod';
 import { callbackGet, callbackPost, getCallbackConfig } from './callback-tools.js';
 import type { ToolResult } from './file-tools.js';
 import { errorResult } from './file-tools.js';
+import { resolveInvocationEnv } from './invocation-auth.js';
 
 const scheduleGovernance = {
   resourceFamily: 'schedule',
@@ -152,7 +153,7 @@ export async function handleRegisterScheduledTask(input: {
 
   // Auto-inject the selected cat's ID so reminder tasks wake the registering cat, not default opus.
   // Shared Antigravity MCP has no per-process CAT_CAFE_CAT_ID; the selected sidecar cat is the actor.
-  const currentCatId = authMode === 'agent-key' ? input.agentKeyCatId : process.env['CAT_CAFE_CAT_ID'];
+  const currentCatId = authMode === 'agent-key' ? input.agentKeyCatId : resolveInvocationEnv('CAT_CAFE_CAT_ID');
   if (input.templateId !== ENTRUSTED_WORK_REEVALUATION_TEMPLATE_ID && !params.targetCatId && currentCatId) {
     params.targetCatId = currentCatId;
   }

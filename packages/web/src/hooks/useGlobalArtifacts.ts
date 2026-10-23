@@ -13,6 +13,12 @@ import { useWorksSourceRefresh } from './useThreadArtifacts';
 
 type WorkLineage = GlobalArtifactsResponse['workLineage'];
 
+class GlobalArtifactsReadError extends Error {
+  constructor(readonly status: number) {
+    super(`global artifacts fetch failed: ${status}`);
+  }
+}
+
 interface GlobalArtifactsPayload {
   artifacts: GlobalArtifactDTO[];
   workLineage: WorkLineage;
@@ -37,8 +43,8 @@ async function fetchGlobalArtifacts(
   requireComplete: boolean,
   worksView: boolean,
 ): Promise<GlobalArtifactsPayload> {
-  const res = await apiFetch(path, { signal });
-  if (!res.ok) throw new Error(`global artifacts fetch failed: ${res.status}`);
+  const res = await apiFetch(path, { signal }, { afterCurrentGet: requireComplete });
+  if (!res.ok) throw new GlobalArtifactsReadError(res.status);
   const body = await res.json();
   if (worksView && (body === null || typeof body !== 'object' || body.view !== 'works'))
     throw new Error('Works view unavailable');
@@ -57,9 +63,15 @@ interface UseGlobalArtifactsResult {
 
 export type GlobalArtifactsQuery = { view: 'recent-works'; limit: number } | { view: 'works' };
 
-export function useGlobalArtifacts(enabled: boolean, query?: GlobalArtifactsQuery): UseGlobalArtifactsResult {
+export function useGlobalArtifacts(
+  enabled: boolean,
+  query?: GlobalArtifactsQuery,
+  ownerKey?: string | null,
+): UseGlobalArtifactsResult {
   const worksView = query?.view === 'works';
-  const paged = usePagedGlobalWorks(enabled && worksView);
+  const paged = usePagedGlobalWorks(enabled && worksView, ownerKey);
+  const [resolvedScope, setResolvedScope] = useState<string | null>(null);
+  const resolvedScopeRef = useRef<string | null>(null);
   const [artifacts, setArtifacts] = useState<GlobalArtifactDTO[]>([]);
   const [workLineage, setWorkLineage] = useState<WorkLineage>('unavailable');
   const [complete, setComplete] = useState(true);
@@ -73,6 +85,7 @@ export function useGlobalArtifacts(enabled: boolean, query?: GlobalArtifactsQuer
   const requestPath = query
     ? `/api/artifacts?view=${encodeURIComponent(query.view)}${'limit' in query ? `&limit=${encodeURIComponent(String(query.limit))}` : ''}`
     : '/api/artifacts';
+  const scope = JSON.stringify([requestPath, ownerKey]);
 
   const refetch = useCallback(async () => {
     abortRef.current?.abort();
@@ -88,17 +101,26 @@ export function useGlobalArtifacts(enabled: boolean, query?: GlobalArtifactsQuer
         setArtifacts(result.artifacts);
         setWorkLineage(result.workLineage);
         setComplete(result.complete);
+        setResolvedScope(scope);
+        resolvedScopeRef.current = scope;
       }
     } catch (err: unknown) {
       if (ac.signal.aborted || (err instanceof DOMException && err.name === 'AbortError')) return;
       setError(true);
-      setArtifacts([]);
+      if (
+        resolvedScopeRef.current !== scope ||
+        (err instanceof GlobalArtifactsReadError && (err.status === 401 || err.status === 403))
+      ) {
+        setArtifacts([]);
+        setResolvedScope(null);
+        resolvedScopeRef.current = null;
+      }
       setWorkLineage('unavailable');
       setComplete(false);
     } finally {
       if (!ac.signal.aborted) setLoading(false);
     }
-  }, [requestPath, requireComplete, worksView]);
+  }, [requestPath, requireComplete, worksView, scope]);
 
   useEffect(() => {
     enabledRef.current = enabled;
@@ -114,9 +136,16 @@ export function useGlobalArtifacts(enabled: boolean, query?: GlobalArtifactsQuer
     return () => abortRef.current?.abort();
   }, [enabled, refetch, worksView]);
 
-  useWorksSourceRefresh(hostThreadId, enabled && worksView, paged.restart);
+  useWorksSourceRefresh(hostThreadId, enabled && query !== undefined, worksView ? paged.restart : refetch);
 
   return worksView
     ? paged
-    : { artifacts, workLineage, complete, loading: enabled && (loading || !enabledRef.current), error, refetch };
+    : {
+        artifacts: enabled && resolvedScope === scope ? artifacts : [],
+        workLineage: resolvedScope === scope ? workLineage : 'unavailable',
+        complete: resolvedScope === scope && complete,
+        loading: enabled && (loading || !enabledRef.current),
+        error,
+        refetch,
+      };
 }

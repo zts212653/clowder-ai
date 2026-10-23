@@ -8,6 +8,7 @@ import {
   approvalResolutionSchema,
 } from './approval-lifecycle.js';
 import type { CollectiveAccountabilityAttentionItem } from './collective-accountability-attention.js';
+import { producerAttentionCoverageV1Schema } from './growing.js';
 import { preparedArtifactSnapshotV1Schema } from './growing-artifact.js';
 import type { RichCardBlock, RichInteractiveBlock } from './rich.js';
 import {
@@ -72,7 +73,7 @@ export const unifiedAttentionApprovalsSourceSchema = z.object({
 });
 
 export const unifiedAttentionWorkSourceSchema = z.object({
-  coverage: sourceCoverageSchema.optional(),
+  coverage: producerAttentionCoverageV1Schema.optional(),
   ownerReads: z.array(
     z
       .object({

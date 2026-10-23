@@ -182,3 +182,32 @@ it.each([
     language === 'zh' ? '刷新额度 · 上次 10/21 23:17' : 'Refresh quota · Last checked 10/21 23:17',
   );
 });
+
+it.each(['zh', 'en'] as const)('distinguishes exhausted, low and healthy readings in %s', async (language) => {
+  writeShellLanguage(language);
+  for (const left of [0, 1, 19, 20]) {
+    await act(async () =>
+      root.render(
+        <CodexQuotaControl
+          accountRef="codex"
+          observation={{ ...observation, items: [{ label: 'Week', usedPercent: 100 - left }] }}
+          reload={async () => {}}
+        />,
+      ),
+    );
+    const warning = host.querySelector('.account-quota-warning');
+    expect(warning?.textContent ?? '').toBe(
+      left === 0
+        ? language === 'zh'
+          ? '已用完'
+          : 'Used up'
+        : left < 20
+          ? language === 'zh'
+            ? '接近上限'
+            : 'Near limit'
+          : '',
+    );
+    expect(host.querySelector('[role="meter"]')?.getAttribute('aria-valuenow')).toBe(String(left));
+    expect(host.querySelector<HTMLElement>('.account-quota-meter > span')?.style.width).toBe(`${left}%`);
+  }
+});

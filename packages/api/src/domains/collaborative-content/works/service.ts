@@ -25,6 +25,7 @@ import {
   type WorkPublicationScopeV1,
 } from '../../video-studio/content-owner/types.js';
 import { type WorkListReader, withWorkCatalogueRead } from './catalogue-read.js';
+import type { WorkCatalogueReadObserver } from './catalogue-read-timing.js';
 import type { WorkReviewResponseService } from './review-response.js';
 import type { WorkAuthorizationInput, WorkPrincipal, WorkReadResult } from './types.js';
 import { workVersionRecord } from './version-record.js';
@@ -66,11 +67,22 @@ export class LivingWorkService {
       versions: WorkVersionStore;
       source: WorkSourcePort;
       responses?: WorkReviewResponseService;
+      changed?(ownerUserId: string): void;
       authorize(input: WorkAuthorizationInput): Promise<void>;
     },
   ) {}
 
   async commit(raw: unknown, principal: WorkPrincipal) {
+    const result = await this.commitVersion(raw, principal);
+    try {
+      this.deps.changed?.(principal.userId);
+    } catch {
+      /* Projection invalidation never changes the canonical save result. */
+    }
+    return result;
+  }
+
+  private async commitVersion(raw: unknown, principal: WorkPrincipal) {
     const command = commitWorkSchema.parse(raw);
     const response = command.action === 'submit' ? command.reviewResponse : undefined;
     if (response && !this.deps.responses) throw new MediaOwnerError('media_unavailable');
@@ -191,8 +203,12 @@ export class LivingWorkService {
     );
   }
 
-  withCatalogueRead<T>(ownerUserId: string, consume: (reader: WorkListReader) => Promise<T>): Promise<T> {
-    return withWorkCatalogueRead({ ...this.deps, read: this.read.bind(this) }, ownerUserId, consume);
+  withCatalogueRead<T>(
+    ownerUserId: string,
+    consume: (reader: WorkListReader) => Promise<T>,
+    observer?: WorkCatalogueReadObserver,
+  ): Promise<T> {
+    return withWorkCatalogueRead({ ...this.deps, read: this.read.bind(this) }, ownerUserId, consume, observer);
   }
 
   async inspectSource(locator: Omit<WorkWorkspaceSource, 'expectedSourceRevision'>, principal: WorkPrincipal) {

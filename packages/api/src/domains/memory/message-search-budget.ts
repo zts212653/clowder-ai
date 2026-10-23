@@ -1,4 +1,5 @@
-import type { MessageSearchResponse } from '@cat-cafe/shared';
+import type { MessageSearchInput, MessageSearchResponse } from '@cat-cafe/shared';
+import type { MessagePassageSearchExecution } from './message-passage-search-types.js';
 
 export const MESSAGE_SEARCH_RESPONSE_BUDGET = 24_000;
 
@@ -29,4 +30,33 @@ export function boundMessageSearchResponse(response: MessageSearchResponse): Mes
     out.meta.hasMore = true;
     out.meta.response.truncated = true;
   }
+}
+
+export function messageSearchMeta(
+  input: MessageSearchInput,
+  execution: MessagePassageSearchExecution,
+  count: number,
+  limit: number,
+): MessageSearchResponse['meta'] {
+  return {
+    scope: input.threadId ? 'thread' : 'global',
+    ...(input.threadId ? { threadId: input.threadId } : {}),
+    sort: input.sort ?? 'time',
+    requestedMode: input.mode ?? 'hybrid',
+    effectiveMode: execution.meta.effectiveMode,
+    degraded: execution.meta.degraded,
+    ...(execution.meta.degradeReason ? { degradeReason: execution.meta.degradeReason } : {}),
+    hasMore: count > limit,
+    partial: true,
+    candidateLimit: execution.meta.candidateLimit,
+    semanticCandidatesLimited: execution.meta.semanticCandidatesLimited,
+    sourceCoverage: 'unknown',
+    freshness: 'unknown',
+    response: {
+      budgetChars: MESSAGE_SEARCH_RESPONSE_BUDGET,
+      serializedChars: 0,
+      truncated: false,
+      continuation: 'unavailable',
+    },
+  };
 }

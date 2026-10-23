@@ -24,7 +24,7 @@ import { evidenceRoutes } from '../dist/routes/evidence.js';
 import { libraryRoutes } from '../dist/routes/library.js';
 import { canonicalTestMessageInput } from '../test/helpers/message-from-fixtures.js';
 
-export async function createExperienceEnvironment(repoRoot, root) {
+export async function createExperienceEnvironment(repoRoot, root, { cueRuntimeFactory, registerRuntimeRoutes } = {}) {
   const project = join(root, 'project');
   const docs = join(project, 'docs');
   mkdirSync(docs, { recursive: true });
@@ -106,8 +106,37 @@ export async function createExperienceEnvironment(repoRoot, root) {
   mkdirSync(join(project, '.codex'), { recursive: true });
   symlinkSync(join(repoRoot, 'cat-cafe-skills'), join(project, '.codex/skills'), 'dir');
   const app = Fastify();
+  const cueRuntime = cueRuntimeFactory?.({
+    messages,
+    threads,
+    tasks,
+    registry,
+    repository,
+    store,
+    catalog,
+    stores,
+    knowledgeResolver,
+    project,
+    docs,
+  });
   const requests = [];
-  app.addHook('onRequest', async (req) => requests.push({ method: req.method, url: req.url }));
+  app.addHook('onRequest', async (req) => requests.push({ requestId: req.id, method: req.method, url: req.url }));
+  app.addHook('onResponse', async (req, reply) => {
+    const record = requests.find((item) => item.requestId === req.id);
+    if (record) record.statusCode = reply.statusCode;
+  });
+  app.addHook('onSend', async (req, _reply, payload) => {
+    if (!req.url.includes('/memory-cues/')) return payload;
+    const record = requests.find((item) => item.requestId === req.id);
+    if (record && typeof payload === 'string') {
+      try {
+        record.reply = JSON.parse(payload);
+      } catch {
+        /* Plain error stays in the status log. */
+      }
+    }
+    return payload;
+  });
   const { callbacksRoutes } = await import('../dist/routes/callbacks.js');
   await app.register(callbacksRoutes, {
     registry,
@@ -116,9 +145,11 @@ export async function createExperienceEnvironment(repoRoot, root) {
     taskStore: tasks,
     profileRepository: repository,
     profileUpdateProposalStore: proposals,
+    ...(cueRuntime ? { memoryCueDeps: cueRuntime.callbackDeps } : {}),
+    ...(cueRuntime?.callbackRouteDeps ?? {}),
     evidenceStore: store,
     messageSearchService: messageSearch,
-    socketManager: { emitToUser() {}, broadcastToRoom() {} },
+    socketManager: { emitToUser() {}, broadcastToRoom() {}, broadcastAgentMessage() {} },
   });
   await app.register(evidenceRoutes, {
     evidenceStore: store,
@@ -134,6 +165,7 @@ export async function createExperienceEnvironment(repoRoot, root) {
     stores: new Map([['project:cat-cafe', store]]),
     dataDir: join(root, 'data'),
   });
+  if (registerRuntimeRoutes) await registerRuntimeRoutes(app, { registry, tasks, messages, threads });
   const address = await app.listen({ host: '127.0.0.1', port: 0 });
   const append = (content, catId = null) =>
     messages.append(
@@ -146,9 +178,9 @@ export async function createExperienceEnvironment(repoRoot, root) {
         threadId: sourceThread.id,
       }),
     );
-  const legalProfile = async (content) => {
+  const legalProfile = async (content, writerCatId = 'codex61-sol') => {
     const source = append(content);
-    const auth = await registry.create('trial-owner', 'codex61-sol', sourceThread.id, undefined, source.id);
+    const auth = await registry.create('trial-owner', writerCatId, sourceThread.id, undefined, source.id);
     const response = await app.inject({
       method: 'POST',
       url: '/api/callbacks/propose-profile-update',
@@ -199,6 +231,9 @@ export async function createExperienceEnvironment(repoRoot, root) {
     append,
     legalProfile,
     tasks,
+    messages,
+    threads,
+    cueRuntime,
     async flushSourceThread() {
       threadBuilder.markThreadDirty(sourceThread.id);
       await threadBuilder.flushDirtyThreads();

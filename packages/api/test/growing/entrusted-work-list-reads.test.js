@@ -91,6 +91,9 @@ async function fixture(completed) {
         async listCurrentReceipts() {
           return [];
         },
+        async readCurrentReceipts() {
+          return { receipts: [], coverage: { state: 'complete' } };
+        },
       },
     }),
     scanCount: () => scans,

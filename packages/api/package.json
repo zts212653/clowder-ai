@@ -7,7 +7,7 @@
   "scripts": {
     "dev": "node --import tsx ./scripts/copy-bundled-plugin-packages.mjs --source && node scripts/dev-supervisor.mjs",
     "verify:sigusr1": "node scripts/verify-sigusr1-guard.mjs",
-    "build": "pnpm --dir ../shared build && tsc && node ./scripts/build-governance-metadata.mjs && node ./scripts/copy-bundled-plugin-packages.mjs && node ./scripts/copy-marketplace-catalog-data.mjs && node ../../scripts/check-provider-request-recorder.mjs",
+    "build": "pnpm --dir ../shared build && pnpm --dir ../mcp-server build && tsc && node ./scripts/build-governance-metadata.mjs && node ./scripts/copy-bundled-plugin-packages.mjs && node ./scripts/copy-marketplace-catalog-data.mjs && node ../../scripts/check-provider-request-recorder.mjs",
     "gate:f202-artifacts": "node scripts/f202-connector-artifact-gate.mjs",
     "audit:codex-protocol": "node ./scripts/audit-codex-app-server-protocol.mjs",
     "verify:codex-build-independence": "node ./scripts/verify-codex-build-independence.mjs",
@@ -27,6 +27,7 @@
     "migrate-signals": "node dist/scripts/migrate-signals.js",
     "migrate:f231-profile": "node dist/scripts/migrate-f231-profile.js",
     "backfill:f276-history": "node dist/scripts/f276-approval-history/backfill-settled-index.js",
+    "downgrade:runtime-interaction": "pnpm run build && node dist/scripts/prepare-runtime-interaction-downgrade.js",
     "rebuild-index": "node dist/scripts/rebuild-index.js",
     "project:init": "node dist/scripts/project-init.js",
     "test:redis": "node ./scripts/with-test-home.mjs node ./scripts/run-isolated-redis-tests.mjs",
@@ -35,7 +36,7 @@
     "test:pty": "pnpm run build && node --import ./test/helpers/setup-cat-registry.js --test --test-timeout=120000 test/f230-pty-driver.test.js",
     "test:cli": "node --import tsx --test test/cli/*.test.ts",
     "test:development-work": "node ./scripts/with-test-home.mjs --env CAT_CAFE_DISABLE_SHARED_STATE_PREFLIGHT=1 node --import tsx --test --test-concurrency=1 --test-timeout=60000 test/growing/development-*.test.ts test/scheduler/development-return-*.test.ts",
-    "test:runtime-interaction": "node ./scripts/with-test-home.mjs --env CAT_CAFE_DISABLE_SHARED_STATE_PREFLIGHT=1 node --import tsx --test --test-timeout=60000 test/runtime-interaction-service.test.ts test/runtime-interaction-record-model.test.ts test/runtime-conversation-decision-service.test.ts test/runtime-conversation-return-gateway.test.ts test/runtime-conversation-decision-projection.test.ts test/runtime-interaction-routes.test.ts test/runtime-interaction-composition.test.ts test/runtime-interaction-card-publisher.test.ts test/codex-runtime-interaction-adapter.test.ts test/codex-runtime-interaction-wire-edge.test.ts test/callback-runtime-interaction-routes.test.ts test/approval-hub/f306-approval-adapter.test.ts test/codex-app-server-protocol-resilience.test.mjs test/f320-account-launch.test.ts test/f320-effective-config.test.ts test/f320-collective-account.test.ts test/f320-native-account.test.ts test/f320-account-consumers.test.ts test/f320-api-auth-consumers.test.ts test/f320-api-provider-overrides.test.ts test/f320-managed-accounts.test.ts test/f320-state-admission.test.ts test/f320-owner-root.test.ts test/f320-owned-collective.test.ts test/f320-login-lifecycle.test.ts test/f320-account-quota.test.ts test/f320-login-uniqueness.test.ts test/f320-account-journey.test.ts test/f320-managed-consumers.test.ts test/f320-host-tools.test.ts test/f320-claude-accounts.test.ts test/f320-claude-carriers.test.ts test/f320-claude-review.test.ts",
+    "test:runtime-interaction": "node ./scripts/with-test-home.mjs --env CAT_CAFE_DISABLE_SHARED_STATE_PREFLIGHT=1 node --import tsx --test --test-timeout=60000 test/runtime-interaction-service.test.ts test/runtime-interaction-record-model.test.ts test/runtime-conversation-decision-service.test.ts test/runtime-conversation-return-gateway.test.ts test/runtime-conversation-decision-projection.test.ts test/runtime-interaction-routes.test.ts test/runtime-interaction-composition.test.ts test/runtime-interaction-card-publisher.test.ts test/runtime-interaction-question-extension.test.ts test/runtime-interaction-downgrade.test.ts test/codex-runtime-interaction-adapter.test.ts test/codex-runtime-interaction-wire-edge.test.ts test/callback-runtime-interaction-routes.test.ts test/approval-hub/f306-approval-adapter.test.ts test/codex-app-server-protocol-resilience.test.mjs test/f320-account-launch.test.ts test/f320-effective-config.test.ts test/f320-collective-account.test.ts test/f320-native-account.test.ts test/f320-account-consumers.test.ts test/f320-api-auth-consumers.test.ts test/f320-api-provider-overrides.test.ts test/f320-managed-accounts.test.ts test/f320-state-admission.test.ts test/f320-owner-root.test.ts test/f320-owned-collective.test.ts test/f320-login-lifecycle.test.ts test/f320-account-quota.test.ts test/f320-login-uniqueness.test.ts test/f320-account-journey.test.ts test/f320-managed-consumers.test.ts test/f320-host-tools.test.ts test/f320-claude-accounts.test.ts test/f320-claude-carriers.test.ts test/f320-claude-review.test.ts",
     "persist-dormant-cursors": "pnpm run build && node scripts/persist-dormant-cursors.mjs",
     "lint": "tsc --noEmit",
     "clean": "node ../../scripts/clean-path.mjs dist",
@@ -54,6 +55,7 @@
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "0.3.285",
+    "@cat-cafe/mcp-server": "workspace:*",
     "@cat-cafe/shared": "workspace:*",
     "@clowder-ai/plugin-contract": "file:vendor/clowder-ai-plugin-contract-0.2.0-1bcd26e0191a.tgz",
     "@clowder-ai/plugin-contract-beta21": "npm:@clowder-ai/plugin-contract@0.1.0-beta.21",

@@ -6,6 +6,7 @@ import { createServer } from 'node:net';
 import path from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { CLIENT_REQUEST_DIAGNOSTIC_HEADER } from '@cat-cafe/shared';
 import sharp from 'sharp';
 import { chromium } from '../../../ppt-forge/node_modules/playwright/index.mjs';
 import { createNextDevTestEnvironment } from './next-dev-test-environment.mjs';
@@ -115,7 +116,10 @@ test(
     const api = createHttpServer(async (request, response) => {
       response.setHeader('Access-Control-Allow-Origin', request.headers.origin ?? '*');
       response.setHeader('Access-Control-Allow-Credentials', 'true');
-      response.setHeader('Access-Control-Allow-Headers', 'X-Cat-Cafe-User, Content-Type');
+      response.setHeader(
+        'Access-Control-Allow-Headers',
+        `X-Cat-Cafe-User, Content-Type,${CLIENT_REQUEST_DIAGNOSTIC_HEADER}`,
+      );
       response.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
       response.setHeader('Content-Type', 'application/json');
       if (request.method === 'OPTIONS') {

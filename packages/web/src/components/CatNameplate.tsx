@@ -1,10 +1,9 @@
 'use client';
 
-import { Nameplate } from '@cat-cafe/ui';
 import { useCatData } from '@/hooks/useCatData';
 import { catColorVar } from '@/lib/cat-slug';
 import { resolveMessageSender, type SenderMeta } from '@/lib/resolve-sender';
-import { SenderAvatar } from './SenderAvatar';
+import { MessageNameplate } from './MessageNameplate';
 
 interface CatNameplateProps {
   catId: string;
@@ -28,13 +27,15 @@ export function CatNameplate({ catId, name, title, onEditCat, sender }: CatNamep
       mentionPatterns: [],
     });
   return (
-    <Nameplate
+    <MessageNameplate
       id={catId}
       name={name}
       title={title}
       surface={catColorVar(catId, 'surface')}
       ink={catColorVar(catId, 'text')}
-      avatar={<SenderAvatar sender={identity} presentation="nameplate" onClick={onEditCat} />}
+      sender={identity}
+      onClick={onEditCat}
+      kind="cat"
     />
   );
 }

@@ -119,6 +119,8 @@ export const COORDINATION_TERMINAL_SCAN_PAGE_SIZE = 100;
 export interface ThreadMessageReadOptions {
   /** Select artifact hash fields, omitting named top-level payloads; contentBlocks and extra are not trimmed. */
   artifactProjection?: boolean;
+  /** Internal recipient history: omit top-level bodies and contentBlocks; retain sender/visibility inputs and full extra. */
+  recipientProjection?: boolean;
   /** Include queued cat-authored speech that is already published to the timeline. */
   includeQueuedCatMessages?: boolean;
   /** Include durable queued owner work (user or Host connector ingress) in the browser timeline only. */
@@ -3662,7 +3664,10 @@ export class MessageStore {
       collectiveWorkDelegationV1: _stripCollectiveDelegation,
       ...hostOnly
     } = extra as Record<string, unknown>;
+    const previousRich = JSON.stringify(msg.extra?.rich);
     msg.extra = { ...msg.extra, ...hostOnly };
+    if (hostOnly.rich !== undefined && previousRich !== JSON.stringify(msg.extra.rich))
+      notifyMessageTimelineChange(this, msg);
     return msg;
   }
 
@@ -3702,9 +3707,11 @@ export class MessageStore {
   augmentStreamMetadata(id: string, patch: StreamMetadataAugmentInput): StoredMessage | null {
     const msg = this.messages.find((m) => m.id === id);
     if (!msg) return null;
+    const previousRich = JSON.stringify(msg.extra?.rich);
     const updated = applyStreamMetadataAugment(msg, patch);
     this.userMentionIndex.observe(updated);
-    if (patch.mentionsUser) notifyMessageTimelineChange(this, updated);
+    if (patch.mentionsUser || (patch.extra?.rich && previousRich !== JSON.stringify(updated.extra?.rich)))
+      notifyMessageTimelineChange(this, updated);
     return updated;
   }
 

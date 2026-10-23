@@ -912,7 +912,7 @@ describe('GET /api/messages', () => {
 
   // ── F97: Connector message type mapping ──────────────────────────
 
-  it('maps message with source field to type=connector', async () => {
+  it('maps message with source field to type=connector without legacy implicit navigation', async () => {
     messageStore.append(
       canonicalTestMessageInput({
         userId: 'default-user',
@@ -939,7 +939,7 @@ describe('GET /api/messages', () => {
     assert.equal(msg.source.connector, 'github-review');
     assert.equal(msg.source.label, 'GitHub Review');
     assert.equal(msg.source.icon, '🔔');
-    assert.equal(msg.source.url, 'https://github.com/org/repo/pull/42');
+    assert.equal(Object.hasOwn(msg.source, 'url'), false);
   });
 
   it('includes source.meta in API response (F098-C: needed for direction parsing)', async () => {
@@ -965,7 +965,7 @@ describe('GET /api/messages', () => {
     const msg = body.messages[0];
     assert.equal(msg.type, 'connector');
     assert.equal(msg.source.connector, 'github-review');
-    assert.equal(msg.source.url, 'https://github.com/org/repo/pull/42');
+    assert.equal(Object.hasOwn(msg.source, 'url'), false);
     assert.deepStrictEqual(
       msg.source.meta,
       { targets: ['codex', 'gpt52'], initiator: 'opus' },

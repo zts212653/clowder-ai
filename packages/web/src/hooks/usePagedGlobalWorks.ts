@@ -40,13 +40,14 @@ async function fetchPage(token: string | undefined, signal: AbortSignal): Promis
 }
 
 /** Drain bounded requests serially, publishing useful batches while the original catalogue is still being read. */
-export function usePagedGlobalWorks(enabled: boolean) {
+export function usePagedGlobalWorks(enabled: boolean, ownerKey?: string | null) {
   const [snapshot, setSnapshot] = useState<Snapshot>(empty);
   const current = useRef<Snapshot>(empty());
   const confirmed = useRef<Snapshot | null>(null);
   const cursor = useRef<string | undefined>();
   const request = useRef<AbortController | null>(null);
   const cursorExpired = useRef(false);
+  const owner = useRef(ownerKey);
   const read = useCallback(async (restart: boolean) => {
     request.current?.abort();
     const ac = new AbortController();
@@ -105,6 +106,10 @@ export function usePagedGlobalWorks(enabled: boolean) {
     void read(!current.current.error || cursorExpired.current);
   }, [read]);
   useEffect(() => {
+    if (owner.current !== ownerKey) {
+      confirmed.current = null;
+      owner.current = ownerKey;
+    }
     if (enabled) restart();
     else {
       current.current = empty();
@@ -113,6 +118,7 @@ export function usePagedGlobalWorks(enabled: boolean) {
       setSnapshot(current.current);
     }
     return () => request.current?.abort();
-  }, [enabled, restart]);
-  return { ...snapshot, loading: enabled && snapshot.loading, refetch, restart };
+  }, [enabled, restart, ownerKey]);
+  const visible = owner.current === ownerKey ? snapshot : empty();
+  return { ...visible, loading: enabled && visible.loading, refetch, restart };
 }

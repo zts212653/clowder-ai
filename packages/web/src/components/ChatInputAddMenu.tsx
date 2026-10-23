@@ -7,7 +7,8 @@ import { ComposerPopover } from './ComposerPopover';
 import { type ComposerPreferredCatControl, ComposerPreferredCatSection } from './ComposerPreferredCatSection';
 import { chatComposerCopy } from './chat-composer.shell-copy';
 import { AttachIcon } from './icons/AttachIcon';
-import { MessageDispositionSelector, messageDispositionLabel } from './MessageDispositionSelector';
+import { MessageDispositionSelector } from './MessageDispositionSelector';
+import { messageDispositionCopy } from './message-disposition.shell-copy';
 import { useShellCopy } from './shell/shell-copy';
 
 interface ChatInputAddMenuProps {
@@ -23,6 +24,7 @@ interface ChatInputAddMenuProps {
   whisperMode?: boolean;
   messageDisposition?: MessageDispositionPreferenceController;
   preferredCat?: ComposerPreferredCatControl;
+  hasActiveInvocation?: boolean;
 }
 
 export function ChatInputAddMenu({
@@ -37,11 +39,14 @@ export function ChatInputAddMenu({
   maxImages,
   whisperMode,
   messageDisposition,
+  hasActiveInvocation = false,
   preferredCat,
 }: ChatInputAddMenuProps) {
   const [view, setView] = useState<'root' | 'disposition'>('root');
   const localized = useShellCopy(chatComposerCopy);
   const t = presentation === 'v2' ? localized : chatComposerCopy.zh;
+  const localizedDisposition = useShellCopy(messageDispositionCopy);
+  const dispositionCopy = (presentation === 'v2' ? localizedDisposition : messageDispositionCopy.zh).composer;
 
   const unavailable = Boolean(disabled || sendDisabled);
 
@@ -54,16 +59,20 @@ export function ChatInputAddMenu({
       presentation={presentation}
     >
       <div id="composer-add-menu" data-testid="composer-add-menu" className="bg-cafe-surface-canvas">
-        {view === 'disposition' && messageDisposition ? (
-          <MessageDispositionSelector controller={messageDisposition} onBack={() => setView('root')} />
+        {view === 'disposition' && hasActiveInvocation && messageDisposition ? (
+          <MessageDispositionSelector
+            controller={messageDisposition}
+            onBack={() => setView('root')}
+            presentation={presentation}
+          />
         ) : (
           <div role="menu" aria-label={t.addContent} className="w-full overflow-hidden rounded-lg">
-            {presentation === 'v2' && messageDisposition ? (
+            {presentation === 'v2' && hasActiveInvocation && messageDisposition ? (
               <AddMenuItem
                 testId="message-disposition-trigger"
                 dispositionSource={messageDisposition.source}
-                label={`发送策略：${messageDispositionLabel(messageDisposition.effective)}`}
-                description="选择本 Thread 或全局默认策略"
+                label={dispositionCopy.menuLabel(dispositionCopy.label[messageDisposition.effective])}
+                description={dispositionCopy.menuNote}
                 icon={<span aria-hidden>↪</span>}
                 disabled={messageDisposition.loading}
                 onClick={() => setView('disposition')}
@@ -98,12 +107,12 @@ export function ChatInputAddMenu({
                   onAttach();
                 }}
               />
-              {presentation === 'classic' && messageDisposition ? (
+              {presentation === 'classic' && hasActiveInvocation && messageDisposition ? (
                 <AddMenuItem
                   testId="message-disposition-trigger"
                   dispositionSource={messageDisposition.source}
-                  label="发送策略"
-                  description={messageDispositionLabel(messageDisposition.effective)}
+                  label={dispositionCopy.heading}
+                  description={dispositionCopy.label[messageDisposition.effective]}
                   icon={<StrategyIcon />}
                   disabled={messageDisposition.loading}
                   onClick={() => setView('disposition')}

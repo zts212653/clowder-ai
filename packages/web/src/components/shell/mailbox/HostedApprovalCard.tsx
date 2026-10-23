@@ -21,6 +21,7 @@ import { mailboxEntryCopy } from './mailbox-entry.shell-copy';
 import type { OriginalPlace } from './original-place';
 import { PlaceAction } from './PlaceAction';
 import { ThreadProposalDecision } from './ThreadProposalDecision';
+import { ThreadProposalDecisionReceipt } from './ThreadProposalDecisionReceipt';
 
 const MUTED = { color: 'var(--shell-muted)' } as const;
 
@@ -214,6 +215,29 @@ function Hosted({
     [originalPlaceAction, writesLocked, authorizeWrite, reportEditing, reportRequest, t],
   );
 
+  if (
+    approval.sourceFeatureId === 'F128' &&
+    state.kind === 'decided' &&
+    (state.terminal.resolution === 'accepted' || state.terminal.resolution === 'rejected')
+  ) {
+    return (
+      <div data-testid="mailbox-hosted-approval" data-state={state.kind} data-session-key={key}>
+        <ThreadProposalDecisionReceipt
+          approval={session?.approval ?? approval}
+          terminal={{ ...state.terminal, resolution: state.terminal.resolution }}
+          line={reconcile.line}
+        >
+          <SessionStatus
+            line={null}
+            notice={session?.notice ?? null}
+            canReread={reconcile.canReread}
+            onReread={() => sessions.reread(key)}
+          />
+          {originalPlaceAction}
+        </ThreadProposalDecisionReceipt>
+      </div>
+    );
+  }
   return (
     <div
       className="flex flex-col gap-2"

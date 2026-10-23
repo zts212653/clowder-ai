@@ -16,7 +16,7 @@ export const principal = (threadId = 'selected-thread', userId = 'owner') => ({
 });
 
 /** Real owner files, annotations and catalogue; workspace bytes and external admission are synthetic. */
-export async function workCatalogueFixture(t) {
+export async function workCatalogueFixture(t, options = {}) {
   const root = await mkdtemp(join(tmpdir(), 'task229-work-catalogue-'));
   const owner = new ProjectContentOwnerService({ dataDir: root });
   const store = new ArtifactReviewStore(join(root, 'reviews.sqlite'));
@@ -39,6 +39,7 @@ export async function workCatalogueFixture(t) {
   };
   const service = new LivingWorkService({
     owner,
+    changed: options.changed,
     versions: store.works,
     authorize: (input) => authorize(input),
     source: {

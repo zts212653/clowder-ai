@@ -153,6 +153,11 @@ export interface PresentationCandidate {
  * that candidate into a ContextPresentation, and only the ledger may admit it.
  */
 export interface ContextPresentationEnvelope<TReceipt> {
+  /** Producer-owned original-source fence. Metadata admission never substitutes for currentness. */
+  readonly validateCurrent?: () => Promise<boolean>;
+  readonly recordOmission?: (
+    reason: 'invocation_budget_exhausted' | 'duplicate' | 'source_unavailable' | 'superseded' | 'expired',
+  ) => void;
   readonly candidate: PresentationCandidate;
   /** Proof that the producer owner admitted this opportunity for presentation. */
   readonly admission: AdmittedOpportunityPresentationV1;

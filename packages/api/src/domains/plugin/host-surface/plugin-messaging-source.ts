@@ -4,7 +4,6 @@ import { MessagingError } from '../../messaging/contract/host-types.js';
 import { pluginManagerPackageIconUrl } from '../manager/plugin-manager-projection.js';
 import { externalPluginIdentity } from './plugin-external-identity.js';
 
-const MAX_SOURCE_URL_LENGTH = 2_048;
 const MAX_SOURCE_META_BYTES = 16_384;
 const MAX_SOURCE_META_DEPTH = 20;
 const MAX_SOURCE_META_VALUES = 2_000;
@@ -13,7 +12,6 @@ const HOST_SOURCE_META_KEYS = new Set(['externalChatId']);
 export interface PluginMessageSourceInput {
   readonly sender?: unknown;
   readonly identity?: unknown;
-  readonly url?: unknown;
   readonly meta?: unknown;
 }
 
@@ -42,21 +40,6 @@ function senderOf(value: unknown): PluginMessageSourceResult['sender'] {
     id: boundedString(candidate.id, 'sender.id', 500),
     ...(candidate.name === undefined ? {} : { name: boundedString(candidate.name, 'sender.name', 200) }),
   };
-}
-
-function sourceUrlOf(value: unknown): string | undefined {
-  if (value === undefined) return undefined;
-  const raw = boundedString(value, 'url', MAX_SOURCE_URL_LENGTH);
-  let parsed: URL;
-  try {
-    parsed = new URL(raw);
-  } catch {
-    throw new MessagingError('VALIDATION', 'url must be an absolute http(s) URL');
-  }
-  if ((parsed.protocol !== 'http:' && parsed.protocol !== 'https:') || parsed.username || parsed.password) {
-    throw new MessagingError('VALIDATION', 'url must be an absolute http(s) URL without credentials');
-  }
-  return raw;
 }
 
 interface SourceMetaValidationState {
@@ -148,7 +131,6 @@ export function pluginMessageSourceOf(
 ): PluginMessageSourceResult {
   const sender = senderOf(input.sender);
   const requestedIdentityId = input.identity === undefined ? undefined : boundedString(input.identity, 'identity', 200);
-  const url = sourceUrlOf(input.url);
   const meta = sourceMetaOf(input.meta);
   const declared = identities(manifest);
   const selected =
@@ -170,7 +152,6 @@ export function pluginMessageSourceOf(
           ? pluginManagerPackageIconUrl(manifest.pluginId)
           : (selected.identity.icon ?? manifest.icon ?? 'message'),
       ...(selected.identity.color === undefined ? {} : { themeColor: selected.identity.color }),
-      ...(url === undefined ? {} : { url }),
       ...(Object.keys(sourceMeta).length === 0 ? {} : { meta: sourceMeta }),
       ...(sender === undefined ? {} : { sender }),
     },

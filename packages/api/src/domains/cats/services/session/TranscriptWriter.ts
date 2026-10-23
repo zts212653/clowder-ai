@@ -16,6 +16,8 @@
 import { createHmac, randomBytes } from 'node:crypto';
 import { appendFile, mkdir, readFile, unlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { createModuleLogger } from '../../../../infrastructure/logger.js';
+import { createTranscriptReadDiagnostics } from '../../../../infrastructure/transcript-read-diagnostics.js';
 import {
   type CollaborationContinuityCapsuleV1,
   extractContinuityCapsuleFromSystemInfo,
@@ -156,6 +158,7 @@ export interface HandoffDigestMeta {
 }
 
 export class TranscriptWriter {
+  private filesReadDiagnostics?: ReturnType<typeof createTranscriptReadDiagnostics>;
   private readonly readProjections = new WeakMap<BufferedEvent, CompactTranscriptEvent>();
   private readonly dataDir: string;
   private readonly indexStride: number;
@@ -383,12 +386,15 @@ export class TranscriptWriter {
     const filePaths = new Map<string, Set<string>>();
 
     if (sessionMeta) {
-      return new TranscriptInvocationReader(new TranscriptReader({ dataDir: this.dataDir }), this).readFiles({
-        id: sessionId,
-        ...sessionMeta,
-        seq: 0,
-        status: 'active',
+      this.filesReadDiagnostics ??= createTranscriptReadDiagnostics({
+        operation: 'TranscriptWriter.getFilesTouched',
+        onEvent: (event) => createModuleLogger('transcript-files').info(event, 'Transcript file projection'),
       });
+      return new TranscriptInvocationReader(new TranscriptReader({ dataDir: this.dataDir }), this).readFiles(
+        { id: sessionId, ...sessionMeta, seq: 0, status: 'active' },
+        undefined,
+        this.filesReadDiagnostics.beginRead(sessionId, 'files'),
+      );
     }
 
     // Overlay in-memory buffer: has current events + not-yet-flushed writes

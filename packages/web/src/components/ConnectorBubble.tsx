@@ -1,7 +1,13 @@
 'use client';
 
-import { type ConnectorSource, decideHoldCancelEntry, readHoldCardCancelability } from '@cat-cafe/shared';
+import {
+  type ConnectorSource,
+  decideHoldCancelEntry,
+  isStaticConnectorId,
+  readHoldCardCancelability,
+} from '@cat-cafe/shared';
 import type { ReactNode } from 'react';
+import type { CatData } from '@/hooks/useCatData';
 import { useCoCreatorConfig } from '@/hooks/useCoCreatorConfig';
 import { connectorThemeToken } from '@/lib/connector-theme-token';
 import { resolveMessageSender } from '@/lib/resolve-sender';
@@ -15,12 +21,15 @@ import { HoldBallCancelButton } from './HoldBallCancelButton';
 import { MarkdownContent } from './MarkdownContent';
 import { MessageActionSlot } from './MessageActionSlot';
 import { MessageBubble } from './MessageBubble';
+import { MessageNameplate } from './MessageNameplate';
 import { ManagedJobCard } from './managed-job/ManagedJobCard';
+import { ReplyPill } from './ReplyPill';
 import { frustrationHistoryCopy } from './rich/frustration-history.shell-copy';
 import { trustedFrustrationMeta, useFrustrationVisibility } from './rich/frustration-visibility';
 import { RichBlocks } from './rich/RichBlocks';
 import { SenderAvatar } from './SenderAvatar';
 import { useShellCopy } from './shell/shell-copy';
+import { useShellPresentation } from './shell/shell-presentation';
 
 function formatTime(ts: number): string {
   const d = new Date(ts);
@@ -75,14 +84,25 @@ interface ConnectorBubbleProps {
   threadId?: string;
   timelineMessages?: readonly ChatMessageType[];
   footer?: ReactNode;
+  getCatById?: (id: string) => CatData | undefined;
+  replyPreview?: NonNullable<ChatMessageType['replyPreview']> & { expandedContent?: string };
 }
 
 /**
- * F97: Connector message bubble for external information sources (GitHub Review, etc.)
- * Uses MessageBubble for shared layout; adds connector-specific avatar, header, and actions.
+ * Renders connector-owned content inside the same message shell used by members.
+ * Specialized hold/job/card bodies stay content-level concerns rather than defining
+ * a separate visual identity or navigation surface for the whole message.
  */
-export function ConnectorBubble({ message, threadId, timelineMessages, footer }: ConnectorBubbleProps) {
+export function ConnectorBubble({
+  message,
+  threadId,
+  timelineMessages,
+  footer,
+  getCatById = () => undefined,
+  replyPreview,
+}: ConnectorBubbleProps) {
   const coCreator = useCoCreatorConfig();
+  const shellPresentation = useShellPresentation();
   const source: ConnectorSource = message.source ?? { connector: '', label: '', icon: '' };
   const t = useShellCopy(frustrationHistoryCopy);
   const visibility = useFrustrationVisibility(message.extra?.rich?.blocks ?? [], source?.connector);
@@ -109,6 +129,16 @@ export function ConnectorBubble({ message, threadId, timelineMessages, footer }:
   const connId = source.connector;
   const themeToken = connectorThemeToken(connId);
   const sender = resolveMessageSender({ from: message.from, source }, () => undefined, coCreator);
+  const externalPerson =
+    message.from?.kind === 'external' &&
+    Boolean(message.from.sender?.id) &&
+    !isStaticConnectorId(message.from.connectorId);
+  const platform = source.label || (message.from?.kind === 'external' ? message.from.connectorId : source.connector);
+  const senderRole = message.from?.kind === 'plugin' ? 'Plugin' : externalPerson ? `External · ${platform}` : 'Host';
+  const avatarShape = externalPerson ? 'round' : 'rounded-square';
+  const nameplateSender = externalPerson
+    ? { ...sender, color: 'var(--shell-body)', textColor: 'var(--shell-body)' }
+    : sender;
   const pluginColor = message.from?.kind === 'plugin' ? source.themeColor : undefined;
   const nameColor = pluginColor ?? `var(--color-${themeToken}-bubble, var(--cafe-text))`;
   const surfaceColor = pluginColor
@@ -120,8 +150,6 @@ export function ConnectorBubble({ message, threadId, timelineMessages, footer }:
     .map(({ block, signal }) =>
       signal && block.kind === 'card' ? { ...block, meta: { ...block.meta, signalType: signal } } : block,
     );
-  const rawUrl = source.url;
-  const srcUrl = rawUrl && /^https?:\/\//.test(rawUrl) ? rawUrl : undefined;
   const sourceCatId = typeof source.meta?.catId === 'string' ? source.meta.catId : undefined;
   const holdCards = collectHoldCards(message, timelineMessages);
   const holdStatusRefreshKey = getHoldStatusRefreshKey(holdCards, message);
@@ -140,27 +168,51 @@ export function ConnectorBubble({ message, threadId, timelineMessages, footer }:
 
   const avatar = <SenderAvatar sender={sender} presentation="message" />;
 
-  const header = (
-    <div className="flex items-center gap-2 mb-1">
-      {srcUrl ? (
-        <a
-          href={srcUrl}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="text-xs font-semibold hover:underline"
-          style={{ color: nameColor }}
-        >
-          {withdrawnFeedback ? t.title : sender.label}
-        </a>
-      ) : (
-        <span className="text-xs font-semibold" style={{ color: nameColor }}>
-          {withdrawnFeedback ? t.title : sender.label}
+  const displayName = withdrawnFeedback ? t.title : sender.label;
+  const header =
+    shellPresentation === 'v2' ? (
+      <div className="mb-1 flex flex-wrap items-center gap-x-2 gap-y-4 min-w-0" data-message-author-row="">
+        <MessageNameplate
+          id={`connector:${source.connector}`}
+          name={displayName}
+          sender={nameplateSender}
+          surface="var(--shell-selected)"
+          ink="var(--shell-body)"
+          avatarShape={avatarShape}
+        />
+        <span data-sender-role="" className="shrink-0 text-micro font-medium" style={{ color: 'var(--shell-muted)' }}>
+          {senderRole}
         </span>
-      )}
-      <span className="text-xs text-cafe-muted">{formatTime(message.timestamp)}</span>
-      <MessageActionSlot />
-    </div>
-  );
+        <span className="text-xs shrink-0" style={{ color: 'var(--shell-muted)' }}>
+          {formatTime(message.timestamp)}
+        </span>
+        {message.replyTo && replyPreview && (
+          <ReplyPill
+            replyPreview={replyPreview}
+            expandedContent={replyPreview.expandedContent}
+            replyToId={message.replyTo}
+            getCatById={getCatById}
+          />
+        )}
+        <MessageActionSlot />
+      </div>
+    ) : (
+      <div className="flex items-center gap-2 mb-1">
+        <span className="text-xs font-semibold" style={{ color: nameColor }}>
+          {displayName}
+        </span>
+        <span className="text-xs text-cafe-muted">{formatTime(message.timestamp)}</span>
+        {message.replyTo && replyPreview && (
+          <ReplyPill
+            replyPreview={replyPreview}
+            expandedContent={replyPreview.expandedContent}
+            replyToId={message.replyTo}
+            getCatById={getCatById}
+          />
+        )}
+        <MessageActionSlot />
+      </div>
+    );
 
   return (
     <MessageBubble
@@ -168,10 +220,13 @@ export function ConnectorBubble({ message, threadId, timelineMessages, footer }:
       avatar={avatar}
       header={header}
       footer={footer}
-      bubbleStyle={{
-        backgroundColor: surfaceColor,
-        color: 'var(--cat-msg-text, var(--cafe-text))',
-      }}
+      presentation={shellPresentation === 'v2' ? 'nameplate' : 'bubble'}
+      railColor={shellPresentation === 'v2' ? 'var(--shell-hairline)' : undefined}
+      bubbleStyle={
+        shellPresentation === 'v2'
+          ? undefined
+          : { backgroundColor: surfaceColor, color: 'var(--cat-msg-text, var(--cafe-text))' }
+      }
     >
       {jobId && taskId ? (
         <ManagedJobCard

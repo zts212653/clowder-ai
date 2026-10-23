@@ -9,6 +9,7 @@ import {
 import { toAbstractiveMessages } from '../../src/domains/memory/abstractive-summary-input.js';
 import { IndexBuilder } from '../../src/domains/memory/IndexBuilder.js';
 import { MessageSearchService } from '../../src/domains/memory/MessageSearchService.js';
+import { MessageQueryQualifier } from '../../src/domains/memory/message-query-qualifier.js';
 import { buildSearchableMessageContent } from '../../src/domains/memory/message-search-content.js';
 import { SqliteEvidenceStore } from '../../src/domains/memory/SqliteEvidenceStore.js';
 import { evidenceRoutes } from '../../src/routes/evidence.js';
@@ -186,6 +187,14 @@ test('real attachment comment survives index backfill and canonical message reca
     builder.markThreadDirty(thread.id);
     await builder.flushDirtyThreads();
     const service = new MessageSearchService({
+      // This index/projection control supplies a qualified attachment quote;
+      // semantic judgment itself is covered at the shared publication boundary.
+      qualifier: new MessageQueryQualifier(async (batch) =>
+        JSON.stringify({
+          requestId: batch.requestId,
+          rows: batch.rows.map((row) => [row.id, 'supported', '钛合金裤衩子']),
+        }),
+      ),
       evidenceStore: store,
       messageStore: { getById: () => quote },
       threadStore: { get: () => thread, list: () => [thread] },

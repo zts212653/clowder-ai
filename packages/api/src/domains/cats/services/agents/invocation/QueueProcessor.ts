@@ -5161,6 +5161,17 @@ export class QueueProcessor {
           ...(entry.execution.readOnlyToolPolicy ? { toolExecutionPolicy: entry.execution.readOnlyToolPolicy } : {}),
           humanDispositionInvocationOrigin: 'queue_replay',
           routingQueueSource: source,
+          ...(messageId && !connectorReplayCarrier && (source === 'user' || source === 'agent')
+            ? {
+                contextSourceIngress: {
+                  kind: source === 'user' ? ('owner' as const) : ('queue_agent' as const),
+                  sourceMessageId: messageId,
+                  ...(entry.execution.actionSuccessorFence
+                    ? { actionSuccessorFence: structuredClone(entry.execution.actionSuccessorFence) }
+                    : {}),
+                },
+              }
+            : {}),
           ...(routingOwnerRetryTarget ? { routingOwnerRetryTarget } : {}),
           onRoutingPreflightRejected: async (target) => {
             routingRejectedTargets.add(target.targetCatId);

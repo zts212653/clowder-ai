@@ -61,6 +61,10 @@ describe('cat_cafe_read_profile MCP tool', () => {
     assert.match(tool.description, /NOT for:/);
     assert.match(tool.description, /Output:/);
     assert.match(tool.description, /GOTCHA:/);
+    assert.match(tool.description, /this connection.s authenticated identity/i);
+    assert.match(tool.description, /bound to that invocation/i);
+    assert.match(tool.description, /separately installed App.*not a substitute/i);
+    assert.match(tool.description, /missing profile on another connection.*absence here/i);
   });
 
   // ──── Phase E: corpus layer read ────

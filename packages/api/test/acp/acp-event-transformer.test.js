@@ -673,3 +673,132 @@ describe('transformAcpEvent', () => {
     assert.equal(state2.scratchpadDetected, false);
   });
 });
+
+describe('transformAcpEvent — iCode (Chrys) wire format', () => {
+  // Captured iCode/Chrys bindings: 0.29.2 (wire shapes) and 0.30.0 (live flow).
+  // 0.30.1+ is declared compatible but unverified — no capture exists.
+  // iCode tool events carry: toolCallId + title (no toolName), rawInput args,
+  // content as an ARRAY of wrapped blocks ({type:'content', content:{...}}),
+  // and plan updates as entries[] (empty array = clear plan).
+
+  it('tool_call start uses title as toolName and rawInput as toolInput', () => {
+    const update = {
+      sessionId: 's1',
+      update: {
+        sessionUpdate: 'tool_call',
+        toolCallId: 'call-1',
+        title: 'powershell: Get-ChildItem',
+        kind: 'execute',
+        status: 'in_progress',
+        rawInput: { command: 'Get-ChildItem', working_dir: 'E:/repo' },
+      },
+    };
+    const result = transformAcpEvent(update, catId, metadata);
+    assert.equal(result.type, 'tool_use');
+    assert.equal(result.toolName, 'powershell: Get-ChildItem');
+    assert.deepEqual(result.toolInput, { command: 'Get-ChildItem', working_dir: 'E:/repo' });
+  });
+
+  it('final tool_call_update extracts text from the content block array', () => {
+    const state = createAcpSessionState();
+    const start = {
+      sessionId: 's1',
+      update: {
+        sessionUpdate: 'tool_call',
+        toolCallId: 'call-2',
+        title: 'read_file',
+        status: 'in_progress',
+        rawInput: { path: 'a.ts' },
+      },
+    };
+    transformAcpEvent(start, catId, metadata, state);
+
+    const final = {
+      sessionId: 's1',
+      update: {
+        sessionUpdate: 'tool_call_update',
+        toolCallId: 'call-2',
+        status: 'completed',
+        content: [{ type: 'content', content: { type: 'text', text: 'file contents here' } }],
+      },
+    };
+    const result = transformAcpEvent(final, catId, metadata, state);
+    assert.equal(result.type, 'tool_result');
+    assert.equal(result.content, 'file contents here');
+  });
+
+  it('final tool_call falls back to rawOutput when no content array is present', () => {
+    const update = {
+      sessionId: 's1',
+      update: {
+        sessionUpdate: 'tool_call',
+        toolCallId: 'call-3',
+        title: 'run_skill',
+        status: 'completed',
+        rawOutput: 'skill finished ok',
+      },
+    };
+    const results = transformAcpEvent(update, catId, metadata);
+    const arr = Array.isArray(results) ? results : [results];
+    const resultMsg = arr.find((m) => m.type === 'tool_result');
+    assert.ok(resultMsg, 'final tool_call must produce a tool_result');
+    assert.equal(resultMsg.content, 'skill finished ok');
+  });
+
+  it('plan entries[] project onto the canonical semantic plan event', () => {
+    const update = {
+      sessionId: 's1',
+      update: {
+        sessionUpdate: 'plan',
+        entries: [
+          { content: 'Write RED tests', priority: 'high', status: 'completed' },
+          { content: 'Implement adapter', priority: 'medium', status: 'in_progress' },
+        ],
+      },
+    };
+    const result = transformAcpEvent(update, catId, metadata);
+    assert.equal(result.type, 'provider_signal');
+    assert.equal(result.semanticEvent.kind, 'plan');
+    assert.equal(result.semanticEvent.stage, 'updated');
+    assert.equal(result.semanticEvent.totalItems, 2);
+    assert.equal(result.semanticEvent.completedItems, 1);
+    assert.equal(result.semanticEvent.text, '✓ Write RED tests · ▸ Implement adapter');
+    assert.equal(result.semanticEvent.provenance.provider, 'chrys');
+    assert.ok(!JSON.stringify(result).includes('"priority"'), 'raw entry objects must not leak into chat');
+  });
+
+  it('plan entries: [] has no canonical clear projection and stays suppressed', () => {
+    const update = {
+      sessionId: 's1',
+      update: { sessionUpdate: 'plan', entries: [] },
+    };
+    assert.equal(transformAcpEvent(update, catId, metadata), null);
+  });
+
+  it('concurrent tool calls pair correctly through state (start×2 then final×2)', () => {
+    const state = createAcpSessionState();
+    const mkStart = (id, title) => ({
+      sessionId: 's1',
+      update: { sessionUpdate: 'tool_call', toolCallId: id, title, status: 'in_progress', rawInput: {} },
+    });
+    const mkFinal = (id, title, text) => ({
+      sessionId: 's1',
+      update: {
+        sessionUpdate: 'tool_call_update',
+        toolCallId: id,
+        status: 'completed',
+        content: [{ type: 'content', content: { type: 'text', text } }],
+      },
+    });
+
+    transformAcpEvent(mkStart('a', 'tool-a'), catId, metadata, state);
+    transformAcpEvent(mkStart('b', 'tool-b'), catId, metadata, state);
+    const finalA = transformAcpEvent(mkFinal('a', 'tool-a', 'A result'), catId, metadata, state);
+    const finalB = transformAcpEvent(mkFinal('b', 'tool-b', 'B result'), catId, metadata, state);
+
+    assert.equal(finalA.type, 'tool_result');
+    assert.equal(finalA.content, 'A result');
+    assert.equal(finalB.type, 'tool_result');
+    assert.equal(finalB.content, 'B result');
+  });
+});

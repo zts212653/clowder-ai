@@ -35,6 +35,7 @@ const TIP_KEYS = new Set([
   'audience',
   'body',
   'action',
+  'demoId',
   'owner',
 ]);
 const ACTION_KEYS = {
@@ -185,6 +186,9 @@ function validateActionShape(id, action) {
 
 function validateActionAndBody(id, tip) {
   const errors = [];
+  if (tip.demoId !== undefined && (typeof tip.demoId !== 'string' || !/^[a-z0-9][a-z0-9-]{0,63}$/.test(tip.demoId))) {
+    errors.push(`${id}: demoId must be a bounded catalogue identifier`);
+  }
   if (typeof tip.body === 'string' && FAKE_PROGRESS_RE.test(tip.body)) {
     errors.push(`${id}: fake progress wording is not allowed`);
   }

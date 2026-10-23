@@ -14,6 +14,7 @@ import { audioHttpError } from './audio-http-error.js';
 import { type AudioInputSignal, formatAudioInputSignal } from './audio-signal-format.js';
 import type { ToolResult } from './file-tools.js';
 import { errorResult, successResult } from './file-tools.js';
+import { resolveInvocationEnv } from './invocation-auth.js';
 
 const defineTool = defineMcpMigrationFactory('audio-tools.ts', undefined, {
   resourceFamily: 'audio',
@@ -24,18 +25,21 @@ const defineCanonicalTool = defineMcpCanonicalFactory('audio-tools.ts', undefine
   authority: 'local-runtime',
 });
 
-const API_URL = process.env.CAT_CAFE_API_URL ?? deploymentDefaults.apiLoopbackUrl;
-const USER_ID = process.env.CAT_CAFE_USER_ID ?? 'default-user';
 const AUDIO_INPUT_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 
+function resolveApiUrl(): string {
+  return resolveInvocationEnv('CAT_CAFE_API_URL') ?? deploymentDefaults.apiLoopbackUrl;
+}
+
 async function audioFetch(path: string, init?: RequestInit): Promise<Response> {
-  return fetch(`${API_URL}/api/audio${path}`, {
+  const catId = resolveInvocationEnv('CAT_CAFE_CAT_ID');
+  return fetch(`${resolveApiUrl()}/api/audio${path}`, {
     ...init,
     signal: init?.signal ?? AbortSignal.timeout(path === '/start' || path === '/stop' ? 130_000 : 10_000),
     headers: {
       'Content-Type': 'application/json',
-      'x-cat-cafe-user': USER_ID,
-      ...(process.env.CAT_CAFE_CAT_ID ? { 'x-cat-id': process.env.CAT_CAFE_CAT_ID } : {}),
+      'x-cat-cafe-user': resolveInvocationEnv('CAT_CAFE_USER_ID') ?? 'default-user',
+      ...(catId ? { 'x-cat-id': catId } : {}),
       ...(init?.headers as Record<string, string>),
     },
   });
@@ -47,7 +51,7 @@ export async function shutdownActiveAudioCapture(): Promise<void> {
 }
 
 function audioError(err: unknown): string {
-  return `Cannot reach ${deploymentDefaults.brand.displayName} API at ${API_URL}: ${err instanceof Error ? err.message : String(err)}`;
+  return `Cannot reach ${deploymentDefaults.brand.displayName} API at ${resolveApiUrl()}: ${err instanceof Error ? err.message : String(err)}`;
 }
 
 // ── Schemas ──────────────────────────────────────────────────

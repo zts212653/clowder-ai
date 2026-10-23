@@ -123,6 +123,20 @@ function validateBriefAttention(
     }
     return;
   }
+  if (ownerRead.attentionCoverage?.state === 'partial') {
+    if (
+      ownerRead.brief.needsMe.state !== 'unknown' ||
+      ownerRead.brief.needsMe.reason !== 'attention_source_unavailable' ||
+      ownerRead.brief.nextOwner.kind !== 'unknown'
+    ) {
+      addBriefIssue(
+        context,
+        'needsMe',
+        'partial attention coverage must fail closed when no healthy source needs action',
+      );
+    }
+    return;
+  }
   if (
     ownerRead.brief.needsMe.state !== 'not_needed' ||
     ownerRead.brief.needsMe.evidenceRef !== ownerRead.envelope.ownerRef ||

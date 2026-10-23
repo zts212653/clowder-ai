@@ -236,7 +236,8 @@ describe('HostedApprovalCard: a press, and what comes back', () => {
     expect(fake.refetch).toHaveBeenCalledTimes(1);
 
     await answer(gone());
-    expect(text('mailbox-approval-result')).toContain('已同意');
+    expect(text('proposal-result-label')).toContain('已同意');
+    await act(async () => $('thread-proposal-result')?.querySelector('button')?.click());
     expect($('approve-btn')).toBeNull();
     expect($('mailbox-approval-reread')).not.toBeNull();
   });
@@ -285,7 +286,8 @@ describe('HostedApprovalCard: a press, and what comes back', () => {
     await act(async () => $('mailbox-approval-reread')?.click());
     expect(fake.refetch).toHaveBeenCalledTimes(2);
     await answer(gone());
-    expect(text('mailbox-approval-result')).toContain('已同意');
+    expect(text('proposal-result-label')).toContain('已同意');
+    await act(async () => $('thread-proposal-result')?.querySelector('button')?.click());
   });
 
   it('a 403 says no permission, holds the card, and offers a re-read', async () => {

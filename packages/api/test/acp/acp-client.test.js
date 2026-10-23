@@ -60,6 +60,21 @@ const INIT_RESULT = {
 };
 
 describe('AcpClient', () => {
+  // Upstream regression from whutzefengxie-ops/clowder-ai@c7a67cc55f915dc225f587ae0ed4b35e91120395.
+  it('closes an initialized carrier without agentInfo and awaits its exit once', async () => {
+    const { child, clientStdin, agentStdout } = createMockChild();
+    clientStdin.on('data', (chunk) => {
+      const msg = JSON.parse(chunk.toString());
+      agentRespond(agentStdout, msg.id, { protocolVersion: 1, agentCapabilities: {} });
+    });
+    const nativeClient = new AcpClient({ command: 'fake', args: [], cwd: '/tmp', spawnFn: () => child });
+    await nativeClient.initialize();
+    const closing = nativeClient.close();
+    assert.equal(nativeClient.close(), closing, 'concurrent closes share the same retirement');
+    await closing;
+    assert.equal(child.kill.mock.callCount(), 1);
+    assert.equal(nativeClient.isAlive, false);
+  });
   it('uses advertised session/resume and preserves id omitted by the agent', async () => {
     const { child, clientStdin, agentStdout } = createMockChild();
     const methods = [];
@@ -253,6 +268,89 @@ describe('AcpClient', () => {
     assert.equal(captured.params.sessionId, 'sess-123');
     assert.equal(captured.params.configId, 'model');
     assert.equal(captured.params.value, 'anthropic/claude-opus-4-6');
+  });
+
+  it('iCode: setSessionModel and closeSession use the standard ACP methods', async () => {
+    const { child, clientStdin, agentStdout } = createMockChild();
+    const captured = [];
+
+    clientStdin.on('data', (chunk) => {
+      for (const line of chunk.toString().trim().split('\n')) {
+        const msg = JSON.parse(line);
+        if (msg.method === 'initialize') {
+          agentRespond(agentStdout, msg.id, {
+            ...INIT_RESULT,
+            agentCapabilities: { loadSession: true, sessionCapabilities: { close: {} } },
+          });
+        } else if (msg.method === 'session/set_model' || msg.method === 'session/close') {
+          captured.push(msg);
+          agentRespond(agentStdout, msg.id, {});
+        }
+      }
+    });
+
+    client = new AcpClient({ command: 'fake', args: [], cwd: '/tmp', spawnFn: () => child });
+    await client.initialize();
+    await client.setSessionModel('icode-session', 'profile-model-id');
+    await client.closeSession('icode-session');
+
+    assert.deepEqual(
+      captured.map(({ method, params }) => ({ method, params })),
+      [
+        { method: 'session/set_model', params: { sessionId: 'icode-session', modelId: 'profile-model-id' } },
+        { method: 'session/close', params: { sessionId: 'icode-session' } },
+      ],
+    );
+  });
+
+  it('closeSession is a no-op when the agent does not advertise session/close', async () => {
+    const { child, clientStdin, agentStdout } = createMockChild();
+    const methods = [];
+    clientStdin.on('data', (chunk) => {
+      for (const line of chunk.toString().trim().split('\n')) {
+        const msg = JSON.parse(line);
+        methods.push(msg.method);
+        if (msg.method === 'initialize') agentRespond(agentStdout, msg.id, INIT_RESULT);
+      }
+    });
+
+    client = new AcpClient({ command: 'fake', args: [], cwd: '/tmp', spawnFn: () => child });
+    await client.initialize();
+    await client.closeSession('session-without-close-capability');
+
+    assert.equal(methods.includes('session/close'), false, 'close must follow the advertised capability');
+  });
+
+  it('successful close invalidates the live-session cache so the next load re-issues the request', async () => {
+    const { child, clientStdin, agentStdout } = createMockChild();
+    const methods = [];
+    clientStdin.on('data', (chunk) => {
+      for (const line of chunk.toString().trim().split('\n')) {
+        const msg = JSON.parse(line);
+        methods.push(msg.method);
+        agentRespond(
+          agentStdout,
+          msg.id,
+          msg.method === 'initialize'
+            ? { ...INIT_RESULT, agentCapabilities: { sessionCapabilities: { resume: {}, close: {} } } }
+            : { configOptions: [] },
+        );
+      }
+    });
+
+    client = new AcpClient({ command: 'fake', args: [], cwd: '/tmp', spawnFn: () => child });
+    await client.initialize();
+    await client.loadSession('resume-session');
+    await client.loadSession('resume-session');
+    assert.equal(methods.filter((method) => method === 'session/resume').length, 1, 'active session is reused');
+    await client.closeSession('resume-session');
+    await client.loadSession('resume-session');
+
+    assert.equal(
+      methods.filter((method) => method === 'session/resume').length,
+      2,
+      'a closed session must reload instead of reusing the stale cache entry',
+    );
   });
 
   it('promptCollect collects events and returns stopReason', async () => {
@@ -545,6 +643,86 @@ describe('AcpClient', () => {
     assert.ok(capturedResponse.outcome, 'response must have outcome wrapper');
     assert.equal(capturedResponse.outcome.outcome, 'selected');
     assert.equal(capturedResponse.outcome.optionId, 'allow_once');
+  });
+
+  it('iCode: reject permission policy fails closed instead of auto-approving flagged native effects', async () => {
+    const { child, clientStdin, agentStdout } = createMockChild();
+    let capturedResponse = null;
+
+    clientStdin.on('data', (chunk) => {
+      for (const line of chunk.toString().trim().split('\n')) {
+        const msg = JSON.parse(line);
+        if (msg.method === 'initialize') agentRespond(agentStdout, msg.id, INIT_RESULT);
+        if (msg.id === 'perm-icode' && msg.result) capturedResponse = msg.result;
+      }
+    });
+
+    client = new AcpClient({
+      command: 'fake',
+      args: [],
+      cwd: '/tmp',
+      spawnFn: () => child,
+      defaultPermissionDecision: 'reject',
+    });
+    await client.initialize();
+
+    agentStdout.write(
+      JSON.stringify({
+        jsonrpc: '2.0',
+        method: 'session/request_permission',
+        id: 'perm-icode',
+        params: {
+          sessionId: 'icode-session',
+          options: [
+            { optionId: 'allow', kind: 'allow_once', name: 'Allow' },
+            { optionId: 'reject', kind: 'reject_once', name: 'Reject' },
+          ],
+        },
+      }) + '\n',
+    );
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    assert.equal(capturedResponse?.outcome?.outcome, 'selected');
+    assert.equal(capturedResponse?.outcome?.optionId, 'reject');
+  });
+
+  it('iCode: dispatches private request_input to a session-scoped request handler', async () => {
+    const { child, clientStdin, agentStdout } = createMockChild();
+    let capturedResponse = null;
+
+    clientStdin.on('data', (chunk) => {
+      for (const line of chunk.toString().trim().split('\n')) {
+        const msg = JSON.parse(line);
+        if (msg.method === 'initialize') agentRespond(agentStdout, msg.id, INIT_RESULT);
+        if (msg.id === 'ask-icode' && (msg.result || msg.error)) capturedResponse = msg;
+      }
+    });
+
+    client = new AcpClient({ command: 'fake', args: [], cwd: '/tmp', spawnFn: () => child });
+    await client.initialize();
+    const requests = [];
+    client.setSessionRequestHandler('icode-session', async (request) => {
+      requests.push(request);
+      return { answers: [{ values: ['A'], note: '' }], cancelled: false };
+    });
+
+    agentStdout.write(
+      JSON.stringify({
+        jsonrpc: '2.0',
+        method: '_chrys/request_input',
+        id: 'ask-icode',
+        params: { sessionId: 'icode-session', questions: [{ header: 'Choice', question: 'Pick one' }] },
+      }) + '\n',
+    );
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    assert.equal(requests.length, 1);
+    assert.deepEqual(capturedResponse?.result, {
+      answers: [{ values: ['A'], note: '' }],
+      cancelled: false,
+    });
+
+    client.setSessionRequestHandler('icode-session', undefined);
   });
 
   it('promptStream yields events as they arrive and returns stopReason', async () => {

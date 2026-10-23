@@ -1,13 +1,15 @@
 import type { AgentService } from '../../../../types.js';
 import type { AcpProcessPool } from '../AcpProcessPool.js';
+import { trackAcpPoolRetirement } from './acp-pool-retirement-registry.js';
 
 interface PoolOwnership {
   count: number;
   externalOwner: boolean;
   activeWork: number;
   retiring: boolean;
-  drain?: () => void;
+  drain?: () => Promise<void> | void;
   closing?: Promise<void>;
+  workDrained?: { promise: Promise<void>; resolve: () => void };
 }
 const owners = new WeakMap<object, PoolOwnership>();
 export interface AcpServicePoolLease {
@@ -15,30 +17,44 @@ export interface AcpServicePoolLease {
   beginWork(): void;
   endWork(): Promise<void>;
 }
+export interface AcpServicePoolRetirement {
+  completion: Promise<void>;
+  deferredForActiveWork: boolean;
+}
 
 function closeAfterWork(pool: { closeAll(): Promise<void> }, state: PoolOwnership): Promise<void> {
   if (!state.retiring || state.activeWork > 0) return Promise.resolve();
-  if (state.drain) {
-    state.drain();
-    return Promise.resolve();
-  }
-  return (state.closing ??= pool.closeAll());
+  state.workDrained?.resolve();
+  return (state.closing ??= Promise.resolve(state.drain ? state.drain() : pool.closeAll()));
 }
 
 /** Stale registry entries can retire while an already-running service finishes. */
-export function retireAcpServicePool(pool: { closeAll(): Promise<void> }, drain?: () => void): Promise<void> {
+export function retireAcpServicePool(
+  pool: { closeAll(): Promise<void> },
+  drain?: () => Promise<void> | void,
+): AcpServicePoolRetirement {
   const state = owners.get(pool);
-  if (!state) {
-    if (!drain) return pool.closeAll();
-    drain();
-    return Promise.resolve();
-  }
+  if (!state) return { completion: Promise.resolve(drain ? drain() : pool.closeAll()), deferredForActiveWork: false };
   // Preserve factory replacement's native drain policy, but defer it until an
   // already-pinned invocation has performed its first acquire and finished.
   // Final owned-service disposal upgrades drain to complete close.
+  if (!drain && state.drain) state.closing = undefined;
   if (!state.retiring || !drain) state.drain = drain;
   state.retiring = true;
-  return closeAfterWork(pool, state);
+  if (state.activeWork > 0) {
+    state.workDrained ??= (() => {
+      let resolve = () => {};
+      const promise = new Promise<void>((done) => {
+        resolve = done;
+      });
+      return { promise, resolve };
+    })();
+    return {
+      completion: state.workDrained.promise.then(() => closeAfterWork(pool, state)),
+      deferredForActiveWork: true,
+    };
+  }
+  return { completion: closeAfterWork(pool, state), deferredForActiveWork: false };
 }
 
 /** One service preparation owns one lease, independently of process/session leases. */
@@ -58,9 +74,12 @@ export function retainAcpServicePool(
       released = true;
       state.count--;
       if (state.count > 0 || state.externalOwner) return;
+      const retirement = retireAcpServicePool(pool);
+      trackAcpPoolRetirement(registry, profileId, retirement.completion);
       // A replacement generation may already own this registry coordinate.
       if (registry.get(profileId) === pool) registry.delete(profileId);
-      await retireAcpServicePool(pool);
+      // Releasing ownership must not deadlock an already-pinned invocation during registry refresh.
+      if (!retirement.deferredForActiveWork) await retirement.completion;
     },
     beginWork() {
       if (released || state.retiring) throw new Error('ACP service ownership retired');

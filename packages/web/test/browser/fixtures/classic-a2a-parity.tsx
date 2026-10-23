@@ -109,6 +109,7 @@ function Proof() {
       </div>
       {open && (
         <ChatInputAddMenu
+          hasActiveInvocation
           presentation={presentation}
           triggerRef={trigger}
           messageDisposition={{
@@ -117,6 +118,9 @@ function Proof() {
             source: 'thread',
             loading: false,
             error: null,
+            oneShot: effective,
+            setOneShot: setEffective,
+            clearOneShot: () => setEffective('next_work'),
             setPreference: async (_scope, value) => {
               setEffective(value ?? 'next_work');
               return true;

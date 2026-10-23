@@ -11,6 +11,8 @@ const os = require('node:os');
 const crypto = require('node:crypto');
 const { resolveDesktopRuntime } = require('./runtime-config');
 const { initializeDesktopTemplate } = require('./desktop-template');
+const { prepareProjectMirrors } = require('./project-mirrors');
+const { waitForProjectMirrors } = require('./project-mirror-readiness');
 const { createPluginNetworkBridge } = require('./plugin-network-bridge');
 const { createStartupTimeline } = require('./startup-timing');
 const { prepareStartupServices, stopOwnedStartupProcess } = require('./startup-services');
@@ -202,7 +204,7 @@ class ServiceManager {
     // first traversal still returns ENOENT. Do not spawn API/Web in that
     // window: the API reads bundled docs and skills during bootstrap and would
     // otherwise bind its port, then exit later with an opaque startup failure.
-    await this._waitForProjectMirrors(userDataDir);
+    await this._waitForProjectMirrors(userDataDir, undefined, nodeExe);
 
     // ---- Redis ----
     this.onStatus('Starting Redis...');
@@ -310,125 +312,7 @@ class ServiceManager {
       }
     }
 
-    // Mirror read-only install-dir resources into the project dir via symlinks.
-    // Without these, findMonorepoRoot(cwd) resolves to the project dir but
-    // docs/cat-cafe-skills/packages are not under it — so API routes like
-    // /api/docs, capabilities.ts skill listing, and MCP server spawning
-    // (resolve(projectRoot, 'packages/mcp-server/dist/memory.js')) all fail.
-    // Windows uses NTFS junctions (no admin needed, absolute paths). macOS
-    // uses plain directory symlinks.
-    const linkType = IS_WIN ? 'junction' : 'dir';
-    const mirrors = ['.claude', 'assets', 'cat-cafe-skills', 'docs', 'guides', 'packages', 'plugins', 'scripts'];
-
-    // Helper: remove a junction or symlink. On Windows, NTFS junctions are
-    // directory reparse points — fs.unlinkSync calls DeleteFileW which fails
-    // on directory entries (EPERM). fs.rmdirSync calls RemoveDirectoryW which
-    // correctly removes junctions without recursing into the target.
-    const removeLink = (linkPath) => {
-      if (IS_WIN) {
-        try {
-          fs.rmdirSync(linkPath);
-        } catch {
-          fs.unlinkSync(linkPath); // fallback for true symlinks
-        }
-      } else {
-        fs.unlinkSync(linkPath);
-      }
-    };
-
-    for (const name of mirrors) {
-      const src = path.join(this.root, name);
-      const dst = path.join(projectDir, name);
-      if (!fs.existsSync(src)) {
-        log(`Skipping mirror ${name} — source missing at ${src}`);
-        continue;
-      }
-      try {
-        // lstatSync does NOT follow symlinks/junctions — it inspects the
-        // link entry itself. existsSync follows the target, so a broken
-        // junction (target path removed after reinstall) returns false
-        // even though the junction entry still occupies the path, causing
-        // symlinkSync to fail with EEXIST.
-        let dstStat = null;
-        try {
-          dstStat = fs.lstatSync(dst);
-        } catch {
-          // Path doesn't exist at all — proceed to create
-        }
-        if (dstStat?.isSymbolicLink()) {
-          // Verify junction/symlink target matches current install root.
-          // After reinstall to a different path, stale junctions cause
-          // UNKNOWN errors because the old target no longer exists.
-          try {
-            const target = fs.readlinkSync(dst);
-            if (path.resolve(target) === path.resolve(src)) continue;
-            removeLink(dst);
-            log(`Removed stale ${linkType}: ${dst} (was -> ${target})`);
-          } catch {
-            try {
-              removeLink(dst);
-            } catch {
-              // Ignore — symlinkSync below will report the real error
-            }
-          }
-        } else if (dstStat?.isDirectory()) {
-          // On Windows, lstatSync().isSymbolicLink() can return false for
-          // NTFS junctions (IO_REPARSE_TAG_MOUNT_POINT ≠ SYMLINK tag),
-          // making them appear as plain directories. Probe with readlinkSync
-          // to detect hidden junctions; real directories throw EINVAL.
-          if (IS_WIN) {
-            try {
-              const target = fs.readlinkSync(dst);
-              // readlinkSync succeeded → it's a junction, not a real dir.
-              if (path.resolve(target) === path.resolve(src)) continue;
-              removeLink(dst);
-              log(`Removed stale junction (was dir-flagged): ${dst} (was -> ${target})`);
-            } catch {
-              continue; // Genuine directory — don't replace
-            }
-          } else {
-            continue; // Real directory on macOS — don't replace
-          }
-        }
-        fs.symlinkSync(src, dst, linkType);
-        log(`Mirror ${linkType} created: ${dst} -> ${src}`);
-      } catch (err) {
-        log(`Warning: failed to create ${linkType} ${dst}: ${err.message}`);
-      }
-    }
-
-    // Verify critical junctions are traversable. On Windows, freshly-created
-    // NTFS junctions occasionally return UNKNOWN errors from readFileSync
-    // even though the link entry and target both exist (observed on first
-    // launch after installer on clean machines). Removing and recreating
-    // the junction resolves it — so retry once if the probe fails.
-    const criticalProbes = [
-      { mirror: 'cat-cafe-skills', probe: path.join('refs', 'shared-rules.md') },
-      { mirror: 'plugins', probe: path.join('github', 'plugin.yaml') },
-    ];
-    for (const { mirror, probe } of criticalProbes) {
-      const probePath = path.join(projectDir, mirror, probe);
-      const src = path.join(this.root, mirror);
-      const dst = path.join(projectDir, mirror);
-      try {
-        fs.readFileSync(probePath, 'utf-8');
-      } catch (probeErr) {
-        log(`Junction probe FAILED for ${probePath}: ${probeErr.message} — rebuilding`);
-        try {
-          removeLink(dst);
-        } catch {
-          /* best effort */
-        }
-        try {
-          fs.symlinkSync(src, dst, linkType);
-          // Second attempt — verify again
-          fs.readFileSync(probePath, 'utf-8');
-          log(`Junction rebuilt and verified: ${dst} -> ${src}`);
-        } catch (retryErr) {
-          log(`Junction rebuild ALSO FAILED: ${retryErr.message}`);
-        }
-      }
-    }
+    prepareProjectMirrors({ installRoot: this.root, projectDir, log });
 
     // scripts/ has no node_modules. compile-system-prompt-l0.mjs uses ESM
     // `import { catRegistry } from '@cat-cafe/shared'` — Node ESM ignores
@@ -457,33 +341,15 @@ class ServiceManager {
     }
   }
 
-  async _waitForProjectMirrors(baseDir, timeoutMs = 5_000) {
-    const projectDir = path.join(baseDir, 'project');
-    const probes = [
-      ['docs', path.join('harness-feedback', 'eval-domains', 'eval-design-gate.yaml')],
-      ['cat-cafe-skills', path.join('refs', 'shared-rules.md')],
-      ['cat-cafe-skills', path.join('custody-recognition', 'SKILL.md')],
-      ['plugins', path.join('github', 'plugin.yaml')],
-    ];
-    const deadline = Date.now() + timeoutMs;
-    let lastFailures = [];
-    while (Date.now() <= deadline) {
-      lastFailures = [];
-      for (const [mirror, relativeProbe] of probes) {
-        const probePath = path.join(projectDir, mirror, relativeProbe);
-        try {
-          fs.readFileSync(probePath, 'utf8');
-        } catch (error) {
-          lastFailures.push(`${probePath}: ${error.message}`);
-        }
-      }
-      if (lastFailures.length === 0) {
-        log(`Project mirror readiness verified (${probes.length} probes)`);
-        return;
-      }
-      await new Promise((resolve) => setTimeout(resolve, 100));
-    }
-    throw new Error(`Project mirror readiness failed before API start:\n${lastFailures.join('\n')}`);
+  async _waitForProjectMirrors(baseDir, timeoutMs = 5_000, nodeExe = resolveNode(this.root)) {
+    await waitForProjectMirrors({
+      installRoot: this.root,
+      projectDir: path.join(baseDir, 'project'),
+      nodeExe,
+      signal: this.startupAbort?.signal,
+      log,
+      timeoutMs,
+    });
   }
 
   _getOrCreateTelemetrySalt(userDataDir) {
@@ -550,9 +416,15 @@ class ServiceManager {
   _buildApiEnv(userDataDir) {
     const salt = this._getOrCreateTelemetrySalt(userDataDir);
     return {
+      // Binary lookup and runtime-path redirection are one API contract.
+      // Keep writable project data outside the installation and respect an
+      // ordinary deployment's existing explicit workspace selection.
+      CAT_CAFE_RUNTIME_ROOT: this.root,
+      CAT_CAFE_WORKSPACE_ROOT: process.env.CAT_CAFE_WORKSPACE_ROOT?.trim() || path.join(userDataDir, 'project'),
       ...(resolveDesktopRuntime().instanceRoot
         ? {
             CAT_CAFE_CONFIG_ROOT: path.join(userDataDir, 'project'),
+            CAT_CAFE_WORKSPACE_ROOT: path.join(userDataDir, 'project'),
             CAT_CAFE_GLOBAL_CONFIG_ROOT: path.join(userDataDir, 'global'),
             CAT_CAFE_DATA_DIR: path.join(userDataDir, 'data'),
             PREVIEW_GATEWAY_PORT: '0',
@@ -798,7 +670,6 @@ class ServiceManager {
             CODEX_HOME: path.join(instanceRoot, 'home', '.codex'),
             CLAUDE_CONFIG_DIR: path.join(instanceRoot, 'home', '.claude'),
             DSH_HOME: path.join(instanceRoot, 'home', '.dsh'),
-            CAT_CAFE_RUNTIME_ROOT: this.root,
             CAT_CAFE_WORKSPACE_ROOT: path.join(instanceRoot, 'project'),
             ALLOWED_WORKSPACE_DIRS: path.join(instanceRoot, 'project'),
             REDIS_PORT: String(this.redisPort),

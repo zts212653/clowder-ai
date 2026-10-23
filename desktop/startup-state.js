@@ -7,7 +7,7 @@ function createStartupReporter(logDir) {
   const startedAt = Date.now();
   fs.mkdirSync(logDir, { recursive: true });
   const file = path.join(logDir, 'startup-state.json');
-  return (phase, message) => {
+  return (phase, message, diagnostics) => {
     const state = {
       version: 1,
       pid: process.pid,
@@ -16,6 +16,7 @@ function createStartupReporter(logDir) {
       updatedAt: Date.now(),
       elapsedMs: Date.now() - startedAt,
       ...(message ? { message } : {}),
+      ...(diagnostics ? { diagnostics } : {}),
     };
     const temp = `${file}.${process.pid}.tmp`;
     fs.writeFileSync(temp, JSON.stringify(state, null, 2));

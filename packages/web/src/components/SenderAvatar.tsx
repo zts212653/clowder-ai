@@ -7,12 +7,14 @@ export function SenderAvatar({
   sender,
   className = 'h-5 w-5',
   presentation = 'inline',
+  shape = 'round',
   onClick,
   streaming = false,
 }: {
   sender: SenderMeta;
   className?: string;
   presentation?: 'inline' | 'message' | 'nameplate';
+  shape?: 'round' | 'rounded-square';
   onClick?: () => void;
   streaming?: boolean;
 }) {
@@ -32,7 +34,8 @@ export function SenderAvatar({
       aria-label={onClick ? `编辑 ${sender.label}` : undefined}
       aria-hidden={onClick ? undefined : true}
       data-sender-avatar={presentation}
-      className={`${fullSize ? 'relative w-8 h-8 rounded-full overflow-hidden' : className} inline-flex shrink-0 items-center justify-center ${streaming ? 'animate-pulse' : ''} ${onClick ? 'cursor-pointer hover:opacity-80 transition-opacity' : ''}`}
+      data-sender-avatar-shape={shape}
+      className={`${fullSize ? `relative w-8 h-8 ${shape === 'rounded-square' ? 'rounded-lg' : 'rounded-full'} overflow-hidden` : className} inline-flex shrink-0 items-center justify-center ${streaming ? 'animate-pulse' : ''} ${onClick ? 'cursor-pointer hover:opacity-80 transition-opacity' : ''}`}
       style={
         fullSize
           ? {
@@ -42,7 +45,11 @@ export function SenderAvatar({
           : undefined
       }
     >
-      {image || (!sender.icon && !sender.fallbackIcon) ? (
+      {sender.initial && !image && !sender.icon && !sender.fallbackIcon ? (
+        <span className="text-sm font-semibold leading-none" aria-hidden="true">
+          {sender.initial}
+        </span>
+      ) : image || (!sender.icon && !sender.fallbackIcon) ? (
         <AvatarImageWithFallback
           src={image}
           alt=""
@@ -59,7 +66,7 @@ export function SenderAvatar({
         <span
           data-member-avatar-ring
           aria-hidden="true"
-          className="pointer-events-none absolute inset-0 rounded-full"
+          className={`pointer-events-none absolute inset-0 ${shape === 'rounded-square' ? 'rounded-lg' : 'rounded-full'}`}
           style={{ boxShadow: `inset 0 0 0 1px ${sender.color}` }}
         />
       )}

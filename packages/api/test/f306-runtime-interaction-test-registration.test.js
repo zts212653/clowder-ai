@@ -9,6 +9,8 @@ const REQUIRED_TESTS = [
   'test/runtime-interaction-routes.test.ts',
   'test/runtime-interaction-composition.test.ts',
   'test/runtime-interaction-card-publisher.test.ts',
+  'test/runtime-interaction-question-extension.test.ts',
+  'test/runtime-interaction-downgrade.test.ts',
   'test/codex-runtime-interaction-adapter.test.ts',
   'test/codex-runtime-interaction-wire-edge.test.ts',
   'test/approval-hub/f306-approval-adapter.test.ts',

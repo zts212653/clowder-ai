@@ -51,7 +51,8 @@ type PluginManagerRouteService = Pick<
 >;
 
 export interface PluginManagerRouteOptions {
-  readonly manager: PluginManagerRouteService & Partial<Pick<PluginManagerService, 'configureBootstrapRoot'>>;
+  readonly manager: PluginManagerRouteService &
+    Partial<Pick<PluginManagerService, 'configureBootstrapRoot' | 'repair'>>;
   readonly contributions?: Pick<PluginRuntimeCarrierRouter, 'listPluginTools' | 'callPluginTool'>;
   readonly bindings?: Pick<PluginManagerBindings, 'list' | 'disconnect'>;
   readonly asset?: PluginManagerPackageAssetPort;
@@ -209,6 +210,30 @@ export function registerPluginManagerRoutes(app: FastifyInstance, options: Plugi
       }
     },
   );
+
+  app.post<{ Params: { pluginId: string } }>('/api/plugin-manager/plugins/:pluginId/repair', async (request, reply) => {
+    const access = requirePluginWriteAccess(request, accessOptions);
+    if ('error' in access) return pluginAccessError(reply, access);
+    const id = pluginIdSchema.safeParse(request.params.pluginId);
+    const parsed = z.object({ expectedRevision: lifecycleRevisionSchema }).strict().safeParse(request.body);
+    if (!id.success || !parsed.success) return invalidRequest(reply);
+    if (!options.manager.repair) return reply.status(503).send({ code: 'LIFECYCLE_UNAVAILABLE' });
+    try {
+      await appendMutationAudit(auditLog, {
+        operator: access.operator,
+        operation: 'repair',
+        pluginId: id.data,
+        expectedRevision: parsed.data.expectedRevision,
+      });
+    } catch {
+      return reply.status(503).send({ error: 'Plugin audit log is unavailable', code: 'AUDIT_UNAVAILABLE' });
+    }
+    try {
+      return await options.manager.repair(id.data, parsed.data);
+    } catch (error) {
+      return sendManagerError(reply, error);
+    }
+  });
 
   app.post<{ Params: { pluginId: string } }>(
     '/api/plugin-manager/plugins/:pluginId/uninstall',

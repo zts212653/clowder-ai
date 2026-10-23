@@ -6,7 +6,7 @@ import type { McpServerFamily } from './tool-governance-snapshot.js';
  */
 export const SERVER_INSTRUCTIONS = {
   collab:
-    'Collaboration actions for messages, threads, tasks, reviews, schedules, and runtime coordination live on this server. Search this server when the request involves communicating with another cat, reading or updating thread work, routing review, managing a task or workflow, scheduling work, or controlling a governed runtime action.',
+    "Personal profiles, relationship context, and collaboration actions for messages, threads, tasks, reviews, schedules, and runtime coordination live on this connection. Search this server when the request needs personal context, communicating with another cat, reading or updating thread work, routing review, managing a task or workflow, scheduling work, or controlling a governed runtime action. Tools use this connection's authenticated scope; separately installed Apps with the same tool names are independent connections.",
   memory:
     'Memory recall, evidence search, graph navigation, session history, knowledge libraries, and distillation live on this server. Search this server when the request asks what happened before, why a decision was made, where evidence came from, what changed, or how to inspect a stored session or knowledge artifact.',
   signals:

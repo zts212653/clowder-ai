@@ -455,3 +455,23 @@ it('opens a coordinate-backed html_widget inside Works, but keeps an interactive
   expect(open).toHaveBeenCalledTimes(1);
   expect(useChatStore.getState().rightPanelOpen).toBe(false);
 });
+
+it('opens homepage Works in all conversations because the landing page has no source conversation', async () => {
+  data.fetch.mockImplementation(async () =>
+    Response.json({
+      artifacts: items.map((item) => ({ ...item, threadId: 'owned', threadTitle: 'Original' })),
+      workLineage: 'resolved',
+      view: 'works',
+      complete: true,
+      pageTotal: items.length,
+    }),
+  );
+  await act(async () => root.render(<ThreadWorksPanelV2 threadId="default" />));
+  const all = [...host.querySelectorAll<HTMLButtonElement>('button')].find(
+    (button) => button.textContent === 'All conversations',
+  );
+  expect(all?.getAttribute('aria-pressed')).toBe('true');
+  expect(data.fetch.mock.calls.some(([path]) => path === '/api/artifacts?view=works&read=pages')).toBe(true);
+  expect(data.fetch.mock.calls.some(([path]) => path.includes('/threads/default/artifacts'))).toBe(false);
+  expect(host.textContent).toContain('Delivered.md');
+});

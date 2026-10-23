@@ -4,6 +4,9 @@ title: Harness Eval Control Plane
 summary: Harness contract、runtime eval、measurement validity/owner-backed issuance、verdict handoff、domain registry、durable verdict lifecycle、F313 immutable finding/repair-target artifacts，以及 F278 每条爪感差的 duty/issue 双轴、tenant-bound tool-scoped owner repair、already-loaded result proof、evidence-driven blocker resume 与 refs-only legacy census。
 canonical_features: [F192, F266, F267, F278, F313]
 code_anchors:
+  - packages/api/src/routes/tip-telemetry.ts
+  - packages/api/src/routes/tip-demo-summary.ts
+  - packages/api/src/infrastructure/harness-eval/capability-tips/capability-tips-usage-adapter.ts
   - packages/api/src/infrastructure/harness-eval/f167-eval.ts
   - packages/api/src/infrastructure/harness-eval/cross-thread-coordination-eval.ts
   - packages/api/src/infrastructure/harness-eval/attribution.ts
@@ -127,6 +130,7 @@ code_anchors:
   - scripts/lib/sop-definition-codegen.mjs
   - packages/shared/src/types/sop-definition.generated.ts
 doc_anchors:
+  - feature-specs/2026-10-22-f331-demo-entry.md
   - docs/features/F192-socio-technical-harness-eval.md
   - docs/features/F266-eval-verdict-closure-control-plane.md
   - docs/features/F245-friction-signal-eval.md
@@ -144,6 +148,7 @@ doc_anchors:
   - sop-definitions/README.md
 static_scan_hints: [harness-eval, VerdictHandoffPacket, lifecycle-root.json, eval:verdict-lifecycle, reeval-closure, reeval-case, legacy_case_migrated, legacy-reeval-case-migration, repairDebtStatus, reevalDebtStatus, eval-case-v1, eval-domain, reeval, harness-fit-digest, Eval Hub, freshness-closure-replay, f254-freshness-replay, FreshnessReplayProvider, evalFreshnessLiveVerdict, no_data, rawArtifactSha256, SopDefinition, sop-definitions, predicate, friction, paw-feel, PawFeelDisposition, PawFeelIssueProjection, direct-repair-binding, repair_outcome_linked, blocker_reopened, paw-feel-inbox, paw-feel-legacy-blocker-census, FrictionSignal, measurement-validity, measurement-certificate, measurement-bundle-result, measurement-issuance, measurement-proof, same-version-replay, prospective_paired_capture]
 cited_by:
+  - {feature: F331, date: 2026-10-22, delta: "demo observations reuse F268 receipts and aggregate counters; the authenticated query reports counts and explicit no-data without enabling effectiveness eval"}
   - F192 Phase E-pilot
   - F245 Phase A (paw-feel friction collector) + Phase B (cancel/user-feedback/eval-domain adapters + aggregator + clusterer + rollup input; domain registration + rollup sink land in Phase C)
   - F248 Phase A (Eval Hub human-readability: registry descriptionForHuman + Hub display + state/verdict badge disambiguation)

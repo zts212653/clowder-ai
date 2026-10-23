@@ -107,6 +107,7 @@ async function harness({
   offline = () => false,
   contract,
   machinePresentation = false,
+  catalogManifests,
   extraFiles = {},
   effectiveGrants,
 } = {}) {
@@ -150,7 +151,7 @@ async function harness({
   const composition = createPluginManagerRuntimeComposition({
     runtime,
     catalogProvider: provider,
-    catalogManifests: [packageManifest],
+    catalogManifests: catalogManifests ?? [packageManifest],
     fetchOfficialArchive: async () => archive.bytes,
     now: () => 9_000,
   });
@@ -1025,4 +1026,38 @@ export default { create() { return { async start() {
       { id: 'messaging.send', kind: 'messaging', name: 'Source', active: false },
     ]);
   });
+});
+
+// Production ships bundled metadata only for dot; ordinary releases are verified on update.
+it('offers and verifies an exact catalog update without a bundled package manifest', async () => {
+  const h = await harness({ machinePresentation: true, catalogManifests: [] });
+  const installed = await h.composition.manager.install({
+    source: { kind: 'catalog', catalogId: h.entry.catalogId },
+    expectedVersion: h.entry.version,
+    expectedDigest: h.entry.packageDigest,
+  });
+  await h.setRelease(manifest({ version: '0.2.0' }));
+  const item = (await h.composition.manager.get(h.entry.pluginId)).plugin;
+  assert.equal(item.actions.install, true, 'the remote release must expose Update');
+  await h.composition.manager.update(h.entry.pluginId, {
+    expectedVersion: '0.2.0',
+    expectedRevision: item.lifecycleRevision,
+  });
+  const updated = (await h.composition.manager.get(h.entry.pluginId)).plugin;
+  assert.equal(updated.pluginInstanceId, installed.pluginInstanceId);
+  assert.equal(updated.installedVersion, '0.2.0');
+  const before = await h.runtime.inventoryStore.snapshot();
+  await h.setRelease(manifest({ version: '0.3.0', contractVersion: '999.0.0' }));
+  const invalid = (await h.composition.manager.get(h.entry.pluginId)).plugin;
+  await assert.rejects(
+    h.composition.manager.update(h.entry.pluginId, {
+      expectedVersion: '0.3.0',
+      expectedRevision: invalid.lifecycleRevision,
+    }),
+  );
+  assert.deepEqual(
+    await h.runtime.inventoryStore.snapshot(),
+    before,
+    'validation must reject before changing the installed package',
+  );
 });

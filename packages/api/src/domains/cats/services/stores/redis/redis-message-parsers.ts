@@ -47,7 +47,7 @@ import {
   writeOpportunityPresentationRetryCarrierV1Schema,
   writeOpportunityReentryCarrierV1Schema,
 } from '@cat-cafe/shared';
-import { parsePluginMessageExtra } from '../../../../messaging/envelope.js';
+import { parsePersistedPluginMessageExtra } from '../../../../messaging/envelope.js';
 import { MAX_PERSISTED_SUBEXECUTION_EVENTS, type MessageMetadata } from '../../types.js';
 import { liveResultNoticeSchema, liveReturnProjectionSchema } from '../live-result-carriers.js';
 import { parseMessageDeliveryBoundary } from '../message-delivery-boundary.js';
@@ -66,7 +66,7 @@ export function safeParseMessageFrom(raw: string | undefined | null): MessageFro
 }
 
 function parsePluginMessage(value: unknown): StoredPluginMessage | undefined {
-  return (parsePluginMessageExtra(value) as StoredPluginMessage | null) ?? undefined;
+  return (parsePersistedPluginMessageExtra(value) as StoredPluginMessage | null) ?? undefined;
 }
 
 /** Parse the F288 payload stored in its own Redis hash field (fail-closed). */
@@ -1052,16 +1052,32 @@ export function safeParseConnectorSource(raw: string | undefined): ConnectorSour
   if (!raw) return undefined;
   try {
     const parsed = JSON.parse(raw);
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return undefined;
+    const source = parsed as Record<string, unknown>;
     if (
-      typeof parsed === 'object' &&
-      parsed !== null &&
-      typeof parsed.connector === 'string' &&
-      typeof parsed.label === 'string' &&
-      typeof parsed.icon === 'string'
-    ) {
-      return parsed as ConnectorSource;
-    }
-    return undefined;
+      typeof source.connector !== 'string' ||
+      typeof source.label !== 'string' ||
+      typeof source.icon !== 'string' ||
+      (source.themeColor !== undefined && typeof source.themeColor !== 'string') ||
+      (source.meta !== undefined &&
+        (typeof source.meta !== 'object' || source.meta === null || Array.isArray(source.meta))) ||
+      (source.sender !== undefined &&
+        (typeof source.sender !== 'object' ||
+          source.sender === null ||
+          Array.isArray(source.sender) ||
+          typeof (source.sender as Record<string, unknown>).id !== 'string' ||
+          ((source.sender as Record<string, unknown>).name !== undefined &&
+            typeof (source.sender as Record<string, unknown>).name !== 'string')))
+    )
+      return undefined;
+    return {
+      connector: source.connector,
+      label: source.label,
+      icon: source.icon,
+      ...(source.themeColor === undefined ? {} : { themeColor: source.themeColor }),
+      ...(source.meta === undefined ? {} : { meta: source.meta as ConnectorSource['meta'] }),
+      ...(source.sender === undefined ? {} : { sender: source.sender as ConnectorSource['sender'] }),
+    };
   } catch {
     return undefined;
   }

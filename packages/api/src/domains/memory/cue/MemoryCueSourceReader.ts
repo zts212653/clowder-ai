@@ -4,6 +4,7 @@ import type { MemoryCueInvalidationReason } from './MemoryCueEpisodeStore.js';
 
 export interface MemoryCueSourceReader {
   read(input: {
+    opportunityId?: string;
     family: MemoryCueDrillCoordinate['family'];
     anchor: string;
     expectedRevision: string;

@@ -1261,6 +1261,18 @@ describe('GeminiAcpAdapter integration', () => {
 
   it('P1-1: abort one invocation does not kill concurrent invocations', async () => {
     const { child, clientStdin, agentStdout, ee } = createMockChild();
+    const responseTimers = new Set();
+    const respondLater = (send, delay) => {
+      const timer = setTimeout(() => {
+        responseTimers.delete(timer);
+        send();
+      }, delay);
+      responseTimers.add(timer);
+    };
+    // A real producer cannot emit after its process exits; retire the mock's delayed replies too.
+    ee.once('exit', () => {
+      for (const timer of responseTimers) clearTimeout(timer);
+    });
     let sessionCounter = 0;
     const capturedCancels = [];
     const pendingPrompts = new Map();
@@ -1295,7 +1307,7 @@ describe('GeminiAcpAdapter integration', () => {
                   },
                 }) + '\n',
               );
-              setTimeout(
+              respondLater(
                 () =>
                   agentStdout.write(
                     JSON.stringify({ jsonrpc: '2.0', id: msg.id, result: { stopReason: 'end_turn' } }) + '\n',
@@ -1309,7 +1321,7 @@ describe('GeminiAcpAdapter integration', () => {
           capturedCancels.push(cancelSid);
           const promptId = pendingPrompts.get(cancelSid);
           if (promptId) {
-            setTimeout(() => {
+            respondLater(() => {
               agentStdout.write(
                 JSON.stringify({ jsonrpc: '2.0', id: promptId, result: { stopReason: 'cancelled' } }) + '\n',
               );

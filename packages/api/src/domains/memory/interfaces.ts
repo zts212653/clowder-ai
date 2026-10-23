@@ -407,6 +407,8 @@ export interface IEvidenceStore {
   refreshEntityMentions?(docAnchors?: string[]): Promise<void>;
   deleteByAnchor(anchor: string): Promise<void>;
   getByAnchor(anchor: string): Promise<EvidenceItem | null>;
+  /** Read-only source/vector revision projection from the original index, never a freshness timestamp. */
+  getIndexedSourceRevision?(anchor: string): Promise<{ sourceHash: string; vectorSourceHash: string | null } | null>;
   health(): Promise<boolean>;
   initialize(): Promise<void>;
 }

@@ -35,9 +35,11 @@ function manager() {
     'cat-cafe-skills/custody-recognition/SKILL.md',
     'plugins/github/plugin.yaml',
   ]) {
-    const file = path.join(root, 'project', entry);
-    fs.mkdirSync(path.dirname(file), { recursive: true });
-    fs.writeFileSync(file, 'startup fixture');
+    for (const base of [root, path.join(root, 'project')]) {
+      const file = path.join(base, entry);
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      fs.writeFileSync(file, 'startup fixture');
+    }
   }
   const value = new ServiceManager(root, { frontendPort: 5200, apiPort: 3200, redisPort: 6300 });
   value._getUserDataDir = () => root;
@@ -49,13 +51,13 @@ function manager() {
 
 test('missing project mirrors reject startup before any service is spawned', async () => {
   const value = manager();
-  fs.unlinkSync(path.join(value.root, 'project/plugins/github/plugin.yaml'));
+  fs.unlinkSync(path.join(value.root, 'project/docs/harness-feedback/eval-domains/eval-design-gate.yaml'));
   value._waitForProjectMirrors = (root) => ServiceManager.prototype._waitForProjectMirrors.call(value, root, 0);
   const starts = [];
   value._startRedis = async () => starts.push('redis');
   value._startApi = async () => starts.push('api');
   value._startNextJs = () => starts.push('web');
-  await assert.rejects(value.startAll(), /Project mirror readiness failed[\s\S]*plugin.yaml/);
+  await assert.rejects(value.startAll(), /Project mirror readiness failed[\s\S]*eval-design-gate.yaml/);
   assert.deepEqual(starts, []);
 });
 

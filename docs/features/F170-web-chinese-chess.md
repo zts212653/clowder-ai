@@ -1,11 +1,11 @@
 ---
 feature_ids: [F170]
-tips_exempt: "Renewed 2026-10-21 after the owner-authorized merge of the playable C1 plugin. Publication and production installation remain separate facts; the owner deferred replay, resignation and chess-strength follow-up, so this record must not advertise a newly available public entry."
+tips_exempt: "Renewed 2026-10-22 for read-only reconciliation of the independently published alpha.2 package and live catalog. Catalog discovery is available; this Host remains uninstalled, and the owner-deferred gameplay acceptance and broader follow-up are unchanged."
 related_features: [F093, F311]
 topics: [game, frontend, companionship, replay, plugin]
 doc_kind: spec
 created: 2026-04-20
-updated: 2026-10-21
+updated: 2026-10-22
 description: "让人和猫在同一张可靠棋盘上认真对弈，流畅落子、保存多盘棋谱，并一起回看关键转折与学到的棋理。"
 description_source: model
 description_author: codex-astra
@@ -14,7 +14,7 @@ description_updated_at: 2026-09-27T02:04:07Z
 
 # F170: Web Chinese Chess — 网页象棋、人猫对弈与复盘
 
-> **Status**: in-progress（可玩 C1 插件 #66 已合入；安装后真实回合与恢复已实测，发布/生产安装另核；剩余性能、认输、回放与棋力工作依 operator 指令待后续唤起） | **Owner**: 小星星·Maine Coon（@codex-astra, gpt-6-astra；原 A/B owner：Ragdoll） | **Priority**: P2
+> **Status**: in-progress（可玩 C1 插件 #66 已合入，alpha.2 已发布并入官方目录；当前 Host 未安装；剩余安装/体验验收、性能、认输、回放与棋力工作依 operator 指令待后续唤起） | **Owner**: 小星星·Maine Coon（@codex-astra, gpt-6-astra；原 A/B owner：Ragdoll） | **Priority**: P2
 
 ## Why
 
@@ -67,6 +67,12 @@ operator 在原执行 thread 明确要求“推进到可玩可用然后合入”
 - 当前交付仅支持同机本地棋盘、默认人执红；原私人棋谱没有读取或修改。npm、live catalog 与生产安装仍按各自实际结果确认；多盘回放、复盘、认输策略及棋力判断保持原有开放范围。
 
 本轮已用现行插件模块生命周期、原生调用身份、消息与持久数据接口替代九月未实现的通用交互草案；在当前会话请指定猫开局即确定绑定，不新增 Core 界面槽或共享交互协议。棋盘、搜索、规则与棋谱归插件，Host 只消费既有通用能力。上述直接指令同时明确“剩下的之后喊你们”：原 Task 保留开放 AC，剩余开发/手动发布上架/生产安装待后续明确续办，不继续以旧设计确认或 CODEOWNER 审批催人。合入触发的既有 CI 自动运行，其状态不等于发布成功。
+
+### 2026-10-22 发布事实对齐（只读）
+
+- 统一发布后的目录激活 [plugins#114](https://github.com/zts212653/clowder-ai-plugins/pull/114) 已于 `2026-10-22T17:27:42Z` 合入 `44baef04430d1b703556b4e50ae8707187e7a1d4`。Astra 实读 npm 元数据并下载 `@clowder-ai/xiangqi@0.1.0-alpha.2` 的 49,165 字节 tarball，只在内存计算哈希；SHA256 为 `d8d9c1977e0ddc05196f7b566ebada0c8acfa04fde11ab40013210de4179e65f`，与原验收制品一致，SHA1/SHA512 也与 registry 及当前 live catalog 一致。
+- 当前 Host 的只读 `plugin_get` 返回 catalog=fresh、availableVersion=alpha.2、允许安装，installedVersion/pluginInstanceId 均为 null、artifact=absent、intent=disabled、live=stopped。**已经发布且可从目录安装，不等于 You 已安装、亲自下过或整个 F170 完成。**
+- operator `private-source-id` 的“剩下的之后喊你们”仍有效；本轮只更新事实，不修代码、重跑、重发包、安装或启动服务，原 Task/owner/历史日期/开放 AC 保留。
 
 ## What
 

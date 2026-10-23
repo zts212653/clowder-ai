@@ -5,7 +5,9 @@ import { existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from 
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { NAMED_ALPHA_PORTS, namedAlphaFixture } from './lib/alpha-named-fixture.mjs';
+import { lifecycleConfig } from './lib/worktree-reaper-probes.mjs';
 import { decideNativeHookPayload } from './native-effect-target-guard.mjs';
+import { finishWorktree, ownedWorktreeFacts } from './worktree-finish.mjs';
 
 test('canonical named Alpha launcher carries one tuple from actual main to isolated child', (t) => {
   const f = namedAlphaFixture(t);
@@ -180,14 +182,43 @@ test('named init creates only its main-derived registered checkout and preserves
   const sentinel = join(legacy, '.cat-cafe/redis/dump.rdb');
   writeFileSync(sentinel, 'preserve damaged original');
   const created = join(f.directory, 'cat-cafe-alpha-new-site');
-  const result = f.run(['init', '--instance', 'new-site', '--ports', NAMED_ALPHA_PORTS]);
+  const result = f.run(['init', '--instance', 'new-site', '--ports', NAMED_ALPHA_PORTS], { cwd: f.directory });
   assert.equal(result.status, 0, result.stderr);
   assert.equal(f.git(['branch', '--show-current'], created), 'alpha/new-site-main-sync');
   assert.equal(f.git(['rev-parse', 'HEAD'], created), f.git(['rev-parse', 'origin/main']));
   assert.equal(readFileSync(sentinel, 'utf8'), 'preserve damaged original');
   assert.equal(f.readCalls().includes('redis-cli '), false);
   assert.equal(existsSync(legacy), true);
+  const finish = { repo: f.mainRoot, path: created, owner: f.env.CAT_CAFE_CAT_ID, sourceRef: 'task:alpha-init' };
+  const { lifecycle } = ownedWorktreeFacts(finish);
+  assert.equal(lifecycle.policy, 'merged');
+  assert.ok(Number.isFinite(Date.parse(lifecycle.createdAt)));
+  assert.equal(lifecycleConfig(f.mainRoot, '--local')?.owner, undefined, 'declaration is private to the new tree');
+  const repeated = f.run(['init', '--instance', 'new-site', '--ports', NAMED_ALPHA_PORTS], {
+    env: { CAT_CAFE_CAT_ID: 'another-caller' },
+  });
+  assert.equal(repeated.status, 0, repeated.stderr);
+  assert.deepEqual(lifecycleConfig(created, '--worktree'), lifecycle, 'existing owner and birth stay unchanged');
+  assert.equal(finishWorktree(finish).storageDisposition, 'removed');
+  assert.equal(finishWorktree({ ...finish, mode: 'check' }).state, 'released');
+  assert.equal(existsSync(created), false);
+  assert.equal(readFileSync(sentinel, 'utf8'), 'preserve damaged original');
 });
+
+for (const failure of ['missing owner', 'shared-only config']) {
+  test(`named init refuses ${failure} before creating an undeclared checkout`, (t) => {
+    const f = namedAlphaFixture(t);
+    if (failure === 'shared-only config') f.git(['config', 'extensions.worktreeConfig', 'false']);
+    const result = f.run(['init', '--instance', 'undeclared', '--ports', NAMED_ALPHA_PORTS], {
+      env: failure === 'missing owner' ? { CAT_CAFE_CAT_ID: '' } : {},
+    });
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, failure === 'missing owner' ? /invalid --owner/ : /worktreeConfig/);
+    assert.equal(existsSync(join(f.directory, 'cat-cafe-alpha-undeclared')), false);
+    assert.equal(f.git(['branch', '--list', 'alpha/undeclared-main-sync']), '');
+    assert.equal(f.readCalls(), '', 'refusal happens before dependency installation or service probes');
+  });
+}
 
 test('a main advance during compilation cannot widen the once-frozen named Alpha target', (t) => {
   const f = namedAlphaFixture(t);

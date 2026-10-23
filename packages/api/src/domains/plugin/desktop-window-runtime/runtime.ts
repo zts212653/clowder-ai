@@ -142,6 +142,8 @@ export class DesktopWindowPluginRuntime implements BundledPluginRuntime {
         throw new Error('companion archive contract unavailable');
       const publicCompanionV2 = companionContract !== undefined;
       controller.signal.throwIfAborted();
+      await this.options.executor.prepare?.();
+      controller.signal.throwIfAborted();
       connection = await this.options.broker.openBuiltinConnection(id);
       const run: ActiveWindow = {
         id,

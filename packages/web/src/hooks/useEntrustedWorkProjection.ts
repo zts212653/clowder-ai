@@ -1,4 +1,8 @@
-import { type EntrustedWorkOwnerReadV1, entrustedWorkOwnerReadV1Schema } from '@cat-cafe/shared';
+import {
+  type EntrustedWorkOwnerReadV1,
+  entrustedWorkOwnerReadV1Schema,
+  producerAttentionCoverageV1Schema,
+} from '@cat-cafe/shared';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { apiFetch } from '@/utils/api-client';
 
@@ -6,6 +10,8 @@ interface EntrustedWorkProjectionResult {
   ownerReads: EntrustedWorkOwnerReadV1[];
   loading: boolean;
   error: boolean;
+  /** At least one producer failed; successful owner facts remain readable but absence/counts are not exact. */
+  partial: boolean;
   /** A confirmed snapshot exists for this same projection while revalidating. */
   confirmed: boolean;
   refetch: () => void;
@@ -13,12 +19,34 @@ interface EntrustedWorkProjectionResult {
 
 export type EntrustedWorkProjection = 'schedule' | 'needs-me' | 'completed';
 
+function projectionEndpoint(projection: EntrustedWorkProjection): string {
+  if (projection === 'needs-me') return '/api/entrusted-work/needs-me';
+  if (projection === 'completed') return '/api/entrusted-work/owner-reads?view=completed';
+  return '/api/entrusted-work/owner-reads';
+}
+
+async function readProjection(
+  projection: EntrustedWorkProjection,
+  signal: AbortSignal,
+): Promise<{ ownerReads: EntrustedWorkOwnerReadV1[]; partial: boolean }> {
+  const response = await apiFetch(projectionEndpoint(projection), { signal }, { afterCurrentGet: true });
+  if (!response.ok) throw new Error(`entrusted-work owner reads failed: ${response.status}`);
+  const body = (await response.json()) as { ownerReads?: unknown; coverage?: unknown };
+  const ownerReads = entrustedWorkOwnerReadV1Schema.array().parse(body.ownerReads);
+  const coverage = producerAttentionCoverageV1Schema.parse(body.coverage);
+  return {
+    ownerReads,
+    partial: coverage.state === 'partial' || ownerReads.some((read) => read.envelope.freshness.state !== 'current'),
+  };
+}
+
 export function useEntrustedWorkProjection(
   projection: EntrustedWorkProjection = 'schedule',
 ): EntrustedWorkProjectionResult {
   const [ownerReads, setOwnerReads] = useState<EntrustedWorkOwnerReadV1[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
+  const [partial, setPartial] = useState(false);
   const [resolution, setResolution] = useState<{
     projection: EntrustedWorkProjection;
     confirmed: boolean;
@@ -32,23 +60,16 @@ export function useEntrustedWorkProjection(
     setLoading(true);
     setError(false);
     try {
-      const endpoint =
-        projection === 'needs-me'
-          ? '/api/entrusted-work/needs-me'
-          : projection === 'completed'
-            ? '/api/entrusted-work/owner-reads?view=completed'
-            : '/api/entrusted-work/owner-reads';
-      const response = await apiFetch(endpoint, { signal: controller.signal }, { afterCurrentGet: true });
-      if (!response.ok) throw new Error(`entrusted-work owner reads failed: ${response.status}`);
-      const body = (await response.json()) as { ownerReads?: unknown };
-      const parsed = entrustedWorkOwnerReadV1Schema.array().parse(body.ownerReads);
+      const result = await readProjection(projection, controller.signal);
       if (!controller.signal.aborted) {
-        setOwnerReads(parsed);
-        setResolution({ projection, confirmed: true });
+        setOwnerReads(result.ownerReads);
+        setPartial(result.partial);
+        setResolution({ projection, confirmed: !result.partial });
       }
     } catch (reason: unknown) {
       if (controller.signal.aborted || (reason instanceof DOMException && reason.name === 'AbortError')) return;
       setOwnerReads([]);
+      setPartial(false);
       setResolution({ projection, confirmed: false });
       setError(true);
     } finally {
@@ -75,6 +96,7 @@ export function useEntrustedWorkProjection(
     loading: loading || resolution?.projection !== projection,
     confirmed: resolution?.projection === projection && resolution.confirmed && !error,
     error,
+    partial,
     refetch,
   };
 }

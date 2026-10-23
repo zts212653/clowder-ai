@@ -1,7 +1,9 @@
 import {
   acceptedDecisionRequiredOpportunityV1Schema,
   approvedTasteInvokedOpportunityV1Schema,
+  authorizedTaskSourcesOpportunityV1Schema,
   deliveryDecisionOpportunityV1Schema,
+  freshContextSourcesOpportunityV1Schema,
   judgmentSurfaceEnteredOpportunityV1Schema,
   ownedSeedAvailableOpportunityV1Schema,
   profileRevisionAvailableOpportunityV1Schema,
@@ -30,7 +32,43 @@ export interface RecallOpportunityCatalogEntry {
   dedupeKey(opportunity: RecallOpportunityV1): string;
 }
 
+const contextEntries: readonly RecallOpportunityCatalogEntry[] = (
+  [
+    { kind: 'fresh_context_sources', producer: 'context_epoch', schema: freshContextSourcesOpportunityV1Schema },
+    {
+      kind: 'authorized_task_sources',
+      producer: 'task_action_custody',
+      schema: authorizedTaskSourcesOpportunityV1Schema,
+    },
+  ] as const
+).map(({ kind, producer, schema }) =>
+  Object.freeze({
+    kind,
+    producer,
+    consumer: 'agent_route' as const,
+    payloadSchema: schema.shape.payload,
+    scopeBinding: 'server_exact' as const,
+    resolverFamilies: Object.freeze(['profile', 'project_knowledge'] as const),
+    maxCues: 3,
+    maxPromptTokens: 900,
+    expiresAfterMs: 5 * 60_000,
+    dedupeKey(opportunity: RecallOpportunityV1): string {
+      return opportunity.kind === 'fresh_context_sources' || opportunity.kind === 'authorized_task_sources'
+        ? [
+            opportunity.kind,
+            opportunity.scope.ownerUserId,
+            opportunity.scope.threadId,
+            opportunity.payload.contextEpoch,
+            opportunity.payload.sourceMessageId,
+            JSON.stringify(opportunity.payload.evidence),
+          ].join('\0')
+        : 'invalid';
+    },
+  }),
+);
+
 const entries: readonly RecallOpportunityCatalogEntry[] = Object.freeze([
+  ...contextEntries,
   Object.freeze({
     kind: 'subject_seen',
     producer: 'entity_nudge',
@@ -219,7 +257,7 @@ const entries: readonly RecallOpportunityCatalogEntry[] = Object.freeze([
   }),
 ]);
 
-export const RECALL_OPPORTUNITY_CATALOG_V6 = Object.freeze({
+export const RECALL_OPPORTUNITY_CATALOG_V7 = Object.freeze({
   version: RECALL_OPPORTUNITY_CATALOG_VERSION,
   entries,
 });
@@ -244,9 +282,10 @@ export function getRecallOpportunityCatalogEntry(opportunity: RecallOpportunityV
   const entry = entries.find(
     (candidate) => candidate.kind === opportunity.kind && candidate.producer === opportunity.producer,
   );
-  if (!entry) throw new Error('Recall opportunity is not admitted by catalog v6');
+  if (!entry) throw new Error('Recall opportunity is not admitted by current catalog');
   return entry;
 }
 
 /** Compatibility name for callers; contents always follow the current catalog. */
-export const RECALL_OPPORTUNITY_CATALOG_V5 = RECALL_OPPORTUNITY_CATALOG_V6;
+export const RECALL_OPPORTUNITY_CATALOG_V6 = RECALL_OPPORTUNITY_CATALOG_V7;
+export const RECALL_OPPORTUNITY_CATALOG_V5 = RECALL_OPPORTUNITY_CATALOG_V7;

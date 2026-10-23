@@ -551,6 +551,7 @@ REDIS_PIDFILE="${REDIS_DATA_DIR}/redis-${REDIS_PORT}.pid"
 REDIS_LOGFILE="${REDIS_DATA_DIR}/redis-${REDIS_PORT}.log"
 STARTED_REDIS=false
 REDIS_STARTUP_DATA_UNVERIFIED=false
+REDIS_STARTUP_READINESS_FAILED=false
 NAMED_ALPHA_REDIS_IDENTITY=""
 NAMED_ALPHA_REDIS_LEASE_FILE=""
 F247_CLOUD_OWNER_FILE=""
@@ -675,7 +676,10 @@ remove_named_alpha_redis_lease() {
 if [ -n "${CAT_CAFE_ALPHA_COORDINATES:-}" ]; then
     redis-cli() {
         named_alpha_redis_is_owned || { echo "[start-dev] refusing unproven named Alpha Redis command" >&2; return 1; }
-        command redis-cli "$@"
+        case "${@: -1}" in
+            ping|PING) cat_cafe_redis_ping_command "$@" ;;
+            *) command redis-cli "$@" ;;
+        esac
     }
 fi
 
@@ -1504,7 +1508,7 @@ assert_alpha_redis_runtime_dir() {
             # The directory identity was verified above. An ordinary shutdown
             # would rewrite the RDB with this empty state and destroy the copy
             # we need for recovery, so stop only this Alpha instance nosave.
-            redis-cli -h 127.0.0.1 -p "$REDIS_PORT" shutdown nosave >/dev/null 2>&1 || true
+            redis-cli -e -h 127.0.0.1 -p "$REDIS_PORT" shutdown nosave >/dev/null 2>&1 || true
             for _ in $(seq 1 20); do
                 if ! redis-cli -h 127.0.0.1 -p "$REDIS_PORT" ping >/dev/null 2>&1; then
                     return 1
@@ -1521,6 +1525,10 @@ assert_alpha_redis_runtime_dir() {
 redis_startup_data_allows_save() {
     [ "${REDIS_STARTUP_DATA_UNVERIFIED:-false}" = true ] || return 0
     [ "$(cat_cafe_file_size_bytes "$REDIS_DATA_DIR/dump.rdb")" -ge 1024 ] || return 0
+    if [ "${REDIS_STARTUP_READINESS_FAILED:-false}" = true ]; then
+        echo "[start-dev] preserving snapshot after Redis readiness refusal; no saving cleanup" >&2
+        return 1
+    fi
     local size
     # A failed startup read is not evidence that saving over its snapshot is safe.
     # This read uses the same strict per-command ownership wrapper as cleanup.
@@ -1573,7 +1581,7 @@ setup_storage() {
             --daemonize yes \
             --pidfile "$REDIS_PIDFILE" \
             --logfile "$REDIS_LOGFILE" "${ownership_args[@]}" \
-            || { if [ -n "${CAT_CAFE_ALPHA_COORDINATES:-}" ]; then exit 1; fi; }
+            || exit 1
         if redis_startup_ping; then
             assert_alpha_redis_runtime_dir || exit 1
             STARTED_REDIS=true
@@ -1637,7 +1645,7 @@ cleanup() {
                 CLEANUP_STATUS=1
             else
                 archive_redis_snapshot "pre-stop"
-                if shutdown_output="$(redis-cli -p "$REDIS_PORT" shutdown save 2>&1)"; then
+                if shutdown_output="$(redis-cli -e -p "$REDIS_PORT" shutdown save 2>&1)"; then
                     echo "  Redis (端口 $REDIS_PORT) 已关闭"
                 else
                     shutdown_status=$?

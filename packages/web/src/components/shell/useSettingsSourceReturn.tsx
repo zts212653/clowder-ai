@@ -46,6 +46,7 @@ function ReturnNotice({ bridge }: { bridge: SettingsReadingBridge }) {
       message: messages[notice],
       duration: 0,
     });
+    bridge.noticePresented(notice);
   }, [bridge, view, copy]);
   return null;
 }

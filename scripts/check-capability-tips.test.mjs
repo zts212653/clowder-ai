@@ -46,6 +46,20 @@ const validTip = {
 };
 
 describe('F244 capability tips hard check', () => {
+  it('accepts bounded optional demo references while rejecting URLs and unknown fields', () => {
+    const root = makeRepo();
+    try {
+      writeInventory(root, [{ ...validTip, demoId: 'conversation-proposals-v1' }]);
+      assert.equal(checkCapabilityTipsForRepo(root, { changedFiles: [] }).ok, true);
+      for (const invalid of [{ demoId: 'https://private/video.mp4' }, { demoId: 42 }, { arbitraryField: 'bypass' }]) {
+        writeInventory(root, [{ ...validTip, ...invalid }]);
+        assert.equal(checkCapabilityTipsForRepo(root, { changedFiles: [] }).ok, false);
+      }
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it('passes when a changed feature has a matching sourceRef tip', () => {
     const root = makeRepo();
     try {

@@ -52,8 +52,8 @@ export const entrustedWorkReadTools = [
     description:
       'Read canonical entrusted-work owner truth without mutation. Use when: inspecting the current Task, its Task-bound execution eligibility, progress, time or delivered material; set includeCompleted for satisfied history or includeCancelled for cancelled/abandoned history. ' +
       'NOT for: resuming or changing terminal work, cross-thread access, or nominating producer receipts. ' +
-      'Output: the same owner refs/revisions, Task-binding execution state, typed dates/progress and prepared Artifact as Web; terminal history carries its distinct closure evidence without attention actions. ' +
-      'GOTCHA: history opens only the sealed, still-current owner-issued material; unsealed legacy results remain unavailable. Stale reads expose no executable actions; authorization stays user/thread-scoped.',
+      'Output: the same owner refs/revisions, Task-binding execution state, typed dates/progress, prepared Artifact and attention coverage as Web; partial attention coverage names unavailable producers while preserving reliable owner facts and healthy receipts. ' +
+      'GOTCHA: partial coverage cannot prove that attention is absent. History opens only the sealed, still-current owner-issued material; unsealed legacy results remain unavailable. Stale reads expose no executable actions; authorization stays user/thread-scoped.',
     inputSchema: readEntrustedWorkInputSchema,
     handler: handleReadEntrustedWork,
     governance: {

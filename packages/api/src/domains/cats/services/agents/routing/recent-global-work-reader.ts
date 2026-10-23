@@ -8,8 +8,14 @@ const SCAN_PAGE_SIZE = 64;
 const SCAN_MESSAGE_LIMIT = 512;
 const SCAN_ARTIFACT_LIMIT = 512;
 
+/** Invalidate on material publications, not streamed prose or thinking. Admission stays in the original projector. */
+export function hasRecentWorkPublication(message: StoredMessage): boolean {
+  return projectRecentMessageArtifactPage(message, 1).artifacts.length > 0;
+}
+
 export interface RecentGlobalWorkScanResult {
   artifacts: GlobalArtifactDTO[];
+  messages: readonly StoredMessage[];
   complete: boolean;
   scannedMessages: number;
 }
@@ -73,6 +79,7 @@ function finishScan(input: {
   const projection = projectPage(canonicalMessages, input.threadTitles, input.artifactLimit);
   return {
     artifacts: projection.artifacts,
+    messages: canonicalMessages,
     complete: input.messageComplete && projection.complete,
     scannedMessages: input.scannedMessages,
   };

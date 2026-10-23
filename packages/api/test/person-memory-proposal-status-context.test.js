@@ -65,8 +65,8 @@ function createMessageStore(messages) {
     getRecent: () => [],
     getMentionsFor: () => [],
     getBefore: () => [],
-    getByThread: async (threadId, limit, userId) => {
-      calls.getByThread.push({ threadId, limit, userId });
+    getByThread: async (threadId, limit, userId, options) => {
+      calls.getByThread.push({ threadId, limit, userId, options });
       return [...storedMessages.values()].slice(-(limit ?? 50));
     },
     getByThreadAfter: async () => {
@@ -312,7 +312,9 @@ describe('F276 live proposal status invocation context', () => {
     assert.match(context, /requestedProposal=not_available reason=no_deterministic_subject_match_in_bounded_discovery/);
     assert.match(context, /person_candidate_recent_bounded_8 subject="最近人物 8".*liveStatus=withdrawn/);
     assert.match(context, /未列出或 not_available 的提案不得从聊天记录推断/);
-    assert.deepEqual(messageStore.calls.getByThread, [{ threadId: 'thread-f276', limit: 200, userId: 'owner-1' }]);
+    assert.deepEqual(messageStore.calls.getByThread, [
+      { threadId: 'thread-f276', limit: 200, userId: 'owner-1', options: { artifactProjection: true } },
+    ]);
     assert.equal(messageStore.calls.getByThreadAfter, 0);
   });
 

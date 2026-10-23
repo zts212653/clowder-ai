@@ -79,6 +79,39 @@ describe('Plugin Manager operation refresh', () => {
     vi.restoreAllMocks();
   });
 
+  it('offers Repair and Update on the real failed-plugin row and refreshes after repair', async () => {
+    let repaired = false;
+    mockApiFetch.mockImplementation(async (path, options) => {
+      if (String(path).endsWith('/repair')) {
+        expect(JSON.parse(String(options?.body))).toEqual({ expectedRevision: 1 });
+        repaired = true;
+        return json({ pluginId: plugin.pluginId, pluginInstanceId: plugin.pluginInstanceId });
+      }
+      if (String(path).includes('marketplaces')) return json({ sources: [] });
+      const current = {
+        ...plugin,
+        availableVersion: '1.1.0',
+        live: repaired ? 'running' : 'crashed',
+        actions: { ...plugin.actions, install: true, repair: !repaired },
+      };
+      return String(path).includes(plugin.pluginId)
+        ? json({ plugin: { ...current, capabilities: [], configFields: [] }, catalog: { status: 'fresh' } })
+        : json({ plugins: [current], catalog: { status: 'fresh' } });
+    });
+    await act(async () => root.render(<PluginManagerLiveContent presentation="v2" />));
+    await flushEffects();
+    const row = container.querySelector(`[data-plugin-id="${plugin.pluginId}"]`);
+    const buttons = () => [...(row?.querySelectorAll('button') ?? [])];
+    expect(buttons().some((button) => button.textContent === '更新')).toBe(true);
+    const repair = buttons().find((button) => button.textContent === '修复');
+    expect(repair).toBeDefined();
+    await act(async () => repair?.click());
+    await flushEffects();
+    expect(repaired).toBe(true);
+    expect(container.textContent).not.toContain('修复');
+    expect(mockApiFetch.mock.calls.some(([path]) => String(path).endsWith('/repair'))).toBe(true);
+  });
+
   it('opens the requested package from a recovery settings link instead of selecting the first item', async () => {
     window.history.replaceState(null, '', '/settings?s=plugins&plugin=official.companion.personal-chrome');
     const companion = { ...plugin, pluginId: 'official.companion.personal-chrome', displayName: 'Companion' };

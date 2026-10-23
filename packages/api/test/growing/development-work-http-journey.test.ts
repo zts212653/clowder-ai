@@ -90,7 +90,10 @@ test('untimed development crosses MCP, HTTP, original Task, publication, return 
   };
   const ownerRead = new EntrustedWorkOwnerReadService({
     tasks,
-    producerCatalog: { listCurrentReceipts: async () => [] },
+    producerCatalog: {
+      listCurrentReceipts: async () => [],
+      readCurrentReceipts: async () => ({ receipts: [], coverage: { state: 'complete' as const } }),
+    },
     artifactReader: new F232PreparedArtifactReader({ messages }),
   });
   registerCallbackAuthHook(app, registry);

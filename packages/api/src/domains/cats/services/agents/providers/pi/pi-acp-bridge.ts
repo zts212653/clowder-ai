@@ -1,18 +1,32 @@
 import { isAbsolute } from 'node:path';
 import { StringDecoder } from 'node:string_decoder';
 import { pathToFileURL } from 'node:url';
+import { resolveCatCafeDataRoot } from '../../../../../../utils/cli-process-ownership.js';
 import { PiAcpSession } from './pi-acp-session.js';
+import { encodePiAcpRecord, PI_BRIDGE_NAME, PI_SESSION_BINDING_ERROR } from './pi-bridge-contract.js';
+import { piErrorExcerpt } from './pi-rpc-diagnostics.js';
 import { type PiRecord, record } from './pi-rpc-process.js';
+import { type PiSessionSlot, type PiSessionStorage, PiSessionStore, piDigest } from './pi-session-store.js';
 
 /** A small ACP adapter around an already installed Pi. It never installs a package or logs credentials. */
 export class PiAcpBridge {
   private readonly sessions = new Map<string, PiAcpSession>();
   private closing?: Promise<void>;
+  private readonly opening = new Map<string, Promise<PiRecord>>();
+  private readonly store: PiSessionStore;
   constructor(
     private readonly command: string,
     private readonly args: string[],
     private readonly write: (value: PiRecord) => void,
-  ) {}
+    storage?: PiSessionStorage,
+  ) {
+    this.store = new PiSessionStore(
+      storage ?? {
+        root: resolveCatCafeDataRoot(),
+        scope: piDigest(JSON.stringify([command, args, process.env.PI_CODING_AGENT_DIR ?? 'native-default'])),
+      },
+    );
+  }
 
   async handle(value: unknown): Promise<void> {
     const request = record(value),
@@ -27,9 +41,9 @@ export class PiAcpBridge {
           respond({
             protocolVersion: 1,
             authMethods: [],
-            agentInfo: { name: 'clowder-pi-bridge', title: 'Pi', version: '1.0.0' },
+            agentInfo: { name: PI_BRIDGE_NAME, title: 'Pi', version: '1.1.0' },
             agentCapabilities: {
-              loadSession: false,
+              loadSession: true,
               sessionCapabilities: { close: {} },
               promptCapabilities: {},
               mcpCapabilities: { http: false, sse: false },
@@ -38,6 +52,9 @@ export class PiAcpBridge {
           return;
         case 'session/new':
           respond(await this.newSession(params));
+          return;
+        case 'session/load':
+          respond(await this.loadSession(params));
           return;
         case 'session/prompt':
           respond(await this.session(params.sessionId).prompt(params.prompt));
@@ -67,26 +84,62 @@ export class PiAcpBridge {
         this.write({
           jsonrpc: '2.0',
           id: request.id,
-          error: { code: -32603, message: error instanceof Error ? error.message : 'Pi bridge request failed' },
+          error: {
+            code: request.method === 'session/load' ? PI_SESSION_BINDING_ERROR : -32603,
+            message: error instanceof Error ? piErrorExcerpt(error.message, 1500) : 'Pi bridge request failed',
+          },
         });
     }
   }
 
   private async newSession(params: PiRecord): Promise<PiRecord> {
+    this.validateSession(params);
+    return this.startSession(this.store.create(params.cwd, params.mcpServers), params.mcpServers);
+  }
+
+  private validateSession(params: PiRecord): void {
     if (typeof params.cwd !== 'string' || !isAbsolute(params.cwd))
       throw new Error('Pi requires an absolute working directory');
     if (params.mode || params.toolExecutionPolicy || record(params._meta).toolExecutionPolicy)
       throw new Error('The Pi bridge cannot enforce this restricted execution policy');
-    const session = new PiAcpSession(this.command, this.args, params.cwd, params.mcpServers, (update) =>
-      this.write({ jsonrpc: '2.0', method: 'session/update', params: update }),
+  }
+  private async loadSession(params: PiRecord): Promise<PiRecord> {
+    this.validateSession(params);
+    const active = typeof params.sessionId === 'string' ? this.sessions.get(params.sessionId) : undefined;
+    if (active?.available) {
+      this.store.assertBinding(active.slot, params.cwd, params.mcpServers);
+      return this.opening.get(active.id) ?? active.describe();
+    }
+    if (active) {
+      await active.close();
+      this.sessions.delete(active.id);
+    }
+    return this.startSession(this.store.load(params.sessionId, params.cwd, params.mcpServers), params.mcpServers);
+  }
+  private async startSession(slot: PiSessionSlot, servers: unknown): Promise<PiRecord> {
+    const pending = this.opening.get(slot.id);
+    if (pending) return pending;
+    const session = new PiAcpSession(
+      this.command,
+      this.args,
+      slot.cwd,
+      servers,
+      (update) => this.write({ jsonrpc: '2.0', method: 'session/update', params: update }),
+      slot,
     );
     this.sessions.set(session.id, session);
+    const ready = session.describe();
+    this.opening.set(slot.id, ready);
     try {
-      return await session.describe();
+      const result = await ready;
+      if (this.closing) throw new Error('Pi bridge is shutting down');
+      return result;
     } catch (error) {
       this.sessions.delete(session.id);
       await session.close();
       throw error;
+    } finally {
+      this.opening.delete(slot.id);
     }
   }
 
@@ -109,7 +162,12 @@ async function main(): Promise<void> {
     commandIndex = args.indexOf('--pi-command');
   const command = args[commandIndex + 1];
   if (commandIndex === -1 || !command) throw new Error('An installed Pi command is required');
-  const bridge = new PiAcpBridge(command, [], (value) => process.stdout.write(`${JSON.stringify(value)}\n`));
+  const rootIndex = args.indexOf('--session-root'),
+    scopeIndex = args.indexOf('--session-scope');
+  if ((rootIndex === -1) !== (scopeIndex === -1))
+    throw new Error('Pi storage root and scope must be provided together');
+  const storage = rootIndex === -1 ? undefined : { root: args[rootIndex + 1] ?? '', scope: args[scopeIndex + 1] ?? '' };
+  const bridge = new PiAcpBridge(command, [], (value) => process.stdout.write(encodePiAcpRecord(value)), storage);
   const decoder = new StringDecoder('utf8');
   let buffer = '';
   process.stdin.on('data', (chunk: Buffer) => {

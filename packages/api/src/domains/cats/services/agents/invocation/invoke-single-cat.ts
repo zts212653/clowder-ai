@@ -1,4 +1,10 @@
 import { claudeExecutionAccountSnapshot, redactClaudeLaunchToken } from '../../../../../config/claude-token-account.js';
+import type {
+  ContextSourceAdmission,
+  ContextSourceDecision,
+  ContextSourceIngress,
+} from '../../../../memory/cue/ContextSourceAdmission.js';
+import { ContextSourceWorkBudget } from '../../../../memory/cue/ContextSourceWorkBudget.js';
 import { InvocationServiceScope } from './invocation-service-scope.js';
 import {
   isConfirmedNativeAuthFailure,
@@ -189,6 +195,7 @@ import {
   sealBeforeInvocationIfNeeded,
 } from './invocation-capacity-snapshot.js';
 import { resolveManagedWorkInvocationBinding } from './managed-work-invocation-binding.js';
+import { memoryCuePresentationKey } from './memory-cue-presentation-capacity.js';
 import { projectNativeGoalMessage } from './native-goal-observation.js';
 import {
   type ProviderPresentationAttempt,
@@ -450,25 +457,6 @@ function createPresentationDeliveryAttempt(input: {
 }): { confirm(): Promise<AgentMessage[]>; release(reason: string): Promise<void> } {
   const promptGenerationId = input.attempt.promptGenerationId;
   const evidenceRef = `context-delivery:${input.invocationId}:${promptGenerationId}`;
-  const presented = input.attempt.admitted.flatMap(({ envelope }) =>
-    envelope.receipt.domain === 'memory_cue' ? [envelope.receipt.receipt] : [],
-  );
-  const presentedOpportunityIds = new Set(presented.map((receipt) => receipt.event.opportunityId));
-  const omitted = [
-    ...input.omittedOpportunityIds,
-    ...input.attempt.omitted.flatMap((envelope) =>
-      envelope.receipt.domain === 'memory_cue' ? [envelope.receipt.receipt.event.opportunityId] : [],
-    ),
-  ].filter(
-    (opportunityId, index, all) => !presentedOpportunityIds.has(opportunityId) && all.indexOf(opportunityId) === index,
-  );
-  const presentedWriteOpportunities = input.attempt.admitted.flatMap(({ envelope }) =>
-    envelope.receipt.domain === 'write_opportunity' ? [envelope.receipt.receipt] : [],
-  );
-  const presentedWriteOpportunityIds = new Set(presentedWriteOpportunities.map((receipt) => receipt.opportunityId));
-  const omittedWriteOpportunities = input.asrPersonMemoryReceipts.filter(
-    (receipt) => !presentedWriteOpportunityIds.has(receipt.opportunityId),
-  );
   let terminal: 'open' | 'confirmed' | 'released' = 'open';
 
   return {
@@ -489,6 +477,39 @@ function createPresentationDeliveryAttempt(input: {
       if (commits.some(({ outcome }) => !outcome.committed && outcome.reason === 'generation_mismatch')) {
         throw new Error('presentation_delivery_generation_mismatch');
       }
+      // One confirmed ledger fact drives every consumer: persistence, episodes,
+      // and visible receipts must never confuse a prepared reservation with delivery.
+      const presented = commits.flatMap(({ envelope, outcome }) =>
+        outcome.committed && envelope.receipt.domain === 'memory_cue' ? [envelope.receipt.receipt] : [],
+      );
+      const presentedOpportunityIds = new Set(presented.map((receipt) => receipt.event.opportunityId));
+      const rejected = commits.flatMap(({ envelope, outcome }) => {
+        if (outcome.committed || envelope.receipt.domain !== 'memory_cue') return [];
+        envelope.recordOmission?.(outcome.reason === 'context_epoch_retired' ? 'expired' : 'superseded');
+        return [
+          {
+            opportunityId: envelope.receipt.receipt.event.opportunityId,
+            projectionId: envelope.receipt.receipt.cueId,
+            reason: outcome.reason,
+          },
+        ];
+      });
+      const omitted = [
+        ...new Set([
+          ...input.omittedOpportunityIds,
+          ...input.attempt.omitted.flatMap((envelope) =>
+            envelope.receipt.domain === 'memory_cue' ? [envelope.receipt.receipt.event.opportunityId] : [],
+          ),
+          ...rejected.map((item) => item.opportunityId),
+        ]),
+      ].filter((id) => !presentedOpportunityIds.has(id));
+      const presentedWriteOpportunities = commits.flatMap(({ envelope, outcome }) =>
+        outcome.committed && envelope.receipt.domain === 'write_opportunity' ? [envelope.receipt.receipt] : [],
+      );
+      const presentedWriteOpportunityIds = new Set(presentedWriteOpportunities.map((receipt) => receipt.opportunityId));
+      const omittedWriteOpportunities = input.asrPersonMemoryReceipts.filter(
+        (receipt) => !presentedWriteOpportunityIds.has(receipt.opportunityId),
+      );
       const messages: AgentMessage[] = [];
       if (presented.length > 0 && input.memoryCuePromptService?.recordPresented) {
         await input.memoryCuePromptService.recordPresented(presented, {
@@ -510,7 +531,7 @@ function createPresentationDeliveryAttempt(input: {
           timestamp: Date.now(),
         });
       }
-      if (omitted.length > 0) {
+      if (omitted.length > 0 || rejected.length > 0) {
         messages.push({
           type: 'system_info',
           catId: input.catId,
@@ -522,6 +543,7 @@ function createPresentationDeliveryAttempt(input: {
             generationId: promptGenerationId,
             evidenceRef,
             opportunityIds: omitted,
+            rejections: rejected,
           }),
           timestamp: Date.now(),
         });
@@ -1207,6 +1229,7 @@ export interface InvocationDeps {
   readonly runtimeInteractionPort?: import('../../../../runtime-interaction/ports/RuntimeInteractionPort.js').RuntimeInteractionPort;
   /** F287: invocation-bound Cue resolver; receives only server-owned typed seeds. */
   readonly memoryCuePromptService?: MemoryCueInvocationPromptResolver;
+  readonly contextSourceAdmission?: Pick<ContextSourceAdmission, 'prepare'>;
   /** F312: lane-owned standing predicate for an unconsumed canonical Profile revision. */
   readonly profileCueOpportunitySource?: import('../../../../memory/cue/sources/ProfileMemoryCueSource.js').ProfileMemoryCueSource;
   /** F312: lane-owned temporal/subject predicate for one unconsumed F227 Event revision. */
@@ -1350,6 +1373,7 @@ export interface InvocationParams {
     dispatcher: import('../../types.js').AgentClientActiveRunDispatcher;
   }) => (() => void) | undefined;
   /** Scope-free seeds are bound only after this child invocation id exists. */
+  readonly contextSourceIngress?: ContextSourceIngress;
   readonly memoryCueOpportunitySeeds?: readonly MemoryCueOpportunitySeed[];
   /** F276 trial: source-only ASR scenes bound to their exact owner trigger message. */
   readonly asrPersonMemoryScenes?: readonly import('../../../../memory/people/AsrPersonMemoryOpportunityPromptService.js').BoundAsrPersonMemoryScene[];
@@ -1619,6 +1643,10 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
     });
   }
 
+  let contextSourceDecision: ContextSourceDecision | undefined;
+  const contextSourceBudget = new ContextSourceWorkBudget();
+  let sourceRefreshRequired = false;
+  const invalidSourceKeys = new Set<string>();
   let memoryCuePresentationEnvelopes: readonly InvocationPresentationEnvelope[] = [];
   let omittedMemoryCueOpportunityIds: readonly string[] = [];
   let entityNudgePromptPresentation: EntityNudgePromptPresentation | undefined;
@@ -1648,6 +1676,28 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
     const serverScope = { ownerUserId: userId, threadId, invocationId };
     const cueSource = params.entityNudgeCuePresentation;
     let seeds = params.memoryCueOpportunitySeeds ?? [];
+    if (deps.contextSourceAdmission && contextSourceDecision && params.contextSourceIngress && !params.liveCompanion) {
+      const seed = await contextSourceBudget
+        .run((signal) =>
+          deps.contextSourceAdmission!.prepare({
+            scope: serverScope,
+            consumerCatId: catId,
+            signal,
+            exactSourceMessageId: params.executionCausal?.triggerMessageId,
+            ingress: params.contextSourceIngress,
+            ownerAuthProvenance: params.ownerAuthProvenance,
+            decision: contextSourceDecision!,
+            now: Date.now(),
+          }),
+        )
+        .catch((err) => {
+          log.warn({ err, invocationId }, '[F321] context source admission omitted');
+          return null;
+        });
+      if (seed) {
+        seeds = [...seeds, seed];
+      }
+    }
     let fallbacks = params.memoryCueLegacyFallbacks;
     if (cueSource) {
       entityNudgeCuePromptPresentation ??= {
@@ -1727,16 +1777,30 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
         serverScope,
         now: Date.now(),
         consumerCatId: catId as string,
+        contextSourceBudget,
         signal,
       });
       const typedEnvelopes = cueResolution.presentationEnvelopes ?? [];
       if (cueResolution.promptSegment && typedEnvelopes.length === 0) {
         throw new Error('memory_cue_presentation_envelope_unavailable');
       }
-      memoryCuePresentationEnvelopes = typedEnvelopes.map((envelope) => ({
-        ...envelope,
-        receipt: { domain: 'memory_cue' as const, receipt: envelope.receipt },
-      }));
+      memoryCuePresentationEnvelopes = typedEnvelopes
+        .filter((envelope) => !invalidSourceKeys.has(memoryCuePresentationKey(envelope)))
+        .map((envelope) => ({
+          ...envelope,
+          ...(envelope.validateCurrent
+            ? {
+                validateCurrent: async () => {
+                  const key = memoryCuePresentationKey(envelope);
+                  if (invalidSourceKeys.has(key)) return false;
+                  if (await envelope.validateCurrent!()) return true;
+                  invalidSourceKeys.add(key);
+                  return false;
+                },
+              }
+            : {}),
+          receipt: { domain: 'memory_cue' as const, receipt: envelope.receipt },
+        }));
       omittedMemoryCueOpportunityIds = cueResolution.omittedOpportunityIds ?? [];
       const fallbackProjections = resolveMemoryCueLegacyFallbacks(
         fallbacks,
@@ -3389,6 +3453,19 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
         threadId,
         disposition: contextContinuityHandshake.disposition,
       });
+      contextSourceDecision = contextEpochDecision;
+      const compacted = contextEpochDecision.pendingCompaction;
+      if (
+        compacted &&
+        contextEpochDecision.coldConsumedAtEpoch !== contextEpochDecision.contextEpoch &&
+        compacted.runtimeSessionId === contextEpochDecision.boundRuntimeSessionId
+      ) {
+        contextSourceDecision = {
+          ...contextEpochDecision,
+          transition: 'context_compacted',
+          lastTransitionRef: compacted.evidenceRef,
+        };
+      }
       contextContinuityHandshake = {
         ...contextContinuityHandshake,
         disposition: contextEpochDecision.normalizedDisposition,
@@ -5394,7 +5471,10 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
               },
             }
           : {}),
-        ...(generationRecorder || entityNudgePromptPresentation || entityNudgeCuePromptPresentation
+        ...(generationRecorder ||
+        entityNudgePromptPresentation ||
+        entityNudgeCuePromptPresentation ||
+        deps.memoryCuePromptService
           ? {
               beforeProviderLaunch: async (prepared) => {
                 signal?.throwIfAborted();
@@ -5495,6 +5575,17 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
                   presentation?.confirmAssembled();
                   confirmEntityNudgeCuePresentation(prepared.message.body);
                 }
+                if (
+                  !liveFollowup &&
+                  !isCapacityRecovery &&
+                  !nativeAuthContinuation &&
+                  currentPresentationAttempt &&
+                  !(await currentPresentationAttempt.revalidate())
+                ) {
+                  await currentPresentationAttempt.release('source_changed_before_provider');
+                  sourceRefreshRequired = true;
+                  throw new Error('memory_cue_source_changed_before_provider');
+                }
                 return committed;
               },
             }
@@ -5566,7 +5657,14 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
       )[Symbol.asyncIterator]();
       activeServiceIterator = serviceIter;
       for (;;) {
-        const iterResult = await abortableNext(serviceIter, signal);
+        let iterResult: IteratorResult<AgentMessage>;
+        try {
+          iterResult = await abortableNext(serviceIter, signal);
+        } catch (error) {
+          if (!sourceRefreshRequired) throw error;
+          break;
+        }
+        if (sourceRefreshRequired) break;
         if (pendingContinuityInfo) {
           const settledInfo = pendingContinuityInfo;
           pendingContinuityInfo = undefined;
@@ -5988,6 +6086,19 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
         }
       }
       if (activeServiceIterator === serviceIter) await closeActiveServiceIterator();
+
+      if (sourceRefreshRequired) {
+        sourceRefreshRequired = false;
+        await terminateCurrentRequestGeneration('replaced', 'source_changed_before_provider');
+        await presentationDelivery?.release('source_changed_before_provider');
+        // Only metadata already rejected by its source fence is rebuilt; this retry made no provider request.
+        memoryCuePresentationEnvelopes = memoryCuePresentationEnvelopes.filter(
+          (envelope) => !invalidSourceKeys.has(memoryCuePresentationKey(envelope)),
+        );
+        if (!usesProviderContinuityPreflight) await prepareCurrentPresentationDelivery();
+        attempt -= 1;
+        continue;
+      }
 
       if (suppressedNativeAuthError) {
         signal?.throwIfAborted();

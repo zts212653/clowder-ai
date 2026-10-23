@@ -520,6 +520,7 @@
   },
   {
     "id": "capability-propose-thread",
+    "demoId": "conversation-proposals-v1",
     "kind": "capability",
     "sourceRef": {
       "path": "cat-cafe-skills/refs/capability-wakeup-index.md",

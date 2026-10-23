@@ -16,6 +16,7 @@ import {
   type ConnectorIconSpec,
   type ConnectorSource,
   getConnectorDefinition,
+  isStaticConnectorId,
   type MessageFrom,
 } from '@cat-cafe/shared';
 import type { CoCreatorConfig } from '@/components/config-viewer-types';
@@ -38,6 +39,8 @@ export interface SenderMeta {
   /** true when the canonical sender is the co-creator */
   isCoCreator: boolean;
   avatar?: string;
+  /** Initial used when an external person has no projected avatar. */
+  initial?: string;
   icon?: ConnectorIconSpec;
   fallbackIcon?: string;
 }
@@ -64,28 +67,34 @@ export function resolveMessageSender(
   const connectorId = from?.kind === 'external' ? from.connectorId : source?.connector;
   const definition = connectorId ? getConnectorDefinition(connectorId) : undefined;
   const sourceName = source?.label || definition?.displayName || connectorId;
-  const actor = from?.kind === 'external' ? from.sender : from?.kind === 'plugin' ? source?.sender : undefined;
-  const actorName = actor?.name || (from?.kind === 'plugin' ? undefined : actor?.id);
-  const label = sourceName
-    ? actorName
-      ? `${sourceName} · ${actorName}`
-      : sourceName
-    : from?.kind === 'plugin'
-      ? '插件'
-      : from?.kind === 'system'
-        ? from.service
-        : '未知来源';
+  const externalActorName =
+    from?.kind === 'external' && !isStaticConnectorId(from.connectorId)
+      ? (from.sender?.name ?? from.sender?.id)
+      : undefined;
+  const pluginActorName = from?.kind === 'plugin' ? source?.sender?.name : undefined;
+  const label = externalActorName
+    ? externalActorName
+    : sourceName
+      ? pluginActorName
+        ? `${sourceName} · ${pluginActorName}`
+        : sourceName
+      : from?.kind === 'plugin'
+        ? '插件'
+        : from?.kind === 'system'
+          ? from.service
+          : '未知来源';
   const color = source?.themeColor ?? definition?.themeColor ?? '#64748B';
   return {
     label,
     color,
     textColor: color,
     isCoCreator: false,
+    ...(externalActorName ? { initial: externalActorName.charAt(0) } : {}),
     icon:
-      from?.kind === 'plugin' && source?.icon
+      externalActorName || (from?.kind === 'plugin' && source?.icon)
         ? undefined
         : (definition?.icon ?? (source?.icon ? undefined : { type: 'svg', iconId: 'robot' })),
-    ...(source?.icon ? { fallbackIcon: source.icon } : {}),
+    ...(!externalActorName && source?.icon ? { fallbackIcon: source.icon } : {}),
   };
 }
 

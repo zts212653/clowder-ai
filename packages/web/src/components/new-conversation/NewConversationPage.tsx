@@ -337,7 +337,12 @@ export function NewConversationPage(props: NewConversationPageProps) {
         {props.onShowCollaboration && <DemoEntryActions onShowCollaboration={props.onShowCollaboration} />}
         {floating.error && <p role="alert">{floating.error}</p>}
         <div className="mt-8">
-          <RecentWorks onOpen={openWork} onOpenAll={() => setWorkspaceMode('artifacts')} onDiscuss={discussWork} />
+          <RecentWorks
+            ownerUserId={admission.ownerUserId}
+            onOpen={openWork}
+            onOpenAll={() => setWorkspaceMode('artifacts')}
+            onDiscuss={discussWork}
+          />
           {discussionNotice && <p role="alert">{discussionNotice}</p>}
         </div>
       </div>
