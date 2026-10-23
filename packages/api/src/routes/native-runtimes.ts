@@ -5,10 +5,22 @@ import { catRegistry } from '@cat-cafe/shared';
 import { parse } from 'smol-toml';
 import { getAcpConfig } from '../config/cat-config-loader.js';
 import { resolveCliCommand } from '../utils/cli-resolve.js';
+import { hasPersistedDshSetup } from './dsh-persisted-setup.js';
+import { inspectDshRecommendation } from './dsh-recommendation.js';
 import { discoverAdditionalRuntimes } from './native-additional-runtimes.js';
+import { nativeClaudeConfiguration } from './native-claude-api-config.js';
+import { discoverCodeAgentRuntimes } from './native-codeagent-discovery.js';
 import { discoverDshRuntime } from './native-dsh-discovery.js';
 import { dshLauncherProfileState } from './native-dsh-profile.js';
+import { discoverPiRuntime } from './native-pi-discovery.js';
 import { nativeRuntimeReadiness } from './native-runtime-readiness.js';
+import { nativeBindingHarness, nativeTool } from './native-tool-catalog.js';
+
+interface DiscoveryOptions {
+  home?: string;
+  commandFor?: typeof resolveCliCommand;
+  intranet?: boolean;
+}
 
 function text(value: unknown): string | undefined {
   return typeof value === 'string' && value.length > 0 ? value : undefined;
@@ -29,49 +41,58 @@ export function safeNativeStartup(command: string, startupArgs: readonly string[
   );
 }
 /** Discovery is read-only. No auth files, full agent launches, prompts or login probes. */
-export function discoverNativeRuntimes(projectRoot: string) {
-  const home = homedir();
+export function discoverNativeRuntimes(projectRoot: string, options: DiscoveryOptions = {}) {
+  const home = options.home ?? homedir();
+  const commandFor = options.commandFor ?? resolveCliCommand;
+  const intranet = options.intranet ?? process.env.CAT_CAFE_INTRANET_EDITION === '1';
   const codex = metadata(join(process.env.CODEX_HOME || join(home, '.codex'), 'config.toml'), true);
-  const claude = metadata(join(process.env.CLAUDE_CONFIG_DIR || join(home, '.claude'), 'settings.json'));
+  const claude = nativeClaudeConfiguration(projectRoot, home);
   const builtins = (
     [
       ['codex', 'Codex', 'openai'],
       ['claude', 'Claude Code', 'anthropic'],
     ] as const
   ).map(([id, label, clientId]) => {
-    const command = resolveCliCommand(id);
+    const command = commandFor(id);
     const configuredModel = text(id === 'codex' ? codex.model : claude.model);
-    const configuredEffort = text(id === 'codex' ? codex.model_reasoning_effort : claude.effortLevel);
+    const configuredEffort = text(id === 'codex' ? codex.model_reasoning_effort : claude.effort);
     const models = new Set<string>();
     if (configuredModel) models.add(configuredModel);
-    for (const entry of Object.values(catRegistry.getAllConfigs())) {
-      if (entry.clientId === clientId && entry.defaultModel) models.add(entry.defaultModel);
-    }
-    return {
-      id,
-      label,
-      clientId,
-      installed: Boolean(command),
-      command: command ?? undefined,
-      configuredModel,
-      configuredEffort,
-      models: [...models],
-      defaultsStatus: 'configured_only',
-      transport: id === 'codex' ? 'app_server' : 'stream_json',
-    };
+    return nativeTool(
+      {
+        id,
+        label,
+        clientId,
+        installed: Boolean(command),
+        command: command ?? undefined,
+        configuredModel,
+        configuredEffort,
+        models: [...models],
+        defaultsStatus: 'configured_only',
+        transport: id === 'codex' ? 'app_server' : 'stream_json',
+      },
+      id === 'claude' ? 'claudecode' : 'codex',
+    );
   });
   const acp = Object.values(catRegistry.getAllConfigs()).flatMap((cat) => {
     const config = getAcpConfig(cat.id, projectRoot);
     if (!config || (cat.agentProvider !== undefined ? cat.agentProvider : config.agentProvider)) return [];
-    const command = isAbsolute(config.command) ? config.command : resolveCliCommand(config.command);
+    const command = isAbsolute(config.command) ? config.command : commandFor(config.command);
     const entry = config.startupArgs.find((arg) => /(?:\.m?js|\.cjs)$/.test(arg));
     const installed = Boolean(command && existsSync(command) && (!entry || existsSync(resolve(projectRoot, entry))));
     const profileState = dshLauncherProfileState(config.command, config.startupArgs, projectRoot);
+    const harnessId = nativeBindingHarness(config.command, config.startupArgs, projectRoot);
     const selectable = safeNativeStartup(config.command, config.startupArgs) && profileState !== 'acp_profile_invalid';
     return [
       {
         id: `acp:${cat.id}`,
-        label: /dsh|deepseek/i.test([config.command, ...config.startupArgs].join(' ')) ? 'DSH' : cat.displayName,
+        label: cat.displayName,
+        kind: 'binding' as const,
+        sourceCatId: cat.id,
+        harnessId,
+        ...(intranet && harnessId === 'dsh'
+          ? { dshSetupRequired: !hasPersistedDshSetup(config.startupArgs, projectRoot) }
+          : {}),
         clientId: 'acp',
         installed,
         ...(profileState && profileState !== 'custom_startup'
@@ -90,11 +111,23 @@ export function discoverNativeRuntimes(projectRoot: string) {
       },
     ];
   });
-  const dsh = acp.some((runtime) => runtime.label === 'DSH' && runtime.installed && runtime.acp)
-    ? []
-    : [discoverDshRuntime()];
+  const dsh = nativeTool(
+    discoverDshRuntime({
+      resolveCommand: commandFor,
+      dshHome: process.env.DSH_HOME || join(home, '.dsh'),
+      requireSetup: intranet,
+      ...(options.home ? { npmCaches: [] } : {}),
+    }),
+    'dsh',
+  );
+  const additional = intranet
+    ? [nativeTool(discoverPiRuntime({ home, commandFor }), 'pi')]
+    : discoverAdditionalRuntimes(home, commandFor).map((runtime) =>
+        nativeTool(runtime, runtime.id === 'pi' ? 'pi' : 'kimi'),
+      );
   return {
-    runtimes: [...builtins, ...acp, ...dsh, ...discoverAdditionalRuntimes(home)],
+    edition: intranet ? ('intranet' as const) : ('public' as const),
+    runtimes: [...discoverCodeAgentRuntimes(commandFor, intranet), ...builtins, ...acp, dsh, ...additional],
     authenticationStatus: 'not_checked',
   };
 }
@@ -106,7 +139,13 @@ export async function discoverNativeRuntimesWithReadiness(root: string, refresh 
     found.runtimes.map(async (runtime) => ({
       ...runtime,
       readiness: await nativeRuntimeReadiness(runtime, root, refresh),
+      ...(found.edition === 'intranet' &&
+      runtime.harnessId === 'dsh' &&
+      'dshSetupRequired' in runtime &&
+      runtime.dshSetupRequired
+        ? { dshSetup: await inspectDshRecommendation(runtime, root, refresh) }
+        : {}),
     })),
   );
-  return { runtimes, authenticationStatus: 'local_checked' };
+  return { edition: found.edition, runtimes, authenticationStatus: 'local_checked' };
 }

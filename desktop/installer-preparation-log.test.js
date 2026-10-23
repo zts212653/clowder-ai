@@ -19,9 +19,10 @@ const native = {
 const installerSource = fs.readFileSync(path.join(__dirname, 'installer/cat-cafe.iss'), 'utf8');
 const extractionOutput = installerSource.slice(
   installerSource.indexOf('procedure ExtractionOutput'),
-  installerSource.indexOf('function ShouldAutoLaunch'),
+  installerSource.indexOf('procedure ExtractRuntimeArchive'),
 );
-const prepareToInstall = installerSource.slice(installerSource.indexOf('function PrepareToInstall'));
+const identitySource = fs.readFileSync(path.join(__dirname, 'installer/installation-identity.iss'), 'utf8');
+const prepareToInstall = identitySource.slice(identitySource.indexOf('function PrepareToInstall'));
 
 function withTempRoot(prefix, run) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), prefix));

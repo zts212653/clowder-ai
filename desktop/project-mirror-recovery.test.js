@@ -46,13 +46,13 @@ function parentReadFailure(t, paths, { once = false, code = 'UNKNOWN' } = {}) {
   return counts;
 }
 
-test('healthy prepared resources pass without requiring a consumer executable or loose plugin', async (t) => {
+test('healthy real junctions pass without requiring a consumer executable or loose plugin', async (t) => {
   const value = fixture(t);
   prepareProjectMirrors(value);
   assert.equal(fs.existsSync(path.join(value.installRoot, 'plugins')), false);
   const result = await waitForProjectMirrors({ ...value, nodeExe: path.join(value.root, 'absent.exe') });
   assert.equal(result.verification, 'parent');
-  assert.equal(fs.lstatSync(path.join(value.projectDir, 'docs')).isSymbolicLink(), process.platform !== 'win32');
+  assert.ok(fs.readlinkSync(path.join(value.projectDir, 'docs')));
 });
 
 test('transient docs and skills traversal failures recover after bounded retry', async (t) => {
@@ -89,8 +89,8 @@ test('stale junctions are replaced without changing the old target or its custom
   fs.symlinkSync(oldDocs, path.join(value.projectDir, 'docs'), process.platform === 'win32' ? 'junction' : 'dir');
   prepareProjectMirrors(value);
   assert.equal(
-    fs.readFileSync(path.join(value.projectDir, 'docs', PROJECT_MIRROR_PROBES[0].relativePath), 'utf8'),
-    fs.readFileSync(path.join(value.installRoot, 'docs', PROJECT_MIRROR_PROBES[0].relativePath), 'utf8'),
+    fs.realpathSync(path.join(value.projectDir, 'docs')),
+    fs.realpathSync(path.join(value.installRoot, 'docs')),
   );
   assert.equal(fs.readFileSync(path.join(oldDocs, 'custom-history.txt'), 'utf8'), 'protected owner data');
 });
@@ -102,7 +102,7 @@ test('broken junctions are repaired even when existsSync follows an absent old t
   fs.symlinkSync(path.join(value.root, 'gone'), destination, process.platform === 'win32' ? 'junction' : 'dir');
   assert.equal(fs.existsSync(destination), false);
   prepareProjectMirrors(value);
-  assert.ok(fs.readFileSync(path.join(destination, PROJECT_MIRROR_PROBES[0].relativePath)).length);
+  assert.equal(fs.realpathSync(destination), fs.realpathSync(path.join(value.installRoot, 'docs')));
 });
 
 test('real directories and custom files are preserved and cannot be silently passed as recovered', async (t) => {
@@ -127,8 +127,7 @@ test('missing source remains a failure with source and mirror paths and raw erro
   const start = Date.now();
   await assert.rejects(waitForProjectMirrors({ ...value, timeoutMs: 80 }), (error) => {
     assert.match(error.message, /source .*eval-design-gate.yaml.*code=ENOENT errno=.*syscall=open/);
-    if (process.platform !== 'win32') assert.match(error.message, /mirror .*eval-design-gate.yaml.*code=ENOENT/);
-    else assert.ok(fs.readFileSync(path.join(value.projectDir, mirror, relativePath)).length);
+    assert.match(error.message, /mirror .*eval-design-gate.yaml.*code=ENOENT/);
     return true;
   });
   assert.ok(Date.now() - start < 1000, 'failure must respect its bounded deadline');

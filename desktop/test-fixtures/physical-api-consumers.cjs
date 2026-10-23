@@ -4,13 +4,13 @@ const path = require('node:path');
 const { pathToFileURL } = require('node:url');
 const { createRequire } = require('node:module');
 
-async function verifyProtocolProcesses({ load, repoRoot, projectDir, root, mcp }) {
+async function verifyProtocolProcesses({ load, fixtureRoot, runtimeRoot, projectDir, root, mcp }) {
   const { AcpClient } = await load('domains/cats/services/agents/providers/acp/AcpClient.js');
   const acp = new AcpClient({
     command: process.execPath,
     cwd: projectDir,
     inheritParentEnv: false,
-    args: [path.join(repoRoot, 'packages/api/test/fixtures/agent-session-reference/fake-acp-agent.mjs')],
+    args: [path.join(fixtureRoot, 'packages/api/test/fixtures/agent-session-reference/fake-acp-agent.mjs')],
   });
   try {
     await acp.initialize();
@@ -23,7 +23,7 @@ async function verifyProtocolProcesses({ load, repoRoot, projectDir, root, mcp }
     await acp.close();
   }
   if (!fs.existsSync(mcp.args[0])) return { acp: 'passed', mcp: 'not_built' };
-  const sdk = createRequire(path.join(repoRoot, 'packages/mcp-server/package.json'));
+  const sdk = createRequire(path.join(runtimeRoot, 'packages/mcp-server/package.json'));
   const { Client } = await import(pathToFileURL(sdk.resolve('@modelcontextprotocol/sdk/client/index.js')).href);
   const { StdioClientTransport } = await import(
     pathToFileURL(sdk.resolve('@modelcontextprotocol/sdk/client/stdio.js')).href
@@ -57,15 +57,16 @@ async function verifyProtocolProcesses({ load, repoRoot, projectDir, root, mcp }
   }
 }
 
-module.exports = async function verifyApiConsumers({ repoRoot, projectDir, root }) {
-  const dist = path.join(repoRoot, 'packages/api/dist');
+module.exports = async function verifyApiConsumers({ repoRoot, projectDir, root, runtimeRoot = repoRoot }) {
+  const dist = path.join(runtimeRoot, 'packages/api/dist');
   if (!fs.existsSync(path.join(dist, 'index.js'))) return { status: 'api_not_built' };
   for (const key of ['HOME', 'USERPROFILE', 'LOCALAPPDATA', 'APPDATA']) process.env[key] = path.join(root, 'home');
   Object.assign(process.env, {
     CAT_CAFE_CONFIG_ROOT: projectDir,
     CAT_CAFE_GLOBAL_CONFIG_ROOT: path.join(root, 'global'),
     CAT_CAFE_DATA_DIR: path.join(root, 'data'),
-    CAT_CAFE_RUNTIME_ROOT: repoRoot,
+    CAT_CAFE_RUNTIME_ROOT: runtimeRoot,
+    CAT_CAFE_WORKSPACE_ROOT: projectDir,
     CAT_CAFE_SKIP_HOMEDIR_MIGRATION: '1',
     OTEL_SDK_DISABLED: 'true',
   });
@@ -90,14 +91,23 @@ module.exports = async function verifyApiConsumers({ repoRoot, projectDir, root 
   assert.ok(loadA2aBallCheck().length > 100);
   const { resolveL0CompilerScriptPath } = await load('domains/cats/services/agents/providers/l0-compiler.js');
   const compiler = resolveL0CompilerScriptPath(projectDir);
-  assert.equal(fs.realpathSync(compiler), fs.realpathSync(path.join(repoRoot, 'scripts/compile-system-prompt-l0.mjs')));
+  assert.equal(
+    fs.realpathSync(compiler),
+    fs.realpathSync(path.join(runtimeRoot, 'scripts/compile-system-prompt-l0.mjs')),
+  );
   assert.ok(fs.readFileSync(compiler).length > 100);
   const { resolveBuiltinCatCafeServer } = await load('domains/cats/services/agents/providers/acp/acp-mcp-resolver.js');
   const mcp = resolveBuiltinCatCafeServer(projectDir, 'cat-cafe-collab');
-  assert.equal(mcp.args[0], path.join(repoRoot, 'packages/mcp-server/dist/collab.js'));
-  const protocols = await verifyProtocolProcesses({ load, repoRoot, projectDir, root, mcp });
+  assert.equal(mcp.args[0], path.join(runtimeRoot, 'packages/mcp-server/dist/collab.js'));
+  const protocols = await verifyProtocolProcesses({ load, fixtureRoot: repoRoot, runtimeRoot, projectDir, root, mcp });
   return {
     status: 'passed',
+    apiCodeRoot: dist,
+    fixtureRoot: repoRoot,
+    runtimeRoot,
+    buildCommit: fs.existsSync(path.join(dist, '.build-commit'))
+      ? fs.readFileSync(path.join(dist, '.build-commit'), 'utf8').trim()
+      : null,
     consumers: ['design-gate', 'custody', 'governance', 'prompt-template', 'l0-compiler', 'acp-mcp'],
     mcpPath: mcp.args[0],
     protocols,

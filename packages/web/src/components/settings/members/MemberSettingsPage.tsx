@@ -217,6 +217,8 @@ export function MemberSettingsPage({
                     patch={editor.patch}
                     onToolChange={editor.switchRuntime}
                     runtimeDrafts={draft.runtimeDrafts}
+                    runtimeContext={draft.runtimeContext}
+                    onRuntimeContextChange={editor.observeRuntime}
                     t={t}
                     accountHref={accountHref}
                     editing={Boolean(cat)}

@@ -14,7 +14,7 @@
 ;   5. Runs user-level Agent CLI hook sync under the invoking user profile
 ;   6. Creates desktop shortcut to the Electron app
 
-#define MyAppName      "Clowder AI"
+#define MyAppName      "Clowder AI Intranet"
 ; MyAppVersion can be overridden by iscc /DMyAppVersion=X.Y.Z (CI release pipeline).
 ; Default kept for local manual builds.
 #ifndef MyAppVersion
@@ -23,9 +23,9 @@
 #define MyAppPublisher "Clowder AI"
 #define MyAppURL       "https://github.com/zts212653/clowder-ai"
 #define MyAppExeName   "Clowder AI.exe"
-#define MyAppUserModelID "ai.clowderai.desktop"
+#define MyAppUserModelID "ai.clowderai.intranet"
 #ifndef MyAppId
-  #define MyAppId "{{A1B2C3D4-E5F6-7890-ABCD-EF1234567890}"
+  #define MyAppId "{{CAEEDC72-2026-4AC0-9D9C-0FCB0ADEA611}"
 #endif
 
 [Setup]
@@ -37,11 +37,11 @@ AppVersion={#MyAppVersion}
 AppVerName={#MyAppName}
 AppPublisher={#MyAppPublisher}
 AppPublisherURL={#MyAppURL}
-DefaultDirName={autopf}\ClowderAI
+DefaultDirName={autopf}\ClowderAI-Intranet
 DefaultGroupName={#MyAppName}
 AllowNoIcons=yes
 OutputDir=..\..\dist
-OutputBaseFilename=ClowderAI-Setup-{#MyAppVersion}
+OutputBaseFilename=ClowderAI-Intranet-Setup-{#MyAppVersion}
 Compression=lzma2/ultra64
 SolidCompression=yes
 WizardStyle=modern
@@ -207,14 +207,8 @@ Filename: "powershell.exe"; \
   StatusMsg: "Generating desktop configuration..."; \
   Flags: runhidden waituntilterminated; Check: RuntimeExtractionSucceeded
 
-; Offer to launch after interactive install
-Filename: "{app}\desktop-dist\{#MyAppExeName}"; \
-  Description: "Launch {#MyAppName}"; Flags: postinstall nowait skipifsilent runasoriginaluser; Check: RuntimeExtractionSucceeded
-; F273: Auto-restart after silent upgrade (in-app updater uses /SILENT).
-; runasoriginaluser is critical — without it, the app + Redis + API all run
-; as elevated admin, which breaks user-data paths and is a security concern.
-Filename: "{app}\desktop-dist\{#MyAppExeName}"; \
-  Flags: nowait runasoriginaluser; Check: ShouldAutoLaunch
+; The intranet installer never launches the application, interactively or silently.
+; Start it manually from the installed desktop shortcut after Setup has exited.
 
 ; ── F273: Clean previous version's tar-extracted dirs before upgrade ───
 ; These are NOT tracked by Inno's file registry (created by tar.exe in [Run]).
@@ -275,11 +269,6 @@ begin
   WizardForm.FilenameLabel.Caption := Fields[4] + ' / ' + Fields[5] + ' entries - ' + IntToStr(StrToIntDef(Fields[6], 0) div 1000) + 's (' + Fields[1] + ')';
 end;
 
-function ShouldAutoLaunch(): Boolean;
-begin
-  Result := RuntimeExtractionSucceeded and WizardSilent and (ExpandConstant('{param:NoAutoStart|0}') <> '1');
-end;
-
 procedure ExtractRuntimeArchive(ArchiveName: String);
 var
   ProgramPath, Arguments, AppDir: String;
@@ -317,61 +306,4 @@ begin
     FailRuntimeExtraction('Bundled Node.js is incomplete. Installation cannot continue.');
 end;
 
-function PrepareToInstall(var NeedsRestart: Boolean): String;
-var
-  ExitCode: Integer;
-  Cmd, AppDir, InstanceRoot, FrontendPort, ApiPort, RedisPort: String;
-  Started: Boolean;
-begin
-  Result := '';
-  NeedsRestart := False;
-  AppDir := ExpandConstant('{app}');
-  InstanceRoot := ExpandConstant('{param:DesktopInstanceRoot|}');
-  FrontendPort := ExpandConstant('{param:FrontendPort|}');
-  ApiPort := ExpandConstant('{param:ApiPort|}');
-  RedisPort := ExpandConstant('{param:RedisPort|}');
-  // Isolated ports are meaningless without an explicit instance root: blindly
-  // ignoring them would install over the default instance. Fail closed before
-  // touching the target, matching configure-desktop-instance.ps1's last check.
-  if (InstanceRoot = '') and
-     ((FrontendPort <> '') or (ApiPort <> '') or (RedisPort <> '')) then begin
-    Log('Identity helper rejected: isolated port parameters require DesktopInstanceRoot');
-    Result := 'Isolated ports require an explicit DesktopInstanceRoot.';
-    exit;
-  end;
-  // Save/validate identity before InstallDelete replaces desktop-dist.
-  ExtractTemporaryFile('configure-desktop-instance.ps1');
-  Cmd := '-NoProfile -ExecutionPolicy Bypass -File "' + ExpandConstant('{tmp}') +
-         '\configure-desktop-instance.ps1" -AppDir "' + AppDir + '"';
-  // Do not pass empty named arguments. Windows PowerShell's command-line
-  // parser can bind a following switch as the value of an empty argument;
-  // that makes a clean install fail before the helper reaches its no-op path.
-  // InstanceRoot is not a master switch: each isolated parameter is optional
-  // on its own, so only forward the ones that actually carry a value.
-  if InstanceRoot <> '' then begin
-    Cmd := Cmd + ' -InstanceRoot "' + InstanceRoot + '"';
-    if FrontendPort <> '' then Cmd := Cmd + ' -FrontendPort "' + FrontendPort + '"';
-    if ApiPort <> '' then Cmd := Cmd + ' -ApiPort "' + ApiPort + '"';
-    if RedisPort <> '' then Cmd := Cmd + ' -RedisPort "' + RedisPort + '"';
-  end;
-  Log('Identity helper command: ' + Cmd);
-  // Preserve the original diagnostics contract: the identity helper's output,
-  // including stderr, must reach Setup's log so a refused install records the
-  // real cause instead of only a generic message.
-  Started := ExecAndLogOutput(
-    'powershell.exe', Cmd, '', SW_HIDE, ewWaitUntilTerminated, ExitCode,
-    @ExtractionOutput);
-  Log('Identity helper started=' + IntToStr(Ord(Started)) + ', exit=' + IntToStr(ExitCode));
-  if (not Started) or (ExitCode <> 0) then begin
-    Result := 'Unable to preserve the target installation identity. See setup log.';
-    exit;
-  end;
-  ExtractTemporaryFile('stop-installed-desktop.ps1');
-  // Upgrade and uninstall share identity-bound coordinated shutdown and cleanup.
-  Cmd := '-NoProfile -ExecutionPolicy Bypass -File "' + ExpandConstant('{tmp}') +
-         '\stop-installed-desktop.ps1" -AppDir "' + AppDir + '"';
-  if InstanceRoot <> '' then Cmd := Cmd + ' -InstanceRoot "' + InstanceRoot + '"';
-  ExecAsOriginalUser(
-    'powershell.exe', Cmd, '', SW_HIDE, ewWaitUntilTerminated, ExitCode);
-  if ExitCode <> 0 then Result := 'Unable to stop the target installation safely.';
-end;
+#include "installation-identity.iss"

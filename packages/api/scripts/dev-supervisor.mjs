@@ -79,6 +79,7 @@ export async function runDevSupervisor({
           cwd: root,
           env: devEnvironment({ root }),
           stdio: 'inherit',
+          windowsHide: true,
         },
       );
       activeChild = child;

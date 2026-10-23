@@ -23,6 +23,7 @@ import {
 import { GalleryDraftSummary } from '@/components/content-review/GalleryDraftSummary';
 import { useCatData } from '@/hooks/useCatData';
 import { type ProspectiveThreadRouting, useChatComposerRouting } from '@/hooks/useChatComposerRouting';
+import { useCoCreatorMentionPatterns } from '@/hooks/useCoCreatorMentionPatterns';
 import { useIMEGuard } from '@/hooks/useIMEGuard';
 import { useLiveExecutionCancelControl } from '@/hooks/useLiveExecutionCancelControl';
 import { useMessageDispositionPreference } from '@/hooks/useMessageDispositionPreference';
@@ -210,7 +211,8 @@ export function ChatInput({
   const { cats } = useCatData();
   const ime = useIMEGuard();
   const [routingCompositionActive, setRoutingCompositionActive] = useState(false);
-  const catOptions = useMemo(() => buildCatOptions(cats), [cats]);
+  const coCreatorMentions = useCoCreatorMentionPatterns();
+  const catOptions = useMemo(() => buildCatOptions(cats, false, coCreatorMentions), [cats, coCreatorMentions]);
   // F108 Scene 2: whisper-eligible cats (CatData[] for WhisperCatSelector)
   const whisperCats = useMemo(() => cats.filter((c) => c.roster?.available !== false), [cats]);
 

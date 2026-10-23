@@ -80,9 +80,11 @@ export async function setup(options = {}) {
   await context.route('**/api/session', (route) =>
     route.fulfill({ json: { userId: 'fixture-user', csrfToken: 'fixture-only' } }),
   );
-  // Exercise the supported empty-catalog fallback without borrowing a live
-  // backend's templates. Installed avatar/catalog acceptance has its own lane.
-  await context.route('**/api/cat-templates', (route) => route.fulfill({ json: { templates: [] } }));
+  // Default to the empty-catalog fallback; explicit template fixtures may also
+  // exercise named cards without borrowing a live backend's identities.
+  await context.route('**/api/cat-templates', (route) =>
+    route.fulfill({ json: { templates: options.templates ?? [] } }),
+  );
   let discoveryFails = options.discoveryFails ?? false;
   let failure = options.failCreate;
   let discovered = options.runtimes ?? runtimes;
@@ -105,9 +107,20 @@ export async function setup(options = {}) {
   await context.route('**/api/cats/native-runtimes*', (route) =>
     route.fulfill({
       status: discoveryFails ? 503 : 200,
-      json: discoveryFails ? { error: 'fixture discovery unavailable' } : { runtimes: discovered },
+      json: discoveryFails
+        ? { error: 'fixture discovery unavailable' }
+        : { runtimes: discovered, edition: options.edition ?? 'public' },
     }),
   );
+  const preparations = [];
+  if (options.prepareDsh) {
+    await context.route('**/api/cats/dsh-setup/prepare', async (route) => {
+      assert.equal(route.request().method(), 'POST');
+      const body = route.request().postDataJSON();
+      preparations.push(body);
+      return route.fulfill({ json: await options.prepareDsh(body) });
+    });
+  }
   await context.route('**/api/cats', async (route) => {
     if (route.request().method() !== 'POST') return route.fulfill({ json: { cats: options.existing ?? created } });
     const payload = route.request().postDataJSON();
@@ -162,6 +175,7 @@ export async function setup(options = {}) {
     requests,
     created,
     entryWrites,
+    preparations,
     recoverDiscovery: () => {
       discoveryFails = false;
     },
@@ -177,9 +191,16 @@ export async function select(state, mask) {
       `${evidence}/setup-bootstrap.jsonl`,
       `${JSON.stringify({ phase: `select:${labels[i]}`, at: Date.now() })}\n`,
     );
-    await state.page
-      .getByRole('checkbox', { name: `加入 ${labels[i]} 伙伴`, exact: true })
-      .setChecked(Boolean(mask & (1 << i)), { timeout: 8000 });
+    const checkbox = state.page.getByRole('checkbox', {
+      name: `加入 ${labels[i]} 伙伴`,
+      exact: true,
+      includeHidden: true,
+    });
+    const checked = Boolean(mask & (1 << i));
+    if (!(await checkbox.isVisible())) {
+      assert.equal(checked, false, 'Unavailable tools may not be selected via a hidden help card');
+      assert.equal(await checkbox.isChecked(), false);
+    } else await checkbox.setChecked(checked, { timeout: 8000 });
   }
   await appendFile(
     `${evidence}/setup-bootstrap.jsonl`,

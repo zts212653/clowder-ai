@@ -13,6 +13,8 @@ created: 2026-10-23
 
 公共实现以公开 main d4b18b480b2cf9c00825be5fb8236c0c21b86baf 为基线；不引入 feat/intranet-windows-codeagent 的定制配置、身份或权限策略。用户自行把通用提交回灌内网分支。保留当前只读探针、完整 consumer 诊断、鉴权及 ACP 语义；不修改 ACL、系统策略、配置和历史。无需用户配置新变量。
 
+内网发行版合入 main 时保留已有的异步 worker、journal、取消和回收链，沿用同一组普通目录、完整校验、用户内容保留及失败恢复契约；不会并存第二套同步物化器。下文第 7 条的同步执行方式描述公共实现，内网执行接线见 [内网运维说明](../ops/windows-project-mirror-recovery.md)。
+
 ## 实现契约
 
 1. Windows 的 docs、cat-cafe-skills、assets、guides 在原 project 相对路径使用普通目录，包含整个资源树。这样探针和后续规则、技能、提示词、引导读取路径一致。其他便利镜像沿用现有逻辑；API 启动环境用现有 CAT_CAFE_RUNTIME_ROOT 指向安装根，并配套 CAT_CAFE_WORKSPACE_ROOT 指向用户可写 project（普通部署已有显式工作区时保留），不写配置文件。这样 MCP 二进制独立于 project/packages，持久化路径重定向仍能正确工作。

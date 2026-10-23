@@ -92,7 +92,7 @@ describe('MarkdownContent mention highlighting', () => {
     expect(html).toContain('@金渐层');
     expect(html).not.toContain('>@cat-b5ddoo9l<');
     expect(html).not.toContain('>@gpt52<');
-    expect(html).toContain('>@codex<');
+    expect(html).toContain('>@缅因猫<');
     expect(html).toContain('color:#D4A76A');
   });
 });

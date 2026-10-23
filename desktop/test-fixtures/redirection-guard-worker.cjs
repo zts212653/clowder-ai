@@ -8,26 +8,28 @@ const moduleRoot = process.env.CLOWDER_REDIRECTION_MODULE_ROOT || path.resolve(_
 const { prepareProjectMirrors, PROJECT_MIRROR_PROBES } = require(path.join(moduleRoot, 'project-mirrors'));
 const { waitForProjectMirrors } = require(path.join(moduleRoot, 'project-mirror-readiness'));
 const { readProjectMirrorsInConsumer } = require(path.join(moduleRoot, 'project-mirror-consumer'));
-const installRoot = path.join(root, 'installed bundle');
+const installRoot = process.env.CLOWDER_REDIRECTION_INSTALL_ROOT || path.join(root, 'installed bundle');
 const projectDir = path.join(root, 'user project');
 const receipt = path.join(root, 'receipt.json');
 const repoRoot = path.resolve(__dirname, '../..');
 
 async function main() {
   if (process.argv[2] === 'create') {
-    for (const { mirror, relativePath } of PROJECT_MIRROR_PROBES) {
-      const file = path.join(installRoot, mirror, relativePath);
-      fs.mkdirSync(path.dirname(file), { recursive: true });
-      fs.copyFileSync(path.join(repoRoot, mirror, relativePath), file);
+    if (!process.env.CLOWDER_REDIRECTION_INSTALL_ROOT) {
+      for (const { mirror, relativePath } of PROJECT_MIRROR_PROBES) {
+        const file = path.join(installRoot, mirror, relativePath);
+        fs.mkdirSync(path.dirname(file), { recursive: true });
+        fs.copyFileSync(path.join(repoRoot, mirror, relativePath), file);
+      }
+      for (const relative of ['docs/extra.md', 'assets/prompt-templates/template.md', 'guides/catalog.yaml']) {
+        fs.mkdirSync(path.dirname(path.join(installRoot, relative)), { recursive: true });
+        fs.writeFileSync(path.join(installRoot, relative), relative);
+      }
+      fs.copyFileSync(
+        path.join(repoRoot, 'assets/prompt-templates/a2a-ball-check.md'),
+        path.join(installRoot, 'assets/prompt-templates/a2a-ball-check.md'),
+      );
     }
-    for (const relative of ['docs/extra.md', 'assets/prompt-templates/template.md', 'guides/catalog.yaml']) {
-      fs.mkdirSync(path.dirname(path.join(installRoot, relative)), { recursive: true });
-      fs.writeFileSync(path.join(installRoot, relative), relative);
-    }
-    fs.copyFileSync(
-      path.join(repoRoot, 'assets/prompt-templates/a2a-ball-check.md'),
-      path.join(installRoot, 'assets/prompt-templates/a2a-ball-check.md'),
-    );
     fs.mkdirSync(projectDir);
     for (const mirror of ['docs', 'cat-cafe-skills', 'assets', 'guides']) {
       fs.symlinkSync(path.join(installRoot, mirror), path.join(projectDir, mirror), 'junction');
@@ -51,27 +53,40 @@ async function main() {
   fs.mkdirSync(path.dirname(protectedFile));
   fs.writeFileSync(protectedFile, 'protected history and configuration');
   prepareProjectMirrors({ installRoot, projectDir });
+  const ready = await waitForProjectMirrors({ installRoot, projectDir, nodeExe: process.execPath });
   for (const mirror of ['docs', 'cat-cafe-skills', 'assets', 'guides']) {
     assert.equal(fs.lstatSync(path.join(projectDir, mirror)).isSymbolicLink(), false);
   }
-  const ready = await waitForProjectMirrors({ installRoot, projectDir, nodeExe: process.execPath });
   const after = await readProjectMirrorsInConsumer({ nodeExe: process.execPath, entries, timeoutMs: 5000 });
   assert.deepEqual(after, []);
+  const downstreamResources = process.env.CLOWDER_REDIRECTION_INSTALL_ROOT
+    ? [
+        'docs/harness-feedback/eval-domains/eval-design-gate.yaml',
+        'assets/prompt-templates/a2a-ball-check.md',
+        'guides/registry.yaml',
+      ]
+    : ['docs/extra.md', 'assets/prompt-templates/template.md', 'guides/catalog.yaml'];
   const downstream = spawnSync(
     process.execPath,
     [
       '-e',
       `
     const fs = require('node:fs');
-    for (const file of ['docs/extra.md', 'assets/prompt-templates/template.md', 'guides/catalog.yaml'])
+    for (const file of ${JSON.stringify(downstreamResources)})
       if (!fs.readFileSync(file).length) process.exit(2);
   `,
     ],
     { cwd: projectDir, windowsHide: true, encoding: 'utf8' },
   );
   assert.equal(downstream.status, 0, downstream.stderr);
-  const apiConsumers = await require('./physical-api-consumers.cjs')({ repoRoot, projectDir, root });
+  const apiConsumers = await require('./physical-api-consumers.cjs')({
+    repoRoot,
+    projectDir,
+    root,
+    runtimeRoot: process.env.CLOWDER_REDIRECTION_INSTALL_ROOT || repoRoot,
+  });
   prepareProjectMirrors({ installRoot, projectDir }); // Persistent reuse, no environment opt-in.
+  await waitForProjectMirrors({ installRoot, projectDir, nodeExe: process.execPath });
   assert.equal(fs.readFileSync(protectedFile, 'utf8'), 'protected history and configuration');
   fs.writeFileSync(
     receipt,
@@ -83,6 +98,9 @@ async function main() {
         before,
         after,
         ready,
+        moduleRoot,
+        installRoot,
+        downstreamResources,
         downstreamExit: downstream.status,
         apiConsumers,
         historyPreserved: true,

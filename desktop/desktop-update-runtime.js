@@ -36,6 +36,7 @@ function createDesktopUpdateRuntime({
   });
 
   updater = new UpdateManager({
+    distributionChannel: 'intranet',
     app,
     net,
     netSession,

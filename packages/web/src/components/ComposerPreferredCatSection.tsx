@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from 'react';
 import { useCatData } from '@/hooks/useCatData';
+import { useCoCreatorMentionPatterns } from '@/hooks/useCoCreatorMentionPatterns';
 import { buildCatOptions } from './chat-input-options';
 import { composerRoutingCopy } from './composer-routing.shell-copy';
 import { buildComposerRecipientIdentities } from './composer-routing-presentation';
@@ -27,8 +28,15 @@ export function ComposerPreferredCatSection({
   const [expanded, setExpanded] = useState(false);
   const [saving, setSaving] = useState(false);
   const [failed, setFailed] = useState(false);
-  const options = useMemo(() => buildCatOptions(cats).filter((option) => !option.isGroup), [cats]);
-  const identities = useMemo(() => buildComposerRecipientIdentities(cats), [cats]);
+  const coCreatorMentions = useCoCreatorMentionPatterns();
+  const options = useMemo(
+    () => buildCatOptions(cats, false, coCreatorMentions).filter((option) => !option.isGroup),
+    [cats, coCreatorMentions],
+  );
+  const identities = useMemo(
+    () => buildComposerRecipientIdentities(cats, coCreatorMentions),
+    [cats, coCreatorMentions],
+  );
   const selectedIds = useMemo(() => new Set(selectedCatIds), [selectedCatIds]);
   const selectedId = selectedCatIds[0];
   const selectedName =

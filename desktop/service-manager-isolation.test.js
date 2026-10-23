@@ -33,14 +33,20 @@ test('isolated desktop Redis probing, spawn and API env all use the same owned p
     probes.push(port);
     return true;
   };
-  const workspace = process.env.CAT_CAFE_WORKSPACE_ROOT;
   try {
-    delete process.env.CAT_CAFE_WORKSPACE_ROOT;
     await manager._startRedis(base);
     const apiEnv = manager._buildApiEnv(base);
-    assert.equal(Object.hasOwn(apiEnv, 'PREVIEW_GATEWAY_PORT'), false);
+    assert.equal(apiEnv.PREVIEW_GATEWAY_PORT, '0');
     assert.equal(apiEnv.CAT_CAFE_RUNTIME_ROOT, base);
     assert.equal(apiEnv.CAT_CAFE_WORKSPACE_ROOT, path.join(base, 'project'));
+    const previousWorkspace = process.env.CAT_CAFE_WORKSPACE_ROOT;
+    try {
+      process.env.CAT_CAFE_WORKSPACE_ROOT = path.join(base, 'owner-workspace');
+      assert.equal(manager._buildApiEnv(base).CAT_CAFE_WORKSPACE_ROOT, path.join(base, 'owner-workspace'));
+    } finally {
+      if (previousWorkspace === undefined) delete process.env.CAT_CAFE_WORKSPACE_ROOT;
+      else process.env.CAT_CAFE_WORKSPACE_ROOT = previousWorkspace;
+    }
     assert.deepEqual(probes, [6367, 6367]);
     assert.equal(starts[0][2][1], '6367');
     // Observe the env received by a real, test-owned Node child; no API/Redis starts.
@@ -50,32 +56,18 @@ test('isolated desktop Redis probing, spawn and API env all use the same owned p
       process.execPath,
       [
         '-e',
-        `require('node:fs').writeFileSync(${JSON.stringify(resultPath)}, JSON.stringify({redis:process.env.REDIS_URL,runtimeRoot:process.env.CAT_CAFE_RUNTIME_ROOT}))`,
+        `require('node:fs').writeFileSync(${JSON.stringify(resultPath)}, JSON.stringify({redis:process.env.REDIS_URL,runtimeRoot:process.env.CAT_CAFE_RUNTIME_ROOT,workspaceRoot:process.env.CAT_CAFE_WORKSPACE_ROOT}))`,
       ],
       { envOverrides: apiEnv },
     );
     await new Promise((resolve) => manager.procs.probe.once('exit', resolve));
     assert.equal(JSON.parse(fs.readFileSync(resultPath, 'utf8')).redis, 'redis://localhost:6367');
     assert.equal(JSON.parse(fs.readFileSync(resultPath, 'utf8')).runtimeRoot, base);
+    assert.equal(JSON.parse(fs.readFileSync(resultPath, 'utf8')).workspaceRoot, path.join(base, 'project'));
     assert.ok(ServiceManager.USER_DATA_DIR.startsWith(moduleRoot + path.sep));
     assert.ok(fs.existsSync(path.join(ServiceManager.USER_DATA_DIR, 'data/logs/desktop.log')));
   } finally {
-    if (workspace === undefined) delete process.env.CAT_CAFE_WORKSPACE_ROOT;
-    else process.env.CAT_CAFE_WORKSPACE_ROOT = workspace;
     fs.rmSync(base, { recursive: true, force: true });
-  }
-});
-
-test('ordinary API env preserves an explicit owner workspace', () => {
-  const workspace = process.env.CAT_CAFE_WORKSPACE_ROOT;
-  const base = path.join(moduleRoot, 'explicit-workspace');
-  try {
-    process.env.CAT_CAFE_WORKSPACE_ROOT = path.join(base, 'owner-workspace');
-    const manager = new ServiceManager(base, { frontendPort: 5158, apiPort: 3158, redisPort: 6367 });
-    assert.equal(manager._buildApiEnv(base).CAT_CAFE_WORKSPACE_ROOT, path.join(base, 'owner-workspace'));
-  } finally {
-    if (workspace === undefined) delete process.env.CAT_CAFE_WORKSPACE_ROOT;
-    else process.env.CAT_CAFE_WORKSPACE_ROOT = workspace;
   }
 });
 
@@ -165,6 +157,7 @@ for (const contamination of [
     TASK_OUTCOME_DB: '/sentinel/tasks.sqlite',
     GLOBAL_KNOWLEDGE_DB: '/sentinel/knowledge.sqlite',
     CODEX_HOME: '/sentinel/codex',
+    CAT_CAFE_WORKSPACE_ROOT: '/sentinel/workspace',
     OPENAI_API_KEY: 'fake-sentinel',
   },
   { MEMORY_STORE: '1' },

@@ -106,6 +106,7 @@ function runSourceOnly({ sandboxDir, env = {}, extraArgs = [], commands }) {
   ).join('; ');
 
   return spawnSync('bash', ['-c', command], {
+    windowsHide: true,
     cwd: sandboxDir,
     env: {
       PATH: process.env.PATH ?? '',
@@ -124,6 +125,7 @@ function runApiLaunchCommand({ sandboxDir, env = {}, extraArgs = [] }) {
   ].join('; ');
 
   return spawnSync('bash', ['-c', command], {
+    windowsHide: true,
     cwd: sandboxDir,
     env: {
       PATH: process.env.PATH ?? '',
@@ -167,6 +169,7 @@ describe('start-dev strict profile isolation', () => {
       const commands =
         'source scripts/start-dev.sh --source-only --memory >/dev/null && trap - EXIT INT TERM && printf "%s/%s" "$ANTHROPIC_PROXY_ENABLED" "$REDIS_PROFILE"';
       const result = spawnSync('bash', ['-c', commands], {
+        windowsHide: true,
         cwd: sandboxDir,
         env: { PATH: process.env.PATH },
         encoding: 'utf8',
@@ -174,6 +177,7 @@ describe('start-dev strict profile isolation', () => {
       assert.equal(result.status, 0, shellFailureDetails(result));
       assert.equal(result.stdout, '1/opensource');
       const overridden = spawnSync('bash', ['-c', commands], {
+        windowsHide: true,
         cwd: sandboxDir,
         env: { PATH: process.env.PATH, ANTHROPIC_PROXY_ENABLED: '0', REDIS_PROFILE: 'dev' },
         encoding: 'utf8',
@@ -357,6 +361,7 @@ describe('start-dev strict profile isolation', () => {
         'printf "ASR=%s\\nTTS=%s\\nLEGACY_ASR=%s\\nLEGACY_TTS=%s\\n" "$ASR_ENABLED" "$TTS_ENABLED" "${CAT_CAFE_SERVICE_ASR_ENABLED:-}" "${CAT_CAFE_SERVICE_TTS_ENABLED:-}"',
       ].join('; ');
       const result = spawnSync('bash', ['-c', command], {
+        windowsHide: true,
         cwd: sandboxDir,
         env: {
           PATH: process.env.PATH ?? '',
@@ -413,6 +418,7 @@ describe('start-dev strict profile isolation', () => {
         'printf "SERVICE_EMBED=%s\\n" "${CAT_CAFE_SERVICE_EMBED_ENABLED:-unset}"',
       ].join('; ');
       const result = spawnSync('bash', ['-c', command], {
+        windowsHide: true,
         cwd: sandboxDir,
         env: {
           PATH: process.env.PATH ?? '',
@@ -475,6 +481,7 @@ describe('start-dev strict profile isolation', () => {
     assert.match(supervisor, /'src\/index\.ts'/);
 
     const help = spawnSync(process.execPath, [resolvePackageBin('tsx'), 'watch', '--help'], {
+      windowsHide: true,
       cwd: resolve(ROOT, 'packages/api'),
       encoding: 'utf8',
       env: {
@@ -821,6 +828,7 @@ guard_fn=guard_port_kill_ownership
 "$guard_fn" 39876 API 424242
 `;
       const result = spawnSync('bash', ['-c', script, '_', join(sandboxDir, 'scripts', 'start-dev.sh')], {
+        windowsHide: true,
         cwd: sandboxDir,
         encoding: 'utf8',
         env: { ...process.env, API_SERVER_PORT: '39876', FRONTEND_PORT: '39875', PREVIEW_GATEWAY_PORT: '0' },
@@ -845,6 +853,7 @@ guard_fn=guard_port_kill_ownership
 "$guard_fn" 39876 API 424242
 `;
       const result = spawnSync('bash', ['-c', script, '_', join(sandboxDir, 'scripts', 'start-dev.sh')], {
+        windowsHide: true,
         cwd: sandboxDir,
         encoding: 'utf8',
         env: { ...process.env, API_SERVER_PORT: '39876', FRONTEND_PORT: '39875', PREVIEW_GATEWAY_PORT: '0' },
@@ -888,7 +897,7 @@ guard_fn=guard_port_kill_ownership
       const result = spawnSync(
         process.execPath,
         ['scripts/read-deployment-default.mjs', '--startup-profile', profile, 'win32'],
-        { cwd: ROOT, encoding: 'utf8' },
+        { cwd: ROOT, encoding: 'utf8', windowsHide: true },
       );
       assert.equal(result.status, 0, result.stderr);
       const defaults = JSON.parse(result.stdout);
@@ -1214,7 +1223,7 @@ describe('Whisper sidecar startup guards', () => {
           'printf "%s\\n%s\\n%s\\n" "$HTTP_PROXY" "$HTTPS_PROXY" "$ALL_PROXY"',
         ].join('; '),
       ],
-      { encoding: 'utf8' },
+      { encoding: 'utf8', windowsHide: true },
     );
 
     assert.equal(result.status, 0, shellFailureDetails(result));

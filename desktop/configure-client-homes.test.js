@@ -71,7 +71,7 @@ for (const custom of [false, true]) {
               '-RedisPort',
               '6338',
             ],
-            { env, stdio: 'pipe', timeout: 30000 },
+            { env, stdio: 'pipe', timeout: 30000, windowsHide: true },
           );
         configure();
         const resolved = readClientHomes(instance);

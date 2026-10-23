@@ -9,6 +9,7 @@
 import { execSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join, win32 } from 'node:path';
+import { resolveDshDesktopLauncher } from './dsh-desktop-launcher.js';
 
 /**
  * Cache for resolved shim scripts to avoid repeated filesystem lookups.
@@ -114,6 +115,8 @@ export interface WindowsSpawnPlan {
   args: string[];
   mode: WindowsSpawnMode;
   shell?: true | string;
+  /** Verified launcher-local environment; never mutate the parent's environment. */
+  env?: Record<string, string>;
 }
 
 /**
@@ -303,6 +306,8 @@ export function shouldDirectSpawnNativeExe(
 }
 
 export function resolveWindowsSpawnPlan(command: string, args: readonly string[]): WindowsSpawnPlan {
+  const desktop = resolveDshDesktopLauncher(command, args);
+  if (desktop) return { ...desktop, mode: 'native-exe' };
   const shimSpawn = resolveWindowsShimSpawn(command, args);
   if (shimSpawn) {
     return {

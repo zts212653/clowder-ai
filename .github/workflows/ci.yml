@@ -65,6 +65,16 @@ jobs:
           --script test:onboarding:production-contracts
       - run: pnpm --filter @cat-cafe/shared build
       - run: pnpm --filter @cat-cafe/api build
+      - name: Native harness identity and DSH overlay classification
+        run: >-
+          pnpm --filter @cat-cafe/api exec node ./scripts/with-test-home.mjs
+          node --import tsx --test --test-concurrency=1
+          test/native-tool-catalog.test.ts
+          test/native-codeagent-discovery.test.ts
+          test/native-dsh-patch-classification.test.ts
+          test/dsh-recommendation.test.ts
+      - name: Stable member handles and human mention labels
+        run: pnpm --filter @cat-cafe/shared exec vitest run src/__tests__/cat-mention-identity.test.ts
       - name: Managed Codex layout link diagnostic
         run: >-
           pnpm --filter @cat-cafe/api exec node ./scripts/with-test-home.mjs
@@ -103,6 +113,9 @@ jobs:
           src/components/__tests__/chat-input-add-menu.test.tsx
           src/components/__tests__/classic-a2a-parity.test.tsx
           src/hooks/__tests__/useMessageDispositionPreference-settlement.test.tsx
+          src/components/__tests__/mention-member-identity.test.tsx
+          src/components/settings/__tests__/dsh-provider-setup.test.tsx
+          src/components/settings/__tests__/member-dsh-prepare.test.tsx
       - name: Personal first-run lifecycle with production API handlers
         run: pnpm --filter @cat-cafe/web test:first-run-entry:api
       - run: pnpm --filter @cat-cafe/web build

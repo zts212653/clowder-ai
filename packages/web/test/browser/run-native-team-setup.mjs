@@ -79,7 +79,7 @@ try {
     [
       '--test',
       '--test-concurrency=1',
-      ...['native-team-setup', 'native-team-setup-edge', 'native-team-setup-recovery'].map(
+      ...['native-team-setup', 'native-team-setup-edge', 'native-team-setup-recovery', 'native-team-compact'].map(
         (name) => `test/browser/${name}.test.mjs`,
       ),
     ],

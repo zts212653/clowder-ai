@@ -1,3 +1,4 @@
+import { registerDshSetupRoutes } from './dsh-setup-route.js';
 import { dshLauncherProfileState, InvalidDshProfile } from './native-dsh-profile.js';
 import { discoverNativeRuntimesWithReadiness } from './native-runtimes.js';
 import { registerRuntimeCatalogRoute } from './runtime-catalog-route.js';
@@ -927,6 +928,7 @@ interface CatsRoutesOptions {
 
 export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opts) => {
   registerRuntimeCatalogRoute(app);
+  registerDshSetupRoutes(app);
   app.get('/api/cats/native-runtimes', async (request, reply) => {
     if (!resolveHeaderUserId(request)) return reply.code(401).send({ error: '需要登录后检查本机工具' });
     return (opts.nativeRuntimeDiscovery ?? discoverNativeRuntimesWithReadiness)(

@@ -166,19 +166,26 @@ describe('resolveAssetName', () => {
 });
 
 describe('asset name ↔ build config contract', () => {
-  // Regression test: resolveAssetName must match the names produced by
-  // electron-builder (package.json artifactName) and Inno Setup (OutputBaseFilename).
-  // If the build config renames artifacts, this test catches the drift.
+  // The public updater names public releases. The intranet distribution keeps
+  // a separate installer identity and disables that public update channel.
   const pkgJson = JSON.parse(readFileSync(path.join(__dirname, 'package.json'), 'utf-8'));
   const issContent = readFileSync(path.join(__dirname, 'installer', 'cat-cafe.iss'), 'utf-8');
 
-  test('win32 asset name matches Inno Setup OutputBaseFilename', () => {
-    // Inno Setup: OutputBaseFilename=ClowderAI-Setup-{#MyAppVersion}
+  test('win32 installer name follows its distribution instead of conflating intranet and public assets', () => {
     const issMatch = issContent.match(/OutputBaseFilename=(.+)/);
     assert.ok(issMatch, 'OutputBaseFilename must exist in cat-cafe.iss');
     // Replace Inno variable with a concrete version to compare
-    const issFilename = issMatch[1].replace('{#MyAppVersion}', '0.12.0') + '.exe';
-    assert.equal(resolveAssetName('0.12.0', 'win32', 'x64'), issFilename);
+    const issFilename = `${issMatch[1].replace('{#MyAppVersion}', '0.12.0')}.exe`;
+    const publicFilename = resolveAssetName('0.12.0', 'win32', 'x64');
+    if (pkgJson.build?.appId === 'ai.clowderai.intranet') {
+      assert.equal(issFilename, 'ClowderAI-Intranet-Setup-0.12.0.exe');
+      assert.notEqual(issFilename, publicFilename, 'intranet installers must not be selected from the public updater');
+      assert.match(issContent, /#define MyAppUserModelID\s+"ai\.clowderai\.intranet"/);
+      assert.equal(require('./app-identity').DESKTOP_APP_ID, pkgJson.build.appId);
+    } else {
+      assert.equal(pkgJson.build?.appId, 'ai.clowderai.desktop', 'an unknown distribution needs an explicit contract');
+      assert.equal(publicFilename, issFilename);
+    }
   });
 
   test('darwin asset name matches electron-builder artifactName', () => {

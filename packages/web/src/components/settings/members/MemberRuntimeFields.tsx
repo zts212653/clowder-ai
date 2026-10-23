@@ -5,14 +5,23 @@ import { useAgentClientLibraries } from '@/hooks/useAgentClientLibraries';
 import { apiFetch } from '@/utils/api-client';
 import type { ProfileItem } from '../../hub-accounts.types';
 import { usesAgyAcp, usesAgyNative } from '../../hub-cat-editor.agy';
-import { builtinAccountIdForClient, filterAccounts, type HubCatEditorFormState } from '../../hub-cat-editor.model';
+import {
+  builtinAccountIdForClient,
+  filterAccounts,
+  type HubCatEditorFormState,
+  splitCommandArgs,
+} from '../../hub-cat-editor.model';
 import { SelectField } from '../../hub-cat-editor-fields';
-import { KimiLoginHelp } from './KimiLoginHelp';
 import { MemberChoicePicker } from './MemberChoicePicker';
+import { MemberConfigurationDetails } from './MemberConfigurationDetails';
+import { MemberDshProviderSetup } from './MemberDshProviderSetup';
+import { MemberToolSelector } from './MemberToolSelector';
+import type { MemberRuntimeContext } from './member-runtime-context';
 import { matchesRuntime, type RuntimeChoice, type RuntimeDrafts, runtimeDefaults } from './member-runtime-draft';
-import { memberRuntimeOptions, memberRuntimeTools } from './member-runtime-tools';
+import { memberRuntimeName, memberRuntimeTools, type RuntimeEdition } from './member-runtime-tools';
 import { nativeAcpProfileMessage } from './native-acp-profile-status';
 import { usesDefaultNativeIdentity } from './native-login-state';
+import { useMemberRuntimeContext } from './useMemberRuntimeContext';
 import { useRuntimeCatalog } from './useRuntimeCatalog';
 export type MemberText = (zh: string, en: string) => string;
 export function MemberRuntimeFields({
@@ -21,6 +30,8 @@ export function MemberRuntimeFields({
   patch,
   onToolChange,
   runtimeDrafts,
+  runtimeContext,
+  onRuntimeContextChange,
   t,
   accountHref,
   editing,
@@ -30,8 +41,10 @@ export function MemberRuntimeFields({
   form: HubCatEditorFormState;
   accounts: ProfileItem[];
   patch: (value: Partial<HubCatEditorFormState>) => void;
-  onToolChange?: (tool: RuntimeChoice) => void;
+  onToolChange?: (tool: RuntimeChoice, current?: RuntimeChoice) => void;
   runtimeDrafts?: RuntimeDrafts;
+  runtimeContext?: MemberRuntimeContext;
+  onRuntimeContextChange?: (context: MemberRuntimeContext) => void;
   t: MemberText;
   accountHref: string;
   editing: boolean;
@@ -40,6 +53,7 @@ export function MemberRuntimeFields({
   nativeSetup?: boolean;
 }) {
   const [runtimes, setRuntimes] = useState<RuntimeChoice[]>([]),
+    [edition, setEdition] = useState<RuntimeEdition>(),
     [error, setError] = useState(false),
     [loading, setLoading] = useState(true),
     [refresh, setRefresh] = useState(0);
@@ -51,10 +65,13 @@ export function MemberRuntimeFields({
     apiFetch(`/api/cats/native-runtimes${refresh ? '?refresh=1' : ''}`, { signal: controller.signal })
       .then(async (response) => {
         if (!response.ok) throw Error('discovery');
-        return (await response.json()) as { runtimes: RuntimeChoice[] };
+        return (await response.json()) as { runtimes: RuntimeChoice[]; edition?: RuntimeEdition };
       })
       .then((data) => {
-        if (!controller.signal.aborted) setRuntimes(data.runtimes);
+        if (!controller.signal.aborted) {
+          setRuntimes(data.runtimes);
+          setEdition(data.edition ?? 'public');
+        }
       })
       .catch(() => {
         if (!controller.signal.aborted) setError(true);
@@ -64,18 +81,11 @@ export function MemberRuntimeFields({
       });
     return () => controller.abort();
   }, [refresh]);
-  const tools = memberRuntimeTools(runtimes, clientLibraries, runtimeDrafts);
+  const tools = memberRuntimeTools(runtimes, clientLibraries, runtimeDrafts, edition);
   const selected = tools.find((item) => matchesRuntime(form, item));
+  const current = useMemberRuntimeContext(form, selected, runtimeContext, onRuntimeContextChange);
   const agy = usesAgyNative(form) || usesAgyAcp(form);
-  const tool =
-    (usesAgyAcp(form) ? t('AGY 官方 ACP', 'AGY official ACP') : usesAgyNative(form) ? 'AGY Native' : selected?.label) ??
-    (form.clientId === 'openai'
-      ? 'Codex'
-      : form.clientId === 'anthropic'
-        ? 'Claude Code'
-        : form.clientId === 'acp'
-          ? 'ACP'
-          : form.clientId);
+  const tool = memberRuntimeName(form, current, t);
   const native = form.configurationSource === 'native_tool';
   const availableAccounts = filterAccounts(form.clientId, accounts),
     identity = availableAccounts.find((item) => item.id === form.accountRef);
@@ -93,6 +103,7 @@ export function MemberRuntimeFields({
     form.defaultModel,
     refresh,
     form.cliConfigArgs.length > 0,
+    JSON.stringify([form.acpCommand, splitCommandArgs(form.acpStartupArgs), form.acpTransport, form.acpAgentProvider]),
   );
   const defaultModel = catalog?.defaultModel ?? (!form.accountRef ? selected?.configuredModel : undefined);
   const defaultModelLabel =
@@ -140,13 +151,6 @@ export function MemberRuntimeFields({
       label: `${form.accountRef} · ${t('暂不可读取', 'Unavailable')}`,
       disabled: false,
     });
-  const choices = memberRuntimeOptions(tools, t);
-  if (!selected)
-    choices.unshift({
-      value: 'current',
-      disabled: false,
-      label: `${tool} · ${t('当前配置', 'Current configuration')}`,
-    });
   return (
     <div className="space-y-5">
       <div className="flex items-center justify-between gap-3">
@@ -161,14 +165,16 @@ export function MemberRuntimeFields({
         </button>
       </div>
       {!nativeSetup && (
-        <SelectField
-          label={t('使用工具', 'Tool')}
-          value={selected?.id ?? 'current'}
-          options={choices}
-          onChange={(value) => {
-            const next = tools.find((item) => item.id === value);
-            if (!next || next.id === selected?.id || next.discoveryStatus === 'acp_profile_invalid') return;
-            if (onToolChange) onToolChange(next);
+        <MemberToolSelector
+          tools={tools}
+          selected={selected}
+          current={current}
+          tool={tool}
+          edition={edition}
+          loading={loading}
+          t={t}
+          onChange={(next) => {
+            if (onToolChange) onToolChange(next, current);
             else patch(runtimeDefaults(next));
           }}
         />
@@ -218,6 +224,7 @@ export function MemberRuntimeFields({
           {t('已检测登录 · 实际连接待验证', 'Sign-in detected · Connection not yet verified')}
         </p>
       )}
+      <MemberDshProviderSetup form={form} selected={selected} patch={patch} t={t} />
       <div className="grid gap-4 sm:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)]">
         <MemberChoicePicker
           label={t('模型', 'Model')}
@@ -328,27 +335,13 @@ export function MemberRuntimeFields({
         </div>
       )}
       {!nativeSetup && (
-        <details className="text-sm text-cafe-secondary">
-          <summary className="min-h-10 cursor-pointer py-2">{t('配置详情', 'Configuration details')}</summary>
-          {defaultIdentity && form.clientId === 'kimi' && selected?.readiness && (
-            <KimiLoginHelp readiness={selected.readiness} t={t} />
-          )}
-          <p className="mb-3">
-            {t(
-              '只调整这位伙伴的偏好。安装状态和模型目录不代表调用已验证。',
-              'Changes apply to this teammate. Installation and model discovery do not verify an invocation.',
-            )}
-          </p>
-          <SelectField
-            label={t('默认值来源', 'Default source')}
-            value={form.configurationSource ?? 'managed_account'}
-            options={[
-              { value: 'native_tool', label: t('工具配置', 'Tool configuration') },
-              { value: 'managed_account', label: t('已有连接配置', 'Existing connection configuration') },
-            ]}
-            onChange={(value) => patch({ configurationSource: value as HubCatEditorFormState['configurationSource'] })}
-          />
-        </details>
+        <MemberConfigurationDetails
+          form={form}
+          patch={patch}
+          defaultIdentity={defaultIdentity}
+          readiness={selected?.readiness}
+          t={t}
+        />
       )}
     </div>
   );

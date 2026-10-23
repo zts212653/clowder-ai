@@ -7,6 +7,7 @@ import { dshProfileState } from './native-dsh-profile.js';
 
 interface DiscoveryOptions {
   dshHome?: string;
+  requireSetup?: boolean;
   npmCaches?: string[];
   resolveCommand?: (command: string) => string | null;
 }
@@ -61,6 +62,7 @@ export function discoverDshRuntime(options: DiscoveryOptions = {}) {
     ...(available && executable ? { acp: { command: executable, startupArgs, transport: 'stdio' as const } } : {}),
     models: [] as string[],
     defaultsStatus: 'session_only',
+    dshSetupRequired: options.requireSetup ?? process.env.CAT_CAFE_INTRANET_EDITION === '1',
     transport: 'acp',
     discoveryStatus: executable ? profileState : 'not_installed',
   };

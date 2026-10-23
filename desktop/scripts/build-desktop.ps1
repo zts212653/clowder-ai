@@ -541,7 +541,7 @@ if (-not $SkipInstaller) {
     if ($LASTEXITCODE -ne 0) { Write-Err "Inno Setup compilation failed"; exit 1 }
     Write-Ok "Installer built"
 
-    $outputExe = Get-Item -LiteralPath (Join-Path $distDir "ClowderAI-Setup-$catCafeVersion.exe") -ErrorAction Stop
+    $outputExe = Get-Item -LiteralPath (Join-Path $distDir "ClowderAI-Intranet-Setup-$catCafeVersion.exe") -ErrorAction Stop
     # The installer must be launchable from the delivered folder. A Low label
     # inherited from the build root makes Setup run at Low integrity (TEMP
     # creation fails with error 5); an explicit Medium label caps the elevated
@@ -583,7 +583,7 @@ if (-not $SkipPortableZip) {
     $desktopPkgJson = Get-Content $desktopPkgPath -Raw | ConvertFrom-Json
     $zipVersion = if ($env:CATCAFE_VERSION) { $env:CATCAFE_VERSION } else { $desktopPkgJson.version }
 
-    $stagingName = "ClowderAI-$zipVersion"
+    $stagingName = "ClowderAI-Intranet-$zipVersion"
     $staging = Join-Path $distDir $stagingName
     if (Test-Path $staging) { Remove-Item $staging -Recurse -Force }
     New-Item -ItemType Directory -Path $staging -Force | Out-Null

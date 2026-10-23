@@ -19,7 +19,7 @@
  */
 
 import type { CatId, CatRoutingError, MessageContent } from '@cat-cafe/shared';
-import { catRegistry, deploymentDefaults, escapeRegExp } from '@cat-cafe/shared';
+import { buildUserMentionAliases, catRegistry, deploymentDefaults, escapeRegExp } from '@cat-cafe/shared';
 import type {
   RoutingPreviewReason,
   RoutingPreviewReasonKind,
@@ -27,7 +27,11 @@ import type {
 } from '@cat-cafe/shared/routing-preview';
 import type { SessionStore } from '@cat-cafe/shared/utils';
 import { context as ctxApi, SpanStatusCode, trace } from '@opentelemetry/api';
-import { getDefaultCatId, isCatAvailable } from '../../../../../config/cat-config-loader.js';
+import {
+  getCoCreatorMentionPatterns,
+  getDefaultCatId,
+  isCatAvailable,
+} from '../../../../../config/cat-config-loader.js';
 import { createModuleLogger } from '../../../../../infrastructure/logger.js';
 import {
   ROUTING_INTENT,
@@ -109,6 +113,7 @@ interface ParsedMention {
 interface MentionPattern {
   pattern: string;
   catId: CatId;
+  displayAlias?: boolean;
 }
 
 type MarkdownMentionMarker = '*' | '_';
@@ -357,6 +362,8 @@ function findMentionPatternAt(
     const patternEnd = matchMentionPatternEnd(message, pos, entry.pattern);
     if (patternEnd === null) continue;
     const boundaryEnd = normalizePatternEnd ? normalizePatternEnd(patternEnd) : patternEnd;
+    // Friendly labels are complete identities, never prefixes of longer names/prose.
+    if (entry.displayAlias && /^[\p{L}\p{N}_-]/u.test(message.slice(boundaryEnd))) continue;
     if (!isMentionEndBoundary(message, boundaryEnd)) continue;
     return entry;
   }
@@ -940,9 +947,14 @@ export class AgentRouter {
     // 1. Collect all mentionPatterns → catId, sorted by length descending
     const allPatterns: MentionPattern[] = [];
     const allConfigs = catRegistry.getAllConfigs();
+    const displayAliases = buildUserMentionAliases(Object.values(allConfigs), getCoCreatorMentionPatterns());
     for (const config of Object.values(allConfigs)) {
       for (const pattern of config.mentionPatterns) {
         allPatterns.push({ pattern: pattern.toLowerCase(), catId: config.id });
+      }
+      const displayAlias = displayAliases.get(config.id)?.toLowerCase();
+      if (displayAlias && !config.mentionPatterns.some((pattern) => pattern.toLowerCase() === displayAlias)) {
+        allPatterns.push({ pattern: displayAlias, catId: config.id, displayAlias: true });
       }
     }
     allPatterns.sort((a, b) => b.pattern.length - a.pattern.length); // longest first

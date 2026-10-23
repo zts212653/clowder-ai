@@ -328,20 +328,19 @@ describe('Capability Wakeup Trace', () => {
   });
 
   it('treats matching live preview evidence inside the window as a real browser-preview opportunity', () => {
+    const event = transcriptEvent(0, 'inv-web', {
+      type: 'tool_use',
+      toolName: 'Edit',
+      toolInput: { file_path: 'packages/web/src/App.tsx' },
+    });
     const trace = buildCapabilityTrace({
       sessionId: 'session-cap',
       threadId: 'thread-cap',
       catId: 'gpt52',
       worktreeId: 'test-wt',
-      transcriptEvents: [
-        transcriptEvent(0, 'inv-web', {
-          type: 'tool_use',
-          toolName: 'Edit',
-          toolInput: { file_path: 'packages/web/src/App.tsx' },
-        }),
-      ],
+      transcriptEvents: [event],
       toolEvents: [],
-      previewAvailability: [{ worktreeId: 'test-wt', hasLivePort: true, observedAt: Date.now() }],
+      previewAvailability: [{ worktreeId: 'test-wt', hasLivePort: true, observedAt: event.t }],
     });
 
     const trials = evaluateCapabilityWakeupTrace(trace, [

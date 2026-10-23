@@ -1358,7 +1358,7 @@ function defaultSpawn(
     }
     return nodeSpawn(spawnPlan.command, spawnPlan.args, {
       cwd: options.cwd,
-      env: options.env,
+      env: spawnPlan.env ? { ...(options.env ?? process.env), ...spawnPlan.env } : options.env,
       stdio: options.stdio,
       ...(spawnPlan.shell !== undefined ? { shell: spawnPlan.shell } : {}),
     });

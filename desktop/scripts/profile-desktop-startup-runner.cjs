@@ -2,7 +2,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { setTimeout: delay } = require('node:timers/promises');
 const { pathToFileURL } = require('node:url');
-const { copyProfileResources } = require('./profile-resources.cjs');
+const { copyProfileResource } = require('./profile-resource-copy.cjs');
 
 const options = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
 const instance = path.join(options.profileRoot, 'instance');
@@ -13,14 +13,15 @@ fs.mkdirSync(path.join(app, 'packages'), { recursive: true });
 for (const name of ['scripts', '.claude']) fs.mkdirSync(path.join(app, name));
 fs.writeFileSync(path.join(project, 'pnpm-workspace.yaml'), 'packages: []\n');
 fs.cpSync(path.join(options.frozenRoot, 'api'), path.join(app, 'packages/api'), { recursive: true });
-// API code needs installed depth for import.meta.url assets. Critical resource
-// roots below must also model the installed tree, without external junctions.
+// Match the installed API depth and ordinary critical-resource roots. The
+// production reader rejects source reparse points; this fixture flattens them.
 for (const name of ['web', 'mcp-server']) {
   const from = path.join(options.frozenRoot, name);
   if (fs.existsSync(from)) fs.symlinkSync(from, path.join(app, 'packages', name), 'junction');
 }
 fs.symlinkSync(path.join(options.frozenRoot, 'dependencies'), path.join(app, 'node_modules'), 'junction');
-copyProfileResources(options.sourceRoot, app);
+for (const name of ['assets', 'docs', 'guides', 'cat-cafe-skills'])
+  copyProfileResource(options.sourceRoot, name, path.join(app, name));
 for (const name of fs.readdirSync(path.join(options.sourceRoot, 'scripts'))) {
   if (name === 'node_modules') continue;
   const from = path.join(options.sourceRoot, 'scripts', name);

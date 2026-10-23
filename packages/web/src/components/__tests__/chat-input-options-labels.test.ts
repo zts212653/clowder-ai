@@ -59,7 +59,7 @@ describe('chat input mention option labels', () => {
     const geminiOption = options.find((opt) => opt.id === 'gemini');
     expect(geminiOption).toBeDefined();
     expect(geminiOption?.label).toBe('@暹罗猫');
-    expect(geminiOption?.insert).toBe('@暹罗 ');
+    expect(geminiOption?.insert).toBe('@暹罗猫 ');
   });
 });
 

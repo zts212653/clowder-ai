@@ -64,6 +64,11 @@ jobs:
           node --import tsx --test --test-concurrency=1
           test/native-runtime-readiness.test.ts
           test/native-dsh-discovery.test.ts
+          test/native-tool-catalog.test.ts
+          test/native-codeagent-discovery.test.ts
+          test/native-dsh-patch-classification.test.ts
+          test/dsh-recommendation.test.ts
+          test/dsh-setup-copy-policy.test.js
           test/dsh-catalog-boundary.test.ts
           test/native-claude-api-readiness.test.ts
           test/native-mcp-first-run.test.ts
@@ -71,6 +76,13 @@ jobs:
           test/f318-claude-sdk.test.ts
           test/f318-claude-sdk-custody.test.ts
           test/f318-claude-sdk-launch.test.ts
+      - name: Install locked Electron runtime for the official DSH Desktop launcher fixture
+        run: npm ci --prefix desktop --no-audit --no-fund
+      - name: Official DSH Desktop diagnostics, model catalog and ACP cold spawn
+        run: >-
+          pnpm --filter @cat-cafe/api exec node ./scripts/with-test-home.mjs
+          node --import tsx --test --test-timeout=90000
+          test/dsh-desktop-launcher.test.ts
       - name: Desktop isolation and installer profile contracts
         run: >-
           node --test
@@ -81,9 +93,10 @@ jobs:
           desktop/runtime-web-config.test.js
           desktop/service-startup.test.js
           desktop/project-mirror-startup-recovery.test.js
-          desktop/project-resource-materialization.test.js
-          desktop/project-resource-redirection-guard.test.js
           desktop/project-mirror-recovery.test.js
+          desktop/project-mirror-materialization.test.js
+          desktop/project-mirror-physical-resources.test.js
+          desktop/project-resource-redirection-guard.test.js
           desktop/project-mirror-consumer.test.js
           desktop/project-mirror-observability.test.js
           desktop/project-mirror-diagnostic-history.test.js
@@ -95,6 +108,7 @@ jobs:
           desktop/visible-renderer.test.js
           desktop/renderer-navigation.test.js
           desktop/installation-lifecycle.test.js
+          desktop/installation-process-image.test.js
           desktop/service-manager-isolation.test.js
           desktop/client-homes.test.js
           desktop/configure-client-homes.test.js
@@ -115,7 +129,7 @@ jobs:
           desktop/api-startup-cold-budget.test.mjs
           desktop/shutdown-controller.test.js
           desktop/profile-desktop-startup.test.mjs
-          desktop/profile-resources.test.cjs
+          desktop/profile-resource-copy.test.cjs
           desktop/profile-mirror-cancellation.test.js
           desktop/api-puppeteer-lazy-boundary.test.mjs
           packages/api/test/lazy-heavy-imports.test.js
@@ -141,6 +155,7 @@ jobs:
         run: >-
           node --test
           desktop/installer-preparation-log.test.js
+          desktop/installer-manual-start.test.js
           desktop/installer-no-icons.test.js
       - name: Build the actual web application
         run: pnpm --filter @cat-cafe/web build
@@ -235,6 +250,7 @@ jobs:
           node --test --test-concurrency=2 --test-timeout=60000
           packages/api/test/acp/acp-process-pool.test.js
           packages/api/test/acp/acp-client.test.js
+          packages/api/test/acp/acp-client-windowless-spawn.test.js
         env:
           NODE_ENV: test
           REDIS_URL: redis://127.0.0.1:0

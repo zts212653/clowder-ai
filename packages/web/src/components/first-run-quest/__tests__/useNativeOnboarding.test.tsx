@@ -386,3 +386,40 @@ it('recommends a newly installed tool on refresh but preserves an explicit desel
   await act(async () => setup.reload());
   expect(setup.draft?.partners.find((p) => p.id === 'codex')?.selected).toBe(false);
 });
+
+it('refresh restores each CodeAgent identity draft separately even when all three share the same launch descriptor', async () => {
+  const original = vi.mocked(apiFetch).getMockImplementation()!;
+  const names = ['宪宪', '砚砚', '墨墨'];
+  const templates = ['ragdoll', 'maine-coon', 'turkish-van'].map((id, i) => ({
+    id,
+    name: names[i],
+    nickname: names[i],
+    avatar: '/avatars/default.png',
+    color: { primary: '#111111', secondary: '#eeeeee' },
+    roleDescription: 'role',
+    personality: 'personality',
+  }));
+  const discovered = templates.map((template) => ({
+    id: `codeagent:${template.id}`,
+    label: `CodeAgent · ${template.nickname}`,
+    clientId: 'acp',
+    installed: true,
+    models: [],
+    priority: 100,
+    roleTemplateId: template.id,
+    acp: { command: 'codeagent', startupArgs: ['--acp'] },
+  }));
+  vi.mocked(apiFetch).mockImplementation((path, init) =>
+    String(path).startsWith('/api/cats/native-runtimes')
+      ? Promise.resolve(response({ runtimes: discovered }))
+      : path === '/api/cat-templates'
+        ? Promise.resolve(response({ templates }))
+        : original(path, init),
+  );
+  await act(async () => root.render(<Harness mode="members" />));
+  expect(setup.draft?.partners.map((partner) => partner.form.nickname)).toEqual(names);
+  const first = setup.draft!.partners[0];
+  await act(async () => setup.patchPartner(first.id, { form: { ...first.form, nickname: '我的宪宪' } }));
+  await act(async () => setup.reload());
+  expect(setup.draft?.partners.map((partner) => partner.form.nickname)).toEqual(['我的宪宪', '砚砚', '墨墨']);
+});

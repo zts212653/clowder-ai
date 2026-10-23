@@ -161,7 +161,7 @@ describe('F322 B segment 1 — cat nameplate, no outer bubble', () => {
       const name = plate()?.querySelector('[data-testid="cat-nameplate-name"]') as HTMLElement;
 
       expect(name.style.color).toBe('var(--color-opus-text)');
-      expect(name.textContent).toBe('布偶猫');
+      expect(name.textContent).toBe('布偶猫 · 宪宪');
       expect(name.textContent).not.toContain('@');
       expect(name.style.opacity).toBe('');
     });

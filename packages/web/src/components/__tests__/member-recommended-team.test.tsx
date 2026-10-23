@@ -90,7 +90,7 @@ afterEach(() => {
 const mount = () =>
   act(async () => root.render(<RecommendedTeamSetup onCreated={created} onManual={manual} onBack={back} />));
 
-it('blocks the default logged-out partner while keeping connection adjustment and other partners available', async () => {
+it('blocks a genuinely logged-out default partner without expanding configuration and keeps other partners available', async () => {
   loginRequired = true;
   await mount();
   expect(host.textContent).toContain('Claude Code 尚未登录');
@@ -104,8 +104,8 @@ it('blocks the default logged-out partner while keeping connection adjustment an
   const adjust = [...(claude?.closest('article')?.querySelectorAll('button') ?? [])].find(
     (item) => item.textContent === '调整',
   );
-  expect(adjust).toBeDefined();
-  expect(adjust?.disabled).toBe(false);
+  expect(adjust).toBeUndefined();
+  expect(host.querySelector('fieldset')).toBeNull();
   expect(host.querySelectorAll('input:checked')).toHaveLength(2);
   await act(async () => button('一键创建').click());
   const writes = vi

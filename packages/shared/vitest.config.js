@@ -23,6 +23,7 @@ export default defineConfig({
       'test/pet-skin-projection.test.js',
       'src/__tests__/capability-tips.test.ts',
       'src/__tests__/cat-display-name.test.ts',
+      'src/__tests__/cat-mention-identity.test.ts',
       'src/__tests__/capability-evolution.test.ts',
       'src/__tests__/capability-evolution-name.test.ts',
       'src/__tests__/capability-evolution-diagnosis.test.ts',

@@ -35,7 +35,7 @@ export function nativePartnerIdentity(runtime: RuntimeChoice, templates: Templat
     catId: runtime.id,
     acp: runtime.acp,
   });
-  const templateId = identity?.templateId ?? templatesByClient[runtime.clientId];
+  const templateId = runtime.roleTemplateId ?? identity?.templateId ?? templatesByClient[runtime.clientId];
   const template = templates.find((item) => item.id === templateId);
   const form = template
     ? templateForm(template, cats, initialState())

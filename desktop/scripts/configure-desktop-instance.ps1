@@ -3,7 +3,8 @@ param(
   [string]$InstanceRoot,
   [string]$FrontendPort,
   [string]$ApiPort,
-  [string]$RedisPort
+  [string]$RedisPort,
+  [switch]$ValidateOnly
 )
 $ErrorActionPreference = 'Stop'
 # Resolve existing ancestors by handle so junctions and short paths cannot hide
@@ -62,10 +63,12 @@ function Resolve-BoundaryPath([string]$path) {
 }
 function Assert-DataBoundary([string]$root) {
   $candidate = Resolve-BoundaryPath $root
-  foreach ($directory in @('desktop-dist','packages','node','node_modules','scripts\node_modules')) {
+  foreach ($directory in @('desktop-dist','packages','node','node_modules','scripts\node_modules',
+      'bundled','cat-cafe-skills\.cat-cafe-shared-refs')) {
     $payload = Resolve-BoundaryPath (Join-Path $AppDir $directory)
     if ($candidate.Equals($payload, [StringComparison]::OrdinalIgnoreCase) -or
-        $candidate.StartsWith($payload + '\', [StringComparison]::OrdinalIgnoreCase)) {
+        $candidate.StartsWith($payload + '\', [StringComparison]::OrdinalIgnoreCase) -or
+        $payload.StartsWith($candidate + '\', [StringComparison]::OrdinalIgnoreCase)) {
       throw "Desktop instance root is inside the installation replacement boundary: $directory"
     }
   }
@@ -107,6 +110,15 @@ if ($InstanceRoot) {
     }
   } else { $body = $requested | ConvertTo-Json -Compress }
 } elseif ($FrontendPort -or $ApiPort -or $RedisPort) { throw 'InstanceRoot is required with isolated ports' }
+
+# An explicit runtime override is not persisted here, but it must not hide data
+# under a payload while an installer/uninstaller validates its saved identity.
+if ($env:CAT_CAFE_DESKTOP_INSTANCE_ROOT) {
+  if (-not [IO.Path]::IsPathRooted($env:CAT_CAFE_DESKTOP_INSTANCE_ROOT)) { throw 'Environment instance root must be absolute' }
+  Assert-DataBoundary $env:CAT_CAFE_DESKTOP_INSTANCE_ROOT
+}
+# The uninstall gate must never migrate a legacy marker or create client homes.
+if ($ValidateOnly) { Write-Output 'Desktop installation data boundary validated.'; exit 0 }
 
 function Write-DefaultClientHomes([string]$root) {
   if (-not $root) { return }

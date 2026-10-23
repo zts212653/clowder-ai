@@ -5,21 +5,25 @@ const fs = require('node:fs');
 const path = require('node:path');
 const os = require('node:os');
 
-test('keeps normal desktop defaults and ignores unrelated shell port overrides', () => {
+test('keeps dedicated intranet desktop defaults and ignores unrelated shell port overrides', () => {
   assert.deepEqual(resolveDesktopRuntime({ FRONTEND_PORT: '5158' }), {
-    frontendPort: 3003,
-    apiPort: 3004,
-    redisPort: 6399,
+    frontendPort: 5331,
+    apiPort: 5332,
+    redisPort: 6389,
     instanceRoot: null,
   });
 });
 
 test('installed instance survives an environment-free upgrade and rejects corrupt identity', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'installed-runtime-'));
-  const executable = path.join(root, 'Clowder AI.exe');
-  const marker = path.join(root, 'desktop-instance.json');
+  const install = path.join(root, 'install');
+  const data = path.join(root, 'data');
+  fs.mkdirSync(install);
+  fs.mkdirSync(data);
+  const executable = path.join(install, 'Clowder AI.exe');
+  const marker = path.join(install, 'desktop-instance.json');
   const saved = {
-    CAT_CAFE_DESKTOP_INSTANCE_ROOT: root,
+    CAT_CAFE_DESKTOP_INSTANCE_ROOT: data,
     FRONTEND_PORT: '5158',
     API_SERVER_PORT: '3158',
     REDIS_PORT: '6367',
@@ -27,7 +31,7 @@ test('installed instance survives an environment-free upgrade and rejects corrup
   try {
     fs.writeFileSync(marker, JSON.stringify(saved));
     const restored = fs.statSync(resolveDesktopRuntime({}, executable).instanceRoot, { bigint: true });
-    const expected = fs.statSync(root, { bigint: true });
+    const expected = fs.statSync(data, { bigint: true });
     assert.deepEqual([restored.dev, restored.ino], [expected.dev, expected.ino]);
     assert.equal(resolveDesktopRuntime({}, executable).redisPort, 6367);
     fs.writeFileSync(marker, '{}');

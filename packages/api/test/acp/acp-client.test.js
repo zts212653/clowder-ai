@@ -60,6 +60,20 @@ const INIT_RESULT = {
 };
 
 describe('AcpClient', () => {
+  it('closes an initialized carrier without agentInfo and awaits its exit once', async () => {
+    const { child, clientStdin, agentStdout } = createMockChild();
+    clientStdin.on('data', (chunk) => {
+      const msg = JSON.parse(chunk.toString());
+      agentRespond(agentStdout, msg.id, { protocolVersion: 1, agentCapabilities: {} });
+    });
+    const nativeClient = new AcpClient({ command: 'fake', args: [], cwd: '/tmp', spawnFn: () => child });
+    await nativeClient.initialize();
+    const closing = nativeClient.close();
+    assert.equal(nativeClient.close(), closing, 'concurrent closes share the same retirement');
+    await closing;
+    assert.equal(child.kill.mock.callCount(), 1);
+    assert.equal(nativeClient.isAlive, false);
+  });
   it('uses advertised session/resume and preserves id omitted by the agent', async () => {
     const { child, clientStdin, agentStdout } = createMockChild();
     const methods = [];

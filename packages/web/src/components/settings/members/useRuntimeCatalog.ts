@@ -19,13 +19,14 @@ export function useRuntimeCatalog(
   model: string,
   refresh: number,
   customStartup = false,
+  launchContext = '',
 ) {
   const lastRefresh = useRef(refresh);
   const [result, setResult] = useState<{ key: string; context: string; data: MemberCatalog } | null>(null),
     [loading, setLoading] = useState(false);
   const requestedModel = runtimeId === 'dsh' || runtimeId === 'pi' || runtimeId?.startsWith('acp:') ? model : '';
-  const key = JSON.stringify([runtimeId, catId, accountRef, requestedModel, customStartup]);
-  const context = JSON.stringify([runtimeId, catId, accountRef, customStartup]);
+  const key = JSON.stringify([runtimeId, catId, accountRef, requestedModel, customStartup, launchContext]);
+  const context = JSON.stringify([runtimeId, catId, accountRef, customStartup, launchContext]);
   useEffect(() => {
     if (!runtimeId) {
       setLoading(false);

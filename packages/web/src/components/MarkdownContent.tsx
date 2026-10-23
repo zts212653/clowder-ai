@@ -23,13 +23,7 @@ import { unified } from 'unified';
 import 'katex/dist/katex.min.css';
 import { UNKNOWN_CAT_COLOR } from '@/lib/color-defaults';
 import { createListenSentenceRemarkPlugin, type ListenSentence } from '@/lib/listen-mode/markdown-sentences';
-import {
-  getDisplayMentionRe,
-  getDisplayMentionToCat,
-  getMentionColor,
-  getMentionLabel,
-  isCanonicalOnlyMentionAlias,
-} from '@/lib/mention-highlight';
+import { getDisplayMentionRe, getDisplayMentionToCat, getMentionColor, getMentionLabel } from '@/lib/mention-highlight';
 import { useChatStore } from '@/stores/chatStore';
 import { ChatWorkspaceLink } from './ChatWorkspaceLink';
 import { ListenSentenceSpan } from './listen-mode/ListenSentenceSpan';
@@ -131,7 +125,7 @@ function Mention({ catId, text, style }: { catId: string; text: string; style: C
       type="button"
       className="cursor-pointer font-semibold"
       onClick={() => useChatStore.getState().openTeamSubject({ type: 'cat', id: catId })}
-      aria-label={`在猫猫团队中查看 ${catId}`}
+      aria-label={`在猫猫团队中查看 ${text.replace(/^@/, '')}`}
       style={style}
     >
       {text}
@@ -164,7 +158,7 @@ function highlightMentions(text: string): ReactNode[] {
       borderRadius: 4,
       padding: '1px 5px',
     };
-    const displayText = isCanonicalOnlyMentionAlias(alias) ? `@${labelMap[catId] ?? catId}` : m[0];
+    const displayText = labelMap[catId] ? `@${labelMap[catId]}` : m[0];
     parts.push(<Mention key={`m${m.index}`} catId={catId} text={displayText} style={style} />);
     lastIdx = re.lastIndex;
   }

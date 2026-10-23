@@ -7,16 +7,25 @@ import type { RuntimeChoice } from '../settings/members/member-runtime-draft';
 import { matchesRuntime } from '../settings/members/member-runtime-draft';
 import { syncDraftToStorage } from '../thread-drafts';
 import { legacyCreationKey, legacySharedKey } from './legacy-creation-key';
-import { buildNativeCreationPayload } from './native-creation-payload';
+import { retainedCodeagentDraft } from './native-codeagent-draft-recovery';
 import { repairLegacyNativeIdentityFields } from './native-identity-repair';
 import {
   type NativePartner,
+  nativePartnerSelectable,
   nativeRuntimeSelectable,
   newNativeRequestKey,
   recommendNativePartners,
   SMALL_GOALS,
 } from './native-onboarding';
+import {
+  acknowledgeNativePartner,
+  needsExistingDshRepair,
+  restoredDshPreparation,
+  saveNativePartner,
+} from './native-partner-persistence';
+import { parkedNativePartners, restoredNativeLead, uniqueIntranetPartners } from './native-runtime-recommendations';
 import { buildNativeTeamGoal, orderGoalPartners } from './native-team-goal';
+import { prepareNativePartner } from './prepare-native-partner';
 import { prepareFirstRunEntry } from './prepareFirstRunEntry';
 import type { TemplateCard } from './TemplateStep';
 
@@ -30,6 +39,8 @@ interface SetupDraft {
   idScheme?: 'short-v1';
   journeyId: string;
   partners: NativePartner[];
+  /** No longer recommended; retain old form data and retry keys without displaying or submitting them. */
+  parkedPartners?: NativePartner[];
   goal: string;
   lead: string;
   created: Record<string, CreatedPartner>;
@@ -90,9 +101,12 @@ export function useNativeOnboarding(
     setErrorStage(null);
     void Promise.all([
       readJson<{ userId: string }>('/api/session', { signal: controller.signal }),
-      readJson<{ runtimes: RuntimeChoice[] }>(`/api/cats/native-runtimes${reload ? '?refresh=1' : ''}`, {
-        signal: controller.signal,
-      }),
+      readJson<{ runtimes: RuntimeChoice[]; edition?: 'intranet' | 'public' }>(
+        `/api/cats/native-runtimes${reload ? '?refresh=1' : ''}`,
+        {
+          signal: controller.signal,
+        },
+      ),
       readJson<{ templates: TemplateCard[] }>('/api/cat-templates', { signal: controller.signal }),
       readJson<{ cats: CatData[] }>('/api/cats', { signal: controller.signal }),
     ])
@@ -107,72 +121,92 @@ export function useNativeOnboarding(
         } catch {
           /* A corrupt draft does not prevent setup. */
         }
+        if (saved)
+          saved = {
+            ...saved,
+            partners: [...saved.partners, ...(Array.isArray(saved.parkedPartners) ? saved.parkedPartners : [])],
+          };
         const journeyId = saved?.journeyId ?? newJourneyId();
         const currentCats = roster.cats;
-        const partners = recommendNativePartners(discovered.runtimes, templates.templates, currentCats, journeyId).map(
-          (partner) => {
-            const previous = saved?.partners.find((p) => p.form && matchesRuntime(p.form, partner.runtime));
-            if (!previous?.form) return partner;
-            const savedMember = currentCats.find(
-              (cat) => cat.id === previous.form.catId && matchesRuntime(initialState(cat), partner.runtime),
+        let partners = recommendNativePartners(
+          discovered.runtimes,
+          templates.templates,
+          currentCats,
+          journeyId,
+          discovered.edition,
+        ).map((partner) => {
+          const retained = retainedCodeagentDraft(partner, saved?.partners);
+          const previous =
+            saved?.partners.find((p) => p.id === partner.id) ??
+            retained?.previous ??
+            saved?.partners.find(
+              (p) => p.form && !partner.runtime.roleTemplateId && matchesRuntime(p.form, partner.runtime),
             );
-            const acknowledged = saved?.created[partner.id] ?? saved?.created[previous.id];
-            const confirmed = Boolean(previous.existingId || (acknowledged && savedMember?.id === acknowledged.id));
-            const receiptMismatch =
-              acknowledged &&
-              currentCats.some(
-                (cat) => cat.id === acknowledged.id && !matchesRuntime(initialState(cat), partner.runtime),
-              );
-            const restoredForm = confirmed && savedMember ? initialState(savedMember) : previous.form;
-            // Repair a pre-identity default even when the draft is not confirmed:
-            // a draft whose member is no longer in the roster (for example, a
-            // clean install or a reset catalog) is a fresh recommendation and
-            // must show the cat identity. An unconfirmed form whose member still
-            // exists may be the exact body of a lost-response retry, so leave
-            // that wire shape untouched.
-            const identityRepair =
-              confirmed || !savedMember
-                ? repairLegacyNativeIdentityFields(restoredForm, partner.form, partner.runtime)
-                : {};
-            const identityChanged = Object.keys(identityRepair).length > 0;
-            const form = identityChanged ? { ...restoredForm, ...identityRepair } : restoredForm;
-            return {
-              ...partner,
-              // A repaired form is a new request: its old key may belong to a
-              // different payload. A true lost-response retry keeps its key.
-              creationRequestKey: receiptMismatch
-                ? partner.creationRequestKey
-                : identityChanged && !savedMember
-                  ? newNativeRequestKey()
-                  : saved?.idScheme
-                    ? legacyCreationKey(previous, saved.partners)
-                    : (previous.creationRequestKey ?? partner.creationRequestKey),
-              legacySharedRequestKey: saved?.idScheme ? legacySharedKey(previous, saved.partners) : undefined,
-              existingId: confirmed && savedMember ? savedMember.id : undefined,
-              missingExisting: Boolean(previous.existingId && !savedMember),
-              ...(!confirmed && savedMember && !saved?.idScheme
-                ? { recoverable: { id: savedMember.id, form: initialState(savedMember) } }
-                : {}),
-              selected:
-                nativeRuntimeSelectable(partner.runtime, form) && (!previous.runtime?.installed || previous.selected),
-              form,
-            };
-          },
-        );
+          if (!previous?.form) return partner;
+          const savedMember = currentCats.find(
+            (cat) => cat.id === previous.form.catId && matchesRuntime(initialState(cat), partner.runtime),
+          );
+          const acknowledged = saved?.created[partner.id] ?? saved?.created[previous.id];
+          const confirmed = Boolean(previous.existingId || (acknowledged && savedMember?.id === acknowledged.id));
+          const receiptMismatch =
+            acknowledged &&
+            currentCats.some(
+              (cat) => cat.id === acknowledged.id && !matchesRuntime(initialState(cat), partner.runtime),
+            );
+          const dshPreparation = restoredDshPreparation(partner, previous);
+          const restoredForm =
+            dshPreparation?.form ?? (confirmed && savedMember ? initialState(savedMember) : previous.form);
+          // Repair a pre-identity default even when the draft is not confirmed:
+          // a draft whose member is no longer in the roster (for example, a
+          // clean install or a reset catalog) is a fresh recommendation and
+          // must show the cat identity. An unconfirmed form whose member still
+          // exists may be the exact body of a lost-response retry, so leave
+          // that wire shape untouched.
+          const identityRepair =
+            confirmed || !savedMember
+              ? repairLegacyNativeIdentityFields(restoredForm, partner.form, partner.runtime)
+              : {};
+          const identityChanged = Object.keys(identityRepair).length > 0;
+          const form = identityChanged ? { ...restoredForm, ...identityRepair } : restoredForm;
+          return {
+            ...partner,
+            ...dshPreparation,
+            ...(retained || previous.retainedCodeagentRole
+              ? { id: previous.id, retainedCodeagentRole: retained?.roleKey ?? previous.retainedCodeagentRole }
+              : {}),
+            // A repaired form is a new request: its old key may belong to a
+            // different payload. A true lost-response retry keeps its key.
+            creationRequestKey: receiptMismatch
+              ? partner.creationRequestKey
+              : identityChanged && !savedMember
+                ? newNativeRequestKey()
+                : saved?.idScheme
+                  ? legacyCreationKey(previous, saved.partners)
+                  : (previous.creationRequestKey ?? partner.creationRequestKey),
+            legacySharedRequestKey: saved?.idScheme ? legacySharedKey(previous, saved.partners) : undefined,
+            existingId: confirmed && savedMember ? savedMember.id : undefined,
+            missingExisting: Boolean(previous.existingId && !savedMember),
+            ...(!confirmed && savedMember && !saved?.idScheme
+              ? { recoverable: { id: savedMember.id, form: initialState(savedMember) } }
+              : {}),
+            selected:
+              nativeRuntimeSelectable(partner.runtime, form) &&
+              (!previous.runtime?.installed ||
+                !nativeRuntimeSelectable(previous.runtime, previous.form) ||
+                previous.selected),
+            form,
+          };
+        });
+        if (discovered.edition === 'intranet') partners = uniqueIntranetPartners(partners, currentCats);
         persist({
           version: 2,
           ...(!saved || saved.idScheme ? { idScheme: 'short-v1' as const } : {}),
           journeyId,
           initialRosterEmpty: saved?.initialRosterEmpty ?? (!saved && roster.cats.length === 0),
           partners,
+          parkedPartners: parkedNativePartners(saved?.partners, partners),
           goal: saved?.goal ?? SMALL_GOALS[0].content,
-          lead:
-            partners.find((p) => {
-              const previousLead = saved?.partners.find((old) => old.id === saved.lead);
-              return previousLead?.form && matchesRuntime(previousLead.form, p.runtime);
-            })?.id ??
-            partners.find((p) => p.selected)?.id ??
-            '',
+          lead: restoredNativeLead(partners, saved?.partners, saved?.lead),
           created: Object.fromEntries(
             partners.flatMap((partner) => {
               const previous = saved?.partners.find((p) => p.form && matchesRuntime(p.form, partner.runtime));
@@ -216,7 +250,7 @@ export function useNativeOnboarding(
     )
       return;
     const selected = orderGoalPartners(
-      current.partners.filter((p) => p.selected && nativeRuntimeSelectable(p.runtime, p.form)),
+      current.partners.filter((p) => p.selected && nativePartnerSelectable(p)),
       current.lead,
     );
     if (!selected.length) return;
@@ -236,32 +270,20 @@ export function useNativeOnboarding(
         await prepareFirstRunEntry();
       }
       for (const selection of selected) {
-        const partner = progress.partners.find((p) => p.id === selection.id) ?? selection;
+        let partner = progress.partners.find((p) => p.id === selection.id) ?? selection;
         const id = partner.id;
-        if (progress.created[id]) continue;
+        if (progress.created[id] && !needsExistingDshRepair(partner)) continue;
         setBusy(`正在添加 ${partner.form.displayName}…`);
         pendingPartner = partner;
-        const result = partner.existingId
-          ? {
-              cat: {
-                id: partner.existingId,
-                displayName: partner.form.displayName,
-                mentionPatterns: partner.form.mentionPatterns.split(/[\s,]+/).filter(Boolean),
-              },
-            }
-          : await readJson<{ cat: { id: string; displayName: string; mentionPatterns: string[] } }>('/api/cats', {
-              method: 'POST',
-              headers: {
-                ...headers,
-                'Idempotency-Key': `onboarding:${current.journeyId}:cat:${partner.creationRequestKey ?? id}`,
-              },
-              body: JSON.stringify(buildNativeCreationPayload(partner.form)),
-            });
+        partner = await prepareNativePartner(partner, headers, readJson);
+        progress = { ...progress, partners: progress.partners.map((p) => (p.id === id ? partner : p)) };
+        persist(progress);
+        const result = await saveNativePartner(partner, current.journeyId, headers, readJson);
         pendingPartner = undefined;
         progress = {
           ...progress,
           partners: progress.partners.map((p) => {
-            if (p.id === id) return { ...p, form: { ...p.form, catId: result.cat.id } };
+            if (p.id === id) return acknowledgeNativePartner(p, result);
             // A successful server replay/create proves which legacy key/body owns this member.
             // Split the remaining collision before their first POST, even when the initial roster was empty.
             return !partner.existingId &&

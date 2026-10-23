@@ -82,6 +82,10 @@ class UpdateManager {
 
   /** Check once at startup, then once daily while the app remains running. */
   startSchedule() {
+    if (this._d.distributionChannel === 'intranet') {
+      this._d.dbg('Intranet edition: public automatic update channel disabled');
+      return;
+    }
     if (this._intervalTimer !== null) return;
     const settings = checker.loadSettings(this._settingsPath);
     if (!settings.autoCheck) {
@@ -114,6 +118,16 @@ class UpdateManager {
   }
 
   checkForUpdates(opts) {
+    if (this._d.distributionChannel === 'intranet') {
+      return opts?.manual
+        ? this._d.showDialog({
+            type: 'info',
+            title: '内网版本更新',
+            message: '请使用内网分发的安装包更新；本版本不会切换到公共发行版。',
+            buttons: ['确定'],
+          })
+        : Promise.resolve();
+    }
     const run = () => this._runUpdateCheck(opts);
     this._checkQueue = this._checkQueue.then(run, run);
     return this._checkQueue;

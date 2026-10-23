@@ -1,5 +1,6 @@
 const { app, BrowserWindow, Menu, dialog, ipcMain, net, session, shell, Notification } = require('electron');
 const path = require('node:path');
+const { prepareIntranetAppData } = require('./intranet-profile');
 const { resolveProjectRootFromDir } = require('./project-root');
 const { installationIdentity, isInstallationShutdownRequest } = require('./installation-lifecycle');
 const ServiceManager = require('./service-manager');
@@ -39,8 +40,7 @@ if (process.platform === 'win32') {
 }
 const PROJECT_ROOT = resolveProjectRootFromDir(__dirname);
 const desktopRuntime = resolveDesktopRuntime();
-const FRONTEND_PORT = desktopRuntime.frontendPort;
-const API_PORT = desktopRuntime.apiPort;
+const { frontendPort: FRONTEND_PORT, apiPort: API_PORT } = desktopRuntime;
 prepareDesktopInstance(app, desktopRuntime);
 const APP_URL = `http://localhost:${FRONTEND_PORT}`;
 const APP_ORIGIN = new URL(APP_URL).origin;
@@ -54,6 +54,7 @@ const createBaseRendererLinkOrigins = () =>
 let rendererLinkOrigins = createBaseRendererLinkOrigins();
 const QUIT_FOR_UPDATE_ARG = '--quit-owned-installation';
 const userDataRoot = ServiceManager.USER_DATA_DIR;
+prepareIntranetAppData(app, userDataRoot, desktopRuntime.instanceRoot);
 const dbg = createDesktopLogger(userDataRoot);
 const lifecycle = createLifecycleLogger(dbg);
 const startupLogDir = path.join(userDataRoot, 'data', 'logs');
@@ -63,7 +64,6 @@ startupTimeline.mark('main-initialized');
 dbg(`Electron starting. ELECTRON_RUN_AS_NODE=${process.env.ELECTRON_RUN_AS_NODE}`);
 dbg(`process.type=${process.type}, versions.electron=${process.versions.electron}`);
 appLifecycle.logRuntimeIdentity({ dbg, app, projectRoot: PROJECT_ROOT });
-
 let mainWindow = null;
 let splashWindow = null;
 let tray = null;

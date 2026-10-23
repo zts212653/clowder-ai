@@ -273,9 +273,11 @@ export class AcpClient {
       cwd: this.config.cwd,
       stdio: ['pipe', 'pipe', 'pipe'],
       env: childEnv,
+      windowsHide: true,
     };
     if (IS_WINDOWS && !this.config.spawnFn) {
       const spawnPlan = resolveWindowsSpawnPlan(command, args);
+      Object.assign(childEnv, spawnPlan.env);
       log.debug(
         {
           original: command,
@@ -934,7 +936,7 @@ export class AcpClient {
     this.rl?.close();
     this.rejectAllPending(new Error('ACP client closed'));
     if (this.child && !this.exited)
-      await shutdownAcpChild(this.child, KILL_GRACE_MS, this.initResult?.agentInfo.name === PI_BRIDGE_NAME);
+      await shutdownAcpChild(this.child, KILL_GRACE_MS, this.initResult?.agentInfo?.name === PI_BRIDGE_NAME);
   }
 
   get pid(): number | undefined {
