@@ -75,6 +75,36 @@ function fakeClock(initial = 10_000) {
 }
 
 describe('RoutingPreflightService', () => {
+  it('warns at execution when an account reading is fresh but pool applicability is unknown', async () => {
+    const member = candidate('sol');
+    member.binding.capacityFacts = {
+      v: 1,
+      current: {
+        state: 'fresh',
+        evidenceRef: 'account:observation',
+        windows: [
+          {
+            poolId: 'opaque-main',
+            poolKind: 'codex-main',
+            applicability: 'unknown',
+            freshness: 'fresh',
+            kind: 'five_hour',
+            remainingPercent: 70,
+          },
+        ],
+      },
+      switchRequired: [],
+    };
+    const service = new RoutingPreflightService({ resolver: { resolve: async () => freshResolution([member]) } });
+    const admission = await service.preflight(input());
+    assert.equal(admission.targets[0].disposition, 'allowed', 'B observes availability without granting execution');
+    const execution = await service.preflight({ ...input(), requireCapacityProof: true });
+    assert.equal(execution.targets[0].disposition, 'warned');
+    assert.equal(execution.targets[0].targetCatId, 'sol');
+    assert.match(execution.targets[0].reasons[0].summary, /applicability unknown/);
+    assert.equal(member.availability, 'available', 'unknown capacity never creates an availability assertion');
+  });
+
   it('maps fresh proof to per-target decisions and preference-ordered eligible alternatives', async () => {
     const unavailableReason = {
       code: 'routing_signal_unavailable',
@@ -281,6 +311,27 @@ describe('RoutingPreflightService', () => {
     clock.advance(30_000);
     assert.equal((await service.preflight(input())).targets[0].disposition, 'warned');
     assert.equal(audits.length, 2);
+  });
+
+  it('does not call synchronous work fresh just because it starved the budget timer', async () => {
+    const audits = [];
+    const service = new RoutingPreflightService({
+      readBudgetMs: 5,
+      resolver: {
+        resolve: async () => {
+          const finish = performance.now() + 15;
+          while (performance.now() < finish) {
+            /* simulate a synchronous resolver */
+          }
+          return freshResolution();
+        },
+      },
+      auditSink: { record: (event) => audits.push(event) },
+    });
+    const decision = await service.preflight(input());
+    assert.equal(decision.resolverState, 'degraded');
+    assert.equal(decision.targets[0].disposition, 'warned');
+    assert.equal(audits[0].failureClass, 'resolver_timeout');
   });
 
   it('does not let a stalled operational audit sink become a dispatch gate', async () => {

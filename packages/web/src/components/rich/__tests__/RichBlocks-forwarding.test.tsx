@@ -1,19 +1,6 @@
 import React from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-
-vi.mock('@/components/TransferTargetPicker', async () => {
-  const { createElement } = await vi.importActual<typeof import('react')>('react');
-  return {
-    TransferTargetPicker: ({ open, items }: { open: boolean; items: unknown[] }) =>
-      open
-        ? createElement('output', {
-            'data-testid': 'rich-forward-picker-probe',
-            'data-items': JSON.stringify(items),
-          })
-        : null,
-  };
-});
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 const { RichBlocks } = await import('../RichBlocks');
 
@@ -33,151 +20,19 @@ describe('RichBlocks exact forwarding', () => {
     container.remove();
   });
 
-  it('opens the shared picker with only the selected block identity and source-record refs', () => {
-    React.act(() => {
+  it('keeps cards readable without a second forwarding entry', () => {
+    React.act(() =>
       root.render(
         <RichBlocks
-          blocks={[
-            { id: 'card-1', kind: 'card', v: 1, title: 'Decision', bodyMarkdown: 'Use exact refs.' },
-            { id: 'card-2', kind: 'card', v: 1, title: 'Sibling', bodyMarkdown: 'Do not forward me.' },
-          ]}
+          blocks={[{ id: 'card-1', kind: 'card', v: 1, title: 'Decision', bodyMarkdown: 'Use exact refs.' }]}
           messageId="source-anchor"
           sourceThreadId="source-thread"
-          sourceMessageIds={['source-stream', 'source-anchor']}
         />,
-      );
-    });
-
-    const richBlock = container.querySelector('[data-rich-block-id="card-1"]');
-    const actionDock = richBlock?.querySelector('[data-testid="rich-block-forward-actions"]');
-    const forward = richBlock?.querySelector<HTMLButtonElement>('button[aria-label="转发富块：Decision"]');
-
-    expect(richBlock?.className).toContain('group/rich-block');
-    expect(actionDock?.className).not.toContain('absolute');
-    expect(actionDock?.className).toContain('grid-rows-[0fr]');
-    expect(actionDock?.className).toContain('pointer-events-none');
-    expect(actionDock?.className).toContain('opacity-0');
-    expect(actionDock?.className).toContain('group-hover/rich-block:pointer-events-auto');
-    expect(actionDock?.className).toContain('group-hover/rich-block:opacity-100');
-    expect(actionDock?.className).toContain('group-focus-within/rich-block:opacity-100');
-    expect(actionDock?.className).toContain('[@media(hover:none)_and_(pointer:coarse)]:opacity-100');
-    expect(forward?.querySelector('svg')).not.toBeNull();
-
-    React.act(() => forward?.click());
-
-    const probe = container.querySelector<HTMLOutputElement>('[data-testid="rich-forward-picker-probe"]');
-    expect(JSON.parse(probe?.dataset.items ?? '[]')).toEqual([
-      {
-        kind: 'rich_block',
-        messageId: 'source-anchor',
-        sourceMessageIds: ['source-stream', 'source-anchor'],
-        blockId: 'card-1',
-      },
-    ]);
-  });
-
-  it('keeps file forwarding in a separate flow row from copy and download actions', () => {
-    React.act(() => {
-      root.render(
-        <RichBlocks
-          blocks={[
-            {
-              id: 'file-1',
-              kind: 'file',
-              v: 1,
-              fileName: '昇腾算力资源申请-Agent自进化-单独转发这个富块-8-27B场景化后训练.docx',
-              url: '/uploads/resource-request.docx',
-            },
-          ]}
-          messageId="source-anchor"
-          sourceThreadId="source-thread"
-          sourceMessageIds={['source-anchor']}
-        />,
-      );
-    });
-
-    const richBlock = container.querySelector('[data-rich-block-id="file-1"]');
-    const actionDock = richBlock?.querySelector('[data-testid="rich-block-forward-actions"]');
-    const actionSurface = richBlock?.querySelector('[data-testid="rich-block-forward-action-dock"]');
-
-    expect(actionDock?.className).toContain('grid-rows-[0fr]');
-    expect(actionDock?.className).not.toContain('absolute');
-    expect(actionSurface).not.toBeNull();
-  });
-
-  it('keeps individually addressable forwarding actions for blocks inside an interactive group', () => {
-    React.act(() => {
-      root.render(
-        <RichBlocks
-          blocks={[
-            {
-              id: 'choice-1',
-              kind: 'interactive',
-              v: 1,
-              groupId: 'decisions',
-              interactiveType: 'select',
-              title: 'First decision',
-              options: [{ id: 'a', label: 'A' }],
-            },
-            {
-              id: 'choice-2',
-              kind: 'interactive',
-              v: 1,
-              groupId: 'decisions',
-              interactiveType: 'select',
-              title: 'Second decision',
-              options: [{ id: 'b', label: 'B' }],
-            },
-          ]}
-          messageId="source-anchor"
-          sourceThreadId="source-thread"
-          sourceMessageIds={['source-anchor']}
-        />,
-      );
-    });
-
-    const second = container.querySelector<HTMLButtonElement>('button[aria-label="转发富块：Second decision"]');
-    const group = container.querySelector('[data-rich-block-group-id="decisions"]');
-    const actionDock = group?.querySelector('[data-testid="rich-block-forward-actions"]');
-    const actionSurface = group?.querySelector('[data-testid="rich-block-forward-action-dock"]');
-
-    expect(group?.className).toContain('group/rich-block');
-    expect(actionDock?.className).toContain('grid-rows-[0fr]');
-    expect(actionDock?.className).toContain('opacity-0');
-    expect(actionDock?.className).toContain('group-hover/rich-block:grid-rows-[1fr]');
-    expect(actionDock?.className).toContain('group-focus-within/rich-block:grid-rows-[1fr]');
-    expect(actionDock?.className).toContain('[@media(hover:none)_and_(pointer:coarse)]:grid-rows-[1fr]');
-    expect(actionSurface?.className).toContain('flex-wrap');
-    expect(actionDock?.querySelectorAll('button')).toHaveLength(2);
-    expect(second?.querySelector('svg')).not.toBeNull();
-    expect(second).not.toBeNull();
-    React.act(() => second?.click());
-
-    const probe = container.querySelector<HTMLOutputElement>('[data-testid="rich-forward-picker-probe"]');
-    expect(JSON.parse(probe?.dataset.items ?? '[]')).toEqual([
-      {
-        kind: 'rich_block',
-        messageId: 'source-anchor',
-        sourceMessageIds: ['source-anchor'],
-        blockId: 'choice-2',
-      },
-    ]);
-  });
-
-  it('does not offer Rich Block forwarding while the canonical source group is streaming', () => {
-    React.act(() => {
-      root.render(
-        <RichBlocks
-          blocks={[{ id: 'card-live', kind: 'card', v: 1, title: 'Still streaming' }]}
-          messageId="source-anchor"
-          sourceThreadId="source-thread"
-          sourceMessageIds={['source-anchor']}
-          forwardingEnabled={false}
-        />,
-      );
-    });
-
-    expect(container.querySelector('button[aria-label="转发富块：Still streaming"]')).toBeNull();
+      ),
+    );
+    expect(container.textContent).toContain('Decision');
+    expect(container.querySelector('[data-testid="rich-block-forward-actions"]')).toBeNull();
+    expect(container.querySelector('button[title="单独转发这个富块"]')).toBeNull();
   });
 
   it('renders action-bearing card, interactive, and HTML blocks passively in read-only mode', () => {

@@ -14,12 +14,14 @@ import {
   verifyReferenceBoundaries,
   verifySplitFileGroup,
 } from './chat-reference-boundaries.journey.mjs';
+import { registerDesign1526Journeys } from './chat-reference-design1526.journey.mjs';
 import { availablePort, stopChild, waitForHttp } from './f290-runtime-journey.harness.mjs';
 import { createNextDevTestEnvironment } from './next-dev-test-environment.mjs';
 
 const web = fileURLToPath(new URL('../..', import.meta.url)),
   tree = path.resolve(web, '../..');
 const root = process.env.F322_CHAT_PATH_EVIDENCE ?? (await mkdtemp(path.join(tmpdir(), 'f322-chat-links-')));
+registerDesign1526Journeys(root);
 async function readFixtureReferenceParagraphs(page, message, sha, reading) {
   // Metadata follows the real reading viewport; visit each controlled sample paragraph before counting cards.
   const paragraphs = message.locator('.markdown-content > p');
@@ -127,6 +129,7 @@ for (const language of ['zh', 'en'])
                 reading,
                 reads,
                 desktop,
+                fileSourceRequests: source.fileSourceRequests,
                 references: await page.locator('[data-message-id] [data-chat-reference-kind]').evaluateAll((elements) =>
                   elements.map((element) => ({
                     kind: element.getAttribute('data-chat-reference-kind'),
@@ -442,7 +445,30 @@ for (const language of ['zh', 'en'])
     await message.locator('[data-chat-reference-kind=missing]').filter({ hasText: 'later-deleted.md' }).waitFor();
     await verifyReferenceBoundaries({ page, source, evidence, language, desktop });
     await verifyMultilineFileGroup({ page, source, evidence });
-    await verifyPathLifecycle({ page, base, source, evidence });
-    await captureChatPathDesign({ page, base, fixture, language, evidence });
+    await t.test('F322 actual chat paths: parent and alias lifecycle', async (stage) => {
+      stage.after(async () => {
+        await page.screenshot({
+          path: path.join(evidence, 'parent-lifecycle-terminal.png'),
+          fullPage: true,
+          animations: 'disabled',
+        });
+        await writeFile(
+          path.join(evidence, 'parent-lifecycle-terminal.json'),
+          JSON.stringify(
+            {
+              text: await page.locator('body').innerText(),
+              fileSourceRequests: source.fileSourceRequests,
+              errors,
+            },
+            null,
+            2,
+          ),
+        );
+      });
+      await verifyPathLifecycle({ page, base, source, evidence });
+    });
+    await t.test('F322 actual chat paths: accepted typography and standalone image', async () => {
+      await captureChatPathDesign({ page, base, fixture, language, evidence });
+    });
     assert.deepEqual(errors, []);
   });

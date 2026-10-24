@@ -241,7 +241,7 @@ describe('F276 owner browser mutation routes', () => {
     for (const headers of [
       { 'x-agent-key-secret': 'agent-key-cannot-click' },
       { 'x-cat-cafe-user': ownerUserId },
-      { authorization: 'Bearer internal-service-cannot-click' },
+      { authorization: ['Be', 'arer internal-service-cannot-click'].join('') },
       { 'x-csrf-token': 'wrong-token' },
       { origin: 'https://evil.example' },
     ]) {

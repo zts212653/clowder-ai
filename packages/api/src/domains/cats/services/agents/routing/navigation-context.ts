@@ -74,6 +74,8 @@ export interface TaskSummary {
   title: string;
   status: string;
   ownerCatId: string | null;
+  /** Thread/owner-level registered wait; undefined means the read was unavailable. */
+  hasActiveWait?: boolean;
 }
 
 export function summarizeActiveTasks(
@@ -159,7 +161,9 @@ function buildNavigationInner(ctx: NavigationContext, options?: NavigationFormat
     lines.push('活跃毛线球:');
     for (const t of ctx.tasks) {
       const owner = t.ownerCatId ? `@${t.ownerCatId}` : '未分配';
-      lines.push(`  - [${t.status}] ${t.title} (${owner})`);
+      const waitFact =
+        t.ownerCatId === ctx.currentCatId && t.status !== 'done' && t.hasActiveWait === false ? ' [未挂等待]' : '';
+      lines.push(`  - [${t.status}] ${t.title} (${owner})${waitFact}`);
     }
   }
 

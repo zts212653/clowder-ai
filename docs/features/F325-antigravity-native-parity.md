@@ -1,6 +1,6 @@
 ---
 feature_ids: [F325]
-tips_exempt: "Renewed 2026-10-23 for the member tool discovery regression: restoring existing AGY Native/official ACP identification and saved bindings in the existing Members settings page, not adding a new capability or guide. Overall parity and natural-use limits remain recorded separately."
+tips_exempt: "Renewed 2026-10-24 for restoring the existing Native host tool environment and unattended Git behavior, alongside the member tool discovery repair; no new setting or user action is introduced. Overall parity and natural-use limits remain recorded separately."
 related_features: [F053, F061, F143, F149, F161, F174, F178, F194, F201, F203, F210, F211, F241, F254, F261, F286, F296, F299, F306, F318, F320, F323, F324]
 topics: [antigravity, acp, native-carrier, parity, migration, managed-job]
 doc_kind: spec
@@ -118,6 +118,10 @@ ACP 原生 L0 缺口已证；You 已选择保留个人 OAuth 与原生 L0，继�
 选择结果仍须收敛一个 AGY 生产载体，不能自动堆 fallback。
 
 ### Phase B: 原生身份、安全与对话平权
+
+#### 工作单元：宿主工具环境同步 {#native-host-environment}
+
+- 来源：You `private-source-id`；Sol6.1 实现、Argon 独立 review。
 
 #### Open issue：Native 命令长时间静默 {#native-command-stall}
 

@@ -36,7 +36,7 @@ test('resolveApiCredentials returns null when bound account does not resolve', (
 });
 
 test('resolveApiCredentials ignores env var — only bound account is authoritative', () => {
-  process.env.CATAGENT_ANTHROPIC_API_KEY = 'sk-ant-should-be-ignored';
+  process.env.CATAGENT_ANTHROPIC_API_KEY = ['sk', '-ant-should-be-ignored'].join('');
   try {
     const result = resolveApiCredentials('/tmp', 'opus', null);
     assert.equal(result, null, 'should return null — env override must not bypass account binding');

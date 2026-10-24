@@ -50,6 +50,10 @@ export class ApprovalProducerRegistry {
       if (APPROVAL_PRODUCER_CATALOG[id].history && typeof adapter.listSettled !== 'function') {
         throw new Error(`Approval producer ${id} declares history but its adapter omits listSettled`);
       }
+      const receipt = APPROVAL_PRODUCER_CATALOG[id].decisionReceipt;
+      if (receipt?.mode !== 'shared-origin-thread') {
+        throw new Error(`Approval producer ${id} decision receipt binding is missing`);
+      }
       if (!binding.lifecycle) {
         throw new Error(`Approval producer ${id} lifecycle binding is missing`);
       }

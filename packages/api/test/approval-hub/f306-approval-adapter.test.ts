@@ -60,7 +60,7 @@ function requests(): RuntimeInteractionRequest[] {
 
 describe('F306ApprovalAdapter', () => {
   it('reports unavailable rather than empty history for a source without the read capability', async () => {
-    const adapter = new F306ApprovalAdapter({ listPendingByUser: async () => [] });
+    const adapter = new F306ApprovalAdapter({ get: async () => null, listPendingByUser: async () => [] });
     await assert.rejects(adapter.listSettled('user-1'), /history unavailable/);
   });
   it('projects only anchored pending approval requests as navigation-only Hub items', async () => {

@@ -36,7 +36,7 @@ export const personMemoryCopy = defineShellCopy(
       checking: 'Checking the original proposal…',
       written: 'Written to memory',
       partial: 'Partly written; choose remaining drafts',
-      rejected: 'Rejected',
+      rejected: 'Declined',
       rejectedAfterWrite: (n: number | null) =>
         n === null ? 'Earlier writes remain · rest declined' : `Wrote ${n} · rest declined`,
       writesRemain: 'Earlier writes remain',

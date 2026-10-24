@@ -24,6 +24,7 @@ export interface ReduceRoutingContextInput {
   profiles: readonly CapabilityProfileRevisionRefV1[];
   profileDiagnostics?: readonly CapabilityProfileDiagnostic[];
   signalEvents: readonly RoutingSignalEventV1[];
+  signalClosures?: ReadonlyMap<string, Exclude<RoutingSignalEventV1, { eventType: 'asserted' }>>;
   preferenceRevisions: readonly RoutingPreferenceRevisionV1[];
 }
 
@@ -123,14 +124,7 @@ function coalesceActiveSignalReasons(signals: readonly AssertedSignal[]): Routin
   return reasons;
 }
 
-function inactiveSignalReason(signal: AssertedSignal, closer?: ClosingSignal): RoutingReasonV1 {
-  if (closer?.eventType === 'recovered') {
-    return {
-      code: 'routing_signal_recovered',
-      summary: closer.note ?? closer.reasonCode,
-      sourceRefs: [closer.eventId, signal.eventId, closer.evidenceRef],
-    };
-  }
+function expiredSignalReason(signal: AssertedSignal): RoutingReasonV1 {
   return {
     code: 'routing_signal_expired',
     summary: `${signal.reasonCode} expired without recovery evidence`,
@@ -212,15 +206,24 @@ function reduceCandidateSignals(input: {
     return {
       availability: 'unknown',
       freshness: 'stale',
-      reasons: expired.map((signal) => inactiveSignalReason(signal)),
+      reasons: expired.map(expiredSignalReason),
     };
   }
   if (recovered.length > 0) {
     recovered.sort((left, right) => compareIdentity(left.closer, right.closer));
+    const latest = recovered[recovered.length - 1].closer;
     return {
       availability: 'available',
       freshness: 'fresh',
-      reasons: recovered.map(({ signal, closer }) => inactiveSignalReason(signal, closer)),
+      // Summarize records, not incidents: one probe can close many assertions.
+      // The latest immutable recovery is enough to drill into its full provenance.
+      reasons: [
+        {
+          code: 'routing_signal_recovered',
+          summary: `已恢复 ${recovered.length} 条历史状态记录`,
+          sourceRefs: [latest.eventId],
+        },
+      ],
     };
   }
   return { availability: 'available', freshness: 'fresh', reasons: [] };
@@ -279,7 +282,7 @@ export function reduceRoutingContext(rawInput: ReduceRoutingContextInput): Routi
   );
   const profileHeads = selectProfileHeads(profiles);
   const profileDiagnostics = rawInput.profileDiagnostics ?? [];
-  const closures = routingSignalClosures(signalEvents);
+  const closures = rawInput.signalClosures ?? routingSignalClosures(signalEvents);
 
   const projectedCandidates: CandidateProjection[] = candidates
     .map((binding) => {

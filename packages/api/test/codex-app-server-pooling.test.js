@@ -1,11 +1,9 @@
 import assert from 'node:assert/strict';
-import { execFile, execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { after, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { promisify } from 'node:util';
 import Fastify from 'fastify';
 import { InvocationRegistry } from '../dist/domains/cats/services/agents/invocation/InvocationRegistry.js';
 import {
@@ -20,6 +18,7 @@ import { pluginNativeActionRoutes } from '../dist/routes/plugin-native-action-ro
 import { getCliExecutionExit, isCliExecutionRunning } from '../dist/utils/CliExecutionObservation.js';
 import { createHarness, sessionOptions } from './helpers/codex-host-pool-harness.js';
 import { fakeL0Compiler } from './helpers/fake-l0-compiler.js';
+import { callMcpProbe, writeMcpProbe } from './helpers/mcp-probe.js';
 
 class AsyncInbox {
   #values = [];
@@ -238,20 +237,19 @@ for (const resumeKind of ['replacement', 'cold', 'unregistered-project']) {
   test(`${resumeKind} pooled resume authenticates a real plugin wrapper child with the current credential file`, async (t) => {
     const project = mkdtempSync(join(credsDir, 'plugin-wrapper-'));
     const childPath = join(project, 'native-action-child.mjs');
-    writeFileSync(
+    writeMcpProbe(
       childPath,
       `
-      import { readFileSync } from 'node:fs';
       let credential;
       try { credential = JSON.parse(readFileSync(process.env.CAT_CAFE_CREDENTIAL_FILE, 'utf8')); }
-      catch { process.stdout.write(JSON.stringify({ credentialReadable: false })); process.exit(0); }
+      catch { return { credentialReadable: false }; }
       const response = await fetch(process.env.CAT_CAFE_API_URL + '/api/plugin-runtime/action', {
         method: 'POST', headers: { 'content-type': 'application/json',
           'x-invocation-id': credential.invocationId, 'x-callback-token': credential.callbackToken,
           'x-clowder-plugin-action-token': process.env.CLOWDER_PLUGIN_ACTION_TOKEN },
         body: JSON.stringify({ method: 'fixture.run', input: {} }),
       });
-      process.stdout.write(JSON.stringify({ credentialReadable: true, status: response.status }));
+      return { credentialReadable: true, status: response.status };
     `,
     );
     const registry = new InvocationRegistry();
@@ -383,11 +381,7 @@ for (const resumeKind of ['replacement', 'cold', 'unregistered-project']) {
         !JSON.stringify(server).includes(activation.CLOWDER_PLUGIN_ACTION_TOKEN),
         'activation secrets must remain outside the provider config',
       );
-      const { stdout } = await promisify(execFile)(server.command, server.args, {
-        env: { ...process.env, ...server.env },
-        timeout: 10_000,
-      });
-      return JSON.parse(stdout);
+      return callMcpProbe(server);
     };
     let oldPath;
     let seed;
@@ -431,12 +425,8 @@ for (const resumeKind of ['replacement', 'cold', 'unregistered-project']) {
         credentialFile: currentPath,
       });
       const shared = servers[pluginName];
-      const { stdout } = await promisify(execFile)(shared.command, shared.args, {
-        env: { ...process.env, ...shared.env },
-        timeout: 10_000,
-      });
       assert.deepEqual(
-        JSON.parse(stdout),
+        await callMcpProbe(shared),
         { credentialReadable: true, status: 200 },
         'shared provider must use the current Host activation despite a stale project copy',
       );
@@ -451,25 +441,19 @@ for (const resumeKind of ['replacement', 'cold', 'unregistered-project']) {
         credentialFile: currentPath,
       });
       assert.equal(blocked[pluginName], undefined, 'Host connection binding must not lift an explicit member disable');
-      const stale = await promisify(execFile)(process.execPath, [childPath], {
-        env: { ...process.env, ...envFor(current), ...activation, CAT_CAFE_CREDENTIAL_FILE: currentPath },
-        timeout: 10_000,
+      const stale = await callMcpProbe({
+        command: process.execPath,
+        args: [childPath],
+        env: { ...envFor(current), ...activation, CAT_CAFE_CREDENTIAL_FILE: currentPath },
       });
-      assert.deepEqual(
-        JSON.parse(stale.stdout),
-        { credentialReadable: true, status: 401 },
-        'revoked activation must remain rejected',
-      );
+      assert.deepEqual(stale, { credentialReadable: true, status: 401 }, 'revoked activation must remain rejected');
       const hostConnection = actions.environment('wrapper-fixture', 'native');
-      const sameChild = async () =>
-        JSON.parse(
-          (
-            await promisify(execFile)(process.execPath, [childPath], {
-              env: { ...process.env, ...envFor(current), ...hostConnection, CAT_CAFE_CREDENTIAL_FILE: currentPath },
-              timeout: 10_000,
-            })
-          ).stdout,
-        );
+      const sameChild = () =>
+        callMcpProbe({
+          command: process.execPath,
+          args: [childPath],
+          env: { ...envFor(current), ...hostConnection, CAT_CAFE_CREDENTIAL_FILE: currentPath },
+        });
       actions.deactivate('wrapper-fixture');
       assert.equal((await sameChild()).status, 401, 'a disabled plugin must not execute');
       actions.activate(authority, actions.generation('wrapper-fixture'), async () => {
@@ -1164,13 +1148,12 @@ test('plugin MCP wrapper follows the replacement host credential file instead of
   const configPath = join(credsDir, '.cat-cafe', 'capabilities.json');
   const originalConfig = readFileSync(configPath, 'utf8');
   const fixture = join(credsDir, 'plugin-credential-probe.mjs');
-  writeFileSync(
+  writeMcpProbe(
     fixture,
-    [
-      "import { readFileSync } from 'node:fs';",
-      "const credential = JSON.parse(readFileSync(process.env.CAT_CAFE_CREDENTIAL_FILE, 'utf8'));",
-      'console.log(JSON.stringify({ invocationId: credential.invocationId }));',
-    ].join('\n'),
+    `
+    const credential = JSON.parse(readFileSync(process.env.CAT_CAFE_CREDENTIAL_FILE, 'utf8'));
+    return { invocationId: credential.invocationId };
+  `,
   );
   const config = JSON.parse(originalConfig);
   config.capabilities.push({
@@ -1227,9 +1210,7 @@ test('plugin MCP wrapper follows the replacement host credential file instead of
     const resume = pool.wires.at(-1).writes.find((m) => m.method === 'thread/resume');
     const server = Object.entries(resume.params.config.mcp_servers).find(([id]) => id.includes('github-tracking'))?.[1];
     assert.ok(server, 'the declared plugin must remain available');
-    const result = JSON.parse(
-      execFileSync(server.command, server.args, { env: { ...process.env, ...server.env }, encoding: 'utf8' }),
-    );
+    const result = await callMcpProbe(server);
     assert.equal(result.invocationId, 'plugin-current');
     assert.equal(JSON.parse(readFileSync(oldPath, 'utf8')).invocationId, 'plugin-seed');
     assert.doesNotMatch(JSON.stringify(resume), /seed-token|current-token|CAT_CAFE_CALLBACK_TOKEN/);

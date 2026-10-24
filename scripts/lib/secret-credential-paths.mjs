@@ -1,0 +1,86 @@
+import { realpathSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { basename, resolve, sep } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+function credentialName(path, cwd) {
+  const normalized = path.replaceAll('\\', '/').toLowerCase();
+  const name = basename(normalized);
+  if (/^\.env(?:\..+)?$/.test(name) && !/^\.env\.(?:example|sample|template)$/.test(name)) return true;
+  if (['.mcp.json', '.netrc', '.npmrc', 'id_rsa', 'id_ed25519', 'id_ecdsa'].includes(name)) return true;
+  if (/(?:^|\/)\.kimi-code\/(?:config\.toml|mcp\.json|credentials(?:\/.*)?)$/.test(normalized)) return true;
+  if (/(?:^|\/)\.dsh\/\.credentials\.ya?ml$/.test(normalized)) return true;
+  if (/(?:^|\/)\.cat-cafe\/oc-config-[^/]+\/opencode\.json$/.test(normalized)) return true;
+  if (normalized === resolve(cwd, homedir(), '.claude/settings.json').toLowerCase()) return true;
+  if (/(?:^|\/)(?:\.cat-cafe\/mcp-creds|cat-cafe-credentials)\//.test(normalized)) return true;
+  if (/\.gemini\/(?:oauth_creds\.json|config\/mcp_config\.json)$/.test(normalized)) return true;
+  return /(?:^|\/)(?:\.aws\/credentials|\.config\/gh\/hosts\.ya?ml|\.codex\/auth\.json|\.claude\/\.credentials\.json|\.gemini\/[^\n]*\/(?:[^/]*token[^/]*|oauth_creds\.json))$/.test(
+    normalized,
+  );
+}
+
+function configuredCredentialPaths(cwd) {
+  const files = [
+    'CAT_CAFE_CREDENTIAL_FILE',
+    'CAT_CAFE_NATIVE_TURN_CREDENTIAL_FILE',
+    'CODEX_CREDENTIALS_PATH',
+    'CLAUDE_CREDENTIALS_PATH',
+    'GOOGLE_APPLICATION_CREDENTIALS',
+  ]
+    .map((key) => process.env[key])
+    .filter(Boolean);
+  const directories = [];
+  for (const [key, filenames] of [
+    ['CODEX_HOME', ['auth.json']],
+    ['CLAUDE_CONFIG_DIR', ['.credentials.json', 'settings.json']],
+    ['GEMINI_HOME', ['oauth_creds.json', 'config/mcp_config.json']],
+    ['GH_CONFIG_DIR', ['hosts.yml']],
+    ['XDG_CONFIG_HOME', ['gh/hosts.yml']],
+  ]) {
+    if (process.env[key]) files.push(...filenames.map((name) => resolve(cwd, process.env[key], name)));
+  }
+  const mcp = process.env.CAT_CAFE_MCP_CREDS_DIR?.trim();
+  const kimi = process.env.KIMI_CODE_HOME && resolve(cwd, process.env.KIMI_CODE_HOME);
+  const dsh = process.env.DSH_HOME && resolve(cwd, process.env.DSH_HOME);
+  if (mcp) directories.push(mcp);
+  if (kimi) {
+    files.push(resolve(kimi, 'config.toml'), resolve(kimi, 'mcp.json'));
+    directories.push(resolve(kimi, 'credentials'));
+  }
+  if (dsh) files.push(resolve(dsh, '.credentials.yaml'));
+  return { files, directories };
+}
+
+function pathIdentities(path, cwd = process.cwd()) {
+  const absolute = resolve(cwd, path);
+  try {
+    return [absolute, realpathSync(absolute)];
+  } catch {
+    // A not-yet-created configured source still has its lexical identity.
+    return [absolute];
+  }
+}
+
+function configuredCredentialMatch(requested, cwd) {
+  const { files, directories } = configuredCredentialPaths(cwd);
+  if (files.some((file) => pathIdentities(file, cwd).some((identity) => requested.includes(identity)))) return true;
+  return directories.some((directory) =>
+    pathIdentities(directory, cwd).some((identity) =>
+      requested.some((path) => path === identity || path.startsWith(`${identity}${sep}`)),
+    ),
+  );
+}
+
+// Follow symlinks for an explicit file operand; never open its contents to decide.
+export function isCredentialSource(path, cwd = process.cwd()) {
+  if (typeof path !== 'string' || !path || path.includes('\0')) return false;
+  if (/^file:/i.test(path)) {
+    try {
+      path = fileURLToPath(path);
+    } catch {
+      return true;
+    }
+  }
+  const requested = pathIdentities(path, cwd);
+  return requested.some((path) => credentialName(path, cwd)) || configuredCredentialMatch(requested, cwd);
+}

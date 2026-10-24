@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { chromium } from '../../../ppt-forge/node_modules/playwright/index.mjs';
 import { availablePort, stopChild, waitForHttp } from './f290-runtime-journey.harness.mjs';
 import { createInboxOriginalApprovalFixture } from './f322-inbox-original-approval.fixture.mjs';
+import { captureOriginalResultDesign } from './f322-original-approval-design.journey.mjs';
 import { createNextDevTestEnvironment } from './next-dev-test-environment.mjs';
 
 const web = fileURLToPath(new URL('../..', import.meta.url)),
@@ -67,8 +68,8 @@ function resultSentence(kind, language, verb) {
       ? /written to your profile/i
       : /已同意 · 已写入档案/
     : language === 'en'
-      ? /rejected|declined/i
-      : /已拒绝|已驳回/;
+      ? /\bDeclined\b/
+      : /已拒绝/;
 }
 async function verifyProfileTechnicalLabels({ page, card, language, evidence, name }) {
   const title = language === 'en' ? 'Technical details' : '技术详情';
@@ -215,6 +216,14 @@ export function registerOriginalApprovalJourneys(evidenceRoot) {
           );
           assert.equal(await card.getByTestId('decision-result-details').count(), 0);
           await freezeVisibleCard(page, card);
+          chatRender.at(-1).result = await captureOriginalResultDesign({
+            card,
+            record,
+            language,
+            width,
+            verb: chatVerb,
+            evidence,
+          });
           await page.screenshot({ path: path.join(evidence, `chat-${record.kind}-collapsed.png`), fullPage: true });
           await card.locator('button[aria-expanded="false"]').click();
           await card.getByTestId('decision-result-label').waitFor();
@@ -225,6 +234,10 @@ export function registerOriginalApprovalJourneys(evidenceRoot) {
           if (record.kind === 'F231')
             await verifyProfileTechnicalLabels({ page, card, language, evidence, name: `chat-${record.proposalId}` });
           await freezeVisibleCard(page, card);
+          await card.screenshot({
+            path: path.join(evidence, `chat-${record.kind}-${chatVerb}-expanded.png`),
+            animations: 'disabled',
+          });
           await page.screenshot({ path: path.join(evidence, `chat-${record.kind}-after.png`), fullPage: true });
         }
         assert.equal(await sources.readProfile(), inverse ? sources.before : sources.after);
@@ -319,6 +332,11 @@ export function registerOriginalApprovalJourneys(evidenceRoot) {
           await receipt.getByTestId('decision-result-label').waitFor();
           if (record === expired)
             assert.equal(await receipt.getByTestId('decision-result-dot').getAttribute('data-status'), 'expired');
+          if (record === expired)
+            assert.match(
+              await receipt.getByTestId('decision-result-label').innerText(),
+              language === 'en' ? /^Expired(?: ·|$)/ : /^已过期(?: ·|$)/,
+            );
           if (record === expired)
             assert.doesNotMatch(
               await receipt.getByTestId('decision-result-label').innerText(),

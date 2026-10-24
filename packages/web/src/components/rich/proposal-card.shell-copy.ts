@@ -113,7 +113,7 @@ export const proposalCardCopy = defineShellCopy({
     edit: 'Edit',
     cancel: 'Cancel changes',
     submitting: 'Submitting…',
-    approved: 'Approved · Conversation created',
+    approved: 'Approved · conversation created',
     rejected: 'Rejected',
     withdrawn: 'Withdrawn',
     open: 'Open new conversation',

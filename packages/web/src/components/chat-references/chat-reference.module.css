@@ -288,12 +288,46 @@
   -webkit-box-orient: vertical;
   white-space: normal;
 }
-.prStatus {
+.prStatus,
+.prRepository {
+  --pr-meta-gap: 4px;
+  --pr-meta-separator-width: calc(1ch + var(--pr-meta-gap));
+  display: block;
+  overflow-x: clip;
+}
+.prMetaFlow {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 4px;
+  row-gap: var(--pr-meta-gap);
+  /* Each line starts with a separator slot outside the clip; its text stays available to reading. */
+  margin-inline-start: calc(-1 * var(--pr-meta-separator-width));
+}
+.prStatus {
   margin-top: 3px;
+}
+.prMetaItem,
+.prMetaLeading {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+  max-width: 100%;
+  white-space: nowrap;
+}
+.prMetaLeading {
+  /* The state pill keeps its ordinary gap before the first, separator-free metadata item. */
+  margin-inline-end: calc(var(--pr-meta-gap) - var(--pr-meta-separator-width));
+}
+.prMetaSeparator {
+  flex: none;
+  inline-size: var(--pr-meta-separator-width);
+  white-space: pre;
+  text-align: end;
+}
+.prMetaValue {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .prStatus .pill {
   margin: 0 2px 0 0;

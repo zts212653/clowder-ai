@@ -943,7 +943,11 @@ describe('writeOpenCodeRuntimeConfig', () => {
       );
 
       const content = JSON.parse(readFileSync(configPath, 'utf-8'));
-      assert.deepEqual(content.mcp['external-command-only'].command, ['external-tool']);
+      const external = content.mcp['external-command-only'];
+      assert.match(external.command[1], /secret-mcp-proxy\.js$/);
+      const upstream = JSON.parse(external.environment.CAT_CAFE_SECRET_MCP_PROXY_SPEC);
+      assert.equal(upstream.command, 'external-tool');
+      assert.deepEqual(upstream.args, []);
     } finally {
       rmSync(configRoot, { recursive: true, force: true });
       rmSync(runtimeRoot, { recursive: true, force: true });
@@ -1046,11 +1050,10 @@ describe('writeOpenCodeRuntimeConfig', () => {
       const content = JSON.parse(readFileSync(configPath, 'utf-8'));
       const limb = content.mcp['cat-cafe-limb'];
       assert.ok(limb, 'external cat-cafe-limb must be present');
-      assert.deepEqual(
-        limb.command,
-        ['my-custom-limb-server', '--port', '9999'],
-        'external source must keep original command, not rewrite to split entrypoint',
-      );
+      assert.match(limb.command[1], /secret-mcp-proxy\.js$/);
+      const upstream = JSON.parse(limb.environment.CAT_CAFE_SECRET_MCP_PROXY_SPEC);
+      assert.equal(upstream.command, 'my-custom-limb-server', 'external must not become the built-in limb entrypoint');
+      assert.deepEqual(upstream.args, ['--port', '9999']);
     } finally {
       rmSync(configRoot, { recursive: true, force: true });
       rmSync(runtimeRoot, { recursive: true, force: true });

@@ -53,6 +53,7 @@ import { findGitBashPath } from './claude-agent-win.js';
 import { composeManagedSettingsDocument } from './claude-compaction-launch-plan.js';
 import { resolveClaudeMcpConfig } from './claude-mcp-config.js';
 import { extractClaudeUsage, isResultErrorEvent, transformClaudeEvent } from './claude-ndjson-parser.js';
+import { withClaudeSecretHooks } from './claude-secret-hook-settings.js';
 import { compileL0ViaSubprocess } from './l0-compiler.js';
 import {
   createMcpSchemaDeliveryLaunchConfig,
@@ -626,15 +627,13 @@ export class ClaudeAgentService implements AgentService {
             claudeSettingSources(args),
           )
         : userSettingsValue;
-      if (compactionPlan?.ready) {
-        preCompactSettingsPath = writePreCompactSettingsToTempFile(
-          composeManagedSettingsDocument(compactionPlan, effectiveUserSettings, options?.workingDirectory),
-        );
-        args.push('--settings', preCompactSettingsPath);
-      } else if (effectiveUserSettings !== undefined) {
-        // No managed carrier resolved — the user's own --settings passes through untouched.
-        args.push('--settings', effectiveUserSettings);
-      }
+      const composedSettings = compactionPlan?.ready
+        ? composeManagedSettingsDocument(compactionPlan, effectiveUserSettings, options?.workingDirectory)
+        : effectiveUserSettings;
+      preCompactSettingsPath = writePreCompactSettingsToTempFile(
+        withClaudeSecretHooks(composedSettings, options?.workingDirectory),
+      );
+      args.push('--settings', preCompactSettingsPath);
 
       const claudeCommand = resolveCliCommand('claude');
       log.info({ catId: this.catId, resolved: claudeCommand ?? null }, 'Resolving claude CLI command');
@@ -673,7 +672,7 @@ export class ClaudeAgentService implements AgentService {
         if (v === null) {
           safeEnvSummary[k] = '(cleared)';
         } else if (/key|secret|token|password|cookie|auth|session|bearer|credential/i.test(k)) {
-          safeEnvSummary[k] = v.slice(0, 6) + '***';
+          safeEnvSummary[k] = '[REDACTED]';
         } else {
           safeEnvSummary[k] = v;
         }

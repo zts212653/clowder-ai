@@ -225,7 +225,8 @@ describe('Turn resolvers D1-D10', () => {
     const result = new mod.D9Resolver().resolve(input);
     assert.equal(result.status, 'fired');
     // Only first 2 items
-    assert.equal(result.vars.UNROUTED_MENTIONS, '@unknown1、@unknown2');
+    assert.match(result.vars.ROUTING_FEEDBACK, /@unknown1、@unknown2/);
+    assert.doesNotMatch(result.vars.ROUTING_FEEDBACK, /@unknown3/);
   });
 
   it('D10 fires with critique tag', () => {

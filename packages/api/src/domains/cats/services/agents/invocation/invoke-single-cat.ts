@@ -1,16 +1,19 @@
-import { claudeExecutionAccountSnapshot, redactClaudeLaunchToken } from '../../../../../config/claude-token-account.js';
+import { redactClaudeLaunchToken } from '../../../../../config/claude-token-account.js';
 import type {
   ContextSourceAdmission,
   ContextSourceDecision,
   ContextSourceIngress,
 } from '../../../../memory/cue/ContextSourceAdmission.js';
 import { ContextSourceWorkBudget } from '../../../../memory/cue/ContextSourceWorkBudget.js';
+import { type FrozenExecutionBinding, freezeExecutionAccountBinding } from './execution-account-binding.js';
+import { freezeExecutionWorkspace } from './execution-workspace.js';
 import { InvocationServiceScope } from './invocation-service-scope.js';
 import {
   isConfirmedNativeAuthFailure,
   NATIVE_AUTH_CONTINUATION_PROMPT,
   type NativeAuthContinuation,
 } from './native-auth-continuation.js';
+import { protectNativeProviderResult } from './secret-provider-result.js';
 /**
  * Single Cat Invocation
  * 单猫调用的核心逻辑，从 AgentRouter 提取。
@@ -51,18 +54,8 @@ import {
   type SessionRecord,
 } from '@cat-cafe/shared';
 import { context, SpanStatusCode, trace } from '@opentelemetry/api';
-import {
-  providerRequiresThreadWorkspace,
-  resolveBuiltinClientForProvider,
-  validateRuntimeProviderBinding,
-} from '../../../../../config/account-resolver.js';
-import { AccountStoreVerdictError } from '../../../../../config/account-store-format.js';
-import { resolveBoundAccountRefForCat } from '../../../../../config/cat-account-binding.js';
 import { buildCatGitIdentityEnv } from '../../../../../config/cat-git-identity.js';
 import { getCatModel } from '../../../../../config/cat-models.js';
-import { resolveCatRuntimeAccount } from '../../../../../config/cat-runtime-account.js';
-import { resolveCodexAccountLaunch } from '../../../../../config/codex-account-launch.js';
-import { codexExecutionAccountSnapshot } from '../../../../../config/codex-execution-account.js';
 import { parseOpenCodeModel, resolveEffectiveOpenCodeModel } from '../../../../../config/opencode-model.js';
 import { shouldTakeAction } from '../../../../../config/session-strategy.js';
 import { assertSafeTestConfigRoot } from '../../../../../config/test-config-write-guard.js';
@@ -99,7 +92,6 @@ import { resolveActiveProjectRoot } from '../../../../../utils/active-project-ro
 import { resolveCliCommand } from '../../../../../utils/cli-resolve.js';
 import { resolveCliTimeoutMs } from '../../../../../utils/cli-timeout.js';
 import { findMonorepoRoot, isSameProject } from '../../../../../utils/monorepo-root.js';
-import { resolvePersistentProjectPathDetailed } from '../../../../../utils/persistent-project-path.js';
 import { readProcessActivity } from '../../../../../utils/process-activity-registry.js';
 import { pathsEqual } from '../../../../../utils/project-path.js';
 import { tcpProbe } from '../../../../../utils/tcp-probe.js';
@@ -128,7 +120,6 @@ import {
 } from '../../../../routing-context/RoutingDispatchSignalContract.js';
 import type { AgentPaneRegistry } from '../../../../terminal/agent-pane-registry.js';
 import type { TmuxGateway } from '../../../../terminal/tmux-gateway.js';
-import { resolveBootcampWorkspaceRoot } from '../../bootcamp/workspace-root.js';
 import {
   buildCloudBridgeStatusContent,
   type CloudBridgeAuditContext,
@@ -185,7 +176,6 @@ import {
   supportsProviderContinuityPreflight,
 } from './context-continuity.js';
 import { buildContextManagementHint, queueContextHint, takeContextHintPrefix } from './context-management-hint.js';
-import { canUseDefaultThreadWorkspace, resolveDefaultThreadWorkspace } from './default-thread-workspace.js';
 import {
   applyActiveSessionCapacityPin,
   applyContextBindingToInvocationSnapshot,
@@ -1243,6 +1233,9 @@ export interface InvocationDeps {
  * Per-invocation parameters
  */
 export interface InvocationParams {
+  readonly routingAdmission?: import('@cat-cafe/shared').RoutingAdmissionProvenanceV1;
+  /** Frozen before execution preflight/child creation; never persisted with its private account material. */
+  readonly executionBinding?: FrozenExecutionBinding;
   readonly onRemoteExecutionDispatched?: AgentServiceOptions['onRemoteExecutionDispatched'];
   /** Host-derived Task coordinates and post-Queue-binding launch owner, never package input. */
   readonly liveCompanion?: AgentServiceOptions['liveCompanion'];
@@ -1409,10 +1402,57 @@ export interface InvocationParams {
  * - Accumulating text/metadata from yielded messages
  * - Storing the final response in messageStore
  */
+export async function prepareInvocationExecutionBinding(
+  deps: Pick<InvocationDeps, 'threadStore'>,
+  input: {
+    catId: CatId;
+    threadId: string;
+    userId: string;
+    service?: AgentService;
+    model?: string;
+    signal?: AbortSignal;
+  },
+): Promise<FrozenExecutionBinding> {
+  const catConfig = catRegistry.tryGet(input.catId as string)?.config;
+  const carrier = input.service?.freshnessCarrierCapability?.();
+  const workspace = await freezeExecutionWorkspace({
+    threadStore: deps.threadStore,
+    threadId: input.threadId,
+    userId: input.userId,
+    provider: catConfig?.clientId,
+    ...(input.signal ? { signal: input.signal } : {}),
+    requiresAgyWorkspace:
+      Boolean(input.service && usesAgyNativeCarrier(input.service)) || carrier?.carrier === 'agy_acp',
+  });
+  return freezeExecutionAccountBinding({ catId: input.catId, catConfig, model: input.model, workspace });
+}
+
 export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationParams): AsyncIterable<AgentMessage> {
   const services = new InvocationServiceScope();
   try {
-    yield* invokePreparedSingleCat(deps, { ...params, service: services.pin(params.service) });
+    const service = params.executionBinding ? params.service : services.pin(params.service);
+    let executionBinding: FrozenExecutionBinding;
+    try {
+      executionBinding =
+        params.executionBinding ?? (await prepareInvocationExecutionBinding(deps, { ...params, service }));
+      if (
+        deps.threadStore &&
+        !executionBinding.workspace.workingDirectory &&
+        (usesAgyNativeCarrier(service) || service.freshnessCarrierCapability?.().carrier === 'agy_acp')
+      )
+        throw new Error('AGY requires a thread projectPath before provider startup.');
+    } catch (error) {
+      yield {
+        type: 'error',
+        catId: params.catId,
+        errorCode: 'execution_binding_unavailable',
+        error: error instanceof Error ? error.message : 'Execution binding is unavailable',
+        timestamp: Date.now(),
+      };
+      yield { type: 'done', catId: params.catId, timestamp: Date.now() };
+      return;
+    }
+    yield* invokePreparedSingleCat(deps, { ...params, executionBinding, service });
   } finally {
     await services.dispose();
   }
@@ -1421,7 +1461,9 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
 async function* invokePreparedSingleCat(deps: InvocationDeps, params: InvocationParams): AsyncIterable<AgentMessage> {
   const { registry, sessionManager, threadStore, apiUrl } = deps;
   const { catId, userId, threadId, isLastCat, signal: callerSignal } = params;
-  const service = params.service.forInvocation?.() ?? params.service;
+  const frozenExecutionBinding = params.executionBinding;
+  if (!frozenExecutionBinding) throw new Error('Invocation requires its frozen execution binding');
+  const service = params.service;
   let prompt = params.prompt;
   const invocationPromptAdditions: string[] = [];
   const originTriggerMessageId = params.a2aTriggerMessageId ?? params.executionCausal?.triggerMessageId;
@@ -1443,7 +1485,7 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
   // normal durable child invocation. The bounded Host transport branch runs
   // after invocation creation/body exposure so Queue and F167 can bind the
   // exact source to one terminal outcome.
-  const cloudOnlyConfig = catRegistry.tryGet(catId as string)?.config;
+  const cloudOnlyConfig = frozenExecutionBinding.catConfig;
   const isCloudOnlyInvocation = cloudOnlyConfig?.provider === 'openai-chatgpt-pro';
 
   // F198 Bug #3: a bg carrier has no stable per-conversation sessionId — the
@@ -2100,6 +2142,28 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
       const initialCoveredMessageIds = params.contextPromptFactory ? [] : promptMessageIds;
       const executionCausal = {
         ...(params.executionCausal ?? {}),
+        ...(params.routingDispatchPreflightDecision
+          ? {
+              routingPreflight: {
+                stage: 'execution_preflight' as const,
+                observedAt: params.routingDispatchPreflightDecision.observedAt,
+                ...(params.routingAdmission?.targets.some((target) => target.targetCatId === catId)
+                  ? {
+                      admission: {
+                        stage: params.routingAdmission.stage,
+                        observedAt: params.routingAdmission.observedAt,
+                        ...(params.routingAdmission.snapshotRef
+                          ? { snapshotRef: params.routingAdmission.snapshotRef }
+                          : {}),
+                      },
+                    }
+                  : {}),
+                ...(params.routingDispatchPreflightDecision.snapshotRef
+                  ? { snapshotRef: params.routingDispatchPreflightDecision.snapshotRef }
+                  : {}),
+              },
+            }
+          : {}),
         ...(initialCoveredMessageIds.length > 0 ? { coveredMessageIds: initialCoveredMessageIds } : {}),
       };
       let created;
@@ -2639,36 +2703,20 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
       await refreshInvocationPolicyExecution();
     }
 
-    const catConfig = catRegistry.tryGet(catId as string)?.config;
+    const catConfig = frozenExecutionBinding.catConfig;
     const provider = catConfig?.clientId;
-    const requiresThreadWorkspace = providerRequiresThreadWorkspace(provider) || isAgyNative || isAgyAcp;
-    const workspaceRequiredBy = isAgyNative || isAgyAcp ? 'AGY' : 'OpenCode';
-
     let firstReplyNamingInstruction = '';
-    // Resolve workingDirectory from thread's projectPath
-    let workingDirectory: string | undefined;
-    let threadProjectPath: string | undefined;
-    let bootcampWorkspaceError: Error | undefined;
-    let workspaceResolutionError: Error | undefined;
-    let workspaceResolutionFailureMessage: string | undefined;
+    const { workingDirectory, threadProjectPath } = frozenExecutionBinding.workspace;
+    if (frozenExecutionBinding.workspace.usesDefaultWorkspace)
+      yield { type: 'system_info', catId, content: `本次使用默认工作区：${workingDirectory}`, timestamp: Date.now() };
     if (threadStore) {
-      let thread: Awaited<ReturnType<IThreadStore['get']>> | null | undefined;
-      try {
-        thread = await preflightRace(Promise.resolve(threadStore.get(threadId)), 'threadStore.get', signal);
-      } catch (err) {
-        workspaceResolutionFailureMessage = `Unable to resolve thread workspace for ${threadId}: ${err instanceof Error ? err.message : String(err)}`;
-        log.warn(
-          { catId, threadId, err },
-          'threadStore.get failed during workspace resolution — proceeding without workingDirectory',
-        );
-      }
+      const thread = frozenExecutionBinding.workspace.thread;
       if (thread) {
         if (threadId !== DEFAULT_THREAD_ID && !thread.systemKind && thread.titleSource === 'temporary') {
           firstReplyNamingInstruction =
             '这条对话尚未起名。首次回话时，请调用 cat_cafe_set_thread_metadata 的 title，起一个概括这次任务的短名（不照抄用户原话）。用户自己填过或改过的名字会受保护；猫只起一次名。';
         }
         if (thread.createdAt) threadCreatedAt = thread.createdAt;
-        if (thread.projectPath) threadProjectPath = thread.projectPath;
         // #836: Reborn session strategy — force new session every invocation.
         // Uses store lookup (isRebornSession) instead of thread field because
         // Redis stores strategy in separate hash fields not hydrated by get().
@@ -2696,96 +2744,9 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
           sessionId = undefined;
           log.info({ catId, threadId }, '#836: reborn session strategy — forcing new session');
         }
-        if (thread?.projectPath && thread.projectPath !== 'default') {
-          // F101: Game threads use virtual projectPaths (e.g. 'games/werewolf') for
-          // categorization only — they are not real filesystem directories. Skip them
-          // to avoid triggering the F070 governance gate on a non-existent path.
-          if (thread.projectPath.startsWith('games/')) {
-            workspaceResolutionFailureMessage = `${workspaceRequiredBy} requires a filesystem thread projectPath for ${threadId}; virtual game projectPath ${thread.projectPath} cannot be used as a working directory.`;
-          } else {
-            const validatedProjectPath = await resolvePersistentProjectPathDetailed(thread.projectPath);
-            if (!validatedProjectPath.ok) {
-              const isTransient = ['io_error', 'runtime_root_invalid', 'runtime_workspace_missing'].includes(
-                validatedProjectPath.reason,
-              );
-              workspaceResolutionFailureMessage = isTransient
-                ? `Unable to validate thread projectPath for ${threadId}: ${thread.projectPath}. ${validatedProjectPath.message ?? 'Transient filesystem error.'} Retry; if it persists, re-bind the thread's project workspace.`
-                : `Invalid thread projectPath for ${threadId}: ${thread.projectPath}. Expected an existing directory under allowed roots.`;
-              log.warn(
-                {
-                  catId,
-                  threadId,
-                  projectPath: thread.projectPath,
-                  reason: validatedProjectPath.reason,
-                  message: validatedProjectPath.message,
-                },
-                'thread projectPath failed validation during workspace resolution',
-              );
-            } else {
-              workingDirectory = validatedProjectPath.path;
-              if (validatedProjectPath.remappedFrom && threadStore.updateProjectPath) {
-                try {
-                  await preflightRace(
-                    Promise.resolve(threadStore.updateProjectPath(threadId, validatedProjectPath.path)),
-                    'updateProjectPath',
-                    signal,
-                  );
-                  log.info(
-                    {
-                      catId,
-                      threadId,
-                      previousProjectPath: validatedProjectPath.remappedFrom,
-                      projectPath: validatedProjectPath.path,
-                    },
-                    'migrated thread projectPath out of the runtime worktree',
-                  );
-                } catch (migrationErr) {
-                  log.warn(
-                    { catId, threadId, err: migrationErr, projectPath: validatedProjectPath.path },
-                    'failed to persist runtime projectPath migration; continuing with persistent workspace',
-                  );
-                }
-              }
-            }
-          }
-        } else if (thread?.bootcampState) {
-          const bootcampWorkspace = await resolveBootcampWorkspaceRoot();
-          if (bootcampWorkspace.ok) {
-            workingDirectory = bootcampWorkspace.projectPath;
-          } else {
-            bootcampWorkspaceError = new Error(bootcampWorkspace.error);
-          }
-        } else if (provider === 'opencode' && canUseDefaultThreadWorkspace(thread, threadId, userId)) {
-          const defaultWorkspace = await resolveDefaultThreadWorkspace();
-          if (defaultWorkspace.ok) {
-            workingDirectory = defaultWorkspace.path;
-            yield {
-              type: 'system_info' as const,
-              catId,
-              content: `本次使用默认工作区：${workingDirectory}`,
-              timestamp: Date.now(),
-            };
-          } else {
-            workspaceResolutionFailureMessage = defaultWorkspace.error;
-          }
-        } else if (requiresThreadWorkspace) {
-          workspaceResolutionFailureMessage = `${workspaceRequiredBy} requires a thread projectPath for ${threadId}. Bind the thread to a project workspace before spawning ${workspaceRequiredBy}.`;
-        }
       }
     }
-    if (requiresThreadWorkspace && threadStore && !workingDirectory && !bootcampWorkspaceError) {
-      workspaceResolutionError = new Error(
-        workspaceResolutionFailureMessage ??
-          `${workspaceRequiredBy} requires a thread projectPath for ${threadId}. Bind the thread to a project workspace before spawning ${workspaceRequiredBy}.`,
-      );
-    }
-    if (bootcampWorkspaceError) {
-      throw bootcampWorkspaceError;
-    }
-    if (workspaceResolutionError) {
-      throw workspaceResolutionError;
-    }
-    const workingProjectRoot = workingDirectory ? findMonorepoRoot(workingDirectory) : undefined;
+    const workingProjectRoot = frozenExecutionBinding.workspace.workingProjectRoot;
     const sessionWorkspaceBinding =
       provider === 'opencode' && workingDirectory
         ? {
@@ -2933,69 +2894,10 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
 
     // F127 account injection:
     // Members bind to a concrete accountRef (builtin oauth account or generic api_key account).
-    const builtinClient = provider ? resolveBuiltinClientForProvider(provider) : null;
-    // #1208: the route-owned snapshot captures the concrete service model.
-    // Every downstream account/config/provider decision consumes that same
-    // value instead of re-reading a potentially stale catalog default.
     const defaultModel = invocationCapacitySnapshot?.model?.trim() || catConfig?.defaultModel?.trim() || undefined;
-    // Account resolution, proxy registration, and runtime config always use the
-    // runtime root (process.cwd()), NOT thread.projectPath.  catRegistry loads
-    // from the runtime root at startup — reading a divergent catalog (e.g. the
-    // dev worktree pointed to by thread.projectPath) misses runtime-only accounts.
-    // workingProjectRoot is still used for shared-state preflight + cat cwd.
-    const projectRoot = resolveActiveProjectRoot(process.cwd());
-    const effectiveAccountRef = resolveBoundAccountRefForCat(projectRoot, catId, catConfig);
-    const resolveRuntimeAccount = async () => {
-      if (!builtinClient) return null;
-      // Yield to event loop so preflight warnings are delivered before account resolution.
-      await Promise.resolve();
-      const runtime = resolveCatRuntimeAccount(projectRoot, catId, builtinClient, catConfig);
-      if (effectiveAccountRef && !runtime) {
-        throw new Error(`bound account "${effectiveAccountRef}" not found`);
-      }
-      return runtime;
-    };
-    const assertCompatibleRuntimeAccount = <T extends { id: string }>(
-      account: (T & Parameters<typeof validateRuntimeProviderBinding>[1]) | null,
-    ) => {
-      if (!provider || !account) return account;
-      const compatibilityError = validateRuntimeProviderBinding(provider, account, defaultModel);
-      if (compatibilityError) {
-        throw new Error(compatibilityError);
-      }
-      return account;
-    };
-    const isExplicitBindingCompatibilityError = (err: unknown): err is Error =>
-      err instanceof Error &&
-      (/bound provider profile/i.test(err.message) || /model ".+" is not available on provider/i.test(err.message));
-    const isBoundAccountResolutionError = (err: unknown): err is Error =>
-      err instanceof Error && /bound account ".+" not found/i.test(err.message);
-
-    // Resolve account first, then use its protocol for env injection.
-    // For API Key accounts, protocol is declared on the account itself.
-    // For builtin OAuth accounts, protocol comes from the provider mapping.
-    let resolvedAccount: Awaited<ReturnType<typeof resolveRuntimeAccount>> = null;
-    try {
-      resolvedAccount = assertCompatibleRuntimeAccount(await resolveRuntimeAccount());
-    } catch (err) {
-      // Absence may use ambient CLI auth; a malformed/torn/divergent store may not.
-      if (err instanceof AccountStoreVerdictError) throw err;
-      if (isExplicitBindingCompatibilityError(err) || isBoundAccountResolutionError(err)) {
-        throw err;
-      }
-      if (effectiveAccountRef) {
-        throw new Error(`failed to resolve bound account "${effectiveAccountRef}"`);
-      }
-    }
-
-    // Fail fast when an api_key account has no credential — otherwise the child
-    // process silently receives no auth and produces cryptic errors.
-    if (resolvedAccount?.authType === 'api_key' && !resolvedAccount.apiKey) {
-      throw new Error(
-        `account "${resolvedAccount.id}" is configured as api_key but has no API key set — ` +
-          'add the key in Hub > account settings',
-      );
-    }
+    const projectRoot = frozenExecutionBinding.projectRoot;
+    const effectiveAccountRef = frozenExecutionBinding.effectiveAccountRef;
+    const resolvedAccount = frozenExecutionBinding.resolvedAccount;
 
     // clowder-ai#340: Protocol is fully derived from client/provider identity — account.protocol retired.
     // Non-opencode clients have a fixed protocol. OpenCode derives protocol from the
@@ -3929,16 +3831,8 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
       await deps.registry.setExpectedCompactionCarrier(invocationId, compactionLaunchPlan.carrierIdentity);
     }
 
-    const codexAccountLaunch =
-      provider === 'openai' && resolvedAccount
-        ? resolveCodexAccountLaunch(resolvedAccount, { cwd: workingProjectRoot })
-        : undefined;
-    const executionAccount =
-      resolvedAccount && codexAccountLaunch
-        ? codexExecutionAccountSnapshot(resolvedAccount, codexAccountLaunch)
-        : provider === 'anthropic' && resolvedAccount?.claude
-          ? claudeExecutionAccountSnapshot(resolvedAccount)
-          : undefined;
+    const codexAccountLaunch = frozenExecutionBinding.codexAccountLaunch;
+    const executionAccount = frozenExecutionBinding.executionAccount;
     const requiresImportedHistory =
       activeSessionRecordForResume?.externalImport?.cliSessionId === sessionId && Boolean(sessionId);
     const baseOptions: AgentServiceOptions = {
@@ -4304,7 +4198,7 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
               // gateways. Keep context_health observability but do not act on it.
               // Policy remains immutable; missing execution evidence produces
               // degraded/unavailable status before this branch, never a fallback.
-              const provider = catRegistry.tryGet(catId as string)?.config.clientId;
+              const provider = frozenExecutionBinding.catConfig?.clientId;
               const profileMode = callbackEnv[ANTHROPIC_PROFILE_MODE_KEY];
               const strategy = invocationPolicySnapshot.config;
               const isAnthropicApiKey = provider === 'anthropic' && profileMode === ANTHROPIC_PROFILE_MODE_API_KEY;
@@ -5674,7 +5568,7 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
           activeServiceIterator = null;
           break;
         }
-        let msg = iterResult.value;
+        let msg = await protectNativeProviderResult(iterResult.value, options);
         if (msg.nativeGoalObservation) {
           if (!threadStore || !deps.sessionChainStore) continue;
           const projected = await projectNativeGoalMessage({

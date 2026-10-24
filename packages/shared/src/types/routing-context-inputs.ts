@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { routingCapacityFactsV1Schema } from './routing-capacity-facts.js';
 import {
   addRoutingDuplicateIssues,
   ROUTING_CONTEXT_VERSION,
@@ -223,6 +224,7 @@ export const routingCandidateBindingV1Schema = z
     catId: routingOwnerIdSchema,
     providerId: routingIdentifierSchema,
     provenQuotaPools: z.array(routingQuotaPoolBindingV1Schema).max(32),
+    capacityFacts: routingCapacityFactsV1Schema.optional(),
   })
   .strict()
   .superRefine((candidate, ctx) => {

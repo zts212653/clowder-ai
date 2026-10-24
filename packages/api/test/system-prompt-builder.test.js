@@ -1251,6 +1251,20 @@ describe('SystemPromptBuilder', () => {
     assert.ok(ctx.includes('@opus'), 'Should mention the target cat');
   });
 
+  test('void hold feedback is a factual wait reconciliation rather than a self-mention routing instruction', async () => {
+    const { buildInvocationContext } = await import('../dist/domains/cats/services/context/SystemPromptBuilder.js');
+    const ctx = buildInvocationContext({
+      catId: 'codex',
+      mode: 'independent',
+      teammates: ['opus'],
+      mcpAvailable: true,
+      mentionRoutingFeedback: { sourceTimestamp: Date.now(), items: [{ targetCatId: 'codex', reason: 'void_hold' }] },
+    });
+    assert.match(ctx, /等待对账/);
+    assert.doesNotMatch(ctx, /上次你提到了.*@codex/);
+    assert.doesNotMatch(ctx, /请.*hold_ball/);
+  });
+
   test('buildInvocationContext does not contain static identity or MCP tools', async () => {
     const { buildInvocationContext } = await import('../dist/domains/cats/services/context/SystemPromptBuilder.js');
     const ctx = buildInvocationContext({

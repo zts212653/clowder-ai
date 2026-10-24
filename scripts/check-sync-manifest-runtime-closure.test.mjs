@@ -945,16 +945,36 @@ describe('outbound sync runtime closure', { skip: !isHomeRepo && 'sync manifest 
     );
   });
 
-  // Behavioural, not textual: run the real blocking grep the way Step 4 runs it, over file types
-  // the sanitizer exports but cannot redact. A secret in exported CommonJS used to be invisible.
-  it('blocks a secret sentinel in every sanitized text type the scan must see', () => {
+  // Exercise the secret scanner and retained privacy grep separately. Both must
+  // see every sanitized type; the content scanner additionally covers binary/unlisted paths.
+  it('blocks secret and private-path sentinels in every sanitized text type', () => {
     const syncScript = readFileSync(SYNC_SCRIPT_PATH, 'utf8');
     const includes = readSanitizedTextExtensions(syncScript).map((ext) => `--include=*.${ext}`);
     const fixtureDir = mkdtempSync(join(tmpdir(), 'scan-includes-'));
     try {
       const sentinels = ['cjs', 'ps1', 'py', 'bat', 'iss', 'html', 'mjs', 'css'];
+      const secret = ['ghp', '_', 'V'.repeat(36)].join('');
       for (const ext of sentinels) {
-        writeFileSync(join(fixtureDir, `sentinel.${ext}`), 'const key = "sk-ant-fixture-not-a-real-key";\n', 'utf8');
+        writeFileSync(join(fixtureDir, `sentinel.${ext}`), `const key = "${secret}";\n`, 'utf8');
+      }
+      const block = syncScript.slice(syncScript.indexOf('# 4b-BLOCK:'), syncScript.indexOf('# Separate you check'));
+      assert.match(block, /secret-content-files\.mjs/, 'Step 4 must invoke the shared content scanner');
+      const output = execFileSync('bash', ['-c', `${block}\nprintf '\\nSCAN_FAILED=%s\\n' "$SCAN_FAILED"`], {
+        encoding: 'utf8',
+        env: {
+          ...process.env,
+          SOURCE_SYNC_DIR: ROOT,
+          FILTERED_DIR: fixtureDir,
+          SCAN_INCLUDES: includes.join(' '),
+          RED: '',
+          NC: '',
+        },
+      });
+      assert.match(output, /SCAN_FAILED=true/);
+      assert.ok(!output.includes(secret));
+      for (const ext of sentinels) {
+        assert.ok(output.includes(`sentinel.${ext}`), `content scanner must see *.${ext}`);
+        writeFileSync(join(fixtureDir, `sentinel.${ext}`), 'const home = "/home/user/project";\n', 'utf8');
       }
       const matched = execFileSync('grep', ['-rEl', readBlockingScanPattern(syncScript), fixtureDir, ...includes], {
         encoding: 'utf8',

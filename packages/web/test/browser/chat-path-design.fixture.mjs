@@ -53,5 +53,21 @@ export async function seedChatPathDesignSample({ app, root, owner, threads, mess
     content,
     timestamp: Date.now(),
   });
-  return { thread, message, sourceHead, commit, report, cover, actions };
+  const imageMessage = messages.append({
+    userId: owner,
+    threadId: thread.id,
+    from: { kind: 'agent', catId: 'codex61-sol' },
+    content: code(cover),
+    timestamp: Date.now(),
+  });
+  const longFilename = 'long-file-name-'.repeat(8) + '.md';
+  await writeFile(path.join(root, longFilename), '# Long file punctuation specimen\n');
+  const longMessage = messages.append({
+    userId: owner,
+    threadId: thread.id,
+    from: { kind: 'agent', catId: 'codex61-sol' },
+    content: `（${code(longFilename)}）。`,
+    timestamp: Date.now(),
+  });
+  return { thread, message, imageMessage, longMessage, sourceHead, commit, report, cover, actions };
 }

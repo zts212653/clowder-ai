@@ -1,4 +1,9 @@
-import type { RoutingPreflightDecisionV1 } from '@cat-cafe/shared';
+import {
+  type RoutingPreflightDecisionV1,
+  type RoutingQueueAdmissionReceiptV1,
+  routingQueueAdmissionReceiptV1Schema,
+} from '@cat-cafe/shared';
+import type { RoutingExecutionBindingProof } from '../../config/account-routing-capacity.js';
 import type { RoutingCandidateCatalogSource } from './RoutingContextReadService.js';
 import type { RoutingPreflightService } from './RoutingPreflightService.js';
 
@@ -8,6 +13,8 @@ export interface RoutingDispatchPreflightInput {
   intent?: 'review' | 'architecture';
   /** Set only by trusted dispatch ingress, never by agent/user payload. */
   ownerRequestedAttempt?: boolean;
+  /** Trusted frozen execution carrier, never caller-provided account identity. */
+  executionBindings?: readonly RoutingExecutionBindingProof[];
 }
 
 export interface RoutingDispatchPreflightPort {
@@ -83,13 +90,18 @@ export class RuntimeRoutingDispatchPreflight implements RoutingDispatchPreflight
     try {
       // Preflight needs the complete catalog to offer truthful alternatives;
       // targetCatIds scopes verdicts, not the resolver's candidate universe.
-      const catalog = await this.dependencies.catalogSource.load({ ownerId: input.ownerId });
+      const catalog = await this.dependencies.catalogSource.load({
+        ownerId: input.ownerId,
+        observedAt,
+        ...(input.executionBindings ? { executionBindings: input.executionBindings } : {}),
+      });
       return await this.dependencies.preflightService.preflight({
         ownerId: input.ownerId,
         observedAt,
         catalogRevision: catalog.catalogRevision,
         candidates: catalog.candidates,
         targetCatIds: input.targetCatIds,
+        ...(input.executionBindings ? { requireCapacityProof: true } : {}),
         ...(input.ownerRequestedAttempt ? { ownerRequestedAttempt: true } : {}),
         ...(input.intent ? { intent: input.intent } : {}),
       });
@@ -115,6 +127,7 @@ export function routingDispatchPreflightReceipt(decision: RoutingPreflightDecisi
   if (!target) throw new Error(`routing preflight omitted requested target: ${targetCatId}`);
   return {
     type: 'routing_preflight' as const,
+    stage: 'execution_preflight' as const,
     v: decision.v,
     ownerId: decision.ownerId,
     observedAt: decision.observedAt,
@@ -122,6 +135,29 @@ export function routingDispatchPreflightReceipt(decision: RoutingPreflightDecisi
     ...(decision.snapshotRef ? { snapshotRef: decision.snapshotRef } : {}),
     target,
   };
+}
+
+/** A readonly post-enqueue observation. It is deliberately not an execution verdict. */
+export async function observeRoutingQueueAdmission(
+  port: RoutingDispatchPreflightPort,
+  input: RoutingDispatchPreflightInput,
+): Promise<RoutingQueueAdmissionReceiptV1> {
+  const observation = await preflightRoutingDispatch(port, input);
+  return routingQueueAdmissionReceiptV1Schema.parse({
+    v: 1,
+    stage: 'queue_admitted',
+    executionPreflight: 'pending',
+    ownerId: observation.ownerId,
+    observedAt: observation.observedAt,
+    ...(observation.snapshotRef ? { snapshotRef: observation.snapshotRef } : {}),
+    targets: observation.targets.map((target) => ({
+      targetCatId: target.targetCatId,
+      availabilityObservation:
+        target.disposition === 'allowed' ? 'available' : target.disposition === 'rejected' ? 'unavailable' : 'warned',
+      reasons: target.reasons,
+      ...(target.capacityFacts ? { capacityFacts: target.capacityFacts } : {}),
+    })),
+  });
 }
 
 /** Only a rejection changes the requested delivery and belongs in chat. */

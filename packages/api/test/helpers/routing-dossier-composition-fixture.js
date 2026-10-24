@@ -9,6 +9,9 @@ import { _resetDossierCache } from '@cat-cafe/shared/dossier';
 export const { createRoutingContextRuntime } = await import(
   '../../dist/domains/routing-context/RoutingContextRuntime.js'
 );
+const { buildRoutingSignalDecisionProjection } = await import(
+  '../../dist/domains/routing-context/RoutingSignalDecisionProjection.js'
+);
 export const ownerId = 'issue-1438-owner';
 export const primaryCatId = 'issue-1438-primary';
 export const secondaryCatId = 'issue-1438-secondary';
@@ -42,6 +45,9 @@ export function fixture(t, { signals = [], preferences = [], members = configs }
   const runtime = createRoutingContextRuntime({ redis: {}, projectRoot, getConfigs: () => members });
   // Keep the production catalog/resolver/profile/preflight wiring; isolate only storage I/O.
   t.mock.method(runtime.signalStore, 'getOwnerRevision', async () => signals.length);
+  t.mock.method(runtime.signalStore, 'readDecisionProjection', async () =>
+    buildRoutingSignalDecisionProjection({ ownerId, revision: signals.length, events: signals }),
+  );
   t.mock.method(runtime.signalStore, 'listByOwner', async () => signals);
   t.mock.method(runtime.preferenceStore, 'listByOwner', async () => preferences);
   return { runtime, projectRoot };

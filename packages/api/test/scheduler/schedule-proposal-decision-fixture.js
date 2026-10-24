@@ -1,5 +1,14 @@
 import Database from 'better-sqlite3';
 import Fastify from 'fastify';
+import { ApprovalDecisionReceiptOutbox } from '../../dist/domains/approval-hub/ApprovalDecisionReceiptOutbox.js';
+import { ApprovalDecisionReceiptService } from '../../dist/domains/approval-hub/ApprovalDecisionReceiptService.js';
+import {
+  ApprovalProducerRegistry,
+  bindLegacyApprovalProducer,
+} from '../../dist/domains/approval-hub/ApprovalProducerRegistry.js';
+import { F139ApprovalAdapter } from '../../dist/domains/approval-hub/adapters/F139ApprovalAdapter.js';
+import { installApprovalDecisionReceiptHooks } from '../../dist/domains/approval-hub/approval-decision-receipt-hooks.js';
+import { MessageStore } from '../../dist/domains/cats/services/stores/ports/MessageStore.js';
 
 import { applyMigrations } from '../../dist/domains/memory/schema.js';
 import { DynamicTaskStore } from '../../dist/infrastructure/scheduler/DynamicTaskStore.js';
@@ -15,10 +24,10 @@ import { scheduleProposalDecisionRoutes } from '../../dist/routes/schedule-propo
 export const OWNER = 'owner-user';
 export const NOW = Date.parse('2026-07-23T12:00:00.000Z');
 
-export async function createDecisionFixture() {
+export async function createDecisionFixture(options = {}) {
   const previousOwnerUserId = process.env.DEFAULT_OWNER_USER_ID;
   process.env.DEFAULT_OWNER_USER_ID = OWNER;
-  const db = new Database(':memory:');
+  const db = new Database(options.dbPath ?? ':memory:');
   applyMigrations(db);
   const dynamicStore = new DynamicTaskStore(db);
   const store = new ScheduleMutationProposalStore(db);
@@ -28,10 +37,19 @@ export async function createDecisionFixture() {
     dynamicTaskStore: dynamicStore,
   });
   const notifications = [];
+  const messageStore = options.messageStore ?? new MessageStore();
+  const outbox = new ApprovalDecisionReceiptOutbox(db);
   const socketEvents = [];
   const app = Fastify({ logger: false });
+  const receipts = new ApprovalDecisionReceiptService({
+    registry: new ApprovalProducerRegistry({ F139: bindLegacyApprovalProducer(new F139ApprovalAdapter(store)) }),
+    messageStore,
+    outbox,
+    logger: options.logger ?? app.log,
+  });
+  installApprovalDecisionReceiptHooks(app, () => receipts);
   app.decorateRequest('sessionUserId', undefined);
-  app.addHook('preHandler', async (request) => {
+  app.addHook('onRequest', async (request) => {
     if (request.headers['x-owner-session'] === 'true') request.sessionUserId = OWNER;
     if (request.headers['x-owner-session'] === 'other') request.sessionUserId = 'other-user';
   });
@@ -55,6 +73,9 @@ export async function createDecisionFixture() {
     store,
     runner,
     notifications,
+    messageStore,
+    receipts,
+    outbox,
     socketEvents,
     decide(proposalId, action, payload) {
       return app.inject({

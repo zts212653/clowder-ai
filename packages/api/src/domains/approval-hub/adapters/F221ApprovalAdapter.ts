@@ -1,3 +1,4 @@
+import { type ApprovalDecisionRead, projectApprovalDecisionRead } from '../ports/IApprovalAdapter.js';
 /**
  * F246 v2: F221 (Taste Proposal) → ApprovalItem adapter.
  *
@@ -29,6 +30,12 @@ export class F221ApprovalAdapter implements IApprovalAdapter {
     const result = this.store.listActionable(userId, ALL_PENDING_APPROVALS_LIMIT);
     if (Array.isArray(result)) return compactApprovalProjections(result.map((p) => toItem(p)));
     return result.then((proposals) => compactApprovalProjections(proposals.map((p) => toItem(p))));
+  }
+
+  async readDecision(userId: string, proposalId: string): Promise<ApprovalDecisionRead> {
+    const p = await this.store.get(proposalId);
+    if (!p || p.userId !== userId) return { state: 'closed' };
+    return projectApprovalDecisionRead(p.status, () => toSettledItem(p), p.rejectionReason);
   }
 
   async listSettled(userId: string, opts?: ListSettledOpts): Promise<SettledApprovalItem[]> {

@@ -1,3 +1,4 @@
+import { type ApprovalDecisionRead, projectApprovalDecisionRead } from '../ports/IApprovalAdapter.js';
 /**
  * F260 Phase A: Entity Proposal → ApprovalItem adapter.
  *
@@ -45,6 +46,12 @@ export class F260ApprovalAdapter implements IApprovalAdapter {
         await Promise.all(proposals.map(async (proposal) => toItem(proposal, await inspectConflict(proposal)))),
       ),
     );
+  }
+
+  async readDecision(userId: string, proposalId: string): Promise<ApprovalDecisionRead> {
+    const p = await this.store.get(proposalId);
+    if (!p || p.ownerUserId !== userId) return { state: 'closed' };
+    return projectApprovalDecisionRead(p.status, () => toSettledItem(p, null), p.rejectionReason);
   }
 
   async listSettled(userId: string, opts?: ListSettledOpts): Promise<SettledApprovalItem[]> {

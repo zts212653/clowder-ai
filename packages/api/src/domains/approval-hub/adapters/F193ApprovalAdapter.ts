@@ -1,3 +1,4 @@
+import { type ApprovalDecisionRead, projectApprovalDecisionRead } from '../ports/IApprovalAdapter.js';
 /**
  * F246 Phase B: F193 (Cross-Thread Dispatch) → ApprovalItem adapter.
  *
@@ -24,6 +25,12 @@ export class F193ApprovalAdapter implements IApprovalAdapter {
   async listPending(userId: string): Promise<ApprovalItem[]> {
     const proposals = await this.store.listPendingByUser(userId);
     return compactApprovalProjections(proposals.map((p) => toItem(p)));
+  }
+
+  async readDecision(userId: string, proposalId: string): Promise<ApprovalDecisionRead> {
+    const p = await this.store.get(proposalId);
+    if (!p || p.ownerUserId !== userId) return { state: 'closed' };
+    return projectApprovalDecisionRead(p.status, () => toSettledItem(p));
   }
 
   async listSettled(userId: string, opts?: ListSettledOpts): Promise<SettledApprovalItem[]> {

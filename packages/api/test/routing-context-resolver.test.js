@@ -9,6 +9,9 @@ const { DossierCapabilityProfileRevisionSource } = await import(
   '../dist/domains/routing-context/DossierCapabilityProfileRevisionSource.js'
 );
 const { RoutingContextResolver } = await import('../dist/domains/routing-context/RoutingContextResolver.js');
+const { buildRoutingSignalDecisionProjection } = await import(
+  '../dist/domains/routing-context/RoutingSignalDecisionProjection.js'
+);
 
 const temporaryRoots = [];
 
@@ -65,7 +68,12 @@ function profileSource(projectRoot, overrides = {}) {
 
 function fakeResolver(profileRevisionSource) {
   return new RoutingContextResolver({
-    signalStore: { getOwnerRevision: async () => 0, listByOwner: async () => [] },
+    signalStore: {
+      getOwnerRevision: async () => 0,
+      readDecisionProjection: async () =>
+        buildRoutingSignalDecisionProjection({ ownerId: 'owner-1', revision: 0, events: [] }),
+      listByOwner: async () => [],
+    },
     preferenceStore: { listByOwner: async () => [] },
     profileRevisionSource,
   });
@@ -152,6 +160,150 @@ describe('DossierCapabilityProfileRevisionSource', () => {
 });
 
 describe('RoutingContextResolver', () => {
+  it('resolves dispatch decisions from the bounded signal projection without loading the immutable ledger', async () => {
+    const assertion = {
+      v: 1,
+      eventId: 'signal:sol:provider-error',
+      commandId: 'command:sol:provider-error',
+      ownerId: 'owner-1',
+      subjectRef: { type: 'cat', catId: 'sol' },
+      reasonCode: 'provider_unreachable',
+      source: 'provider_error',
+      observedAt: 1_000,
+      evidenceRef: 'turn:failed',
+      eventType: 'asserted',
+      state: 'unavailable',
+      validUntil: 20_000,
+    };
+    const recovery = {
+      v: 1,
+      eventId: 'signal:sol:dispatch-success',
+      commandId: 'command:sol:dispatch-success',
+      ownerId: 'owner-1',
+      subjectRef: { type: 'cat', catId: 'sol' },
+      reasonCode: 'dispatch_success_probe',
+      source: 'dispatch_success',
+      observedAt: 2_000,
+      evidenceRef: 'turn:succeeded',
+      eventType: 'recovered',
+      state: 'available',
+      closesSignalIds: [],
+      probeStartedAt: 1_500,
+    };
+    const futureRecovery = {
+      ...recovery,
+      eventId: 'signal:sol:dispatch-success:future',
+      commandId: 'command:sol:dispatch-success:future',
+      observedAt: 10_001,
+      evidenceRef: 'turn:succeeded:future',
+      probeStartedAt: 9_500,
+    };
+    const decisionProjection = buildRoutingSignalDecisionProjection({
+      ownerId: 'owner-1',
+      revision: 10_000,
+      events: [assertion, recovery, futureRecovery],
+    });
+    let projectionReads = 0;
+    let ledgerReads = 0;
+    const resolver = new RoutingContextResolver({
+      signalStore: {
+        getOwnerRevision: async () => 10_000,
+        readDecisionProjection: async () => {
+          projectionReads += 1;
+          return decisionProjection;
+        },
+        listByOwner: async () => {
+          ledgerReads += 1;
+          throw new Error('dispatch resolution must not load the immutable signal ledger');
+        },
+      },
+      preferenceStore: { listByOwner: async () => [] },
+      profileRevisionSource: { load: async () => ({ status: 'fresh', profiles: [], absentCatIds: ['sol'] }) },
+    });
+
+    const beforeRecovery = await resolver.resolve({
+      ownerId: 'owner-1',
+      observedAt: 1_500,
+      catalogRevision: 'catalog:v1',
+      candidates: [candidate('sol')],
+    });
+    const result = await resolver.resolve({
+      ownerId: 'owner-1',
+      observedAt: 10_000,
+      catalogRevision: 'catalog:v1',
+      candidates: [candidate('sol')],
+    });
+
+    assert.equal(beforeRecovery.status, 'fresh');
+    assert.equal(beforeRecovery.snapshot.candidates[0].availability, 'unavailable');
+    assert.equal(result.status, 'fresh');
+    assert.equal(result.snapshot.candidates[0].availability, 'available');
+    assert.equal(projectionReads, 1);
+    assert.equal(ledgerReads, 0);
+  });
+
+  it('uses one decision projection for dispatch and the ledger-complete owner read model', async () => {
+    const signal = {
+      v: 1,
+      eventId: 'signal:owner-read',
+      commandId: 'command:owner-read',
+      ownerId: 'owner-1',
+      subjectRef: { type: 'cat', catId: 'sol' },
+      reasonCode: 'quota_low',
+      source: 'quota_probe',
+      observedAt: 1_000,
+      evidenceRef: 'quota:1',
+      eventType: 'asserted',
+      state: 'scarce',
+      validUntil: 20_000,
+    };
+    const historyOnly = {
+      v: 1,
+      eventId: 'signal:history-only-success',
+      commandId: 'command:history-only-success',
+      ownerId: 'owner-1',
+      subjectRef: { type: 'cat', catId: 'sol' },
+      reasonCode: 'dispatch_success_probe',
+      source: 'dispatch_success',
+      observedAt: 2_000,
+      evidenceRef: 'turn:history-only',
+      eventType: 'recovered',
+      state: 'available',
+      closesSignalIds: [],
+      probeStartedAt: 1_500,
+    };
+    const projection = buildRoutingSignalDecisionProjection({
+      ownerId: 'owner-1',
+      revision: 2,
+      events: [signal, historyOnly],
+    });
+    const resolver = new RoutingContextResolver({
+      signalStore: {
+        getOwnerRevision: async () => 2,
+        readDecisionProjection: async () => projection,
+        listByOwner: async () => [signal, historyOnly],
+      },
+      preferenceStore: { listByOwner: async () => [] },
+      profileRevisionSource: { load: async () => ({ status: 'fresh', profiles: [], absentCatIds: ['sol'] }) },
+    });
+    const input = {
+      ownerId: 'owner-1',
+      observedAt: 10_000,
+      catalogRevision: 'catalog:v1',
+      candidates: [candidate('sol')],
+    };
+
+    const dispatch = await resolver.resolve(input);
+    const ownerRead = await resolver.resolveWithSources(input);
+
+    assert.deepEqual(ownerRead.resolution, dispatch);
+    assert.deepEqual(
+      ownerRead.signalEvents.map((event) => event.eventId),
+      [signal.eventId, historyOnly.eventId],
+    );
+    assert.deepEqual(dispatch.sourceRefs.signalEventIds, [historyOnly.eventId, signal.eventId].sort());
+  });
+
   it('returns typed dossier degradation instead of inventing a capability snapshot', async () => {
     const resolver = fakeResolver({
       load: async () => ({ status: 'degraded', reason: 'model_missing', affectedCatIds: ['sol'] }),
@@ -194,9 +346,9 @@ describe('RoutingContextResolver', () => {
     assert.ok(withPending.snapshot.candidates.every((entry) => entry.profile.revision.pendingProposalCount === 99));
   });
 
-  it('reuses immutable signal timelines by owner revision while recomputing time-sensitive projection', async () => {
+  it('reuses the decision projection by owner revision while recomputing time-sensitive state', async () => {
     let revision = 1;
-    let listCalls = 0;
+    let projectionReads = 0;
     const assertion = {
       v: 1,
       eventId: 'signal:sol:unavailable',
@@ -214,10 +366,11 @@ describe('RoutingContextResolver', () => {
     let events = [assertion];
     const signalStore = {
       getOwnerRevision: async () => revision,
-      listByOwner: async () => {
-        listCalls += 1;
-        return events;
+      readDecisionProjection: async () => {
+        projectionReads += 1;
+        return buildRoutingSignalDecisionProjection({ ownerId: 'owner-1', revision, events });
       },
+      listByOwner: async () => events,
     };
     const makeResolver = () =>
       new RoutingContextResolver({
@@ -238,7 +391,7 @@ describe('RoutingContextResolver', () => {
     assert.equal((await firstProcess.resolve(input(7_000))).snapshot.candidates[0].availability, 'unknown');
     assert.equal((await secondProcess.resolve(input(7_000))).snapshot.candidates[0].availability, 'unknown');
     assert.equal((await secondProcess.resolve(input(8_000))).snapshot.candidates[0].availability, 'unknown');
-    assert.equal(listCalls, 2, 'each process should load an unchanged owner timeline once');
+    assert.equal(projectionReads, 2, 'each process should load an unchanged owner projection once');
 
     revision = 2;
     events = [
@@ -261,22 +414,20 @@ describe('RoutingContextResolver', () => {
 
     assert.equal((await firstProcess.resolve(input(10_000))).snapshot.candidates[0].availability, 'available');
     assert.equal((await secondProcess.resolve(input(10_000))).snapshot.candidates[0].availability, 'available');
-    assert.equal(listCalls, 4, 'shared revision changes must invalidate every process cache');
+    assert.equal(projectionReads, 4, 'shared revision changes must invalidate every process cache');
   });
 
-  it('does not cache a timeline when the shared revision changes during its read', async () => {
-    let revisionCalls = 0;
-    let listCalls = 0;
+  it('does not reuse a cached projection after the shared owner revision advances', async () => {
+    let revision = 1;
+    let projectionReads = 0;
     const resolver = new RoutingContextResolver({
       signalStore: {
-        getOwnerRevision: async () => {
-          revisionCalls += 1;
-          return revisionCalls === 1 ? 1 : 2;
+        getOwnerRevision: async () => revision,
+        readDecisionProjection: async () => {
+          projectionReads += 1;
+          return buildRoutingSignalDecisionProjection({ ownerId: 'owner-1', revision, events: [] });
         },
-        listByOwner: async () => {
-          listCalls += 1;
-          return [];
-        },
+        listByOwner: async () => [],
       },
       preferenceStore: { listByOwner: async () => [] },
       profileRevisionSource: { load: async () => ({ status: 'fresh', profiles: [], absentCatIds: ['sol'] }) },
@@ -289,7 +440,40 @@ describe('RoutingContextResolver', () => {
     };
 
     await resolver.resolve(input);
+    revision = 2;
     await resolver.resolve(input);
-    assert.equal(listCalls, 2);
+    await resolver.resolve(input);
+    assert.equal(projectionReads, 2);
+  });
+
+  it('single-flights a cold projection rebuild for concurrent preflight readers', async () => {
+    let projectionReads = 0;
+    const projection = buildRoutingSignalDecisionProjection({ ownerId: 'owner-1', revision: 10_000, events: [] });
+    const resolver = new RoutingContextResolver({
+      signalStore: {
+        getOwnerRevision: async () => 10_000,
+        readDecisionProjection: async () => {
+          projectionReads += 1;
+          await new Promise((resolve) => setTimeout(resolve, 20));
+          return projection;
+        },
+        listByOwner: async () => {
+          throw new Error('concurrent preflight must not load the ledger');
+        },
+      },
+      preferenceStore: { listByOwner: async () => [] },
+      profileRevisionSource: { load: async () => ({ status: 'fresh', profiles: [], absentCatIds: ['sol'] }) },
+    });
+    const input = {
+      ownerId: 'owner-1',
+      observedAt: 10_000,
+      catalogRevision: 'catalog:v1',
+      candidates: [candidate('sol')],
+    };
+
+    const results = await Promise.all(Array.from({ length: 20 }, () => resolver.resolve(input)));
+
+    assert.ok(results.every((result) => result.status === 'fresh'));
+    assert.equal(projectionReads, 1);
   });
 });

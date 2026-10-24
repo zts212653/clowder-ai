@@ -14,6 +14,7 @@ import {
 } from './ClaudeAgentService.js';
 import { composeManagedSettingsDocument } from './claude-compaction-launch-plan.js';
 import { resolveClaudeMcpConfig } from './claude-mcp-config.js';
+import { withClaudeSecretHooks } from './claude-secret-hook-settings.js';
 import { appendLocalImagePathHints, collectImageAccessDirectories } from './image-cli-bridge.js';
 import { extractTrustedImagePaths } from './image-paths.js';
 import { compileL0ViaSubprocess } from './l0-compiler.js';
@@ -126,9 +127,10 @@ export async function prepareClaudeSdkLaunch(input: {
   const accountSettings = options?.claudeTokenAccount
     ? await composeClaudeTokenSettingsDocument(operator.settings, options?.workingDirectory, settingSources)
     : operator.settings;
-  const settings = plan?.ready
+  const composedSettings = plan?.ready
     ? composeManagedSettingsDocument(plan, accountSettings, options?.workingDirectory)
     : accountSettings;
+  const settings = readOnly ? composedSettings : withClaudeSecretHooks(composedSettings, options?.workingDirectory);
   const overrides = {
     ...buildClaudeEnvOverrides(options?.callbackEnv, {
       contextNativeWindowTokens: options?.contextNativeWindowTokens,

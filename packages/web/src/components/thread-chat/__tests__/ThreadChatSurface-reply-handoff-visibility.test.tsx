@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { CatData } from '@/hooks/useCatData';
 import type { ChatMessage as Message } from '@/stores/chat-types';
 import { useChatStore } from '@/stores/chatStore';
+import { writeShellLanguage } from '../../shell/shell-language';
 import { SHELL_PRESENTATION_STORAGE_KEY } from '../../shell/shell-presentation';
 
 const fixture = vi.hoisted(() => ({ messages: [] as Message[] }));
@@ -163,5 +164,12 @@ describe('ThreadChatSurface reply handoff eligibility transitions', () => {
     expect(container.querySelector('[data-message-id="source"]')?.textContent).toContain('visible source');
     expect(container.querySelector('[data-testid="reply-handoff"]')).toBeNull();
     expect(container.querySelector('[data-message-id="route"]')).toBeNull();
+  });
+  it('localizes the exhausted-history message for an English reading surface', async () => {
+    writeShellLanguage('en');
+    await render([source('visible source')]);
+    expect(container.textContent).toContain('No earlier messages');
+    expect(container.textContent).not.toContain('没有更多消息了');
+    act(() => writeShellLanguage('zh'));
   });
 });

@@ -121,4 +121,54 @@ describe('F322 reading header and transient actions', () => {
     act(() => more!.click());
     expect(document.querySelector('[role="menuitem"][aria-label="复制消息 ID"]')).not.toBeNull();
   });
+  it.each([
+    'approval',
+    'question',
+    'elicitation',
+  ] as const)('localizes only the bound system-generated %s heading and preserves its stored title', async (kind) => {
+    h.enableV2();
+    writeShellLanguage('en');
+    const title = '保持原文 Exact title';
+    const prefix = { approval: '需要你确认：', question: '需要你回答：', elicitation: '需要你补充：' }[kind];
+    const expected = {
+      approval: 'Needs your approval: ',
+      question: 'Needs your answer: ',
+      elicitation: 'Needs your input: ',
+    }[kind];
+    const message = streamReply({
+      origin: 'callback',
+      content: prefix + title,
+      extra: {
+        runtimeInteractionCard: {
+          version: 1,
+          interactionId: 'heading-card',
+          blockId: 'heading-block',
+          requestKind: kind,
+        },
+        rich: {
+          v: 1,
+          blocks: [
+            {
+              id: 'heading-block',
+              kind: 'card',
+              v: 1,
+              title,
+              meta: { kind: 'runtime_interaction', interactionId: 'heading-card', interactionKind: kind },
+            },
+          ],
+        },
+      },
+    });
+    const original = JSON.stringify(message);
+    await act(async () => h.render(message));
+    expect(h.container.textContent).toContain(expected + title);
+    expect(h.container.textContent).not.toContain(prefix + title);
+    expect(JSON.stringify(message)).toBe(original);
+  });
+  it('keeps ordinary authored text that resembles an interaction heading verbatim', () => {
+    h.enableV2();
+    writeShellLanguage('en');
+    h.render(streamReply({ origin: 'callback', content: '需要你回答：我的原话' }));
+    expect(h.container.textContent).toContain('需要你回答：我的原话');
+  });
 });

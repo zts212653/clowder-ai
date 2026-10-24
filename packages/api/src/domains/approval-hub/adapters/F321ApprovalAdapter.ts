@@ -1,6 +1,12 @@
 import type { ApprovalItem, EventMemoryCorrectionProposal, SettledApprovalItem } from '@cat-cafe/shared';
 import type { EventMemoryCorrectionProposalStore } from '../../memory/event/EventMemoryCorrectionProposalStore.js';
-import { ALL_PENDING_APPROVALS_LIMIT, type IApprovalAdapter, type ListSettledOpts } from '../ports/IApprovalAdapter.js';
+import {
+  ALL_PENDING_APPROVALS_LIMIT,
+  type ApprovalDecisionRead,
+  type IApprovalAdapter,
+  type ListSettledOpts,
+  projectApprovalDecisionRead,
+} from '../ports/IApprovalAdapter.js';
 import { compactApprovalProjections, projectApprovalNavigation } from '../projectApprovalNavigation.js';
 import { projectSettledDecisionFacts } from '../settled-decision-facts.js';
 
@@ -14,6 +20,12 @@ export class F321ApprovalAdapter implements IApprovalAdapter {
   async listPending(ownerUserId: string): Promise<ApprovalItem[]> {
     const proposals = await this.store.listActionable(ownerUserId, ALL_PENDING_APPROVALS_LIMIT);
     return compactApprovalProjections(proposals.map(toItem));
+  }
+
+  async readDecision(userId: string, proposalId: string): Promise<ApprovalDecisionRead> {
+    const p = await this.store.get(proposalId);
+    if (!p || p.ownerUserId !== userId) return { state: 'closed' };
+    return projectApprovalDecisionRead(p.status, () => toSettledItem(p), p.rejectionReason);
   }
 
   async listSettled(ownerUserId: string, opts?: ListSettledOpts): Promise<SettledApprovalItem[]> {

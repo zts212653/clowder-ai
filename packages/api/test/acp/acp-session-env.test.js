@@ -22,7 +22,7 @@ const CALLBACK_ENV = {
 describe('materializeSessionMcpServers', () => {
   it('accepts existing stdio registrations without an env field', () => {
     const base = [{ name: 'cat-cafe-collab', command: 'node', args: ['collab.js'] }];
-    assert.strictEqual(materializeSessionMcpServers(base), base);
+    assert.match(materializeSessionMcpServers(base)[0].args[0], /secret-mcp-proxy\.js$/);
     const withCallbacks = materializeSessionMcpServers(base, CALLBACK_ENV);
     assert.equal(
       withCallbacks[0].env.find((entry) => entry.name === 'CAT_CAFE_INVOCATION_ID').value,
@@ -64,14 +64,16 @@ describe('materializeSessionMcpServers', () => {
     assert.equal(envMap.EXISTING, 'keep', 'Existing env preserved');
   });
 
-  it('does not modify non-cat-cafe servers', () => {
+  it('protects non-cat-cafe servers without giving their child callback credentials', () => {
     const base = [
       { name: 'playwright', command: 'npx', args: ['@playwright/mcp'], env: [] },
       { name: 'cat-cafe-signals', command: 'node', args: ['signals.js'], env: [] },
     ];
 
     const result = materializeSessionMcpServers(base, CALLBACK_ENV);
-    assert.deepStrictEqual(result[0].env, [], 'playwright should be untouched');
+    const outer = Object.fromEntries(result[0].env.map((entry) => [entry.name, entry.value]));
+    assert.match(result[0].args[0], /secret-mcp-proxy\.js$/);
+    assert.deepEqual(JSON.parse(outer.CAT_CAFE_SECRET_MCP_PROXY_SPEC).env, {});
     assert.ok(result[1].env.length > 0, 'cat-cafe-signals should get env');
   });
 
@@ -82,27 +84,36 @@ describe('materializeSessionMcpServers', () => {
     ];
 
     const result = materializeSessionMcpServers(base, CALLBACK_ENV);
-    assert.deepStrictEqual(result[0].env, [], 'cat-cafeteria should NOT get callback env');
+    const outer = Object.fromEntries(result[0].env.map((entry) => [entry.name, entry.value]));
+    assert.deepEqual(
+      JSON.parse(outer.CAT_CAFE_SECRET_MCP_PROXY_SPEC).env,
+      {},
+      'unrelated child does NOT get callback auth',
+    );
     assert.ok(result[1].env.length > 0, 'cat-cafe-collab should get callback env');
   });
 
-  it('does not modify HTTP/SSE servers even with cat-cafe prefix', () => {
+  it('protects HTTP/SSE servers while preserving their upstream URL and protocol', () => {
     const base = [{ type: 'http', name: 'cat-cafe-http', url: 'http://localhost', headers: [] }];
 
     const result = materializeSessionMcpServers(base, CALLBACK_ENV);
-    assert.deepStrictEqual(result, base, 'HTTP server should pass through unchanged');
+    const env = Object.fromEntries(result[0].env.map((entry) => [entry.name, entry.value]));
+    const spec = JSON.parse(env.CAT_CAFE_SECRET_MCP_PROXY_SPEC);
+    assert.equal(spec.url, base[0].url);
+    assert.equal(spec.transport, 'http');
   });
 
-  it('returns base array as-is when no callbackEnv', () => {
+  it('still protects MCP without callbackEnv', () => {
     const base = [{ name: 'cat-cafe-collab', command: 'node', args: [], env: [] }];
     const result = materializeSessionMcpServers(base, undefined);
-    assert.strictEqual(result, base, 'Should return same reference');
+    assert.match(result[0].args[0], /secret-mcp-proxy\.js$/);
+    assert.deepEqual(base[0].args, [], 'registration stays unchanged');
   });
 
-  it('returns base array as-is when callbackEnv is empty', () => {
+  it('still protects MCP when callbackEnv is empty', () => {
     const base = [{ name: 'cat-cafe-collab', command: 'node', args: [], env: [] }];
     const result = materializeSessionMcpServers(base, {});
-    assert.strictEqual(result, base, 'Should return same reference');
+    assert.match(result[0].args[0], /secret-mcp-proxy\.js$/);
   });
 
   it('overwrites existing placeholder values', () => {
@@ -155,13 +166,8 @@ describe('materializeSessionMcpServers', () => {
       assert.equal(env.CLOWDER_PLUGIN_ACTION_PATH, '/api/plugin-runtime/action');
       assert.equal(env.CAT_CAFE_CREDENTIAL_FILE, callbackEnv.CAT_CAFE_CREDENTIAL_FILE);
       assert.equal(env.CAT_CAFE_API_URL, callbackEnv.CAT_CAFE_API_URL);
-      if (credentialFileOnly) {
-        assert.equal(Object.hasOwn(env, 'CAT_CAFE_INVOCATION_ID'), false);
-        assert.equal(Object.hasOwn(env, 'CAT_CAFE_CALLBACK_TOKEN'), false);
-      } else {
-        assert.equal(env.CAT_CAFE_INVOCATION_ID, callbackEnv.CAT_CAFE_INVOCATION_ID);
-        assert.equal(env.CAT_CAFE_CALLBACK_TOKEN, callbackEnv.CAT_CAFE_CALLBACK_TOKEN);
-      }
+      assert.equal(Object.hasOwn(env, 'CAT_CAFE_INVOCATION_ID'), false, 'credential files remain authoritative');
+      assert.equal(Object.hasOwn(env, 'CAT_CAFE_CALLBACK_TOKEN'), false);
       assert.deepEqual(base, before);
     });
   }

@@ -22,10 +22,15 @@ test('quoted plugin MCP identities survive as literal keys alongside existing se
   );
   const output = codexMcpConfigArgs(input);
   const config = codexConfigObjectFromArgs(output);
-  assert.deepEqual(config.mcp_servers, {
-    'cat-cafe': { command: 'echo', enabled: false },
-    [server]: { command: 'node', args: ['/fixture/server.mjs', 'line\nquote"'], enabled: true },
+  assert.deepEqual(config.mcp_servers['cat-cafe'], { command: 'echo', enabled: false });
+  assert.match(config.mcp_servers[server].args[0], /secret-mcp-proxy\.js$/);
+  assert.deepEqual(JSON.parse(config.mcp_servers[server].env.CAT_CAFE_SECRET_MCP_PROXY_SPEC), {
+    command: 'node',
+    args: ['/fixture/server.mjs', 'line\nquote"'],
+    env: {},
+    source: server,
   });
+  assert.equal(config.mcp_servers[server].enabled, true);
   assert.equal(config.features.shell_tool, false);
   assert.equal(output.filter((argument) => argument.startsWith('mcp_servers=')).length, 1);
   assert.equal(
@@ -71,7 +76,7 @@ test('HTTP transport, bearer environment reference and quoted identities retain 
     bearer_token_env_var: 'MCP_FIXTURE_BEARER',
     enabled: false,
   });
-  assert.equal(servers.remote__with__dots.command, 'echo');
+  assert.equal(JSON.parse(servers.remote__with__dots.env.CAT_CAFE_SECRET_MCP_PROXY_SPEC).command, 'echo');
 });
 
 test('bare-only generated overrides keep their existing precedence and form', () => {

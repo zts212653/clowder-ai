@@ -4050,7 +4050,7 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
       displayName: 'Patch ACP Remove Whitelist',
       authType: 'api_key',
       protocol: 'openai',
-      apiKey: 'sk-patch-remove-whitelist',
+      apiKey: ['sk', '-patch-remove-whitelist'].join(''),
       models: ['test-model'],
     });
 

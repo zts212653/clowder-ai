@@ -21,10 +21,14 @@ export async function probeCodexNativePolicy({
   invokeTools = true,
   codeMode = false,
   nativeSubtask = false,
+  carrier = 'exec_json',
+  requestedCall,
+  prepare,
 } = {}) {
   const root = await mkdtemp(join(tmpdir(), 'f290-native-policy-'));
   const privateCanary = 'F290_PRIVATE_NATIVE_CANARY';
   const marker = join(root, 'forbidden-native-effect');
+  if (prepare) await prepare(root);
   await mkdir(join(root, '.codex', 'skills', 'private'), { recursive: true });
   await writeFile(join(root, 'AGENTS.md'), privateCanary);
   await writeFile(join(root, '.codex', 'AGENTS.md'), privateCanary);
@@ -44,6 +48,12 @@ export async function probeCodexNativePolicy({
   const server = http.createServer(async (req, res) => {
     let body = '';
     for await (const chunk of req) body += chunk;
+    if (req.method === 'POST' && req.url === '/api/callbacks/post-message') {
+      callbacks.push({ path: req.url, headers: req.headers, body: JSON.parse(body) });
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ messageId: 'fixture-notice' }));
+      return;
+    }
     if (req.method === 'GET' && req.url.startsWith('/api/callbacks/thread-context')) {
       firstCallbackAt ??= Date.now();
       callbacks.push({ path: req.url, headers: req.headers });
@@ -61,7 +71,9 @@ export async function probeCodexNativePolicy({
     requests.push(parsed);
     let call;
     let finalText;
-    if (nativeSubtask) {
+    if (requestedCall) {
+      call = requestedCall({ parsed, ordinal: requests.length, marker });
+    } else if (nativeSubtask) {
       const user = [...(parsed.input ?? [])].reverse().find((row) => row.role === 'user');
       const child = JSON.stringify(user?.content ?? '').includes('F317_CHILD_FIXED_INPUT');
       if (child) {
@@ -239,10 +251,10 @@ export async function probeCodexNativePolicy({
     'mcp_servers.cat-cafe-collab.default_tools_approval_mode="approve"',
   ];
   const args = [
-    'exec',
-    '--json',
-    ...(policyArgs.includes('--skip-git-repo-check') ? [] : ['--skip-git-repo-check']),
-    ...policyArgs,
+    ...(carrier === 'app_server'
+      ? ['app-server', '--listen', 'stdio://']
+      : ['exec', '--json', ...(policyArgs.includes('--skip-git-repo-check') ? [] : ['--skip-git-repo-check'])]),
+    ...policyArgs.filter((arg) => carrier !== 'app_server' || arg !== '--ignore-user-config'),
     ...(codeMode ? ['--enable', 'code_mode', '--enable', 'code_mode_only'] : []),
     ...mcp,
     '--config',
@@ -257,8 +269,7 @@ export async function probeCodexNativePolicy({
     'model_providers.probe.wire_api="responses"',
     '--config',
     'model_providers.probe.env_key="OPENAI_API_KEY"',
-    '--',
-    '-',
+    ...(carrier === 'app_server' ? [] : ['--', '-']),
   ];
   let stdout = '';
   let stderr = '';
@@ -270,7 +281,44 @@ export async function probeCodexNativePolicy({
     child.on('exit', () => {
       childExitAt = Date.now();
     });
-    child.stdin.end('Read the current public context for PUBLIC_REQUEST_A.');
+    if (carrier === 'app_server') {
+      const send = (message) => child.stdin.write(JSON.stringify(message) + '\n');
+      let buffer = '';
+      child.stdout.on('data', (chunk) => {
+        buffer += chunk;
+        let line;
+        while ((line = buffer.indexOf('\n')) >= 0) {
+          const message = JSON.parse(buffer.slice(0, line));
+          buffer = buffer.slice(line + 1);
+          if (message.id === 1 && message.result) {
+            send({ method: 'initialized' });
+            send({
+              id: 2,
+              method: 'thread/start',
+              params: { cwd: root, model: 'gpt-5', approvalPolicy: 'never', sandbox: 'workspace-write' },
+            });
+          } else if (message.id === 2 && message.result) {
+            send({
+              id: 3,
+              method: 'turn/start',
+              params: {
+                threadId: message.result.thread.id,
+                input: [
+                  { type: 'text', text: 'Read the current public context for PUBLIC_REQUEST_A.', text_elements: [] },
+                ],
+              },
+            });
+          } else if (message.method === 'turn/completed' || message.error) {
+            child.stdin.end();
+          }
+        }
+      });
+      send({
+        id: 1,
+        method: 'initialize',
+        params: { clientInfo: { name: 'secret-probe', version: '1' }, capabilities: { experimentalApi: true } },
+      });
+    } else child.stdin.end('Read the current public context for PUBLIC_REQUEST_A.');
     child.stdout.on('data', (d) => {
       stdout += d;
     });

@@ -140,11 +140,12 @@ describe('F325 one-turn native AGY carrier', () => {
       assert.equal(env.ALLOWED_WORKSPACE_DIRS, process.env.ALLOWED_WORKSPACE_DIRS?.trim() || f.workspace);
       assert.equal(env.CAT_CAFE_CALLBACK_TOKEN, undefined);
       assert.equal(env.CAT_CAFE_INVOCATION_ID, undefined);
-      assert.equal(
-        servers['project-fixture'].env,
-        undefined,
-        'external tools must not inherit host callback authority',
-      );
+      const external = servers['project-fixture'];
+      assert.match(external.args[0], /secret-mcp-proxy\.js$/);
+      const upstream = JSON.parse(external.env.CAT_CAFE_SECRET_MCP_PROXY_SPEC);
+      assert.deepEqual(upstream.env, {}, 'external tools must not inherit host callback authority');
+      assert.equal(external.env.CAT_CAFE_CREDENTIAL_FILE, credential);
+      assert.equal(external.env.CAT_CAFE_CALLBACK_TOKEN, undefined);
       assert.ok(credential && !existsSync(credential), 'terminal cleanup retires the exact credential');
     } finally {
       f.cleanup();
@@ -365,7 +366,8 @@ describe('F325 one-turn native AGY carrier', () => {
       assert.equal(settings.allowNonWorkspaceAccess, false);
       assert.deepEqual(mcp.mcpServers, {});
       assert.doesNotMatch(body, / {2}- (?:run_command|write_to_file|call_mcp_tool)\n/);
-      assert.match(hooks['cat-cafe-native-effect'].PreToolUse[0].hooks[0].command, /'read-only'$/);
+      const guardCommand = hooks['cat-cafe-native-effect'].PreToolUse[0].hooks[0].command;
+      assert.ok(guardCommand.endsWith(`'read-only' '${launch.env.HOME}'`), guardCommand);
     } finally {
       f.cleanup();
     }

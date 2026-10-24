@@ -155,6 +155,7 @@ export interface RouteStrategyDeps {
   skillLoadEventLog?: import('../../tool-usage/SkillLoadEventLog.js').SkillLoadEventLog;
   /** F148 Phase F: Task store for navigation context (optional, fail-open) */
   taskStore?: import('../../stores/ports/TaskStore.js').ITaskStore;
+  ownedWaitStatusReader?: import('../../../../ball-custody/OwnedWaitStatus.js').OwnedWaitStatusReader;
   /** RFC A79: exact lifecycle situation shared with UI and read-only thread context. */
   threadExecutionSituationSource?: import('../invocation/thread-execution-situation.js').ThreadExecutionSituationSource;
   /** F222: Frustration auto-issue store (optional, fail-open) */
@@ -266,6 +267,8 @@ export function mergePersistedPromptMessages(
 
 /** Common options for both strategies */
 export interface RouteOptions {
+  /** Trusted Queue provenance for comparing B with C; never an execution grant. */
+  routingAdmission?: import('@cat-cafe/shared').RoutingAdmissionProvenanceV1;
   /** Server-owned ingress only; never copied from an HTTP/MCP request body. */
   contextSourceIngress?: import('../../../../memory/cue/ContextSourceAdmission.js').ContextSourceIngress;
   /** Persist the exact policy refusal before publishing its receipt; Queue owns recovery. */
@@ -1922,6 +1925,27 @@ async function assembleIncrementalContextInternal(
       const tasks = await Promise.resolve(deps.taskStore.listByThread(threadId));
       activeTasks = summarizeActiveTasks(tasks);
       allThreadTasks = tasks;
+      if (deps.ownedWaitStatusReader) {
+        try {
+          const hasActiveWait = await deps.ownedWaitStatusReader({ userId, threadId, catId }, tasks);
+          if (hasActiveWait !== undefined) {
+            const ownedIds = new Set(
+              tasks
+                .filter(
+                  (task) =>
+                    task.kind === 'work' &&
+                    task.userId === userId &&
+                    task.threadId === threadId &&
+                    task.ownerCatId === catId,
+                )
+                .map((task) => task.id),
+            );
+            activeTasks = activeTasks.map((task) => (ownedIds.has(task.id) ? { ...task, hasActiveWait } : task));
+          }
+        } catch {
+          // Unknown wait state must not erase the existing Task/navigation context.
+        }
+      }
     } catch {
       // fail-open: tasks stay empty
     }

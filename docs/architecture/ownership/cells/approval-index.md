@@ -6,6 +6,9 @@ canonical_features: [F246]
 code_anchors:
   # API — adapters + routes
   - packages/api/src/domains/approval-hub/ApprovalIngress.ts
+  - packages/api/src/domains/approval-hub/ApprovalDecisionReceiptService.ts
+  - packages/api/src/domains/approval-hub/ApprovalDecisionReceiptOutbox.ts
+  - packages/api/src/domains/approval-hub/approval-decision-receipt-hooks.ts
   - packages/api/src/domains/approval-hub/ApprovalLifecycleEpochAuthority.ts
   - packages/api/src/domains/approval-hub/ApprovalProducerRegistry.ts
   - packages/api/src/domains/approval-hub/projectApprovalNavigation.ts
@@ -36,6 +39,7 @@ code_anchors:
   # Shared types
   - packages/shared/src/approval-producer-catalog.ts
   - packages/shared/src/types/approval-hub.ts
+  - packages/shared/src/types/approval-decision-receipt.ts
   - packages/shared/src/types/approval-lifecycle.ts
   - packages/shared/src/types/entity-proposal.ts
   - packages/shared/src/types/schedule-mutation.ts
@@ -133,6 +137,27 @@ the shared adapter and Hub only project it. Proposal and dispatch snapshots carr
 target-version and dispatch refs. Until a canonical owner resolver/repair dispatcher and explicit production epoch
 migration are supplied, the complete v3 composition stays inactive and the route returns
 `approval_route_unavailable` without creating a case, card, Task or F167 lease.
+
+### Durable decision receipts
+
+The shared catalog explicitly selects `shared-origin-thread` delivery for all 11 producers, including
+origin-card F306. Runtime admission requires an exact adapter `readDecision` binding. Producer-owned
+stores, CAS, materialization and existing wakes retain their authority.
+
+Before a decision handler runs, the shared HTTP boundary persists owner/producer/proposal identity in
+a SQLite delivery outbox. It then rereads the exact canonical decision and uses the message store's
+permanent atomic idempotency key (producer + proposal + terminal resolution) to append one bounded Host
+receipt in `approvalCardRef.threadId`. The outbox never stores proposal content or decides a resolution;
+it removes the intent only after append succeeds. Admission failure returns 503 before business mutation.
+Post-commit delivery failure preserves the decision and intent, exposes a pending header and warning,
+and retries on startup and a bounded periodic sweep. Lost append acknowledgements replay the same message.
+Rollback retains unconsumed intents for compatible recovery. No UI history window is used for recovery.
+
+`approvalDecisionReceiptV1Schema` admits only this named Host system carrier into cat context. Ordinary
+system badges remain display-only; receipt delivery does not dispatch a cat or create another approval.
+The catalog-driven contract suite covers each real producer transition, HTTP selection, durable append
+and next-invocation `ContextAssembler` visibility. SQLite reopen plus real Redis acknowledgement-loss
+tests cover persistence and dedupe across service instances.
 
 ### Data Flow
 

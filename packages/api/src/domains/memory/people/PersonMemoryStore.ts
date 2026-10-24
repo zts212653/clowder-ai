@@ -244,6 +244,8 @@ export interface PersonMemoryStore extends OwnerMemoryActionStore {
   getCandidateForOwner(ownerUserId: string, candidateId: string): Promise<StoredPersonMemoryCandidate | null>;
   listPending(ownerUserId: string, limit?: number): Promise<StoredPersonMemoryCandidate[]>;
   listSettled(ownerUserId: string, limit?: number): Promise<StoredPersonMemorySettledCandidate[]>;
+  /** Exact decision time from the index committed atomically with the terminal transition. */
+  getSettledDecisionTime(ownerUserId: string, candidateId: string): Promise<number | null>;
   resolvePendingCandidateBySubject(ownerUserId: string, subject: string): Promise<StoredPersonMemoryCandidate | null>;
   resolveDormantCandidateBySubject(ownerUserId: string, subject: string): Promise<PersonMemorySuppressionToken | null>;
   getPublication(candidateId: string, ownerUserId?: string): Promise<ApprovalPublication | null>;

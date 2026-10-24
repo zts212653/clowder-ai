@@ -67,6 +67,38 @@ async function collect(iterable) {
 }
 
 describe('invokeSingleCat durable child execution lifecycle', () => {
+  test('a fallback child cannot inherit the admission observation of a mixed fan-out sibling', async () => {
+    const store = new InMemoryTurnExecutionStore();
+    await collect(
+      invokeSingleCat(makeDeps(store, 'child-without-B'), {
+        catId: 'codex',
+        prompt: 'fallback after exact continuation',
+        userId: 'user-1',
+        threadId: 'thread-1',
+        isLastCat: true,
+        service: {
+          async *invoke() {
+            yield { type: 'done', catId: 'codex', timestamp: Date.now() };
+          },
+        },
+        routingDispatchPreflightDecision: routingDecision(),
+        routingAdmission: {
+          stage: 'queue_admitted',
+          observedAt: 0,
+          snapshotRef: 'B:other-target',
+          targets: [{ targetCatId: 'opus', factsRef: 'facts:opus' }],
+        },
+      }),
+    );
+    const child = await store.get('child-without-B');
+    assert.equal(child.causal.routingPreflight.snapshotRef, 'routing-snapshot:1');
+    assert.equal(
+      child.causal.routingPreflight.admission,
+      undefined,
+      'B.targets is an explicit subset, not a fan-out verdict',
+    );
+  });
+
   test('a cancellation-only terminal never succeeds or schedules a freshness invocation', async () => {
     const store = new InMemoryTurnExecutionStore();
     let reinvokes = 0;
@@ -347,6 +379,12 @@ describe('invokeSingleCat durable child execution lifecycle', () => {
         threadId: 'thread-1',
         parentInvocationId: 'parent-1',
         routingDispatchPreflightDecision: exactDecision,
+        routingAdmission: {
+          stage: 'queue_admitted',
+          observedAt: 0,
+          snapshotRef: 'snapshot:B',
+          targets: [{ targetCatId: 'codex', factsRef: 'facts:codex' }],
+        },
         isLastCat: true,
       }),
     );
@@ -356,6 +394,12 @@ describe('invokeSingleCat durable child execution lifecycle', () => {
     assert.equal(observed[0].observationId, 'child-routing-success');
     assert.equal(observed[0].evidenceRef, 'turn-execution:child-routing-success');
     assert.equal(observed[0].preflightDecision, exactDecision);
+    assert.deepEqual((await store.get('child-routing-success')).causal.routingPreflight, {
+      stage: 'execution_preflight',
+      observedAt: exactDecision.observedAt,
+      snapshotRef: exactDecision.snapshotRef,
+      admission: { stage: 'queue_admitted', observedAt: 0, snapshotRef: 'snapshot:B' },
+    });
     assert.equal(observed[0].observedAt, (await store.get('child-routing-success')).endedAt);
   });
 

@@ -18,6 +18,7 @@ import {
 } from './native-effect-shell-classifier.mjs';
 import { decideShellHookPayload } from './native-effect-shell-decision.mjs';
 import { classifyNativeTarget as classifyTarget } from './native-effect-target-classifier.mjs';
+import { nativeSecretDenial } from './native-secret-policy.mjs';
 import { projectLocalNativeShellPayload } from './native-shell-execution-context.mjs';
 
 /** Provider-neutral policy: native-effect-policy.mjs. Re-exported for existing importers. */
@@ -63,6 +64,8 @@ export function decideNativeHookPayload(payload, options = {}) {
     payload = projectLocalNativeShellPayload(payload);
     if (!payload) return deny(invalidCandidate(), 'invalid_native_shell_execution');
   }
+  const secretDenial = nativeSecretDenial(payload);
+  if (secretDenial) return deny(invalidCandidate(), secretDenial);
   const resolveSelfHost = options.selfHost ?? readSelfHostFacet;
   const decision = decideNativeHookPayloadWithoutSelfHost(payload);
   // Edit payloads are source data. Their file target was already classified;

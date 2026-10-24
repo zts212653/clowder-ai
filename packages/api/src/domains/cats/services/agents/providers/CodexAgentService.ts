@@ -355,7 +355,16 @@ function visitMcpConfigEnvironments(
   if (!isCodexConfigObject(servers)) return;
   for (const server of Object.values(servers)) {
     if (!isCodexConfigObject(server)) continue;
-    if (isCodexConfigObject(server.env)) visit(server.env);
+    if (!isCodexConfigObject(server.env)) continue;
+    visit(server.env);
+    // The host replaces credentials on pooled resume. Update the frozen
+    // upstream descriptor as well as the relay's own notice credentials.
+    const raw = server.env.CAT_CAFE_SECRET_MCP_PROXY_SPEC;
+    if (typeof raw !== 'string') continue;
+    const spec: unknown = JSON.parse(raw);
+    if (!isCodexConfigObject(spec) || !isCodexConfigObject(spec.env)) continue;
+    visit(spec.env);
+    server.env.CAT_CAFE_SECRET_MCP_PROXY_SPEC = JSON.stringify(spec);
   }
 }
 
@@ -1110,7 +1119,11 @@ async function buildCatCafeMcpArgs(
     },
     '#712: MCP invoke-time injection',
   );
-  return { args: codexMcpConfigArgs(args), bearerEnv, declaredServerNames: [...new Set(enabledServers)].sort() };
+  return {
+    args: codexMcpConfigArgs(args, callbackEnv),
+    bearerEnv,
+    declaredServerNames: [...new Set(enabledServers)].sort(),
+  };
 }
 
 export function isGitRepositoryPath(workingDirectory: string): boolean {

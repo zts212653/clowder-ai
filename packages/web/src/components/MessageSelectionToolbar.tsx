@@ -1,5 +1,6 @@
 'use client';
 
+import type { MessageBundleSelectionItem } from '@cat-cafe/shared';
 import { type ReactNode, useCallback, useState } from 'react';
 import { apiFetch } from '@/utils/api-client';
 import { MessageSelectionBar } from './message-v2/MessageSelectionBar';
@@ -10,6 +11,9 @@ type SelectionExportFormat = 'md' | 'txt' | 'png';
 export interface MessageSelectionToolbarProps {
   threadId: string;
   selectedMessageIds: readonly string[];
+  getSelectionItems?: () => MessageBundleSelectionItem[];
+  unselectedCardCount?: number;
+  selectionError?: string | null;
   onCancel: () => void;
   onExportSuccess: () => void;
   /** Blocks only the network-forward action until this browser document is admitted. */
@@ -69,6 +73,9 @@ const iconClass = 'h-5 w-5';
 export function MessageSelectionToolbar({
   threadId,
   selectedMessageIds,
+  getSelectionItems,
+  unselectedCardCount = 0,
+  selectionError,
   onCancel,
   onExportSuccess,
   forwardingDisabled,
@@ -85,7 +92,7 @@ export function MessageSelectionToolbar({
       setPendingFormat(format);
       setError(null);
       try {
-        const items = selectionItems(selectedMessageIds);
+        const items = getSelectionItems ? getSelectionItems() : selectionItems(selectedMessageIds);
         const response =
           format === 'png'
             ? await apiFetch(`/api/threads/${threadId}/export-selection-image`, {
@@ -110,7 +117,7 @@ export function MessageSelectionToolbar({
         setPendingFormat(null);
       }
     },
-    [hasSelection, onExportSuccess, pendingFormat, selectedMessageIds, threadId],
+    [getSelectionItems, hasSelection, onExportSuccess, pendingFormat, selectedMessageIds, threadId],
   );
 
   if (presentation === 'v2')
@@ -118,7 +125,8 @@ export function MessageSelectionToolbar({
       <MessageSelectionBar
         count={selectedMessageIds.length}
         pendingFormat={pendingFormat}
-        error={error}
+        error={error ?? selectionError ?? null}
+        unselectedCardCount={unselectedCardCount}
         forwardingDisabled={forwardingDisabled}
         onExport={exportSelection}
         onForward={onForward}
@@ -134,15 +142,18 @@ export function MessageSelectionToolbar({
       data-testid="message-selection-toolbar"
     >
       <div className="mx-auto max-w-3xl">
-        {error && (
+        {(error || selectionError) && (
           <p className="mb-1 text-xs text-conn-red-text" role="alert">
-            {error}
+            {error || selectionError}
           </p>
         )}
         <div className="flex items-center gap-1">
           <p className="mr-auto w-12 shrink-0 pl-1 text-sm font-semibold tabular-nums text-cafe-primary sm:w-auto sm:min-w-16">
             <span className="sm:hidden">已选 {selectedMessageIds.length}</span>
             <span className="hidden sm:inline">已选 {selectedMessageIds.length} 条</span>
+            {unselectedCardCount > 0 && (
+              <span className="ml-1.5 text-[12.5px] font-normal text-cafe-muted">{unselectedCardCount} 张卡没勾</span>
+            )}
           </p>
 
           <div className="ml-auto flex items-start gap-0.5 sm:gap-2" data-testid="message-selection-actions">

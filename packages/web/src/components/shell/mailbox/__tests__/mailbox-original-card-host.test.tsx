@@ -162,7 +162,7 @@ it.each([
   );
   await render(source(kind));
   expect(primary(kind)).toBeUndefined();
-  expect(container.textContent).toContain('已批准');
+  expect(container.textContent).toContain(kind === 'F225' ? '已同意 · 接力已发起' : '已同意 · 已写入档案');
 });
 
 it.each([

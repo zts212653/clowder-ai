@@ -6,6 +6,7 @@ import { useChatStore } from '@/stores/chatStore';
 import { apiFetch } from '@/utils/api-client';
 import { getUserId } from '@/utils/userId';
 import { buildSelectionMessage, InteractiveBlock } from './InteractiveBlock';
+import { RichBlockSelectionFrame } from './RichBlockSelectionFrame';
 
 // ── Helpers ─────────────────────────────────────────────────
 
@@ -126,18 +127,19 @@ export function InteractiveBlockGroup({
 
   return (
     <div className="space-y-3 rounded-2xl border-2 border-dashed border-conn-amber-ring p-3">
-      {blocks.map((block) => (
-        <InteractiveBlock
-          key={block.id}
-          block={block}
-          messageId={messageId}
-          pendingMode={!submitted}
-          onPendingChange={(ids) => handlePendingChange(block.id, ids)}
-          onCustomTextChange={(text) => handleCustomTextChange(block.id, text)}
-          groupDisabled={submitted}
-          groupSelectedIds={submitted ? selections.get(block.id) : undefined}
-          sendContext={sendContext}
-        />
+      {blocks.map((block, index) => (
+        <RichBlockSelectionFrame key={block.id} block={block} index={index} messageId={messageId}>
+          <InteractiveBlock
+            block={block}
+            messageId={messageId}
+            pendingMode={!submitted}
+            onPendingChange={(ids) => handlePendingChange(block.id, ids)}
+            onCustomTextChange={(text) => handleCustomTextChange(block.id, text)}
+            groupDisabled={submitted}
+            groupSelectedIds={submitted ? selections.get(block.id) : undefined}
+            sendContext={sendContext}
+          />
+        </RichBlockSelectionFrame>
       ))}
       {!submitted && (
         <button

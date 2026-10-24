@@ -32,7 +32,7 @@ describe('GET /api/callbacks/thread-cats', () => {
     if (app) await app.close();
   });
 
-  async function setup({ records, threads, participants, services = new Map() } = {}) {
+  async function setup({ records, threads, participants, services = new Map(), routingSelection } = {}) {
     const { registerCallbackThreadCatsRoutes } = await import('../dist/routes/callback-thread-cats-routes.js');
     const { registerCallbackAuthHook } = await import('../dist/routes/callback-auth-prehandler.js');
     app = Fastify();
@@ -40,6 +40,7 @@ describe('GET /api/callbacks/thread-cats', () => {
     registerCallbackThreadCatsRoutes(app, {
       threadStore: stubThreadStore(threads, participants),
       agentRegistry: { getAllEntries: () => services },
+      ...(routingSelection ? { routingSelection } : {}),
     });
     await app.ready();
     return app;
@@ -52,6 +53,40 @@ describe('GET /api/callbacks/thread-cats', () => {
       url: '/api/callbacks/thread-cats',
     });
     assert.equal(res.statusCode, 401);
+  });
+
+  it('reads the complete routable longlist before a role choice, including members not joined', async () => {
+    const inputs = [];
+    await setup({
+      records: new Map([
+        ['inv-1', { invocationId: 'inv-1', callbackToken: 'tok-1', threadId: 't-1', catId: 'opus', userId: 'u1' }],
+      ]),
+      threads: new Map([['t-1', { id: 't-1', createdBy: 'u1' }]]),
+      participants: new Map([['t-1', [{ catId: 'opus', lastMessageAt: 1, messageCount: 1 }]]]),
+      services: new Map([
+        ['opus', {}],
+        ['codex', {}],
+      ]),
+      routingSelection: {
+        read: async (input) => {
+          inputs.push(input);
+          return { stage: 'selection', snapshotRef: 'snapshot:A', facts: 'codex: unknown' };
+        },
+      },
+    });
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/callbacks/thread-cats?forRole=review',
+      headers: { 'x-invocation-id': 'inv-1', 'x-callback-token': 'tok-1' },
+    });
+    assert.equal(response.statusCode, 200);
+    assert.equal(response.json().selection.stage, 'selection');
+    assert.equal(inputs[0].role, 'review');
+    assert.ok(
+      inputs[0].targetCatIds.includes('codex'),
+      'new eligible members are considered before the author selects a target',
+    );
+    assert.equal(inputs[0].ownerId, 'u1');
   });
 
   it('returns 401 for invalid callback credentials', async () => {

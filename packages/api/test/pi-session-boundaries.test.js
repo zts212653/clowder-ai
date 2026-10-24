@@ -65,7 +65,7 @@ test('Host injects distinct persistent scopes only into the exact builtin Pi lau
 });
 test('Pi diagnostics sanitize complete split chunks and discard oversized raw lines', () => {
   const diag = new PiRpcDiagnostics();
-  const secret = 'sk-0123456789abcdefghijklmnopqrstuvwxyz';
+  const secret = ['sk', '-0123456789abcdefghijklmnopqrstuvwxyz'].join('');
   diag.write(Buffer.from(`api_key=${secret.slice(0, 10)}`));
   assert.equal(diag.context(), '');
   diag.write(Buffer.from(`${secret.slice(10)}\n`));

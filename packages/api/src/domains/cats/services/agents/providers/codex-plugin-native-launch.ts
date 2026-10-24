@@ -7,7 +7,7 @@ import { codexManagedLaunchArgs } from '../../../../../config/codex-managed-laun
 import type { NativeMcpServer } from '../../../../plugin/declared/native-mcp-launches.js';
 import type { AgentServiceOptions } from '../../types.js';
 import { normalizeToolExecutionPolicy } from '../invocation/tool-execution-policy.js';
-import { codexMcpConfigArgs } from './codex-config-overrides.js';
+import { normalizeCodexMcpConfigArgs } from './codex-config-overrides.js';
 import { CODEX_LIVE_DISABLED_FEATURES } from './codex-live-policy.js';
 
 const AUTH_KEYS = ['OPENAI_API_KEY', 'OPENAI_ORG_ID', 'OPENAI_ORGANIZATION', 'OPENAI_PROJECT_ID'] as const;
@@ -162,24 +162,32 @@ export async function prepareCodexNativeLaunch(
     writeFileSync(
       specPath,
       JSON.stringify({
+        source: server.name,
         command: server.command,
         args: server.args,
         cwd: server.workingDirectory,
         // The package receives its explicit activation environment, not provider account secrets.
         env: { HOME: pluginHome, TMPDIR: scratch, PATH: MINIMAL_PATH, ...pluginEnv },
+        // Host guard auth lives only in this existing owner-only file, never CLI args.
+        secretGuard: Object.fromEntries(
+          ['CAT_CAFE_API_URL', 'CAT_CAFE_INVOCATION_ID', 'CAT_CAFE_CALLBACK_TOKEN', 'CAT_CAFE_CREDENTIAL_FILE'].flatMap(
+            (key) => (callbackEnv[key] ? [[key, callbackEnv[key]]] : []),
+          ),
+        ),
       }),
       { mode: 0o600, flag: 'wx' },
     );
     writeFileSync(
       wrapperPath,
       [
-        "import { spawn } from 'node:child_process';",
         "import { readFileSync } from 'node:fs';",
-        "const spec = JSON.parse(readFileSync(process.argv[2], 'utf8'));",
-        "const child = spawn(spec.command, spec.args, { cwd: spec.cwd, env: spec.env, stdio: 'inherit' });",
-        "for (const signal of ['SIGTERM', 'SIGINT']) process.on(signal, () => child.kill(signal));",
-        "child.on('error', () => process.exit(1));",
-        "child.on('exit', (code) => process.exit(code ?? 1));",
+        'try {',
+        "const {secretGuard,...spec} = JSON.parse(readFileSync(process.argv[2], 'utf8'));",
+        'Object.assign(process.env, secretGuard);',
+        'process.env.CAT_CAFE_SECRET_MCP_PROXY_SPEC = JSON.stringify(spec);',
+        `const {runSecretMcpProxyFromEnvironment} = await import(${JSON.stringify(new URL('../../../../../../../../packages/mcp-server/dist/secret-mcp-proxy.js', import.meta.url).href)});`,
+        'await runSecretMcpProxyFromEnvironment();',
+        "} catch { process.stderr.write('secret_mcp_proxy_unavailable\\n'); process.exitCode=1; }",
       ].join('\n'),
       { mode: 0o600, flag: 'wx' },
     );
@@ -245,7 +253,7 @@ export async function prepareCodexNativeLaunch(
       kind: 'public',
       options: captured,
       env,
-      args: Object.freeze(codexMcpConfigArgs(args)),
+      args: Object.freeze(normalizeCodexMcpConfigArgs(args)),
       serverName: server.name,
       assertCurrent,
       dispose,

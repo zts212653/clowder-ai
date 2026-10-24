@@ -453,7 +453,7 @@ test('message actions occupy no resting layout and stay unpainted until asked fo
       'the real message boundary must not paint-clip its revealed action bar',
     );
     assertStableMessageGeometry(resting, hovered, 'hover');
-    assert.ok(hovered.actionAriaLabels.includes('多选消息'), 'hover must reveal the multi-select action');
+    assert.ok(hovered.actionAriaLabels.includes('多选：转发或导出'), 'hover must reveal the multi-select action');
     assert.ok(
       hovered.actionAriaLabels.some((label) => label.startsWith('复制消息 ID:')),
       'hover must keep message identity in the same dock',
@@ -486,7 +486,7 @@ test('message actions preserve keyboard focus and body-focus isolation', { timeo
     const selectionButton = page
       .locator('[data-testid="f294-density-source"] [data-context-quote-source="message"]')
       .first()
-      .getByRole('button', { name: '多选消息' });
+      .getByRole('button', { name: '多选：转发或导出' });
     await selectionButton.focus();
     await page.waitForFunction(
       () => {
@@ -911,10 +911,7 @@ test('a Rich Card final paragraph still exposes the quote affordance', { timeout
     });
 
     assert.equal(boundarySelection.text, '已执行：最后一行仍然可以引用。');
-    assert.ok(
-      boundarySelection.excludedIntersections.includes('rich-block-forward-actions'),
-      `the platform fixture must retain the boundary-only Range intersection, saw ${JSON.stringify(boundarySelection)}`,
-    );
+    assert.equal(await page.getByTestId('rich-block-forward-actions').count(), 0);
     await page.waitForTimeout(200);
     assert.equal(
       await page.getByTestId('message-selection-add-to-chat').count(),
@@ -981,7 +978,7 @@ test(
             const box = button.getBoundingClientRect();
             return { width: box.width, height: box.height };
           });
-          const selection = dock.querySelector('button[aria-label="多选消息"]')?.getBoundingClientRect();
+          const selection = dock.querySelector('button[aria-label="多选：转发或导出"]')?.getBoundingClientRect();
           return {
             actions,
             selection: selection

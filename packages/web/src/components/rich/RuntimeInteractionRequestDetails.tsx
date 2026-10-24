@@ -32,7 +32,7 @@ export function RuntimeInteractionRequestDetails({
             </section>
           ))
         : null}
-      {request.kind === 'approval' || request.kind === 'elicitation' ? (
+      {request.kind === 'approval' ? (
         <ReadOnlyChoiceList
           options={request.decisions}
           selectedIds={response?.kind === 'decision' ? [response.decisionId] : []}
@@ -53,6 +53,10 @@ export function RuntimeInteractionRequestDetails({
           ) : (
             <p className="break-all">{request.url}</p>
           )}
+          <ReadOnlyChoiceList
+            options={request.decisions}
+            selectedIds={response?.kind === 'decision' ? [response.decisionId] : []}
+          />
         </>
       ) : null}
     </div>

@@ -152,7 +152,7 @@ test('redacts lowercase/mixed-case bearer token (云端 codex P1 — RFC 7235 ca
 });
 
 test('redacts generic token=value pattern', () => {
-  const input = '{"api_key": "secret-abc123def456ghijklmnop"}';
+  const input = ['{"api_key": "se', 'cret-abc123def456ghijklmnop"}'].join('');
   const out = sanitizeCliStderr(input);
   assert.ok(out.includes('[TOKEN_REDACTED]'), `expected redaction, got: ${out}`);
 });

@@ -637,7 +637,10 @@ describe('F052: cross-thread A2A mention routing', () => {
     const body = response.json();
     assert.deepEqual(body.routed, ['codex'], 'requested recipient owns the durable wake');
     assert.equal(availabilityChecks, 1, 'availability annotates the admitted source');
-    assert.equal(body.routing_preflight.targets[0].disposition, 'rejected');
+    assert.equal(body.routing_preflight, undefined);
+    assert.equal(body.routing_admission.stage, 'queue_admitted');
+    assert.equal(body.routing_admission.executionPreflight, 'pending');
+    assert.equal(body.routing_admission.targets[0].availabilityObservation, 'unavailable');
     const entries = invocationQueue.list(target.id, 'user-1');
     assert.equal(entries.length, 1);
     assert.deepEqual(entries[0].targets, ['codex']);

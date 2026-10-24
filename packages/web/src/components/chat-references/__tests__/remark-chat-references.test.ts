@@ -38,3 +38,29 @@ it('preserves a historical root hint in the reader coordinate while hiding it fr
   expect(JSON.stringify(link)).toContain('"data-chat-reference":"docs/history.md[wt:old-root]"');
   expect(JSON.stringify(link)).toContain('"children":[{"type":"text","value":"docs/history.md"}]');
 });
+
+it('keeps immediate brackets and closing punctuation with an inline reference without changing the prose', () => {
+  const processor = unified().use(remarkParse).use(remarkChatReferences);
+  const body = '已推送（`881135a8f8`），原稿 `F317-actions.md:42`。 [说明](docs/notes.md)!';
+  const tree = processor.runSync(processor.parse(body)) as Root;
+  const wrappers: string[] = [];
+  function visit(node: { data?: { hProperties?: Record<string, unknown> }; children?: unknown[] }) {
+    if (node.data?.hProperties?.['data-chat-reference-affix']) wrappers.push(JSON.stringify(node));
+    for (const child of node.children ?? []) visit(child as Parameters<typeof visit>[0]);
+  }
+  visit(tree);
+  expect(wrappers).toHaveLength(3);
+  expect(wrappers[0]).toContain('（');
+  expect(wrappers[0]).toContain('），');
+  expect(wrappers[1]).toContain('。');
+  expect(wrappers[2]).toContain('!');
+  expect(JSON.stringify(tree)).not.toContain('"data-chat-layout":"card"');
+});
+
+it('leaves plain-prose closing punctuation outside file and commit candidates', () => {
+  for (const suffix of ['!', '?', ':', '！', '？', '：']) {
+    const tree = references(`Open notes.md${suffix} Then 881135a8f8${suffix}`);
+    expect(tree).toContain('"data-chat-reference":"notes.md"');
+    expect(tree).toContain('"data-chat-reference":"881135a8f8"');
+  }
+});

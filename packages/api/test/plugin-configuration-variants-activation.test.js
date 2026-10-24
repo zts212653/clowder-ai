@@ -8,7 +8,7 @@
  * materialized MCP capability env, so no consumer can silently regress while unit tests stay green.
  */
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { afterEach, test } from 'node:test';
@@ -187,6 +187,15 @@ async function installConfigureEnable(updates, roots) {
     (roots?.configOnWorkspace ? roots.workspace : roots?.runtime) ??
     (await tempRoot('cat-cafe-variants-feishu-project-'));
   const configRoot = roots?.workspace ?? projectRoot;
+  if (roots?.runtime && roots.runtime !== resolve(import.meta.dirname, '../../..')) {
+    const dist = join(roots.runtime, 'packages/mcp-server/dist');
+    await mkdir(dist, { recursive: true });
+    // A synthetic binary root must include the real transport artifact.
+    await symlink(
+      fileURLToPath(new URL('../../mcp-server/dist/secret-mcp-proxy.js', import.meta.url)),
+      join(dist, 'secret-mcp-proxy.js'),
+    );
+  }
   const packageRoot = await writeFixturePackage(Boolean(roots), roots?.mcpTools);
   const io = roots
     ? fileBasedMcpIO(configRoot, {
@@ -425,7 +434,9 @@ for (const configOnWorkspace of [false, true])
       assert.ok(server, 'real composition must provide the live plugin despite distinct runtime/workspace roots');
       assert.equal(server.env.CLOWDER_PLUGIN_ACTION_TOKEN, live.env.CLOWDER_PLUGIN_ACTION_TOKEN);
       assert.equal(server.command, live.command);
-      assert.deepEqual(server.args, [...live.args]);
+      const upstream = JSON.parse(server.env.CAT_CAFE_SECRET_MCP_PROXY_SPEC);
+      assert.deepEqual(upstream.args, [...live.args]);
+      assert.match(server.args[0], /secret-mcp-proxy\.js$/);
     } finally {
       await ownedRuntime?.shutdown();
     }

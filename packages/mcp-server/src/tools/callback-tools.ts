@@ -76,6 +76,7 @@ import {
   createDeferredPersonMemoryTool,
   createProactiveMemoryAbstentionTool,
 } from './proactive-memory-opportunity-tool.js';
+import { projectRoutingCallbackResponse } from './routing-preflight-response.js';
 
 /**
  * F174 Phase A — reason taxonomy lives in @cat-cafe/shared (single source of
@@ -281,7 +282,7 @@ export async function callbackPost(
       fetchTimeoutMs: options?.fetchTimeoutMs,
     },
   );
-  if (result.ok) return successResult(JSON.stringify(result.data));
+  if (result.ok) return successResult(JSON.stringify(projectRoutingCallbackResponse(result.data)));
 
   // KD-6: detect 400 CatRoutingError and prepend human-readable prefix + JSON dual-track
   const errText = result.error;
@@ -3173,6 +3174,7 @@ export async function handleProposeEventMemoryCorrection(input: {
 // ============ Thread Cats Discovery ============
 
 export const getThreadCatsInputSchema = {
+  forRole: z.enum(['review', 'architecture', 'implementation']).optional(),
   threadId: z
     .string()
     .trim()
@@ -3185,10 +3187,12 @@ export const getThreadCatsInputSchema = {
   agentKeyCatId: agentKeyCatIdSchema,
 };
 
-export async function handleGetThreadCats(input: AgentKeySelectable & { threadId?: string } = {}): Promise<ToolResult> {
+export async function handleGetThreadCats(
+  input: AgentKeySelectable & { threadId?: string; forRole?: 'review' | 'architecture' | 'implementation' } = {},
+): Promise<ToolResult> {
   return callbackGet(
     '/api/callbacks/thread-cats',
-    input.threadId ? { threadId: input.threadId } : undefined,
+    { ...(input.threadId ? { threadId: input.threadId } : {}), ...(input.forRole ? { forRole: input.forRole } : {}) },
     agentKeyOptions(input),
   );
 }
@@ -3660,10 +3664,9 @@ export const callbackTools = [
   defineCanonicalTool({
     name: 'cat_cafe_get_thread_cats',
     description:
-      'Discover recipient catIds in an authorized thread. Use before choosing targetCats or starting a root collaboration. ' +
-      'Output: historical participants, routableNow (joined), routableNotJoined, and notRoutable from the shared registered-service and roster projection. ' +
-      'NOT an online/idle/quota probe or a delivery guarantee; dispatch revalidates availability. ' +
-      'Agent-key callers must supply threadId. Do not infer targets from private session chains or automatically target yourself.',
+      'Find recipients before choosing; forRole adds cached quota facts for every routable member. ' +
+      'Returns members and an advisory snapshot; unknown stays unknown, spares require switching. ' +
+      'Not online/idle status or role ranking; no live probe; execution rechecks. Agent-key needs threadId; never target yourself.',
     inputSchema: getThreadCatsInputSchema,
     handler: handleGetThreadCats,
     governance: {

@@ -92,6 +92,7 @@ export * from './schemas/index.js';
 export * from './source-code-extensions.js';
 export * from './text-utils.js';
 export * from './thread-works.js';
+export * from './types/approval-decision-receipt.js';
 export * from './types/artifact-review.js';
 export * from './types/artifact-review-drawing.js';
 // F255 runtime schemas are exported directly while their source remains grouped

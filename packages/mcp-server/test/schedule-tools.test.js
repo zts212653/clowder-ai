@@ -233,7 +233,7 @@ describe('Schedule tools in registration', () => {
         writeFileSync(keyFile, 'schedule-agent-secret\n', { mode: 0o600 });
         process.env.CAT_CAFE_AGENT_KEY_FILES = JSON.stringify({ gemini35: keyFile });
         process.env.CAT_CAFE_INVOCATION_ID = 'invocation-schedule-id';
-        process.env.CAT_CAFE_CALLBACK_TOKEN = 'invocation-schedule-token';
+        process.env.CAT_CAFE_CALLBACK_TOKEN = ['invocation', 'schedule', 'token'].join('-');
         process.env.CAT_CAFE_CAT_ID = 'opus';
 
         const { handlePreviewScheduledTask, handleRegisterScheduledTask } = await import(

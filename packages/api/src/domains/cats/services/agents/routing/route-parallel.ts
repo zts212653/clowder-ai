@@ -90,7 +90,11 @@ import {
   resolveInvocationCapacitySnapshot,
   sealBeforeInvocationIfNeeded,
 } from '../invocation/invocation-capacity-snapshot.js';
-import { type InvocationParams, invokeSingleCat } from '../invocation/invoke-single-cat.js';
+import {
+  type InvocationParams,
+  invokeSingleCat,
+  prepareInvocationExecutionBinding,
+} from '../invocation/invoke-single-cat.js';
 import { buildMcpCallbackInstructions, needsMcpInjection } from '../invocation/McpPromptInjector.js';
 import {
   MEMBER_TIMEOUT_REASON,
@@ -219,11 +223,61 @@ async function* routeParallelPrepared(
   } = options;
 
   let routingDispatchPreflightDecision: RoutingPreflightDecisionV1 | undefined;
+  const originalTargets = [...targetCats];
+  targetCats = targetCats.filter((catId) => !(signalForCat?.(catId) ?? signal)?.aborted);
+  const pinnedServices = new Map<CatId, AgentService>();
+  const servicePreparationErrors = new Map<CatId, unknown>();
+  for (const catId of targetCats) {
+    try {
+      pinnedServices.set(catId, invocationServices.pin(getService(deps.services, catId, deps.unavailableServices)));
+    } catch (error) {
+      servicePreparationErrors.set(catId, error);
+    }
+  }
+  const prepared = await Promise.allSettled(
+    targetCats.map((catId) =>
+      prepareInvocationExecutionBinding(deps.invocationDeps, {
+        catId,
+        threadId,
+        userId,
+        service: pinnedServices.get(catId),
+        signal: signalForCat?.(catId) ?? signal,
+      }),
+    ),
+  );
+  const executionBindings = new Map<CatId, Awaited<ReturnType<typeof prepareInvocationExecutionBinding>>>();
+  for (const [index, result] of prepared.entries()) {
+    const catId = targetCats[index];
+    if (!catId) continue;
+    if (result.status === 'fulfilled') executionBindings.set(catId, result.value);
+    else
+      yield {
+        type: 'error',
+        catId,
+        errorCode: 'execution_binding_unavailable',
+        error: result.reason instanceof Error ? result.reason.message : 'Execution binding is unavailable',
+        timestamp: Date.now(),
+      };
+  }
+  targetCats = targetCats.filter((catId) => executionBindings.has(catId));
+  if (targetCats.length === 0) {
+    if (originalTargets[0]) yield { type: 'done', catId: originalTargets[0], isFinal: true, timestamp: Date.now() };
+    return;
+  }
   if (deps.routingDispatchPreflight) {
     const requestedTargetCats = [...targetCats];
     const routingPreflight = await preflightRoutingDispatch(deps.routingDispatchPreflight, {
       ownerId: userId,
       targetCatIds: requestedTargetCats,
+      executionBindings: requestedTargetCats.map((catId) => {
+        const binding = executionBindings.get(catId);
+        const accountRevision = binding?.executionAccount?.accountRevision;
+        return {
+          catId,
+          providerId: binding?.catConfig?.provider?.trim() || binding?.catConfig?.clientId,
+          ...(accountRevision ? { accountRevision } : {}),
+        };
+      }),
       ...(isRoutingOwnerAttempt(options, targetCats.length === 1 ? targetCats[0] : undefined)
         ? { ownerRequestedAttempt: true }
         : {}),
@@ -232,7 +286,6 @@ async function* routeParallelPrepared(
     routingDispatchPreflightDecision = routingPreflight;
     for (const targetCatId of requestedTargetCats) {
       const receipt = routingDispatchPreflightReceipt(routingPreflight, targetCatId);
-      if (receipt.target.disposition === 'allowed') continue;
       const notice = await routingPreflightNotice(deps, options, routingPreflight, targetCatId, threadId, true);
       if (notice) yield notice;
       if (receipt.target.disposition === 'rejected') {
@@ -554,8 +607,10 @@ async function* routeParallelPrepared(
       }
       let service: AgentService;
       try {
-        service = getService(deps.services, catId, deps.unavailableServices);
-        service = invocationServices.pin(service);
+        if (servicePreparationErrors.has(catId)) throw servicePreparationErrors.get(catId);
+        const pinned = pinnedServices.get(catId);
+        if (!pinned) throw new Error('No frozen provider service');
+        service = pinned;
       } catch (error) {
         if (!(error instanceof AgentServiceUnavailableError)) throw error;
         unavailableCats.add(catId);
@@ -1043,6 +1098,8 @@ async function* routeParallelPrepared(
       const remoteCancellation = createRemoteCancellationObserver();
       catRemoteCancellation.set(catId, remoteCancellation);
       const invocationStream = invokeSingleCat(deps.invocationDeps, {
+        executionBinding: executionBindings.get(catId),
+        ...(options.routingAdmission ? { routingAdmission: options.routingAdmission } : {}),
         ...(options.routeIntent ? { routeIntent: options.routeIntent } : {}),
         ...(options.routingContextIntent ? { routingContextIntent: options.routingContextIntent } : {}),
         ...(routingDispatchPreflightDecision ? { routingDispatchPreflightDecision } : {}),

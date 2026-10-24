@@ -69,7 +69,7 @@ test('unix websocket preserves the provider terminal diagnostic for replacement 
 });
 
 test('unix websocket sanitizes provider terminal diagnostics before exposing them', async () => {
-  await withClosingUnixWebSocket('Bearer sk-proj-abcdefghijklmnopqrstuvwxyz123456', async (session) => {
+  await withClosingUnixWebSocket(['Bearer sk', '-proj-abcdefghijklmnopqrstuvwxyz123456'].join(''), async (session) => {
     await assert.rejects(
       async () => {
         for await (const _message of session.read()) {

@@ -21,9 +21,10 @@ import type {
   QueueAuthorIntent,
   QueueAuthorIntentFallbackReason,
   QueueTargetAttemptTerminalReason,
+  RoutingAdmissionProvenanceV1,
   WaitContinuationCarrierV1,
 } from '@cat-cafe/shared';
-import { isMessageFrom } from '@cat-cafe/shared';
+import { isMessageFrom, routingAdmissionProvenanceV1Schema } from '@cat-cafe/shared';
 import { createModuleLogger } from '../../../../../infrastructure/logger.js';
 import type { CallerTraceContext } from '../../../../../infrastructure/telemetry/genai-semconv.js';
 import {
@@ -1419,6 +1420,24 @@ export class InvocationQueue {
     }
     this.cacheLedgerEntries([committed.entry]);
     return true;
+  }
+
+  /** B is optional provenance. A worker that already claimed this row never waits for it. */
+  async recordRoutingAdmissionObservation(
+    threadId: string,
+    userId: string,
+    entryId: string,
+    observation: RoutingAdmissionProvenanceV1,
+  ): Promise<boolean> {
+    const parsed = routingAdmissionProvenanceV1Schema.parse(observation);
+    const result = await this.mutateQueuedLedgerEntry(threadId, userId, entryId, (entry) => {
+      if (entry.delivery.routingAdmission) return false;
+      entry.delivery.routingAdmission = structuredClone(parsed);
+      return true;
+    });
+    // The metadata CAS may briefly win a worker's claim. Restore its ordinary drain notification.
+    if (result) await this.notifyAdmission(threadId, [result.entry]);
+    return result?.changed ?? false;
   }
 
   /**

@@ -481,6 +481,7 @@ export interface AgentRouterOptions {
   draftStore?: IDraftStore;
   /** F065: Task store for bootstrap task snapshot injection */
   taskStore?: ITaskStore;
+  ownedWaitStatusReader?: import('../../../../ball-custody/OwnedWaitStatus.js').OwnedWaitStatusReader;
   /** RFC A79: canonical exact-run situation projection for agent context. */
   threadExecutionSituationSource?: import('../invocation/thread-execution-situation.js').ThreadExecutionSituationSource;
   /** F073 P4: Workflow SOP store for stage hint injection */
@@ -584,6 +585,9 @@ export class AgentRouter {
   private draftStore: IDraftStore | undefined;
   private taskProgressStore: TaskProgressStore | undefined;
   private taskStore: ITaskStore | undefined;
+  private ownedWaitStatusReader:
+    | import('../../../../ball-custody/OwnedWaitStatus.js').OwnedWaitStatusReader
+    | undefined;
   private threadExecutionSituationSource?: import('../invocation/thread-execution-situation.js').ThreadExecutionSituationSource;
   private workflowSopStore: IWorkflowSopStore | undefined;
   private executionDigestStore:
@@ -689,6 +693,7 @@ export class AgentRouter {
     this.draftStore = options.draftStore;
     this.taskProgressStore = options.taskProgressStore;
     this.taskStore = options.taskStore;
+    this.ownedWaitStatusReader = options.ownedWaitStatusReader;
     this.threadExecutionSituationSource = options.threadExecutionSituationSource;
     this.workflowSopStore = options.workflowSopStore;
     this.executionDigestStore = options.executionDigestStore;
@@ -1371,6 +1376,7 @@ export class AgentRouter {
       ...(this.dotReplyTarget ? { dotReplyTarget: this.dotReplyTarget } : {}),
       deliveryCursorStore: this.deliveryCursorStore,
       ...(this.taskStore ? { taskStore: this.taskStore } : {}),
+      ...(this.ownedWaitStatusReader ? { ownedWaitStatusReader: this.ownedWaitStatusReader } : {}),
       ...(this.threadExecutionSituationSource
         ? { threadExecutionSituationSource: this.threadExecutionSituationSource }
         : {}),

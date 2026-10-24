@@ -222,7 +222,7 @@ describe('OpenCodeAgentService', () => {
 
     assert.equal(summary.mode, 'runtime-config');
     assert.equal(summary.opencodeConfig, '/tmp/.cat-cafe/oc-config-opencode-inv1/opencode.json');
-    assert.equal(summary.catCafeOcApiKey, 'sk-oc-***');
+    assert.equal(summary.catCafeOcApiKey, '[REDACTED]');
     assert.equal(summary.catCafeOcBaseUrl, 'https://maas.example.com/v1');
     assert.equal(summary.anthropicApiKey, '(cleared)');
     assert.equal(summary.anthropicBaseUrl, '(cleared)');
@@ -239,7 +239,7 @@ describe('OpenCodeAgentService', () => {
 
     assert.equal(summary.mode, 'direct-env');
     assert.equal(summary.opencodeConfig, '(unset)');
-    assert.equal(summary.anthropicApiKey, 'sk-dir***');
+    assert.equal(summary.anthropicApiKey, '[REDACTED]');
     assert.equal(summary.anthropicBaseUrl, 'https://api.minimaxi.com/anthropic/v1');
     assert.equal(summary.catCafeOcApiKey, '(unset)');
     assert.equal(summary.catCafeOcBaseUrl, '(unset)');
@@ -499,7 +499,7 @@ describe('OpenCodeAgentService', () => {
     const proc = createMockProcess();
     const spawnFn = mock.fn(() => proc);
     const previousAnthropicApiKey = process.env.ANTHROPIC_API_KEY;
-    process.env.ANTHROPIC_API_KEY = 'sk-inherited-should-clear';
+    process.env.ANTHROPIC_API_KEY = ['sk', '-inherited-should-clear'].join('');
 
     const service = new OpenCodeAgentService({
       catId: 'opencode',

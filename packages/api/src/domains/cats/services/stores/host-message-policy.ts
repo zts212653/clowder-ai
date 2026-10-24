@@ -1,4 +1,5 @@
 import {
+  approvalDecisionReceiptV1Schema,
   contentModificationFollowUpCarrierV1Schema,
   contentModificationPublicationCarrierV1Schema,
   contentModificationReceiptV1Schema,
@@ -7,7 +8,7 @@ import {
 } from '@cat-cafe/shared';
 
 interface HostMessageCandidate {
-  readonly from?: { readonly kind: string };
+  readonly from?: { readonly kind: string; readonly service?: string };
   readonly userId?: unknown;
   readonly catId?: unknown;
   readonly extra?: unknown;
@@ -30,6 +31,13 @@ export function catConsumableHostSpeaker(message: HostMessageCandidate): string 
     return 'Host 作品修改回执';
   }
   const source = record(message.source);
+  if (
+    message.from?.kind === 'system' &&
+    message.from.service === 'approval-hub' &&
+    source?.connector === 'approval-hub' &&
+    approvalDecisionReceiptV1Schema.safeParse(record(source.meta)?.approvalDecisionReceipt).success
+  )
+    return 'Host 审批结果回执';
   if (
     source?.connector === 'content-review' &&
     source.label === 'Host 文档写回完成：原任务核证续办' &&

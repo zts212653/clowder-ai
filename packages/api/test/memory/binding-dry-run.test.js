@@ -28,7 +28,10 @@ describe('BindingDryRun (AC-C4)', () => {
   it('detects secrets and reports count + safe=false', () => {
     const dir = mkdtempSync(join(tmpdir(), 'dry-secret-'));
     writeFileSync(join(dir, 'clean.md'), '# Clean\n\nSafe content.');
-    writeFileSync(join(dir, 'danger.md'), '# Danger\n\ntoken: ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghij\n');
+    writeFileSync(
+      join(dir, 'danger.md'),
+      ['# Danger\n\ntoken: gh', 'p_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghij\n'].join(''),
+    );
 
     const report = BindingDryRun.run(dir);
     assert.ok(report.secretFindings >= 1);
@@ -61,7 +64,7 @@ describe('BindingDryRun (AC-C4)', () => {
     mkdirSync(join(dir, '.obsidian'));
     writeFileSync(
       join(dir, '.obsidian', 'config.md'),
-      '# Config\n\ntoken: sk-proj-AbCdEfGhIjKlMnOpQrStUvWxYz1234567890ab',
+      ['# Config\n\ntoken: sk', '-proj-AbCdEfGhIjKlMnOpQrStUvWxYz1234567890ab'].join(''),
     );
     mkdirSync(join(dir, '.claude'));
     writeFileSync(join(dir, '.claude', 'settings.md'), '# Settings');

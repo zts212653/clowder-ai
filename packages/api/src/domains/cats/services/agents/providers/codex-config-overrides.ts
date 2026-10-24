@@ -1,4 +1,5 @@
 import { parse as parseToml } from 'smol-toml';
+import { guardMcpConfig } from '../../../../../config/capabilities/secret-mcp-config.js';
 
 /** Convert generated CLI assignments into the same config used by app-server. */
 export function codexConfigObjectFromArgs(args: readonly string[]): Record<string, unknown> {
@@ -42,8 +43,20 @@ export function isCodexConfigObject(value: unknown): value is Record<string, unk
  * A single root value preserves the server keys without changing their identity.
  * Bare-name configurations retain their existing override form and precedence.
  */
-export function codexMcpConfigArgs(args: readonly string[]): string[] {
-  if (!args.some((argument) => argument.startsWith('mcp_servers."'))) return [...args];
+export function codexMcpConfigArgs(args: readonly string[], callbackEnv: Record<string, string> = {}): string[] {
+  return transformCodexMcpConfig(args, (server, name) => guardMcpConfig(server, callbackEnv, undefined, name));
+}
+
+/** A private plugin launch already guards its transport inside the credential-file wrapper. */
+export function normalizeCodexMcpConfigArgs(args: readonly string[]): string[] {
+  return transformCodexMcpConfig(args, (server) => server);
+}
+
+function transformCodexMcpConfig(
+  args: readonly string[],
+  transform: (server: Record<string, unknown>, name: string) => Record<string, unknown>,
+): string[] {
+  if (!args.some((argument) => argument.startsWith('mcp_servers'))) return [...args];
   let config: Record<string, unknown> = {};
   const retained: string[] = [];
   for (let index = 0; index < args.length; index++) {
@@ -58,7 +71,19 @@ export function codexMcpConfigArgs(args: readonly string[]): string[] {
     config = expression.startsWith('mcp_servers=') ? overlay : mergeCodexConfig(config, overlay);
     index++;
   }
-  return [...retained, '--config', `mcp_servers=${inlineToml(config.mcp_servers)}`];
+  const servers = isCodexConfigObject(config.mcp_servers) ? config.mcp_servers : {};
+  const guarded = Object.fromEntries(
+    Object.entries(servers).map(([name, server]) => [
+      name,
+      isCodexConfigObject(server) ? transform(server, name) : server,
+    ]),
+  );
+  if (
+    !args.some((arg) => arg.startsWith('mcp_servers."')) &&
+    Object.entries(servers).every(([name, server]) => guarded[name] === server)
+  )
+    return [...args];
+  return [...retained, '--config', `mcp_servers=${inlineToml(guarded)}`];
 }
 
 function inlineToml(value: unknown): string {

@@ -216,6 +216,105 @@ function createMockDeps(services, appendCalls, feedbackWrites, broadcasts) {
 }
 
 describe('route-serial notice contract', () => {
+  it('keeps inline-routing and unbacked-wait facts in one feedback record', async () => {
+    const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
+    const feedbackWrites = [];
+    const service = {
+      async *invoke() {
+        yield {
+          type: 'text',
+          catId: 'opus',
+          content: '今天不回也没关系，我先请 @codex 补分母。',
+          timestamp: Date.now(),
+        };
+        yield { type: 'done', catId: 'opus', timestamp: Date.now() };
+      },
+    };
+    const deps = createMockDeps({ opus: service }, [], feedbackWrites, []);
+    for await (const _msg of routeSerial(deps, ['opus'], '继续', 'user1', 'thread-both')) {
+    }
+    assert.equal(feedbackWrites.length, 1);
+    assert.deepEqual(feedbackWrites[0].payload.items.map((item) => item.reason).sort(), ['inline_action', 'void_hold']);
+  });
+
+  it('passes the canonical owned-wait fact into the next invocation navigation', async () => {
+    const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
+    const { DeliveryCursorStore } = await import('../dist/domains/cats/services/stores/ports/DeliveryCursorStore.js');
+    const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
+    let invocationPrompt = '';
+    const scopes = [];
+    const service = {
+      async *invoke(prompt) {
+        invocationPrompt = prompt;
+        yield { type: 'text', catId: 'opus', content: '处理完成。', timestamp: Date.now() };
+        yield { type: 'done', catId: 'opus', timestamp: Date.now() };
+      },
+    };
+    const deps = createMockDeps({ opus: service }, [], [], []);
+    deps.messageStore = new MessageStore();
+    deps.deliveryCursorStore = new DeliveryCursorStore();
+    const source = await deps.messageStore.append({
+      from: { kind: 'user', userId: 'user1' },
+      userId: 'user1',
+      threadId: 'thread-nav',
+      content: '继续',
+      mentions: [],
+      timestamp: Date.now(),
+    });
+    deps.taskStore = {
+      listByThread: () => [
+        {
+          id: 'task-next',
+          kind: 'work',
+          title: '继续原工作',
+          status: 'doing',
+          ownerCatId: 'opus',
+          userId: 'user1',
+          threadId: 'thread-nav',
+          updatedAt: Date.now(),
+        },
+      ],
+    };
+    deps.ownedWaitStatusReader = async (scope) => {
+      scopes.push(scope);
+      return false;
+    };
+    for await (const _msg of routeSerial(deps, ['opus'], '继续', 'user1', 'thread-nav', {
+      currentUserMessageId: source.id,
+    })) {
+    }
+    assert.deepEqual(scopes, [{ userId: 'user1', threadId: 'thread-nav', catId: 'opus' }]);
+    assert.match(invocationPrompt, /继续原工作.*\[未挂等待\]/);
+  });
+
+  it('persists an unbacked wait as private feedback without public notices or a second invocation', async () => {
+    const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
+    const appendCalls = [],
+      feedbackWrites = [],
+      broadcasts = [];
+    let invocations = 0;
+    const service = {
+      async *invoke() {
+        invocations++;
+        yield { type: 'text', catId: 'opus', content: '等 gate 跑完我再汇报。', timestamp: Date.now() };
+        yield { type: 'done', catId: 'opus', timestamp: Date.now() };
+      },
+    };
+    const deps = createMockDeps({ opus: service }, appendCalls, feedbackWrites, broadcasts);
+    for await (const _msg of routeSerial(deps, ['opus'], '继续处理', 'user1', 'thread-wait')) {
+    }
+    assert.equal(invocations, 1);
+    assert.equal(appendCalls.length, 1);
+    assert.equal(appendCalls[0].content, '等 gate 跑完我再汇报。');
+    assert.ok(
+      feedbackWrites.some(
+        (write) =>
+          write.threadId === 'thread-wait' &&
+          write.catId === 'opus' &&
+          write.payload.items.some((item) => item.reason === 'void_hold'),
+      ),
+    );
+  });
   it('keeps an inline action @handle as text without adding a public correction bubble', async () => {
     const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
     const appendCalls = [];

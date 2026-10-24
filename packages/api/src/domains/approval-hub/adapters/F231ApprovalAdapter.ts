@@ -1,3 +1,4 @@
+import { type ApprovalDecisionRead, projectApprovalDecisionRead } from '../ports/IApprovalAdapter.js';
 /**
  * F246 v2: F231 (Profile Update Proposal) → ApprovalItem adapter.
  *
@@ -29,6 +30,12 @@ export class F231ApprovalAdapter implements IApprovalAdapter {
   }
 
   /** F246 Phase H: approved/rejected proposals for the history tab. */
+  async readDecision(userId: string, proposalId: string): Promise<ApprovalDecisionRead> {
+    const p = await this.store.get(proposalId);
+    if (!p || p.createdBy !== userId) return { state: 'closed' };
+    return projectApprovalDecisionRead(p.status, () => toSettledItem(p), p.rejectionReason);
+  }
+
   async listSettled(userId: string, opts?: ListSettledOpts): Promise<SettledApprovalItem[]> {
     const limit = opts?.limit ?? DEFAULT_SETTLED_LIMIT;
     const proposals = await this.store.listSettledByUser(userId, limit);

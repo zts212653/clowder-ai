@@ -136,7 +136,7 @@ export function buildExternalRuntimeAnchorThreadId(runtime: ExternalRuntimeAncho
   return `external-runtime:${runtime}:${userId}`;
 }
 
-export type MentionRoutingSuppressionReason = 'no_action' | 'cross_paragraph' | 'inline_action';
+export type MentionRoutingSuppressionReason = 'no_action' | 'cross_paragraph' | 'inline_action' | 'void_hold';
 export type MentionActionabilityMode = 'strict' | 'relaxed';
 
 export interface ThreadMentionRoutingFeedbackItem {
