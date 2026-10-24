@@ -511,6 +511,12 @@ export interface AgentCarrierSessionOptions {
   args: readonly string[];
   cwd?: string;
   env?: Record<string, string | null>;
+  /**
+   * Whether env should inherit from process.env (default: true).
+   * Set to false when env is already a finalEnvironment pre-composed with inheritParentEnv=false.
+   * Carriers that spawn child processes (tmux, direct) must respect this flag.
+   */
+  inheritParentEnv?: boolean;
   signal?: AbortSignal;
   invocationId: string;
   /** Existing provider session id used for warm-host affinity. */

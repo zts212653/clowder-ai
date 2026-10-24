@@ -172,7 +172,11 @@ export function createTmuxAgentCarrierSessionFactory(input: {
       await execAsync('mkfifo', [inputPath, outputPath], { signal: options.signal });
       const command = await writeAgentCommandFile(
         tmpDir,
-        { cwd: options.cwd, env: withCatCliProcessContext(options.env ?? {}) },
+        {
+          cwd: options.cwd,
+          env: withCatCliProcessContext(options.env ?? {}),
+          inheritParentEnv: options.inheritParentEnv,
+        },
         buildTmuxAgentCarrierPaneCommand(options, inputPath, outputPath, stderrPath, exitPath),
       );
       lease = await input.tmuxGateway.createAgentPaneLease(input.worktreeId, {

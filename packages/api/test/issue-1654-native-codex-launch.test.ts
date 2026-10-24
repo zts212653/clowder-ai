@@ -172,7 +172,7 @@ test('explicit OAuth binding retains its provider and credential boundary', asyn
     /fixture_launch_captured/,
   );
   assert.equal(launch?.env?.CODEX_AUTH_MODE, 'oauth');
-  assert.equal(launch?.env?.OPENAI_API_KEY, null);
+  assert.equal(launch?.env?.OPENAI_API_KEY, undefined); // finalEnvironment bypasses normalizeEnv; deleted keys are absent
   assert.ok(launch?.args.includes('model_provider="openai"'));
 });
 

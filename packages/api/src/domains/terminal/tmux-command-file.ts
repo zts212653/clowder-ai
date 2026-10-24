@@ -41,7 +41,7 @@ export function paneUtility(name: 'env' | 'rm' | 'tee' | 'cat' | 'sh'): string {
 
 export async function writeAgentCommandFile(
   directory: string,
-  options: Pick<CliSpawnOptions, 'env' | 'cwd' | 'bindExecutionOwner'>,
+  options: Pick<CliSpawnOptions, 'env' | 'cwd' | 'bindExecutionOwner' | 'inheritParentEnv'>,
   command: string,
 ): Promise<readonly string[]> {
   if (options.bindExecutionOwner === true) {
@@ -51,7 +51,15 @@ export async function writeAgentCommandFile(
   const zsh = bash ? undefined : findExecutable('zsh');
   const shell = bash ?? zsh;
   if (!shell) throw new Error('tmux agent transport requires bash or zsh with pipefail support');
-  const planned = buildChildEnv(options.env, { workingDirectory: options.cwd, bindExecutionOwner: false });
+
+  // Always use canonical buildChildEnv for security (strips sensitive vars) and defaults (HOME/PATH/cwd fixup)
+  // inheritParentEnv=false signals finalEnvironment: env is pre-composed, don't re-inherit from process.env
+  const planned = buildChildEnv(options.env, {
+    workingDirectory: options.cwd,
+    bindExecutionOwner: false,
+    inheritParentEnv: options.inheritParentEnv,
+  });
+
   const exports: string[] = [];
   for (const [key, value] of Object.entries(planned)) {
     if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) throw new Error(`Invalid tmux environment key: ${key}`);
