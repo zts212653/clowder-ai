@@ -63,7 +63,9 @@ describe('F306 AC-C7 Codex native guard launch contract', () => {
     assert.match(config, /PreToolUse=\[\{matcher="Edit\|Write"/);
     assert.match(config, /NativeShellSafetyCheck=\[\{matcher="\^Bash\$"/);
     assert.match(config, /config\.toml:native_shell_safety_check:0:0/);
-    assert.equal((config.match(/trusted_hash=/g) ?? []).length, 2);
+    assert.equal((config.match(/trusted_hash=/g) ?? []).length, 4);
+    assert.match(config, /secret-native-hook\.mjs/);
+    assert.match(config, /PostToolUse/);
     assert.doesNotMatch(config, /matcher="Bash\|Edit\|Write"/);
     assert.ok(buildCodexAppServerArgs(args).includes(config));
   });

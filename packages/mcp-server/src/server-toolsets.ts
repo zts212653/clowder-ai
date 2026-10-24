@@ -7,6 +7,7 @@ import { derivedProfileSet, projectServerFamily } from './canonical-tool-registr
 import { registerCoCreatorPresentation } from './co-creator-presentation.js';
 import { jsonSchemaToZod } from './json-schema-to-zod.js';
 import { runWithNativeTurnAuth } from './native-turn-auth.js';
+import { guardSecretToolCall } from './secret-tool-guard.js';
 import type { FamilyToolDefinition, McpServerFamily } from './tool-governance-snapshot.js';
 import { protectToolResponse } from './tool-response-budget.js';
 import { type PostMessageRegistrationPrincipal, projectPostMessageInputSchema } from './tools/callback-tools.js';
@@ -226,11 +227,17 @@ function registerTools(server: McpServer, tools: readonly ToolDef[], env: Toolse
         annotations,
         ...(deliveryMeta ? { _meta: deliveryMeta } : {}),
       },
-      async (args: never, extra: { signal: AbortSignal; _meta?: unknown }) =>
+      async (args: never, extra: { signal: AbortSignal; _meta?: unknown; requestId?: string | number }) =>
         runWithNativeTurnAuth(extra._meta, extra.signal, async () => {
-          const result = tool.implementation.runWithExtra
-            ? await tool.implementation.runWithExtra(args, { signal: extra.signal })
-            : await tool.handler(args);
+          const result = await guardSecretToolCall(
+            tool.name,
+            args,
+            async (safeArgs) =>
+              tool.implementation.runWithExtra
+                ? tool.implementation.runWithExtra(safeArgs as never, { signal: extra.signal })
+                : tool.handler(safeArgs as never),
+            extra.requestId === undefined ? undefined : String(extra.requestId),
+          );
           const typed = {
             ...(result as Record<string, unknown>),
           } as {

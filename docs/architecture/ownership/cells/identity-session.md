@@ -11,6 +11,7 @@ code_anchors:
   - packages/api/src/config/cat-config-loader.ts
   - packages/api/src/config/account-resolver.ts
   - packages/api/src/config/account-store-snapshot.ts
+  - packages/api/src/config/account-routing-capacity.ts
   - packages/api/src/config/codex-account-launch.ts
   - packages/api/src/config/codex-login-manager.ts
   - packages/api/src/config/codex-managed-layout.ts
@@ -212,6 +213,8 @@ Watch for new or renamed `catId`, `relationshipKey`, `ProfileRepository`, `CAT_C
 ### Codex account journey
 
 The existing account store owns managed account metadata, immutable principal coordinates, notes, login attempt revisions and per-account read-only quota observations. Official Codex owns PKCE, callback validation and credential writing; `CodexLoginManager` only retains live carrier cancellation handles and persists facts through the existing store. Staged results require current attempt identity before adoption, and cannot replace an established principal silently. The running member catalog owns `selectedAccountRefs` and each member's follow/override intent; account metadata stays in its persistent workspace owner. A confirmed preview and one catalog write switch the enabled local Codex followers across families, with explicit inclusion of exceptions and exclusion of disabled/cloud members. Invocation, usage and realtime transcripts retain their accepted execution snapshot. Native default rows are read-only projections of the existing resolver and actual credential home; listing or logging into a backup account does not switch members.
+
+F293 consumes a credential-free projection of that same store: canonical account label, opaque pool/binding/evidence refs and exact-principal observations. The projection neither selects accounts nor proves that a model/execution consumes a particular pool. Pool applicability remains unknown without a provider-issued proof on the frozen execution binding; no accountRef, principal ID or credential path crosses into F293 subjects or evidence. A frozen execution continues to use its accepted account when the live member selection later changes.
 
 The measured first managed combination is macOS + official native Codex 0.159.0 + private file authentication, without forced MDM or legacy managed/requirements policy and without cloud-eligible enterprise/business/education plans. Native personal and team-like plans remain eligible. Unsupported combinations are rejected before credential-bearing launch; no policy is disabled. Shared session/SQLite/memory/image/config state has explicit roots, while auth, secrets, temporary/control state and plugin/browser authentication stay private. Installed-native layout and source-consumer fixtures cover this implementation; real OAuth and cross-account server compaction require owner authorization and remain unclaimed until exercised.
 

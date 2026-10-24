@@ -1,10 +1,10 @@
 ---
 feature_ids: [F246]
-related_features: [F128, F139, F168, F193, F208, F221, F225, F231, F260, F286]
+related_features: [F128, F139, F168, F193, F208, F221, F225, F231, F260, F266, F276, F286, F306, F321]
 topics: [approval, hub, cvo-gate, cross-thread, cqrs, proposal, provenance, schedule]
 doc_kind: spec
 created: 2026-06-20
-updated: 2026-09-17
+updated: 2026-10-24
 ---
 
 # F246: Approval Hub — 统一审批中心底座
@@ -23,6 +23,56 @@ Why: operator 审批不仅会散落，还可能进入 Hub 后失去原文锚点�
 - 各 feature 继续独占 child resolution、内容、版本、权限和 effect proof；新 operation key 不能替相同 child revision 建第二 executor。原 owner attempt CAS/fence 必须与 effect commit 去重闭合；Hub 不建第二 proposal/memory 数据库，不以 response waiter 代替持久命令。
 - **B1 接球门** — F246 owner 须明确接受这份 implementation custody，核定自身存储/CAS 与各 producer 接缝后才进入实现/激活。本文只登记候选，不替 Sol 或其他猫接实现、不改变现有 producer writer epoch/cutover，也不扩大 M3 首批 corpus + Taste 目标。
 - B1 交付必须含服务端签发/封板与一张批次卡、选中行快照、唯一领取/续约/到期/启动恢复、稳定 operation/key 查询以及原 owner proof-first 对账。验收至少覆盖缺段/迟到/伪造 ref、双 worker、旧 lease 晚提交、effect 后断连与不同 key 同 child；细则和负例 10–15 由 M3 候选持有。本节不伪造已通过 AC。
+
+### 决议结果回写原线程（2026-10-24）
+
+授权：You `[thread-id]#private-source-id`；
+本批范围：`[thread-id]#private-source-id`；原 Task `private-source-id`。
+本批 author 为 `codex61-sol`，独立 reviewer 为 `gemini-argon`；总体 owner/status 保留原责任现场。
+
+operator 在 Hub 或原审批卡批准、拒绝 proposal 后，提案猫下一轮应在 canonical
+`approvalCardRef.threadId` 读到简洁的 Host 审批结果回执。回执只含 producer、proposal ID、
+accepted/rejected 决议及最多 500 字的拒绝理由，不复制 proposal 摘要、人物资料、画像正文或任务内容。
+批准不被描述成“副作用已执行”。回执不触发新审批或额外唤醒；既有 producer wake 契约保持原状。
+
+Architecture cell: `approval-index`
+Map delta: update required — 新增 F246 共享决议回执服务和持久化 delivery outbox；各 producer 保有 decision/CAS/materialization authority。
+Why: socket 更新、scheduler lifecycle 通知和原卡状态变化不能保证猫下一轮读到决议；普通 system 消息还会被上下文过滤。
+Canonical source: `packages/shared/src/approval-producer-catalog.ts#APPROVAL_PRODUCER_IDS` 与每个 adapter 的 `readDecision`。
+Consumer evidence: `rg -n 'readDecision|decisionReceipt' packages/api/src/domains/approval-hub packages/shared/src/approval-producer-catalog.ts`；共享 hooks 在 composition root 的 route registration 前安装。
+F276 精确时间 consumer：`rg -n 'getSettledDecisionTime' packages/api/src`，读取原有原子 settled index，不修改 producer 的决议写入。
+Claim guard: `decision-receipt-contract.test.js` 从 catalog 枚举真实 producer transition、实际 HTTP hook、消息持久化及 `ContextAssembler`；遗漏新 producer 的真实 fixture 或 exact reader 会失败。
+Characterization/contract test: `pnpm --filter @cat-cafe/api test:redis -- node --import tsx --import ./test/helpers/setup-cat-registry.js --test test/approval-hub/decision-receipt-contract.test.js test/scheduler/schedule-proposal-receipt-recovery.test.js`。
+
+共享边界在原决议 handler 运行前，向现有 SQLite database 登记仅含 owner/producer/proposal ID 的待发项。
+待发项写入不可用时，本次 handler 不运行并返回 503。业务决议仍由原 store 提交；随后按 proposal ID
+回读 canonical state，通过消息 store 的原子 `appendIdempotent` 写入原卡线程。消息幂等键绑定
+`producerId + canonicalProposalId + terminal resolution`。消息提交后才删除待发项，因此响应丢失、
+并发请求或中途退出均可重试。写回失败保留已完成决议，响应标注 `x-approval-receipt-status: pending`
+并记录具名 warning；启动及每 60 秒恢复最多 100 个最久未尝试的待发项。待发项无 TTL，不全量轮询历史，不复制 proposal 状态机。
+
+新 catalog 成员必须显式声明 `decisionReceipt.mode`；receipt runtime admission 要求 exact canonical reader。
+当前 11 项全部使用共享 notifier，没有 origin-card 豁免：
+
+| Producer | 决议权威与终态映射 | 拒绝理由来源 |
+|---|---|---|
+| F128 | Thread proposal store；approved/rejected | rejectionReason |
+| F139 | ScheduleMutationProposalStore；approved/rejected | rejectionReason |
+| F193 | Dispatch proposal store；approved/rejected | 现有拒绝契约无自由文本理由 |
+| F221 | Taste proposal store；approved/rejected | rejectionReason |
+| F225 | Session handoff store；approved/rejected | latestHumanDisposition |
+| F231 | Profile update store；approved/rejected | rejectionReason |
+| F260 | Entity proposal store；approved/rejected | rejectionReason |
+| F266 | canonical eval event log；accepted/rejected | decision.reasonText / reasonCode |
+| F276 | PersonMemoryStore；materialized/rejected，原子 settled index 精确提供终态时间 | latestHumanDisposition |
+| F306 | RuntimeInteractionStore；canonical provider terminal disposition | 现有原卡拒绝契约无自由文本理由 |
+| F321 | Event correction proposal store；approved/rejected | rejectionReason |
+
+pending/approving/applying、F276 partial、withdrawn/expired/superseded 不生成伪造的批准或拒绝回执。
+Host carrier 使用严格 schema；只有具名的审批结果 system message 进入猫的上下文，普通系统 badge 仍按既有规则处理。
+迁移/回滚：outbox 只新增独立的 delivery intent 表，不改 producer schema 或既有数据；回滚代码保留待发项，
+恢复本实现后仍按原 canonical state 补发。历史终态不主动全量回灌；激活后的决议与重试由持久化 intent 保护。
+本批不含 runtime restart/activation；main 与 live 分开核验。原始 RED、真实持久化与恢复证据见
 
 ## Why
 

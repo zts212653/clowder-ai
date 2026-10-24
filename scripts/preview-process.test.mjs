@@ -48,7 +48,7 @@ describe('preview-process managed lifecycle', () => {
   const env = {
     ...process.env,
     CAT_CAFE_PREVIEW_PROCESS_DIR: stateDir,
-    CAT_CAFE_CALLBACK_TOKEN: 'must-not-leak-to-managed-preview',
+    CAT_CAFE_CALLBACK_TOKEN: ['must', 'not', 'leak', 'to', 'managed', 'preview'].join('-'),
   };
 
   before(async () => {

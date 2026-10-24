@@ -1,4 +1,5 @@
 import { pluginMcpEnvironment } from '../../../../../../config/capabilities/plugin-mcp-environment.js';
+import { guardMcpConfig } from '../../../../../../config/capabilities/secret-mcp-config.js';
 /**
  * Per-invocation MCP server env materialization for ACP sessions.
  *
@@ -60,12 +61,7 @@ export function materializeSessionMcpServers(
   callbackEnv?: Record<string, string>,
   credentialFileOnly = false,
 ): AcpMcpServer[] {
-  const hasCallbacks = callbackEnv && Object.keys(callbackEnv).length > 0;
-  const hasReferences = baseServers.some(
-    (server) => 'command' in server && (server.env ?? []).some((entry) => /\$\{[^}]+\}/.test(entry.value)),
-  );
-  if (!hasCallbacks && !hasReferences) return baseServers;
-  return baseServers.map((server) => {
+  const resolved = baseServers.map((server) => {
     if (!('command' in server)) return server;
     const registered = Object.fromEntries((server.env ?? []).map((e) => [e.name, e.value]));
     const nativeActionServer = Boolean(registered.CLOWDER_PLUGIN_ACTION_TOKEN);
@@ -83,6 +79,34 @@ export function materializeSessionMcpServers(
               (entry) => entry.name !== 'CAT_CAFE_INVOCATION_ID' && entry.name !== 'CAT_CAFE_CALLBACK_TOKEN',
             )
           : materialized,
+    };
+  });
+  const proxyEnv = credentialFileOnly
+    ? Object.fromEntries(
+        Object.entries(callbackEnv ?? {}).filter(
+          ([key]) => key !== 'CAT_CAFE_INVOCATION_ID' && key !== 'CAT_CAFE_CALLBACK_TOKEN',
+        ),
+      )
+    : callbackEnv;
+  return resolved.map((server): AcpMcpServerStdio => {
+    const record =
+      'command' in server
+        ? {
+            command: server.command,
+            args: server.args,
+            env: Object.fromEntries(server.env.map(({ name, value }) => [name, value])),
+          }
+        : {
+            url: server.url,
+            headers: Object.fromEntries(server.headers.map(({ name, value }) => [name, value])),
+            transport: server.type,
+          };
+    const guarded = guardMcpConfig(record, proxyEnv, undefined, server.name);
+    return {
+      name: server.name,
+      command: String(guarded.command),
+      args: guarded.args as string[],
+      env: Object.entries(guarded.env as Record<string, string>).map(([name, value]) => ({ name, value })),
     };
   });
 }

@@ -19,22 +19,36 @@ export function buildCodexNativeEffectGuardArgs(options?: {
   const scriptPath = join(repoRoot, 'scripts', 'native-effect-target-guard.mjs');
   if (!existsSync(scriptPath)) throw new Error(`native_effect_guard_missing:${scriptPath}`);
   const command = `${shellQuote(options?.nodeExecutable ?? process.execPath)} ${shellQuote(realpathSync(scriptPath))}`;
-  const groups = options?.nativeShellSafetyCheck
+  const secretScript = join(repoRoot, 'scripts', 'secret-native-hook.mjs');
+  if (!existsSync(secretScript)) throw new Error('secret_native_hook_unavailable');
+  const secretCommand = `${shellQuote(options?.nodeExecutable ?? process.execPath)} ${shellQuote(realpathSync(secretScript))}`;
+  const effectGroups = options?.nativeShellSafetyCheck
     ? [
         { event: 'PreToolUse', key: 'pre_tool_use', matcher: 'Edit|Write' },
         { event: 'NativeShellSafetyCheck', key: 'native_shell_safety_check', matcher: '^Bash$' },
       ]
     : [{ event: 'PreToolUse', key: 'pre_tool_use', matcher: MATCHER }];
+  const groups = [
+    ...effectGroups.map((group) => ({ ...group, command, index: 0 })),
+    { event: 'PreToolUse', key: 'pre_tool_use', matcher: '.*', command: secretCommand, index: 1 },
+    { event: 'PostToolUse', key: 'post_tool_use', matcher: '.*', command: secretCommand, index: 0 },
+  ];
   const hookConfig = [
     'hooks={',
-    ...groups.map(
-      ({ event, matcher }) =>
-        `${event}=[{matcher=${tomlString(matcher)},hooks=[{type="command",command=${tomlString(command)},timeout=${TIMEOUT_SECONDS},statusMessage=${tomlString(STATUS_MESSAGE)}}]}],`,
+    ...[...new Set(groups.map(({ event }) => event))].map(
+      (event) =>
+        `${event}=[${groups
+          .filter((group) => group.event === event)
+          .map(
+            ({ matcher, command }) =>
+              `{matcher=${tomlString(matcher)},hooks=[{type="command",command=${tomlString(command)},timeout=${TIMEOUT_SECONDS},statusMessage=${tomlString(STATUS_MESSAGE)}}]}`,
+          )
+          .join(',')}],`,
     ),
     `state={${groups
       .map(
-        ({ key, matcher }) =>
-          `${tomlString(`/<session-flags>/config.toml:${key}:0:0`)}={enabled=true,trusted_hash=${tomlString(hookHash(command, key, matcher))}}`,
+        ({ key, matcher, command, index }) =>
+          `${tomlString(`/<session-flags>/config.toml:${key}:${index}:0`)}={enabled=true,trusted_hash=${tomlString(hookHash(command, key, matcher))}}`,
       )
       .join(',')}}`,
     '}',

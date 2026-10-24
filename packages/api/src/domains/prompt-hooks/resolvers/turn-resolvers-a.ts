@@ -231,11 +231,20 @@ export class D8Resolver implements HookResolver {
 
 export class D9Resolver implements HookResolver {
   resolve(input: AssemblerInput): ResolveResult {
-    if (input.mentionRoutingItems.length === 0) {
+    if (input.mentionRoutingItems.length === 0 && !input.voidHoldFeedback) {
       return skip('no_routing_feedback', 'No unrouted mention feedback');
     }
     const items = input.mentionRoutingItems.slice(0, 2);
-    return { status: 'fired', vars: { UNROUTED_MENTIONS: items.join('、') } };
+    const facts: string[] = [];
+    if (items.length > 0) {
+      facts.push(
+        `[路由提醒] 上次你提到了 ${items.join('、')} 但没有用行首 @ 路由。如果需要对方行动，请在行首独立一行写 @句柄。`,
+      );
+    }
+    if (input.voidHoldFeedback) {
+      facts.push('[等待对账] 上轮末段声明了继续行动或等待；该轮未记录等待工具、有效事件回调或向队友传球。');
+    }
+    return { status: 'fired', vars: { ROUTING_FEEDBACK: facts.join('\n') } };
   }
 }
 

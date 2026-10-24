@@ -33,6 +33,8 @@ import { isMessageSelectableForBundle, MAX_SELECTED_MESSAGES } from '../message-
 import { ImportedSessionNotice } from '../new-conversation/ImportedSessionNotice';
 import { ReplyRecallRuntimeProvider } from '../reply-layers/ReplyRecallRuntimeProvider';
 import type { CardConfirmationEntry } from '../rich/CardBlock';
+import { conversationViewCopy } from '../shell/conversation-view.shell-copy';
+import { useShellCopy } from '../shell/shell-copy';
 import { useShellPresentation } from '../shell/shell-presentation';
 import { ThreadComposerContext } from '../ThreadComposerContext';
 import { TransferTargetPicker } from '../TransferTargetPicker';
@@ -138,6 +140,7 @@ export function ThreadChatSurface({
   const companion = useCompanionConversation(threadId);
   // The composer is told it is hosted with the one execution row only in the new shell (see ChatInput `presentation`).
   const composerPresentation = useShellPresentation();
+  const historyCopy = useShellCopy(conversationViewCopy);
   const [pianoReady, setPianoReady] = useState(false);
   const liveness = useThreadLiveness(threadId);
   const { hasActive: hasActiveInvocation, catStatuses, catInvocations, intentMode } = liveness;
@@ -252,6 +255,9 @@ export function ThreadChatSurface({
         dedupCount={dedupInfo?.dedupCount}
         selectionMode={selection.selectionMode}
         selected={selected}
+        partiallySelected={selection.isPartiallySelected(message.id)}
+        partSelection={selection.partSelections.get(message.id)}
+        onToggleRichBlock={selection.toggleRichBlockSelection}
         selectionEligible={selectionEligible}
         onEnterSelection={selection.enterMessageSelection}
         onToggleSelection={selection.toggleMessageSelection}
@@ -347,7 +353,7 @@ export function ThreadChatSurface({
               />
             ) : null}
             {!hasMore && messages.length > 0 && (
-              <div className="py-3 text-center text-xs text-cafe-muted">没有更多消息了</div>
+              <div className="py-3 text-center text-xs text-cafe-muted">{historyCopy.noEarlierMessages}</div>
             )}
             <ReplyRecallRuntimeProvider enabled={composerPresentation === 'v2'} threadId={threadId} messages={messages}>
               {visibleMessages.length === 0 && !isLoadingHistory ? (
@@ -397,6 +403,9 @@ export function ThreadChatSurface({
             <MessageSelectionToolbar
               threadId={threadId}
               selectedMessageIds={selection.normalizedSelectedMessageIds}
+              getSelectionItems={selection.getSelectedBundleItems}
+              unselectedCardCount={selection.unselectedCardCount}
+              selectionError={selection.selectionError}
               onCancel={selection.clearMessageSelection}
               onExportSuccess={selection.clearMessageSelection}
               forwardingDisabled={connectionStatus.forwardingBlocked}
@@ -452,6 +461,8 @@ export function ThreadChatSurface({
             admissionBlocked={connectionStatus.forwardingBlocked}
             sourceThreadId={threadId}
             items={selection.selectedBundleItems}
+            selectionSummary={selection.selectionSummary}
+            selectedMessageCount={selection.normalizedSelectedMessageIds.length}
             onClose={selection.closeSelectionForward}
             onSuccess={selection.clearMessageSelection}
           />

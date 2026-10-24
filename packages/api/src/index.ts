@@ -82,6 +82,8 @@ import {
 } from './config/runtime-deployment-inclusion.js';
 import { initRuntimeOverrides } from './config/session-strategy-overrides.js';
 import { assertStorageReady } from './config/storage-guard.js';
+import { ApprovalDecisionReceiptOutbox } from './domains/approval-hub/ApprovalDecisionReceiptOutbox.js';
+import { ApprovalDecisionReceiptService } from './domains/approval-hub/ApprovalDecisionReceiptService.js';
 import { ApprovalIngress } from './domains/approval-hub/ApprovalIngress.js';
 import { RedisApprovalLifecycleEpochAuthority } from './domains/approval-hub/ApprovalLifecycleEpochAuthority.js';
 import {
@@ -100,6 +102,7 @@ import { F266ApprovalAdapter } from './domains/approval-hub/adapters/F266Approva
 import { F276ApprovalAdapter } from './domains/approval-hub/adapters/F276ApprovalAdapter.js';
 import { F306ApprovalAdapter } from './domains/approval-hub/adapters/F306ApprovalAdapter.js';
 import { F321ApprovalAdapter } from './domains/approval-hub/adapters/F321ApprovalAdapter.js';
+import { installApprovalDecisionReceiptHooks } from './domains/approval-hub/approval-decision-receipt-hooks.js';
 import { createDispatchProposalStore } from './domains/approval-hub/stores/factories/DispatchProposalStoreFactory.js';
 import { createEntityProposalStore } from './domains/approval-hub/stores/factories/EntityProposalStoreFactory.js';
 import { createActionSuccessorRecoveryCycle } from './domains/ball-custody/ActionSuccessorRecoveryCycle.js';
@@ -651,6 +654,8 @@ async function main(): Promise<void> {
   reportAcpHostPolicy(app.log, acpHostPolicy);
   const messageReadDiagnostics = registerMessageReadDiagnostics(app);
   const privateUserId = (process.env.CAT_CAFE_USER_ID ?? 'default-user').trim();
+  let approvalDecisionReceipts: ApprovalDecisionReceiptService;
+  installApprovalDecisionReceiptHooks(app, () => approvalDecisionReceipts);
   let runtimeDeploymentRevision: string | null = null;
   let runtimeDeploymentContext: RuntimeDeploymentProcessContext | undefined;
   const deploymentWaitLifecycleHolder: {
@@ -2668,7 +2673,10 @@ async function main(): Promise<void> {
     postCompactContext: ({ cliSessionId }) => inProcessCompactionSurface.postCompactContextFor(cliSessionId),
   });
   let trustedImagePathResolver: (hmrId: string) => Promise<string | undefined> = async () => undefined;
+  const { createOwnedWaitStatusReader } = await import('./domains/ball-custody/OwnedWaitStatus.js');
+  const ownedWaitStatusReader = createOwnedWaitStatusReader({ taskStore, dynamicTaskStore });
   router = new AgentRouter({
+    ownedWaitStatusReader,
     resolveTrustedImagePath: async (hmrId) => trustedImagePathResolver(hmrId),
 
     agentRegistry,
@@ -4597,6 +4605,7 @@ async function main(): Promise<void> {
   }
 
   const callbackOpts = {
+    ...(routingContextRuntime ? { routingSelection: routingContextRuntime.selectionService } : {}),
     proposalProjectRoot: resolveActiveProjectRoot(),
     companionCollectiveAccountability: readCollectiveAttention,
     resolveTrustedImagePath: async (hmrId: string) => {
@@ -4658,6 +4667,7 @@ async function main(): Promise<void> {
     socketManager,
     callbackAuthNotifier,
     taskStore,
+    ownedWaitStatusReader,
     backlogStore,
     threadStore,
     conciergeConfigStore: conciergeConfigStoreShared,
@@ -5712,6 +5722,12 @@ async function main(): Promise<void> {
       ),
     ),
     F266: bindV1ApprovalProducer(f266ApprovalAdapter),
+  });
+  approvalDecisionReceipts = new ApprovalDecisionReceiptService({
+    registry: approvalProducerRegistry,
+    messageStore,
+    outbox: new ApprovalDecisionReceiptOutbox(schedulerDb),
+    logger: app.log,
   });
   const { createArtifactReviewIntegration } = await import('./domains/growing/artifact-review-composition.js');
   const { createProgramContentMediaPort } = await import(

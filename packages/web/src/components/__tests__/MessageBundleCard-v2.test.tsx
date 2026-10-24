@@ -26,7 +26,7 @@ const items = [
   available('second', 'SECOND source'),
   available('third', 'THIRD source'),
 ];
-const response = (value = items) =>
+const response = (value: unknown = items) =>
   new Response(
     JSON.stringify({
       messageBundleId: 'bundle',
@@ -99,6 +99,23 @@ describe('F322 forwarded paper card', () => {
     expect(api).toHaveBeenCalledTimes(3);
     expect(host.querySelector('[role="alert"]')).not.toBeNull();
     expect(host.textContent).not.toContain('FRESH source');
+  });
+  it('counts source messages once when a partial message is represented by a quote and a card', async () => {
+    api.mockResolvedValueOnce(
+      response([
+        { ...available('same-source', 'selected text'), kind: 'quote' },
+        {
+          ...available('same-source', 'selected card'),
+          kind: 'rich_block',
+          richBlock: { id: 'selected-card', kind: 'card', v: 1, title: 'Selected card' },
+        },
+        available('other-source', 'other message'),
+      ]),
+    );
+    await render('v2');
+    expect(host.textContent).toContain('2 条聊天记录');
+    expect(host.textContent).toContain('展开全部 3 项内容');
+    expect(host.textContent).not.toContain('3 条聊天记录');
   });
   it('uses English wording for the same ordered preview without changing source content', async () => {
     writeShellLanguage('en');

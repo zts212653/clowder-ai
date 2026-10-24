@@ -128,7 +128,10 @@ describe('ensureProjectCollection', () => {
 
   it('P1-2: throws when secret is detected in project files', async () => {
     const secretProject = mkdtempSync(join(tmpdir(), 'secret-'));
-    writeFileSync(join(secretProject, 'leaked.md'), '# Config\n\ntoken: ghp_AAAAAAAABBBBBBBBCCCCCCCCDDDDDDDDEEEE\n');
+    writeFileSync(
+      join(secretProject, 'leaked.md'),
+      ['# Config\n\ntoken: gh', 'p_AAAAAAAABBBBBBBBCCCCCCCCDDDDDDDDEEEE\n'].join(''),
+    );
 
     const catalog = new LibraryCatalog();
     const stores = new Map();

@@ -1,10 +1,16 @@
 import type { ApprovalItem, SettledApprovalItem } from '@cat-cafe/shared';
+import { locateEvalRepairApproval } from '../../../infrastructure/harness-eval/eval-repair-approval-contracts.js';
 import {
   type EvalRepairApprovalRecord,
   projectEvalRepairApprovals,
 } from '../../../infrastructure/harness-eval/eval-repair-approval-projection.js';
 import type { IReevalClosureEventLog } from '../../../infrastructure/harness-eval/reeval-closure-event-log.js';
-import type { IApprovalAdapter, ListSettledOpts } from '../ports/IApprovalAdapter.js';
+import {
+  type ApprovalDecisionRead,
+  type IApprovalAdapter,
+  type ListSettledOpts,
+  projectApprovalDecisionRead,
+} from '../ports/IApprovalAdapter.js';
 
 export class F266ApprovalAdapter implements IApprovalAdapter {
   readonly featureId = 'F266' as const;
@@ -58,6 +64,20 @@ export class F266ApprovalAdapter implements IApprovalAdapter {
       .slice(0, limit);
   }
 
+  async readDecision(userId: string, proposalId: string): Promise<ApprovalDecisionRead> {
+    if (!this.eventLog) throw new Error('F266 canonical decision event log unavailable');
+    const record = (await locateEvalRepairApproval(this.eventLog, proposalId))?.record;
+    if (!record || record.proposal.requestOrigin.ownerUserId !== userId) return { state: 'closed' };
+    if (record.lifecycle.resolution === 'open') return { state: 'pending' };
+    const item = toSettledItem(record, userId);
+    if (!item) return { state: 'closed' };
+    return projectApprovalDecisionRead(
+      item.status,
+      () => item,
+      record.decision?.reasonText ?? record.decision?.reasonCode,
+    );
+  }
+
   private async readRecords() {
     const eventLog = this.eventLog;
     if (!eventLog) return [];
@@ -89,6 +109,7 @@ function toSettledItem(record: EvalRepairApprovalRecord, userId: string): Settle
     summary: proposal.summary,
     detail: {
       ...proposal.detail,
+
       ...(!resultTime ? { closureTimeUnknown: true } : {}),
       ...(record.materialization
         ? { canonicalEffectProofRef: record.materialization.custodyReceiptRef.ownerStateRef }

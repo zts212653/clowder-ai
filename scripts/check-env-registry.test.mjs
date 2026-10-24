@@ -25,6 +25,11 @@ const ROOT = resolve(import.meta.dirname, '..');
 const ALLOWLIST = new Map([
   ['HOME', 'OS-provided home directory'],
   ['SHELL', 'OS-provided shell path'],
+  ['ZDOTDIR', 'Zsh-owned startup configuration root; inherited tool setting, not an app setting'],
+  [
+    'CAT_CAFE_ORIGINAL_ZDOTDIR',
+    'Host-owned shell guard handoff preserving the original Zsh startup root; not user configuration',
+  ],
   ['PATH', 'OS-provided executable search path'],
   ['TMPDIR', 'OS-provided temporary directory passed to the isolated AGY CLI; not an app setting'],
   ['Path', 'Windows OS-provided PATH alias; executable search input, not an app setting'],

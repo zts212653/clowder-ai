@@ -3,71 +3,123 @@
 import type { MessageBundleSelectionItem } from '@cat-cafe/shared';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { ChatMessage } from '@/stores/chat-types';
+import {
+  isWholeMessageSelected,
+  type MessagePartSelection,
+  partialSelectionSummary,
+  selectedMessageParts,
+  wholeMessageSelection,
+} from '../message-part-selection';
 import { isMessageSelectableForBundle, MAX_SELECTED_MESSAGES, normalizeSelectedMessageIds } from '../message-selection';
 
 export function useThreadChatSelection(messages: readonly ChatMessage[]) {
   const [selectionMode, setSelectionMode] = useState(false);
-  const [selectedMessageIds, setSelectedMessageIds] = useState<Set<string>>(() => new Set());
+  const [partSelections, setPartSelections] = useState<Map<string, MessagePartSelection>>(() => new Map());
   const [selectionForwardOpen, setSelectionForwardOpen] = useState(false);
-
+  const [selectedBundleItems, setSelectedBundleItems] = useState<MessageBundleSelectionItem[]>([]);
+  const [selectionError, setSelectionError] = useState<string | null>(null);
+  const selectedMessageIds = useMemo(() => new Set(partSelections.keys()), [partSelections]);
   const normalizedSelectedMessageIds = useMemo(
     () => normalizeSelectedMessageIds(messages, selectedMessageIds),
     [messages, selectedMessageIds],
   );
-  const selectedBundleItems = useMemo<MessageBundleSelectionItem[]>(
-    () => normalizedSelectedMessageIds.map((messageId) => ({ kind: 'message', messageId })),
-    [normalizedSelectedMessageIds],
+  const summary = useMemo(() => partialSelectionSummary(messages, partSelections), [messages, partSelections]);
+  const getSelectedBundleItems = useCallback(
+    () => selectedMessageParts(messages, partSelections),
+    [messages, partSelections],
   );
-
   const clearMessageSelection = useCallback(() => {
     setSelectionForwardOpen(false);
     setSelectionMode(false);
-    setSelectedMessageIds(new Set());
+    setPartSelections(new Map());
+    setSelectionError(null);
+    setSelectedBundleItems([]);
   }, []);
-
   const enterMessageSelection = useCallback(
     (messageId: string) => {
-      const candidate = messages.find((message) => message.id === messageId);
-      if (!candidate || !isMessageSelectableForBundle(candidate)) return;
-      setSelectedMessageIds(new Set([messageId]));
+      const message = messages.find((candidate) => candidate.id === messageId);
+      if (!message || !isMessageSelectableForBundle(message)) return;
+      setPartSelections(new Map([[messageId, wholeMessageSelection(message)]]));
+      setSelectionError(null);
       setSelectionMode(true);
     },
     [messages],
   );
-
-  const toggleMessageSelection = useCallback((messageId: string) => {
-    setSelectedMessageIds((current) => {
-      const next = new Set(current);
-      if (next.has(messageId)) {
-        next.delete(messageId);
-      } else if (next.size < MAX_SELECTED_MESSAGES) {
-        next.add(messageId);
-      }
-      return next;
-    });
-  }, []);
-
-  // Drop selected ids whose messages went away or stopped being selectable. Decide before calling setState: while a
-  // reply streams, `messages` changes on nearly every commit and this component usually has work pending, so React
-  // cannot skip an updater that returns the same Set; each call would be a real update scheduled from the commit
-  // phase, and a long chain of them trips React's nested-update limit (F117 baseline B).
+  const toggleMessageSelection = useCallback(
+    (messageId: string) => {
+      const message = messages.find((candidate) => candidate.id === messageId);
+      if (!message || !isMessageSelectableForBundle(message)) return;
+      setSelectionError(null);
+      setPartSelections((current) => {
+        const next = new Map(current);
+        if (isWholeMessageSelected(message, current.get(messageId))) next.delete(messageId);
+        else if (next.has(messageId) || next.size < MAX_SELECTED_MESSAGES)
+          next.set(messageId, wholeMessageSelection(message));
+        return next;
+      });
+    },
+    [messages],
+  );
+  const toggleRichBlockSelection = useCallback(
+    (messageId: string, blockId: string) => {
+      const message = messages.find((candidate) => candidate.id === messageId);
+      if (
+        !message ||
+        !isMessageSelectableForBundle(message) ||
+        !message.extra?.rich?.blocks.some((block) => block.id === blockId)
+      )
+        return;
+      setSelectionError(null);
+      setPartSelections((current) => {
+        if (!current.has(messageId) && current.size >= MAX_SELECTED_MESSAGES) return current;
+        const previous = current.get(messageId);
+        const blockIds = new Set(previous?.blockIds);
+        if (blockIds.has(blockId)) blockIds.delete(blockId);
+        else blockIds.add(blockId);
+        const next = new Map(current);
+        if (!previous?.includeText && blockIds.size === 0) next.delete(messageId);
+        else next.set(messageId, { includeText: previous?.includeText ?? false, blockIds });
+        return next;
+      });
+    },
+    [messages],
+  );
+  // Decide before scheduling updates: streaming siblings must not cause a no-op setState chain.
   useEffect(() => {
-    if (selectedMessageIds.size === 0) return;
-    const selectableIds = new Set(messages.filter(isMessageSelectableForBundle).map((message) => message.id));
-    if ([...selectedMessageIds].every((messageId) => selectableIds.has(messageId))) return;
-    setSelectedMessageIds((current) => new Set([...current].filter((messageId) => selectableIds.has(messageId))));
-  }, [messages, selectedMessageIds]);
-
+    const selectable = new Set(messages.filter(isMessageSelectableForBundle).map((message) => message.id));
+    if ([...partSelections.keys()].every((id) => selectable.has(id))) return;
+    setPartSelections((current) => new Map([...current].filter(([id]) => selectable.has(id))));
+  }, [messages, partSelections]);
+  const openSelectionForward = useCallback(() => {
+    try {
+      const items = getSelectedBundleItems();
+      if (!items.length) return;
+      setSelectedBundleItems(items);
+      setSelectionError(null);
+      setSelectionForwardOpen(true);
+    } catch (error) {
+      setSelectionError(error instanceof Error ? error.message : '所选内容无法转发');
+    }
+  }, [getSelectedBundleItems]);
   return {
     selectionMode,
     selectedMessageIds,
+    partSelections,
     selectionForwardOpen,
     normalizedSelectedMessageIds,
     selectedBundleItems,
+    selectionError,
+    ...summary,
+    getSelectedBundleItems,
     clearMessageSelection,
     enterMessageSelection,
     toggleMessageSelection,
-    openSelectionForward: () => setSelectionForwardOpen(true),
+    toggleRichBlockSelection,
+    openSelectionForward,
+    isPartiallySelected: (id: string) => {
+      const message = messages.find((candidate) => candidate.id === id);
+      return Boolean(message && partSelections.has(id) && !isWholeMessageSelected(message, partSelections.get(id)));
+    },
     closeSelectionForward: () => setSelectionForwardOpen(false),
   };
 }

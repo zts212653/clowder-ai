@@ -22,6 +22,7 @@ import {
 } from '../../../../../config/capabilities/mcp-launch-paths.js';
 import { pluginMcpEnvironment } from '../../../../../config/capabilities/plugin-mcp-environment.js';
 import { isRetiredGithubMcpConfigEntry } from '../../../../../config/capabilities/retired-github-mcp.js';
+import { guardMcpConfig } from '../../../../../config/capabilities/secret-mcp-config.js';
 import { createModuleLogger } from '../../../../../infrastructure/logger.js';
 
 const log = createModuleLogger('provider-mcp-config');
@@ -174,7 +175,23 @@ export async function resolveProviderMcpConfigResolution(input: {
     }),
     '#712: MCP invoke-time injection',
   );
-  return { servers: mcpServers, source: resolved ? 'capabilities.json' : 'fallback' };
+  return {
+    servers: Object.fromEntries(
+      Object.entries(mcpServers).map(([name, server]) => [
+        name,
+        guardMcpConfig(
+          server,
+          {
+            ...input.callbackEnv,
+            ...(input.credentialFile ? { CAT_CAFE_CREDENTIAL_FILE: input.credentialFile } : {}),
+          },
+          binaryProjectRoot,
+          name,
+        ),
+      ]),
+    ),
+    source: resolved ? 'capabilities.json' : 'fallback',
+  };
 }
 
 export async function resolveProviderMcpConfig(

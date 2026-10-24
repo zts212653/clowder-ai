@@ -63,6 +63,7 @@ import {
   recordKimiL0Fingerprint,
 } from './kimi-l0-session-fingerprint.js';
 import { type KimiMcpLease, prepareKimiMcpConfig } from './kimi-mcp-config.js';
+import { ensureKimiSecretHooks } from './kimi-secret-hooks.js';
 import { compileL0ViaSubprocess } from './l0-compiler.js';
 
 const log = createModuleLogger('kimi-agent');
@@ -327,6 +328,7 @@ export class KimiAgentService implements AgentService {
 
     let mcpLease: KimiMcpLease | undefined;
     try {
+      await ensureKimiSecretHooks({ ...(options?.callbackEnv ?? {}), ...(options?.accountEnv ?? {}) });
       mcpLease = await prepareKimiMcpConfig({
         callbackEnv: { ...(options?.callbackEnv ?? {}), ...(options?.accountEnv ?? {}) },
         workingDirectory: options?.workingDirectory,

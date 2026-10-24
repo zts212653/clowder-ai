@@ -174,7 +174,7 @@ test('AC-A6: panic without classifier match — publicSummary surfaces headline,
 });
 
 test('safeExcerpt is sanitized (token redacted)', () => {
-  const rawText = '401 Unauthorized: invalid api key sk-AbCdEfGh1234567890IjKlMnOpQrStUv';
+  const rawText = ['401 Unauthorized: invalid api key sk', '-AbCdEfGh1234567890IjKlMnOpQrStUv'].join('');
   const d = buildCliDiagnostics({ rawText, debugRef: baseRef });
   assert.strictEqual(d.reasonCode, 'auth_failed');
   assert.ok(d.safeExcerpt);
@@ -677,7 +677,7 @@ test('AC-G2 安全: stderrExcerpt goes through sanitizer (token redacted)', () =
     eventCount: 1,
     eventTypes: ['step_start'],
     stderrPresent: true,
-    stderrExcerpt: 'API_KEY=sk-AbCdEfGh1234567890IjKlMnOpQr in env',
+    stderrExcerpt: ['API_KEY=sk', '-AbCdEfGh1234567890IjKlMnOpQr in env'].join(''),
   });
   const evidence = JSON.parse(d.safeExcerpt);
   assert.ok(evidence.stderrExcerpt, 'stderrExcerpt should be populated');

@@ -62,7 +62,10 @@ test('native MCP admission reads the configuration root and leaves its file unch
     mcpServerPath: join(f.dist, 'index.js'),
   });
   assert.equal(result.source, 'capabilities.json');
-  assert.deepEqual(result.servers['cat-cafe-collab'].args, [join(f.dist, 'collab.js')]);
+  const server = result.servers['cat-cafe-collab'];
+  assert.deepEqual(server.args, [join(f.dist, 'secret-mcp-proxy.js')]);
+  const spec = JSON.parse((server.env as Record<string, string>).CAT_CAFE_SECRET_MCP_PROXY_SPEC);
+  assert.deepEqual(spec.args, [join(f.dist, 'collab.js')]);
   assert.ok((await readFile(f.file)).equals(before));
 });
 

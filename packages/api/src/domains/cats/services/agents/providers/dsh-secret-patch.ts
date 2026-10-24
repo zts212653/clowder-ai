@@ -1,0 +1,42 @@
+import { createHash } from 'node:crypto';
+import { lstatSync, readFileSync } from 'node:fs';
+import { mkdir, writeFile } from 'node:fs/promises';
+import { basename, join } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+
+const PLUGIN = fileURLToPath(new URL('../../../../../../../../scripts/secret-dsh-plugin.mjs', import.meta.url));
+// Startup admission covers this exact reviewed consumer, never arbitrary YAML or !!js.
+const PLUGIN_HASH = '5b70b9694b1c0ebcca16da3b7143500de3fd82beea8754de45811344fe3827d1';
+const template = () =>
+  `- insert:\n    - id: cat-cafe-secret-content\n      name: ${JSON.stringify(pathToFileURL(PLUGIN).href)}\n- id: acp\n  inject: [acpAppStartup, catCafeSecretContent]\n`;
+
+export function verifyDshSecretPatch(path: string): boolean {
+  try {
+    const stat = lstatSync(path);
+    return (
+      stat.isFile() &&
+      !stat.isSymbolicLink() &&
+      stat.nlink === 1 &&
+      stat.size < 4096 &&
+      readFileSync(path, 'utf8') === template() &&
+      createHash('sha256').update(readFileSync(PLUGIN)).digest('hex') === PLUGIN_HASH
+    );
+  } catch {
+    return false;
+  }
+}
+
+/** An explicit final patch leaves the native DSH home/profile and OAuth state intact. */
+export async function prepareDshSecretPatch(command: string, args: string[], projectRoot: string): Promise<string[]> {
+  if (!/^dsh(?:\.(?:cmd|exe|bat))?$/i.test(basename(command))) return args;
+  const directory = join(projectRoot, '.cat-cafe', 'native-guards');
+  await mkdir(directory, { recursive: true, mode: 0o700 });
+  const patch = join(directory, 'secret-dsh.patch.yml');
+  try {
+    await writeFile(patch, template(), { flag: 'wx', mode: 0o600 });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw new Error('secret_dsh_patch_unavailable');
+  }
+  if (!verifyDshSecretPatch(patch)) throw new Error('secret_dsh_patch_changed');
+  return [...args, '--patch', patch];
+}

@@ -18,6 +18,7 @@ import type {
 export interface RoutingPreflightInput extends ResolveRoutingContextInput {
   targetCatIds: readonly string[];
   ownerRequestedAttempt?: boolean;
+  requireCapacityProof?: boolean;
 }
 
 export interface RoutingPreflightAuditEvent {
@@ -142,12 +143,13 @@ export class RoutingPreflightService {
   }
 
   private async resolveWithinBudget(input: RoutingPreflightInput): Promise<RoutingContextResolution> {
+    const startedAt = performance.now();
     let timeout: ReturnType<typeof setTimeout> | undefined;
     const budgetExpired = new Promise<never>((_resolve, reject) => {
       timeout = setTimeout(() => reject(new ResolverBudgetTimeoutError()), this.readBudgetMs);
     });
     try {
-      return await Promise.race([
+      const result = await Promise.race([
         Promise.resolve().then(() =>
           this.resolver.resolve({
             ownerId: input.ownerId,
@@ -159,6 +161,9 @@ export class RoutingPreflightService {
         ),
         budgetExpired,
       ]);
+      // A CPU-bound resolver can starve setTimeout. Elapsed truth is independent of the timer's turn.
+      if (performance.now() - startedAt > this.readBudgetMs) throw new ResolverBudgetTimeoutError();
+      return result;
     } finally {
       if (timeout !== undefined) clearTimeout(timeout);
     }

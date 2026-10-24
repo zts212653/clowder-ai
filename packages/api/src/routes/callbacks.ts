@@ -870,6 +870,7 @@ export interface CallbackRoutesOptions {
     threadId: string,
   ) => Promise<{ memberCardCount: number }> | { memberCardCount: number };
   taskStore?: ITaskStore;
+  ownedWaitStatusReader?: import('../domains/ball-custody/OwnedWaitStatus.js').OwnedWaitStatusReader;
   backlogStore?: IBacklogStore;
   /** For thinking mode filtering in thread-context + thread-cats discovery */
   threadStore?: IThreadStore;
@@ -913,6 +914,10 @@ export interface CallbackRoutesOptions {
   agentRegistry?: { getAllEntries(): Map<string, unknown> };
   /** Read-only F293 annotation; Queue preserves all accepted target rows. */
   routingDispatchPreflight?: import('../domains/routing-context/RoutingDispatchPreflightPort.js').RoutingDispatchPreflightPort;
+  routingSelection?: Pick<
+    import('../domains/routing-context/RoutingSelectionService.js').RoutingSelectionService,
+    'read'
+  >;
   /** For post_message @mention → invocation triggering */
   router?: AgentRouter;
   invocationRecordStore?: IInvocationRecordStore;
@@ -2173,7 +2178,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
         threadId: effectiveThreadId,
         messageId: storedMsg.id,
         routed: routingOutcome.routed,
-        ...(deliveryDecision.routingPreflight ? { routing_preflight: deliveryDecision.routingPreflight } : {}),
+        ...(deliveryDecision.routingAdmission ? { routing_admission: deliveryDecision.routingAdmission } : {}),
         ...(validatedReplyTo ? { replyTo: validatedReplyTo } : {}),
         ...(clientMessageId ? { clientMessageId } : {}),
         ...(routing_warnings.length > 0 ? { routing_warnings } : {}),
@@ -3837,7 +3842,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       threadId: effectiveThreadId,
       messageId: storedMsg.id,
       routed: routingOutcome.routed,
-      ...(deliveryDecision.routingPreflight ? { routing_preflight: deliveryDecision.routingPreflight } : {}),
+      ...(deliveryDecision.routingAdmission ? { routing_admission: deliveryDecision.routingAdmission } : {}),
       ...(validatedReplyTo ? { replyTo: validatedReplyTo } : {}),
       ...(clientMessageId ? { clientMessageId } : {}),
       ...(routing_warnings.length > 0 ? { routing_warnings } : {}),
@@ -5801,6 +5806,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
   if (taskStore) {
     registerCallbackTaskRoutes(app, {
       taskStore,
+      ...(opts.ownedWaitStatusReader ? { ownedWaitStatusReader: opts.ownedWaitStatusReader } : {}),
       messageStore: opts.messageStore,
       socketManager,
       ...(threadStore ? { threadStore } : {}),
@@ -5836,6 +5842,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
     registerCallbackThreadCatsRoutes(app, {
       threadStore: opts.threadStore,
       agentRegistry: opts.agentRegistry,
+      ...(opts.routingSelection ? { routingSelection: opts.routingSelection } : {}),
     });
   }
 

@@ -129,6 +129,7 @@ function MessageBundleRead({ messageId, forwarderName, getCatLabel }: MessageBun
 
   const availableItems = data.items.filter((item) => item.status === 'available');
   const singleItem = data.items.length === 1 ? data.items[0] : undefined;
+  const messageCount = new Set(data.items.map((item) => item.messageId)).size;
   const participants = [
     ...new Set(
       availableItems.map((item) => messageBundleSenderLabel(item.from, data.createdBy, forwarderName, getCatLabel)),
@@ -168,7 +169,7 @@ function MessageBundleRead({ messageId, forwarderName, getCatLabel }: MessageBun
           <span className="truncate">来自「{sourceTitle}」</span>
           <HubIcon name="external-link" className="h-3 w-3 shrink-0" />
         </button>
-        {!singleItem ? <span className="shrink-0 text-xs text-cafe-muted">{data.items.length} 条聊天记录</span> : null}
+        {!singleItem ? <span className="shrink-0 text-xs text-cafe-muted">{messageCount} 条聊天记录</span> : null}
       </div>
       {data.note ? (
         <div data-message-bundle-note className="mt-3 rounded-lg bg-cafe-surface-sunken px-3 py-2 text-sm">
@@ -190,7 +191,7 @@ function MessageBundleRead({ messageId, forwarderName, getCatLabel }: MessageBun
             aria-expanded={expanded}
             onClick={toggle}
           >
-            {expanded ? '收起聊天记录' : `展开 ${data.items.length} 条聊天记录`}
+            {expanded ? '收起聊天记录' : `展开 ${messageCount} 条聊天记录`}
           </button>
           {expanded ? <div className="mt-3 space-y-3">{data.items.map(renderItem)}</div> : null}
         </>

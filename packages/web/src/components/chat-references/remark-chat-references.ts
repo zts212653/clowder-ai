@@ -1,8 +1,9 @@
 import { isChatCommitCandidate, isChatPathCandidate, parseLegacyChatPathReference } from '@cat-cafe/shared';
 import type { Link, PhrasingContent, Root, RootContent } from 'mdast';
+import { attachReferenceAffixes } from './chat-reference-affixes';
 
 const token =
-  /(^|[\s（(「『【《，。；：、“‘])((?:https?:\/\/[^\s<>[\]）)」』】》，。；、“‘]+)|(?:[~.]?\/[^\s<>[\]）)」』】》，。；、“‘]+)|(?:[\p{L}\p{N}_@.-]+\/[^\s<>[\]）)」』】》，。；、“‘]*)|(?:[\p{L}\p{N}_@.-]+\.[a-zA-Z0-9]{1,12}(?::[1-9]\d*(?::[1-9]\d*)?)?)|(?:[a-fA-F0-9]{7,40}))(?=\[wt:|$|[\s）)」』】》，。；、“‘])/gu;
+  /(^|[\s（(「『【《，。；：、“‘])((?:https?:\/\/[^\s<>[\]）)」』】》，。；、“‘]+)|(?:[~.]?\/[^\s<>[\]）)」』】》，。；、“‘]+)|(?:[\p{L}\p{N}_@.-]+\/[^\s<>[\]）)」』】》，。；、“‘]*)|(?:[\p{L}\p{N}_@.-]+\.[a-zA-Z0-9]{1,12}(?::[1-9]\d*(?::[1-9]\d*)?)?)|(?:[a-fA-F0-9]{7,40}))(?=\[wt:|$|[\s）)」』】》，。；、“‘.,;:!?！？：])/gu;
 const candidate = (value: string) =>
   /^https?:\/\//.test(value) || isChatPathCandidate(value) || isChatCommitCandidate(value);
 
@@ -27,7 +28,7 @@ function splitText(value: string): PhrasingContent[] {
   const result: PhrasingContent[] = [];
   let end = 0;
   for (const match of value.matchAll(token)) {
-    const reference = match[2].replace(/[.,;]+$/, '');
+    const reference = match[2].replace(/[.,;:!?，。；：、！？]+$/u, '');
     if (!candidate(reference)) continue;
     const start = match.index + match[1].length;
     if (start > end) result.push({ type: 'text', value: value.slice(end, start) });
@@ -107,7 +108,7 @@ function visit(node: Node, definitions: Map<string, string>): void {
     path.data.hProperties['data-chat-reference'] += ` [wt:${hint[1]}]`;
     suffix.value = suffix.value.slice(hint[0].length);
   }
-  children.splice(0, children.length, ...transformed);
+  children.splice(0, children.length, ...attachReferenceAffixes(transformed));
   markStandaloneGroup(node, children);
 }
 /** Parse only Markdown prose. Fenced/indented code, images and existing-link children remain literal. */

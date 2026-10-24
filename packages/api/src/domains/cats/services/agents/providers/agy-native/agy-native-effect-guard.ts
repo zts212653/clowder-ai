@@ -6,6 +6,7 @@ import { validateAgyNativeConfigReceipt, writeAgyNativeConfigReceipt } from './a
 /** Host-only config: an existing different hook is never overwritten or silently enabled. */
 export function materializeAgyNativeEffectGuard(input: {
   profileHome: string;
+  accountHome?: string;
   runtimeRoot: string;
   readOnly: boolean;
 }): string {
@@ -13,7 +14,15 @@ export function materializeAgyNativeEffectGuard(input: {
   const quote = (value: string) => `'${value.replaceAll("'", `'"'"'`)}'`;
   // Carry the host state coordinate separately: isolated OAuth HOME is not the
   // home in which our daemon writes its self-host record.
-  const command = [process.execPath, script, homedir(), input.readOnly ? 'read-only' : 'normal'].map(quote).join(' ');
+  const command = [
+    process.execPath,
+    script,
+    homedir(),
+    input.readOnly ? 'read-only' : 'normal',
+    input.accountHome ?? input.profileHome,
+  ]
+    .map(quote)
+    .join(' ');
   const config = {
     'cat-cafe-native-effect': {
       PreToolUse: [{ matcher: '*', hooks: [{ type: 'command', command, timeout: 5 }] }],

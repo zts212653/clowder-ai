@@ -17,6 +17,11 @@
 
 BRANCH=$(git branch --show-current 2>/dev/null)
 REPO_ROOT=$(git rev-parse --show-toplevel 2>/dev/null)
+# Read INDEX blobs, not the worktree; do not print matched content on failure.
+SECRET_GUARD="$(dirname "${BASH_SOURCE[0]}")/../scripts/secret-git-guard.mjs"
+if ! node "$SECRET_GUARD" index; then
+  exit 1
+fi
 STAGED_FILES="$(git diff --cached --name-only || true)"
 VERDICT_BRANCH_DOMAIN=""
 VERDICT_ID=""

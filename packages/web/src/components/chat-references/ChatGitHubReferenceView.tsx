@@ -1,5 +1,5 @@
 import type { ChatGitHubReference } from '@cat-cafe/shared';
-import type { RefObject } from 'react';
+import type { ReactNode, RefObject } from 'react';
 import { AppTooltip } from '../AppTooltip';
 import { useShellCopy } from '../shell/shell-copy';
 import { useShellLanguage } from '../shell/shell-language';
@@ -27,6 +27,27 @@ function GitHubIcon({ issue }: { issue: boolean }) {
     </span>
   );
 }
+
+function MetadataParts({ items, leading }: { items: string[]; leading?: ReactNode }) {
+  return (
+    <span className={styles.prMetaFlow}>
+      {leading ? (
+        <span className={styles.prMetaLeading}>
+          <span className={styles.prMetaSeparator} />
+          {leading}
+          {items.length > 0 ? ' ' : null}
+        </span>
+      ) : null}
+      {items.map((item, index) => (
+        <span key={index} className={styles.prMetaItem} title={item}>
+          <span className={styles.prMetaSeparator}>{index === 0 ? '' : ' · '}</span>
+          <span className={styles.prMetaValue}>{item}</span>
+        </span>
+      ))}
+    </span>
+  );
+}
+
 export function ChatGitHubReferenceView({
   target,
   layout,
@@ -58,6 +79,20 @@ export function ChatGitHubReferenceView({
   const title = target.title
     ? Array.from(target.title).slice(0, 28).join('') + (Array.from(target.title).length > 28 ? '…' : '')
     : '';
+  const metadata = [
+    target.additions !== undefined && target.deletions !== undefined
+      ? `+${target.additions} −${target.deletions}`
+      : null,
+    target.changedFiles !== undefined ? `${target.changedFiles} ${t.files}` : null,
+    target.checks ? t[target.checks] : null,
+    target.author ?? null,
+    target.updatedAt
+      ? new Date(target.updatedAt).toLocaleTimeString(language === 'en' ? 'en-US' : 'zh-CN', {
+          hour: '2-digit',
+          minute: '2-digit',
+        })
+      : null,
+  ].filter((item): item is string => item !== null);
   const inline = (
     <>
       <GitHubIcon issue={target.objectType === 'issue'} />
@@ -83,33 +118,12 @@ export function ChatGitHubReferenceView({
               <GitHubIcon issue={target.objectType === 'issue'} />
             </span>
             <span className={styles.prBody}>
-              <span className={styles.meta}>
-                {target.repo} · #{target.number}
+              <span className={`${styles.meta} ${styles.prRepository}`}>
+                <MetadataParts items={[target.repo, `#${target.number}`]} />
               </span>
               {target.title ? <span className={styles.name}>{target.title}</span> : null}
               <span className={`${styles.meta} ${styles.prStatus}`}>
-                {pill}
-                {target.additions !== undefined && target.deletions !== undefined ? (
-                  <span>
-                    +{target.additions} −{target.deletions}
-                  </span>
-                ) : null}
-                {target.changedFiles !== undefined ? (
-                  <span>
-                    · {target.changedFiles} {t.files}
-                  </span>
-                ) : null}
-                {target.checks ? <span>· {t[target.checks]}</span> : null}
-                {target.author ? <span>· {target.author}</span> : null}
-                {target.updatedAt ? (
-                  <span>
-                    ·{' '}
-                    {new Date(target.updatedAt).toLocaleTimeString(language === 'en' ? 'en-US' : 'zh-CN', {
-                      hour: '2-digit',
-                      minute: '2-digit',
-                    })}
-                  </span>
-                ) : null}
+                <MetadataParts items={metadata} leading={pill} />
               </span>
               <span className={styles.prActions}>
                 {local ? (

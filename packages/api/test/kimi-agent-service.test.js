@@ -6,6 +6,7 @@ import { delimiter, join } from 'node:path';
 import { PassThrough } from 'node:stream';
 import { after, mock, test } from 'node:test';
 import { isolateKimiTestEnvironment } from './helpers/kimi-test-environment.js';
+import { waitForMockProcessReady } from './helpers/mock-process-lifecycle.js';
 import { emitEvents as emitKimiEvents } from './helpers/provider-archive-test-helpers.js';
 
 after(isolateKimiTestEnvironment());
@@ -269,8 +270,8 @@ test('api-key mode maps selected model into official kimi env overrides', async 
         },
       }),
     );
-    // Flush native identity compilation before inspecting the spawn call.
-    await new Promise((r) => setImmediate(r));
+    // Native configuration preparation does filesystem IO before spawn.
+    await waitForMockProcessReady(proc);
     const args = spawnFn.mock.calls[0].arguments[1];
     const env = spawnFn.mock.calls[0].arguments[2]?.env ?? {};
     assert.ok(!args.includes('--model'));
@@ -906,11 +907,8 @@ test('native L0: passes --agent-file with compiled L0 + pack, v2 env flag, no pr
         callbackEnv: { CAT_CAFE_USER_ID: 'user-1' },
       }),
     );
-    // Flush microtasks until the CLI is spawned (MCP config write + L0 compile
-    // are both async), then read the agent file BEFORE completion cleans it up.
-    for (let i = 0; i < 20 && spawnFn.mock.calls.length === 0; i++) {
-      await new Promise((r) => setImmediate(r));
-    }
+    // Read the agent file after launch preparation and before completion cleans it up.
+    await waitForMockProcessReady(proc);
     assert.equal(spawnFn.mock.calls.length, 1, 'CLI should be spawned');
 
     const args = spawnFn.mock.calls[0].arguments[1];

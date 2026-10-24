@@ -15,6 +15,7 @@ import {
 } from '@cat-cafe/shared';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
+import type { OwnedWaitStatusReader } from '../domains/ball-custody/OwnedWaitStatus.js';
 import { resolveCatTarget } from '../domains/cats/services/agents/routing/cat-target-resolver.js';
 import type { IMessageStore } from '../domains/cats/services/stores/ports/MessageStore.js';
 import { queryTaskItems } from '../domains/cats/services/stores/ports/TaskQuery.js';
@@ -34,6 +35,7 @@ import { anchorTaskWhy } from './callback-anchor-helpers.js';
 import { requireCallbackAuth } from './callback-auth-prehandler.js';
 import { registerCallbackDevelopmentWorkRoutes } from './callback-development-work-routes.js';
 import { deriveCallbackActor, getDeletedCallbackThreadGuard, resolveScopedThreadId } from './callback-scope-helpers.js';
+import { reconcileOwnedTaskWaits } from './callback-task-reconciliation.js';
 import { admissionSourceContext, assertDirectAdmissionSourceCustody } from './entrusted-work-source-custody.js';
 import { type LiveTaskAuthority, withLiveTaskAuthority } from './live-task-authority.js';
 
@@ -185,6 +187,7 @@ export function registerCallbackTaskRoutes(
   app: FastifyInstance,
   deps: {
     taskStore: ITaskStore;
+    ownedWaitStatusReader?: OwnedWaitStatusReader;
     messageStore: IMessageStore;
     socketManager: SocketManager;
     threadStore?: IThreadStore;
@@ -268,7 +271,11 @@ export function registerCallbackTaskRoutes(
       }
 
       socketManager.broadcastToRoom(`thread:${updated.threadId}`, 'task_updated', updated);
-      return { status: 'ok', task: updated };
+      return {
+        status: 'ok',
+        task: updated,
+        ...(await reconcileOwnedTaskWaits(taskStore, deps.ownedWaitStatusReader, actor)),
+      };
     }),
   );
 
@@ -358,7 +365,11 @@ export function registerCallbackTaskRoutes(
         await assertCurrent();
         const task = await entrustedWorkLifecycle.close(parsed.data, assertCurrent);
         socketManager.broadcastToRoom(`thread:${task.threadId}`, 'task_updated', task);
-        return { status: 'closed', task };
+        return {
+          status: 'closed',
+          task,
+          ...(await reconcileOwnedTaskWaits(taskStore, deps.ownedWaitStatusReader, actor)),
+        };
       } catch (error) {
         return replyEntrustedWorkLifecycleError(reply, error);
       }
@@ -404,7 +415,11 @@ export function registerCallbackTaskRoutes(
         await assertCurrent();
         const task = await entrustedWorkLifecycle.update(parsed.data);
         socketManager.broadcastToRoom(`thread:${task.threadId}`, 'task_updated', task);
-        return { status: 'updated', task };
+        return {
+          status: 'updated',
+          task,
+          ...(await reconcileOwnedTaskWaits(taskStore, deps.ownedWaitStatusReader, actor)),
+        };
       } catch (error) {
         return replyEntrustedWorkLifecycleError(reply, error);
       }
@@ -466,7 +481,7 @@ export function registerCallbackTaskRoutes(
 
       socketManager.broadcastToRoom(`thread:${task.threadId}`, 'task_created', task);
       reply.status(201);
-      return { status: 'ok', task };
+      return { status: 'ok', task, ...(await reconcileOwnedTaskWaits(taskStore, deps.ownedWaitStatusReader, actor)) };
     }),
   );
 

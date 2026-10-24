@@ -113,7 +113,7 @@ it('disclosing a settled receipt cannot reopen its original writer even if a lat
 
 it.each([
   ['zh', '已拒绝 · 你'],
-  ['en', 'Rejected · You'],
+  ['en', 'Declined · You'],
 ] as const)('formats the authenticated owner in %s without changing canonical metadata', (language, expected) => {
   const state: ReconcileState = { kind: 'decided', terminal: { resolution: 'rejected', decidedBy: 'default-user' } };
   expect(describeReconcile(state, { ownerUserId: 'default-user', language })).toEqual({

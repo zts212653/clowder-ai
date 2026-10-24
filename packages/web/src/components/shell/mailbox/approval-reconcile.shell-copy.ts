@@ -43,9 +43,9 @@ export const approvalReconcileCopy = defineShellCopy({
     open: '打开',
   },
   en: {
-    resolutions: { accepted: 'Approved', rejected: 'Rejected', closed_without_decision: 'Closed without a decision' },
+    resolutions: { accepted: 'Approved', rejected: 'Declined', closed_without_decision: 'Closed without a decision' },
     closedReasons: { expired: 'Expired', withdrawn: 'Withdrawn' },
-    opened: 'Conversation created',
+    opened: 'conversation created',
     effectUnknown: 'Effect not yet confirmed',
     originalEffects: {
       'handoff-started': 'Handoff started',

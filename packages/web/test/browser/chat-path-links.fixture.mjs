@@ -40,6 +40,19 @@ export async function createChatPathFixture(language) {
       const root = await mkdtemp(path.join(tmpdir(), 'f322-chat-paths-'));
       const reviewState = await mkdtemp(path.join(tmpdir(), 'f322-chat-reviews-'));
       let reviews;
+      const fileSourceRequests = [];
+      app.addHook('onSend', async (request, reply, payload) => {
+        if (request.url === '/api/workspace/resolve-file-source' && fileSourceRequests.length < 64) {
+          let response;
+          try {
+            response = JSON.parse(String(payload));
+          } catch {
+            response = String(payload);
+          }
+          fileSourceRequests.push({ body: request.body, status: reply.statusCode, response });
+        }
+        return payload;
+      });
       const closeReviews = () => {
         reviews?.store.close();
         reviews = undefined;
@@ -179,6 +192,7 @@ export async function createChatPathFixture(language) {
           multiline,
           lifecycleThread,
           lifecycle,
+          fileSourceRequests,
           ordinary,
           design,
           close: async () => {

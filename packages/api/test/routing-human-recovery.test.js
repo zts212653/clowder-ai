@@ -7,6 +7,7 @@ import { RoutingContextResolver } from '../dist/domains/routing-context/RoutingC
 import { RuntimeRoutingDispatchPreflight } from '../dist/domains/routing-context/RoutingDispatchPreflightPort.js';
 import { RoutingDispatchSignalAdapter } from '../dist/domains/routing-context/RoutingDispatchSignalAdapter.js';
 import { RoutingPreflightService } from '../dist/domains/routing-context/RoutingPreflightService.js';
+import { buildRoutingSignalDecisionProjection } from '../dist/domains/routing-context/RoutingSignalDecisionProjection.js';
 import { routingJourneyDeps } from './helpers/routing-journey-deps.js';
 
 function harness(catIds = ['sol', 'terra']) {
@@ -25,6 +26,10 @@ function harness(catIds = ['sol', 'terra']) {
     },
     async getOwnerRevision() {
       return events.length;
+    },
+    async readDecisionProjection(ownerId) {
+      const owned = events.filter((event) => event.ownerId === ownerId);
+      return buildRoutingSignalDecisionProjection({ ownerId, revision: owned.length, events: owned });
     },
     async listByOwner(ownerId) {
       return events.filter((event) => event.ownerId === ownerId);

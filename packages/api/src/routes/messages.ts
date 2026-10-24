@@ -90,8 +90,9 @@ function buildMessageBundleSummary(admission: ResolvedBundleAdmission): string {
   if (admission.items.length === 1 && admission.items[0]?.kind === 'quote') {
     return `转发了 1 段引用 · 来自「${sourceTitle}」`;
   }
-  const unit = admission.items.length === 1 ? '条消息' : '条聊天记录';
-  return `转发了 ${admission.items.length} ${unit} · 来自「${sourceTitle}」`;
+  const messageCount = new Set(admission.items.map((item) => item.messageId)).size;
+  const unit = messageCount === 1 ? '条消息' : '条聊天记录';
+  return `转发了 ${messageCount} ${unit} · 来自「${sourceTitle}」`;
 }
 
 type MessageBundleAdmissionFailureReason = Exclude<MessageSelectionAdmissionResult, { status: 'resolved' }>['reason'];
@@ -1067,6 +1068,7 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
         ...(m.origin ? { origin: m.origin } : {}),
         ...(m.thinking ? { thinking: m.thinking } : {}),
         ...(m.extra?.outputLayout ||
+        m.extra?.runtimeInteractionCard ||
         m.extra?.contentModificationReceiptV1 ||
         m.extra?.semanticEvent ||
         m.extra?.liveCompanion ||
@@ -1093,6 +1095,7 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
           ? {
               extra: {
                 ...(m.extra?.outputLayout ? { outputLayout: m.extra.outputLayout } : {}),
+                ...(m.extra?.runtimeInteractionCard ? { runtimeInteractionCard: m.extra.runtimeInteractionCard } : {}),
                 ...(m.extra?.contentModificationReceiptV1
                   ? { contentModificationReceiptV1: m.extra.contentModificationReceiptV1 }
                   : {}),

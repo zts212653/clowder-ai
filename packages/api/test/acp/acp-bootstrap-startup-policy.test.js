@@ -7,6 +7,7 @@ import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { verifyAcpBootstrap } from '../../dist/domains/cats/services/agents/providers/acp/bootstrap/acp-bootstrap-context.js';
 import { auditedWindowsAcpStartup } from '../../dist/domains/cats/services/agents/providers/acp/bootstrap/acp-bootstrap-startup-policy.js';
+import { prepareDshSecretPatch } from '../../dist/domains/cats/services/agents/providers/dsh-secret-patch.js';
 
 const windows = { skip: process.platform !== 'win32' };
 const bridge = fileURLToPath(
@@ -14,6 +15,24 @@ const bridge = fileURLToPath(
 );
 const args = [bridge, '--pi-command', process.execPath];
 const cleanEnv = { NODE_OPTIONS: '', NODE_PATH: '' };
+
+test('Windows DSH startup admits the exact managed guard overlay, then rejects any patch delta', windows, async (t) => {
+  const entry = process.env.ACP_DSH_AUDITED_ENTRY;
+  if (!entry) return t.skip('requires the already audited local DSH installation');
+  const root = mkdtempSync(join(tmpdir(), 'acp-dsh-secret-policy-'));
+  const env = { ...cleanEnv, DSH_HOME: join(root, 'native-home') };
+  try {
+    const argv = await prepareDshSecretPatch('dsh', ['--profile', 'acp'], root);
+    assert.equal(auditedWindowsAcpStartup(process.execPath, [entry, ...argv], env), 'dsh-0.2.0-rc.2');
+    assert.equal(auditedWindowsAcpStartup(process.execPath, [entry, ...argv, '--patch', 'unsafe.yml'], env), undefined);
+    const patch = argv.at(-1);
+    assert.ok(patch);
+    writeFileSync(patch, '!!js/function >\n  function() {}');
+    assert.equal(auditedWindowsAcpStartup(process.execPath, [entry, ...argv], env), undefined);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
 
 test('only the exact built-in Pi bridge shape admits the volume policy', windows, () => {
   assert.equal(auditedWindowsAcpStartup(process.execPath, args, cleanEnv), 'builtin-pi');

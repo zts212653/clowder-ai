@@ -5,6 +5,13 @@ export type TurnExecutionStatus = 'running' | 'succeeded' | 'failed' | 'canceled
 export type TurnExecutionTerminalStatus = Exclude<TurnExecutionStatus, 'running'>;
 
 export interface TurnExecutionCausalRefs {
+  /** Server-produced C provenance only; private execution binding/credentials never enter this ledger. */
+  routingPreflight?: {
+    stage: 'execution_preflight';
+    observedAt: number;
+    snapshotRef?: string;
+    admission?: { stage: 'queue_admitted'; observedAt: number; snapshotRef?: string };
+  };
   triggerMessageId?: string;
   routingGuardReason?: 'missing_routing_exit';
   /** Exact persisted message bodies present in this child's prompt. */

@@ -117,7 +117,13 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
 function ChatContainerContent({ threadId }: ChatContainerProps) {
   const searchParams = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null;
   if (searchParams?.get('export') === 'true') {
-    return <ThreadChatExport threadId={threadId} messageIds={searchParams.getAll('messageId')} />;
+    return (
+      <ThreadChatExport
+        threadId={threadId}
+        messageIds={searchParams.getAll('messageId')}
+        selectionItems={window.__catCafeImageExportItems}
+      />
+    );
   }
   return <InteractiveChatContainer threadId={threadId} />;
 }

@@ -6,7 +6,7 @@ import {
   type OpenCodeRuntimeConfigDebugSummary,
   summarizeOpenCodeRuntimeConfigForDebug,
 } from './opencode-config-template.js';
-import { writeOpenCodeRuntimeConfig } from './opencode-config-writer.js';
+import { writeOpenCodeInstructionsOnlyConfig, writeOpenCodeRuntimeConfig } from './opencode-config-writer.js';
 
 export interface OpenCodeAcpSpawnAccount {
   id: string;
@@ -54,7 +54,14 @@ export async function prepareOpenCodeAcpSpawnConfig(
   if (!isOpenCodeAcpTarget(options.clientId)) return null;
 
   const effective = resolveEffectiveOpenCodeModel(options.providerName, options.defaultModel);
-  if (!effective) return null;
+  if (!effective) {
+    const configPath = writeOpenCodeInstructionsOnlyConfig(options.projectRoot, options.profileId, 'acp-pool', []);
+    return {
+      configPath,
+      env: { OPENCODE_CONFIG: configPath, CAT_CAFE_GUARD_NODE: process.execPath, CAT_CAFE_OC_INSTRUCTIONS_ONLY: '1' },
+      runtimeConfigSummary: { providerKeys: [], providerSummary: {} },
+    };
+  }
 
   const account = options.account ?? null;
   if (account?.authType === 'api_key' && !account.apiKey) {
@@ -78,7 +85,7 @@ export async function prepareOpenCodeAcpSpawnConfig(
     runtimeConfigOptions,
   );
 
-  const env: Record<string, string> = { OPENCODE_CONFIG: configPath };
+  const env: Record<string, string> = { OPENCODE_CONFIG: configPath, CAT_CAFE_GUARD_NODE: process.execPath };
   if (account?.authType === 'api_key' && account.apiKey) {
     env[OC_API_KEY_ENV] = account.apiKey;
     if (account.baseUrl) env[OC_BASE_URL_ENV] = account.baseUrl;

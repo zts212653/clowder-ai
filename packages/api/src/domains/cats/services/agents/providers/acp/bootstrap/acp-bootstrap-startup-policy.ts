@@ -5,6 +5,7 @@ import { homedir } from 'node:os';
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import { resolveCliCommandOrBare } from '../../../../../../../utils/cli-resolve.js';
 import { resolveWindowsSpawnPlan } from '../../../../../../../utils/cli-spawn-win.js';
+import { verifyDshSecretPatch } from '../../dsh-secret-patch.js';
 import { isBuiltinPiBridgeArgs } from '../../pi/pi-bridge-launch.js';
 
 const DSH_HASHES = {
@@ -42,7 +43,14 @@ export function auditedWindowsAcpStartup(
     const [entry, ...rest] = plan.args;
     if (!entry || !isAbsolute(entry)) return undefined;
     if (isBuiltinPiBridgeArgs(plan.args)) return 'builtin-pi';
-    if (rest.length !== 2 || rest[0] !== '--profile' || rest[1] !== 'acp' || hash(entry) !== DSH_HASHES.entry)
+    const managedPatch =
+      rest.length === 4 && rest[2] === '--patch' && typeof rest[3] === 'string' && verifyDshSecretPatch(rest[3]);
+    if (
+      (rest.length !== 2 && !managedPatch) ||
+      rest[0] !== '--profile' ||
+      rest[1] !== 'acp' ||
+      hash(entry) !== DSH_HASHES.entry
+    )
       return undefined;
     if (
       hash(join(dirname(entry), 'profile-boot.js')) !==

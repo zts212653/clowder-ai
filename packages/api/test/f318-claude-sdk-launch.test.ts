@@ -91,7 +91,12 @@ test('launch preserves resume, account isolation, native identity and managed F2
   assert.equal(prepared.sdkOptions.env?.SOME_ACCOUNT_SETTING, 'kept');
   assert.equal(prepared.sdkOptions.systemPrompt, 'native identity\n\nroute append');
   const settings = JSON.parse(prepared.sdkOptions.settings as string);
-  assert.equal(settings.disableAllHooks, true);
+  assert.equal(settings.disableAllHooks, false, 'host security hooks remain enabled');
+  assert.ok(
+    settings.hooks.PreToolUse.some((entry: { hooks: Array<{ command: string }> }) =>
+      entry.hooks.some(({ command }) => command.includes('secret-native-hook.mjs')),
+    ),
+  );
   assert.ok(settings.hooks.PreCompact[0].hooks[0].command.includes('f24-compaction.mjs'));
   assert.equal(recorded?.message.body, 'actual task');
 });

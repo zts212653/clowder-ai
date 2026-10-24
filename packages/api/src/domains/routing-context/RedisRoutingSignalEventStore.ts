@@ -1,6 +1,12 @@
 import { type RoutingSignalEventV1, type RoutingSubjectRefV1, routingSignalEventV1Schema } from '@cat-cafe/shared';
 import type { RedisClient } from '@cat-cafe/shared/utils';
 import {
+  advanceRoutingSignalDecisionProjectionSequence,
+  buildRoutingSignalDecisionProjection,
+  parseRoutingSignalDecisionProjection,
+  type RoutingSignalDecisionProjectionV1,
+} from './RoutingSignalDecisionProjection.js';
+import {
   type IRoutingSignalEventStore,
   type RoutingSignalEventAppendResult,
   RoutingSignalEventConflictError,
@@ -14,7 +20,7 @@ local function allowed_type(key, expected)
 end
 
 local close_count = tonumber(ARGV[5])
-if not close_count or #KEYS ~= 6 + close_count or #ARGV ~= 5 + close_count then
+if not close_count or #KEYS ~= 7 + close_count or #ARGV ~= 5 + close_count then
   return {'INVALID_ARGUMENTS', ''}
 end
 if not allowed_type(KEYS[1], 'string') or not allowed_type(KEYS[2], 'string') or
@@ -22,10 +28,14 @@ if not allowed_type(KEYS[1], 'string') or not allowed_type(KEYS[2], 'string') or
    not allowed_type(KEYS[5], 'hash') or not allowed_type(KEYS[6], 'string') then
   return {'TYPE_CONFLICT', ''}
 end
+local sequence_type = redis.call('TYPE', KEYS[7])['ok']
+if sequence_type ~= 'none' and sequence_type ~= 'zset' then
+  redis.call('DEL', KEYS[7])
+end
 local revision_raw = redis.call('GET', KEYS[6])
 if revision_raw and not string.match(revision_raw, '^%d+$') then return {'TYPE_CONFLICT', ''} end
 for i = 1, close_count do
-  if not allowed_type(KEYS[6 + i], 'string') then
+  if not allowed_type(KEYS[7 + i], 'string') then
     return {'TYPE_CONFLICT', ''}
   end
 end
@@ -48,7 +58,7 @@ end
 if redis.call('EXISTS', KEYS[2]) == 1 then return {'EVENT_CONFLICT', ''} end
 
 for i = 1, close_count do
-  local assertion_raw = redis.call('GET', KEYS[6 + i])
+  local assertion_raw = redis.call('GET', KEYS[7 + i])
   if not assertion_raw or redis.call('HEXISTS', KEYS[5], ARGV[5 + i]) == 1 then
     return {'CLOSURE_CONFLICT', ''}
   end
@@ -65,8 +75,22 @@ redis.call('ZADD', KEYS[4], tonumber(ARGV[3]), ARGV[2])
 for i = 1, close_count do
   redis.call('HSET', KEYS[5], ARGV[5 + i], ARGV[2])
 end
-redis.call('INCR', KEYS[6])
+local next_revision = redis.call('INCR', KEYS[6])
+redis.call('ZADD', KEYS[7], next_revision, ARGV[2])
 return {'APPENDED', ARGV[1]}
+`;
+
+const STORE_DECISION_PROJECTION_LUA = `
+local revision_type = redis.call('TYPE', KEYS[1])['ok']
+local projection_type = redis.call('TYPE', KEYS[2])['ok']
+if (revision_type ~= 'none' and revision_type ~= 'string') or
+   (projection_type ~= 'none' and projection_type ~= 'string') then
+  return 'TYPE_CONFLICT'
+end
+local current = redis.call('GET', KEYS[1]) or '0'
+if current ~= ARGV[1] then return 'REVISION_MISMATCH' end
+redis.call('SET', KEYS[2], ARGV[2])
+return 'STORED'
 `;
 
 function keyPart(value: string): string {
@@ -85,6 +109,8 @@ export const RoutingSignalEventKeys = {
     `routing-context:signals:${keyPart(ownerId)}:command:${keyPart(commandId)}`,
   ownerTimeline: (ownerId: string) => `routing-context:signals:${keyPart(ownerId)}:timeline`,
   ownerRevision: (ownerId: string) => `routing-context:signals:${keyPart(ownerId)}:revision`,
+  ownerAppendSequence: (ownerId: string) => `routing-context:signals:${keyPart(ownerId)}:append-sequence`,
+  decisionProjection: (ownerId: string) => `routing-context:signals:${keyPart(ownerId)}:decision-projection:v1`,
   subjectTimeline: (ownerId: string, subjectRef: RoutingSubjectRefV1) =>
     `routing-context:signals:${keyPart(ownerId)}:subject:${keyPart(subjectIdentity(subjectRef))}:timeline`,
   closures: (ownerId: string) => `routing-context:signals:${keyPart(ownerId)}:closures`,
@@ -104,6 +130,7 @@ export class RedisRoutingSignalEventStore implements IRoutingSignalEventStore {
       RoutingSignalEventKeys.subjectTimeline(event.ownerId, event.subjectRef),
       RoutingSignalEventKeys.closures(event.ownerId),
       RoutingSignalEventKeys.ownerRevision(event.ownerId),
+      RoutingSignalEventKeys.ownerAppendSequence(event.ownerId),
       ...closesSignalIds.map((eventId) => RoutingSignalEventKeys.detail(event.ownerId, eventId)),
     ];
     const result = (await this.redis.eval(
@@ -161,6 +188,39 @@ export class RedisRoutingSignalEventStore implements IRoutingSignalEventStore {
     return revision;
   }
 
+  async readDecisionProjection(ownerId: string): Promise<RoutingSignalDecisionProjectionV1> {
+    let projection = await this.readPersistedDecisionProjection(ownerId);
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      const targetRevision = await this.getOwnerRevision(ownerId);
+      projection = await this.projectDecisionRevision(ownerId, projection, targetRevision);
+
+      if (projection.revision !== (await this.getOwnerRevision(ownerId))) continue;
+      const stored = await this.persistDecisionProjection(ownerId, projection);
+      if (stored) return projection;
+    }
+    throw new RoutingSignalEventHydrationError(
+      `routing signal projection could not reach a stable revision: ${ownerId}`,
+    );
+  }
+
+  private async projectDecisionRevision(
+    ownerId: string,
+    projection: RoutingSignalDecisionProjectionV1 | null,
+    targetRevision: number,
+  ): Promise<RoutingSignalDecisionProjectionV1> {
+    if (projection === null || projection.revision > targetRevision) {
+      return this.rebuildDecisionProjection(ownerId);
+    }
+    if (projection.revision === targetRevision) return projection;
+    const deltas = await this.readAppendSequence(ownerId, projection.revision + 1, targetRevision);
+    if (deltas === null) return this.rebuildDecisionProjection(ownerId);
+    try {
+      return advanceRoutingSignalDecisionProjectionSequence(projection, deltas);
+    } catch {
+      return this.rebuildDecisionProjection(ownerId);
+    }
+  }
+
   async listByOwner(ownerId: string): Promise<RoutingSignalEventV1[]> {
     return this.listTimeline(ownerId, RoutingSignalEventKeys.ownerTimeline(ownerId));
   }
@@ -179,6 +239,78 @@ export class RedisRoutingSignalEventStore implements IRoutingSignalEventStore {
       }
       return this.parsePersisted(raw, eventIds[index]);
     });
+  }
+
+  private async readPersistedDecisionProjection(ownerId: string): Promise<RoutingSignalDecisionProjectionV1 | null> {
+    const key = RoutingSignalEventKeys.decisionProjection(ownerId);
+    let raw: string | null;
+    try {
+      raw = await this.redis.get(key);
+    } catch (error) {
+      if (!(error instanceof Error) || !error.message.includes('WRONGTYPE')) throw error;
+      await this.redis.del(key);
+      return null;
+    }
+    if (raw === null) return null;
+    try {
+      return parseRoutingSignalDecisionProjection(JSON.parse(raw), ownerId);
+    } catch {
+      return null;
+    }
+  }
+
+  private async rebuildDecisionProjection(ownerId: string): Promise<RoutingSignalDecisionProjectionV1> {
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      const revisionBefore = await this.getOwnerRevision(ownerId);
+      const events = await this.listByOwner(ownerId);
+      const revisionAfter = await this.getOwnerRevision(ownerId);
+      if (revisionBefore === revisionAfter) {
+        return buildRoutingSignalDecisionProjection({ ownerId, revision: revisionAfter, events });
+      }
+    }
+    throw new RoutingSignalEventHydrationError(
+      `routing signal owner revision changed during projection rebuild: ${ownerId}`,
+    );
+  }
+
+  private async readAppendSequence(
+    ownerId: string,
+    firstRevision: number,
+    lastRevision: number,
+  ): Promise<RoutingSignalEventV1[] | null> {
+    const eventIds = await this.redis.zrangebyscore(
+      RoutingSignalEventKeys.ownerAppendSequence(ownerId),
+      firstRevision,
+      lastRevision,
+    );
+    if (eventIds.length !== lastRevision - firstRevision + 1) return null;
+    const raws = await this.redis.mget(...eventIds.map((eventId) => RoutingSignalEventKeys.detail(ownerId, eventId)));
+    const events: RoutingSignalEventV1[] = [];
+    for (const [index, raw] of raws.entries()) {
+      if (raw === null) return null;
+      events.push(this.parsePersisted(raw, eventIds[index]));
+    }
+    return events;
+  }
+
+  private async persistDecisionProjection(
+    ownerId: string,
+    projection: RoutingSignalDecisionProjectionV1,
+  ): Promise<boolean> {
+    const outcome = (await this.redis.eval(
+      STORE_DECISION_PROJECTION_LUA,
+      2,
+      RoutingSignalEventKeys.ownerRevision(ownerId),
+      RoutingSignalEventKeys.decisionProjection(ownerId),
+      String(projection.revision),
+      JSON.stringify(projection),
+    )) as string;
+    if (outcome === 'STORED') return true;
+    if (outcome === 'REVISION_MISMATCH') return false;
+    if (outcome === 'TYPE_CONFLICT') {
+      throw new RoutingSignalEventHydrationError(`routing signal projection Redis type conflict: ${ownerId}`);
+    }
+    throw new RoutingSignalEventHydrationError(`routing signal projection persist failed (${outcome}): ${ownerId}`);
   }
 
   private parsePersisted(raw: string, eventId: string): RoutingSignalEventV1 {

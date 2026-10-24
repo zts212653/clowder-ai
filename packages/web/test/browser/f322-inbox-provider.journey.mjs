@@ -30,6 +30,24 @@ export async function verifyProviderCards({ t, language, width, root }) {
     await card.waitFor();
     await card.scrollIntoViewIfNeeded();
     if (!row) {
+      const source = await f.messages.getById(entry.pending.cardRef.messageId);
+      const rawPrefix = { approval: '需要你确认：', question: '需要你回答：', elicitation: '需要你补充：' }[
+        entry.pending.request.kind
+      ];
+      const displayPrefix =
+        language === 'en'
+          ? { approval: 'Needs your approval: ', question: 'Needs your answer: ', elicitation: 'Needs your input: ' }[
+              entry.pending.request.kind
+            ]
+          : rawPrefix;
+      assert.equal(
+        source.content,
+        rawPrefix + entry.pending.request.title,
+        'The original publisher still stores its original generated template',
+      );
+      const body = page.locator(`[data-message-id="${source.id}"] .markdown-content`).first();
+      await body.getByText(displayPrefix + entry.pending.request.title, { exact: true }).waitFor();
+      if (language === 'en') assert.ok(!(await body.innerText()).startsWith(rawPrefix));
       // Adopt this position through the history owner's real input path before framing the card.
       const port = await page.locator('[data-chat-container]').boundingBox();
       assert.ok(port);
@@ -147,6 +165,7 @@ export async function verifyProviderCards({ t, language, width, root }) {
       expected,
       bounds,
       resultLabel: label,
+      sourceMessage: await f.messages.getById(entry.pending.cardRef.messageId),
     });
   }
   assert.equal(posts.length, 8);

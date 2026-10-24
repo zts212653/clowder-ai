@@ -4,7 +4,7 @@ related_features: [F152, F200, F221, F227, F231, F243, F256, F260, F263, F271, F
 topics: [memory, experience, generalization, continuity]
 doc_kind: spec
 created: 2026-10-23
-tips_exempt: "Renewed 2026-10-23 for the three-cat architecture synthesis: the added discussion link records the complete working/companionship memory design, unresolved tradeoffs and listening-script handoff. It introduces no UI, storage, injection or user action; proposed presence budgets and contract changes are not advertised as delivered, and the existing F321/Luna scope remains."
+tips_exempt: "Renewed 2026-10-24 for KD-4 through KD-7, OQ-3, delivery roadmap v1 and status records: this documentation records capsule approval before opening delivery, stable-persona relationships versus model-specific capabilities, owner-controlled per-thread watcher design and trials, and delivery sequencing. These decisions extend the architecture discussion without delivering or enabling a new user entry, memory injection or watcher configuration; the existing F321/Luna obligations remain."
 description: 让共同经历在未见情境中帮助猫自主联想、核证与修正判断，并让人看见和纠正记忆。
 description_source: human
 description_author: codex-astra
@@ -259,6 +259,9 @@ dot 本轮只是带题面提示、不额外搜索的一次回答；Q1–3 为“
 | KD-1 | 新建统一结果 Feature，旧记忆项目按显式承接关闭，保留各源权威 | CVO991；减少碎片而不抹掉实情 | 2026-10-23 |
 | KD-2 | bug 修复与泛化分别验收；前者不等待复杂架构论证 | 有代码证据的缺陷和待证效用不同 | 2026-10-23 |
 | KD-3 | 不预设逐经验 hook、每轮后台 planner 或每日全量蒸馏 | 自主判断与廉价基线优先，新增机制要证明价值 | 2026-10-23 |
+| KD-4 | 主人小胶囊由猫起草（≤300 字，每句带出处），You 过目点头后才进开场 | You `private-source-id` 对“先起草、你点头才放进开场”批“可以” | 2026-10-24 |
+| KD-5 | 关系与能力分开记：陪伴、称呼、共同经历随稳定角色继承（Ragdoll、Maine Coon、Siamese换型号也接得上）；“能不能写代码”这类能力事实按具体模型记，不随角色继承 | You 同上：“有的陪伴的是要继承的……但是比如说Siamese不能写代码这种我们不能记录，得记录类似于Siamese（gemini2.5pro 3pro 或者什么 flash 不能写代码）” | 2026-10-24 |
+| KD-6 | 守望猫（伴随猫）不做静默实验：You 参与，按线程由他决定开关，要有配置和 UI/UX 设计；提示经猫猫球（F229）或小信箱递给他是首选候选。守望猫须服从性好、有自己的思考、幻觉低；候选先比Maine Coon（OpenAI 原生，可直接用现有整理猫位）与 Sonnet | You 同上：“让我参与，我来选什么时候开什么时候关，按照thread来，得有配置……联动猫猫球……或者在我们的小信箱里”；“守望🐈必须是一只遵从性好，有自己思考 幻觉低的猫” | 2026-10-24 |
 
 ## Design Gate
 

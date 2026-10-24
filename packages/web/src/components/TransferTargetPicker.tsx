@@ -21,6 +21,8 @@ interface TransferTargetPickerProps {
   admissionBlocked: boolean;
   sourceThreadId: string;
   items: readonly MessageBundleSelectionItem[];
+  selectedMessageCount?: number;
+  selectionSummary?: string;
   onClose: () => void;
   onSuccess: (result: { targetThreadId: string; messageBundleId: string }) => void;
 }
@@ -30,6 +32,8 @@ export function TransferTargetPicker({
   admissionBlocked,
   sourceThreadId,
   items,
+  selectedMessageCount,
+  selectionSummary,
   onClose,
   onSuccess,
 }: TransferTargetPickerProps) {
@@ -135,11 +139,14 @@ export function TransferTargetPicker({
       note={note}
       error={error}
       submitting={submitting}
-      itemCount={items.length}
+      itemCount={selectedMessageCount ?? new Set(items.map((item) => item.messageId)).size}
+      selectionSummary={selectionSummary}
       singleItemLabel={
-        items.length === 1 && (items[0]?.kind === 'quote' || items[0]?.kind === 'cli_quote')
+        selectedMessageCount === undefined &&
+        items.length === 1 &&
+        (items[0]?.kind === 'quote' || items[0]?.kind === 'cli_quote')
           ? '1 段引用'
-          : items.length === 1 && items[0]?.kind === 'rich_block'
+          : selectedMessageCount === undefined && items.length === 1 && items[0]?.kind === 'rich_block'
             ? '1 个富块'
             : undefined
       }

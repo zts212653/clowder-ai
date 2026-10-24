@@ -10,6 +10,7 @@ import { DossierCapabilityProfileRevisionSource } from '../dist/domains/routing-
 import { RoutingPreferenceKeys } from '../dist/domains/routing-context/RedisRoutingPreferenceStore.js';
 import { RoutingSignalEventKeys } from '../dist/domains/routing-context/RedisRoutingSignalEventStore.js';
 import { createRoutingContextRuntime } from '../dist/domains/routing-context/RoutingContextRuntime.js';
+import { buildRoutingSignalDecisionProjection } from '../dist/domains/routing-context/RoutingSignalDecisionProjection.js';
 
 const roots = [];
 const ownerId = 'community-owner';
@@ -91,6 +92,9 @@ function fixture(content, { states = ['no_evidence', 'no_evidence'], preferences
     projectRoot: root,
     getConfigs: () => Object.fromEntries(catIds.map((id) => [id, config])),
   });
+  runtime.signalStore.getOwnerRevision = async () => events.length;
+  runtime.signalStore.readDecisionProjection = async () =>
+    buildRoutingSignalDecisionProjection({ ownerId, revision: events.length, events });
   return { root, path, runtime };
 }
 

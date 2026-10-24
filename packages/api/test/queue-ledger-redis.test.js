@@ -106,6 +106,31 @@ describe('RFC #1356 Redis Queue ledger', { skip: redisIsolationSkipReason(REDIS_
     assert.deepEqual((await store.getByMessageIds('thread-redis', ['m1', 'missing'])).get('m1'), [entry]);
   });
 
+  it('rebuilds optional admission provenance without granting execution or changing source identity', async () => {
+    const entry = row('admission-source', ['opus']);
+    await store.enqueue([entry]);
+    const queue = new InvocationQueue(store);
+    await queue.hydrateFromLedger();
+    const observation = {
+      stage: 'queue_admitted',
+      observedAt: 100,
+      snapshotRef: 'snapshot:B',
+      targets: [{ targetCatId: 'opus', factsRef: 'sha256:opaque-facts' }],
+    };
+    assert.equal(await queue.recordRoutingAdmissionObservation('thread-redis', 'owner-1', entry.id, observation), true);
+    assert.equal(
+      (await store.enqueue([entry])).outcome,
+      'replayed',
+      'derived provenance cannot change admission identity',
+    );
+    const rebuilt = new InvocationQueue(store);
+    await rebuilt.hydrateFromLedger();
+    const restored = rebuilt.list('thread-redis', 'owner-1');
+    assert.equal(restored.length, 1);
+    assert.deepEqual(restored[0].delivery.routingAdmission, observation);
+    assert.deepEqual(restored[0].execution, entry.execution, 'the execution policy is unchanged');
+  });
+
   it('persists an exact routing hold through sibling handoff, claim recovery and a fresh Queue instance', async () => {
     const source = await messageStore.append({
       userId: 'owner-1',

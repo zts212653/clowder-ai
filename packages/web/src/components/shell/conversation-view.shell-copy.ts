@@ -4,6 +4,7 @@ export const conversationViewCopy = defineShellCopy(
   {
     zh: {
       group: '群聊',
+      noEarlierMessages: '没有更多消息了',
       menuLabel: '切换对话视图',
       currentView: '当前视图',
       loading: '正在恢复视图…',
@@ -19,6 +20,7 @@ export const conversationViewCopy = defineShellCopy(
     },
     en: {
       group: 'Group chat',
+      noEarlierMessages: 'No earlier messages',
       menuLabel: 'Switch conversation view',
       currentView: 'Current view',
       loading: 'Restoring view…',

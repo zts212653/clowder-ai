@@ -10,6 +10,7 @@ import { homedir } from 'node:os';
 import * as path from 'node:path';
 import { createInterface } from 'node:readline';
 import { z } from 'zod';
+import { credentialReadDenial } from '../secret-credential-source.js';
 import { ensureDir, isPathAllowed } from '../utils/path-validator.js';
 
 const defineTool = defineMcpCanonicalFactory('file-tools.ts', undefined, {
@@ -190,6 +191,8 @@ export async function handleReadFileSlice(input: {
   if (!isPathAllowed(filePath)) {
     return errorResult(`Access denied: ${filePath} is not within allowed directories`);
   }
+  const secretDenial = await credentialReadDenial(filePath);
+  if (secretDenial) return errorResult(secretDenial);
   if (!fs.existsSync(filePath)) {
     return errorResult(`File not found: ${filePath}`);
   }

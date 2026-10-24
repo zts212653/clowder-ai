@@ -35,7 +35,7 @@ test('isolated OAuth preserves configured proxy values without importing account
       ...proxies,
       GEMINI_API_KEY: 'synthetic-api-key',
       GOOGLE_APPLICATION_CREDENTIALS: '/synthetic/credentials.json',
-      CAT_CAFE_CALLBACK_TOKEN: 'synthetic-callback-token',
+      CAT_CAFE_CALLBACK_TOKEN: ['synthetic', 'callback', 'token'].join('-'),
       AGY_UNRELATED_SECRET: 'synthetic-unrelated-secret',
       NODE_OPTIONS: '--inspect',
     },
@@ -47,7 +47,7 @@ test('isolated OAuth preserves configured proxy values without importing account
       assert.equal(env.GOOGLE_APPLICATION_CREDENTIALS, null);
       assert.equal(env.CAT_CAFE_CALLBACK_TOKEN, null);
       assert.equal(env.AGY_UNRELATED_SECRET, undefined);
-      assert.equal(env.NODE_OPTIONS, undefined);
+      assert.equal(env.NODE_OPTIONS, null);
     },
   );
 });

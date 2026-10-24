@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { writeFile } from 'node:fs/promises';
 import path from 'node:path';
+import { captureStandaloneImage, verifyReferenceTypography } from './chat-path-design-followup.journey.mjs';
 
 export async function captureChatPathDesign({ page, base, fixture, language, evidence }) {
   const source = fixture.runtime.design;
@@ -108,6 +109,7 @@ export async function captureChatPathDesign({ page, base, fixture, language, evi
         'The original sample PR height matches the accepted HTML',
       );
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+    await verifyReferenceTypography({ message, evidence, width });
     await message.screenshot({ path: path.join(evidence, `accepted-example-${language}-${width}-message.png`) });
     await page.screenshot({
       path: path.join(evidence, `accepted-example-${language}-${width}-chat.png`),
@@ -150,4 +152,5 @@ export async function captureChatPathDesign({ page, base, fixture, language, evi
       ),
     );
   }
+  await captureStandaloneImage({ page, base, source, evidence });
 }

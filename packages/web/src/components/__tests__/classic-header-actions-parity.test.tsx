@@ -67,7 +67,14 @@ describe('classic author row and action strip match the runtime reference', () =
     const speech = required(h.container.querySelector<HTMLButtonElement>('button[aria-label="播放语音"]'));
     const toolbar = required(speech.closest<HTMLElement>('[role="toolbar"]'));
     const names = [...toolbar.querySelectorAll('button')].map((b) => b.getAttribute('aria-label'));
-    expect(names.slice(0, 6)).toEqual(['播放语音', '复制消息 ID: reply-1', '引用回复', '多选消息', '创建分支', '删除']);
+    expect(names.slice(0, 6)).toEqual([
+      '播放语音',
+      '复制消息 ID: reply-1',
+      '引用回复',
+      '多选：转发或导出',
+      '创建分支',
+      '删除',
+    ]);
     expect(h.container.querySelectorAll('button[aria-label="播放语音"]')).toHaveLength(1);
     act(() => speech.click());
     expect(synthesize).toHaveBeenCalledWith(message.id, message.content, message.catId);

@@ -154,7 +154,7 @@ describe('private-collection-bindings: corpus indexing (INV-9)', () => {
     // Fictional GitHub token pattern triggers SecretScanner → blocked rebuild
     writeFileSync(
       join(profileRoot, 'corpus', 'shared-facts.md'),
-      'Fictional credential: ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdef1234',
+      ['Fictional credential: gh', 'p_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdef1234'].join(''),
     );
 
     const { refreshCanonicalProfileIndex } = await import('../../dist/domains/memory/private-collection-bindings.js');
@@ -229,7 +229,7 @@ describe('private-collection-bindings: corpus indexing (INV-9)', () => {
     // Overwrite with secret-bearing content and refresh
     writeFileSync(
       join(profileRoot, 'corpus', 'shared-facts.md'),
-      'Fictional credential: ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdef1234',
+      ['Fictional credential: gh', 'p_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdef1234'].join(''),
     );
 
     const result = await refreshCanonicalProfileIndex(stores, catalog, { userId });

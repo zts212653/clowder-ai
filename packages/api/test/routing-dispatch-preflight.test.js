@@ -1,6 +1,8 @@
 import './helpers/setup-cat-registry.js';
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { describe, test } from 'node:test';
+import { getEncoding } from 'js-tiktoken';
 
 function decision(input, dispositions, resolverState = 'fresh') {
   return {
@@ -67,6 +69,194 @@ function routeDeps(services, routingDispatchPreflight, invocationExtras = {}) {
 }
 
 describe('F293 home routing through canonical Queue dispatch', () => {
+  test('execution history stays concise while durable metadata and live notice retain exact C', async () => {
+    const { routingPreflightNotice } = await import(
+      '../dist/domains/cats/services/agents/routing/routing-preflight-notice.js'
+    );
+    const { projectMessageBundleReadableContent } = await import(
+      '../dist/domains/cats/services/context/MessageBundleSourceProjection.js'
+    );
+    const c = decision({ ownerId: 'owner-1', targetCatIds: ['codex'] }, { codex: 'warned' });
+    c.snapshotRef =
+      'sha256:' + createHash('sha256').update('C execution with independent account observations').digest('hex');
+    c.targets[0].reasons = [
+      {
+        code: 'routing_capacity_unverified',
+        summary: 'Pool applicability unknown; account observation is fresh; requested target unchanged',
+        sourceRefs: ['account-capacity:latest'],
+      },
+    ];
+    const account = {
+      state: 'fresh',
+      observedAt: 1000,
+      windows: Array.from({ length: 6 }, (_, i) => ({
+        poolId:
+          'quota-pool:' +
+          createHash('sha256')
+            .update('pool' + i)
+            .digest('hex'),
+        poolKind: 'codex-main',
+        applicability: 'unknown',
+        freshness: 'fresh',
+        kind: 'five_hour',
+        remainingPercent: 70,
+        resetAt: 2000,
+      })),
+    };
+    c.targets[0].capacityFacts = {
+      v: 1,
+      current: account,
+      switchRequired: [1, 2, 3].map((n) => ({ ...account, evidenceRef: 'account:spare-' + n })),
+    };
+    const stored = [];
+    const wire = await routingPreflightNotice(
+      {
+        messageStore: {
+          append: async (input) => {
+            stored.push(input);
+            return { id: 'notice:C' };
+          },
+        },
+      },
+      {},
+      c,
+      'codex',
+      'thread-1',
+      true,
+    );
+    const readable = projectMessageBundleReadableContent(stored[0]);
+    assert.ok(
+      getEncoding('o200k_base').encode(readable).length <= 180,
+      'repeated quota/account metadata must not enter every prompt',
+    );
+    assert.ok(readable.includes('routing_capacity_unverified'));
+    assert.ok(readable.includes('applicability unknown'));
+    assert.ok(!readable.includes('quota-pool:'));
+    assert.deepEqual(stored[0].extra.systemInfo.payload.target, c.targets[0]);
+    assert.deepEqual(JSON.parse(wire.content).target, c.targets[0]);
+    assert.equal(JSON.parse(readable).snapshotRef, c.snapshotRef);
+    assert.equal(
+      JSON.parse(readable).v,
+      undefined,
+      'a readable projection does not impersonate the full receipt schema',
+    );
+  });
+
+  test('changed execution facts persist exact C while unchanged healthy facts stay quiet', async () => {
+    const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
+    const { routeParallel } = await import('../dist/domains/cats/services/agents/routing/route-parallel.js');
+    const { routingAdmissionProvenance } = await import(
+      '../dist/domains/routing-context/RoutingQueueAdmissionObservation.js'
+    );
+    for (const route of [routeSerial, routeParallel]) {
+      const b = {
+        v: 1,
+        stage: 'queue_admitted',
+        executionPreflight: 'pending',
+        ownerId: 'owner-1',
+        observedAt: 1000,
+        snapshotRef: 'snapshot:B',
+        targets: [
+          {
+            targetCatId: 'opus',
+            availabilityObservation: 'available',
+            reasons: [],
+            capacityFacts: {
+              v: 1,
+              current: { state: 'fresh', bindingRevision: 'binding-B', windows: [] },
+              switchRequired: [],
+            },
+          },
+        ],
+      };
+      for (const changed of [false, true]) {
+        const messages = [];
+        const c = decision({ ownerId: 'owner-1', targetCatIds: ['opus'] }, { opus: 'allowed' });
+        c.snapshotRef = 'snapshot:C';
+        c.targets[0].capacityFacts = structuredClone(b.targets[0].capacityFacts);
+        if (changed) c.targets[0].capacityFacts.current.bindingRevision = 'binding-C';
+        const deps = routeDeps({ opus: service('opus', []) }, { preflight: async () => c });
+        deps.messageStore.append = async (input) => {
+          messages.push(input);
+          return { ...input, id: `message-${messages.length}` };
+        };
+        for await (const _event of route(deps, ['opus'], 'existing work', 'owner-1', 'thread', {
+          routingAdmission: routingAdmissionProvenance(b),
+        })) {
+          /* execute C */
+        }
+        const notices = messages.filter((message) => message.extra?.systemInfo?.payload.type === 'routing_preflight');
+        assert.equal(notices.length, changed ? 1 : 0);
+        if (changed) {
+          assert.equal(notices[0].extra.systemInfo.payload.snapshotRef, 'snapshot:C');
+          assert.equal(notices[0].extra.systemInfo.payload.stage, 'execution_preflight');
+          assert.equal(notices[0].extra.systemInfo.payload.target.capacityFacts.current.bindingRevision, 'binding-C');
+        }
+      }
+    }
+  });
+  test('provider service is pinned before C and cannot be replaced between preflight and invocation', async () => {
+    const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
+    const { routeParallel } = await import('../dist/domains/cats/services/agents/routing/route-parallel.js');
+    for (const route of [routeSerial, routeParallel]) {
+      const calls = [];
+      const makeService = (label) => ({
+        async *invoke() {
+          calls.push(label);
+          yield { type: 'done', catId: 'opus', timestamp: Date.now() };
+        },
+      });
+      let deps;
+      deps = routeDeps(
+        { opus: makeService('original') },
+        {
+          preflight: async (input) => {
+            deps.services.opus = makeService('replacement');
+            return decision(input, { opus: 'allowed' });
+          },
+        },
+      );
+      for await (const _event of route(deps, ['opus'], 'existing work', 'owner-1', 'frozen-service')) {
+        /* consume actual provider boundary */
+      }
+      assert.deepEqual(calls, ['original']);
+    }
+  });
+  test('execution preflight receives frozen binding proof and rejects before creating a child', async () => {
+    const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
+    const { routeParallel } = await import('../dist/domains/cats/services/agents/routing/route-parallel.js');
+    for (const route of [routeSerial, routeParallel]) {
+      let children = 0;
+      const calls = [];
+      const inputs = [];
+      const deps = routeDeps(
+        { opus: service('opus', calls) },
+        {
+          preflight: async (input) => {
+            inputs.push(input);
+            return decision(input, { opus: 'rejected' });
+          },
+        },
+        {
+          registry: {
+            create: () => {
+              children++;
+              throw new Error('rejected child must not exist');
+            },
+          },
+        },
+      );
+      for await (const _event of route(deps, ['opus'], 'review this task', 'owner-1', 'thread', {})) {
+        /* consume */
+      }
+      assert.equal(children, 0);
+      assert.deepEqual(calls, []);
+      assert.deepEqual(
+        inputs[0].executionBindings?.map((binding) => binding.catId),
+        ['opus'],
+      );
+    }
+  });
   test('public composition without the optional availability port runs ordinary serial and parallel targets', async () => {
     const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
     const { routeParallel } = await import('../dist/domains/cats/services/agents/routing/route-parallel.js');
@@ -239,7 +429,10 @@ describe('F293 home routing through canonical Queue dispatch', () => {
     assert.equal(degraded.targets[0].disposition, 'warned');
     assert.deepEqual(seen, ['catalog:1', 'catalog:2']);
     assert.equal(loads, 3);
-    assert.deepEqual(catalogInputs, [{ ownerId: 'owner-1' }, { ownerId: 'owner-1' }, { ownerId: 'owner-1' }]);
+    assert.deepEqual(
+      catalogInputs,
+      Array.from({ length: 3 }, () => ({ ownerId: 'owner-1', observedAt: 10_000 })),
+    );
   });
 
   test('serial mixed targets reject only the unavailable child and let warned target proceed unchanged', async () => {
@@ -563,6 +756,14 @@ describe('F293 home routing through canonical Queue dispatch', () => {
     assert.equal(observed[1].preflightDecision, returnedDecisions[1]);
     assert.equal(observed[2].preflightDecision, returnedDecisions[1]);
     assert.deepEqual(
+      serialDeps.invocationDeps.turnExecutionStore.get(observed[0].observationId).causal.routingPreflight,
+      {
+        stage: 'execution_preflight',
+        observedAt: returnedDecisions[0].observedAt,
+        snapshotRef: returnedDecisions[0].snapshotRef,
+      },
+    );
+    assert.deepEqual(
       observed.slice(0, 1).map(({ catId, status }) => [catId, status]),
       [['opus', 'succeeded']],
     );
@@ -578,7 +779,7 @@ describe('F293 home routing through canonical Queue dispatch', () => {
     );
   });
 
-  test('callback queues exact targets for fresh execution-time preflight and notifies the drain once', async () => {
+  test('callback keeps one Queue source for all exact targets and leaves execution authority with C', async () => {
     const { enqueueA2ATargets } = await import('../dist/routes/callback-a2a-trigger.js');
     const { InvocationQueue } = await import('../dist/domains/cats/services/agents/invocation/InvocationQueue.js');
     const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
@@ -642,12 +843,14 @@ describe('F293 home routing through canonical Queue dispatch', () => {
     );
 
     assert.deepEqual(result.enqueued, ['opus', 'codex']);
-    assert.deepEqual(drainThreads, ['thread-callback'], 'one common-admission wake covers the complete fan-out');
+    assert.ok(drainThreads.length >= 1, 'admission and an optional metadata CAS notify the same coalesced drain');
+    assert.deepEqual([...new Set(drainThreads)], ['thread-callback']);
+    assert.equal(queue.list('thread-callback', 'owner-1').length, 1, 'provenance cannot create another Queue entry');
     assert.equal(appendCalls, 0, 'Append belongs to Queue execution, not the callback producer');
     assert.equal(availabilityCalls, 1, 'read-only annotation is returned to the caller');
     assert.deepEqual(
-      result.routingPreflight.targets.map((target) => target.disposition),
-      ['rejected', 'warned'],
+      result.routingAdmission.targets.map((target) => target.availabilityObservation),
+      ['unavailable', 'warned'],
     );
     assert.deepEqual(
       queue.list('thread-callback', 'owner-1').flatMap((entry) => entry.targets),

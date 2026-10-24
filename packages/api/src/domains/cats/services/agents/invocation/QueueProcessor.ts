@@ -5251,6 +5251,7 @@ export class QueueProcessor {
           ...(entry.execution.readOnlyToolPolicy ? { toolExecutionPolicy: entry.execution.readOnlyToolPolicy } : {}),
           humanDispositionInvocationOrigin: 'queue_replay',
           routingQueueSource: source,
+          ...(entry.delivery.routingAdmission ? { routingAdmission: entry.delivery.routingAdmission } : {}),
           ...(messageId && !connectorReplayCarrier && (source === 'user' || source === 'agent')
             ? {
                 contextSourceIngress: {

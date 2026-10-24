@@ -7,9 +7,15 @@ import type {
 } from '@cat-cafe/shared';
 import type {
   CapabilityProfileDegradationReason,
+  CapabilityProfileRevisionLoadResult,
   CapabilityProfileRevisionSource,
 } from './CapabilityProfileRevisionSource.js';
 import type { IRoutingPreferenceStore } from './RoutingPreferenceStore.js';
+import {
+  type RoutingSignalDecisionProjectionV1,
+  routingSignalDecisionClosureMap,
+  routingSignalDecisionSourceEventIds,
+} from './RoutingSignalDecisionProjection.js';
 import type { IRoutingSignalEventStore } from './RoutingSignalEventStore.js';
 import { reduceRoutingContext } from './routing-context-reducer.js';
 
@@ -45,7 +51,7 @@ export interface RoutingContextResolutionWithSources {
 }
 
 interface RoutingContextResolverDependencies {
-  signalStore: Pick<IRoutingSignalEventStore, 'getOwnerRevision' | 'listByOwner'>;
+  signalStore: Pick<IRoutingSignalEventStore, 'getOwnerRevision' | 'readDecisionProjection' | 'listByOwner'>;
   preferenceStore: Pick<IRoutingPreferenceStore, 'listByOwner'>;
   profileRevisionSource: CapabilityProfileRevisionSource;
 }
@@ -87,17 +93,14 @@ function sortPreferences(revisions: readonly RoutingPreferenceRevisionV1[]): Rou
 }
 
 export class RoutingContextResolver {
-  private readonly signalTimelineCache = new Map<string, { revision: number; signalEvents: RoutingSignalEventV1[] }>();
+  private readonly signalProjectionCache = new Map<string, RoutingSignalDecisionProjectionV1>();
+  private readonly signalProjectionLoads = new Map<string, Promise<RoutingSignalDecisionProjectionV1>>();
 
   constructor(private readonly dependencies: RoutingContextResolverDependencies) {}
 
   async resolve(input: ResolveRoutingContextInput): Promise<RoutingContextResolution> {
-    return (await this.resolveWithSources(input)).resolution;
-  }
-
-  async resolveWithSources(input: ResolveRoutingContextInput): Promise<RoutingContextResolutionWithSources> {
-    const [signalEvents, preferenceRevisions, profileResult] = await Promise.all([
-      this.loadSignalTimeline(input.ownerId),
+    const [signalProjection, preferenceRevisions, profileResult] = await Promise.all([
+      this.loadSignalProjection(input.ownerId),
       this.dependencies.preferenceStore.listByOwner(input.ownerId),
       this.dependencies.profileRevisionSource.load({
         ownerId: input.ownerId,
@@ -105,16 +108,36 @@ export class RoutingContextResolver {
         intent: input.intent,
       }),
     ]);
-    if (profileResult.status === 'degraded') {
-      return {
-        resolution: profileResult,
-        signalEvents: sortSignals(signalEvents),
-        preferenceRevisions: sortPreferences(preferenceRevisions),
-      };
-    }
+    return this.composeResolution(input, signalProjection, preferenceRevisions, profileResult);
+  }
 
+  async resolveWithSources(input: ResolveRoutingContextInput): Promise<RoutingContextResolutionWithSources> {
+    const [{ signalProjection, signalEvents }, preferenceRevisions, profileResult] = await Promise.all([
+      this.loadSignalProjectionWithTimeline(input.ownerId),
+      this.dependencies.preferenceStore.listByOwner(input.ownerId),
+      this.dependencies.profileRevisionSource.load({
+        ownerId: input.ownerId,
+        candidates: input.candidates,
+        intent: input.intent,
+      }),
+    ]);
+    const preferences = sortPreferences(preferenceRevisions);
+    return {
+      resolution: this.composeResolution(input, signalProjection, preferences, profileResult),
+      signalEvents: sortSignals(signalEvents),
+      preferenceRevisions: preferences,
+    };
+  }
+
+  private composeResolution(
+    input: ResolveRoutingContextInput,
+    signalProjection: RoutingSignalDecisionProjectionV1,
+    preferenceRevisions: readonly RoutingPreferenceRevisionV1[],
+    profileResult: CapabilityProfileRevisionLoadResult,
+  ): RoutingContextResolution {
+    if (profileResult.status === 'degraded') return profileResult;
     const candidates = sortCandidates(input.candidates);
-    const signals = sortSignals(signalEvents);
+    const signals = sortSignals(signalProjection.assertions);
     const preferences = sortPreferences(preferenceRevisions);
     const profiles = [...profileResult.profiles].sort(
       (left, right) =>
@@ -127,6 +150,7 @@ export class RoutingContextResolver {
       profiles,
       profileDiagnostics,
       signalEvents: signals,
+      signalClosures: routingSignalDecisionClosureMap(signalProjection, input.observedAt),
       preferenceRevisions: preferences,
     });
     const inputRevisionRef = digest({
@@ -137,47 +161,69 @@ export class RoutingContextResolver {
       candidates,
       profiles,
       ...(profileDiagnostics.length > 0 ? { profileDiagnostics } : {}),
-      signalEvents: signals,
+      signalProjection: {
+        v: signalProjection.v,
+        ownerId: signalProjection.ownerId,
+        revision: signalProjection.revision,
+        contentHash: signalProjection.contentHash,
+      },
       preferenceRevisions: preferences,
     });
 
     return {
-      resolution: {
-        status: 'fresh',
-        snapshot,
-        inputRevisionRef,
-        sourceRefs: {
-          signalEventIds: signals.map((event) => event.eventId),
-          preferenceRevisionIds: preferences.map((preference) => preference.revisionId),
-          dossierRevisions: profiles.map((profile) => profile.dossierRevision),
-        },
+      status: 'fresh',
+      snapshot,
+      inputRevisionRef,
+      sourceRefs: {
+        signalEventIds: routingSignalDecisionSourceEventIds(signalProjection),
+        preferenceRevisionIds: preferences.map((preference) => preference.revisionId),
+        dossierRevisions: profiles.map((profile) => profile.dossierRevision),
       },
-      signalEvents: signals,
-      preferenceRevisions: preferences,
     };
   }
 
-  private async loadSignalTimeline(ownerId: string): Promise<RoutingSignalEventV1[]> {
-    const revisionBefore = await this.dependencies.signalStore.getOwnerRevision(ownerId);
-    const cached = this.signalTimelineCache.get(ownerId);
-    if (cached?.revision === revisionBefore) {
-      this.signalTimelineCache.delete(ownerId);
-      this.signalTimelineCache.set(ownerId, cached);
-      return [...cached.signalEvents];
+  private async loadSignalProjection(ownerId: string): Promise<RoutingSignalDecisionProjectionV1> {
+    const ownerRevision = await this.dependencies.signalStore.getOwnerRevision(ownerId);
+    const cached = this.signalProjectionCache.get(ownerId);
+    if (cached?.revision === ownerRevision) {
+      this.signalProjectionCache.delete(ownerId);
+      this.signalProjectionCache.set(ownerId, cached);
+      return cached;
     }
 
-    const signalEvents = sortSignals(await this.dependencies.signalStore.listByOwner(ownerId));
-    const revisionAfter = await this.dependencies.signalStore.getOwnerRevision(ownerId);
-    if (revisionBefore === revisionAfter) {
-      this.signalTimelineCache.set(ownerId, { revision: revisionAfter, signalEvents });
-      while (this.signalTimelineCache.size > 256) {
-        const oldestOwnerId = this.signalTimelineCache.keys().next().value;
-        if (oldestOwnerId === undefined) break;
-        this.signalTimelineCache.delete(oldestOwnerId);
-      }
-    } else {
-      this.signalTimelineCache.delete(ownerId);
+    let load = this.signalProjectionLoads.get(ownerId);
+    if (!load) {
+      load = this.dependencies.signalStore.readDecisionProjection(ownerId);
+      this.signalProjectionLoads.set(ownerId, load);
     }
-    return [...signalEvents];
+    let projection: RoutingSignalDecisionProjectionV1;
+    try {
+      projection = await load;
+    } finally {
+      if (this.signalProjectionLoads.get(ownerId) === load) this.signalProjectionLoads.delete(ownerId);
+    }
+    this.signalProjectionCache.set(ownerId, projection);
+    while (this.signalProjectionCache.size > 256) {
+      const oldestOwnerId = this.signalProjectionCache.keys().next().value;
+      if (oldestOwnerId === undefined) break;
+      this.signalProjectionCache.delete(oldestOwnerId);
+    }
+    if (projection.revision < ownerRevision) return this.loadSignalProjection(ownerId);
+    return projection;
+  }
+
+  private async loadSignalProjectionWithTimeline(ownerId: string): Promise<{
+    signalProjection: RoutingSignalDecisionProjectionV1;
+    signalEvents: RoutingSignalEventV1[];
+  }> {
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      const signalProjection = await this.loadSignalProjection(ownerId);
+      const signalEvents = await this.dependencies.signalStore.listByOwner(ownerId);
+      if (signalProjection.revision === (await this.dependencies.signalStore.getOwnerRevision(ownerId))) {
+        return { signalProjection, signalEvents };
+      }
+      this.signalProjectionCache.delete(ownerId);
+    }
+    throw new TypeError(`routing signal owner revision changed during read-model resolution: ${ownerId}`);
   }
 }

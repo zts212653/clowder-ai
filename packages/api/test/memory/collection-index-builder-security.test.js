@@ -68,7 +68,7 @@ describe('CollectionIndexBuilder — secret gate (AC-C1)', () => {
 
   it('reports all secret findings even when blocked', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'col-multi-'));
-    writeFileSync(join(dir, 'a.md'), '# A\n\ntoken = ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghij\n');
+    writeFileSync(join(dir, 'a.md'), ['# A\n\ntoken = gh', 'p_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghij\n'].join(''));
     writeFileSync(join(dir, 'b.md'), '# B\n\naws: AKIAIOSFODNN7EXAMPLE\n');
 
     const manifest = makeManifest(dir);
@@ -83,7 +83,7 @@ describe('CollectionIndexBuilder — secret gate (AC-C1)', () => {
   it('does not write any evidence when blocked', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'col-nowrite-'));
     writeFileSync(join(dir, 'clean.md'), '# Clean\n\nSafe content.');
-    writeFileSync(join(dir, 'dirty.md'), '# Dirty\n\nsk-proj-AbCdEfGhIjKlMnOpQrStUvWxYz1234567890ab\n');
+    writeFileSync(join(dir, 'dirty.md'), ['# Dirty\n\nsk', '-proj-AbCdEfGhIjKlMnOpQrStUvWxYz1234567890ab\n'].join(''));
 
     const manifest = makeManifest(dir);
     const scanner = new FlatScanner('test:sec');
@@ -129,7 +129,10 @@ describe('CollectionIndexBuilder — secret gate (AC-C1)', () => {
     const existing = await store.getByAnchor('test:sec:doc/doc');
     assert.ok(existing, 'doc should be indexed after clean rebuild');
 
-    writeFileSync(join(dir, 'leaked.md'), '# Leaked\n\ntoken: ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghij\n');
+    writeFileSync(
+      join(dir, 'leaked.md'),
+      ['# Leaked\n\ntoken: gh', 'p_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghij\n'].join(''),
+    );
     const second = await builder.rebuild();
     assert.equal(second.blocked, true);
     const purged = await store.getByAnchor('test:sec:doc/doc');

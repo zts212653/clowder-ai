@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   capabilityProfileRevisionRefV1Schema,
   routingCandidateBindingV1Schema,
+  routingCapacityWindowV1Schema,
   routingContextSnapshotV1Schema,
   routingPreferenceRevisionV1Schema,
   routingPreflightDecisionV1Schema,
@@ -38,6 +39,22 @@ const preferenceBase = {
 } as const;
 
 describe('F293 routing context V1 contracts', () => {
+  it('keeps pool purpose distinct and refuses to promote an account observation to proven applicability', () => {
+    const window = {
+      poolId: 'opaque-pool',
+      poolKind: 'codex-main',
+      applicability: 'unknown',
+      freshness: 'fresh',
+      kind: 'five_hour',
+      remainingPercent: 70,
+      resetAt: 2000,
+    };
+    expect(routingCapacityWindowV1Schema.parse(window)).toEqual(window);
+    expect(routingCapacityWindowV1Schema.safeParse({ ...window, applicability: 'proven' }).success).toBe(false);
+    expect(routingCapacityWindowV1Schema.safeParse({ ...window, kind: 'credits' }).success).toBe(false);
+    expect(routingCapacityWindowV1Schema.safeParse({ ...window, limitId: 'inferred-from-model' }).success).toBe(false);
+  });
+
   it('accepts bounded immutable signal variants with explicit causal validity and closure', () => {
     expect(
       routingSignalEventV1Schema.parse({

@@ -14,6 +14,8 @@ import { resolveContextCapacity } from '../../../../../../config/context-capacit
 import { resolveEffectiveOpenCodeModel } from '../../../../../../config/opencode-model.js';
 import { saveSpan } from '../../../../../../utils/member-save-diagnostics.js';
 import type { AgentRegistrationFailure } from '../../registry/AgentServiceUnavailableError.js';
+import { prepareDshSecretPatch, verifyDshSecretPatch } from '../dsh-secret-patch.js';
+import { ensureKimiSecretHooks } from '../kimi-secret-hooks.js';
 import { prepareOpenCodeAcpSpawnConfig } from '../opencode-acp-spawn-config.js';
 import { piBridgeStorageArgs } from '../pi/pi-bridge-launch.js';
 import { AcpAgentService } from './AcpAgentService.js';
@@ -157,6 +159,7 @@ async function prepareAcpSpawnContext(
     );
   }
   let acpSpawnEnv: Record<string, string> | undefined = acpEnvResult.env;
+  if (config.clientId === 'kimi') await ensureKimiSecretHooks(acpSpawnEnv ?? {});
 
   let openCodeAcpSpawnConfig: Awaited<ReturnType<typeof prepareOpenCodeAcpSpawnConfig>>;
   const contextPolicy = resolveAcpContextPolicy(config, input.effectiveModel);
@@ -358,8 +361,19 @@ export async function createAcpServiceForConfig(
     [bootstrap.projectRoot, catId, profileId, accountContext.accountRef ?? 'native-profile'],
     { ...process.env, ...spawn.env },
   );
+  const originalArgs = bootstrap.args;
+  bootstrap.args = await prepareDshSecretPatch(bootstrap.command, originalArgs, bootstrap.projectRoot);
   const root = input.bootstrapRoot ?? acpConfig.bootstrapRoot;
   const verified = verifyAcpBootstrap(bootstrap, profileId, root, spawn.env, acpConfig.bootstrapRoot !== undefined);
+  if (bootstrap.args !== originalArgs) {
+    const patch = bootstrap.args.at(-1);
+    if (!patch) throw new Error('secret_dsh_patch_unavailable');
+    const verifyCwd = verified.verifyCwd;
+    verified.verifyCwd = (...args) => {
+      if (!verifyDshSecretPatch(patch)) throw new Error('secret_dsh_patch_changed');
+      return verifyCwd(...args);
+    };
+  }
   const { pool, lease } = await saveSpan('acp.pool', () => ensureAcpPool(effectiveInput, verified, spawn));
 
   // #712 P1-1: pass whitelist — MCP resolution happens at invoke time in

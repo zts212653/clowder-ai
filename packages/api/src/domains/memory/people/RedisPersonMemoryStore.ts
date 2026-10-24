@@ -160,6 +160,14 @@ export class RedisPersonMemoryStore implements PersonMemoryStore {
     return listSettledPersonMemoryCandidates(this.redis, ownerUserId, limit);
   }
 
+  async getSettledDecisionTime(ownerUserId: string, candidateId: string): Promise<number | null> {
+    const raw = await this.redis.zscore(PersonMemoryKeys.settled(ownerUserId), candidateId);
+    if (raw === null) return null;
+    const time = Number(raw);
+    if (!Number.isFinite(time) || time < 0) throw new Error('invalid person memory decision time');
+    return time;
+  }
+
   async resolvePendingCandidateBySubject(
     ownerUserId: string,
     subject: string,

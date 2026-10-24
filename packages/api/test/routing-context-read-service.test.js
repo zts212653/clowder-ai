@@ -2,6 +2,43 @@ import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 
 describe('F293 RoutingContextReadService', () => {
+  test('selection reads the bounded decision resolver without loading presentation history', async () => {
+    const { RoutingContextReadService } = await import('../dist/domains/routing-context/RoutingContextReadService.js');
+    const calls = [];
+    const service = new RoutingContextReadService({
+      catalogSource: {
+        async load() {
+          return { catalogRevision: 'catalog:selection', candidates: [] };
+        },
+      },
+      resolver: {
+        async resolve(input) {
+          calls.push('decision');
+          return {
+            status: 'fresh',
+            inputRevisionRef: 'snapshot:bounded',
+            snapshot: {
+              v: 1,
+              ownerId: input.ownerId,
+              observedAt: input.observedAt,
+              catalogRevision: input.catalogRevision,
+              candidates: [],
+            },
+            sourceRefs: { signalEventIds: ['frontier:1'], preferenceRevisionIds: [], dossierRevisions: [] },
+          };
+        },
+        async resolveWithSources() {
+          throw new Error('selection must not load the audit ledger');
+        },
+      },
+    });
+    const result = await service.readSnapshot({ ownerId: 'owner-1', observedAt: 1000 });
+    assert.equal(result.resolution.state, 'fresh');
+    assert.equal(result.resolution.inputRevisionRef, 'snapshot:bounded');
+    assert.equal(result.signalEvents, undefined, 'the decision view does not pretend the audit ledger is empty');
+    assert.deepEqual(calls, ['decision']);
+  });
+
   test('loads catalog, ledgers and resolver once into one canonical read model', async () => {
     const { RoutingContextReadService } = await import('../dist/domains/routing-context/RoutingContextReadService.js');
     const calls = [];

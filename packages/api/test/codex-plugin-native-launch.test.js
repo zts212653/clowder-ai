@@ -8,11 +8,14 @@ import { tmpdir } from 'node:os';
 import { isAbsolute, join, relative } from 'node:path';
 import { PassThrough } from 'node:stream';
 import { test } from 'node:test';
+import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { resolveCodexAccountLaunch } from '../dist/config/codex-account-launch.js';
 import {
   CodexAgentService,
   codexConfigObjectFromArgs,
 } from '../dist/domains/cats/services/agents/providers/CodexAgentService.js';
+import { writeMcpProbe } from './helpers/mcp-probe.js';
 
 // This suite tests only the provider's launch boundary. The Host resolver and
 // public source admission are separate authorities; these callbacks are fakes,
@@ -66,6 +69,7 @@ async function fixture(t, serviceOverrides = {}) {
   const calls = [];
   const projections = [];
   let duringL0 = async () => {};
+  let duringSpawn = async () => {};
   let current = true;
   let currentChecks = 0;
   const server = {
@@ -113,7 +117,13 @@ async function fixture(t, serviceOverrides = {}) {
       child.emit('close', null, 'SIGTERM');
       return true;
     };
-    setImmediate(() => {
+    setImmediate(async () => {
+      try {
+        await duringSpawn(calls.at(-1));
+      } catch (error) {
+        child.emit('error', error);
+        return;
+      }
       child.stdout.end(`${JSON.stringify({ type: 'turn.completed', usage: {} })}\n`);
       child.exitCode = 0;
       child.emit('exit', 0, null);
@@ -161,9 +171,51 @@ async function fixture(t, serviceOverrides = {}) {
     onL0: (fn) => {
       duringL0 = fn;
     },
+    onSpawn: (fn) => {
+      duringSpawn = fn;
+    },
     currentChecks: () => currentChecks,
   };
 }
+
+test('the private plugin wrapper runs the real guarded MCP without enabling native hooks', async (t) => {
+  const f = await fixture(t);
+  const file = join(f.packageRoot, 'result.txt');
+  await writeFile(file, 'clean');
+  writeMcpProbe(f.launch.server.args[0], `return {text:readFileSync(${JSON.stringify(file)},'utf8')};`);
+  let checked = false;
+  f.onSpawn(async (call) => {
+    const config = codexConfigObjectFromArgs(call.args);
+    assert.equal(config.features.hooks, false);
+    const server = config.mcp_servers[f.launch.server.name];
+    const client = new Client({ name: 'private-plugin-consumer', version: '1' });
+    const transport = new StdioClientTransport({
+      command: server.command,
+      args: server.args,
+      env: call.options.env,
+      stderr: 'pipe',
+    });
+    transport.stderr?.on('data', () => {});
+    try {
+      await client.connect(transport);
+      assert.equal((await client.listTools()).tools[0].name, 'probe');
+      const clean = await client.callTool({ name: 'probe', arguments: {} });
+      assert.equal(JSON.parse(clean.content[0].text).text, 'clean');
+      const fake = ['ghp', '_', 'Z'.repeat(36)].join('');
+      const blocked = await client.callTool({ name: 'probe', arguments: { text: fake } });
+      assert.equal(blocked.isError, true);
+      await writeFile(file, fake);
+      const redacted = await client.callTool({ name: 'probe', arguments: {} });
+      assert.ok(!JSON.stringify(redacted).includes(fake));
+      assert.match(JSON.stringify(redacted), /轮转/);
+      checked = true;
+    } finally {
+      await client.close();
+    }
+  });
+  const messages = await collect(f.service.invoke('Fixture prompt', f.options));
+  assert.equal(checked, true, JSON.stringify(messages));
+});
 
 async function refused(f, options) {
   let messages = [];

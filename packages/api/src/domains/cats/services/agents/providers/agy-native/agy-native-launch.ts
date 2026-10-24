@@ -182,6 +182,7 @@ export async function prepareAgyNativeLaunch(input: AgyNativeLaunchInput): Promi
     });
     materializeAgyNativeEffectGuard({
       profileHome: configHome,
+      accountHome: home,
       runtimeRoot: findMonorepoRoot(process.cwd()),
       readOnly: options?.toolExecutionPolicy?.mode === 'read_only',
     });
@@ -271,11 +272,12 @@ export async function prepareAgyNativeLaunch(input: AgyNativeLaunchInput): Promi
       tools: Object.freeze({ finalSurface: 'unknown' as const }),
       providerNativeVisibility: 'unknown',
     });
+    const env = { ...isolatedOAuthEnv(home), ...executionOwnerEnv(options) };
     const cliOptions: CliSpawnOptions & { readonly cwd: string } = {
       command,
       args,
       cwd: resolveAgySpawnCwd(profile, input.catId, policy.workspaceRoot),
-      env: { ...isolatedOAuthEnv(home), ...executionOwnerEnv(options) },
+      env,
       inheritParentEnv: false,
       bindExecutionOwner: Boolean(options?.auditContext),
       stdinInput: `${encodeAgyStreamJsonUserMessage(nativeInput.prompt)}\n`,

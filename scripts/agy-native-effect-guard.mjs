@@ -7,6 +7,7 @@ import { commandTouchesAgyControl } from './agy-native-control-commands.mjs';
 import { readSelfHostFacet } from './lib/self-host-facet.mjs';
 import { kernelPath } from './lib/shell-directory.mjs';
 import { decideNativeHookPayload } from './native-effect-target-guard.mjs';
+import { nativeSecretDenial } from './native-secret-policy.mjs';
 
 const vocabulary = JSON.parse(
   readFileSync(new URL('../assets/agy-native-tool-vocabulary.json', import.meta.url), 'utf8'),
@@ -83,14 +84,19 @@ export function decideAgyNativeHookPayload(payload, options = {}) {
     return deny('invalid AGY tool arguments');
   const cwd = typeof args.Cwd === 'string' ? args.Cwd : payload.workspacePaths?.[0];
   if (typeof cwd !== 'string' || !isAbsolute(cwd)) return deny('missing tool workspace');
+  // Preserve raw content and delegated arguments before effect/target projection.
+  const secretDenial = nativeSecretDenial({ tool_name: name, tool_input: args, cwd });
+  if (secretDenial) return deny(secretDenial);
   if (options.readOnly && !READERS.has(name)) return deny('read-only invocation');
+  const isControl = (path, directory, profileHome) =>
+    controlPath(path, directory, profileHome) || (options.toolHome && controlPath(path, directory, options.toolHome));
 
   let toolName;
   let toolInput;
   if (FILE_WRITERS.has(name)) {
     const target = args.TargetFile ?? args.NotebookPath;
     if (typeof target !== 'string' || !target) return deny('missing file target');
-    if (controlPath(target, cwd, options.profileHome)) return deny('AGY executable control-plane write');
+    if (isControl(target, cwd, options.profileHome)) return deny('AGY executable control-plane write');
     toolName = name === 'write_to_file' ? 'Write' : 'Edit';
     toolInput = { file_path: target };
   } else if (COMMANDS.has(name)) {
@@ -106,7 +112,9 @@ export function decideAgyNativeHookPayload(payload, options = {}) {
     if (typeof command !== 'string' || !command) return deny('missing command');
     // The CLI hot-loads these programs outside its terminal sandbox. Their
     // protection is carrier integrity, not another list of protected project files.
-    if (commandTouchesAgyControl(command, cwd, options.profileHome, controlPath)) {
+    if (
+      commandTouchesAgyControl(command, cwd, options.profileHome, isControl, 0, options.toolHome ?? options.profileHome)
+    ) {
       return deny('AGY executable control-plane command');
     }
     toolName = 'Bash';
@@ -128,8 +136,14 @@ async function main() {
       if (raw.length > 2 * 1024 * 1024) throw new Error('oversized hook input');
     }
     const hostHome = process.argv[2];
+    // The carrier account is frozen in the host-generated command. A command
+    // shell may restore HOME for tools without changing this protection root.
+    const profileHome = process.argv[4] || process.env.HOME;
+    const toolHome = process.env.CAT_CAFE_NATIVE_TOOL_HOME || process.env.HOME;
+    if (toolHome) process.env.HOME = toolHome;
     const decision = decideAgyNativeHookPayload(JSON.parse(raw), {
-      profileHome: process.env.HOME,
+      profileHome,
+      toolHome,
       readOnly: process.argv[3] === 'read-only',
       selfHost: () => readSelfHostFacet({ ...(hostHome ? { homeDir: hostHome } : {}) }),
     });

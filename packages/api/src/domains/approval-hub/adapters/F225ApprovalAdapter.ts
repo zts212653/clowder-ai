@@ -1,3 +1,4 @@
+import { type ApprovalDecisionRead, projectApprovalDecisionRead } from '../ports/IApprovalAdapter.js';
 /**
  * F246: F225 (Session Handoff Proposal) → ApprovalItem adapter.
  *
@@ -26,6 +27,14 @@ export class F225ApprovalAdapter implements IApprovalAdapter {
     const result = this.store.listPendingByUser(userId, ALL_PENDING_APPROVALS_LIMIT);
     if (Array.isArray(result)) return compactApprovalProjections(result.map((p) => toItem(p)));
     return result.then((proposals) => compactApprovalProjections(proposals.map((p) => toItem(p))));
+  }
+
+  async readDecision(userId: string, proposalId: string): Promise<ApprovalDecisionRead> {
+    const p = await this.store.get(proposalId);
+    if (!p || p.userId !== userId) return { state: 'closed' };
+    const feedback = p.latestHumanDisposition;
+    const reason = feedback?.reasonCode === 'other' ? feedback.detail : feedback?.reasonCode;
+    return projectApprovalDecisionRead(p.status, () => toSettledItem(p), reason);
   }
 
   async listSettled(userId: string, opts?: ListSettledOpts): Promise<SettledApprovalItem[]> {

@@ -282,8 +282,8 @@ test('a hung live API times out as unknown instead of indefinitely blocking reco
 });
 
 test('credential conflict diagnostics never disclose the credential contents', async () => {
-  put(workspace, 'credentials.json', { claude: { apiKey: 'FAKE_SECRET_A_DO_NOT_PRINT' } });
-  put(runtime, 'credentials.json', { claude: { apiKey: 'FAKE_SECRET_B_DO_NOT_PRINT' } });
+  put(workspace, 'credentials.json', { claude: { apiKey: ['FA', 'KE_SECRET_A_DO_NOT_PRINT'].join('') } });
+  put(runtime, 'credentials.json', { claude: { apiKey: ['FA', 'KE_SECRET_B_DO_NOT_PRINT'].join('') } });
   const result = await runChecker(['--json']);
   assert.equal(result.status, 2);
   assert.doesNotMatch(result.stdout + result.stderr, /FAKE_SECRET/);

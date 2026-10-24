@@ -16,23 +16,23 @@ describe('SecretScanner', () => {
   });
 
   it('detects GitHub personal access token (ghp_)', () => {
-    const content = 'token = ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghij\n';
+    const content = ['token = gh', 'p_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghij\n'].join('');
     const findings = SecretScanner.scan(content, 'notes.md');
     assert.equal(findings.length, 1);
     assert.equal(findings[0].type, 'github-token');
   });
 
   it('detects GitHub App tokens (ghs_, ghu_, ghr_) (R6-P1)', () => {
-    const ghs = 'GITHUB_TOKEN=ghs_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghij\n';
-    const ghu = 'token: ghu_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghij\n';
-    const ghr = 'refresh = ghr_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghij\n';
+    const ghs = ['GITHUB_TOKEN=gh', 's_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghij\n'].join('');
+    const ghu = ['token: gh', 'u_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghij\n'].join('');
+    const ghr = ['refresh = gh', 'r_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghij\n'].join('');
     assert.equal(SecretScanner.scan(ghs, 'ci.md')[0].type, 'github-token');
     assert.equal(SecretScanner.scan(ghu, 'ci.md')[0].type, 'github-token');
     assert.equal(SecretScanner.scan(ghr, 'ci.md')[0].type, 'github-token');
   });
 
   it('detects generic high-entropy strings in key context', () => {
-    const content = 'api_key = "a8f3b2c1d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9"\n';
+    const content = ['api_key = "a8', 'f3b2c1d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9"\n'].join('');
     const findings = SecretScanner.scan(content, 'env.md');
     assert.ok(findings.length >= 1);
     assert.equal(findings[0].type, 'high-entropy-secret');
@@ -58,7 +58,7 @@ describe('SecretScanner', () => {
   });
 
   it('detects OpenAI key pattern', () => {
-    const content = 'openai_key: sk-proj-AbCdEfGhIjKlMnOpQrStUvWxYz123456\n';
+    const content = ['openai_key: sk', '-proj-AbCdEfGhIjKlMnOpQrStUvWxYz123456\n'].join('');
     const findings = SecretScanner.scan(content, 'config.md');
     assert.equal(findings.length, 1);
     assert.equal(findings[0].type, 'openai-key');
@@ -74,7 +74,7 @@ describe('SecretScanner', () => {
   it('scanBatch reports filesWithSecrets count', () => {
     const files = [
       { path: 'clean.md', content: '# Clean\n\nSafe.' },
-      { path: 'dirty.md', content: '# Dirty\n\ntoken: ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghij\n' },
+      { path: 'dirty.md', content: ['# Dirty\n\ntoken: gh', 'p_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghij\n'].join('') },
       { path: 'also-dirty.md', content: '# Also\n\nkey: AKIAIOSFODNN7EXAMPLE\n' },
     ];
     const result = SecretScanner.scanBatch(files);
@@ -83,7 +83,7 @@ describe('SecretScanner', () => {
   });
 
   it('does not suppress real token when TODO appears in surrounding context (P1-C)', () => {
-    const content = 'token: ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghij # TODO rotate this\n';
+    const content = ['token: gh', 'p_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghij # TODO rotate this\n'].join('');
     const findings = SecretScanner.scan(content, 'config.md');
     assert.equal(findings.length, 1, 'TODO in context must not suppress a real token');
     assert.equal(findings[0].type, 'github-token');

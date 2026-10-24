@@ -46,6 +46,7 @@ export function MessageBundlePaperCard({
       : undefined;
   const participants = [...new Set(data.items.map(authorName).filter((name): name is string => name !== undefined))];
   const single = data.items.length === 1;
+  const messageCount = new Set(data.items.map((item) => item.messageId)).size;
   return (
     <div data-message-bundle-id={messageId} className="flex w-full min-w-0 flex-col gap-2">
       {data.note && (
@@ -69,7 +70,7 @@ export function MessageBundlePaperCard({
           >
             {t.from(data.sourceThread?.title ?? t.sourceUnavailable)}
           </button>
-          <span className="ml-auto shrink-0">{t.count(data.items.length)}</span>
+          <span className="ml-auto shrink-0">{t.count(messageCount)}</span>
         </div>
         <p className="mt-1 break-words text-xs text-cafe-muted">
           {t.forwardedBy(forwarderName)}
@@ -105,7 +106,11 @@ export function MessageBundlePaperCard({
             aria-expanded={expanded}
             onClick={onToggle}
           >
-            {expanded ? t.collapse : t.showAll(data.items.length)}
+            {expanded
+              ? t.collapse
+              : messageCount < data.items.length
+                ? t.showAllParts(data.items.length)
+                : t.showAll(messageCount)}
           </button>
         )}
       </section>
