@@ -35,12 +35,14 @@ test('V46 preserves existing execution rows and rolls back its private column if
         reviewed_development_return_json,
         successor_development_return_json,
         parent_bound_development_return_json,
+        tool_execution_policy_json,
         ...row
       }) => {
         assert.equal(development_return_json, null);
         assert.equal(reviewed_development_return_json, null);
         assert.equal(successor_development_return_json, null);
         assert.equal(parent_bound_development_return_json, null);
+        assert.equal(tool_execution_policy_json, null);
         return row;
       },
     );

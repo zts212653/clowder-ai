@@ -4,9 +4,9 @@ import { open, realpath } from 'node:fs/promises';
 import { isAbsolute, relative, resolve, sep } from 'node:path';
 import type { PluginIconSpec } from '@cat-cafe/shared';
 import { XMLParser, XMLValidator } from 'fast-xml-parser';
-import type { VerifiedPluginPackage } from '../external-runtime/types.js';
-import type { PluginPackageRecord } from '../host-inventory/types.js';
-import { type PluginManagerPackageAsset, PluginManagerPackageAssetError } from './plugin-package-asset-contract.js';
+import type { VerifiedPluginPackage } from '../../external-runtime/types.js';
+import type { PluginPackageRecord } from '../../host-inventory/types.js';
+import { type PluginManagerPackageAsset, PluginManagerPackageAssetError } from './contract.js';
 
 const MAX_PLUGIN_ICON_BYTES = 1024 * 1024;
 const MAX_PLUGIN_README_BYTES = 256 * 1024;

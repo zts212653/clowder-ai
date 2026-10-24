@@ -1,8 +1,8 @@
 import { constants, type Stats } from 'node:fs';
 import { lstat, open, realpath } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
-import type { AgentMessage } from '../../../types.js';
-import type { AgyStreamJsonEvent } from '../agy-stream-json-parser.js';
+import type { AgentMessage } from '../../../../types.js';
+import type { AgyStreamJsonEvent } from '../../agy-stream-json-parser.js';
 
 const MAX_SPILL_BYTES = 8 * 1024 * 1024;
 

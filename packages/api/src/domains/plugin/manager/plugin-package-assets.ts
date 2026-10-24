@@ -11,7 +11,7 @@ import {
   PluginManagerPackageAssetError,
   type PluginManagerPackageAssetPort,
   type PluginManagerPackageDocumentationPort,
-} from './plugin-package-asset-contract.js';
+} from './package-assets/contract.js';
 import {
   inventoryIdentity,
   objectIcon,
@@ -19,16 +19,16 @@ import {
   readVerifiedIcon,
   readVerifiedReadme,
   verifiedPackageIcon,
-} from './plugin-package-asset-validation.js';
+} from './package-assets/validation.js';
 
 export type {
   PluginManagerPackageAsset,
   PluginManagerPackageAssetErrorCode,
   PluginManagerPackageAssetPort,
   PluginManagerPackageDocumentationPort,
-} from './plugin-package-asset-contract.js';
-export { PluginManagerPackageAssetError } from './plugin-package-asset-contract.js';
-export { pluginIconAsset } from './plugin-package-asset-validation.js';
+} from './package-assets/contract.js';
+export { PluginManagerPackageAssetError } from './package-assets/contract.js';
+export { pluginIconAsset } from './package-assets/validation.js';
 
 export interface PluginManagerPackageAssetServiceOptions {
   readonly inventory: Pick<PluginInventoryStore, 'snapshot'>;

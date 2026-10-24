@@ -5,9 +5,9 @@ import type { AgentMessage, AgentServiceOptions, MessageMetadata } from '../../.
 import { type RawArchiveSink, sanitizeRawEvent } from '../../codex-audit-hooks.js';
 import type { createAgyNativeContinuityInput } from '../agy-native-continuity.js';
 import type { AgyNativeLaunchPlan } from '../agy-native-launch.js';
-import { recoverAgyNativeMcpSpill } from '../agy-native-mcp-spill.js';
 import { AgyNativeProgress } from '../agy-native-progress.js';
 import { type AgyNativeObservedTurn, observeAgyNativeTurn, projectAgyNativeTurn } from '../agy-native-turn.js';
+import { recoverAgyNativeMcpSpill } from './agy-native-mcp-spill.js';
 import { AgyNativeRunInput } from './agy-native-run-input.js';
 import { AgyNativeRunOutput } from './agy-native-run-output.js';
 
