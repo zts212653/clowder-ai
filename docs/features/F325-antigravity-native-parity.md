@@ -15,6 +15,8 @@ description_updated_at: 2026-09-29T06:01:16Z
 
 > **Status**: in-progress | **Owner**: 小星星·Maine Coon (@codex-astra, gpt-6-astra) | **Priority**: P1
 
+**2026-10-23 部署等待核对：`deploymentWait=unavailable`**：沿墨墨 source `private-source-id`，Sol 独立核实 #6041 已合入 `7761176c829af36d89a7ea3975cb4e8c744f3199`，正式 runtime 仍运行 `f16399d26482ece3341137c11f64c6189f3f726c`。原 Task `private-source-id` 的 canonical owner read 为 revision 17、`done` / `satisfied`、owner=`codex61-sol`；运行版本的 `registrationTaskError` 明确对终态 Task 返回 409 `Terminal Task cannot register a deployment wait`。据此未提交终态登记请求，本修复没有新建的自动部署回调；不复活 Task1529、不建镜像 Task、不重启 runtime。加载后核验仍待沿本线程续办：先确认冻结 merge 的实际包含关系与 API/Web ready，再按 source1329 的原分工安排便宜模型自然连续 A/B/C 验收，核对同进程、逐条完成回执、Queue 退休和正文；是否实际触发 recovered 支路须如实记录。Task1529 的已完成快照与整体 F325/Task2347 的未验边界保持原状。
+
 **2026-10-20 验收安排更新（覆盖下文这三项的专门验收安排）**：You 在本线程 source1157（`[thread-id]#private-source-id`）说明这几天正常使用没有遇到问题，要求认证中断恢复、上下文快满时自动接续、持久后台任务随日常使用验收，不消耗Siamese或其他猫的额外 token 专门验收。三项沿平时真实任务自然观察，复用已有证据；不为凑验收安排额外模型调用、长任务/故障探针、周期核验或反复审计旧材料。日常出现具体故障再针对该现场定位、修复与必要验证。未触发的场景如实保留证据边界，不以“近期没出问题”冒称全部通过，也不继续以缺少专门验收为由要求重复演示。原 Task2347 与 Astra 的交付责任保留，本次不关闭 Feature。
 
 **我们要的结果**：You 从家里正常入口叫出Siamese，便能对话、创作、查记忆、用工具、读改代码与测试、接 review、接住插话、停止和续接；长任务独立持久、重启可恢复，历史与身份保留，过时入口退役。以家里 Codex app-server / Claude 已落地的实际能力为参照，在相同授权与受保护目标边界下可用。普通工作不能要求人为维护 Native 专属的短工具清单或只为验收准备的空目录。任何真实上游限制须有当前证据和可用替代；本地尚未接线不能冒充不支持。

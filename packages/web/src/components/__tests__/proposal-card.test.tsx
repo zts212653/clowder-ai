@@ -225,7 +225,7 @@ describe('ProposalCard', () => {
     expect(checkbox.checked).toBe(false);
   });
 
-  it('does NOT send pinned in approve body (pin is a separate PATCH)', async () => {
+  it('includes pinned in approve so the thread is created with its final pin state', async () => {
     await render();
     const checkbox = container.querySelector('input[type="checkbox"]') as HTMLInputElement;
     await act(async () => {
@@ -242,10 +242,10 @@ describe('ProposalCard', () => {
     });
     const approveCall = apiFetchMock.mock.calls.find(([url]) => String(url).endsWith('/approve'));
     const sentBody = readRequestBody(approveCall);
-    expect(sentBody.pinned).toBeUndefined();
+    expect(sentBody.pinned).toBe(true);
   });
 
-  it('does not call PATCH pin when pin toggle is unchecked', async () => {
+  it('omits pinned and a separate PATCH when the pin toggle is unchecked', async () => {
     await render();
     apiFetchMock.mockImplementation(() =>
       Promise.resolve(jsonResponse(200, { proposalId: PROPOSAL_ID, threadId: 'thread_nopin', status: 'approved' })),
@@ -260,9 +260,11 @@ describe('ProposalCard', () => {
       ([url]) => String(url).includes('/api/threads/') && String(url).includes('thread_nopin'),
     );
     expect(patchCall).toBeUndefined();
+    const approveCall = apiFetchMock.mock.calls.find(([url]) => String(url).endsWith('/approve'));
+    expect(readRequestBody(approveCall).pinned).toBeUndefined();
   });
 
-  it('PATCHes /api/threads/:id with pinned:true after approve when pin is checked', async () => {
+  it('uses no separate PATCH or optimistic Sidebar pin command when pin is checked', async () => {
     await render();
     const checkbox = container.querySelector('input[type="checkbox"]') as HTMLInputElement;
     await act(async () => {
@@ -281,38 +283,10 @@ describe('ProposalCard', () => {
       ([url, opts]) =>
         String(url) === '/api/threads/thread_pin_patch' && (opts as { method?: string })?.method === 'PATCH',
     );
-    const patchBody = readRequestBody(patchCall);
-    expect(patchBody.pinned).toBe(true);
+    expect(patchCall).toBeUndefined();
     const pending = Object.values(useSidebarProjectionStore.getState().pendingThreadCommands);
-    expect(pending).toEqual([expect.objectContaining({ threadId: 'thread_pin_patch', field: 'pinned', value: true })]);
+    expect(pending).toEqual([]);
     expect(pinMock).not.toHaveBeenCalled();
-  });
-
-  it('does NOT call updateThreadPin when PATCH pin returns non-2xx', async () => {
-    await render();
-    const checkbox = container.querySelector('input[type="checkbox"]') as HTMLInputElement;
-    await act(async () => {
-      checkbox.click();
-    });
-    // First call: approve → 200; Second call: PATCH pin → 500
-    let callCount = 0;
-    apiFetchMock.mockImplementation(() => {
-      callCount++;
-      if (callCount === 1) {
-        return Promise.resolve(
-          jsonResponse(200, { proposalId: PROPOSAL_ID, threadId: 'thread_pin_fail', status: 'approved' }),
-        );
-      }
-      return Promise.resolve(jsonResponse(500, { error: 'internal error' }));
-    });
-    await act(async () => {
-      findButton('批准并创建').dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    });
-    await act(async () => {
-      await Promise.resolve();
-    });
-    expect(pinMock).not.toHaveBeenCalled();
-    expect(Object.values(useSidebarProjectionStore.getState().pendingThreadCommands)).toEqual([]);
   });
 
   // AC-F8: auto-navigate to new thread after approve

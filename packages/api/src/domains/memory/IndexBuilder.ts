@@ -35,11 +35,13 @@ import {
   documentPathToAnchor,
   extractDocumentSourceEdges,
 } from './document-source-edges.js';
-import { embedPassages, type PassageEmbeddingRow } from './embed-utils.js';
+import { embedPassages, INDEX_EMBED_BATCH_SIZE } from './embed-utils.js';
 import { isMarkdownSourcePath } from './MarkdownPassageIndexer.js';
 import { runMemoryScan } from './MemoryProcess.js';
 import { buildSearchableMessageContent } from './message-search-content.js';
 import { type PassageVectorStore, passageVectorKey } from './PassageVectorStore.js';
+import { readPassageEmbeddingPage } from './passage-embedding-page.js';
+import { prepareDocumentVectors } from './prepare-document-vectors.js';
 import { type DocumentPassageSource, replaceDocumentPassages } from './replace-document-passages.js';
 import type { SqliteEvidenceStore } from './SqliteEvidenceStore.js';
 import { SIGNAL_FLAGS } from './summary-config.js';
@@ -214,6 +216,7 @@ export class IndexBuilder implements IIndexBuilder {
     scanner?: RepoScanner,
     exclude?: string[],
   ) {
+    this.store.invalidateVectorProjection();
     if (scanner) {
       this.scanner = scanner;
       this.scanRoot = docsRoot;
@@ -234,6 +237,13 @@ export class IndexBuilder implements IIndexBuilder {
         }
       | undefined,
   ): void {
+    if (
+      this.embedDeps?.embedding !== deps?.embedding ||
+      this.embedDeps?.vectorStore !== deps?.vectorStore ||
+      this.embedDeps?.passageVectorStore !== deps?.passageVectorStore
+    ) {
+      this.store.invalidateVectorProjection();
+    }
     this.embedDeps = deps;
   }
 
@@ -320,8 +330,10 @@ export class IndexBuilder implements IIndexBuilder {
   private async rebuildOnce(options?: {
     force?: boolean;
     deferThreadIndexing?: boolean;
+    deferDocumentEmbedding?: boolean;
     onProgress?: (phase: string, percent: number) => void;
   }): Promise<RebuildResult> {
+    this.store.invalidateVectorProjection();
     const report = options?.onProgress ?? (() => {});
     const start = Date.now();
     let indexed = 0;
@@ -467,10 +479,23 @@ export class IndexBuilder implements IIndexBuilder {
     report('embedding', 80);
     // The model may have become ready after this pass began. Vector catch-up
     // reads the indexed rows and their source hashes without rescanning files.
-    try {
-      await this.embedMissingDocumentVectors(Boolean(options?.force));
-    } catch {
-      // fail-open: lexical evidence remains usable without embeddings
+    if (options?.deferDocumentEmbedding) {
+      const deps = this.embedDeps;
+      if (deps) {
+        await prepareDocumentVectors(
+          this.store,
+          deps,
+          this.pendingDocumentVectorAnchors,
+          () => this.embedDeps?.embedding === deps.embedding && this.embedDeps.vectorStore === deps.vectorStore,
+          Boolean(options.force),
+        );
+      }
+    } else {
+      try {
+        await this.embedMissingDocumentVectors(Boolean(options?.force));
+      } catch {
+        // fail-open: lexical evidence remains usable without embeddings
+      }
     }
     await publishDocumentSourceClaims(this.store, documentSourceClaims(scannedItems.map(({ item }) => item)));
     // Persist current indexing version so next startup can detect changes
@@ -604,78 +629,27 @@ export class IndexBuilder implements IIndexBuilder {
     const deps = this.embedDeps;
     if (!deps) return { docsEmbedded: 0, durationMs: Date.now() - start };
     const { embedding, vectorStore } = deps;
+    const isCurrent = () => this.embedDeps?.embedding === embedding && this.embedDeps.vectorStore === vectorStore;
     await embedding.reprobeIfNeeded();
-    if (!embedding.isReady()) return { docsEmbedded: 0, durationMs: Date.now() - start };
+    if (!embedding.isReady() || !isCurrent()) return { docsEmbedded: 0, durationMs: Date.now() - start };
 
     const db = this.store.getDb();
-    const model = embedding.getModelInfo();
-    const meta = vectorStore.getMeta();
-    const modelChanged =
-      !vectorStore.checkMetaConsistency(model).consistent || (vectorStore.count() > 0 && !meta.embedding_model_id);
-    if (modelChanged) {
-      await this.store.runExclusive(() => {
-        vectorStore.clearAll();
-        deps.passageVectorStore?.clearAll();
-        db.prepare('DELETE FROM document_vector_sources').run();
-      });
-    }
-
-    const rows = db
-      .prepare(`
-      SELECT d.anchor, d.title, d.summary, d.source_hash AS sourceHash, s.source_hash AS vectorSourceHash
-      FROM evidence_docs d LEFT JOIN document_vector_sources s ON s.anchor = d.anchor
-      ORDER BY d.anchor
-    `)
-      .all() as Array<{
-      anchor: string;
-      title: string;
-      summary: string | null;
-      sourceHash: string | null;
-      vectorSourceHash: string | null;
-    }>;
-    const vectorAnchors = new Set(
-      (db.prepare('SELECT anchor FROM evidence_vectors').all() as Array<{ anchor: string }>).map((row) => row.anchor),
-    );
-    if (!modelChanged && !force) {
-      // V48 already has usable vectors but no source stamps. The startup
-      // rebuild above identifies every changed row; trust only the remaining
-      // existing vectors, and avoid a one-time full-corpus embed on upgrade.
-      const legacyCurrent = rows.filter(
-        (row) =>
-          row.vectorSourceHash === null &&
-          vectorAnchors.has(row.anchor) &&
-          !this.pendingDocumentVectorAnchors.has(row.anchor),
-      );
-      if (legacyCurrent.length > 0) {
-        await this.store.runExclusive(() =>
-          db.transaction(() => {
-            for (const row of legacyCurrent) {
-              db.prepare('INSERT OR REPLACE INTO document_vector_sources (anchor, source_hash) VALUES (?, ?)').run(
-                row.anchor,
-                row.sourceHash ?? '',
-              );
-              row.vectorSourceHash = row.sourceHash ?? '';
-            }
-          })(),
-        );
-      }
-    }
-    const pending = rows.filter(
-      (row) =>
-        force ||
-        this.pendingDocumentVectorAnchors.has(row.anchor) ||
-        !vectorAnchors.has(row.anchor) ||
-        row.vectorSourceHash !== (row.sourceHash ?? ''),
-    );
+    const pending = await prepareDocumentVectors(this.store, deps, this.pendingDocumentVectorAnchors, isCurrent, force);
     let docsEmbedded = 0;
-    for (let offset = 0; offset < pending.length; offset += 64) {
-      const batch = pending.slice(offset, offset + 64);
+    for (let offset = 0; offset < pending.length; offset += INDEX_EMBED_BATCH_SIZE) {
+      if (!isCurrent()) break;
+      const anchors = pending.slice(offset, offset + INDEX_EMBED_BATCH_SIZE);
+      const batch = db
+        .prepare(`SELECT anchor, title, summary, source_hash AS sourceHash FROM evidence_docs
+          WHERE anchor IN (${anchors.map(() => '?').join(',')}) ORDER BY anchor`)
+        .all(...anchors) as Array<{ anchor: string; title: string; summary: string | null; sourceHash: string | null }>;
+      if (batch.length === 0) continue;
       const vectors = await embedding.embed(batch.map((row) => `${row.title} ${row.summary ?? ''}`));
       for (let i = 0; i < batch.length; i++) {
+        if (!isCurrent()) break;
         if (await this.storeDocumentVectorIfCurrent(batch[i], vectors[i], vectorStore)) docsEmbedded++;
       }
     }
-    await this.store.runExclusive(() => vectorStore.initMeta(model));
     return { docsEmbedded, durationMs: Date.now() - start };
   }
 
@@ -1534,46 +1508,38 @@ export class IndexBuilder implements IIndexBuilder {
   /** F209 Phase A: embed newly indexed raw passages without blocking lexical recall. */
   private async embedMissingPassages(docAnchors?: string[]): Promise<void> {
     const deps = this.embedDeps;
-    if (!deps?.passageVectorStore) return;
+    const passageVectors = deps?.passageVectorStore;
+    if (!passageVectors) return;
 
+    try {
+      await deps.embedding.reprobeIfNeeded();
+    } catch {
+      return; // Optional vector work cannot fail a canonical dirty-thread flush.
+    }
     const db = this.store.getDb();
-    const existingStmt = db.prepare('SELECT 1 AS present FROM passage_vectors WHERE passage_key = ? LIMIT 1');
     let lastId = 0;
     let consecutiveErrors = 0;
 
     for (;;) {
-      const whereClauses = ['id > ?'];
-      const params: unknown[] = [lastId];
-      if (docAnchors?.length) {
-        whereClauses.push(`doc_anchor IN (${docAnchors.map(() => '?').join(',')})`);
-        params.push(...docAnchors);
-      }
-
-      let rows: Array<PassageEmbeddingRow & { id: number }>;
+      // Resolved promises only yield to microtasks. Warm pages still need an
+      // actual I/O turn, and service deactivation must stop the remaining scan.
+      await yieldToIo();
+      if (this.embedDeps !== deps || !deps.embedding.isReady()) return;
+      let page: ReturnType<typeof readPassageEmbeddingPage>;
       try {
-        rows = db
-          .prepare(
-            `SELECT id, doc_anchor AS docAnchor, passage_id AS passageId, content
-             FROM evidence_passages
-             WHERE ${whereClauses.join(' AND ')}
-             ORDER BY id
-             LIMIT ?`,
-          )
-          .all(...params, PASSAGE_EMBED_SCAN_BATCH_SIZE) as Array<PassageEmbeddingRow & { id: number }>;
+        page = readPassageEmbeddingPage(db, passageVectors, lastId, PASSAGE_EMBED_SCAN_BATCH_SIZE, docAnchors);
       } catch {
-        // DB read error — stop scanning (structural problem, not transient)
+        // Structural read errors cannot be repaired by scanning the next page.
         return;
       }
-      if (rows.length === 0) return;
-
-      lastId = rows[rows.length - 1]!.id;
-      const missing = rows.filter((r) => !existingStmt.get(passageVectorKey(r.docAnchor, r.passageId)));
+      if (!page) return;
+      lastId = page.lastId;
 
       try {
         await embedPassages({
-          passages: missing,
+          passages: page.passages,
           embedding: deps.embedding,
-          passageVectorStore: deps.passageVectorStore,
+          passageVectorStore: passageVectors,
           commitBatch: (batch, vectors) =>
             this.store.runExclusive(() => {
               if (this.embedDeps !== deps) return;
@@ -1584,7 +1550,7 @@ export class IndexBuilder implements IIndexBuilder {
                 const row = batch[i];
                 const live = current.get(row.docAnchor, row.passageId) as { content: string } | undefined;
                 if (live?.content !== row.content) continue;
-                deps.passageVectorStore!.upsert(passageVectorKey(row.docAnchor, row.passageId), vectors[i]);
+                passageVectors.upsert(passageVectorKey(row.docAnchor, row.passageId), vectors[i]);
               }
             }),
         });

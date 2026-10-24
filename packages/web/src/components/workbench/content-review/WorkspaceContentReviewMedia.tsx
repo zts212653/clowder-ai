@@ -320,6 +320,7 @@ export function WorkspaceContentReviewMedia({
       ref={artwork}
       className={`${styles.artwork} ${imageChatPrimary ? styles.imageArtwork : ''} ${media.kind === 'video' ? videoStyles.player : ''}`}
       data-testid="workspace-review-artwork"
+      data-content-opening-state={error ? 'blocked' : undefined}
       data-artwork-video-player={media.kind === 'video' ? '' : undefined}
     >
       {saveNotice ? <output className="px-3 text-xs text-cafe-muted">{saveNotice}</output> : null}

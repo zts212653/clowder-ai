@@ -60,7 +60,7 @@ async function sha512File(path: string): Promise<Buffer> {
   });
 }
 
-async function sealArchive(source: string, destination: string, signal?: AbortSignal): Promise<void> {
+export async function sealArchive(source: string, destination: string, signal?: AbortSignal): Promise<void> {
   let bytes = 0;
   const bound = new Transform({
     transform(chunk: Buffer, _encoding, callback) {
@@ -89,7 +89,7 @@ async function sealArchive(source: string, destination: string, signal?: AbortSi
   }
 }
 
-async function verifyArchiveDigest(archivePath: string, packageDigest: string): Promise<void> {
+export async function verifyArchiveDigest(archivePath: string, packageDigest: string): Promise<void> {
   const expected = Buffer.from(packageDigest.slice('sha512-'.length), 'base64');
   const actual = await sha512File(archivePath);
   if (expected.length !== actual.length || !timingSafeEqual(expected, actual)) {
@@ -97,7 +97,7 @@ async function verifyArchiveDigest(archivePath: string, packageDigest: string): 
   }
 }
 
-function archiveMembers(output: string): string[] {
+export function archiveMembers(output: string): string[] {
   const members = output.split('\n').filter(Boolean);
   if (members.length === 0) throw runtimeError('staged package archive is empty');
   for (const member of members) {
@@ -117,7 +117,7 @@ function archiveMembers(output: string): string[] {
   return members;
 }
 
-function validateArchiveMemberTypes(output: string, expectedMembers: number): void {
+export function validateArchiveMemberTypes(output: string, expectedMembers: number): void {
   const types = output
     .split('\n')
     .filter(Boolean)

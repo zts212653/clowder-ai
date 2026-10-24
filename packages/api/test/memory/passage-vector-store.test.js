@@ -57,4 +57,18 @@ describe('PassageVectorStore', () => {
     assert.equal(passageVectors.count(), 0);
     assert.equal(docVectors.count(), 1);
   });
+  it('finds exact existing keys after native insert, delete and clear', async () => {
+    const { PassageVectorStore } = await import('../../dist/domains/memory/PassageVectorStore.js');
+    const vectors = new PassageVectorStore(db, 4);
+    const key = JSON.stringify(['thread"\u0000', "msg' OR 1=1 --"]);
+    const other = 'other';
+    assert.deepEqual(vectors.existingKeys([]), new Set());
+    vectors.upsert(key, new Float32Array([1, 0, 0, 0]));
+    vectors.upsert(other, new Float32Array([0, 1, 0, 0]));
+    assert.deepEqual(vectors.existingKeys([key, 'missing', key]), new Set([key]));
+    vectors.delete(key);
+    assert.deepEqual(vectors.existingKeys([key, other]), new Set([other]));
+    vectors.clearAll();
+    assert.deepEqual(vectors.existingKeys([other]), new Set());
+  });
 });

@@ -76,6 +76,7 @@ describe('F167 Phase P: wakeWhen cancel/replace/delivery tests', () => {
     const removedIds = [];
     const appendedMessages = [];
     const ownerAuthProvenanceByTaskId = new Map();
+    const privateAuthorizationByTaskId = new Map();
     const defaultTemplate = {
       createSpec(taskId, taskParams) {
         return { taskId, taskParams };
@@ -110,10 +111,12 @@ describe('F167 Phase P: wakeWhen cancel/replace/delivery tests', () => {
         },
       },
       dynamicTaskStore: {
-        insert(record, ownerAuthProvenance) {
+        insert(record, authorization) {
           insertedTasks.push(record);
-          if (ownerAuthProvenance !== undefined) {
-            ownerAuthProvenanceByTaskId.set(record.id, ownerAuthProvenance);
+          if (authorization !== undefined) {
+            const snapshot = typeof authorization === 'string' ? { ownerAuthProvenance: authorization } : authorization;
+            privateAuthorizationByTaskId.set(record.id, snapshot);
+            ownerAuthProvenanceByTaskId.set(record.id, snapshot.ownerAuthProvenance);
           }
         },
         getAll() {
@@ -125,10 +128,14 @@ describe('F167 Phase P: wakeWhen cancel/replace/delivery tests', () => {
         remove(id) {
           removedIds.push(id);
           ownerAuthProvenanceByTaskId.delete(id);
+          privateAuthorizationByTaskId.delete(id);
           return true;
         },
         getPrivateOwnerAuthProvenance(id) {
           return ownerAuthProvenanceByTaskId.get(id) ?? 'unknown';
+        },
+        getPrivateOwnerAuthorization(id) {
+          return privateAuthorizationByTaskId.get(id) ?? { ownerAuthProvenance: 'unknown' };
         },
         updateParams(id, params) {
           const task = insertedTasks.find((t) => t.id === id && !removedIds.includes(t.id));
@@ -182,6 +189,7 @@ describe('F167 Phase P: wakeWhen cancel/replace/delivery tests', () => {
       _removedIds: removedIds,
       _appendedMessages: appendedMessages,
       _ownerAuthProvenanceByTaskId: ownerAuthProvenanceByTaskId,
+      _privateAuthorizationByTaskId: privateAuthorizationByTaskId,
     };
     return { ...deps, ...overrides };
   }
@@ -684,7 +692,7 @@ describe('F167 Phase P: wakeWhen cancel/replace/delivery tests', () => {
     cancelWakeWhenRunner('nonexistent-thread', 'nonexistent-cat');
   });
 
-  test('wakeWhen registration persists the authenticated owner provenance outside public task params', async () => {
+  test('wakeWhen registration persists authenticated provenance and tool restrictions outside public task params', async () => {
     const { ManagedRunner } = await import('../dist/infrastructure/managed-runner.js');
     const originalStart = ManagedRunner.prototype.start;
     ManagedRunner.prototype.start = () => ({
@@ -696,6 +704,7 @@ describe('F167 Phase P: wakeWhen cancel/replace/delivery tests', () => {
       const deps = makeStubDeps();
       const app = await createApp(deps);
       const ownerUserId = 'user-owner-provenance';
+      const policy = { mode: 'callback_allowlist', allowedCallbackRoutes: ['POST /api/callbacks/hold-ball'] };
       const thread = await threadStore.create(ownerUserId, 'owner provenance');
       const { invocationId, callbackToken } = await registry.create(
         ownerUserId,
@@ -703,7 +712,7 @@ describe('F167 Phase P: wakeWhen cancel/replace/delivery tests', () => {
         thread.id,
         undefined,
         undefined,
-        undefined,
+        policy,
         undefined,
         'strict',
       );
@@ -722,17 +731,20 @@ describe('F167 Phase P: wakeWhen cancel/replace/delivery tests', () => {
       assert.equal(response.statusCode, 200, response.body);
       const taskId = JSON.parse(response.body).taskId;
       assert.equal(deps._ownerAuthProvenanceByTaskId.get(taskId), 'strict');
+      assert.deepEqual(deps._privateAuthorizationByTaskId.get(taskId).toolExecutionPolicy, policy);
       assert.equal(Object.hasOwn(deps.dynamicTaskStore.getById(taskId).params, 'ownerAuthProvenance'), false);
+      assert.equal(Object.hasOwn(deps.dynamicTaskStore.getById(taskId).params, 'toolExecutionPolicy'), false);
       await app.close();
     } finally {
       ManagedRunner.prototype.start = originalStart;
     }
   });
 
-  test('wakeAfterMs registration preserves the authenticated owner provenance outside public task params', async () => {
+  test('wakeAfterMs registration preserves authenticated provenance and tool restrictions for immediate and restarted delivery', async () => {
     const deps = makeStubDeps();
     const app = await createApp(deps);
     const ownerUserId = 'user-owner-timer-provenance';
+    const policy = { mode: 'callback_allowlist', allowedCallbackRoutes: ['POST /api/callbacks/hold-ball'] };
     const thread = await threadStore.create(ownerUserId, 'timer owner provenance');
     const { invocationId, callbackToken } = await registry.create(
       ownerUserId,
@@ -740,7 +752,7 @@ describe('F167 Phase P: wakeWhen cancel/replace/delivery tests', () => {
       thread.id,
       undefined,
       undefined,
-      undefined,
+      policy,
       undefined,
       'strict',
     );
@@ -765,6 +777,8 @@ describe('F167 Phase P: wakeWhen cancel/replace/delivery tests', () => {
     assert.equal(response.statusCode, 200, response.body);
     const taskId = JSON.parse(response.body).taskId;
     assert.equal(deps._ownerAuthProvenanceByTaskId.get(taskId), 'strict');
+    assert.deepEqual(deps._privateAuthorizationByTaskId.get(taskId).toolExecutionPolicy, policy);
+    assert.deepEqual(deps._registeredDynamic[0].spec.taskParams.toolExecutionPolicy, policy);
     assert.equal(Object.hasOwn(deps.dynamicTaskStore.getById(taskId).params, 'ownerAuthProvenance'), false);
     await app.close();
   });

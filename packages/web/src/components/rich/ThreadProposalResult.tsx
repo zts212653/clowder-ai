@@ -26,6 +26,8 @@ export function ThreadProposalResult({
   children,
   onExpandedChange,
   resolveThreadId,
+  superseded = false,
+  replacementAction,
 }: {
   status: DecisionResultStatus;
   decidedAt?: number;
@@ -36,6 +38,8 @@ export function ThreadProposalResult({
   children: ReactNode;
   onExpandedChange?: (expanded: boolean) => void;
   resolveThreadId?: () => Promise<string | null>;
+  superseded?: boolean;
+  replacementAction?: ReactNode;
 }) {
   const t = useShellCopy(proposalResultCopy);
   const resultCopy = useShellCopy(decisionResultCopy);
@@ -43,8 +47,9 @@ export function ThreadProposalResult({
   const [opening, setOpening] = useState(false);
   const openingRef = useRef(false);
   const time = resultTime(decidedAt, language);
-  const label =
-    status === 'approved'
+  const label = superseded
+    ? t.superseded
+    : status === 'approved'
       ? [t.approved, effectUnknown ? t.effectUnknown : threadId ? t.opened : null].filter(Boolean).join(' · ')
       : [status === 'rejected' ? t.declined : resultCopy[status], time].filter(Boolean).join(' · ');
   return (
@@ -55,9 +60,11 @@ export function ThreadProposalResult({
         testIdPrefix="proposal-result"
         onExpandedChange={onExpandedChange}
         actions={
-          status === 'approved' && (threadId || resolveThreadId) ? (
+          superseded ? (
+            replacementAction
+          ) : status === 'approved' && (threadId || resolveThreadId) ? (
             <>
-              <span aria-hidden="true">·</span>
+              <span aria-hidden="true">{' · '}</span>
               {/* A native href would let middle-click/context-menu skip the synchronous continuation guard. */}
               <button
                 type="button"

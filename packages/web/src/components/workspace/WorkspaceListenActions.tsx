@@ -1,5 +1,8 @@
 import type { ListenDocumentCacheProjection } from '@/stores/listenModeStore';
+import { useShellCopy } from '../shell/shell-copy';
+import { useShellPresentation } from '../shell/shell-presentation';
 import { WorkspaceToolbarButton as ToolbarBtn } from './WorkspaceToolbarButton';
+import { workspaceFileCopy } from './workspace-file.shell-copy';
 
 const PlayIcon = () => (
   <svg aria-hidden="true" className="h-3 w-3" viewBox="0 0 12 14" fill="currentColor">
@@ -18,13 +21,13 @@ interface WorkspaceListenActionsProps {
   listenLabel?: string;
 }
 
-function cacheActionText(cache: WorkspaceListenActionsProps['cache']): string {
+function cacheActionText(cache: WorkspaceListenActionsProps['cache'], t: typeof workspaceFileCopy.zh): string {
   const cached = cache.cachedAnchors.length;
   const total = cache.totalSentences;
-  if (cache.active) return `缓存 ${cached}/${total}`;
-  if (cached > 0 && cached < total) return `继续缓存 ${cached}/${total}`;
-  if (total > 0 && cached === total) return `缓存 ${cached}/${total}`;
-  return '缓存全文';
+  if (cache.active) return t.cache(cached, total);
+  if (cached > 0 && cached < total) return t.resumeCache(cached, total);
+  if (total > 0 && cached === total) return t.cache(cached, total);
+  return t.cacheAll;
 }
 
 export function WorkspaceListenActions({
@@ -35,19 +38,22 @@ export function WorkspaceListenActions({
   onStartCache,
   onStartListen,
   action,
-  listenLabel = '听读',
+  listenLabel,
 }: WorkspaceListenActionsProps) {
+  const localized = useShellCopy(workspaceFileCopy);
+  const isV2 = useShellPresentation() === 'v2';
+  const t = isV2 ? localized : workspaceFileCopy.zh;
   const cached = cache.cachedAnchors.length;
   const complete = cache.totalSentences > 0 && cached === cache.totalSentences;
   const cacheTitle = cache.active
-    ? `正在缓存 ${cached}/${cache.totalSentences} 句；点击取消缓存`
+    ? t.caching(cached, cache.totalSentences)
     : cache.error
-      ? `${cache.error}；点击继续缓存`
+      ? t.cacheFailed(cache.error)
       : complete
-        ? '此文档已缓存全文'
+        ? t.cachedAll
         : cached > 0
-          ? `从真实缓存进度继续：${cached}/${cache.totalSentences} 句`
-          : '缓存全文，稍后可直接听读';
+          ? t.cacheProgress(cached, cache.totalSentences)
+          : t.cacheTitle;
 
   return (
     <>
@@ -56,12 +62,12 @@ export function WorkspaceListenActions({
           active={active}
           activeClass="bg-cafe-accent text-[var(--cafe-accent-foreground)] hover:bg-cafe-interactive"
           onClick={onStartListen}
-          title={hasSentences ? '从上次位置开始听读' : '这份 Markdown 没有可听正文'}
+          title={hasSentences ? t.listenTitle : t.noSentences}
           disabled={!hasSentences}
         >
           <span className="inline-flex items-center gap-1">
             <PlayIcon />
-            {listenLabel}
+            {isV2 ? t.listen : (listenLabel ?? t.listen)}
           </span>
         </ToolbarBtn>
       )}
@@ -73,7 +79,7 @@ export function WorkspaceListenActions({
           title={cacheTitle}
           disabled={!hasSentences || (complete && !cache.active)}
         >
-          {cacheActionText(cache)}
+          {cacheActionText(cache, t)}
         </ToolbarBtn>
       )}
     </>

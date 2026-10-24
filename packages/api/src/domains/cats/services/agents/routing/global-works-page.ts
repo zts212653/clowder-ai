@@ -156,7 +156,8 @@ export async function readGlobalWorksPage(input: {
       if (position.resume && page.tasks[0]?.id !== position.resume.id)
         throw new WorksPageError('Work attachment changed; reload catalogue', 409);
       for (const task of page.tasks) {
-        const digest = createHash('sha256').update(JSON.stringify(task)).digest('hex');
+        // Complete items have no continuation payload to fingerprint.
+        const digest = position.resume ? createHash('sha256').update(JSON.stringify(task)).digest('hex') : undefined;
         if (position.resume && digest !== position.resume.fingerprint)
           throw new WorksPageError('Work attachment changed; reload catalogue', 409);
         const items = aggregateProjectedThreadArtifacts({
@@ -168,7 +169,11 @@ export async function readGlobalWorksPage(input: {
         const selected = items.slice(offset, offset + 512 - artifacts.length);
         append(selected);
         if (offset + selected.length < items.length) {
-          position.resume = { id: task.id, offset: offset + selected.length, fingerprint: digest };
+          position.resume = {
+            id: task.id,
+            offset: offset + selected.length,
+            fingerprint: digest ?? createHash('sha256').update(JSON.stringify(task)).digest('hex'),
+          };
           break;
         }
         delete position.resume;
@@ -204,7 +209,7 @@ export async function readGlobalWorksPage(input: {
     let split = false;
     for (const message of messages) {
       const offset = position.resume?.offset ?? 0;
-      const digest = fingerprint(message);
+      const digest = position.resume ? fingerprint(message) : undefined;
       if (position.resume && digest !== position.resume.fingerprint)
         throw new WorksPageError('Work publication changed; reload catalogue', 409);
       const accepted = await input.accepted(thread.id, [message]);
@@ -218,7 +223,7 @@ export async function readGlobalWorksPage(input: {
       append([...acceptedSlice, ...projection.artifacts]);
       const consumed = offset + acceptedSlice.length + projection.artifacts.length;
       if (consumed < accepted.length + projection.total) {
-        position.resume = { id: message.id, offset: consumed, fingerprint: digest };
+        position.resume = { id: message.id, offset: consumed, fingerprint: digest ?? fingerprint(message) };
         split = true;
         break;
       }

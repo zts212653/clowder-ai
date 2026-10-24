@@ -28,7 +28,6 @@ export function HandoffResultRow({
       <h3 className="text-sm font-semibold">{title}</h3>
       {body ? <MarkdownContent content={body} className="!text-xs" disableCommandPrefix /> : null}
       <HandoffCardContent fields={block.fields ?? []} />
-      <output data-testid="original-approval-terminal">{label}</output>
       {actions}
       {error ? <p role="alert">{error}</p> : null}
     </ApprovalResultRow>

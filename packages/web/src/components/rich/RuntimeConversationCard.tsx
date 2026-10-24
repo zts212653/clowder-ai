@@ -10,6 +10,7 @@ import { ApprovalResultRow } from './ApprovalResultRow';
 import { conversationDecisionCopy } from './conversation-decision.shell-copy';
 import { decisionResultCopy } from './decision-result.shell-copy';
 import { InteractiveBlock } from './InteractiveBlock';
+import { ReadOnlyChoiceList } from './ReadOnlyChoiceList';
 import {
   type ConversationRecord,
   type RuntimeConversationBinding,
@@ -191,7 +192,8 @@ export function RuntimeConversationCard({
       <section data-testid="runtime-conversation-card">
         <div data-testid="conversation-decision-result">
           <ApprovalResultRow status={status} label={label}>
-            <InteractiveBlock block={block} controller={{ copy, disabled: true, selectedIds, submit: () => {} }} />
+            <h3 className="font-semibold">{record.request.title}</h3>
+            <ReadOnlyChoiceList options={record.request.presentation.options} selectedIds={selectedIds} />
             <button
               type="button"
               disabled={busy}

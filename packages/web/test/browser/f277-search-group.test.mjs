@@ -5,6 +5,7 @@ import path from 'node:path';
 import { after, before, test } from 'node:test';
 import { chromium } from '../../../ppt-forge/node_modules/playwright/index.mjs';
 import { verifyGroupSorting } from './f277-group-sort-journey.mjs';
+import { registerProposalV2Cases } from './f277-proposal-v2.cases.mjs';
 import { startSearchGroupBrowserFixture } from './f277-search-group-browser.harness.mjs';
 
 let webUrl;
@@ -31,6 +32,7 @@ const command = async (body) => {
   assert.equal(response.status, 200, await response.clone().text());
   return response.json();
 };
+registerProposalV2Cases(() => ({ apiUrl, webUrl }), evidenceDir);
 
 test(
   'production Sidebar organizes across pins, retries, persists and protects undo in Chromium',

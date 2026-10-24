@@ -182,7 +182,7 @@ describe('one decided-row presentation in original approval surfaces', () => {
     );
     await act(async () => root.render(<RuntimeInteractionCard block={runtimeBlock} messageId={messageId} />));
     const label = container.querySelector('[data-testid="decision-result-label"]')?.textContent;
-    expect(label).toContain('Selected · Alpha');
+    expect(label).toContain('Chose “Alpha”');
     expect(label).not.toContain('Private selection');
     expect(label).not.toContain('Production');
     expect(container.querySelector('form')).toBeNull();

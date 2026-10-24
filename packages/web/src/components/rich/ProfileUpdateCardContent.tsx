@@ -3,6 +3,7 @@ import type { ReactNode } from 'react';
 import { MarkdownContent } from '@/components/MarkdownContent';
 import { originalApprovalCopy } from '../shell/mailbox/original-approval.shell-copy';
 import { useShellCopy } from '../shell/shell-copy';
+import { useShellLanguage } from '../shell/shell-language';
 import { ApprovalResultRow } from './ApprovalResultRow';
 
 export function ProfileUpdateResult({
@@ -22,7 +23,6 @@ export function ProfileUpdateResult({
     <ApprovalResultRow status={status} label={label}>
       <h3 className="text-sm font-semibold">{original.profileTitle}</h3>
       <ProfileUpdateCardContent block={block} />
-      <output data-testid="original-approval-terminal">{label}</output>
       {actions}
       {error ? <p role="alert">{error}</p> : null}
     </ApprovalResultRow>
@@ -39,12 +39,18 @@ export function profileUpdateDiff(body: string) {
 
 export function ProfileUpdateCardContent({ block, settled = false }: { block: RichCardBlock; settled?: boolean }) {
   const t = useShellCopy(originalApprovalCopy);
+  const language = useShellLanguage();
+  const separator = language === 'en' ? ': ' : '：';
   const diff = profileUpdateDiff(block.bodyMarkdown ?? '');
   const rawSignal = block.fields?.find((field) => field.label === '来源')?.value.split('（')[0];
   const signal =
     rawSignal && Object.hasOwn(t.signalKinds, rawSignal)
       ? t.signalKinds[rawSignal as keyof typeof t.signalKinds]
       : t.signalUnavailable;
+  const technicalLabels = new Map([
+    ['目标', t.technicalTarget],
+    ['来源', t.technicalSource],
+  ]);
   return (
     <div className="mt-2 space-y-2 text-xs">
       {!settled && diff?.rationale ? (
@@ -52,11 +58,17 @@ export function ProfileUpdateCardContent({ block, settled = false }: { block: Ri
       ) : null}
       <dl className="space-y-1">
         <div>
-          <dt className="inline text-[var(--shell-muted)]">{t.target}: </dt>
+          <dt className="inline text-[var(--shell-muted)]">
+            {t.target}
+            {separator}
+          </dt>
           <dd className="inline">{block.title.includes('（corpus）') ? t.sharedProfile : t.relationshipProfile}</dd>
         </div>
         <div>
-          <dt className="inline text-[var(--shell-muted)]">{t.signal}: </dt>
+          <dt className="inline text-[var(--shell-muted)]">
+            {t.signal}
+            {separator}
+          </dt>
           <dd className="inline">{signal}</dd>
         </div>
       </dl>
@@ -95,8 +107,15 @@ export function ProfileUpdateCardContent({ block, settled = false }: { block: Ri
           <dl className="mt-1 space-y-1 break-all">
             {block.fields.map((field, index) => (
               <div key={`${field.label}-${index}`}>
-                <dt className="inline">{field.label}: </dt>
-                <dd className="inline">{field.value}</dd>
+                <dt className="inline">
+                  {technicalLabels.get(field.label) ?? field.label}
+                  {separator}
+                </dt>
+                <dd className="inline">
+                  {language === 'en' && field.label === '来源' && rawSignal && Object.hasOwn(t.signalKinds, rawSignal)
+                    ? `${rawSignal} (${signal})`
+                    : field.value}
+                </dd>
               </div>
             ))}
           </dl>

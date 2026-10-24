@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
@@ -319,4 +319,40 @@ test('Native deduplicates deliveryId within this live process', async () => {
   });
   assert.equal(state.writes.length, 2);
   assert.deepEqual(completed, [true]);
+});
+
+test('Native completes a recovered turn and the next appended turn without replaying text', async () => {
+  const recovered = readFileSync(
+    new URL('./fixtures/agy-stream-json/recovered-retry-turn.ndjson', import.meta.url),
+    'utf8',
+  )
+    .trim()
+    .split('\n')
+    .map(JSON.parse);
+  const completed = [];
+  const state = await runNative(async function* (s) {
+    for (const event of recovered) {
+      if (event.event === 'init') continue;
+      if (event.event === 'step_update') event.step_update.conversation_id = session;
+      if (event.event === 'result') {
+        event.result.conversation_id = session;
+        assert.equal((await append(s, 'B', { onInputCompleted: async (ok) => completed.push(ok) })).accepted, true);
+      }
+      yield event;
+    }
+    yield input(94);
+    yield answer(95, 'B done.', 20);
+    yield result('B done.', 2);
+  });
+  assert.deepEqual(completed, [true]);
+  assert.equal(state.messages.at(-1).errorCode, undefined, JSON.stringify(state.messages));
+  assert.equal(state.messages.filter((m) => m.type === 'error').length, 0);
+  assert.equal(state.messages.filter((m) => m.type === 'done').length, 1);
+  assert.equal(
+    state.messages
+      .filter((m) => m.type === 'text')
+      .map((m) => m.content)
+      .join(''),
+    'Recovered review\nB done.',
+  );
 });

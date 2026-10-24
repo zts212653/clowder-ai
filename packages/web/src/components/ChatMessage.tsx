@@ -818,6 +818,10 @@ function ChatMessageContent({
   /* ── Cat (assistant) header ── */
   const catHeader =
     compact ||
+    // Persisted replies can outlive their catalog entry. Their stable catId still owns the
+    // author row and its action slot; dropping the whole row makes MessageActions fall back
+    // over the first line of content exactly when the catalog cannot resolve the author.
+    message.catId ||
     catStyle ||
     companionIdentity ||
     message.extra?.turnExecution ||
@@ -924,7 +928,6 @@ function ChatMessageContent({
             {shellPresentation === 'classic' && (
               <InvocationTrajectoryAnchor message={message} threadId={renderThreadId} />
             )}
-            {shellPresentation === 'classic' && <MessageActionSlot />}
           </MessageAuthorDetails>
         </div>
         {companionIdentity && companionAuthorName && (

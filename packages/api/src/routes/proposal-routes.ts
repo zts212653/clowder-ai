@@ -8,6 +8,8 @@ import type { Thread } from '../domains/cats/services/stores/ports/ThreadStore.j
 import { resolveStrictUserId, resolveUserId } from '../utils/request-identity.js';
 import { resolveApproveOverrides } from './proposal-approve-overrides.js';
 import { createReconcileApprovedInitialMessage } from './proposal-approve-reconcile.js';
+import { validateProposalGroup } from './proposal-group-placement.js';
+import { registerProposalRevisionRoutes } from './proposal-revision-routes.js';
 import type { ProposalRoutesOptions } from './proposal-route-options.js';
 import { handleApproveStaleClaim, handleRejectStaleClaim } from './proposal-stale-recovery.js';
 import { replyToProposalTerminalConflict } from './proposal-terminal-conflict.js';
@@ -16,6 +18,11 @@ export type { ProposalRoutesOptions } from './proposal-route-options.js';
 
 const approveBodySchema = z
   .object({
+    attentionGroupId: z
+      .string()
+      .regex(/^attention_[A-Za-z0-9_-]+$/)
+      .nullable()
+      .optional(),
     pinned: z.boolean().optional(),
     title: z.string().trim().min(1).max(200).optional(),
     parentThreadId: z.string().min(1).optional(),
@@ -41,6 +48,7 @@ const proposalParamsSchema = z.object({
 
 export const proposalRoutes: FastifyPluginAsync<ProposalRoutesOptions> = async (app, opts) => {
   const { proposalStore, threadStore, messageStore, socketManager, onProposalReject } = opts;
+  registerProposalRevisionRoutes(app, opts);
 
   app.post('/api/proposals/:proposalId/approve', async (request, reply) => {
     const paramsParse = proposalParamsSchema.safeParse(request.params);
@@ -79,6 +87,13 @@ export const proposalRoutes: FastifyPluginAsync<ProposalRoutesOptions> = async (
       return { error: 'Proposal does not belong to the current user' };
     }
     if (replyToProposalTerminalConflict(proposal, 'approve', reply)) return;
+    if (proposal.status === 'pending' && proposal.supersedesProposalId) {
+      const previous = await proposalStore.get(proposal.supersedesProposalId);
+      if (!previous || previous.createdBy !== userId || previous.supersededByProposalId !== proposal.proposalId)
+        return reply
+          .code(409)
+          .send({ error: 'Replacement publication is not complete; reread this proposal before approving' });
+    }
     if (proposal.status === 'approved' && proposal.createdThreadId) {
       // #1387: verify the proposal seed exists (idempotency-key index or legacy
       // scan) and reconcile it if missing. All dedupe reads are best-effort;
@@ -121,6 +136,11 @@ export const proposalRoutes: FastifyPluginAsync<ProposalRoutesOptions> = async (
 
     // Resolve + validate the user's approve-time edits (parentThreadId ownership, projectPath
     // validity) BEFORE claiming — a rejected override must not leave the proposal in `approving`.
+    const groupId = bodyParse.data.attentionGroupId ?? null;
+    if (!(await validateProposalGroup(threadStore, userId, groupId)))
+      return reply
+        .code(400)
+        .send({ error: 'Selected Group no longer exists or does not belong to you; choose another Group' });
     const resolution = await resolveApproveOverrides(proposal, bodyParse.data, userId, threadStore);
     if (!resolution.ok) {
       reply.status(resolution.status);
@@ -134,6 +154,7 @@ export const proposalRoutes: FastifyPluginAsync<ProposalRoutesOptions> = async (
       finalDeclaredWorkMode,
       finalizeOverrides,
     } = resolution.resolved;
+    finalizeOverrides.attentionGroupId = groupId;
 
     // Atomic claim — guards against concurrent approve/reject leaving an orphan thread.
     const claimed = await proposalStore.claimForApproval({ proposalId: proposal.proposalId, approvedBy: userId });

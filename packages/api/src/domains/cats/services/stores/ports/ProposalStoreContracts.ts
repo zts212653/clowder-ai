@@ -25,6 +25,10 @@ export interface CreateProposalInput {
   preferredCats: CatId[];
   projectPath: string;
   initialMessage?: string;
+  suggestedGroupId?: string;
+  suggestedPinned?: boolean;
+  groupSuggestionReason?: ThreadProposal['groupSuggestionReason'];
+  supersedesProposalId?: string;
   /** F128: reporting mode for the created thread (default final-only if omitted). */
   reportingMode?: ReportingMode;
   /** F277: declared placement role; omitted only for legacy proposals. */
@@ -77,6 +81,15 @@ export interface WithdrawProposalInput {
 }
 
 export interface IProposalStore {
+  recordRevisionRequest(
+    proposalId: string,
+    request: NonNullable<ThreadProposal['revisionRequest']>,
+  ): ThreadProposal | null | Promise<ThreadProposal | null>;
+  supersedePending(
+    proposalId: string,
+    replacementId: string,
+    requestMessageId: string,
+  ): ThreadProposal | null | Promise<ThreadProposal | null>;
   continueApprovedTask(
     input: ApprovedTaskContinuationInput,
     memoryAuthority?: MemoryContinuationAuthority,

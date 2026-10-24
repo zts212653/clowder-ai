@@ -2,6 +2,7 @@ import type { ThreadProposal } from '@cat-cafe/shared';
 import type { OwnerAuthProvenance } from '../domains/cats/services/agents/invocation/owner-auth-provenance.js';
 import type { IMessageStore, StoredMessage } from '../domains/cats/services/stores/ports/MessageStore.js';
 import { appendApprovedInitialMessage } from './proposal-approve-dispatch.js';
+import { placeApprovedProposalGroup } from './proposal-group-placement.js';
 import type { ProposalRoutesOptions } from './proposal-route-options.js';
 
 export interface ReconcileApprovedSeedDeps
@@ -37,8 +38,14 @@ export function createReconcileApprovedInitialMessage({
   router,
   invocationQueue,
 }: ReconcileFactoryDeps) {
-  return (proposal: ThreadProposal) =>
-    reconcileApprovedInitialMessage({
+  return async (proposal: ThreadProposal) => {
+    const groupWarnings: string[] = [];
+    try {
+      await placeApprovedProposalGroup(threadStore, proposal);
+    } catch (error) {
+      groupWarnings.push(`Group placement failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    const result = await reconcileApprovedInitialMessage({
       proposal,
       userId,
       ownerAuthProvenance,
@@ -48,6 +55,8 @@ export function createReconcileApprovedInitialMessage({
       router,
       invocationQueue,
     });
+    return { ...result, warnings: [...groupWarnings, ...result.warnings] };
+  };
 }
 
 /**

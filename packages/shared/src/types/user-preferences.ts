@@ -36,6 +36,8 @@ export interface ThreadAttentionGroup {
 export type ThreadAttentionMemberSort = 'manual' | 'running-first';
 
 export interface ThreadAttentionPreferences {
+  /** Most recently used destinations first; membership remains in thread metadata. */
+  recentGroupIds?: string[];
   aliases?: Record<string, string>;
   open?: Record<string, boolean>;
   /** F322: collapsed Groups reveal attention shortcuts unless explicitly disabled. */

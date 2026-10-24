@@ -57,6 +57,7 @@ export const reminderTemplate: TaskTemplate = {
     const targetCatId = (p.params.targetCatId as string) || null;
     const triggerUserId = (p.params.triggerUserId as string) || 'default-user';
     const ownerAuthProvenance = instanceId.startsWith('hold-ball-') ? p.ownerAuthProvenance : undefined;
+    const toolExecutionPolicy = instanceId.startsWith('hold-ball-') ? p.toolExecutionPolicy : undefined;
     const threadId = p.deliveryThreadId;
     const managedCommandWake = instanceId.startsWith('hold-ball-') && isManagedCommandWake(p.params);
     const managedHoldWake = isManagedHoldWake(instanceId, p.params);
@@ -117,6 +118,7 @@ export const reminderTemplate: TaskTemplate = {
                 : `scheduler-wake:${instanceId}:${ctx.occurrenceId}`,
               ...(managedHoldWake ? { priority: 'urgent' as const, source: holdSource } : {}),
               ...(ownerAuthProvenance ? { ownerAuthProvenance } : {}),
+              ...(toolExecutionPolicy ? { toolExecutionPolicy } : {}),
               ...(managedHoldWake ? {} : { extra: { scheduler: { hiddenTrigger: true } } }),
             });
           } catch (err) {

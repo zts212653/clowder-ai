@@ -7,7 +7,7 @@ import { ApprovalResultRow } from './ApprovalResultRow';
 import { decisionResultCopy } from './decision-result.shell-copy';
 import { PersonMemoryUndo } from './PersonMemoryUndo';
 import { personMemoryCopy } from './person-memory.shell-copy';
-import { personMemoryOutcomeText, personMemoryResultLabel, personMemorySnapshotResult } from './person-memory-result';
+import { personMemoryResultLabel, personMemorySnapshotResult, personMemoryWriteCount } from './person-memory-result';
 import { usePersonMemoryProposal } from './use-person-memory-proposal';
 
 /** Decision results keep the producer's exact reversible receipt even after the pending row retires. */
@@ -68,8 +68,15 @@ export function PersonMemoryRetainedReceipt({
             : 'closed';
     return (
       <ApprovalResultRow
-        status={status}
-        label={personMemoryResultLabel(outcome, name, t, resultCopy, approval.detail.hasRetainedWrites === true)}
+        status={status === 'rejected' && approval.detail.hasRetainedWrites === true ? 'approved' : status}
+        label={personMemoryResultLabel(
+          outcome,
+          name,
+          t,
+          resultCopy,
+          approval.detail.hasRetainedWrites === true,
+          personMemoryWriteCount(approval.detail.materialized),
+        )}
         onExpandedChange={expandedChange}
       >
         {children}
@@ -112,18 +119,18 @@ export function PersonMemoryRetainedReceipt({
   return (
     <ApprovalResultRow
       status={result.status}
-      label={personMemoryResultLabel(result.outcome, name, t, resultCopy, snapshot.hasRetainedWrites === true)}
+      label={personMemoryResultLabel(
+        result.outcome,
+        name,
+        t,
+        resultCopy,
+        snapshot.hasRetainedWrites === true,
+        personMemoryWriteCount(snapshot.materialized),
+      )}
       onExpandedChange={expandedChange}
     >
       {name ? <p data-testid="person-memory-result-subject">{t.person(name)}</p> : null}
-      {!result.undoApplied ? (
-        <output>{personMemoryOutcomeText(result.outcome, t, resultCopy, snapshot.hasRetainedWrites === true)}</output>
-      ) : null}
-      {result.undoApplied ? (
-        <output data-testid="person-memory-undo-result">
-          {personMemoryOutcomeText(result.outcome, t, resultCopy, snapshot.hasRetainedWrites === true)}
-        </output>
-      ) : receipt ? (
+      {receipt && !result.undoApplied ? (
         <p>
           {t.receipt(
             receipt.materializedClaimIds.length,

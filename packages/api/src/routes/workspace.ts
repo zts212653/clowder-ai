@@ -1,3 +1,4 @@
+import { isLocalHumanFileActionRequest } from './media-file-actions.js';
 /**
  * Workspace Explorer Routes — F063
  *
@@ -34,6 +35,7 @@ import {
 } from '../domains/cats/services/tool-usage/SkillConsumptionReceiptService.js';
 import type { PullRequestChangesDependencies } from '../domains/workspace/pull-request-changes.js';
 import { canonicalLinkedRootId, readLinkedRootState } from '../domains/workspace/roots/workspace-linked-root-store.js';
+import { readWorkspaceFileMetadata } from '../domains/workspace/workspace-file-metadata.js';
 import { guessMime, readWorkspaceFilePreview } from '../domains/workspace/workspace-file-read.js';
 import type { WorkspaceNavigationEmitter } from '../domains/workspace/workspace-navigation-delivery.js';
 import {
@@ -64,8 +66,11 @@ import {
 } from './callback-auth-prehandler.js';
 import { resolvePrincipalThread } from './callback-scope-helpers.js';
 import { registerWorkspaceVideoFileActions } from './local-video-file-actions.js';
+import { registerChatChanges } from './workspace-chat-changes.js';
+import { registerWorkspaceChatReferences } from './workspace-chat-references.js';
 import { parseWorkspaceChangedFiles } from './workspace-diff.js';
 import { workspaceDirectHuman } from './workspace-direct-human.js';
+import { registerWorkspaceFileActions } from './workspace-file-actions.js';
 import { registerWorkspaceFileSourceRoutes } from './workspace-file-source-routes.js';
 import { sendWorkspaceMedia } from './workspace-media-response.js';
 import {
@@ -419,6 +424,9 @@ async function attachSkillConsumptionReceipt(
 }
 
 export const workspaceRoutes: FastifyPluginAsync<WorkspaceRouteOpts> = async (app, opts) => {
+  registerWorkspaceChatReferences(app, resolveWorkspaceInteractiveUserId, opts.threadStore);
+  registerWorkspaceFileActions(app, resolveWorkspaceInteractiveUserId);
+  registerChatChanges(app, resolveWorkspaceInteractiveUserId, opts.threadStore, opts.pullRequestChangesDependencies);
   registerWorkspaceVideoFileActions(app);
   const auditLog = opts.auditLog ?? getEventAuditLog();
   if (opts.callbackRegistry) {
@@ -552,15 +560,18 @@ export const workspaceRoutes: FastifyPluginAsync<WorkspaceRouteOpts> = async (ap
       // hashing policy live in the shared helper, so this route and the
       // file-watcher classify files identically (F063 OOM fix).
       const preview = await readWorkspaceFilePreview(resolved, { maxBytes: MAX_FILE_SIZE });
+      const office = /\.(?:pptx?|docx?|xlsx?)$/i.test(filePath) ? await readWorkspaceFileMetadata(resolved) : null;
 
       return {
         path: filePath,
+        absolutePath: resolved,
         content: preview.content,
         sha256: preview.sha256,
         size: preview.size,
         mime: preview.mime,
         truncated: preview.truncated,
         binary: preview.binary,
+        ...(office ? { ...office, content: '', sha256: '', binary: true, truncated: false } : {}),
       };
     } catch (e) {
       if (e instanceof WorkspaceSecurityError) {
@@ -827,6 +838,8 @@ export const workspaceRoutes: FastifyPluginAsync<WorkspaceRouteOpts> = async (ap
   app.post<{
     Body: { worktreeId: string; path: string };
   }>('/api/workspace/reveal', async (request, reply) => {
+    if (!isLocalHumanFileActionRequest(request) || !workspaceDirectHuman(request, resolveWorkspaceInteractiveUserId))
+      return reply.code(403).send({ error: 'local_human_required' });
     const { worktreeId, path: filePath } = request.body ?? {};
     if (!worktreeId || !filePath) {
       reply.status(400);
@@ -865,6 +878,8 @@ export const workspaceRoutes: FastifyPluginAsync<WorkspaceRouteOpts> = async (ap
   app.post<{
     Body: { projectPath: string };
   }>('/api/workspace/reveal-project', async (request, reply) => {
+    if (!isLocalHumanFileActionRequest(request) || !workspaceDirectHuman(request, resolveWorkspaceInteractiveUserId))
+      return reply.code(403).send({ error: 'local_human_required' });
     const { projectPath } = request.body ?? {};
     if (!projectPath) {
       reply.status(400);

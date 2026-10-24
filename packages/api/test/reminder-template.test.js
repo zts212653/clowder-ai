@@ -158,6 +158,7 @@ describe('reminderTemplate', () => {
   });
 
   it('preserves private owner authentication provenance when a hold timer wakes its cat', async () => {
+    const policy = { mode: 'callback_allowlist', allowedCallbackRoutes: ['POST /api/callbacks/hold-ball'] };
     const deliverMock = mock.fn(async () => 'msg-timer-owner');
     const triggerMock = { trigger: mock.fn(async () => 'enqueued') };
     const spec = reminderTemplate.createSpec('hold-ball-timer-owner', {
@@ -169,6 +170,7 @@ describe('reminderTemplate', () => {
       },
       deliveryThreadId: 'thread-owner',
       ownerAuthProvenance: 'strict',
+      toolExecutionPolicy: policy,
     });
 
     await spec.run.execute('resume owner work', 'thread-thread-owner', {
@@ -182,6 +184,7 @@ describe('reminderTemplate', () => {
     assert.equal(managedEnvelope.sourceCategory, 'scheduled');
     assert.equal(managedEnvelope.priority, 'urgent');
     assert.equal(managedEnvelope.ownerAuthProvenance, 'strict');
+    assert.deepEqual(managedEnvelope.toolExecutionPolicy, policy);
   });
 
   it('does not grant a private owner provenance carrier to an ordinary reminder', async () => {

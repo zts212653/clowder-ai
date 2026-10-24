@@ -1,5 +1,6 @@
 import type { BuiltinBrokerConnection } from '../host-broker/builtin-loopback.js';
 import { StaticFeatureAuthority } from '../host-broker/static-feature-authority.js';
+import { ObservationDiagnostics } from './observation-diagnostics.js';
 import type { DesktopWindowFailure, DesktopWindowHandle, DesktopWindowPresence } from './types.js';
 
 interface ObservationAttempt {
@@ -8,6 +9,7 @@ interface ObservationAttempt {
   startedAtMs: number;
   deadlineAtMs: number;
   startedMonotonicMs: number;
+  diagnostics: ObservationDiagnostics;
 }
 
 interface Options {
@@ -57,6 +59,7 @@ export class DesktopWindowObserver {
       startedAtMs,
       deadlineAtMs: startedAtMs + deadlineMs,
       startedMonotonicMs: performance.now(),
+      diagnostics: new ObservationDiagnostics(),
     };
     this.attempt = attempt;
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -73,32 +76,41 @@ export class DesktopWindowObserver {
             throw error;
           },
         );
-      const state = await Promise.race([
-        poll,
-        new Promise<never>((_, reject) => {
-          timer = setTimeout(() => reject(new Error('desktop heartbeat expired')), deadlineMs);
-          timer.unref();
-        }),
-      ]);
+      const state = await attempt.diagnostics.measure('poll', () =>
+        Promise.race([
+          poll,
+          new Promise<never>((_, reject) => {
+            timer = setTimeout(() => reject(new Error('desktop heartbeat expired')), deadlineMs);
+            timer.unref();
+          }),
+        ]),
+      );
       const receivedAt = now();
       if (!isCurrent()) throw new Error('desktop window ended');
       // Only a fresh native reply may renew a still-current Broker binding.
       // Expired bindings fail here; renewal never revives old feature authority.
       attempt.phase = 'lease-renew';
-      await connection.renewRuntimeLease();
+      await attempt.diagnostics.measure('lease-renew', () => connection.renewRuntimeLease());
       attempt.phase = 'authority';
-      await features.run(lease, async (authority) => {
-        if (now() - receivedAt >= freshnessMs) throw new Error('desktop observation expired');
-        const contributionId = authority.contributionIds[0];
-        if (!contributionId) throw new Error('desktop authority without contribution');
-        this.observation = {
-          pluginInstanceId: id,
-          contributionId,
-          state,
-          observedAt: receivedAt,
-          expiresAt: receivedAt + freshnessMs,
-        };
-      });
+      await attempt.diagnostics.measure('authority', () =>
+        features.run(
+          lease,
+          (authority) =>
+            attempt.diagnostics.measure('observation-publish', async () => {
+              if (now() - receivedAt >= freshnessMs) throw new Error('desktop observation expired');
+              const contributionId = authority.contributionIds[0];
+              if (!contributionId) throw new Error('desktop authority without contribution');
+              this.observation = {
+                pluginInstanceId: id,
+                contributionId,
+                state,
+                observedAt: receivedAt,
+                expiresAt: receivedAt + freshnessMs,
+              };
+            }),
+          attempt.diagnostics,
+        ),
+      );
       if (this.attempt === attempt) this.attempt = undefined;
     } finally {
       clearTimeout(timer);
@@ -123,7 +135,7 @@ export class DesktopWindowObserver {
     this.attempt = undefined;
   }
 
-  diagnostic(): DesktopWindowFailure['observation'] {
+  diagnostic(error?: unknown): DesktopWindowFailure['observation'] {
     const attempt = this.attempt;
     if (!attempt) return undefined;
     return {
@@ -133,6 +145,7 @@ export class DesktopWindowObserver {
       deadlineAtMs: attempt.deadlineAtMs,
       elapsedMs: Math.max(0, Math.round(performance.now() - attempt.startedMonotonicMs)),
       lastPollAnswerAgeMs: this.observation ? Math.max(0, this.options.now() - this.observation.observedAt) : null,
+      ...attempt.diagnostics.snapshot(error),
     };
   }
 }

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { mkdtemp, readdir, rm } from 'node:fs/promises';
+import { mkdtemp, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, test } from 'node:test';
@@ -225,13 +225,15 @@ for (const layout of ['src', 'dist']) {
       `const bytes=await fetchOfficialPackageArchive(row);rows.push({id:row.pluginId,bytes:bytes.length,` +
       `digest:'sha512-'+createHash('sha512').update(bytes).digest('base64')});}` +
       `process.stdout.write(JSON.stringify(rows));`;
+    const consumerRoot = await mkdtemp(join(tmpdir(), 'f322-bundled-consumer-'));
+    roots.push(consumerRoot);
+    const consumer = join(consumerRoot, 'consumer.mjs');
+    await writeFile(consumer, code);
     const { stdout } = await promisify(execFile)(
       process.execPath,
       [
         ...(layout === 'src' ? ['--import', new URL('../node_modules/tsx/dist/loader.mjs', import.meta.url).href] : []),
-        '--input-type=module',
-        '-e',
-        code,
+        consumer,
       ],
       {
         cwd: tmpdir(),

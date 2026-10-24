@@ -27,7 +27,8 @@ export function personMemorySnapshotResult(snapshot: PersonMemorySnapshot): {
     snapshot.undoReceipt.candidateState === 'withdrawn';
   if (snapshot.status === 'withdrawn')
     return { status: 'withdrawn', outcome: undoApplied ? 'undone' : 'withdrawn', undoApplied };
-  if (snapshot.status === 'rejected') return { status: 'rejected', outcome: 'rejected', undoApplied: false };
+  if (snapshot.status === 'rejected')
+    return { status: snapshot.hasRetainedWrites ? 'approved' : 'rejected', outcome: 'rejected', undoApplied: false };
   if (snapshot.status === 'materialized' || snapshot.status === 'partially_materialized')
     return { status: 'approved', outcome: snapshot.status, undoApplied: false };
   return { status: 'closed', outcome: snapshot.status === 'not_now' ? 'not_now' : 'closed', undoApplied: false };
@@ -39,6 +40,7 @@ export function personMemoryOutcomeText(
   t: typeof personMemoryCopy.zh,
   resultCopy: typeof decisionResultCopy.zh,
   hasRetainedWrites = false,
+  writtenCount: number | null = null,
 ): string {
   let outcome: string;
   switch (state) {
@@ -49,7 +51,7 @@ export function personMemoryOutcomeText(
       outcome = t.partial;
       break;
     case 'rejected':
-      outcome = hasRetainedWrites ? t.rejectedAfterWrite : resultCopy.declined;
+      outcome = hasRetainedWrites ? t.rejectedAfterWrite(writtenCount) : resultCopy.declined;
       break;
     case 'withdrawn':
       outcome = t.withdrawn;
@@ -78,8 +80,26 @@ export function personMemoryResultLabel(
   t: typeof personMemoryCopy.zh,
   resultCopy: typeof decisionResultCopy.zh,
   hasRetainedWrites = false,
+  writtenCount: number | null = null,
 ): string {
-  return [personMemoryOutcomeText(state, t, resultCopy, hasRetainedWrites), t.kind, name ? t.person(name) : null]
+  return [
+    personMemoryOutcomeText(state, t, resultCopy, hasRetainedWrites, writtenCount),
+    t.kind,
+    name ? t.person(name) : null,
+  ]
     .filter(Boolean)
     .join(' · ');
+}
+
+/** Only canonical materialized counts/ids support a quantity; absence is not zero. */
+export function personMemoryWriteCount(value: unknown): number | null {
+  if (!value || typeof value !== 'object') return null;
+  const data = value as Record<string, unknown>;
+  const counts = ['claims', 'relationships', 'events'].map((key) => data[key]);
+  if (counts.every((n) => typeof n === 'number' && Number.isSafeInteger(n) && n >= 0))
+    return (counts as number[]).reduce((a, b) => a + b, 0);
+  const ids = ['materializedClaimIds', 'materializedRelationshipIds', 'materializedEventIds'].map((key) => data[key]);
+  return ids.every((v) => Array.isArray(v) && v.every((id) => typeof id === 'string'))
+    ? ids.reduce<number>((n, v) => n + (v as string[]).length, 0)
+    : null;
 }

@@ -1,4 +1,5 @@
-import type { DynamicTaskDef } from '../../infrastructure/scheduler/DynamicTaskStore.js';
+import type { DynamicTaskDef, DynamicTaskOwnerAuthorization } from '../../infrastructure/scheduler/DynamicTaskStore.js';
+import type { OwnerAuthProvenance } from '../cats/services/owner-auth-provenance.js';
 import type { InvocationRecord } from '../cats/services/stores/ports/InvocationRecordStore.js';
 import type { AppendMessageInput, IMessageStore, StoredMessage } from '../cats/services/stores/ports/MessageStore.js';
 import type { ActionSuccessorFence } from './ActionSuccessorAdmissionContract.js';
@@ -112,7 +113,7 @@ export function resolveManagedCommandWakeEventCarrier(
   };
 }
 
-export interface ManagedCommandWakeAdmissionInput {
+export interface ManagedCommandWakeAdmissionInput extends DynamicTaskOwnerAuthorization {
   readonly message: AppendMessageInput;
   readonly threadId: string;
   readonly userId: string;
@@ -125,6 +126,8 @@ export interface ManagedCommandWakeAdmissionInput {
 }
 
 export interface ManagedCommandWakeDynamicTaskStore {
+  getPrivateOwnerAuthorization?(id: string): DynamicTaskOwnerAuthorization;
+  getPrivateOwnerAuthProvenance?(id: string): OwnerAuthProvenance;
   reconcileRetainedManagedCommand?(task: DynamicTaskDef): 'absent' | 'pending' | 'not_started' | 'conflict';
   getAll(): DynamicTaskDef[];
   listManagedCommandCandidates?(): DynamicTaskDef[];

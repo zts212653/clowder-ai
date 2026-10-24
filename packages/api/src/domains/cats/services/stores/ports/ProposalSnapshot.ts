@@ -5,6 +5,7 @@ export function applyProposalOverrides(
   overrides: ProposalApproveOverrides | undefined,
 ): void {
   if (!overrides) return;
+  if (overrides.attentionGroupId !== undefined) proposal.attentionGroupId = overrides.attentionGroupId;
   if (overrides.title !== undefined) proposal.title = overrides.title;
   if (overrides.parentThreadId !== undefined) proposal.parentThreadId = overrides.parentThreadId;
   if (overrides.preferredCats !== undefined) proposal.preferredCats = [...overrides.preferredCats];
@@ -19,6 +20,7 @@ export function cloneProposal(proposal: ThreadProposal): ThreadProposal {
   return {
     ...proposal,
     preferredCats: [...proposal.preferredCats],
+    ...(proposal.revisionRequest ? { revisionRequest: structuredClone(proposal.revisionRequest) } : {}),
     ...(proposal.publication ? { publication: structuredClone(proposal.publication) } : {}),
     ...(proposal.approvedTaskContract ? { approvedTaskContract: { ...proposal.approvedTaskContract } } : {}),
     ...(proposal.taskContractContinuation

@@ -26,6 +26,15 @@ export function useChatArtworkLightbox(publication?: PublishedMessageCoordinate)
   const [preview, setPreview] = useState<Preview | null>(null);
   const [navigating, setNavigating] = useState(false);
   const navigation = useRef(0);
+  const pendingGeneration = useRef<number>();
+  const currentGeneration = scope?.getGeneration();
+  useEffect(() => {
+    if (pendingGeneration.current !== undefined && pendingGeneration.current !== currentGeneration) {
+      pendingGeneration.current = undefined;
+      navigation.current++;
+      setNavigating(false);
+    }
+  }, [currentGeneration]);
   const invalidateNavigation = useCallback(() => {
     navigation.current++;
   }, []);
@@ -71,17 +80,28 @@ export function useChatArtworkLightbox(publication?: PublishedMessageCoordinate)
   ): Promise<boolean> {
     const ticket = ++navigation.current;
     const initialScope = scopeRef.current;
-    const generation = initialScope?.getGeneration();
+    let generation = initialScope?.getGeneration();
+    const earlyPreview = mode === 'lightbox' && artwork.isV2 && initialScope && !!input.url;
     const isCurrent = () =>
       navigation.current === ticket &&
       useChatStore.getState().currentThreadId === hostThreadId &&
       (!initialScope || scopeRef.current?.getGeneration() === generation);
+    if (earlyPreview) {
+      if (!initialScope.open({ ...input, surface: null, pending: true }, generation)) return false;
+      generation = initialScope.getGeneration();
+      pendingGeneration.current = generation;
+    }
     setNavigating(true);
     try {
-      const selectedGroup = group ?? (await groupFor(input));
+      // The selected item already has its rendered URL. Neither sibling locator
+      // reads nor owner admission need to delay those already visible pixels.
+      const [selectedGroup, result] = await Promise.all([
+        group ?? groupFor(input),
+        artwork.open(input.entry, input.title, mode, isCurrent),
+      ]);
       if (!isCurrent()) return false;
       const selected = selectedGroup?.items[selectedGroup.index] ?? input;
-      const result = await artwork.open(selected.entry, selected.title, mode, isCurrent);
+      if (isCurrent() && result.status === 'blocked' && earlyPreview) initialScope.close();
       if (!isCurrent() || result.status === 'blocked' || (mode === 'work-mode' && result.status !== 'opened'))
         return false;
       const gallery = selectedGroup
@@ -103,7 +123,11 @@ export function useChatArtworkLightbox(publication?: PublishedMessageCoordinate)
       };
       if (initialScope && artwork.isV2) {
         const applied =
-          mode === 'work-mode' ? initialScope.enterWorkMode(work, generation) : initialScope.open(work, generation);
+          mode === 'work-mode'
+            ? initialScope.enterWorkMode(work, generation)
+            : earlyPreview
+              ? initialScope.update(work, generation!)
+              : initialScope.open(work, generation);
         if (applied) setPreview(null);
         return applied;
       }
@@ -115,9 +139,16 @@ export function useChatArtworkLightbox(publication?: PublishedMessageCoordinate)
         ...selected,
         gallery,
         hostThreadId,
-        ...(result.status === 'preview' ? { reason: result.reason } : {}),
+        ...(result.status === 'preview' && artwork.isV2 ? { reason: result.reason } : {}),
       });
       return true;
+    } catch {
+      if (earlyPreview && isCurrent())
+        initialScope.update(
+          { ...input, surface: null, reason: '原作品信息暂时无法读取，当前仅显示聊天预览。' },
+          generation!,
+        );
+      return false;
     } finally {
       if (ticket === navigation.current) setNavigating(false);
     }
@@ -125,7 +156,7 @@ export function useChatArtworkLightbox(publication?: PublishedMessageCoordinate)
   const openWorkMode = (input: Input) => show(input, 'work-mode');
   return {
     ...artwork,
-    busy: artwork.busy || navigating,
+    busy: navigating,
     enlarge: (input: Input) => show(input, 'lightbox'),
     openWorkMode,
     lightbox: preview ? (

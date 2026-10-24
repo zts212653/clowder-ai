@@ -15,6 +15,7 @@ export type AuthorizedMediaFile = {
   createdAt?: string;
 };
 type Dependencies = {
+  allowDirectoryReveal?: boolean;
   authorize: (request: FastifyRequest) => Promise<AuthorizedMediaFile | { local: false } | null>;
   onError: (reply: FastifyReply, error: unknown) => unknown;
 };
@@ -42,7 +43,7 @@ async function defaultApp(mime: string): Promise<{ path?: string; name?: string;
     return {};
   }
 }
-function localHuman(request: FastifyRequest) {
+export function isLocalHumanFileActionRequest(request: FastifyRequest) {
   return (
     isDirectLoopbackRequest(request) &&
     isTrustedLocalApiRequest(request) &&
@@ -57,7 +58,7 @@ function localHuman(request: FastifyRequest) {
 export function registerMediaFileActions(app: FastifyInstance, mediaPath: string, deps: Dependencies) {
   app.get(`${mediaPath}/file-info`, async (request, reply) => {
     reply.header('Cache-Control', 'private, no-store');
-    if (!localHuman(request)) return { local: false };
+    if (!isLocalHumanFileActionRequest(request)) return { local: false };
     try {
       const file = await deps.authorize(request);
       if (!file) return reply.code(401).send({ error: 'identity_required' });
@@ -82,14 +83,16 @@ export function registerMediaFileActions(app: FastifyInstance, mediaPath: string
   for (const action of ['reveal', 'open'] as const) {
     app.post(`${mediaPath}/${action}`, async (request, reply) => {
       reply.header('Cache-Control', 'private, no-store');
-      if (!localHuman(request)) return reply.code(403).send({ error: 'local_human_required' });
+      if (!isLocalHumanFileActionRequest(request)) return reply.code(403).send({ error: 'local_human_required' });
       if (request.body && Object.keys(request.body as object).length)
         return reply.code(400).send({ error: 'unexpected_action_input' });
       try {
         const file = await deps.authorize(request);
         if (!file) return reply.code(401).send({ error: 'identity_required' });
         if ('local' in file) return reply.code(403).send({ error: 'local_file_unavailable' });
-        if (!(await stat(file.path)).isFile()) return reply.code(404).send({ error: 'not_found' });
+        const info = await stat(file.path);
+        if (!info.isFile() && !(deps.allowDirectoryReveal && action === 'reveal' && info.isDirectory()))
+          return reply.code(404).send({ error: 'not_found' });
         if (process.platform !== 'darwin') return reply.code(422).send({ error: 'desktop_action_unavailable' });
         if (action === 'reveal') {
           await exec('open', ['-R', file.path], { timeout: 5000 });

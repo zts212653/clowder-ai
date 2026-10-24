@@ -109,8 +109,8 @@ import { EventWaitDispositionService } from './domains/ball-custody/EventWaitDis
 import { createSqliteHoldQuotaStore, type IHoldQuotaStore } from './domains/ball-custody/hold-quota-store.js';
 import { RedisHoldQuotaStore } from './domains/ball-custody/hold-quota-store-redis.js';
 import type { ManagedCommandWakeRecoverySweep } from './domains/ball-custody/ManagedCommandWakeRecoverySweep.js';
+import { createManagedCommandWakeAdmission } from './domains/ball-custody/managed-command-wake-admission.js';
 import { createManagedCommandWakeCarrierAdapter } from './domains/ball-custody/managed-command-wake-carrier-adapter.js';
-import type { ManagedCommandWakeRecoveryDeps } from './domains/ball-custody/managed-command-wake-lifecycle.js';
 import { createManagedWakeAdmittedNotifier } from './domains/ball-custody/managed-wake-admitted-notifier.js';
 import { RedisWaitTerminationStore } from './domains/ball-custody/RedisWaitTerminationStore.js';
 import { WaitTerminationService } from './domains/ball-custody/WaitTerminationService.js';
@@ -1619,6 +1619,7 @@ async function main(): Promise<void> {
     try {
       const result = await memoryServices.indexBuilder.rebuild({
         deferThreadIndexing: true,
+        deferDocumentEmbedding: true,
         onProgress: (phase, percent) => {
           app.log.info(
             { phase, percent, elapsedMs: Date.now() - startMs },
@@ -1640,6 +1641,7 @@ async function main(): Promise<void> {
       memoryServices.embeddingLifecycle.catchUpAfterReady(),
     );
   }
+  app.addHook('onClose', async () => memoryServices.embeddingLifecycle.deactivate());
 
   // F-4: Global knowledge rebuild (Skills + MEMORY.md → global_knowledge.sqlite)
   if (memoryServices.globalIndexBuilder) {
@@ -4595,6 +4597,7 @@ async function main(): Promise<void> {
   }
 
   const callbackOpts = {
+    proposalProjectRoot: resolveActiveProjectRoot(),
     companionCollectiveAccountability: readCollectiveAttention,
     resolveTrustedImagePath: async (hmrId: string) => {
       try {
@@ -7543,28 +7546,11 @@ async function main(): Promise<void> {
     log: { warn: (context, message) => app.log.warn(context, message) },
   });
 
-  const admitManagedWake: ManagedCommandWakeRecoveryDeps['admitWake'] = async (input) => {
-    // INV-I1: Message and Queue row in one transaction. The lease was already verified against
-    // this exact envelope, so nothing admitted here can belong to a generation that has moved on.
-    const admitted = await invocationQueue.send(messageStore, input.message, {
-      threadId: input.threadId,
-      userId: input.userId,
-      sourceId: input.message.idempotencyKey,
-      kind: 'conversation_input',
-      ownerAuthProvenance: 'unknown',
-      idempotencyKey: input.message.idempotencyKey,
-      content: input.content,
-      from: input.message.from,
-      targetCats: [input.catId],
-      intent: 'execute',
-      priority: input.priority,
-      sourceCategory: input.sourceCategory,
-      ...(input.actionSuccessorFence ? { actionSuccessorFence: input.actionSuccessorFence } : {}),
-    });
-    if (admitted.outcome === 'full') return {};
-    await notifyManagedWakeAdmitted(input.threadId, input.userId);
-    return { messageId: admitted.message.id };
-  };
+  const admitManagedWake = createManagedCommandWakeAdmission({
+    queue: invocationQueue,
+    messageStore,
+    notifyAdmitted: notifyManagedWakeAdmitted,
+  });
   // Physical embodiment is independent of IM packages and their subscriptions.
   const embodimentOutbound: NonNullable<typeof callbackOpts.outboundHook> = {
     async deliver(threadId, content, catId, _rich, _meta, _origin, triggerMessageId) {

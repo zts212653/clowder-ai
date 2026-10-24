@@ -14,6 +14,7 @@ import { basename, dirname, relative, resolve, sep } from 'node:path';
 import { resolveStartupProjectRoot } from '../../utils/startup-root.js';
 import { readGitWorktreeList } from './git-worktree-probe.js';
 import { resolveCurrentWorkspaceContentRoot } from './roots/workspace-content-root-resolution.js';
+import { canonicalWorkspacePath } from './workspace-canonical-path.js';
 import { canonicalWorkspaceIdentityRoot, resolveVerifiedScopedWorkspaceAlias } from './workspace-worktree-identity.js';
 
 const DENYLIST_PATTERNS = [/^\.env/, /\.pem$/, /\.key$/, /^id_rsa/];
@@ -44,41 +45,16 @@ export function assertWorkspacePathAllowed(path: string): void {
 async function resolveWorkspacePathValue(root: string, pathValue: string): Promise<string> {
   const resolved = resolve(root, pathValue);
   const relFromRoot = relative(root, resolved);
-  if (relFromRoot.startsWith('..') || resolve(root, relFromRoot) !== resolved)
+  if (relFromRoot === '..' || relFromRoot.startsWith(`..${sep}`) || resolve(root, relFromRoot) !== resolved)
     throw new WorkspaceSecurityError('Path outside workspace root', 'TRAVERSAL');
   assertWorkspacePathAllowed(relFromRoot);
 
-  // Symlink escape check: resolve the FULL real path (follows all symlinks
-  // in every segment, not just the final one). This catches both
-  // "final segment is symlink" AND "intermediate directory is symlink".
-  // Also realpath the root to handle cases where root itself traverses
-  // symlinks (e.g. macOS /tmp → /private/tmp).
-  try {
-    const [real, realRoot] = await Promise.all([realpath(resolved), realpath(root)]);
-    if (!real.startsWith(realRoot + sep) && real !== realRoot) {
-      throw new WorkspaceSecurityError('Symlink escapes workspace root', 'TRAVERSAL');
-    }
-    // Re-check denylist on the realpath result — a symlink named "safe"
-    // pointing to ".env" would pass the pre-realpath check above but the
-    // resolved target must still be denied.
-    const realRel = relative(realRoot, real);
-    for (const seg of realRel.split(sep)) {
-      if (DENYLIST_DIRS.has(seg)) {
-        throw new WorkspaceSecurityError(`Access denied: ${seg}`, 'DENIED');
-      }
-      for (const pat of DENYLIST_PATTERNS) {
-        if (pat.test(seg)) {
-          throw new WorkspaceSecurityError(`Access denied: ${seg}`, 'DENIED');
-        }
-      }
-    }
-  } catch (e) {
-    if (e instanceof WorkspaceSecurityError) throw e;
-    // ENOENT = file doesn't exist yet; traversal check above covers it
-    if ((e as NodeJS.ErrnoException).code !== 'ENOENT') {
-      throw e;
-    }
+  // Existing and missing leaves share the same canonical root and denylist proof.
+  const [real, realRoot] = await Promise.all([canonicalWorkspacePath(resolved), realpath(root)]);
+  if (!real.startsWith(realRoot + sep) && real !== realRoot) {
+    throw new WorkspaceSecurityError('Symlink escapes workspace root', 'TRAVERSAL');
   }
+  assertWorkspacePathAllowed(relative(realRoot, real));
 
   return resolved;
 }

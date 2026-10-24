@@ -123,6 +123,9 @@ export async function createInboxPersonMemoryFixture(language) {
                   candidate,
                   candidateTtl: await redis.ttl(PersonMemoryKeys.candidate(owner, r.proposalId)),
                   claims: claims.filter((c) => c.materializedBy?.candidateId === r.proposalId),
+                  relationships: candidate.materializedPersonId
+                    ? await store.listRelationships(owner, candidate.materializedPersonId)
+                    : [],
                 };
               }),
             );

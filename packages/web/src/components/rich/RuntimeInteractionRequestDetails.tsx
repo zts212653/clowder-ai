@@ -1,7 +1,15 @@
-import type { RuntimeInteractionRequest } from '@cat-cafe/shared';
+import type { RuntimeInteractionRecord, RuntimeInteractionRequest } from '@cat-cafe/shared';
+import { ReadOnlyChoiceList } from './ReadOnlyChoiceList';
 
 /** Original request only: never reconstruct private answers or reinstall response controls. */
-export function RuntimeInteractionRequestDetails({ request }: { request: RuntimeInteractionRequest }) {
+export function RuntimeInteractionRequestDetails({
+  request,
+  terminal,
+}: {
+  request: RuntimeInteractionRequest;
+  terminal?: RuntimeInteractionRecord['terminal'];
+}) {
+  const response = terminal?.response;
   return (
     <div className="min-w-0 space-y-3 break-words text-sm">
       <h3 className="font-semibold">{request.title}</h3>
@@ -12,18 +20,24 @@ export function RuntimeInteractionRequestDetails({ request }: { request: Runtime
               <h4 className="font-semibold">{question.header}</h4>
               <p className="whitespace-pre-wrap">{question.question}</p>
               {!question.isSecret && question.options ? (
-                <ul className="list-inside list-disc">
-                  {question.options.map((option) => (
-                    <li key={option.label}>
-                      {option.label}
-                      {option.description ? <p>{option.description}</p> : null}
-                    </li>
-                  ))}
-                </ul>
+                <ReadOnlyChoiceList
+                  options={question.options.map((option, index) => ({ ...option, id: String(index) }))}
+                  selectedIds={
+                    response?.kind === 'answers'
+                      ? (response.selectedOptionIndexes?.[question.id] ?? []).map(String)
+                      : []
+                  }
+                />
               ) : null}
             </section>
           ))
         : null}
+      {request.kind === 'approval' || request.kind === 'elicitation' ? (
+        <ReadOnlyChoiceList
+          options={request.decisions}
+          selectedIds={response?.kind === 'decision' ? [response.decisionId] : []}
+        />
+      ) : null}
       {request.kind === 'elicitation' ? (
         <>
           <p className="whitespace-pre-wrap">{request.message}</p>

@@ -107,7 +107,6 @@ Group 只由用户的明确动作出生：长按/菜单进入整理模式，把�
 浏览器 localStorage 只作缓存。同一用户的一条普通 Thread 至多属于一个 Group。
 
 显式整理绝不回写 `parentThreadId`、`declaredWorkMode`、pin、label、project 或 thread title；反过来，
-新子 Thread 无论 work mode 是否明确，都不得继承父 Thread 的 Group。两个以上 live 成员才渲染组壳：
 用户主动移除后只剩一个成员则清除余下 membership；internal-archive/soft-delete 导致当前入口只剩一个可见成员
 时视觉退化成单行，但 metadata 仍可在成员恢复后重建 Group。
 

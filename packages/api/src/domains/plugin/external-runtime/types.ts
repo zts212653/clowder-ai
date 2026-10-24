@@ -47,6 +47,16 @@ export interface VerifiedPluginPackage {
 
 export interface VerifiedPluginPackageLocator {
   resolveInstalledPackage(packageDigest: string): Promise<VerifiedPluginPackage>;
+  /** Read inert presentation bytes from the admitted archive without preparing an executable tree. */
+  readInstalledStaticFile?(
+    packageDigest: string,
+    selectFile: (manifest: PluginManifest) => string,
+  ): Promise<VerifiedPluginStaticFile>;
+}
+
+export interface VerifiedPluginStaticFile {
+  readonly manifest: PluginManifest;
+  readonly bytes: Buffer | undefined;
 }
 
 export interface ExternalPluginBootstrapEnvironment extends NodeJS.ProcessEnv {

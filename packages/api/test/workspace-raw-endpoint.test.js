@@ -227,7 +227,7 @@ describe('workspace reveal endpoint', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/api/workspace/reveal',
-      headers: { 'content-type': 'application/json' },
+      headers: { 'content-type': 'application/json', 'x-cat-cafe-user': 'operator' },
       payload: JSON.stringify({ path: 'README.md' }),
     });
     assert.equal(res.statusCode, 400);
@@ -237,7 +237,7 @@ describe('workspace reveal endpoint', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/api/workspace/reveal',
-      headers: { 'content-type': 'application/json' },
+      headers: { 'content-type': 'application/json', 'x-cat-cafe-user': 'operator' },
       payload: JSON.stringify({ worktreeId }),
     });
     assert.equal(res.statusCode, 400);
@@ -247,7 +247,7 @@ describe('workspace reveal endpoint', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/api/workspace/reveal',
-      headers: { 'content-type': 'application/json' },
+      headers: { 'content-type': 'application/json', 'x-cat-cafe-user': 'operator' },
       payload: JSON.stringify({ worktreeId, path: '../../etc/passwd' }),
     });
     // resolveWorkspacePath may return 403 or 404 depending on traversal detection

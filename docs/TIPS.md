@@ -1,8 +1,8 @@
 ---
 doc_kind: guide
 topics: [usage, magic-words, collaboration]
-updated: 2026-10-06
-description: "User tips for course correction, routing, and everyday collaboration."
+updated: 2026-10-24
+description: "User tips for course correction, routing, chat file links, and everyday collaboration."
 ---
 
 # Tips / 使用小 Tips
@@ -94,6 +94,15 @@ First time here? Start a new thread and your AI team will walk you through a com
 
 Your cats remember past decisions, discussion conclusions, and lessons learned across conversations. You can say things like "we discussed this before" or "what did we decide about X" — the cat will search its knowledge base automatically. No need to re-explain context from previous sessions.
 
+## 9. Chat Paths and Links
+
+Click a recognized file label in a message to read it in the Workspace on the right. Relative paths use the conversation's project. A line suffix such as `docs/report.md:42` opens that line; a folder opens in the file tree. Paths in fenced code blocks remain plain code.
+
+- A label inside a sentence stays compact; a file on its own line becomes a card. Hover or right-click a file label to see and copy its full path. Where the platform supports it, the menu also reveals the file in the file manager.
+- Images open in a floating viewer. A locally matched commit or pull request opens its changes in the Workspace; other web links open in the browser.
+- Document tabs and their existing file actions remain available after opening a label. Office files that cannot be previewed offer the available local-file actions instead.
+- An unavailable file has a gray dashed label. If a reference cannot be resolved, it remains readable text rather than pretending to be an available file.
+
 ---
 
 <a id="中文"></a>
@@ -178,3 +187,12 @@ Your cats remember past decisions, discussion conclusions, and lessons learned a
 ## 8. 猫猫有记忆
 
 猫猫会记住历史决策、讨论结论和踩过的坑。你可以说"之前我们讨论过 XXX"或"我们当时对 X 是怎么决定的"，猫猫会自动搜索知识库。不需要重新解释上下文。
+
+## 9. 聊天里的路径和链接
+
+点消息里已识别的文件标签，就能在右边的 Workspace 继续读。相对路径按这条对话绑定的项目查找；`docs/report.md:42` 这类行号会定位到对应行，文件夹会在文件树里展开。代码块里的路径仍是普通代码。
+
+- 句子里是一枚小标签，单独一行的文件是一张卡。悬停或右键点文件标签，可以查看和复制完整路径；平台支持时，也可在文件管理器中显示文件，macOS 对应 Finder。
+- 图片在浮窗里看大图；匹配本地项目的提交号和 PR 在 Workspace 看改动，其他网址去浏览器。
+- 打开标签后，原有文档标签和文件操作仍可用。不能直接预览的 Office 文件会提供当前可用的本地文件操作。
+- 文件不在了，会显示灰色虚线标签。无法解析的引用保留可读原文，不冒充可用文件。

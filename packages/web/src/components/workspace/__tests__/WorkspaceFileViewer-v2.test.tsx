@@ -2,8 +2,12 @@
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { writeShellLanguage } from '../../shell/shell-language';
 import { writeShellPresentation } from '../../shell/shell-presentation';
 import type { WorkspaceFileViewerProps } from '../WorkspaceFileViewer.types';
+
+const desktopAction = vi.hoisted(() => vi.fn().mockResolvedValue({ ok: true }));
+vi.mock('@/utils/api-client', () => ({ API_URL: '', apiFetch: desktopAction }));
 
 vi.mock('../FileContentRenderer', () => ({
   FileContentRenderer: () => <textarea data-testid="owner-content" defaultValue="draft retained" />,
@@ -60,10 +64,50 @@ const props = (): WorkspaceFileViewerProps => ({
 beforeEach(() => {
   (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   localStorage.clear();
+  desktopAction.mockClear();
   writeShellPresentation('v2');
   host = document.createElement('div');
   document.body.append(host);
   root = createRoot(host);
+});
+it.each([
+  'zh',
+  'en',
+] as const)('keeps localized native file operations in the original %s Workspace menu', async (language) => {
+  writeShellLanguage(language);
+  const original = props();
+  const p = { ...original, file: { ...original.file, absolutePath: '/registered/source/docs/guide.md' } };
+  const copyPath = vi.fn().mockResolvedValue(undefined);
+  Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: copyPath } });
+  act(() => root.render(<WorkspaceFileViewer {...p} />));
+  const summary = host.querySelector<HTMLElement>('summary')!;
+  act(() => {
+    vi.spyOn(summary, 'getClientRects').mockReturnValue([new DOMRect(0, 0, 40, 32)] as unknown as DOMRectList);
+    const details = summary.closest('details')!;
+    details.open = true;
+    details.dispatchEvent(new Event('toggle'));
+  });
+  const menu = document.getElementById(summary.getAttribute('aria-controls')!)!;
+  const labels = [...menu.querySelectorAll('button')].map((button) => button.textContent);
+  expect(labels).toContain(language === 'en' ? 'Copy path' : '复制路径');
+  expect(labels).toContain(language === 'en' ? 'Show in Finder' : '在 Finder 中显示');
+  const openLabel = language === 'en' ? 'Open with default application' : '用默认应用打开';
+  expect(labels).toContain(openLabel);
+  if (language === 'en') expect(menu.textContent).not.toMatch(/[\u3400-\u9fff]/);
+  expect(desktopAction).not.toHaveBeenCalled();
+  const copy = [...menu.querySelectorAll<HTMLButtonElement>('button')].find(
+    (button) => button.textContent === (language === 'en' ? 'Copy path' : '复制路径'),
+  )!;
+  await act(async () => copy.click());
+  expect(copyPath).toHaveBeenCalledWith('/registered/source/docs/guide.md');
+  const open = [...menu.querySelectorAll<HTMLButtonElement>('button')].find(
+    (button) => button.textContent === openLabel,
+  )!;
+  await act(async () => open.click());
+  expect(desktopAction).toHaveBeenCalledWith(
+    '/api/workspace/file/actions/open?worktreeId=fixture&path=docs%2Fguide.md',
+    { method: 'POST' },
+  );
 });
 afterEach(() => {
   act(() => root.unmount());

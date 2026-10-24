@@ -1,24 +1,28 @@
 'use client';
 import type { ReactNode } from 'react';
-import { resolveShellCopy } from '@/components/shell/shell-copy';
+import { resolveShellCopy, useShellCopy } from '@/components/shell/shell-copy';
 import { readShellLanguage } from '@/components/shell/shell-language';
 import { workspaceChromeCopy } from '@/components/workbench/workspace-chrome.shell-copy';
+import { ChatFileActions } from '../chat-references/ChatFileActions';
 import { FileIcon } from './FileIcons';
 import { V2WorkspaceMenu } from './V2WorkspaceMenu';
 import type { WorkspaceFileViewerProps } from './WorkspaceFileViewer.types';
 import { WorkspaceToolbarButton as Button } from './WorkspaceToolbarButton';
+import { workspaceFileCopy } from './workspace-file.shell-copy';
+import { workspaceFileReference } from './workspace-file-reference';
 
 export function fileReturnLabel(origin: WorkspaceFileViewerProps['navigationOrigin']): string {
-  if (origin?.kind === 'meeting-transcript') return '‹ 会议伴随';
-  if (origin?.kind === 'workspace-changes') return '‹ 变更';
+  const t = resolveShellCopy(workspaceFileCopy, readShellLanguage());
+  if (origin?.kind === 'meeting-transcript') return `‹ ${t.meeting}`;
+  if (origin?.kind === 'workspace-changes') return `‹ ${t.changes}`;
   if (origin?.kind === 'workspace-home-search' || origin?.kind === 'workspace-tools-search')
     return `‹ ${resolveShellCopy(workspaceChromeCopy, readShellLanguage()).toolsSearch}`;
   if (origin?.kind === 'workspace-home-artifact')
     return `‹ ${resolveShellCopy(workspaceChromeCopy, readShellLanguage()).home}`;
-  if (origin?.kind === 'chat-file-link') return '‹ 聊天';
-  if (origin?.kind === 'workspace-document') return '‹ 文档';
-  if (origin?.kind === 'artifact-list') return '‹ 作品';
-  return '‹ 文件';
+  if (origin?.kind === 'chat-file-link') return `‹ ${t.chat}`;
+  if (origin?.kind === 'workspace-document') return `‹ ${t.document}`;
+  if (origin?.kind === 'artifact-list') return `‹ ${t.works}`;
+  return `‹ ${t.files}`;
 }
 
 function fileChromeBackLabel(p: Pick<WorkspaceFileViewerProps, 'navigationOrigin' | 'showFileQuotes'>): string {
@@ -37,23 +41,24 @@ export function V2WorkspaceFileChrome({
   cache: ReactNode;
   onAsk: () => void;
 }) {
+  const t = useShellCopy(workspaceFileCopy);
   const path = p.openFilePath ?? p.file.path;
-  const directory = path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : '根目录';
+  const directory = path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : t.root;
   const toggle =
     !p.editMode && (p.isMarkdown || p.isHtml || p.isJsx) ? (
       <Button
         onClick={p.isMarkdown ? p.onToggleMarkdownRendered : p.isHtml ? p.onToggleHtmlPreview : p.onToggleJsxPreview}
-        title="切换渲染与源码"
+        title={t.toggle}
         activeClass="bg-cafe-accent text-[var(--cafe-accent-foreground)] hover:bg-cafe-accent-hover"
         active={p.isMarkdown ? p.markdownRendered : p.isHtml ? p.htmlPreview : p.jsxPreview}
       >
         {p.isMarkdown
           ? p.markdownRendered
-            ? '渲染'
-            : '源码'
+            ? t.rendered
+            : t.source
           : (p.isHtml ? p.htmlPreview : p.jsxPreview)
-            ? '预览'
-            : '源码'}
+            ? t.preview
+            : t.source}
       </Button>
     ) : null;
   return (
@@ -94,7 +99,7 @@ export function V2WorkspaceFileChrome({
                 </button>
                 <button
                   type="button"
-                  aria-label={`关闭 ${tab.split('/').at(-1)}`}
+                  aria-label={t.close(tab.split('/').at(-1) ?? tab)}
                   className="mx-1 shrink-0 rounded px-1 hover:bg-cafe-surface-sunken"
                   onClick={() => p.closeTab(tab)}
                 >
@@ -107,7 +112,7 @@ export function V2WorkspaceFileChrome({
       ) : null}
       <div
         role="toolbar"
-        aria-label="文件操作"
+        aria-label={t.actions}
         data-testid="workspace-file-toolbar"
         data-v2-workspace-menu-boundary=""
         className="flex h-10 min-w-0 items-center gap-2 border-b border-cafe-subtle bg-cafe-surface px-3"
@@ -117,7 +122,7 @@ export function V2WorkspaceFileChrome({
           onClick={p.onRevealInTree}
           disabled={!p.onRevealInTree}
           data-testid="v2-file-directory"
-          title="在文件列表中显示"
+          title={t.reveal}
           className="min-w-0 flex-1 truncate text-left text-xs text-cafe-muted"
         >
           {p.nestedWork ? path.split('/').at(-1) || path : directory}
@@ -131,22 +136,23 @@ export function V2WorkspaceFileChrome({
         <Button
           onClick={onAsk}
           disabled={p.modificationDisabled || (p.onRequestModification ? p.editMode : false)}
-          title="把这个文件交给当前对话，请猫修改"
+          title={t.askTitle}
         >
-          请猫修改
+          {t.ask}
         </Button>
         {p.collaborationAvailable && p.onOpenCollaboration && (
           <Button
             onClick={p.onOpenCollaboration}
             disabled={p.editMode}
-            title={p.editMode ? '请先保存或退出编辑' : '打开此文件的批注'}
+            title={p.editMode ? t.saveFirst : t.annotationTitle}
           >
-            批注{p.annotationCount != null ? ` ${p.annotationCount}` : ''}
+            {t.annotations}
+            {p.annotationCount != null ? ` ${p.annotationCount}` : ''}
           </Button>
         )}
         {!p.isMarkdown && p.canEdit && (
-          <Button onClick={p.onToggleEdit} active={p.editMode} title="编辑文件">
-            {p.editMode ? '编辑中' : '编辑'}
+          <Button onClick={p.onToggleEdit} active={p.editMode} title={t.editTitle}>
+            {p.editMode ? t.editing : t.edit}
           </Button>
         )}
         <span className="v2-file-listen shrink-0">{listen}</span>
@@ -161,10 +167,10 @@ export function V2WorkspaceFileChrome({
           </button>
         ) : null}
         <V2WorkspaceMenu
-          width={160}
-          trigger="更多 ▾"
+          width={248}
+          trigger={t.more}
           triggerProps={{
-            title: '更多文件操作',
+            title: t.moreTitle,
             className:
               'cursor-pointer list-none rounded px-2 py-1 text-xs text-cafe-secondary hover:bg-cafe-surface-sunken',
           }}
@@ -173,31 +179,23 @@ export function V2WorkspaceFileChrome({
           <span className="v2-file-menu-view">{toggle}</span>
           <span className="v2-file-menu-listen">{listen}</span>
           {p.isMarkdown && p.canEdit && (
-            <Button onClick={p.onToggleEdit} active={p.editMode} title="编辑文件">
-              {p.editMode ? '编辑中' : '编辑'}
+            <Button onClick={p.onToggleEdit} active={p.editMode} title={t.editTitle}>
+              {p.editMode ? t.editing : t.edit}
             </Button>
           )}
           {cache}
           <Button
             onClick={() => void navigator.clipboard.writeText(p.file.content)}
-            title={p.file.truncated ? '复制已加载内容' : '复制文件全文'}
+            title={p.file.truncated ? t.copyLoaded : t.copyAllTitle}
           >
-            {p.file.truncated ? '复制已加载内容' : '复制内容'}
+            {p.file.truncated ? t.copyLoaded : t.copyContent}
           </Button>
-          <Button
-            onClick={() =>
-              void navigator.clipboard.writeText(p.currentWorktree ? `${p.currentWorktree.root}/${path}` : path)
-            }
-            title="复制文件路径"
-          >
-            复制路径
-          </Button>
-          <Button onClick={() => p.revealInFinder(path)} title="在访达中显示">
-            在访达中显示
-          </Button>
+          {p.worktreeId ? (
+            <ChatFileActions target={workspaceFileReference(p.file, p.worktreeId, p.currentWorktree?.root)} inline />
+          ) : null}
           {p.navigationOrigin?.kind === 'chat-file-link' && p.onBack && (
-            <Button onClick={p.onBack} title={`返回消息 ${p.navigationOrigin.messageId}`}>
-              返回来源 · {p.navigationOrigin.messageId}
+            <Button onClick={p.onBack} title={t.returnTitle(p.navigationOrigin.messageId)}>
+              {t.returnSource(p.navigationOrigin.messageId)}
             </Button>
           )}
         </V2WorkspaceMenu>

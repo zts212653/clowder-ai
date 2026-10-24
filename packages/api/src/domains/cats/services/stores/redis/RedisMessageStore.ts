@@ -1539,7 +1539,7 @@ export class RedisMessageStore {
     if (!(ledgerStore instanceof RedisQueueLedgerStore) || !ledgerStore.usesRedisClient(this.redis)) {
       throw new Error('Redis message admission requires the matching Redis Queue ledger');
     }
-    const messageId = generateSortableId(input.timestamp);
+    const messageId = input.reservedId ?? generateSortableId(input.timestamp);
     const entries = [...buildAdmission(messageId)];
     for (const entry of entries) {
       assertQueueLedgerEntry(entry);
@@ -2036,6 +2036,11 @@ export class RedisMessageStore {
   async getById(id: string): Promise<StoredMessage | null> {
     const data = await this.redis.hgetall(MessageKeys.detail(id));
     return this.hydrateHash(data);
+  }
+
+  async getArtifactById(id: string): Promise<StoredMessage | null> {
+    const messages = await this.hydrateMessages([id], { artifactOnly: true, strict: true, includeDeleted: true });
+    return messages[0] ?? null;
   }
 
   /** Read F278 marker sources in bounded, narrow Redis batches. */

@@ -30,7 +30,7 @@ import {
   splitLexicalBackfillWords,
 } from './lexical-backfill.js';
 import { runMemoryRead, runMemoryVectorRepack } from './MemoryProcess.js';
-import type { EmbeddingSnapshot } from './memory-process-protocol.js';
+import type { EmbeddingSnapshot, MemoryProcessJob } from './memory-process-protocol.js';
 import { searchMessagePassages } from './message-passage-search.js';
 import type { MessagePassageSearchExecution, MessagePassageSearchOptions } from './message-passage-search-types.js';
 import { readMessagePassageState } from './message-passage-state.js';
@@ -43,6 +43,7 @@ import { applyPullOnlyDownrank } from './pull-only-ranking.js';
 import { computeRecencyDecay } from './recency-decay.js';
 import { repackPassageVectors, type VectorRepackResult } from './repack-passage-vectors.js';
 import { applyMigrations } from './schema.js';
+import { createSearchEmbeddingCapability, type SearchEmbeddingCapability } from './search-embedding-capability.js';
 import type { VectorStore } from './VectorStore.js';
 import { createVectorInvalidator } from './vector-invalidation.js';
 import { writeEvidenceItems } from './write-evidence-items.js';
@@ -164,6 +165,9 @@ export class SqliteEvidenceStore implements IEvidenceStore {
   private db: Database.Database | null = null;
   private readonly dbPath: string;
   private embedDeps?: EmbedDeps;
+  // Standalone stores may own an already prepared corpus. IndexBuilder claims
+  // responsibility by invalidating this process-local capability before use.
+  private vectorProjection = { ready: true };
   private readonly workerMode?: 'read';
   private readonly readDiagnostics?: SqliteEvidenceStoreOptions['readDiagnostics'];
   private detachReadDiagnostics?: () => void;
@@ -186,6 +190,26 @@ export class SqliteEvidenceStore implements IEvidenceStore {
   /** @internal Allow late-binding of embed deps (factory sets after construction) */
   setEmbedDeps(deps: EmbedDeps | undefined): void {
     this.embedDeps = deps;
+  }
+
+  /** @internal Only the successful preparation transaction may publish its generation. */
+  invalidateVectorProjection(): () => void {
+    const projection = { ready: false };
+    this.vectorProjection = projection;
+    return () => {
+      if (this.vectorProjection === projection) projection.ready = true;
+    };
+  }
+
+  private searchEmbedding(): SearchEmbeddingCapability | undefined {
+    const deps = this.embedDeps;
+    const projection = this.vectorProjection;
+    return deps
+      ? createSearchEmbeddingCapability(
+          deps.embedding,
+          () => this.embedDeps === deps && this.vectorProjection === projection && projection.ready,
+        )
+      : undefined;
   }
 
   /** @internal Bind relative sourcePath values to the scanner/collection root that produced them. */
@@ -322,16 +346,16 @@ export class SqliteEvidenceStore implements IEvidenceStore {
     if (this.usesIsolatedProcesses()) {
       const { signal, ...serialized } = normalized;
       serialized.deadlineAt ??= Date.now() + 15_000;
-      return runMemoryRead<MessagePassageSearchExecution>(
+      return this.runProjectionRead<MessagePassageSearchExecution>(
         {
           kind: 'message-search',
           dbPath: this.dbPath,
           query,
           options: serialized,
-          embedding: this.processEmbeddingSnapshot(),
           flags: memorySearchFlags(),
         },
-        { signal, deadlineAt: serialized.deadlineAt, embedding: this.embedDeps?.embedding },
+        { signal, deadlineAt: serialized.deadlineAt },
+        (value) => value,
       );
     }
     return searchMessagePassages(query, normalized, {
@@ -341,6 +365,38 @@ export class SqliteEvidenceStore implements IEvidenceStore {
       hybridSearch: (lexical, limit, accept, compare) =>
         this.hybridPassageRRFSearch(query, lexical, limit, normalized, accept, compare),
     });
+  }
+
+  /** The parent owns projection lifetime through final worker publication, not just RPC. */
+  private async runProjectionRead<T>(
+    job: Extract<MemoryProcessJob, { kind: 'search' | 'message-search' }>,
+    options: Pick<SearchOptions, 'signal' | 'deadlineAt'>,
+    executionOf: (value: T) => { meta: SearchExecutionMeta },
+  ): Promise<T> {
+    const snapshot = this.processEmbeddingSnapshot();
+    const embedding = snapshot ? this.searchEmbedding() : undefined;
+    const value = await runMemoryRead<T>({ ...job, embedding: snapshot }, { ...options, embedding });
+    const mode = job.options?.mode ?? (job.kind === 'message-search' ? 'hybrid' : 'lexical');
+    if (mode === 'lexical' || !embedding || embedding.isCurrent()) return value;
+
+    // A retired worker result may contain old geometry with newly hydrated
+    // source bodies. Discard it and use the existing lexical consumer once,
+    // preserving the original absolute deadline, grants, filters and signal.
+    throwIfSearchCancelled(options);
+    const lexicalJob: typeof job =
+      job.kind === 'message-search'
+        ? { ...job, options: { ...job.options, mode: 'lexical' }, embedding: undefined }
+        : { ...job, options: { ...job.options, mode: 'lexical' }, embedding: undefined };
+    const fallback = await runMemoryRead<T>(lexicalJob, options);
+    throwIfSearchCancelled(options);
+    const execution = executionOf(fallback);
+    execution.meta = {
+      ...execution.meta,
+      degraded: true,
+      effectiveMode: 'lexical',
+      degradeReason: 'passage_embedding_unavailable',
+    };
+    return fallback;
   }
 
   private buildSearchFilters(options: SearchOptions | undefined, suppressBackstop = false): SearchFilterContext {
@@ -444,7 +500,7 @@ export class SqliteEvidenceStore implements IEvidenceStore {
       throwIfSearchCancelled(options);
       const { signal, ...serialized } = options ?? {};
       const flags = memorySearchFlags();
-      const execution = await runMemoryRead<{
+      const execution = await this.runProjectionRead<{
         result: EvidenceSearchExecution;
         shadow: Array<{ anchor: string; shadowRank: number }> | null;
       }>(
@@ -456,9 +512,9 @@ export class SqliteEvidenceStore implements IEvidenceStore {
           sourceRoot: this.sourceRoot,
           sourceRef: this.sourceRef,
           flags,
-          embedding: this.processEmbeddingSnapshot(),
         },
-        { signal, deadlineAt: options?.deadlineAt, embedding: this.embedDeps?.embedding },
+        { signal, deadlineAt: options?.deadlineAt },
+        (value) => value.result,
       );
       if (execution.shadow)
         storeShadowRanking(
@@ -1102,25 +1158,27 @@ export class SqliteEvidenceStore implements IEvidenceStore {
   private async isEmbeddingAvailable(options?: SearchOptions): Promise<boolean> {
     const deps = this.embedDeps;
     if (!deps || deps.mode !== 'on') return false;
+    const embedding = this.searchEmbedding()!;
     try {
-      await deps.embedding.reprobeIfNeeded(options?.signal);
+      await embedding.reprobeIfNeeded(options?.signal);
     } catch (error) {
       rethrowIfSearchCancelled(options, error);
       return false;
     }
-    return deps.embedding.isReady();
+    return embedding.isReady();
   }
 
   private async isPassageEmbeddingAvailable(options?: SearchOptions): Promise<boolean> {
     const deps = this.embedDeps;
     if (!deps?.passageVectorStore || deps.mode !== 'on') return false;
+    const embedding = this.searchEmbedding()!;
     try {
-      await deps.embedding.reprobeIfNeeded(options?.signal);
+      await embedding.reprobeIfNeeded(options?.signal);
     } catch (error) {
       rethrowIfSearchCancelled(options, error);
       return false;
     }
-    return deps.embedding.isReady();
+    return embedding.isReady();
   }
 
   private async semanticPassageNNSearch(
@@ -1128,11 +1186,15 @@ export class SqliteEvidenceStore implements IEvidenceStore {
     limit: number,
     options?: SearchOptions,
   ): Promise<PassageResult[]> {
+    const deps = this.embedDeps!;
+    const embedding = this.searchEmbedding()!;
     await coverageSearchCheckpoint(options);
-    const queryVec = await this.embedDeps!.embedding.embed([query], options?.signal);
+    const queryVec = await embedding.embed([query], options?.signal);
     await coverageSearchCheckpoint(options);
-    const nnResults = this.embedDeps!.passageVectorStore!.search(queryVec[0], limit);
+    embedding.assertCurrent();
+    const nnResults = deps.passageVectorStore!.search(queryVec[0], limit);
     await coverageSearchCheckpoint(options);
+    embedding.assertCurrent();
     return this.hydratePassageVectorHits(nnResults, options);
   }
 
@@ -1529,11 +1591,15 @@ export class SqliteEvidenceStore implements IEvidenceStore {
     suppressBackstop?: boolean,
   ): Promise<EvidenceItem[]> {
     const pool = Math.min(Math.max(limit * 4, 20), 100); // 砚砚: generous pool, cap 100
+    const deps = this.embedDeps!;
+    const embedding = this.searchEmbedding()!;
     await coverageSearchCheckpoint(options);
-    const queryVec = await this.embedDeps!.embedding.embed([query], options?.signal);
+    const queryVec = await embedding.embed([query], options?.signal);
     await coverageSearchCheckpoint(options);
-    const nnResults = this.embedDeps!.vectorStore.search(queryVec[0], pool);
+    embedding.assertCurrent();
+    const nnResults = deps.vectorStore.search(queryVec[0], pool);
     await coverageSearchCheckpoint(options);
+    embedding.assertCurrent();
     if (nnResults.length === 0) return [];
 
     const anchors = nnResults.map((r) => r.anchor);
@@ -1567,11 +1633,15 @@ export class SqliteEvidenceStore implements IEvidenceStore {
     suppressBackstop?: boolean,
   ): Promise<EvidenceItem[]> {
     const pool = Math.min(Math.max(limit * 4, 20), 100);
+    const deps = this.embedDeps!;
+    const embedding = this.searchEmbedding()!;
     await coverageSearchCheckpoint(options);
-    const queryVec = await this.embedDeps!.embedding.embed([query], options?.signal);
+    const queryVec = await embedding.embed([query], options?.signal);
     await coverageSearchCheckpoint(options);
-    const nnResults = this.embedDeps!.vectorStore.search(queryVec[0], pool);
+    embedding.assertCurrent();
+    const nnResults = deps.vectorStore.search(queryVec[0], pool);
     await coverageSearchCheckpoint(options);
+    embedding.assertCurrent();
 
     // RRF fusion: score = Σ 1/(k + rank_i), k=60
     const RRF_K = 60;
@@ -1788,7 +1858,7 @@ export class SqliteEvidenceStore implements IEvidenceStore {
 
   private processEmbeddingSnapshot(): EmbeddingSnapshot | undefined {
     const deps = this.embedDeps;
-    return deps
+    return deps && this.vectorProjection.ready
       ? {
           ready: deps.embedding.isReady(),
           model: deps.embedding.getModelInfo(),

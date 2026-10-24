@@ -13,17 +13,21 @@ const web = fileURLToPath(new URL('../..', import.meta.url)),
   tree = path.resolve(web, '../..');
 const root = process.env.F322_INBOX_PARITY_EVIDENCE ?? path.join(tree, '.tmp/f322-person-memory');
 async function freeze(page, target, file) {
+  const inChat = await target.evaluate((el) => Boolean(el.closest('[data-chat-container]')));
+  if (inChat) {
+    const port = await page.locator('[data-chat-container]').boundingBox();
+    assert.ok(port);
+    await page.mouse.move(port.x + 8, port.y + 24);
+    await page.mouse.wheel(0, -1);
+  }
   await target.scrollIntoViewIfNeeded();
-  await page.waitForFunction(() =>
-    document
-      .getAnimations()
-      .every(
-        (animation) =>
-          animation.playState !== 'running' || animation.effect?.getComputedTiming().iterations === Infinity,
-      ),
-  );
   await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
-  await page.screenshot({ path: file, fullPage: true });
+  // Capture the actual tested element, rather than a whole page that can follow a newer card.
+  const isResultFragment = await target.evaluate((el) =>
+    ['decision-result-label', 'person-memory-result'].includes(el.getAttribute('data-testid')),
+  );
+  const frame = inChat && isResultFragment ? target.locator('xpath=ancestor::*[@data-rich-block-id][1]') : target;
+  await frame.screenshot({ path: file });
 }
 async function postThrough(page, record, verb, responses, press) {
   const pending = page.waitForResponse(
@@ -239,7 +243,7 @@ for (const language of ['zh', 'en'])
       await page.getByTestId('mailbox-close').click();
       await postThrough(page, selected, 'undo', responses, () => card.getByTestId('person-memory-undo').click());
       await card
-        .getByTestId('person-memory-result')
+        .getByTestId('decision-result-label')
         .filter({ hasText: language === 'en' ? 'This write was undone' : '已撤销本次写入' })
         .waitFor();
       const partialRejected = page.locator(`[data-rich-block-id="${rejected.block.id}"]`);
@@ -255,9 +259,11 @@ for (const language of ['zh', 'en'])
       await reject(page, partialRejected, rejected, responses);
       await partialRejected
         .getByTestId('decision-result-label')
-        .filter({ hasText: language === 'en' ? 'Part written' : '已写入部分' })
+        .filter({ hasText: language === 'en' ? 'Wrote 2' : '已写入 2 条' })
         .waitFor();
-      assert.equal((await source.effects()).find((r) => r.proposalId === rejected.proposalId).claims.length, 1);
+      const retained = (await source.effects()).find((r) => r.proposalId === rejected.proposalId);
+      assert.equal(retained.claims.length, 1);
+      assert.equal(retained.relationships.length, 1); // Both persisted objects belong in the one-line total.
 
       await freeze(
         page,
@@ -338,7 +344,18 @@ for (const language of ['zh', 'en'])
           .waitFor();
         await freeze(page, result, path.join(evidence, 'Inbox-undone-collapsed.png'));
         await result.locator('button[aria-expanded="false"]').click();
-        await result.getByTestId('person-memory-undo-result').waitFor();
+        await result.getByTestId('person-memory-result-subject').waitFor();
+        assert.equal(
+          await result.getByTestId('person-memory-undo-result').count(),
+          0,
+          'The original does not repeat the result',
+        );
+        assert.equal(
+          await result.getByTestId('person-memory-undo').count(),
+          0,
+          'An undone write cannot be undone again',
+        );
+        assert.equal(await result.locator('input,select,textarea,form').count(), 0);
         await freeze(page, panel, path.join(evidence, 'Inbox-undone.png'));
       }
       const replacement = await source.createReplacement(chatRecords[0].thread);
@@ -372,7 +389,7 @@ for (const language of ['zh', 'en'])
           .locator(`[data-rich-block-id="${rejected.block.id}"]`)
           .getByTestId('decision-result-label')
           .innerText(),
-        language === 'en' ? /Part written.*Rest declined/ : /已写入部分.*已拒绝其余/,
+        language === 'en' ? /Wrote 2.*rest declined/ : /已写入 2 条.*其余没写/,
       );
       await freeze(
         page,
@@ -389,7 +406,7 @@ for (const language of ['zh', 'en'])
       assert.equal(chatDot?.width, 8);
       assert.equal(chatDot?.height, 8);
       await replacementChat.locator('button[aria-expanded="false"]').click();
-      assert.equal(await replacementChat.getByTestId('person-memory-result').innerText(), closed);
+      assert.equal(await replacementChat.getByTestId('decision-result-details').locator('output').count(), 0);
       assert.ok(!(await replacementChat.innerText()).includes(withdrawn));
       assert.ok(!(await replacementChat.innerText()).includes(undoneText));
       assert.equal(
@@ -403,7 +420,7 @@ for (const language of ['zh', 'en'])
       );
       await freeze(
         page,
-        replacementChat.getByTestId('person-memory-result'),
+        replacementChat.getByTestId('decision-result-details'),
         path.join(evidence, 'replacement-Chat-cold-expanded.png'),
       );
       await page.getByTestId('mailbox-button').click();
@@ -426,8 +443,8 @@ for (const language of ['zh', 'en'])
               : /已撤销本次写入/
             : record.entrance === 'Chat'
               ? language === 'en'
-                ? /Part written.*Rest declined/
-                : /已写入部分.*已拒绝其余/
+                ? /Wrote 2.*rest declined/
+                : /已写入 2 条.*其余没写/
               : language === 'en'
                 ? /Declined/
                 : /已拒绝/,
@@ -435,7 +452,7 @@ for (const language of ['zh', 'en'])
         await freeze(page, receipt, path.join(evidence, `${record.proposalId}-cold-collapsed.png`));
         assert.equal(
           await receipt.getByTestId('decision-result-dot').getAttribute('data-status'),
-          record.verb === 'approve' ? 'withdrawn' : 'rejected',
+          record.verb === 'approve' ? 'withdrawn' : record.entrance === 'Chat' ? 'approved' : 'rejected',
         );
         await receipt.locator('button[aria-expanded="false"]').click();
         await receipt.getByTestId('approval-receipt-original').waitFor();
@@ -448,10 +465,7 @@ for (const language of ['zh', 'en'])
         if (record.verb === 'reject') {
           assert.ok(!textAfterDisclosure.includes(language === 'en' ? 'This write was undone' : '已撤销本次写入'));
           if (record.entrance === 'Chat')
-            assert.match(
-              textAfterDisclosure,
-              language === 'en' ? /Part written.*Rest declined/ : /已写入部分.*已拒绝其余/,
-            );
+            assert.match(textAfterDisclosure, language === 'en' ? /Wrote 2.*rest declined/ : /已写入 2 条.*其余没写/);
         }
         await freeze(page, receipt, path.join(evidence, `${record.proposalId}-cold-original.png`));
       }
@@ -465,7 +479,7 @@ for (const language of ['zh', 'en'])
       assert.equal(inboxDot?.height, 8);
       await replacementInbox.locator('button[aria-expanded="false"]').click();
       await replacementInbox.getByTestId('approval-receipt-original').waitFor();
-      assert.equal(await replacementInbox.locator('output').innerText(), closed);
+      assert.equal(await replacementInbox.locator('output').count(), 0); // The canonical header is the sole result statement.
       assert.ok(!(await replacementInbox.innerText()).includes(withdrawn));
       assert.ok(!(await replacementInbox.innerText()).includes(undoneText));
       assert.equal(

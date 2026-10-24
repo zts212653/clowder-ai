@@ -2048,6 +2048,12 @@ export interface IMessageStore {
   /** Get a single message by its ID. Returns null if not found. */
   getById(id: string): StoredMessage | null | Promise<StoredMessage | null>;
   /**
+   * Fresh media/visibility projection for exact publication reads. May omit
+   * top-level content, thinking, metadata and toolEvents; never an authority verdict.
+   * Missing rows return null; unavailable/incomplete hydration must reject.
+   */
+  getArtifactById?(id: string): StoredMessage | null | Promise<StoredMessage | null>;
+  /**
    * F278 source-only read path. Redis implementations may batch a narrow field
    * projection; all requested ids must receive an available/unavailable outcome.
    */
@@ -2627,7 +2633,7 @@ export class MessageStore {
       };
     }
 
-    const messageId = generateSortableId(msg.timestamp);
+    const messageId = msg.reservedId ?? generateSortableId(msg.timestamp);
     const entries = [...buildAdmission(messageId)];
     const admitted = ledgerStore.enqueueNow(entries, maxQueuedUserEntries);
     if (admitted.outcome === 'full') return { outcome: 'full' };

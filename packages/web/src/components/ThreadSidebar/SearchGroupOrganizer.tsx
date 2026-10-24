@@ -1,8 +1,13 @@
 'use client';
 
 import type { ThreadAttentionGroup } from '@cat-cafe/shared';
-import { type ReactNode, useMemo, useRef, useState } from 'react';
+import { type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
+import { useShellPresentation } from '@/components/shell/shell-presentation';
 import type { SidebarSnapshotRow } from '@/stores/sidebarProjectionStore';
+import { SearchGroupMembers } from './SearchGroupMembers';
+import { SearchGroupOverlay } from './SearchGroupOverlay';
+import { matchingGroup, SearchGroupPicker } from './SearchGroupPicker';
+import styles from './search-group-picker.module.css';
 import {
   type GroupMutationResult,
   groupTitle,
@@ -16,6 +21,7 @@ interface Props {
   request: SearchGroupRequest;
   threads: readonly SidebarSnapshotRow[];
   groups: readonly ThreadAttentionGroup[];
+  recentGroupIds?: readonly string[];
   renderThread: (thread: SidebarSnapshotRow) => ReactNode;
   onCommand: (command: ThreadAttentionGroupCommand) => Promise<GroupMutationResult>;
   onReload: () => Promise<ThreadAttentionPreferences | null>;
@@ -27,19 +33,25 @@ export function SearchGroupOrganizer({
   request,
   threads,
   groups,
+  recentGroupIds,
   renderThread,
   onCommand,
   onReload,
   onSaved,
   onClose,
 }: Props) {
+  const isV2 = useShellPresentation() === 'v2';
+  const editor = useRef<HTMLElement>(null);
+  const destinationChosen = useRef(false);
   // Freeze the observed membership until an explicit refresh; a live update must not silently authorize a move.
   const [observedGroups, setObservedGroups] = useState(groups);
   const [query, setQuery] = useState(request.query);
   const [name, setName] = useState(
     /^f\d+$/i.test(request.query) ? request.query.toUpperCase() : request.query || '新 Group',
   );
-  const [destination, setDestination] = useState(request.groupId ?? '');
+  const [destination, setDestination] = useState(
+    request.groupId ?? (isV2 ? matchingGroup(groups, request.query)[0]?.id : '') ?? '',
+  );
   const [selected, setSelected] = useState(
     () =>
       new Set(
@@ -68,6 +80,19 @@ export function SearchGroupOrganizer({
   );
   const visibleCandidates = [...candidates, ...selectedOutsideSearch];
   const target = observedGroups.find((group) => group.id === destination);
+  const alreadyInTarget = candidates.filter((thread) => target?.threadIds.includes(thread.id)).length;
+  useEffect(() => {
+    if (isV2 && !request.groupId && !destinationChosen.current)
+      setDestination(matchingGroup(observedGroups, query)[0]?.id ?? '');
+  }, [isV2, observedGroups, query, request.groupId]);
+  useEffect(() => {
+    if (!isV2) return;
+    const previous = document.activeElement;
+    editor.current?.querySelector<HTMLInputElement>('input[aria-label="搜索对话"]')?.focus();
+    return () => {
+      if (previous instanceof HTMLElement && previous.isConnected) previous.focus();
+    };
+  }, [isV2]);
   const currentGroup = request.threadId ? groupByThread.get(request.threadId) : undefined;
   const chosen = threads.filter(
     (thread) =>
@@ -130,9 +155,21 @@ export function SearchGroupOrganizer({
     else setFailure(result);
   };
 
-  return (
-    <section data-testid="search-group-editor" aria-label="批量整理 Group" aria-busy={pending} className="min-w-0">
-      <div className="sticky top-0 z-20 mx-2 rounded-xl border border-cafe-subtle bg-cafe-surface-elevated p-3 shadow-[var(--console-shadow-soft)]">
+  const content = (
+    <section
+      ref={editor}
+      data-testid={isV2 ? undefined : 'search-group-editor'}
+      aria-label="批量整理 Group"
+      aria-busy={pending}
+      className="min-w-0"
+    >
+      <div
+        className={
+          isV2
+            ? styles.header
+            : 'sticky top-0 z-20 mx-2 rounded-xl border border-cafe-subtle bg-cafe-surface-elevated p-3 shadow-[var(--console-shadow-soft)]'
+        }
+      >
         <div className="flex items-center justify-between gap-2">
           <h2 className="text-sm font-semibold text-cafe-black">整理 Group</h2>
           <button
@@ -146,7 +183,15 @@ export function SearchGroupOrganizer({
           </button>
         </div>
         <p className="my-2 text-micro text-cafe-muted">
-          全部匹配 {candidates.length} 条 · {pinned} 条已置顶、{candidates.length - pinned} 条未置顶
+          {isV2 ? (
+            <>
+              匹配 {candidates.length} 条{target ? ` · 其中 ${alreadyInTarget} 条已在「${groupTitle(target)}」` : ''}
+            </>
+          ) : (
+            <>
+              全部匹配 {candidates.length} 条 · {pinned} 条已置顶、{candidates.length - pinned} 条未置顶
+            </>
+          )}
         </p>
         <fieldset disabled={pending} className="space-y-2 disabled:opacity-60">
           {currentGroup && (
@@ -164,22 +209,40 @@ export function SearchGroupOrganizer({
               className="w-full rounded-lg border border-cafe-subtle bg-cafe-surface px-2 py-1.5 text-xs font-normal text-cafe-black"
             />
           </label>
-          <label className="block space-y-1 text-xs font-medium text-cafe-black">
-            <span>整理到</span>
-            <select
-              aria-label="整理到"
-              value={destination}
-              onChange={(event) => setDestination(event.target.value)}
-              className="w-full rounded-lg border border-cafe-subtle bg-cafe-surface px-2 py-1.5 text-xs font-normal text-cafe-black"
-            >
-              <option value="">新建 Group</option>
-              {observedGroups.map((group) => (
-                <option key={group.id} value={group.id}>
-                  加入 {groupTitle(group)}
-                </option>
-              ))}
-            </select>
-          </label>
+          {isV2 ? (
+            <div className="space-y-1">
+              <p className="text-xs text-[var(--shell-muted)]">整理到</p>
+              <SearchGroupPicker
+                groups={observedGroups}
+                destination={destination}
+                onChange={(id) => {
+                  destinationChosen.current = true;
+                  setDestination(id);
+                }}
+                matchQuery={query}
+                recentGroupIds={recentGroupIds}
+                matchedThreadIds={candidates.map((thread) => thread.id)}
+                disabled={pending}
+              />
+            </div>
+          ) : (
+            <label className="block space-y-1 text-xs font-medium text-cafe-black">
+              <span>整理到</span>
+              <select
+                aria-label="整理到"
+                value={destination}
+                onChange={(event) => setDestination(event.target.value)}
+                className="w-full rounded-lg border border-cafe-subtle bg-cafe-surface px-2 py-1.5 text-xs font-normal text-cafe-black"
+              >
+                <option value="">新建 Group</option>
+                {observedGroups.map((group) => (
+                  <option key={group.id} value={group.id}>
+                    加入 {groupTitle(group)}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
           {!destination && (
             <label className="block space-y-1 text-xs font-medium text-cafe-black">
               <span>新组名称</span>
@@ -227,7 +290,9 @@ export function SearchGroupOrganizer({
               : failure
                 ? '重试保存'
                 : destination
-                  ? `加入 Group · ${chosen.length} 条`
+                  ? isV2
+                    ? `把另外 ${chosen.length} 条加入 ${target ? groupTitle(target) : ''}`
+                    : `加入 Group · ${chosen.length} 条`
                   : `创建 Group · ${chosen.length} 条`}
           </button>
         </fieldset>
@@ -242,47 +307,26 @@ export function SearchGroupOrganizer({
           </div>
         )}
       </div>
-      <div className="mt-2 space-y-1">
-        {selectedOutsideSearch.length > 0 && (
-          <p className="px-4 py-1 text-micro text-cafe-muted">
-            另有 {selectedOutsideSearch.length} 条已选对话保留在列表下方。
-          </p>
-        )}
-        {visibleCandidates.map((thread) => {
-          const source = groupByThread.get(thread.id);
-          const alreadyInTarget = Boolean(destination && source?.id === destination);
-          const checked = selected.has(thread.id) && !alreadyInTarget;
-          return (
-            <div key={thread.id} className="flex min-w-0 items-start gap-1 px-2">
-              <input
-                type="checkbox"
-                aria-label={`选择 ${thread.title || thread.id}`}
-                data-select-thread={thread.id}
-                checked={checked || alreadyInTarget}
-                disabled={pending || alreadyInTarget}
-                onChange={() => toggle(thread.id)}
-                className="mt-5 h-4 w-4 shrink-0 accent-[var(--cafe-accent)]"
-              />
-              <div className="min-w-0 flex-1">
-                {renderThread(thread)}
-                <p className="px-3 pb-1 text-micro text-cafe-muted">
-                  {thread.pinned ? '已置顶' : '未置顶'} ·{' '}
-                  {alreadyInTarget
-                    ? '已在目标 Group'
-                    : source
-                      ? checked
-                        ? `将从「${groupTitle(source)}」移到「${target ? groupTitle(target) : name || '新 Group'}」`
-                        : `已在「${groupTitle(source)}」`
-                      : '尚未归组'}
-                </p>
-              </div>
-            </div>
-          );
-        })}
-        {candidates.length === 0 && (
-          <p className="px-4 py-4 text-xs text-cafe-muted">没有匹配的普通对话；可以修改搜索，已选成员仍保留。</p>
-        )}
-      </div>
+      <SearchGroupMembers
+        visibleCandidates={visibleCandidates}
+        candidates={candidates}
+        selectedOutsideSearch={selectedOutsideSearch}
+        groupByThread={groupByThread}
+        destination={destination}
+        selected={selected}
+        pending={pending}
+        toggle={toggle}
+        renderThread={renderThread}
+        target={target}
+        name={name}
+      />
     </section>
+  );
+  return isV2 ? (
+    <SearchGroupOverlay pending={pending} onClose={onClose} focusRoot={editor}>
+      {content}
+    </SearchGroupOverlay>
+  ) : (
+    content
   );
 }

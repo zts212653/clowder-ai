@@ -32,6 +32,11 @@ import {
 } from '@/lib/mention-highlight';
 import { useChatStore } from '@/stores/chatStore';
 import { ChatWorkspaceLink } from './ChatWorkspaceLink';
+import { ChatReference } from './chat-references/ChatReference';
+import { ChatReferenceGroup } from './chat-references/ChatReferenceGroup';
+import { useChatReferenceThread } from './chat-references/ChatReferenceScope';
+import { remarkChatReferences } from './chat-references/remark-chat-references';
+import { ChatReferenceDemand, useChatReferenceDemand } from './chat-references/useChatReferenceDemand';
 import { ListenSentenceSpan } from './listen-mode/ListenSentenceSpan';
 import { MermaidDiagram } from './MermaidDiagram';
 import { createWorkspaceImageComponent, createWorkspaceLinkComponent } from './workspace-md-components';
@@ -209,143 +214,6 @@ function CodeBlock({ children }: { children: ReactNode }) {
   );
 }
 
-/* ── File path → VSCode link ──────────────────────────────── */
-const PROJECT_ROOT = process.env.NEXT_PUBLIC_PROJECT_ROOT ?? '';
-// A path may start a line, follow whitespace, or follow Chinese full-width punctuation
-// ("文件：/a/b.md", "（/a/b.md）") — CJK prose rarely puts a space there. ASCII ':' stays
-// excluded so "https://host/a.png" is never read as a local path.
-const PATH_BOUNDARY_CHARS = '\\s：（「『【《，。；、“‘';
-const PATH_LEADING_RE = new RegExp(`^[${PATH_BOUNDARY_CHARS}]`);
-const FILE_PATH_RE = new RegExp(
-  `(?:^|[${PATH_BOUNDARY_CHARS}])\`?((?:\\/[\\w.@-]+)+(?:\\.[\\w]+)(?::(\\d+))?)(?:\`?)`,
-  'g',
-);
-const REL_PATH_RE = new RegExp(
-  `(?:^|[${PATH_BOUNDARY_CHARS}])\`?((?:packages|src|docs|tests?)\\/[\\w./@-]+(?:\\.[\\w]+)(?::(\\d+))?)(?:\`?)`,
-  'g',
-);
-const WT_TAG_RE = /^\s*\[wt:([a-zA-Z0-9_/-]+)\]/;
-
-function linkifyFilePaths(text: string): ReactNode[] {
-  const parts: ReactNode[] = [];
-  let lastIdx = 0;
-  const combined = new RegExp(`${FILE_PATH_RE.source}|${REL_PATH_RE.source}`, 'g');
-  let m: RegExpExecArray | null;
-
-  combined.lastIndex = 0;
-  while ((m = combined.exec(text)) !== null) {
-    const fullMatch = m[0];
-    const leading = fullMatch.match(PATH_LEADING_RE)?.[0] ?? '';
-    const path = m[1] ?? m[3];
-    const line = m[2] ?? m[4];
-    if (!path) continue;
-
-    const start = m.index + leading.length;
-    if (start > lastIdx) parts.push(text.slice(lastIdx, start));
-
-    // Check for [wt:ID] tag immediately after the match
-    const afterMatch = text.slice(m.index + fullMatch.length);
-    const wtMatch = afterMatch.match(WT_TAG_RE);
-    const worktreeId = wtMatch?.[1] ?? undefined;
-
-    // Strip backticks from display
-    const display = path;
-    const isAbsolute = path.startsWith('/');
-    const filePath = path.split(':')[0];
-    const absPath = isAbsolute ? filePath : PROJECT_ROOT ? `${PROJECT_ROOT}/${filePath}` : null;
-    const href = absPath ? `vscode://file${absPath}${line ? `:${line}` : ''}` : null;
-
-    parts.push(
-      href ? (
-        <FilePathLink
-          key={`fp${m.index}`}
-          display={display}
-          href={href}
-          filePath={filePath!}
-          line={line ? parseInt(line, 10) : undefined}
-          worktreeId={worktreeId}
-        />
-      ) : (
-        <span key={`fp${m.index}`} className="text-[var(--semantic-info)] font-mono text-[0.85em]">
-          {display}
-        </span>
-      ),
-    );
-    // Skip past the [wt:ID] tag so it's not rendered as visible text
-    if (wtMatch) {
-      lastIdx = m.index + fullMatch.length + wtMatch[0].length;
-      combined.lastIndex = lastIdx;
-    } else {
-      lastIdx = m.index + fullMatch.length;
-    }
-  }
-  if (lastIdx < text.length) parts.push(text.slice(lastIdx));
-  return parts.length > 0 ? parts : [text];
-}
-
-/** F063: File path link — click opens in workspace panel, Cmd/Ctrl+click opens in VSCode */
-function FilePathLink({
-  display,
-  href,
-  filePath,
-  line,
-  worktreeId,
-}: {
-  display: string;
-  href: string;
-  filePath: string;
-  line?: number;
-  worktreeId?: string;
-}) {
-  const setOpenFile = useChatStore((s) => s.setWorkspaceOpenFile);
-  const currentThreadId = useChatStore((s) => s.currentThreadId);
-  const linkRef = useRef<HTMLAnchorElement>(null);
-
-  const handleClick = useCallback(
-    (e: React.MouseEvent) => {
-      // Cmd/Ctrl+click → VSCode (default link behavior)
-      if (e.metaKey || e.ctrlKey) return;
-      e.preventDefault();
-      // Regular click → open in workspace panel (with optional worktree switch)
-      const messageId = linkRef.current?.closest<HTMLElement>('[data-message-id]')?.dataset.messageId;
-      setOpenFile(
-        filePath,
-        line ?? null,
-        worktreeId ?? null,
-        currentThreadId,
-        currentThreadId && messageId ? { kind: 'chat-file-link', threadId: currentThreadId, messageId } : undefined,
-        'permanent',
-      );
-    },
-    [currentThreadId, setOpenFile, filePath, line, worktreeId],
-  );
-
-  return (
-    <a
-      ref={linkRef}
-      href={href}
-      onClick={handleClick}
-      className="text-[var(--semantic-info)] hover:text-[var(--semantic-info)] hover:underline font-mono text-[0.85em] cursor-pointer"
-      title={`点击在工作区中查看 · Cmd+Click 打开 VSCode\n${display}`}
-    >
-      {display}
-    </a>
-  );
-}
-
-/** Process string children → @mentions + file path links */
-function withMentionsAndLinks(children: ReactNode): ReactNode {
-  return Children.map(children, (child) => {
-    if (typeof child !== 'string') return child;
-    // First pass: file paths → ReactNode[]
-    const linked = linkifyFilePaths(child);
-    // Second pass: highlight @mentions in remaining text nodes
-    return (
-      <>{linked.map((node, i) => (typeof node === 'string' ? <span key={i}>{highlightMentions(node)}</span> : node))}</>
-    );
-  });
-}
-
 function hasMermaidLanguage(className = ''): boolean {
   return /\blanguage-mermaid\b/i.test(className);
 }
@@ -390,17 +258,32 @@ interface ListenSentenceRendering {
   onStart: (index: number) => void;
 }
 
-function buildMdComponents(tp?: (children: ReactNode) => ReactNode, listen?: ListenSentenceRendering): Components {
+function buildMdComponents(
+  tp?: (children: ReactNode) => ReactNode,
+  listen?: ListenSentenceRendering,
+  referenceThreadId?: string,
+): Components {
   // Compose text processing: tp runs first (e.g. replace markers with buttons),
   // then withMentions/withMentionsAndLinks processes remaining strings.
   const m = tp ? (c: ReactNode) => withMentions(tp(c)) : withMentions;
-  const ml = tp ? (c: ReactNode) => withMentionsAndLinks(tp(c)) : withMentionsAndLinks;
+  const ml = m;
 
   const components: Components = {
     p: ({ children, node }) => (
-      <p data-source-line={node?.position?.start.line} className="mb-2 last:mb-0 leading-relaxed">
+      <ChatReferenceGroup
+        sourceLine={node?.position?.start.line}
+        threadId={referenceThreadId}
+        grid={node?.properties?.['data-chat-reference-group'] === 'grid'}
+        candidates={
+          Array.isArray(node?.properties?.['data-chat-reference-candidates'])
+            ? node.properties['data-chat-reference-candidates'].filter(
+                (value): value is string => typeof value === 'string',
+              )
+            : undefined
+        }
+      >
         {ml(children)}
-      </p>
+      </ChatReferenceGroup>
     ),
     strong: ({ children }) => <strong className="font-semibold">{m(children)}</strong>,
     em: ({ children }) => <em>{m(children)}</em>,
@@ -473,9 +356,20 @@ function buildMdComponents(tp?: (children: ReactNode) => ReactNode, listen?: Lis
         {children}
       </blockquote>
     ),
-    a: ({ href, children }) => (
+    a: ({ href, children, node }) => (
       <InsideMarkdownLinkContext.Provider value={true}>
-        <ChatWorkspaceLink href={href}>{m(children)}</ChatWorkspaceLink>
+        {referenceThreadId && typeof node?.properties?.['data-chat-reference'] === 'string' ? (
+          <ChatReference
+            reference={node.properties['data-chat-reference']}
+            format={String(node.properties['data-chat-format'] ?? 'link')}
+            layout={String(node.properties['data-chat-layout'] ?? 'inline')}
+            threadId={referenceThreadId}
+          >
+            {m(children)}
+          </ChatReference>
+        ) : (
+          <ChatWorkspaceLink href={href}>{m(children)}</ChatWorkspaceLink>
+        )}
       </InsideMarkdownLinkContext.Provider>
     ),
     hr: () => <hr className="my-3 border-cafe" />,
@@ -536,6 +430,7 @@ const mdComponents = buildMdComponents();
 /* ── Exported component ────────────────────────────────────── */
 interface Props {
   content: string;
+  referenceThreadId?: string;
   className?: string;
   /** Skip slash-command prefix detection (e.g. for rich block bodyMarkdown) */
   disableCommandPrefix?: boolean;
@@ -585,6 +480,7 @@ export function resolveRelativePath(base: string, relative: string): string {
 
 export const MarkdownContent = memo(function MarkdownContent({
   content,
+  referenceThreadId: sourceThreadId,
   className,
   disableCommandPrefix,
   basePath,
@@ -595,6 +491,10 @@ export const MarkdownContent = memo(function MarkdownContent({
   activeListenAnchor,
   onListenSentenceStart,
 }: Props) {
+  const currentThreadId = useChatReferenceThread();
+  const referenceThreadId = basePath == null ? (sourceThreadId ?? currentThreadId) : undefined;
+  const referenceAnchor = useRef<HTMLDivElement>(null);
+  const referenceDemand = useChatReferenceDemand(referenceAnchor, !!referenceThreadId);
   const cmdMatch = disableCommandPrefix ? null : /^(\/\w+)/.exec(content);
   const md = normalizeMathDelimiters(cmdMatch ? content.slice(cmdMatch[1].length) : content);
 
@@ -606,7 +506,10 @@ export const MarkdownContent = memo(function MarkdownContent({
     [activeListenAnchor, listenSentences, onListenSentenceStart],
   );
   const components = useMemo(() => {
-    let nextComponents: Components = textProcessor || listen ? buildMdComponents(textProcessor, listen) : mdComponents;
+    let nextComponents: Components =
+      textProcessor || listen || referenceThreadId
+        ? buildMdComponents(textProcessor, listen, referenceThreadId)
+        : mdComponents;
 
     if (basePath != null) {
       // When textProcessor is active, the workspace link component must also compose it
@@ -625,24 +528,27 @@ export const MarkdownContent = memo(function MarkdownContent({
     }
 
     return nextComponents;
-  }, [basePath, sourcePath, listen, textProcessor, worktreeId]);
+  }, [basePath, sourcePath, listen, textProcessor, worktreeId, referenceThreadId]);
 
   return (
-    <div className={`markdown-content text-sm break-words ${className ?? ''}`}>
-      {cmdMatch && <span className="font-semibold text-[var(--semantic-info)]">{cmdMatch[1]}</span>}
-      <ReactMarkdown
-        remarkPlugins={[
-          remarkGfm,
-          remarkBreaks,
-          [remarkMath, { singleDollarTextMath: false }],
-          ...(listenSentences?.length ? [createListenSentenceRemarkPlugin(listenSentences)] : []),
-        ]}
-        rehypePlugins={[rehypeKatex]}
-        components={components}
-        urlTransform={transformChatMarkdownUrl}
-      >
-        {md}
-      </ReactMarkdown>
-    </div>
+    <ChatReferenceDemand.Provider value={referenceDemand}>
+      <div ref={referenceAnchor} className={`markdown-content text-sm break-words ${className ?? ''}`}>
+        {cmdMatch && <span className="font-semibold text-[var(--semantic-info)]">{cmdMatch[1]}</span>}
+        <ReactMarkdown
+          remarkPlugins={[
+            remarkGfm,
+            remarkBreaks,
+            ...(referenceThreadId ? [remarkChatReferences] : []),
+            [remarkMath, { singleDollarTextMath: false }],
+            ...(listenSentences?.length ? [createListenSentenceRemarkPlugin(listenSentences)] : []),
+          ]}
+          rehypePlugins={[rehypeKatex]}
+          components={components}
+          urlTransform={transformChatMarkdownUrl}
+        >
+          {md}
+        </ReactMarkdown>
+      </div>
+    </ChatReferenceDemand.Provider>
   );
 });

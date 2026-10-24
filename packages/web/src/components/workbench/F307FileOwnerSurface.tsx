@@ -36,7 +36,11 @@ function toWorkspaceContentRevision(sha256: string): string {
 
 function FileOwnerUnavailable({ message }: { message: string }) {
   return (
-    <div className="grid h-full min-h-52 place-items-center p-6 text-center" data-testid="f307-owner-unavailable">
+    <div
+      className="grid h-full min-h-52 place-items-center p-6 text-center"
+      data-testid="f307-owner-unavailable"
+      data-content-opening-state="blocked"
+    >
       <div>
         <p className="text-sm font-semibold text-cafe">这个文件目前无法恢复</p>
         <p className="mt-1 max-w-sm text-xs leading-5 text-cafe-muted">{message}</p>
@@ -303,7 +307,7 @@ export function F307FileOwnerSurface({
       : onReturnToNavigationOrigin
         ? onReturnToNavigationOrigin(surface.navigationOrigin ?? { kind: 'file-tree' })
         : onRequestDetach();
-  if (/\.docx$/i.test(target.path))
+  if (/\.docx$/i.test(target.path) && surface.navigationOrigin?.kind !== 'chat-file-link')
     return (
       <WorkspaceOfficeSurface
         key={`${target.worktreeId}:${target.path}`}

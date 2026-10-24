@@ -255,12 +255,13 @@ export class DesktopWindowPluginRuntime implements BundledPluginRuntime {
   }
 
   private observationLost(run: ActiveWindow, error: unknown): void {
+    const observation = run.observer?.diagnostic(error);
     this.lost(run, {
-      reason:
-        error instanceof Error && error.message === 'desktop heartbeat expired' ? 'heartbeat-expired' : 'poll-failed',
+      reason: observation?.error?.reason === 'heartbeat_expired' ? 'heartbeat-expired' : 'poll-failed',
       exitCode: null,
       signal: null,
       initiator: 'host-observer',
+      ...(observation ? { observation } : {}),
     });
   }
 
@@ -269,7 +270,7 @@ export class DesktopWindowPluginRuntime implements BundledPluginRuntime {
     failure: DesktopWindowFailure = { reason: 'unknown', exitCode: null, signal: null },
   ): void {
     if (this.active !== run || run.closing) return;
-    const observation = run.observer?.diagnostic();
+    const observation = failure.observation ?? run.observer?.diagnostic();
     const firstFailure = observation ? { ...failure, observation } : failure;
     // Claim the first live terminal cause before aborting: the executor's
     // abort handler synchronously calls onClosed(undefined) back into lost().

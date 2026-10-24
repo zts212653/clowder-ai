@@ -74,6 +74,23 @@ export interface ThreadProposal {
   /** F277: user-editable placement role, immutable after approval creates the Thread. */
   declaredWorkMode?: DeclaredWorkMode;
   projectPath: string;
+  /** A suggestion only. Membership is written exclusively by owner approval. */
+  suggestedGroupId?: string;
+  suggestedPinned?: boolean;
+  groupSuggestionReason?: 'source-thread' | 'feature-title' | 'explicit' | 'none';
+  /** Owner's final approval-time choice, checkpointed for crash recovery. */
+  attentionGroupId?: string | null;
+  /** Exact owner message that asks the proposer to issue a replacement. */
+  revisionRequest?: {
+    messageId: string;
+    instruction: string;
+    requestedBy: string;
+    requestedAt: number;
+    queuedAt?: number;
+    choices?: { suggestedGroupId?: string | null; projectPath?: string; pinned?: boolean };
+  };
+  supersedesProposalId?: string;
+  supersededByProposalId?: string;
 
   // Audit — creation
   createdBy: string;
@@ -149,6 +166,7 @@ export interface ThreadProposal {
  * `undefined` means "keep the proposal's prefilled value".
  */
 export interface ProposalApproveOverrides {
+  attentionGroupId?: string | null;
   title?: string;
   parentThreadId?: string;
   preferredCats?: CatId[];

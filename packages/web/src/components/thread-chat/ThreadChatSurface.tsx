@@ -20,6 +20,7 @@ import { ChatInput } from '../ChatInput';
 import { ChatMessageRow } from '../ChatMessageRow';
 import { ConnectionStatusBar } from '../ConnectionStatusBar';
 import { getStreamingTipContexts, selectLifecycleTipMessageId } from '../capability-tip-placement';
+import { ChatReferenceScope } from '../chat-references/ChatReferenceScope';
 import { buildChatTimelineProjectionKey } from '../chat-timeline-projection-key';
 import { useCompanionConversation } from '../concierge/useCompanionConversation';
 import { useArtworkLightboxScope } from '../content-review/ArtworkLightboxScope';
@@ -464,5 +465,9 @@ export function ThreadChatSurface({
       />
     </section>
   );
-  return <MessageNavigationProvider value={jumpToMessage}>{surface}</MessageNavigationProvider>;
+  return (
+    <MessageNavigationProvider value={jumpToMessage}>
+      <ChatReferenceScope value={threadId}>{surface}</ChatReferenceScope>
+    </MessageNavigationProvider>
+  );
 }

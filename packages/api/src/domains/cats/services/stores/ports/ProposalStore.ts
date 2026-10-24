@@ -79,6 +79,10 @@ export class InMemoryProposalStore implements IProposalStore {
       parentThreadId: input.parentThreadId,
       preferredCats: [...input.preferredCats],
       projectPath: input.projectPath,
+      suggestedGroupId: input.suggestedGroupId,
+      suggestedPinned: input.suggestedPinned,
+      groupSuggestionReason: input.groupSuggestionReason,
+      supersedesProposalId: input.supersedesProposalId,
       createdBy: input.createdBy,
       createdAt: now,
       publication: { state: 'staged', stagedAt: now },
@@ -96,6 +100,50 @@ export class InMemoryProposalStore implements IProposalStore {
   get(proposalId: string): ThreadProposal | null {
     const found = this.proposals.get(proposalId);
     return found ? cloneProposal(found) : null;
+  }
+
+  recordRevisionRequest(
+    proposalId: string,
+    request: NonNullable<ThreadProposal['revisionRequest']>,
+  ): ThreadProposal | null {
+    const proposal = this.proposals.get(proposalId);
+    if (!proposal || proposal.status !== 'pending') return null;
+    if (
+      proposal.revisionRequest &&
+      (proposal.revisionRequest.instruction !== request.instruction ||
+        (['suggestedGroupId', 'projectPath', 'pinned'] as const).some(
+          (key) => proposal.revisionRequest?.choices?.[key] !== request.choices?.[key],
+        ))
+    )
+      return null;
+    proposal.revisionRequest ??= structuredClone(request);
+    if (request.queuedAt && proposal.revisionRequest.messageId === request.messageId)
+      proposal.revisionRequest.queuedAt ??= request.queuedAt;
+    return cloneProposal(proposal);
+  }
+
+  supersedePending(proposalId: string, replacementId: string, requestMessageId: string): ThreadProposal | null {
+    const proposal = this.proposals.get(proposalId);
+    const next = this.proposals.get(replacementId);
+    if (proposal?.supersededByProposalId === replacementId) return cloneProposal(proposal);
+    if (
+      !proposal ||
+      proposal.status !== 'pending' ||
+      proposal.revisionRequest?.messageId !== requestMessageId ||
+      !next?.cardMessageId ||
+      next.status !== 'pending' ||
+      next.supersedesProposalId !== proposalId ||
+      next.sourceMessageId !== requestMessageId ||
+      next.createdBy !== proposal.createdBy ||
+      next.sourceCatId !== proposal.sourceCatId ||
+      next.sourceThreadId !== proposal.sourceThreadId
+    )
+      return null;
+    proposal.status = 'withdrawn';
+    proposal.withdrawnBy = proposal.sourceCatId;
+    proposal.withdrawnAt = Date.now();
+    proposal.supersededByProposalId = replacementId;
+    return cloneProposal(proposal);
   }
 
   listByUser(userId: string, limit: number = DEFAULT_LIST_LIMIT): ThreadProposal[] {

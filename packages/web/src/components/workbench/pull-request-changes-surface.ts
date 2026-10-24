@@ -13,7 +13,7 @@ import type { WorkspaceSurfaceDescriptor } from './workbench-contract';
 export const PULL_REQUEST_CHANGES_OWNER = 'f063-workspace-diff';
 
 export function createPullRequestChangesSurface(input: {
-  artifact: ThreadArtifactDTO;
+  artifact: Pick<ThreadArtifactDTO, 'type' | 'ref' | 'name'>;
   worktreeId: string | null;
   threadId?: string | null;
   navigationOrigin?: WorkspaceSurfaceDescriptor['navigationOrigin'];

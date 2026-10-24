@@ -62,6 +62,7 @@ export async function activateDeclaredMcp(
           }),
         }),
       );
+      if (host.persistCapabilities === false) continue;
       // Persist only the standard environment reference, never its process-lifetime value.
       const { CLOWDER_PLUGIN_ACTION_TOKEN: _token, ...durableEnv } = server.env ?? {};
       const durableEntry = {
@@ -81,7 +82,7 @@ export async function activateDeclaredMcp(
 }
 
 export async function removeDeclaredMcp(pluginId: string, host: DeclaredStaticResourceHost | undefined): Promise<void> {
-  if (!host) return;
+  if (!host || host.persistCapabilities === false) return;
   if (!host.mcpConfigIO) return;
   const config = await host.mcpConfigIO.readConfig();
   const owned = config?.capabilities.filter(

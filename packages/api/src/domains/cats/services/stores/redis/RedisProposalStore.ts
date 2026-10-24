@@ -34,6 +34,7 @@ import { ProposalKeys } from '../redis-keys/proposals/proposal-keys.js';
 import { abortRedisStaged, commitRedisApprovalEnvelope } from './RedisApprovalPublication.js';
 import { finalizeRedisProposalApproval } from './RedisProposalApproval.js';
 import { continueRedisApprovedTask } from './RedisProposalContinuation.js';
+import { recordRedisRevisionRequest, supersedeRedisProposal } from './RedisProposalRevision.js';
 import { createdThreadCheckpointFields } from './RedisProposalStoreFields.js';
 import {
   CAS_TRANSITION_LUA,
@@ -82,6 +83,10 @@ export class RedisProposalStore implements IProposalStore {
       parentThreadId: input.parentThreadId,
       preferredCats: [...input.preferredCats],
       projectPath: input.projectPath,
+      suggestedGroupId: input.suggestedGroupId,
+      suggestedPinned: input.suggestedPinned,
+      groupSuggestionReason: input.groupSuggestionReason,
+      supersedesProposalId: input.supersedesProposalId,
       createdBy: input.createdBy,
       createdAt: now,
       publication: { state: 'staged', stagedAt: now },
@@ -108,6 +113,24 @@ export class RedisProposalStore implements IProposalStore {
     const data = await this.redis.hgetall(ProposalKeys.detail(proposalId));
     if (!data || !data.proposalId) return null;
     return hydrateProposal(data);
+  }
+
+  async recordRevisionRequest(
+    proposalId: string,
+    request: NonNullable<ThreadProposal['revisionRequest']>,
+  ): Promise<ThreadProposal | null> {
+    return (await recordRedisRevisionRequest(this.redis, proposalId, request)) ? this.get(proposalId) : null;
+  }
+
+  async supersedePending(
+    proposalId: string,
+    replacementId: string,
+    requestMessageId: string,
+  ): Promise<ThreadProposal | null> {
+    const proposal = await this.get(proposalId);
+    return proposal && (await supersedeRedisProposal(this.redis, proposal, replacementId, requestMessageId))
+      ? this.get(proposalId)
+      : null;
   }
 
   async listByUser(userId: string, limit: number = DEFAULT_LIST_LIMIT): Promise<ThreadProposal[]> {

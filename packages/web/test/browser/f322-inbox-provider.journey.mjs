@@ -36,14 +36,8 @@ export async function verifyProviderCards({ t, language, width, root }) {
       await page.mouse.move(port.x + 8, port.y + 24);
       await page.mouse.wheel(0, -1);
       await card.scrollIntoViewIfNeeded();
-      await page.waitForFunction(
-        (element) => {
-          const card = element.getBoundingClientRect();
-          const port = element.closest('[data-chat-container]').getBoundingClientRect();
-          return card.top >= port.top && card.bottom <= port.bottom;
-        },
-        await card.elementHandle(),
-      );
+      // Pending forms may extend beyond the history viewport; their controls remain reachable by scrolling.
+      // Playwright acts on visible controls below, and the settled/read-only elements are captured separately.
     }
     if (row) {
       assert.equal(await row.getAttribute('data-expanded'), 'false');
@@ -69,7 +63,7 @@ export async function verifyProviderCards({ t, language, width, root }) {
     }
     const bounds = await card.evaluate((el) => el.getBoundingClientRect().toJSON());
     assert.ok(bounds.left >= 0 && bounds.right <= width + 1);
-    await page.screenshot({ path: path.join(evidence, `${entry.surface}-${entry.kind}-before.png`), fullPage: true });
+    await card.screenshot({ path: path.join(evidence, `${entry.surface}-${entry.kind}-before.png`) });
     const expected =
       entry.kind === 'question'
         ? { kind: 'answers', answers: { environment: ['Alpha'] } }
@@ -103,9 +97,18 @@ export async function verifyProviderCards({ t, language, width, root }) {
     const result = card.getByTestId('decision-result-row');
     await result.getByTestId('decision-result-label').waitFor();
     const label = await result.getByTestId('decision-result-label').innerText();
+    assert.match(label, language === 'en' ? /^Chose “/ : /^已选「/);
     assert.match(
       label,
-      entry.kind === 'url' ? (language === 'en' ? /Declined/ : /已拒绝/) : language === 'en' ? /Approved/ : /已同意/,
+      entry.kind === 'question'
+        ? /Alpha/
+        : entry.kind === 'url'
+          ? language === 'en'
+            ? /Decline/
+            : /拒绝/
+          : language === 'en'
+            ? /Allow once/
+            : /允许一次/,
     );
     assert.equal(
       await result.getByTestId('decision-result-dot').getAttribute('data-status'),
@@ -122,6 +125,9 @@ export async function verifyProviderCards({ t, language, width, root }) {
     await result.locator('button[aria-expanded=false]').click();
     const details = result.getByTestId('decision-result-details');
     await details.waitFor();
+    assert.equal(await details.locator('[data-selected] button, [data-selected] input').count(), 0);
+    assert.equal(await details.locator('[data-selected=true]').count(), 1);
+    assert.ok((await details.locator('[data-selected=true]').innerText()).includes('✓'));
     if (entry.kind === 'question')
       await details.getByText(entry.pending.request.questions[0].question, { exact: true }).waitFor();
     if (entry.kind === 'form' || entry.kind === 'url')
@@ -169,7 +175,13 @@ export async function verifyProviderCards({ t, language, width, root }) {
     assert.equal(await card.locator('button').count(), 1, 'Only the result disclosure remains');
     await card.locator('button[aria-expanded=false]').click();
     const details = card.getByTestId('decision-result-details');
-    await details.getByText(terminalText, { exact: true }).waitFor();
+    await details.getByRole('heading', { name: entry.pending.request.title, exact: true }).waitFor();
+    assert.equal(
+      await details.getByText(terminalText, { exact: true }).count(),
+      0,
+      'The original request does not duplicate the terminal result',
+    );
+    assert.equal(await details.locator('[data-selected=true]').count(), 1);
     assert.equal(await details.locator('button').count(), 0, 'Disclosure must never restore a provider writer');
   }
   await page.getByTestId('mailbox-button').click();

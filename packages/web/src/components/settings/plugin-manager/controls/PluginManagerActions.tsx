@@ -152,7 +152,7 @@ export function PluginRowActions({
           className={`console-button-secondary h-8 shrink-0 !font-medium ${
             allowOverflow
               ? '[@container(max-width:23rem)]:col-start-1 [@container(max-width:23rem)]:row-start-2 [@container(max-width:23rem)]:justify-self-end'
-              : '[@container(max-width:23rem)]:absolute [@container(max-width:23rem)]:bottom-3 [@container(max-width:23rem)]:right-4'
+              : '[@container(max-width:23rem)]:absolute [@container(max-width:23rem)]:bottom-2 [@container(max-width:23rem)]:right-3.5'
           }`}
         >
           {busy ? t.working : action.label}
@@ -167,7 +167,7 @@ export function PluginRowActions({
         className={
           allowOverflow
             ? '[@container(max-width:23rem)]:col-start-2 [@container(max-width:23rem)]:row-start-1'
-            : '[@container(max-width:23rem)]:absolute [@container(max-width:23rem)]:right-4 [@container(max-width:23rem)]:top-4'
+            : '[@container(max-width:23rem)]:absolute [@container(max-width:23rem)]:right-3.5 [@container(max-width:23rem)]:top-3'
         }
       />
       {allowOverflow && (canUninstall || secondaryUpdate) && (

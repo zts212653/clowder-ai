@@ -7,12 +7,17 @@ import { useShellCopy } from '../shell/shell-copy';
 import { useApprovalItemActions } from '../useApprovalItemActions';
 import { ApprovalMember } from './ApprovalMember';
 import { ApprovalResultRow } from './ApprovalResultRow';
-import { CardBlock } from './CardBlock';
 import { decisionResultCopy } from './decision-result.shell-copy';
+import { PersonMemoryOriginal } from './PersonMemoryOriginal';
 import { PersonMemoryUndo } from './PersonMemoryUndo';
 import { personMemoryCopy } from './person-memory.shell-copy';
 import type { PersonMemoryCoordinate } from './person-memory-proposal-source';
-import { personMemoryOutcomeText, personMemoryResultLabel, personMemorySnapshotResult } from './person-memory-result';
+import {
+  personMemoryOutcomeText,
+  personMemoryResultLabel,
+  personMemorySnapshotResult,
+  personMemoryWriteCount,
+} from './person-memory-result';
 import { usePersonMemoryProposal } from './use-person-memory-proposal';
 
 /** The same original selector, original writer and exact owner receipt in Chat and every approval host. */
@@ -41,7 +46,13 @@ export function PersonMemoryApprovalCard({
   const actual = snapshot ? personMemorySnapshotResult(snapshot) : null;
   const label =
     actual && snapshot?.status !== 'pending_approval'
-      ? personMemoryOutcomeText(actual.outcome, t, resultCopy, snapshot?.hasRetainedWrites === true)
+      ? personMemoryOutcomeText(
+          actual.outcome,
+          t,
+          resultCopy,
+          snapshot?.hasRetainedWrites === true,
+          personMemoryWriteCount(snapshot?.materialized),
+        )
       : null;
   const participant = shown ?? item;
   const displayName =
@@ -55,13 +66,13 @@ export function PersonMemoryApprovalCard({
       t,
       resultCopy,
       snapshot.hasRetainedWrites === true,
+      personMemoryWriteCount(snapshot.materialized),
     );
     return (
       <article data-testid={`approval-item-${proposalId}`}>
         <ApprovalResultRow status={result.status} label={resultLabel}>
           {typeof displayName === 'string' ? <h3 className="font-semibold">{t.person(displayName)}</h3> : null}
-          {block ? <CardBlock block={{ ...block, actions: undefined }} /> : null}
-          <output data-testid="person-memory-result">{label}</output>
+          {block ? <PersonMemoryOriginal block={block} /> : null}
           {receipt && !result.undoApplied ? (
             <p data-testid="person-memory-receipt">
               {t.receipt(
@@ -115,7 +126,7 @@ export function PersonMemoryApprovalCard({
       ) : block ? (
         <details>
           <summary className="shell-focusable cursor-pointer">{t.original}</summary>
-          <CardBlock block={{ ...block, actions: undefined }} />
+          <PersonMemoryOriginal block={block} />
         </details>
       ) : null}
       {label ? (

@@ -253,7 +253,7 @@ export function ConnectorBubble({
           reason={typeof source.meta?.reason === 'string' ? source.meta.reason : undefined}
         />
       ) : (
-        <MarkdownContent content={message.content} />
+        <MarkdownContent referenceThreadId={threadId} content={message.content} />
       )}
       {richBlocks && richBlocks.length > 0 && (
         <RichBlocks blocks={richBlocks} messageSource={message.source} publication={publication} />

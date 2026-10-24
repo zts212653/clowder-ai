@@ -4,6 +4,7 @@ import { ApprovalItemCard } from '@/components/ApprovalItemCard';
 import { MarkdownContent } from '@/components/MarkdownContent';
 import { CardBlock } from '@/components/rich/CardBlock';
 import { HandoffCardContent } from '@/components/rich/HandoffCardContent';
+import { PersonMemoryOriginal } from '@/components/rich/PersonMemoryOriginal';
 import { PersonMemoryRetainedReceipt } from '@/components/rich/PersonMemoryRetainedReceipt';
 import { ProfileUpdateCardContent } from '@/components/rich/ProfileUpdateCardContent';
 import { ReconciledApprovalResult } from '@/components/rich/ReconciledApprovalResult';
@@ -52,16 +53,7 @@ export function ApprovalDecisionReceipt({
         >
           {session.originalBlock ? (
             <div data-testid="approval-receipt-original">
-              <MarkdownContent
-                content={session.originalBlock.bodyMarkdown ?? ''}
-                className="!text-xs"
-                disableCommandPrefix
-              />
-              {session.originalBlock.fields?.map((field) => (
-                <p key={field.label}>
-                  {field.label}: {field.value}
-                </p>
-              ))}
+              <PersonMemoryOriginal block={session.originalBlock} />
             </div>
           ) : null}
         </ApprovalHostContext.Provider>
@@ -87,11 +79,6 @@ export function ApprovalDecisionReceipt({
   return (
     <ReconciledApprovalResult terminal={terminal} line={line} onExpandedChange={onExpandedChange}>
       {heading ? <MarkdownContent content={heading} className="!text-sm [&_p]:mb-0" disableCommandPrefix /> : null}
-      {approval.sourceFeatureId === 'F225' || approval.sourceFeatureId === 'F231' ? (
-        <output className="block" data-testid="original-approval-terminal">
-          {line}
-        </output>
-      ) : null}
       <ApprovalHostContext.Provider
         value={{
           ...PERMISSIVE_APPROVAL_HOST,

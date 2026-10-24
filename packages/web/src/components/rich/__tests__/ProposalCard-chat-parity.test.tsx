@@ -6,6 +6,7 @@ import { ApprovalHostContext, PERMISSIVE_APPROVAL_HOST } from '@/components/Appr
 import { writeShellLanguage } from '@/components/shell/shell-language';
 import { writeShellPresentation } from '@/components/shell/shell-presentation';
 import type { RichCardBlock } from '@/stores/chat-types';
+import { useSidebarProjectionStore } from '@/stores/sidebarProjectionStore';
 import { apiFetch } from '@/utils/api-client';
 import { ProposalCard } from '../ProposalCard';
 
@@ -67,6 +68,7 @@ let root: Root;
 beforeEach(() => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
   writeShellPresentation('v2');
+  useSidebarProjectionStore.setState({ rows: [] });
   vi.mocked(apiFetch)
     .mockReset()
     .mockImplementation(async () => Response.json({ proposal }));
@@ -88,22 +90,110 @@ async function render(card: React.ReactNode) {
 it('uses the Inbox producer card and human field names in the Chat entry', async () => {
   await render(<ProposalCard block={block} messageId="source-card-message" />);
   expect(host.querySelector(`[data-testid="approval-item-${proposal.proposalId}"]`)).not.toBeNull();
-  for (const text of ['谁来做', '放在', '怎么跟进', '界面设计的原对话', '每到一个阶段回报一次'])
+  for (const text of [
+    '派给',
+    '项目',
+    '放进 Group',
+    '回报',
+    '置顶',
+    '先开口',
+    '界面设计的原对话',
+    '每到一个阶段回报一次',
+  ])
     expect(host.textContent).toContain(text);
   for (const raw of ['父 Thread', '建议成员', 'state-transitions', proposal.projectPath])
     expect(host.textContent).not.toContain(raw);
 });
 
-it('keeps the first message formatted when the original seven-field editor opens', async () => {
+it('sends an inline change request to the proposer while preserving the formatted first message', async () => {
   await render(<ProposalCard proposal={proposal} />);
-  const edit = [...host.querySelectorAll('button')].find((button) => button.textContent === '编辑');
-  expect(edit).toBeDefined();
-  await act(async () => edit?.click());
-  const preview = host.querySelector('[data-testid="proposal-initial-message-editor-preview"]');
-  expect(preview?.querySelector('strong')?.textContent).toBe('真相源');
-  expect(preview?.querySelectorAll('li')).toHaveLength(2);
-  expect(preview?.textContent).not.toContain('**');
+  expect(host.querySelector('[data-testid="proposal-initial-message"] strong')?.textContent).toBe('真相源');
+  const revise = [...host.querySelectorAll('button')].find((button) => button.textContent === '让小太阳改…');
+  expect(revise).toBeDefined();
+  await act(async () => revise?.click());
+  const input = host.querySelector<HTMLInputElement>('input[aria-label="想怎么改？"]')!;
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set?.call(input, '换 Argon 审');
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  await act(async () => host.querySelector<HTMLButtonElement>('button[type="submit"]')?.click());
+  const write = vi.mocked(apiFetch).mock.calls.find((call) => call[1]?.method === 'POST');
+  expect(write?.[0]).toBe(`/api/proposals/${proposal.proposalId}/request-revision`);
+  expect(JSON.parse(String(write?.[1]?.body))).toEqual({ instruction: '换 Argon 审' });
+  expect(host.textContent).toContain('已发给提议的猫');
+  expect(host.querySelector('[data-testid="proposal-initial-message"] strong')?.textContent).toBe('真相源');
+});
+
+it('lets a keyboard reader focus the bounded first-message region', async () => {
+  await render(<ProposalCard proposal={proposal} />);
+  const region = host.querySelector<HTMLElement>('[aria-label="第一条消息"]');
+  expect(region).not.toBeNull();
+  expect(region?.tabIndex).toBe(0);
+  region?.focus();
+  expect(document.activeElement).toBe(region);
+});
+
+it('offers existing projects from the canonical rows when the legacy thread cache is empty', async () => {
+  useSidebarProjectionStore.setState({
+    rows: [
+      {
+        id: 'other-project-thread',
+        title: 'Existing project',
+        participants: [],
+        pinned: false,
+        favorited: false,
+        labels: [],
+        preferredCats: [],
+        projectPath: '/isolated/existing-project',
+        lastActiveAt: 1,
+        systemKind: null,
+        isHubThread: false,
+        unreadCount: 0,
+        hasUserMention: false,
+        presence: { status: 'idle' },
+      },
+    ],
+  });
+  await render(<ProposalCard proposal={proposal} />);
+  const projects = host.querySelector<HTMLButtonElement>('button[role="combobox"][aria-label="项目"]');
+  expect(projects).not.toBeNull();
+  await act(async () => projects?.click());
+  const option = [...host.querySelectorAll<HTMLButtonElement>('[role="option"]')].find(
+    (option) => option.textContent?.trim() === 'existing-project',
+  );
+  expect(option).toBeDefined();
+  await act(async () => option?.click());
+  expect(projects?.textContent).toContain('existing-project');
+  expect(document.activeElement).toBe(projects);
+  await act(async () => host.querySelector<HTMLButtonElement>('[data-testid="approve-btn"]')?.click());
+  const write = vi.mocked(apiFetch).mock.calls.find((call) => call[1]?.method === 'POST');
+  expect(JSON.parse(String(write?.[1]?.body)).projectPath).toBe('/isolated/existing-project');
+});
+
+it.each([
+  true,
+  false,
+])('keeps a local revision draft editable while the host refuses writes (locked=%s)', async (locked) => {
+  const authorizeWrite = vi.fn(() => false);
+  await render(
+    <ApprovalHostContext.Provider value={{ ...PERMISSIVE_APPROVAL_HOST, writesLocked: locked, authorizeWrite }}>
+      <ProposalCard proposal={proposal} />
+    </ApprovalHostContext.Provider>,
+  );
+  const revise = [...host.querySelectorAll<HTMLButtonElement>('button')].find(
+    (button) => button.textContent === '让小太阳改…',
+  )!;
+  expect(revise.disabled).toBe(false);
+  await act(async () => revise.click());
+  const input = host.querySelector<HTMLInputElement>('input[aria-label="想怎么改？"]')!;
+  expect(input.disabled).toBe(false);
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set?.call(input, '换 Argon 审');
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  await act(async () => host.querySelector<HTMLButtonElement>('button[type="submit"]')?.click());
   expect(vi.mocked(apiFetch).mock.calls.filter((call) => call[1]?.method === 'POST')).toHaveLength(0);
+  expect(input.value).toBe('换 Argon 审');
 });
 
 it.each(['zh', 'en'] as const)('collapses an approved Chat proposal to the verified result in %s', async (language) => {

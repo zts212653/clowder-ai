@@ -7,10 +7,15 @@ import {
 } from '@cat-cafe/shared';
 import type Database from 'better-sqlite3';
 import {
+  normalizeToolExecutionPolicy,
+  parseToolExecutionPolicy,
+} from '../../domains/cats/services/agents/invocation/tool-execution-policy.js';
+import {
   normalizeOwnerAuthProvenance,
   type OwnerAuthProvenance,
   requireOwnerAuthProvenance,
 } from '../../domains/cats/services/owner-auth-provenance.js';
+import type { ToolExecutionPolicy } from '../../domains/cats/services/types.js';
 import { assertDevelopmentReturnChain } from './development-return/DevelopmentReturnChain.js';
 import { MANAGED_COMMAND_CANDIDATE_FILTER } from './managed-command-candidate-schema.js';
 import { type RetainedManagedCommandState, reconcileRetainedManagedCommand } from './retained-managed-command.js';
@@ -44,6 +49,12 @@ export interface DynamicTaskDef {
 
 export type DevelopmentReturnStorage = 'direct' | 'reviewed' | 'successor' | 'parent_bound';
 
+/** Private registration facts; neither field may come from public schedule params. */
+export interface DynamicTaskOwnerAuthorization {
+  readonly ownerAuthProvenance: OwnerAuthProvenance;
+  readonly toolExecutionPolicy?: ToolExecutionPolicy;
+}
+
 function developmentReturnColumns(
   registration: DevelopmentReturnRegistrationV1 | null,
   storage: DevelopmentReturnStorage,
@@ -67,7 +78,7 @@ export class DynamicTaskStore {
 
   insert(
     def: DynamicTaskDef,
-    privateOwnerAuthProvenance?: OwnerAuthProvenance,
+    privateAuthorization?: OwnerAuthProvenance | DynamicTaskOwnerAuthorization,
     privateReturn?: DevelopmentReturnRegistrationV1,
     returnStorage: DevelopmentReturnStorage = 'direct',
     predecessorSupersession?: DevelopmentReturnRegistrationV1,
@@ -91,16 +102,28 @@ export class DynamicTaskStore {
     ) {
       throw new Error('Active return supersession must name the new registration predecessor');
     }
+    const snapshot = typeof privateAuthorization === 'object' ? privateAuthorization : undefined;
     const ownerAuthProvenance =
-      privateOwnerAuthProvenance === undefined ? null : requireOwnerAuthProvenance(privateOwnerAuthProvenance);
+      privateAuthorization === undefined
+        ? null
+        : requireOwnerAuthProvenance(snapshot ? snapshot.ownerAuthProvenance : privateAuthorization);
+    // SQL NULL means the old writer did not record restrictions. JSON null proves this
+    // authenticated registration had none; the two must not collapse on recovery.
+    const toolPolicy = snapshot
+      ? JSON.stringify(
+          snapshot.toolExecutionPolicy === undefined
+            ? null
+            : normalizeToolExecutionPolicy(snapshot.toolExecutionPolicy),
+        )
+      : null;
     const returnColumns = developmentReturnColumns(registration, returnStorage);
     this.db
       .transaction(() => {
         this.preparePrivateReturnInsert(registration, predecessorSupersession);
         this.db
           .prepare(
-            `INSERT INTO dynamic_task_defs (id, template_id, trigger_json, params_json, entrusted_work_reevaluation_json, display_json, delivery_thread_id, enabled, created_by, created_at, owner_auth_provenance, development_return_json, reviewed_development_return_json, successor_development_return_json, parent_bound_development_return_json)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            `INSERT INTO dynamic_task_defs (id, template_id, trigger_json, params_json, entrusted_work_reevaluation_json, display_json, delivery_thread_id, enabled, created_by, created_at, owner_auth_provenance, development_return_json, reviewed_development_return_json, successor_development_return_json, parent_bound_development_return_json, tool_execution_policy_json)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           )
           .run(
             def.id,
@@ -118,6 +141,7 @@ export class DynamicTaskStore {
             returnColumns.reviewed,
             returnColumns.successor,
             returnColumns.parentBound,
+            toolPolicy,
           );
       })
       .immediate();
@@ -270,6 +294,22 @@ export class DynamicTaskStore {
       | { owner_auth_provenance: unknown }
       | undefined;
     return normalizeOwnerAuthProvenance(row?.owner_auth_provenance);
+  }
+
+  getPrivateOwnerAuthorization(id: string): DynamicTaskOwnerAuthorization {
+    const row = this.db
+      .prepare('SELECT owner_auth_provenance, tool_execution_policy_json FROM dynamic_task_defs WHERE id = ?')
+      .get(id) as { owner_auth_provenance: unknown; tool_execution_policy_json: string | null } | undefined;
+    const ownerAuthProvenance = normalizeOwnerAuthProvenance(row?.owner_auth_provenance);
+    if (row?.tool_execution_policy_json === 'null') return { ownerAuthProvenance };
+    return {
+      ownerAuthProvenance,
+      // Legacy registration has no proof of unrestricted tools. Preserve its grade,
+      // but do not manufacture authority from a message, a cat id, or current settings.
+      toolExecutionPolicy: row?.tool_execution_policy_json
+        ? parseToolExecutionPolicy(row.tool_execution_policy_json)
+        : { mode: 'read_only', replayDeniedToolNames: [] },
+    };
   }
 
   remove(id: string): boolean {

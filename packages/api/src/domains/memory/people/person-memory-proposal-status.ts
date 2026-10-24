@@ -3,10 +3,16 @@ import type { StoredPersonMemoryCandidate } from './PersonMemoryStore.js';
 /** Current un-undone approvals, not the mere presence of a historical decision/Undo receipt. */
 export function projectPersonMemoryRetainedEffects(candidate: StoredPersonMemoryCandidate) {
   const receipt = candidate.latestDecisionReceipt;
+  // A receipt names one approval batch. Earlier un-undone drafts require a separate aggregate;
+  // until one exists, expose the retained effect without mislabelling the last batch as its total.
+  const receiptCoversRetained =
+    receipt &&
+    Array.isArray(receipt.selectedDraftIds) &&
+    candidate.approval?.approvedDraftIds.every((id) => receipt.selectedDraftIds.some((selected) => selected === id));
   const retained = (candidate.approval?.approvedDraftIds.length ?? 0) > 0;
   return {
     ...(retained ? { hasRetainedWrites: true } : {}),
-    ...(retained && receipt?.candidateId === candidate.candidateId
+    ...(retained && receiptCoversRetained && receipt?.candidateId === candidate.candidateId
       ? {
           materialized: {
             claims: receipt.materializedClaimIds.length,

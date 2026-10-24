@@ -65,10 +65,23 @@ function resultSentence(kind, language, verb) {
   return verb === 'approve'
     ? language === 'en'
       ? /written to your profile/i
-      : /已批准并写入档案/
+      : /已同意 · 已写入档案/
     : language === 'en'
       ? /rejected|declined/i
       : /已拒绝|已驳回/;
+}
+async function verifyProfileTechnicalLabels({ page, card, language, evidence, name }) {
+  const title = language === 'en' ? 'Technical details' : '技术详情';
+  const technical = card.locator('details').filter({ has: page.locator('summary').filter({ hasText: title }) });
+  await technical.locator('summary').click();
+  assert.deepEqual(
+    await technical.locator('dt').allTextContents(),
+    language === 'en' ? ['Target path: ', 'Source: '] : ['目标路径：', '来源：'],
+  );
+  if (language === 'en') assert.doesNotMatch(await technical.innerText(), /[\u3400-\u9fff]/u);
+  assert.equal(await technical.locator('form,input,textarea,select').count(), 0);
+  await technical.screenshot({ path: path.join(evidence, `${name}-technical.png`), animations: 'disabled' });
+  await technical.locator('summary').click();
 }
 export function registerOriginalApprovalJourneys(evidenceRoot) {
   const inverse = process.env.F322_ORIGINAL_APPROVAL_INVERSE === '1';
@@ -200,15 +213,17 @@ export function registerOriginalApprovalJourneys(evidenceRoot) {
             await card.getByTestId('decision-result-label').innerText(),
             resultSentence(record.kind, language, chatVerb),
           );
-          assert.equal(await card.getByTestId('original-approval-terminal').count(), 0);
+          assert.equal(await card.getByTestId('decision-result-details').count(), 0);
           await freezeVisibleCard(page, card);
           await page.screenshot({ path: path.join(evidence, `chat-${record.kind}-collapsed.png`), fullPage: true });
           await card.locator('button[aria-expanded="false"]').click();
-          await card.getByTestId('original-approval-terminal').waitFor();
+          await card.getByTestId('decision-result-label').waitFor();
           assert.match(
-            await card.getByTestId('original-approval-terminal').innerText(),
+            await card.getByTestId('decision-result-label').innerText(),
             resultSentence(record.kind, language, chatVerb),
           );
+          if (record.kind === 'F231')
+            await verifyProfileTechnicalLabels({ page, card, language, evidence, name: `chat-${record.proposalId}` });
           await freezeVisibleCard(page, card);
           await page.screenshot({ path: path.join(evidence, `chat-${record.kind}-after.png`), fullPage: true });
         }
@@ -322,10 +337,18 @@ export function registerOriginalApprovalJourneys(evidenceRoot) {
               language,
               canonical.status === 'approved' ? 'approve' : 'reject',
             );
-            await receipt.getByTestId('original-approval-terminal').filter({ hasText: expected }).waitFor();
+            await receipt.getByTestId('decision-result-label').filter({ hasText: expected }).waitFor();
             assert.match(await receipt.getByTestId('decision-result-label').innerText(), expected);
           }
           const originalText = await receipt.getByTestId('approval-receipt-original').textContent();
+          if (record.kind === 'F231')
+            await verifyProfileTechnicalLabels({
+              page,
+              card: receipt,
+              language,
+              evidence,
+              name: `inbox-${record.proposalId}`,
+            });
           assert.ok(
             originalText.includes(
               record.kind === 'F225'
@@ -387,7 +410,7 @@ export function registerOriginalApprovalJourneys(evidenceRoot) {
           );
           await current.getByTestId('decision-result-label').filter({ hasText: expected }).waitFor();
           await current.locator('button[aria-expanded="false"]').click();
-          assert.match(await current.getByTestId('original-approval-terminal').innerText(), expected);
+          assert.match(await current.getByTestId('decision-result-label').innerText(), expected);
           assert.equal(await current.locator('form, input, textarea, select').count(), 0);
           await freezeVisibleCard(page, current);
           await current.screenshot({ path: path.join(evidence, `${record.proposalId}-Chat-cold-outcome.png`) });

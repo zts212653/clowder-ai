@@ -18,6 +18,13 @@ const snapshotSchema = z.object({
   approvalCardMessageId: z.string(),
   replacedByProposalId: z.string().min(1).optional(),
   hasRetainedWrites: z.boolean().optional(),
+  materialized: z
+    .object({
+      claims: z.number().int().nonnegative(),
+      relationships: z.number().int().nonnegative(),
+      events: z.number().int().nonnegative(),
+    })
+    .optional(),
   undoApplied: z.boolean().optional(),
   decisionReceipt: receiptSchema.optional(),
   undoReceipt: z

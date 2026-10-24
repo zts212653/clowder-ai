@@ -32,11 +32,6 @@ export function conversationResult(
     choices.length && (reason === 'answered' || reason === 'defaulted') ? t.selected(choices.join(' / ')) : '';
   return {
     status: result.status,
-    label:
-      selected && reason === 'defaulted'
-        ? `${selected} · ${result.label}`
-        : selected
-          ? `${result.label} · ${selected}`
-          : result.label,
+    label: selected && reason === 'defaulted' ? `${selected} · ${result.label}` : selected ? selected : result.label,
   };
 }

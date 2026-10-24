@@ -77,6 +77,7 @@ export interface PrivateQueueDeliveryInput {
   priority?: 'urgent' | 'normal';
   sourceCategory?: PersistedQueueDeliveryInput['sourceCategory'];
   ownerAuthProvenance?: OwnerAuthProvenance;
+  toolExecutionPolicy?: ToolExecutionPolicy;
 }
 
 export interface VisibleWithPrivateQueueDeliveryInput extends PrivateQueueDeliveryInput {
@@ -240,6 +241,7 @@ export class PersistedQueueDelivery implements PersistedQueueDeliveryPort {
       sourceId: input.idempotencyKey,
       kind: 'private_input' as const,
       ownerAuthProvenance: input.ownerAuthProvenance ?? ('unknown' as const),
+      ...(input.toolExecutionPolicy ? { readOnlyToolPolicy: input.toolExecutionPolicy } : {}),
       idempotencyKey: input.idempotencyKey,
       content: input.content,
       from: input.from,

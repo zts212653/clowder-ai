@@ -92,7 +92,7 @@ for (const language of ['zh', 'en'] as const)
       const expected = language === 'zh' ? zh : en;
       expect(container.querySelector('[data-testid=decision-result-label]')?.textContent).toMatch(expected);
       await act(async () => container.querySelector<HTMLButtonElement>('button[aria-expanded=false]')?.click());
-      expect(container.querySelector('[data-testid=original-approval-terminal]')?.textContent).toMatch(expected);
+      expect(container.querySelector('[data-testid=decision-result-details]')?.textContent).not.toMatch(expected);
       expect(container.textContent).toContain('Continue the accepted verification.');
       expect(container.querySelectorAll('form, input, textarea, select')).toHaveLength(0);
       expect(vi.mocked(apiFetch).mock.calls.some(([, options]) => options?.method === 'POST')).toBe(false);

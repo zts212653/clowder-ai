@@ -96,7 +96,7 @@ it('shows the actual public default selection as a gray result, without a respon
   );
   await render();
   const result = container.querySelector('[data-testid="decision-result-label"]');
-  expect(result?.textContent).toMatch(/^(?:Selected|已选择) · Alpha/);
+  expect(result?.textContent).toMatch(/^(?:Chose “Alpha”|已选「Alpha」)/);
   expect(container.querySelector('[data-testid="decision-result-dot"]')?.getAttribute('data-status')).toBe('closed');
   expect(vi.mocked(apiFetch).mock.calls.some(([, options]) => options?.method === 'POST')).toBe(false);
 });
@@ -112,9 +112,7 @@ it('submits the server-bound original block through one canonical CAS writer, ne
   expect(body.operationId).toEqual(expect.any(String));
   expect(body.operationId.length).toBeGreaterThan(0);
   expect(sends).toEqual([]);
-  expect(container.querySelector('[data-testid=conversation-decision-result]')?.textContent).toContain(
-    '已在对话里回答',
-  );
+  expect(container.querySelector('[data-testid=conversation-decision-result]')?.textContent).toContain('已选「Alpha」');
   expect(vi.mocked(apiFetch).mock.calls.some(([url]) => String(url).includes('block-state'))).toBe(false);
 });
 it('does not turn an unbound ordinary guide or navigation card into a runtime decision', async () => {

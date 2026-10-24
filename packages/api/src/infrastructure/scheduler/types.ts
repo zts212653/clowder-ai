@@ -96,6 +96,7 @@ export interface PrivateDeliverOpts {
   priority?: 'urgent' | 'normal';
   sourceCategory?: 'ci' | 'review' | 'conflict' | 'scheduled' | 'a2a' | 'issue';
   ownerAuthProvenance?: import('../../domains/cats/services/owner-auth-provenance.js').OwnerAuthProvenance;
+  toolExecutionPolicy?: import('../../domains/cats/services/types.js').ToolExecutionPolicy;
 }
 
 export interface DeliverOpts {
@@ -121,6 +122,7 @@ export interface DeliverOpts {
   suggestedSkill?: string;
   sourceCategory?: 'ci' | 'review' | 'conflict' | 'scheduled' | 'a2a' | 'issue';
   ownerAuthProvenance?: import('../../domains/cats/services/owner-auth-provenance.js').OwnerAuthProvenance;
+  toolExecutionPolicy?: import('../../domains/cats/services/types.js').ToolExecutionPolicy;
   /** Optional canonical source identity for scheduler-backed continuation producers. */
   source?: ConnectorSource;
 }

@@ -12,6 +12,7 @@ import {
 } from '@/components/ApprovalHost';
 import type { PublishedMessageCoordinate } from '@/components/content-review/usePublishedContent';
 import { useShellCopy } from '@/components/shell/shell-copy';
+import { useShellPresentation } from '@/components/shell/shell-presentation';
 import { pushThreadRouteWithHistory } from '@/components/ThreadSidebar/thread-navigation';
 import { recordThreadProposalDemoUse } from '@/lib/feature-demo-telemetry';
 import type { RichCardBlock } from '@/stores/chat-types';
@@ -42,6 +43,7 @@ function selectExistingProjectPaths(state: ReturnType<typeof useChatStore.getSta
 }
 
 export function useProposalCardState({ block, proposal }: ProposalCardInput) {
+  const isV2 = useShellPresentation() === 'v2';
   const t = useShellCopy(proposalCardCopy);
   const proposalId = useMemo(
     () => proposal?.proposalId ?? (block ? extractProposalId(block) : null),
@@ -52,7 +54,10 @@ export function useProposalCardState({ block, proposal }: ProposalCardInput) {
   const [editing, setEditing] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [pinOnApprove, setPinOnApprove] = useState(false);
+  const [pinOnApprove, setPinOnApprove] = useState(proposal?.suggestedPinned ?? false);
+  const [attentionGroupId, setAttentionGroupId] = useState(
+    proposal?.attentionGroupId !== undefined ? (proposal.attentionGroupId ?? '') : (proposal?.suggestedGroupId ?? ''),
+  );
   const guardedWrite = useGuardedWrite();
   const authorizeContinuation = useAuthorizeWrite();
   const writeBlocked = useWriteBlocked(loading);
@@ -160,19 +165,22 @@ export function useProposalCardState({ block, proposal }: ProposalCardInput) {
       if (!proposalId) return;
       setLoading(true);
       setError(null);
-      const body: Record<string, unknown> = editing
-        ? {
-            title: edits.title.trim() || undefined,
-            parentThreadId: edits.parentThreadId.trim() || undefined,
-            preferredCats: parsePreferredCats(edits.preferredCats),
-            initialMessage: edits.initialMessage.trim() ? edits.initialMessage.trim() : null,
-            // F128: empty box = no override (keep the proposal's projectPath); a path re-homes the
-            // child thread. Backend validates + fail-loud rejects an invalid path (400).
-            projectPath: edits.projectPath.trim() || undefined,
-            reportingMode: edits.reportingMode,
-            declaredWorkMode: edits.declaredWorkMode || undefined,
-          }
-        : {};
+      const body: Record<string, unknown> =
+        editing && !isV2
+          ? {
+              title: edits.title.trim() || undefined,
+              parentThreadId: edits.parentThreadId.trim() || undefined,
+              preferredCats: parsePreferredCats(edits.preferredCats),
+              initialMessage: edits.initialMessage.trim() ? edits.initialMessage.trim() : null,
+              // F128: empty box = no override (keep the proposal's projectPath); a path re-homes the
+              // child thread. Backend validates + fail-loud rejects an invalid path (400).
+              projectPath: edits.projectPath.trim() || undefined,
+              reportingMode: edits.reportingMode,
+              declaredWorkMode: edits.declaredWorkMode || undefined,
+            }
+          : isV2 && proposal
+            ? { projectPath: edits.projectPath.trim() || undefined, attentionGroupId: attentionGroupId || null }
+            : {};
       if (pinOnApprove) body.pinned = true;
       let receivedResponse = false;
       try {
@@ -183,7 +191,7 @@ export function useProposalCardState({ block, proposal }: ProposalCardInput) {
         });
         receivedResponse = true;
         reportEvidence({ outcome: res.ok ? 'settled' : 'http-error', status: res.status });
-        const data = (await res.json()) as { threadId?: string; error?: string };
+        const data = (await res.json()) as { threadId?: string; error?: string; warnings?: string[] };
         if (!res.ok) throw new Error(data.error ?? `HTTP ${res.status}`);
         recordThreadProposalDemoUse(data);
         const newThreadId = data.threadId ?? null;
@@ -192,6 +200,7 @@ export function useProposalCardState({ block, proposal }: ProposalCardInput) {
         setResultThreadId(newThreadId);
         setStatus('approved');
         setEditing(false);
+        if (data.warnings?.length) setError(data.warnings.join(' · '));
         if (newThreadId) {
           if (!authorizeContinuation('producer-card')) {
             setError(t.continuationRefused);
@@ -215,6 +224,9 @@ export function useProposalCardState({ block, proposal }: ProposalCardInput) {
       pinOnApprove,
       authorizeContinuation,
       t.continuationRefused,
+      isV2,
+      proposal,
+      attentionGroupId,
     ],
   );
 
@@ -260,6 +272,8 @@ export function useProposalCardState({ block, proposal }: ProposalCardInput) {
     error,
     pinOnApprove,
     setPinOnApprove,
+    attentionGroupId,
+    setAttentionGroupId,
     writeBlocked,
     edits,
     setEdits,

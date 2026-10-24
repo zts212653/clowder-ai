@@ -4,6 +4,24 @@ import { installLegacyEntityRevisionFixture } from './legacy-entity-revision-fix
 export function installV43CueLedgerSchemaFixture(db) {
   installLegacyEntityRevisionFixture(db);
   db.exec(`
+    -- V32 is already present in a real V43 database; V69 indexes this ledger.
+    CREATE TABLE entity_revision_events (
+      revision_id INTEGER PRIMARY KEY AUTOINCREMENT,
+      entity_id TEXT NOT NULL,
+      operation TEXT NOT NULL CHECK (operation IN ('create', 'update')),
+      before_json TEXT,
+      after_json TEXT NOT NULL,
+      source TEXT NOT NULL,
+      actor_id TEXT,
+      proposal_id TEXT,
+      reason TEXT,
+      created_at TEXT NOT NULL
+    );
+    CREATE INDEX idx_entity_revision_events_entity_time ON entity_revision_events(entity_id, revision_id);
+    CREATE TRIGGER entity_revision_events_no_update BEFORE UPDATE ON entity_revision_events
+    BEGIN SELECT RAISE(ABORT, 'entity revision events are append-only'); END;
+    CREATE TRIGGER entity_revision_events_no_delete BEFORE DELETE ON entity_revision_events
+    BEGIN SELECT RAISE(ABORT, 'entity revision events are append-only'); END;
     CREATE TABLE memory_cue_events (
       event_id TEXT PRIMARY KEY,
       idempotency_key TEXT NOT NULL UNIQUE,

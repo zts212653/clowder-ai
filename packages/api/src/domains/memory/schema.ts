@@ -1784,6 +1784,16 @@ export function applyMigrations(db: Database.Database): void {
       db.prepare('INSERT INTO schema_version(version,applied_at) VALUES (?,?)').run(69, new Date().toISOString());
     })();
   }
+  // V70: hold continuations retain their authenticated caller's tool restrictions.
+  // Existing rows stay NULL (unknown restrictions); no historical authority is upgraded.
+  if (currentVersion < 70) {
+    db.transaction(() => {
+      const columns = db.prepare('PRAGMA table_info(dynamic_task_defs)').all() as Array<{ name: string }>;
+      if (!columns.some((column) => column.name === 'tool_execution_policy_json'))
+        db.exec('ALTER TABLE dynamic_task_defs ADD COLUMN tool_execution_policy_json TEXT');
+      db.prepare('INSERT INTO schema_version(version,applied_at) VALUES (?,?)').run(70, new Date().toISOString());
+    })();
+  }
 }
 
 /**

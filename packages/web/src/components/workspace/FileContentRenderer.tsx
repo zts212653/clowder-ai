@@ -12,6 +12,7 @@ import { WorkspacePendingFileQuoteMarks } from '../workbench/content-review/Work
 import { useWorkspaceSurfaceVisibility } from '../workbench/WorkspaceSurfaceVisibility';
 import { CodeViewer } from './CodeViewer';
 import { JsxPreview } from './JsxPreview';
+import { OfficeFileCard } from './OfficeFileCard';
 import type { MarkdownSelectionAction } from './useMarkdownSelectionAction';
 import type { WorkspaceFileSave } from './workspace-file-draft';
 
@@ -164,6 +165,8 @@ export function FileContentRenderer({
   }, [mdActive, mdContainerRef, scrollToLine]);
 
   if (file.binary) {
+    if (/\.(?:pptx?|docx?|xlsx?)$/i.test(file.path))
+      return <OfficeFileCard file={file} worktreeId={worktreeId} root={currentWorktree?.root} />;
     if (file.mime.startsWith('image/'))
       return (
         <div className="flex-1 flex items-center justify-center bg-[var(--ws-editor-bg)] p-4 overflow-auto">

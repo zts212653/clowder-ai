@@ -27,6 +27,19 @@ interface Options {
 type Decision<T> = { value: T } | { error: HostBrokerError };
 const denied = (message: string) => new HostBrokerError('AUTHORITY_CHANGED', message);
 
+export type StaticFeatureRunStage =
+  | 'feature-snapshot'
+  | 'package-verification'
+  | 'broker-transaction'
+  | 'inventory-transaction'
+  | 'authority-check';
+
+/** Optional trusted Host observation, never a package input or authority grant. */
+export interface StaticFeatureRunDiagnostics {
+  measure<T>(stage: StaticFeatureRunStage, work: () => Promise<T>): Promise<T>;
+  checkAuthority(work: () => void): void;
+}
+
 /** Host-owned activation for declarative static features, with no bootstrap/effect APIs.
  * Package code is never imported. General Train B callbacks/state/settlement tokens are
  * outside this admission class; they cannot be requested through this authority.
@@ -136,8 +149,12 @@ export class StaticFeatureAuthority {
   /** Keep revocation and owner-effect linearization in order, including inventory CAS.
    * Work must not re-enter either Host store. Only trusted Host consumers receive this port.
    */
-  run<T>(executionLease: string, work: (lease: StaticFeatureLease) => Promise<T>): Promise<T> {
-    return this.withLease(executionLease, 'active', (record) => work(structuredClone(record)));
+  run<T>(
+    executionLease: string,
+    work: (lease: StaticFeatureLease) => Promise<T>,
+    diagnostics?: StaticFeatureRunDiagnostics,
+  ): Promise<T> {
+    return this.withLease(executionLease, 'active', (record) => work(structuredClone(record)), diagnostics);
   }
 
   async resolve(pluginInstanceId: string, providerId: string): Promise<StaticFeatureLease | null> {
@@ -183,60 +200,75 @@ export class StaticFeatureAuthority {
     executionLease: string,
     phase: 'provisioning' | 'active',
     work: (lease: StaticFeatureLease, tx: HostBrokerTransaction, inventory: PluginInventoryTransaction) => Promise<T>,
+    diagnostics?: StaticFeatureRunDiagnostics,
   ): Promise<T> {
+    const measure: StaticFeatureRunDiagnostics['measure'] = (stage, operation) =>
+      diagnostics ? diagnostics.measure(stage, operation) : operation();
     // Package IO must not hold the shared Broker/inventory locks: a slow scan
     // otherwise starves renewal and owner revocation. Recheck all authority
     // inside the transaction after the scan, including the current clock.
-    const candidate = (await this.options.store.snapshot()).staticFeatures?.leases.find(
-      (r) => r.executionLease === executionLease,
-    );
+    const candidate = (
+      await measure('feature-snapshot', () => this.options.store.snapshot())
+    ).staticFeatures?.leases.find((r) => r.executionLease === executionLease);
     if (!candidate || candidate.state === 'revoked') throw denied('feature lease is revoked or unknown');
     if (candidate.state !== phase) throw denied(`feature lease is not ${phase}`);
     let packageTrusted = true;
     try {
-      await this.options.verifyActivePackage(candidate.pluginInstanceId, candidate.packageRevision);
+      await measure('package-verification', () =>
+        this.options.verifyActivePackage(candidate.pluginInstanceId, candidate.packageRevision),
+      );
     } catch {
       packageTrusted = false;
     }
-    const decision = await this.options.store.transaction((tx) =>
-      this.options.inventory.transaction(async (inventory): Promise<Decision<T>> => {
-        const ledger = tx.staticFeatures.get();
-        const record = ledger.leases.find((r) => r.executionLease === executionLease);
-        if (!record || record.state === 'revoked') return { error: denied('feature lease is revoked or unknown') };
-        if (record.state !== phase) return { error: denied(`feature lease is not ${phase}`) };
-        try {
-          const { instance, manifest } = this.current(tx, inventory, {
-            ...record,
-            packageDigest: record.packageRevision,
-          });
-          this.declarations(manifest, record.featureId);
-          if (!matchesStaticFeatureGrants(this.admission, record.grantedCapabilities))
-            throw denied('feature belongs to a different Host admission class');
-          const desired = ledger.preferences.find(
-            (r) => r.pluginInstanceId === record.pluginInstanceId && r.featureId === record.featureId,
-          );
-          const epoch = ledger.epochs.find(
-            (r) => r.pluginInstanceId === record.pluginInstanceId && r.integrityEpoch === record.integrityEpoch,
-          );
-          if (
-            !desired?.enabled ||
-            epoch?.state !== 'verified' ||
-            instance.lifecycleRevision !== record.lifecycleRevision
-          ) {
-            throw denied('feature authority changed');
-          }
-        } catch (error) {
-          tx.staticFeatures.put(revokeStaticFeatures(ledger, (r) => r.executionLease === executionLease, this.now()));
-          return { error: error instanceof HostBrokerError ? error : denied('feature authority changed') };
-        }
-        if (!packageTrusted) {
-          tx.staticFeatures.put(
-            containStaticFeatureEpoch(ledger, record.pluginInstanceId, record.integrityEpoch, this.now()),
-          );
-          return { error: denied('package integrity is untrusted') };
-        }
-        return { value: await work(record, tx, inventory) };
-      }),
+    const decision = await measure('broker-transaction', () =>
+      this.options.store.transaction((tx) =>
+        measure('inventory-transaction', () =>
+          this.options.inventory.transaction(async (inventory): Promise<Decision<T>> => {
+            const ledger = tx.staticFeatures.get();
+            const record = ledger.leases.find((r) => r.executionLease === executionLease);
+            if (!record || record.state === 'revoked') return { error: denied('feature lease is revoked or unknown') };
+            if (record.state !== phase) return { error: denied(`feature lease is not ${phase}`) };
+            try {
+              const checkAuthority = () => {
+                const { instance, manifest } = this.current(tx, inventory, {
+                  ...record,
+                  packageDigest: record.packageRevision,
+                });
+                this.declarations(manifest, record.featureId);
+                if (!matchesStaticFeatureGrants(this.admission, record.grantedCapabilities))
+                  throw denied('feature belongs to a different Host admission class');
+                const desired = ledger.preferences.find(
+                  (r) => r.pluginInstanceId === record.pluginInstanceId && r.featureId === record.featureId,
+                );
+                const epoch = ledger.epochs.find(
+                  (r) => r.pluginInstanceId === record.pluginInstanceId && r.integrityEpoch === record.integrityEpoch,
+                );
+                if (
+                  !desired?.enabled ||
+                  epoch?.state !== 'verified' ||
+                  instance.lifecycleRevision !== record.lifecycleRevision
+                ) {
+                  throw denied('feature authority changed');
+                }
+              };
+              if (diagnostics) diagnostics.checkAuthority(checkAuthority);
+              else checkAuthority();
+            } catch (error) {
+              tx.staticFeatures.put(
+                revokeStaticFeatures(ledger, (r) => r.executionLease === executionLease, this.now()),
+              );
+              return { error: error instanceof HostBrokerError ? error : denied('feature authority changed') };
+            }
+            if (!packageTrusted) {
+              tx.staticFeatures.put(
+                containStaticFeatureEpoch(ledger, record.pluginInstanceId, record.integrityEpoch, this.now()),
+              );
+              return { error: denied('package integrity is untrusted') };
+            }
+            return { value: await work(record, tx, inventory) };
+          }),
+        ),
+      ),
     );
     if ('error' in decision) throw decision.error;
     return decision.value;

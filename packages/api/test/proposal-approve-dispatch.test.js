@@ -93,8 +93,8 @@ describe('F128 approve dispatch — initialMessage routing', () => {
     const entries = invocationQueue.list(body.threadId, 'alice');
     assert.equal(entries.length, 1);
     assert.ok(
-      entries[0].payload.content.startsWith('Kick this off'),
-      'enqueued content should start with user-typed content',
+      entries[0].payload.content.startsWith('@opus\n\nKick this off'),
+      'the seed starts with assignments followed by the unchanged message body',
     );
     assert.deepEqual(
       entries.flatMap((entry) => entry.targets),

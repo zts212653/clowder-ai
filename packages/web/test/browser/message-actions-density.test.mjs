@@ -158,7 +158,13 @@ async function gotoHydratedFixture(page, timeout = HYDRATION_TIMEOUT_MS) {
       (async () => {
         // The fixture owns an explicit hydration marker. Next dev can keep ancillary requests
         // active after the page is usable, so network-idle is not part of this test's contract.
-        await page.goto(baseUrl, { waitUntil: 'domcontentloaded', timeout });
+        // The load event still matters: returning at DOMContentLoaded can race a dev-client reload
+        // and destroy the execution context immediately after the hydration marker appears.
+        await page.goto(baseUrl, { waitUntil: 'load', timeout });
+        await waitForHydratedFixture(page, timeout);
+        // Next dev may replace the just-hydrated document once while its client rebuild settles.
+        // Require the marker to survive a short quiet window before any pointer or Range work.
+        await page.waitForTimeout(500);
         await waitForHydratedFixture(page, timeout);
       })(),
       clientFailure,
@@ -195,8 +201,52 @@ async function gotoHydratedFixture(page, timeout = HYDRATION_TIMEOUT_MS) {
   }
 }
 
+async function waitForMessageActionsReady(page, messageId, { painted = false, timeout = 5_000 } = {}) {
+  await page.waitForFunction(
+    ({ expectedMessageId, expectedPainted }) => {
+      const row = Array.from(document.querySelectorAll('[data-message-id]')).find(
+        (candidate) => candidate.getAttribute('data-message-id') === expectedMessageId,
+      );
+      const plane = Array.from(document.querySelectorAll('[data-message-actions-owner]')).find(
+        (candidate) => candidate.getAttribute('data-message-actions-owner') === expectedMessageId,
+      );
+      const classicRoot = row?.closest('[data-context-quote-source="message"]');
+      const classicCompact = window.matchMedia('(max-width: 767px), (hover: none) and (pointer: coarse)').matches;
+      const control =
+        plane?.querySelector(
+          '[data-testid="message-actions-toolbar"], [data-testid="message-actions-compact-trigger"]',
+        ) ??
+        classicRoot?.querySelector(
+          classicCompact
+            ? '[data-testid="message-actions-compact-trigger"]'
+            : '[data-testid="message-actions-toolbar"]',
+        );
+      if (!(control instanceof HTMLElement)) return false;
+      if (
+        plane instanceof HTMLElement &&
+        (plane.dataset.messageActionsReady !== 'true' || getComputedStyle(plane).visibility !== 'visible')
+      )
+        return false;
+      if (!expectedPainted) return true;
+      return Number(getComputedStyle(control).opacity) === 1 && getComputedStyle(control).pointerEvents === 'auto';
+    },
+    { expectedMessageId: messageId, expectedPainted: painted },
+    { timeout },
+  );
+}
+
+async function settleMessageInViewport(page, messageId) {
+  const actionRoot = page
+    .locator(`[data-context-quote-source="message"]:has([data-message-id="${messageId}"])`)
+    .first();
+  await actionRoot.scrollIntoViewIfNeeded();
+  await page.mouse.move(0, 0);
+  await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+  return actionRoot;
+}
+
 async function reloadHydratedFixture(page) {
-  await page.reload({ waitUntil: 'domcontentloaded' });
+  await page.reload({ waitUntil: 'load' });
   await waitForHydratedFixture(page);
 }
 
@@ -370,6 +420,8 @@ test('message actions occupy no resting layout and stay unpainted until asked fo
   await page.setViewportSize({ width: 1440, height: 900 });
   try {
     await gotoHydratedFixture(page);
+    const densityActionRoot = await settleMessageInViewport(page, 'f294-density-message');
+    await waitForMessageActionsReady(page, 'f294-density-message');
 
     const resting = await page.evaluate(readToolbarState);
     assert.equal(resting.hostPaddingTop, '0px', 'a resting message must not pad the top for its action bar');
@@ -384,17 +436,14 @@ test('message actions occupy no resting layout and stay unpainted until asked fo
       `author and timestamp must remain one metadata cluster, saw ${resting.authorToTimestampGap}px`,
     );
 
-    await page.locator('[data-testid="f294-density-source"] [data-message-id="f294-density-message"]').hover();
-    // transition-opacity animates, so settle before measuring.
-    await page.waitForFunction(
-      () => {
-        const toolbar = document.querySelector(
-          '[data-testid="f294-density-source"] [data-testid="message-actions-toolbar"]',
-        );
-        return toolbar !== null && Number(getComputedStyle(toolbar).opacity) === 1;
-      },
-      { timeout: 5_000 },
+    const densityActionBox = await densityActionRoot.boundingBox();
+    assert.ok(densityActionBox, 'the visible density action owner must have a pointer target');
+    await page.mouse.move(
+      densityActionBox.x + densityActionBox.width / 2,
+      densityActionBox.y + densityActionBox.height / 2,
     );
+    // transition-opacity animates, so settle before measuring.
+    await waitForMessageActionsReady(page, 'f294-density-message', { painted: true });
     const hovered = await page.evaluate(readToolbarState);
     assert.equal(hovered.toolbarOpacity, 1, 'the action bar must appear on hover');
     assert.equal(hovered.toolbarPointerEvents, 'auto', 'the revealed action bar must be clickable');
@@ -417,6 +466,19 @@ test('message actions occupy no resting layout and stay unpainted until asked fo
       false,
       'the unified dock must not duplicate branch/delete behind an overflow menu',
     );
+  } finally {
+    await page.close();
+  }
+});
+
+test('message actions preserve keyboard focus and body-focus isolation', { timeout: 90_000 }, async () => {
+  const page = await browserContext.newPage();
+  await page.setViewportSize({ width: 1440, height: 900 });
+  try {
+    await gotoHydratedFixture(page);
+    await settleMessageInViewport(page, 'f294-density-message');
+    await waitForMessageActionsReady(page, 'f294-density-message');
+    const resting = await page.evaluate(readToolbarState);
 
     // Moving the pointer away and focusing a hidden action must reveal the same local row for
     // keyboard users, without relying on hover to keep it painted.
@@ -461,9 +523,24 @@ test('message actions occupy no resting layout and stay unpainted until asked fo
 
     // Keyboard users reach the same actions without a pointer.
     await selectionButton.focus();
-    await selectionButton.click();
+    await page.keyboard.press('Enter');
+    await page.waitForFunction(
+      () => document.querySelector('[data-testid="f294-density-enter-count"]')?.textContent === '1',
+      null,
+      { timeout: 5_000 },
+    );
     assert.equal(await page.getByTestId('f294-density-enter-count').textContent(), '1');
     assert.equal(await page.getByTestId('f294-density-enter-message').textContent(), 'f294-density-message');
+  } finally {
+    await page.close();
+  }
+});
+
+test('rendered quote-plane fixtures preserve collision and generated-text facts', { timeout: 90_000 }, async () => {
+  const page = await browserContext.newPage();
+  await page.setViewportSize({ width: 1440, height: 900 });
+  try {
+    await gotoHydratedFixture(page);
 
     // Measure what a human selecting the SECOND rendered paragraph actually reports.
     const collision = await page.evaluate(() => {
@@ -600,21 +677,10 @@ test('a revealed message toolbar never covers adjacent message chrome', { timeou
     await page.setViewportSize(viewport);
     try {
       await gotoHydratedFixture(page);
-      await page
-        .locator('[data-testid="f294-density-source"] [data-message-id="f294-density-followup-message"]')
-        .hover();
-      await page.waitForFunction(
-        () => {
-          const rows = document.querySelectorAll(
-            '[data-testid="f294-density-source"] [data-context-quote-source="message"]',
-          );
-          const toolbar = rows[1]?.querySelector(
-            '[data-testid="message-actions-toolbar"], [data-testid="message-actions-compact-trigger"]',
-          );
-          return toolbar !== null && Number(getComputedStyle(toolbar).opacity) === 1;
-        },
-        { timeout: 5_000 },
-      );
+      const followupActionRoot = await settleMessageInViewport(page, 'f294-density-followup-message');
+      await waitForMessageActionsReady(page, 'f294-density-followup-message');
+      await followupActionRoot.hover();
+      await waitForMessageActionsReady(page, 'f294-density-followup-message', { painted: true });
 
       const collision = await page.evaluate(readAdjacentMessageCollision);
       assert.equal(
@@ -636,6 +702,59 @@ test('a revealed message toolbar never covers adjacent message chrome', { timeou
     }
   }
 });
+
+test(
+  'an uncatalogued completed assistant keeps message actions off first-row content',
+  { timeout: 90_000 },
+  async () => {
+    const page = await browserContext.newPage();
+    await page.setViewportSize({ width: 1440, height: 900 });
+    try {
+      await gotoHydratedFixture(page);
+      await settleMessageInViewport(page, 'f294-unknown-author-message');
+      await waitForMessageActionsReady(page, 'f294-unknown-author-message');
+
+      const row = page
+        .locator('[data-testid="f294-unknown-author-source"] [data-message-id="f294-unknown-author-message"]')
+        .first();
+      const bodyLink = row.getByRole('link', { name: '打开第一行文件' });
+
+      // Ordinary Playwright click intentionally moves a real pointer over the content. The
+      // message hover therefore reveals the action dock just as it does for a person; force-click
+      // would hide the regression by bypassing the dock's hit target.
+      const [openedPage] = await Promise.all([
+        page.waitForEvent('popup', { timeout: 5_000 }),
+        bodyLink.click({ timeout: 5_000 }),
+      ]);
+      try {
+        await openedPage.waitForURL((url) => url.hash === '#f294-unknown-author-click', { timeout: 5_000 });
+      } finally {
+        await openedPage.close();
+      }
+
+      await row.hover();
+      await waitForMessageActionsReady(page, 'f294-unknown-author-message', { painted: true });
+      const [toolbarBox, linkBox] = await Promise.all([
+        page
+          .locator(
+            '[data-message-actions-owner="f294-unknown-author-message"] [data-testid="message-actions-toolbar"], [data-message-id="f294-unknown-author-message"] [data-testid="message-actions-toolbar"]',
+          )
+          .first()
+          .boundingBox(),
+        bodyLink.boundingBox(),
+      ]);
+      assert.ok(toolbarBox && linkBox, 'unknown-author geometry fixture must render both link and action dock');
+      const overlap =
+        toolbarBox.x < linkBox.x + linkBox.width &&
+        toolbarBox.x + toolbarBox.width > linkBox.x &&
+        toolbarBox.y < linkBox.y + linkBox.height &&
+        toolbarBox.y + toolbarBox.height > linkBox.y;
+      assert.equal(overlap, false, 'the revealed action dock must not cover unknown-author body controls');
+    } finally {
+      await page.close();
+    }
+  },
+);
 
 test(
   'a cross-row paragraph selection keeps the real MessageActions forward affordance',
@@ -820,6 +939,7 @@ test(
       const page = await context.newPage();
       try {
         await gotoHydratedFixture(page);
+        await settleMessageInViewport(page, 'f294-density-message');
 
         // Guard the emulation itself: without (hover: none) this test would prove nothing.
         const touchLike = await page.evaluate(() => window.matchMedia('(hover: none) and (pointer: coarse)').matches);
@@ -835,21 +955,55 @@ test(
         assert.ok(entryBox.width >= 44, `compact entry width must be at least 44px, saw ${entryBox.width}`);
         assert.ok(entryBox.height >= 44, `compact entry height must be at least 44px, saw ${entryBox.height}`);
 
-        await compactEntry.tap();
+        await page.touchscreen.tap(entryBox.x + entryBox.width / 2, entryBox.y + entryBox.height / 2);
         const expandedDock = page.getByTestId('message-actions-compact-sheet').getByTestId('message-actions-toolbar');
         await expandedDock.waitFor({ state: 'visible' });
-        const directTargets = expandedDock.locator('button');
-        const targetCount = await directTargets.count();
-        assert.ok(targetCount >= 4, 'the compact entry must expand the complete direct action dock');
-        for (let index = 0; index < targetCount; index += 1) {
-          const box = await directTargets.nth(index).boundingBox();
-          assert.ok(box, `expanded action ${index} must have a rendered hit box`);
+        await page.waitForFunction(
+          () => {
+            const dock = document.querySelector(
+              '[data-testid="message-actions-compact-sheet"] [data-testid="message-actions-toolbar"]',
+            );
+            if (!dock) return false;
+            const buttons = Array.from(dock.querySelectorAll('button'));
+            return (
+              buttons.length >= 4 &&
+              buttons.every((button) => {
+                const box = button.getBoundingClientRect();
+                return box.width >= 44 && box.height >= 44;
+              })
+            );
+          },
+          null,
+          { timeout: 5_000 },
+        );
+        const expandedMetrics = await expandedDock.evaluate((dock) => {
+          const actions = Array.from(dock.querySelectorAll('button')).map((button) => {
+            const box = button.getBoundingClientRect();
+            return { width: box.width, height: box.height };
+          });
+          const selection = dock.querySelector('button[aria-label="多选消息"]')?.getBoundingClientRect();
+          return {
+            actions,
+            selection: selection
+              ? { x: selection.x, y: selection.y, width: selection.width, height: selection.height }
+              : null,
+          };
+        });
+        assert.ok(expandedMetrics.actions.length >= 4, 'the compact entry must expand the complete direct action dock');
+        for (const [index, box] of expandedMetrics.actions.entries()) {
           assert.ok(box.width >= 44, `expanded action ${index} width must be at least 44px, saw ${box.width}`);
           assert.ok(box.height >= 44, `expanded action ${index} height must be at least 44px, saw ${box.height}`);
         }
 
         // Tapping the expanded action still targets the originating message.
-        await expandedDock.getByRole('button', { name: '多选消息' }).tap();
+        const selectionBox = expandedMetrics.selection;
+        assert.ok(selectionBox, 'the expanded multi-select action must have a touch hit box');
+        await page.touchscreen.tap(selectionBox.x + selectionBox.width / 2, selectionBox.y + selectionBox.height / 2);
+        await page.waitForFunction(
+          () => document.querySelector('[data-testid="f294-density-enter-count"]')?.textContent === '1',
+          null,
+          { timeout: 5_000 },
+        );
         assert.equal(await page.getByTestId('f294-density-enter-count').textContent(), '1');
         assert.equal(await page.getByTestId('f294-density-enter-message').textContent(), 'f294-density-message');
       } finally {

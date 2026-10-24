@@ -19,7 +19,7 @@ export const decisionResultCopy = defineShellCopy(
       notTracked: '这次不纳入跟踪',
       custodyTitle: '帮你接住这件事',
       technical: '技术详情',
-      selected: (value: string) => `已选择 · ${value}`,
+      selected: (value: string) => `已选「${value}」`,
     },
     en: {
       approved: 'Approved',
@@ -38,7 +38,7 @@ export const decisionResultCopy = defineShellCopy(
       notTracked: 'Not tracked this time',
       custodyTitle: 'Keep track of this work',
       technical: 'Technical details',
-      selected: (value: string) => `Selected · ${value}`,
+      selected: (value: string) => `Chose “${value}”`,
     },
   },
   { samples: { selected: [['Option A'], ['Option B']] } },

@@ -595,6 +595,7 @@ export function ThreadSidebar({ onClose, className, routeThreadId, activeDestina
     titleFor: attentionClusterTitle,
     rename: renameAttentionCluster,
     savedGroups: attentionSavedGroups,
+    recentGroupIds: attentionRecentGroupIds,
     mutateGroup: mutateAttentionGroup,
     preferenceError: attentionPreferenceError,
     groupLoadState: attentionLoadState,
@@ -1930,6 +1931,7 @@ export function ThreadSidebar({ onClose, className, routeThreadId, activeDestina
                 request={searchGroupRequest}
                 threads={liveThreads}
                 groups={attentionSavedGroups}
+                recentGroupIds={attentionRecentGroupIds}
                 renderThread={renderThreadItem}
                 onCommand={mutateAttentionGroup}
                 onReload={reloadAttentionGroups}

@@ -5,6 +5,7 @@ import type { AgentMessage, AgentServiceOptions, MessageMetadata } from '../../.
 import { type RawArchiveSink, sanitizeRawEvent } from '../../codex-audit-hooks.js';
 import type { createAgyNativeContinuityInput } from '../agy-native-continuity.js';
 import type { AgyNativeLaunchPlan } from '../agy-native-launch.js';
+import { recoverAgyNativeMcpSpill } from '../agy-native-mcp-spill.js';
 import { AgyNativeProgress } from '../agy-native-progress.js';
 import { type AgyNativeObservedTurn, observeAgyNativeTurn, projectAgyNativeTurn } from '../agy-native-turn.js';
 import { AgyNativeRunInput } from './agy-native-run-input.js';
@@ -119,7 +120,15 @@ export async function* runAgyNativeInvocation(input: {
         };
       } else if (observation.kind === 'step') {
         await runInput?.step(observation.event);
-        yield* runOutput ? runOutput.step(observation.event) : progress.step(observation.event);
+        const messages = runOutput ? runOutput.step(observation.event) : progress.step(observation.event);
+        for (const message of messages) {
+          yield await recoverAgyNativeMcpSpill(
+            message,
+            observation.event,
+            launch.binding.profileHome,
+            launch.agentTools,
+          );
+        }
       } else if (observation.kind === 'result') {
         if (runInput && runOutput) {
           const messages = runOutput.result(observation.observed);

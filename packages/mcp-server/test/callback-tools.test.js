@@ -55,6 +55,25 @@ describe('MCP Callback Tools', () => {
     }
   });
 
+  test('propose_thread forwards explicit empty fields when clearing an owner revision', async () => {
+    const { handleProposeThread } = await import('../dist/tools/callback-tools.js');
+    let body;
+    globalThis.fetch = async (_url, options) => {
+      body = JSON.parse(options.body);
+      return { ok: true, json: async () => ({ proposalId: 'replacement', status: 'pending' }) };
+    };
+    const result = await handleProposeThread({
+      title: 'same work',
+      reason: 'clear assignments and body',
+      supersedesProposalId: 'original',
+      preferredCats: [],
+      initialMessage: '',
+    });
+    assert.notEqual(result.isError, true);
+    assert.deepEqual(body.preferredCats, []);
+    assert.equal(body.initialMessage, '');
+  });
+
   test('propose_taste forwards an optional takeaway hypothesis with the approval request', async () => {
     const { handleProposeTaste, proposeTasteInputSchema } = await import('../dist/tools/callback-tools.js');
     assert.equal(proposeTasteInputSchema.takeaway.safeParse('我们以为 You 喜欢清楚的来源。').success, true);

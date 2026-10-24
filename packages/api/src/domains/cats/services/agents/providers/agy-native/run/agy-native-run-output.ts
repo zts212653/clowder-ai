@@ -36,7 +36,7 @@ export class AgyNativeRunOutput {
       observed.cancelledBeforeTerminal === true,
       this.tools,
     );
-    this.successful = observed.turn.upstreamStatus === 'SUCCESS' && messages.at(-1)?.errorCode === undefined;
+    this.successful = messages.at(-1)?.type === 'done' && messages.at(-1)?.errorCode === undefined;
     const projected = this.progress
       .final(messages)
       .filter((m) => m.type !== 'done' && m.type !== 'error')

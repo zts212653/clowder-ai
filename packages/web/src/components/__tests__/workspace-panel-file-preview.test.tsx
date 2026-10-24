@@ -14,7 +14,7 @@ import { WorkspacePanel } from '../WorkspacePanel';
 vi.hoisted(() => vi.stubEnv('NEXT_PUBLIC_PROJECT_ROOT', '/tmp/listed'));
 afterAll(() => vi.unstubAllEnvs());
 
-vi.mock('@/utils/api-client', () => ({ apiFetch: vi.fn() }));
+vi.mock('@/utils/api-client', () => ({ apiFetch: vi.fn(), API_URL: 'http://localhost:3102' }));
 // Keep the real stamp consumer, foreground binding, dispatch and persisted topology; only the leaf does no file I/O.
 vi.mock('@/components/workbench/F307OwnerSurfaceRenderer', () => ({
   F307OwnerSurfaceRenderer: ({ surface }: { surface: WorkspaceSurfaceDescriptor }) => (
@@ -50,17 +50,48 @@ beforeEach(() => {
     threadStates: {},
     _workspaceFileSetAt: { ts: 0, threadId: null },
   });
-  vi.mocked(apiFetch).mockResolvedValue({
-    ok: true,
-    json: async () => ({
-      worktrees: [
-        { id: 'listed-worktree', canonicalId: 'listed-worktree', root: '/tmp/listed', branch: 'main', head: 'a' },
-      ],
-      files: [],
-      executions: [],
-      items: [],
-    }),
-  } as Response);
+  vi.mocked(apiFetch).mockImplementation(async (url, options) => {
+    if (url === '/api/workspace/chat-references') {
+      const { groups } = JSON.parse(String(options?.body)) as {
+        groups: { threadId: string; references: string[] }[];
+      };
+      return Response.json({
+        groups: groups.map((group) => ({
+          threadId: group.threadId,
+          results: group.references.map((reference) => {
+            const file = /^(docs\/(?:B|C)\.md)(?::(7|40))?$/.exec(reference);
+            return {
+              reference,
+              target: file
+                ? {
+                    kind: 'file',
+                    entryType: 'file',
+                    worktreeId: 'listed-worktree',
+                    path: file[1],
+                    absolutePath: `/tmp/listed/${file[1]}`,
+                    line: file[2] ? Number(file[2]) : null,
+                    mime: 'text/markdown',
+                    size: 42,
+                    modifiedAt: '2026-10-23T08:00:00Z',
+                  }
+                : null,
+            };
+          }),
+        })),
+      });
+    }
+    return {
+      ok: true,
+      json: async () => ({
+        worktrees: [
+          { id: 'listed-worktree', canonicalId: 'listed-worktree', root: '/tmp/listed', branch: 'main', head: 'a' },
+        ],
+        files: [],
+        executions: [],
+        items: [],
+      }),
+    } as Response;
+  });
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
@@ -127,7 +158,10 @@ it.each([
     root.render(
       <>
         <div data-message-id="document-source">
-          <MarkdownContent content="[Document B](docs/B.md:7) [B line 40](docs/B.md:40) docs/C.md" />
+          <MarkdownContent
+            referenceThreadId="file-stamp-thread"
+            content="[Document B](docs/B.md:7) [B line 40](docs/B.md:40) docs/C.md"
+          />
         </div>
         <WorkspacePanel threadId="file-stamp-thread" projectPath="/tmp/listed" />
       </>,
@@ -137,26 +171,32 @@ it.each([
   const originalA = before.surfaces.find((surface) => resolveFileTarget(surface)?.path === 'docs/A.md');
   expect(originalA).toBeDefined();
   const click = async (label: string) => {
-    const link = Array.from(container.querySelectorAll('button, a')).find((item) => item.textContent === label);
+    const link = Array.from(container.querySelectorAll('button, a')).find(
+      (item) => item.getAttribute('aria-label') === label,
+    );
     expect(link).toBeDefined();
     if (!link) throw new Error(`Missing link: ${label}`);
     await act(async () => link.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true })));
     return useF307ExperienceWorkbenchStore.getState().layout;
   };
-  const opened = await click('Document B');
+  // The controlled metadata reply follows the batch reader's 8ms flush.
+  await act(async () => new Promise((resolve) => setTimeout(resolve, 20)));
+  expect(container.querySelectorAll('[data-chat-reference-kind=file]')).toHaveLength(3);
+  const opened = await click('/tmp/listed/docs/B.md:7');
   expect(opened.surfaces.map((surface) => resolveFileTarget(surface)?.path)).toEqual(['docs/A.md', 'docs/B.md']);
   expect(opened.surfaces[0]).toEqual(originalA);
   const b = opened.surfaces[1];
   if (!b) throw new Error('Document B did not open');
   expect(opened.previewSurfaceId).not.toBe(b.id);
-  const navigated = await click('B line 40');
+  const navigated = await click('/tmp/listed/docs/B.md:40');
   expect(navigated.surfaces).toHaveLength(2);
   expect(navigated.activeSurfaceId).toBe(b.id);
   expect(resolveFileTarget(b)).toMatchObject({ path: 'docs/B.md', scrollToLine: 7 });
   const updatedB = navigated.surfaces[1];
   if (!updatedB) throw new Error('Document B was lost');
   expect(resolveFileTarget(updatedB)).toMatchObject({ path: 'docs/B.md', scrollToLine: 40 });
-  const c = await click('docs/C.md');
+  // A plain chat path is a verified filename chip; preserve the original tab assertions below.
+  const c = await click('/tmp/listed/docs/C.md');
   expect(c.surfaces.map((surface) => resolveFileTarget(surface)?.path)).toEqual([
     'docs/A.md',
     'docs/B.md',

@@ -2443,7 +2443,23 @@ export async function handleBootcampEnvCheck(input: WithAgentKey<{ threadId: str
 // ============ Propose Thread (F128) ============
 
 export const proposeThreadInputSchema = {
-  title: z.string().min(1).max(200).describe('Title for the proposed thread (user can edit before approving)'),
+  title: z.string().min(1).max(200).describe('Title for the proposed thread (owner can ask the proposer to revise it)'),
+  suggestedGroupId: z
+    .string()
+    .regex(/^attention_[A-Za-z0-9_-]+$/)
+    .nullable()
+    .optional()
+    .describe(
+      'Optional owner Group ID to suggest. Omit to suggest the source conversation Group, then a title F-number match; null suggests no Group. The server verifies ownership. Membership changes only after owner approval.',
+    ),
+  supersedesProposalId: z
+    .string()
+    .min(1)
+    .max(200)
+    .optional()
+    .describe(
+      'Replace your pending proposal after an owner asks you to revise it. Requires the exact revision-request message as this invocation source; publish the complete revised proposal. The old card is superseded only after the new card is visible. Omitted fields retain the original assignments, message, workflow, parent and Task binding; inherited Task ownership is revalidated.',
+    ),
   reason: z.string().min(1).max(1000).describe('Why a new thread is needed (shown to the user on the proposal card)'),
   preferredCats: z
     .array(z.string().min(1))
@@ -2455,7 +2471,7 @@ export const proposeThreadInputSchema = {
     .max(4000)
     .optional()
     .describe(
-      'Optional first message body posted as the source cat (AC-AA4 source attribution) into the new thread on approve. Server injects routing credentials (threadId + @handle) into the header so downstream cats can cross-post back. The server does NOT infer external PR identity, author role, maintainer policy, or auto-inject the opensource-ops skill; if the child thread will handle a GitHub PR/issue, the first cat must load the opensource-ops skill and perform its own grounding.',
+      'Optional first message body posted as the source cat into the new thread on approval. Do not repeat assignment @mentions at the beginning: preferredCats is the sole assignment source and the server prepends its handles. Server injects routing credentials (threadId + @handle) into the header so downstream cats can cross-post back. The server does NOT infer external PR identity, author role, maintainer policy, or auto-inject the opensource-ops skill; if the child thread will handle a GitHub PR/issue, the first cat must load the opensource-ops skill and perform its own grounding.',
     ),
   reportingMode: z
     .enum(['none', 'final-only', 'state-transitions', 'blocking-ack'])
@@ -2496,6 +2512,8 @@ export const proposeThreadInputSchema = {
 
 export async function handleProposeThread(input: {
   title: string;
+  suggestedGroupId?: string | null | undefined;
+  supersedesProposalId?: string | undefined;
   reason: string;
   preferredCats?: string[] | undefined;
   initialMessage?: string | undefined;
@@ -2514,8 +2532,10 @@ export async function handleProposeThread(input: {
     reason: input.reason,
     clientRequestId: input.clientRequestId ?? randomUUID(),
   };
-  if (input.preferredCats?.length) body.preferredCats = input.preferredCats;
-  if (input.initialMessage) body.initialMessage = input.initialMessage;
+  if (input.suggestedGroupId !== undefined) body.suggestedGroupId = input.suggestedGroupId;
+  if (input.supersedesProposalId) body.supersedesProposalId = input.supersedesProposalId;
+  if (input.preferredCats !== undefined) body.preferredCats = input.preferredCats;
+  if (input.initialMessage !== undefined) body.initialMessage = input.initialMessage;
   if (input.reportingMode) body.reportingMode = input.reportingMode;
   if (input.declaredWorkMode) body.declaredWorkMode = input.declaredWorkMode;
   if (input.parentThreadId) body.parentThreadId = input.parentThreadId;
@@ -4173,8 +4193,8 @@ export const callbackTools = [
       'only when a clearly separable, long-running discussion genuinely deserves its own thread, or when the owner asks for "新开一个 thread". ' +
       'Do NOT use to escape the current conversation, to split routine tasks, or proactively without an obvious need. ' +
       'parentThreadId defaults to the current thread. After proposing, continue your current work — do not assume the thread exists until the user approves. ' +
-      'WRITING @-mentions in `initialMessage`: use the SAME stable handle you use in the current thread (e.g. `@砚砚`, `@opus46`, `@gemini`) — NOT the raw catId form like `@cat-rcs85pvn`. ' +
-      'Server normalizes known catIds to stable handles defensively, but always prefer the handle form so the proposal card reads naturally to the user. ' +
+      'ASSIGNMENT: preferredCats is the single source of recipients; do not prepend their @mentions in initialMessage. The server generates that salutation. When the owner asks the proposer to revise, send a complete new proposal with supersedesProposalId; the exact revision request must be your invocation source. ' +
+      'GROUP: suggestedGroupId is only a suggestion. Omission suggests the source conversation Group, then a title F-number match; null means no Group. Only owner approval writes membership. ' +
       'preferredCats accepts catIds (returned by cat_cafe_get_thread_cats). DISPATCH MODEL: when the user approves, the server wakes ONLY the FIRST cat in preferredCats (the chain starter). Subsequent cats are woken by the chain-driven @-mentions cats write in their own replies. ORDER preferredCats EXACTLY as you want the chain to start (e.g. for 接龙/轮转, put the first 棒 cat first). ' +
       'FORK-AND-RETURN pattern (thread-orchestration skill Step 5c): use `reportingMode` to set the report-back contract. Ask yourself: "做完后源 thread 是否需要结果回来？" — YES (most cases) → omit reportingMode or set `final-only` (default); NO, downstream self-governs → set `none`; need phase updates → `state-transitions`; need blocking ack → `blocking-ack`. On approval the initial message is prefixed with a "## 主 Thread" header carrying routing credentials (threadId + targetCats/handle) so the last cat knows exactly where and whom to cross-post to. ' +
       'OPEN-SOURCE PR GUIDANCE: when title/reason/initialMessage references a GitHub PR or issue, the child thread should load the `opensource-ops` skill. The server does NOT infer external PR identity, author role, maintainer policy, or auto-inject the opensource-ops skill. Ground the provider object and author in the child workspace, route findings to the external author by default, and only dispatch fixes to local cats with explicit operator or maintainer authorization and provenance. ' +

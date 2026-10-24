@@ -92,7 +92,7 @@ export function PluginListRow({
       <div
         className={
           modern
-            ? 'relative flex min-h-[76px] w-full items-center gap-3 px-4 py-3 [@container(max-width:23rem)]:min-h-[96px]'
+            ? 'relative flex min-h-[62px] w-full items-center gap-3 px-3.5 py-2 [@container(max-width:23rem)]:min-h-[80px]'
             : 'grid min-h-[88px] w-full grid-cols-[minmax(0,1fr)_auto_auto_auto] items-center gap-2 px-4 py-3 [@container(max-width:23rem)]:grid-cols-[minmax(0,1fr)_auto]'
         }
       >
@@ -101,7 +101,12 @@ export function PluginListRow({
           className={`flex min-w-0 items-center gap-3 text-left ${modern ? 'flex-1 [@container(max-width:23rem)]:pr-10' : ''}`}
           onClick={onSelect}
         >
-          <PluginVisual icon={plugin.icon} iconBg={plugin.iconBg} name={plugin.displayName} />
+          <PluginVisual
+            icon={plugin.icon}
+            iconBg={plugin.iconBg}
+            name={plugin.displayName}
+            className={modern ? '!h-[34px] !w-[34px] !rounded-[9px]' : ''}
+          />
           <span className="min-w-0 flex-1">
             <span className="flex min-w-0 items-center gap-1.5">
               <SettingsText
@@ -136,7 +141,7 @@ export function PluginListRow({
               <span
                 data-plugin-summary
                 data-plugin-attention={reason ? '' : undefined}
-                className="mt-1 flex min-w-0 items-center gap-1.5 text-compact text-cafe-secondary [@container(max-width:23rem)]:pr-8"
+                className="mt-0.5 flex min-w-0 items-center gap-1.5 text-compact text-cafe-secondary [@container(max-width:23rem)]:pr-8"
               >
                 {(reason || pluginHasUpdate(plugin)) && (
                   <span

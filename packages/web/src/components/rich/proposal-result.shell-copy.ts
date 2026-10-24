@@ -2,6 +2,9 @@ import { defineShellCopy } from '@/components/shell/shell-copy';
 
 export const proposalResultCopy = defineShellCopy({
   zh: {
+    superseded: '已被新提议替代',
+    replacement: '查看新提议 ↓',
+    replacementUnavailable: '未能打开新提议，请重试',
     approved: '已同意',
     opened: '对话已开',
     effectUnknown: '实际结果尚未确认',
@@ -12,6 +15,9 @@ export const proposalResultCopy = defineShellCopy({
     proposer: '谁提的',
   },
   en: {
+    superseded: 'Replaced by a new proposal',
+    replacement: 'View new proposal ↓',
+    replacementUnavailable: 'Could not open the new proposal; retry',
     approved: 'Approved',
     opened: 'conversation opened',
     effectUnknown: 'Effect not yet confirmed',

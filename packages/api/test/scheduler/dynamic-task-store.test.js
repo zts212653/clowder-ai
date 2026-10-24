@@ -103,8 +103,54 @@ test('V44 preserves legacy tasks and private owner auth across a database restar
   migrated = new DynamicTaskStore(db);
   assert.equal(migrated.getPrivateOwnerAuthProvenance('legacy-task'), 'unknown');
   assert.equal(migrated.getPrivateOwnerAuthProvenance('strict-task'), 'strict');
+  assert.deepEqual(migrated.getPrivateOwnerAuthorization('strict-task'), {
+    ownerAuthProvenance: 'strict',
+    toolExecutionPolicy: { mode: 'read_only', replayDeniedToolNames: [] },
+  });
   assert.equal(Object.hasOwn(migrated.getById('strict-task'), 'ownerAuthProvenance'), false);
   db.close();
+});
+
+test('private wake authorization survives restart without leaking or accepting public replacements', (t) => {
+  const root = mkdtempSync(join(tmpdir(), 'cat-cafe-private-wake-auth-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const dbPath = join(root, 'scheduler.sqlite');
+  let db = new Database(dbPath);
+  t.after(() => {
+    if (db.open) db.close();
+  });
+  applyMigrations(db);
+  let store = new DynamicTaskStore(db);
+  const policy = { mode: 'callback_allowlist', allowedCallbackRoutes: ['POST /api/callbacks/hold-ball'] };
+  for (const grade of ['strict', 'compatibility_fallback', 'unknown']) {
+    store.insert({ ...SAMPLE_DEF, id: grade }, { ownerAuthProvenance: grade, toolExecutionPolicy: policy });
+  }
+  store.insert({ ...SAMPLE_DEF, id: 'unrestricted' }, { ownerAuthProvenance: 'strict' });
+  store.insert({ ...SAMPLE_DEF, id: 'legacy' }, 'strict');
+  db.close();
+  db = new Database(dbPath);
+  applyMigrations(db);
+  store = new DynamicTaskStore(db);
+  for (const grade of ['strict', 'compatibility_fallback', 'unknown']) {
+    const expected = { ownerAuthProvenance: grade, toolExecutionPolicy: policy };
+    assert.deepEqual(store.getPrivateOwnerAuthorization(grade), expected);
+    assert.equal(Object.hasOwn(store.getById(grade), 'toolExecutionPolicy'), false);
+    assert.equal(Object.hasOwn(store.getById(grade).params, 'toolExecutionPolicy'), false);
+    store.updateParams(grade, { ownerAuthProvenance: 'strict', toolExecutionPolicy: undefined });
+    store.upsert({ ...SAMPLE_DEF, id: grade, params: { ownerAuthProvenance: 'strict' } });
+    assert.deepEqual(store.getPrivateOwnerAuthorization(grade), expected);
+  }
+  assert.deepEqual(store.getPrivateOwnerAuthorization('unrestricted'), { ownerAuthProvenance: 'strict' });
+  assert.deepEqual(store.getPrivateOwnerAuthorization('legacy'), {
+    ownerAuthProvenance: 'strict',
+    toolExecutionPolicy: { mode: 'read_only', replayDeniedToolNames: [] },
+  });
+  assert.equal(store.getPrivateOwnerAuthorization('missing').ownerAuthProvenance, 'unknown');
+  db.prepare('UPDATE dynamic_task_defs SET tool_execution_policy_json = ? WHERE id = ?').run(
+    '{"mode":"forged"}',
+    'strict',
+  );
+  assert.throws(() => store.getPrivateOwnerAuthorization('strict'), /invalid persisted tool execution policy/);
 });
 
 // --- Task 2: DynamicTaskStore CRUD ---
@@ -170,6 +216,12 @@ describe('DynamicTaskStore', () => {
 
   test('rejects an invalid private owner auth producer value before persistence', () => {
     assert.throws(() => store.insert(SAMPLE_DEF, 'forged'), /ownerAuthProvenance must be explicit/);
+    assert.equal(store.getById('dyn-001'), null);
+  });
+
+  test('does not interpret incomplete or malformed private authorization as unrestricted', () => {
+    assert.throws(() => store.insert(SAMPLE_DEF, {}), /ownerAuthProvenance must be explicit/);
+    assert.throws(() => store.insert(SAMPLE_DEF, { ownerAuthProvenance: 'strict', toolExecutionPolicy: null }));
     assert.equal(store.getById('dyn-001'), null);
   });
 

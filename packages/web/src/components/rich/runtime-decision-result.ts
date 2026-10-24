@@ -52,10 +52,20 @@ export function runtimeDecisionResult(
   const reason = record.terminal?.reasonCode;
   if (reason === 'expired') return { status: 'expired', label: `${t.expired} · ${record.request.title}` };
   if (reason === 'withdrawn') return { status: 'withdrawn', label: `${t.withdrawn} · ${record.request.title}` };
+  const choices = selectedChoices(record);
+  if (choices.length)
+    return {
+      status:
+        record.status === 'declined' || reason === 'user_rejected'
+          ? 'rejected'
+          : record.status === 'answered'
+            ? 'approved'
+            : 'closed',
+      label: t.selected(choices.join(' / ')),
+    };
   if (record.status === 'declined' || reason === 'user_rejected')
     return { status: 'rejected', label: `${t.declined} · ${record.request.title}` };
   if (record.status !== 'answered') return { status: 'closed', label: closedLabel(record, copy) };
-  const choices = selectedChoices(record);
   const outcome = choices.length
     ? t.selected(choices.join(' / '))
     : record.request.kind === 'question'

@@ -46,12 +46,16 @@ function mergeSubtree(nodes: TreeNode[], targetPath: string, children: TreeNode[
 
 export interface FileData {
   path: string;
+  /** Authorized absolute path after the existing Workspace root and realpath checks. Display/copy only. */
+  absolutePath?: string;
   content: string;
   sha256: string;
   size: number;
   mime: string;
   truncated: boolean;
   binary?: boolean;
+  pageCount?: number;
+  pageUnit?: 'pages' | 'slides' | 'sheets';
 }
 
 async function discoverWorktrees(projectPath: string): Promise<WorktreeEntry[]> {

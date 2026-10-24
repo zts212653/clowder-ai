@@ -1,5 +1,6 @@
 import { realpath, stat } from 'node:fs/promises';
 import { isAbsolute, relative, resolve, sep } from 'node:path';
+import { canonicalWorkspacePath } from './workspace-canonical-path.js';
 import {
   listWorkspaceRootEntries,
   resolveWorkspaceFilesystemPath,
@@ -47,7 +48,7 @@ function containsPath(root: string, candidate: string): boolean {
   return candidate === root || candidate.startsWith(`${root}${sep}`);
 }
 
-async function selectWorkspaceRoot(
+export async function selectWorkspaceRoot(
   absoluteCandidate: string,
   entries: WorktreeEntry[],
 ): Promise<{ entry: WorktreeEntry; relativePath: string }> {
@@ -63,7 +64,7 @@ async function selectWorkspaceRoot(
   // match is intentionally preferred so resolveWorkspacePath can detect a
   // symlink that escapes the chosen root.
   if (matches.length === 0) {
-    const canonicalCandidate = await realpath(absoluteCandidate).catch(() => absoluteCandidate);
+    const canonicalCandidate = await canonicalWorkspacePath(absoluteCandidate).catch(() => absoluteCandidate);
     const canonicalEntries = await Promise.all(
       entries.map(async (entry) => ({
         entry,
@@ -88,11 +89,15 @@ async function selectWorkspaceRoot(
 export async function resolveWorkspaceAbsolutePath(
   absolutePath: string,
   repoRoot?: string,
+  entries?: WorktreeEntry[],
 ): Promise<WorkspaceAbsolutePathTarget> {
   if (!isAbsolute(absolutePath)) {
     throw new WorkspaceSecurityError('Workspace path must be absolute', 'NOT_FOUND');
   }
-  const selected = await selectWorkspaceRoot(resolve(absolutePath), await listWorkspaceRootEntries(repoRoot));
+  const selected = await selectWorkspaceRoot(
+    resolve(absolutePath),
+    entries ?? (await listWorkspaceRootEntries(repoRoot)),
+  );
   const resolvedPath = await resolveWorkspaceFilesystemPath(selected.entry.root, selected.relativePath);
   const pathStat = await stat(resolvedPath).catch((error: NodeJS.ErrnoException) => {
     if (error.code === 'ENOENT') {
@@ -133,7 +138,11 @@ export interface WorkspacePathLinkTarget extends WorkspaceAbsolutePathTarget {
 }
 
 /** Resolve a chat link to any registered Workspace file or directory. */
-export async function resolveWorkspacePathLinkHref(href: string, repoRoot?: string): Promise<WorkspacePathLinkTarget> {
+export async function resolveWorkspacePathLinkHref(
+  href: string,
+  repoRoot?: string,
+  entries?: WorktreeEntry[],
+): Promise<WorkspacePathLinkTarget> {
   const candidates: Array<{ href: string; line: number | null }> = [{ href, line: null }];
   for (const match of [href.match(WORKSPACE_PATH_LINE_COLUMN_SUFFIX_RE), href.match(WORKSPACE_PATH_LINE_SUFFIX_RE)]) {
     if (match?.[1]) {
@@ -147,7 +156,7 @@ export async function resolveWorkspacePathLinkHref(href: string, repoRoot?: stri
   let lastCandidateError: WorkspacePathNotFoundError | WorkspacePathNotRegisteredError | null = null;
   for (const candidate of candidates) {
     try {
-      const target = await resolveWorkspaceAbsolutePath(candidate.href, repoRoot);
+      const target = await resolveWorkspaceAbsolutePath(candidate.href, repoRoot, entries);
       return {
         ...target,
         line: target.kind === 'file' ? candidate.line : null,

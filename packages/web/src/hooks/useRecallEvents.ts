@@ -3,7 +3,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ChatMessage } from '@/stores/chat-types';
 import { useChatStore } from '@/stores/chatStore';
 import { apiFetch } from '@/utils/api-client';
-import { deduplicateRecallEvents } from './recall-feed-model';
+import { deduplicateRecallEvents, recallReplyInvocationId } from './recall-feed-model';
 import { lookupRecallReply, type RecallReplyCursor, recallReplyMessage } from './recall-reply-lookup';
 import { filterRecallEvents } from './recall-tool-events';
 import type { MemoryCueStatus, RecallEvent, RecallResultItem, RecallSourceView } from './recall-types';
@@ -62,10 +62,8 @@ export function useThreadRecall(options: { threadId?: string; messages?: readonl
   const live = useMemo(
     () =>
       messages.flatMap((message) => {
-        const invocationId =
-          message.lifecycle?.kind === 'response'
-            ? message.lifecycle.invocationId
-            : (message.extra?.stream?.turnInvocationId ?? message.extra?.stream?.invocationId);
+        if (message.extra?.crossPost || message.lifecycle?.kind === 'input') return [];
+        const invocationId = recallReplyInvocationId(message);
         return filterRecallEvents(message.toolEvents ?? []).map((event) => ({
           ...event,
           catId: message.catId,
@@ -157,22 +155,13 @@ export function useThreadRecall(options: { threadId?: string; messages?: readonl
       ...new Set(
         [
           ...(history.threadId === threadId ? (history.cueInvocationIds ?? []) : []),
-          ...messages.map((message) =>
-            message.lifecycle?.kind === 'response'
-              ? message.lifecycle.invocationId
-              : (message.extra?.stream?.turnInvocationId ?? message.extra?.stream?.invocationId),
-          ),
+          ...messages.map(recallReplyInvocationId),
         ].filter((id): id is string => !!id),
       ),
     ]
       .sort()
       .map((id) => {
-        const message = messages.find(
-          (message) =>
-            (message.lifecycle?.kind === 'response'
-              ? message.lifecycle.invocationId
-              : (message.extra?.stream?.turnInvocationId ?? message.extra?.stream?.invocationId)) === id,
-        );
+        const message = messages.find((message) => recallReplyInvocationId(message) === id);
         return {
           id,
           token: `${generation}:${message ? `${message.isStreaming}:${message.toolEvents?.length ?? 0}` : 'history'}`,

@@ -9,7 +9,7 @@
  * proposal-routes.ts.
  */
 
-import type { ApprovalEnvelope, CatId, DevelopmentScopeV1, TaskItem, ThreadProposal } from '@cat-cafe/shared';
+import type { ApprovalEnvelope, CatId, TaskItem, ThreadProposal } from '@cat-cafe/shared';
 import { catIdSchema, generateProposalId, suggestedReportingModeForWorkMode } from '@cat-cafe/shared';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
@@ -19,13 +19,25 @@ import type { IMessageStore } from '../domains/cats/services/stores/ports/Messag
 import type { IProposalStore } from '../domains/cats/services/stores/ports/ProposalStore.js';
 import type { IThreadStore } from '../domains/cats/services/stores/ports/ThreadStore.js';
 import type { SocketManager } from '../infrastructure/websocket/index.js';
-import { normalizeCatIdMentionsInText } from '../utils/cat-mention-handle.js';
 import { migrateStoredProjectPath, resolvePersistentProjectPath } from '../utils/persistent-project-path.js';
 import { requireCallbackAuth } from './callback-auth-prehandler.js';
-import { buildProposalCardBlock } from './proposal-card-block.js';
+import { suggestProposalGroup } from './proposal-group-placement.js';
+import { normalizeProposedMessage } from './proposal-initial-message.js';
+import {
+  publishThreadApproval,
+  readProposalBeingRevised,
+  visibleLegacyProposalResponse,
+} from './proposal-publication.js';
+import { resolveProposalTaskBinding } from './proposal-task-binding.js';
 
 const proposeThreadCallbackSchema = z.object({
   title: z.string().trim().min(1).max(200),
+  suggestedGroupId: z
+    .string()
+    .regex(/^attention_[A-Za-z0-9_-]+$/)
+    .nullable()
+    .optional(),
+  supersedesProposalId: z.string().min(1).max(200).optional(),
   reason: z.string().trim().min(1).max(1000),
   preferredCats: z.array(catIdSchema()).max(10).optional(),
   initialMessage: z.string().max(4000).optional(),
@@ -47,6 +59,7 @@ const proposeThreadCallbackSchema = z.object({
 });
 
 export interface ProposeThreadDeps {
+  projectRoot?: string;
   registry: InvocationRegistry;
   proposalStore: IProposalStore;
   threadStore: IThreadStore;
@@ -73,6 +86,8 @@ export function registerCallbackProposeThreadRoutes(app: FastifyInstance, deps: 
 
     const {
       title,
+      suggestedGroupId,
+      supersedesProposalId,
       reason,
       preferredCats,
       initialMessage: rawInitialMessage,
@@ -84,15 +99,6 @@ export function registerCallbackProposeThreadRoutes(app: FastifyInstance, deps: 
       subjectTaskId: rawSubjectTaskId,
     } = parsed.data;
     const invocationId = record.invocationId;
-
-    // F128: cats sometimes paste raw catIds (`@cat-rcs85pvn`) from
-    // `cat_cafe_get_thread_cats` output into `initialMessage` instead of the
-    // stable handle (`@砚砚` / `@opus46`). Raw catIds aren't in the router's
-    // mentionPatterns, so downstream `router.parseAllMentions` won't see them
-    // as mentions — dispatch then walks `preferredCats` in the wrong order.
-    // Normalize at the propose boundary so the persisted card text matches
-    // how the cat would have written @mentions in the same thread.
-    const initialMessage = rawInitialMessage ? normalizeCatIdMentionsInText(rawInitialMessage) : undefined;
 
     if (!(await registry.isLatest(invocationId))) {
       return { status: 'stale_ignored' };
@@ -107,30 +113,9 @@ export function registerCallbackProposeThreadRoutes(app: FastifyInstance, deps: 
       return { error: 'Exact source message is required for an approval proposal' };
     }
 
-    // F167 × F322: server-side validation of subjectTaskId — verifies the task exists
-    // and belongs to the same user. Full delegation chain runs at claim time.
-    let validatedSubjectTaskId: string | undefined;
-    let validatedSubjectTaskTitle: string | undefined;
-    let validatedDevelopmentScope: DevelopmentScopeV1 | undefined;
-    if (rawSubjectTaskId) {
-      if (!deps.taskLookup) {
-        reply.status(400);
-        return { error: 'subjectTaskId is not supported without a task store' };
-      }
-      const task = await deps.taskLookup.get(rawSubjectTaskId);
-      if (!task) {
-        reply.status(400);
-        return { error: 'subjectTaskId references a non-existent task' };
-      }
-      if (task.userId && task.userId !== record.userId) {
-        reply.status(403);
-        return { error: 'subjectTaskId belongs to a different user' };
-      }
-      validatedSubjectTaskId = task.id;
-      validatedSubjectTaskTitle = task.title;
-      // F167 R5: snapshot scope from the already-validated task (server-derived, not caller-supplied).
-      validatedDevelopmentScope = task.entrustedWork?.developmentScope;
-    }
+    const explicitTask = await resolveProposalTaskBinding(deps.taskLookup, rawSubjectTaskId, record.userId);
+    if (!explicitTask.ok) return reply.code(explicitTask.status).send({ error: explicitTask.error });
+    let taskBinding = explicitTask.binding;
 
     // Idempotency fast path: only return success if the proposal is fully VISIBLE — i.e. the
     // rich card has been appended (cardMessageId set). For proposals where cardMessageId is
@@ -149,7 +134,7 @@ export function registerCallbackProposeThreadRoutes(app: FastifyInstance, deps: 
             reply.header('retry-after', '1');
             return { error: 'Legacy proposal card is not visible; retry shortly', status: 'retryable' };
           }
-          const envelope = await publishThreadApproval(approvalIngress, proposalStore, proposal);
+          const envelope = await publishThreadApproval(approvalIngress, proposalStore, proposal, socketManager);
           return {
             proposalId: proposal.proposalId,
             status: proposal.status,
@@ -168,6 +153,50 @@ export function registerCallbackProposeThreadRoutes(app: FastifyInstance, deps: 
       reply.status(404);
       return { error: 'Source thread not found' };
     }
+    if (sourceThread.createdBy !== record.userId)
+      return reply.code(403).send({ error: 'Source thread does not belong to the current user' });
+    const revisedProposal = await readProposalBeingRevised(proposalStore, supersedesProposalId, {
+      userId: record.userId,
+      catId: record.catId,
+      threadId: record.threadId,
+      messageId: originMessageId,
+    });
+    // Re-proposing changes only supplied content; omitted fields retain the original entrusted work.
+    const finalPreferredCats = preferredCats ?? revisedProposal?.preferredCats;
+    const finalWorkMode = declaredWorkMode ?? revisedProposal?.declaredWorkMode;
+    const finalReportingMode =
+      reportingMode ?? revisedProposal?.reportingMode ?? suggestedReportingModeForWorkMode(finalWorkMode);
+    const finalParentThreadId = parentThreadId ?? revisedProposal?.parentThreadId;
+    const initialMessage = normalizeProposedMessage(
+      rawInitialMessage === undefined ? revisedProposal?.initialMessage : rawInitialMessage,
+      finalPreferredCats,
+    );
+    if (!rawSubjectTaskId && revisedProposal?.subjectTaskId) {
+      const inheritedTask = await resolveProposalTaskBinding(
+        deps.taskLookup,
+        revisedProposal.subjectTaskId,
+        record.userId,
+      );
+      if (!inheritedTask.ok) return reply.code(inheritedTask.status).send({ error: inheritedTask.error });
+      taskBinding = inheritedTask.binding;
+    }
+    let groupSuggestion: Pick<ThreadProposal, 'suggestedGroupId' | 'groupSuggestionReason'>;
+    try {
+      groupSuggestion = await suggestProposalGroup(
+        threadStore,
+        record.userId,
+        record.threadId,
+        title,
+        suggestedGroupId !== undefined
+          ? suggestedGroupId
+          : revisedProposal?.revisionRequest?.choices?.suggestedGroupId !== undefined
+            ? revisedProposal.revisionRequest.choices.suggestedGroupId
+            : revisedProposal?.suggestedGroupId,
+        deps.projectRoot,
+      );
+    } catch (error) {
+      return reply.code(400).send({ error: error instanceof Error ? error.message : String(error) });
+    }
 
     // The effective parent defaults to the source thread, but an explicit parentThreadId
     // re-roots the child — and projectPath must inherit from the EFFECTIVE parent, not the
@@ -175,13 +204,13 @@ export function registerCallbackProposeThreadRoutes(app: FastifyInstance, deps: 
     // a re-parent doesn't silently keep the source thread's ownership.
     let resolvedParentThreadId = record.threadId;
     let parentThread = sourceThread;
-    if (parentThreadId && parentThreadId !== record.threadId) {
-      const parent = await threadStore.get(parentThreadId);
+    if (finalParentThreadId && finalParentThreadId !== record.threadId) {
+      const parent = await threadStore.get(finalParentThreadId);
       if (!parent || parent.createdBy !== record.userId) {
         reply.status(403);
         return { error: 'parentThreadId does not belong to the current user' };
       }
-      resolvedParentThreadId = parentThreadId;
+      resolvedParentThreadId = finalParentThreadId;
       parentThread = parent;
     }
 
@@ -189,7 +218,10 @@ export function registerCallbackProposeThreadRoutes(app: FastifyInstance, deps: 
     // root cause was child threads inheriting a `default` projectPath). Fail loud on an
     // invalid explicit path — never silently fall back to source/default, or a cat that
     // thinks it pinned `clowder-ai` would land in `default` (砚砚 review push-back #1).
-    let resolvedProjectPath = parentThread.projectPath; // omitted → inherit effective parent thread
+    let resolvedProjectPath =
+      revisedProposal?.revisionRequest?.choices?.projectPath ??
+      revisedProposal?.projectPath ??
+      parentThread.projectPath; // omitted → inherit effective parent thread
     if (explicitProjectPath !== undefined) {
       const validatedProjectPath = await resolvePersistentProjectPath(explicitProjectPath);
       if (!validatedProjectPath) {
@@ -234,7 +266,7 @@ export function registerCallbackProposeThreadRoutes(app: FastifyInstance, deps: 
           reply.header('retry-after', '1');
           return { error: 'Legacy proposal card is not visible; retry shortly', status: 'retryable' };
         }
-        const envelope = await publishThreadApproval(approvalIngress, proposalStore, canonical);
+        const envelope = await publishThreadApproval(approvalIngress, proposalStore, canonical, socketManager);
         return {
           proposalId: winningId,
           status: canonical.status,
@@ -259,15 +291,21 @@ export function registerCallbackProposeThreadRoutes(app: FastifyInstance, deps: 
         title,
         reason,
         parentThreadId: resolvedParentThreadId,
-        preferredCats: (preferredCats ?? []) as CatId[],
+        preferredCats: (finalPreferredCats ?? []) as CatId[],
         projectPath: resolvedProjectPath,
+        ...groupSuggestion,
+        ...(revisedProposal
+          ? {
+              suggestedPinned:
+                revisedProposal.revisionRequest?.choices?.pinned ?? revisedProposal.suggestedPinned ?? false,
+            }
+          : {}),
+        ...(supersedesProposalId ? { supersedesProposalId } : {}),
         createdBy: record.userId,
         ...(initialMessage ? { initialMessage } : {}),
-        reportingMode: reportingMode ?? suggestedReportingModeForWorkMode(declaredWorkMode),
-        ...(declaredWorkMode ? { declaredWorkMode } : {}),
-        ...(validatedSubjectTaskId ? { subjectTaskId: validatedSubjectTaskId } : {}),
-        ...(validatedSubjectTaskTitle ? { subjectTaskTitle: validatedSubjectTaskTitle } : {}),
-        ...(validatedDevelopmentScope ? { approvedDevelopmentScope: validatedDevelopmentScope } : {}),
+        reportingMode: finalReportingMode,
+        ...(finalWorkMode ? { declaredWorkMode: finalWorkMode } : {}),
+        ...taskBinding,
       });
     } catch (err) {
       // Critical: if we reserved a dedup key but failed to create the proposal it points at,
@@ -285,7 +323,7 @@ export function registerCallbackProposeThreadRoutes(app: FastifyInstance, deps: 
 
     let envelope: ApprovalEnvelope;
     try {
-      envelope = await publishThreadApproval(approvalIngress, proposalStore, proposal);
+      envelope = await publishThreadApproval(approvalIngress, proposalStore, proposal, socketManager);
     } catch (err) {
       if (reservedDedup && clientRequestId && !(await proposalStore.get(proposal.proposalId))) {
         try {
@@ -303,47 +341,4 @@ export function registerCallbackProposeThreadRoutes(app: FastifyInstance, deps: 
       messageId: envelope.approvalCardRef.messageId,
     };
   });
-}
-
-async function visibleLegacyProposalResponse(
-  ingress: ApprovalIngress,
-  store: IProposalStore,
-  proposal: ThreadProposal,
-) {
-  if (proposal.publication) return null;
-  const cardMessageId =
-    proposal.cardMessageId ??
-    (await ingress.recoverLegacyCard({
-      producerId: 'F128',
-      canonicalProposalId: proposal.proposalId,
-      ownerUserId: proposal.createdBy,
-      cardThreadId: proposal.sourceThreadId,
-      cardBlockId: buildProposalCardBlock(proposal).id,
-    }));
-  if (!cardMessageId) return null;
-  if (!proposal.cardMessageId) await store.setCardMessageId(proposal.proposalId, cardMessageId);
-  return {
-    proposalId: proposal.proposalId,
-    status: proposal.status,
-    messageId: cardMessageId,
-    deduped: true as const,
-  };
-}
-
-function publishThreadApproval(ingress: ApprovalIngress, store: IProposalStore, proposal: ThreadProposal) {
-  if (!proposal.sourceMessageId) throw new Error('F128 Phase-I proposal is missing its persisted source message');
-  return ingress.publish(
-    {
-      producerId: 'F128',
-      canonicalProposalId: proposal.proposalId,
-      ownerUserId: proposal.createdBy,
-      requesterCatId: proposal.sourceCatId,
-      originRef: { kind: 'message', threadId: proposal.sourceThreadId, messageId: proposal.sourceMessageId },
-      cardThreadId: proposal.sourceThreadId,
-      cardContent: `提议新建 thread：${proposal.title}`,
-      cardBlock: buildProposalCardBlock(proposal),
-      createdAt: proposal.createdAt,
-    },
-    store,
-  );
 }

@@ -578,6 +578,7 @@ describe('F167 S.1-c ManagedCommandWakeRecoverySweep', () => {
     });
 
     assert.equal(h.triggerCalls.length, 1);
+    assert.equal(h.triggerCalls[0].ownerAuthProvenance, 'strict');
     assert.equal(h.triggerCalls[0].sourceCategory, 'scheduled');
     assert.equal(h.triggerCalls[0].priority, 'urgent');
   });
@@ -594,11 +595,12 @@ describe('F167 S.1-c ManagedCommandWakeRecoverySweep', () => {
     });
 
     assert.equal(h.triggerCalls.length, 1);
+    assert.equal(h.triggerCalls[0].ownerAuthProvenance, 'unknown');
     assert.equal(h.triggerCalls[0].sourceCategory, 'scheduled');
     assert.equal(h.triggerCalls[0].priority, 'urgent');
   });
 
-  test('does not copy compatibility owner provenance into Queue ingress options', async () => {
+  test('preserves compatibility owner provenance without upgrading it at Queue ingress', async () => {
     const { ManagedCommandWakeRecoverySweep } = await loadSweep();
     const h = makeHarness({ ownerAuthProvenance: 'compatibility_fallback' });
     const sweep = new ManagedCommandWakeRecoverySweep(h.deps);
@@ -610,6 +612,7 @@ describe('F167 S.1-c ManagedCommandWakeRecoverySweep', () => {
     });
 
     assert.equal(h.triggerCalls.length, 1);
+    assert.equal(h.triggerCalls[0].ownerAuthProvenance, 'compatibility_fallback');
     assert.equal(h.triggerCalls[0].sourceCategory, 'scheduled');
     assert.equal(h.triggerCalls[0].priority, 'urgent');
   });

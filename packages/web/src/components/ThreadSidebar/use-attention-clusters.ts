@@ -87,6 +87,7 @@ export function useAttentionClusters(
   const [collapsedPeek, setCollapsedPeek] = useState<Record<string, boolean>>({});
   const [pendingSort, setPendingSort] = useState<ReadonlySet<string>>(new Set());
   const [savedGroups, setSavedGroups] = useState<ThreadAttentionPreferences['groups']>([]);
+  const [recentGroupIds, setRecentGroupIds] = useState<string[]>([]);
   const [preferenceError, setPreferenceError] = useState<string | null>(null);
   const mutationQueue = useRef<Promise<void>>(Promise.resolve());
 
@@ -96,6 +97,7 @@ export function useAttentionClusters(
     setCollapsedPeek(preferences.collapsedPeek ?? {});
     setOpenPreferences(preferences.open ?? {});
     setSavedGroups(preferences.groups ?? []);
+    setRecentGroupIds(preferences.recentGroupIds ?? []);
     cacheOpenPreferences(preferences.open ?? {});
   }, []);
   const {
@@ -185,6 +187,7 @@ export function useAttentionClusters(
   return {
     clusters,
     savedGroups,
+    recentGroupIds,
     memberSort,
     pendingSort,
     changeMemberSort: (cluster: AttentionCluster, mode: ThreadAttentionMemberSort | null) =>

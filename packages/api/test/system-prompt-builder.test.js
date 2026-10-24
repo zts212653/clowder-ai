@@ -491,8 +491,7 @@ describe('SystemPromptBuilder', () => {
     assert.ok(opencodeId.includes('出口一问'), 'OpenCode workflow should include exit check (出口一问)');
     assert.ok(opencodeId.includes('OMOC Sisyphus'), 'OpenCode workflow should keep golden-chinchilla governance');
     for (const prompt of [opusId, codexId, opencodeId, buildStaticIdentity('gemini25')]) {
-      assert.match(prompt, /常规 reviewer（缅因猫、kimi 或 gemini-argon；Argon 只审不写）/);
-      assert.doesNotMatch(prompt, /常规 reviewer（[^）]*Sonnet/);
+      assert.match(prompt, /常规 reviewer（缅因猫、Sonnet、kimi 或 gemini-argon；Argon 只审不写）/);
     }
   });
 

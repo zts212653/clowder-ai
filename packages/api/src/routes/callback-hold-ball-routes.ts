@@ -1090,6 +1090,7 @@ export function registerCallbackHoldBallRoutes(app: FastifyInstance, deps: HoldB
       },
       deliveryThreadId: threadId as string | null,
       ownerAuthProvenance: record.ownerAuthProvenance,
+      ...(record.toolExecutionPolicy ? { toolExecutionPolicy: record.toolExecutionPolicy } : {}),
     };
 
     // Wrap spec creation + store insertion + scheduler registration in a single
@@ -1118,7 +1119,10 @@ export function registerCallbackHoldBallRoutes(app: FastifyInstance, deps: HoldB
           createdBy: `hold-ball:${catIdStr}`,
           createdAt: new Date().toISOString(),
         },
-        record.ownerAuthProvenance,
+        {
+          ownerAuthProvenance: record.ownerAuthProvenance,
+          ...(record.toolExecutionPolicy ? { toolExecutionPolicy: record.toolExecutionPolicy } : {}),
+        },
       );
 
       taskRunner.registerDynamic(spec, taskId);

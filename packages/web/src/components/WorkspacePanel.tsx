@@ -16,6 +16,7 @@ import { useF307ExperienceWorkbenchStore } from './workbench/experience-workbenc
 import { F307ExperienceWorkbench } from './workbench/F307ExperienceWorkbench';
 import { createBrowserSurface } from './workbench/real-surface-adapters';
 import { canConsumeWorkspaceFileStamp, openWorkspaceFileStamp } from './workbench/workspace-file-open';
+import { readF284WorkspaceSnapshot } from './workbench/workspace-legacy-snapshot';
 import { bindWorkspaceForeground } from './workbench/workspace-presentation-lock';
 
 export function WorkspacePanel({
@@ -231,24 +232,19 @@ export function WorkspacePanel({
         currentWorktree ? { name: worktreeBasename(currentWorktree.root), branch: currentWorktree.branch } : undefined
       }
       workspaceSearch={launcherWorkspaceSearch}
-      f284WorkspaceState={
-        !pendingFileLink &&
-        (workspaceMode === 'team' ||
-          (viewMode === 'files' && openFilePath) ||
-          (viewMode === 'browser' && workspacePreview.port))
-          ? {
-              threadId,
-              workspaceMode,
-              workspaceSurface: viewMode,
-              workspaceOpenFilePath: openFilePath,
-              workspaceOpenFileLine: openFileLine,
-              workspaceWorktreeId: worktreeId,
-              workspacePreview,
-              teamWorkspaceSubject,
-              rightPanelOpen: true,
-            }
-          : undefined
-      }
+      f284WorkspaceState={readF284WorkspaceSnapshot(
+        {
+          workspaceMode,
+          workspaceSurface: viewMode,
+          workspaceOpenFilePath: openFilePath,
+          workspaceOpenFileLine: openFileLine,
+          workspaceWorktreeId: worktreeId,
+          workspacePreview,
+          teamWorkspaceSubject,
+        },
+        pendingFileLink,
+        threadId,
+      )}
       workspaceOpenRequest={workspaceOpenRequest}
       onWorkspaceOpenRequestConsumed={consumeWorkspaceOpenRequest}
       onRestoreWorkspaceSearch={restoreWorkspaceSearch}

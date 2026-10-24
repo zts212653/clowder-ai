@@ -2,6 +2,7 @@ import { messageMediaPublicationSourceSchema } from '@cat-cafe/shared';
 import { artifactListViewSchema } from '@/components/artifacts/artifact-list-state';
 import { artifactFileEntranceSchema } from './artifact-file-source';
 import { resolveArtifactReviewTarget } from './artifact-review-surface';
+import { resolveCommitChangesTarget } from './commit-changes-surface';
 import { resolveEvolutionMediaTarget } from './evolution-media-surface';
 import { parseFileNavigationOrigin } from './file-navigation-origin';
 import { resolveMessagePublicationSource } from './message-publication-surface';
@@ -198,6 +199,7 @@ function parseSurface(value: unknown, legacySchema: boolean): WorkspaceSurfaceDe
     ) &&
     resolveFilesTarget(parsed) === null &&
     resolvePullRequestChangesTarget(parsed) === null &&
+    resolveCommitChangesTarget(parsed) === null &&
     resolveArtifactReviewTarget(parsed) === null &&
     resolvePublicationTarget(parsed) === null &&
     resolveMessagePublicationSource(parsed) === null &&
@@ -207,6 +209,7 @@ function parseSurface(value: unknown, legacySchema: boolean): WorkspaceSurfaceDe
   if (
     (isPullRequestChangesSurfaceCandidate(parsed) || ownerStateRef.owner === 'f063-workspace-diff') &&
     resolvePullRequestChangesTarget(parsed) === null &&
+    resolveCommitChangesTarget(parsed) === null &&
     resolveChangesTarget(parsed) === null
   )
     return null;

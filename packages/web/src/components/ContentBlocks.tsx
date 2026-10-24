@@ -51,11 +51,11 @@ export function ContentBlocks({
   return (
     <>
       {fallbackText?.trim() && !blocks.some((block) => block.type === 'text') ? (
-        <MarkdownContent content={fallbackText} />
+        <MarkdownContent referenceThreadId={publication?.threadId} content={fallbackText} />
       ) : null}
       {blocks.map((block, i) => {
         if (block.type === 'text') {
-          return <MarkdownContent key={i} content={block.text} />;
+          return <MarkdownContent key={i} referenceThreadId={publication?.threadId} content={block.text} />;
         }
         if (block.type === 'image') {
           const source = published.source(block.url, { kind: 'content-block', index: i });

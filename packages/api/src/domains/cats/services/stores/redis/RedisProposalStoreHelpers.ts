@@ -13,6 +13,7 @@ import {
 import { applyProposalOverrides } from '../ports/ProposalSnapshot.js';
 import type { FinalizeApprovalInput } from '../ports/ProposalStore.js';
 import { hydrateApprovalPublication, serializeApprovalPublication } from './RedisApprovalPublication.js';
+import { hydrateProposalRevision, serializeProposalRevision } from './RedisProposalRevisionFields.js';
 
 /**
  * CAS Lua: atomically check current status matches expected → HSET fields + ZREM/ZADD pending index.
@@ -99,6 +100,7 @@ export function serializeProposal(proposal: ThreadProposal): string[] {
     String(proposal.createdAt),
   ];
   if (proposal.initialMessage) fields.push('initialMessage', proposal.initialMessage);
+  fields.push(...serializeProposalRevision(proposal));
   if (proposal.sourceMessageId) fields.push('sourceMessageId', proposal.sourceMessageId);
   if (proposal.cardMessageId) fields.push('cardMessageId', proposal.cardMessageId);
   if (proposal.reportingMode) fields.push('reportingMode', proposal.reportingMode);
@@ -135,6 +137,7 @@ export function hydrateProposal(data: Record<string, string>): ThreadProposal {
     ...optionalSourceMessage(data.sourceMessageId),
   };
   if (initialMessage) proposal.initialMessage = initialMessage;
+  hydrateProposalRevision(proposal, data);
   if (data.reportingMode) proposal.reportingMode = data.reportingMode as ReportingMode;
   if (data.declaredWorkMode) proposal.declaredWorkMode = data.declaredWorkMode as DeclaredWorkMode;
   if (data.approvedBy) proposal.approvedBy = data.approvedBy;

@@ -1,4 +1,4 @@
-import { groupRecallEvents, type RecallGroup } from '@/hooks/recall-feed-model';
+import { groupRecallEvents, type RecallGroup, recallReplyInvocationId } from '@/hooks/recall-feed-model';
 import type { RecallEvent } from '@/hooks/recall-types';
 import type { ChatMessage } from '@/stores/chat-types';
 
@@ -17,10 +17,7 @@ function projectReplyRecall(
   status: Exclude<ReplyRecallReadState, 'loading'>,
 ): ReplyRecallProjection | undefined {
   if (message.type !== 'assistant' || !message.catId) return undefined;
-  const invocationId =
-    message.lifecycle?.kind === 'response'
-      ? message.lifecycle.invocationId
-      : (message.extra?.stream?.turnInvocationId ?? message.extra?.stream?.invocationId);
+  const invocationId = recallReplyInvocationId(message);
   if (!invocationId) return undefined;
   const events = group?.events ?? [];
   if (status === 'ready' && events.length === 0) return undefined;

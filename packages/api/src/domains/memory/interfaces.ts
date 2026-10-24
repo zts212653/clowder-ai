@@ -433,6 +433,8 @@ export interface IIndexBuilder {
   rebuild(options?: {
     force?: boolean;
     deferThreadIndexing?: boolean;
+    /** API startup fills vectors through its existing post-listen catch-up. */
+    deferDocumentEmbedding?: boolean;
     onProgress?: RebuildProgressCallback;
   }): Promise<RebuildResult>;
   refreshThreadIndex(options?: ThreadIndexRefreshOptions): Promise<RebuildResult>;

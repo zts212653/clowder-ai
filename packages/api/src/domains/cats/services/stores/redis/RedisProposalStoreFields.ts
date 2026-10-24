@@ -26,6 +26,7 @@ export function finalizedProposalFields(updated: ThreadProposal): string[] {
     updated.declaredWorkMode ?? '',
   ];
   if (updated.createdThreadId) fields.push('createdThreadId', updated.createdThreadId);
+  if (updated.attentionGroupId !== undefined) fields.push('attentionGroupId', updated.attentionGroupId ?? '');
   fields.push('initialMessage', updated.initialMessage ?? '');
   if (updated.approvedTaskContract) fields.push('approvedTaskContract', JSON.stringify(updated.approvedTaskContract));
   return fields;
@@ -37,6 +38,7 @@ export function createdThreadCheckpointFields(
 ): string[] {
   const fields = ['createdThreadId', threadId];
   if (!overrides) return fields;
+  if (overrides.attentionGroupId !== undefined) fields.push('attentionGroupId', overrides.attentionGroupId ?? '');
   if (overrides.title !== undefined) fields.push('title', overrides.title);
   if (overrides.parentThreadId !== undefined) fields.push('parentThreadId', overrides.parentThreadId);
   if (overrides.preferredCats !== undefined) fields.push('preferredCats', JSON.stringify(overrides.preferredCats));

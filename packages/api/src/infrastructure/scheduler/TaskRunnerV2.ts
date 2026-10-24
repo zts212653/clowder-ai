@@ -381,7 +381,7 @@ export class TaskRunnerV2 {
         params: def.params,
         ...(def.entrustedWorkReevaluation ? { entrustedWorkReevaluation: def.entrustedWorkReevaluation } : {}),
         deliveryThreadId: def.deliveryThreadId,
-        ownerAuthProvenance: store.getPrivateOwnerAuthProvenance(def.id),
+        ...store.getPrivateOwnerAuthorization(def.id),
       });
       if (def.trigger.type === 'once' && def.trigger.fireAt < Date.now()) {
         this.configureTimerHoldRecovery(spec, def.id, store);

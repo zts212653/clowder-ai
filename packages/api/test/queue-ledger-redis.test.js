@@ -59,6 +59,44 @@ describe('RFC #1356 Redis Queue ledger', { skip: redisIsolationSkipReason(REDIS_
     };
   }
 
+  it('keeps a host-reserved message identity through atomic admission and replay', async () => {
+    const { generateSortableId } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
+    const reservedId = generateSortableId(100);
+    const queue = new InvocationQueue(store);
+    const source = {
+      from: { kind: 'user', userId: 'owner-1' },
+      userId: 'owner-1',
+      threadId: 'thread-redis',
+      content: 'revise',
+      mentions: ['opus'],
+      timestamp: 100,
+      deliveryStatus: 'queued',
+      idempotencyKey: 'reserved',
+      reservedId,
+    };
+    const input = {
+      from: source.from,
+      userId: source.userId,
+      threadId: source.threadId,
+      content: source.content,
+      kind: 'conversation_input',
+      ownerAuthProvenance: 'strict',
+      targetCats: ['opus'],
+      exactTargets: true,
+      intent: 'execute',
+      idempotencyKey: source.idempotencyKey,
+    };
+    const first = await queue.send(messageStore, source, input);
+    assert.equal(first.outcome, 'enqueued');
+    assert.equal(first.message.id, reservedId);
+    assert.equal((await messageStore.getById(reservedId)).content, 'revise');
+    assert.equal(first.entries[0].payload.messageId, reservedId);
+    const replay = await queue.send(messageStore, source, input);
+    assert.equal(replay.deduped, true);
+    assert.equal(replay.message.id, reservedId);
+    assert.equal((await store.list('thread-redis')).length, 1);
+  });
+
   it('stores one source row with every pending target and rejects a conflicting replay', async () => {
     const entry = row('m1', ['opus', 'codex']);
     assert.equal((await store.enqueue([entry], 5)).outcome, 'enqueued');

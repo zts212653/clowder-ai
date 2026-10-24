@@ -219,7 +219,8 @@ for (const entrance of ['Chat', 'Inbox'] as const) {
       .mocked(apiFetch)
       .mock.calls.find(([url, init]) => String(url).endsWith('/undo') && init?.method === 'POST');
     expect(JSON.parse(String(undo?.[1]?.body)).decisionId).toBe(decisionId);
-    expect(container.querySelector('[data-testid=person-memory-result]')?.textContent).toContain('已撤销本次写入');
+    expect(container.querySelector('[data-testid=decision-result-label]')?.textContent).toContain('已撤销本次写入');
+    expect(container.querySelector('[data-testid=person-memory-result]')).toBeNull();
     expect(container.querySelector('[data-testid="person-memory-undo"]')).toBeNull();
   });
   it(`${entrance}: refuses a changed publication immediately before writing`, async () => {
@@ -394,9 +395,9 @@ it.each([
   retainedWrites = true;
   await render(entrance);
   const label = container.querySelector('[data-testid=decision-result-label]')?.textContent;
-  expect(label).toContain('已写入部分');
-  expect(label).toContain('已拒绝其余');
-  expect(container.querySelector('[data-testid=decision-result-dot]')?.getAttribute('data-status')).toBe('rejected');
+  expect(label).toContain('此前已写入');
+  expect(label).toContain('其余没写');
+  expect(container.querySelector('[data-testid=decision-result-dot]')?.getAttribute('data-status')).toBe('approved');
   expect(container.querySelector('[data-testid=person-memory-undo]')).toBeNull();
 });
 
@@ -519,7 +520,8 @@ it('a cold Chat replacement has the same closed meaning in its row and expanded 
       .querySelector<HTMLButtonElement>('[data-testid=decision-result-row] button[aria-expanded="false"]')
       ?.click(),
   );
-  expect(container.querySelector('[data-testid=person-memory-result]')?.textContent).toContain('已关闭');
+  expect(container.querySelector('[data-testid=decision-result-label]')?.textContent).toContain('已关闭');
+  expect(container.querySelector('[data-testid=person-memory-result]')).toBeNull();
   expect(container.textContent).not.toContain('已撤回');
   expect(container.textContent).not.toContain('已撤销本次写入');
   expect(container.querySelector('[data-testid=person-memory-undo]')).toBeNull();

@@ -149,8 +149,7 @@ export function RuntimeInteractionCard({
     return (
       <section data-testid="runtime-interaction-card">
         <ApprovalResultRow status={result.status} label={result.label}>
-          <RuntimeInteractionRequestDetails request={record.request} />
-          <TerminalState record={record} copy={copy} />
+          <RuntimeInteractionRequestDetails request={record.request} terminal={record.terminal} />
           {error ? <p role="alert">{error}</p> : null}
           {secondaryActions}
         </ApprovalResultRow>

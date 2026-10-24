@@ -805,6 +805,7 @@ async function ensureDuplicateCallbackWake(input: {
 }
 
 export interface CallbackRoutesOptions {
+  proposalProjectRoot?: string;
   resolveTrustedImagePath?: (hmrId: string) => Promise<string | undefined>;
   liveTaskAuthority?: import('./live-task-authority.js').LiveTaskAuthority;
   /** F293: applied scarcity policy; defaults to the active project dossier. */
@@ -5841,6 +5842,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
   // F128: Cat-side thread proposal callback
   if (opts.proposalStore && opts.threadStore) {
     registerCallbackProposeThreadRoutes(app, {
+      projectRoot: opts.proposalProjectRoot,
       registry,
       proposalStore: opts.proposalStore,
       threadStore: opts.threadStore,

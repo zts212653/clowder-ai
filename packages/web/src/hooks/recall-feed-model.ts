@@ -11,6 +11,12 @@ export interface RecallGroup {
   timestamp?: number;
   events: RecallEvent[];
 }
+/** Incoming posts carry their producer's stream coordinates, not a local reply's. */
+export function recallReplyInvocationId(message: ChatMessage): string | undefined {
+  if (message.type !== 'assistant' || !message.catId || message.extra?.crossPost) return undefined;
+  if (message.lifecycle) return message.lifecycle.kind === 'response' ? message.lifecycle.invocationId : undefined;
+  return message.extra?.stream?.turnInvocationId ?? message.extra?.stream?.invocationId;
+}
 export function recallKind(event: RecallEvent): RecallKind {
   return event.source === 'push' || event.cueStatus
     ? 'delivery'
@@ -105,14 +111,11 @@ export function deduplicateRecallEvents(live: RecallEvent[], history: RecallEven
   return [...merged, ...history.filter((event) => !used.has(event))].sort((a, b) => a.timestamp - b.timestamp);
 }
 export function findRecallReply(event: RecallEvent, messages: readonly ChatMessage[]): ChatMessage | undefined {
-  if (event.messageId) return messages.find((message) => message.id === event.messageId);
+  const replies = messages.filter((message) => recallReplyInvocationId(message));
+  if (event.messageId) return replies.find((message) => message.id === event.messageId);
   if (!event.catId || !event.invocationId) return undefined;
-  const exact = messages.filter(
-    (message) =>
-      message.catId === event.catId &&
-      (message.lifecycle?.kind === 'response'
-        ? message.lifecycle.invocationId
-        : (message.extra?.stream?.turnInvocationId ?? message.extra?.stream?.invocationId)) === event.invocationId,
+  const exact = replies.filter(
+    (message) => message.catId === event.catId && recallReplyInvocationId(message) === event.invocationId,
   );
   if (exact.length === 1) return exact[0];
   return undefined;
@@ -121,11 +124,7 @@ export function groupRecallEvents(events: RecallEvent[], messages: readonly Chat
   const groups = new Map<string, RecallGroup>();
   for (const event of events) {
     const reply = findRecallReply(event, messages);
-    const invocationId = reply
-      ? ((reply.lifecycle?.kind === 'response'
-          ? reply.lifecycle.invocationId
-          : (reply.extra?.stream?.turnInvocationId ?? reply.extra?.stream?.invocationId)) ?? event.invocationId)
-      : event.invocationId;
+    const invocationId = (reply && recallReplyInvocationId(reply)) ?? event.invocationId;
     const id = invocationId ? JSON.stringify([event.catId, invocationId]) : `message:${event.messageId ?? event.id}`;
     let group = groups.get(id);
     if (!group) {

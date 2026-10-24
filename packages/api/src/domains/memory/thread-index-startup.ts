@@ -26,12 +26,12 @@ export function registerThreadIndexCatchUp(
         try {
           await catchUpVectors();
         } catch (error) {
-          app.log.warn({ error }, '[api] F102: thread vector catch-up failed (non-fatal)');
+          app.log.warn({ err: error }, '[api] F102: thread vector catch-up failed (non-fatal)');
         }
       })
       .catch((error: unknown) => {
         if (controller.signal.aborted) return;
-        app.log.warn({ error }, '[api] F102: background thread index failed; retrying in 30s');
+        app.log.warn({ err: error }, '[api] F102: background thread index failed; retrying in 30s');
         scheduled = setTimeout(start, 30_000);
         scheduled.unref();
       });

@@ -4,7 +4,7 @@
 
 ragdoll: |
   ## 工作流（主动 @ 触发点）
-  - 完成开发/修复 → 先判断要不要独立 review；要的话，只找一只非作者的常规 reviewer（缅因猫、kimi 或 gemini-argon；Argon 只审不写）
+  - 完成开发/修复 → 先判断要不要独立 review；要的话，只找一只非作者的常规 reviewer（缅因猫、Sonnet、kimi 或 gemini-argon；Argon 只审不写）
   - 修完 review 意见 → 只请改动所在那一面的 reviewer 复审；稀缺席位不进迭代循环
   - MG provenance override：外部finding修完后等PR truth，不@旧reviewer。
   - 遇到视觉/体验问题 → @gemini-argon 征询
@@ -12,7 +12,7 @@ ragdoll: |
 
 maine-coon: |
   ## 工作流（主动 @ 触发点）
-  - 修完 bug/feature → 先判断要不要独立 review；要的话，找一只非作者的常规 reviewer（缅因猫、kimi 或 gemini-argon；Argon 只审不写）
+  - 修完 bug/feature → 先判断要不要独立 review；要的话，找一只非作者的常规 reviewer（缅因猫、Sonnet、kimi 或 gemini-argon；Argon 只审不写）
   - 完成 review → @作者 通知结果
   - 新界面或改版、架构模块或归属变化、做片子 → 动手前先请「创作位」出稿；做完不再请他逐轮复审
   - 只是通知（FYI、完工汇报、Release）→ 写进 feature doc 或 Task，不叫醒 owner
@@ -35,11 +35,11 @@ maine-coon: |
 
 siamese: |
   ## 工作流（主动 @ 触发点）
-  - 改了代码 → 需要独立 review 时，找一只非作者的常规 reviewer（缅因猫、kimi 或 gemini-argon；Argon 只审不写）
+  - 改了代码 → 需要独立 review 时，找一只非作者的常规 reviewer（缅因猫、Sonnet、kimi 或 gemini-argon；Argon 只审不写）
 
 golden-chinchilla: |
   ## 工作流（主动 @ 触发点）
-  - 完成开发/修复 → 先判断要不要独立 review；要的话，只找一只非作者的常规 reviewer（缅因猫、kimi 或 gemini-argon；Argon 只审不写）
+  - 完成开发/修复 → 先判断要不要独立 review；要的话，只找一只非作者的常规 reviewer（缅因猫、Sonnet、kimi 或 gemini-argon；Argon 只审不写）
   - 修完 review 意见 → 只请改动所在那一面的 reviewer 复审；稀缺席位不进迭代循环
   - MG provenance override：外部finding修完后等PR truth，不@旧reviewer。
   - 遇到视觉/体验问题 → @gemini-argon 征询

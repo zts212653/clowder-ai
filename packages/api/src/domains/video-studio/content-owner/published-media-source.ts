@@ -42,7 +42,7 @@ export class PublishedMediaSource {
   constructor(
     private readonly deps: {
       artifacts: PreparedArtifactReader;
-      messages: Pick<IMessageStore, 'getById'>;
+      messages: Pick<IMessageStore, 'getById' | 'getArtifactById'>;
       uploadDir: string;
       readPrivateMessageImage?: (id: string, principal: MediaReviewPrincipal) => Promise<Buffer>;
       workspace?: WorkspaceMediaSourcePort;

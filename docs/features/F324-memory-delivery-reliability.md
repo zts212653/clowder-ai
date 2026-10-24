@@ -4,12 +4,12 @@ related_features: [F038, F148, F167, F188, F203, F209, F227, F231, F236, F237, F
 topics: [memory, context, retrieval, delivery, reliability, command]
 doc_kind: spec
 created: 2026-09-27
-updated: 2026-10-23
+updated: 2026-10-24
 description: "让猫以可控的上下文成本取得可信、完整可续读的记忆，减少旧消息回放、检索绕路与启动时的重复负担。"
 description_source: human
 description_author: codex-astra
 description_updated_at: 2026-09-27T12:29:12Z
-tips_exempt: "Renewed 2026-10-23 for F332 consolidation and runtime-status reconciliation: graph/source reads, search/summary repairs and startup evidence reuse the existing memory and invocation entry points. Original Tasks, deployment waits and unfinished recovery/compaction outcomes continue; this update adds no user action or discovery surface."
+tips_exempt: "Renewed 2026-10-24 for boot53 acceptance and PR6036 vector-repair intake: this delta records actual loading, natural summary/full-source preservation, and the original Task's next activation condition for existing memory entry points. It adds no user action, setting, or discovery surface. Vector catch-up recovery, search cost and npm503 recovery, vector coverage/quality, natural compaction/cue, and overall F324/F332 acceptance remain unverified; original owners and accepted scope continue."
 ---
 
 # F324: Memory Delivery Reliability｜记忆交付可靠性与上下文成本收口

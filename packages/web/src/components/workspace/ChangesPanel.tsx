@@ -4,6 +4,7 @@ import type { PullRequestChangesTarget } from '@cat-cafe/shared';
 import { useLayoutEffect, useState } from 'react';
 import { useShellPresentation } from '@/components/shell/shell-presentation';
 import { ThreadNativeReviewSettingsContent } from '@/components/ThreadSidebar/ThreadNativeReviewSettings';
+import type { CommitChangesTarget } from '../workbench/commit-changes-surface';
 import { ChangesPanelV2 } from './ChangesPanelV2';
 import { DiffViewer } from './DiffViewer';
 import { FileIcon } from './FileIcons';
@@ -29,11 +30,26 @@ interface ChangesPanelProps {
   threadId?: string | null;
   onOpenFile?: (path: string) => void;
   pullRequestTarget?: PullRequestChangesTarget;
+  chatSource?: boolean;
+  commitTarget?: CommitChangesTarget;
   onBack?: () => void;
 }
 
-function ChangesPanelClassic({ worktreeId, basisPct, threadId, pullRequestTarget, onBack }: ChangesPanelProps) {
-  const { data, loading, error, refresh, targetKey } = useChangesDiff(worktreeId, pullRequestTarget);
+function ChangesPanelClassic({
+  worktreeId,
+  basisPct,
+  threadId,
+  pullRequestTarget,
+  chatSource,
+  commitTarget,
+  onBack,
+}: ChangesPanelProps) {
+  const { data, loading, error, refresh, targetKey } = useChangesDiff(
+    worktreeId,
+    pullRequestTarget,
+    chatSource,
+    commitTarget,
+  );
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
   useLayoutEffect(() => setSelectedFile(null), [targetKey]);
 

@@ -36,7 +36,7 @@ Reviewer 回读原 issue / 讨论 / 已接受决定，再看计划与实际结�
 | 安全 / 鉴权 / 生产数据 / 外部契约，或需要 context-blind 代码扫描 | cloud；不再同时把同一问题默认发 local |
 | 用户可见 feature 的终态是否符合愿景 | 愿景守护在 feature close 触发；本次交付的约定结果仍由已选 reviewer 判断，不给每个 PR 加第三棒 |
 
-默认只找一只 reviewer：测试能兜住的实现正确性找常规 reviewer（非作者Maine Coon、kimi 或 gemini-argon，同族不同个体也行）；gemini-argon 只审不写代码。Sonnet 常规 review 暂停（2026-10-15 operator 试行，来源见 dossier v0.11），不扩大为其他任务停用。方向和形状请创作位一次给完；安全、鉴权、生产数据、外部契约优先 cloud，cloud 不可用时只换成一只本地 reviewer，不拆成两路。
+默认只找一只 reviewer：测试能兜住的实现正确性找常规 reviewer（非作者Maine Coon、Sonnet、kimi 或 gemini-argon，同族不同个体也行）；gemini-argon 只审不写代码。在这几只里按派活时各家粮的实际情况和现行有效安排挑，已撤销或已过期的暂停、稀缺标签不作排除依据。方向和形状请创作位一次给完；安全、鉴权、生产数据、外部契约优先 cloud，cloud 不可用时只换成一只本地 reviewer，不拆成两路。
 
 只有两个风险面确实需要不同的人时才加第二只，并写明各自理由。迭代修复只请改动所在那一面的 reviewer 复审；稀缺席位不进迭代循环。F320 #5195 两路复审 6 轮，安全面的两个 P1 都是语义 reviewer 抓到的，是机械拆两路的反例（见 `docs/SOP.md`「Reviewer 配对规则」）。
 

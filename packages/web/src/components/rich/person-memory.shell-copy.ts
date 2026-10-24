@@ -13,7 +13,7 @@ export const personMemoryCopy = defineShellCopy(
       written: '已写入',
       partial: '部分已写入，可继续选择',
       rejected: '已拒绝',
-      rejectedAfterWrite: '已写入部分 · 已拒绝其余',
+      rejectedAfterWrite: (n: number | null) => (n === null ? '此前已写入 · 其余没写' : `已写入 ${n} 条 · 其余没写`),
       writesRemain: '此前写入仍保留',
       withdrawn: '已撤回',
       undone: '已撤销本次写入',
@@ -37,7 +37,8 @@ export const personMemoryCopy = defineShellCopy(
       written: 'Written to memory',
       partial: 'Partly written; choose remaining drafts',
       rejected: 'Rejected',
-      rejectedAfterWrite: 'Part written · Rest declined',
+      rejectedAfterWrite: (n: number | null) =>
+        n === null ? 'Earlier writes remain · rest declined' : `Wrote ${n} · rest declined`,
       writesRemain: 'Earlier writes remain',
       withdrawn: 'Withdrawn',
       undone: 'This write was undone',
@@ -52,6 +53,7 @@ export const personMemoryCopy = defineShellCopy(
   },
   {
     samples: {
+      rejectedAfterWrite: [[null], [2]],
       person: [['林'], ['Lin']],
       subject: [
         ['林', 0],

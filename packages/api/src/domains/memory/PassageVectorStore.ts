@@ -37,6 +37,15 @@ export class PassageVectorStore {
     this.db.prepare('DELETE FROM passage_vectors WHERE passage_key = ?').run(passageKey);
   }
 
+  /** Read vec0's indexed key map without loading its vector BLOBs (also used by vector repacking). */
+  existingKeys(keys: readonly string[]): Set<string> {
+    if (keys.length === 0) return new Set();
+    const rows = this.db
+      .prepare(`SELECT id FROM passage_vectors_rowids WHERE id IN (${keys.map(() => '?').join(',')})`)
+      .all(...keys) as Array<{ id: string }>;
+    return new Set(rows.map(({ id }) => id));
+  }
+
   search(queryVec: Float32Array, k: number): Array<{ passageKey: string; distance: number }> {
     return this.db
       .prepare(

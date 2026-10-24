@@ -53,6 +53,10 @@
     "./routing-preview": {
       "import": "./dist/routing-preview.js",
       "types": "./dist/routing-preview.d.ts"
+    },
+    "./proposal-message": {
+      "import": "./dist/proposal-message.js",
+      "types": "./dist/proposal-message.d.ts"
     }
   },
   "scripts": {

@@ -4,6 +4,7 @@ import { ApprovalResultRow, type DecisionResultStatus } from '@/components/rich/
 import { conversationDecisionCopy } from '@/components/rich/conversation-decision.shell-copy';
 import { conversationResult } from '@/components/rich/conversation-result';
 import { decisionResultCopy } from '@/components/rich/decision-result.shell-copy';
+import { ReadOnlyChoiceList } from '@/components/rich/ReadOnlyChoiceList';
 import { RuntimeInteractionRequestDetails } from '@/components/rich/RuntimeInteractionRequestDetails';
 import { runtimeDecisionResult } from '@/components/rich/runtime-decision-result';
 import { useShellCopy } from '../shell-copy';
@@ -49,7 +50,9 @@ export function SettledRuntimeReceipt({ item, reread }: { item: SettledApprovalH
       ? conversationResult(reason, labels, conversationCopy, resultCopy)
       : {
           status,
-          label: `${status === 'approved' ? resultCopy.approved : status === 'rejected' ? resultCopy.declined : resultCopy[status]} · ${labels.length ? resultCopy.selected(labels.join(' / ')) : item.summary}`,
+          label: labels.length
+            ? resultCopy.selected(labels.join(' / '))
+            : `${status === 'approved' ? resultCopy.approved : status === 'rejected' ? resultCopy.declined : resultCopy[status]} · ${item.summary}`,
         };
   if (read?.item === item && !record) result = { status: 'closed', label: `${resultCopy.unknown} · ${item.summary}` };
   if (record?.request.kind === 'conversation_decision') {
@@ -64,13 +67,12 @@ export function SettledRuntimeReceipt({ item, reread }: { item: SettledApprovalH
     <ApprovalResultRow {...result} onExpandedChange={setExpanded}>
       {record ? (
         <>
-          <RuntimeInteractionRequestDetails request={record.request} />
+          <RuntimeInteractionRequestDetails request={record.request} terminal={record.terminal} />
           {record.request.kind === 'conversation_decision' ? (
-            <ul className="list-inside list-disc">
-              {record.request.presentation.options.map((option) => (
-                <li key={option.id}>{option.label}</li>
-              ))}
-            </ul>
+            <ReadOnlyChoiceList
+              options={record.request.presentation.options}
+              selectedIds={record.terminal?.response?.kind === 'selection' ? record.terminal.response.selectedIds : []}
+            />
           ) : null}
         </>
       ) : (

@@ -29,7 +29,7 @@ export function ApprovalResultRow({
   if (insideDetails) return <>{children}</>;
   return (
     <div data-testid="decision-result-row" className="min-w-0 text-sm">
-      <div className="flex min-w-0 items-center gap-1.5">
+      <div className="min-w-0">
         <button
           type="button"
           aria-expanded={expanded}
@@ -39,13 +39,13 @@ export function ApprovalResultRow({
             setExpanded(!expanded);
             onExpandedChange?.(!expanded);
           }}
-          className="shell-focusable flex min-w-0 items-center gap-2 text-left hover:underline"
+          className="shell-focusable max-w-full text-left leading-relaxed hover:underline"
         >
           <span
             aria-hidden="true"
             data-testid={`${testIdPrefix}-dot`}
             data-status={status}
-            className="h-2 w-2 shrink-0 rounded-full"
+            className="mr-2 inline-block h-2 w-2 shrink-0 rounded-full align-middle"
             style={{
               background:
                 status === 'approved'
@@ -55,11 +55,15 @@ export function ApprovalResultRow({
                     : 'var(--shell-muted)',
             }}
           />
-          <span data-testid={`${testIdPrefix}-label`} className="truncate" title={label}>
+          <span
+            data-testid={`${testIdPrefix}-label`}
+            className="whitespace-normal break-words [overflow-wrap:anywhere]"
+            title={label}
+          >
             {label}
           </span>
           {!actions ? (
-            <span className="shrink-0 text-[var(--shell-body)]">{expanded ? t.collapse : t.open}</span>
+            <span className="ml-1.5 whitespace-nowrap text-[var(--shell-body)]">{expanded ? t.collapse : t.open}</span>
           ) : null}
         </button>
         {actions}

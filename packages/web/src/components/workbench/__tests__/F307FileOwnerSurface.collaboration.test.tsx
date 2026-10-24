@@ -156,6 +156,23 @@ describe('F307 File owner collaboration entry', () => {
     expect([...container.querySelectorAll('button')].some((button) => button.textContent === '协作批注')).toBe(true);
   });
 
+  it('opens a chat DOCX in the original file reader without importing a collaborative editor', async () => {
+    writeShellPresentation('v2');
+    await act(async () =>
+      root.render(
+        <F307FileOwnerSurface
+          surface={createFileSurface({
+            worktreeId: 'worktree-a',
+            path: 'docs/report.docx',
+            navigationOrigin: { kind: 'chat-file-link', threadId: 'thread-1', messageId: 'message-1' },
+          })}
+          onRequestDetach={vi.fn()}
+        />,
+      ),
+    );
+    expect(container.querySelector('[data-testid="workspace-file-viewer"]')).not.toBeNull();
+    expect(mocks.apiFetch.mock.calls.some(([url]) => url === '/api/workspace/content-editor')).toBe(false);
+  });
   it.each([
     'cover.png',
   ])('opens %s directly in the full collaboration surface and can return to file tools', async (path) => {

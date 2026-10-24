@@ -135,7 +135,7 @@ it('continues bounded history preparation without presenting an empty success or
     expect(container.textContent).toContain('Preparing handled results');
     expect(container.textContent).not.toContain('unavailable');
     await act(async () => vi.advanceTimersByTimeAsync(1000));
-    expect(container.textContent).toContain('Selected · Alpha');
+    expect(container.textContent).toContain('Chose “Alpha”');
     await act(async () => vi.advanceTimersByTimeAsync(5000));
     expect(reads).toBe(2);
   } finally {
@@ -288,14 +288,20 @@ it.each([
   expect(vi.mocked(apiFetch).mock.calls.some(([, options]) => options?.method === 'POST')).toBe(false);
 });
 
-it('keeps prior writes and the final rejection explicit before and after cold Inbox disclosure', async () => {
+it.each([
+  true,
+  false,
+])('keeps prior writes and the final rejection explicit; complete quantity proof=%s', async (complete) => {
   item = {
     ...item,
     proposalId: 'person_candidate_original',
     sourceFeatureId: 'F276',
     resolution: 'rejected',
     materialization: { state: 'not_started' },
-    detail: { hasRetainedWrites: true, materialized: { claims: 1, relationships: 0, events: 0 } },
+    detail: {
+      hasRetainedWrites: true,
+      ...(complete ? { materialized: { claims: 1, relationships: 0, events: 0 } } : {}),
+    },
   };
   vi.mocked(apiFetch).mockImplementation(async (path) => {
     if (String(path) === '/api/session') return Response.json({ userId: owner });
@@ -307,6 +313,7 @@ it('keeps prior writes and the final rejection explicit before and after cold In
         approvalCardMessageId: cardRef.messageId,
         status: 'rejected',
         hasRetainedWrites: true,
+        ...(complete ? { materialized: { claims: 1, relationships: 0, events: 0 } } : {}),
         decisionReceipt: {
           decisionId: 'earlier-partial',
           materializedClaimIds: ['claim'],
@@ -318,19 +325,19 @@ it('keeps prior writes and the final rejection explicit before and after cold In
   });
   await render();
   expect(container.querySelector('[data-testid=decision-result-label]')?.textContent).toContain(
-    'Part written · Rest declined',
+    complete ? 'Wrote 1 · rest declined' : 'Earlier writes remain · rest declined',
   );
-  expect(container.querySelector('[data-testid=decision-result-dot]')?.getAttribute('data-status')).toBe('rejected');
+  expect(container.querySelector('[data-testid=decision-result-dot]')?.getAttribute('data-status')).toBe('approved');
   await expand();
   expect(container.querySelector('[data-testid=decision-result-label]')?.textContent).toContain(
-    'Part written · Rest declined',
+    complete ? 'Wrote 1 · rest declined' : 'Earlier writes remain · rest declined',
   );
   expect(container.querySelector('[data-testid=person-memory-undo]')).toBeNull();
 });
 
 it('cold-loads the canonical choice into a collapsed receipt, without a session or response writer', async () => {
   await render();
-  expect(container.textContent).toContain('Selected · Alpha');
+  expect(container.textContent).toContain('Chose “Alpha”');
   expect(container.querySelector('[data-testid="decision-result-details"]')).toBeNull();
   await expand();
   expect(container.textContent).toContain('Which environment?');
@@ -339,7 +346,7 @@ it('cold-loads the canonical choice into a collapsed receipt, without a session 
   act(() => root.unmount());
   root = createRoot(container);
   await render();
-  expect(container.textContent).toContain('Selected · Alpha');
+  expect(container.textContent).toContain('Chose “Alpha”');
   expect(container.querySelector('[data-testid="decision-result-details"]')).toBeNull();
 });
 it.each([
@@ -364,7 +371,7 @@ it.each([
   expect(container.querySelector('[data-testid="decision-result-dot"]')?.getAttribute('data-status')).toBe('closed');
   expect(container.textContent).toContain('Result not yet confirmed');
   expect(container.querySelectorAll('form, input, select, textarea')).toHaveLength(0);
-  expect(container.textContent).not.toContain('Selected · Alpha');
+  expect(container.textContent).not.toContain('Chose “Alpha”');
 });
 it('does not duplicate an already mounted pending or retained decision', async () => {
   await render('owner', [JSON.stringify(['F306', item.proposalId])]);
@@ -383,16 +390,16 @@ it('refuses foreign owners, duplicate identities, invalid closure reasons and fa
 });
 it('hides previous owner results immediately on a principal mismatch', async () => {
   await render();
-  expect(container.textContent).toContain('Selected · Alpha');
+  expect(container.textContent).toContain('Chose “Alpha”');
   owner = 'different-owner';
   await render('different-owner');
-  expect(container.textContent).not.toContain('Selected · Alpha');
+  expect(container.textContent).not.toContain('Chose “Alpha”');
   expect(container.textContent).toContain('Handled results are unavailable');
 });
 it('rejects a changed current principal after the settled read', async () => {
   owner = 'different-owner';
   await render();
-  expect(container.textContent).not.toContain('Selected · Alpha');
+  expect(container.textContent).not.toContain('Chose “Alpha”');
   expect(container.textContent).toContain('Handled results are unavailable');
 });
 it('strips private response text rather than replaying it into a restored receipt', () => {

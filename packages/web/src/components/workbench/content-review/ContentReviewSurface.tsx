@@ -118,7 +118,11 @@ export function ContentReviewSurface({
           </div>
         ) : null}
         {review.error ? (
-          <p role="alert" className="rounded bg-[var(--semantic-critical-surface)] p-2 text-xs text-cafe-error">
+          <p
+            data-content-opening-state={!review.view ? 'blocked' : undefined}
+            role="alert"
+            className="rounded bg-[var(--semantic-critical-surface)] p-2 text-xs text-cafe-error"
+          >
             {review.error}
           </p>
         ) : null}

@@ -1,9 +1,17 @@
 import { createHash } from 'node:crypto';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
+import type { PluginManifest } from '@clowder-ai/plugin-contract';
+import { PLUGIN_ARCHIVE_BUDGET } from './archive-preflight.js';
 import type { PluginManifestValidator } from './package-staging.js';
 import { stageVerifiedPackageArchive } from './package-staging.js';
-import type { VerifiedPluginPackage, VerifiedPluginPackageLocator } from './types.js';
+import { readVerifiedPackageStaticFile } from './package-static-file.js';
+import {
+  ExternalPluginRuntimeError,
+  type VerifiedPluginPackage,
+  type VerifiedPluginPackageLocator,
+  type VerifiedPluginStaticFile,
+} from './types.js';
 
 export interface FilesystemVerifiedPluginPackageLocatorOptions {
   readonly tarBin?: string;
@@ -37,6 +45,48 @@ export class FilesystemVerifiedPluginPackageLocator implements VerifiedPluginPac
       tarBin: this.tarBin,
       ...(this.validateManifest === undefined ? {} : { validateManifest: this.validateManifest }),
     });
+  }
+
+  readInstalledStaticFile(
+    packageDigest: string,
+    selectFile: (manifest: PluginManifest) => string,
+  ): Promise<VerifiedPluginStaticFile> {
+    return readVerifiedPackageStaticFile({
+      artifactRoot: this.packageRoot(packageDigest),
+      packagesRoot: this.packagesRoot,
+      packageDigest,
+      tarBin: this.tarBin,
+      selectFile,
+      ...(this.validateManifest === undefined ? {} : { validateManifest: this.validateManifest }),
+    });
+  }
+
+  async readArchiveStaticFile(
+    packageDigest: string,
+    bytes: Uint8Array,
+    selectFile: (manifest: PluginManifest) => string,
+  ): Promise<VerifiedPluginStaticFile> {
+    if (bytes.byteLength > PLUGIN_ARCHIVE_BUDGET.compressedBytes) {
+      throw new ExternalPluginRuntimeError(
+        'PACKAGE_AUTHORITY_MISMATCH',
+        'static archive compressed byte limit exceeded',
+      );
+    }
+    await mkdir(this.packagesRoot, { recursive: true, mode: 0o700 });
+    const candidate = await mkdtemp(resolve(this.packagesRoot, '.static-candidate-'));
+    try {
+      await writeFile(resolve(candidate, 'package.tgz'), bytes, { mode: 0o600, flag: 'wx' });
+      return await readVerifiedPackageStaticFile({
+        artifactRoot: candidate,
+        packagesRoot: this.packagesRoot,
+        packageDigest,
+        tarBin: this.tarBin,
+        selectFile,
+        ...(this.validateManifest === undefined ? {} : { validateManifest: this.validateManifest }),
+      });
+    } finally {
+      await rm(candidate, { recursive: true, force: true });
+    }
   }
 
   /**

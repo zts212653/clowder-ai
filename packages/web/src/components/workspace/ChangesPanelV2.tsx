@@ -5,6 +5,7 @@ import { useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useShellCopy } from '@/components/shell/shell-copy';
 import { ThreadNativeReviewSettingsContent } from '@/components/ThreadSidebar/ThreadNativeReviewSettings';
 import { useWorkspaceSurfaceVisibility } from '@/components/workbench/WorkspaceSurfaceVisibility';
+import type { CommitChangesTarget } from '../workbench/commit-changes-surface';
 import { codeToolsCopy } from './code-tools.shell-copy';
 import { DiffViewer, parseUnifiedDiff } from './DiffViewer';
 import { FileIcon } from './FileIcons';
@@ -30,6 +31,8 @@ interface ChangesPanelV2Props {
   threadId?: string | null;
   onOpenFile?: (path: string) => void;
   pullRequestTarget?: PullRequestChangesTarget;
+  chatSource?: boolean;
+  commitTarget?: CommitChangesTarget;
   onBack?: () => void;
 }
 
@@ -45,10 +48,17 @@ export function ChangesPanelV2({
   threadId,
   onOpenFile,
   pullRequestTarget,
+  chatSource,
+  commitTarget,
   onBack,
 }: ChangesPanelV2Props) {
   const copy = useShellCopy(codeToolsCopy).changes;
-  const { data, loading, error, refresh, targetKey } = useChangesDiff(worktreeId, pullRequestTarget);
+  const { data, loading, error, refresh, targetKey } = useChangesDiff(
+    worktreeId,
+    pullRequestTarget,
+    chatSource,
+    commitTarget,
+  );
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
   const visible = useWorkspaceSurfaceVisibility();
   const diffViewport = useRef<HTMLDivElement>(null);
