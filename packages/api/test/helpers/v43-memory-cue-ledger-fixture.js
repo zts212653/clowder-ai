@@ -1,8 +1,8 @@
-import { installLegacyEntityMentionFixture } from './legacy-entity-mention-fixture.js';
+import { installLegacyEntityRevisionFixture } from './legacy-entity-revision-fixture.js';
 
 /** The physical cue ledger already exists at schema V43; scheduler migration fixtures must include it. */
 export function installV43CueLedgerSchemaFixture(db) {
-  installLegacyEntityMentionFixture(db);
+  installLegacyEntityRevisionFixture(db);
   db.exec(`
     CREATE TABLE memory_cue_events (
       event_id TEXT PRIMARY KEY,

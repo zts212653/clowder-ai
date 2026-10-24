@@ -23,10 +23,7 @@ const init = {
 
 test('recorded official CLI followups retain separate turns and non-cumulative usage', async () => {
   for (const name of ['default', 'immediate']) {
-    const events = readFileSync(
-      new URL(`../../../docs/evidence/2026-10-23-f325-agy-cli-followup-spike/raw-${name}.ndjson`, import.meta.url),
-      'utf8',
-    )
+    const events = readFileSync(new URL(`./fixtures/agy-stream-json/followup-${name}.ndjson`, import.meta.url), 'utf8')
       .trim()
       .split('\n')
       .map((line) => JSON.parse(line))
@@ -50,9 +47,16 @@ test('recorded official CLI followups retain separate turns and non-cumulative u
     ))
       if (observed.kind === 'result') turns.push(observed.observed.turn);
     assert.equal(turns.length, 2);
+    assert.deepEqual(
+      turns.map((turn) => turn.outcome),
+      ['ok', 'ok'],
+    );
+    assert.equal(turns[0].turnUsage.inputTokens, turns[0].usage.inputTokens);
     assert.equal(turns[1].turnUsage.inputTokens, turns[1].usage.inputTokens - turns[0].usage.inputTokens);
+    assert.notEqual(turns[1].turnUsage.inputTokens, turns[1].usage.inputTokens);
     assert.match(turns[0].finalText, /A_DONE NONE/);
     assert.match(turns[1].finalText, /A_DONE PAPAYA/);
+    assert.equal(turns[0].toolCalls.length, name === 'default' ? 1 : 2, 'A contains the recorded tools');
     assert.equal(turns[1].toolCalls.length, 0, 'A tool observations do not bleed into B');
   }
 });
