@@ -82,6 +82,9 @@ export interface CancelResult {
   catIds: string[];
   /** Exact runner(s) aborted by this action; safe witness for holder preservation. */
   executionIds?: string[];
+  /** Snapshot the canceled owner before teardown/replacement can change the slot. */
+  executionIdByCatId?: Readonly<Record<string, string>>;
+  activeRunByCatId?: Readonly<Record<string, LifecycleActiveRun>>;
 }
 
 export interface ExactCancelResult extends CancelResult {
@@ -100,6 +103,7 @@ export interface CancelAllResult {
   executionIds: string[];
   /** Exact active execution owner for each canceled slot. */
   executionIdByCatId: Readonly<Record<string, string>>;
+  activeRunByCatId?: Readonly<Record<string, LifecycleActiveRun>>;
 }
 
 export interface DeleteGuard {
@@ -397,7 +401,13 @@ export class InvocationTracker {
     // getController() still returns the aborted controller for a cat cancelled BEFORE the route
     // layer grabbed its own signal (pre-invoke cancel must not be lost / fall back to the batch
     // gate). Purged at the next start-family or complete-family call for this slot.
-    return { cancelled: true, catIds, executionIds: inv.executionId ? [inv.executionId] : [] };
+    return {
+      cancelled: true,
+      catIds,
+      executionIds: inv.executionId ? [inv.executionId] : [],
+      ...(inv.executionId ? { executionIdByCatId: { [catId]: inv.executionId } } : {}),
+      ...(inv.activeRun ? { activeRunByCatId: { [catId]: inv.activeRun } } : {}),
+    };
   }
 
   /**
@@ -429,6 +439,8 @@ export class InvocationTracker {
         cancelled: true,
         catIds: inv.catIds,
         executionIds: [executionId],
+        executionIdByCatId: { [catId]: executionId },
+        ...(inv.activeRun ? { activeRunByCatId: { [catId]: inv.activeRun } } : {}),
       };
     }
 
@@ -450,6 +462,8 @@ export class InvocationTracker {
       cancelled: true,
       catIds: inv.catIds,
       executionIds: [executionId],
+      executionIdByCatId: { [catId]: executionId },
+      ...(inv.activeRun ? { activeRunByCatId: { [catId]: inv.activeRun } } : {}),
     };
   }
 
@@ -465,6 +479,7 @@ export class InvocationTracker {
     const cancelledCatIds: string[] = [];
     const cancelledExecutionIds = new Set<string>();
     const cancelledExecutionIdByCatId = new Map<string, string>();
+    const activeRunByCatId: Record<string, LifecycleActiveRun> = {};
     // F211-REG6 instrument (observation-only): per-cat age evidence for the all-scope path,
     // mirroring cancel()'s msSinceStart. An all-scope cancel / force-reset must also answer
     // "just started" vs "ran a while" — without this, the cancelAll log can't distinguish them.
@@ -485,6 +500,7 @@ export class InvocationTracker {
           cancelledExecutionIds.add(inv.executionId);
           cancelledExecutionIdByCatId.set(inv.catId, inv.executionId);
         }
+        if (inv.activeRun) activeRunByCatId[inv.catId] = inv.activeRun;
         cancelledSlots.push({ catId: inv.catId, msSinceStart: Date.now() - inv.startedAt });
         this.tombstoneCanceledInvocation(inv, abortReason);
         if (inv.batchController) batchControllers.add(inv.batchController);
@@ -513,6 +529,7 @@ export class InvocationTracker {
       catIds: cancelledCatIds,
       executionIds: [...cancelledExecutionIds],
       executionIdByCatId: Object.fromEntries(cancelledExecutionIdByCatId),
+      ...(Object.keys(activeRunByCatId).length ? { activeRunByCatId } : {}),
     };
   }
 

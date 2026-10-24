@@ -27,11 +27,16 @@ export interface SessionLockScope {
   catId?: string;
 }
 
+export type ReleasedInvocation = Pick<SessionLockOwner, 'catId' | 'executionId'> &
+  Partial<Pick<SessionLockOwner, 'invocationId'>>;
+
 export interface ForceReleaseResult {
   releasedHolders: number;
   rejectedWaiters: number;
   /** Cats whose holder or waiter was force-released, for terminal UI/slot cleanup. */
   catIds?: string[];
+  /** Exact owners actually released/rejected, captured before replacement admission. */
+  releasedInvocations?: readonly ReleasedInvocation[];
 }
 
 export interface ForceReleaseOptions {
@@ -132,13 +137,19 @@ export class SessionMutex {
     let releasedHolders = 0;
     let rejectedWaiters = 0;
     const catIds = new Set<string>();
+    const released = new Map<string, ReleasedInvocation>();
+    const remember = (owner: SessionLockOwner): void => {
+      const { catId, executionId, invocationId } = owner;
+      catIds.add(catId);
+      released.set(JSON.stringify([catId, executionId, invocationId]), { catId, executionId, invocationId });
+    };
     const preservedHolderExecutions = new Set(options.preserveHolderExecutionIds ?? []);
 
     for (const [sessionId, queue] of this.waiters) {
       const survivors: Waiter[] = [];
       for (const waiter of queue) {
         if (this.matchesScope(waiter.owner, scope)) {
-          if (waiter.owner) catIds.add(waiter.owner.catId);
+          if (waiter.owner) remember(waiter.owner);
           waiter.cleanup();
           waiter.reject(new Error(`SessionMutex force released for session ${sessionId}`));
           rejectedWaiters++;
@@ -161,13 +172,13 @@ export class SessionMutex {
       // release; a later stale release cannot delete a replacement because lock()
       // guards ownership with a per-acquisition token.
       if (held.owner && preservedHolderExecutions.has(held.owner.executionId)) continue;
-      if (held.owner) catIds.add(held.owner.catId);
+      if (held.owner) remember(held.owner);
       this.held.delete(sessionId);
       releasedHolders++;
       this.drainNext(sessionId);
     }
 
-    return { releasedHolders, rejectedWaiters, catIds: [...catIds] };
+    return { releasedHolders, rejectedWaiters, catIds: [...catIds], releasedInvocations: [...released.values()] };
   }
 
   /** Create a lock entry and return an idempotent release function. */
