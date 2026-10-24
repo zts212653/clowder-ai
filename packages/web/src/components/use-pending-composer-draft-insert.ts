@@ -46,13 +46,14 @@ function applyPendingServerRevision(insert: ComposerDraftInsert, refs: PendingCo
   refs.imageUrlsRef.current = [...imageUrls];
   refs.revisionRef.current = insert.serverRevision;
   refs.hydratedRef.current = true;
-  refs.lastSavedSignatureRef.current = composerDraftSignature(
+  const signature = composerDraftSignature(
     insert.text,
     imageUrls,
     insert.contextAttachments ?? [],
     refs.preservedBlocksRef.current,
     insert.replyToId,
   );
+  refs.lastSavedSignatureRef.current = signature;
 }
 
 function projectPendingText(insert: ComposerDraftInsert, previous: string): string {
