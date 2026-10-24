@@ -202,6 +202,7 @@ export function OverviewPanel() {
 
   const invOk = sumByPrefix(latest, 'cat_cafe_invocation_completed', 'status="ok"');
   const invErr = sumByPrefix(latest, 'cat_cafe_invocation_completed', 'status="error"');
+  const invCanceled = sumByPrefix(latest, 'cat_cafe_invocation_completed', 'status="canceled"');
   const invocations = sumByPrefix(latest, 'cat_cafe_cat_invocation_count');
   const activeInv = sumByPrefix(latest, 'cat_cafe_invocation_active');
 
@@ -233,6 +234,7 @@ export function OverviewPanel() {
           value={String(invErr)}
           sub={invOk + invErr > 0 ? `${((invErr / (invOk + invErr)) * 100).toFixed(1)}% error` : undefined}
         />
+        <MetricCard label="Invocation (canceled)" value={String(invCanceled)} />
         <MetricCard label="Invocations" value={String(invocations)} />
         <MetricCard label="Active" value={String(activeInv)} />
         <MetricCard label="Snapshots" value={`${snapshots.length}`} sub="(last 30min)" />

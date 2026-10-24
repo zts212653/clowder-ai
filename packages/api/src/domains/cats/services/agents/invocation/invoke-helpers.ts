@@ -202,3 +202,11 @@ export async function preflightRace<T>(promise: Promise<T>, label: string, signa
 
   return Promise.race(parts).finally(cleanup);
 }
+
+/** Explicit user/owner control is expected; unknown aborts and timeouts remain failures. */
+export function isExpectedInvocationCancellation(signal: AbortSignal | undefined): boolean {
+  return (
+    signal?.aborted === true &&
+    (signal.reason === 'user_cancel' || signal.reason === 'cancel_all' || signal.reason === 'preempted')
+  );
+}
