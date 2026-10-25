@@ -2,7 +2,17 @@ import { CONTEXTUAL_SECRET, isContextualCredential } from './secret-content-rule
 import { mergeSecretFindings, redactSecretContent, scanSecretContent } from './secret-content-scan.mjs';
 
 function inspectString(item, key, rules) {
-  if (new RegExp(CONTEXTUAL_SECRET).test(`${key}: "${item}"`) && isContextualCredential(item)) {
+  const prefix = `${key}: "`;
+  const field = new RegExp(CONTEXTUAL_SECRET).exec(`${prefix}${item}"`);
+  // Only the actual field name supplies structured credential context. A match
+  // may begin within a namespaced/header key, but its value must be in item.
+  // Matches wholly inside source text still use the ordinary content scanner.
+  if (
+    field &&
+    field.index < key.length &&
+    field.index + field[0].length - field[1].length >= prefix.length &&
+    isContextualCredential(item)
+  ) {
     rules.add('contextual-credential');
     return '[credential redacted]';
   }

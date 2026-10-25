@@ -196,6 +196,14 @@ test('absolute pinned gh wrapper retains the PR/API read contract', () => {
     parity(`${gh} pr checks 5346 --repo zts212653/clowder-ai --json name,state`, 'allow');
     parity(`${gh} pr list --repo zts212653/clowder-ai --state open --json number,files`, 'allow');
     parity(`${gh} api repos/zts212653/cat-cafe/pulls/5346 --method GET`, 'allow');
+    for (const payload of [
+      '--method GET --raw-field body=ordinary',
+      '--method GET --field body=@README.md',
+      '--method GET --input README.md',
+      '--method GET --header @README.md',
+    ])
+      parity(`${gh} api repos/zts212653/cat-cafe/pulls/5346 ${payload}`, 'deny');
+    parity('/usr/bin/gh api repos/zts212653/cat-cafe/pulls/5346 --method GET', 'deny');
     parity(`NODE_OPTIONS='--require ${runtime}/loader.js' ${gh} pr view 5346`, 'deny');
     parity(`${gh} api repos/zts212653/cat-cafe/issues --method POST`, 'deny');
     parity(`${gh} pr view 5346 > ${runtime}/output`, 'deny');
