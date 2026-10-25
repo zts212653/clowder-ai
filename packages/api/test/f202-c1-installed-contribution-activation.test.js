@@ -27,6 +27,7 @@ import {
   createPluginManagerRuntimeComposition,
 } from '../dist/domains/plugin/index.js';
 import { registerPluginManagerRoutes } from '../dist/routes/plugin-manager-routes.js';
+import { secretMcpContract } from './helpers/secret-mcp-contract.js';
 
 const roots = [];
 const execFileAsync = promisify(execFile);
@@ -1029,13 +1030,19 @@ test('plugin MCP lifecycle reaches existing projects and their provider injectio
       );
     }
     const providerEntry = (await inject(consumer, allowedCat))[name];
+    assert.ok(providerEntry, `${phase}: provider must retain the activated plugin`);
+    const { upstream, proxyEnv } = secretMcpContract(providerEntry);
+    assert.equal(upstream.command, homeEntry.mcpServer.command);
+    assert.deepEqual(upstream.args, homeEntry.mcpServer.args);
+    assert.equal(upstream.env.CLOWDER_PLUGIN_ACTION_PATH, '/api/plugin-runtime/action');
+    assert.equal(proxyEnv.CLOWDER_PLUGIN_ACTION_TOKEN, undefined);
     assert.ok(
-      providerEntry?.env?.CLOWDER_PLUGIN_ACTION_TOKEN === currentToken,
+      upstream.env.CLOWDER_PLUGIN_ACTION_TOKEN === currentToken,
       `${phase}: provider must inject the active token`,
     );
     assert.deepEqual(
       await runtime.supervisor.nativeActions.call(
-        providerEntry.env.CLOWDER_PLUGIN_ACTION_TOKEN,
+        upstream.env.CLOWDER_PLUGIN_ACTION_TOKEN,
         'native.run',
         { value: phase },
         caller,

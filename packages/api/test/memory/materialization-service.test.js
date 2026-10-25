@@ -1,10 +1,18 @@
 import assert from 'node:assert/strict';
-import { execSync } from 'node:child_process';
+import { execFileSync, execSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, it } from 'node:test';
+
+function initializeGitFixture(directory) {
+  const options = { cwd: directory, stdio: 'pipe' };
+  execFileSync('git', ['init'], options);
+  execFileSync('git', ['config', 'user.name', 'Materialization Fixture'], options);
+  execFileSync('git', ['config', 'user.email', 'materialization-fixture@example.invalid'], options);
+  execFileSync('git', ['commit', '--allow-empty', '-m', 'init'], options);
+}
 
 describe('MaterializationService', () => {
   let tmpDir;
@@ -114,14 +122,7 @@ describe('MaterializationService', () => {
 
   it('does NOT commit by default (commit is opt-in)', async () => {
     // Init a git repo so a commit COULD happen — proves no-commit is by design, not env
-    const gitEnv = {
-      ...process.env,
-      GIT_AUTHOR_NAME: 'test',
-      GIT_AUTHOR_EMAIL: 'test@test',
-      GIT_COMMITTER_NAME: 'test',
-      GIT_COMMITTER_EMAIL: 'test@test',
-    };
-    execSync('git init && git commit --allow-empty -m "init"', { cwd: tmpDir, env: gitEnv, stdio: 'pipe' });
+    initializeGitFixture(tmpDir);
     const marker = await queue.submit({
       content: 'Default no-commit lesson',
       source: 'opus:t1',
@@ -139,14 +140,7 @@ describe('MaterializationService', () => {
 
   it('commits the materialized file to git', async () => {
     // Init a git repo in tmpDir so commit can work
-    const gitEnv = {
-      ...process.env,
-      GIT_AUTHOR_NAME: 'test',
-      GIT_AUTHOR_EMAIL: 'test@test',
-      GIT_COMMITTER_NAME: 'test',
-      GIT_COMMITTER_EMAIL: 'test@test',
-    };
-    execSync('git init && git commit --allow-empty -m "init"', { cwd: tmpDir, env: gitEnv, stdio: 'pipe' });
+    initializeGitFixture(tmpDir);
     const marker = await queue.submit({
       content: 'Committed lesson',
       source: 'opus:t1',
@@ -494,14 +488,7 @@ describe('MaterializationService', () => {
     };
 
     // Init git repo for commit
-    const gitEnv = {
-      ...process.env,
-      GIT_AUTHOR_NAME: 'test',
-      GIT_AUTHOR_EMAIL: 'test@test',
-      GIT_COMMITTER_NAME: 'test',
-      GIT_COMMITTER_EMAIL: 'test@test',
-    };
-    execSync('git init && git commit --allow-empty -m "init"', { cwd: tmpDir, env: gitEnv, stdio: 'pipe' });
+    initializeGitFixture(tmpDir);
 
     const fullService = new MaterializationService(queue, join(tmpDir, 'docs'), mockIndexBuilder);
 

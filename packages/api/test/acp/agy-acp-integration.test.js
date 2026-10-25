@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, test } from 'node:test';
 import { AcpAgentService } from '../../dist/domains/cats/services/agents/providers/acp/AcpAgentService.js';
+import { secretMcpContract } from '../helpers/secret-mcp-contract.js';
 
 const roots = [];
 afterEach(() => {
@@ -220,21 +221,26 @@ for (const mode of [{ stopReason: 'cancelled' }, { stopReason: 'refusal' }, { pr
 
 for (const nativePlugin of [false, true]) {
   test(`AGY ACP refreshes credentials before resume and uses only their file for ${nativePlugin ? 'native-plugin' : 'host'} MCP`, async () => {
-    let seen;
-    let resumeEnv;
+    const resumes = [];
+    const registration = {
+      name: nativePlugin ? 'plugin-fixture' : 'cat-cafe-memory',
+      command: process.execPath,
+      args: [],
+      env: nativePlugin
+        ? [
+            { name: 'CLOWDER_PLUGIN_ACTION_TOKEN', value: 'synthetic-action' },
+            { name: 'CLOWDER_PLUGIN_ACTION_PATH', value: '/api/plugin-runtime/action' },
+          ]
+        : [],
+    };
     const f = fixture({
-      mcpServers: [
-        {
-          name: nativePlugin ? 'plugin-fixture' : 'cat-cafe-memory',
-          command: process.execPath,
-          args: [],
-          env: nativePlugin ? [{ name: 'CLOWDER_PLUGIN_ACTION_TOKEN', value: 'synthetic-action' }] : [],
-        },
-      ],
+      mcpServers: [registration],
       onResume: (args) => {
-        resumeEnv = Object.fromEntries(args[2][0].env.map(({ name, value }) => [name, value]));
-        const path = resumeEnv.CAT_CAFE_CREDENTIAL_FILE;
-        seen = JSON.parse(readFileSync(path, 'utf8'));
+        const contract = secretMcpContract(args[2][0]);
+        resumes.push({
+          ...contract,
+          seen: JSON.parse(readFileSync(contract.proxyEnv.CAT_CAFE_CREDENTIAL_FILE, 'utf8')),
+        });
       },
     });
     const previous = process.env.CAT_CAFE_MCP_CREDS_DIR;
@@ -249,32 +255,42 @@ for (const nativePlugin of [false, true]) {
     try {
       const events = await Array.fromAsync(f.service.invoke('first', { ...f.options, callbackEnv }));
       const setup = f.calls.find(([name]) => name === 'new');
-      assert.equal(
-        setup[2][0].env.some((entry) => ['CAT_CAFE_INVOCATION_ID', 'CAT_CAFE_CALLBACK_TOKEN'].includes(entry.name)),
-        false,
-      );
+      const initial = secretMcpContract(setup[2][0]);
       const binding = events.find((event) => event.nativeSessionBinding).nativeSessionBinding;
-      await Array.fromAsync(
-        f.service.invoke('second', {
-          ...f.options,
-          sessionId: 'acp-original',
-          nativeSessionBinding: binding,
-          callbackEnv: {
-            ...callbackEnv,
-            CAT_CAFE_INVOCATION_ID: 'second',
-            CAT_CAFE_CALLBACK_TOKEN: 'synthetic-second',
-          },
-        }),
-      );
-      assert.equal(seen.invocationId, 'second');
-      assert.equal(seen.callbackToken, 'synthetic-second');
-      assert.equal(Object.hasOwn(resumeEnv, 'CAT_CAFE_INVOCATION_ID'), false);
-      assert.equal(Object.hasOwn(resumeEnv, 'CAT_CAFE_CALLBACK_TOKEN'), false);
-      assert.equal(
-        resumeEnv.CAT_CAFE_CREDENTIAL_FILE,
-        setup[2][0].env.find((entry) => entry.name === 'CAT_CAFE_CREDENTIAL_FILE').value,
-      );
-      if (nativePlugin) assert.equal(resumeEnv.CLOWDER_PLUGIN_ACTION_TOKEN, 'synthetic-action');
+      for (const turn of ['second', 'third']) {
+        await Array.fromAsync(
+          f.service.invoke(turn, {
+            ...f.options,
+            sessionId: 'acp-original',
+            nativeSessionBinding: binding,
+            callbackEnv: {
+              ...callbackEnv,
+              CAT_CAFE_INVOCATION_ID: turn,
+              CAT_CAFE_CALLBACK_TOKEN: `synthetic-${turn}`,
+            },
+          }),
+        );
+        const { seen } = resumes.at(-1);
+        assert.equal(seen.invocationId, turn);
+        assert.equal(seen.callbackToken, `synthetic-${turn}`);
+      }
+      assert.equal(resumes.length, 2, 'both turns must use native resume');
+      for (const { proxyEnv, upstream } of [initial, ...resumes]) {
+        assert.equal(upstream.command, registration.command);
+        assert.deepEqual(upstream.args, registration.args);
+        assert.equal(upstream.source, registration.name);
+        assert.equal(proxyEnv.CLOWDER_PLUGIN_ACTION_TOKEN, undefined);
+        assert.equal(proxyEnv.CLOWDER_PLUGIN_ACTION_PATH, undefined);
+        if (nativePlugin) {
+          assert.equal(upstream.env.CLOWDER_PLUGIN_ACTION_TOKEN, 'synthetic-action');
+          assert.equal(upstream.env.CLOWDER_PLUGIN_ACTION_PATH, '/api/plugin-runtime/action');
+        }
+        for (const env of [proxyEnv, upstream.env]) {
+          assert.equal(Object.hasOwn(env, 'CAT_CAFE_INVOCATION_ID'), false);
+          assert.equal(Object.hasOwn(env, 'CAT_CAFE_CALLBACK_TOKEN'), false);
+          assert.equal(env.CAT_CAFE_CREDENTIAL_FILE, initial.proxyEnv.CAT_CAFE_CREDENTIAL_FILE);
+        }
+      }
     } finally {
       if (previous === undefined) delete process.env.CAT_CAFE_MCP_CREDS_DIR;
       else process.env.CAT_CAFE_MCP_CREDS_DIR = previous;

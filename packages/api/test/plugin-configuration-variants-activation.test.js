@@ -34,6 +34,7 @@ import {
   createPluginManagerRuntimeComposition,
 } from '../dist/domains/plugin/index.js';
 import { pluginNativeActionRoutes } from '../dist/routes/plugin-native-action-routes.js';
+import { secretMcpContract } from './helpers/secret-mcp-contract.js';
 
 const roots = [];
 afterEach(async () => {
@@ -352,7 +353,11 @@ test('variant changes refresh existing project MCP providers while preserving me
       }
       const provider = await inject(consumer, allowedCat);
       assert.ok(provider, `${mode}: allowed member must receive the refreshed descriptor`);
-      assert.equal(Object.hasOwn(provider.env ?? {}, 'FEISHU_TOKEN'), mode === 'webhook');
+      const { upstream, proxyEnv } = secretMcpContract(provider);
+      assert.equal(Object.hasOwn(upstream.env, 'FEISHU_TOKEN'), mode === 'webhook');
+      if (mode === 'webhook') assert.equal(upstream.env.FEISHU_TOKEN, 'fixture-variant-secret');
+      assert.equal(proxyEnv.FEISHU_TOKEN, undefined);
+      assert.equal(proxyEnv.CLOWDER_PLUGIN_ACTION_TOKEN, undefined);
       const native = await runtime.supervisor.resolveNativeMcpLaunch({
         mode: 'plugin_native',
         pluginInstanceId: installed.pluginInstanceId,
@@ -360,6 +365,10 @@ test('variant changes refresh existing project MCP providers while preserving me
         actionMethods: ['native.run'],
       });
       assert.equal(Object.hasOwn(native.env, 'FEISHU_TOKEN'), mode === 'webhook');
+      assert.equal(upstream.command, native.command);
+      assert.deepEqual(upstream.args, [...native.args]);
+      assert.equal(upstream.env.CLOWDER_PLUGIN_ACTION_TOKEN, native.env.CLOWDER_PLUGIN_ACTION_TOKEN);
+      assert.equal(upstream.env.CLOWDER_PLUGIN_ACTION_PATH, native.env.CLOWDER_PLUGIN_ACTION_PATH);
       assert.ok(native.env.CLOWDER_PLUGIN_ACTION_TOKEN === initialActionToken, 'live refresh must not rotate tokens');
       assert.deepEqual(
         await runtime.supervisor.nativeActions.call(
@@ -432,9 +441,11 @@ for (const configOnWorkspace of [false, true])
       });
       const server = servers[id.replaceAll(':', '__')];
       assert.ok(server, 'real composition must provide the live plugin despite distinct runtime/workspace roots');
-      assert.equal(server.env.CLOWDER_PLUGIN_ACTION_TOKEN, live.env.CLOWDER_PLUGIN_ACTION_TOKEN);
-      assert.equal(server.command, live.command);
-      const upstream = JSON.parse(server.env.CAT_CAFE_SECRET_MCP_PROXY_SPEC);
+      const { upstream, proxyEnv } = secretMcpContract(server);
+      assert.equal(upstream.env.CLOWDER_PLUGIN_ACTION_TOKEN, live.env.CLOWDER_PLUGIN_ACTION_TOKEN);
+      assert.equal(upstream.env.CLOWDER_PLUGIN_ACTION_PATH, live.env.CLOWDER_PLUGIN_ACTION_PATH);
+      assert.equal(proxyEnv.CLOWDER_PLUGIN_ACTION_TOKEN, undefined);
+      assert.equal(upstream.command, live.command);
       assert.deepEqual(upstream.args, [...live.args]);
       assert.match(server.args[0], /secret-mcp-proxy\.js$/);
     } finally {
@@ -574,8 +585,14 @@ for (const legacy of ['missing-env-mapping', 'persisted-old-token']) {
       });
       const server = servers[existing.id.replaceAll(':', '__')];
       assert.ok(server);
-      assert.equal(server.env.CLOWDER_PLUGIN_ACTION_TOKEN, token);
-      assert.equal(server.env.FEISHU_TOKEN, ' preserved legacy secret ');
+      const { upstream, proxyEnv } = secretMcpContract(server);
+      assert.equal(upstream.env.CLOWDER_PLUGIN_ACTION_TOKEN, token);
+      assert.equal(upstream.env.CLOWDER_PLUGIN_ACTION_PATH, '/api/plugin-runtime/action');
+      assert.equal(upstream.env.FEISHU_TOKEN, ' preserved legacy secret ');
+      assert.equal(upstream.command, existing.mcpServer.command);
+      assert.deepEqual(upstream.args, existing.mcpServer.args);
+      assert.equal(proxyEnv.CLOWDER_PLUGIN_ACTION_TOKEN, undefined);
+      assert.equal(proxyEnv.FEISHU_TOKEN, undefined);
       assert.equal(await readFile(projectFile, 'utf8'), projectBytes, 'unregistered legacy project needs no rewrite');
       client = new Client({ name: 'existing-install-upgrade', version: '1' });
       await client.connect(new StdioClientTransport({ command: server.command, args: server.args, env: server.env }));
@@ -590,7 +607,7 @@ for (const legacy of ['missing-env-mapping', 'persisted-old-token']) {
         { value: 'recovered' },
       );
       const staleClient = createModuleActionClient({
-        env: { ...server.env, CLOWDER_PLUGIN_ACTION_TOKEN: previousToken },
+        env: { ...upstream.env, CLOWDER_PLUGIN_ACTION_TOKEN: previousToken },
       });
       await assert.rejects(staleClient.invoke('native.run', {}), /HTTP 401/);
       assert.equal(await readFile(projectFile, 'utf8'), projectBytes, 'SDK action must not rewrite the project');
