@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { existsSync, realpathSync } from 'node:fs';
-import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { join } from 'node:path';
+import { secretRuntimeRoot } from '@cat-cafe/mcp-server/dist/secret-runtime.js';
 
 export const CODEX_NATIVE_GUARD_HOOK_KEY = '/<session-flags>/config.toml:pre_tool_use:0:0';
 export const CODEX_NATIVE_SHELL_GUARD_HOOK_KEY = '/<session-flags>/config.toml:native_shell_safety_check:0:0';
@@ -90,9 +90,7 @@ function canonicalJson(value: unknown): unknown {
 }
 
 function resolveRepositoryRoot(): string {
-  let cursor = dirname(fileURLToPath(import.meta.url));
-  for (let depth = 0; depth < 8; depth++) cursor = dirname(cursor);
-  return cursor;
+  return secretRuntimeRoot();
 }
 
 function tomlString(value: string): string {

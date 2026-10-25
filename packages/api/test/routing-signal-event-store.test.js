@@ -58,7 +58,7 @@ describe('RedisRoutingSignalEventStore', { skip: redisIsolationSkipReason(REDIS_
       '../dist/domains/routing-context/RedisRoutingSignalEventStore.js'
     ));
     ({ routingSignalDecisionClosureMap } = await import(
-      '../dist/domains/routing-context/RoutingSignalDecisionProjection.js'
+      '../dist/domains/routing-context/preflight/RoutingSignalDecisionProjection.js'
     ));
     ({ createRedisClient } = await import('@cat-cafe/shared/utils'));
     redis = createRedisClient({ url: REDIS_URL, keyPrefix: 'f293-routing-signal-test:' });

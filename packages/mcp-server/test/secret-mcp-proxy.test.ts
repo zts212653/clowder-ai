@@ -13,26 +13,37 @@ afterEach(async () => {
 });
 
 describe('external MCP transport relay', () => {
-  it('does not forward secrets in client notifications or server-initiated messages', async () => {
-    const [caller, downstream] = InMemoryTransport.createLinkedPair();
-    const [upstream, remote] = InMemoryTransport.createLinkedPair();
-    const sentToRemote: unknown[] = [];
-    const sentToCaller: unknown[] = [];
-    remote.onmessage = (message) => {
-      sentToRemote.push(message);
-    };
-    caller.onmessage = (message) => {
-      sentToCaller.push(message);
-    };
-    await remote.start();
-    await caller.start();
-    dispose.push(await startSecretMcpProxy(downstream, upstream));
-    await caller.send({ jsonrpc: '2.0', method: 'notifications/message', params: { text: fake() } });
-    await remote.send({ jsonrpc: '2.0', method: 'notifications/message', params: { text: fake() } });
-    await new Promise((resolve) => setTimeout(resolve, 30));
-    assert.ok(!JSON.stringify(sentToRemote).includes(fake()));
-    assert.ok(!JSON.stringify(sentToCaller).includes(fake()));
-  });
+  for (const origin of ['client', 'server'] as const)
+    it(`does not forward secrets in ${origin} notifications`, { timeout: 2000 }, async () => {
+      const [caller, downstream] = InMemoryTransport.createLinkedPair();
+      const [upstream, remote] = InMemoryTransport.createLinkedPair();
+      const sentToRemote: unknown[] = [];
+      const sentToCaller: unknown[] = [];
+      const completed = Promise.withResolvers<void>();
+      remote.onclose = () => completed.resolve();
+      remote.onmessage = (message) => {
+        sentToRemote.push(message);
+      };
+      caller.onmessage = (message) => {
+        sentToCaller.push(message);
+        completed.resolve();
+      };
+      await remote.start();
+      await caller.start();
+      dispose.push(await startSecretMcpProxy(downstream, upstream));
+      // A blocked client notification closes the transport. Test the reverse
+      // direction on its own connection rather than racing that close.
+      await (origin === 'client' ? caller : remote).send({
+        jsonrpc: '2.0',
+        method: 'notifications/message',
+        params: { text: fake() },
+      });
+      await completed.promise;
+      assert.ok(!JSON.stringify(sentToRemote).includes(fake()));
+      assert.ok(!JSON.stringify(sentToCaller).includes(fake()));
+      assert.equal(sentToRemote.length, 0);
+      assert.equal(sentToCaller.length, origin === 'server' ? 1 : 0);
+    });
   it('preserves tool discovery, executes clean calls, and blocks a secret before the external handler', async () => {
     let executions = 0;
     const remote = new McpServer({ name: 'external-fixture', version: '1' });

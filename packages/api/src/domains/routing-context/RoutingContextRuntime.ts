@@ -14,12 +14,12 @@ import { RoutingContextResolver } from './RoutingContextResolver.js';
 import { RuntimeRoutingDispatchPreflight } from './RoutingDispatchPreflightPort.js';
 import { RoutingDispatchSignalAdapter } from './RoutingDispatchSignalAdapter.js';
 import { RoutingPreflightService } from './RoutingPreflightService.js';
-import { RoutingSelectionService } from './RoutingSelectionService.js';
 import {
   OpenTelemetryRoutingSignalObservationSink,
   RoutingSignalObservationTelemetry,
 } from './RoutingSignalObservationTelemetry.js';
 import { RuntimeRoutingCandidateCatalogSource } from './RuntimeRoutingCandidateCatalogSource.js';
+import { RoutingSelectionService } from './selection/RoutingSelectionService.js';
 
 export interface CreateRoutingContextRuntimeOptions {
   redis: RedisClient;

@@ -1,8 +1,8 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { secretRuntimeScript } from '@cat-cafe/mcp-server/dist/secret-runtime.js';
 
-const SCRIPT = fileURLToPath(new URL('../../../../../../../../scripts/secret-native-hook.mjs', import.meta.url));
+const SCRIPT = secretRuntimeScript('secret-native-hook.mjs');
 const quote = (value: string) => `'${value.replaceAll("'", `'"'"'`)}'`;
 const record = (value: unknown): Record<string, unknown> =>
   value !== null && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : {};

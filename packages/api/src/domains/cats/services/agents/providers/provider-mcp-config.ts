@@ -185,7 +185,7 @@ export async function resolveProviderMcpConfigResolution(input: {
             ...input.callbackEnv,
             ...(input.credentialFile ? { CAT_CAFE_CREDENTIAL_FILE: input.credentialFile } : {}),
           },
-          binaryProjectRoot,
+          undefined,
           name,
         ),
       ]),

@@ -66,7 +66,7 @@ async function harness(t, transport, extraDeps = {}) {
 }
 
 for (const transport of ['invocation', 'agent-key']) {
-  test(`${transport}: cross-post returns read-only routing reasons while retaining the exact target`, async (t) => {
+  test(`${transport}: cross-post observes queue admission without claiming execution while retaining the exact target`, async (t) => {
     let decision;
     const h = await harness(t, transport, {
       routingDispatchPreflight: {
@@ -89,7 +89,22 @@ for (const transport of ['invocation', 'agent-key']) {
     });
     const response = await h.post('routing-annotation');
     assert.equal(response.statusCode, 200, response.body);
-    assert.deepEqual(response.json().routing_preflight, decision);
+    const body = response.json();
+    assert.equal(body.routing_preflight, undefined);
+    assert.deepEqual(body.routing_admission, {
+      v: 1,
+      stage: 'queue_admitted',
+      executionPreflight: 'pending',
+      ownerId: 'identity-owner',
+      observedAt: decision.observedAt,
+      targets: [
+        {
+          targetCatId: 'codex',
+          availabilityObservation: 'unavailable',
+          reasons: [{ code: 'quota_exhausted', summary: 'Temporarily unavailable', sourceRefs: ['quota:1'] }],
+        },
+      ],
+    });
     assert.deepEqual(h.invocationQueue.list(h.to.id, 'identity-owner')[0].targets, ['codex']);
   });
 

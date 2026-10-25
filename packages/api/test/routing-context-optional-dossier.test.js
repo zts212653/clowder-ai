@@ -7,10 +7,10 @@ import { afterEach, test } from 'node:test';
 import { catRegistry } from '@cat-cafe/shared';
 import { _resetDossierCache } from '@cat-cafe/shared/dossier';
 import { DossierCapabilityProfileRevisionSource } from '../dist/domains/routing-context/DossierCapabilityProfileRevisionSource.js';
+import { buildRoutingSignalDecisionProjection } from '../dist/domains/routing-context/preflight/RoutingSignalDecisionProjection.js';
 import { RoutingPreferenceKeys } from '../dist/domains/routing-context/RedisRoutingPreferenceStore.js';
 import { RoutingSignalEventKeys } from '../dist/domains/routing-context/RedisRoutingSignalEventStore.js';
 import { createRoutingContextRuntime } from '../dist/domains/routing-context/RoutingContextRuntime.js';
-import { buildRoutingSignalDecisionProjection } from '../dist/domains/routing-context/RoutingSignalDecisionProjection.js';
 
 const roots = [];
 const ownerId = 'community-owner';

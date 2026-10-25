@@ -1,4 +1,4 @@
-import type { RoutingContextReadService, RoutingSnapshotReadModel } from './RoutingContextReadService.js';
+import type { RoutingContextReadService, RoutingSnapshotReadModel } from '../RoutingContextReadService.js';
 import { routingSelectionFacts } from './RoutingSelectionFacts.js';
 
 export type RoutingSelectionRole = 'review' | 'architecture' | 'implementation';

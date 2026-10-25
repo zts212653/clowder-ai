@@ -1,9 +1,7 @@
 import { randomUUID } from 'node:crypto';
+import { hasPendingExposureNotice, inspectSecretValue } from '@cat-cafe/mcp-server/dist/secret-runtime.js';
 import { recordSecretExposure } from '@cat-cafe/mcp-server/dist/secret-tool-guard.js';
 import { withInvocationCredentials } from '@cat-cafe/mcp-server/dist/tools/invocation-auth.js';
-// @ts-expect-error The shared native/MCP boundary is an ESM script.
-import { hasPendingExposureNotice } from '../../../../../../../../scripts/lib/secret-tool-io.mjs';
-import { inspectSecretValue } from '../../../../../../../../scripts/lib/secret-value-inspection.mjs';
 import type { AgentMessage, AgentServiceOptions } from '../../types.js';
 
 /** Native providers may already have consumed the result. This protects host consumers and records exposure. */

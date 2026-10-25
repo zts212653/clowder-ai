@@ -1,4 +1,4 @@
-import { inspectSecretValue } from '../../../../../../../../scripts/lib/secret-value-inspection.mjs';
+import { inspectSecretValue } from '@cat-cafe/mcp-server/dist/secret-runtime.js';
 import type { AuditEventInput } from '../../orchestration/EventAuditLog.js';
 
 export interface AuditLogSink {

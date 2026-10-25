@@ -1,3 +1,4 @@
+import { secretRuntimeScript } from '@cat-cafe/mcp-server/dist/secret-runtime.js';
 /**
  * CLI Process Spawner
  * 通用 CLI 子进程管理器，处理生命周期、超时和清理
@@ -52,8 +53,8 @@ const log = createModuleLogger('cli-spawn');
 
 const IS_WINDOWS = process.platform === 'win32';
 const CAT_CAFE_RUNTIME_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../../../..');
-const GUARDED_GH_BIN = resolve(CAT_CAFE_RUNTIME_ROOT, 'scripts', 'guarded-bin');
-const GUARDED_ZSH_SOURCE_DIR = resolve(CAT_CAFE_RUNTIME_ROOT, 'scripts', 'guarded-zsh');
+const GUARDED_GH_BIN = secretRuntimeScript('guarded-bin');
+const GUARDED_ZSH_SOURCE_DIR = secretRuntimeScript('guarded-zsh');
 const GUARDED_ZSH_DIR = resolve(CAT_CAFE_RUNTIME_ROOT, '.cat-cafe', 'tmp', 'guarded-zsh');
 type GuardedChildEnv = Record<string, string | null | undefined>;
 type SourceEnvOverrides = Readonly<Record<string, string | null>> | undefined;

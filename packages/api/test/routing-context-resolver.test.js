@@ -10,7 +10,7 @@ const { DossierCapabilityProfileRevisionSource } = await import(
 );
 const { RoutingContextResolver } = await import('../dist/domains/routing-context/RoutingContextResolver.js');
 const { buildRoutingSignalDecisionProjection } = await import(
-  '../dist/domains/routing-context/RoutingSignalDecisionProjection.js'
+  '../dist/domains/routing-context/preflight/RoutingSignalDecisionProjection.js'
 );
 
 const temporaryRoots = [];

@@ -1,6 +1,7 @@
 import { existsSync, lstatSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
+import { secretRuntimeScript } from '@cat-cafe/mcp-server/dist/secret-runtime.js';
 import { validateAgyNativeConfigReceipt, writeAgyNativeConfigReceipt } from './agy-native-config-receipt.js';
 
 /** Host-only config: an existing different hook is never overwritten or silently enabled. */
@@ -10,7 +11,7 @@ export function materializeAgyNativeEffectGuard(input: {
   runtimeRoot: string;
   readOnly: boolean;
 }): string {
-  const script = realpathSync(join(input.runtimeRoot, 'scripts/agy-native-effect-guard.mjs'));
+  const script = realpathSync(secretRuntimeScript('agy-native-effect-guard.mjs'));
   const quote = (value: string) => `'${value.replaceAll("'", `'"'"'`)}'`;
   // Carry the host state coordinate separately: isolated OAuth HOME is not the
   // home in which our daemon writes its self-host record.

@@ -1,6 +1,6 @@
 import type { CatId, RoutingPreflightDecisionV1 } from '@cat-cafe/shared';
+import { executionFactsChanged } from '../../../../routing-context/preflight/RoutingQueueAdmissionObservation.js';
 import { routingDispatchPreflightReceipt } from '../../../../routing-context/RoutingDispatchPreflightPort.js';
-import { executionFactsChanged } from '../../../../routing-context/RoutingQueueAdmissionObservation.js';
 import type { AgentMessage } from '../../types.js';
 import type { RouteOptions, RouteStrategyDeps } from './route-helpers.js';
 

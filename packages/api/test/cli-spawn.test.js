@@ -14,6 +14,7 @@ import { PassThrough } from 'node:stream';
 import { mock, test } from 'node:test';
 import { clearTimeout as clearKeepAliveTimeout, setTimeout as setKeepAliveTimeout } from 'node:timers';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { secretRuntimeScript } from '@cat-cafe/mcp-server/dist/secret-runtime.js';
 import { waitForSupervisorExit } from './helpers/cli-supervisor-exit.js';
 
 const REPO_ROOT = dirname(fileURLToPath(new URL('../../../package.json', import.meta.url)));
@@ -960,7 +961,7 @@ test(
       CAT_CAFE_VERDICT_REPO_FULL_NAME: 'example/cat-cafe',
     });
 
-    assert.equal(childEnv.PATH?.split(':')[0], join(REPO_ROOT, 'scripts', 'guarded-bin'));
+    assert.equal(childEnv.PATH?.split(':')[0], secretRuntimeScript('guarded-bin'));
     assert.equal(childEnv.CAT_CAFE_VERDICT_GH_GUARD_ROOT, REPO_ROOT);
     assert.equal(childEnv.CAT_CAFE_VERDICT_REPO_FULL_NAME, 'example/cat-cafe');
     assert.equal(childEnv.ZDOTDIR, join(REPO_ROOT, '.cat-cafe', 'tmp', 'guarded-zsh'));
@@ -970,7 +971,7 @@ test(
       env: childEnv,
     });
     assert.equal(loginShell.status, 0, loginShell.stderr);
-    assert.equal(loginShell.stdout.trim(), join(REPO_ROOT, 'scripts', 'guarded-bin', 'gh'));
+    assert.equal(loginShell.stdout.trim(), secretRuntimeScript('guarded-bin/gh'));
   },
 );
 
@@ -1020,7 +1021,7 @@ test(
       assert.equal(loginShell.status, 0, loginShell.stderr);
       assert.equal(
         loginShell.stdout.trim(),
-        `1|1|1|1|${join(originalZdotdir, '.zsh_history')}|${join(REPO_ROOT, 'scripts', 'guarded-bin', 'gh')}`,
+        `1|1|1|1|${join(originalZdotdir, '.zsh_history')}|${secretRuntimeScript('guarded-bin/gh')}`,
       );
     } finally {
       await rm(originalZdotdir, { recursive: true, force: true });
@@ -1037,7 +1038,7 @@ test(
   { skip: !existsSync('/bin/zsh') && 'zsh is not installed' },
   async () => {
     const originalZdotdir = await mkdtemp(join(tmpdir(), 'cat-cafe-installer-zdotdir-'));
-    const template = join(REPO_ROOT, 'scripts', 'guarded-zsh', '.zshrc');
+    const template = secretRuntimeScript('guarded-zsh/.zshrc');
     const original = await readFile(template, 'utf8');
     let childEnv;
     try {
@@ -1049,7 +1050,7 @@ test(
       );
       assert.equal(installer.status, 0, installer.stderr);
       assert.equal(await readFile(template, 'utf8'), original, 'installer must not dirty the runtime source tree');
-      assert.equal(existsSync(join(REPO_ROOT, 'scripts', 'guarded-zsh', '.zcompdump')), false);
+      assert.equal(existsSync(secretRuntimeScript('guarded-zsh/.zcompdump')), false);
       assert.match(await readFile(join(childEnv.ZDOTDIR, '.zshrc'), 'utf8'), /installer configuration/);
 
       const nestedEnv = buildChildEnv(childEnv);

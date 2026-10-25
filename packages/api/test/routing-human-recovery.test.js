@@ -3,11 +3,11 @@ import { describe, it } from 'node:test';
 import { routingSignalClosures } from '@cat-cafe/shared';
 import { routeSerial } from '../dist/domains/cats/services/agents/routing/route-serial.js';
 import { AutomaticRoutingSignalService } from '../dist/domains/routing-context/AutomaticRoutingSignalService.js';
+import { buildRoutingSignalDecisionProjection } from '../dist/domains/routing-context/preflight/RoutingSignalDecisionProjection.js';
 import { RoutingContextResolver } from '../dist/domains/routing-context/RoutingContextResolver.js';
 import { RuntimeRoutingDispatchPreflight } from '../dist/domains/routing-context/RoutingDispatchPreflightPort.js';
 import { RoutingDispatchSignalAdapter } from '../dist/domains/routing-context/RoutingDispatchSignalAdapter.js';
 import { RoutingPreflightService } from '../dist/domains/routing-context/RoutingPreflightService.js';
-import { buildRoutingSignalDecisionProjection } from '../dist/domains/routing-context/RoutingSignalDecisionProjection.js';
 import { routingJourneyDeps } from './helpers/routing-journey-deps.js';
 
 function harness(catIds = ['sol', 'terra']) {

@@ -1,5 +1,5 @@
 import type { RoutingSignalEventV1, RoutingSubjectRefV1 } from '@cat-cafe/shared';
-import type { RoutingSignalDecisionProjectionV1 } from './RoutingSignalDecisionProjection.js';
+import type { RoutingSignalDecisionProjectionV1 } from './preflight/RoutingSignalDecisionProjection.js';
 
 export type RoutingSignalEventAppendOutcome = 'appended' | 'replayed';
 

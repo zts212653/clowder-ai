@@ -1,5 +1,5 @@
 import type { RoutingAccountCapacityV1, RoutingCapacityWindowV1 } from '@cat-cafe/shared';
-import type { RoutingSnapshotReadModel } from './RoutingContextReadService.js';
+import type { RoutingSnapshotReadModel } from '../RoutingContextReadService.js';
 
 const windowNames = { five_hour: '5h', seven_day: '7d', monthly: 'month', credits: 'credits', unknown: 'window?' };
 const column = (window: RoutingCapacityWindowV1) =>

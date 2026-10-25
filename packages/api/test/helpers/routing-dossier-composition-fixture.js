@@ -10,7 +10,7 @@ export const { createRoutingContextRuntime } = await import(
   '../../dist/domains/routing-context/RoutingContextRuntime.js'
 );
 const { buildRoutingSignalDecisionProjection } = await import(
-  '../../dist/domains/routing-context/RoutingSignalDecisionProjection.js'
+  '../../dist/domains/routing-context/preflight/RoutingSignalDecisionProjection.js'
 );
 export const ownerId = 'issue-1438-owner';
 export const primaryCatId = 'issue-1438-primary';

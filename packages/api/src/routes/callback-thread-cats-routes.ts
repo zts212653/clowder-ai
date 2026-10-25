@@ -8,7 +8,7 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { isCatAvailable } from '../config/cat-config-loader.js';
 import type { IThreadStore } from '../domains/cats/services/stores/ports/ThreadStore.js';
-import type { RoutingSelectionService } from '../domains/routing-context/RoutingSelectionService.js';
+import type { RoutingSelectionService } from '../domains/routing-context/selection/RoutingSelectionService.js';
 import { requireCallbackPrincipal } from './callback-auth-prehandler.js';
 import { resolvePrincipalThread } from './callback-scope-helpers.js';
 import { categorizeThreadCats } from './thread-cats-core.js';

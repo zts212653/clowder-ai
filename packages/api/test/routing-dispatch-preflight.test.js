@@ -146,7 +146,7 @@ describe('F293 home routing through canonical Queue dispatch', () => {
     const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
     const { routeParallel } = await import('../dist/domains/cats/services/agents/routing/route-parallel.js');
     const { routingAdmissionProvenance } = await import(
-      '../dist/domains/routing-context/RoutingQueueAdmissionObservation.js'
+      '../dist/domains/routing-context/preflight/RoutingQueueAdmissionObservation.js'
     );
     for (const route of [routeSerial, routeParallel]) {
       const b = {

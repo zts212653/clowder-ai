@@ -10,6 +10,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { PassThrough } from 'node:stream';
 import { afterEach, describe, it, mock } from 'node:test';
+import { assertCurrentCallback, secretMcpContract } from '../helpers/secret-mcp-contract.js';
 
 const { AcpAgentService: GeminiAcpAdapter } = await import(
   '../../dist/domains/cats/services/agents/providers/acp/AcpAgentService.js'
@@ -295,13 +296,16 @@ describe('GeminiAcpAdapter', () => {
       false,
       'successful resume must not create a new session',
     );
-    const env = sessionLoad.params.mcpServers[0].env;
-    assert.deepEqual(Object.fromEntries(env.map((entry) => [entry.name, entry.value])), {
+    const { proxyEnv, upstream } = secretMcpContract(sessionLoad.params.mcpServers[0]);
+    const expected = {
       CAT_CAFE_INVOCATION_ID: 'new-invocation',
       CAT_CAFE_CALLBACK_TOKEN: 'new-token',
       CAT_CAFE_API_URL: 'http://127.0.0.1:3004',
       CAT_CAFE_THREAD_ID: 'thread-new',
-    });
+    };
+    assert.deepEqual(proxyEnv, expected);
+    assert.deepEqual(upstream.env, expected, 'resumed builtin must receive this turn, not the previous credentials');
+    assert.deepEqual(upstream.args, ['mcp.js']);
   });
 
   it('preserves ACP session affinity when resuming across idle pool clients', async () => {
@@ -2911,18 +2915,16 @@ describe('GeminiAcpAdapter callbackEnv passthrough', () => {
     // cat-cafe-collab should have callback env merged
     const collab = servers.find((s) => s.name === 'cat-cafe-collab');
     assert.ok(collab, 'cat-cafe-collab should be present');
-    const collabEnvMap = Object.fromEntries(collab.env.map((e) => [e.name, e.value]));
-    assert.equal(collabEnvMap.CAT_CAFE_API_URL, 'http://localhost:3004');
-    assert.equal(collabEnvMap.CAT_CAFE_INVOCATION_ID, 'inv-123');
-    assert.equal(collabEnvMap.CAT_CAFE_CALLBACK_TOKEN, 'tok-abc');
-    assert.equal(collabEnvMap.CAT_CAFE_THREAD_ID, 'thread-acp-123');
+    const { upstream: collabUpstream, proxyEnv: collabProxyEnv } = secretMcpContract(collab);
+    const collabEnvMap = collabUpstream.env;
+    assertCurrentCallback(collabProxyEnv, callbackEnv);
+    assertCurrentCallback(collabEnvMap, callbackEnv);
 
     // cat-cafe-memory should also get callback env
     const memory = servers.find((s) => s.name === 'cat-cafe-memory');
     assert.ok(memory, 'cat-cafe-memory should be present');
-    const memoryEnvMap = Object.fromEntries(memory.env.map((e) => [e.name, e.value]));
-    assert.equal(memoryEnvMap.CAT_CAFE_API_URL, 'http://localhost:3004');
-    assert.equal(memoryEnvMap.CAT_CAFE_THREAD_ID, 'thread-acp-123');
+    const memoryEnvMap = secretMcpContract(memory).upstream.env;
+    assertCurrentCallback(memoryEnvMap, callbackEnv);
   });
 
   it('injects into exact "cat-cafe" server name (not just prefixed)', async () => {
@@ -2960,15 +2962,19 @@ describe('GeminiAcpAdapter callbackEnv passthrough', () => {
 
     const catCafe = sentServers.find((s) => s.name === 'cat-cafe');
     assert.ok(catCafe, 'cat-cafe should be present');
-    const catCafeEnv = Object.fromEntries(catCafe.env.map((e) => [e.name, e.value]));
+    const catCafeEnv = secretMcpContract(catCafe).upstream.env;
     assert.equal(catCafeEnv.CAT_CAFE_API_URL, 'http://127.0.0.1:3004');
     assert.equal(catCafeEnv.CAT_CAFE_CALLBACK_TOKEN, 'token-acp-123');
     assert.equal(catCafeEnv.EXISTING, 'keep');
 
     const pencil = sentServers.find((s) => s.name === 'pencil');
     assert.ok(pencil, 'pencil should be present');
-    const pencilEnv = Object.fromEntries(pencil.env.map((e) => [e.name, e.value]));
-    assert.equal(pencilEnv.CAT_CAFE_INVOCATION_ID, undefined, 'pencil should not get callback env');
+    const { upstream: pencilUpstream, proxyEnv: pencilProxyEnv } = secretMcpContract(pencil);
+    const pencilEnv = pencilUpstream.env;
+    for (const key of Object.keys(callbackEnv))
+      assert.equal(pencilEnv[key], undefined, `foreign upstream must not receive ${key}`);
+    assert.equal(pencilProxyEnv.CAT_CAFE_INVOCATION_ID, callbackEnv.CAT_CAFE_INVOCATION_ID);
+    assert.equal(pencilProxyEnv.CAT_CAFE_CALLBACK_TOKEN, callbackEnv.CAT_CAFE_CALLBACK_TOKEN);
     assert.equal(pencilEnv.UNCHANGED, 'yes');
   });
 
@@ -3007,12 +3013,12 @@ describe('GeminiAcpAdapter callbackEnv passthrough', () => {
     const sessionNew = captured.find((m) => m.method === 'session/new');
     assert.ok(sessionNew, 'Expected session/new');
     const collab = sessionNew.params.mcpServers[0];
-    const envMap = Object.fromEntries(collab.env.map((e) => [e.name, e.value]));
+    const envMap = secretMcpContract(collab).upstream.env;
     assert.equal(envMap.CAT_CAFE_API_URL, 'http://localhost:3004', 'Placeholder should be overwritten');
     assert.equal(envMap.CAT_CAFE_CALLBACK_TOKEN, 'real-token', 'Placeholder should be overwritten');
   });
 
-  it('passes servers unchanged when no callbackEnv', async () => {
+  it('keeps upstream credentials absent when no callbackEnv while retaining secret protection', async () => {
     const { pool: p, captured } = createPoolWithAutoRespond();
     pool = p;
 
@@ -3033,7 +3039,11 @@ describe('GeminiAcpAdapter callbackEnv passthrough', () => {
     assert.ok(sessionNew, 'Expected session/new');
     const collab = sessionNew.params.mcpServers.find((s) => s.name === 'cat-cafe-collab');
     assert.ok(collab, 'cat-cafe-collab should be present');
-    assert.deepStrictEqual(collab.env, [], 'No callbackEnv = empty env on builtin servers');
+    const { proxyEnv, upstream } = secretMcpContract(collab);
+    assert.deepEqual(proxyEnv, {}, 'no turn credentials may be invented for the relay');
+    assert.deepEqual(upstream.env, {}, 'no callbackEnv means no upstream callback credentials');
+    assert.equal(upstream.command, 'node');
+    assert.deepEqual(upstream.args, ['collab.js']);
   });
 
   // F161 architecture change: capabilities.json-aware filtering (disabled capabilities,

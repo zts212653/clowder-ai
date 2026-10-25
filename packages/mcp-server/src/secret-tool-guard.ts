@@ -1,23 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
+import { type ExposureNotice, withSecretToolGuard } from './secret-runtime.js';
 import { callbackPost, getCallbackConfig } from './tools/callback-tools.js';
-
-interface ExposureNotice {
-  state: 'exposed_or_suspected';
-  callId?: string;
-  rules: string[];
-}
-
-interface SecretToolBoundary {
-  withSecretToolGuard(
-    name: string,
-    args: unknown,
-    execute: (args: unknown) => Promise<unknown>,
-    options: { callId: string; cwd: string; notify: (notice: ExposureNotice) => Promise<void> },
-  ): Promise<unknown>;
-}
-
-const scriptUrl = new URL('../../../scripts/lib/secret-tool-io.mjs', import.meta.url).href;
-const loadBoundary = (): Promise<SecretToolBoundary> => import(scriptUrl) as Promise<SecretToolBoundary>;
 
 export async function recordSecretExposure(notice: ExposureNotice): Promise<void> {
   const config = getCallbackConfig();
@@ -45,8 +28,7 @@ export async function guardSecretToolCall<T>(
   callId: string = randomUUID(),
   cwd: string = process.cwd(),
 ): Promise<T> {
-  const boundary = await loadBoundary();
-  return boundary.withSecretToolGuard(name, args, execute, {
+  return withSecretToolGuard(name, args, execute, {
     callId: `${name}:${callId}`,
     cwd,
     notify: recordSecretExposure,

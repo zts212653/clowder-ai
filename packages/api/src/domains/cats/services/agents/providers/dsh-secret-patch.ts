@@ -2,9 +2,10 @@ import { createHash } from 'node:crypto';
 import { lstatSync, readFileSync } from 'node:fs';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { basename, join } from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { pathToFileURL } from 'node:url';
+import { secretRuntimeScript } from '@cat-cafe/mcp-server/dist/secret-runtime.js';
 
-const PLUGIN = fileURLToPath(new URL('../../../../../../../../scripts/secret-dsh-plugin.mjs', import.meta.url));
+const PLUGIN = secretRuntimeScript('secret-dsh-plugin.mjs');
 // Startup admission covers this exact reviewed consumer, never arbitrary YAML or !!js.
 const PLUGIN_HASH = '5b70b9694b1c0ebcca16da3b7143500de3fd82beea8754de45811344fe3827d1';
 const template = () =>

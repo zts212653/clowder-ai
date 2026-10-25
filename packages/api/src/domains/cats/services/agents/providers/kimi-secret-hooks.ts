@@ -2,13 +2,13 @@ import { randomUUID } from 'node:crypto';
 import { lstat, mkdir, open, readFile, rename, unlink, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
-import { fileURLToPath } from 'node:url';
+import { secretRuntimeScript } from '@cat-cafe/mcp-server/dist/secret-runtime.js';
 import { parse, stringify } from 'smol-toml';
 import { resolveKimiRuntimePaths } from '../../../../../utils/kimi-cli-runtime.js';
 
 const START = '# BEGIN CAT CAFE SECRET HOOKS';
 const END = '# END CAT CAFE SECRET HOOKS';
-const SCRIPT = fileURLToPath(new URL('../../../../../../../../scripts/secret-kimi-hook.mjs', import.meta.url));
+const SCRIPT = secretRuntimeScript('secret-kimi-hook.mjs');
 const quote = (value: string) =>
   process.platform === 'win32' ? `"${value.replaceAll('"', '""')}"` : `'${value.replaceAll("'", "'\\''")}'`;
 

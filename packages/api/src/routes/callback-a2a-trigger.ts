@@ -38,12 +38,12 @@ import {
   lifecycleResponseTerminalPatchFromAppendInput,
   settleLifecycleResponseInputs,
 } from '../domains/cats/services/stores/ports/MessageStore.js';
+import { routingAdmissionProvenance } from '../domains/routing-context/preflight/RoutingQueueAdmissionObservation.js';
 import {
   inferRoutingContextIntent,
   observeRoutingQueueAdmission,
   type RoutingDispatchPreflightPort,
 } from '../domains/routing-context/RoutingDispatchPreflightPort.js';
-import { routingAdmissionProvenance } from '../domains/routing-context/RoutingQueueAdmissionObservation.js';
 import { wrapWithDispatchSpan } from '../infrastructure/telemetry/dispatch-span.js';
 import type { CallerTraceContext } from '../infrastructure/telemetry/genai-semconv.js';
 import { emitQueueUpdated } from '../utils/queue-enrichment.js';

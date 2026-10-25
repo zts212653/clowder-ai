@@ -915,7 +915,7 @@ export interface CallbackRoutesOptions {
   /** Read-only F293 annotation; Queue preserves all accepted target rows. */
   routingDispatchPreflight?: import('../domains/routing-context/RoutingDispatchPreflightPort.js').RoutingDispatchPreflightPort;
   routingSelection?: Pick<
-    import('../domains/routing-context/RoutingSelectionService.js').RoutingSelectionService,
+    import('../domains/routing-context/selection/RoutingSelectionService.js').RoutingSelectionService,
     'read'
   >;
   /** For post_message @mention → invocation triggering */

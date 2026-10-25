@@ -54,8 +54,8 @@ function invocationDenial(invocation, cwd) {
 }
 
 function unguardedSender(invocation, program) {
-  if (invocation.environment?.some((item) => item.startsWith('PATH='))) return true;
   if (program === 'gh' && plainGhRead(invocation)) return false;
+  if (invocation.environment?.some((item) => item.startsWith('PATH='))) return true;
   if (!(invocation.program ?? '').includes('/'))
     return invocation.wrappers?.some(
       (wrapper) => commandName(wrapper.program) === 'command' && wrapper.options.includes('-p'),

@@ -10,12 +10,12 @@ import type {
   CapabilityProfileRevisionLoadResult,
   CapabilityProfileRevisionSource,
 } from './CapabilityProfileRevisionSource.js';
-import type { IRoutingPreferenceStore } from './RoutingPreferenceStore.js';
 import {
   type RoutingSignalDecisionProjectionV1,
   routingSignalDecisionClosureMap,
   routingSignalDecisionSourceEventIds,
-} from './RoutingSignalDecisionProjection.js';
+} from './preflight/RoutingSignalDecisionProjection.js';
+import type { IRoutingPreferenceStore } from './RoutingPreferenceStore.js';
 import type { IRoutingSignalEventStore } from './RoutingSignalEventStore.js';
 import { reduceRoutingContext } from './routing-context-reducer.js';
 

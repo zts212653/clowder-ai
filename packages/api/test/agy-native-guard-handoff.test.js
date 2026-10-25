@@ -4,6 +4,7 @@ import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSy
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
+import { secretRuntimeScript } from '@cat-cafe/mcp-server/dist/secret-runtime.js';
 
 const { materializeAgyNativeEffectGuard } = await import(
   '../dist/domains/cats/services/agents/providers/agy-native/agy-native-effect-guard.js'
@@ -25,7 +26,13 @@ test('Native guard can move between registered worktrees but refuses altered hoo
     git('worktree', 'add', '--quiet', '--detach', next);
     const path = materializeAgyNativeEffectGuard({ profileHome: home, runtimeRoot: repo, readOnly: false });
     materializeAgyNativeEffectGuard({ profileHome: home, runtimeRoot: next, readOnly: false });
-    assert.ok(readFileSync(path, 'utf8').includes(join(next, 'scripts/agy-native-effect-guard.mjs')));
+    const config = readFileSync(path, 'utf8');
+    assert.ok(config.includes(realpathSync(secretRuntimeScript('agy-native-effect-guard.mjs'))));
+    assert.ok(
+      !config.includes(join(next, 'scripts/agy-native-effect-guard.mjs')),
+      'workspace code cannot replace the package-owned guard',
+    );
+    assert.ok(!config.includes(join(repo, 'scripts/agy-native-effect-guard.mjs')));
     writeFileSync(path, '{}');
     assert.throws(
       () => materializeAgyNativeEffectGuard({ profileHome: home, runtimeRoot: repo, readOnly: false }),

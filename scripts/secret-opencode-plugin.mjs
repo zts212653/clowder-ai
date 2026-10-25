@@ -26,9 +26,7 @@ export async function SecretContentProtection({ directory }) {
     config: async (config) => {
       try {
         if (!nodeCommand) throw new Error('secret_node_runtime_unavailable');
-        const { withOpenCodeSecretGuard } = await import(
-          '../packages/api/dist/domains/cats/services/agents/providers/opencode-secret-config.js'
-        );
+        const { withOpenCodeSecretGuard } = await import('../packages/mcp-server/dist/secret-opencode-config.js');
         withOpenCodeSecretGuard(config, process.env, nodeCommand);
         configured = true;
       } catch {

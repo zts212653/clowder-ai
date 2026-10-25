@@ -125,7 +125,7 @@ function fixture(realProducer = false, childFrames = [], childBeforeText = false
       threadStore: {
         get: async () => null,
         getParticipantsWithActivity: async () => [],
-        consumeMentionRoutingFeedback: async () => [],
+        consumeMentionRoutingFeedback: async () => null,
         updateParticipantActivity: async () => {},
       },
       apiUrl: 'http://127.0.0.1:3102',

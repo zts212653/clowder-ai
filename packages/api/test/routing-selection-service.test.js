@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import { writeFileSync } from 'node:fs';
 import { test } from 'node:test';
 import { getEncoding } from 'js-tiktoken';
-import { RoutingSelectionService } from '../dist/domains/routing-context/RoutingSelectionService.js';
+import { RoutingSelectionService } from '../dist/domains/routing-context/selection/RoutingSelectionService.js';
 
 test('six-member discovery shows bound and switch-required facts before selection within the agreed budget', async () => {
   const observedAt = Date.parse('2026-10-24T07:00:00Z');

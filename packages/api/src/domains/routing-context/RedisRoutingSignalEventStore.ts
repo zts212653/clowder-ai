@@ -5,7 +5,7 @@ import {
   buildRoutingSignalDecisionProjection,
   parseRoutingSignalDecisionProjection,
   type RoutingSignalDecisionProjectionV1,
-} from './RoutingSignalDecisionProjection.js';
+} from './preflight/RoutingSignalDecisionProjection.js';
 import {
   type IRoutingSignalEventStore,
   type RoutingSignalEventAppendResult,

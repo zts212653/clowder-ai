@@ -1,11 +1,11 @@
 import type { JSONRPCMessage } from '@modelcontextprotocol/sdk/types.js';
+import { inspectSecretValue } from './secret-runtime.js';
 import { recordSecretExposure } from './secret-tool-guard.js';
 
 interface Inspection {
   value: unknown;
   rules: string[];
 }
-const script = new URL('../../../scripts/lib/secret-value-inspection.mjs', import.meta.url).href;
 
 export function blockedMcpReply(message: JSONRPCMessage): JSONRPCMessage | undefined {
   if (!('id' in message) || message.id === undefined || !('method' in message)) return undefined;
@@ -20,7 +20,6 @@ export function blockedMcpReply(message: JSONRPCMessage): JSONRPCMessage | undef
 
 /** Inspect all wire fields, including extension metadata and notifications. */
 export async function inspectMcpWire(message: JSONRPCMessage): Promise<Inspection> {
-  const { inspectSecretValue } = (await import(script)) as { inspectSecretValue(value: unknown): Inspection };
   return inspectSecretValue(message);
 }
 

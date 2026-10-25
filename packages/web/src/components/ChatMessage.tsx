@@ -202,7 +202,6 @@ function ChatMessageContent({
   onEditCoCreator,
   hideDiagnosticsPanel,
   dedupCount,
-  forwardingDisabled = false,
   showCapabilityTip = false,
   capabilityTipContexts,
   sendContext,

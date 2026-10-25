@@ -5,7 +5,7 @@ const {
   advanceRoutingSignalDecisionProjection,
   buildRoutingSignalDecisionProjection,
   routingSignalDecisionClosureMap,
-} = await import('../dist/domains/routing-context/RoutingSignalDecisionProjection.js');
+} = await import('../dist/domains/routing-context/preflight/RoutingSignalDecisionProjection.js');
 
 function assertion(eventId, overrides = {}) {
   return {
