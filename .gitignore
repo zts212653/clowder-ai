@@ -246,3 +246,8 @@ packages/api/test/__b1_parent_a__/
 var/f309-artwork-preview/
 # Host-owned build output; release afterPack compiles its own target binary.
 desktop/plugin-window/native/app-assist
+
+# Temporary working files
+REFACTOR_PLAN.md
+pr-body.txt
+pr-body-v2.txt

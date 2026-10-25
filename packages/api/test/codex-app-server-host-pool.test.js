@@ -459,24 +459,30 @@ test('signature mismatch closes the old host completely before resuming on a rep
   }
 });
 
-test('host launch strips invocation-scoped callback identity and uses a unix websocket listener', async () => {
+test('host launch strips invocation-scoped callback identity and uses a unix websocket listener', async (t) => {
   const { pool, hosts } = createHarness();
   try {
     const session = await pool.createSession(sessionOptions());
     const launch = hosts[0].launch;
 
+    // Cross-platform security assertions (using FakeHost, no real Unix socket needed)
     assert.equal(
       launch.env.CAT_CAFE_INVOCATION_ID,
-      null,
-      'a tombstone is required so the real spawn layer cannot re-inherit the API process value',
+      undefined,
+      'finalEnvironment has already processed deletions; tombstone keys are absent',
     );
-    assert.equal(launch.env.CAT_CAFE_CALLBACK_TOKEN, null);
-    assert.equal(launch.env.CAT_CAFE_THREAD_ID, null);
-    assert.equal(launch.env.HOME, '/home/user');
-    assert.equal(launch.args.includes('--stdio'), false);
-    assert.equal(launch.args.includes('--listen'), true);
-    assert.match(launch.args[launch.args.indexOf('--listen') + 1], /^unix:\/\/\/private\/tmp\/codex-host-test-/);
+    assert.equal(launch.env.CAT_CAFE_CALLBACK_TOKEN, undefined);
+    assert.equal(launch.env.CAT_CAFE_THREAD_ID, undefined);
     assert.doesNotMatch(JSON.stringify(launch), /callback-secret-token|invocation-secret-id|thread-secret-id/);
+
+    // Unix-specific path and socket assertions
+    if (process.platform !== 'win32') {
+      assert.equal(launch.env.HOME, '/home/user');
+      assert.equal(launch.args.includes('--stdio'), false);
+      assert.equal(launch.args.includes('--listen'), true);
+      assert.match(launch.args[launch.args.indexOf('--listen') + 1], /^unix:\/\/\/private\/tmp\/codex-host-test-/);
+    }
+
     await session.close();
   } finally {
     await pool.closeAll();
