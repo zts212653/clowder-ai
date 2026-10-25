@@ -12,6 +12,8 @@ function invoke(payload) {
 test('actual hook blocks native reads, search and MCP args, with no secret diagnostics', () => {
   for (const [tool_name, tool_input] of [
     ['Read', { file_path: '/project/.env.local' }],
+    ['Bash', { command: 'set -- .env.local; cat "$1"' }],
+    ['exec_command', { cmd: 'set -- .env.local; cat "$@"' }],
     ['mcp__browser__type', { text: secret() }],
   ]) {
     const result = invoke({ hook_event_name: 'PreToolUse', tool_name, tool_input });

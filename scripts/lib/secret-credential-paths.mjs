@@ -19,7 +19,7 @@ function credentialName(path, cwd) {
   );
 }
 
-function configuredCredentialPaths(cwd) {
+export function credentialSourcesFromEnvironment(environment = process.env, cwd = process.cwd()) {
   const files = [
     'CAT_CAFE_CREDENTIAL_FILE',
     'CAT_CAFE_NATIVE_TURN_CREDENTIAL_FILE',
@@ -27,7 +27,7 @@ function configuredCredentialPaths(cwd) {
     'CLAUDE_CREDENTIALS_PATH',
     'GOOGLE_APPLICATION_CREDENTIALS',
   ]
-    .map((key) => process.env[key])
+    .map((key) => environment[key])
     .filter(Boolean);
   const directories = [];
   for (const [key, filenames] of [
@@ -37,18 +37,20 @@ function configuredCredentialPaths(cwd) {
     ['GH_CONFIG_DIR', ['hosts.yml']],
     ['XDG_CONFIG_HOME', ['gh/hosts.yml']],
   ]) {
-    if (process.env[key]) files.push(...filenames.map((name) => resolve(cwd, process.env[key], name)));
+    if (environment[key]) files.push(...filenames.map((name) => resolve(cwd, environment[key], name)));
   }
-  const mcp = process.env.CAT_CAFE_MCP_CREDS_DIR?.trim();
-  const kimi = process.env.KIMI_CODE_HOME && resolve(cwd, process.env.KIMI_CODE_HOME);
-  const dsh = process.env.DSH_HOME && resolve(cwd, process.env.DSH_HOME);
+  for (const key of ['HOME', 'USERPROFILE'])
+    if (environment[key]) files.push(resolve(cwd, environment[key], '.claude/settings.json'));
+  const mcp = environment.CAT_CAFE_MCP_CREDS_DIR?.trim();
+  const kimi = environment.KIMI_CODE_HOME && resolve(cwd, environment.KIMI_CODE_HOME);
+  const dsh = environment.DSH_HOME && resolve(cwd, environment.DSH_HOME);
   if (mcp) directories.push(mcp);
   if (kimi) {
     files.push(resolve(kimi, 'config.toml'), resolve(kimi, 'mcp.json'));
     directories.push(resolve(kimi, 'credentials'));
   }
   if (dsh) files.push(resolve(dsh, '.credentials.yaml'));
-  return { files, directories };
+  return { files: files.map((file) => resolve(cwd, file)), directories: directories.map((dir) => resolve(cwd, dir)) };
 }
 
 function pathIdentities(path, cwd = process.cwd()) {
@@ -61,8 +63,7 @@ function pathIdentities(path, cwd = process.cwd()) {
   }
 }
 
-function configuredCredentialMatch(requested, cwd) {
-  const { files, directories } = configuredCredentialPaths(cwd);
+function configuredCredentialMatch(requested, cwd, { files, directories }) {
   if (files.some((file) => pathIdentities(file, cwd).some((identity) => requested.includes(identity)))) return true;
   return directories.some((directory) =>
     pathIdentities(directory, cwd).some((identity) =>
@@ -72,7 +73,7 @@ function configuredCredentialMatch(requested, cwd) {
 }
 
 // Follow symlinks for an explicit file operand; never open its contents to decide.
-export function isCredentialSource(path, cwd = process.cwd()) {
+export function isCredentialSource(path, cwd = process.cwd(), credentialSources) {
   if (typeof path !== 'string' || !path || path.includes('\0')) return false;
   if (/^file:/i.test(path)) {
     try {
@@ -82,5 +83,9 @@ export function isCredentialSource(path, cwd = process.cwd()) {
     }
   }
   const requested = pathIdentities(path, cwd);
-  return requested.some((path) => credentialName(path, cwd)) || configuredCredentialMatch(requested, cwd);
+  return (
+    requested.some((path) => credentialName(path, cwd)) ||
+    configuredCredentialMatch(requested, cwd, credentialSourcesFromEnvironment(process.env, cwd)) ||
+    (credentialSources ? configuredCredentialMatch(requested, cwd, credentialSources) : false)
+  );
 }

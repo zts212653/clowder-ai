@@ -1,5 +1,7 @@
 import { homedir } from 'node:os';
+import { expandPositionalParameters, parameterFrame } from './lib/shell-code-inputs.mjs';
 import { cdReadings, kernelPath } from './lib/shell-directory.mjs';
+import { executedInvocations } from './lib/shell-invocation.mjs';
 import { scanShellText, shellSubstitutions } from './lib/shell-lexical.mjs';
 import {
   assignmentBindings,
@@ -20,7 +22,7 @@ import { shellInvocation, shellWords, tokenizeSimpleShellCommand } from './nativ
  * strongest effect with any protected word in the text instead. This follows the shell's
  * execution paths instead of approximating them (codex-astra review of #4817):
  *
- * - Each path carries (directory, assignment bindings, last status, subshell frames).
+ * - Each path carries directory, assignment bindings, positional parameters, last status and subshell frames.
  * - `&&` runs a segment only on paths whose last status is success, `||` only on failure;
  *   `;`, newline, `&` and `|` run it on every path. A path that skips a segment which
  *   opens a group (`(`, `{`, `if`, `for`, `while`) skips the whole group.
@@ -47,7 +49,7 @@ export function segmentLocations(segments, cwd, env = process.env) {
 
 /**
  * The same walk, keeping what each directory reading was reached with: per segment, every
- * `{ directory, bindings }` it can run in (slice 2b -- a variable a command bound earlier is
+ * `{ directory, bindings, parameters }` it can run in (slice 2b -- a variable a command bound earlier is
  * an operand's value, read with `expandWordValues`). `bindings` is the path's own map; a
  * forgotten map (too many paths) makes every variable unreadable.
  */
@@ -56,8 +58,8 @@ export function segmentContexts(segments, cwd, env = process.env) {
     const seen = new Map();
     for (const path of judged) {
       for (const directory of directoriesOf(path.location)) {
-        const key = JSON.stringify([directory ?? null, [...path.bindings]]);
-        if (!seen.has(key)) seen.set(key, { directory, bindings: path.bindings });
+        const key = JSON.stringify([directory ?? null, [...path.bindings], path.parameters]);
+        if (!seen.has(key)) seen.set(key, { directory, bindings: path.bindings, parameters: path.parameters });
       }
     }
     return [...seen.values()];
@@ -66,10 +68,13 @@ export function segmentContexts(segments, cwd, env = process.env) {
 
 function judgedPaths(segments, cwd, env) {
   const start = cwd === undefined ? UNKNOWN : { logical: cwd, physical: kernelPath(cwd) ?? cwd };
-  let paths = [{ location: start, bindings: new Map(), status: 'ok', frames: [], skipped: [] }];
+  let paths = [
+    { location: start, bindings: new Map(), parameters: parameterFrame(), status: 'ok', frames: [], skipped: [] },
+  ];
   return segments.map((segment, index) => {
     const shape = segmentShape(segment.text);
-    const inSubshell = segment.separator === '|' || ['|', '&'].includes(segments[index + 1]?.separator);
+    const inSubshell =
+      ['|', '|&'].includes(segment.separator) || ['|', '|&', '&'].includes(segments[index + 1]?.separator);
     const next = [];
     const running = [];
     for (const path of paths) {
@@ -206,7 +211,8 @@ function skipSegment(path, shape) {
 function runSegment(path, shape, inSubshell, env) {
   const frames = [...path.frames];
   const subshells = shape.openers.filter((type) => type === '(').length;
-  for (let i = 0; i < subshells; i += 1) frames.push({ location: path.location, bindings: path.bindings });
+  for (let i = 0; i < subshells; i += 1)
+    frames.push({ location: path.location, bindings: path.bindings, parameters: path.parameters });
   const entry = { ...path, frames };
   const outcomes = [];
   const command = shape.tokens ? peel(shape.tokens) : { words: [OPAQUE], mayNotRun: false, negated: false };
@@ -216,7 +222,10 @@ function runSegment(path, shape, inSubshell, env) {
     const status = command.negated ? (outcome.status === 'ok' ? 'fail' : 'ok') : outcome.status;
     // An explicit subshell group restores its state at the closing parenthesis,
     // not after its first command when the group happens to follow a pipe.
-    const kept = inSubshell && subshells === 0 ? { location: entry.location, bindings: entry.bindings } : {};
+    const kept =
+      inSubshell && subshells === 0
+        ? { location: entry.location, bindings: entry.bindings, parameters: entry.parameters }
+        : {};
     outcomes.push({ ...outcome, ...kept, status });
   }
   const exits = shape.closers.filter((type) => type === ')').length;
@@ -245,6 +254,13 @@ function peel(tokens) {
 }
 
 function execute(path, words, env, bindingSource) {
+  // Positionals have the same path/subshell lifetime as directory and named bindings.
+  const projected = expandPositionalParameters(bindingSource, path.parameters);
+  if (projected !== bindingSource) {
+    const invocation = shellInvocation(segmentCommandText(projected));
+    if (invocation.syntaxComplete) words = peel(invocation.words.map(({ value }) => value)).words;
+    bindingSource = projected;
+  }
   const [program, ...operands] = words;
   if (program === undefined || program === 'fi' || program === 'done' || program === 'esac' || program === '}') {
     return [path];
@@ -254,6 +270,15 @@ function execute(path, words, env, bindingSource) {
     const assigned = assign(path, words, env, bindingSource);
     // A substitution can fail: its bound evidence still reaches the || path.
     return scanShellText(bindingSource).substitutions.length ? [assigned, { ...assigned, status: 'fail' }] : [assigned];
+  }
+  if (['set', 'command', 'builtin'].includes(program)) {
+    const parsed = executedInvocations(segmentCommandText(bindingSource), {
+      cwd: directoriesOf(path.location)[0],
+      bindings: path.bindings,
+      parameters: path.parameters,
+    });
+    if (parsed.directInvocations.some((call) => call.name === 'set' && call.operands[0] === '--'))
+      return [{ ...path, parameters: parsed.parameters, status: 'ok' }];
   }
   if (program === 'cd' || program === 'pushd') return changeDirectory(path, operands, env);
   if (program === 'popd')
@@ -296,13 +321,13 @@ function bindFor(path, operands, env, source) {
 
 function closeFrames(path, pops) {
   const frames = [...path.frames];
-  let { location, bindings } = path;
+  let { location, bindings, parameters } = path;
   for (let i = 0; i < pops; i += 1) {
     const frame = frames.pop();
     if (!frame) return { ...path, location: UNKNOWN, frames: [] };
-    ({ location, bindings } = frame);
+    ({ location, bindings, parameters } = frame);
   }
-  return { ...path, location, bindings, frames };
+  return { ...path, location, bindings, parameters, frames };
 }
 
 function directoriesOf(location) {
@@ -315,15 +340,16 @@ function dedupe(paths) {
     const key = JSON.stringify([
       path.location,
       [...path.bindings],
+      path.parameters,
       path.status,
       path.skipped,
-      path.frames.map((frame) => [frame.location, [...frame.bindings]]),
+      path.frames.map((frame) => [frame.location, [...frame.bindings], frame.parameters]),
     ]);
     if (!seen.has(key)) seen.set(key, path);
   }
   const distinct = [...seen.values()];
   if (distinct.length <= MAX_PATHS) return distinct;
-  // Too many paths to follow exactly: keep every directory and both statuses, forget the
+  // Too many paths to follow exactly: keep directories, positional scopes and both statuses, forget the
   // bindings (later expansions then read as unknown) rather than drop a directory.
   const merged = new Map();
   const evidence = [
@@ -335,7 +361,13 @@ function dedupe(paths) {
   ];
   for (const path of distinct) {
     for (const status of ['ok', 'fail']) {
-      const key = JSON.stringify([path.location, status, path.skipped, path.frames.length]);
+      const key = JSON.stringify([
+        path.location,
+        status,
+        path.skipped,
+        path.frames.map((frame) => frame.parameters),
+        path.parameters,
+      ]);
       if (!merged.has(key))
         merged.set(key, {
           ...path,

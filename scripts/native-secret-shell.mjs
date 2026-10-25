@@ -5,7 +5,11 @@ import { ghOperation } from './lib/secret-gh-options.mjs';
 import { executedInvocations } from './lib/shell-invocation.mjs';
 import { programTokens } from './lib/shell-program-tokens.mjs';
 import { hereDocumentView } from './native-effect-heredoc.mjs';
-import { splitShellExecutionSegments } from './native-effect-shell-classifier.mjs';
+import { segmentCommandText, segmentContexts } from './native-effect-segment-locations.mjs';
+import {
+  splitShellExecutionSegments,
+  splitShellExecutionSegmentsWithSeparators,
+} from './native-effect-shell-classifier.mjs';
 import { commandName, shellInvocation } from './native-effect-shell-tokenizer.mjs';
 
 const READERS = new Set(['cat', 'head', 'tail', 'less', 'more', 'grep', 'rg', 'sed', 'awk']);
@@ -13,32 +17,51 @@ const SECRET_ENV = /\$(?:\{)?[A-Za-z0-9_]*(?:TOKEN|SECRET|PASSWORD|CREDENTIAL|AP
 const ENV_NAME = /TOKEN|SECRET|PASSWORD|CREDENTIAL|API_KEY|AUTH/i;
 const VALUE_OPTIONS = new Set(['-m', '-A', '-B', '-C', '--max-count', '--glob', '-g', '--type', '-t']);
 
-export function secretShellDenial(command, cwd) {
+export function secretShellDenial(command, cwd, credentialSources) {
   const host = hereDocumentView(command).host;
   for (const segment of splitShellExecutionSegments(host)) {
     const invocation = shellInvocation(segment);
     const program = commandName(invocation.words[0]?.value);
     if (readsCredentialEnvironment(program, invocation.words)) return 'credential_environment_blocked_before_read';
   }
-  for (const invocation of executedInvocations(host, { cwd }).pipelines.flat()) {
-    const reason = invocationDenial(invocation, cwd);
+  for (const invocation of contextualInvocations(host, cwd)) {
+    const reason = invocationDenial(invocation, cwd, credentialSources);
     if (reason) return reason;
   }
   return null;
 }
 
-function invocationDenial(invocation, cwd) {
+function contextualInvocations(command, cwd) {
+  const parts = splitShellExecutionSegmentsWithSeparators(command);
+  const contexts = segmentContexts(parts, cwd);
+  return parts.flatMap((part, index) => {
+    if (['|', '|&'].includes(part.separator)) return [];
+    let end = index;
+    while (['|', '|&'].includes(parts[end + 1]?.separator)) end++;
+    // Keep producer/consumer code evidence together within each pipeline.
+    const pipeline = parts
+      .slice(index, end + 1)
+      .map((item, offset) => `${offset ? item.separator : ''} ${segmentCommandText(item.text)}`)
+      .join(' ');
+    return contexts[index].flatMap(({ directory, bindings, parameters }) =>
+      executedInvocations(pipeline, { cwd: directory, bindings, parameters }).pipelines.flat(),
+    );
+  });
+}
+
+function invocationDenial(invocation, cwd, credentialSources) {
   const program = commandName(invocation.program ?? invocation.name);
   const operands = invocation.programOperands ?? invocation.operands;
   if (
     READERS.has(program) &&
-    readOperands(program, operands).some((path) => isCredentialSource(path, invocation.cwd ?? cwd))
+    readOperands(program, operands).some((path) => isCredentialSource(path, invocation.cwd ?? cwd, credentialSources))
   )
     return 'credential_source_blocked_before_read';
   if (
     invocation.redirections?.some(
       (entry) =>
-        /^\d*(?:<|<>|<&)$/.test(entry.operator) && isCredentialSource(entry.operand?.value, invocation.cwd ?? cwd),
+        /^\d*(?:<|<>|<&)$/.test(entry.operator) &&
+        isCredentialSource(entry.operand?.value, invocation.cwd ?? cwd, credentialSources),
     )
   )
     return 'credential_source_blocked_before_read';

@@ -35,13 +35,16 @@ export function prepareSecretToolInput(name, args, options = {}) {
   const snapshot = createPayloadSnapshot();
   try {
     const inspected = inspectSecretValue(args);
-    const denial = nativeSecretDenial({ tool_name: name, tool_input: args, cwd: options.cwd });
+    const denial = nativeSecretDenial(
+      { tool_name: name, tool_input: args, cwd: options.cwd },
+      options.credentialSources,
+    );
     if (inspected.rules.length || denial)
       throw Object.assign(new Error('Secret tool input blocked'), {
         code: denial ?? 'secret_content_blocked_before_send',
       });
     return {
-      input: FILE_SENDERS.test(name) ? freezeToolFiles(args, snapshot, options.cwd) : args,
+      input: FILE_SENDERS.test(name) ? freezeToolFiles(args, snapshot, options.cwd, options.credentialSources) : args,
       dispose: () => snapshot.dispose(),
     };
   } catch (error) {
@@ -97,12 +100,16 @@ export function hasPendingExposureNotice(text) {
   }
 }
 
-function freezeToolFiles(value, snapshot, cwd, key = '') {
-  if (typeof value === 'string' && FILE_KEYS.test(key)) return snapshot.freeze(readSecretPayload(value, cwd), value);
-  if (Array.isArray(value)) return value.map((child) => freezeToolFiles(child, snapshot, cwd, key));
+function freezeToolFiles(value, snapshot, cwd, credentialSources, key = '') {
+  if (typeof value === 'string' && FILE_KEYS.test(key))
+    return snapshot.freeze(readSecretPayload(value, cwd, credentialSources), value);
+  if (Array.isArray(value)) return value.map((child) => freezeToolFiles(child, snapshot, cwd, credentialSources, key));
   if (value && typeof value === 'object')
     return Object.fromEntries(
-      Object.entries(value).map(([name, child]) => [name, freezeToolFiles(child, snapshot, cwd, name)]),
+      Object.entries(value).map(([name, child]) => [
+        name,
+        freezeToolFiles(child, snapshot, cwd, credentialSources, name),
+      ]),
     );
   return value;
 }

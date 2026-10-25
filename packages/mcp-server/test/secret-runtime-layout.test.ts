@@ -1,28 +1,32 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { cpSync, mkdtempSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, mkdirSync, mkdtempSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
-test('built secret runtime works after the MCP package moves outside the source repository', () => {
-  const root = mkdtempSync(join(tmpdir(), 'secret-installed-layout-'));
-  try {
-    const original = join(root, 'original');
-    cpSync(fileURLToPath(new URL('../dist', import.meta.url)), join(original, 'dist'), { recursive: true });
-    writeFileSync(join(original, 'package.json'), '{"type":"module"}');
-    const moved = join(root, 'moved');
-    renameSync(original, moved);
-    const result = execFileSync(
-      process.execPath,
-      [
-        '--input-type=module',
-        '-e',
-        `
+for (const layout of ['standalone', 'node_modules'] as const) {
+  test(`built secret runtime works after the MCP package moves outside the source repository (${layout})`, () => {
+    const root = mkdtempSync(join(tmpdir(), 'secret-installed-layout-'));
+    try {
+      const original = join(root, 'original');
+      cpSync(fileURLToPath(new URL('../dist', import.meta.url)), join(original, 'dist'), { recursive: true });
+      writeFileSync(join(original, 'package.json'), '{"type":"module"}');
+      const moved =
+        layout === 'node_modules' ? join(root, 'moved/node_modules/@cat-cafe/mcp-server') : join(root, 'moved');
+      mkdirSync(join(moved, '..'), { recursive: true });
+      renameSync(original, moved);
+      const result = execFileSync(
+        process.execPath,
+        [
+          '--input-type=module',
+          '-e',
+          `
       import assert from 'node:assert/strict';
+      import { spawnSync } from 'node:child_process';
       import { existsSync, writeFileSync } from 'node:fs';
-      import { pathToFileURL } from 'node:url';
+      import { fileURLToPath, pathToFileURL } from 'node:url';
       const base=pathToFileURL(process.cwd()+'/');
       const runtime=await import(new URL('dist/secret-runtime.js',base));
       const {withOpenCodeSecretGuard}=await import(new URL('dist/secret-opencode-config.js',base));
@@ -47,25 +51,35 @@ test('built secret runtime works after the MCP package moves outside the source 
       await instance.config(config);
       assert.equal(config.plugin.length,1);
       assert.equal(config.mcp.foreign.command[1],runtime.secretMcpProxyPath());
+      const callback={CAT_CAFE_API_URL:'http://127.0.0.1:1',CAT_CAFE_INVOCATION_ID:'moved-inv',CAT_CAFE_CALLBACK_TOKEN:['fixture','moved'].join('-')};
+      const managed=withOpenCodeSecretGuard({mcp:{collab:{type:'local',command:[process.execPath,fileURLToPath(new URL('dist/collab.js',base))]}}},callback);
+      const spec=JSON.parse(managed.mcp.collab.environment.CAT_CAFE_SECRET_MCP_PROXY_SPEC);
+      assert.deepEqual(spec.env,callback,'a moved installed package still recognizes its own first-party entrypoint');
       for(const name of ['secret-native-hook.mjs','secret-kimi-hook.mjs','secret-dsh-plugin.mjs','agy-native-effect-guard.mjs','guarded-bin/gh','guarded-bin/curl','guarded-zsh/.zshenv']) assert.ok(existsSync(runtime.secretRuntimeScript(name)));
+      const program=runtime.secretRuntimeScript('guarded-bin/gh');
+      const scoped=spawnSync(process.execPath,[program,'pr','create','--title','verdict(fixture): installation probe','--body','safe fixture'],{encoding:'utf8'});
+      assert.equal(scoped.status,1);
+      assert.match(scoped.stderr,/verdict_publish_missing_repo_scope/,'packaged command must load deployment defaults before enforcing repository scope');
+      assert.doesNotMatch(scoped.stderr,/ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING/);
       console.log(JSON.stringify({blocked:true,redacted:true,notices,plugin:true}));
     `,
-      ],
-      {
-        cwd: moved,
-        env: {
-          PATH: process.env.PATH,
-          SYSTEMROOT: process.env.SYSTEMROOT,
-          HOME: root,
-          USERPROFILE: root,
-          CAT_CAFE_GUARD_NODE: process.execPath,
-          NODE_PATH: '',
+        ],
+        {
+          cwd: moved,
+          env: {
+            PATH: process.env.PATH,
+            SYSTEMROOT: process.env.SYSTEMROOT,
+            HOME: root,
+            USERPROFILE: root,
+            CAT_CAFE_GUARD_NODE: process.execPath,
+            NODE_PATH: '',
+          },
+          encoding: 'utf8',
         },
-        encoding: 'utf8',
-      },
-    );
-    assert.deepEqual(JSON.parse(result), { blocked: true, redacted: true, notices: 1, plugin: true });
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-  }
-});
+      );
+      assert.deepEqual(JSON.parse(result), { blocked: true, redacted: true, notices: 1, plugin: true });
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+}

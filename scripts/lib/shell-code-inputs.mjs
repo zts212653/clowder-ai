@@ -72,6 +72,19 @@ export function parameterValue(word, quote, frame, bindings) {
   return values.map((v) => v.replace(/[\\"$`]/g, '\\$&')).join('" "');
 }
 
+/** Resolve known positional words without erasing substitutions or named-binding provenance. */
+export function expandPositionalParameters(source, frame) {
+  let output = '',
+    cursor = 0;
+  for (const { start, end, quote } of scanShellText(source).parameters) {
+    const value = parameterValue(source.slice(start, end), quote, frame);
+    if (value === undefined) continue;
+    output += source.slice(cursor, start) + value;
+    cursor = end;
+  }
+  return output + source.slice(cursor);
+}
+
 /** Select actual parameter slots; alternative writes never concatenate across vectors. */
 export function parameterEvidence(stage, bindings, frame) {
   return scanShellText(stage).parameters.flatMap((span) => {

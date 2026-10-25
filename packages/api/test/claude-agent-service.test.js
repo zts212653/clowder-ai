@@ -19,9 +19,11 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { PassThrough } from 'node:stream';
 import { mock, test } from 'node:test';
+import { assertClaudeSettingsPreserved, claudeUserSettings } from './helpers/claude-settings-contract.js';
 import { ensureFakeCliOnPath } from './helpers/fake-cli-path.js';
 import { emitProcessExit, waitForMockProcessReady } from './helpers/mock-process-lifecycle.js';
 import { emitEvents as emitClaudeEvents } from './helpers/provider-archive-test-helpers.js';
+import { assertCurrentCallback, secretMcpContract } from './helpers/secret-mcp-contract.js';
 
 const { ClaudeAgentService, pickGitBashPathFromWhere, resolveDefaultClaudeMcpServerPath } = await import(
   '../dist/domains/cats/services/agents/providers/ClaudeAgentService.js'
@@ -1150,7 +1152,7 @@ test('#712: merges user .mcp.json servers as base layer — managed entries take
     join(projectDir, '.mcp.json'),
     JSON.stringify({
       mcpServers: {
-        filesystem: { command: 'npx', args: ['-y', '@mcp/fs'] },
+        filesystem: { command: 'npx', args: ['-y', '@mcp/fs'], env: { FS_OPTION: 'kept' } },
         github: { type: 'http', url: 'https://api.githubcopilot.com/mcp/' },
         'cat-cafe-collab': { command: 'echo', args: ['stale-should-be-ignored'] },
       },
@@ -1189,22 +1191,41 @@ test('#712: merges user .mcp.json servers as base layer — managed entries take
     const parsed = JSON.parse(args[mcpConfigIdx + 1]);
     // User-owned server should be merged in
     assert.ok(parsed.mcpServers.filesystem, 'user-owned filesystem should be merged');
-    assert.deepEqual(parsed.mcpServers.filesystem.args, ['-y', '@mcp/fs']);
+    const { proxyEnv: filesystemProxyEnv, upstream: filesystem } = secretMcpContract(parsed.mcpServers.filesystem);
+    assert.equal(filesystem.source, 'filesystem');
+    assert.equal(filesystem.command, 'npx');
+    assert.deepEqual(filesystem.args, ['-y', '@mcp/fs']);
+    assert.deepEqual(filesystem.env, { FS_OPTION: 'kept' }, 'foreign upstream has no host callback credentials');
+    assert.equal(filesystemProxyEnv.FS_OPTION, undefined, 'upstream launch variables cannot configure the proxy');
+    assertCurrentCallback(filesystemProxyEnv, {
+      CAT_CAFE_API_URL: 'http://localhost:3004',
+      CAT_CAFE_INVOCATION_ID: 'inv-merge',
+      CAT_CAFE_CALLBACK_TOKEN: 'token-merge',
+    });
     assert.equal(parsed.mcpServers.github, undefined, 'retired GitHub MCP must not be merged');
     // Managed split servers should be present
     assert.ok(parsed.mcpServers['cat-cafe-collab'], 'managed cat-cafe-collab should be present');
     // Stale user copy should NOT override managed entry
-    assert.notEqual(parsed.mcpServers['cat-cafe-collab'].command, 'echo', 'stale user entry must not override managed');
-    assert.equal(
-      parsed.mcpServers['cat-cafe-collab'].command,
-      process.execPath,
-      'managed entry should use the runtime Node executable',
+    const { proxyEnv: collabProxyEnv, upstream: collab } = secretMcpContract(parsed.mcpServers['cat-cafe-collab']);
+    assert.notEqual(collab.command, 'echo', 'stale user entry must not override the managed upstream');
+    assert.equal(collab.source, 'cat-cafe-collab');
+    assert.deepEqual(
+      collab.args.map((path) => realpathSync(path)),
+      [realpathSync(join(mcpDistDir, 'collab.js'))],
     );
+    assert.equal(collab.command, process.execPath, 'managed entry should use the runtime Node executable');
     assert.equal(
-      parsed.mcpServers['cat-cafe-collab'].env.ALLOWED_WORKSPACE_DIRS,
+      collab.env.ALLOWED_WORKSPACE_DIRS,
       projectDir,
       'managed split servers must receive the invocation workspace root',
     );
+    const expectedCallback = {
+      CAT_CAFE_API_URL: 'http://localhost:3004',
+      CAT_CAFE_INVOCATION_ID: 'inv-merge',
+      CAT_CAFE_CALLBACK_TOKEN: 'token-merge',
+    };
+    assertCurrentCallback(collabProxyEnv, expectedCallback);
+    assertCurrentCallback(collab.env, { ALLOWED_WORKSPACE_DIRS: projectDir, ...expectedCallback });
   } finally {
     if (previousAllowedWorkspaceDirs === undefined) delete process.env.ALLOWED_WORKSPACE_DIRS;
     else process.env.ALLOWED_WORKSPACE_DIRS = previousAllowedWorkspaceDirs;
@@ -1322,9 +1343,16 @@ test('Claude MCP config resolves Pencil with the current editor host identifier'
 
     const args = spawnFn.mock.calls[0].arguments[1];
     const parsed = JSON.parse(args[args.indexOf('--mcp-config') + 1]);
-    assert.deepEqual(parsed.mcpServers.pencil, {
-      command: pencilBin,
-      args: ['--app', 'visual_studio_code'],
+    const { proxyEnv, upstream: pencil } = secretMcpContract(parsed.mcpServers.pencil);
+    assert.equal(pencil.source, 'pencil');
+    assert.equal(pencil.command, pencilBin);
+    assert.deepEqual(pencil.args, ['--app', 'visual_studio_code']);
+    assert.deepEqual(pencil.env, {}, 'foreign Pencil upstream has no host callback credentials');
+    assertCurrentCallback(proxyEnv, {
+      CAT_CAFE_CAT_ID: 'fable-5',
+      CAT_CAFE_API_URL: 'http://localhost:3004',
+      CAT_CAFE_INVOCATION_ID: 'inv-claude-pencil',
+      CAT_CAFE_CALLBACK_TOKEN: 'token-claude-pencil',
     });
   } finally {
     if (previousPencilBin === undefined) delete process.env.PENCIL_MCP_BIN;
@@ -1448,10 +1476,15 @@ test('falls back to default MCP path when CAT_CAFE_MCP_SERVER_PATH is empty', as
     // #712: Split servers instead of monolith cat-cafe
     assert.ok(parsed.mcpServers['cat-cafe-collab'], 'split server cat-cafe-collab expected');
     assert.equal(parsed.mcpServers['cat-cafe'], undefined, 'monolith must not be injected');
-    assert.equal(
-      realpathSync(parsed.mcpServers['cat-cafe-collab'].args[0]),
-      realpathSync(join(mcpDistDir, 'collab.js')),
-    );
+    const { proxyEnv, upstream: collab } = secretMcpContract(parsed.mcpServers['cat-cafe-collab']);
+    assert.equal(collab.source, 'cat-cafe-collab');
+    assert.equal(collab.command, process.execPath);
+    assert.equal(realpathSync(collab.args[0]), realpathSync(join(mcpDistDir, 'collab.js')));
+    for (const env of [proxyEnv, collab.env]) {
+      assert.equal(env.CAT_CAFE_API_URL, 'http://localhost:3004');
+      assert.equal(env.CAT_CAFE_INVOCATION_ID, 'inv-1');
+      assert.equal(env.CAT_CAFE_CALLBACK_TOKEN, 'token-1');
+    }
   } finally {
     process.chdir(previousCwd);
     if (previousEnv === undefined) {
@@ -2198,34 +2231,43 @@ test('#1542 P1: a user-supplied --settings is composed with the managed plan, ne
   rmSync(userSettingsPath, { force: true });
 });
 
-test('#1542: user --settings passes through untouched when no managed plan is ready', async () => {
-  const userSettingsPath = join(tmpdir(), `f296-user-solo-${Date.now()}.json`);
-  writeFileSync(userSettingsPath, JSON.stringify({ spinnerTipsEnabled: false }));
+for (const style of ['separate', 'equals'])
+  test(`#1542: user settings and hooks survive security composition without a compaction plan (${style})`, async (t) => {
+    const root = mkdtempSync(join(tmpdir(), 'f296-user-solo-'));
+    t.after(() => rmSync(root, { recursive: true, force: true }));
+    const userSettingsPath = join(root, 'settings.json');
+    const original = `${JSON.stringify(claudeUserSettings, null, 2)}\n`;
+    writeFileSync(userSettingsPath, original);
 
-  const proc = createMockProcess();
-  const spawnFn = createMockSpawnFn(proc);
-  const service = createClaudeAgentService({ spawnFn, model: 'claude-test-model' });
+    const proc = createMockProcess();
+    let capturedSettings;
+    const spawnFn = capturingSpawnFn(proc, ([, args]) => {
+      const index = args.indexOf('--settings');
+      assert.ok(index >= 0, 'settings must reach the actual CLI launch');
+      capturedSettings = JSON.parse(readFileSync(args[index + 1], 'utf8'));
+    });
+    const service = createClaudeAgentService({ spawnFn, model: 'claude-test-model' });
+    const promise = collect(
+      service.invoke('hello', {
+        callbackEnv: {
+          CAT_CAFE_API_URL: 'http://localhost:3004',
+          CAT_CAFE_INVOCATION_ID: 'inv-solo',
+          CAT_CAFE_CALLBACK_TOKEN: 'token-solo',
+          CAT_CAFE_ANTHROPIC_PROFILE_MODE: 'api_key',
+          CAT_CAFE_ANTHROPIC_API_KEY: 'sk-test',
+        },
+        cliConfigArgs: style === 'equals' ? [`--settings=${userSettingsPath}`] : ['--settings', userSettingsPath],
+      }),
+    );
+    await emitClaudeEvents(proc, [{ type: 'result', subtype: 'success' }]);
+    await promise;
 
-  const promise = collect(
-    service.invoke('hello', {
-      callbackEnv: {
-        CAT_CAFE_API_URL: 'http://localhost:3004',
-        CAT_CAFE_INVOCATION_ID: 'inv-solo',
-        CAT_CAFE_CALLBACK_TOKEN: 'token-solo',
-        CAT_CAFE_ANTHROPIC_PROFILE_MODE: 'api_key',
-        CAT_CAFE_ANTHROPIC_API_KEY: 'sk-test',
-      },
-      cliConfigArgs: ['--settings', userSettingsPath],
-    }),
-  );
-  await emitClaudeEvents(proc, [{ type: 'result', subtype: 'success' }]);
-  await promise;
-
-  const args = spawnFn.mock.calls[0].arguments[1];
-  assert.equal(args.filter((arg) => arg === '--settings').length, 1);
-  assert.equal(args[args.indexOf('--settings') + 1], userSettingsPath);
-  rmSync(userSettingsPath, { force: true });
-});
+    const args = spawnFn.mock.calls[0].arguments[1];
+    assert.equal(args.filter((arg) => arg === '--settings').length, 1);
+    assertClaudeSettingsPreserved(capturedSettings);
+    assert.equal(readFileSync(userSettingsPath, 'utf8'), original, 'the original user file is never rewritten');
+    assert.ok(!existsSync(args[args.indexOf('--settings') + 1]), 'the invocation-owned overlay is cleaned up');
+  });
 
 test('#1542: an invalid user --settings fails closed instead of silently dropping the managed carrier', async () => {
   const proc = createMockProcess();

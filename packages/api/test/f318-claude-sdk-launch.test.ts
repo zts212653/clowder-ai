@@ -1,8 +1,36 @@
 import assert from 'node:assert/strict';
-import { resolve } from 'node:path';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
 import { test } from 'node:test';
 import { createCatId } from '@cat-cafe/shared';
 import { CLI_EXECUTION_ID_ENV, CLI_EXECUTION_OWNER_BINDING_ENV } from '../src/utils/cli-process-ownership.js';
+import { assertClaudeSettingsPreserved, claudeUserSettings } from './helpers/claude-settings-contract.js';
+
+for (const source of ['relative-file', 'inline'])
+  test(`SDK preserves user settings and hooks without a compaction plan (${source})`, async (t) => {
+    const { prepareClaudeSdkLaunch } = await import(
+      '../src/domains/cats/services/agents/providers/claude-sdk-launch.js'
+    );
+    const root = mkdtempSync(join(tmpdir(), 'claude-sdk-user-settings-'));
+    t.after(() => rmSync(root, { recursive: true, force: true }));
+    const path = join(root, 'user-settings.json');
+    const original = `${JSON.stringify(claudeUserSettings, null, 2)}\n`;
+    writeFileSync(path, original);
+    const prepared = await prepareClaudeSdkLaunch({
+      catId: createCatId('opus'),
+      model: 'claude-test',
+      prompt: 'inspect settings',
+      l0CompilerFn: async () => 'identity',
+      abortController: new AbortController(),
+      options: {
+        workingDirectory: root,
+        cliConfigArgs: ['--settings', source === 'relative-file' ? 'user-settings.json' : original],
+      },
+    });
+    assertClaudeSettingsPreserved(JSON.parse(prepared.sdkOptions.settings as string));
+    assert.equal(readFileSync(path, 'utf8'), original, 'SDK leaves the user source file unchanged');
+  });
 
 test('SDK child strips API-owned credentials and owner capabilities from inherited and account env', async (t) => {
   const { spawnSync } = await import('node:child_process');

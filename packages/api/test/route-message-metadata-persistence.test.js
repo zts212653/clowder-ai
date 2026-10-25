@@ -116,9 +116,33 @@ function createMetadataService(catId, options = {}) {
   };
 }
 
-function assertHydratedMetadata(message) {
+async function captureExecutionAccounts(deps, threadId) {
+  const { prepareInvocationExecutionBinding } = await import(
+    '../dist/domains/cats/services/agents/invocation/invoke-single-cat.js'
+  );
+  const accounts = new Map();
+  for (const [catId, service] of Object.entries(deps.services)) {
+    const { executionAccount } = await prepareInvocationExecutionBinding(deps.invocationDeps, {
+      catId,
+      threadId,
+      userId: 'user-1',
+      service,
+    });
+    accounts.set(catId, executionAccount);
+  }
+  return accounts;
+}
+
+function assertHydratedMetadata(message, accounts) {
+  assert.equal(message.from?.kind, 'agent');
+  assert.ok(accounts.has(message.from.catId), 'the persisted member must have an upstream binding');
+  const executionAccount = accounts.get(message.from.catId);
   assert.deepEqual(message.metadata?.diagnostics, APP_SERVER_DIAGNOSTICS);
-  assert.deepEqual(message.metadata?.usage, TERMINAL_USAGE);
+  assert.deepEqual(message.metadata?.executionAccount, executionAccount);
+  assert.deepEqual(
+    message.metadata?.usage,
+    executionAccount ? { ...TERMINAL_USAGE, executionAccount } : TERMINAL_USAGE,
+  );
   assert.equal(
     message.metadata?.usage?.costUsd,
     undefined,
@@ -132,6 +156,7 @@ describe('F306 OpenAI usage metadata persistence', () => {
     const pause = { entered: createDeferred(), resume: createDeferred() };
     const messageStore = createHydratingMessageStore();
     const deps = createRouteDeps({ opus: createMetadataService('opus', { pause }) }, messageStore);
+    const accounts = await captureExecutionAccounts(deps, 'thread-serial');
 
     const run = (async () => {
       for await (const _message of routeSerial(deps, ['opus'], 'work', 'user-1', 'thread-serial')) {
@@ -146,7 +171,7 @@ describe('F306 OpenAI usage metadata persistence', () => {
 
     const hydrated = messageStore.getByThread('thread-serial');
     assert.equal(hydrated.length, 1);
-    assertHydratedMetadata(hydrated[0]);
+    assertHydratedMetadata(hydrated[0], accounts);
   });
 
   it('parallel hydration retains the same lifecycle and terminal usage semantics', async () => {
@@ -160,6 +185,7 @@ describe('F306 OpenAI usage metadata persistence', () => {
       messageStore,
       { parallel: true },
     );
+    const accounts = await captureExecutionAccounts(deps, 'thread-parallel');
 
     for await (const _message of routeParallel(deps, ['opus', 'kimi'], 'compare', 'user-1', 'thread-parallel')) {
       // Drain both providers.
@@ -167,6 +193,6 @@ describe('F306 OpenAI usage metadata persistence', () => {
 
     const hydrated = messageStore.getByThread('thread-parallel');
     assert.equal(hydrated.length, 2);
-    for (const message of hydrated) assertHydratedMetadata(message);
+    for (const message of hydrated) assertHydratedMetadata(message, accounts);
   });
 });

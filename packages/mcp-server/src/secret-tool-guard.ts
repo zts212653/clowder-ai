@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { type ExposureNotice, withSecretToolGuard } from './secret-runtime.js';
+import { type CredentialSources, type ExposureNotice, withSecretToolGuard } from './secret-runtime.js';
 import { callbackPost, getCallbackConfig } from './tools/callback-tools.js';
 
 export async function recordSecretExposure(notice: ExposureNotice): Promise<void> {
@@ -27,10 +27,12 @@ export async function guardSecretToolCall<T>(
   execute: (args: unknown) => Promise<T>,
   callId: string = randomUUID(),
   cwd: string = process.cwd(),
+  credentialSources?: CredentialSources,
 ): Promise<T> {
   return withSecretToolGuard(name, args, execute, {
     callId: `${name}:${callId}`,
     cwd,
+    credentialSources,
     notify: recordSecretExposure,
   }) as Promise<T>;
 }

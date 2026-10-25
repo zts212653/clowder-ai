@@ -18,6 +18,12 @@ export function secretMcpContract(server) {
   return { proxyEnv, upstream: spec };
 }
 
+/** OpenCode uses a command vector and calls its environment field `environment`. */
+export function openCodeSecretMcpContract(server) {
+  assert.equal(server.type, 'local');
+  return secretMcpContract({ command: server.command[0], args: server.command.slice(1), env: server.environment });
+}
+
 /** A pooled MCP may refresh auth through its existing private credential file. */
 export function assertCurrentCallback(env, expected) {
   const { CAT_CAFE_INVOCATION_ID: invocationId, CAT_CAFE_CALLBACK_TOKEN: callbackToken, ...metadata } = expected;

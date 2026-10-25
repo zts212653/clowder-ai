@@ -42,6 +42,8 @@ describe('F208 AC-E3: execute-apply endpoint', () => {
 
     // Init git repo
     execFileSync('git', ['init'], { cwd: tempDir });
+    execFileSync('git', ['config', 'user.name', 'Dossier Fixture'], { cwd: tempDir });
+    execFileSync('git', ['config', 'user.email', 'dossier-fixture@example.invalid'], { cwd: tempDir });
     execFileSync('git', ['add', '.'], { cwd: tempDir });
     execFileSync('git', ['commit', '-m', 'init'], { cwd: tempDir });
 

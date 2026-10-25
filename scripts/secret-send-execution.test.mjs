@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -71,6 +72,33 @@ test('delegate output is redacted before reaching the native shell result', () =
   assert.ok(!`${result.stdout}${result.stderr}`.includes(secret()));
   assert.match(`${result.stdout}${result.stderr}`, /轮转|rotate/);
 });
+
+for (const program of ['gh', 'curl'])
+  for (const stream of ['stdout', 'stderr'])
+    test(`${program} flushes complete binary ${stream} through a real pipe before reporting exit`, () => {
+      const f = fixture(program);
+      const size = 256 * 1024 + 137;
+      const status = stream === 'stderr' ? 7 : 0;
+      writeFileSync(
+        f.delegate,
+        `#!${process.execPath}\nconst payload=Buffer.alloc(${size});\nfor(let i=0;i<payload.length;i++)payload[i]=i%256;\nprocess.${stream}.write(payload);\nprocess.exitCode=${status};\n`,
+      );
+      const expected = Buffer.alloc(size);
+      for (let i = 0; i < expected.length; i++) expected[i] = i % 256;
+      const args =
+        program === 'gh'
+          ? ['api', 'repos/fixture/project/actions/artifacts/1/zip']
+          : ['https://example.invalid/archive'];
+      const result = spawnSync(resolve('scripts/guarded-bin', program), args, {
+        cwd: f.dir,
+        env: f.env,
+        maxBuffer: 4 * 1024 * 1024,
+      });
+      assert.equal(result.status, status, 'preserve the delegate exit status after flushing its output');
+      assert.equal(result[stream].length, size, `${stream} must not be cut at the pipe buffer boundary`);
+      const digest = (bytes) => createHash('sha256').update(bytes).digest('hex');
+      assert.equal(digest(result[stream]), digest(expected), 'preserve every binary byte');
+    });
 
 test('release draft assets are rejected before the upload delegate executes', () => {
   const f = fixture('gh');

@@ -21,6 +21,7 @@ import { catRegistry } from '@cat-cafe/shared';
 import { ContextEpochOwner } from '../dist/domains/cats/services/session/context/ContextEpochOwner.js';
 import { InMemoryContextEpochStore } from '../dist/domains/cats/services/stores/ports/ContextEpochStore.js';
 import { scopedTestSessions, scriptedSessionInit } from './helpers/scoped-test-sessions.js';
+import { openCodeSecretMcpContract } from './helpers/secret-mcp-contract.js';
 
 function assertStagingPromptContract(prompt, mode) {
   if (hasSourceStagingContent) {
@@ -9229,17 +9230,20 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     assert.equal(seenRuntimeConfig.mcp['cat-cafe'], undefined, 'monolith must not be injected');
     const mcpCollab = seenRuntimeConfig.mcp['cat-cafe-collab'];
     assert.ok(mcpCollab, 'split server cat-cafe-collab expected');
-    assert.equal(mcpCollab.type, 'local');
-    assert.equal(mcpCollab.command.length, 2);
-    const nodeBin91 = mcpCollab.command[0];
+    const { upstream, proxyEnv } = openCodeSecretMcpContract(mcpCollab);
+    assert.equal(upstream.source, 'cat-cafe-collab');
+    assert.equal(upstream.command, process.execPath, 'the original split server retains the runtime Node binary');
+    assert.equal(upstream.args.length, 1);
     assert.ok(
-      nodeBin91 === 'node' || nodeBin91.endsWith('/node') || nodeBin91.endsWith('\\node.exe'),
-      `command[0] must be a node binary: ${nodeBin91}`,
+      upstream.args[0].endsWith('/packages/mcp-server/dist/collab.js'),
+      `MCP upstream must point to split entrypoint: ${upstream.args[0]}`,
     );
-    assert.ok(
-      mcpCollab.command[1].endsWith('/packages/mcp-server/dist/collab.js'),
-      `mcp command[1] must point to split entrypoint: ${mcpCollab.command[1]}`,
-    );
+    for (const env of [proxyEnv, upstream.env])
+      for (const key of ['CAT_CAFE_API_URL', 'CAT_CAFE_INVOCATION_ID', 'CAT_CAFE_CALLBACK_TOKEN'])
+        assert.equal(env[key], undefined, `the disk config must defer ${key} to the native config hook`);
+    assert.ok(callbackEnv.CAT_CAFE_API_URL);
+    assert.ok(callbackEnv.CAT_CAFE_INVOCATION_ID);
+    assert.ok(callbackEnv.CAT_CAFE_CALLBACK_TOKEN);
     // Config file should be cleaned up after invocation
     await assert.rejects(readFile(seenConfigPath, 'utf-8'));
   });
@@ -9348,13 +9352,16 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
       assert.equal(seenRuntimeConfig.mcp['cat-cafe'], undefined, 'monolith must not be injected');
       const mcpCollab = seenRuntimeConfig.mcp['cat-cafe-collab'];
       assert.ok(mcpCollab, 'split server cat-cafe-collab expected');
-      assert.equal(mcpCollab.type, 'local');
-      const nodeBin92 = mcpCollab.command[0];
-      assert.ok(
-        nodeBin92 === 'node' || nodeBin92.endsWith('/node') || nodeBin92.endsWith('\\node.exe'),
-        `command[0] must be a node binary: ${nodeBin92}`,
-      );
-      assert.ok(mcpCollab.command[1].endsWith('collab.js'), 'must point to split entrypoint');
+      const { upstream, proxyEnv } = openCodeSecretMcpContract(mcpCollab);
+      assert.equal(upstream.source, 'cat-cafe-collab');
+      assert.equal(upstream.command, process.execPath);
+      assert.deepEqual(upstream.args, [join(externalMcpDir, 'collab.js')], 'preserve the explicit MCP binary root');
+      for (const env of [proxyEnv, upstream.env])
+        for (const key of ['CAT_CAFE_API_URL', 'CAT_CAFE_INVOCATION_ID', 'CAT_CAFE_CALLBACK_TOKEN'])
+          assert.equal(env[key], undefined, `the disk config must defer ${key} to the native config hook`);
+      assert.ok(callbackEnv.CAT_CAFE_API_URL);
+      assert.ok(callbackEnv.CAT_CAFE_INVOCATION_ID);
+      assert.ok(callbackEnv.CAT_CAFE_CALLBACK_TOKEN);
       await assert.rejects(readFile(seenConfigPath, 'utf-8'));
     },
   );

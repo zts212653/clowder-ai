@@ -25,6 +25,7 @@ const sharedDefaults = new Set([
   'packages/shared/src/deployment-profiles.json',
 ]);
 const portable = (path) => path.split(sep).join('/');
+const emittedPath = (file) => file.replace(/\.ts$/, '.mjs');
 function inside(root, path) {
   const child = relative(root, path);
   return child !== '..' && !child.startsWith(`..${sep}`) && !isAbsolute(child);
@@ -49,7 +50,9 @@ function collect(file) {
       code = code.replaceAll(name, portable(relative(dirname(resolve(output, file)), target)));
       continue;
     }
-    collect(portable(relative(repository, target)));
+    const sourceFile = portable(relative(repository, target));
+    collect(sourceFile);
+    code = code.replaceAll(name, emittedPath(name));
   }
   inputs.set(file, code);
   const declaration = path.replace(/\.mjs$/, '.d.mts');
@@ -65,8 +68,15 @@ for (const file of [
 // This directory contains generated build assets only, never user state.
 rmSync(output, { recursive: true, force: true });
 for (const [file, code] of inputs) {
-  const target = resolve(output, file);
+  const target = resolve(output, emittedPath(file));
   mkdirSync(dirname(target), { recursive: true });
-  writeFileSync(target, code, { mode: statSync(resolve(repository, file)).mode });
+  // Installed dependencies cannot rely on Node stripping TypeScript in node_modules.
+  const emitted = file.endsWith('.ts')
+    ? ts.transpileModule(code, {
+        fileName: file,
+        compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 },
+      }).outputText
+    : code;
+  writeFileSync(target, emitted, { mode: statSync(resolve(repository, file)).mode });
 }
 console.log(`Secret runtime: staged ${inputs.size} package-local inputs`);

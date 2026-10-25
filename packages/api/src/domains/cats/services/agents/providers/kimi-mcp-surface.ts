@@ -91,6 +91,7 @@ export async function resolveKimiMcpSurface(input: {
   mcpServerPath: string;
   nativeDirectory: string;
   mcpSupport?: boolean;
+  credentialFile?: string;
 }): Promise<Record<string, Server>> {
   const projectRoot = await kimiProjectRoot(input.workingDirectory);
   const servers = Object.create(null) as Record<string, Server>;

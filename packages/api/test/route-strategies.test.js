@@ -2656,6 +2656,9 @@ describe('routeParallel resilience', () => {
 
   it('preserves metadata when parallel provider only attaches it to done', async () => {
     const { routeParallel } = await import('../dist/domains/cats/services/agents/routing/route-parallel.js');
+    const { prepareInvocationExecutionBinding } = await import(
+      '../dist/domains/cats/services/agents/invocation/invoke-single-cat.js'
+    );
 
     const doneMetadata = {
       model: 'codex-test',
@@ -2671,12 +2674,24 @@ describe('routeParallel resilience', () => {
 
     const appendCalls = [];
     const deps = createMockDeps({ opus: metadataOnDoneService }, appendCalls);
+    // Account resolution is upstream of this merge: preserve that snapshot together with provider metadata.
+    const { executionAccount } = await prepareInvocationExecutionBinding(deps.invocationDeps, {
+      catId: 'opus',
+      threadId: 'thread1',
+      userId: 'user1',
+      service: metadataOnDoneService,
+    });
+    assert.ok(executionAccount, 'the opus fixture must bind an execution account');
 
     for await (const _ of routeParallel(deps, ['opus'], 'test metadata', 'user1', 'thread1')) {
     }
 
     assert.equal(appendCalls.length, 1, 'should persist one final message');
-    assert.deepEqual(appendCalls[0].metadata, doneMetadata);
+    assert.deepEqual(appendCalls[0].metadata, {
+      ...doneMetadata,
+      executionAccount,
+      usage: { ...doneMetadata.usage, executionAccount },
+    });
   });
 });
 

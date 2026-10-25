@@ -7,6 +7,7 @@ import { catRegistry } from '@cat-cafe/shared';
 import { prepareKimiMcpConfig } from '../dist/domains/cats/services/agents/providers/kimi-mcp-config.js';
 import { nativeLoaders, nativeSchemas } from './helpers/kimi-native-contract.js';
 import { kimiNativeFixture, managedCapability } from './helpers/kimi-native-fixture.js';
+import { secretMcpContract } from './helpers/secret-mcp-contract.js';
 
 const transports = {
   stdio: { command: 'never-executed', args: ['--no-spawn'] },
@@ -153,8 +154,12 @@ test('root user MCP keeps its source-relative cwd while retired and managed alia
     for (const load of Object.values(nativeLoaders)) {
       const effective = await load(f.loadInput);
       assert.notEqual(effective.filesystem.enabled, false);
-      assert.equal(resolve(effective.filesystem.cwd), join(f.project, 'tools'));
-      assert.deepEqual(effective.filesystem.args, ['relative-script.js']);
+      const { upstream: filesystem } = secretMcpContract(effective.filesystem);
+      assert.equal(filesystem.source, 'filesystem');
+      assert.equal(filesystem.command, 'never-executed');
+      assert.equal(resolve(filesystem.cwd), join(f.project, 'tools'));
+      assert.deepEqual(filesystem.args, ['relative-script.js']);
+      assert.deepEqual(filesystem.env, {}, 'foreign upstream must not acquire host identity or callback env');
     }
   } finally {
     await lease.dispose();
@@ -216,8 +221,16 @@ test('gitdir worktree discovery and nested user MCP paths follow their actual so
   try {
     for (const load of Object.values(nativeLoaders)) {
       const effective = await load(f.loadInput);
-      assert.equal(resolve(effective.inherited.cwd), join(f.project, 'root-tools'));
-      assert.equal(resolve(effective.override.cwd), join(f.cwd, 'local-tools'));
+      for (const [name, cwd] of [
+        ['inherited', join(f.project, 'root-tools')],
+        ['override', join(f.cwd, 'local-tools')],
+      ]) {
+        const { upstream } = secretMcpContract(effective[name]);
+        assert.equal(upstream.source, name);
+        assert.equal(upstream.command, 'never-executed');
+        assert.equal(resolve(upstream.cwd), cwd);
+        assert.deepEqual(upstream.env, {}, 'foreign upstream must not acquire host identity or callback env');
+      }
     }
   } finally {
     await lease.dispose();
@@ -232,7 +245,13 @@ test('host-approved collaboration remains executable and per-cat denial cannot l
     for (const load of Object.values(nativeLoaders)) {
       const effective = await load(f.loadInput);
       assert.notEqual(effective['cat-cafe-collab'].enabled, false);
-      assert.deepEqual(effective['cat-cafe-collab'].args, [join(f.dist, 'collab.js')]);
+      const { upstream: collab, proxyEnv } = secretMcpContract(effective['cat-cafe-collab']);
+      assert.equal(collab.source, 'cat-cafe-collab');
+      assert.equal(collab.command, process.execPath);
+      assert.deepEqual(collab.args, [join(f.dist, 'collab.js')]);
+      assert.equal(collab.env.CAT_CAFE_CAT_ID, 'kimi');
+      assert.ok(collab.env.ALLOWED_WORKSPACE_DIRS, 'the workspace boundary stays on the upstream reader');
+      assert.deepEqual(proxyEnv, {}, 'Kimi does not persist invocation credentials in its project relay environment');
     }
   } finally {
     await lease.dispose();

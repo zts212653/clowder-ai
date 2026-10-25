@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, it } from 'node:test';
 import { ClaudeSdkAgentService } from '../dist/domains/cats/services/agents/providers/ClaudeSdkAgentService.js';
+import { assertCurrentCallback, secretMcpContract } from './helpers/secret-mcp-contract.js';
 
 class AsyncInbox {
   #values = [];
@@ -814,8 +815,9 @@ describe('live member carriers', () => {
     assert.equal(registration.released, true);
   });
 
-  it('Claude SDK injects the invocation MCP map through the native SDK option', async () => {
+  it('Claude SDK injects the guarded invocation MCP map through the native SDK option', async (t) => {
     const root = mkdtempSync(join(tmpdir(), 'cat-cafe-claude-sdk-mcp-'));
+    t.after(() => rmSync(root, { recursive: true, force: true }));
     mkdirSync(join(root, '.cat-cafe'));
     writeFileSync(
       join(root, '.mcp.json'),
@@ -840,13 +842,28 @@ describe('live member carriers', () => {
 
     for await (const _message of service.invoke('initial body', {
       workingDirectory: root,
-      callbackEnv: { CAT_CAFE_CAT_ID: 'opus', CAT_CAFE_INVOCATION_ID: 'inv-sdk-mcp' },
+      callbackEnv: {
+        CAT_CAFE_CAT_ID: 'opus',
+        CAT_CAFE_API_URL: 'http://127.0.0.1:1',
+        CAT_CAFE_INVOCATION_ID: 'inv-sdk-mcp',
+        CAT_CAFE_CALLBACK_TOKEN: 'fixture-sdk-callback',
+      },
     })) {
       // Drain the injected query.
     }
 
     assert.equal(sdkOptions.strictMcpConfig, true);
-    assert.deepEqual(sdkOptions.mcpServers['user-tool'], { command: 'user-tool', args: ['serve'] });
+    const { proxyEnv, upstream } = secretMcpContract(sdkOptions.mcpServers['user-tool']);
+    assert.equal(upstream.source, 'user-tool');
+    assert.equal(upstream.command, 'user-tool');
+    assert.deepEqual(upstream.args, ['serve']);
+    assert.deepEqual(upstream.env, {}, 'foreign upstream must not receive callback credentials or identity');
+    assertCurrentCallback(proxyEnv, {
+      CAT_CAFE_CAT_ID: 'opus',
+      CAT_CAFE_API_URL: 'http://127.0.0.1:1',
+      CAT_CAFE_INVOCATION_ID: 'inv-sdk-mcp',
+      CAT_CAFE_CALLBACK_TOKEN: 'fixture-sdk-callback',
+    });
   });
 
   it('Claude SDK rejects a steer whose provider interrupt never acknowledges', async () => {

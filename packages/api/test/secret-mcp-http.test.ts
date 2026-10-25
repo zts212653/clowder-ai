@@ -10,7 +10,7 @@ import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/
 import { z } from 'zod';
 import { guardMcpConfig } from '../src/config/capabilities/secret-mcp-config.js';
 
-for (const kind of ['http', 'sse', 'auto-http', 'auto-sse'])
+for (const kind of ['http', 'sse', 'auto-http', 'auto-sse', 'env-http'])
   test(`real ${kind} MCP relay preserves auth, blocks input and redacts results`, { timeout: 15000 }, async () => {
     const fake = ['ghp', '_', 'Y'.repeat(36)].join('');
     let executions = 0;
@@ -31,7 +31,10 @@ for (const kind of ['http', 'sse', 'auto-http', 'auto-sse'])
         notices.push({ body, invocation: req.headers['x-invocation-id'] as string });
         res.setHeader('content-type', 'application/json');
         res.end(JSON.stringify({ messageId: 'notice' }));
-      } else if (req.headers['x-fixture-auth'] !== 'transport-owned') {
+      } else if (
+        req.headers['x-fixture-auth'] !== 'transport-owned' ||
+        (kind === 'env-http' && req.headers.authorization !== 'Bearer transport-owned')
+      ) {
         res.writeHead(401).end();
       } else if (isHttp) {
         await http.handleRequest(req, res);
@@ -49,10 +52,18 @@ for (const kind of ['http', 'sse', 'auto-http', 'auto-sse'])
     const config = guardMcpConfig(
       {
         url: `${url}/mcp`,
-        type: kind.startsWith('auto-') ? 'auto' : kind,
+        type: kind.startsWith('auto-') ? 'auto' : kind === 'env-http' ? 'http' : kind,
         headers: { 'x-fixture-auth': 'transport-owned' },
+        ...(kind === 'env-http'
+          ? { bearer_token_env_var: 'NODE_OPTIONS', env: { NODE_OPTIONS: 'transport-owned' } }
+          : {}),
       },
       { CAT_CAFE_API_URL: url, CAT_CAFE_INVOCATION_ID: 'remote-invocation', CAT_CAFE_CALLBACK_TOKEN: 'fixture' },
+    );
+    assert.equal(
+      (config.env as Record<string, string>).NODE_OPTIONS,
+      undefined,
+      'transport values cannot configure Node',
     );
     const client = new Client({ name: 'remote-consumer', version: '1' });
     const transport = new StdioClientTransport({

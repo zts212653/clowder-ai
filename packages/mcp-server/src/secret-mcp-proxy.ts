@@ -7,6 +7,7 @@ import type { JSONRPCError, JSONRPCMessage, JSONRPCResponse } from '@modelcontex
 import { runWithNativeTurnAuth } from './native-turn-auth.js';
 import { blockedMcpReply, inspectMcpWire, redactMcpWire } from './secret-mcp-wire.js';
 import { SecretRemoteTransport } from './secret-remote-transport.js';
+import { type CredentialSources, credentialSourcesFromEnvironment } from './secret-runtime.js';
 import { guardSecretToolCall } from './secret-tool-guard.js';
 import { isDirectExecution } from './utils/is-direct-execution.js';
 
@@ -18,6 +19,7 @@ export async function startSecretMcpProxy(
   upstream: Transport,
   source: string = randomUUID(),
   cwd: string = process.cwd(),
+  credentialSources?: CredentialSources,
 ): Promise<() => Promise<void>> {
   let closing = false;
   const pending = new Map<string | number, (result: JSONRPCResponse | JSONRPCError) => void>();
@@ -97,6 +99,7 @@ export async function startSecretMcpProxy(
         },
         `${source}:${requestId}`,
         cwd,
+        credentialSources,
       );
     const result =
       message.method === 'tools/call' ? runWithNativeTurnAuth(params?._meta, new AbortController().signal, run) : run();
@@ -160,7 +163,7 @@ export async function runSecretMcpProxyFromEnvironment() {
   };
   const headers = { ...spec.headers };
   if (spec.bearerTokenEnvVar) {
-    const bearer = process.env[spec.bearerTokenEnvVar];
+    const bearer = spec.env?.[spec.bearerTokenEnvVar] ?? process.env[spec.bearerTokenEnvVar];
     if (!bearer) throw new Error('secret_mcp_transport_auth_unavailable');
     headers.Authorization = `Bearer ${bearer}`;
   }
@@ -176,7 +179,16 @@ export async function runSecretMcpProxyFromEnvironment() {
         stderr: 'pipe',
       });
   if (upstream instanceof StdioClientTransport) upstream.stderr?.on('data', () => {});
-  const dispose = await startSecretMcpProxy(new StdioServerTransport(), upstream, spec.source, cwd);
+  // Retain upstream credential locations as guard data, never as executable proxy environment.
+  const contexts = [
+    credentialSourcesFromEnvironment(process.env, process.cwd()),
+    credentialSourcesFromEnvironment(spec.env ?? {}, cwd),
+  ];
+  const credentialSources = {
+    files: contexts.flatMap((context) => context.files),
+    directories: contexts.flatMap((context) => context.directories),
+  };
+  const dispose = await startSecretMcpProxy(new StdioServerTransport(), upstream, spec.source, cwd, credentialSources);
   for (const signal of ['SIGTERM', 'SIGINT'] as const)
     process.once(signal, () => {
       void dispose();

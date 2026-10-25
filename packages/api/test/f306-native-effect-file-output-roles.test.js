@@ -318,11 +318,23 @@ test('owned OS fixtures verify that uniq and git output syntax creates files', (
     const result = spawnSync('git', ['-C', ordinary, ...args, `--output=${file}`], { encoding: 'utf8' });
     assert.ok(existsSync(file), `${JSON.stringify(args)}:exit=${result.status}:${result.stderr}`);
   }
-  for (const flag of ['+1', '-1', '--cou']) {
-    const file = join(ordinary, `uniq-legacy-${flag}`);
-    const result = spawnSync('/usr/bin/uniq', [flag, input, file], { encoding: 'utf8' });
+  // The policy cases above retain legacy spellings; the installed uniq need not support them.
+  // Exercise their portable equivalents when witnessing actual filesystem effects.
+  for (const [index, [args, expected]] of [
+    [['-s', '1'], ['a']],
+    [['-f', '1'], ['a']],
+    [['-c'], ['2 a', '1 b']],
+  ].entries()) {
+    const file = join(ordinary, `uniq-portable-${index}`);
+    const result = spawnSync('/usr/bin/uniq', [...args, input, file], { encoding: 'utf8' });
     assert.equal(result.status, 0, result.stderr);
-    assert.ok(existsSync(file), flag);
+    assert.deepEqual(
+      readFileSync(file, 'utf8')
+        .trim()
+        .split('\n')
+        .map((line) => line.trim().replace(/\s+/g, ' ')),
+      expected,
+    );
   }
   for (const subcommand of ['log', 'show'])
     for (const flag of ['-L', '--decorate-refs']) {

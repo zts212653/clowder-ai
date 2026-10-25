@@ -11,14 +11,31 @@ export interface ExposureNotice {
   callId?: string;
   rules: string[];
 }
+export interface CredentialSources {
+  files: string[];
+  directories: string[];
+}
+export const credentialSourcesFromEnvironment = sources.credentialSourcesFromEnvironment as (
+  environment: Record<string, string | undefined>,
+  cwd?: string,
+) => CredentialSources;
 export const withSecretToolGuard = boundary.withSecretToolGuard as (
   name: string,
   args: unknown,
   execute: (args: unknown) => Promise<unknown>,
-  options: { callId: string; cwd: string; notify: (notice: ExposureNotice) => Promise<void> },
+  options: {
+    callId: string;
+    cwd: string;
+    credentialSources?: CredentialSources;
+    notify: (notice: ExposureNotice) => Promise<void>;
+  },
 ) => Promise<unknown>;
 export const hasPendingExposureNotice = boundary.hasPendingExposureNotice as (value: unknown) => boolean;
-export const isCredentialSource = sources.isCredentialSource as (path: string, cwd?: string) => boolean;
+export const isCredentialSource = sources.isCredentialSource as (
+  path: string,
+  cwd?: string,
+  credentialSources?: CredentialSources,
+) => boolean;
 
 /** src and dist share the same package root; deployment never changes that coordinate. */
 export function secretRuntimeRoot(): string {

@@ -27,8 +27,8 @@ export function scanSecretPayload(content) {
 }
 
 /** Read an already opened regular file once; the executor only receives this copy. */
-export function readSecretPayload(path, cwd) {
-  if (isCredentialSource(path, cwd)) throw new Error('credential_source_blocked_before_read');
+export function readSecretPayload(path, cwd, credentialSources) {
+  if (isCredentialSource(path, cwd, credentialSources)) throw new Error('credential_source_blocked_before_read');
   let fd;
   try {
     fd = openSync(resolve(cwd ?? process.cwd(), path), 'r');
