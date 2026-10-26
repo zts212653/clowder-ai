@@ -16,6 +16,7 @@ import type {
   ThreadOpenedOpportunityV1,
 } from '@cat-cafe/shared';
 import { contextEpochScopeKey } from '../../cats/services/session/context/ContextEpochOwner.js';
+import type { NativeProfileOpeningDelivery } from '../profile/native-profile-opening.js';
 import { ContextSourceWorkBudget } from './ContextSourceWorkBudget.js';
 import type { ContextSourceOmission } from './context-source-omission.js';
 import type {
@@ -119,6 +120,7 @@ export interface MemoryCueInvocationPromptResolution {
 }
 
 export interface MemoryCueInvocationPromptResolver {
+  recordProfileOpeningObserved?(delivery: NativeProfileOpeningDelivery): Promise<void>;
   resolve(input: ResolveMemoryCueInvocationPromptInput): Promise<MemoryCueInvocationPromptResolution>;
   recordPresented?(
     receipts: readonly MemoryCueDeliveryReceipt[],
@@ -190,6 +192,7 @@ export class MemoryCueInvocationPromptService implements MemoryCueInvocationProm
   constructor(
     private readonly deps: {
       plane: MemoryCuePlaneService;
+      recordProfileOpeningObserved?(delivery: NativeProfileOpeningDelivery): void;
       sourceReader?: MemoryCueSourceReader;
       validateContextSource?(
         opportunityId: string,
@@ -313,5 +316,9 @@ export class MemoryCueInvocationPromptService implements MemoryCueInvocationProm
   ): Promise<void> {
     await this.deps.plane.recordPresented(receipts, confirmation);
     this.deps.onProviderCommitted?.(receipts, confirmation);
+  }
+
+  async recordProfileOpeningObserved(delivery: NativeProfileOpeningDelivery): Promise<void> {
+    this.deps.recordProfileOpeningObserved?.(delivery);
   }
 }

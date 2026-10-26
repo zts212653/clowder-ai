@@ -72,7 +72,17 @@ export async function executeMessageSearch(
   };
   reply.raw.once('close', disconnect);
   try {
-    return await service.search(input, principal, { signal: controller.signal, deadlineAt });
+    return await service.search(input, principal, {
+      signal: controller.signal,
+      deadlineAt,
+      onTrace: (trace) => {
+        try {
+          reply.log.info({ messageSearchTrace: trace }, 'Message search execution');
+        } catch {
+          /* Logging does not own search outcome. */
+        }
+      },
+    });
   } catch (error) {
     if (error instanceof MessageSearchAccessError) {
       reply.status(error.statusCode);

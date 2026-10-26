@@ -10,6 +10,7 @@ import {
   peekPendingCrossPostScroll,
   setPendingCrossPostScroll,
 } from '@/utils/crosspost-scroll-target';
+import { loadThreadMessages } from '@/utils/offline-store';
 import { __resetPendingTeleportForTest, peekPendingTeleport, setPendingTeleport } from '@/utils/teleport';
 import { useChatHistory } from '../useChatHistory';
 
@@ -141,6 +142,88 @@ describe('useChatHistory approval-card teleport refresh', () => {
     const historyCall = apiFetchMock.mock.calls.find(([url]) => String(url).startsWith('/api/messages?'));
     expect(historyCall?.[0]).toBe(`/api/messages?limit=50&threadId=${THREAD_ID}`);
     expect(useChatStore.getState().messages.map((message) => message.id)).toContain(APPROVAL_CARD.id);
+    expect(peekPendingTeleport(THREAD_ID)).toBeNull();
+  });
+
+  it('keeps a cold-thread source target until fresh history can page back to it', async () => {
+    useChatStore.setState({ messages: [], hasMore: false, threadStates: {} });
+    setPendingTeleport({ threadId: THREAD_ID, messageId: CACHED_MESSAGE.id });
+    apiFetchMock.mockImplementation(async (input) => {
+      const url = new URL(String(input), 'http://localhost');
+      if (url.pathname === '/api/messages') {
+        const older = url.searchParams.has('before');
+        return {
+          ok: true,
+          json: async () => ({
+            messages: older ? [CACHED_MESSAGE] : [APPROVAL_CARD, CROSS_POST_SOURCE],
+            hasMore: !older,
+          }),
+        } as Response;
+      }
+      return { ok: true, json: async () => ({}) } as Response;
+    });
+
+    await act(async () => {
+      root.render(React.createElement(HookHost));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const historyUrls = apiFetchMock.mock.calls
+      .map(([url]) => new URL(String(url), 'http://localhost'))
+      .filter((url) => url.pathname === '/api/messages');
+    expect(historyUrls.map((url) => url.searchParams.get('before'))).toEqual([null, '2:new-approval-card']);
+    expect(useChatStore.getState().messages.map((message) => message.id)).toContain(CACHED_MESSAGE.id);
+    expect(peekPendingTeleport(THREAD_ID)).toBeNull();
+  });
+
+  it('does not treat an unread cold-thread snapshot as an authoritative missing source', async () => {
+    useChatStore.setState({ messages: [], hasMore: false, threadStates: {} });
+    let finishSnapshot: (value: null) => void = () => {};
+    const snapshot = new Promise<null>((resolve) => {
+      finishSnapshot = resolve;
+    });
+    vi.mocked(loadThreadMessages).mockReturnValueOnce(snapshot);
+    setPendingTeleport({ threadId: THREAD_ID, messageId: APPROVAL_CARD.id });
+
+    await act(async () => {
+      root.render(React.createElement(HookHost));
+    });
+    const pendingBeforeSnapshot = peekPendingTeleport(THREAD_ID);
+    const requestedHistoryBeforeSnapshot = apiFetchMock.mock.calls.some(([url]) =>
+      String(url).startsWith('/api/messages?'),
+    );
+    await act(async () => {
+      finishSnapshot(null);
+    });
+
+    expect(requestedHistoryBeforeSnapshot).toBe(false);
+    expect(pendingBeforeSnapshot?.messageId).toBe(APPROVAL_CARD.id);
+    expect(useChatStore.getState().messages.map((message) => message.id)).toContain(APPROVAL_CARD.id);
+  });
+
+  it('finishes an absent cold-thread target after an authoritative empty page arrives', async () => {
+    useChatStore.setState({ messages: [], hasMore: false, threadStates: {} });
+    let finishHistory: (value: Response) => void = () => {};
+    const history = new Promise<Response>((resolve) => {
+      finishHistory = resolve;
+    });
+    apiFetchMock.mockImplementation(async (input) =>
+      String(input).startsWith('/api/messages?') ? history : ({ ok: true, json: async () => ({}) } as Response),
+    );
+    setPendingTeleport({ threadId: THREAD_ID, messageId: 'missing-source' });
+
+    await act(async () => {
+      root.render(React.createElement(HookHost));
+    });
+    const pendingBeforeHistory = peekPendingTeleport(THREAD_ID);
+    await act(async () => {
+      finishHistory({ ok: true, json: async () => ({ messages: [], hasMore: false }) } as Response);
+    });
+
+    expect(pendingBeforeHistory?.messageId).toBe('missing-source');
+    expect(useChatStore.getState().messages).toEqual([]);
+    expect(useChatStore.getState().hasMore).toBe(false);
     expect(peekPendingTeleport(THREAD_ID)).toBeNull();
   });
 

@@ -129,6 +129,39 @@ test('missing scope index rebuilds from Task and close retires only the open ind
   assert.ok(await store.get(first.task.id));
 });
 
+test('a cold absent scope stays inside the callback budget beyond the production task count', { skip }, async (t) => {
+  const seed = redis.pipeline();
+  for (let index = 0; index < 4_485; index++) {
+    const id = `scale-${index}`;
+    seed.hset(`task:${id}`, {
+      id,
+      kind: 'work',
+      threadId: 'unrelated-thread',
+      title: id,
+      ownerCatId: 'codex-sol',
+      status: 'doing',
+      why: '',
+      createdBy: 'codex-sol',
+      createdAt: String(index + 1),
+      updatedAt: String(index + 1),
+      userId: actor.userId,
+      resolveMode: '',
+    });
+    seed.zadd('tasks:kind:work', index + 1, id);
+  }
+  const seeded = await seed.exec();
+  assert.equal(seeded?.length, 8_970);
+  assert.ok(seeded?.every(([error]) => !error));
+
+  const startedAt = performance.now();
+  const matches = await new RedisTaskStore(redis).findDevelopmentWork(actor.userId, command('scale-miss').scope);
+  const elapsedMs = performance.now() - startedAt;
+
+  assert.deepEqual(matches, []);
+  assert.ok(elapsedMs < 2_000, `cold absent-scope lookup took ${elapsedMs.toFixed(1)}ms`);
+  t.diagnostic(JSON.stringify({ taskCount: 4_485, elapsedMs }));
+});
+
 test('scoped work history and shared thread index stay durable under an expiring generic store', { skip }, async () => {
   const store = new RedisTaskStore(redis, { ttlSeconds: 60 });
   const input = command('durable-history');

@@ -12,6 +12,9 @@ export const { createRoutingContextRuntime } = await import(
 const { buildRoutingSignalDecisionProjection } = await import(
   '../../dist/domains/routing-context/preflight/RoutingSignalDecisionProjection.js'
 );
+const { projectRoutingPreferenceHeads } = await import(
+  '../../dist/domains/routing-context/preflight/RoutingPreferenceDecisionProjection.js'
+);
 export const ownerId = 'issue-1438-owner';
 export const primaryCatId = 'issue-1438-primary';
 export const secondaryCatId = 'issue-1438-secondary';
@@ -49,6 +52,7 @@ export function fixture(t, { signals = [], preferences = [], members = configs }
     buildRoutingSignalDecisionProjection({ ownerId, revision: signals.length, events: signals }),
   );
   t.mock.method(runtime.signalStore, 'listByOwner', async () => signals);
+  t.mock.method(runtime.preferenceStore, 'readDecisionHeads', async () => projectRoutingPreferenceHeads(preferences));
   t.mock.method(runtime.preferenceStore, 'listByOwner', async () => preferences);
   return { runtime, projectRoot };
 }

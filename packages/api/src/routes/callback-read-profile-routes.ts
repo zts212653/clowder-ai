@@ -6,6 +6,7 @@
  */
 
 import { PROFILE_UPDATE_TARGET_LAYERS } from '@cat-cafe/shared';
+import { CURRENT_CAPSULE_PROFILE_URI } from '@cat-cafe/shared/profile-contract';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { FileProfileRepository } from '../domains/cats/services/profile/ProfileRepository.js';
@@ -45,27 +46,31 @@ export function registerCallbackReadProfileRoutes(app: FastifyInstance, deps: Ca
       };
     }
 
-    if (layer === 'corpus') {
+    if (layer === 'corpus' || layer === 'capsule') {
+      const uri = layer === 'capsule' ? CURRENT_CAPSULE_PROFILE_URI : deps.repository.currentCorpusUri();
       try {
-        const corpus = deps.repository.readCorpus(principal.userId);
+        const corpus =
+          layer === 'capsule'
+            ? deps.repository.readCapsule(principal.userId)
+            : deps.repository.readCorpus(principal.userId);
         if (!corpus) {
-          profilePointerMissing.add(1, { 'profile.layer': 'corpus' });
+          profilePointerMissing.add(1, { 'profile.layer': layer });
           reply.status(404);
-          return { error: 'no_corpus', uri: deps.repository.currentCorpusUri() };
+          return { error: `no_${layer}`, uri };
         }
         if (expectedRevision && corpus.revision !== expectedRevision) {
           return reply.status(409).send({ error: 'profile_revision_changed' });
         }
-        profilePointerResolved.add(1, { 'profile.layer': 'corpus' });
+        profilePointerResolved.add(1, { 'profile.layer': layer });
         return {
-          layer: 'corpus',
-          uri: deps.repository.currentCorpusUri(),
+          layer,
+          uri,
           content: corpus.content,
           revision: corpus.revision,
         };
       } catch {
         reply.status(503);
-        return { error: 'corpus_target_unavailable', uri: deps.repository.currentCorpusUri() };
+        return { error: `${layer}_target_unavailable`, uri };
       }
     }
 

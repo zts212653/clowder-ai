@@ -10,6 +10,16 @@ export const TRUSTED_CHROME_SETUP_DELIVERY = Object.freeze({
   digest: 'sha512-JaN+5NroQcz6r0qyocd9AeS5GZNAUqZLdbGeVVgr8tTTWsGmE5XD3Bds8+tND2WbeGOcUWx/im5iyULAFilA2A==',
 });
 
+// Published alpha.6: SHA256 953f83f057c926f74c35e02c3fbe5e7a19087a77de50f2626e357c6a599f9b22.
+// Review and fresh-consumer setup exercise the exact archive, not catalog/name-based HOME authority.
+export const TRUSTED_CHROME_SETUP_DELIVERIES = Object.freeze([
+  TRUSTED_CHROME_SETUP_DELIVERY,
+  Object.freeze({
+    version: '0.1.0-alpha.6',
+    digest: 'sha512-ypOOdp+jONUH1H9W9qbOLLZVyZ8gXZPs0w4aWuHpTbwhdn1PUIrK4f/DsKwmNyHcrGyq4oF1izrgjC8z8NhN4A==',
+  }),
+]);
+
 /** Routing is not authorization: both projection and execution resolve the policy below. */
 export function isChromeSetupRequest(pluginId: string, key: string): boolean {
   return pluginId === PLUGIN_ID && key === OPERATION_KEY;
@@ -20,10 +30,11 @@ export function chromeSetupPolicy(record: PluginPackageRecord): ContractOperatio
   if (
     record.packageState !== 'installed' ||
     record.pluginId !== PLUGIN_ID ||
-    record.version !== TRUSTED_CHROME_SETUP_DELIVERY.version ||
-    record.packageDigest !== TRUSTED_CHROME_SETUP_DELIVERY.digest ||
     record.manifest?.pluginId !== PLUGIN_ID ||
-    record.manifest.version !== TRUSTED_CHROME_SETUP_DELIVERY.version
+    record.manifest.version !== record.version ||
+    !TRUSTED_CHROME_SETUP_DELIVERIES.some(
+      ({ version, digest }) => record.version === version && record.packageDigest === digest,
+    )
   )
     return;
   return {

@@ -13,7 +13,7 @@ import type {
   CrossThreadCoordination,
   WorldContextEnvelope,
 } from '@cat-cafe/shared';
-import { catRegistry } from '@cat-cafe/shared';
+import { catRegistry, collectRosterFamilyLabels, formatRosterLabel } from '@cat-cafe/shared';
 import { getDossierL0Pronouns, getDossierRosterSummary, hasDossierEntry } from '@cat-cafe/shared/dossier';
 import { isCatAvailable } from '../../../../config/cat-config-loader.js';
 import { getCatModel } from '../../../../config/cat-models.js';
@@ -367,12 +367,9 @@ export function buildTeammateRoster(currentCatId: CatId, projectRoot = findMonor
   if (entries.length === 0) return null;
 
   const rows: string[] = [];
+  const familyLabels = collectRosterFamilyLabels(entries.map(([, config]) => config));
   for (const [id, config] of entries) {
-    const label = config.variantLabel
-      ? `${config.displayName} ${config.variantLabel}`
-      : config.nickname
-        ? `${config.displayName}/${config.nickname}`
-        : config.displayName;
+    const label = formatRosterLabel(config, familyLabels);
     const pronouns = getDossierL0Pronouns(id, projectRoot)?.split('/')[0]?.trim();
     const rosterLabel = pronouns ? `${config.nickname ?? label}（${pronouns}）` : label;
     const mention = pickVariantMention(id, config);

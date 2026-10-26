@@ -13,7 +13,7 @@ function approvalCardRef(proposal: ProfileUpdateProposal): ApprovalCardRef | und
 
 export async function readProfileMemoryProposals(
   ownerUserId: string,
-  entry: StoredProfileMemoryEntry,
+  entry: Pick<StoredProfileMemoryEntry, 'targetPath'>,
   store: ProfileMemoryProposalReader,
 ): Promise<ProfileMemoryProposalView[]> {
   const proposals = await store.listByTarget(ownerUserId, entry.targetPath, 100);

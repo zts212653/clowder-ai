@@ -27,7 +27,9 @@ export class ProfileCueResolver implements MemoryCueResolver {
   async resolve(opportunity: RecallOpportunityV1, context: MemoryCueResolverContext) {
     if (opportunity.kind === 'fresh_context_sources' || opportunity.kind === 'authorized_task_sources') {
       if (!context.consumerCatId || !this.primerSource) return [];
-      const source = this.primerSource.resolvePrimer(opportunity.scope.ownerUserId, context.consumerCatId);
+      const source = this.primerSource.resolvePrimer(opportunity.scope.ownerUserId, context.consumerCatId, {
+        opening: opportunity.kind === 'fresh_context_sources',
+      });
       if (!source) {
         context.recordOmission?.('source_unavailable');
         return [];

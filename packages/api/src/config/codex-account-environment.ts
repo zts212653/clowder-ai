@@ -1,6 +1,7 @@
 import { readCodexAccountIdentity, sameCodexIdentity } from './codex-account-identity.js';
 import type { CodexAccountLaunchDescriptor } from './codex-account-launch.js';
 import { codexCanonicalPath } from './codex-account-launch.js';
+import { withoutUnreviewedCodexEnvironment } from './codex-env-namespace.js';
 import {
   codexCliConfig,
   codexConfigRecord,
@@ -122,6 +123,8 @@ export function validateCodexOAuthConfig(config: Record<string, unknown>): void 
 // Serialized Option::None fields from pinned ModelProviderInfo are absent inputs, not overrides.
 const NATIVE_UNSET_PROVIDER_FIELDS = new Set([
   'base_url',
+  // 0.164.0 serializes this new Option field as null on every provider; a set value still conflicts.
+  'capabilities',
   'model_catalog_url',
   'env_key',
   'env_key_instructions',
@@ -235,6 +238,7 @@ export function finalizeCodexAccountEnvironment(
         : null,
   };
   if (descriptor.authMode === 'auto') return env;
+  if (descriptor.managed && descriptor.authMode === 'oauth') Object.assign(env, withoutUnreviewedCodexEnvironment(env));
   for (const key of ALTERNATIVE_CREDENTIAL_ENV) env[key] = null;
   // The composed environment alone cannot distinguish selected routing from another account's ambient fields.
   for (const key of API_ACCOUNT_ENV)

@@ -1,5 +1,6 @@
 import type Database from 'better-sqlite3';
 import { buildProgressiveFtsQueries } from './fts-query-builder.js';
+import { observeCjkRead } from './message-cjk-read-diagnostics.js';
 import { messageLiteralRelevance } from './message-literal-relevance.js';
 import type { MessagePassageSearchOptions } from './message-passage-search-types.js';
 import type { PassageResult } from './SqliteEvidenceStore.js';
@@ -53,11 +54,16 @@ export function lexicalMessagePassages(
   if (anchors.size === 0) return [];
   const filter = messageFilters(options, anchors);
   const literal = messageLiteralRelevance(query);
+  const cjk = literal && options.onCjkRead ? observeCjkRead(options.onCjkRead) : undefined;
   if (literal) {
     // Connection-local functions are rebound during this synchronous query;
     // registration writes no schema/data and also works in read-only workers.
     db.function('message_literal_coverage', { deterministic: true }, literal.coverageFolded);
-    db.function('message_cjk_match', { deterministic: true }, literal.matchesChineseFolded);
+    db.function(
+      'message_cjk_match',
+      { deterministic: true },
+      cjk?.wrap(literal.matchesChineseFolded) ?? literal.matchesChineseFolded,
+    );
   }
   const ranked = options.sort === 'relevance' ? literal : undefined;
   const literalColumns = ranked ? `${ranked.selectSql},` : '';
@@ -82,11 +88,23 @@ export function lexicalMessagePassages(
   // unicode61 treats a continuous Chinese sentence as one token. Recover
   // literal message substrings without changing the shared FTS index/tokenizer.
   if (literal) {
-    const extra = db
-      .prepare(`SELECT ${columns}, ${literalColumns} 0 AS rank
+    // SQLite may run the matcher before other WHERE terms. CASE keeps rejected
+    // bodies out of the callback; the outer filter retains native index choices.
+    // Numbered parameters reuse the same bindings in both copies of the filter.
+    const rankedParams = ranked?.params ?? [];
+    let parameter = rankedParams.length;
+    const admitted = filter.sql.replace(/\?/g, () => `?${++parameter}`);
+    const bindings = Object.fromEntries(
+      filter.params.map((value, index) => [String(rankedParams.length + index + 1), value]),
+    );
+    const readExtra = () =>
+      db
+        .prepare(`SELECT ${columns}, ${literalColumns} 0 AS rank
       FROM evidence_passages p JOIN evidence_docs d ON d.anchor = p.doc_anchor
-      WHERE message_cjk_match(LOWER(p.content)) AND ${filter.sql} ORDER BY ${order} LIMIT ?`)
-      .all(...(ranked?.params ?? []), ...filter.params, pool + 1) as PassageRow[];
+      WHERE ${admitted} AND CASE WHEN ${admitted}
+        THEN message_cjk_match(LOWER(p.content)) ELSE 0 END ORDER BY ${order} LIMIT ?`)
+        .all(bindings, ...rankedParams, pool + 1) as PassageRow[];
+    const extra = cjk ? cjk.read(readExtra) : readExtra();
     // FTS wins duplicate identities, retaining BM25 as the final score tie-breaker.
     rows = [
       ...new Map([...extra, ...rows].map((row) => [JSON.stringify([row.docAnchor, row.passageId]), row])).values(),

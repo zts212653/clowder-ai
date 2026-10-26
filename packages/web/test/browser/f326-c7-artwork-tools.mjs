@@ -10,6 +10,7 @@ import {
   startF309OrdinaryWorkspaceJourney,
   stopF309OrdinaryWorkspaceJourney,
 } from './f309-ordinary-workspace-journey-runtime.mjs';
+import { checkF326MediaPreviews } from './f326-c-media-previews.mjs';
 import { decodedSeek } from './f326-screening-journey.harness.mjs';
 
 export function registerF326C7ArtworkToolsJourney() {
@@ -40,11 +41,14 @@ export function registerF326C7ArtworkToolsJourney() {
         },
       };
       try {
-        const sourceCovers = process.env.F326_C7_COVER_DIR
-          ? ['cat-planet-cover-landscape-1920x1080.png', 'cat-planet-cover-portrait-1080x1440.png'].map((name) =>
-              path.join(process.env.F326_C7_COVER_DIR, name),
-            )
-          : ['antig-opus.png', 'codex.png'].map((name) => path.resolve(WEB_ROOT, '../../assets/avatars', name));
+        const sourceCovers =
+          process.env.F326_C_MEDIA_COVER_LANDSCAPE && process.env.F326_C_MEDIA_COVER_PORTRAIT
+            ? [process.env.F326_C_MEDIA_COVER_LANDSCAPE, process.env.F326_C_MEDIA_COVER_PORTRAIT]
+            : process.env.F326_C7_COVER_DIR
+              ? ['cat-planet-cover-landscape-1920x1080.png', 'cat-planet-cover-portrait-1080x1440.png'].map((name) =>
+                  path.join(process.env.F326_C7_COVER_DIR, name),
+                )
+              : ['antig-opus.png', 'codex.png'].map((name) => path.resolve(WEB_ROOT, '../../assets/avatars', name));
         const imageNames = sourceCovers.map((_source, i) => `c7-cover-${i}.png`);
         for (const [i, source] of sourceCovers.entries())
           await copyFile(source, path.join(path.dirname(fixture.absolute), imageNames[i]));
@@ -97,17 +101,24 @@ export function registerF326C7ArtworkToolsJourney() {
         );
         result.frame = await decodedSeek(video, Math.min(5, duration / 3));
         const toolbar = dialog.getByTestId('artwork-annotation-toolbar');
-        const geometry = () =>
-          toolbar.evaluate((node) => ({
-            height: node.getBoundingClientRect().height,
-            buttons: [...node.querySelectorAll(':scope > button')].map((button) => ({
-              text: button.textContent,
-              icon: button.querySelectorAll('svg').length,
-              height: button.getBoundingClientRect().height,
-              fontSize: getComputedStyle(button).fontSize,
-              fontWeight: getComputedStyle(button).fontWeight,
-            })),
-          }));
+        const geometry = async () =>
+          toolbar.evaluate(
+            (node, stage) => ({
+              height: node.getBoundingClientRect().height,
+              centerOffset:
+                (node.getBoundingClientRect().left + node.getBoundingClientRect().right) / 2 -
+                stage.x -
+                stage.width / 2,
+              buttons: [...node.querySelectorAll(':scope > button')].map((button) => ({
+                text: button.textContent,
+                icon: button.querySelectorAll('svg').length,
+                height: button.getBoundingClientRect().height,
+                fontSize: getComputedStyle(button).fontSize,
+                fontWeight: getComputedStyle(button).fontWeight,
+              })),
+            }),
+            await surface.getByTestId('review-media-stage').boundingBox(),
+          );
         result.videoTools = await geometry();
         assert.deepEqual(
           result.videoTools.buttons.map((x) => x.text),
@@ -115,6 +126,24 @@ export function registerF326C7ArtworkToolsJourney() {
         );
         assert.ok(result.videoTools.buttons.every((x) => x.icon === 1));
         await page.screenshot({ path: path.join(evidence, 'video-zh.png') });
+        // The brush lives in the same group's menu. Its centre must be the real pointer target,
+        // not something painted over it (gallery strip) or clipped away by the composer panel.
+        const more = toolbar.locator('summary[aria-label="更多视频工具"]');
+        await more.click();
+        const brushInMenu = toolbar.getByRole('button', { name: '画笔', exact: true });
+        await brushInMenu.waitFor();
+        result.videoMoreBrush = await brushInMenu.evaluate((node) => {
+          const box = node.getBoundingClientRect();
+          const at = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
+          return {
+            hit: node.contains(at),
+            target: at ? `${at.tagName.toLowerCase()}${at.dataset.testid ? `[${at.dataset.testid}]` : ''}` : null,
+            box: { top: box.top, bottom: box.bottom, left: box.left, right: box.right },
+          };
+        });
+        await page.screenshot({ path: path.join(evidence, 'video-more-zh.png') });
+        assert.ok(result.videoMoreBrush.hit, JSON.stringify(result.videoMoreBrush));
+        await more.click();
         const language = async (value) =>
           page.evaluate((value) => {
             localStorage.setItem('cat-cafe:shell-language', value);
@@ -127,6 +156,8 @@ export function registerF326C7ArtworkToolsJourney() {
         await surface.locator('img[data-testid="workspace-content-review-media"]').evaluate((img) => img.decode());
         await toolbar.getByRole('button', { name: 'Brush', exact: true }).waitFor();
         result.imageTools = await geometry();
+        assert.ok(Math.abs(result.videoTools.centerOffset) < 2, JSON.stringify(result.videoTools));
+        assert.ok(Math.abs(result.imageTools.centerOffset) < 2, JSON.stringify(result.imageTools));
         assert.deepEqual(
           result.imageTools.buttons.map((x) => x.text),
           ['Select', 'Brush'],
@@ -146,7 +177,7 @@ export function registerF326C7ArtworkToolsJourney() {
           return node && node.readyState >= 2 && node.seekable.length > 0 && !node.seeking;
         });
         result.returnedFrame = await decodedSeek(video, Math.min(6, duration / 2));
-        const circle = async (left, right) => {
+        const circle = async (left, right, words = '隔离验证标记') => {
           await toolbar.getByRole('button', { name: '圈这一帧', exact: true }).click();
           const rect = await surface.getByTestId('review-media-stage').boundingBox();
           assert.ok(rect?.height > 100);
@@ -154,11 +185,24 @@ export function registerF326C7ArtworkToolsJourney() {
           await page.mouse.down();
           await page.mouse.move(rect.x + rect.width * right, rect.y + rect.height * 0.55, { steps: 6 });
           await page.mouse.up();
-          await page.getByRole('textbox', { name: '这处的话', exact: true }).fill('隔离验证标记');
+          await page.getByRole('textbox', { name: '这处的话', exact: true }).fill(words);
           await page.getByRole('button', { name: '保留', exact: true }).click();
         };
-        await circle(0.2, 0.4);
-        await circle(0.6, 0.8);
+        await circle(0.2, 0.4, '这只猫的表情再明显一点');
+        const secondSeconds = Math.min(42, duration * 0.5);
+        await decodedSeek(video, secondSeconds);
+        await circle(0.6, 0.8, '报告标题停留久一点');
+        result.mediaPreviews = await checkF326MediaPreviews({
+          page,
+          surface,
+          toolbar,
+          dialog,
+          video,
+          evidence,
+          duration,
+          circle,
+          language,
+        });
         const group = page.getByTestId('gallery-composer-group');
         const marks = surface.getByTestId('review-pending-chat-mark');
         assert.equal(await marks.count(), 2);
@@ -216,7 +260,7 @@ export function registerF326C7ArtworkToolsJourney() {
         const heldVideo = await work.locator('video').elementHandle();
         await page.waitForFunction(
           ({ video, seconds }) => !video.seeking && Math.abs(video.currentTime - seconds) < 1 / 30,
-          { video: heldVideo, seconds: Math.min(6, duration / 2) },
+          { video: heldVideo, seconds: secondSeconds },
         );
         await page.waitForFunction(
           (button) => !button.disabled,

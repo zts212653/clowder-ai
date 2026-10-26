@@ -1,3 +1,4 @@
+import { getFeatureDemo } from '@cat-cafe/shared';
 import type { FeatureDemoSession } from '@/stores/featureDemoStore';
 import { recordCapabilityTipEvent } from './capabilityTipEvents';
 
@@ -21,7 +22,8 @@ export function recordFeatureDemoStage(session: FeatureDemoSession, stage: Featu
   if (!accepted) return;
   stages.add(stage);
   recorded.set(session, stages);
-  if (stage === 'completed') {
+  // Only a film with a product use signal keeps its completion; watching another film must not erase it.
+  if (stage === 'completed' && getFeatureDemo(session.demoId)?.useSignal) {
     try {
       sessionStorage.setItem(COMPLETED_KEY, JSON.stringify({ ...session, completedAt: Date.now() }));
     } catch {
@@ -45,7 +47,8 @@ export function recordThreadProposalDemoUse(result: unknown): boolean {
     const raw = sessionStorage.getItem(COMPLETED_KEY);
     if (!raw) return false;
     const value = JSON.parse(raw) as FeatureDemoSession & { completedAt: number };
-    if (value.demoId !== 'conversation-proposals-v1' || !Number.isFinite(value.completedAt)) return false;
+    if (getFeatureDemo(value.demoId)?.useSignal !== 'f128-proposal-created' || !Number.isFinite(value.completedAt))
+      return false;
     const age = Date.now() - value.completedAt;
     if (age < 0 || age > OBSERVATION_WINDOW_MS) {
       sessionStorage.removeItem(COMPLETED_KEY);

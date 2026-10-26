@@ -1,20 +1,52 @@
+import type { LifecycleActiveRun } from '@cat-cafe/shared';
 import type { TypedWaitSource } from '../domains/ball-custody/TypedWaitRegistration.js';
 import type { InvocationRecord } from '../domains/cats/services/agents/invocation/InvocationRegistry.js';
 import type { InvocationTracker } from '../domains/cats/services/agents/invocation/InvocationTracker.js';
 import type { IMessageStore } from '../domains/cats/services/stores/ports/MessageStore.js';
 import { isOwnerVisibleManagedHoldConnector } from '../domains/cats/services/stores/visibility.js';
+import {
+  resolveSessionHandoffWaitSource,
+  type SessionHandoffWaitSourceDeps,
+} from '../domains/runtime-deployment/SessionHandoffWaitSource.js';
 
 interface WaitSourceDeps {
   readonly messageStore: Pick<IMessageStore, 'getById'>;
   readonly invocationTracker?: Pick<InvocationTracker, 'getActiveSlots'>;
 }
 
-function captureActiveInputIds(auth: InvocationRecord, deps: WaitSourceDeps): readonly string[] | undefined {
+function captureActiveRun(auth: InvocationRecord, deps: WaitSourceDeps): LifecycleActiveRun | undefined {
   const activeRun = deps.invocationTracker
     ?.getActiveSlots(auth.threadId)
     .find((slot) => slot.catId === auth.catId && slot.activeRun?.invocationId === auth.invocationId)?.activeRun;
   if (!activeRun || activeRun.threadId !== auth.threadId || activeRun.targetId !== auth.catId) return undefined;
-  return [...activeRun.inputMessageIds];
+  return structuredClone(activeRun);
+}
+
+function captureActiveInputIds(auth: InvocationRecord, deps: WaitSourceDeps): readonly string[] | undefined {
+  return captureActiveRun(auth, deps)?.inputMessageIds;
+}
+
+async function captureDeploymentPrimary(
+  auth: InvocationRecord,
+  active: LifecycleActiveRun,
+  deps: SessionHandoffWaitSourceDeps,
+): Promise<Pick<TypedWaitSource, 'sourceMessageId' | 'sessionHandoff'> | undefined> {
+  const sourceMessageId = auth.originTriggerMessageId;
+  if (sourceMessageId) return active.inputMessageIds.includes(sourceMessageId) ? { sourceMessageId } : undefined;
+  const ref = active.sessionHandoff;
+  if (
+    !ref ||
+    !active.privateInputEntryIds.includes(ref.continuationEntryId) ||
+    !active.inputEntryIds.includes(ref.continuationEntryId)
+  )
+    return undefined;
+  const source = await resolveSessionHandoffWaitSource(ref, auth, deps);
+  return source
+    ? {
+        sourceMessageId: source.sourceMessageId,
+        sessionHandoff: { ...ref, sourceSessionId: source.sourceSessionId },
+      }
+    : undefined;
 }
 
 /**
@@ -24,19 +56,23 @@ function captureActiveInputIds(auth: InvocationRecord, deps: WaitSourceDeps): re
  */
 export async function captureDeploymentWaitSource(
   auth: InvocationRecord,
-  deps: WaitSourceDeps,
+  deps: WaitSourceDeps & SessionHandoffWaitSourceDeps,
 ): Promise<TypedWaitSource | undefined> {
   try {
-    const inputMessageIds = captureActiveInputIds(auth, deps);
-    const sourceMessageId = auth.originTriggerMessageId;
-    if (!sourceMessageId || !inputMessageIds?.includes(sourceMessageId)) return undefined;
+    const active = captureActiveRun(auth, deps);
+    if (!active) return undefined;
+    const primary = await captureDeploymentPrimary(auth, active, deps);
+    if (!primary) return undefined;
+    const { sourceMessageId } = primary;
     const origin = await deps.messageStore.getById(sourceMessageId);
     if (
       !origin ||
       origin.threadId !== auth.threadId ||
       origin.userId !== auth.userId ||
       origin.deletedAt !== undefined ||
-      origin._tombstone
+      origin._tombstone ||
+      origin.recall ||
+      origin.deliveryStatus === 'canceled'
     ) {
       return undefined;
     }
@@ -50,9 +86,9 @@ export async function captureDeploymentWaitSource(
       ) {
         return undefined;
       }
-      return { kind: 'primary', sourceMessageId, holdTaskId };
+      return { kind: 'primary', ...primary, holdTaskId };
     }
-    return { kind: 'primary', sourceMessageId };
+    return { kind: 'primary', ...primary };
   } catch {
     return undefined;
   }

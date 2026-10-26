@@ -1,0 +1,46 @@
+import assert from 'node:assert/strict';
+import { test } from 'node:test';
+import type { PluginPackageRecord } from '../src/domains/plugin/host-inventory/types.js';
+import { chromeSetupPolicy } from '../src/domains/plugin/manager/chrome-setup/personal-chrome-setup-policy.js';
+
+// Immutable published alpha.6 bytes, independently checked against npm dist.integrity.
+const version = '0.1.0-alpha.6';
+const digest = 'sha512-ypOOdp+jONUH1H9W9qbOLLZVyZ8gXZPs0w4aWuHpTbwhdn1PUIrK4f/DsKwmNyHcrGyq4oF1izrgjC8z8NhN4A==';
+function record(): PluginPackageRecord & { manifest: NonNullable<PluginPackageRecord['manifest']> } {
+  return {
+    pluginId: 'official.companion.personal-chrome',
+    version,
+    packageDigest: digest,
+    contractVersion: '0.1.0',
+    packageState: 'installed',
+    signalSchemas: {},
+    verifiedAt: 1,
+    updatedAt: 1,
+    manifest: {
+      pluginId: 'official.companion.personal-chrome',
+      version,
+      name: 'Personal Chrome',
+      contractVersion: '0.1.0',
+      runtime: { transport: 'builtin', entrypoint: 'dist/plugin-entrypoint.js' },
+      features: [{ id: 'main', name: 'Main', resources: [], capabilities: [] }],
+    },
+  };
+}
+
+test('published catalog alpha.6 receives the same fixed Host setup actions', () => {
+  assert.deepEqual(
+    chromeSetupPolicy(record())?.actions.map(({ id }) => id),
+    ['inspect', 'install', 'uninstall'],
+  );
+});
+
+test('catalog identity and version never grant arbitrary bytes HOME setup authority', () => {
+  for (const delta of [
+    { packageDigest: 'sha512-unreviewed' },
+    { version: '0.1.0-alpha.7' },
+    { pluginId: 'dev.foreign.chrome' },
+    { packageState: 'quarantined' as const },
+    { manifest: { ...record().manifest, version: '0.1.0-alpha.4' } },
+  ])
+    assert.equal(chromeSetupPolicy({ ...record(), ...delta }), undefined);
+});

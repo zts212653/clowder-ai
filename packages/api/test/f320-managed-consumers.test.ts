@@ -17,18 +17,20 @@ import { buildChildEnv } from '../src/utils/cli-spawn.js';
 import { F320AccountWire } from './helpers/f320-account-wire.js';
 import { fakeL0Compiler } from './helpers/fake-l0-compiler.js';
 
-// These two producer cases exercise the measured native admission, even with a mock
-// transport. Other CI platforms still run the platform-independent layout/identity cases.
+// These two producer cases exercise the measured native admission (a real credential-free probe of
+// whatever Codex is installed), even with a mock transport. Other CI platforms still run the
+// platform-independent layout/identity cases.
 let measuredNativeAvailable = false;
 if (process.platform === 'darwin') {
   try {
-    measuredNativeAvailable =
+    measuredNativeAvailable = /^codex-cli /.test(
       execFileSync('codex', ['--version'], {
         encoding: 'utf8',
-        timeout: 2000,
+        timeout: 20_000,
         stdio: ['ignore', 'pipe', 'ignore'],
         env: { PATH: process.env.PATH, HOME: tmpdir(), CODEX_HOME: tmpdir(), NODE_ENV: 'test' },
-      }).trim() === 'codex-cli 0.159.0';
+      }).trim(),
+    );
   } catch {
     measuredNativeAvailable = false;
   }

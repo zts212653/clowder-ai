@@ -132,12 +132,39 @@ export function useHumanAuthSession(snapshot: ClientSnapshot, setSnapshot: Dispa
 
   // One browser-service request per instance; share the lane across effect replays and refreshes.
   const requestTail = useRef<Promise<void>>(Promise.resolve());
+  const binaryRequest = useCallback(async (path: string, init?: RequestInit) => {
+    if (!path.startsWith('/api/') || path.startsWith('//')) throw new Error('Invalid Service path');
+    const credential = token.current;
+    if (!credential) throw new CollectiveClientRequestError(401, '请先登录');
+    const response = await fetch(path, {
+      ...init,
+      credentials: 'same-origin',
+      headers: {
+        ...init?.headers,
+        authorization: `Bearer ${credential}`,
+        'x-collective-message-content': '1',
+      },
+    });
+    if (credential !== token.current) {
+      await response.body?.cancel();
+      throw new Error('身份已变化');
+    }
+    if (!response.ok) {
+      const result = (await response.json()) as { error?: { message?: string } };
+      throw new CollectiveClientRequestError(
+        response.status,
+        result.error?.message ?? `请求失败（${response.status}）`,
+      );
+    }
+    return response;
+  }, []);
   const request = useCallback(<Result>(path: string, init?: RequestInit): Promise<Result> => {
     const options: RequestInit = {
       ...init,
       credentials: 'same-origin',
       headers: {
         'content-type': 'application/json',
+        'x-collective-message-content': '1',
         ...(token.current ? { authorization: `Bearer ${token.current}` } : {}),
         ...init?.headers,
       },
@@ -317,7 +344,7 @@ export function useHumanAuthSession(snapshot: ClientSnapshot, setSnapshot: Dispa
     }
   }, [invitationMode, request, snapshot.phase, snapshot.providers]);
 
-  return { token, request, loadMe, invitationMode, bootstrap, authenticate, configureProvider };
+  return { token, request, binaryRequest, loadMe, invitationMode, bootstrap, authenticate, configureProvider };
 }
 
 export { CollectiveClientRequestError, collectiveClientErrorMessage } from './client-request.js';

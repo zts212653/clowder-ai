@@ -1,4 +1,8 @@
-import { collectiveRecipientSchema } from '@cat-cafe/shared';
+import {
+  type CollectiveMessageAttachment,
+  collectiveMessageAttachmentSchema,
+  collectiveRecipientSchema,
+} from '@cat-cafe/shared';
 import type { CollectiveEventEnvelope, CollectiveParticipant, CollectiveRecipient } from './client-types.js';
 import { mentionSelectionForEvent } from './participant-identity.js';
 import {
@@ -11,6 +15,7 @@ import {
 } from './shared-artifact-draft.js';
 
 export interface ComposerDraft {
+  readonly attachments?: readonly CollectiveMessageAttachment[];
   readonly body: string;
   readonly entrust?: boolean;
   readonly responseRequested?: boolean;
@@ -47,6 +52,9 @@ export function readDraft(key: string): ComposerDraft {
     const parsed = collectiveRecipientSchema.safeParse('recipient' in data ? data.recipient : undefined);
     const recipient = parsed.success ? parsed.data : { kind: 'channel' as const };
     return {
+      attachments: collectiveMessageAttachmentSchema
+        .array()
+        .safeParse('attachments' in data ? data.attachments : undefined).data,
       body: data.body,
       artifactReply: sharedArtifactDraftReplySchema.safeParse('artifactReply' in data ? data.artifactReply : undefined)
         .data,
@@ -91,12 +99,20 @@ export function clearConfirmedComposerDraft(current: ComposerDraft, draft: Compo
     current.body !== draft.body ||
     current.recipient !== draft.recipient ||
     current.replyToEventId !== draft.replyToEventId ||
+    current.attachments !== draft.attachments ||
     (current.artifactReply && current.artifactReply !== draft.artifactReply) ||
     (current.artifactRework && current.artifactRework !== draft.artifactRework) ||
     (current.artifactSelections && current.artifactSelections !== draft.artifactSelections)
   )
     return current;
   return current.replyToEventId
-    ? { ...current, body: '', artifactSelections: undefined, artifactRework: undefined, artifactReply: undefined }
+    ? {
+        ...current,
+        body: '',
+        attachments: undefined,
+        artifactSelections: undefined,
+        artifactRework: undefined,
+        artifactReply: undefined,
+      }
     : emptyDraft;
 }

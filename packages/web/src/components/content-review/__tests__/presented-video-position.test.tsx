@@ -1,4 +1,4 @@
-import { act, useRef } from 'react';
+import { act, useEffect, useRef } from 'react';
 import { createRoot } from 'react-dom/client';
 import { expect, it, vi } from 'vitest';
 import { ArtworkLightboxProvider } from '../ArtworkLightboxScope';
@@ -57,6 +57,61 @@ it('retains the same source playhead across presentation remounts, while requiri
     await act(async () => otherThread.dispatchEvent(new Event('loadedmetadata')));
     expect(otherThread.currentTime).toBe(0);
     expect(frameTime).toBeNull();
+  } finally {
+    await act(async () => root.unmount());
+    host.remove();
+    vi.restoreAllMocks();
+  }
+});
+
+it('lets an explicit place request issued before metadata win over the retained playhead', async () => {
+  (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+  const host = document.createElement('div');
+  document.body.append(host);
+  const root = createRoot(host);
+  // Like opening a composer chip: the new surface asks for that place's frame while its player is still loading.
+  function Player({ place }: { place?: number }) {
+    const video = useRef<HTMLVideoElement>(null);
+    const { seekTo } = usePresentedVideoFrame(video, '/original-media', 'review:revision-1:stream-0');
+    useEffect(() => {
+      if (place !== undefined) seekTo(place);
+    }, [place, seekTo]);
+    // biome-ignore lint/a11y/useMediaCaption: This metadata-only test player never loads media.
+    return <video ref={video} />;
+  }
+  const render = (key: string, place?: number) =>
+    act(async () =>
+      root.render(
+        <ArtworkLightboxProvider threadId="original-thread">
+          <Player key={key} place={place} />
+        </ArtworkLightboxProvider>,
+      ),
+    );
+  try {
+    await render('first');
+    const first = host.querySelector('video');
+    if (!first) throw new Error('first player missing');
+    Object.defineProperty(first, 'readyState', { value: 4 });
+    first.currentTime = 82;
+    await act(async () => first.dispatchEvent(new Event('timeupdate')));
+
+    await render('place-before-metadata', 6);
+    const placed = host.querySelector('video');
+    if (!placed) throw new Error('placed player missing');
+    vi.spyOn(placed, 'pause').mockImplementation(() => {});
+    expect(placed.currentTime).toBe(6);
+    Object.defineProperty(placed, 'readyState', { value: 1 });
+    await act(async () => placed.dispatchEvent(new Event('loadedmetadata')));
+    expect(placed.currentTime).toBe(6);
+
+    // Without an explicit request, a later remount still continues from where the person left off.
+    await render('plain-remount');
+    const plain = host.querySelector('video');
+    if (!plain) throw new Error('plain player missing');
+    vi.spyOn(plain, 'pause').mockImplementation(() => {});
+    Object.defineProperty(plain, 'readyState', { value: 1 });
+    await act(async () => plain.dispatchEvent(new Event('loadedmetadata')));
+    expect(plain.currentTime).toBe(6);
   } finally {
     await act(async () => root.unmount());
     host.remove();

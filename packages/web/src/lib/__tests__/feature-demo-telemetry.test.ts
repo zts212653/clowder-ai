@@ -33,6 +33,19 @@ describe('demo observations, never treating a try click as use', () => {
     ]);
     expect(JSON.stringify(vi.mocked(recordCapabilityTipEvent).mock.calls)).not.toContain('actual-created-thread');
   });
+  it('keeps the F128 completion when another film without a use signal is watched afterwards', () => {
+    recordFeatureDemoStage(view(), 'completed');
+    recordFeatureDemoStage(
+      {
+        demoId: 'steer-v1',
+        tipId: 'feature-author-message-disposition',
+        context: 'thinking',
+        surface: 'pending_bubble',
+      },
+      'completed',
+    );
+    expect(recordThreadProposalDemoUse({ threadId: 'created-after-both' })).toBe(true);
+  });
   it('does not count a successful approval outside the seven-day observation window', () => {
     vi.useFakeTimers();
     recordFeatureDemoStage(view(), 'completed');

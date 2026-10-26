@@ -13,7 +13,7 @@ import { ConversationViewMenu } from './shell/ConversationViewMenu';
 import { ThreadTasksButton, ThreadWorksButton } from './shell/HeaderCounts';
 import { ShellGlyph } from './shell/ShellIcons';
 import { useShellPresentation } from './shell/shell-presentation';
-import { ThreadMetadataMenu } from './shell/ThreadMetadataMenu';
+import { ThreadSettingsButton } from './shell/ThreadSettingsButton';
 import { useSettingsReadingEntry } from './shell/useSettingsSourceReturn';
 import { ThreadCatPill } from './ThreadCatPill';
 import { ThreadIndicator } from './ThreadIndicator';
@@ -94,7 +94,7 @@ export function ChatContainerHeader({
               messages={conversationViewMessages}
               queue={conversationViewQueue}
             />
-            <ThreadMetadataMenu key={`metadata:${threadId}`} threadId={threadId} />
+            <ThreadSettingsButton threadId={threadId} />
           </div>
           <div className="shell-chat-header-actions flex flex-none flex-wrap items-center justify-end gap-1 sm:gap-1.5">
             {onOpenMessageSearch && <MessageSearchButton onOpen={onOpenMessageSearch} open={messageSearchOpen} />}

@@ -1,7 +1,9 @@
 import { randomUUID } from 'node:crypto';
 import type { RedisClient } from '@cat-cafe/shared/utils';
+import { continueSettledIndex, type SettledIndexCheckpoint } from './settled-index-worker.js';
 
 export const SETTLED_INDEX_BATCH = 200;
+const SETTLED_INDEX_SCAN_COUNT = 1_000;
 export class SettledIndexPreparingError extends Error {
   readonly statusCode = 503;
   readonly code = 'APPROVAL_HISTORY_PREPARING';
@@ -16,7 +18,13 @@ export type SettledIndexSource = {
   type: 'hash' | 'string';
   entry: (raw: unknown, key: string) => Promise<SettledIndexEntry | null> | SettledIndexEntry | null;
 };
-type Progress = { cursor: string; pending: string[]; complete: boolean };
+type Progress = { cursor: string; pending: string[]; complete: boolean; batches?: number; detailReads?: number };
+const checkpoint = (progress: Progress): SettledIndexCheckpoint => ({
+  complete: progress.complete,
+  batches: progress.batches ?? 0,
+  detailReads: progress.detailReads ?? 0,
+  pendingKeys: progress.pending.length,
+});
 
 const COMMIT_BATCH = `
 if redis.call('GET', KEYS[2]) ~= ARGV[1] then return 0 end
@@ -40,23 +48,30 @@ const RELEASE = `if redis.call('GET', KEYS[1]) == ARGV[1] then return redis.call
 
 /** One resumable batch, at most 200 detail reads. Incomplete migration is unavailable, never false empty history. */
 export async function advanceSettledIndex(redis: RedisClient, source: SettledIndexSource): Promise<boolean> {
+  const result = await advanceBatch(redis, source);
+  if (!result.complete) continueSettledIndex(redis, source.progressKey, () => advanceBatch(redis, source));
+  return result.complete;
+}
+
+async function advanceBatch(redis: RedisClient, source: SettledIndexSource): Promise<SettledIndexCheckpoint> {
   const PROGRESS = source.progressKey,
     LOCK = `${PROGRESS}:lock`;
   const prior = await redis.get(PROGRESS);
   const progress: Progress = prior ? JSON.parse(prior) : { cursor: '0', pending: [], complete: false };
-  if (progress.complete) return true;
+  const priorCheckpoint = checkpoint(progress);
+  if (progress.complete) return checkpoint(progress);
   const token = randomUUID();
-  if (!(await redis.set(LOCK, token, 'PX', 30000, 'NX'))) return false;
+  if (!(await redis.set(LOCK, token, 'PX', 30000, 'NX'))) return checkpoint(progress);
   try {
     const physicalPrefix = `${redis.options.keyPrefix ?? ''}${source.prefix}`;
     if (!progress.pending.length) {
-      const pattern = physicalPrefix.replace(/[\\*?[\]]/gu, '\\$&') + '*';
+      const pattern = `${physicalPrefix.replace(/[\\*?[\]]/gu, '\\$&')}*`;
       const [cursor, keys] = await redis.scan(
         progress.cursor,
         'MATCH',
         pattern,
         'COUNT',
-        SETTLED_INDEX_BATCH,
+        SETTLED_INDEX_SCAN_COUNT,
         'TYPE',
         source.type,
       );
@@ -103,6 +118,8 @@ export async function advanceSettledIndex(redis: RedisClient, source: SettledInd
       });
     }
     progress.complete = progress.cursor === '0' && progress.pending.length === 0;
+    progress.batches = (progress.batches ?? 0) + 1;
+    progress.detailReads = (progress.detailReads ?? 0) + batch.length;
     const committed = await redis.eval(
       COMMIT_BATCH,
       keys.length,
@@ -112,7 +129,7 @@ export async function advanceSettledIndex(redis: RedisClient, source: SettledInd
       JSON.stringify(progress),
       JSON.stringify(entries),
     );
-    return Number(committed) === 1 && progress.complete;
+    return Number(committed) === 1 ? checkpoint(progress) : priorCheckpoint;
   } finally {
     await redis.eval(RELEASE, 1, LOCK, token);
   }

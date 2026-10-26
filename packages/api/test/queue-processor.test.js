@@ -2006,7 +2006,8 @@ describe('QueueProcessor over the source-row pending Queue', () => {
     assert.equal((await harness.processor.processNext('thread-1', 'user-1')).started, true);
     await waitFor(() => harness.queue.getEntrySnapshot('thread-1', 'user-1', callerWake.entry.id) === null);
     assert.match(observedPrompts[1], /→ worker: completed/);
-    assert.match(observedPrompts[1], /worker finished/);
+    assert.match(observedPrompts[1], new RegExp(`response=${responseId}`));
+    assert.doesNotMatch(observedPrompts[1], /worker finished/);
 
     const nextCallerWake = await admitMessage(harness, { targetCats: ['caller'] });
     assert.equal((await harness.processor.processNext('thread-1', 'user-1')).started, true);
@@ -2109,13 +2110,15 @@ describe('QueueProcessor over the source-row pending Queue', () => {
     const firstWake = await admitMessage(harness, { targetCats: ['caller'] });
     assert.equal((await harness.processor.processNext('thread-1', 'user-1')).started, true);
     await waitFor(() => harness.queue.getEntrySnapshot('thread-1', 'user-1', firstWake.entry.id) === null);
-    assert.match(observedPrompts[0], /worker finished/);
+    assert.match(observedPrompts[0], new RegExp(`response=${response.id}`));
+    assert.doesNotMatch(observedPrompts[0], /worker finished/);
     assert.equal(registry.list({ ownerId: 'user-1', threadId: 'thread-1', callerCatId: 'caller' }).length, 1);
 
     const secondWake = await admitMessage(harness, { targetCats: ['caller'] });
     assert.equal((await harness.processor.processNext('thread-1', 'user-1')).started, true);
     await waitFor(() => harness.queue.getEntrySnapshot('thread-1', 'user-1', secondWake.entry.id) === null);
-    assert.match(observedPrompts[1], /worker finished/);
+    assert.match(observedPrompts[1], new RegExp(`response=${response.id}`));
+    assert.doesNotMatch(observedPrompts[1], /worker finished/);
     assert.equal(registry.list({ ownerId: 'user-1', threadId: 'thread-1', callerCatId: 'caller' }).length, 0);
   });
 

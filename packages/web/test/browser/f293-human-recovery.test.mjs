@@ -103,8 +103,11 @@ test(
       await blocked.getByRole('button', { name: '重试这条' }).waitFor();
       assert.equal(posts, 0, 'polling terminal state never retries');
       assert.match(await blocked.innerText(), /本次未执行/);
-      assert.doesNotMatch(await blocked.innerText(), /quota_exhausted|@antigravity|可考虑/);
-      assert.match(await page.getByRole('region', { name: '人工主动尝试' }).innerText(), /仍会按你的选择尝试/);
+      assert.match(await blocked.innerText(), /近期遇到额度限制/);
+      assert.doesNotMatch(await blocked.innerText(), /quota_exhausted|Execution capacity|已恢复|@antigravity|可考虑/);
+      const proceeding = page.getByRole('region', { name: '人工主动尝试' });
+      assert.equal((await proceeding.innerText()).trim(), '', 'continuing with the requested target needs no card');
+      assert.equal(await proceeding.getByRole('button').count(), 0);
       for (const [width, theme] of [
         [1100, 'light'],
         [360, 'light'],
@@ -130,6 +133,7 @@ test(
       await blocked.getByText('这条已执行').waitFor();
       await page.reload({ waitUntil: 'networkidle' });
       await page.getByText('这条已执行').waitFor();
+      assert.equal((await proceeding.innerText()).trim(), '', 'old advisory cards stay hidden after history reload');
       assert.equal(posts, 1, 'refreshing completed history does not replay it');
       assert.deepEqual(pageErrors, []);
     } finally {

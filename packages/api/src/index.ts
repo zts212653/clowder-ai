@@ -2771,6 +2771,8 @@ async function main(): Promise<void> {
   const deploymentWaitStartGuard = new DeploymentWaitStartGuard({
     taskStore,
     messageStore,
+    handoffProposalStore,
+    sessionChainStore,
     observationProvider: runtimeDeploymentContext?.provider ?? { observe: async () => null },
   });
   const queueProcessor = new QueueProcessor(
@@ -3366,12 +3368,23 @@ async function main(): Promise<void> {
     });
   }
   // F200 Phase B: Recall metrics API
+  const recallOwnerMessageSources = {
+    tasteSources: {
+      ownerUserId: privateUserId,
+      repository: tasteRepository,
+      lifecycle: tasteMemoryLifecycleStore,
+      sourceReaders: { proposalStore: tasteProposalStore, threadStore, messageStore },
+    },
+    eventSources: { store: memoryServices.eventMemoryStore, sourceReaders: eventMemorySourceReaders },
+  };
   await app.register(recallMetricsRoutes, {
     evidenceDb: memoryServices.store.getDb(),
     messageStore,
     threadStore,
     ...(personMemoryStore ? { personMemoryStore } : {}),
     cueSourceReader: memoryCueRuntime.sourceReader,
+    profileMemoryStore: profileMemoryLifecycleStore,
+    ...recallOwnerMessageSources,
   });
   const { memoryCueInvocationReadRoutes } = await import('./routes/memory-cue-invocation-read.js');
   await app.register(memoryCueInvocationReadRoutes, {
@@ -5271,6 +5284,7 @@ async function main(): Promise<void> {
   const personalChromeSetup = new PersonalChromeSetup({
     inventory: pluginRuntime.inventoryStore,
     packages: pluginRuntime.packages,
+    materializer: new FilesystemBuiltinPluginPackageMaterializer({ packagesRoot: pluginRuntime.paths.packagesRoot }),
     lifecycle: pluginRuntime.lifecycle,
     projectRoot: pluginRuntime.projectRoot,
   });
@@ -5726,6 +5740,7 @@ async function main(): Promise<void> {
   approvalDecisionReceipts = new ApprovalDecisionReceiptService({
     registry: approvalProducerRegistry,
     messageStore,
+    invocationTracker,
     outbox: new ApprovalDecisionReceiptOutbox(schedulerDb),
     logger: app.log,
   });
@@ -6996,12 +7011,14 @@ async function main(): Promise<void> {
       searchSources: { tasteRepository, messageSearchService },
       brakeSources: { eventMemoryStore: memoryServices.eventMemoryStore, threadStore, messageStore },
       recallSources: {
+        ...recallOwnerMessageSources,
         threadStore,
         messageStore,
         invocationRecordStore,
         turnExecutionStore,
         ...(personMemoryStore ? { personMemoryStore } : {}),
         cueSourceReader: memoryCueRuntime.sourceReader,
+        profileMemoryStore: profileMemoryLifecycleStore,
       },
       evidenceDb: memoryServices.store.getDb(),
       markerQueue: memoryServices.markerQueue,
@@ -7665,6 +7682,8 @@ async function main(): Promise<void> {
       const deploymentWaitLifecycle = new DeploymentWaitLifecycleService({
         taskStore,
         messageStore,
+        handoffProposalStore,
+        sessionChainStore,
         authorizationRegistry: registry,
         deliveryDeps,
         eventLog: waitEventLog,

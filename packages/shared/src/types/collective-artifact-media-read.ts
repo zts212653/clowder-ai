@@ -72,14 +72,15 @@ export const collectiveMediaErrorHeader = 'x-collective-media-error';
 export const collectiveMediaBufferBytes = 64 * 1024;
 export const collectiveMediaRelaySlots = 32;
 
-export function collectiveMediaResponseLength(value: CollectiveMediaDescriptor): number {
+type MediaResponse = Pick<CollectiveMediaDescriptor, 'status' | 'start' | 'end' | 'byteLength'> & { mediaType: string };
+export function collectiveMediaResponseLength(value: MediaResponse): number {
   if (value.status === 416) return 0;
   if (value.status === 206 && value.start !== undefined && value.end !== undefined) return value.end - value.start + 1;
   return value.byteLength;
 }
 
 /** Shared by the outbound Service relay and the local authenticated Host proxy. */
-export function collectiveMediaResponseHeaders(value: CollectiveMediaDescriptor): Record<string, string> {
+export function collectiveMediaResponseHeaders(value: MediaResponse): Record<string, string> {
   const headers: Record<string, string> = {
     'content-type': value.mediaType,
     'cache-control': 'private, no-store',

@@ -54,14 +54,11 @@ describe('F231 Phase E: profile corpus contract', () => {
   });
 
   describe('PROFILE_UPDATE_TARGET_LAYERS', () => {
-    it('includes both primer and corpus', () => {
+    it('includes the three owner-confirmed profile layers', () => {
       expect(PROFILE_UPDATE_TARGET_LAYERS).toContain('primer');
       expect(PROFILE_UPDATE_TARGET_LAYERS).toContain('corpus');
-      expect(PROFILE_UPDATE_TARGET_LAYERS).toHaveLength(2);
-    });
-
-    it('does NOT include capsule (gate §4: no capsule layer)', () => {
-      expect(PROFILE_UPDATE_TARGET_LAYERS).not.toContain('capsule');
+      expect(PROFILE_UPDATE_TARGET_LAYERS).toContain('capsule');
+      expect(PROFILE_UPDATE_TARGET_LAYERS).toHaveLength(3);
     });
 
     it('type-level: ProfileUpdateTargetLayer accepts primer and corpus', () => {

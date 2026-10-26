@@ -387,6 +387,11 @@ export interface LifecycleActiveRun {
   readonly inputEntryIds: readonly string[];
   readonly inputMessageIds: readonly string[];
   readonly privateInputEntryIds: readonly string[];
+  /** Only the original, approved-handoff Queue producer may supply this private source reference. */
+  readonly sessionHandoff?: {
+    readonly proposalId: string;
+    readonly continuationEntryId: string;
+  };
   readonly startedAt: number;
 }
 

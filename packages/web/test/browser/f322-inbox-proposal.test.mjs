@@ -371,9 +371,9 @@ for (const language of ['zh', 'en'])
         await page.goto(`http://127.0.0.1:${webPort}/thread/${CALENDAR_THREAD}?shell=v2`);
 
         if (width === 1440) {
-          const sidebarPin = page.locator(`[data-thread-id="${created.id}"]`).getByTestId('thread-pin-button');
+          const sidebarPin = page.locator(`[data-thread-id="${created.id}"]`).getByTestId('thread-pin-mark');
           await sidebarPin.waitFor();
-          assert.equal(await sidebarPin.getAttribute('aria-pressed'), 'true');
+          assert.equal(await sidebarPin.getAttribute('role'), 'img');
           await page.screenshot({ path: path.join(evidence, 'pin-after-refresh.png'), fullPage: true });
         }
         await page.getByTestId('mailbox-button').click();

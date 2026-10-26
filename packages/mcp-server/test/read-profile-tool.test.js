@@ -75,7 +75,7 @@ describe('cat_cafe_read_profile MCP tool', () => {
     assert.equal(readProfileInputSchema.layer.safeParse(undefined).success, true, 'layer is optional');
     assert.equal(readProfileInputSchema.layer.safeParse('primer').success, true);
     assert.equal(readProfileInputSchema.layer.safeParse('corpus').success, true);
-    assert.equal(readProfileInputSchema.layer.safeParse('capsule').success, false, 'capsule rejected');
+    assert.equal(readProfileInputSchema.layer.safeParse('capsule').success, true, 'current capsule is owner-readable');
   });
 
   test('F321 forwards the expected revision without exposing a target identity', async () => {

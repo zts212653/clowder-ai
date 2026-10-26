@@ -183,7 +183,7 @@ export function mapToPresentation(candidate: PresentationCandidate): ContextPres
   const effectiveTier: SourceTier =
     candidate.sourceTier === 'T1' && !candidate.invalidator ? 'invalid' : candidate.sourceTier;
 
-  const clueAdmitted = admitsThreadOpeningClue(candidate);
+  const clueAdmitted = historicalCluePolicy(candidate) !== null;
   const tierCeiling = effectiveTier === 'T2' && clueAdmitted ? 'clue' : TIER_CEILING[effectiveTier];
   const requested = candidate.requested === 'clue' && !clueAdmitted ? 'pointer' : candidate.requested;
   const ceilings: PresentationKind[] = [tierCeiling, requested];
@@ -232,20 +232,47 @@ export function mapToPresentation(candidate: PresentationCandidate): ContextPres
   }
 }
 
-/** The sole T2 body admission: a sourced clue for the closed F321 first-owner-message entry.
- * This never creates verified state, approval, or a general intent classifier. */
-function admitsThreadOpeningClue(candidate: PresentationCandidate): boolean {
+/** Closed historical-reference entries; neither is current state or authorization. */
+export function historicalCluePolicy(candidate: PresentationCandidate): {
+  producerOwner: 'owner_message' | 'context_epoch';
+  invalidatorOwner: 'thread_overview' | 'profile_repository';
+  consumerCatId?: string;
+} | null {
   const admission = candidate.historicalClueAdmission;
-  return (
-    candidate.epistemicCeiling === 'historical_clue' &&
-    admission !== undefined &&
+  if (
+    !admission ||
+    candidate.epistemicCeiling !== 'historical_clue' ||
+    candidate.asOf.kind !== 'version' ||
+    candidate.asOf.value !== admission.sourceRevision ||
+    candidate.invalidator?.ref !== `${admission.sourceAnchor}@${admission.sourceRevision}`
+  )
+    return null;
+  if (
     admission.entryVersion === `recall-catalog:${RECALL_OPPORTUNITY_CATALOG_VERSION}:thread_opened:owner_message` &&
     admission.policyRef === 'F321.ThreadOpeningClue' &&
     admission.sourceAnchor.startsWith('thread-overview:') &&
     candidate.subjectKey === `memory-cue:thread_overview:${admission.sourceAnchor}` &&
-    candidate.asOf.kind === 'version' &&
-    candidate.asOf.value === admission.sourceRevision &&
-    candidate.invalidator?.owner === 'thread_overview' &&
-    candidate.invalidator.ref === `${admission.sourceAnchor}@${admission.sourceRevision}`
-  );
+    candidate.invalidator.owner === 'thread_overview'
+  )
+    return { producerOwner: 'owner_message', invalidatorOwner: 'thread_overview' };
+  if (
+    admission.entryVersion !==
+      `recall-catalog:${RECALL_OPPORTUNITY_CATALOG_VERSION}:fresh_context_sources:context_epoch` ||
+    admission.policyRef !== 'F332.ProfileOpeningReference' ||
+    candidate.invalidator.owner !== 'profile_repository'
+  )
+    return null;
+  const coordinate = /^profile:opening-primer:([^:]+):([^:]+)$/.exec(admission.sourceAnchor);
+  if (!coordinate) return null;
+  try {
+    const consumerCatId = decodeURIComponent(coordinate[2]!);
+    if (
+      !consumerCatId ||
+      candidate.subjectKey !== `memory-cue:profile:${admission.sourceAnchor}:consumer:${consumerCatId}`
+    )
+      return null;
+    return { producerOwner: 'context_epoch', invalidatorOwner: 'profile_repository', consumerCatId };
+  } catch {
+    return null;
+  }
 }

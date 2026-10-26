@@ -268,6 +268,7 @@ export function useThreadRecall(options: { threadId?: string; messages?: readonl
             titleStatus: view.titleStatus,
             sourceType: view.kind ?? item.sourceType,
             href: view.href,
+            sourceUnavailableReason: view.sourceUnavailableReason,
           };
         if (!event.cueId) return item;
         if (history.status === 'error') return { ...item, href: null, titleStatus: 'unavailable' };

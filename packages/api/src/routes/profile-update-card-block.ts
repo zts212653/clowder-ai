@@ -28,9 +28,11 @@ export function buildProfileUpdateCardBlock(proposal: ProfileUpdateProposal): Ri
     kind: 'card',
     v: 1,
     title:
-      proposal.targetLayer === 'corpus'
-        ? '提议更新共享事实档案（corpus）'
-        : `提议更新 ${proposal.sourceCatId} 的关系档案（primer）`,
+      proposal.targetLayer === 'capsule'
+        ? '提议更新开场简介'
+        : proposal.targetLayer === 'corpus'
+          ? '提议更新共享事实档案（corpus）'
+          : `提议更新 ${proposal.sourceCatId} 的关系档案（primer）`,
     bodyMarkdown: renderDiff(proposal),
     tone: 'info',
     fields: [

@@ -241,55 +241,28 @@ it('renders the actual sent blocks as one gallery, with the Human body once and 
     '0 0 1440 900',
   ]);
 });
-it('keeps thumbnail numbers readable in screen pixels when the original and preview sizes differ', async () => {
-  let notifyResize: ResizeObserverCallback | undefined;
-  vi.stubGlobal(
-    'ResizeObserver',
-    class {
-      constructor(callback: ResizeObserverCallback) {
-        notifyResize = callback;
-      }
-      observe() {}
-      disconnect() {}
+it('keeps each number outside the thumbnail coordinate system while its region remains on the original pixels', async () => {
+  const original = attachment(0);
+  await render(false, [
+    {
+      ...original,
+      selections: [
+        { ...original.selections[0], selection: { kind: 'image-region', x: 1400, y: 880, width: 40, height: 20 } },
+      ],
     },
-  );
-  try {
-    const original = attachment(0);
-    await render(false, [
-      {
-        ...original,
-        selections: [
-          { ...original.selections[0], selection: { kind: 'image-region', x: 1400, y: 880, width: 40, height: 20 } },
-        ],
-      },
-    ]);
-    const image = container.querySelector('img')!;
-    let width = 128;
-    Object.defineProperties(image, {
-      naturalWidth: { value: 1440 },
-      naturalHeight: { value: 900 },
-      getBoundingClientRect: { value: () => ({ width, height: (width * 900) / 1440 }) },
-    });
-    await act(async () => image.dispatchEvent(new Event('load')));
-    const assertReadable = () => {
-      const mark = container.querySelector('[data-selection-id="3"]')!;
-      const scale = width / 1440;
-      expect(Number(mark.querySelector('circle')?.getAttribute('r')) * scale).toBeGreaterThanOrEqual(8);
-      expect(Number(mark.querySelector('text')?.getAttribute('font-size')) * scale).toBeGreaterThanOrEqual(10);
-      expect(mark.querySelector('text')?.textContent).toBe('3');
-      expect(mark.querySelector('rect')?.getAttribute('x')).toBe('1400');
-      expect(mark.querySelector('rect')?.getAttribute('width')).toBe('40');
-      const circle = mark.querySelector('circle')!;
-      expect(Number(circle.getAttribute('cx')) + Number(circle.getAttribute('r'))).toBeLessThanOrEqual(1440);
-      expect(Number(circle.getAttribute('cy')) + Number(circle.getAttribute('r'))).toBeLessThanOrEqual(900);
-    };
-    assertReadable();
-    width = 64;
-    await act(async () => notifyResize?.([], {} as ResizeObserver));
-    assertReadable();
-  } finally {
-    vi.unstubAllGlobals();
-  }
+  ]);
+  const image = container.querySelector('img')!;
+  Object.defineProperties(image, {
+    naturalWidth: { value: 1440 },
+    naturalHeight: { value: 900 },
+  });
+  await act(async () => image.dispatchEvent(new Event('load')));
+  const mark = container.querySelector('[data-testid="review-pending-chat-mark"][data-selection-id="3"]')!;
+  const number = container.querySelector('[data-testid="media-selection-number"]')!;
+  expect(number.textContent).toBe('3');
+  expect(number.closest('svg')).toBeNull();
+  expect(mark.querySelector('rect')?.getAttribute('x')).toBe('1400');
+  expect(mark.querySelector('rect')?.getAttribute('width')).toBe('40');
 });
 it('a close while the original message read is pending prevents a late reopen', async () => {
   let answer: ((response: Response) => void) | undefined;

@@ -40,7 +40,6 @@ export function ScheduleApprovalResult({
           <ApprovalMember catId={proposal.requesterCatId} />
         </header>
         <ScheduleApprovalContent proposal={proposal} />
-        <output data-testid="schedule-approval-result">{line}</output>
         {error ? <p role="alert">{error}</p> : null}
         {error || unknown || !effect ? (
           <button type="button" className="shell-focusable text-xs hover:underline" onClick={reread}>

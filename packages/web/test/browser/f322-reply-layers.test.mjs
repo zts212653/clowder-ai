@@ -7,11 +7,13 @@ import { build } from 'vite';
 import { chromium } from '../../../ppt-forge/node_modules/playwright/index.mjs';
 import { runMessageBundleNextJourney } from './f294-message-bundle-next.mjs';
 import { runActionOwnerNextJourney } from './f322-action-owner-next.mjs';
+import { runCatProfileCardJourney } from './f322-cat-profile-card.journey.mjs';
 import { registerCrossThreadLetterJourneys } from './f322-cross-thread-letter.journey.mjs';
 import { runNativeReplyNextJourney } from './f322-native-reply-next.mjs';
 import { runNarrowUserActionJourney } from './f322-native-reply-reading.mjs';
 import { runNativeReplyMotionJourney } from './f322-reply-motion.journey.mjs';
 import { runSubexecutionNextJourney } from './f322-subexecution-next.mjs';
+import { runThreadSettingsJourney } from './f322-thread-settings.journey.mjs';
 import { contrast, measureReply } from './fixtures/f322-reply-layers-metrics.mjs';
 
 /**
@@ -28,6 +30,22 @@ const fixtureRoot = path.join(webRoot, 'test/browser/fixtures');
 const origin = 'https://f322-reply-layers.test';
 const evidenceDir = process.env.REPLY_LAYERS_EVIDENCE_DIR;
 const measurements = [];
+
+test(
+  'conversation settings: header and sidebar share one drawer with linked Feature editing',
+  { timeout: 300000 },
+  async () => {
+    await runThreadSettingsJourney(browser, process.env.THREAD_SETTINGS_EVIDENCE_DIR ?? evidenceDir);
+  },
+);
+
+test(
+  'native cat card: avatar, original image, caret mention, cat view, settings and mobile sheet',
+  { timeout: 300000 },
+  async () => {
+    await runCatProfileCardJourney(browser, process.env.CAT_CARD_EVIDENCE_DIR ?? evidenceDir);
+  },
+);
 let browser, script, css;
 const startedIn = process.cwd();
 

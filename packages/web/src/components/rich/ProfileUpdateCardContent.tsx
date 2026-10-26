@@ -62,7 +62,13 @@ export function ProfileUpdateCardContent({ block, settled = false }: { block: Ri
             {t.target}
             {separator}
           </dt>
-          <dd className="inline">{block.title.includes('（corpus）') ? t.sharedProfile : t.relationshipProfile}</dd>
+          <dd className="inline">
+            {block.fields?.some((field) => field.label === '目标' && field.value === 'capsule.md')
+              ? t.openingCapsule
+              : block.title.includes('（corpus）')
+                ? t.sharedProfile
+                : t.relationshipProfile}
+          </dd>
         </div>
         <div>
           <dt className="inline text-[var(--shell-muted)]">

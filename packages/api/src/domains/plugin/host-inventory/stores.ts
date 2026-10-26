@@ -208,7 +208,8 @@ export class FilePluginInventoryStore implements PluginInventoryStore {
 
   async snapshot(): Promise<PluginInventorySnapshot> {
     await this.queue.settled();
-    return clonePluginInventorySnapshot(await this.load());
+    // Each load parses current file bytes into an unshared snapshot.
+    return this.load();
   }
 
   async transaction<T>(

@@ -4,6 +4,7 @@ import {
   type AdmittedOpportunityPresentationV1,
   type ContextPresentation,
   type ContextPresentationEnvelope,
+  historicalCluePolicy,
   mapToPresentation,
 } from '../../session/context/context-presentation.js';
 import type { DeliveryReceipt } from '../../session/context/delivery-receipt.js';
@@ -106,15 +107,18 @@ function isCurrentAdmission<TReceipt>(
   }
   if (envelope.candidate.epistemicCeiling === 'historical_clue') {
     const clue = envelope.candidate.historicalClueAdmission;
+    const policy = historicalCluePolicy(envelope.candidate);
     if (
       !clue ||
+      !policy ||
       admission.opportunityKind !== 'recall' ||
-      admission.producerOwner !== 'owner_message' ||
+      admission.producerOwner !== policy.producerOwner ||
+      (policy.consumerCatId !== undefined && policy.consumerCatId !== context.consumerCatId) ||
       admission.entryVersion !== clue.entryVersion ||
       admission.presentationPolicyRef !== clue.policyRef ||
       !admission.sourceRefs.includes(clue.sourceAnchor) ||
       !admission.invalidators.some(
-        (ref) => ref.owner === 'thread_overview' && ref.ref === `${clue.sourceAnchor}@${clue.sourceRevision}`,
+        (ref) => ref.owner === policy.invalidatorOwner && ref.ref === `${clue.sourceAnchor}@${clue.sourceRevision}`,
       )
     )
       return false;

@@ -61,6 +61,8 @@ export interface ContentLandingCapabilities {
 export interface ContentReviewWorkflow {
   responseDiscussion?: ReactNode;
   videoWork?: boolean;
+  /** Display name of the already selected original work/version; not an owner coordinate. */
+  chatTitle?: string;
   playbackHidden?: boolean;
   onPlaybackTime?: (seconds: number) => void;
   chapterNavigation?: ReactNode;

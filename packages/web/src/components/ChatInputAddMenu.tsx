@@ -24,7 +24,6 @@ interface ChatInputAddMenuProps {
   whisperMode?: boolean;
   messageDisposition?: MessageDispositionPreferenceController;
   preferredCat?: ComposerPreferredCatControl;
-  hasActiveInvocation?: boolean;
 }
 
 export function ChatInputAddMenu({
@@ -39,7 +38,6 @@ export function ChatInputAddMenu({
   maxImages,
   whisperMode,
   messageDisposition,
-  hasActiveInvocation = false,
   preferredCat,
 }: ChatInputAddMenuProps) {
   const [view, setView] = useState<'root' | 'disposition'>('root');
@@ -59,7 +57,7 @@ export function ChatInputAddMenu({
       presentation={presentation}
     >
       <div id="composer-add-menu" data-testid="composer-add-menu" className="bg-cafe-surface-canvas">
-        {view === 'disposition' && hasActiveInvocation && messageDisposition ? (
+        {view === 'disposition' && messageDisposition ? (
           <MessageDispositionSelector
             controller={messageDisposition}
             onBack={() => setView('root')}
@@ -67,7 +65,7 @@ export function ChatInputAddMenu({
           />
         ) : (
           <div role="menu" aria-label={t.addContent} className="w-full overflow-hidden rounded-lg">
-            {presentation === 'v2' && hasActiveInvocation && messageDisposition ? (
+            {presentation === 'v2' && messageDisposition ? (
               <AddMenuItem
                 testId="message-disposition-trigger"
                 dispositionSource={messageDisposition.source}
@@ -107,7 +105,7 @@ export function ChatInputAddMenu({
                   onAttach();
                 }}
               />
-              {presentation === 'classic' && hasActiveInvocation && messageDisposition ? (
+              {presentation === 'classic' && messageDisposition ? (
                 <AddMenuItem
                   testId="message-disposition-trigger"
                   dispositionSource={messageDisposition.source}

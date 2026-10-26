@@ -142,7 +142,16 @@ describe('F321 original-memory proposal projections', () => {
         approvalCardRef: { threadId: 'thread-profile-card', messageId: 'profile-card-message' },
       },
     ]);
-    assert.deepEqual(calls, [[ownerUserId, 'corpus/shared-facts.md']]);
+    assert.deepEqual(calls, [
+      [ownerUserId, 'corpus/shared-facts.md'],
+      [ownerUserId, 'capsule.md'],
+    ]);
+    assert.equal(list.json().capsuleSetup.proposals[0].suggestedContent, 'new profile');
+    assert.equal(
+      list.json().entries.some((entry) => entry.id === 'capsule'),
+      false,
+      'a draft is not active memory',
+    );
     await app.close();
   });
 

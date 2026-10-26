@@ -65,6 +65,10 @@ import { ThreadSidebarV2Header } from './ThreadSidebarV2Header';
 import { openTheaterReplay } from './theater-navigation';
 import { pushThreadRouteWithHistory } from './thread-navigation';
 import { isGroupableThread, matchesThreadSearch } from './thread-search';
+import {
+  saveThreadLabels as handleUpdateLabels,
+  saveThreadPreferredCats as handleUpdatePreferredCats,
+} from './thread-settings-commands';
 import { threadSignalsCopy } from './thread-signals.shell-copy';
 import {
   buildSidebarTabContent,
@@ -478,38 +482,6 @@ export function ThreadSidebar({ onClose, className, routeThreadId, activeDestina
           signal,
         }),
     });
-  }, []);
-
-  const handleUpdatePreferredCats = useCallback(async (threadId: string, cats: string[]) => {
-    const ok = await executeSidebarFieldCommand({
-      threadId,
-      field: 'preferredCats',
-      value: cats,
-      request: (signal) =>
-        apiFetch(`/api/threads/${threadId}`, {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ preferredCats: cats }),
-          signal,
-        }),
-    });
-    if (!ok) throw new Error('保存失败');
-  }, []);
-
-  const handleUpdateLabels = useCallback(async (threadId: string, labels: string[]) => {
-    const ok = await executeSidebarFieldCommand({
-      threadId,
-      field: 'labels',
-      value: labels,
-      request: (signal) =>
-        apiFetch(`/api/threads/${threadId}`, {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ labels }),
-          signal,
-        }),
-    });
-    if (!ok) throw new Error('保存失败');
   }, []);
 
   // F252 Phase E: route replay to the always-mounted AppShell host.
@@ -1488,8 +1460,6 @@ export function ThreadSidebar({ onClose, className, routeThreadId, activeDestina
       handleSelect,
       handleToggleFavorite,
       handleTogglePin,
-      handleUpdateLabels,
-      handleUpdatePreferredCats,
     ],
   );
 

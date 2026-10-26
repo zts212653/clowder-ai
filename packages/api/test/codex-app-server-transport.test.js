@@ -176,14 +176,52 @@ class ProtocolWire {
   }
 }
 
+test('app-server rejects unpaired surrogates before sending any malformed request', async () => {
+  for (const overrides of [
+    { prompt: frozenPrompt('dispatch summary ends with \ud83d…') },
+    { developerInstructions: 'invalid instruction \udc3e' },
+    { config: { nested: { value: ['invalid config \ud83d'] } } },
+  ]) {
+    const wire = new ProtocolWire();
+    const write = wire.write.bind(wire);
+    wire.write = async (message) => {
+      await write(message);
+      if (message.method === 'turn/start') {
+        wire.inbox.push({
+          method: 'turn/completed',
+          params: { threadId: 'thread-1', turn: { id: 'turn-1', status: 'completed' } },
+        });
+      }
+    };
+    const client = new CodexAppServerClient({ wire });
+    const { values, error } = await collectFailure(
+      client.run({ prompt: frozenPrompt('valid 🐾'), thread: { kind: 'start' }, ...overrides }),
+    );
+
+    assert.match(error?.message ?? '', /invalid Unicode/);
+    const unsafeMethod = overrides.prompt ? 'turn/start' : 'thread/start';
+    assert.equal(
+      wire.writes.some((message) => message.method === unsafeMethod),
+      false,
+    );
+    assert.equal(
+      values.some((event) => event.type === 'app_server.lifecycle' && event.lifecycle.stage === 'failed'),
+      true,
+    );
+    assert.equal(values.at(-1)?.lifecycle?.stage, 'closed');
+    assert.equal(wire.closeCalls, 1);
+  }
+});
+
 test('app-server registers one exact active-run dispatcher and fences it at turn terminal', async () => {
   const wire = new ProtocolWire();
+  const initialPrompt = 'initial work 🐾; literal \\ud83d';
   let dispatcher;
   let releaseCount = 0;
   const client = new CodexAppServerClient({ wire });
   const outputPromise = collect(
     client.run({
-      prompt: frozenPrompt('initial work'),
+      prompt: frozenPrompt(initialPrompt),
       thread: { kind: 'start' },
       activeRunDispatch: {
         invocationId: 'turn-invocation-1',
@@ -198,6 +236,7 @@ test('app-server registers one exact active-run dispatcher and fences it at turn
   );
 
   await waitFor(() => dispatcher !== undefined);
+  assert.equal(wire.writes.find((message) => message.method === 'turn/start').params.input[0].text, initialPrompt);
   assert.deepEqual(dispatcher.capabilities, { append: true, steer: true, inputReadReceipt: true });
   assert.deepEqual(dispatcher.handle, {
     provider: 'openai_codex',

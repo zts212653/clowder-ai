@@ -27,8 +27,8 @@ function stale(): never {
   );
 }
 
-/** Only a legacy instance without recorded provenance needs this explicit replacement offer. */
-export function confirmLegacyArchiveReplacement(
+/** Bind explicit legacy or same-package catalog replacement to the exact installation and archive. */
+export function confirmArchiveReplacement(
   sourceKind: string,
   snapshot: PluginInventorySnapshot,
   candidate: PackageAdmissionCandidate & { readonly manifest: PluginManifest },
@@ -39,8 +39,12 @@ export function confirmLegacyArchiveReplacement(
     (instance) => instance.pluginId === candidate.packagePluginId && instance.lifecycleState === 'installed',
   );
   const previous = snapshot.packages.find((record) => record.packageDigest === current?.packageDigest);
-  const legacy = sourceKind === 'local-archive' && current && previous && previous.provenance === undefined;
-  if (!legacy) {
+  const legacy = previous?.provenance === undefined;
+  const sameCatalogPackage =
+    previous?.provenance?.kind === 'catalog' &&
+    candidate.provenance?.kind === 'local-archive' &&
+    previous.provenance.packageName === candidate.provenance.packageName;
+  if (sourceKind !== 'local-archive' || !current || !previous || (!legacy && !sameCatalogPackage)) {
     if (confirmation !== undefined) stale();
     return false;
   }
@@ -61,7 +65,7 @@ export function confirmLegacyArchiveReplacement(
   if (confirmation === undefined) {
     throw new PluginArchiveReplacementError(
       'ARCHIVE_REPLACEMENT_CONFIRMATION_REQUIRED',
-      'Confirm replacing this legacy installation while retaining its instance, configuration, and data.',
+      'Confirm replacing this installation while retaining its instance, configuration, and data.',
       {
         confirmation: expected,
         displayName: candidate.manifest.name,

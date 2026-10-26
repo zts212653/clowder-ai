@@ -1,6 +1,7 @@
 import type { MessageSearchInput, MessageSearchResult } from '@cat-cafe/shared';
 import type { MessagePassageCandidate } from './message-passage-search-types.js';
 import { literalQueryEvidence, type QueryCandidate } from './message-query-protocol.js';
+import type { MessageSearchDiagnostics } from './message-search-diagnostics.js';
 
 export interface CanonicalSearchCandidate extends QueryCandidate {
   result: MessageSearchResult;
@@ -15,7 +16,9 @@ export async function collectMessageSearchCandidates(input: {
   source?: { threadId: string; messageId: string };
   project: (candidate: MessagePassageCandidate) => Promise<CanonicalSearchCandidate | null>;
   check: () => void;
+  diagnostics?: MessageSearchDiagnostics;
 }): Promise<CanonicalSearchCandidate[]> {
+  input.diagnostics?.candidates(input.candidates.length);
   const rows: CanonicalSearchCandidate[] = [];
   const seen = new Set<string>();
   const from = input.search.dateFrom ? Date.parse(input.search.dateFrom) : -Infinity;
@@ -29,13 +32,16 @@ export async function collectMessageSearchCandidates(input: {
     // Overlap only independent canonical reads, retaining retrieval order below.
     // Never read beyond the remaining literal page/witness budget on the fast path.
     const width = input.search.sort === 'relevance' ? Math.min(8, limit + 1 - literalWitnesses) : 8;
-    const projected = await Promise.all(
-      input.candidates.slice(offset, offset + width).map(async (candidate) => {
-        if (!validReference(candidate, input.threadIds, input.source)) return null;
-        if (seen.has(JSON.stringify([candidate.threadId, candidate.messageId]))) return null;
-        return input.project(candidate);
-      }),
-    );
+    const wave = input.candidates.slice(offset, offset + width);
+    const readWave = () =>
+      Promise.all(
+        wave.map(async (candidate) => {
+          if (!validReference(candidate, input.threadIds, input.source)) return null;
+          if (seen.has(JSON.stringify([candidate.threadId, candidate.messageId]))) return null;
+          return input.project(candidate);
+        }),
+      );
+    const projected = await (input.diagnostics ? input.diagnostics.wave(wave.length, readWave) : readWave());
     offset += width;
     for (const row of projected) {
       input.check();
@@ -45,6 +51,7 @@ export async function collectMessageSearchCandidates(input: {
       seen.add(key);
       if (!(row.result.timestamp >= from && row.result.timestamp <= to)) continue;
       rows.push(row);
+      input.diagnostics?.accepted();
       if (literalQueryEvidence(input.search.query, row.content)) literalWitnesses++;
       // Pending semantic rows preceding these literal witnesses are still judged.
       if (input.search.sort === 'relevance' && literalWitnesses > limit) return rows;

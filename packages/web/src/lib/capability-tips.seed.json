@@ -1,5 +1,89 @@
 [
   {
+    "id": "feature-f322-thread-settings",
+    "kind": "feature",
+    "sourceRef": {
+      "path": "docs/TIPS.md",
+      "anchor": "10. 对话设置"
+    },
+    "structureSource": {
+      "path": "packages/web/src/components/ThreadSidebar/ThreadSettingsPanel.tsx",
+      "anchor": "ThreadSettingsPanel"
+    },
+    "bodySource": {
+      "path": "docs/TIPS.md",
+      "anchor": "10. 对话设置"
+    },
+    "contexts": ["concierge_open", "feature_dev"],
+    "audience": ["cvo", "developer"],
+    "body": "在对话顶栏点「⋯」，或在侧栏对话行点「…」→「对话设置」，都能打开同一块面板。默认猫猫、思考和速度档位在回复设置里；标签和关联 Feature 在整理里。置顶从侧栏行的「…」操作。",
+    "action": {
+      "type": "open_source",
+      "label": "查看对话设置的用法",
+      "sourceRef": {
+        "path": "docs/TIPS.md",
+        "anchor": "10. 对话设置"
+      }
+    },
+    "owner": "codex61-sol"
+  },
+  {
+    "id": "feature-f290-channel-attachments",
+    "kind": "feature",
+    "sourceRef": {
+      "path": "docs/TIPS.md",
+      "anchor": "11. 频道附件"
+    },
+    "structureSource": {
+      "path": "packages/collective-client/src/ComposerInput.tsx",
+      "anchor": "ComposerInput"
+    },
+    "bodySource": {
+      "path": "docs/TIPS.md",
+      "anchor": "11. 频道附件"
+    },
+    "contexts": ["concierge_open", "feature_dev"],
+    "audience": ["cvo", "developer"],
+    "body": "在频道粘贴截图，或从「+」选择文件；点缩略图可预览，点 × 移除。发送失败时先保留原草稿再重试；想继续看别人发的图，点图片打开原图，再点「回到原消息」。配套 Host 与插件须都支持频道附件。",
+    "action": {
+      "type": "open_source",
+      "label": "查看频道附件的用法",
+      "sourceRef": {
+        "path": "docs/TIPS.md",
+        "anchor": "11. 频道附件"
+      }
+    },
+    "owner": "codex61-sol"
+  },
+  {
+    "id": "feature-f322-cat-card",
+    "kind": "feature",
+    "sourceRef": {
+      "path": "DESIGN.md",
+      "anchor": "点名片牌上的头像或名字"
+    },
+    "structureSource": {
+      "path": "packages/web/src/components/cat-profile-card/CatProfileCardScope.tsx",
+      "anchor": "CatProfileCardScope"
+    },
+    "bodySource": {
+      "path": "docs/TIPS.md",
+      "anchor": "12. 猫猫小卡"
+    },
+    "contexts": ["concierge_open"],
+    "audience": ["cvo"],
+    "body": "想看看猫，点聊天里的头像或名字，再点小卡头像看原图。卡里的「@ 它」把提及放到输入框光标处，「只看它的回话」切到当前对话的单猫视图；改配置点「设置 ›」。",
+    "action": {
+      "type": "open_source",
+      "label": "查看小卡的用法",
+      "sourceRef": {
+        "path": "docs/TIPS.md",
+        "anchor": "12. 猫猫小卡"
+      }
+    },
+    "owner": "codex61-sol"
+  },
+  {
     "id": "feature-f322-chat-paths",
     "kind": "feature",
     "sourceRef": {
@@ -145,7 +229,7 @@
       "path": "DESIGN.md",
       "anchor": "接上 Claude Code / Codex 里已有的会话"
     },
-    "contexts": ["concierge_open"],
+    "contexts": ["concierge_open", "long_running"],
     "audience": ["cvo"],
     "body": "想把本机已有的 Claude Code、Codex 或 OpenCode 会话接到猫咖？先在原工具里关掉它，再点新对话输入框下面的「接上本机已有的会话」，选同工具的猫，再选最近的会话；找不到时可以贴会话 ID。不用先发一句；已经接过的可以直接打开原对话。",
     "action": {
@@ -539,7 +623,7 @@
     },
     "contexts": ["review", "feature_dev"],
     "audience": ["cvo", "developer"],
-    "body": "重要决策拿不准？让多只猫各自独立判断再收敛——跟猫说「开个专家讨论」就行。",
+    "body": "重要决策拿不准？让多只猫各自独立判断再收敛——跟猫说「开个专家辩论」就行。",
     "action": {
       "type": "open_concierge_draft",
       "label": "了解更多"
@@ -548,7 +632,6 @@
   },
   {
     "id": "capability-propose-thread",
-    "demoId": "conversation-proposals-v1",
     "kind": "capability",
     "sourceRef": {
       "path": "cat-cafe-skills/refs/capability-wakeup-index.md",
@@ -1639,11 +1722,11 @@
     },
     "contexts": ["thinking", "long_running"],
     "audience": ["cvo"],
-    "body": "消息默认可以「排队等待」或「立即发送，引导回复」；对队列消息使用 Steer 时，可为每位成员分别选择「立即发送，引导回复」或「立即发送，中断回复」。",
+    "body": "猫回话时，新消息默认「排队等待」；在输入框 + 的发送策略里换成「引导当前回复」，就能接进这一轮。排队中的消息点 Steer，可为每只猫选「接进当前回复」或「停下并处理这条」。",
     "action": {
       "type": "open_concierge_draft",
       "label": "消息去向怎么选",
-      "draftPrompt": "请告诉我「排队等待」「立即发送，引导回复」分别适合什么情况，以及 Steer 时怎样按成员选择引导回复或中断回复。"
+      "draftPrompt": "请告诉我发送策略里「排队等待」和「引导当前回复」分别适合什么情况，以及排队中的消息点 Steer 时，怎样给每只猫选「接进当前回复」或「停下并处理这条」。"
     },
     "owner": "codex-sol"
   },
@@ -3346,5 +3429,30 @@
       "draftPrompt": "请带我打开动画作品的修改回应，对照原版和新版位置，说明如何确认已改或重新指出还不对。"
     },
     "owner": "codex61-sol"
+  },
+  {
+    "id": "feature-f332-opening-brief",
+    "kind": "feature",
+    "sourceRef": {
+      "path": "docs/features/F332-experience-informed-memory.md",
+      "anchor": "KD-8"
+    },
+    "structureSource": {
+      "path": "packages/web/src/components/memory/page/MemoryCapsule.tsx",
+      "anchor": "MemoryCapsuleDetail"
+    },
+    "bodySource": {
+      "path": "docs/TIPS.md",
+      "anchor": "13. 开场简介"
+    },
+    "contexts": ["concierge_open", "long_running"],
+    "audience": ["all"],
+    "body": "想让新对话里的猫认得你？在「记忆 → 画像 → 开场简介」填写称呼和交流习惯，也可以请猫起草，确认后生效。",
+    "action": {
+      "type": "open_concierge_draft",
+      "label": "请猫起草",
+      "draftPrompt": "请先读我的开场简介，再根据我们已有的对话起草一份不超过300字的版本，提交给我确认。"
+    },
+    "owner": "codex-astra"
   }
 ]

@@ -3,7 +3,7 @@ feature_ids: [F331]
 related_features: [F128, F244, F268, F309, F326, F138, F059]
 topics: [feature-demos, demo-video, capability-discovery, community, site, readme, capability-tips]
 doc_kind: spec
-tips_exempt: "2026-10-23 续核片4：等待小贴士观看/试用仍由 capability-propose-thread 的 demoId=conversation-proposals-v1 发现，效果读取复用 F268；官网/README 的两支既有短片对应 capability-import-native-session 与 feature-author-message-disposition。新增片4记录把已有 capability-expert-panel 与 feature-voting 按顺序演示，只更新片单与待审 v1，不新增功能入口、触发语或默认流程，不把整场 Alpha、上线或自然采用率写成已验证。"
+tips_exempt: "2026-10-25 续核片5：片子挂进已有小贴士由 packages/shared/src/feature-demos.json 决定（#6116 起小贴士不再写 demoId）。片1 capability-propose-thread、片2 capability-import-native-session、片3 feature-author-message-disposition、片4 capability-expert-panel 与 feature-voting，都是已有小贴士；片5 只上官网和 README，没有能在等待条显示的定时任务或 GitHub 跟踪小贴士可挂（F139 那条打开开发文档，GitHub 跟踪按 F280 的 tips_exempt 不设小贴士）。本 feat 不新增文字小贴士、触发语或默认流程。效果读取复用 F268，不把自然采用率写成已验证。"
 created: 2026-10-22
 description: "家里的每个功能配一支照真实界面重建的短演示片，放进官网、README 和产品小贴士，让没用过的人看完就知道它做什么、去哪试。"
 description_source: human
@@ -58,7 +58,7 @@ description_updated_at: 2026-10-22T07:40:00Z
 - 小窗主按钮「立即试用」：打开猫猫球并预填一句话，不自动发送。另一个按钮是「关闭」。
 - 没有片的小贴士保持原样。
 
-**分工（You 2026-10-22）**：「让猫咖的Maine Coon 去写代码，你来继续做影片」。Phase B 的代码由家里的Maine Coon写，怎么挂进 F244 由他定；Ragdoll只负责提供片子和片单，不碰这块产品代码。
+**分工（You 2026-10-22）**：「让猫咖的Maine Coon 去写代码，你来继续做影片」。Phase B 的代码由家里的Maine Coon写，怎么挂进 F244 由他定；Ragdoll只负责提供片子和片单，不碰这块产品代码。10-24 起挂片配置改由Ragdoll做，原因见片单下「这次谁做的」。
 
 Architecture cell: hub-action-surface, thread-chat-surface, harness-eval
 Map delta: update required
@@ -80,19 +80,47 @@ You 10-22：「我感觉30s这个得讲一些不太容易发现的功能」。�
 | # | 功能（小贴士 id） | 讲什么 | 结果那一拍 | 状态 |
 |---|-------------------|--------|------------|------|
 | 1 | 新对话提议（`capability-propose-thread`，F128） | 一件大事交给一群猫，猫拆成五张提议卡；同意三张，拒两张并批注，改好重发 | 第一条线交回结果 | ✅ **已完成**，10-22 公开（见下方「已完成的片」） |
-| 2 | 同一个 bug，两种结局（`capability-import-native-session` + 报错 fallback，[@mindfn](https://github.com/mindfn) 的 clowder-ai #1398） | 先只有 Claude Code：没猫粮，干等 5 小时；猫粮恢复后接进猫咖，Ragdoll找Maine Coon一起看，Ragdoll又没猫粮时球自动回到Maine Coon手里 | 同样没猫粮，第二次活没停 | **v1 You 看过**（10-22：「我竟然感觉都挺好的！ 没有什么不好的」；48s，films `same-bug/` `594ba96`）。故事见表下；10-22 You 在设计线：「可以加入你帮他加入一下吧 提个pr commit push就行别过度sop」（`[thread-id]#private-source-id`）→ 已加入官网 `#demos` 和 README 英中日入口，随下次公开同步上线 |
-| 3 | 立即引导（`feature-author-message-disposition`，F047；画面里用 F309 圈选批注） | 猫正改着，你在画面上一圈一句话接着发，不用等它说完 | 猫当场转向，不用重来 | **v1 You 看过**（10-22：「做的没啥问题～ 挺好的」；36s，films `steer/` `8822af1`）。故事见表下；10-22 You 在设计线：「可以加入你帮他加入一下吧 提个pr commit push就行别过度sop」（`[thread-id]#private-source-id`）→ 已加入官网 `#demos` 和 README 英中日入口，随下次公开同步上线 |
-| 4 | 专家辩论 + 投票（`capability-expert-panel`、`feature-voting`） | 拿不准的事，几只猫先各想各的，你的主意也摆进去一起比（四象限）；还分不出，就打 `/vote` 让猫投 | 投票结果卡：你的主意也上票，不一定赢 | **v1 已交 You 看**（10-23，46.7s，films `panel-vote/` `68e05c6`）；You 10-22 选定「专家讨论」，10-23 定把投票合进来、故事「其他都挺好」。故事见表下 |
+| 2 | 同一个 bug，两种结局（`capability-import-native-session` + 报错 fallback，[@mindfn](https://github.com/mindfn) 的 clowder-ai #1398） | 先只有 Claude Code：没猫粮，干等 5 小时；猫粮恢复后接进猫咖，Ragdoll找Maine Coon一起看，Ragdoll又没猫粮时球自动回到Maine Coon手里 | 同样没猫粮，第二次活没停 | **v1 You 看过**（10-22：「我竟然感觉都挺好的！ 没有什么不好的」；48s，films `same-bug/` `594ba96`）。故事见表下；10-22 You 在设计线：「可以加入你帮他加入一下吧 提个pr commit push就行别过度sop」（`[thread-id]#private-source-id`）→ 已加入官网 `#demos` 和 README 英中日入口，随下次公开同步上线；10-24 小贴士也挂上了（#6116）|
+| 3 | 立即引导（`feature-author-message-disposition`，F047；画面里用 F309 圈选批注） | 猫正改着，你在画面上一圈一句话接着发，不用等它说完 | 猫当场转向，不用重来 | **v1 You 看过**（10-22：「做的没啥问题～ 挺好的」；36s，films `steer/` `8822af1`）。故事见表下；10-22 You 在设计线：「可以加入你帮他加入一下吧 提个pr commit push就行别过度sop」（`[thread-id]#private-source-id`）→ 已加入官网 `#demos` 和 README 英中日入口，随下次公开同步上线；10-24 小贴士也挂上了（#6116）|
+| 4 | 专家辩论 + 投票（`capability-expert-panel`、`feature-voting`） | 拿不准的事，几只猫先各想各的，你的主意也算一个；还吵不出，说「四象限」先查最可能推翻结论的那个未知；还分不出，就打 `/vote` 让猫投 | 投票结果卡：你的主意也上票，不一定赢 | **v1 You 看过**（10-24：「我看过了 是ok的！！」；46.7s，films `panel-vote/` `68e05c6`）；You 10-22 选定「专家讨论」，10-23 定把投票合进来。10-25 You：「第四个公开吧～」→ 加入官网 `#demos`、README 英中日入口，挂上小贴士（[#6125](https://github.com/zts212653/clowder-ai/pull/6125)），随下次公开同步上线。故事见表下 |
 | 5 | ELI5（`feature-f287-explicit-eli5-html`） | 说「ELI5」，猫把复杂概念做成一页图解，不发长文 | 那一页图解 | 候选 |
 | 6 | 魔法词「脚手架」（`magic-word-scaffold`） | 猫交了个临时方案，你说「脚手架」，猫对照原托付，补齐真实能用的路径 | 补完以后真的能用 | 候选（六个魔法词也可以合成一支） |
-| 7 | 定时任务（`feature-f139-schedule-mutation-approval`） | 「每天早上 9 点帮我看一下 X」，先出审批卡 | 到点，猫自己来了 | 候选 |
+| 7 | 我们睡着的那 10 个小时：定时任务（`feature-f139-schedule-mutation-approval`）+ GitHub 事件驱动 | 你定好规矩去睡，猫到点自己来、GitHub 有动静自己醒；用 10-22 周四那一晚的真事 | 醒来那张卡：10 小时合入 37 个 PR | **已公开**（10-25，v3，55s，films `while-we-slept/` `2fdd08d`）：10-25 You 先定合成一支（「我想拍定时任务 + 我们的github的那个功能～ 😁 event driven」），又改成用真实一晚（「直接用 我们这周四…所有人都在睡觉…你们共同协同完成了这些事情」），看过故事：「完美！」。v1 只有「你」的视角，You：「你这里只展现了我的视角 但是我们想表达的好像是团队 人类都睡着了之后？」→ v2 改成团队视角；v3 重画团队的四个人。You：「我感觉可以的！」「你可以公开的～」→ 官网 `#demos`、README 英中日（#6127）；小贴士没挂，原因见「小贴士里能播的片子」。故事见表下 |
 | 8 | 交互引导（`capability-guide-interaction`） | 问「这个怎么配？」，猫做成一步步的引导 | 跟着点完、配好 | 候选 |
 | 9 | 把东西端到你面前（`capability-browser-preview`、`capability-workspace-navigator`） | 让猫打开页面预览或某个文件 | 直接在 Hub 旁边打开 | 候选 |
 | 10 | 看这一轮猫收到了什么（`feature-f299-invocation-trajectory`、`feature-f237-prompt-injection-visibility`） | 猫这轮答偏了，从消息进入轨迹，看它到底收到了什么 | 找到原因的那一刻 | 候选（面向开发者） |
 | 11 | 拖拽分组（`feature-f277-thread-attention-navigation`） | 长按一条对话，拖到另一条上，变成一个组 | 侧栏整齐了 | 候选（小） |
 | 12 | 用语音（`feature-voice-interaction`） | 说「用语音」，每只猫用自己的声线回你 | 听到几只猫不同的声音 | 候选（要本机语音服务；家里的克隆声线不能公开） |
+| 13 | 一夜织成一张布（多猫、多条对话、跨家协作；接《一根线》的总览片） | 同一晚，几十条对话里一群猫接力：远景是整栋楼的窗此起彼伏，中景是几扇窗之间抛毛线球，近景是一条消息 | 天亮时一夜的毛线织成一整张布，37 个 PR 是布上的结 | **第 6 支，计划中**（10-25 You：「我感觉可以试试！… 我就是想看到 一根线 到「一夜织成一张布」 那种！」）。先量那一晚的真实规模，再交故事。见表下 |
 
 导出长图 / 多选打包（F294）拍不拍，由 You 定。
+
+**小贴士里能播的片子**（10-24，[#6116](https://github.com/zts212653/clowder-ai/pull/6116)，`8ffcaaddec`）：
+
+- **#1** `conversation-proposals-v1` → `capability-propose-thread`。
+- **#2** `same-bug-v1` → `capability-import-native-session`。这条小贴士原来只在「打开猫猫球」时出现，可猫猫球里没有地方显示小贴士，所以它从来没出现过。现在加了「等得久」的场合，等猫回话时也会出现。
+- **#3** `steer-v1` → `feature-author-message-disposition`。10-24 发现片子和产品对不上：#5961 把输入框改成了只管一条的「这条发出去后：作为下一件工作 / 接着当前工作」。You 说是产品改错了：「我感觉是#3 改错了，或者说我希望你是宣传片里的叫法」。[#6113](https://github.com/zts212653/clowder-ai/pull/6113) 撤回 #5961，改回片子里的「发送策略：排队等待 / 引导当前回复」，设置页也统一成这套，片子不用改。
+- **#4** `panel-vote-v1` → `capability-expert-panel`，`panel-vote-voting-v1` → `feature-voting`，两条用同一个文件（10-25，#6125）。专家辩论那条小贴士里的「开个专家讨论」改成了 skill 认的「专家辩论」。专家辩论那条只在讨论模式（ideate）等猫时出现；投票那条平时等猫就会出现。
+- **#5 没挂**（10-25，#6127）：等待条只显示按钮是「了解更多」或能跳到某个页面的小贴士。讲定时任务的那条（`feature-f139-schedule-mutation-approval`）按钮是打开 F139 开发文档，从不出现在等待条里；GitHub 跟踪按 F280 的 tips_exempt 不设小贴士。所以片 5 只上官网和 README。要不要给这两个功能加一条给用户看的小贴士，归 F139、F280 的负责猫定。这次顺手把片单检查补严：挂的小贴士按钮类型等待条不显示，测试会直接报出来。
+
+**怎么挂一支片**（You 10-24 要的「json…可配置让你直接配置」）：
+
+1. 片子和封面放进 `site/assets/demos/`。
+2. 在 `packages/shared/src/feature-demos.json` 加一条，写清：挂哪条小贴士（`tipId`）、标题、片子和封面的文件名、「立即试用」那句话。
+3. 跑 `pnpm demos:pin`，自动填上时长和校验值。已经发布的片子文件要是变了，它会拒绝：换片就用新 id（比如 `-v2`）。
+
+还有几条规矩：
+
+- 一条小贴士最多挂一支片。同一支片要挂两条小贴士，就写两条，用同一个文件。
+- 小贴士只在等猫回话时出现，所以挂片的小贴士必须有「等待中」的场合，否则测试会拦下。
+- 「看完后用上」这一项只有 #1 量得到（看完后真的创建了新对话）。别的片这一项是「未知」，不是 0。
+
+**这次谁做的**：Phase B 的代码原来归Maine Coon。10-24 You：「Maine Coon现在翻肚皮了，这个你签名成你自己的Ff331 feat md写清楚原因就好这样Maine Coon就知道了」，所以这次由Ragdoll做（#6116）。Maine Coon回来要知道的：
+
+- 小贴士不再写 `demoId`：结构里删了，检查会拒绝。
+- 片子全在 `feature-demos.json` 里。
+- `GET /api/tip-telemetry/demos` 对没有使用信号的片，`used` 是 null。
+- 原来留给Maine Coon定的「#2 立即试用怎么落」，Ragdoll先写了：带你从新对话页接上本机已有的会话。#2、#3 的试用句都在 JSON 里，觉得不对直接改。
 
 **前三支的故事（10-22）**
 
@@ -139,7 +167,28 @@ You 10-22：「我感觉30s这个得讲一些不太容易发现的功能」。�
     - 「各自独立、不互看」是猫按 skill 守的做法，产品没有技术上藏起别的猫的回复；分发用 `multi_mention` 并行。
     - 收拢卡必须有共识区和分歧区（「不抹平」），交付是洞察卡片 + 约 50 秒语音总结 + 正式报告（优先 DOCX）。
     - 专家辩论**不以投票收尾**；投票（F079）是另一个功能，人只能打 `/vote` 发起，猫在回复里写 `[VOTE:选项]` 投（回复照常可见，不是密封票），人不在投票人名单里。10-22 一度拆成候选 #13，10-23 You 定合回 #4。
-    - 小贴士原文是「跟猫说「开个专家讨论」就行」，和 skill 认的说法对不上；片里用「专家辩论」。开拍前在 Alpha 实测一次这句话能不能启动。
+    - 小贴士原文是「跟猫说「开个专家讨论」就行」，和 skill 认的说法对不上；片里用「专家辩论」，10-25 小贴士也改成「开个专家辩论」（#6125）。这句话还没在 Alpha 跑过整场（要叫醒三只猫）。
+
+- **#5 我们睡着的那 10 个小时**（10-25 You 定）
+  - **一句话**：你定好规矩就去睡；猫到点自己来，GitHub 上有动静自己醒；醒来时活已经干完了。
+  - **故事**：睡前你留一句「CI 过了、社区合进来的都收回家了，就合」→ 灯灭，「睡着第 0 小时」开始走 → 几条线同时跑：⏰ 定时提醒每两小时叫小星星接着推开源同步；「GitHub」消息叫醒Maine Coon去 review 社区 PR，来回几轮后通过、合入；合进开源仓的社区代码一条条接回家；插件目录换上新版本 → 同步 PR 的 CI、Windows、macOS 全绿，两个条件都满足，猫合入 → 第 10 小时你醒来问干了多少，Maine Coon回一张卡：10 小时合入 37 个 PR。
+  - **片尾**：「到点就来，有动静就醒」；致谢 4 位社区贡献者；教一句「每天早上 9 点…」「帮我盯着这个 PR」。
+  - **真事与数字**（太平洋时间 10-22 08:53–18:53，10-25 用 GitHub 重新数过）：
+    - 合入 37 个 PR：家里 30、clowder-ai 6、clowder-ai-plugins 1，和Maine Coon当晚的统计一致。周五同一时段 22 个。
+    - 社区 PR 合入 5 个，来自 4 位贡献者：@mindfn 2 个（#1690、#1698），@amazing-fish（#1505）、@EdgarR1170（#1700）、@whutzefengxie-ops（#1705）各 1 个。
+    - 家里账号在社区 PR 上提交 review 22 次，覆盖 8 个 PR。有签名的 20 次都是Maine Coon（Sol 6.1 19 次、Sol 5.6 1 次）。
+    - 接回家的社区改动 9 个（clowder-ai #1665、#1677、#1690、#1691、#1692、#1698、#1700、#1705、#1505）。
+    - 公开同步 clowder-ai #1694 于 15:37 合入，CI、Windows、macOS 全绿；You 当天 05:51 的授权原话：「如果我们的这个 pr ci过了，也确定收了所有的merge intake的pr 我们就可以合入 最重要的是 开源社区merge的我们得完成intake才行」（`[thread-id]#private-source-id`）。
+  - **我定的**：时间写「睡着第几小时」不写钟点（那一晚是太平洋时间白天）；贡献者名字只在片尾致谢出现，片中 review 不显示意见内容；家里私有仓不写仓库名。GitHub 插件是每分钟查一次，不拍成「秒醒」。
+
+- **#6 一夜织成一张布**（计划，10-25 You 定要试）
+  - **起因**：片 5 为了讲清「到点叫醒」「有动静叫醒」，只留了两只猫、一条对话。You 问：那一晚其实是很多条对话、很多只猫、还有别家的猫，要拍出「壮观的猫猫团队」怎么拍？
+  - **一句话**：一个晚上，全家的猫在几十条对话里接力；天亮时，一夜的毛线织成了一张布。
+  - **画面**：夜里的猫咖小楼（可借 films `builder-day` 的小楼插画）。每扇窗是一条对话，猫在里面干活窗就亮；传球是一团毛线球从这扇窗抛到那扇窗（接《一根线》的「毛线球＝球权」）；别家的猫一眼认得出（布偶、缅因、暹罗……），毛线带各家的颜色，跨家 review 就是一根线穿进另一家的窗。
+  - **镜头三层**：远景整栋楼，几十扇窗此起彼伏，只给「这么多猫同时在干」的震撼；中景一层楼，三四扇窗之间来回传一个球，看清接力；近景一条消息（GitHub 叫醒、⏰ 到点），落到真事。全片跟一根主线走（比如 #1694 那团毛线球），周围再热闹也不迷路。
+  - **结尾**：一夜的毛线在楼外织成一整张布，37 个 PR 是布上的 37 个结。从「一根线」到「一夜织成一张布」。
+  - **数据**：每扇窗什么时候亮、每个球什么时候抛，都照 10-22 那一晚的真实记录放：每只猫每次运行的起止和所在对话、谁 @ 了谁、PR 合入和 review。取数走 3002 的只读接口（10-19 注意力账单用过的那套）。
+  - **第一步**：先量那一晚的真实规模（几只猫、几条对话、传了多少次球、跨了几家），带着数字找 You 对齐故事，再开拍。
 
 ### 总览片（不在 30 秒集合里）
 
@@ -280,7 +329,7 @@ You 10-22：「我感觉30s这个得讲一些不太容易发现的功能」。�
 - [x] AC-A1: 第一支片完成，共四个版本，事件能回查到原消息和审批记录（films `open-threads/` README「素材」段）。
 - [x] AC-A2: 官网 `#demos` 与 README 英中日入口已公开：主仓 #5875（`41486de49c`）随 clowder-ai #1676 发出，10-22 实测见 Current State。
 - [x] AC-A3: You 看过片子和公开前三条后，同意公开。三条在 10-21 13:40 PDT 列给 You：园区俯视白模认得出地点、卡上有 Luna 和墨墨、原话里有「宝贝」。13:49 PDT You 回「片子这个可以发」。
-- [ ] AC-A4: README 里每支演示折叠成一行（#5907）。10-22 You「直接合入」，已合入 main `90794197bb`；随公开同步上线后，在公开页核过再打勾。
+- [x] AC-A4: README 里每支演示折叠成一行（#5907）。10-22 You「直接合入」，已合入 main `90794197bb`；随公开同步 clowder-ai #1714（`99c1ca9a59`，10-23 16:55 UTC）上线。10-24 读公开仓英、中、日三份 README：三支演示各是一个 `<details>`，收起时只剩一行标题。
 - [ ] AC-A5: 第一支片登记进 Works，You 能在剪辑台上批注。需要家里的猫用作品工具，外部会话做不了。
 
 ### Phase B（产品里的「观看演示」）
@@ -301,7 +350,7 @@ You 10-22：「我感觉30s这个得讲一些不太容易发现的功能」。�
 | R4 | 「小贴士的这个好像也可以 就是可以增加一个？点击播放引导？」 | AC-B1, AC-B2 | 真实产品壳确认；Alpha 实页 | [x] |
 | R5 | 「还是完整版的好点 有个创建之后的反馈」 | AC-A2, AC-C1 | 入口用的是完整版；完成标准第 3 条 | [x] |
 | R6 | 「我们要新建一个feat 专门挂这些吗？比如挂上每个film来追踪」 | 片单表 | 本文件 | [x] |
-| R7 | 「这里应该折叠起来…占了一个屏幕」 | AC-A4 | 公开页截图 | [ ] |
+| R7 | 「这里应该折叠起来…占了一个屏幕」 | AC-A4 | 10-24 读公开仓三份 README 原文（没截图） | [x] |
 
 ### 覆盖检查
 
@@ -311,7 +360,7 @@ You 10-22：「我感觉30s这个得讲一些不太容易发现的功能」。�
 
 ## Tips Contribution（F244）
 
-本 feat 不新增文字小贴士。Phase B 是给现有小贴士 `capability-propose-thread`（「聊天太长了？猫猫可以提议开个新 thread…」）加「观看演示」，怎么挂由负责小贴士的猫定。Phase A 只改官网和 README，不在应用内。
+本 feat 不新增文字小贴士。10-24 起片子挂哪条小贴士写在 `packages/shared/src/feature-demos.json`（#6116），片1–片4 都挂在已有小贴士上（片5 没有可挂的，见上），见片单下「小贴士里能播的片子」。Phase B 最早是给现有小贴士 `capability-propose-thread`（「聊天太长了？猫猫可以提议开个新 thread…」）加「观看演示」，怎么挂由负责小贴士的猫定。Phase A 只改官网和 README，不在应用内。
 
 frontmatter 的 `tips_exempt` 明确登记这次复用，避免为同一条 F128 推荐再造一条文字 tip；已有 tip 的 `sourceRef` 仍指向其原功能来源。该声明可用于只含 Phase A/片单的旧公开切面，不把后续 Phase B 的代码、完成状态或验收证据带进去。后续片子若需要新的推荐入口，应贡献对应 tip 或更新具体复用依据，不沿用这条声明作通用豁免。
 

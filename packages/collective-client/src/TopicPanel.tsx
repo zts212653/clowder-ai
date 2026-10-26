@@ -163,8 +163,9 @@ export function TopicPanel({
             language === 'en' ? `Reply to ${actorDisplayName(thread.root)}` : `回复 ${actorDisplayName(thread.root)}`
           }
           delivery={delivery}
-          onSend={(body, recipient, entrust, responseRequested, replyToEventId) =>
+          onSend={(body, recipient, entrust, responseRequested, replyToEventId, content) =>
             onSend(body, {
+              ...content,
               location: { ...location, rootEventId: location.rootEventId ?? thread.root.eventId },
               recipient,
               replyToEventId: replyToEventId ?? thread.root.eventId,

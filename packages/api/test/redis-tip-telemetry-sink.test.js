@@ -260,5 +260,9 @@ describe('F268 RedisTipEventSink (production path)', { skip: redisIsolationSkipR
     assert.equal(result.demos[0].watchRate, 0.5);
     assert.equal(result.demos[0].completionRate, 0.5);
     assert.equal(result.demos[0].useAfterCompletionRate, 1);
+    // Films without a product use signal report use as unknown, not as zero.
+    const unmeasured = result.demos.find((demo) => demo.demoId === 'steer-v1');
+    assert.equal(unmeasured.used, null);
+    assert.equal(unmeasured.useAfterCompletionRate, null);
   });
 });

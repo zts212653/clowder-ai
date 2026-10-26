@@ -11,13 +11,14 @@ import { actorDisplayName, groupChannelThreads } from './channel-model.js';
 import { eventChannelId } from './channel-navigation.js';
 import type { ChannelSceneProps } from './channel-scene-props.js';
 import type { CollectiveEventEnvelope } from './client-types.js';
-import { useCollectiveText } from './collective-copy.js';
+import { useCollectiveLanguage, useCollectiveText } from './collective-copy.js';
 import { DemoPlayback } from './first-entry/DemoPlayback.js';
 import { PublicChannelActivity } from './PublicChannelActivity.js';
 import { mentionSelectionForEvent } from './participant-identity.js';
 import { RoadmapWorkspace } from './RoadmapWorkspace.js';
 import { SharedArtifactLibrary } from './SharedArtifactLibrary.js';
 import { SharedArtifactSurface } from './SharedArtifactSurface.js';
+import { useChannelReadPosition } from './use-channel-read-position.js';
 import { useSharedArtifacts } from './use-collective-artifacts.js';
 
 export function ChannelScene(props: ChannelSceneProps) {
@@ -89,11 +90,16 @@ export function ChannelScene(props: ChannelSceneProps) {
   const [mention, setMention] = useState<MentionSelection>();
   const [selectionError, setSelectionError] = useState<string>();
   const [highlightedId, setHighlightedId] = useState(focusEventId);
-  const restoredScroll = useRef(false);
   const focusedHostEvent = useRef<string>();
-  const searching = useRef(Boolean(query));
-  searching.current = Boolean(query);
   const flowRef = useRef<HTMLDivElement>(null);
+  const language = useCollectiveLanguage();
+  const readPosition = useChannelReadPosition(
+    flowRef,
+    channelId,
+    events,
+    content === 'conversation' && !query && !shared?.selected,
+    focusEventId,
+  );
   const allThreads = groupChannelThreads(events);
   const search = query.trim().toLocaleLowerCase();
   const threads = allThreads.filter((thread) =>
@@ -150,34 +156,6 @@ export function ChannelScene(props: ChannelSceneProps) {
     },
     [channelId, onOpenChannel, shared?.close],
   );
-  useEffect(() => {
-    const key = `collective-scroll:${namespace}:${channelId}`;
-    const flow = flowRef.current;
-    if (!flow) return;
-    const save = () => {
-      if (!restoredScroll.current || searching.current) return;
-      try {
-        window.localStorage.setItem(key, String(flow.scrollTop));
-      } catch {
-        /* Storage may be unavailable. */
-      }
-    };
-    flow.addEventListener('scroll', save, { passive: true });
-    return () => {
-      save();
-      flow.removeEventListener('scroll', save);
-    };
-  }, [namespace, channelId]);
-  useEffect(() => {
-    const flow = flowRef.current;
-    if (!flow || restoredScroll.current || !events.length || query) return;
-    try {
-      flow.scrollTop = Number(window.localStorage.getItem(`collective-scroll:${namespace}:${channelId}`) ?? '0');
-    } catch {
-      /* Unavailable storage does not prevent reading. */
-    }
-    restoredScroll.current = true;
-  }, [namespace, channelId, events.length, query]);
   useEffect(() => {
     // While the work is open, its exact original Topic owns this pane; a channel focus cannot close it.
     if (shared?.selected) return;
@@ -289,6 +267,21 @@ export function ChannelScene(props: ChannelSceneProps) {
           <button type="button" className="roadmap-return" onClick={onReturnToRoadmap}>
             ← {t('返回')} {roadmapReturnLabel}
           </button>
+        )}
+        {content === 'conversation' && !search && readPosition.unreadCount > 0 && (
+          <button type="button" className="channel-unread-return" onClick={readPosition.jumpToUnread}>
+            {language === 'en'
+              ? `Continue reading · ${readPosition.unreadCount} unread`
+              : `回来接着读 · ${readPosition.unreadCount} 条未读`}
+          </button>
+        )}
+        {readPosition.notice && (
+          <p role="status" className="delivery-state">
+            {readPosition.notice}
+            <button type="button" onClick={readPosition.retry}>
+              {language === 'en' ? 'Retry' : '重试'}
+            </button>
+          </p>
         )}
         {content === 'artifacts' ? (
           <SharedArtifactLibrary key={namespace} channelId={channelId} filterable />

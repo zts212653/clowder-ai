@@ -50,7 +50,7 @@ export interface PreparedCodexHostLaunch {
 
 export async function prepareCodexHostLaunch(options: AgentCarrierSessionOptions): Promise<PreparedCodexHostLaunch> {
   assertCodexSharedStateCarrier(options.env);
-  assertCodexManagedCarrierSupport(options.env, options.command);
+  await assertCodexManagedCarrierSupport(options.env, options.command);
   const signatureEnv = Object.fromEntries(
     Object.entries(options.env ?? {}).filter(([key]) => !SESSION_SCOPED_ENV_KEYS.has(key)),
   );

@@ -45,7 +45,7 @@ export const SETTINGS_IA: readonly SettingsEntry[] = [
   {
     id: 'team',
     label: '猫猫团队',
-    icon: 'users',
+    icon: 'paw',
     group: 1,
     destination: {
       kind: 'sections',
@@ -132,7 +132,7 @@ export type ResolvedPin =
 /** Old pins are bare section ids and stay valid; new pins are `dest:<entry id>`. Unknown ids resolve to null (hidden, never crash). */
 export function resolvePin(pinId: string): ResolvedPin | null {
   if (pinId === TEAM_WORKSPACE_PIN_ID) {
-    return { kind: 'workspace-team', id: pinId, label: TEAM_WORKSPACE_LABEL, icon: 'users' };
+    return { kind: 'workspace-team', id: pinId, label: TEAM_WORKSPACE_LABEL, icon: 'paw' };
   }
   if (pinId.startsWith(DEST_PREFIX)) {
     const entry = findEntry(pinId.slice(DEST_PREFIX.length));

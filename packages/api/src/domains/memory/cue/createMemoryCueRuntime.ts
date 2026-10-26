@@ -5,6 +5,7 @@ import type { EntityRegistryStore } from '../EntityRegistry.js';
 import type { IEventMemoryStore } from '../EventMemoryStore.js';
 import type { IEvidenceStore } from '../interfaces.js';
 import type { PersonMemoryRecallService } from '../people/PersonMemoryRecallService.js';
+import { recordNativeProfileOpening } from '../profile/native-profile-opening.js';
 import type { TasteMemoryLifecycleStore } from '../taste/TasteMemoryLifecycleStore.js';
 import { ContextSourceAdmission } from './ContextSourceAdmission.js';
 import type { ContextSourceOpportunityStore } from './ContextSourceOpportunityStore.js';
@@ -28,7 +29,7 @@ import { DecisionMemoryCueSource } from './sources/DecisionMemoryCueSource.js';
 import { EventMemoryCueSource } from './sources/EventMemoryCueSource.js';
 import { CanonicalOperationalPrecedentCueSource } from './sources/OperationalPrecedentCueSource.js';
 import { PersonMemoryCueSource } from './sources/PersonMemoryCueSource.js';
-import { PrimerMemoryCueSource } from './sources/PrimerMemoryCueSource.js';
+import { OPENING_PRIMER_PREFIX, PrimerMemoryCueSource } from './sources/PrimerMemoryCueSource.js';
 import { ProfileMemoryCueSource } from './sources/ProfileMemoryCueSource.js';
 import { ProjectKnowledgeMemoryCueSource } from './sources/ProjectKnowledgeMemoryCueSource.js';
 import { CanonicalTasteMemoryCueSource } from './sources/TasteMemoryCueSource.js';
@@ -118,6 +119,7 @@ export function createMemoryCueRuntime(input: {
     ...(contextSourceAdmission ? { contextSourceAdmission } : {}),
     promptService: new MemoryCueInvocationPromptService({
       plane,
+      recordProfileOpeningObserved: (delivery) => recordNativeProfileOpening(input.episodeStore, delivery),
       sourceReader: { read: (request) => runtime.sourceReader.read(request) },
       validateContextSource: (id, scope, cat, now) =>
         contextSourceAdmission?.validate(id, scope, cat, now) ?? Promise.resolve(false),
@@ -136,7 +138,11 @@ export function createMemoryCueRuntime(input: {
     ...(input.threadOverviewSource ? { threadOverviewOpportunitySource: input.threadOverviewSource } : {}),
     sourceReader: {
       async read(request) {
-        if (request.anchor.startsWith('project-collection:') || request.anchor.startsWith('profile:primer:')) {
+        if (
+          request.anchor.startsWith('project-collection:') ||
+          request.anchor.startsWith('profile:primer:') ||
+          request.anchor.startsWith(OPENING_PRIMER_PREFIX)
+        ) {
           if (
             !request.opportunityId ||
             !request.consumerCatId ||
@@ -200,7 +206,7 @@ export function createMemoryCueRuntime(input: {
           });
         }
         if (request.family === 'profile') {
-          if (request.anchor.startsWith('profile:primer:'))
+          if (request.anchor.startsWith('profile:primer:') || request.anchor.startsWith(OPENING_PRIMER_PREFIX))
             return primerSource.read({
               ownerUserId: request.scope.ownerUserId,
               consumerCatId: request.consumerCatId,

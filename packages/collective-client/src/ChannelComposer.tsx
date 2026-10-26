@@ -108,8 +108,10 @@ export function ChannelComposer({
           placeholder={language === 'en' ? `Message #${channelId}…` : `在 #${channelId} 里说点什么……`}
           delivery={delivery}
           mention={guideMention ?? mention}
-          onSend={async (body, recipient, entrust, responseRequested) => {
+          onSend={async (body, recipient, entrust, responseRequested, replyToEventId, content) => {
             await onSend(body, {
+              ...content,
+              ...(replyToEventId ? { replyToEventId } : {}),
               location: { channelId },
               recipient,
               ...(responseRequested && recipient.kind === 'channel'

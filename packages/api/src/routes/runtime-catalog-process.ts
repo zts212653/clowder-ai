@@ -2,6 +2,7 @@ import { type ChildProcess, spawn } from 'node:child_process';
 import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import {
+  CLI_PROCESS_OWNER_ENV,
   findOwnedUnixProcesses,
   readUnixProcessSnapshot,
   signalOwnedUnixProcesses,
@@ -34,7 +35,10 @@ export async function closeCatalogProcess(child: ChildProcess, ownerId: string):
     const deadline = Date.now() + graceMs;
     do {
       // Do not stop at the direct child's exit: its detached descendants still own the token.
-      const snapshot = await readUnixProcessSnapshot({ includeEnvironment: true });
+      const snapshot = await readUnixProcessSnapshot({
+        includeEnvironment: true,
+        environmentMarkers: [`${CLI_PROCESS_OWNER_ENV}=${ownerId}`],
+      });
       if (snapshot) {
         const owned = findOwnedUnixProcesses(snapshot, ownerId);
         if (owned.length === 0) return;
@@ -46,7 +50,10 @@ export async function closeCatalogProcess(child: ChildProcess, ownerId: string):
       await delay(50);
     } while (Date.now() < deadline);
   }
-  const remaining = await readUnixProcessSnapshot({ includeEnvironment: true });
+  const remaining = await readUnixProcessSnapshot({
+    includeEnvironment: true,
+    environmentMarkers: [`${CLI_PROCESS_OWNER_ENV}=${ownerId}`],
+  });
   if (!remaining || findOwnedUnixProcesses(remaining, ownerId).length > 0) {
     throw new Error('catalog_unavailable');
   }

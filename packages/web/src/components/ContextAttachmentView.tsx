@@ -5,7 +5,6 @@ import { useState } from 'react';
 import { useChatStore } from '@/stores/chatStore';
 import { apiFetch } from '@/utils/api-client';
 import { ComposerFileQuoteTags } from './ComposerFileQuoteTags';
-import { ContextMediaSelections } from './ContextMediaSelections';
 import { GalleryAttachmentGroup } from './content-review/GalleryAttachmentGroup';
 import { sameGalleryGroup } from './content-review/media-chat-selection';
 import { useContextAttachmentPresentation } from './context-attachment-presentation';
@@ -60,6 +59,15 @@ async function confirmQuotedLine(
 }
 
 export function ContextAttachmentView(props: ContextAttachmentViewProps) {
+  if (props.attachment.kind === 'media')
+    return (
+      <GalleryAttachmentGroup
+        attachments={[props.attachment]}
+        compact={props.compact}
+        onRemove={props.onRemove ? () => props.onRemove?.() : undefined}
+        fromComposer={!!props.onRemove}
+      />
+    );
   return props.attachment.kind === 'project-screening' ? (
     <ProjectScreeningAttachmentView {...props} attachment={props.attachment} />
   ) : (
@@ -140,9 +148,6 @@ function OrdinaryContextAttachmentView({
             {location === 'changed' ? t.changedFileQuote : t.unversionedFileQuote}
           </span>
         )}
-        {attachment.kind === 'media' && (
-          <ContextMediaSelections attachment={attachment} compact={compact} removable={Boolean(onRemove)} />
-        )}
         {attachment.kind === 'quote' && attachment.comment && (
           <span className="mt-1.5 block border-l-2 border-cafe-accent/50 pl-2 text-xs leading-relaxed text-cafe-primary">
             <span className={`mr-1 text-micro font-semibold ${isV2 ? '' : 'uppercase '}tracking-wide text-cafe-muted`}>
@@ -154,28 +159,6 @@ function OrdinaryContextAttachmentView({
       </span>
     </>
   );
-
-  if (isV2 && compact && onRemove && attachment.kind === 'media' && attachment.selections.length)
-    return (
-      <div
-        data-testid={`context-attachment-${attachment.id}`}
-        data-context-kind="media"
-        className="flex min-w-0 items-center gap-2 px-2 py-1 text-xs"
-      >
-        <span className="max-w-32 truncate" title={attachment.title}>
-          {attachment.title}
-        </span>
-        <ContextMediaSelections attachment={attachment} compact removable />
-        <button
-          type="button"
-          aria-label={presentation.removeLabel}
-          onClick={onRemove}
-          className="shrink-0 rounded px-1 text-cafe-muted hover:bg-cafe-surface-sunken"
-        >
-          ×
-        </button>
-      </div>
-    );
 
   return (
     <div
@@ -248,12 +231,14 @@ export function ContextAttachmentList({
       className={compact ? 'relative flex flex-wrap gap-2 px-4 pt-2' : undefined}
     >
       {attachments.map((attachment) => {
-        if (attachment.kind === 'media' && attachment.gallery) {
+        if (attachment.kind === 'media') {
           if (renderedGalleries.has(attachment.id)) return null;
-          const group = attachments.filter(
-            (item): item is MediaContextAttachment =>
-              item.kind === 'media' && !!item.gallery && sameGalleryGroup(attachment.gallery!, item.gallery),
-          );
+          const group = attachment.gallery
+            ? attachments.filter(
+                (item): item is MediaContextAttachment =>
+                  item.kind === 'media' && !!item.gallery && sameGalleryGroup(attachment.gallery!, item.gallery),
+              )
+            : [attachment];
           for (const member of group) renderedGalleries.add(member.id);
           return (
             <GalleryAttachmentGroup

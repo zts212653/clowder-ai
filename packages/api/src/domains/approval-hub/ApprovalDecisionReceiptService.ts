@@ -9,12 +9,18 @@ import {
 import type { IMessageStore } from '../cats/services/stores/ports/MessageStore.js';
 import type { ApprovalDecisionReceiptOutbox, ApprovalDecisionSubject } from './ApprovalDecisionReceiptOutbox.js';
 import type { ApprovalProducerRegistry } from './ApprovalProducerRegistry.js';
+import {
+  appendDecisionReceiptToActiveRun,
+  type ReceiptAppendLogger,
+  type ReceiptAppendTracker,
+} from './approval-decision-receipt-append.js';
 
 interface ReceiptOptions {
   registry: ApprovalProducerRegistry;
   messageStore: Pick<IMessageStore, 'appendIdempotent'>;
   outbox: ApprovalDecisionReceiptOutbox;
-  logger: { warn(fields: Record<string, unknown>, message: string): void };
+  logger: ReceiptAppendLogger;
+  invocationTracker?: ReceiptAppendTracker;
 }
 
 /** A delivery projection of producer truth, never a second decision store. */
@@ -74,7 +80,7 @@ export class ApprovalDecisionReceiptService {
         ) {
           throw new Error('Canonical approval decision receipt identity mismatch');
         }
-        await messageStore.appendIdempotent({
+        const appended = await messageStore.appendIdempotent({
           userId: ownerUserId,
           from: { kind: 'system', service: 'approval-hub' },
           threadId: receipt.approvalCardRef.threadId,
@@ -89,6 +95,18 @@ export class ApprovalDecisionReceiptService {
             meta: { presentation: 'system_notice', approvalDecisionReceipt: receipt },
           },
         });
+        // Permanent message idempotency also fences the optional provider call.
+        // Replays (including recovery after a committed append lost its ACK)
+        // only retain the message. There is no second live-delivery state layer.
+        if (!appended.idempotent && this.opts.invocationTracker) {
+          await appendDecisionReceiptToActiveRun({
+            ownerUserId,
+            receipt,
+            message: appended.message,
+            invocationTracker: this.opts.invocationTracker,
+            logger,
+          });
+        }
       }
       // A crash after append and before removal replays the message's atomic,
       // permanent idempotency key, rather than creating a second receipt.

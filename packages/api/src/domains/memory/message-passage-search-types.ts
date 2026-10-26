@@ -1,4 +1,6 @@
 import type { SearchExecutionMeta, SearchOptions } from './interfaces.js';
+import type { MemoryReadSnapshot } from './memory-read-execution.js';
+import type { CjkReadSnapshot } from './message-cjk-read-diagnostics.js';
 
 /** Internal index admission. These grants/source coordinates come from the server. */
 export interface MessagePassageSearchOptions
@@ -6,6 +8,9 @@ export interface MessagePassageSearchOptions
   visibleThreadIds: readonly string[];
   sort?: 'time' | 'relevance';
   candidateLimit?: number;
+  /** Private observers, stripped before IPC; never part of public search metadata. */
+  onReadSnapshot?: (snapshot: MemoryReadSnapshot) => void;
+  onCjkRead?: (snapshot: CjkReadSnapshot) => void;
   excludeSource?: { threadId: string; messageId: string };
 }
 

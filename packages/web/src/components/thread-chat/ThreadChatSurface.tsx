@@ -20,6 +20,7 @@ import { ChatInput } from '../ChatInput';
 import { ChatMessageRow } from '../ChatMessageRow';
 import { ConnectionStatusBar } from '../ConnectionStatusBar';
 import { getStreamingTipContexts, selectLifecycleTipMessageId } from '../capability-tip-placement';
+import { CatProfileCardScope } from '../cat-profile-card/CatProfileCardScope';
 import { ChatReferenceScope } from '../chat-references/ChatReferenceScope';
 import { buildChatTimelineProjectionKey } from '../chat-timeline-projection-key';
 import { useCompanionConversation } from '../concierge/useCompanionConversation';
@@ -478,7 +479,15 @@ export function ThreadChatSurface({
   );
   return (
     <MessageNavigationProvider value={jumpToMessage}>
-      <ChatReferenceScope value={threadId}>{surface}</ChatReferenceScope>
+      <ChatReferenceScope value={threadId}>
+        {composerPresentation === 'v2' ? (
+          <CatProfileCardScope threadId={threadId} conversationView={conversationViewController}>
+            {surface}
+          </CatProfileCardScope>
+        ) : (
+          surface
+        )}
+      </ChatReferenceScope>
     </MessageNavigationProvider>
   );
 }

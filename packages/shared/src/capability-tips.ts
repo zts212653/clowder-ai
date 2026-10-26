@@ -1,5 +1,4 @@
 import { z } from 'zod';
-import { getFeatureDemo } from './feature-demos.js';
 
 export const CAPABILITY_TIP_KINDS = ['capability', 'magic_word', 'workflow', 'feature', 'status_help'] as const;
 export const CAPABILITY_TIP_CONTEXTS = [
@@ -172,10 +171,6 @@ export const CapabilityTipSchema = z
     audience: z.array(z.enum(CAPABILITY_TIP_AUDIENCES)).min(1),
     body: z.string().min(12).max(140),
     action: CapabilityTipActionSchema.optional(),
-    demoId: z
-      .string()
-      .regex(/^[a-z0-9][a-z0-9-]{0,63}$/)
-      .optional(),
     owner: z.string().min(1),
   })
   .strict();
@@ -235,9 +230,6 @@ export function validateCapabilityTip(input: unknown): CapabilityTipValidationRe
   }
 
   const errors: string[] = [];
-  if (parsed.data.demoId && getFeatureDemo(parsed.data.demoId)?.tipId !== parsed.data.id) {
-    errors.push(`${parsed.data.id}: demoId must reference the registered demo for this tip`);
-  }
   if (isActionRequiredTipKind(parsed.data.kind) && !parsed.data.action) {
     errors.push(`${parsed.data.id}: ${parsed.data.kind} requires an action`);
   }

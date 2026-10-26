@@ -7,6 +7,7 @@ code_anchors:
   # API — adapters + routes
   - packages/api/src/domains/approval-hub/ApprovalIngress.ts
   - packages/api/src/domains/approval-hub/ApprovalDecisionReceiptService.ts
+  - packages/api/src/domains/approval-hub/approval-decision-receipt-append.ts
   - packages/api/src/domains/approval-hub/ApprovalDecisionReceiptOutbox.ts
   - packages/api/src/domains/approval-hub/approval-decision-receipt-hooks.ts
   - packages/api/src/domains/approval-hub/ApprovalLifecycleEpochAuthority.ts
@@ -154,7 +155,12 @@ and retries on startup and a bounded periodic sweep. Lost append acknowledgement
 Rollback retains unconsumed intents for compatible recovery. No UI history window is used for recovery.
 
 `approvalDecisionReceiptV1Schema` admits only this named Host system carrier into cat context. Ordinary
-system badges remain display-only; receipt delivery does not dispatch a cat or create another approval.
+system badges remain display-only. On the first durable write only, the receipt service may supplement the
+requester's exact active run in the canonical card thread through the existing per-run Append capability and
+provider dispatcher, with `force:false` and a fixed invocation/response identity. A replay, absent/unsupported run,
+or failed/closed handoff retains the message without another attempt, Queue admission, new invocation or wake.
+Native input-read callbacks log the exact receipt/run/provider correlation without copying proposal content.
+This best-effort live projection does not create another approval or change producer effects/wake contracts.
 The catalog-driven contract suite covers each real producer transition, HTTP selection, durable append
 and next-invocation `ContextAssembler` visibility. SQLite reopen plus real Redis acknowledgement-loss
 tests cover persistence and dedupe across service instances.

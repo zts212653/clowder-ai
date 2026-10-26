@@ -172,4 +172,16 @@ describe('ThreadChatSurface reply handoff eligibility transitions', () => {
     expect(container.textContent).not.toContain('没有更多消息了');
     act(() => writeShellLanguage('zh'));
   });
+
+  it('opens a cat card from the real nameplate without replacing the conversation', async () => {
+    await render([{ ...source('visible source'), from: { kind: 'agent', catId: 'opus' } }]);
+    const avatar = container.querySelector<HTMLButtonElement>('[data-testid="cat-nameplate-avatar"] button');
+    expect(avatar).not.toBeNull();
+    expect(avatar?.getAttribute('aria-label')).toContain('看猫');
+    await act(async () => avatar?.click());
+    expect(document.querySelector('[role="dialog"][aria-label="看猫 · 宪宪"]')).not.toBeNull();
+    expect(container.querySelector('[data-message-id="source"]')?.textContent).toContain('visible source');
+    act(() => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
+    expect(document.querySelector('[role="dialog"][aria-label="看猫 · 宪宪"]')).toBeNull();
+  });
 });

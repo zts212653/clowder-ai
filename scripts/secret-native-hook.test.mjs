@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { resolve } from 'node:path';
 import { test } from 'node:test';
+import { PENDING_EXPOSURE_NOTICE } from './lib/secret-tool-io.mjs';
+import { secretNativeHook } from './secret-native-hook.mjs';
 
 const hook = resolve('scripts/secret-native-hook.mjs');
 const secret = () => ['ghp', '_', 'H'.repeat(36)].join('');
@@ -39,3 +41,43 @@ test('an already exposed native result produces a rotation instruction without r
   assert.ok(!`${result.stdout}${result.stderr}`.includes(secret()));
   assert.equal(invoke({ hook_event_name: 'PostToolUse', tool_response: { stdout: 'safe result' } }).stdout, '');
 });
+
+for (const recorded of [true, false]) {
+  for (const mcp of [false, true]) {
+    test(`${mcp ? 'MCP' : 'native'} post-hook describes exposure truthfully when notice ${recorded ? 'records' : 'fails'}`, async () => {
+      const notices = [];
+      const original = { content: [{ type: 'text', text: secret() }] };
+      const result = await secretNativeHook(
+        {
+          hook_event_name: 'PostToolUse',
+          tool_name: mcp ? 'mcp__fixture__read' : 'Bash',
+          tool_use_id: 'exposure-context-test',
+          tool_response: original,
+        },
+        {
+          notify: async (notice) => {
+            notices.push(notice);
+            if (!recorded) throw new Error('fixture notice unavailable');
+          },
+        },
+      );
+      const output = result.hookSpecificOutput;
+      assert.equal(notices.length, 1);
+      assert.equal(notices[0].state, 'exposed_or_suspected');
+      assert.equal(notices[0].callId, 'exposure-context-test');
+      assert.ok(!JSON.stringify(notices).includes(secret()));
+      assert.ok(!JSON.stringify(result).includes(secret()));
+      assert.equal(original.content[0].text, secret(), 'the original provider result has not been replaced in place');
+      assert.match(output.additionalContext, recorded ? /原线程轮转提醒已持久保存/ : /原线程轮转提醒未能保存/);
+      assert.equal(output.additionalContext.includes(PENDING_EXPOSURE_NOTICE), !recorded);
+      if (mcp) {
+        assert.match(output.additionalContext, /已隐藏/);
+        assert.equal(output.updatedMCPToolOutput._meta.secretExposure.rotationNotice, recorded ? 'recorded' : 'failed');
+      } else {
+        assert.equal(Object.hasOwn(output, 'updatedMCPToolOutput'), false);
+        assert.match(output.additionalContext, /原生工具结果.*已进入模型上下文.*无法隐藏.*请轮转/);
+        assert.doesNotMatch(output.additionalContext, /已隐藏/);
+      }
+    });
+  }
+}

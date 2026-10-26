@@ -70,7 +70,8 @@ function hasAttemptToken(commandAndEnvironment: string | undefined, attemptToken
 }
 
 async function attemptMembers(attemptToken: string): Promise<UnixProcessIdentity[] | null> {
-  const snapshot = await readUnixProcessSnapshot({ includeEnvironment: true });
+  const environmentMarkers = [`${DURABLE_GATE_ATTEMPT_TOKEN_ENV}=${attemptToken}`];
+  const snapshot = await readUnixProcessSnapshot({ includeEnvironment: true, environmentMarkers });
   if (snapshot === null) return null;
   const candidates = [...snapshot.values()].filter(
     (entry) => entry.pid !== process.pid && hasAttemptToken(entry.commandAndEnvironment, attemptToken),
@@ -78,6 +79,7 @@ async function attemptMembers(attemptToken: string): Promise<UnixProcessIdentity
   if (candidates.length === 0) return [];
   const verified = await readUnixProcessSnapshot({
     includeEnvironment: true,
+    environmentMarkers,
     pids: candidates.map((entry) => entry.pid),
   });
   if (verified === null) return null;

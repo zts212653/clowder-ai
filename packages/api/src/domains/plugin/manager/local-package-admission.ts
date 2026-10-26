@@ -20,7 +20,7 @@ import {
   type PluginPackageRecord,
 } from '../host-inventory/types.js';
 import { MAX_PLUGIN_PACKAGE_BYTES, publishPluginPackageArchive } from '../official-package-archive.js';
-import { confirmLegacyArchiveReplacement } from './local-archive-replacement.js';
+import { confirmArchiveReplacement } from './local-archive-replacement.js';
 import { prepareLocalDirectoryDistribution } from './local-directory-distribution.js';
 import type { LocalDirectoryOperation } from './local-directory-operation.js';
 import { inspectLocalDirectorySource } from './local-directory-source.js';
@@ -454,7 +454,7 @@ export class LocalPluginPackageAdmission {
         signalSchemas,
         provenance: admittedProvenance,
       };
-      const legacyReplacement = confirmLegacyArchiveReplacement(
+      const confirmedReplacement = confirmArchiveReplacement(
         source.kind,
         inventoryAtRequest,
         candidate,
@@ -462,7 +462,7 @@ export class LocalPluginPackageAdmission {
         this.options.inventory.options.contract,
       );
       await publishPluginPackageArchive(this.packagesRoot, digest, bytes);
-      const installed = await this.admitCandidate(source, inventoryAtRequest, candidate, legacyReplacement);
+      const installed = await this.admitCandidate(source, inventoryAtRequest, candidate, confirmedReplacement);
       return { pluginId: located.manifest.pluginId, ...installed };
     } catch (error) {
       const failure = error instanceof PluginInventoryError ? inventoryAdmissionError(error) : error;
@@ -488,7 +488,7 @@ export class LocalPluginPackageAdmission {
     source: LocalPluginPackageSource | { readonly kind: 'catalog' },
     inventoryAtRequest: PluginInventorySnapshot,
     candidate: PackageAdmissionCandidate,
-    legacyReplacement = false,
+    confirmedReplacement = false,
   ): Promise<InventoryMutationResult> {
     try {
       const current = inventoryAtRequest.instances.find(
@@ -501,7 +501,7 @@ export class LocalPluginPackageAdmission {
       // installed npm package. Discovery alone never reaches this admission path.
       const localUpdate =
         current !== undefined &&
-        (legacyReplacement ||
+        (confirmedReplacement ||
           source.kind === 'local-directory' ||
           source.kind === 'catalog' ||
           (candidate.provenance?.kind === source.kind &&

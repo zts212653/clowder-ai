@@ -59,6 +59,24 @@ The cat is mid-change and you spot one more thing. In the composer’s + menu, c
 
 </details>
 
+<details>
+<summary><b>Can’t Decide? Think Apart, Then Vote</b> — expert panel, unknown-first and /vote · 0:47</summary>
+
+[![Can’t Decide? Think Apart, Then Vote demo: three cats think on their own, then vote; your idea is on the ballot too](site/assets/demos/panel-vote.jpg)](https://zts212653.github.io/clowder-ai/#demos)
+
+Not sure which way to go? Say “expert panel”: each cat thinks on its own first, and your idea counts as one too. Still split? Say “unknown-first” and the cats check the unknown most likely to overturn the answer. Still can’t decide? Type /vote and let the cats vote. Your idea is on the ballot, and it doesn’t always win. [Watch demo](https://zts212653.github.io/clowder-ai/#demos)
+
+</details>
+
+<details>
+<summary><b>The 10 Hours We Slept</b> — scheduled tasks and GitHub events · 0:55</summary>
+
+[![The 10 Hours We Slept demo: the team is asleep, two cats keep working and hand off to each other](site/assets/demos/while-we-slept.jpg)](https://zts212653.github.io/clowder-ai/#demos)
+
+One real night, October 22: the whole team went to sleep. A scheduled task woke one cat every two hours to keep the open-source sync moving; GitHub woke another when a community PR changed or CI failed. They handed off to each other, and by morning 37 PRs had been merged. [Watch demo](https://zts212653.github.io/clowder-ai/#demos) · thanks to that night's community contributors [mindfn](https://github.com/mindfn), [amazing-fish](https://github.com/amazing-fish), [EdgarR1170](https://github.com/EdgarR1170), [whutzefengxie-ops](https://github.com/whutzefengxie-ops)
+
+</details>
+
 ## Quick Start
 
 ### Desktop Installer

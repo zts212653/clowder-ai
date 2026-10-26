@@ -30,7 +30,7 @@ function quote(value: string): string {
 export function createCodexTerminalLoginDriver(
   options: {
     command?: string;
-    assertSupport?: typeof assertCodexManagedPlatformSupport;
+    assertSupport?: (home: string) => void | Promise<void>;
     openTerminal?: typeof openCodexLoginTerminal;
   } = {},
 ): CodexLoginDriver {
@@ -40,7 +40,7 @@ export function createCodexTerminalLoginDriver(
       const command = options.command ?? resolveCliCommand('codex');
       if (!command) throw new Error('codex_cli_unavailable');
       mkdirSync(input.home, { recursive: true, mode: 0o700 });
-      (options.assertSupport ?? assertCodexManagedPlatformSupport)(input.home);
+      await (options.assertSupport ?? assertCodexManagedPlatformSupport)(input.home);
       const args = ['-c', 'cli_auth_credentials_store="file"', 'login'];
       const env = finalizeCodexAccountEnvironment(
         {

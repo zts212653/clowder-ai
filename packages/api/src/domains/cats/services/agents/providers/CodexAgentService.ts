@@ -1374,7 +1374,7 @@ export class CodexAgentService implements AgentService {
     input: LocalSessionReadInput,
     read: (client: CodexAppServerNativeRpcClient) => Promise<T>,
   ): Promise<T> {
-    const launch = this.prepareCapabilityLaunch(input.cwd, input.account, input.cliConfigArgs, true);
+    const launch = await this.prepareCapabilityLaunch(input.cwd, input.account, input.cliConfigArgs, true);
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(new Error('Session check timed out')), input.timeoutMs);
     const options = { ...launch, invocationId: input.invocationId, signal: controller.signal };
@@ -1407,7 +1407,7 @@ export class CodexAgentService implements AgentService {
     if (this.carrierMode !== 'app_server' || !this.appServerHostPool) {
       throw new Error('codex_native_capability_source_unsupported');
     }
-    const launchConfiguration = this.prepareCapabilityLaunch(input.cwd, input.account, input.cliConfigArgs);
+    const launchConfiguration = await this.prepareCapabilityLaunch(input.cwd, input.account, input.cliConfigArgs);
     // The native CLI creates an implicit home, but refuses a missing explicit one.
     if (launchConfiguration.env?.CODEX_AUTH_MODE === 'api_key' && launchConfiguration.env.CODEX_HOME) {
       const { mkdir } = await import('node:fs/promises');
@@ -1453,12 +1453,12 @@ export class CodexAgentService implements AgentService {
     }
   }
 
-  private prepareCapabilityLaunch(
+  private async prepareCapabilityLaunch(
     cwd: string,
     account?: RuntimeProviderProfile,
     cliConfigArgs: readonly string[] = [],
     localInspection = false,
-  ): Pick<AgentCarrierSessionOptions, 'command' | 'args' | 'cwd' | 'env'> {
+  ): Promise<Pick<AgentCarrierSessionOptions, 'command' | 'args' | 'cwd' | 'env'>> {
     if (!localInspection && (this.carrierMode !== 'app_server' || !this.appServerHostPool))
       throw new Error('codex_native_capability_source_unsupported');
     const nativeTool = usesNativeToolConfiguration(catRegistry.tryGet(this.catId)?.config);
@@ -1497,7 +1497,7 @@ export class CodexAgentService implements AgentService {
     const descriptor = resolveCodexAccountLaunch(selected, { cwd, env });
     if (descriptor.managed || (descriptor.accountRef === 'codex' && descriptor.authMode === 'oauth'))
       assertCodexSharedStateRoots(descriptor.accountOwnerRoot, { launch: descriptor });
-    if (descriptor.managed) assertCodexManagedPlatformSupport(descriptor.credentialHome, this.cliCommand);
+    if (descriptor.managed) await assertCodexManagedPlatformSupport(descriptor.credentialHome, this.cliCommand);
     const args = ['app-server', '--stdio'];
     if (descriptor.authMode === 'api_key') {
       if (customBaseUrl) args.push(...buildCodexCustomProviderArgs(customBaseUrl, 'api_key'));
@@ -2120,7 +2120,7 @@ export class CodexAgentService implements AgentService {
         args.splice(promptSeparator < 0 ? args.length : promptSeparator, 0, ...managedArgs);
         appServerArgs.push(...managedArgs);
       }
-      if (accountLaunch.managed) assertCodexManagedPlatformSupport(accountLaunch.credentialHome, this.cliCommand);
+      if (accountLaunch.managed) await assertCodexManagedPlatformSupport(accountLaunch.credentialHome, this.cliCommand);
       const apiExecutionHome =
         !native && authMode === 'api_key' && customBaseUrl
           ? resolveCodexApiExecutionHome(accountLaunch, customBaseUrl, options?.workingDirectory ?? process.cwd(), {

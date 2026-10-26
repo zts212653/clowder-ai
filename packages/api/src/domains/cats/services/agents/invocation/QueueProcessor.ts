@@ -86,6 +86,7 @@ import {
   type ToolExecutionPolicy,
 } from '../../types.js';
 import { extractImagePaths } from '../providers/image-paths.js';
+import { appendContextAttachmentsToPrompt } from '../routing/context-attachment-prompt.js';
 import { userFacingSystemInfoNoticeContent } from '../routing/persist-system-info-warnings.js';
 import {
   type PersistedPromptMessage,
@@ -1092,6 +1093,33 @@ export class QueueProcessor {
     let providerDispatchStarted = false;
     let sourceMessages: StoredMessage[] = [];
     try {
+      const sourceMessagesBeforeAdmission = (
+        await Promise.all(inputMessageIds.map((messageId) => messageStore.getById(messageId)))
+      ).filter((message): message is StoredMessage => !!message);
+      // Both rejects below run before handoff custody is persisted: a claim
+      // restore does not clear appendPendingByTarget or routingHeldTargetIds,
+      // and leftovers would keep the source from ever starting a fresh turn.
+      if (
+        sourceMessagesBeforeAdmission.some((source) =>
+          input.expectedRuns.some((run) => !canViewMessage(source, { type: 'cat', catId: run.targetId as CatId })),
+        )
+      ) {
+        await queue.restoreClaimedEntries(input.threadId, [input.entryId]);
+        return { outcome: 'rejected', reason: 'append_unavailable' };
+      }
+      const imagePaths = sourceMessagesBeforeAdmission.flatMap((message) => extractImagePaths(message.contentBlocks));
+      // Hand over the body a fresh turn would see (AgentRouter renders the same
+      // attachments): a quote-only comment keeps its words in contentBlocks and
+      // leaves Queue text empty. A body that is still empty reaches no carrier;
+      // its source goes back to the Queue for a fresh turn to project.
+      const appendBody = appendContextAttachmentsToPrompt(
+        claimed.payload.content,
+        sourceMessagesBeforeAdmission.flatMap((message) => message.contentBlocks ?? []),
+      );
+      if (!appendBody.trim() && imagePaths.length === 0) {
+        await queue.restoreClaimedEntries(input.threadId, [input.entryId]);
+        return { outcome: 'rejected', reason: 'append_unavailable' };
+      }
       const pending = Object.fromEntries(
         input.expectedRuns.map((run, index) => [
           run.targetId,
@@ -1104,22 +1132,10 @@ export class QueueProcessor {
         ]),
       );
       await queue.prepareLifecycleAppendHandoff(claimed, pending);
-      const sourceMessagesBeforeAdmission = (
-        await Promise.all(inputMessageIds.map((messageId) => messageStore.getById(messageId)))
-      ).filter((message): message is StoredMessage => !!message);
       if (sourceMessagesBeforeAdmission.length !== inputMessageIds.length) {
         throw new Error(`lifecycle Append source vanished before admission: ${input.entryId}`);
       }
-      if (
-        sourceMessagesBeforeAdmission.some((source) =>
-          input.expectedRuns.some((run) => !canViewMessage(source, { type: 'cat', catId: run.targetId as CatId })),
-        )
-      ) {
-        await queue.restoreClaimedEntries(input.threadId, [input.entryId]);
-        return { outcome: 'rejected', reason: 'append_unavailable' };
-      }
       sourceMessages = sourceMessagesBeforeAdmission;
-      const imagePaths = sourceMessagesBeforeAdmission.flatMap((message) => extractImagePaths(message.contentBlocks));
       // Fence the response receiving this delivery. Model consumption is not a second admission.
       for (const run of input.expectedRuns) {
         if (!this.isExactActiveRun(input.threadId, run)) {
@@ -1212,7 +1228,7 @@ export class QueueProcessor {
           try {
             return await dispatchers[index]!.dispatch(
               {
-                text: claimed.payload.content,
+                text: appendBody,
                 ...(imagePaths.length > 0 ? { imagePaths } : {}),
                 messageIds: inputMessageIds,
                 deliveryId: appendDeliveryId(inputMessageIds[0]!, run.targetId, run.invocationId),
@@ -5567,6 +5583,18 @@ export class QueueProcessor {
                 privateInputEntryIds: admissionEntries
                   .filter((candidate) => candidate.kind === 'private_input')
                   .map((candidate) => candidate.id),
+                ...(entry.kind === 'private_input' &&
+                entry.sourceCategory === 'continuation' &&
+                entry.execution.intent === 'session_handoff_continuation' &&
+                entry.from.kind === 'agent' &&
+                entry.from.catId === input.catId
+                  ? {
+                      sessionHandoff: {
+                        proposalId: entry.payload.sourceRecordId,
+                        continuationEntryId: entry.id,
+                      },
+                    }
+                  : {}),
                 startedAt: input.startedAt,
               };
               if (

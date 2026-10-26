@@ -82,7 +82,7 @@ describe('F293 routing preflight in callback tool responses', () => {
     return JSON.parse(result.content[0].text);
   }
 
-  it('returns queue admission as pending execution, never a second execution verdict', async () => {
+  it('acknowledges the send without post-send queue diagnostics or an execution verdict', async () => {
     const full = decision();
     const admission = {
       v: 1,
@@ -96,60 +96,60 @@ describe('F293 routing preflight in callback tool responses', () => {
     response = { messageId: 'message:sent', routed: ['sol'], routing_admission: admission };
     const result = await callbackPost('/api/callbacks/post-message', { content: 'existing work' });
     const body = JSON.parse(result.content[0].text);
-    assert.deepEqual(body.routing_admission, {
-      stage: 'queue_admitted',
-      executionPreflight: 'pending',
-      snapshotRef: full.snapshotRef,
-      targets: ['sol'],
-    });
+    assert.equal(body.routing_admission, undefined);
+    assert.equal(body.messageId, 'message:sent');
     assert.equal(body.routing_preflight, undefined);
     admission.targets[0].availabilityObservation = 'unavailable';
     admission.targets[0].reasons = [{ code: 'quota_exhausted', summary: 'No current quota', sourceRefs: ['quota:1'] }];
     const warned = await callbackPost('/api/callbacks/post-message', { content: 'existing work' });
-    assert.deepEqual(JSON.parse(warned.content[0].text).routing_admission, admission);
+    assert.equal(JSON.parse(warned.content[0].text).routing_admission, undefined);
+    assert.equal(admission.targets[0].availabilityObservation, 'unavailable', 'internal evidence stays intact');
   });
 
-  it('returns a concise healthy receipt with the exact snapshot and latest recovery reference', async () => {
+  it('returns the actual send acknowledgement without repeating healthy routing history', async () => {
     const full = decision();
     const result = await send(full);
     assert.equal(result.messageId, 'message:sent');
     assert.deepEqual(result.routed, ['sol']);
-    assert.deepEqual(result.routing_preflight, {
-      snapshotRef: full.snapshotRef,
-      targets: [{ targetCatId: 'sol', disposition: 'allowed', reasons: full.targets[0].reasons }],
-    });
+    assert.equal(result.routing_preflight, undefined);
     assert.ok(full.targets[0].contextualSignals, 'the canonical decision remains complete');
   });
 
-  it('keeps all requested targets in order, including a healthy target without recovery history', async () => {
+  it('keeps the send acknowledgement and exposes only blocked targets in a mixed execution result', async () => {
     const full = decision();
-    full.targets.push({ targetCatId: 'argon', disposition: 'allowed', reasons: [], alternatives: [] });
+    full.targets.push({
+      targetCatId: 'argon',
+      disposition: 'rejected',
+      reasons: [{ code: 'routing_signal_unavailable', summary: 'quota_exhausted', sourceRefs: ['quota:1'] }],
+      alternatives: [],
+    });
     const result = await send(full);
     assert.deepEqual(
       result.routing_preflight.targets.map((target) => target.targetCatId),
-      ['sol', 'argon'],
+      ['argon'],
     );
-    assert.deepEqual(result.routing_preflight.targets[1].reasons, []);
+    assert.deepEqual(result.routed, ['sol']);
+    assert.deepEqual(result.routing_preflight.targets[0], full.targets[1]);
   });
 
-  it('preserves complete warnings, rejections, degraded results and unrecognized evidence', async () => {
-    for (const disposition of ['warned', 'rejected']) {
+  it('keeps advisory diagnostics internal and preserves genuine blocked execution evidence', async () => {
+    for (const disposition of ['allowed', 'warned', 'rejected']) {
       const full = decision();
       full.targets[0].disposition = disposition;
       full.targets[0].reasons = [
         { code: 'routing_signal_scarce', summary: 'Quota is scarce', sourceRefs: ['quota:1'] },
       ];
       full.targets[0].alternatives = [{ catId: 'argon', reasonRefs: ['dossier:argon'] }];
-      assert.deepEqual((await send(full)).routing_preflight, full);
+      assert.deepEqual((await send(full)).routing_preflight, disposition === 'rejected' ? full : undefined);
     }
     const degraded = decision();
     degraded.resolverState = 'degraded';
-    assert.deepEqual((await send(degraded)).routing_preflight, degraded);
+    assert.equal((await send(degraded)).routing_preflight, undefined);
     const unrecognized = decision();
     unrecognized.targets[0].reasons[0].code = 'future_warning';
-    assert.deepEqual((await send(unrecognized)).routing_preflight, unrecognized);
+    assert.equal((await send(unrecognized)).routing_preflight, undefined);
     const unbound = decision();
     delete unbound.snapshotRef;
-    assert.deepEqual((await send(unbound)).routing_preflight, unbound);
+    assert.equal((await send(unbound)).routing_preflight, undefined);
   });
 });

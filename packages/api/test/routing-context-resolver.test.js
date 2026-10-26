@@ -242,6 +242,64 @@ describe('RoutingContextResolver', () => {
     assert.equal(ledgerReads, 0);
   });
 
+  it('resolves dispatch decisions from preference heads without loading preference history', async () => {
+    const preference = {
+      v: 1,
+      preferenceId: 'preference:reviewer',
+      revisionId: 'preference:reviewer:v2',
+      commandId: 'command:preference:reviewer:v2',
+      ownerId: 'owner-1',
+      appliesWhen: { intent: 'review' },
+      prefer: [{ type: 'cat', catId: 'terra' }],
+      over: [{ type: 'cat', catId: 'sol' }],
+      rationale: 'Prefer Terra for review.',
+      evidenceRefs: ['evidence:reviewer:v2'],
+      version: 2,
+      supersedesRevisionId: 'preference:reviewer:v1',
+      validFrom: 2_000,
+      lifecycle: 'active',
+    };
+    let headReads = 0;
+    let historyReads = 0;
+    const resolver = new RoutingContextResolver({
+      signalStore: {
+        getOwnerRevision: async () => 0,
+        readDecisionProjection: async () =>
+          buildRoutingSignalDecisionProjection({ ownerId: 'owner-1', revision: 0, events: [] }),
+        listByOwner: async () => [],
+      },
+      preferenceStore: {
+        readDecisionHeads: async () => {
+          headReads += 1;
+          return [preference];
+        },
+        listByOwner: async () => {
+          historyReads += 1;
+          throw new Error('dispatch resolution must not load preference history');
+        },
+      },
+      profileRevisionSource: {
+        load: async () => ({ status: 'fresh', profiles: [], absentCatIds: ['sol', 'terra'] }),
+      },
+    });
+
+    const result = await resolver.resolve({
+      ownerId: 'owner-1',
+      observedAt: 10_000,
+      catalogRevision: 'catalog:v1',
+      intent: 'review',
+      candidates: [candidate('sol'), candidate('terra')],
+    });
+
+    assert.equal(result.status, 'fresh');
+    assert.deepEqual(
+      result.snapshot.candidates.map((entry) => entry.binding.catId),
+      ['terra', 'sol'],
+    );
+    assert.equal(headReads, 1);
+    assert.equal(historyReads, 0);
+  });
+
   it('uses one decision projection for dispatch and the ledger-complete owner read model', async () => {
     const signal = {
       v: 1,
@@ -277,13 +335,41 @@ describe('RoutingContextResolver', () => {
       revision: 2,
       events: [signal, historyOnly],
     });
+    const firstPreference = {
+      v: 1,
+      preferenceId: 'preference:owner-read',
+      revisionId: 'preference:owner-read:v1',
+      commandId: 'command:preference:owner-read:v1',
+      ownerId: 'owner-1',
+      appliesWhen: {},
+      prefer: [{ type: 'cat', catId: 'sol' }],
+      over: [{ type: 'cat', catId: 'terra' }],
+      rationale: 'Initial owner preference.',
+      evidenceRefs: ['evidence:preference:v1'],
+      version: 1,
+      validFrom: 1_000,
+      lifecycle: 'active',
+    };
+    const secondPreference = {
+      ...firstPreference,
+      revisionId: 'preference:owner-read:v2',
+      commandId: 'command:preference:owner-read:v2',
+      rationale: 'Updated owner preference.',
+      evidenceRefs: ['evidence:preference:v2'],
+      version: 2,
+      supersedesRevisionId: firstPreference.revisionId,
+      validFrom: 2_000,
+    };
     const resolver = new RoutingContextResolver({
       signalStore: {
         getOwnerRevision: async () => 2,
         readDecisionProjection: async () => projection,
         listByOwner: async () => [signal, historyOnly],
       },
-      preferenceStore: { listByOwner: async () => [] },
+      preferenceStore: {
+        readDecisionHeads: async () => [secondPreference],
+        listByOwner: async () => [firstPreference, secondPreference],
+      },
       profileRevisionSource: { load: async () => ({ status: 'fresh', profiles: [], absentCatIds: ['sol'] }) },
     });
     const input = {
@@ -302,6 +388,11 @@ describe('RoutingContextResolver', () => {
       [signal.eventId, historyOnly.eventId],
     );
     assert.deepEqual(dispatch.sourceRefs.signalEventIds, [historyOnly.eventId, signal.eventId].sort());
+    assert.deepEqual(dispatch.sourceRefs.preferenceRevisionIds, [secondPreference.revisionId]);
+    assert.deepEqual(
+      ownerRead.preferenceRevisions.map((preference) => preference.revisionId),
+      [firstPreference.revisionId, secondPreference.revisionId],
+    );
   });
 
   it('returns typed dossier degradation instead of inventing a capability snapshot', async () => {

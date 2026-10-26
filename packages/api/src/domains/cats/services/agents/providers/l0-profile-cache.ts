@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { profileCapsuleReadRelativePath } from '@cat-cafe/shared/profile-contract';
 
 export interface L0CacheGeneration {
   global: number;
@@ -12,12 +13,13 @@ export type L0Projection = 'owner' | 'public';
 function computeProfileContentSignature(profileDir: string): string | null {
   if (!existsSync(profileDir)) return 'missing';
   const entries: string[] = [];
-  const capsulePath = resolve(profileDir, 'operator-capsule.md');
+  const capsuleName = profileCapsuleReadRelativePath((path) => existsSync(resolve(profileDir, path)));
+  const capsulePath = resolve(profileDir, capsuleName);
   try {
-    entries.push(`operator-capsule.md\t${createHash('sha256').update(readFileSync(capsulePath)).digest('hex')}`);
+    entries.push(`${capsuleName}\t${createHash('sha256').update(readFileSync(capsulePath)).digest('hex')}`);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') return null;
-    entries.push('operator-capsule.md\tmissing');
+    entries.push(`${capsuleName}\tmissing`);
   }
 
   const relationshipDir = resolve(profileDir, 'relationship');

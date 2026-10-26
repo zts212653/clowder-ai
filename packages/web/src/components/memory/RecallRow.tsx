@@ -1,6 +1,8 @@
 'use client';
 import Link from 'next/link';
 import { useState } from 'react';
+import { openExactPlace } from '@/components/shell/mailbox/open-exact-place';
+import { useWorkspaceChatReveal } from '@/components/workbench/WorkspaceChatReveal';
 import { recallDeliveryLabel, recallResultHref, recallResultTitle, recallTypeLabel } from '@/hooks/recall-display';
 import type { RecallKind } from '@/hooks/recall-feed-model';
 import { recallEventDisplayTitle, recallEventResultLabel, recallKind } from '@/hooks/recall-feed-model';
@@ -46,6 +48,7 @@ export function RecallCard({
   allowDeliveryExpansion?: boolean;
 }) {
   const [expanded, setExpanded] = useState(false);
+  const revealChat = useWorkspaceChatReveal();
   const title = recallEventDisplayTitle(event);
   const results = event.results ?? [];
   const kind = recallKind(event);
@@ -102,7 +105,30 @@ export function RecallCard({
                   {event.cueStatus ? recallEventResultLabel(event) : item.consumed ? '之后读了' : '之后没看到读取'}
                 </span>
                 {recallResultHref(item) && (
-                  <Link href={recallResultHref(item)!} className="text-cafe-accent hover:underline">
+                  <Link
+                    href={recallResultHref(item)!}
+                    onClick={(event) => {
+                      if (
+                        event.defaultPrevented ||
+                        event.button !== 0 ||
+                        event.metaKey ||
+                        event.ctrlKey ||
+                        event.shiftKey ||
+                        event.altKey
+                      )
+                        return;
+                      const source = /^\/thread\/([A-Za-z0-9_-]{1,200})\?message=([A-Za-z0-9_-]{1,200})$/.exec(
+                        recallResultHref(item) ?? '',
+                      );
+                      if (!source) return;
+                      event.preventDefault();
+                      // The Chat host owns panel visibility (it re-opens a 'workspace' panel on its own);
+                      // ask it to reveal this conversation so the exact message is not left under the overlay.
+                      revealChat?.(source[1]);
+                      openExactPlace(`message:${source[1]}:${source[2]}`, window.location.pathname);
+                    }}
+                    className="text-cafe-accent hover:underline"
+                  >
                     打开<span className="sr-only"> {recallResultTitle(item)}</span>
                   </Link>
                 )}

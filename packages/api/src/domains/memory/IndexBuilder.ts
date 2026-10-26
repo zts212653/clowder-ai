@@ -41,6 +41,7 @@ import { runMemoryScan } from './MemoryProcess.js';
 import { buildSearchableMessageContent } from './message-search-content.js';
 import { type PassageVectorStore, passageVectorKey } from './PassageVectorStore.js';
 import { readPassageEmbeddingPage } from './passage-embedding-page.js';
+import { PassageWarmupDiagnostics } from './passage-warmup-diagnostics.js';
 import { prepareDocumentVectors } from './prepare-document-vectors.js';
 import { type DocumentPassageSource, replaceDocumentPassages } from './replace-document-passages.js';
 import type { SqliteEvidenceStore } from './SqliteEvidenceStore.js';
@@ -668,14 +669,17 @@ export class IndexBuilder implements IIndexBuilder {
   private runPassageEmbeddingWarmup(): Promise<void> {
     if (this.passageEmbeddingWarmupInFlight) return this.passageEmbeddingWarmupInFlight;
 
-    const warmup = this.embedMissingPassages()
+    const observation = new PassageWarmupDiagnostics();
+    const warmup = this.embedMissingPassages(undefined, observation)
       .catch(() => {
+        observation.stop('rejected', 'unexpected-error');
         /* fail-open: passage vectors are an accelerator; passage_fts remains canonical */
       })
       .finally(() => {
         if (this.passageEmbeddingWarmupInFlight === warmup) {
           this.passageEmbeddingWarmupInFlight = null;
         }
+        observation.finish();
       });
     this.passageEmbeddingWarmupInFlight = warmup;
     return warmup;
@@ -1506,14 +1510,18 @@ export class IndexBuilder implements IIndexBuilder {
   }
 
   /** F209 Phase A: embed newly indexed raw passages without blocking lexical recall. */
-  private async embedMissingPassages(docAnchors?: string[]): Promise<void> {
+  private async embedMissingPassages(docAnchors?: string[], observation?: PassageWarmupDiagnostics): Promise<void> {
     const deps = this.embedDeps;
     const passageVectors = deps?.passageVectorStore;
-    if (!passageVectors) return;
+    if (!passageVectors) {
+      observation?.stop('retired', 'no-dependencies');
+      return;
+    }
 
     try {
       await deps.embedding.reprobeIfNeeded();
     } catch {
+      observation?.stop('rejected', 'probe-error');
       return; // Optional vector work cannot fail a canonical dirty-thread flush.
     }
     const db = this.store.getDb();
@@ -1524,15 +1532,27 @@ export class IndexBuilder implements IIndexBuilder {
       // Resolved promises only yield to microtasks. Warm pages still need an
       // actual I/O turn, and service deactivation must stop the remaining scan.
       await yieldToIo();
-      if (this.embedDeps !== deps || !deps.embedding.isReady()) return;
+      if (this.embedDeps !== deps || !deps.embedding.isReady()) {
+        observation?.stop('retired', 'dependencies-unavailable');
+        return;
+      }
       let page: ReturnType<typeof readPassageEmbeddingPage>;
       try {
         page = readPassageEmbeddingPage(db, passageVectors, lastId, PASSAGE_EMBED_SCAN_BATCH_SIZE, docAnchors);
       } catch {
+        observation?.stop('rejected', 'metadata-read-error');
         // Structural read errors cannot be repaired by scanning the next page.
         return;
       }
-      if (!page) return;
+      if (!page) {
+        if (observation) observation.scanExhausted = true;
+        return;
+      }
+      if (observation) {
+        observation.pagesRead++;
+        observation.metadataRows += page.metadataRows;
+        observation.missingBodies += page.passages.length;
+      }
       lastId = page.lastId;
 
       try {
@@ -1540,26 +1560,38 @@ export class IndexBuilder implements IIndexBuilder {
           passages: page.passages,
           embedding: deps.embedding,
           passageVectorStore: passageVectors,
-          commitBatch: (batch, vectors) =>
-            this.store.runExclusive(() => {
-              if (this.embedDeps !== deps) return;
+          commitBatch: (batch, vectors) => {
+            // Provider work has returned even if writer admission or its dependency fence retires the commit.
+            if (observation) observation.returnedBatches++;
+            return this.store.runExclusive(() => {
+              if (this.embedDeps !== deps) {
+                observation?.stop('retired', 'dependencies-changed');
+                return;
+              }
               const current = db.prepare(
                 'SELECT content FROM evidence_passages WHERE doc_anchor = ? AND passage_id = ?',
               );
               for (let i = 0; i < batch.length; i++) {
                 const row = batch[i];
                 const live = current.get(row.docAnchor, row.passageId) as { content: string } | undefined;
-                if (live?.content !== row.content) continue;
+                if (live?.content !== row.content) {
+                  if (observation) observation.sourceChanged++;
+                  continue;
+                }
                 passageVectors.upsert(passageVectorKey(row.docAnchor, row.passageId), vectors[i]);
+                if (observation) observation.committedVectors++;
               }
-            }),
+            });
+          },
         });
         consecutiveErrors = 0;
       } catch {
         // Batch-level fail-open: skip this batch, continue with the next.
         // passage_fts remains canonical — vectors are an accelerator.
         consecutiveErrors++;
+        if (observation) observation.batchFailures++;
         if (consecutiveErrors >= 3) {
+          observation?.stop('rejected', 'consecutive-batch-errors');
           // 3 consecutive batch failures → embedding service likely down, stop gracefully
           return;
         }

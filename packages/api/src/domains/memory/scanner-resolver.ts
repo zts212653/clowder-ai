@@ -5,9 +5,11 @@ import { join } from 'node:path';
 import type { CollectionManifest } from './collection-types.js';
 import { FlatScanner } from './FlatScanner.js';
 import type { RepoScanner } from './interfaces.js';
+import { ProfileCollectionScanner } from './profile/ProfileCollectionScanner.js';
 import { StructuredScanner } from './StructuredScanner.js';
 
 export function resolveCollectionScanner(manifest: CollectionManifest): RepoScanner {
+  if (manifest.id === 'domain:user-profile') return new ProfileCollectionScanner(manifest.id, manifest.exclude);
   const level = manifest.scannerLevel === 'auto' ? detectScannerLevel(manifest.root) : manifest.scannerLevel;
 
   if (level === 0) return new FlatScanner(manifest.id, manifest.exclude);

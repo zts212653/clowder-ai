@@ -9,7 +9,8 @@
  */
 
 import { randomUUID } from 'node:crypto';
-import { mkdirSync, readdirSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
+import { mkdirSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
+import { opendir, stat } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { createModuleLogger } from '../../../../../infrastructure/logger.js';
 import { findMonorepoRoot } from '../../../../../utils/monorepo-root.js';
@@ -18,6 +19,7 @@ const log = createModuleLogger('session-credential-file');
 const sessionFileBindings = new Map<string, Map<string, string>>();
 const MAX_BINDINGS = 1_000;
 const SWEEP_AGE_MS = 48 * 60 * 60 * 1_000;
+const activeSweeps = new Set<string>();
 
 export interface PreparedCredentialEnv {
   env: Record<string, string>;
@@ -71,7 +73,7 @@ export function writeSessionCredentialFile(callbackEnv: Record<string, string> |
       unlinkSync(temporaryPath);
       writeFileSync(path, serialized, { mode: 0o600 });
     }
-    sweepStaleFiles(dir);
+    void sweepStaleFiles(dir);
     return true;
   } catch (err) {
     try {
@@ -117,20 +119,29 @@ export function bindSessionCredentialFile(namespace: string, sessionId: string |
   bindings.set(sessionId, path);
 }
 
-function sweepStaleFiles(dir: string): void {
+async function sweepStaleFiles(dir: string): Promise<void> {
+  const root = resolve(dir);
+  if (activeSweeps.has(root)) return;
+  activeSweeps.add(root);
   try {
     const cutoff = Date.now() - SWEEP_AGE_MS;
-    for (const name of readdirSync(dir)) {
-      if (!name.endsWith('.json')) continue;
-      const filePath = join(dir, name);
+    const directory = await opendir(root);
+    for await (const entry of directory) {
+      if (!entry.name.endsWith('.json')) continue;
+      const filePath = join(root, entry.name);
       try {
-        if (statSync(filePath).mtimeMs < cutoff) unlinkSync(filePath);
+        const observed = await stat(filePath);
+        // A resume may refresh this path while metadata is pending. Keep the
+        // final freshness check and removal in one turn, as in the old sweep.
+        if (observed.mtimeMs < cutoff && statSync(filePath).mtimeMs < cutoff) unlinkSync(filePath);
       } catch {
         // Best-effort: another invocation may have removed the file.
       }
     }
   } catch {
     // Sweeping must never break an invocation.
+  } finally {
+    activeSweeps.delete(root);
   }
 }
 

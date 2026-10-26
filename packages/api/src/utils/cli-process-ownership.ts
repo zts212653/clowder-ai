@@ -15,6 +15,7 @@ import { readFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import { debuglog } from 'node:util';
+import { macProcessEnvironmentCommand } from '#process-environment-snapshot';
 import { CLI_PROCESS_OWNER_ENV } from './cli-process-environment.js';
 
 export { CLI_PROCESS_OWNER_ENV } from './cli-process-environment.js';
@@ -103,10 +104,10 @@ interface CliExecutionOwnerLog {
   warn(bindings: Record<string, unknown>, message: string): void;
 }
 
-export interface ProcessSnapshotOptions {
-  includeEnvironment?: boolean;
-  pids?: readonly number[];
-}
+export type ProcessSnapshotOptions = { pids?: readonly number[] } & (
+  | { includeEnvironment?: false; environmentMarkers?: never }
+  | { includeEnvironment: true; environmentMarkers: readonly string[] }
+);
 
 export type ReadProcessSnapshot = (
   options?: ProcessSnapshotOptions,
@@ -351,9 +352,16 @@ export function readUnixProcessSnapshotSync(
   // An explicit empty PID set needs no platform-specific process lookup.
   if (pids && pids.length === 0) return new Map();
   if (process.platform === 'win32') return null;
-  const args = buildUnixProcessSnapshotArgs(options.includeEnvironment === true, pids);
+  const command =
+    options.includeEnvironment && process.platform === 'darwin'
+      ? macProcessEnvironmentCommand({
+          pids,
+          markers: options.environmentMarkers,
+          retainEnvironmentKeys: [CLI_PROCESS_OWNER_ENV],
+        })
+      : { file: '/bin/ps', args: buildUnixProcessSnapshotArgs(options.includeEnvironment === true, pids) };
   if (options.includeEnvironment) processDebug('ownership-process-table-scan');
-  const result = spawnSync('/bin/ps', args, {
+  const result = spawnSync(command.file, command.args, {
     encoding: 'utf8',
     timeout: CLI_PROCESS_SNAPSHOT_TIMEOUT_MS,
     maxBuffer: options.includeEnvironment ? 32 * 1024 * 1024 : 4 * 1024 * 1024,
@@ -391,12 +399,19 @@ export function readUnixProcessSnapshot(
   const pids = options.pids?.filter(isPositiveSafeInteger);
   if (pids && pids.length === 0) return Promise.resolve(new Map());
   if (process.platform === 'win32') return Promise.resolve(null);
-  const args = buildUnixProcessSnapshotArgs(options.includeEnvironment === true, pids);
+  const command =
+    options.includeEnvironment && process.platform === 'darwin'
+      ? macProcessEnvironmentCommand({
+          pids,
+          markers: options.environmentMarkers,
+          retainEnvironmentKeys: [CLI_PROCESS_OWNER_ENV],
+        })
+      : { file: '/bin/ps', args: buildUnixProcessSnapshotArgs(options.includeEnvironment === true, pids) };
   if (options.includeEnvironment) processDebug('ownership-process-table-scan');
   return new Promise((resolveSnapshot) => {
     execFile(
-      '/bin/ps',
-      args,
+      command.file,
+      command.args,
       {
         encoding: 'utf8',
         timeout: CLI_PROCESS_SNAPSHOT_TIMEOUT_MS,

@@ -234,21 +234,19 @@ F293 不再把“F300 runtime 未启动”当成全局停止条件。当前按 c
 **PR1：恢复回执去噪，Phase C follow-through / AC-C4 + INV-C11。** 先交独立完整功能；PR2 不混入这张 PR。只压缩展示，完整 immutable timeline、closure/recovery authority、Team/账本历史保留。
 
 - [x] AC-NR1: 无 active/expired 约束时，将所有匹配的 recovered 历史合成一条，显示已恢复状态记录数和最近 recovery 的有界引用；计数发生在展示容量裁剪之前，不把多个记录误称为多个独立故障。当前故障、人工暂停、过期 unknown 的归约与完整因果恢复不变。
-- [x] AC-NR2: 正常单目标派活的 MCP 预检摘要约 100 token，保留 exact snapshotRef、显式目标、disposition、汇总原因及最新引用；完整决定仍归原 API/read model。告警、拒绝、degraded 或未识别证据保留完整解释，不为预算丢失决策依据。覆盖 reasons 的预检、工具返回、Team/成员状态和聊天渲染消费者。
+- [x] AC-NR2: 按 2026-10-25 的已接受纠正，正常或仍可执行的告警状态不生成发送后预检系统消息，也不在猫的 MCP 发送回执回显 B/C 诊断；旧正常卡在实时、历史重载与回放均隐藏。实际拒绝保留原目标、中文说明和原消息重试；内部 Queue/child/terminal 的 exact snapshotRef 与完整决定保留。能改变选择的可用性、余粮与候选事实放在选候选前，不补发无用后置摘要。未识别的协议证据不静默丢弃。
 
 **PR2：派活事实条，Phase B/C follow-through — dispatch quota facts。** 接既有 AC-B3/B4、AC-C1/C2，由 Phase E 做真实 A2A 验收。F293 只读 canonical owner 的 typed supply facts，不新增额度账本、画像事实、调度器、opaque score 或阈值自动解限；expanded custody/Cancel/AND-join 不在此刀。
 
 - [ ] AC-QF1: cat→当前 quota pool 绑定须由账号/执行 owner 证明，采用不泄漏身份的 opaque pool identity、binding revision/evidence，并进入 catalog/snapshot digest；actual-send 与最终冻结的 ExecutionAccountSnapshot.accountRevision 对齐，换号须重检或 unknown。账号归属不等于执行/模型的池适用性：当前 Codex main/spark/review/overflow 均仅为 exact account 下的独立观测，缺 provider typed applicability proof 时全部 `applicability: unknown`（包括 main），不进 provenQuotaPools、不改变 availability。将来逐池生效须取 exact frozen binding 的 limitId 或同等 typed proof，evidenceRef 指向 binding proof。缺绑定、无主观测、principal 不匹配或读取失败均 unknown，不按 provider/家族猜。owner 原文：`[thread-id]#private-source-id`「契约结论」。
 - [ ] AC-QF2: 同一 resolver 消费余量、多窗口、resetAt、observedAt 及 source freshness/validUntil；旧读数只可 stale 展示。Codex 按账号，Claude/Kimi/Gemini 按实际计划和窗口分别记录；Kimi 家内 Allegro 的 5 小时、7 天、月度约束并存，Gemini 懒启动周窗口仍待核。窗口不平均、不相加，不把 resetAt 当作 freshness 保证或把正向事实塞进负面 signal。
-- [ ] AC-QF3: 在选人前，对 caller/roster/F208 形成的角色 longlist 经同一 read service 读取 advisory selection snapshot A；MCP 只对 new-execution-capable targets 返回独立 queue-admission observation B（stage=queue_admitted、executionPreflight=pending），不冒充执行 allowed/rejected 或恢复证据。exact continue_current 沿用 active run 的 frozen binding 与原 C，不生成 B、不承诺新 C、不新增 pre-append check；混合 fan-out 的 B.targets 排除这组 target。append race 退回 next_work 时实际新 child 仍取 fresh C，初始响应不回填 B。Queue 执行前先冻结 provider 实际消费的 binding/account revision，再 resolve execution preflight C，C 完成后才创建 child/启动 provider；执行 notice 与 terminal observer 共用 exact C。B→C 换号正常重检，无法证明同源时 unknown/warned；C 后不另读换号。显式目标不变。owner 裁定：`[thread-id]#private-source-id` 与 continue_current 澄清 `[thread-id]#private-source-id`。
+- [ ] AC-QF3: 在选人前，对 caller/roster/F208 形成的角色 longlist 经同一 read service 读取 advisory selection snapshot A；Queue 只对 new-execution-capable targets 记录独立 queue-admission observation B（stage=queue_admitted、executionPreflight=pending），保留内部 provenance，不作为发送后 MCP 诊断回显，也不冒充执行 allowed/rejected 或恢复证据。exact continue_current 沿用 active run 的 frozen binding 与原 C，不生成 B、不承诺新 C、不新增 pre-append check；混合 fan-out 的 B.targets 排除这组 target。append race 退回 next_work 时实际新 child 仍取 fresh C，初始响应不回填 B。Queue 执行前先冻结 provider 实际消费的 binding/account revision，再 resolve execution preflight C，C 完成后才创建 child/启动 provider；执行 notice 与 terminal observer 共用 exact C。B→C 换号正常重检，无法证明同源时 unknown/warned；C 后不另读换号。显式目标不变。owner 裁定：`[thread-id]#private-source-id` 与 continue_current 澄清 `[thread-id]#private-source-id`。
 - [ ] AC-QF4: 仅展示 canonical account owner 允许的账号展示名；不把 raw accountRef、email/user/workspace 或私人/公司身份写入 F293 subject/evidence/log。备用账号标记 switchRequired，不计入当前猫的 provenQuotaPools 或当前可用余量。
-- [ ] AC-QF5: 每轮常驻路由内容不增加；派活时 6 猫事实条约 300 token、正常预检摘要约 100 token，以同一近似分词器和实物计量，不把警告压成失真信息。
+- [ ] AC-QF5: 每轮常驻路由内容不增加；选人前 6 猫事实条约 300 token，以同一近似分词器和实物计量。正常发送后的预检诊断为零；真实拒绝保留决策与恢复依据，内部原始事实完整留存。
 - [ ] AC-QF6: 至少一次真实 A2A：role longlist 内原非首选猫因 fresh capacity 被选中，执行 C 仍成立，对方实际接下且 You 未补粮情报；另覆盖 stale、unknown binding、switchRequired、operator 已定限制到期四类反例。只显示成功不算交付。
 - [ ] AC-QF7: 上线前补同四周猫发起交接分母；按独立任务必要派工去重，含该派未派与人类接管，区分主动点名和被迫补救。上线一周看每百次比例、粮相关纠正、交付量/等待/返工，并用新题复做盲选；30%/50% 仅参考，不作硬阈值。
 
 性能 prerequisite [#6067](https://github.com/zts212653/clowder-ai/pull/6067) 已合入 `473adb24f8c1d3d8619b0fb9aec7608232ffcb01`，owner 的 resolver/store claim 释放；PR2 已同步并验证组合版本。TTL=0 全账本仍为真相，decision projection 可重建。latest-main gate 冻结 `248a60f94b186b5585d91844b1d8dc40e6036dee`，分类 full/high，却在无关 F294 browser admission 规划处退出 1；full gate 未执行/未通过，已将原始失败源回投 F294 v3 既有执行 owner。按 SOP 采用受影响覆盖，high-assurance 非作者审查要求不变。
-
-所有 AC-QF 暂保持开放，不将上述实现/链路证据扩为完整 live/效果通过。四周 public agent census 与 Task/source identity 已采齐，独立任务分母与主动点名/补救分拆尚未核验；24 个定向原源案例已送 Argon 校准，不拿候选或 raw routed 数当分母。新 20 题与旧题 source/thread 无交集，Argon 首次答卷已封存，自报 18 题未识别污染、2 题已知；当前名册先验的影响与对照边界仍需保留。实际激活后一周观察尚未开始。正式运行进程早于本 merge，原生工具尚无 forRole 参数，未声称已加载本刀；`f16399d26482ece3341137c11f64c6189f3f726c` 只是所读 runtime checkout，不能替代新实例加载证明。Alpha 生效不代签正式激活。
 
 ### Phase D — Slow Routing Knowledge Freshness & Migration
 

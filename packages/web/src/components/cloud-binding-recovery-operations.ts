@@ -8,7 +8,7 @@ export type { AuthorizedConversationCandidate } from './authorized-conversations
 export type RecoveryLoadState =
   | { kind: 'loading' }
   | { kind: 'unauthorized' }
-  | { kind: 'error'; message: string }
+  | { kind: 'error'; message: string; actionLabel?: string }
   | {
       kind: 'ready';
       candidates: AuthorizedConversationCandidate[];
@@ -17,6 +17,7 @@ export type RecoveryLoadState =
       retryStateError?: string;
       retryState?: 'ready' | 'pending' | 'unavailable';
       connectionIssue?: string;
+      connectionActionLabel?: string;
       titleSyncMessage?: string;
     };
 
@@ -58,7 +59,11 @@ export async function readRecoveryState(
   const [bindingBody] = await Promise.all([bindingResponse.json().catch(() => ({})) as Promise<CloudBindingsResponse>]);
   if (signal.aborted) return null;
   if (!authorized.response.ok) {
-    return { kind: 'error', message: authorized.body.error ?? `授权会话读取失败 (${authorized.response.status})` };
+    return {
+      kind: 'error',
+      message: authorized.body.setupIssue?.message ?? '暂时读不到已授权的会话，请检查 Personal Chrome 插件状态后重试。',
+      actionLabel: authorized.body.setupIssue?.actionLabel ?? '检查 Personal Chrome',
+    };
   }
   if (!bindingResponse.ok) {
     return { kind: 'error', message: bindingBody.error ?? `当前 Thread 绑定读取失败 (${bindingResponse.status})` };

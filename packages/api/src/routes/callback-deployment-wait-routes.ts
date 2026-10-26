@@ -19,6 +19,7 @@ import { deploymentWaitGeneration } from '../domains/cats/services/stores/ports/
 import type { ITaskStore } from '../domains/cats/services/stores/ports/TaskStore.js';
 import { captureDeploymentWaitAuthorization } from '../domains/runtime-deployment/DeploymentWaitAuthorization.js';
 import type { DeploymentWaitLifecycleService } from '../domains/runtime-deployment/DeploymentWaitLifecycleService.js';
+import type { SessionHandoffWaitSourceDeps } from '../domains/runtime-deployment/SessionHandoffWaitSource.js';
 import { requireCallbackAuth } from './callback-auth-prehandler.js';
 import { captureDeploymentWaitSource } from './callback-typed-wait-source.js';
 
@@ -40,7 +41,7 @@ export interface DeploymentObservationProvider {
   }): Promise<DeploymentObservationV1 | null>;
 }
 
-export interface DeploymentWaitCallbackRouteDeps {
+export interface DeploymentWaitCallbackRouteDeps extends SessionHandoffWaitSourceDeps {
   readonly taskStore: ITaskStore;
   readonly messageStore: Pick<IMessageStore, 'getById'>;
   readonly registry: Pick<InvocationRegistry, 'isLatest'>;
@@ -186,6 +187,8 @@ async function performRegistration(
 
   const source = await captureDeploymentWaitSource(auth, {
     messageStore: deps.messageStore,
+    ...(deps.handoffProposalStore ? { handoffProposalStore: deps.handoffProposalStore } : {}),
+    ...(deps.sessionChainStore ? { sessionChainStore: deps.sessionChainStore } : {}),
     ...(deps.invocationTracker ? { invocationTracker: deps.invocationTracker } : {}),
   });
   if (!source) return result(409, { error: 'Invocation source is unavailable; no wait was registered' });

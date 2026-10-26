@@ -1,9 +1,5 @@
 import { createHash } from 'node:crypto';
-import type {
-  RoutingAdmissionProvenanceV1,
-  RoutingPreflightDecisionV1,
-  RoutingQueueAdmissionReceiptV1,
-} from '@cat-cafe/shared';
+import type { RoutingAdmissionProvenanceV1, RoutingQueueAdmissionReceiptV1 } from '@cat-cafe/shared';
 
 type ObservedTarget = RoutingQueueAdmissionReceiptV1['targets'][number];
 
@@ -26,24 +22,4 @@ export function routingAdmissionProvenance(receipt: RoutingQueueAdmissionReceipt
     ...(receipt.snapshotRef ? { snapshotRef: receipt.snapshotRef } : {}),
     targets: receipt.targets.map((target) => ({ targetCatId: target.targetCatId, factsRef: factsRef(target) })),
   };
-}
-
-/** Compare meaning, not snapshotRefs: observedAt alone makes otherwise identical snapshots differ. */
-export function executionFactsChanged(
-  admission: RoutingAdmissionProvenanceV1 | undefined,
-  decision: RoutingPreflightDecisionV1,
-  catId: string,
-): boolean {
-  const previous = admission?.targets.find((target) => target.targetCatId === catId);
-  const target = decision.targets.find((target) => target.targetCatId === catId);
-  if (!admission || !previous || !target || admission.observedAt > decision.observedAt) return false;
-  return (
-    previous.factsRef !==
-    factsRef({
-      availabilityObservation:
-        target.disposition === 'allowed' ? 'available' : target.disposition === 'rejected' ? 'unavailable' : 'warned',
-      reasons: target.reasons,
-      ...(target.capacityFacts ? { capacityFacts: target.capacityFacts } : {}),
-    })
-  );
 }

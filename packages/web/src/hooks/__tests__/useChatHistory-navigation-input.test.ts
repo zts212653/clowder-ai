@@ -293,6 +293,51 @@ describe('useChatHistory navigation input owner', () => {
     expect(readChatScrollState(threadId)).toMatchObject({ anchor: 'offset', messageAnchor: { messageId: 'first' } });
   });
 
+  it.each(['refresh', 'restore'] as const)('keeps a return alive during pointer hover in %s', async (phase) => {
+    const threadId = `return-hover-${phase}`;
+    const { el, top } = await openThread(threadId);
+    act(() => {
+      const gesture = beginGesture();
+      gesture.scrollTo(200);
+      gesture.end();
+    });
+    const origin = capturedHook!.captureReadingRef()!;
+    act(() => {
+      const gesture = beginGesture();
+      gesture.scrollTo(500);
+      gesture.end();
+    });
+    let releaseHistory!: (response: Response) => void;
+    apiFetchMock.mockImplementationOnce(
+      () =>
+        new Promise<Response>((resolve) => {
+          releaseHistory = resolve;
+        }),
+    );
+    let receipt!: ReturnType<ReturnType<typeof useChatHistory>['restoreReadingRef']>;
+    await act(async () => {
+      receipt = capturedHook!.restoreReadingRef(origin.ref, undefined, { refresh: true });
+    });
+    expect(releaseHistory).toBeTypeOf('function');
+    const hover = () => {
+      el.dispatchEvent(new MouseEvent('pointermove', { clientY: 150, buttons: 0 }));
+      el.dispatchEvent(new MouseEvent('pointermove', { clientY: 180, buttons: 0 }));
+    };
+    if (phase === 'refresh') act(hover);
+    await act(async () => {
+      releaseHistory({
+        ok: true,
+        json: async () => ({ messages: [makeMsg('first', 1), makeMsg('second', 2)], hasMore: false }),
+      } as Response);
+    });
+    if (phase === 'restore') act(hover);
+    await act(async () => {
+      for (let frame = 0; frame < 8; frame++) flushAnimationFrames();
+    });
+    expect(await receipt).toMatchObject({ status: 'settled', exact: true });
+    expect(top.get()).toBe(200);
+  });
+
   it('returns through multiple older pages without converting the origin to bottom', async () => {
     const threadId = 'return-multiple-pages';
     const { el, top } = await openThread(threadId);

@@ -57,6 +57,10 @@
     "./proposal-message": {
       "import": "./dist/proposal-message.js",
       "types": "./dist/proposal-message.d.ts"
+    },
+    "./profile-opening-reference": {
+      "import": "./dist/profile-opening-reference.js",
+      "types": "./dist/profile-opening-reference.d.ts"
     }
   },
   "scripts": {

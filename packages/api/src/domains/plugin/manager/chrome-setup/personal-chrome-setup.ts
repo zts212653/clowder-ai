@@ -9,6 +9,7 @@ import type { VerifiedPluginPackageLocator } from '../../external-runtime/types.
 import type { PluginInventoryStore } from '../../host-inventory/ports.js';
 import type { PluginInstanceRecord } from '../../host-inventory/types.js';
 import type { InstalledPluginOperationResult } from '../../operations/plugin-operation-routes.js';
+import type { BuiltinPluginPackageMaterializer } from '../builtin-package-materializer-types.js';
 import { chromeSetupPolicy, isChromeSetupRequest } from './personal-chrome-setup-policy.js';
 import { runChromeSetupProcess } from './personal-chrome-setup-process.js';
 
@@ -52,6 +53,7 @@ const response = (status: number, body: Record<string, unknown>): InstalledPlugi
 export interface PersonalChromeSetupOptions {
   readonly inventory: Pick<PluginInventoryStore, 'snapshot'>;
   readonly packages: VerifiedPluginPackageLocator;
+  readonly materializer?: BuiltinPluginPackageMaterializer;
   readonly lifecycle: Pick<ExternalPluginLifecycleService, 'runWithRuntimeSuspended'>;
   readonly projectRoot: string;
   /** Host startup coordinate, never supplied by a plugin or an HTTP request. */
@@ -109,7 +111,15 @@ export class PersonalChromeSetup {
     const perform = async (expected: PluginInstanceRecord) => {
       const current = () => assertCurrent(expected);
       await current();
-      const verified = await this.options.packages.resolveInstalledPackage(initial.packageDigest);
+      const verified = this.options.materializer
+        ? await this.options.materializer.resolve({
+            pluginInstanceId: initial.pluginInstanceId,
+            pluginId: record.pluginId,
+            packageDigest: initial.packageDigest,
+            ...(record.provenance?.packageName ? { packageName: record.provenance.packageName } : {}),
+            sourceKind: record.provenance?.kind ?? 'local-archive',
+          })
+        : await this.options.packages.resolveInstalledPackage(initial.packageDigest);
       try {
         await verified.verifyIntegrity();
         if (JSON.stringify(verified.manifest) !== JSON.stringify(record.manifest))

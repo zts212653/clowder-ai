@@ -3,6 +3,8 @@ import {
   type ProfileMemoryOwnerEntry,
   profileMemoryOwnerActionSchema,
 } from '@cat-cafe/shared';
+import { PROFILE_CAPSULE_RELATIVE_PATH } from '@cat-cafe/shared/profile-contract';
+import { profileRevisionOf } from '@cat-cafe/shared/profile-revision';
 import type { FastifyPluginAsync } from 'fastify';
 import type { IProfileUpdateProposalStore } from '../domains/cats/services/stores/ports/ProfileUpdateProposalStore.js';
 import type { ProfileMemoryLifecycleService } from '../domains/memory/profile/ProfileMemoryLifecycleService.js';
@@ -32,7 +34,17 @@ export const profileMemoryOwnerRoutes: FastifyPluginAsync<ProfileMemoryOwnerRout
         .list(owner)
         .map(async (entry) => projectEntry(entry, await readProfileMemoryProposals(owner, entry, opts.proposalStore))),
     );
-    return { readStatus: 'ready', entries };
+    const capsuleSetup = entries.some((entry) => entry.id === 'capsule')
+      ? undefined
+      : {
+          revision: profileRevisionOf(''),
+          proposals: await readProfileMemoryProposals(
+            owner,
+            { targetPath: PROFILE_CAPSULE_RELATIVE_PATH },
+            opts.proposalStore,
+          ),
+        };
+    return { readStatus: 'ready', entries, ...(capsuleSetup ? { capsuleSetup } : {}) };
   });
 
   app.get<{ Params: { memoryId: string }; Querystring: { revision?: string } }>(
@@ -113,6 +125,7 @@ function projectEntry(
     status: entry.status,
     revision: entry.revision,
     content: entry.content,
+    ...(entry.updatedAt !== undefined ? { updatedAt: entry.updatedAt } : {}),
     proposals,
   };
 }

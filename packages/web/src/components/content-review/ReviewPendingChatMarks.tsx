@@ -21,10 +21,12 @@ export function ReviewPendingChatMarks({
   marks,
   media,
   badgeRadius,
+  preview = false,
 }: {
   marks: readonly PendingChatMark[];
   media: ImmutableMedia;
   badgeRadius?: number;
+  preview?: boolean;
 }) {
   const radius = badgeRadius ?? Math.max(8, media.width / 65);
   return (
@@ -32,7 +34,7 @@ export function ReviewPendingChatMarks({
       {marks.map((mark, index) => {
         const box = anchorBounds(mark.anchor);
         if (!box) return null;
-        const isPoint = mark.anchor.kind === 'image-point';
+        const isPoint = mark.anchor.kind === 'image-point' || (preview && box.width === 0 && box.height === 0);
         const fitted = badgeRadius !== undefined;
         const cx = thumbnailBadgeCenter(isPoint ? box.x : box.x + radius, media.width, radius, fitted);
         const cy = thumbnailBadgeCenter(isPoint ? box.y : box.y + radius, media.height, radius, fitted);
@@ -54,23 +56,46 @@ export function ReviewPendingChatMarks({
                 fill="var(--cafe-accent)"
                 fillOpacity={mark.active ? 0.25 : 0.1}
                 stroke="var(--cafe-accent)"
-                strokeWidth={2}
-                strokeDasharray={mark.active ? undefined : '6 4'}
+                strokeWidth={preview ? 1.5 : 2}
+                strokeDasharray={preview ? '3 2' : mark.active ? undefined : '6 4'}
                 vectorEffect="non-scaling-stroke"
               />
             )}
-            <circle cx={cx} cy={cy} r={radius} fill="var(--cafe-accent)" stroke="var(--cafe-surface)" strokeWidth={2} />
-            <text
-              x={cx}
-              y={cy}
-              textAnchor="middle"
-              dominantBaseline="central"
-              fill="var(--cafe-surface)"
-              fontSize={Math.max(11, radius * 1.2)}
-              fontWeight={600}
-            >
-              {mark.label ?? index + 1}
-            </text>
+            {preview && isPoint ? (
+              <circle
+                cx={box.x}
+                cy={box.y}
+                r={(media.width / 40) * 2}
+                fill="none"
+                stroke="var(--cafe-accent)"
+                strokeWidth={1.5}
+                strokeDasharray="3 2"
+                vectorEffect="non-scaling-stroke"
+              />
+            ) : null}
+            {!preview ? (
+              <>
+                <circle
+                  cx={cx}
+                  cy={cy}
+                  r={radius}
+                  fill="var(--cafe-accent)"
+                  stroke="var(--cafe-surface)"
+                  strokeWidth={2}
+                />
+                <text
+                  x={cx}
+                  y={cy}
+                  textAnchor="middle"
+                  dominantBaseline="central"
+                  fill="var(--cafe-surface)"
+                  fontSize={Math.max(11, radius * 1.2)}
+                  fontWeight={600}
+                >
+                  {mark.label ?? index + 1}
+                </text>
+              </>
+            ) : null}
           </g>
         );
       })}

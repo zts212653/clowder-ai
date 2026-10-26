@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { useShellCopy } from '@/components/shell/shell-copy';
 import { ArtworkAnnotationToolbar } from './ArtworkAnnotationToolbar';
 import { useArtworkLightboxScope, useFloatingArtworkPresentation } from './ArtworkLightboxScope';
+import toolbarStyles from './artwork-annotation-toolbar.module.css';
 import styles from './image-artwork.module.css';
 import { imageArtworkCopy } from './image-artwork.shell-copy';
 import type { ReviewCanvasMode } from './ReviewCanvasToolbar';
@@ -42,7 +43,7 @@ export function ImageArtworkControls({
   const toolsSlot = useArtworkLightboxScope()?.toolsSlot;
   const tools = (
     <div
-      className={floating ? 'flex flex-wrap items-center gap-2 px-3 py-1' : styles.tools}
+      className={floating ? toolbarStyles.placement : styles.tools}
       data-review-mode={mode}
       style={
         !floating && mode !== 'markup' && typeof viewport.stageStyle.height === 'number'

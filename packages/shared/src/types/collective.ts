@@ -1,5 +1,13 @@
 import { z } from 'zod';
 import {
+  collectiveDraftSendReceiptSchema,
+  collectiveMessageContentFields,
+  requireCollectiveMessageContent,
+} from './collective-message-content.js';
+
+export * from './collective-message-content.js';
+
+import {
   collectiveWorkAcceptanceNoticeSchema,
   collectiveWorkExecutionNoticeSchema,
 } from './collective-work-acceptance.js';
@@ -155,11 +163,12 @@ export const collectiveEventEnvelopeSchema = collectiveCoordinatesSchema
     workWakeNotice: collectiveWorkWakeNoticeSchema.optional(),
     workResultReceipt: collectiveWorkResultReceiptSchema.optional(),
     workProgressReceipt: collectiveWorkProgressReceiptSchema.optional(),
-    body: z.string().trim().min(1).max(32_000),
+    ...collectiveMessageContentFields,
     acceptedAt: z.string().datetime(),
   })
   .strict()
   .superRefine((event, context) => {
+    requireCollectiveMessageContent(event, context);
     if (event.workProgressReceipt && (event.actor.kind !== 'agent' || event.workResultReceipt)) {
       context.addIssue({
         code: 'custom',
@@ -294,9 +303,11 @@ export const collectiveHumanMessageRequestSchema = collectiveCoordinatesSchema
     replyToEventId: collectiveEventIdSchema.optional(),
     attentionRequest: collectiveAttentionRequestSchema.optional(),
     workRequest: z.literal('entrust').optional(),
-    body: z.string().trim().min(1).max(32_000),
+    draftReceipt: collectiveDraftSendReceiptSchema.optional(),
+    ...collectiveMessageContentFields,
   })
-  .strict();
+  .strict()
+  .superRefine(requireCollectiveMessageContent);
 
 export const collectiveAgentMessageRequestSchema = collectiveConnectionCoordinatesSchema
   .extend({
@@ -317,10 +328,11 @@ export const collectiveAgentMessageRequestSchema = collectiveConnectionCoordinat
     workResultIntent: collectiveWorkResultIntentSchema.optional(),
     workResultFile: collectiveWorkResultFileSchema.optional(),
     workProgressIntent: collectiveWorkProgressIntentSchema.optional(),
-    body: z.string().trim().min(1).max(32_000),
+    ...collectiveMessageContentFields,
   })
   .strict()
   .superRefine((input, context) => {
+    requireCollectiveMessageContent(input, context);
     if (input.workResultIntent && input.workProgressIntent)
       context.addIssue({ code: 'custom', message: 'Choose result or progress, not both' });
     if (input.workResultFile && !input.workResultIntent)

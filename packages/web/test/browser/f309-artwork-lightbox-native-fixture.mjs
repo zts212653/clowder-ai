@@ -21,7 +21,10 @@ export async function createNativeArtworkFixture(kind, evidence, sourceKind = 'w
     return response.json();
   }
   const directory = await mkdtemp(path.join(owner.root, 'f309-native-artwork-'));
-  const filename = `native-original.${kind}`;
+  const filename =
+    kind === 'mp4' && process.env.F309_ORIGINAL_FILM_PATH
+      ? path.basename(process.env.F309_ORIGINAL_FILM_PATH)
+      : `native-original.${kind}`;
   const absolute =
     sourceKind === 'publication'
       ? path.join(dataDir, `native-original-${Date.now()}.${kind}`)

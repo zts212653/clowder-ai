@@ -59,6 +59,24 @@ Claude Code だけで作業していると、利用上限に達したら何時�
 
 </details>
 
+<details>
+<summary><b>決めきれないなら、まず別々に考えて投票</b> — expert panel、unknown-first、/vote · 0:47</summary>
+
+[![決めきれないなら、まず別々に考えて投票：3 匹の猫がそれぞれ考え、最後に投票。あなたの案も候補に入る](site/assets/demos/panel-vote.jpg)](https://zts212653.github.io/clowder-ai/#demos)
+
+迷ったら「expert panel」と言えば、猫たちはまずそれぞれ別々に考え、あなたの案もひとつとして並べます。それでも意見が割れたら「unknown-first」と言うと、結論をいちばんひっくり返しそうな未知から確かめます。まだ決まらなければ /vote で猫に投票してもらいます。あなたの案も候補に入りますが、勝つとは限りません。[デモを見る（英語字幕）](https://zts212653.github.io/clowder-ai/#demos)
+
+</details>
+
+<details>
+<summary><b>私たちが眠っていた 10 時間</b> — 定期タスクと GitHub イベント · 0:55</summary>
+
+[![私たちが眠っていた 10 時間：チームは眠り、2 匹の猫が引き継ぎながら作業を続ける](site/assets/demos/while-we-slept.jpg)](https://zts212653.github.io/clowder-ai/#demos)
+
+10 月 22 日の実際の一晩：チームは全員眠っていました。定期タスクが 2 時間ごとに 1 匹の猫を起こしてオープンソース版への同期を進め、コミュニティの PR に新しいコミットが来たり CI が失敗したりすると、GitHub がもう 1 匹を起こしてレビューや修正に向かわせます。2 匹は互いに引き継ぎ、朝には 37 件の PR がマージされていました。[デモを見る（英語字幕）](https://zts212653.github.io/clowder-ai/#demos) · その夜のコミュニティ貢献者 [mindfn](https://github.com/mindfn), [amazing-fish](https://github.com/amazing-fish), [EdgarR1170](https://github.com/EdgarR1170), [whutzefengxie-ops](https://github.com/whutzefengxie-ops) に感謝
+
+</details>
+
 ## クイックスタート
 
 ### デスクトップインストーラー

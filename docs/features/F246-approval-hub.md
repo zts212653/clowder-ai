@@ -4,7 +4,8 @@ related_features: [F128, F139, F168, F193, F208, F221, F225, F231, F260, F266, F
 topics: [approval, hub, cvo-gate, cross-thread, cqrs, proposal, provenance, schedule]
 doc_kind: spec
 created: 2026-06-20
-updated: 2026-10-24
+updated: 2026-10-25
+tips_exempt: 本批活 run 审批回执自动追加，不增加用户操作或配置；原审批入口与闲置猫下轮可见保持不变。
 ---
 
 # F246: Approval Hub — 统一审批中心底座
@@ -72,7 +73,63 @@ pending/approving/applying、F276 partial、withdrawn/expired/superseded 不生�
 Host carrier 使用严格 schema；只有具名的审批结果 system message 进入猫的上下文，普通系统 badge 仍按既有规则处理。
 迁移/回滚：outbox 只新增独立的 delivery intent 表，不改 producer schema 或既有数据；回滚代码保留待发项，
 恢复本实现后仍按原 canonical state 补发。历史终态不主动全量回灌；激活后的决议与重试由持久化 intent 保护。
-本批不含 runtime restart/activation；main 与 live 分开核验。原始 RED、真实持久化与恢复证据见
+本批实现未执行 runtime restart/activation。2026-10-25 UTC，原 Task 的 deployment wait 已匹配
+runtime boot 54；`/health` 独立确认运行版本 `9e737d37f07b4774d62bb2a67c685f9c199a16c9`，
+Git ancestry 包含 merge SHA `96a746a0a57be86afad832f294f3ac0f7f0fcae0`。
+当前状态为 main 已合入、runtime 已加载、真实 approve/reject 回执验收待取样；原 Task 仍未完成。
+
+### 活 run 的审批回执 Append（2026-10-25）
+
+直接认可：`[thread-id]#private-source-id`；
+完整方案：同线程 `private-source-id`；执行位置裁定：同线程
+`private-source-id`。原 Task `private-source-id`、owner
+`codex61-sol`、reviewer `gemini-argon` 保持；本批在 canonical Task 父线程执行，旧 child 只供历史参考。
+
+用户批准或拒绝卡片后，除持久回执外，提卡猫若正在该卡所在的线程工作，应在同一次 invocation
+收到相同的回执文本。闲置猫仍只在下次读到持久回执；不另发 invocation 或补唤醒。
+
+Architecture cell: `approval-index`
+Map delta: none — 复用现有回执所有权、逐 run 能力投影与 provider Append 通道，不建 Queue、状态层或第二个 writer。
+Why: 下一轮可见还不能解决正在工作的猫不知道 operator 已作决定的问题。
+Canonical source: `packages/api/src/domains/approval-hub/ApprovalDecisionReceiptService.ts#deliverSubject`；run 能力以 `lifecycle-append-projection.ts#projectLifecycleAppendCapability` 为准。
+Consumer evidence: `rg -n 'appendDecisionReceiptToActiveRun|projectLifecycleAppendCapability|expectedInvocationId' packages/api/src/domains/approval-hub packages/api/src/domains/cats/services/agents/invocation/lifecycle-append-projection.ts`。
+Claim guard: `decision-receipt-append.test.js` 的真实 schedule approve/reject 在首次写入后应调用一次精确 dispatcher；原实现实际 RED 为 `0 !== 1`。
+
+- 仅 `appendIdempotent` 返回首次写入时尝试一次。重复 HTTP、并发与持久消息重放不再投 provider；
+  落盘后崩溃可以只保留消息，不另建可靠投递状态机。
+- 用 owner、canonical card thread、requester、invocation 和 response message 绑定目标；
+  选中后结束、换代或拒绝时不转投新的 run。
+- 调用既有 dispatcher，`force:false`、`expectedInvocationId` 固定。Codex 内部的
+  `turn/steer(expectedTurnId)` 是此 Append 通道的实现，不使用产品层打断语义。
+- Append 拒绝或异常不撤销业务终态、不丢持久回执、不留下需要新 run 处理的工作；
+  现有 producer 动作、通知与唤醒语义保持。通用 Queue 的 private/system-pinned 排除不变。
+- 文本复用已持久化的回执及原有拒绝理由，不追加 proposal 摘要或正文。
+  provider 原生读取回调只记录 message/run/native handle 的日志证据，不复制敏感内容。
+
+本批验收：
+
+- [x] 真实路由 approve/reject RED→GREEN；catalog 全 11 producer 的批准/拒绝均经过同一首次写入补充路径。
+- [x] 并发、重复 HTTP、恢复、ACK 丢失、异线程/异 owner、unsupported、run 换代与异常不新增或转投 invocation。
+- [ ] Claude SDK 真卡在同一次运行读到回执，保留原生读取回执或会话原件。
+- [ ] Codex app-server 真卡在同一次运行读到回执，保留原生读取回执或会话原件。
+- [ ] AGY native 真卡在同一次运行读到回执，保留原生读取回执或会话原件。
+- [ ] 上述真实运行验收至少一次为拒卡；未通过项保持原 Task 未完成。
+
+真实三家验收须在加载该版本的隔离应用或获准生产部署后完成，mock dispatcher 与静态 capabilities 不计入。
+本批不自行重启 runtime、不关闭 F246。
+
+PR [#6123](https://github.com/zts212653/clowder-ai/pull/6123) 已合入 `453848f5e95bdca9618401141829ac510e25aba8`；
+Argon 的 typed local review 批准精确 HEAD `8dd2f770516dc24e271b819bec8c0b3f30b3b8b3`，
+来源为父线程消息 `private-source-id`，0 P0/P1/P2。
+标准 Alpha 同步到该 merge 后完成 shared/API/MCP 构建，新 API readiness 通过；同一 checkout 的
+组合回归 60/60、零跳过。Alpha `/health` 的 revision 字段为 null，实际加载以构建标记、
+2026-10-25 08:54 UTC 初验时生产为 boot 55 / `b9335c22…`，原 Task 登记 deployment wait g2。
+14:29 UTC 该等待已 matched/delivered：boot 56 / `e57f5305e89b9cacd1fa90ebd2d95bdc2da64598`
+确含本批 merge，health/readiness 通过，`live=activated`。本轮进程日志窗口
+14:26:24–14:33:29 UTC 未观察到决议相关写请求或回执消费事件；pending 读取为 0，
+历史读取仍为 `503 APPROVAL_HISTORY_PREPARING`，不能据此声称历史为空或回执失败。
+三家真实读取及拒卡验收仍待自然样本，原 Task 保持 blocked；g2 已结束，不另登记部署等待。
+上述四项真实运行验收没有勾选，不把版本加载或 Alpha 的可控 dispatcher 检查计作通过。
 
 ## Why
 

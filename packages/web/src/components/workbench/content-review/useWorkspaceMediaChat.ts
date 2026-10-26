@@ -72,7 +72,7 @@ export function useWorkspaceMediaChat({
       ? (workflow.chatMedia ?? null)
       : mime
         ? mediaChatTarget({
-            title: path.split('/').at(-1) || path,
+            title: workflow?.chatTitle ?? (path.split('/').at(-1) || path),
             mime,
             source: workspaceReviewRequestSource(view),
           })

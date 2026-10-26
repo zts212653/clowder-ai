@@ -17,15 +17,21 @@ export function profileMemoryTombstoneContent(
   })}\n`;
 }
 
-export function removeMatchingProfileTombstone(path: string, requestId: string): void {
+export function removeMatchingProfileTombstone(path: string, requestId: string, aliases: string[] = []): void {
   if (!existsSync(path)) return;
   const content = readFileSync(path, 'utf8');
   if (!isProfileMemoryTombstoneContent(content)) return;
+  let marker: { requestId?: unknown };
   try {
-    const marker = JSON.parse(content) as { requestId?: unknown };
-    if (marker.requestId === requestId) rmSync(path, { force: true });
+    marker = JSON.parse(content) as { requestId?: unknown };
   } catch {
     // A malformed/non-lifecycle file must never be removed by cleanup.
+    return;
+  }
+  if (marker.requestId === requestId) {
+    // Keep the canonical tombstone until every alias is gone; I/O failure remains retryable.
+    for (const alias of aliases) rmSync(alias, { force: true });
+    rmSync(path, { force: true });
   }
 }
 

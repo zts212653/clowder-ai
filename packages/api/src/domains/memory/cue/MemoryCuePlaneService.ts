@@ -20,6 +20,7 @@ import {
   getRecallOpportunityCatalogEntry,
   type RecallOpportunityCatalogEntry,
 } from './RecallOpportunityCatalog.js';
+import { OPENING_PRIMER_PREFIX } from './sources/PrimerMemoryCueSource.js';
 
 export interface MemoryCueInvocationState {
   readonly seenDedupeKeys: Set<string>;
@@ -115,7 +116,14 @@ export class MemoryCuePlaneService {
       deliveryReceipts,
       presentationEnvelopes: formatted.cues.map((cue, index) => {
         const subjectKey = memoryCueSourceIdentity(cue, input.consumerCatId);
-        const isOpeningClue = opportunity.kind === 'thread_opened' && cue.resolverFamily === 'thread_overview';
+        const isProfileOpening =
+          opportunity.kind === 'fresh_context_sources' &&
+          cue.resolverFamily === 'profile' &&
+          cue.source.anchor.startsWith(OPENING_PRIMER_PREFIX);
+        const isOpeningClue =
+          isProfileOpening || (opportunity.kind === 'thread_opened' && cue.resolverFamily === 'thread_overview');
+        const cluePolicy = isProfileOpening ? 'F332.ProfileOpeningReference' : 'F321.ThreadOpeningClue';
+        const clueOwner = isProfileOpening ? 'profile_repository' : 'thread_overview';
         const entryVersion = `recall-catalog:${RECALL_OPPORTUNITY_CATALOG_VERSION}:${entry.kind}:${entry.producer}`;
         const asOf = { kind: 'version' as const, value: cue.source.revision };
         return {
@@ -129,17 +137,23 @@ export class MemoryCuePlaneService {
               ? {
                   historicalClueAdmission: {
                     entryVersion,
-                    policyRef: 'F321.ThreadOpeningClue',
+                    policyRef: cluePolicy,
                     sourceAnchor: cue.source.anchor,
                     sourceRevision: cue.source.revision,
                   },
-                  invalidator: { owner: 'thread_overview', ref: `${cue.source.anchor}@${cue.source.revision}` },
+                  invalidator: { owner: clueOwner, ref: `${cue.source.anchor}@${cue.source.revision}` },
                 }
               : {}),
           },
           segments: {
             pointer: renderMemoryCuePointer(cue),
-            ...(isOpeningClue ? { clue: renderThreadOpeningClue(cue) } : {}),
+            ...(isOpeningClue
+              ? {
+                  clue: isProfileOpening
+                    ? `${cue.summary}\n${renderMemoryCuePointer(cue)}`
+                    : renderThreadOpeningClue(cue),
+                }
+              : {}),
           },
           admission: {
             opportunityId: opportunity.opportunityId,
@@ -151,15 +165,13 @@ export class MemoryCuePlaneService {
             asOf,
             sourceRefs: [cue.source.anchor],
             eligibleSurfaces: ['dynamic_context', 'pointer'] as const,
-            presentationPolicyRef: isOpeningClue ? 'F321.ThreadOpeningClue' : 'F296.OpportunityPresentation',
+            presentationPolicyRef: isOpeningClue ? cluePolicy : 'F296.OpportunityPresentation',
             tokenBudget: entry.maxPromptTokens,
             dedupeKey,
             expiresAt,
             invalidators: [
               ...cue.invalidators.map((ref) => ({ owner: opportunity.producer, ref })),
-              ...(isOpeningClue
-                ? [{ owner: 'thread_overview', ref: `${cue.source.anchor}@${cue.source.revision}` }]
-                : []),
+              ...(isOpeningClue ? [{ owner: clueOwner, ref: `${cue.source.anchor}@${cue.source.revision}` }] : []),
             ],
             epistemicCeiling: isOpeningClue ? ('historical_clue' as const) : ('pointer' as const),
           },

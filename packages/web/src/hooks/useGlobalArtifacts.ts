@@ -136,7 +136,8 @@ export function useGlobalArtifacts(
     return () => abortRef.current?.abort();
   }, [enabled, refetch, worksView]);
 
-  useWorksSourceRefresh(hostThreadId, enabled && query !== undefined, worksView ? paged.restart : refetch);
+  // The paged Works view re-reads the whole owner catalogue, so host-thread changes are coalesced.
+  useWorksSourceRefresh(hostThreadId, enabled && query !== undefined, worksView ? paged.scheduleRefresh : refetch);
 
   return worksView
     ? paged

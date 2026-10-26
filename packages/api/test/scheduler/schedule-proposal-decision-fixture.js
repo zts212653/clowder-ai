@@ -46,6 +46,7 @@ export async function createDecisionFixture(options = {}) {
     messageStore,
     outbox,
     logger: options.logger ?? app.log,
+    invocationTracker: options.invocationTracker,
   });
   installApprovalDecisionReceiptHooks(app, () => receipts);
   app.decorateRequest('sessionUserId', undefined);

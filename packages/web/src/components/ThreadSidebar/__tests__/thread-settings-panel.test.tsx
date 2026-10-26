@@ -24,6 +24,7 @@ vi.mock('../ThreadNativeStatusSettings', () => ({
   ThreadNativeStatusSettingsContent: () => React.createElement('div', { 'data-testid': 'status-content' }, 'status'),
 }));
 
+import { writeShellPresentation } from '../../shell/shell-presentation';
 import { ThreadSettingsPanel } from '../ThreadSettingsPanel';
 
 describe('ThreadSettingsPanel', () => {
@@ -40,7 +41,31 @@ describe('ThreadSettingsPanel', () => {
   afterEach(() => {
     act(() => root.unmount());
     container.remove();
+    writeShellPresentation('classic');
     delete (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT;
+  });
+
+  it('groups v2 settings in goal, execution and organization order, ending with the linked Feature', () => {
+    writeShellPresentation('v2');
+    render();
+    const panel = document.querySelector('[data-testid="thread-settings-panel"]');
+    const sections = Array.from(panel?.querySelectorAll('section > button') ?? []).map(
+      (button) => button.querySelector('.font-semibold')?.textContent,
+    );
+    expect(sections).toEqual([
+      '对话目标',
+      '默认猫猫',
+      '思考档位',
+      '速度档位',
+      'Codex 运行状态',
+      '标签管理',
+      '关联 Feature',
+    ]);
+    expect(
+      Array.from(panel?.querySelectorAll('[data-settings-group]') ?? []).map((group) =>
+        group.getAttribute('data-settings-group'),
+      ),
+    ).toEqual(['goal', 'execution', 'organization']);
   });
 
   function render(onClose = vi.fn(), returnFocusRef?: React.RefObject<HTMLElement | null>, projectPath?: string) {

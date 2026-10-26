@@ -1,4 +1,5 @@
 import type { MemoryOwnerActionError, MemoryOwnerActionReceipt, ProfileMemoryOwnerAction } from '@cat-cafe/shared';
+import { renderUserCapsuleSection } from '@cat-cafe/shared/profile-contract';
 import type { SessionMutex } from '../../cats/services/agents/invocation/SessionMutex.js';
 import type { OwnerMemoryActionCoordinator } from '../owner/OwnerMemoryActionCoordinator.js';
 import type { ProfileMemoryLifecycleStore, ProfileMemoryMutationResult } from './ProfileMemoryLifecycleStore.js';
@@ -30,6 +31,13 @@ export class ProfileMemoryLifecycleService {
     memoryId: string,
     command: ProfileMemoryOwnerAction,
   ): Promise<MemoryOwnerActionReceipt | { error: MemoryOwnerActionError }> {
+    if (memoryId === 'capsule' && command.action === 'replace_content') {
+      try {
+        if (!renderUserCapsuleSection(command.content)) return Promise.resolve({ error: 'invalid_content' });
+      } catch {
+        return Promise.resolve({ error: 'invalid_content' });
+      }
+    }
     return this.deps.coordinator.execute(
       { ownerUserId, lane: 'profile', memoryId, requestId: command.requestId, command },
       {
@@ -43,7 +51,8 @@ export class ProfileMemoryLifecycleService {
     const projected = await this.withTargetLock(ownerUserId, memoryId, () => {
       const evidence = this.deps.store.getOwnerActionEvidence(ownerUserId, memoryId, command.requestId);
       const current = this.deps.store.get(ownerUserId, memoryId);
-      if (!current && !evidence) return { error: 'not_available' as const };
+      const creatingCapsule = memoryId === 'capsule' && command.action === 'replace_content';
+      if (!current && !evidence && !creatingCapsule) return { error: 'not_available' as const };
       if (current && current.revision !== command.expectedRevision && !evidence) {
         return { error: 'stale_revision' as const };
       }

@@ -1,3 +1,5 @@
+import './helpers/setup-cat-registry.js';
+
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { accountCapacityFixture as fixture } from './helpers/account-routing-capacity-fixture.js';

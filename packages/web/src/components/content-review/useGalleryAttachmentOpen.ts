@@ -45,7 +45,7 @@ export function useGalleryAttachmentOpen(
     const origin = attachment.gallery;
     const threadId = useChatStore.getState().currentThreadId;
     const owner = currentScope.current;
-    if (!origin || !threadId || !owner || owner.threadId !== threadId) {
+    if (!threadId || !owner || owner.threadId !== threadId) {
       setError('请在原聊天中打开这处圈选。');
       return;
     }
@@ -75,6 +75,44 @@ export function useGalleryAttachmentOpen(
     setBusy(true);
     setError(null);
     try {
+      if (!origin) {
+        const read = await readMediaAttachmentOwner(attachment);
+        if (!isCurrent()) return;
+        const work: FloatingArtwork = {
+          url: read.url,
+          title: attachment.title,
+          alt: attachment.title,
+          mediaType: attachment.mediaType === 'video/mp4' ? 'video' : 'image',
+          surface: read.surface,
+          reference: {
+            attachment,
+            selectionId,
+            origin: message
+              ? { kind: 'message', ...message }
+              : fromComposer
+                ? { kind: 'composer', threadId }
+                : undefined,
+          },
+        };
+        work.openWorkspace = async () => {
+          const active = currentScope.current;
+          if (!active || useChatStore.getState().currentThreadId !== threadId) return false;
+          const stamp = active.getGeneration();
+          // Revalidate the same owner on every transition; presentation does not grant publication authority.
+          const checked = await readMediaAttachmentOwner(attachment);
+          if (currentScope.current?.getGeneration() !== stamp) return false;
+          captureChatReadingBeforeLayoutChange();
+          const state = useChatStore.getState();
+          const opened =
+            checked.target.kind === 'file'
+              ? state.openWorkspacePath(threadId, checked.target, 'work-mode')
+              : state.openPublication(checked.target, threadId, 'work-mode');
+          return !!opened && active.enterWorkMode(work, stamp);
+        };
+        // The fixed preview already occupies this generation; replace it in place after the owner read.
+        owner.update(work, generation);
+        return;
+      }
       const original = await readOriginalGallery(origin);
       if (!isCurrent()) return;
       const items = await Promise.all(

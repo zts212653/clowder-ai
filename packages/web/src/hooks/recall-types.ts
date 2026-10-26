@@ -3,6 +3,7 @@ import type { RecallMatchRank, RecallMatchType, RecallResolverFamily, RecallResu
 export type MemoryCueStatus = 'presented_unreported' | 'drilled' | 'applied' | 'dismissed' | 'invalidated';
 
 export interface RecallResultItem {
+  sourceUnavailableReason?: 'source_corrected' | 'source_forgotten' | 'scope_revoked';
   title: string;
   titleStatus?: 'loading' | 'unavailable';
   /** Null explicitly means this source has no verified owner-readable destination. */
@@ -49,6 +50,7 @@ export interface RecallEvent {
 }
 
 export interface RecallSourceView {
+  sourceUnavailableReason?: RecallResultItem['sourceUnavailableReason'];
   anchor: string;
   invocationId?: string;
   cueId?: string;

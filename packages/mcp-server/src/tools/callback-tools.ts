@@ -23,6 +23,7 @@ import type {
   EntrustedWorkTerminalClosureV1,
   EntrustedWorkUpdateActionV1,
   EntrustedWorkV1,
+  ProfileUpdateTargetLayer,
   SuggestedCrossPostAction,
 } from '@cat-cafe/shared';
 import {
@@ -48,6 +49,7 @@ import {
   isValidRichBlock,
   localReviewVerdictSchema,
   normalizeRichBlock,
+  PROFILE_UPDATE_TARGET_LAYERS,
   reviewSubjectRefSchema,
   SOP_DEFINITION_IDS,
   taskFeatureIdSchema,
@@ -2704,16 +2706,16 @@ export const readProfileInputSchema = {
       'Optional revision from a prior profile snapshot. A changed revision returns no content; reread without it to obtain the current approved profile.',
     ),
   layer: z
-    .enum(['primer', 'corpus'])
+    .enum(PROFILE_UPDATE_TARGET_LAYERS)
     .optional()
     .describe(
-      "Which profile layer to read. 'primer' (default) = this persona's relationship primer; 'corpus' = owner-wide shared facts (all personas see the same content). Omit for the default primer.",
+      "Which profile layer to read: 'primer' (default) for this persona's relationship, 'corpus' for owner-wide shared facts, or 'capsule' for the owner's current opening portrait. All reads are scoped to the authenticated owner.",
     ),
 };
 
 export async function handleReadProfile(input: {
   expectedRevision?: string | undefined;
-  layer?: 'primer' | 'corpus' | undefined;
+  layer?: ProfileUpdateTargetLayer | undefined;
   agentKeyCatId?: string | undefined;
 }): Promise<ToolResult> {
   const params: Record<string, string> = {};
@@ -2732,7 +2734,7 @@ export const proposeProfileUpdateInputSchema = {
     .min(1)
     .max(20000)
     .describe(
-      'The COMPLETE new content (whole-file replacement, NOT a diff/patch). For primer: writes to relationship/{relationshipKey}-primer.md; for corpus: writes to corpus/shared-facts.md. Include everything you want kept — anything you omit is dropped.',
+      'The COMPLETE new content (whole-file replacement, not a patch). Capsule: 1–300 non-whitespace Unicode characters in capsule.md; primer: relationship/{relationshipKey}-primer.md; corpus: corpus/shared-facts.md. Private owner data only; include everything to keep. Nothing is written until owner confirmation. To select primer opening history, preserve the body and add YAML frontmatter opening: {asOf: "YYYY-MM-DD", excerpts: [{kind: "relationship" or "model_capability", text, source: {threadId, messageId}, model: "exact model, required only for model_capability"}]}. Use 1–2 sourced excerpts totaling at most 300 non-whitespace Unicode characters; missing or invalid selection remains on-demand.',
     ),
   rationale: z
     .string()
@@ -2747,10 +2749,10 @@ export const proposeProfileUpdateInputSchema = {
       "Where the relationship signal came from (provenance). 'cat-declared' = you observed/inferred it from the interaction; 'cvo-instructed' = the operator explicitly asked you to remember it. AC-C1 is manual-entry only (no auto-classifier).",
     ),
   targetLayer: z
-    .enum(['primer', 'corpus'])
+    .enum(PROFILE_UPDATE_TARGET_LAYERS)
     .optional()
     .describe(
-      "Which profile layer to target. 'primer' (default) = this persona's relationship primer (per-cat); 'corpus' = owner-wide shared facts (all personas see the same content, one file). Use corpus for personal facts that are independent of persona relationship (birthday, preferences, background). Omit for the default primer.",
+      "Which profile layer to target: 'primer' (default) for this persona's relationship, 'corpus' for shared personal facts, or 'capsule' for a short owner-approved portrait carried into new conversations. Read the same layer before replacing it; every layer requires owner confirmation.",
     ),
   sourceMessageId: z
     .string()
@@ -2771,7 +2773,7 @@ export async function handleProposeProfileUpdate(input: {
   afterContent: string;
   rationale: string;
   signalKind: 'cat-declared' | 'cvo-instructed';
-  targetLayer?: 'primer' | 'corpus' | undefined;
+  targetLayer?: ProfileUpdateTargetLayer | undefined;
   sourceMessageId?: string | undefined;
   clientRequestId?: string | undefined;
   agentKeyCatId?: string | undefined;
@@ -4285,7 +4287,7 @@ export const callbackTools = [
     name: 'cat_cafe_read_profile',
     description:
       "Read the profile of this connection's authenticated identity through the stable cat-cafe-profile:// URI. " +
-      'Supports two layers: primer (default, per-persona relationship) and corpus (owner-wide shared facts, all personas see the same content). ' +
+      'Supports primer (default, per-persona relationship), corpus (owner-wide shared facts), and capsule (the current opening portrait). ' +
       'Use when: L0 shows the profile URI, you are starting a session and need relationship or owner context, or you need to verify the currently effective content before proposing an update. ' +
       'NOT for: searching project knowledge or old threads (use search_evidence), reading arbitrary workspace files (use read_file_slice), or reading another user/cat/persona. ' +
       'Output: the current content + revision (sha256 hash); expectedRevision rejects changed snapshots without returning content. Read-only, no profile change. ' +
@@ -4311,10 +4313,11 @@ export const callbackTools = [
     name: 'cat_cafe_propose_profile_update',
     description:
       'Propose an update to a profile layer — the "养熟循环" digest entry point (F231 KD-12/KD-18). ' +
-      'Supports two layers: primer (default, per-persona relationship primer) and corpus (owner-wide shared facts visible to all personas). ' +
+      'Supports primer (default, per-persona relationship), corpus (owner-wide shared facts), and capsule (a 1–300 character opening portrait). ' +
       'Output: returns a proposalId, NOT a written file; the content is only written after operator approval (reject/expire = nothing changes). ' +
       'Use when: the content is a durable fact about the authenticated person or this persona-operator relationship — personal context, preferred address, or a relationship-specific communication boundary. ' +
       'Use targetLayer:corpus for owner-wide personal facts independent of persona relationship (birthday, background, preferences that all cats should know). ' +
+      'Use targetLayer:capsule to draft the short portrait visible in Memory → Profile; read layer:capsule first, keep supporting source coordinates in the rationale, and wait for the owner to confirm. Capsule content belongs only in private owner data, never repository defaults. ' +
       'NOT for reusable judgments about what makes output, design, expression, architecture, or systems good (use cat_cafe_propose_taste), repeated operational/tool/process rules (use code-as-harness), or one-off context. ' +
       'A correction, praise, or Magic Word does not choose the lane; semantic content does. ' +
       'afterContent is the COMPLETE new content (whole-file replacement, not a diff) — include everything you want kept. ' +

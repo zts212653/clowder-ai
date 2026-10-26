@@ -24,9 +24,9 @@ import type { CatId } from './ids.js';
  * Phase E: target layer enum — the canonical source of truth for where a profile update lands.
  * 'primer' = per-persona relationship file (AC-C1, existing).
  * 'corpus' = owner-wide shared facts (AC-E1, Phase E).
- * No 'capsule': the ≤300-char identity anchor is operator hand-maintained only (KD-7/KD-17).
+ * F332 KD-8: 'capsule' = owner-wide opening portrait, drafted by cats and confirmed by its owner.
  */
-export const PROFILE_UPDATE_TARGET_LAYERS = ['primer', 'corpus'] as const;
+export const PROFILE_UPDATE_TARGET_LAYERS = ['primer', 'corpus', 'capsule'] as const;
 export type ProfileUpdateTargetLayer = (typeof PROFILE_UPDATE_TARGET_LAYERS)[number];
 
 export type ProfileUpdateProposalStatus = 'pending' | 'approving' | 'approved' | 'rejected';

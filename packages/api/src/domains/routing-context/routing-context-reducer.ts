@@ -14,6 +14,7 @@ import {
   routingSignalEventV1Schema,
 } from '@cat-cafe/shared';
 import type { CapabilityProfileDiagnostic } from './CapabilityProfileRevisionSource.js';
+import { projectRoutingPreferenceHeads } from './preflight/RoutingPreferenceDecisionProjection.js';
 
 export interface ReduceRoutingContextInput {
   ownerId: string;
@@ -69,21 +70,6 @@ function selectProfileHeads(
     }
   }
   return heads;
-}
-
-function selectPreferenceHeads(preferences: readonly RoutingPreferenceRevisionV1[]): RoutingPreferenceRevisionV1[] {
-  const heads = new Map<string, RoutingPreferenceRevisionV1>();
-  for (const preference of preferences) {
-    const current = heads.get(preference.preferenceId);
-    if (
-      current === undefined ||
-      preference.version > current.version ||
-      (preference.version === current.version && preference.revisionId.localeCompare(current.revisionId) > 0)
-    ) {
-      heads.set(preference.preferenceId, preference);
-    }
-  }
-  return [...heads.values()].sort((left, right) => left.preferenceId.localeCompare(right.preferenceId));
 }
 
 function activeSignalReason(signal: AssertedSignal): RoutingReasonV1 {
@@ -275,7 +261,7 @@ export function reduceRoutingContext(rawInput: ReduceRoutingContextInput): Routi
   const signalEvents = rawInput.signalEvents
     .map((event) => routingSignalEventV1Schema.parse(event))
     .filter((event) => event.ownerId === rawInput.ownerId && event.observedAt <= rawInput.observedAt);
-  const preferenceHeads = selectPreferenceHeads(
+  const preferenceHeads = projectRoutingPreferenceHeads(
     rawInput.preferenceRevisions
       .map((preference) => routingPreferenceRevisionV1Schema.parse(preference))
       .filter((preference) => preference.ownerId === rawInput.ownerId),

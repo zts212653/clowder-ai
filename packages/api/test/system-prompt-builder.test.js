@@ -1046,6 +1046,32 @@ describe('SystemPromptBuilder', () => {
     }
   });
 
+  test('teammate roster keeps a variant cat nickname next to its variant label', async () => {
+    const { loadCatConfig, toAllCatConfigs } = await import('../dist/config/cat-config-loader.js');
+    const { buildStaticIdentity } = await import('../dist/domains/cats/services/context/SystemPromptBuilder.js');
+    const originalConfigs = catRegistry.getAllConfigs();
+    catRegistry.reset();
+    try {
+      const runtimeConfigs = toAllCatConfigs(loadCatConfig(CAT_TEMPLATE_PATH));
+      for (const [id, config] of Object.entries(runtimeConfigs)) {
+        catRegistry.register(id, config);
+      }
+      const prompt = buildStaticIdentity('opus');
+      const rosterLines = prompt.split('\n').filter((l) => l.trim().startsWith('|'));
+      const glmLine = rosterLines.find((l) => l.includes('@glm52'));
+      assert.match(glmLine ?? '', /^\| 狸花猫 GLM-5\.2\/小狸花 \|/, `got: ${glmLine}`);
+      const sonnetLine = rosterLines.find((l) => l.includes('@sonnet'));
+      assert.match(sonnetLine ?? '', /^\| 布偶猫 Sonnet\/宪宪 \|/, `family row is self here; got: ${sonnetLine}`);
+      const geminiVariantLine = rosterLines.find((l) => l.includes('@gemini38'));
+      assert.match(geminiVariantLine ?? '', /^\| 暹罗猫 Gemini 3\.8 Flash \|/, `got: ${geminiVariantLine}`);
+    } finally {
+      catRegistry.reset();
+      for (const [id, config] of Object.entries(originalConfigs)) {
+        catRegistry.register(id, config);
+      }
+    }
+  });
+
   test('F167-F AC-F10: AGENTS.md / CLAUDE.md have no hardcoded "@x = model-y" bindings', async () => {
     // KD-21 invariant: handle/model must stay decoupled in static docs. If someone
     // re-introduces "@codex（model=gpt-5.3-codex）" style hardcoding, this test traps it.

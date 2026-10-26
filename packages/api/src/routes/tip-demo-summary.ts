@@ -15,7 +15,8 @@ export function summarizeTipDemos(rows: readonly CapabilityTipsUsageRow[]) {
     const started = count('capability_tip_demo_started');
     const completed = count('capability_tip_demo_completed');
     const tried = count('capability_tip_demo_tried');
-    const used = count('capability_tip_demo_used');
+    // Only demos with a product use signal can count "used"; for the rest it is unknown, not zero.
+    const used = demo.useSignal ? count('capability_tip_demo_used') : null;
     return {
       demoId,
       tipId: demo.tipId,
@@ -27,11 +28,11 @@ export function summarizeTipDemos(rows: readonly CapabilityTipsUsageRow[]) {
       used,
       watchRate: ratio(opened, exposed),
       completionRate: ratio(completed, opened),
-      useAfterCompletionRate: ratio(used, completed),
+      useAfterCompletionRate: used === null ? null : ratio(used, completed),
     };
   });
   return {
-    status: demos.every((demo) => demo.exposed + demo.opened + demo.completed + demo.used === 0)
+    status: demos.every((demo) => demo.exposed + demo.opened + demo.completed + (demo.used ?? 0) === 0)
       ? 'no_data'
       : 'observed',
     demos,
@@ -49,6 +50,7 @@ export function summarizeTipDemos(rows: readonly CapabilityTipsUsageRow[]) {
       'delivery-can-be-incomplete',
       'observations-not-causal-lift',
       'per-tip-not-per-video-version',
+      'use-measured-only-for-demos-with-a-use-signal',
     ],
   };
 }

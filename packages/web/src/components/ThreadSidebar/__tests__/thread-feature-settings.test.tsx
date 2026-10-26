@@ -20,7 +20,7 @@ vi.mock('@/stores/chatStore', () => ({
 }));
 vi.mock('../../AppTooltip', () => ({ AppTooltip: ({ children }: { children: React.ReactNode }) => children }));
 
-import { ThreadMetadataMenu } from '../ThreadMetadataMenu';
+import { ThreadFeatureSettingsContent } from '../../ThreadSidebar/ThreadFeatureSettings';
 
 function reply(body: unknown, ok = true) {
   return Promise.resolve({ ok, json: () => Promise.resolve(body) });
@@ -46,7 +46,7 @@ function applyDetailPatch(detail: Detail, body: { pinned?: boolean; backlogItemI
   return next;
 }
 
-describe('F322 post-create thread metadata menu', () => {
+describe('F322 linked Feature settings', () => {
   let host: HTMLDivElement;
   let root: Root;
   const requests: Array<{ path: string; body?: unknown }> = [];
@@ -89,28 +89,14 @@ describe('F322 post-create thread metadata menu', () => {
   });
 
   async function openMenu() {
-    act(() => root.render(<ThreadMetadataMenu threadId="thread-1" />));
-    await act(async () => {
-      host.querySelector<HTMLButtonElement>('[data-testid="thread-metadata-menu-toggle"]')?.click();
-      await Promise.resolve();
-      await Promise.resolve();
-    });
+    await act(async () => root.render(<ThreadFeatureSettingsContent threadId="thread-1" />));
   }
 
-  it('reads current pin and Feature, then saves pin, replacement and clear through the canonical PATCH', async () => {
+  it('keeps the current completed Feature selectable, then saves replacement and clear through the canonical PATCH', async () => {
     await openMenu();
-    const checkbox = host.querySelector<HTMLInputElement>('input[type="checkbox"]');
     const select = host.querySelector<HTMLSelectElement>('[data-testid="thread-feature-select"]');
-    expect(checkbox?.checked).toBe(false);
     expect(select?.value).toBe('feature-a');
     expect(select ? [...select.options].map((option) => option.value) : []).toEqual(['', 'feature-a', 'feature-b']);
-
-    await act(async () => {
-      checkbox?.click();
-      await Promise.resolve();
-      await Promise.resolve();
-    });
-    expect(mocks.updateThreadPin).toHaveBeenCalledWith('thread-1', true);
 
     await act(async () => {
       if (select) {
@@ -131,16 +117,30 @@ describe('F322 post-create thread metadata menu', () => {
       await Promise.resolve();
     });
     expect(mocks.updateThreadBacklogItem).toHaveBeenLastCalledWith('thread-1', null);
-    expect(requests.map((request) => request.body)).toEqual([
-      { pinned: true },
-      { backlogItemId: 'feature-b' },
-      { backlogItemId: null },
-    ]);
+    expect(requests.map((request) => request.body)).toEqual([{ backlogItemId: 'feature-b' }, { backlogItemId: null }]);
   });
 
-  it('never exposes post-create controls on the virtual default route', () => {
-    act(() => root.render(<ThreadMetadataMenu threadId="default" />));
-    expect(host.querySelector('[data-testid="thread-metadata-menu-toggle"]')).toBeNull();
-    expect(mocks.apiFetch).not.toHaveBeenCalled();
+  it('rolls back a rejected save and exposes the error without losing the prior association', async () => {
+    await openMenu();
+    mocks.apiFetch.mockImplementationOnce(() => reply({}, false));
+    const select = host.querySelector<HTMLSelectElement>('select');
+    await act(async () => {
+      if (select) {
+        select.value = 'feature-b';
+        select.dispatchEvent(new Event('change', { bubbles: true }));
+      }
+    });
+    expect(select?.value).toBe('feature-a');
+    expect(host.querySelector('[role="alert"]')?.textContent).toContain('保存失败');
+    expect(mocks.updateThreadBacklogItem).not.toHaveBeenCalled();
+  });
+
+  it('retries a failed load without treating a missing response as an empty association', async () => {
+    mocks.apiFetch.mockImplementationOnce(() => reply({}, false));
+    await openMenu();
+    expect(host.querySelector('select')).toBeNull();
+    expect(host.querySelector('[role="alert"]')).not.toBeNull();
+    await act(async () => host.querySelector<HTMLButtonElement>('button')?.click());
+    expect(host.querySelector<HTMLSelectElement>('select')?.value).toBe('feature-a');
   });
 });

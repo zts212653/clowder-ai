@@ -140,8 +140,13 @@ describe('F322 rail names and canonical companion entry', () => {
   it('old pins retain their destination above the one mailbox; new users start with no pins', () => {
     render();
     expect(host.querySelector('[data-testid^="rail-pin-"]')).toBeNull();
-    data.pinned = ['accounts'];
+    data.pinned = ['members', 'accounts'];
     render();
+    const members = control('rail-pin-members');
+    expect(members.querySelector('[data-hub-icon="paw"]')).not.toBeNull();
+    expect(members.querySelector('path')?.getAttribute('d')).not.toBe(
+      control('world-collective').querySelector('path')?.getAttribute('d'),
+    );
     const pin = control('rail-pin-accounts');
     expect(pin.compareDocumentPosition(control('mailbox-button')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     act(() => pin.click());

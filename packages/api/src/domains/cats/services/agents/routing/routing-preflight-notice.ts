@@ -1,10 +1,12 @@
 import type { CatId, RoutingPreflightDecisionV1 } from '@cat-cafe/shared';
-import { executionFactsChanged } from '../../../../routing-context/preflight/RoutingQueueAdmissionObservation.js';
-import { routingDispatchPreflightReceipt } from '../../../../routing-context/RoutingDispatchPreflightPort.js';
+import {
+  isUserVisibleRoutingPreflightReceipt,
+  routingDispatchPreflightReceipt,
+} from '../../../../routing-context/RoutingDispatchPreflightPort.js';
 import type { AgentMessage } from '../../types.js';
 import type { RouteOptions, RouteStrategyDeps } from './route-helpers.js';
 
-/** Persist the same receipt that live clients consume; its source ref is not retry authorization. */
+/** Persist actionable rejections only; normal C provenance stays on the child/terminal ledgers. */
 export async function routingPreflightNotice(
   deps: RouteStrategyDeps,
   options: RouteOptions,
@@ -14,10 +16,9 @@ export async function routingPreflightNotice(
   _originalTarget: boolean,
 ): Promise<AgentMessage | undefined> {
   const receipt = routingDispatchPreflightReceipt(decision, catId);
-  if (receipt.target.disposition === 'allowed' && !executionFactsChanged(options.routingAdmission, decision, catId))
-    return undefined;
-  if (receipt.target.disposition === 'rejected') await options.onRoutingPreflightRejected?.(receipt.target);
-  if (options.beforeOutputCommit && !(await options.beforeOutputCommit(catId))) {
+  if (!isUserVisibleRoutingPreflightReceipt(receipt)) return undefined;
+  await options.onRoutingPreflightRejected?.(receipt.target);
+  if ((await options.beforeOutputCommit?.(catId)) === false) {
     if (options.persistenceContext) options.persistenceContext.actionOutputCommitRejected = true;
     return undefined;
   }

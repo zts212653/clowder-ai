@@ -1,10 +1,11 @@
 'use client';
 
 import { resolvePluginDescription } from '@cat-cafe/shared';
+import { personalChromeSettingsHref } from '@/utils/personal-chrome-settings';
 import { HubIcon } from '../../hub-icons';
 import { settingsResourceCardClass, settingsResourceRowClass } from '../../SettingsResourceCard';
 import { SettingsText } from '../primitives/SettingsText';
-import { PluginDetailFooter, PluginDetailHeader } from './controls/PluginManagerDetailChrome';
+import { PluginDetailFooter, PluginDetailHeader, PluginDetailStateAction } from './controls/PluginManagerDetailChrome';
 import { pluginManagerText } from './controls/plugin-manager.shell-copy';
 import { DotConnectionDetail } from './DotConnectionDetail';
 import { PluginCapabilityDocumentation } from './PluginCapabilityDocumentation';
@@ -83,7 +84,7 @@ export function PluginManagerDetailCard({
         {presentation === 'v1' && (
           <section className="space-y-2.5" data-plugin-detail-section="identity">
             <SectionHeading>{t.identity}</SectionHeading>
-            <div className={`${settingsResourceRowClass} w-full px-0 py-0`}>
+            <div className={`${settingsResourceRowClass} w-full flex-wrap px-0 py-0`}>
               <PluginVisual icon={plugin.icon} iconBg={plugin.iconBg} name={plugin.displayName} size="large" />
               <div className="min-w-0 flex-1">
                 <SettingsText as="h3" variant="sm" tone="default" className="font-semibold">
@@ -104,6 +105,14 @@ export function PluginManagerDetailCard({
                   </SettingsText>
                 )}
               </div>
+              <PluginDetailStateAction
+                plugin={plugin}
+                locale={locale}
+                busy={busy}
+                onInstall={onInstall}
+                onSetEnabled={onSetEnabled}
+                onBlockedToggle={onBlockedToggle}
+              />
             </div>
           </section>
         )}
@@ -128,6 +137,19 @@ export function PluginManagerDetailCard({
 
         {plugin.id === 'official.chatgpt-dot' ? (
           <>
+            <section className="space-y-2">
+              <SectionHeading>ChatGPT Pro · 本机 Chrome</SectionHeading>
+              <SettingsText as="p" variant="sm" tone="secondary">
+                要让砚砚 Pro 接收消息，请安装并启用 Personal Chrome，准备 Chrome
+                连接，再在扩展中授权指定会话。回到当前对话选择并连接该会话后，才能向它发送消息。
+              </SettingsText>
+              <a
+                href={personalChromeSettingsHref()}
+                className="inline-block text-sm font-medium text-cafe-interactive hover:underline"
+              >
+                设置 Personal Chrome
+              </a>
+            </section>
             {presentation === 'v2' && (
               <PluginManagerDetailPrelude
                 plugin={plugin}

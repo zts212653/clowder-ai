@@ -1,6 +1,8 @@
-import { ComposerControl, ComposerFrame } from '@cat-cafe/ui';
-import { type FormEvent, type KeyboardEvent, useEffect, useId, useRef, useState } from 'react';
-import { CollectiveIcon } from './CollectiveIcon.js';
+import type { CollectiveMessageAttachment } from '@cat-cafe/shared';
+import { type FormEvent, type KeyboardEvent, useCallback, useEffect, useId, useRef, useState } from 'react';
+import { ComposerContext } from './ComposerContext.js';
+import { ComposerFeedback } from './ComposerFeedback.js';
+import { ComposerInput } from './ComposerInput.js';
 import { ComposerMentionMenu } from './ComposerMentionMenu.js';
 import { ComposerTray } from './ComposerTray.js';
 import { actorDisplayName } from './channel-model.js';
@@ -20,7 +22,8 @@ import {
 } from './composer-draft.js';
 import { participantKey, participantRecipient } from './participant-identity.js';
 import { participantLabel } from './participant-label.js';
-import { SharedArtifactQuoteTags } from './SharedArtifactQuoteTags.js';
+import { useComposerAttachments } from './use-composer-attachments.js';
+import { useServiceComposerDraft } from './use-service-composer-draft.js';
 import { useSharedArtifactComposer } from './use-shared-artifact-composer.js';
 
 export interface HumanMention {
@@ -53,6 +56,8 @@ function selectionAvailable(
   );
 }
 
+// The coordinator keeps mention selection, reply identity and exact send/draft consumption together.
+// Visual input, source context and feedback are separate components; further splitting would duplicate this state.
 export function Composer({
   placeholder,
   channelId,
@@ -80,6 +85,10 @@ export function Composer({
     entrust: boolean,
     responseRequested: boolean,
     replyToEventId?: string,
+    content?: {
+      attachments?: CollectiveMessageAttachment[];
+      draftReceipt?: { revision: number; rootEventId?: string };
+    },
   ) => Promise<void>;
   readonly mention?: MentionSelection;
   readonly compact?: boolean;
@@ -92,13 +101,29 @@ export function Composer({
   const language = useCollectiveLanguage();
   const draftKey = `collective-draft:${namespace}:${channelId}:${rootEventId ?? 'channel'}`;
   const [draft, setDraft] = useState(() => readDraft(draftKey));
+  const fileInput = useRef<HTMLInputElement>(null);
   const attachment = useSharedArtifactComposer(draft, setDraft, rootEventId);
   const [mentionQuery, setMentionQuery] = useState<string>();
   const [activeOption, setActiveOption] = useState(0);
   const [expanded, setExpanded] = useState(false);
-  const [entrust, setEntrust] = useState(draft.entrust ?? false);
-  const [responseRequested, setResponseRequested] = useState(draft.responseRequested ?? false);
+  const entrust = draft.entrust ?? false;
+  const setEntrust = useCallback((entrust: boolean) => setDraft((current) => ({ ...current, entrust })), []);
+  const responseRequested = draft.responseRequested ?? false;
+  const setResponseRequested = useCallback(
+    (responseRequested: boolean) => setDraft((current) => ({ ...current, responseRequested })),
+    [],
+  );
   const [pending, setPending] = useState(false);
+  const durable = useServiceComposerDraft({
+    draftKey,
+    namespace,
+    channelId,
+    rootEventId,
+    draft,
+    setDraft,
+    paused: pending,
+  });
+  const files = useComposerAttachments(draftKey, channelId, draft, setDraft, durable.ready);
   const [storageNotice, setStorageNotice] = useState<string>();
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const sending = useRef(false);
@@ -140,10 +165,16 @@ export function Composer({
     })),
   ].filter((item) => `${item.label} ${item.detail}`.toLocaleLowerCase().includes(query));
   const activeIndex = Math.min(activeOption, Math.max(0, options.length - 1));
+  const artifactAction = Boolean(attachment.selections.length || attachment.rework || attachment.reply);
+  const mixedAttachmentAction = Boolean(draft.attachments?.length && artifactAction);
   const disabled =
     pending ||
+    !durable.ready ||
+    !!durable.conflict ||
+    mixedAttachmentAction ||
     delivery.kind === 'requesting' ||
-    !draft.body.trim() ||
+    (!draft.body.trim() && !draft.attachments?.length) ||
+    files.pending ||
     !available ||
     unresolved ||
     !!replyError ||
@@ -168,14 +199,14 @@ export function Composer({
     setEntrust(false);
     setResponseRequested(false);
     inputRef.current?.focus();
-  }, [mention]);
+  }, [mention, setEntrust, setResponseRequested]);
   useEffect(() => {
     if (!reply) return;
     setDraft((current) => selectReply(current, reply));
     setEntrust(false);
     setResponseRequested(false);
     inputRef.current?.focus();
-  }, [reply]);
+  }, [reply, setEntrust, setResponseRequested]);
 
   const select = (index: number) => {
     const selected = options[index];
@@ -199,16 +230,24 @@ export function Composer({
     sending.current = true;
     setPending(true);
     try {
-      if (attachment.selections.length || attachment.rework || attachment.reply) {
+      if (artifactAction) {
+        await durable.flush(draft);
         await attachment.send(draft.body.trim(), draft.recipient);
-      } else if (draft.replyToEventId) {
-        await onSend(draft.body.trim(), draft.recipient, entrust, responseRequested, draft.replyToEventId);
       } else {
-        await onSend(draft.body.trim(), draft.recipient, entrust, responseRequested);
+        const draftReceipt = await durable.flush(draft);
+        const content = {
+          ...(draft.attachments?.length ? { attachments: [...draft.attachments] } : {}),
+          ...(draftReceipt ? { draftReceipt } : {}),
+        };
+        if (Object.keys(content).length)
+          await onSend(draft.body.trim(), draft.recipient, entrust, responseRequested, draft.replyToEventId, content);
+        else if (draft.replyToEventId)
+          await onSend(draft.body.trim(), draft.recipient, entrust, responseRequested, draft.replyToEventId);
+        else await onSend(draft.body.trim(), draft.recipient, entrust, responseRequested);
       }
-      setDraft((current) => clearConfirmedComposerDraft(current, draft));
-      setEntrust(false);
-      setResponseRequested(false);
+      const consume = artifactAction ? await durable.clearAfterAction(draft) : await durable.acknowledged(draft);
+      if (consume) setDraft((current) => clearConfirmedComposerDraft(current, draft));
+      if (draft.attachments?.length) await files.confirm(draft.attachments);
       setExpanded(false);
       setMentionQuery(undefined);
     } finally {
@@ -246,53 +285,39 @@ export function Composer({
     <form
       className={compact ? 'composer composer-compact' : 'composer'}
       onSubmit={(event) => void submit(event).catch(() => undefined)}
+      onDragOver={(event) => {
+        if (event.dataTransfer.types.includes('Files')) event.preventDefault();
+      }}
+      onDrop={(event) => {
+        if (!event.dataTransfer.files.length) return;
+        event.preventDefault();
+        void files.add([...event.dataTransfer.files]);
+      }}
     >
       {mentionQuery !== undefined && (
         <ComposerMentionMenu options={options} id={listId} active={activeIndex} onSelect={select} />
       )}
-      <SharedArtifactQuoteTags attachment={attachment} />
-      {replyEvent && (
-        <div className="composer-recipient" role="group" aria-label={t('回复来源')}>
-          <span>
-            {language === 'en' ? 'Reply to' : '回复'} {actorDisplayName(replyEvent)}
-            {language === 'en' ? ': ' : '：'}
-            {replyEvent.body.replace(/\s+/gu, ' ').slice(0, 60)}
-          </span>
-        </div>
-      )}
-      {draft.recipient.kind !== 'channel' && (
-        <div className="composer-recipient">
-          <span>@{draft.recipientLabel || t('已选成员')}</span>
-          <button
-            type="button"
-            aria-label={t('移除 @')}
-            onClick={() => {
-              setDraft((current) => ({
-                ...current,
-                recipient: { kind: 'channel' },
-                recipientLabel: '',
-                replyNeedsSelection: false,
-              }));
-              setEntrust(false);
-              setResponseRequested(false);
-            }}
-          >
-            ×
-          </button>
-        </div>
-      )}
-      {(replyError || !available) && (
-        <p role="alert" className="composer-warning">
-          {replyError ? t(replyError) : t('参与设置已变化，请重新选择成员；消息尚未发送。')}
-        </p>
-      )}
-      {unresolved && mentionQuery === undefined && (
-        <p role="alert" className="composer-warning">
-          {t('请用 @ 选择当前频道的成员，或移除没选中的 @。')}
-        </p>
-      )}
+      <ComposerContext
+        attachment={attachment}
+        draft={draft}
+        replyEvent={replyEvent}
+        replyError={replyError}
+        available={available}
+        unresolved={unresolved && mentionQuery === undefined}
+        onRemoveRecipient={() => {
+          setDraft((current) => ({
+            ...current,
+            recipient: { kind: 'channel' },
+            recipientLabel: '',
+            replyNeedsSelection: false,
+          }));
+          setEntrust(false);
+          setResponseRequested(false);
+        }}
+      />
       {expanded && (
         <ComposerTray
+          onFiles={() => fileInput.current?.click()}
           recipientKind={draft.recipient.kind}
           entrust={entrust}
           responseRequested={responseRequested}
@@ -305,51 +330,40 @@ export function Composer({
           onResponseRequested={setResponseRequested}
         />
       )}
-      <ComposerFrame className="composer-box">
-        <ComposerControl
-          type="button"
-          className="composer-expand"
-          aria-label={t('更多输入选项')}
-          aria-expanded={expanded}
-          onClick={() => setExpanded((value) => !value)}
-        >
-          +
-        </ComposerControl>
-        <textarea
-          ref={inputRef}
-          id={inputId}
-          value={draft.body}
-          placeholder={inputPlaceholder}
-          aria-label={inputPlaceholder}
-          aria-autocomplete="list"
-          rows={1}
-          required
-          disabled={pending}
-          aria-controls={mentionQuery !== undefined ? listId : undefined}
-          aria-activedescendant={mentionQuery !== undefined && options.length ? `${listId}-${activeIndex}` : undefined}
-          onKeyDown={keyDown}
-          onChange={(event) => {
+      <ComposerInput
+        files={files}
+        inputRef={inputRef}
+        fileRef={fileInput}
+        expanded={expanded}
+        onExpand={() => setExpanded((value) => !value)}
+        disabled={disabled}
+        input={{
+          id: inputId,
+          value: draft.body,
+          placeholder: inputPlaceholder,
+          'aria-label': inputPlaceholder,
+          'aria-autocomplete': 'list',
+          required: !draft.attachments?.length,
+          'aria-controls': mentionQuery !== undefined ? listId : undefined,
+          'aria-activedescendant':
+            mentionQuery !== undefined && options.length ? `${listId}-${activeIndex}` : undefined,
+          onKeyDown: keyDown,
+          onChange(event) {
             const body = event.target.value;
             setDraft((current) => ({ ...current, body }));
             const match = body.slice(0, event.target.selectionStart).match(/(?:^|\s)@([^\s@]*)$/u);
             setMentionQuery(match?.[1]);
             setActiveOption(0);
-          }}
-        />
-        <button type="submit" className="composer-send" aria-label={t('发送')} disabled={disabled}>
-          <CollectiveIcon kind="send" />
-        </button>
-      </ComposerFrame>
-      {storageNotice && (
-        <p className="composer-warning" role="status">
-          {t(storageNotice)}
-        </p>
-      )}
-      {delivery.kind !== 'idle' && (
-        <p className={`delivery-state delivery-${delivery.kind}`} role="status">
-          {t(delivery.label)}
-        </p>
-      )}
+          },
+        }}
+      />
+      <ComposerFeedback
+        durable={durable}
+        fileNotice={files.notice}
+        storageNotice={storageNotice}
+        mixedAttachmentAction={mixedAttachmentAction}
+        delivery={delivery}
+      />
     </form>
   );
 }

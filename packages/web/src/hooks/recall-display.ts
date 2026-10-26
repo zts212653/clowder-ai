@@ -33,11 +33,19 @@ const TYPE_LABELS: Record<string, string> = {
   commit: '提交',
 };
 export const recallTypeLabel = (sourceType?: string) => TYPE_LABELS[sourceType ?? ''] ?? '记忆';
+const UNAVAILABLE_LABELS = {
+  source_corrected: '来源已更正',
+  source_forgotten: '来源已遗忘',
+  scope_revoked: '来源已不可访问',
+};
 function hasReadableTitle(item: RecallResultItem): boolean {
   const title = item.title.trim();
   return !!title && title !== item.anchor && !/^(?:thread-thread_|person-memory:|person_[A-Za-z0-9_-]+$)/.test(title);
 }
 export function recallResultTitle(item: RecallResultItem): string {
+  if (item.sourceUnavailableReason && Object.hasOwn(UNAVAILABLE_LABELS, item.sourceUnavailableReason)) {
+    return `${recallTypeLabel(item.sourceType)} · ${UNAVAILABLE_LABELS[item.sourceUnavailableReason]}`;
+  }
   if (item.titleStatus === 'loading') return `${recallTypeLabel(item.sourceType)} · 正在读取标题…`;
   if (item.titleStatus === 'unavailable') return `${recallTypeLabel(item.sourceType)} · 暂时读不到标题`;
   return hasReadableTitle(item) ? item.title : `${recallTypeLabel(item.sourceType)} · 标题没有记录下来`;

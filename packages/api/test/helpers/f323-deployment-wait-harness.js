@@ -44,7 +44,15 @@ export function bindInputs(messages, principals) {
   return tracker;
 }
 
-export async function fixture({ included = true, observe, staleCurrentObservation = false, authorization = {} } = {}) {
+export async function fixture({
+  included = true,
+  observe,
+  staleCurrentObservation = false,
+  authorization = {},
+  bindActiveInputs = true,
+  handoffProposalStore,
+  sessionChainStore,
+} = {}) {
   const app = Fastify({ logger: false });
   const taskStore = new TaskStore();
   const messageStore = adaptMessageStore(new MessageStore());
@@ -81,17 +89,18 @@ export async function fixture({ included = true, observe, staleCurrentObservatio
       return invocationId === auth.invocationId ? auth : null;
     },
   };
-  const invocationTracker = bindInputs(messageStore, [{ auth, origin }]);
+  const invocationTracker = bindActiveInputs ? bindInputs(messageStore, [{ auth, origin }]) : new InvocationTracker();
   const turnExecutionStore = new InMemoryTurnExecutionStore();
-  turnExecutionStore.createRunning({
-    invocationId: auth.invocationId,
-    parentInvocationId: 'parent-registration',
-    userId: auth.userId,
-    threadId: auth.threadId,
-    catId: auth.catId,
-    executionKind: 'ordinary',
-    startedAt: 101,
-  });
+  if (bindActiveInputs)
+    turnExecutionStore.createRunning({
+      invocationId: auth.invocationId,
+      parentInvocationId: 'parent-registration',
+      userId: auth.userId,
+      threadId: auth.threadId,
+      catId: auth.catId,
+      executionKind: 'ordinary',
+      startedAt: 101,
+    });
   const connector = connectorDeliveryHarness({ messageStore });
   registerCallbackAuthHook(app, registry);
   const task = taskStore.create({
@@ -132,12 +141,16 @@ export async function fixture({ included = true, observe, staleCurrentObservatio
     log: { info() {}, warn() {}, error() {} },
     currentObservation,
     authorizationRegistry: registry,
+    handoffProposalStore,
+    sessionChainStore,
   });
   registerCallbackDeploymentWaitRoutes(app, {
     taskStore,
     messageStore,
     registry,
     invocationTracker,
+    handoffProposalStore,
+    sessionChainStore,
     observationProvider: {
       observe: observeDeployment,
     },
@@ -152,6 +165,7 @@ export async function fixture({ included = true, observe, staleCurrentObservatio
     auth,
     origin,
     invocationTracker,
+    turnExecutionStore,
     getWakes: () => connector.wakes.length,
     connector,
     observation,

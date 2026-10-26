@@ -74,6 +74,7 @@ after(async () => {
   const connectedBeforeClose = browser?.isConnected() ?? false;
   await browser?.close();
   if (process.env.F322_MENU_EVIDENCE_DIR) {
+    mkdirSync(process.env.F322_MENU_EVIDENCE_DIR, { recursive: true });
     writeFileSync(
       path.join(process.env.F322_MENU_EVIDENCE_DIR, 'shared-browser-cleanup.json'),
       JSON.stringify({ connectedBeforeClose, sharedBrowserClosed: !browser?.isConnected() }),
@@ -975,9 +976,25 @@ test('settings tabs support keyboard navigation and their selected content is as
 });
 
 test('the workspace-team second-level destination can be pinned like the other settings items', async () => {
-  const proof = await openProof({ route: '/settings?from=thread-return' });
+  const proof = await openProof({ route: '/settings?from=thread-return', pins: [] });
   const { page } = proof;
   try {
+    assert.equal(await page.getByTestId('world-rail').locator('[data-testid^="rail-pin-"]').count(), 0);
+    await page.getByRole('button', { name: '固定「成员与运行时」到窄栏', exact: true }).click();
+    const members = page.getByTestId('rail-pin-members');
+    await members.locator('[data-hub-icon="paw"]').waitFor();
+    const collective = page.getByTestId('world-collective');
+    assert.notDeepEqual(
+      await members.locator('path').evaluateAll((paths) => paths.map((node) => node.getAttribute('d'))),
+      await collective.locator('path').evaluateAll((paths) => paths.map((node) => node.getAttribute('d'))),
+    );
+    if (process.env.F322_MENU_EVIDENCE_DIR) {
+      mkdirSync(process.env.F322_MENU_EVIDENCE_DIR, { recursive: true });
+      await page
+        .getByTestId('world-rail')
+        .screenshot({ path: path.join(process.env.F322_MENU_EVIDENCE_DIR, 'world-rail-member-paw.png') });
+      await page.screenshot({ path: path.join(process.env.F322_MENU_EVIDENCE_DIR, 'world-rail-member-paw-1440.png') });
+    }
     assert.equal(
       await page.getByRole('button', { name: '固定「成员能力与路由状态」到窄栏', exact: true }).count(),
       1,
@@ -1116,7 +1133,7 @@ test('the complete header stays in its real shell pane through keyboard navigati
         const controls = [
           'header-sidebar-expand',
           'conversation-view-menu-toggle',
-          'thread-metadata-menu-toggle',
+          'thread-settings-toggle',
           'message-search-entry',
           'header-works',
           'header-tasks',

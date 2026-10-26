@@ -101,15 +101,10 @@ describe('formatVisibleSystemInfo — routing_preflight', () => {
       },
     });
 
-    expect(visible).toEqual({
-      content: 'codex-sol：路由上下文暂时无法完整读取。本次仍按原目标尝试。',
-      variant: 'info',
-    });
-    expect(visible?.content).not.toContain('resolver_degraded');
-    expect(visible?.content).not.toContain('original target');
+    expect(visible).toBeNull();
   });
 
-  it('explains an owner attempt without raw quota codes or a wall of alternative handles', () => {
+  it('keeps an already requested owner attempt quiet while it proceeds', () => {
     const result = formatVisibleSystemInfo(
       {
         type: 'routing_preflight',
@@ -123,9 +118,46 @@ describe('formatVisibleSystemInfo — routing_preflight', () => {
       },
       () => 'Astra',
     );
-    expect(result?.content).toBe('Astra：近期遇到额度限制。这次仍会按你的选择尝试。');
-    expect(result?.content).not.toContain('quota_exhausted');
-    expect(result?.content).not.toContain('alternative-');
+    expect(result).toBeNull();
+  });
+
+  it('never uses recovered-history or execution-capacity diagnostics as human-facing rejection copy', () => {
+    const result = formatVisibleSystemInfo(
+      {
+        type: 'routing_preflight',
+        target: {
+          targetCatId: 'codex-sol',
+          disposition: 'rejected',
+          reasons: [
+            { code: 'routing_signal_recovered', summary: '已恢复 9 条历史状态记录', sourceRefs: ['history:1'] },
+            {
+              code: 'routing_capacity_unverified',
+              summary: 'Execution capacity is unverified (pool applicability unknown); account observation is fresh',
+              sourceRefs: ['capacity:1'],
+            },
+            { code: 'routing_signal_unavailable', summary: 'quota_exhausted', sourceRefs: ['quota:1'] },
+          ],
+        },
+      },
+      () => '小太阳',
+    );
+    expect(result).toEqual({
+      content: '小太阳：近期遇到额度限制。本次未执行，这条消息会等待你重试。',
+      variant: 'info',
+    });
+  });
+
+  it('uses a Chinese fallback when a rejected target has only an unknown machine reason', () => {
+    expect(
+      formatVisibleSystemInfo({
+        type: 'routing_preflight',
+        target: {
+          targetCatId: '小太阳',
+          disposition: 'rejected',
+          reasons: [{ code: 'future_provider_error', summary: 'New internal diagnostic', sourceRefs: [] }],
+        },
+      }),
+    ).toEqual({ content: '小太阳：当前暂不可用。本次未执行，这条消息会等待你重试。', variant: 'info' });
   });
 });
 

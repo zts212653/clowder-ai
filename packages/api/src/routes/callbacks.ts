@@ -1325,6 +1325,8 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       registry,
       observationProvider: opts.deploymentObservationProvider,
       lifecycleHolder: opts.deploymentWaitLifecycleHolder,
+      ...(opts.handoffProposalStore ? { handoffProposalStore: opts.handoffProposalStore } : {}),
+      ...(opts.sessionChainStore ? { sessionChainStore: opts.sessionChainStore } : {}),
       ...(opts.invocationTracker ? { invocationTracker: opts.invocationTracker } : {}),
     });
   }

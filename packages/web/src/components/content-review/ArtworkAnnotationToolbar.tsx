@@ -1,5 +1,6 @@
 'use client';
 import { Fragment, type ReactNode } from 'react';
+import { useArtworkLightboxScope, useFloatingArtworkPresentation } from './ArtworkLightboxScope';
 import styles from './artwork-annotation-toolbar.module.css';
 import { type ReviewIconName, ReviewToolbarIcon } from './ReviewToolbarIcon';
 
@@ -23,6 +24,11 @@ export function ArtworkAnnotationToolbar({
   tools: readonly AnnotationTool[];
   more?: { readonly label: string; readonly children: ReactNode };
 }) {
+  // Image and video controls portal this toolbar into the floating composer slot exactly when both hold.
+  // That panel scrolls, so an upward menu would be clipped above its top edge and fall onto the gallery strip.
+  const floating = useFloatingArtworkPresentation();
+  const toolsSlot = useArtworkLightboxScope()?.toolsSlot;
+  const menuPlacement = floating && toolsSlot ? 'below' : 'above';
   return (
     <div className={styles.dock} role="toolbar" aria-label={label} data-testid="artwork-annotation-toolbar">
       {tools.map((tool, index) => (
@@ -46,7 +52,12 @@ export function ArtworkAnnotationToolbar({
           <summary aria-label={more.label}>
             <ReviewToolbarIcon name="more" />
           </summary>
-          <div className={styles.menu}>{more.children}</div>
+          <div
+            className={menuPlacement === 'below' ? `${styles.menu} ${styles.menuBelow}` : styles.menu}
+            data-menu-placement={menuPlacement}
+          >
+            {more.children}
+          </div>
         </details>
       ) : null}
     </div>

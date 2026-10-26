@@ -47,6 +47,21 @@ const readViews = (sourceReader: MemoryCueSourceReader) =>
     personMemoryStore: { getPerson: async (ownerUserId) => ({ ownerUserId, displayName: '吴浪', status: 'active' }) },
   });
 
+it('opening history identifies the profile owner target without using an expired cat drill as a human read', async () => {
+  seed('profile', 'profile:opening-capsule');
+  seed('profile', 'profile:opening-primer:astra:sonnet', 'r2');
+  const views = await readViews({
+    read: async () => {
+      throw new Error('must not impersonate a cat drill');
+    },
+  });
+  assert.equal(views.find((item) => item.anchor === 'profile:opening-capsule')?.profileMemoryId, 'capsule');
+  const primer = views.find((item) => item.anchor === 'profile:opening-primer:astra:sonnet');
+  assert.equal(primer?.profileMemoryId, 'primer:astra');
+  assert.equal(primer?.title, '开场递送 · 关系参考');
+  assert.equal(primer?.href, null, 'no fabricated profile deep link before the real UI entry exists');
+});
+
 it('reads identical cue source metadata once per request and keeps revision keys separate', async () => {
   const insert = db.prepare('INSERT INTO memory_cue_events VALUES (?,?,?,?,?,?,?,?,?)');
   for (const [cueId, revision] of [
@@ -108,7 +123,9 @@ it('projects readable titles for all admitted families without exporting source 
               ? { summary: titles.event, cognitiveTransition: 'PRIVATE' }
               : input.family === 'thread_overview'
                 ? { title: titles.thread_overview, summary: 'PRIVATE' }
-                : { claim: 'PRIVATE', sourceRunId: 'PRIVATE' };
+                : input.family === 'person_memory'
+                  ? { displayName: titles.person_entity, provenanceRefs: [], facts: ['PRIVATE'] }
+                  : { claim: 'PRIVATE', sourceRunId: 'PRIVATE' };
       return { status: 'ok', payload };
     },
   };

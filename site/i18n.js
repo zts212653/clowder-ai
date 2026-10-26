@@ -34,6 +34,8 @@ window.I18N = {
     'home.a11y.demo.proposals': `Demo: a cat proposes new conversations`,
     'home.a11y.demo.samebug': `Demo: the same bug with two endings`,
     'home.a11y.demo.steer': `Demo: steer a cat while it is still replying`,
+    'home.a11y.demo.panelvote': `Demo: several cats think apart, then vote`,
+    'home.a11y.demo.slept': `Demo: what the cats did while the team slept`,
 
     // ── Hero ──
     'hero.tagline': `Open Source Multi-Model AI Platform`,
@@ -173,6 +175,15 @@ window.I18N = {
     'demos.steer.title': `Don’t Wait for It to Finish`,
     'demos.steer.desc': `The cat is mid-change and you spot one more thing. In the composer’s + menu, choose to steer the current reply, circle the spot, add one line, and send. The cat picks it up in the same turn, then shows the old and new versions side by side.`,
     'demos.steer.try': `“Make this button bigger.”`,
+    'demos.panelvote.video': `assets/demos/panel-vote.en.mp4`,
+    'demos.panelvote.title': `Can’t Decide? Think Apart, Then Vote`,
+    'demos.panelvote.desc': `Not sure which way to go? Say “expert panel”: each cat thinks on its own first, and your idea counts as one too. Still split? Say “unknown-first” and the cats check the unknown most likely to overturn the answer. Still can’t decide? Type /vote and let the cats vote. Your idea is on the ballot, and it doesn’t always win.`,
+    'demos.panelvote.try': `“Expert panel: should sign-ups pay a deposit? My idea: 50, no refunds.”`,
+    'demos.slept.video': `assets/demos/while-we-slept.en.mp4`,
+    'demos.slept.source': `Thanks to that night's community contributors: mindfn, amazing-fish, EdgarR1170, whutzefengxie-ops`,
+    'demos.slept.title': `The 10 Hours We Slept`,
+    'demos.slept.desc': `One real night, October 22: the whole team went to sleep. A scheduled task woke one cat every two hours to keep the open-source sync moving; GitHub woke another when a community PR changed or CI failed. They handed off to each other, and by morning 37 PRs had been merged.`,
+    'demos.slept.try': `“Every morning at 9, check …” or “Keep an eye on this PR.”`,
 
     // ── Roadmap ──
     'roadmap.title': `Roadmap`,
@@ -315,6 +326,8 @@ window.I18N = {
     'home.a11y.demo.proposals': `演示：猫猫提议开新对话`,
     'home.a11y.demo.samebug': `演示：同一个 bug，两种结局`,
     'home.a11y.demo.steer': `演示：不用等猫说完，直接引导`,
+    'home.a11y.demo.panelvote': `演示：几只猫先各想各的，再投票`,
+    'home.a11y.demo.slept': `演示：团队睡着时，猫做了什么`,
 
     // ── Hero ──
     'hero.tagline': `开源多模型 AI 团队平台`,
@@ -454,6 +467,15 @@ window.I18N = {
     'demos.steer.title': `不用等它说完`,
     'demos.steer.desc': `猫正改着，你又想到一处：把发送策略选成「引导当前回复」，在画面上圈一处、说一句就发。猫在这一轮里接住，改完新旧两版并排，一眼就能定。`,
     'demos.steer.try': `「这个按钮再大点。」`,
+    'demos.panelvote.video': `assets/demos/panel-vote.zh.mp4`,
+    'demos.panelvote.title': `拿不准？先各想各的，再投票`,
+    'demos.panelvote.desc': `拿不准的事，说「专家辩论」：几只猫先各想各的，你的主意也算一个。还吵不出结果，说「四象限」，猫先去查最可能推翻结论的那件事。还分不出，打 /vote 让猫投票：你的主意也上票，不一定赢。`,
+    'demos.panelvote.try': `「开个专家辩论：报名要不要收押金？我的主意是收 50，不退。」`,
+    'demos.slept.video': `assets/demos/while-we-slept.zh.mp4`,
+    'demos.slept.source': `谢谢那一晚的社区贡献者：mindfn、amazing-fish、EdgarR1170、whutzefengxie-ops`,
+    'demos.slept.title': `我们睡着的那 10 个小时`,
+    'demos.slept.desc': `10 月 22 日真实的一晚：团队的人都睡了。定时任务每两小时叫醒一只猫，接着推往开源仓的同步；社区 PR 有新提交、CI 挂了，GitHub 就叫醒另一只去 review、去修。两只猫互相接力，醒来时已经合入 37 个 PR。`,
+    'demos.slept.try': `「每天早上 9 点帮我看一下……」或者「帮我盯着这个 PR。」`,
 
     // ── Roadmap ──
     'roadmap.title': `路线图`,

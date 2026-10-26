@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useChatStore } from '@/stores/chatStore';
 import { apiFetch } from '@/utils/api-client';
+import { recallResultHref, recallResultTitle } from '../recall-display';
 import { recallEventDisplayTitle } from '../recall-feed-model';
 import { useThreadRecall } from '../useRecallEvents';
 
@@ -457,5 +458,62 @@ describe('F321 scoped recall reads', () => {
     );
     await act(async () => root.render(<Probe />));
     expect(container.textContent).toBe('ready|递送时的品味,品味 · 暂时读不到标题|cue-ok');
+  });
+  it.each([
+    'source_corrected',
+    'source_forgotten',
+  ] as const)('keeps owner source invalidation visible through cue hydration (%s)', async (sourceUnavailableReason) => {
+    api.mockImplementation(
+      async (path) =>
+        new Response(
+          JSON.stringify(
+            path.includes('memory-cues')
+              ? {
+                  cues: [
+                    {
+                      cueId: 'profile',
+                      consumerCatId: 'sonnet',
+                      sourceAnchor: 'profile:primer:ragdoll:sonnet',
+                      sourceRevision: 'original-revision',
+                      resolverFamily: 'profile',
+                      status: 'presented_unreported',
+                      presentedAt: 1,
+                    },
+                  ],
+                }
+              : {
+                  events: [],
+                  cueInvocationIds: ['inv'],
+                  sourceViews: [
+                    {
+                      anchor: 'profile:primer:ragdoll:sonnet',
+                      invocationId: 'inv',
+                      cueId: 'profile',
+                      sourceRevision: 'original-revision',
+                      kind: 'profile',
+                      titleStatus: 'unavailable',
+                      href: null,
+                      sourceUnavailableReason,
+                    },
+                  ],
+                },
+          ),
+        ),
+    );
+    function ProfileSourceProbe() {
+      const event = useThreadRecall().events[0];
+      const item = event?.results?.[0];
+      return (
+        <span data-revision={event?.sourceRevision} data-href={item ? (recallResultHref(item) ?? '') : ''}>
+          {item ? recallResultTitle(item) : ''}
+        </span>
+      );
+    }
+    await act(async () => root.render(<ProfileSourceProbe />));
+    expect(container.textContent).toBe(
+      sourceUnavailableReason === 'source_corrected' ? '画像 · 来源已更正' : '画像 · 来源已遗忘',
+    );
+    expect(container.querySelector('span')?.getAttribute('data-revision')).toBe('original-revision');
+    expect(container.querySelector('span')?.getAttribute('data-href')).toBe('');
   });
 });

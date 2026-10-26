@@ -235,7 +235,7 @@ for (const recordKind of ['instances', 'grants']) {
   });
 }
 
-for (const kind of ['local-directory', 'catalog', 'git']) {
+for (const kind of ['local-directory', 'git']) {
   test(`legacy confirmation does not allow switching the known ${kind} source`, async (t) => {
     const h = await fixture(t, {
       provenance: {
@@ -251,6 +251,57 @@ for (const kind of ['local-directory', 'catalog', 'git']) {
     assert.deepEqual(h.lifecycleCalls, []);
   });
 }
+
+for (const enabled of [false, true]) {
+  test(`same-package catalog archive replacement requires confirmation and retains the instance (enabled=${enabled})`, async (t) => {
+    const h = await fixture(t, {
+      provenance: { kind: 'catalog', catalogId: 'test', packageName: '@clowder-ai/official-test-source' },
+    });
+    if (enabled)
+      await h.store.transaction((tx) =>
+        tx.instances.put({
+          ...tx.instances.get('pi_original'),
+          activationState: 'enabled',
+          runtimeState: 'healthy',
+          configReadiness: 'ready',
+        }),
+      );
+    const before = await h.store.snapshot();
+    const replacement = await h.offer();
+    assert.deepEqual(await h.store.snapshot(), before);
+    assert.deepEqual(h.lifecycleCalls, []);
+    await h.admission.install(h.source, { replacement });
+    const after = await h.store.snapshot();
+    assert.equal(after.instances.length, 1);
+    assert.equal(after.instances[0].pluginInstanceId, before.instances[0].pluginInstanceId);
+    assert.equal(after.instances[0].installedAt, before.instances[0].installedAt);
+    assert.equal(after.instances[0].packageDigest, h.nextArchive.integrity);
+    assert.equal(after.instances[0].activationState, enabled ? 'enabled' : 'disabled');
+    const installed = after.packages.find((record) => record.packageDigest === h.nextArchive.integrity);
+    assert.equal(installed.provenance.kind, 'local-archive');
+    assert.equal(installed.provenance.packageName, '@clowder-ai/official-test-source');
+    assert.deepEqual(after.grants[0].effectiveGrants, before.grants[0].effectiveGrants);
+    assert.deepEqual(
+      h.lifecycleCalls,
+      enabled
+        ? [
+            ['stop', 'pi_original'],
+            ['start', 'pi_original'],
+          ]
+        : [],
+    );
+  });
+}
+
+test('catalog replacement refuses a different recorded npm identity', async (t) => {
+  const h = await fixture(t, {
+    provenance: { kind: 'catalog', catalogId: 'test', packageName: '@clowder-ai/unrelated-package' },
+  });
+  const before = await h.store.snapshot();
+  await assert.rejects(h.admission.install(h.source), { code: 'INVENTORY_REJECTED' });
+  assert.deepEqual(await h.store.snapshot(), before);
+  assert.deepEqual(h.lifecycleCalls, []);
+});
 
 test('configuration failure restores the legacy package and preserves instance history', async (t) => {
   const h = await fixture(t, {

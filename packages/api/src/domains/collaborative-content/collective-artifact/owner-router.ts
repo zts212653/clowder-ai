@@ -1,6 +1,7 @@
 import { isDeepStrictEqual } from 'node:util';
 import type { PublishedMediaService } from '../../video-studio/content-owner/published-media-service.js';
 import { CollectiveMarkdownOwner } from './markdown-owner.js';
+import { createCollectiveMessageAttachmentOwner } from './message-attachment-owner.js';
 import type { CollectiveArtifactOwnerPort } from './owner-port.js';
 import { CollectivePublishedMediaOwner } from './published-media-owner.js';
 import { mediaOwnerError } from './published-media-read.js';
@@ -15,6 +16,7 @@ export function createCollectiveArtifactOwner(
     ownerUserId: options.ownerUserId,
   });
   const port: CollectiveArtifactOwnerPort = {
+    attachments: createCollectiveMessageAttachmentOwner(options.owner),
     custody: markdown.custody,
     media: publishedMedia.media,
     publish: (operation, authority) => markdown.publish(operation, authority),

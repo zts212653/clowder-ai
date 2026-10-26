@@ -38,36 +38,42 @@ describe('typed wait registration keeps exact private Redis authority', () => {
     assert.equal((await resolveTypedWaitContinuation({ taskStore: cold, ...h.identity })).kind, 'bypass');
   });
 
-  test('authorization grade and tool restrictions survive cold hydration only in the private receipt', async (t) => {
-    const h = await harness(t);
-    const authorization = {
-      ownerAuthProvenance: 'strict',
-      toolExecutionPolicy: {
-        mode: 'callback_allowlist',
-        allowedCallbackRoutes: ['POST /api/callbacks/register-deployment-wait'],
-      },
-    };
-    const receipt = createTypedWaitRegistration({
-      task: h.task,
-      active: h.active,
-      invocationId: h.identity.invocationId,
-      source: h.receipt.source,
-      authorization,
+  for (const sessionHandoff of [
+    undefined,
+    { proposalId: 'approved-handoff', continuationEntryId: 'private-entry', sourceSessionId: 'sealed-session' },
+  ]) {
+    test(`authorization and ${sessionHandoff ? 'handoff' : 'message'} source survive cold hydration only in the private receipt`, async (t) => {
+      const h = await harness(t);
+      const authorization = {
+        ownerAuthProvenance: 'strict',
+        toolExecutionPolicy: {
+          mode: 'callback_allowlist',
+          allowedCallbackRoutes: ['POST /api/callbacks/register-deployment-wait'],
+        },
+      };
+      const receipt = createTypedWaitRegistration({
+        task: h.task,
+        active: h.active,
+        invocationId: h.identity.invocationId,
+        source: { ...h.receipt.source, ...(sessionHandoff ? { sessionHandoff } : {}) },
+        authorization,
+      });
+      const current = await h.taskStore.get(h.task.id);
+      assert.ok(
+        await h.taskStore.replaceDeploymentWaitIfGeneration(h.task.id, {
+          expectedGeneration: 1,
+          expectedDeploymentWait: current.deploymentWait,
+          expectedUpdatedAt: current.updatedAt,
+          deploymentWait: current.deploymentWait,
+          waitRegistration: receipt,
+        }),
+      );
+      const cold = new RedisTaskStore(h.redis);
+      assert.deepEqual((await cold.getWaitRegistration(h.task.id)).receipt.authorization, authorization);
+      assert.deepEqual((await cold.getWaitRegistration(h.task.id)).receipt.source, receipt.source);
+      assert.equal(JSON.stringify(await cold.get(h.task.id)).includes('ownerAuthProvenance'), false);
     });
-    const current = await h.taskStore.get(h.task.id);
-    assert.ok(
-      await h.taskStore.replaceDeploymentWaitIfGeneration(h.task.id, {
-        expectedGeneration: 1,
-        expectedDeploymentWait: current.deploymentWait,
-        expectedUpdatedAt: current.updatedAt,
-        deploymentWait: current.deploymentWait,
-        waitRegistration: receipt,
-      }),
-    );
-    const cold = new RedisTaskStore(h.redis);
-    assert.deepEqual((await cold.getWaitRegistration(h.task.id)).receipt.authorization, authorization);
-    assert.equal(JSON.stringify(await cold.get(h.task.id)).includes('ownerAuthProvenance'), false);
-  });
+  }
 
   test('a losing Task CAS cannot overwrite the winning generation receipt', async (t) => {
     const h = await harness(t);

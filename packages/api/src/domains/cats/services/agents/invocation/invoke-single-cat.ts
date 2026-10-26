@@ -3699,6 +3699,12 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
             transcriptWriter: durableTranscriptWriter,
             sessionChainStore: deps.sessionChainStore,
             ...(deps.profileRepository ? { profileRepository: deps.profileRepository } : {}),
+            ...(deps.memoryCuePromptService?.recordProfileOpeningObserved
+              ? {
+                  onProfileOpeningObserved: (delivery) =>
+                    deps.memoryCuePromptService!.recordProfileOpeningObserved!(delivery),
+                }
+              : {}),
             snapshot: () => {
               const presentations = requestGenerationPresentations(currentPresentationAttempt);
               const messageSourceRefs = requestGenerationMessageSourceRefs({

@@ -1,6 +1,7 @@
 import { execFileSync, spawn } from 'node:child_process';
 import { readdirSync, readFileSync } from 'node:fs';
 import { constants } from 'node:os';
+import { macProcessEnvironmentCommand } from '../../packages/api/runtime/process-observation/ps-environment-snapshot.mjs';
 import { normalizedGateEnvironment } from './gate-environment.mjs';
 import { proveLinuxExecutionExited, readLinuxExitIdentity } from './gate-linux-process-exit.mjs';
 
@@ -48,8 +49,9 @@ export function parseMacGateJobProcesses(snapshot, jobToken, tokenEnvironmentKey
 }
 
 function scanMac(jobToken, tokenEnvironmentKey, execFileSyncImpl) {
+  const command = macProcessEnvironmentCommand({ markers: [`${tokenEnvironmentKey}=${jobToken}`] });
   const snapshot = scanOperation('ps', () =>
-    execFileSyncImpl('ps', ['eww', '-axo', 'pid=,ppid=,command='], {
+    execFileSyncImpl(command.file, command.args, {
       encoding: 'utf8',
       maxBuffer: 32 * 1024 * 1024,
       stdio: ['ignore', 'pipe', 'pipe'],

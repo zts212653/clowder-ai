@@ -98,8 +98,13 @@ describe('F322 pins above the mailbox', () => {
 
   it('the Workspace team panel has its own pin identity and never resolves to the settings members section', () => {
     expect(TEAM_WORKSPACE_PIN_ID).not.toBe(destPinId('team'));
-    expect(resolvePin(TEAM_WORKSPACE_PIN_ID)).toMatchObject({ kind: 'workspace-team', label: '成员能力与路由状态' });
-    expect(resolvePin('dest:team')).toMatchObject({ kind: 'entry', label: '猫猫团队' });
+    expect(resolvePin(TEAM_WORKSPACE_PIN_ID)).toMatchObject({
+      kind: 'workspace-team',
+      label: '成员能力与路由状态',
+      icon: 'paw',
+    });
+    expect(resolvePin('dest:team')).toMatchObject({ kind: 'entry', label: '猫猫团队', icon: 'paw' });
+    expect(resolvePin('members')).toMatchObject({ kind: 'section', label: '成员与运行时', icon: 'paw' });
   });
 
   it('an unknown or retired pin id resolves to nothing instead of crashing the rail', () => {

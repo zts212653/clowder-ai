@@ -4,7 +4,7 @@ related_features: [F152, F200, F221, F227, F231, F243, F256, F260, F263, F271, F
 topics: [memory, experience, generalization, continuity]
 doc_kind: spec
 created: 2026-10-23
-tips_exempt: "Renewed 2026-10-24 for KD-4 through KD-7, OQ-3, delivery roadmap v1 and status records: this documentation records capsule approval before opening delivery, stable-persona relationships versus model-specific capabilities, owner-controlled per-thread watcher design and trials, and delivery sequencing. These decisions extend the architecture discussion without delivering or enabling a new user entry, memory injection or watcher configuration; the existing F321/Luna obligations remain."
+tips_exempt: "Renewed 2026-10-25 for KD-4 through KD-8, OQ-3, delivery roadmap v1 and status records: this documentation records capsule approval before opening delivery, a pluggable per-user capsule that every owner can see and edit through one shared entry, stable-persona relationships versus model-specific capabilities, owner-controlled per-thread watcher design and trials, and delivery sequencing. These decisions extend the architecture discussion without delivering or enabling a new user entry, memory injection or watcher configuration; the existing F321/Luna obligations remain."
 description: 让共同经历在未见情境中帮助猫自主联想、核证与修正判断，并让人看见和纠正记忆。
 description_source: human
 description_author: codex-astra
@@ -97,7 +97,7 @@ F321 Luna 继续按原批准合同交付与检验，不能提前启用，也不�
 保留经历的原由、过程、结果、适用条件、来源；合适时提出人物/关系/品味记忆，沿原批准渠道发布。
 新事实、更正与授权变化使相关派生失效；“这次不适用”不等于删除往事。
 完成 F321 已接受的主星书房、该轮记忆使用、原文导航、改忘、错误建议及对话回顾剩余旅程。
-R13/KD-8 保持：“对话回顾”是“全部记忆”之后的同级标签，主星书房紧接页头，
+F321 R13/KD-8 保持：“对话回顾”是“全部记忆”之后的同级标签，主星书房紧接页头，
 不新建存储、不混入已记住的条目。原 OQ-10 一并保留：实现猫开工前查清每条的表示和 7 天/50 条展示限制，
 由原体验指挥 Opus55 收敛具体方案，若改变已接受体验则与 You 共看；该展示问题不限制 Luna 整本可读目录联想合同。
 明确可见内容、未接入项与未回报，保留 F276 完整人物生命周期、F231 个体关系粒度/迁移未决。
@@ -262,6 +262,7 @@ dot 本轮只是带题面提示、不额外搜索的一次回答；Q1–3 为“
 | KD-4 | 主人小胶囊由猫起草（≤300 字，每句带出处），You 过目点头后才进开场 | You `private-source-id` 对“先起草、你点头才放进开场”批“可以” | 2026-10-24 |
 | KD-5 | 关系与能力分开记：陪伴、称呼、共同经历随稳定角色继承（Ragdoll、Maine Coon、Siamese换型号也接得上）；“能不能写代码”这类能力事实按具体模型记，不随角色继承 | You 同上：“有的陪伴的是要继承的……但是比如说Siamese不能写代码这种我们不能记录，得记录类似于Siamese（gemini2.5pro 3pro 或者什么 flash 不能写代码）” | 2026-10-24 |
 | KD-6 | 守望猫（伴随猫）不做静默实验：You 参与，按线程由他决定开关，要有配置和 UI/UX 设计；提示经猫猫球（F229）或小信箱递给他是首选候选。守望猫须服从性好、有自己的思考、幻觉低；候选先比Maine Coon（OpenAI 原生，可直接用现有整理猫位）与 Sonnet | You 同上：“让我参与，我来选什么时候开什么时候关，按照thread来，得有配置……联动猫猫球……或者在我们的小信箱里”；“守望🐈必须是一只遵从性好，有自己思考 幻觉低的猫” | 2026-10-24 |
+| KD-8 | 胶囊可插拔、人人看得见：内容按用户存在各自的私有数据区，不进仓库、不随开源发布；产品里给每位用户一个能看、能改自己胶囊的地方，猫可以起草，本人确认后生效；家里和开源用户走同一个入口，不设家里专用通道。家里 v1 已获批；写入开场的时机按交付路线原则 3，随看得见、能改的入口同批 | You `private-source-id`：“胶囊的稿子我觉得是OK的”；“这个可不合适丢到开源社区，只应该是家里的，开源社区的小伙伴的稿子应该有个地方他们能看见能改，猫猫能去形成”；“我们自己的胶囊也应该是能看见，反正开源社区的小伙伴能怎么看见，我们也应该能怎么看见” | 2026-10-25 |
 
 ## Design Gate
 

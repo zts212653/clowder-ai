@@ -9,7 +9,7 @@ export function readPassageEmbeddingPage(
   lastId: number,
   limit: number,
   docAnchors?: readonly string[],
-): { lastId: number; passages: PassageEmbeddingRow[] } | undefined {
+): { lastId: number; metadataRows: number; passages: PassageEmbeddingRow[] } | undefined {
   const where = ['id > ?'];
   const params: unknown[] = [lastId];
   if (docAnchors?.length) {
@@ -30,5 +30,5 @@ export function readPassageEmbeddingPage(
           WHERE id IN (${missing.map(() => '?').join(',')}) ORDER BY id`)
         .all(...missing.map(({ id }) => id)) as PassageEmbeddingRow[])
     : [];
-  return { lastId: last.id, passages };
+  return { lastId: last.id, metadataRows: rows.length, passages };
 }

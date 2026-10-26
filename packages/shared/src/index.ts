@@ -118,6 +118,7 @@ export * from './types/collective-media-share-surface.js';
 export * from './types/collective-media-surface.js';
 export * from './types/collective-media-surface-rpc.js';
 export * from './types/collective-members.js';
+export * from './types/collective-message-state.js';
 export * from './types/collective-participation.js';
 export * from './types/collective-project-authoring.js';
 export * from './types/collective-ui-placement.js';

@@ -55,6 +55,75 @@ function prepared() {
   });
 }
 
+it('records the exact cold-start capsule only after the provider observes that native request', async () => {
+  const deliveries = [];
+  const { recorder } = fixture({
+    profileRepository: { readCapsule: () => ({ content: '先讲结果。', revision: 'sha256:fixture-capsule' }) },
+    onProfileOpeningObserved: async (delivery) => deliveries.push(delivery),
+    snapshot: () => ({
+      continuity: { mode: 'cold', contextEpoch: 1, transition: 'fresh', capability: 'exact', compactionRefs: [] },
+      messageSourceRefs: [],
+      nativeInstructionSourceRefs: [],
+      presentations: [],
+    }),
+  });
+  const commit = await recorder.recordPrepared(
+    {
+      ...prepared(),
+      nativeInstructions: [{ body: '身份\n## 主人画像\n\n先讲结果。', injectionDecision: 'native_l0_compiled' }],
+    },
+    { attempt: 1 },
+  );
+  assert.equal(deliveries.length, 0, 'assembly is not delivery');
+  await recorder.recordObserved(commit, { evidenceRef: 'provider-turn-accepted' });
+  assert.equal(deliveries.length, 1);
+  assert.equal(deliveries[0].sourceRevision, 'sha256:fixture-capsule');
+  assert.equal(deliveries[0].scope.ownerUserId, 'user-1');
+  assert.equal(deliveries[0].scope.invocationId, 'inv-1');
+  await recorder.recordObserved(commit, { evidenceRef: 'provider-turn-accepted' });
+  assert.equal(deliveries.length, 1);
+});
+
+it('does not invent opening delivery for a warm turn, unmatched profile bytes, or an unproven native channel', async () => {
+  for (const scenario of ['warm', 'changed-profile', 'unknown-channel']) {
+    const deliveries = [];
+    const { recorder } = fixture({
+      profileRepository: {
+        readCapsule: () => ({
+          content: scenario === 'changed-profile' ? '新版内容。' : '先讲结果。',
+          revision: 'sha256:fixture-capsule',
+        }),
+      },
+      onProfileOpeningObserved: async (delivery) => deliveries.push(delivery),
+      snapshot: () => ({
+        continuity: {
+          mode: scenario === 'warm' ? 'hot' : 'cold',
+          contextEpoch: 1,
+          capability: 'exact',
+          compactionRefs: [],
+        },
+        messageSourceRefs: [],
+        nativeInstructionSourceRefs: [],
+        presentations: [],
+      }),
+    });
+    const commit = await recorder.recordPrepared(
+      {
+        ...prepared(),
+        nativeInstructions: [
+          {
+            body: '## 主人画像\n\n先讲结果。',
+            ...(scenario === 'unknown-channel' ? {} : { injectionDecision: 'native_l0_compiled' }),
+          },
+        ],
+      },
+      { attempt: 1 },
+    );
+    await recorder.recordObserved(commit, { evidenceRef: 'provider-turn-accepted' });
+    assert.equal(deliveries.length, 0, scenario);
+  }
+});
+
 describe('F299 request-generation recorder', () => {
   it('durably appends exact prepared channels to the active Session before resolving', async () => {
     const { active, appended, recorder } = fixture();

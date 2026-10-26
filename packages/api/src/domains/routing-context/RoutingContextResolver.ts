@@ -10,6 +10,7 @@ import type {
   CapabilityProfileRevisionLoadResult,
   CapabilityProfileRevisionSource,
 } from './CapabilityProfileRevisionSource.js';
+import { projectRoutingPreferenceHeads } from './preflight/RoutingPreferenceDecisionProjection.js';
 import {
   type RoutingSignalDecisionProjectionV1,
   routingSignalDecisionClosureMap,
@@ -52,7 +53,8 @@ export interface RoutingContextResolutionWithSources {
 
 interface RoutingContextResolverDependencies {
   signalStore: Pick<IRoutingSignalEventStore, 'getOwnerRevision' | 'readDecisionProjection' | 'listByOwner'>;
-  preferenceStore: Pick<IRoutingPreferenceStore, 'listByOwner'>;
+  preferenceStore: Pick<IRoutingPreferenceStore, 'listByOwner'> &
+    Partial<Pick<IRoutingPreferenceStore, 'readDecisionHeads'>>;
   profileRevisionSource: CapabilityProfileRevisionSource;
 }
 
@@ -101,7 +103,7 @@ export class RoutingContextResolver {
   async resolve(input: ResolveRoutingContextInput): Promise<RoutingContextResolution> {
     const [signalProjection, preferenceRevisions, profileResult] = await Promise.all([
       this.loadSignalProjection(input.ownerId),
-      this.dependencies.preferenceStore.listByOwner(input.ownerId),
+      this.loadPreferenceHeads(input.ownerId),
       this.dependencies.profileRevisionSource.load({
         ownerId: input.ownerId,
         candidates: input.candidates,
@@ -123,10 +125,22 @@ export class RoutingContextResolver {
     ]);
     const preferences = sortPreferences(preferenceRevisions);
     return {
-      resolution: this.composeResolution(input, signalProjection, preferences, profileResult),
+      resolution: this.composeResolution(
+        input,
+        signalProjection,
+        projectRoutingPreferenceHeads(preferences),
+        profileResult,
+      ),
       signalEvents: sortSignals(signalEvents),
       preferenceRevisions: preferences,
     };
+  }
+
+  private loadPreferenceHeads(ownerId: string): Promise<RoutingPreferenceRevisionV1[]> {
+    return (
+      this.dependencies.preferenceStore.readDecisionHeads?.(ownerId) ??
+      this.dependencies.preferenceStore.listByOwner(ownerId)
+    );
   }
 
   private composeResolution(

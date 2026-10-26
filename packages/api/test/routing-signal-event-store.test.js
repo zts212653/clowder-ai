@@ -47,6 +47,7 @@ function closeEvent(eventType, eventId, closesSignalIds, overrides = {}) {
 describe('RedisRoutingSignalEventStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () => {
   let RedisRoutingSignalEventStore;
   let RoutingSignalEventKeys;
+  let STORE_ROUTING_SIGNAL_DECISION_PROJECTION_LUA;
   let routingSignalDecisionClosureMap;
   let createRedisClient;
   let redis;
@@ -59,6 +60,9 @@ describe('RedisRoutingSignalEventStore', { skip: redisIsolationSkipReason(REDIS_
     ));
     ({ routingSignalDecisionClosureMap } = await import(
       '../dist/domains/routing-context/preflight/RoutingSignalDecisionProjection.js'
+    ));
+    ({ STORE_ROUTING_SIGNAL_DECISION_PROJECTION_LUA } = await import(
+      '../dist/domains/routing-context/RedisRoutingSignalPersistence.js'
     ));
     ({ createRedisClient } = await import('@cat-cafe/shared/utils'));
     redis = createRedisClient({ url: REDIS_URL, keyPrefix: 'f293-routing-signal-test:' });
@@ -137,6 +141,78 @@ describe('RedisRoutingSignalEventStore', { skip: redisIsolationSkipReason(REDIS_
     assert.equal(fullLedgerReads, 0);
   });
 
+  it('advances warm process decision state on append without Redis reads in the next preflight', async () => {
+    const failure = asserted('signal:hot-failure', {
+      source: 'provider_error',
+      state: 'unavailable',
+      reasonCode: 'provider_unreachable',
+    });
+    await store.append(failure);
+    const warm = await store.readDecisionProjection('owner-1');
+    assert.equal(warm.revision, 1);
+
+    const success = closeEvent('recovered', 'signal:hot-success', [], {
+      source: 'dispatch_success',
+      probeStartedAt: 1_500,
+    });
+    await store.append(success);
+
+    const methods = ['get', 'zrangebyscore', 'mget', 'eval'];
+    const originals = new Map();
+    let redisReads = 0;
+    for (const method of methods) {
+      originals.set(method, redis[method]);
+      redis[method] = (...args) => {
+        redisReads += 1;
+        return originals.get(method).apply(redis, args);
+      };
+    }
+    try {
+      assert.equal(await store.getOwnerRevision('owner-1'), 2);
+      const advanced = await store.readDecisionProjection('owner-1');
+      assert.equal(advanced.revision, 2);
+      assert.equal(routingSignalDecisionClosureMap(advanced).get(failure.eventId)?.eventId, success.eventId);
+      assert.equal(redisReads, 0, 'warm owner revision and projection must stay off Redis');
+    } finally {
+      for (const [method, original] of originals) redis[method] = original;
+    }
+  });
+
+  it('includes an append that commits while a cold decision projection is being persisted', async () => {
+    const first = asserted('signal:cold-race-first');
+    await store.append(first);
+    const restarted = new RedisRoutingSignalEventStore(redis);
+    const persistCompleted = Promise.withResolvers();
+    const releasePersist = Promise.withResolvers();
+    const originalEval = redis.eval;
+    redis.eval = async function (script, ...args) {
+      const result = await originalEval.call(this, script, ...args);
+      if (script === STORE_ROUTING_SIGNAL_DECISION_PROJECTION_LUA) {
+        persistCompleted.resolve();
+        await releasePersist.promise;
+      }
+      return result;
+    };
+
+    try {
+      const loading = restarted.readDecisionProjection('owner-1');
+      await persistCompleted.promise;
+      const second = asserted('signal:cold-race-second', { observedAt: 1_001 });
+      await restarted.append(second);
+      releasePersist.resolve();
+      const projection = await loading;
+      assert.equal(projection.revision, 2);
+      assert.deepEqual(
+        projection.assertions.map((event) => event.eventId),
+        [first.eventId, second.eventId],
+      );
+      assert.equal((await restarted.readDecisionProjection('owner-1')).revision, 2);
+    } finally {
+      releasePersist.resolve();
+      redis.eval = originalEval;
+    }
+  });
+
   it('rebuilds a late assertion against canonical success history instead of the latest frontier', async () => {
     const firstSuccess = closeEvent('recovered', 'signal:late-first-success', [], {
       source: 'dispatch_success',
@@ -158,18 +234,25 @@ describe('RedisRoutingSignalEventStore', { skip: redisIsolationSkipReason(REDIS_
       reasonCode: 'provider_unreachable',
       observedAt: 1_000,
     });
+    let appendRebuildReads = 0;
+    const originalStoreList = store.listByOwner.bind(store);
+    store.listByOwner = async (...args) => {
+      appendRebuildReads += 1;
+      return originalStoreList(...args);
+    };
     await store.append(lateFailure);
+    assert.equal(appendRebuildReads, 1, 'the single writer must repair an unprojectable append before returning');
 
     const restarted = new RedisRoutingSignalEventStore(redis);
-    let rebuildReads = 0;
+    let restartReads = 0;
     const originalList = restarted.listByOwner.bind(restarted);
     restarted.listByOwner = async (...args) => {
-      rebuildReads += 1;
+      restartReads += 1;
       return originalList(...args);
     };
     const projection = await restarted.readDecisionProjection('owner-1');
 
-    assert.equal(rebuildReads, 1);
+    assert.equal(restartReads, 0, 'the repaired durable projection must survive restart');
     assert.equal(routingSignalDecisionClosureMap(projection).get(lateFailure.eventId)?.eventId, firstSuccess.eventId);
   });
 
@@ -199,14 +282,15 @@ describe('RedisRoutingSignalEventStore', { skip: redisIsolationSkipReason(REDIS_
     await store.readDecisionProjection('owner-1');
 
     await redis.set(RoutingSignalEventKeys.decisionProjection('owner-1'), '{malformed');
-    const afterMalformed = await store.readDecisionProjection('owner-1');
+    const afterMalformed = await new RedisRoutingSignalEventStore(redis).readDecisionProjection('owner-1');
     assert.deepEqual(
       afterMalformed.assertions.map((event) => event.eventId),
       [first.eventId],
     );
 
     const second = asserted('signal:projection-rebuild-2', { observedAt: 1_001 });
-    await store.append(second);
+    const coldWriter = new RedisRoutingSignalEventStore(redis);
+    await coldWriter.append(second);
     await redis.zrem(RoutingSignalEventKeys.ownerAppendSequence('owner-1'), second.eventId);
     const restarted = new RedisRoutingSignalEventStore(redis);
     let rebuildReads = 0;

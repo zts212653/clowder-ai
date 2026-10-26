@@ -178,10 +178,11 @@ test('HTTP discovery → durable admission → switched-account C → exact term
     'warned',
     'an expired manual restriction becomes unknown, not a permanent block',
   );
-  const notice = messages.find((message) => message.extra?.systemInfo?.payload.type === 'routing_preflight').extra
-    .systemInfo.payload;
-  assert.equal(notice.snapshotRef, c.snapshotRef);
-  assert.deepEqual(notice.target, c.targets[0]);
+  assert.equal(
+    messages.some((message) => message.extra?.systemInfo?.payload.type === 'routing_preflight'),
+    false,
+    'account changes and unknown applicability remain internal when the target still executes',
+  );
   const child = await deps.invocationDeps.turnExecutionStore.get(terminals[0].observationId);
   assert.equal(child.status, 'succeeded');
   assert.equal(child.causal.routingPreflight.snapshotRef, c.snapshotRef);

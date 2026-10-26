@@ -50,30 +50,20 @@ afterEach(() => {
   writeShellLanguage('zh');
   vi.unstubAllGlobals();
 });
-it('exposes the pin truth at one fixed slot and toggles without selecting the conversation', () => {
+it('uses the fixed slot only as a pin indicator and keeps the pin command in the row menu', () => {
   render(false);
-  const button = host.querySelector<HTMLButtonElement>('[data-testid="thread-pin-button"]');
-  expect(button).not.toBeNull();
-  expect(button?.getAttribute('aria-label')).toBe('Pin Target');
-  expect(button?.getAttribute('aria-pressed')).toBe('false');
-  expect(button?.className).toContain('group-hover:opacity-100');
-  expect(button?.className).toContain('group-focus-within:opacity-100');
-  expect(button?.className).toContain('[@media(hover:none)]:opacity-100');
-  expect(button?.className).toContain('w-4');
-  expect(button?.querySelector('svg')?.getAttribute('fill')).toBe('none');
-  act(() => button?.click());
+  expect(host.querySelector('[data-testid="thread-pin-button"]')).toBeNull();
+  act(() => host.querySelector<HTMLButtonElement>('button[aria-label="更多操作"]')?.click());
+  const pinAction = Array.from(host.querySelectorAll<HTMLButtonElement>('[role="menu"] button')).find(
+    (button) => button.textContent?.trim() === 'Pin',
+  );
+  expect(pinAction).toBeDefined();
+  act(() => pinAction?.click());
   expect(pin).toHaveBeenLastCalledWith('thread', true);
   expect(select).not.toHaveBeenCalled();
   render(true);
-  const pinned = host.querySelector<HTMLButtonElement>('[data-testid="thread-pin-button"]');
-  expect(pinned?.getAttribute('aria-pressed')).toBe('true');
-  expect(pinned?.getAttribute('aria-label')).toBe('Unpin Target');
-  expect(pinned?.querySelector('svg')?.getAttribute('fill')).toBe('currentColor');
-  expect(pinned?.getAttribute('style')).toContain('--shell-primary');
-  expect(pinned?.className).not.toContain('opacity-0');
-  act(() => pinned?.click());
-  expect(pin).toHaveBeenLastCalledWith('thread', false);
-  expect(select).not.toHaveBeenCalled();
+  expect(host.querySelector('[data-testid="thread-pin-mark"]')?.getAttribute('aria-label')).toBe('Pinned');
+  expect(host.querySelector('[data-testid="thread-pin-button"]')).toBeNull();
 });
 it('keeps a read-only pinned mark visible and never creates a default-thread pin action', () => {
   render(true, false);

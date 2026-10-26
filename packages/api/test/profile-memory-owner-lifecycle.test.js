@@ -133,6 +133,35 @@ describe('F321 Profile owner lifecycle', () => {
     'content-type': 'application/json',
   });
 
+  it('opens selected relationship sources through the same owner visibility checks', async () => {
+    const content = `---
+opening:
+  asOf: '2026-10-03'
+  excerpts:
+    - kind: relationship
+      text: 一起完成示例合奏。
+      source: {threadId: thread-profile-source, messageId: message-profile-source}
+    - kind: model_capability
+      model: example-model-v1
+      text: 当时模型的历史判断。
+      source: {threadId: private-other-owner, messageId: hidden-message}
+---
+原关系正文。`;
+    writeFileSync(join(profileDir, 'relationship', 'maine-coon-primer.md'), content);
+    const list = await app.inject({ method: 'GET', url: '/api/memory/profile', headers: readHeaders() });
+    const primer = list.json().entries.find((entry) => entry.layer === 'primer');
+    const source = await app.inject({
+      method: 'GET',
+      url: `/api/memory/profile/${encodeURIComponent(primer.id)}/source?revision=${primer.revision}`,
+      headers: readHeaders(),
+    });
+    assert.equal(source.statusCode, 200);
+    assert.equal(source.json().status, 'ready');
+    assert.equal(source.json().sources.length, 1);
+    assert.equal(source.json().sources[0].messageId, 'message-profile-source');
+    assert.doesNotMatch(source.body, /private-other-owner|hidden-message/);
+  });
+
   async function postAction(memoryId, payload) {
     return app.inject({
       method: 'POST',

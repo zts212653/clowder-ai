@@ -46,12 +46,12 @@ const validTip = {
 };
 
 describe('F244 capability tips hard check', () => {
-  it('accepts bounded optional demo references while rejecting URLs and unknown fields', () => {
+  it('rejects demo references in tips now that films attach from feature-demos.json, and unknown fields', () => {
     const root = makeRepo();
     try {
-      writeInventory(root, [{ ...validTip, demoId: 'conversation-proposals-v1' }]);
+      writeInventory(root, [validTip]);
       assert.equal(checkCapabilityTipsForRepo(root, { changedFiles: [] }).ok, true);
-      for (const invalid of [{ demoId: 'https://private/video.mp4' }, { demoId: 42 }, { arbitraryField: 'bypass' }]) {
+      for (const invalid of [{ demoId: 'conversation-proposals-v1' }, { arbitraryField: 'bypass' }]) {
         writeInventory(root, [{ ...validTip, ...invalid }]);
         assert.equal(checkCapabilityTipsForRepo(root, { changedFiles: [] }).ok, false);
       }

@@ -1,4 +1,4 @@
-/** Request-local error evidence only: no query, identity, body, prompt or raw provider event. */
+/** Request-local lifecycle evidence only: no query, identity, body, prompt or raw provider event. */
 export function observeQueryQualification() {
   const batches: Array<{
     rows: number;
@@ -13,7 +13,15 @@ export function observeQueryQualification() {
   let nativeLaunches = 0;
   let costReports = 0;
   let reportedCostUsd = 0;
+  const snapshot = () => ({
+    runnerCalls: batches.length,
+    nativeLaunches,
+    costReports,
+    reportedCostUsd: costReports ? reportedCostUsd : null,
+    batches: batches.map((batch) => ({ ...batch })),
+  });
   return {
+    snapshot,
     start(rows: number, bodyChars: number, deadlineAt: number, onTrace?: (event: Record<string, unknown>) => void) {
       const entered = performance.now();
       const batch: (typeof batches)[number] = {
@@ -58,13 +66,7 @@ export function observeQueryQualification() {
       if (!(error instanceof Error)) return;
       try {
         Object.assign(error, {
-          messageSearchQualification: {
-            runnerCalls: batches.length,
-            nativeLaunches,
-            costReports,
-            reportedCostUsd: costReports ? reportedCostUsd : null,
-            batches: batches.map((batch) => ({ ...batch })),
-          },
+          messageSearchQualification: snapshot(),
         });
       } catch {
         /* Diagnostics cannot replace a frozen/hostile original error. */

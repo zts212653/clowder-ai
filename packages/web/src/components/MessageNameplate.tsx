@@ -1,6 +1,7 @@
 'use client';
 
 import { Nameplate } from '@cat-cafe/ui';
+import type { Ref } from 'react';
 import type { SenderMeta } from '@/lib/resolve-sender';
 import { SenderAvatar } from './SenderAvatar';
 
@@ -12,6 +13,8 @@ interface MessageNameplateProps {
   ink: string;
   sender: SenderMeta;
   onClick?: () => void;
+  anchorRef?: Ref<HTMLSpanElement>;
+  actionLabel?: string;
   kind?: 'cat' | 'member';
   avatarShape?: 'round' | 'rounded-square';
 }
@@ -25,6 +28,8 @@ export function MessageNameplate({
   ink,
   sender,
   onClick,
+  anchorRef,
+  actionLabel,
   kind = 'member',
   avatarShape = 'round',
 }: MessageNameplateProps) {
@@ -37,7 +42,17 @@ export function MessageNameplate({
       ink={ink}
       kind={kind}
       avatarShape={avatarShape}
-      avatar={<SenderAvatar sender={sender} presentation="nameplate" shape={avatarShape} onClick={onClick} />}
+      onClick={onClick}
+      anchorRef={anchorRef}
+      avatar={
+        <SenderAvatar
+          sender={sender}
+          presentation="nameplate"
+          shape={avatarShape}
+          onClick={onClick}
+          actionLabel={actionLabel}
+        />
+      }
     />
   );
 }

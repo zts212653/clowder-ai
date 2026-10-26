@@ -10,6 +10,7 @@ import {
   AgyNativeProfileBusyError,
   type AgyNativeTurnScope,
   isNativeTurnRetiredFromSnapshot,
+  nativeTurnEnvironmentMarkers,
   openNativeTurnStore,
   type ProfileTurnOwner,
   parseNativeTurnOwner,
@@ -27,7 +28,10 @@ async function isRetired(owner: ProfileTurnOwner, home: string): Promise<boolean
   if (owner.identity.pid === process.pid && sameUnixProcess(owner.identity, ownIdentity)) return false;
   const exact = await readUnixProcessSnapshot({ pids: [owner.identity.pid] });
   if (!exact || sameUnixProcess(owner.identity, exact.get(owner.identity.pid))) return false;
-  const snapshot = await readUnixProcessSnapshot({ includeEnvironment: true });
+  const snapshot = await readUnixProcessSnapshot({
+    includeEnvironment: true,
+    environmentMarkers: nativeTurnEnvironmentMarkers(owner, home),
+  });
   return snapshot !== null && isNativeTurnRetiredFromSnapshot(owner, home, snapshot);
 }
 

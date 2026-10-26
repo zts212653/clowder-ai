@@ -15,8 +15,14 @@ vi.mock('../icons/CatCafeLogo', () => ({ CatCafeLogo: () => null }));
 vi.mock('../ThreadCatPill', () => ({ ThreadCatPill: () => null }));
 vi.mock('../ThreadIndicator', () => ({ ThreadIndicator: () => null, tailTruncate: (value: string) => value }));
 vi.mock('../shell/HeaderCounts', () => ({ ThreadTasksButton: () => null, ThreadWorksButton: () => null }));
+vi.mock('@/hooks/useThreadDisplayInfo', () => ({
+  useThreadDisplayInfo: (id: string) => ({
+    currentThread: { id, title: id, projectPath: '/p', preferredCats: [], labels: [] },
+  }),
+}));
 
 import { ChatContainerHeader } from '../ChatContainerHeader';
+import { ThreadSettingsProvider } from '../ThreadSidebar/ThreadSettingsProvider';
 
 const THREAD = 'thread-title-menu';
 const toggle = (container: HTMLElement) => container.querySelector('[data-testid="thread-title-menu-toggle"]');
@@ -77,15 +83,17 @@ describe('ChatContainerHeader: the title ⌄ menu', () => {
   function renderHeader(threadId: string = THREAD) {
     act(() =>
       root.render(
-        <ChatContainerHeader
-          sidebarOpen
-          onToggleSidebar={vi.fn()}
-          threadId={threadId}
-          viewMode="single"
-          onToggleViewMode={vi.fn()}
-          statusPanelOpen={false}
-          onToggleStatusPanel={vi.fn()}
-        />,
+        <ThreadSettingsProvider routeThreadId={threadId}>
+          <ChatContainerHeader
+            sidebarOpen
+            onToggleSidebar={vi.fn()}
+            threadId={threadId}
+            viewMode="single"
+            onToggleViewMode={vi.fn()}
+            statusPanelOpen={false}
+            onToggleStatusPanel={vi.fn()}
+          />
+        </ThreadSettingsProvider>,
       ),
     );
   }
@@ -110,6 +118,32 @@ describe('ChatContainerHeader: the title ⌄ menu', () => {
     seedRunning(false);
     renderHeader();
     expect(toggle(container)).toBeNull();
+  });
+
+  it('opens the complete conversation settings from the v2 header, without a pin checkbox', async () => {
+    act(() => writeShellPresentation('v2'));
+    renderHeader();
+    const settings = container.querySelector<HTMLButtonElement>('button[aria-label="对话设置"]');
+    expect(settings).not.toBeNull();
+    await act(async () => settings?.click());
+    const panel = document.querySelector('[data-testid="thread-settings-panel"]');
+    expect(panel).not.toBeNull();
+    expect(panel?.textContent).toContain('对话目标');
+    expect(panel?.textContent).toContain('关联 Feature');
+    expect(panel?.querySelector('input[type="checkbox"]')).toBeNull();
+  });
+
+  it('closes settings when the header changes conversation and never revives the previous selection', async () => {
+    act(() => writeShellPresentation('v2'));
+    renderHeader();
+    await act(async () => container.querySelector<HTMLButtonElement>('button[aria-label="对话设置"]')?.click());
+    expect(document.querySelector('[data-testid="thread-settings-panel"]')).not.toBeNull();
+    const header = container.querySelector('header');
+    renderHeader('other-thread');
+    expect(document.querySelector('[data-testid="thread-settings-panel"]')).toBeNull();
+    expect(container.querySelector('header')).toBe(header);
+    renderHeader();
+    expect(document.querySelector('[data-testid="thread-settings-panel"]')).toBeNull();
   });
   const click = (el: Element | null) => act(async () => (el as HTMLElement | null)?.click());
   const confirmButton = () =>

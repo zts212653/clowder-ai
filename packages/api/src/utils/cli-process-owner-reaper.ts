@@ -1,4 +1,5 @@
 import {
+  CLI_PROCESS_OWNER_ENV,
   type CliProcessOwnerRecord,
   completeCliProcessOwnerCleanup,
   findOwnedUnixProcesses,
@@ -139,7 +140,8 @@ export async function reapStaleCliProcessOwners(
   result.skippedActiveOwners = selection.activeCount;
   if (stale.length === 0) return result;
 
-  let ownershipSnapshot = readUnixProcessSnapshotSync({ includeEnvironment: true });
+  const environmentMarkers = stale.map(({ manifest }) => `${CLI_PROCESS_OWNER_ENV}=${manifest.ownerId}`);
+  let ownershipSnapshot = readUnixProcessSnapshotSync({ includeEnvironment: true, environmentMarkers });
   if (!ownershipSnapshot) {
     return retainAfterScanFailure(result, stale.length, options.log, 'ownership');
   }
@@ -147,7 +149,7 @@ export async function reapStaleCliProcessOwners(
   result.termSignals = term.signals;
 
   if (term.hasTargets) await delay(Math.max(1, options.killGraceMs ?? 3_000));
-  ownershipSnapshot = readUnixProcessSnapshotSync({ includeEnvironment: true });
+  ownershipSnapshot = readUnixProcessSnapshotSync({ includeEnvironment: true, environmentMarkers });
   if (!ownershipSnapshot) {
     return retainAfterScanFailure(result, stale.length, options.log, 'post-TERM');
   }
@@ -155,7 +157,7 @@ export async function reapStaleCliProcessOwners(
   result.killSignals = kill.signals;
 
   if (kill.hasTargets) await delay(50);
-  const finalSnapshot = readUnixProcessSnapshotSync({ includeEnvironment: true });
+  const finalSnapshot = readUnixProcessSnapshotSync({ includeEnvironment: true, environmentMarkers });
   if (!finalSnapshot) {
     return retainAfterScanFailure(result, stale.length, options.log, 'final ownership');
   }

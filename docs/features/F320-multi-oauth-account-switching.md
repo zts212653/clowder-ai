@@ -5,7 +5,7 @@ related_features: [F062, F136, F171, F291, F318, F319]
 topics: [accounts, oauth, credentials, provider-routing, hub-settings]
 doc_kind: spec
 created: 2026-09-24
-updated: 2026-10-23
+updated: 2026-10-24
 description: "同一家厂商可以登录多个 OAuth 账号（如公司号与私人号），各自隔离；按猫家族一键换绑，或按项目自动选用对应账号。"
 description_source: human
 description_author: opus55
@@ -287,6 +287,7 @@ operator 2026-09-24 原话：
 | KD-3 | 只按账号隔离凭证，会话记录所有账号共用 | operator 09:4xZ 指出：今天手动退出/登录能续上会话，是因为只换了凭证、会话记录留在原地；做不到续会话，F320 就没有意义。**实测（opus55，2026-09-24 09:51Z）**：正常账号开会话并记下暗号，把这一个会话文件复制到异常账号目录的同一相对路径，用异常账号 `codex exec resume <id>` 续上，正确答出暗号，无报错；测试文件用后已删 | 2026-09-24 |
 | KD-2 | 用各工具官方支持的登录目录环境变量（`CODEX_HOME` / `CLAUDE_CONFIG_DIR`）隔离账号，不复制 token、不加代理 | 用的是工具本身支持的能力，凭证始终留在工具自己的目录里 | 2026-09-24 |
 | KD-4 | 新增账号采用备注→终端执行官方 `codex login`→用户授权→独立持久登录；浏览器完全归官方原生流程。撤出 F320 专用自动发布、迁移前置和 Chrome 自动化，复用正常部署 | source2335/116 接受原生体验，source357 纠正 Astra 自加的 profile 保证；原 Phase B 结果仍保留 | 2026-10-08 |
+| KD-5 | 托管账号与 F306 只读统计不再写死 Codex 版本号（原为 `codex-cli 0.159.0`）。每个新版本第一次被用到时，家里在临时目录里自动跑一遍无凭据实测（托管账号：私有登录不借宿主登录、单写者锁、跨账号续聊/目标/记忆、共享 SQLite、配置写入与端点/sqlite_home 语义；只读：能读、拦写、拦本机网络），结果按版本记在 `<数据目录>/codex-native-compat/`，过了就接上，不过就只拦这一项能力并写明哪一项没过。原「启动前不让新认证开关漏进来」的意图改由环境变量白名单承担：托管 OAuth 启动和终端登录里，`CODEX_*`/`OPENAI_*` 只保留家里自己设置的字段。平台、托管策略（managed_config/requirements/CFPreferences forced）和同一原生 carrier 检查不变 | You 10-24 21:53 PDT 在终端升级到 0.164.0 后全部托管Maine Coon报 `codex_managed_version_unsupported`；他要求「terminal 升级 codex，家里不能炸，也要跟着升级」，并在 `[thread-id]` 拍板「直接修，修好请Siamese审，合入」。0.164.0 实测通过，唯一差异是 provider 多出值为 null 的 `capabilities` 字段，已按“未设置”放行 | 2026-10-24 |
 
 ## Tips Contribution（F244）
 

@@ -1,11 +1,7 @@
-import { defineShellCopy } from './shell-copy';
+import { defineShellCopy } from '../shell/shell-copy';
 
-export const threadMetadataCopy = defineShellCopy({
+export const threadFeatureCopy = defineShellCopy({
   zh: {
-    open: '对话设置',
-    title: '对话设置',
-    pin: '置顶这条对话',
-    pinned: '已置顶',
     feature: '关联 Feature',
     noFeature: '不关联 Feature',
     loading: '正在读取对话设置…',
@@ -14,10 +10,6 @@ export const threadMetadataCopy = defineShellCopy({
     retry: '重试',
   },
   en: {
-    open: 'Conversation settings',
-    title: 'Conversation settings',
-    pin: 'Pin this conversation',
-    pinned: 'Pinned',
     feature: 'Linked Feature',
     noFeature: 'No linked Feature',
     loading: 'Loading conversation settings…',

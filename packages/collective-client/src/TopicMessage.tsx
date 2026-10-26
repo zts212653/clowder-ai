@@ -4,6 +4,7 @@ import { actorDisplayName, formatEventTime } from './channel-model.js';
 import type { CollectiveEventEnvelope, CollectiveParticipant } from './client-types.js';
 import { useCollectiveLanguage, useCollectiveText } from './collective-copy.js';
 import { MemberAvatar } from './MemberAvatar.js';
+import { MessageAttachments } from './MessageAttachments.js';
 import { MessageMarkdown } from './MessageMarkdown.js';
 import { authorPresentation } from './message-presentation.js';
 import { participantLabel } from './participant-label.js';
@@ -63,6 +64,7 @@ export function MessageBody({
     : undefined;
   return (
     <>
+      <MessageAttachments event={event} />
       <MessageMarkdown
         source={event.body}
         prefix={
@@ -121,7 +123,13 @@ export function TopicMessage({
   const v2 = useRoomPresentation(presentation) === 'v2';
   const author = authorPresentation(event, currentHumanId);
   return (
-    <article className="topic-message" data-author={v2 ? author : undefined}>
+    <article
+      id={`collective-event-${event.eventId}`}
+      data-event-id={event.eventId}
+      tabIndex={-1}
+      className="topic-message"
+      data-author={v2 ? author : undefined}
+    >
       <div>
         <header className="message-meta">
           <CollectiveNameplate

@@ -1,12 +1,19 @@
-import { type PersonIdentity, RECALL_DISPLAY_DOC_KINDS } from '@cat-cafe/shared';
+import { type PersonIdentity, type ProfileMemoryOwnerEntry, RECALL_DISPLAY_DOC_KINDS } from '@cat-cafe/shared';
 import type Database from 'better-sqlite3';
 import type { Thread } from '../domains/cats/services/stores/ports/ThreadStore.js';
 import { canAccessThread } from '../domains/guides/guide-state-access.js';
 import type { MemoryCueSourceReader } from '../domains/memory/cue/MemoryCueSourceReader.js';
 import { type RecallCueCoordinate, type RecallSourceView, recallCueViewReader } from './recall-cue-view.js';
+import type { RecallOwnerMessageSources } from './recall-owner-message-view.js';
 
-export interface RecallSourceReaders {
+export interface RecallSourceReaders extends RecallOwnerMessageSources {
   cueSourceReader?: MemoryCueSourceReader;
+  profileMemoryStore?: {
+    get(
+      ownerUserId: string,
+      memoryId: string,
+    ): Pick<ProfileMemoryOwnerEntry, 'id' | 'revision' | 'title' | 'status'> | null;
+  };
   threadStore?: {
     get(
       id: string,
@@ -24,6 +31,8 @@ export interface RecallSourceReaders {
   };
 }
 export interface RecallCandidateView {
+  profileMemoryId?: string;
+  sourceUnavailableReason?: 'source_corrected' | 'source_forgotten' | 'scope_revoked';
   title?: string;
   titleStatus?: 'unavailable';
   kind?: string;
@@ -59,7 +68,7 @@ export function recallCandidateViewReader(db: Database.Database, userId: string,
     if (!/^person_[A-Za-z0-9_-]+$/.test(id)) return unavailable;
     const person = await readers.personMemoryStore?.getPerson(userId, id);
     if (!person || person.ownerUserId !== userId || person.status !== 'active') return unavailable;
-    // No owner-facing person detail route exists yet; a name does not imply a valid destination.
+    // Search results have no delivered-card revision or provenance; a current name alone is not a source link.
     return { title: person.displayName, kind: 'person_entity', href: null };
   };
   const resolve = async (anchor: string): Promise<RecallCandidateView> => {
@@ -117,7 +126,13 @@ export async function readRecallSourceViews(
       GROUP BY invocation_id, cue_id, resolver_family, source_anchor, source_revision, consumer_cat_id
       ORDER BY MAX(occurred_at) DESC, invocation_id DESC, cue_id DESC LIMIT 200`)
       .all(userId, threadId, ...cueInvocationIds) as RecallCueCoordinate[];
-    const readCue = recallCueViewReader({ ownerUserId: userId, threadId }, read, readers.cueSourceReader);
+    const readCue = recallCueViewReader(
+      { ownerUserId: userId, threadId },
+      read,
+      readers.cueSourceReader,
+      readers.profileMemoryStore,
+      readers,
+    );
     for (let offset = 0; offset < cues.length; offset += 4) {
       views.push(...(await Promise.all(cues.slice(offset, offset + 4).map(readCue))));
     }

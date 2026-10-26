@@ -7,6 +7,7 @@ import { useShellCopy } from '@/components/shell/shell-copy';
 import { ArtworkAnnotationToolbar } from './ArtworkAnnotationToolbar';
 import { useArtworkLightboxScope, useFloatingArtworkPresentation } from './ArtworkLightboxScope';
 import { ArtworkVideoPlayback } from './ArtworkVideoPlayback';
+import toolbarStyles from './artwork-annotation-toolbar.module.css';
 import type { ReviewCanvasMode } from './ReviewCanvasToolbar';
 import type { PendingChatMark } from './ReviewPendingChatMarks';
 import { ReviewToolbarIcon } from './ReviewToolbarIcon';
@@ -90,7 +91,7 @@ export function VideoArtworkControls({
     endTick <= media.startTick + media.durationTicks &&
     endTick > startTick;
   const tools = (
-    <div className="flex flex-wrap items-center gap-2 px-3 py-1">
+    <div className={toolbarStyles.placement}>
       <ArtworkAnnotationToolbar
         label={t.tools}
         tools={[

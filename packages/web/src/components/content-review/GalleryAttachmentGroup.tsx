@@ -23,8 +23,7 @@ export function GalleryAttachmentGroup({
   const opening = useGalleryAttachmentOpen(attachments, message, fromComposer);
   const allImages = attachments.every((item) => item.mediaType !== 'video/mp4');
   const places = attachments.reduce((count, item) => count + item.selections.length, 0);
-  const name = (attachment: MediaContextAttachment) =>
-    attachment.gallery ? `${english ? 'Artwork' : '图'} ${attachment.gallery.index + 1}` : attachment.title;
+  const name = (attachment: MediaContextAttachment) => attachment.title;
   return (
     <section
       data-testid={compact ? 'gallery-composer-group' : 'gallery-message-group'}
@@ -52,7 +51,7 @@ export function GalleryAttachmentGroup({
             data-attachment-id={attachment.id}
             className={compact ? styles.row : 'flex min-w-0 flex-wrap items-start gap-3 p-3'}
           >
-            {!compact ? (
+            {!compact && !attachment.selections.length ? (
               <button
                 type="button"
                 disabled={opening.busy}
@@ -63,7 +62,7 @@ export function GalleryAttachmentGroup({
                 <MediaAttachmentThumbnail attachment={attachment} />
               </button>
             ) : null}
-            {compact ? (
+            {compact && !attachment.selections.length ? (
               <span className={styles.thumbnail}>
                 <MediaAttachmentThumbnail attachment={attachment} compact />
               </span>
@@ -76,7 +75,7 @@ export function GalleryAttachmentGroup({
                   onClick={() => void opening.open(attachment)}
                   className="block max-w-full break-words text-left text-xs font-medium text-cafe-secondary"
                 >
-                  {name(attachment)} · {attachment.title}
+                  {name(attachment)}
                 </button>
               ) : (
                 <span className={styles.name} title={attachment.title}>

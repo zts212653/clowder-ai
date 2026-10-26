@@ -95,7 +95,7 @@ export function PluginManagerLiveContent({
         hash === '#chatgpt-dot'
           ? 'official.chatgpt-dot'
           : hash === '#personal-chatgpt-pro'
-            ? 'personal-chrome-host'
+            ? 'official.companion.personal-chrome'
             : null;
       setLinkedPluginId(pluginId);
       if (pluginId) linkedSelection.current(pluginId);

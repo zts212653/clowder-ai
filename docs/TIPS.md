@@ -1,7 +1,7 @@
 ---
 doc_kind: guide
 topics: [usage, magic-words, collaboration]
-updated: 2026-10-24
+updated: 2026-10-25
 description: "User tips for course correction, routing, chat file links, and everyday collaboration."
 ---
 
@@ -103,6 +103,28 @@ Click a recognized file label in a message to read it in the Workspace on the ri
 - Document tabs and their existing file actions remain available after opening a label. Office files that cannot be previewed offer the available local-file actions instead.
 - An unavailable file has a gray dashed label. If a reference cannot be resolved, it remains readable text rather than pretending to be an available file.
 
+## 10. Conversation Settings
+
+Open the conversation header's **⋯**, or choose **Conversation settings** from the sidebar row's **…** menu. Both open the same panel. Reply settings contain the default cats, reasoning and speed options; organization contains labels and the associated Feature. Pinning stays in the sidebar row's **…** menu.
+
+Changes save as you make them; a failed save keeps the previous value and shows an error. Press Esc, use the close button, or click outside to close the panel.
+
+## 11. Channel Attachments
+
+With a compatible Host and Collective plugin, paste a screenshot into the channel composer or choose a file from **+**. Open a thumbnail to preview it, or use **×** to remove it. Uploads and failed sends remain in your draft for that channel so you can retry.
+
+Recipients can open an image from the original message and choose **Back to message** to return. Each person's draft is separate. If another window has saved different content, choose which version to keep instead of silently replacing it.
+
+## 12. Cat Profile Cards
+
+In the current chat interface, click a cat's avatar or name to open its card. Click the card's avatar to see the original image. **Mention** inserts the cat at the input cursor; **Only this cat's replies** selects that cat's view within the current conversation. Use **Settings ›** to edit its configuration.
+
+Click outside the card or press Esc to close it. On mobile, you can also drag the handle down.
+
+## 13. Opening Brief
+
+Go to **Memory → Profile → Opening brief** to view or edit how you would like cats to address and work with you. You can also ask a cat to draft a short version based on your conversations. Review and confirm the draft before it takes effect; only your own profile is being edited.
+
 ---
 
 <a id="中文"></a>
@@ -196,3 +218,25 @@ Click a recognized file label in a message to read it in the Workspace on the ri
 - 图片在浮窗里看大图；匹配本地项目的提交号和 PR 在 Workspace 看改动，其他网址去浏览器。
 - 打开标签后，原有文档标签和文件操作仍可用。不能直接预览的 Office 文件会提供当前可用的本地文件操作。
 - 文件不在了，会显示灰色虚线标签。无法解析的引用保留可读原文，不冒充可用文件。
+
+## 10. 对话设置
+
+在对话顶栏点 **⋯**，或从侧栏对话行的 **…** 菜单选择「对话设置」，都能打开同一块面板。默认猫猫、思考和速度档位在回复设置里；标签和关联 Feature 在整理里。置顶从侧栏对话行的 **…** 菜单操作。
+
+修改会即时保存，失败时保留原值并提示。按 Esc、点关闭按钮或点面板外可收起设置。
+
+## 11. 频道附件
+
+在配套 Host 与 Collective 插件都支持频道附件的版本中，可以在频道输入框粘贴截图，或从 **+** 选择文件。点缩略图可预览，点 **×** 可移除。上传未完成或发送失败时，内容会留在你在原频道的草稿中，方便重试。
+
+收件人可以从原消息打开图片，再点「回到原消息」继续聊天。不同人的草稿彼此独立；另一窗口保存了不同内容时，先选择载入保存内容或保留当前内容，避免静默覆盖。
+
+## 12. 猫猫小卡
+
+在新版聊天里，点猫的头像或名字看小卡；再点卡上的头像看原图。「@ 它」把提及放到输入框光标处，「只看它的回话」切到当前对话的单猫视图。要改配置，点「设置 ›」。
+
+点卡外或按 Esc 收起；手机也可以向下拖动把手收起。
+
+## 13. 开场简介
+
+在「记忆 → 画像 → 开场简介」查看或编辑自己的称呼和交流习惯，也可以请猫根据已有对话起草一份短稿。先核对并确认，再让它生效；这里编辑的是你自己的画像。

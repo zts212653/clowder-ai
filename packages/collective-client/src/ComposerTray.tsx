@@ -1,5 +1,5 @@
 import type { CollectiveRecipient } from './client-types.js';
-import { useCollectiveText } from './collective-copy.js';
+import { useCollectiveLanguage, useCollectiveText } from './collective-copy.js';
 
 export function ComposerTray({
   recipientKind,
@@ -8,6 +8,7 @@ export function ComposerTray({
   onMention,
   onEntrust,
   onResponseRequested,
+  onFiles,
 }: {
   readonly recipientKind: CollectiveRecipient['kind'];
   readonly entrust: boolean;
@@ -15,10 +16,17 @@ export function ComposerTray({
   readonly onMention: () => void;
   readonly onEntrust: (value: boolean) => void;
   readonly onResponseRequested: (value: boolean) => void;
+  readonly onFiles?: () => void;
 }) {
   const t = useCollectiveText();
+  const language = useCollectiveLanguage();
   return (
     <div className="composer-tray">
+      {onFiles && (
+        <button type="button" onClick={onFiles}>
+          {language === 'en' ? 'Add files' : '添加文件'}
+        </button>
+      )}
       <button type="button" onClick={onMention}>
         @ {t('提到成员')}
       </button>

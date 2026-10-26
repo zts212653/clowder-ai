@@ -36,6 +36,20 @@ export class RedisTaskDevelopmentWorkStore {
     return raw.id ? hydrateTask(raw) : null;
   }
 
+  private async readTasks(redis: RedisClient, ids: readonly string[]): Promise<TaskItem[]> {
+    if (ids.length === 0) return [];
+    const reads = redis.pipeline();
+    for (const id of ids) reads.hgetall(TaskKeys.detail(id));
+    const replies = await reads.exec();
+    if (!replies || replies.length !== ids.length) throw new Error('Development scope candidate read incomplete');
+    return replies.flatMap(([error, raw]) => {
+      if (error) throw error;
+      if (!raw || typeof raw !== 'object') throw new Error('Development scope candidate read invalid');
+      const task = raw as Record<string, string>;
+      return task.id ? [hydrateTask(task)] : [];
+    });
+  }
+
   private async readMatches(redis: RedisClient, userId: string, scope: DevelopmentScopeV1): Promise<TaskItem[]> {
     const index = TaskKeys.developmentScope(developmentScopeKey(userId, scope));
     const indexedId = await redis.get(index);
@@ -48,11 +62,10 @@ export class RedisTaskDevelopmentWorkStore {
     await redis.watch(TaskKeys.kind('work'));
     const ids = await redis.zrange(TaskKeys.kind('work'), 0, -1);
     const matches: TaskItem[] = [];
-    for (const id of ids) {
-      const candidate = await this.readTask(redis, id);
-      if (!candidate || !matchesDevelopmentScope(candidate, userId, scope)) continue;
-      await redis.watch(TaskKeys.detail(id));
-      const current = await this.readTask(redis, id);
+    for (const candidate of await this.readTasks(redis, ids)) {
+      if (!matchesDevelopmentScope(candidate, userId, scope)) continue;
+      await redis.watch(TaskKeys.detail(candidate.id));
+      const current = await this.readTask(redis, candidate.id);
       if (current && matchesDevelopmentScope(current, userId, scope)) matches.push(current);
     }
     return matches;

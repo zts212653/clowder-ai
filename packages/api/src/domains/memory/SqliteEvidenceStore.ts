@@ -344,7 +344,7 @@ export class SqliteEvidenceStore implements IEvidenceStore {
     this.ensureOpen();
     const normalized = normalizeMessageSearchDates(options);
     if (this.usesIsolatedProcesses()) {
-      const { signal, ...serialized } = normalized;
+      const { signal, onReadSnapshot, onCjkRead: _onCjkRead, ...serialized } = normalized;
       serialized.deadlineAt ??= Date.now() + 15_000;
       return this.runProjectionRead<MessagePassageSearchExecution>(
         {
@@ -354,7 +354,7 @@ export class SqliteEvidenceStore implements IEvidenceStore {
           options: serialized,
           flags: memorySearchFlags(),
         },
-        { signal, deadlineAt: serialized.deadlineAt },
+        { signal, deadlineAt: serialized.deadlineAt, onReadSnapshot },
         (value) => value,
       );
     }
@@ -370,7 +370,7 @@ export class SqliteEvidenceStore implements IEvidenceStore {
   /** The parent owns projection lifetime through final worker publication, not just RPC. */
   private async runProjectionRead<T>(
     job: Extract<MemoryProcessJob, { kind: 'search' | 'message-search' }>,
-    options: Pick<SearchOptions, 'signal' | 'deadlineAt'>,
+    options: Pick<SearchOptions, 'signal' | 'deadlineAt'> & Pick<MessagePassageSearchOptions, 'onReadSnapshot'>,
     executionOf: (value: T) => { meta: SearchExecutionMeta },
   ): Promise<T> {
     const snapshot = this.processEmbeddingSnapshot();

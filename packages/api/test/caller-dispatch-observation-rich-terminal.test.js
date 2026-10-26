@@ -47,7 +47,7 @@ function terminal(responseId, contentBlocks) {
 }
 
 describe('caller dispatch rich terminal projection', () => {
-  it('summarizes a rich-only terminal before consuming its observation', async () => {
+  it('consumes a representable rich-only terminal by coordinate without copying its payload', async () => {
     const registry = new CallerDispatchObservationRegistry();
     const response = terminal('response-rich', [
       { type: 'image', url: '/uploads/result.png', alt: 'verification screenshot' },
@@ -62,9 +62,8 @@ describe('caller dispatch rich terminal projection', () => {
 
     const projection = await registry.project({ getById: async (id) => messages.get(id) ?? null }, scope);
 
-    assert.match(projection.prompt, /completed/);
-    assert.match(projection.prompt, /\[图片: verification screenshot\]/);
-    assert.match(projection.prompt, /\[文件: report\.pdf\]/);
+    assert.match(projection.prompt, /completed; response=response-rich\n/);
+    assert.doesNotMatch(projection.prompt, /body=|verification screenshot|report\.pdf/);
     assert.equal(projection.included[0]?.terminal, true);
     registry.acknowledge(projection.included);
     assert.equal(registry.list(scope).length, 0);

@@ -19,9 +19,6 @@ function createMessageDisposition(): MessageDispositionPreferenceController {
     loading: false,
     error: null,
     setPreference: vi.fn(async () => true),
-    oneShot: null,
-    setOneShot: vi.fn(),
-    clearOneShot: vi.fn(),
   };
 }
 
@@ -77,44 +74,44 @@ describe('ChatInputAddMenu', () => {
 
   it('uses English throughout the v2 send-mode panel and follows a live language change', async () => {
     writeShellLanguage('en');
-    render({ presentation: 'v2', hasActiveInvocation: true });
-    expect(menu()?.textContent).toContain('After sending: As the next work');
-    expect(menu()?.textContent).toContain('Only affects this message');
+    render({ presentation: 'v2' });
+    expect(menu()?.textContent).toContain('Send mode: Wait in queue');
+    expect(menu()?.textContent).toContain('Choose for this thread or as the default');
     await act(async () =>
       document.querySelector<HTMLButtonElement>('[data-testid="message-disposition-trigger"]')?.click(),
     );
     const panel = document.querySelector<HTMLElement>('[data-testid="message-disposition-panel"]');
-    expect(panel?.textContent).toContain('Continue current work');
-    expect(panel?.textContent).toContain('Starts once the cat is free');
-    expect(panel?.textContent).toContain('Joins the current reply when it can; otherwise waits in the queue');
-    expect(panel?.textContent).toContain('This message only');
-    expect(panel?.querySelector('fieldset')).toBeNull();
+    expect(panel?.textContent).toContain('Steer the current reply');
+    expect(panel?.textContent).toContain('Start a new reply once the cat is free');
+    expect(panel?.textContent).toContain('Join the current reply when possible; otherwise wait in the queue');
+    expect(panel?.textContent).toContain('This thread');
+    expect(panel?.textContent).toContain('Default for all');
     expect(panel?.textContent).not.toMatch(/\p{Script=Han}/u);
     expect(panel?.querySelector('button[aria-label]')?.getAttribute('aria-label')).toBe('Back to add menu');
-
+    expect(panel?.querySelector('fieldset')?.getAttribute('aria-label')).toBe('Applies to');
+    render({ presentation: 'v2', messageDisposition: { ...createMessageDisposition(), loading: true } });
+    expect(panel?.textContent).toContain('Syncing…');
     await act(async () => writeShellLanguage('zh'));
-    expect(panel?.textContent).toContain('这条发出去后');
-    expect(panel?.textContent).toContain('等猫空闲后开始');
-    expect(panel?.textContent).toContain('仅这一次');
+    expect(panel?.textContent).toContain('发送策略');
+    expect(panel?.textContent).toContain('等待目标空闲后开始新回复');
+    expect(panel?.textContent).toContain('同步中…');
   });
 
   it('keeps Classic send-mode wording Chinese even when the shell language is English', async () => {
     writeShellLanguage('en');
-    render({ presentation: 'classic', hasActiveInvocation: true });
-    expect(menu()?.textContent).toContain('这条发出去后');
+    render({ presentation: 'classic' });
+    expect(menu()?.textContent).toContain('发送策略');
     await act(async () =>
       document.querySelector<HTMLButtonElement>('[data-testid="message-disposition-trigger"]')?.click(),
     );
-    expect(document.querySelector('[data-testid="message-disposition-panel"]')?.textContent).toContain(
-      '作为下一件工作',
-    );
+    expect(document.querySelector('[data-testid="message-disposition-panel"]')?.textContent).toContain('排队等待');
     expect(document.querySelector('[data-testid="message-disposition-panel"]')?.textContent).not.toContain('Send mode');
   });
 
   it('groups context, upload and optional modes behind one menu', () => {
     render();
     const menu = document.querySelector('[data-testid="composer-add-menu"]');
-    expect(document.querySelectorAll('[role="menuitem"]')).toHaveLength(3);
+    expect(document.querySelectorAll('[role="menuitem"]')).toHaveLength(4);
     expect(menu?.textContent?.startsWith('添加')).toBe(false);
     expect(menu?.className).not.toContain('border-cafe');
     expect(menu?.className).toContain('bg-cafe-surface-canvas');
@@ -123,11 +120,11 @@ describe('ChatInputAddMenu', () => {
     expect(menu?.textContent).toContain('图片、文档或压缩包，最多 5 个');
     expect(menu?.textContent).toContain('悄悄话');
     expect(menu?.textContent).not.toContain('游戏');
-    expect(menu?.textContent).not.toContain('这条发出去后');
+    expect(menu?.textContent).toContain('发送策略');
   });
 
-  it('changes only this message while work is active', async () => {
-    const callbacks = render({ hasActiveInvocation: true });
+  it('persists the Thread strategy without an active-work gate', async () => {
+    const callbacks = render();
     await act(async () => {
       document.querySelector<HTMLButtonElement>('[data-testid="message-disposition-trigger"]')?.click();
       await Promise.resolve();
@@ -138,8 +135,7 @@ describe('ChatInputAddMenu', () => {
       document.querySelector<HTMLButtonElement>('[data-disposition-option="continue_current"]')?.click();
       await Promise.resolve();
     });
-    expect(callbacks.messageDisposition.setOneShot).toHaveBeenCalledWith('continue_current');
-    expect(callbacks.messageDisposition.setPreference).not.toHaveBeenCalled();
+    expect(callbacks.messageDisposition.setPreference).toHaveBeenCalledWith('thread', 'continue_current');
     expect(document.querySelector('[data-testid="message-disposition-trigger"]')).not.toBeNull();
   });
 

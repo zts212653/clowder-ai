@@ -2,6 +2,7 @@
 import type { ArtifactReviewAnchor, ReviewedMediaAsset } from '@cat-cafe/shared';
 import { type ReactNode, useState } from 'react';
 import { browserTimeToTick, tickToBrowserTime } from '@/components/content-review/review-geometry';
+import { useShellLanguage } from '@/components/shell/shell-language';
 import type { WorkspaceFileNavigationOrigin } from '@/stores/chat-types';
 import { useChatStore } from '@/stores/chatStore';
 import { API_URL } from '@/utils/api-client';
@@ -36,6 +37,7 @@ export function VideoWorkReview({
   navigationOrigin?: WorkspaceFileNavigationOrigin;
 }) {
   const context = useVideoWorkContext(asset.contentRef, asset.ownerRevision);
+  const english = useShellLanguage() === 'en';
   const threadId = useChatStore((state) => state.currentThreadId);
   const [comparison, setComparison] = useState(false);
   const [leftActive, setLeftActive] = useState(false);
@@ -159,6 +161,7 @@ export function VideoWorkReview({
         }
         workflow={{
           videoWork: true,
+          chatTitle: `${title.slice(0, 260)} · ${english ? `Version ${asset.ownerRevision}` : `第 ${asset.ownerRevision} 版`}`,
           onPlaybackTime: setSeconds,
           chapterNavigation:
             asset.media.kind === 'video' ? (

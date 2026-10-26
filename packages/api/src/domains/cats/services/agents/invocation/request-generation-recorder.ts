@@ -13,12 +13,14 @@ import {
   requestGenerationObservedEventSchema,
   requestGenerationTerminalEventSchema,
 } from '@cat-cafe/shared';
+import type { NativeProfileOpeningDelivery } from '../../../../memory/profile/native-profile-opening.js';
 import type { TranscriptSessionInfo, TranscriptWriter } from '../../session/TranscriptWriter.js';
 import type { ISessionChainStore } from '../../stores/ports/SessionChainStore.js';
 import type { PreparedProviderRequestV1, ProviderRequestGenerationCommitV1 } from '../../types.js';
 
 import {
   type CapsuleSourceRepository,
+  nativeOpeningCapsuleRevision,
   requestGenerationCapsuleSourceRefs,
 } from './request-generation-capsule-source.js';
 
@@ -55,6 +57,7 @@ interface GenerationState {
   readonly runtime: PreparedProviderRequestV1['runtime'];
   observed: boolean;
   terminal: boolean;
+  openingCapsuleRevision?: string;
 }
 
 function transcriptSession(record: {
@@ -179,6 +182,7 @@ export function createRequestGenerationRecorder(input: {
   /** Scoped one-shot nodes have an explicit owner and never enter the home active index. */
   readonly resolveSession?: () => SessionRecord | null | Promise<SessionRecord | null>;
   readonly profileRepository?: CapsuleSourceRepository;
+  readonly onProfileOpeningObserved?: (delivery: NativeProfileOpeningDelivery) => Promise<void>;
   readonly snapshot: () => RequestGenerationRecorderSnapshot;
   readonly now?: () => number;
   readonly createId?: () => string;
@@ -251,6 +255,9 @@ export function createRequestGenerationRecorder(input: {
         digest,
       });
       const nativeChannels = await persistedNativeChannels(prepared, snapshot);
+      const openingCapsuleRevision = input.onProfileOpeningObserved
+        ? nativeOpeningCapsuleRevision(prepared, snapshot.continuity, input.userId, input.profileRepository)
+        : undefined;
       const tools = await persistedToolSurface(prepared.tools, digest);
       const envelope = requestGenerationEnvelopeV1Schema.parse({
         v: 1,
@@ -284,7 +291,13 @@ export function createRequestGenerationRecorder(input: {
         { type: 'request_generation_assembled', envelope },
         input.invocationId,
       );
-      generations.set(requestGenerationId, { session, runtime: prepared.runtime, observed: false, terminal: false });
+      generations.set(requestGenerationId, {
+        session,
+        runtime: prepared.runtime,
+        observed: false,
+        terminal: false,
+        ...(openingCapsuleRevision ? { openingCapsuleRevision } : {}),
+      });
       return { requestGenerationId, generationOrdinal, sessionId: active.id };
     },
     async recordObserved(commit, evidence) {
@@ -305,6 +318,15 @@ export function createRequestGenerationRecorder(input: {
         },
       });
       await input.transcriptWriter.appendDurableEvent(await lifecycleSession(state), event, input.invocationId);
+      if (state.openingCapsuleRevision && input.onProfileOpeningObserved) {
+        await input.onProfileOpeningObserved({
+          scope: { ownerUserId: input.userId, threadId: input.threadId, invocationId: input.invocationId },
+          consumerCatId: input.catId,
+          sourceRevision: state.openingCapsuleRevision,
+          requestGenerationId: commit.requestGenerationId,
+          observedAt: event.observedAt,
+        });
+      }
       state.observed = true;
     },
     async recordTerminal(commit, outcome, reason) {

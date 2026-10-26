@@ -26,3 +26,13 @@ export class CodexAppServerRpcError extends Error {
 export function isCodexAppServerRpcError(value: unknown): value is CodexAppServerRpcError {
   return value instanceof CodexAppServerRpcError;
 }
+
+/** Missing acknowledgement is a transport failure, never a provider rejection or replay permission. */
+export class CodexAppServerTurnStartTimeoutError extends Error {
+  constructor(requestId: number, timeoutMs: number) {
+    super(
+      `Codex app-server did not acknowledge turn/start RPC ${requestId} within ${timeoutMs} ms; acceptance is unknown`,
+    );
+    this.name = 'CodexAppServerTurnStartTimeoutError';
+  }
+}

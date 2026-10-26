@@ -19,7 +19,7 @@ const DEFAULT_SNAPSHOT: MessageDispositionPreferenceSnapshot = {
   source: 'product',
 };
 
-export type MessageDispositionSelectionSource = MessageDispositionPreferenceSource | 'once';
+export type MessageDispositionSelectionSource = MessageDispositionPreferenceSource;
 export type MessageDispositionPreferenceScope = 'thread' | 'global';
 
 export interface MessageDispositionPreferenceController {
@@ -28,9 +28,6 @@ export interface MessageDispositionPreferenceController {
   source: MessageDispositionSelectionSource;
   loading: boolean;
   error: string | null;
-  oneShot: MessageWorkDisposition | null;
-  setOneShot(disposition: MessageWorkDisposition): void;
-  clearOneShot(): void;
   setPreference(scope: 'thread' | 'global', disposition: MessageWorkDisposition | null): Promise<boolean>;
 }
 
@@ -91,16 +88,6 @@ export function useMessageDispositionPreference(
     value: DEFAULT_SNAPSHOT,
   });
   const [loading, setLoading] = useState(false);
-  const [oneShotState, setOneShotState] = useState<{
-    threadId: string | undefined;
-    value: MessageWorkDisposition | null;
-  }>({ threadId, value: null });
-  const oneShot = oneShotState.threadId === threadId ? oneShotState.value : null;
-  const setOneShot = useCallback((value: MessageWorkDisposition) => setOneShotState({ threadId, value }), [threadId]);
-  const clearOneShot = useCallback(
-    () => setOneShotState((current) => (current === oneShotState ? { threadId, value: null } : current)),
-    [threadId, oneShotState],
-  );
   const [failure, setError] = useState<{ cause: unknown; fallback: 'loadFailed' | 'saveFailed' } | null>(null);
   const error = failure
     ? failure.cause instanceof PreferenceHttpError
@@ -180,15 +167,12 @@ export function useMessageDispositionPreference(
   return useMemo(
     () => ({
       snapshot,
-      effective: oneShot ?? snapshot.effective,
-      source: oneShot ? 'once' : snapshot.source,
-      oneShot,
-      setOneShot,
-      clearOneShot,
+      effective: snapshot.effective,
+      source: snapshot.source,
       loading,
       error,
       setPreference,
     }),
-    [snapshot, oneShot, setOneShot, clearOneShot, loading, error, setPreference],
+    [snapshot, loading, error, setPreference],
   );
 }

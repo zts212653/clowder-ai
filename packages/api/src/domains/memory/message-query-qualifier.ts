@@ -150,7 +150,7 @@ export class MessageQueryQualifier {
       ...counts,
       unassessed,
     };
-    context.onTrace?.({ phase: 'qualification', nativeCalls, bodyChars: chars, ...meta });
+    context.onTrace?.({ phase: 'qualification', nativeCalls, bodyChars: chars, ...meta, ...observation.snapshot() });
     return { decisions, evidence, meta, nativeCalls };
   }
 }

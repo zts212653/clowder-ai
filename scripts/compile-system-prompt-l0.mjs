@@ -40,12 +40,19 @@ import { accessSync, existsSync, readFileSync, realpathSync, writeFileSync } fro
 import { homedir } from 'node:os';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { catRegistry, resolveL0Projections, resolvePromptTemplateVariables } from '@cat-cafe/shared';
+import {
+  catRegistry,
+  collectRosterFamilyLabels,
+  formatRosterLabel,
+  resolveL0Projections,
+  resolvePromptTemplateVariables,
+} from '@cat-cafe/shared';
 import { getDossierL0Pronouns, getDossierL0RoutingNote, getDossierL0SelfDescription } from '@cat-cafe/shared/dossier';
 import {
   CURRENT_CORPUS_PROFILE_URI,
   CURRENT_RELATIONSHIP_PROFILE_URI,
   DEFAULT_PROFILE_USER_ID,
+  profileCapsuleReadRelativePath,
   profileCorpusRelativePath,
   profileUserRelativePath,
   relationshipPrimerRelativePath,
@@ -290,12 +297,6 @@ function compilePublicParticipationL0(catId) {
     .replace('{{PUBLIC_IDENTITY_BLOCK}}', buildPublicIdentityBlock(catId));
 }
 
-function rosterLabel(cfg) {
-  if (cfg.variantLabel) return `${cfg.displayName} ${cfg.variantLabel}`;
-  if (cfg.nickname) return `${cfg.displayName}/${cfg.nickname}`;
-  return cfg.displayName;
-}
-
 // 云端 review round-2 P2: roster 列标"当前模型"，必须 runtime resolve
 // （getCatModel: env CAT_{CATID}_MODEL override > catRegistry），不能用
 // 静态 cfg.defaultModel——否则 env model override 下广告错误队友模型，
@@ -311,7 +312,7 @@ function resolveModel(id, cfg) {
   return cfg.defaultModel ?? '';
 }
 
-function buildRosterRow(id, cfg, dossierRoot) {
+function buildRosterRow(id, cfg, dossierRoot, familyLabels) {
   const mention = cfg.mentionPatterns?.[0] ?? `@${id}`;
   const model = resolveModel(id, cfg);
   const cell = model ? `${mention} · ${model}` : mention;
@@ -319,7 +320,7 @@ function buildRosterRow(id, cfg, dossierRoot) {
   // Chinese L0 only needs the Chinese pronoun. The dossier marker limits this
   // scarce surface to evidence-backed repeat failures instead of every profile.
   // Prefer the shorter nickname for marked rows so the reminder is token-negative.
-  const baseLabel = rosterLabel(cfg);
+  const baseLabel = formatRosterLabel(cfg, familyLabels);
   const label = pronouns ? `${cfg.nickname ?? baseLabel}（${pronouns}）` : baseLabel;
   const hasRestrictions = cfg.restrictions && cfg.restrictions.length > 0;
   const restrictions = hasRestrictions ? `**硬限制**：${cfg.restrictions.join('、')}` : null;
@@ -342,8 +343,9 @@ function buildTeammateRoster(currentCatId, dossierRoot) {
   if (teammates.length === 0) return '（无其他可用队友）';
 
   const rows = ['## 队友名册', '| 猫猫 | @mention · 当前模型 | 路由边界 |', '|------|---------|------|'];
+  const familyLabels = collectRosterFamilyLabels(teammates.map(([, cfg]) => cfg));
   for (const [id, cfg] of teammates) {
-    rows.push(buildRosterRow(id, cfg, dossierRoot));
+    rows.push(buildRosterRow(id, cfg, dossierRoot, familyLabels));
   }
   return rows.join('\n');
 }
@@ -395,7 +397,7 @@ function renderCvoRef() {
 // ─── F231: User profile capsule resolution ────────────────────────────────
 // Contract (F231 spec KD-7 + Phase A plan §三):
 //   profileDir is supplied by the canonical data-root repository; this compiler never guesses cwd.
-//   capsulePath = join(profileDir, 'operator-capsule.md')
+//   capsule.md is canonical; the old filename is read only when it is absent.
 //   Three states:
 //     missing/unreadable → '' (empty string, no heading — backward compat)
 //     ≤300 Unicode chars  → '## 主人画像\n\n{body}' + optional primer pointer
@@ -406,13 +408,16 @@ function renderCvoRef() {
 /**
  * Resolve user profile capsule for L0 injection.
  *
- * @param {string} profileDir - directory containing operator-capsule.md
+ * @param {string} profileDir - authenticated owner's profile directory
  * @param {string} relationshipKey - stable persona key from CatConfig.relationshipKey
  * @returns {string} available capsule section and/or logical relationship-profile pointer
  * @throws {Error} if capsule exceeds 300 Unicode characters
  */
 export function resolveUserCapsule(profileDir, relationshipKey) {
-  const capsulePath = resolve(profileDir, 'operator-capsule.md');
+  const capsulePath = resolve(
+    profileDir,
+    profileCapsuleReadRelativePath((path) => existsSync(resolve(profileDir, path))),
+  );
   const primerPath = resolve(profileDir, relationshipPrimerRelativePath(relationshipKey));
   const corpusPath = resolve(profileDir, profileCorpusRelativePath());
   let primerEntry = '';

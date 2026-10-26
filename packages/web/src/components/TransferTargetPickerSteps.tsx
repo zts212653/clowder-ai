@@ -1,9 +1,14 @@
 import { useMemo, useState } from 'react';
 import { HubIcon } from './hub-icons';
+import { useShellCopy } from './shell/shell-copy';
+import { formatSidebarActivityTime, threadSignalsCopy } from './ThreadSidebar/thread-signals.shell-copy';
+import { projectDisplayName } from './ThreadSidebar/thread-utils';
 
 export interface TransferThreadChoice {
   id: string;
   title?: string | null;
+  projectPath?: string | null;
+  lastActiveAt?: number;
 }
 
 export interface TransferCatChoice {
@@ -18,6 +23,7 @@ export function TransferThreadStep({
   threads: readonly TransferThreadChoice[];
   onSelect: (threadId: string) => void;
 }) {
+  const copy = useShellCopy(threadSignalsCopy);
   const [query, setQuery] = useState('');
   const normalizedQuery = query.trim().toLocaleLowerCase();
   const matchingThreads = useMemo(
@@ -63,7 +69,16 @@ export function TransferThreadStep({
               onClick={() => onSelect(thread.id)}
             >
               <div className="truncate text-sm font-semibold text-cafe-primary">{thread.title ?? '未命名对话'}</div>
-              <div className="mt-1 truncate text-xs text-cafe-muted">{thread.id}</div>
+              <div className="mt-1 truncate text-xs text-cafe-muted">
+                {[
+                  thread.projectPath && thread.projectPath !== 'default'
+                    ? projectDisplayName(thread.projectPath)
+                    : null,
+                  thread.lastActiveAt !== undefined ? formatSidebarActivityTime(thread.lastActiveAt, copy) : null,
+                ]
+                  .filter(Boolean)
+                  .join(' · ')}
+              </div>
             </button>
           ))}
         </div>

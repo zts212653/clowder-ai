@@ -2,30 +2,20 @@ import { execFile } from 'node:child_process';
 import { lstat, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { isDeepStrictEqual, promisify } from 'node:util';
-import type { PluginManifest } from '@clowder-ai/plugin-contract';
 import { packageDirectoryName } from '../external-runtime/filesystem-package-locator.js';
 import type { PluginManifestValidator } from '../external-runtime/package-staging.js';
 import { stageVerifiedPackageArchive } from '../external-runtime/package-staging.js';
 import type { PluginPackageProvenance } from '../host-inventory/types.js';
 
-export interface MaterializedBuiltinPluginPackage {
-  readonly rootDir: string;
-  /** Installed dependency tree visible to the staged package through Node's ancestor lookup. */
-  readonly dependencyRoot?: string;
-  readonly manifest: PluginManifest;
-  verifyIntegrity(): Promise<void>;
-  release(): Promise<void>;
-}
+import type {
+  BuiltinPluginPackageMaterializer,
+  MaterializedBuiltinPluginPackage,
+} from './builtin-package-materializer-types.js';
 
-export interface BuiltinPluginPackageMaterializer {
-  resolve(input: {
-    readonly pluginInstanceId: string;
-    readonly pluginId: string;
-    readonly packageDigest: string;
-    readonly packageName?: string;
-    readonly sourceKind: PluginPackageProvenance['kind'];
-  }): Promise<MaterializedBuiltinPluginPackage>;
-}
+export type {
+  BuiltinPluginPackageMaterializer,
+  MaterializedBuiltinPluginPackage,
+} from './builtin-package-materializer-types.js';
 
 const execFileAsync = promisify(execFile);
 const DEFAULT_INSTALL_TIMEOUT_MS = 5 * 60_000;

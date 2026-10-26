@@ -118,6 +118,96 @@ describe('RedisRoutingPreferenceStore', { skip: redisIsolationSkipReason(REDIS_U
     assert.equal(await restarted.getByCommand('owner-1', 'command:missing'), null);
   });
 
+  it('serves warm decision heads without history reads and advances them on append', async () => {
+    const first = activeRevision();
+    await store.append(first);
+    assert.deepEqual(await store.readDecisionHeads('owner-1'), [first]);
+
+    const second = activeRevision({
+      revisionId: 'preference:reviewer:v2',
+      version: 2,
+      supersedesRevisionId: first.revisionId,
+    });
+    await store.append(second);
+
+    const methods = ['zcard', 'zrange', 'mget'];
+    const originals = new Map();
+    let redisReads = 0;
+    for (const method of methods) {
+      originals.set(method, redis[method]);
+      redis[method] = (...args) => {
+        redisReads += 1;
+        return originals.get(method).apply(redis, args);
+      };
+    }
+    try {
+      assert.deepEqual(await store.readDecisionHeads('owner-1'), [second]);
+      assert.equal(redisReads, 0, 'warm preference heads must stay off Redis');
+    } finally {
+      for (const [method, original] of originals) redis[method] = original;
+    }
+
+    const restarted = new RedisRoutingPreferenceStore(redis);
+    assert.deepEqual(await restarted.readDecisionHeads('owner-1'), [second]);
+    assert.deepEqual(await restarted.listByOwner('owner-1'), [first, second]);
+  });
+
+  it('single-flights concurrent cold decision-head reconstruction', async () => {
+    const first = activeRevision();
+    await store.append(first);
+    const restarted = new RedisRoutingPreferenceStore(redis);
+    const originalZrange = redis.zrange;
+    let timelineReads = 0;
+    redis.zrange = async function (...args) {
+      timelineReads += 1;
+      if (timelineReads === 1) await new Promise((resolve) => setTimeout(resolve, 20));
+      return originalZrange.apply(this, args);
+    };
+
+    try {
+      const results = await Promise.all(Array.from({ length: 20 }, () => restarted.readDecisionHeads('owner-1')));
+      assert.ok(results.every((heads) => heads.length === 1 && heads[0].revisionId === first.revisionId));
+      assert.equal(timelineReads, 2, 'one fenced reconstruction reads the timeline before and after hydration');
+    } finally {
+      redis.zrange = originalZrange;
+    }
+  });
+
+  it('includes an append that commits while cold decision heads are being fenced', async () => {
+    const first = activeRevision();
+    await store.append(first);
+    const restarted = new RedisRoutingPreferenceStore(redis);
+    const second = activeRevision({
+      revisionId: 'preference:reviewer:v2',
+      version: 2,
+      supersedesRevisionId: first.revisionId,
+    });
+    const secondFenceRead = Promise.withResolvers();
+    const releaseFenceRead = Promise.withResolvers();
+    const originalZrange = redis.zrange;
+    let timelineReads = 0;
+    redis.zrange = async function (...args) {
+      const result = await originalZrange.apply(this, args);
+      if (args[0] === RoutingPreferenceKeys.ownerTimeline('owner-1') && ++timelineReads === 2) {
+        secondFenceRead.resolve();
+        await releaseFenceRead.promise;
+      }
+      return result;
+    };
+
+    try {
+      const loading = restarted.readDecisionHeads('owner-1');
+      await secondFenceRead.promise;
+      await restarted.append(second);
+      releaseFenceRead.resolve();
+      assert.deepEqual(await loading, [second]);
+      assert.deepEqual(await restarted.readDecisionHeads('owner-1'), [second]);
+    } finally {
+      releaseFenceRead.resolve();
+      redis.zrange = originalZrange;
+    }
+  });
+
   it('keeps detail, command, indexes and head at TTL=-1 without mutating review_due by time', async () => {
     const first = activeRevision({ reviewAfter: 2_000 });
     await store.append(first);

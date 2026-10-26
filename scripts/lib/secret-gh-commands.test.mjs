@@ -100,3 +100,24 @@ test('preserves ordinary reads, explicit approval and metadata edits', async () 
     assert.deepEqual(prepared.args, args);
   }
 });
+
+test('preserves release and workflow downloads as inbound files, not upload payloads', async () => {
+  const destination = body(secret());
+  for (const args of [
+    ['release', 'download', 'v1', '--repo', 'fixture/project', '--pattern', '*.tgz', '--dir', '/tmp/downloads'],
+    ['release', 'download', 'v1', '--archive=zip', '--output', destination],
+    ['run', 'download', '123', '-R', 'fixture/project', '--name', 'artifact', '--dir', '/tmp/downloads'],
+  ]) {
+    const prepared = await prepareSecretSafeSend('gh', args);
+    leases.push(prepared);
+    assert.deepEqual(prepared.args, args, 'download destinations are outputs and must not be read or frozen');
+  }
+  await assert.rejects(
+    prepareSecretSafeSend('gh', ['release', 'download', 'v1', '--pattern', secret()]),
+    /secret_content_detected/,
+  );
+  await assert.rejects(
+    prepareSecretSafeSend('gh', ['release', 'upload', 'v1', destination]),
+    /secret_content_detected/,
+  );
+});

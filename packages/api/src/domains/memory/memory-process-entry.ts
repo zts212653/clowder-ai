@@ -13,6 +13,7 @@ import {
   type ParentMessage,
 } from './memory-process-protocol.js';
 import type { MemoryReadDiagnostic } from './memory-read-execution.js';
+import { describePassageVectorRead } from './native-vector-read-context.js';
 import { PassageVectorStore } from './PassageVectorStore.js';
 import { projectEntityMentions } from './project-entity-mentions.js';
 import { repackPassageVectorDatabase } from './repack-passage-vectors.js';
@@ -90,6 +91,7 @@ async function execute(
       detachReadDiagnostics = createSqliteReadDiagnostics({
         onSlowRead() {},
         maxReports: 20,
+        describeNativeRead: describePassageVectorRead,
         onReadStarted: (sql) => report({ phase: 'sql-start', sql }),
         onReadFinished: (sql) => report({ phase: 'sql-finish', sql }),
       })(db);
@@ -109,7 +111,17 @@ async function execute(
             ...(job.embedding.passages ? { passageVectorStore: new PassageVectorStore(db, dim) } : {}),
           });
         }
-        if (job.kind === 'message-search') return await store.searchMessagePassages(job.query, job.options);
+        if (job.kind === 'message-search')
+          return await store.searchMessagePassages(job.query, {
+            ...job.options,
+            onCjkRead: (cjk) => {
+              try {
+                report({ phase: 'cjk-read', cjk });
+              } catch {
+                /* Private IPC is optional. */
+              }
+            },
+          });
         const result = await store.searchWithMeta(job.query, job.options);
         return { result, shadow: lookupShadowRanking(result.items.map((item) => item.anchor)) };
       }
@@ -136,7 +148,13 @@ process.on('message', (message: ParentMessage) => {
   void execute(
     message.job,
     () => send({ type: 'started', id: message.id, pid: process.pid }),
-    (diagnostic) => send({ type: 'read-diagnostic', id: message.id, diagnostic }),
+    (diagnostic) => {
+      try {
+        send({ type: 'read-diagnostic', id: message.id, diagnostic });
+      } catch {
+        /* Optional witness. */
+      }
+    },
   ).then(
     (value) => finish({ type: 'result', id: message.id, value }),
     (error) => finish({ type: 'result', id: message.id, error: encodeProcessError(error) }),

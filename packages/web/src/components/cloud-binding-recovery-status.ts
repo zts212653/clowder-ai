@@ -1,5 +1,6 @@
 export interface PersonalChromeRecoveryStatus {
   connectionIssue?: string;
+  connectionActionLabel?: string;
   titleSyncMessage?: string;
 }
 
@@ -54,7 +55,11 @@ function titleSyncMessageFor(sync: PluginStatus['titleSync']): string | undefine
 }
 
 export function projectPersonalChromeRecoveryStatus(state: PluginStatus): PersonalChromeRecoveryStatus {
-  const connectionIssue = connectionIssueFor(state);
+  const connectionIssue = state.setupIssue?.message ?? connectionIssueFor(state);
   const titleSyncMessage = titleSyncMessageFor(state.titleSync);
-  return { ...(connectionIssue ? { connectionIssue } : {}), ...(titleSyncMessage ? { titleSyncMessage } : {}) };
+  return {
+    ...(connectionIssue ? { connectionIssue } : {}),
+    ...(state.setupIssue ? { connectionActionLabel: state.setupIssue.actionLabel } : {}),
+    ...(titleSyncMessage ? { titleSyncMessage } : {}),
+  };
 }

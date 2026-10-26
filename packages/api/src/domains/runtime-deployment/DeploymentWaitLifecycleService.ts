@@ -19,6 +19,7 @@ import { isDeploymentWaitTask } from './DeploymentWaitAuthority.js';
 import { DeploymentWaitCurrentTurnClaim } from './DeploymentWaitCurrentTurnClaim.js';
 import { lifecycleEvent, matchedOutcomeId, originalRegistration } from './DeploymentWaitOutcome.js';
 import { DeploymentWaitPublisher } from './DeploymentWaitPublisher.js';
+import type { SessionHandoffWaitSourceDeps } from './SessionHandoffWaitSource.js';
 
 export interface DeploymentWaitObservation {
   readonly taskId: string;
@@ -43,7 +44,7 @@ export type DeploymentWaitLifecycleResult =
   | DeploymentWaitNotified
   | { readonly kind: 'unrecorded'; readonly reason: 'generation_changed_concurrently' };
 
-export interface DeploymentWaitLifecycleServiceOptions {
+export interface DeploymentWaitLifecycleServiceOptions extends SessionHandoffWaitSourceDeps {
   readonly taskStore: ITaskStore;
   readonly messageStore?: Pick<IMessageStore, 'appendIdempotent' | 'getByIdempotencyKey' | 'getById'>;
   /** Exact historical source proof for receipts written before authorization snapshots existed. */

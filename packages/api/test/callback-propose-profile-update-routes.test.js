@@ -136,14 +136,15 @@ describe('callback propose-profile-update route', () => {
     assert.equal(proposal.beforeContent, 'SOL FAMILY OLD');
   });
 
-  it('INV-6: targetLayer capsule rejected (400 — AC-C1 primer only)', async () => {
+  it('capsule proposal pins the owner-wide target without writing content', async () => {
     seedPrimer('OLD');
     const res = await propose({
       body: { afterContent: 'X', rationale: 'r', signalKind: 'cat-declared', targetLayer: 'capsule' },
     });
-    assert.equal(res.statusCode, 400);
+    assert.equal(res.statusCode, 200);
     const body = JSON.parse(res.body);
-    assert.equal(body.error, 'invalid_target_layer', 'typed error for rejected layer');
+    assert.equal(store.get(body.proposalId).targetPath, 'capsule.md');
+    assert.equal(repository.readCapsule('alice'), null);
   });
 
   it('replaced invocation → typed auth failure (no proposal created)', async () => {
@@ -307,13 +308,13 @@ describe('callback propose-profile-update route', () => {
     assert.equal(proposal.baseContentHash, writeMod.hashContent(''));
   });
 
-  it('targetLayer capsule → 400 (Phase E: still rejected, A4)', async () => {
+  it('oversized capsule is rejected before any approval is created', async () => {
     const res = await propose({
-      body: { afterContent: 'X', rationale: 'r', signalKind: 'cat-declared', targetLayer: 'capsule' },
+      body: { afterContent: 'X'.repeat(301), rationale: 'r', signalKind: 'cat-declared', targetLayer: 'capsule' },
     });
     assert.equal(res.statusCode, 400);
     const body = JSON.parse(res.body);
-    assert.equal(body.error, 'invalid_target_layer', 'typed error for capsule');
+    assert.equal(body.error, 'invalid_content', 'typed error for capsule length');
   });
 
   it('unknown targetLayer → 400 with typed error', async () => {

@@ -1781,7 +1781,6 @@ export function useChatHistory(threadId: string) {
       const workspaceStateAtLoadStart = captureThreadWorkspaceState(state, threadId);
       const cached = state.threadStates[threadId];
       const hasCachedMessages = cached && cached.messages.length > 0;
-      const isThreadSynced = state.currentThreadId === threadId;
 
       // F120 durable workspace restore: the server remains authoritative for
       // thread/messages, while this user-visible local view (surface, exact
@@ -1862,6 +1861,9 @@ export function useChatHistory(threadId: string) {
 
       const bootstrap = async (): Promise<boolean> => {
         if (!hasCachedMessages) {
+          // An unread local snapshot is not an exhausted transcript. Preserve
+          // pending source jumps while IDB and the first API page are loading.
+          replaceThreadMessages(threadId, [], true);
           // F164: Try IndexedDB snapshot before API fetch
           let restoredFromIdb = false;
           try {
@@ -1873,14 +1875,9 @@ export function useChatHistory(threadId: string) {
                 useChatStore.getState().setOfflineSnapshot(true);
               }
               restoredFromIdb = true;
-            } else if (isThreadSynced) {
-              replaceThreadMessages(threadId, [], true);
             }
           } catch {
             if (isStaleThreadRequest(controller, threadId)) return false;
-            if (isThreadSynced) {
-              replaceThreadMessages(threadId, [], true);
-            }
           }
           if (isStaleThreadRequest(controller, threadId)) return false;
           // Always fetch fresh data from API (replace snapshot)
@@ -2206,8 +2203,13 @@ export function useChatHistory(threadId: string) {
   // no older history remains. Reused by the messages-effect (cross-thread nav + the
   // auto-load chain) and an explicit kick (same-thread teleport, where no route changes).
   const resolveTeleport = useCallback(() => {
-    if (useChatStore.getState().currentThreadId !== threadId) return;
-    if (loadingRef.current || isLoadingHistory) return;
+    const state = useChatStore.getState();
+    if (state.currentThreadId !== threadId) return;
+    if (loadingRef.current || isLoadingHistory || state.isLoadingHistory) return;
+    // Bootstrap can publish history during layout before an older render's
+    // passive resolver runs. Only consume against the rendered page's phase.
+    if (state.messages !== rawMessages || state.hasMore !== hasMore || state.isOfflineSnapshot !== isOfflineSnapshot)
+      return;
     if (restoreFrameKindRef.current === 'navigation' && !navigationReceiptRef.current) return;
     const pending = peekPendingTeleport(threadId);
     const targetId = resolvePendingTeleport(
@@ -2238,6 +2240,7 @@ export function useChatHistory(threadId: string) {
     }
   }, [
     messages,
+    rawMessages,
     threadId,
     isOfflineSnapshot,
     hasMore,
@@ -2425,7 +2428,14 @@ export function useChatHistory(threadId: string) {
       pointerY = event.clientY;
     };
     const handlePointerMove = (event: PointerEvent) => {
-      if (pointerY !== null && event.clientY !== pointerY) markScrollIntent(event.clientY < pointerY);
+      // Hover is observation, not reading input. A release outside this viewport
+      // also ends the drag even when this owner did not receive pointerup.
+      if (event.buttons === 0) {
+        pointerY = null;
+        return;
+      }
+      if (pointerY === null) return;
+      if (event.clientY !== pointerY) markScrollIntent(event.clientY < pointerY);
       pointerY = event.clientY;
     };
     const clearPointer = () => {

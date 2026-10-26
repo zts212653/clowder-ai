@@ -4,15 +4,18 @@ import { type ReactNode, type RefObject, useEffect, useRef, useState } from 'rea
 import { createPortal } from 'react-dom';
 import { CafeIcon } from '@/components/rich/CafeIcons';
 import { useShellCopy } from '../shell/shell-copy';
+import { useShellPresentation } from '../shell/shell-presentation';
+import { threadSettingsCopy } from '../shell/thread-settings.shell-copy';
 import { ThreadCatSettingsContent } from './ThreadCatSettings';
 import { ThreadEffortSettingsContent } from './ThreadEffortSettings';
+import { ThreadFeatureSettingsContent } from './ThreadFeatureSettings';
 import { ThreadGoalSettingsContent } from './ThreadGoalSettings';
 import { ThreadLabelSettingsContent } from './ThreadLabelPicker';
 import { ThreadNativeStatusSettingsContent } from './ThreadNativeStatusSettings';
 import { ThreadSpeedSettingsContent } from './ThreadSpeedSettings';
 import { threadSignalsCopy } from './thread-signals.shell-copy';
 
-type SettingsSectionId = 'goal' | 'status' | 'cats' | 'effort' | 'speed' | 'labels';
+type SettingsSectionId = 'goal' | 'status' | 'cats' | 'effort' | 'speed' | 'labels' | 'feature';
 
 interface ThreadSettingsPanelProps {
   open: boolean;
@@ -40,8 +43,12 @@ export function ThreadSettingsPanel({
   returnFocusRef,
 }: ThreadSettingsPanelProps) {
   const copy = useShellCopy(threadSignalsCopy);
+  const isV2 = useShellPresentation() === 'v2';
+  const localized = useShellCopy(threadSettingsCopy);
+  const settingsCopy = isV2 ? localized : threadSettingsCopy.zh;
   const panelRef = useRef<HTMLElement>(null);
   const [activeSection, setActiveSection] = useState<SettingsSectionId | null>(null);
+  const panelId = `thread-settings-${threadId}`;
 
   useEffect(() => {
     if (!open) setActiveSection(null);
@@ -50,6 +57,9 @@ export function ThreadSettingsPanel({
   useEffect(() => {
     if (!open) return;
     const handleMouseDown = (event: MouseEvent) => {
+      // The controlling button owns its toggle; an outside-close here would race its subsequent click.
+      const trigger = event.target instanceof Element ? event.target.closest('button[aria-controls]') : null;
+      if (isV2 && trigger?.getAttribute('aria-controls') === panelId) return;
       if (!panelRef.current?.contains(event.target as Node)) onClose();
     };
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -63,7 +73,7 @@ export function ThreadSettingsPanel({
       document.removeEventListener('mousedown', handleMouseDown);
       document.removeEventListener('keydown', handleKeyDown);
     };
-  }, [open, onClose, returnFocusRef]);
+  }, [open, onClose, returnFocusRef, isV2, panelId]);
 
   if (!open || typeof document === 'undefined') return null;
 
@@ -71,8 +81,22 @@ export function ThreadSettingsPanel({
     setActiveSection((current) => (current === section ? null : section));
   };
 
+  const runtimeStatus = (
+    <SettingsSection
+      id="status"
+      title={settingsCopy.status}
+      description={settingsCopy.statusDescription}
+      icon={isV2 ? 'chart' : 'activity'}
+      active={activeSection === 'status'}
+      onToggle={() => toggleSection('status')}
+    >
+      <ThreadNativeStatusSettingsContent threadId={threadId} />
+    </SettingsSection>
+  );
+
   return createPortal(
     <aside
+      id={panelId}
       ref={panelRef}
       role="dialog"
       aria-modal="false"
@@ -85,7 +109,7 @@ export function ThreadSettingsPanel({
       <header className="flex flex-shrink-0 items-start gap-3 border-b border-cafe-subtle px-4 py-3.5">
         <div className="min-w-0 flex-1">
           <h2 id={`thread-settings-title-${threadId}`} className="text-sm font-semibold text-cafe-black">
-            对话设置
+            {settingsCopy.title}
           </h2>
           <p className="mt-0.5 truncate text-micro text-cafe-muted" title={threadTitle}>
             {threadTitle}
@@ -93,7 +117,7 @@ export function ThreadSettingsPanel({
         </div>
         <button
           type="button"
-          aria-label="关闭对话设置"
+          aria-label={settingsCopy.close}
           onClick={() => {
             onClose();
             returnFocusRef?.current?.focus();
@@ -111,70 +135,80 @@ export function ThreadSettingsPanel({
             <p className="mt-1 break-all text-xs text-cafe-secondary">{projectPath}</p>
           </div>
         )}
-        <SettingsSection
-          id="goal"
-          title="对话目标"
-          description="保存、恢复并同步这条对话想达成的结果"
-          icon="target"
-          active={activeSection === 'goal'}
-          onToggle={() => toggleSection('goal')}
-        >
-          <ThreadGoalSettingsContent threadId={threadId} />
-        </SettingsSection>
-        <SettingsSection
-          id="status"
-          title="Codex 运行状态"
-          description="实时能力、权限、账户与额度来源"
-          icon="activity"
-          active={activeSection === 'status'}
-          onToggle={() => toggleSection('status')}
-        >
-          <ThreadNativeStatusSettingsContent threadId={threadId} />
-        </SettingsSection>
-        {onSavePreferredCats && (
+        <SettingsGroup id="goal" title={settingsCopy.goalGroup} grouped={isV2}>
           <SettingsSection
-            id="cats"
-            title="默认猫猫"
-            description="决定没有显式 @ 时谁优先回复"
-            icon="chat"
-            active={activeSection === 'cats'}
-            onToggle={() => toggleSection('cats')}
+            id="goal"
+            title={settingsCopy.goal}
+            description={settingsCopy.goalDescription}
+            icon="target"
+            active={activeSection === 'goal'}
+            onToggle={() => toggleSection('goal')}
           >
-            <ThreadCatSettingsContent threadId={threadId} currentCats={currentCats} onSave={onSavePreferredCats} />
+            <ThreadGoalSettingsContent threadId={threadId} />
           </SettingsSection>
-        )}
-        <SettingsSection
-          id="effort"
-          title="思考档位"
-          description="按猫覆盖本对话的思考深度"
-          icon="idea"
-          active={activeSection === 'effort'}
-          onToggle={() => toggleSection('effort')}
-        >
-          <ThreadEffortSettingsContent threadId={threadId} />
-        </SettingsSection>
-        <SettingsSection
-          id="speed"
-          title="速度档位"
-          description="为 Codex OAuth 猫选择 Standard / Fast"
-          icon="bolt"
-          active={activeSection === 'speed'}
-          onToggle={() => toggleSection('speed')}
-        >
-          <ThreadSpeedSettingsContent threadId={threadId} />
-        </SettingsSection>
-        {onSaveLabels && (
+        </SettingsGroup>
+        <SettingsGroup id="execution" title={settingsCopy.executionGroup} grouped={isV2}>
+          {!isV2 && runtimeStatus}
+          {onSavePreferredCats && (
+            <SettingsSection
+              id="cats"
+              title={settingsCopy.cats}
+              description={settingsCopy.catsDescription}
+              icon="chat"
+              active={activeSection === 'cats'}
+              onToggle={() => toggleSection('cats')}
+            >
+              <ThreadCatSettingsContent threadId={threadId} currentCats={currentCats} onSave={onSavePreferredCats} />
+            </SettingsSection>
+          )}
           <SettingsSection
-            id="labels"
-            title="标签管理"
-            description="整理与筛选这条对话"
-            icon="tree"
-            active={activeSection === 'labels'}
-            onToggle={() => toggleSection('labels')}
+            id="effort"
+            title={settingsCopy.effort}
+            description={settingsCopy.effortDescription}
+            icon="idea"
+            active={activeSection === 'effort'}
+            onToggle={() => toggleSection('effort')}
           >
-            <ThreadLabelSettingsContent threadId={threadId} currentLabels={currentLabels} onSave={onSaveLabels} />
+            <ThreadEffortSettingsContent threadId={threadId} />
           </SettingsSection>
-        )}
+          <SettingsSection
+            id="speed"
+            title={settingsCopy.speed}
+            description={settingsCopy.speedDescription}
+            icon="bolt"
+            active={activeSection === 'speed'}
+            onToggle={() => toggleSection('speed')}
+          >
+            <ThreadSpeedSettingsContent threadId={threadId} />
+          </SettingsSection>
+          {isV2 && runtimeStatus}
+        </SettingsGroup>
+        <SettingsGroup id="organization" title={settingsCopy.organizationGroup} grouped={isV2}>
+          {onSaveLabels && (
+            <SettingsSection
+              id="labels"
+              title={settingsCopy.labels}
+              description={settingsCopy.labelsDescription}
+              icon="tree"
+              active={activeSection === 'labels'}
+              onToggle={() => toggleSection('labels')}
+            >
+              <ThreadLabelSettingsContent threadId={threadId} currentLabels={currentLabels} onSave={onSaveLabels} />
+            </SettingsSection>
+          )}
+          {isV2 && (
+            <SettingsSection
+              id="feature"
+              title={settingsCopy.feature}
+              description={settingsCopy.featureDescription}
+              icon="code"
+              active={activeSection === 'feature'}
+              onToggle={() => toggleSection('feature')}
+            >
+              <ThreadFeatureSettingsContent threadId={threadId} />
+            </SettingsSection>
+          )}
+        </SettingsGroup>
       </div>
     </aside>,
     document.body,
@@ -240,5 +274,25 @@ function ChevronIcon({ expanded }: { expanded: boolean }) {
         clipRule="evenodd"
       />
     </svg>
+  );
+}
+
+function SettingsGroup({
+  id,
+  title,
+  grouped,
+  children,
+}: {
+  id: string;
+  title: string;
+  grouped: boolean;
+  children: ReactNode;
+}) {
+  if (!grouped) return <>{children}</>;
+  return (
+    <div data-settings-group={id} className="mb-3 last:mb-0">
+      <h3 className="px-3 py-2 text-micro font-semibold text-cafe-muted">{title}</h3>
+      {children}
+    </div>
   );
 }

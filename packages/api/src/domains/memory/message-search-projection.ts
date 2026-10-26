@@ -1,7 +1,16 @@
+import { createHash } from 'node:crypto';
 import type { MessageSearchResult } from '@cat-cafe/shared';
 import { storedMessageSource } from '../cats/services/stores/message-source.js';
 import type { StoredMessage } from '../cats/services/stores/ports/MessageStore.js';
-import { isSystemUserMessage } from '../cats/services/stores/visibility.js';
+import type { Thread } from '../cats/services/stores/ports/ThreadStore.js';
+import {
+  canQuoteInPublicReply,
+  getTimelineOrderTime,
+  isSystemUserMessage,
+} from '../cats/services/stores/visibility.js';
+import type { MessagePassageCandidate, MessagePassageIndexState } from './message-passage-search-types.js';
+import type { CanonicalSearchCandidate } from './message-search-candidates.js';
+import { buildSearchableMessageContent } from './message-search-content.js';
 
 export function projectMessageSearchSnippet(
   text: string,
@@ -73,4 +82,50 @@ export function projectMessageSearchSpeaker(
     return { speaker: 'connector', speakerLabel: sender ? `${label} · ${sender}` : label };
   }
   return { speaker: message.catId ?? 'user' };
+}
+
+/** Pure canonical body projection; permission/current-source checks remain with MessageSearchService. */
+export function projectCanonicalSearchMessage(
+  message: StoredMessage,
+  thread: Thread,
+  indexState: MessagePassageIndexState,
+  candidate: MessagePassageCandidate,
+  query: string,
+  evidence?: string,
+): CanonicalSearchCandidate | null {
+  const canonical = buildSearchableMessageContent({
+    content: message.content,
+    contentBlocks: message.contentBlocks,
+    richBlocks: message.extra?.rich?.blocks,
+  });
+  if (candidate.content !== canonical) return null;
+  const bodyMatches = query.trim() && message.content.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase());
+  const attachmentMatches =
+    !bodyMatches && query.trim() && canonical.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase());
+  const useBody = message.content.trim() && !attachmentMatches;
+  const excerpt = evidence
+    ? projectQualifiedSnippet(message.content, canonical, evidence)
+    : useBody
+      ? projectMessageSearchSnippet(message.content, 'body', query)
+      : projectMessageSearchSnippet(canonical, 'attachment-text', query);
+  return {
+    threadId: thread.id,
+    messageId: message.id,
+    content: canonical,
+    candidate,
+    contentRevision: createHash('sha256').update(canonical).digest('hex'),
+    result: {
+      threadId: thread.id,
+      messageId: message.id,
+      threadTitle: indexState.suppressThreadTitle ? `原对话 (${thread.id})` : (thread.title ?? thread.id),
+      ...projectMessageSearchSpeaker(message),
+      timestamp: message.timestamp,
+      timelineOrderAt: getTimelineOrderTime(message),
+      snippet: excerpt,
+      highlights: projectMessageSearchHighlights(excerpt.text, query),
+      match: candidate.match,
+      contentRevision: createHash('sha256').update(canonical).digest('hex'),
+      publiclyQuotable: canQuoteInPublicReply(message),
+    },
+  };
 }

@@ -31,7 +31,7 @@ it('keeps shared artwork file actions on the Host media URL without a private re
     const original = container.querySelector<HTMLImageElement>('[data-testid="workspace-content-review-media"]');
     const link = container.querySelector<HTMLAnchorElement>('[role="menu"] a[target="_blank"]');
     expect(link?.href).toBe(original?.src);
-    expect(link?.href).toContain('/api/plugins/collective-connector/');
+    expect(link?.href).toContain('/api/plugins/official.collective-connector/connections/');
     expect(fetch.mock.calls.some(([url]) => String(url).includes('/content-reviews/'))).toBe(false);
     expect(container.querySelector('[data-testid="workspace-media-chat-whole-work"]')).toBeNull();
     expect(container.querySelector('[data-testid="content-modification-entry"]')).toBeNull();

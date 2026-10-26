@@ -9,6 +9,7 @@ export function SenderAvatar({
   presentation = 'inline',
   shape = 'round',
   onClick,
+  actionLabel,
   streaming = false,
 }: {
   sender: SenderMeta;
@@ -16,6 +17,7 @@ export function SenderAvatar({
   presentation?: 'inline' | 'message' | 'nameplate';
   shape?: 'round' | 'rounded-square';
   onClick?: () => void;
+  actionLabel?: string;
   streaming?: boolean;
 }) {
   const message = presentation === 'message';
@@ -31,7 +33,7 @@ export function SenderAvatar({
     <Frame
       type={onClick ? 'button' : undefined}
       onClick={onClick}
-      aria-label={onClick ? `编辑 ${sender.label}` : undefined}
+      aria-label={onClick ? (actionLabel ?? `编辑 ${sender.label}`) : undefined}
       aria-hidden={onClick ? undefined : true}
       data-sender-avatar={presentation}
       data-sender-avatar-shape={shape}

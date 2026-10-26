@@ -146,10 +146,10 @@ describe('F293 controlled human recovery journey', () => {
     assert.equal(calls, 1, 'automatic retries are blocked before invoking the provider');
     providerFails = false;
     const attempted = await send('thread-a', true);
-    assert.ok(
-      attempted.some(
-        (event) => event.type === 'system_info' && JSON.parse(event.content).target?.ownerAttempt === true,
-      ),
+    assert.equal(
+      attempted.some((event) => event.type === 'system_info' && JSON.parse(event.content).type === 'routing_preflight'),
+      false,
+      'an already requested owner attempt proceeds without another routing notice',
     );
     assert.equal(calls, 2, 'a human attempt reaches the recovered provider');
     assert.equal((await h.decide()).targets[0].disposition, 'allowed');

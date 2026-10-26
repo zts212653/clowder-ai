@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ClientSnapshot, InviteResult, PairingIntentResult } from './client-types.js';
 import { phaseForHuman } from './human-auth-flow.js';
 import { collectiveClientNamespace } from './human-send-custody.js';
 import { readMembershipLeaveReadiness } from './leave-readiness.js';
+import { createMessageExpressionPort } from './message-expression-context.js';
 import {
   announcePairingAvailability,
   resolvePairingAuthority,
@@ -30,10 +31,8 @@ export function useCollectiveClient() {
   const activeCollectiveRole = snapshot.collective?.role;
   const currentNamespace = useRef<string>();
   currentNamespace.current = collectiveClientNamespace(snapshot);
-  const { token, request, loadMe, invitationMode, bootstrap, authenticate, configureProvider } = useHumanAuthSession(
-    snapshot,
-    setSnapshot,
-  );
+  const { token, request, binaryRequest, loadMe, invitationMode, bootstrap, authenticate, configureProvider } =
+    useHumanAuthSession(snapshot, setSnapshot);
   const { refreshEvents, recheckScope, cancelRefresh } = useCollectiveRefresh(
     snapshot,
     setSnapshot,
@@ -205,10 +204,23 @@ export function useCollectiveClient() {
     refresh: refreshEvents,
   });
   const artifacts = useCollectiveArtifacts(snapshot, request, refreshEvents);
+  const expressionServiceId = snapshot.meta?.serviceInstanceId;
+  const expressionCollectiveId = snapshot.collective?.collectiveId;
+  const expression = useMemo(
+    () =>
+      expressionServiceId && expressionCollectiveId
+        ? createMessageExpressionPort(
+            { serviceInstanceId: expressionServiceId, collectiveId: expressionCollectiveId },
+            binaryRequest,
+          )
+        : undefined,
+    [expressionServiceId, expressionCollectiveId, binaryRequest],
+  );
 
   return {
     snapshot,
     artifacts,
+    expression,
     hostHumanSession: { request, refresh: refreshEvents },
     invitationMode,
     bootstrap,

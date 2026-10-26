@@ -128,15 +128,19 @@ export function ContentBlocks({
         }
         if (block.type === 'context_attachment') {
           const attachment = block.attachment;
-          if (attachment.kind === 'media' && attachment.gallery) {
+          if (attachment.kind === 'media') {
             if (renderedGalleryAttachments.has(attachment.id)) return null;
-            const group = blocks.flatMap((item) =>
-              item.type === 'context_attachment' &&
-              item.attachment.kind === 'media' &&
-              item.attachment.gallery &&
-              sameGalleryGroup(attachment.gallery!, item.attachment.gallery)
-                ? [item.attachment]
-                : [],
+            const group = (
+              attachment.gallery
+                ? blocks.flatMap((item) =>
+                    item.type === 'context_attachment' &&
+                    item.attachment.kind === 'media' &&
+                    item.attachment.gallery &&
+                    sameGalleryGroup(attachment.gallery!, item.attachment.gallery)
+                      ? [item.attachment]
+                      : [],
+                  )
+                : [attachment]
             ) satisfies MediaContextAttachment[];
             for (const member of group) renderedGalleryAttachments.add(member.id);
             return (

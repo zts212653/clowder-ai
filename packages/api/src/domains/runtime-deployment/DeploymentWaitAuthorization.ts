@@ -6,6 +6,17 @@ import {
 } from '../cats/services/agents/invocation/tool-execution-policy.js';
 import { normalizeOwnerAuthProvenance } from '../cats/services/owner-auth-provenance.js';
 import type { IMessageStore } from '../cats/services/stores/ports/MessageStore.js';
+import { resolveSessionHandoffWaitSource, type SessionHandoffWaitSourceDeps } from './SessionHandoffWaitSource.js';
+
+async function handoffAuthorizationIsCurrent(
+  receipt: TypedWaitRegistration,
+  deps: SessionHandoffWaitSourceDeps,
+): Promise<boolean> {
+  if (!receipt.source.sessionHandoff) return true;
+  if (!receipt.authorization) return false;
+  const original = await resolveSessionHandoffWaitSource(receipt.source.sessionHandoff, receipt, deps);
+  return original?.sourceMessageId === receipt.source.sourceMessageId;
+}
 
 /** Authentication grade is not an executable token or a grant to exceed the original tool policy. */
 export function captureDeploymentWaitAuthorization(auth: InvocationRecord): TypedWaitAuthorization {
@@ -24,13 +35,14 @@ export function captureDeploymentWaitAuthorization(auth: InvocationRecord): Type
  */
 export async function resolveDeploymentWaitAuthorization(
   receipt: TypedWaitRegistration,
-  deps: {
+  deps: SessionHandoffWaitSourceDeps & {
     readonly messageStore?: Pick<IMessageStore, 'getById'>;
     readonly authorizationRegistry?: Pick<InvocationRegistry, 'peekRecord'>;
   },
 ): Promise<{ readonly verified: boolean; readonly authorization: TypedWaitAuthorization } | null> {
   const unknown: TypedWaitAuthorization = { ownerAuthProvenance: 'unknown' };
   try {
+    if (!(await handoffAuthorizationIsCurrent(receipt, deps))) return null;
     const auth = receipt.authorization ? null : await deps.authorizationRegistry?.peekRecord(receipt.invocationId);
     // Preserve safe historical notifications; absence of proof never manufactures strict authority.
     if (!receipt.authorization && !auth) return { verified: false, authorization: unknown };

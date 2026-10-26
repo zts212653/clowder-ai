@@ -7,7 +7,13 @@ export {
   type AppTooltipSide,
   resetAppTooltipWarmState,
 } from './AppTooltip';
+export {
+  type ComposerAttachmentItem,
+  ComposerAttachmentPreview,
+  formatAttachmentSize,
+} from './AttachmentPreview';
 export { collectiveText } from './collective-copy';
+export { type MessageMediaItem, MessageMediaViewer } from './MediaViewer';
 export { MeowClubMark } from './MeowClubMark';
 export { Nameplate } from './Nameplate';
 export { ComposerControl, ComposerFrame, HeaderFrame, WorldRailFrame } from './ShellFrame';

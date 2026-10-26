@@ -148,3 +148,25 @@ test('the real curl cannot copy an explicit credential URL into an output file',
   assert.equal(clean.status, 0, clean.stderr);
   assert.equal(readFileSync(destination, 'utf8'), 'safe local resource');
 });
+
+for (const group of ['release', 'run'])
+  test(`${group} download writes a large artifact to disk without the stdout buffer`, () => {
+    const f = fixture('gh');
+    const size = 78_464_220;
+    const destination = join(f.dir, 'artifact.tgz');
+    writeFileSync(
+      f.delegate,
+      `#!${process.execPath}\nimport { writeFileSync } from 'node:fs';\nwriteFileSync(${JSON.stringify(destination)}, Buffer.alloc(${size}, 81));\nprocess.stdout.write('download complete\\n');\n`,
+    );
+    const args = [group, 'download', '123', '--repo', 'fixture/project', '--pattern', '*.tgz', '--dir', f.dir];
+    const result = spawnSync(resolve('scripts/guarded-bin/gh'), args, { cwd: f.dir, env: f.env, encoding: 'utf8' });
+    assert.equal(result.status, 0, result.stderr);
+    const bytes = readFileSync(destination);
+    assert.equal(bytes.length, size, 'large download bytes must stay out of the bounded text result');
+    const expected = createHash('sha256');
+    const chunk = Buffer.alloc(1024 * 1024, 81);
+    for (let left = size; left > 0; left -= chunk.length)
+      expected.update(chunk.subarray(0, Math.min(left, chunk.length)));
+    assert.equal(createHash('sha256').update(bytes).digest('hex'), expected.digest('hex'));
+    assert.equal(result.stdout, 'download complete\n');
+  });

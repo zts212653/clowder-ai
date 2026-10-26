@@ -1,6 +1,7 @@
 import { CURRENT_CORPUS_PROFILE_URI, CURRENT_RELATIONSHIP_PROFILE_URI } from '@cat-cafe/shared/profile-contract';
 import { profileRevisionOf } from '@cat-cafe/shared/profile-revision';
 import type { FileProfileRepository } from '../../../cats/services/profile/ProfileRepository.js';
+import { NATIVE_CAPSULE_ANCHOR } from '../../profile/native-profile-opening.js';
 import type { MemoryCueEpisodeStore } from '../MemoryCueEpisodeStore.js';
 import type { MemoryCueOpportunitySeed } from '../MemoryCueInvocationPromptService.js';
 import type { MemoryCueSourceProjection } from '../MemoryCueResolverRegistry.js';
@@ -137,7 +138,7 @@ export class ProfileMemoryCueSource implements ProfileCueSource {
     if (input.anchor === CORPUS_ANCHOR) {
       return this.readCorpusSnapshot(input.ownerUserId, input.expectedRevision);
     }
-    if (input.anchor !== PROFILE_ANCHOR) {
+    if (input.anchor !== PROFILE_ANCHOR && input.anchor !== NATIVE_CAPSULE_ANCHOR) {
       return { status: 'not_available', invalidationReason: 'source_forgotten' };
     }
     const snapshot = this.capsuleSnapshot(input.ownerUserId);
@@ -148,7 +149,10 @@ export class ProfileMemoryCueSource implements ProfileCueSource {
     return {
       status: 'ok',
       payload: {
-        profileUri: CURRENT_RELATIONSHIP_PROFILE_URI,
+        profileUri:
+          input.anchor === NATIVE_CAPSULE_ANCHOR
+            ? 'cat-cafe-profile://capsule/current'
+            : CURRENT_RELATIONSHIP_PROFILE_URI,
         content: snapshot.content,
         sourceRevision: snapshot.revision,
       },

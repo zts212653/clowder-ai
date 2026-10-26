@@ -41,6 +41,7 @@ import { ChatInputActionButton } from './ChatInputActionButton';
 import { ChatInputAddMenu } from './ChatInputAddMenu';
 import { ChatInputMenus } from './ChatInputMenus';
 import { ComposerRoutingPreview } from './ComposerRoutingPreview';
+import { useCatCardComposer } from './cat-profile-card/CatProfileCardContext';
 import { chatComposerCopy } from './chat-composer.shell-copy';
 import { type ContextPickerMode, detectContextShortcut } from './chat-context-reference';
 import { buildCatOptions, type CatOption, detectMenuTrigger } from './chat-input-options';
@@ -337,6 +338,7 @@ export function ChatInput({
   const ghostRef = useRef<string | null>(null);
   const [showHistorySearch, setShowHistorySearch] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  useCatCardComposer(input, setInput, textareaRef);
   useComposerKeyboardFocus(shellV2, textareaRef);
   useEffect(() => {
     const handler = (event: Event) => {
@@ -503,17 +505,8 @@ export function ChatInput({
       const settleAdmission = beginComposerDraftAdmission(draftSnapshot);
       let admission: ReturnType<ChatInputProps['onSend']>;
       try {
-        admission = messageDisposition.oneShot
-          ? onSend(
-              trimmed,
-              images.length > 0 ? images : undefined,
-              whisper,
-              replyToMessage?.id,
-              sendContexts.length > 0 ? sendContexts : undefined,
-              undefined,
-              messageDisposition.oneShot,
-            )
-          : sendContexts.length > 0
+        admission =
+          sendContexts.length > 0
             ? onSend(trimmed, images.length > 0 ? images : undefined, whisper, replyToMessage?.id, sendContexts)
             : onSend(trimmed, images.length > 0 ? images : undefined, whisper, replyToMessage?.id);
       } catch {
@@ -523,7 +516,6 @@ export function ChatInput({
       void Promise.resolve(admission).then(
         (accepted) => {
           settleAdmission(accepted === false ? false : undefined);
-          if (accepted !== false) messageDisposition.clearOneShot();
         },
         () => settleAdmission(false),
       );
@@ -556,7 +548,6 @@ export function ChatInput({
     markComposerDraftOptimisticallyCleared,
     setInput,
     effectiveThreadId,
-    messageDisposition,
   ]);
 
   const handleSend = useCallback(() => doSend(), [doSend]);
@@ -1060,7 +1051,6 @@ export function ChatInput({
           onWhisperToggle={handleWhisperToggle}
           onClose={() => setAddMenuOpen(false)}
           messageDisposition={messageDisposition}
-          hasActiveInvocation={hasActiveInvocation && !prospectiveThread && !whisperTargetsAllIdle}
           triggerRef={addButtonRef}
           disabled={disabled}
           sendDisabled={sendTemporarilyDisabled}

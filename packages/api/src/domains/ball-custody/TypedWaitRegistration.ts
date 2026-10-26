@@ -39,6 +39,14 @@ const receiptSchema = z
         kind: z.enum(['primary', 'adopted_hold']),
         sourceMessageId: nonEmpty,
         holdTaskId: nonEmpty.optional(),
+        sessionHandoff: z
+          .object({
+            proposalId: nonEmpty,
+            continuationEntryId: nonEmpty,
+            sourceSessionId: nonEmpty,
+          })
+          .strict()
+          .optional(),
       })
       .strict()
       .refine((source) => source.kind !== 'adopted_hold' || source.holdTaskId !== undefined),
@@ -72,6 +80,13 @@ const receiptSchema = z
     }
     if (deployment && receipt.expiresAt !== undefined) {
       context.addIssue({ code: 'custom', path: ['expiresAt'], message: 'deployment waits are persistent' });
+    }
+    if (receipt.source.sessionHandoff && (!deployment || receipt.source.kind !== 'primary' || !receipt.authorization)) {
+      context.addIssue({
+        code: 'custom',
+        path: ['source'],
+        message: 'handoff waits require a deployment authorization snapshot',
+      });
     }
   });
 

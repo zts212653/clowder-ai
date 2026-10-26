@@ -16,6 +16,7 @@ export interface MemoryCueInvocationCueEntry {
   sourceAnchor: string;
   sourceRevision: string;
   consumerCatId: string;
+  pushSurface?: 'profile_opening';
   status: MemoryCueInvocationStatus;
   invalidationReason: MemoryCueInvalidationReason | null;
   presentedAt: number;
@@ -80,6 +81,10 @@ export function projectInvocationCues(events: readonly MemoryCueEvent[]): Memory
       sourceAnchor: first.sourceAnchor,
       sourceRevision: first.sourceRevision,
       consumerCatId: first.consumerCatId,
+      ...(first.resolverFamily === 'profile' &&
+      (first.sourceAnchor === 'profile:opening-capsule' || first.sourceAnchor.startsWith('profile:opening-primer:'))
+        ? { pushSurface: 'profile_opening' as const }
+        : {}),
       status,
       invalidationReason,
       presentedAt: presentedAt ?? first.occurredAt,

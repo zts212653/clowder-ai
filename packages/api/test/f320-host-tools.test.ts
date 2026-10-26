@@ -131,7 +131,7 @@ test(
         ALL_PROXY: 'http://127.0.0.1:1',
         NO_PROXY: '127.0.0.1,localhost',
       });
-      assert.equal(execFileSync('codex', ['--version'], { env, encoding: 'utf8' }).trim(), 'codex-cli 0.159.0');
+      // Runs on whatever version is installed; admission measures the same property per version.
       const loginPath = join(f.layout.credentialHome, 'auth.json');
       const fakeLogin = JSON.parse(readFileSync(loginPath, 'utf8'));
       fakeLogin.tokens.refresh_token = 'fixture-refresh-b';

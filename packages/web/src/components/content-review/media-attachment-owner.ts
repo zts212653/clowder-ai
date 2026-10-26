@@ -56,6 +56,7 @@ export async function readMediaAttachmentOwner(attachment: MediaContextAttachmen
       throw new Error('原作品版本不一致，未打开其它版本。');
     return {
       url: mediaAttachmentUrl(attachment)!,
+      media: asset.media,
       target: {
         kind: 'publication' as const,
         contentRef,
@@ -90,7 +91,12 @@ export async function readMediaAttachmentOwner(attachment: MediaContextAttachmen
     )
       throw new Error('原版文件已变化或不可读取；保留原圈选，没有套到新版本上。');
     const target = { kind: 'file' as const, ...source.locator, navigationOrigin };
-    return { url: mediaAttachmentUrl(attachment)!, target, surface: createFilePreviewSurface(target) };
+    return {
+      url: mediaAttachmentUrl(attachment)!,
+      media: actual.media,
+      target,
+      surface: createFilePreviewSurface(target),
+    };
   }
   throw new Error('请从这件作品原来的入口打开；原版本和圈选仍然保留。');
 }

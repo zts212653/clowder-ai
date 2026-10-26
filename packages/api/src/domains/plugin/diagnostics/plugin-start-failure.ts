@@ -1,6 +1,7 @@
 import type { Capability } from '@clowder-ai/plugin-contract';
 import { createModuleLogger } from '../../../infrastructure/logger.js';
 import { MessagingError } from '../../messaging/contract/host-types.js';
+import { type PackageStagingPhase, packageStagingPhase } from '../external-runtime/package-staging-diagnostics.js';
 import { ExternalPluginRuntimeError } from '../external-runtime/types.js';
 import {
   PluginInventoryError,
@@ -34,6 +35,8 @@ export interface PluginStartFailureReport {
   readonly occurredAt: number;
   readonly category: PluginStartFailureCategory;
   readonly error: SafeErrorProjection;
+  /** Closed Host-only phase; absent for errors outside verified archive staging. */
+  readonly stagingPhase?: PackageStagingPhase;
 }
 
 export type PluginStartFailureObserver = (report: PluginStartFailureReport) => void;
@@ -81,6 +84,7 @@ export function pluginStartFailureReport(input: {
   readonly occurredAt: number;
   readonly error: unknown;
 }): PluginStartFailureReport {
+  const stagingPhase = packageStagingPhase(input.error);
   return {
     pluginId: input.pluginId,
     pluginInstanceId: input.pluginInstanceId,
@@ -88,6 +92,7 @@ export function pluginStartFailureReport(input: {
     occurredAt: input.occurredAt,
     category: classifyStartFailure(input.error),
     error: safeErrorProjection(input.error, HOST_RECOGNITION),
+    ...(stagingPhase ? { stagingPhase } : {}),
   };
 }
 

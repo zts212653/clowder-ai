@@ -35,7 +35,7 @@ const auth = {
   'x-cat-cafe-user': process.env.DEFAULT_OWNER_USER_ID?.trim() || 'owner-user',
 };
 
-async function harness(t, { enabled = false, digest = pin.digest, run, resumeFails = false } = {}) {
+async function harness(t, { enabled = false, digest = pin.digest, run, resumeFails = false, materialize } = {}) {
   const root = await realpath(await mkdtemp(join(tmpdir(), 'chrome-host-policy-')));
   const home = join(root, 'home');
   const packageRoot = join(root, 'package');
@@ -107,6 +107,25 @@ async function harness(t, { enabled = false, digest = pin.digest, run, resumeFai
         },
       }),
     },
+    ...(materialize
+      ? {
+          materializer: {
+            resolve: async (input) => {
+              await materialize({ input, store });
+              return {
+                rootDir: packageRoot,
+                manifest,
+                verifyIntegrity: async () => {
+                  verified++;
+                },
+                release: async () => {
+                  released++;
+                },
+              };
+            },
+          },
+        }
+      : {}),
     run: async (input) => {
       runs++;
       events.push('run');
@@ -180,6 +199,25 @@ test('wrong digest of the same id/version has neither UI nor execution authority
   assert.deepEqual(await h.configuration.fields(pluginId), []);
   assert.equal((await h.request()).statusCode, 403);
   assert.equal(h.counts().runs, 0);
+});
+
+test('dependency preparation cannot bypass a changed owner installation fence', async (t) => {
+  const h = await harness(t, {
+    materialize: async ({ input, store }) => {
+      assert.equal(input.pluginId, pluginId);
+      assert.equal(input.packageDigest, pin.digest);
+      assert.equal(input.pluginInstanceId, instanceId);
+      await store.transaction((tx) => {
+        const instance = tx.instances.get(instanceId);
+        tx.instances.put({ ...instance, lifecycleRevision: instance.lifecycleRevision + 1 });
+      });
+    },
+  });
+  const result = await h.request('install', { ...auth, 'x-cat-cafe-owner-confirmed': 'true' });
+  assert.equal(result.statusCode, 409);
+  assert.equal(result.json().effect, 'not_started');
+  assert.equal(h.counts().runs, 0);
+  assert.equal(h.counts().released, 1);
 });
 
 test('owner context, declared action, confirmation and empty input are enforced at real route', async (t) => {

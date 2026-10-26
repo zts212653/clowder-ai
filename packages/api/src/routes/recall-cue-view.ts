@@ -1,7 +1,9 @@
 import type { RecallResolverFamily, RecallScopeV1 } from '@cat-cafe/shared';
 import { CURRENT_CORPUS_PROFILE_URI, CURRENT_RELATIONSHIP_PROFILE_URI } from '@cat-cafe/shared/profile-contract';
 import type { MemoryCueSourceReader } from '../domains/memory/cue/MemoryCueSourceReader.js';
-import type { RecallCandidateView } from './recall-candidate-view.js';
+import type { RecallCandidateView, RecallSourceReaders } from './recall-candidate-view.js';
+import { type RecallOwnerMessageSources, readOwnerMessageView } from './recall-owner-message-view.js';
+import { readOwnerProfileView } from './recall-owner-profile-view.js';
 
 export interface RecallCueCoordinate {
   invocation_id: string;
@@ -63,20 +65,54 @@ function payloadTitle(family: RecallResolverFamily, payload: unknown): string | 
   }
 }
 
+function openingProfileMetadata(cue: RecallCueCoordinate): RecallCandidateView | null {
+  // This names a recorded delivery, not a fresh drill or a claim that the old body is current.
+  // The profile lane owns the owner-facing current read/correction, including forgotten entries.
+  if (cue.resolver_family === 'profile' && cue.source_anchor === 'profile:opening-capsule') {
+    return { kind: 'profile', title: '开场递送 · 开场简介', href: null, profileMemoryId: 'capsule' };
+  }
+  if (cue.resolver_family === 'profile' && cue.source_anchor.startsWith('profile:opening-primer:')) {
+    const coordinate = /^profile:opening-primer:([^:]+):([^:]+)$/.exec(cue.source_anchor);
+    const [, relationshipKey, consumerCatId] = coordinate ?? [];
+    try {
+      if (relationshipKey && consumerCatId && decodeURIComponent(consumerCatId) === cue.consumer_cat_id) {
+        return {
+          kind: 'profile',
+          title: '开场递送 · 关系参考',
+          href: null,
+          profileMemoryId: `primer:${decodeURIComponent(relationshipKey)}`,
+        };
+      }
+    } catch {
+      /* Malformed history does not acquire a profile target. */
+    }
+    return { kind: 'profile', titleStatus: 'unavailable', href: null };
+  }
+  return null;
+}
+
 /** Pure metadata projection: reuse canonical owner/revision readers, never the consumption/drill writer. */
 async function readCueMetadata(
   cue: RecallCueCoordinate,
   scope: Omit<RecallScopeV1, 'invocationId'>,
   readCandidate: (anchor: string) => Promise<RecallCandidateView>,
   sourceReader?: MemoryCueSourceReader,
+  profileMemoryStore?: RecallSourceReaders['profileMemoryStore'],
+  ownerMessages: RecallOwnerMessageSources = {},
 ): Promise<RecallCandidateView> {
+  const ownerProfile = readOwnerProfileView(cue, scope.ownerUserId, scope.threadId, profileMemoryStore);
+  if (ownerProfile) return ownerProfile;
+  const opening = openingProfileMetadata(cue);
+  if (opening) return opening;
+  const ownerMessage = await readOwnerMessageView(cue, scope, readCandidate, sourceReader, ownerMessages);
+  if (ownerMessage) return ownerMessage;
   // A human-facing metadata read must not impersonate the producing cat to drill its private hypothesis.
   // Its delivery is already owner-readable in A1; retain that observation without opening the seed body.
   if (cue.resolver_family === 'cat_owned_seed') {
     return { kind: 'cat_owned_seed', href: null, title: '猫的私有种子（正文仅该猫可读）' };
   }
-  // Evidence remains gated by the shared index's collection/world/kind filters. Person names use getPerson.
-  if (cue.resolver_family === 'person_entity' || FAMILIES[cue.resolver_family] === 'evidence') {
+  // Evidence remains gated by the shared index's collection/world/kind filters.
+  if (FAMILIES[cue.resolver_family] === 'evidence') {
     return readCandidate(cue.source_anchor);
   }
   const unavailable: RecallCandidateView = {
@@ -113,13 +149,15 @@ export function recallCueViewReader(
   scope: Omit<RecallScopeV1, 'invocationId'>,
   readCandidate: (anchor: string) => Promise<RecallCandidateView>,
   sourceReader?: MemoryCueSourceReader,
+  profileMemoryStore?: RecallSourceReaders['profileMemoryStore'],
+  ownerMessages: RecallOwnerMessageSources = {},
 ) {
   const cache = new Map<string, Promise<RecallCandidateView>>();
   return async (cue: RecallCueCoordinate): Promise<RecallSourceView> => {
-    const key = JSON.stringify([cue.resolver_family, cue.source_anchor, cue.source_revision]);
+    const key = JSON.stringify([cue.resolver_family, cue.source_anchor, cue.source_revision, cue.consumer_cat_id]);
     let pending = cache.get(key);
     if (!pending) {
-      pending = readCueMetadata(cue, scope, readCandidate, sourceReader);
+      pending = readCueMetadata(cue, scope, readCandidate, sourceReader, profileMemoryStore, ownerMessages);
       cache.set(key, pending);
     }
     return {

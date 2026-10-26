@@ -69,14 +69,14 @@ function routeDeps(services, routingDispatchPreflight, invocationExtras = {}) {
 }
 
 describe('F293 home routing through canonical Queue dispatch', () => {
-  test('execution history stays concise while durable metadata and live notice retain exact C', async () => {
+  test('blocked execution history stays concise while durable metadata and live notice retain exact C', async () => {
     const { routingPreflightNotice } = await import(
       '../dist/domains/cats/services/agents/routing/routing-preflight-notice.js'
     );
     const { projectMessageBundleReadableContent } = await import(
       '../dist/domains/cats/services/context/MessageBundleSourceProjection.js'
     );
-    const c = decision({ ownerId: 'owner-1', targetCatIds: ['codex'] }, { codex: 'warned' });
+    const c = decision({ ownerId: 'owner-1', targetCatIds: ['codex'] }, { codex: 'rejected' });
     c.snapshotRef =
       'sha256:' + createHash('sha256').update('C execution with independent account observations').digest('hex');
     c.targets[0].reasons = [
@@ -142,7 +142,33 @@ describe('F293 home routing through canonical Queue dispatch', () => {
     );
   });
 
-  test('changed execution facts persist exact C while unchanged healthy facts stay quiet', async () => {
+  test('internal capacity warnings create neither live notices nor thread history', async () => {
+    const { routingPreflightNotice } = await import(
+      '../dist/domains/cats/services/agents/routing/routing-preflight-notice.js'
+    );
+    const stored = [];
+    const c = decision({ ownerId: 'owner-1', targetCatIds: ['codex'] }, { codex: 'warned' });
+    c.targets[0].reasons = [
+      { code: 'routing_signal_recovered', summary: '已恢复 9 条历史状态记录', sourceRefs: ['history:1'] },
+      {
+        code: 'routing_capacity_unverified',
+        summary: 'Execution capacity is unverified; requested target unchanged',
+        sourceRefs: ['capacity:1'],
+      },
+    ];
+    const notice = await routingPreflightNotice(
+      { messageStore: { append: async (input) => stored.push(input) } },
+      {},
+      c,
+      'codex',
+      'thread-quiet',
+      true,
+    );
+    assert.equal(notice, undefined);
+    assert.deepEqual(stored, []);
+  });
+
+  test('healthy execution stays quiet even when account facts changed after queue admission', async () => {
     const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
     const { routeParallel } = await import('../dist/domains/cats/services/agents/routing/route-parallel.js');
     const { routingAdmissionProvenance } = await import(
@@ -186,12 +212,7 @@ describe('F293 home routing through canonical Queue dispatch', () => {
           /* execute C */
         }
         const notices = messages.filter((message) => message.extra?.systemInfo?.payload.type === 'routing_preflight');
-        assert.equal(notices.length, changed ? 1 : 0);
-        if (changed) {
-          assert.equal(notices[0].extra.systemInfo.payload.snapshotRef, 'snapshot:C');
-          assert.equal(notices[0].extra.systemInfo.payload.stage, 'execution_preflight');
-          assert.equal(notices[0].extra.systemInfo.payload.target.capacityFacts.current.bindingRevision, 'binding-C');
-        }
+        assert.equal(notices.length, 0, `${route.name}: account diagnostics are not thread messages`);
       }
     }
   });
@@ -471,7 +492,8 @@ describe('F293 home routing through canonical Queue dispatch', () => {
       receipts.some((receipt) => receipt.target.targetCatId === 'opus' && receipt.target.disposition === 'rejected'),
     );
     assert.ok(
-      receipts.some((receipt) => receipt.target.targetCatId === 'codex' && receipt.target.disposition === 'warned'),
+      !receipts.some((receipt) => receipt.target.targetCatId === 'codex'),
+      'the warned target proceeds without a post-send system notice',
     );
   });
 
@@ -488,13 +510,11 @@ describe('F293 home routing through canonical Queue dispatch', () => {
     }
 
     assert.ok(calls.includes('opus'));
-    const receipt = events
-      .filter((event) => event.type === 'system_info' && event.content?.includes('routing_preflight'))
-      .map((event) => JSON.parse(event.content))[0];
-    assert.equal(receipt.resolverState, 'degraded');
-    assert.equal(receipt.target.targetCatId, 'opus');
-    assert.equal(receipt.target.disposition, 'warned');
-    assert.deepEqual(receipt.target.alternatives, []);
+    assert.deepEqual(
+      events.filter((event) => event.type === 'system_info' && event.content?.includes('routing_preflight')),
+      [],
+      'degraded advisory diagnostics do not become post-send notices',
+    );
   });
 
   test('completed response atomically queues requested targets for their fresh execution-time preflight', async () => {

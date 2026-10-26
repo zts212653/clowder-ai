@@ -2,12 +2,21 @@
 import { useShellPresentation } from '@/components/shell/shell-presentation';
 import { MemoryHub } from '../MemoryHub';
 import { MemoryPagePreview, type MemoryPageTab } from './MemoryPagePreview';
+import type { ProfileSourceTarget } from './profile-source-target';
 
 /** The existing shell preference owns presentation; the classic feed remains its original entry. */
-export function MemoryEntry({ tab, from }: { tab: MemoryPageTab; from: string | null }) {
+export function MemoryEntry({
+  tab,
+  from,
+  profileSource,
+}: {
+  tab: MemoryPageTab;
+  from: string | null;
+  profileSource?: ProfileSourceTarget;
+}) {
   const presentation = useShellPresentation();
-  return presentation === 'v2' ? (
-    <MemoryPagePreview tab={tab} shell="v2" basePath="/memory" from={from} />
+  return presentation === 'v2' || profileSource ? (
+    <MemoryPagePreview tab={tab} shell={presentation} basePath="/memory" from={from} profileSource={profileSource} />
   ) : (
     <MemoryHub activeTab="feed" initialReferrerThread={from} />
   );

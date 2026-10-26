@@ -7,6 +7,7 @@ vi.mock('@/components/useConfirm', async (importOriginal) => importOriginal());
 
 import { apiFetch } from '@/utils/api-client';
 import { PluginManagerContent } from '../plugin-manager/PluginManagerContent';
+import { PluginManagerDetailCard } from '../plugin-manager/PluginManagerDetailCard';
 import {
   PLUGIN_MANAGER_DESIGN_FIXTURES,
   type PluginManagerDesignFixture,
@@ -52,6 +53,34 @@ describe('Plugin Manager v2 detail guidance', () => {
       ),
     );
   }
+  it.each([
+    'v1',
+    'v2',
+  ] as const)('can install and enable the selected detail in %s without finding its list row', async (presentation) => {
+    const onInstall = vi.fn();
+    const onSetEnabled = vi.fn();
+    const detail = (installed: boolean) => (
+      <PluginManagerDetailCard
+        plugin={{ ...base, artifact: installed ? 'installed' : 'absent', intent: 'disabled', configFields: [] }}
+        presentation={presentation}
+        locale="zh-CN"
+        onInstall={onInstall}
+        onSetEnabled={onSetEnabled}
+      />
+    );
+    await act(async () => root.render(detail(false)));
+    const install = container.querySelector<HTMLButtonElement>('[data-plugin-detail-action="install"]');
+    expect(install).not.toBeNull();
+    expect(onInstall).not.toHaveBeenCalled();
+    await act(async () => install?.click());
+    expect(onInstall).toHaveBeenCalledOnce();
+    await act(async () => root.render(detail(true)));
+    const enable = container.querySelector<HTMLButtonElement>(`button[aria-label="启用${base.displayName}"]`);
+    expect(enable).not.toBeNull();
+    expect(onSetEnabled).not.toHaveBeenCalled();
+    await act(async () => enable?.click());
+    expect(onSetEnabled).toHaveBeenCalledWith(true);
+  });
   it('translates a known setup instruction while rendering its command as code', () => {
     render();
     expect(container.textContent).toContain('在运行');

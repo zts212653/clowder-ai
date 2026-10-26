@@ -105,6 +105,7 @@
     "check:features": "node scripts/check-feature-truth.mjs && node --test scripts/workspace-navigation-doc-contract.test.mjs && pnpm check:approval-producer-registry",
     "check:approval-producer-registry": "pnpm --filter @cat-cafe/shared build && pnpm --filter @cat-cafe/api build && node --test scripts/check-approval-producer-registry.test.mjs && node scripts/check-approval-producer-registry.mjs",
     "check:capability-tips": "node --test scripts/check-capability-tips.test.mjs && node scripts/check-capability-tips.mjs",
+    "demos:pin": "node scripts/pin-feature-demos.mjs",
     "check:capability-tips-enablement": "pnpm --filter @cat-cafe/api build && node --test packages/api/test/harness-eval/eval-capability-tips-enable-gate.test.js scripts/check-capability-tips-enablement.test.mjs && node scripts/check-capability-tips-enablement.mjs",
     "check:capability-tips:stale": "node --test scripts/check-capability-tips-stale.test.mjs && node scripts/check-capability-tips-stale.mjs",
     "gen:sop-definitions": "node scripts/sop-definitions.mjs",

@@ -1,3 +1,5 @@
+import type { MessageSearchDiagnostics } from './message-search-diagnostics.js';
+
 type SearchPhase =
   | 'visibility'
   | 'source-admission'
@@ -7,7 +9,10 @@ type SearchPhase =
   | 'final-revalidation';
 
 /** Error-only operational evidence. Query, principal and canonical bodies are never captured. */
-export function observeMessageSearchExecution(onTrace?: (trace: Record<string, unknown>) => void) {
+export function observeMessageSearchExecution(
+  onTrace?: (trace: Record<string, unknown>) => void,
+  diagnostics?: MessageSearchDiagnostics,
+) {
   const started = performance.now();
   const completedPhases: Partial<Record<SearchPhase, number>> = {};
   return async <T>(phase: SearchPhase, run: () => T | Promise<T>, check?: () => void): Promise<T> => {
@@ -16,7 +21,16 @@ export function observeMessageSearchExecution(onTrace?: (trace: Record<string, u
       const result = await run();
       check?.();
       completedPhases[phase] = performance.now() - entered;
-      onTrace?.({ phase, elapsedMs: performance.now() - started, phaseElapsedMs: completedPhases[phase] });
+      try {
+        onTrace?.({
+          phase,
+          elapsedMs: performance.now() - started,
+          phaseElapsedMs: completedPhases[phase],
+          ...(phase === 'retrieval' || phase === 'canonical-projection' ? diagnostics?.snapshot() : {}),
+        });
+      } catch {
+        /* Optional diagnostics must not replace successful results. */
+      }
       return result;
     } catch (error) {
       if (error instanceof Error) {
@@ -27,6 +41,7 @@ export function observeMessageSearchExecution(onTrace?: (trace: Record<string, u
               elapsedMs: performance.now() - started,
               phaseElapsedMs: performance.now() - entered,
               completedPhases: { ...completedPhases },
+              ...diagnostics?.snapshot(),
             },
           });
         } catch {

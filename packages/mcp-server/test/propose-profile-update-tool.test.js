@@ -241,8 +241,8 @@ describe('cat_cafe_propose_profile_update MCP tool', () => {
     assert.equal(proposeProfileUpdateInputSchema.targetLayer.safeParse('corpus').success, true);
     assert.equal(
       proposeProfileUpdateInputSchema.targetLayer.safeParse('capsule').success,
-      false,
-      'capsule still rejected',
+      true,
+      'capsule drafts use the same owner confirmation channel',
     );
   });
 

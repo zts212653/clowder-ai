@@ -28,6 +28,7 @@ export function authorizeOwnerBrowserAction(request: FastifyRequest): OwnerBrows
 }
 
 export function ownerMemoryActionHttpStatus(outcome: MemoryOwnerActionError | 'invalid_action'): number {
+  if (outcome === 'invalid_content') return 400;
   if (outcome === 'not_available') return 404;
   if (
     outcome === 'stale_revision' ||

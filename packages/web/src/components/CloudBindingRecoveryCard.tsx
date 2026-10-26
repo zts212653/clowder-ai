@@ -92,21 +92,34 @@ function ReadyRecovery(
   if (loadState.candidates.length === 0)
     return (
       <div className="mt-3 text-sm text-cafe-secondary">
-        <p>还没有已授权会话。打开目标 ChatGPT 对话后，点击扩展里的「授权此会话」。</p>
-        <div className="mt-3 flex flex-wrap gap-2">
-          <a
-            data-recovery-open-chatgpt
-            href="https://chatgpt.com/"
-            target="_blank"
-            rel="noopener noreferrer"
-            className={primaryClass}
-          >
-            打开 ChatGPT 授权会话
-          </a>
-          <button type="button" onClick={onRefresh} className={secondaryClass}>
-            我已授权，重新检查
-          </button>
-        </div>
+        {loadState.connectionIssue ? (
+          <div className="flex flex-wrap gap-2">
+            <a href={personalChromeSettingsHref()} className={primaryClass}>
+              {loadState.connectionActionLabel ?? '检查 Chrome 连接'}
+            </a>
+            <button type="button" onClick={onRefresh} className={secondaryClass}>
+              我已处理，重新检查
+            </button>
+          </div>
+        ) : (
+          <>
+            <p>还没有已授权会话。打开目标 ChatGPT 对话后，点击扩展里的「授权此会话」。</p>
+            <div className="mt-3 flex flex-wrap gap-2">
+              <a
+                data-recovery-open-chatgpt
+                href="https://chatgpt.com/"
+                target="_blank"
+                rel="noopener noreferrer"
+                className={primaryClass}
+              >
+                打开 ChatGPT 授权会话
+              </a>
+              <button type="button" onClick={onRefresh} className={secondaryClass}>
+                我已授权，重新检查
+              </button>
+            </div>
+          </>
+        )}
       </div>
     );
   const selected = loadState.candidates.find((candidate) => candidate.conversationId === selectedConversationId);
@@ -132,7 +145,7 @@ function ReadyRecovery(
           href={personalChromeSettingsHref()}
           className="mt-2 inline-block text-xs font-semibold text-cafe-interactive hover:underline"
         >
-          检查连接组件
+          {loadState.connectionActionLabel ?? '检查 Chrome 连接'}
         </a>
       ) : null}
       {showChoices ? (
@@ -235,6 +248,9 @@ export function CloudBindingRecoveryCardView(props: CloudBindingRecoveryCardView
               <p role="alert" className="text-xs text-conn-red-text">
                 {props.loadState.message}
               </p>
+              <a href={personalChromeSettingsHref()} className={`${secondaryClass} mt-2 inline-block`}>
+                {props.loadState.actionLabel ?? '检查 Personal Chrome'}
+              </a>
               <button type="button" onClick={props.onRefresh} className={`${secondaryClass} mt-2`}>
                 重新检查
               </button>

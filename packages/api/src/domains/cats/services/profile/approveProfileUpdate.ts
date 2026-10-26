@@ -26,6 +26,7 @@
  */
 
 import type { ProfileUpdateProposal } from '@cat-cafe/shared';
+import { renderUserCapsuleSection } from '@cat-cafe/shared/profile-contract';
 import { profileRevisionOf } from '@cat-cafe/shared/profile-revision';
 import type { SessionMutex } from '../agents/invocation/SessionMutex.js';
 import type { IProfileUpdateProposalStore } from '../stores/ports/ProfileUpdateProposalStore.js';
@@ -89,23 +90,24 @@ export async function approveProfileUpdate(
   }
   if (peek.status === 'rejected') return { ok: false, reason: 'rejected', proposal: peek };
 
-  // Phase E: dispatch by targetLayer — primer uses relationship scope, corpus uses userId-only.
-  let scope;
+  // Every writer shares its canonical target lock; only primers need a relationship identity.
+  let relationshipKey: string | undefined;
   let lockKey: string;
-  let absoluteTargetPath: string;
-  const isCorpus = peek.targetLayer === 'corpus';
   try {
-    if (isCorpus) {
-      lockKey = repository.resolveCorpusTarget(peek.createdBy, peek.targetPath);
-      absoluteTargetPath = lockKey;
-    } else {
-      scope = repository.scopeForPinnedPrimerTarget(peek.createdBy, peek.sourceCatId as string, peek.targetPath);
+    if (peek.targetLayer === 'primer') {
+      const scope = repository.scopeForPinnedPrimerTarget(peek.createdBy, peek.sourceCatId, peek.targetPath);
+      relationshipKey = scope.relationshipKey;
       lockKey = repository.resolvePrimerTarget(scope, peek.targetPath);
+    } else {
+      lockKey =
+        peek.targetLayer === 'capsule'
+          ? repository.resolveCapsuleTarget(peek.createdBy, peek.targetPath)
+          : repository.resolveCorpusTarget(peek.createdBy, peek.targetPath);
     }
   } catch (err) {
     return { ok: false, reason: 'write_failed', error: errMessage(err), proposal: peek };
   }
-  const profileDir = isCorpus ? repository.profileDir(peek.createdBy) : repository.profileDir(scope!.userId);
+  const profileDir = repository.profileDir(peek.createdBy);
   const release = await lock.acquire(lockKey, signal);
   try {
     // Re-read inside the lock — another holder may have settled it while we waited.
@@ -137,11 +139,14 @@ export async function approveProfileUpdate(
     if (!proposal.writtenPath) {
       let writtenPath: string;
       try {
-        if (isCorpus) {
-          ({ writtenPath } = writeTarget(proposal, absoluteTargetPath!, { allowAlreadyApplied: recovered }));
+        if (relationshipKey !== undefined) {
+          ({ writtenPath } = writePrimer(proposal, profileDir, relationshipKey, { allowAlreadyApplied: recovered }));
         } else {
-          ({ writtenPath } = writePrimer(proposal, profileDir, scope!.relationshipKey, {
+          const capsule = proposal.targetLayer === 'capsule';
+          if (capsule && !renderUserCapsuleSection(proposal.afterContent)) throw new Error('Capsule is empty');
+          ({ writtenPath } = writeTarget(proposal, lockKey, {
             allowAlreadyApplied: recovered,
+            ...(capsule ? { readCurrentContent: () => repository.readCapsule(peek.createdBy)?.content ?? '' } : {}),
           }));
         }
       } catch (err) {

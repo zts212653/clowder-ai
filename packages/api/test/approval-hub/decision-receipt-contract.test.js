@@ -40,7 +40,34 @@ for (const producerId of APPROVAL_PRODUCER_IDS) {
         const messageStore = new MessageStore();
         const outbox = new ApprovalDecisionReceiptOutbox(db);
         const warnings = [];
-        const options = { registry, messageStore, outbox, logger: { warn: (...args) => warnings.push(args) } };
+        const appends = [];
+        const activeRun = {
+          threadId: CARD_THREAD,
+          targetId: 'codex-sol',
+          invocationId: 'receipt-live-invocation',
+          responseMessageId: 'receipt-live-response',
+        };
+        const dispatcher = {
+          invocationId: activeRun.invocationId,
+          capabilities: { append: true, steer: false },
+          handle: { provider: 'other', carrier: 'other', threadId: 'native', turnId: 'native-turn' },
+          dispatch: async (input, control) => {
+            appends.push({ input, control });
+            return { accepted: true, handle: dispatcher.handle };
+          },
+        };
+        const invocationTracker = {
+          getUserId: () => OWNER,
+          getActiveSlots: () => [{ catId: activeRun.targetId, activeRun }],
+          getAgentClientActiveRunDispatcher: () => dispatcher,
+        };
+        const options = {
+          registry,
+          messageStore,
+          outbox,
+          invocationTracker,
+          logger: { warn: (...args) => warnings.push(args) },
+        };
         const service = new ApprovalDecisionReceiptService(options);
         const subject = { ownerUserId: OWNER, producerId, canonicalProposalId: id };
         service.prepare(subject);
@@ -72,6 +99,10 @@ for (const producerId of APPROVAL_PRODUCER_IDS) {
         const messages = await messageStore.getByThread(CARD_THREAD, 50, OWNER);
         assert.equal(messages.length, 1);
         const [message] = messages;
+        assert.equal(appends.length, 1, 'every producer shares the first-write-only active-run supplement');
+        assert.equal(appends[0].input.text, message.content);
+        assert.deepEqual(appends[0].input.messageIds, [message.id]);
+        assert.deepEqual(appends[0].control, { force: false, expectedInvocationId: activeRun.invocationId });
         assert.deepEqual(message.mentions, [], 'a durable receipt does not dispatch or wake a cat');
         assert.equal(message.from.kind, 'system');
         assert.equal(message.source.meta.approvalDecisionReceipt.canonicalProposalId, id);

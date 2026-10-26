@@ -6,7 +6,7 @@ import {
   type CapabilityTipAudience,
   type CapabilityTipContext,
   type CapabilityTipSurface,
-  getFeatureDemo,
+  getFeatureDemoIdForTip,
   selectCapabilityTip,
   type TipExposureState,
   validateCapabilityTipInventory,
@@ -49,7 +49,7 @@ function capabilitySurfaceHref(tip: CapabilityTip): string | undefined {
   return CAPABILITY_SURFACE_ROUTES[tip.action.surfaceId];
 }
 
-function canRenderInTipStrip(tip: CapabilityTip): boolean {
+export function canRenderInTipStrip(tip: CapabilityTip): boolean {
   return tip.action?.type === 'open_concierge_draft' || capabilitySurfaceHref(tip) !== undefined;
 }
 
@@ -70,13 +70,14 @@ function TipContent({
   const isV2 = useShellPresentation() === 'v2';
   const t = useShellCopy(replyBodyCopy);
   const surfaceHref = capabilitySurfaceHref(tip);
+  const demoId = getFeatureDemoIdForTip(tip.id);
   const demoSession = useMemo(
-    () => ({ demoId: tip.demoId ?? '', tipId: tip.id, context: matchedContext, surface }),
-    [tip, matchedContext, surface],
+    () => ({ demoId: demoId ?? '', tipId: tip.id, context: matchedContext, surface }),
+    [demoId, tip.id, matchedContext, surface],
   );
   useEffect(() => {
-    if (getFeatureDemo(tip.demoId)) recordFeatureDemoStage(demoSession, 'exposed');
-  }, [tip.demoId, demoSession]);
+    if (demoId) recordFeatureDemoStage(demoSession, 'exposed');
+  }, [demoId, demoSession]);
   const recordAction = (actionType: 'open_concierge_draft' | 'open_capability_surface') => {
     recordCapabilityTipEvent({
       event: 'capability_tip_action',
@@ -96,10 +97,8 @@ function TipContent({
   return (
     <>
       <span className="shrink-0 font-medium text-cafe-secondary">{isV2 ? t.tip : 'Tip'}</span>
-      <span className={`min-w-0 flex-1 break-words ${getFeatureDemo(tip.demoId) ? 'basis-full sm:basis-0' : ''}`}>
-        {tip.body}
-      </span>
-      {getFeatureDemo(tip.demoId) && (
+      <span className={`min-w-0 flex-1 break-words ${demoId ? 'basis-full sm:basis-0' : ''}`}>{tip.body}</span>
+      {demoId && (
         <button
           type="button"
           data-testid="capability-tip-watch-demo"
@@ -269,7 +268,7 @@ export function CapabilityTipStrip({
     <div
       data-testid="capability-tip-strip"
       data-tip-id={showContent ? tip.id : undefined}
-      className={`tip-thinking mt-1 flex min-h-8 w-full max-w-full items-start gap-2 rounded-md border border-cafe bg-cafe-surface-elevated/70 px-2.5 py-2 text-xs leading-5 text-cafe-muted ${getFeatureDemo(tip?.demoId) ? 'flex-wrap' : ''}`}
+      className={`tip-thinking mt-1 flex min-h-8 w-full max-w-full items-start gap-2 rounded-md border border-cafe bg-cafe-surface-elevated/70 px-2.5 py-2 text-xs leading-5 text-cafe-muted ${getFeatureDemoIdForTip(tip?.id) ? 'flex-wrap' : ''}`}
       role="status"
     >
       {showContent ? (
