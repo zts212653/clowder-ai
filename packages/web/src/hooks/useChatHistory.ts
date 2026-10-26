@@ -103,7 +103,13 @@ type NavigationSettleResult =
   | { kind: 'retry' }
   | { kind: 'settled'; sample: NavigationSettleSample }
   | { kind: 'expired' };
-type NativeScrollInput = { startTop: number; observationFrame: number | null; bottomTarget?: number };
+type NativeScrollInput = {
+  startTop: number;
+  upward: boolean;
+  pointerHeld: boolean;
+  observationFrame: number | null;
+  bottomTarget?: number;
+};
 
 export type { CapturedChatReadingRef, ChatReadingRef, ChatReadingSnapshot } from '@/utils/chat-scroll-memory';
 
@@ -157,14 +163,15 @@ function isNearBottom(el: { scrollTop: number; scrollHeight: number; clientHeigh
   return el.scrollHeight - el.clientHeight - el.scrollTop <= SCROLL_BOTTOM_THRESHOLD_PX;
 }
 
-function hasNativeUpwardMovement(
+function hasNativeScrollMovement(
   el: { scrollTop: number; scrollHeight: number; clientHeight: number },
   startTop: number,
+  upward: boolean,
 ): boolean {
   // A shrinking card can clamp the old bottom upward before wheel pixels arrive.
   // Only movement beyond that now-valid starting position consumes the input.
   const clampedStartTop = Math.min(startTop, Math.max(0, el.scrollHeight - el.clientHeight));
-  return el.scrollTop < clampedStartTop;
+  return upward ? el.scrollTop < clampedStartTop : el.scrollTop > clampedStartTop;
 }
 
 /**
@@ -179,7 +186,7 @@ export function resolveScrollAnchor(
   prev: SavedScrollState | null,
   userScrolledUp = false,
 ): SavedScrollState['anchor'] {
-  if (prev && userScrolledUp && hasNativeUpwardMovement(el, prev.top)) return 'offset';
+  if (prev && userScrolledUp && hasNativeScrollMovement(el, prev.top, true)) return 'offset';
   // A small upward gesture can stop inside the bottom proximity band. Keep its
   // reading intent until movement toward the bottom, rather than treating a
   // later same-position layout observation as a request to follow again.
@@ -796,7 +803,7 @@ export function useChatHistory(threadId: string) {
   }, []);
 
   const markScrollIntent = useCallback(
-    (upward: boolean) => {
+    (upward: boolean, pointerHeld = false) => {
       readingRestoreRef.current = null;
       cancelPendingRestore();
       // The gesture revokes the old restore, but subsequent layout changes still
@@ -810,9 +817,11 @@ export function useChatHistory(threadId: string) {
       }
       userScrollIntentRef.current = true;
       userScrollUpRef.current = upward && el.scrollTop > 0;
-      const input: NativeScrollInput = { startTop: el.scrollTop, observationFrame: null };
+      const input: NativeScrollInput = { startTop: el.scrollTop, upward, pointerHeld, observationFrame: null };
       userScrollInputRef.current = input;
-      if (!userScrollUpRef.current) return;
+      // Pressing a scrollbar is a held gesture: the first drag can be delayed
+      // by the reader, and native scrollbars need not send pointermove to us.
+      if (pointerHeld) return;
 
       // Observe through the next paint: an earlier layout end must not consume
       // compositor movement, but input consumed elsewhere cannot pin this owner.
@@ -828,7 +837,7 @@ export function useChatHistory(threadId: string) {
           clearUserScrollIntent();
           return;
         }
-        if (hasNativeUpwardMovement(el, input.startTop)) return;
+        if (hasNativeScrollMovement(el, input.startTop, input.upward)) return;
         if (--framesRemaining > 0) {
           input.observationFrame = requestAnimationFrame(observeMovement);
           return;
@@ -2153,6 +2162,11 @@ export function useChatHistory(threadId: string) {
     prevCountRef.current = messages.length;
     prevFirstIdRef.current = currentFirstId;
 
+    // An explicit cold-source jump can own a receipt before the first page
+    // commits. That owner must settle it; default initial restoration must not
+    // cancel it or replace its target with the bottom of the new transcript.
+    if (navigationReceiptRef.current) return;
+
     // Initial load (includes remount after thread switch — prevCountRef resets to 0).
     // clowder-ai#27: check module-level Map for a saved position before scrolling to bottom.
     if (prevCount === 0) {
@@ -2424,31 +2438,38 @@ export function useChatHistory(threadId: string) {
       touchY = nextY;
     };
     const handlePointerDown = (event: PointerEvent) => {
-      markScrollIntent(false);
+      // Direction is not known until native movement; conservatively suspend
+      // bottom follow while held. resolveScrollAnchor still measures direction.
+      markScrollIntent(true, true);
       pointerY = event.clientY;
     };
     const handlePointerMove = (event: PointerEvent) => {
       // Hover is observation, not reading input. A release outside this viewport
       // also ends the drag even when this owner did not receive pointerup.
       if (event.buttons === 0) {
-        pointerY = null;
+        releasePointer();
         return;
       }
       if (pointerY === null) return;
-      if (event.clientY !== pointerY) markScrollIntent(event.clientY < pointerY);
+      if (event.clientY !== pointerY) markScrollIntent(event.clientY < pointerY, true);
       pointerY = event.clientY;
-    };
-    const clearPointer = () => {
-      pointerY = null;
     };
     const finishNativeScroll = () => {
       // A queued layout scrollend can precede the new wheel's compositor scroll.
-      // Keep upward intent until its movement, or a newer input, is observed.
+      // Keep either direction until its movement or the bounded no-movement
+      // observation. Clicks and input consumed elsewhere still expire.
       const input = userScrollInputRef.current;
-      if (userScrollUpRef.current && input && !hasNativeUpwardMovement(el, input.startTop)) {
+      if (!input) return;
+      // A queued completion before the first pixels must leave the existing
+      // observer in charge. A round trip to startTop after movement has no
+      // observer left, so it must proceed to settlement rather than stay pinned.
+      if (
+        !input.pointerHeld &&
+        input.observationFrame !== null &&
+        !hasNativeScrollMovement(el, input.startTop, input.upward)
+      )
         return;
-      }
-      if (input?.bottomTarget !== undefined) {
+      if (input.bottomTarget !== undefined) {
         // Native End uses the bottom measured at keydown. Deferred rows may grow
         // while it moves, so reaching that old target completes the native leg,
         // then the existing bottom owner follows the actual destination.
@@ -2457,7 +2478,62 @@ export function useChatHistory(threadId: string) {
         jumpToLatest();
         return;
       }
-      clearUserScrollIntent();
+      // Native pixels can arrive before React's scroll observation. Commit the
+      // input's final reading position before retiring its intent, or the later
+      // scroll/reflow would preserve the old message anchor and snap back to it.
+      const currentThread = threadIdRef.current;
+      const saved = readChatScrollState(currentThread);
+      if (saved && el.scrollTop !== saved.top && useChatStore.getState().currentThreadId === currentThread) {
+        rememberScrollState(currentThread, el, userScrollUpRef.current);
+      }
+      // A pause can emit scrollend before the native thumb is released. Keep
+      // recording later drag segments, even without page pointermove events.
+      if (input.pointerHeld) return;
+      // A stale end can also fall between native animation frames. Retire this
+      // input only after two quiet frames; a new input cancels the same observer.
+      if (input.observationFrame !== null) cancelAnimationFrame(input.observationFrame);
+      let previousTop = el.scrollTop;
+      let quietFrames = 0;
+      const settle = () => {
+        if (userScrollInputRef.current !== input) return;
+        input.observationFrame = null;
+        if (
+          scrollContainerRef.current !== el ||
+          threadIdRef.current !== currentThread ||
+          useChatStore.getState().currentThreadId !== currentThread
+        ) {
+          clearUserScrollIntent();
+          return;
+        }
+        quietFrames = el.scrollTop === previousTop ? quietFrames + 1 : 0;
+        previousTop = el.scrollTop;
+        if (quietFrames < 2) {
+          input.observationFrame = requestAnimationFrame(settle);
+          return;
+        }
+        const latest = readChatScrollState(currentThread);
+        if (latest && el.scrollTop !== latest.top) rememberScrollState(currentThread, el, userScrollUpRef.current);
+        clearUserScrollIntent();
+        scheduleCurrentAnchorCorrection(true);
+      };
+      input.observationFrame = requestAnimationFrame(settle);
+    };
+    const releasePointer = () => {
+      pointerY = null;
+      const input = userScrollInputRef.current;
+      if (!input?.pointerHeld) return;
+      // Native dragging can settle skipped row geometry without changing the
+      // last recorded pixels. The released reading point is the current view,
+      // rather than the anchor captured by an earlier scroll observation.
+      const currentThread = threadIdRef.current;
+      if (useChatStore.getState().currentThreadId === currentThread) {
+        rememberScrollState(currentThread, el, userScrollUpRef.current);
+      }
+      input.pointerHeld = false;
+      finishNativeScroll();
+    };
+    const releaseUnpressedPointer = (event: PointerEvent) => {
+      if (event.buttons === 0) releasePointer();
     };
     const handleKeyDown = (event: KeyboardEvent) => {
       const target = event.target;
@@ -2496,26 +2572,30 @@ export function useChatHistory(threadId: string) {
     el.addEventListener('wheel', handleWheel, { passive: true });
     el.addEventListener('touchstart', handleTouchStart, { passive: true });
     el.addEventListener('touchmove', handleTouchMove, { passive: true });
-    el.addEventListener('touchend', clearPointer, { passive: true });
     el.addEventListener('pointerdown', handlePointerDown, { passive: true });
     el.addEventListener('pointermove', handlePointerMove, { passive: true });
-    el.addEventListener('pointerup', clearPointer, { passive: true });
-    el.addEventListener('pointercancel', clearPointer, { passive: true });
+    el.addEventListener('lostpointercapture', releasePointer, { passive: true });
+    window.addEventListener('pointerup', releasePointer, { passive: true, capture: true });
+    window.addEventListener('pointercancel', releasePointer, { passive: true, capture: true });
+    window.addEventListener('pointermove', releaseUnpressedPointer, { passive: true });
+    window.addEventListener('blur', releasePointer);
     el.addEventListener('scrollend', finishNativeScroll, { passive: true });
     window.addEventListener('keydown', handleKeyDown);
     return () => {
       el.removeEventListener('wheel', handleWheel);
       el.removeEventListener('touchstart', handleTouchStart);
       el.removeEventListener('touchmove', handleTouchMove);
-      el.removeEventListener('touchend', clearPointer);
       el.removeEventListener('pointerdown', handlePointerDown);
       el.removeEventListener('pointermove', handlePointerMove);
-      el.removeEventListener('pointerup', clearPointer);
-      el.removeEventListener('pointercancel', clearPointer);
+      el.removeEventListener('lostpointercapture', releasePointer);
+      window.removeEventListener('pointerup', releasePointer, true);
+      window.removeEventListener('pointercancel', releasePointer, true);
+      window.removeEventListener('pointermove', releaseUnpressedPointer);
+      window.removeEventListener('blur', releasePointer);
       el.removeEventListener('scrollend', finishNativeScroll);
       window.removeEventListener('keydown', handleKeyDown);
     };
-  }, [markScrollIntent, clearUserScrollIntent, jumpToLatest]);
+  }, [markScrollIntent, clearUserScrollIntent, jumpToLatest, scheduleCurrentAnchorCorrection]);
 
   // Load more when scrolled to top + clowder-ai#27 continuous scroll save
   const handleScroll = useCallback(() => {

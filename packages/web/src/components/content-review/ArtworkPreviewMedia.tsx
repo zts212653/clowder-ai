@@ -10,13 +10,11 @@ export function ArtworkPreviewMedia({
   title,
   video,
   gallery,
-  showActions = true,
 }: {
   url: string;
   title: string;
   video: boolean;
   gallery?: ArtworkGallery;
-  showActions?: boolean;
 }) {
   const root = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState({ width: 0, height: 0 });
@@ -27,18 +25,16 @@ export function ArtworkPreviewMedia({
       className="relative flex min-h-0 flex-1 items-center justify-center overflow-hidden"
       {...viewport.handlers}
     >
-      {showActions ? (
-        <ArtworkActions
-          root={root}
-          src={url}
-          originalUrl={url}
-          filename={title}
-          width={size.width}
-          height={size.height}
-          mediaType={video ? 'video' : 'image'}
-          viewport={viewport}
-        />
-      ) : null}
+      <ArtworkActions
+        root={root}
+        src={url}
+        originalUrl={url}
+        filename={title}
+        width={size.width}
+        height={size.height}
+        mediaType={video ? 'video' : 'image'}
+        viewport={viewport}
+      />
       {video ? (
         <ArtworkPreviewVideo url={url} stageStyle={viewport.stageStyle} onSize={setSize} />
       ) : (

@@ -1,3 +1,4 @@
+import { invocationFetch } from './invocation-auth.js';
 /**
  * Evidence Search Tool
  * MCP 工具: 搜索项目知识 (SQLite FTS5 + semantic rerank)
@@ -219,7 +220,7 @@ export async function handleSearchEvidence(
     const internalHeaders: Record<string, string> = {};
     if (userId) internalHeaders['x-cat-cafe-user'] = userId;
     if (currentThreadId) internalHeaders['x-cat-cafe-thread-id'] = currentThreadId;
-    const response = await fetch(url, {
+    const response = await invocationFetch(url, {
       headers: Object.keys(internalHeaders).length > 0 ? internalHeaders : undefined,
       signal: requestSignal,
     });

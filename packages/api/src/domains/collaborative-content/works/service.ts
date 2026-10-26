@@ -26,6 +26,7 @@ import {
 } from '../../video-studio/content-owner/types.js';
 import { type WorkListReader, withWorkCatalogueRead } from './catalogue-read.js';
 import type { WorkCatalogueReadObserver } from './catalogue-read-timing.js';
+import { resolveFileWork } from './resolve-file-work.js';
 import type { WorkReviewResponseService } from './review-response.js';
 import type { WorkAuthorizationInput, WorkPrincipal, WorkReadResult } from './types.js';
 import { workVersionRecord } from './version-record.js';
@@ -216,6 +217,10 @@ export class LivingWorkService {
     const description = await this.deps.source.inspect({ locator, principal });
     await this.deps.authorize({ principal, permission: 'write' });
     return description;
+  }
+
+  resolveFile(locator: Omit<WorkWorkspaceSource, 'expectedSourceRevision'>, principal: WorkPrincipal) {
+    return resolveFileWork({ ...this.deps, read: this.read.bind(this) }, locator, principal);
   }
 
   async authorizeVersion(reference: WorkReference, principal: WorkPrincipal, permission: 'read' | 'write') {

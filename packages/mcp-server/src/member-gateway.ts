@@ -1,3 +1,4 @@
+import { sharedToolAuthorizer } from './shared-tool-authorization.js';
 /**
  * Member MCP gateway — Streamable HTTP MCP endpoint for ACP members (F306 Phase B).
  *
@@ -20,6 +21,7 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
+import { SERVER_INSTRUCTIONS } from './server-instructions.js';
 import {
   registerAudioToolset,
   registerCollabToolset,
@@ -29,6 +31,7 @@ import {
   registerSignalToolset,
   type ToolsetEnv,
 } from './server-toolsets.js';
+import { parseSharedInvocationContext, type SharedInvocationContext } from './shared-invocation-context.js';
 import { withInvocationCredentials } from './tools/invocation-auth.js';
 
 export type { ToolsetEnv } from './server-toolsets.js';
@@ -50,6 +53,7 @@ export interface MemberGatewayCredentialContext {
    * READONLY/agent-key settings can neither widen nor narrow the member.
    */
   toolsetEnv: ToolsetEnv;
+  sharedContext?: SharedInvocationContext;
 }
 
 export type MemberGatewayVerifyResult =
@@ -58,7 +62,10 @@ export type MemberGatewayVerifyResult =
 
 export interface MemberGatewayDeps {
   verify(input: { invocationId: string; callbackToken: string }): Promise<MemberGatewayVerifyResult>;
-  resolveFamilies(input: { catId: string }): Promise<readonly MemberToolFamily[]> | readonly MemberToolFamily[];
+  resolveFamilies(input: {
+    catId: string;
+    sharedContext?: SharedInvocationContext;
+  }): Promise<readonly MemberToolFamily[]> | readonly MemberToolFamily[];
   log?: { warn(payload: Record<string, unknown>, message: string): void };
 }
 
@@ -117,6 +124,8 @@ export function createMemberGatewayHandler(
   deps: MemberGatewayDeps,
 ): (req: IncomingMessage, res: ServerResponse, parsedBody?: unknown) => Promise<void> {
   const log = deps.log ?? { warn() {} };
+  // Request-owned cancellation only. No session/replay/authority is retained here.
+  const activeRequests = new Map<string, AbortController>();
 
   return async function handleMemberGatewayRequest(
     req: IncomingMessage,
@@ -137,6 +146,19 @@ export function createMemberGatewayHandler(
     }
 
     const url = new URL(req.url ?? '/', 'http://localhost');
+    const shared = url.searchParams.get('shared') === '1';
+    if (
+      shared &&
+      (req.headers.origin !== undefined ||
+        !['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(req.socket.remoteAddress ?? ''))
+    ) {
+      sendJson(res, 403, { error: 'shared_loopback_only' });
+      return;
+    }
+    if (Number(req.headers['content-length'] ?? 0) > 1024 * 1024) {
+      sendJson(res, 413, { error: 'request_too_large' });
+      return;
+    }
     for (const key of QUERY_CREDENTIAL_PARAMS) {
       if (url.searchParams.has(key)) {
         sendJson(res, 403, { error: 'query_credentials_rejected' });
@@ -165,54 +187,136 @@ export function createMemberGatewayHandler(
       return;
     }
     const { context } = verified;
-
-    let families: readonly MemberToolFamily[];
-    try {
-      families = await deps.resolveFamilies({ catId: context.catId });
-    } catch (err) {
-      log.warn(
-        { catId: context.catId, err: err instanceof Error ? err.message : String(err) },
-        'member gateway tool surface resolution failed',
-      );
-      sendJson(res, 500, { error: 'surface_unavailable' });
+    // The original principal chooses its authority model. Omitting a query
+    // flag must never turn a shared invocation into an ambient Host reader.
+    if (context.sharedContext !== undefined && !shared) {
+      sendJson(res, 403, { error: 'shared_transport_required' });
       return;
     }
+    let sharedContext: SharedInvocationContext | undefined;
+    if (shared) {
+      try {
+        sharedContext = parseSharedInvocationContext(context.sharedContext);
+      } catch {
+        sendJson(res, 401, { error: 'shared_context_unavailable' });
+        return;
+      }
+      if (
+        context.invocationId !== invocationId ||
+        context.callbackToken !== callbackToken ||
+        !context.catId ||
+        !context.userId ||
+        !context.threadId ||
+        !context.apiBaseUrl
+      ) {
+        sendJson(res, 401, { error: 'shared_identity_unavailable' });
+        return;
+      }
+    }
 
-    const server = new McpServer({ name: SERVER_NAME, version: SERVER_VERSION });
-    const transport = new StreamableHTTPServerTransport({
-      sessionIdGenerator: undefined,
-      enableJsonResponse: true,
-    });
-
+    const connectionId = readHeader(req, 'x-mcp-connection-id');
+    if (shared && (!connectionId || !/^[A-Za-z0-9_-]{1,160}$/.test(connectionId))) {
+      sendJson(res, 401, { error: 'shared_connection_unavailable' });
+      return;
+    }
+    const body = parsedBody && typeof parsedBody === 'object' ? (parsedBody as Record<string, unknown>) : undefined;
+    const params =
+      body?.params && typeof body.params === 'object' ? (body.params as Record<string, unknown>) : undefined;
+    const keyFor = (id: string | number) => JSON.stringify([invocationId, connectionId, id]);
+    if (shared && body?.method === 'notifications/cancelled') {
+      const id = params?.requestId;
+      if (typeof id !== 'string' && typeof id !== 'number') {
+        sendJson(res, 400, { error: 'invalid_request_id' });
+        return;
+      }
+      activeRequests.get(keyFor(id))?.abort();
+      res.writeHead(202);
+      res.end();
+      return;
+    }
+    const requestKey =
+      shared && (typeof body?.id === 'string' || typeof body?.id === 'number') ? keyFor(body.id) : undefined;
+    if (requestKey && activeRequests.has(requestKey)) {
+      sendJson(res, 409, { error: 'request_already_active' });
+      return;
+    }
+    const controller = new AbortController();
+    if (requestKey) activeRequests.set(requestKey, controller);
     try {
-      // Registration runs inside the scope: principal/schema resolution at
-      // register time must see the verified invocation, and a registration
-      // failure lands in this 500 path instead of escaping after reply.hijack.
-      await withInvocationCredentials(
-        {
-          invocationId: context.invocationId,
-          callbackToken: context.callbackToken,
-          apiUrl: context.apiBaseUrl,
-          catId: context.catId,
-          userId: context.userId,
-          threadId: context.threadId,
-        },
-        async () => {
-          for (const family of new Set(families)) {
-            FAMILY_REGISTRARS[family]?.(server, context.toolsetEnv);
+      let families: readonly MemberToolFamily[];
+      try {
+        families = await deps.resolveFamilies({ catId: context.catId, ...(sharedContext ? { sharedContext } : {}) });
+        if (sharedContext) families = families.filter((family) => sharedContext.families.includes(family));
+        const requestedFamily = url.searchParams.get('family');
+        if (requestedFamily) {
+          if (!families.includes(requestedFamily as MemberToolFamily)) {
+            sendJson(res, 403, { error: 'family_not_allowed' });
+            return;
           }
-          await server.connect(transport);
-          await transport.handleRequest(req, res, parsedBody);
-        },
-      );
-    } catch (err) {
-      log.warn(
-        { catId: context.catId, err: err instanceof Error ? err.message : String(err) },
-        'member gateway request failed',
-      );
-      sendJson(res, 500, { error: 'internal_error' });
+          families = families.filter((family) => family === requestedFamily);
+        }
+        controller.signal.throwIfAborted();
+      } catch (err) {
+        log.warn(
+          { catId: context.catId, err: err instanceof Error ? err.message : String(err) },
+          'member gateway tool surface resolution failed',
+        );
+        sendJson(res, 500, { error: 'surface_unavailable' });
+        return;
+      }
+
+      const requested = url.searchParams.get('family') as MemberToolFamily | null;
+      const server =
+        shared && requested
+          ? new McpServer(
+              { name: `cat-cafe-${requested}-mcp`, version: '0.1.0' },
+              { instructions: SERVER_INSTRUCTIONS[requested] },
+            )
+          : new McpServer({ name: shared ? 'cat-cafe-mcp' : SERVER_NAME, version: shared ? '0.1.0' : SERVER_VERSION });
+      const transport = new StreamableHTTPServerTransport({
+        sessionIdGenerator: undefined,
+        enableJsonResponse: true,
+      });
+
+      try {
+        // Registration runs inside the scope: principal/schema resolution at
+        // register time must see the verified invocation, and a registration
+        // failure lands in this 500 path instead of escaping after reply.hijack.
+        await withInvocationCredentials(
+          {
+            invocationId: context.invocationId,
+            callbackToken: context.callbackToken,
+            apiUrl: context.apiBaseUrl,
+            catId: context.catId,
+            userId: context.userId,
+            threadId: context.threadId,
+            ...(sharedContext
+              ? {
+                  sharedContext,
+                  requestSignal: controller.signal,
+                  authorizeTool: sharedToolAuthorizer(deps, context, sharedContext, families, controller.signal),
+                }
+              : {}),
+          },
+          async () => {
+            for (const family of new Set(families)) {
+              FAMILY_REGISTRARS[family]?.(server, context.toolsetEnv);
+            }
+            await server.connect(transport);
+            await transport.handleRequest(req, res, parsedBody);
+          },
+        );
+      } catch (err) {
+        log.warn(
+          { catId: context.catId, err: err instanceof Error ? err.message : String(err) },
+          'member gateway request failed',
+        );
+        sendJson(res, 500, { error: 'internal_error' });
+      } finally {
+        await server.close().catch(() => {});
+      }
     } finally {
-      await server.close().catch(() => {});
+      if (requestKey) activeRequests.delete(requestKey);
     }
   };
 }

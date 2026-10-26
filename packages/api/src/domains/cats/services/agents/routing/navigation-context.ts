@@ -110,6 +110,9 @@ export interface NavigationContext {
   artifacts?: NavigationArtifact[];
   truthSource?: TruthSourceInfo | null;
   bestNextSource?: string;
+  recentWorkDirectory?: boolean;
+  /** Explicit original roadmap pointer; never a directive or custody grant. */
+  roadmapPointer?: string;
 }
 
 export interface NavigationFormatOptions {
@@ -139,6 +142,11 @@ function buildNavigationInner(ctx: NavigationContext, options?: NavigationFormat
   const lines: string[] = [];
   const coCreatorTimeZone = getCoCreatorConfig().timeZone;
   const nowMs = options?.nowMs;
+  if (ctx.recentWorkDirectory) {
+    lines.push(
+      '近期工作线: 用户提到本线程外的“那个X/上次的Y” → cat_cafe_list_threads({ includeWork: true }) 按标题+毛线球认线；别只拿原话当keyword；近期没找到≠不存在。',
+    );
+  }
 
   if (typeof nowMs === 'number') {
     lines.push(
@@ -208,6 +216,7 @@ function buildNavigationInner(ctx: NavigationContext, options?: NavigationFormat
     }
   }
 
+  if (ctx.roadmapPointer) lines.push(ctx.roadmapPointer);
   return lines.join('\n');
 }
 

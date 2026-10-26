@@ -1,3 +1,4 @@
+import { parseSharedInvocationContext } from '@cat-cafe/mcp-server/dist/shared-invocation-context.js';
 import type { CatId } from '@cat-cafe/shared';
 import {
   AUTH_TERMINAL_DISPOSITIONS,
@@ -49,6 +50,8 @@ function applyOptionalFields(
   if (fields.endReason) record.endReason = fields.endReason;
   if (fields.terminalRef) record.terminalRef = fields.terminalRef;
   if (fields.expectedCompactionCarrier) record.expectedCompactionCarrier = fields.expectedCompactionCarrier;
+  if (fields.sharedMcpContext)
+    Object.assign(record, { sharedMcpContext: parseSharedInvocationContext(JSON.parse(fields.sharedMcpContext)) });
   if (fields.traceId && fields.spanId) {
     record.traceContext = {
       traceId: fields.traceId,

@@ -201,6 +201,8 @@ describe('MCP input/result boundary', () => {
     assert.equal(notices[0].state, 'exposed_or_suspected');
     assert.ok(!JSON.stringify(notices).includes(fake()));
     assert.equal(result._meta.secretExposure.rotationNotice, 'recorded');
+    assert.ok(result.content.at(-1).text.includes('尚未核实真实凭据'));
+    assert.ok(result.content.at(-1).text.includes('仅在确认真实凭据已暴露后'));
   });
 
   it('redacts an opaque callback credential from an unexpected result and records exposure', async () => {
@@ -233,6 +235,21 @@ describe('MCP input/result boundary', () => {
     );
     assert.ok(!JSON.stringify(result).includes(fake()));
     assert.equal(result._meta.secretExposure.rotationNotice, 'failed');
+    assert.ok(result.content.at(-2).text.includes('核验记录未能保存'));
+    assert.ok(!result.content.at(-2).text.includes('请轮转相关凭据'));
+  });
+
+  it('distinguishes unavailable inspection from finding a credential', async () => {
+    let nested = { text: 'ordinary result' };
+    for (let depth = 0; depth < 66; depth++) nested = { nested };
+    const notices = [];
+    const result = await withSecretToolGuard('read_text', {}, async () => nested, {
+      notify: async (notice) => notices.push(notice),
+    });
+    assert.equal(result._meta.secretExposure.rotationNotice, 'recorded');
+    assert.deepEqual(notices[0].rules, ['uninspectable-result']);
+    assert.ok(result.content.at(-1).text.includes('检查未完成'));
+    assert.ok(!result.content.at(-1).text.includes('轮转'));
   });
 
   it('redacts complete variable-length credentials crossing result chunk boundaries', async () => {

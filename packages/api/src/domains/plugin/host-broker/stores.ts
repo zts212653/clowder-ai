@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
+import type { SnapshotReadDiagnostics } from '../diagnostics/observation-work.js';
 import type {
   BrokerCallStore,
   BrokerRuntimeLeaseStore,
@@ -110,9 +111,11 @@ export class MemoryHostBrokerStore implements HostBrokerStore {
     this.current = parseHostBrokerSnapshot(initial);
   }
 
-  async snapshot(): Promise<HostBrokerSnapshot> {
-    await this.queue.settled();
-    return cloneHostBrokerSnapshot(this.current);
+  async snapshot(diagnostics?: SnapshotReadDiagnostics): Promise<HostBrokerSnapshot> {
+    if (diagnostics) await diagnostics.measure('queue', () => this.queue.settled());
+    else await this.queue.settled();
+    const clone = () => cloneHostBrokerSnapshot(this.current);
+    return diagnostics ? diagnostics.sync('clone', clone) : clone();
   }
 
   async transaction<T>(work: (transaction: HostBrokerTransaction) => Promise<T> | T): Promise<T> {
@@ -152,9 +155,12 @@ export class FileHostBrokerStore implements HostBrokerStore {
     this.fileOps = { readFile, mkdir, writeFile, rename, unlink, ...options.fileOps };
   }
 
-  async snapshot(): Promise<HostBrokerSnapshot> {
-    await this.queue.settled();
-    return cloneHostBrokerSnapshot(await this.load());
+  async snapshot(diagnostics?: SnapshotReadDiagnostics): Promise<HostBrokerSnapshot> {
+    if (diagnostics) await diagnostics.measure('queue', () => this.queue.settled());
+    else await this.queue.settled();
+    const loaded = await this.load(diagnostics);
+    const clone = () => cloneHostBrokerSnapshot(loaded);
+    return diagnostics ? diagnostics.sync('clone', clone) : clone();
   }
 
   async transaction<T>(work: (transaction: HostBrokerTransaction) => Promise<T> | T): Promise<T> {
@@ -182,20 +188,24 @@ export class FileHostBrokerStore implements HostBrokerStore {
     });
   }
 
-  private async load(): Promise<HostBrokerSnapshot> {
+  private async load(diagnostics?: SnapshotReadDiagnostics): Promise<HostBrokerSnapshot> {
     let raw: string;
     try {
-      raw = await this.fileOps.readFile(this.path, 'utf8');
+      const read = () => this.fileOps.readFile(this.path, 'utf8');
+      raw = await (diagnostics ? diagnostics.measure('read', read) : read());
     } catch (error) {
       if (isNotFound(error)) return emptyHostBrokerSnapshot();
       throw error;
     }
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(raw);
-    } catch {
-      throw new HostBrokerError('CORRUPT_SNAPSHOT', `Host Broker snapshot at ${this.path} is not valid JSON`);
-    }
-    return parseHostBrokerSnapshot(parsed);
+    const parse = () => {
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(raw);
+      } catch {
+        throw new HostBrokerError('CORRUPT_SNAPSHOT', `Host Broker snapshot at ${this.path} is not valid JSON`);
+      }
+      return parseHostBrokerSnapshot(parsed);
+    };
+    return diagnostics ? diagnostics.sync('parse', parse) : parse();
   }
 }

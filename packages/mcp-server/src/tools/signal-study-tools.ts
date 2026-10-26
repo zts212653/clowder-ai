@@ -1,10 +1,9 @@
 import { deploymentDefaults } from '@cat-cafe/shared';
 import { z } from 'zod';
 import { defineMcpMigrationFactory } from '../tool-governance-migration.js';
-
 import type { ToolResult } from './file-tools.js';
 import { errorResult, successResult } from './file-tools.js';
-import { resolveInvocationEnv, resolveInvocationUserId } from './invocation-auth.js';
+import { invocationFetch, resolveInvocationEnv, resolveInvocationUserId } from './invocation-auth.js';
 
 const defineTool = defineMcpMigrationFactory('signal-study-tools.ts', undefined, { authority: 'local-runtime' });
 
@@ -22,7 +21,7 @@ async function apiJson(
     if (init?.body && !headers.has('Content-Type')) {
       headers.set('Content-Type', 'application/json');
     }
-    const response = await fetch(`${resolveApiUrl()}${path}`, { ...init, headers });
+    const response = await invocationFetch(`${resolveApiUrl()}${path}`, { ...init, headers });
     if (!response.ok) {
       return { ok: false, error: `API failed (${response.status}): ${await response.text()}` };
     }

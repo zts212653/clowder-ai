@@ -11,7 +11,11 @@ function transport(provider, server, name) {
   if (provider === 'codex') return server;
   const { proxyEnv, upstream } = secretMcpContract(server);
   assert.equal(upstream.source, name);
-  assert.equal(proxyEnv.ALLOWED_WORKSPACE_DIRS, undefined, 'workspace scope belongs to the upstream reader');
+  assert.equal(
+    proxyEnv.ALLOWED_WORKSPACE_DIRS,
+    upstream.env?.ALLOWED_WORKSPACE_DIRS,
+    'secret protection must inspect the same admitted workspace as the upstream reader',
+  );
   return upstream;
 }
 

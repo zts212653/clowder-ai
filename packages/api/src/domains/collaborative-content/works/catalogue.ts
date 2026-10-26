@@ -5,6 +5,7 @@ import type { WorkCatalogueReadObserver } from './catalogue-read-timing.js';
 import type { WorkContextStore } from './context-store.js';
 import type { LivingWorkService } from './service.js';
 import type { WorkReadResult } from './types.js';
+import { workCardArtifact } from './work-card-artifact.js';
 
 export interface IndependentWorkCataloguePort {
   withRead?<T>(
@@ -89,26 +90,9 @@ export class WorkCatalogue implements IndependentWorkCataloguePort {
     return { artifacts, complete: true };
   }
   private project(item: WorkReadResult, ownerUserId: string): ThreadArtifactDTO {
-    const createdAt = Date.parse(item.revision.committedAt);
-    if (!Number.isFinite(createdAt)) throw new MediaOwnerError('media_unavailable');
     // List has already authorized these exact owner versions. Metadata changes no pagination coordinates.
     const production = this.contexts?.get(ownerUserId, item.reference)?.context.production;
-    return {
-      type: item.description.mediaType === 'video/mp4' ? 'video' : 'file',
-      name: item.version.title,
-      catId: item.revision.committedBy.kind === 'cat' ? item.revision.committedBy.actorId : null,
-      createdAt,
-      sourceMessageId: null,
-      ref: item.reference.contentRef,
-      url: `/api/content-publications/${encodeURIComponent(item.reference.contentRef)}/media/${item.reference.ownerRevision}`,
-      work: {
-        ...item.reference,
-        currentOwnerRevision: item.currentOwnerRevision,
-        ...(production
-          ? { versionCreatedAt: Date.parse(production.createdAt), versionTimeSource: production.sourceRef }
-          : {}),
-      },
-    };
+    return workCardArtifact(item, production);
   }
 }
 

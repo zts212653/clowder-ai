@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { pluginMcpEnvironment } from '../../../../../../config/capabilities/plugin-mcp-environment.js';
 import { guardMcpConfig } from '../../../../../../config/capabilities/secret-mcp-config.js';
 /**
@@ -24,6 +25,7 @@ const CALLBACK_ENV_KEYS = [
   'CAT_CAFE_SIGNAL_USER',
   // #1092: File path for credential refresh across ACP session resume.
   'CAT_CAFE_CREDENTIAL_FILE',
+  'CAT_CAFE_MCP_TRANSPORT',
 ] as const;
 
 function isCatCafeStdioServer(server: AcpMcpServer): server is AcpMcpServerStdio {
@@ -165,16 +167,20 @@ export function materializeIcodeSessionMcpServers(
   const apiUrl = callbackEnv?.CAT_CAFE_API_URL;
   const invocationId = callbackEnv?.CAT_CAFE_INVOCATION_ID;
   const callbackToken = callbackEnv?.CAT_CAFE_CALLBACK_TOKEN;
+  // iCode has always consumed HTTP. Both managed transport choices preserve
+  // the same scoped principal; stdio rollback applies to stdio-capable clients.
+  const shared = ['shared', 'stdio'].includes(callbackEnv?.CAT_CAFE_MCP_TRANSPORT ?? '');
   const overlay: AcpMcpServer[] =
     catCafeBuiltins.length > 0 && apiUrl && invocationId && callbackToken
       ? [
           {
             type: 'http',
             name: 'cat-cafe-member',
-            url: `${apiUrl.replace(/\/+$/, '')}/api/member-mcp/mcp`,
+            url: `${apiUrl.replace(/\/+$/, '')}/api/member-mcp/mcp${shared ? '?shared=1' : ''}`,
             headers: [
               { name: 'x-invocation-id', value: invocationId },
               { name: 'x-callback-token', value: callbackToken },
+              ...(shared ? [{ name: 'x-mcp-connection-id', value: randomUUID() }] : []),
             ],
           },
         ]

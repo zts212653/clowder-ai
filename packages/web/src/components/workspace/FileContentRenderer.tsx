@@ -7,6 +7,7 @@ import { type ListenSentence, maskLeadingMarkdownFrontmatter } from '@/lib/liste
 import { HubIcon } from '../hub-icons';
 import { LiveSelectionAnnotationAction } from '../LiveSelectionAnnotationAction';
 import { MarkdownContent } from '../MarkdownContent';
+import { useShellPresentation } from '../shell/shell-presentation';
 import { WorkspaceFileQuoteMarks } from '../workbench/content-review/WorkspaceFileQuoteMarks';
 import { WorkspacePendingFileQuoteMarks } from '../workbench/content-review/WorkspacePendingFileQuoteMarks';
 import { useWorkspaceSurfaceVisibility } from '../workbench/WorkspaceSurfaceVisibility';
@@ -14,6 +15,7 @@ import { CodeViewer } from './CodeViewer';
 import { JsxPreview } from './JsxPreview';
 import { OfficeFileCard } from './OfficeFileCard';
 import type { MarkdownSelectionAction } from './useMarkdownSelectionAction';
+import { WorkspaceHtmlPreview } from './WorkspaceHtmlPreview';
 import type { WorkspaceFileSave } from './workspace-file-draft';
 
 function scrollMarkdownToSourceLine(container: HTMLDivElement | null, isActive: boolean, line: number | null): void {
@@ -92,6 +94,7 @@ export function FileContentRenderer({
   publishedQuoteSource,
 }: FileContentRendererProps) {
   const visible = useWorkspaceSurfaceVisibility();
+  const isV2 = useShellPresentation() === 'v2';
   const onScrollTopChangeRef = useRef(onScrollTopChange);
   onScrollTopChangeRef.current = onScrollTopChange;
   const restoreScrollTopRef = useRef(restoreScrollTop);
@@ -296,6 +299,9 @@ export function FileContentRenderer({
         />
       </div>
     );
+
+  if (isV2 && isHtml && htmlPreview && !editMode && worktreeId)
+    return <WorkspaceHtmlPreview worktreeId={worktreeId} path={file.path} content={file.content} />;
 
   if (isHtml && htmlPreview && !editMode)
     return (

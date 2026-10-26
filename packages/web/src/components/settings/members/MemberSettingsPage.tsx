@@ -1,11 +1,15 @@
 'use client';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useSearchParams } from 'next/navigation';
 import { useState } from 'react';
 import { type CatData, formatCatName } from '@/hooks/useCatData';
 import type { MemberSaveTrace } from '@/utils/member-save-trace';
 import { usesAgyAcp, usesAgyNative } from '../../hub-cat-editor.agy';
 import { MemberCurrentStatus } from '../../members/MemberCurrentStatus';
 import { MemberIdentity } from '../../members/MemberIdentity';
+import { memberSaveCopy } from '../../members/member-save.shell-copy';
+import { useShellCopy } from '../../shell/shell-copy';
+import { useShellLanguage } from '../../shell/shell-language';
+import { settingsDetailCopy } from '../settings-detail.shell-copy';
 import { MemberAdditionalFields } from './MemberAdditionalFields';
 import { MemberChangeSummary } from './MemberChangeSummary';
 import { MemberCloudIdentity } from './MemberCloudIdentity';
@@ -37,15 +41,12 @@ export function MemberSettingsPage({
   onDelete?: () => Promise<void>;
   onBeforeCreate?: () => Promise<void>;
 }) {
-  const router = useRouter();
   const [runtimeValid, setRuntimeValid] = useState(true);
+  const [unchangedSave, setUnchangedSave] = useState(false);
+  const saveCopy = useShellCopy(memberSaveCopy);
+  const detailCopy = useShellCopy(settingsDetailCopy);
   const searchParams = useSearchParams();
-  const english = searchParams.get('lang') === 'en';
-  const toggleLanguage = () => {
-    const params = new URLSearchParams(searchParams.toString());
-    params.set('lang', english ? 'zh' : 'en');
-    router.replace(`/settings?${params.toString()}`, { scroll: false });
-  };
+  const english = useShellLanguage() === 'en';
   const t = (zh: string, en: string) => (english ? en : zh);
   const editor = useMemberEditor(cat, cats, onSaved, onBeforeCreate);
   const { draft, accounts, ready, saving, dirtyCount } = editor;
@@ -85,7 +86,7 @@ export function MemberSettingsPage({
       <div className="mb-6 flex flex-wrap items-start justify-between gap-4">
         <div className="min-w-0">
           <button type="button" className="mb-3 min-h-10 text-sm text-cafe-accent" onClick={onBack}>
-            ← {t('成员与运行时', 'Members & runtimes')}
+            ← {detailCopy.members.title}
           </button>
           <h1 className="break-words text-2xl font-semibold">
             {cat ? formatCatName(form) : t('添加猫猫伙伴', 'Add a teammate')}
@@ -102,9 +103,6 @@ export function MemberSettingsPage({
             {form.roleDescription ? ` · ${form.roleDescription}` : ''}
           </p>
         </div>
-        <button type="button" onClick={toggleLanguage} className="min-h-10 px-2 text-sm text-cafe-secondary">
-          {english ? '中文' : 'English'}
-        </button>
       </div>
       {cat && onDelete && <MemberDeleteButton disabled={saving} onDelete={onDelete} t={t} />}
       {!ready ? (
@@ -272,43 +270,59 @@ export function MemberSettingsPage({
               {t('浏览器无法保留草稿，请保存后再离开。', 'Draft storage is unavailable; save before leaving.')}
             </p>
           )}
-          {(dirtyCount > 0 || !cat) && (
-            <div
-              className="sticky bottom-3 z-40 mx-auto mt-5 flex max-w-3xl flex-wrap items-center justify-between gap-3 rounded-2xl border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] p-4 shadow-lg"
-              data-testid="member-save-bar"
-            >
-              {cat ? (
-                <MemberChangeSummary draft={draft} count={dirtyCount} t={t} />
-              ) : (
-                <span className="text-sm">{t('准备好就可以添加伙伴', 'Ready to add your teammate')}</span>
-              )}
-              <div className="flex gap-3">
+          <div
+            className="sticky bottom-0 z-40 mt-5 flex w-full flex-wrap items-center justify-between gap-3 border-t border-[var(--console-border-soft)] bg-[var(--console-card-bg)] px-5 py-4"
+            data-testid="member-save-bar"
+          >
+            {cat && dirtyCount > 0 ? (
+              <MemberChangeSummary draft={draft} count={dirtyCount} t={t} />
+            ) : (
+              <span className="text-sm" role="status">
+                {cat
+                  ? unchangedSave
+                    ? saveCopy.noChangesToSave
+                    : saveCopy.noChanges
+                  : t('准备好就可以添加伙伴', 'Ready to add your teammate')}
+              </span>
+            )}
+            <div className="flex gap-3">
+              {dirtyCount > 0 && (
                 <button
                   type="button"
                   disabled={saving}
-                  onClick={editor.discard}
+                  onClick={() => {
+                    setUnchangedSave(false);
+                    editor.discard();
+                  }}
                   className="min-h-11 rounded-lg px-4 text-sm"
                 >
-                  {t('放弃', 'Discard')}
+                  {saveCopy.discard}
                 </button>
-                <button
-                  type="button"
-                  disabled={
-                    saving ||
-                    !form.name.trim() ||
-                    (!runtimeValid &&
-                      (!baseline ||
-                        form.defaultModel !== baseline.defaultModel ||
-                        form.cliEffort !== (baseline.cli?.effort ?? '')))
+              )}
+              <button
+                type="button"
+                disabled={
+                  saving ||
+                  !form.name.trim() ||
+                  (!runtimeValid &&
+                    (!baseline ||
+                      form.defaultModel !== baseline.defaultModel ||
+                      form.cliEffort !== (baseline.cli?.effort ?? '')))
+                }
+                onClick={() => {
+                  if (cat && dirtyCount === 0) {
+                    setUnchangedSave(true);
+                    return;
                   }
-                  onClick={() => void editor.save()}
-                  className="min-h-11 rounded-lg bg-cafe-accent px-5 text-sm font-semibold text-[var(--cafe-surface)] disabled:opacity-50"
-                >
-                  {saving ? t('保存中…', 'Saving…') : cat ? t('保存', 'Save') : t('添加伙伴', 'Add teammate')}
-                </button>
-              </div>
+                  setUnchangedSave(false);
+                  void editor.save();
+                }}
+                className="min-h-11 rounded-lg bg-cafe-accent px-5 text-sm font-semibold text-[var(--cafe-surface)] disabled:opacity-50"
+              >
+                {saving ? t('保存中…', 'Saving…') : cat ? t('保存', 'Save') : t('添加伙伴', 'Add teammate')}
+              </button>
             </div>
-          )}
+          </div>
         </>
       )}
     </div>

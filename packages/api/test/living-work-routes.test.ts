@@ -114,6 +114,31 @@ test('common HTTP/callback entry retains real video, authenticates production, a
   assert.ok(created.body.length <= 12000);
   const saved = JSON.parse(created.json().json);
   assert.equal(saved.reference.ownerRevision, 1);
+  const resolveFile = (auth: Record<string, string> = { 'x-fixture-user': 'operator' }) =>
+    app.inject({
+      method: 'GET',
+      url: '/api/works/resolve-file?threadId=thread-cover&worktreeId=root&path=movie.mp4',
+      headers: auth,
+    });
+  assert.equal((await resolveFile({})).statusCode, 401);
+  const fileLanding = await resolveFile();
+  assert.equal(fileLanding.statusCode, 200, fileLanding.body);
+  assert.deepEqual(fileLanding.json().artifact.work, { ...saved.reference, currentOwnerRevision: 1 });
+  assert.equal(fileLanding.json().artifact.name, command.title);
+  const directLanding = await app.inject({
+    method: 'GET',
+    url: `/api/works/resolve-file?threadId=thread-cover&contentRef=${encodeURIComponent(saved.reference.contentRef)}&ownerRevision=1`,
+    headers: { 'x-fixture-user': 'operator' },
+  });
+  assert.equal(directLanding.statusCode, 200, directLanding.body);
+  assert.deepEqual(directLanding.json().artifact.work, fileLanding.json().artifact.work);
+  assert.equal((await resolveFile(headers())).statusCode, 401, 'callback credentials cannot act as the human reader');
+  const traversal = await app.inject({
+    method: 'GET',
+    url: '/api/works/resolve-file?threadId=thread-cover&worktreeId=root&path=..%2Fmovie.mp4',
+    headers: { 'x-fixture-user': 'operator' },
+  });
+  assert.notEqual(traversal.statusCode, 200, 'the source owner rejects a path outside its registered root');
   const retained = await f.media.read(saved.reference.contentRef, 1, {
     userId: 'operator',
     actor: { kind: 'human', actorId: 'operator' },

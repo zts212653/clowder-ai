@@ -27,7 +27,11 @@ export function registerMessageReadingVisibilityCases({ open, evidence }) {
             await page.getByRole('button', { name: '搜索', exact: true }).click();
             await page.locator('[data-message-search-result]').first().waitFor();
           }
-          await page.locator('[data-message-search-result]').first().getByRole('button', { name: '跳过去' }).click();
+          await page
+            .locator('[data-message-search-result]')
+            .first()
+            .getByRole('button', { name: /^(?:跳过去|去原处)/ })
+            .click();
           const controls = page.getByRole('navigation', { name: '浏览本次检索结果', exact: true });
           for (const [step, index, id] of [
             ['first', 0, 'old-0'],
@@ -63,7 +67,7 @@ export function registerMessageReadingVisibilityCases({ open, evidence }) {
             }
             assert(sample.openingUnobstructed, JSON.stringify(sample));
           }
-          await controls.getByRole('button', { name: '回到刚才', exact: true }).click();
+          await controls.getByRole('button', { name: /^(?:回到刚才|‹ 回到「)/ }).click();
           await page.waitForFunction(
             () =>
               document.querySelector('[data-reading-trip-status]')?.getAttribute('data-reading-trip-status') ===

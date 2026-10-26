@@ -136,6 +136,55 @@ describe('ordinary native reply whole-body proof', () => {
   });
 });
 
+describe('successful-turn tool boundary is an explicit personal display choice', () => {
+  function nonNative(): ChatMessage {
+    const message = fixture();
+    const layout = message.extra?.outputLayout;
+    if (layout?.status !== 'available') throw new Error('fixture');
+    message.catId = 'opus55';
+    message.extra = {
+      ...message.extra,
+      outputLayout: {
+        v: 1,
+        status: 'available',
+        basis: 'successful_turn_last_tool',
+        owner: { ...layout.owner, catId: 'opus55' },
+        contentRevision: layout.contentRevision,
+        runs: layout.runs.map(({ id, channel, start, end, gluePrefixLength }) => ({
+          id,
+          channel,
+          start,
+          end,
+          gluePrefixLength,
+        })),
+        order: layout.order,
+      },
+    };
+    return message;
+  }
+  it('defaults whole, and only an explicit record choice can move the attested earlier text', () => {
+    expect(projectReplyOutput(nonNative(), 'thread', hash)).toBeUndefined();
+    expect(projectReplyOutput(nonNative(), 'thread', hash, 'whole')).toBeUndefined();
+    const enabled = projectReplyOutput(nonNative(), 'thread', hash, 'record');
+    expect(enabled?.answers[0]?.text).toBe('回答😺。');
+    expect(enabled?.processCount).toBe(2);
+    expect(enabled?.showEarlierText).toBe(true);
+  });
+  it('an enabled preference still keeps unproven old or changed messages whole', () => {
+    const old = nonNative();
+    if (old.extra) delete old.extra.outputLayout;
+    expect(projectReplyOutput(old, 'thread', hash, 'record')).toBeUndefined();
+    const changed = nonNative();
+    changed.content += ' changed';
+    expect(projectReplyOutput(changed, 'thread', hash, 'record')).toBeUndefined();
+  });
+  it('the same preference never changes native phase selection', () => {
+    expect(projectReplyOutput(fixture(), 'thread', hash, 'whole')).toEqual(
+      projectReplyOutput(fixture(), 'thread', hash, 'record'),
+    );
+  });
+});
+
 describe('typed terminal host signature is an answer suffix', () => {
   const suffix = '\n\n[小太阳·砚砚/gpt-6.1-sol🐾]';
   function signedMessage() {

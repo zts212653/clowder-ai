@@ -44,3 +44,26 @@ test('catalog identity and version never grant arbitrary bytes HOME setup author
   ])
     assert.equal(chromeSetupPolicy({ ...record(), ...delta }), undefined);
 });
+
+const alpha7 = {
+  version: '0.1.0-alpha.7',
+  digest: 'sha512-/lLrNrAsCYEhwHiJuaaiEnG8YIzKGJ+tIX2C8FGFF2BJQd8Rtz6/dg4pXpeVDhUFt16c+7oRitfEnWCGU+Tr+g==',
+};
+function alpha7Record() {
+  const candidate = record();
+  candidate.version = alpha7.version;
+  candidate.packageDigest = alpha7.digest;
+  candidate.manifest.version = alpha7.version;
+  return candidate;
+}
+
+test('the exact reviewed alpha.7 archive receives Host Chrome setup actions', () => {
+  assert.deepEqual(
+    chromeSetupPolicy(alpha7Record())?.actions.map(({ id }) => id),
+    ['inspect', 'install', 'uninstall'],
+  );
+});
+
+test('alpha.7 with the right version but unreviewed bytes remains untrusted', () => {
+  assert.equal(chromeSetupPolicy({ ...alpha7Record(), packageDigest: 'sha512-unreviewed-alpha7' }), undefined);
+});

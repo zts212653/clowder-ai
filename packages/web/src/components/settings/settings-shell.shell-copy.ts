@@ -14,16 +14,23 @@
  * 「导航」: the previous level's name, never a bare "Back"). The conversation's name is the user's own title and is passed in as
  * data; only the words around it are here (the naming table: 返回 {对话名} / Back to {conversation}).
  *
- * Not here: the second-level tab names (they come from `settings-nav-config.ts`, which the classic settings page shares and
- * which is not translated), the rail pin tooltips (`WorldRail`), and the old section pages. Those stay Chinese, and nothing
- * in this round claims otherwise.
+ * Second-level names and their accessible labels also follow this dictionary. The shared navigation metadata keeps its
+ * Chinese labels for the classic interface; section ids and destinations remain its responsibility.
  */
+
 import { defineShellCopy } from '@/components/shell/shell-copy';
+import { accountsCopy } from '../accounts/accounts.shell-copy';
+import { settingsDetailCopy } from './settings-detail.shell-copy';
+import { SETTINGS_SECTIONS } from './settings-nav-config';
 
 export const settingsShellCopy = defineShellCopy(
   {
     zh: {
       title: '设置与管理',
+      navigation: '设置导航',
+      teamWorkspace: '成员能力与路由状态',
+      sections: Object.fromEntries(SETTINGS_SECTIONS.map(({ id, label }) => [id, label] as const)),
+      sectionGroup: (label: string) => `${label}的分区`,
       entries: {
         team: '猫猫团队',
         schedule: '调度',
@@ -43,6 +50,24 @@ export const settingsShellCopy = defineShellCopy(
     },
     en: {
       title: 'Settings',
+      navigation: 'Settings navigation',
+      teamWorkspace: 'Member capabilities & routing',
+      sections: {
+        members: settingsDetailCopy.en.members.title,
+        profiles: settingsDetailCopy.en.profiles.title,
+        accounts: accountsCopy.en.title,
+        concierge: 'Cat Ball',
+        marketplace: 'Capability marketplace',
+        skills: 'Skills',
+        mcp: 'MCP',
+        plugins: 'Plugins',
+        voice: settingsDetailCopy.en.voice.title,
+        system: settingsDetailCopy.en.system.title,
+        rules: 'Collaboration & rules',
+        notify: 'Notifications',
+        ops: 'Operations',
+      },
+      sectionGroup: (label: string) => `${label} sections`,
       entries: {
         team: 'Cat team',
         schedule: 'Scheduling',
@@ -66,6 +91,7 @@ export const settingsShellCopy = defineShellCopy(
       pin: [['Theme'], ['成员与运行时']],
       unpin: [['Theme'], ['成员与运行时']],
       back: [['F322 Workspace'], ['一个很长很长的对话标题']],
+      sectionGroup: [['Cat team'], ['Integrations']],
     },
   },
 );

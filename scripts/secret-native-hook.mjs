@@ -13,8 +13,12 @@ function postToolUseOutput(toolName, result) {
   const isMcp = /mcp/i.test(toolName ?? '');
   const noticeFailed = result._meta.secretExposure.rotationNotice === 'failed';
   const context = result.content.slice(noticeFailed ? -2 : -1).map((part) => part.text);
-  if (!isMcp)
-    context[0] = `原生工具结果含疑似凭据，已进入模型上下文，无法隐藏；请轮转相关凭据。原线程轮转提醒${noticeFailed ? '未能保存，请保留本结果并处理' : '已持久保存'}。`;
+  if (!isMcp) {
+    const summary = result._meta.secretExposure.rules.includes('uninspectable-result')
+      ? '原生工具结果的安全检查未完成，尚不能判断是否含凭据；结果可能已被原生提供方消费。'
+      : '原生工具结果命中疑似凭据格式，尚未核实真实凭据；匹配内容可能已被原生提供方消费，无法撤回；仅在确认真实凭据已暴露后按原授权轮转。';
+    context[0] = `${summary}核验记录${noticeFailed ? '未能保存' : '已持久保存'}。`;
+  }
   return {
     hookEventName: 'PostToolUse',
     additionalContext: context.join('\n'),

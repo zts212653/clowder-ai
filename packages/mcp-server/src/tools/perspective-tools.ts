@@ -1,4 +1,5 @@
 import { defineMcpMigrationFactory } from '../tool-governance-migration.js';
+import { invocationFetch } from './invocation-auth.js';
 
 /**
  * Perspective Run Tool
@@ -88,7 +89,7 @@ export async function handleRunPerspective(input: {
   }`;
 
   try {
-    const response = await fetch(url);
+    const response = await invocationFetch(url);
     if (!response.ok) {
       const text = await response.text();
       return errorResult(`Perspective run failed for ${input.planId} (${response.status}): ${text}`);

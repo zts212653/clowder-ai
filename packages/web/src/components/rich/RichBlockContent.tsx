@@ -39,14 +39,17 @@ function RichCardRenderer({
   messageSource,
   confirmations,
   publication,
+  catId,
 }: {
   block: Extract<RichBlock, { kind: 'card' }>;
   messageId?: string;
   messageSource?: ConnectorSource;
   confirmations?: CardConfirmationEntry[];
   publication?: PublishedMessageCoordinate;
+  catId?: string;
 }) {
-  if (block.meta?.kind === 'work_reference') return <LivingWorkCard block={block} messageId={messageId} />;
+  if (block.meta?.kind === 'work_reference')
+    return <LivingWorkCard block={block} messageId={messageId} catId={catId} />;
   if (isDomainApprovalPublication(block)) return <OriginalDomainApprovalCard block={block} coordinate={publication} />;
   if (isCorrectionPublication(block)) return <OriginalMemoryCorrectionCard block={block} coordinate={publication} />;
   if (isEvalRepairPublication(block)) return <OriginalEvalRepairCard block={block} coordinate={publication} />;
@@ -117,6 +120,7 @@ export function RichBlockRenderer({
           messageSource={messageSource}
           confirmations={confirmations}
           publication={publication}
+          catId={catId}
         />
       );
     case 'diff':
@@ -149,6 +153,7 @@ export function RichBlockRenderer({
           messageId={messageId}
           sourceThreadId={sourceThreadId}
           sourceMessageIds={sourceMessageIds}
+          catId={catId}
         />
       );
     default:

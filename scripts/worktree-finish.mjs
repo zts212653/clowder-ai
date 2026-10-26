@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { requireNoDurableConsumers } from './lib/worktree-consumers.mjs';
 import { directReleaseReceipt, removeFinishedWorktree } from './lib/worktree-direct-release.mjs';
 import { requireVisibleWorktreeIndex } from './lib/worktree-light.mjs';
+import { parsePrSource, readPrTruth } from './lib/worktree-pr.mjs';
 import { quarantineRoot, readQuarantineRecords } from './lib/worktree-quarantine.mjs';
 import { isProtected, LIFECYCLE_POLICIES, parseWorktreePorcelain } from './lib/worktree-reaper-core.mjs';
 import {
@@ -120,6 +121,12 @@ function requireCleanTarget(path) {
 }
 
 function requireMergedContent(entry, opts) {
+  if (opts.prTruth) {
+    if (!opts.prTruth.commits.includes(entry.head)) fail('PR does not contain the exact checkout HEAD');
+    if (isAncestor(opts.repo, opts.mergedAt, 'origin/main') !== true)
+      fail('PR merge commit must be in origin/main history; fetch before finishing');
+    return;
+  }
   if (entry.lifecycle.policy !== 'merged') {
     if (opts.mergedAt) fail('merged-at requires a merged-policy worktree');
     return;
@@ -170,6 +177,26 @@ function retainWorktree(initial, opts) {
   return verifyRetention(ownedWorktreeFacts(opts), opts);
 }
 
+function resolveMergedPr(opts) {
+  if (opts.mergedPr !== undefined) {
+    parsePrSource(opts.mergedPr);
+    if (opts.mode !== 'release' || opts.mergedAt !== undefined)
+      fail('merged PR requires exact PR truth and release mode; cannot combine with merged-at');
+    const truth = (opts.readPr ?? readPrTruth)(opts.mergedPr);
+    if (
+      truth.sourceRef !== opts.mergedPr ||
+      truth.state !== 'MERGED' ||
+      !/^[0-9a-f]{40}$/.test(truth.mergedAt ?? '') ||
+      !Array.isArray(truth.commits) ||
+      !truth.commits.length ||
+      !truth.commits.every((sha) => /^[0-9a-f]{40}$/.test(sha))
+    )
+      fail('merged PR truth unavailable or invalid');
+    opts.prTruth = truth;
+    opts.mergedAt = truth.mergedAt;
+  }
+}
+
 /** No batch deletion, no branch deletion, no --force, no mutation while checking. */
 export function finishWorktree(input) {
   const opts = {
@@ -184,6 +211,7 @@ export function finishWorktree(input) {
       fail(`required ${key}`);
   }
   if (!['release', 'retain', 'check'].includes(opts.mode)) fail('invalid disposition mode');
+  resolveMergedPr(opts);
   if (
     opts.mergedAt !== undefined &&
     (opts.mode !== 'release' || typeof opts.mergedAt !== 'string' || !/^[0-9a-f]{40}$/.test(opts.mergedAt))
@@ -203,7 +231,13 @@ export function finishWorktree(input) {
     actor: opts.owner,
     authorizationRef: opts.sourceRef,
     root: current.root,
-    entry: { ...current, reason: 'owner-finished', finishSourceRef: opts.sourceRef, mergedAt: opts.mergedAt },
+    entry: {
+      ...current,
+      reason: 'owner-finished',
+      finishSourceRef: opts.sourceRef,
+      mergedAt: opts.mergedAt,
+      mergedPr: opts.mergedPr,
+    },
     validate: () => {
       const final = ownedWorktreeFacts(opts);
       releaseProbe(final, opts);
@@ -234,6 +268,7 @@ export function parseFinishArgs(argv, env = process.env) {
     '--reason': 'reason',
     '--until': 'until',
     '--merged-at': 'mergedAt',
+    '--merged-pr': 'mergedPr',
   };
   for (let i = 1; i < argv.length; i++) {
     const flag = argv[i];

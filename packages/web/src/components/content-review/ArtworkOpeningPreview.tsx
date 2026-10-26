@@ -1,6 +1,7 @@
 import { type ReactNode, useLayoutEffect, useRef, useState } from 'react';
 import { useShellCopy } from '@/components/shell/shell-copy';
 import { observeMediaPresentation } from '@/components/workbench/content-review/observe-media-presentation';
+import { ArtworkActionsVisibility } from './ArtworkChrome';
 import type { FloatingArtwork } from './ArtworkLightboxScope';
 import { ArtworkPreviewMedia } from './ArtworkPreviewMedia';
 import { artworkActionsCopy } from './artwork-actions.shell-copy';
@@ -9,6 +10,10 @@ import styles from './artwork-lightbox.module.css';
 /** The original owner still loads normally. Its decoded pixels replace the
  * already displayed Chat preview; preview bytes never become an annotation source. */
 export function ArtworkOpeningPreview({ work, children }: { work: FloatingArtwork; children?: ReactNode }) {
+  return work.ownerContentOnly ? children : <MediaOpeningPreview work={work}>{children}</MediaOpeningPreview>;
+}
+
+function MediaOpeningPreview({ work, children }: { work: FloatingArtwork; children?: ReactNode }) {
   const owner = useRef<HTMLDivElement>(null);
   const preview = useRef<HTMLDivElement>(null);
   const [phase, setPhase] = useState<'version' | 'media' | 'ready' | 'unavailable'>('version');
@@ -89,7 +94,7 @@ export function ArtworkOpeningPreview({ work, children }: { work: FloatingArtwor
   return (
     <div className={styles.opening} data-testid="artwork-opening-preview">
       <div ref={owner} className={styles.openingOwner} aria-hidden={!showOwner}>
-        {children}
+        <ArtworkActionsVisibility visible={showOwner}>{children}</ArtworkActionsVisibility>
       </div>
       {!showOwner ? (
         <div ref={preview} className={styles.openingMedia} data-testid="artwork-chat-preview">
@@ -98,7 +103,6 @@ export function ArtworkOpeningPreview({ work, children }: { work: FloatingArtwor
             title={work.alt}
             video={work.mediaType === 'video'}
             gallery={work.gallery}
-            showActions={!loading}
           />
           {loading ? (
             <p role="status" className="shrink-0 px-3 py-1 text-xs text-cafe-muted">

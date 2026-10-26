@@ -10826,6 +10826,13 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
       writeFile(join(runtimeRoot, 'pnpm-workspace.yaml'), 'packages: []\n'),
       writeFile(join(workspaceRoot, 'pnpm-workspace.yaml'), 'packages: []\n'),
     ]);
+    // The Host's persistent source is initialized; only the external workspace
+    // is uninitialized. Missing mapped authority must never enable default tools.
+    await mkdir(join(workspaceRoot, '.cat-cafe'), { recursive: true });
+    await writeFile(
+      join(workspaceRoot, '.cat-cafe/capabilities.json'),
+      JSON.stringify({ version: 1, capabilities: [] }),
+    );
     process.env.CAT_CAFE_RUNTIME_ROOT = runtimeRoot;
     process.env.CAT_CAFE_WORKSPACE_ROOT = workspaceRoot;
     process.chdir(runtimeRoot);
@@ -10882,6 +10889,13 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     const runtimeRoot = await realpath(await mkdtemp(join(tmpdir(), 'legacy-thread-runtime-root-')));
     const previousRuntimeRoot = process.env.CAT_CAFE_RUNTIME_ROOT;
     const previousWorkspaceRoot = process.env.CAT_CAFE_WORKSPACE_ROOT;
+    const previousConfigRoot = process.env.CAT_CAFE_CONFIG_ROOT;
+    await mkdir(join(testGlobalConfigRoot, '.cat-cafe'), { recursive: true });
+    await writeFile(
+      join(testGlobalConfigRoot, '.cat-cafe/capabilities.json'),
+      JSON.stringify({ version: 1, capabilities: [] }),
+    );
+    process.env.CAT_CAFE_CONFIG_ROOT = testGlobalConfigRoot;
     process.env.CAT_CAFE_RUNTIME_ROOT = runtimeRoot;
     process.env.CAT_CAFE_WORKSPACE_ROOT = workspaceRoot;
 
@@ -10924,6 +10938,8 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
       else process.env.CAT_CAFE_RUNTIME_ROOT = previousRuntimeRoot;
       if (previousWorkspaceRoot === undefined) delete process.env.CAT_CAFE_WORKSPACE_ROOT;
       else process.env.CAT_CAFE_WORKSPACE_ROOT = previousWorkspaceRoot;
+      if (previousConfigRoot === undefined) delete process.env.CAT_CAFE_CONFIG_ROOT;
+      else process.env.CAT_CAFE_CONFIG_ROOT = previousConfigRoot;
       await rmWithRetry(runtimeRoot);
     }
   });

@@ -47,6 +47,11 @@ export function VideoWorkReview({
   const [selection, setSelection] = useState<{ id: number; anchor: ArtifactReviewAnchor }>();
   const versionControl = (
     <>
+      {context.error ? (
+        <span role="alert" className="text-xs text-cafe-error">
+          {context.error}
+        </span>
+      ) : null}
       <select
         aria-label="作品版本"
         value={asset.ownerRevision}

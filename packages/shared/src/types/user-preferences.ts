@@ -6,6 +6,7 @@
 
 import type { ConversationViewPreferences } from '../conversation-view-preference.js';
 import type { IgnoredItemPreferences } from '../ignored-item-preference.js';
+import type { ProcessTalkMode } from '../process-talk-preference.js';
 import type { MessageWorkDisposition } from './queue-receipt.js';
 
 export type MessageDispositionPreferenceSource = 'thread' | 'global' | 'product';
@@ -54,6 +55,8 @@ export interface BubbleDefaultPreferences {
 }
 
 export interface UserPreferences {
+  /** F322: personal display only, per authenticated user, no TTL and no thread override. */
+  processTalk?: { owners?: Record<string, { mode: ProcessTalkMode }> };
   /** #1466: durable personal guide receipts. Keys include operator and guide version. */
   onboardingGuides?: Record<string, { status: 'pending' | 'dismissed' | 'completed'; updatedAt: number }>;
   /** Happening Now per-project presentation only; persisted without expiry. */

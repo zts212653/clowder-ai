@@ -44,5 +44,14 @@
     "tryPrompt": "几只猫意见不一样时，我想让它们投票定下来。请带我打 /vote 发起一次：问题和选项怎么填、勾哪几只猫、我自己的主意怎样也放上去让猫投。先别直接发起。",
     "durationSeconds": 46.7,
     "sha256": "37bee3133500953e4836eeb002132d1fd9c815fa9d6bb14fa61aac13647bcf4a"
+  },
+  "bundles-v1": {
+    "tipId": "feature-f294-selective-message-bundles",
+    "title": "挑几条，带去哪都行",
+    "video": "bundles.zh.mp4",
+    "poster": "bundles.jpg",
+    "tryPrompt": "我想把几条消息带走。请带我从消息动作区点「多选：转发或导出」，说说导出成长图、文档、文本各适合什么时候；再带我把它们转发给另一个对话里的猫并留一句话。先别直接转发。",
+    "durationSeconds": 49,
+    "sha256": "a7951acdc2e6a951262d4344a4678ce909b76b9b4273fc99ff0e26479e7ec799"
   }
 }

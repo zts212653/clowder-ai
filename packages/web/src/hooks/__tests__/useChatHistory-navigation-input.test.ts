@@ -188,6 +188,54 @@ describe('useChatHistory navigation input owner', () => {
     return { el, top, second };
   }
 
+  it('keeps an explicit cold-source arrival pending when the first history snapshot commits', async () => {
+    const threadId = 'cold-source-before-first-layout';
+    const message = makeMsg('cold-target', 1);
+    useChatStore.setState({
+      currentThreadId: threadId,
+      messages: [],
+      hasMore: true,
+      threadStates: { [threadId]: { ...makeThreadState([]), hasMore: true } },
+    });
+    let release!: (value: Response) => void;
+    const page = new Promise<Response>((resolve) => {
+      release = resolve;
+    });
+    apiFetchMock.mockImplementation(async (url) =>
+      String(url).startsWith('/api/messages?')
+        ? page
+        : ({
+            ok: true,
+            json: async () => ({ tasks: [], queue: [], activeInvocations: [], hasMore: false }),
+          } as Response),
+    );
+    await act(async () => root.render(React.createElement(HookHost, { threadId })));
+    const el = capturedHook!.scrollContainerRef.current!;
+    const top = defineMutableNumberProp(el, 'scrollTop', 0);
+    defineMutableNumberProp(el, 'scrollHeight', 1400);
+    defineMutableNumberProp(el, 'clientHeight', 600);
+    el.getBoundingClientRect = () => ({ top: 100, bottom: 700, height: 600 }) as DOMRect;
+    const rect = () => ({ top: 500 - top.get(), bottom: 620 - top.get(), height: 120 });
+    const boundary = appendMessageBoundary(el, message.id, rect);
+    const target = boundary.firstElementChild as HTMLElement;
+    target.getBoundingClientRect = () => rect() as DOMRect;
+    target.scrollIntoView = () => top.set(240);
+    capturedHook!.messagesEndRef.current!.scrollIntoView = vi.fn();
+    const settled = vi.fn();
+    act(() => {
+      void capturedHook!.navigateToMessage(message.id).then(settled);
+    });
+    await act(async () =>
+      release({ ok: true, json: async () => ({ messages: [message], hasMore: false }) } as Response),
+    );
+    await act(async () => {
+      for (let frame = 0; frame < 8; frame++) flushAnimationFrames();
+    });
+    expect(settled).toHaveBeenCalledWith(
+      expect.objectContaining({ status: 'settled', threadId, messageId: message.id }),
+    );
+  });
+
   it('captures the actual surface reading point and restores it only after owner settlement', async () => {
     const { top } = await openThread('search-reading-return');
     const gesture = beginGesture();

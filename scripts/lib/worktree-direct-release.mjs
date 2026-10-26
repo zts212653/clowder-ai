@@ -39,6 +39,7 @@ export function removeFinishedWorktree({ repo, root, entry, validate, actor, aut
     sourceRef: entry.finishSourceRef,
     head: entry.head,
     ...(entry.mergedAt ? { mergedAt: entry.mergedAt } : {}),
+    ...(entry.mergedPr ? { mergedPr: entry.mergedPr } : {}),
     restore,
   };
   append(root, { ...base, state: 'pending' }, clock());
@@ -110,6 +111,7 @@ export function directReleaseReceipt({ repo, root, path, owner, sourceRef }) {
         'head',
         'restore',
         'mergedAt',
+        'mergedPr',
       ].every((key) => previous.pending[key] === r[key]) &&
       Number.isFinite(Date.parse(r.at)) &&
       Date.parse(r.at) >= Date.parse(previous.pending.at)
@@ -133,7 +135,8 @@ export function directReleaseReceipt({ repo, root, path, owner, sourceRef }) {
     manifest.head !== r.head ||
     manifest.owner !== owner ||
     manifest.sourceRef !== sourceRef ||
-    manifest.mergedAt !== r.mergedAt
+    manifest.mergedAt !== r.mergedAt ||
+    manifest.mergedPr !== r.mergedPr
   )
     throw new Error('release archive receipt mismatch');
   return {
@@ -144,6 +147,7 @@ export function directReleaseReceipt({ repo, root, path, owner, sourceRef }) {
     sourceRef,
     head: r.head,
     ...(r.mergedAt ? { mergedAt: r.mergedAt } : {}),
+    ...(r.mergedPr ? { mergedPr: r.mergedPr } : {}),
     archivePath: r.archivePath,
     restore: r.restore,
     diskFreeBytesBefore: r.diskFreeBytesBefore,

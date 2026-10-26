@@ -29,7 +29,7 @@ export const themeSettingsCopy = defineShellCopy(
   {
     zh: {
       title: '主题',
-      scope: '界面版本、语言和配色，只对这个浏览器生效。',
+      scope: '界面版本、语言和配色保存在这个浏览器；回话显示跟随你的账号。',
       presentation: {
         heading: '界面版本',
         v2: { label: '新版界面', note: '窄栏、对话栏与顶栏按新版布局' },
@@ -53,7 +53,7 @@ export const themeSettingsCopy = defineShellCopy(
     },
     en: {
       title: 'Theme',
-      scope: 'Interface version, language and colors. Saved in this browser only.',
+      scope: 'Interface version, language and colors are saved in this browser. Reply display follows your account.',
       presentation: {
         heading: 'Interface version',
         v2: { label: 'New interface', note: 'Narrow rail, conversation column and header use the new layout' },

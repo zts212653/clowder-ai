@@ -1,4 +1,5 @@
 import { deploymentDefaults } from '@cat-cafe/shared';
+import { isInvocationBoundMcpLaunch } from '../session-credential-file.js';
 /**
  * AcpAgentService — Generic AgentService implementation backed by ACP protocol.
  *
@@ -593,9 +594,12 @@ export class AcpAgentService implements AgentService {
       // and resume rewrites the same file with fresh creds. A superseded process keeps
       // its own file, which stops updating — its late callbacks fail registry.isLatest().
       const buildSessionConfig = (preparedCreds: PreparedCredentialEnv | null) => {
-        if (agy && options?.callbackEnv?.CAT_CAFE_INVOCATION_ID && !preparedCreds)
+        const invocationBound = isInvocationBoundMcpLaunch(options?.callbackEnv);
+        if (agy && options?.callbackEnv?.CAT_CAFE_INVOCATION_ID && !preparedCreds && !invocationBound)
           throw new Error('AGY ACP invocation credentials could not be prepared');
-        const sessionCallbackEnv = preparedCreds?.env ?? options?.callbackEnv;
+        const sessionCallbackEnv = invocationBound
+          ? options?.callbackEnv
+          : (preparedCreds?.env ?? options?.callbackEnv);
         if (this.protocolAdapter === 'icode') {
           // F306 Phase B: route cat-cafe tool families through the member gateway
           // HTTP overlay carrying THIS turn's invocation credentials. iCode rejects
@@ -674,9 +678,11 @@ export class AcpAgentService implements AgentService {
       };
       let resumedSession: AcpNewSessionResult | undefined;
       if (resumeSessionId) {
-        const resumeCreds = agy
-          ? prepareSessionCredentialFile(options?.callbackEnv, resumeSessionId)
-          : resolveSessionCredentialFile(options?.callbackEnv, resumeSessionId);
+        const resumeCreds = isInvocationBoundMcpLaunch(options?.callbackEnv)
+          ? null
+          : agy
+            ? prepareSessionCredentialFile(options?.callbackEnv, resumeSessionId)
+            : resolveSessionCredentialFile(options?.callbackEnv, resumeSessionId);
         const resumeConfig = buildSessionConfig(resumeCreds);
         // iCode: the per-turn overlay (externals + member gateway with fresh
         // credentials) is re-injected on load — the previous turn's live
@@ -743,7 +749,9 @@ export class AcpAgentService implements AgentService {
       }
 
       if (resumeDisposition !== 'resumed') {
-        const freshCreds = prepareSessionCredentialFile(options?.callbackEnv);
+        const freshCreds = isInvocationBoundMcpLaunch(options?.callbackEnv)
+          ? null
+          : prepareSessionCredentialFile(options?.callbackEnv);
         const freshConfig = buildSessionConfig(freshCreds);
         sessionMcpServers = freshConfig.mcpServers;
         envDiag = freshConfig.envDiag;
@@ -1022,7 +1030,9 @@ export class AcpAgentService implements AgentService {
         promptPhase = 'not_started';
         const replacedSessionId = sessionId; // captured: `sessionId` is repointed below
         try {
-          const retryCreds = prepareSessionCredentialFile(options?.callbackEnv);
+          const retryCreds = isInvocationBoundMcpLaunch(options?.callbackEnv)
+            ? null
+            : prepareSessionCredentialFile(options?.callbackEnv);
           const retryConfig = buildSessionConfig(retryCreds);
           const freshSession = await client.newSession(cwd, retryConfig.mcpServers);
           await configureNative(freshSession, true);
@@ -1261,26 +1271,40 @@ export class AcpAgentService implements AgentService {
           }
         }
       }
-      if (this.protocolAdapter === 'icode' && sessionId) {
-        // iCode: a persisted session rejects overlay re-injection while a live
-        // instance holds it — end the instance each turn so the next turn can
-        // session/load with fresh per-turn credentials. Best-effort: the
-        // provider keeps the persisted conversation either way.
-        try {
-          await client.closeSession(sessionId);
-          log.info({ ...ctx, sessionId }, 'ACP icode session instance closed (per-turn session/close)');
-        } catch (err) {
-          log.warn(
-            { ...ctx, sessionId, err: err instanceof Error ? err.message : String(err) },
-            'ACP icode best-effort session/close failed',
-          );
+      try {
+        if (isInvocationBoundMcpLaunch(options?.callbackEnv) && sessionId) {
+          try {
+            await lease.closeTurn(sessionId);
+          } catch (err) {
+            // The pool stops admitting work to this carrier and retires it once
+            // any active peers drain. Cleanup must not rewrite the turn result.
+            log.warn(
+              { ...ctx, sessionId, err: err instanceof Error ? err.message : String(err) },
+              'ACP turn-bound session cleanup failed; carrier draining',
+            );
+          }
+        } else if (this.protocolAdapter === 'icode' && sessionId) {
+          // iCode: a persisted session rejects overlay re-injection while a live
+          // instance holds it — end the instance each turn so the next turn can
+          // session/load with fresh per-turn credentials. Best-effort: the
+          // provider keeps the persisted conversation either way.
+          try {
+            await client.closeSession(sessionId);
+            log.info({ ...ctx, sessionId }, 'ACP icode session instance closed (per-turn session/close)');
+          } catch (err) {
+            log.warn(
+              { ...ctx, sessionId, err: err instanceof Error ? err.message : String(err) },
+              'ACP icode best-effort session/close failed',
+            );
+          }
         }
+      } finally {
+        client.offCapacity(onCapacity);
+        if (onAbort && options?.signal) {
+          options.signal.removeEventListener('abort', onAbort);
+        }
+        lease.release();
       }
-      client.offCapacity(onCapacity);
-      if (onAbort && options?.signal) {
-        options.signal.removeEventListener('abort', onAbort);
-      }
-      lease.release();
     }
   }
 }

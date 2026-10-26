@@ -1,5 +1,6 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { readFileSync } from 'node:fs';
+import { parseSharedInvocationContext, type SharedInvocationContext } from '../shared-invocation-context.js';
 
 export interface InvocationCredentialValues {
   invocationId: string | undefined;
@@ -15,6 +16,11 @@ export interface InvocationCredentialValues {
   userId?: string;
   /** Verified member identity for in-process carriers (member MCP gateway). */
   threadId?: string;
+  /** Complete Host projection: presence forbids ambient authority fallbacks. */
+  sharedContext?: SharedInvocationContext;
+  /** Rechecks current invocation/family/tool authority immediately before protected work. */
+  authorizeTool?: (name: string) => Promise<void>;
+  requestSignal?: AbortSignal;
 }
 
 const requestCredentials = new AsyncLocalStorage<InvocationCredentialValues>();
@@ -23,6 +29,26 @@ const requestCredentials = new AsyncLocalStorage<InvocationCredentialValues>();
 export function withInvocationCredentials<T>(credentials: InvocationCredentialValues, run: () => T): T {
   return requestCredentials.run(credentials, run);
 }
+
+export function resolveSharedInvocationContext(): SharedInvocationContext | undefined {
+  const context = requestCredentials.getStore()?.sharedContext;
+  return context === undefined ? undefined : parseSharedInvocationContext(context);
+}
+
+export async function authorizeInvocationTool(name: string): Promise<void> {
+  await requestCredentials.getStore()?.authorizeTool?.(name);
+}
+
+export function resolveInvocationRequestSignal(signal?: AbortSignal | null): AbortSignal | undefined {
+  const bound = requestCredentials.getStore()?.requestSignal;
+  return bound && signal ? AbortSignal.any([bound, signal]) : (bound ?? signal ?? undefined);
+}
+
+/** Preserve each helper's timeout while cancelling only its admitted request. */
+export const invocationFetch: typeof fetch = (input, init) => {
+  const signal = resolveInvocationRequestSignal(init?.signal ?? (input instanceof Request ? input.signal : undefined));
+  return fetch(input, signal ? { ...init, signal } : init);
+};
 
 function readCredentialFile(): { invocationId: string; callbackToken: string } | null {
   const filePath = process.env.CAT_CAFE_CREDENTIAL_FILE;
@@ -94,21 +120,27 @@ export function getInvocationAuthSignal(): {
  * fall back to CAT_CAFE_API_URL from their launch environment.
  */
 export function resolveScopedApiBaseUrl(): string | undefined {
-  return requestCredentials.getStore()?.apiUrl;
+  const store = requestCredentials.getStore();
+  if (store?.sharedContext !== undefined && !store.apiUrl?.trim())
+    throw new Error('Shared invocation API destination is required');
+  return store?.apiUrl;
 }
 
 export type ScopedInvocationEnvName =
   | 'CAT_CAFE_API_URL'
   | 'CAT_CAFE_CAT_ID'
   | 'CAT_CAFE_USER_ID'
-  | 'CAT_CAFE_THREAD_ID';
+  | 'CAT_CAFE_THREAD_ID'
+  | 'CAT_CAFE_DATA_DIR'
+  | 'ALLOWED_WORKSPACE_DIRS'
+  | 'CAT_CAFE_DESKTOP_MODE';
 
-const SCOPED_ENV_FIELDS: Record<ScopedInvocationEnvName, keyof InvocationCredentialValues> = {
+const SCOPED_ENV_FIELDS = {
   CAT_CAFE_API_URL: 'apiUrl',
   CAT_CAFE_CAT_ID: 'catId',
   CAT_CAFE_USER_ID: 'userId',
   CAT_CAFE_THREAD_ID: 'threadId',
-};
+} as const;
 
 /**
  * Resolve a launcher env value with the per-turn invocation scope taking
@@ -117,7 +149,21 @@ const SCOPED_ENV_FIELDS: Record<ScopedInvocationEnvName, keyof InvocationCredent
  * member identity so handlers never use the API host env by accident.
  */
 export function resolveInvocationEnv(name: ScopedInvocationEnvName): string | undefined {
-  const scoped = requestCredentials.getStore()?.[SCOPED_ENV_FIELDS[name]];
+  const store = requestCredentials.getStore();
+  if (store?.sharedContext !== undefined) {
+    if (name in SCOPED_ENV_FIELDS) {
+      const value = store[SCOPED_ENV_FIELDS[name as keyof typeof SCOPED_ENV_FIELDS]];
+      if (!value?.trim()) throw new Error(`Shared invocation ${name} is required`);
+      return value;
+    }
+    const context = parseSharedInvocationContext(store.sharedContext);
+    if (name === 'CAT_CAFE_DATA_DIR') return context.dataDir;
+    if (name === 'ALLOWED_WORKSPACE_DIRS') return context.allowedWorkspaceDirs.join(',');
+    if (name === 'CAT_CAFE_DESKTOP_MODE') return context.desktopMode;
+    return undefined;
+  }
+  const scoped =
+    name in SCOPED_ENV_FIELDS ? store?.[SCOPED_ENV_FIELDS[name as keyof typeof SCOPED_ENV_FIELDS]] : undefined;
   if (typeof scoped === 'string' && scoped.length > 0) return scoped;
   return process.env[name];
 }

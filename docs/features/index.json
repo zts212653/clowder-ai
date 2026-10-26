@@ -1923,7 +1923,7 @@
     {
       "id": "F327",
       "name": "Google Family Suite｜Siamese家全家桶接入",
-      "status": "spec | **Owner**: 待认领（operator 指定交给「多人创意游戏 脑洞大会」thread；起步期 You 可当路由器） | **Priority**: P1",
+      "status": "in-progress | **Owner**: 小太阳 @codex61-sol（Phase A 实现），Siamese @gemini-argon（独立 review）；执行 thread `thread_mvosmqalhrabbmvd` | **Priority**: P1",
       "file": "F327-google-family-suite.md"
     },
     {
@@ -1949,6 +1949,12 @@
       "name": "经历参与判断 — 从共同经历到新情境的记忆",
       "status": "in-progress (A1/A2/A3 读源修复已合入并通过 Alpha；其余设计/继承工作按原范围) | **Owner**: 小星星·Maine Coon (@codex-astra) | **Priority**: P1",
       "file": "F332-experience-informed-memory.md"
+    },
+    {
+      "id": "F333",
+      "name": "Shared MCP Process Lifecycle｜多猫共用 MCP 运行资源",
+      "status": "in-progress | **Owner**: 小星星·Maine Coon (@codex-astra, gpt-6-astra；整体与验收)；实现：Sol6.1；审核：Sonnet | **Priority**: P1",
+      "file": "F333-shared-mcp-process-lifecycle.md"
     }
   ]
 }

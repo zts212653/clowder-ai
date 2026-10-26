@@ -8,6 +8,7 @@ import { mkdir, readdir, readFile, rename, unlink, writeFile } from 'node:fs/pro
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { getRetryDelaysMs, postJsonWithRetry } from './callback-retry.js';
+import { resolveInvocationRequestSignal } from './invocation-auth.js';
 
 const DEFAULT_OUTBOX_MAX_FLUSH_BATCH = 20;
 const DEFAULT_OUTBOX_MAX_ATTEMPTS = 10;
@@ -105,6 +106,8 @@ async function enqueueOutbox(entry: OutboxEntry): Promise<boolean> {
 
 async function flushOutbox(): Promise<void> {
   if (!isOutboxEnabled()) return;
+  const signal = resolveInvocationRequestSignal();
+  if (signal?.aborted) return;
   const dir = getOutboxDir();
   if (!existsSync(dir)) return;
 
@@ -117,6 +120,7 @@ async function flushOutbox(): Promise<void> {
     .slice(0, maxFlushBatch);
 
   for (const name of files) {
+    if (signal?.aborted) return;
     const originalPath = join(dir, name);
     const processingPath = `${originalPath}.processing`;
 
@@ -147,6 +151,11 @@ async function flushOutbox(): Promise<void> {
         await unlink(processingPath);
         continue;
       }
+      if (replay.failure.cancelled) {
+        // A cancelled flusher owns neither the queued write nor its retry budget.
+        await rename(processingPath, originalPath);
+        return;
+      }
       if (!replay.failure.retryable || entry.attempts + 1 >= maxAttempts) {
         await unlink(processingPath);
         continue;
@@ -165,6 +174,7 @@ async function flushOutbox(): Promise<void> {
       } catch {
         // Keep best-effort semantics.
       }
+      if (signal?.aborted) return;
     }
   }
 }

@@ -40,6 +40,8 @@ for (const edition of Object.keys(profiles.profiles)) {
         F330_CARRIER: carrier,
       };
       delete env.API_SERVER_PORT;
+      delete env.CAT_CAFE_CREDENTIAL_FILE;
+      delete env.CAT_CAFE_API_URL;
       if (explicitPort) env.API_SERVER_PORT = explicitPort;
       const result = spawnSync(process.execPath, ['--input-type=module', '-e', run], {
         cwd: import.meta.dirname, // Deliberately outside the install root.
@@ -63,6 +65,7 @@ test('ordinary CLI sessions remain silent without reading install configuration'
   const env = { ...process.env };
   delete env.CAT_CAFE_INVOCATION_ID;
   delete env.CAT_CAFE_CALLBACK_TOKEN;
+  delete env.CAT_CAFE_CREDENTIAL_FILE;
   const result = spawnSync(process.execPath, [carrier, 'pre'], { env, input: '{}', encoding: 'utf8' });
   assert.equal(result.status, 0, result.stderr);
   assert.equal(result.stdout, '');

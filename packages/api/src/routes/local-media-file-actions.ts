@@ -21,35 +21,37 @@ function replyFileError(reply: FastifyReply, error: unknown) {
 function human(request: FastifyRequest) {
   return workspaceDirectHuman(request, resolveDirectLocalAuthorizationUserId);
 }
-async function videoFile(root: string, path: string) {
+async function mediaFile(root: string, path: string) {
   // Resolve exactly as the original media reader does: registered/confined root,
   // relative location, denylist and full realpath/symlink checks. No body path.
   const resolved = await resolveWorkspaceFilesystemPath(root, path);
   const mime = guessMime(resolved.toLowerCase());
-  if (!mime.startsWith('video/')) return { local: false as const };
+  if (!mime.startsWith('image/') && !mime.startsWith('video/')) return { local: false as const };
   const file = await stat(resolved);
   if (!file.isFile()) return { local: false as const };
   return { path: resolved, mime, byteLength: file.size };
 }
 
 /** Upload static bytes remain public reads; host actions require the existing direct local human fence. */
-export function registerUploadedVideoFileActions(app: FastifyInstance, uploadDir: string) {
+export function registerUploadedMediaFileActions(app: FastifyInstance, uploadDir: string) {
   registerMediaFileActions(app, '/api/uploads/:filename', {
     onError: replyFileError,
     authorize: async (request) => {
       if (!human(request)) return null;
       const { filename } = z
-        .object({ filename: z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9._-]*\.(mp4|webm|mov)$/i) })
+        .object({
+          filename: z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9._-]*\.(mp4|webm|mov|png|jpe?g|gif|webp|svg|ico)$/i),
+        })
         .strict()
         .parse(request.params);
       z.object({}).strict().parse(request.query);
-      return videoFile(uploadDir, filename);
+      return mediaFile(uploadDir, filename);
     },
   });
 }
 
 /** Existing raw-file coordinates do not create a new root grant or accept an OS path from the caller. */
-export function registerWorkspaceVideoFileActions(app: FastifyInstance) {
+export function registerWorkspaceMediaFileActions(app: FastifyInstance) {
   registerMediaFileActions(app, '/api/workspace/file/raw', {
     onError: replyFileError,
     authorize: async (request) => {
@@ -58,7 +60,7 @@ export function registerWorkspaceVideoFileActions(app: FastifyInstance) {
         .object({ worktreeId: z.string().min(1), path: z.string().min(1) })
         .strict()
         .parse(request.query);
-      return videoFile(await getWorktreeRoot(worktreeId), path);
+      return mediaFile(await getWorktreeRoot(worktreeId), path);
     },
   });
 }

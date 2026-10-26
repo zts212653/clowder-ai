@@ -20,16 +20,24 @@ import {
   type Viewer,
 } from '../cats/services/stores/visibility.js';
 import type { IEvidenceStore, SearchOptions } from './interfaces.js';
+import {
+  attachDecisionSources,
+  boundDecisionSearchResponse,
+  GitMessageDecisionIndex,
+  hasDecisionSourceCoordinate,
+  type MessageDecisionIndex,
+} from './message-decision-index.js';
 import type { MessagePassageCandidate } from './message-passage-search-types.js';
 import { runNativeQueryBatch } from './message-query-native.js';
 import { candidateKey } from './message-query-protocol.js';
 import { MessageQueryQualifier } from './message-query-qualifier.js';
-import { boundMessageSearchResponse, messageSearchMeta } from './message-search-budget.js';
+import { messageSearchMeta } from './message-search-budget.js';
 import { type CanonicalSearchCandidate, collectMessageSearchCandidates } from './message-search-candidates.js';
 import { buildSearchableMessageContent } from './message-search-content.js';
 import { MessageSearchDiagnostics } from './message-search-diagnostics.js';
 import { observeMessageSearchExecution } from './message-search-execution.js';
 import { projectCanonicalSearchMessage } from './message-search-projection.js';
+import { readMessageSourceContext } from './message-source-context.js';
 
 export interface MessageSearchPrincipal {
   userId: string;
@@ -42,10 +50,11 @@ export interface MessageSearchPrincipal {
 
 interface MessageSearchServiceDeps {
   evidenceStore: Pick<IEvidenceStore, 'searchMessagePassages' | 'readMessagePassageState'>;
-  messageStore: Pick<IMessageStore, 'getById'>;
+  messageStore: Pick<IMessageStore, 'getById'> & Partial<Pick<IMessageStore, 'getByThreadAfter'>>;
   threadStore: Pick<IThreadStore, 'get' | 'list'>;
   qualifier?: MessageQueryQualifier;
   onTrace?: (trace: Record<string, unknown>) => void;
+  decisionIndex?: MessageDecisionIndex;
 }
 
 type MessageSearchExecutionContext = Pick<SearchOptions, 'signal' | 'deadlineAt'> & {
@@ -65,8 +74,10 @@ export class MessageSearchAccessError extends Error {
 /** Only this projection may turn indexed message candidates into readable results. */
 export class MessageSearchService {
   private readonly qualifier: MessageQueryQualifier;
+  private readonly decisionIndex: MessageDecisionIndex;
   constructor(private readonly deps: MessageSearchServiceDeps) {
     this.qualifier = deps.qualifier ?? new MessageQueryQualifier(runNativeQueryBatch);
+    this.decisionIndex = deps.decisionIndex ?? new GitMessageDecisionIndex();
   }
 
   private async readableThreads(
@@ -183,7 +194,15 @@ export class MessageSearchService {
   async resolveNavigationReference(
     ref: MessageNavigationReference,
     principal: MessageSearchPrincipal,
+    contextCount?: number,
+    signal?: AbortSignal,
   ): Promise<MessageNavigationAdmission | null> {
+    signal?.throwIfAborted();
+    if (
+      contextCount !== undefined &&
+      (!ref.messageId || !Number.isInteger(contextCount) || contextCount < 0 || contextCount > 3)
+    )
+      throw new Error('Invalid source context request');
     if (!principal.userId) throw new MessageSearchAccessError('Search identity is not accessible');
     await this.readableThreads({ query: 'navigation', threadId: ref.threadId }, principal);
     await this.requireSource({ query: 'navigation' }, principal);
@@ -210,11 +229,24 @@ export class MessageSearchService {
       '',
     );
     if (!projected) return null;
-    return {
+    const admission: MessageNavigationAdmission = {
       status: 'available',
       target: { ...exactRef, contentRevision: projected.result.contentRevision },
       updated: ref.contentRevision !== undefined && ref.contentRevision !== projected.result.contentRevision,
     };
+    if (contextCount === undefined) return admission;
+    const after = this.deps.messageStore.getByThreadAfter;
+    if (!after) throw new Error('Source context reader unavailable');
+    return readMessageSourceContext({
+      admission,
+      message,
+      count: contextCount,
+      signal,
+      after: async (threadId, messageId, limit) =>
+        after.call(this.deps.messageStore, threadId, messageId, limit, principal.userId),
+      readable: (coordinate) => this.readableMessage(coordinate, principal),
+      revalidate: () => this.resolveNavigationReference(ref, principal, undefined, signal),
+    });
   }
 
   async search(
@@ -286,25 +318,37 @@ export class MessageSearchService {
         }),
       );
       const approved = canonical.filter((row) => qualification.decisions.get(candidateKey(row)) === 'supported');
+      const ledgerNeedsRead =
+        this.deps.decisionIndex !== undefined ||
+        approved.slice(0, limit + 1).some((row) => hasDecisionSourceCoordinate(row.result));
+      const decisionIndex = await attachDecisionSources(
+        approved.slice(0, limit + 1).map((row) => row.result),
+        this.decisionIndex,
+        context,
+      );
       const results: MessageSearchResult[] = [];
       await observe('final-revalidation', async () => {
-        if (qualification.nativeCalls) await this.requireSource(input, principal);
+        if (qualification.nativeCalls || ledgerNeedsRead) await this.requireSource(input, principal);
         // Refresh the authority snapshot after external inference; the original one
         // cannot keep a revoked grant alive. Only rows needed for the page/witness are reread.
         currentVisibility = undefined;
         for (const row of approved) {
           checkSearchExecution(context);
-          const fresh = qualification.nativeCalls
-            ? await this.project(
-                row.candidate,
-                principal,
-                input.query,
-                authority,
-                qualification.evidence.get(candidateKey(row)),
-              )
-            : row;
-          if (fresh && fresh.contentRevision === row.contentRevision) results.push(fresh.result);
-          else {
+          // The document lookup is asynchronous too: re-admit after it, even for literal results.
+          const fresh =
+            qualification.nativeCalls || ledgerNeedsRead
+              ? await this.project(
+                  row.candidate,
+                  principal,
+                  input.query,
+                  authority,
+                  qualification.evidence.get(candidateKey(row)),
+                )
+              : row;
+          if (fresh && fresh.contentRevision === row.contentRevision) {
+            if (row.result.decisionSources) fresh.result.decisionSources = row.result.decisionSources;
+            results.push(fresh.result);
+          } else {
             qualification.meta.supported--;
             qualification.meta.unassessed++;
             qualification.meta.status = 'partial';
@@ -313,11 +357,17 @@ export class MessageSearchService {
         }
         checkSearchExecution(context);
       });
-      return boundMessageSearchResponse({
+      const page = results.slice(0, limit);
+      checkSearchExecution(context);
+      return boundDecisionSearchResponse({
         searchId: randomUUID(),
         query: input.query,
-        results: results.slice(0, limit),
-        meta: { ...messageSearchMeta(input, execution, results.length, limit), qualification: qualification.meta },
+        results: page,
+        meta: {
+          ...messageSearchMeta(input, execution, results.length, limit),
+          qualification: qualification.meta,
+          decisionIndex,
+        },
       });
     } finally {
       diagnostics.close();

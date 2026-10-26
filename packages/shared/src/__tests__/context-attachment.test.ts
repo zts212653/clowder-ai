@@ -22,6 +22,30 @@ const threadAttachment = {
 } as const;
 
 describe('ContextAttachmentSchema', () => {
+  it('preserves bounded source attribution separately from a user-authored quote comment', () => {
+    const attachment = {
+      v: 1,
+      id: 'ctx-citation',
+      kind: 'quote',
+      text: '原文',
+      source: {
+        kind: 'message',
+        threadId: 'thread-original',
+        messageId: 'original',
+        displayLabel: 'You · 10-15 09:08 · 已定',
+      },
+    };
+    const parsed = ContextAttachmentSchema.parse(attachment);
+    expect(parsed).toEqual(attachment);
+    expect('comment' in parsed).toBe(false);
+    expect(
+      ContextAttachmentSchema.safeParse({
+        ...attachment,
+        source: { ...attachment.source, displayLabel: 'x'.repeat(513) },
+      }).success,
+    ).toBe(false);
+  });
+
   it('accepts the versioned thread, workspace file, and sourced quote variants', () => {
     expect(ContextAttachmentSchema.parse(threadAttachment)).toEqual(threadAttachment);
     expect(

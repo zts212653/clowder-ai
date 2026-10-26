@@ -1,4 +1,5 @@
 import { PluginSourceLabel } from '../PluginSourceLabel';
+import { PluginStatusDot } from '../PluginStatusDot';
 import { PluginVisual } from '../PluginVisual';
 import { pluginHasUpdate } from '../plugin-manager-attention';
 import type { PluginManagerDesignFixture } from '../plugin-manager-fixtures';
@@ -98,7 +99,10 @@ export function PluginUpdateNotice({
       data-inline-notice
       className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-cafe-border bg-[var(--shell-work)] px-3 py-2.5"
     >
-      <p className="text-sm text-cafe">{t.newVersion(plugin.availableVersion)}</p>
+      <p className="flex items-center gap-2 text-sm text-cafe">
+        <PluginStatusDot tone="update" className="h-2 w-2" />
+        {t.newVersion(plugin.availableVersion)}
+      </p>
       {onInstall && (
         <button
           type="button"

@@ -85,6 +85,30 @@ for (const mode of ['active', 'background'] as const) {
       expect(rows()[0].extra?.outputLayout).toBeUndefined();
     });
 
+    it('appends native deltas with a whole-body layout revision, then adopts the completed layout', () => {
+      begin();
+      for (const [delta, content] of [
+        ['答', '答'],
+        ['案', '答案'],
+      ]) {
+        const output: MessageOutputLayoutV1 = {
+          v: 1,
+          owner: layout(content).owner,
+          contentRevision: layout(content).contentRevision,
+          status: 'unavailable',
+          reason: 'unknown_output',
+        };
+        send({ ...snapshot(delta, output), textMode: 'append' });
+        expect(rows()[0].content).toBe(content);
+        expect(rows()[0].extra?.outputLayout).toEqual(output);
+        expect(projectReplyOutput(rows()[0], THREAD, hash(content))).toBeUndefined();
+      }
+      send(snapshot('答案', layout('答案')));
+      expect(rows()).toHaveLength(1);
+      expect(rows()[0].content).toBe('答案');
+      expect(projectReplyOutput(rows()[0], THREAD, hash('答案'))?.answers[0].text).toBe('答案');
+    });
+
     it('layout for another turn cannot move words out of this response', () => {
       begin();
       const wrong = layout('回答');

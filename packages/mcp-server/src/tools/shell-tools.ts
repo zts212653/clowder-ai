@@ -22,8 +22,14 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { promisify } from 'node:util';
 import { z } from 'zod';
+import { resolveAbsolutePath } from '../utils/path-utils.js';
 import { getDefaultConfig, isPathAllowed } from '../utils/path-validator.js';
 import { errorResult, successResult, type ToolResult } from './file-tools.js';
+import {
+  authorizeInvocationTool,
+  resolveInvocationRequestSignal,
+  resolveSharedInvocationContext,
+} from './invocation-auth.js';
 
 const defineTool = defineMcpMigrationFactory('shell-tools.ts', undefined, {
   resourceFamily: 'runtime-control',
@@ -188,6 +194,8 @@ export function getPathBoundaryRefusalReason(commandLine: string, cwd: string): 
  * downstream guard will then reject it, which is correct).
  */
 function pickDefaultCwd(): string {
+  const shared = resolveSharedInvocationContext();
+  if (shared) return shared.workspaceRoot;
   const { catCafeDir, allowedDirs } = getDefaultConfig();
   for (const dir of allowedDirs) {
     if (path.resolve(dir) !== path.resolve(catCafeDir)) return dir;
@@ -232,7 +240,7 @@ export async function handleShellExec(input: { commandLine: string; cwd?: string
   // Bengal's actual workspace root and lets `cat_cafe_shell_exec({ commandLine })`
   // work without the caller threading cwd through every invocation.
   const cwd = input.cwd ?? pickDefaultCwd();
-  const resolvedCwd = path.resolve(cwd);
+  const resolvedCwd = resolveAbsolutePath(cwd);
   if (!isPathAllowed(resolvedCwd)) {
     return errorResult(`Refused: cwd outside allowed roots (${resolvedCwd}). See ALLOWED_WORKSPACE_DIRS env.`);
   }
@@ -244,11 +252,25 @@ export async function handleShellExec(input: { commandLine: string; cwd?: string
   const t0 = Date.now();
 
   try {
-    const { stdout, stderr } = await execAsync(commandLine, {
+    const shared = resolveSharedInvocationContext();
+    await authorizeInvocationTool('cat_cafe_shell_exec');
+    // The whitelist admits one command only. Replace the shell so abort kills
+    // the admitted command itself rather than leaving an orphaned shell child.
+    const { stdout, stderr } = await execAsync(`exec ${commandLine}`, {
       cwd: resolvedCwd,
       timeout: TIMEOUT_MS,
       maxBuffer: MAX_OUTPUT_BYTES,
       shell: '/bin/sh',
+      signal: resolveInvocationRequestSignal(),
+      ...(shared
+        ? {
+            env: Object.fromEntries(
+              ['PATH', 'HOME', 'LANG', 'TMPDIR'].flatMap((name) =>
+                process.env[name] ? [[name, process.env[name]!]] : [],
+              ),
+            ),
+          }
+        : {}),
     });
     const durationMs = Date.now() - t0;
     const parts = [`Status: success`, `Exit code: 0`, `Duration: ${durationMs}ms`, `Cwd: ${resolvedCwd}`];

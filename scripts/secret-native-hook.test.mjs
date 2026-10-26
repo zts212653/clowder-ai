@@ -29,7 +29,7 @@ test('actual hook blocks native reads, search and MCP args, with no secret diagn
     '',
   );
 });
-test('an already exposed native result produces a rotation instruction without repeating it', () => {
+test('a native pattern match asks for verification without confirming a real credential', () => {
   const result = invoke({
     hook_event_name: 'PostToolUse',
     tool_name: 'Bash',
@@ -38,6 +38,8 @@ test('an already exposed native result produces a rotation instruction without r
   });
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /轮转|rotate/);
+  assert.ok(result.stdout.includes('尚未核实真实凭据'));
+  assert.ok(!result.stdout.includes('已进入模型上下文'));
   assert.ok(!`${result.stdout}${result.stderr}`.includes(secret()));
   assert.equal(invoke({ hook_event_name: 'PostToolUse', tool_response: { stdout: 'safe result' } }).stdout, '');
 });
@@ -68,16 +70,34 @@ for (const recorded of [true, false]) {
       assert.ok(!JSON.stringify(notices).includes(secret()));
       assert.ok(!JSON.stringify(result).includes(secret()));
       assert.equal(original.content[0].text, secret(), 'the original provider result has not been replaced in place');
-      assert.match(output.additionalContext, recorded ? /原线程轮转提醒已持久保存/ : /原线程轮转提醒未能保存/);
+      assert.match(output.additionalContext, recorded ? /核验记录已持久保存/ : /核验记录未能保存/);
+      assert.ok(output.additionalContext.includes('尚未核实真实凭据'));
+      assert.ok(output.additionalContext.includes('仅在确认真实凭据已暴露后'));
+      assert.ok(!output.additionalContext.includes('请轮转相关凭据'));
       assert.equal(output.additionalContext.includes(PENDING_EXPOSURE_NOTICE), !recorded);
       if (mcp) {
         assert.match(output.additionalContext, /已隐藏/);
         assert.equal(output.updatedMCPToolOutput._meta.secretExposure.rotationNotice, recorded ? 'recorded' : 'failed');
       } else {
         assert.equal(Object.hasOwn(output, 'updatedMCPToolOutput'), false);
-        assert.match(output.additionalContext, /原生工具结果.*已进入模型上下文.*无法隐藏.*请轮转/);
+        assert.match(output.additionalContext, /原生工具结果.*可能已被原生提供方消费/);
         assert.doesNotMatch(output.additionalContext, /已隐藏/);
       }
     });
   }
 }
+
+test('inspection failure is not reported as a credential discovery or rotation request', async () => {
+  let original = { safe: 'ordinary result' };
+  for (let depth = 0; depth < 66; depth++) original = { nested: original };
+  const notices = [];
+  const result = await secretNativeHook(
+    { hook_event_name: 'PostToolUse', tool_name: 'Read', tool_response: original },
+    { notify: async (notice) => notices.push(notice) },
+  );
+  assert.deepEqual(notices[0].rules, ['uninspectable-result']);
+  const context = result.hookSpecificOutput.additionalContext;
+  assert.ok(context.includes('检查未完成'));
+  assert.ok(!context.includes('轮转'));
+  assert.ok(!context.includes('已进入模型上下文'));
+});

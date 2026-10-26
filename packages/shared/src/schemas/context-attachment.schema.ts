@@ -62,6 +62,7 @@ export const MessageQuoteSourceSchema = z
     threadId: boundedId,
     messageId: boundedId,
     senderCatId: boundedId.optional(),
+    displayLabel: boundedMetadata.optional(),
     artifactFile: z
       .object({
         item: messageMediaItemSelectorSchema,

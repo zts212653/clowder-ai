@@ -1,4 +1,5 @@
 import { defineMcpMigrationFactory } from '../tool-governance-migration.js';
+import { invocationFetch } from './invocation-auth.js';
 
 /**
  * Rich Block Rules Tool
@@ -26,7 +27,7 @@ export async function handleGetRichBlockRules(): Promise<ToolResult> {
   const url = `${resolveApiUrl()}/api/callbacks/rich-block-rules`;
 
   try {
-    const response = await fetch(url);
+    const response = await invocationFetch(url);
 
     if (!response.ok) {
       const text = await response.text();

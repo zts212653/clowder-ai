@@ -9,6 +9,7 @@ import { promisify } from 'node:util';
 import { type PluginManifest } from '@clowder-ai/plugin-contract';
 import { parse as parseYaml } from 'yaml';
 import { validateHostPluginManifest as validateManifest } from '../desktop-window-runtime/presentation-manifest.js';
+import type { SealReadDiagnostics } from '../diagnostics/observation-work.js';
 import { PLUGIN_ARCHIVE_BUDGET, preflightPluginArchive } from './archive-preflight.js';
 import { recordPackageStagingPhase } from './package-staging-diagnostics.js';
 import { sealStaticPackage } from './static-package-seal.js';
@@ -286,9 +287,9 @@ export async function stageVerifiedPackageContent(
     };
     phase = 'seal';
     const verifySeal = await sealStaticPackage(readyRoot, verifyIntegrity);
-    const verifyStaticIntegrity = async () => {
+    const verifyStaticIntegrity = async (diagnostics?: SealReadDiagnostics) => {
       if (released) throw runtimeError('staged package was released');
-      await verifySeal();
+      await verifySeal(diagnostics);
       if (released) throw runtimeError('staged package was released');
     };
     return { rootDir: readyRoot, verifyIntegrity, verifyStaticIntegrity, release };

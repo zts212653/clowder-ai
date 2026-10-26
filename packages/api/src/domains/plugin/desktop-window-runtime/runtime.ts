@@ -7,6 +7,7 @@ import { StaticFeatureAuthority } from '../host-broker/static-feature-authority.
 import type { ExecutablePluginPackageRecord } from '../host-inventory/types.js';
 import { desktopWindowContribution } from './admission.js';
 import { unexpectedDesktopLossId } from './desktop-loss.js';
+import { ObservationDiagnostics } from './observation-diagnostics.js';
 import { DesktopWindowObserver } from './observer.js';
 import { resolveCompanionArchiveContract } from './published-companion-v2.js';
 import type {
@@ -33,13 +34,13 @@ export class DesktopWindowPluginRuntime implements BundledPluginRuntime {
       broker: options.broker,
       admission: 'desktop-companion',
       now: this.now,
-      verifyActivePackage: async (id, digest) => {
+      verifyActivePackage: async (id, digest, diagnostics) => {
         const run = this.active;
         if (!run || run.id !== id || run.digest !== digest || run.closing)
           throw new Error('desktop package unavailable');
         // The surface serves frozen Host buffers; mutable executable admission
         // keeps verifyIntegrity. Every authority check still validates the seal.
-        await (run.package.verifyStaticIntegrity?.() ?? run.package.verifyIntegrity());
+        await (run.package.verifyStaticIntegrity?.(diagnostics) ?? run.package.verifyIntegrity());
         if (this.active !== run || run.closing) throw new Error('desktop ended during package verification');
       },
     });
@@ -79,10 +80,13 @@ export class DesktopWindowPluginRuntime implements BundledPluginRuntime {
     )
       return null;
     try {
-      return await this.features.run(run.lease, async () =>
-        this.active === run && run.ready && !run.closing && this.now() - observation.observedAt < this.freshnessMs
-          ? structuredClone(observation)
-          : null,
+      return await this.features.run(
+        run.lease,
+        async () =>
+          this.active === run && run.ready && !run.closing && this.now() - observation.observedAt < this.freshnessMs
+            ? structuredClone(observation)
+            : null,
+        new ObservationDiagnostics('presence'),
       );
     } catch {
       return null;

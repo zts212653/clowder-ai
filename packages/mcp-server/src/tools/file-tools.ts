@@ -11,7 +11,9 @@ import * as path from 'node:path';
 import { createInterface } from 'node:readline';
 import { z } from 'zod';
 import { credentialReadDenial } from '../secret-credential-source.js';
+import { resolveAbsolutePath } from '../utils/path-utils.js';
 import { ensureDir, isPathAllowed } from '../utils/path-validator.js';
+import { authorizeInvocationTool, resolveInvocationEnv } from './invocation-auth.js';
 
 const defineTool = defineMcpCanonicalFactory('file-tools.ts', undefined, {
   resourceFamily: 'evidence-navigation',
@@ -83,7 +85,7 @@ type CollectionManifestRef = {
 };
 
 function loadCollectionManifestRefs(): CollectionManifestRef[] {
-  const dataDir = process.env.CAT_CAFE_DATA_DIR ?? path.join(homedir(), '.cat-cafe');
+  const dataDir = resolveInvocationEnv('CAT_CAFE_DATA_DIR') ?? path.join(homedir(), '.cat-cafe');
   const manifestPath = path.join(dataDir, 'library', 'collections.json');
   if (!fs.existsSync(manifestPath)) return [];
   try {
@@ -103,7 +105,7 @@ function resolveFileSlicePath(inputPath: string): { filePath: string; displayPat
       const filePath = path.resolve(inputPath);
       return { filePath, displayPath: filePath };
     }
-    const allowedDirs = (process.env['ALLOWED_WORKSPACE_DIRS'] ?? '')
+    const allowedDirs = (resolveInvocationEnv('ALLOWED_WORKSPACE_DIRS') ?? '')
       .split(/[:,]/)
       .map((dir) => dir.trim())
       .filter(Boolean)
@@ -125,7 +127,7 @@ function resolveFileSlicePath(inputPath: string): { filePath: string; displayPat
         };
       }
     }
-    const filePath = path.resolve(inputPath);
+    const filePath = resolveAbsolutePath(inputPath);
     return { filePath, displayPath: filePath };
   }
 
@@ -193,6 +195,7 @@ export async function handleReadFileSlice(input: {
   }
   const secretDenial = await credentialReadDenial(filePath);
   if (secretDenial) return errorResult(secretDenial);
+  await authorizeInvocationTool('cat_cafe_read_file_slice');
   if (!fs.existsSync(filePath)) {
     return errorResult(`File not found: ${filePath}`);
   }
@@ -277,6 +280,7 @@ export async function handleReadFileSlice(input: {
   if (text.length > FILE_SLICE_RESPONSE_MAX_CHARS) {
     return errorResult('File slice source path exceeds the bounded response budget; use a shorter permitted path');
   }
+  await authorizeInvocationTool('cat_cafe_read_file_slice');
   return successResult(text);
 }
 
@@ -285,7 +289,7 @@ export async function handleReadFileSlice(input: {
  * 写入文件内容，带路径验证和自动创建父目录
  */
 export async function handleWriteFile(input: { path: string; content: string }): Promise<ToolResult> {
-  const filePath = path.resolve(input.path);
+  const filePath = resolveAbsolutePath(input.path);
 
   // 路径验证
   if (!isPathAllowed(filePath)) {
@@ -333,7 +337,7 @@ function listFilesRecursive(dirPath: string, basePath: string): string[] {
  * 列出目录中的文件，支持递归选项
  */
 export async function handleListFiles(input: { path: string; recursive?: boolean }): Promise<ToolResult> {
-  const dirPath = path.resolve(input.path);
+  const dirPath = resolveAbsolutePath(input.path);
   const recursive = input.recursive ?? false;
 
   // 路径验证

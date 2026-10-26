@@ -32,12 +32,14 @@ export function DotConnectionDetail({
   activationAllowed = false,
   onStateChanged,
   secondaryAction = false,
+  compact = false,
 }: {
   installed: boolean;
   activationRequest?: number;
   activationAllowed?: boolean;
   onStateChanged?: () => void | Promise<void>;
   secondaryAction?: boolean;
+  compact?: boolean;
 }) {
   const [status, setStatus] = useState<DotStatus | null>(null);
   const [setup, setSetup] = useState<DotStatus | null>(null);
@@ -137,6 +139,26 @@ export function DotConnectionDetail({
       setBusy(false);
     }
   };
+  const prepareAction = (
+    <button
+      type="button"
+      className={`${secondaryAction ? 'console-button-secondary' : 'console-button-primary'} min-h-8 !font-medium disabled:opacity-50`}
+      disabled={busy || !status?.endpointUrl}
+      onClick={() => void prepare()}
+    >
+      {busy ? '准备中…' : status?.paired ? '查看订阅说明' : '准备订阅说明'}
+    </button>
+  );
+  const testAction = status?.paired && (
+    <SettingsSecondaryButton disabled={busy || status.subscription !== 'active'} onClick={() => void testConnection()}>
+      {tests.length ? '重新检查往返' : '测试两处往返'}
+    </SettingsSecondaryButton>
+  );
+  const disconnectAction = status?.paired && (
+    <SettingsSecondaryButton disabled={busy} onClick={() => void disconnect()}>
+      断开这只 dot
+    </SettingsSecondaryButton>
+  );
   return (
     <section className="space-y-3" aria-label="dot 连接">
       <SettingsText as="h4" variant="sm" className="font-semibold">
@@ -207,27 +229,41 @@ export function DotConnectionDetail({
               <dd>{status.imageAt ? '收到过原图' : '尚未验证'}</dd>
             </div>
           </dl>
-          <SettingsText as="p" variant="sm" tone="muted">
-            你的召唤仅读取来源对话。Pro 会话与 dot 会话共用一个连接，名字和头像分别显示。断开 dot 订阅不影响 Pro。
-          </SettingsText>
+          {!compact && (
+            <SettingsText as="p" variant="sm" tone="muted">
+              你的召唤仅读取来源对话。Pro 会话与 dot 会话共用一个连接，名字和头像分别显示。断开 dot 订阅不影响 Pro。
+            </SettingsText>
+          )}
           {!status.endpointUrl && (
             <SettingsText as="p" variant="sm" tone="muted">
               云端连接地址尚未配置，连接资料准备好后会显示在这里。
             </SettingsText>
           )}
-          <button
-            type="button"
-            className={`${secondaryAction ? 'console-button-secondary' : 'console-button-primary'} min-h-8 !font-medium disabled:opacity-50`}
-            disabled={busy || !status.endpointUrl}
-            onClick={() => void prepare()}
-          >
-            {busy ? '准备中…' : status.paired ? '查看订阅说明' : '准备订阅说明'}
-          </button>
+          {compact ? (
+            <>
+              <SettingsText as="p" variant="sm" tone="muted">
+                召唤只读取来源对话，断开 dot 不影响 Pro
+                {status.paired ? '；两处原对话的收到、读原文和回帖都验证通过后再启用。' : '。'}
+              </SettingsText>
+              <div role="group" aria-label="dot 连接操作" className="flex flex-wrap items-center gap-2">
+                {prepareAction}
+                {testAction}
+                {disconnectAction}
+              </div>
+            </>
+          ) : (
+            prepareAction
+          )}
           {setup?.endpointUrl && (
             <div className="space-y-3 rounded-lg border border-cafe p-3">
               <SettingsText as="p" variant="sm" tone="secondary">
                 只为目标 dot 准备订阅，无需重新添加猫咖插件或更换 Pro 的连接口令。把下面的说明发给你的 dot。
               </SettingsText>
+              {compact && (
+                <SettingsText as="p" variant="sm" tone="muted">
+                  Pro 会话与 dot 会话共用一个连接，名字和头像分别显示。
+                </SettingsText>
+              )}
               <SettingsText as="p" variant="sm" tone="muted">
                 若 ChatGPT 尚未连接猫咖，先按猫咖插件原有流程连接；不要另装一份 dot 连接。
               </SettingsText>
@@ -239,15 +275,14 @@ export function DotConnectionDetail({
           )}
           {status.paired && (
             <div className="space-y-3">
-              <SettingsText as="p" variant="sm" tone="secondary">
-                同时测两处原对话。收到、读过和回帖分别核实；两处都回到原处后再用左边开关启用。
-              </SettingsText>
-              <SettingsSecondaryButton
-                disabled={busy || status.subscription !== 'active'}
-                onClick={() => void testConnection()}
-              >
-                {tests.length ? '重新检查往返' : '测试两处往返'}
-              </SettingsSecondaryButton>
+              {!compact && (
+                <>
+                  <SettingsText as="p" variant="sm" tone="secondary">
+                    同时测两处原对话。收到、读过和回帖分别核实；两处都回到原处后再用左边开关启用。
+                  </SettingsText>
+                  {testAction}
+                </>
+              )}
               {tests.length > 0 && (
                 <table className="w-full text-xs">
                   <thead>
@@ -280,11 +315,7 @@ export function DotConnectionDetail({
               )}
             </div>
           )}
-          {status.paired && (
-            <SettingsSecondaryButton disabled={busy} onClick={() => void disconnect()}>
-              断开这只 dot
-            </SettingsSecondaryButton>
-          )}
+          {!compact && disconnectAction}
         </>
       )}
     </section>

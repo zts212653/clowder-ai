@@ -157,6 +157,7 @@ import {
 } from './domains/cats/services/agents/invocation/response-draft-settlement.js';
 import { SessionContinuationCoordinator } from './domains/cats/services/agents/invocation/SessionContinuationCoordinator.js';
 import { SessionMutex } from './domains/cats/services/agents/invocation/SessionMutex.js';
+import { sharedMcpDeploymentId } from './domains/cats/services/agents/invocation/shared-mcp-launch.js';
 import {
   createSidebarPresenceSource,
   type SidebarTerminalExecution,
@@ -425,6 +426,7 @@ import { runSchedulerReplyUserIdBackfill } from './infrastructure/scheduler/sche
 import { securityHeadersPlugin } from './infrastructure/security-headers.js';
 import { sessionAuthPlugin, sessionRoute } from './infrastructure/session-auth.js';
 import { startupMilestone } from './infrastructure/startup-diagnostics.js';
+import { startProcessCpuCapture } from './infrastructure/telemetry/cpu/process-cpu-capture.js';
 import { SocketManager } from './infrastructure/websocket/index.js';
 import { avatarsRoutes } from './routes/avatars.js';
 import {
@@ -1760,6 +1762,16 @@ async function main(): Promise<void> {
     progress: (entry, targetCatId) => queueProcessor.progressOwnedCarrier(entry, targetCatId),
   });
   const schedulerDeliver = createDeliverFn({ messageStore, socketManager, persistedQueueDelivery });
+  const { WorktreeNoticeService } = await import('./infrastructure/worktrees/WorktreeNoticeService.js');
+  const worktreeNotices = new WorktreeNoticeService({
+    repoRoot,
+    scriptRoot: runtimeEntrypointRoot,
+    getThread: async (id) => threadStore.get(id),
+    deliver: schedulerDeliver,
+    warn: (message) => app.log.warn(message),
+  });
+  worktreeNotices.start();
+  app.addHook('onClose', async () => worktreeNotices.stop());
   const schedulerDeliverPrivate = createDeliverPrivateFn({ persistedQueueDelivery });
   const schedulerLifecycleToast = createLifecycleToastFn({ socketManager });
   const schedulerFetchContent = createFetchContentFn();
@@ -4795,8 +4807,14 @@ async function main(): Promise<void> {
   // members (iCode), authenticated per invocation against the live registry.
   registerMemberMcpRoutes(app, {
     registry,
-    resolveMemberToolFamilies: ({ catId }) => resolveMemberToolFamiliesForCat(resolveActiveProjectRoot(), catId),
+    resolveMemberToolFamilies: ({ catId, sharedContext }) =>
+      resolveMemberToolFamiliesForCat(
+        sharedContext?.capabilityRoot ?? resolveActiveProjectRoot(),
+        catId,
+        sharedContext?.workspaceRoot,
+      ),
     apiBaseUrl: `http://127.0.0.1:${PORT}`,
+    deploymentId: sharedMcpDeploymentId(`http://127.0.0.1:${PORT}`),
     log: app.log,
   });
   await app.register(callbackRuntimeInteractionRoutes, {
@@ -5051,6 +5069,7 @@ async function main(): Promise<void> {
     ]),
     projectRoot: pluginProjectRoot,
     capabilityProjectRoot: pluginCapabilityRoot,
+    binaryProjectRoot: runtimeEntrypointRoot,
     editorParentOrigin: new URL(resolveFrontendBaseUrl(process.env, app.log)).origin,
     desktopExecutor: {
       prepare: async () => {
@@ -7255,6 +7274,8 @@ async function main(): Promise<void> {
   // delivery boundary, so register cleanup now and late-bind its handle below.
   let designGateThresholdObserver: { close(): void } | null = null;
   app.addHook('onClose', async () => designGateThresholdObserver?.close());
+  let processCpuCapture: { close(): Promise<void> } | undefined;
+  app.addHook('onClose', async () => processCpuCapture?.close());
 
   // #603: Preload governance overlay (.local / .local-override)
   // Start listening
@@ -7291,6 +7312,11 @@ async function main(): Promise<void> {
       listen: async () => {
         const listening = await app.listen({ port: PORT, host: HOST });
         startupMilestone('http-listening');
+        processCpuCapture = startProcessCpuCapture({
+          enabled: process.env.CAT_CAFE_CPU_CAPTURE_ONCE === '1',
+          dataDir: process.env.CAT_CAFE_DATA_DIR ?? join(homedir(), '.cat-cafe'),
+          logger: app.log,
+        });
         releaseHostListening();
         await initialPlugins?.activate();
         return listening;

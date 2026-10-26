@@ -80,7 +80,7 @@ export function MailboxSettledResults({
     <section data-testid="mailbox-settled-results" className="mt-5 min-w-0" aria-label={t.title}>
       <h3 className="mb-2 text-sm font-semibold">{t.title}</h3>
       {current.preparing ? <p className="text-xs text-[var(--shell-muted)]">{t.preparing}</p> : null}
-      {generation === null || current.excluded !== excluded || current.retry !== retry ? (
+      {!current.preparing && (generation === null || current.excluded !== excluded || current.retry !== retry) ? (
         <p className="text-xs text-[var(--shell-muted)]">{t.refreshing}</p>
       ) : null}
       {items ? (

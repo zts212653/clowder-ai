@@ -23,6 +23,28 @@
   container: chat-header / inline-size;
 }
 
+/* Use the chat pane's available width, including desktop split panes. */
+[data-thread-chat-full-v2] {
+  container: thread-chat / inline-size;
+}
+
+@container thread-chat (max-width: 420px) {
+  /* 28px latest target + 2px edge + 10px reading gap; both columns inherit this one budget. */
+  [data-thread-chat-full-v2] > [data-thread-chat-history],
+  [data-thread-chat-full-v2] [data-thread-chat-footer] {
+    --thread-chat-inset-end: 2.5rem;
+  }
+
+  /* Stack the existing targets: latest is 12px from the bottom, 28px high, with an 8px gap. */
+  [data-thread-chat-full-v2] > [data-thread-chat-history] > [data-message-piano] {
+    bottom: 3rem;
+  }
+
+  [data-thread-chat-full-v2] > [data-thread-chat-history] [data-thread-scroll-placement="rail"] {
+    right: 0.125rem;
+  }
+}
+
 @container chat-header (max-width: 420px) {
   .shell-chat-header-layout {
     height: auto;

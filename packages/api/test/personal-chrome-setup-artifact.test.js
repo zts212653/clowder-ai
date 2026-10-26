@@ -49,7 +49,7 @@ test(
       expectedPackageDigest: pin.digest,
       packagePluginId: manifest.pluginId,
       effectiveGrants: [],
-      ...(pin.version === '0.1.0-alpha.6'
+      ...(['0.1.0-alpha.6', '0.1.0-alpha.7'].includes(pin.version)
         ? {
             provenance: {
               kind: 'catalog',

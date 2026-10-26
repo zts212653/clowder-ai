@@ -95,7 +95,7 @@ it('restores the exact legacy configuration after a round trip, including after 
   await act(async () => runtime.click());
   await choose('claude');
   await legacyConfirm();
-  expect(host.querySelector('[data-testid=member-save-bar]')).toBeNull();
+  expect(host.querySelector('[data-testid=member-save-bar]')?.textContent).toContain('没有改动');
   expect(host.querySelector('[role=combobox]')?.textContent).toContain('opus');
 });
 
@@ -119,7 +119,7 @@ it('keeps the draft and exact old configuration after a rejected save', async ()
   expect(host.querySelector('[data-testid=member-identity-summary]')?.textContent).toContain('Codex');
   expect(saved).not.toHaveBeenCalled();
   await choose('claude');
-  expect(host.querySelector('[data-testid=member-save-bar]')).toBeNull();
+  expect(host.querySelector('[data-testid=member-save-bar]')?.textContent).toContain('没有改动');
   expect(host.querySelector('[role=combobox]')?.textContent).toContain('opus');
 });
 
@@ -140,7 +140,7 @@ it('allows returning to a saved custom ACP tool that discovery does not list', a
   const oldTool = [...(select?.options ?? [])].find((o) => o.textContent?.includes('private-agent'));
   expect(oldTool).toBeDefined();
   await choose(oldTool?.value ?? 'missing');
-  expect(host.querySelector('[data-testid=member-save-bar]')).toBeNull();
+  expect(host.querySelector('[data-testid=member-save-bar]')?.textContent).toContain('没有改动');
 });
 
 it('keeps the save trace open through the actual editor refresh and records the UI commit', async () => {

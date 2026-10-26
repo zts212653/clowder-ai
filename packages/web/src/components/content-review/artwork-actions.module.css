@@ -26,6 +26,11 @@
   margin-left: auto;
   flex: none;
 }
+.headerActions:focus-visible {
+  outline: 2px solid var(--semantic-info);
+  outline-offset: 2px;
+  border-radius: 8px;
+}
 .header > button,
 .headerActions > button,
 .headerActions > a,

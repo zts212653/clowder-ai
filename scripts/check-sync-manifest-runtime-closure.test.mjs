@@ -731,6 +731,7 @@ describe('outbound sync runtime closure', { skip: !isHomeRepo && 'sync manifest 
       .filter(Boolean);
     const exportedClaudePaths = trackedClaudePaths.filter((repoPath) => isExported(repoPath)).sort();
     const expectedClaudePaths = [
+      '.claude/hooks/f236-anchor-posttool.mjs',
       '.claude/hooks/f24-compaction.mjs',
       '.claude/hooks/f24-post-compact-bootstrap.sh',
       '.claude/hooks/f24-pre-compact.sh',

@@ -6,7 +6,7 @@ import { afterEach, describe, it, mock } from 'node:test';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { guardSecretToolCall } from '../src/secret-tool-guard.js';
+import { guardSecretToolCall, recordSecretExposure } from '../src/secret-tool-guard.js';
 import { registerCollabToolset, registerMemoryToolset } from '../src/server-toolsets.js';
 import { handleReadFileSlice } from '../src/tools/file-tools.js';
 
@@ -37,6 +37,21 @@ afterEach(async () => {
 });
 
 describe('registered MCP transport secret protection', () => {
+  it('records unavailable inspection without claiming a credential was found', async () => {
+    process.env.CAT_CAFE_API_URL = 'http://127.0.0.1:59999';
+    process.env.CAT_CAFE_INVOCATION_ID = 'inv-secret-test';
+    process.env.CAT_CAFE_CALLBACK_TOKEN = 'callback-test';
+    const requests: string[] = [];
+    globalThis.fetch = (async (_url, init) => {
+      requests.push(String(init?.body));
+      return new Response('{"messageId":"inspection-notice"}', { status: 200 });
+    }) as typeof fetch;
+    await recordSecretExposure({ state: 'exposed_or_suspected', rules: ['uninspectable-result'] });
+    assert.equal(requests.length, 1);
+    assert.ok(requests[0].includes('检查未完成'));
+    assert.ok(!requests[0].includes('轮转'));
+  });
+
   it('checks the resolved workspace/collection file before opening an opaque credential alias', async () => {
     const root = await mkdtemp(join(tmpdir(), 'secret-file-resolution-'));
     const data = join(root, 'data');
@@ -109,6 +124,8 @@ describe('registered MCP transport secret protection', () => {
     assert.equal(notices[0].headers['x-invocation-id'], 'inv-secret-test');
     assert.equal(notices[0].headers['x-callback-token'], 'callback-test');
     assert.ok(!notices[0].body.includes(credential()));
-    assert.match(notices[0].body, /轮转提醒/);
+    assert.ok(notices[0].body.includes('尚未核实真实凭据'));
+    assert.ok(notices[0].body.includes('仅在确认真实凭据已暴露后'));
+    assert.ok(!notices[0].body.includes('请轮转相关凭据'));
   });
 });

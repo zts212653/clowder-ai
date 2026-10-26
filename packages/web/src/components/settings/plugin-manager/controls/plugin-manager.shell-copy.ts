@@ -49,6 +49,8 @@ export const pluginManagerCopy = defineShellCopy(
       configHint: '请检查下方配置和插件文档，再使用插件提供的操作处理。',
       packageHint: '请检查安装包和插件文档中的安装要求。',
       incompatibleHint: '请更新到兼容当前 Host 的插件版本，再重新启用。',
+      incompatibleNoUpdateHint: '当前没有可用的兼容更新。',
+      incompatibleUpdateHint: (version: string) => `可尝试更新到 ${version}，安装前会校验兼容性；通过后再重新启用。`,
       introduction: '简介',
       identity: '插件标识',
       available: (version: string) => `可用版本：${version}`,
@@ -113,6 +115,9 @@ export const pluginManagerCopy = defineShellCopy(
       configHint: 'Check the configuration and plugin documentation, then use the plugin’s actions below.',
       packageHint: 'Check the package and the installation requirements in the plugin documentation.',
       incompatibleHint: 'Update to a compatible plugin version, then enable it again.',
+      incompatibleNoUpdateHint: 'No compatible update is currently available.',
+      incompatibleUpdateHint: (version: string) =>
+        `You can try updating to ${version}. Compatibility will be checked before installation; enable it again after validation succeeds.`,
       introduction: 'Introduction',
       identity: 'Plugin identity',
       available: (version: string) => `Available version: ${version}`,
@@ -134,6 +139,7 @@ export const pluginManagerCopy = defineShellCopy(
   {
     samples: {
       updateTo: [['0.1.2'], ['1.0.0']],
+      incompatibleUpdateHint: [['0.1.2'], ['1.0.0']],
       enable: [['Companion'], ['GitHub']],
       disable: [['Companion'], ['GitHub']],
       uninstall: [['Companion'], ['GitHub']],

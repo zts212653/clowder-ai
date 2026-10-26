@@ -86,6 +86,7 @@ export class DesktopWindowObserver {
         ]),
       );
       const receivedAt = now();
+      attempt.diagnostics.costs.receive(receivedAt);
       if (!isCurrent()) throw new Error('desktop window ended');
       // Only a fresh native reply may renew a still-current Broker binding.
       // Expired bindings fail here; renewal never revives old feature authority.
@@ -97,7 +98,9 @@ export class DesktopWindowObserver {
           lease,
           (authority) =>
             attempt.diagnostics.measure('observation-publish', async () => {
-              if (now() - receivedAt >= freshnessMs) throw new Error('desktop observation expired');
+              const publishedAt = now();
+              attempt.diagnostics.costs.publish(publishedAt);
+              if (publishedAt - receivedAt >= freshnessMs) throw new Error('desktop observation expired');
               const contributionId = authority.contributionIds[0];
               if (!contributionId) throw new Error('desktop authority without contribution');
               this.observation = {

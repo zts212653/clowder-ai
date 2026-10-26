@@ -1,4 +1,5 @@
 import { defineMcpCanonicalFactory, defineMcpMigrationFactory } from '../tool-governance-migration.js';
+import { invocationFetch } from './invocation-auth.js';
 
 /**
  * F139 Phase 3A: Schedule MCP Tools (AC-G2)
@@ -46,7 +47,7 @@ async function callbackDelete(path: string, options?: { agentKeyCatId?: string }
   if (!config) return errorResult(NO_CONFIG_ERROR);
 
   try {
-    const response = await fetch(`${config.apiUrl}${path}`, {
+    const response = await invocationFetch(`${config.apiUrl}${path}`, {
       method: 'DELETE',
       headers: { 'Content-Type': 'application/json', ...buildAuthHeaders(config) },
     });

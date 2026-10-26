@@ -3,7 +3,7 @@ import { Session } from 'node:inspector';
 import { test } from 'node:test';
 import { setImmediate } from 'node:timers/promises';
 
-const { createSlowReadCpuObserver } = await import('../dist/infrastructure/telemetry/slow-read-cpu-observer.js');
+const { createSlowReadCpuObserver } = await import('../dist/infrastructure/telemetry/cpu/slow-read-cpu-observer.js');
 const profile = { nodes: [], samples: [], startTime: 0, endTime: 2000 };
 
 for (const trigger of ['timer', 'settlement']) {

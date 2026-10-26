@@ -2,6 +2,18 @@ import type { EnvDefinition } from '../env-registry.js';
 
 export const ENV_DEFINITIONS_8: readonly EnvDefinition[] = [
   {
+    name: 'CAT_CAFE_CPU_CAPTURE_ONCE',
+    defaultValue: '0',
+    description:
+      '仅显式批准的下次启动设1：高CPU/ELU连续两窗后录一次60秒进程CPU；原件私有保存，不开启调试端口。默认关闭。',
+    category: 'telemetry',
+    sensitive: false,
+    hubVisible: false,
+    runtimeEditable: false,
+    restartRequired: true,
+    allowedValues: ['0', '1'],
+  },
+  {
     name: 'EMBED_URL',
     defaultValue: 'http://127.0.0.1:9880',
     description: 'Embedding 服务地址（独立 Python GPU 进程 scripts/embed-api.py）',

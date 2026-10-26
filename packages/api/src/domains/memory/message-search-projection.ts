@@ -11,6 +11,7 @@ import {
 import type { MessagePassageCandidate, MessagePassageIndexState } from './message-passage-search-types.js';
 import type { CanonicalSearchCandidate } from './message-search-candidates.js';
 import { buildSearchableMessageContent } from './message-search-content.js';
+import { messageSourceText } from './message-source-text.js';
 
 export function projectMessageSearchSnippet(
   text: string,
@@ -99,15 +100,17 @@ export function projectCanonicalSearchMessage(
     richBlocks: message.extra?.rich?.blocks,
   });
   if (candidate.content !== canonical) return null;
-  const bodyMatches = query.trim() && message.content.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase());
+  const visible = messageSourceText(message.content, message.contentBlocks);
+  const bodyMatches = query.trim() && visible.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase());
   const attachmentMatches =
     !bodyMatches && query.trim() && canonical.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase());
-  const useBody = message.content.trim() && !attachmentMatches;
+  const useBody = visible.trim() && !attachmentMatches;
   const excerpt = evidence
-    ? projectQualifiedSnippet(message.content, canonical, evidence)
+    ? projectQualifiedSnippet(visible, canonical, evidence)
     : useBody
-      ? projectMessageSearchSnippet(message.content, 'body', query)
+      ? projectMessageSearchSnippet(visible, visible === message.content ? 'body' : 'attachment-text', query)
       : projectMessageSearchSnippet(canonical, 'attachment-text', query);
+  if (visible !== message.content) excerpt.source = 'attachment-text';
   return {
     threadId: thread.id,
     messageId: message.id,

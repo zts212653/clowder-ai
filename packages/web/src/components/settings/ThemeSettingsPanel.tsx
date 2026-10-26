@@ -6,6 +6,7 @@ import { HubIcon } from '../hub-icons';
 import { useShellCopy } from '../shell/shell-copy';
 import { type ShellLanguage, useShellLanguage, writeShellLanguage } from '../shell/shell-language';
 import { type ShellPresentation, useShellPresentation, writeShellPresentation } from '../shell/shell-presentation';
+import { ProcessTalkSettings } from './ProcessTalkSettings';
 import { themeSettingsCopy } from './theme-settings.shell-copy';
 
 const OklchTuner = lazy(() => import('../dev/OklchTuner').then((m) => ({ default: m.OklchTuner })));
@@ -157,6 +158,8 @@ export function ThemeSettingsPanel() {
           ))}
         </div>
       </section>
+
+      <ProcessTalkSettings />
 
       <section aria-labelledby="theme-list-heading">
         <h3 id="theme-list-heading" className="text-sm font-semibold" style={{ color: 'var(--shell-ink)' }}>

@@ -36,10 +36,13 @@ test('provider result boundary records a credential-free warning with the exact 
     );
     assert.ok(!JSON.stringify(result).includes(fake()));
     assert.match(result.content ?? '', /轮转/);
+    assert.ok(result.content?.includes('尚未核实真实凭据'));
+    assert.ok(result.content?.includes('仅在确认真实凭据已暴露后'));
     assert.equal(requests.length, 1);
     assert.equal(requests[0].headers['x-invocation-id'], 'fixture-inv');
     assert.equal(requests[0].headers['x-callback-token'], 'fixture-callback');
     assert.ok(!requests[0].body.includes(fake()));
+    assert.ok(requests[0].body.includes('尚未核实真实凭据'));
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -99,6 +102,8 @@ test('an uninspectable native payload is discarded instead of retaining unsafe r
   assert.equal(result.toolRawPayload, undefined);
   assert.equal(result.toolInput, undefined);
   assert.match(result.content ?? '', /hidden|轮转/);
+  assert.ok(result.content?.includes('检查未完成'));
+  assert.ok(!result.content?.includes('轮转'));
 });
 
 test('raw native output still counts as exposure when the display content omits it', async () => {

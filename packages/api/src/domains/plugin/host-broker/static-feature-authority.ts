@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { PluginManifest } from '@clowder-ai/plugin-contract';
+import type { SealReadDiagnostics, SnapshotReadDiagnostics } from '../diagnostics/observation-work.js';
 import type { PluginInventoryStore, PluginInventoryTransaction } from '../host-inventory/ports.js';
 import type { HostBrokerControlPlane } from './control-plane.js';
 import type { HostBrokerStore, HostBrokerTransaction } from './ports.js';
@@ -18,7 +19,11 @@ interface Options {
   readonly store: HostBrokerStore;
   readonly broker: HostBrokerControlPlane;
   /** The runtime owns the verified, private tree; candidates cannot supply this verifier. */
-  readonly verifyActivePackage: (pluginInstanceId: string, packageDigest: string) => Promise<void>;
+  readonly verifyActivePackage: (
+    pluginInstanceId: string,
+    packageDigest: string,
+    diagnostics?: SealReadDiagnostics,
+  ) => Promise<void>;
   readonly now?: () => number;
   /** Chosen by the trusted Host consumer, never by package or renderer input. */
   readonly admission?: StaticFeatureAdmission;
@@ -36,6 +41,8 @@ export type StaticFeatureRunStage =
 
 /** Optional trusted Host observation, never a package input or authority grant. */
 export interface StaticFeatureRunDiagnostics {
+  readonly snapshotDiagnostics?: SnapshotReadDiagnostics;
+  readonly packageDiagnostics?: SealReadDiagnostics;
   measure<T>(stage: StaticFeatureRunStage, work: () => Promise<T>): Promise<T>;
   checkAuthority(work: () => void): void;
 }
@@ -208,14 +215,18 @@ export class StaticFeatureAuthority {
     // otherwise starves renewal and owner revocation. Recheck all authority
     // inside the transaction after the scan, including the current clock.
     const candidate = (
-      await measure('feature-snapshot', () => this.options.store.snapshot())
+      await measure('feature-snapshot', () => this.options.store.snapshot(diagnostics?.snapshotDiagnostics))
     ).staticFeatures?.leases.find((r) => r.executionLease === executionLease);
     if (!candidate || candidate.state === 'revoked') throw denied('feature lease is revoked or unknown');
     if (candidate.state !== phase) throw denied(`feature lease is not ${phase}`);
     let packageTrusted = true;
     try {
       await measure('package-verification', () =>
-        this.options.verifyActivePackage(candidate.pluginInstanceId, candidate.packageRevision),
+        this.options.verifyActivePackage(
+          candidate.pluginInstanceId,
+          candidate.packageRevision,
+          diagnostics?.packageDiagnostics,
+        ),
       );
     } catch {
       packageTrusted = false;

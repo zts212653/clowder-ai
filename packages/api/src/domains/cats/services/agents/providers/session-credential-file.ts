@@ -26,6 +26,11 @@ export interface PreparedCredentialEnv {
   path: string;
 }
 
+/** Managed shared and rollback transports keep the same one-turn credential owner. */
+export function isInvocationBoundMcpLaunch(env?: Record<string, string>): boolean {
+  return Boolean(env?.CAT_CAFE_CREDENTIAL_FILE && ['shared', 'stdio'].includes(env.CAT_CAFE_MCP_TRANSPORT));
+}
+
 interface CredentialPayload {
   threadId: string;
   catId: string;
@@ -103,6 +108,15 @@ export function prepareSessionCredentialFile(
   if (!prepared) return null;
   if (!writeSessionCredentialFile(callbackEnv, prepared.path)) return null;
   return prepared;
+}
+
+/** Only the owning invocation calls this after its carrier has finished closing. */
+export function releaseInvocationCredentialFile(path: string): void {
+  try {
+    unlinkSync(path);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+  }
 }
 
 export function bindSessionCredentialFile(namespace: string, sessionId: string | undefined, path: string): void {

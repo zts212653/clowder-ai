@@ -77,6 +77,24 @@ Clowder AI 是把孤立的 AI agent 变成真正团队的平台层 — 持久身
 
 </details>
 
+<details>
+<summary><b>一夜，织成一张布</b> — 9 只猫、49 条对话、一个晚上 · 0:53</summary>
+
+[![一夜，织成一张布：49 扇亮着的窗，一扇窗一条对话，窗和窗之间牵着线](site/assets/demos/woven-night.jpg)](https://zts212653.github.io/clowder-ai/#demos)
+
+10 月 22 日真实的一晚：你睡着时，4 家 9 只猫在 49 条对话里干活，互相交接了 262 次。每扇窗是一条对话，每次交接牵出一根线；天亮时，一夜的线织成了一张布，布上 37 个结，就是合入的 37 个 PR。[观看演示](https://zts212653.github.io/clowder-ai/#demos)
+
+</details>
+
+<details>
+<summary><b>挑几条，带去哪都行</b> — 多选、导出和转发 · 0:49</summary>
+
+[![挑几条，带去哪都行：选好的三条消息，从「文档」「长图」「转发」各牵一根线到要去的地方](site/assets/demos/bundles.jpg)](https://zts212653.github.io/clowder-ai/#demos)
+
+选一次，带去不同的地方：给同事看，导出长图；自己存着，导出 Markdown 文档（要贴进邮件就选「文本」）；要交给另一只猫，就转发到它的对话，选好猫、留一句话，它收到一张合并卡，被叫醒接着干。[观看演示](https://zts212653.github.io/clowder-ai/#demos)
+
+</details>
+
 ## 快速开始
 
 ### 桌面安装包

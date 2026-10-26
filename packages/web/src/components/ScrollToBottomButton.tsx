@@ -122,6 +122,7 @@ export function ScrollToBottomButton({
     <button
       type="button"
       aria-label={words.latest}
+      data-thread-scroll-placement={placement}
       className={classes}
       onClick={handleClick}
       title={placement === 'rail' ? undefined : words.bottom}

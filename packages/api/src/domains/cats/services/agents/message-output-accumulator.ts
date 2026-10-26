@@ -14,16 +14,12 @@ export function createMessageOutputState(owner: MessageOutputOwner): MessageOutp
   return { owner, entries: [] };
 }
 
-function observationReason(
-  validPrefix: boolean,
-  mode: unknown,
-  identity: unknown,
-  channel: unknown,
-  complete: unknown,
-) {
+function observationReason(validPrefix: boolean, mode: unknown, identity: unknown, complete: unknown) {
   if (!validPrefix || (mode !== 'append' && mode !== 'replace')) return 'conflict' as const;
   if (complete !== undefined && typeof complete !== 'boolean') return 'conflict' as const;
-  if (!identity || !channel) return 'unknown_output' as const;
+  if (!identity) return 'unknown_output' as const;
+  // Missing channels remain unavailable at materialization. They are not a
+  // permanent conflict: a native item may reveal its phase at completion.
   return undefined;
 }
 
@@ -49,7 +45,7 @@ function observation(input: MessageOutputTextInput) {
     displayPrefix: prefix === 2 && validPrefix,
     text: prefix === 2 && validPrefix ? input.content.slice(2) : input.content,
     reason:
-      observationReason(validPrefix, nativeMode, identity, channel, metadata?.complete) ??
+      observationReason(validPrefix, nativeMode, identity, metadata?.complete) ??
       (input.fragment?.changed ? ('content_changed' as const) : undefined),
   };
 }
@@ -78,21 +74,29 @@ function updateExistingRun(
   previous: OutputTextRun,
 ): MessageOutputState {
   const sameChannel = previous.channel === next.channel;
+  const observedChannel = previous.channel === undefined && next.channel !== undefined && !previous.complete;
   const duplicateCompletion =
     previous.complete && next.complete && sameChannel && next.mode === 'replace' && previous.text === next.text;
-  if (duplicateCompletion) return state;
-  if (!sameChannel || previous.complete || index !== state.entries.length - 1 || next.reason) {
+  if (duplicateCompletion) return next.reason ? { ...state, reason: state.reason ?? next.reason } : state;
+  const conflictingObservation = next.reason && next.reason !== 'content_changed';
+  if (
+    (!sameChannel && !observedChannel) ||
+    previous.complete ||
+    index !== state.entries.length - 1 ||
+    conflictingObservation
+  ) {
     // Contradictory public text remains readable, with no classification claim.
     return appendRun({ ...state, reason: 'conflict' }, { kind: 'text', ...next, paragraphBoundary: true });
   }
   const entries = [...state.entries];
   entries[index] = {
     ...previous,
+    channel: next.channel,
     text: next.mode === 'replace' ? next.text : previous.text + next.text,
     complete: next.complete,
     displayPrefix: previous.displayPrefix || next.displayPrefix,
   };
-  return { ...state, entries };
+  return { ...state, entries, ...(next.reason ? { reason: state.reason ?? next.reason } : {}) };
 }
 
 function appendUnobservedRun(state: MessageOutputState, next: Observation): MessageOutputState {

@@ -69,6 +69,9 @@ export async function protectSecretToolResult(result, options = {}) {
   } catch {
     /* The safe result reports this gap; do not expose the original again. */
   }
+  const summary = inspected.rules.includes('uninspectable-result')
+    ? '工具结果的安全检查未完成，结果已隐藏；这不代表已确认凭据泄露。'
+    : '工具结果命中疑似凭据格式，匹配内容已隐藏，尚未核实真实凭据；仅在确认真实凭据已暴露后按原授权轮转。';
   return {
     ...inspected.value,
     _meta: {
@@ -79,7 +82,7 @@ export async function protectSecretToolResult(result, options = {}) {
       ...(Array.isArray(inspected.value?.content) ? inspected.value.content : []),
       {
         type: 'text',
-        text: `工具结果含疑似凭据，已隐藏。请轮转相关凭据。原线程轮转提醒${rotationNotice === 'recorded' ? '已持久保存' : '未能保存，请保留本结果并处理'}。`,
+        text: `${summary}核验记录${rotationNotice === 'recorded' ? '已持久保存' : '未能保存'}。`,
       },
       ...(rotationNotice === 'failed' ? [{ type: 'text', text: PENDING_EXPOSURE_NOTICE }] : []),
     ],

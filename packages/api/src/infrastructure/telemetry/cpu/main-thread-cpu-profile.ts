@@ -1,15 +1,10 @@
 import type { Profiler } from 'node:inspector';
+import { type CodeCoordinate, codeCoordinate } from './cpu-code-coordinate.js';
 
-const API_ROOT = new URL('../../', import.meta.url).href;
 const MAX_NODES = 4096;
 const MAX_SAMPLES = 10000;
 type CallFrame = Profiler.ProfileNode['callFrame'];
 type Category = 'api' | 'node' | 'external' | 'idle' | 'gc' | 'native';
-interface CodeCoordinate {
-  file: string;
-  function: string;
-  line: number;
-}
 interface SampledCoordinate extends CodeCoordinate {
   selfSamples: number;
   nativeSamples?: number;
@@ -116,16 +111,4 @@ function category(frame: CallFrame | undefined, coordinate: CodeCoordinate | und
   if (frame.url.startsWith('node:')) return 'node';
   if (coordinate) return 'api';
   return frame.url ? 'external' : 'native';
-}
-
-function codeCoordinate(frame: CallFrame | undefined): CodeCoordinate | undefined {
-  if (!frame?.url.startsWith(API_ROOT)) return;
-  const file = frame.url.slice(API_ROOT.length);
-  if (!/^[A-Za-z0-9_./-]{1,180}\.(?:js|ts)$/.test(file) || file.startsWith('/') || file.split('/').includes('..'))
-    return;
-  return {
-    file,
-    function: /^[A-Za-z_$][A-Za-z0-9_$ .<>:-]{0,79}$/.test(frame.functionName) ? frame.functionName : '<anonymous>',
-    line: Number.isSafeInteger(frame.lineNumber) && frame.lineNumber >= 0 ? frame.lineNumber + 1 : 0,
-  };
 }

@@ -15,7 +15,7 @@ import {
   createPluginManagerRuntimeComposition,
 } from '../dist/domains/plugin/index.js';
 
-async function fixture(t, deployment) {
+async function fixture(t, deployment, withRuntimeRoot = true) {
   const root = await mkdtemp(join(tmpdir(), 'plugin-alpha-publication-'));
   let runtime;
   t.after(async () => {
@@ -27,6 +27,8 @@ async function fixture(t, deployment) {
   });
   const projectRoot = join(root, 'deployment');
   const capabilityProjectRoot = join(root, 'persistent');
+  await mkdir(projectRoot, { recursive: true });
+  await writeFile(join(projectRoot, '.git'), 'gitdir: ../persistent/.git/worktrees/deployment\n');
   const packageRoot = join(root, 'package');
   const pluginId = 'dev.clowder.alpha-publication';
   const manifest = {
@@ -95,10 +97,15 @@ async function fixture(t, deployment) {
   const original = await readFile(sharedPath, 'utf8');
   let writes = 0;
   const previousDeployment = process.env.CAT_CAFE_DEPLOYMENT_ID;
-  process.env.CAT_CAFE_DEPLOYMENT_ID = deployment;
+  const previousRuntimeRoot = process.env.CAT_CAFE_RUNTIME_ROOT;
+  if (withRuntimeRoot) process.env.CAT_CAFE_RUNTIME_ROOT = projectRoot;
+  else delete process.env.CAT_CAFE_RUNTIME_ROOT;
+  if (deployment === undefined) delete process.env.CAT_CAFE_DEPLOYMENT_ID;
+  else process.env.CAT_CAFE_DEPLOYMENT_ID = deployment;
   try {
     runtime = createDormantPluginRuntimeComposition({
       projectRoot,
+      binaryProjectRoot: projectRoot,
       capabilityProjectRoot,
       messageStore: {},
       contract: { manifestContractRange: '0.1.0', validateEffectiveGrants, validateManifest },
@@ -114,6 +121,8 @@ async function fixture(t, deployment) {
   } finally {
     if (previousDeployment === undefined) delete process.env.CAT_CAFE_DEPLOYMENT_ID;
     else process.env.CAT_CAFE_DEPLOYMENT_ID = previousDeployment;
+    if (previousRuntimeRoot === undefined) delete process.env.CAT_CAFE_RUNTIME_ROOT;
+    else process.env.CAT_CAFE_RUNTIME_ROOT = previousRuntimeRoot;
   }
   const composition = createPluginManagerRuntimeComposition({
     runtime,
@@ -137,13 +146,13 @@ async function fixture(t, deployment) {
     unchanged: async () => {
       assert.equal(await readFile(sharedPath, 'utf8'), original, 'shared capability bytes must remain unchanged');
       assert.equal(await readlink(skillLink), stableSkill, 'formal skill mount must remain unchanged');
-      assert.equal(writes, 0, 'Alpha must never enter MCP publication/CLI reconciliation');
+      assert.equal(writes, 0, 'isolated deployment must never enter shared MCP publication/CLI reconciliation');
     },
   };
 }
 
-test('Alpha activation, refresh, disable and uninstall leave shared capabilities and skill mounts untouched', async (t) => {
-  const f = await fixture(t, 'alpha');
+async function verifyReadOnlyLifecycle(t, deployment, withRuntimeRoot = true) {
+  const f = await fixture(t, deployment, withRuntimeRoot);
   await f.mutate(true);
   await f.unchanged();
   const launch = await f.runtime.supervisor.resolveNativeMcpLaunch({
@@ -152,7 +161,10 @@ test('Alpha activation, refresh, disable and uninstall leave shared capabilities
     contributionId: 'native',
     actionMethods: ['native.read'],
   });
-  assert.ok(launch.workingDirectory.startsWith(f.projectRoot), 'Alpha retains its own verified native launch');
+  assert.ok(
+    launch.workingDirectory.startsWith(f.projectRoot),
+    'isolated deployment retains its verified native launch',
+  );
   await access(launch.args[0]);
   await f.runtime.supervisor.configRefresh(f.installed.pluginInstanceId);
   await f.unchanged();
@@ -163,6 +175,18 @@ test('Alpha activation, refresh, disable and uninstall leave shared capabilities
   const current = (await f.composition.manager.get(f.pluginId)).plugin;
   await f.composition.manager.uninstall(f.pluginId, { expectedRevision: current.lifecycleRevision });
   await f.unchanged();
+}
+
+test('Alpha activation, refresh, disable and uninstall leave shared capabilities and skill mounts untouched', async (t) => {
+  await verifyReadOnlyLifecycle(t, 'alpha');
+});
+
+test('an unlabelled linked worktree cannot publish or remove another Host capabilities', async (t) => {
+  await verifyReadOnlyLifecycle(t, undefined);
+});
+
+test('a runtime-labelled linked worktree without its root cannot publish or remove another Host capabilities', async (t) => {
+  await verifyReadOnlyLifecycle(t, 'runtime', false);
 });
 
 test('a persistent runtime still publishes its own managed MCP descriptor', async (t) => {

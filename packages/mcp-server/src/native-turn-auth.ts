@@ -1,5 +1,5 @@
 import { readFileSync, statSync } from 'node:fs';
-import { withInvocationCredentials } from './tools/invocation-auth.js';
+import { resolveSharedInvocationContext, withInvocationCredentials } from './tools/invocation-auth.js';
 
 interface Credentials {
   invocationId: string;
@@ -45,6 +45,7 @@ export async function runWithNativeTurnAuth<T>(
   run: () => Promise<T>,
   options: AdmissionOptions = {},
 ): Promise<T> {
+  if (resolveSharedInvocationContext()) return run();
   const env = options.env ?? process.env;
   const file = env.CAT_CAFE_NATIVE_TURN_CREDENTIAL_FILE;
   if (!file) return run();

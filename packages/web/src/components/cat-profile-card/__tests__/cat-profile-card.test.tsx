@@ -57,9 +57,9 @@ function Composer() {
   useCatCardComposer(input, setInput, ref);
   return <textarea ref={ref} aria-label="草稿" value={input} onChange={(event) => setInput(event.target.value)} />;
 }
-function renderScope(threadId: string) {
+function renderScope(threadId: string, enabled = true) {
   root.render(
-    <CatProfileCardScope threadId={threadId} conversationView={controller}>
+    <CatProfileCardScope threadId={threadId} conversationView={controller} enabled={enabled}>
       <CatNameplate catId="deepseek-flash" name="鲸鲸" onEditCat={() => push('/old-settings')} />
       <Composer key={threadId} />
     </CatProfileCardScope>,
@@ -131,6 +131,25 @@ it('closes on thread changes without resurrecting the old selection on return', 
   open();
   act(() => button('@ 它').click());
   expect(container.querySelector('textarea')?.value).toContain('@deepseek-flash');
+});
+
+it('disables card behavior without remounting the composer or reviving the selection when re-enabled', () => {
+  const composer = required(container.querySelector('textarea'));
+  open();
+  expect(card()).not.toBeNull();
+  act(() => renderScope('card-thread', false));
+  expect(card()).toBeNull();
+  expect(container.querySelector('textarea')).toBe(composer);
+  expect(composer.value).toBe('前半段 后半段');
+  open();
+  expect(push).toHaveBeenCalledExactlyOnceWith('/old-settings');
+  expect(card()).toBeNull();
+  act(() => renderScope('card-thread'));
+  expect(container.querySelector('textarea')).toBe(composer);
+  expect(card()).toBeNull();
+  open();
+  act(() => button('@ 它').click());
+  expect(composer.value).toContain('@deepseek-flash');
 });
 
 it('opens the original with the existing Lightbox and returns to the same card', () => {

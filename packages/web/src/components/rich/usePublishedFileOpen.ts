@@ -10,7 +10,9 @@ async function resolvePublication(url: string, threadId: string, sourceIds: read
   const matches = Array.isArray(body.artifacts)
     ? body.artifacts.filter(
         (artifact) =>
-          artifact.type === 'file' && artifact.url === url && sourceIds.includes(artifact.sourceMessageId ?? ''),
+          (artifact.type === 'file' || artifact.type === 'video') &&
+          artifact.url === url &&
+          sourceIds.includes(artifact.sourceMessageId ?? ''),
       )
     : [];
   if (matches.length !== 1 || !matches[0]) throw new Error('publication_unresolved');
@@ -42,19 +44,20 @@ export function usePublishedFileOpen(
     };
   }, [url, sourceThreadId, sourceKey]);
 
-  async function open() {
-    if (!sourceThreadId || !sourceKey || pending.current) return;
-    if (useChatStore.getState().currentThreadId !== sourceThreadId) return;
+  async function resolve(): Promise<ThreadArtifactDTO | null> {
+    if (!sourceThreadId || !sourceKey || pending.current) return null;
+    if (useChatStore.getState().currentThreadId !== sourceThreadId) return null;
     const controller = new AbortController();
     pending.current = controller;
     setLoading(true);
     setError(false);
     try {
       const artifact = await resolvePublication(url, sourceThreadId, sourceKey.split('\u0000'), controller.signal);
-      if (!sourceStillVisible(sourceThreadId, controller.signal)) return;
-      useChatStore.getState().openPublishedArtifact(sourceThreadId, artifact);
+      if (!sourceStillVisible(sourceThreadId, controller.signal)) return null;
+      return artifact;
     } catch {
       if (sourceStillVisible(sourceThreadId, controller.signal)) setError(true);
+      return null;
     } finally {
       if (pending.current === controller) {
         pending.current = null;
@@ -63,5 +66,5 @@ export function usePublishedFileOpen(
     }
   }
 
-  return { open, loading, error };
+  return { resolve, loading, error };
 }

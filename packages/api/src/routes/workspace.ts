@@ -65,13 +65,14 @@ import {
   registerCallbackAuthHook,
 } from './callback-auth-prehandler.js';
 import { resolvePrincipalThread } from './callback-scope-helpers.js';
-import { registerWorkspaceVideoFileActions } from './local-video-file-actions.js';
+import { registerWorkspaceMediaFileActions } from './local-media-file-actions.js';
 import { registerChatChanges } from './workspace-chat-changes.js';
 import { registerWorkspaceChatReferences } from './workspace-chat-references.js';
 import { parseWorkspaceChangedFiles } from './workspace-diff.js';
 import { workspaceDirectHuman } from './workspace-direct-human.js';
 import { registerWorkspaceFileActions } from './workspace-file-actions.js';
 import { registerWorkspaceFileSourceRoutes } from './workspace-file-source-routes.js';
+import { registerWorkspaceHtmlPreviewRoutes } from './workspace-html-preview.js';
 import { sendWorkspaceMedia } from './workspace-media-response.js';
 import {
   handleWorkspaceNavigateBody,
@@ -427,12 +428,13 @@ export const workspaceRoutes: FastifyPluginAsync<WorkspaceRouteOpts> = async (ap
   registerWorkspaceChatReferences(app, resolveWorkspaceInteractiveUserId, opts.threadStore);
   registerWorkspaceFileActions(app, resolveWorkspaceInteractiveUserId);
   registerChatChanges(app, resolveWorkspaceInteractiveUserId, opts.threadStore, opts.pullRequestChangesDependencies);
-  registerWorkspaceVideoFileActions(app);
+  registerWorkspaceMediaFileActions(app);
   const auditLog = opts.auditLog ?? getEventAuditLog();
   if (opts.callbackRegistry) {
     registerCallbackAuthHook(app, opts.callbackRegistry, { agentKeyRegistry: opts.agentKeyRegistry });
   }
   registerWorkspaceFileSourceRoutes(app, resolveWorkspaceInteractiveUserId);
+  registerWorkspaceHtmlPreviewRoutes(app, resolveWorkspaceInteractiveUserId);
   registerWorkspacePullRequestChangesRoutes(
     app,
     resolveWorkspaceInteractiveUserId,

@@ -1,10 +1,10 @@
 'use client';
-import { type ReactNode, type RefObject, useEffect, useRef, useState } from 'react';
+import { type ReactNode, type RefObject, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useShellCopy } from '@/components/shell/shell-copy';
 import { API_URL } from '@/utils/api-client';
 import { ArtworkActionMenu, artworkMenuItems } from './ArtworkActionMenu';
-import { useArtworkChrome } from './ArtworkChrome';
+import { useArtworkActionsVisible, useArtworkChrome } from './ArtworkChrome';
 import styles from './artwork-actions.module.css';
 import { artworkActionsCopy } from './artwork-actions.shell-copy';
 import {
@@ -47,6 +47,7 @@ export function ArtworkActions({
   onHistory?: () => void;
 }) {
   const chrome = useArtworkChrome();
+  const visible = useArtworkActionsVisible();
   const t = useShellCopy(artworkActionsCopy);
   const [position, setPosition] = useState<{ x: number; y: number } | null>(null);
   const [info, setInfo] = useState<ArtworkFileInfo | null>(null);
@@ -56,6 +57,20 @@ export function ArtworkActions({
   const timer = useRef<ReturnType<typeof setTimeout>>();
   const generation = useRef(0);
   const initialFocus = useRef<HTMLElement | null>(null);
+  useLayoutEffect(() => {
+    const slot = chrome?.actions;
+    return () => {
+      // A decoded owner replaces the preview's buttons. Keep keyboard ownership
+      // in the stable floating header only when those disappearing buttons had it.
+      if (
+        visible &&
+        slot?.getAttribute('tabindex') === '-1' &&
+        document.activeElement !== slot &&
+        slot.contains(document.activeElement)
+      )
+        slot.focus({ preventScroll: true });
+    };
+  }, [chrome?.actions, visible]);
   const isVideo = mediaType === 'video' || !!mime?.startsWith('video/');
   const link = new URL(originalUrl, API_URL).href;
   const feedback = (message: ArtworkNotice) => {
@@ -72,9 +87,13 @@ export function ArtworkActions({
       clearTimeout(timer.current);
     };
   }, [originalUrl]);
+  const closeMenu = () => {
+    if (menu.current?.contains(document.activeElement)) trigger.current?.focus();
+    setPosition(null);
+  };
   const perform = async (action: () => Promise<void>, message?: ArtworkNotice) => {
     const scope = generation.current;
-    setPosition(null);
+    closeMenu();
     try {
       await action();
       if (scope === generation.current && message) feedback(message);
@@ -117,6 +136,7 @@ export function ArtworkActions({
       });
   };
   useEffect(() => {
+    if (!visible) return;
     const element = root.current;
     if (!element) return;
     const context = (event: MouseEvent) => {
@@ -173,7 +193,7 @@ export function ArtworkActions({
     document.addEventListener('pointerdown', outside);
     return () => document.removeEventListener('pointerdown', outside);
   }, [position]);
-  if (!chrome?.actions) return null;
+  if (!visible || !chrome?.actions) return null;
   return createPortal(
     <>
       <button
@@ -224,7 +244,7 @@ export function ArtworkActions({
           download={() => void perform(() => downloadArtworkFile(link, filename))}
           history={onHistory ?? chrome.history}
           scale={viewport.renderedScale}
-          close={() => setPosition(null)}
+          close={closeMenu}
           copyLocation={copyLocation}
           copyPixels={copyPixels}
           fileAction={(action) => void perform(() => runArtworkFileAction(originalUrl, action))}

@@ -56,6 +56,7 @@ function quoteTitle(
   t: typeof replyBodyCopy.zh,
 ): string {
   if (source.kind === 'message' && source.artifactFile) return source.artifactFile.fileName;
+  if (source.kind === 'message' && source.displayLabel) return source.displayLabel;
   // Legacy CLI references do not prove which rendered leaf was quoted.
   if (source.kind === 'cli_output' && source.segmentId !== 'stdout') return t.executionRecord;
   if (loadedSource?.type === 'user') return t.replyBy(humanName);

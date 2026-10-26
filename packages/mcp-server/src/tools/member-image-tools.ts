@@ -6,7 +6,7 @@ import { defineMcpCanonicalFactory } from '../tool-governance-migration.js';
 import { isPathAllowed } from '../utils/path-validator.js';
 import { callbackPost } from './callback-tools.js';
 import { errorResult } from './file-tools.js';
-import { resolveInvocationCredentials, withInvocationCredentials } from './invocation-auth.js';
+import { authorizeInvocationTool, resolveInvocationCredentials, withInvocationCredentials } from './invocation-auth.js';
 
 const MAX_BYTES = 10 * 1024 * 1024;
 // Darwin's atomic whole-path no-symlink flag; Node does not export this SDK constant.
@@ -59,6 +59,7 @@ export async function readMemberImage(path: string): Promise<{ sourcePath: strin
       throw new Error('Access denied: image path changed before reading');
     if (before.size > MAX_BYTES) throw new Error('Image file too large (maximum 10 MiB)');
     const buffer = Buffer.alloc(MAX_BYTES + 1);
+    await authorizeInvocationTool('cat_cafe_publish_image');
     let size = 0;
     while (size < buffer.length) {
       const { bytesRead } = await file.read(buffer, size, buffer.length - size, size);
@@ -66,6 +67,7 @@ export async function readMemberImage(path: string): Promise<{ sourcePath: strin
       size += bytesRead;
     }
     const after = await file.stat();
+    await authorizeInvocationTool('cat_cafe_publish_image');
     if (size > MAX_BYTES) throw new Error('Image file too large (maximum 10 MiB)');
     if (
       size !== before.size ||

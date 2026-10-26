@@ -43,6 +43,29 @@ export function pluginHasUpdate(plugin: PluginManagerDesignFixture): boolean {
   );
 }
 
+/** A Host-offered replacement can still require compatibility validation at install time. */
+export function pluginIncompatibleHint(plugin: PluginManagerDesignFixture, locale: string): string {
+  const t = pluginManagerText(locale);
+  return pluginHasUpdate(plugin) ? t.incompatibleUpdateHint(plugin.availableVersion) : t.incompatibleNoUpdateHint;
+}
+
+export function pluginAttentionTone(plugin: PluginManagerDesignFixture): 'muted' | 'warning' {
+  return plugin.actions?.blockingReasons.includes('package-incompatible') ? 'muted' : 'warning';
+}
+
+export function pluginBlockedEnableReason(
+  plugin: PluginManagerDesignFixture,
+  locale: string,
+  presentation: PluginManagerPresentation,
+) {
+  if (plugin.actions?.blockingReasons.includes('package-incompatible'))
+    return presentation === 'v2' ? pluginIncompatibleHint(plugin, locale) : pluginManagerText(locale).incompatibleHint;
+  if (plugin.id !== 'official.chatgpt-dot') return '请先完成右侧配置或连接，再启用。';
+  return plugin.auth === 'connected'
+    ? '还在等待 dot 读原文并回帖；两处都完成后才能开启。'
+    : '请先完成订阅和两处往返验证，再启用 dot。';
+}
+
 /** Classify current state, not a historical diagnostic or an absent candidate's default config. */
 export function pluginAttentionReason(plugin: PluginManagerDesignFixture, locale = 'zh-CN'): string | undefined {
   const t = pluginManagerText(locale);

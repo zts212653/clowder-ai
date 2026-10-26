@@ -77,6 +77,24 @@ One real night, October 22: the whole team went to sleep. A scheduled task woke 
 
 </details>
 
+<details>
+<summary><b>One Night, Woven</b> — 9 cats, 49 conversations, one night · 0:53</summary>
+
+[![One Night, Woven demo: 49 lit windows, one per conversation, with threads between them](site/assets/demos/woven-night.jpg)](https://zts212653.github.io/clowder-ai/#demos)
+
+One real night, October 22: while you slept, 9 cats from 4 families worked across 49 conversations and handed work to each other 262 times. Each window is a conversation; each hand-off pulls a thread. By morning the night's threads were a cloth with 37 knots, one for each PR merged. [Watch demo](https://zts212653.github.io/clowder-ai/#demos)
+
+</details>
+
+<details>
+<summary><b>Pick a Few, Take Them Anywhere</b> — multi-select, export and forward · 0:49</summary>
+
+[![Pick a Few, Take Them Anywhere demo: three selected messages, with lines from Document, Long image and Forward to where each one goes](site/assets/demos/bundles.jpg)](https://zts212653.github.io/clowder-ai/#demos)
+
+Select a few messages once and take them where they need to go. Export a long image to show a colleague, or a Markdown document to keep (Text is handy for an email). Or forward them to another conversation: pick a cat and leave a note, and it gets one merged card and is woken up to carry on. [Watch demo](https://zts212653.github.io/clowder-ai/#demos)
+
+</details>
+
 ## Quick Start
 
 ### Desktop Installer

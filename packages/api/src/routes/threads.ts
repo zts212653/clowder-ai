@@ -84,7 +84,7 @@ import {
   type SidebarPresence,
   type SidebarPresenceSource,
 } from './sidebar-presence-projection.js';
-import { sendCanonicalSidebarSnapshot } from './sidebar-snapshot-http.js';
+import { createSidebarCompositionTimer, sendCanonicalSidebarSnapshot } from './sidebar-snapshot-http.js';
 import { createThreadProjectPathResolver, mapThreadList } from './thread-list-project-migration.js';
 
 const log = createModuleLogger('routes/threads');
@@ -1051,6 +1051,7 @@ export const threadsRoutes: FastifyPluginAsync<ThreadsRoutesOptions> = async (ap
       deletedRaw === undefined &&
       includeConciergeRaw === undefined;
     const sidebarCompositionStartedAt = isCanonicalSidebarSnapshot ? performance.now() : null;
+    const sidebarTiming = isCanonicalSidebarSnapshot ? createSidebarCompositionTimer() : undefined;
     const userId = resolveUserId(request, { defaultUserId: 'default-user' });
     if (!userId) return { threads: [] };
     const resolveListProjectPath = createThreadProjectPathResolver();
@@ -1072,7 +1073,9 @@ export const threadsRoutes: FastifyPluginAsync<ThreadsRoutesOptions> = async (ap
 
     // Resolve the owner's one canonical concierge carrier before reading the
     // list. This also repairs a generated blank title without creating a thread.
+    sidebarTiming?.mark('setupMs');
     const canonicalConciergeId = await opts.conciergeThreadService?.findThreadId(userId);
+    sidebarTiming?.mark('conciergeMs');
     const migratedProjectPath = projectPath ? await resolveListProjectPath(projectPath) : undefined;
     if (projectPath && migratedProjectPath === null) return { threads: [] };
     const projectPathMatches =
@@ -1084,6 +1087,7 @@ export const threadsRoutes: FastifyPluginAsync<ThreadsRoutesOptions> = async (ap
     let threads = projectPathMatches
       ? [...new Map(projectPathMatches.flat().map((thread) => [thread.id, thread] as const)).values()]
       : await threadStore.list(userId);
+    sidebarTiming?.mark('listMs');
     if (canonicalConciergeId && !threads.some((thread) => thread.id === canonicalConciergeId)) {
       const canonical = await threadStore.get(canonicalConciergeId);
       if (
@@ -1093,9 +1097,11 @@ export const threadsRoutes: FastifyPluginAsync<ThreadsRoutesOptions> = async (ap
       )
         threads.push(canonical);
     }
+    sidebarTiming?.mark('conciergeAttachMs');
     threads = await mapThreadList(threads, async (thread) =>
       sanitizeThreadForResponse(await migrateRuntimeProjectPath(thread, threadStore, resolveListProjectPath), userId),
     );
+    sidebarTiming?.mark('pathMigrationMs');
 
     // Keep only this owner's canonical concierge carrier discoverable. Stale
     // same-kind orphans cannot become duplicate history entries.
@@ -1185,17 +1191,20 @@ export const threadsRoutes: FastifyPluginAsync<ThreadsRoutesOptions> = async (ap
     }
 
     // F069: Hydrate unread summaries from read state store
+    sidebarTiming?.mark('filterMs');
     if (opts.readStateStore && messageStore && threads.length > 0) {
       const summaries = await opts.readStateStore.getUnreadSummaries(
         userId,
         threads.map((t) => t.id),
         messageStore,
       );
+      sidebarTiming?.mark('unreadReadMs');
       const summaryMap = new Map(summaries.map((s) => [s.threadId, s]));
       threads = threads.map((t) => {
         const s = summaryMap.get(t.id);
         return { ...t, unreadCount: s?.unreadCount ?? 0, hasUserMention: s?.hasUserMention ?? false };
       });
+      sidebarTiming?.mark('unreadProjectMs');
     }
 
     // F297 Phase B (AC-B4): Sidebar snapshot 必须自带 C10 presence，
@@ -1204,12 +1213,14 @@ export const threadsRoutes: FastifyPluginAsync<ThreadsRoutesOptions> = async (ap
       view === 'sidebar' && threads.length > 0
         ? await composeSidebarPresence(threads, userId, opts.presenceSource)
         : undefined;
+    sidebarTiming?.mark('presenceMs');
 
     const response = {
       threads: threads.map((thread) => projectThreadForListView(thread, view, presenceByThread?.get(thread.id))),
     };
+    sidebarTiming?.mark('dtoProjectMs');
     if (sidebarCompositionStartedAt !== null) {
-      return sendCanonicalSidebarSnapshot(request, reply, response, sidebarCompositionStartedAt);
+      return sendCanonicalSidebarSnapshot(request, reply, response, sidebarCompositionStartedAt, sidebarTiming?.phases);
     }
     return response;
   });

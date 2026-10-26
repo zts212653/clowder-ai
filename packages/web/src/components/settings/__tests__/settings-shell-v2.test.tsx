@@ -105,7 +105,7 @@ describe('F322 设置与管理 shell (v2)', () => {
     click('settings-entry-connect');
     expect(nav.replace).toHaveBeenCalledTimes(1);
     const url = String(nav.replace.mock.calls[0]?.[0]);
-    expect(url).toContain('s=im');
+    expect(url).toContain('s=marketplace');
     expect(url).toContain('from=thread-1');
     expect(url).toContain('cat=opus');
   });

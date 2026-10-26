@@ -10,6 +10,7 @@
 
 import { createModuleLogger } from '../../../../../../infrastructure/logger.js';
 import { AcpRetirementBarrier } from './lifecycle/acp-retirement-barrier.js';
+import type { AcpInitializeResult } from './types.js';
 
 const log = createModuleLogger('acp-pool');
 
@@ -44,6 +45,8 @@ export interface AcpLease {
   readonly poolKey: PoolKey;
   /** False when the requested persisted session was sealed and must be replaced with session/new. */
   readonly canResumeRequestedSession?: boolean;
+  /** End only this turn's MCP instances; retire an exclusive carrier without session/close. */
+  closeTurn(sessionId: string): Promise<void>;
   release(): void;
 }
 
@@ -73,6 +76,7 @@ export interface AcpPoolClient {
   /** Session-scoped counterpart used to seal only the cancelled logical session on multiplexed carriers. */
   isSessionSafeForReuse?(sessionId: string): boolean;
   closeSession?(sessionId: string): Promise<void>;
+  readonly agentCapabilities?: AcpInitializeResult['agentCapabilities'];
   initialize(): Promise<unknown>;
   close(): Promise<void>;
 }
@@ -96,6 +100,8 @@ interface PoolEntry {
   leaseGeneration: number;
   lastUsedAt: number;
   state: 'initializing' | 'ready' | 'closing';
+  /** Stop admission after failed session cleanup; existing peers drain before retirement. */
+  turnCloseFailed?: boolean;
   idleTimer: ReturnType<typeof setTimeout> | null;
 }
 
@@ -203,7 +209,7 @@ export class AcpProcessPool {
         log.warn({ poolKey, sessionId }, 'ACP session is sealed; acquiring carrier for a fresh replacement session');
       } else {
         const owner = this.sessionOwners.get(sessionKey);
-        if (owner && owner.state === 'ready' && owner.client.isAlive) {
+        if (owner && !owner.turnCloseFailed && owner.state === 'ready' && owner.client.isAlive) {
           if (this.rejectActiveSessionLease && owner.leaseCount > 0)
             throw new Error('ACP session has an active lease; refusing concurrent ownership');
           if (!this.supportsMultiplexing && owner.client.isSafeForSingleFlightReuse === false) {
@@ -240,7 +246,11 @@ export class AcpProcessPool {
 
     // 1. Try warm reuse. Single-flight carriers may reuse only idle processes.
     const warm = entries.find(
-      (e) => e.state === 'ready' && e.client.isAlive && (this.supportsMultiplexing || e.leaseCount === 0),
+      (e) =>
+        !e.turnCloseFailed &&
+        e.state === 'ready' &&
+        e.client.isAlive &&
+        (this.supportsMultiplexing || e.leaseCount === 0),
     );
     if (warm) {
       return this.leaseReadyEntry(warm, poolKey, canResumeRequestedSession);
@@ -460,6 +470,20 @@ export class AcpProcessPool {
       client: entry.client,
       poolKey,
       canResumeRequestedSession,
+      closeTurn: async (sessionId: string) => {
+        try {
+          if (entry.client.agentCapabilities?.sessionCapabilities?.close && entry.client.closeSession) {
+            await entry.client.closeSession(sessionId);
+            return;
+          }
+          if (entry.leaseCount > 1) throw new Error('Shared MCP requires session/close on a multiplexed ACP carrier');
+          this.retireEntry(entry, poolKey, 'turn-bound MCP connection completed');
+          await this.retirements.wait(serializeKey(poolKey));
+        } catch (error) {
+          entry.turnCloseFailed = true;
+          throw error;
+        }
+      },
       release: () => {
         if (released) return;
         released = true;
@@ -481,7 +505,7 @@ export class AcpProcessPool {
         this._metrics.activeLeaseCount--;
         if (entry.leaseCount <= 0) {
           entry.leaseCount = 0;
-          if (this.retiring) {
+          if (this.retiring || entry.turnCloseFailed) {
             this.closeRetiredEntry(entry, poolKey, false);
           } else {
             this._metrics.idleProcessCount++;

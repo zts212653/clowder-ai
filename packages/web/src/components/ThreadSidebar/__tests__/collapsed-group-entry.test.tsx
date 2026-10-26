@@ -20,6 +20,9 @@ import {
 describe('collapsed production Group attention shortcuts', () => {
   let harness: ThreadSidebarHarness;
   let pending = true;
+  let decisionVersion = 1;
+  let ignoredDecisionVersion: number | undefined;
+  let personalRevision = 8;
   let decisionsUnavailable = false;
   let open: boolean | undefined = false;
   let preference: Record<string, boolean>;
@@ -65,17 +68,26 @@ describe('collapsed production Group attention shortcuts', () => {
           sources: {
             approvals: { status: 'available', exhaustiveness: 'complete' },
             needsMe: { status: 'available', exhaustiveness: 'complete' },
+            personalPreferences: { status: 'available', exhaustiveness: 'complete' },
           },
+          personalView: { mode: 'visible', preferenceRevision: personalRevision },
           readWindow: { startedAt: 1, endedAt: 3, consistency: 'independent_source_reads' },
           consistency: { state: 'verified', reasons: [] },
           items:
-            pending && count > 1
+            pending &&
+            count > 1 &&
+            !(path.includes('personalView=visible') && ignoredDecisionVersion === decisionVersion)
               ? [
                   {
                     decisionRef: 'approval:F193:p',
                     kind: 'approval',
                     summary: 'Decide',
                     linkedNeedsMe: [],
+                    preferenceCoordinate: {
+                      kind: 'mailbox',
+                      decisionRef: 'approval:F193:p',
+                      version: `sha256:${String(decisionVersion).repeat(64)}`,
+                    },
                     approval: {
                       proposalId: 'p',
                       resolution: 'open',
@@ -97,6 +109,9 @@ describe('collapsed production Group attention shortcuts', () => {
     window.localStorage.setItem(SIDEBAR_TAB_STORAGE_KEY, 'pinned');
     useLabelStore.setState({ labels: [], isLoading: false });
     pending = true;
+    decisionVersion = 1;
+    ignoredDecisionVersion = undefined;
+    personalRevision = 8;
     decisionsUnavailable = false;
     open = false;
     preference = {};
@@ -113,6 +128,45 @@ describe('collapsed production Group attention shortcuts', () => {
       e.dataset.peekReason,
     ]);
   const header = () => harness.container.querySelector('[data-testid="group-header-v2"]');
+  it('refreshes both row and collapsed decision signals on ignore, restore and a newer version', async () => {
+    setup(5);
+    const threads = mockStore.threads as { unreadCount: number; hasUserMention: boolean }[];
+    for (const thread of threads) {
+      thread.unreadCount = 0;
+      thread.hasUserMention = false;
+    }
+    threads[0].unreadCount = 1;
+    const refresh = async (event: string) =>
+      act(async () => {
+        window.dispatchEvent(new Event(event));
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      });
+    await harness.render();
+    expect(ids()).toEqual([
+      ['member-2', 'decision'],
+      ['member-0', 'unread'],
+    ]);
+    await act(async () => header()?.querySelector<HTMLButtonElement>('button[aria-controls]')?.click());
+    expect(harness.container.querySelector('[data-testid="thread-row-pending-decision"]')).not.toBeNull();
+    ignoredDecisionVersion = 1;
+    personalRevision++;
+    await refresh('cat-cafe:ignored-item-preferences-updated');
+    expect(harness.container.querySelector('[data-testid="thread-row-pending-decision"]')).toBeNull();
+    expect(harness.container.querySelector('[data-testid="thread-row-unread"]')?.textContent).toBe('1 未读');
+    await act(async () => header()?.querySelector<HTMLButtonElement>('button[aria-controls]')?.click());
+    expect(ids()).toEqual([['member-0', 'unread']]);
+    ignoredDecisionVersion = undefined;
+    personalRevision++;
+    await refresh('cat-cafe:ignored-item-preferences-updated');
+    expect(ids()[0]).toEqual(['member-2', 'decision']);
+    ignoredDecisionVersion = 1;
+    personalRevision++;
+    await refresh('cat-cafe:ignored-item-preferences-updated');
+    expect(ids()).toEqual([['member-0', 'unread']]);
+    decisionVersion = 2;
+    await refresh('cat-cafe:runtime-interaction-updated');
+    expect(ids()[0]).toEqual(['member-2', 'decision']);
+  });
   it('caps five at three, sorts the actual decision first and expands only through the explicit remainder', async () => {
     setup(5);
     await harness.render();

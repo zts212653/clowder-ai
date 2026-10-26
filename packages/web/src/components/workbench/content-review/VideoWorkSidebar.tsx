@@ -27,6 +27,9 @@ export function VideoWorkSidebar({
   assetUrl?: (assetId: string, metadataRevision: number) => string;
 }) {
   const [tab, setTab] = useState('story');
+  const hasStory = !!(record?.context.story.length || record?.context.chapters?.length);
+  if (!hasStory && !record?.context.assets.length) return null;
+  const activeTab = hasStory ? tab : 'assets';
   return (
     <aside
       data-video-work-sidebar
@@ -35,11 +38,11 @@ export function VideoWorkSidebar({
     >
       <select
         aria-label="故事线或素材"
-        value={tab}
+        value={activeTab}
         onChange={(event) => setTab(event.target.value)}
         className="mb-3 w-full rounded-md border border-cafe-subtle bg-cafe-surface px-2 py-1 text-sm"
       >
-        <option value="story">故事线</option>
+        {hasStory ? <option value="story">故事线</option> : null}
         <option value="assets">素材</option>
       </select>
       {!loading && !error ? <VideoWorkSource binding={record?.context.sourceBinding} /> : null}
@@ -49,7 +52,7 @@ export function VideoWorkSidebar({
           {error}
         </p>
       ) : !loading ? (
-        tab === 'story' ? (
+        activeTab === 'story' ? (
           <VideoWorkStory
             record={record}
             clock={clock}

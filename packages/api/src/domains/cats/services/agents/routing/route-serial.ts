@@ -1596,6 +1596,7 @@ export async function* routeSerial(
       let textContent = '';
       checkpointPreparation('history_and_prompt');
       let persistedDoneContent: string | undefined;
+      let persistedLayoutContent: string | undefined;
       const thinkingChunks: string[] = [];
       let persistedMetadata: MessageMetadata | undefined;
       const remoteCancellation = createRemoteCancellationObserver();
@@ -2680,6 +2681,9 @@ export async function* routeSerial(
         const persistedContent = conciergeActionSourceContent
           ? projectConciergeStoredContent(storedContent)
           : storedContent;
+        // Layout hashes must attest the same normalized body for live done and cold history.
+        // Keep the existing done.content policy independent of this proof input.
+        persistedLayoutContent = persistedContent;
         if (conciergeActionSourceContent !== undefined) {
           persistedDoneContent = persistedContent;
         }
@@ -3064,6 +3068,13 @@ export async function* routeSerial(
               !catSignal?.aborted &&
               actionOutputCommitAllowed &&
               visibleTurnInvocationId === ownInvocationId,
+          });
+          const outputConfig = executionBinding.catConfig;
+          outputProjection?.settle({
+            succeeded:
+              Boolean(doneMsg) && !hadError && !doneMsg?.errorCode && !catSignal?.aborted && actionOutputCommitAllowed,
+            nativePhases:
+              !outputConfig?.clientId || outputConfig.clientId === 'openai' || outputConfig.provider === 'openai',
           });
           const streamMessageInput: AppendMessageInput = {
             from: { kind: 'agent', catId },
@@ -3841,7 +3852,7 @@ export async function* routeSerial(
           ...ownStampedDone,
           extra: {
             ...ownStampedDone.extra,
-            ...outputLayoutExtra(outputProjection, persistedDoneContent ?? textContent),
+            ...outputLayoutExtra(outputProjection, persistedDoneContent ?? persistedLayoutContent ?? textContent),
           },
           ...(cancellationDiagnostics ? { metadata: persistedMetadata } : {}),
           ...(persistedDoneContent !== undefined ? { content: persistedDoneContent } : {}),

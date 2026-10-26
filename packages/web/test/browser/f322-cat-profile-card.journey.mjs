@@ -7,6 +7,52 @@ import { THREAD_ID } from './f307-real-surface-fixtures.mjs';
 import { startNativeHost } from './f322-native-reply-next.mjs';
 import { CARD_OTHER_THREAD_ID, createCardFixture } from './fixtures/f322-cat-profile-card.mjs';
 
+async function verifyShellContinuity(page, initialShell, card, nameplate, results) {
+  const input = page.locator('textarea').first();
+  await input.fill('切换外壳仍保留的草稿');
+  const main = await page.locator('main.overflow-y-auto').elementHandle();
+  const composer = await input.elementHandle();
+  const message = await page.locator('[data-message-id="card-idle"]').elementHandle();
+  const switchShell = async (shell) => {
+    // Drive the existing browser-local preference protocol without an outside
+    // pointer event dismissing the card before the shell consumer can do so.
+    await page.evaluate((value) => {
+      localStorage.setItem('cat-cafe:shell-presentation', value);
+      window.dispatchEvent(new CustomEvent('cat-cafe:shell-presentation-sync'));
+    }, shell);
+    await page.waitForFunction(
+      (v2) => Boolean(document.querySelector('[data-testid="cat-nameplate"]')) === v2,
+      shell === 'v2',
+    );
+    assert.equal(await page.locator('main.overflow-y-auto').evaluate((node, old) => node === old, main), true);
+    assert.equal(await input.evaluate((node, old) => node === old, composer), true);
+    assert.equal(
+      await page.locator('[data-message-id="card-idle"]').evaluate((node, old) => node === old, message),
+      true,
+    );
+    assert.equal(await input.inputValue(), '切换外壳仍保留的草稿');
+    assert.equal(await card().count(), 0, 'shell changes do not preserve or revive an open card');
+  };
+  if (initialShell === 'v2') {
+    await nameplate('鲸鲸').click();
+    await card().waitFor();
+    await switchShell('classic');
+    await switchShell('v2');
+  } else {
+    await switchShell('v2');
+    await nameplate('鲸鲸').click();
+    await card().waitFor();
+    await switchShell('classic');
+  }
+  await input.fill('');
+  results.push({
+    scenario: `shell-round-trip-from-${initialShell}`,
+    status: 'passed',
+    sameNodes: true,
+    draftRetained: true,
+  });
+}
+
 /** Real Next / ChatContainer / composer. Mock API is isolated to this browser context, never a human session. */
 export async function runCatProfileCardJourney(browser, out) {
   if (out) await mkdir(out, { recursive: true });
@@ -95,6 +141,9 @@ export async function runCatProfileCardJourney(browser, out) {
         }
         const collapse = page.getByTestId('sidebar-collapse');
         if (await collapse.isVisible()) await collapse.click();
+        if (scenario.name === 'desktop' || scenario.name === 'classic') {
+          await verifyShellContinuity(page, scenario.shell, card, nameplate, results);
+        }
         if (scenario.shell === 'classic') {
           assert.equal(await page.getByTestId('cat-nameplate').count(), 0);
           assert.equal(await page.getByRole('dialog').count(), 0);

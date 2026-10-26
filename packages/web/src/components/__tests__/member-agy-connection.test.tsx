@@ -5,6 +5,7 @@ import type { CatData } from '@/hooks/useCatData';
 import { apiFetch } from '@/utils/api-client';
 import { MemberSettingsPage } from '../settings/members/MemberSettingsPage';
 import type { RuntimeChoice } from '../settings/members/member-runtime-draft';
+import { writeShellLanguage } from '../shell/shell-language';
 
 const language = vi.hoisted(() => ({ value: 'zh' }));
 vi.mock('@/utils/api-client', () => ({
@@ -49,6 +50,7 @@ beforeEach(() => {
   (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   sessionStorage.clear();
   language.value = 'zh';
+  writeShellLanguage('zh');
   writes.length = 0;
   providers = [];
   runtimes = [{ id: 'codex', label: 'Codex', clientId: 'openai', installed: true, models: [] }];
@@ -134,7 +136,7 @@ it('returns from Codex to a discovered AGY Native binding without dropping profi
   expect(host.querySelector('select[aria-label="接入方式"]')).toHaveProperty('value', 'agy-native');
   expect(host.querySelector('input[aria-label="隔离 Profile ID"]')).toHaveProperty('value', profile.profileId);
   expect(host.querySelector('select[aria-label="执行权限"]')).toHaveProperty('value', 'restricted');
-  expect(host.querySelector('[data-testid="member-save-bar"]')).toBeNull();
+  expect(host.querySelector('[data-testid="member-save-bar"]')?.textContent).toContain('没有改动');
   expect(writes).toHaveLength(0);
 });
 
@@ -169,7 +171,7 @@ it.each([
   await click('模型与工具');
   expect(host.querySelector('select[aria-label="使用连接"]')).toHaveProperty('value', 'gemini');
   expect(host.querySelector('[role="combobox"]')?.textContent).toContain(profile.model);
-  expect(host.querySelector('[data-testid="member-save-bar"]')).toBeNull();
+  expect(host.querySelector('[data-testid="member-save-bar"]')?.textContent).toContain('没有改动');
   expect(writes).toHaveLength(0);
 });
 
@@ -210,13 +212,13 @@ it('matches a saved official AGY ACP executable separately from generic plugin/c
   await click('高级接入');
   await select('接入方式', 'agy-native');
   await select('接入方式', 'agy-acp');
-  expect(host.querySelector('[data-testid="member-save-bar"]')).toBeNull();
+  expect(host.querySelector('[data-testid="member-save-bar"]')?.textContent).toContain('没有改动');
   await click('模型与工具');
   await select('使用工具', 'codex');
   await select('使用工具', 'acp:gemini-argon');
   await click('高级接入');
   expect(host.querySelector('select[aria-label="接入方式"]')).toHaveProperty('value', 'agy-acp');
-  expect(host.querySelector('[data-testid="member-save-bar"]')).toBeNull();
+  expect(host.querySelector('[data-testid="member-save-bar"]')?.textContent).toContain('没有改动');
   expect(writes).toHaveLength(0);
 });
 afterEach(async () => {
@@ -312,6 +314,7 @@ it('keeps legacy Google unconfigured until explicit selection and refuses an emp
 
 it('uses the member page language for profile labels, permissions and independent ACP login guidance', async () => {
   language.value = 'en';
+  writeShellLanguage('en');
   await render();
   await click('Advanced connection');
   await select('Adapter', 'agy-acp');
@@ -355,6 +358,6 @@ it('returns to the exact AGY profile after switching tools without applying any 
   await click('高级接入');
   expect(host.querySelector('select[aria-label="接入方式"]')).toHaveProperty('value', 'agy-native');
   expect(host.querySelector('input[aria-label="隔离 Profile ID"]')).toHaveProperty('value', profile.profileId);
-  expect(host.querySelector('[data-testid="member-save-bar"]')).toBeNull();
+  expect(host.querySelector('[data-testid="member-save-bar"]')?.textContent).toContain('没有改动');
   expect(writes).toHaveLength(0);
 });

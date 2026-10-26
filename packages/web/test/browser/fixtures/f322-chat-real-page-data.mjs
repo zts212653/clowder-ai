@@ -95,6 +95,16 @@ export function createChatProofApi(now = Date.now(), crowded = false, surface = 
   const requests = [];
   const sent = [];
   const decisions = [];
+  const decisionPreferences = { revision: 0, ignored: new Set() };
+  // Synthetic HTTP coordinates, not production digests. Equal payloads keep
+  // their version and a changed decision gets a new one; this module also bundles in the browser.
+  const decisionVersions = new Map();
+  const decisionVersion = (item) => {
+    const payload = JSON.stringify(item);
+    if (!decisionVersions.has(payload))
+      decisionVersions.set(payload, `sha256:${(decisionVersions.size + 1).toString(16).padStart(64, '0')}`);
+    return decisionVersions.get(payload);
+  };
   const reply = (body, status = 200) => ({ status, contentType: 'application/json', body: JSON.stringify(body) });
   function respond(request, url) {
     const method = request.method();
@@ -107,6 +117,20 @@ export function createChatProofApi(now = Date.now(), crowded = false, surface = 
       const limit = Number(url.searchParams.get('limit'));
       assert.equal(limit, 20);
       assert.ok(Number.isInteger(offset) && offset >= 0);
+      const mode = url.searchParams.get('personalView');
+      assert.ok(mode === null || mode === 'visible' || mode === 'ignored');
+      const original = decisions.map((item) => ({
+        ...item,
+        preferenceCoordinate: {
+          kind: 'mailbox',
+          decisionRef: item.decisionRef,
+          version: decisionVersion(item),
+        },
+      }));
+      const isIgnored = (item) => decisionPreferences.ignored.has(item.preferenceCoordinate.version);
+      const visible = original.filter((item) => !isIgnored(item));
+      const ignored = original.filter(isIgnored);
+      const selected = mode === 'visible' ? visible : mode === 'ignored' ? ignored : decisions;
       const source = { status: 'available', exhaustiveness: 'complete' };
       return reply({
         version: 1,
@@ -114,12 +138,31 @@ export function createChatProofApi(now = Date.now(), crowded = false, surface = 
         scope: 'owner_all_projects',
         identity: { ownerUserId: 'owner-proof' },
         observedAt: now,
-        sources: { approvals: source, needsMe: source, structuredChoices: source },
+        sources: {
+          approvals: source,
+          needsMe: source,
+          structuredChoices: source,
+          ...(mode ? { personalPreferences: source } : {}),
+        },
+        ...(mode
+          ? {
+              personalView: {
+                mode,
+                preferenceRevision: decisionPreferences.revision,
+                originalTotalCount: original.length,
+                visibleTotalCount: visible.length,
+                ignoredTotalCount: ignored.length,
+                originalAttentionCount: original.length,
+                visibleAttentionCount: visible.length,
+                ignoredAttentionCount: ignored.length,
+              },
+            }
+          : {}),
         readWindow: { startedAt: now, endedAt: now, consistency: 'independent_source_reads' },
         consistency: { state: 'verified', reasons: [] },
-        items: decisions.slice(offset, offset + limit),
-        totalCount: decisions.length,
-        page: { offset, limit, scope: 'known_rows', hasMore: offset + limit < decisions.length },
+        items: selected.slice(offset, offset + limit),
+        totalCount: selected.length,
+        page: { offset, limit, scope: 'known_rows', hasMore: offset + limit < selected.length },
       });
     }
     if (url.pathname === '/api/cats') return reply({ cats: roster });
@@ -363,5 +406,5 @@ export function createChatProofApi(now = Date.now(), crowded = false, surface = 
     };
     return Object.hasOwn(bodies, url.pathname) ? reply(bodies[url.pathname]) : null;
   }
-  return { respond, requests, threads, preferences, sent, decisions };
+  return { respond, requests, threads, preferences, sent, decisions, decisionPreferences };
 }

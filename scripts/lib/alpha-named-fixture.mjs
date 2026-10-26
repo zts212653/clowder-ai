@@ -47,6 +47,7 @@ export function namedAlphaFixture(t) {
     'scripts/lib/worktree-reaper-probes.mjs',
     'scripts/lib/worktree-reaper-risk.mjs',
     'scripts/lib/worktree-retention.mjs',
+    'scripts/lib/worktree-origin.mjs',
     'packages/shared/src/deployment-defaults.ts',
     'packages/shared/src/deployment-profiles.json',
     'packages/api/src/config/alpha-coordinates.ts',

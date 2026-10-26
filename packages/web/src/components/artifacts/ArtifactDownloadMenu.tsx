@@ -5,13 +5,15 @@ import { useShellCopy } from '@/components/shell/shell-copy';
 import { workspaceV3Copy } from '@/components/workspace-home/workspace-v3.shell-copy';
 import { API_URL } from '@/utils/api-client';
 import { isSiteAssetPath, resolveAssetUrl } from './artifact-view';
-export function ArtifactDownloadMenu({ artifact }: { artifact: ThreadArtifactDTO }) {
+export function ArtifactDownloadMenu({ artifact, copyName }: { artifact: ThreadArtifactDTO; copyName?: string }) {
   const t = useShellCopy(workspaceV3Copy);
   const [downloading, setDownloading] = useState(false);
   const [failed, setFailed] = useState(false);
+  const [copyFailed, setCopyFailed] = useState(false);
   if (!artifact.url) return null;
   const url = resolveAssetUrl(artifact.url, API_URL);
   if (!url) return null;
+  const directLink = /^https?:\/\//i.test(artifact.url);
   const download = async () => {
     if (downloading) return;
     setDownloading(true);
@@ -54,13 +56,33 @@ export function ArtifactDownloadMenu({ artifact }: { artifact: ThreadArtifactDTO
         className="shell-focusable"
         aria-disabled={downloading || undefined}
         onClick={(event) => {
+          // A readable external link does not imply permission for a cross-origin fetch.
+          if (directLink) return;
           event.preventDefault();
           void download();
         }}
       >
         {t.download}
       </a>
+      {copyName && (
+        <button
+          type="button"
+          className="shell-focusable"
+          aria-label={t.copyFileName}
+          onClick={async () => {
+            setCopyFailed(false);
+            try {
+              await navigator.clipboard.writeText(copyName);
+            } catch {
+              setCopyFailed(true);
+            }
+          }}
+        >
+          {t.copyFileName}
+        </button>
+      )}
       {failed && <output role="alert">{t.downloadFailed}</output>}
+      {copyFailed && <output role="alert">{t.copyFileNameFailed}</output>}
     </details>
   );
 }

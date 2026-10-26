@@ -3,7 +3,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { CatData } from '@/hooks/useCatData';
 import { useChatStore } from '@/stores/chatStore';
-import { SHELL_PRESENTATION_STORAGE_KEY } from '../../shell/shell-presentation';
+import { SHELL_PRESENTATION_STORAGE_KEY, writeShellPresentation } from '../../shell/shell-presentation';
 
 const knownCat = vi.hoisted(
   () =>
@@ -125,5 +125,26 @@ describe('ThreadChatSurface keeps its scroll container (and the listeners bound 
     expect(mainB).toBe(mainA);
     expect(mainB?.isConnected).toBe(true);
     expect(wheelTargets.has(mainB as Element)).toBe(true);
+  });
+
+  it.each([
+    'v2',
+    'classic',
+  ] as const)('keeps the real history scroll node and wheel listener through a round trip from %s', async (initialShell) => {
+    writeShellPresentation(initialShell);
+    await act(async () => {
+      useChatStore.setState({ currentThreadId: 'thread-a' });
+      root.render(<Surface id="thread-a" />);
+    });
+    const main = container.querySelector('main.overflow-y-auto');
+    expect(main).not.toBeNull();
+    expect(wheelTargets.has(main as Element)).toBe(true);
+    for (const shell of [initialShell === 'v2' ? 'classic' : 'v2', initialShell] as const) {
+      await act(async () => writeShellPresentation(shell));
+      const current = container.querySelector('main.overflow-y-auto');
+      expect(current).toBe(main);
+      expect(current?.isConnected).toBe(true);
+      expect(wheelTargets.has(current as Element)).toBe(true);
+    }
   });
 });

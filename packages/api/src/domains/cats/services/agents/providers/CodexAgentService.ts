@@ -210,6 +210,7 @@ import {
 } from './mcp-schema-delivery-capability.js';
 import {
   bindSessionCredentialFile,
+  isInvocationBoundMcpLaunch,
   type PreparedCredentialEnv,
   resolveSessionCredentialFile,
   writeSessionCredentialFile,
@@ -1746,6 +1747,7 @@ export class CodexAgentService implements AgentService {
       process.platform !== 'win32' &&
       !readOnly &&
       !live &&
+      !isInvocationBoundMcpLaunch(options?.callbackEnv) &&
       !options?.agentCarrierSessionFactory &&
       !!appServerHostPool;
     const callbackHasInvocationCredentials =
@@ -2447,7 +2449,7 @@ export class CodexAgentService implements AgentService {
       const events = useAppServer
         ? runCodexAppServerWithRecovery({
             sessionFactory: async (sessionOptions) => {
-              if (live && sessionOptions.sessionId)
+              if ((live || isInvocationBoundMcpLaunch(options?.callbackEnv)) && sessionOptions.sessionId)
                 await appServerHostPool?.retireIdleOwnerForDirectSession(
                   sessionOptions.sessionId,
                   sessionOptions.signal,

@@ -1,5 +1,6 @@
 import { deploymentDefaults } from '@cat-cafe/shared';
 import { defineMcpCanonicalFactory, defineMcpMigrationFactory } from '../tool-governance-migration.js';
+import { invocationFetch } from './invocation-auth.js';
 
 /**
  * MCP Callback Tools — core callbacks
@@ -324,7 +325,7 @@ export async function callbackGet(
         response.status === 401 ? extractReasonTag(response.body) : '',
       );
     }
-    const response = await fetch(url, { headers: buildAuthHeaders(config) });
+    const response = await invocationFetch(url, { headers: buildAuthHeaders(config) });
     if (!response.ok) {
       const text = await response.text();
       // F174 Phase A: tag structured reason from 401 callback_auth_failed body
@@ -598,7 +599,23 @@ export const listThreadsInputSchema = {
     .min(1)
     .max(200)
     .optional()
-    .describe('Optional: filter threads whose title or threadId contains this keyword (case-insensitive).'),
+    .describe(
+      'Case-insensitive title filter. Work mode also accepts an exact complete thread_ ID; default mode retains title/threadId substring matching.',
+    ),
+  includeWork: z
+    .boolean()
+    .optional()
+    .describe(
+      'Include up to 3 unfinished Task pointers and lifecycle-backed running members per visible thread; page cap 20, 24k characters. Default false.',
+    ),
+  cursor: z
+    .string()
+    .min(1)
+    .max(2000)
+    .optional()
+    .describe(
+      'Opaque nextCursor from includeWork=true; reuse the same activeSince/keyword filters. Live pages are not a frozen snapshot.',
+    ),
   agentKeyCatId: agentKeyCatIdSchema,
 };
 
@@ -1282,6 +1299,8 @@ export async function handleListThreads(input: {
   limit?: number | undefined;
   activeSince?: number | undefined;
   keyword?: string | undefined;
+  includeWork?: boolean | undefined;
+  cursor?: string | undefined;
   agentKeyCatId?: string | undefined;
 }): Promise<ToolResult> {
   return callbackGet(
@@ -1290,6 +1309,8 @@ export async function handleListThreads(input: {
       ...(input.limit ? { limit: String(input.limit) } : {}),
       ...(input.activeSince !== undefined ? { activeSince: String(input.activeSince) } : {}),
       ...(input.keyword ? { keyword: input.keyword } : {}),
+      ...(input.includeWork !== undefined ? { includeWork: String(input.includeWork) } : {}),
+      ...(input.cursor ? { cursor: input.cursor } : {}),
     },
     { agentKeyCatId: input.agentKeyCatId },
   );
@@ -3406,7 +3427,30 @@ export async function handleGetThreadMetadata(input: AgentKeySelectable = {}): P
 }
 
 export const setThreadMetadataInputSchema = {
-  // Protected migration schema stays stable; the tool-level contract below governs title writes.
+  roadmap: z
+    .discriminatedUnion('state', [
+      z
+        .object({
+          state: z.literal('active'),
+          projectPath: z.string().min(1).max(1000),
+          path: z.string().min(1).max(1000),
+          sourceRef: z.string().min(1).max(500),
+          expectedRevision: z.number().int().positive().nullable(),
+        })
+        .strict(),
+      z
+        .object({
+          state: z.literal('revoked'),
+          sourceRef: z.string().min(1).max(500),
+          expectedRevision: z.number().int().positive(),
+        })
+        .strict(),
+    ])
+    .optional()
+    .describe(
+      'Bind one original work-line roadmap in this thread, or retain a revocation tombstone. Active: existing project root + repository-relative Markdown path. sourceRef=thread:<currentThreadId>#<messageId> must be readable here. expectedRevision=null for first bind; otherwise use roadmapBinding.revision from get_thread_metadata. Server normalizes disposable worktrees to a persistent root and derives actor/time/version; a pointer grants no read or work authority.',
+    ),
+  // Keep the legacy title hint; the server and tool-level contract govern protected title writes.
   title: z.string().min(1).optional().describe('Update thread title (replaces existing)'),
   labels: z.array(z.string()).optional().describe('Update thread labels (replaces entire array)'),
   worktrees: z.array(z.string()).optional().describe('Worktree paths to add (append + dedupe)'),
@@ -3436,6 +3480,7 @@ export const setThreadMetadataInputSchema = {
 };
 
 export async function handleSetThreadMetadata(input: {
+  roadmap?: z.infer<typeof setThreadMetadataInputSchema.roadmap>;
   title?: string;
   labels?: string[];
   worktrees?: string[];
@@ -3455,6 +3500,7 @@ export async function handleSetThreadMetadata(input: {
       callbackPost(
         '/api/callbacks/set-thread-metadata',
         {
+          ...(input.roadmap !== undefined ? { roadmap: input.roadmap } : {}),
           ...(input.title !== undefined ? { title: input.title } : {}),
           ...(input.labels !== undefined ? { labels: input.labels } : {}),
           ...(input.worktrees !== undefined ? { worktrees: input.worktrees } : {}),
@@ -3680,12 +3726,16 @@ export const callbackTools = [
       runtimeProfiles: ['full', 'agent-key', 'desktop:cloud-pro-phase0', 'desktop:live-companion'],
     },
   }),
-  defineTool({
+  defineCanonicalTool({
     name: 'cat_cafe_list_threads',
     description:
-      'List thread summaries for discovery. Use when you need to find a thread by keyword or see recent activity. ' +
-      'Returns thread IDs, titles, and activity timestamps. ' +
-      'Use activeSince (Unix ms) to filter to recently active threads. Use keyword to search by title.',
+      'Discover visible threads and recent work without reading conversation bodies. ' +
+      'Use when: finding a work line such as “那个3D建模” or “最近在忙什么”; set includeWork=true for titles, up to 3 unfinished Tasks, and actual running members. ' +
+      'NOT for: resuming authorization or reading full progress (follow the returned thread/Task pointers), or all-project execution counts (get_running_work is Host-project scoped). ' +
+      'Output: thread IDs, titles, activity times; work mode adds project identity, per-source availability, bounded live pages and nextCursor. A bound original roadmap appears directly on the entry with file version/as-of, exact read pointer and later-activity-needs-checking. ' +
+      'GOTCHA: Task/project details require the original list_tasks invocation authority; other callers retain title pointers only. ' +
+      'Doing does not prove execution. Execution none covers the home thread and visible dispatchGate targets; dispatchedThreadId is a routing target, not proof of execution location. Entrusted work with no canonical execution link remains unknown even when dispatched. ' +
+      'Task and roadmap reads also respect the invocation callback allowlist. Partial Task scans cannot claim globally latest Tasks. A later timestamp does not make original decisions obsolete. Discovery grants no file or work authority.',
     inputSchema: listThreadsInputSchema,
     handler: handleListThreads,
     governance: {
@@ -4291,7 +4341,7 @@ export const callbackTools = [
       'Use when: L0 shows the profile URI, you are starting a session and need relationship or owner context, or you need to verify the currently effective content before proposing an update. ' +
       'NOT for: searching project knowledge or old threads (use search_evidence), reading arbitrary workspace files (use read_file_slice), or reading another user/cat/persona. ' +
       'Output: the current content + revision (sha256 hash); expectedRevision rejects changed snapshots without returning content. Read-only, no profile change. ' +
-      'GOTCHA: for a runtime invocation, use the Clowder AI MCP bound to that invocation; a separately installed App with the same tool name is not a substitute. A missing profile on another connection does not establish absence here. The primer is approved current context, not proof of a historical first occurrence. For original message coordinates use cat_cafe_get_message(mode="full", messageId=the bare ID after #), not graph_resolve. A revision mismatch requires a fresh read. An unavailable current layer is not permission to reconstruct a current agreement from old messages; describe history as history instead. Identity comes from authentication, never userId, catId, path or relationshipKey input.',
+      `GOTCHA: for a runtime invocation, use the ${deploymentDefaults.brand.displayName} MCP bound to that invocation; a separately installed App with the same tool name is not a substitute. A missing profile on another connection does not establish absence here. The primer is approved current context, not proof of a historical first occurrence. For original message coordinates use cat_cafe_get_message(mode="full", messageId=the bare ID after #), not graph_resolve. A revision mismatch requires a fresh read. An unavailable current layer is not permission to reconstruct a current agreement from old messages; describe history as history instead. Identity comes from authentication, never userId, catId, path or relationshipKey input.`,
     inputSchema: readProfileInputSchema,
     handler: handleReadProfile,
     governance: {
@@ -4760,14 +4810,14 @@ export const callbackTools = [
       runtimeProfiles: ['full'],
     },
   }),
-  defineTool({
+  defineCanonicalTool({
     name: 'cat_cafe_set_thread_metadata',
     description:
       'Write low-frequency metadata anchors for the current thread. Merge semantics: ' +
       'title names an untitled conversation once; labels REPLACE; worktrees/prs/issues/features APPEND with dedupe (use remove* fields to remove); ' +
-      'notes MERGE (string sets, null deletes key). ' +
-      'Use when: naming an untitled conversation or recording a worktree, PR, or issue association. NOT for: renaming an already named conversation or dynamic state. ' +
-      'Output: updated metadata; title requests include titleApplied and titleSource. If titleApplied=false, report that the title was not changed. ' +
+      'notes MERGE (string sets, null deletes key). roadmap binds one original file or records a revocation tombstone, with expectedRevision concurrency protection. ' +
+      'Use when: naming an untitled conversation, recording an association, or explicitly choosing/revoking the original roadmap for a long work line. NOT for: renaming an already named conversation, taking over a Task or storing derived progress. ' +
+      'Output: updated metadata; roadmapBinding returns normalized persistent coordinates and revision, roadmap returns current file/version/as-of or revoked/invalid/unavailable. Later activity means needs checking, never automatically obsolete. File readers retain their own access checks. Title requests include titleApplied and titleSource. If titleApplied=false, report that the title was not changed. ' +
       'SCOPE: current thread only (no threadId param); cross-thread writes are impossible. ' +
       'GOTCHA: the legacy title parameter hint does not authorize replacement. User and previously cat-named titles are protected; check titleApplied.',
     inputSchema: setThreadMetadataInputSchema,

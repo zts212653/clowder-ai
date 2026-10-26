@@ -15,7 +15,7 @@ export type ArtworkFileInfo = {
 export function artworkFileActionUrl(mediaUrl: string, action: 'file-info' | 'reveal' | 'open'): string | null {
   const url = new URL(mediaUrl, API_URL);
   if (url.origin !== new URL(API_URL).origin) return null;
-  if (/^\/uploads\/[a-zA-Z0-9][a-zA-Z0-9._-]*\.(mp4|webm|mov)$/i.test(url.pathname)) {
+  if (/^\/uploads\/[a-zA-Z0-9][a-zA-Z0-9._-]*\.(mp4|webm|mov|png|jpe?g|gif|webp|svg|ico)$/i.test(url.pathname)) {
     url.pathname = `/api${url.pathname}`;
     url.search = '';
   } else if (url.pathname === '/api/workspace/file/raw') {

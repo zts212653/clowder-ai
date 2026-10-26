@@ -55,6 +55,25 @@ describe('MCP Callback Tools', () => {
     }
   });
 
+  test('handleSetThreadMetadata forwards roadmap coordinates and revision without cross-thread selectors', async () => {
+    const { handleSetThreadMetadata } = await import('../dist/tools/callback-tools.js');
+    const roadmap = {
+      state: 'active',
+      projectPath: '/authorized/project',
+      path: 'docs/roadmap.md',
+      sourceRef: 'thread:current#source',
+      expectedRevision: null,
+    };
+    let body;
+    globalThis.fetch = async (_url, options) => {
+      body = JSON.parse(options.body);
+      return { ok: true, json: async () => ({ roadmapBinding: { revision: 1 } }) };
+    };
+    const result = await handleSetThreadMetadata({ roadmap });
+    assert.notEqual(result.isError, true);
+    assert.deepEqual(body, { roadmap });
+  });
+
   test('propose_thread forwards explicit empty fields when clearing an owner revision', async () => {
     const { handleProposeThread } = await import('../dist/tools/callback-tools.js');
     let body;
@@ -947,6 +966,8 @@ describe('MCP Callback Tools', () => {
       limit: 15,
       activeSince: 1234567890,
       keyword: 'design review',
+      includeWork: true,
+      cursor: 'opaque-next',
     });
 
     assert.equal(result.isError, undefined);
@@ -954,6 +975,8 @@ describe('MCP Callback Tools', () => {
     assert.ok(capturedUrl.includes('limit=15'));
     assert.ok(capturedUrl.includes('activeSince=1234567890'));
     assert.ok(capturedUrl.includes('keyword=design+review'));
+    assert.ok(capturedUrl.includes('includeWork=true'));
+    assert.ok(capturedUrl.includes('cursor=opaque-next'));
   });
 
   test('handleCrossPostMessage calls post-message with threadId', async () => {

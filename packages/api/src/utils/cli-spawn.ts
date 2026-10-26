@@ -355,6 +355,9 @@ export function buildChildEnv(
   const workingDirectory = resolve(options.workingDirectory ?? process.cwd());
   merged.PWD = workingDirectory;
   merged.INIT_CWD = workingDirectory;
+  if (['shared', 'stdio'].includes(merged.CAT_CAFE_MCP_TRANSPORT ?? '') && merged.CAT_CAFE_CREDENTIAL_FILE) {
+    delete merged.CAT_CAFE_CALLBACK_TOKEN;
+  }
   return withVerdictGhGuardEnv(merged, overrides);
 }
 

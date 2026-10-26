@@ -44,7 +44,15 @@ registerNavigationOwnerJourneys({ origin, browser: () => browser, bundle: () => 
 
 registerReadingLandingJourneys({ origin, threadId, browser: () => browser, bundle: () => bundle.code });
 registerStreamingWheelJourney({ origin, threadId, browser: () => browser, bundle: () => bundle.code });
-registerReadingWheelJourneys({ origin, threadId, browser: () => browser, bundle: () => bundle.code });
+registerReadingWheelJourneys({
+  origin,
+  threadId,
+  browser: () => browser,
+  bundle: () => bundle.code,
+  // Headless Playwright hides scrollbars by default. A real thumb drag needs
+  // this separate browser; the other recovery journeys keep their environment.
+  launchNativeScrollbarBrowser: () => chromium.launch({ headless: true, ignoreDefaultArgs: ['--hide-scrollbars'] }),
+});
 registerEndGrowthJourney({ origin, threadId, browser: () => browser, bundle: () => bundle.code });
 
 function fixtureApiBody(pathname, state) {

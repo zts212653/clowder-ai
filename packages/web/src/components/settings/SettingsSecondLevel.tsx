@@ -1,12 +1,11 @@
 'use client';
 
 import type { KeyboardEvent, ReactNode } from 'react';
-import { accountsCopy } from '../accounts/accounts.shell-copy';
 import { HubIcon } from '../hub-icons';
 import { useShellCopy } from '../shell/shell-copy';
 import { PinToggle } from './SettingsPinToggle';
-import { useSettingsDetailText } from './settings-detail.shell-copy';
-import { type SettingsEntry, sectionLabel } from './settings-ia';
+import type { SettingsEntry } from './settings-ia';
+import { settingsShellCopy } from './settings-shell.shell-copy';
 
 const PANEL_ID = 'settings-tabpanel';
 const tabDomId = (sectionId: string) => `settings-tab-${sectionId}`;
@@ -35,10 +34,11 @@ export function SettingsSecondLevel({
   fixedLayout?: boolean;
   children: ReactNode;
 }) {
-  const accountsText = useShellCopy(accountsCopy);
-  const sectionText = useSettingsDetailText();
-  const labelOf = (id: string) =>
-    id === 'accounts' ? accountsText.title : (sectionText(id)?.title ?? sectionLabel(id));
+  const copy = useShellCopy(settingsShellCopy);
+  const sectionLabels: Readonly<Record<string, string>> = copy.sections;
+  const entryLabels: Readonly<Record<string, string>> = copy.entries;
+  const labelOf = (id: string) => sectionLabels[id] ?? id;
+  const entryLabel = entryLabels[entry.id] ?? entry.label;
   if (entry.destination.kind !== 'sections') return <>{children}</>;
   const items = entry.destination.items;
   const sectionIds = items.flatMap((item) => (item.kind === 'section' ? [item.sectionId] : []));
@@ -70,7 +70,7 @@ export function SettingsSecondLevel({
   return (
     <>
       <div className="flex shrink-0 flex-wrap items-center justify-between gap-2">
-        <div role="tablist" aria-label={`${entry.label}的分区`} className="flex flex-wrap items-center gap-1">
+        <div role="tablist" aria-label={copy.sectionGroup(entryLabel)} className="flex flex-wrap items-center gap-1">
           {sectionIds.map((sectionId, index) => {
             const current = sectionId === selection;
             // one tab stop: the selected tab, or the first one when the URL names no known section
@@ -118,13 +118,13 @@ export function SettingsSecondLevel({
                 style={{ color: 'var(--shell-body)' }}
               >
                 <span className="inline-flex items-center gap-1">
-                  {teamItem.label}
+                  {copy.teamWorkspace}
                   <HubIcon name="external-link" className="h-3 w-3" />
                 </span>
               </button>
               <PinToggle
                 pinned={isPinned(teamItem.pinId)}
-                label={teamItem.label}
+                label={copy.teamWorkspace}
                 onToggle={() => onTogglePin(teamItem.pinId)}
               />
             </span>
@@ -135,7 +135,7 @@ export function SettingsSecondLevel({
         role="tabpanel"
         id={PANEL_ID}
         aria-labelledby={selectedIsKnown ? tabDomId(selection) : undefined}
-        aria-label={selectedIsKnown ? undefined : `${entry.label}`}
+        aria-label={selectedIsKnown ? undefined : entryLabel}
         tabIndex={-1}
         className={`${fixedLayout ? 'flex min-h-0 flex-1 flex-col gap-5 overflow-hidden' : 'space-y-5'} outline-none`}
       >

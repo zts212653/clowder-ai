@@ -28,6 +28,25 @@
     "owner": "codex61-sol"
   },
   {
+    "id": "feature-f322-process-talk",
+    "kind": "feature",
+    "sourceRef": { "path": "docs/TIPS.md", "anchor": "回话里的过程话" },
+    "structureSource": {
+      "path": "packages/web/src/components/settings/ProcessTalkSettings.tsx",
+      "anchor": "ProcessTalkSettings"
+    },
+    "bodySource": { "path": "docs/TIPS.md", "anchor": "回话里的过程话" },
+    "contexts": ["concierge_open", "feature_dev"],
+    "audience": ["cvo", "developer"],
+    "body": "想让过程话收起来：设置 › 主题 ›「回话里的过程话」选「收进执行记录」。默认整段显示；启用后，回答上方仍可点「前面还有 N 段话」找回早先内容。猫已标明的分段照旧，旧回复和未成功结束的回复保留全文。",
+    "action": {
+      "type": "open_source",
+      "label": "查看回话显示设置的用法",
+      "sourceRef": { "path": "docs/TIPS.md", "anchor": "回话里的过程话" }
+    },
+    "owner": "codex61-sol"
+  },
+  {
     "id": "feature-f290-channel-attachments",
     "kind": "feature",
     "sourceRef": {

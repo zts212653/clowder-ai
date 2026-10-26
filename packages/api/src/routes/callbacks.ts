@@ -120,6 +120,7 @@ import {
   type StoredMessage,
 } from '../domains/cats/services/stores/ports/MessageStore.js';
 import type { ITaskStore } from '../domains/cats/services/stores/ports/TaskStore.js';
+import { roadmapInputSchema, ThreadRoadmapConflict } from '../domains/cats/services/stores/ports/ThreadRoadmap.js';
 import type { IThreadStore, VotingStateV1 } from '../domains/cats/services/stores/ports/ThreadStore.js';
 import {
   type ITurnExecutionStore,
@@ -149,6 +150,7 @@ import {
   partitionNotificationTargets,
   readEngagementPolicy,
 } from '../domains/routing-context/ScarceSeatNotificationPolicy.js';
+import { readThreadRoadmap } from '../domains/workspace/thread-roadmap-source.js';
 import { createModuleLogger } from '../infrastructure/logger.js';
 import {
   coordinationActiveDispatchCount,
@@ -253,6 +255,7 @@ import {
   type ThreadContextSelection,
 } from './thread-context-envelope.js';
 import { type KeywordScanTiming, scanRankedThreadContext } from './thread-context-keyword-scan.js';
+import { prepareRoadmapMutation } from './thread-roadmap-binding.js';
 import { detectUserMention } from './user-mention.js';
 import { clearVoteTimer, closeVoteInternal, voteTimers } from './votes.js';
 import { publishDispatchProposal } from './wave2-proposal-publication.js';
@@ -1086,6 +1089,8 @@ const listThreadsQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(200).optional(),
   activeSince: z.coerce.number().int().min(0).optional(),
   keyword: z.string().trim().min(1).max(200).optional(),
+  includeWork: z.enum(['true', 'false']).optional(),
+  cursor: z.string().min(1).max(2000).optional(),
 });
 
 const listLabelsQuerySchema = z.object({
@@ -1096,6 +1101,7 @@ const refItemSchema = z.object({ repo: z.string().min(1).max(200), number: z.num
 const SET_THREAD_METADATA_EMPTY_UPDATE_MESSAGE = 'At least one thread metadata update field is required';
 const setThreadMetadataSchema = z
   .object({
+    roadmap: roadmapInputSchema.optional(),
     // P2: match PATCH /api/threads/:id invariants — trim + min(1) + max
     title: z.string().trim().min(1).max(200).optional(),
     labels: z.array(z.string().trim().min(1).max(50)).max(20).optional(),
@@ -5110,13 +5116,41 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       return { error: 'Invalid request query', details: parsed.error.issues };
     }
 
-    const { limit, activeSince, keyword } = parsed.data;
+    const { limit, activeSince, keyword, includeWork, cursor } = parsed.data;
 
     if (!threadStore) {
       reply.status(503);
       return { error: 'Thread store not configured' };
     }
 
+    if (includeWork === 'true') {
+      const { readRecentWorkDirectory, DirectoryCursorError } = await import('./recent-work-directory.js');
+      try {
+        return await readRecentWorkDirectory({
+          userId: principal.userId,
+          threadStore,
+          taskStore: opts.taskStore,
+          invocationAuthority: request.callbackAuth,
+          readRunningWork: async () => {
+            const response = await app.inject({
+              method: 'GET',
+              url: '/api/callbacks/companion/running-work',
+              headers: request.headers,
+            });
+            return { statusCode: response.statusCode, body: response.json() };
+          },
+          limit,
+          activeSince,
+          keyword,
+          cursor,
+        });
+      } catch (error) {
+        return reply.code(error instanceof DirectoryCursorError ? 400 : 503).send({
+          error: error instanceof DirectoryCursorError ? error.message : 'Work directory unavailable',
+        });
+      }
+    }
+    if (cursor) return reply.code(400).send({ error: 'cursor requires includeWork=true' });
     const requestedLimit = limit ?? 20;
     let threads = await threadStore.list(principal.userId);
     if (activeSince !== undefined) {
@@ -5199,6 +5233,12 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       threadId: effectiveThreadId,
       title: thread.title,
       labels: thread.labels ?? [],
+      ...(meta?.roadmap
+        ? {
+            roadmap: await readThreadRoadmap({ thread, threadStore, userId: principal.userId }),
+            roadmapBinding: meta.roadmap,
+          }
+        : {}),
       ...(meta?.worktrees ? { worktrees: meta.worktrees } : {}),
       ...(meta?.prs ? { prs: meta.prs } : {}),
       ...(meta?.issues ? { issues: meta.issues } : {}),
@@ -5238,7 +5278,23 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       return { error: 'Thread not found' };
     }
 
-    const { title, labels, ...metadataFields } = parsed.data;
+    const { title, labels, roadmap, ...metadataFields } = parsed.data;
+    let roadmapMutation: Awaited<ReturnType<typeof prepareRoadmapMutation>> | undefined;
+    if (roadmap) {
+      try {
+        roadmapMutation = await prepareRoadmapMutation({
+          roadmap,
+          record: principal,
+          thread,
+          threadStore,
+          messageStore,
+        });
+      } catch (error) {
+        return reply
+          .code(error instanceof ThreadRoadmapConflict ? 409 : 400)
+          .send({ error: error instanceof Error ? error.message : 'Invalid roadmap binding' });
+      }
+    }
 
     // #872 cloud-review P2: validate all rejectable inputs BEFORE applying any mutations.
     // Without this gate, a request with valid title + invalid labels would commit the title
@@ -5263,12 +5319,16 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
     // #872 cloud-review P2 (R3): failable operations first. atomicMergeThreadMetadata can
     // throw on CAS exhaustion or unparseable stored data; run it before title/labels so
     // a throw doesn't leave visible fields partially committed.
-    const hasMetadataUpdate = Object.keys(metadataFields).length > 0;
+    const hasMetadataUpdate = Object.keys(metadataFields).length > 0 || roadmapMutation !== undefined;
     if (hasMetadataUpdate) {
       try {
-        await threadStore.atomicMergeThreadMetadata(effectiveThreadId, metadataFields);
+        await threadStore.atomicMergeThreadMetadata(effectiveThreadId, {
+          ...metadataFields,
+          ...(roadmapMutation ? { roadmap: roadmapMutation } : {}),
+        });
       } catch (err) {
         // #872: total-limits rejection is a client error (deterministic, not retryable).
+        if (err instanceof ThreadRoadmapConflict) return reply.code(409).send({ error: err.message });
         // Surface as 422 so MCP retry helpers don't retry a request that can never succeed.
         const msg = err instanceof Error ? err.message : String(err);
         if (msg.includes('total limits exceeded')) {
@@ -5308,6 +5368,12 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
         ? { titleApplied, titleSource: updated?.titleSource ?? (thread.title ? 'user' : 'temporary') }
         : {}),
       labels: updated?.labels ?? thread.labels ?? [],
+      ...(updated?.threadMetadata?.roadmap
+        ? {
+            roadmap: await readThreadRoadmap({ thread: updated, threadStore, userId: principal.userId }),
+            roadmapBinding: updated.threadMetadata.roadmap,
+          }
+        : {}),
       ...(meta?.worktrees ? { worktrees: meta.worktrees } : {}),
       ...(meta?.prs ? { prs: meta.prs } : {}),
       ...(meta?.issues ? { issues: meta.issues } : {}),

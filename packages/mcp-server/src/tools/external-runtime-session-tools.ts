@@ -1,11 +1,10 @@
 import { deploymentDefaults } from '@cat-cafe/shared';
 import { z } from 'zod';
 import { defineMcpMigrationFactory } from '../tool-governance-migration.js';
-
 import { callbackPost } from './callback-tools.js';
 import type { ToolResult } from './file-tools.js';
 import { errorResult, successResult } from './file-tools.js';
-import { resolveInvocationEnv } from './invocation-auth.js';
+import { invocationFetch, resolveInvocationEnv } from './invocation-auth.js';
 
 const defineTool = defineMcpMigrationFactory('external-runtime-session-tools.ts', undefined, {
   resourceFamily: 'runtime-session',
@@ -126,7 +125,7 @@ export async function handleReadExternalRuntimeSession(input: { sessionId: strin
 
 async function fetchExternalRuntimeSessionJson(url: string, failurePrefix: string): Promise<ToolResult> {
   try {
-    const res = await fetch(url, { headers: buildUserAuthHeaders() });
+    const res = await invocationFetch(url, { headers: buildUserAuthHeaders() });
     if (!res.ok) {
       return errorResult(`${failurePrefix} (${res.status}): ${await res.text()}`);
     }

@@ -308,3 +308,48 @@ test('Works displays the frozen version production time without changing catalog
   assert.equal(ownerVersion.currentOwnerRevision, 1);
   assert.deepEqual((await catalogue.readThread({ ownerUserId: 'operator', threadId: 'other' })).artifacts, []);
 });
+
+test('file landing reuses the exact registered version, refuses ambiguity and creates no work on a miss', async (t) => {
+  const f = await fixture(t);
+  const service = new LivingWorkService({
+    ...f.deps,
+    source: {
+      ...f.deps.source,
+      inspect: async ({ locator }) => ({
+        source: { ...locator, expectedSourceRevision: digest(locator.path.replace('.mp4', '')) },
+        mediaType: 'video/mp4',
+        byteLength: 5,
+      }),
+    },
+  });
+  const first = await service.commit(create, principal);
+  const second = await service.commit(
+    {
+      ...create,
+      action: 'submit',
+      contentRef: first.reference.contentRef,
+      expectedOwnerRevision: 1,
+      operationId: 'new-cut',
+      source: source('second'),
+    },
+    principal,
+  );
+  const located = await service.resolveFile({ worktreeId: 'authorized-root', path: 'first.mp4' }, principal);
+  assert.deepEqual(located.artifact?.work, { ...first.reference, currentOwnerRevision: 2 });
+  assert.notDeepEqual(located.artifact?.work, { ...second.reference, currentOwnerRevision: 2 });
+  const before = await f.owner.describe(first.reference.contentRef);
+  assert.deepEqual(await service.resolveFile({ worktreeId: 'authorized-root', path: 'unregistered.mp4' }, principal), {
+    artifact: null,
+  });
+  assert.equal((await f.owner.describe(first.reference.contentRef)).currentOwnerRevision, before.currentOwnerRevision);
+  await service.commit({ ...create, operationId: 'separate-work-same-file' }, principal);
+  await assert.rejects(
+    service.resolveFile({ worktreeId: 'authorized-root', path: 'first.mp4' }, principal),
+    /publication_changed/,
+  );
+  f.revoke();
+  await assert.rejects(
+    service.resolveFile({ worktreeId: 'authorized-root', path: 'second.mp4' }, principal),
+    /revoked/,
+  );
+});

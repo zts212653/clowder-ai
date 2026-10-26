@@ -1,4 +1,3 @@
-import { createModuleLogger } from '../../../../../infrastructure/logger.js';
 import { buildOpenCodeMcpSync } from './opencode-mcp-injection.js';
 
 export {
@@ -6,8 +5,6 @@ export {
   parseOpenCodeModel,
   resolveEffectiveOpenCodeModel,
 } from '../../../../../config/opencode-model.js';
-
-const log = createModuleLogger('opencode-config');
 
 interface OpenCodeConfigOptions {
   /** Anthropic API key — validated but NOT written to config (stays in ANTHROPIC_API_KEY env var) */
@@ -45,21 +42,6 @@ interface OpenCodeConfig {
     external_directory?: Record<string, OpenCodePermissionAction>;
   };
 }
-
-type OpenCodeLocalMcpEntry = {
-  type: string;
-  command: string[];
-  environment?: Record<string, string>;
-};
-
-type OpenCodeRemoteMcpEntry = {
-  type: 'remote';
-  url: string;
-  enabled: true;
-  headers?: Record<string, string>;
-};
-
-type OpenCodeMcpEntry = OpenCodeLocalMcpEntry | OpenCodeRemoteMcpEntry;
 
 export function generateOpenCodeConfig(options: OpenCodeConfigOptions): OpenCodeConfig {
   const { baseUrl, model, enableOmoc = true } = options;
@@ -308,7 +290,10 @@ function summarizeEnvPlaceholder(value: string | undefined): string | undefined 
 export function summarizeOpenCodeRuntimeConfigForDebug(
   options: OpenCodeRuntimeConfigOptions,
 ): OpenCodeRuntimeConfigDebugSummary {
-  const config = generateOpenCodeRuntimeConfig(options);
+  // This projection reports provider routing only. Resolving MCP again here
+  // has neither the writer's member nor its persistent root and can abort an
+  // already prepared native launch merely while constructing a debug message.
+  const config = generateOpenCodeRuntimeConfig({ ...options, mcpServerPath: undefined });
   const providerEntries = Object.entries(config.provider).sort(([a], [b]) => a.localeCompare(b));
 
   return {

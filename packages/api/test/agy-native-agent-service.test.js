@@ -147,8 +147,8 @@ describe('F325 one-turn native AGY carrier', () => {
         assert.equal(upstream.env.ALLOWED_WORKSPACE_DIRS, process.env.ALLOWED_WORKSPACE_DIRS?.trim() || f.workspace);
         assert.equal(
           proxyEnv.ALLOWED_WORKSPACE_DIRS,
-          undefined,
-          'only the upstream reader owns the workspace boundary',
+          upstream.env.ALLOWED_WORKSPACE_DIRS,
+          'secret protection must inspect the same admitted workspace as the upstream reader',
         );
         for (const env of [proxyEnv, upstream.env]) {
           assert.equal(env.CAT_CAFE_API_URL, 'http://127.0.0.1:3012');

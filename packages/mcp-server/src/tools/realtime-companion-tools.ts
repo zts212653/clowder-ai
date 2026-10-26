@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { defineMcpCanonicalFactory } from '../tool-governance-migration.js';
 import type { ToolResult } from './file-tools.js';
 import { errorResult, successResult } from './file-tools.js';
-import { resolveInvocationEnv } from './invocation-auth.js';
+import { invocationFetch, resolveInvocationEnv } from './invocation-auth.js';
 
 const defineTool = defineMcpCanonicalFactory('realtime-companion-tools.ts', undefined, {
   resourceFamily: 'audio',
@@ -63,7 +63,7 @@ async function companionRequest(threadId: string, suffix: string, init?: Request
   const apiUrl = resolveApiUrl();
   const userId = resolveInvocationEnv('CAT_CAFE_USER_ID') ?? 'default-user';
   try {
-    const response = await fetch(
+    const response = await invocationFetch(
       `${apiUrl}/api/threads/${encodeURIComponent(threadId.trim())}/realtime-companion${suffix}`,
       {
         ...init,

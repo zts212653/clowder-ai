@@ -1,7 +1,8 @@
 import { SettingsText } from '../primitives/SettingsText';
 import { PluginUpdateNotice } from './controls/PluginManagerDetailChrome';
 import { pluginManagerText } from './controls/plugin-manager.shell-copy';
-import { pluginAttentionReason } from './plugin-manager-attention';
+import { PluginStatusDot } from './PluginStatusDot';
+import { pluginAttentionReason, pluginAttentionTone, pluginIncompatibleHint } from './plugin-manager-attention';
 import type { PluginManagerDesignFixture } from './plugin-manager-fixtures';
 
 /** Status and introduction precede the manifest-ordered configuration. */
@@ -31,7 +32,7 @@ export function PluginManagerDetailPrelude({
             className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-x-3 gap-y-2 rounded-lg border border-cafe-border bg-[var(--shell-work)] px-3 py-2.5"
           >
             <SettingsText as="p" variant="sm" tone="default">
-              <span aria-hidden className="mr-2 inline-block h-2 w-2 rounded-full bg-conn-amber-text" />
+              <PluginStatusDot tone={pluginAttentionTone(plugin)} className="mr-2 h-2 w-2" />
               {reason}
             </SettingsText>
             {plugin.artifact === 'installed' && plugin.actions?.repair && onRepair && (
@@ -47,7 +48,7 @@ export function PluginManagerDetailPrelude({
             )}
             <SettingsText as="p" variant="sm" tone="secondary" className="col-span-2">
               {plugin.actions?.blockingReasons.includes('package-incompatible')
-                ? t.incompatibleHint
+                ? pluginIncompatibleHint(plugin, locale)
                 : plugin.artifact !== 'installed'
                   ? t.packageHint
                   : plugin.actions?.repair

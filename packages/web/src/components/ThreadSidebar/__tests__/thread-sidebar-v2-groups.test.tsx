@@ -151,6 +151,17 @@ describe('F322 production group preview and compact virtual navigation', () => {
           sources: {
             approvals: { status: 'available', exhaustiveness: 'complete' },
             needsMe: { status: 'available', exhaustiveness: 'complete' },
+            personalPreferences: { status: 'available', exhaustiveness: 'complete' },
+          },
+          personalView: {
+            mode: 'visible',
+            preferenceRevision: 1,
+            originalTotalCount: 0,
+            visibleTotalCount: 0,
+            ignoredTotalCount: 0,
+            originalAttentionCount: 0,
+            visibleAttentionCount: 0,
+            ignoredAttentionCount: 0,
           },
           readWindow: { startedAt: 1, endedAt: 3, consistency: 'independent_source_reads' },
           consistency: { state: 'verified', reasons: [] },

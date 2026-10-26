@@ -1,7 +1,8 @@
 import { CONTEXTUAL_SECRET, isContextualCredential } from './secret-content-rules.mjs';
 import { mergeSecretFindings, redactSecretContent, scanSecretContent } from './secret-content-scan.mjs';
+import { decodeRasterPayload } from './secret-image-payload.mjs';
 
-function inspectString(item, key, rules) {
+function inspectString(item, key, parent, rules) {
   const prefix = `${key}: "`;
   const field = new RegExp(CONTEXTUAL_SECRET).exec(`${prefix}${item}"`);
   // Only the actual field name supplies structured credential context. A match
@@ -15,6 +16,15 @@ function inspectString(item, key, rules) {
   ) {
     rules.add('contextual-credential');
     return '[credential redacted]';
+  }
+  const image = decodeRasterPayload(item, key, parent);
+  if (image) {
+    const imageRules = new Set();
+    // Scan decoded bytes for actual embedded credential text (e.g. metadata).
+    // Never edit an image's encoding in place or exempt its neighboring text.
+    redactChunks(image, imageRules);
+    for (const rule of imageRules) rules.add(rule);
+    return imageRules.size ? '[credential-bearing image removed]' : item;
   }
   return redactChunks(Buffer.from(item), rules);
 }
@@ -37,12 +47,12 @@ export function inspectSecretValue(value) {
   const rules = new Set();
   let nodes = 0;
   let bytes = 0;
-  function visit(item, key = '', depth = 0) {
+  function visit(item, key = '', depth = 0, parent = null) {
     if (++nodes > 100000 || depth > 64) throw new Error('secret_payload_uninspectable');
     if (typeof item === 'string') {
       bytes += Buffer.byteLength(item);
       if (bytes > 64 * 1024 * 1024) throw new Error('secret_payload_uninspectable');
-      return inspectString(item, key, rules);
+      return inspectString(item, key, parent, rules);
     }
     if (Array.isArray(item)) return item.map((child) => visit(child, key, depth + 1));
     if (!item || typeof item !== 'object') return item;
@@ -50,7 +60,7 @@ export function inspectSecretValue(value) {
       Object.entries(item).map(([name, child]) => {
         const findings = scanSecretContent(name);
         for (const finding of findings) rules.add(finding.ruleId);
-        return [redactSecretContent(name, findings), visit(child, name, depth + 1)];
+        return [redactSecretContent(name, findings), visit(child, name, depth + 1, item)];
       }),
     );
   }

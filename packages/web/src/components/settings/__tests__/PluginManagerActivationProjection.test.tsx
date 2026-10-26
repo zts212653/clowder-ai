@@ -138,7 +138,7 @@ describe('Host activation projection through Plugin Manager UI', () => {
       '版本和当前 Host 不兼容，已停用',
     );
     act(() => container.querySelector<HTMLButtonElement>('button[data-enabled]')?.click());
-    expect(container.querySelector('output')?.textContent).toContain('请更新到兼容当前 Host 的插件版本');
+    expect(container.querySelector('output')?.textContent).toContain('当前没有可用的兼容更新');
   });
 
   it('retains v1 grouping for the same production failure', () => {

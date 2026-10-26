@@ -49,7 +49,7 @@ init_named_alpha_worktree() {
   local target
   target="$(git -C "$PROJECT_DIR" rev-parse --verify 'refs/remotes/origin/main^{commit}')"
   (cd "$PROJECT_DIR" && node "$SCRIPT_DIR/worktree-new.mjs" "$ALPHA_DIR" \
-    --branch "$ALPHA_BRANCH" --base "$target" --policy merged --full)
+    --branch "$ALPHA_BRANCH" --base "$target" --policy merged --role alpha --full)
   assert_named_alpha_prepared
   if [ "$RUN_INSTALL" = true ]; then install_alpha_dependencies; fi
   info "named alpha worktree ready: $ALPHA_DIR"

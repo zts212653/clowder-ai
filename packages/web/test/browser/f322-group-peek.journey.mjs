@@ -60,6 +60,77 @@ export async function runGroupPeekJourney(t, browser) {
               ? ['等你决定', '@你', `${unreadCount} 未读`]
               : ['To decide', '@you', `${unreadCount} unread`],
           );
+          // One browser case proves both consumers refresh from the personal view;
+          // the pure reader tests cover pagination and unavailable snapshots.
+          if (base === 'light' && language === 'zh') {
+            const read = await page.evaluate(() =>
+              fetch('/api/concierge/work/decisions?view=unified&offset=0&limit=20&personalView=visible').then((r) =>
+                r.json(),
+              ),
+            );
+            const coordinate = read.items[0].preferenceCoordinate;
+            const refresh = async (event) => {
+              const response = page.waitForResponse((res) => {
+                const url = new URL(res.url());
+                return (
+                  url.pathname === '/api/concierge/work/decisions' &&
+                  url.searchParams.get('personalView') === 'visible' &&
+                  !url.searchParams.has('includeUserMentions')
+                );
+              });
+              await page.evaluate((name) => window.dispatchEvent(new Event(name)), event);
+              const snapshot = await (await response).json();
+              assert.equal(snapshot.personalView.preferenceRevision, api.decisionPreferences.revision);
+              return snapshot;
+            };
+            api.decisionPreferences.ignored.add(coordinate.version);
+            api.decisionPreferences.revision++;
+            assert.equal((await refresh('cat-cafe:ignored-item-preferences-updated')).items.length, 0);
+            await group
+              .getByTestId('group-count')
+              .filter({ hasText: /^5 条要看$/ })
+              .waitFor();
+            await group.locator('[data-peek-reason="decision"]').waitFor({ state: 'detached' });
+            await page.screenshot({ path: path.join(evidence, 'personal-ignored-collapsed.png') });
+            await group.locator('button[aria-controls]').click();
+            assert.equal(await page.getByTestId('thread-row-pending-decision').count(), 0);
+            assert.ok((await page.getByTestId('thread-row-unread').count()) > 0, 'independent unread signals remain');
+            api.decisionPreferences.ignored.clear();
+            api.decisionPreferences.revision++;
+            await refresh('cat-cafe:ignored-item-preferences-updated');
+            await page.getByTestId('thread-row-pending-decision').waitFor();
+            api.decisionPreferences.ignored.add(coordinate.version);
+            api.decisionPreferences.revision++;
+            assert.equal((await refresh('cat-cafe:ignored-item-preferences-updated')).items.length, 0);
+            assert.equal(
+              await group.getByTestId('group-count').textContent(),
+              String(api.preferences.groups.find((g) => g.id === GROUP_ID).threadIds.length),
+            );
+            await page.getByTestId('thread-row-pending-decision').waitFor({ state: 'detached' });
+            api.decisions[0].choiceRequest.revision++;
+            await refresh('cat-cafe:runtime-interaction-updated');
+            await page.getByTestId('thread-row-pending-decision').waitFor();
+            await group.locator('button[aria-controls]').click();
+            await group.locator('[data-peek-reason="decision"]').waitFor();
+            const personalReads = api.requests.filter((r) => r.path === '/api/concierge/work/decisions');
+            assert.ok(personalReads.length > 4);
+            assert.ok(personalReads.every((r) => new URLSearchParams(r.search).get('personalView') === 'visible'));
+            writeFileSync(
+              path.join(evidence, 'personal-visibility.json'),
+              JSON.stringify(
+                {
+                  ignoredCoordinate: coordinate,
+                  ignoredAndRestored: true,
+                  newerVersionVisible: true,
+                  rowAndCollapsed: true,
+                  independentUnreadPreserved: true,
+                  personalReads,
+                },
+                null,
+                2,
+              ),
+            );
+          }
           const contrast = await group
             .getByTestId('group-peek-label')
             .first()

@@ -3,6 +3,33 @@ import type { EnvDefinition } from '../env-registry.js';
 
 export const ENV_DEFINITIONS_5: readonly EnvDefinition[] = [
   {
+    name: 'CAT_CAFE_SYNC_CONTEXT',
+    defaultValue: '(phase injected)',
+    description: '原生 sync:cycle 注入的固定工作区租约 context，仅阶段子进程消费',
+    category: 'cli',
+    sensitive: true,
+    hubVisible: false,
+    runtimeEditable: false,
+  },
+  {
+    name: 'CAT_CAFE_SYNC_WORKSPACE',
+    defaultValue: '(phase injected)',
+    description: '原生同步诊断阶段的固定工作副本根',
+    category: 'cli',
+    sensitive: false,
+    hubVisible: false,
+    runtimeEditable: false,
+  },
+  {
+    name: 'CAT_CAFE_SYNC_EVIDENCE_DIR',
+    defaultValue: '(phase injected)',
+    description: '本轮原始证据持久目录，不是可回收工作区',
+    category: 'cli',
+    sensitive: false,
+    hubVisible: false,
+    runtimeEditable: false,
+  },
+  {
     name: 'CAT_CAFE_CALLBACK_OUTBOX_ENABLED',
     defaultValue: 'true',
     description: 'Callback outbox 是否启用',

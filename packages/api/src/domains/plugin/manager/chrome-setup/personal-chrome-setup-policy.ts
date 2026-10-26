@@ -18,6 +18,12 @@ export const TRUSTED_CHROME_SETUP_DELIVERIES = Object.freeze([
     version: '0.1.0-alpha.6',
     digest: 'sha512-ypOOdp+jONUH1H9W9qbOLLZVyZ8gXZPs0w4aWuHpTbwhdn1PUIrK4f/DsKwmNyHcrGyq4oF1izrgjC8z8NhN4A==',
   }),
+  // Exact alpha.7 archive: SHA256 30686b56939340b8877c52ba363c78a1c98b52885f0265f88bc90f4fa529f808.
+  // Its form-scoped send fix retains the reviewed setup runner and permission boundaries.
+  Object.freeze({
+    version: '0.1.0-alpha.7',
+    digest: 'sha512-/lLrNrAsCYEhwHiJuaaiEnG8YIzKGJ+tIX2C8FGFF2BJQd8Rtz6/dg4pXpeVDhUFt16c+7oRitfEnWCGU+Tr+g==',
+  }),
 ]);
 
 /** Routing is not authorization: both projection and execution resolve the policy below. */

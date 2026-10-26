@@ -130,7 +130,9 @@ git diff --name-only origin/main...HEAD | rg '^[^/]+\.(png|jpe?g|webp|gif|webm|m
 ```
 
 创建时带出生声明，让 reaper 能识别生命周期：
-`pnpm worktree:new /tmp/cat-cafe-review/{id}/{reviewer} --base {exact-SHA} --owner {reviewer} --policy ttl --ttl-days 7`。
+`pnpm worktree:new /tmp/cat-cafe-review/{id}/{reviewer} --base {exact-SHA} --owner {reviewer} --policy ttl --ttl-days 7 --role review --source-ref pr:{OWNER}/{REPO}#{PR_NUMBER}`。
+出生来源从本 invocation 的 thread/user 环境继承；独立 CLI 缺环境时显式带 `--thread-id {原threadId} --user-id {原userId}`，不猜平行线程。
+共享 post-checkout 会为带真实 invocation 来源的裸 Git 首次检出补 TTL 声明；这只是兜底，不替代 canonical new，`--no-checkout` 或无来源的外部命令仍需清单调查。
 
 统一入口 `pnpm review:start`，请求中记录实际 web/api 端口。只审 diff 或治理文字时不启动 sandbox；要改代码则 TAKEOVER，另开正式 worktree。
 

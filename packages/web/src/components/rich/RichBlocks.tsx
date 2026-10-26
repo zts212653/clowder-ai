@@ -12,7 +12,26 @@ import type { RuntimeConversationBinding } from './runtime-conversation-model';
 
 type BlockItem = { type: 'block'; block: RichBlock };
 type GroupedItem = { type: 'group'; groupId: string; blocks: RichInteractiveBlock[] };
+type WorkCardsItem = { type: 'works'; blocks: RichBlock[] };
 type ResultItem = BlockItem | GroupedItem;
+
+/** Adjacent work cards share a grid without changing selection coordinates or source order. */
+function groupWorkCards(items: ResultItem[]): (ResultItem | WorkCardsItem)[] {
+  const result: (ResultItem | WorkCardsItem)[] = [];
+  for (const item of items) {
+    const work =
+      item.type === 'block' &&
+      (item.block.kind === 'file' || (item.block.kind === 'card' && item.block.meta?.kind === 'work_reference'));
+    if (!work || item.type !== 'block') {
+      result.push(item);
+      continue;
+    }
+    const last = result.at(-1);
+    if (last?.type === 'works') last.blocks.push(item.block);
+    else result.push({ type: 'works', blocks: [item.block] });
+  }
+  return result;
+}
 
 /** Render decisions belong to local envelopes, never extra fields on source blocks. */
 function blockItem(block: RichBlock): BlockItem {
@@ -134,7 +153,35 @@ export function RichBlocks({
   const visibility = useFrustrationVisibility(blocks, readOnly ? undefined : messageSource?.connector);
   const shownBlocks = readOnly ? blocks : visibleFrustrationBlocks(visibility);
   if (shownBlocks.length === 0) return null;
-  const items = readOnly || runtimeInteractionCard ? shownBlocks.map(blockItem) : groupBlocks(shownBlocks);
+  const items =
+    readOnly || runtimeInteractionCard ? shownBlocks.map(blockItem) : groupWorkCards(groupBlocks(shownBlocks));
+  const renderBlock = (block: RichBlock) => (
+    <RichBlockSelectionFrame
+      key={block.id}
+      block={block}
+      index={shownBlocks.indexOf(block)}
+      messageId={messageId}
+      readOnly={readOnly}
+    >
+      {readOnly ? (
+        <ReadOnlyRichBlockRenderer block={block} />
+      ) : (
+        <RichBlockRenderer
+          block={block}
+          publication={publication}
+          catId={catId}
+          messageId={messageId}
+          sourceThreadId={sourceThreadId}
+          sourceMessageIds={sourceMessageIds}
+          messageSource={messageSource}
+          confirmations={confirmations}
+          sendContext={sendContext}
+          runtimeInteractionCard={runtimeInteractionCard}
+          htmlWidgetDisclosureKeys={htmlWidgetDisclosureKeys}
+        />
+      )}
+    </RichBlockSelectionFrame>
+  );
   return (
     <div className="mt-2 space-y-2">
       {items.map((item) =>
@@ -142,32 +189,12 @@ export function RichBlocks({
           <div key={item.groupId} data-rich-block-group-id={item.groupId} className="group/rich-block relative">
             <InteractiveBlockGroup blocks={item.blocks} messageId={messageId} sendContext={sendContext} />
           </div>
+        ) : item.type === 'works' ? (
+          <div key={`works-${item.blocks[0]?.id}`} className="chat-work-gallery">
+            <div className="chat-work-grid">{item.blocks.map(renderBlock)}</div>
+          </div>
         ) : (
-          <RichBlockSelectionFrame
-            key={item.block.id}
-            block={item.block}
-            index={shownBlocks.indexOf(item.block)}
-            messageId={messageId}
-            readOnly={readOnly}
-          >
-            {readOnly ? (
-              <ReadOnlyRichBlockRenderer block={item.block} />
-            ) : (
-              <RichBlockRenderer
-                block={item.block}
-                publication={publication}
-                catId={catId}
-                messageId={messageId}
-                sourceThreadId={sourceThreadId}
-                sourceMessageIds={sourceMessageIds}
-                messageSource={messageSource}
-                confirmations={confirmations}
-                sendContext={sendContext}
-                runtimeInteractionCard={runtimeInteractionCard}
-                htmlWidgetDisclosureKeys={htmlWidgetDisclosureKeys}
-              />
-            )}
-          </RichBlockSelectionFrame>
+          renderBlock(item.block)
         ),
       )}
     </div>

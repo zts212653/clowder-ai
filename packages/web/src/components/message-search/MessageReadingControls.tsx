@@ -1,3 +1,5 @@
+import { useChatStore } from '@/stores/chatStore';
+import { useShellPresentation } from '../shell/shell-presentation';
 import type { MessageReadingTrip } from './message-reading-trip';
 import type { MessageSearchHost } from './useMessageSearchHost';
 
@@ -20,6 +22,10 @@ function progressLabel(trip: MessageReadingTrip): string {
 
 export function MessageReadingControls({ host }: { host: MessageSearchHost }) {
   const trip = host.session?.trip;
+  const journey6 = useShellPresentation() === 'v2';
+  const originTitle = useChatStore(
+    (state) => state.threads.find((thread) => thread.id === trip?.origin.threadId)?.title,
+  );
   if (!trip || trip.status === 'completed') return null;
   const index = trip.pending?.kind === 'target' ? trip.pending.index : (trip.settledIndex ?? -1);
   return (
@@ -56,8 +62,8 @@ export function MessageReadingControls({ host }: { host: MessageSearchHost }) {
         >
           ↓
         </button>
-        <button type="button" className={controlClass} onClick={host.returnToOrigin}>
-          回到刚才
+        <button type="button" className={`${controlClass} max-w-52 truncate`} onClick={host.returnToOrigin}>
+          {journey6 ? `‹ 回到「${originTitle || '刚才那条对话'}」` : '回到刚才'}
         </button>
       </div>
       <p className="mt-1 px-2 text-micro text-cafe-secondary">{statusText[trip.status]}</p>

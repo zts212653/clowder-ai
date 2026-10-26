@@ -1,5 +1,6 @@
 import type { Profiler, Session } from 'node:inspector';
 import type { FastifyBaseLogger } from 'fastify';
+import { tryAcquireCpuProfiler } from './cpu-profiler-lease.js';
 import { projectMainThreadCpuProfile } from './main-thread-cpu-profile.js';
 
 const ARM_MS = 2000;
@@ -21,6 +22,8 @@ export function createSlowReadCpuObserver() {
     const arm = setTimeout(() => {
       const now = performance.now();
       if (settled || active || profiles >= MAX_PROFILES || now - lastStarted < COOLDOWN_MS) return;
+      const release = tryAcquireCpuProfiler();
+      if (!release) return;
       active = true;
       profiles++;
       lastStarted = now;
@@ -33,6 +36,7 @@ export function createSlowReadCpuObserver() {
         },
       ).finally(() => {
         active = false;
+        release();
       });
     }, ARM_MS);
     arm.unref();

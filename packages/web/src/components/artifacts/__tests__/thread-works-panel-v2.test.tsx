@@ -13,7 +13,7 @@ const data = vi.hoisted(() => ({ fetch: vi.fn() }));
 vi.mock('@/components/workbench/F307OwnerSurfaceRenderer', () => ({
   F307OwnerSurfaceRenderer: () => <div>Original publication owner</div>,
 }));
-vi.mock('@/utils/api-client', () => ({ API_URL: '', apiFetch: data.fetch }));
+vi.mock('@/utils/api-client', () => ({ API_URL: 'http://localhost:3102', apiFetch: data.fetch }));
 vi.mock('@/hooks/useCatData', () => ({ useCatData: () => ({ getCatById: () => ({ nickname: '小太阳·砚砚' }) }) }));
 const items: ThreadArtifactDTO[] = [
   {

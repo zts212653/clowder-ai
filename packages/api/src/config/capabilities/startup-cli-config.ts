@@ -1,3 +1,4 @@
+import { statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { findMonorepoRoot } from '../../utils/monorepo-root.js';
@@ -9,7 +10,7 @@ import {
   withCapabilityLock,
   writeCapabilitiesConfig,
 } from './capability-orchestrator.js';
-import { resolveDeclaredCapabilityRoot } from './invoke-capability-root.js';
+import { isSameCapabilityRoot, resolveDeclaredCapabilityRoot } from './invoke-capability-root.js';
 
 export interface StartupCliConfigContext {
   projectRoot: string;
@@ -37,9 +38,22 @@ export function resolveStartupCliConfigContext(
   };
 }
 
-/** Alpha may observe shared capabilities, but cannot persist implicit repairs. */
-export function allowsImplicitCapabilityWrites(env: NodeJS.ProcessEnv = process.env): boolean {
-  return env.CAT_CAFE_DEPLOYMENT_ID?.trim() !== 'alpha';
+/** A preview can read shared configuration, but only its persistent owner may publish. */
+export function allowsImplicitCapabilityWrites(env: NodeJS.ProcessEnv, binaryRoot: string): boolean {
+  const deployment = env.CAT_CAFE_DEPLOYMENT_ID?.trim();
+  if (deployment === 'runtime') {
+    const runtimeRoot = env.CAT_CAFE_RUNTIME_ROOT?.trim();
+    if (runtimeRoot) return isSameCapabilityRoot(binaryRoot, runtimeRoot);
+  } else if (deployment) {
+    return false;
+  }
+  try {
+    // Linked checkouts inherit the runtime environment, not publication ownership.
+    // A standalone/public installation has no .git file and retains first-run setup.
+    return !statSync(join(binaryRoot, '.git')).isFile();
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === 'ENOENT';
+  }
 }
 
 export async function regenerateStartupCliConfigs(
@@ -47,9 +61,9 @@ export async function regenerateStartupCliConfigs(
   env: NodeJS.ProcessEnv = process.env,
 ): Promise<StartupCliConfigRegenerationResult> {
   const { projectRoot, paths } = resolveStartupCliConfigContext(start, env);
-  // Alpha verifies an isolated build; it has no authority to repoint shared
+  // A preview verifies an isolated build; it has no authority to repoint shared
   // workspace/HOME configurations to its transient MCP binaries.
-  if (!allowsImplicitCapabilityWrites(env)) {
+  if (!allowsImplicitCapabilityWrites(env, findMonorepoRoot(start))) {
     return { projectRoot, generated: false, healed: false };
   }
   return withCapabilityLock(projectRoot, async () => {

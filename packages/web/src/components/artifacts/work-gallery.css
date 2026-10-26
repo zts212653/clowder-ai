@@ -24,6 +24,7 @@
   inset: 0;
 }
 .work-gallery-visual {
+  position: relative;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -90,18 +91,48 @@
   color: var(--shell-muted);
   font-size: var(--console-font-label);
 }
-.work-gallery-paper {
-  align-self: stretch;
-  width: calc(100% - 32px);
-  margin: 16px;
-  padding: 12px;
-  overflow: hidden;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
+.work-gallery-latest {
+  position: absolute;
+  z-index: 1;
+  top: 8px;
+  left: 8px;
+  padding: 2px 6px;
+  border: 1px solid var(--shell-hairline);
+  border-radius: 6px;
+  color: var(--shell-ink);
   background: var(--shell-paper);
-  color: var(--shell-muted);
-  font-size: var(--console-font-xs);
-  line-height: 1.5;
+  font-size: 11px;
+}
+.chat-work-gallery {
+  container-type: inline-size;
+}
+.chat-work-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+.chat-work-grid > [data-rich-block-id] > div:first-child {
+  height: 100%;
+}
+.chat-work-card {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-width: 0;
+}
+.chat-work-card > .work-gallery-card {
+  flex: 1;
+  height: auto;
+}
+@container (max-width: 719px) {
+  .chat-work-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@container (max-width: 419px) {
+  .chat-work-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 .work-gallery-menu {
   z-index: 2;
@@ -122,10 +153,12 @@
   display: none;
 }
 .work-gallery-menu a,
+.work-gallery-menu button,
 .work-gallery-menu output {
   display: block;
   padding: 5px 10px;
   font-size: var(--console-font-xs);
+  text-align: left;
 }
 .work-gallery-card:hover .work-gallery-menu,
 .work-gallery-card:focus-within .work-gallery-menu,

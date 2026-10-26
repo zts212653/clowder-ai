@@ -1,3 +1,4 @@
+import { invocationFetch } from './invocation-auth.js';
 /**
  * Home-State Tools — F300 M3 pull snapshot.
  *
@@ -54,7 +55,7 @@ export async function handleHomeStateSelf(_input: Record<string, never> = {}): P
   }
 
   try {
-    const response = await fetch(url, {
+    const response = await invocationFetch(url, {
       headers: buildAuthHeaders(config),
       signal: AbortSignal.timeout(TIMEOUT_MS),
     });
@@ -98,7 +99,7 @@ export async function handleCapabilitiesSnapshot(input: { projectPath?: string }
   }
 
   try {
-    const response = await fetch(url, {
+    const response = await invocationFetch(url, {
       headers: buildAuthHeaders(config),
       signal: AbortSignal.timeout(TIMEOUT_MS),
     });

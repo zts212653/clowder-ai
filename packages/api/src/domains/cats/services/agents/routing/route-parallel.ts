@@ -1781,6 +1781,12 @@ async function* routeParallelPrepared(
         errorCode: msg.errorCode,
         outputCommitRejected: !actionOutputCommitAllowed,
       });
+      const outputConfig = executionBindings.get(msg.catId as CatId)?.catConfig;
+      catOutputProjections.get(msg.catId)?.settle({
+        succeeded: lifecycleTerminalStatus === 'completed' && !catHadError.has(msg.catId),
+        nativePhases:
+          !outputConfig?.clientId || outputConfig.clientId === 'openai' || outputConfig.provider === 'openai',
+      });
       const lifecycleResponse =
         lifecycleAdmission && ownInvId
           ? {

@@ -10,11 +10,12 @@ vi.mock('@/utils/api-client', () => ({
 afterEach(() => vi.restoreAllMocks());
 it.each([
   ['/uploads/local-video.mp4', '/api/uploads/local-video.mp4/file-info'],
+  ['/uploads/construction-map.png', '/api/uploads/construction-map.png/file-info'],
   [
     '/api/workspace/file/raw?worktreeId=registered&path=clips%2Flocal.mp4',
     '/api/workspace/file/raw/file-info?worktreeId=registered&path=clips%2Flocal.mp4',
   ],
-])('keeps the existing source coordinate for local video %s', (source, endpoint) => {
+])('keeps the existing source coordinate for local media %s', (source, endpoint) => {
   expect(artworkFileActionUrl(source, 'file-info')).toBe(endpoint);
 });
 it('does not offer machine actions or request file paths in a narrow desktop browser', async () => {

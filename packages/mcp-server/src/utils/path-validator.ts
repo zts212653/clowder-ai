@@ -6,6 +6,7 @@
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import { resolveSharedInvocationContext } from '../tools/invocation-auth.js';
 import { findDeepestExistingPath, isWithinPath, resolveAbsolutePath, tryRealpathSync } from './path-utils.js';
 
 /**
@@ -26,6 +27,15 @@ const CAT_CAFE_SUBDIRS = ['chat', 'memory', 'workspace', 'assets', '.state'] as 
  * 从环境变量读取配置，若未设置则使用默认值
  */
 export function getDefaultConfig(): PathConfig {
+  const shared = resolveSharedInvocationContext();
+  if (shared)
+    return {
+      catCafeDir: shared.dataDir,
+      allowedDirs:
+        shared.desktopMode === 'live-companion'
+          ? [...shared.allowedWorkspaceDirs]
+          : [shared.dataDir, ...shared.allowedWorkspaceDirs],
+    };
   const homeDir = os.homedir();
   const defaultCatCafeDir = path.join(homeDir, '.cat-cafe');
 

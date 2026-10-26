@@ -50,17 +50,47 @@ export function V2WorkspaceFileChrome({
         onClick={p.isMarkdown ? p.onToggleMarkdownRendered : p.isHtml ? p.onToggleHtmlPreview : p.onToggleJsxPreview}
         title={t.toggle}
         activeClass="bg-cafe-accent text-[var(--cafe-accent-foreground)] hover:bg-cafe-accent-hover"
-        active={p.isMarkdown ? p.markdownRendered : p.isHtml ? p.htmlPreview : p.jsxPreview}
+        active={p.isMarkdown ? p.markdownRendered : p.isHtml ? false : p.jsxPreview}
       >
         {p.isMarkdown
           ? p.markdownRendered
             ? t.rendered
             : t.source
-          : (p.isHtml ? p.htmlPreview : p.jsxPreview)
-            ? t.preview
-            : t.source}
+          : p.isHtml
+            ? p.htmlPreview
+              ? t.viewSource
+              : t.pagePreview
+            : p.jsxPreview
+              ? t.preview
+              : t.source}
       </Button>
     ) : null;
+  const secondaryActions = (
+    <>
+      <Button
+        onClick={onAsk}
+        disabled={p.modificationDisabled || (p.onRequestModification ? p.editMode : false)}
+        title={t.askTitle}
+      >
+        {t.ask}
+      </Button>
+      {p.collaborationAvailable && p.onOpenCollaboration && (
+        <Button
+          onClick={p.onOpenCollaboration}
+          disabled={p.editMode}
+          title={p.editMode ? t.saveFirst : t.annotationTitle}
+        >
+          {t.annotations}
+          {p.annotationCount != null ? ` ${p.annotationCount}` : ''}
+        </Button>
+      )}
+      {!p.isMarkdown && p.canEdit && (
+        <Button onClick={p.onToggleEdit} active={p.editMode} title={t.editTitle}>
+          {p.editMode ? t.editing : t.edit}
+        </Button>
+      )}
+    </>
+  );
   return (
     <div
       hidden={p.focusMode}
@@ -132,29 +162,8 @@ export function V2WorkspaceFileChrome({
             {p.file.size < 1024 ? `${p.file.size}B` : `${Math.round(p.file.size / 1024)}KB`}
           </span>
         ) : null}
-        <span className="v2-file-view-toggle shrink-0">{toggle}</span>
-        <Button
-          onClick={onAsk}
-          disabled={p.modificationDisabled || (p.onRequestModification ? p.editMode : false)}
-          title={t.askTitle}
-        >
-          {t.ask}
-        </Button>
-        {p.collaborationAvailable && p.onOpenCollaboration && (
-          <Button
-            onClick={p.onOpenCollaboration}
-            disabled={p.editMode}
-            title={p.editMode ? t.saveFirst : t.annotationTitle}
-          >
-            {t.annotations}
-            {p.annotationCount != null ? ` ${p.annotationCount}` : ''}
-          </Button>
-        )}
-        {!p.isMarkdown && p.canEdit && (
-          <Button onClick={p.onToggleEdit} active={p.editMode} title={t.editTitle}>
-            {p.editMode ? t.editing : t.edit}
-          </Button>
-        )}
+        <span className={p.isHtml ? 'shrink-0' : 'v2-file-view-toggle shrink-0'}>{toggle}</span>
+        <span className={p.isHtml ? 'v2-html-secondary contents' : 'contents'}>{secondaryActions}</span>
         <span className="v2-file-listen shrink-0">{listen}</span>
         {p.nestedWork && p.onBack ? (
           <button
@@ -176,7 +185,8 @@ export function V2WorkspaceFileChrome({
           }}
           panelClassName="flex flex-col items-stretch gap-1 p-2"
         >
-          <span className="v2-file-menu-view">{toggle}</span>
+          {!p.isHtml && <span className="v2-file-menu-view">{toggle}</span>}
+          {p.isHtml && <span className="v2-html-menu-secondary flex-col gap-1">{secondaryActions}</span>}
           <span className="v2-file-menu-listen">{listen}</span>
           {p.isMarkdown && p.canEdit && (
             <Button onClick={p.onToggleEdit} active={p.editMode} title={t.editTitle}>

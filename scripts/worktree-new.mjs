@@ -18,6 +18,7 @@
  */
 import { fileURLToPath } from 'node:url';
 import { deferredMedia, initializeLightCheckout } from './lib/worktree-light.mjs';
+import { originFromEnvironment, validateOrigin } from './lib/worktree-origin.mjs';
 import { DEFAULT_POLICY, LIFECYCLE_POLICIES } from './lib/worktree-reaper-core.mjs';
 import { checkoutKind, git } from './lib/worktree-reaper-probes.mjs';
 import { capacityHolders, checkCapacity, mainRepoFrom } from './worktree-reaper.mjs';
@@ -51,8 +52,9 @@ function worktreeConfigEnabled(dir) {
 }
 
 /** Write catcafe.lifecycle.* for an existing worktree or clone. */
-export function declareLifecycle(dir, { owner, policy, ttlDays, now = Date.now() }) {
+export function declareLifecycle(dir, { owner, policy, ttlDays, now = Date.now(), origin }) {
   validateDeclaration({ owner, policy, ttlDays });
+  validateOrigin(origin);
   const scope = checkoutKind(dir) === 'clone' ? '--local' : '--worktree';
   if (scope === '--worktree' && !worktreeConfigEnabled(dir)) {
     throw new Error('extensions.worktreeConfig is not enabled; refusing to write a shared-config declaration');
@@ -61,6 +63,7 @@ export function declareLifecycle(dir, { owner, policy, ttlDays, now = Date.now()
   set('owner', owner);
   set('policy', policy);
   set('createdAt', new Date(now).toISOString());
+  if (origin) set('origin', JSON.stringify(origin));
   if (policy === 'ttl') set('expiresAt', new Date(now + ttlDays * 86_400_000).toISOString());
 }
 
@@ -104,8 +107,10 @@ export function createWorktree({
   parentDir,
   full = false,
   declare = declareLifecycle,
+  origin,
 }) {
   validateDeclaration({ owner, policy, ttlDays });
+  validateOrigin(origin);
   if (!worktreeConfigEnabled(repo)) {
     throw new Error('extensions.worktreeConfig is not enabled; run `git config extensions.worktreeConfig true` once');
   }
@@ -121,7 +126,7 @@ export function createWorktree({
   );
   try {
     if (deferred) initializeLightCheckout(path, deferred);
-    declare(path, { owner, policy, ttlDays, now });
+    declare(path, { owner, policy, ttlDays, now, origin });
   } catch (err) {
     // Fresh and clean by construction: remove without --force (anything unexpected makes git refuse).
     const removed = git(repo, ['worktree', 'remove', path]).ok;
@@ -140,6 +145,12 @@ function main(argv) {
   const decl = {
     owner: flag(argv, '--owner') ?? process.env.CAT_CAFE_CAT_ID,
     policy: flag(argv, '--policy') ?? 'merged',
+    origin: originFromEnvironment(process.env, {
+      threadId: flag(argv, '--thread-id'),
+      sourceRef: flag(argv, '--source-ref'),
+      role: flag(argv, '--role'),
+      userId: flag(argv, '--user-id'),
+    }),
     ttlDays: ttlRaw === undefined ? undefined : Number(ttlRaw),
   };
   if (argv.includes('--declare-only')) {

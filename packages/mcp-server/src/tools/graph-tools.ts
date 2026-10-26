@@ -1,4 +1,5 @@
 import { defineMcpMigrationFactory } from '../tool-governance-migration.js';
+import { invocationFetch } from './invocation-auth.js';
 
 /**
  * Graph Resolve Tool — F188 Phase F (AC-F1)
@@ -132,7 +133,7 @@ export async function handleGraphResolve(input: {
   const url = `${resolveApiUrl()}/api/library/graph/resolve?${params.toString()}`;
 
   try {
-    const response = await fetch(url);
+    const response = await invocationFetch(url);
     if (!response.ok) {
       const text = await response.text();
       return recallErrorResult(

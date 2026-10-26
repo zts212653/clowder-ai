@@ -1,5 +1,6 @@
 import { deploymentDefaults } from '@cat-cafe/shared';
 import { defineMcpCanonicalFactory, defineMcpMigrationFactory } from '../tool-governance-migration.js';
+import { invocationFetch } from './invocation-auth.js';
 
 /**
  * F195 Phase B — Audio capture & transcription MCP tools.
@@ -33,7 +34,7 @@ function resolveApiUrl(): string {
 
 async function audioFetch(path: string, init?: RequestInit): Promise<Response> {
   const catId = resolveInvocationEnv('CAT_CAFE_CAT_ID');
-  return fetch(`${resolveApiUrl()}/api/audio${path}`, {
+  return invocationFetch(`${resolveApiUrl()}/api/audio${path}`, {
     ...init,
     signal: init?.signal ?? AbortSignal.timeout(path === '/start' || path === '/stop' ? 130_000 : 10_000),
     headers: {

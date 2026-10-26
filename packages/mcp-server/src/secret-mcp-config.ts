@@ -9,6 +9,8 @@ const HOST_CALLBACK_KEYS = [
   'CAT_CAFE_CREDENTIAL_FILE',
   'CAT_CAFE_NATIVE_TURN_CREDENTIAL_FILE',
   'CAT_CAFE_NATIVE_CONNECTION_ID',
+  'CAT_CAFE_DATA_DIR',
+  'ALLOWED_WORKSPACE_DIRS',
 ] as const;
 const SPEC_KEY = 'CAT_CAFE_SECRET_MCP_PROXY_SPEC';
 
@@ -43,6 +45,24 @@ function bindManagedCallback(spec: Record<string, unknown>, callback: Record<str
   if (env.CAT_CAFE_CREDENTIAL_FILE || env.CAT_CAFE_NATIVE_TURN_CREDENTIAL_FILE) {
     delete env.CAT_CAFE_INVOCATION_ID;
     delete env.CAT_CAFE_CALLBACK_TOKEN;
+  }
+  if (env.CAT_CAFE_MCP_TRANSPORT === 'shared') {
+    if (!env.CAT_CAFE_CREDENTIAL_FILE || !env.CAT_CAFE_API_URL)
+      throw new Error('shared_mcp_launch_binding_unavailable');
+    const origin = new URL(env.CAT_CAFE_API_URL);
+    if (
+      origin.protocol !== 'http:' ||
+      !['localhost', '127.0.0.1', '[::1]'].includes(origin.hostname) ||
+      origin.username ||
+      origin.password ||
+      origin.pathname !== '/' ||
+      origin.search ||
+      origin.hash
+    )
+      throw new Error('shared_mcp_loopback_required');
+    const name = basename(String(args[0]), '.js');
+    const family = name === 'index' ? '' : `&family=${name}`;
+    return { url: `${origin.origin}/api/member-mcp/mcp?shared=1${family}`, transport: 'streamableHttp', shared: true };
   }
   return { ...spec, env };
 }

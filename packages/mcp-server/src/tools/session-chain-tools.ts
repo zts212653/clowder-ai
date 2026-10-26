@@ -1,4 +1,5 @@
 import { defineMcpCanonicalFactory } from '../tool-governance-migration.js';
+import { invocationFetch } from './invocation-auth.js';
 
 /**
  * Session Chain MCP Tools — F24 Phase D + F98
@@ -78,7 +79,7 @@ export async function handleListSessionChain(input: {
   const url = `${resolveApiUrl()}/api/threads/${input.threadId}/sessions?${params.toString()}`;
 
   try {
-    const res = await fetch(url, {
+    const res = await invocationFetch(url, {
       headers: buildAuthHeaders(),
     });
     if (!res.ok) {
@@ -150,7 +151,7 @@ export async function handleReadSessionEvents(input: {
   const url = `${resolveApiUrl()}/api/sessions/${input.sessionId}/events?${params.toString()}`;
 
   try {
-    const res = await fetch(url, {
+    const res = await invocationFetch(url, {
       headers: buildAuthHeaders(),
     });
     if (!res.ok) {
@@ -241,7 +242,7 @@ export async function handleReadSessionDigest(input: { sessionId: string; charOf
   const url = `${resolveApiUrl()}/api/sessions/${input.sessionId}/digest${params}`;
 
   try {
-    const res = await fetch(url, {
+    const res = await invocationFetch(url, {
       headers: buildAuthHeaders(),
     });
     if (!res.ok) {
@@ -295,7 +296,7 @@ export async function handleReadInvocationDetail(input: {
   const url = `${resolveApiUrl()}/api/sessions/${input.sessionId}/invocations/${input.invocationId}?${params.toString()}`;
 
   try {
-    const res = await fetch(url, {
+    const res = await invocationFetch(url, {
       headers: buildAuthHeaders(),
     });
     if (!res.ok) {
@@ -343,7 +344,7 @@ export async function handleSessionSearch(input: {
   const url = `${resolveApiUrl()}/api/threads/${input.threadId}/sessions/search?${params.toString()}`;
 
   try {
-    const res = await fetch(url, {
+    const res = await invocationFetch(url, {
       headers: buildAuthHeaders(),
     });
     if (!res.ok) {

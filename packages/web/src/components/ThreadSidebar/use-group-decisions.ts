@@ -22,10 +22,11 @@ export async function readGroupDecisionThreads(
   const owner = typeof identity === 'object' && identity !== null && 'userId' in identity ? identity.userId : null;
   if (typeof owner !== 'string' || !owner.trim()) throw new Error('Session not confirmed');
   const ids = new Set<string>();
+  let preferenceRevision: number | undefined;
   for (let offset = 0; ; offset += 20) {
     signal.throwIfAborted();
     const response = await request(
-      `/api/concierge/work/decisions?view=unified&offset=${offset}&limit=20`,
+      `/api/concierge/work/decisions?view=unified&offset=${offset}&limit=20&personalView=visible`,
       { signal },
       { afterCurrentGet: true },
     );
@@ -33,6 +34,8 @@ export async function readGroupDecisionThreads(
     if (
       !read ||
       read.identity.ownerUserId !== owner ||
+      read.personalView?.mode !== 'visible' ||
+      !Number.isSafeInteger(read.personalView.preferenceRevision) ||
       read.page.offset !== offset ||
       read.page.limit !== 20 ||
       read.status !== 'available' ||
@@ -42,6 +45,10 @@ export async function readGroupDecisionThreads(
       )
     )
       throw new Error('Pending decisions not confirmed');
+    const revision = read.personalView.preferenceRevision;
+    if (preferenceRevision !== undefined && revision !== preferenceRevision)
+      throw new Error('Pending preferences changed between pages');
+    preferenceRevision = revision;
     for (const item of read.items) {
       if (item.kind !== 'approval' && item.kind !== 'judgment') continue;
       if (item.kind === 'approval' && item.approval?.resolution !== 'open') continue;

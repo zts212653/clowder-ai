@@ -6,6 +6,7 @@ import { apiFetch } from '@/utils/api-client';
 import { DefaultCatSelector } from '../DefaultCatSelector';
 import { HubMemberOverviewCard } from '../HubMemberOverviewCard';
 import { MemberSettingsPage } from '../settings/members/MemberSettingsPage';
+import { writeShellLanguage } from '../shell/shell-language';
 
 vi.mock('@/utils/api-client', () => ({
   apiFetch: vi.fn(),
@@ -36,6 +37,7 @@ let cat: CatData, host: HTMLDivElement, root: Root;
 const saved = vi.fn<(cat: CatData) => Promise<void>>().mockResolvedValue(undefined);
 
 beforeEach(() => {
+  writeShellLanguage('zh');
   (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   sessionStorage.clear();
   saved.mockClear();
@@ -63,8 +65,29 @@ beforeEach(() => {
   root = createRoot(host);
 });
 afterEach(async () => {
+  writeShellLanguage('zh');
   await act(async () => root.unmount());
   host.remove();
+});
+
+it('keeps the pristine save action visible and makes an unchanged save a local acknowledgement', async () => {
+  await editor();
+  const bar = host.querySelector('[data-testid=member-save-bar]');
+  expect(bar?.textContent).toContain('没有改动');
+  await click('保存');
+  expect(host.textContent).toContain('没有要保存的修改');
+  expect(vi.mocked(apiFetch).mock.calls.filter(([, init]) => init?.method)).toHaveLength(0);
+  expect(saved).not.toHaveBeenCalled();
+});
+
+it('follows the global language even with a conflicting lang query and exposes no second language switch', async () => {
+  writeShellLanguage('en');
+  await act(async () => root.render(<MemberSettingsPage cat={cat} cats={[cat]} onSaved={saved} onBack={() => {}} />));
+  expect(host.textContent).toContain('Members & runtime');
+  expect(host.textContent).not.toContain('Members & runtimes');
+  expect(
+    [...host.querySelectorAll('button')].some((button) => /^(English|中文)$/.test(button.textContent?.trim() ?? '')),
+  ).toBe(false);
 });
 
 async function overview() {
@@ -110,7 +133,7 @@ it('uses the configured display name consistently in cards, selectors and the ed
   await editor();
   expect(host.querySelector('h1')?.textContent).toBe('布偶猫 Opus（5.5）');
   expect(field('名字').value).toBe('布偶猫 Opus');
-  expect(host.querySelector('[data-testid=member-save-bar]')).toBeNull();
+  expect(host.querySelector('[data-testid=member-save-bar]')?.textContent).toContain('没有改动');
 });
 
 it('shows a saved rename after returning to the list without changing the sibling or routing identity', async () => {
@@ -120,7 +143,7 @@ it('shows a saved rename after returning to the list without changing the siblin
   expect(saved.mock.calls.at(-1)?.[0]).toEqual(cat);
   expect(host.querySelector('h1')?.textContent).toBe('架构伙伴（5.5）');
   expect(field('名字').value).toBe('架构伙伴');
-  expect(host.querySelector('[data-testid=member-save-bar]')).toBeNull();
+  expect(host.querySelector('[data-testid=member-save-bar]')?.textContent).toContain('没有改动');
   expect(cat.displayName).toBe('架构伙伴');
   expect(cat.mentionPatterns).toEqual(['@opus']);
   expect(cat.breedDisplayName).toBe('布偶猫');
@@ -139,7 +162,7 @@ it('keeps nickname edits secondary and clearing the nickname removes it without 
   expect(saved.mock.calls.at(-1)?.[0]).toEqual(cat);
   expect(host.querySelector('h1')?.textContent).toBe('布偶猫 Opus（5.5）');
   expect(field('昵称').value).toBe('新昵称');
-  expect(host.querySelector('[data-testid=member-save-bar]')).toBeNull();
+  expect(host.querySelector('[data-testid=member-save-bar]')?.textContent).toContain('没有改动');
   expect(cat.name).toBe('legacy-internal-name');
   expect(cat.displayName).toBe(original.displayName);
   await overview();

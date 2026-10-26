@@ -37,6 +37,8 @@ export interface MessageQuoteSource {
   readonly threadId: string;
   readonly messageId: string;
   readonly senderCatId?: string;
+  /** Bounded citation display metadata; never a user comment, permission or current-decision authority. */
+  readonly displayLabel?: string;
   /** A quoted file leaf of this message. Metadata describes the displayed copy, never write authority. */
   readonly artifactFile?: {
     readonly item: MessageMediaItemSelector;

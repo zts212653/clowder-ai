@@ -127,7 +127,9 @@ describe('F322 界面语言 on the 主题 page', () => {
     render();
     click('[data-testid="shell-language-en"]');
     expect(text('[data-testid="theme-settings-panel"] h2')).toBe('Theme');
-    expect(host.textContent).toContain('Interface version, language and colors. Saved in this browser only.');
+    expect(host.textContent).toContain(
+      'Interface version, language and colors are saved in this browser. Reply display follows your account.',
+    );
     expect(text('#shell-presentation-heading')).toBe('Interface version');
     expect(text('[data-testid="shell-presentation-v2"]')).toContain('New interface');
     expect(text('[data-testid="shell-presentation-classic"]')).toContain('Classic interface');

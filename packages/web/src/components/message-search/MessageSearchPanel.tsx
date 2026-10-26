@@ -3,6 +3,7 @@
 import type { MessageSearchResponse, MessageSearchResult } from '@cat-cafe/shared';
 import { useEffect, useRef, useState } from 'react';
 import { ShellGlyph } from '../shell/ShellIcons';
+import { useShellPresentation } from '../shell/shell-presentation';
 import { MessageSearchResults } from './MessageSearchResults';
 import { useMessageSearch } from './useMessageSearch';
 
@@ -17,6 +18,7 @@ export function MessageSearchPanel({
   onNavigate: (result: MessageSearchResult, response: MessageSearchResponse) => void;
   resolveSpeaker?: (speaker: string) => string;
 }) {
+  const journey6 = useShellPresentation() === 'v2';
   const [query, setQuery] = useState('');
   const [scope, setScope] = useState<'thread' | 'global'>('thread');
   const [sort, setSort] = useState<'time' | 'relevance'>('time');
@@ -38,7 +40,7 @@ export function MessageSearchPanel({
     <div
       role="dialog"
       aria-label="查找消息"
-      className="flex max-h-[min(70vh,600px)] min-h-0 flex-col rounded-2xl border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] p-3 shadow-[var(--console-shadow-soft)]"
+      className={`flex ${journey6 ? 'max-h-[min(80vh,760px)]' : 'max-h-[min(70vh,600px)]'} min-h-0 flex-col rounded-2xl border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] p-3 shadow-[var(--console-shadow-soft)]`}
       onKeyDown={(event) => {
         if (event.key === 'Escape' && !event.nativeEvent.isComposing && !composing.current) {
           event.stopPropagation();
@@ -98,8 +100,9 @@ export function MessageSearchPanel({
           </button>
         ))}
       </div>
-      <div className="min-h-0 overflow-auto">
+      <div data-message-search-scroll className="min-h-0 overflow-auto">
         <MessageSearchResults
+          journey6={journey6}
           currentThreadId={threadId}
           status={search.status}
           response={search.response}

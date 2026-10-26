@@ -43,6 +43,16 @@ export const ENV_DEFINITIONS_1: readonly EnvDefinition[] = [
     runtimeEditable: false,
   },
   {
+    name: 'CAT_CAFE_MCP_TRANSPORT',
+    defaultValue: 'shared',
+    description:
+      '自家 MCP 默认共享网关，stdio 回滚独立后端。两种模式均固定原 turn 凭证并关闭 Codex F254 warm host，每轮冷启；不会恢复旧 warm 生命周期。重启后对新调用生效',
+    category: 'server',
+    sensitive: false,
+    runtimeEditable: false,
+    restartRequired: true,
+  },
+  {
     name: 'CAT_CAFE_HOST_NODE_ID',
     defaultValue: '(平台使用 hostname；脚本使用 local)',
     description: '部署宿主节点身份覆盖值，供运行环境自述与隔离 CLI 继承，不属于 Hub 可编辑配置',

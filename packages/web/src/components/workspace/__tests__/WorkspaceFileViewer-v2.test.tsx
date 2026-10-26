@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import assert from 'node:assert/strict';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
@@ -69,6 +70,42 @@ beforeEach(() => {
   host = document.createElement('div');
   document.body.append(host);
   root = createRoot(host);
+});
+it.each([true, false])('keeps the HTML action unfilled with page preview=%s', (htmlPreview) => {
+  writeShellLanguage('zh');
+  const original = props();
+  const p = {
+    ...original,
+    file: { ...original.file, path: 'index.html', mime: 'text/html' },
+    openFilePath: 'index.html',
+    openTabs: ['index.html'],
+    isMarkdown: false,
+    isHtml: true,
+    htmlPreview,
+  };
+  act(() => root.render(<WorkspaceFileViewer {...p} />));
+  const toolbar = host.querySelector('[data-testid="workspace-file-toolbar"]');
+  assert(toolbar);
+  const buttons = [...toolbar.querySelectorAll<HTMLButtonElement>('button')];
+  const toggle = buttons.find((button) => button.textContent === (htmlPreview ? '看源码' : '页面预览'));
+  const ask = buttons.find((button) => button.textContent === '请猫修改');
+  assert(toggle && ask);
+  expect(toggle.className).toBe(ask.className);
+  expect(toggle.className).not.toContain('bg-cafe-accent');
+  act(() => toggle.click());
+  expect(p.onToggleHtmlPreview).toHaveBeenCalledOnce();
+});
+it.each(['markdown', 'jsx'] as const)('preserves the filled %s state label', (kind) => {
+  writeShellLanguage('zh');
+  const p = { ...props(), isMarkdown: kind === 'markdown', isJsx: kind === 'jsx', jsxPreview: true };
+  act(() => root.render(<WorkspaceFileViewer {...p} />));
+  const toolbar = host.querySelector('[data-testid="workspace-file-toolbar"]');
+  assert(toolbar);
+  const toggle = [...toolbar.querySelectorAll<HTMLButtonElement>('button')].find(
+    (button) => button.textContent === (kind === 'markdown' ? '渲染' : '预览'),
+  );
+  assert(toggle);
+  expect(toggle.className).toContain('bg-cafe-accent');
 });
 it.each([
   'zh',

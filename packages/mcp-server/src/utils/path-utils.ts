@@ -6,6 +6,7 @@
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import { resolveSharedInvocationContext } from '../tools/invocation-auth.js';
 
 export function expandHomeDir(inputPath: string): string {
   if (inputPath === '~') {
@@ -18,7 +19,8 @@ export function expandHomeDir(inputPath: string): string {
 }
 
 export function resolveAbsolutePath(inputPath: string): string {
-  return path.resolve(expandHomeDir(inputPath));
+  const shared = resolveSharedInvocationContext();
+  return shared ? path.resolve(shared.workspaceRoot, expandHomeDir(inputPath)) : path.resolve(expandHomeDir(inputPath));
 }
 
 export function tryRealpathSync(targetPath: string): string | null {

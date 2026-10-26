@@ -14,7 +14,8 @@
   container-type: inline-size;
 }
 .v2-file-menu-listen,
-.v2-file-menu-view {
+.v2-file-menu-view,
+.v2-html-menu-secondary {
   display: none;
 }
 @container (max-width: 520px) {
@@ -26,6 +27,12 @@
   }
 }
 @container (max-width: 420px) {
+  .v2-html-secondary {
+    display: none;
+  }
+  .v2-html-menu-secondary {
+    display: flex;
+  }
   .v2-file-view-toggle {
     display: none;
   }

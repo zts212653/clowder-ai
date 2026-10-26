@@ -1,11 +1,13 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { useProcessTalkPreference } from '@/hooks/useProcessTalkPreference';
 import type { ChatMessage } from '@/stores/chat-types';
 import { projectReplyOutput } from './reply-output';
 
 /** A changed snapshot remains whole until its actual UTF-8 body hash is verified. */
 export function useReplyOutput(message: ChatMessage, threadId: string | undefined, enabled: boolean) {
+  const preference = useProcessTalkPreference(enabled);
   const [verified, setVerified] = useState<{ content: string; hash: string }>();
   const content = message.content;
   const hasLayout = enabled && Boolean(threadId && message.extra?.outputLayout);
@@ -29,5 +31,5 @@ export function useReplyOutput(message: ChatMessage, threadId: string | undefine
     };
   }, [content, hasLayout]);
   if (!hasLayout || !threadId || verified?.content !== content) return undefined;
-  return projectReplyOutput(message, threadId, verified.hash);
+  return projectReplyOutput(message, threadId, verified.hash, preference.mode);
 }

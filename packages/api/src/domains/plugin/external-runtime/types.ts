@@ -1,5 +1,6 @@
 import type { Readable, Writable } from 'node:stream';
 import type { PluginManifest } from '@clowder-ai/plugin-contract';
+import type { SealReadDiagnostics } from '../diagnostics/observation-work.js';
 import type { HostBrokerControlPlane } from '../host-broker/control-plane.js';
 import type { PluginInventoryStore } from '../host-inventory/ports.js';
 import type { PluginRuntimeErrorCode } from '../host-inventory/types.js';
@@ -40,7 +41,7 @@ export interface VerifiedPluginPackage {
   verifyIntegrity(): Promise<void>;
   /** Revalidate this private generation's sealed tree identity for already
    * snapshotted static assets. Never substitutes for executable admission. */
-  verifyStaticIntegrity?(): Promise<void>;
+  verifyStaticIntegrity?(diagnostics?: SealReadDiagnostics): Promise<void>;
   /** Release the private per-runtime staging directory after the process is gone. */
   release(): Promise<void>;
 }

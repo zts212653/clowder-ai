@@ -16,13 +16,23 @@ export class SecretRemoteTransport implements Transport {
     private url: URL,
     private headers: Record<string, string>,
     private mode?: string,
+    private requestHeaders?: () => Record<string, string>,
+    private requestSignal?: () => AbortSignal | undefined,
   ) {
+    const options = { requestInit: { headers }, ...(requestHeaders ? { fetch: this.authenticatedFetch } : {}) };
     this.active =
-      mode === 'sse'
-        ? new SSEClientTransport(url, { requestInit: { headers } })
-        : new StreamableHTTPClientTransport(url, { requestInit: { headers } });
+      mode === 'sse' ? new SSEClientTransport(url, options) : new StreamableHTTPClientTransport(url, options);
     this.bind(this.active);
   }
+
+  private authenticatedFetch: typeof fetch = (input, init) => {
+    const headers = new Headers(init?.headers);
+    for (const [name, value] of Object.entries(this.requestHeaders?.() ?? {})) headers.set(name, value);
+    const boundSignal = this.requestSignal?.();
+    const signal =
+      boundSignal && init?.signal ? AbortSignal.any([boundSignal, init.signal]) : (boundSignal ?? init?.signal);
+    return fetch(input, { ...init, headers, signal, redirect: 'error' });
+  };
 
   private incompatible(error: unknown): boolean {
     return (
@@ -36,6 +46,9 @@ export class SecretRemoteTransport implements Transport {
       if (this.active === transport) this.onclose?.();
     };
     transport.onerror = (error) => {
+      // Stateless shared requests own their errors and cancellation. send()
+      // rejects that RPC; closing the carrier here would cancel unrelated RPCs.
+      if (this.requestHeaders) return;
       if (!(this.negotiating && this.incompatible(error))) this.onerror?.(error);
     };
   }

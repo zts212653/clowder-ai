@@ -1,7 +1,7 @@
 ---
 doc_kind: guide
 topics: [usage, magic-words, collaboration]
-updated: 2026-10-25
+updated: 2026-10-26
 description: "User tips for course correction, routing, chat file links, and everyday collaboration."
 ---
 
@@ -218,6 +218,12 @@ Go to **Memory → Profile → Opening brief** to view or edit how you would lik
 - 图片在浮窗里看大图；匹配本地项目的提交号和 PR 在 Workspace 看改动，其他网址去浏览器。
 - 打开标签后，原有文档标签和文件操作仍可用。不能直接预览的 Office 文件会提供当前可用的本地文件操作。
 - 文件不在了，会显示灰色虚线标签。无法解析的引用保留可读原文，不冒充可用文件。
+
+## 回话里的过程话
+
+想试着收起过程话，可以到 **设置 › 主题 › 回话里的过程话** 选择「收进执行记录」；默认是「整段显示」。启用后，回答上方仍有「前面还有 N 段话」，点开就能在原处找回早先内容。
+
+猫已经自行标明的过程与回答照旧显示。旧回复和未成功结束的回复保留全文；这只是你的显示偏好，原文不会被删改。
 
 ## 10. 对话设置
 

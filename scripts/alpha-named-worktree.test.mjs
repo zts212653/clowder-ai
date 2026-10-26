@@ -182,7 +182,14 @@ test('named init creates only its main-derived registered checkout and preserves
   const sentinel = join(legacy, '.cat-cafe/redis/dump.rdb');
   writeFileSync(sentinel, 'preserve damaged original');
   const created = join(f.directory, 'cat-cafe-alpha-new-site');
-  const result = f.run(['init', '--instance', 'new-site', '--ports', NAMED_ALPHA_PORTS], { cwd: f.directory });
+  const result = f.run(['init', '--instance', 'new-site', '--ports', NAMED_ALPHA_PORTS], {
+    cwd: f.directory,
+    env: {
+      CAT_CAFE_THREAD_ID: 'thread_alpha_original',
+      CAT_CAFE_USER_ID: 'owner-user',
+      CAT_CAFE_INVOCATION_ID: 'alpha-birth',
+    },
+  });
   assert.equal(result.status, 0, result.stderr);
   assert.equal(f.git(['branch', '--show-current'], created), 'alpha/new-site-main-sync');
   assert.equal(f.git(['rev-parse', 'HEAD'], created), f.git(['rev-parse', 'origin/main']));
@@ -192,6 +199,8 @@ test('named init creates only its main-derived registered checkout and preserves
   const finish = { repo: f.mainRoot, path: created, owner: f.env.CAT_CAFE_CAT_ID, sourceRef: 'task:alpha-init' };
   const { lifecycle } = ownedWorktreeFacts(finish);
   assert.equal(lifecycle.policy, 'merged');
+  assert.equal(lifecycle.origin.threadId, 'thread_alpha_original');
+  assert.equal(lifecycle.origin.role, 'alpha');
   assert.ok(Number.isFinite(Date.parse(lifecycle.createdAt)));
   assert.equal(lifecycleConfig(f.mainRoot, '--local')?.owner, undefined, 'declaration is private to the new tree');
   const repeated = f.run(['init', '--instance', 'new-site', '--ports', NAMED_ALPHA_PORTS], {

@@ -12,7 +12,7 @@ import { createPublicationSurface } from '@/components/workbench/publication-sur
 import { ArtworkOpeningPreview } from '../ArtworkOpeningPreview';
 
 const api = vi.hoisted(() => vi.fn());
-vi.mock('@/utils/api-client', () => ({ apiFetch: (...args: unknown[]) => api(...args) }));
+vi.mock('@/utils/api-client', () => ({ API_URL: 'http://api.test', apiFetch: (...args: unknown[]) => api(...args) }));
 const target = { contentRef: `prepared-media:${'a'.repeat(64)}`, ownerRevision: 1 };
 const surface = createPublicationSurface({ ...target, title: '原图' });
 const context = {

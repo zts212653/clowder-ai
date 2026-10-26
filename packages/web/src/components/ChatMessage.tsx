@@ -66,8 +66,8 @@ import { isLastOfOwnRun } from './own-message-run';
 import { PawFeelDispositionDock } from './paw-feel/PawFeelDispositionDock';
 import { ReplyPill } from './ReplyPill';
 import { RoutingWarningNotice } from './RoutingWarningNotice';
-import { NativeReplyText } from './reply-layers/NativeReplyText';
 import { ReplyLayers } from './reply-layers/ReplyLayers';
+import { ReplyOutputBody } from './reply-layers/ReplyOutputBody';
 import { useReplyRecallProjection } from './reply-layers/ReplyRecallContext';
 import { REPLY_BODY_CLASS } from './reply-layers/reply-body';
 import { canRenderReplyLayers, canRenderReplyNameplate } from './reply-layers/reply-presentation';
@@ -988,11 +988,7 @@ function ChatMessageContent({
    * block. A streamed reply's text is the stream's own text (the CLI block was fed the same); a callback reply, or the spoken part
    * of a merged one, is its own content. The tool calls, thinking and model line are not here: they are the record (ReplyLayers). */
   const replyBody = !showsNameplate ? null : nativeReplyOutput ? (
-    <div data-testid="native-reply-answer" className="space-y-3">
-      {nativeReplyOutput.answers.map((run) => (
-        <NativeReplyText key={run.id} run={run} className={REPLY_BODY_CLASS} disclosureKey={bodyDisclosureKey} />
-      ))}
-    </div>
+    <ReplyOutputBody output={nativeReplyOutput} className={REPLY_BODY_CLASS} disclosureKey={bodyDisclosureKey} />
   ) : isStreamOrigin ? (
     cliStdoutContent?.trim() ? (
       <CollapsibleMarkdown content={cliStdoutContent} className={REPLY_BODY_CLASS} disclosureKey={bodyDisclosureKey} />

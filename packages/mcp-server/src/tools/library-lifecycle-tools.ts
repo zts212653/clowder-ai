@@ -1,4 +1,5 @@
 import { defineMcpMigrationFactory } from '../tool-governance-migration.js';
+import { invocationFetch } from './invocation-auth.js';
 
 /**
  * Library Lifecycle Tools — F188 Phase I (AC-I4)
@@ -53,7 +54,7 @@ interface CatalogItem {
 
 export async function handleLibraryList(input: { status?: string | undefined }): Promise<ToolResult> {
   try {
-    const response = await fetch(`${resolveApiUrl()}/api/library/catalog`, { headers: libraryAuthHeaders() });
+    const response = await invocationFetch(`${resolveApiUrl()}/api/library/catalog`, { headers: libraryAuthHeaders() });
     if (!response.ok) {
       const text = await response.text();
       return errorResult(`library_list failed (${response.status}): ${text}`);
@@ -99,7 +100,7 @@ export async function handleLibraryDryRun(input: {
   try {
     const body: Record<string, unknown> = { root: input.root };
     if (input.exclude) body.exclude = input.exclude;
-    const response = await fetch(`${resolveApiUrl()}/api/library/bind-dry-run`, {
+    const response = await invocationFetch(`${resolveApiUrl()}/api/library/bind-dry-run`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...libraryAuthHeaders() },
       body: JSON.stringify(body),
@@ -160,7 +161,7 @@ export async function handleLibraryCreate(input: {
     if (input.root) body.root = input.root;
     if (input.sensitivity) body.sensitivity = input.sensitivity;
     if (input.exclude) body.exclude = input.exclude;
-    const response = await fetch(`${resolveApiUrl()}/api/library/register`, {
+    const response = await invocationFetch(`${resolveApiUrl()}/api/library/register`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...libraryAuthHeaders() },
       body: JSON.stringify(body),
@@ -173,7 +174,7 @@ export async function handleLibraryCreate(input: {
 
     let rebuildWarning = '';
     try {
-      const rebuildRes = await fetch(`${resolveApiUrl()}/api/library/${id}/rebuild`, {
+      const rebuildRes = await invocationFetch(`${resolveApiUrl()}/api/library/${id}/rebuild`, {
         method: 'POST',
         headers: libraryAuthHeaders(),
       });
@@ -222,7 +223,7 @@ export async function handleLibraryRebuild(input: {
   try {
     const body: Record<string, unknown> = {};
     if (input.force) body.force = true;
-    const response = await fetch(`${resolveApiUrl()}/api/library/${input.collectionId}/rebuild`, {
+    const response = await invocationFetch(`${resolveApiUrl()}/api/library/${input.collectionId}/rebuild`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...libraryAuthHeaders() },
       body: JSON.stringify(body),
@@ -255,7 +256,7 @@ export const libraryArchiveInputSchema = {
 
 export async function handleLibraryArchive(input: { collectionId: string }): Promise<ToolResult> {
   try {
-    const response = await fetch(`${resolveApiUrl()}/api/library/${input.collectionId}/archive`, {
+    const response = await invocationFetch(`${resolveApiUrl()}/api/library/${input.collectionId}/archive`, {
       method: 'POST',
       headers: libraryAuthHeaders(),
     });
@@ -288,7 +289,7 @@ export async function handleLibraryVerify(input: {
   actor: string;
 }): Promise<ToolResult> {
   try {
-    const response = await fetch(`${resolveApiUrl()}/api/f163/verification/action`, {
+    const response = await invocationFetch(`${resolveApiUrl()}/api/f163/verification/action`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(input),

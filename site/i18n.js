@@ -36,6 +36,8 @@ window.I18N = {
     'home.a11y.demo.steer': `Demo: steer a cat while it is still replying`,
     'home.a11y.demo.panelvote': `Demo: several cats think apart, then vote`,
     'home.a11y.demo.slept': `Demo: what the cats did while the team slept`,
+    'home.a11y.demo.woven': `Demo: one night of cats handing off work, woven into a cloth`,
+    'home.a11y.demo.bundles': `Demo: select a few messages, then export them or forward them to another cat`,
 
     // ── Hero ──
     'hero.tagline': `Open Source Multi-Model AI Platform`,
@@ -184,6 +186,15 @@ window.I18N = {
     'demos.slept.title': `The 10 Hours We Slept`,
     'demos.slept.desc': `One real night, October 22: the whole team went to sleep. A scheduled task woke one cat every two hours to keep the open-source sync moving; GitHub woke another when a community PR changed or CI failed. They handed off to each other, and by morning 37 PRs had been merged.`,
     'demos.slept.try': `“Every morning at 9, check …” or “Keep an eye on this PR.”`,
+    'demos.woven.video': `assets/demos/woven-night.en.mp4`,
+    'demos.woven.title': `One Night, Woven`,
+    'demos.woven.desc': `One real night, October 22: while you slept, 9 cats from 4 families worked across 49 conversations and handed work to each other 262 times. Each window is a conversation; each hand-off pulls a thread. By morning the night's threads were a cloth with 37 knots, one for each PR merged.`,
+    'demos.woven.try': `“@another cat, take it from here.”`,
+    'demos.bundles.video': `assets/demos/bundles.en.mp4`,
+    'demos.bundles.title': `Pick a Few, Take Them Anywhere`,
+    'demos.bundles.desc': `Select a few messages once and take them where they need to go. Export a long image to show a colleague, or a Markdown document to keep (Text is handy for an email). Or forward them to another conversation: pick a cat and leave a note, and it gets one merged card and is woken up to carry on.`,
+    'demos.bundles.tryLabel': `Try it`,
+    'demos.bundles.try': `Hover a message, click “Select to forward or export”, tick a few, then export or forward.`,
 
     // ── Roadmap ──
     'roadmap.title': `Roadmap`,
@@ -328,6 +339,8 @@ window.I18N = {
     'home.a11y.demo.steer': `演示：不用等猫说完，直接引导`,
     'home.a11y.demo.panelvote': `演示：几只猫先各想各的，再投票`,
     'home.a11y.demo.slept': `演示：团队睡着时，猫做了什么`,
+    'home.a11y.demo.woven': `演示：一夜的猫猫交接，织成一张布`,
+    'home.a11y.demo.bundles': `演示：挑几条消息，导出，或者转发给另一只猫`,
 
     // ── Hero ──
     'hero.tagline': `开源多模型 AI 团队平台`,
@@ -476,6 +489,15 @@ window.I18N = {
     'demos.slept.title': `我们睡着的那 10 个小时`,
     'demos.slept.desc': `10 月 22 日真实的一晚：团队的人都睡了。定时任务每两小时叫醒一只猫，接着推往开源仓的同步；社区 PR 有新提交、CI 挂了，GitHub 就叫醒另一只去 review、去修。两只猫互相接力，醒来时已经合入 37 个 PR。`,
     'demos.slept.try': `「每天早上 9 点帮我看一下……」或者「帮我盯着这个 PR。」`,
+    'demos.woven.video': `assets/demos/woven-night.zh.mp4`,
+    'demos.woven.title': `一夜，织成一张布`,
+    'demos.woven.desc': `10 月 22 日真实的一晚：你睡着时，4 家 9 只猫在 49 条对话里干活，互相交接了 262 次。每扇窗是一条对话，每次交接牵出一根线；天亮时，一夜的线织成了一张布，布上 37 个结，就是合入的 37 个 PR。`,
+    'demos.woven.try': `「@另一只猫，这个交给你了。」`,
+    'demos.bundles.video': `assets/demos/bundles.zh.mp4`,
+    'demos.bundles.title': `挑几条，带去哪都行`,
+    'demos.bundles.desc': `选一次，带去不同的地方：给同事看，导出长图；自己存着，导出 Markdown 文档（要贴进邮件就选「文本」）；要交给另一只猫，就转发到它的对话，选好猫、留一句话，它收到一张合并卡，被叫醒接着干。`,
+    'demos.bundles.tryLabel': `试试看`,
+    'demos.bundles.try': `鼠标移到消息上，点「多选：转发或导出」，勾上几条，再导出或转发。`,
 
     // ── Roadmap ──
     'roadmap.title': `路线图`,

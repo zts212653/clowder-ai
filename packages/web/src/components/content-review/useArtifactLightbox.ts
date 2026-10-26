@@ -1,5 +1,7 @@
 'use client';
 import type { GlobalArtifactDTO, ThreadArtifactDTO } from '@cat-cafe/shared';
+import { useWorkCardOpen } from '@/components/artifacts/useWorkCardOpen';
+import { createArtifactSurface } from '@/components/workbench/real-surface-adapters';
 import { inferFileKind } from '@/lib/file-kind';
 import type { WorkspaceFileNavigationOrigin } from '@/stores/chat-types';
 import { useChatStore } from '@/stores/chatStore';
@@ -13,15 +15,40 @@ import { messagePublicationSource } from './usePublishedContent';
 export function useArtifactLightbox(hostThreadId: string) {
   const scope = useArtworkLightboxScope();
   const entry = useChatArtworkEntry();
+  const workCard = useWorkCardOpen(undefined, '');
   const open = (
     artifact: ThreadArtifactDTO | GlobalArtifactDTO,
     origin: WorkspaceFileNavigationOrigin | undefined,
   ): boolean => {
-    if (artifact.type === 'video' && artifact.work?.contentRef.startsWith('work:')) return false;
+    if (!scope || !entry.isV2) return false;
+    if (artifact.work?.contentRef.startsWith('work:')) {
+      void workCard.open('lightbox', false, {
+        reference: artifact.work,
+        title: artifact.name,
+        navigationOrigin: origin,
+      });
+      return true;
+    }
     const url = artifact.url;
     // Published rich-file PNGs retain the catalogue's file type; the existing owner still admits their bytes.
     const image = artifact.type === 'image' || (artifact.type === 'file' && inferFileKind(artifact.name) === 'image');
-    if (!scope || !entry.isV2 || !url || (!image && artifact.type !== 'video')) return false;
+    if (!image && artifact.type !== 'video')
+      return scope.open({
+        url: url ?? '',
+        title: artifact.name,
+        alt: artifact.name,
+        mediaType: 'image',
+        ownerContentOnly: true,
+        surface: createArtifactSurface({ threadId: hostThreadId, artifact, navigationOrigin: origin }),
+        openWorkspace: async () => {
+          if (useChatStore.getState().currentThreadId !== hostThreadId) return false;
+          captureChatReadingBeforeLayoutChange();
+          useChatStore.getState().openPublishedArtifact(hostThreadId, artifact, origin, 'work-mode');
+          scope.close();
+          return true;
+        },
+      });
+    if (!url) return false;
     const sourceThreadId = 'threadId' in artifact ? artifact.threadId : hostThreadId;
     const source =
       workspaceArtworkEntry(url) ??
@@ -66,5 +93,5 @@ export function useArtifactLightbox(hostThreadId: string) {
     });
     return true;
   };
-  return { open, error: entry.error };
+  return { open, error: entry.error ?? workCard.error };
 }

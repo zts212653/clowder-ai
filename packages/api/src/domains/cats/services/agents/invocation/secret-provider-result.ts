@@ -57,8 +57,11 @@ export async function protectNativeProviderResult(
   } catch {
     /* Preserve a visible reminder even when its persistent sink is unavailable. */
   }
+  const summary = inspected.rules.includes('uninspectable-result')
+    ? '工具结果的安全检查未完成，返回家里的结果已隐藏；这不代表已确认凭据泄露。'
+    : '工具结果命中疑似凭据格式，匹配内容已在返回家里前隐藏，尚未核实真实凭据；原生提供方可能已经消费结果，仅在确认真实凭据已暴露后按原授权轮转。';
   return {
     ...inspected.value,
-    content: `${inspected.value.content ?? ''}\n\n检测到疑似凭据，已在返回家里前隐藏；原生提供方可能已经消费，请轮转相关凭据。原线程提醒${recorded ? '已持久保存' : '未能保存，请处理'}。`,
+    content: `${inspected.value.content ?? ''}\n\n${summary}核验记录${recorded ? '已持久保存' : '未能保存'}。`,
   };
 }

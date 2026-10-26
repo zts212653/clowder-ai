@@ -1,4 +1,5 @@
 import { defineMcpMigrationFactory } from '../tool-governance-migration.js';
+import { invocationFetch } from './invocation-auth.js';
 
 /**
  * List Recent Tool — F188 Phase F (AC-F2)
@@ -87,7 +88,7 @@ export async function handleListRecent(input: {
   const url = `${resolveApiUrl()}/api/library/recent${qs ? `?${qs}` : ''}`;
 
   try {
-    const response = await fetch(url);
+    const response = await invocationFetch(url);
     if (!response.ok) {
       const text = await response.text();
       return recallErrorResult(

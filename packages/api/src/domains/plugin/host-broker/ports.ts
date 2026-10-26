@@ -1,3 +1,4 @@
+import type { SnapshotReadDiagnostics } from '../diagnostics/observation-work.js';
 import type { StaticFeatureLedger } from './static-feature-ledger.js';
 import type { BrokerCallRecord, BrokerRuntimeLeaseRecord, BrokerSessionRecord, HostBrokerSnapshot } from './types.js';
 
@@ -31,6 +32,6 @@ export interface HostBrokerTransaction {
 }
 
 export interface HostBrokerStore {
-  snapshot(): Promise<HostBrokerSnapshot>;
+  snapshot(diagnostics?: SnapshotReadDiagnostics): Promise<HostBrokerSnapshot>;
   transaction<T>(work: (transaction: HostBrokerTransaction) => Promise<T> | T): Promise<T>;
 }

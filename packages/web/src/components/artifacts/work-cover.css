@@ -1,0 +1,203 @@
+.work-cover {
+  --work-cover-chroma: 0.03;
+  --work-cover-base: oklch(from var(--shell-paper) calc(l - 0.035) var(--work-cover-chroma) 260);
+  position: relative;
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: var(--work-cover-base);
+}
+[data-theme="dark"] .work-cover {
+  --work-cover-chroma: 0.02;
+}
+.work-cover-layout,
+.work-cover-slide {
+  --work-cover-base: oklch(from var(--shell-paper) calc(l - 0.035) var(--work-cover-chroma) 95);
+}
+.work-cover-audio {
+  --work-cover-base: oklch(from var(--shell-paper) calc(l - 0.035) var(--work-cover-chroma) 180);
+}
+.work-cover-code,
+.work-cover-pr {
+  --work-cover-base: oklch(from var(--shell-paper) calc(l - 0.035) 0.008 80);
+}
+.work-cover-paper {
+  position: absolute;
+  inset: 16% 14% -12px;
+  padding: 10px 12px;
+  overflow: hidden;
+  border: 1px solid var(--shell-hairline);
+  border-radius: 6px 6px 0 0;
+  background: var(--shell-paper);
+}
+.work-cover-paper-back {
+  inset: 11% 18% -12px;
+  opacity: 0.75;
+}
+.work-cover-paper-text {
+  display: block;
+  height: 100%;
+  overflow: hidden;
+  color: var(--shell-muted);
+  font-size: 11px;
+  line-height: 16px;
+  mask-image: linear-gradient(#000 55%, transparent 88%);
+}
+.work-cover-paper-text > strong {
+  display: block;
+  color: var(--shell-ink);
+  font-size: 12px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.work-cover-excerpt {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.work-cover-code .work-cover-paper-text,
+.work-cover-pr .work-cover-paper-text {
+  font-family: var(--font-mono, ui-monospace), monospace;
+}
+.work-cover-paper-text > .work-cover-pr-number {
+  font-size: 14px;
+}
+.work-cover-pr-repo {
+  display: block;
+  font-size: 11px;
+}
+.work-cover-bar {
+  display: block;
+  height: 5px;
+  margin-top: 7px;
+  border-radius: 3px;
+  background: color-mix(in oklch, var(--shell-ink) 10%, transparent);
+}
+.work-cover-heading {
+  height: 7px;
+  width: 44%;
+  margin-top: 0;
+  background: color-mix(in oklch, var(--shell-ink) 24%, transparent);
+}
+.work-cover-panels {
+  display: flex;
+  gap: 6px;
+  margin-top: 10px;
+}
+.work-cover-panels > i {
+  flex: 1;
+  height: 28px;
+  border-radius: 3px;
+  background: var(--work-cover-base);
+}
+.work-cover-slide-paper {
+  inset: auto 20%;
+  top: 50%;
+  aspect-ratio: 16 / 9;
+  padding: 7% 9%;
+  border-radius: 4px;
+  transform: translateY(-50%);
+}
+.work-cover-slide .work-cover-panels > i {
+  height: 18px;
+}
+.work-cover-badge {
+  position: absolute;
+  left: 8px;
+  bottom: 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 20px;
+  padding: 0 6px;
+  border: 1px solid var(--shell-hairline);
+  border-radius: 6px;
+  color: var(--shell-ink);
+  background: color-mix(in oklch, var(--shell-paper) 94%, transparent);
+  font-size: 11px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+.work-cover-office {
+  display: inline-grid;
+  place-items: center;
+  min-width: 12px;
+  height: 12px;
+  padding: 0 2px;
+  border-radius: 2px;
+  color: white;
+  font-size: 8px;
+  font-weight: 700;
+}
+/* Document format marks share the established ChatReferenceIcon palette. */
+.work-cover-office-pdf {
+  background: #b8392f;
+}
+.work-cover-office-ppt {
+  background: #c9532d;
+}
+.work-cover-office-word {
+  background: #3b67a8;
+}
+.work-cover-office-excel {
+  background: #2f7a4d;
+}
+.work-cover-video {
+  background: oklch(0.24 0.01 60);
+}
+.work-cover-frame {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.work-cover-poster {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.work-cover-frame-pending {
+  opacity: 0;
+}
+.work-cover-play {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-content: center;
+  color: white;
+}
+.work-cover-play > svg {
+  box-sizing: content-box;
+  padding: 8px;
+  color: #2a2622;
+  background: rgba(255, 255, 255, 0.88);
+  border-radius: 50%;
+}
+.work-cover-play polygon,
+.work-cover-video-badge polygon {
+  fill: currentColor;
+  stroke: none;
+}
+.work-cover-video-badge {
+  color: white;
+  background: rgba(20, 18, 16, 0.66);
+  border: 0;
+}
+.work-cover-wave {
+  position: absolute;
+  left: 14%;
+  right: 14%;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 3px;
+  height: 40px;
+}
+.work-cover-wave > i {
+  flex: 1;
+  border-radius: 2px;
+  background: color-mix(in oklch, var(--shell-ink) 30%, transparent);
+}

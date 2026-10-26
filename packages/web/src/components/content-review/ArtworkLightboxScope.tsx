@@ -16,6 +16,8 @@ export type FloatingArtwork = {
   reason?: string;
   surface: WorkspaceSurfaceDescriptor | null;
   pending?: boolean;
+  /** Non-media cards render their existing document owner directly inside the same floating shell. */
+  ownerContentOnly?: boolean;
   openWorkspace?: () => Promise<boolean>;
   gallery?: ArtworkGallery;
   reference?: {

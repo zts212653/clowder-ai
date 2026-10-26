@@ -19,6 +19,7 @@ export const MCP_CALLBACK_ENV_KEYS = [
   'CAT_CAFE_SIGNAL_USER',
   'CAT_CAFE_RUN_TYPE',
   'CAT_CAFE_AUDIT_TOPIC',
+  'CAT_CAFE_MCP_TRANSPORT',
 ] as const;
 
 /** Refreshed by persistent carriers rather than frozen into each invocation.

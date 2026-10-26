@@ -1,6 +1,6 @@
 ---
 name: worktree
-tips_exempt: "Renewed 2026-10-15 for light creation, branch-local assets and explicit compiler-cache trimming; internal developer commands are discovered through this skill, with no end-user Hub operation."
+tips_exempt: "Renewed 2026-10-26 for birth provenance, full Git-worktree inventory, exact-PR binding and owner finish/retention; these developer CLI operations are discovered through this skill and add no end-user Hub action."
 description: "Use when: 创建代码/脚本/API工位或收尾。Not for: docs直推、代清其他owner。Output: 隔离worktree（Redis6398）、实际移除工位的released回执或具名retained回执。"
 triggers:
   - "开始开发"
@@ -42,7 +42,7 @@ search_evidence("{topic}", scope="all")
 **Clowder AI 项目：`../cat-cafe-{feature-name}`（relay-station/ 同级）**
 
 ```bash
-pnpm worktree:new ../cat-cafe-{feature-name} --branch feat/{feature-name} --owner {你的 catId} --policy merged
+pnpm worktree:new ../cat-cafe-{feature-name} --branch feat/{feature-name} --source-ref {原Task或PR的ref} --owner {你的 catId} --policy merged
 ```
 
 - 🔴 **禁止在项目内部创建**（不要用 `.worktrees/` 子目录）
@@ -212,6 +212,23 @@ pnpm check:worktree-port-offset   # 验证全部 7 个大赛 OFFSET 派生 + 端
 
 详细设计见 *(internal reference removed)*。
 
+## 出生来源与 PR 关联
+
+`worktree:new` 记录本 invocation 的 thread/user/source/role 到工位私有 config，保留原 owner 与出生时间。
+独立 CLI 没有 callback 环境时，带 `--thread-id {原threadId} --user-id {原userId} --source-ref {原Task或PRref}`。
+只在真实创建/使用记录支持时填写；未知旧目录不通过 declare-only 补造出生记录。
+
+作者创建 PR 后，将它关联到自己的 exact HEAD 工位（不改原出生来源）：
+
+```bash
+pnpm worktree:bind-pr {精确工位路径} pr:{OWNER}/{REPO}#{PR_NUMBER}
+```
+
+只读普查用 `pnpm worktree:inventory`，包含 legacy 与非标准路径；capacity 只回答名额，不是完整库存。
+API 每五分钟只读扫描本部署仓库的续留及已合入未收尾事实（每轮最多四个 PR subject 轮转），用已有幂等消息投递到记录的原 thread；不自动删除、不启动模型。
+来源缺失/损坏会写运行日志并保留在 inventory 中，由原维护查证，不能猜同 catId 的另一个线程。
+过期提醒在代码部署后才生效，源码存在不算线上已验收。
+
 ## 收工：核验释放或具名续留
 
 工作结束时，从持有 main 且已包含当前收尾版本的主仓执行唯一收尾入口（merge-gate Step 8 同一套）。旧 feature/review 快照里的 CLI 可能仍执行完整隔离；离开目标目录后调用主仓的 CLI，不从另一份旧快照运行收尾：
@@ -239,7 +256,7 @@ pnpm worktree:finish ../cat-cafe-{feature-name} --source-ref {同一ref} --check
 reaper 尊重有效续留，过期或损坏的续留只报告 review，不能静默按旧策略处置。
 将实际 JSON 回执留在原 Task/PR；`blocked`、merge 成功或单纯命令退出都不替代工位处置。
 
-没有定时回收；`worktree:new` 从不替别人腾位。既有 `reap --apply`/`--purge` 仍是单独授权的显式动作，
+只有过期通知，没有定时回收；`worktree:new` 从不替别人腾位。既有 `reap --apply`/`--purge` 仍是单独授权的显式动作，
 不为满额强删、不代清其他 owner。原始未登记旧目录仍只报告。
 
 ## 异常：满额、想保留、要恢复

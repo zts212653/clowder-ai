@@ -114,7 +114,7 @@ export function SettingsShellV2({
             aria-controls="settings-mobile-navigation"
             onClick={() => setMobileNavigation((open) => !open)}
           >
-            设置导航
+            {t.navigation}
           </button>
         </div>
         <nav

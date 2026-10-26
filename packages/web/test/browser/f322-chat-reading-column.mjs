@@ -6,7 +6,10 @@ export async function runChatReadingColumnJourney(t, { openProof, closeProof, ca
   for (const [width, sidebar, base] of [
     [1920, true, 'light'],
     [1440, true, 'dark'],
+    [721, true, 'light'],
+    [720, true, 'light'],
     [700, true, 'dark'],
+    [390, false, 'light'],
     [320, false, 'light'],
   ]) {
     await t.test(`production reading surface at ${width}px ${base}`, async () => {
@@ -22,7 +25,16 @@ export async function runChatReadingColumnJourney(t, { openProof, closeProof, ca
               const node = document.querySelector(selector);
               if (!node) return null;
               const r = node.getBoundingClientRect();
-              return { x: r.x, right: r.right, width: r.width, scroll: node.scrollWidth, client: node.clientWidth };
+              return {
+                x: r.x,
+                y: r.y,
+                right: r.right,
+                bottom: r.bottom,
+                width: r.width,
+                height: r.height,
+                scroll: node.scrollWidth,
+                client: node.clientWidth,
+              };
             };
             const hostNode = document.querySelector('[data-chat-container]');
             const host = rect('[data-chat-container]');
@@ -39,6 +51,8 @@ export async function runChatReadingColumnJourney(t, { openProof, closeProof, ca
                 right: Number.parseFloat(style.paddingRight),
               },
               column: rect('[data-thread-chat-reading-column]'),
+              composer: rect('[data-testid="chat-input-composer-row"]'),
+              execution: rect('[data-testid="execution-row"]'),
               track: rect('[data-message-piano]'),
               cat: rect('[data-message-id="reading-cat"]'),
               human: rect('[data-message-id="reading-human"] [data-testid="message-bubble"]'),
@@ -56,6 +70,15 @@ export async function runChatReadingColumnJourney(t, { openProof, closeProof, ca
             Math.abs(m.column.x + m.column.right - (m.available.x + m.available.right)) <= 1,
             'column is centered inside the content box, including the piano reservation',
           );
+          assert.ok(
+            Math.abs(m.composer.x + m.composer.right - (m.column.x + m.column.right)) <= 1,
+            'the full v2 composer shares the message column center',
+          );
+          if (m.execution)
+            assert.ok(
+              Math.abs(m.execution.x + m.execution.right - (m.column.x + m.column.right)) <= 1,
+              'the execution row shares the message column center',
+            );
           assert.ok(m.track?.width > 0, 'the production piano is measurable');
           assert.ok(m.column.right < m.track.x, 'the piano never covers the reading column');
           assert.ok(
@@ -68,9 +91,52 @@ export async function runChatReadingColumnJourney(t, { openProof, closeProof, ca
         };
         await page.locator('[data-message-piano-ready="true"][data-message-piano]').waitFor();
         const m = await measure();
-        // #5685 reserves room for the 28px latest control beside the piano.
-        assert.deepEqual(m.padding, { left: 16, right: 72 }, 'the piano and latest control own the reserved gutter');
+        // The narrow pane stacks the existing controls in one strip; wide panes retain #5685's side-by-side rail.
+        assert.deepEqual(
+          m.padding,
+          { left: 16, right: m.host.width <= 420 ? 40 : 72 },
+          'narrow messages and composer reclaim excess gutter while reserving both navigation hit targets',
+        );
         assertReadingGeometry(m);
+        const draft = await page.locator('textarea').inputValue();
+        await page.locator('[data-chat-container]').evaluate((node) => {
+          node.scrollTop = 0;
+        });
+        const latest = page.getByRole('button', { name: '到最新', exact: true });
+        await latest.waitFor({ state: 'visible' });
+        const navigation = await measure();
+        const button = await latest.boundingBox();
+        assert.ok(button && button.width >= 28 && button.height >= 28);
+        assert.ok(button.x >= navigation.column.right + 8, 'latest hit target stays clear of the text');
+        if (navigation.host.width <= 420) {
+          assert.ok(navigation.track.bottom + 8 <= button.y, 'the full piano hit target ends above latest');
+        } else {
+          assert.ok(
+            button.x + button.width + 4 <= navigation.track.x,
+            'wide navigation retains separate side-by-side targets',
+          );
+        }
+        const track = page.locator('[data-message-piano]');
+        assert.ok(
+          await track.evaluate((node) => {
+            const r = node.getBoundingClientRect();
+            return node.contains(document.elementFromPoint(r.x + r.width / 2, r.bottom - 1));
+          }),
+          'the bottom of the piano is an unobstructed pointer target',
+        );
+        await latest.click();
+        await page.waitForFunction(() => {
+          const node = document.querySelector('[data-chat-container]');
+          return node.scrollHeight - node.clientHeight - node.scrollTop <= 2;
+        });
+        await track.focus();
+        await track.press('Home');
+        assert.equal(
+          await track.getAttribute('aria-activedescendant'),
+          await track.getByRole('option').first().getAttribute('id'),
+        );
+        await track.press('Escape');
+        assert.equal(await page.locator('textarea').inputValue(), draft, 'navigation keeps the original input draft');
         assert.equal(m.cat.width, m.column.width);
         const rail = await cat.locator('[data-reply-color-rail]').evaluate((node) => {
           const s = getComputedStyle(node);
@@ -122,7 +188,7 @@ export async function runChatReadingColumnJourney(t, { openProof, closeProof, ca
             ),
           );
           const narrow = await measure();
-          assert.deepEqual(narrow.padding, { left: 16, right: 72 });
+          assert.deepEqual(narrow.padding, { left: 16, right: 40 });
           assertReadingGeometry(narrow);
         }
       } catch (error) {

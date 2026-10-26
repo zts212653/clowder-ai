@@ -1,6 +1,30 @@
 import { createHash } from 'node:crypto';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 
+export function createSidebarCompositionTimer() {
+  let previous = performance.now();
+  const phases = {
+    setupMs: 0,
+    conciergeMs: 0,
+    listMs: 0,
+    conciergeAttachMs: 0,
+    pathMigrationMs: 0,
+    filterMs: 0,
+    unreadReadMs: 0,
+    unreadProjectMs: 0,
+    presenceMs: 0,
+    dtoProjectMs: 0,
+  };
+  return {
+    phases,
+    mark(phase: keyof typeof phases) {
+      const now = performance.now();
+      phases[phase] += Math.max(0, Math.round((now - previous) * 1000) / 1000);
+      previous = now;
+    },
+  };
+}
+
 function elapsedMs(startedAt: number): number {
   return Math.round((performance.now() - startedAt) * 1_000) / 1_000;
 }
@@ -28,6 +52,7 @@ function traceSidebarSnapshotStage(
     responseStatus?: 200 | 304;
     responseBytes?: number;
     serializedBytes?: number;
+    phases?: ReturnType<typeof createSidebarCompositionTimer>['phases'];
   },
 ): void {
   request.log.info(
@@ -54,9 +79,10 @@ export function sendCanonicalSidebarSnapshot(
   reply: FastifyReply,
   payload: unknown,
   compositionStartedAt: number,
+  phases?: ReturnType<typeof createSidebarCompositionTimer>['phases'],
 ): FastifyReply {
   const compositionDurationMs = elapsedMs(compositionStartedAt);
-  traceSidebarSnapshotStage(request, 'composition', { durationMs: compositionDurationMs });
+  traceSidebarSnapshotStage(request, 'composition', { durationMs: compositionDurationMs, ...(phases && { phases }) });
 
   const serializeStartedAt = performance.now();
   const serialized = JSON.stringify(payload);

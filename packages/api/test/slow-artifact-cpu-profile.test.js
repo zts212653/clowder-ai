@@ -7,7 +7,7 @@ import { promisify } from 'node:util';
 const { observeThreadArtifactRead } = await import(
   '../dist/domains/cats/services/agents/routing/thread-artifact-read-diagnostics.js'
 );
-const { projectMainThreadCpuProfile } = await import('../dist/infrastructure/telemetry/main-thread-cpu-profile.js');
+const { projectMainThreadCpuProfile } = await import('../dist/infrastructure/telemetry/cpu/main-thread-cpu-profile.js');
 
 test('a still-pending artifact read captures bounded process CPU evidence without holding its result', async (t) => {
   let clock = 0;
@@ -55,7 +55,7 @@ test('a still-pending artifact read captures bounded process CPU evidence withou
     assert.equal(report.status, 'sampled');
     assert.ok(report.sampleCount > 0, 'the native V8 profiler must actually collect samples');
     assert.ok(
-      report.topFrames.some((frame) => frame.file === 'infrastructure/telemetry/main-thread-cpu-profile.js'),
+      report.topFrames.some((frame) => frame.file === 'infrastructure/telemetry/cpu/main-thread-cpu-profile.js'),
       'a real hot API function is recovered from the native profile as a relative code coordinate',
     );
     assert.ok(report.topFrames.length <= 12);
@@ -117,7 +117,7 @@ test('pending profiler cleanup does not hold either the successful result or the
 });
 
 test('an independent in-process native profiling session keeps its own profile across our capture', async (t) => {
-  const { createSlowReadCpuObserver } = await import('../dist/infrastructure/telemetry/slow-read-cpu-observer.js');
+  const { createSlowReadCpuObserver } = await import('../dist/infrastructure/telemetry/cpu/slow-read-cpu-observer.js');
   let clock = 0;
   t.mock.method(performance, 'now', () => clock);
   t.mock.timers.enable({ apis: ['setTimeout'] });

@@ -1,4 +1,4 @@
-import { type WorkCommand, workCommandSchema } from '@cat-cafe/shared';
+import { type WorkCommand, workCommandSchema, workReferenceSchema, workWorkspaceSourceSchema } from '@cat-cafe/shared';
 import type { FastifyInstance, FastifyReply } from 'fastify';
 import { z } from 'zod';
 import { WorkContextConflictError } from '../domains/collaborative-content/works/context-store.js';
@@ -9,6 +9,7 @@ import {
   WorkProjectionPendingError,
 } from '../domains/collaborative-content/works/service.js';
 import type { WorkVideoContextService } from '../domains/collaborative-content/works/video-context.js';
+import { workCardArtifact } from '../domains/collaborative-content/works/work-card-artifact.js';
 import { MediaOwnerError } from '../domains/video-studio/content-owner/media-errors.js';
 import { WorkspaceContentSourceError } from '../domains/workspace/workspace-content-source.js';
 import { replyArtifactReviewError } from './artifact-review-route-errors.js';
@@ -86,6 +87,26 @@ export async function registerLivingWorkRoutes(
     contexts?: WorkVideoContextService;
   },
 ) {
+  app.get('/api/works/resolve-file', async (request, reply) => {
+    reply.header('Cache-Control', 'private, no-store');
+    const human = directContentHuman(request);
+    if (!human) return reply.code(401).send({ error: 'identity_required' });
+    try {
+      const thread = { threadId: z.string().min(1).max(128) };
+      const { threadId, ...source } = z
+        .union([
+          workWorkspaceSourceSchema.omit({ expectedSourceRevision: true }).extend(thread).strict(),
+          workReferenceSchema.extend({ ...thread, ownerRevision: z.coerce.number().int().positive().safe() }).strict(),
+        ])
+        .parse(request.query);
+      const principal = { ...human, threadId };
+      return 'contentRef' in source
+        ? { artifact: workCardArtifact(await deps.service.read(source, principal)) }
+        : await deps.service.resolveFile(source, principal);
+    } catch (error) {
+      return fail(reply, error);
+    }
+  });
   app.post('/api/works/command', { bodyLimit: 32 * 1024 }, async (request, reply) => {
     reply.header('Cache-Control', 'private, no-store');
     const human = directContentHuman(request);

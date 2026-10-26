@@ -72,7 +72,9 @@ function ResolvedFileOwnerSurface({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
   const [markdownRendered, setMarkdownRendered] = useState(true);
-  const [htmlPreview, setHtmlPreview] = useState(false);
+  const [htmlView, setHtmlView] = useState({ isV2, preview: isV2 });
+  // Reset only this mode before children commit; changing shells must retain the same file owner and draft.
+  if (htmlView.isV2 !== isV2) setHtmlView({ isV2, preview: isV2 });
   const [jsxPreview, setJsxPreview] = useState(false);
   const [collaborationOpen, setCollaborationOpen] = useState<boolean | null>(null);
   const requestSeq = useRef(0);
@@ -199,7 +201,7 @@ function ResolvedFileOwnerSurface({
         isHtml={isHtml}
         isJsx={isJsx}
         markdownRendered={markdownRendered}
-        htmlPreview={htmlPreview}
+        htmlPreview={htmlView.preview}
         jsxPreview={jsxPreview}
         saveError={saveError}
         scrollToLine={target.scrollToLine}
@@ -215,7 +217,7 @@ function ResolvedFileOwnerSurface({
           handleToggleEdit();
         }}
         onToggleMarkdownRendered={() => setMarkdownRendered((current) => !current)}
-        onToggleHtmlPreview={() => setHtmlPreview((current) => !current)}
+        onToggleHtmlPreview={() => setHtmlView((current) => ({ isV2, preview: !current.preview }))}
         onToggleJsxPreview={() => setJsxPreview((current) => !current)}
         showFileQuotes={!!controls}
         onQuoteSelected={controls?.onQuoteSelected}
