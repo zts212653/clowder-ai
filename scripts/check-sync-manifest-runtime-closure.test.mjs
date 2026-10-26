@@ -85,6 +85,25 @@ describe('outbound sync runtime closure', { skip: !isHomeRepo && 'sync manifest 
     }
   });
 
+  it('exports the manual desktop acceptance entry and its checked-in support files', () => {
+    const supportFiles = execFileSync('git', ['ls-files', '.github/desktop-acceptance'], {
+      cwd: ROOT,
+      encoding: 'utf8',
+    })
+      .trim()
+      .split('\n')
+      .filter(Boolean);
+    assert.ok(supportFiles.length > 0, 'desktop acceptance support must exist');
+    const requiredPaths = [
+      '.github/workflows/verify-desktop-candidate.yml',
+      'scripts/vendor-stylesheet-checkout.test.mjs',
+      ...supportFiles,
+    ];
+    const coverage = loadPublicExportCoverage(ROOT);
+    const missing = requiredPaths.filter((path) => !isCoveredByPublicExport(path, coverage));
+    assert.deepEqual(missing, [], `Desktop acceptance export omits: ${missing.join(', ')}`);
+  });
+
   it('preserves templates during repository sync so a public archive binds its own commit', () => {
     const fixture = mkdtempSync(join(tmpdir(), 'sync-archive-identity-'));
     const revisionPath = '.cat-cafe-runtime-revision';

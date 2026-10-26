@@ -151,8 +151,11 @@ if (-not $SkipWebBuild) {
     if ($LASTEXITCODE -ne 0) { throw "Frozen dependency installation failed" }
     pnpm run build
     if ($LASTEXITCODE -ne 0) { Write-Err "Build failed"; exit 1 }
-    if ((git rev-parse HEAD).Trim() -ne $buildRevision -or
-        (git status --porcelain --untracked-files=all -- @buildInputs)) { throw "Source changed during the build" }
+    $afterBuildInputs = @(git status --porcelain --untracked-files=all -- @buildInputs)
+    if ($LASTEXITCODE -ne 0) { throw 'Could not inspect source after the build' }
+    if ((git rev-parse HEAD).Trim() -ne $buildRevision -or $afterBuildInputs.Count -gt 0) {
+        throw "Source changed during the build.`n$($afterBuildInputs -join "`n")"
+    }
     $webRevision = (Get-Content -LiteralPath (Join-Path $ProjectRoot 'packages/web/.next/.build-commit') -Raw).Trim()
     if ($webRevision -ne $buildRevision) { throw "Web build identity does not match this source revision" }
     # The API's generic tsc build does not stamp itself. Only record its identity
