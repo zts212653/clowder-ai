@@ -13,9 +13,9 @@ import {
   MemoryPluginInventoryStore,
   publishPluginPackageArchive,
 } from '../dist/domains/plugin/index.js';
-import { FilesystemBuiltinPluginPackageMaterializer } from '../dist/domains/plugin/manager/builtin-package-materializer.js';
 import { PersonalChromeSetup } from '../dist/domains/plugin/manager/chrome-setup/personal-chrome-setup.js';
 import { TRUSTED_CHROME_SETUP_DELIVERIES } from '../dist/domains/plugin/manager/chrome-setup/personal-chrome-setup-policy.js';
+import { FilesystemBuiltinPluginPackageMaterializer } from '../dist/domains/plugin/manager/package-assets/builtin-package-materializer.js';
 
 const archive = process.env.F202_CHROME_SETUP_ARCHIVE;
 

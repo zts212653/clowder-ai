@@ -1,5 +1,5 @@
 import type { FastifyBaseLogger } from 'fastify';
-import { observeSlowReadCpu } from '../../../../../infrastructure/slow-read-cpu-observer.js';
+import { observeSlowReadCpu } from '../../../../../infrastructure/telemetry/slow-read-cpu-observer.js';
 import type {
   WorkCatalogueReadObserver,
   WorkCatalogueReadTiming,

@@ -1,6 +1,6 @@
 import type { Profiler } from 'node:inspector';
 
-const API_ROOT = new URL('../', import.meta.url).href;
+const API_ROOT = new URL('../../', import.meta.url).href;
 const MAX_NODES = 4096;
 const MAX_SAMPLES = 10000;
 type CallFrame = Profiler.ProfileNode['callFrame'];

@@ -5257,7 +5257,7 @@ async function main(): Promise<void> {
   });
   const pluginManagerCatalog = createHostOfficialPluginCatalog();
   const { FilesystemBuiltinPluginPackageMaterializer } = await import(
-    './domains/plugin/manager/builtin-package-materializer.js'
+    './domains/plugin/manager/package-assets/builtin-package-materializer.js'
   );
   const { DotPluginStateProjection } = await import(
     './domains/cats/services/cloud-bridge/dot/DotPluginStateProjection.js'

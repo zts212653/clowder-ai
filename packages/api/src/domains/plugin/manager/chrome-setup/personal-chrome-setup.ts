@@ -9,7 +9,7 @@ import type { VerifiedPluginPackageLocator } from '../../external-runtime/types.
 import type { PluginInventoryStore } from '../../host-inventory/ports.js';
 import type { PluginInstanceRecord } from '../../host-inventory/types.js';
 import type { InstalledPluginOperationResult } from '../../operations/plugin-operation-routes.js';
-import type { BuiltinPluginPackageMaterializer } from '../builtin-package-materializer-types.js';
+import type { BuiltinPluginPackageMaterializer } from '../package-assets/builtin-package-materializer-types.js';
 import { chromeSetupPolicy, isChromeSetupRequest } from './personal-chrome-setup-policy.js';
 import { runChromeSetupProcess } from './personal-chrome-setup-process.js';
 

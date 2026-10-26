@@ -19,5 +19,5 @@ export * from './RoutingPreflightService.js';
 export * from './RoutingSignalEventStore.js';
 export * from './RoutingSignalObservation.js';
 export * from './RoutingSignalObservationTelemetry.js';
-export * from './RuntimeRoutingCandidateCatalogSource.js';
 export * from './routing-context-reducer.js';
+export * from './selection/RuntimeRoutingCandidateCatalogSource.js';

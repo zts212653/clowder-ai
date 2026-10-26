@@ -3,9 +3,9 @@ import type { CatConfig, RoutingCandidateBindingV1 } from '@cat-cafe/shared';
 import {
   type RoutingExecutionBindingProof,
   readAccountRoutingCapacity,
-} from '../../config/account-routing-capacity.js';
-import { resolveOwnerGate } from '../../utils/owner-gate.js';
-import type { RoutingCandidateCatalogSnapshot, RoutingCandidateCatalogSource } from './RoutingContextReadService.js';
+} from '../../../config/account-routing-capacity.js';
+import { resolveOwnerGate } from '../../../utils/owner-gate.js';
+import type { RoutingCandidateCatalogSnapshot, RoutingCandidateCatalogSource } from '../RoutingContextReadService.js';
 
 export interface RuntimeRoutingCandidateCatalogSourceOptions {
   getConfigs: () => Record<string, CatConfig>;

@@ -38,7 +38,7 @@ import {
 import type { PluginThreadProjectionDeps } from '../../host-surface/plugin-thread-projections.js';
 import type { PluginTaskAdmissionServices } from '../../host-surface/task/plugin-task-data-services.js';
 import { createPluginTaskHost, type PluginTaskHost } from '../../host-surface/task/plugin-task-host.js';
-import type { BuiltinPluginPackageMaterializer } from '../../manager/builtin-package-materializer.js';
+import type { BuiltinPluginPackageMaterializer } from '../../manager/package-assets/builtin-package-materializer.js';
 import {
   type PluginRuntimeConfigurationPort,
   type ResolvedConfigurationField,

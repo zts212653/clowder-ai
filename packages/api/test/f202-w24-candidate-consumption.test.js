@@ -45,9 +45,9 @@ import {
   createDormantPluginRuntimeComposition,
   createPluginManagerRuntimeComposition,
 } from '../dist/domains/plugin/index.js';
-import { FilesystemBuiltinPluginPackageMaterializer } from '../dist/domains/plugin/manager/builtin-package-materializer.js';
 import { resolveLocalPluginEffectiveGrants } from '../dist/domains/plugin/manager/machine-catalog-provider.js';
 import { OFFICIAL_PLUGIN_HOST_POLICIES } from '../dist/domains/plugin/manager/official-plugin-host-policies.js';
+import { FilesystemBuiltinPluginPackageMaterializer } from '../dist/domains/plugin/manager/package-assets/builtin-package-materializer.js';
 import { resolvePluginRuntimePersistencePaths } from '../dist/domains/plugin/runtime-composition.js';
 import { MemoryConnectorThreadBindingStore } from '../dist/infrastructure/connectors/ConnectorThreadBindingStore.js';
 

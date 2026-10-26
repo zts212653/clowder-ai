@@ -4,7 +4,7 @@ import { describe, test } from 'node:test';
 describe('F293 RuntimeRoutingCandidateCatalogSource', () => {
   test('derives deterministic bindings without guessing quota pools or account identity', async () => {
     const { RuntimeRoutingCandidateCatalogSource } = await import(
-      '../dist/domains/routing-context/RuntimeRoutingCandidateCatalogSource.js'
+      '../dist/domains/routing-context/selection/RuntimeRoutingCandidateCatalogSource.js'
     );
     const base = {
       name: 'test',

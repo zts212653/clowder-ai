@@ -1,7 +1,7 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { RuntimeRoutingCandidateCatalogSource } from '../../dist/domains/routing-context/RuntimeRoutingCandidateCatalogSource.js';
+import { RuntimeRoutingCandidateCatalogSource } from '../../dist/domains/routing-context/selection/RuntimeRoutingCandidateCatalogSource.js';
 
 export function accountCapacityFixture(t) {
   const root = mkdtempSync(join(tmpdir(), 'f293-capacity-'));

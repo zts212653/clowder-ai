@@ -1,5 +1,5 @@
 import type { PluginManifest } from '@clowder-ai/plugin-contract';
-import type { PluginPackageProvenance } from '../host-inventory/types.js';
+import type { PluginPackageProvenance } from '../../host-inventory/types.js';
 
 /** Verified executable tree with its locked runtime dependencies available to Node. */
 export interface MaterializedBuiltinPluginPackage {

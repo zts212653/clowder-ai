@@ -77,10 +77,6 @@ import { PluginMediaReadService } from './host-surface/plugin-media-host.js';
 import type { PluginMembersServices } from './host-surface/plugin-members-host.js';
 import { createPluginNeutralHost } from './host-surface/plugin-neutral-host.js';
 import { type PluginPrivateStoragePort, RedisPluginPrivateStorage } from './host-surface/plugin-private-storage.js';
-import {
-  type BuiltinPluginPackageMaterializer,
-  FilesystemBuiltinPluginPackageMaterializer,
-} from './manager/builtin-package-materializer.js';
 import { connectorPermissionsProjection } from './manager/connector-settings.js';
 import { GitPluginPackageAdmission } from './manager/git-package-admission.js';
 import { LocalPluginPackageAdmission } from './manager/local-package-admission.js';
@@ -92,6 +88,10 @@ import type {
   OfficialPluginCatalogProvider,
   OfficialPluginCatalogSnapshot,
 } from './manager/official-catalog-provider.js';
+import {
+  type BuiltinPluginPackageMaterializer,
+  FilesystemBuiltinPluginPackageMaterializer,
+} from './manager/package-assets/builtin-package-materializer.js';
 import { HostPluginConfigurationService } from './manager/plugin-manager-configuration.js';
 import {
   type PluginManagerCatalogCandidate,

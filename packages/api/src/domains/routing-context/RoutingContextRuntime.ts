@@ -18,8 +18,8 @@ import {
   OpenTelemetryRoutingSignalObservationSink,
   RoutingSignalObservationTelemetry,
 } from './RoutingSignalObservationTelemetry.js';
-import { RuntimeRoutingCandidateCatalogSource } from './RuntimeRoutingCandidateCatalogSource.js';
 import { RoutingSelectionService } from './selection/RoutingSelectionService.js';
+import { RuntimeRoutingCandidateCatalogSource } from './selection/RuntimeRoutingCandidateCatalogSource.js';
 
 export interface CreateRoutingContextRuntimeOptions {
   redis: RedisClient;

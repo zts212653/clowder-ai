@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-const { projectMainThreadCpuProfile } = await import('../dist/infrastructure/main-thread-cpu-profile.js');
+const { projectMainThreadCpuProfile } = await import('../dist/infrastructure/telemetry/main-thread-cpu-profile.js');
 const root = new URL('../dist/', import.meta.url).href;
 function node(id, url, functionName = 'retainedMediaHeads') {
   return { id, callFrame: { url, functionName, scriptId: '1', lineNumber: 41, columnNumber: 0 } };

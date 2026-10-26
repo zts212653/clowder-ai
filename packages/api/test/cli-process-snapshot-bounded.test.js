@@ -2,8 +2,8 @@ import assert from 'node:assert/strict';
 import cp from 'node:child_process';
 import { syncBuiltinESMExports } from 'node:module';
 import { test } from 'node:test';
-import { largePsFixture } from '../../../scripts/test-helpers/large-ps-snapshot.mjs';
 import { readUnixProcessSnapshot, readUnixProcessSnapshotSync } from '../dist/utils/cli-process-ownership.js';
+import { largePsFixture } from './helpers/large-ps-snapshot.mjs';
 
 test('macOS sync/async production readers bound environment scans and preserve unknown evidence', async (t) => {
   const platform = Object.getOwnPropertyDescriptor(process, 'platform');

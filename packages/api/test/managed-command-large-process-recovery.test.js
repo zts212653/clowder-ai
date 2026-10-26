@@ -5,7 +5,6 @@ import { syncBuiltinESMExports } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { largePsFixture } from '../../../scripts/test-helpers/large-ps-snapshot.mjs';
 import {
   rawDurableGateRecord,
   recordDurableManagedGateProcess,
@@ -14,6 +13,7 @@ import {
 } from '../dist/domains/managed-job/durable-managed-gate-job-store.js';
 import { ManagedJobService } from '../dist/domains/managed-job/ManagedJobService.js';
 import { reconcileManagedJobDescriptor } from '../dist/domains/managed-job/managed-job-reconcile-descriptor.js';
+import { largePsFixture } from './helpers/large-ps-snapshot.mjs';
 
 test('fenced recovery settles the original exit1 only after a complete large-host cleanup observation', async (t) => {
   const root = mkdtempSync(join(tmpdir(), 'large-host-recovery-'));

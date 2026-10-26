@@ -13,7 +13,7 @@ import { addSkill, removeSkill } from '../../../skills/skill-manage.js';
 import type { PluginRuntimeAdmission } from '../carrier/runtime-carrier.js';
 import { packageDirectoryName } from '../external-runtime/filesystem-package-locator.js';
 import { ExternalPluginRuntimeError, type VerifiedPluginPackageLocator } from '../external-runtime/types.js';
-import type { BuiltinPluginPackageMaterializer } from '../manager/builtin-package-materializer.js';
+import type { BuiltinPluginPackageMaterializer } from '../manager/package-assets/builtin-package-materializer.js';
 import type { PluginRuntimeConfigurationPort } from '../manifest-configuration-projection.js';
 import { activateDeclaredMcp, removeDeclaredMcp } from './declared-mcp-resources.js';
 import { pluginResourceRoot } from './declared-resource-paths.js';

@@ -2,11 +2,11 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
 const moduleUrl = new URL(
-  process.env.TASK229_CPU_PROJECTOR ?? '../dist/infrastructure/main-thread-cpu-profile.js',
+  process.env.TASK229_CPU_PROJECTOR ?? '../dist/infrastructure/telemetry/main-thread-cpu-profile.js',
   import.meta.url,
 );
 const { projectMainThreadCpuProfile } = await import(moduleUrl.href);
-const root = new URL('../', moduleUrl).href;
+const root = new URL('../../', moduleUrl).href;
 const node = (id, url, name, children = []) => ({
   id,
   callFrame: { url, functionName: name, scriptId: '1', lineNumber: 6, columnNumber: 0 },
