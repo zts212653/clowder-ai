@@ -92,6 +92,7 @@ describe('public package script closure', () => {
     write(root, '.githooks/pre-commit', hook);
     write(root, 'scripts/intake-from-opensource.sh', '#!/bin/bash\n');
     write(root, 'scripts/brand-dictionary-helper.mjs', 'export {};\n');
+    write(root, 'scripts/secret-git-guard.mjs', 'export {};\n');
     commitAll(root, 'hook without companion');
     const missing = checkSyncPublicPreflight(root, { baseRef: 'HEAD' });
     assert.equal(missing.ok, false);

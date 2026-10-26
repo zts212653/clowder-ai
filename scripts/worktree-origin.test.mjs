@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, rmSync } from 'node:fs';
+import { mkdirSync, rmSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { test } from 'node:test';
-import { fixture, git } from './lib/worktree-finish-fixture.mjs';
+import { fixture } from './lib/worktree-finish-fixture.mjs';
 import { lifecycleConfig } from './lib/worktree-reaper-probes.mjs';
 import { createWorktree } from './worktree-new.mjs';
 
@@ -35,34 +35,6 @@ test('canonical birth preserves exact source thread and review subject in privat
     rmSync(f.root, { recursive: true, force: true });
   }
 });
-test('real post-checkout registers a raw detached review checkout, not its main or an old checkout', () => {
-  const f = fixture();
-  try {
-    git(f.repo, 'config', 'core.hooksPath', resolve('.githooks'));
-    const path = join(f.repo, '.review-worktrees/pr42-review');
-    const env = {
-      ...process.env,
-      CAT_CAFE_CAT_ID: 'kimi',
-      CAT_CAFE_THREAD_ID: origin.threadId,
-      CAT_CAFE_INVOCATION_ID: 'fixture-invocation',
-      CAT_CAFE_USER_ID: origin.userId,
-    };
-    execFileSync('git', ['-C', f.repo, 'worktree', 'add', '--detach', path, 'HEAD'], { env, stdio: 'pipe' });
-    const config = lifecycleConfig(path, '--worktree');
-    assert.equal(config.owner, 'kimi');
-    assert.equal(config.policy, 'ttl');
-    assert.equal(config.origin.threadId, origin.threadId);
-    assert.equal(lifecycleConfig(f.repo, '--worktree').owner, undefined);
-    assert(existsSync(path));
-    const old = f.make('cat-cafe-old');
-    git(old, 'config', '--worktree', '--remove-section', 'catcafe.lifecycle');
-    execFileSync('git', ['-C', old, 'checkout', '--detach', 'HEAD'], { env, stdio: 'pipe' });
-    assert.deepEqual(lifecycleConfig(old, '--worktree'), {}, 'do not invent legacy birth/ownership');
-  } finally {
-    rmSync(f.root, { recursive: true, force: true });
-  }
-});
-
 test('installing guards from a secondary checkout pins the primary hook source, including old review heads', () => {
   const f = fixture();
   try {

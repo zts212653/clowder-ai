@@ -301,7 +301,7 @@ function writeCarrierFixtureRoot() {
     [
       '// fixture canonical Node carrier',
       '"use /api/sessions/seal";',
-      'CAT_CAFE_INVOCATION_ID CAT_CAFE_CALLBACK_TOKEN',
+      'CAT_CAFE_INVOCATION_ID CAT_CAFE_CALLBACK_TOKEN CAT_CAFE_CREDENTIAL_FILE',
       'X-Invocation-Id X-Callback-Token X-Clowder-Compaction-Carrier',
     ].join('\n'),
   );

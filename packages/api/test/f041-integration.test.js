@@ -188,8 +188,12 @@ describe('F041 Cloud P1-1: bootstrap feeds invocation-owned MCP', () => {
     for (const server of [collab, memory, signals]) {
       const { upstream, proxyEnv } = secretMcpContract(server);
       const { ALLOWED_WORKSPACE_DIRS } = upstream.env;
-      assert.ok(ALLOWED_WORKSPACE_DIRS, 'the configured workspace boundary remains present');
-      assert.deepEqual(proxyEnv, callbackEnv, 'only this invocation supplies identity and callback credentials');
+      assert.equal(ALLOWED_WORKSPACE_DIRS, process.env.ALLOWED_WORKSPACE_DIRS?.trim() || dir);
+      assert.deepEqual(
+        proxyEnv,
+        { ALLOWED_WORKSPACE_DIRS, ...callbackEnv },
+        'the proxy retains the workspace boundary alongside this invocation identity and credentials',
+      );
       assert.equal(upstream.command, process.execPath);
       assert.ok(upstream.args[0].endsWith(`/packages/mcp-server/dist/${server.name.replace('cat-cafe-', '')}.js`));
       assert.deepEqual(upstream.env, { ALLOWED_WORKSPACE_DIRS, ...callbackEnv });

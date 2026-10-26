@@ -1224,7 +1224,7 @@ test('#712: merges user .mcp.json servers as base layer — managed entries take
       CAT_CAFE_INVOCATION_ID: 'inv-merge',
       CAT_CAFE_CALLBACK_TOKEN: 'token-merge',
     };
-    assertCurrentCallback(collabProxyEnv, expectedCallback);
+    assertCurrentCallback(collabProxyEnv, { ALLOWED_WORKSPACE_DIRS: projectDir, ...expectedCallback });
     assertCurrentCallback(collab.env, { ALLOWED_WORKSPACE_DIRS: projectDir, ...expectedCallback });
   } finally {
     if (previousAllowedWorkspaceDirs === undefined) delete process.env.ALLOWED_WORKSPACE_DIRS;
@@ -2136,7 +2136,7 @@ function managedLaunchPlanFixture() {
     [
       '// fixture canonical Node carrier',
       'fetch("/api/sessions/seal"',
-      'CAT_CAFE_INVOCATION_ID CAT_CAFE_CALLBACK_TOKEN',
+      'CAT_CAFE_INVOCATION_ID CAT_CAFE_CALLBACK_TOKEN CAT_CAFE_CREDENTIAL_FILE',
       'X-Invocation-Id X-Callback-Token X-Clowder-Compaction-Carrier',
     ].join('\n'),
   );
