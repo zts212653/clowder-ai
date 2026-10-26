@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
+import { waitForRendererDocument } from './renderer-document.mjs';
 
 const [phase, directory, frontendText, apiText, debugText, version] = process.argv.slice(2);
 assert.ok(['create', 'restore'].includes(phase));
@@ -79,6 +80,10 @@ async function evaluate(expression) {
   return response.result.value;
 }
 try {
+  await waitForRendererDocument({
+    read: () => evaluate('({origin:location.origin,readyState:document.readyState,hasBody:!!document.body})'),
+    origin: base,
+  });
   const healthResponse = await fetch(`http://127.0.0.1:${api}/health`, { signal: AbortSignal.timeout(10000) });
   assert.equal(healthResponse.status, 200);
   const health = await healthResponse.json();
