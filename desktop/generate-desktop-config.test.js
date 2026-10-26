@@ -1,5 +1,6 @@
 /** Structural regression tests for the clowder-ai#1107 desktop metadata intake. */
 const assert = require('node:assert/strict');
+const { spawnSync } = require('node:child_process');
 const { readFileSync } = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
@@ -82,3 +83,51 @@ test('desktop and root package versions remain distinct', () => {
   const desktopPkg = JSON.parse(readFileSync(path.join(__dirname, 'package.json'), 'utf8'));
   assert.notEqual(rootPkg.version, desktopPkg.version);
 });
+
+for (const { requestedVersion, expected, description } of [
+  { requestedVersion: '0.14.0', expected: '0.14.0', description: '0.14.0' },
+  { requestedVersion: '', expected: require('./package.json').version, description: 'the committed package version' },
+]) {
+  test(`Windows shell packages ${description} without editing release inputs`, () => {
+    const packagePath = path.join(__dirname, 'package.json');
+    const original = readFileSync(packagePath, 'utf8');
+    const result = spawnSync(
+      process.execPath,
+      ['-e', 'console.log(JSON.stringify(require("./windows-builder.cjs")))'],
+      { cwd: __dirname, encoding: 'utf8', env: { CATCAFE_VERSION: requestedVersion } },
+    );
+    assert.equal(result.status, 0, result.stdout + result.stderr);
+    assert.equal(JSON.parse(result.stdout).extraMetadata?.version, expected);
+    assert.equal(readFileSync(packagePath, 'utf8'), original);
+  });
+
+  test(
+    `macOS shell packages ${description} without editing release inputs`,
+    { skip: process.platform === 'win32' },
+    () => {
+      const packagePath = path.join(__dirname, 'package.json');
+      const original = readFileSync(packagePath, 'utf8');
+      const buildScript = readFileSync(path.join(SCRIPTS_DIR, 'build-mac.sh'), 'utf8');
+      const start = buildScript.indexOf('# Build .app bundles only');
+      const end = buildScript.indexOf('# Ad-hoc sign each .app');
+      assert.ok(start >= 0 && end > start, 'exercise the actual Electron packaging command');
+      const result = spawnSync(
+        'bash',
+        [
+          '-c',
+          [
+            'set -euo pipefail',
+            'ARCHS=(arm64)',
+            'npx() { node -e \'console.log(JSON.stringify(process.argv.slice(1)))\' "$@"; }',
+            buildScript.slice(start, end),
+          ].join('\n'),
+        ],
+        { cwd: __dirname, encoding: 'utf8', env: { PATH: process.env.PATH, CATCAFE_VERSION: requestedVersion } },
+      );
+      assert.equal(result.status, 0, result.stdout + result.stderr);
+      const builderArgs = JSON.parse(result.stdout.split(/\r?\n/).find((line) => line.startsWith('[')));
+      assert.ok(builderArgs.includes(`--config.extraMetadata.version=${expected}`), JSON.stringify(builderArgs));
+      assert.equal(readFileSync(packagePath, 'utf8'), original);
+    },
+  );
+}

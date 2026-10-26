@@ -230,7 +230,9 @@ rm -rf "${DESKTOP_DIR}/dist"
 # Build .app bundles only (--dir). electron-builder's built-in dmgbuild
 # under-allocates disk image size when afterPack injects large node_modules,
 # causing "No space left on device". We create DMGs ourselves via hdiutil.
-EB_ARGS=("--mac" "dir")
+# Keep the source checkout clean; the requested version belongs to the package.
+VERSION="${CATCAFE_VERSION:-$(node -p "require('./package.json').version")}"
+EB_ARGS=("--mac" "dir" "--config.extraMetadata.version=$VERSION")
 for arch in "${ARCHS[@]}"; do
   EB_ARGS+=("--$arch")
 done
@@ -271,7 +273,6 @@ done
 # prevents ejection. main.js has a runtime guard for this case, but a clear
 # install UI prevents the user from ever hitting that error path.
 mkdir -p "$DIST_DIR"
-VERSION="$(node -p "require('./package.json').version")"
 
 # Creates a simple green drag arrow background for the install DMG using only
 # Python's standard library, avoiding external image dependencies on build

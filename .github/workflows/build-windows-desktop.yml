@@ -42,19 +42,6 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Sync desktop/package.json version
-        shell: bash
-        run: |
-          VERSION="${{ inputs.version }}"
-          node -e "
-            const fs = require('fs');
-            const path = 'desktop/package.json';
-            const pkg = JSON.parse(fs.readFileSync(path, 'utf8'));
-            pkg.version = '$VERSION';
-            fs.writeFileSync(path, JSON.stringify(pkg, null, 2) + '\n');
-            console.log('desktop/package.json version =', pkg.version);
-          "
-
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
