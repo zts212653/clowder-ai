@@ -61,6 +61,8 @@ for (const transport of ['shared', 'stdio']) {
         id: req.headers['x-invocation-id'],
         token: req.headers['x-callback-token'],
         carrier: req.headers['x-clowder-compaction-carrier'],
+        legacyBearer: req.headers['x-cat-cafe-hook-token'],
+        authorization: req.headers.authorization,
         body,
       });
       if (body.includes(`${sessionId}-redirect`)) {
@@ -90,6 +92,9 @@ for (const transport of ['shared', 'stdio']) {
         API_SERVER_PORT: String(port),
       }),
     );
+    // A stale legacy environment must not replace original-turn file auth.
+    env.CAT_CAFE_CALLBACK_TOKEN = 'stale';
+    env.CAT_CAFE_HOOK_TOKEN = 'retired';
     try {
       for (const phase of ['pre', 'post', 'sop-set', 'sop-get', 'legacy-pre', 'legacy-digest']) {
         const result = await run([hook, phase], env, {
@@ -125,6 +130,10 @@ for (const transport of ['shared', 'stdio']) {
       }
       assert.equal(requests.length, 10, 'the shell entrypoints must also perform their original callback operations');
       assert.ok(requests.every((request) => request.id === invocationId && request.token === token));
+      assert.ok(
+        requests.every((request) => request.legacyBearer === undefined && request.authorization === undefined),
+        'legacy global bearer headers must not accompany the invocation pair',
+      );
       assert.ok(
         requests.every((request, index) => request.carrier === (index < 2 ? 'f296-node-v1' : undefined)),
         'only managed pre/post actions may attest compaction',

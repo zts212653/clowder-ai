@@ -1,6 +1,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { PHYSICAL_RESOURCES, materializeResource } = require('./project-resource-materialization');
+const { seedProviderDirectory } = require('./project-provider-directory');
 
 const PROJECT_MIRRORS = Object.freeze([
   '.claude',
@@ -92,6 +93,45 @@ function preparePhysicalResource(options, rebuild) {
   }
 }
 
+function isPriorProviderMirror(target, destination) {
+  if (path.basename(target) !== '.claude') return false;
+  const packages = path.join(path.dirname(destination), 'packages');
+  try {
+    // .claude is processed first, while the previous packages mirror still
+    // identifies a relocated installation. Never remove either target.
+    const peer = path.resolve(path.dirname(packages), fs.readlinkSync(packages));
+    return sameTarget(peer, path.join(path.dirname(target), 'packages'));
+  } catch (error) {
+    if (['ENOENT', 'EINVAL'].includes(error.code)) return false;
+    throw error;
+  }
+}
+
+function prepareProviderDirectory(options) {
+  const { source, destination, log } = options;
+  let existing;
+  let previousLink;
+  try {
+    existing = fs.lstatSync(destination);
+  } catch (error) {
+    if (error.code !== 'ENOENT') throw error;
+  }
+  if (existing?.isSymbolicLink()) {
+    previousLink = fs.readlinkSync(destination);
+    const target = path.resolve(path.dirname(destination), previousLink);
+    if (!sameTarget(target, source) && !isPriorProviderMirror(target, destination)) {
+      throw new Error(`Preserving unowned provider directory link: ${destination}`);
+    }
+  } else if (existing) {
+    if (!existing.isDirectory()) throw new Error(`Preserving non-directory provider path: ${destination}`);
+    // After initialization this is owner configuration, including plugin links
+    // into .cat-cafe. Never traverse or refresh it as a static bundled resource.
+    log(`Preserving writable owner provider directory: ${destination}`);
+    return;
+  }
+  seedProviderDirectory({ ...options, previousLink, removeLink: removeMirrorLink });
+}
+
 /** Prepare physical Windows resources and optional links; preserve owner data. */
 function prepareProjectMirrors({
   installRoot,
@@ -110,6 +150,10 @@ function prepareProjectMirrors({
       if (!fs.statSync(source).isDirectory()) throw new Error('Bundled mirror source is not a directory');
     } catch (error) {
       log(`Skipping mirror source ${source}: ${describeFilesystemError(error)}`);
+      continue;
+    }
+    if (mirror === '.claude') {
+      prepareProviderDirectory({ source, destination, log });
       continue;
     }
     if (platform === 'win32' && PHYSICAL_RESOURCES.has(mirror)) {

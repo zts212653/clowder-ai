@@ -10,7 +10,7 @@
 import assert from 'node:assert/strict';
 import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { join, resolve } from 'node:path';
 import { afterEach, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { catRegistry } from '@cat-cafe/shared';
@@ -56,12 +56,13 @@ function fakeTaskRunner() {
   };
 }
 
-function createRuntime(projectRoot, mcpConfigIO) {
+function createRuntime(projectRoot, mcpConfigIO, binaryProjectRoot = projectRoot) {
   const limbRegistry = new LimbRegistry();
   return {
     limbRegistry,
     runtime: createDormantPluginRuntimeComposition({
       projectRoot,
+      binaryProjectRoot,
       messageStore: new MessageStore(),
       contract: {
         manifestContractRange: '0.1.0 || 0.2.0',
@@ -204,7 +205,7 @@ async function installConfigureEnable(updates, roots) {
         antigravity: join(configRoot, '.test-antigravity/mcp.json'),
       })
     : undefined;
-  const { runtime } = createRuntime(projectRoot, io);
+  const { runtime } = createRuntime(projectRoot, io, roots?.runtime);
   const composition = createPluginManagerRuntimeComposition({
     runtime,
     catalogProvider: { snapshot: async () => ({ entries: [], status: 'fresh', checkedAt: 1 }) },
@@ -454,7 +455,11 @@ for (const configOnWorkspace of [false, true])
   });
 
 test('package API cwd without runtime override reaches MCP tools/list through production composition', async () => {
-  const runtimeRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
+  // Model a standalone installation, not the author's linked worktree, which
+  // correctly has no implicit publication authority after the owner split.
+  const runtimeRoot = await tempRoot('plugin-api-cwd-runtime-');
+  await mkdir(join(runtimeRoot, 'packages/api'), { recursive: true });
+  await writeFile(join(runtimeRoot, 'pnpm-workspace.yaml'), 'packages:\n  - packages/*\n');
   const workspaceRoot = await tempRoot('plugin-api-cwd-policy-');
   const consumer = await tempRoot('plugin-api-cwd-consumer-');
   const previousCwd = process.cwd();

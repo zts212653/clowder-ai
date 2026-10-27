@@ -13,6 +13,7 @@ import {
   resolvePluginRuntimePersistencePaths,
 } from '../dist/domains/plugin/index.js';
 import { callbacksRoutes } from '../dist/routes/callbacks.js';
+import { assertHostListenLifecycle } from './helpers/plugin-host-listen-contract.js';
 import {
   completeExternalHandshake,
   EXTERNAL_PACKAGE_DIGEST,
@@ -266,14 +267,7 @@ test('production composition constructs and recovers K-2D but exposes no startup
     ),
   );
   assert.ok(gate, 'the desktop resume gate must be a Host-owned deferred promise');
-  // Initial package activation also needs the listening Host; preserve this exact ordering.
-  assert.match(
-    source,
-    new RegExp(
-      `listen:\\s*async\\s*\\(\\)\\s*=>\\s*\\{\\s*const\\s+([A-Za-z_$][\\w$]*)\\s*=\\s*await app\\.listen\\(\\{ port: PORT, host: HOST \\}\\);\\s*(?:startupMilestone\\('http-listening'\\);\\s*)?${gate[1]}\\(\\);\\s*await initialPlugins\\?\\.activate\\(\\);\\s*return\\s+\\1;\\s*\\}`,
-    ),
-    'desktop windows may app.inject; the gate opens only once app.listen has booted Fastify',
-  );
+  await assertHostListenLifecycle(source, gate[1]);
   assert.equal(source.split(`${gate[1]}()`).length - 1, 1, 'the gate has a single release point');
   assert.ok(
     managerCompositionIndex >= 0 && managerCompositionIndex < recoveryIndex,

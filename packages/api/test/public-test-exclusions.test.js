@@ -158,10 +158,7 @@ test('resource-only SOP coverage stays excluded while portable Codex contracts a
 test('resolver re-admits the exported Claude hooks and F296 composition coverage', async () => {
   const { resolvePublicTestFiles } = await import(resolverModuleUrl);
   const resolved = await resolvePublicTestFiles({ packageRoot, configPath: registryPath });
-  for (const portableTest of [
-    'test/f296-b3b3-post-compact-hook.test.js',
-    'test/f296-session-hook-source-auth.test.js',
-  ]) {
+  for (const portableTest of ['test/f296-b3b3-post-compact-hook.test.js', 'test/f333-cli-hook-credentials.test.js']) {
     assert.ok(resolved.selectedFiles.includes(portableTest));
   }
   assert.ok(resolved.selectedFiles.includes('test/f296-session-hook-auth.test.js'));

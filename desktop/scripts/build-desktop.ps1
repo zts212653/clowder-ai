@@ -149,8 +149,18 @@ if (-not $SkipWebBuild) {
     if (git status --porcelain --untracked-files=all -- @buildInputs) { throw "Commit runtime source changes before building a release" }
     pnpm install --frozen-lockfile
     if ($LASTEXITCODE -ne 0) { throw "Frozen dependency installation failed" }
-    pnpm run build
-    if ($LASTEXITCODE -ne 0) { Write-Err "Build failed"; exit 1 }
+    $previousDesktopWebBuild = $env:CAT_CAFE_DESKTOP_WEB_BUILD
+    try {
+        $env:CAT_CAFE_DESKTOP_WEB_BUILD = '1'
+        pnpm run build
+        if ($LASTEXITCODE -ne 0) { Write-Err "Build failed"; exit 1 }
+    } finally {
+        if ($null -eq $previousDesktopWebBuild) {
+            Remove-Item Env:CAT_CAFE_DESKTOP_WEB_BUILD -ErrorAction SilentlyContinue
+        } else {
+            $env:CAT_CAFE_DESKTOP_WEB_BUILD = $previousDesktopWebBuild
+        }
+    }
     $afterBuildInputs = @(git status --porcelain --untracked-files=all -- @buildInputs)
     if ($LASTEXITCODE -ne 0) { throw 'Could not inspect source after the build' }
     if ((git rev-parse HEAD).Trim() -ne $buildRevision -or $afterBuildInputs.Count -gt 0) {
@@ -164,9 +174,9 @@ if (-not $SkipWebBuild) {
     Pop-Location
     Write-Ok "Web application built"
 } else {
-    Assert-WebBuildIdentity (Join-Path $ProjectRoot 'packages/web')
     Write-Ok "Skipped (existing artifacts)"
 }
+Assert-WebBuildIdentity (Join-Path $ProjectRoot 'packages/web')
 
 # Step 2: ordinary frozen install, then materialize portable runtime trees.
 # pnpm 9 hoisted deploy disables lockfile reads; do not use it for releases.

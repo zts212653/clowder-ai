@@ -66,11 +66,15 @@ bold "Step 1/6 — Build web application"
 if [[ $SKIP_WEB -eq 0 ]]; then
   cd "$PROJECT_ROOT"
   pnpm install --frozen-lockfile || die "Frozen dependency installation failed"
-  pnpm run build
+  CAT_CAFE_DESKTOP_WEB_BUILD=1 pnpm run build
   ok "Web application built"
 else
   ok "Skipped (--skip-web)"
 fi
+
+# A reused ordinary Web build must not bypass the Desktop image profile.
+WEB_BUILD_REVISION="$(git -C "$PROJECT_ROOT" rev-parse HEAD)"
+node "$SCRIPT_DIR/verify-web-build.cjs" "$PROJECT_ROOT/packages/web" "$WEB_BUILD_REVISION" || die "Desktop Web admission failed; rebuild instead of reusing incompatible artifacts"
 
 # ─── Step 2: frozen runtime packages ──────────────────────────────
 bold "Step 2/6 — frozen runtime packages"
@@ -97,6 +101,9 @@ else
   [[ -d "$DEPLOY_ROOT" ]] || die "bundled/deploy/ missing. Run without --skip-deploy first."
   ok "Skipped (--skip-deploy)"
 fi
+
+# This is the Web tree electron-builder actually packages, including reuse.
+node "$SCRIPT_DIR/verify-web-build.cjs" "$DEPLOY_ROOT/web" "$WEB_BUILD_REVISION" || die "Desktop deploy Web admission failed; rebuild instead of reusing incompatible artifacts"
 
 # ─── Step 3: Bundle Node.js portable (both archs) ──────────────────────
 bold "Step 3/6 — Bundle Node.js portable (arm64 + x64)"

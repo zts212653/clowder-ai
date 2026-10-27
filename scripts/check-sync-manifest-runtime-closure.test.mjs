@@ -691,15 +691,39 @@ describe('outbound sync runtime closure', { skip: !isHomeRepo && 'sync manifest 
     assert.ok(!(manifest.target_owned_files ?? []).includes(carrierPath), 'the absorbed carrier is source-owned');
   });
 
-  it('exports every project hook read by the public F296 authentication contract', () => {
-    const contract = 'packages/api/test/f296-session-hook-source-auth.test.js';
+  it('exports every project hook exercised by the public credential-file HTTP contract', () => {
+    const contract = 'packages/api/test/f333-cli-hook-credentials.test.js';
     const source = readFileSync(resolve(ROOT, contract), 'utf8');
-    const hookReferences = [...source.matchAll(/['"](\.\.\/\.\.\/\.\.\/\.claude\/hooks\/[^'"]+)['"]/g)].map((match) =>
-      toRepoPath(resolveLocalImport(contract, match[1])),
-    );
+    const importedHooks = collectRelativeImports(source, contract)
+      .filter((specifier) => specifier.includes('/.claude/hooks/'))
+      .map((specifier) => toRepoPath(resolveLocalImport(contract, specifier)));
+    const runtimeHooks = new Set();
+    const file = ts.createSourceFile(contract, source, ts.ScriptTarget.Latest, true);
+    function wrapperNames(call, filename) {
+      assert.ok(ts.isIdentifier(filename), `${contract} must use its declared wrapper iteration`);
+      let loop = call.parent;
+      while (loop && !ts.isForOfStatement(loop)) loop = loop.parent;
+      assert.ok(loop && ts.isArrayLiteralExpression(loop.expression), `${contract} must enumerate its wrappers`);
+      assert.ok(ts.isVariableDeclarationList(loop.initializer));
+      assert.equal(loop.initializer.declarations[0].name.getText(file), filename.text);
+      return loop.expression.elements.map((wrapper) => {
+        assert.ok(ts.isStringLiteralLike(wrapper) && wrapper.text.endsWith('.sh'));
+        return wrapper.text;
+      });
+    }
+    function visit(node) {
+      ts.forEachChild(node, visit);
+      if (!ts.isCallExpression(node) || node.expression.getText(file) !== 'resolve') return;
+      const [directory, filename] = node.arguments;
+      if (!directory || !ts.isStringLiteralLike(directory) || !directory.text.startsWith('../../.claude/hooks')) return;
+      for (const wrapper of filename ? wrapperNames(node, filename) : ['']) {
+        runtimeHooks.add(toRepoPath(resolve(ROOT, 'packages/api', directory.text, wrapper)));
+      }
+    }
+    visit(file);
 
-    assert.ok(hookReferences.length > 0, `${contract} must keep its real project-hook references`);
-    for (const hook of hookReferences) {
+    assert.ok(runtimeHooks.size >= 4, `${contract} must exercise the Node carrier and its three real shell wrappers`);
+    for (const hook of new Set([...importedHooks, ...runtimeHooks])) {
       assert.ok(
         managedFiles.has(hook),
         `${hook} must be exported with ${contract}, otherwise test:public reads a missing runtime asset`,

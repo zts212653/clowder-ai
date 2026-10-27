@@ -251,7 +251,11 @@ test('host-approved collaboration remains executable and per-cat denial cannot l
       assert.deepEqual(collab.args, [join(f.dist, 'collab.js')]);
       assert.equal(collab.env.CAT_CAFE_CAT_ID, 'kimi');
       assert.ok(collab.env.ALLOWED_WORKSPACE_DIRS, 'the workspace boundary stays on the upstream reader');
-      assert.deepEqual(proxyEnv, {}, 'Kimi does not persist invocation credentials in its project relay environment');
+      assert.deepEqual(
+        proxyEnv,
+        { ALLOWED_WORKSPACE_DIRS: collab.env.ALLOWED_WORKSPACE_DIRS },
+        'the relay retains its workspace boundary without persisting invocation credentials',
+      );
     }
   } finally {
     await lease.dispose();

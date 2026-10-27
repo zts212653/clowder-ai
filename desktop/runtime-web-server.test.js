@@ -26,7 +26,11 @@ test('production entry preloads its verified build config and production env bef
     write('.next/BUILD_ID', 'fixture-build');
     write('.next/required-server-files.json', {
       version: 1,
-      config: { distDir: '.next', env: { NEXT_PUBLIC_CAT_CAFE_BUILD_REVISION: revision } },
+      config: {
+        distDir: '.next',
+        images: { unoptimized: true },
+        env: { NEXT_PUBLIC_CAT_CAFE_BUILD_REVISION: revision },
+      },
     });
     write('next.config.js', 'throw new Error("Build-only configuration must not execute");');
     write('node_modules/next/package.json', { name: 'next', version: '14.2.35', main: 'index.js' });

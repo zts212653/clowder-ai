@@ -208,7 +208,11 @@ function createTrackingSpawnFn(eventsFn) {
   const calls = [];
   const spawnFn = mock.fn((_cmd, _args, options) => {
     const proc = createMockProcess();
-    calls.push({ cmd: _cmd, args: _args, options, proc });
+    // Observe the original-turn file at launch, before its owner retires it.
+    const credential = options.env?.CAT_CAFE_CREDENTIAL_FILE
+      ? JSON.parse(readFileSync(options.env.CAT_CAFE_CREDENTIAL_FILE, 'utf8'))
+      : undefined;
+    calls.push({ cmd: _cmd, args: _args, options, proc, credential });
     // Schedule events on next tick so caller can start reading
     process.nextTick(() =>
       emitEvents(
@@ -224,6 +228,18 @@ function createTrackingSpawnFn(eventsFn) {
   });
   spawnFn._calls = calls;
   return spawnFn;
+}
+
+function assertCallbackLaunch(call) {
+  const env = call.options.env;
+  assert.ok(env.CAT_CAFE_INVOCATION_ID);
+  assert.ok(env.CAT_CAFE_API_URL);
+  assert.ok(env.CAT_CAFE_CREDENTIAL_FILE);
+  assert.equal(env.CAT_CAFE_CALLBACK_TOKEN, undefined);
+  assert.equal(call.credential?.invocationId, env.CAT_CAFE_INVOCATION_ID);
+  assert.ok(call.credential.callbackToken);
+  assert.equal(JSON.stringify([call.args, env]).includes(call.credential.callbackToken), false);
+  return call.credential;
 }
 
 function commandName(command) {
@@ -362,12 +378,9 @@ describe('AgentRouter + Services wiring', () => {
 
     await collect(router.route('user-1', 'hello'));
 
-    // Claude spawn should have been called with env containing callback vars
+    // Callback authority crosses the launch through the original-turn file.
     assert.equal(claudeSpawn._calls.length, 1);
-    const spawnOpts = claudeSpawn._calls[0].options;
-    assert.ok(spawnOpts.env.CAT_CAFE_INVOCATION_ID, 'should have invocation ID');
-    assert.ok(spawnOpts.env.CAT_CAFE_CALLBACK_TOKEN, 'should have callback token');
-    assert.ok(spawnOpts.env.CAT_CAFE_API_URL, 'should have API URL');
+    assertCallbackLaunch(claudeSpawn._calls[0]);
   });
 
   test('passes callbackEnv to Codex service', async () => {
@@ -390,9 +403,7 @@ describe('AgentRouter + Services wiring', () => {
     await collect(router.route('user-1', '@codex hello'));
 
     assert.equal(codexSpawn._calls.length, 1);
-    const spawnOpts = codexSpawn._calls[0].options;
-    assert.ok(spawnOpts.env.CAT_CAFE_INVOCATION_ID);
-    assert.ok(spawnOpts.env.CAT_CAFE_CALLBACK_TOKEN);
+    assertCallbackLaunch(codexSpawn._calls[0]);
   });
 
   test('passes callbackEnv to Gemini service', async () => {
@@ -472,9 +483,9 @@ describe('AgentRouter + Services wiring', () => {
 
     await collect(router.route('user-1', 'hello'));
 
-    const env = claudeSpawn._calls[0].options.env;
+    const credential = assertCallbackLaunch(claudeSpawn._calls[0]);
     // F174 Phase A/B: verify() returns Promise<VerifyResult>
-    const result = await registry.verify(env.CAT_CAFE_INVOCATION_ID, env.CAT_CAFE_CALLBACK_TOKEN);
+    const result = await registry.verify(credential.invocationId, credential.callbackToken);
     assert.equal(result.ok, true, 'credentials should be verifiable');
     assert.equal(result.record.userId, 'user-1');
     assert.equal(result.record.catId, 'opus');
@@ -674,15 +685,15 @@ describe('MCP callback end-to-end flow', () => {
     // 1. route() creates invocation and passes callbackEnv to spawn
     await collect(router.route('user-1', 'hello'));
 
-    // 2. Extract callbackEnv from the spawn call
-    const env = claudeSpawn._calls[0].options.env;
+    // 2. Use the credential observed while the original launch file existed.
+    const credential = assertCallbackLaunch(claudeSpawn._calls[0]);
 
     // 3. POST to callback endpoint with credentials from route()
     const app = await createApp();
     const response = await app.inject({
       method: 'POST',
       url: '/api/callbacks/post-message',
-      headers: { 'x-invocation-id': env.CAT_CAFE_INVOCATION_ID, 'x-callback-token': env.CAT_CAFE_CALLBACK_TOKEN },
+      headers: { 'x-invocation-id': credential.invocationId, 'x-callback-token': credential.callbackToken },
       payload: {
         content: 'Callback message from cat!',
       },

@@ -25,7 +25,7 @@ test('portable Redis and memory contracts survive the October resource audit', a
     'test/f254-freshness-replay-provider.test.js',
     'test/f254-provider-native-freshness.test.js',
     'test/harness-eval/eval-hub-metric-glossary-coverage.test.js',
-    'test/f296-session-hook-source-auth.test.js',
+    'test/f333-cli-hook-credentials.test.js',
     'test/f296-b3b3-post-compact-hook.test.js',
   ]) {
     assert.ok(resolved.selectedFiles.includes(file), `${file} supplies portable behavior coverage`);
