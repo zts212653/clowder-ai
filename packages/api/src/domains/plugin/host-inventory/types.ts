@@ -1,4 +1,4 @@
-import type { Capability, PluginManifest } from '@clowder-ai/plugin-contract';
+import type { PluginManifest } from '@clowder-ai/plugin-contract';
 import type { DesktopWindowFailureReason } from '../desktop-window-runtime/failure-reason.js';
 import type { StoredPluginManifest } from './stored-manifest.js';
 
@@ -51,25 +51,6 @@ export interface PluginRuntimeErrorRecord {
   readonly desktopReason?: DesktopWindowFailureReason;
 }
 
-/**
- * F202 W2-6b — what the Host knows about a failure beyond its `lastRuntimeError` code. It sits
- * beside that record instead of inside it, so a Host from before it reads the record unchanged and
- * drops this (its instance parser keeps only the fields it knows). A diagnostic only: no grant
- * decision reads it.
- *
- * It explains one failure of one package, and nothing after it: when the failure is replaced or the
- * instance's package changes, it is stale — a new version is never judged by what an old one did.
- */
-export interface PluginRuntimeErrorDetail {
-  /** The failure was the Host refusing a capability the instance was not granted. */
-  readonly kind: 'capability_not_granted';
-  readonly capability: Capability;
-  /** The `occurredAt` of the `lastRuntimeError` it explains. */
-  readonly occurredAt: number;
-  /** The package that was starting when the Host refused it. */
-  readonly packageDigest: string;
-}
-
 export interface PluginPackageRecord {
   readonly packageDigest: string;
   readonly pluginId: string;
@@ -104,23 +85,12 @@ export interface PluginInstanceRecord {
   readonly retiredAt?: number;
   /** Sanitized machine-readable failure only. Raw child stderr is never persisted. */
   readonly lastRuntimeError?: PluginRuntimeErrorRecord;
-  /** Written and cleared with `lastRuntimeError`; see {@link PluginRuntimeErrorDetail}. */
-  readonly lastRuntimeErrorDetail?: PluginRuntimeErrorDetail;
-}
-
-export interface PluginGrantRecord {
-  readonly pluginInstanceId: string;
-  readonly requestedCapabilities: readonly Capability[];
-  readonly effectiveGrants: readonly Capability[];
-  readonly grantRevision: number;
-  readonly updatedAt: number;
 }
 
 export interface PluginInventorySnapshot {
   readonly schemaVersion: typeof PLUGIN_INVENTORY_SCHEMA_VERSION;
   readonly packages: readonly PluginPackageRecord[];
   readonly instances: readonly PluginInstanceRecord[];
-  readonly grants: readonly PluginGrantRecord[];
 }
 
 export interface PackageAdmissionCandidate {
@@ -130,7 +100,6 @@ export interface PackageAdmissionCandidate {
   /** Digest promised by the immutable package source/registry reservation. */
   readonly expectedPackageDigest: string;
   readonly packagePluginId: string;
-  readonly effectiveGrants: readonly string[];
   readonly signalSchemas?: PluginPackageRecord['signalSchemas'];
   readonly provenance?: PluginPackageProvenance;
 }
@@ -138,30 +107,15 @@ export interface PackageAdmissionCandidate {
 export interface UpgradePackageInput extends PackageAdmissionCandidate {
   readonly pluginInstanceId: string;
   readonly expectedLifecycleRevision: number;
-  readonly expectedGrantRevision: number;
 }
 
 export interface ReinstallPackageInput extends PackageAdmissionCandidate {
   readonly previousPluginInstanceId: string;
 }
 
-export interface RevokeGrantInput {
-  readonly pluginInstanceId: string;
-  readonly capability: string;
-  readonly expectedGrantRevision: number;
-}
-
-/** F202 W2-6: what a Host-owned policy now allows the instance; its requests still bound the grant. */
-export interface ReconcileGrantsInput {
-  readonly pluginInstanceId: string;
-  readonly allowedCapabilities: readonly string[];
-  readonly expectedGrantRevision: number;
-}
-
 export interface InventoryMutationResult {
   readonly pluginInstanceId: string;
   readonly packageDigest: string;
-  readonly grantRevision: number;
 }
 
 export type PluginInventoryErrorCode =
@@ -170,13 +124,11 @@ export type PluginInventoryErrorCode =
   | 'PACKAGE_DIGEST_MISMATCH'
   | 'PACKAGE_ID_MISMATCH'
   | 'CONTRACT_VERSION_MISMATCH'
-  | 'INVALID_GRANT'
   | 'PACKAGE_ALREADY_INSTALLED'
   | 'DATA_DIRECTORY_IN_USE'
   | 'INSTANCE_NOT_FOUND'
   | 'STALE_INSTANCE'
   | 'STALE_LIFECYCLE_REVISION'
-  | 'STALE_GRANT_REVISION'
   | 'RUNTIME_NOT_STOPPED'
   | 'INSTANCE_ID_COLLISION'
   | 'INCOMPATIBLE_PACKAGE'

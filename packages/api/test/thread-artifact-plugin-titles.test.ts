@@ -32,7 +32,6 @@ async function fixture(t) {
           ],
         },
       },
-      effectiveGrants: [],
     },
     async (_instance, _method, params) => {
       calls.push(params.request);

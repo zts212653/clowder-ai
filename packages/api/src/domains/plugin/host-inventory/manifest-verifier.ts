@@ -1,10 +1,5 @@
-import { type Capability, type PluginManifest } from '@clowder-ai/plugin-contract';
-import {
-  canonicalCapabilities,
-  DEFAULT_PLUGIN_CONTRACT_RUNTIME,
-  isManifestContractSupported,
-  requestedCapabilitiesForManifest,
-} from './contract-policy.js';
+import { type PluginManifest } from '@clowder-ai/plugin-contract';
+import { DEFAULT_PLUGIN_CONTRACT_RUNTIME, isManifestContractSupported } from './contract-policy.js';
 import { isCanonicalPackageDigest } from './snapshot.js';
 import type { PackageAdmissionCandidate, PluginPackageRecord } from './types.js';
 import { PluginInventoryError } from './types.js';
@@ -13,8 +8,6 @@ export { PLUGIN_CONTRACT_VERSION } from './contract-policy.js';
 
 export interface VerifiedPackageAdmission {
   readonly package: PluginPackageRecord & { readonly manifest: PluginManifest };
-  readonly effectiveGrants: readonly Capability[];
-  readonly requestedCapabilities: readonly Capability[];
 }
 
 export type PackageManifestValidationResult =
@@ -28,7 +21,6 @@ export interface PackageAdmissionContractRuntime {
   /** Protocol compatibility range, independent of a plugin's installed SDK package. */
   readonly manifestContractRange: string;
   readonly validateManifest: (value: unknown) => PackageManifestValidationResult;
-  readonly validateEffectiveGrants: (values: readonly string[]) => boolean;
 }
 
 export function verifyPackageAdmission(
@@ -59,14 +51,6 @@ export function verifyPackageAdmission(
       `manifest requires ${validation.manifest.contractVersion}; Host supports ${contract.manifestContractRange}`,
     );
   }
-  if (!contract.validateEffectiveGrants(candidate.effectiveGrants)) {
-    throw new PluginInventoryError('INVALID_GRANT', 'effective grants contain an unknown or duplicate capability');
-  }
-  const requestedCapabilities = requestedCapabilitiesForManifest(validation.manifest);
-  if (candidate.effectiveGrants.some((capability) => !requestedCapabilities.includes(capability as Capability))) {
-    throw new PluginInventoryError('INVALID_GRANT', 'effective grants must be a subset of manifest requests');
-  }
-  const effectiveGrants = canonicalCapabilities(candidate.effectiveGrants as readonly Capability[]);
   const signalSchemas = candidate.signalSchemas ?? {};
   for (const declaration of validation.manifest.signals?.provides ?? []) {
     if (!Object.hasOwn(signalSchemas, declaration.schemaRef)) {
@@ -82,14 +66,13 @@ export function verifyPackageAdmission(
       pluginId: validation.manifest.pluginId,
       version: validation.manifest.version,
       contractVersion: validation.manifest.contractVersion,
-      manifest: structuredClone(validation.manifest),
+      // The validated original declaration is also the input of the package's own SDK.
+      manifest: structuredClone(candidate.manifest) as PluginManifest,
       signalSchemas: structuredClone(signalSchemas),
       ...(candidate.provenance === undefined ? {} : { provenance: structuredClone(candidate.provenance) }),
       packageState: 'installed',
       verifiedAt: now,
       updatedAt: now,
     },
-    effectiveGrants,
-    requestedCapabilities,
   };
 }

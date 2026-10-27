@@ -1,7 +1,5 @@
 import { randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
-import type { Capability } from '@clowder-ai/plugin-contract';
-import { canonicalCapabilities } from './contract-policy.js';
 import { isHostReservedDataDirectoryName, requestedDataDirectoryName } from './data-directory-name.js';
 import {
   type PackageAdmissionContractRuntime,
@@ -13,11 +11,8 @@ import { normalizePluginInstanceAfterRestart } from './restart-recovery.js';
 import type {
   InventoryMutationResult,
   PackageAdmissionCandidate,
-  PluginGrantRecord,
   PluginInstanceRecord,
-  ReconcileGrantsInput,
   ReinstallPackageInput,
-  RevokeGrantInput,
   UpgradePackageInput,
 } from './types.js';
 import { PluginInventoryError } from './types.js';
@@ -39,15 +34,6 @@ function assertCurrentInstance(
     throw new PluginInventoryError('STALE_INSTANCE', `plugin instance ${pluginInstanceId} is not current`);
   }
   return instance;
-}
-
-function assertGrantRevision(grants: PluginGrantRecord, expectedGrantRevision: number): void {
-  if (grants.grantRevision !== expectedGrantRevision) {
-    throw new PluginInventoryError(
-      'STALE_GRANT_REVISION',
-      `expected grant revision ${expectedGrantRevision}, current ${grants.grantRevision}`,
-    );
-  }
 }
 
 function assertLifecycleRevision(instance: PluginInstanceRecord, expectedLifecycleRevision: number): void {
@@ -125,16 +111,6 @@ function createInstance(
   };
 }
 
-function createGrant(pluginInstanceId: string, verified: VerifiedPackageAdmission, now: number): PluginGrantRecord {
-  return {
-    pluginInstanceId,
-    requestedCapabilities: verified.requestedCapabilities,
-    effectiveGrants: verified.effectiveGrants,
-    grantRevision: 1,
-    updatedAt: now,
-  };
-}
-
 export class HostInventoryControlPlane {
   constructor(
     readonly store: PluginInventoryStore,
@@ -162,8 +138,7 @@ export class HostInventoryControlPlane {
       transaction.instances.put(
         createInstance(pluginInstanceId, verified.package.pluginId, input.computedPackageDigest, now),
       );
-      transaction.grants.put(createGrant(pluginInstanceId, verified, now));
-      return { pluginInstanceId, packageDigest: input.computedPackageDigest, grantRevision: 1 };
+      return { pluginInstanceId, packageDigest: input.computedPackageDigest };
     });
   }
 
@@ -179,9 +154,6 @@ export class HostInventoryControlPlane {
           'upgrade package does not belong to the current instance',
         );
       }
-      const grants = transaction.grants.get(current.pluginInstanceId);
-      if (!grants) throw new PluginInventoryError('INVENTORY_INVARIANT', 'current instance has no grant record');
-      assertGrantRevision(grants, input.expectedGrantRevision);
       if (
         !['stopped', 'crashed'].includes(current.runtimeState) ||
         current.activationState === 'enabling' ||
@@ -199,19 +171,9 @@ export class HostInventoryControlPlane {
         lifecycleRevision: current.lifecycleRevision + 1,
         updatedAt: now,
       });
-      // The package manifest is the authority basis, so every upgrade advances the grant fence.
-      const grantRevision = grants.grantRevision + 1;
-      transaction.grants.put({
-        ...grants,
-        requestedCapabilities: verified.requestedCapabilities,
-        effectiveGrants: verified.effectiveGrants,
-        grantRevision,
-        updatedAt: now,
-      });
       return {
         pluginInstanceId: current.pluginInstanceId,
         packageDigest: input.computedPackageDigest,
-        grantRevision,
       };
     });
   }
@@ -242,47 +204,7 @@ export class HostInventoryControlPlane {
         updatedAt: now,
       });
       transaction.instances.put(createInstance(nextInstanceId, current.pluginId, input.computedPackageDigest, now));
-      transaction.grants.put(createGrant(nextInstanceId, verified, now));
-      return { pluginInstanceId: nextInstanceId, packageDigest: input.computedPackageDigest, grantRevision: 1 };
-    });
-  }
-
-  async revokeGrant(input: RevokeGrantInput): Promise<number> {
-    return this.store.transaction((transaction) => {
-      assertCurrentInstance(transaction, input.pluginInstanceId);
-      const grants = transaction.grants.get(input.pluginInstanceId);
-      if (!grants) throw new PluginInventoryError('INVENTORY_INVARIANT', 'current instance has no grant record');
-      assertGrantRevision(grants, input.expectedGrantRevision);
-      if (!grants.requestedCapabilities.includes(input.capability as Capability)) {
-        throw new PluginInventoryError('INVALID_GRANT', `${input.capability} is not requested by this plugin`);
-      }
-      if (!grants.effectiveGrants.includes(input.capability as Capability)) return grants.grantRevision;
-      const now = this.now();
-      const effectiveGrants = grants.effectiveGrants.filter((capability) => capability !== input.capability);
-      const grantRevision = grants.grantRevision + 1;
-      transaction.grants.put({ ...grants, effectiveGrants, grantRevision, updatedAt: now });
-      return grantRevision;
-    });
-  }
-
-  /**
-   * F202 W2-6: sets the instance's grants to what its package requests and the Host-owned policy
-   * allows — adding what the policy has since allowed, dropping what it no longer does. Returns the
-   * grant revision, unchanged when the grants already match.
-   */
-  async reconcileGrants(input: ReconcileGrantsInput): Promise<number> {
-    return this.store.transaction((transaction) => {
-      assertCurrentInstance(transaction, input.pluginInstanceId);
-      const grants = transaction.grants.get(input.pluginInstanceId);
-      if (!grants) throw new PluginInventoryError('INVENTORY_INVARIANT', 'current instance has no grant record');
-      assertGrantRevision(grants, input.expectedGrantRevision);
-      const effectiveGrants = canonicalCapabilities(
-        grants.requestedCapabilities.filter((capability) => input.allowedCapabilities.includes(capability)),
-      );
-      if (isDeepStrictEqual(effectiveGrants, [...grants.effectiveGrants])) return grants.grantRevision;
-      const grantRevision = grants.grantRevision + 1;
-      transaction.grants.put({ ...grants, effectiveGrants, grantRevision, updatedAt: this.now() });
-      return grantRevision;
+      return { pluginInstanceId: nextInstanceId, packageDigest: input.computedPackageDigest };
     });
   }
 

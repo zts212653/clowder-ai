@@ -8,7 +8,6 @@ import {
   INTERNAL_ERROR_CODE,
   INVALID_PARAMS_CODE,
   isPluginDeliveryInput,
-  MESSAGING_ROW_METHODS,
   PARSE_ERROR_CODE,
   type PluginDeliveryInput,
   type PluginDeliveryReceipt,
@@ -53,9 +52,6 @@ interface PendingHostCall {
 }
 
 const DEFAULT_HEARTBEAT_TIMEOUT_MS = 5_000;
-const PLUGIN_TO_HOST_MESSAGING_METHODS = new Set<WireMethodName>(
-  MESSAGING_ROW_METHODS.filter((method) => method !== 'host.messaging.deliver'),
-);
 
 function closedHostCallError(method: PendingHostCall['method'], cause?: Error): ExternalPluginRuntimeError {
   const options = cause === undefined ? undefined : { cause };
@@ -147,19 +143,6 @@ function hostBrokerFailureResponse(id: string, method: WireMethodName, error: Ho
     return { response: handshakeError(id, error), close: true };
   }
   if (error.code === 'INVALID_CALL_INPUT' || error.code === 'METHOD_NOT_READY') {
-    return { response: standardError(id, INVALID_PARAMS_CODE), close: false };
-  }
-  if (error.code === 'CAPABILITY_DENIED') {
-    if (PLUGIN_TO_HOST_MESSAGING_METHODS.has(method)) {
-      return {
-        response: {
-          jsonrpc: '2.0',
-          id,
-          error: { code: DOMAIN_ERROR_CODE, message: DOMAIN_ERROR_MESSAGE, data: { code: 'PERMISSION' } },
-        },
-        close: false,
-      };
-    }
     return { response: standardError(id, INVALID_PARAMS_CODE), close: false };
   }
   if (error.code === 'AUTHORITY_CHANGED' || error.code === 'SESSION_NOT_ACTIVE' || error.code === 'SESSION_NOT_FOUND') {

@@ -2,7 +2,6 @@ import type { CloudConversationHostContribution, StaticContribution } from '@clo
 import type { PluginInvocationOutcome } from '../carrier/host-invocation.js';
 import type { PluginRuntimeAdmission } from '../carrier/runtime-carrier.js';
 import { ExternalPluginRuntimeError } from '../external-runtime/types.js';
-import { hostCapabilityRefusal } from '../host-surface/host-capability-refusal.js';
 import type { CloudConversationHostLease, CloudConversationHostRegistry } from './cloud-conversation-host-registry.js';
 
 /**
@@ -44,12 +43,7 @@ export async function admitCloudConversationHosts(
   if (!registry || !surface) {
     throw new ExternalPluginRuntimeError('UNSUPPORTED_TRANSPORT', 'Host cloud conversation registry is unavailable');
   }
-  if (!admission.effectiveGrants.includes(CLOUD_CONVERSATION_HOST_CAPABILITY)) {
-    throw hostCapabilityRefusal(
-      new ExternalPluginRuntimeError('DELIVERY_REJECTED', `${pluginId} lacks ${CLOUD_CONVERSATION_HOST_CAPABILITY}`),
-      CLOUD_CONVERSATION_HOST_CAPABILITY,
-    );
-  }
+
   if (manifest.runtime?.transport !== 'builtin') {
     throw new ExternalPluginRuntimeError(
       'UNSUPPORTED_TRANSPORT',

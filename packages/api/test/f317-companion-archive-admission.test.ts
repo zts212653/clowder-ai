@@ -35,7 +35,7 @@ test('an unpaired official archive with bridge 1.3 is rejected before Broker, Br
     await runtime.shutdown();
     await f.cleanup();
   });
-  const entry = { ...f.entry, effectiveGrants: ['windows.create' as const] };
+  const entry = { ...f.entry };
   const installer = new OfficialPluginPackageInstaller({
     inventory: runtime.inventory,
     packagesRoot: runtime.paths.packagesRoot,

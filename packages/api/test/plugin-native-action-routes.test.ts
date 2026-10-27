@@ -68,12 +68,10 @@ test('native route authenticates separately, captures optional source, and refus
             type: 'mcp',
             id: 'example',
             runtime: { transport: 'stdio', entrypoint: 'dist/mcp.js' },
-            actions: [{ method: 'example.run' }],
           } satisfies McpContribution,
         ],
       },
     },
-    effectiveGrants: [],
   };
   const validation = validateManifest(authority.packageRecord.manifest);
   assert.equal(validation.valid, true, JSON.stringify(validation.errors));
@@ -145,7 +143,7 @@ test('native route authenticates separately, captures optional source, and refus
       (await app.inject({ ...request, payload: { ...request.payload, context: { catId: 'spoof' } } })).statusCode,
       400,
     );
-    assert.equal((await app.inject({ ...request, payload: { method: 'not.declared', input: {} } })).statusCode, 403);
+    assert.equal((await app.inject({ ...request, payload: { method: 'example.other', input: {} } })).statusCode, 200);
     deleted = true;
     assert.equal((await app.inject(request)).statusCode, 410);
     deleted = false;
@@ -154,7 +152,7 @@ test('native route authenticates separately, captures optional source, and refus
     latestCurrent = true;
     current = false;
     assert.equal((await app.inject(request)).statusCode, 401);
-    assert.equal(writes, 2);
+    assert.equal(writes, 3);
     const diagnostics = logs.filter((row) => row.event === 'plugin_native_auth');
     assert.ok(diagnostics.some((row) => row.stage === 'headers' && row.reason === 'missing_credentials'));
     assert.ok(diagnostics.some((row) => row.stage === 'callback_prehandler' && row.reason === 'invalid_token'));

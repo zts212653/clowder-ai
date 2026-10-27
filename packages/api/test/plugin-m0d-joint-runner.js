@@ -1,10 +1,10 @@
 import { readFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 
-import { executeBehaviorCase, M0C_BEHAVIOR_CASE_IDS } from '@clowder-ai/plugin-contract/conformance';
+import { executeBehaviorCase } from '@clowder-ai/plugin-contract/conformance';
 
 import { ExternalStdioBehaviorAdapter } from './plugin-m0d-behavior-adapter.js';
-import { loadM0dExecutionPlan } from './plugin-m0d-execution-plan.js';
+import { loadM0dExecutionPlan, M0D_PROTOCOL_CASE_IDS } from './plugin-m0d-execution-plan.js';
 import { HostControlBehaviorAdapter } from './plugin-m0d-host-control-adapter.js';
 import { evaluateDeclaredVerdict } from './plugin-m0d-verdict-oracle.js';
 
@@ -61,12 +61,14 @@ function observedEvidence(adapter, execution) {
 }
 
 export async function loadM0dBehaviorFixture() {
-  return JSON.parse(await readFile(M0D_BEHAVIOR_FIXTURE_PATH, 'utf8'));
+  const fixture = JSON.parse(await readFile(M0D_BEHAVIOR_FIXTURE_PATH, 'utf8'));
+  fixture.cases = fixture.cases.filter((row) => M0D_PROTOCOL_CASE_IDS.includes(row.id));
+  return fixture;
 }
 
 export function isM0dAcceptancePassed(report) {
-  if (report.catalog.catalogMatches !== true || report.catalog.count !== 18) return false;
-  return Object.keys(report.counts).length === 1 && report.counts.pass === 18;
+  if (report.catalog.catalogMatches !== true || report.catalog.count !== M0D_PROTOCOL_CASE_IDS.length) return false;
+  return Object.keys(report.counts).length === 1 && report.counts.pass === M0D_PROTOCOL_CASE_IDS.length;
 }
 
 export async function runM0dJointAcceptance() {
@@ -74,8 +76,8 @@ export async function runM0dJointAcceptance() {
   const executionPlan = loadM0dExecutionPlan(fixture);
   const publishedIds = fixture.cases.map((behaviorCase) => behaviorCase.id);
   const catalogMatches =
-    publishedIds.length === M0C_BEHAVIOR_CASE_IDS.length &&
-    publishedIds.every((id, index) => id === M0C_BEHAVIOR_CASE_IDS[index]);
+    publishedIds.length === M0D_PROTOCOL_CASE_IDS.length &&
+    publishedIds.every((id, index) => id === M0D_PROTOCOL_CASE_IDS[index]);
   const cases = [];
 
   for (const [index, behaviorCase] of fixture.cases.entries()) {

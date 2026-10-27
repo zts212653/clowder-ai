@@ -79,7 +79,6 @@ export async function prepareAcpBootstrapConfigRecovery(input: {
   const captured = await input.inventory.transaction((tx) => {
     const instance = tx.instances.getCurrent(input.pluginId);
     const record = instance && tx.packages.get(instance.packageDigest);
-    const grant = instance && tx.grants.get(instance.pluginInstanceId);
     if (
       instance?.pluginInstanceId === input.pluginInstanceId &&
       instance.lifecycleRevision !== input.request.expectedRevision
@@ -89,16 +88,12 @@ export async function prepareAcpBootstrapConfigRecovery(input: {
       !instance ||
       instance.pluginInstanceId !== input.pluginInstanceId ||
       !record?.manifest ||
-      record.packageState !== 'installed' ||
-      !grant?.effectiveGrants.includes('plugin.config.read') ||
-      !grant.requestedCapabilities.includes('plugin.config.read') ||
-      !record.manifest.features.some((feature) => feature.capabilities.includes('plugin.config.read'))
+      record.packageState !== 'installed'
     )
       return refused();
     return {
       instance,
       record,
-      grant,
       stored: readPluginConfig(input.projectRoot, input.pluginId),
       text: readPluginConfigText(input.projectRoot, input.pluginId),
     };
@@ -162,7 +157,6 @@ export async function prepareAcpBootstrapConfigRecovery(input: {
           instance.packageDigest !== captured.instance.packageDigest ||
           instance.activationState !== captured.instance.activationState ||
           !isDeepStrictEqual(tx.packages.get(instance.packageDigest), captured.record) ||
-          !isDeepStrictEqual(tx.grants.get(instance.pluginInstanceId), captured.grant) ||
           readPluginConfigText(input.projectRoot, input.pluginId) !== captured.text ||
           !isDeepStrictEqual(readPluginConfig(input.projectRoot, input.pluginId), captured.stored)
         )

@@ -146,7 +146,6 @@ test('verified installation selects the owner port; unrelated plugins and replac
       computedPackageDigest: digest,
       expectedPackageDigest: digest,
       packagePluginId: pluginId,
-      effectiveGrants: [],
       signalSchemas: {},
     });
     await store.transaction((tx) => {
@@ -170,8 +169,8 @@ test('verified installation selects the owner port; unrelated plugins and replac
       'ok',
     );
     await store.transaction((tx) => {
-      const grant = tx.grants.get(instanceId)!;
-      tx.grants.put({ ...grant, grantRevision: grant.grantRevision + 1 });
+      const instance = tx.instances.get(instanceId)!;
+      tx.instances.put({ ...instance, activationState: 'disabled', lifecycleRevision: instance.lifecycleRevision + 1 });
     });
     await assert.rejects(
       host.collectiveArtifactOwner!.execute(op, { reauthorize: async () => op.constraint }),

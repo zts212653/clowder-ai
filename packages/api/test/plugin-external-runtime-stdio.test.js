@@ -272,11 +272,15 @@ test('typed exit before broker.ready fails startup immediately and retains the s
   assert.equal(inventory.instances[0].lastRuntimeError.exitCode, 17);
 });
 
-test('authority revocation closes transport on the next call with zero new effect', async () => {
+test('owner disable closes transport on the next call with zero new effect', async () => {
   const harness = await runningHarness();
   await harness.inventory.transaction((transaction) => {
-    const grants = transaction.grants.get(EXTERNAL_INSTANCE_ID);
-    transaction.grants.put({ ...grants, effectiveGrants: [], grantRevision: grants.grantRevision + 1 });
+    const instance = transaction.instances.get(EXTERNAL_INSTANCE_ID);
+    transaction.instances.put({
+      ...instance,
+      activationState: 'disabled',
+      lifecycleRevision: instance.lifecycleRevision + 1,
+    });
   });
   sendFrame(harness.child, wireRequest('publish-revoked', 'messaging.send', externalSendInput()));
   const response = await readFrame(harness.child);
@@ -657,7 +661,7 @@ test('missing Host ping response crashes and closes a runtime instead of project
   assert.equal(inventory.instances[0].runtimeState, 'crashed');
 });
 
-test('missing Host ping response after authority revocation never restarts the runtime', async () => {
+test('missing Host ping response after owner disable never restarts the runtime', async () => {
   const rootDir = await mkdtemp(join(tmpdir(), 'cat-cafe-k2d-heartbeat-authority-change-'));
   const harness = await createExternalRuntimeHarness({ rootDir, activeLeaseTtlMs: 100 });
   const processes = new FakePluginProcessAdapter();
@@ -686,8 +690,12 @@ test('missing Host ping response after authority revocation never restarts the r
   const ping = await readFrame(child);
   assert.equal(ping.method, 'host.lifecycle.ping');
   await harness.inventory.transaction((transaction) => {
-    const grants = transaction.grants.get(EXTERNAL_INSTANCE_ID);
-    transaction.grants.put({ ...grants, effectiveGrants: [], grantRevision: grants.grantRevision + 1 });
+    const instance = transaction.instances.get(EXTERNAL_INSTANCE_ID);
+    transaction.instances.put({
+      ...instance,
+      activationState: 'disabled',
+      lifecycleRevision: instance.lifecycleRevision + 1,
+    });
   });
   await handle.closed;
 
@@ -696,8 +704,8 @@ test('missing Host ping response after authority revocation never restarts the r
   assert.equal(broker.sessions[0].closeReason, 'authority_changed');
   assert.equal(processes.processes.length, 1);
   const inventory = await harness.inventory.snapshot();
-  assert.equal(inventory.instances[0].activationState, 'error');
-  assert.equal(inventory.instances[0].runtimeState, 'crashed');
+  assert.equal(inventory.instances[0].activationState, 'disabled');
+  assert.equal(inventory.instances[0].runtimeState, 'stopped');
 });
 
 test('a successful stdio start verifies admitted package bytes exactly once', async () => {

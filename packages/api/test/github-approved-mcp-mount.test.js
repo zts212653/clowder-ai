@@ -13,18 +13,6 @@ import {
 } from '../dist/scripts/github-approved-source/mcp-mount-authority.js';
 
 function fixture() {
-  const caps = [
-    'messaging.send',
-    'plugin.config.read',
-    'plugin.state.get',
-    'plugin.state.set',
-    'schedule.register',
-    'secret.read',
-    'task.read',
-    'task.write',
-    'thread.listMetadata',
-    'thread.write',
-  ];
   return {
     snapshot: {
       instances: [
@@ -37,7 +25,6 @@ function fixture() {
           runtimeState: 'healthy',
         },
       ],
-      grants: [{ pluginInstanceId: RECOVERY_INSTANCE, effectiveGrants: caps }],
       packages: [
         {
           pluginId: 'official.github-operations',
@@ -49,7 +36,6 @@ function fixture() {
                 id: 'github-tracking',
                 type: 'mcp',
                 runtime: { transport: 'stdio', entrypoint: 'dist/mcp-entrypoint.js' },
-                actions: [{ method: 'github.migration.bind-wait' }],
               },
             ],
           },
@@ -72,16 +58,13 @@ function fixture() {
     },
   };
 }
-test('only exact admitted live instance, grant and declared native bridge can be mounted', () => {
+test('only exact admitted live instance and declared native bridge can be mounted', () => {
   const { snapshot, entry } = fixture();
   assert.equal(verifyGitHubMcpMount(snapshot, entry).entry, entry);
   for (const change of [
     (s) => s.instances.push({ ...s.instances[0] }),
     (s) => (s.instances[0].activationState = 'disabled'),
     (s) => (s.instances[0].packageDigest = 'wrong'),
-    (s) => s.grants[0].effectiveGrants.push('thread.readContent'),
-    (s) => s.grants[0].effectiveGrants.pop(),
-    (s) => (s.packages[0].manifest.contributions[0].actions = []),
   ]) {
     const f = fixture();
     change(f.snapshot);

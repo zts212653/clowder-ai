@@ -7,6 +7,7 @@
  * install → configure → enable path against a feishu-shaped fixture package and read the actual
  * materialized MCP capability env, so no consumer can silently regress while unit tests stay green.
  */
+
 import assert from 'node:assert/strict';
 import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -14,7 +15,7 @@ import { join, resolve } from 'node:path';
 import { afterEach, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { catRegistry } from '@cat-cafe/shared';
-import { validateEffectiveGrants, validateManifest } from '@clowder-ai/plugin-contract';
+import { validateManifest } from '@clowder-ai/plugin-contract';
 import { createModuleActionClient } from '@clowder-ai/plugin-sdk';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
@@ -66,7 +67,6 @@ function createRuntime(projectRoot, mcpConfigIO, binaryProjectRoot = projectRoot
       messageStore: new MessageStore(),
       contract: {
         manifestContractRange: '0.1.0 || 0.2.0',
-        validateEffectiveGrants,
         validateManifest,
       },
       limbRegistry,
@@ -210,7 +210,6 @@ async function installConfigureEnable(updates, roots) {
     runtime,
     catalogProvider: { snapshot: async () => ({ entries: [], status: 'fresh', checkedAt: 1 }) },
     catalogManifests: [],
-    localGrantPolicy: (manifest) => manifest.features.flatMap((feature) => [...feature.capabilities]),
   });
   const installed = await composition.manager.install({ source: { kind: 'local-directory', path: packageRoot } });
   const beforeConfigure = (await composition.manager.get(installed.pluginId)).plugin;
@@ -282,7 +281,6 @@ test('variant changes refresh existing project MCP providers while preserving me
     runtime,
     catalogProvider: { snapshot: async () => ({ entries: [], status: 'fresh', checkedAt: 1 }) },
     catalogManifests: [],
-    localGrantPolicy: (manifest) => manifest.features.flatMap((feature) => [...feature.capabilities]),
   });
   const installed = await composition.manager.install({
     source: { kind: 'local-directory', path: await writeFixturePackage(true) },
@@ -363,7 +361,6 @@ test('variant changes refresh existing project MCP providers while preserving me
         mode: 'plugin_native',
         pluginInstanceId: installed.pluginInstanceId,
         contributionId: 'feishu-mcp',
-        actionMethods: ['native.run'],
       });
       assert.equal(Object.hasOwn(native.env, 'FEISHU_TOKEN'), mode === 'webhook');
       assert.equal(upstream.command, native.command);
@@ -431,7 +428,6 @@ for (const configOnWorkspace of [false, true])
         mode: 'plugin_native',
         pluginInstanceId: f.installed.pluginInstanceId,
         contributionId: 'feishu-mcp',
-        actionMethods: ['native.run'],
       });
       assert.ok(live?.env.CLOWDER_PLUGIN_ACTION_TOKEN);
       assert.match(f.capability.mcpServer.env.CLOWDER_PLUGIN_ACTION_TOKEN, /^\$\{[A-Z0-9_]+\}$/);
@@ -554,7 +550,6 @@ for (const legacy of ['missing-env-mapping', 'persisted-old-token']) {
       assert.ok(token);
       assert.notEqual(token, previousToken);
       const after = await restarted.inventoryStore.snapshot();
-      assert.deepEqual(after.grants, before.grants);
       assert.equal(after.instances[0].pluginInstanceId, before.instances[0].pluginInstanceId);
       assert.equal(after.instances[0].packageDigest, before.instances[0].packageDigest);
       assert.equal(after.instances[0].activationState, 'enabled');

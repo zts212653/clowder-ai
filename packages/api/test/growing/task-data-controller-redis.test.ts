@@ -1,9 +1,12 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import { after, before, test } from 'node:test';
 import Redis from 'ioredis';
 import '../helpers/setup-cat-registry.js';
+import { serializeTask } from '../../src/domains/cats/services/stores/redis/RedisTaskCodec.js';
 import { RedisTaskStore } from '../../src/domains/cats/services/stores/redis/RedisTaskStore.js';
+import { TaskKeys } from '../../src/domains/cats/services/stores/redis-keys/task-keys.js';
 import {
   assertRedisIsolationOrThrow,
   cleanupClientKeyspace,
@@ -41,7 +44,6 @@ const baseController = {
   pluginInstanceId: 'pi-current',
   moduleRef: 'plugin:official.collective-connector',
   lifecycleRevision: 8,
-  grantRevision: 3,
 };
 
 async function fixture() {
@@ -230,4 +232,59 @@ test('Redis checks the carrier fence at controller and entrusted-work CAS bounda
     /expired/,
   );
   assert.deepEqual(await redis.hgetall(`task:${admitted.id}`), before);
+});
+
+test('Redis preserves original controller receipt bytes across legacy retries and a new bind', { skip }, async () => {
+  const { store, admitted } = await fixture();
+  const history = JSON.parse(
+    readFileSync(new URL('../fixtures/growing/task-controller-legacy-history.json', import.meta.url), 'utf8'),
+  );
+  const taskId = 'legacy-controller-task';
+  const expected = { ...owner, subjectKey: history.binding.subjectKey };
+  const key = TaskKeys.detail(taskId);
+  await redis.hset(key, {
+    ...serializeTask(admitted),
+    id: taskId,
+    subjectKey: expected.subjectKey,
+    entrustedWork: JSON.stringify({ ...admitted.entrustedWork, revision: 3, dataController: history }),
+  });
+  const before = await redis.hgetall(key);
+  const replay = await store.transitionEntrustedTaskDataController(
+    bind(taskId, history.receipts[0].operationId, 'pi-current', expected),
+  );
+  assert.equal(replay.kind, 'replayed');
+  if (replay.kind === 'replayed') assert.equal(JSON.stringify(replay.receipt), JSON.stringify(history.receipts[0]));
+  const revoke = await store.transitionEntrustedTaskDataController({
+    action: 'revoke',
+    taskId,
+    expectedTaskRevision: 2,
+    operationId: history.receipts[1].operationId,
+    expectedBindingRevision: 1,
+    expectedControllerReceiptRef: history.receipts[0].receiptRef,
+    controller: baseController,
+    ownerOperation: {
+      actorRef: 'user:owner',
+      operationKey: 'work',
+      actionId: 'release',
+      requestId: 'retry',
+      confirmedAt: 3000,
+    },
+  });
+  assert.equal(revoke.kind, 'replayed');
+  if (revoke.kind === 'replayed') assert.equal(JSON.stringify(revoke.receipt), JSON.stringify(history.receipts[1]));
+  assert.deepEqual(await redis.hgetall(key), before, 'completed operations must not issue another Task mutation');
+  const next = await store.transitionEntrustedTaskDataController({
+    ...bind(taskId, 'owner-operation:new-bind', 'pi-current', expected),
+    expectedTaskRevision: 3,
+  });
+  assert.equal(next.kind, 'bound');
+  const persisted = await store.get(taskId);
+  assert.equal(
+    JSON.stringify(persisted?.entrustedWork?.dataController?.receipts.slice(0, 2)),
+    JSON.stringify(history.receipts),
+  );
+  assert.ok(persisted?.entrustedWork?.dataController);
+  assert.equal('grantRevision' in persisted.entrustedWork.dataController.binding, false);
+  if (next.kind === 'bound' && next.receipt.kind === 'bind')
+    assert.equal('grantRevision' in next.receipt.controller, false);
 });

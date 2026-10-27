@@ -24,7 +24,7 @@ import { readPluginConfig, writePluginConfig } from '../dist/domains/plugin/plug
 
 const INSTANCE_ID = 'pi-feishu-variants';
 const PLUGIN_ID = 'dev.clowder.feishu';
-const GRANTS = ['plugin.config.read', 'secret.read'];
+const _GRANTS = ['plugin.config.read', 'secret.read'];
 
 /** The feishu-shaped target declaration (brief §47-64): Token required iff webhook. */
 function feishuManifest(overrides = {}) {
@@ -98,7 +98,6 @@ function projectionInput(store, manifest = feishuManifest()) {
     input: {
       pluginInstanceId: INSTANCE_ID,
       manifest,
-      effectiveGrants: GRANTS,
       configuration: tracked.configuration,
     },
   };
@@ -179,7 +178,6 @@ describe('§3.3 module settings — runtime vs management layering', () => {
     return {
       pluginInstanceId: INSTANCE_ID,
       packageRecord: { pluginId: PLUGIN_ID, manifest: feishuManifest() },
-      effectiveGrants: GRANTS,
       options: { ...port(store), log: () => {}, dataDirectoryParent: dataRoot },
     };
   }
@@ -245,15 +243,6 @@ describe('§3.1/§3.2 console projection and save readiness', () => {
           runtimeState: 'stopped',
           lifecycleRevision: 1,
           installedAt: 1,
-          updatedAt: 1,
-        },
-      ],
-      grants: [
-        {
-          pluginInstanceId: INSTANCE_ID,
-          requestedCapabilities: GRANTS,
-          effectiveGrants: GRANTS,
-          grantRevision: 1,
           updatedAt: 1,
         },
       ],

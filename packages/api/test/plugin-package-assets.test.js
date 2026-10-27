@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { readdir, rm } from 'node:fs/promises';
 import { afterEach, describe, it } from 'node:test';
-import { validateEffectiveGrants, validateManifest } from '@clowder-ai/plugin-contract';
+import { validateManifest } from '@clowder-ai/plugin-contract';
 
 import {
   FilesystemVerifiedPluginPackageLocator,
@@ -21,7 +21,6 @@ afterEach(async () => {
 function metadataContractRuntime() {
   return {
     manifestContractRange: '0.1.0',
-    validateEffectiveGrants,
     validateManifest(value) {
       if (!value || typeof value !== 'object' || Array.isArray(value)) return validateManifest(value);
       const { description: _description, icon: _icon, ...legacy } = value;
@@ -78,7 +77,6 @@ async function fixture({ icon, iconBytes, readme, catalogOnly = false }) {
         computedPackageDigest: archive.integrity,
         expectedPackageDigest: archive.integrity,
         packagePluginId: packageManifest.pluginId,
-        effectiveGrants: [],
       });
     } finally {
       await located.release();

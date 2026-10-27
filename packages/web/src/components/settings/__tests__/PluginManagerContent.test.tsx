@@ -345,8 +345,6 @@ describe('F202 live Plugin Manager Console wiring', () => {
       currentPackageDigest: digest,
       candidatePackageDigest: digest,
       expectedLifecycleRevision: 7,
-      expectedGrantRevision: 1,
-      candidateEffectiveGrants: [],
     };
     mockApiFetch.mockImplementation(async (url, init) => {
       if (url === '/api/plugin-manager/plugins') return json(response(managerPlugin({ installed })));
@@ -469,7 +467,6 @@ describe('F202 live Plugin Manager Console wiring', () => {
       version: '1.0.0',
       availableVersion: '1.0.0',
       packageDigest: digest,
-      effectiveGrants: [],
       ownerAuthAvailable: false,
       updateAvailable: false,
       instance: null,

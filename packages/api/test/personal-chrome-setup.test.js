@@ -55,7 +55,6 @@ async function harness(t, { enabled = false, digest = pin.digest, run, resumeFai
     computedPackageDigest: digest,
     expectedPackageDigest: digest,
     packagePluginId: pluginId,
-    effectiveGrants: [],
   });
   const events = [];
   let enabling = true;
@@ -259,16 +258,13 @@ test('completed mutation survives runtime recovery failure without rerunning it'
   assert.equal(h.counts().released, 1);
 });
 
-for (const change of ['package', 'grant', 'revision', 'manifest'])
+for (const change of ['package', 'revision', 'manifest'])
   test(`fresh ${change} change fences runner result`, async (t) => {
     const h = await harness(t, {
       run: async ({ input, store, result }) => {
         await store.transaction((tx) => {
           const current = tx.instances.getCurrent(pluginId);
-          if (change === 'grant') {
-            const grant = tx.grants.get(instanceId);
-            tx.grants.put({ ...grant, grantRevision: grant.grantRevision + 1 });
-          } else if (change === 'manifest') {
+          if (change === 'manifest') {
             const pkg = tx.packages.get(current.packageDigest);
             tx.packages.put({ ...pkg, manifest: { ...pkg.manifest, name: 'changed' } });
           } else

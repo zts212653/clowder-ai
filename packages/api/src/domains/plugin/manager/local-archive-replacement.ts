@@ -7,7 +7,6 @@ import {
 import type { PluginManifest } from '@clowder-ai/plugin-contract';
 import { type PackageAdmissionContractRuntime, verifyPackageAdmission } from '../host-inventory/manifest-verifier.js';
 import type { PackageAdmissionCandidate, PluginInventorySnapshot } from '../host-inventory/types.js';
-import { PluginInventoryError } from '../host-inventory/types.js';
 
 export class PluginArchiveReplacementError extends Error {
   constructor(
@@ -48,19 +47,15 @@ export function confirmArchiveReplacement(
     if (confirmation !== undefined) stale();
     return false;
   }
-  // Read-only preflight uses the same contract and grant verifier as the eventual upgrade.
+  // Read-only preflight uses the same package verifier as the eventual upgrade.
   // Its timestamp is discarded; no inventory record is persisted by this call.
-  const verified = verifyPackageAdmission(candidate, 0, contract);
-  const grant = snapshot.grants.find((record) => record.pluginInstanceId === current.pluginInstanceId);
-  if (!grant) throw new PluginInventoryError('INVENTORY_INVARIANT', 'current instance has no grant record');
+  verifyPackageAdmission(candidate, 0, contract);
   const expected: PluginArchiveReplacementConfirmation = {
     pluginId: current.pluginId,
     pluginInstanceId: current.pluginInstanceId,
     currentPackageDigest: current.packageDigest,
     candidatePackageDigest: candidate.computedPackageDigest,
     expectedLifecycleRevision: current.lifecycleRevision,
-    expectedGrantRevision: grant.grantRevision,
-    candidateEffectiveGrants: [...verified.effectiveGrants],
   };
   if (confirmation === undefined) {
     throw new PluginArchiveReplacementError(

@@ -37,7 +37,6 @@ export async function collectiveModuleFixture(t, f, owner) {
     packageDigest: 'verified-collective-archive',
     packageState: 'installed',
   };
-  const grants = [...new Set(manifest.features.flatMap((feature) => feature.capabilities))];
   const runtime = new ModulePluginRuntime({
     taskStore: new TaskStore(),
     taskOwnerUserId: 'real-local-owner',
@@ -88,7 +87,7 @@ export async function collectiveModuleFixture(t, f, owner) {
   return {
     runtime,
     dataPath,
-    start: () => runtime.start(instanceId, packageRecord, grants),
+    start: () => runtime.start(instanceId, packageRecord),
     stop: () => runtime.stop(instanceId, 'fixture restart'),
   };
 }

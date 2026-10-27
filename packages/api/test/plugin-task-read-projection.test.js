@@ -32,7 +32,6 @@ function fixture(task, options = {}) {
     pluginId: 'neutral',
     ownerUserId: 'owner',
     readThreadStore: { get: async (id) => ({ id, createdBy: 'owner' }) },
-    effectiveGrants: ['task.read'],
     taskStore: store,
     ...options,
   });
@@ -284,9 +283,8 @@ test('task read wait projection removes identities, registration and every neste
   }
 });
 
-test('task read grant and caller lifetime are checked before releasing projected data', async () => {
+test('caller lifetime are checked before releasing projected data', async () => {
   for (const [method, arg, storeMethod] of reads) {
-    await assert.rejects(() => fixture(minimal, { effectiveGrants: [] })[method](arg), /lacks task.read/);
     let current = true;
     const host = fixture(minimal, {
       taskStore: {

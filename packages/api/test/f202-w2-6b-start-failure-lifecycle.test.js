@@ -1,6 +1,6 @@
 /**
- * F202 W2-6b — every failed runtime start reaches the Host log, as a safe projection, and a Host
- * refusal is recorded as the reason (ledger「W2-6b」(1)(3)).
+ * F202 W2-6b — every failed runtime start reaches the Host log, as a safe projection, and the failure
+ * is recorded (ledger「W2-6b」(1)(3)).
  *
  * The lifecycle has four places a start can fail — owner enable (and repair), resume after a Host
  * restart, and resume after maintenance or its rollback. Each tells its observer, which by default is
@@ -16,12 +16,10 @@ import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { promisify } from 'node:util';
 import { ExternalPluginRuntimeError } from '../dist/domains/plugin/external-runtime/types.js';
-import { hostCapabilityRefusal } from '../dist/domains/plugin/host-surface/host-capability-refusal.js';
 import {
   ExternalPluginLifecycleService,
   HostInventoryControlPlane,
   MemoryPluginInventoryStore,
-  PluginLifecycleError,
 } from '../dist/domains/plugin/index.js';
 
 const PLUGIN_ID = 'dev.example.w26b-lifecycle';
@@ -32,13 +30,6 @@ const roots = [];
 after(async () => {
   for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true });
 });
-
-function refused(capability = 'thread.listMetadata') {
-  return hostCapabilityRefusal(
-    new ExternalPluginRuntimeError('DELIVERY_REJECTED', `${PLUGIN_ID} lacks ${capability}`),
-    capability,
-  );
-}
 
 function leakyError() {
   const error = new Error('start failed', {
@@ -65,7 +56,6 @@ async function harness({ start, observer } = {}) {
     computedPackageDigest: DIGEST,
     expectedPackageDigest: DIGEST,
     packagePluginId: PLUGIN_ID,
-    effectiveGrants: [],
   });
   const reports = [];
   const supervisor = { start: start ?? (async () => undefined), stop: async () => undefined };
@@ -79,67 +69,6 @@ async function harness({ start, observer } = {}) {
   const instance = async () => (await store.snapshot()).instances[0];
   return { store, lifecycle, reports, instance };
 }
-
-test('an enable refused a capability: logged safely, recorded beside the legacy record, and named to the owner', async () => {
-  const { lifecycle, reports, instance } = await harness({
-    start: async () => {
-      throw new Error('bind failed', { cause: refused() });
-    },
-  });
-
-  await assert.rejects(
-    lifecycle.enable(INSTANCE_ID, 2),
-    (error) =>
-      error instanceof PluginLifecycleError &&
-      error.code === 'START_FAILED' &&
-      error.message === 'official plugin runtime failed to start: the Host refused it thread.listMetadata',
-  );
-
-  const failed = await instance();
-  assert.equal(failed.activationState, 'error');
-  assert.deepEqual(failed.lastRuntimeError, {
-    code: 'UNEXPECTED_RUNTIME_FAILURE',
-    exitCode: null,
-    signal: null,
-    occurredAt: failed.lastRuntimeError.occurredAt,
-  });
-  assert.deepEqual(failed.lastRuntimeErrorDetail, {
-    kind: 'capability_not_granted',
-    capability: 'thread.listMetadata',
-    occurredAt: failed.lastRuntimeError.occurredAt,
-    packageDigest: DIGEST,
-  });
-
-  assert.equal(reports.length, 1);
-  const [report] = reports;
-  assert.deepEqual(
-    { ...report, error: undefined },
-    {
-      pluginId: PLUGIN_ID,
-      pluginInstanceId: INSTANCE_ID,
-      phase: 'enable',
-      occurredAt: failed.lastRuntimeError.occurredAt,
-      category: { kind: 'capability_not_granted', capability: 'thread.listMetadata' },
-      error: undefined,
-    },
-  );
-  assert.deepEqual(
-    { origin: report.error.origin, type: report.error.type, message: report.error.message },
-    { origin: 'unverified', type: 'Error', message: undefined },
-    'what the plugin wrote is not kept',
-  );
-  assert.deepEqual(
-    { ...report.error.cause, at: undefined },
-    {
-      origin: 'host_refusal',
-      type: 'ExternalPluginRuntimeError',
-      code: 'DELIVERY_REJECTED',
-      capability: 'thread.listMetadata',
-      at: undefined,
-    },
-  );
-  assert.ok(report.error.cause.at.length > 0, 'where the Host refused it');
-});
 
 test('any other failure keeps the legacy record and message; the observer gets only the safe projection', async () => {
   const { lifecycle, reports, instance } = await harness({
@@ -183,27 +112,24 @@ test("a Host runtime error is classified by its code; a plugin's lookalike of a 
 test('an observer that throws changes nothing the lifecycle records or reports', async () => {
   const { lifecycle, instance } = await harness({
     start: async () => {
-      throw refused('plugin.state.get');
+      throw new ExternalPluginRuntimeError('DELIVERY_REJECTED', 'start unavailable');
     },
     observer: () => {
       throw new Error('observer failed');
     },
   });
 
-  await assert.rejects(
-    lifecycle.enable(INSTANCE_ID, 2),
-    (error) => error.code === 'START_FAILED' && /refused it plugin\.state\.get/u.test(error.message),
-  );
+  await assert.rejects(lifecycle.enable(INSTANCE_ID, 2), (error) => error.code === 'START_FAILED');
   const failed = await instance();
   assert.equal(failed.activationState, 'error');
-  assert.equal(failed.lastRuntimeErrorDetail.capability, 'plugin.state.get');
+  assert.equal(failed.lastRuntimeErrorDetail, undefined);
 });
 
 test('repair reports its own phase; a later successful start clears the failure and its detail', async () => {
   let fail = true;
   const { lifecycle, reports, instance } = await harness({
     start: async () => {
-      if (fail) throw refused();
+      if (fail) throw new ExternalPluginRuntimeError('DELIVERY_REJECTED', 'start unavailable');
     },
   });
   await assert.rejects(lifecycle.enable(INSTANCE_ID, 2));
@@ -225,7 +151,7 @@ test('a resume after a Host restart that fails is reported and recorded the same
   let fail = false;
   const { store, lifecycle, reports, instance } = await harness({
     start: async () => {
-      if (fail) throw refused('messaging.send');
+      if (fail) throw new ExternalPluginRuntimeError('DELIVERY_REJECTED', 'start unavailable');
     },
   });
   await lifecycle.enable(INSTANCE_ID, 2);
@@ -242,7 +168,7 @@ test('a resume after a Host restart that fails is reported and recorded the same
   const failed = await instance();
   assert.equal(failed.activationState, 'error');
   assert.equal(failed.lastRuntimeError.code, 'UNEXPECTED_RUNTIME_FAILURE');
-  assert.equal(failed.lastRuntimeErrorDetail.capability, 'messaging.send');
+  assert.equal(failed.lastRuntimeErrorDetail, undefined);
   assert.equal(reports.at(-1).phase, 'restart_resume');
   assert.equal(reports.at(-1).occurredAt, failed.lastRuntimeError.occurredAt);
 });
@@ -251,7 +177,7 @@ test('maintenance resumes keep their own codes, drop an earlier detail, and are 
   let fail = false;
   const { lifecycle, reports, instance } = await harness({
     start: async () => {
-      if (fail) throw refused();
+      if (fail) throw new ExternalPluginRuntimeError('DELIVERY_REJECTED', 'start unavailable');
     },
   });
   await lifecycle.enable(INSTANCE_ID, 2);
@@ -288,7 +214,7 @@ test('maintenance resumes keep their own codes, drop an earlier detail, and are 
   );
   assert.equal((await instance()).lastRuntimeError.code, 'UPDATE_ROLLBACK_RESUME_FAILED');
   assert.equal(reports.at(-1).phase, 'maintenance_rollback_resume');
-  assert.deepEqual(reports.at(-1).category, { kind: 'capability_not_granted', capability: 'thread.listMetadata' });
+  assert.deepEqual(reports.at(-1).category, { kind: 'host_runtime_error', code: 'DELIVERY_REJECTED' });
 });
 
 test('by default the failure goes to the Host log as one safe line', async () => {
@@ -305,7 +231,7 @@ test('by default the failure goes to the Host log as one safe line', async () =>
       manifest: { pluginId: 'dev.example.w26b-log', version: '0.1.0', contractVersion: '0.1.0', name: 'log',
         features: [{ id: 'main', name: 'Main', resources: [], capabilities: [] }],
         runtime: { transport: 'builtin', entrypoint: 'dist/plugin.js' } },
-      computedPackageDigest: digest, expectedPackageDigest: digest, packagePluginId: 'dev.example.w26b-log', effectiveGrants: [],
+      computedPackageDigest: digest, expectedPackageDigest: digest, packagePluginId: 'dev.example.w26b-log',
     });
     const lifecycle = new plugin.ExternalPluginLifecycleService({ store, supervisor: {
       start: async () => {

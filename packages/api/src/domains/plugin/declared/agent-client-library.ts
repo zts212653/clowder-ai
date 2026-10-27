@@ -16,8 +16,6 @@ export async function resolveAgentClientLibrary(input: {
   const { configurationKey } = input.declaration;
   const field = input.admission.packageRecord.manifest.configuration?.find((field) => field.key === configurationKey);
   if (!field || field.kind !== 'string') throw new Error('ACP 客户端目录必须引用声明的 string 配置项');
-  if (!input.admission.effectiveGrants.includes('plugin.config.read'))
-    throw new Error('ACP 客户端目录缺少 plugin.config.read 授权');
   const stored = await input.configuration.readConfig(input.admission.instance.pluginInstanceId, configurationKey);
   const result = parseAgentClientProfiles(stored ?? field.default ?? '[]', { packageRoot: input.packageRoot });
   if (!result.ok) throw new Error(`ACP 客户端配置无效，请在插件配置中修复：${result.reason}`);

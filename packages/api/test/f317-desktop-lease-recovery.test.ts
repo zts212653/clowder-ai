@@ -53,7 +53,7 @@ test('sleep beyond TTL stays fenced until an owner restore creates fresh desktop
     await runtime.shutdown();
     await f.cleanup();
   });
-  const entry = { ...f.entry, effectiveGrants: ['windows.create' as const] };
+  const entry = { ...f.entry };
   const installed = await new OfficialPluginPackageInstaller({
     inventory: runtime.inventory,
     packagesRoot: runtime.paths.packagesRoot,
@@ -129,22 +129,9 @@ test('sleep beyond TTL stays fenced until an owner restore creates fresh desktop
   const disabled = await app.inject({ method: 'POST', url: '/api/concierge/desktop/show', headers, payload: {} });
   assert.equal(disabled.statusCode, 409, 'owner disable cannot be re-enabled by restore');
   assert.equal(opens, 2);
-  // Isolated inventory fixtures represent revoked/new grants; the recovery
-  // port must consume them through the real lifecycle and Broker admission.
   await runtime.inventoryStore.transaction((tx) => {
     const instance = tx.instances.get(installed.pluginInstanceId)!;
     tx.instances.put({ ...instance, activationState: 'enabled', runtimeState: 'crashed' });
-    const grants = tx.grants.get(installed.pluginInstanceId)!;
-    tx.grants.put({ ...grants, grantRevision: grants.grantRevision + 1, effectiveGrants: [] });
-  });
-  const revoked = await app.inject({ method: 'POST', url: '/api/concierge/desktop/show', headers, payload: {} });
-  assert.equal(revoked.statusCode, 409, 'new owner intent does not recreate a revoked window grant');
-  assert.equal(opens, 2);
-  await runtime.inventoryStore.transaction((tx) => {
-    const instance = tx.instances.get(installed.pluginInstanceId)!;
-    tx.instances.put({ ...instance, activationState: 'enabled', runtimeState: 'crashed' });
-    const grants = tx.grants.get(installed.pluginInstanceId)!;
-    tx.grants.put({ ...grants, grantRevision: grants.grantRevision + 1, effectiveGrants: ['windows.create'] });
   });
   await writeFile(
     join(runtime.paths.packagesRoot, packageDirectoryName(entry.packageDigest), 'package.tgz'),

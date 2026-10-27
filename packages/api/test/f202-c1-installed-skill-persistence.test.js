@@ -3,7 +3,7 @@ import { access, cp, mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile 
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { afterEach, test } from 'node:test';
-import { validateEffectiveGrants, validateManifest } from '@clowder-ai/plugin-contract';
+import { validateManifest } from '@clowder-ai/plugin-contract';
 
 import {
   readCapabilitiesConfig,
@@ -33,7 +33,7 @@ function createRuntime(projectRoot, options = {}) {
     projectRoot,
     ...options,
     messageStore: new MessageStore(),
-    contract: { manifestContractRange: '0.1.0', validateEffectiveGrants, validateManifest },
+    contract: { manifestContractRange: '0.1.0', validateManifest },
   });
 }
 

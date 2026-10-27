@@ -47,7 +47,7 @@ export class NativeMcpLaunches {
     if (policy.mode !== 'plugin_native') throw unavailable();
     const request = normalizeToolExecutionPolicy(policy);
     if (request.mode !== 'plugin_native') throw unavailable();
-    const { pluginInstanceId, contributionId, actionMethods } = request;
+    const { pluginInstanceId, contributionId } = request;
     const activation = this.#activations.get(pluginInstanceId);
     if (!activation) throw unavailable();
     const current = await this.admission(pluginInstanceId);
@@ -61,9 +61,7 @@ export class NativeMcpLaunches {
       current.packageRecord.packageState !== 'installed' ||
       current.instance.pluginId !== original.instance.pluginId ||
       current.instance.packageDigest !== original.instance.packageDigest ||
-      current.grantRevision !== original.grantRevision ||
-      !isDeepStrictEqual(current.packageRecord, original.packageRecord) ||
-      !isDeepStrictEqual([...current.effectiveGrants].sort(), [...original.effectiveGrants].sort())
+      !isDeepStrictEqual(current.packageRecord, original.packageRecord)
     )
       throw unavailable();
 
@@ -74,22 +72,12 @@ export class NativeMcpLaunches {
     const server = launches[0]?.server;
     if (declarations?.length !== 1 || launches.length !== 1 || !server) throw unavailable();
     const token = server.env.CLOWDER_PLUGIN_ACTION_TOKEN;
-    if (
-      !token ||
-      !actionMethods.every((method) => {
-        const target = this.actions.target(token, method);
-        return (
-          target?.instanceId === pluginInstanceId &&
-          target.contributionId === contributionId &&
-          target.method === method
-        );
-      })
-    )
+    if (!token || this.actions.environment(pluginInstanceId, contributionId).CLOWDER_PLUGIN_ACTION_TOKEN !== token)
       throw unavailable();
     return server;
   }
 }
 
 function unavailable(): NativePluginActionError {
-  return new NativePluginActionError(409, 'Plugin native MCP launch is not current or permitted');
+  return new NativePluginActionError(409, 'Plugin native MCP launch is not current');
 }

@@ -979,7 +979,6 @@ export interface AgentClientActiveRunDispatchRegistration {
 export interface PluginNativeActionTarget {
   readonly instanceId: string;
   readonly contributionId: string;
-  readonly method: string;
 }
 
 export type ToolExecutionPolicy =
@@ -992,7 +991,6 @@ export type ToolExecutionPolicy =
       readonly mode: 'plugin_native';
       readonly pluginInstanceId: string;
       readonly contributionId: string;
-      readonly actionMethods: readonly string[];
     };
 
 /**

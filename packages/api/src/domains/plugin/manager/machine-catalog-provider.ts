@@ -1,7 +1,5 @@
 import { isDeepStrictEqual } from 'node:util';
 import type { PluginDescription, PluginIconSpec } from '@cat-cafe/shared';
-import type { Capability, PluginManifest } from '@clowder-ai/plugin-contract';
-import { grantsWithinRequest } from '../host-inventory/contract-policy.js';
 import type { OfficialPluginCatalogEntry } from '../official-catalog.js';
 import { fetchPluginNetworkResource } from '../plugin-network-fetch.js';
 import {
@@ -114,38 +112,16 @@ export type MachineCatalogValidationResult =
   | { readonly valid: true; readonly catalog: ValidatedMachineCatalog }
   | { readonly valid: false; readonly errors: readonly unknown[] };
 
-export interface MachineCatalogHostPolicy {
-  readonly pluginId: string;
-  readonly effectiveGrants: readonly Capability[];
-}
-
 export interface MachineOfficialPluginCatalogOptions {
   readonly loadCatalog: () => Promise<unknown>;
   /** Exact runtime export from the selected @clowder-ai/plugin-contract artifact. */
   readonly validateCatalog: (value: unknown) => MachineCatalogValidationResult;
-  /** Host-owned authority; catalog metadata is never allowed to widen this policy. */
-  readonly hostPolicies: readonly MachineCatalogHostPolicy[];
   /** Host-shipped packages have no remote archive; installation still uses Host inventory. */
   readonly bundledEntries?: readonly OfficialPluginCatalogEntry[];
   readonly now?: () => number;
 }
 
-/**
- * Applies Host-owned authority equally to catalog and owner-selected local bytes: the package gets
- * what it requests within its policy entry (F202 W2-6), and nothing without an entry.
- */
-export function resolveLocalPluginEffectiveGrants(
-  hostPolicies: readonly MachineCatalogHostPolicy[],
-  manifest: Pick<PluginManifest, 'pluginId' | 'features'>,
-): readonly Capability[] {
-  const policy = hostPolicies.find((candidate) => candidate.pluginId === manifest.pluginId);
-  return grantsWithinRequest(policy?.effectiveGrants ?? [], manifest);
-}
-
-function projectEntry(
-  plugin: ValidatedMachineCatalog['plugins'][number],
-  policy: MachineCatalogHostPolicy | undefined,
-): OfficialPluginCatalogEntry | undefined {
+function projectEntry(plugin: ValidatedMachineCatalog['plugins'][number]): OfficialPluginCatalogEntry | undefined {
   const release = plugin.versions.reduce<(typeof plugin.versions)[number] | undefined>((latest, candidate) => {
     if (!latest) return candidate;
     const comparison = compareOfficialPluginVersions(candidate.version, latest.version);
@@ -160,7 +136,6 @@ function projectEntry(
     distribution: 'registry',
     archiveUrl: release.artifact.tarballUrl,
     packageDigest: release.artifact.integrity,
-    effectiveGrants: policy?.effectiveGrants ?? [],
     presentation: {
       displayName: plugin.name,
       description: plugin.description,
@@ -173,7 +148,6 @@ function projectEntry(
 /** Consumes canonical machine catalog truth without turning it into Host authority. */
 export class MachineOfficialPluginCatalog implements OfficialPluginCatalogProvider {
   private readonly now: () => number;
-  private readonly policies: ReadonlyMap<string, MachineCatalogHostPolicy>;
   private readonly trustedReleases = new Map<string, OfficialPluginCatalogEntry>();
   private readonly versionsByDigest = new Map<string, string>();
   private lastGoodEntries: readonly OfficialPluginCatalogEntry[] = [];
@@ -187,7 +161,6 @@ export class MachineOfficialPluginCatalog implements OfficialPluginCatalogProvid
       throw new TypeError('Host bundled discovery accepts only bundled package entries');
     }
     this.now = options.now ?? Date.now;
-    this.policies = new Map(options.hostPolicies.map((policy) => [policy.pluginId, policy]));
   }
 
   async snapshot(): Promise<OfficialPluginCatalogSnapshot> {
@@ -230,9 +203,7 @@ export class MachineOfficialPluginCatalog implements OfficialPluginCatalogProvid
 
     const entries: OfficialPluginCatalogEntry[] = [];
     for (const plugin of validation.catalog.plugins) {
-      const policy = this.policies.get(plugin.pluginId);
-      // Discovery is catalog-owned. An unknown identity receives no Host authority.
-      const entry = projectEntry(plugin, policy);
+      const entry = projectEntry(plugin);
       if (entry) entries.push(entry);
     }
     // Validate the entire snapshot before advancing any trusted release. A temporary

@@ -98,7 +98,7 @@ async function lifecycle(t, raw = declaration, mode, createProvider) {
   const packagesRoot = join(root, 'packages');
   const store = new MemoryPluginInventoryStore();
   const inventory = new HostInventoryControlPlane(store);
-  const installer = new LocalPluginPackageAdmission({ inventory, packagesRoot, grantPolicy: async () => [] });
+  const installer = new LocalPluginPackageAdmission({ inventory, packagesRoot });
   await installer.install({ kind: 'local-directory', path: packageRoot });
   const snapshot = await store.snapshot();
   const pkg = snapshot.packages[0];
@@ -136,7 +136,7 @@ async function lifecycle(t, raw = declaration, mode, createProvider) {
       }),
   });
   const runtime = new DeclaredRuntimeContributions({ packages, configuration: {}, agentSessionProviders: host });
-  const admission = { instance, packageRecord: pkg, effectiveGrants: [] };
+  const admission = { instance, packageRecord: pkg };
   return { runtime, admission, registry, service, created, packagesRoot, logs };
 }
 function assertLifecycleLog(line, result, level, providerId = 'agent') {

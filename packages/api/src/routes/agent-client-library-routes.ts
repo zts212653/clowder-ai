@@ -65,7 +65,6 @@ export function registerAgentClientLibraryRoutes(
         const parsed = parseAgentProviderDeclaration(raw, { packageRoot: located.rootDir });
         if (!parsed.ok) throw new Error(parsed.reason);
         configurationKey = 'configurationKey' in parsed.declaration ? parsed.declaration.configurationKey : null;
-        const grant = snapshot.grants.find((grant) => grant.pluginInstanceId === instance.pluginInstanceId);
         const profiles =
           'configurationKey' in parsed.declaration
             ? await resolveAgentClientLibrary({
@@ -73,7 +72,6 @@ export function registerAgentClientLibraryRoutes(
                 admission: {
                   instance,
                   packageRecord: { ...record, manifest: record.manifest },
-                  effectiveGrants: grant?.effectiveGrants ?? [],
                 },
                 packageRoot: located.rootDir,
                 configuration: input.configuration,

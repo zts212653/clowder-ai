@@ -5,7 +5,6 @@ import {
   loadMachinePluginCatalog,
   MachineOfficialPluginCatalog,
   OfficialPluginManagerCatalogAdapter,
-  resolveLocalPluginEffectiveGrants,
 } from '../dist/domains/plugin/index.js';
 
 const digest = `sha512-${Buffer.alloc(64, 7).toString('base64')}`;
@@ -52,16 +51,11 @@ function canonicalValidator(value) {
   return { valid: true, catalog: value, errors: [] };
 }
 
-test('projects canonical machine catalog release truth while Host policy remains authoritative', async () => {
+test('projects canonical machine catalog release truth', async () => {
   const provider = new MachineOfficialPluginCatalog({
     loadCatalog: async () => rawCatalog(),
     validateCatalog: canonicalValidator,
-    hostPolicies: [
-      {
-        pluginId: 'dev.clowder.video-analysis',
-        effectiveGrants: ['messaging.send'],
-      },
-    ],
+
     now: () => 1_000,
   });
 
@@ -77,7 +71,6 @@ test('projects canonical machine catalog release truth while Host policy remains
       distribution: 'registry',
       archiveUrl: 'https://registry.npmjs.org/@clowder-ai/video-analysis/-/video-analysis-0.1.0-alpha.0.tgz',
       packageDigest: digest,
-      effectiveGrants: ['messaging.send'],
       presentation: {
         displayName: 'Video Analysis',
         description: {
@@ -108,7 +101,6 @@ test('projects canonical machine catalog release truth while Host policy remains
     ownerAuthRequired: false,
     compatibleReplacement: false,
     updateRequiresValidation: true,
-    capabilities: [],
   });
 });
 
@@ -122,7 +114,6 @@ test('projects the Host bundle locally without starting remote catalog discovery
     distribution: 'bundled',
     archiveUrl: 'builtin://chatgpt-dot',
     packageDigest: digest,
-    effectiveGrants: [],
     presentation: {
       displayName: 'ChatGPT Dot',
       publisher: 'Clowder AI',
@@ -149,45 +140,6 @@ test('projects the Host bundle locally without starting remote catalog discovery
   );
 });
 
-test('uses the same Host-owned grants for local development archives as catalog releases', () => {
-  const policies = [
-    {
-      pluginId: 'official.weixin-mp',
-      effectiveGrants: ['plugin.config.read', 'secret.read'],
-    },
-    {
-      pluginId: 'dev.clowder.video-generation',
-      effectiveGrants: ['plugin.config.read', 'secret.read'],
-    },
-    {
-      pluginId: 'dev.clowder.video-analysis',
-      effectiveGrants: ['plugin.config.read', 'secret.read'],
-    },
-  ];
-
-  // The package's request bounds the grant too (F202 W2-6): less than the entry gets less, more gets no more.
-  const requesting = (pluginId, ...capabilities) => ({ pluginId, features: [{ capabilities }] });
-  assert.deepEqual(
-    resolveLocalPluginEffectiveGrants(policies, requesting('official.weixin-mp', 'plugin.config.read', 'secret.read')),
-    ['plugin.config.read', 'secret.read'],
-  );
-  assert.deepEqual(
-    resolveLocalPluginEffectiveGrants(
-      policies,
-      requesting('dev.clowder.video-generation', 'plugin.config.read', 'secret.read', 'messaging.send'),
-    ),
-    ['plugin.config.read', 'secret.read'],
-  );
-  assert.deepEqual(
-    resolveLocalPluginEffectiveGrants(policies, requesting('untrusted.local', 'plugin.config.read', 'secret.read')),
-    [],
-  );
-  assert.deepEqual(
-    resolveLocalPluginEffectiveGrants(policies, requesting('dev.clowder.video-analysis', 'secret.read')),
-    ['secret.read'],
-  );
-});
-
 test('selects the newest validated release independently of catalog array order', async () => {
   const catalog = rawCatalog();
   catalog.plugins[0].versions = [
@@ -206,7 +158,7 @@ test('selects the newest validated release independently of catalog array order'
   const provider = new MachineOfficialPluginCatalog({
     loadCatalog: async () => catalog,
     validateCatalog: canonicalValidator,
-    hostPolicies: [{ pluginId: 'dev.clowder.video-analysis', effectiveGrants: [] }],
+
     now: () => 1_500,
   });
 
@@ -215,11 +167,11 @@ test('selects the newest validated release independently of catalog array order'
   assert.equal(snapshot.entries[0].packageDigest, `sha512-${Buffer.alloc(64, 8).toString('base64')}`);
 });
 
-test('fails closed when catalog validation fails but discovers valid entries without Host grants', async () => {
+test('fails closed when catalog validation fails but discovers valid entries', async () => {
   const invalid = new MachineOfficialPluginCatalog({
     loadCatalog: async () => rawCatalog(),
     validateCatalog: () => ({ valid: false, errors: [{ message: 'invalid' }] }),
-    hostPolicies: [],
+
     now: () => 2_000,
   });
   assert.deepEqual(await invalid.snapshot(), {
@@ -232,7 +184,7 @@ test('fails closed when catalog validation fails but discovers valid entries wit
   const missingPolicy = new MachineOfficialPluginCatalog({
     loadCatalog: async () => rawCatalog(),
     validateCatalog: canonicalValidator,
-    hostPolicies: [],
+
     now: () => 3_000,
   });
   const discovered = await missingPolicy.snapshot();
@@ -240,10 +192,8 @@ test('fails closed when catalog validation fails but discovers valid entries wit
   assert.equal(discovered.checkedAt, 3_000);
   assert.equal(discovered.entries.length, 1);
   assert.equal(discovered.entries[0].pluginId, 'dev.clowder.video-analysis');
-  assert.deepEqual(discovered.entries[0].effectiveGrants, []);
   const manager = await new OfficialPluginManagerCatalogAdapter(missingPolicy, []).snapshot();
   assert.equal(manager.candidates[0].pluginId, 'dev.clowder.video-analysis');
-  assert.deepEqual(manager.candidates[0].capabilities, []);
 });
 
 test('retains the last canonical machine catalog when a later read fails', async () => {
@@ -255,12 +205,6 @@ test('retains the last canonical machine catalog when a later read fails', async
       return rawCatalog();
     },
     validateCatalog: canonicalValidator,
-    hostPolicies: [
-      {
-        pluginId: 'dev.clowder.video-analysis',
-        effectiveGrants: [],
-      },
-    ],
     now: () => now,
   });
 
@@ -315,12 +259,6 @@ test('coalesces only concurrent refreshes and reloads the catalog on the next sn
       return rawCatalog();
     },
     validateCatalog: canonicalValidator,
-    hostPolicies: [
-      {
-        pluginId: 'dev.clowder.video-analysis',
-        effectiveGrants: [],
-      },
-    ],
     now: () => now,
   });
 
@@ -427,7 +365,6 @@ for (const [name, mutate, code] of [
     const provider = new MachineOfficialPluginCatalog({
       loadCatalog: async () => raw,
       validateCatalog: canonicalValidator,
-      hostPolicies: [],
       now: () => now,
     });
     const first = await provider.snapshot();
@@ -450,7 +387,6 @@ test('continuity retains historical digest bindings across upgrades and temporar
   const provider = new MachineOfficialPluginCatalog({
     loadCatalog: async () => raw,
     validateCatalog: canonicalValidator,
-    hostPolicies: [],
   });
   await provider.snapshot();
   raw = releaseCatalog('2.0.0', 2);

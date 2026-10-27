@@ -47,7 +47,6 @@ async function harness(overrides = {}) {
     computedPackageDigest: DIGEST,
     expectedPackageDigest: DIGEST,
     packagePluginId: pluginId,
-    effectiveGrants: ['messaging.send'],
   });
   const calls = [];
   const supervisor = {

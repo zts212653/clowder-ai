@@ -214,7 +214,6 @@ try {
     const admission = new LocalPluginPackageAdmission({
       inventory: new HostInventoryControlPlane(inventory),
       packagesRoot: pluginRoot,
-      grantPolicy: () => ['events.publish'],
     });
     const installed = await admission.install({ kind: 'local-archive', path: archive });
     assert.equal(installed.pluginId, 'official.test-source');

@@ -275,16 +275,9 @@ function inventoryOf(records) {
     updatedAt: 0,
   }));
   const live = new Map(instances.map((instance) => [instance.pluginInstanceId, instance]));
-  const grants = instances.map((instance, index) => ({
-    pluginInstanceId: instance.pluginInstanceId,
-    requestedCapabilities: records[index].effectiveGrants ?? [],
-    effectiveGrants: records[index].effectiveGrants ?? [],
-    grantRevision: 1,
-    updatedAt: 0,
-  }));
   return {
     live,
-    snapshot: async () => ({ packages, instances: [...live.values()], grants }),
+    snapshot: async () => ({ packages, instances: [...live.values()] }),
     transaction: async (apply) =>
       apply({
         instances: {
@@ -509,7 +502,6 @@ test('start receives only the admitted config, secrets and log Host surface', as
           ],
         }),
         rootDir,
-        effectiveGrants: ['plugin.config.read', 'secret.read'],
       },
     ],
     {
@@ -579,7 +571,6 @@ export default { create() { return { async start(host) {
             { key: 'token', label: 'Token', kind: 'secret', required: false },
           ],
         }),
-        effectiveGrants: ['plugin.config.read', 'secret.read'],
       },
     ],
     {
@@ -607,7 +598,6 @@ test('module configuration rejects malformed typed storage before package activa
         {
           rootDir,
           manifest: manifest({ configuration: [{ key: 'setting', label: 'Setting', kind, required: false }] }),
-          effectiveGrants: ['plugin.config.read'],
         },
       ],
       { configuration: { readConfig: async () => value, readSecret: async () => undefined } },
@@ -651,17 +641,14 @@ export default {
   const admitted = manifest({
     features: [{ id: 'main', name: 'Main', resources: [], capabilities: ['streams.read'] }],
   });
-  const host = hostOf([{ manifest: admitted, rootDir, effectiveGrants: ['streams.read'] }], { media });
+  const host = hostOf([{ manifest: admitted, rootDir }], { media });
   try {
     await host.router.start('instance-0');
     assert.deepEqual(moduleLog(), [{ call: 'stream', bytes: 'abc' }]);
     await entitlements.revoke({ grantId: grant.grantId }, 'delivery_settled');
     await assert.rejects(
       async () => {
-        for await (const _ of media.stream(
-          { pluginInstanceId: 'instance-0', effectiveGrants: ['streams.read'] },
-          reference,
-        )) {
+        for await (const _ of media.stream({ pluginInstanceId: 'instance-0' }, reference)) {
         }
       },
       (error) => error?.code === 'MEDIA_ACCESS_DENIED',
@@ -680,7 +667,7 @@ test('start receives the caller-bound Host thread surface', async () => {
   const pluginManifest = manifest({
     features: [{ id: 'main', name: 'Main', resources: [], capabilities: ['thread.write'] }],
   });
-  const host = hostOf([{ manifest: pluginManifest, rootDir, effectiveGrants: ['thread.write'] }], {
+  const host = hostOf([{ manifest: pluginManifest, rootDir }], {
     threads: { threadStore, bindingStore, ownerUserId: 'owner-1', projectPath: '/workspace/clowder-ai' },
   });
 
@@ -724,7 +711,7 @@ test('a real builtin module consumes thread listing, safe history, roster and ro
   });
   const grants = ['thread.write', 'thread.listMetadata', 'thread.readContent'];
   const pluginManifest = manifest({ features: [{ id: 'main', name: 'Main', resources: [], capabilities: grants }] });
-  const host = hostOf([{ manifest: pluginManifest, rootDir, effectiveGrants: grants }], {
+  const host = hostOf([{ manifest: pluginManifest, rootDir }], {
     threads: {
       threadStore,
       messageStore,
@@ -783,7 +770,7 @@ test('real builtin thread surface paginates past fifty owner threads', async () 
   await threadStore.create('other-owner', 'Hidden');
   const grants = ['thread.listMetadata'];
   const pluginManifest = manifest({ features: [{ id: 'main', name: 'Main', resources: [], capabilities: grants }] });
-  const host = hostOf([{ manifest: pluginManifest, rootDir, effectiveGrants: grants }], {
+  const host = hostOf([{ manifest: pluginManifest, rootDir }], {
     threads: { threadStore, bindingStore: new MemoryConnectorThreadBindingStore(), ownerUserId: 'owner-1' },
   });
   try {
@@ -814,13 +801,10 @@ test('start receives the caller-bound Host messaging surface', async () => {
     ],
   });
   const shared = { threadStore, bindingStore, ownerUserId: 'owner-1' };
-  const host = hostOf(
-    [{ manifest: pluginManifest, rootDir, effectiveGrants: ['messaging.send', 'thread.write', 'thread.readContent'] }],
-    {
-      threads: shared,
-      messaging: { ...shared, service: messaging, messageStore },
-    },
-  );
+  const host = hostOf([{ manifest: pluginManifest, rootDir }], {
+    threads: shared,
+    messaging: { ...shared, service: messaging, messageStore },
+  });
 
   await host.router.start('instance-0');
 
@@ -849,13 +833,10 @@ test('module stop unregisters every Host messaging subscription', async () => {
   const pluginManifest = manifest({
     features: [{ id: 'main', name: 'Main', resources: [], capabilities: ['message.event.subscribe', 'thread.write'] }],
   });
-  const host = hostOf(
-    [{ manifest: pluginManifest, rootDir, effectiveGrants: ['message.event.subscribe', 'thread.write'] }],
-    {
-      threads: shared,
-      messaging: { ...shared, service: messaging, delivery },
-    },
-  );
+  const host = hostOf([{ manifest: pluginManifest, rootDir }], {
+    threads: shared,
+    messaging: { ...shared, service: messaging, delivery },
+  });
 
   await host.router.start('instance-0');
   assert.equal(registrations.length, 1);
@@ -879,13 +860,10 @@ test('a module start failure unregisters subscriptions before rollback completes
   const pluginManifest = manifest({
     features: [{ id: 'main', name: 'Main', resources: [], capabilities: ['message.event.subscribe', 'thread.write'] }],
   });
-  const host = hostOf(
-    [{ manifest: pluginManifest, rootDir, effectiveGrants: ['message.event.subscribe', 'thread.write'] }],
-    {
-      threads: shared,
-      messaging: { ...shared, service: messaging, delivery },
-    },
-  );
+  const host = hostOf([{ manifest: pluginManifest, rootDir }], {
+    threads: shared,
+    messaging: { ...shared, service: messaging, delivery },
+  });
 
   await assert.rejects(() => host.router.start('instance-0'), /start failed after subscribe/);
 
@@ -908,7 +886,7 @@ test('an invalid start result is stopped and leaves no active module behind', as
 test('routes the frozen Host delivery row through the selected module carrier', async () => {
   resetModuleLog();
   const rootDir = await writePackage(deliveryModule);
-  const host = hostOf([{ manifest: manifest(), rootDir, effectiveGrants: ['onMessage'] }]);
+  const host = hostOf([{ manifest: manifest(), rootDir }]);
   const input = {
     deliveryId: 'delivery-module-1',
     kind: 'message',
@@ -932,43 +910,9 @@ test('routes the frozen Host delivery row through the selected module carrier', 
   assert.deepEqual(moduleLog(), [{ call: 'start' }, { call: 'deliver', input }]);
 });
 
-test('module delivery fails closed when the instance lacks the published onMessage grant', async () => {
-  resetModuleLog();
-  const rootDir = await writePackage(deliveryModule);
-  const host = hostOf([{ manifest: manifest(), rootDir }]);
-
-  await host.router.start('instance-0');
-  await assert.rejects(
-    () =>
-      host.router.deliver('instance-0', {
-        deliveryId: 'delivery-denied',
-        kind: 'message',
-        threadId: 'thread-1',
-        envelope: {
-          messageId: 'message-denied',
-          revision: 1,
-          threadId: 'thread-1',
-          actor: { kind: 'cat', id: 'opus' },
-          audience: { kind: 'public' },
-          occurredAt: '2026-09-21T00:00:00.000Z',
-          payload: {
-            provenance: { epistemicStatus: 'inference', origin: { kind: 'host' } },
-            elements: [{ elementId: 'e1', kind: 'text', payload: { text: 'must not arrive' } }],
-          },
-        },
-      }),
-    (error) => error.code === 'DELIVERY_REJECTED',
-  );
-  assert.deepEqual(
-    moduleLog(),
-    [{ call: 'start' }],
-    'delivery authority denial must stop before the package action runs',
-  );
-});
-
 test('the production carrier router rejects an invalid module delivery receipt', async () => {
   const rootDir = await writePackage(invalidDeliveryReceiptModule);
-  const host = hostOf([{ manifest: manifest(), rootDir, effectiveGrants: ['onMessage'] }]);
+  const host = hostOf([{ manifest: manifest(), rootDir }]);
   const input = {
     deliveryId: 'delivery-invalid-receipt',
     kind: 'message',
@@ -1210,8 +1154,6 @@ test('real module Task data writes reach original Schedule projection and change
     pluginInstanceId: 'instance-0',
     moduleRef: 'plugin:dev.clowder.module-fixture',
     lifecycleRevision: 1,
-    grantRevision: 1,
-    effectiveGrants: ['task.read', 'task.write', 'task.admitEntrusted'],
   });
   const taskAdmission = (includeControllerAuthority) => async () => ({
     messageStore: messages,
@@ -1224,7 +1166,7 @@ test('real module Task data writes reach original Schedule projection and change
         }
       : {}),
   });
-  const record = { manifest: manifest(), rootDir, effectiveGrants: controllerAuthority.effectiveGrants };
+  const record = { manifest: manifest(), rootDir };
   const missingAuthorityHost = hostOf([record], {
     taskServices: {
       taskStore: new TaskStore(),
@@ -1289,7 +1231,7 @@ test('installed module exposes Task data and ordinary send without legacy execut
   await host.router.stop('instance-0', 'host_shutdown');
 });
 
-test('loaded settings uses the original data path without a separate grant without starting runtime', async (t) => {
+test('loaded settings uses the original data path without starting runtime', async (t) => {
   const rootDir = await writePackage(`
     import { readFile } from 'node:fs/promises';
     import { join } from 'node:path';
@@ -1318,15 +1260,12 @@ test('loaded settings uses the original data path without a separate grant witho
   const input = {
     pluginInstanceId: 'instance-0',
     packageRecord: record,
-    effectiveGrants: ['secret.read'],
     method: 'inspect',
     params: {},
     assertCurrent: async () => {},
   };
   const result = await host.moduleRuntime.invokeSettings(input);
   assert.deepEqual(result, { handled: true, result: { directory, binding: '{"original":true}', secret: undefined } });
-  const withoutGrant = await host.moduleRuntime.invokeSettings({ ...input, effectiveGrants: ['secret.read'] });
-  assert.equal(withoutGrant.result.directory, directory);
   assert.equal(await readFile(join(directory, 'conversation-binding.json'), 'utf8'), '{"original":true}');
   await assert.rejects(
     host.moduleRuntime.invokeSettings({
@@ -1337,7 +1276,7 @@ test('loaded settings uses the original data path without a separate grant witho
     }),
     /stale/,
   );
-  assert.equal(host.released.length, 3);
+  assert.equal(host.released.length, 2);
 });
 
 test('loaded settings consumes the one-shot HTTP owner authority and leaves the commit fence current', async (t) => {
@@ -1375,7 +1314,6 @@ test('loaded settings consumes the one-shot HTTP owner authority and leaves the 
       host.moduleRuntime.invokeSettings({
         pluginInstanceId: 'instance-0',
         packageRecord: record,
-        effectiveGrants: [],
         method: 'inspect',
         params: {},
         assertCurrent: async () => {},
@@ -1431,7 +1369,6 @@ test('configRefresh replaces cached credentials and a failed refresh cannot keep
       {
         manifest: manifest({ configuration: [{ key: 'TOKEN', label: 'Token', kind: 'secret', required: true }] }),
         rootDir,
-        effectiveGrants: ['secret.read'],
       },
     ],
     { configuration: { readConfig: async () => undefined, readSecret: async () => token } },
@@ -1501,7 +1438,6 @@ async function settingsProbeFixture(t, { hook = false, failStart = false, materi
   const input = {
     pluginInstanceId: 'instance-0',
     packageRecord,
-    effectiveGrants: [],
     method: 'inspect',
     params: {},
     assertCurrent: async () => {},

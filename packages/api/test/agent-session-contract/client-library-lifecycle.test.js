@@ -17,25 +17,24 @@ import {
 import { registerAgentClientLibraryRoutes } from '../../dist/routes/agent-client-library-routes.js';
 import { collect, FakeSessionProvider, options } from './fake-session-provider.js';
 
-async function harness(t, grants = ['plugin.config.read']) {
+async function harness(t) {
   const root = await mkdtemp(join(tmpdir(), 'client-library-'));
   t.after(() => rm(root, { recursive: true, force: true }));
   const source = join(root, 'source');
   await cp(new URL('../fixtures/agent-session-reference/plugin/', import.meta.url), source, { recursive: true });
   const manifest = JSON.parse(await readFile(join(source, 'manifest.json'), 'utf8'));
   manifest.configuration = [{ key: 'clients', label: 'Clients', kind: 'string', required: false, default: '[]' }];
-  manifest.features[0].capabilities = ['plugin.config.read'];
   await writeFile(join(source, 'manifest.json'), JSON.stringify(manifest));
   await writeFile(join(source, 'agent-provider.json'), JSON.stringify({ configurationKey: 'clients' }));
   const store = new MemoryPluginInventoryStore();
   const inventory = new HostInventoryControlPlane(store);
   const packagesRoot = join(root, 'packages');
-  await new LocalPluginPackageAdmission({ inventory, packagesRoot, grantPolicy: async () => grants }).install({
+  await new LocalPluginPackageAdmission({ inventory, packagesRoot }).install({
     kind: 'local-directory',
     path: source,
   });
   const snapshot = await store.snapshot();
-  const admission = { instance: snapshot.instances[0], packageRecord: snapshot.packages[0], effectiveGrants: grants };
+  const admission = { instance: snapshot.instances[0], packageRecord: snapshot.packages[0] };
   const packages = new FilesystemVerifiedPluginPackageLocator(packagesRoot);
   const registry = new SessionImplementationRegistry();
   let clients = [
@@ -99,16 +98,6 @@ test('multi-client registration and disable release persisted member bindings wi
   await collect(h.service.invoke('new config', options({ hostSessionId: 'new-host' })));
   assert.deepEqual(h.created[1].declaration.acp.startupArgs, ['external.js']);
   assert.equal(h.registry.has({ ...h.ref, contributionId: 'second' }), false);
-});
-
-test('profile configuration cannot be read without the manifest capability grant', async (t) => {
-  const h = await harness(t, []);
-  await assert.rejects(
-    h.runtime.activate(h.admission, () => {}),
-    /plugin.config.read/,
-  );
-  assert.equal(h.reads(), 0);
-  assert.equal(h.registry.has(h.ref), false);
 });
 
 test('configuration refresh replaces live registrations and releases the previous provider', async (t) => {

@@ -18,7 +18,7 @@ export const profile = {
   bootstrapRoot: 'D:/OldACP',
   mcpWhitelist: ['cat-cafe'],
 };
-export async function rootRecoveryFixture({ grant = true, declaration, inspect, identity, lifecycleFactory } = {}) {
+export async function rootRecoveryFixture({ declaration, inspect, identity, lifecycleFactory } = {}) {
   const projectRoot = await mkdtemp(join(tmpdir(), 'acp-root-recovery-'));
   const source = join(projectRoot, 'source');
   const { mkdir } = await import('node:fs/promises');
@@ -28,7 +28,7 @@ export async function rootRecoveryFixture({ grant = true, declaration, inspect, 
     version: '1.0.0',
     contractVersion: '0.1.0',
     name: 'Test ACP',
-    features: [{ id: 'clients', name: 'Clients', resources: [], capabilities: ['plugin.config.read'] }],
+    features: [{ id: 'clients', name: 'Clients', resources: [] }],
     configuration: [
       { key: 'clients', kind: 'string', label: 'Clients', required: false, default: '[]' },
       { key: 'other', kind: 'string', label: 'Other', required: false },
@@ -41,7 +41,6 @@ export async function rootRecoveryFixture({ grant = true, declaration, inspect, 
   const installer = new LocalPluginPackageAdmission({
     inventory: new HostInventoryControlPlane(inventory),
     packagesRoot,
-    grantPolicy: async () => (grant ? ['plugin.config.read'] : []),
   });
   const result = await installer.install({ kind: 'local-directory', path: source });
   const instance = (await inventory.snapshot()).instances[0];

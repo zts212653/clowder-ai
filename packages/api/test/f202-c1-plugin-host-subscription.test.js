@@ -56,12 +56,11 @@ function createFixture() {
     });
   };
   restart();
-  const createSession = (effectiveGrants = ['message.event.subscribe'], manifest) =>
+  const createSession = (manifest) =>
     createPluginMessagingSubscriptionSession({
       pluginId: PLUGIN_ID,
       pluginInstanceId: INSTANCE_ID,
       ownerUserId: OWNER,
-      effectiveGrants,
       threadStore: threads,
       bindingStore: bindings,
       messaging,
@@ -119,9 +118,7 @@ describe('F202 C1 — caller-bound Host messaging subscriptions', () => {
           },
         ],
       };
-      await h
-        .createSession(['message.event.subscribe'], manifest)
-        .host.subscribe({ threadId: thread.id, method: 'fixture.outbound' });
+      await h.createSession(manifest).host.subscribe({ threadId: thread.id, method: 'fixture.outbound' });
       const targets = h.delivery.lifecycleTargetsForThread(thread.id);
       assert.deepEqual(targets, [
         {
@@ -239,15 +236,11 @@ describe('F202 C1 — caller-bound Host messaging subscriptions', () => {
     assert.equal(h.calls[0].params.envelope.payload.elements[0].payload.text, 'echo accepted');
   });
 
-  test('subscription grant and shape are checked without plugin thread ownership', async () => {
+  test('subscription shape is checked before dispatch', async () => {
     const h = createFixture();
     const ownThread = await h.threads.create(OWNER, 'Owned');
     const foreignThread = await h.threads.create('another-owner', 'Foreign');
 
-    await assert.rejects(
-      () => h.createSession([]).host.subscribe({ threadId: ownThread.id, method: 'fixture.outbound' }),
-      (error) => error?.code === 'PERMISSION',
-    );
     await h.createSession().host.subscribe({ threadId: foreignThread.id, method: 'fixture.outbound' });
     await assert.rejects(
       () => h.createSession().host.subscribe({ threadId: ownThread.id, method: ' fixture.outbound' }),

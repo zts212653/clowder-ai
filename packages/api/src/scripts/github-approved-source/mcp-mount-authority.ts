@@ -5,18 +5,6 @@ import { APPROVAL } from './approved-scope.js';
 
 export const GITHUB_MCP_ID = 'plugin:official.github-operations:github-tracking';
 export const RECOVERY_INSTANCE = 'pi_2033aea0-229d-4554-a309-7dca009ddd12';
-const CAPS = [
-  'messaging.send',
-  'plugin.config.read',
-  'plugin.state.get',
-  'plugin.state.set',
-  'schedule.register',
-  'secret.read',
-  'task.read',
-  'task.write',
-  'thread.listMetadata',
-  'thread.write',
-] as const;
 
 /** Authenticate the source as the already admitted declaration. No credentials
  * are created or returned separately; the descriptor stays opaque in-process. */
@@ -34,17 +22,13 @@ export function verifyGitHubMcpMount(snapshot: PluginInventorySnapshot, entry: C
     instance.runtimeState !== 'healthy'
   )
     throw new Error('Exact healthy approved instance required');
-  const grant = snapshot.grants.find((g) => g.pluginInstanceId === instance.pluginInstanceId);
-  if (!grant || grant.effectiveGrants.length !== CAPS.length || CAPS.some((c) => !grant.effectiveGrants.includes(c)))
-    throw new Error('Approved ten-capability grant required');
   const pkg = snapshot.packages.find((p) => p.packageDigest === APPROVAL.archiveDigest);
   const declaration = pkg?.manifest?.contributions?.find((c) => c.type === 'mcp' && c.id === 'github-tracking');
   if (
     pkg?.pluginId !== 'official.github-operations' ||
     pkg.packageState !== 'installed' ||
     declaration?.type !== 'mcp' ||
-    declaration.runtime.transport !== 'stdio' ||
-    !declaration.actions?.some((a) => a.method === 'github.migration.bind-wait')
+    declaration.runtime.transport !== 'stdio'
   )
     throw new Error('Installed native binding declaration required');
   const server = entry?.mcpServer;

@@ -24,7 +24,6 @@ const policy = {
   mode: 'plugin_native',
   pluginInstanceId: 'instance-a',
   contributionId: 'native',
-  actionMethods: ['native.read'],
 };
 
 async function collect(stream) {

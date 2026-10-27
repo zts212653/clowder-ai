@@ -68,7 +68,6 @@ async function fixture({ admissionOwned = false }: { readonly admissionOwned?: b
     pluginInstanceId,
     moduleRef: 'plugin:official.collective-connector',
     lifecycleRevision: 8,
-    grantRevision: 3,
   };
   let controllerAuthority = controller;
   let controllerAuthorityAvailable = true;
@@ -86,17 +85,14 @@ async function fixture({ admissionOwned = false }: { readonly admissionOwned?: b
       if (!current) throw new Error('controller fence changed');
     },
     readCurrentDataControllerAuthority: async () =>
-      current && controllerAuthorityAvailable
-        ? { ...controllerAuthority, effectiveGrants: ['task.read', 'task.write', 'task.admitEntrusted'] }
-        : undefined,
+      current && controllerAuthorityAvailable ? { ...controllerAuthority } : undefined,
     withCurrentDataControllerAuthority: async <T>(
-      run: (authority: typeof controller & { readonly effectiveGrants: readonly string[] }) => Promise<T>,
+      run: (authority: typeof controller & { readonly lifecycleRevision: number }) => Promise<T>,
     ) => {
       if (!current || !controllerAuthorityAvailable) throw new Error('controller fence changed');
       await beforeControllerMutation?.();
       return run({
         ...controllerAuthority,
-        effectiveGrants: ['task.read', 'task.write', 'task.admitEntrusted'],
       });
     },
   } as unknown as PluginTaskAdmissionServices;
@@ -105,7 +101,6 @@ async function fixture({ admissionOwned = false }: { readonly admissionOwned?: b
     pluginId: controller.pluginId,
     pluginInstanceId: controller.pluginInstanceId,
     ownerUserId: 'owner',
-    effectiveGrants: ['task.read', 'task.write', 'task.admitEntrusted'],
     taskStore: tasks,
     threadStore: threads,
     readThreadStore: threads,
@@ -156,8 +151,8 @@ async function fixture({ admissionOwned = false }: { readonly admissionOwned?: b
     expire: () => {
       current = false;
     },
-    driftGrant: () => {
-      controllerAuthority = { ...controllerAuthority, grantRevision: controllerAuthority.grantRevision + 1 };
+    driftActivation: () => {
+      controllerAuthority = { ...controllerAuthority, lifecycleRevision: controllerAuthority.lifecycleRevision + 1 };
     },
     removeControllerAuthority: () => {
       controllerAuthorityAvailable = false;
@@ -265,7 +260,6 @@ test('admission fallback cannot bypass a controller with moved or foreign coordi
       pluginId: f.controller.pluginId,
       pluginInstanceId: f.controller.pluginInstanceId,
       ownerUserId: 'owner',
-      effectiveGrants: ['task.read', 'task.write', 'task.admitEntrusted'],
       taskStore: projectedStore,
       threadStore: f.threads,
       readThreadStore: f.threads,
@@ -285,7 +279,7 @@ test('admission fallback cannot bypass a controller with moved or foreign coordi
   }
 });
 
-test('grant or lifecycle drift before the controller CAS leaves the Task unchanged', async () => {
+test('lifecycle drift before the controller CAS leaves the Task unchanged', async () => {
   const f = await fixture();
   const before = structuredClone(f.tasks.get(f.original.id));
   f.expire();
@@ -449,7 +443,7 @@ test('a same-instance stale controller is projected as unusable without rewritin
   const f = await fixture({ admissionOwned: true });
   await withCurrentOwnerOperation(f.ownerOperation(true), () => f.host.bindDataController(f.bind));
   assert.equal((await f.host.get({ id: f.original.id }))?.entrustedWork?.dataController?.currentForCaller, true);
-  f.driftGrant();
+  f.driftActivation();
   assert.equal((await f.host.get({ id: f.original.id }))?.entrustedWork?.dataController?.currentForCaller, false);
   assert.equal(
     f.tasks.get(f.original.id)?.entrustedWork?.dataController?.state,
@@ -470,7 +464,7 @@ test('a same-instance stale controller is projected as unusable without rewritin
   assert.deepEqual(f.tasks.get(f.original.id), before);
 });
 
-test('a removed controller grant projects false without turning an otherwise readable Task into an error', async () => {
+test('a stopped controller installation projects false without turning an otherwise readable Task into an error', async () => {
   const f = await fixture();
   await withCurrentOwnerOperation(f.ownerOperation(true), () => f.host.bindDataController(f.bind));
   const before = structuredClone(f.tasks.get(f.original.id));
@@ -502,7 +496,6 @@ test('a controller cannot maintain a Task whose immutable admission is not an au
     pluginId: f.controller.pluginId,
     pluginInstanceId: f.controller.pluginInstanceId,
     ownerUserId: 'owner',
-    effectiveGrants: ['task.read', 'task.write', 'task.admitEntrusted'],
     taskStore: incompatibleStore,
     threadStore: f.threads,
     readThreadStore: f.threads,
@@ -526,20 +519,20 @@ test('a controller cannot maintain a Task whose immutable admission is not an au
 test('a new confirmed bind replaces only a stale same-installation controller and preserves its receipt history', async () => {
   const f = await fixture();
   const first = await withCurrentOwnerOperation(f.ownerOperation(true), () => f.host.bindDataController(f.bind));
-  f.driftGrant();
+  f.driftActivation();
   const rebound = await withCurrentOwnerOperation(f.ownerOperation(true, 'rebind'), () =>
-    f.host.bindDataController({ ...f.bind, expectedTaskRevision: 2, operationId: 'rebind-after-grant-change' }),
+    f.host.bindDataController({ ...f.bind, expectedTaskRevision: 2, operationId: 'rebind-after-activation-change' }),
   );
   assert.equal(rebound.disposition, 'bound');
   assert.equal(rebound.task.entrustedWork?.revision, 3);
   assert.equal(rebound.task.entrustedWork?.dataController?.bindingRevision, 2);
-  assert.equal(rebound.task.entrustedWork?.dataController?.binding.grantRevision, 4);
+  assert.equal(rebound.task.entrustedWork?.dataController?.binding.lifecycleRevision, 9);
   assert.equal(rebound.task.entrustedWork?.dataController?.currentForCaller, true);
   assert.notEqual(rebound.receiptRef, first.receiptRef);
   assert.equal(f.tasks.get(f.original.id)?.entrustedWork?.dataController?.receipts.length, 2);
 });
 
-test('real inventory serialization rejects a grant change committed after confirmation but before Task CAS', async () => {
+test('real inventory serialization rejects a activation change committed after confirmation but before Task CAS', async () => {
   const f = await fixture();
   const inventory = new MemoryPluginInventoryStore();
   const control = new HostInventoryControlPlane(inventory, {
@@ -561,7 +554,6 @@ test('real inventory serialization rejects a grant change committed after confir
     computedPackageDigest: packageDigest,
     expectedPackageDigest: packageDigest,
     packagePluginId: f.controller.pluginId,
-    effectiveGrants: ['task.read', 'task.write', 'task.admitEntrusted'],
   });
   await inventory.transaction((tx) => {
     const instance = tx.instances.get(f.controller.pluginInstanceId);
@@ -586,7 +578,6 @@ test('real inventory serialization rejects a grant change committed after confir
     pluginId: f.controller.pluginId,
     pluginInstanceId: f.controller.pluginInstanceId,
     ownerUserId: 'owner',
-    effectiveGrants: ['task.read', 'task.write', 'task.admitEntrusted'],
     taskStore: f.tasks,
     threadStore: f.threads,
     readThreadStore: f.threads,
@@ -612,10 +603,9 @@ test('real inventory serialization rejects a grant change committed after confir
   const before = structuredClone(f.tasks.get(f.original.id));
   const pending = withCurrentOwnerOperation(operation, () => host.bindDataController(f.bind));
   await atConfirmedBoundary;
-  await control.revokeGrant({
-    pluginInstanceId: f.controller.pluginInstanceId,
-    capability: 'task.write',
-    expectedGrantRevision: 1,
+  await inventory.transaction((tx) => {
+    const current = tx.instances.get(f.controller.pluginInstanceId)!;
+    tx.instances.put({ ...current, activationState: 'disabled' });
   });
   release();
   await assert.rejects(pending, /controller capability|task.write|current/i);

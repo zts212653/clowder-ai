@@ -26,7 +26,6 @@ export interface PluginContentEditorHandle {
   readonly installationInstanceId: string;
   readonly packageDigest: string;
   readonly providerVersion: string;
-  readonly grantRevision: number;
   readonly lifecycleRevision: number;
   readonly executionLease: string;
   readonly featureId: string;
@@ -105,7 +104,6 @@ export class ContentEditorPluginRuntime implements BundledPluginRuntime {
       installationInstanceId: id,
       packageDigest: lease.packageRevision,
       providerVersion: run.package.manifest.version,
-      grantRevision: lease.grantRevision,
       lifecycleRevision: lease.lifecycleRevision,
       executionLease: lease.executionLease,
       featureId: lease.featureId,

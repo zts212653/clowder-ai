@@ -8,8 +8,6 @@ import {
   createDormantPluginRuntimeComposition,
   createPluginManagerRuntimeComposition,
 } from '../dist/domains/plugin/index.js';
-import { resolveLocalPluginEffectiveGrants } from '../dist/domains/plugin/manager/machine-catalog-provider.js';
-import { OFFICIAL_PLUGIN_HOST_POLICIES } from '../dist/domains/plugin/manager/official-plugin-host-policies.js';
 import { ARCHIVE } from './helpers/f202-companion-artifact.js';
 import { catConfig, manualScheduler } from './helpers/f202-return-poller-harness.js';
 
@@ -58,7 +56,6 @@ test(
       runtime,
       catalogProvider: { snapshot: async () => ({ entries: [], status: 'fresh', checkedAt: 1 }) },
       catalogManifests: [],
-      localGrantPolicy: (manifest) => resolveLocalPluginEffectiveGrants(OFFICIAL_PLUGIN_HOST_POLICIES, manifest),
     });
     const installed = await manager.install({ source: { kind: 'local-archive', path: ARCHIVE } });
     const detail = (await manager.get(installed.pluginId)).plugin;
@@ -117,7 +114,6 @@ test(
       runtime,
       catalogProvider: { snapshot: async () => ({ entries: [], status: 'fresh', checkedAt: 1 }) },
       catalogManifests: [],
-      localGrantPolicy: (manifest) => resolveLocalPluginEffectiveGrants(OFFICIAL_PLUGIN_HOST_POLICIES, manifest),
     });
     const installed = await manager.install({ source: { kind: 'local-archive', path: ARCHIVE } });
     const detail = (await manager.get(installed.pluginId)).plugin;

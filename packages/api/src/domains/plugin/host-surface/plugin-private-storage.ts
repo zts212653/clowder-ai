@@ -1,6 +1,5 @@
 import type { RedisClient } from '@cat-cafe/shared/utils';
 import { ExternalPluginRuntimeError } from '../external-runtime/types.js';
-import { hostCapabilityRefusal } from './host-capability-refusal.js';
 
 const MAX_STORAGE_KEY_LENGTH = 256;
 const MAX_STORAGE_VALUE_BYTES = 1024 * 1024;
@@ -80,28 +79,21 @@ export interface PluginStorageHost {
 
 export function createPluginStorageHost(input: {
   readonly pluginId: string;
-  readonly effectiveGrants: readonly string[];
   readonly storage?: PluginPrivateStoragePort;
 }): PluginStorageHost {
-  const requireGrant = (capability: 'plugin.state.get' | 'plugin.state.set') => {
-    if (!input.effectiveGrants.includes(capability)) {
-      throw hostCapabilityRefusal(
-        new ExternalPluginRuntimeError('DELIVERY_REJECTED', `${input.pluginId} lacks ${capability}`),
-        capability,
-      );
-    }
+  const requireService = () => {
     if (!input.storage) {
       throw new ExternalPluginRuntimeError('UNSUPPORTED_TRANSPORT', 'Host plugin storage is unavailable');
     }
     return input.storage;
   };
   return {
-    get: (key) => requireGrant('plugin.state.get').get(input.pluginId, key),
-    list: () => requireGrant('plugin.state.get').list(input.pluginId),
-    set: (key, value) => requireGrant('plugin.state.set').set(input.pluginId, key, value),
+    get: (key) => requireService().get(input.pluginId, key),
+    list: () => requireService().list(input.pluginId),
+    set: (key, value) => requireService().set(input.pluginId, key, value),
     compareAndSet: (key, expectedRevision, value) =>
-      requireGrant('plugin.state.set').compareAndSet(input.pluginId, key, expectedRevision, value),
-    delete: (key, expectedRevision) => requireGrant('plugin.state.set').delete(input.pluginId, key, expectedRevision),
+      requireService().compareAndSet(input.pluginId, key, expectedRevision, value),
+    delete: (key, expectedRevision) => requireService().delete(input.pluginId, key, expectedRevision),
   };
 }
 

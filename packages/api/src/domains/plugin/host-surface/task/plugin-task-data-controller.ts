@@ -66,8 +66,7 @@ function controllerIsCurrentForTask(task: TaskItem, authority: CurrentPluginTask
     binding.pluginId === authority.pluginId &&
     binding.pluginInstanceId === authority.pluginInstanceId &&
     binding.moduleRef === authority.moduleRef &&
-    binding.lifecycleRevision === authority.lifecycleRevision &&
-    binding.grantRevision === authority.grantRevision
+    binding.lifecycleRevision === authority.lifecycleRevision
   );
 }
 
@@ -139,11 +138,9 @@ async function mutate(
     ) {
       refuse('Task data controller owner, thread, or participant is no longer current');
     }
-    const { effectiveGrants, ...controller } = currentController;
     const authority = {
       ownerUserId,
-      controller,
-      effectiveGrants,
+      controller: currentController,
       ownerOperation: {
         actorRef: `user:${operation.userId}`,
         operationKey: operation.operationKey,

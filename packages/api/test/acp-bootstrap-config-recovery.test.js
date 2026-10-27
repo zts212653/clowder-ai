@@ -60,23 +60,19 @@ for (const [label, transform] of [
     assert.deepEqual(f.read(), before);
   });
 
-test(
-  'malformed stored data, mixed keys, missing grants and failed root checks cannot use recovery',
-  windows,
-  async () => {
-    for (const options of [{ grant: false }, { inspect: () => ({ ok: false, error: 'PRIVATE_DACL' }) }]) {
-      const f = await rootRecoveryFixture(options);
-      await assert.rejects(f.save());
-      assert.equal(JSON.parse(f.read().clients)[0].bootstrapRoot, profile.bootstrapRoot);
-    }
-    const f = await rootRecoveryFixture();
-    await assert.rejects(
-      f.save({ ...f.request(), updates: [...f.request().updates, { key: 'other', value: 'modified' }] }),
-    );
-    writePluginConfig(f.projectRoot, 'test.acp-library', [{ name: 'clients', value: '[invalid' }]);
+test('malformed stored data, mixed keys, failed root checks cannot use recovery', windows, async () => {
+  for (const options of [{ inspect: () => ({ ok: false, error: 'PRIVATE_DACL' }) }]) {
+    const f = await rootRecoveryFixture(options);
     await assert.rejects(f.save());
-  },
-);
+    assert.equal(JSON.parse(f.read().clients)[0].bootstrapRoot, profile.bootstrapRoot);
+  }
+  const f = await rootRecoveryFixture();
+  await assert.rejects(
+    f.save({ ...f.request(), updates: [...f.request().updates, { key: 'other', value: 'modified' }] }),
+  );
+  writePluginConfig(f.projectRoot, 'test.acp-library', [{ name: 'clients', value: '[invalid' }]);
+  await assert.rejects(f.save());
+});
 
 test('explicit required wins over the legacy preset; a non-Windows Host never waives audit', async () => {
   const f = await rootRecoveryFixture();
@@ -112,8 +108,8 @@ test('a raw config rewrite with unchanged parsed values invalidates previous adm
   assert.equal(JSON.parse(f.read().clients)[0].bootstrapRoot, profile.bootstrapRoot);
 });
 
-test('preflight admission cannot survive concurrent config or grant changes', windows, async () => {
-  for (const mutation of ['config', 'grant']) {
+test('preflight admission cannot survive concurrent config or installation changes', windows, async () => {
+  for (const mutation of ['config', 'installation']) {
     const f = await rootRecoveryFixture({
       lifecycleFactory: (inventory, instance) => ({
         async runWithRuntimeSuspended(input) {
@@ -122,8 +118,8 @@ test('preflight admission cannot survive concurrent config or grant changes', wi
             writePluginConfig(f.projectRoot, 'test.acp-library', [{ name: 'other', value: 'concurrent' }]);
           else
             await inventory.transaction((tx) => {
-              const grant = tx.grants.get(instance.pluginInstanceId);
-              tx.grants.put({ ...grant, grantRevision: grant.grantRevision + 1, effectiveGrants: [] });
+              const current = tx.instances.get(instance.pluginInstanceId);
+              tx.instances.put({ ...current, lifecycleRevision: current.lifecycleRevision + 1 });
             });
           return input.operation(instance);
         },
@@ -205,7 +201,6 @@ for (const resumeFailure of [false, true])
       await initial.transaction((tx) => {
         for (const pkg of snapshot.packages) tx.packages.put(pkg);
         for (const instance of snapshot.instances) tx.instances.put(instance);
-        for (const grant of snapshot.grants) tx.grants.put(grant);
         if (resumeFailure)
           tx.instances.put({
             ...f.instance,

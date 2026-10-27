@@ -143,7 +143,6 @@ test('a listener failing on release does not stop the rest of the teardown', asy
   const admission = {
     instance: { pluginInstanceId: 'pi_teardown' },
     packageRecord: { pluginId: manifest.pluginId, packageDigest: 'digest-teardown', manifest },
-    effectiveGrants: ['cloud.conversation.host', 'schedule.register'],
   };
 
   await contributions.activate(admission, async () => ({ success: true }), surface);

@@ -93,7 +93,6 @@ function compact(value: SafeErrorProjection, depth = 0): ObservationError {
 function observationError(error: unknown): ObservationError {
   const projected = compact(
     safeErrorProjection(error, {
-      refusal: () => undefined,
       hostCode: (value) => (value instanceof HostBrokerError && BROKER_CODES.has(value.code) ? value.code : undefined),
     }),
   );

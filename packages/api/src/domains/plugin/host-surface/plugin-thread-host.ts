@@ -1,6 +1,5 @@
 import type { IThreadStore, Thread } from '../../cats/services/stores/ports/ThreadStore.js';
 import { ExternalPluginRuntimeError } from '../external-runtime/types.js';
-import { hostCapabilityRefusal } from './host-capability-refusal.js';
 import {
   boundedLimit,
   type PluginThreadCats,
@@ -55,7 +54,6 @@ export interface PluginThreadHostDeps extends PluginThreadProjectionDeps {
   readonly pluginId: string;
   readonly ownerUserId: string;
   readonly projectPath: string;
-  readonly effectiveGrants: readonly string[];
   readonly threadStore: IThreadStore;
   readonly assertCurrent?: () => void;
 }
@@ -114,14 +112,8 @@ function compareThreadPosition(a: PluginThreadListCursor, b: PluginThreadListCur
 export function createPluginThreadHost(input: PluginThreadHostDeps): PluginThreadHost {
   const summary = (thread: Thread) =>
     projectThread(thread, input.ownerUserId, input.backlogStore, input.threadDeepLinkUrl);
-  const requireGrant = (capability: 'thread.listMetadata' | 'thread.readContent' | 'thread.write') => {
+  const requireService = () => {
     input.assertCurrent?.();
-    if (!input.effectiveGrants.includes(capability)) {
-      throw hostCapabilityRefusal(
-        new ExternalPluginRuntimeError('DELIVERY_REJECTED', `${input.pluginId} lacks ${capability}`),
-        capability,
-      );
-    }
   };
 
   const readThread = async (id: string): Promise<Thread | null> => {
@@ -137,7 +129,7 @@ export function createPluginThreadHost(input: PluginThreadHostDeps): PluginThrea
 
   return {
     async list(options = {}) {
-      requireGrant('thread.listMetadata');
+      requireService();
       if (!options || typeof options !== 'object' || Array.isArray(options))
         throw new TypeError('list options must be an object');
       if (Object.keys(options).some((key) => key !== 'limit' && key !== 'before'))
@@ -154,7 +146,7 @@ export function createPluginThreadHost(input: PluginThreadHostDeps): PluginThrea
       return Promise.all(accessible.map(summary));
     },
     async readMessages(id, options) {
-      requireGrant('thread.readContent');
+      requireService();
       const thread = await requireThread(id);
       if (!options || typeof options !== 'object' || Array.isArray(options))
         throw new TypeError('message options must be an object');
@@ -178,18 +170,18 @@ export function createPluginThreadHost(input: PluginThreadHostDeps): PluginThrea
       return projectThreadMessages(input.messageStore, thread.id, input.ownerUserId, { ...options, limit });
     },
     async getCats(id) {
-      requireGrant('thread.listMetadata');
+      requireService();
       const thread = await requireThread(id);
       if (!input.cats) return projectionUnavailable();
       return projectThreadCats(input.cats, await input.threadStore.getParticipantsWithActivity(thread.id));
     },
     async get(id) {
-      requireGrant('thread.readContent');
+      requireService();
       const thread = await readThread(id);
       return thread ? summary(thread) : null;
     },
     async create(value) {
-      requireGrant('thread.write');
+      requireService();
       if (
         !value ||
         typeof value !== 'object' ||
@@ -214,7 +206,7 @@ export function createPluginThreadHost(input: PluginThreadHostDeps): PluginThrea
       return summary(stored);
     },
     async update(id, patch) {
-      requireGrant('thread.write');
+      requireService();
       if (!patch || typeof patch !== 'object' || Array.isArray(patch))
         throw new TypeError('thread patch must be an object');
       const keys = Object.keys(patch);
@@ -233,7 +225,7 @@ export function createPluginThreadHost(input: PluginThreadHostDeps): PluginThrea
       return summary(stored);
     },
     async addParticipants(value) {
-      requireGrant('thread.write');
+      requireService();
       if (
         !value ||
         typeof value !== 'object' ||

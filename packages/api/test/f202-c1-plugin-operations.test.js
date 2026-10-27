@@ -92,7 +92,6 @@ function snapshot({ enabled = true, installed = true } = {}) {
           },
         ]
       : [],
-    grants: [],
   };
 }
 

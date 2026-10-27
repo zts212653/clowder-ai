@@ -29,7 +29,6 @@ async function fixture() {
       computedPackageDigest: e.packageDigest,
       expectedPackageDigest: e.packageDigest,
       packagePluginId: e.pluginId,
-      effectiveGrants: ['messaging.send'],
     });
   };
   const options = {
@@ -185,7 +184,7 @@ for (const requiresConfig of [false, true])
         'dist/entrypoint.js': 'export default {create(){return {async start(){return {actions:{},async stop(){}}}}}};',
       },
     });
-    const entry = catalogEntry(archive.integrity, { effectiveGrants: [] });
+    const entry = catalogEntry(archive.integrity, {});
     let catalogReads = 0;
     const catalog = {
       snapshot: async () => {
@@ -263,11 +262,7 @@ for (const requiresConfig of [false, true])
 
 test('the zero-capability GenOffice default remains discoverable in the official catalog', async () => {
   const { MachineOfficialPluginCatalog } = await import('../dist/domains/plugin/manager/machine-catalog-provider.js');
-  const { OFFICIAL_PLUGIN_HOST_POLICIES } = await import(
-    '../dist/domains/plugin/manager/official-plugin-host-policies.js'
-  );
   const catalog = new MachineOfficialPluginCatalog({
-    hostPolicies: OFFICIAL_PLUGIN_HOST_POLICIES,
     validateCatalog: (value) => ({ valid: true, catalog: value }),
     loadCatalog: async () => ({
       plugins: [
@@ -291,7 +286,6 @@ test('the zero-capability GenOffice default remains discoverable in the official
   });
   const entries = (await catalog.snapshot()).entries;
   assert.equal(entries.length, 1);
-  assert.deepEqual(entries[0].effectiveGrants, []);
 });
 
 test('a configuration failure after admission retries setup without reinstalling the admitted instance', async () => {

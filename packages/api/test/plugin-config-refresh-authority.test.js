@@ -7,9 +7,8 @@ import { createPluginManagerRuntimeComposition } from '../dist/domains/plugin/in
 import { neutralFixture } from './helpers/neutral-host-fixture.js';
 import { catalogEntry } from './plugin-official-package-installer.fixture.js';
 
-async function fixture(t, capabilities, options = {}) {
+async function fixture(t, options = {}) {
   const f = await neutralFixture(t, {
-    capabilities,
     configuration: true,
     members: {
       listCats: () => [{ catId: 'codex', displayName: 'Codex', defaultModel: 'model' }],
@@ -28,7 +27,6 @@ async function fixture(t, capabilities, options = {}) {
   const entry = catalogEntry(pkg.packageDigest, {
     pluginId: pkg.pluginId,
     version: pkg.manifest.version,
-    effectiveGrants: capabilities,
   });
   const { manager } = createPluginManagerRuntimeComposition({
     runtime: f.runtime,
@@ -52,7 +50,7 @@ async function fixture(t, capabilities, options = {}) {
 
 test('real configure keeps members live on the same activation', async (t) => {
   let duringRefresh;
-  const f = await fixture(t, ['thread.listMetadata'], {
+  const f = await fixture(t, {
     onRefresh: async (host) => {
       duringRefresh = await host.members.list();
     },
@@ -65,7 +63,6 @@ test('real configure keeps members live on the same activation', async (t) => {
         mode: 'plugin_native',
         pluginInstanceId: f.installed.pluginInstanceId,
         contributionId: 'native',
-        actionMethods: ['neutral.call'],
       }),
     );
   };
@@ -80,7 +77,7 @@ test('real configure keeps members live on the same activation', async (t) => {
 
 test('real configure keeps entrusted Task data mutations live and stop revokes retained client', async (t) => {
   const tasks = new TaskStore();
-  const f = await fixture(t, ['task.read', 'task.write', 'task.admitEntrusted'], { taskStore: tasks });
+  const f = await fixture(t, { taskStore: tasks });
   f.threads.addParticipants(f.thread.id, ['codex']);
   const source = f.messages.append({
     userId: f.owner,
@@ -169,7 +166,6 @@ for (const surface of ['action', 'launch']) {
             mode: 'plugin_native',
             pluginInstanceId: f.installed.pluginInstanceId,
             contributionId: 'native',
-            actionMethods: ['neutral.call'],
           });
     const before = await call();
     await f.save('updated');

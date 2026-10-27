@@ -31,7 +31,6 @@ export async function neutralFixture(t, options = {}) {
     await options.onRefresh?.(host);
   };
   globalThis[key].stop = () => events.push('stop');
-  const capabilities = options.capabilities ?? ['thread.listMetadata'];
   const manifest = {
     pluginId: 'dev.clowder.neutral-host',
     name: 'Neutral Host fixture',
@@ -46,20 +45,17 @@ export async function neutralFixture(t, options = {}) {
         id: 'neutral',
         name: 'Neutral',
         resources: [],
-        capabilities,
         contributions: [
           { type: 'webhook', id: 'owner' },
           ...(options.independentNative ? [] : [{ type: 'mcp', id: 'native' }]),
         ],
       },
-      // A zero-capability test action can attempt a Host call, but cannot acquire the port's grant.
       ...(options.independentNative
         ? [
             {
               id: 'probe',
               name: 'Probe',
               resources: [],
-              capabilities: [],
               contributions: [{ type: 'mcp', id: 'native' }],
             },
           ]
@@ -71,7 +67,6 @@ export async function neutralFixture(t, options = {}) {
         type: 'mcp',
         id: 'native',
         runtime: { transport: 'stdio', entrypoint: 'mcp.js' },
-        actions: [{ method: 'neutral.call' }],
       },
     ],
   };
@@ -122,7 +117,6 @@ export async function neutralFixture(t, options = {}) {
     computedPackageDigest: packageDigest,
     expectedPackageDigest: packageDigest,
     packagePluginId: manifest.pluginId,
-    effectiveGrants: options.grants ?? capabilities,
     ...(options.configuration ? { provenance: { kind: 'local-directory' } } : {}),
   });
   await runtime.inventoryStore.transaction((tx) => {

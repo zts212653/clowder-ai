@@ -63,7 +63,6 @@ test('local directory admission packages and verifies real bytes with the select
     const admission = new LocalPluginPackageAdmission({
       inventory: new HostInventoryControlPlane(store),
       packagesRoot,
-      grantPolicy: () => ['messaging.send'],
     });
 
     const result = await admission.install({ kind: 'local-directory', path: source });
@@ -72,7 +71,6 @@ test('local directory admission packages and verifies real bytes with the select
     const snapshot = await store.snapshot();
     assert.equal(snapshot.instances.length, 1);
     assert.equal(snapshot.instances[0].runtimeState, 'stopped');
-    assert.deepEqual(snapshot.grants[0].effectiveGrants, ['messaging.send']);
     const bytes = await readFile(join(packagesRoot, packageDirectoryName(result.packageDigest), 'package.tgz'));
     assert.equal(result.packageDigest, `sha512-${createHash('sha512').update(bytes).digest('base64')}`);
     assert.equal(await readFile(join(source, 'dist', 'entrypoint.js'), 'utf8'), entrypoint);
@@ -98,7 +96,6 @@ test('archive admission preserves source bytes and rejects duplicate installatio
     const admission = new LocalPluginPackageAdmission({
       inventory: new HostInventoryControlPlane(store),
       packagesRoot,
-      grantPolicy: () => ['messaging.send'],
     });
     await writeFile(sourceArchive, pluginBytes());
     const first = await admission.install({ kind: 'local-archive', path: sourceArchive });
@@ -136,7 +133,6 @@ test('archive portability preserves layout rejection without publishing inventor
     const admission = new LocalPluginPackageAdmission({
       inventory: new HostInventoryControlPlane(store),
       packagesRoot: join(root, 'packages'),
-      grantPolicy: () => [],
     });
     await assert.rejects(admission.install({ kind: 'local-archive', path: sourceArchive }), /archive|package/i);
     assert.equal((await store.snapshot()).instances.length, 0);
@@ -172,7 +168,7 @@ test(
       const admission = new LocalPluginPackageAdmission({
         inventory: new HostInventoryControlPlane(new MemoryPluginInventoryStore()),
         packagesRoot: join(root, 'packages'),
-        grantPolicy: () => ['messaging.send'],
+
         tarBin: probePath,
       });
       const admitted = await admission.install({ kind: 'local-directory', path: source });
@@ -182,7 +178,7 @@ test(
       const archiveAdmission = new LocalPluginPackageAdmission({
         inventory: new HostInventoryControlPlane(new MemoryPluginInventoryStore()),
         packagesRoot: join(root, 'archive packages'),
-        grantPolicy: () => ['messaging.send'],
+
         tarBin: probePath,
       });
       await archiveAdmission.install({ kind: 'local-archive', path: sourceArchive });

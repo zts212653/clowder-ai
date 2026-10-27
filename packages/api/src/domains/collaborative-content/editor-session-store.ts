@@ -17,7 +17,6 @@ export interface StoredEditorSessionRecordV1 {
   readonly installationInstanceId: string;
   readonly providerVersion: string;
   readonly packageDigest: string;
-  readonly grantRevision: number;
   readonly lifecycleRevision: number;
   readonly surfaceIntegrity: string;
   /** Digest only: the Host's opaque execution lease never enters F309 state or responses. */
@@ -154,7 +153,6 @@ function parseStoredSession(value: unknown): StoredEditorSessionRecordV1 {
     installationInstanceId: requiredString(value.installationInstanceId, 'installationInstanceId'),
     providerVersion: requiredString(value.providerVersion, 'providerVersion'),
     packageDigest: requiredString(value.packageDigest, 'packageDigest'),
-    grantRevision: requiredInteger(value.grantRevision, 'grantRevision', 1),
     lifecycleRevision: requiredInteger(value.lifecycleRevision, 'lifecycleRevision', 1),
     surfaceIntegrity: requiredString(value.surfaceIntegrity, 'surfaceIntegrity'),
     ...(executionLeaseDigest === undefined ? {} : { executionLeaseDigest }),

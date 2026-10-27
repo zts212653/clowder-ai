@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, test } from 'node:test';
-import { validateEffectiveGrants, validateManifest } from '@clowder-ai/plugin-contract';
+import { validateManifest } from '@clowder-ai/plugin-contract';
 
 import { MessageStore } from '../dist/domains/cats/services/stores/ports/MessageStore.js';
 import { ThreadStore } from '../dist/domains/cats/services/stores/ports/ThreadStore.js';
@@ -113,7 +113,7 @@ test('production composition delivers concurrent cat replies exactly once to an 
     threadStore,
     threadBindingStore: new MemoryConnectorThreadBindingStore(),
     threadOwnerUserId: 'owner-1',
-    contract: { manifestContractRange: '0.1.0', validateEffectiveGrants, validateManifest },
+    contract: { manifestContractRange: '0.1.0', validateManifest },
   });
   scheduler.attach(runtime.subscriptionDelivery);
   const manager = createPluginManagerRuntimeComposition({
@@ -123,17 +123,6 @@ test('production composition delivers concurrent cat replies exactly once to an 
   }).manager;
 
   const installed = await manager.install({ source: { kind: 'local-directory', path: packageRoot } });
-  // Local admission does not auto-grant L2 capabilities. Model the owner's approval before
-  // enablement so this exercises an authorised production path, not a bypassed Host check.
-  await runtime.inventoryStore.transaction((transaction) => {
-    const grant = transaction.grants.get(installed.pluginInstanceId);
-    transaction.grants.put({
-      ...grant,
-      effectiveGrants: ['message.event.subscribe', 'thread.write'],
-      grantRevision: grant.grantRevision + 1,
-      updatedAt: Date.now(),
-    });
-  });
   const beforeEnable = (await manager.get(installed.pluginId)).plugin;
   await manager.setEnabled(installed.pluginId, { enabled: true, expectedRevision: beforeEnable.lifecycleRevision });
   const state = globalThis[marker];

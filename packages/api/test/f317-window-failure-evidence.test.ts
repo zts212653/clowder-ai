@@ -7,7 +7,7 @@ import { OfficialPluginPackageInstaller } from '../src/domains/plugin/official-p
 import { createDormantPluginRuntimeComposition } from '../src/domains/plugin/runtime-composition.js';
 import { desktopWindowFixture } from './f317-window.fixture.js';
 
-type Fault = 'lease-expired' | 'grant-changed' | 'snapshot-io' | 'seal-missing' | 'observation-expired';
+type Fault = 'lease-expired' | 'snapshot-io' | 'seal-missing' | 'observation-expired';
 
 async function failedObservation(t: TestContext, fault: Fault) {
   const f = await desktopWindowFixture();
@@ -81,15 +81,6 @@ async function failedObservation(t: TestContext, fault: Fault) {
     const expiry = await renew(connectionId);
     if (polls === 2) {
       if (fault === 'snapshot-io') failSnapshot = true;
-      if (fault === 'grant-changed') {
-        await runtime.inventoryStore.transaction((tx) => {
-          const session = awaitSnapshot.sessions.find((row) => row.connectionId === connectionId);
-          assert.ok(session);
-          const grants = tx.grants.get(session.pluginInstanceId);
-          assert.ok(grants);
-          tx.grants.put({ ...grants, grantRevision: grants.grantRevision + 1, effectiveGrants: [] });
-        });
-      }
     }
     return expiry;
   };
@@ -135,7 +126,6 @@ async function failedObservation(t: TestContext, fault: Fault) {
 
 const cases = [
   ['lease-expired', 'lease-renew', 'lease-renew', 'SESSION_NOT_ACTIVE'],
-  ['grant-changed', 'authority', 'authority-check', 'AUTHORITY_CHANGED'],
   ['snapshot-io', 'authority', 'feature-snapshot', 'EIO'],
   ['seal-missing', 'authority', 'package-verification', 'ENOENT'],
   ['observation-expired', 'authority', 'observation-publish', undefined],

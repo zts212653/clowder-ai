@@ -314,7 +314,8 @@ export async function stageVerifiedPackageArchive(
     const validation = (input.validateManifest ?? validateManifest)(value);
     if (!validation.valid) throw runtimeError('installed package manifest fails the published contract');
     await staged.verifyIntegrity();
-    return { ...staged, manifest: validation.manifest };
+    // Validation may normalize retired metadata; package execution receives its own original declaration.
+    return { ...staged, manifest: structuredClone(value) as PluginManifest };
   } catch (error) {
     await staged.release();
     if (error instanceof ExternalPluginRuntimeError) throw error;

@@ -343,8 +343,6 @@ const archiveReplacement = {
   currentPackageDigest: `sha512-${'A'.repeat(86)}==`,
   candidatePackageDigest: `sha512-${'B'.repeat(85)}A==`,
   expectedLifecycleRevision: 8,
-  expectedGrantRevision: 1,
-  candidateEffectiveGrants: [],
 };
 
 for (const fields of [

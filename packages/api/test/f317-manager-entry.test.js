@@ -1,8 +1,6 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { test } from 'node:test';
-import { PLUGIN_MANAGER_HOST_POLICIES } from '../dist/domains/plugin/manager/host-official-catalog.js';
-import { OFFICIAL_PLUGIN_POLICIES } from '../dist/domains/plugin/official-catalog.js';
 import { managerEntryFixture } from './f317-manager-entry.fixture.js';
 
 const detailPath = '/api/plugin-manager/plugins/official.companion';
@@ -20,12 +18,6 @@ test('production Manager composition exposes the cold Companion catalog and inst
   assert.equal(row.actions.install, true);
   const detail = await f.request('GET', detailPath);
   assert.equal(detail.statusCode, 200, detail.payload);
-  const policy = PLUGIN_MANAGER_HOST_POLICIES.find((candidate) => candidate.pluginId === row.pluginId);
-  assert.deepEqual(policy.effectiveGrants, ['windows.create']);
-  assert.deepEqual(
-    policy.effectiveGrants,
-    OFFICIAL_PLUGIN_POLICIES.find((candidate) => candidate.pluginId === row.pluginId).effectiveGrants,
-  );
   const bad = await f.request('POST', '/api/plugin-manager/plugins/install', {
     source: { kind: 'catalog', catalogId: row.source.catalogId },
     expectedVersion: row.availableVersion,
@@ -90,6 +82,5 @@ test('Companion discovery cannot admit changed archive bytes', async (t) => {
 
 test('main uses the same Host catalog factory and replacement authority as the production entry regression', async () => {
   const source = await readFile(new URL('../src/index.ts', import.meta.url), 'utf8');
-  assert.match(source, /createHostOfficialPluginCatalog, PLUGIN_MANAGER_HOST_POLICIES: pluginManagerHostPolicies/);
   assert.match(source, /const pluginManagerCatalog = createHostOfficialPluginCatalog\(\)/);
 });

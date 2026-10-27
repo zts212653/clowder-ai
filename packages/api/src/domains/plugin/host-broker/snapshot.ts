@@ -91,54 +91,24 @@ function sessionIdentity(raw: Record<string, unknown>, label: string) {
   return { pluginId, packageDigest, contractVersion, wireVersion, candidate };
 }
 
-// Stored sessions survive contract changes; live authority is always revalidated against inventory.
-function sessionEffectiveGrants(value: unknown, label: string): string[] | undefined {
-  if (value === undefined) return undefined;
-  if (
-    !Array.isArray(value) ||
-    !value.every((grant) => typeof grant === 'string' && grant.trim().length > 0) ||
-    new Set(value).size !== value.length
-  ) {
-    corrupt(`${label}.effectiveGrants is invalid`);
-  }
-  return [...value];
-}
-
 function assertSessionPhase(
   phase: BrokerSessionPhase,
   authority: {
     readonly candidate: unknown;
-    readonly grantRevision?: number;
-    readonly effectiveGrants?: readonly string[];
     readonly bindingNonce?: string;
     readonly activeLeaseExpiresAt?: number;
   },
   label: string,
 ): void {
-  if (
-    phase === 'transport_connected' &&
-    (authority.candidate !== undefined ||
-      authority.grantRevision !== undefined ||
-      authority.effectiveGrants !== undefined)
-  ) {
+  if (phase === 'transport_connected' && authority.candidate !== undefined) {
     corrupt(`${label} transport-connected state already contains Host binding authority`);
   }
-  if (
-    phase === 'host_bound' &&
-    (!authority.candidate ||
-      authority.grantRevision === undefined ||
-      !authority.effectiveGrants ||
-      !authority.bindingNonce)
-  ) {
+  if (phase === 'host_bound' && (!authority.candidate || !authority.bindingNonce)) {
     corrupt(`${label} host-bound state is incomplete`);
   }
   if (
     phase === 'active' &&
-    (!authority.candidate ||
-      authority.grantRevision === undefined ||
-      !authority.effectiveGrants ||
-      authority.bindingNonce ||
-      authority.activeLeaseExpiresAt === undefined)
+    (!authority.candidate || authority.bindingNonce || authority.activeLeaseExpiresAt === undefined)
   ) {
     corrupt(`${label} active state is incomplete`);
   }
@@ -148,18 +118,11 @@ function parseSession(value: unknown, index: number): BrokerSessionRecord {
   const label = `sessions[${index}]`;
   const raw = object(value, label);
   const identity = sessionIdentity(raw, label);
-  const grantRevision =
-    raw.grantRevision === undefined ? undefined : positiveRevision(raw.grantRevision, `${label}.grantRevision`);
-  const effectiveGrants = sessionEffectiveGrants(raw.effectiveGrants, label);
   const bindingNonce = raw.bindingNonce;
   if (bindingNonce !== undefined && !validateBindingNonce(bindingNonce)) corrupt(`${label}.bindingNonce is invalid`);
   const phase = enumValue(raw.phase, SESSION_PHASES, `${label}.phase`);
   const activeLeaseExpiresAt = optionalTimestamp(raw.activeLeaseExpiresAt, `${label}.activeLeaseExpiresAt`);
-  assertSessionPhase(
-    phase,
-    { candidate: identity.candidate, grantRevision, effectiveGrants, bindingNonce, activeLeaseExpiresAt },
-    label,
-  );
+  assertSessionPhase(phase, { candidate: identity.candidate, bindingNonce, activeLeaseExpiresAt }, label);
   const createdAt = timestamp(raw.createdAt, `${label}.createdAt`);
   const updatedAt = timestamp(raw.updatedAt, `${label}.updatedAt`);
   if (updatedAt < createdAt) corrupt(`${label}.updatedAt precedes creation`);
@@ -179,8 +142,6 @@ function parseSession(value: unknown, index: number): BrokerSessionRecord {
     wireVersion: identity.wireVersion,
     phase,
     ...(identity.candidate === undefined ? {} : { candidate: structuredClone(identity.candidate) }),
-    ...(grantRevision === undefined ? {} : { grantRevision }),
-    ...(effectiveGrants === undefined ? {} : { effectiveGrants }),
     ...(bindingNonce === undefined ? {} : { bindingNonce }),
     preActiveDeadlineAt: timestamp(raw.preActiveDeadlineAt, `${label}.preActiveDeadlineAt`),
     ...(activeLeaseExpiresAt === undefined ? {} : { activeLeaseExpiresAt }),
@@ -201,7 +162,6 @@ function parseLease(value: unknown, index: number): BrokerRuntimeLeaseRecord {
     brokerSessionId: string(raw.brokerSessionId, `${label}.brokerSessionId`),
     pluginInstanceId: string(raw.pluginInstanceId, `${label}.pluginInstanceId`),
     packageDigest,
-    grantRevision: positiveRevision(raw.grantRevision, `${label}.grantRevision`),
     state: enumValue(raw.state, LEASE_STATES, `${label}.state`),
     expiresAt: timestamp(raw.expiresAt, `${label}.expiresAt`),
     updatedAt: timestamp(raw.updatedAt, `${label}.updatedAt`),
@@ -244,7 +204,6 @@ function parseCall(value: unknown, index: number): BrokerCallRecord {
     runtimeLeaseId: string(raw.runtimeLeaseId, `${label}.runtimeLeaseId`),
     pluginInstanceId: string(raw.pluginInstanceId, `${label}.pluginInstanceId`),
     packageDigest,
-    grantRevision: positiveRevision(raw.grantRevision, `${label}.grantRevision`),
     method,
     settlementKey: string(raw.settlementKey, `${label}.settlementKey`),
     inputDigest: string(raw.inputDigest, `${label}.inputDigest`),
@@ -284,8 +243,7 @@ function indexLeases(
       !session ||
       session.runtimeLeaseId !== lease.runtimeLeaseId ||
       session.pluginInstanceId !== lease.pluginInstanceId ||
-      session.packageDigest !== lease.packageDigest ||
-      session.grantRevision !== lease.grantRevision
+      session.packageDigest !== lease.packageDigest
     ) {
       corrupt(`runtime lease ${lease.runtimeLeaseId} does not match its session authority`);
     }

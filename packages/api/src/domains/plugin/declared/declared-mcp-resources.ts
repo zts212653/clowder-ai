@@ -13,7 +13,6 @@ import {
 } from '../configuration-variant-consumption.js';
 import { packageDirectoryName } from '../external-runtime/filesystem-package-locator.js';
 import { ExternalPluginRuntimeError } from '../external-runtime/types.js';
-import { hostCapabilityRefusal } from '../host-surface/host-capability-refusal.js';
 import { effectivePluginConfigurationValue } from '../manager/plugin-configuration-values.js';
 import { pluginResourceRoot, resolvePackageFile } from './declared-resource-paths.js';
 import type { DeclaredStaticResourceHost } from './declared-static-resources.js';
@@ -271,7 +270,7 @@ async function mcpEnvironment(
   const fields = new Map((admission.packageRecord.manifest.configuration ?? []).map((field) => [field.key, field]));
   // Variant-declared manifests (design §3.4): resolve the branch once per
   // contribution. Non-selected resolutions refuse the launch (fail-closed);
-  // inactive-branch bindings are silently skipped (no grant demand, no error),
+  // inactive-branch bindings are silently skipped (no config read or error),
   // and inactive-branch stores are never read.
   const variants = admission.packageRecord.manifest.configurationVariants;
   let variantActiveKeys: ReadonlySet<string> | undefined;
@@ -279,15 +278,11 @@ async function mcpEnvironment(
   if (variants) {
     const configuration = admission.packageRecord.manifest.configuration ?? [];
     const readStored = async (field: ConfigurationField): Promise<unknown> => {
-      // Same grant discipline as the projection: no grant, no store read; the
-      // contract then applies the declared default for that field.
-      const grant = field.kind === 'secret' ? 'secret.read' : 'plugin.config.read';
-      if (!admission.effectiveGrants.includes(grant)) return undefined;
       return field.kind === 'secret'
         ? host.configuration.readSecret(admission.instance.pluginInstanceId, field.key)
         : host.configuration.readConfig(admission.instance.pluginInstanceId, field.key);
     };
-    // Phase 1: branch selection from the grant-gated discriminator alone,
+    // Phase 1: branch selection from the discriminator alone,
     // fail-closed before any other store read.
     const discriminatorField = fields.get(variants.discriminator);
     let probe: Record<string, unknown> = {};
@@ -323,7 +318,7 @@ async function mcpEnvironment(
     Object.entries(contribution.environment ?? {}).map(async ([name, binding]) => {
       if (variantActiveKeys && !variantActiveKeys.has(binding.key)) return undefined;
       const field = fields.get(binding.key);
-      const value = await environmentValue(admission, host, contribution, field, binding, variantEffectiveValues);
+      const value = await environmentValue(admission, host, field, binding, variantEffectiveValues);
       return value === undefined ? undefined : ([name, value] as const);
     }),
   );
@@ -337,7 +332,6 @@ async function mcpEnvironment(
 async function environmentValue(
   admission: PluginRuntimeAdmission,
   host: DeclaredStaticResourceHost,
-  contribution: McpContribution,
   field: ConfigurationField | undefined,
   binding: { readonly source: 'config' | 'secret'; readonly key: string },
   /**
@@ -348,16 +342,6 @@ async function environmentValue(
    */
   effectiveValues?: Record<string, unknown>,
 ): Promise<string | undefined> {
-  const grant = binding.source === 'secret' ? 'secret.read' : 'plugin.config.read';
-  if (!admission.effectiveGrants.includes(grant)) {
-    throw hostCapabilityRefusal(
-      new ExternalPluginRuntimeError(
-        'CONFIG_UNAVAILABLE',
-        `MCP contribution ${contribution.id} lacks Host grant ${grant}`,
-      ),
-      grant,
-    );
-  }
   if (effectiveValues) {
     const value = field ? effectivePluginConfigurationValue(field, effectiveValues[binding.key]) : undefined;
     const required = field ? variantFieldRequiredness(field, effectiveValues) : false;

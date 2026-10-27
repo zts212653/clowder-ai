@@ -5,7 +5,7 @@ export const PLUGIN_ID = 'official.example-source';
 export const INSTANCE_ID = 'pi_example';
 export const PACKAGE_DIGEST = `sha512-${createHash('sha512').update('k2b-example-package').digest('base64')}`;
 
-export function pluginManifest(capabilities = ['messaging.send']) {
+export function pluginManifest() {
   return {
     pluginId: PLUGIN_ID,
     version: '1.0.0',
@@ -16,7 +16,6 @@ export function pluginManifest(capabilities = ['messaging.send']) {
         id: 'source',
         name: 'Source',
         resources: [],
-        capabilities,
       },
     ],
     signals: {
@@ -65,18 +64,17 @@ export function messageSendReceipt(messageId) {
   };
 }
 
-export async function readyInventory({ effectiveGrants = ['messaging.send'] } = {}) {
+export async function readyInventory({ manifest = pluginManifest() } = {}) {
   const inventory = new MemoryPluginInventoryStore();
   const controlPlane = new HostInventoryControlPlane(inventory, {
     createInstanceId: () => INSTANCE_ID,
     now: () => 1_000,
   });
   await controlPlane.installPackage({
-    manifest: pluginManifest(effectiveGrants),
+    manifest,
     computedPackageDigest: PACKAGE_DIGEST,
     expectedPackageDigest: PACKAGE_DIGEST,
     packagePluginId: PLUGIN_ID,
-    effectiveGrants,
     signalSchemas: {
       'schemas/example.signal.v1.schema.json': {
         type: 'object',

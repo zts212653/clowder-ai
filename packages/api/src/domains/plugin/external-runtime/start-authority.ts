@@ -13,12 +13,7 @@ import { assertExecutablePackage } from '../host-inventory/stored-manifest.js';
  * has exactly one home, and the supervisor stays under the file-size cap while doing so.
  */
 
-import type {
-  ExecutablePluginPackageRecord,
-  PluginGrantRecord,
-  PluginInstanceRecord,
-  RuntimeState,
-} from '../host-inventory/types.js';
+import type { ExecutablePluginPackageRecord, PluginInstanceRecord, RuntimeState } from '../host-inventory/types.js';
 import {
   ManifestConfigurationProjectionError,
   type PluginRuntimeConfigurationPort,
@@ -30,8 +25,6 @@ import { ExternalPluginRuntimeError } from './types.js';
 export interface RunnableAuthority {
   readonly instance: PluginInstanceRecord;
   readonly packageRecord: ExecutablePluginPackageRecord;
-  /** F202 C1 gap C: the grant set a config/secret projection must be checked against. */
-  readonly grants: PluginGrantRecord | undefined;
 }
 
 /** Only the two collaborators the authority questions actually need. */
@@ -46,7 +39,7 @@ const UNREADABLE_CONFIGURATION: PluginRuntimeConfigurationPort = {
   readSecret: async () => undefined,
 };
 
-/** Resolves the instance + package + grants a start is allowed to proceed from. */
+/** Resolves the instance + package a start is allowed to proceed from. */
 export async function resolveRunnableAuthority(
   deps: StartAuthorityDeps,
   pluginInstanceId: string,
@@ -75,8 +68,7 @@ export async function resolveRunnableAuthority(
     throw new ExternalPluginRuntimeError('INSTANCE_NOT_RUNNABLE', `${pluginInstanceId} is not a runnable instance`);
   }
   assertExecutablePackage(packageRecord);
-  const grants = snapshot.grants.find((candidate) => candidate.pluginInstanceId === pluginInstanceId);
-  return { instance, packageRecord, grants };
+  return { instance, packageRecord };
 }
 
 /**
@@ -92,15 +84,13 @@ export async function assertAuthorityUnchanged(
   const snapshot = await deps.inventory.snapshot();
   const pluginInstanceId = authority.instance.pluginInstanceId;
   const instance = snapshot.instances.find((candidate) => candidate.pluginInstanceId === pluginInstanceId);
-  const grants = snapshot.grants.find((candidate) => candidate.pluginInstanceId === pluginInstanceId);
   if (
     !instance ||
     instance.lifecycleState !== 'installed' ||
     instance.packageDigest !== authority.instance.packageDigest ||
     instance.activationState !== 'enabled' ||
     instance.configReadiness !== 'ready' ||
-    instance.runtimeState !== runtimeState ||
-    grants?.grantRevision !== authority.grants?.grantRevision
+    instance.runtimeState !== runtimeState
   ) {
     throw new ExternalPluginRuntimeError('INSTANCE_NOT_RUNNABLE', `${pluginInstanceId} authority changed during start`);
   }
@@ -122,7 +112,6 @@ export async function projectStartConfiguration(
     return await projectManifestConfigurationEnv({
       pluginInstanceId: authority.instance.pluginInstanceId,
       manifest: authority.packageRecord.manifest,
-      effectiveGrants: authority.grants?.effectiveGrants ?? [],
       configuration,
     });
   } catch (error) {

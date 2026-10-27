@@ -108,7 +108,6 @@ async function fixture({ catalog = false, duplicate = false, missing = false, ov
             distribution: 'registry',
             archiveUrl: 'https://registry.npmjs.org/@clowder-ai/static-icon/-/static-icon-0.1.0.tgz',
             packageDigest: digest,
-            effectiveGrants: [],
             presentation: { displayName: manifest.name, icon: manifest.icon, publisher: 'Clowder AI' },
           },
         ],

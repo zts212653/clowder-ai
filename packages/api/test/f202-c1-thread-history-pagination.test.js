@@ -15,7 +15,6 @@ async function check(store) {
     ownerUserId: 'owner',
     projectPath: '/isolated',
     systemThreadTitle: 'Fixture',
-    effectiveGrants: ['thread.write', 'thread.readContent'],
     threadStore: new ThreadStore(),
     messageStore: store,
     bindingStore: new MemoryConnectorThreadBindingStore(),

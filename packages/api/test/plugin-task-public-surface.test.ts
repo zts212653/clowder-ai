@@ -9,7 +9,6 @@ function fixture() {
     pluginId: 'example',
     pluginInstanceId: 'instance',
     ownerUserId: 'owner',
-    effectiveGrants: ['task.read', 'task.write'],
     taskStore: store,
     readThreadStore: { get: async (id) => ({ id, createdBy: 'owner' }) } as never,
   });

@@ -55,21 +55,18 @@ test(
       pluginInstanceId,
       moduleRef: `plugin:${manifest.pluginId}`,
       lifecycleRevision: 1,
-      grantRevision: 1,
     };
-    const effectiveGrants = ['task.read', 'task.write', 'task.admitEntrusted'];
     const admission = {
       messageStore: messages,
       isCatAvailable: (id) => id === 'codex',
       assertCurrent: async () => {},
-      readCurrentDataControllerAuthority: async () => ({ ...controllerAuthority, effectiveGrants }),
-      withCurrentDataControllerAuthority: async (run) => run({ ...controllerAuthority, effectiveGrants }),
+      readCurrentDataControllerAuthority: async () => ({ ...controllerAuthority }),
+      withCurrentDataControllerAuthority: async (run) => run({ ...controllerAuthority }),
     };
     const deps = {
       pluginId: manifest.pluginId,
       pluginInstanceId,
       ownerUserId,
-      effectiveGrants,
       taskStore: tasks,
       threadStore: threads,
       readThreadStore: threads,
@@ -78,23 +75,20 @@ test(
       admission,
     };
     const taskHost = createPluginTaskHost(deps);
-    const denied = createPluginTaskHost({ ...deps, effectiveGrants: ['task.read', 'task.write'] });
     const reader = createPluginMessagingHost({
       ...deps,
       manifest,
       messageStore: messages,
-      effectiveGrants: ['thread.readContent'],
       messaging: {},
     });
     const records = new Map();
     const sent = new Map();
     const context = {
       pluginInstanceId,
-      tasks: denied,
+      tasks: taskHost,
       threads: createPluginThreadHost({
         ...deps,
         projectPath: f.root,
-        effectiveGrants: ['thread.read', 'thread.list', 'thread.readContent', 'thread.write'],
         threadDeepLinkUrl: (id) => `https://fixture.invalid/thread/${id}`,
         cats: {
           getAllCatIds: () => ['codex'],
@@ -149,9 +143,6 @@ test(
     const caller = workModule.createCollectiveMessageWorkCaller(f.connector, context);
     const subject = `collective-work:${f.connection.connectionId}:${work.workId}`;
     const send = () => caller.send(f.connection.connectionId, work.assignmentEventId, ownerUserId, async () => {});
-    await assert.rejects(send(), /task.admitEntrusted/);
-    assert.equal(tasks.getBySubject(subject), null);
-    context.tasks = taskHost;
     const wake = await send();
     const task = await taskHost.get({ subjectKey: subject });
     assert.ok(task?.entrustedWork);
@@ -204,9 +195,6 @@ test(
       extra: { rich: { blocks: [{ kind: 'file', v: 1, id: 'report', fileName: 'report.md', url: artifactRef }] } },
     });
     await caller.withCurrentMessage(action, async (binding) => {
-      context.tasks = denied;
-      await assert.rejects(binding.registerArtifactRefs(binding.work.revision, [artifactRef]), /task.admitEntrusted/);
-      context.tasks = taskHost;
       await binding.registerArtifactRefs(binding.work.revision, [artifactRef]);
       assert.deepEqual((await taskHost.get({ id: task.id })).entrustedWork.artifactRefs, [artifactRef]);
     });
@@ -270,10 +258,6 @@ test(
         result,
         async () => {},
       );
-    context.tasks = denied;
-    await assert.rejects(reconcile(), /task.admitEntrusted/);
-    assert.notEqual((await taskHost.get({ id: task.id })).status, 'done');
-    context.tasks = taskHost;
     assert.equal((await reconcile()).result, 'closed');
     assert.equal((await reconcile()).result, 'already_closed');
     const beforeLifecycleAdvance = structuredClone(tasks.get(task.id));

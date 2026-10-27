@@ -7,7 +7,6 @@ export interface EditorSurfaceAdmissionV1 {
   readonly installationInstanceId: string;
   readonly providerVersion: string;
   readonly packageDigest: string;
-  readonly grantRevision: number;
   readonly lifecycleRevision: number;
   readonly activationState: 'enabled';
   readonly runtimeState: 'healthy';
@@ -40,7 +39,6 @@ export function surfaceAdmissionMatchesSession(
     value.installationInstanceId !== session.installationInstanceId ||
     value.providerVersion !== session.providerVersion ||
     value.packageDigest !== session.packageDigest ||
-    value.grantRevision !== session.grantRevision ||
     value.lifecycleRevision !== session.lifecycleRevision ||
     value.activationState !== 'enabled' ||
     value.runtimeState !== 'healthy' ||

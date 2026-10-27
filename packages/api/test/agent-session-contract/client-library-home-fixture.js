@@ -49,7 +49,6 @@ export async function library(t, createService, { catIds = ['codex'] } = {}) {
   const admission = {
     instance: { pluginInstanceId: 'home-library' },
     packageRecord: { pluginId: ref.pluginId, packageDigest: 'fixture', manifest },
-    effectiveGrants: ['plugin.config.read'],
   };
   return { rootDir, registry, ref, service, activate: () => lifecycle.activate(admission) };
 }

@@ -915,24 +915,50 @@ class ServiceManager {
   async stopAll() {
     this.startupAbort?.abort(new Error('Desktop startup cancelled'));
     const KILL_TIMEOUT_MS = 5000;
-    const killPromises = [];
+    const entries = Object.entries(this.procs);
+    // API shutdown still writes to Redis (audit, plugin teardown and leases).
+    // Drain its consumers before terminating their persistence dependency.
+    const groups = [entries.filter(([name]) => name !== 'redis'), entries.filter(([name]) => name === 'redis')];
 
-    for (const [name, proc] of Object.entries(this.procs)) {
-      if (!proc || proc.killed) continue;
-      // Skip children that already exited on their own — their PID may have
-      // been reused by Windows, so taskkill could hit an unrelated process.
-      if (proc.exitCode !== null || proc.signalCode !== null) {
-        log(`[desktop] ${name} already exited (code=${proc.exitCode}), skipping`);
-        continue;
+    for (const group of groups) {
+      const killPromises = [];
+      for (const [name, proc] of group) {
+        if (!proc) continue;
+        // Skip children that already exited on their own — their PID may have
+        // been reused by Windows, so taskkill could hit an unrelated process.
+        if (proc.exitCode !== null || proc.signalCode !== null) {
+          log(`[desktop] ${name} already exited (code=${proc.exitCode}), skipping`);
+          continue;
+        }
+        // killed records a sent signal, not a completed exit. Observe an
+        // already-signalled child without sending another signal to its PID.
+        if (proc.killed) {
+          killPromises.push(this._waitForProcessExit(proc, KILL_TIMEOUT_MS));
+          continue;
+        }
+        log(`[desktop] stopping ${name} (pid=${proc.pid})...`);
+
+        killPromises.push(this._killProcessTree(name, proc, KILL_TIMEOUT_MS));
       }
-      log(`[desktop] stopping ${name} (pid=${proc.pid})...`);
-
-      killPromises.push(this._killProcessTree(name, proc, KILL_TIMEOUT_MS));
+      await Promise.allSettled(killPromises);
     }
-
-    await Promise.allSettled(killPromises);
     this.procs = {};
     await this._stopPluginNetworkBridge();
+  }
+
+  _waitForProcessExit(proc, timeoutMs) {
+    if (proc.exitCode !== null || proc.signalCode !== null) return Promise.resolve(true);
+    return new Promise((resolve) => {
+      const onExit = () => {
+        clearTimeout(timer);
+        resolve(true);
+      };
+      const timer = setTimeout(() => {
+        proc.removeListener('exit', onExit);
+        resolve(false);
+      }, timeoutMs);
+      proc.once('exit', onExit);
+    });
   }
 
   async _killProcessTree(name, proc, timeoutMs) {
@@ -963,14 +989,7 @@ class ServiceManager {
     // macOS/Linux: SIGTERM first, then SIGKILL after timeout
     proc.kill('SIGTERM');
 
-    const exited = await new Promise((resolve) => {
-      if (proc.exitCode !== null) return resolve(true);
-      const timer = setTimeout(() => resolve(false), timeoutMs);
-      proc.once('exit', () => {
-        clearTimeout(timer);
-        resolve(true);
-      });
-    });
+    const exited = await this._waitForProcessExit(proc, timeoutMs);
 
     if (!exited) {
       log(`[${name}] did not exit after SIGTERM, sending SIGKILL`);

@@ -15,8 +15,6 @@ export function authorityMatchesBinding(
     authority.surfaceIntegrity.length > 0 &&
     typeof authority.executionLeaseDigest === 'string' &&
     /^sha256:[0-9a-f]{64}$/.test(authority.executionLeaseDigest) &&
-    Number.isSafeInteger(authority.grantRevision) &&
-    authority.grantRevision > 0 &&
     Number.isSafeInteger(authority.lifecycleRevision) &&
     authority.lifecycleRevision > 0
   );
@@ -29,7 +27,6 @@ export function authorityMatchesSession(
   return (
     authorityMatchesBinding(authority, session) &&
     authority.packageDigest === session.packageDigest &&
-    authority.grantRevision === session.grantRevision &&
     authority.lifecycleRevision === session.lifecycleRevision &&
     authority.surfaceIntegrity === session.surfaceIntegrity &&
     authority.executionLeaseDigest === session.executionLeaseDigest

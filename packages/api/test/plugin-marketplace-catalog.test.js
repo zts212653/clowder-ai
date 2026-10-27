@@ -83,7 +83,6 @@ async function fixture(t, prepare) {
   const admission = new LocalPluginPackageAdmission({
     inventory,
     packagesRoot: join(root, 'installed'),
-    grantPolicy: () => [],
   });
   const base = { snapshot: async () => ({ status: 'fresh', refreshedAt: 10, candidates: [] }) };
   const catalog = new GitMarketplaceCatalog({ base, sources, repository, localAdmission: admission, prepare });

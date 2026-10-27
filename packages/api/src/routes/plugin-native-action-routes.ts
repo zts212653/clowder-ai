@@ -30,8 +30,7 @@ export const pluginNativeActionRoutes: FastifyPluginAsync<PluginNativeActionRout
         hasInvocationId: typeof request.headers['x-invocation-id'] === 'string',
         hasCallbackToken: typeof request.headers['x-callback-token'] === 'string',
         hasActivationToken: typeof token === 'string',
-        declaredTargetKnown:
-          typeof token === 'string' && parsed.success && Boolean(options.actions.target(token, parsed.data.method)),
+        activeTargetKnown: typeof token === 'string' && parsed.success && Boolean(options.actions.target(token)),
       },
       'Native plugin action received',
     );
@@ -40,9 +39,7 @@ export const pluginNativeActionRoutes: FastifyPluginAsync<PluginNativeActionRout
     pluginNativeActionTarget: (request) => {
       const token = request.headers['x-clowder-plugin-action-token'];
       const parsed = bodySchema.safeParse(request.body);
-      return typeof token === 'string' && parsed.success
-        ? options.actions.target(token, parsed.data.method)
-        : undefined;
+      return typeof token === 'string' && parsed.success ? options.actions.target(token) : undefined;
     },
   });
   app.post('/api/plugin-runtime/action', { bodyLimit: 1024 * 1024 }, async (request, reply) => {
@@ -83,12 +80,7 @@ export const pluginNativeActionRoutes: FastifyPluginAsync<PluginNativeActionRout
       if (!reply.raw.writableEnded) onAbort();
     };
     try {
-      fence = captureNativeCallbackCurrentness(
-        record,
-        callbackToken,
-        options.actions.target(token, parsed.data.method),
-        options,
-      );
+      fence = captureNativeCallbackCurrentness(record, callbackToken, options.actions.target(token), options);
       request.raw.on('aborted', onAbort);
       reply.raw.on('close', onClose);
       if (request.raw.aborted) onAbort();

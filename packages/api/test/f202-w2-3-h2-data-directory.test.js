@@ -1,12 +1,13 @@
 /** Stable module dataPath, declared directory admission and uninstall stop-failure behavior.
  * Directory allocation is lifecycle context and requires no additional grant. */
+
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { chmod, mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { after, test } from 'node:test';
-import { validateEffectiveGrants, validateManifest } from '@clowder-ai/plugin-contract';
+import { validateManifest } from '@clowder-ai/plugin-contract';
 import { MessageStore } from '../dist/domains/cats/services/stores/ports/MessageStore.js';
 import { BundledPluginRuntimeCarrier } from '../dist/domains/plugin/builtin-runtime/carriers/bundled-runtime-carrier.js';
 import { ModulePluginRuntime } from '../dist/domains/plugin/builtin-runtime/carriers/module-plugin-runtime.js';
@@ -81,7 +82,7 @@ async function tempDir(prefix) {
   return root;
 }
 
-async function harness({ packageManifest = manifest(), grants = [] } = {}) {
+async function harness({ packageManifest = manifest() } = {}) {
   globalThis[LOG] = [];
   globalThis[FAIL_STOPS] = 0;
   let now = 1_000;
@@ -96,7 +97,6 @@ async function harness({ packageManifest = manifest(), grants = [] } = {}) {
     computedPackageDigest: digestOf(rootDir),
     expectedPackageDigest: digestOf(rootDir),
     packagePluginId: packageManifest.pluginId,
-    effectiveGrants: grants,
   });
   const released = [];
   const moduleRuntime = new ModulePluginRuntime({
@@ -170,7 +170,7 @@ test('an existing directory is kept and tightened to 0700', async () => {
 });
 
 test('dataPath is injected without a separate capability grant', async () => {
-  const h = await harness({ grants: [] });
+  const h = await harness();
 
   await h.enable();
 
@@ -219,13 +219,12 @@ test('the production composition gives a granted module its directory under the 
   const runtime = createDormantPluginRuntimeComposition({
     projectRoot,
     messageStore: new MessageStore(),
-    contract: { manifestContractRange: '0.1.0', validateEffectiveGrants, validateManifest },
+    contract: { manifestContractRange: '0.1.0', validateManifest },
   });
   const composition = createPluginManagerRuntimeComposition({
     runtime,
     catalogProvider: { snapshot: async () => ({ entries: [], status: 'fresh', checkedAt: 1 }) },
     catalogManifests: [],
-    localGrantPolicy: (candidate) => candidate.features.flatMap((feature) => feature.capabilities),
   });
 
   const installed = await composition.manager.install({ source: { kind: 'local-directory', path: packageRoot } });

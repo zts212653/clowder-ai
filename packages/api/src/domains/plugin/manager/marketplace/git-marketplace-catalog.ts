@@ -3,7 +3,6 @@ import { validateManifest } from '@clowder-ai/plugin-contract';
 import type { LocalPluginPackageAdmission } from '../local-package-admission.js';
 import {
   type PluginManagerCatalogCandidate,
-  pluginManagerCapabilitiesFromManifest,
   pluginManagerContributionsFromManifest,
 } from '../plugin-manager-projection.js';
 import type { PluginManagerCatalogPort, PluginManagerCatalogSnapshot } from '../plugin-manager-service.js';
@@ -81,7 +80,6 @@ export class GitMarketplaceCatalog implements PluginManagerCatalogPort {
           ...(manifest.icon ? { icon: manifest.icon } : {}),
           ownerAuthRequired: false,
           compatibleReplacement: true,
-          capabilities: pluginManagerCapabilitiesFromManifest(manifest),
           contributions: pluginManagerContributionsFromManifest(manifest),
           directorySource: {
             kind: 'git',

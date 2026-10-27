@@ -18,7 +18,6 @@ function admission(overrides: Record<string, unknown> = {}) {
       installationInstanceId: 'plugin-instance-1',
       providerVersion: '0.8.1039',
       packageDigest: 'sha512-package-1',
-      grantRevision: 1,
       lifecycleRevision: 1,
       activationState: 'enabled',
       runtimeState: 'healthy',

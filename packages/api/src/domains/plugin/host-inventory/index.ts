@@ -12,7 +12,6 @@ export type {
 } from './manifest-verifier.js';
 export { verifyPackageAdmission } from './manifest-verifier.js';
 export type {
-  GrantStore,
   PackageInventoryStore,
   PluginInstanceStore,
   PluginInventoryStore,

@@ -20,7 +20,7 @@ function inventory(count = 1) {
         version: '1.0.0',
         contractVersion: '0.1.0',
         name: `Synthetic ${index}`,
-        features: [{ id: 'messaging', name: 'Messaging', resources: [], capabilities: ['messaging.send'] }],
+        features: [{ id: 'messaging', name: 'Messaging', resources: [] }],
         runtime: { transport: 'builtin' },
       };
       return {
@@ -36,20 +36,13 @@ function inventory(count = 1) {
       };
     }),
     instances: [],
-    grants: [],
   };
 }
 
 function countInventoryCopies() {
   let copies = 0;
   mock.method(globalThis, 'structuredClone', (value, options) => {
-    if (
-      value?.schemaVersion === 1 &&
-      Array.isArray(value.packages) &&
-      Array.isArray(value.instances) &&
-      Array.isArray(value.grants)
-    )
-      copies++;
+    if (value?.schemaVersion === 1 && Array.isArray(value.packages) && Array.isArray(value.instances)) copies++;
     return clone(value, options);
   });
   return () => copies;
@@ -87,10 +80,10 @@ test('a fresh file snapshot has no redundant whole-inventory deep copy', async (
 test('file results are independent and observe external changes and newly corrupt bytes', async () => {
   const store = new FilePluginInventoryStore(file);
   const first = await store.snapshot();
-  first.packages[0].manifest.features[0].capabilities.push('synthetic-mutation');
+  first.packages[0].manifest.features[0].resources.push('synthetic-mutation');
   first.packages[0].manifest.name = 'caller mutation';
   const second = await store.snapshot();
-  assert.deepEqual(second.packages[0].manifest.features[0].capabilities, ['messaging.send']);
+  assert.deepEqual(second.packages[0].manifest.features[0].resources, []);
   assert.equal(second.packages[0].manifest.name, 'Synthetic 0');
   assert.notEqual(first.packages[0].manifest, second.packages[0].manifest);
   const changed = inventory();
@@ -126,10 +119,10 @@ test('memory snapshots keep their deep-copy isolation', async () => {
   const store = new MemoryPluginInventoryStore(inventory());
   const copies = countInventoryCopies();
   const first = await store.snapshot();
-  first.packages[0].manifest.features[0].capabilities.push('synthetic-mutation');
+  first.packages[0].manifest.features[0].resources.push('synthetic-mutation');
   first.packages[0].manifest.name = 'caller mutation';
   const second = await store.snapshot();
   assert.equal(second.packages[0].manifest.name, 'Synthetic 0');
-  assert.deepEqual(second.packages[0].manifest.features[0].capabilities, ['messaging.send']);
+  assert.deepEqual(second.packages[0].manifest.features[0].resources, []);
   assert.equal(copies(), 2);
 });

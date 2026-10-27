@@ -22,7 +22,6 @@ test('bundled carrier starts and stops the bundled Connector without external pr
     computedPackageDigest: entry.packageDigest,
     expectedPackageDigest: entry.packageDigest,
     packagePluginId: entry.pluginId,
-    effectiveGrants: [],
     signalSchemas: {},
   });
   await store.transaction((transaction) => {

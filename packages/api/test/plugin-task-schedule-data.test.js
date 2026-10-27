@@ -30,7 +30,6 @@ async function fixture(tasks = new TaskStore()) {
     pluginId: 'fixture',
     pluginInstanceId: 'instance',
     ownerUserId: 'owner',
-    effectiveGrants: ['task.read', 'task.write', 'task.admitEntrusted'],
     taskStore: tasks,
     threadStore: threads,
     readThreadStore: threads,
@@ -45,8 +44,6 @@ async function fixture(tasks = new TaskStore()) {
         pluginInstanceId: 'instance',
         moduleRef: 'plugin:fixture',
         lifecycleRevision: 1,
-        grantRevision: 1,
-        effectiveGrants: ['task.read', 'task.write', 'task.admitEntrusted'],
       }),
       withCurrentDataControllerAuthority: async (run) =>
         run({
@@ -54,8 +51,6 @@ async function fixture(tasks = new TaskStore()) {
           pluginInstanceId: 'instance',
           moduleRef: 'plugin:fixture',
           lifecycleRevision: 1,
-          grantRevision: 1,
-          effectiveGrants: ['task.read', 'task.write', 'task.admitEntrusted'],
         }),
     },
   };
@@ -131,12 +126,8 @@ test('same Task has a Schedule deadline, changes it, then closes without any exe
   assert.equal(f.messages.getRecent(100, 'owner').length, 1, 'no execution/admission carrier message');
 });
 
-test('foreign source, absent grant, foreign Task and conflicting bare Task cannot be adopted', async () => {
+test('foreign source, foreign Task and conflicting bare Task cannot be adopted', async () => {
   const f = await fixture();
-  await assert.rejects(
-    createPluginTaskHost({ ...f.deps, effectiveGrants: ['task.write'] }).create(f.input, { onConflict: 'update' }),
-    /task.admitEntrusted/,
-  );
   await assert.rejects(
     createPluginTaskHost({ ...f.deps, pluginInstanceId: 'other' }).create(f.input, { onConflict: 'update' }),
     /source|installation/i,

@@ -5,7 +5,7 @@ import { type FileHandle, lstat, mkdir, mkdtemp, open, readFile, realpath, rm, w
 import { isAbsolute, relative, resolve, sep } from 'node:path';
 import { promisify } from 'node:util';
 import type { PluginArchiveReplacementConfirmation } from '@cat-cafe/shared';
-import type { Capability, PluginManifest } from '@clowder-ai/plugin-contract';
+import type { PluginManifest } from '@clowder-ai/plugin-contract';
 import type { ExternalPluginLifecycleService } from '../external-plugin-lifecycle.js';
 import { FilesystemVerifiedPluginPackageLocator } from '../external-runtime/filesystem-package-locator.js';
 import type { PluginManifestValidator } from '../external-runtime/package-staging.js';
@@ -55,8 +55,6 @@ export interface LocalPluginPackageAdmissionOptions {
   readonly lifecycle?: Pick<ExternalPluginLifecycleService, 'runWithRuntimeSuspended'>;
   readonly reconcileConfiguration?: (pluginId: string, instanceId: string) => Promise<void>;
   readonly packagesRoot: string;
-  /** Host-owned policy. Package declarations are requests, never grants. */
-  readonly grantPolicy: (manifest: PluginManifest) => Promise<readonly Capability[]> | readonly Capability[];
   readonly tarBin?: string;
   readonly npmBin?: string;
   readonly validateManifest?: PluginManifestValidator;
@@ -387,7 +385,7 @@ export class LocalPluginPackageAdmission {
     fence: LocalPluginAdmissionFence = {},
     provenance: LocalPluginPackageProvenance = { kind: source.kind },
   ) {
-    // Capture the current instance/grant fences before asynchronous source work.
+    // Capture current instance and lifecycle state before asynchronous source work.
     // A later owner mutation must win over this directory reselection.
     const inventoryAtRequest = await this.options.inventory.store.snapshot();
     const bytes =
@@ -434,7 +432,6 @@ export class LocalPluginPackageAdmission {
         );
       }
       const signalSchemas = await readSignalSchemas(located.rootDir, located.manifest);
-      const effectiveGrants = await this.options.grantPolicy(located.manifest);
       const packageMetadata = await readPackageMetadata(located.rootDir);
       if (
         fence.expectedPackage &&
@@ -450,7 +447,6 @@ export class LocalPluginPackageAdmission {
         computedPackageDigest: digest,
         expectedPackageDigest: digest,
         packagePluginId: located.manifest.pluginId,
-        effectiveGrants: [...effectiveGrants],
         signalSchemas,
         provenance: admittedProvenance,
       };
@@ -473,7 +469,7 @@ export class LocalPluginPackageAdmission {
     }
   }
 
-  /** Internal Host seam: catalog callers have already verified release bytes and Host grant policy. */
+  /** Internal Host seam: catalog callers have already verified release bytes. */
   async admitVerifiedCatalogCandidate(
     inventoryAtRequest: PluginInventorySnapshot,
     candidate: PackageAdmissionCandidate,
@@ -509,22 +505,17 @@ export class LocalPluginPackageAdmission {
             candidate.provenance.packageName !== undefined &&
             previousPackage.provenance.packageName === candidate.provenance.packageName));
       if (!localUpdate) return await this.options.inventory.installPackage(candidate);
-      const grants = inventoryAtRequest.grants.find((grant) => grant.pluginInstanceId === current.pluginInstanceId);
-      if (!grants) throw new PluginInventoryError('INVENTORY_INVARIANT', 'current instance has no grant record');
       let upgraded: InventoryMutationResult | undefined;
       const rollback = async () => {
         if (!upgraded) return;
         await this.options.inventory.store.transaction((tx) => {
           const instance = tx.instances.getCurrent(current.pluginId);
-          const grant = tx.grants.get(current.pluginInstanceId);
           if (
             instance?.pluginInstanceId !== current.pluginInstanceId ||
             instance.packageDigest !== upgraded?.packageDigest ||
             instance.lifecycleState !== 'installed'
           )
             throw new PluginInventoryError('STALE_INSTANCE', 'replacement is no longer current');
-          if (grant?.grantRevision !== upgraded.grantRevision)
-            throw new PluginInventoryError('STALE_GRANT_REVISION', 'grant changed during replacement');
           // Keep fences monotonic: old leases must not become valid again.
           tx.instances.put({
             ...current,
@@ -532,7 +523,6 @@ export class LocalPluginPackageAdmission {
             lifecycleRevision: instance.lifecycleRevision + 1,
             updatedAt: Date.now(),
           });
-          tx.grants.put({ ...grants, grantRevision: grant.grantRevision + 1, updatedAt: Date.now() });
         });
       };
       const upgrade = async (revision: number) => {
@@ -540,7 +530,6 @@ export class LocalPluginPackageAdmission {
           ...candidate,
           pluginInstanceId: current.pluginInstanceId,
           expectedLifecycleRevision: revision,
-          expectedGrantRevision: grants.grantRevision,
         });
         upgraded = result;
         await this.options.reconcileConfiguration?.(candidate.packagePluginId, current.pluginInstanceId);
@@ -560,13 +549,6 @@ export class LocalPluginPackageAdmission {
           expectedRevision: current.lifecycleRevision,
           stopReason: 'package_update',
           resumeFailureCode: 'UPDATE_RESUME_FAILED',
-          preflight: async () => {
-            const grant = (await this.options.inventory.store.snapshot()).grants.find(
-              (item) => item.pluginInstanceId === current.pluginInstanceId,
-            );
-            if (grant?.grantRevision !== grants.grantRevision)
-              throw new PluginInventoryError('STALE_GRANT_REVISION', 'grant changed during package preparation');
-          },
           operation: (stopped) => upgrade(stopped.lifecycleRevision),
           rollback,
         })

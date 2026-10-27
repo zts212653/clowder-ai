@@ -11,17 +11,17 @@ Plugin *management* and plugin *implementation* live in separate repositories, c
 | **`clowder-ai`** (core) | Plugin discovery and install, the management UI, authorization, the **Host Broker** that runs plugins, orchestration, audit, and core thread/message/task data. |
 | **`clowder-ai-plugins`** | The plugin **contract**, the plugin-side **SDK** and standalone runtime, scaffolding, official plugins, plugin-owned business data and conformance fixtures. |
 
-The plugins repo is **not** a plugin manager. Official plugins are built and published there independently; the host downloads or receives a plugin artifact, validates its manifest and digest, obtains the user's authorization, and only then installs, enables, and runs it through the Host Broker. **First-party and third-party plugins use the same SDK and the same authorization channel** — there is no privileged side door.
+The plugin repository implements and publishes packages; Host installs and integrates them. Supported sources are the reviewed official repository and repositories managed by a user’s own team. The SDK defines the bidirectional public interface. Host automatically registers an enabled plugin’s declared MCP and routes its calls using the existing plugin token and invocation context. It does not maintain a second per-plugin SDK API permission list. Inventory persists packages and instances only. Historical API grant fields are ignored on snapshot input; only the legacy SDK hello response projects its two required wire fields from the original manifest. Internal sessions, runtime leases and API admission do not carry grant state.
 
 ## The contract
 
-`@clowder-ai/plugin-contract` is the machine-readable source of truth both sides consume — JSON Schema, generated types, a capability table, and conformance fixtures. It defines three things:
+`@clowder-ai/plugin-contract` is the machine-readable source of truth both sides consume — JSON Schema, generated types, operation metadata, and conformance fixtures. It defines three things:
 
 - **The input envelope** — every input a plugin receives is described on two axes: its **origin** (where it came from) and its **epistemic status** (how settled or trusted that information is).
 - **Ordinary operations and results** — messages, task data, actions, delivery receipts and byte streams.
-- **The manifest and capability types** — what a plugin declares it owns and is allowed to do.
+- **The manifest and capability types** — the resources and operations a plugin integrates.
 
-Host and plugins consume the same versioned contract. Package validation and conformance checks verify their declared capabilities and operation shapes.
+Host and plugins consume the same versioned contract. Package validation and conformance checks verify package declarations and operation shapes.
 
 ## The SDK
 
@@ -147,14 +147,14 @@ Catalog packages retain their own registry integrity validation.
 One bounded, cancellable operation covers inspection, graph construction, sealing and packing. Source
 members, metadata, resolution and lock are rechecked before publication; aggregate graph work and archive
 size have explicit limits. Cancellation stops scheduling new work and awaits active filesystem operations
-before cleanup. Validation failures precede grant/inventory writes. Standalone directories without
+before cleanup. Validation failures precede inventory writes. Standalone directories without
 package.json retain the existing bounded copy path. Git installation can prepare a source through its
 existing declared build workflow; direct admission does not run source install/build scripts.
 
 ## Verification boundaries
 
 Exercise package admission and lifecycle against isolated data, including invalid archives, revoked
-grants, config refresh, stop/restart, failed replacement and retained data. Verify terminal message
+config refresh, stop/restart, failed replacement and retained data. Verify terminal message
 publication for successful and failed member responses; processing placeholders are not deliveries.
 For UI identity, exercise persisted message → history and reply projection → the common member avatar.
 Only manifest presentation supplies plugin images/colors; old records without presentation use the

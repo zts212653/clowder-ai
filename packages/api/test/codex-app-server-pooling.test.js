@@ -266,10 +266,9 @@ for (const resumeKind of ['replacement', 'cold', 'unregistered-project']) {
         pluginId: 'fixture',
         manifest: {
           features: [{ capabilities: [], contributions: [{ type: 'mcp', id: 'native' }] }],
-          contributions: [{ type: 'mcp', id: 'native', actions: [{ method: 'fixture.run' }] }],
+          contributions: [{ type: 'mcp', id: 'native' }],
         },
       },
-      effectiveGrants: [],
     };
     let actionCalls = 0;
     let actions = new NativePluginActions(async () => authority);

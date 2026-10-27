@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import {
   type EntrustedTaskDataControllerCoordinatesV1,
   type EntrustedTaskDataControllerReceiptV1,
+  entrustedTaskDataControllerCoordinatesV1Schema,
   entrustedWorkV1Schema,
   type TaskItem,
 } from '@cat-cafe/shared';
@@ -21,7 +22,6 @@ export interface EntrustedTaskDataControllerAuthority {
   readonly pluginInstanceId: string;
   readonly moduleRef: string;
   readonly lifecycleRevision: number;
-  readonly grantRevision: number;
 }
 
 export interface EntrustedTaskDataControllerOwnerOperation {
@@ -88,7 +88,16 @@ export function transitionEntrustedTaskDataController(
   const digest = payloadDigest(input);
   const replay = work.dataController?.receipts.find((receipt) => receipt.operationId === input.operationId);
   if (replay) {
-    return replay.payloadDigest === digest
+    // Old digests include a retired input. Recover it only from the immutable
+    // bind receipt (also referenced by revoke), never from current authority.
+    const bindingReceipt = work.dataController?.receipts.find(
+      (receipt): receipt is Extract<EntrustedTaskDataControllerReceiptV1, { kind: 'bind' }> =>
+        receipt.kind === 'bind' &&
+        receipt.receiptRef === (replay.kind === 'bind' ? replay.receiptRef : replay.controllerReceiptRef),
+    );
+    const historicalRevision = bindingReceipt?.controller.grantRevision;
+    return replay.payloadDigest === digest ||
+      (historicalRevision !== undefined && replay.payloadDigest === payloadDigest(input, historicalRevision))
       ? { kind: 'replayed', task, receipt: replay }
       : { kind: 'operation_conflict', task };
   }
@@ -118,10 +127,10 @@ function bindTaskDataController(
     !staleControllerCanRebind(work.dataController.binding, input.controller)
   )
     return { kind: 'controller_conflict', task };
-  const coordinates: EntrustedTaskDataControllerCoordinatesV1 = {
+  const coordinates = entrustedTaskDataControllerCoordinatesV1Schema.parse({
     ...input.expected,
     ...input.controller,
-  };
+  });
   const receipt: EntrustedTaskDataControllerReceiptV1 = {
     ...receiptBase(task.id, input, digest, now),
     kind: 'bind',
@@ -208,7 +217,11 @@ function ownerSnapshotMatches(
   );
 }
 
-function payloadDigest(input: EntrustedTaskDataControllerTransition): `sha256:${string}` {
+function payloadDigest(input: EntrustedTaskDataControllerTransition, historicalRevision?: number): `sha256:${string}` {
+  const controller = {
+    ...input.controller,
+    ...(historicalRevision === undefined ? {} : { grantRevision: historicalRevision }),
+  };
   const stable =
     input.action === 'bind'
       ? {
@@ -216,7 +229,7 @@ function payloadDigest(input: EntrustedTaskDataControllerTransition): `sha256:${
           taskId: input.taskId,
           operationId: input.operationId,
           expected: input.expected,
-          controller: input.controller,
+          controller,
           ownerOperation: operationIdentity(input.ownerOperation),
         }
       : {
@@ -225,7 +238,7 @@ function payloadDigest(input: EntrustedTaskDataControllerTransition): `sha256:${
           operationId: input.operationId,
           expectedBindingRevision: input.expectedBindingRevision,
           expectedControllerReceiptRef: input.expectedControllerReceiptRef,
-          controller: input.controller,
+          controller,
           ownerOperation: operationIdentity(input.ownerOperation),
         };
   return `sha256:${createHash('sha256').update(JSON.stringify(stable)).digest('hex')}`;
@@ -239,8 +252,7 @@ function controllerMatches(
     binding.pluginId === controller.pluginId &&
     binding.pluginInstanceId === controller.pluginInstanceId &&
     binding.moduleRef === controller.moduleRef &&
-    binding.lifecycleRevision === controller.lifecycleRevision &&
-    binding.grantRevision === controller.grantRevision
+    binding.lifecycleRevision === controller.lifecycleRevision
   );
 }
 
@@ -255,8 +267,7 @@ function staleControllerCanRebind(
     binding.pluginId === controller.pluginId &&
     binding.moduleRef === controller.moduleRef &&
     (binding.pluginInstanceId !== controller.pluginInstanceId ||
-      binding.lifecycleRevision !== controller.lifecycleRevision ||
-      binding.grantRevision !== controller.grantRevision)
+      binding.lifecycleRevision !== controller.lifecycleRevision)
   );
 }
 

@@ -74,7 +74,6 @@ test('a second package for the same provider fails to enable, is stopped again, 
 
 test('a package that could not serve fails to enable and is stopped again, holding nothing', async (t) => {
   const cases = {
-    'the owner did not grant cloud.conversation.host': { packages: [{ manifest: hostManifest(), grants: [] }] },
     'the module does not expose a declared action': {
       packages: [{ manifest: hostManifest(), exposes: [METHODS.append, METHODS.list] }],
     },
@@ -108,7 +107,6 @@ function admission(manifest) {
   return {
     instance: { pluginInstanceId: 'pi_unit' },
     packageRecord: { pluginId: manifest.pluginId, manifest },
-    effectiveGrants: ['cloud.conversation.host'],
   };
 }
 

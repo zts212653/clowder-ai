@@ -11,7 +11,6 @@ export interface StoredPluginManifest extends Readonly<Record<string, unknown>> 
   readonly features: readonly {
     readonly id: string;
     readonly name: string;
-    readonly capabilities: readonly string[];
   }[];
   readonly runtime?: { readonly transport: string; readonly dataDirectory?: string };
 }
@@ -28,15 +27,7 @@ export function storedManifest(value: unknown, label: string): StoredPluginManif
     !['pluginId', 'version', 'contractVersion', 'name'].every((key) => text(value[key])) ||
     !validatePluginId(value.pluginId) ||
     !Array.isArray(value.features) ||
-    value.features.some(
-      (feature) =>
-        !record(feature) ||
-        !text(feature.id) ||
-        !text(feature.name) ||
-        !Array.isArray(feature.capabilities) ||
-        feature.capabilities.some((capability) => !text(capability)) ||
-        new Set(feature.capabilities).size !== feature.capabilities.length,
-    ) ||
+    value.features.some((feature) => !record(feature) || !text(feature.id) || !text(feature.name)) ||
     (value.runtime !== undefined &&
       (!record(value.runtime) ||
         !text(value.runtime.transport) ||

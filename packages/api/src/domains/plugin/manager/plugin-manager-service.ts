@@ -174,7 +174,6 @@ function installedCandidate(plugin: PluginManagerDetail): PluginManagerCatalogCa
     ...(plugin.iconBg === undefined ? {} : { iconBg: plugin.iconBg }),
     ...(plugin.publisher === undefined ? {} : { publisher: plugin.publisher }),
     ownerAuthRequired: plugin.auth !== 'not-required',
-    capabilities: plugin.capabilities.map(({ active: _active, ...capability }) => capability),
     ...(plugin.contributions === undefined ? {} : { contributions: plugin.contributions }),
   };
 }
@@ -184,9 +183,6 @@ function installedOverrides(plugin: PluginManagerDetail): PluginManagerProjectio
     authState: plugin.auth,
     configState: plugin.config,
     intentState: plugin.intent,
-    activeCapabilityIds: plugin.capabilities
-      .filter((capability) => capability.active)
-      .map((capability) => capability.id),
   };
 }
 

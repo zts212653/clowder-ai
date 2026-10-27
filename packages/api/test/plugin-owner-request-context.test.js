@@ -35,7 +35,6 @@ async function fixture(t, handler, { anonymous = false, timeoutMs = 1000, fastif
           ],
         },
       },
-      effectiveGrants: [],
     },
     handler,
   );

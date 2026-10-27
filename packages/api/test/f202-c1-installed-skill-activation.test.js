@@ -3,7 +3,7 @@ import { access, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { afterEach, test } from 'node:test';
-import { validateEffectiveGrants, validateManifest } from '@clowder-ai/plugin-contract';
+import { validateManifest } from '@clowder-ai/plugin-contract';
 
 import {
   readCapabilitiesConfig,
@@ -60,7 +60,7 @@ test('enabling a locally installed package registers its declared skill capabili
   const runtime = createDormantPluginRuntimeComposition({
     projectRoot,
     messageStore: new MessageStore(),
-    contract: { manifestContractRange: '0.1.0', validateEffectiveGrants, validateManifest },
+    contract: { manifestContractRange: '0.1.0', validateManifest },
   });
   const composition = createPluginManagerRuntimeComposition({
     runtime,
@@ -174,7 +174,7 @@ test('a skill activation failure leaves no capability registered by the package'
   const runtime = createDormantPluginRuntimeComposition({
     projectRoot,
     messageStore: new MessageStore(),
-    contract: { manifestContractRange: '0.1.0', validateEffectiveGrants, validateManifest },
+    contract: { manifestContractRange: '0.1.0', validateManifest },
   });
   const composition = createPluginManagerRuntimeComposition({
     runtime,

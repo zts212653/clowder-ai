@@ -40,7 +40,6 @@ describe('K-2B persisted restart normalization', () => {
         runtimeLeaseId: 'lease-restart',
         pluginInstanceId: INSTANCE_ID,
         packageDigest: candidateHello().packageDigest,
-        grantRevision: 1,
         method: 'messaging.send',
         settlementKey: 'settlement-1',
         inputDigest: 'digest-1',
@@ -99,7 +98,6 @@ describe('K-2B persisted restart normalization', () => {
       runtimeLeaseId: 'lease-restart',
       pluginInstanceId: INSTANCE_ID,
       packageDigest: candidateHello().packageDigest,
-      grantRevision: 1,
       method: 'messaging.send',
       settlementKey: 'settlement-forged',
       inputDigest: 'digest-forged',
@@ -145,20 +143,17 @@ describe('K-2B persisted restart normalization', () => {
 });
 
 describe('retired contract history', () => {
-  it('preserves obsolete grant and method receipts without admitting their runtime authority', async () => {
-    const { readFileSync } = await import('node:fs');
+  it('preserves retired method receipts without admitting their runtime authority', async () => {
     const root = mkdtempSync(join(os.tmpdir(), 'broker-retired-contract-'));
     const path = join(root, 'broker.json');
     const { inventory, store } = await activePersistedHarness(path);
     const old = await store.snapshot();
-    old.sessions[0].effectiveGrants = ['events.publish'];
     old.calls.push({
       ledgerKey: 'old-call',
       brokerSessionId: 'bs-restart',
       runtimeLeaseId: 'lease-restart',
       pluginInstanceId: INSTANCE_ID,
       packageDigest: candidateHello().packageDigest,
-      grantRevision: 1,
       method: 'events.publish',
       settlementKey: 'old-settlement',
       inputDigest: 'old-input',
@@ -174,12 +169,7 @@ describe('retired contract history', () => {
     assert.equal(await broker.recoverAfterRestart(), 1);
     const recovered = await restartedStore.snapshot();
     assert.deepEqual(recovered.calls, old.calls);
-    assert.deepEqual(recovered.sessions[0].effectiveGrants, ['events.publish']);
     assert.equal(recovered.sessions[0].phase, 'closed');
     assert.equal(recovered.runtimeLeases[0].state, 'closed');
-    const corrupt = JSON.parse(readFileSync(path, 'utf8'));
-    corrupt.sessions[0].effectiveGrants = ['events.publish', 'events.publish'];
-    writeFileSync(path, JSON.stringify(corrupt));
-    await assert.rejects(new FileHostBrokerStore(path).snapshot(), { code: 'CORRUPT_SNAPSHOT' });
   });
 });

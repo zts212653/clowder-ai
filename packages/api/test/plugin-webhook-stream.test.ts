@@ -36,7 +36,6 @@ async function fixture(t: TestContext, run: (context: PluginOwnerRequestContext)
           ],
         },
       },
-      effectiveGrants: [],
     } as never,
     async () => {
       const context = currentPluginOwnerRequestContext('pi_stream');

@@ -12,7 +12,6 @@ test('exact archive admits a public static editor into disabled inventory withou
   assert.equal(snapshot.instances[0].activationState, 'disabled');
   assert.equal(snapshot.instances[0].runtimeState, 'stopped');
   assert.equal(snapshot.instances[0].configReadiness, 'incomplete');
-  assert.deepEqual(snapshot.grants[0].effectiveGrants, []);
 });
 
 test('a signed archive with an incorrect renderer SRI is rejected before inventory admission', async (t) => {
@@ -26,10 +25,6 @@ for (const [name, mutation] of [
   [
     'executable entrypoint',
     (m: PluginManifest) => ({ ...m, runtime: { transport: 'builtin' as const, entrypoint: 'renderer/code.js' } }),
-  ],
-  [
-    'effect capability',
-    (m: PluginManifest) => ({ ...m, features: [{ ...m.features[0], capabilities: ['events.publish' as const] }] }),
   ],
   [
     'configuration',

@@ -34,11 +34,9 @@ async function fixture(t, pkg) {
   const inputs = [origin.id];
   let onRead = async () => {},
     onProvider = async () => {};
-  const grants = [...new Set(pkg.manifest.features.flatMap((feature) => feature.capabilities))];
   const tasks = createPluginTaskHost({
     pluginId: pkg.manifest.pluginId,
     pluginInstanceId: instanceId,
-    effectiveGrants: grants,
     taskStore,
     threadStore,
     readThreadStore: threadStore,
@@ -104,7 +102,6 @@ async function fixture(t, pkg) {
       configReadiness: 'ready',
     },
     packageRecord: { manifest: pkg.manifest },
-    effectiveGrants: grants,
   };
   const carrier = createModuleHostInvocation({ runtime: { actions: () => active.actions } });
   const actions = new NativePluginActions(async () => admission);

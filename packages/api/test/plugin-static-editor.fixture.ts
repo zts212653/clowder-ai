@@ -66,7 +66,6 @@ export async function staticEditorFixture(packageManifest: PluginManifest, body 
     distribution: 'registry' as const,
     archiveUrl: 'https://registry.npmjs.org/@test/static-editor/-/static-editor-0.1.0-alpha.0.tgz',
     packageDigest,
-    effectiveGrants: [],
   };
   const installer = new OfficialPluginPackageInstaller({
     inventory,

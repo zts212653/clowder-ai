@@ -76,19 +76,10 @@ function installedSnapshot(overrides = {}) {
     schemaVersion: 1,
     packages: [packageRecord],
     instances: [instance],
-    grants: [
-      {
-        pluginInstanceId: instance.pluginInstanceId,
-        requestedCapabilities: ['messaging.send'],
-        effectiveGrants: ['messaging.send'],
-        grantRevision: 1,
-        updatedAt: 1_000,
-      },
-    ],
   };
 }
 
-const emptySnapshot = { schemaVersion: 1, packages: [], instances: [], grants: [] };
+const emptySnapshot = { schemaVersion: 1, packages: [], instances: [] };
 
 describe('client source trust is descriptive, not an install or enable gate', () => {
   it('retains trusted catalog provenance recorded at installation', () => {
@@ -128,7 +119,7 @@ describe('client source trust is descriptive, not an install or enable gate', ()
 });
 
 describe('F202 terminal Plugin Manager projection', () => {
-  it('projects declared contributions without relabeling permission grants as tools', () => {
+  it('projects declared contributions as tools', () => {
     const manifest = {
       ...installedSnapshot().packages[0].manifest,
       contributions: [
@@ -222,7 +213,6 @@ describe('F202 terminal Plugin Manager projection', () => {
   it('joins an installed instance without an update or repair affordance', () => {
     const projected = projectPluginManagerCatalogCandidate(candidate, installedSnapshot(), {
       authState: 'not-required',
-      activeCapabilityIds: ['messaging.send'],
     });
 
     assert.equal(projected.pluginInstanceId, 'pi_video');
@@ -230,7 +220,6 @@ describe('F202 terminal Plugin Manager projection', () => {
     assert.equal(projected.config, 'ready');
     assert.equal(projected.intent, 'enabled');
     assert.equal(projected.live, 'running');
-    assert.equal(projected.capabilitySummary[0].active, true);
     assert.deepEqual(projected.actions, {
       install: false,
       setEnabled: true,
@@ -320,7 +309,6 @@ describe('F202 terminal Plugin Manager projection', () => {
     const snapshot = installedSnapshot();
     snapshot.packages[0].packageState = 'quarantined';
     snapshot.instances = [];
-    snapshot.grants = [];
 
     const projected = projectPluginManagerCatalogCandidate(candidate, snapshot);
 

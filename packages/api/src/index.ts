@@ -5252,11 +5252,8 @@ async function main(): Promise<void> {
   const { registerConciergeDesktopRoutes } = await import('./routes/concierge-desktop.js');
   registerConciergeDesktopRoutes(app, { ownerUserId: privateUserId, desktop: pluginRuntime.ownerDesktop });
   app.addHook('onClose', async () => pluginRuntime.shutdown('api_shutdown'));
-  const { resolveLocalPluginEffectiveGrants } = await import('./domains/plugin/manager/machine-catalog-provider.js');
   const { OFFICIAL_BUNDLED_MANIFESTS } = await import('./domains/plugin/official-catalog.js');
-  const { createHostOfficialPluginCatalog, PLUGIN_MANAGER_HOST_POLICIES: pluginManagerHostPolicies } = await import(
-    './domains/plugin/manager/host-official-catalog.js'
-  );
+  const { createHostOfficialPluginCatalog } = await import('./domains/plugin/manager/host-official-catalog.js');
   const { GitMarketplaceRepository } = await import(
     './domains/plugin/manager/marketplace/git-marketplace-repository.js'
   );
@@ -5294,7 +5291,6 @@ async function main(): Promise<void> {
       await companionDesktopComponent.prepare();
     },
     catalogManifests: OFFICIAL_BUNDLED_MANIFESTS,
-    localGrantPolicy: (manifest) => resolveLocalPluginEffectiveGrants(pluginManagerHostPolicies, manifest),
   });
   const { InstalledPluginOperations, pluginOperationRoutes } = await import(
     './domains/plugin/operations/plugin-operation-routes.js'
@@ -5361,20 +5357,6 @@ async function main(): Promise<void> {
     // Offline discovery must not prevent the Host from opening. The durable journal retries
     // unfinished entries on restart; completed entries (including user uninstalls) stay completed.
     app.log.warn({ err: error }, '[api] Initial plugin installation deferred until next startup');
-  }
-  // F202 W2-6: grants follow the Host policy for instances installed before a policy change too;
-  // done before recovery so every resumed runtime starts with the grants it will run with.
-  const { reconcileOfficialPluginGrants } = await import('./domains/plugin/manager/official-plugin-grants.js');
-  const officialGrantChanges = await reconcileOfficialPluginGrants({
-    store: pluginRuntime.inventoryStore,
-    inventory: pluginRuntime.inventory,
-    hostPolicies: pluginManagerHostPolicies,
-  });
-  if (officialGrantChanges.length > 0) {
-    app.log.info(
-      { changes: officialGrantChanges },
-      '[api] F202 official plugin grants reconciled with the Host policy',
-    );
   }
   // Released once app.listen resolves. A resumed desktop window's bridge calls
   // app.inject; before Fastify has booted that breaks the remaining app.register

@@ -78,7 +78,7 @@ export class ConnectorSettingsService {
     },
   ) {}
 
-  private async authority(pluginId: string, write: boolean) {
+  private async authority(pluginId: string) {
     const snapshot = await this.options.inventory.snapshot();
     const instance = snapshot.instances.find(
       (item) => item.pluginId === pluginId && item.lifecycleState === 'installed',
@@ -93,19 +93,9 @@ export class ConnectorSettingsService {
       typeof declaration.label !== 'string'
     )
       throw new ConnectorSettingsError(404, 'Group settings are not declared by this installed plugin');
-    const grant = snapshot.grants.find((item) => item.pluginInstanceId === instance.pluginInstanceId);
-    const requested = new Set(manifest?.features.flatMap((feature) => feature.capabilities));
-    const required = write ? (['plugin.state.get', 'plugin.state.set'] as const) : (['plugin.state.get'] as const);
-    if (required.some((capability) => !requested.has(capability) || !grant?.effectiveGrants.includes(capability)))
-      throw new ConnectorSettingsError(403, 'Group settings storage grant is unavailable');
     if (!this.options.storage) throw new ConnectorSettingsError(503, 'Group settings storage is unavailable');
     return {
-      fence: JSON.stringify([
-        instance.pluginInstanceId,
-        instance.packageDigest,
-        instance.lifecycleRevision,
-        grant?.grantRevision,
-      ]),
+      fence: JSON.stringify([instance.pluginInstanceId, instance.packageDigest, instance.lifecycleRevision]),
       storage: this.options.storage,
     };
   }
@@ -118,10 +108,10 @@ export class ConnectorSettingsService {
 
   async read(pluginId: string, assertRequestCurrent: () => void = () => {}) {
     assertRequestCurrent();
-    const authority = await this.authority(pluginId, false);
+    const authority = await this.authority(pluginId);
     const entry = await authority.storage.get(pluginId, KEY);
     assertRequestCurrent();
-    if ((await this.authority(pluginId, false)).fence !== authority.fence)
+    if ((await this.authority(pluginId)).fence !== authority.fence)
       throw new ConnectorSettingsError(409, 'Plugin changed; reload settings');
     return projection(entry?.revision ?? null, entry ? this.decode(entry.value) : defaults);
   }
@@ -134,7 +124,7 @@ export class ConnectorSettingsService {
         `Invalid group settings field: ${parsed.error.issues[0]?.message ?? 'invalid value'}`,
       );
     assertRequestCurrent();
-    const authority = await this.authority(pluginId, true);
+    const authority = await this.authority(pluginId);
     const entry = await authority.storage.get(pluginId, KEY);
     const previous = entry ? this.decode(entry.value) : defaults;
     if ((entry?.revision ?? null) !== parsed.data.expectedRevision)
@@ -157,7 +147,7 @@ export class ConnectorSettingsService {
     });
     if (value.allowedGroups.length > 5000) throw new ConnectorSettingsError(400, 'Too many groups');
     assertRequestCurrent();
-    if ((await this.authority(pluginId, true)).fence !== authority.fence)
+    if ((await this.authority(pluginId)).fence !== authority.fence)
       throw new ConnectorSettingsError(409, 'Plugin changed; reload settings');
     const result = await authority.storage.compareAndSet(pluginId, KEY, expectedRevision, value);
     if (!result.applied || result.revision === undefined)

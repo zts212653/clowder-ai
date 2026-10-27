@@ -6,8 +6,6 @@ import { CloudAssistantReturnIngestService } from '../dist/domains/cats/services
 import { MemoryCloudReturnGrantStore } from '../dist/domains/cats/services/cloud-bridge/cloud-return-grant.js';
 import { PluginConversationHostAdapter } from '../dist/domains/cats/services/cloud-bridge/plugin-conversation-host/plugin-conversation-host-adapter.js';
 import { MessageStore } from '../dist/domains/cats/services/stores/ports/MessageStore.js';
-import { resolveLocalPluginEffectiveGrants } from '../dist/domains/plugin/manager/machine-catalog-provider.js';
-import { OFFICIAL_PLUGIN_HOST_POLICIES } from '../dist/domains/plugin/manager/official-plugin-host-policies.js';
 import { ARCHIVE, companionHarness } from './helpers/f202-companion-artifact.js';
 import { nativePeer } from './helpers/f202-companion-helper.js';
 import { catConfig, pollerFor } from './helpers/f202-return-poller-harness.js';
@@ -20,39 +18,24 @@ const options = {
   timeout: 30000,
 };
 
-test(
-  'pinned companion receives production grants and its provider lease follows enable/disable/restart',
-  options,
-  async (t) => {
-    const h = await companionHarness(t);
-    const expanded = structuredClone(h.record.manifest);
-    expanded.features[0].capabilities.push('secret.read');
-    assert.deepEqual(
-      resolveLocalPluginEffectiveGrants(OFFICIAL_PLUGIN_HOST_POLICIES, expanded).sort(),
-      ['cloud.conversation.host'],
-      'the package cannot widen its Host-owned grant',
-    );
-    expanded.features[0].capabilities = [];
-    assert.deepEqual(resolveLocalPluginEffectiveGrants(OFFICIAL_PLUGIN_HOST_POLICIES, expanded), []);
-    expanded.pluginId = 'dev.unlisted.companion';
-    assert.deepEqual(resolveLocalPluginEffectiveGrants(OFFICIAL_PLUGIN_HOST_POLICIES, expanded), []);
-    assert.equal(h.registry.current('chatgpt'), undefined);
-    await h.enable();
-    const first = h.registry.current('chatgpt');
-    assert.equal(first.pluginId, 'official.companion.personal-chrome');
-    await h.disable();
-    assert.equal(h.registry.current('chatgpt'), undefined);
-    const afterStop = await first.attempt(first.contribution.appendMessage.method, {
-      conversationId: 'conversation-1',
-      text: 'hello',
-      idempotencyKey: 'source-1',
-    });
-    assert.equal(afterStop.status, 'failed');
-    assert.equal(afterStop.effect, 'not_started');
-    await h.enable();
-    assert.ok(h.registry.current('chatgpt').generation > first.generation);
-  },
-);
+test('pinned companion provider lease follows enable/disable/restart', options, async (t) => {
+  const h = await companionHarness(t);
+  assert.equal(h.registry.current('chatgpt'), undefined);
+  await h.enable();
+  const first = h.registry.current('chatgpt');
+  assert.equal(first.pluginId, 'official.companion.personal-chrome');
+  await h.disable();
+  assert.equal(h.registry.current('chatgpt'), undefined);
+  const afterStop = await first.attempt(first.contribution.appendMessage.method, {
+    conversationId: 'conversation-1',
+    text: 'hello',
+    idempotencyKey: 'source-1',
+  });
+  assert.equal(afterStop.status, 'failed');
+  assert.equal(afterStop.effect, 'not_started');
+  await h.enable();
+  assert.ok(h.registry.current('chatgpt').generation > first.generation);
+});
 
 test(
   'pinned companion takes over a synthetic legacy authorization without inventing row timestamps',

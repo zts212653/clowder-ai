@@ -59,7 +59,6 @@ export async function mediaHostFixture(
           ),
         },
       },
-      effectiveGrants: [],
     } as never,
     (id, method, input) => carrier.invoke(id, method, input),
   );

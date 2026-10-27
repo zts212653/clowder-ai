@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { validateEffectiveGrants, validateManifest } from '@clowder-ai/plugin-contract';
+import { validateManifest } from '@clowder-ai/plugin-contract';
 
 const { FileMessagingMediaLedger } = await import('../dist/domains/messaging/media-ledger.js');
 const { HostMediaSourceImporter } = await import('../dist/domains/plugin/media-source-importer.js');
@@ -295,7 +295,7 @@ test('an admitted in-test media-source plugin is invoked through the production 
       onMessagePublished: () => {
         wakes += 1;
       },
-      contract: { manifestContractRange: '0.1.0', validateEffectiveGrants, validateManifest },
+      contract: { manifestContractRange: '0.1.0', validateManifest },
     });
     const manager = createPluginManagerRuntimeComposition({
       runtime,

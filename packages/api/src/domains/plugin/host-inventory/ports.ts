@@ -1,4 +1,4 @@
-import type { PluginGrantRecord, PluginInstanceRecord, PluginInventorySnapshot, PluginPackageRecord } from './types.js';
+import type { PluginInstanceRecord, PluginInventorySnapshot, PluginPackageRecord } from './types.js';
 
 export interface PackageInventoryStore {
   get(packageDigest: string): PluginPackageRecord | undefined;
@@ -13,16 +13,9 @@ export interface PluginInstanceStore {
   put(record: PluginInstanceRecord): void;
 }
 
-export interface GrantStore {
-  get(pluginInstanceId: string): PluginGrantRecord | undefined;
-  list(): readonly PluginGrantRecord[];
-  put(record: PluginGrantRecord): void;
-}
-
 export interface PluginInventoryTransaction {
   readonly packages: PackageInventoryStore;
   readonly instances: PluginInstanceStore;
-  readonly grants: GrantStore;
 }
 
 export interface PluginInventoryStore {

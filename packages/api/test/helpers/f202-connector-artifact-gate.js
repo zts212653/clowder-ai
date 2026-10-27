@@ -40,8 +40,6 @@ import {
   MemoryPluginInventoryStore,
   packageDirectoryName,
 } from '../../dist/domains/plugin/index.js';
-import { resolveLocalPluginEffectiveGrants } from '../../dist/domains/plugin/manager/machine-catalog-provider.js';
-import { OFFICIAL_PLUGIN_HOST_POLICIES } from '../../dist/domains/plugin/manager/official-plugin-host-policies.js';
 import { archiveFileName } from './f202-connector-artifact-pins.js';
 
 export { RELEASES } from './f202-connector-artifact-pins.js';
@@ -80,10 +78,7 @@ export async function admitAndLoad(release, root) {
     createInstanceId: () => `pi_${release.name}`,
     now: () => 12_000,
   });
-  // F202 W2-6: the grants production gives this package — the Host policy table — not everything
-  // its manifest asks for; an approved artifact must work with what the Host really grants it.
-  const grantPolicy = (manifest) => resolveLocalPluginEffectiveGrants(OFFICIAL_PLUGIN_HOST_POLICIES, manifest);
-  const admission = new LocalPluginPackageAdmission({ inventory, packagesRoot, grantPolicy });
+  const admission = new LocalPluginPackageAdmission({ inventory, packagesRoot });
   const installed = await admission.install({ kind: 'local-archive', path: archive });
   const row = (await store.snapshot()).packages.find(({ packageDigest }) => packageDigest === installed.packageDigest);
   assert.equal(row?.provenance.dependencyClosure, 'shipped');
@@ -97,7 +92,7 @@ export async function admitAndLoad(release, root) {
   assert.ok(entrypoint.startsWith(`${packageRoot}/`), 'runtime entrypoint must stay inside admitted package');
   const namespace = await import(pathToFileURL(entrypoint).href);
   assert.equal(typeof namespace[release.factory], 'function');
-  return { manifest, factory: namespace[release.factory], grants: grantPolicy(manifest) };
+  return { manifest, factory: namespace[release.factory] };
 }
 
 /** The IM platform adapter: every call recorded; a media stream is drained as an uploader would. */
@@ -200,7 +195,6 @@ export async function createGateHost(root) {
         pluginId: loaded.manifest.id,
         pluginInstanceId: instanceId,
         ownerUserId: OWNER,
-        effectiveGrants: loaded.grants,
         threadStore: threads,
         messaging,
         delivery,
@@ -208,13 +202,9 @@ export async function createGateHost(root) {
       });
       const probe = adapterProbe();
       let running = true;
-      const streams = createPluginStreamsHost(
-        mediaReads,
-        { pluginInstanceId: instanceId, effectiveGrants: loaded.grants },
-        () => {
-          if (!running) throw new Error('plugin stopped');
-        },
-      );
+      const streams = createPluginStreamsHost(mediaReads, { pluginInstanceId: instanceId }, () => {
+        if (!running) throw new Error('plugin stopped');
+      });
       // Business mapping belongs to the plugin's storage; the Host thread service sees no binding key.
       const state = new Map([
         [
@@ -228,7 +218,6 @@ export async function createGateHost(root) {
       let revision = 1;
       const storage = createPluginStorageHost({
         pluginId: loaded.manifest.id,
-        effectiveGrants: loaded.grants,
         storage: {
           get: async (_pluginId, key) => structuredClone(state.get(key)),
           list: async () => structuredClone(Object.fromEntries(state)),
@@ -268,7 +257,6 @@ export async function createGateHost(root) {
           pluginId: loaded.manifest.id,
           ownerUserId: OWNER,
           projectPath: root,
-          effectiveGrants: loaded.grants,
           threadStore: threads,
           messageStore,
           threadDeepLinkUrl: (id) => `/threads/${id}`,
@@ -285,7 +273,6 @@ export async function createGateHost(root) {
       return {
         probe,
         streams,
-        grants: loaded.grants,
         stop: async () => {
           await active.preStop?.({ reason: 'test_done', deadline: Date.now() + 30_000 });
           running = false;

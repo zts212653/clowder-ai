@@ -4,7 +4,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import { join } from 'node:path';
 import { describe, it } from 'node:test';
-import { validateEffectiveGrants, validateManifest } from '@clowder-ai/plugin-contract';
+import { validateManifest } from '@clowder-ai/plugin-contract';
 import {
   FilePluginInventoryStore,
   HostInventoryControlPlane,
@@ -29,7 +29,6 @@ function candidate() {
     computedPackageDigest,
     expectedPackageDigest: computedPackageDigest,
     packagePluginId: 'dev.clowder.restart',
-    effectiveGrants: ['messaging.send'],
   };
 }
 
@@ -48,7 +47,6 @@ describe('K-2A persisted restart normalization', () => {
     const contract = {
       manifestContractRange: '>=0.1.0-beta.13 <0.1.1 || >=0.2.0 <=0.2.0',
       validateManifest,
-      validateEffectiveGrants,
     };
     const store = new FilePluginInventoryStore(path, { contract });
     const current = new HostInventoryControlPlane(store, { contract });
@@ -57,7 +55,6 @@ describe('K-2A persisted restart normalization', () => {
     assert.equal(recovered.packages[0].manifest, null);
     assert.deepEqual(recovered.packages[0].incompatibleManifest, before.packages[0].manifest);
     assert.deepEqual(recovered.instances, before.instances);
-    assert.deepEqual(recovered.grants, before.grants);
     assert.equal(readFileSync(path, 'utf8'), bytes);
 
     admitted.manifest.contractVersion = '0.2.0';
@@ -73,7 +70,6 @@ describe('K-2A persisted restart normalization', () => {
     const previousContract = {
       manifestContractRange: '0.1.1',
       validateManifest,
-      validateEffectiveGrants,
     };
     const firstStore = new FilePluginInventoryStore(path, { contract: previousContract });
     const first = new HostInventoryControlPlane(firstStore, {
@@ -106,11 +102,10 @@ describe('K-2A persisted restart normalization', () => {
     t.after(() => rmSync(root, { recursive: true, force: true }));
     const path = join(root, 'inventory.json');
     // Public Host b1fe2966 admitted these exact versions before the beta.16 bump.
-    // Keep real manifest/grant validators; only the historical version policy differs.
+    // Keep real manifest validators; only the historical version policy differs.
     const previousContract = {
       manifestContractRange: '0.1.0 || 0.1.0-beta.13 || 0.1.0-beta.15',
       validateManifest,
-      validateEffectiveGrants,
     };
     const previousStore = new FilePluginInventoryStore(path, { contract: previousContract });
     const previousHost = new HostInventoryControlPlane(previousStore, {
@@ -172,7 +167,6 @@ describe('K-2A persisted restart normalization', () => {
 
     assert.equal(changed, 1);
     assert.deepEqual(after.packages, before.packages);
-    assert.deepEqual(after.grants, before.grants);
     assert.equal(after.instances[0].pluginInstanceId, 'pi_restart');
     assert.equal(after.instances[0].configReadiness, 'ready');
     assert.equal(after.instances[0].activationState, 'error');
@@ -186,7 +180,7 @@ describe('K-2A persisted restart normalization', () => {
     const corruptPath = join(root, 'corrupt.json');
     const futurePath = join(root, 'future.json');
     writeFileSync(corruptPath, '{not-json');
-    writeFileSync(futurePath, JSON.stringify({ schemaVersion: 99, packages: [], instances: [], grants: [] }));
+    writeFileSync(futurePath, JSON.stringify({ schemaVersion: 99, packages: [], instances: [] }));
 
     await assert.rejects(
       () => new FilePluginInventoryStore(corruptPath).snapshot(),
@@ -224,23 +218,6 @@ describe('K-2A persisted restart normalization', () => {
     assert.equal(recovered.activationState, 'enabled');
     assert.equal(recovered.runtimeState, 'stopped');
     assert.equal(recovered.lifecycleRevision, 1);
-  });
-
-  it('rejects persisted grants that were not requested by the referenced package manifest', async () => {
-    const root = mkdtempSync(join(os.tmpdir(), 'plugin-inventory-forged-grant-'));
-    const path = join(root, 'inventory.json');
-    const store = new FilePluginInventoryStore(path);
-    const controlPlane = new HostInventoryControlPlane(store, { createInstanceId: () => 'pi_restart' });
-    await controlPlane.installPackage(candidate());
-    const snapshot = await store.snapshot();
-    snapshot.grants[0].requestedCapabilities = ['onMessage'];
-    snapshot.grants[0].effectiveGrants = ['onMessage'];
-    writeFileSync(path, JSON.stringify(snapshot));
-
-    await assert.rejects(
-      () => new FilePluginInventoryStore(path).snapshot(),
-      (error) => error?.code === 'CORRUPT_SNAPSHOT',
-    );
   });
 
   it('rejects runtime diagnostics with unrecognized fields instead of persisting raw detail', async () => {
@@ -292,7 +269,6 @@ describe('K-2A persisted restart normalization', () => {
     assert.equal(recovered.packages[0].manifest, null);
     assert.deepEqual(recovered.packages[0].incompatibleManifest, snapshot.packages[0].manifest);
     assert.deepEqual(recovered.instances, snapshot.instances);
-    assert.deepEqual(recovered.grants, snapshot.grants);
   });
 
   it('rejects a current installed instance backed by a quarantined package', async () => {

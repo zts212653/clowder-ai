@@ -63,17 +63,16 @@ test('restricted native scope remains a detached immutable policy, not owner aut
     mode: 'plugin_native',
     pluginInstanceId: 'plugin',
     contributionId: 'native',
-    actionMethods: ['example.send'],
   };
   const { fence, record } = fixture({ ownerAuthProvenance: 'unknown', toolExecutionPolicy: policy });
   assert.equal(fence.identity.ownerAuthProvenance, 'unknown');
   assert.deepEqual(fence.identity.toolExecutionPolicy, policy);
   assert.notEqual(fence.identity.toolExecutionPolicy, record.toolExecutionPolicy);
-  assert.equal(Object.isFrozen(fence.identity.toolExecutionPolicy.actionMethods), true);
+  assert.equal(Object.isFrozen(fence.identity.toolExecutionPolicy), true);
   await fence.assertCurrent();
-  record.toolExecutionPolicy.actionMethods.push('example.other');
+  record.toolExecutionPolicy.contributionId = 'other';
   await assert.rejects(fence.assertInvocationCurrent, /no longer current/);
-  assert.deepEqual(fence.identity.toolExecutionPolicy.actionMethods, ['example.send']);
+  assert.equal(fence.identity.toolExecutionPolicy.contributionId, 'native');
   fence.close();
 });
 
@@ -105,7 +104,6 @@ for (const [name, mutate] of [
         mode: 'plugin_native',
         pluginInstanceId: 'plugin',
         contributionId: 'native',
-        actionMethods: ['example.send'],
       };
     },
   ],
@@ -129,7 +127,6 @@ test('removing an allowed native policy invalidates the original call', async ()
       mode: 'plugin_native',
       pluginInstanceId: 'plugin',
       contributionId: 'native',
-      actionMethods: ['example.send'],
     },
   });
   await fence.assertCurrent();

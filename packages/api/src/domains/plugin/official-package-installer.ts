@@ -7,7 +7,6 @@ import { FilesystemVerifiedPluginPackageLocator, type VerifiedPluginPackage } fr
 import type { PluginManifestValidator } from './external-runtime/package-staging.js';
 import { reportPackageArchiveFailure } from './external-runtime/package-staging-diagnostics.js';
 import { snapshotPluginSurfaceAssets } from './external-runtime/package-surface-assets.js';
-import { grantsWithinRequest } from './host-inventory/contract-policy.js';
 import type { HostInventoryControlPlane } from './host-inventory/control-plane.js';
 import { requireExecutableManifest } from './host-inventory/stored-manifest.js';
 import {
@@ -163,7 +162,7 @@ export class OfficialPluginPackageInstaller {
       )
         return existing;
       // Explicit reinstall also repairs an absent Host desktop component, using
-      // the same verified archive and current catalog grant fence.
+      // the same verified archive and current catalog release fence.
       return this.withVerifiedPackage(entry, async () => existing);
     }
 
@@ -214,10 +213,6 @@ export class OfficialPluginPackageInstaller {
         `expected lifecycle revision ${expectedLifecycleRevision}, current ${instance.lifecycleRevision}`,
       );
     }
-    const grants = snapshot.grants.find((candidate) => candidate.pluginInstanceId === pluginInstanceId);
-    if (!grants) {
-      throw new OfficialPluginInstallError('INVENTORY_REJECTED', 'official plugin grant record is unavailable');
-    }
     const installedPackage = snapshot.packages.find((candidate) => candidate.packageDigest === instance.packageDigest);
     if (instance.packageDigest === entry.packageDigest) {
       assertInstalledPackageVersion(entry, installedPackage?.version);
@@ -225,7 +220,6 @@ export class OfficialPluginPackageInstaller {
       return {
         pluginInstanceId,
         packageDigest: instance.packageDigest,
-        grantRevision: grants.grantRevision,
       };
     }
     const versionComparison = installedPackage
@@ -255,12 +249,11 @@ export class OfficialPluginPackageInstaller {
             ...candidate,
             pluginInstanceId,
             expectedLifecycleRevision,
-            expectedGrantRevision: grants.grantRevision,
           });
         } catch (error) {
           if (
             error instanceof PluginInventoryError &&
-            ['STALE_INSTANCE', 'STALE_LIFECYCLE_REVISION', 'STALE_GRANT_REVISION'].includes(error.code)
+            ['STALE_INSTANCE', 'STALE_LIFECYCLE_REVISION'].includes(error.code)
           ) {
             throw new OfficialPluginInstallError('STALE_REVISION', 'official plugin state changed during update', {
               cause: error,
@@ -404,9 +397,7 @@ export class OfficialPluginPackageInstaller {
           (feature) => feature.contributions?.some((item) => item.type === 'desktop-window') === true,
         );
       if (declaresStaticEditor || declaresDesktopWindow) {
-        const admitted = declaresDesktopWindow
-          ? desktopWindow !== undefined && entry.effectiveGrants.every((grant) => grant === 'windows.create')
-          : staticEditors.length > 0 && entry.effectiveGrants.length === 0;
+        const admitted = declaresDesktopWindow ? desktopWindow !== undefined : staticEditors.length > 0;
         if (!admitted) {
           throw new OfficialPluginInstallError(
             'UNSUPPORTED_TRANSPORT',
@@ -416,7 +407,7 @@ export class OfficialPluginPackageInstaller {
         // Static builtin admission still consumes the exact archive and public
         // manifest. Validate renderer bytes now; admission never starts a server.
         await snapshotPluginSurfaceAssets(located, desktopWindow ? [desktopWindow] : staticEditors);
-        if (desktopWindow && entry.effectiveGrants.includes('windows.create')) {
+        if (desktopWindow) {
           try {
             await this.options.prepareDesktopComponent?.();
           } catch (error) {
@@ -435,7 +426,6 @@ export class OfficialPluginPackageInstaller {
         computedPackageDigest: entry.packageDigest,
         expectedPackageDigest: entry.packageDigest,
         packagePluginId: entry.pluginId,
-        effectiveGrants: grantsWithinRequest(entry.effectiveGrants, located.manifest),
         signalSchemas,
         provenance: {
           kind: 'catalog',
@@ -478,7 +468,6 @@ export class OfficialPluginPackageInstaller {
       computedPackageDigest: entry.packageDigest,
       expectedPackageDigest: entry.packageDigest,
       packagePluginId: entry.pluginId,
-      effectiveGrants: grantsWithinRequest(entry.effectiveGrants, manifest),
       signalSchemas: {},
       provenance: { kind: 'catalog', catalogId: entry.catalogId, packageName: entry.packageName },
     });
@@ -511,12 +500,9 @@ export class OfficialPluginPackageInstaller {
     const installedPackage = snapshot.packages.find((candidate) => candidate.packageDigest === instance.packageDigest);
     assertInstalledPackageVersion(entry, installedPackage?.version);
     if (installedPackage) requireExecutableManifest(installedPackage);
-    const grants = snapshot.grants.find((candidate) => candidate.pluginInstanceId === instance.pluginInstanceId);
-    if (!grants) return undefined;
     return {
       pluginInstanceId: instance.pluginInstanceId,
       packageDigest: instance.packageDigest,
-      grantRevision: grants.grantRevision,
     };
   }
 }

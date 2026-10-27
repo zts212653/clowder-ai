@@ -16,8 +16,6 @@ export const PluginArchiveReplacementConfirmationSchema = z
     currentPackageDigest: digest,
     candidatePackageDigest: digest,
     expectedLifecycleRevision: revision,
-    expectedGrantRevision: revision,
-    candidateEffectiveGrants: z.array(z.string().min(1).max(128)).max(256),
   })
   .strict();
 

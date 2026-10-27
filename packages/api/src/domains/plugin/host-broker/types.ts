@@ -1,4 +1,4 @@
-import type { CandidateHello, Capability, HandshakeRejectReason, WireMethodName } from '@clowder-ai/plugin-contract';
+import type { CandidateHello, HandshakeRejectReason, WireMethodName } from '@clowder-ai/plugin-contract';
 import type { StaticFeatureLedger } from './static-feature-ledger.js';
 
 export const HOST_BROKER_SCHEMA_VERSION = 1 as const;
@@ -20,8 +20,6 @@ export interface BrokerSessionRecord {
   readonly wireVersion: string;
   readonly phase: BrokerSessionPhase;
   readonly candidate?: CandidateHello;
-  readonly grantRevision?: number;
-  readonly effectiveGrants?: readonly string[];
   readonly bindingNonce?: string;
   readonly preActiveDeadlineAt: number;
   readonly activeLeaseExpiresAt?: number;
@@ -36,7 +34,6 @@ export interface BrokerRuntimeLeaseRecord {
   readonly brokerSessionId: string;
   readonly pluginInstanceId: string;
   readonly packageDigest: string;
-  readonly grantRevision: number;
   readonly state: BrokerRuntimeLeaseState;
   readonly expiresAt: number;
   readonly updatedAt: number;
@@ -53,7 +50,6 @@ export interface BrokerCallRecord {
   readonly runtimeLeaseId: string;
   readonly pluginInstanceId: string;
   readonly packageDigest: string;
-  readonly grantRevision: number;
   readonly method: string;
   readonly settlementKey: string;
   readonly inputDigest: string;
@@ -83,7 +79,6 @@ export type HostBrokerErrorCode =
   | 'METHOD_NOT_REGISTERED'
   | 'INVALID_CALL_INPUT'
   | 'INVALID_CALL_RESULT'
-  | 'CAPABILITY_DENIED'
   | 'AUTHORITY_CHANGED'
   | 'CALL_CONFLICT'
   | 'CALL_IN_FLIGHT'
@@ -111,8 +106,6 @@ export interface BrokerCallContext {
   readonly pluginId: string;
   readonly packageDigest: string;
   readonly contractVersion: string;
-  readonly grantRevision: number;
-  readonly effectiveGrants: readonly Capability[];
 }
 
 export type BrokerValidationResult<Value> = { readonly valid: true; readonly value: Value } | { readonly valid: false };

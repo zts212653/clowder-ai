@@ -13,7 +13,6 @@ export interface EditorProviderAuthorityV1 {
   readonly installationInstanceId: string;
   readonly providerVersion: string;
   readonly packageDigest: string;
-  readonly grantRevision: number;
   readonly lifecycleRevision: number;
   readonly activationState: 'enabled' | 'disabled';
   readonly runtimeState: 'healthy' | 'stopped' | 'crashed';
@@ -38,7 +37,6 @@ export interface PreparedEditorSessionV1 {
   readonly installationInstanceId: string;
   readonly providerVersion: string;
   readonly packageDigest: string;
-  readonly grantRevision: number;
   readonly lifecycleRevision: number;
   readonly surfaceIntegrity: string;
   readonly executionLeaseDigest?: string;

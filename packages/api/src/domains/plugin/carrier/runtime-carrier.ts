@@ -47,8 +47,6 @@ import {
 export interface PluginRuntimeAdmission {
   readonly instance: PluginInstanceRecord;
   readonly packageRecord: ExecutablePluginPackageRecord;
-  readonly effectiveGrants: readonly string[];
-  readonly grantRevision?: number;
 }
 
 export interface PluginRuntimeCarrier {
@@ -359,9 +357,6 @@ export class PluginRuntimeCarrierRouter implements PluginRuntimeLifecyclePort {
     const packageRecord = instance
       ? snapshot.packages.find((candidate) => candidate.packageDigest === instance.packageDigest)
       : undefined;
-    const grants = instance
-      ? snapshot.grants.find((candidate) => candidate.pluginInstanceId === pluginInstanceId)
-      : undefined;
     if (!instance || !packageRecord) {
       throw new ExternalPluginRuntimeError(
         'INSTANCE_NOT_RUNNABLE',
@@ -372,8 +367,6 @@ export class PluginRuntimeCarrierRouter implements PluginRuntimeLifecyclePort {
     return {
       instance,
       packageRecord,
-      effectiveGrants: grants?.effectiveGrants ?? [],
-      ...(grants?.grantRevision === undefined ? {} : { grantRevision: grants.grantRevision }),
     };
   }
 }

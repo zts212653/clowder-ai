@@ -10,5 +10,5 @@ export async function desktopWindowFixture(
   bridgeVersion: DesktopWindowContribution['bridgeVersion'] = '1.0.0',
 ) {
   const f = await staticEditorFixture(desktopWindowManifest(body, bridgeVersion), body, worker);
-  return { ...f, entry: { ...f.entry, effectiveGrants: ['windows.create' as const] } };
+  return { ...f, entry: { ...f.entry } };
 }

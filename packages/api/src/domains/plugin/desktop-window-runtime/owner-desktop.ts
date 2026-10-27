@@ -53,7 +53,7 @@ export class OwnerDesktop {
         !desktopWindowContribution(pkg.manifest)
       )
         throw new Error('desktop recovery unavailable');
-      // Repair owns the revision CAS, durable close, fresh grant/package checks
+      // Repair owns the revision CAS, durable close, fresh package/activation checks
       // and new Broker/feature generation. No call or media is restored here.
       await lifecycle.repair(instance.pluginInstanceId, instance.lifecycleRevision);
     }

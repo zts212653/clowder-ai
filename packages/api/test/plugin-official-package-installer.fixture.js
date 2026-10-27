@@ -99,7 +99,6 @@ export function catalogEntry(integrity, overrides = {}) {
     distribution: 'registry',
     archiveUrl: 'https://registry.npmjs.org/@clowder-ai/official-test-source/-/official-test-source-0.1.0-alpha.1.tgz',
     packageDigest: integrity,
-    effectiveGrants: ['messaging.send'],
     ...overrides,
   };
 }

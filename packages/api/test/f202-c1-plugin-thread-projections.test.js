@@ -6,7 +6,7 @@ import { ThreadStore } from '../dist/domains/cats/services/stores/ports/ThreadSt
 import { createPluginThreadHost } from '../dist/domains/plugin/host-surface/plugin-thread-host.js';
 import { MemoryConnectorThreadBindingStore } from '../dist/infrastructure/connectors/ConnectorThreadBindingStore.js';
 
-function fixture(grants = ['thread.listMetadata', 'thread.readContent', 'thread.write']) {
+function fixture() {
   const threadStore = new ThreadStore();
   const messageStore = new MessageStore();
   const bindingStore = new MemoryConnectorThreadBindingStore();
@@ -29,7 +29,6 @@ function fixture(grants = ['thread.listMetadata', 'thread.readContent', 'thread.
     projectPath: '/isolated',
     systemThreadTitle: 'Fixture',
     threadDeepLinkUrl: (id) => `https://cafe.example.test/thread/${encodeURIComponent(id)}`,
-    effectiveGrants: grants,
     threadStore,
     messageStore,
     bindingStore,
@@ -93,7 +92,6 @@ test('lists owner-accessible threads, bounded by recent activity, without privat
   assert.equal(JSON.stringify(list).includes('private'), false);
   assert.deepEqual(f.backlogReads, [['private-backlog-id', 'owner']]);
   for (const limit of [0, 51, 1.5, NaN]) await assert.rejects(() => f.host.list({ limit }), /limit/);
-  await assert.rejects(() => fixture([]).host.list(), /thread.listMetadata/);
 });
 
 test('list cursor reaches owner threads beyond 50 and terminates without repeating the boundary', async () => {
@@ -209,7 +207,6 @@ test('history uses owner visibility, chronological order and a strict bounded sa
   await assert.rejects(() => f.host.readMessages(thread.id, { before: NaN, limit: 1 }), /before/);
   const foreign = await f.threadStore.create('foreign', 'no access');
   assert.deepEqual(await f.host.readMessages(foreign.id, { limit: 1 }), []);
-  await assert.rejects(() => fixture([]).host.readMessages(thread.id, { limit: 1 }), /thread.readContent/);
 });
 
 test('cat roster reuses categorization and exposes only public identity and activity', async () => {
@@ -223,7 +220,6 @@ test('cat roster reuses categorization and exposes only public identity and acti
   assert.equal(cats.participants[0].catId, 'a');
   const foreign = await f.threadStore.create('foreign', 'no');
   assert.equal((await f.host.getCats(foreign.id)).routableNotJoined.length, 2);
-  await assert.rejects(() => fixture([]).host.getCats(thread.id), /thread.listMetadata/);
 });
 
 test('preferredCats patches reach the owned Host thread, validate before writes, and clear explicitly', async () => {

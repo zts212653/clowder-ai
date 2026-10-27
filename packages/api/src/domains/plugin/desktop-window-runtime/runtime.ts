@@ -17,7 +17,7 @@ import type {
   DesktopWindowRuntimeOptions as Options,
 } from './types.js';
 
-/** One owner desktop body; observations are ephemeral, while installation, grants and leases remain in their stores. */
+/** One owner desktop body; observations are ephemeral, while installation and leases remain in their stores. */
 export class DesktopWindowPluginRuntime implements BundledPluginRuntime {
   readonly features: StaticFeatureAuthority;
   private active: ActiveWindow | undefined;

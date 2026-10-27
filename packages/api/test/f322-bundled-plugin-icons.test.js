@@ -30,7 +30,7 @@ function offlineHostCatalog() {
       throw new Error('offline machine registry');
     },
     validateCatalog: validatePluginCatalog,
-    hostPolicies: [],
+
     bundledEntries: OFFICIAL_BUNDLED_CATALOG_ENTRIES,
   });
 }

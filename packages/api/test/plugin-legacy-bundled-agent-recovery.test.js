@@ -63,7 +63,6 @@ async function recoveryHarness(t, provenance) {
     computedPackageDigest: digest,
     expectedPackageDigest: digest,
     packagePluginId: manifest.pluginId,
-    effectiveGrants: [],
     signalSchemas: {},
     ...(provenance ? { provenance } : {}),
   });

@@ -86,22 +86,15 @@ test('a name or code a credential could take is dropped; integer codes and conve
 });
 
 test('what the Host recognizes as its own is labelled so; nothing else is', () => {
-  const refusal = new Error('dev.example lacks thread.listMetadata FAKE_W26B_TEXT');
   const hostError = Object.assign(new Error('entrypoint FAKE_W26B_TEXT'), { code: 'INVALID_ENTRYPOINT' });
-  const recognition = {
-    refusal: (error) => (error === refusal ? 'thread.listMetadata' : undefined),
-    hostCode: (error) => (error === hostError || error === refusal ? (error.code ?? 'DELIVERY_REJECTED') : undefined),
-  };
-
-  const projection = safeErrorProjection(new AggregateError([refusal, hostError], 'rollback'), recognition);
-
+  const recognition = { hostCode: (error) => (error === hostError ? error.code : undefined) };
+  const projection = safeErrorProjection(new AggregateError([hostError, new Error('other')], 'rollback'), recognition);
   assertNoCanary(projection);
-  assert.equal(projection.origin, 'unverified');
   assert.deepEqual(
-    projection.errors.map(({ origin, code, capability }) => ({ origin, code, capability })),
+    projection.errors.map(({ origin, code }) => ({ origin, code })),
     [
-      { origin: 'host_refusal', code: 'DELIVERY_REJECTED', capability: 'thread.listMetadata' },
-      { origin: 'host', code: 'INVALID_ENTRYPOINT', capability: undefined },
+      { origin: 'host', code: 'INVALID_ENTRYPOINT' },
+      { origin: 'unverified', code: undefined },
     ],
   );
 });
@@ -208,9 +201,6 @@ test('a throwing getter or a hostile proxy yields a partial projection, never an
   assert.equal(safeErrorProjection(aggregate).errors, undefined);
 
   const throwingRecognition = {
-    refusal: () => {
-      throw new Error('recognition failed');
-    },
     hostCode: () => {
       throw new Error('recognition failed');
     },

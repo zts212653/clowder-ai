@@ -135,7 +135,7 @@ export function PluginArchiveInstallButton({
         title="替换已安装的插件"
         message={
           pending
-            ? `将 ${pending.offer.displayName} 从 ${pending.offer.currentVersion} 替换为 ${pending.offer.candidateVersion}。保留原实例及已保存的配置和数据。替换后授予的权限：${pending.offer.confirmation.candidateEffectiveGrants.join('、') || '无'}。`
+            ? `将 ${pending.offer.displayName} 从 ${pending.offer.currentVersion} 替换为 ${pending.offer.candidateVersion}。保留原实例及已保存的配置和数据。`
             : ''
         }
         confirmLabel="确认替换"

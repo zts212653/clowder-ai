@@ -23317,24 +23317,12 @@
                     "additionalProperties": false,
                     "description": "Exact confirmation from the Host replacement offer; send only after the owner confirms this archive replacement.",
                     "properties": {
-                      "candidateEffectiveGrants": {
-                        "items": {
-                          "maxLength": 128,
-                          "minLength": 1,
-                          "type": "string"
-                        },
-                        "maxItems": 256,
-                        "type": "array"
-                      },
                       "candidatePackageDigest": {
                         "$ref": "#/properties/request/anyOf/2/properties/replacement/properties/currentPackageDigest"
                       },
                       "currentPackageDigest": {
                         "pattern": "^sha512-[A-Za-z0-9+/]{85}[AQgw]==$",
                         "type": "string"
-                      },
-                      "expectedGrantRevision": {
-                        "$ref": "#/properties/request/anyOf/2/properties/replacement/properties/expectedLifecycleRevision"
                       },
                       "expectedLifecycleRevision": {
                         "maximum": 9007199254740991,
@@ -23358,9 +23346,7 @@
                       "pluginInstanceId",
                       "currentPackageDigest",
                       "candidatePackageDigest",
-                      "expectedLifecycleRevision",
-                      "expectedGrantRevision",
-                      "candidateEffectiveGrants"
+                      "expectedLifecycleRevision"
                     ],
                     "type": "object"
                   },
@@ -23428,7 +23414,7 @@
         ],
         "type": "object"
       },
-      "inputSchemaDigest": "sha256:e9ca4c495907b2b9722f0bdeb2026d08b7fe25772297354c1051b76b9ff3327d",
+      "inputSchemaDigest": "sha256:acd312dfaf7975cbb38168221c996bcbc7a4422bfeec576f99f8fc8dd2122dd9",
       "annotations": {
         "destructiveHint": false,
         "openWorldHint": true,

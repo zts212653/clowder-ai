@@ -6,7 +6,7 @@ import { join, resolve } from 'node:path';
 import { afterEach, test } from 'node:test';
 import { pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
-import { validateEffectiveGrants, validateManifest } from '@clowder-ai/plugin-contract';
+import { validateManifest } from '@clowder-ai/plugin-contract';
 
 import { MessageStore } from '../dist/domains/cats/services/stores/ports/MessageStore.js';
 import {
@@ -59,7 +59,7 @@ async function composition(projectRoot, overrides = {}) {
   const runtime = createDormantPluginRuntimeComposition({
     projectRoot,
     messageStore: new MessageStore(),
-    contract: { manifestContractRange: '0.1.0', validateEffectiveGrants, validateManifest },
+    contract: { manifestContractRange: '0.1.0', validateManifest },
   });
   const manager = createPluginManagerRuntimeComposition({
     runtime,

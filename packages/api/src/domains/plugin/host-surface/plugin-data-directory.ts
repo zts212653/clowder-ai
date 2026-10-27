@@ -14,12 +14,11 @@ export function pluginDataDirectoryParent(projectRoot: string): string {
   return pluginHostRoot(projectRoot);
 }
 
-/** Prepares the stable declared module directory without a separate capability grant.
+/** Prepares the stable declared module directory for the installed plugin.
  * Owner data survives stop/uninstall; the existing name and collision rules remain unchanged. */
 export async function preparePluginDataDirectory(input: {
   readonly parent: string | undefined;
   readonly manifest: DataDirectoryManifest;
-  readonly effectiveGrants: readonly string[];
 }): Promise<string> {
   if (input.parent === undefined)
     throw new ExternalPluginRuntimeError('DATA_DIRECTORY_UNAVAILABLE', 'Host data directory parent is not configured');

@@ -49,8 +49,6 @@ export function desktopWindowContribution(manifest: PluginManifest): DesktopWind
     manifest.features.length !== 1 ||
     !feature ||
     feature.resources.length !== 0 ||
-    feature.capabilities.length !== 1 ||
-    feature.capabilities[0] !== 'windows.create' ||
     feature.contributions?.length !== 1 ||
     feature.contributions[0].type !== contribution.type ||
     feature.contributions[0].id !== contribution.id

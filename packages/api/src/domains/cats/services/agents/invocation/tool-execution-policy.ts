@@ -2,7 +2,6 @@ import type { AgentService, PluginNativeActionTarget, ToolExecutionPolicy } from
 
 const MAX_REPLAY_DENIED_TOOL_NAMES = 32;
 const MAX_ALLOWED_CALLBACK_ROUTES = 32;
-const MAX_NATIVE_ACTION_METHODS = 256;
 
 function nativeCoordinate(value: unknown): value is string {
   return typeof value === 'string' && value.length > 0 && value.length <= 256 && value.trim() === value;
@@ -43,23 +42,12 @@ export function normalizeToolExecutionName(rawName: string): string {
 
 export function normalizeToolExecutionPolicy(policy: ToolExecutionPolicy): ToolExecutionPolicy {
   if (policy.mode === 'plugin_native') {
-    if (
-      Object.keys(policy).some(
-        (key) => !['mode', 'pluginInstanceId', 'contributionId', 'actionMethods'].includes(key),
-      ) ||
-      !nativeCoordinate(policy.pluginInstanceId) ||
-      !nativeCoordinate(policy.contributionId) ||
-      !Array.isArray(policy.actionMethods) ||
-      policy.actionMethods.length === 0 ||
-      policy.actionMethods.length > MAX_NATIVE_ACTION_METHODS ||
-      !policy.actionMethods.every(nativeCoordinate)
-    )
+    if (!nativeCoordinate(policy.pluginInstanceId) || !nativeCoordinate(policy.contributionId))
       throw new Error('invalid plugin native policy');
     return {
       mode: 'plugin_native',
       pluginInstanceId: policy.pluginInstanceId,
       contributionId: policy.contributionId,
-      actionMethods: [...new Set(policy.actionMethods)].sort(),
     };
   }
   if (policy.mode === 'callback_allowlist') {
@@ -121,8 +109,7 @@ export function toolExecutionPolicyDenial(
     if (normalized.mode !== 'plugin_native') throw new Error('invalid plugin native policy');
     return rawToolName === 'POST /api/plugin-runtime/action' &&
       nativeTarget?.instanceId === normalized.pluginInstanceId &&
-      nativeTarget.contributionId === normalized.contributionId &&
-      normalized.actionMethods.includes(nativeTarget.method)
+      nativeTarget.contributionId === normalized.contributionId
       ? null
       : { reason: 'plugin_native_tool_policy', toolName: normalizeToolExecutionName(rawToolName) };
   }

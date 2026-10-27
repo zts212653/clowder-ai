@@ -90,18 +90,13 @@ async function fixture(
   await chmod(packSentinel, 0o700);
   const store = new MemoryPluginInventoryStore();
   const inventory = new HostInventoryControlPlane(store, { createInstanceId: () => 'pi_source', now: () => 1000 });
-  let grants = 0;
   const createAdmission = (npmBin = packSentinel) =>
     new LocalPluginPackageAdmission({
       inventory,
       packagesRoot: inventoryRoot,
       npmBin,
-      grantPolicy: () => {
-        grants++;
-        return ['messaging.send'];
-      },
     });
-  return { root, source, inventoryRoot, store, packMarker, createAdmission, grants: () => grants };
+  return { root, source, inventoryRoot, store, packMarker, createAdmission };
 }
 
 async function rejectsBeforePreparation(f, reason) {
@@ -115,7 +110,6 @@ async function rejectsBeforePreparation(f, reason) {
   // Keep the existing public admission envelope; the machine reason belongs to the internal preparation boundary.
   assert.equal(failure.code, 'INVALID_LOCAL_SOURCE');
   assert.equal(failure.cause?.code, reason);
-  assert.equal(f.grants(), 0, 'source refusal must precede grant policy');
   assert.deepEqual((await f.store.snapshot()).instances, []);
   assert.deepEqual((await f.store.snapshot()).packages, []);
   assert.deepEqual((await f.store.snapshot()).grants, []);
@@ -353,7 +347,6 @@ test('cancels and releases staging while copying a directory without package.jso
     );
     assert.equal(observationError, undefined);
     assert.equal(stageSeen, true, 'cancel only after actual staging starts');
-    assert.equal(f.grants(), 0);
     for (const key of ['instances', 'packages', 'grants']) assert.deepEqual((await f.store.snapshot())[key], []);
     assert.equal(
       (await readdir(f.inventoryRoot)).some((entry) => entry.startsWith('.local-directory-')),

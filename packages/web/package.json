@@ -34,7 +34,7 @@
   "dependencies": {
     "@cat-cafe/shared": "workspace:*",
     "@cat-cafe/ui": "workspace:*",
-    "@clowder-ai/plugin-contract": "file:../api/vendor/clowder-ai-plugin-contract-0.2.0-1bcd26e0191a.tgz",
+    "@clowder-ai/plugin-contract": "file:../api/vendor/clowder-ai-plugin-contract-0.3.0-d98817b1476e.tgz",
     "@codemirror/lang-css": "^6.3.1",
     "@codemirror/lang-html": "^6.4.11",
     "@codemirror/lang-javascript": "^6.2.5",

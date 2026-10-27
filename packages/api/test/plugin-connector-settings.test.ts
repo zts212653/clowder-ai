@@ -28,9 +28,7 @@ function harness(declared = true) {
         },
       },
     ],
-    grants: [
-      { pluginInstanceId: 'pi_demo', grantRevision: 1, effectiveGrants: ['plugin.state.get', 'plugin.state.set'] },
-    ],
+    grants: [{ pluginInstanceId: 'pi_demo' }],
   };
   let entry: any;
   let writes = 0;
@@ -101,7 +99,7 @@ test('disabled group declaration reads defaults without initializing; owner cont
   assert.deepEqual(h.state, before, 'configuration never changes enabled intent, runtime or package');
 });
 
-test('direct-only, missing authority, invalid edits and corrupt stored state never gain a default write', async () => {
+test('direct-only, invalid edits and corrupt stored state never gain a default write', async () => {
   const direct = harness(false);
   await assert.rejects(direct.service.read('demo'), /not declared/);
   assert.equal(direct.writes, 0);
@@ -112,10 +110,7 @@ test('direct-only, missing authority, invalid edits and corrupt stored state nev
     /field/,
   );
   await assert.rejects(h.service.save('demo', { expectedRevision: null, enabled: true }), /field/);
-  h.state.grants[0].effectiveGrants = ['plugin.state.get'];
-  await assert.rejects(h.service.save('demo', { expectedRevision: null, whitelistEnabled: true }), /grant/);
   assert.equal(h.writes, 0);
-  h.state.grants[0].effectiveGrants.push('plugin.state.set');
   await h.storage.compareAndSet('demo', 'connector.permissions.v1', null, { v: 1, whitelistEnabled: 'bad' });
   await assert.rejects(h.service.read('demo'), /invalid/);
   assert.equal(h.writes, 1);

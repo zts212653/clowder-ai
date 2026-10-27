@@ -11,10 +11,7 @@ import {
 } from '../dist/domains/plugin/runtime-composition.js';
 import { catalogEntry, packageArchive } from './plugin-official-package-installer.fixture.js';
 
-async function desktopManager(
-  t,
-  { preparationFails = false, mixedDesktopCapabilities = false, projectRoot: restartedRoot } = {},
-) {
+async function desktopManager(t, { preparationFails = false, projectRoot: restartedRoot } = {}) {
   const projectRoot = restartedRoot ?? (await mkdtemp(join(tmpdir(), 'f202-desktop-integration-')));
   const html = '<!doctype html><html><body>Installed companion</body></html>';
   const manifest = {
@@ -28,7 +25,6 @@ async function desktopManager(
         id: 'body',
         name: 'Body',
         resources: [],
-        capabilities: ['windows.create'],
         contributions: [{ type: 'desktop-window', id: 'body' }],
       },
     ],
@@ -53,12 +49,10 @@ async function desktopManager(
       },
     ],
   };
-  if (mixedDesktopCapabilities) manifest.features[0].capabilities.push('messaging.send');
   const archive = await packageArchive({ packageManifest: manifest, extraFiles: { 'renderer/index.html': html } });
   const entry = catalogEntry(archive.integrity, {
     pluginId: manifest.pluginId,
     version: manifest.version,
-    effectiveGrants: ['windows.create'],
   });
   const observed = { prepared: 0, opens: 0, closes: 0 };
   const runtime = createDormantPluginRuntimeComposition({
@@ -289,11 +283,12 @@ test('Manager preserves official desktop preparation and routes enable/disable t
   const current = (await composition.manager.get(entry.pluginId)).plugin;
   assert.equal(current.contributions[0].kind, 'desktop-window');
   assert.equal(current.live, 'running');
-  assert.equal(current.capabilities.find((capability) => capability.id === 'windows.create').active, true);
   await composition.manager.setEnabled(entry.pluginId, { enabled: false, expectedRevision: current.lifecycleRevision });
   assert.equal(observed.closes, 1);
   assert.equal(await runtime.desktopWindows.presence(), null);
-  assert.equal((await composition.manager.get(entry.pluginId)).plugin.capabilities[0].active, false);
+  const disabled = (await composition.manager.get(entry.pluginId)).plugin;
+  assert.equal(disabled.intent, 'disabled');
+  assert.equal(disabled.live, 'stopped');
 });
 
 test('Manager official installation fails before inventory admission if desktop preparation fails', async (t) => {
@@ -306,16 +301,7 @@ test('Manager official installation fails before inventory admission if desktop 
   assert.equal((await runtime.inventoryStore.snapshot()).instances.length, 0);
 });
 
-test('Manager installer retains the closed desktop admission shape instead of accepting a generic builtin', async (t) => {
-  const { entry, observed, runtime, composition } = await desktopManager(t, { mixedDesktopCapabilities: true });
-  await assert.rejects(composition.officialRouteInstaller.install(entry.catalogId, entry), {
-    code: 'UNSUPPORTED_TRANSPORT',
-  });
-  assert.equal(observed.prepared, 0);
-  assert.equal((await runtime.inventoryStore.snapshot()).instances.length, 0);
-});
-
-test('Manager repairs a current failed desktop activation without changing its package or grants', async (t) => {
+test('Manager repairs a current failed desktop activation without changing its package or instance', async (t) => {
   const { entry, observed, runtime, composition } = await desktopManager(t);
   const installed = await composition.officialRouteInstaller.install(entry.catalogId, entry);
   await runtime.lifecycle.prepare(installed.pluginInstanceId, 1);
@@ -336,7 +322,6 @@ test('Manager repairs a current failed desktop activation without changing its p
   assert.notEqual(repaired.actions.repair, true);
   assert.equal(repaired.pluginInstanceId, installed.pluginInstanceId);
   assert.deepEqual((await runtime.inventoryStore.snapshot()).packages, before.packages);
-  assert.deepEqual((await runtime.inventoryStore.snapshot()).grants, before.grants);
   await assert.rejects(composition.manager.repair(entry.pluginId, { expectedRevision: repaired.lifecycleRevision }), {
     code: 'ACTION_NOT_ALLOWED',
   });

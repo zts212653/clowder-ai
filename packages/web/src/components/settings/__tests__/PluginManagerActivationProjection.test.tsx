@@ -48,7 +48,6 @@ function project(
         },
       },
     ],
-    grants: [],
     instances: [
       {
         pluginId: candidate.pluginId,

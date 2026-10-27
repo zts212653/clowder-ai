@@ -83,7 +83,6 @@ export class PersonalChromeSetup {
       return response(403, { error: 'Chrome setup requires the exact Host-trusted package and action' });
     if (declaration.confirm !== undefined && request.confirmed !== true)
       return response(400, { error: 'Confirm this Chrome setup change first' });
-    const initialGrant = snapshot.grants.find((x) => x.pluginInstanceId === initial.pluginInstanceId)?.grantRevision;
     const assertCurrent = async (expected: PluginInstanceRecord) => {
       request.assertCurrent();
       request.signal.throwIfAborted();
@@ -99,8 +98,7 @@ export class PersonalChromeSetup {
         instance.activationState !== initial.activationState ||
         instance.packageDigest !== initial.packageDigest ||
         JSON.stringify(pkg.manifest) !== JSON.stringify(record.manifest) ||
-        JSON.stringify(chromeSetupPolicy(pkg)) !== JSON.stringify(policy) ||
-        latest.grants.find((x) => x.pluginInstanceId === initial.pluginInstanceId)?.grantRevision !== initialGrant
+        JSON.stringify(chromeSetupPolicy(pkg)) !== JSON.stringify(policy)
       )
         throw new Error('SETUP_SOURCE_CHANGED');
       request.assertCurrent();
@@ -192,7 +190,7 @@ export class PersonalChromeSetup {
           resumeFailureCode: 'CONFIGURATION_RESUME_FAILED',
           preflight: () => assertCurrent(initial),
           operation: async (stopped) => {
-            // Only this queue's stop revision is adopted; package, activation and grant stay fenced.
+            // Only this queue's stop revision is adopted; package and activation stay fenced.
             await assertCurrent(stopped);
             return perform(stopped);
           },

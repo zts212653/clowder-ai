@@ -68,7 +68,6 @@ for (const carrier of ['exec_json', 'app_server']) {
           mode: 'plugin_native' as const,
           pluginInstanceId: 'instance',
           contributionId: 'native',
-          actionMethods: ['native.read'],
         },
         pluginNativeLaunch: {
           sandbox: { kind: 'public' as const, workspaceRoot: workspace },

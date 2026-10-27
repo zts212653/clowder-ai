@@ -1,17 +1,11 @@
-import {
-  DEFAULT_PLUGIN_CONTRACT_RUNTIME,
-  isManifestContractSupported,
-  requestedCapabilitiesForManifest,
-} from './contract-policy.js';
+import { DEFAULT_PLUGIN_CONTRACT_RUNTIME, isManifestContractSupported } from './contract-policy.js';
 import type { PackageAdmissionContractRuntime } from './manifest-verifier.js';
-import { parseRuntimeErrorDetail } from './runtime-failure-record.js';
 import { storedManifest } from './stored-manifest.js';
 import type {
   ActivationState,
   ConfigReadiness,
   InstanceLifecycleState,
   PackageState,
-  PluginGrantRecord,
   PluginInstanceRecord,
   PluginInventorySnapshot,
   PluginPackageRecord,
@@ -90,13 +84,6 @@ function positiveInteger(value: unknown, label: string): number {
 function enumValue<T extends string>(value: unknown, values: ReadonlySet<T>, label: string): T {
   if (typeof value !== 'string' || !values.has(value as T)) corrupt(`${label} has an unsupported value`);
   return value as T;
-}
-
-function stringArray(value: unknown, label: string): string[] {
-  if (!Array.isArray(value) || !value.every((item) => typeof item === 'string')) {
-    corrupt(`${label} must be a string array`);
-  }
-  return [...value];
 }
 
 function equalStrings(left: readonly string[], right: readonly string[]): boolean {
@@ -212,7 +199,8 @@ function parsePackage(value: unknown, index: number, contract: PackageAdmissionC
     pluginId: string(raw.pluginId, `packages[${index}].pluginId`),
     version: string(raw.version, `packages[${index}].version`),
     contractVersion: string(raw.contractVersion, `packages[${index}].contractVersion`),
-    manifest: compatible && validation.valid ? structuredClone(validation.manifest) : null,
+    manifest:
+      compatible && validation.valid ? (structuredClone(persistedManifest) as PluginPackageRecord['manifest']) : null,
     ...(!compatible ? { incompatibleManifest: stored } : {}),
     signalSchemas: signalSchemaCatalog(raw.signalSchemas ?? {}, `packages[${index}].signalSchemas`),
     ...(raw.provenance === undefined
@@ -238,12 +226,7 @@ function parsePackage(value: unknown, index: number, contract: PackageAdmissionC
   return record;
 }
 
-function parseInstance(
-  value: unknown,
-  index: number,
-  contract: PackageAdmissionContractRuntime,
-  packages: ReadonlyMap<string, PluginPackageRecord>,
-): PluginInstanceRecord {
+function parseInstance(value: unknown, index: number): PluginInstanceRecord {
   const raw = object(value, `instances[${index}]`);
   const record: PluginInstanceRecord = {
     pluginInstanceId: string(raw.pluginInstanceId, `instances[${index}].pluginInstanceId`),
@@ -262,55 +245,15 @@ function parseInstance(
       ? {}
       : { lastRuntimeError: runtimeError(raw.lastRuntimeError, `instances[${index}].lastRuntimeError`) }),
   };
-  const detail = parseRuntimeErrorDetail(
-    raw,
-    `instances[${index}]`,
-    record,
-    contract,
-    packages.get(record.packageDigest)?.manifest === null,
-  );
   if (!isCanonicalPackageDigest(record.packageDigest)) corrupt(`instances[${index}].packageDigest is not canonical`);
   if (record.lifecycleState === 'retired' && record.retiredAt === undefined) {
     corrupt(`instances[${index}] retired state requires retiredAt`);
   }
-  return detail === undefined ? record : { ...record, lastRuntimeErrorDetail: detail };
-}
-
-function parseGrant(
-  value: unknown,
-  index: number,
-  contract: PackageAdmissionContractRuntime,
-  incompatible: boolean,
-): PluginGrantRecord {
-  const raw = object(value, `grants[${index}]`);
-  const requestedCapabilities = stringArray(raw.requestedCapabilities, `grants[${index}].requestedCapabilities`);
-  const effectiveGrants = stringArray(raw.effectiveGrants, `grants[${index}].effectiveGrants`);
-  const grantRevision = raw.grantRevision;
-  if (
-    new Set(requestedCapabilities).size !== requestedCapabilities.length ||
-    new Set(effectiveGrants).size !== effectiveGrants.length ||
-    (!incompatible &&
-      (!contract.validateEffectiveGrants(requestedCapabilities) || !contract.validateEffectiveGrants(effectiveGrants)))
-  ) {
-    corrupt(`grants[${index}] contains invalid or duplicate capabilities`);
-  }
-  if (effectiveGrants.some((capability) => !requestedCapabilities.includes(capability))) {
-    corrupt(`grants[${index}] effective grants exceed requested capabilities`);
-  }
-  if (typeof grantRevision !== 'number' || !Number.isSafeInteger(grantRevision) || grantRevision < 1) {
-    corrupt(`grants[${index}].grantRevision must be a positive safe integer`);
-  }
-  return {
-    pluginInstanceId: string(raw.pluginInstanceId, `grants[${index}].pluginInstanceId`),
-    requestedCapabilities,
-    effectiveGrants,
-    grantRevision,
-    updatedAt: timestamp(raw.updatedAt, `grants[${index}].updatedAt`),
-  } as PluginGrantRecord;
+  return record;
 }
 
 export function emptyPluginInventorySnapshot(): PluginInventorySnapshot {
-  return { schemaVersion: 1, packages: [], instances: [], grants: [] };
+  return { schemaVersion: 1, packages: [], instances: [] };
 }
 
 export function clonePluginInventorySnapshot(snapshot: PluginInventorySnapshot): PluginInventorySnapshot {
@@ -320,7 +263,6 @@ export function clonePluginInventorySnapshot(snapshot: PluginInventorySnapshot):
 function requireSupportedCollections(raw: Record<string, unknown>): asserts raw is Record<string, unknown> & {
   packages: unknown[];
   instances: unknown[];
-  grants: unknown[];
 } {
   if (raw.schemaVersion !== 1) {
     if (typeof raw.schemaVersion === 'number') {
@@ -328,7 +270,7 @@ function requireSupportedCollections(raw: Record<string, unknown>): asserts raw 
     }
     corrupt('inventory.schemaVersion must be 1');
   }
-  if (!Array.isArray(raw.packages) || !Array.isArray(raw.instances) || !Array.isArray(raw.grants)) {
+  if (!Array.isArray(raw.packages) || !Array.isArray(raw.instances)) {
     corrupt('inventory collections must be arrays');
   }
 }
@@ -376,39 +318,6 @@ function indexInstances(
   return instanceById;
 }
 
-function validateGrantReferences(
-  grants: PluginGrantRecord[],
-  instances: PluginInstanceRecord[],
-  instanceById: ReadonlyMap<string, PluginInstanceRecord>,
-  packageByDigest: ReadonlyMap<string, PluginPackageRecord>,
-): void {
-  const grantByInstance = new Set<string>();
-  for (const record of grants) {
-    const instance = instanceById.get(record.pluginInstanceId);
-    if (!instance) corrupt(`grant ${record.pluginInstanceId} has no instance`);
-    if (grantByInstance.has(record.pluginInstanceId)) corrupt(`duplicate grant record ${record.pluginInstanceId}`);
-    const packageRecord = packageByDigest.get(instance.packageDigest);
-    if (!packageRecord) corrupt(`grant ${record.pluginInstanceId} has no package`);
-    const requestedCapabilities = packageRecord.manifest
-      ? requestedCapabilitiesForManifest(packageRecord.manifest)
-      : [
-          ...new Set(packageRecord.incompatibleManifest!.features.flatMap((feature) => [...feature.capabilities])),
-        ].sort();
-    if (!equalStrings(record.requestedCapabilities, requestedCapabilities)) {
-      corrupt(`grant ${record.pluginInstanceId} requests do not match its package manifest`);
-    }
-    if (record.effectiveGrants.some((capability) => !requestedCapabilities.includes(capability))) {
-      corrupt(`grant ${record.pluginInstanceId} exceeds its package manifest requests`);
-    }
-    grantByInstance.add(record.pluginInstanceId);
-  }
-  for (const instance of instances) {
-    if (!grantByInstance.has(instance.pluginInstanceId)) {
-      corrupt(`instance ${instance.pluginInstanceId} has no grant record`);
-    }
-  }
-}
-
 export function parsePluginInventorySnapshot(
   value: unknown,
   contract: PackageAdmissionContractRuntime = DEFAULT_PLUGIN_CONTRACT_RUNTIME,
@@ -417,14 +326,7 @@ export function parsePluginInventorySnapshot(
   requireSupportedCollections(raw);
   const packages = raw.packages.map((entry, index) => parsePackage(entry, index, contract));
   const packageByDigest = indexPackages(packages);
-  const instances = raw.instances.map((entry, index) => parseInstance(entry, index, contract, packageByDigest));
-  const instanceById = indexInstances(instances, packageByDigest);
-  const grants = raw.grants.map((entry, index) => {
-    const grant = object(entry, `grants[${index}]`);
-    const instance = instanceById.get(String(grant.pluginInstanceId));
-    const incompatible = instance !== undefined && packageByDigest.get(instance.packageDigest)?.manifest === null;
-    return parseGrant(entry, index, contract, incompatible);
-  });
-  validateGrantReferences(grants, instances, instanceById, packageByDigest);
-  return { schemaVersion: 1, packages, instances, grants };
+  const instances = raw.instances.map((entry, index) => parseInstance(entry, index));
+  indexInstances(instances, packageByDigest);
+  return { schemaVersion: 1, packages, instances };
 }
