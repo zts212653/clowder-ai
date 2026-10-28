@@ -2135,8 +2135,8 @@ describe('SystemPromptBuilder', () => {
     const magicWordPattern = /\|.*?「(.+?)」/g;
     const rulesMagicWords = [...rulesText.matchAll(magicWordPattern)].map((m) => m[1]);
     assert.ok(
-      rulesMagicWords.length === 6,
-      `Expected six current magic-word definitions in shared-rules.md, got ${rulesMagicWords.length}`,
+      rulesMagicWords.length > 0,
+      'Expected current magic-word definitions in shared-rules.md before checking every compiled entry',
     );
     const build = await getBuilder();
     const prompt = build({

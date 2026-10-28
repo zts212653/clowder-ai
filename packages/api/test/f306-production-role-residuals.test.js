@@ -26,6 +26,7 @@ mkdirSync(join(output, 'hard-directory'));
 linkSync(join(runtime, 'file.txt'), join(output, 'hard-directory/copy-source.txt'));
 after(() => rmSync(root, { recursive: true, force: true }));
 const noHost = { selfHost: () => ({ confidence: 'none' }) };
+const runtimeApiPort = 3002;
 function verdict(command, tool = 'exec_command', cwd = main) {
   return decideNativeHookPayload({ tool_name: tool, cwd, tool_input: { cmd: command, command } }, noHost);
 }
@@ -33,6 +34,16 @@ function parity(command, expected, cwd = main) {
   for (const tool of ['exec_command', 'Bash']) {
     const got = verdict(command, tool, cwd);
     assert.equal(got.decision, expected, tool + ': ' + command + ': ' + JSON.stringify(got));
+  }
+}
+
+function unproved(command, targetKind = 'runtime_sanctuary', cwd = main) {
+  for (const tool of ['exec_command', 'Bash']) {
+    const got = verdict(command, tool, cwd);
+    const message = `${tool}: ${command}: ${JSON.stringify(got)}`;
+    assert.equal(got.effect, 'unknown', message);
+    assert.equal(got.target.kind, targetKind, message);
+    assert.notEqual(got.reasonCode, 'read_only', message);
   }
 }
 
@@ -58,15 +69,15 @@ test('literal Node/Python inline-code arguments remain data through target class
 
 test('Node options after inline source remain loader controls until positional data starts', () => {
   for (const option of ['-r', '--require', '--import', '--loader', '--experimental-loader']) {
-    parity("node -e 'console.log(1)' " + option + ' ' + runtime + '/loader.js', 'deny');
-    parity('node ' + option + '=' + runtime + "/loader.js -e 'console.log(1)'", 'deny');
+    unproved("node -e 'console.log(1)' " + option + ' ' + runtime + '/loader.js');
+    unproved('node ' + option + '=' + runtime + "/loader.js -e 'console.log(1)'");
   }
   parity("node -e 'console.log(process.argv)' -- --require " + runtime + '/data-argument', 'allow');
-  parity("node -e '' -r " + runtime + '/loader.js', 'deny');
+  unproved("node -e '' -r " + runtime + '/loader.js');
   parity("node -e 'console.log(process.argv)' '' --require " + runtime + '/data-argument', 'allow');
 });
 
-test('script entries, generated control, environment authority, cwd and redirects remain protected', () => {
+test('script, loader and configuration targets stay unproved while real output writes stay protected', () => {
   for (const command of [
     'node ' + runtime + '/script.js',
     'node -- ' + runtime + '/script.js',
@@ -77,13 +88,13 @@ test('script entries, generated control, environment authority, cwd and redirect
     'node "$OPT" -e \'console.log(1)\' ' + runtime + '/data',
     "NODE_OPTIONS='--require " + runtime + "/loader.js' node -e 'console.log(1)'",
     'env CAT_CAFE_CONFIG_ROOT=' + runtime + " node -e 'console.log(1)'",
-    "node -e 'console.log(1)' /tmp/data > " + runtime + '/out',
-    'PATH=' + runtime + "/bin node -e 'console.log(1)'",
   ])
-    parity(command, 'deny');
-  parity("node -e 'console.log(process.argv[1])' '/tmp/data'", 'deny', runtime);
-  // Perl's -p/-i positional files are interpreted by Perl; they are not Node/Python argv.
-  parity("perl -pi -e 's/x/y/' " + runtime + '/file.txt', 'deny');
+    unproved(command);
+  unproved('PATH=' + runtime + "/bin node -e 'console.log(1)'", 'ordinary');
+  unproved("node -e 'console.log(process.argv[1])' '/tmp/data'", 'runtime_sanctuary', runtime);
+  parity("node -e 'console.log(1)' /tmp/data > " + runtime + '/out', 'deny');
+  // Perl's inline source is not Node/Python argv and cannot certify the path as a read.
+  unproved("perl -pi -e 's/x/y/' " + runtime + '/file.txt');
 });
 
 // Real source055/073: a cp -R read source was misclassified as the write target.
@@ -161,11 +172,18 @@ test('unregistered named status is read-only observation and does not prove Alph
     assert.equal(got.effect, 'read');
     assert.ok(!got.target.value.startsWith('preview://alpha'));
   }
-  parity(prefix + 'stop' + coordinates, 'deny');
-  parity(prefix + 'start' + coordinates + ' -- node /tmp/unknown-child.js', 'deny');
-  parity(prefix + 'status' + coordinates + ' --lifetime-seconds 30', 'deny');
-  parity(prefix + 'status' + coordinates + ' -- node /tmp/unknown-child.js', 'deny');
-  parity(prefix + 'status' + coordinates + ' --unknown', 'deny');
+  for (const command of [
+    prefix + 'stop' + coordinates,
+    prefix + 'start' + coordinates + ' -- node /tmp/unknown-child.js',
+    prefix + 'status' + coordinates + ' --lifetime-seconds 30',
+    prefix + 'status' + coordinates + ' -- node /tmp/unknown-child.js',
+    prefix + 'status' + coordinates + ' --unknown',
+  ]) {
+    parity(command, 'allow');
+    unproved(command, 'ordinary');
+    assert.ok(!verdict(command).target.value.startsWith('preview://alpha'));
+  }
+  parity(prefix + 'stop' + coordinates + '; rm -rf ' + runtime, 'deny');
   parity(prefix + 'status --cwd ' + runtime + ' --port 5311', 'deny');
-  parity(prefix + 'status --cwd ' + main + ' --port 3004', 'deny');
+  parity(prefix + 'status --cwd ' + main + ' --port ' + runtimeApiPort, 'deny');
 });
