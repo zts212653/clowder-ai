@@ -58,7 +58,7 @@ function invalid(code: string, message: string): never {
 function hash(bytes: Buffer | string): string {
   return `sha512-${createHash('sha512').update(bytes).digest('base64')}`;
 }
-function resolveNpmInvocation(npmBin: string): { command: string; prefixArgs: string[] } {
+export function resolveNpmInvocation(npmBin: string): { command: string; prefixArgs: string[] } {
   // An explicit npm CLI entrypoint is JavaScript, not a launcher. Node can run
   // it everywhere, including Windows where execFile cannot start npm.cmd.
   if (/\.(?:c|m)?js$/i.test(npmBin)) return { command: process.execPath, prefixArgs: [npmBin] };

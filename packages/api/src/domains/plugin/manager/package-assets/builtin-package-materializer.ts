@@ -6,6 +6,7 @@ import { packageDirectoryName } from '../../external-runtime/filesystem-package-
 import type { PluginManifestValidator } from '../../external-runtime/package-staging.js';
 import { stageVerifiedPackageArchive } from '../../external-runtime/package-staging.js';
 import type { PluginPackageProvenance } from '../../host-inventory/types.js';
+import { resolveNpmInvocation } from '../local-directory-distribution.js';
 
 import type {
   BuiltinPluginPackageMaterializer,
@@ -287,9 +288,10 @@ function installEnvironment(root: string, registryOnly: boolean): Record<string,
 }
 
 function defaultDependencyInstaller(npmBin: string, timeoutMs: number): BuiltinDependencyInstaller {
+  const { command, prefixArgs } = resolveNpmInvocation(npmBin);
   return async ({ cwd, env }) => {
     try {
-      await execFileAsync(npmBin, ['ci', '--ignore-scripts', '--omit=dev', '--no-audit', '--no-fund'], {
+      await execFileAsync(command, [...prefixArgs, 'ci', '--ignore-scripts', '--omit=dev', '--no-audit', '--no-fund'], {
         cwd,
         env: { ...env },
         timeout: timeoutMs,
