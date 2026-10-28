@@ -1,12 +1,7 @@
-import { stat } from 'node:fs/promises';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
-import { workspaceReferenceMime } from '../domains/workspace/workspace-file-metadata.js';
-import {
-  getWorktreeRoot,
-  resolveWorkspaceFilesystemPath,
-  WorkspaceSecurityError,
-} from '../domains/workspace/workspace-security.js';
+import { resolveLocalFile } from '../domains/workspace/local-file-source.js';
+import { getWorktreeRoot, WorkspaceSecurityError } from '../domains/workspace/workspace-security.js';
 import { registerMediaFileActions } from './media-file-actions.js';
 import { workspaceDirectHuman } from './workspace-direct-human.js';
 
@@ -20,15 +15,7 @@ export function registerWorkspaceFileActions(app: FastifyInstance, user: (reques
         .object({ worktreeId: z.string().min(1).max(256), path: z.string().min(1).max(2048) })
         .strict()
         .parse(request.query);
-      const resolved = await resolveWorkspaceFilesystemPath(await getWorktreeRoot(worktreeId), path);
-      const file = await stat(resolved);
-      return file.isFile() || file.isDirectory()
-        ? {
-            path: resolved,
-            mime: file.isDirectory() ? 'inode/directory' : workspaceReferenceMime(resolved),
-            byteLength: file.size,
-          }
-        : { local: false };
+      return resolveLocalFile(await getWorktreeRoot(worktreeId), path);
     },
     onError: (reply, error) =>
       reply

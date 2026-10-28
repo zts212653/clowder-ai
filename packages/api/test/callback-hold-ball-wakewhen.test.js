@@ -944,6 +944,150 @@ describe('F167 Phase P: wakeWhen cancel/replace/delivery tests', () => {
     });
   }
 
+  // ─── F314 Humphrey case: hook-forced full gate must not be throttled ──────
+  test('F314: full gate wakeWhen skips the hourly hold quota; other holds still hit it without routing to the co-creator', async () => {
+    const { ManagedRunner } = await import('../dist/infrastructure/managed-runner.js');
+    const { recordDurableManagedGateProcess } = await import(
+      '../dist/domains/ball-custody/durable-managed-gate-job.js'
+    );
+    const { getCoCreatorDisplay } = await import('../dist/config/co-creator-display.js');
+    const originalStart = ManagedRunner.prototype.start;
+    let resolveCompletion;
+    ManagedRunner.prototype.start = (_command, options) => {
+      const processIdentity = { pid: 43, ppid: 1, pgid: 43, startedAt: 'birth-43' };
+      assert.equal(recordDurableManagedGateProcess(options.managedJob, processIdentity), true);
+      return {
+        admission: Promise.resolve({ spawned: true, pid: 43, processIdentity }),
+        completion: new Promise((resolve) => {
+          resolveCompletion = resolve;
+        }),
+      };
+    };
+    const tempDir = mkdtempSync(path.join(os.tmpdir(), 'hold-ball-gate-quota-'));
+    const previousDataDir = process.env.CAT_CAFE_DATA_DIR;
+    process.env.CAT_CAFE_DATA_DIR = tempDir;
+
+    try {
+      const deps = makeStubDeps();
+      let admissions = 0;
+      deps.holdQuotaStore.tryAdmit = async () => {
+        admissions++;
+        return { admitted: false, count: 3, retryAtMs: Date.now() + 60_000, retryAfterMs: 60_000 };
+      };
+      const app = await createApp(deps);
+      const ownerUserId = 'user-gate-quota';
+      const thread = await threadStore.create(ownerUserId, 'gate quota');
+      const { invocationId, callbackToken } = await registry.create(ownerUserId, 'codex', thread.id);
+      const headers = { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken };
+
+      const gate = await app.inject({
+        method: 'POST',
+        url: '/api/callbacks/hold-ball',
+        headers,
+        payload: { reason: 'rerun canonical gate', nextStep: 'consume result', wakeWhen: { command: 'pnpm gate' } },
+      });
+      assert.equal(gate.statusCode, 200, gate.body);
+      assert.equal(admissions, 0, 'a full gate hold must not consult the hourly hold quota');
+
+      const other = await app.inject({
+        method: 'POST',
+        url: '/api/callbacks/hold-ball',
+        headers,
+        payload: { reason: 'wait for build', nextStep: 'read output', wakeWhen: { command: 'echo done' } },
+      });
+      assert.equal(other.statusCode, 429, other.body);
+      assert.equal(admissions, 1, 'non-gate holds still spend the hourly hold quota');
+      const otherBody = JSON.parse(other.body);
+      assert.ok(
+        !otherBody.error.includes(getCoCreatorDisplay().mention),
+        `quota exhaustion must not tell the cat to route the ball to the co-creator: ${otherBody.error}`,
+      );
+
+      const job = resolveManagedCommandJob(deps.dynamicTaskStore.getById(JSON.parse(gate.body).taskId));
+      const terminal = { exitCode: 0, timedOut: false, durationMs: 5, tailOutput: 'gate green' };
+      settleDurableManagedGateJobFromRunner(job, terminal);
+      resolveCompletion(terminal);
+      const deadline = Date.now() + 1_000;
+      while (getActiveRunnerCount() > 0 && Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      assert.equal(getActiveRunnerCount(), 0, 'gate fake worker must leave no active registry residue');
+      await app.close();
+    } finally {
+      ManagedRunner.prototype.start = originalStart;
+      if (previousDataDir === undefined) delete process.env.CAT_CAFE_DATA_DIR;
+      else process.env.CAT_CAFE_DATA_DIR = previousDataDir;
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  test('F314 review P1: a failing hold-count read neither blocks nor fakes the quota-exempt full gate launch', async () => {
+    const { ManagedRunner } = await import('../dist/infrastructure/managed-runner.js');
+    const { recordDurableManagedGateProcess } = await import(
+      '../dist/domains/ball-custody/durable-managed-gate-job.js'
+    );
+    const originalStart = ManagedRunner.prototype.start;
+    let starts = 0;
+    let resolveCompletion;
+    ManagedRunner.prototype.start = (_command, options) => {
+      starts++;
+      const processIdentity = { pid: 44, ppid: 1, pgid: 44, startedAt: 'birth-44' };
+      assert.equal(recordDurableManagedGateProcess(options.managedJob, processIdentity), true);
+      return {
+        admission: Promise.resolve({ spawned: true, pid: 44, processIdentity }),
+        completion: new Promise((resolve) => {
+          resolveCompletion = resolve;
+        }),
+      };
+    };
+    const tempDir = mkdtempSync(path.join(os.tmpdir(), 'hold-ball-gate-count-fault-'));
+    const previousDataDir = process.env.CAT_CAFE_DATA_DIR;
+    process.env.CAT_CAFE_DATA_DIR = tempDir;
+
+    try {
+      const deps = makeStubDeps();
+      deps.holdQuotaStore.tryAdmit = async () => assert.fail('a full gate hold must not consult the hourly quota');
+      deps.holdQuotaStore.getCount = async () => {
+        throw new Error('hold quota store unavailable');
+      };
+      const app = await createApp(deps);
+      const ownerUserId = 'user-gate-count-fault';
+      const thread = await threadStore.create(ownerUserId, 'gate count fault');
+      const { invocationId, callbackToken } = await registry.create(ownerUserId, 'codex', thread.id);
+      const request = {
+        method: 'POST',
+        url: '/api/callbacks/hold-ball',
+        headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+        payload: { reason: 'rerun canonical gate', nextStep: 'consume result', wakeWhen: { command: 'pnpm gate' } },
+      };
+
+      const first = await app.inject(request);
+      assert.equal(first.statusCode, 200, first.body);
+      assert.equal(starts, 1, 'the first response must reflect a real launch, not a persisted task with no command');
+
+      const retry = await app.inject(request);
+      assert.equal(retry.statusCode, 200, retry.body);
+      assert.equal(retry.json().taskId, first.json().taskId);
+      assert.equal(starts, 1, 'a retry reuses the running gate instead of launching again or faking success');
+
+      const job = resolveManagedCommandJob(deps.dynamicTaskStore.getById(first.json().taskId));
+      const terminal = { exitCode: 0, timedOut: false, durationMs: 5, tailOutput: 'gate green' };
+      settleDurableManagedGateJobFromRunner(job, terminal);
+      resolveCompletion(terminal);
+      const deadline = Date.now() + 1_000;
+      while (getActiveRunnerCount() > 0 && Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      assert.equal(getActiveRunnerCount(), 0, 'gate fake worker must leave no active registry residue');
+      await app.close();
+    } finally {
+      ManagedRunner.prototype.start = originalStart;
+      if (previousDataDir === undefined) delete process.env.CAT_CAFE_DATA_DIR;
+      else process.env.CAT_CAFE_DATA_DIR = previousDataDir;
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
   // ─── T8: wakeWhen hold with cancel → runner is cancelled ────────────────
   test('T8: wakeWhen hold registers active runner, cancel removes it', async () => {
     const deps = makeStubDeps();

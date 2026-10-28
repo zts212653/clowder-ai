@@ -54,6 +54,7 @@ describe('published file opens in the existing Artifact surface', () => {
   beforeEach(() => {
     Object.assign(globalThis, { React, IS_REACT_ACT_ENVIRONMENT: true });
     vi.clearAllMocks();
+    vi.spyOn(HTMLMediaElement.prototype, 'load').mockImplementation(() => {});
     mocks.thread = 'thread-source';
     container = document.createElement('div');
     document.body.append(container);
@@ -63,6 +64,7 @@ describe('published file opens in the existing Artifact surface', () => {
   afterEach(() => {
     act(() => root.unmount());
     container.remove();
+    vi.restoreAllMocks();
   });
   async function render() {
     await act(async () =>
@@ -80,8 +82,8 @@ describe('published file opens in the existing Artifact surface', () => {
       'thread-source',
       artifact,
       expect.objectContaining({ messageId: expect.any(String) }),
-      'work-mode',
     );
+    await act(async () => container.querySelector<HTMLButtonElement>('button[aria-haspopup="menu"]')?.click());
     expect(container.querySelector('a[download]')?.getAttribute('href')).toBe(`http://localhost:3102${artifact.url}`);
   });
 
@@ -112,7 +114,6 @@ describe('published file opens in the existing Artifact surface', () => {
       'thread-source',
       artifact,
       expect.objectContaining({ messageId: expect.any(String) }),
-      'work-mode',
     );
   });
 
@@ -164,7 +165,9 @@ describe('published file opens in the existing Artifact surface', () => {
     await act(async () => container.querySelector<HTMLButtonElement>('[data-testid="chat-work-open"]')?.click());
     expect(pendingReads.length).toBeGreaterThan(0);
     await render();
-    await act(async () => pendingReads.forEach((finish) => finish()));
+    await act(async () => {
+      for (const finish of pendingReads) finish();
+    });
     expect(mocks.publication).not.toHaveBeenCalled();
   });
 
@@ -219,5 +222,41 @@ describe('published file opens in the existing Artifact surface', () => {
     await act(async () => container.querySelector<HTMLButtonElement>('[data-testid="chat-work-open"]')?.click());
     expect(mocks.publication).not.toHaveBeenCalled();
     expect(container.querySelector('[role="alert"]')).not.toBeNull();
+  });
+
+  it('waits for work resolution before admitting any raw-file video request', async () => {
+    let finish: (value: unknown) => void = () => {};
+    mocks.fetch.mockReturnValue(
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+    );
+    const create = vi.spyOn(document, 'createElement');
+    try {
+      await act(async () =>
+        root.render(
+          <FileBlock
+            block={{
+              ...block,
+              fileName: 'pending.mp4',
+              mimeType: 'video/mp4',
+              url: '/api/workspace/file/raw?worktreeId=work&path=pending.mp4',
+            }}
+            messageId="message-source"
+            sourceThreadId="thread-source"
+          />,
+        ),
+      );
+      expect(mocks.fetch).toHaveBeenCalledWith(expect.stringContaining('/api/works/resolve-file?'), expect.any(Object));
+      expect(create.mock.calls.filter(([tag]) => tag === 'video')).toHaveLength(0);
+      await act(async () => finish({ ok: true, json: async () => ({ artifact: null }) }));
+      const request = create.mock.calls.findIndex(([tag]) => tag === 'video');
+      const reader = create.mock.results[request]?.value as HTMLVideoElement | undefined;
+      expect(reader?.getAttribute('src')).toBe(
+        'http://localhost:3102/api/workspace/file/raw?worktreeId=work&path=pending.mp4',
+      );
+    } finally {
+      create.mockRestore();
+    }
   });
 });

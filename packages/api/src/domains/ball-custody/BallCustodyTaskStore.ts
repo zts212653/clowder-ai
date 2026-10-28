@@ -12,6 +12,7 @@ import type {
   DevelopmentWorkTransition,
 } from '../cats/services/stores/ports/DevelopmentWorkTransition.js';
 import type { AttachEntrustedWorkArtifactInput } from '../cats/services/stores/ports/EntrustedWorkArtifactEvidence.js';
+import type { OrdinaryTaskMutation } from '../cats/services/stores/ports/OrdinaryTaskMutation.js';
 import type { EntrustedTaskDataControllerTransition } from '../cats/services/stores/ports/TaskDataControllerTransition.js';
 import type { ITaskStore } from '../cats/services/stores/ports/TaskStore.js';
 import type {
@@ -48,6 +49,12 @@ export function withBallCustodyTaskEvents(
 }
 
 class BallCustodyTaskStore implements ITaskStore {
+  async mutateOrdinaryTask(command: OrdinaryTaskMutation, writeFence?: TaskMutationWriteFence) {
+    const before = await this.inner.get(command.taskId);
+    const result = await this.inner.mutateOrdinaryTask(command, writeFence);
+    if (before && result.kind === 'updated') this.recordStatusTransition(before, result.task);
+    return result;
+  }
   readonly listByThreadPage?: NonNullable<ITaskStore['listByThreadPage']>;
 
   findDevelopmentWork(userId: string, scope: DevelopmentScopeV1) {

@@ -2,7 +2,7 @@
  * Callback task routes — MCP post_message 回传的任务更新端点
  */
 
-import type { CatId, EntrustedWorkTerminalClosureV1, TaskItem } from '@cat-cafe/shared';
+import type { CatId, EntrustedWorkTerminalClosureV1, TaskItem, UpdateTaskInput } from '@cat-cafe/shared';
 import {
   catRegistry,
   createCatId,
@@ -15,12 +15,17 @@ import {
 } from '@cat-cafe/shared';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
+import { adoptOrdinaryTaskTenant } from '../domains/ball-custody/adopt-ordinary-task-tenant.js';
+import type { OrdinaryTaskHandoffService } from '../domains/ball-custody/OrdinaryTaskHandoffService.js';
 import type { OwnedWaitStatusReader } from '../domains/ball-custody/OwnedWaitStatus.js';
 import { resolveCatTarget } from '../domains/cats/services/agents/routing/cat-target-resolver.js';
 import type { IMessageStore } from '../domains/cats/services/stores/ports/MessageStore.js';
 import { queryTaskItems } from '../domains/cats/services/stores/ports/TaskQuery.js';
 import type { ITaskStore } from '../domains/cats/services/stores/ports/TaskStore.js';
-import { isEntrustedWorkTerminalActionRequiredError } from '../domains/cats/services/stores/ports/TaskStoreContract.js';
+import {
+  isEntrustedWorkTerminalActionRequiredError,
+  isOrdinaryImplementTask,
+} from '../domains/cats/services/stores/ports/TaskStoreContract.js';
 import type { IThreadStore } from '../domains/cats/services/stores/ports/ThreadStore.js';
 import type { DevelopmentScopeDocuments } from '../domains/growing/DevelopmentScopeResolver.js';
 import {
@@ -34,6 +39,7 @@ import { recordAnchorFullDrill, recordAnchorReturned } from './anchor-telemetry.
 import { anchorTaskWhy } from './callback-anchor-helpers.js';
 import { requireCallbackAuth } from './callback-auth-prehandler.js';
 import { registerCallbackDevelopmentWorkRoutes } from './callback-development-work-routes.js';
+import { updateOrdinaryTaskFromCallback } from './callback-ordinary-task-update.js';
 import { deriveCallbackActor, getDeletedCallbackThreadGuard, resolveScopedThreadId } from './callback-scope-helpers.js';
 import { reconcileOwnedTaskWaits } from './callback-task-reconciliation.js';
 import { admissionSourceContext, assertDirectAdmissionSourceCustody } from './entrusted-work-source-custody.js';
@@ -70,6 +76,7 @@ const updateDispatchGateSchema = z
 /** @internal Exported for contract testing only — not part of public API */
 export const updateTaskSchema = z.object({
   taskId: z.string().min(1),
+  expectedOwnerRevision: z.number().int().nonnegative().optional(),
   status: z.enum(['todo', 'doing', 'blocked', 'done']).optional(),
   why: z.string().max(1000).optional(),
   // F193-E1 P1-4: allow patching dispatchGate
@@ -187,12 +194,17 @@ export function registerCallbackTaskRoutes(
   app: FastifyInstance,
   deps: {
     taskStore: ITaskStore;
+    registry?: Pick<
+      import('../domains/cats/services/agents/invocation/InvocationRegistry.js').InvocationRegistry,
+      'verify'
+    >;
     ownedWaitStatusReader?: OwnedWaitStatusReader;
     messageStore: IMessageStore;
     socketManager: SocketManager;
     threadStore?: IThreadStore;
     developmentDocuments?: DevelopmentScopeDocuments;
     liveTaskAuthority?: LiveTaskAuthority;
+    ordinaryTaskHandoffs?: OrdinaryTaskHandoffService;
   },
 ): void {
   const { taskStore, messageStore, socketManager, threadStore } = deps;
@@ -224,16 +236,32 @@ export function registerCallbackTaskRoutes(
 
       const { taskId, status, why, dispatchGate } = parsed.data;
 
-      const existing = await taskStore.get(taskId);
+      let existing = await taskStore.get(taskId);
       if (!existing) {
         reply.status(404);
         return { error: 'Task not found' };
       }
-      if (existing.threadId !== actor.threadId) {
+      const ordinary = isOrdinaryImplementTask(existing);
+      if (ordinary && !existing.userId) {
+        if (existing.threadId !== actor.threadId)
+          return reply.code(403).send({ error: 'Task belongs to a different thread' });
+        if (existing.ownerCatId && existing.ownerCatId !== actor.catId)
+          return reply.code(403).send({ error: 'Task is owned by another cat' });
+        const adopted = await adoptOrdinaryTaskTenant({
+          task: existing,
+          userId: actor.userId,
+          tasks: taskStore,
+          threads: threadStore,
+        });
+        if (!adopted) return reply.code(403).send({ error: 'Task tenant mismatch' });
+        existing = adopted;
+      }
+      if (ordinary && existing.userId !== actor.userId) return reply.code(403).send({ error: 'Task tenant mismatch' });
+      if (!ordinary && existing.threadId !== actor.threadId) {
         reply.status(403);
         return { error: 'Task belongs to a different thread' };
       }
-      if (existing.ownerCatId && existing.ownerCatId !== actor.catId) {
+      if (!ordinary && existing.ownerCatId && existing.ownerCatId !== actor.catId) {
         reply.status(403);
         return { error: 'Task is owned by another cat' };
       }
@@ -245,7 +273,7 @@ export function registerCallbackTaskRoutes(
         return { error: 'Live may mutate only its own owner-scoped work Task' };
       }
 
-      const updateData: Record<string, unknown> = {};
+      const updateData: UpdateTaskInput = {};
       if (status) updateData.status = status;
       if (why) updateData.why = why;
       // F193-E1 P1-4: allow patching dispatchGate on existing tasks
@@ -254,7 +282,30 @@ export function registerCallbackTaskRoutes(
       let updated: TaskItem | null;
       try {
         await assertCurrent();
-        updated = await taskStore.update(taskId, updateData);
+        if (ordinary) {
+          const result = await updateOrdinaryTaskFromCallback({
+            task: existing,
+            record,
+            data: updateData,
+            expectedOwnerRevision: parsed.data.expectedOwnerRevision,
+            tasks: taskStore,
+            messages: messageStore,
+            handoffs: deps.ordinaryTaskHandoffs,
+            fence: {
+              async assertCurrent() {
+                await assertCurrent();
+                if (deps.registry && !(await deps.registry.verify(record.invocationId, record.callbackToken)).ok)
+                  throw new Error('TASK_CALLBACK_AUTHORITY_RETIRED');
+              },
+            },
+          });
+          if (result.kind !== 'updated' && result.kind !== 'replayed')
+            return reply.code(409).send({
+              error: 'Task assignment changed',
+              reason: result.kind === 'refused' ? result.reason : 'not_found',
+            });
+          updated = result.task;
+        } else updated = await taskStore.update(taskId, updateData);
       } catch (error) {
         if (isEntrustedWorkTerminalActionRequiredError(error)) {
           reply.status(409);
@@ -473,6 +524,22 @@ export function registerCallbackTaskRoutes(
         subjectKey: null,
         ownerCatId: live ? actor.catId : resolvedOwnerCatId,
         userId: actor.userId,
+        ...((record.originTriggerMessageId ?? record.a2aTriggerMessageId)
+          ? {
+              sourceMessageId: record.originTriggerMessageId ?? record.a2aTriggerMessageId,
+            }
+          : {}),
+        ...((live ? actor.catId : resolvedOwnerCatId) === actor.catId
+          ? {
+              initialExecutionRef: {
+                invocationId: actor.invocationId,
+                parentInvocationId: actor.parentInvocationId ?? actor.invocationId,
+                catId: actor.catId,
+                threadId: actor.threadId,
+                sourceMessageId: record.originTriggerMessageId ?? record.a2aTriggerMessageId ?? null,
+              },
+            }
+          : {}),
         // F193 Phase E (dispatch gate) — pass through to store
         ...(relatedFeatureId ? { relatedFeatureId } : {}),
         ...(detectedFeatureIds?.length ? { detectedFeatureIds } : {}),

@@ -79,6 +79,13 @@ export const CONNECTOR_DEFINITIONS: readonly ConnectorDefinition[] = [
     description: '部署条件满足后接回原任务',
   },
   {
+    id: 'worktree-lifecycle',
+    displayName: '工位通知',
+    icon: { type: 'svg', iconId: 'settings' },
+    themeColor: '#6B7280',
+    description: '工位保留、清理及恢复结果',
+  },
+  {
     id: 'physical-limb.stackchan',
     displayName: 'StackChan',
     icon: { type: 'svg', iconId: 'robot' },

@@ -18,7 +18,7 @@ import {
 import { resolveDevelopmentReturnSource } from './DevelopmentReturnOriginalSource.js';
 import type { DevelopmentReturnDeps } from './DevelopmentReturnService.js';
 
-type Deps = Pick<DevelopmentReturnDeps, 'tasks' | 'messages' | 'readReviewProvenance'>;
+type Deps = Pick<DevelopmentReturnDeps, 'tasks' | 'messages' | 'definitions' | 'readReviewProvenance'>;
 
 const actionLeaseSourcePattern = /^action-lease:([A-Za-z0-9_-]{1,200}):([1-9]\d*)$/;
 

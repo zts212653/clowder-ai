@@ -11,6 +11,8 @@ import {
   useState,
 } from 'react';
 import { useThreadDisplayInfo } from '@/hooks/useThreadDisplayInfo';
+import { apiFetch } from '@/utils/api-client';
+import { executeSidebarFieldCommand } from '@/utils/sidebar-commands';
 import { useShellPresentation } from '../shell/shell-presentation';
 import { ThreadSettingsPanel } from './ThreadSettingsPanel';
 import { saveThreadLabels, saveThreadPreferredCats } from './thread-settings-commands';
@@ -89,7 +91,7 @@ function ThreadSettingsHost({
   returnFocusRef: RefObject<HTMLElement | null>;
   onClose: () => void;
 }) {
-  const { currentThread } = useThreadDisplayInfo(threadId);
+  const { currentThread, setExactThread } = useThreadDisplayInfo(threadId);
   if (!currentThread) return null;
   return (
     <ThreadSettingsPanel
@@ -103,6 +105,24 @@ function ThreadSettingsHost({
       onSaveLabels={saveThreadLabels}
       onClose={onClose}
       returnFocusRef={returnFocusRef}
+      pinned={currentThread.pinned}
+      onTogglePin={async () => {
+        const pinned = !currentThread.pinned;
+        const ok = await executeSidebarFieldCommand({
+          threadId,
+          field: 'pinned',
+          value: pinned,
+          request: (signal) =>
+            apiFetch(`/api/threads/${threadId}`, {
+              method: 'PATCH',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({ pinned }),
+              signal,
+            }),
+        });
+        if (ok) setExactThread((previous) => (previous && !('error' in previous) ? { ...previous, pinned } : previous));
+        return ok;
+      }}
     />
   );
 }

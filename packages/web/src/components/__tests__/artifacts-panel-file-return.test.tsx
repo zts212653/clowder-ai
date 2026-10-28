@@ -6,6 +6,7 @@ import { useChatStore } from '@/stores/chatStore';
 import { ArtifactsPanel } from '../ArtifactsPanel';
 import type { ArtifactListView } from '../artifacts/artifact-list-state';
 
+const opened = vi.hoisted(() => ({ resolve: vi.fn() }));
 const rows = vi.hoisted(() => ({ image: undefined as GlobalArtifactDTO | undefined }));
 
 const artifact: GlobalArtifactDTO = {
@@ -27,7 +28,7 @@ vi.mock('@/hooks/useGlobalArtifacts', () => ({
 }));
 vi.mock('../content-review/usePublishedContent', async (original) => ({
   ...(await original<typeof import('../content-review/usePublishedContent')>()),
-  usePublishedContent: () => ({ open: vi.fn() }),
+  usePublishedContent: () => ({ open: opened.resolve, clearError: vi.fn(), busy: false, error: null }),
 }));
 vi.mock('../artifacts/ArtifactDetailView', () => ({ ArtifactDetailView: () => <div data-testid="weak-preview" /> }));
 const view: ArtifactListView = {
@@ -42,6 +43,15 @@ const container = document.createElement('div');
 const root = createRoot(container);
 beforeEach(() => {
   rows.image = undefined;
+  opened.resolve.mockImplementation(async (source: unknown) => ({
+    status: 'opened',
+    target: {
+      kind: 'publication',
+      contentRef: 'prepared-media:' + 'a'.repeat(64),
+      ownerRevision: 1,
+      messagePublicationSource: source,
+    },
+  }));
   (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 });
 
@@ -62,11 +72,17 @@ it.each([
   await act(async () =>
     root.render(<ArtifactsPanel threadId="list-host-thread" initialView={{ ...view, filter: 'all', query: '' }} />),
   );
-  act(() => container.querySelector<HTMLElement>('[data-artifact-row]')?.click());
+  await act(async () => container.querySelector<HTMLElement>('[data-artifact-row]')?.click());
+  expect(useChatStore.getState().workspaceOpenRequest).toBeNull();
+  await act(async () => document.querySelector<HTMLButtonElement>('[data-testid="lightbox-open-workspace"]')?.click());
   expect(container.querySelector('[data-testid="weak-preview"]')).toBeNull();
   expect(useChatStore.getState().workspaceOpenRequest?.target).toMatchObject({
-    kind: 'artifact',
-    artifact: { threadId: 'original-thread' },
+    kind: 'publication',
+    messagePublicationSource: {
+      threadId: 'original-thread',
+      messageId: 'original-message',
+      expectedUrl: `/uploads/original.${extension}`,
+    },
     navigationOrigin: { kind: 'artifact-list', threadId: 'list-host-thread' },
   });
 });

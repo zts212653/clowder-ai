@@ -56,7 +56,10 @@ it('a published Markdown copy uses the original reader and source controls witho
       /编辑|采用并写回|请猫修改/.test(button.textContent ?? ''),
     ),
   ).toBe(false);
-  expect(fixture.fetch.mock.calls.map(([url]) => url)).toEqual([artifact.url]);
+  expect(fixture.fetch.mock.calls[0][0]).toBe(artifact.url);
+  expect(fixture.fetch.mock.calls.slice(1).every(([url]) => String(url).startsWith('/api/tts/listen/document?'))).toBe(
+    true,
+  );
   act(() => [...container.querySelectorAll('button')].find((button) => button.textContent === '返回来源')?.click());
   expect(back).toHaveBeenCalledTimes(1);
 });
@@ -83,6 +86,31 @@ it('a published selection preserves its exact original message and file item as 
   expect(parsed.success).toBe(true);
   if (parsed.success)
     expect(parsed.data.source).toMatchObject({ kind: 'message', artifactFile: { item: artifact.publicationItem } });
+});
+
+it('a published document has the common file menu while its text keeps native context selection', async () => {
+  fixture.fetch.mockImplementation(async (url: string) =>
+    url.includes('file-info')
+      ? { ok: true, json: async () => ({ local: true, path: '/uploads/copy.md', mime: 'text/markdown' }) }
+      : { ok: true, text: async () => '# Published\n\nOriginal words.\n' },
+  );
+  await act(async () =>
+    root.render(
+      <ArtifactDetailView artifact={artifact} worktreeId={null} onBack={() => undefined} onJump={() => undefined} />,
+    ),
+  );
+  const body = container.querySelector('[data-testid="workspace-file-viewer"] p');
+  expect(body?.textContent).toBe('Original words.');
+  const context = new MouseEvent('contextmenu', { bubbles: true, cancelable: true });
+  act(() => body?.dispatchEvent(context));
+  expect(context.defaultPrevented).toBe(false);
+  const more = container.querySelector<HTMLButtonElement>('button[aria-haspopup="menu"]');
+  expect(more, 'read-only copies must expose the same file menu as ordinary Workspace documents').not.toBeNull();
+  await act(async () => more?.click());
+  expect(container.textContent).toContain('在 Finder 中显示');
+  expect(container.textContent).toContain('复制路径');
+  expect(container.querySelectorAll('button[aria-haspopup="menu"]')).toHaveLength(1);
+  expect(container.querySelectorAll('[data-testid="content-file-toolbar"]')).toHaveLength(1);
 });
 
 it('switching identical file names cannot show the previous body under the new artifact even before its fetch effect', async () => {

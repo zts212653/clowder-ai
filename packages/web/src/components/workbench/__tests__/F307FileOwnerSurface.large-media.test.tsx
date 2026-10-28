@@ -66,7 +66,7 @@ it('plays a readable large video through the existing raw reader and explains th
   expect(url.pathname).toBe('/api/workspace/file/raw');
   expect(url.searchParams.get('worktreeId')).toBe('registered-video');
   expect(url.searchParams.get('path')).toBe('master.mp4');
-  expect(video.controls).toBe(true);
+  expect(container.querySelector('[data-testid="artwork-video-timeline"]')).not.toBeNull();
   expect(container.textContent).toContain('文件太大');
   expect(container.textContent).toContain('批注');
   expect(container.textContent).not.toContain('正在打开作品');

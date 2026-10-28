@@ -14,7 +14,7 @@ export function localServiceDescription(state: LocalCollectiveServiceStatus['sta
     not_created: '尚未部署本机 Service。',
     stopped: '已找到本机 Service 数据，进程当前停止；继续后会从原状态恢复。',
     starting: '本机 Service 正在独立启动。',
-    setup_required: 'Service 已在线，等待完成首次 Human 与共同家园设置。',
+    setup_required: 'Service 已在线，等待完成首次 Human 与共同体设置。',
     ready: '本机 Service 已在线并完成首次设置。',
     error: '本机 Service 需要处理后才能继续；现有数据不会被覆盖。',
   } as const;

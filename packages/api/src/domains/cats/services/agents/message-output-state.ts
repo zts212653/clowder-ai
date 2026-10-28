@@ -39,6 +39,8 @@ export interface MessageOutputTextInput {
   textMode?: unknown;
   outputMessage?: unknown;
   hostOutput?: unknown;
+  /** Exact suffix actually removed by the native producer; invocation-local, never wire metadata. */
+  nativeSignatureSuffix?: string;
   /** Trusted invocation-local sanitizer facts; never persisted as native metadata. */
   fragment?: { mode?: 'append'; complete: boolean; changed: boolean };
 }

@@ -18,7 +18,13 @@ function commandForMember(
   if (action.type === 'duplicate') return { ...base, type: 'mark_duplicate', duplicateOf: action.duplicateOf };
   if (action.type === 'no_action') return { ...base, type: 'mark_no_action', reasonCode: action.reasonCode };
   if (action.type === 'fix') {
-    return { ...base, type: 'mark_fix', leaseId: action.leaseId, actionRef: action.actionRef };
+    return {
+      ...base,
+      type: 'mark_fix',
+      repairBinding: action.repairBinding,
+      leaseId: action.leaseId,
+      actionRef: action.actionRef,
+    };
   }
   if (action.type === 'request_signature') {
     return {

@@ -80,6 +80,8 @@ export interface ITurnExecutionStore {
    * Sidebar 需要"这个用户此刻有哪些 child 在跑"，这是 child ledger 自己才答得出的问题。
    */
   listRunningByUser(userId: string): TurnExecutionRecord[] | Promise<TurnExecutionRecord[]>;
+  markProviderStarted(invocationId: string, at: number): boolean | Promise<boolean>;
+  recordProviderTeardown(invocationId: string, at: number): void | Promise<void>;
   transitionTerminal(
     invocationId: string,
     input: TurnExecutionTerminalInput,
@@ -216,10 +218,18 @@ export function assertTurnExecutionTerminalInput(
   if (input.endedAt < record.startedAt) throw new Error('endedAt cannot precede startedAt');
   if (input.status !== 'succeeded') assertNonEmpty(input.terminalReason ?? '', 'terminalReason');
   if (input.terminalReason !== undefined) assertNonEmpty(input.terminalReason, 'terminalReason');
+  if (input.providerTeardownAt !== undefined) {
+    assertTimestamp(input.providerTeardownAt, 'providerTeardownAt');
+    if (input.providerTeardownAt < record.startedAt)
+      throw new Error('providerTeardownAt must be inside the exact execution lifetime');
+  }
 }
 
 export function cloneTurnExecutionRecord(record: TurnExecutionRecord): TurnExecutionRecord {
   return {
+    ...(record.providerLifecycleTracked ? { providerLifecycleTracked: true } : {}),
+    ...(record.providerStartedAt !== undefined ? { providerStartedAt: record.providerStartedAt } : {}),
+    ...(record.providerTeardownAt !== undefined ? { providerTeardownAt: record.providerTeardownAt } : {}),
     invocationId: record.invocationId,
     parentInvocationId: record.parentInvocationId,
     threadId: record.threadId,

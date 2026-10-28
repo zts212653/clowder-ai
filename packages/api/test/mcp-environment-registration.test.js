@@ -12,7 +12,7 @@ import { buildOpenCodeMcpSync } from '../dist/domains/cats/services/agents/provi
 import { resolveProviderMcpConfig } from '../dist/domains/cats/services/agents/providers/provider-mcp-config.js';
 import { probeMcpCapability } from '../dist/routes/mcp-probe.js';
 import { resolveEnvReferences } from '../dist/utils/env-references.js';
-import { secretMcpContract } from './helpers/secret-mcp-contract.js';
+import { directMcpContract } from './helpers/direct-mcp-contract.js';
 
 function root(t) {
   const p = mkdtempSync(join(tmpdir(), 'mcp-env-registration-'));
@@ -146,9 +146,9 @@ test('client config adapters share generic env expansion, including ACP session 
   const mcpServerPath = join(host, 'packages/mcp-server/dist/index.js');
   const callbackEnv = { CAT_CAFE_CAT_ID: 'codex' };
   const shared = await resolveProviderMcpConfig({ workingDirectory: project, mcpServerPath, callbackEnv });
-  const sharedContract = secretMcpContract(shared.fixture);
+  const sharedContract = directMcpContract(shared.fixture);
   assert.equal(sharedContract.upstream.env.CUSTOM, 'prefix:current-value');
-  assert.equal(sharedContract.proxyEnv.CUSTOM, undefined);
+  assert.equal(sharedContract.launchEnv.CUSTOM, 'prefix:current-value');
   assert.equal(sharedContract.upstream.command, entry.mcpServer.command);
   assert.deepEqual(sharedContract.upstream.args, entry.mcpServer.args);
   const kimi = await resolveKimiMcpSurface({
@@ -157,9 +157,9 @@ test('client config adapters share generic env expansion, including ACP session 
     callbackEnv,
     nativeDirectory: root(t),
   });
-  const kimiContract = secretMcpContract(kimi.fixture);
+  const kimiContract = directMcpContract(kimi.fixture);
   assert.equal(kimiContract.upstream.env.CUSTOM, 'prefix:current-value');
-  assert.equal(kimiContract.proxyEnv.CUSTOM, undefined);
+  assert.equal(kimiContract.launchEnv.CUSTOM, 'prefix:current-value');
   assert.equal(kimiContract.upstream.command, entry.mcpServer.command);
   assert.deepEqual(kimiContract.upstream.args, entry.mcpServer.args);
   const openCode = buildOpenCodeMcpSync(mcpServerPath, 'codex', host, project);
@@ -171,14 +171,15 @@ test('client config adapters share generic env expansion, including ACP session 
     capabilitiesConfig: config,
     configSourceRoot: project,
   });
-  const acpContract = secretMcpContract(materializeSessionMcpServers(acp)[0]);
+  const acpContract = directMcpContract(materializeSessionMcpServers(acp)[0]);
   assert.equal(acpContract.upstream.env.CUSTOM, 'prefix:current-value');
-  assert.equal(acpContract.proxyEnv.CUSTOM, undefined);
+  assert.equal(acpContract.launchEnv.CUSTOM, 'prefix:current-value');
   assert.equal(acpContract.upstream.command, entry.mcpServer.command);
   assert.deepEqual(acpContract.upstream.args, entry.mcpServer.args);
   const native = [
     {
       name: 'plugin-fixture',
+      hostSource: 'plugin',
       command: process.execPath,
       args: [],
       env: [
@@ -192,10 +193,10 @@ test('client config adapters share generic env expansion, including ACP session 
     CAT_CAFE_CALLBACK_TOKEN: 'current-callback',
     CAT_CAFE_INVOCATION_ID: 'current-invocation',
   });
-  const { proxyEnv, upstream } = secretMcpContract(result[0]);
+  const { launchEnv, upstream } = directMcpContract(result[0]);
   const environment = upstream.env;
-  assert.equal(proxyEnv.CLOWDER_PLUGIN_ACTION_TOKEN, undefined);
-  assert.equal(proxyEnv.CUSTOM, undefined);
+  assert.equal(launchEnv.CLOWDER_PLUGIN_ACTION_TOKEN, upstream.env.CLOWDER_PLUGIN_ACTION_TOKEN);
+  assert.equal(launchEnv.CUSTOM, 'untouched');
   assert.equal(environment.CLOWDER_PLUGIN_ACTION_TOKEN, 'current-value');
   assert.equal(environment.CAT_CAFE_CALLBACK_TOKEN, 'current-callback');
   assert.equal(environment.CAT_CAFE_INVOCATION_ID, 'current-invocation');
@@ -214,12 +215,12 @@ test('ACP expands references once at session launch, preserving replacement valu
     { name: 'ordinary', command: process.execPath, args: [], env: [{ name: 'VALUE', value: '${MCP_FIXTURE_VALUE}' }] },
   ];
   const materialized = materializeSessionMcpServers(base);
-  const { proxyEnv, upstream } = secretMcpContract(materialized[0]);
+  const { launchEnv, upstream } = directMcpContract(materialized[0]);
   assert.equal(upstream.command, base[0].command);
   assert.deepEqual(upstream.args, base[0].args);
-  assert.equal(upstream.source, base[0].name);
+
   assert.equal(upstream.env.VALUE, 'literal:${NOT_A_SECOND_LOOKUP}');
-  assert.equal(proxyEnv.VALUE, undefined);
+  assert.equal(launchEnv.VALUE, upstream.env.VALUE);
   assert.equal(base[0].env[0].value, '${MCP_FIXTURE_VALUE}');
 });
 

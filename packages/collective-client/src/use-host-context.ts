@@ -16,6 +16,7 @@ import type { collectiveArtifactClient } from './collective-artifact-client.js';
 import { useHostAccountabilityContext } from './use-host-accountability-context.js';
 import { useHostMediaShare } from './use-host-media-share.js';
 import { type MediaSelection, useHostMediaSurface } from './use-host-media-surface.js';
+import { type ProjectAttentionFocus, useHostProjectAttentionContext } from './use-host-project-attention-context.js';
 import { useHostUiPlacement } from './use-host-ui-placement.js';
 import { useHostWorkPolicy } from './use-host-work-policy.js';
 
@@ -41,6 +42,7 @@ export function useHostContext(
   const [open, setOpen] = useState(false);
   const [cafeSection, setCafeSection] = useState<CollectiveCafeSection>('cats');
   const [focusWork, setFocusWork] = useState<
+    | ProjectAttentionFocus
     | { workId: string; channelId: string; eventId: string }
     | { workId: string; channelId: string; roadmapId: string; accountabilityRequestId: string }
   >();
@@ -76,6 +78,11 @@ export function useHostContext(
     setFocusWork({ workId: work.workId, channelId: value.channelId, eventId: value.resultEventId });
     return true;
   }, []);
+  const projectAttentionContext = useHostProjectAttentionContext({
+    context: publicContext,
+    snapshot,
+    onFocus: setFocusWork,
+  });
   const { handleFocus: handleAccountabilityFocus, reset: resetAccountabilityContext } = useHostAccountabilityContext({
     hostOrigin,
     context: publicContext,
@@ -93,6 +100,7 @@ export function useHostContext(
       setFocusWork(undefined);
       pendingWorkFocus.current = undefined;
       resetAccountabilityContext();
+      projectAttentionContext.reset();
       reconciledWorks.current.clear();
       setParticipationReady(undefined);
       const matched = hostInitMatches(parsed.data, serviceInstanceId, collectiveId, humanId) ? parsed.data : undefined;
@@ -154,7 +162,8 @@ export function useHostContext(
         handleParticipationReady(event.data) ||
         handleReconciled(event.data) ||
         handleWorkFocus(event.data) ||
-        handleAccountabilityFocus(event.data)
+        handleAccountabilityFocus(event.data) ||
+        projectAttentionContext.handleFocus(event.data)
       )
         return;
       handleAction(event.data);
@@ -168,6 +177,8 @@ export function useHostContext(
     hostOrigin,
     humanId,
     handleAccountabilityFocus,
+    projectAttentionContext.handleFocus,
+    projectAttentionContext.reset,
     resetAccountabilityContext,
     serviceInstanceId,
   ]);

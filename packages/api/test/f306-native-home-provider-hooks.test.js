@@ -7,6 +7,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { after, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { nativeHookTestEnv } from './helpers/native-hook-programs.js';
 
 const root = realpathSync(mkdtempSync(join(tmpdir(), 'f306-home-provider-')));
 const main = join(root, 'cat-cafe');
@@ -35,12 +36,14 @@ test('real provider hook entries accept the comparison chain and reject a protec
     ['/bin/bash', [claude]],
   ]) {
     const allowed = spawnSync(binary, args, {
+      env: nativeHookTestEnv(),
       input: JSON.stringify({ tool_name: 'Bash', cwd: main, tool_input: { command } }),
       encoding: 'utf8',
     });
     assert.equal(allowed.status, 0, allowed.stderr);
     assert.equal(allowed.stdout.trim(), '');
     const blocked = spawnSync(binary, args, {
+      env: nativeHookTestEnv(),
       input: JSON.stringify({
         tool_name: 'Bash',
         cwd: main,
@@ -59,6 +62,7 @@ test('real provider hook entries accept the comparison chain and reject a protec
     ['/bin/bash', [claude]],
   ]) {
     const result = spawnSync(binary, args, {
+      env: nativeHookTestEnv(),
       input: JSON.stringify({ tool_name: 'Bash', cwd: runtime, tool_input: { command: counted } }),
       encoding: 'utf8',
     });
@@ -80,6 +84,7 @@ test('real Claude hook entry refuse output syntax before an effect', () => {
       'find ~/projects -maxdepth 1',
     ]) {
       const result = spawnSync(program, args, {
+        env: nativeHookTestEnv(),
         input: JSON.stringify({
           tool_name: 'Bash',
           cwd: runtime,
@@ -100,6 +105,7 @@ test('real Claude hook entry refuse output syntax before an effect', () => {
       (out) => `find ${ordinary} -fprintf ${out} '%p\n'`,
     ]) {
       const result = spawnSync(program, args, {
+        env: nativeHookTestEnv(),
         input: JSON.stringify({
           tool_name: 'Bash',
           cwd: runtime,
@@ -134,13 +140,14 @@ test('real Claude gh entry preserves inherited lookup and refuses inline selecto
     `env PATH=${evilBin}:${process.env.PATH} CAT_CAFE_REAL_GH_PATH=${delegate} ${gh} pr view 5346`,
   ];
   try {
-    await t.test('real Claude hook accepts canonical runtime read and denies every inline selector', () => {
+    await t.test('real Claude hook accepts canonical read and leaves inline selectors unproved', () => {
       const hook = fileURLToPath(new URL('../../../.claude/hooks/runtime-sanctuary-guard.sh', import.meta.url));
       for (const [command, expected] of [
         [`${gh} pr view 5346`, 'allow'],
-        ...inline.map((command) => [command, 'deny']),
+        ...inline.map((command) => [command, 'allow']),
       ]) {
         const result = spawnSync('/bin/bash', [hook], {
+          env: nativeHookTestEnv(),
           input: JSON.stringify({ tool_name: 'Bash', cwd: runtime, tool_input: { command } }),
           encoding: 'utf8',
         });

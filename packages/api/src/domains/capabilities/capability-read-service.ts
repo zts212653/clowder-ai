@@ -25,6 +25,8 @@ import type {
 import { catRegistry, STANDARD_MOUNT_POINT_IDS } from '@cat-cafe/shared';
 import type { CapabilitiesConfigState } from '../../config/capabilities/capability-orchestrator.js';
 import { readCapabilitiesConfigState } from '../../config/capabilities/capability-orchestrator.js';
+import type { InvocationPluginMcpView } from '../../config/capabilities/invocation-plugin-mcp-view.js';
+import { projectLocalPluginMcpCapabilities } from '../../config/capabilities/plugin-mcp-exposure.js';
 import { resolveMountRulesFromConfigs } from '../../config/mount/mount-rules-store.js';
 import {
   parseManifestSkillMetaState,
@@ -59,6 +61,8 @@ export interface CapabilityReadRequest {
   /** Loaded by the caller with `readCapabilitiesConfigState`; never re-read or created here. */
   readonly config: CapabilitiesConfigState;
   readonly scope: CapabilityReadScope;
+  /** Host-owned local installation view; not request input or a second stored registry. */
+  readonly pluginMcpView?: InvocationPluginMcpView | undefined;
   /** Console-only (F062): launch fields and secret values. Ignored for member scope. */
   readonly secrets?: { readonly launchFields: boolean; readonly values: boolean };
   /** Owner resolvers for live facts outside capabilities.json. Absent = not observed. */
@@ -116,6 +120,18 @@ export async function readCapabilitySnapshot(request: CapabilityReadRequest): Pr
   // answer is unknown — not the project's stale local copy (review R1 P1-2).
   if (globalState?.kind === 'unreadable') return unknownFrom(globalState, 'global_config_unreadable');
 
+  const local = projectLocalPluginMcpCapabilities(
+    config.config,
+    request.pluginMcpView,
+    scope.kind === 'member'
+      ? { kind: 'member', projectRoot, memberCatId: scope.catId }
+      : { kind: 'diagnostic', projectRoot },
+    scope.kind === 'member' ? scope.catId : undefined,
+  );
+  const effectiveConfig = local.config;
+  configRefs.push(...local.sourceRefs);
+  invalidators.push(...local.sourceRefs.map((ref) => ({ ownerRef: 'F202', ref })));
+
   // `absent` home config is a fact (no inherited policy); only `present` feeds it.
   const globalConfig = globalState?.kind === 'present' ? globalState.config : null;
   const secrets = scope.kind === 'console' ? request.secrets : undefined;
@@ -142,14 +158,14 @@ export async function readCapabilitySnapshot(request: CapabilityReadRequest): Pr
   for (const [name, meta] of skillMetaMap) {
     if (!mergedMetaForMcp.has(name)) mergedMetaForMcp.set(name, meta);
   }
-  const mcpStatuses = await resolveSkillMcpStatuses(projectRoot, mergedMetaForMcp, config.config);
+  const mcpStatuses = await resolveSkillMcpStatuses(projectRoot, mergedMetaForMcp, effectiveConfig);
 
   const catIds = catRegistry.getAllIds().map((id) => id as string);
   const items: CapabilityBoardItem[] = [];
   const globalMcpMap = new Map(
     (globalConfig?.capabilities ?? []).filter((c) => c.type === 'mcp').map((c) => [c.id, c] as const),
   );
-  for (const cap of config.config.capabilities) {
+  for (const cap of effectiveConfig.capabilities) {
     if (cap.type !== 'mcp') continue;
     // F249 Bug 3: external projects without a project-level override inherit globalEnabled.
     const inheritFromGlobal = isExternalProject && cap.blockedCats === undefined;
@@ -172,9 +188,10 @@ export async function readCapabilitySnapshot(request: CapabilityReadRequest): Pr
       globalEnabled: effectiveGlobalEnabled,
       cats,
       mcpServer: await buildBoardMcpServer(cap, {
-        includeLaunchFields: secrets?.launchFields ?? false,
-        includeSecrets: secrets?.values ?? false,
+        includeLaunchFields: !local.localCapabilityIds.has(cap.id) && (secrets?.launchFields ?? false),
+        includeSecrets: !local.localCapabilityIds.has(cap.id) && (secrets?.values ?? false),
       }),
+      ...(local.localCapabilityIds.has(cap.id) ? { accessManagedByPlugin: true } : {}),
       layer: 'L1',
       pluginId: cap.pluginId,
       blockedCats: cap.blockedCats,
@@ -261,7 +278,7 @@ export async function readCapabilitySnapshot(request: CapabilityReadRequest): Pr
   const revision = sourceRevisionOf({ configRefs, presence: mountPointSkills, items, health: skillHealth });
 
   if (request.resolvers?.probeMcp) {
-    await applyMcpProbe(items, config.config.capabilities, request.resolvers.probeMcp);
+    await applyMcpProbe(items, effectiveConfig.capabilities, request.resolvers.probeMcp);
   }
 
   const envelope: CapabilityReadEnvelope = {

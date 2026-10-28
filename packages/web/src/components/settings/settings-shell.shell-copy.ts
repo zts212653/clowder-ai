@@ -32,6 +32,7 @@ export const settingsShellCopy = defineShellCopy(
       sections: Object.fromEntries(SETTINGS_SECTIONS.map(({ id, label }) => [id, label] as const)),
       sectionGroup: (label: string) => `${label}的分区`,
       entries: {
+        you: '你',
         team: '猫猫团队',
         schedule: '调度',
         evolution: '能力进化',
@@ -69,6 +70,7 @@ export const settingsShellCopy = defineShellCopy(
       },
       sectionGroup: (label: string) => `${label} sections`,
       entries: {
+        you: 'You',
         team: 'Cat team',
         schedule: 'Scheduling',
         evolution: 'Capability evolution',

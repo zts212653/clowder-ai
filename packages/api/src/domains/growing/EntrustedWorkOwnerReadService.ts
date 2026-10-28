@@ -8,6 +8,7 @@ import {
 } from '@cat-cafe/shared';
 import { z } from 'zod';
 import type { ITaskStore } from '../cats/services/stores/ports/TaskStore.js';
+import type { CollectiveWorkCalendarReader } from '../plugin/host-surface/collective-work-calendar.js';
 import { composeEntrustedWorkBrief } from './EntrustedWorkBriefComposer.js';
 import {
   projectEntrustedWorkTimeRefs,
@@ -101,6 +102,7 @@ export interface EntrustedWorkOwnerReadServiceDeps {
   readonly tasks: Pick<ITaskStore, 'get' | 'listByKind'>;
   readonly producerCatalog: NeedsMeProducerCatalog;
   readonly artifactReader?: PreparedArtifactReader;
+  readonly collectiveCalendarReader?: CollectiveWorkCalendarReader;
   readonly taskExecution?: { read(task: TaskItem): Promise<EntrustedWorkTaskExecutionV1> };
 }
 
@@ -157,6 +159,8 @@ export class EntrustedWorkOwnerReadService {
             : task.status !== 'done' && task.entrustedWork?.closure.state === 'open'),
     );
     const artifactReader = this.deps.artifactReader?.createReadScope?.() ?? this.deps.artifactReader;
+    const calendarReader =
+      this.deps.collectiveCalendarReader?.createReadScope?.() ?? this.deps.collectiveCalendarReader;
     const ownerReads: EntrustedWorkOwnerReadV1[] = [];
     // One owner scan at a time; repeated work in the same thread reuses this request's index.
     for (const task of currentTasks) {
@@ -172,6 +176,7 @@ export class EntrustedWorkOwnerReadService {
           attention.receipts,
           artifactReader,
           attention.coverage,
+          calendarReader,
         ),
       );
     }
@@ -195,6 +200,8 @@ export class EntrustedWorkOwnerReadService {
       byTask.set(taskId, current);
     }
 
+    const calendarReader =
+      this.deps.collectiveCalendarReader?.createReadScope?.() ?? this.deps.collectiveCalendarReader;
     const ownerReads: EntrustedWorkOwnerReadV1[] = [];
     const artifactReader = this.deps.artifactReader?.createReadScope?.() ?? this.deps.artifactReader;
     for (const [taskId, taskReceipts] of byTask) {
@@ -206,6 +213,7 @@ export class EntrustedWorkOwnerReadService {
         taskReceipts,
         artifactReader,
         attention.coverage,
+        calendarReader,
       );
       if (ownerRead.preparedArtifact && ownerRead.attentionReceipts.some((receipt) => receipt.eligible)) {
         ownerReads.push(ownerRead);
@@ -241,6 +249,7 @@ export class EntrustedWorkOwnerReadService {
     producerReceipts: readonly ProducerAttentionReceiptV1[],
     artifactReader = this.deps.artifactReader,
     attentionCoverage: ProducerAttentionCoverageV1 = { state: 'complete' },
+    calendarReader = this.deps.collectiveCalendarReader,
   ): Promise<EntrustedWorkOwnerReadV1> {
     this.assertViewer(task, input.viewer);
     const entrusted = task.entrustedWork;
@@ -273,7 +282,20 @@ export class EntrustedWorkOwnerReadService {
       subjectRef,
       producerReceipts,
     });
-    const timeRefs = projectEntrustedWorkTimeRefs(entrusted.time, subjectRef, ownerRef, entrusted.revision);
+    const publicTime = isCurrent ? await calendarReader?.read(task) : undefined;
+    // This is a disposable read of the same Work. Never copy public dates into private Task storage.
+    const dateFacts =
+      publicTime?.state === 'current'
+        ? Object.fromEntries(
+            Object.entries(publicTime.time).map(([key, fact]) => [
+              key,
+              { value: Date.parse(fact.value), sourceRef: fact.sourceRef },
+            ]),
+          )
+        : publicTime?.state === 'unavailable'
+          ? {}
+          : entrusted.time;
+    const timeRefs = projectEntrustedWorkTimeRefs(dateFacts, subjectRef, ownerRef, entrusted.revision);
     const execution =
       entrusted.closure.state === 'open'
         ? await readOwnerTaskExecution({ task, isCurrent, reader: this.deps.taskExecution })
@@ -325,6 +347,7 @@ export class EntrustedWorkOwnerReadService {
         ...(terminal ? { terminal } : {}),
       }),
       ...(preparedArtifact ? { preparedArtifact } : {}),
+      ...(publicTime ? { publicTime } : {}),
       timeRefs,
       attentionCoverage,
       attentionReceipts,

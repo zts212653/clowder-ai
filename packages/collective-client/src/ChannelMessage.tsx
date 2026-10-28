@@ -12,6 +12,7 @@ import type {
 } from './client-types.js';
 import { useCollectiveLanguage, useCollectiveText } from './collective-copy.js';
 import { MessageInteraction } from './MessageInteraction.js';
+import { MessageReadEnd } from './MessageReadEnd.js';
 import { MessageReceipt } from './MessageReceipt.js';
 import { authorPresentation } from './message-presentation.js';
 import { publicActorLabel } from './participant-label.js';
@@ -127,6 +128,7 @@ export function ChannelMessage({
           )}
         </header>
         {body}
+        <MessageReadEnd eventId={root.eventId} />
         <MessageReceipt
           event={root}
           replies={replies}

@@ -29,14 +29,18 @@ export function MemoryPagePreview({
   basePath = '/memory/preview',
   from,
   profileSource,
+  initialQuery,
+  findSessionId,
 }: {
   tab: MemoryPageTab;
   shell?: string;
   basePath?: '/memory' | '/memory/preview';
   from?: string | null;
   profileSource?: ProfileSourceTarget;
+  initialQuery?: string;
+  findSessionId?: string | null;
 }) {
-  const search = useMemorySearch();
+  const search = useMemorySearch(initialQuery);
   const rawIndex = useMemoryRead<Parameters<typeof parseIndexStatus>[0]>('/api/evidence/status');
   const index = { ...rawIndex, data: rawIndex.data ? parseIndexStatus(rawIndex.data) : null };
   const maintenance = useMemoryRead<MaintenanceData>('/api/memory/maintenance');
@@ -46,13 +50,13 @@ export function MemoryPagePreview({
       data-testid="memory-page-preview"
     >
       <header className="flex flex-wrap items-center gap-3 border-b border-cafe-subtle px-4 py-3 md:px-8">
-        <MemoryNavigation from={from} />
+        <MemoryNavigation from={from} findSessionId={findSessionId} />
         <span className="text-base font-medium">记忆</span>
         <nav className="flex max-w-full gap-1 overflow-x-auto" aria-label="记忆页标签">
           {TABS.map((item) => (
             <Link
               key={item.id}
-              href={`${basePath}?tab=${item.id}${shell ? `&shell=${encodeURIComponent(shell)}` : ''}${from ? `&from=${encodeURIComponent(from)}` : ''}`}
+              href={`${basePath}?tab=${item.id}${shell ? `&shell=${encodeURIComponent(shell)}` : ''}${from ? `&from=${encodeURIComponent(from)}` : ''}${findSessionId ? `&findSession=${encodeURIComponent(findSessionId)}` : ''}`}
               aria-current={search.query === null && tab === item.id ? 'page' : undefined}
               className={`whitespace-nowrap rounded-lg px-3 py-2 text-sm ${search.query === null && tab === item.id ? 'bg-cafe-surface-sunken font-medium' : 'text-cafe-muted'}`}
             >

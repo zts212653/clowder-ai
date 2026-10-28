@@ -1,3 +1,4 @@
+import { readNativeMcpConfig } from './helpers/direct-mcp-contract.js';
 /**
  * ClaudeAgentService Tests (CLI mode)
  * 测试布偶猫 CLI 子进程调用
@@ -20,10 +21,10 @@ import { dirname, join } from 'node:path';
 import { PassThrough } from 'node:stream';
 import { mock, test } from 'node:test';
 import { assertClaudeSettingsPreserved, claudeUserSettings } from './helpers/claude-settings-contract.js';
+import { assertCurrentCallback, directMcpContract } from './helpers/direct-mcp-contract.js';
 import { ensureFakeCliOnPath } from './helpers/fake-cli-path.js';
 import { emitProcessExit, waitForMockProcessReady } from './helpers/mock-process-lifecycle.js';
 import { emitEvents as emitClaudeEvents } from './helpers/provider-archive-test-helpers.js';
-import { assertCurrentCallback, secretMcpContract } from './helpers/secret-mcp-contract.js';
 
 const { ClaudeAgentService, pickGitBashPathFromWhere, resolveDefaultClaudeMcpServerPath } = await import(
   '../dist/domains/cats/services/agents/providers/ClaudeAgentService.js'
@@ -1188,27 +1189,27 @@ test('#712: merges user .mcp.json servers as base layer — managed entries take
     assert.ok(mcpConfigIdx >= 0, '--mcp-config should be present');
     assert.ok(args.includes('--strict-mcp-config'), '--strict-mcp-config should be present');
 
-    const parsed = JSON.parse(args[mcpConfigIdx + 1]);
+    const parsed = readNativeMcpConfig(args[mcpConfigIdx + 1]);
     // User-owned server should be merged in
     assert.ok(parsed.mcpServers.filesystem, 'user-owned filesystem should be merged');
-    const { proxyEnv: filesystemProxyEnv, upstream: filesystem } = secretMcpContract(parsed.mcpServers.filesystem);
-    assert.equal(filesystem.source, 'filesystem');
+    const { launchEnv: filesystemLaunchEnv, upstream: filesystem } = directMcpContract(parsed.mcpServers.filesystem);
+
     assert.equal(filesystem.command, 'npx');
     assert.deepEqual(filesystem.args, ['-y', '@mcp/fs']);
-    assert.deepEqual(filesystem.env, { FS_OPTION: 'kept' }, 'foreign upstream has no host callback credentials');
-    assert.equal(filesystemProxyEnv.FS_OPTION, undefined, 'upstream launch variables cannot configure the proxy');
-    assertCurrentCallback(filesystemProxyEnv, {
-      CAT_CAFE_API_URL: 'http://localhost:3004',
-      CAT_CAFE_INVOCATION_ID: 'inv-merge',
-      CAT_CAFE_CALLBACK_TOKEN: 'token-merge',
-    });
+    assert.equal(filesystem.env.FS_OPTION, 'kept');
+    assert.ok(
+      Object.entries(filesystem.env).every(([key, value]) => key === 'FS_OPTION' || value === ''),
+      'only blank inherited Host identities are added',
+    );
+    assert.equal(filesystemLaunchEnv.FS_OPTION, 'kept');
+    assert.equal(filesystemLaunchEnv.CAT_CAFE_CALLBACK_TOKEN, '');
     assert.equal(parsed.mcpServers.github, undefined, 'retired GitHub MCP must not be merged');
     // Managed split servers should be present
     assert.ok(parsed.mcpServers['cat-cafe-collab'], 'managed cat-cafe-collab should be present');
     // Stale user copy should NOT override managed entry
-    const { proxyEnv: collabProxyEnv, upstream: collab } = secretMcpContract(parsed.mcpServers['cat-cafe-collab']);
+    const { launchEnv: collabLaunchEnv, upstream: collab } = directMcpContract(parsed.mcpServers['cat-cafe-collab']);
     assert.notEqual(collab.command, 'echo', 'stale user entry must not override the managed upstream');
-    assert.equal(collab.source, 'cat-cafe-collab');
+
     assert.deepEqual(
       collab.args.map((path) => realpathSync(path)),
       [realpathSync(join(mcpDistDir, 'collab.js'))],
@@ -1224,8 +1225,14 @@ test('#712: merges user .mcp.json servers as base layer — managed entries take
       CAT_CAFE_INVOCATION_ID: 'inv-merge',
       CAT_CAFE_CALLBACK_TOKEN: 'token-merge',
     };
-    assertCurrentCallback(collabProxyEnv, { ALLOWED_WORKSPACE_DIRS: projectDir, ...expectedCallback });
-    assertCurrentCallback(collab.env, { ALLOWED_WORKSPACE_DIRS: projectDir, ...expectedCallback });
+    assertCurrentCallback(Object.fromEntries(Object.entries(collabLaunchEnv).filter(([, value]) => value !== '')), {
+      ALLOWED_WORKSPACE_DIRS: projectDir,
+      ...expectedCallback,
+    });
+    assertCurrentCallback(Object.fromEntries(Object.entries(collab.env).filter(([, value]) => value !== '')), {
+      ALLOWED_WORKSPACE_DIRS: projectDir,
+      ...expectedCallback,
+    });
   } finally {
     if (previousAllowedWorkspaceDirs === undefined) delete process.env.ALLOWED_WORKSPACE_DIRS;
     else process.env.ALLOWED_WORKSPACE_DIRS = previousAllowedWorkspaceDirs;
@@ -1283,7 +1290,7 @@ test('#712: Claude reads capabilities from runtime root while cwd is user projec
     await promise;
 
     const args = spawnFn.mock.calls[0].arguments[1];
-    const parsed = JSON.parse(args[args.indexOf('--mcp-config') + 1]);
+    const parsed = readNativeMcpConfig(args[args.indexOf('--mcp-config') + 1]);
     assert.equal(parsed.mcpServers['cat-cafe-collab'], undefined, 'disabled runtime capability must not be injected');
     assert.ok(parsed.mcpServers['cat-cafe-memory'], 'enabled runtime capability must be injected');
   } finally {
@@ -1342,18 +1349,16 @@ test('Claude MCP config resolves Pencil with the current editor host identifier'
     await promise;
 
     const args = spawnFn.mock.calls[0].arguments[1];
-    const parsed = JSON.parse(args[args.indexOf('--mcp-config') + 1]);
-    const { proxyEnv, upstream: pencil } = secretMcpContract(parsed.mcpServers.pencil);
-    assert.equal(pencil.source, 'pencil');
+    const parsed = readNativeMcpConfig(args[args.indexOf('--mcp-config') + 1]);
+    const { launchEnv, upstream: pencil } = directMcpContract(parsed.mcpServers.pencil);
+
     assert.equal(pencil.command, pencilBin);
     assert.deepEqual(pencil.args, ['--app', 'visual_studio_code']);
-    assert.deepEqual(pencil.env, {}, 'foreign Pencil upstream has no host callback credentials');
-    assertCurrentCallback(proxyEnv, {
-      CAT_CAFE_CAT_ID: 'fable-5',
-      CAT_CAFE_API_URL: 'http://localhost:3004',
-      CAT_CAFE_INVOCATION_ID: 'inv-claude-pencil',
-      CAT_CAFE_CALLBACK_TOKEN: 'token-claude-pencil',
-    });
+    assert.ok(
+      Object.values(pencil.env).every((value) => value === ''),
+      'foreign Pencil has no inherited Host callback credentials',
+    );
+    assert.equal(launchEnv.CAT_CAFE_CALLBACK_TOKEN, '');
   } finally {
     if (previousPencilBin === undefined) delete process.env.PENCIL_MCP_BIN;
     else process.env.PENCIL_MCP_BIN = previousPencilBin;
@@ -1424,7 +1429,7 @@ test('#712: Claude merge excludes disabled capability-managed user entries', asy
     await promise;
 
     const args = spawnFn.mock.calls[0].arguments[1];
-    const parsed = JSON.parse(args[args.indexOf('--mcp-config') + 1]);
+    const parsed = readNativeMcpConfig(args[args.indexOf('--mcp-config') + 1]);
     assert.equal(parsed.mcpServers.filesystem, undefined, 'disabled capability must not be re-added from .mcp.json');
     assert.equal(parsed.mcpServers['cat-cafe'], undefined, 'legacy monolith alias must not be re-added from .mcp.json');
     assert.ok(parsed.mcpServers['my-tool'], 'unmanaged user server should still be merged');
@@ -1472,15 +1477,15 @@ test('falls back to default MCP path when CAT_CAFE_MCP_SERVER_PATH is empty', as
     const args = spawnFn.mock.calls[0].arguments[1];
     const mcpConfigIdx = args.indexOf('--mcp-config');
     assert.ok(mcpConfigIdx >= 0, '--mcp-config should be present when fallback resolves');
-    const parsed = JSON.parse(args[mcpConfigIdx + 1]);
+    const parsed = readNativeMcpConfig(args[mcpConfigIdx + 1]);
     // #712: Split servers instead of monolith cat-cafe
     assert.ok(parsed.mcpServers['cat-cafe-collab'], 'split server cat-cafe-collab expected');
     assert.equal(parsed.mcpServers['cat-cafe'], undefined, 'monolith must not be injected');
-    const { proxyEnv, upstream: collab } = secretMcpContract(parsed.mcpServers['cat-cafe-collab']);
-    assert.equal(collab.source, 'cat-cafe-collab');
+    const { launchEnv, upstream: collab } = directMcpContract(parsed.mcpServers['cat-cafe-collab']);
+
     assert.equal(collab.command, process.execPath);
     assert.equal(realpathSync(collab.args[0]), realpathSync(join(mcpDistDir, 'collab.js')));
-    for (const env of [proxyEnv, collab.env]) {
+    for (const env of [launchEnv, collab.env]) {
       assert.equal(env.CAT_CAFE_API_URL, 'http://localhost:3004');
       assert.equal(env.CAT_CAFE_INVOCATION_ID, 'inv-1');
       assert.equal(env.CAT_CAFE_CALLBACK_TOKEN, 'token-1');

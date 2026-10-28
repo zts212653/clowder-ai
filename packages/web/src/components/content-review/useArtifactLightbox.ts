@@ -1,97 +1,54 @@
 'use client';
 import type { GlobalArtifactDTO, ThreadArtifactDTO } from '@cat-cafe/shared';
-import { useWorkCardOpen } from '@/components/artifacts/useWorkCardOpen';
-import { createArtifactSurface } from '@/components/workbench/real-surface-adapters';
-import { inferFileKind } from '@/lib/file-kind';
+import { useEffect, useRef } from 'react';
 import type { WorkspaceFileNavigationOrigin } from '@/stores/chat-types';
-import { useChatStore } from '@/stores/chatStore';
-import { API_URL } from '@/utils/api-client';
-import { captureChatReadingBeforeLayoutChange } from '@/utils/chat-layout-change';
-import { useArtworkLightboxScope } from './ArtworkLightboxScope';
-import { artworkLightboxSurface } from './artwork-lightbox-surface';
-import { useChatArtworkEntry, workspaceArtworkEntry } from './useChatArtworkEntry';
-import { messagePublicationSource } from './usePublishedContent';
+import { artifactObjectId } from '../workbench/real-surface-adapters';
+import { type ContentOpenSource, contentOpenFacts } from './content-open-source';
+import { useContentOpen } from './useContentOpen';
 
-export function useArtifactLightbox(hostThreadId: string) {
-  const scope = useArtworkLightboxScope();
-  const entry = useChatArtworkEntry();
-  const workCard = useWorkCardOpen(undefined, '');
-  const open = (
-    artifact: ThreadArtifactDTO | GlobalArtifactDTO,
-    origin: WorkspaceFileNavigationOrigin | undefined,
-  ): boolean => {
-    if (!scope || !entry.isV2) return false;
-    if (artifact.work?.contentRef.startsWith('work:')) {
-      void workCard.open('lightbox', false, {
-        reference: artifact.work,
-        title: artifact.name,
-        navigationOrigin: origin,
+/** Entry supplies its source and attachment control; opening/type decisions have one implementation. */
+export function useArtifactLightbox<Origin extends WorkspaceFileNavigationOrigin = WorkspaceFileNavigationOrigin>(
+  hostThreadId: string,
+  onOpenDocument?: (artifact: ThreadArtifactDTO | GlobalArtifactDTO, origin: Origin) => void,
+  catalogue?: { items: readonly (ThreadArtifactDTO | GlobalArtifactDTO)[]; complete: boolean },
+) {
+  const opening = useContentOpen();
+  const selected = useRef<string>();
+  const invalidate = useRef(opening.invalidate);
+  invalidate.current = opening.invalidate;
+  useEffect(() => {
+    if (!catalogue?.complete || !selected.current) return;
+    if (!catalogue.items.some((item) => artifactObjectId(item) === selected.current)) {
+      selected.current = undefined;
+      invalidate.current('无法打开这件作品：原来源已不在当前目录中。');
+    }
+  }, [catalogue?.items, catalogue?.complete]);
+  return {
+    ...opening,
+    open: (
+      artifact: ThreadArtifactDTO | GlobalArtifactDTO,
+      origin: Origin | undefined,
+      catalogue: readonly (ThreadArtifactDTO | GlobalArtifactDTO)[] = [],
+    ) => {
+      selected.current = artifactObjectId(artifact);
+      const sources: ContentOpenSource[] = catalogue
+        .map((item) => ({
+          kind: 'artifact' as const,
+          threadId: 'threadId' in item ? item.threadId : hostThreadId,
+          artifact: item,
+          origin,
+        }))
+        .filter((source) => contentOpenFacts(source).floating);
+      const index = sources.findIndex((source) => source.kind === 'artifact' && source.artifact === artifact);
+      void opening.openContent({
+        gallery: index >= 0 ? { items: sources, index } : undefined,
+        kind: 'artifact',
+        threadId: 'threadId' in artifact ? artifact.threadId : hostThreadId,
+        artifact,
+        origin,
+        attach: onOpenDocument && origin ? () => onOpenDocument(artifact, origin) : undefined,
       });
       return true;
-    }
-    const url = artifact.url;
-    // Published rich-file PNGs retain the catalogue's file type; the existing owner still admits their bytes.
-    const image = artifact.type === 'image' || (artifact.type === 'file' && inferFileKind(artifact.name) === 'image');
-    if (!image && artifact.type !== 'video')
-      return scope.open({
-        url: url ?? '',
-        title: artifact.name,
-        alt: artifact.name,
-        mediaType: 'image',
-        ownerContentOnly: true,
-        surface: createArtifactSurface({ threadId: hostThreadId, artifact, navigationOrigin: origin }),
-        openWorkspace: async () => {
-          if (useChatStore.getState().currentThreadId !== hostThreadId) return false;
-          captureChatReadingBeforeLayoutChange();
-          useChatStore.getState().openPublishedArtifact(hostThreadId, artifact, origin, 'work-mode');
-          scope.close();
-          return true;
-        },
-      });
-    if (!url) return false;
-    const sourceThreadId = 'threadId' in artifact ? artifact.threadId : hostThreadId;
-    const source =
-      workspaceArtworkEntry(url) ??
-      (artifact.sourceMessageId && artifact.publicationItem
-        ? messagePublicationSource(
-            {
-              threadId: sourceThreadId,
-              messageId: artifact.sourceMessageId,
-              messageRevision: String(artifact.createdAt),
-            },
-            artifact.publicationItem,
-            url,
-          )
-        : null);
-    void entry.open(source, artifact.name, 'lightbox').then((result) => {
-      if (result.status === 'blocked') return;
-      scope.open({
-        url: url.startsWith('/') ? `${API_URL}${url}` : url,
-        title: artifact.name,
-        alt: artifact.name,
-        mediaType: artifact.type === 'video' ? 'video' : 'image',
-        surface:
-          result.status === 'opened'
-            ? {
-                ...artworkLightboxSurface(result.target, artifact.name),
-                ...(origin ? { navigationOrigin: origin } : {}),
-              }
-            : null,
-        ...(result.status === 'preview' ? { reason: result.reason } : {}),
-        openWorkspace: async () => {
-          const admitted = await entry.open(source, artifact.name, 'lightbox');
-          if (admitted.status === 'blocked' || !admitted.target) return false;
-          const chat = useChatStore.getState();
-          if (chat.currentThreadId !== hostThreadId) return false;
-          const target = { ...admitted.target, ...(origin ? { navigationOrigin: origin } : {}) };
-          captureChatReadingBeforeLayoutChange();
-          return target.kind === 'file'
-            ? chat.openWorkspacePath(hostThreadId, target, 'work-mode')
-            : chat.openPublication(target, hostThreadId, 'work-mode');
-        },
-      });
-    });
-    return true;
+    },
   };
-  return { open, error: entry.error ?? workCard.error };
 }

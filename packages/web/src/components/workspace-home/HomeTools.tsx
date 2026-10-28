@@ -1,7 +1,7 @@
 'use client';
 
 import { type ReactNode, useEffect, useMemo, useState } from 'react';
-import { MemoryBookStarIcon, ShellGlyph } from '@/components/shell/ShellIcons';
+import { MemoryBookStarIcon, ShellGlyph, YarnBallIcon } from '@/components/shell/ShellIcons';
 import { useShellCopy } from '@/components/shell/shell-copy';
 import type { WorkspaceLauncherDestination } from '@/components/workspace/WorkspaceLauncher';
 import { type LauncherWorkspaceSearch, WorkspaceLauncherSearch } from '@/components/workspace/WorkspaceLauncherSearch';
@@ -25,6 +25,7 @@ import { homeCopy } from './workspace-home.shell-copy';
 const GROUP_ORDER: readonly HomeGroupId[] = ['activity', 'code', 'other'];
 
 function RowIcon({ icon }: { icon: HomeRow['icon'] }) {
+  if (icon === 'yarnBall') return <YarnBallIcon className="h-4 w-4" />;
   return icon === 'memory' ? (
     <MemoryBookStarIcon className="h-4 w-4" />
   ) : (

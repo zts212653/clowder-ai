@@ -22,7 +22,7 @@
  * deferred to a later phase) to stay minimal and avoid dependency on
  * compileL0ViaSubprocess machinery.
  */
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { type CatId, createCatId } from '@cat-cafe/shared';
@@ -52,6 +52,7 @@ import {
   resolveClaudeModelSelection,
   resolveDefaultClaudeMcpServerPath,
 } from './ClaudeAgentService.js';
+import { resolveClaudeMcpConfig } from './claude-mcp-config.js';
 import {
   extractEntrypointFromHookEntries,
   extractSessionIdFromHookEntries,
@@ -64,6 +65,7 @@ import { type HookInfrastructureResult, setupHookInfrastructure } from './pty/ho
 import type { PtyDriverOptions } from './pty/PtyDriver.js';
 import { PtyDriver } from './pty/PtyDriver.js';
 import { ptyTranscriptDir, sleep } from './pty/pty-utils.js';
+import { writeInvocationMcpConfigFile } from './session-credential-file.js';
 export { ptyTranscriptDir }; // re-export for consumers (f230-interactive-pty-carrier.test.js)
 
 import { TranscriptTailer } from './TranscriptTailer.js';
@@ -109,7 +111,6 @@ export class ClaudeInteractivePtyCarrierService implements AgentService {
   private readonly claudeBinary: string | undefined;
   private readonly hookSidecarPathOverride: string | undefined;
   /** Cached MCP config file path (created once per instance, reused across invocations). */
-  private mcpConfigFilePath: string | undefined;
 
   constructor(options?: ClaudeInteractivePtyCarrierServiceOptions) {
     this.catId = options?.catId ?? createCatId('opus');
@@ -207,21 +208,13 @@ export class ClaudeInteractivePtyCarrierService implements AgentService {
     extraArgs.push('--effort', effortLevel);
     // --mcp-config + --strict-mcp-config (F230 AC-B3): gated on callbackEnv (no callback = MCP unusable).
     if (!readOnly && options?.callbackEnv && this.mcpServerPath && existsSync(this.mcpServerPath)) {
-      // Write MCP config to temp file (file-based avoids inline JSON shell quoting issues).
-      if (!this.mcpConfigFilePath || !existsSync(this.mcpConfigFilePath)) {
-        const dir = mkdtempSync(join(tmpdir(), 'cat-cafe-pty-mcp-'));
-        this.mcpConfigFilePath = join(dir, 'mcp-config.json');
-        writeFileSync(
-          this.mcpConfigFilePath,
-          JSON.stringify({
-            mcpServers: {
-              'cat-cafe': { command: 'node', args: [this.mcpServerPath] },
-            },
-          }),
-          'utf-8',
-        );
-      }
-      extraArgs.push('--mcp-config', this.mcpConfigFilePath, '--strict-mcp-config');
+      const resolution = await resolveClaudeMcpConfig({
+        callbackEnv: options.callbackEnv,
+        workingDirectory: options.workingDirectory ?? this.cwd,
+        mcpServerPath: this.mcpServerPath,
+      });
+      const configPath = writeInvocationMcpConfigFile({ mcpServers: resolution?.servers ?? {} }, options.callbackEnv);
+      extraArgs.push('--mcp-config', configPath, '--strict-mcp-config');
     }
     const cwd = options?.workingDirectory ?? this.cwd;
     if (options?.claudeTokenAccount)

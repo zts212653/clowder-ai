@@ -1,6 +1,5 @@
 import { readFile, stat } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
-import { MCP_CALLBACK_ENV_KEYS } from '../../../../../config/capabilities/mcp-constants.js';
 import { resolveProviderMcpConfig } from './provider-mcp-config.js';
 
 type Server = Record<string, unknown>;
@@ -107,13 +106,5 @@ export async function resolveKimiMcpSurface(input: {
       : []),
   ];
   await denyUnapprovedNativeServers(servers, layers);
-  // Approved MCP children inherit callbacks from the invocation, never a file.
-  for (const entry of Object.values(servers)) {
-    if (entry.env && typeof entry.env === 'object') {
-      const env = { ...(entry.env as Record<string, string>) };
-      for (const key of MCP_CALLBACK_ENV_KEYS) delete env[key];
-      entry.env = env;
-    }
-  }
   return servers;
 }

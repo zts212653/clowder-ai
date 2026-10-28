@@ -1821,7 +1821,7 @@
     {
       "id": "F309",
       "name": "产物协作 — Artifact Collaboration / Collaborative Content Plane",
-      "status": "in-progress / Phase R 历史有界交付保留；Phase U 的 Studio 297 作品体验工作单元已在 #5507/#5521 合入后通过父 Alpha 与原设计负责人实页复看；其余 Phase U、Office/video Admission Gate 与未勾 AC 仍开放",
+      "status": "in-progress / Phase R、Studio 297 历史有界交付保留；Phase U 全入口归一 #6249 已合入；父 Alpha 基础旅程通过，入口与元数据缺口已交原 writer 续修；其余 Phase U、Office/video Admission Gate 与未勾 AC 仍开放",
       "file": "F309-collaborative-content-plane.md"
     },
     {
@@ -1955,6 +1955,12 @@
       "name": "Shared MCP Process Lifecycle｜多猫共用 MCP 运行资源",
       "status": "in-progress | **Owner**: 小星星·Maine Coon (@codex-astra, gpt-6-astra；整体与验收)；实现：Sol6.1；审核：Sonnet | **Priority**: P1",
       "file": "F333-shared-mcp-process-lifecycle.md"
+    },
+    {
+      "id": "F334",
+      "name": "Multi-Machine Cat Hosting｜分身不分家：猫在别的机器上干活，还是家里那只",
+      "status": "spec | **Owner**: Ragdoll (@opus55, claude-opus-5-5) | **Priority**: P2",
+      "file": "F334-multi-machine-cat-hosting.md"
     }
   ]
 }

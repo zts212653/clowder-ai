@@ -894,8 +894,15 @@ export function registerCallbackHoldBallRoutes(app: FastifyInstance, deps: HoldB
     // share the same time reference, preventing clock-skew window divergence.
     // SQLite: IMMEDIATE transaction with local Date.now().
     // Both prevent the TOCTOU race where concurrent requests overcommit.
-    const admission = await deps.holdQuotaStore.tryAdmit(threadId, catIdStr, MAX_HOLDS_PER_WINDOW, HOLD_WINDOW_MS);
-    if (!admission.admitted) {
+    // F314 Humphrey case: the canonical full gate is forced through hold_ball by
+    // the gate hook, so throttling it made the harness contradict itself (re-running
+    // gate hit 429). A full gate is self-grounded real work, not a stall, and does
+    // not spend the hourly hold quota. Every other hold still does.
+    const holdQuotaExempt = durableGateRequested;
+    const admission = holdQuotaExempt
+      ? null
+      : await deps.holdQuotaStore.tryAdmit(threadId, catIdStr, MAX_HOLDS_PER_WINDOW, HOLD_WINDOW_MS);
+    if (admission && !admission.admitted) {
       // Both retryAtMs and retryAfterMs come from the same authority clock
       // (Redis TIME for Redis mode, local now for SQLite). Route must NOT
       // recompute retryAfterMs from Date.now() — cross-clock subtraction
@@ -910,7 +917,8 @@ export function registerCallbackHoldBallRoutes(app: FastifyInstance, deps: HoldB
       return {
         error:
           `maxHoldsPerWindow (${MAX_HOLDS_PER_WINDOW} per ~1h window) reached. ` +
-          `You MUST pass the ball now: @ another cat or ${getCoCreatorDisplay().mention}.`,
+          'Stop re-arming timers: continue the work yourself, run the command through wakeWhen, ' +
+          'or @ a cat who can actually act on it.',
         holdsInWindow: admission.count,
         maxHoldsPerWindow: MAX_HOLDS_PER_WINDOW,
         windowMs: HOLD_WINDOW_MS,
@@ -922,13 +930,16 @@ export function registerCallbackHoldBallRoutes(app: FastifyInstance, deps: HoldB
     // Event ID for exact compensation on any post-admission failure.
     // Using the rowid ensures interleaving A/B admissions are correctly compensated:
     // A's eventId targets only A's reservation, never B's.
-    const eventId = admission.eventId!;
+    const eventId = admission?.eventId ?? null;
+    const releaseQuota = async (): Promise<void> => {
+      if (eventId !== null) await deps.holdQuotaStore.releaseByEventId(eventId, threadId, catIdStr);
+    };
 
     const template = templateRegistry.get('reminder');
     if (!template) {
       log.error('F167 C1: reminder template not found');
       // Compensate the exact quota reservation by eventId.
-      await deps.holdQuotaStore.releaseByEventId(eventId, threadId, catIdStr);
+      await releaseQuota();
       reply.status(500);
       return { error: 'Internal error: reminder template not found' };
     }
@@ -984,7 +995,7 @@ export function registerCallbackHoldBallRoutes(app: FastifyInstance, deps: HoldB
         'F280 Phase D: canonical hold owner fence is unavailable',
       );
       // Compensate the exact quota reservation by eventId.
-      await deps.holdQuotaStore.releaseByEventId(eventId, threadId, catIdStr);
+      await releaseQuota();
       reply.status(503);
       // An error that is none of the five stays unnamed: it is not folded into one of them.
       return {
@@ -1002,11 +1013,11 @@ export function registerCallbackHoldBallRoutes(app: FastifyInstance, deps: HoldB
           wakeTarget,
         });
         if (durableJob.originTaskId !== taskId) {
-          await deps.holdQuotaStore.releaseByEventId(eventId, threadId, catIdStr);
+          await releaseQuota();
           return reuseManagedSubmission(durableJob);
         }
       } catch (error) {
-        await deps.holdQuotaStore.releaseByEventId(eventId, threadId, catIdStr);
+        await releaseQuota();
         const code = error instanceof Error ? error.message : 'managed_job_submission_failed';
         reply.status(code === 'managed_job_budget_exhausted' ? 429 : 400);
         return { error: 'Managed command was not admitted', code };
@@ -1132,7 +1143,7 @@ export function registerCallbackHoldBallRoutes(app: FastifyInstance, deps: HoldB
       dynamicTaskStore.remove(taskId);
       if (durableJob) settleNoSpawnDurableGate(durableJob, taskId, 'hold_materialization_failed', false);
       // Compensate the exact quota reservation by eventId.
-      await deps.holdQuotaStore.releaseByEventId(eventId, threadId, catIdStr);
+      await releaseQuota();
       log.error(
         { threadId, catId: catIdStr, taskId, err },
         'F167 Phase G: hold materialization failed — rolled back store + quota; prior hold retained',
@@ -1206,7 +1217,7 @@ export function registerCallbackHoldBallRoutes(app: FastifyInstance, deps: HoldB
         dynamicTaskStore.remove(taskId);
         // Definite non-commit is the same failed admission as materialization failure.
         // An ambiguous/committed History outcome above must retain its reservation.
-        await deps.holdQuotaStore.releaseByEventId(eventId, threadId, catIdStr);
+        await releaseQuota();
         if (durableJob) {
           settleNoSpawnDurableGate(durableJob, taskId, 'waiting_history_append_failed', false);
         }
@@ -1226,7 +1237,7 @@ export function registerCallbackHoldBallRoutes(app: FastifyInstance, deps: HoldB
         taskRunner.unregister(taskId);
         dynamicTaskStore.remove(taskId);
         settleNoSpawnDurableGate(durableJob, taskId, 'hold_admission_failed', false);
-        await deps.holdQuotaStore.releaseByEventId(eventId, threadId, catIdStr);
+        await releaseQuota();
         log.error({ taskId, err }, 'Managed job admission failed before command start');
         reply.status(503);
         return { error: 'Failed to admit managed job', code: 'HOLD_MANAGED_JOB_ADMISSION_FAILED' };
@@ -1351,7 +1362,9 @@ export function registerCallbackHoldBallRoutes(app: FastifyInstance, deps: HoldB
 
     // Quota already reserved atomically by tryAdmit() above (line ~716).
     // admission.count is the post-admission count.
-    const newCount = admission.count;
+    // Quota-exempt holds (full gate) reserved nothing; their count is read later,
+    // report-only, after the launch decision (F314 review P1).
+    const newCount: number | null = admission ? admission.count : null;
 
     // ── F167 Phase P spawn admission truth: launch AFTER visibility append ──
     // F280 invariant preserved: the visibility append above is the cancellation
@@ -1498,7 +1511,7 @@ export function registerCallbackHoldBallRoutes(app: FastifyInstance, deps: HoldB
 
       if (!spawnResult.spawned && spawnResult.durableTerminalPersisted === false) admissionDurable = false;
       if (!spawnResult.spawned) {
-        await deps.holdQuotaStore.releaseByEventId(eventId, threadId, catIdStr);
+        await releaseQuota();
         if (!admissionDurable) {
           reply.status(503);
           return {
@@ -1587,7 +1600,18 @@ export function registerCallbackHoldBallRoutes(app: FastifyInstance, deps: HoldB
     }
 
     const held = !commandAdmission || commandAdmission.state === 'command_running';
-    const holdsInWindow = held ? newCount : await deps.holdQuotaStore.getCount(threadId, catIdStr, HOLD_WINDOW_MS);
+    // F314 review P1 (kimi31-pro): holdsInWindow is report-only. A failed count read
+    // must never turn an already-decided hold into a 500 (which a retry would then
+    // answer as "reused" with no real launch) — report null instead.
+    const readHoldsInWindowForReport = async (): Promise<number | null> => {
+      try {
+        return await deps.holdQuotaStore.getCount(threadId, catIdStr, HOLD_WINDOW_MS);
+      } catch (err) {
+        log.warn({ err, threadId, catId: catIdStr }, 'F314: hold count read failed; reporting holdsInWindow=null');
+        return null;
+      }
+    };
+    const holdsInWindow = held && newCount !== null ? newCount : await readHoldsInWindowForReport();
     log.info(
       {
         threadId,

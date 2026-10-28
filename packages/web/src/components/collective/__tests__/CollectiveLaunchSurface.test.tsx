@@ -109,6 +109,46 @@ describe('CollectiveLaunchSurface', () => {
     expect(container.querySelector('a[href="/settings?s=plugins"]')).not.toBeNull();
   });
 
+  it('opens the configured remote Service before pairing without offering a local deployment', async () => {
+    mockApiFetch.mockResolvedValue(
+      response({
+        runtimeStatus: 'active',
+        connections: [],
+        remoteService: { state: 'unpaired', serviceUrl: 'http://127.0.0.1:15201', serviceInstanceId: 'svc_remote001' },
+      }),
+    );
+    await act(async () => root.render(<CollectiveLaunchSurface />));
+    await flush();
+    expect(container.textContent).not.toContain('新建共同体');
+    expect(new URL(requiredIframe(container).src).origin).toBe('http://127.0.0.1:15201');
+    expect(mockApiFetch.mock.calls.some(([url]) => String(url).endsWith('/service/provision'))).toBe(false);
+  });
+
+  it('keeps the remote destination visible through tunnel loss and retries it without provisioning', async () => {
+    let offline = true;
+    mockApiFetch.mockImplementation(async () =>
+      response({
+        runtimeStatus: 'active',
+        connections: [],
+        remoteService: { state: offline ? 'offline' : 'unpaired', serviceUrl: 'http://127.0.0.1:15201' },
+      }),
+    );
+    await act(async () => root.render(<CollectiveLaunchSurface />));
+    await flush();
+    expect(container.textContent).toContain('暂时无法打开这个共同体');
+    expect(container.textContent).not.toContain('新建共同体');
+    const before = requiredIframe(container);
+    const retry = Array.from(container.querySelectorAll('button')).find((item) => item.textContent === '重试');
+    expect(retry).toBeDefined();
+    offline = false;
+    await act(async () => retry?.click());
+    await flush();
+    expect(requiredIframe(container)).not.toBe(before);
+    expect(new URL(requiredIframe(container).src).origin).toBe('http://127.0.0.1:15201');
+    expect(container.textContent).not.toContain('暂时无法打开');
+    expect(mockApiFetch.mock.calls.some(([url]) => String(url).endsWith('/service/provision'))).toBe(false);
+  });
+
   it('creates the independent local Service without a terminal and opens its one-time bootstrap in the canonical Client', async () => {
     mockApiFetch.mockImplementation(async (url, init) => {
       if (url === '/api/plugins/official.collective-connector/service/provision' && init?.method === 'POST') {
@@ -220,6 +260,7 @@ describe('CollectiveLaunchSurface', () => {
     expect(iframe?.src).toBe('http://localhost:5201/?hostOrigin=http%3A%2F%2Flocalhost%3A3000');
     expect(iframe?.title).toBe('Collective');
     expect(iframe?.getAttribute('sandbox')).toContain('allow-popups-to-escape-sandbox');
+    expect(iframe?.getAttribute('allow')).toBe('microphone');
     expect(container.textContent).not.toContain('canonical client');
     expect(container.textContent).not.toContain('ACK #');
 
@@ -275,7 +316,7 @@ describe('CollectiveLaunchSurface', () => {
       rosterFingerprint: 'a'.repeat(64),
       excludedCatIds: ['codex-sol'],
     });
-    expect(new URL(requiredIframe(container).src).searchParams.get('collectiveId')).toBe('col_12345678');
+    expect(new URL(requiredIframe(container).src).searchParams.get('collectiveId')).toBeNull();
 
     await act(async () => {
       window.dispatchEvent(
@@ -333,6 +374,52 @@ describe('CollectiveLaunchSurface', () => {
     });
     expect(container.textContent).toContain('先看清要带来的伙伴');
     expect(container.textContent).toContain('Sol');
+  });
+
+  it('opens a deterministic usable Service when several active endpoint records exist', async () => {
+    mockApiFetch.mockResolvedValue(
+      response({
+        runtimeStatus: 'active',
+        connections: [
+          {
+            serviceUrl: 'http://localhost:5202',
+            serviceInstanceId: 'svc_offline1',
+            collectiveId: 'col_offline1',
+            connectionId: 'con_offline1',
+            authorizedHumanId: 'human_12345678',
+            endpointId: 'ep_offline1',
+            endpointLabel: 'Offline Café',
+            authorityStatus: 'connected',
+            liveStatus: 'offline',
+            lastAckedSequence: 0,
+            outbox: { queued: 0, accepted: 0 },
+            route: { configured: false },
+            inbox: { persisted: 0, pending: 0, routed: 0, failed: 0 },
+          },
+          {
+            serviceUrl: 'http://localhost:5201',
+            serviceInstanceId: 'svc_online12',
+            collectiveId: 'col_online12',
+            connectionId: 'con_online12',
+            authorizedHumanId: 'human_12345678',
+            endpointId: 'ep_online12',
+            endpointLabel: 'Online Café',
+            authorityStatus: 'connected',
+            liveStatus: 'online',
+            lastAckedSequence: 0,
+            outbox: { queued: 0, accepted: 0 },
+            route: { configured: false },
+            inbox: { persisted: 0, pending: 0, routed: 0, failed: 0 },
+          },
+        ],
+      }),
+    );
+
+    await act(async () => root.render(<CollectiveLaunchSurface />));
+    await flush();
+
+    expect(requiredIframe(container).src).toBe('http://localhost:5201/?hostOrigin=http%3A%2F%2Flocalhost%3A3000');
+    expect(container.textContent).not.toContain('进入哪个共同家园？');
   });
 
   it('recovers the entry roster after a transient read failure without pairing early', async () => {
@@ -408,7 +495,7 @@ describe('CollectiveLaunchSurface', () => {
     expect(container.textContent).not.toContain('撤销连接');
     expect(container.textContent).not.toContain('credential');
     expect(container.querySelector('iframe')?.src).toBe(
-      'http://localhost:5201/?hostOrigin=http%3A%2F%2Flocalhost%3A3000&collectiveId=col_12345678',
+      'http://localhost:5201/?hostOrigin=http%3A%2F%2Flocalhost%3A3000',
     );
 
     const iframe = container.querySelector('iframe');

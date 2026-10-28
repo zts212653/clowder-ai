@@ -7,14 +7,22 @@ import {
   collectiveHumanIdSchema,
   collectiveLocationSchema,
 } from './collective.js';
+import { collectiveCollaborationActorSchema } from './collective-collaboration-actor.js';
 import { collectiveRoadmapIdSchema, collectiveWorkIdSchema } from './collective-collaboration-identifiers.js';
 import { collectiveBindingVoteProjectionSchema, collectiveDecisionRecordSchema } from './collective-decision-vote.js';
+import { collectiveMaterialLinkSchema } from './collective-material.js';
 import {
   collectiveProjectWorkSuggestionSchema,
   collectiveProjectWorkSuggestionTargetSchema,
   collectiveWorkAccountabilityRequestSchema,
 } from './collective-project-authoring.js';
 import { collectiveReactionSummarySchema } from './collective-reaction.js';
+import {
+  collectiveTimeChangeSchema,
+  collectiveTimeFactSchema,
+  collectiveTimeSuggestionSchema,
+  collectiveWorkTimeSchema,
+} from './collective-time.js';
 import { collectiveVoteProjectionSchema } from './collective-vote.js';
 import {
   collectiveWorkAcceptanceSchema,
@@ -41,25 +49,7 @@ export const collectiveAcceptedWorkResultSchema = collectiveAssignedWorkReadRequ
   })
   .strict();
 
-export const collectiveCollaborationActorSchema = z.discriminatedUnion('kind', [
-  z
-    .object({
-      kind: z.literal('human'),
-      humanId: collectiveHumanIdSchema,
-      displayName: z.string().trim().min(1).max(120),
-    })
-    .strict(),
-  z
-    .object({
-      kind: z.literal('agent'),
-      humanId: collectiveHumanIdSchema,
-      humanDisplayName: z.string().trim().min(1).max(120),
-      connectionId: collectiveConnectionIdSchema,
-      catId: z.string().trim().min(1).max(120),
-      displayName: z.string().trim().min(1).max(120),
-    })
-    .strict(),
-]);
+export { collectiveCollaborationActorSchema } from './collective-collaboration-actor.js';
 
 export const collectiveWorkAssignmentSchema = z
   .object({
@@ -97,6 +87,10 @@ export const collectiveWorkHistoryEntrySchema = z
   .object({
     revision: z.number().int().positive(),
     action: z.enum([
+      'material_linked',
+      'time_changed',
+      'time_suggested',
+      'time_suggestion_resolved',
       'proposed',
       'committed',
       'accountability_assigned',
@@ -114,6 +108,7 @@ export const collectiveWorkHistoryEntrySchema = z
       'declined',
       'cancelled',
     ]),
+    timeChange: collectiveTimeChangeSchema.optional(),
     actor: collectiveCollaborationActorSchema,
     at: z.string().datetime(),
     eventId: collectiveEventIdSchema.optional(),
@@ -134,6 +129,9 @@ export const collectiveWorkRecordSchema = collectiveCoordinatesSchema
     proposedRequestKind: z.string().trim().min(1).max(240).optional(),
     projectSuggestion: collectiveProjectWorkSuggestionSchema.optional(),
     accountableHumanId: collectiveHumanIdSchema.optional(),
+    materialLinks: z.array(collectiveMaterialLinkSchema).optional(),
+    time: collectiveWorkTimeSchema.optional(),
+    timeSuggestions: z.array(collectiveTimeSuggestionSchema).optional(),
     accountabilityRequests: z.array(collectiveWorkAccountabilityRequestSchema).max(100).optional(),
     assignment: collectiveWorkAssignmentSchema.optional(),
     assignmentEventId: collectiveEventIdSchema.optional(),
@@ -158,7 +156,11 @@ export const collectiveWorkProjectionSchema = collectiveWorkRecordSchema
 export const collectiveRoadmapHistoryEntrySchema = z
   .object({
     revision: z.number().int().positive(),
-    action: z.enum(['created', 'works_changed', 'completed', 'reopened']),
+    action: z.enum(['created', 'works_changed', 'completed', 'reopened', 'target_date_changed']),
+    targetDateChange: z
+      .object({ previous: collectiveTimeFactSchema.nullable(), current: collectiveTimeFactSchema.nullable() })
+      .strict()
+      .optional(),
     actor: collectiveCollaborationActorSchema,
     at: z.string().datetime(),
     note: z.string().trim().min(1).max(1000).optional(),
@@ -173,6 +175,7 @@ export const collectiveRoadmapRecordSchema = collectiveCoordinatesSchema
     sourceLocation: collectiveLocationSchema,
     title: z.string().trim().min(1).max(200),
     purpose: z.string().trim().min(1).max(4000),
+    targetDate: collectiveTimeFactSchema.optional(),
     accountableHumanId: collectiveHumanIdSchema,
     workIds: z.array(collectiveWorkIdSchema).max(200),
     status: z.enum(['active', 'completed']),

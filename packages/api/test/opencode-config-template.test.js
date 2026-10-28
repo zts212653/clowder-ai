@@ -538,7 +538,7 @@ describe('generateOpenCodeRuntimeConfig', () => {
     });
     // Provider key must NOT be 'openai' — OpenCode treats it as built-in and
     // forces Responses API, ignoring the npm adapter field.
-    assert.equal(config.provider['openai'], undefined, 'must not use reserved "openai" key');
+    assert.equal(config.provider.openai, undefined, 'must not use reserved "openai" key');
     assert.ok(config.provider['openai-compat'], 'must use remapped "openai-compat" key');
     assert.equal(config.provider['openai-compat'].npm, '@ai-sdk/openai-compatible');
     assert.equal(config.model, 'openai-compat/gpt-4o', 'model prefix must match remapped provider key');
@@ -577,7 +577,7 @@ describe('generateOpenCodeRuntimeConfig', () => {
       defaultModel: 'kimi/moonshot-v2',
       apiType: 'openai',
     });
-    assert.ok(config.provider['kimi'], 'custom name must be preserved');
+    assert.ok(config.provider.kimi, 'custom name must be preserved');
     assert.equal(config.model, 'kimi/moonshot-v2');
   });
 
@@ -944,10 +944,7 @@ describe('writeOpenCodeRuntimeConfig', () => {
 
       const content = JSON.parse(readFileSync(configPath, 'utf-8'));
       const external = content.mcp['external-command-only'];
-      assert.match(external.command[1], /secret-mcp-proxy\.js$/);
-      const upstream = JSON.parse(external.environment.CAT_CAFE_SECRET_MCP_PROXY_SPEC);
-      assert.equal(upstream.command, 'external-tool');
-      assert.deepEqual(upstream.args, []);
+      assert.deepEqual(external.command, ['external-tool']);
     } finally {
       rmSync(configRoot, { recursive: true, force: true });
       rmSync(runtimeRoot, { recursive: true, force: true });
@@ -1050,10 +1047,7 @@ describe('writeOpenCodeRuntimeConfig', () => {
       const content = JSON.parse(readFileSync(configPath, 'utf-8'));
       const limb = content.mcp['cat-cafe-limb'];
       assert.ok(limb, 'external cat-cafe-limb must be present');
-      assert.match(limb.command[1], /secret-mcp-proxy\.js$/);
-      const upstream = JSON.parse(limb.environment.CAT_CAFE_SECRET_MCP_PROXY_SPEC);
-      assert.equal(upstream.command, 'my-custom-limb-server', 'external must not become the built-in limb entrypoint');
-      assert.deepEqual(upstream.args, ['--port', '9999']);
+      assert.deepEqual(limb.command, ['my-custom-limb-server', '--port', '9999']);
     } finally {
       rmSync(configRoot, { recursive: true, force: true });
       rmSync(runtimeRoot, { recursive: true, force: true });

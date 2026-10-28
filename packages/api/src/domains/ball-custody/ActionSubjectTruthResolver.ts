@@ -1,3 +1,4 @@
+import { isOrdinaryImplementTask } from '../cats/services/stores/ports/TaskStoreContract.js';
 import type { ActionSubjectTerminalTruth, ActionSuccessorLeaseStore } from './ActionSuccessorLeaseStore.js';
 import {
   type CanonicalActionTerminalPredicate,
@@ -83,11 +84,11 @@ export class ActionSubjectTruthResolver {
 
   async resolve(subjectRefInput: string, _now: number): Promise<ActionSubjectTruthResolution> {
     const subjectRef = canonicalizeActionSubjectRef(subjectRefInput);
-    const marker = await this.leaseStore.getSubjectTerminal(subjectRef);
-
     const taskId = taskIdFromSubject(subjectRef);
+    const task = taskId ? await this.taskActionTruthProvider?.get(taskId) : undefined;
+    if (task && isOrdinaryImplementTask(task)) throw new Error('ORDINARY_TASK_REQUIRES_NATIVE_HANDOFF');
+    const marker = await this.leaseStore.getSubjectTerminal(subjectRef);
     if (taskId) {
-      const task = await this.taskActionTruthProvider?.get(taskId);
       if (!task) {
         if (marker) return { terminal: true, source: 'marker', truth: marker };
         return { terminal: false, source: 'task_store', state: 'unknown' };
@@ -125,6 +126,11 @@ export class ActionSubjectTruthResolver {
       if (!taskId)
         return bindActionCompletionVerdict({ status: 'mismatch', reason: 'task subject unavailable' }, candidate);
       const task = await this.taskActionTruthProvider?.get(taskId);
+      if (task && isOrdinaryImplementTask(task))
+        return bindActionCompletionVerdict(
+          { status: 'mismatch', reason: 'ordinary Task has no lease completion contract' },
+          candidate,
+        );
       if (!task || task.status !== 'done') {
         return bindActionCompletionVerdict({ status: 'mismatch', reason: 'task is not done' }, candidate);
       }
@@ -154,6 +160,12 @@ export class ActionSubjectTruthResolver {
       if (!taskId) return { status: 'insufficient', reason: 'task subject unavailable' };
       const task = await this.taskActionTruthProvider?.get(taskId);
       if (!task) return { status: 'insufficient', reason: 'task unavailable' };
+      if (isOrdinaryImplementTask(task))
+        return {
+          status: 'mismatch',
+          reason: 'ordinary Task requires native handoff',
+          evidenceRef: taskEvidenceRef(task, 'active'),
+        };
       if (task.status === 'done') {
         return {
           status: 'mismatch',

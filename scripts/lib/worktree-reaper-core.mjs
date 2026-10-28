@@ -34,7 +34,6 @@ export const DEFAULT_POLICY = Object.freeze({
   mergedIdleDays: 7,
   /** Days a quarantined directory stays restorable before --purge may delete it. */
   quarantineDays: 14,
-  maxWorktrees: 40,
 });
 
 export const LIFECYCLE_POLICIES = Object.freeze(['merged', 'ttl', 'never']);
@@ -44,8 +43,14 @@ const review = (reason) => ({ verdict: 'review', reason });
 const quarantine = (reason) => ({ verdict: 'quarantine', reason });
 const known = (v) => v !== null && v !== undefined;
 
-export function isProtected(name, policy = DEFAULT_POLICY) {
-  return policy.whitelist.includes(name) || policy.protectedPrefixes.some((p) => name.startsWith(p));
+export function isProtected(name, policy = DEFAULT_POLICY, primaryName = 'cat-cafe') {
+  return (
+    policy.whitelist.includes(name) ||
+    policy.protectedPrefixes.some((p) => name.startsWith(p)) ||
+    name === `${primaryName}-alpha` ||
+    name === `${primaryName}-runtime` ||
+    name.startsWith(`${primaryName}-runtime-`)
+  );
 }
 
 /** Uncommitted work is never moved automatically, whatever the declared policy. */

@@ -186,7 +186,7 @@ export class TaskWorkflowPawFeelDirectRepairOwnerProvider implements PawFeelDire
     binding: PawFeelDirectRepairBindingV1;
     ownerOutcomeRef: OwnerTruthRefV1;
     taskTerminalRef: OwnerTruthRefV1;
-    leaseTerminalRef: OwnerTruthRefV1;
+    leaseTerminalRef?: OwnerTruthRefV1;
   }): Promise<PawFeelDirectRepairOutcomeV1> {
     const binding = PawFeelDirectRepairBindingV1Schema.parse(input.binding);
     const ownerOutcomeRef = ownerTruthRefV1Schema.parse(input.ownerOutcomeRef);
@@ -231,7 +231,7 @@ export class TaskWorkflowPawFeelDirectRepairOwnerProvider implements PawFeelDire
       schemaVersion: 1,
       bindingRef: binding.bindingRef,
       taskTerminalRef: ownerTruthRefV1Schema.parse(input.taskTerminalRef),
-      leaseTerminalRef: ownerTruthRefV1Schema.parse(input.leaseTerminalRef),
+      ...(input.leaseTerminalRef ? { leaseTerminalRef: ownerTruthRefV1Schema.parse(input.leaseTerminalRef) } : {}),
       ownerOutcomeRef,
       verificationRefs: [
         authorizationRef,

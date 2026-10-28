@@ -435,7 +435,9 @@ function buildMentionData(configs: Record<string, import('@cat-cafe/shared').Cat
  * Options for AgentRouter constructor
  */
 export interface AgentRouterOptions {
+  messageSearchAnswerService?: import('../../../../memory/MessageSearchAnswerPublicationService.js').MessageSearchAnswerPublicationService;
   resolveTrustedImagePath?: (hmrId: string) => Promise<string | undefined>;
+  resolveInvocationPluginMcpView?: import('../invocation/invoke-single-cat.js').InvocationDeps['resolveInvocationPluginMcpView'];
   agentRegistry: AgentRegistry;
   registry: InvocationRegistry;
   dotReplyTarget?: (
@@ -481,6 +483,7 @@ export interface AgentRouterOptions {
   draftStore?: IDraftStore;
   /** F065: Task store for bootstrap task snapshot injection */
   taskStore?: ITaskStore;
+  ordinaryTaskHandoffs?: import('../../../../ball-custody/OrdinaryTaskHandoffService.js').OrdinaryTaskHandoffService;
   ownedWaitStatusReader?: import('../../../../ball-custody/OwnedWaitStatus.js').OwnedWaitStatusReader;
   /** RFC A79: canonical exact-run situation projection for agent context. */
   threadExecutionSituationSource?: import('../invocation/thread-execution-situation.js').ThreadExecutionSituationSource;
@@ -563,7 +566,9 @@ export class AgentRouter {
   private unavailableServices: ReadonlyMap<string, AgentRegistrationFailure> = new Map();
   private registry: InvocationRegistry;
   private messageStore: IMessageStore;
+  private messageSearchAnswerService?: import('../../../../memory/MessageSearchAnswerPublicationService.js').MessageSearchAnswerPublicationService;
   private resolveTrustedImagePath?: (hmrId: string) => Promise<string | undefined>;
+  private resolveInvocationPluginMcpView?: AgentRouterOptions['resolveInvocationPluginMcpView'];
   private sessionManager: SessionManager;
   private deliveryCursorStore: DeliveryCursorStore;
   private threadStore: IThreadStore | null;
@@ -585,6 +590,7 @@ export class AgentRouter {
   private draftStore: IDraftStore | undefined;
   private taskProgressStore: TaskProgressStore | undefined;
   private taskStore: ITaskStore | undefined;
+  private ordinaryTaskHandoffs?: AgentRouterOptions['ordinaryTaskHandoffs'];
   private ownedWaitStatusReader:
     | import('../../../../ball-custody/OwnedWaitStatus.js').OwnedWaitStatusReader
     | undefined;
@@ -666,7 +672,9 @@ export class AgentRouter {
 
     this.registry = options.registry;
     this.messageStore = options.messageStore;
+    this.messageSearchAnswerService = options.messageSearchAnswerService;
     this.resolveTrustedImagePath = options.resolveTrustedImagePath;
+    this.resolveInvocationPluginMcpView = options.resolveInvocationPluginMcpView;
     this.sessionManager = new SessionManager(options.sessionStore);
     // #1200 P2-3: wire cursor canonicalizer for v1→v2 async resolution
     const canonicalizer = options.messageStore.canonicalizeCursor
@@ -693,6 +701,7 @@ export class AgentRouter {
     this.draftStore = options.draftStore;
     this.taskProgressStore = options.taskProgressStore;
     this.taskStore = options.taskStore;
+    this.ordinaryTaskHandoffs = options.ordinaryTaskHandoffs;
     this.ownedWaitStatusReader = options.ownedWaitStatusReader;
     this.threadExecutionSituationSource = options.threadExecutionSituationSource;
     this.workflowSopStore = options.workflowSopStore;
@@ -1316,11 +1325,15 @@ export class AgentRouter {
   getStrategyDeps(): RouteStrategyDeps {
     const apiPort = process.env.API_SERVER_PORT ?? String(deploymentDefaults.apiPort);
     return {
+      ...(this.messageSearchAnswerService ? { messageSearchAnswerService: this.messageSearchAnswerService } : {}),
       services: this.services,
       unavailableServices: this.unavailableServices,
       ...(this.routingDispatchPreflight ? { routingDispatchPreflight: this.routingDispatchPreflight } : {}),
       invocationDeps: {
         ...(this.resolveTrustedImagePath ? { resolveTrustedImagePath: this.resolveTrustedImagePath } : {}),
+        ...(this.resolveInvocationPluginMcpView
+          ? { resolveInvocationPluginMcpView: this.resolveInvocationPluginMcpView }
+          : {}),
         messageStore: this.messageStore,
         registry: this.registry,
         sessionManager: this.sessionManager,
@@ -1351,6 +1364,7 @@ export class AgentRouter {
         ...(this.transcriptReader ? { transcriptReader: this.transcriptReader } : {}),
         ...(this.sessionSealer ? { sessionSealer: this.sessionSealer } : {}),
         ...(this.taskStore ? { taskStore: this.taskStore } : {}),
+        ...(this.ordinaryTaskHandoffs ? { ordinaryTaskHandoffs: this.ordinaryTaskHandoffs } : {}),
         ...(this.workflowSopStore ? { workflowSopStore: this.workflowSopStore } : {}),
         ...(this.executionDigestStore ? { executionDigestStore: this.executionDigestStore } : {}),
         ...(this.tmuxGateway ? { tmuxGateway: this.tmuxGateway } : {}),

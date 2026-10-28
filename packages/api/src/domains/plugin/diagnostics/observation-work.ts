@@ -1,5 +1,20 @@
 /** Private Host diagnostics only; no package/renderer authority or public bridge fields. */
 export type SealCaller = 'observer' | 'presence' | 'other';
+export interface SealSlotRelease {
+  readonly caller: SealCaller;
+  readonly operation: 'lstat' | 'readdir';
+  /** Whole releasing operation's await, not exclusive time blocking this consumer. */
+  readonly ioAwaitMs: number;
+  readonly capped: boolean;
+}
+export interface SealQueueWait {
+  readonly queueWaitMs: number;
+  readonly slotWaitMs: number;
+  readonly resumeDelayMs: number;
+  readonly waitingAhead: number;
+  /** The operation handing off this slot, not a complete blocker history. */
+  readonly releasedBy?: SealSlotRelease;
+}
 export interface SnapshotReadDiagnostics {
   measure<T>(stage: 'queue' | 'read', work: () => Promise<T>): Promise<T>;
   sync<T>(stage: 'parse' | 'clone', work: () => T): T;
@@ -15,6 +30,8 @@ export interface SealReadSummary {
   /** Inclusive per-operation totals overlap across concurrent reads; not disk/lock attribution. */
   readonly queueWaitMs: number;
   readonly maxQueueWaitMs: number;
+  /** One longest wait only. Slot wait and resume delay do not attribute CPU/disk/sleep. */
+  readonly longestQueueWait?: SealQueueWait;
   readonly ioAwaitMs: number;
   readonly maxIoAwaitMs: number;
   readonly capped: boolean;

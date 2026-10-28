@@ -8,7 +8,7 @@ import { getServiceManifest, resolveServiceEndpoint } from '../../../domains/ser
 export interface WhisperSttProviderOptions {
   baseUrl?: string;
   model?: string;
-  /** @internal test injection */
+  /** @internal Scoped Host transport or test injection. */
   _fetchFn?: typeof fetch;
 }
 

@@ -8,6 +8,7 @@ import type {
   PawFeelReconciliationCoverage,
   PawFeelResponsibilityProjection,
 } from '@cat-cafe/shared';
+import { pawFeelRepairBinding } from '@cat-cafe/shared';
 import { PawFeelBundleSnapshotSigner } from './bundle-snapshot.js';
 import type { PawFeelFixResolver } from './command-context.js';
 import { PawFeelContinuingResponsibilityResolver } from './continuation/follow-up-resolver.js';
@@ -312,17 +313,27 @@ export class PawFeelDispositionReadModel {
     projection: PawFeelDispositionProjection,
   ): Promise<PawFeelResponsibilityProjection> {
     if (projection.state === 'fix') {
-      const leaseRef = projection.actionLeaseRef;
-      if (!leaseRef) return derivePawFeelResponsibility(projection);
+      const binding = pawFeelRepairBinding(projection);
+      if (!binding) return derivePawFeelResponsibility(projection);
       try {
-        const current = await this.options.repairBindingResolver?.resolve(leaseRef.leaseId);
+        const resolver = this.options.repairBindingResolver;
+        const current = resolver?.resolveCurrent
+          ? await resolver.resolveCurrent(projection)
+          : binding.kind === 'action_lease'
+            ? await resolver?.resolve(binding.leaseId)
+            : undefined;
+        const currentBinding = current && pawFeelRepairBinding(current);
         const matches = Boolean(
           current &&
             current.ownerCatId === projection.ownerCatId &&
             current.taskId === projection.taskId &&
-            current.leaseId === leaseRef.leaseId &&
-            current.leaseGeneration === leaseRef.generation &&
-            current.custodyEvidenceRef === projection.custodyEvidenceRef,
+            current.custodyEvidenceRef === projection.custodyEvidenceRef &&
+            currentBinding?.kind === binding.kind &&
+            (binding.kind === 'task_assignment'
+              ? JSON.stringify(currentBinding) === JSON.stringify(binding)
+              : currentBinding.kind === 'action_lease' &&
+                currentBinding.leaseId === binding.leaseId &&
+                currentBinding.generation === binding.generation),
         );
         return derivePawFeelResponsibility(projection, { repairBindingIsActive: matches });
       } catch {

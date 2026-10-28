@@ -1,58 +1,63 @@
 'use client';
 
-import { useCallback, useRef, useState } from 'react';
+import { fileContentKind } from '@cat-cafe/shared';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import { createFileContextAttachment, createQuoteContextAttachment } from '@/components/chat-context-reference';
 import { useChatStore } from '@/stores/chatStore';
 import { API_URL } from '@/utils/api-client';
+import { useArtworkChrome } from '../content-review/ArtworkChrome';
+import { FileToolbar } from '../content-review/FileToolbar';
+import { fileSourceIdentity } from '../content-review/file-action-client';
 import { useShellPresentation } from '../shell/shell-presentation';
 import { ClassicWorkspaceFileChrome } from './ClassicWorkspaceFileChrome';
 import { FileContentRenderer } from './FileContentRenderer';
-import { PublishedTextFileChrome } from './PublishedTextFileChrome';
 import { type MarkdownSelectionAction, useMarkdownSelectionAction } from './useMarkdownSelectionAction';
 import { useWorkspaceListenMode } from './useWorkspaceListenMode';
 import { V2WorkspaceFileChrome } from './V2WorkspaceFileChrome';
 import { WorkspaceFilePreviewDraftNotice } from './WorkspaceFileDraftNotice';
-import type { PublishedTextViewerProps, WorkspaceFileViewerProps } from './WorkspaceFileViewer.types';
+import type { ContentDocumentViewerProps, WorkspaceFileViewerProps } from './WorkspaceFileViewer.types';
 import { WorkspaceListenActions } from './WorkspaceListenActions';
 import { addQuoteToChat, addWorkspaceFileQuoteToChat } from './workspace-file-quote';
 
-export function WorkspaceFileViewer(props: WorkspaceFileViewerProps | PublishedTextViewerProps) {
-  const published = 'publication' in props ? props : null;
-  const workspace = 'publication' in props ? null : props;
+export function WorkspaceFileViewer(props: WorkspaceFileViewerProps | ContentDocumentViewerProps) {
+  const published = 'source' in props ? props : null;
+  const workspace = 'source' in props ? null : props;
   const { file } = props;
-  const [rendered, setRendered] = useState(true);
-  const {
-    openFilePath,
-    editMode,
-    isMarkdown,
-    markdownRendered,
-    isHtml,
-    isJsx,
-    htmlPreview,
-    jsxPreview,
-    worktreeId,
-    currentWorktree,
-  } = workspace ?? {
-    openFilePath: file.path,
-    editMode: false,
-    isMarkdown: /\.(md|markdown)$/i.test(file.path),
-    markdownRendered: rendered,
-    isHtml: false,
-    isJsx: false,
-    htmlPreview: false,
-    jsxPreview: false,
-    worktreeId: null,
-    currentWorktree: undefined,
-  };
-  const quoteSource = published ? (published.publication.quoteSource ?? false) : undefined;
+  const kind = fileContentKind(file.path, file.mime);
+  const [rendered, setRendered] = useState(kind === 'markdown' || kind === 'html');
+  const chrome = useArtworkChrome();
+  const mediaChrome = (kind === 'image' || kind === 'video') && !!chrome?.actions;
+  const { openFilePath, editMode, markdownRendered, htmlPreview, jsxPreview, worktreeId, currentWorktree } =
+    workspace ?? {
+      openFilePath: file.path,
+      editMode: false,
+      isMarkdown: kind === 'markdown',
+      markdownRendered: rendered,
+      isHtml: kind === 'html',
+      isJsx: kind === 'jsx',
+      htmlPreview: rendered,
+      jsxPreview: rendered,
+      worktreeId: published?.source.kind === 'workspace' ? published.source.worktreeId : null,
+      currentWorktree: undefined,
+    };
+  const isMarkdown = kind === 'markdown',
+    isHtml = kind === 'html',
+    isJsx = kind === 'jsx';
+  const quoteSource = published?.source.kind === 'url' ? (published.quoteSource ?? false) : undefined;
+  const source = published?.source ?? { kind: 'workspace' as const, worktreeId: worktreeId ?? '', path: file.path };
+  const sourceKey = fileSourceIdentity(source);
+  const listenReturn = useMemo(
+    () => (published?.listenReturn ? { kind: 'artifact' as const, ...published.listenReturn } : undefined),
+    [published?.listenReturn],
+  );
   const isV2 = useShellPresentation() === 'v2';
   const currentThreadId = useChatStore((s) => s.currentThreadId);
-  const onQuoteSelected = workspace?.onQuoteSelected;
+  const onQuoteSelected = props.onQuoteSelected;
   const mdContainerRef = useRef<HTMLDivElement>(null);
   const mdSelectionAction = useMarkdownSelectionAction(
     mdContainerRef,
     isMarkdown && markdownRendered && !editMode && quoteSource !== false,
-    openFilePath,
+    sourceKey,
     // The loaded file's version, only when it is the file this tab names.
     file.path === openFilePath ? file.sha256 : null,
   );
@@ -95,13 +100,17 @@ export function WorkspaceFileViewer(props: WorkspaceFileViewerProps | PublishedT
 
   const rawUrl = (path: string) =>
     published
-      ? published.publication.url
+      ? published.source.kind === 'url'
+        ? published.source.url
+        : `${API_URL}/api/workspace/file/raw?${new URLSearchParams({ worktreeId: published.source.worktreeId, path: published.source.path })}`
       : `${API_URL}/api/workspace/file/raw?worktreeId=${encodeURIComponent(worktreeId ?? '')}&path=${encodeURIComponent(path)}`;
   const listenMode = useWorkspaceListenMode({
     file,
     openFilePath,
     worktreeId,
-    enabled: !!workspace && isMarkdown && markdownRendered && !editMode && !file.truncated,
+    enabled: isMarkdown && markdownRendered && !editMode && !file.truncated && !!file.sha256,
+    sourceKey: source.kind === 'url' ? sourceKey : undefined,
+    returnTarget: listenReturn,
   });
 
   const handleAskCat = () => {
@@ -122,24 +131,53 @@ export function WorkspaceFileViewer(props: WorkspaceFileViewerProps | PublishedT
     onStartCache: listenMode.startCache,
     onStartListen: () => listenMode.start(),
   };
-  const listenAvailable = !!workspace && isMarkdown && markdownRendered && !editMode;
-  const listenAction = listenAvailable ? (
-    <WorkspaceListenActions {...listenProps} action="listen" listenLabel="朗读" />
-  ) : null;
+  const listenAvailable = isMarkdown && markdownRendered && !editMode;
+  const listenAction = listenAvailable ? <WorkspaceListenActions {...listenProps} action="listen" /> : null;
   const cacheAction = listenAvailable ? <WorkspaceListenActions {...listenProps} action="cache" /> : null;
 
   return (
     <div className="flex min-h-0 min-w-0 w-full flex-1 flex-col animate-fade-in" data-testid="workspace-file-viewer">
-      {published ? (
-        <PublishedTextFileChrome
-          props={published}
-          rendered={rendered}
-          onToggle={isMarkdown ? () => setRendered((value) => !value) : undefined}
+      {mediaChrome ? null : published ? (
+        <FileToolbar
+          source={published.source}
+          filename={file.path}
+          mime={file.mime}
+          byteLength={file.size}
+          text={file.binary ? undefined : file.content}
+          readOnlyReason={published.readOnlyReason ?? '此来源没有文件写入权限'}
+          leading={
+            published.onBack && (
+              <button type="button" className="shrink-0 text-xs" onClick={published.onBack}>
+                返回来源
+              </button>
+            )
+          }
+          controls={
+            <>
+              {published.reviewAction}
+              {(isMarkdown || isHtml || isJsx) && (
+                <button
+                  type="button"
+                  className="shrink-0 rounded border border-cafe px-2 py-1 text-xs"
+                  onClick={() => setRendered((value) => !value)}
+                >
+                  {rendered ? '源码' : '渲染'}
+                </button>
+              )}
+              {listenAction}
+              {cacheAction}
+            </>
+          }
         />
       ) : workspace && isV2 ? (
-        <V2WorkspaceFileChrome props={workspace} listen={listenAction} cache={cacheAction} onAsk={handleAskCat} />
+        <V2WorkspaceFileChrome
+          props={{ ...workspace, isMarkdown, isHtml, isJsx }}
+          listen={listenAction}
+          cache={cacheAction}
+          onAsk={handleAskCat}
+        />
       ) : workspace ? (
-        <ClassicWorkspaceFileChrome props={workspace} listenMode={listenMode} />
+        <ClassicWorkspaceFileChrome props={{ ...workspace, isMarkdown, isHtml, isJsx }} listenMode={listenMode} />
       ) : null}
 
       {workspace?.saveError && (
@@ -170,6 +208,11 @@ export function WorkspaceFileViewer(props: WorkspaceFileViewerProps | PublishedT
         </div>
       )}
 
+      {listenMode.previousVersion && (
+        <p role="status" className="px-3 text-xs text-cafe-muted">
+          听读的是此文档的旧版本；当前正文已更新。
+        </p>
+      )}
       {/* File content */}
       {workspace &&
         !editMode &&
@@ -183,6 +226,8 @@ export function WorkspaceFileViewer(props: WorkspaceFileViewerProps | PublishedT
         )}
       <FileContentRenderer
         file={file}
+        sourceKey={sourceKey}
+        listenCacheKey={listenMode.activeCacheKey ?? listenMode.cacheKey}
         openFilePath={openFilePath}
         isMarkdown={isMarkdown}
         isHtml={isHtml}
@@ -191,7 +236,7 @@ export function WorkspaceFileViewer(props: WorkspaceFileViewerProps | PublishedT
         htmlPreview={htmlPreview}
         jsxPreview={jsxPreview}
         editMode={editMode}
-        scrollToLine={workspace?.scrollToLine ?? null}
+        scrollToLine={props.scrollToLine ?? null}
         worktreeId={worktreeId}
         currentWorktree={currentWorktree}
         mdContainerRef={mdContainerRef}
@@ -200,17 +245,16 @@ export function WorkspaceFileViewer(props: WorkspaceFileViewerProps | PublishedT
         onSave={workspace?.onSave}
         onDirtyChange={workspace?.onDirtyChange}
         rawUrl={rawUrl}
-        revealInFinder={workspace?.revealInFinder}
         restoreScrollTop={workspace?.restoreScrollTop}
         restoreKey={workspace?.restoreKey}
         onScrollTopChange={workspace?.onScrollTopChange}
         listenSentences={listenMode.active ? listenMode.sentences : undefined}
         activeListenAnchor={listenMode.activeAnchor}
         onListenSentenceStart={listenMode.active ? listenMode.start : undefined}
-        showFileQuotes={workspace?.showFileQuotes}
-        onQuoteSelected={workspace?.onQuoteSelected}
+        showFileQuotes={props.showFileQuotes}
+        onQuoteSelected={props.onQuoteSelected}
         quoteSource={quoteSource}
-        publishedQuoteSource={published?.publication.quoteSource}
+        publishedQuoteSource={published?.quoteSource}
       />
 
       {file.truncated && (

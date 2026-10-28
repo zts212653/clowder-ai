@@ -130,7 +130,7 @@ export function createPawFeelDutyTaskSpec(options: PawFeelDutyTaskSpecOptions): 
           `${signal.rawSignalCount} raw signal(s); open the bundle-first inbox and review original evidence; ` +
           'bounded pages or 10/20/50-item slices are execution limits, not a terminal condition; ' +
           'continue the same responsibility chain until active=0, or every actionable remainder has either a ' +
-          `real task + named owner + active F167 lease, a durable proposal awaiting ${getCoCreatorDisplay().role} approval, or an explicit ` +
+          `real task + named owner + verified current repairBinding (ordinary Task assignment or governed action lease), a durable proposal awaiting ${getCoCreatorDisplay().role} approval, or an explicit ` +
           'blocker with evidence; signature-waiting must continue to an exact independent signature or blocker; owner, task, ' +
           'transport receipt, or chat prose alone is not a terminal condition; if the invocation budget is near, ' +
           'use a structured continuation instead of waiting for the next duty cron';

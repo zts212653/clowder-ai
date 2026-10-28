@@ -1,6 +1,6 @@
-import { readProfileOpeningReference, splitProfileBody } from '@cat-cafe/shared/profile-opening-reference';
 import { useEffect, useState } from 'react';
 import { MemoryCapsuleCard, MemoryCapsuleDetail } from './MemoryCapsule';
+import { MemoryProfileCard } from './MemoryProfileCard';
 import { ProfileDetail } from './MemoryProfileDetail';
 import { MemoryReadState } from './MemoryReadState';
 import { isProfileBrowse, type ProfileMemoryBrowseRead } from './owner-memory-read';
@@ -14,10 +14,25 @@ export function MemoryProfile({
   target?: { id: string; revision: string };
 }) {
   const read = useMemoryRead<ProfileMemoryBrowseRead>('/api/memory/profile', isProfileBrowse);
-  const [selected, select] = useState<string | null>(target?.id ?? null);
+  const [selected, select] = useState<string | null>(target?.id ?? 'capsule');
   const [followingSource, followSource] = useState(!!target);
+  const [dirty, setDirty] = useState(false);
+  const [pendingSelection, setPendingSelection] = useState<{ id: string | null } | null>(null);
+  const choose = (id: string | null) => {
+    if (id === selected) return;
+    if (dirty) {
+      setPendingSelection({ id });
+      return;
+    }
+    followSource(false);
+    select(id);
+  };
   const entries = read.data?.entries ?? [];
   const current = entries.find((entry) => entry.id === selected);
+  useEffect(() => {
+    if (!followingSource && !read.loading && !read.error && selected && selected !== 'capsule' && !current)
+      select('capsule');
+  }, [followingSource, read.loading, read.error, selected, current]);
   useEffect(() => {
     onReadSummary(read.loading ? '正在读取' : read.error ? '暂时读不到' : `${read.data?.entries.length ?? 0} 条`);
   }, [read.data, read.error, read.loading, onReadSummary]);
@@ -43,52 +58,74 @@ export function MemoryProfile({
   }
   return (
     <section className="space-y-4" aria-label="画像记忆">
-      <header>
-        <h1 className="text-display-sm">画像</h1>
-        <p className="mt-2 text-compact text-cafe-muted">关于你和我们相处方式的共同画像与关系画像。</p>
-      </header>
+      <h1 className="sr-only">画像</h1>
+      {pendingSelection && (
+        <div
+          role="alertdialog"
+          aria-label="还有未保存的修改"
+          className="flex flex-wrap items-center gap-3 rounded-xl border border-cafe-subtle bg-cafe-surface-sunken p-4 text-sm"
+        >
+          <p>修改还没保存。</p>
+          <button type="button" className="shell-focusable underline" onClick={() => setPendingSelection(null)}>
+            继续编辑
+          </button>
+          <button
+            type="button"
+            className="shell-focusable text-cafe-accent underline"
+            onClick={() => {
+              setDirty(false);
+              followSource(false);
+              select(pendingSelection.id);
+              setPendingSelection(null);
+            }}
+          >
+            放弃并切换
+          </button>
+        </div>
+      )}
       <MemoryReadState loading={read.loading} error={read.error} empty={false} noun="画像" retry={read.retry} />
-      <div className="grid items-start gap-4 lg:grid-cols-2">
+      <div className="grid items-start gap-4 lg:grid-cols-[minmax(0,0.38fr)_minmax(0,0.62fr)]">
         <div className={`space-y-3 ${current || selected === 'capsule' ? 'hidden lg:block' : ''}`}>
           {!read.loading && !read.error && (
             <MemoryCapsuleCard
               entry={entries.find((entry) => entry.id === 'capsule')}
               setup={read.data?.capsuleSetup}
               selected={selected === 'capsule'}
-              select={() => {
-                followSource(false);
-                select('capsule');
-              }}
+              select={() => choose('capsule')}
             />
           )}
           {entries
-            .filter((entry) => entry.id !== 'capsule')
+            .filter((entry) => entry.layer === 'corpus')
             .map((entry) => (
-              <article key={entry.id} className="rounded-xl border border-cafe-subtle bg-[var(--console-card-bg)] p-4">
-                <button
-                  type="button"
-                  className="text-left text-base font-medium"
-                  aria-pressed={current?.id === entry.id}
-                  onClick={() => {
-                    followSource(false);
-                    select(entry.id);
-                  }}
-                >
-                  {entry.title}
-                </button>
-                {entry.layer === 'primer' && readProfileOpeningReference(entry.content) && (
-                  <p className="mt-2 text-xs text-cafe-muted">含新对话开场参考</p>
-                )}
-                <p className="mt-2 line-clamp-3 break-words text-compact text-cafe-muted">
-                  {splitProfileBody(entry.content).body}
-                </p>
-              </article>
+              <MemoryProfileCard
+                key={entry.id}
+                entry={entry}
+                selected={selected === entry.id}
+                select={() => choose(entry.id)}
+              />
+            ))}
+          {entries.some((entry) => entry.layer === 'primer') && (
+            <h2 className="pt-1 text-xs text-cafe-muted">
+              与各只猫的关系画像 · {entries.filter((entry) => entry.layer === 'primer').length} 份
+            </h2>
+          )}
+          {entries
+            .filter((entry) => entry.layer === 'primer')
+            .map((entry) => (
+              <MemoryProfileCard
+                key={entry.id}
+                entry={entry}
+                selected={selected === entry.id}
+                select={() => choose(entry.id)}
+              />
             ))}
         </div>
-        {selected === 'capsule' && (
+        {selected === 'capsule' && !read.error && (
           <MemoryCapsuleDetail
             entry={current}
+            onDirtyChange={setDirty}
             close={() => {
+              setDirty(false);
               followSource(false);
               select(null);
             }}
@@ -99,13 +136,15 @@ export function MemoryProfile({
           <ProfileDetail
             key={`${current.id}:${current.revision}`}
             entry={current}
+            onDirtyChange={setDirty}
             close={() => {
+              setDirty(false);
               followSource(false);
               select(null);
             }}
             reload={() => {
+              setDirty(false);
               followSource(false);
-              select(null);
               read.retry();
             }}
           />

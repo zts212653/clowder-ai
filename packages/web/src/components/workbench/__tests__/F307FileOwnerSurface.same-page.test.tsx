@@ -11,7 +11,18 @@ import { revision, view } from '../content-review/__tests__/WorkspaceContentRevi
 import { F307FileOwnerSurface } from '../F307FileOwnerSurface';
 import { createFileSurface } from '../real-surface-adapters';
 
-const mocks = vi.hoisted(() => ({ apiFetch: vi.fn() }));
+const mocks = vi.hoisted(() => ({ apiFetch: vi.fn(), startDocument: vi.fn() }));
+vi.mock('@/services/DocumentListenController', () => ({
+  documentListenController: { startDocument: mocks.startDocument },
+}));
+vi.mock('@/services/DocumentCacheController', () => ({
+  documentCacheController: {
+    refresh: vi.fn().mockResolvedValue(undefined),
+    release: vi.fn(),
+    start: vi.fn(),
+    cancel: vi.fn(),
+  },
+}));
 vi.mock('@/utils/api-client', () => ({ API_URL: 'http://api.test', apiFetch: mocks.apiFetch }));
 vi.mock('@/hooks/useWorkspaceFileChange', () => ({
   useWorkspaceFileChange: () => ({ pendingExternalSha: null, onDirtyChange: vi.fn() }),
@@ -57,12 +68,13 @@ beforeEach(() => {
   (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   writeShellPresentation('v2');
   onReturn.mockReset();
+  mocks.startDocument.mockReset();
   clearModificationFocus();
   useChatStore.setState({
     currentThreadId: 'thread-a',
     workspaceOpenRevision: 7,
     pendingChatInsert: null,
-    currentProjectPath: undefined,
+    currentProjectPath: '/repo',
   });
   mocks.apiFetch.mockReset().mockImplementation(async (url: string, init?: RequestInit) => {
     if (url.startsWith('/api/workspace/file?'))
@@ -173,7 +185,16 @@ it('keeps source, edit/save, listening and return in the same original file surf
   expect(host.querySelector('[data-testid="workspace-file-viewer"]')).toBe(reader);
   await click('编辑中');
   await click('源码');
-  expect([...host.querySelectorAll('button')].some((button) => button.textContent === '朗读')).toBe(true);
+  const listen = host.querySelector<HTMLButtonElement>('button[title="从上次位置开始听读"]');
+  expect(listen).not.toBeNull();
+  await act(async () => listen!.click());
+  expect(mocks.startDocument).toHaveBeenCalledWith(
+    expect.objectContaining({
+      identity: { projectPath: '/repo', relativePath: 'notes.md', contentDigest: sha },
+      worktreeId: 'worktree-a',
+    }),
+    undefined,
+  );
   await click('‹ 工具搜索');
   expect(onReturn).toHaveBeenCalledWith({ kind: 'workspace-home-search', query: 'notes' });
 });

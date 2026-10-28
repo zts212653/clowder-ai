@@ -1,3 +1,4 @@
+import type { ProfileMemoryProposalView } from '@cat-cafe/shared';
 import { act, StrictMode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
@@ -18,11 +19,11 @@ const capsule = (content: string) => ({
   layer: 'capsule' as const,
   relationshipKey: null,
   uri: 'cat-cafe-profile://capsule/current',
-  title: '开场简介',
+  title: '关于你',
   status: 'active' as const,
   revision,
   content,
-  proposals: [],
+  proposals: [] as ProfileMemoryProposalView[],
 });
 const proposal = {
   proposalId: 'draft',
@@ -36,7 +37,7 @@ const proposal = {
   decisionEndpointBase: '/api/profile-updates',
   approvalState: 'anchored',
   approvalCardRef: { threadId: 'draft-thread', messageId: 'draft-card' },
-};
+} satisfies ProfileMemoryProposalView;
 let host: HTMLDivElement;
 let root: Root;
 let current: ReturnType<typeof capsule> | null;
@@ -50,7 +51,7 @@ async function click(name: string) {
   await act(async () => node?.click());
 }
 async function type(value: string) {
-  const field = host.querySelector<HTMLTextAreaElement>('textarea[aria-label="开场简介内容"]');
+  const field = host.querySelector<HTMLTextAreaElement>('textarea[aria-label="关于你内容"]');
   expect(field).not.toBeNull();
   await act(async () => {
     Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set?.call(field, value);
@@ -95,9 +96,9 @@ const open = () => act(async () => root.render(<MemoryProfile onReadSummary={() 
 
 it('keeps the empty opening brief discoverable and creates it through the original owner action', async () => {
   await open();
-  await click('开场简介');
+  await click('关于你');
   expect(host.textContent).toContain('现在还是空的');
-  await click('添加开场简介');
+  await click('添加关于你');
   await type('叫我示例用户，先给结论。');
   await click('保存');
   const post = apiFetch.mock.calls.find(([, init]) => init?.method === 'POST');
@@ -115,7 +116,7 @@ it('shows a cat draft as pending without making it effective or sending an appro
   drafts = [proposal];
   await open();
   expect(host.textContent).toContain('待你决定');
-  await click('开场简介');
+  await click('关于你');
   expect(host.textContent).toContain('现在还是空的');
   expect(host.textContent).toContain(proposal.suggestedContent);
   expect(button('查看并决定')).toBeDefined();
@@ -125,7 +126,7 @@ it('shows a cat draft as pending without making it effective or sending an appro
 it('counts Unicode body characters consistently and preserves private metadata when editing', async () => {
   current = capsule('---\nsource: original-coordinate\n---\n旧内容。');
   await open();
-  await click('开场简介');
+  await click('关于你');
   expect(host.textContent).not.toContain('source: original-coordinate');
   await click('编辑');
   await type(`${'猫'.repeat(300)}\n  `);
@@ -142,7 +143,8 @@ it('counts Unicode body characters consistently and preserves private metadata w
 
 it('keeps a failed edit and retries the same request rather than discarding the draft', async () => {
   current = capsule('原内容。');
-  const ordinary = apiFetch.getMockImplementation()!;
+  const ordinary = apiFetch.getMockImplementation();
+  if (!ordinary) throw new Error('Expected fixture reader');
   let failed = false;
   apiFetch.mockImplementation(async (path: string, init?: RequestInit) => {
     if (init?.method === 'POST' && !failed) {
@@ -152,7 +154,7 @@ it('keeps a failed edit and retries the same request rather than discarding the 
     return ordinary(path, init);
   });
   await open();
-  await click('开场简介');
+  await click('关于你');
   await click('编辑');
   await type('还在的修改。');
   await click('保存');
@@ -208,6 +210,7 @@ it.each([
   'primer',
 ] as const)('does not use a browser scroll promise as the %s effect cleanup', async (layer) => {
   const scroll = vi.fn(() => Promise.resolve());
+  vi.stubGlobal('innerWidth', 390);
   Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', { configurable: true, value: scroll });
   const entry: ProfileMemoryRead = {
     ...capsule('示例内容。'),
@@ -283,7 +286,7 @@ it.each([
     await type('新版内容。');
     await click('保存');
   } else {
-    await click('忘掉开场简介');
+    await click('忘掉关于你');
     await act(async () => host.querySelector<HTMLInputElement>('input[type="checkbox"]')?.click());
     await click('确认永久遗忘');
   }
@@ -295,4 +298,54 @@ it.each([
   );
   expect(host.textContent).toContain(operation === 'hard_forget' ? '现在还是空的' : '新版内容。');
   expect(revisionReadsAfterMutation.every((path) => !path.includes(encodeURIComponent(revision)))).toBe(true);
+});
+
+// The accepted page must start with the current brief visible, without an extra card click.
+it('opens About you by default and keeps the selected owner content visible', async () => {
+  current = capsule('第一句。\n第二句。');
+  await open();
+  const detail = host.querySelector('aside[aria-label="画像详情"]');
+  expect(detail).not.toBeNull();
+  expect(detail?.textContent).toContain('第一句。');
+  expect(button('关于你')?.getAttribute('aria-pressed')).toBe('true');
+});
+
+// Card navigation must not silently throw away an owner edit.
+it('keeps an unsaved About you edit until the owner explicitly discards it', async () => {
+  current = capsule('原内容。');
+  const ordinary = apiFetch.getMockImplementation();
+  if (!ordinary) throw new Error('Expected fixture reader');
+  const corpus = { ...capsule('共同画像正文。'), id: 'corpus', layer: 'corpus' as const, title: '共同画像' };
+  apiFetch.mockImplementation(async (path: string, init?: RequestInit) => {
+    if (path === '/api/memory/profile') return response({ readStatus: 'ready', entries: [current, corpus] });
+    if (path.startsWith('/api/memory/profile/corpus?')) return response(corpus);
+    return ordinary(path, init);
+  });
+  await open();
+  await click('编辑');
+  await type('暂时没有保存的修改。');
+  await click('共同画像');
+  expect(host.querySelector('[role="alertdialog"]')).not.toBeNull();
+  expect(host.querySelector('textarea')?.value).toBe('暂时没有保存的修改。');
+  await click('继续编辑');
+  expect(host.querySelector('[role="alertdialog"]')).toBeNull();
+  await click('共同画像');
+  await click('放弃并切换');
+  expect(host.querySelector('aside')?.textContent).toContain('共同画像正文。');
+  expect(apiFetch.mock.calls.some(([, init]) => init?.method === 'POST')).toBe(false);
+});
+
+it('does not discard an owner draft or silently rebase it when the original proposal is decided elsewhere', async () => {
+  current = { ...capsule('原内容。'), proposals: [proposal] };
+  await open();
+  await click('编辑');
+  await type('未保存的主人修改。');
+  apiFetch.mockClear();
+  await act(async () =>
+    window.dispatchEvent(new CustomEvent('cat-cafe:proposal-updated', { detail: { proposalId: proposal.proposalId } })),
+  );
+  expect(host.querySelector('textarea')?.value).toBe('未保存的主人修改。');
+  expect(apiFetch).not.toHaveBeenCalled();
+  await click('放弃修改');
+  expect(apiFetch.mock.calls.some(([path]) => path === '/api/memory/profile')).toBe(true);
 });

@@ -2,7 +2,7 @@
 /** Read-only lifecycle receipts across every Git-registered linked path. */
 import { fileURLToPath } from 'node:url';
 import { associatedWorktrees, worktreeInventory } from './lib/worktree-inventory.mjs';
-import { mergedWorktreeNotices } from './lib/worktree-merged-notices.mjs';
+import { mergedWorktreeNotices, releasedWorktreeNotices } from './lib/worktree-merged-notices.mjs';
 import { readPrTruth } from './lib/worktree-pr.mjs';
 import { mainRepoFrom } from './worktree-reaper.mjs';
 
@@ -47,11 +47,16 @@ export function inventoryCommand(argv, readPr = readPrTruth) {
   const worktrees = worktreeInventory(repo);
   if (options.merged && !options.notices) throw new Error('merged sweep requires --notices');
   const merged = options.merged ? mergedWorktreeNotices(repo, worktrees) : { notices: [], unknown: [] };
+  const mergedPaths = new Set(merged.notices.map((notice) => notice.path));
   return options.notices
     ? {
         version: 1,
         repo,
-        notices: [...worktrees.flatMap((row) => (row.notice ? [row.notice] : [])), ...merged.notices],
+        notices: [
+          ...worktrees.flatMap((row) => (row.notice && !mergedPaths.has(row.path) ? [row.notice] : [])),
+          ...merged.notices,
+          ...(options.merged ? releasedWorktreeNotices(repo, worktrees) : []),
+        ],
         unknownPrQueries: merged.unknown,
         unroutable: worktrees
           .filter((row) => row.retentionStatus && row.retentionStatus !== 'retained-until' && !row.notice)

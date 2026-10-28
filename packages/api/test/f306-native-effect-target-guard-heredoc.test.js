@@ -3,6 +3,7 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync as removeFixture } from 'n
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, describe, test } from 'node:test';
+import { assertGuardedOrUnproved } from './helpers/native-effect-policy-assertions.js';
 
 const { decideNativeHookPayload } = await import('../../../scripts/native-effect-target-guard.mjs');
 const { hereDocumentView } = await import('../../../scripts/native-effect-heredoc.mjs');
@@ -45,12 +46,11 @@ function assertAllowed(command, cwd) {
     `expected allow: ${command}\n→ ${decision.reasonCode} (${decision.effect} → ${decision.target.kind})`,
   );
 }
-function assertDenied(command, cwd) {
+function assertGuardedOrUnprovedCommand(command, cwd) {
   const decision = decideBoth(command, cwd);
-  assert.equal(
-    decision.decision,
-    'deny',
-    `expected deny: ${command}\n→ ${decision.reasonCode} (${decision.effect} → ${decision.target.kind})`,
+  assertGuardedOrUnproved(
+    decision,
+    `expected guarded or unproved: ${command}\n→ ${decision.reasonCode} (${decision.effect} → ${decision.target.kind})`,
   );
   return decision;
 }
@@ -90,24 +90,24 @@ describe('F306 slice 2: a here-document body is the standard input of its comman
       mainRoot,
     );
     // What the command itself names still counts: its cwd, its redirection, a preceding cd.
-    assertDenied(`python3 - <<'PY'\nprint(1)\nPY`, runtimeRoot);
-    assertDenied(`python3 - > ${runtimeRoot}/out.txt <<'PY'\nprint(1)\nPY`);
-    assertDenied(`cd ${runtimeRoot} && python3 - <<'PY'\nprint(1)\nPY`);
+    assertGuardedOrUnprovedCommand(`python3 - <<'PY'\nprint(1)\nPY`, runtimeRoot);
+    assertGuardedOrUnprovedCommand(`python3 - > ${runtimeRoot}/out.txt <<'PY'\nprint(1)\nPY`);
+    assertGuardedOrUnprovedCommand(`cd ${runtimeRoot} && python3 - <<'PY'\nprint(1)\nPY`);
   });
 
   test('a body that runs as shell, or feeds operands, is still judged', () => {
-    assertDenied(`bash <<'EOF'\nrm -rf ${runtimeRoot}\nEOF`);
-    assertDenied(`sudo bash <<'EOF'\nrm -rf /\nEOF`);
-    assertDenied(`sh -s <<EOF\ncd ${runtimeRoot} && git reset --hard\nEOF`);
+    assertGuardedOrUnprovedCommand(`bash <<'EOF'\nrm -rf ${runtimeRoot}\nEOF`);
+    assertGuardedOrUnprovedCommand(`sudo bash <<'EOF'\nrm -rf /\nEOF`);
+    assertGuardedOrUnprovedCommand(`sh -s <<EOF\ncd ${runtimeRoot} && git reset --hard\nEOF`);
     // The body becomes operands: command substitution, a pipe, a read loop.
-    assertDenied(`rm -rf $(cat <<'EOF'\n${runtimeRoot}\nEOF\n)`);
-    assertDenied(`cat <<'EOF' | xargs rm -rf\n${runtimeRoot}\nEOF`);
-    assertDenied(`cat <<'EOF' | while read f; do rm -rf "$f"; done\n${runtimeRoot}\nEOF`);
-    assertDenied(`while read f; do rm -rf "$f"; done <<'EOF'\n${runtimeRoot}\nEOF`);
+    assertGuardedOrUnprovedCommand(`rm -rf $(cat <<'EOF'\n${runtimeRoot}\nEOF\n)`);
+    assertGuardedOrUnprovedCommand(`cat <<'EOF' | xargs rm -rf\n${runtimeRoot}\nEOF`);
+    assertGuardedOrUnprovedCommand(`cat <<'EOF' | while read f; do rm -rf "$f"; done\n${runtimeRoot}\nEOF`);
+    assertGuardedOrUnprovedCommand(`while read f; do rm -rf "$f"; done <<'EOF'\n${runtimeRoot}\nEOF`);
     // An unquoted delimiter expands substitutions in the body: they run.
-    assertDenied(`cat > /tmp/x <<EOF\n$(rm -rf ${runtimeRoot})\nEOF`);
+    assertGuardedOrUnprovedCommand(`cat > /tmp/x <<EOF\n$(rm -rf ${runtimeRoot})\nEOF`);
     // A script read from standard input by an option is not data.
-    assertDenied(`sed -n -f - /tmp/in <<'EOF'\nw ${runtimeRoot}/x\nEOF`);
+    assertGuardedOrUnprovedCommand(`sed -n -f - /tmp/in <<'EOF'\nw ${runtimeRoot}/x\nEOF`);
   });
 
   // codex-astra review of #4840 at 7121abb924: `-f-` and `-f/dev/stdin` also make stdin the
@@ -124,7 +124,7 @@ describe('F306 slice 2: a here-document body is the standard input of its comman
       '--file=/dev/stdin',
       '-f/dev/fd/0',
     ]) {
-      assertDenied(`sed -n ${option} /tmp/in <<'SCRIPT'\nw ${runtimeRoot}/x\nSCRIPT`);
+      assertGuardedOrUnprovedCommand(`sed -n ${option} /tmp/in <<'SCRIPT'\nw ${runtimeRoot}/x\nSCRIPT`);
       // The reviewer's check, independent of target policy: the program stays visible.
       const view = hereDocumentView(`sed -n ${option} /dev/null <<'SCRIPT'\nw /tmp/SENTINEL\nSCRIPT`);
       assert.ok(view.judged.includes('w /tmp/SENTINEL') && view.host.includes('w /tmp/SENTINEL'), option);
@@ -138,9 +138,9 @@ describe('F306 slice 2: a here-document body is the standard input of its comman
 
   test('sed can run its input, so what it reads is never plain data', () => {
     // GNU sed's `e` command and `s///e` flag execute the pattern space: the input lines.
-    assertDenied(`sed e <<'EOF'\nrm -rf ${runtimeRoot}\nEOF`);
-    assertDenied(`sed 's/.*/&/e' <<'EOF'\nrm -rf ${runtimeRoot}\nEOF`);
-    assertDenied(`gsed -n e <<'EOF'\nrm -rf /\nEOF`);
+    assertGuardedOrUnprovedCommand(`sed e <<'EOF'\nrm -rf ${runtimeRoot}\nEOF`);
+    assertGuardedOrUnprovedCommand(`sed 's/.*/&/e' <<'EOF'\nrm -rf ${runtimeRoot}\nEOF`);
+    assertGuardedOrUnprovedCommand(`gsed -n e <<'EOF'\nrm -rf /\nEOF`);
   });
 
   test('a message option reads standard input however it is spelled', () => {
@@ -149,22 +149,22 @@ describe('F306 slice 2: a here-document body is the standard input of its comman
   });
 
   test('the body ends at its terminator: the next line is a command again', () => {
-    assertDenied(`cat > /tmp/x <<'EOF'\nEOF2\nEOF\nrm -rf ${runtimeRoot}`);
-    assertDenied(`cat > /tmp/x <<-'EOF'\n\tdata\n\tEOF\nrm -rf ${runtimeRoot}`);
-    assertDenied(`cat > /tmp/a <<'A'; cat > /tmp/b <<'B'\none\nA\ntwo\nB\nrm -rf ${runtimeRoot}`);
+    assertGuardedOrUnprovedCommand(`cat > /tmp/x <<'EOF'\nEOF2\nEOF\nrm -rf ${runtimeRoot}`);
+    assertGuardedOrUnprovedCommand(`cat > /tmp/x <<-'EOF'\n\tdata\n\tEOF\nrm -rf ${runtimeRoot}`);
+    assertGuardedOrUnprovedCommand(`cat > /tmp/a <<'A'; cat > /tmp/b <<'B'\none\nA\ntwo\nB\nrm -rf ${runtimeRoot}`);
     // An apostrophe in a body does not open a quote that swallows the rest.
-    assertDenied(`cat > /tmp/x <<'EOF'\ndon't\nEOF\nrm -rf /`);
+    assertGuardedOrUnprovedCommand(`cat > /tmp/x <<'EOF'\ndon't\nEOF\nrm -rf /`);
     // Writing the heredoc into the runtime is still a write into the runtime.
-    assertDenied(`cat > ${runtimeRoot}/x.txt <<'EOF'\nhello\nEOF`);
+    assertGuardedOrUnprovedCommand(`cat > ${runtimeRoot}/x.txt <<'EOF'\nhello\nEOF`);
   });
 
   test('what only looks like a here-document is not one', () => {
     // A comment, an arithmetic shift, or `<<` inside a quote hides nothing.
-    assertDenied(`ls # see <<EOF\nrm -rf ${runtimeRoot}\nEOF`);
-    assertDenied(`echo $((1<<2))\nrm -rf ${runtimeRoot}\n2`);
-    assertDenied(`echo "a <<EOF"\nrm -rf ${runtimeRoot}\nEOF`);
+    assertGuardedOrUnprovedCommand(`ls # see <<EOF\nrm -rf ${runtimeRoot}\nEOF`);
+    assertGuardedOrUnprovedCommand(`echo $((1<<2))\nrm -rf ${runtimeRoot}\n2`);
+    assertGuardedOrUnprovedCommand(`echo "a <<EOF"\nrm -rf ${runtimeRoot}\nEOF`);
     // A here-document without its terminator is left to the line parser.
-    assertDenied(`cat > /tmp/x <<'EOF'\nrm -rf ${runtimeRoot}`);
+    assertGuardedOrUnprovedCommand(`cat > /tmp/x <<'EOF'\nrm -rf ${runtimeRoot}`);
   });
 });
 
@@ -207,18 +207,18 @@ describe('F306 slice 2: a message passed as "$(cat <<\'EOF\' … EOF)"', () => {
   });
 
   test('the literal is still an operand, and code still runs', () => {
-    assertDenied(`rm -rf "$(cat <<'EOF'\n${runtimeRoot}\nEOF\n)"`);
+    assertGuardedOrUnprovedCommand(`rm -rf "$(cat <<'EOF'\n${runtimeRoot}\nEOF\n)"`);
     assert.equal(decideHosted(`pkill -f "$(cat <<'EOF'\nnode\nEOF\n)"`).decision, 'deny');
     assert.equal(decideHosted(`cat <<'EOF' | sh\npkill node\nEOF`).decision, 'deny');
     assert.equal(decideHosted(`bash <<'EOF'\npkill node\nEOF`).decision, 'deny');
     // An unquoted delimiter expands the body, so it is not a literal.
-    assertDenied(`rm -rf "$(cat <<EOF\n$HOME/../${runtimeRoot}\nEOF\n)"`);
+    assertGuardedOrUnprovedCommand(`rm -rf "$(cat <<EOF\n$HOME/../${runtimeRoot}\nEOF\n)"`);
     // Under bash 3.2 a stray `)` ends the substitution early and the rest of the body runs.
     assert.equal(decideHosted(`git commit -m "$(cat <<'EOF'\n)\n\`pkill node\`\nEOF\n)"`).decision, 'deny');
     // Inside double quotes a backtick is a real substitution.
     assert.equal(decideHosted('git commit -m "fix: `pkill node`"').decision, 'deny');
     // A real `case` makes grouping unknown: the body is judged line by line again.
-    assertDenied(`x=$(case 1 in 1) cat <<'EOF'\n${runtimeRoot}\nEOF\n;; esac)\nrm -rf "$x"`);
+    assertGuardedOrUnprovedCommand(`x=$(case 1 in 1) cat <<'EOF'\n${runtimeRoot}\nEOF\n;; esac)\nrm -rf "$x"`);
   });
 });
 
@@ -228,7 +228,7 @@ describe('F306 slice 2: quoted text is not shell syntax', () => {
     assertAllowed(`rg -n 'a > b' ${runtimeRoot}/packages/api/data/logs/api/api.log`);
     assertAllowed(`grep -E "x=>y" ${runtimeRoot}/cat-cafe-daemon.log`);
     // A real redirection into the runtime is still a write into it.
-    assertDenied(`echo hi > ${runtimeRoot}/x.txt`);
-    assertDenied(`echo "a > b" > ${runtimeRoot}/x.txt`);
+    assertGuardedOrUnprovedCommand(`echo hi > ${runtimeRoot}/x.txt`);
+    assertGuardedOrUnprovedCommand(`echo "a > b" > ${runtimeRoot}/x.txt`);
   });
 });

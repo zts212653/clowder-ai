@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { decideNativeHookPayload } from '../../../scripts/native-effect-target-guard.mjs';
+import { nativeHookTestEnv } from './helpers/native-hook-programs.js';
 
 const guardPath = fileURLToPath(new URL('../../../scripts/native-effect-target-guard.mjs', import.meta.url));
 const noSelfHost = { selfHost: () => ({ confidence: 'none' }) };
@@ -66,6 +67,7 @@ test('opaque local PathUri cannot become an ordinary executor coordinate', (t) =
 test('opaque local PathUri CLI returns an explicit fingerprint-bound Native deny', (t) => {
   const input = opaqueLocalPayload(t);
   const result = spawnSync(process.execPath, [guardPath], {
+    env: nativeHookTestEnv(),
     input: JSON.stringify(input),
     encoding: 'utf8',
     timeout: 5000,
@@ -220,6 +222,7 @@ for (const expected of ['accept', 'deny']) {
     const { ordinary, runtime } = fixture(t);
     const input = payload(ordinary, expected === 'accept' ? ordinary : runtime);
     const result = spawnSync(process.execPath, [guardPath], {
+      env: nativeHookTestEnv(),
       input: JSON.stringify(input),
       encoding: 'utf8',
       timeout: 5000,

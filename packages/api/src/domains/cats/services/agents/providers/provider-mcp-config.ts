@@ -14,6 +14,10 @@ import {
   resolveInvokeCapabilityRoot,
 } from '../../../../../config/capabilities/invoke-capability-root.js';
 import { readInvocationMcpConfig } from '../../../../../config/capabilities/invoke-mcp-config.js';
+import {
+  bindManagedMcpStdioConfig,
+  materializeNativeMcpHttp,
+} from '../../../../../config/capabilities/managed-mcp-config.js';
 import { isManagedCatCafeSplit } from '../../../../../config/capabilities/mcp-constants.js';
 import {
   resolveMcpArgs,
@@ -22,7 +26,6 @@ import {
 } from '../../../../../config/capabilities/mcp-launch-paths.js';
 import { pluginMcpEnvironment } from '../../../../../config/capabilities/plugin-mcp-environment.js';
 import { isRetiredGithubMcpConfigEntry } from '../../../../../config/capabilities/retired-github-mcp.js';
-import { guardMcpConfig } from '../../../../../config/capabilities/secret-mcp-config.js';
 import { createModuleLogger } from '../../../../../infrastructure/logger.js';
 
 const log = createModuleLogger('provider-mcp-config');
@@ -54,7 +57,7 @@ export async function resolveProviderMcpConfigResolution(input: {
     ALLOWED_WORKSPACE_DIRS: resolveMcpWorkspaceRoot(input.workingDirectory),
   };
   for (const key of MCP_CALLBACK_ENV_KEYS) {
-    const val = input.callbackEnv![key];
+    const val = input.callbackEnv?.[key];
     if (val && !(input.credentialFile && (key === 'CAT_CAFE_INVOCATION_ID' || key === 'CAT_CAFE_CALLBACK_TOKEN')))
       catCafeEnvEntries[key] = val;
   }
@@ -176,19 +179,17 @@ export async function resolveProviderMcpConfigResolution(input: {
     '#712: MCP invoke-time injection',
   );
   return {
-    servers: Object.fromEntries(
-      Object.entries(mcpServers).map(([name, server]) => [
-        name,
-        guardMcpConfig(
-          server,
-          {
+    servers: materializeNativeMcpHttp(
+      Object.fromEntries(
+        Object.entries(mcpServers).map(([name, server]) => [
+          name,
+          bindManagedMcpStdioConfig(server, {
             ...input.callbackEnv,
             ...(input.credentialFile ? { CAT_CAFE_CREDENTIAL_FILE: input.credentialFile } : {}),
-          },
-          undefined,
-          name,
-        ),
-      ]),
+          }),
+        ]),
+      ),
+      { ...input.callbackEnv, ...(input.credentialFile ? { CAT_CAFE_CREDENTIAL_FILE: input.credentialFile } : {}) },
     ),
     source: resolved ? 'capabilities.json' : 'fallback',
   };

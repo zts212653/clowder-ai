@@ -93,16 +93,19 @@ test('unregistered, dirty, feature-lineage and path alias checkouts cannot becom
   const absent = coordinates(f, { instance: 'unregistered' });
   mkdirSync(absent.alphaRoot);
   assert.throws(() => assertNamedAlphaCheckout(absent), /not registered/);
+  assert.throws(() => assertNamedAlphaCheckout(absent, { requireClean: false }), /not registered/);
   const alias = join(f.directory, 'main-alias');
   symlinkSync(f.mainRoot, alias, 'dir');
   assert.throws(() => coordinates(f, { mainRoot: alias }), /aliases/);
   writeFileSync(join(f.alphaRoot, 'scripts/alpha-worktree.sh'), '# changed');
   assert.throws(() => assertNamedAlphaCheckout(c), /tracked changes/);
+  assert.equal(assertNamedAlphaCheckout(c, { requireClean: false }), f.head);
   f.git(['restore', 'scripts/alpha-worktree.sh'], f.alphaRoot);
   writeFileSync(join(f.alphaRoot, 'feature-only'), 'outside main');
   f.git(['add', 'feature-only'], f.alphaRoot);
   f.git(['commit', '-m', 'not in main'], f.alphaRoot);
   assert.throws(() => assertNamedAlphaCheckout(c), /outside main lineage/);
+  assert.throws(() => assertNamedAlphaCheckout(c, { requireClean: false }), /outside main lineage/);
   assert.equal(readFileSync(join(f.mainRoot, '.gitignore'), 'utf8').includes('.cat-cafe/'), true);
 });
 

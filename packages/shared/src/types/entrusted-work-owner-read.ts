@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { collectiveTaskPublicTimeSchema } from './collective-time.js';
 import { entrustedWorkTaskExecutionV1Schema, entrustedWorkTerminalV1Schema } from './entrusted-work-human-terminal.js';
 import { validateOwnerTimeCoordinates } from './entrusted-work-owner-read-evidence.js';
 import {
@@ -182,6 +183,7 @@ export const entrustedWorkOwnerReadV1Schema = z
       .optional(),
     terminal: entrustedWorkTerminalV1Schema.optional(),
     execution: entrustedWorkTaskExecutionV1Schema.optional(),
+    publicTime: collectiveTaskPublicTimeSchema.optional(),
     timeRefs: z.array(entrustedWorkTimeRefV1Schema).max(64),
     attentionCoverage: producerAttentionCoverageV1Schema.optional(),
     attentionReceipts: z.array(producerAttentionReceiptV1Schema).max(NEEDS_ME_PRODUCER_IDS.length),

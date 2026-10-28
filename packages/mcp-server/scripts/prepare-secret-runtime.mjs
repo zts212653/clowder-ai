@@ -6,6 +6,19 @@ import ts from 'typescript';
 const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const repository = resolve(packageRoot, '../..');
 const output = resolve(packageRoot, 'dist/runtime');
+// These are retired generated MCP wrappers, never user files. Do not ship
+// stale compiled entrypoints after an incremental build of their removal.
+for (const name of [
+  'secret-mcp-config',
+  'secret-mcp-proxy',
+  'secret-mcp-wire',
+  'secret-remote-transport',
+  'shared-json-transport',
+  'shared-mcp-aggregate',
+]) {
+  for (const suffix of ['.js', '.js.map', '.d.ts', '.d.ts.map'])
+    rmSync(resolve(packageRoot, 'dist', name + suffix), { force: true });
+}
 const entries = [
   'scripts/lib/secret-tool-io.mjs',
   'scripts/lib/secret-value-inspection.mjs',

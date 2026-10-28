@@ -19,6 +19,7 @@ export function MessageSearchResultRow({
   readonly,
   onNavigate,
   resolveSpeaker,
+  beforeAction,
 }: {
   result: MessageSearchResult;
   response: MessageSearchResponse;
@@ -29,8 +30,9 @@ export function MessageSearchResultRow({
   readonly: boolean;
   onNavigate: (result: MessageSearchResult, response: MessageSearchResponse) => void;
   resolveSpeaker: (speaker: string) => string;
+  beforeAction?: (signal: AbortSignal) => Promise<boolean>;
 }) {
-  const action = useMessageSourceActions(result, currentThreadId, resolveSpeaker);
+  const action = useMessageSourceActions(result, currentThreadId, resolveSpeaker, beforeAction);
   const enhanced = journey6 && !readonly;
   const sourceDecision =
     queryMatchRanges(result.snippet.text, response.query).length === 0

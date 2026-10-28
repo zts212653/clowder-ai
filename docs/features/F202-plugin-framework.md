@@ -5,7 +5,7 @@ topics: [plugin-framework, plugin-manager, host-inventory, capability-registry, 
 doc_kind: spec
 created: 2026-05-15
 architecture-cell: plugin
-tips_exempt: "Generic messaging, Task data and plugin-owned services use existing Settings, conversation and feedback-card entry points. The interface consolidation adds no separate user-discoverable action; the feedback card describes draft creation directly. The consolidated migration scope and incompatible-install diagnostics use the existing Manager. Git marketplace and local-directory discovery are documented by their existing capability tips; shared member avatars add no separate action. Personal Chrome setup is available only after installing an exact trusted candidate; its Manager card provides the installation and extension-loading instructions at the point of use, rather than advertising an unavailable catalog release. Renewal 2026-10-21 keeps publication and home-repair records in Internal Notes while retaining the public product scope and existing Manager discovery; neither the source merge nor these records activate a runtime."
+tips_exempt: "Renewed 2026-10-27: Contract 0.3 removes duplicate capability/grant declarations while keeping the existing Plugin Manager discovery, installation, configuration and activation journey. Existing Manager and package-source tips remain applicable; this migration introduces no separate user action or new management entry point."
 mcp_admission_status: accepted
 mcp_admission_ref: "file:docs/features/F202-plugin-framework.md"
 mcp_admission_claims:
@@ -66,7 +66,7 @@ description_confirmed_by: codex-astra
 
 ## Outcome and Scope
 
-One Plugin Manager handles verified package discovery, installation, configuration, grants and lifecycle.
+One Plugin Manager handles verified package discovery, installation, configuration and lifecycle.
 Host supplies ordinary resource APIs; packages own provider connections, routing, business mappings and
 private state. Console and Agent management use the same inventory and runtime facts.
 
@@ -113,7 +113,7 @@ Scope: one catalog candidate or installed plugin instance.
    does not hide installed plugins.
 2. Install a published package or explicitly selected development source. Host verifies its manifest,
    dependencies and identity, then creates an immutable installed copy.
-3. Configure credentials and grant the declared capabilities. Configuration fields and action buttons
+3. Configure credentials and the plugin's declared resources. Configuration fields and action buttons
    appear in manifest order. A test or connection action returns a transient result, not persistent health.
 4. Enable the plugin. Host invokes its lifecycle; the plugin opens its connections and manages its helpers.
 5. Use the declared tools, message subscriptions and actions. Messages and attachments follow the ordinary
@@ -123,7 +123,7 @@ Scope: one catalog candidate or installed plugin instance.
    immutable package; a source checkout or Host restart alone does not update it.
 
 Installed packages whose manifests are incompatible with the current contract remain visible in
-Plugin Manager with their instance identity, original grant records, configuration and data preserved.
+Plugin Manager with their instance identity, configuration and data preserved.
 Host and compatible plugins continue to run; incompatible packages cannot start or receive calls.
 Without a higher compatible catalog version, Manager reports that no update is available and hides the
 update action. A compatible replacement passes normal admission and replaces the package atomically;
@@ -142,11 +142,10 @@ an SDK capability. The authenticated local owner confirms installation/removal, 
 under a maintenance lock and invokes the verified package's fixed setup protocol with Host-selected paths.
 Inspection is read-only. Failed runtime recovery preserves the reported setup outcome and asks the owner
 to inspect before retrying; an unknown child outcome never triggers an automatic mutation retry. Installing
-the helper does not prove Chrome connection or conversation authorization. Runtime grant reconciliation
-adds only requested, allowlisted capabilities (including Collective's ordinary `plugin.config.read`) and
-retains installation identity, package, configuration and data.
+the helper does not prove Chrome connection or conversation authorization. Configuration access uses the
+current instance's Host client and retains installation identity, package, configuration and data.
 
-Host owns package verification, inventory, configuration/secrets, grants, lifecycle and ordinary resource
+Host owns package verification, inventory, configuration/secrets, lifecycle and ordinary resource
 operations. Packages own provider behavior and their storage. Plugin identity is bound by Host; business
 payloads do not supply authorization identity. Plugins use ordinary threads/messages/members without a
 second thread-visibility system. Thread creation is ordinary creation; after an uncertain failure the
@@ -158,7 +157,7 @@ the underlying attachment. Meeting notifications use ordinary messaging and pack
 
 Lifecycle hooks are preStart, start, configRefresh, preStop, stop, preUninstall and uninstall. A missing
 refresh hook is a no-op. Plugins explicitly refresh cached resources and manage their own helper processes.
-Configuration updates keep the current activation usable; stop, package replacement, grant and caller
+Configuration updates keep the current activation usable; stop, package replacement and caller
 validity checks still apply. QR challenges and polling state belong to plugin storage; only declared
 configuration/credential targets and generic UI step position persist in Host.
 
@@ -197,7 +196,7 @@ Work receipts jointly authorize document publication without restoring a builtin
   contribution discovery/invocation tools.
 - Catalog publication truth lives in `clowder-ai-plugins`; Core validates configured origin, exact version,
   digest, provenance and trust policy. A catalog row is never installation or activation truth.
-- Host inventory owns installed package, instance, grant and activation truth; supervisor/Broker own live
+- Host inventory owns installed package, instance and activation truth; supervisor/Broker own live
   runtime truth. Aggregate UI status is a pure projection, not another persisted state machine.
 - Generic `plugin_update`, `plugin_repair` and `updateAvailable` are not public Console, Agent or canonical
   Manager capabilities. Narrow internal recovery primitives may remain implementation details.
@@ -457,10 +456,10 @@ the independent read/write/destructive risk and callback-owner authority.
 | `plugin_search` | Discover verified metadata through the same read-only projection. |
 | `plugin_get` | Inspect one exact plugin and its current lifecycle revision. |
 | `plugin_list_tools` | Disclose schemas only for a live, authorized contribution. |
-| `plugin_call` | Invoke an exact discovered schema under current live/grant authority; write profile only. |
+| `plugin_call` | Invoke an exact discovered schema under current instance, contribution and caller authority; write profile only. |
 | `plugin_install` | Admit the exact verified package as a disabled instance; no implicit enablement. |
 | `plugin_set_enabled` | Explicit owner lifecycle mutation fenced by the current revision. |
-| `plugin_uninstall` | Destructive owner mutation; revoke runtime/grants before retiring the instance. |
+| `plugin_uninstall` | Destructive owner mutation; revoke the live activation before retiring the instance. |
 
 This admission does not expose generic update/repair, grant authority to catalog metadata, or register
 arbitrary dynamic schemas as canonical tools. Restricted Collective sessions cannot use these entries;

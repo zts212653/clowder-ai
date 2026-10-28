@@ -109,12 +109,9 @@ async function createMultiApprovedChildScenario(t: TestContext, laterSuccessor: 
       markSubjectTerminal: async () => null,
       clearSubjectTerminal: async () => {},
     },
-    { get: async () => null },
-    undefined,
     {
       get: async (id) => (id === task.id ? { ...task, developmentScope: task.entrustedWork?.developmentScope } : null),
     },
-    undefined,
     delegates,
   );
   const admission = new ActionSuccessorAdmissionService(store, resolver);

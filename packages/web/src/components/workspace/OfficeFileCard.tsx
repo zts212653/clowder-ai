@@ -1,5 +1,4 @@
 import type { FileData } from '@/hooks/useWorkspace';
-import { ChatFileActions } from '../chat-references/ChatFileActions';
 import { ChatReferenceIcon, chatReferenceFileType } from '../chat-references/ChatReferenceIcon';
 import { chatReferenceCopy } from '../chat-references/chat-reference.shell-copy';
 import { useShellCopy } from '../shell/shell-copy';
@@ -31,7 +30,6 @@ export function OfficeFileCard({
           : ` · ${t.pageCountUnknown}`}
       </p>
       <p className="text-xs text-[var(--shell-muted)]">{t.officeUnavailable}</p>
-      {worktreeId ? <ChatFileActions target={target} inline /> : null}
     </section>
   );
 }

@@ -29,6 +29,7 @@ import {
 import { CapabilityTipStrip } from './CapabilityTipStrip';
 import { CatNameplate } from './CatNameplate';
 import { CloudBindingRecoveryCard } from './CloudBindingRecoveryCard';
+import { CodexStartupRecoveryStatus } from './CodexStartupRecoveryStatus';
 import { CollapsibleMarkdown } from './CollapsibleMarkdown';
 import { ConnectorBubble } from './ConnectorBubble';
 import { ContentBlocks } from './ContentBlocks';
@@ -545,7 +546,14 @@ function ChatMessageContent({
     }
     if (isConnectorSystemNotice(message)) {
       if (isLinkedCloudBindingRecoveryNotice(message, threadMessages)) return null;
-      return <SystemNoticeBar message={message} footer={dispatchLine} />;
+      return (
+        <SystemNoticeBar
+          message={message}
+          footer={dispatchLine}
+          threadId={renderThreadId}
+          timelineMessages={threadMessages}
+        />
+      );
     }
     return (
       <ConnectorBubble
@@ -797,7 +805,13 @@ function ChatMessageContent({
               )}
               <span className="text-cafe-muted">{formatTime(assistantPresentationTime)}</span>
             </div>
-            <p className="mt-2 text-sm text-cafe-muted">已接下，还没有输出</p>
+            {message.extra?.startupRecovery && message.extra.startupRecovery.stage !== 'ready' ? (
+              <div className="mt-2 text-cafe-muted">
+                <CodexStartupRecoveryStatus message={message} />
+              </div>
+            ) : (
+              <p className="mt-2 text-sm text-cafe-muted">已接下，还没有输出</p>
+            )}
             {showCapabilityTip && capabilityTipContexts ? (
               <CapabilityTipStrip
                 surface="pending_bubble"
@@ -1092,7 +1106,9 @@ function ChatMessageContent({
         </>
       }
     >
-      {emptyResponseNotice && emptyResponseNotice.tone !== 'processing' ? (
+      <CodexStartupRecoveryStatus message={message} showRecovered={!showsNameplate} />
+      {message.extra?.startupRecovery && message.extra.startupRecovery.stage !== 'ready' ? null : emptyResponseNotice &&
+        emptyResponseNotice.tone !== 'processing' ? (
         <CollapsibleMarkdown
           content={emptyResponseNotice.label}
           className={catStyle?.font}

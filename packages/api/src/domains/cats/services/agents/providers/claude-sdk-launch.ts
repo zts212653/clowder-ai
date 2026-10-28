@@ -18,6 +18,7 @@ import { withClaudeSecretHooks } from './claude-secret-hook-settings.js';
 import { appendLocalImagePathHints, collectImageAccessDirectories } from './image-cli-bridge.js';
 import { extractTrustedImagePaths } from './image-paths.js';
 import { compileL0ViaSubprocess } from './l0-compiler.js';
+import { writeInvocationMcpConfigFile } from './session-credential-file.js';
 
 function effortValue(effort: string): EffortLevel | undefined {
   if (!effort) return undefined;
@@ -179,7 +180,7 @@ export async function prepareClaudeSdkLaunch(input: {
       permissionMode: readOnly ? 'plan' : 'bypassPermissions',
       ...(readOnly ? { tools: [] } : { allowDangerouslySkipPermissions: true }),
       strictMcpConfig: true,
-      mcpServers: mcpServers as Options['mcpServers'],
+      mcpServers: {},
       settingSources,
       ...(options?.sessionId ? { resume: options.sessionId } : {}),
       ...(additionalDirectories.length ? { additionalDirectories } : {}),
@@ -193,7 +194,15 @@ export async function prepareClaudeSdkLaunch(input: {
           }
         : {}),
       ...(!readOnly || Object.keys(operator.extraArgs).length > 0
-        ? { extraArgs: { ...operator.extraArgs, ...(readOnly ? {} : { chrome: null }) } }
+        ? {
+            extraArgs: {
+              ...operator.extraArgs,
+              ...(readOnly ? {} : { chrome: null }),
+              ...(mcpResolution
+                ? { 'mcp-config': writeInvocationMcpConfigFile({ mcpServers }, options?.callbackEnv) }
+                : {}),
+            },
+          }
         : {}),
     },
   };

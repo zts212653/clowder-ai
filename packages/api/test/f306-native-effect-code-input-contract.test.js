@@ -3,7 +3,7 @@ import { spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { test } from 'node:test';
 import { decideNativeHookPayload } from '../../../scripts/native-effect-target-guard.mjs';
-import { nativeHookPrograms } from './helpers/native-hook-programs.js';
+import { nativeHookPrograms, nativeHookTestEnv } from './helpers/native-hook-programs.js';
 
 // Sources: 0001791034032278-000485-37cbf073; 0001791035019057-000596-6c26fbd4;
 // 0001791060581057-001626-0915f7ae.
@@ -130,7 +130,7 @@ test('literal stdin is read as code by both real hook entries', () => {
         input: JSON.stringify(payload(command, provider)),
         encoding: 'utf8',
         timeout: 10_000,
-        env: { PATH: process.env.PATH, USER: 'hook-user', HOME: '/tmp', PWD: '/tmp' },
+        env: nativeHookTestEnv({ PATH: process.env.PATH, USER: 'hook-user', PWD: '/tmp' }),
       });
       assert.equal(result.status, 0, result.stderr);
       assert.equal(

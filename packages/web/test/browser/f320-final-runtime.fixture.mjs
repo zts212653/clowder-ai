@@ -9,10 +9,12 @@ import { toAllCatConfigs } from '../../../api/src/config/cat-config-loader.ts';
 import { configEventBus } from '../../../api/src/config/config-event-bus.ts';
 import { readRuntimeCatCatalog } from '../../../api/src/config/runtime-cat-catalog.ts';
 import { invokeSingleCat } from '../../../api/src/domains/cats/services/agents/invocation/invoke-single-cat.ts';
+import { emitLifecycleMessageUpdated } from '../../../api/src/domains/cats/services/agents/invocation/lifecycle-message-update.ts';
 import { accountsRoutes } from '../../../api/src/routes/accounts.ts';
 import { catsRoutes } from '../../../api/src/routes/cats.ts';
 import { configRoutes } from '../../../api/src/routes/config.ts';
 import { servicesRoutes } from '../../../api/src/routes/services.ts';
+import { createCodexStartupRouteHarness } from '../../../api/test/helpers/codex-startup-route-harness.mjs';
 import {
   createReviewState,
   findFreePort,
@@ -31,6 +33,7 @@ export async function startFinalAccountPreview({
   withClaude = false,
   routingSnapshot,
   withServicePreview = false,
+  withStartupRecovery = false,
   ownerUserId,
 } = {}) {
   const saved = { ...process.env };
@@ -39,7 +42,7 @@ export async function startFinalAccountPreview({
     HOME: root,
     CAT_CAFE_CONFIG_ROOT: root,
     CAT_CAFE_WORKSPACE_ROOT: root,
-    CAT_CAFE_RUNTIME_ROOT: root,
+    CAT_CAFE_RUNTIME_ROOT: withStartupRecovery ? join(root, 'disposable-runtime') : root,
     CAT_CAFE_GLOBAL_CONFIG_ROOT: root,
     CAT_TEMPLATE_PATH: join(root, 'cat-template.json'),
     CAT_CAFE_PROJECT_ALLOWED_ROOTS: root,
@@ -48,9 +51,12 @@ export async function startFinalAccountPreview({
     AUDIT_LOG_DIR: join(root, 'audit'),
   });
   if (ownerUserId !== undefined) process.env.DEFAULT_OWNER_USER_ID = ownerUserId;
+  if (withStartupRecovery) mkdirSync(join(root, 'disposable-runtime'));
   delete process.env.CODEX_HOME;
   delete process.env.CODEX_SQLITE_HOME;
   mkdirSync(join(root, '.cat-cafe'));
+  if (withStartupRecovery)
+    writeFileSync(join(root, '.cat-cafe/capabilities.json'), JSON.stringify({ version: 2, capabilities: [] }));
   writeFileSync(
     join(root, '.cat-cafe', 'accounts.json'),
     JSON.stringify({
@@ -159,10 +165,25 @@ export async function startFinalAccountPreview({
   let quotaMode = 'body';
   const nativeLogin = createFixtureLoginDriver();
   const app = Fastify();
+  const startup = withStartupRecovery
+    ? createCodexStartupRouteHarness({
+        root,
+        threadId: THREAD_ID,
+        catId: 'codex61-sol',
+        retryDelaysMs: [2_000, 5_000, 1_000, 1_000, 1_000],
+        onEvent: (event) => sockets.emit('agent_message', { ...event, threadId: THREAD_ID }),
+        onResponse: (response) =>
+          emitLifecycleMessageUpdated(
+            { emitToUser: (_user, event, data) => sockets.emit(event, data) },
+            'fixture',
+            response,
+          ),
+      })
+    : undefined;
   const fallback = createReviewState();
   app.addHook('onRequest', async (request, reply) => {
     request.headers['x-cat-cafe-user'] = 'fixture';
-    if (withServicePreview) request.sessionUserId = 'fixture';
+    if (withServicePreview || withStartupRecovery) request.sessionUserId = 'fixture';
     const origin = request.headers.origin;
     if (origin && /^http:\/\/(127\.0\.0\.1|localhost):\d+$/.test(origin))
       reply
@@ -202,7 +223,36 @@ export async function startFinalAccountPreview({
   });
   await app.register(catsRoutes);
   await app.register(configRoutes, { projectRoot: root });
-  app.get('/api/messages', async () => ({ messages, hasMore: false }));
+  app.get('/api/messages', async () => ({
+    messages: [...messages, ...(startup?.store.getByThread(THREAD_ID) ?? [])],
+    hasMore: false,
+  }));
+  if (startup) {
+    app.post('/api/fixture/startup', async (request) => {
+      const body = request.body ?? {};
+      if (!['recover', 'fail'].includes(body.scenario) || !['user', 'system_wake'].includes(body.origin))
+        throw new Error('invalid startup fixture');
+      const run = startup.start(body);
+      void run.pending.catch((error) => {
+        run.error = String(error);
+      });
+      return { runId: startup.runs.length - 1, sourceId: run.source.id };
+    });
+    app.get('/api/fixture/startup/:id', async (request) => {
+      const run = startup.runs[Number(request.params.id)];
+      return {
+        response: startup.store.getById(run?.responseId),
+        wireCount: run?.wires.length,
+        turnStarts: run?.wires.flatMap((w) => w.writes).filter((m) => m.method === 'turn/start').length,
+        error: run?.error,
+        errors: run?.events.filter((event) => event.type === 'error'),
+      };
+    });
+    app.post('/api/fixture/startup/:id/stop', async (request) => {
+      startup.runs[Number(request.params.id)]?.controller.abort('user_cancel');
+      return { stopped: true };
+    });
+  }
   app.get('/*', async (request) => {
     const url = new URL(request.url, 'http://127.0.0.1');
     if (url.pathname === '/api/session' || url.pathname === '/api/auth/session')
@@ -312,6 +362,8 @@ export async function startFinalAccountPreview({
     url,
     apiUrl,
     root,
+    startup,
+    threadId: THREAD_ID,
     output,
     close,
     setQuota(mode) {
@@ -335,10 +387,8 @@ export async function startFinalAccountPreview({
         threadStore: null,
         apiUrl: 'http://127.0.0.1:0',
       };
-      let expectAccountSnapshot = true;
       const service = {
         async *invoke(_prompt, options) {
-          expectAccountSnapshot = catId !== 'opus' || !!options.claudeTokenAccount;
           if (catId === 'opus') assertSelectedToken(options);
           onStarted?.();
           yield {
@@ -367,8 +417,10 @@ export async function startFinalAccountPreview({
       }))
         events.push(event);
       const metadata = events.find((event) => event.type === 'metadata')?.metadata;
-      if (!metadata || !!metadata.executionAccount !== expectAccountSnapshot || events.some((e) => e.type === 'error'))
-        throw new Error(`fixture invocation failed: ${events.filter((e) => e.type === 'error').map((e) => e.content)}`);
+      if (!metadata?.executionAccount || events.some((e) => e.type === 'error'))
+        throw new Error(
+          `fixture invocation failed: ${JSON.stringify({ hasMetadata: !!metadata, hasAccountSnapshot: !!metadata?.executionAccount, errors: events.filter((e) => e.type === 'error').map((e) => ({ error: e.error, code: e.errorCode })) })}`,
+        );
       messages.push({
         from: { kind: 'agent', catId: catId },
         id: `reply-${messages.length}`,

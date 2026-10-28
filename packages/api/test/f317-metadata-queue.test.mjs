@@ -49,6 +49,13 @@ test('four FIFO slots distinguish queued time from IO await with exact counts an
     readdirCalls: 2,
     queueWaitMs: 25,
     maxQueueWaitMs: 15,
+    longestQueueWait: {
+      queueWaitMs: 15,
+      slotWaitMs: 15,
+      resumeDelayMs: 0,
+      waitingAhead: 1,
+      releasedBy: { caller: 'observer', operation: 'readdir', ioAwaitMs: 15, capped: false },
+    },
     ioAwaitMs: 115,
     maxIoAwaitMs: 30,
     capped: false,

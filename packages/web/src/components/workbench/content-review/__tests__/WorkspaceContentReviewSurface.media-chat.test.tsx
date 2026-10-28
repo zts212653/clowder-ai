@@ -273,7 +273,7 @@ it('puts the brush next to the image and keeps the only ordinary input in Chat',
   await act(async () => byText('画笔')?.click());
   expect(container.querySelector('[data-testid="review-markup-layer"]')).not.toBeNull();
   expect(container.querySelector('textarea')).toBeNull();
-  expect(container.querySelector('[aria-label="图片更多操作"]')).not.toBeNull();
+  expect(container.querySelector('[aria-label="作品更多操作"]')).not.toBeNull();
   expect(mocks.apiFetch).toHaveBeenCalledTimes(1);
 });
 

@@ -46,7 +46,7 @@ export function MemoryCapsuleEditor({
     ? '正在保存…'
     : action.error
       ? `修改还在。${action.error}`
-      : message || (dirty ? '有修改还没保存' : '没有改动');
+      : message || (dirty ? '有修改还没保存 · 保存后从下一场新对话开始生效' : '没有改动');
   return (
     <form
       className="space-y-3"
@@ -69,10 +69,10 @@ export function MemoryCapsuleEditor({
       }}
     >
       <label className="block text-sm">
-        <span className="sr-only">开场简介内容</span>
+        <span className="sr-only">关于你内容</span>
         <textarea
           ref={field}
-          aria-label="开场简介内容"
+          aria-label="关于你内容"
           aria-describedby="capsule-count"
           aria-invalid={count > USER_CAPSULE_CHAR_LIMIT}
           value={value}
@@ -83,7 +83,7 @@ export function MemoryCapsuleEditor({
           disabled={action.busy || action.retryable}
           maxLength={20_000}
           placeholder="比如：怎么称呼你、你在做什么、希望猫怎么和你说话。"
-          className={`min-h-48 w-full resize-y rounded-lg border bg-[var(--console-card-bg)] p-3 text-sm leading-relaxed outline-offset-2 ${count > USER_CAPSULE_CHAR_LIMIT ? 'border-[var(--semantic-critical)]' : 'border-cafe-subtle'}`}
+          className={`min-h-64 w-full resize-y rounded-lg border bg-[var(--console-card-bg)] p-3 text-sm leading-relaxed outline-none focus:border-cafe-accent focus:ring-1 focus:ring-[var(--cafe-accent)] ${count > USER_CAPSULE_CHAR_LIMIT ? 'border-[var(--semantic-critical)]' : 'border-cafe-subtle'}`}
         />
       </label>
       <div id="capsule-count" className="flex flex-wrap items-start justify-between gap-2 text-xs text-cafe-muted">
@@ -100,7 +100,7 @@ export function MemoryCapsuleEditor({
           超出 {count - 300} 字，删掉一些才能保存。
         </p>
       )}
-      <div className="sticky bottom-0 -mx-4 -mb-4 flex flex-wrap items-center justify-between gap-3 rounded-b-xl border-t border-cafe-subtle bg-[var(--console-card-bg)] px-4 py-3 md:-mx-6 md:-mb-6 md:px-6">
+      <div className="sticky bottom-0 -mx-4 -mb-4 flex flex-wrap items-center justify-between gap-3 rounded-b-xl border border-[var(--semantic-warning)] bg-[var(--semantic-warning-surface)] px-4 py-3 md:-mx-6 md:-mb-6 md:px-6">
         <p role={action.error ? 'alert' : 'status'} className="min-w-0 flex-1 text-compact">
           {state}
         </p>

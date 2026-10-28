@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, it } from 'node:test';
 import { ClaudeSdkAgentService } from '../dist/domains/cats/services/agents/providers/ClaudeSdkAgentService.js';
-import { assertCurrentCallback, secretMcpContract } from './helpers/secret-mcp-contract.js';
+import { directMcpContract, readNativeMcpConfig } from './helpers/direct-mcp-contract.js';
 
 class AsyncInbox {
   #values = [];
@@ -853,17 +853,14 @@ describe('live member carriers', () => {
     }
 
     assert.equal(sdkOptions.strictMcpConfig, true);
-    const { proxyEnv, upstream } = secretMcpContract(sdkOptions.mcpServers['user-tool']);
-    assert.equal(upstream.source, 'user-tool');
+    const { launchEnv, upstream } = directMcpContract(
+      readNativeMcpConfig(sdkOptions.extraArgs['mcp-config']).mcpServers['user-tool'],
+    );
+
     assert.equal(upstream.command, 'user-tool');
     assert.deepEqual(upstream.args, ['serve']);
     assert.deepEqual(upstream.env, {}, 'foreign upstream must not receive callback credentials or identity');
-    assertCurrentCallback(proxyEnv, {
-      CAT_CAFE_CAT_ID: 'opus',
-      CAT_CAFE_API_URL: 'http://127.0.0.1:1',
-      CAT_CAFE_INVOCATION_ID: 'inv-sdk-mcp',
-      CAT_CAFE_CALLBACK_TOKEN: 'fixture-sdk-callback',
-    });
+    assert.deepEqual(launchEnv, {});
   });
 
   it('Claude SDK rejects a steer whose provider interrupt never acknowledges', async () => {

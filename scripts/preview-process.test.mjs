@@ -284,9 +284,10 @@ describe('preview-process managed lifecycle', () => {
     if (process.platform !== 'darwin') return;
     const oneShotPort = await reservePort();
     const fixture = [
+      OWNER_REPORT_SOURCE,
       "const http = require('node:http');",
       `const server = http.createServer((_req, res) => res.end('one-shot')).listen(${oneShotPort}, '127.0.0.1');`,
-      'setTimeout(() => server.close(() => process.exit(0)), 750);',
+      'setTimeout(() => server.close(() => { report(0); process.exit(0); }), 750);',
     ].join('');
     const start = spawnSync(
       process.execPath,

@@ -1,21 +1,22 @@
 import { randomUUID } from 'node:crypto';
+import {
+  bindManagedMcpStdioConfig,
+  isInstalledManagedMcpServer,
+  materializeNativeMcpHttp,
+} from '../../../../../../config/capabilities/managed-mcp-config.js';
 import { pluginMcpEnvironment } from '../../../../../../config/capabilities/plugin-mcp-environment.js';
-import { guardMcpConfig } from '../../../../../../config/capabilities/secret-mcp-config.js';
 /**
  * Per-invocation MCP server env materialization for ACP sessions.
  *
  * Static MCP configs (from .mcp.json via acp-mcp-resolver) don't carry
  * per-invocation callback env (CAT_CAFE_API_URL, token, etc.).
- * This module merges callbackEnv into cat-cafe* and native-action servers before newSession().
+ * This module merges callbackEnv into genuine installed first-party and admitted native-action servers before newSession().
  */
 
-import type { AcpMcpServer, AcpMcpServerStdio } from './types.js';
-
-/** Prefix for Clowder AI MCP servers that need callback env injection. */
-const CAT_CAFE_SERVER_PREFIX = 'cat-cafe';
+import type { AcpMcpServer } from './types.js';
 
 /** Callback env keys injected per-invocation into cat-cafe MCP servers. */
-const CALLBACK_ENV_KEYS = [
+const _CALLBACK_ENV_KEYS = [
   'CAT_CAFE_API_URL',
   'CAT_CAFE_INVOCATION_ID',
   'CAT_CAFE_CALLBACK_TOKEN',
@@ -28,87 +29,73 @@ const CALLBACK_ENV_KEYS = [
   'CAT_CAFE_MCP_TRANSPORT',
 ] as const;
 
-function isCatCafeStdioServer(server: AcpMcpServer): server is AcpMcpServerStdio {
-  return (
-    'command' in server &&
-    (server.name === CAT_CAFE_SERVER_PREFIX || server.name.startsWith(`${CAT_CAFE_SERVER_PREFIX}-`))
-  );
-}
-
-/**
- * Merge callbackEnv into a stdio server's env array.
- * Overwrites existing entries by name (e.g. replaces `${CAT_CAFE_API_URL}` placeholder).
- */
-function mergeCallbackEnv(
-  existingEnv: Array<{ name: string; value: string }>,
-  callbackEnv: Record<string, string>,
-): Array<{ name: string; value: string }> {
-  const envMap = new Map(existingEnv.map((e) => [e.name, e.value]));
-  for (const key of CALLBACK_ENV_KEYS) {
-    if (key in callbackEnv) {
-      envMap.set(key, callbackEnv[key]);
-    }
-  }
-  return [...envMap.entries()].map(([name, value]) => ({ name, value }));
-}
-
 /**
  * Materialize per-invocation MCP server configs by merging callbackEnv
- * into cat-cafe* and native-action servers. Other servers pass through unchanged.
+ * into genuine installed first-party and admitted native-action servers. Other servers pass through unchanged.
  *
  * @returns New array (never mutates input)
  */
 export function materializeSessionMcpServers(
   baseServers: AcpMcpServer[],
   callbackEnv?: Record<string, string>,
-  credentialFileOnly = false,
+  _credentialFileOnly = false,
 ): AcpMcpServer[] {
   const resolved = baseServers.map((server) => {
     if (!('command' in server)) return server;
     const registered = Object.fromEntries((server.env ?? []).map((e) => [e.name, e.value]));
-    const nativeActionServer = Boolean(registered.CLOWDER_PLUGIN_ACTION_TOKEN);
+    const nativeActionServer = server.hostSource === 'plugin' && Boolean(registered.CLOWDER_PLUGIN_ACTION_TOKEN);
     const env = pluginMcpEnvironment(
       { source: nativeActionServer ? 'plugin' : undefined, env: registered },
       callbackEnv ?? {},
     );
     const entries = Object.entries(env ?? {}).map(([name, value]) => ({ name, value }));
-    const materialized = isCatCafeStdioServer(server) && callbackEnv ? mergeCallbackEnv(entries, callbackEnv) : entries;
+    // Only the installed-entrypoint binder below may add callback authority.
+    // A foreign server cannot acquire it by reusing a cat-cafe name prefix.
+    const materialized = entries;
     return {
       ...server,
       env:
-        credentialFileOnly && (isCatCafeStdioServer(server) || nativeActionServer)
+        nativeActionServer && Boolean(env?.CAT_CAFE_CREDENTIAL_FILE || env?.CAT_CAFE_NATIVE_TURN_CREDENTIAL_FILE)
           ? materialized.filter(
               (entry) => entry.name !== 'CAT_CAFE_INVOCATION_ID' && entry.name !== 'CAT_CAFE_CALLBACK_TOKEN',
             )
           : materialized,
     };
   });
-  const proxyEnv = credentialFileOnly
-    ? Object.fromEntries(
-        Object.entries(callbackEnv ?? {}).filter(
-          ([key]) => key !== 'CAT_CAFE_INVOCATION_ID' && key !== 'CAT_CAFE_CALLBACK_TOKEN',
-        ),
-      )
-    : callbackEnv;
-  return resolved.map((server): AcpMcpServerStdio => {
-    const record =
-      'command' in server
-        ? {
-            command: server.command,
-            args: server.args,
-            env: Object.fromEntries(server.env.map(({ name, value }) => [name, value])),
-          }
-        : {
-            url: server.url,
-            headers: Object.fromEntries(server.headers.map(({ name, value }) => [name, value])),
-            transport: server.type,
-          };
-    const guarded = guardMcpConfig(record, proxyEnv, undefined, server.name);
+  const records = Object.fromEntries(
+    resolved.map((server) => {
+      const record =
+        'command' in server
+          ? {
+              command: server.command,
+              args: server.args,
+              env: Object.fromEntries(server.env.map(({ name, value }) => [name, value])),
+            }
+          : {
+              url: server.url,
+              headers: Object.fromEntries(server.headers.map(({ name, value }) => [name, value])),
+              transport: server.type,
+            };
+      return [server.name, bindManagedMcpStdioConfig(record, callbackEnv)];
+    }),
+  );
+  const native = materializeNativeMcpHttp(records, callbackEnv ?? {});
+  return Object.entries(native).map(([name, record]): AcpMcpServer => {
+    if (typeof record.command !== 'string')
+      return {
+        type: record.transport === 'sse' ? 'sse' : 'http',
+        name,
+        url: String(record.url),
+        headers: Object.entries((record.headers ?? {}) as Record<string, string>).map(([name, value]) => ({
+          name,
+          value,
+        })),
+      };
     return {
-      name: server.name,
-      command: String(guarded.command),
-      args: guarded.args as string[],
-      env: Object.entries(guarded.env as Record<string, string>).map(([name, value]) => ({ name, value })),
+      name,
+      command: record.command,
+      args: (record.args ?? []) as string[],
+      env: Object.entries((record.env ?? {}) as Record<string, string>).map(([name, value]) => ({ name, value })),
     };
   });
 }
@@ -152,7 +139,14 @@ export function materializeIcodeSessionMcpServers(
   const droppedStdio: string[] = [];
 
   for (const server of baseServers) {
-    if (isCatCafeStdioServer(server)) {
+    if (
+      'command' in server &&
+      isInstalledManagedMcpServer({
+        command: server.command,
+        args: server.args,
+        env: Object.fromEntries((server.env ?? []).map(({ name, value }) => [name, value])),
+      })
+    ) {
       catCafeBuiltins.push(server.name);
       continue;
     }

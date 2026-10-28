@@ -7,7 +7,6 @@ import toolbarStyles from './artwork-annotation-toolbar.module.css';
 import styles from './image-artwork.module.css';
 import { imageArtworkCopy } from './image-artwork.shell-copy';
 import type { ReviewCanvasMode } from './ReviewCanvasToolbar';
-import { ReviewToolbarIcon } from './ReviewToolbarIcon';
 import type { useArtworkViewport } from './useArtworkViewport';
 
 /** Image actions share the measured canvas; viewport and annotation authority remain with its owner. */
@@ -18,8 +17,6 @@ export function ImageArtworkControls({
   canMarkup,
   onModeChange,
   viewport,
-  src,
-  download,
   discussionCount,
   onOpenDiscussion,
   wholeWorkAction,
@@ -112,23 +109,11 @@ export function ImageArtworkControls({
               </button>
             </div>
           </details>
-          <details className={styles.menu}>
-            <summary aria-label={t.more}>
-              <ReviewToolbarIcon name="more" />
-            </summary>
-            <div className={styles.menuBody}>
-              {wholeWorkAction}
-              <button type="button" aria-label={t.discussionLabel} onClick={onOpenDiscussion}>
-                {t.discussion}
-                {discussionCount ? ` · ${discussionCount}` : ''}
-              </button>
-              {src ? (
-                <a href={download?.src ?? src} download={download?.filename ?? '作品.png'}>
-                  {t.download}
-                </a>
-              ) : null}
-            </div>
-          </details>
+          {wholeWorkAction}
+          <button type="button" aria-label={t.discussionLabel} onClick={onOpenDiscussion}>
+            {t.discussion}
+            {discussionCount ? ` · ${discussionCount}` : ''}
+          </button>
         </div>
       ) : null}
       {floating && toolsSlot ? createPortal(tools, toolsSlot) : tools}

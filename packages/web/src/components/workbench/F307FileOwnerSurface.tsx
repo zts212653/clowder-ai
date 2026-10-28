@@ -57,8 +57,10 @@ function ResolvedFileOwnerSurface({
   onBack,
   onRevealInTree,
   focusMode = false,
+  onOfficeEdit,
 }: {
   surfaceId: string;
+  onOfficeEdit?: () => void;
   target: FileOwnerTarget;
   onRequestDetach: () => void;
   navigationOrigin?: WorkspaceFileNavigationOrigin;
@@ -139,17 +141,6 @@ function ResolvedFileOwnerSurface({
     onReload: refreshFile,
   });
 
-  const revealInFinder = useCallback(
-    async (path: string) => {
-      await apiFetch('/api/workspace/reveal', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ worktreeId: target.worktreeId, path }),
-      }).catch(() => undefined);
-    },
-    [target.worktreeId],
-  );
-
   // Refresh this file in place: unmounting its collaboration surface loses the confirmed result and selection.
   // A different file or a denied read still has no cached preview to show.
   if (error || !file || file.path !== target.path)
@@ -223,8 +214,13 @@ function ResolvedFileOwnerSurface({
         onQuoteSelected={controls?.onQuoteSelected}
         onRequestModification={controls?.onRequestModification}
         modificationDisabled={controls?.modificationDisabled}
-        collaborationAvailable={!controls && !collaborationRefusal && collaborationAvailable}
+        collaborationAvailable={!!onOfficeEdit || (!controls && !collaborationRefusal && collaborationAvailable)}
+        collaborationLabel={onOfficeEdit ? '协作编辑' : undefined}
         onOpenCollaboration={() => {
+          if (onOfficeEdit) {
+            onOfficeEdit();
+            return;
+          }
           promoteWorkspacePreview(surfaceId);
           setCollaborationOpen(true);
         }}
@@ -233,7 +229,6 @@ function ResolvedFileOwnerSurface({
         pendingExternalSha={pendingExternalSha}
         onApplyExternalChange={applyExternalChange}
         onDismissExternalChange={dismissExternalChange}
-        revealInFinder={revealInFinder}
         focusMode={focusMode}
         navigationOrigin={navigationOrigin}
         onBack={onBack}
@@ -276,6 +271,8 @@ export function F307FileOwnerSurface({
   focusMode?: boolean;
 }) {
   const target = resolveFileTarget(surface);
+  const [officeEditing, setOfficeEditing] = useState<string | null>(null);
+  const officeTarget = JSON.stringify([target?.worktreeId, target?.path, surface.rootSelection]);
   if (!target)
     return (
       <div className="flex min-h-0 flex-1 flex-col">
@@ -309,18 +306,24 @@ export function F307FileOwnerSurface({
       : onReturnToNavigationOrigin
         ? onReturnToNavigationOrigin(surface.navigationOrigin ?? { kind: 'file-tree' })
         : onRequestDetach();
-  if (/\.docx$/i.test(target.path) && surface.navigationOrigin?.kind !== 'chat-file-link')
+  if (/\.docx$/i.test(target.path) && officeEditing === officeTarget)
     return (
       <WorkspaceOfficeSurface
         key={`${target.worktreeId}:${target.path}`}
         worktreeId={target.worktreeId}
         path={target.path}
-        navigationOrigin={surface.navigationOrigin}
-        onBack={onBack}
+        navigationOrigin={{
+          kind: 'workspace-document',
+          worktreeId: target.worktreeId,
+          path: target.path,
+          line: target.scrollToLine ?? 1,
+        }}
+        onBack={() => setOfficeEditing(null)}
       />
     );
   return (
     <ResolvedFileOwnerSurface
+      onOfficeEdit={/\.docx$/i.test(target.path) ? () => setOfficeEditing(officeTarget) : undefined}
       surfaceId={surface.id}
       key={`${target.worktreeId}:${target.path}`}
       target={target}

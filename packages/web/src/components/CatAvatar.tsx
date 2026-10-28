@@ -2,6 +2,7 @@
 
 import { type ReactNode, useState } from 'react';
 import { useCatData } from '@/hooks/useCatData';
+import { isCanonicalAvatarUrl, resolveAvatarUrl } from '@/lib/avatar-url';
 import { resolveCatDisplayName } from '@/lib/cat-display-name';
 import { hexToRgba } from '@/lib/color-utils';
 import { PawIcon } from './icons/PawIcon';
@@ -59,7 +60,7 @@ export function CatAvatar({
   const { getCatById } = useCatData();
   const cat = getCatById(catId);
   const catName = resolveCatDisplayName(catId, getCatById);
-  const avatarSrc = cat?.avatar || '/avatars/default.png';
+  const avatarSrc = resolveAvatarUrl(cat?.avatar || '/avatars/default.png');
   const imgError = failedAvatarSrc === avatarSrc;
 
   const isStreaming = status === 'streaming';
@@ -96,7 +97,13 @@ export function CatAvatar({
         }}
       >
         {imgError ? (
-          <PawIcon className="text-base" />
+          isCanonicalAvatarUrl(avatarSrc) ? (
+            <span role="img" aria-label="这张图打不开了" title="这张图打不开了">
+              —
+            </span>
+          ) : (
+            <PawIcon className="text-base" />
+          )
         ) : (
           // eslint-disable-next-line @next/next/no-img-element
           <img

@@ -1,5 +1,4 @@
 import assert from 'node:assert/strict';
-import { channel } from 'node:diagnostics_channel';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -104,33 +103,34 @@ for (const reason of ['AbortError', 'TimeoutError'])
     assert.doesNotMatch(JSON.stringify(snapshots), /secret-body|柚子|SELECT|bindings/);
   });
 
-// Existing production inputs: this RED enters native SQLite without a new observer option.
-test('native deadline already carries the last SQL but must also preserve CJK progress', async (t) => {
+test('a checkpoint-triggered native deadline retains its observed SQL and CJK progress', async (t) => {
   const { store } = await fixture(t, 16000, true);
   const control = new AbortController();
-  const events = channel('cat-cafe.memory-process');
-  let cancel;
-  const listener = (e) => {
-    if (e.kind === 'message-search' && !cancel)
-      cancel = setTimeout(() => control.abort(new DOMException('controlled native deadline', 'TimeoutError')), 50);
-  };
-  events.subscribe(listener);
-  t.after(() => {
-    events.unsubscribe(listener);
-    clearTimeout(cancel);
-  });
+  let observed;
   await assert.rejects(
     store.searchMessagePassages('柚子', {
       mode: 'lexical',
       sort: 'time',
       visibleThreadIds: ['neutral'],
       signal: control.signal,
+      // A fail-safe only: reaching it without the real checkpoint must fail the assertions below.
+      deadlineAt: Date.now() + 8000,
+      onReadSnapshot(snapshot) {
+        if (snapshot.cjk?.outcome !== 'running' || control.signal.aborted) return;
+        observed = snapshot;
+        control.abort(new DOMException('controlled native deadline', 'TimeoutError'));
+      },
     }),
     (error) => {
       assert.equal(error, control.signal.reason);
+      assert.ok(observed, 'cancellation must follow an actual CJK checkpoint, not elapsed wall time');
+      assert.ok(observed.cjk.bodyVisits >= 256);
+      assert.equal(error.memoryProcess.pid, observed.pid);
       assert.equal(error.memoryProcess.lastObservedSql.event, 'sql-start');
       assert.ok(error.memoryProcess.lastObservedSql.caller.some((s) => s.includes('message-passage-lexical')));
-      assert.ok(error.memoryProcess.cjk?.bodyVisits > 0, 'real native cancellation must retain bounded CJK progress');
+      assert.deepEqual(error.memoryProcess.cjk, observed.cjk);
+      assert.equal(error.memoryProcess.cjk.complete, false);
+      assert.equal(error.memoryProcess.cjk.returnedRows, null);
       return true;
     },
   );

@@ -173,4 +173,49 @@ describe('useHostWorldDirectory', () => {
       host.postMessage.mock.calls.filter(([message]) => message.type === 'collective:world-directory-ready'),
     ).toHaveLength(2);
   });
+
+  it('re-handshakes as session-required after switching accounts so the Host cannot keep the old Human directory', async () => {
+    await act(async () => root.render(<Harness selectCollective={vi.fn()} />));
+    await act(async () => {
+      window.dispatchEvent(
+        new MessageEvent('message', {
+          origin: 'http://localhost:3000',
+          source: host as unknown as MessageEventSource,
+          data: { type: 'collective:host-world-directory-init', bridgeId: 'bridge_oldhuman' },
+        }),
+      );
+    });
+    expect(host.postMessage.mock.calls.at(-1)?.[0]).toMatchObject({ state: 'ready', humanId: 'human_12345678' });
+
+    await act(async () =>
+      root.render(
+        <Harness
+          currentSnapshot={{ ...snapshot, phase: 'entry', me: undefined, collective: undefined }}
+          selectCollective={vi.fn()}
+        />,
+      ),
+    );
+    expect(
+      host.postMessage.mock.calls.filter(([message]) => message.type === 'collective:world-directory-ready'),
+    ).toHaveLength(2);
+
+    await act(async () => {
+      window.dispatchEvent(
+        new MessageEvent('message', {
+          origin: 'http://localhost:3000',
+          source: host as unknown as MessageEventSource,
+          data: { type: 'collective:host-world-directory-init', bridgeId: 'bridge_anonymous' },
+        }),
+      );
+    });
+    const projection = host.postMessage.mock.calls.at(-1)?.[0];
+    expect(projection).toMatchObject({
+      type: 'collective:client-world-directory',
+      bridgeId: 'bridge_anonymous',
+      state: 'session_required',
+      serviceInstanceId: 'svc_12345678',
+    });
+    expect(projection).not.toHaveProperty('humanId');
+    expect(projection).not.toHaveProperty('memberships');
+  });
 });

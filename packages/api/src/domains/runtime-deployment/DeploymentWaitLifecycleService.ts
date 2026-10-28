@@ -150,6 +150,11 @@ export class DeploymentWaitLifecycleService {
 
   async recoverOutcome(taskId: string): Promise<DeploymentWaitLifecycleResult> {
     const task = await this.opts.taskStore.get(taskId);
+    // Audit survives a committed owner removal or terminal Task write; it never authorizes a wake.
+    if (task?.kind === 'work' && task.userId && task.deploymentWait?.waitOutcome?.delivery === 'not_applicable') {
+      await this.appendLifecycleEvent(task, task.deploymentWait.waitOutcome);
+      return { kind: 'state_only', reason: task.deploymentWait.waitOutcome.reason };
+    }
     if (!isDeploymentWaitTask(task)) return { kind: 'not_tracked', reason: 'task_missing_or_unowned' };
     const claim = task.deploymentWait?.currentExecutionClaim;
     if (claim) {
@@ -183,6 +188,13 @@ export class DeploymentWaitLifecycleService {
 
   async taskCompleted(taskId: string): Promise<DeploymentWaitLifecycleResult> {
     return this.terminalize(taskId, 'subject_terminal', { kind: 'system' });
+  }
+
+  /** Post-commit projection only: the Task aggregate already consumed its wait and chose the status. */
+  async recordTaskMutationOutcome(task: TaskItem): Promise<void> {
+    const outcome = task.deploymentWait?.waitOutcome;
+    if (task.kind === 'work' && task.userId && outcome?.delivery === 'not_applicable')
+      await this.appendLifecycleEvent(task, outcome);
   }
 
   async releaseCurrentExecutionClaim(
@@ -238,7 +250,23 @@ export class DeploymentWaitLifecycleService {
   private async appendLifecycleEvent(task: TaskItem, outcome: DeploymentWaitOutcomeV1): Promise<void> {
     if (!this.opts.eventLog) return;
     try {
-      await this.opts.eventLog.append(lifecycleEvent(task, outcome));
+      const event = lifecycleEvent(task, outcome);
+      if (outcome.reason === 'owner_changed' || outcome.reason === 'subject_terminal') {
+        const snapshot = await this.opts.taskStore.getWaitRegistration(task.id);
+        const receipt = snapshot?.receipt;
+        if (
+          receipt?.proofKind === 'deployment_predicate' &&
+          receipt.taskId === task.id &&
+          receipt.userId === task.userId &&
+          receipt.subjectRef === outcome.subjectRef &&
+          receipt.generation === outcome.generation
+        ) {
+          event.ownerUserId = receipt.userId;
+          event.ownerCatId = receipt.catId;
+          event.threadId = receipt.threadId;
+        }
+      }
+      await this.opts.eventLog.append(event);
     } catch (error) {
       this.opts.log.warn({ error, taskId: task.id }, '[F323] deployment wait event append deferred');
     }

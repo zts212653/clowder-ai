@@ -4,6 +4,7 @@ import {
   updateProfileOpeningReference,
 } from '@cat-cafe/shared/profile-opening-reference';
 import { useState } from 'react';
+import { formatModelName } from '@/lib/model-display-name';
 import type { MemoryOwnerActionState } from './use-memory-owner-action';
 
 export function MemoryProfileOpening({
@@ -61,7 +62,7 @@ export function MemoryProfileOpening({
           </label>
           {draft.excerpts.map((item, index) => (
             <label key={`${item.source.threadId}:${item.source.messageId}:${index}`} className="block text-compact">
-              {item.kind === 'relationship' ? '陪伴与关系' : `历史能力判断 · ${item.model}`}
+              {item.kind === 'relationship' ? '陪伴与关系' : `历史能力判断 · ${formatModelName(item.model)}`}
               <textarea
                 aria-label={`开场参考 ${index + 1}`}
                 value={item.text}
@@ -107,7 +108,7 @@ export function MemoryProfileOpening({
           {reference.excerpts.map((item, index) => (
             <div key={`${item.source.threadId}:${item.source.messageId}:${index}`} className="space-y-1">
               <h5 className="text-compact font-medium">
-                {item.kind === 'relationship' ? '陪伴与关系' : `历史能力判断 · ${item.model}`}
+                {item.kind === 'relationship' ? '陪伴与关系' : `历史能力判断 · ${formatModelName(item.model)}`}
               </h5>
               <p className="whitespace-pre-wrap break-words text-sm leading-relaxed">{item.text}</p>
             </div>

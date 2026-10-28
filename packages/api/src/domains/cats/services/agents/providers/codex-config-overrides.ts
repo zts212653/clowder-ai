@@ -1,5 +1,43 @@
 import { parse as parseToml } from 'smol-toml';
-import { guardMcpConfig } from '../../../../../config/capabilities/secret-mcp-config.js';
+import {
+  bindManagedMcpStdioConfig,
+  materializeNativeMcpHttp,
+} from '../../../../../config/capabilities/managed-mcp-config.js';
+
+/** Native headers belong to the private thread RPC, never the CLI assignment. */
+export function codexNativeMcpThreadConfig(
+  args: readonly string[],
+  callback: Record<string, string>,
+): Record<string, unknown> {
+  const config = codexConfigObjectFromArgs(args);
+  const servers = isCodexConfigObject(config.mcp_servers) ? config.mcp_servers : {};
+  const records = Object.fromEntries(
+    Object.entries(servers).filter(([, server]) => isCodexConfigObject(server)),
+  ) as Record<string, Record<string, unknown>>;
+  const native = materializeNativeMcpHttp(records, callback);
+  return {
+    mcp_servers: Object.fromEntries(
+      Object.entries(native).map(([name, server]) => {
+        if (server.type !== 'http') return [name, server];
+        const { type: _type, headers, ...rest } = server;
+        return [name, { ...rest, ...(headers ? { http_headers: headers } : {}) }];
+      }),
+    ),
+  };
+}
+
+/** Remove only generated MCP assignments after transferring them to private RPC. */
+export function withoutCodexMcpAssignments(args: readonly string[]): string[] {
+  const result: string[] = [];
+  for (let i = 0; i < args.length; i++) {
+    if ((args[i] === '--config' || args[i] === '-c') && /^mcp_servers(?:\.|=)/.test(args[i + 1] ?? '')) {
+      i++;
+      continue;
+    }
+    result.push(args[i]!);
+  }
+  return result;
+}
 
 /** Convert generated CLI assignments into the same config used by app-server. */
 export function codexConfigObjectFromArgs(args: readonly string[]): Record<string, unknown> {
@@ -44,10 +82,10 @@ export function isCodexConfigObject(value: unknown): value is Record<string, unk
  * Bare-name configurations retain their existing override form and precedence.
  */
 export function codexMcpConfigArgs(args: readonly string[], callbackEnv: Record<string, string> = {}): string[] {
-  return transformCodexMcpConfig(args, (server, name) => guardMcpConfig(server, callbackEnv, undefined, name));
+  return transformCodexMcpConfig(args, (server) => bindManagedMcpStdioConfig(server, callbackEnv));
 }
 
-/** A private plugin launch already guards its transport inside the credential-file wrapper. */
+/** Normalize the direct private plugin launch without altering its transport. */
 export function normalizeCodexMcpConfigArgs(args: readonly string[]): string[] {
   return transformCodexMcpConfig(args, (server) => server);
 }
@@ -72,7 +110,7 @@ function transformCodexMcpConfig(
     index++;
   }
   const servers = isCodexConfigObject(config.mcp_servers) ? config.mcp_servers : {};
-  const guarded = Object.fromEntries(
+  const bound = Object.fromEntries(
     Object.entries(servers).map(([name, server]) => [
       name,
       isCodexConfigObject(server) ? transform(server, name) : server,
@@ -80,10 +118,10 @@ function transformCodexMcpConfig(
   );
   if (
     !args.some((arg) => arg.startsWith('mcp_servers."')) &&
-    Object.entries(servers).every(([name, server]) => guarded[name] === server)
+    Object.entries(servers).every(([name, server]) => bound[name] === server)
   )
     return [...args];
-  return [...retained, '--config', `mcp_servers=${inlineToml(guarded)}`];
+  return [...retained, '--config', `mcp_servers=${inlineToml(bound)}`];
 }
 
 function inlineToml(value: unknown): string {

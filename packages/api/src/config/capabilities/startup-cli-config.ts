@@ -1,6 +1,7 @@
 import { statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
+import { createModuleLogger } from '../../infrastructure/logger.js';
 import { findMonorepoRoot } from '../../utils/monorepo-root.js';
 import {
   type CliConfigPaths,
@@ -10,7 +11,10 @@ import {
   withCapabilityLock,
   writeCapabilitiesConfig,
 } from './capability-orchestrator.js';
+import { migrateOwnedCodexProjectMcp } from './codex-managed-mcp-migration.js';
 import { isSameCapabilityRoot, resolveDeclaredCapabilityRoot } from './invoke-capability-root.js';
+
+const log = createModuleLogger('startup-cli-config');
 
 export interface StartupCliConfigContext {
   projectRoot: string;
@@ -56,6 +60,28 @@ export function allowsImplicitCapabilityWrites(env: NodeJS.ProcessEnv, binaryRoo
   }
 }
 
+/** Attempt migration before admitting turns; a user CLI file cannot take the Host offline. */
+export async function migrateStartupCodexMcpConfig(
+  start = process.cwd(),
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<string[]> {
+  const binaryRoot = findMonorepoRoot(start);
+  if (!allowsImplicitCapabilityWrites(env, binaryRoot)) return [];
+  const { projectRoot } = resolveStartupCliConfigContext(start, env);
+  try {
+    return await withCapabilityLock(projectRoot, () =>
+      migrateOwnedCodexProjectMcp(projectRoot, [projectRoot, env.CAT_CAFE_RUNTIME_ROOT?.trim() || binaryRoot]),
+    );
+  } catch {
+    // Parser diagnostics can quote private TOML contents. Report only the path.
+    log.warn(
+      { path: join(projectRoot, '.codex/config.toml') },
+      'Codex MCP migration skipped; inspect this file. Managed turns with legacy tables use direct stdio.',
+    );
+    return [];
+  }
+}
+
 export async function regenerateStartupCliConfigs(
   start = process.cwd(),
   env: NodeJS.ProcessEnv = process.env,
@@ -66,6 +92,7 @@ export async function regenerateStartupCliConfigs(
   if (!allowsImplicitCapabilityWrites(env, findMonorepoRoot(start))) {
     return { projectRoot, generated: false, healed: false };
   }
+  await migrateStartupCodexMcpConfig(start, env);
   return withCapabilityLock(projectRoot, async () => {
     let config = await readCapabilitiesConfig(projectRoot);
     // An explicitly empty registry is a user choice. Only the first-run owner

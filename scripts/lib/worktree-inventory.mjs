@@ -19,7 +19,18 @@ function noticeFor(row, repo) {
   } catch {
     return undefined;
   }
-  const revision = JSON.stringify([repo, row.path, row.head, row.owner, row.lifecycle.retention]);
+  // One reminder per retained intent and condition, rather than per newer checkout HEAD.
+  // Expiry is a distinct event even if a version-change reminder was already delivered.
+  const revision = JSON.stringify([
+    2,
+    repo,
+    row.path,
+    status,
+    row.owner,
+    origin.threadId,
+    origin.userId,
+    row.lifecycle.retention,
+  ]);
   return {
     kind: status,
     key: `worktree:${createHash('sha256').update(revision).digest('hex')}`,
@@ -44,7 +55,11 @@ export function worktreeInventory(repo, { now = Date.now() } = {}) {
   return records
     .filter((r) => {
       const path = safeRealpath(r.path);
-      return path !== primary && !isProtected(basename(path)) && !path.startsWith(`${quarantine}/`);
+      return (
+        path !== primary &&
+        !isProtected(basename(path), undefined, basename(primary)) &&
+        !path.startsWith(`${quarantine}/`)
+      );
     })
     .map((r) => {
       const path = safeRealpath(r.path);

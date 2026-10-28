@@ -7,6 +7,7 @@ import {
   previewCleanupExitCode,
   readCleanupOwnerResult,
 } from './lib/preview-cleanup-result.mjs';
+import { previewCommandGroupStatus, recordPreviewCommand } from './lib/preview-command-identity.mjs';
 import { processGroupExists, waitForProcessGroupExit } from './lib/preview-process-runtime.mjs';
 
 // start-dev drains application children for eight seconds before saving Redis.
@@ -81,6 +82,8 @@ async function main() {
     },
   });
   let shutdownPromise;
+  let commandIdentity;
+  let identityError;
   const shutdown = (reason) => (shutdownPromise ??= terminate(child, reason));
   for (const signal of ['SIGINT', 'SIGTERM']) {
     process.on(signal, () => {
@@ -94,8 +97,22 @@ async function main() {
     Math.max(0, expiresAt - Date.now()),
   );
   const outcome = await new Promise((resolveExit) => {
+    // Install exit/error listeners before synchronous identity observation.
     child.once('exit', (exitCode, exitSignal) => resolveExit({ code: exitCode, signal: exitSignal }));
     child.once('error', (error) => resolveExit({ error }));
+    if (completionPath && process.platform !== 'win32') {
+      try {
+        commandIdentity = recordPreviewCommand({
+          completionPath,
+          expiresAt: new Date(expiresAt).toISOString(),
+          command,
+          childPid: child.pid,
+        });
+      } catch (error) {
+        identityError = error;
+        void shutdown('command identity could not be persisted');
+      }
+    }
   });
   clearTimeout(expiryTimer);
   if (outcome.error) {
@@ -108,24 +125,32 @@ async function main() {
   if (!shutdownPromise && descendantsRemain) shutdown('preview command exited');
   const graceful = shutdownPromise ? await shutdownPromise : true;
   const owner = readCleanupOwnerResult(ownerResultPath, child.pid);
-  const exitCode = previewCleanupExitCode({
-    outcome,
-    graceful,
-    owner,
-    descendantsRemain,
-    shutdownRequested,
-    requireOwnerResult: Boolean(completionPath),
-  });
+  const exitCode = identityError
+    ? 1
+    : previewCleanupExitCode({
+        outcome,
+        graceful,
+        owner,
+        descendantsRemain,
+        shutdownRequested,
+        requireOwnerResult: Boolean(completionPath),
+      });
   if (completionPath) {
     const temporaryPath = `${completionPath}.${process.pid}.tmp`;
     writeFileSync(
       temporaryPath,
       JSON.stringify({
+        version: 2,
         pid: process.pid,
         expiresAt: new Date(expiresAt).toISOString(),
         exitCode,
+        commandExitCode: owner.version === 2 ? owner.commandExitCode : (outcome.code ?? null),
+        runnerExitCode: outcome.code ?? null,
+        cleanupExitCode: graceful && owner.status === 'complete' ? owner.cleanupExitCode : null,
         forced: !graceful,
         cleanupOwnerStatus: owner.status,
+        commandIdentity: commandIdentity ? { path: commandIdentity.path, sha256: commandIdentity.sha256 } : null,
+        commandGroupStatus: previewCommandGroupStatus(commandIdentity),
         completedAt: new Date().toISOString(),
       }),
       { mode: 0o600 },

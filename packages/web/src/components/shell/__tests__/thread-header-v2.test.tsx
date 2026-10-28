@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const data = vi.hoisted(() => ({
   mode: vi.fn(),
-  tasks: [] as { status: string }[],
+  tasks: [] as { status: string; kind: string; threadId: string }[],
   threadId: 'thread-current',
   readWorks: vi.fn(),
   works: { total: null as number | null, complete: false, loading: true, error: false },
@@ -61,13 +61,17 @@ describe('F322 thread-scoped header facts', () => {
     delete (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT;
   });
   it('counts only unfinished tasks; works does not invent a number; actions retain original modes', () => {
-    data.tasks = ['todo', 'doing', 'blocked', 'done', 'done'].map((status) => ({ status }));
+    data.tasks = ['todo', 'doing', 'blocked', 'done', 'done'].map((status) => ({
+      status,
+      kind: 'work',
+      threadId: 'thread-current',
+    }));
     render();
     const tasks = host.querySelector<HTMLButtonElement>('[data-testid="header-tasks"]');
     const works = host.querySelector<HTMLButtonElement>('[data-testid="header-works"]');
     if (!tasks || !works) throw new Error('Thread header actions are missing');
-    expect(tasks.textContent).toBe('任务3');
-    expect(tasks.getAttribute('aria-label')).toBe('任务 3，这条对话的任务');
+    expect(tasks.textContent).toBe('毛线球3');
+    expect(tasks.getAttribute('aria-label')).toBe('毛线球 3，这条对话的毛线球');
     expect(works.textContent).toBe('作品');
     expect(works.getAttribute('aria-label')).not.toMatch(/\d/);
     act(() => {
@@ -77,10 +81,10 @@ describe('F322 thread-scoped header facts', () => {
     expect(data.mode.mock.calls).toEqual([['tasks'], ['artifacts']]);
     expect(host.querySelector('[title]')).toBeNull();
   });
-  it('all-done or unread initial tasks do not claim a numeric zero', () => {
-    data.tasks = [{ status: 'done' }];
+  it('all-done tasks show zero open; unread initial tasks remain unnumbered', () => {
+    data.tasks = [{ status: 'done', kind: 'work', threadId: 'thread-current' }];
     render();
-    expect(host.querySelector('[data-testid="header-tasks"]')?.textContent).toBe('任务');
+    expect(host.querySelector('[data-testid="header-tasks"]')?.textContent).toBe('毛线球0');
   });
   it('uses the original works catalogue total rather than the displayed row count', () => {
     data.works = { total: 774, complete: true, loading: false, error: false };
@@ -113,7 +117,10 @@ describe('F322 thread-scoped header facts', () => {
     expect(host.querySelector('[data-testid="header-works"]')?.textContent).toBe('作品1');
   });
   it('switches both labels and accessible descriptions to English without changing counts or destinations', () => {
-    data.tasks = [{ status: 'doing' }, { status: 'done' }];
+    data.tasks = [
+      { status: 'doing', kind: 'work', threadId: 'thread-current' },
+      { status: 'done', kind: 'work', threadId: 'thread-current' },
+    ];
     render();
     act(() => writeShellLanguage('en'));
     const works = host.querySelector<HTMLButtonElement>('[data-testid="header-works"]');

@@ -85,6 +85,8 @@ const READ_OPERATIONS = new Set([
   'help',
   'version',
   'completion',
+  'auth:token',
+  'auth:status',
   'pr:view',
   'pr:list',
   'pr:checks',

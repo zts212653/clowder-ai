@@ -215,6 +215,8 @@ export interface AcpSessionUpdate {
 export type AcpMcpServer = AcpMcpServerStdio | AcpMcpServerHttp | AcpMcpServerSse;
 
 export interface AcpMcpServerStdio {
+  /** Host provenance; removed by materialization before the native RPC. */
+  hostSource?: 'plugin';
   name: string;
   command: string;
   args: string[];

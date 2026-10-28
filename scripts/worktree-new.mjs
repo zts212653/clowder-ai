@@ -12,16 +12,15 @@
  * requires extensions.worktreeConfig) or, for a standalone clone, its `--local` config — never the shared
  * repository config.
  *
- * Order: validate everything (declaration, worktreeConfig, base) → capacity gate (at the cap: refuse and
- * name the holders; creation never moves anyone's directory) → `git worktree add` → declaration; if the
+ * Order: validate everything (declaration, worktreeConfig, base) → `git worktree add` → declaration; if the
  * declaration fails, the new worktree and branch are removed again so nothing half-created is left behind.
  */
 import { fileURLToPath } from 'node:url';
 import { deferredMedia, initializeLightCheckout } from './lib/worktree-light.mjs';
 import { originFromEnvironment, validateOrigin } from './lib/worktree-origin.mjs';
-import { DEFAULT_POLICY, LIFECYCLE_POLICIES } from './lib/worktree-reaper-core.mjs';
+import { LIFECYCLE_POLICIES } from './lib/worktree-reaper-core.mjs';
 import { checkoutKind, git } from './lib/worktree-reaper-probes.mjs';
-import { capacityHolders, checkCapacity, mainRepoFrom } from './worktree-reaper.mjs';
+import { mainRepoFrom } from './worktree-reaper.mjs';
 
 function flag(args, name) {
   const i = args.indexOf(name);
@@ -67,33 +66,7 @@ export function declareLifecycle(dir, { owner, policy, ttlDays, now = Date.now()
   if (policy === 'ttl') set('expiresAt', new Date(now + ttlDays * 86_400_000).toISOString());
 }
 
-/**
- * At the cap, refuse and say who holds the slots. Creation never moves or deletes anything — not even
- * directories whose owners' declarations already release them: quarantine stays an explicit
- * `pnpm worktree:reap --apply`, run by whoever is authorised to (review round 2).
- */
-function ensureCapacity({ repo, max, parentDir }) {
-  const cap = checkCapacity({ repo, parentDir, max });
-  if (!cap.over) return;
-  const byOwner = new Map();
-  for (const h of capacityHolders({ repo, parentDir }).active) {
-    const name = h.retentionStatus ? `${h.name} [${h.retentionStatus} until=${h.retainedUntil ?? 'unknown'}]` : h.name;
-    byOwner.set(h.owner, [...(byOwner.get(h.owner) ?? []), name]);
-  }
-  const holders = [...byOwner]
-    .sort((a, b) => b[1].length - a[1].length)
-    .map(([owner, names]) => `  ${owner}: ${names.length} (${names.join(', ')})`)
-    .join('\n');
-  const err = new Error(
-    `capacity: ${cap.count}/${cap.max} active declared worktrees. Holders:\n${holders}\n` +
-      'Next: use worktree:finish for one of your own; for the rest ask the listed owner in their thread. ' +
-      '`pnpm worktree:reap` (dry-run) shows which ones their owners already released. Nothing was created or moved.',
-  );
-  err.exitCode = 2;
-  throw err;
-}
-
-/** Validate → capacity → `git worktree add` → declaration (rolled back if it fails). */
+/** Validate → `git worktree add` → declaration (rolled back if it fails). No numeric veto or cleanup. */
 export function createWorktree({
   repo,
   path,
@@ -102,9 +75,7 @@ export function createWorktree({
   owner,
   policy = 'merged',
   ttlDays,
-  max = DEFAULT_POLICY.maxWorktrees,
   now,
-  parentDir,
   full = false,
   declare = declareLifecycle,
   origin,
@@ -117,7 +88,6 @@ export function createWorktree({
   if (!git(repo, ['rev-parse', '--verify', '--quiet', `${base}^{commit}`]).ok) {
     throw new Error(`invalid --base ${base}: not a commit in this repository (fetch it first?)`);
   }
-  ensureCapacity({ repo, max, parentDir });
   const deferred = full ? null : deferredMedia(repo, base);
   mustGit(
     repo,

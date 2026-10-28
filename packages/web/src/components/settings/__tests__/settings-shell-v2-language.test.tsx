@@ -71,12 +71,15 @@ describe('F322 设置与管理 catalogue in both languages', () => {
     expect(host.querySelector('button[aria-label="固定「主题」到窄栏"]')).not.toBeNull();
   });
 
-  it('reads the approved English names once the language is English, with the same eleven entries', () => {
+  it('reads the approved English names with You before the eleven existing entries', () => {
     writeShellLanguage('en');
     render('s=theme');
     expect(host.querySelector('h1')?.textContent).toBe('Settings');
     expect(host.querySelector('nav[aria-label="Settings"]')).not.toBeNull();
-    expect(host.querySelectorAll('[data-testid^="settings-entry-"]')).toHaveLength(11);
+    const entries = host.querySelectorAll('[data-testid^="settings-entry-"]');
+    expect(entries).toHaveLength(12);
+    expect(entries[0]?.getAttribute('data-testid')).toBe('settings-entry-you');
+    expect(entryText('you')).toMatch(/You$/);
     expect(
       [
         'team',

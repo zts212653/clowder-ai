@@ -3,6 +3,8 @@ import { describe, test } from 'node:test';
 import './helpers/setup-cat-registry.js';
 import { canonicalizeActionTerminalPredicate } from '../dist/domains/ball-custody/ActionTerminalPredicateCatalog.js';
 import { ActionSuccessorKeys } from '../dist/domains/ball-custody/action-successor-keys.js';
+import { InvocationTracker } from '../dist/domains/cats/services/agents/invocation/InvocationTracker.js';
+import { QueueProcessor } from '../dist/domains/cats/services/agents/invocation/QueueProcessor.js';
 import { RedisProposalStore } from '../dist/domains/cats/services/stores/redis/RedisProposalStore.js';
 import { approvedTaskFixture, OWNER, TARGET, USER } from './helpers/approved-task-contract-fixture.js';
 import { redisIsolationSkipReason } from './helpers/redis-test-helpers.js';
@@ -118,7 +120,7 @@ describe('approved Task continuation boundaries', { skip: redisIsolationSkipReas
     assert.deepEqual(await f.delegates.getForTask(f.task.id, f.source.id, OWNER, USER, undefined, f.task.title), []);
   });
 
-  test('revocation between standing resolution and lease commit creates no lease or carrier', async (t) => {
+  test('revocation at native Task commit refuses the request and restart retires its original queued source', async (t) => {
     const f = await approvedTaskFixture(t);
     assert.equal((await f.continueTask()).statusCode, 200);
     const duplicate = f.redis.duplicate.bind(f.redis);
@@ -132,7 +134,7 @@ describe('approved Task continuation boundaries', { skip: redisIsolationSkipReas
         transaction.exec = async (...execArgs) => {
           if (!changed) {
             changed = true;
-            await f.redis.hset(`task:${f.task.id}`, 'title', 'Changed at lease CAS');
+            await f.redis.hset(`task:${f.task.id}`, 'title', 'Changed at native Task CAS');
           }
           return exec(...execArgs);
         };
@@ -141,10 +143,50 @@ describe('approved Task continuation boundaries', { skip: redisIsolationSkipReas
       return session;
     };
     const rejected = await f.implement();
-    assert.notEqual(rejected.statusCode, 200, rejected.body);
+    assert.equal(changed, true, 'the barrier must reach the actual Task commit');
+    assert.equal(rejected.statusCode, 409, rejected.body);
     assert.equal((await f.leases.listActiveTaskLeases()).length, 0);
+    const sourceId = rejected.json().messageId;
+    assert.ok(sourceId, 'Message-first recovery keeps the refused request as durable evidence');
+    assert.equal((await f.tasks.get(f.task.id)).lastAppliedHandoffMessageRef, undefined);
+    let writers = 0;
+    const processor = new QueueProcessor({
+      queue: f.queue,
+      messageStore: f.messages,
+      taskStore: f.tasks,
+      turnExecutionStore: f.turns,
+      ordinaryTaskHandoffs: f.handoffs,
+      invocationTracker: new InvocationTracker(),
+      invocationRecordStore: {},
+      router: {
+        async resolveExplicitTargets(targets) {
+          return targets;
+        },
+        async resolveConversationTargetsAtAdmission(targets) {
+          return targets;
+        },
+        async ackCollectedCursors() {},
+        async *routeExecution() {
+          writers++;
+          throw new Error('revoked work must never execute');
+        },
+      },
+      socketManager: { broadcastAgentMessage() {}, broadcastToRoom() {}, emitToUser() {} },
+      log: { info() {}, warn() {}, error() {} },
+    });
+    await processor.processNext(f.childId, USER);
+    assert.equal(writers, 0);
+    assert.equal(
+      (await f.messages.getById(sourceId)).id,
+      sourceId,
+      'the original source stays readable as audit evidence',
+    );
     assert.equal((await f.queue.listAllDurable(f.childId)).length, 0);
-    assert.equal((await f.messages.getByThreadAfter(f.childId, undefined, undefined, USER)).length, 2);
+    assert.equal(
+      (await f.messages.getByThreadAfter(f.childId, undefined, undefined, USER)).length,
+      3,
+      'the refused original source is retained',
+    );
   });
 
   test('incomplete future generic approvals reject before claiming or creating a child', async (t) => {

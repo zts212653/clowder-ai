@@ -46,11 +46,13 @@ export async function activateDeclaredMcp(
     for (const contribution of contributions) {
       const entry = await mcpCapability(admission, host, packageRoot, contribution);
       const server = entry.mcpServer;
+      const { mcpServer: _launch, mcpServerOverride: _override, ...installationPolicy } = entry;
       // Copy before passing the entry to mutable configuration I/O. This is the
       // exact verified activation descriptor, not a later capabilities lookup.
       launches.push(
         Object.freeze({
           contributionId: contribution.id,
+          installationPolicy: Object.freeze(installationPolicy),
           server: Object.freeze({
             name: entry.id.replaceAll(':', '__'),
             command: server.command,

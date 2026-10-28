@@ -10,6 +10,7 @@ export function ProposalChoice({
   onChange,
   disabled,
   notice,
+  triggerLabel,
 }: {
   id?: string;
   label: string;
@@ -18,6 +19,7 @@ export function ProposalChoice({
   onChange: (value: string) => void;
   disabled: boolean;
   notice?: ReactNode;
+  triggerLabel?: string;
 }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
@@ -53,7 +55,7 @@ export function ProposalChoice({
         className={styles.select}
         onClick={() => setOpen(!open)}
       >
-        {options.find((option) => option.value === value)?.label ?? label} <span aria-hidden>⌄</span>
+        {triggerLabel ?? options.find((option) => option.value === value)?.label ?? label} <span aria-hidden>⌄</span>
       </button>
       {open ? (
         <div

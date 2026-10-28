@@ -42,11 +42,14 @@ import {
   localReviewGitRevisionSchema,
   MessageBundleCarrierV1Schema,
   MessageContentsSchema,
+  messageSearchAnswerBindingSchema,
+  parseCodexStartupRecovery,
   readMessageOutputLayout,
   routingPreflightReceiptV1Schema,
   writeOpportunityPresentationRetryCarrierV1Schema,
   writeOpportunityReentryCarrierV1Schema,
 } from '@cat-cafe/shared';
+import { ordinaryTaskHandoffRequestSchema } from '../../../../ball-custody/OrdinaryTaskHandoffContract.js';
 import { parsePersistedPluginMessageExtra } from '../../../../messaging/envelope.js';
 import { MAX_PERSISTED_SUBEXECUTION_EVENTS, type MessageMetadata } from '../../types.js';
 import { liveResultNoticeSchema, liveReturnProjectionSchema } from '../live-result-carriers.js';
@@ -249,6 +252,9 @@ type ExtraCarrierPersistenceClassification<
  * Every StoredMessage.extra key must be classified when it is introduced.
  */
 type ExtraCarrierPersistence = ExtraCarrierPersistenceClassification<{
+  taskHandoff: 'parsed';
+  taskHandoffInvalid: 'derived';
+  taskAssignmentRequestDigest: 'parsed';
   collectiveOwnerAdmissionV1: 'parsed';
   collectiveAuthorizationInvalid: 'derived';
   outputLayout: 'parsed';
@@ -264,6 +270,7 @@ type ExtraCarrierPersistence = ExtraCarrierPersistenceClassification<{
   liveAdmission: 'parsed';
   routingTargetSource: 'parsed';
   rich: 'parsed';
+  messageSearchAnswer: 'parsed';
   callbackRichRequestDigest: 'parsed';
   isExplicitPost: 'parsed';
   mediaPublication: 'parsed';
@@ -301,6 +308,7 @@ type ExtraCarrierPersistence = ExtraCarrierPersistenceClassification<{
   pluginMessage: 'parsed';
   routingWarnings: 'parsed';
   cloudBridgeRetry: 'parsed';
+  startupRecovery: 'parsed';
 }>;
 
 function isNonEmptyString(value: unknown): value is string {
@@ -515,6 +523,19 @@ export function safeParseExtra(raw: string | undefined): StoredMessage['extra'] 
     const outputLayout = readMessageOutputLayout(parsed.outputLayout);
     if (outputLayout) result.outputLayout = outputLayout;
     let hasField = modification.success || modificationReceipt.success || outputLayout !== undefined;
+    if (
+      typeof parsed.taskAssignmentRequestDigest === 'string' &&
+      /^[0-9a-f]{64}$/.test(parsed.taskAssignmentRequestDigest)
+    ) {
+      result.taskAssignmentRequestDigest = parsed.taskAssignmentRequestDigest;
+      hasField = true;
+    }
+    if (parsed.taskHandoff !== undefined || parsed.taskHandoffInvalid !== undefined) {
+      const handoff = ordinaryTaskHandoffRequestSchema.safeParse(parsed.taskHandoff);
+      if (handoff.success && parsed.taskHandoffInvalid === undefined) result.taskHandoff = handoff.data;
+      else result.taskHandoffInvalid = true;
+      hasField = true;
+    }
     // Legacy receipts remain readable after plugin migration, never executable invocation/delegation carriers.
     if (parsed.collectiveOwnerAdmissionV1 !== undefined) {
       const admission = collectiveOwnerAdmissionV1Schema.safeParse(parsed.collectiveOwnerAdmissionV1);
@@ -641,6 +662,11 @@ export function safeParseExtra(raw: string | undefined): StoredMessage['extra'] 
     }
 
     // Validate rich sub-field shape
+    const messageSearchAnswer = messageSearchAnswerBindingSchema.safeParse(parsed.messageSearchAnswer);
+    if (messageSearchAnswer.success) {
+      result.messageSearchAnswer = messageSearchAnswer.data;
+      hasField = true;
+    }
     if (parsed.rich && typeof parsed.rich === 'object' && parsed.rich.v === 1 && Array.isArray(parsed.rich.blocks)) {
       result.rich = parsed.rich as RichMessageExtra;
       hasField = true;
@@ -664,6 +690,11 @@ export function safeParseExtra(raw: string | undefined): StoredMessage['extra'] 
 
     if (isCloudBridgeRetryV1(parsed.cloudBridgeRetry)) {
       result.cloudBridgeRetry = parsed.cloudBridgeRetry;
+      hasField = true;
+    }
+    const startupRecovery = parseCodexStartupRecovery(parsed.startupRecovery);
+    if (startupRecovery) {
+      result.startupRecovery = startupRecovery;
       hasField = true;
     }
 

@@ -1,4 +1,4 @@
-import type { MediaContextAttachment } from '@cat-cafe/shared';
+import type { AssetContextAttachment, MediaContextAttachment } from '@cat-cafe/shared';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
@@ -309,4 +309,50 @@ it('cannot use an adjacent or edited message as the original gallery', async () 
   expect(container.querySelector('[data-testid="opened"]')?.textContent).toBe('');
   expect(container.querySelector('[role="alert"]')?.textContent).toContain('原消息');
   expect(mocks.apiFetch).toHaveBeenCalledTimes(1);
+});
+
+it('groups a material chip with this exact film version and leaves another version separate', async () => {
+  const source = {
+    kind: 'publication' as const,
+    contentRef: 'work:film',
+    ownerRevision: 4,
+    ledgerRef: 'ledger',
+    expectedLedgerRevision: 1,
+  };
+  const film: MediaContextAttachment = {
+    ...attachment(0),
+    gallery: undefined,
+    source,
+    mediaType: 'video/mp4',
+    title: '片子 · 第 4 版',
+    selections: [],
+  };
+  const asset: AssetContextAttachment = {
+    v: 1,
+    id: 'asset',
+    kind: 'asset',
+    name: 'hero.jpg',
+    workTitle: '片子',
+    mediaType: 'image/jpeg',
+    indexedVersionRef: 'asset:sha256:' + 'a'.repeat(64),
+    work: { reference: { contentRef: source.contentRef, ownerRevision: 4 }, metadataRevision: 1, assetId: 'hero' },
+  };
+  await act(async () =>
+    root.render(
+      <ContextAttachmentList
+        compact
+        attachments={[
+          film,
+          asset,
+          { ...asset, id: 'other', work: { ...asset.work, reference: { ...asset.work.reference, ownerRevision: 5 } } },
+        ]}
+        onRemove={vi.fn()}
+      />,
+    ),
+  );
+  const group = container.querySelector('[data-testid="gallery-composer-group"]');
+  expect(group?.textContent).toContain('片子 · 第 4 版');
+  expect(group?.querySelectorAll('[data-context-kind="asset"]')).toHaveLength(1);
+  expect(container.querySelectorAll('[data-context-kind="asset"]')).toHaveLength(2);
+  expect(container.textContent).toContain('片子 · 第 5 版');
 });

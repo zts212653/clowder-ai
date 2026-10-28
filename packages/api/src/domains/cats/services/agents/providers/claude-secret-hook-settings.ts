@@ -23,7 +23,7 @@ export function withClaudeSecretHooks(settings?: string, cwd = process.cwd()): s
   }
   const hooks = record(document.hooks);
   const command = `${quote(process.execPath)} ${quote(SCRIPT)}`;
-  const managed = { matcher: '.*', hooks: [{ type: 'command', command, timeout: 8 }] };
+  const managed = { matcher: 'Bash', hooks: [{ type: 'command', command, timeout: 8 }] };
   return JSON.stringify({
     ...document,
     disableAllHooks: false,

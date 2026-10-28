@@ -1,5 +1,89 @@
 [
   {
+    "id": "feature-f327-generate-music",
+    "kind": "feature",
+    "sourceRef": {
+      "path": "docs/architecture/f327-music-generation.md",
+      "anchor": "给片子和游戏配乐"
+    },
+    "structureSource": {
+      "path": "packages/api/src/domains/plugin/outputs/project-output-actions.ts",
+      "anchor": "PluginProjectOutputs"
+    },
+    "bodySource": {
+      "path": "docs/architecture/f327-music-generation.md",
+      "anchor": "给片子和游戏配乐"
+    },
+    "contexts": ["concierge_open", "feature_dev"],
+    "audience": ["cvo", "developer"],
+    "body": "Google Cloud 配乐插件候选正在完善：在 Plugin Manager 配置已有授权和 Cloud 项目、明确启用后，由猫生成 MP3 并交付来源回执。完整插件真实生成尚待验收，实际扣费及赠金抵扣仍须核实。",
+    "action": {
+      "type": "open_source",
+      "label": "查看配乐用法与账户条件",
+      "sourceRef": {
+        "path": "docs/architecture/f327-music-generation.md",
+        "anchor": "给片子和游戏配乐"
+      }
+    },
+    "owner": "codex61-sol"
+  },
+  {
+    "id": "feature-f322-chat-background",
+    "kind": "feature",
+    "sourceRef": {
+      "path": "DESIGN.md",
+      "anchor": "对话背景（2026-10-26"
+    },
+    "structureSource": {
+      "path": "packages/web/src/components/settings/YouSettingsPage.tsx",
+      "anchor": "YouSettingsPage"
+    },
+    "bodySource": {
+      "path": "docs/TIPS.md",
+      "anchor": "14. 你的资料和对话背景"
+    },
+    "contexts": ["concierge_open"],
+    "audience": ["cvo"],
+    "body": "点左下角头像，在「设置 → 你」换资料或给所有对话选背景。某条想用别的图，进它的「⋯ 对话设置 → 对话背景」；选「无」只关掉这条的图，「使用默认背景」恢复跟随。背景即时保存，刷新后还在。猫的小卡横幅在这只猫的「身份与职责」里上传并保存。",
+    "action": {
+      "type": "open_source",
+      "label": "查看背景和资料的用法",
+      "sourceRef": {
+        "path": "docs/TIPS.md",
+        "anchor": "14. 你的资料和对话背景"
+      }
+    },
+    "owner": "codex61-sol"
+  },
+  {
+    "id": "feature-f290-channel-expression",
+    "kind": "feature",
+    "sourceRef": {
+      "path": "docs/TIPS.md",
+      "anchor": "15. 频道里继续表达"
+    },
+    "structureSource": {
+      "path": "packages/collective-client/src/ComposerInput.tsx",
+      "anchor": "ComposerInput"
+    },
+    "bodySource": {
+      "path": "docs/TIPS.md",
+      "anchor": "15. 频道里继续表达"
+    },
+    "contexts": ["feature_dev"],
+    "audience": ["cvo", "developer"],
+    "body": "在频道选贴纸、引用选中文字，或从输入框菜单加入清单与回复选项。语音会转成可编辑文字，再由你发送；切频道立即停麦，已录内容留在原频道草稿，失败可回来重试。刷新后继续自己的草稿和阅读位置。",
+    "action": {
+      "type": "open_source",
+      "label": "查看频道表达的用法",
+      "sourceRef": {
+        "path": "docs/TIPS.md",
+        "anchor": "15. 频道里继续表达"
+      }
+    },
+    "owner": "codex61-sol"
+  },
+  {
     "id": "feature-f322-thread-settings",
     "kind": "feature",
     "sourceRef": {
@@ -16,7 +100,7 @@
     },
     "contexts": ["concierge_open", "feature_dev"],
     "audience": ["cvo", "developer"],
-    "body": "在对话顶栏点「⋯」，或在侧栏对话行点「…」→「对话设置」，都能打开同一块面板。默认猫猫、思考和速度档位在回复设置里；标签和关联 Feature 在整理里。置顶从侧栏行的「…」操作。",
+    "body": "在对话顶栏点「⋯」，或在侧栏对话行点「…」→「对话设置」，都能打开同一块面板。最上面是置顶和对话背景；默认猫猫、思考和速度档位在回复设置里，标签和关联 Feature 在整理里。",
     "action": {
       "type": "open_source",
       "label": "查看对话设置的用法",
@@ -30,19 +114,28 @@
   {
     "id": "feature-f322-process-talk",
     "kind": "feature",
-    "sourceRef": { "path": "docs/TIPS.md", "anchor": "回话里的过程话" },
+    "sourceRef": {
+      "path": "docs/TIPS.md",
+      "anchor": "回话里的过程话"
+    },
     "structureSource": {
       "path": "packages/web/src/components/settings/ProcessTalkSettings.tsx",
       "anchor": "ProcessTalkSettings"
     },
-    "bodySource": { "path": "docs/TIPS.md", "anchor": "回话里的过程话" },
+    "bodySource": {
+      "path": "docs/TIPS.md",
+      "anchor": "回话里的过程话"
+    },
     "contexts": ["concierge_open", "feature_dev"],
     "audience": ["cvo", "developer"],
     "body": "想让过程话收起来：设置 › 主题 ›「回话里的过程话」选「收进执行记录」。默认整段显示；启用后，回答上方仍可点「前面还有 N 段话」找回早先内容。猫已标明的分段照旧，旧回复和未成功结束的回复保留全文。",
     "action": {
       "type": "open_source",
       "label": "查看回话显示设置的用法",
-      "sourceRef": { "path": "docs/TIPS.md", "anchor": "回话里的过程话" }
+      "sourceRef": {
+        "path": "docs/TIPS.md",
+        "anchor": "回话里的过程话"
+      }
     },
     "owner": "codex61-sol"
   },
@@ -275,7 +368,7 @@
     },
     "contexts": ["concierge_open", "feature_dev"],
     "audience": ["cvo"],
-    "body": "记得以前聊过什么，却找不到消息？告诉猫大致意思和查找范围，它可以按消息检索原文片段与来源，并说明语义检索是否可用、索引覆盖和新鲜度是否已知。",
+    "body": "找以前聊过的事，可以从对话顶栏「查找」开始；「作品 ↗」「记忆 ↗」会带着关键词去各自的搜索，点「回到查找」继续原来的结果。问猫当时怎么定的时，可以让它附同源出处卡，再看原处或引用到草稿。",
     "action": {
       "type": "open_concierge_draft",
       "label": "找以前聊过的消息",
@@ -461,7 +554,7 @@
     "kind": "magic_word",
     "sourceRef": {
       "path": "cat-cafe-skills/refs/shared-rules.md",
-      "anchor": "「钛合金裤衩子／钛合金内裤」"
+      "anchor": "「钛合金裤衩子／钛合金内裤／防弹内裤」"
     },
     "structureSource": {
       "path": "cat-cafe-skills/refs/shared-rules.md",
@@ -469,7 +562,7 @@
     },
     "bodySource": {
       "path": "cat-cafe-skills/refs/shared-rules.md",
-      "anchor": "「钛合金裤衩子／钛合金内裤」"
+      "anchor": "「钛合金裤衩子／钛合金内裤／防弹内裤」"
     },
     "contexts": ["thinking", "long_running", "feature_dev"],
     "audience": ["cvo"],
@@ -3088,7 +3181,7 @@
     },
     "contexts": ["concierge_open", "pet_waiting_for_user"],
     "audience": ["all"],
-    "body": "在 Workspace 选中内容后点“请猫修改”，在同一聊天里说明想法；新版可对照后采用或拒绝，标记不会改原件。视频按 F 全屏播放；本机宽屏的“⋯”可在 Finder 中显示或用默认播放器打开原件。",
+    "body": "在 Workspace 选中内容后点“请猫修改”，在同一聊天里说明想法；新版可对照后采用或拒绝，标记不会改原件。视频按 F 全屏播放；本机的“⋯”可在 Finder 中显示或用默认播放器打开原件。",
     "action": {
       "type": "open_source",
       "label": "查看 Workspace 协作说明",
@@ -3462,16 +3555,44 @@
     },
     "bodySource": {
       "path": "docs/TIPS.md",
-      "anchor": "13. 开场简介"
+      "anchor": "13. 关于你"
     },
     "contexts": ["concierge_open", "long_running"],
     "audience": ["all"],
-    "body": "想让新对话里的猫认得你？在「记忆 → 画像 → 开场简介」填写称呼和交流习惯，也可以请猫起草，确认后生效。",
+    "body": "想让新对话里的猫认得你？在「记忆 → 全部记忆 → 画像 → 关于你」填写称呼和交流习惯，也可以请猫起草，确认后生效。",
     "action": {
       "type": "open_concierge_draft",
       "label": "请猫起草",
-      "draftPrompt": "请先读我的开场简介，再根据我们已有的对话起草一份不超过300字的版本，提交给我确认。"
+      "draftPrompt": "请先读我的「关于你」，再根据我们已有的对话起草一份不超过300字的版本，提交给我确认。"
     },
     "owner": "codex-astra"
+  },
+  {
+    "id": "feature-f326-asset-canon",
+    "kind": "feature",
+    "sourceRef": {
+      "path": "docs/TIPS.md",
+      "anchor": "16. 素材正典"
+    },
+    "structureSource": {
+      "path": "packages/web/src/components/workbench/content-review/AssetCanonDetail.tsx",
+      "anchor": "AssetCanonDetail"
+    },
+    "bodySource": {
+      "path": "docs/TIPS.md",
+      "anchor": "16. 素材正典"
+    },
+    "contexts": ["concierge_open", "feature_dev"],
+    "audience": ["cvo", "developer"],
+    "body": "在作品模式左栏选「素材」，点一件后标正典、实验或失败样本，并写为什么。想跟猫说这件事，点「对这件说一句」会把确切素材挂到原输入框；旧片遇到新正典，可提下一版换上，或写理由保留这一版。",
+    "action": {
+      "type": "open_source",
+      "label": "查看素材正典的用法",
+      "sourceRef": {
+        "path": "docs/TIPS.md",
+        "anchor": "16. 素材正典"
+      }
+    },
+    "owner": "codex61-sol"
   }
 ]

@@ -30,23 +30,39 @@ function NativeMaterial({
   name,
   onError,
   onMedia,
+  mediaClassName,
 }: {
   kind: PreviewKind;
   url: string;
   name: string;
   onError: () => void;
   onMedia: (element: HTMLMediaElement | null) => void;
+  mediaClassName?: string;
 }) {
   if (kind === 'image')
     // biome-ignore lint/performance/noImgElement: original permission-checked source has no public image URL.
-    return <img src={url} alt={name} onError={onError} className="mt-2 max-h-64 w-full object-contain" />;
+    return (
+      <img src={url} alt={name} onError={onError} className={mediaClassName ?? 'mt-2 max-h-64 w-full object-contain'} />
+    );
   const playback = { ref: onMedia, src: url, 'aria-label': name, controls: true, preload: 'none' as const, onError };
   if (kind === 'audio') return <audio {...playback} className="mt-2 w-full" />;
-  return <video {...playback} className="mt-2 max-h-64 w-full" />;
+  return <video {...playback} className={mediaClassName ?? 'mt-2 max-h-64 w-full'} />;
 }
 
-export function VideoWorkMaterialPreview({ url, name, mediaType }: { url: string; name: string; mediaType: string }) {
-  const [open, setOpen] = useState(false);
+export function VideoWorkMaterialPreview({
+  url,
+  name,
+  mediaType,
+  initiallyOpen = false,
+  comparison = false,
+}: {
+  url: string;
+  name: string;
+  mediaType: string;
+  initiallyOpen?: boolean;
+  comparison?: boolean;
+}) {
+  const [open, setOpen] = useState(initiallyOpen);
   const [failed, setFailed] = useState(false);
   const media = useRef<HTMLMediaElement | null>(null);
   const t = words[useShellLanguage()];
@@ -58,19 +74,21 @@ export function VideoWorkMaterialPreview({ url, name, mediaType }: { url: string
   const kind = formats[mediaType];
   if (!kind) return null;
   return (
-    <div className="mt-2">
-      <button
-        type="button"
-        aria-label={`${t.preview} ${name}`}
-        aria-expanded={open}
-        onClick={() => {
-          setOpen(!open);
-          setFailed(false);
-        }}
-        className="text-cafe-accent"
-      >
-        {open ? t.hide : t.open}
-      </button>
+    <div className={comparison ? 'h-full' : 'mt-2'}>
+      {!initiallyOpen ? (
+        <button
+          type="button"
+          aria-label={`${t.preview} ${name}`}
+          aria-expanded={open}
+          onClick={() => {
+            setOpen(!open);
+            setFailed(false);
+          }}
+          className="text-cafe-accent"
+        >
+          {open ? t.hide : t.open}
+        </button>
+      ) : null}
       {open &&
         (failed ? (
           <p role="alert" className="mt-2 text-cafe-error">
@@ -88,6 +106,7 @@ export function VideoWorkMaterialPreview({ url, name, mediaType }: { url: string
             onMedia={(node) => {
               media.current = node;
             }}
+            mediaClassName={comparison ? 'h-full w-full object-contain' : undefined}
           />
         ))}
     </div>

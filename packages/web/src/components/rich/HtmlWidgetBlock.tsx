@@ -1,5 +1,6 @@
 'use client';
 
+import { SandboxedWidgetFrame } from '@cat-cafe/ui';
 import { useEffect, useId, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { useMessageDisclosureState } from '@/components/message-disclosure-state';
 import type { RichHtmlWidgetBlock } from '@/stores/chat-types';
@@ -245,15 +246,12 @@ export function HtmlWidgetBlock({ block, disclosureKey }: { block: RichHtmlWidge
             正在准备完整内容…
           </output>
         ) : (
-          <iframe
+          <SandboxedWidgetFrame
             id={iframeId}
             ref={iframeRef}
-            srcDoc={bridgedHtml}
-            sandbox="allow-scripts"
-            scrolling="no"
+            html={bridgedHtml}
             title={accessibleTitle}
-            style={{ width: '100%', height: `${visibleHeight}px`, border: 'none', display: 'block' }}
-            referrerPolicy="no-referrer"
+            height={visibleHeight}
           />
         )}
         {longContent && !fullyExpanded ? (

@@ -4,7 +4,9 @@ import {
   importWorkContextSchema,
   type SetWorkContext,
   setWorkContextSchema,
+  type WorkContextRecord,
   type WorkReference,
+  type WorkVideoContext,
   workReferenceSchema,
 } from '@cat-cafe/shared';
 import { MediaOwnerError } from '../../video-studio/content-owner/media-errors.js';
@@ -18,6 +20,8 @@ export class WorkVideoContextService {
     private readonly deps: {
       store: WorkContextStore;
       verifyBinding?: VerifyWorkSourceBinding;
+      verifyAssets?(context: WorkVideoContext, principal: WorkPrincipal, retained?: WorkVideoContext): Promise<void>;
+      assertAssetSelections?(context: WorkVideoContext, owner: string, retained?: WorkVideoContext): void;
       contextSource?: WorkContextSource;
       authorize(reference: WorkReference, principal: WorkPrincipal, permission: 'read' | 'write'): Promise<void>;
       media(
@@ -39,6 +43,13 @@ export class WorkVideoContextService {
     await this.verifyBinding(reference, record?.context.sourceBinding, principal);
     await this.deps.authorize(reference, principal, 'read');
     return record;
+  }
+
+  /** Recheck a request's immutable parsed snapshot without decoding the entire context again. */
+  async revalidate(record: WorkContextRecord, principal: WorkPrincipal) {
+    await this.deps.authorize(record.reference, principal, 'read');
+    await this.verifyBinding(record.reference, record.context.sourceBinding, principal);
+    await this.deps.authorize(record.reference, principal, 'read');
   }
 
   /** Validate a citation against its retained row, never today's extractor output. */
@@ -102,6 +113,13 @@ export class WorkVideoContextService {
       await this.deps.authorize(command.reference, principal, 'write');
       return this.deps.store.save(command, principal, requestDigest);
     }
+    const retained = this.deps.store.get(principal.userId, command.reference)?.context;
+    if (
+      command.context.assets.some((row) => row.bindingSelection) &&
+      (!this.deps.verifyAssets || !this.deps.assertAssetSelections)
+    )
+      throw new MediaOwnerError('access_denied');
+    await this.deps.verifyAssets?.(command.context, principal, retained);
     const media = await this.deps.media(command.reference, principal);
     if (
       media.kind !== 'video' ||
@@ -116,7 +134,9 @@ export class WorkVideoContextService {
     await this.verifyBinding(command.reference, command.context.sourceBinding, principal);
     await revalidate?.();
     await this.deps.authorize(command.reference, principal, 'write');
-    return this.deps.store.save(command, principal, requestDigest);
+    return this.deps.store.save(command, principal, requestDigest, () =>
+      this.deps.assertAssetSelections?.(command.context, principal.userId, retained),
+    );
   }
 
   private async verifyBinding(

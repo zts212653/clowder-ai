@@ -63,6 +63,13 @@ export class CallbackAuthTurnExecutionLifecycle implements ITurnExecutionStore {
     return this.store.listRunningByUser(userId);
   }
 
+  markProviderStarted(invocationId: string, at: number) {
+    return this.store.markProviderStarted(invocationId, at);
+  }
+  recordProviderTeardown(invocationId: string, at: number) {
+    return this.store.recordProviderTeardown(invocationId, at);
+  }
+
   async transitionTerminal(
     invocationId: string,
     input: TurnExecutionTerminalInput,

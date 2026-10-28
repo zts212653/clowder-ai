@@ -2,6 +2,7 @@ import type { RoutingPreflightDecisionV1 } from '@cat-cafe/shared';
 import { InvocationServiceScope } from '../invocation/invocation-service-scope.js';
 import { isRoutingOwnerAttempt } from './routing-owner-attempt.js';
 import { routingPreflightNotice } from './routing-preflight-notice.js';
+import { persistStartupRecovery } from './startup-recovery-projection.js';
 /**
  * Serial Route Strategy
  * Cats respond one by one, each seeing previous responses.
@@ -2100,6 +2101,18 @@ export async function* routeSerial(
             }
           }
 
+          if (effectiveMsg.extra?.startupRecovery) {
+            if (
+              !(await persistStartupRecovery(
+                deps.messageStore,
+                effectiveMsg,
+                lifecycleResponseMessageId,
+                ownInvocationId,
+              ))
+            )
+              continue;
+            effectiveMsg = { ...effectiveMsg, messageId: lifecycleResponseMessageId };
+          }
           if (effectiveMsg.type === 'text') {
             const fragment = effectiveMsg.content;
             if (outputProjection) {
@@ -3210,6 +3223,20 @@ export async function* routeSerial(
           } else {
             storedMsg = await deps.messageStore.append(streamMessageInput);
           }
+          if (
+            storedMsg &&
+            ownInvocationId &&
+            actionOutputCommitAllowed &&
+            lifecycleTerminalStatus === 'completed' &&
+            deps.messageSearchAnswerService
+          ) {
+            try {
+              storedMsg = await deps.messageSearchAnswerService.publishResponse(storedMsg, ownInvocationId);
+              allRichBlocks = [...(storedMsg.extra?.rich?.blocks ?? allRichBlocks)];
+            } catch {
+              log.warn({ threadId, messageId: storedMsg.id }, 'Search answer binding pending on committed response');
+            }
+          }
           storedMsgId = storedMsg?.id;
           turnStoredMessageId = storedMsgId;
           if (storedMsgId) recordPersistedOutputMessageId(storedMsgId);
@@ -3476,6 +3503,25 @@ export async function* routeSerial(
               // distinction that used to route mutating tools here belonged to the closure gate,
               // which is retired — nothing downstream re-runs a turn behind the cat's back.
               storedNoText = await deps.messageStore.append(noTextMessageInput);
+            }
+            if (
+              storedNoText &&
+              ownInvocationId &&
+              actionOutputCommitAllowed &&
+              lifecycleTerminalStatus === 'completed' &&
+              deps.messageSearchAnswerService
+            ) {
+              try {
+                storedNoText = await deps.messageSearchAnswerService.publishResponse(storedNoText, ownInvocationId);
+                const bound = storedNoText.extra?.messageSearchAnswer;
+                const block = bound && storedNoText.extra?.rich?.blocks.find((block) => block.id === bound.blockId);
+                if (block && !noTextBlocks.some((current) => current.id === block.id)) noTextBlocks.push(block);
+              } catch {
+                log.warn(
+                  { threadId, messageId: storedNoText.id },
+                  'Search answer binding pending on committed response',
+                );
+              }
             }
             // F088-P3: Stash rich blocks for outbound delivery (no-text branch)
             if (storedNoText && options.persistenceContext && noTextBlocks.length > 0) {

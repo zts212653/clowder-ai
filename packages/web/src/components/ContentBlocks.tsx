@@ -1,10 +1,12 @@
 'use client';
 
-import type { MediaContextAttachment } from '@cat-cafe/shared';
+import { findMessageSticker, type MediaContextAttachment } from '@cat-cafe/shared';
+import { StickerArtwork } from '@cat-cafe/ui';
 import type { MessageContent } from '@/stores/chatStore';
 import { API_URL } from '@/utils/api-client';
 import { AuthenticatedMediaImage } from './AuthenticatedMediaImage';
 import { ContextAttachmentView } from './ContextAttachmentView';
+import { ContentFileAttachment } from './content-review/ContentFileAttachment';
 import { GalleryAttachmentGroup } from './content-review/GalleryAttachmentGroup';
 import { sameGalleryGroup } from './content-review/media-chat-selection';
 import { useChatArtworkLightbox } from './content-review/useChatArtworkLightbox';
@@ -59,10 +61,11 @@ export function ContentBlocks({
         }
         if (block.type === 'image') {
           const source = published.source(block.url, { kind: 'content-block', index: i });
-          return (
+          const stickerLabel = block.sticker && findMessageSticker(block.sticker.stickerId)?.label.zh;
+          const image = (
             <AuthenticatedMediaImage
               url={resolveUrl(block.url, published.isV2)}
-              alt="附件"
+              alt={stickerLabel || '附件'}
               key={i}
               className="block max-w-full sm:max-w-sm rounded-lg mt-2 border border-cafe hover:opacity-90 transition-opacity"
               onOpen={
@@ -81,51 +84,10 @@ export function ContentBlocks({
               }
             />
           );
+          return stickerLabel ? <StickerArtwork key={i}>{image}</StickerArtwork> : image;
         }
-        if (block.type === 'file') {
-          const src = resolveUrl(block.url, published.isV2);
-          const source = published.source(block.url, { kind: 'content-block', index: i });
-          if (source || (published.isV2 && block.mimeType.startsWith('video/')))
-            return (
-              <button
-                key={i}
-                type="button"
-                disabled={published.busy}
-                onClick={() =>
-                  void published.enlarge({
-                    url: src,
-                    title: block.fileName,
-                    alt: block.fileName,
-                    mediaType: block.mimeType.startsWith('video/') ? 'video' : 'image',
-                    entry: source,
-                    item: { kind: 'content-block', index: i },
-                  })
-                }
-                className="mt-2 flex max-w-sm items-center gap-2 rounded-lg border border-cafe bg-cafe-surface px-3 py-2 text-left hover:border-cafe-accent"
-              >
-                <span aria-hidden="true">{fileIcon(block.mimeType)}</span>
-                <span className="min-w-0 truncate">{block.fileName}</span>
-                <span className="shrink-0 text-xs text-cafe-muted">{source ? '打开作品' : '查看视频'}</span>
-              </button>
-            );
-          return (
-            <a
-              key={i}
-              href={src}
-              download={block.fileName}
-              className="flex items-center gap-2 bg-cafe-surface border border-cafe rounded-lg px-3 py-2 mt-2 hover:border-cafe-accent transition-colors max-w-sm"
-            >
-              <span className="text-2xl flex-shrink-0">{fileIcon(block.mimeType)}</span>
-              <div className="flex flex-col min-w-0">
-                <span className="text-sm text-cafe-secondary truncate">{block.fileName}</span>
-                <span className="text-micro text-cafe-muted">
-                  {block.mimeType} · {formatFileSize(block.fileSize)}
-                </span>
-              </div>
-              <span className="ml-auto text-cafe-muted text-xs">下载</span>
-            </a>
-          );
-        }
+        if (block.type === 'file')
+          return <ContentFileAttachment key={i} block={block} publication={publication} index={i} />;
         if (block.type === 'context_attachment') {
           const attachment = block.attachment;
           if (attachment.kind === 'media') {

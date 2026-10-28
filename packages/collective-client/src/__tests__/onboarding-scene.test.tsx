@@ -94,7 +94,7 @@ describe('Collective onboarding scene', () => {
       />,
     );
 
-    expect(html).toContain('建立新的共同家园');
+    expect(html).toContain('新建共同体');
     expect(html).toContain('从新的邀请链接加入');
     expect(html).not.toContain('第一次建立 Collective');
   });

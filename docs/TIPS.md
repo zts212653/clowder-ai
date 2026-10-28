@@ -1,7 +1,7 @@
 ---
 doc_kind: guide
 topics: [usage, magic-words, collaboration]
-updated: 2026-10-26
+updated: 2026-10-27
 description: "User tips for course correction, routing, chat file links, and everyday collaboration."
 ---
 
@@ -105,7 +105,7 @@ Click a recognized file label in a message to read it in the Workspace on the ri
 
 ## 10. Conversation Settings
 
-Open the conversation header's **⋯**, or choose **Conversation settings** from the sidebar row's **…** menu. Both open the same panel. Reply settings contain the default cats, reasoning and speed options; organization contains labels and the associated Feature. Pinning stays in the sidebar row's **…** menu.
+Open the conversation header's **⋯**, or choose **Conversation settings** from the sidebar row's **…** menu. Both open the same panel. Pinning and the chat background are at the top. Reply settings contain the default cats, reasoning and speed options; organization contains labels and the associated Feature.
 
 Changes save as you make them; a failed save keeps the previous value and shows an error. Press Esc, use the close button, or click outside to close the panel.
 
@@ -124,6 +124,28 @@ Click outside the card or press Esc to close it. On mobile, you can also drag th
 ## 13. Opening Brief
 
 Go to **Memory → Profile → Opening brief** to view or edit how you would like cats to address and work with you. You can also ask a cat to draft a short version based on your conversations. Review and confirm the draft before it takes effect; only your own profile is being edited.
+
+## 14. Your Profile and Chat Background
+
+Click your bottom-left avatar to open **Settings → You**. Change your profile in the first card; choose an image in the second card to set the default background for all chats. Image choices, opacity and placement save immediately and survive a restart. The initial opacity keeps muted text readable; moving further right shows a warning.
+
+For one chat, open **⋯ Conversation settings → Chat background**. This overrides your default; **None** clears the image only in that chat, while **Use default background** restores inheritance. Backgrounds stay out of messages and exports. To add a cat's card banner, open **Settings → Team → that cat → Identity & role → Banner**, upload an image and save the member.
+
+## 15. Keep Expressing Yourself in a Channel
+
+With a compatible Host and Collective plugin, choose a sticker, quote selected message text, or add a checklist, response options, HTML or a diff from the composer menu. A sticker is a message from you; it does not change a task's state. When you receive response options, choose them before inserting the reply into your draft.
+
+Voice recording uses a local transcription service explicitly selected by the current member. The transcript remains editable until you send it. Changing channels stops the microphone and keeps the recording in the original channel's private draft; a failed transcription can be retried there. Explicitly cancelling discards it.
+
+Returning after a refresh restores your text, quotes, attachments and reading position. An uncertain send result keeps the original draft for retry. Drafts and reading positions stay separate for each person; a conflicting draft from another window requires your choice.
+
+## 16. Canonical Materials
+
+The material controls currently use Chinese labels, including in the English interface. Open a film in Workspace, switch to the work view and choose **素材** (Materials) on the left. Select an original, mark it as **正典** (Canonical), **实验** (Experiment) or **失败样本** (Failed sample), write why, then select **记下** (Record). The mark belongs to that exact file version and is visible in other works using it; an unmarked original shows **还没标** (Not marked yet).
+
+**对这件说一句** (Say something about this) attaches the exact material to the existing composer. Send your comment in the current conversation, or return to the film discussion. When a new canonical version appears, select **下一版换上** (Use for the next revision) or **这版不换** (Keep this version) and explain why it should stay. These choices leave the existing film unchanged; a later canonical version can prompt you again.
+
+In a member's **Identity & role → Appearance** settings, choose a canonical avatar and select **用这张** (Use this one) to save it independently. A new upload needs a reason before it is registered and selected. An unavailable linked original is shown as unavailable.
 
 ---
 
@@ -227,7 +249,7 @@ Go to **Memory → Profile → Opening brief** to view or edit how you would lik
 
 ## 10. 对话设置
 
-在对话顶栏点 **⋯**，或从侧栏对话行的 **…** 菜单选择「对话设置」，都能打开同一块面板。默认猫猫、思考和速度档位在回复设置里；标签和关联 Feature 在整理里。置顶从侧栏对话行的 **…** 菜单操作。
+在对话顶栏点 **⋯**，或从侧栏对话行的 **…** 菜单选择「对话设置」，都能打开同一块面板。最上面是置顶和对话背景；默认猫猫、思考和速度档位在回复设置里，标签和关联 Feature 在整理里。
 
 修改会即时保存，失败时保留原值并提示。按 Esc、点关闭按钮或点面板外可收起设置。
 
@@ -243,6 +265,28 @@ Go to **Memory → Profile → Opening brief** to view or edit how you would lik
 
 点卡外或按 Esc 收起；手机也可以向下拖动把手收起。
 
-## 13. 开场简介
+## 13. 关于你
 
-在「记忆 → 画像 → 开场简介」查看或编辑自己的称呼和交流习惯，也可以请猫根据已有对话起草一份短稿。先核对并确认，再让它生效；这里编辑的是你自己的画像。
+在「记忆 → 全部记忆 → 画像 → 关于你」查看或编辑自己的称呼和交流习惯。自己修改后保存即可；猫起草的版本先在这里对比，点「查看并决定」回原提案确认，和待办「等你决定」是同一件。
+
+## 14. 你的资料和对话背景
+
+点左下角自己的头像，进入「设置 → 你」。第一张卡改资料，第二张卡选图，设置所有对话的默认背景。选图、浓淡和摆放即时保存，重启后也在。初始浓淡让灰字读得清；继续向右推时会提示。
+
+只想换某条对话，进「⋯ 对话设置 → 对话背景」。这里盖过默认值；「无」只关掉这条的图，「使用默认背景」恢复跟随。背景不进消息和导出。想给猫的小卡加横幅，到「设置 → 猫猫团队 → 这只猫 → 身份与职责 → 横幅」上传图片，再保存成员。
+
+## 15. 频道里继续表达
+
+在配套 Host 与 Collective 插件支持这些能力的版本中，可以选贴纸、引用消息中选中的文字，或从输入框内容菜单加入清单、回复选项、HTML 和 diff。贴纸仍是你发出的消息，不改变任务状态；收到回复选项时，先选好再放进回复草稿。
+
+语音先录音，再用当前成员明确选择的本地转写服务变成可编辑文字，最后由你点发送。切换频道会立即停麦，已录内容留在原频道的私人草稿；转写失败可回来重试，主动取消才丢弃。
+
+刷新后可继续自己的文字、引用和附件草稿，也能接续阅读位置。发送结果不确定时保留原草稿重试。不同人的草稿与阅读位置各自保存；另一窗口存了不同内容时，由你选择保留哪份。
+
+## 16. 素材正典
+
+在 Workspace 打开一支影片，切到作品模式，在左栏选择「素材」。点一件原件，标「正典 / 实验 / 失败样本」，写明为什么，再「记下」。标记跟着确切文件版本走，其他片子用了同一件也能看见；未标过的保留「还没标」。
+
+「对这件说一句」把确切素材挂到原输入框，意见仍发进当前对话；也可回到影片讨论。遇到新正典时，可点「下一版换上」提出意见，或写理由保留这一版。这些选择都不改现有影片，以后再有新正典会重新提示。
+
+在成员「身份与职责 → 外观」中，可选头像用途的正典，再点「用这张」单独保存。上传新图先写理由，再登记并选用；关联的原件不可用时会明确显示。

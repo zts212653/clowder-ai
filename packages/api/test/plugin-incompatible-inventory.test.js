@@ -99,7 +99,7 @@ function replacement() {
     expectedPackageDigest: digest('new'),
   };
 }
-test('legacy snapshot transaction drops retired grants while preserving its incompatible raw manifest', async () => {
+test('legacy inventory reads preserve disk bytes and actual writes drop retired grants while retaining the raw manifest', async () => {
   const root = await mkdtemp(join(tmpdir(), 'plugin-incompatible-'));
   const path = join(root, 'inventory.json');
   const original = oldSnapshot();
@@ -110,6 +110,12 @@ test('legacy snapshot transaction drops retired grants while preserving its inco
   assert.deepEqual(snapshot.packages[0].incompatibleManifest, oldManifest);
   assert.deepEqual(snapshot.instances, original.instances);
   await store.transaction(() => {});
+  assert.deepEqual(
+    JSON.parse(await readFile(path, 'utf8')),
+    original,
+    'a read-only transaction does not rewrite inventory',
+  );
+  await store.transaction((tx) => tx.instances.put(snapshot.instances[0]));
   const { grants: _legacyGrants, ...current } = original;
   assert.deepEqual(JSON.parse(await readFile(path, 'utf8')), current);
 });

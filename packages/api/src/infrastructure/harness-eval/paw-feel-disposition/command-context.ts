@@ -1,8 +1,10 @@
+import type { PawFeelDispositionProjection, PawFeelRepairRequest } from '@cat-cafe/shared';
 import type { PawFeelDispositionCommand, PawFeelResolvedCommandContext, PawFeelResolvedFix } from './commands.js';
 import { PawFeelDispositionServiceError, type PawFeelTrustedPrincipal } from './service-guards.js';
 
 export interface PawFeelFixResolver {
-  resolve(leaseId: string): Promise<PawFeelResolvedFix>;
+  resolveCurrent?(projection: PawFeelDispositionProjection): Promise<PawFeelResolvedFix>;
+  resolve(binding: PawFeelRepairRequest | string, userId?: string): Promise<PawFeelResolvedFix>;
 }
 
 export async function resolvePawFeelCommandContext(

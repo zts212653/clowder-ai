@@ -4,7 +4,7 @@ import { useCatData } from '@/hooks/useCatData';
 import { approvalMemberCopy } from './approval-member.shell-copy';
 
 /** Readable decision participants from the same registry as Chat; an unknown address is not a name. */
-export function ApprovalMember({ catId }: { catId: string }) {
+export function ApprovalMember({ catId, showModel = true }: { catId: string; showModel?: boolean }) {
   const { getCatById } = useCatData({ fetch: false });
   const t = useShellCopy(approvalMemberCopy);
   const cat = getCatById(catId);
@@ -13,7 +13,9 @@ export function ApprovalMember({ catId }: { catId: string }) {
       <ShellCatAvatar catId={catId} size={20} />
       <span className="min-w-0 break-words">
         {cat ? cat.nickname?.trim() || cat.displayName : t.unavailable}
-        {cat?.defaultModel ? <span className="text-[var(--shell-muted)]"> · {cat.defaultModel}</span> : null}
+        {showModel && cat?.defaultModel ? (
+          <span className="text-[var(--shell-muted)]"> · {cat.defaultModel}</span>
+        ) : null}
       </span>
     </span>
   );

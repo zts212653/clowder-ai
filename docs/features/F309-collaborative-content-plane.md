@@ -60,14 +60,17 @@ mcp_admission_claims:
 （2026-10-20：“应该是产物……视频 图片 文档”）。本次修正描述与检索入口；具体能力仍按下列
 阶段和原验收证据交付，不把网页作品版本化或 Office 完整共编记成已经完成。
 
-> **Status**: in-progress / Phase R 历史有界交付保留；Phase U 的 Studio 297 作品体验工作单元已在 #5507/#5521 合入后通过父 Alpha 与原设计负责人实页复看；其余 Phase U、Office/video Admission Gate 与未勾 AC 仍开放
-> **Owner**: 小太阳·Maine Coon (@codex-sol, GPT-5.6 Sol)
+> **Status**: in-progress / Phase R、Studio 297 历史有界交付保留；Phase U 全入口归一 #6249 已合入；父 Alpha 基础旅程通过，入口与元数据缺口已交原 writer 续修；其余 Phase U、Office/video Admission Gate 与未勾 AC 仍开放
+> **Owner**: 小星星·Maine Coon (@codex-astra, GPT-6 Astra)，F309 统筹与最终交付
 > **Priority**: P1
-> **Source thread**: `[thread-id]`
+> **Source thread**: `[thread-id]` — F309「指挥」
+> **Original source thread**: `[thread-id]`（保留初始设计与授权来源）
 > **operator origin**: 从 F290 完整剥离 Office、富文本、图片、视频、画布的编辑、选区、批注与 Agent patch；“能用开源就用开源集成”；最终要支持人猫共同编辑，猫能感知人的编辑。来源：`private-source-id`。
 > **operator final-state correction**: DOCX + video 必须优先直接集成成熟开源能力；禁止用 fake owner、最小编辑器或独立脚手架证明“可行”，开发从真实候选的最终宿主/内容边界起步。来源：`private-source-id`。
 > **operator Workspace correction**: Office 不是孤立工具或多内核拼盘；家里只维护一条 Office 主线，把它嵌入现有浏览器 Workspace。人和具名猫都是同一实时内容模型里的第一等 writer，不能让猫离线改旧文件或借用人的光标、身份冒充共同编辑。来源：`private-source-id`、`private-source-id`。
 > **operator plugin choice**: Office 是用户可选择安装/启用的 provider plugin，不是 core 默认重依赖；GenOffice 是第一个真实 admission candidate。第一轮只开 DOCX vertical slice，验证通过后 XLSX/PPTX/PDF 才在同一插件内逐项开放。来源：`private-source-id`。
+
+> **F309 统筹归属（2026-10-27）**：You 将 `[thread-id]` 改名为 F309「指挥」，明确托付 Astra 今后统筹整个 F309。直接来源：`[thread-id]#private-source-id`；持久托付：`task:work:private-source-id`。本线程负责已接受范围、路线顺序、执行分工、跨线程依赖、状态同步与最终用户交付。具体实现、独立审查和内容写入仍沿各原 Task、执行线程与内容 owner；新 Phase、愿景变更及 Feature 结项继续由 You 决定。原 Task909/414、GenOffice 任务和历史证据不迁移、不重建。
 
 Architecture cell: `collaborative-content-plane`
 
@@ -1060,10 +1063,11 @@ Why: F309 derives request identity, Task continuation and result projection with
 
 ## Thread Topology（执行载体，不是真相源）
 
-1. **指挥与理论 thread**：当前 source thread；责任猫维护验收后的 vision、边界与 Phase 状态，并持续驱动下一步。
+1. **F309 指挥 thread**：`[thread-id]` / Astra；按 CVO1601 统筹整个 Feature 的范围、分工、依赖、交付与验收。初始 source thread `[thread-id]` 保留历史来源，当前协调回到指挥线程。
 2. **Phase execution threads**：每个 Phase 单独承载实现、证据与 review，不在指挥 thread 堆执行噪音。
 3. **runtime 重启后的验收 thread**：只消费已合入 main 的 exact SHA，在隔离验收环境复跑真实用户旅程。
 4. **CVO517作品体验执行批次**：新thread以 `codex6-sol` 为实现/交付owner、`codex-sol`（GPT-5.6）为独立reviewer；在自身隔离worktree自治实现、修复、review、commit/push及merge，最终回父 `[thread-id]` / `codex-astra` 做Alpha。创建以F128返回的实际thread为准，pending proposal不冒称已开工；原child其余责任及Task909保留。
+5. **当前全入口归一施工**：原 Task414 / `[thread-id]` 的 Sol6.1 单写实现、处理审查意见与合入；Sonnet 负责 #6249 独立审查，Astra 在本指挥线程持合后 Alpha 和整体结果。此批次沿既有 Phase U，不新开 Phase 或转移其他内容 owner。
 
 Feature、Research、ownership、commit/PR 与 task 状态仍是 canonical truth；thread 只是协作载体。这里复用家里
 现有 Feature/Phase/验收概念，不新增 Stage、Queue、Registry 或另一套状态机。

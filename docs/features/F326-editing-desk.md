@@ -125,9 +125,11 @@ You 认可重排（`[thread-id]#private-source-id`）：「我觉得可以……
 
 **D 启动（2026-10-26）**：10-23 登记后Ragdoll没有启动，10-25 C 收尾对稿通过后也没接回 D，停了 3 天，You 在 Feature 盘点线追问（经Siamese转来，`[thread-id]#private-source-id`），掉球在Ragdoll。OQ-3 挪到 F、OQ-4 已定（见 Open Questions），D 不再被挡。Task `private-source-id` 改为进行中。分工照 KD-5：小星星先出正典标记的数据合同（素材索引上加 正典 / 实验 / 失败样本、谁标的、为什么、标记时间；被取代关系；猫按「只要正典」取素材的工具；家里猫形象的正典和引用旧版的提示），Ragdoll同时画作品模式素材面板里标正典的稿，You 看过后交小太阳 6.1 实现，一个 PR（KD-7）。
 
+**D 实现与工程验测（2026-10-27）**：[同一实现 PR #6183](https://github.com/zts212653/clowder-ai/pull/6183) 已合入 `531e6f1d2e1b9a7121310b36129215d1bf3482a1`，包含 D.4.1“这版不换”和第四帧成员头像。非作者 Sonnet 对最终作者 HEAD `7063905ee65de958ff3533cde73e49c92ac857f7` 给出 typed approved，P1/P2=0；作者最终 API 检查 165/165（其中 canon 44/44），最后一版 Web cut 的核心浏览器 smoke 37/37。第五轮 cloud 停滞后已封板，由 Sonnet 的完整独立终审承接最终判断。
+
 #### Phase D 数据合同（2026-10-26，小星星）
 
-本节覆盖 AC-D1 / D2；依据 KD-5–10、OQ-2 和启动原件 `[thread-id]#private-source-id`。它是待实现的数据合同，不是 D 已验收；界面由Ragdoll出稿，按本轮约定由 You 看过再实现，同一 Phase 一个 PR。角色定稿沿用已有明确选择，不能因本合同重新要求逐张确认。
+本节覆盖 AC-D1 / D2；依据 KD-5–10、OQ-2 和启动原件 `[thread-id]#private-source-id`。合同已由 #6183 实现，D 的设计验收待原责任线结算；界面沿Ragdoll已交付的四帧稿与本轮接受约定落地，同一 Phase 一个 PR。角色定稿沿用已有明确选择，不能因本合同重新要求逐张确认。
 
 Architecture cell: `collaborative-content-plane`（正典标记、取代经过与使用关系投影），`identity-session` 的 `identity-agent`（成员身份与既有成员设置）；文件读取仍归 F063，作品字节与版本仍归 F138。
 
@@ -215,8 +217,6 @@ F309 仅原子写正典选择，成员 API 只读投影，不双写 catalog.avat
 - 角色来源：`docs/videos/cucu-pr-flow/character-bible-v0.1.md` §7。`video-forge` / `anime-forge` / `sprite-forge` 的取材指向同一正典读取；只调整取材与交付接缝，沿 KD-9 保留各自创作自由。
 
 实现 PR 的 claim guard：同文件在两片中标记一致；同名异路径不误合；原地换字节不继承标签；空正典不降级实验；失败/旧正典在已用清单不消失；并发换代与重放只产生一个结果；A→B→C/环/多用途部分更新处理明确；角色/风格/形态不串；跨线程/撤权/伪造 actor 与借 Work 提权被拒；重启保留全部经过；更新提示既不改旧片也不漏有证据的旧引用。选材结果和实际打开字节都重新验 digest/权限；查到正典后又被改判或换代，制作取用时应报告当前差异，不能继续把旧选择说成当前正典。
-
-本次仅合同落盘；上述行为的 RED/GREEN、边界 review、真实素材与正式入口验收由同一 D 实现 PR 提供，AC-D1 / D2 保持未勾选。
 
 ### Phase E: 包装与发布
 

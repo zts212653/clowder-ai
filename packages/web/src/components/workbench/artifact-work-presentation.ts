@@ -1,4 +1,4 @@
-import { inferFileKind } from '@/lib/file-kind';
+import { contentFileExtension, projectFileContent } from '@cat-cafe/shared';
 import { resolveFileTarget } from './real-surface-adapters';
 import type { WorkspaceSurfaceDescriptor } from './workbench-contract';
 
@@ -240,7 +240,9 @@ type WorkSurfaceCoordinate = { readonly type?: string } & Partial<
 >;
 
 export function isWorkspaceArtworkPath(path: string): boolean {
-  return inferFileKind(path) === 'image' || /\.(mp4|webm|mov|mdx?|txt|docx)$/i.test(path);
+  const facts = projectFileContent({ name: path });
+  // Default work presentation is narrower than all readable or editable formats.
+  return facts.floating || facts.kind === 'markdown' || ['txt', 'docx'].includes(contentFileExtension(path));
 }
 
 /** Presentation reads the canonical file coordinate; admission and bytes remain with the file/review owners. */

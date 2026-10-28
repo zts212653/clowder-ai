@@ -5,6 +5,7 @@ import {
   decideHoldCancelEntry,
   isStaticConnectorId,
   readHoldCardCancelability,
+  readWorktreeNotice,
 } from '@cat-cafe/shared';
 import type { ReactNode } from 'react';
 import type { CatData } from '@/hooks/useCatData';
@@ -30,6 +31,7 @@ import { RichBlocks } from './rich/RichBlocks';
 import { SenderAvatar } from './SenderAvatar';
 import { useShellCopy } from './shell/shell-copy';
 import { useShellPresentation } from './shell/shell-presentation';
+import { WorktreeNoticeBody } from './worktrees/WorktreeNoticeBody';
 
 function formatTime(ts: number): string {
   const d = new Date(ts);
@@ -127,6 +129,10 @@ export function ConnectorBubble({
   }
 
   const connId = source.connector;
+  const worktreeNotice =
+    message.from?.kind === 'system' && message.from.service === 'worktree-lifecycle' && connId === 'worktree-lifecycle'
+      ? readWorktreeNotice(source.meta?.worktreeNotice, message.content)
+      : null;
   const themeToken = connectorThemeToken(connId);
   const sender = resolveMessageSender({ from: message.from, source }, () => undefined, coCreator);
   const externalPerson =
@@ -252,6 +258,8 @@ export function ConnectorBubble({
           content={message.content}
           reason={typeof source.meta?.reason === 'string' ? source.meta.reason : undefined}
         />
+      ) : worktreeNotice ? (
+        <WorktreeNoticeBody notice={worktreeNotice} getCatById={getCatById} />
       ) : (
         <MarkdownContent referenceThreadId={threadId} content={message.content} />
       )}

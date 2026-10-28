@@ -50,7 +50,7 @@ function LiveCollectiveClient({ embedded }: { readonly embedded: boolean }) {
           onAuthenticate={client.authenticate}
         />
       ) : snapshot.phase === 'ready' && snapshot.me ? (
-        <p className="channel-empty">选择一个共同家园，继续交流。</p>
+        <p className="channel-empty">选择一个共同体，继续交流。</p>
       ) : (
         <OnboardingScene
           phase={snapshot.phase}

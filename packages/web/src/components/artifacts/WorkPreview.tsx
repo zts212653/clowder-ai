@@ -1,5 +1,5 @@
 'use client';
-import type { ThreadArtifactDTO } from '@cat-cafe/shared';
+import { projectFileContent, type ThreadArtifactDTO } from '@cat-cafe/shared';
 import { useState } from 'react';
 import { ShellGlyph } from '@/components/shell/ShellIcons';
 import { useShellCopy } from '@/components/shell/shell-copy';
@@ -33,27 +33,32 @@ export function WorkPreview({
   artifact,
   description,
   pending,
+  title,
+  compact = false,
 }: {
   artifact: ThreadArtifactDTO;
   description?: WorkCardDescription | null;
   pending?: boolean;
+  title?: string;
+  compact?: boolean;
 }) {
   const t = useShellCopy(worksPanelCopy);
+  const { kind: contentKind } = projectFileContent(artifact);
   const [failedUrl, setFailedUrl] = useState<string | null>(null);
   const url = artifact.url ? resolveAssetUrl(artifact.url, API_URL) : null;
-  if (artifact.type === 'image' && url && failedUrl !== url)
+  if (contentKind === 'image' && !compact && url && failedUrl !== url)
     // biome-ignore lint/performance/noImgElement: preserve the original authenticated publication URL.
-    return <img src={url} alt={artifact.name} onError={() => setFailedUrl(url)} />;
-  if (artifact.type === 'image')
+    return <img src={url} alt={title ?? artifact.name} onError={() => setFailedUrl(url)} />;
+  if (contentKind === 'image')
     return (
       <span className="work-gallery-kind">
         <ShellGlyph name="filePen" className="h-7 w-7" />
-        <span>{t.filters.image}</span>
+        <span>{failedUrl === url ? t.imageUnavailable : t.filters.image}</span>
       </span>
     );
-  if (artifact.type === 'video')
+  if (contentKind === 'video')
     return <WorkVideoPreview artifact={artifact} description={description} pending={pending} />;
-  if (artifact.type === 'audio') return <WorkAudioPreview artifact={artifact} />;
+  if (contentKind === 'audio') return <WorkAudioPreview artifact={artifact} />;
   return <TypedCover artifact={artifact} />;
 }
 function TypedCover({ artifact }: { artifact: ThreadArtifactDTO }) {

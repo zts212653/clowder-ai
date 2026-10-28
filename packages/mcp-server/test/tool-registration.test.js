@@ -342,6 +342,7 @@ describe('MCP Server Tool Registration', () => {
       'cat_cafe_list_schedule_templates',
       'cat_cafe_list_threads',
       'cat_cafe_post_message',
+      'cat_cafe_prepare_message_search_answer',
       'cat_cafe_preview_open',
       'cat_cafe_offer_custody',
       'cat_cafe_preview_scheduled_task',

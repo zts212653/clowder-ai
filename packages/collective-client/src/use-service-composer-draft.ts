@@ -197,6 +197,18 @@ export function useServiceComposerDraft(input: {
     ready,
     conflict,
     notice,
+    acceptExternal(result: Awaited<ReturnType<MessageExpressionPort['saveDraft']>>) {
+      if (result.status === 'conflict') {
+        currentConflict.current = { revision: result.draft.revision, content: result.draft.content };
+        if (active.current) setConflict(currentConflict.current);
+        return;
+      }
+      remember({
+        revision: result.draft.revision,
+        fingerprint: fingerprint(result.draft.content),
+        clientOperationId: result.draft.clientOperationId,
+      });
+    },
     async flush(draft: ComposerDraft) {
       if (timer.current) clearTimeout(timer.current);
       const saved = await persistRef.current(draft);
@@ -214,7 +226,7 @@ export function useServiceComposerDraft(input: {
         return true;
       }
       const remoteFingerprint = fingerprint(remote.draft.content);
-      if (!remote.draft.content.body && !remote.draft.content.attachments?.length) {
+      if (fingerprint(remote.draft.content) === fingerprint(emptyDraft)) {
         remember({
           revision: remote.draft.revision,
           fingerprint: remoteFingerprint,

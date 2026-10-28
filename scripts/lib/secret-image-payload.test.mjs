@@ -71,18 +71,19 @@ test('raster encoding collisions preserve exact bytes and cause no native rotati
   }
 });
 
-test('decoded image metadata and neighboring text still redact and notify', async () => {
+test('decoded image metadata and neighboring text with a configured credential still redact and notify', async () => {
   for (const original of [
     ...representations(image(secret)),
     { image_url: representations(image())[0], text: secret },
   ]) {
     let notice;
     const result = await protectSecretToolResult(original, {
+      knownCredentials: [secret],
       notify: async (value) => {
         notice = value;
       },
     });
-    assert.ok(notice.rules.includes('github-token'));
+    assert.deepEqual(notice.rules, ['known-credential']);
     assert.equal(result._meta.secretExposure.rotationNotice, 'recorded');
     const output = JSON.stringify(result);
     assert.equal(output.includes(secret), false);

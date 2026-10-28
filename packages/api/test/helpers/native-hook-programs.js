@@ -1,8 +1,21 @@
-import { existsSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
+import { after } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
 const repositoryRoot = fileURLToPath(new URL('../../../../', import.meta.url));
+let hookHome;
+after(() => {
+  if (hookHome) rmSync(hookHome, { recursive: true, force: true });
+});
+
+export function nativeHookTestEnv(overrides = process.env) {
+  // Real hook entry points append denials. Keep those side effects in this
+  // test process's private home, including when the caller is itself a test.
+  hookHome ??= mkdtempSync(join(tmpdir(), 'native-hook-home-'));
+  return { ...overrides, HOME: hookHome };
+}
 
 function privateHookIsUnexported(root, hook) {
   // The home manifest is intentionally absent from public exports. Missing a

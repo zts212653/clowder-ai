@@ -1,4 +1,5 @@
 import type { ExactAssetVersionRefV1, OwnerTruthRefV1 } from './capability-evolution-refs.js';
+import type { PawFeelRepairBinding } from './paw-feel-repair-binding.js';
 
 export const PAW_FEEL_ISSUE_RESOLUTIONS = ['open', 'resolved'] as const;
 export type PawFeelIssueResolution = (typeof PAW_FEEL_ISSUE_RESOLUTIONS)[number];
@@ -75,7 +76,8 @@ export interface PawFeelDirectRepairOutcomeV1 {
   schemaVersion: 1;
   bindingRef: OwnerTruthRefV1;
   taskTerminalRef: OwnerTruthRefV1;
-  leaseTerminalRef: OwnerTruthRefV1;
+  /** Present only for an actual ActionSuccessor completion. */
+  leaseTerminalRef?: OwnerTruthRefV1;
   ownerOutcomeRef: OwnerTruthRefV1;
   verificationRefs: readonly [OwnerTruthRefV1, ...OwnerTruthRefV1[]];
   disposition: 'verified_changed' | 'verified_no_change';
@@ -119,6 +121,7 @@ export interface PawFeelContinuationProjection {
   evidenceRefs: string[];
   ownerCatId?: string;
   taskId?: string;
+  repairBinding?: PawFeelRepairBinding;
   leaseId?: string;
   caseActionRef?: string;
   proposalId?: string;

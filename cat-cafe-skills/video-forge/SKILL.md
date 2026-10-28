@@ -34,6 +34,10 @@ description: >
 | 只看截帧拼图、统计数字就说「看过了」（《AI-native builder 的一天》10-12 冷读、10-14 粗剪） | 气泡直接蹦出来、角色不动、转场没东西带着，静帧上都看不出来 | 动作和声音只有连续看、带声听才知道；没连续看过就写「没看过」 |
 | 先交静帧平移的全片粗片，动效和后期留到后面（同片 10-14，5:38） | 人和猫全是静图平移、8 处 18 帧溶解、配乐占位，交出去的片子像半成品 | 「先粗后精」只适合画面要靠 AI 生成或画师画、重画很贵的片子（anime-forge）。Remotion 里让角色动起来和让它平移费的工夫差不多：交出去的每一段都按成片做 |
 
+## 取家里的素材
+
+用 `cat_cafe_work` 的 `list-assets` 找素材，默认只选经当前文件核验的正典；没有就照实说没有，不拿实验/失败样本补位。角色按成员或系列、形态、风格和用途选，头像不能顶替走路动作。已入旧索引的文件需要补登记用途时，由原登记猫或 Human 用 `set-asset-status` 带 `applicability`、CAS 和来源理由改判；这不会替 Human 绑定角色。取用前用 `read-asset` 带选中项的 `expectedRevision` 再核一次；使用了用途绑定，就把返回的 `{bindingRef, bindingRevision, indexedVersionRef}` 写进交片索引的 `assets[].bindingSelection`。旧片查看用 `purpose: used` 和固定 WorkReference，看全当时原件，不重新选材。
+
 ## 工程
 
 - **宣传片工程**：私有仓 `meow-club/cat-cafe-films`，一支片一个能独立渲染的 Remotion 工程（`npm install --include=dev`）。《AI-native builder 的一天》以这个仓为准，家里的改动走 PR。

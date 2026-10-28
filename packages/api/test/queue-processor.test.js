@@ -76,6 +76,7 @@ function createHarness({
   draftStore,
   turnExecutionStore,
   actionSuccessorLeaseStore,
+  taskStore,
   deploymentWaitStartGuard,
   autoDrain = false,
   ledgerStore,
@@ -136,6 +137,7 @@ function createHarness({
     ...(draftStore ? { draftStore } : {}),
     ...(turnExecutionStore ? { turnExecutionStore } : {}),
     ...(actionSuccessorLeaseStore ? { actionSuccessorLeaseStore } : {}),
+    ...(taskStore ? { taskStore } : {}),
     ...(deploymentWaitStartGuard ? { deploymentWaitStartGuard } : {}),
     ...(liveCompanionSessions ? { liveCompanionSessions } : {}),
   };
@@ -223,6 +225,7 @@ async function admitMessage(harness, overrides = {}) {
     catId: null,
     from: queueInput.from,
     ...(overrides.messageSource ? { source: overrides.messageSource } : {}),
+    ...(overrides.messageExtra ? { extra: overrides.messageExtra } : {}),
     ...(overrides.visibility ? { visibility: overrides.visibility, whisperTo: overrides.whisperTo } : {}),
     content: queueInput.content,
     mentions: queueInput.targetCats,
@@ -2959,4 +2962,119 @@ describe('F293 routing through the canonical Queue', () => {
         assert.deepEqual(failures, [], 'a known availability refusal is not a backend error');
       });
     }
+});
+
+it('retired ordinary implement carrier cannot wake a provider or write any lease outcome', async () => {
+  const { TaskStore } = await import('../dist/domains/cats/services/stores/ports/TaskStore.js');
+  const tasks = new TaskStore(),
+    task = tasks.create({
+      threadId: 'thread-1',
+      userId: 'user-1',
+      title: 'Original task',
+      ownerCatId: 'opus',
+      createdBy: 'opus',
+    });
+  const lease = {
+    leaseId: 'ordinary-retired',
+    subjectRef: `subject:task:${task.id}`,
+    actionFamily: 'implement',
+    terminalPredicate: { kind: 'task_done' },
+  };
+  let leaseWrites = 0,
+    preflights = 0;
+  const h = createHarness({
+    taskStore: tasks,
+    actionSuccessorLeaseStore: {
+      async get() {
+        return lease;
+      },
+      async preflight() {
+        preflights++;
+        return { ok: true };
+      },
+      async commitOutcome() {
+        leaseWrites++;
+        throw new Error('retired lease mutation');
+      },
+    },
+  });
+  const admitted = await admitMessage(h, {
+    actionSuccessorFence: { leaseId: lease.leaseId, generation: 1, dispatchId: 'post:legacy' },
+  });
+  await h.processor.processNext('thread-1', 'user-1');
+  assert.equal(h.router.routeExecution.mock.calls.length, 0);
+  assert.equal(h.messageStore.getById(admitted.message.id).deliveryStatus, 'canceled');
+  assert.equal(preflights, 0);
+  assert.equal(leaseWrites, 0);
+  assert.equal(tasks.get(task.id).status, 'todo');
+});
+
+function nativeTaskSourceExtra() {
+  return {
+    taskHandoff: {
+      v: 1,
+      taskId: 'task-native',
+      expected: {
+        userId: 'user-1',
+        ownerCatId: 'opus',
+        threadId: 'thread-1',
+        ownerRevision: 0,
+        lastAppliedHandoffMessageRef: null,
+        executionRef: null,
+      },
+      issuer: { userId: 'user-1', catId: 'codex', threadId: 'thread-1', invocationId: 'issuer' },
+      targetCatId: 'opus',
+      targetThreadId: 'thread-1',
+      ownerCatId: 'opus',
+      stopPrevious: false,
+    },
+  };
+}
+
+it('Task handoff source cannot Append into an existing provider outside its exact Task execution binding', async () => {
+  const h = createHarness();
+  const admitted = await admitMessage(h, { messageExtra: nativeTaskSourceExtra() });
+  const run = bindActiveRun(h);
+  const dispatch = mock.fn(async () => ({ accepted: true, handle: {} }));
+  h.invocationTracker.bindAgentClientActiveRunDispatcher('thread-1', 'opus', {
+    invocationId: run.invocationId,
+    capabilities: { append: true, steer: true },
+    handle: { provider: 'anthropic', carrier: 'claude_print_sdk' },
+    dispatch,
+  });
+  const result = await h.processor.appendExactEntry({
+    threadId: 'thread-1',
+    userId: 'user-1',
+    entryId: admitted.entry.id,
+    expectedQueueRevision: h.queue.snapshotRevision('thread-1', 'user-1'),
+    expectedRuns: [{ targetId: 'opus', invocationId: run.invocationId, responseMessageId: run.response.id }],
+  });
+  assert.deepEqual(result, { outcome: 'rejected', reason: 'append_unavailable' });
+  assert.equal(dispatch.mock.calls.length, 0);
+  assert.equal(h.queue.getEntrySnapshot('thread-1', 'user-1', admitted.entry.id).status, 'queued');
+});
+
+it('Task handoff source cannot hide behind a plain primary in a batched Steer start', async () => {
+  const h = createHarness();
+  const plain = await admitMessage(h);
+  const native = await admitMessage(h, { messageExtra: nativeTaskSourceExtra() });
+  const claimed = await h.queue.markProcessingGroupDurable(
+    'thread-1',
+    'user-1',
+    { entryId: plain.entry.id, targetCats: ['opus'] },
+    [plain.entry.id, native.entry.id],
+  );
+  assert.ok(claimed);
+  const result = await h.processor.processClaimedSteerEntries(
+    'thread-1',
+    'user-1',
+    [plain.entry.id, native.entry.id],
+    'opus',
+  );
+  assert.equal(result.started, false);
+  assert.equal(h.router.routeExecution.mock.calls.length, 0);
+  assert.deepEqual(
+    h.queue.list('thread-1', 'user-1').map((e) => e.status),
+    ['queued', 'queued'],
+  );
 });

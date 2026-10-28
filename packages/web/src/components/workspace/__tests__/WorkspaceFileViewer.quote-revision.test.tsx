@@ -92,7 +92,6 @@ async function addSelection(filePath: string, openFilePath: string, onQuoteSelec
         onOpenCollaboration={vi.fn()}
         onSave={vi.fn()}
         onQuoteSelected={onQuoteSelected}
-        revealInFinder={vi.fn()}
       />,
     );
   });

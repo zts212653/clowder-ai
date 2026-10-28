@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { rmSync } from 'node:fs';
+import { rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { fixture, git } from './lib/worktree-finish-fixture.mjs';
@@ -16,6 +16,73 @@ test('target receipt sees unregistered and nonstandard review paths by exact PR 
     assert.deepEqual(rows.map((x) => x.path).sort(), [raw, declared].sort());
     assert.equal(rows.find((x) => x.path === raw).declaration, 'legacy');
     assert.equal(rows.find((x) => x.path === declared).declaration, 'declared');
+  } finally {
+    rmSync(f.root, { recursive: true, force: true });
+  }
+});
+
+test('one retention episode coalesces successive version changes', () => {
+  const f = fixture();
+  try {
+    const p = f.make('updating-alpha');
+    const now = Date.now();
+    const sourceRef = 'task:work:original-alpha';
+    git(
+      p,
+      'config',
+      '--worktree',
+      'catcafe.lifecycle.origin',
+      JSON.stringify({
+        threadId: 'thread_original',
+        sourceRef,
+        role: 'alpha',
+        userId: 'user',
+      }),
+    );
+    f.finish(p, {
+      mode: 'retain',
+      sourceRef,
+      reason: 'accepting current main',
+      until: new Date(now + 3600000).toISOString(),
+    });
+    const row = (at) => worktreeInventory(f.repo, { now: at }).find((r) => r.path === p);
+    let firstKey;
+    for (const text of ['new version', 'another version']) {
+      writeFileSync(join(p, 'README.md'), text);
+      git(p, 'add', 'README.md');
+      git(p, 'commit', '-qm', text);
+      if (text === 'new version') {
+        const first = row(now);
+        assert.equal(first.notice.kind, 'retention-head-changed');
+        firstKey = first.notice.key;
+      } else {
+        assert.equal(row(now).notice.key, firstKey, 'further version changes in the same retention must not repeat');
+      }
+    }
+  } finally {
+    rmSync(f.root, { recursive: true, force: true });
+  }
+});
+
+test('expiry remains a new event after a version-change reminder', () => {
+  const f = fixture();
+  try {
+    const p = f.make('head-then-expiry');
+    const now = Date.now();
+    const sourceRef = 'task:work:original';
+    git(
+      p,
+      'config',
+      '--worktree',
+      'catcafe.lifecycle.origin',
+      JSON.stringify({ threadId: 'thread_original', userId: 'user', sourceRef, role: 'author' }),
+    );
+    f.finish(p, { mode: 'retain', sourceRef, reason: 'original use', until: new Date(now + 3600000).toISOString() });
+    writeFileSync(join(p, 'README.md'), 'current work');
+    git(p, 'add', 'README.md');
+    git(p, 'commit', '-qm', 'current work');
+    const notice = (at) => worktreeInventory(f.repo, { now: at }).find((r) => r.path === p).notice;
+    assert.notEqual(notice(now).key, notice(now + 7200000).key);
   } finally {
     rmSync(f.root, { recursive: true, force: true });
   }

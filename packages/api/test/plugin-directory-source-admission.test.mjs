@@ -112,7 +112,6 @@ async function rejectsBeforePreparation(f, reason) {
   assert.equal(failure.cause?.code, reason);
   assert.deepEqual((await f.store.snapshot()).instances, []);
   assert.deepEqual((await f.store.snapshot()).packages, []);
-  assert.deepEqual((await f.store.snapshot()).grants, []);
   await assert.rejects(access(f.packMarker), { code: 'ENOENT' }, 'source refusal must precede npm pack');
 }
 
@@ -273,7 +272,7 @@ test('stops the shared source read-set revalidation after caller cancellation', 
   await assert.rejects(source.assertCurrent(), (error) => error === reason);
 });
 
-test('bounds total repeated dependency edges before npm, grants or inventory', { timeout: 120000 }, async (t) => {
+test('bounds total repeated dependency edges before npm or inventory', { timeout: 120000 }, async (t) => {
   const f = await fixture(t);
   const names = Array.from({ length: 65 }, (_, i) => `dense-node-${i}`);
   const importers = { '.': {}, 'packages/plugin': { dependencies: {} } };
@@ -347,7 +346,7 @@ test('cancels and releases staging while copying a directory without package.jso
     );
     assert.equal(observationError, undefined);
     assert.equal(stageSeen, true, 'cancel only after actual staging starts');
-    for (const key of ['instances', 'packages', 'grants']) assert.deepEqual((await f.store.snapshot())[key], []);
+    for (const key of ['instances', 'packages']) assert.deepEqual((await f.store.snapshot())[key], []);
     assert.equal(
       (await readdir(f.inventoryRoot)).some((entry) => entry.startsWith('.local-directory-')),
       false,

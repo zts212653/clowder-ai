@@ -1,15 +1,22 @@
-import type { MessageQuoteSource } from '@cat-cafe/shared';
+import type { MessageQuoteSource, ThreadArtifactDTO } from '@cat-cafe/shared';
 import type { ReactNode } from 'react';
 import type { FileData, WorktreeEntry } from '@/hooks/useWorkspace';
 import type { WorkspaceFileNavigationOrigin } from '@/stores/chat-types';
+import type { FileActionSource } from '../content-review/file-action-client';
 import type { WorkspaceFileSave } from './workspace-file-draft';
 
-/** A published copy has display bytes and its source, but no F063 locator or write/listen authority. */
-export interface PublishedTextViewerProps {
+/** Read-only is a capability, not a separate document reader. */
+export interface ContentDocumentViewerProps {
   file: FileData;
-  publication: { url: string; quoteSource?: MessageQuoteSource };
-  onBack: () => void;
+  source: FileActionSource;
+  quoteSource?: MessageQuoteSource;
+  readOnlyReason?: string;
+  onBack?: () => void;
   reviewAction?: ReactNode;
+  showFileQuotes?: boolean;
+  scrollToLine?: number | null;
+  onQuoteSelected?: (quote: string) => void;
+  listenReturn?: { threadId: string; artifact: ThreadArtifactDTO };
 }
 
 export interface WorkspaceFileViewerProps {
@@ -36,13 +43,13 @@ export interface WorkspaceFileViewerProps {
   onToggleHtmlPreview: () => void;
   onToggleJsxPreview: () => void;
   collaborationAvailable?: boolean;
+  collaborationLabel?: string;
   onOpenCollaboration?: () => void;
   onSave: WorkspaceFileSave;
   onDirtyChange?: (dirty: boolean) => void;
   pendingExternalSha?: string | null;
   onApplyExternalChange?: () => void;
   onDismissExternalChange?: () => void;
-  revealInFinder: (path: string) => void;
   onFocusMode?: () => void;
   focusDisabled?: boolean;
   restoreScrollTop?: number | null;

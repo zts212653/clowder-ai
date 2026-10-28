@@ -11,16 +11,23 @@ function DecisionEntry({
   threadId,
   result,
   resolveSpeaker,
+  beforeAction,
 }: {
   fact: Decision;
   threadId: string;
   result: MessageSearchResult;
   resolveSpeaker: (speaker: string) => string;
+  beforeAction?: (result: MessageSearchResult, signal: AbortSignal) => Promise<boolean>;
 }) {
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const pending = useRef<AbortController | null>(null);
-  const source = useMessageSourceActions(result, threadId, resolveSpeaker);
+  const source = useMessageSourceActions(
+    result,
+    threadId,
+    resolveSpeaker,
+    beforeAction ? (signal) => beforeAction(result, signal) : undefined,
+  );
   useEffect(() => () => pending.current?.abort(), []);
   async function open() {
     pending.current?.abort();
@@ -29,6 +36,8 @@ function DecisionEntry({
     setBusy(true);
     setError('');
     try {
+      if (beforeAction && !(await beforeAction(result, controller.signal)))
+        throw new Error('已定事项已更新，请查看当前结果后再操作。');
       // Reuse the existing project/file resolver and Workbench. No new document browser.
       const reference = `${fact.documentPath}:${fact.line}`;
       const response = await apiFetch('/api/workspace/chat-references', {
@@ -100,10 +109,12 @@ export function MessageDecisionSummary({
   response,
   threadId,
   resolveSpeaker,
+  beforeAction,
 }: {
   response: MessageSearchResponse;
   threadId: string;
   resolveSpeaker: (speaker: string) => string;
+  beforeAction?: (result: MessageSearchResult, signal: AbortSignal) => Promise<boolean>;
 }) {
   const facts = new Map<string, { fact: Decision; result: MessageSearchResult }>();
   for (const result of response.results)
@@ -127,6 +138,7 @@ export function MessageDecisionSummary({
           result={entry.result}
           threadId={threadId}
           resolveSpeaker={resolveSpeaker}
+          beforeAction={beforeAction}
         />
       ))}
     </section>

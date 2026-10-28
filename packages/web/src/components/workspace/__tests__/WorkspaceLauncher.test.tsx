@@ -420,7 +420,7 @@ describe('F284 WorkspaceLauncher', () => {
 
     expect(mocks.setWorkspaceMode).toHaveBeenCalledWith('tasks');
     expect(onSelectDestination).toHaveBeenCalledWith(
-      expect.objectContaining({ kind: 'mode', id: 'tasks', label: '任务' }),
+      expect.objectContaining({ kind: 'mode', id: 'tasks', label: '毛线球' }),
     );
     expect(mocks.setWorkspaceMode.mock.invocationCallOrder[0]).toBeLessThan(
       onSelectDestination.mock.invocationCallOrder[0],
@@ -452,7 +452,7 @@ describe('F284 WorkspaceLauncher', () => {
     expect(recall?.querySelector('path')?.getAttribute('d')).toBe(MEMORY_BOOK_STAR_PATH);
 
     const tasks = container.querySelector('[data-testid="workspace-launcher-tasks"] svg');
-    expect(tasks?.getAttribute('stroke')).toBe('currentColor');
+    expect(tasks?.querySelector('circle')?.getAttribute('fill')).toBe('#c46a4d');
     expect(tasks?.querySelector('path, circle')).not.toBeNull();
     expect(tasks?.innerHTML).not.toContain(MEMORY_BOOK_STAR_PATH);
   });

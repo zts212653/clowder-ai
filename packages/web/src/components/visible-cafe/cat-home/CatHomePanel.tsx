@@ -3,6 +3,7 @@
 import Image from 'next/image';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { CatData } from '@/hooks/useCatData';
+import { resolveAvatarUrl } from '@/lib/avatar-url';
 import { apiFetch } from '@/utils/api-client';
 import { CatDiaryShelf } from './CatDiaryShelf';
 import styles from './CatHomePanel.module.css';
@@ -98,7 +99,14 @@ export function CatHomePanel({ cat, availableCats, onSelectCat, onClose }: CatHo
       <aside className={styles.panel} role="dialog" aria-modal="true" aria-label={`${cat.displayName}的房间`}>
         <header className={styles.header}>
           {cat.avatar ? (
-            <Image className={styles.avatar} src={cat.avatar} width={44} height={44} unoptimized alt="" />
+            <Image
+              className={styles.avatar}
+              src={resolveAvatarUrl(cat.avatar)}
+              width={44}
+              height={44}
+              unoptimized
+              alt=""
+            />
           ) : (
             <div className={styles.avatar} />
           )}

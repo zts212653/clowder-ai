@@ -19,7 +19,6 @@ export async function prepareGhArgs(args, freeze) {
   const operation = ghOperation(args);
   if (operation.action === 'new' && ['gist', 'release', 'pr', 'issue'].includes(operation.group))
     operation.action = 'create';
-  rejectCredentialDisclosure(operation, args);
   const options = ghOptionPolicy(operation);
   if (options.passthrough) return args;
   const parameters = sendArguments(args, options.values, options.flags);
@@ -47,8 +46,6 @@ async function ghArgument(argument, operation, flags, freeze) {
     return [argument.name, await ghValue(argument.name, value, operation, freeze)];
   }
   if (argument.kind === 'flag') {
-    if (operation.group === 'auth' && ['--show-token', '-t'].includes(argument.name))
-      throw new Error('credential_disclosure_blocked_before_read');
     rejectDerived(argument.name, operation);
     if (flags && !flags.has(argument.name)) throw new Error('secret_send_option_unsupported');
   }
@@ -62,11 +59,6 @@ function rejectDerived(name, operation) {
     ['create', 'comment', 'review', 'edit'].includes(operation.action)
   )
     throw new Error('secret_send_implicit_content_unsupported');
-}
-
-function rejectCredentialDisclosure(operation, args) {
-  if (operation.group === 'auth' && (operation.action === 'token' || args.includes('--show-token')))
-    throw new Error('credential_disclosure_blocked_before_read');
 }
 
 function fileOperand(operation, positional) {

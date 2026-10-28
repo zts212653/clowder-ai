@@ -4,6 +4,8 @@ export const worksPanelCopy = defineShellCopy(
   {
     zh: {
       title: '作品',
+      untitledImage: '图片',
+      imageUnavailable: '无法读取图片',
       close: '关闭作品',
       thread: '这条对话',
       global: '所有对话',
@@ -38,6 +40,8 @@ export const worksPanelCopy = defineShellCopy(
     },
     en: {
       title: 'Works',
+      untitledImage: 'Image',
+      imageUnavailable: 'Image unavailable',
       close: 'Close works',
       thread: 'This conversation',
       global: 'All conversations',
@@ -71,5 +75,5 @@ export const worksPanelCopy = defineShellCopy(
       total: (count: number) => `${count} works`,
     },
   },
-  { samples: { total: [[0], [761]], newerVersion: [[2]], version: [[1]] } },
+  { samples: { total: [[0], [761]], newerVersion: [[2], [3]], version: [[1], [2]] } },
 );

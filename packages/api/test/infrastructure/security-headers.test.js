@@ -20,6 +20,14 @@ describe('F156 D-2: Security Headers', () => {
     await app.register(securityHeadersPlugin);
     app.get('/api/test', async () => ({ ok: true }));
     app.get('/health', async () => ({ status: 'ok' }));
+    app.get('/api/restricted-by-owner', async (_request, reply) =>
+      reply.header('Content-Security-Policy', "sandbox; default-src 'none'; frame-ancestors *").send('same bytes'),
+    );
+    app.get('/api/multiple-owner-policies', async (_request, reply) =>
+      reply
+        .header('Content-Security-Policy', ["script-src 'self'", "script-src 'none'; frame-ancestors *"])
+        .send('same bytes'),
+    );
     await app.ready();
   });
 
@@ -49,6 +57,21 @@ describe('F156 D-2: Security Headers', () => {
     const res = await app.inject({ method: 'GET', url: '/api/test' });
     assert.equal(res.statusCode, 200);
     assert.deepStrictEqual(JSON.parse(res.body), { ok: true });
+  });
+
+  it('keeps route sandbox/default restrictions and still overrides permissive framing', async () => {
+    const res = await app.inject({ method: 'GET', url: '/api/restricted-by-owner' });
+    assert.equal(res.headers['content-security-policy'], "sandbox; default-src 'none'; frame-ancestors 'none'");
+    assert.equal(res.headers['x-frame-options'], 'DENY');
+    assert.equal(res.body, 'same bytes');
+  });
+
+  it('does not merge distinct owner policies into a directive list that could weaken their intersection', async () => {
+    const res = await app.inject({ method: 'GET', url: '/api/multiple-owner-policies' });
+    assert.equal(
+      res.headers['content-security-policy'],
+      "script-src 'self'; frame-ancestors 'none', script-src 'none'; frame-ancestors 'none'",
+    );
   });
 });
 

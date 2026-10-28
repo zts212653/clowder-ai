@@ -17,6 +17,7 @@ import {
   isSourceCodeExtension,
   type MessageContent,
   messageMediaItemKey,
+  projectFileContent,
   type RichBlock,
   type ThreadArtifactDTO,
 } from '@cat-cafe/shared';
@@ -112,9 +113,6 @@ export interface ThreadArtifactsAggregatorInput {
 
 const AUDIO_NAME_MAX = 24;
 
-/** F232 A.2: video 扩展名集合——mimeType 优先，扩展名 fallback（无 mimeType 的旧 file block）。 */
-const VIDEO_EXTENSIONS = new Set(['mp4', 'mov', 'webm', 'avi', 'mkv', 'm4v', 'ogv']);
-
 function extensionOf(name: string): string {
   const dot = name.lastIndexOf('.');
   return dot > 0 ? name.slice(dot + 1).toLowerCase() : '';
@@ -145,11 +143,12 @@ function visitBlockArtifacts(b: RichBlock, msg: AggregatorMessage, visit: Artifa
     }
     case 'file': {
       // AC-A9: video 识别——mimeType 优先，扩展名 fallback
-      const isVideo = b.mimeType ? b.mimeType.startsWith('video/') : VIDEO_EXTENSIONS.has(extensionOf(b.fileName));
+      const isVideo = projectFileContent({ name: b.fileName, url: b.url, mime: b.mimeType }).kind === 'video';
       visit({
         ...base,
         type: isVideo ? 'video' : 'file',
         name: b.fileName,
+        ...(b.mimeType ? { mime: b.mimeType } : {}),
         url: b.url,
         publicationItem: { kind: 'rich-file', blockId: b.id },
       });
@@ -186,9 +185,15 @@ function visitContentArtifacts(msg: AggregatorMessage, visit: ArtifactVisitor): 
       catId: msg.catId,
       createdAt: msg.timestamp,
       sourceMessageId: msg.id,
-      type: block.type === 'image' ? 'image' : block.mimeType.startsWith('video/') ? 'video' : 'file',
+      type:
+        block.type === 'image'
+          ? 'image'
+          : projectFileContent({ name: block.fileName, url: block.url, mime: block.mimeType }).kind === 'video'
+            ? 'video'
+            : 'file',
       name: block.type === 'image' ? '图片' : block.fileName,
       url: block.url,
+      ...(block.type === 'file' && block.mimeType ? { mime: block.mimeType } : {}),
       publicationItem: { kind: 'content-block', index },
     });
   }

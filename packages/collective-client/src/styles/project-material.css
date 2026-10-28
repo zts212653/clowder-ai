@@ -1,0 +1,301 @@
+.project-triage {
+  margin-top: 24px;
+  min-width: 0;
+}
+.project-triage > header,
+.project-material-card > header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.project-triage > header {
+  justify-content: space-between;
+}
+.project-triage h2 {
+  font-size: 18px;
+}
+.project-triage h2 span {
+  font-size: 13px;
+  color: var(--cafe-text-muted);
+}
+.project-triage-columns {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 190px;
+  gap: 24px;
+  align-items: start;
+}
+.project-triage-columns > main {
+  min-width: 0;
+}
+.project-material-card {
+  margin-bottom: 10px;
+  padding: 12px 14px;
+  border: 1px solid var(--console-border-soft);
+  border-radius: 10px;
+  background: var(--console-card-bg);
+}
+.project-material-card h3 {
+  margin: 0;
+  font-size: 14px;
+  overflow-wrap: anywhere;
+}
+.material-kind {
+  flex-shrink: 0;
+  padding: 3px 6px;
+  border-radius: 6px;
+  background: var(--cafe-surface-1);
+  color: var(--cafe-text-muted);
+  font-size: 11.5px;
+}
+.material-meta,
+.material-note {
+  color: var(--cafe-text-muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
+.material-source-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  font-size: 12px;
+}
+.material-clause {
+  padding: 10px 0;
+  border-bottom: 1px solid var(--console-border-soft);
+}
+.material-clause > p {
+  margin: 0 0 8px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  line-height: 1.65;
+  font-size: 13px;
+  max-height: 260px;
+  overflow-y: auto;
+}
+.material-clause small {
+  display: block;
+  margin-bottom: 8px;
+  font-size: 11px;
+  color: var(--cafe-text-muted);
+}
+.material-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+.project-triage button,
+.material-dialog button,
+.project-share-material {
+  min-height: 28px;
+  padding: 5px 9px;
+  border: 1px solid var(--console-border-soft);
+  border-radius: 6px;
+  background: var(--console-card-bg);
+  color: var(--cafe-text-primary);
+  cursor: pointer;
+  font-size: 12px;
+}
+.project-triage button:disabled,
+.material-dialog button:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+.project-triage button.primary,
+.material-dialog button.primary {
+  border-color: var(--cafe-accent);
+  color: var(--cafe-accent);
+  background: var(--cafe-surface-1);
+}
+.material-revised {
+  margin-top: 10px;
+  color: var(--semantic-warning);
+  font-size: 12px;
+  line-height: 1.6;
+}
+.material-revised ol {
+  color: var(--cafe-text-muted);
+  padding-left: 20px;
+}
+.material-destination {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  color: var(--cafe-text-muted);
+  font-size: 12px;
+}
+.material-processed {
+  border-left: 1px solid var(--console-border-soft);
+  padding-left: 16px;
+  min-width: 0;
+}
+.material-processed h3 {
+  font-size: 13px;
+  margin-top: 0;
+}
+.material-processed p {
+  display: grid;
+  gap: 6px;
+  margin: 14px 0;
+  color: var(--cafe-text-muted);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.project-material-unavailable {
+  padding: 12px;
+  margin: 10px 0;
+  border: 1px dashed var(--console-border-soft);
+  border-radius: 10px;
+  color: var(--cafe-text-muted);
+  font-size: 13px;
+}
+.material-dialog::backdrop {
+  background: var(--console-overlay-heavy);
+}
+.material-dialog {
+  margin: auto;
+  width: min(540px, calc(100% - 20px));
+  max-height: calc(100dvh - 40px);
+  box-sizing: border-box;
+  overflow-y: auto;
+  padding: 22px;
+  border: 1px solid var(--console-border-soft);
+  border-radius: 12px;
+  background: var(--console-card-bg);
+  color: var(--cafe-text-primary);
+}
+.material-dialog h2 {
+  font-size: 19px;
+  margin: 0;
+}
+.material-dialog > p,
+.material-dialog form > p {
+  color: var(--cafe-text-muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
+.material-dialog blockquote {
+  margin: 14px 0;
+  padding: 10px 12px;
+  border-left: 2px solid var(--console-border-soft);
+  font-size: 12px;
+  max-height: 120px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+}
+.material-dialog form,
+.material-dialog label {
+  display: grid;
+  gap: 8px;
+}
+.material-dialog form {
+  gap: 14px;
+}
+.material-dialog label,
+.material-dialog legend {
+  font-size: 12px;
+  color: var(--cafe-text-muted);
+}
+.material-dialog input,
+.material-dialog textarea,
+.material-dialog select {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  border: 1px solid var(--console-border-soft);
+  border-radius: 6px;
+  padding: 8px;
+  background: var(--cafe-surface-0);
+  color: var(--cafe-text-primary);
+  font: inherit;
+}
+.material-dialog textarea {
+  min-height: 100px;
+}
+.material-dialog footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.material-dialog .material-consent,
+.material-task-choices label {
+  display: flex;
+  align-items: start;
+  gap: 8px;
+  line-height: 1.6;
+}
+.material-consent input,
+.material-task-choices input {
+  width: auto;
+  margin-top: 3px;
+}
+.material-task-choices {
+  border: 0;
+  margin: 0;
+  padding: 0;
+  max-height: 200px;
+  overflow-y: auto;
+}
+.material-task-choices label {
+  padding: 6px 0;
+}
+.material-sources {
+  margin-top: 18px;
+  font-size: 12px;
+}
+.material-sources h4 {
+  margin: 0 0 8px;
+  font-size: 13px;
+}
+.material-sources > div {
+  display: grid;
+  gap: 4px;
+  margin-bottom: 8px;
+  overflow-wrap: anywhere;
+}
+.material-sources small {
+  color: var(--cafe-text-muted);
+  font-size: 11px;
+}
+.material-sources button {
+  text-align: start;
+  border: 0;
+  padding: 0;
+  background: none;
+  color: var(--cafe-accent);
+  cursor: pointer;
+  font: inherit;
+}
+@media (max-width: 900px) {
+  .project-triage-columns {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .material-processed {
+    border-left: 0;
+    border-top: 1px solid var(--console-border-soft);
+    padding: 14px 0 0;
+  }
+}
+@media (max-width: 640px) {
+  .material-dialog {
+    padding: 16px;
+    max-height: calc(100dvh - 20px);
+  }
+}
+.project-page-authoring-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  justify-self: end;
+}
+.project-page-authoring-actions .project-authoring-control > button {
+  min-height: 32px;
+  padding: 6px 10px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  font-size: 13px;
+  cursor: pointer;
+}

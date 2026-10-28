@@ -85,42 +85,50 @@ it('records the exact cold-start capsule only after the provider observes that n
 });
 
 it('does not invent opening delivery for a warm turn, unmatched profile bytes, or an unproven native channel', async () => {
-  for (const scenario of ['warm', 'changed-profile', 'unknown-channel']) {
-    const deliveries = [];
-    const { recorder } = fixture({
-      profileRepository: {
-        readCapsule: () => ({
-          content: scenario === 'changed-profile' ? '新版内容。' : '先讲结果。',
-          revision: 'sha256:fixture-capsule',
-        }),
-      },
-      onProfileOpeningObserved: async (delivery) => deliveries.push(delivery),
-      snapshot: () => ({
-        continuity: {
-          mode: scenario === 'warm' ? 'hot' : 'cold',
-          contextEpoch: 1,
-          capability: 'exact',
-          compactionRefs: [],
+  for (const injectionDecision of [
+    'native_l0_compiled',
+    'native_l0_compiled_with_signature_boundary',
+    'native_agent_file_compiled',
+  ]) {
+    for (const scenario of ['warm', 'changed-profile', 'unknown-channel', 'near-match']) {
+      const deliveries = [];
+      const { recorder } = fixture({
+        profileRepository: {
+          readCapsule: () => ({
+            content: scenario === 'changed-profile' ? '新版内容。' : '先讲结果。',
+            revision: 'sha256:fixture-capsule',
+          }),
         },
-        messageSourceRefs: [],
-        nativeInstructionSourceRefs: [],
-        presentations: [],
-      }),
-    });
-    const commit = await recorder.recordPrepared(
-      {
-        ...prepared(),
-        nativeInstructions: [
-          {
-            body: '## 主人画像\n\n先讲结果。',
-            ...(scenario === 'unknown-channel' ? {} : { injectionDecision: 'native_l0_compiled' }),
+        onProfileOpeningObserved: async (delivery) => deliveries.push(delivery),
+        snapshot: () => ({
+          continuity: {
+            mode: scenario === 'warm' ? 'hot' : 'cold',
+            contextEpoch: 1,
+            capability: 'exact',
+            compactionRefs: [],
           },
-        ],
-      },
-      { attempt: 1 },
-    );
-    await recorder.recordObserved(commit, { evidenceRef: 'provider-turn-accepted' });
-    assert.equal(deliveries.length, 0, scenario);
+          messageSourceRefs: [],
+          nativeInstructionSourceRefs: [],
+          presentations: [],
+        }),
+      });
+      const commit = await recorder.recordPrepared(
+        {
+          ...prepared(),
+          nativeInstructions: [
+            {
+              body: '## 主人画像\n\n先讲结果。',
+              ...(scenario === 'unknown-channel'
+                ? {}
+                : { injectionDecision: scenario === 'near-match' ? `${injectionDecision}_extra` : injectionDecision }),
+            },
+          ],
+        },
+        { attempt: 1 },
+      );
+      await recorder.recordObserved(commit, { evidenceRef: 'provider-turn-accepted' });
+      assert.equal(deliveries.length, 0, `${injectionDecision}: ${scenario}`);
+    }
   }
 });
 

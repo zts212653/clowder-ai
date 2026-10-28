@@ -115,6 +115,7 @@ import type { PluginRuntimeConfigurationPort } from './manifest-configuration-pr
 import { HostMediaSourceImporter } from './media-source-importer.js';
 import { type OfficialPluginCatalogEntry, officialPluginPresentationMatches } from './official-catalog.js';
 import { OfficialPluginPackageInstaller } from './official-package-installer.js';
+import { PluginProjectOutputs } from './outputs/project-output-actions.js';
 import { readPluginConfig } from './plugin-config-store.js';
 
 type BuiltinPluginRuntime = Pick<BundledPluginRuntime, 'start' | 'stop'>;
@@ -126,6 +127,7 @@ export interface PluginRuntimePersistencePaths {
 }
 
 export interface DormantPluginRuntimeCompositionOptions {
+  readonly collectiveMaterialSource?: import('./host-surface/collective-material-source.js').CollectiveMaterialSourceHolder;
   readonly collectiveArtifactOwner?: import('./host-surface/collective-artifact-owner.js').CollectiveArtifactOwnerHolder;
   readonly builtinRuntimes?: ReadonlyMap<string, BuiltinPluginRuntime>;
   readonly taskArtifactReader?: import('../growing/ports/PreparedArtifactReader.js').PreparedArtifactReader;
@@ -473,6 +475,7 @@ export function createDormantPluginRuntimeComposition(
       }),
     neutral: (pluginInstanceId, packageDigest, assertActivation, activationSignal) =>
       createPluginNeutralHost({
+        ...(options.collectiveMaterialSource ? { collectiveMaterialSource: options.collectiveMaterialSource } : {}),
         ...(options.collectiveArtifactOwner ? { collectiveArtifactOwner: options.collectiveArtifactOwner } : {}),
         ...(activationSignal ? { activationSignal } : {}),
         pluginInstanceId,
@@ -566,6 +569,12 @@ export function createDormantPluginRuntimeComposition(
         reason === PLUGIN_OWNER_UNINSTALLED_REASON ? 'instance_uninstalled' : 'instance_stopped',
       );
     },
+    new PluginProjectOutputs({
+      root: resolve(dirname(paths.inventorySnapshotPath), 'project-outputs'),
+      importer: mediaImporter,
+      ledger: mediaLedger,
+      ...(options.threadStore ? { threads: options.threadStore } : {}),
+    }),
   );
   deliveryTarget.current = supervisor;
   supervisor.register(

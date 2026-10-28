@@ -11,6 +11,7 @@ import { scrollToMessage } from '@/utils/scrollToMessage';
 import { kickTeleportResolve, planTeleport } from '@/utils/teleport';
 import { resolveListedWorktreeId } from '@/utils/worktree-id-alias';
 import { worktreeBasename } from '@/utils/worktree-label';
+import { useContentOpen } from './content-review/useContentOpen';
 import { pushThreadRouteWithHistory } from './ThreadSidebar/thread-navigation';
 import { useF307ExperienceWorkbenchStore } from './workbench/experience-workbench-store';
 import { F307ExperienceWorkbench } from './workbench/F307ExperienceWorkbench';
@@ -35,6 +36,7 @@ export function WorkspacePanel({
   statusSurface?: ReactNode;
   artifactWorkHostAvailable?: boolean;
 }) {
+  const contentOpening = useContentOpen();
   const {
     worktrees,
     worktreesLoading,
@@ -100,29 +102,32 @@ export function WorkspacePanel({
     // Both are valid coordinates; the owner resolver, rather than the alias list, validates them.
     if (!openFilePath || !worktreeId) return;
     setViewMode('files');
-    openWorkspaceFileStamp(
-      {
-        worktreeId,
-        path: openFilePath,
-        scrollToLine: openFileLine,
-        navigationOrigin: workspaceFileSetAt.navigationOrigin,
-        ...(currentWorktree?.resolvedRoot && currentWorktree.rootEpoch !== undefined
-          ? {
-              rootSelection: {
-                root: currentWorktree.resolvedRoot,
-                branch: currentWorktree.branch,
-                expectedEpoch: currentWorktree.rootEpoch,
-              },
-            }
-          : {}),
-      },
-      isV2,
-      workspaceFileSetAt.disposition,
-      workspaceFileSetAt.threadId ?? undefined,
-    );
+    const target = {
+      worktreeId,
+      path: openFilePath,
+      scrollToLine: openFileLine,
+      navigationOrigin: workspaceFileSetAt.navigationOrigin,
+      ...(currentWorktree?.resolvedRoot && currentWorktree.rootEpoch !== undefined
+        ? {
+            rootSelection: {
+              root: currentWorktree.resolvedRoot,
+              branch: currentWorktree.branch,
+              expectedEpoch: currentWorktree.rootEpoch,
+            },
+          }
+        : {}),
+    };
+    void contentOpening.openContent({
+      kind: 'workspace',
+      target,
+      origin: target.navigationOrigin,
+      attach: () =>
+        openWorkspaceFileStamp(target, isV2, workspaceFileSetAt.disposition, workspaceFileSetAt.threadId ?? undefined),
+    });
     lastWorkspaceFileSetAtRef.current = workspaceFileSetAt.ts;
     if (pendingFileLink) consumeWorkspaceFileSetAt(workspaceFileSetAt);
   }, [
+    contentOpening.openContent,
     consumeWorkspaceFileSetAt,
     currentWorktree,
     fileStampReady,
@@ -195,61 +200,64 @@ export function WorkspacePanel({
   const activeWorktreeId = currentWorktree ? worktreeId : null;
 
   return (
-    <F307ExperienceWorkbench
-      foregroundSurfaceId={
-        isV2 && (foregroundSurfaceId !== null || viewMode === 'home') ? foregroundSurfaceId : undefined
-      }
-      onOpenHome={
-        isV2
-          ? () => {
-              useChatStore.getState().setWorkspaceForegroundSurfaceId(null);
-              setViewMode('home');
-            }
-          : undefined
-      }
-      threadId={threadId}
-      defaultCatId={defaultCatId}
-      visible={visible}
-      statusSurface={statusSurface}
-      artifactWorkHostAvailable={artifactWorkHostAvailable}
-      onSelectDevSurface={setViewMode}
-      worktreeId={activeWorktreeId}
-      canonicalWorktreeId={currentWorktree?.canonicalId ?? currentWorktree?.id ?? activeWorktreeId}
-      rootSelection={
-        currentWorktree?.resolvedRoot && currentWorktree.rootEpoch !== undefined
-          ? {
-              root: currentWorktree.resolvedRoot,
-              branch: currentWorktree.branch,
-              expectedEpoch: currentWorktree.rootEpoch,
-            }
-          : undefined
-      }
-      worktreeLoading={worktreesLoading}
-      worktreeError={worktreesError}
-      openFilePath={openFilePath}
-      preview={workspacePreview}
-      repository={
-        currentWorktree ? { name: worktreeBasename(currentWorktree.root), branch: currentWorktree.branch } : undefined
-      }
-      workspaceSearch={launcherWorkspaceSearch}
-      f284WorkspaceState={readF284WorkspaceSnapshot(
-        {
-          workspaceMode,
-          workspaceSurface: viewMode,
-          workspaceOpenFilePath: openFilePath,
-          workspaceOpenFileLine: openFileLine,
-          workspaceWorktreeId: worktreeId,
-          workspacePreview,
-          teamWorkspaceSubject,
-        },
-        pendingFileLink,
-        threadId,
-      )}
-      workspaceOpenRequest={workspaceOpenRequest}
-      onWorkspaceOpenRequestConsumed={consumeWorkspaceOpenRequest}
-      onRestoreWorkspaceSearch={restoreWorkspaceSearch}
-      onReturnToChatMessage={returnToChatMessage}
-      onOpenAppRoute={(href) => router.push(href)}
-    />
+    <>
+      <F307ExperienceWorkbench
+        foregroundSurfaceId={
+          isV2 && (foregroundSurfaceId !== null || viewMode === 'home') ? foregroundSurfaceId : undefined
+        }
+        onOpenHome={
+          isV2
+            ? () => {
+                useChatStore.getState().setWorkspaceForegroundSurfaceId(null);
+                setViewMode('home');
+              }
+            : undefined
+        }
+        threadId={threadId}
+        defaultCatId={defaultCatId}
+        visible={visible}
+        statusSurface={statusSurface}
+        artifactWorkHostAvailable={artifactWorkHostAvailable}
+        onSelectDevSurface={setViewMode}
+        worktreeId={activeWorktreeId}
+        canonicalWorktreeId={currentWorktree?.canonicalId ?? currentWorktree?.id ?? activeWorktreeId}
+        rootSelection={
+          currentWorktree?.resolvedRoot && currentWorktree.rootEpoch !== undefined
+            ? {
+                root: currentWorktree.resolvedRoot,
+                branch: currentWorktree.branch,
+                expectedEpoch: currentWorktree.rootEpoch,
+              }
+            : undefined
+        }
+        worktreeLoading={worktreesLoading}
+        worktreeError={worktreesError}
+        openFilePath={openFilePath}
+        preview={workspacePreview}
+        repository={
+          currentWorktree ? { name: worktreeBasename(currentWorktree.root), branch: currentWorktree.branch } : undefined
+        }
+        workspaceSearch={launcherWorkspaceSearch}
+        f284WorkspaceState={readF284WorkspaceSnapshot(
+          {
+            workspaceMode,
+            workspaceSurface: viewMode,
+            workspaceOpenFilePath: openFilePath,
+            workspaceOpenFileLine: openFileLine,
+            workspaceWorktreeId: worktreeId,
+            workspacePreview,
+            teamWorkspaceSubject,
+          },
+          pendingFileLink,
+          threadId,
+        )}
+        workspaceOpenRequest={workspaceOpenRequest}
+        onWorkspaceOpenRequestConsumed={consumeWorkspaceOpenRequest}
+        onRestoreWorkspaceSearch={restoreWorkspaceSearch}
+        onReturnToChatMessage={returnToChatMessage}
+        onOpenAppRoute={(href) => router.push(href)}
+      />
+      {contentOpening.lightbox}
+    </>
   );
 }

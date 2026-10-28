@@ -68,6 +68,23 @@ describe('ThreadSettingsPanel', () => {
     ).toEqual(['goal', 'execution', 'organization']);
   });
 
+  it('keeps keyboard focus inside the same popover when entering and leaving background settings', () => {
+    writeShellPresentation('v2');
+    render();
+    const panel = document.querySelector('[data-testid="thread-settings-panel"]');
+    const entry = panel?.querySelector<HTMLButtonElement>('[data-testid="thread-background-entry"]');
+    act(() => {
+      entry?.focus();
+      entry?.click();
+    });
+    const back = panel?.querySelector<HTMLButtonElement>('[aria-label="返回对话设置"]');
+    expect(document.querySelector('[data-testid="thread-settings-panel"]')).toBe(panel);
+    expect(document.activeElement).toBe(back);
+    expect(panel?.querySelector('header button')).toBeNull();
+    act(() => back?.click());
+    expect(document.activeElement).toBe(panel?.querySelector('[data-testid="thread-background-entry"]'));
+  });
+
   function render(onClose = vi.fn(), returnFocusRef?: React.RefObject<HTMLElement | null>, projectPath?: string) {
     act(() => {
       root.render(

@@ -5,6 +5,7 @@ import { dirname, join, resolve } from 'node:path';
 import { after, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import Fastify from 'fastify';
+import { bindInvocationPluginMcpView } from '../dist/config/capabilities/invocation-plugin-mcp-view.js';
 import { InvocationRegistry } from '../dist/domains/cats/services/agents/invocation/InvocationRegistry.js';
 import {
   buildCodexActiveWriterWaitSignal,
@@ -16,7 +17,9 @@ import { NativePluginActions } from '../dist/domains/plugin/declared/native-plug
 import { syncMcpProject } from '../dist/mcp/mcp-sync-engine.js';
 import { pluginNativeActionRoutes } from '../dist/routes/plugin-native-action-routes.js';
 import { getCliExecutionExit, isCliExecutionRunning } from '../dist/utils/CliExecutionObservation.js';
+import { fixture as alphaPluginFixture } from './helpers/alpha-plugin-runtime-fixture.js';
 import { createHarness, sessionOptions } from './helpers/codex-host-pool-harness.js';
+import { directMcpContract } from './helpers/direct-mcp-contract.js';
 import { fakeL0Compiler } from './helpers/fake-l0-compiler.js';
 import { callMcpProbe, writeMcpProbe } from './helpers/mcp-probe.js';
 
@@ -1011,6 +1014,64 @@ function managedCredentialPath(threadStart) {
     .map((server) => server?.env?.CAT_CAFE_CREDENTIAL_FILE)
     .find((value) => typeof value === 'string');
 }
+
+test('ordinary pooled Codex selects its Alpha activation with the original member callback', async (t) => {
+  const f = await alphaPluginFixture(t, 'alpha');
+  await f.mutate(true);
+  const previousRoots = Object.fromEntries(
+    ['CAT_CAFE_CONFIG_ROOT', 'CAT_CAFE_WORKSPACE_ROOT'].map((key) => [key, process.env[key]]),
+  );
+  process.env.CAT_CAFE_CONFIG_ROOT = f.capabilityProjectRoot;
+  process.env.CAT_CAFE_WORKSPACE_ROOT = f.projectRoot;
+  t.after(() => {
+    for (const [key, value] of Object.entries(previousRoots)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  });
+  const pool = new FakeHostPool();
+  const service = new CodexAgentService({
+    carrierMode: 'app_server',
+    appServerHostPool: pool,
+    cliCommand: process.execPath,
+    l0CompilerFn: fakeL0Compiler,
+    model: 'gpt-5.3-codex',
+  });
+  const callback = {
+    ...callbackEnv('alpha-member-turn', 'fixture-callback'),
+    CAT_CAFE_API_URL: 'http://127.0.0.1:5712',
+  };
+  const iterator = bindInvocationPluginMcpView(
+    () =>
+      service
+        .invoke('ordinary Alpha member', {
+          workingDirectory: f.projectRoot,
+          invocationId: 'alpha-member-turn',
+          callbackEnv: callback,
+        })
+        [Symbol.asyncIterator](),
+    await f.runtime.supervisor.resolveMemberMcpView(),
+  );
+  const events = [];
+  for (let result = await iterator.next(); !result.done; result = await iterator.next()) events.push(result.value);
+  assert.deepEqual(
+    events.filter((event) => event.type === 'error'),
+    [],
+  );
+  const start = pool.wires[0].writes.find((message) => message.method === 'thread/start');
+  const server = start.params.config.mcp_servers[`plugin__${f.pluginId}__native`];
+  assert.ok(server, 'the actual Codex carrier receives the registered plugin');
+  const { upstream } = directMcpContract(server);
+  const launch = JSON.parse(readFileSync(upstream.args[1], 'utf8'));
+  t.after(() => rmSync(dirname(upstream.args[0]), { recursive: true, force: true }));
+  assert.ok(launch.args[0].startsWith(f.projectRoot), 'Codex must not launch the formal runtime plugin');
+  assert.equal(launch.cwd.startsWith(f.projectRoot), true);
+  assert.equal(launch.env.CAT_CAFE_API_URL, callback.CAT_CAFE_API_URL);
+  const credential = JSON.parse(readFileSync(server.env.CAT_CAFE_CREDENTIAL_FILE, 'utf8'));
+  assert.equal(credential.invocationId, 'alpha-member-turn');
+  assert.equal(credential.callbackToken, callback.CAT_CAFE_CALLBACK_TOKEN);
+  await f.unchanged();
+});
 
 test('pooled Codex carries MCP config per session and refreshes an isolated credential file', async () => {
   const pool = new FakeHostPool();

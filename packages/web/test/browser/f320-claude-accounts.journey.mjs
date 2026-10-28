@@ -97,9 +97,9 @@ export async function runClaudeAccountJourney({ preview, browser }) {
     await update.getByRole('button', { name: '保存更改', exact: true }).click();
     await update.waitFor({ state: 'hidden' });
     await select(native);
-    assert.equal(await preview.reply('back to default', 'opus'), undefined);
+    assert.equal((await preview.reply('back to default', 'opus')).accountRef, 'claude');
     const nativeReplies = await (await page.request.get(`${preview.apiUrl}/api/messages`)).json();
-    assert.equal(nativeReplies.messages.at(-1).metadata.usage.executionAccount, undefined);
+    assert.equal(nativeReplies.messages.at(-1).metadata.usage.executionAccount.accountRef, 'claude');
     await page.setViewportSize({ width: 390, height: 844 });
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
     await page.evaluate(() => {

@@ -1,5 +1,5 @@
 'use client';
-import type { ThreadArtifactDTO } from '@cat-cafe/shared';
+import { projectFileContent, type ThreadArtifactDTO } from '@cat-cafe/shared';
 import { useArtifactContent } from '@/hooks/useArtifactContent';
 import { classifyArtifactView } from './artifact-view';
 import { useNearWorkViewport } from './useNearWorkViewport';
@@ -20,9 +20,9 @@ function Bars({ code = false, count = 6 }: { code?: boolean; count?: number }) {
 }
 function PaperContent({ artifact }: { artifact: ThreadArtifactDTO }) {
   const { ref, near } = useNearWorkViewport<HTMLSpanElement>();
+  const kind = projectFileContent(artifact).kind;
   const text =
-    /\.(md|markdown|txt)$/i.test(artifact.ref ?? artifact.name) ||
-    (artifact.type === 'code' && classifyArtifactView(artifact) === 'text');
+    kind === 'markdown' || kind === 'text' || (artifact.type === 'code' && classifyArtifactView(artifact) === 'text');
   const body = useArtifactContent(artifact, null, near && text && !!artifact.url);
   const lines = body.content?.trim().split('\n');
   const plain = (line: string) => (artifact.type === 'code' ? line : line.replace(/^#+\s*/, ''));

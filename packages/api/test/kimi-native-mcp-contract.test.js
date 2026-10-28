@@ -5,9 +5,9 @@ import { join, resolve } from 'node:path';
 import { test } from 'node:test';
 import { catRegistry } from '@cat-cafe/shared';
 import { prepareKimiMcpConfig } from '../dist/domains/cats/services/agents/providers/kimi-mcp-config.js';
+import { directMcpContract } from './helpers/direct-mcp-contract.js';
 import { nativeLoaders, nativeSchemas } from './helpers/kimi-native-contract.js';
 import { kimiNativeFixture, managedCapability } from './helpers/kimi-native-fixture.js';
-import { secretMcpContract } from './helpers/secret-mcp-contract.js';
 
 const transports = {
   stdio: { command: 'never-executed', args: ['--no-spawn'] },
@@ -154,8 +154,8 @@ test('root user MCP keeps its source-relative cwd while retired and managed alia
     for (const load of Object.values(nativeLoaders)) {
       const effective = await load(f.loadInput);
       assert.notEqual(effective.filesystem.enabled, false);
-      const { upstream: filesystem } = secretMcpContract(effective.filesystem);
-      assert.equal(filesystem.source, 'filesystem');
+      const { upstream: filesystem } = directMcpContract(effective.filesystem);
+
       assert.equal(filesystem.command, 'never-executed');
       assert.equal(resolve(filesystem.cwd), join(f.project, 'tools'));
       assert.deepEqual(filesystem.args, ['relative-script.js']);
@@ -225,8 +225,8 @@ test('gitdir worktree discovery and nested user MCP paths follow their actual so
         ['inherited', join(f.project, 'root-tools')],
         ['override', join(f.cwd, 'local-tools')],
       ]) {
-        const { upstream } = secretMcpContract(effective[name]);
-        assert.equal(upstream.source, name);
+        const { upstream } = directMcpContract(effective[name]);
+
         assert.equal(upstream.command, 'never-executed');
         assert.equal(resolve(upstream.cwd), cwd);
         assert.deepEqual(upstream.env, {}, 'foreign upstream must not acquire host identity or callback env');
@@ -245,17 +245,14 @@ test('host-approved collaboration remains executable and per-cat denial cannot l
     for (const load of Object.values(nativeLoaders)) {
       const effective = await load(f.loadInput);
       assert.notEqual(effective['cat-cafe-collab'].enabled, false);
-      const { upstream: collab, proxyEnv } = secretMcpContract(effective['cat-cafe-collab']);
-      assert.equal(collab.source, 'cat-cafe-collab');
+      const { upstream: collab, launchEnv } = directMcpContract(effective['cat-cafe-collab']);
+
       assert.equal(collab.command, process.execPath);
       assert.deepEqual(collab.args, [join(f.dist, 'collab.js')]);
       assert.equal(collab.env.CAT_CAFE_CAT_ID, 'kimi');
       assert.ok(collab.env.ALLOWED_WORKSPACE_DIRS, 'the workspace boundary stays on the upstream reader');
-      assert.deepEqual(
-        proxyEnv,
-        { ALLOWED_WORKSPACE_DIRS: collab.env.ALLOWED_WORKSPACE_DIRS },
-        'the relay retains its workspace boundary without persisting invocation credentials',
-      );
+      assert.equal(launchEnv.CAT_CAFE_CAT_ID, 'kimi');
+      assert.equal(launchEnv.CAT_CAFE_SECRET_MCP_PROXY_SPEC, undefined);
     }
   } finally {
     await lease.dispose();
@@ -266,5 +263,41 @@ test('host-approved collaboration remains executable and per-cat denial cannot l
     await assertNativeDisabled(f, ['cat-cafe-collab']);
   } finally {
     await denied.dispose();
+  }
+});
+
+test('Kimi native parsers accept private shared HTTP headers with the six unchanged server names', async (t) => {
+  const f = await kimiNativeFixture(t, {
+    capabilities: ['collab', 'memory', 'signals', 'limb', 'audio', 'finance'].map((name) =>
+      managedCapability({ id: `cat-cafe-${name}` }),
+    ),
+  });
+  const mcpServerPath = new URL('../../mcp-server/dist/index.js', import.meta.url).pathname;
+  const lease = await prepareKimiMcpConfig({
+    workingDirectory: f.cwd,
+    mcpServerPath,
+    callbackEnv: {
+      KIMI_CODE_HOME: f.native,
+      CAT_CAFE_CAT_ID: 'kimi',
+      CAT_CAFE_API_URL: 'http://127.0.0.1:59999',
+      CAT_CAFE_INVOCATION_ID: 'owned-kimi-A',
+      CAT_CAFE_CALLBACK_TOKEN: 'owned-kimi-token',
+      CAT_CAFE_THREAD_ID: 'owned-kimi-thread',
+      CAT_CAFE_MCP_TRANSPORT: 'shared',
+    },
+  });
+  try {
+    for (const load of Object.values(nativeLoaders)) {
+      const servers = await load(f.loadInput);
+      assert.equal(Object.keys(servers).length, 6);
+      for (const [name, server] of Object.entries(servers)) {
+        assert.equal(server.command, undefined);
+        assert.equal(new URL(server.url).searchParams.get('family'), name.slice('cat-cafe-'.length));
+        assert.equal(server.headers['x-invocation-id'], 'owned-kimi-A');
+        assert.equal(server.headers['x-callback-token'], 'owned-kimi-token');
+      }
+    }
+  } finally {
+    await lease.dispose();
   }
 });

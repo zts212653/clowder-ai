@@ -1,6 +1,7 @@
 'use client';
 
 import { type RefObject, useCallback, useEffect, useRef, useState } from 'react';
+import { resolveAvatarUrl } from '@/lib/avatar-url';
 import { type CatOption } from './chat-input-options';
 
 interface ChatInputMenusProps {
@@ -71,7 +72,7 @@ export function ChatInputMenus({
                 ) : (
                   /* eslint-disable-next-line @next/next/no-img-element */
                   <img
-                    src={opt.avatar}
+                    src={resolveAvatarUrl(opt.avatar)}
                     alt={opt.label}
                     className="w-7 h-7 rounded-full"
                     onError={(e) => {

@@ -3,6 +3,7 @@
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { collectiveClientNamespace } from '../human-send-custody.js';
 import { useCollectiveClient } from '../use-collective-client.js';
 import { SESSION_KEY } from '../use-human-auth-session.js';
 import { snapshot as ready } from './first-entry-fixture.js';
@@ -17,8 +18,18 @@ let member = true;
 const storageKey = `${SESSION_KEY}:${location.origin}`;
 const { me: readyMe, collective, meta } = ready;
 if (!readyMe || !collective || !meta) throw new Error('Expected authenticated fixture');
-const me = { ...readyMe, collectives: [collective] };
+const alternateCollective = {
+  ...collective,
+  collectiveId: 'col_savedreturn',
+  name: '保存频道的共同体',
+};
+const me = { ...readyMe, collectives: [collective, alternateCollective] };
 const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status });
+
+function currentHumanResponse(): Response {
+  if (meStatus !== 200) return json(meStatus, { error: { message: 'authority unavailable' } });
+  return json(200, { ...me, collectives: member ? me.collectives : [] });
+}
 
 function Harness() {
   client = useCollectiveClient();
@@ -27,6 +38,7 @@ function Harness() {
 
 beforeEach(async () => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+  localStorage.clear();
   window.history.replaceState(null, '', `/?collectiveId=${collective.collectiveId}`);
   sessionStorage.setItem(storageKey, 'valid-human-session');
   resourceStatus = 200;
@@ -38,13 +50,7 @@ beforeEach(async () => {
       const path = input.split('?')[0];
       if (path === '/api/meta') return json(200, ready.meta);
       if (path === '/api/auth/providers') return json(200, { providers: [] });
-      if (path === '/api/me')
-        return json(
-          meStatus,
-          meStatus === 200
-            ? { ...me, collectives: member ? me.collectives : [] }
-            : { error: { message: 'authority unavailable' } },
-        );
+      if (path === '/api/me') return currentHumanResponse();
       if (resourceStatus !== 200) return json(resourceStatus, { error: { message: 'resource denied' } });
       const data: Record<string, unknown> = {
         '/api/events/human': { events: [human] },
@@ -76,7 +82,29 @@ afterEach(async () => {
   await act(async () => root.unmount());
   container.remove();
   sessionStorage.clear();
+  localStorage.clear();
   vi.unstubAllGlobals();
+});
+
+it('restores the saved channel target when selecting a previously visited world', async () => {
+  const namespace = collectiveClientNamespace({ ...client.snapshot, collective: alternateCollective });
+  expect(namespace).toBeDefined();
+  localStorage.setItem(`collective-channel:${namespace}`, 'research');
+  window.history.replaceState(null, '', `/?collectiveId=${collective.collectiveId}&channelId=general`);
+
+  await act(async () => client.selectCollective(alternateCollective.collectiveId));
+
+  expect(client.snapshot.collective?.collectiveId).toBe(alternateCollective.collectiveId);
+  expect(new URL(window.location.href).searchParams.get('channelId')).toBe('research');
+});
+
+it('keeps an unvisited world on its home instead of inventing a channel target', async () => {
+  window.history.replaceState(null, '', `/?collectiveId=${collective.collectiveId}&channelId=general`);
+
+  await act(async () => client.selectCollective(alternateCollective.collectiveId));
+
+  expect(client.snapshot.collective?.collectiveId).toBe(alternateCollective.collectiveId);
+  expect(new URL(window.location.href).searchParams.has('channelId')).toBe(false);
 });
 
 it('closes the removed membership scope while retaining the valid Human session', async () => {
@@ -136,7 +164,7 @@ it('does not mistake a service 503 for membership loss or logout', async () => {
   expect(sessionStorage.getItem(storageKey)).toBe('valid-human-session');
 });
 
-it('a delayed old allow cannot reopen a scope closed by a newer denial', async () => {
+it('a superseding denial ignores an older allow already in the serialized request lane', async () => {
   const previous = globalThis.fetch;
   let release: ((response: Response) => void) | undefined;
   let intercepted = false;
@@ -152,13 +180,16 @@ it('a delayed old allow cannot reopen a scope closed by a newer denial', async (
   let oldRefresh: Promise<void> | undefined;
   await act(async () => {
     oldRefresh = client.hostHumanSession.refresh();
+    await vi.waitFor(() => expect(release).toBeTypeOf('function'));
   });
   resourceStatus = 403;
   member = false;
-  await act(async () => client.hostHumanSession.refresh());
+  const releaseOld = release;
+  if (!releaseOld) throw new Error('Expected the older refresh to reach the Service');
   await act(async () => {
-    release?.(json(200, { events: [human] }));
-    await oldRefresh;
+    const newerRefresh = client.hostHumanSession.refresh();
+    releaseOld(json(200, { events: [human] }));
+    await Promise.all([oldRefresh, newerRefresh]);
   });
   expect(client.snapshot.events).toEqual([]);
   expect(client.snapshot.restrictedScope?.reason).toBe('membership_lost');

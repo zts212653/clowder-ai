@@ -102,6 +102,15 @@ for (const input of ['hover', 'click']) {
       await page.mouse.move(box.x + 100, box.y + 140);
       if (input === 'click') await page.mouse.click(box.x + 100, box.y + 160);
       assert.ok(pendingHistory, 'the real history request must be held before native input');
+      if (input === 'click') {
+        await page.waitForFunction(
+          () => document.querySelector('[data-testid="return-state"]')?.dataset.returning === 'false',
+        );
+        assert.equal(await page.getByTestId('return-state').getAttribute('data-notice'), 'interrupted');
+        assert.equal(await page.getByTestId('return-state').getAttribute('data-source'), 'true');
+      } else {
+        assert.equal(await page.getByTestId('return-state').getAttribute('data-returning'), 'true');
+      }
       holdHistory = false;
       await pendingHistory.fulfill({
         contentType: 'application/json',

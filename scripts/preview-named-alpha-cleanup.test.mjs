@@ -8,6 +8,7 @@ import { test as nodeTest } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { deriveNamedAlphaCoordinates, namedAlphaEnvironment } from './lib/alpha-coordinates.mjs';
 import { namedAlphaFixture } from './lib/alpha-named-fixture.mjs';
+import { readNamedAlphaRedisLeases } from './lib/alpha-redis-leases.mjs';
 import { captureNamedAlphaRedisIdentity, verifyNamedAlphaRedisIdentity } from './lib/alpha-redis-process.mjs';
 import { waitForPreviewFixture } from './lib/preview-fixture-readiness.mjs';
 
@@ -59,8 +60,9 @@ exec ${quote(native)} "$@"
   return { bin, armed, observed };
 }
 
-for (const [verificationFails, earlyWrapper, missingResult, pnpmWrapper, identityFailureMode] of [
+for (const [verificationFails, earlyWrapper, missingResult, pnpmWrapper, identityFailureMode, trackedServingChange] of [
   [false, false, false],
+  [false, false, false, false, undefined, true],
   [true, false, false],
   [false, true, false],
   [true, true, false],
@@ -73,7 +75,7 @@ for (const [verificationFails, earlyWrapper, missingResult, pnpmWrapper, identit
   [false, false, false, false, 'argv-always'],
 ]) {
   const cleanupRefused = verificationFails || identityFailureMode?.endsWith('always');
-  test(`canonical preview stop ${cleanupRefused ? 'reports refused Redis cleanup and retains ownership' : 'saves Redis and releases the producer lease'}${earlyWrapper ? ' after an early wrapper exit' : ''}${missingResult ? ' but rejects an unpublished owner result' : ''}${pnpmWrapper ? ' through real pnpm' : ''}${identityFailureMode ? ` after ${identityFailureMode}` : ''}`, async (t) => {
+  test(`canonical preview stop ${cleanupRefused ? 'reports refused Redis cleanup and retains ownership' : 'saves Redis and releases the producer lease'}${trackedServingChange ? ' after tracked serving changes' : ''}${earlyWrapper ? ' after an early wrapper exit' : ''}${missingResult ? ' but rejects an unpublished owner result' : ''}${pnpmWrapper ? ' through real pnpm' : ''}${identityFailureMode ? ` after ${identityFailureMode}` : ''}`, async (t) => {
     const disposals = [];
     const f = namedAlphaFixture({ after: (fn) => disposals.push(fn) });
     const sockets = [];
@@ -135,6 +137,7 @@ wait
     const id = createHash('sha256').update(`${f.alphaRoot}\0${ports[0]}`).digest('hex').slice(0, 16);
     const recordPath = join(env.CAT_CAFE_PREVIEW_PROCESS_DIR, `${id}.json`);
     let previewRecord;
+    let redisProof;
     const run = (action, extra = []) =>
       spawnSync(process.execPath, [cli, action, '--port', String(ports[0]), '--cwd', f.alphaRoot, '--json', ...extra], {
         env,
@@ -146,7 +149,7 @@ wait
       run('stop');
       // A failed regression must still keep data and never bypass identity proof.
       if (existsSync(pidFile)) {
-        const proof = captureNamedAlphaRedisIdentity(raw);
+        const proof = redisProof ?? captureNamedAlphaRedisIdentity(raw);
         verifyNamedAlphaRedisIdentity(raw, proof);
         execFileSync('redis-cli', ['-h', '127.0.0.1', '-p', String(coordinates.ports.redis), 'shutdown', 'save']);
       }
@@ -195,8 +198,17 @@ setInterval(()=>{},1000);`,
         }),
     });
     const proof = captureNamedAlphaRedisIdentity(raw);
+    redisProof = proof;
     verifyNamedAlphaRedisIdentity(raw, proof);
     assert.equal(readdirSync(registry).length, 1, 'producer registered its own Redis lease');
+    if (trackedServingChange) {
+      writeFileSync(join(f.alphaRoot, 'packages/web/package.json'), '{"generatedDuringServing":true}\n');
+      assert.throws(() => captureNamedAlphaRedisIdentity(raw), /tracked changes/);
+      verifyNamedAlphaRedisIdentity(raw, proof);
+      const leases = readNamedAlphaRedisLeases(registry);
+      assert.deepEqual(leases.rejected, []);
+      assert.equal(leases.live.length, 1, 'serving generation does not erase the owner lease');
+    }
     const stopped = run('stop');
     if (probe) assert.ok(existsSync(probe.observed), 'exercise the native identity probe failure');
     if (cleanupRefused) {

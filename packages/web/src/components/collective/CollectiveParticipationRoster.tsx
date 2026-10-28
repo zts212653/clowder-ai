@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { AvatarImageWithFallback } from '@/components/AvatarImageWithFallback';
+import { isCanonicalAvatarUrl } from '@/lib/avatar-url';
 import { CollectiveToggleSwitch } from './CollectiveToggleSwitch';
 import type { ParticipationView } from './use-collective-participation';
 import { useCollectiveText } from './use-collective-text';
@@ -135,7 +136,11 @@ function participationStatus(view: ParticipationView, cat: ParticipationView['ca
 }
 
 function ownerAvatar(value?: string) {
-  return value?.startsWith('/avatars/') || value?.startsWith('/uploads/') ? value : null;
+  return value?.startsWith('/avatars/') ||
+    value?.startsWith('/uploads/') ||
+    (value?.startsWith('/api/cats/') && isCanonicalAvatarUrl(value))
+    ? value
+    : null;
 }
 
 async function updateGlobalParticipation(

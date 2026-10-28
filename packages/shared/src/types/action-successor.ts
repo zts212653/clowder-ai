@@ -150,6 +150,8 @@ export function isAllowedActionSuccessorSlot(
 }
 
 export const actionSuccessorMetadataObjectSchema = z.object({
+  expectedOwnerRevision: z.number().int().nonnegative().optional(),
+  stopPreviousExecution: z.boolean().optional(),
   subjectRef: actionSubjectRefSchema,
   actionFamily: z.enum(ACTION_SUCCESSOR_ACTION_FAMILIES),
   successorSlot: z.enum(ACTION_SUCCESSOR_SLOTS),

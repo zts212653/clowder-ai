@@ -67,6 +67,7 @@ export interface CatConfig {
   /** Nickname given by co-creator (e.g. 宪宪, 砚砚). See docs/stories/cat-names/ */
   readonly nickname?: string;
   readonly avatar: string;
+  readonly banner?: string;
   readonly color: CatColor;
   readonly mentionPatterns: readonly string[];
   readonly accountRef?: string;

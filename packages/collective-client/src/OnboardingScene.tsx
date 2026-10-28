@@ -33,7 +33,7 @@ export function OnboardingScene({
   if (phase === 'loading') {
     return (
       <div className="state-scene" aria-live="polite">
-        <p>{t('正在打开共同家园…')}</p>
+        <p>{t('正在打开共同体…')}</p>
       </div>
     );
   }
@@ -89,10 +89,10 @@ export function OnboardingScene({
     return (
       <EntryCard
         eyebrow={hasAuthenticatedHuman ? '选择下一步' : '第一次建立 Collective'}
-        title={hasAuthenticatedHuman ? '建立新的共同家园' : '给共同家园起个名字'}
+        title={hasAuthenticatedHuman ? '新建共同体' : '给共同体起个名字'}
         description={
           hasAuthenticatedHuman
-            ? '你已离开原共同家园。可以在这里新建，也可以从新的邀请链接加入；原公开历史与署名仍会保留。'
+            ? '你已离开原共同体。可以在这里新建，也可以从新的邀请链接加入；原公开历史与署名仍会保留。'
             : '你会成为第一位管理者。首启完成后还需绑定 Human 身份，才能邀请成员、连接 Café 或进入日常协作。'
         }
         label="Collective 名称"

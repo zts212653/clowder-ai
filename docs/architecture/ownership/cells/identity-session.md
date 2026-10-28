@@ -4,6 +4,9 @@ title: Identity / Session
 summary: Agent identity、connector session binding、bubble identity、runtime session binding、context continuity、thread access policy 与 user profile 等 subcell 的边界。
 canonical_features: [F032, F088, F136, F171, F183, F211, F231, F262, F291, F296, F299, F320, F322]
 code_anchors:
+  - packages/api/src/routes/member-canon-response.ts
+  - packages/api/src/routes/member-canon-routes.ts
+  - packages/web/src/components/settings/members/MemberCanonAvatar.tsx
   - packages/api/src/domains/cats/services/agents/providers/pi/pi-session-store.ts
   - packages/api/src/domains/cats/services/agents/providers/pi/pi-session-runner.ts
   - packages/api/src/domains/cats/services/cloud-bridge/dot/dot-identity.ts
@@ -223,3 +226,7 @@ The measured first managed combination is macOS + official native Codex 0.159.0 
 Native uses the existing SessionManager/SessionChainStore for durable resume bindings, not an in-memory session authority. A verified preflight L0/cwd/permission mismatch can seal the old session and rebuild from canonical history before starting a new one; partial output and exact imported-resume requests cannot silently fall back. Profile serialization protects per-turn credential/config binding. Skills come from the existing mount resolver. Historical Antigravity session import/lifecycle remain readable; Gemini CLI, IDE bridge and SQLite polling are no longer execution carriers.
 
 Official CLI init is verified before stdin delivery; only then does the existing F296 preflight settle the final generation and F299 record its bytes. A prior unsupported scope adopts a newly observed runtime through one unconsumed cold epoch; it becomes hot only after actual generation consumption and another verified resume. Compaction checkpoints advance the existing epoch owner. The raw cumulative result/error and transport diagnostics remain separate from current-turn completion evidence.
+
+## Canon Member Avatar Consumer
+
+F326 Phase D resolves the existing member id, then projects its one member-avatar slot from collaborative-content-plane. The direct Human selects it with its own receipt; mixed avatar/profile PATCH is rejected before either write. Linked members keep the canon projection after profile-only saves, clear remains linked, and unreadable bound bytes never fall back to catalog or another image. This consumer does not move roster or member authority.

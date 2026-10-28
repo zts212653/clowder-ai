@@ -22,6 +22,28 @@ const threadAttachment = {
 } as const;
 
 describe('ContextAttachmentSchema', () => {
+  it('retains a Channel quote in the same sourced quote contract without inventing a private Thread', () => {
+    const quote = {
+      v: 1,
+      id: 'ctx-channel-quote',
+      kind: 'quote',
+      text: '这张图可以直接打开。',
+      selectionStart: 2,
+      selectionEnd: 14,
+      source: {
+        kind: 'collective_message',
+        serviceInstanceId: 'svc_service01',
+        collectiveId: 'col_collective01',
+        channelId: 'general',
+        eventId: 'evt_message01',
+      },
+    };
+    expect(ContextAttachmentSchema.parse(quote)).toEqual(quote);
+    expect(
+      ContextAttachmentSchema.safeParse({ ...quote, source: { ...quote.source, threadId: 'private-thread' } }).success,
+    ).toBe(false);
+    expect(ContextAttachmentsSchema.safeParse([quote]).success).toBe(true);
+  });
   it('preserves bounded source attribution separately from a user-authored quote comment', () => {
     const attachment = {
       v: 1,

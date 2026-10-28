@@ -1,7 +1,9 @@
 import { randomUUID } from 'node:crypto';
 import {
   type CollectiveAccountabilityAttentionItem,
+  type CollectiveProjectAttentionItem,
   collectiveAccountabilityAttentionItemSchema,
+  collectiveProjectAttentionItemSchema,
   type UnifiedAttentionSourceRead,
 } from '@cat-cafe/shared';
 import { z } from 'zod';
@@ -11,6 +13,22 @@ import type { InstalledPluginOperations } from '../domains/plugin/operations/plu
 const COVERAGE = 'pending_f290_collective_accountability_requests' as const;
 const sourceSchema = z
   .object({
+    projectRead: z
+      .object({
+        items: z.array(collectiveProjectAttentionItemSchema),
+        reasons: z.array(z.string()),
+        state: z
+          .object({
+            coverage: z.literal('pending_f290_project_materials_and_dates'),
+            startedAt: z.number().int().nonnegative(),
+            observedAt: z.number().int().nonnegative(),
+            status: z.enum(['available', 'unavailable', 'unauthenticated', 'forbidden', 'invalid']),
+            exhaustiveness: z.enum(['complete', 'partial', 'unknown']),
+          })
+          .strict(),
+      })
+      .strict()
+      .optional(),
     items: z.array(collectiveAccountabilityAttentionItemSchema),
     reasons: z.array(z.string()),
     state: z
@@ -26,6 +44,11 @@ const sourceSchema = z
   .strict();
 
 export interface CollectiveAccountabilityAttentionSourceRead {
+  readonly projectRead?: {
+    items: CollectiveProjectAttentionItem[];
+    reasons: string[];
+    state: UnifiedAttentionSourceRead;
+  };
   readonly items: CollectiveAccountabilityAttentionItem[];
   readonly state: UnifiedAttentionSourceRead;
   readonly reasons: string[];

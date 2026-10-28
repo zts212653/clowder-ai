@@ -10,11 +10,13 @@ import { AttachIcon } from './icons/AttachIcon';
 import { MessageDispositionSelector } from './MessageDispositionSelector';
 import { messageDispositionCopy } from './message-disposition.shell-copy';
 import { useShellCopy } from './shell/shell-copy';
+import { useShellLanguage } from './shell/shell-language';
 
 interface ChatInputAddMenuProps {
   presentation?: 'classic' | 'v2';
   onAddContext: () => void;
   onAttach: () => void;
+  onStickers?: () => void;
   onWhisperToggle: () => void;
   onClose: () => void;
   triggerRef: RefObject<HTMLButtonElement>;
@@ -30,6 +32,7 @@ export function ChatInputAddMenu({
   presentation = 'classic',
   onAddContext,
   onAttach,
+  onStickers,
   onWhisperToggle,
   onClose,
   triggerRef,
@@ -42,6 +45,7 @@ export function ChatInputAddMenu({
 }: ChatInputAddMenuProps) {
   const [view, setView] = useState<'root' | 'disposition'>('root');
   const localized = useShellCopy(chatComposerCopy);
+  const stickerEnglish = useShellLanguage() === 'en' && presentation === 'v2';
   const t = presentation === 'v2' ? localized : chatComposerCopy.zh;
   const localizedDisposition = useShellCopy(messageDispositionCopy);
   const dispositionCopy = (presentation === 'v2' ? localizedDisposition : messageDispositionCopy.zh).composer;
@@ -105,6 +109,19 @@ export function ChatInputAddMenu({
                   onAttach();
                 }}
               />
+              {onStickers && (
+                <AddMenuItem
+                  testId="composer-stickers"
+                  icon={<span aria-hidden>☺</span>}
+                  label={stickerEnglish ? 'Stickers' : '贴纸'}
+                  description={stickerEnglish ? 'Add an expression to your draft' : '选一张，放进草稿'}
+                  disabled={unavailable || maxImages}
+                  onClick={() => {
+                    onClose();
+                    onStickers();
+                  }}
+                />
+              )}
               {presentation === 'classic' && messageDisposition ? (
                 <AddMenuItem
                   testId="message-disposition-trigger"

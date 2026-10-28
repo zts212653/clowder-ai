@@ -12,6 +12,10 @@ import { describe, expect, it } from 'vitest';
 import { formatModelName } from '../CatDossierContent';
 
 describe('formatModelName (P2 regression — variable segment counts)', () => {
+  it('formats named GPT variants without exposing machine separators', () => {
+    expect(formatModelName('gpt-6.1-sol')).toBe('GPT 6.1 Sol');
+    expect(formatModelName('gpt-6-astra')).toBe('GPT 6 Astra');
+  });
   // Standard 3-segment Claude models
   it('claude-opus-4-6 → Claude Opus 4.6', () => {
     expect(formatModelName('claude-opus-4-6')).toBe('Claude Opus 4.6');

@@ -4,7 +4,7 @@ related_features: [F060, F058, F279]
 topics: [hub, ux, workspace, file-browser, code-preview, collaboration]
 doc_kind: spec
 created: 2026-03-05
-updated: 2026-08-11
+updated: 2026-10-27
 tips_exempt: composer + button, slash commands, and picker footer teach context linking in place without a separate waiting-state tip
 ---
 
@@ -708,3 +708,12 @@ operator看到实际 UI 后指出两个层级问题：
    - 方案 A：在 `useEffect([threadId])` 里调 `GET /api/threads/:id` 取 projectPath
    - 方案 B：让 `setCurrentThread` 同时接受 thread 元数据（需改 store 接口）
    - **推荐方案 A**：最小侵入，不改 store 接口
+
+## 2026-10-27 已结阶段之后的搜索缺口
+
+F309 原 Task414 全入口验收在新隔离 Alpha 的真实全量工作树遇到文件名/正文搜索500：
+`listWorkspaceFiles` 的 find stdout 超过既有10MiB缓冲。文件存在且同源树入口已通过；
+这是 #1014 沿用逻辑在当前大目录的边界，不是 F309 #6249 新改出的搜索回归。
+父已核当前无其他搜索在办工位，将具体证据交原 F309 执行线作为其已接受搜索→打开合同的阻碍续修，
+消息 `[thread-id]#private-source-id`。
+这里保留 F063 历史完成状态，不以旧 Opus owner 自动派工程，也不把发现或派发记为已修复。

@@ -31,7 +31,8 @@ import type { MessagePassageCandidate } from './message-passage-search-types.js'
 import { runNativeQueryBatch } from './message-query-native.js';
 import { candidateKey } from './message-query-protocol.js';
 import { MessageQueryQualifier } from './message-query-qualifier.js';
-import { messageSearchMeta } from './message-search-budget.js';
+import { readMessageSearchAnswerSnapshot } from './message-search-answer-snapshot.js';
+import { boundMessageSearchResponse, messageSearchMeta } from './message-search-budget.js';
 import { type CanonicalSearchCandidate, collectMessageSearchCandidates } from './message-search-candidates.js';
 import { buildSearchableMessageContent } from './message-search-content.js';
 import { MessageSearchDiagnostics } from './message-search-diagnostics.js';
@@ -116,6 +117,7 @@ export class MessageSearchService {
       !message ||
       message.id !== ref.messageId ||
       message.threadId !== ref.threadId ||
+      message.recall ||
       message._tombstone ||
       message.deletedAt
     )
@@ -246,6 +248,21 @@ export class MessageSearchService {
         after.call(this.deps.messageStore, threadId, messageId, limit, principal.userId),
       readable: (coordinate) => this.readableMessage(coordinate, principal),
       revalidate: () => this.resolveNavigationReference(ref, principal, undefined, signal),
+    });
+  }
+
+  /** Re-admit an existing answer snapshot without retrieval, qualification or provider work. */
+  readAnswerSnapshot(response: MessageSearchResponse, principal: MessageSearchPrincipal, signal?: AbortSignal) {
+    return readMessageSearchAnswerSnapshot(response, {
+      signal,
+      decisionIndex: this.decisionIndex,
+      admit: async (result) => {
+        const admitted = await this.resolveNavigationReference(result, principal, undefined, signal).catch((error) => {
+          if (error instanceof MessageSearchAccessError) return null;
+          throw error;
+        });
+        return !!admitted && !admitted.updated;
+      },
     });
   }
 

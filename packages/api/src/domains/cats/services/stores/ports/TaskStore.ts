@@ -25,6 +25,12 @@ import {
   type TypedWaitRegistrationSnapshot,
 } from '../../../../ball-custody/TypedWaitRegistration.js';
 import type { DevelopmentWorkTransition } from './DevelopmentWorkTransition.js';
+import {
+  advanceOrdinaryTaskAssignment,
+  mutateOrdinaryTask,
+  type OrdinaryTaskMutation,
+  type OrdinaryTaskMutationResult,
+} from './OrdinaryTaskMutation.js';
 import { mergeTaskAutomationState } from './TaskAutomationState.js';
 import {
   type EntrustedTaskDataControllerTransition,
@@ -75,6 +81,17 @@ const MAX_TASKS = 500;
  * #320: Extended with kind/subject indexes.
  */
 export class TaskStore implements ITaskStore {
+  mutateOrdinaryTask(
+    command: OrdinaryTaskMutation,
+    writeFence?: TaskMutationWriteFence,
+  ): OrdinaryTaskMutationResult | Promise<OrdinaryTaskMutationResult> {
+    const apply = () => {
+      const result = mutateOrdinaryTask(this.tasks.get(command.taskId) ?? null, command, Date.now());
+      if (result.kind === 'updated') this.tasks.set(command.taskId, result.task);
+      return result;
+    };
+    return writeFence ? Promise.resolve(writeFence.assertCurrent()).then(apply) : apply();
+  }
   private tasks: Map<string, TaskItem> = new Map();
   private readonly waitRegistrations = new Map<string, TypedWaitRegistration>();
   /** subject_key → taskId reverse index */
@@ -314,9 +331,12 @@ export class TaskStore implements ITaskStore {
       updatedAt: Date.now(),
     };
 
-    const reconciled = reconcilePluginWaitTaskMutation(
+    const reconciled = advanceOrdinaryTaskAssignment(
       existing,
-      reconcileDeploymentWaitTaskMutation(existing, updated),
+      reconcilePluginWaitTaskMutation(
+        existing,
+        reconcileDeploymentWaitTaskMutation(existing, updated, { statusIsExplicit: input.status !== undefined }),
+      ),
     );
     this.tasks.set(taskId, reconciled);
     return reconciled;

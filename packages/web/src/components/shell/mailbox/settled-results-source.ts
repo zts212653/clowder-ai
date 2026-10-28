@@ -74,8 +74,9 @@ export function parseSettledResults(body: unknown, ownerUserId: string): Settled
 export async function readSettledResults(
   ownerUserId: string,
   signal: AbortSignal,
+  limit: 50 | 200 = 50,
 ): Promise<SettledResultItem[] | null | 'preparing'> {
-  const response = await apiFetch('/api/approval-hub/settled?limit=50', { signal }, { afterCurrentGet: true });
+  const response = await apiFetch(`/api/approval-hub/settled?limit=${limit}`, { signal }, { afterCurrentGet: true });
   if (response.status === 503) {
     const error = z
       .object({ code: z.literal('APPROVAL_HISTORY_PREPARING') })

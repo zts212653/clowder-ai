@@ -23,13 +23,14 @@ describe('Collective product shell', () => {
         onInvite={() => undefined}
         onPair={() => undefined}
       >
-        <p>正在读取共同家园</p>
+        <p>正在读取共同体</p>
       </ProductShell>,
     );
 
     expect(html).not.toContain('data-experience-gate');
     expect(html).not.toContain('general');
     expect(html).not.toContain('aria-label="Clowder AI Collective菜单"');
+    expect(html).not.toContain('共同家园');
   });
 
   it('uses Service-owned world navigation and the accepted destination/scene grammar', () => {

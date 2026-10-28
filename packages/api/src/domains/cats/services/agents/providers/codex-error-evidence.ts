@@ -64,7 +64,8 @@ export class CodexErrorEvidence {
     } else if (requestId) this.requestId = requestId;
   }
 
-  diagnostics(terminalError: string, debugRef: CliDiagnostics['debugRef']): CliDiagnostics {
+  diagnostics(error: unknown, debugRef: CliDiagnostics['debugRef']): CliDiagnostics {
+    const terminalError = error instanceof Error ? error.message : String(error);
     const terminalReason = classifyCliError(terminalError);
     const usePriorCause =
       terminalReason === 'stream_disconnected' || terminalError === 'Codex app-server request failed';

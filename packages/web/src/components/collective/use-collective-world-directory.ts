@@ -13,6 +13,12 @@ import {
   type WorldDirectoryGeneration,
   worldDirectoryServiceMismatch,
 } from './collective-world-directory';
+import {
+  beginWorldDirectoryObservation,
+  endWorldDirectoryObservation,
+  failWorldDirectoryObservation,
+  publishWorldDirectoryObservation,
+} from './collective-world-directory-store';
 
 /** The frame generation the handshake minted, observed read-only by the other host bridges (e.g. appearance). */
 export interface ObservedFrameGeneration {
@@ -37,46 +43,54 @@ export function useCollectiveWorldDirectory(input: {
     setFailure(undefined);
     setFrameGeneration(undefined);
     if (!serviceOrigin) return;
-    const onMessage = (event: MessageEvent<unknown>) => {
-      if (event.source !== input.iframeRef.current?.contentWindow || event.origin !== serviceOrigin) return;
-      if (collectiveWorldDirectoryReadySchema.safeParse(event.data).success) {
-        const next: WorldDirectoryGeneration = {
-          bridgeId: crypto.randomUUID(),
-          revision: 0,
-          serviceOrigin,
-          ...(input.expectedServiceInstanceId ? { expectedServiceInstanceId: input.expectedServiceInstanceId } : {}),
-        };
-        generation.current = next;
-        setFrameGeneration({ bridgeId: next.bridgeId, serviceOrigin });
-        setDirectory(undefined);
-        setFailure(undefined);
-        input.iframeRef.current?.contentWindow?.postMessage(
-          collectiveHostWorldDirectoryInitSchema.parse({
-            type: 'collective:host-world-directory-init',
-            bridgeId: next.bridgeId,
-            ...(next.expectedServiceInstanceId ? { expectedServiceInstanceId: next.expectedServiceInstanceId } : {}),
-          }),
-          serviceOrigin,
-        );
-        return;
-      }
+    const beginHandshake = () => {
+      const next: WorldDirectoryGeneration = {
+        bridgeId: crypto.randomUUID(),
+        revision: 0,
+        serviceOrigin,
+        ...(input.expectedServiceInstanceId ? { expectedServiceInstanceId: input.expectedServiceInstanceId } : {}),
+      };
+      generation.current = next;
+      beginWorldDirectoryObservation({
+        serviceUrl: serviceOrigin,
+        bridgeId: next.bridgeId,
+        ...(next.expectedServiceInstanceId ? { expectedServiceInstanceId: next.expectedServiceInstanceId } : {}),
+      });
+      setFrameGeneration({ bridgeId: next.bridgeId, serviceOrigin });
+      setDirectory(undefined);
+      setFailure(undefined);
+      input.iframeRef.current?.contentWindow?.postMessage(
+        collectiveHostWorldDirectoryInitSchema.parse({
+          type: 'collective:host-world-directory-init',
+          bridgeId: next.bridgeId,
+          ...(next.expectedServiceInstanceId ? { expectedServiceInstanceId: next.expectedServiceInstanceId } : {}),
+        }),
+        serviceOrigin,
+      );
+    };
+    const receiveDirectory = (data: unknown) => {
       const active = generation.current;
       if (!active) return;
       const accepted = acceptWorldDirectory({
-        data: event.data,
-        eventOrigin: event.origin,
+        data,
+        eventOrigin: serviceOrigin,
         sourceMatches: true,
         generation: active,
       });
       if (!accepted) {
         if (
           worldDirectoryServiceMismatch({
-            data: event.data,
-            eventOrigin: event.origin,
+            data,
+            eventOrigin: serviceOrigin,
             sourceMatches: true,
             generation: active,
           })
         ) {
+          failWorldDirectoryObservation({
+            serviceUrl: serviceOrigin,
+            bridgeId: active.bridgeId,
+            failure: 'service_mismatch',
+          });
           setFailure('service_mismatch');
         }
         return;
@@ -86,11 +100,25 @@ export function useCollectiveWorldDirectory(input: {
         revision: accepted.revision,
         ...(accepted.state === 'ready' ? { humanId: accepted.humanId } : {}),
       };
+      publishWorldDirectoryObservation({
+        serviceUrl: serviceOrigin,
+        bridgeId: active.bridgeId,
+        directory: accepted,
+      });
       setFailure(undefined);
       setDirectory(accepted);
     };
+    const onMessage = (event: MessageEvent<unknown>) => {
+      if (event.source !== input.iframeRef.current?.contentWindow || event.origin !== serviceOrigin) return;
+      if (collectiveWorldDirectoryReadySchema.safeParse(event.data).success) beginHandshake();
+      else receiveDirectory(event.data);
+    };
     window.addEventListener('message', onMessage);
     return () => {
+      const active = generation.current;
+      if (active) {
+        endWorldDirectoryObservation({ serviceUrl: serviceOrigin, bridgeId: active.bridgeId });
+      }
       generation.current = undefined;
       window.removeEventListener('message', onMessage);
     };

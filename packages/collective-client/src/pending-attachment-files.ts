@@ -1,8 +1,9 @@
-import type { CollectiveMessageAttachment } from '@cat-cafe/shared';
+import type { CollectiveMessageAttachment, MessageSticker } from '@cat-cafe/shared';
 export interface PendingAttachmentFile {
   id: string;
   file: File;
   attachment?: CollectiveMessageAttachment;
+  sticker?: MessageSticker;
 }
 
 interface FileIntent {
@@ -28,6 +29,9 @@ export function beginPendingAttachmentFile(namespace: string, id: string) {
   if (!intents.some((item) => item.id === id))
     localStorage.setItem(intentKey(namespace), JSON.stringify([...intents, { id }]));
 }
+export function hasPendingAttachmentFile(namespace: string, id: string) {
+  return fileIntents(namespace).some((item) => item.id === id);
+}
 
 /** Unsent files belong to this exact person/channel draft and persist until removal or its send ACK. */
 async function openFiles() {
@@ -49,7 +53,7 @@ export async function pendingAttachmentFiles(namespace: string): Promise<Pending
             .filter(
               (item) => item.namespace === namespace && fileIntents(namespace).some((intent) => intent.id === item.id),
             )
-            .map(({ id, file, attachment }) => ({ id, file, attachment })),
+            .map(({ id, file, attachment, sticker }) => ({ id, file, attachment, sticker })),
         );
       request.onerror = () => reject(request.error);
     });

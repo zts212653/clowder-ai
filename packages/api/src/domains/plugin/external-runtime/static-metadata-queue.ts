@@ -2,7 +2,9 @@ import {
   MAX_WORK_COUNT,
   MAX_WORK_MS,
   type SealCaller,
+  type SealQueueWait,
   type SealReadDiagnostics,
+  type SealSlotRelease,
   sealCaller,
   workMs,
 } from '../diagnostics/observation-work.js';
@@ -18,6 +20,7 @@ export class MetadataScan {
   readdirCalls = 0;
   queueWaitMs = 0;
   maxQueueWaitMs = 0;
+  longestQueueWait?: SealQueueWait;
   ioAwaitMs = 0;
   maxIoAwaitMs = 0;
   capped = false;
@@ -49,7 +52,7 @@ export class MetadataScan {
 /** One private generation: four FIFO IO slots and only live per-consumer summaries. */
 export class StaticMetadataQueue {
   private active = 0;
-  private readonly waiting: Array<() => void> = [];
+  private readonly waiting: Array<(releasedBy?: SealSlotRelease) => void> = [];
   private readonly scans = new Set<MetadataScan>();
 
   begin(caller: SealCaller = 'other'): MetadataScan {
@@ -66,14 +69,40 @@ export class StaticMetadataQueue {
 
   async run<T>(scan: MetadataScan, kind: Operation, operation: () => Promise<T>): Promise<T> {
     const queued = scan.sample();
+    let granted = queued;
+    let waitingAhead = 0;
+    let releasedBy: SealSlotRelease | undefined;
     if (this.active < 4) this.active++;
-    else await new Promise<void>((resolve) => this.waiting.push(resolve));
+    else {
+      waitingAhead = this.waiting.length;
+      await new Promise<void>((resolve) =>
+        this.waiting.push((release) => {
+          granted = scan.sample();
+          releasedBy = release;
+          resolve();
+        }),
+      );
+    }
+    let ioElapsed: number | undefined;
     try {
       const acquired = scan.sample();
       if (queued !== undefined && acquired !== undefined) {
         const waiting = Math.max(0, acquired - queued);
         if (waiting > MAX_WORK_MS) scan.capped = true;
         scan.add('queueWaitMs', waiting);
+        if (waiting > scan.maxQueueWaitMs && granted !== undefined) {
+          const slotWaitMs = Math.max(0, granted - queued);
+          const resumeDelayMs = Math.max(0, acquired - granted);
+          if (waitingAhead > MAX_WORK_COUNT || Math.max(slotWaitMs, resumeDelayMs) > MAX_WORK_MS || releasedBy?.capped)
+            scan.capped = true;
+          scan.longestQueueWait = {
+            queueWaitMs: workMs(waiting),
+            slotWaitMs: workMs(slotWaitMs),
+            resumeDelayMs: workMs(resumeDelayMs),
+            waitingAhead: Math.min(MAX_WORK_COUNT, waitingAhead),
+            ...(releasedBy ? { releasedBy } : {}),
+          };
+        }
         scan.maxQueueWaitMs = Math.max(scan.maxQueueWaitMs, waiting);
       }
       scan.add(kind === 'lstat' ? 'lstatCalls' : 'readdirCalls', 1);
@@ -85,6 +114,7 @@ export class StaticMetadataQueue {
         const finished = scan.sample();
         if (acquired !== undefined && finished !== undefined) {
           const elapsed = Math.max(0, finished - acquired);
+          ioElapsed = elapsed;
           if (elapsed > MAX_WORK_MS) scan.capped = true;
           scan.add('ioAwaitMs', elapsed);
           scan.maxIoAwaitMs = Math.max(scan.maxIoAwaitMs, elapsed);
@@ -92,7 +122,12 @@ export class StaticMetadataQueue {
       }
     } finally {
       const next = this.waiting.shift();
-      if (next) next();
+      if (next)
+        next(
+          ioElapsed === undefined
+            ? undefined
+            : { caller: scan.caller, operation: kind, ioAwaitMs: workMs(ioElapsed), capped: ioElapsed > MAX_WORK_MS },
+        );
       else this.active--;
     }
   }
@@ -111,6 +146,7 @@ export class StaticMetadataQueue {
         readdirCalls: scan.readdirCalls,
         queueWaitMs: workMs(scan.queueWaitMs),
         maxQueueWaitMs: workMs(scan.maxQueueWaitMs),
+        ...(scan.longestQueueWait ? { longestQueueWait: scan.longestQueueWait } : {}),
         ioAwaitMs: workMs(scan.ioAwaitMs),
         maxIoAwaitMs: workMs(scan.maxIoAwaitMs),
         capped: scan.capped,

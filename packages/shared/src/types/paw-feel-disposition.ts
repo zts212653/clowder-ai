@@ -1,3 +1,4 @@
+import type { PawFeelRepairBinding } from './paw-feel-repair-binding.js';
 /**
  * F278 Paw-Feel Disposition Inbox shared contracts.
  *
@@ -72,8 +73,10 @@ export type PawFeelSignatureAction =
       type: 'fix';
       ownerCatId: string;
       taskId: string;
-      leaseId: string;
-      leaseGeneration: number;
+      repairBinding?: PawFeelRepairBinding;
+      /** Historical lease fields; absent on Task-native writes. */
+      leaseId?: string;
+      leaseGeneration?: number;
       custodyEvidenceRef: string;
       /** Required for new writes; optional only while replaying pre-D5 signature requests. */
       directRepairBinding?: PawFeelDirectRepairBindingV1;
@@ -119,6 +122,7 @@ export interface PawFeelResponsibilityProjection {
   evidenceRefs: string[];
   ownerCatId?: string;
   taskId?: string;
+  repairBinding?: PawFeelRepairBinding;
   leaseId?: string;
   proposalId?: string;
   signerExclusionCatId?: string;
@@ -182,8 +186,10 @@ export type PawFeelDispositionEvent =
       type: 'fix';
       ownerCatId: string;
       taskId: string;
-      leaseId: string;
-      leaseGeneration: number;
+      repairBinding?: PawFeelRepairBinding;
+      /** Historical lease fields; absent on Task-native writes. */
+      leaseId?: string;
+      leaseGeneration?: number;
       custodyEvidenceRef: string;
       directRepairBinding?: PawFeelDirectRepairBindingV1;
     })
@@ -235,6 +241,7 @@ export interface PawFeelDispositionProjection extends PawFeelSourceRef {
   outcomeRef?: string;
   ownerCatId?: string;
   taskId?: string;
+  repairBinding?: PawFeelRepairBinding;
   actionLeaseRef?: { leaseId: string; generation: number };
   custodyEvidenceRef?: string;
   directRepairBinding?: PawFeelDirectRepairBindingV1;

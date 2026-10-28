@@ -27,6 +27,31 @@ describe('F322 B §1.16 — a cat reply in three layers (new shell only)', () =>
   const q = (testId: string) => harness.q(testId);
   const click = (testId: string) => harness.click(testId);
 
+  it('keeps a recovered startup in Activity rather than adding system copy to the cat reply', () => {
+    harness.enableV2();
+    render(
+      streamReply({
+        catId: 'codex-astra',
+        toolEvents: [],
+        extra: {
+          startupRecovery: {
+            invocationId: 'turn-1',
+            stage: 'ready',
+            sequence: 6,
+            attempt: 3,
+            maxAttempts: 6,
+            startedAt: 1,
+            deadlineAt: 120_001,
+            updatedAt: 7_001,
+          },
+        },
+      }),
+    );
+    expect(harness.container.textContent).not.toContain('账号确认已恢复');
+    click('reply-record-toggle');
+    expect(q('reply-record')?.textContent).toContain('账号确认已恢复，尝试 3 次');
+  });
+
   describe('classic is untouched', () => {
     it('a streamed reply still lives in the CLI block, with the metadata line, the name-row anchor and no layers', () => {
       render(streamReply());

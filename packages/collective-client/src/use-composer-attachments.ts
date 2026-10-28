@@ -1,4 +1,4 @@
-import type { CollectiveMessageAttachment } from '@cat-cafe/shared';
+import type { CollectiveMessageAttachment, MessageSticker } from '@cat-cafe/shared';
 import type { ComposerAttachmentItem } from '@cat-cafe/ui';
 import { type Dispatch, type SetStateAction, useEffect, useRef, useState } from 'react';
 import type { ComposerDraft } from './composer-draft.js';
@@ -12,6 +12,7 @@ import {
 
 interface UploadItem extends ComposerAttachmentItem {
   readonly file: File;
+  readonly sticker?: MessageSticker;
 }
 export function useComposerAttachments(
   draftKey: string,
@@ -29,19 +30,25 @@ export function useComposerAttachments(
   const uploadUrls = useRef(new Set<string>());
   const present = useRef(new Set<string>());
   const currentDraft = useRef(draft);
+  const uploadQueue = useRef(Promise.resolve());
   currentDraft.current = draft;
 
   const upload = async (item: UploadItem) => {
-    if (!port || controllers.current.has(item.id)) return;
+    if (!port || !active.current || !present.current.has(item.id) || controllers.current.has(item.id)) return;
     const controller = new AbortController();
     controllers.current.set(item.id, controller);
     setUploads((current) =>
       current.map((value) => (value.id === item.id ? { ...value, status: 'uploading', notice: undefined } : value)),
     );
     try {
-      const attachment = await port.upload(item.file, item.id, channelId, controller.signal);
+      const attachment = await port.upload(item.file, item.id, channelId, controller.signal, item.sticker);
       if (!present.current.has(item.id)) return;
-      await savePendingAttachmentFile(draftKey, { id: item.id, file: item.file, attachment });
+      await savePendingAttachmentFile(draftKey, {
+        id: item.id,
+        file: item.file,
+        attachment,
+        ...(item.sticker ? { sticker: item.sticker } : {}),
+      });
       if (!present.current.has(item.id)) {
         await discardPendingAttachmentFiles(draftKey, [item.id]);
         return;
@@ -63,7 +70,16 @@ export function useComposerAttachments(
       controllers.current.delete(item.id);
     }
   };
-  const add = async (files: readonly File[]) => {
+  // Preserve selection order and leave a Service upload slot available for the other member.
+  const enqueueUpload = (item: UploadItem) => {
+    uploadQueue.current = uploadQueue.current
+      .then(() => upload(item))
+      .catch((error) => {
+        if (active.current) setNotice(error instanceof Error ? error.message : String(error));
+      });
+  };
+  const add = async (files: readonly File[], sticker?: MessageSticker) => {
+    if (!active.current) return;
     if (!port) {
       setNotice('附件服务当前不可用；文件尚未发送。');
       return;
@@ -87,18 +103,19 @@ export function useComposerAttachments(
         byteLength: file.size,
         url: URL.createObjectURL(file),
         status: 'uploading',
+        ...(sticker ? { sticker } : {}),
       };
       uploadUrls.current.add(item.url!);
       present.current.add(id);
       setUploads((current) => [...current, item]);
       try {
         beginPendingAttachmentFile(draftKey, id);
-        await savePendingAttachmentFile(draftKey, { id, file });
+        await savePendingAttachmentFile(draftKey, { id, file, ...(sticker ? { sticker } : {}) });
       } catch {
         setNotice('浏览器无法保存未上传的文件，请保留当前页面。');
       }
       if (!active.current) return;
-      void upload(item);
+      enqueueUpload(item);
     }
   };
   useEffect(() => {
@@ -193,7 +210,7 @@ export function useComposerAttachments(
     },
     retry(id: string) {
       const item = uploads.find((value) => value.id === id);
-      if (item) void upload(item);
+      if (item) enqueueUpload(item);
     },
     async confirm(attachments: readonly CollectiveMessageAttachment[]) {
       try {

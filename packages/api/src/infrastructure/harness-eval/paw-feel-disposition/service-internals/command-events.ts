@@ -27,8 +27,8 @@ function fixEvent(
     type: 'fix',
     ownerCatId: context.fix.ownerCatId,
     taskId: context.fix.taskId,
-    leaseId: context.fix.leaseId,
-    leaseGeneration: context.fix.leaseGeneration,
+    ...(context.fix.repairBinding ? { repairBinding: context.fix.repairBinding } : {}),
+    ...(context.fix.leaseId ? { leaseId: context.fix.leaseId, leaseGeneration: context.fix.leaseGeneration } : {}),
     custodyEvidenceRef: context.fix.custodyEvidenceRef,
     directRepairBinding: context.directRepairBinding,
   };

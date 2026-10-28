@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { TreeNode } from '@/hooks/useWorkspace';
+import { FileActions } from '../content-review/FileActions';
 import { DirIcon, FileIcon } from './FileIcons';
 import { InlineTreeInput } from './InlineTreeInput';
 
@@ -40,12 +41,6 @@ const UploadIcon = () => (
     <path d="M8 1L3 6h3v5h4V6h3L8 1zM2 13h12v2H2v-2z" />
   </svg>
 );
-const CopyPathIcon = () => (
-  <svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
-    <path d="M4 1.5A1.5 1.5 0 015.5 0h5A1.5 1.5 0 0112 1.5v9a1.5 1.5 0 01-1.5 1.5h-5A1.5 1.5 0 014 10.5v-9zM5.5 1a.5.5 0 00-.5.5v9a.5.5 0 00.5.5h5a.5.5 0 00.5-.5v-9a.5.5 0 00-.5-.5h-5z" />
-    <path d="M2 4.5A1.5 1.5 0 013.5 3H4v8.5a.5.5 0 00.5.5H10v.5a1.5 1.5 0 01-1.5 1.5h-5A1.5 1.5 0 012 12.5v-8z" />
-  </svg>
-);
 
 const hoverBtn =
   'opacity-0 group-hover:opacity-100 w-5 h-5 flex items-center justify-center rounded text-cafe-interactive/40 hover:text-cafe-accent hover:bg-cafe-surface-sunken/60 transition-all';
@@ -67,6 +62,7 @@ export interface TreeCallbacks {
 
 function TreeItem({
   node,
+  worktreeId,
   depth,
   onSelect,
   onCite,
@@ -81,6 +77,7 @@ function TreeItem({
   onDrop,
 }: {
   node: TreeNode;
+  worktreeId?: string;
   depth: number;
   onSelect: (path: string) => void;
   onCite?: (path: string) => void;
@@ -234,17 +231,15 @@ function TreeItem({
               <CiteIcon />
             </button>
           )}
-          <button
-            type="button"
-            className={hoverBtn}
-            title="复制路径"
-            onClick={(e) => {
-              e.stopPropagation();
-              void navigator.clipboard.writeText(node.path);
-            }}
-          >
-            <CopyPathIcon />
-          </button>
+          {worktreeId && (
+            <span className="opacity-0 group-hover:opacity-100 focus-within:opacity-100">
+              <FileActions
+                source={{ kind: 'workspace', worktreeId, path: node.path }}
+                filename={node.name}
+                contextRef={rowRef}
+              />
+            </span>
+          )}
           {callbacks.onRename && (
             <button
               type="button"
@@ -298,6 +293,7 @@ function TreeItem({
               <TreeItem
                 key={child.path}
                 node={child}
+                worktreeId={worktreeId}
                 depth={depth + 1}
                 onSelect={onSelect}
                 onCite={onCite}
@@ -340,6 +336,7 @@ export function TreeSkeleton() {
 }
 
 export function WorkspaceTree({
+  worktreeId,
   tree,
   loading,
   expandedPaths,
@@ -354,6 +351,7 @@ export function WorkspaceTree({
   emptyDescription = '可以新建文件，或切换到另一个工作区',
 }: {
   tree: TreeNode[];
+  worktreeId?: string;
   loading: boolean;
   expandedPaths: Set<string>;
   toggleExpand: (path: string) => void;
@@ -478,6 +476,7 @@ export function WorkspaceTree({
           <TreeItem
             key={node.path}
             node={node}
+            worktreeId={worktreeId}
             depth={0}
             onSelect={onSelect}
             onCite={onCite}

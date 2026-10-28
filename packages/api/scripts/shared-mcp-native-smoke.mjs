@@ -156,7 +156,7 @@ const report = {
       'packages/api/dist/domains/cats/services/agents/invocation/invoke-single-cat.js',
       'packages/api/dist/routes/member-mcp.js',
       'packages/mcp-server/dist/member-gateway.js',
-      'packages/mcp-server/dist/secret-mcp-proxy.js',
+      'packages/mcp-server/dist/managed-mcp-config.js',
       'packages/mcp-server/dist/tools/invocation-auth.js',
     ].map((path) => [
       path,
@@ -166,7 +166,7 @@ const report = {
     ]),
   ),
   journey:
-    'real provider -> invokeSingleCat -> generated native MCP -> existing protection proxy -> production member route -> fixture file',
+    'real provider -> invokeSingleCat -> native HTTP/explicit stdio -> production member route/backend -> fixture file',
   results: [],
 };
 const families = ['collab', 'memory', 'signals', 'limb', 'audio', 'finance'];

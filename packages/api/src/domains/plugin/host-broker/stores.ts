@@ -48,11 +48,13 @@ function fileQueue(path: string): SerialQueue {
 }
 
 class MutableBrokerSnapshot implements HostBrokerTransaction {
+  private written = false;
   private featureLedger: StaticFeatureLedger | undefined;
   readonly staticFeatures = {
     get: () => structuredClone(this.featureLedger ?? emptyStaticFeatureLedger()),
     put: (ledger: StaticFeatureLedger) => {
       this.featureLedger = structuredClone(ledger);
+      this.written = true;
     },
   };
   private readonly sessionRecords = new Map<string, BrokerSessionRecord>();
@@ -64,19 +66,28 @@ class MutableBrokerSnapshot implements HostBrokerTransaction {
     getBySessionId: (brokerSessionId) =>
       this.clone([...this.sessionRecords.values()].find((record) => record.brokerSessionId === brokerSessionId)),
     list: () => [...this.sessionRecords.values()].map((record) => structuredClone(record)),
-    put: (record) => this.sessionRecords.set(record.connectionId, structuredClone(record)),
+    put: (record) => {
+      this.sessionRecords.set(record.connectionId, structuredClone(record));
+      this.written = true;
+    },
   };
 
   readonly runtimeLeases: BrokerRuntimeLeaseStore = {
     get: (runtimeLeaseId) => this.clone(this.runtimeLeaseRecords.get(runtimeLeaseId)),
     list: () => [...this.runtimeLeaseRecords.values()].map((record) => structuredClone(record)),
-    put: (record) => this.runtimeLeaseRecords.set(record.runtimeLeaseId, structuredClone(record)),
+    put: (record) => {
+      this.runtimeLeaseRecords.set(record.runtimeLeaseId, structuredClone(record));
+      this.written = true;
+    },
   };
 
   readonly calls: BrokerCallStore = {
     get: (ledgerKey) => this.clone(this.callRecords.get(ledgerKey)),
     list: () => [...this.callRecords.values()].map((record) => structuredClone(record)),
-    put: (record) => this.callRecords.set(record.ledgerKey, structuredClone(record)),
+    put: (record) => {
+      this.callRecords.set(record.ledgerKey, structuredClone(record));
+      this.written = true;
+    },
   };
 
   constructor(snapshot: HostBrokerSnapshot) {
@@ -86,6 +97,10 @@ class MutableBrokerSnapshot implements HostBrokerTransaction {
       this.runtimeLeaseRecords.set(record.runtimeLeaseId, structuredClone(record));
     }
     for (const record of snapshot.calls) this.callRecords.set(record.ledgerKey, structuredClone(record));
+  }
+
+  hasWrites(): boolean {
+    return this.written;
   }
 
   toSnapshot(): HostBrokerSnapshot {
@@ -167,6 +182,9 @@ export class FileHostBrokerStore implements HostBrokerStore {
     return this.queue.run(async () => {
       const mutable = new MutableBrokerSnapshot(await this.load());
       const result = await work(mutable);
+      // Keep the fresh read and serialized authority/effect boundary. A callback
+      // that used no write port must not turn a check into a full JSON commit.
+      if (!mutable.hasWrites()) return result;
       const next = mutable.toSnapshot();
       await this.fileOps.mkdir(dirname(this.path), { recursive: true });
       const temporaryPath = `${this.path}.tmp-${process.pid}-${randomUUID()}`;

@@ -62,6 +62,21 @@ it('status read failure keeps authorizations and never claims a connection probl
   expect(projectPersonalChromeRecoveryStatus(result.body)).toEqual({});
 });
 
+it('keeps an outdated conversation page actionable after the extension connection is verified', async () => {
+  fetch.mockImplementation(async (path) => {
+    if (path === `${base}list`) return json({ rows: [{ key: 'a', label: 'Saved conversation' }] }, 'rows');
+    if (path === `${base}status`)
+      return json({ helper: { state: 'connected' }, delivery: { reloadRequired: false, pageReloadRequired: true } });
+    throw new Error(path);
+  });
+  const result = await fetchAuthorizedConversations(new AbortController().signal);
+  expect(result.candidates).toHaveLength(1);
+  const issue = projectPersonalChromeRecoveryStatus(result.body).connectionIssue;
+  expect(issue).toContain('原对话页面');
+  expect(issue).toContain('重载');
+  expect(issue).not.toContain('扩展需要重载');
+});
+
 it('settles both inventory and authorization reads when the view is aborted', async () => {
   fetch.mockImplementation(
     (_path, init) =>

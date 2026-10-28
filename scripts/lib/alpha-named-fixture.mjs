@@ -31,6 +31,8 @@ export function namedAlphaFixture(t) {
     'scripts/lib/alpha-coordinates.mjs',
     'scripts/lib/alpha-launch-contract.mjs',
     'scripts/lib/alpha-named-launch.sh',
+    'scripts/lib/alpha-lifecycle-lock.mjs',
+    'scripts/lib/process-resource-lease-lock.mjs',
     'scripts/lib/alpha-redis-process.mjs',
     'scripts/lib/alpha-identity-diagnostics.mjs',
     'scripts/lib/alpha-redis-leases.mjs',

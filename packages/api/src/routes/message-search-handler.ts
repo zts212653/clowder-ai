@@ -60,6 +60,18 @@ export async function executeMessageSearch(
     reply.status(503);
     return { error: 'Message search unavailable', degraded: true, degradeReason: 'message_search_unavailable' };
   }
+  return executeMessageSearchOperation((execution) => service.search(input, principal, execution), reply);
+}
+
+/** The existing 15s cancellation owner also bounds explicit answer preparation. */
+export async function executeMessageSearchOperation<T>(
+  run: (execution: {
+    signal: AbortSignal;
+    deadlineAt: number;
+    onTrace: (trace: Record<string, unknown>) => void;
+  }) => Promise<T>,
+  reply: FastifyReply,
+) {
   const controller = new AbortController();
   const deadlineAt = Date.now() + 15_000;
   const timeout = setTimeout(
@@ -72,7 +84,7 @@ export async function executeMessageSearch(
   };
   reply.raw.once('close', disconnect);
   try {
-    return await service.search(input, principal, {
+    return await run({
       signal: controller.signal,
       deadlineAt,
       onTrace: (trace) => {
@@ -84,6 +96,11 @@ export async function executeMessageSearch(
       },
     });
   } catch (error) {
+    if (
+      error instanceof Error &&
+      ['ANSWER_OPERATION_CONFLICT', 'ANSWER_INVOCATION_ALREADY_PREPARED'].includes(error.message)
+    )
+      return reply.status(409).send({ error: 'Answer operation conflicts with its accepted use', code: error.message });
     if (error instanceof MessageSearchAccessError) {
       reply.status(error.statusCode);
       return { error: error.message, code: 'MESSAGE_SEARCH_ACCESS_DENIED' };

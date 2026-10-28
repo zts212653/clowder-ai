@@ -7,6 +7,7 @@ import type {
 import { WorkIdentityChips } from './ProjectIdentityChip.js';
 import { ProjectResponsibilityInline } from './ProjectResponsibilityInline.js';
 import { dependencyLevels, formatHistoryTime, workHistoryLabels } from './roadmap-view-model.js';
+import { WorkTimeSummary } from './WorkTimeSummary.js';
 import { workBlockingPresentation, workDependencyPresentation } from './work-blocking-presentation.js';
 import { workExecutionPresentation } from './work-execution-presentation.js';
 
@@ -56,7 +57,7 @@ export function ProjectPlanTable(props: ProjectPlanProps) {
         <span>执行</span>
         <span>阻塞 / 前置</span>
         <span>下一次交付</span>
-        <span>最近</span>
+        <span>时间</span>
       </header>
       {completed.length > 0 && (
         <details className="project-plan-completed" aria-label="已完成任务">
@@ -119,7 +120,9 @@ function ProjectPlanRow({ work, ...props }: ProjectPlanProps & { readonly work: 
       </div>
       <p className="project-plan-delivery">{work.intendedOutcome || '未填写'}</p>
       <div className="project-plan-recent">
-        {recent ? (
+        {work.time?.businessDeadline || work.time?.reviewBy || work.time?.estimatedCompletion ? (
+          <WorkTimeSummary work={work} />
+        ) : recent ? (
           <>
             <strong>{workHistoryLabels[recent.action]}</strong>
             <span>

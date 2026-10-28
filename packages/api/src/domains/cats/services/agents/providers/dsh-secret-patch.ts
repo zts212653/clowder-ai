@@ -7,7 +7,7 @@ import { secretRuntimeScript } from '@cat-cafe/mcp-server/dist/secret-runtime.js
 
 const PLUGIN = secretRuntimeScript('secret-dsh-plugin.mjs');
 // Startup admission covers this exact reviewed consumer, never arbitrary YAML or !!js.
-const PLUGIN_HASH = '5b70b9694b1c0ebcca16da3b7143500de3fd82beea8754de45811344fe3827d1';
+const PLUGIN_HASH = 'c34e9b909d42d44f52d4742fcd7e94679cacd65e26f8743403121521628c8901';
 const template = () =>
   `- insert:\n    - id: cat-cafe-secret-content\n      name: ${JSON.stringify(pathToFileURL(PLUGIN).href)}\n- id: acp\n  inject: [acpAppStartup, catCafeSecretContent]\n`;
 

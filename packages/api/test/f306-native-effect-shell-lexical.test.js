@@ -8,7 +8,7 @@ import { gateBackgroundDecision } from '../../../scripts/gate-background-decisio
 import { assessSideEffect } from '../../../scripts/lib/self-host-guard.mjs';
 import { executedInvocations } from '../../../scripts/lib/shell-invocation.mjs';
 import { decideNativeHookPayload } from '../../../scripts/native-effect-target-guard.mjs';
-import { gateHookProgram, nativeHookPrograms } from './helpers/native-hook-programs.js';
+import { gateHookProgram, nativeHookPrograms, nativeHookTestEnv } from './helpers/native-hook-programs.js';
 
 // Sources: 0001790992047730-001180-9579c288, 0001790992632671-001208-8b43ecfb.
 // Threat specimens are data passed to classifiers/hook stdin, NEVER shell programs.
@@ -107,6 +107,7 @@ test('the actual gate hook denies comment/apostrophe and EOF variants without ex
     "echo ok # c \\\nbash -c 'echo hi\npnpm gate' #c\\; eval 'x #\necho y'",
   ]) {
     const result = spawnSync(gateProgram, [gateScript], {
+      env: nativeHookTestEnv(),
       input: JSON.stringify(payload(command)),
       encoding: 'utf8',
       timeout: 10_000,
@@ -169,15 +170,15 @@ test('nested execution keeps its own targets while the outer substitution output
     );
 });
 
-test('a child policy denial on an ordinary target is not reclassified into permission', () => {
+test('an unsupported ordinary preview in a child shell defers to ordinary policy', () => {
   for (const cwd of ['/tmp', '/tmp/f306-policy/projects/relay-station/cat-cafe']) {
     for (const tool of ['Bash', 'exec_command']) {
       const decision = decideNativeHookPayload(
         { ...payload('echo $(printf ok; pnpm preview:process stop runtime)', tool), cwd },
         { selfHost: () => ({ confidence: 'none' }) },
       );
-      assert.equal(decision.decision, 'deny');
-      assert.equal(decision.reasonCode, 'unbounded_managed_preview_operation');
+      assert.equal(decision.decision, 'allow');
+      assert.notEqual(decision.reasonCode, 'read_only');
     }
   }
 });

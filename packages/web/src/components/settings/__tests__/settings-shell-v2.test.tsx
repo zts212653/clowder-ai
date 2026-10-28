@@ -72,9 +72,11 @@ describe('F322 设置与管理 shell (v2)', () => {
     delete (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT;
   });
 
-  it('shows 11 first-level items and lands on 猫猫团队 › 成员与运行时 by default', () => {
+  it('puts You before the eleven existing entries and keeps the team default', () => {
     render('');
-    expect(host.querySelectorAll('[data-testid^="settings-entry-"]')).toHaveLength(11);
+    const entries = host.querySelectorAll('[data-testid^="settings-entry-"]');
+    expect(entries).toHaveLength(12);
+    expect(entries[0]?.getAttribute('data-testid')).toBe('settings-entry-you');
     expect(host.querySelector('[data-testid="settings-entry-team"]')?.getAttribute('aria-current')).toBe('page');
     expect(host.querySelector('[data-testid="content"]')?.getAttribute('data-section')).toBe('members');
   });

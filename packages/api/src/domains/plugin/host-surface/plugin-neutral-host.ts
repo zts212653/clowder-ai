@@ -1,15 +1,22 @@
+import type { CollectiveMaterialSourcePort } from '@cat-cafe/shared';
 import type { CollectiveArtifactOwnerPort } from '../../collaborative-content/collective-artifact/owner-port.js';
 import { ExternalPluginRuntimeError } from '../external-runtime/types.js';
 import type { PluginInventoryStore } from '../host-inventory/ports.js';
 import type { PluginInstanceRecord, PluginPackageRecord } from '../host-inventory/types.js';
 import { type CollectiveArtifactOwnerHolder, createCollectiveArtifactOwnerProxy } from './collective-artifact-owner.js';
+import {
+  type CollectiveMaterialSourceHolder,
+  createCollectiveMaterialSourceProxy,
+} from './collective-material-source.js';
 import { createPluginMembersHost, type PluginMembersHost, type PluginMembersServices } from './plugin-members-host.js';
 
 export interface PluginNeutralHost {
+  readonly collectiveMaterialSource?: CollectiveMaterialSourcePort;
   readonly collectiveArtifactOwner?: CollectiveArtifactOwnerPort;
   readonly members: PluginMembersHost;
 }
 interface Deps {
+  readonly collectiveMaterialSource?: CollectiveMaterialSourceHolder;
   readonly collectiveArtifactOwner?: CollectiveArtifactOwnerHolder;
   readonly activationSignal?: AbortSignal;
   readonly pluginInstanceId: string;
@@ -54,6 +61,15 @@ export async function createPluginNeutralHost(deps: Deps): Promise<PluginNeutral
   }
   const collective = pkg.pluginId === 'official.collective-connector' && instance.pluginId === pkg.pluginId;
   return Object.freeze({
+    ...(collective && deps.collectiveMaterialSource
+      ? {
+          collectiveMaterialSource: createCollectiveMaterialSourceProxy({
+            owner: () => deps.collectiveMaterialSource?.current,
+            assertCurrent: () => current(),
+            ...(deps.activationSignal ? { signal: deps.activationSignal } : {}),
+          }),
+        }
+      : {}),
     members: createPluginMembersHost({ services: deps.members, assertCurrent: current }),
     ...(collective && deps.collectiveArtifactOwner
       ? {

@@ -30,6 +30,9 @@ export default defineConfig({
       'src/__tests__/capability-evolution-preparation.test.ts',
       'src/__tests__/capability-evolution-preparation-choice.test.ts',
       'src/__tests__/collective.test.ts',
+      'src/__tests__/collective-message-expression.test.ts',
+      'src/__tests__/collective-message-rich.test.ts',
+      'src/__tests__/message-stickers.test.ts',
       'src/__tests__/collective-appearance-bridge.test.ts',
       'src/__tests__/action-successor-types.test.ts',
       'src/__tests__/cross-thread-coordination.test.ts',
@@ -87,6 +90,7 @@ export default defineConfig({
       'src/__tests__/timeline-message-kind.test.ts',
       'src/__tests__/lifecycle-metadata-coercion.test.ts',
       'src/__tests__/hold-card-cancelability.test.ts',
+      'src/__tests__/worktree-notice.test.ts',
     ],
   },
 });

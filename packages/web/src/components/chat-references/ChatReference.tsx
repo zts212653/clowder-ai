@@ -7,7 +7,6 @@ import {
 } from '@cat-cafe/shared';
 import { type ReactNode, useCallback, useContext, useRef, useState, useSyncExternalStore } from 'react';
 import { useChatStore } from '@/stores/chatStore';
-import { API_URL } from '@/utils/api-client';
 import { hasPendingWorkspaceFileLink } from '@/utils/pending-workspace-file-link';
 import { AppTooltip } from '../AppTooltip';
 import { useChatArtworkLightbox } from '../content-review/useChatArtworkLightbox';
@@ -103,15 +102,17 @@ export function ChatReference({
           path: value.path,
           navigationOrigin: origin(),
         });
-      else if (value.mime.startsWith('image/'))
-        void artwork.enlarge({
-          url: `${API_URL}/api/workspace/file/raw?${new URLSearchParams({ worktreeId: value.worktreeId, path: value.path })}`,
-          title: value.path.split('/').at(-1) ?? value.path,
-          alt: value.path,
-          mediaType: 'image',
-          entry: { kind: 'workspace', worktreeId: value.worktreeId, path: value.path, messageId: origin()?.messageId },
+      else
+        void artwork.openContent({
+          kind: 'workspace',
+          target: {
+            worktreeId: value.worktreeId,
+            path: value.path,
+            scrollToLine: value.line,
+            navigationOrigin: origin(),
+          },
+          origin: origin(),
         });
-      else state.setWorkspaceOpenFile(value.path, value.line, value.worktreeId, threadId, origin(), 'permanent');
     } else if (value.kind === 'github' && value.objectType === 'pull' && value.worktreeId) {
       const surface = createPullRequestChangesSurface({
         artifact: { type: 'pr', ref: `${value.repo}#${value.number}`, name: value.title ?? `#${value.number}` },

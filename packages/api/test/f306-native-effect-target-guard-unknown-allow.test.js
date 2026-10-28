@@ -13,6 +13,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, describe, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { nativeHookTestEnv } from './helpers/native-hook-programs.js';
 
 const { decideNativeEffect, decideNativeHookPayload } = await import('../../../scripts/native-effect-target-guard.mjs');
 const claudeHookPath = fileURLToPath(new URL('../../../.claude/hooks/runtime-sanctuary-guard.sh', import.meta.url));
@@ -23,8 +24,8 @@ const publicWithoutClaudeWrapper =
 // denial, and the two largest reasons were "the parser did not recognise the command"
 // (`unknown → broad_root`, `unknown → runtime_sanctuary`). A command the parser cannot read
 // is not evidence of danger. A deny needs a recognised dangerous effect on a protected
-// target, except for You's two literal iron-rule sanctuaries (runtime, Redis 6399),
-// which stay closed to unrecognised commands that name them.
+// target. The 2026-10-27 A disposition also defers unknown runtime/6399 effects;
+// recognised protected mutations remain refused and unknown is never labelled read.
 const fixtureRoot = realpathSync(mkdtempSync(join(tmpdir(), 'f306-unknown-allow-')));
 after(() => removeFixture(fixtureRoot, { recursive: true, force: true }));
 const stationRoot = join(fixtureRoot, 'projects', 'relay-station');
@@ -93,18 +94,15 @@ describe('F306 AC-C7: an unrecognised command is not a dangerous one', () => {
     }
   });
 
-  test('recognised destruction and the literal iron-rule sanctuaries stay denied', () => {
+  test('recognised destruction on actual protected targets stays denied', () => {
     for (const [command, cwd] of [
       ['rm -rf /', mainRoot],
       ['rm -rf ~/', mainRoot],
       ['rm -rf ../*', mainRoot],
       [`trash ${mainRoot}`, stationRoot],
       ['git push --force origin main', mainRoot],
-      // Unrecognised commands that literally name a sanctuary.
-      // (`cd <runtime> && pnpm start` is classified read_only on main today; that gap
-      // predates this change and is not claimed here.)
-      ['pnpm start', runtimeRoot],
-      ['REDIS_URL=redis://localhost:6399 pnpm dev', mainRoot],
+      [`touch ${runtimeRoot}/modified`, mainRoot],
+      ['redis-cli -p 6399 FLUSHALL', mainRoot],
     ]) {
       const decision = decideBoth(command, cwd);
       assert.equal(decision.decision, 'deny', `${command} (cwd ${cwd}) → ${decision.reasonCode}`);
@@ -124,7 +122,7 @@ describe('Claude hook: a broken shared guard falls back instead of locking every
       copyFileSync(claudeHookPath, hook);
       if (guardSource !== undefined)
         writeFileSync(join(root, 'scripts', 'native-effect-target-guard.mjs'), guardSource);
-      const env = { ...process.env };
+      const env = nativeHookTestEnv();
       delete env.CAT_CAFE_DEPLOYMENT_ID;
       const result = spawnSync('bash', [hook], {
         input: JSON.stringify({ tool_name: 'Bash', cwd: '/tmp', tool_input: { command } }),

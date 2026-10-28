@@ -5,6 +5,7 @@ import { CollectiveChannelWorkspace } from './CollectiveChannelWorkspace.js';
 import { CollectiveHome } from './CollectiveHome.js';
 import {
   channelDestinations,
+  clearChannelPosition,
   readChannelEntry,
   saveChannelPosition,
   writeChannelTarget,
@@ -145,6 +146,7 @@ export function CollectiveWorkspace({
         [focus.channelId]: {
           ...defaultRoadmapView,
           workspace: 'project',
+          lens: 'attention' in focus && focus.attention === 'triage' ? 'triage' : 'stage',
           roadmapId: focus.roadmapId,
           workId: focus.workId,
         },
@@ -223,8 +225,9 @@ export function CollectiveWorkspace({
   };
   useEffect(() => {
     if (previousNamespace.current !== namespace) return;
-    saveChannelPosition(namespace, channelId);
-  }, [namespace, channelId]);
+    if (destination === 'channel') saveChannelPosition(namespace, channelId);
+    else if (destination === 'home') clearChannelPosition(namespace);
+  }, [namespace, channelId, destination]);
   // biome-ignore lint/correctness/useExhaustiveDependencies: A world namespace change is the reset signal; Host callbacks must not replay this reset.
   useEffect(() => {
     const worldChanged = previousNamespace.current !== namespace;
@@ -254,11 +257,23 @@ export function CollectiveWorkspace({
     );
   };
   const members = snapshot.members;
+  const currentHumanId = snapshot.me.human.humanId;
   const visibleCats = visibleCollectiveCats(participants, members);
+  const ownCats = snapshot.participants?.filter(
+    (participant) => participant.availability === 'declared' && participant.humanId === currentHumanId,
+  );
+  const showCurrentHuman = () => {
+    artifactNavigation.discard();
+    setDestination('channel');
+    writeChannelTarget(channelId);
+    setSelectedMember({ kind: 'human', humanId: currentHumanId });
+    setNavigationOpen(false);
+    host.hide();
+  };
   const roadmapView = roadmapViews[channelId];
   const updateRoadmapView = (view: RoadmapViewState) =>
     setRoadmapViews((current) => ({ ...current, [channelId]: view }));
-  const openRoadmapMessage = (work: CollectiveWorkProjection, view: RoadmapViewState, eventId: string) => {
+  const openProjectSource = (sourceChannelId: string, view: RoadmapViewState, eventId: string) => {
     artifactNavigation.discard();
     const roadmap = snapshot.collaboration?.roadmaps.find((candidate) => candidate.roadmapId === view.roadmapId);
     setRoadmapViews((current) => ({ ...current, [channelId]: view }));
@@ -270,9 +285,11 @@ export function CollectiveWorkspace({
     setSelectedMember(undefined);
     setNavigationOpen(false);
     setQuery('');
-    setChannelId(work.sourceLocation.channelId);
-    writeChannelTarget(work.sourceLocation.channelId);
+    setChannelId(sourceChannelId);
+    writeChannelTarget(sourceChannelId);
   };
+  const openRoadmapMessage = (work: CollectiveWorkProjection, view: RoadmapViewState, eventId: string) =>
+    openProjectSource(work.sourceLocation.channelId, view, eventId);
   const returnToRoadmap = () => {
     if (!roadmapReturn) return;
     setRoadmapViews((current) => ({ ...current, [roadmapReturn.channelId]: roadmapReturn.view }));
@@ -371,6 +388,9 @@ export function CollectiveWorkspace({
                   : `${members.cafes.length} 个 Café · ${members.humans.length + visibleCats.length} 位成员`
                 : t('正在读取成员…')
             }
+            identity={{ human: snapshot.me.human, auth: snapshot.me.auth, cats: ownCats }}
+            onOpenSelf={showCurrentHuman}
+            onSwitchAccount={client.switchAccount}
             notice={snapshot.notice}
             onInvite={() => void client.createInvite()}
             onPair={beginPair}
@@ -457,6 +477,14 @@ export function CollectiveWorkspace({
                 onNavigation={() => setNavigationOpen((value) => !value)}
                 onLibrary={showLibrary}
                 onOpenRoadmapMessage={openRoadmapMessage}
+                onOpenTimeSource={(eventId, sourceChannelId) =>
+                  content === 'roadmap'
+                    ? openProjectSource(sourceChannelId, roadmapView ?? defaultRoadmapView, eventId)
+                    : selectChannel(sourceChannelId, eventId)
+                }
+                onOpenMaterialSource={(publication, view) =>
+                  openProjectSource(publication.channelId, view, publication.sourceEventId)
+                }
                 onReplayGuide={replayGuide}
                 onReturnToRoadmap={roadmapReturn ? returnToRoadmap : undefined}
                 onRoadmapView={updateRoadmapView}

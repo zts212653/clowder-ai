@@ -574,7 +574,11 @@ export function resolveServiceEndpointMap(
   );
 }
 
-export async function fetchServiceHealth(url: string, service?: ServiceManifest): Promise<ServiceHealthResult> {
+export async function fetchServiceHealth(
+  url: string,
+  service?: ServiceManifest,
+  transport: typeof fetch = fetch,
+): Promise<ServiceHealthResult> {
   // Deep health probes (synthesis dry-run, embedding trial, etc.) are much
   // slower than a simple HTTP /health ping.  Use the per-service timeout when
   // the URL targets a deep-health endpoint; otherwise keep the fast 1500ms
@@ -582,7 +586,7 @@ export async function fetchServiceHealth(url: string, service?: ServiceManifest)
   const isDeepProbe = !!(service?.deepHealthPath && url.includes(service.deepHealthPath));
   const timeoutMs = isDeepProbe ? (service?.deepHealthTimeoutMs ?? 20_000) : 1500;
   try {
-    const response = await fetch(url, { signal: AbortSignal.timeout(timeoutMs) });
+    const response = await transport(url, { signal: AbortSignal.timeout(timeoutMs) });
     let details: Record<string, unknown> | undefined;
     try {
       const payload: unknown = await response.json();

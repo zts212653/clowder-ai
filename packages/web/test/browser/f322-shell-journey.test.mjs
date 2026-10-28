@@ -983,7 +983,7 @@ test('the workspace-team second-level destination can be pinned like the other s
     await page.getByRole('button', { name: '固定「成员与运行时」到窄栏', exact: true }).click();
     const members = page.getByTestId('rail-pin-members');
     await members.locator('[data-hub-icon="paw"]').waitFor();
-    const collective = page.getByTestId('world-collective');
+    const collective = page.getByTestId('world-add');
     assert.notDeepEqual(
       await members.locator('path').evaluateAll((paths) => paths.map((node) => node.getAttribute('d'))),
       await collective.locator('path').evaluateAll((paths) => paths.map((node) => node.getAttribute('d'))),

@@ -12,6 +12,11 @@ title: Memory / Evidence
 summary: Evidence indexing、retrieval、scanner selection、bootstrap、library memory，以及带 append-only content-free owner outcome refs 的 execution-time cue orchestration。
 canonical_features: [F102, F152, F209, F221, F227, F231, F255, F260, F263, F271, F276, F282, F287, F321]
 code_anchors:
+  - packages/api/src/domains/memory/MessageSearchAnswerPublicationService.ts
+  - packages/api/src/domains/memory/MessageSearchAnswerPublicationStore.ts
+  - packages/api/src/routes/callback-message-search-answer-routes.ts
+  - packages/api/src/routes/message-search-answer-route.ts
+  - packages/mcp-server/src/tools/message-search-answer-tool.ts
   - packages/api/src/domains/memory/MessageSearchService.ts
   - packages/api/src/domains/memory/message-query-qualifier.ts
   - packages/api/src/domains/memory/message-query-native.ts
@@ -116,6 +121,7 @@ code_anchors:
   - packages/api/src/routes/taste-observatory.ts
   - packages/mcp-server/src/tools/memory-cue-tools.ts
 doc_anchors:
+  - docs/architecture/f322-message-search-answer-contract.md
   - feature-specs/2026-10-08-f321-luna-thread-recall.md
   - docs/decisions/020-f102-memory-system-architecture.md
   - docs/features/F102-memory-adapter-refactor.md
@@ -142,6 +148,7 @@ doc_anchors:
   - feature-discussions/2026-08-02-f287-close-gate/close-gate-report.md
 static_scan_hints: [IEvidenceStore, IIndexBuilder, RepoScanner, EvidenceStore, IndexBuilder, Scanner, Memory, passage_vectors, entity_id, entity conflict, EntityRegistry, EntityConflictContext, Perspective, searchEvidence, search_evidence, AutoDreamStore, DreamDiaryEntry, SleepPosture, PrivateCue, OwnedSeed, F255PendingCueSink, DiaryEvidenceProjector, world:diary, LifecycleTraceStore, lifecycle_traces, VerificationEvent, ThreeAxisSnapshot, MemoryReflectionStore, SessionReflectionProducer, DailyContextReflectionProducer, DailyContextReflectionTaskSpec, reflection_outputs, pull_only, applyPullOnlyDownrank, ProactiveMemoryOpportunityEvaluator, ProactiveMemoryColdStartConfig, proactive-memory-judgment, opportunityRef, RecallOpportunityCatalog, MemoryCuePlaneService, MemoryCueResolverRegistry, MemoryCueInvocationPromptService, MemoryCueEpisodeStore, MemoryCueDrillHandleService, MemoryCueSourceReader, memory_cue_events]
 cited_by:
+  - {feature: F322, date: 2026-10-26, delta: "memory owns one TTL=0 bounded answer publication; original completed R or explicit message owns its Host-only binding, with no parallel search/index/queue"}
   - {feature: F322, date: 2026-10-22, delta: "query eligibility is a bounded native read-only consumer of canonical readable message bodies; publication rechecks authority and revision, while recall, source stores, sorting and memory curation ownership stay in existing lanes"}
   - {feature: F321, date: 2026-10-08, delta: "F102 source-thread overviews and durable native session/cursor metadata; catalog v6 first-owner-message resolver and F296 bounded T2 historical clue; message/source/Task authority remains in existing lanes"}
   - {feature: F321, date: 2026-10-07, delta: "Phase A adds browser-owner adapters to original lane services, durable request receipts and Event correction approval; memory source owners remain separate and F287 cue episodes stay content-free"}

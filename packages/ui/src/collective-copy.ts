@@ -7,6 +7,20 @@ const en: Readonly<Record<string, string>> = {
   我家的猫在这个频道: 'My cats in this channel',
   '目标共同家园需要重新登录；不会自动切换到其他共同家园。':
     'Sign in again to open this collective. Your selected collective stays unchanged.',
+  '目标共同体需要重新登录；不会自动切换到其他共同体。':
+    'Sign in again to open this collective. Your selected collective stays unchanged.',
+  '这个共同体的入口不完整；请从世界栏重新进入。':
+    'This collective link is incomplete. Open it again from the world rail.',
+  '暂时连不上这个共同体的服务；请先在设置与管理里确认连接。':
+    'This collective service is temporarily unreachable. Check its connection in Settings & Management.',
+  '现在进不去这个共同体；它的服务已经变化，请从世界栏重新进入。':
+    'This collective is unavailable because its service changed. Open it again from the world rail.',
+  '当前账号现在进不去这个共同体；不会自动切换到别处。':
+    'This account cannot open the collective. Your selected destination stays unchanged.',
+  '当前账号现在进不去这个共同体；请换账号或重新登录。不会自动切换到别处。':
+    'This account cannot open the collective. Switch accounts or sign in again; your destination stays unchanged.',
+  '暂时连不上这个共同体的服务；不会自动切换到别处。':
+    'This collective service is temporarily unreachable. Your selected destination stays unchanged.',
   'Clowder AI 正在安全托管连接凭据…': 'Clowder AI is securely saving connection credentials…',
   推进: 'is progressing',
   关掉: 'Turn off',
@@ -52,6 +66,7 @@ const en: Readonly<Record<string, string>> = {
   '公开进度：推进中': 'Public progress: in progress',
   公开任务进行中: 'public tasks in progress',
   共同家园: 'Collective',
+  共同体: 'Collective',
   成员资料: 'Member profile',
   关闭成员资料: 'Close member profile',
   维护者: 'Steward',
@@ -60,9 +75,14 @@ const en: Readonly<Record<string, string>> = {
   项目: 'Projects',
   作品资料库: 'Works library',
   共同家园成员: 'Collective members',
+  共同体成员列表: 'Collective members',
   全部作品: 'All works',
   频道: 'Channels',
   我的猫: 'My cats',
+  你的猫在这里: 'Your cats here',
+  看我的成员资料: 'View my member profile',
+  '换账号…': 'Switch account…',
+  '当前没有登记到这里的猫。': 'No cats are registered here yet.',
   '搜索频道、话题或消息': 'Search channels, topics or messages',
   搜索频道与话题: 'Search channels and topics',
   搜索结果: 'Search results',
@@ -75,7 +95,9 @@ const en: Readonly<Record<string, string>> = {
   关闭频道导航: 'Close channel navigation',
   收起频道导航: 'Collapse channel navigation',
   共同家园导航: 'Collective navigation',
+  共同体导航: 'Collective navigation',
   选择共同家园: 'Choose collective',
+  选择共同体: 'Choose collective',
   频道导航: 'Channel navigation',
   '我的猫…': 'My cats…',
   '已允许的工作…': 'Allowed work…',
@@ -165,6 +187,7 @@ const en: Readonly<Record<string, string>> = {
   '任务建议 · 来自这条消息': 'Task suggestion · from this message',
   '任务 · 来自这条消息': 'Task · from this message',
   '正在打开共同家园…': 'Opening the collective…',
+  '正在打开共同体…': 'Opening the collective…',
   现在还进不去: 'Unable to open this collective',
   '暂时连不上这个共同体。恢复后可以接着用。':
     'This collective is temporarily unavailable. You can continue when it reconnects.',
@@ -196,10 +219,15 @@ const en: Readonly<Record<string, string>> = {
   选择下一步: 'Choose your next step',
   '第一次建立 Collective': 'Create your first collective',
   建立新的共同家园: 'Create a collective',
+  建立新的共同体: 'Create a collective',
+  新建共同体: 'Create a collective',
   给共同家园起个名字: 'Name your collective',
+  给共同体起个名字: 'Name your collective',
   'Collective 名称': 'Collective name',
   '建立 Collective': 'Create collective',
   '你已离开原共同家园。可以在这里新建，也可以从新的邀请链接加入；原公开历史与署名仍会保留。':
+    'You have left the previous collective. Create one here or open a new invitation. Public history and attribution remain.',
+  '你已离开原共同体。可以在这里新建，也可以从新的邀请链接加入；原公开历史与署名仍会保留。':
     'You have left the previous collective. Create one here or open a new invitation. Public history and attribution remain.',
   '你会成为第一位管理者。首启完成后还需绑定 Human 身份，才能邀请成员、连接 Café 或进入日常协作。':
     'You will be the first steward. Link your GitHub identity before inviting members, connecting Cafés or collaborating.',
@@ -211,6 +239,7 @@ const en: Readonly<Record<string, string>> = {
   '一次性初始化已经建立首个 Collective。完成身份验证后，才能邀请成员、连接 Café 或进入日常协作。':
     'The first collective is ready. Verify your identity before inviting members, connecting Cafés or collaborating.',
   目标共同家园需要重新登录: 'Sign in again to open this collective',
+  目标共同体需要重新登录: 'Sign in again to open this collective',
   在家里查看: 'Open in my Café',
   停止: 'Stop',
   我的猫在这个频道: 'My cats in this channel',
@@ -267,6 +296,7 @@ const en: Readonly<Record<string, string>> = {
   '作品服务当前不可用。': 'Shared works are currently unavailable.',
   '共同家园已经切换，请从当前页面重新打开结果。':
     'The collective changed. Open the result again from the current page.',
+  '共同体已经切换，请从当前页面重新打开结果。': 'The collective changed. Open the result again from the current page.',
   '正在更新…': 'Updating…',
   '共同状态尚未确认，可以重试': 'The collective state is not confirmed yet; you can retry.',
   '结果已确认，任务动态会继续保留': 'Result accepted; the task activity remains available',

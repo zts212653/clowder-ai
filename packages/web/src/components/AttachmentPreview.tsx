@@ -1,8 +1,8 @@
 'use client';
 
-import { ComposerAttachmentPreview, MessageMediaViewer } from '@cat-cafe/ui';
+import { ComposerAttachmentPreview } from '@cat-cafe/ui';
 import { useEffect, useMemo, useState } from 'react';
-import { CopyButton } from './Lightbox';
+import { Lightbox } from './Lightbox';
 
 /** Private Host upload behavior stays here; attachment presentation is shared with Channel. */
 export function AttachmentPreview({ files, onRemove }: { files: File[]; onRemove: (index: number) => void }) {
@@ -34,17 +34,12 @@ export function AttachmentPreview({ files, onRemove }: { files: File[]; onRemove
         labels={{ remove: (name) => `Remove ${name}`, retry: '重试', uploading: '正在上传…' }}
       />
       {item && (
-        <MessageMediaViewer
-          item={{ id: item.id, url: item.url, title: item.name, mediaType: item.mediaType }}
+        <Lightbox
+          url={item.url}
+          alt={item.name}
+          mediaType={item.mediaType.startsWith('video/') ? 'video' : 'image'}
           onClose={() => setSelected(undefined)}
-        >
-          {item.mediaType.startsWith('image/') ? (
-            <>
-              <img src={item.url} alt={item.name} />
-              <CopyButton url={item.url} placement="below" />
-            </>
-          ) : undefined}
-        </MessageMediaViewer>
+        />
       )}
     </>
   );

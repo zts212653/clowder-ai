@@ -108,14 +108,14 @@ function isFileExistsError(error: unknown): error is NodeJS.ErrnoException {
 }
 
 function buildDisplayName(originalFilename: string, mimeType: string): string {
-  const ext = extname(originalFilename).toLowerCase() || mimeToDefaultExt(mimeType);
-  const stem = basename(originalFilename, extname(originalFilename)) || 'upload';
-  const sanitizedStem = stem
-    .trim()
-    .replace(/[^a-zA-Z0-9._-]+/g, '-')
-    .replace(/-+/g, '-')
-    .replace(/^[.-]+|[.-]+$/g, '');
-  return `${sanitizedStem || 'upload'}${ext}`;
+  // A display label is not the generated on-disk locator. Keep the person's
+  // Unicode name while stripping path/control syntax at this producer boundary.
+  const name = basename(originalFilename.replace(/\\/g, '/'))
+    .replace(/[\u0000-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069]/g, '')
+    .trim();
+  const ext = extname(name).toLowerCase() || mimeToDefaultExt(mimeType);
+  const stem = (basename(name, extname(name)) || 'upload').replace(/^[.]+|[.]+$/g, '') || 'upload';
+  return `${stem}${ext}`;
 }
 
 export async function saveFileBufferToUploadDir(input: {
@@ -138,12 +138,12 @@ export async function saveFileBufferToUploadDir(input: {
   }
 
   await mkdir(input.uploadDir, { recursive: true });
-  const ext = extname(input.originalFilename).toLowerCase() || mimeToDefaultExt(input.mimeType);
+  const displayName = buildDisplayName(input.originalFilename, input.mimeType);
+  const ext = extname(displayName).toLowerCase() || mimeToDefaultExt(input.mimeType);
   const uniqueStem = sanitizeFilenameStem(input.filenameStem);
   const diskFilename = `${uniqueStem}${ext}`;
   const absPath = resolve(join(input.uploadDir, diskFilename));
   const urlPath = `/uploads/${diskFilename}` as const;
-  const displayName = buildDisplayName(input.originalFilename, input.mimeType);
 
   try {
     await writeFile(absPath, input.buffer, { flag: 'wx' });

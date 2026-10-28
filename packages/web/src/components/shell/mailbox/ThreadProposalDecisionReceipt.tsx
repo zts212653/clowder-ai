@@ -45,6 +45,7 @@ export function ThreadProposalDecisionReceipt({
       }
       decidedAt={terminal.decidedAt}
       effectUnknown={terminal.effectUnknown}
+      effectFailed={approval.materialization.state === 'failed' && !terminal.threadId}
       threadId={terminal.effectUnknown ? undefined : terminal.threadId}
       authorizeOpen={authorizeOpen}
       onExpandedChange={onExpandedChange}

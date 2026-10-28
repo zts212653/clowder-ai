@@ -107,7 +107,7 @@ it.each([
   expect(container.querySelector('[data-testid="workspace-content-review-surface"]')).not.toBeNull();
   expect(container.querySelector('[data-testid="content-modification-entry"]')).toBeNull();
   expect(mocks.apiFetch).toHaveBeenCalledTimes(2);
-  if (shell === 'v2') {
+  {
     const more = container.querySelector<HTMLButtonElement>('[aria-label="作品更多操作"]');
     expect(more).not.toBeNull();
     await act(async () => more?.click());
@@ -116,7 +116,7 @@ it.each([
   expect(container.querySelector('img')?.getAttribute('src')).toContain(
     `/api/content-publications/${encodeURIComponent(contentRef)}/media/2`,
   );
-  expect(mocks.apiFetch).toHaveBeenCalledTimes(shell === 'v2' ? 3 : 2);
+  expect(mocks.apiFetch).toHaveBeenCalledTimes(3);
   expect([...container.querySelectorAll('h2')].map((node) => node.textContent)).toEqual(['封面']);
   expect(
     container.querySelector('select[aria-label="作品版本"]')?.getAttribute('value') ??

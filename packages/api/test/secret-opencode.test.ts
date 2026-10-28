@@ -10,7 +10,7 @@ import {
 } from '../src/domains/cats/services/agents/providers/opencode-config-writer.js';
 import { withOpenCodeSecretGuard } from '../src/domains/cats/services/agents/providers/opencode-secret-config.js';
 
-test('both OpenCode config owners install native checks and guard MCP after project merge', async () => {
+test('both OpenCode config owners install native shell checks and leave MCP direct after project merge', async () => {
   const root = await mkdtemp(join(tmpdir(), 'secret-opencode-'));
   try {
     await mkdir(join(root, '.cat-cafe'));
@@ -46,8 +46,8 @@ test('both OpenCode config owners install native checks and guard MCP after proj
     for (const config of [full, fallback])
       assert.ok(config.plugin.some((path: string) => new URL(path).pathname.endsWith('/secret-opencode-plugin.mjs')));
     const external = full.mcp.external;
-    assert.match(external.command[1], /secret-mcp-proxy\.js$/);
-    assert.equal(JSON.parse(external.environment.CAT_CAFE_SECRET_MCP_PROXY_SPEC).env.FIXTURE, 'kept');
+    assert.deepEqual(external.command, ['node', '/fixture/browser.js']);
+    assert.equal(external.environment.FIXTURE, 'kept');
     assert.equal(full.mcp.disabled.enabled, false);
     assert.equal(fallback.provider, undefined, 'native subscription auth stays in its original owner');
   } finally {
@@ -91,16 +91,10 @@ test('OpenCode keeps native OAuth while explicit static remote transports use gu
     },
   });
   assert.equal(config.mcp.native, native);
-  const guarded = config.mcp.static as unknown as {
-    type: string;
-    environment: Record<string, string>;
-    command: string[];
-  };
-  assert.equal(guarded.type, 'local');
-  assert.equal(guarded.command[0], process.execPath);
-  assert.equal(JSON.parse(guarded.environment.CAT_CAFE_SECRET_MCP_PROXY_SPEC).transport, 'auto');
-  assert.equal(
-    JSON.parse(guarded.environment.CAT_CAFE_SECRET_MCP_PROXY_SPEC).headers.Authorization,
-    'fixture-transport-owned',
-  );
+  assert.deepEqual(config.mcp.static, {
+    type: 'remote',
+    url: 'https://example.invalid/mcp',
+    oauth: false,
+    headers: { Authorization: 'fixture-transport-owned' },
+  });
 });

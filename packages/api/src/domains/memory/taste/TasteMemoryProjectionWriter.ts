@@ -194,7 +194,13 @@ function projectHardForget(
   const current = readCanonicalFile(target);
   const existingTombstone = readCanonicalFile(tombstonePath);
   if (current === null) {
-    if (existingTombstone !== exactTombstone) throw new TasteMemoryMutationError('not_available');
+    // Accept only the two emitted serializations, retaining every owner/request/
+    // revision field and leaving existing compact tombstones byte-for-byte intact.
+    if (
+      existingTombstone !== exactTombstone &&
+      existingTombstone !== tasteTombstone(input.ownerUserId, input.sourcePath, input.command, 0)
+    )
+      throw new TasteMemoryMutationError('not_available');
     const indexChanged = projectIndexFile(root, input.sourcePath, null);
     return {
       changed: indexChanged,
@@ -295,13 +301,22 @@ function tasteTombstonePath(sourcePath: string): string {
     : `docs/taste/tombstones/${digest}.json`;
 }
 
-function tasteTombstone(ownerUserId: string, sourcePath: string, command: TasteMemoryOwnerAction): string {
-  return `${JSON.stringify({
-    v: 1,
-    kind: 'taste-memory-forget-tombstone',
-    ownerDigest: createHash('sha256').update(ownerUserId).digest('hex'),
-    sourcePath,
-    requestId: command.requestId,
-    expectedRevision: command.expectedRevision,
-  })}\n`;
+function tasteTombstone(
+  ownerUserId: string,
+  sourcePath: string,
+  command: TasteMemoryOwnerAction,
+  indent: 0 | 2 = 2,
+): string {
+  return `${JSON.stringify(
+    {
+      v: 1,
+      kind: 'taste-memory-forget-tombstone',
+      ownerDigest: createHash('sha256').update(ownerUserId).digest('hex'),
+      sourcePath,
+      requestId: command.requestId,
+      expectedRevision: command.expectedRevision,
+    },
+    null,
+    indent,
+  )}\n`;
 }

@@ -4,7 +4,7 @@ import { act, StrictMode, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import type { ClientSnapshot } from '../client-types.js';
-import { useHumanAuthSession } from '../use-human-auth-session.js';
+import { SESSION_KEY, useHumanAuthSession } from '../use-human-auth-session.js';
 
 const meta = {
   serviceInstanceId: 'service-test',
@@ -45,6 +45,7 @@ function deferred<T>() {
 beforeEach(() => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
   sessionStorage.clear();
+  localStorage.clear();
   history.replaceState(null, '', '/#bootstrap=test');
   container = document.createElement('div');
   document.body.append(container);
@@ -54,6 +55,7 @@ beforeEach(() => {
 afterEach(async () => {
   await act(async () => root.unmount());
   container.remove();
+  localStorage.clear();
   history.replaceState(null, '', '/');
   vi.unstubAllGlobals();
 });
@@ -132,4 +134,91 @@ it('preserves FIFO and caller errors without replaying a failed write or sending
     '/api/later',
     { credentials: 'same-origin', headers: { authorization: 'Bearer original-session' } },
   ]);
+});
+
+it('rejects in-flight and queued requests from the previous Human after switching accounts', async () => {
+  const slowBody = deferred<unknown>();
+  const fetcher = vi.fn(async (path: string) => ({
+    ok: true,
+    status: 200,
+    json: async () => (path === '/api/slow' ? slowBody.promise : path === '/api/meta' ? meta : { providers: [] }),
+  }));
+  vi.stubGlobal('fetch', fetcher);
+  await act(async () => root.render(<Harness />));
+  fetcher.mockClear();
+  session.token.current = 'human-a-session';
+  const inFlight = session.request('/api/slow');
+  const queued = session.request('/api/must-not-run');
+
+  await act(async () => {
+    await Promise.resolve();
+  });
+  expect(fetcher.mock.calls.map(([path]) => path)).toEqual(['/api/slow']);
+  act(() => session.switchAccount());
+
+  let outcomes: PromiseSettledResult<unknown>[] = [];
+  await act(async () => {
+    slowBody.resolve({ stale: true });
+    outcomes = await Promise.allSettled([inFlight, queued]);
+  });
+  expect(outcomes).toEqual([
+    expect.objectContaining({ status: 'rejected', reason: expect.objectContaining({ message: '身份已变化' }) }),
+    expect.objectContaining({ status: 'rejected', reason: expect.objectContaining({ message: '身份已变化' }) }),
+  ]);
+  expect(fetcher.mock.calls.map(([path]) => path)).toEqual(['/api/slow']);
+  expect(session.token.current).toBeNull();
+  expect(current.phase).toBe('entry');
+});
+
+it('switches back to the existing login path without erasing world, channel, or draft coordinates', async () => {
+  const collectiveId = 'col_12345678';
+  const storageKey = `${SESSION_KEY}:${location.origin}`;
+  const draftKey = `collective-draft:service-test:${collectiveId}:human_12345678:general:channel`;
+  history.replaceState(null, '', `/?collectiveId=${collectiveId}&channelId=general`);
+  sessionStorage.setItem(storageKey, 'operator-session');
+  localStorage.setItem(draftKey, JSON.stringify({ body: '切账号后也要留着' }));
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (path: string) => {
+      if (path === '/api/meta') return new Response(JSON.stringify({ ...meta, bootstrapNeeded: false }));
+      if (path === '/api/auth/providers') {
+        return new Response(JSON.stringify({ providers: [{ id: 'github', ready: true }] }));
+      }
+      if (path === '/api/me') {
+        return new Response(
+          JSON.stringify({
+            human: {
+              humanId: 'human_12345678',
+              displayName: 'You',
+              createdAt: '2026-08-29T00:00:00.000Z',
+            },
+            auth: { provider: 'github', handle: 'zts212653' },
+            collectives: [
+              {
+                collectiveId,
+                name: '猫猫研究所',
+                createdByHumanId: 'human_12345678',
+                createdAt: '2026-08-29T00:00:00.000Z',
+                role: 'steward',
+              },
+            ],
+          }),
+        );
+      }
+      throw new Error(`Unexpected request: ${path}`);
+    }),
+  );
+
+  await act(async () => root.render(<Harness />));
+  expect(current).toMatchObject({ phase: 'ready', me: { human: { displayName: 'You' } } });
+
+  act(() => session.switchAccount());
+
+  expect(session.token.current).toBeNull();
+  expect(sessionStorage.getItem(storageKey)).toBeNull();
+  expect(localStorage.getItem(draftKey)).toContain('切账号后也要留着');
+  expect(location.search).toBe(`?collectiveId=${collectiveId}&channelId=general`);
+  expect(current).toMatchObject({ phase: 'entry', events: [], delivery: { kind: 'idle' } });
+  expect(current.me).toBeUndefined();
+  expect(current.collective).toBeUndefined();
 });

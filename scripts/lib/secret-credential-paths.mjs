@@ -53,6 +53,24 @@ export function credentialSourcesFromEnvironment(environment = process.env, cwd 
   return { files: files.map((file) => resolve(cwd, file)), directories: directories.map((dir) => resolve(cwd, dir)) };
 }
 
+/** Only use credentials already configured by this host; never discover or open a key store. */
+export function configuredCredentialValues(environment = process.env) {
+  return [
+    ...new Set(
+      Object.entries(environment)
+        .filter(
+          ([name, value]) =>
+            /(?:^|_)(?:API_?KEY|AUTH_TOKEN|ACCESS_TOKEN|REFRESH_TOKEN|CALLBACK_TOKEN|CLIENT_SECRET|SECRET_ACCESS_KEY|PRIVATE_KEY|PASSWORD|PASSWD|TOKEN|SECRET)$/i.test(
+              name,
+            ) &&
+            typeof value === 'string' &&
+            value.length >= 24,
+        )
+        .map(([, value]) => value),
+    ),
+  ];
+}
+
 function pathIdentities(path, cwd = process.cwd()) {
   const absolute = resolve(cwd, path);
   try {

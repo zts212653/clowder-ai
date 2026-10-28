@@ -30,8 +30,8 @@ export function buildCodexNativeEffectGuardArgs(options?: {
     : [{ event: 'PreToolUse', key: 'pre_tool_use', matcher: MATCHER }];
   const groups = [
     ...effectGroups.map((group) => ({ ...group, command, index: 0 })),
-    { event: 'PreToolUse', key: 'pre_tool_use', matcher: '.*', command: secretCommand, index: 1 },
-    { event: 'PostToolUse', key: 'post_tool_use', matcher: '.*', command: secretCommand, index: 0 },
+    { event: 'PreToolUse', key: 'pre_tool_use', matcher: '^Bash$', command: secretCommand, index: 1 },
+    { event: 'PostToolUse', key: 'post_tool_use', matcher: '^Bash$', command: secretCommand, index: 0 },
   ];
   const hookConfig = [
     'hooks={',

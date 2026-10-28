@@ -7,7 +7,12 @@ import { writeShellLanguage } from '../../shell/shell-language';
 import { writeShellPresentation } from '../../shell/shell-presentation';
 import type { WorkspaceFileViewerProps } from '../WorkspaceFileViewer.types';
 
-const desktopAction = vi.hoisted(() => vi.fn().mockResolvedValue({ ok: true }));
+const desktopAction = vi.hoisted(() =>
+  vi.fn().mockResolvedValue({
+    ok: true,
+    json: async () => ({ local: true, path: '/registered/source/docs/guide.md', canOpen: true, canReveal: true }),
+  }),
+);
 vi.mock('@/utils/api-client', () => ({ API_URL: '', apiFetch: desktopAction }));
 
 vi.mock('../FileContentRenderer', () => ({
@@ -58,7 +63,6 @@ const props = (): WorkspaceFileViewerProps => ({
   onToggleHtmlPreview: vi.fn(),
   onToggleJsxPreview: vi.fn(),
   onSave: vi.fn(),
-  revealInFinder: vi.fn(),
   collaborationAvailable: true,
   onOpenCollaboration: vi.fn(),
 });
@@ -97,7 +101,15 @@ it.each([true, false])('keeps the HTML action unfilled with page preview=%s', (h
 });
 it.each(['markdown', 'jsx'] as const)('preserves the filled %s state label', (kind) => {
   writeShellLanguage('zh');
-  const p = { ...props(), isMarkdown: kind === 'markdown', isJsx: kind === 'jsx', jsxPreview: true };
+  const base = props();
+  const p = {
+    ...base,
+    file: kind === 'jsx' ? { ...base.file, path: 'Example.tsx', mime: 'text/tsx' } : base.file,
+    openFilePath: kind === 'jsx' ? 'Example.tsx' : base.openFilePath,
+    isMarkdown: kind === 'markdown',
+    isJsx: kind === 'jsx',
+    jsxPreview: true,
+  };
   act(() => root.render(<WorkspaceFileViewer {...p} />));
   const toolbar = host.querySelector('[data-testid="workspace-file-toolbar"]');
   assert(toolbar);
@@ -117,33 +129,30 @@ it.each([
   const copyPath = vi.fn().mockResolvedValue(undefined);
   Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: copyPath } });
   act(() => root.render(<WorkspaceFileViewer {...p} />));
-  const summary = host.querySelector<HTMLElement>('summary')!;
-  act(() => {
-    vi.spyOn(summary, 'getClientRects').mockReturnValue([new DOMRect(0, 0, 40, 32)] as unknown as DOMRectList);
-    const details = summary.closest('details')!;
-    details.open = true;
-    details.dispatchEvent(new Event('toggle'));
-  });
-  const menu = document.getElementById(summary.getAttribute('aria-controls')!)!;
+  const trigger = host.querySelector<HTMLButtonElement>('button[aria-haspopup="menu"]')!;
+  await act(async () => trigger.click());
+  const menu = document.querySelector<HTMLElement>('[role="menu"]')!;
   const labels = [...menu.querySelectorAll('button')].map((button) => button.textContent);
   expect(labels).toContain(language === 'en' ? 'Copy path' : '复制路径');
   expect(labels).toContain(language === 'en' ? 'Show in Finder' : '在 Finder 中显示');
   const openLabel = language === 'en' ? 'Open with default application' : '用默认应用打开';
   expect(labels).toContain(openLabel);
   if (language === 'en') expect(menu.textContent).not.toMatch(/[\u3400-\u9fff]/);
-  expect(desktopAction).not.toHaveBeenCalled();
+  expect(desktopAction.mock.calls.some(([, options]) => options?.method === 'POST')).toBe(false);
   const copy = [...menu.querySelectorAll<HTMLButtonElement>('button')].find(
     (button) => button.textContent === (language === 'en' ? 'Copy path' : '复制路径'),
   )!;
   await act(async () => copy.click());
   expect(copyPath).toHaveBeenCalledWith('/registered/source/docs/guide.md');
-  const open = [...menu.querySelectorAll<HTMLButtonElement>('button')].find(
+  await act(async () => trigger.click());
+  const reopened = document.querySelector<HTMLElement>('[role="menu"]')!;
+  const open = [...reopened.querySelectorAll<HTMLButtonElement>('button')].find(
     (button) => button.textContent === openLabel,
   )!;
   await act(async () => open.click());
   expect(desktopAction).toHaveBeenCalledWith(
     '/api/workspace/file/actions/open?worktreeId=fixture&path=docs%2Fguide.md',
-    { method: 'POST' },
+    { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' },
   );
 });
 afterEach(() => {
@@ -151,7 +160,7 @@ afterEach(() => {
   host.remove();
   localStorage.clear();
 });
-it('v2 keeps named return with the tab and puts secondary file actions in More', () => {
+it('v2 keeps the named return, primary edit controls and the same file menu', async () => {
   const p = {
     ...props(),
     navigationOrigin: { kind: 'file-tree' as const },
@@ -166,17 +175,13 @@ it('v2 keeps named return with the tab and puts secondary file actions in More',
   const toolbar = host.querySelector('[data-testid="workspace-file-toolbar"]');
   expect(toolbar?.textContent).toContain('请猫修改');
   expect(toolbar?.textContent).toContain('批注 3');
-  expect(host.querySelector('details summary')?.textContent).toContain('更多');
-  const summary = host.querySelector<HTMLElement>('summary[title="更多文件操作"]')!;
-  act(() => {
-    vi.spyOn(summary, 'getClientRects').mockReturnValue([new DOMRect(0, 0, 40, 32)] as unknown as DOMRectList);
-    const details = summary.closest('details')!;
-    details.open = true;
-    details.dispatchEvent(new Event('toggle'));
-  });
-  const menu = document.getElementById(summary.getAttribute('aria-controls')!);
-  expect(menu?.hidden).toBe(false);
-  const edit = [...menu!.querySelectorAll<HTMLButtonElement>('button')].find((b) => b.textContent === '编辑');
+  const trigger = host.querySelector<HTMLButtonElement>('button[aria-haspopup="menu"]');
+  expect(trigger).not.toBeNull();
+  await act(async () => trigger?.click());
+  expect(document.querySelector('[role="menu"]')).not.toBeNull();
+  const edit = [...toolbar!.querySelectorAll<HTMLButtonElement>('button')].find(
+    (button) => button.textContent === '编辑',
+  );
   expect(edit).toBeDefined();
   act(() => edit!.click());
   expect(p.onToggleEdit).toHaveBeenCalledOnce();

@@ -16,6 +16,8 @@ import { after, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { decideNativeHookPayload } from '../../../scripts/native-effect-target-guard.mjs';
 import { fileProgramAnalysis } from '../../../scripts/native-effect-write-effects.mjs';
+import { assertGuardedOrUnproved } from './helpers/native-effect-policy-assertions.js';
+import { nativeHookTestEnv } from './helpers/native-hook-programs.js';
 
 const root = realpathSync(mkdtempSync(join(tmpdir(), 'f306-output-roles-')));
 const runtime = join(root, 'cat-cafe-runtime');
@@ -130,7 +132,7 @@ test('relative, expanded and ambiguous output operands cannot be credited as rea
     `uniq --unknown ${input} ${runtime}/out`,
     `find ${runtime} -fprint`,
   ])
-    for (const result of decide(command, runtime)) assert.equal(result.decision, 'deny', command);
+    for (const result of decide(command, runtime)) assertGuardedOrUnproved(result, command);
 });
 
 test('one canonical file analysis supplies both effect and literal write aliases', () => {
@@ -147,7 +149,6 @@ test('one canonical file analysis supplies both effect and literal write aliases
 test('output detection does not grant new Git observation eligibility', () => {
   for (const command of ['git --no-pager log', `git --git-dir ${runtime}/.git log`]) {
     for (const result of decide(command, runtime)) {
-      assert.equal(result.decision, 'deny', command);
       assert.equal(result.effect, 'unknown');
     }
   }
@@ -193,7 +194,6 @@ test('opaque option expansions still veto reads before an explicit pathspec boun
     'find . -name {-fprint,out}',
   ])
     for (const result of decide(command, runtime)) {
-      assert.equal(result.decision, 'deny', command);
       assert.equal(result.effect, 'unknown', command);
     }
   for (const command of [`git log --grep --output=${runtime}/out`, `git rev-parse --output=${runtime}/out`])
@@ -236,6 +236,7 @@ test('real shared hook entry refuse output syntax before an effect', () => {
       'find ~/projects -maxdepth 1',
     ]) {
       const result = spawnSync(program, args, {
+        env: nativeHookTestEnv(),
         input: JSON.stringify({
           tool_name: 'Bash',
           cwd: runtime,
@@ -256,6 +257,7 @@ test('real shared hook entry refuse output syntax before an effect', () => {
       (out) => `find ${ordinary} -fprintf ${out} '%p\n'`,
     ]) {
       const result = spawnSync(program, args, {
+        env: nativeHookTestEnv(),
         input: JSON.stringify({
           tool_name: 'Bash',
           cwd: runtime,

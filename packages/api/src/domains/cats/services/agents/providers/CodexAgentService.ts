@@ -1,4 +1,5 @@
 import type { RuntimeProviderProfile } from '../../../../../config/account-resolver.js';
+import { findCodexProjectMcpConflict } from '../../../../../config/capabilities/codex-project-mcp-compatibility.js';
 import { readInvocationMcpConfig } from '../../../../../config/capabilities/invoke-mcp-config.js';
 import { usesNativeToolConfiguration } from '../../../../../config/cat-account-binding.js';
 import { finalizeCodexAccountEnvironment } from '../../../../../config/codex-account-environment.js';
@@ -12,8 +13,10 @@ import { bindCodexAccountConfiguration } from './codex-app-server-account-config
 import {
   codexConfigObjectFromArgs,
   codexMcpConfigArgs,
+  codexNativeMcpThreadConfig,
   isCodexConfigObject,
   mergeCodexConfig,
+  withoutCodexMcpAssignments,
 } from './codex-config-overrides.js';
 import { CODEX_DESKTOP_ISOLATION_ARGS, CODEX_RESTRICTED_APPS_ARGS } from './codex-desktop-isolation.js';
 
@@ -40,9 +43,9 @@ import { extractUserEnvTemplates, hasSupportedEnvTemplate, resolveEnvMap } from 
  */
 
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
-import { dirname, isAbsolute, join, parse, resolve } from 'node:path';
+import { dirname, join, parse, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   type CatId,
@@ -85,7 +88,6 @@ import {
 } from '../../../../../config/codex-cli.js';
 import { estimateCostFromTokens } from '../../../../../config/model-pricing.js';
 import { createModuleLogger } from '../../../../../infrastructure/logger.js';
-import { buildCliDiagnostics } from '../../../../../utils/cli-diagnostics.js';
 import { formatCliExitError } from '../../../../../utils/cli-format.js';
 import { CLI_EXECUTION_ID_ENV, CLI_EXECUTION_OWNER_BINDING_ENV } from '../../../../../utils/cli-process-ownership.js';
 import { formatCliNotFoundError, resolveCliCommand } from '../../../../../utils/cli-resolve.js';
@@ -358,14 +360,6 @@ function visitMcpConfigEnvironments(
     if (!isCodexConfigObject(server)) continue;
     if (!isCodexConfigObject(server.env)) continue;
     visit(server.env);
-    // The host replaces credentials on pooled resume. Update the frozen
-    // upstream descriptor as well as the relay's own notice credentials.
-    const raw = server.env.CAT_CAFE_SECRET_MCP_PROXY_SPEC;
-    if (typeof raw !== 'string') continue;
-    const spec: unknown = JSON.parse(raw);
-    if (!isCodexConfigObject(spec) || !isCodexConfigObject(spec.env)) continue;
-    visit(spec.env);
-    server.env.CAT_CAFE_SECRET_MCP_PROXY_SPEC = JSON.stringify(spec);
   }
 }
 
@@ -476,6 +470,8 @@ interface CodexAgentServiceOptions {
   approvalSurface?: CodexApprovalSurface;
   /** Warm app-server host pool. Omitted keeps the per-invocation carrier. */
   appServerHostPool?: CodexAppServerHostPool;
+  /** Clock/budget seam for isolated protocol fixtures; no public config or account override. */
+  appServerStartupRecovery?: import('./codex-startup-recovery.js').CodexStartupRecoveryOptions;
   /** Server-owned Alpha admission for Codex Realtime conversation support. */
   nativeRealtimeCompanionEnabled?: boolean;
 }
@@ -1199,6 +1195,9 @@ export class CodexAgentService implements AgentService {
   private readonly carrierMode: CodexCarrierMode;
   private readonly approvalSurface: CodexApprovalSurface;
   private readonly appServerHostPool: CodexAppServerHostPool | undefined;
+  private readonly appServerStartupRecovery:
+    | import('./codex-startup-recovery.js').CodexStartupRecoveryOptions
+    | undefined;
   private apiKeyIsolationHome: string | undefined;
   private readonly nativeRealtimeCompanionEnabled: boolean;
   /** F203 Phase C: compiles per-cat L0 → OpenAI developer role (-c). */
@@ -1220,6 +1219,7 @@ export class CodexAgentService implements AgentService {
     // than relying on transport names or timing heuristics.
     this.approvalSurface = options?.approvalSurface ?? 'unavailable';
     this.appServerHostPool = options?.appServerHostPool;
+    this.appServerStartupRecovery = options?.appServerStartupRecovery;
     this.nativeRealtimeCompanionEnabled = options?.nativeRealtimeCompanionEnabled ?? false;
   }
 
@@ -1681,7 +1681,7 @@ export class CodexAgentService implements AgentService {
     const readOnly = options?.toolExecutionPolicy?.mode === 'read_only';
     const live = options?.liveCompanion;
     if (live && (!live.configure || !options?.callbackEnv)) throw new Error('Live Host credentials unavailable');
-    const liveConfig = live ? await live.configure!(options!.callbackEnv!) : undefined;
+    const liveConfig = live ? await live.configure?.(options?.callbackEnv!) : undefined;
     // Codex CLI has no system prompt flag; prepend identity to prompt text.
     // In preflight mode the identity prepend has to ride along inside `settle`,
     // because the bytes do not exist until the verdict is in.
@@ -1762,9 +1762,23 @@ export class CodexAgentService implements AgentService {
     // a pooled session whose MCP callbacks would be stale or unconfigured.
     const usePooledAppServer =
       wantsPooledAppServer && (!callbackHasInvocationCredentials || pooledCredentialEnv !== null);
-    const mcpCallbackEnv = usePooledAppServer
+    let mcpCallbackEnv = usePooledAppServer
       ? withoutFrozenInvocationCredentials(pooledCredentialEnv?.env ?? options?.callbackEnv)
-      : options?.callbackEnv;
+      : carrierMode === 'exec_json' && options?.callbackEnv?.CAT_CAFE_MCP_TRANSPORT === 'shared'
+        ? { ...options.callbackEnv, CAT_CAFE_MCP_TRANSPORT: 'stdio' }
+        : options?.callbackEnv;
+    if (!native && !readOnly && !liveConfig && mcpCallbackEnv?.CAT_CAFE_MCP_TRANSPORT === 'shared') {
+      const conflict = await findCodexProjectMcpConflict(options?.workingDirectory ?? process.cwd());
+      if (conflict) {
+        log.warn(
+          { catId: this.catId, ...conflict },
+          'Codex project MCP config requires direct stdio for this turn; migrate the named file to enable HTTP.',
+        );
+        mcpCallbackEnv = { ...mcpCallbackEnv, CAT_CAFE_MCP_TRANSPORT: 'stdio' };
+      }
+    }
+    // The legacy exec carrier keeps its explicit stdio rollback. Managed app-server
+    // sessions use private RPC headers; no MCP authentication is serialized in argv.
     const {
       args: catCafeMcpArgs,
       bearerEnv: mcpBearerEnv,
@@ -2065,6 +2079,7 @@ export class CodexAgentService implements AgentService {
           ...(native?.args ?? []),
           ...promptArgs,
         ];
+    const privateMcpRpc = carrierMode === 'app_server' && mcpCallbackEnv?.CAT_CAFE_MCP_TRANSPORT === 'shared';
     const appServerArgs =
       carrierMode === 'app_server'
         ? buildCodexAppServerArgs([
@@ -2080,13 +2095,18 @@ export class CodexAgentService implements AgentService {
             ...desktopIsolationArgs,
             ...buildCodexRealtimeFeatureArgs(this.nativeRealtimeCompanionEnabled || Boolean(options?.liveCompanion)),
             ...nativeEffectGuardArgs,
-            ...(usePooledAppServer ? [] : catCafeMcpArgs),
+            ...(usePooledAppServer ? [] : privateMcpRpc ? withoutCodexMcpAssignments(catCafeMcpArgs) : catCafeMcpArgs),
           ])
         : [];
     const appServerThreadConfig =
       carrierMode === 'app_server'
         ? mergeCodexConfig(
-            liveConfig ?? (usePooledAppServer ? codexConfigObjectFromArgs(catCafeMcpArgs) : {}),
+            liveConfig ??
+              (privateMcpRpc
+                ? codexNativeMcpThreadConfig(catCafeMcpArgs, mcpCallbackEnv!)
+                : usePooledAppServer
+                  ? codexConfigObjectFromArgs(catCafeMcpArgs)
+                  : {}),
             codexConfigObjectFromArgs(desktopIsolationArgs),
           )
         : undefined;
@@ -2099,6 +2119,7 @@ export class CodexAgentService implements AgentService {
     const auditContext = options?.auditContext;
     const recentStreamErrors: string[] = [];
     const errorEvidence = new CodexErrorEvidence();
+    let startupRecovery: import('@cat-cafe/shared').CodexStartupRecovery | undefined;
     let capacityRecoveryBlocked: CodexAppServerRecoveryBlockedEvent | null = null;
     let activeWriterWaitNoticeEmitted = false;
     let providerRecovery: CodexProviderRecoveryTracker | null = null;
@@ -2448,6 +2469,7 @@ export class CodexAgentService implements AgentService {
           : undefined;
       const events = useAppServer
         ? runCodexAppServerWithRecovery({
+            ...(this.appServerStartupRecovery ? { startupRecovery: this.appServerStartupRecovery } : {}),
             sessionFactory: async (sessionOptions) => {
               if ((live || isInvocationBoundMcpLaunch(options?.callbackEnv)) && sessionOptions.sessionId)
                 await appServerHostPool?.retireIdleOwnerForDirectSession(
@@ -2639,6 +2661,18 @@ export class CodexAgentService implements AgentService {
           : {}),
       };
       for await (const event of events) {
+        if ((event as { type?: string })?.type === 'app_server.startup_recovery') {
+          startupRecovery = (event as import('./codex-startup-recovery.js').CodexStartupRecoveryEvent).startupRecovery;
+          yield {
+            type: 'system_info',
+            catId: this.catId,
+            content: JSON.stringify({ type: 'codex_startup_recovery', startupRecovery }),
+            extra: { startupRecovery },
+            metadata,
+            timestamp: startupRecovery.updatedAt,
+          };
+          continue;
+        }
         if (useAppServer) errorEvidence.observe(event);
         if (pooledSessionInUse && pooledCredentialEnv && isCodexThreadStartedEvent(event)) {
           bindSessionCredentialFile(credentialNamespace, event.thread_id, pooledCredentialEnv.path);
@@ -3161,20 +3195,23 @@ export class CodexAgentService implements AgentService {
         providerRecovery = null;
       }
       const cancellationCode = err instanceof CodexLiveStartupCancelledError ? err.code : undefined;
-      if (cancellationCode) {
+      if (cancellationCode || startupRecovery?.stage === 'cancelled') {
         // An owner Stop is a terminal cancellation, not a retryable provider failure.
         yield { type: 'done', catId: this.catId, errorCode: cancellationCode, metadata, timestamp: Date.now() };
         return;
       }
       const requiredToolsError = err instanceof CodexRequiredToolsUnavailableError ? err : undefined;
       const requiredToolsUnavailable = requiredToolsError?.details;
-      const visibleError = requiredToolsError
-        ? requiredToolsError.message
-        : capacityRecoveryBlocked
-          ? `自动续跑已安全停止（${capacityRecoveryBlocked.reason}）；系统已保留并显示本轮断点，没有猜测或切换任务。`
-          : err instanceof CodexActiveWriterRecoveryError
-            ? '原生会话恢复仍被 active writer 拒绝；系统已拒绝自动替换或封存当前会话。请稍后重试。'
-            : rawError;
+      const startupFailure = startupRecovery?.stage === 'failed' ? startupRecovery.diagnostics : undefined;
+      const visibleError = startupFailure
+        ? startupFailure.publicSummary
+        : requiredToolsError
+          ? requiredToolsError.message
+          : capacityRecoveryBlocked
+            ? `自动续跑已安全停止（${capacityRecoveryBlocked.reason}）；系统已保留并显示本轮断点，没有猜测或切换任务。`
+            : err instanceof CodexActiveWriterRecoveryError
+              ? '原生会话恢复仍被 active writer 拒绝；系统已拒绝自动替换或封存当前会话。请稍后重试。'
+              : rawError;
       const errorMetadata =
         carrierMode === 'app_server'
           ? {
@@ -3189,12 +3226,14 @@ export class CodexAgentService implements AgentService {
                     },
                   }
                 : {}),
-              cliDiagnostics: errorEvidence.diagnostics(rawError, {
-                command: 'codex app-server',
-                exitCode: null,
-                signal: null,
-                ...(options?.invocationId ? { invocationId: options.invocationId } : {}),
-              }),
+              cliDiagnostics:
+                startupFailure ??
+                errorEvidence.diagnostics(err, {
+                  command: 'codex app-server',
+                  exitCode: null,
+                  signal: null,
+                  ...(options?.invocationId ? { invocationId: options.invocationId } : {}),
+                }),
             }
           : metadata;
       yield {

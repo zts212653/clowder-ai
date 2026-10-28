@@ -1,4 +1,5 @@
 import type { PawFeelDispositionEvent, PawFeelDispositionProjection } from '@cat-cafe/shared';
+import { pawFeelRepairBinding } from '@cat-cafe/shared';
 import { derivePawFeelResumeConditionId } from '../blocker-recovery/resume-condition.js';
 
 function fail(message: string): never {
@@ -6,13 +7,19 @@ function fail(message: string): never {
 }
 
 function activeRepairIdentity(projection: PawFeelDispositionProjection) {
-  if (!projection.ownerCatId || !projection.taskId || !projection.actionLeaseRef || !projection.custodyEvidenceRef) {
+  if (
+    !projection.ownerCatId ||
+    !projection.taskId ||
+    !pawFeelRepairBinding(projection) ||
+    !projection.custodyEvidenceRef
+  ) {
     return undefined;
   }
   return {
     ownerCatId: projection.ownerCatId,
     taskId: projection.taskId,
-    actionLeaseRef: projection.actionLeaseRef,
+    repairBinding: pawFeelRepairBinding(projection),
+    ...(projection.actionLeaseRef ? { actionLeaseRef: projection.actionLeaseRef } : {}),
     custodyEvidenceRef: projection.custodyEvidenceRef,
     ...(projection.directRepairBinding ? { directRepairBinding: projection.directRepairBinding } : {}),
   };
@@ -81,7 +88,7 @@ export function preserveActiveRepairIdentity(projection: PawFeelDispositionProje
     const hasPartialIdentity = [
       projection.ownerCatId,
       projection.taskId,
-      projection.actionLeaseRef,
+      pawFeelRepairBinding(projection),
       projection.custodyEvidenceRef,
       projection.directRepairBinding,
     ].some(Boolean);

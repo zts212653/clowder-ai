@@ -6,6 +6,8 @@ import { dirname, join } from 'node:path';
 import { after, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { decideNativeHookPayload } from '../../../scripts/native-effect-target-guard.mjs';
+import { assertGuardedOrUnproved } from './helpers/native-effect-policy-assertions.js';
+import { nativeHookTestEnv } from './helpers/native-hook-programs.js';
 
 const root = realpathSync(mkdtempSync(join(tmpdir(), 'f306-observation-residual-')));
 const main = join(root, 'cat-cafe');
@@ -63,7 +65,8 @@ function parity(command, decision, cwd = main) {
       tool_input: { command, cmd: command },
       ...(tool_name === 'exec_command' ? { turn_id: 'owned-observation-turn' } : {}),
     });
-    assert.equal(result.decision, decision, `${tool_name}: ${command}: ${JSON.stringify(result)}`);
+    if (decision === 'unproved') assertGuardedOrUnproved(result, `${tool_name}: ${command}`);
+    else assert.equal(result.decision, decision, `${tool_name}: ${command}: ${JSON.stringify(result)}`);
     results.push(result);
   }
   return results;
@@ -108,17 +111,19 @@ test('sequential comparison retains program proof around a separate read pipelin
       `${compare} && ${count} && touch ${runtime}/forbidden`,
       `${compare} && { ln -s ${runtime} ${ordinary}/alias; } | wc -l && cp -- ${runtime}/package.json ${ordinary}/alias/copied.json`,
     ])
-      await t.test(`deny: ${cwd}: ${command}`, () => parity(command, 'deny', cwd));
+      await t.test(`qualified: ${cwd}: ${command}`, () =>
+        parity(command, command.includes('/forbidden') || command.includes('cp --') ? 'deny' : 'unproved', cwd),
+      );
   }
 });
 
 test('comparison cannot erase unknown options, output writes or executable segments', () => {
-  parity(`diff --output=${runtime}/output ${ordinary}/a ${ordinary}/b`, 'deny');
-  parity(`diff --unknown ${runtime} ${ordinary}`, 'deny');
+  parity(`diff --output=${runtime}/output ${ordinary}/a ${ordinary}/b`, 'unproved');
+  parity(`diff --unknown ${runtime} ${ordinary}`, 'unproved');
   parity(`diff -qr ${runtime} ${ordinary} > ${runtime}/output`, 'deny');
   parity(`diff -qr ${runtime} ${ordinary} && touch ${runtime}/output`, 'deny');
   parity(`diff -qr ${runtime} ${ordinary} && find ${runtime} -exec rm -rf ${runtime} ';'`, 'deny');
-  parity(`${guardedBin}/diff -qr ${runtime} ${ordinary}`, 'deny');
+  parity(`${guardedBin}/diff -qr ${runtime} ${ordinary}`, 'unproved');
 });
 
 test('explicit inherited loader inputs remain unproved', () => {
@@ -136,7 +141,7 @@ test('explicit inherited loader inputs remain unproved', () => {
     const saved = fixtureEnvironment[key];
     try {
       fixtureEnvironment[key] = key === 'NODE_OPTIONS' ? `--require ${runtime}/loader.js` : `${runtime}/loader`;
-      parity(`diff -qr ${runtime} ${ordinary}`, 'deny');
+      parity(`diff -qr ${runtime} ${ordinary}`, 'unproved');
     } finally {
       fixtureEnvironment[key] = saved;
     }
@@ -165,14 +170,14 @@ test('comparison reads require the observed system program and unchanged earlier
   writeFileSync(join(guardedBin, 'diff'), '#!/bin/sh\nexit 0\n', { mode: 0o700 });
   try {
     fixtureEnvironment.PATH = `${guardedBin}:/usr/bin:/bin`;
-    parity(`diff -qr ${runtime} ${ordinary}`, 'deny');
+    parity(`diff -qr ${runtime} ${ordinary}`, 'unproved');
     fixtureEnvironment.F306_OBSERVATION_TOOL = 'diff';
     fixtureEnvironment.F306_OBSERVATION_SOURCE = runtime;
-    parity(`"$F306_OBSERVATION_TOOL" -qr ${runtime} ${ordinary}`, 'deny');
-    parity(`diff -qr "$F306_OBSERVATION_SOURCE" ${ordinary}`, 'deny');
+    parity(`"$F306_OBSERVATION_TOOL" -qr ${runtime} ${ordinary}`, 'unproved');
+    parity(`diff -qr "$F306_OBSERVATION_SOURCE" ${ordinary}`, 'unproved');
     fixtureEnvironment.PATH = '/usr/bin:/bin';
-    parity(`export PATH=${guardedBin}:/usr/bin:/bin; diff -qr ${runtime} ${ordinary}`, 'deny');
-    parity(`export PATH=${guardedBin}:/usr/bin:/bin; /usr/bin/diff -qr ${runtime} ${ordinary}`, 'deny');
+    parity(`export PATH=${guardedBin}:/usr/bin:/bin; diff -qr ${runtime} ${ordinary}`, 'unproved');
+    parity(`export PATH=${guardedBin}:/usr/bin:/bin; /usr/bin/diff -qr ${runtime} ${ordinary}`, 'unproved');
   } finally {
     fixtureEnvironment.PATH = savedPath;
     fixtureEnvironment.F306_OBSERVATION_TOOL = savedTool;
@@ -202,23 +207,23 @@ test('absolute pinned gh wrapper retains the PR/API read contract', () => {
       '--method GET --input README.md',
       '--method GET --header @README.md',
     ])
-      parity(`${gh} api repos/zts212653/cat-cafe/pulls/5346 ${payload}`, 'deny');
-    parity('/usr/bin/gh api repos/zts212653/cat-cafe/pulls/5346 --method GET', 'deny');
-    parity(`NODE_OPTIONS='--require ${runtime}/loader.js' ${gh} pr view 5346`, 'deny');
-    parity(`${gh} api repos/zts212653/cat-cafe/issues --method POST`, 'deny');
+      parity(`${gh} api repos/zts212653/cat-cafe/pulls/5346 ${payload}`, 'unproved');
+    parity('/usr/bin/gh api repos/zts212653/cat-cafe/pulls/5346 --method GET', 'unproved');
+    parity(`NODE_OPTIONS='--require ${runtime}/loader.js' ${gh} pr view 5346`, 'unproved');
+    parity(`${gh} api repos/zts212653/cat-cafe/issues --method POST`, 'unproved');
     parity(`${gh} pr view 5346 > ${runtime}/output`, 'deny');
-    parity(`export NODE_OPTIONS='--require ${runtime}/loader.js'; ${gh} pr view 5346`, 'deny');
-    parity(`export CAT_CAFE_REAL_GH_PATH=${runtime}/unreviewed-gh; ${gh} pr view 5346`, 'deny');
-    parity(`export PATH=${guardedBin}:/usr/bin:/bin; ${gh} pr view 5346`, 'deny');
+    parity(`export NODE_OPTIONS='--require ${runtime}/loader.js'; ${gh} pr view 5346`, 'unproved');
+    parity(`export CAT_CAFE_REAL_GH_PATH=${runtime}/unreviewed-gh; ${gh} pr view 5346`, 'unproved');
+    parity(`export PATH=${guardedBin}:/usr/bin:/bin; ${gh} pr view 5346`, 'unproved');
     const savedOptions = fixtureEnvironment.NODE_OPTIONS;
     try {
       fixtureEnvironment.NODE_OPTIONS = `--require ${runtime}/loader.js`;
-      parity(`${gh} pr view 5346`, 'deny');
-      parity('/usr/bin/gh pr view 5346', 'deny', runtime);
+      parity(`${gh} pr view 5346`, 'unproved');
+      parity('/usr/bin/gh pr view 5346', 'unproved', runtime);
       const savedPull = fixtureEnvironment.F306_OBSERVATION_PULL;
       try {
         fixtureEnvironment.F306_OBSERVATION_PULL = '5346';
-        parity('/usr/bin/gh pr view "$F306_OBSERVATION_PULL"', 'deny', runtime);
+        parity('/usr/bin/gh pr view "$F306_OBSERVATION_PULL"', 'unproved', runtime);
       } finally {
         fixtureEnvironment.F306_OBSERVATION_PULL = savedPull;
       }
@@ -226,7 +231,7 @@ test('absolute pinned gh wrapper retains the PR/API read contract', () => {
       fixtureEnvironment.NODE_OPTIONS = savedOptions;
     }
     writeFileSync(gh, '#!/bin/sh\nexit 0\n', { mode: 0o700 });
-    parity(`${gh} pr view 5346`, 'deny');
+    parity(`${gh} pr view 5346`, 'unproved');
   } finally {
     fixtureEnvironment.PATH = savedPath;
     fixtureEnvironment.CAT_CAFE_REAL_GH_PATH = savedDelegate;
@@ -260,9 +265,13 @@ test('gh read proof distinguishes inherited lookup from inline selection in all 
     ]) {
       for (const [index, command] of inline.entries()) {
         await t.test(`${role}: inline selection ${index + 1} stays unproved`, () => {
-          for (const result of parity(command, 'deny', cwd)) {
+          for (const result of parity(command, 'unproved', cwd)) {
             assert.equal(result.effect, 'unknown', JSON.stringify(result));
-            assert.equal(result.target.kind, 'runtime_sanctuary', JSON.stringify(result));
+            assert.equal(
+              result.target.kind,
+              cwd === runtime ? 'runtime_sanctuary' : 'ordinary',
+              JSON.stringify(result),
+            );
           }
         });
       }
@@ -285,15 +294,16 @@ test('real shared hook keeps inherited loader selection unproved under public is
   const guard = fileURLToPath(new URL('../../../scripts/native-effect-target-guard.mjs', import.meta.url));
   for (const command of [`diff -qr ${runtime} ${ordinary}`, `diff -qr ${runtime} ${ordinary} > ${runtime}/output`]) {
     const result = spawnSync(process.execPath, [guard], {
-      env: {
+      env: nativeHookTestEnv({
         ...process.env,
         NODE_OPTIONS: `--import=${publicGuard}`,
         CAT_CAFE_PUBLIC_TEST_RESOURCE_SCOPE: 'distributable',
-      },
+      }),
       input: JSON.stringify({ tool_name: 'Bash', cwd: runtime, tool_input: { command } }),
       encoding: 'utf8',
     });
     assert.equal(result.status, 0, result.stderr);
-    assert.equal(JSON.parse(result.stdout).hookSpecificOutput.permissionDecision, 'deny');
+    if (command.includes(' > ')) assert.equal(JSON.parse(result.stdout).hookSpecificOutput.permissionDecision, 'deny');
+    else assert.equal(result.stdout.trim(), '');
   }
 });

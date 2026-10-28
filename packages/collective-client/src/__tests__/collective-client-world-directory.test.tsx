@@ -85,7 +85,7 @@ describe('CollectiveClient world directory assembly', () => {
 
   it('keeps the Host directory bridge mounted while a multi-membership Human has not selected a world', async () => {
     await act(async () => root.render(<CollectiveClient />));
-    expect(container.textContent).toContain('选择一个共同家园');
+    expect(container.textContent).toContain('选择一个共同体');
     expect(host.postMessage).toHaveBeenCalledWith(
       { type: 'collective:world-directory-ready' },
       'http://localhost:3000',

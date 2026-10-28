@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { approvedTaskFixture, OWNER, TARGET, USER } from './approved-task-contract-fixture.js';
 
 export async function runningFixture(t) {
-  const f = await approvedTaskFixture(t);
+  const f = await approvedTaskFixture(t, { governed: true });
   assert.equal((await f.continueTask()).statusCode, 200);
   assert.equal((await f.implement()).statusCode, 200);
   return { ...f, lease: (await f.leases.listActiveTaskLeases())[0] };

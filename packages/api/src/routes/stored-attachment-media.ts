@@ -2,6 +2,7 @@
 import { resolve } from 'node:path';
 import fastifyStatic from '@fastify/static';
 import type { FastifyPluginAsync } from 'fastify';
+import { setStoredFileHeaders } from './file-byte-response-headers.js';
 
 export interface StoredAttachmentMediaRoutesOptions {
   mediaDir: string;
@@ -16,5 +17,6 @@ export const storedAttachmentMediaRoutes: FastifyPluginAsync<StoredAttachmentMed
     // Persisted messages retain these URLs; this route contains no platform handling.
     prefix: '/api/connector-media/',
     decorateReply: false,
+    setHeaders: setStoredFileHeaders,
   });
 };

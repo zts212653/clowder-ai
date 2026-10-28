@@ -241,10 +241,10 @@ describe('F278 cat-authenticated bounded inbox audit scan route', () => {
 
     try {
       const firstResult = await handleScanPawFeelInbox({ limit: 50 });
-      assert.equal(firstResult.isError, undefined);
+      assert.equal(firstResult.isError, undefined, JSON.stringify(firstResult));
       const first = JSON.parse(firstResult.content[0].text);
       const secondResult = await handleScanPawFeelInbox({ limit: 50, cursor: first.nextCursor });
-      assert.equal(secondResult.isError, undefined);
+      assert.equal(secondResult.isError, undefined, JSON.stringify(secondResult));
       const second = JSON.parse(secondResult.content[0].text);
 
       assert.deepEqual(

@@ -5,10 +5,17 @@ import {
   type CollectiveAttachmentScope,
   collectiveAttachmentScopeSchema,
   collectiveMessageAttachmentSchema,
+  collectiveStickerScopeSchema,
   parseMediaByteRange,
 } from '@cat-cafe/shared';
+import type { z } from 'zod';
 import type { ProjectContentOwnerService } from '../../video-studio/content-owner/service.js';
 import type { CollectiveAttachmentAuthority, CollectiveMessageAttachmentOwnerPort } from './message-attachment-port.js';
+import { authorizedAttachmentStream } from './message-attachment-stream.js';
+import type { CollectiveAudioTranscriber } from './message-model-av.js';
+import { readCollectiveModelImage } from './message-model-image.js';
+import { readCollectiveModelMedia } from './message-model-media.js';
+import { type MessageStickerDirectories, openMessageSticker } from './message-sticker-owner.js';
 
 function contentRef(scope: CollectiveAttachmentScope) {
   return `collective-attachment:${createHash('sha256')
@@ -21,19 +28,51 @@ function contentRef(scope: CollectiveAttachmentScope) {
 /** Immutable bytes and receipts use the original content owner. No Task, Thread or publication is fabricated. */
 export function createCollectiveMessageAttachmentOwner(
   owner: ProjectContentOwnerService,
+  options: { stickerDirectories?: MessageStickerDirectories; transcribeAudio?: CollectiveAudioTranscriber } = {},
 ): CollectiveMessageAttachmentOwnerPort {
-  function admit(value: CollectiveAttachmentScope, authority: CollectiveAttachmentAuthority, signal: AbortSignal) {
-    const scope = collectiveAttachmentScopeSchema.parse(value);
+  function admit<T>(value: T, authority: { reauthorize(): Promise<T> }, signal: AbortSignal, schema: z.ZodType<T>) {
+    const scope = schema.parse(value);
     return async () => {
       signal.throwIfAborted();
-      if (!isDeepStrictEqual(collectiveAttachmentScopeSchema.parse(await authority.reauthorize()), scope))
+      if (!isDeepStrictEqual(schema.parse(await authority.reauthorize()), scope))
         throw new Error('Attachment authority changed');
       signal.throwIfAborted();
     };
   }
-  return {
+  const stickerDirectories = options.stickerDirectories;
+  const catalogImage: CollectiveMessageAttachmentOwnerPort['catalogImage'] = stickerDirectories
+    ? async (input, authority, signal) =>
+        openMessageSticker(
+          stickerDirectories,
+          input.stickerId,
+          admit(input.scope, authority, signal, collectiveStickerScopeSchema),
+          signal,
+        )
+    : undefined;
+  const port: CollectiveMessageAttachmentOwnerPort = {
+    ...(catalogImage ? { catalogImage } : {}),
+    async modelContent(input, authority, signal) {
+      const readSignal = AbortSignal.any([signal, AbortSignal.timeout(20_000)]);
+      const authorize = admit(input.scope, authority, readSignal, collectiveAttachmentScopeSchema);
+      const opened = await port.open(input, authority, readSignal);
+      if (input.attachment.mediaType.startsWith('image/'))
+        return readCollectiveModelImage(opened.attachment, opened.body, authorize);
+      return readCollectiveModelMedia(
+        opened.attachment,
+        opened.body,
+        authorize,
+        readSignal,
+        input.selection,
+        options.transcribeAudio,
+      );
+    },
+    async modelImage(input, authority, signal) {
+      const authorize = admit(input.scope, authority, signal, collectiveAttachmentScopeSchema);
+      const opened = await port.open(input, authority, signal);
+      return readCollectiveModelImage(opened.attachment, opened.body, authorize);
+    },
     async retain(input, authority, signal) {
-      const authorizeEffect = admit(input.scope, authority, signal);
+      const authorizeEffect = admit(input.scope, authority, signal, collectiveAttachmentScopeSchema);
       await authorizeEffect();
       const bytes = Buffer.from(input.bytes);
       const reference = contentRef(input.scope);
@@ -47,7 +86,13 @@ export function createCollectiveMessageAttachmentOwner(
         byteLength: bytes.length,
         mediaType: input.mediaType,
         fileName: input.fileName,
+        ...(input.sticker ? { sticker: input.sticker } : {}),
       });
+      if (
+        metadata.sticker &&
+        (metadata.sticker.blobDigest !== metadata.blobDigest || metadata.mediaType !== 'image/png')
+      )
+        throw new Error('Sticker identity does not match the original image');
       if (`sha256:${createHash('sha256').update(bytes).digest('hex')}` !== metadata.blobDigest)
         throw new Error('Attachment digest mismatch');
       const receipt = await owner.importContent({
@@ -62,7 +107,7 @@ export function createCollectiveMessageAttachmentOwner(
       return { ...metadata, ownerReceiptRef: receipt.receiptId };
     },
     async open(input, authority, signal) {
-      const authorize = admit(input.scope, authority, signal);
+      const authorize = admit(input.scope, authority, signal, collectiveAttachmentScopeSchema);
       await authorize();
       const attachment = collectiveMessageAttachmentSchema.parse(input.attachment);
       if (contentRef(input.scope) !== attachment.contentRef || input.scope.attachmentId !== attachment.attachmentId)
@@ -92,28 +137,5 @@ export function createCollectiveMessageAttachmentOwner(
       }
     },
   };
-}
-
-function authorizedAttachmentStream(source: Readable, authorize: () => Promise<void>, signal: AbortSignal) {
-  const abort = () => source.destroy(new Error('Attachment read aborted'));
-  signal.addEventListener('abort', abort, { once: true });
-  const body = Readable.from(
-    (async function* () {
-      try {
-        for await (const chunk of source) {
-          await authorize();
-          yield chunk;
-        }
-      } finally {
-        signal.removeEventListener('abort', abort);
-        source.destroy();
-      }
-    })(),
-  );
-  body.once('close', () => {
-    signal.removeEventListener('abort', abort);
-    source.destroy();
-  });
-  if (signal.aborted) abort();
-  return body;
+  return port;
 }

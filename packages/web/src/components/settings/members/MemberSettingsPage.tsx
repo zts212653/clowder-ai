@@ -42,6 +42,7 @@ export function MemberSettingsPage({
   onBeforeCreate?: () => Promise<void>;
 }) {
   const [runtimeValid, setRuntimeValid] = useState(true);
+  const [uploading, setUploading] = useState(false);
   const [unchangedSave, setUnchangedSave] = useState(false);
   const saveCopy = useShellCopy(memberSaveCopy);
   const detailCopy = useShellCopy(settingsDetailCopy);
@@ -224,12 +225,15 @@ export function MemberSettingsPage({
               ) : (
                 <MemberAdditionalFields
                   section={section}
+                  visualAssets={draft.baseline?.visualAssets}
+                  onAvatarCommitted={editor.avatarCommitted}
                   form={form}
                   patch={editor.patch}
                   t={t}
                   editing={Boolean(cat)}
                   strategy={draft.strategy}
                   patchStrategy={editor.patchStrategy}
+                  onUploadingChange={setUploading}
                 />
               )}
               {section === 'advanced' && !cat?.identityProtection && (
@@ -303,6 +307,7 @@ export function MemberSettingsPage({
                 type="button"
                 disabled={
                   saving ||
+                  uploading ||
                   !form.name.trim() ||
                   (!runtimeValid &&
                     (!baseline ||

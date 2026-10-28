@@ -78,6 +78,9 @@ export interface TaskApprovedDelegateProvider {
  * Narrow snapshot of a task used for action subject truth resolution.
  */
 export interface TaskActionSnapshot {
+  kind?: import('@cat-cafe/shared').TaskKind;
+  subjectKey?: string | null;
+  entrustedWork?: unknown;
   id: string;
   title?: string;
   status: 'todo' | 'doing' | 'blocked' | 'done';

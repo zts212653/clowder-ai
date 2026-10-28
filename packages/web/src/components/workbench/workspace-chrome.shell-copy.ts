@@ -13,7 +13,7 @@ export const workspaceChromeCopy = defineShellCopy(
         'needs-me': '待办',
         'product-schedule': '日程',
         schedule: '调度',
-        tasks: '任务',
+        tasks: '毛线球',
         team: '猫猫团队',
         community: '社区',
         artifacts: '作品',

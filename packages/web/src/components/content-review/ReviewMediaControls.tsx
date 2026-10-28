@@ -5,11 +5,9 @@ import { reviewMediaControl } from './review-media-styles';
 
 export function ReviewMediaControls({
   media,
-  round,
   selected,
   canAnnotate,
   src,
-  download,
   error,
   selectionActive,
   selecting,
@@ -54,15 +52,6 @@ export function ReviewMediaControls({
           />
         ) : null}
         {selectionActive ? <p className="text-xs text-cafe-accent">在画面上拖出一个框，再写下你的意见。</p> : null}
-        {src ? (
-          <a
-            className="text-xs text-cafe-muted underline"
-            href={download?.src ?? src}
-            download={download?.filename ?? `review-version-${round}.${media.kind === 'image' ? 'png' : 'mp4'}`}
-          >
-            下载原文件
-          </a>
-        ) : null}
       </div>
       {media.kind === 'video' ? (
         <ReviewVideoRangeControls

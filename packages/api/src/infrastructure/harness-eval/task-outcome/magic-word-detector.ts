@@ -33,6 +33,8 @@ export const MAGIC_WORD_PATTERNS: readonly string[] = [
   'unknown-first',
   '钛合金裤衩子',
   '钛合金内裤',
+  '防弹内裤',
+  '汉弗莱喵',
 ];
 
 /**

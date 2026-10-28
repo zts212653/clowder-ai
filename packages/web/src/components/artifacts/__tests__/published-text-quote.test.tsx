@@ -85,7 +85,8 @@ async function render(sha256 = DIGEST) {
           mime: 'text/markdown',
           truncated: false,
         }}
-        publication={{ url: source.artifactFile!.url, quoteSource: source }}
+        source={{ kind: 'url', url: source.artifactFile!.url }}
+        quoteSource={source}
         onBack={() => undefined}
       />,
     ),

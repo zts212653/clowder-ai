@@ -579,6 +579,89 @@ describe('useChatHistory navigation input owner', () => {
     expect(readChatReadingRef(origin.ref)?.threadId).toBe('source-return-cancellation');
   });
 
+  it.each([
+    ['return', 'abort'],
+    ['search', 'abort'],
+    ['return', 'wheel'],
+    ['search', 'wheel'],
+  ] as const)('settles a cancelled %s on %s while its history refresh is still pending', async (kind, cancellation) => {
+    const threadId = `cancel-refresh-${kind}-${cancellation}`;
+    const { el, top } = await openThread(threadId);
+    const origin = capturedHook!.captureReadingRef()!;
+    let releaseHistory!: (response: Response) => void;
+    apiFetchMock.mockImplementationOnce(
+      () =>
+        new Promise<Response>((resolve) => {
+          releaseHistory = resolve;
+        }),
+    );
+    const controller = new AbortController();
+    const settled = vi.fn();
+    await act(async () => {
+      const receipt =
+        kind === 'return'
+          ? capturedHook!.restoreReadingRef(origin.ref, controller.signal, { refresh: true })
+          : capturedHook!.navigateToMessage('first', controller.signal, { refresh: true });
+      void receipt.then(settled);
+    });
+    expect(releaseHistory).toBeTypeOf('function');
+    await act(async () => {
+      if (cancellation === 'abort') controller.abort();
+      else el.dispatchEvent(new WheelEvent('wheel', { deltaY: -100 }));
+    });
+    expect(settled).toHaveBeenCalledWith({ status: 'interrupted' });
+    await act(async () => {
+      el.dispatchEvent(new WheelEvent('wheel', { deltaY: -100 }));
+      top.set(200);
+      capturedHook!.handleScroll();
+      releaseHistory({
+        ok: true,
+        json: async () => ({ messages: [makeMsg('first', 1), makeMsg('second', 2)], hasMore: false }),
+      } as Response);
+      for (let frame = 0; frame < 8; frame++) flushAnimationFrames();
+    });
+    expect(settled).toHaveBeenCalledTimes(1);
+    expect(top.get()).toBe(200);
+    expect(readChatReadingRef(origin.ref)?.threadId).toBe(threadId);
+  });
+
+  it('lets a newer source reuse pending history without an old cancellation retiring it', async () => {
+    const { top, second } = await openThread('replacement-during-refresh');
+    second.querySelector<HTMLElement>('[data-message-id]')!.scrollIntoView = () => top.set(500);
+    const origin = capturedHook!.captureReadingRef()!;
+    let releaseHistory!: (response: Response) => void;
+    apiFetchMock.mockImplementationOnce(
+      () =>
+        new Promise<Response>((resolve) => {
+          releaseHistory = resolve;
+        }),
+    );
+    const oldController = new AbortController();
+    const oldResult = vi.fn();
+    const newResult = vi.fn();
+    await act(async () => {
+      void capturedHook!.restoreReadingRef(origin.ref, oldController.signal, { refresh: true }).then(oldResult);
+    });
+    await act(async () => {
+      void capturedHook!.navigateToMessage('second', undefined, { refresh: true }).then(newResult);
+      oldController.abort();
+    });
+    expect(oldResult).toHaveBeenCalledWith({ status: 'interrupted' });
+    expect(newResult).not.toHaveBeenCalled();
+    await act(async () => {
+      releaseHistory({
+        ok: true,
+        json: async () => ({ messages: [makeMsg('first', 1), makeMsg('second', 2)], hasMore: false }),
+      } as Response);
+    });
+    await act(async () => {
+      for (let frame = 0; frame < 8; frame++) flushAnimationFrames();
+    });
+    expect(newResult).toHaveBeenCalledWith(expect.objectContaining({ status: 'settled', messageId: 'second' }));
+    expect(oldResult).toHaveBeenCalledTimes(1);
+    expect(top.get()).toBe(500);
+  });
+
   it('refreshes canonical history before a search target can settle, instead of rendering an edited cached body', async () => {
     const { top, second } = await openThread('source-fresh-history');
     apiFetchMock.mockClear();

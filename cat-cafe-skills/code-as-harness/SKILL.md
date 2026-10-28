@@ -1,6 +1,6 @@
 ---
 name: code-as-harness
-tips_exempt: internal harness diagnostic skill; no distinct end-user capability surface
+tips_exempt: "Renewed 2026-10-27: internal diagnostic guidance now chooses code repair, removal of unnecessary restrictions, or an observed delivery check according to the failure; it adds no end-user capability or new operation."
 description: "证据确认重复摩擦后修 harness。Use: 历史重复已确认。Not: 未确认重复、首次 bug、review 反馈。Output: 未确认不强制 block；需 operator 决策发 interactive，否则行动后发 card（均含根因、证据、处置）。"
 triggers:
   - "又忘了"
@@ -31,7 +31,7 @@ triggers:
 
 - 猫被骂时的第一反应不是道歉，是**搜证据确认是否重复**
 - 确认重复后才进入诊断流程；未确认 = 一次性批评，正常处理
-- 修复优先用**代码**（hook/lint/guard），不是**提示词**（soft constraint 会被忘）
+- 修法按问题选：确定的程序错误用**代码**修；多余的前提、关卡**直接撤**；判断失误拿实际交付检验。不默认再加 hook/lint/guard——加一道关卡也有成本，可能拦住正事（2026-10-26 汉弗莱喵案：*(internal reference removed)*）
 - 如果问题超出当前能力，**拉队友或启动 research**，不是硬编方案
 - 全新任务**先做**，做完后如果发现会反复出现，**再沉淀成 harness**
 

@@ -15,6 +15,7 @@ describe('F233 PR3: BallCustodyTaskStore', () => {
     const rawStore = new TaskStore();
     const task = await rawStore.create({
       threadId: 'thread-task',
+      subjectKey: 'eval-case:kept-lease',
       title: 'Implement the fix',
       why: 'task-backed executable custody',
       ownerCatId: 'opus',
@@ -71,6 +72,7 @@ describe('F233 PR3: BallCustodyTaskStore', () => {
     const rawStore = new TaskStore();
     const task = await rawStore.create({
       threadId: 'thread-task',
+      subjectKey: 'eval-case:kept-lease',
       title: 'Implement the fix',
       why: 'task-backed executable custody',
       ownerCatId: 'opus',
@@ -111,6 +113,7 @@ describe('F233 PR3: BallCustodyTaskStore', () => {
     const rawStore = new TaskStore();
     const task = await rawStore.create({
       threadId: 'thread-task',
+      subjectKey: 'eval-case:kept-lease',
       title: 'Retry completion',
       why: 'cover the durable task write before completion CAS window',
       ownerCatId: 'opus',

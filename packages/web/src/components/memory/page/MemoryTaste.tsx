@@ -29,6 +29,10 @@ export function MemoryTaste() {
     const main = host.current?.closest('main');
     if (main) main.scrollTop = selectedId ? 0 : previousScroll.current;
   }, [selectedId]);
+  const chooseFamily = (next: MemoryFamily) => {
+    setFamily(next);
+    if (next === 'profile') setExpanded(false);
+  };
   const privateCount = entries.filter((entry) => entry.visibility === 'private').length;
   const reload = () => {
     selectId(null);
@@ -41,15 +45,15 @@ export function MemoryTaste() {
         countText={list.loading ? '正在读取' : list.error ? '暂时读不到' : `${entries.length} 条`}
         toggle={() => setExpanded((value) => !value)}
         peopleSummary={peopleSummary}
-        onSelect={setFamily}
+        onSelect={chooseFamily}
         summaries={{ profile: profileSummary, entity: entitiesSummary, event: eventsSummary }}
       />
       <div className="my-5 flex flex-wrap items-center gap-2 text-compact">
         <button
           type="button"
-          onClick={() => setFamily('taste')}
+          onClick={() => chooseFamily('taste')}
           aria-pressed={family === 'taste'}
-          className="rounded-lg bg-cafe-surface-sunken px-3 py-2 font-medium"
+          className={`shell-focusable rounded-lg border px-3 py-2 ${family === 'taste' ? 'border-cafe-subtle bg-cafe-surface-sunken font-medium' : 'border-transparent text-cafe-muted'}`}
         >
           品味 {list.data && !list.loading && !list.error ? entries.length : ''}
         </button>
@@ -57,16 +61,20 @@ export function MemoryTaste() {
           <button
             key={item.id}
             type="button"
-            onClick={() => setFamily(item.id)}
+            onClick={() => chooseFamily(item.id)}
             aria-pressed={family === item.id}
-            className="rounded-lg bg-cafe-surface-sunken px-3 py-2 font-medium"
+            className={`shell-focusable rounded-lg border px-3 py-2 ${family === item.id ? 'border-cafe-subtle bg-cafe-surface-sunken font-medium' : 'border-transparent text-cafe-muted'}`}
           >
             {item.label}
+            {item.id === 'profile' && /^\d+ 条$/.test(profileSummary) ? ` ${profileSummary.replace(' 条', '')}` : ''}
           </button>
         ))}
         <span className="rounded-lg border border-dashed border-cafe-subtle px-2 py-1 text-xs text-cafe-muted">
           会议 · 还没接进来
         </span>
+        {family === 'profile' && (
+          <p className="text-xs text-cafe-muted">「关于你」每场新对话自动带上 · 其余画像按需回看</p>
+        )}
         {family === 'taste' && (
           <>
             {privateCount > 0 && <span className="text-xs text-cafe-muted">含 {privateCount} 条只给你看</span>}

@@ -4,6 +4,9 @@ import type { RoadmapAction } from './channel-collaboration.js';
 import type { CollectiveParticipant, CollectiveWorkProjection } from './client-types.js';
 import { useCollectiveLanguage, useCollectiveText } from './collective-copy.js';
 import { HostWorkPermissionContext } from './use-host-work-policy.js';
+import { WorkTimeCommandContext } from './WorkTimeCommandContext.js';
+import { WorkTimePanel } from './WorkTimePanel.js';
+import { WorkTimeSummary } from './WorkTimeSummary.js';
 import { workExecutionPresentation } from './work-execution-presentation.js';
 
 export function CollectiveWorkCard({
@@ -39,6 +42,7 @@ export function CollectiveWorkCard({
   readonly onComplete: (work: CollectiveWorkProjection) => void;
   readonly roadmapActions?: readonly RoadmapAction[];
 }) {
+  const { change: changeTime } = useContext(WorkTimeCommandContext);
   const home = useContext(HostWorkPermissionContext);
   const language = useCollectiveLanguage();
   const t = useCollectiveText();
@@ -91,6 +95,15 @@ export function CollectiveWorkCard({
         </p>
       )}
       <WorkResultStatus work={work} />
+      {work.lifecycle !== 'proposed' && (
+        <details className="channel-work-dates">
+          <summary>
+            {language === 'en' ? 'Dates' : '时间'}
+            <WorkTimeSummary work={work} />
+          </summary>
+          <WorkTimePanel work={work} currentHumanId={currentHumanId} onChange={changeTime} />
+        </details>
+      )}
       <WorkActions
         work={work}
         currentHumanId={currentHumanId}

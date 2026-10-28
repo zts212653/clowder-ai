@@ -9,6 +9,7 @@ export function useMessageSourceActions(
   result: MessageSearchResult,
   threadId: string,
   resolveSpeaker: (speaker: string) => string,
+  beforeAction?: (signal: AbortSignal) => Promise<boolean>,
 ) {
   const [expanded, setExpanded] = useState(false);
   const [context, setContext] = useState<ReadSourceContext | null>(null);
@@ -41,6 +42,8 @@ export function useMessageSourceActions(
     setContext(null);
     const controller = start('expand');
     try {
+      if (beforeAction && !(await beforeAction(controller.signal)))
+        throw new Error('来源卡已更新，请查看当前结果后再操作。');
       const next = await readMessageSource(result, 3, controller.signal);
       if (!controller.signal.aborted) setContext(next);
     } catch (failure) {
@@ -55,6 +58,8 @@ export function useMessageSourceActions(
   async function quote() {
     const controller = start('quote');
     try {
+      if (beforeAction && !(await beforeAction(controller.signal)))
+        throw new Error('来源卡已更新，请查看当前结果后再引用。');
       const fresh = await readMessageSource(result, 0, controller.signal);
       if (controller.signal.aborted) return;
       // A route change must not put the source into a different conversation's composer.

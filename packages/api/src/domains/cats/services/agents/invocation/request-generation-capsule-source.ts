@@ -18,7 +18,11 @@ export function nativeOpeningCapsuleRevision(
   const rendered = renderUserCapsuleSection(capsule.content);
   return rendered &&
     prepared.nativeInstructions.some(
-      (instruction) => instruction.injectionDecision === 'native_l0_compiled' && instruction.body.includes(rendered),
+      (instruction) =>
+        (instruction.injectionDecision === 'native_l0_compiled' ||
+          instruction.injectionDecision === 'native_l0_compiled_with_signature_boundary' ||
+          instruction.injectionDecision === 'native_agent_file_compiled') &&
+        instruction.body.includes(rendered),
     )
     ? capsule.revision
     : undefined;

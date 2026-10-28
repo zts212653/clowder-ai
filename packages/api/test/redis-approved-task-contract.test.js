@@ -3,12 +3,11 @@ import { execFile } from 'node:child_process';
 import { describe, test } from 'node:test';
 import { promisify } from 'node:util';
 import './helpers/setup-cat-registry.js';
-import { resolveTaskExecutionBinding } from '../dist/domains/growing/EntrustedWorkTaskExecutionBinding.js';
 import { approvedTaskFixture, OWNER, TARGET, USER } from './helpers/approved-task-contract-fixture.js';
 import { redisIsolationSkipReason } from './helpers/redis-test-helpers.js';
 
 describe(
-  'generic approval → seed/READY → typed receipt → delegated fenced implementation',
+  'generic approval → seed/READY → existing continuation → native Task dispatch',
   {
     skip: redisIsolationSkipReason(process.env.REDIS_URL),
   },
@@ -42,23 +41,21 @@ describe(
 
         const accepted = await f.implement();
         assert.equal(accepted.statusCode, 200, accepted.body);
-        const lease = (await f.leases.listActiveTaskLeases())[0];
-        assert.ok(lease);
-        assert.equal(lease.subjectRef, `subject:task:${f.task.id}`);
-        assert.equal(lease.holderThreadId, f.childId);
-        assert.deepEqual(lease.holderCatIds, [TARGET]);
         assert.equal(
-          (await resolveTaskExecutionBinding(await f.tasks.get(f.task.id), lease, f.delegates)).kind,
-          'ready',
+          (await f.leases.listActiveTaskLeases()).length,
+          0,
+          'ordinary work does not create an implementation lease',
         );
-        assert.ok(lease.evidenceRefs.some((ref) => ref.includes(`:continuation:${receipt.receiptId}:`)));
+        const source = await f.messages.getById(accepted.json().messageId);
+        assert.ok(source.extra.taskHandoff.approvedAnchor.evidenceRef.includes(`:continuation:${receipt.receiptId}:`));
+        const current = await f.tasks.get(f.task.id);
+        assert.equal(current.threadId, f.source.id);
+        assert.equal(current.ownerCatId, OWNER);
+        assert.equal(current.lastAppliedHandoffMessageRef, `message:${source.id}`);
         const entries = await f.queue.listAllDurable(f.childId);
         assert.equal(entries.length, 1);
-        assert.equal(entries[0].execution.actionSuccessorFence.leaseId, lease.leaseId);
-        assert.deepEqual(await f.leases.preflight(lease.leaseId, lease.generation, lease.terminalPredicate.digest), {
-          ok: true,
-          reason: 'active',
-        });
+        assert.equal(entries[0].execution.actionSuccessorFence, undefined);
+        assert.equal((await f.handoffs.apply(source.id)).kind, 'replayed');
         const replay = await f.continueTask();
         assert.equal(replay.json().outcome, 'replayed', replay.body);
         assert.deepEqual(replay.json().receipt, receipt, 'replay after implementation preserves original receipt');
@@ -67,26 +64,32 @@ describe(
         assert.equal((await f.queue.listAllDurable(f.childId)).length, 1, 'one durable carrier');
       });
 
-    test('contract drift after a lease was claimed invalidates its execution fence', async (t) => {
+    test('contract drift invalidates both recovered native handoff and actual provider admission', async (t) => {
       const f = await approvedTaskFixture(t);
       assert.equal((await f.continueTask()).statusCode, 200);
-      assert.equal((await f.implement()).statusCode, 200);
-      const lease = (await f.leases.listActiveTaskLeases())[0];
+      const sent = await f.implement();
+      assert.equal(sent.statusCode, 200, sent.body);
+      const sourceId = sent.json().messageId;
       await f.tasks.update(f.task.id, { title: 'Different work' });
-      assert.equal(
-        (await f.leases.preflight(lease.leaseId, lease.generation, lease.terminalPredicate.digest)).ok,
-        false,
+      const result = await f.handoffs.apply(sourceId);
+      assert.deepEqual(result, { kind: 'refused', reason: 'task_approved_contract_unavailable' });
+      await assert.rejects(
+        f.handoffs.start(
+          sourceId,
+          { userId: USER, catId: TARGET, threadId: f.childId, invocationId: 'new-child' },
+          'parent',
+        ),
+        /task_approved_contract_unavailable/,
       );
-      assert.equal(
-        (await f.leases.preflightOutput(lease.leaseId, lease.generation, TARGET, lease.terminalPredicate.digest)).ok,
-        false,
-      );
+      assert.equal((await f.tasks.get(f.task.id)).executionRef, undefined);
+      assert.equal((await f.leases.listActiveTaskLeases()).length, 0);
     });
 
     test('a new API process reads the same permanent receipt and derives the same delegate', async (t) => {
       const f = await approvedTaskFixture(t);
       const receipt = (await f.continueTask()).json().receipt;
       const script = `
+      import './test/helpers/setup-cat-registry.js';
       import { Redis } from 'ioredis';
       import { RedisProposalStore } from './dist/domains/cats/services/stores/redis/RedisProposalStore.js';
       import { RedisThreadStore } from './dist/domains/cats/services/stores/redis/RedisThreadStore.js';
@@ -96,8 +99,8 @@ describe(
       try {
         const proposals = new RedisProposalStore(redis);
         const provider = createTaskApprovedDelegateProvider(proposals, new RedisThreadStore(redis));
-        console.log(JSON.stringify({ receipt: (await proposals.get(input.proposalId)).taskContractContinuation,
-          delegates: await provider.getForTask(input.taskId, input.sourceId, input.owner, input.user, undefined, input.title) }));
+        process.stdout.write(JSON.stringify({receipt:(await proposals.get(input.proposalId)).taskContractContinuation,
+          delegates:await provider.getForTask(input.taskId,input.sourceId,input.owner,input.user,undefined,input.title)}));
       } finally { await redis.quit(); }
     `;
       const { stdout } = await promisify(execFile)(process.execPath, ['--input-type=module', '-e', script], {
@@ -117,7 +120,7 @@ describe(
         timeout: 10000,
       });
       const restarted = JSON.parse(stdout.trim());
-      assert.deepEqual(restarted.receipt, receipt);
+      assert.deepEqual(restarted.receipt, receipt, JSON.stringify(restarted));
       assert.equal(restarted.delegates.length, 1);
       assert.equal(restarted.delegates[0].catId, TARGET);
     });

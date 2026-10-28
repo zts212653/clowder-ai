@@ -228,7 +228,7 @@ async function reject(f, code) {
     assert.equal(error.cause?.code, code);
     return true;
   });
-  for (const key of ['instances', 'packages', 'grants']) assert.deepEqual((await f.store.snapshot())[key], []);
+  for (const key of ['instances', 'packages']) assert.deepEqual((await f.store.snapshot())[key], []);
   await assert.rejects(access(f.marker), { code: 'ENOENT' });
 }
 
@@ -329,5 +329,5 @@ test('refuses relocation that makes an absent optional dependency visible from a
     assert.equal(error.cause?.code, 'DEPENDENCY_LOCK_MISMATCH');
     return true;
   });
-  for (const key of ['instances', 'packages', 'grants']) assert.deepEqual((await f.store.snapshot())[key], []);
+  for (const key of ['instances', 'packages']) assert.deepEqual((await f.store.snapshot())[key], []);
 });

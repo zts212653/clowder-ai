@@ -11,6 +11,8 @@ export type AuthorizedMediaFile = {
   path: string;
   mime: string;
   byteLength: number;
+  canOpen?: boolean;
+  canReveal?: boolean;
   author?: string;
   createdAt?: string;
 };
@@ -64,12 +66,17 @@ export function registerMediaFileActions(app: FastifyInstance, mediaPath: string
       if (!file) return reply.code(401).send({ error: 'identity_required' });
       if ('local' in file) return { local: false };
       const info = await stat(file.path);
-      if (!info.isFile()) return reply.code(404).send({ error: 'not_found' });
-      const application = await defaultApp(file.mime);
+      if (!info.isFile() && !(deps.allowDirectoryReveal && info.isDirectory()))
+        return reply.code(404).send({ error: 'not_found' });
+      const canOpen = info.isFile() && file.canOpen !== false;
+      const canReveal = file.canReveal !== false;
+      const application = canOpen ? await defaultApp(file.mime) : {};
       const home = homedir();
       return {
         ...file,
         local: true,
+        canOpen,
+        canReveal,
         filename: basename(file.path),
         displayPath: file.path.startsWith(`${home}/`) ? `~${file.path.slice(home.length)}` : file.path,
         modifiedAt: info.mtime.toISOString(),
@@ -91,6 +98,11 @@ export function registerMediaFileActions(app: FastifyInstance, mediaPath: string
         if (!file) return reply.code(401).send({ error: 'identity_required' });
         if ('local' in file) return reply.code(403).send({ error: 'local_file_unavailable' });
         const info = await stat(file.path);
+        if (
+          (action === 'open' && (file.canOpen === false || !info.isFile())) ||
+          (action === 'reveal' && file.canReveal === false)
+        )
+          return reply.code(403).send({ error: 'file_action_not_permitted' });
         if (!info.isFile() && !(deps.allowDirectoryReveal && action === 'reveal' && info.isDirectory()))
           return reply.code(404).send({ error: 'not_found' });
         if (process.platform !== 'darwin') return reply.code(422).send({ error: 'desktop_action_unavailable' });

@@ -11,6 +11,7 @@ type ThreadDisplayInfo = {
   projectPath: string;
   preferredCats?: readonly string[];
   labels?: readonly string[];
+  pinned?: boolean;
 };
 type ExactThread = ThreadDisplayInfo | { id: string; error: true };
 
@@ -29,7 +30,14 @@ function parseThreadDisplayInfo(value: unknown, threadId: string): ThreadDisplay
   const labels = Array.isArray(detail.labels)
     ? detail.labels.filter((label): label is string => typeof label === 'string')
     : [];
-  return { id: threadId, title: detail.title as string | null, projectPath: detail.projectPath, preferredCats, labels };
+  return {
+    id: threadId,
+    title: detail.title as string | null,
+    projectPath: detail.projectPath,
+    preferredCats,
+    labels,
+    pinned: detail.pinned === true,
+  };
 }
 
 /** Read the named conversation, including carriers omitted from the sidebar. Never use the global workspace path. */

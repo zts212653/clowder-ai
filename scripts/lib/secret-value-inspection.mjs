@@ -2,7 +2,22 @@ import { CONTEXTUAL_SECRET, isContextualCredential } from './secret-content-rule
 import { mergeSecretFindings, redactSecretContent, scanSecretContent } from './secret-content-scan.mjs';
 import { decodeRasterPayload } from './secret-image-payload.mjs';
 
-function inspectString(item, key, parent, rules) {
+function inspectString(item, key, parent, rules, knownCredentials) {
+  if (knownCredentials !== undefined) {
+    const image = decodeRasterPayload(item, key, parent);
+    if (image) {
+      if (!knownCredentials.some((credential) => image.includes(Buffer.from(credential)))) return item;
+      rules.add('known-credential');
+      return '[credential-bearing image removed]';
+    }
+    let redacted = item;
+    for (const credential of knownCredentials) {
+      if (!redacted.includes(credential)) continue;
+      rules.add('known-credential');
+      redacted = redacted.replaceAll(credential, '[credential redacted]');
+    }
+    return redacted;
+  }
   const prefix = `${key}: "`;
   const field = new RegExp(CONTEXTUAL_SECRET).exec(`${prefix}${item}"`);
   // Only the actual field name supplies structured credential context. A match
@@ -43,7 +58,16 @@ function redactChunks(bytes, rules) {
 }
 
 /** Inspect actual strings, never a JSON serialization that escapes private-key newlines. */
-export function inspectSecretValue(value) {
+export function inspectSecretValue(value, options = {}) {
+  const knownCredentials =
+    options.knownCredentials === undefined
+      ? undefined
+      : [
+          ...new Set(
+            options.knownCredentials.filter((credential) => typeof credential === 'string' && credential.length > 0),
+          ),
+        ].sort((a, b) => b.length - a.length);
+  if (knownCredentials?.length === 0) return { value, rules: [] };
   const rules = new Set();
   let nodes = 0;
   let bytes = 0;
@@ -52,12 +76,14 @@ export function inspectSecretValue(value) {
     if (typeof item === 'string') {
       bytes += Buffer.byteLength(item);
       if (bytes > 64 * 1024 * 1024) throw new Error('secret_payload_uninspectable');
-      return inspectString(item, key, parent, rules);
+      return inspectString(item, key, parent, rules, knownCredentials);
     }
     if (Array.isArray(item)) return item.map((child) => visit(child, key, depth + 1));
     if (!item || typeof item !== 'object') return item;
     return Object.fromEntries(
       Object.entries(item).map(([name, child]) => {
+        if (knownCredentials !== undefined)
+          return [inspectString(name, '', null, rules, knownCredentials), visit(child, name, depth + 1, item)];
         const findings = scanSecretContent(name);
         for (const finding of findings) rules.add(finding.ruleId);
         return [redactSecretContent(name, findings), visit(child, name, depth + 1, item)];

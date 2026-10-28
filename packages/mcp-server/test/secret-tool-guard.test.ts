@@ -37,7 +37,7 @@ afterEach(async () => {
 });
 
 describe('registered MCP transport secret protection', () => {
-  it('records unavailable inspection without claiming a credential was found', async () => {
+  it('does not notify about unavailable inspection as if a configured credential was exposed', async () => {
     process.env.CAT_CAFE_API_URL = 'http://127.0.0.1:59999';
     process.env.CAT_CAFE_INVOCATION_ID = 'inv-secret-test';
     process.env.CAT_CAFE_CALLBACK_TOKEN = 'callback-test';
@@ -47,12 +47,10 @@ describe('registered MCP transport secret protection', () => {
       return new Response('{"messageId":"inspection-notice"}', { status: 200 });
     }) as typeof fetch;
     await recordSecretExposure({ state: 'exposed_or_suspected', rules: ['uninspectable-result'] });
-    assert.equal(requests.length, 1);
-    assert.ok(requests[0].includes('检查未完成'));
-    assert.ok(!requests[0].includes('轮转'));
+    assert.equal(requests.length, 0);
   });
 
-  it('checks the resolved workspace/collection file before opening an opaque credential alias', async () => {
+  it('reads credential aliases within the authorised workspace and collection', async () => {
     const root = await mkdtemp(join(tmpdir(), 'secret-file-resolution-'));
     const data = join(root, 'data');
     process.env.ALLOWED_WORKSPACE_DIRS = root;
@@ -68,9 +66,8 @@ describe('registered MCP transport secret protection', () => {
         const result = await guardSecretToolCall('cat_cafe_read_file_slice', { path, startLine: 1 }, () =>
           handleReadFileSlice({ path, startLine: 1 }),
         );
-        assert.equal(result.isError, true);
-        assert.match(result.content[0].text, /credential_source_blocked_before_read/);
-        assert.ok(!JSON.stringify(result).includes('opaque fixture credential'));
+        assert.equal(result.isError, undefined);
+        assert.match(result.content[0].text, /opaque fixture credential/);
       }
       for (const path of ['public.txt', 'cat-cafe://collection/world%3Afixture/public.txt']) {
         const result = await guardSecretToolCall('cat_cafe_read_file_slice', { path, startLine: 1 }, () =>
@@ -84,20 +81,20 @@ describe('registered MCP transport secret protection', () => {
     }
   });
 
-  it('does not execute a callback for a credential in a read query', async () => {
+  it('executes a local memory read query even when its text resembles a credential', async () => {
     process.env.CAT_CAFE_API_URL = 'http://127.0.0.1:59999';
     process.env.CAT_CAFE_INVOCATION_ID = 'inv-secret-test';
     process.env.CAT_CAFE_CALLBACK_TOKEN = 'callback-test';
-    const calls = mock.fn(async () => new Response('{}', { status: 200 }));
+    const calls = mock.fn(async () => new Response('{"results":[]}', { status: 200 }));
     globalThis.fetch = calls as typeof fetch;
     const client = await clientFor('memory');
     const result = await client.callTool({ name: 'cat_cafe_search_evidence', arguments: { query: credential() } });
-    assert.equal(result.isError, true);
-    assert.equal(calls.mock.callCount(), 0);
-    assert.ok(!JSON.stringify(result).includes(credential()));
+    assert.equal(result.isError, undefined);
+    assert.equal(calls.mock.callCount(), 1);
   });
 
   it('returns redacted history and posts a credential-free notice to the same authenticated invocation', async () => {
+    process.env.GH_TOKEN = credential();
     process.env.CAT_CAFE_API_URL = 'http://127.0.0.1:59999';
     process.env.CAT_CAFE_INVOCATION_ID = 'inv-secret-test';
     process.env.CAT_CAFE_CALLBACK_TOKEN = 'callback-test';
@@ -124,8 +121,7 @@ describe('registered MCP transport secret protection', () => {
     assert.equal(notices[0].headers['x-invocation-id'], 'inv-secret-test');
     assert.equal(notices[0].headers['x-callback-token'], 'callback-test');
     assert.ok(!notices[0].body.includes(credential()));
-    assert.ok(notices[0].body.includes('尚未核实真实凭据'));
-    assert.ok(notices[0].body.includes('仅在确认真实凭据已暴露后'));
+    assert.ok(notices[0].body.includes('当前已配置的凭据值'));
     assert.ok(!notices[0].body.includes('请轮转相关凭据'));
   });
 });

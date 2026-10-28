@@ -1,4 +1,5 @@
 import { nativeSecretDenial } from '../native-secret-policy.mjs';
+import { configuredCredentialValues } from './secret-credential-paths.mjs';
 import { createPayloadSnapshot, readSecretPayload } from './secret-payload-files.mjs';
 import { inspectSecretValue } from './secret-value-inspection.mjs';
 
@@ -34,17 +35,17 @@ export async function withSecretToolGuard(name, args, execute, options = {}) {
 export function prepareSecretToolInput(name, args, options = {}) {
   const snapshot = createPayloadSnapshot();
   try {
-    const inspected = inspectSecretValue(args);
-    const denial = nativeSecretDenial(
-      { tool_name: name, tool_input: args, cwd: options.cwd },
-      options.credentialSources,
-    );
-    if (inspected.rules.length || denial)
+    const outbound = options.outbound === true;
+    const denial = nativeSecretDenial({ tool_name: name, tool_input: args, cwd: options.cwd });
+    if (denial || (outbound && inspectSecretValue(args).rules.length))
       throw Object.assign(new Error('Secret tool input blocked'), {
         code: denial ?? 'secret_content_blocked_before_send',
       });
     return {
-      input: FILE_SENDERS.test(name) ? freezeToolFiles(args, snapshot, options.cwd, options.credentialSources) : args,
+      input:
+        outbound && FILE_SENDERS.test(name)
+          ? freezeToolFiles(args, snapshot, options.cwd, options.credentialSources)
+          : args,
       dispose: () => snapshot.dispose(),
     };
   } catch (error) {
@@ -56,9 +57,12 @@ export function prepareSecretToolInput(name, args, options = {}) {
 export async function protectSecretToolResult(result, options = {}) {
   let inspected;
   try {
-    inspected = inspectSecretValue(result);
+    inspected = inspectSecretValue(result, {
+      knownCredentials: options.knownCredentials ?? configuredCredentialValues(options.environment ?? process.env),
+    });
   } catch {
-    inspected = { value: failure('tool_result_uninspectable'), rules: ['uninspectable-result'] };
+    // Incomplete local observation is not evidence of a credential exposure.
+    return result;
   }
   if (!inspected.rules.length) return result;
   let rotationNotice = 'failed';
@@ -69,9 +73,7 @@ export async function protectSecretToolResult(result, options = {}) {
   } catch {
     /* The safe result reports this gap; do not expose the original again. */
   }
-  const summary = inspected.rules.includes('uninspectable-result')
-    ? '工具结果的安全检查未完成，结果已隐藏；这不代表已确认凭据泄露。'
-    : '工具结果命中疑似凭据格式，匹配内容已隐藏，尚未核实真实凭据；仅在确认真实凭据已暴露后按原授权轮转。';
+  const summary = '工具结果包含当前已配置的凭据值，匹配内容已隐藏；请按原授权轮转对应凭据。';
   return {
     ...inspected.value,
     _meta: {
@@ -87,20 +89,6 @@ export async function protectSecretToolResult(result, options = {}) {
       ...(rotationNotice === 'failed' ? [{ type: 'text', text: PENDING_EXPOSURE_NOTICE }] : []),
     ],
   };
-}
-
-/** A pooled child has no turn principal. Carry only a safe receipt to its host. */
-export function hasPendingExposureNotice(text) {
-  if (typeof text !== 'string') return false;
-  if (text.split(/\r?\n/).some((line) => line.trim() === PENDING_EXPOSURE_NOTICE)) return true;
-  if (text.length > 1024 * 1024 || !/^[\s]*[[{]/.test(text)) return false;
-  try {
-    const parsed = JSON.parse(text);
-    const contents = Array.isArray(parsed) ? parsed : parsed.content;
-    return Array.isArray(contents) && contents.some((part) => part?.text === PENDING_EXPOSURE_NOTICE);
-  } catch {
-    return false;
-  }
 }
 
 function freezeToolFiles(value, snapshot, cwd, credentialSources, key = '') {

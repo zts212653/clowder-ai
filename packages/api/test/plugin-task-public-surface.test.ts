@@ -15,9 +15,16 @@ function fixture() {
   return { store, host };
 }
 
-test('Task public surface has four methods; selectors and combined filters return the same owned task', async () => {
+test('Task public surface includes data-controller binding; selectors and combined filters return the same owned task', async () => {
   const { store, host } = fixture();
-  assert.deepEqual(Object.keys(host).sort(), ['create', 'get', 'list', 'update']);
+  assert.deepEqual(Object.keys(host).sort(), [
+    'bindDataController',
+    'create',
+    'get',
+    'list',
+    'revokeDataController',
+    'update',
+  ]);
   const task = store.create({
     threadId: 'thread',
     title: 'Work',

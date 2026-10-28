@@ -3,6 +3,7 @@ import type { MemberText } from './MemberRuntimeFields';
 import type { MemberDraft } from './member-editor-state';
 
 const labels: Record<keyof HubCatEditorFormState, [string, string]> = {
+  banner: ['横幅', 'Banner'],
   accountBindingMode: ['账号跟随方式', 'Account binding mode'],
   agyNativeEnabled: ['Antigravity 原生运行', 'Native Antigravity'],
   agyAcpEnabled: ['启用官方 ACP', 'Enable official ACP'],

@@ -1,4 +1,5 @@
 import type { MouseEvent, ReactNode } from 'react';
+import { type CollectiveIdentity, CollectiveIdentitySummary } from './CollectiveIdentitySummary.js';
 import { CollectiveWorldRail } from './CollectiveWorldRail.js';
 import type { CollectiveMembership } from './client-types.js';
 import { useCollectiveLanguage, useCollectiveText } from './collective-copy.js';
@@ -30,7 +31,7 @@ function DestinationTitle({
 }) {
   const language = useCollectiveLanguage();
   const t = useCollectiveText();
-  if (!collective) return <h1>{t('共同家园')}</h1>;
+  if (!collective) return <h1>{t('共同体')}</h1>;
   const hasMenu = Boolean(onHome || canSteward || onCafe || onReplayGuide || onLeave);
   if (!hasMenu) return <h1>{collective.name}</h1>;
   const action = (callback: () => void) => (event: MouseEvent<HTMLButtonElement>) => {
@@ -116,6 +117,9 @@ export function ProductShell({
   onReconnect,
   destinations,
   headerMeta,
+  identity,
+  onOpenSelf,
+  onSwitchAccount,
   children,
   navigationOpen = false,
   onCloseNavigation,
@@ -140,6 +144,9 @@ export function ProductShell({
   readonly onReconnect?: () => void;
   readonly destinations?: ReactNode;
   readonly headerMeta?: ReactNode;
+  readonly identity?: CollectiveIdentity;
+  readonly onOpenSelf?: () => void;
+  readonly onSwitchAccount?: () => void;
   readonly navigationOpen?: boolean;
   readonly onCloseNavigation?: () => void;
   readonly children: ReactNode;
@@ -164,21 +171,31 @@ export function ProductShell({
       {navigationOpen && (
         <button type="button" className="navigation-scrim" aria-label={t('关闭频道导航')} onClick={onCloseNavigation} />
       )}
-      <aside className="destination-pane" data-spatial-role="destination-pane" aria-label={t('共同家园导航')}>
+      <aside className="destination-pane" data-spatial-role="destination-pane" aria-label={t('共同体导航')}>
         <header className="destination-header">
-          <DestinationTitle
-            collective={collective}
-            onHome={onHome}
-            meta={headerMeta}
-            canSteward={canSteward}
-            onInvite={onInvite}
-            onCafe={onCafe}
-            onReplayGuide={onReplayGuide}
-            onPermissions={onPermissions}
-            onCalendar={onCalendar}
-            onReconnect={onReconnect}
-            onLeave={onLeave}
-          />
+          <div className="destination-heading">
+            <DestinationTitle
+              collective={collective}
+              onHome={onHome}
+              meta={headerMeta}
+              canSteward={canSteward}
+              onInvite={onInvite}
+              onCafe={onCafe}
+              onReplayGuide={onReplayGuide}
+              onPermissions={onPermissions}
+              onCalendar={onCalendar}
+              onReconnect={onReconnect}
+              onLeave={onLeave}
+            />
+            {collective && identity && onOpenSelf && onSwitchAccount && (
+              <CollectiveIdentitySummary
+                collectiveName={collective.name}
+                identity={identity}
+                onOpenSelf={onOpenSelf}
+                onSwitchAccount={onSwitchAccount}
+              />
+            )}
+          </div>
           <button type="button" className="navigation-close" aria-label={t('收起频道导航')} onClick={onCloseNavigation}>
             ×
           </button>

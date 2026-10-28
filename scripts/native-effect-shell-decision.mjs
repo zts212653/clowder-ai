@@ -12,6 +12,7 @@ import {
   isLocalMediaObservationCommand,
 } from './native-effect-media-classifier.mjs';
 import { decideNativeEffect, deny } from './native-effect-policy.mjs';
+import { protectedManagedPreviewBoundary } from './native-effect-preview-boundary.mjs';
 import { managedPreviewOperationDecision } from './native-effect-preview-classifier.mjs';
 import { gitSubcommandArgs } from './native-effect-repository-classifier.mjs';
 import { isShellStructure, segmentCommandText, segmentContexts } from './native-effect-segment-locations.mjs';
@@ -38,13 +39,15 @@ export function decideShellHookPayload(view, cwd, source, depth = 0, initialCopy
   const lexical = scanShellText(view.judged);
   const raw = lexical.text;
   if (depth > 8) return decideNativeEffect({ effect: 'unknown', target: classifyTarget(raw, cwd, 'unknown'), source });
-  const pipelineBoundary = deniedDataDrivenPipeline(raw, cwd, source);
-  if (pipelineBoundary) return pipelineBoundary;
+  const pipelineBoundary = dataDrivenPipelineDecision(raw, cwd, source);
+  if (pipelineBoundary?.decision === 'deny') return pipelineBoundary;
   const parts = splitShellExecutionSegmentsWithSeparators(raw);
   const segments = parts.map((part) => part.text);
   const mediaObservation = segments.find(isLocalMediaObservationCommand);
+  let mediaUncertainty;
   if (mediaObservation && (segments.length !== 1 || !isConstrainedLocalMediaObservation(mediaObservation))) {
     const candidate = { effect: 'unknown', target: classifyTarget(raw, cwd, 'unknown'), source };
+    mediaUncertainty = candidate;
     if (decideNativeEffect(candidate).decision === 'deny') {
       return deny(candidate, 'unbounded_local_media_observation');
     }
@@ -85,7 +88,7 @@ export function decideShellHookPayload(view, cwd, source, depth = 0, initialCopy
       contexts.map(({ directory }) => directory),
     ),
   );
-  const previewBoundary = deniedManagedPreviewBoundary(previewDecisions, segments, cwd, source);
+  const previewBoundary = protectedManagedPreviewBoundary(previewDecisions, segments, cwd, source);
   if (previewBoundary) return previewBoundary;
   const expanded = units.map(({ segment, contexts }) =>
     contexts.flatMap(({ directory, bindings }) =>
@@ -119,6 +122,8 @@ export function decideShellHookPayload(view, cwd, source, depth = 0, initialCopy
     }),
   );
   if (executionBoundary) candidates.push(executionBoundary);
+  if (mediaUncertainty) candidates.push(mediaUncertainty);
+  if (pipelineBoundary) candidates.push(pipelineBoundary);
   // Child policy decisions may deny an otherwise ordinary target (for example
   // an unbounded managed-preview operation). Do not reinterpret them as candidates.
   const decisions = candidates.map((candidate) => (candidate.decision ? candidate : decideNativeEffect(candidate)));
@@ -133,12 +138,11 @@ export function decideShellHookPayload(view, cwd, source, depth = 0, initialCopy
   }
   return decisions.reduce((best, candidate) => (rank(candidate) > rank(best) ? candidate : best));
 }
-function deniedDataDrivenPipeline(raw, cwd, source) {
+function dataDrivenPipelineDecision(raw, cwd, source) {
   const consumer = splitPipelineSegments(raw).slice(1).find(isDataDrivenPipelineConsumer);
   if (!consumer) return null;
   const effect = classifyShellSegment(consumer);
-  const decision = decideNativeEffect({ effect, target: classifyTarget(raw, cwd, effect), source });
-  return decision.decision === 'deny' ? decision : null;
+  return decideNativeEffect({ effect, target: classifyTarget(raw, cwd, effect), source });
 }
 
 function nestedSubstitutionDecisions(innerCommands, directory, source, depth, initialCopyNamespaceStable) {
@@ -195,7 +199,11 @@ function protectedBranchBoundary(reader, cwd, source) {
 /** A preview operation is admitted only if every directory the segment can run in admits it. */
 function segmentPreviewDecision(segment, locations) {
   const decisions = locations.map((location) => managedPreviewOperationDecision(segment, location));
-  return decisions.find((decision) => decision?.status === 'deny') ?? decisions[0];
+  const decision = decisions.find((entry) => entry?.status === 'deny') ?? decisions[0];
+  // Failed typed attribution is uncertainty, not a mutation of configuration paths.
+  return decision?.status === 'deny'
+    ? { ...decision, operation: { effect: 'unknown', target: 'preview://unattributed' } }
+    : decision;
 }
 
 function segmentCandidate(
@@ -275,23 +283,6 @@ function bindingViewEffect(command, managedPreview, argvPreserved) {
 function observedSegmentTarget(original, unresolved, observed, hasRoles, effect) {
   if (hasRoles || unresolved === original) return observed;
   return effect === 'write' ? `${unresolved} ${observed}` : unresolved;
-}
-
-function deniedManagedPreviewBoundary(decisions, segments, cwd, source) {
-  const invalidIndex = decisions.findIndex((decision) => decision?.status === 'deny');
-  const allowedIndex = decisions.findIndex((decision) => decision?.status === 'allow');
-  const index = invalidIndex >= 0 ? invalidIndex : allowedIndex;
-  if (index < 0) return null;
-  if (
-    invalidIndex < 0 &&
-    (segments.length === 1 || decisions.filter(Boolean).every((decision) => decision.operation?.effect === 'read'))
-  )
-    return null;
-  const candidate = { effect: 'unknown', target: classifyTarget(segments[index], cwd, 'unknown'), source };
-  return {
-    ...deny(candidate, 'unbounded_managed_preview_operation'),
-    ...(decisions[index]?.reason ? { detail: decisions[index].reason } : {}),
-  };
 }
 
 const GIT_CONTROL_COMMANDS = new Set([

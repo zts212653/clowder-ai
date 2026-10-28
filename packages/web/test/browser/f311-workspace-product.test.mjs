@@ -14,6 +14,7 @@ import { verifyJourneyProgress } from './f311-workspace-progress.journey.mjs';
 import {
   verifyThreeProgramsSideBySide,
   verifyUnnamedWorkspaceReadability,
+  verifyV2HomeTruth,
 } from './f311-workspace-readability.journey.mjs';
 import { verifyWorkspaceSidecarReturn } from './f311-workspace-sidecar.journey.mjs';
 import { verifyRichVersionReview } from './f311-workspace-version-review.journey.mjs';
@@ -165,6 +166,32 @@ test('unnamed project context and next steps remain readable in the real shell',
     await context.close();
   }
 });
+
+test(
+  'v2 home keeps pending decisions distinct from constitution and settles typed 422 gaps',
+  { timeout: 90_000 },
+  async () => {
+    const { page, context } = await authenticatedPage();
+    try {
+      report.measurements.v2HomeTruth = await verifyV2HomeTruth({
+        page,
+        base,
+        threadId,
+        programFixture,
+        navigateShell,
+        capture,
+      });
+      report.claims.push(
+        'The real v2 Settings entry shows zero pending approvals without calling constitution a user decision; typed 422 owner gaps settle instead of polling every two seconds.',
+      );
+    } catch (error) {
+      await capture(page, 'v2-home-truth-failure');
+      throw error;
+    } finally {
+      await context.close();
+    }
+  },
+);
 
 test('three named Programs share one home anatomy side by side in the real shell', { timeout: 90_000 }, async () => {
   const { page, context } = await authenticatedPage();

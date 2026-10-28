@@ -3,6 +3,7 @@
 import { useShellPresentation } from '../shell/shell-presentation';
 import { MessageReadingControls } from './MessageReadingControls';
 import { MessageSearchPanel } from './MessageSearchPanel';
+import { captureFindWorkspaceOrigin } from './message-find-destinations';
 import type { MessageSearchHost } from './useMessageSearchHost';
 
 export function MessageSearchOverlay({
@@ -31,10 +32,15 @@ export function MessageSearchOverlay({
     >
       {host.open ? (
         <MessageSearchPanel
+          key={host.findState ? host.findSeed : 'manual'}
           threadId={threadId}
           onClose={host.closeSearch}
           onNavigate={host.navigateResult}
           resolveSpeaker={resolveSpeaker}
+          initialState={host.findState}
+          onOpenDestination={(destination, state) =>
+            host.openDestination(destination, state, captureFindWorkspaceOrigin())
+          }
         />
       ) : (
         <MessageReadingControls host={host} />

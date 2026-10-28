@@ -23,6 +23,50 @@ function renderNotice(message: Partial<ChatMessageType> & Pick<ChatMessageType, 
 }
 
 describe('SystemNoticeBar', () => {
+  const receipt = {
+    v: 1,
+    kind: 'approval_decision_receipt',
+    producerId: 'F128',
+    canonicalProposalId: 'proposal_receipt_example',
+    resolution: 'accepted',
+    approvalCardRef: { threadId: 'thread_example', messageId: 'original-card' },
+    requesterCatId: 'codex61-sol',
+    decidedAt: 1793030000000,
+    decidedBy: 'default-user',
+  };
+
+  it('keeps an approval receipt out of the centered system box and never exposes its machine body', () => {
+    const html = renderNotice({
+      content: '审批结果：线程提案 proposal_receipt_example 已批准。',
+      timestamp: receipt.decidedAt,
+      source: {
+        connector: 'approval-hub',
+        label: 'Host 审批结果回执',
+        icon: 'info',
+        meta: { approvalDecisionReceipt: receipt },
+      },
+    });
+    expect(html).toContain('chat-approval-receipt');
+    expect(html).toContain('justify-end');
+    expect(html).not.toContain('system-notice-bar');
+    expect(html).not.toContain('proposal_receipt_example');
+  });
+
+  it('does not expose the machine body when an approval receipt metadata record is malformed', () => {
+    const html = renderNotice({
+      content: '审批结果：线程提案 proposal_receipt_example 已批准。',
+      timestamp: receipt.decidedAt,
+      source: {
+        connector: 'approval-hub',
+        label: 'Host 审批结果回执',
+        icon: 'info',
+        meta: { approvalDecisionReceipt: { ...receipt, resolution: 'expired' } },
+      },
+    });
+    expect(html).not.toContain('proposal_receipt_example');
+    expect(html).toContain('chat-approval-receipt');
+  });
+
   it('uses Clowder cafe surface styling for info notices instead of a generic blue card', () => {
     const html = renderNotice({
       content: '想交接给 @codex？把它单独放到新起一行开头，才能触发交接。',

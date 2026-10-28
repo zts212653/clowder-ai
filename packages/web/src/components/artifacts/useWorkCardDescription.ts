@@ -12,11 +12,10 @@ const descriptionSchema = z.object({
 export type WorkCardDescription = z.infer<typeof descriptionSchema>;
 
 /** A shipped demo poster is used only for the exact registered cut, never a same-named file. */
-export function workVideoPoster(description: WorkCardDescription | null | undefined) {
+export function workVideoDemo(description: WorkCardDescription | null | undefined) {
   return (
     description &&
     Object.values(FEATURE_DEMOS).find((demo) => demo.sha256 && `sha256:${demo.sha256}` === description.asset.blobDigest)
-      ?.poster
   );
 }
 
@@ -56,6 +55,6 @@ export function useWorkCardDescription(reference: WorkReference | undefined, ena
   }, [key, contentRef, ownerRevision, enabled]);
   return {
     description: loaded?.key === key ? loaded.data : null,
-    loading: !!reference && enabled && loaded?.key !== key,
+    loading: !!reference && loaded?.key !== key,
   };
 }

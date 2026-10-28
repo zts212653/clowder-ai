@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, describe, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { nativeHookTestEnv } from './helpers/native-hook-programs.js';
 
 const { decideNativeHookPayload } = await import('../../../scripts/native-effect-target-guard.mjs');
 const guardCliPath = fileURLToPath(new URL('../../../scripts/native-effect-target-guard.mjs', import.meta.url));
@@ -15,7 +16,7 @@ const publicWithoutClaudeWrapper =
 // The self-host layer depends on which deployment hosts the test process; it is
 // asserted in f300-self-host-guard-hook.test.js, not here.
 function withoutDeployment() {
-  const env = { ...process.env };
+  const env = nativeHookTestEnv();
   delete env.CAT_CAFE_DEPLOYMENT_ID;
   return env;
 }

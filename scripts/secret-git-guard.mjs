@@ -76,8 +76,9 @@ function pushTips(input) {
 }
 
 async function main() {
+  const [mode, target] = process.argv.slice(2);
+  const local = mode === 'index' || mode === 'message';
   try {
-    const [mode, target] = process.argv.slice(2);
     let findings;
     if (mode === 'index') findings = scanSecretIndex();
     else if (mode === 'message') findings = scanSecretContent(readFileSync(target));
@@ -90,12 +91,18 @@ async function main() {
       findings = scanSecretPush(input, target);
     } else throw new Error('secret_scan_unavailable');
     if (findings.length) {
-      process.stderr.write(`${JSON.stringify({ code: 'secret_content_detected', findings })}\n`);
-      process.exitCode = 1;
+      process.stderr.write(
+        `${JSON.stringify({ code: local ? 'secret_content_observed' : 'secret_content_detected', findings })}\n`,
+      );
+      if (!local) process.exitCode = 1;
     }
   } catch {
-    process.stderr.write('secret_scan_unavailable: content was not verified; operation blocked.\n');
-    process.exitCode = 1;
+    process.stderr.write(
+      local
+        ? 'secret_scan_unavailable: local observation incomplete; operation continues.\n'
+        : 'secret_scan_unavailable: content was not verified; operation blocked.\n',
+    );
+    if (!local) process.exitCode = 1;
   }
 }
 

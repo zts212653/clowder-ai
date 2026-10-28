@@ -64,9 +64,9 @@ function withIdentityReobservation(
   }
 }
 
-function redisScope(raw) {
+function redisScope(raw, { requireClean = true } = {}) {
   const coordinates = parseNamedAlphaCoordinates(raw);
-  assertNamedAlphaCheckout(coordinates, { requireBuilds: true, requireTarget: true });
+  assertNamedAlphaCheckout(coordinates, { requireBuilds: true, requireTarget: true, requireClean });
   const dataDirectory = join(coordinates.alphaRoot, '.cat-cafe/redis');
   if (realpathSync(dataDirectory) !== dataDirectory) throw new Error('Redis directory is not its exact Alpha home');
   return { projectRoot: coordinates.alphaRoot, dataDirectory, port: coordinates.ports.redis };
@@ -121,7 +121,9 @@ export function captureNamedAlphaRedisIdentity(raw, deps = {}) {
 
 /** OS metadata must prove the same incarnation before PING, CONFIG, BGSAVE or shutdown is considered. */
 function verifyRedisIdentityOnce(raw, proof, { readListeners = listenerPids, capture = captureProcessIdentity } = {}) {
-  const scope = redisScope(raw);
+  // Serving generators may change tracked files after capture. Reprove the
+  // frozen checkout/build and process identity without reapplying launch cleanliness.
+  const scope = redisScope(raw, { requireClean: false });
   if (
     !proof ||
     proof.v !== 1 ||

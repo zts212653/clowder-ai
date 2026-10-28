@@ -3,16 +3,16 @@ import assert from 'node:assert/strict';
 import { readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
+import { directMcpContract } from './helpers/direct-mcp-contract.js';
 import { capabilityFile, fixture, managed, memberIds, providers, putConfig } from './helpers/invoke-mcp-workspace.js';
-import { secretMcpContract } from './helpers/secret-mcp-contract.js';
 
-function transport(provider, server, name) {
+function transport(provider, server, _name) {
   // Codex's fixture already checks the relay in upstreamMcpServersFromArgs.
   if (provider === 'codex') return server;
-  const { proxyEnv, upstream } = secretMcpContract(server);
-  assert.equal(upstream.source, name);
+  const { launchEnv, upstream } = directMcpContract(server);
+
   assert.equal(
-    proxyEnv.ALLOWED_WORKSPACE_DIRS,
+    launchEnv.ALLOWED_WORKSPACE_DIRS,
     upstream.env?.ALLOWED_WORKSPACE_DIRS,
     'secret protection must inspect the same admitted workspace as the upstream reader',
   );

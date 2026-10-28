@@ -19,6 +19,9 @@ export const credentialSourcesFromEnvironment = sources.credentialSourcesFromEnv
   environment: Record<string, string | undefined>,
   cwd?: string,
 ) => CredentialSources;
+export const configuredCredentialValues = sources.configuredCredentialValues as (
+  environment?: Record<string, string | undefined>,
+) => string[];
 export const withSecretToolGuard = boundary.withSecretToolGuard as (
   name: string,
   args: unknown,
@@ -27,10 +30,12 @@ export const withSecretToolGuard = boundary.withSecretToolGuard as (
     callId: string;
     cwd: string;
     credentialSources?: CredentialSources;
+    outbound?: boolean;
+    knownCredentials?: string[];
+    environment?: Record<string, string | undefined>;
     notify: (notice: ExposureNotice) => Promise<void>;
   },
 ) => Promise<unknown>;
-export const hasPendingExposureNotice = boundary.hasPendingExposureNotice as (value: unknown) => boolean;
 export const isCredentialSource = sources.isCredentialSource as (
   path: string,
   cwd?: string,
@@ -43,7 +48,4 @@ export function secretRuntimeRoot(): string {
 }
 export function secretRuntimeScript(name: string): string {
   return fileURLToPath(new URL(`../dist/runtime/scripts/${name}`, import.meta.url));
-}
-export function secretMcpProxyPath(): string {
-  return fileURLToPath(new URL('../dist/secret-mcp-proxy.js', import.meta.url));
 }

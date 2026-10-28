@@ -1,5 +1,6 @@
 'use client';
 import type { MediaContextAttachment } from '@cat-cafe/shared';
+import type { ReactNode } from 'react';
 import { useShellLanguage } from '@/components/shell/shell-language';
 import { ContextMediaSelections } from '../ContextMediaSelections';
 import styles from './artwork-gallery.module.css';
@@ -12,8 +13,12 @@ export function GalleryAttachmentGroup({
   onRemove,
   message,
   fromComposer = false,
+  materialTitle,
+  materials,
 }: {
   attachments: readonly MediaContextAttachment[];
+  materialTitle?: string;
+  materials?: ReactNode;
   compact?: boolean;
   message?: { threadId: string; messageId: string };
   fromComposer?: boolean;
@@ -30,6 +35,7 @@ export function GalleryAttachmentGroup({
       data-gallery-input={compact || undefined}
       className={`min-w-0 ${compact ? styles.compact : 'w-full max-w-xl overflow-hidden rounded-xl border border-cafe-subtle bg-cafe-surface-elevated'}`}
     >
+      {materialTitle ? <p className="text-xs font-medium text-cafe-muted">{materialTitle}</p> : null}
       {!compact ? (
         <p className="px-3 pt-3 text-xs text-cafe-muted">
           {english
@@ -77,11 +83,11 @@ export function GalleryAttachmentGroup({
                 >
                   {name(attachment)}
                 </button>
-              ) : (
+              ) : !materialTitle ? (
                 <span className={styles.name} title={attachment.title}>
                   {name(attachment)}
                 </span>
-              )}
+              ) : null}
               {attachment.selections.length ? (
                 <ContextMediaSelections
                   attachment={attachment}
@@ -113,6 +119,7 @@ export function GalleryAttachmentGroup({
             ) : null}
           </div>
         ))}
+        {materials}
       </div>
       {opening.error ? (
         <p role="alert" className="text-xs text-cafe-secondary">

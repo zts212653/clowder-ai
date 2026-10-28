@@ -1,5 +1,6 @@
 import type { PawFeelDispositionEvent, PawFeelDispositionProjection } from '@cat-cafe/shared';
 import type { RedisClient } from '@cat-cafe/shared/utils';
+import { TaskKeys } from '../../../domains/cats/services/stores/redis-keys/task-keys.js';
 import { awaitPawFeelRead } from './projection/bounded-reads.js';
 import { RedisPawFeelProjectionReader } from './projection/redis-projection-reader.js';
 import { parsePawFeelDispositionEvent } from './schema.js';
@@ -21,12 +22,25 @@ export type PawFeelDispositionAppendResult =
   | { outcome: 'duplicate' }
   | { outcome: 'conflict'; actualSequence: number };
 
+export interface PawFeelAssignmentAppendFence {
+  taskId: string;
+  ownerRevision: number;
+  taskThreadId: string;
+  ownerCatId: string;
+  userId: string;
+  terminal: boolean;
+}
+
 export interface IPawFeelDispositionEventLog {
   readProjections?(
     signalIds: readonly string[],
     signal?: AbortSignal,
   ): Promise<Map<string, PawFeelDispositionProjection>>;
-  append(event: PawFeelDispositionEvent, expectedSequence: number): Promise<PawFeelDispositionAppendResult>;
+  append(
+    event: PawFeelDispositionEvent,
+    expectedSequence: number,
+    assignment?: PawFeelAssignmentAppendFence,
+  ): Promise<PawFeelDispositionAppendResult>;
   read(signalId: string, fromSequence?: number, signal?: AbortSignal): Promise<PawFeelDispositionEvent[]>;
   readMany?(signalIds: readonly string[], signal?: AbortSignal): Promise<Map<string, PawFeelDispositionEvent[]>>;
   scanSignalIds(cursor: PawFeelSignalScanCursorV1 | undefined, limit: number): Promise<PawFeelSignalScanPage>;
@@ -43,6 +57,18 @@ end
 local current = redis.call('LLEN', KEYS[1])
 if current ~= tonumber(ARGV[2]) then
   return {-1, current}
+end
+
+if KEYS[4] then
+  local expected = cjson.decode(ARGV[5])
+  local fields = redis.call('HMGET', KEYS[4], 'id', 'kind', 'subjectKey', 'entrustedWork', 'userId', 'ownerCatId', 'threadId', 'ownerRevision', 'status')
+  local revision = tonumber(fields[8]) or 0
+  local terminal = fields[9] == 'done'
+  if fields[1] ~= expected.taskId or fields[2] ~= 'work' or (fields[3] and fields[3] ~= '') or
+    (fields[4] and fields[4] ~= '') or fields[5] ~= expected.userId or fields[6] ~= expected.ownerCatId or
+    fields[7] ~= expected.taskThreadId or revision ~= expected.ownerRevision or terminal ~= expected.terminal then
+    return {-2, current}
+  end
 end
 
 redis.call('SADD', KEYS[2], ARGV[1])
@@ -83,20 +109,30 @@ export class RedisPawFeelDispositionEventLog implements IPawFeelDispositionEvent
     return this.projectionReader.readMany(ids, signal);
   }
 
-  async append(event: PawFeelDispositionEvent, expectedSequence: number): Promise<PawFeelDispositionAppendResult> {
+  async append(
+    event: PawFeelDispositionEvent,
+    expectedSequence: number,
+    assignment?: PawFeelAssignmentAppendFence,
+  ): Promise<PawFeelDispositionAppendResult> {
     requireSequence(expectedSequence, 'expectedSequence');
     const validated = parsePawFeelDispositionEvent(event);
-    const result = (await this.redis.eval(
-      APPEND_LUA,
-      3,
+    const keys = [
       PawFeelDispositionKeys.eventLog(validated.signalId),
       PawFeelDispositionKeys.eventsSeen,
       PawFeelDispositionKeys.signals,
+    ];
+    if (assignment) keys.push(TaskKeys.detail(assignment.taskId));
+    const result = (await this.redis.eval(
+      APPEND_LUA,
+      keys.length,
+      ...keys,
       validated.eventId,
       expectedSequence.toString(),
       JSON.stringify(validated),
       validated.signalId,
+      JSON.stringify(assignment ?? null),
     )) as [number, number];
+    if (result[0] === -2) throw new Error('repair Task assignment changed at event append');
 
     if (result[0] === 0) return { outcome: 'duplicate' };
     if (result[0] === -1) return { outcome: 'conflict', actualSequence: result[1] };

@@ -12,7 +12,7 @@ import type {
   CoCreatorConfig,
   VoiceConfig,
 } from '@cat-cafe/shared';
-import { createCatId } from '@cat-cafe/shared';
+import { backgroundImageUrlSchema, createCatId } from '@cat-cafe/shared';
 import { saveSpan } from '../utils/member-save-diagnostics.js';
 import { clearBudgetCache } from './cat-budgets.js';
 import { bootstrapCatCatalog, readCatCatalog, resolveCatCatalogPath } from './cat-catalog-store.js';
@@ -86,6 +86,7 @@ export interface RuntimeCatInput {
   variantLabel?: string;
   nickname?: string;
   avatar: string;
+  banner?: string;
   color: CatColor;
   mentionPatterns: string[];
   accountRef?: string;
@@ -124,6 +125,7 @@ export interface RuntimeCatUpdate {
   variantLabel?: string | null;
   nickname?: string;
   avatar?: string;
+  banner?: string | null;
   color?: CatColor;
   mentionPatterns?: string[];
   accountRef?: string | null;
@@ -332,6 +334,7 @@ function createBreedFromInput(input: RuntimeCatInput): CatBreed {
     variants: [
       {
         id: variantId,
+        ...(input.banner ? { banner: input.banner } : {}),
         clientId: input.clientId,
         ...(input.creationReceipt ? { creationReceipt: input.creationReceipt } : {}),
         ...(input.configurationSource ? { configurationSource: input.configurationSource } : {}),
@@ -463,6 +466,7 @@ function bindRuntimeLocalAccounts(
 }
 
 export function createRuntimeCat(projectRoot: string, input: RuntimeCatInput): CatCafeConfig {
+  if (input.banner !== undefined) backgroundImageUrlSchema.parse(input.banner);
   const catalog = cloneCatalog(readOrBootstrapCatalog(projectRoot));
   if (findBreedVariant(catalog as unknown as CatCafeConfig, input.catId)) {
     throw new Error(`Cat "${input.catId}" already exists in runtime catalog`);
@@ -506,6 +510,7 @@ export function createRuntimeCat(projectRoot: string, input: RuntimeCatInput): C
 }
 
 export function updateRuntimeCat(projectRoot: string, catId: string, patch: RuntimeCatUpdate): CatCafeConfig {
+  if (patch.banner != null) backgroundImageUrlSchema.parse(patch.banner);
   const catalog = cloneCatalog(readOrBootstrapCatalog(projectRoot));
   const previous = {
     cat: toAllCatConfigs(catalog as unknown as CatCafeConfig)[catId],
@@ -588,6 +593,11 @@ export function updateRuntimeCat(projectRoot: string, catId: string, patch: Runt
     } else {
       variant.avatar = patch.avatar;
     }
+  }
+
+  if (patch.banner !== undefined) {
+    // Null is a durable removal, including a value inherited from the shipped template.
+    variant.banner = patch.banner;
   }
 
   if (patch.color !== undefined) {

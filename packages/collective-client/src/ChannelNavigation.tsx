@@ -115,7 +115,7 @@ export function ChannelNavigation({
               </button>
             </nav>
           )}
-          <nav className="destination-list destination-global-list member-destination" aria-label={t('共同家园成员')}>
+          <nav className="destination-list destination-global-list member-destination" aria-label={t('成员')}>
             <button type="button" className="destination-item" onClick={onMembers}>
               <span className="destination-symbol">
                 <CollectiveIcon kind="members" />

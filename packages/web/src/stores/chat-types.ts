@@ -18,6 +18,7 @@ import type {
   QueueAuthorIntentReceipt,
   QueueRecoveryAction,
   ReplyPreview,
+  RichBlock,
   SchedulerMessageExtra,
   ThreadArtifactDTO,
   TurnExecutionMessageProjection,
@@ -123,155 +124,22 @@ export interface ToolEvent {
   timestamp: number;
 }
 
-/** F22: Rich block types for frontend rendering */
-export type RichBlockKind =
-  | 'card'
-  | 'diff'
-  | 'checklist'
-  | 'media_gallery'
-  | 'audio'
-  | 'interactive'
-  | 'html_widget'
-  | 'file';
-
-/** F066 Phase 4: Card action button */
-export interface CardAction {
-  label: string;
-  action: string;
-  payload?: Record<string, unknown>;
-}
-
-export interface RichCardBlock {
-  id: string;
-  kind: 'card';
-  v: 1;
-  title: string;
-  bodyMarkdown?: string;
-  tone?: 'info' | 'success' | 'warning' | 'danger';
-  fields?: Array<{ label: string; value: string }>;
-  /** F066 Phase 4: Optional action buttons */
-  actions?: CardAction[];
-  /** F174 D2b-1: opaque metadata for sub-renderer detection (e.g. callback_auth_failure) */
-  meta?: Record<string, unknown>;
-}
-
-export interface RichDiffBlock {
-  id: string;
-  kind: 'diff';
-  v: 1;
-  filePath: string;
-  diff: string;
-  languageHint?: string;
-}
-
-export interface RichChecklistBlock {
-  id: string;
-  kind: 'checklist';
-  v: 1;
-  title?: string;
-  items: Array<{ id: string; text: string; checked?: boolean }>;
-}
-
-export interface RichMediaGalleryBlock {
-  id: string;
-  kind: 'media_gallery';
-  v: 1;
-  title?: string;
-  items: Array<{ url: string; alt?: string; caption?: string }>;
-}
-
-/** F34: Audio block for TTS playback.
- *  F34-b: `text` = voice message (cat "spoke" it). */
-export interface RichAudioBlock {
-  id: string;
-  kind: 'audio';
-  v: 1;
-  url: string;
-  /** F34-b: Voice message text. Present = voice message style. */
-  text?: string;
-  title?: string;
-  durationSec?: number;
-  mimeType?: string;
-}
-
-/** F155: Direct action for interactive options that bypass the chat message pipeline */
-export interface OptionAction {
-  type: 'callback';
-  endpoint: string;
-  payload?: Record<string, unknown>;
-}
-
-/** F096: Interactive block option */
-export interface InteractiveOption {
-  id: string;
-  label: string;
-  emoji?: string;
-  /** SVG icon name from the café icon set — preferred over emoji */
-  icon?: string;
-  description?: string;
-  level?: number;
-  group?: string;
-  /** When true, selecting this option shows a text input for custom user input */
-  customInput?: boolean;
-  /** Placeholder text for the custom input field */
-  customInputPlaceholder?: string;
-  /** F155: When present, clicking calls the endpoint directly instead of sending a chat message */
-  action?: OptionAction;
-}
-
-/** F096: Interactive rich block — user can select/confirm within the block */
-export interface RichInteractiveBlock {
-  id: string;
-  kind: 'interactive';
-  v: 1;
-  interactiveType: 'select' | 'multi-select' | 'card-grid' | 'confirm';
-  title?: string;
-  description?: string;
-  options: InteractiveOption[];
-  maxSelect?: number;
-  allowRandom?: boolean;
-  messageTemplate?: string;
-  disabled?: boolean;
-  selectedIds?: string[];
-  /** Set false when adjacent blocks belong to separate producer items and must submit independently. */
-  autoGroup?: boolean;
-  /** Phase C: blocks sharing the same groupId are submitted together */
-  groupId?: string;
-}
-
-/** F088 Phase J: File attachment block */
-export interface RichFileBlock {
-  id: string;
-  kind: 'file';
-  v: 1;
-  url: string;
-  fileName: string;
-  mimeType?: string;
-  fileSize?: number;
-}
-
-/** F120 Phase C: Inline HTML/JS widget rendered in sandboxed iframe (srcdoc) */
-export interface RichHtmlWidgetBlock {
-  id: string;
-  kind: 'html_widget';
-  v: 1;
-  /** Complete HTML document or fragment to render */
-  html: string;
-  /** Optional title displayed above the widget */
-  title?: string;
-  /** iframe height in px (default: 300) */
-  height?: number;
-}
-
-export type RichBlock =
-  | RichCardBlock
-  | RichDiffBlock
-  | RichChecklistBlock
-  | RichMediaGalleryBlock
-  | RichAudioBlock
-  | RichInteractiveBlock
-  | RichHtmlWidgetBlock
-  | RichFileBlock;
+/** F22 presentation types come from the same language used by every consumer. */
+export type {
+  CardAction,
+  InteractiveOption,
+  OptionAction,
+  RichAudioBlock,
+  RichBlock,
+  RichBlockKind,
+  RichCardBlock,
+  RichChecklistBlock,
+  RichDiffBlock,
+  RichFileBlock,
+  RichHtmlWidgetBlock,
+  RichInteractiveBlock,
+  RichMediaGalleryBlock,
+} from '@cat-cafe/shared';
 
 /** F97: External connector source info (only when type='connector') */
 export interface ConnectorSourceData {
@@ -452,6 +320,7 @@ export interface ChatMessage {
       evidence?: string;
       updatedAt: number;
     };
+    startupRecovery?: import('@cat-cafe/shared').CodexStartupRecovery;
   };
   /** F045: Extended thinking content, rendered as collapsible block inside assistant bubble */
   thinking?: string;

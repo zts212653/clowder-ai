@@ -23,7 +23,7 @@ export function assertClaudeSettingsPreserved(actual, expected = claudeUserSetti
   for (const event of ['PreToolUse', 'PostToolUse']) {
     assert.deepEqual(hooks[event].slice(0, -1), expectedHooks[event], `preserve the user ${event} hooks`);
     const managed = hooks[event].at(-1);
-    assert.equal(managed.matcher, '.*', `host ${event} must cover every tool`);
+    assert.equal(managed.matcher, 'Bash', `host ${event} must cover the native shell`);
     assert.equal(managed.hooks.length, 1);
     assert.equal(managed.hooks[0].type, 'command');
     assert.match(managed.hooks[0].command, /secret-native-hook\.mjs/);

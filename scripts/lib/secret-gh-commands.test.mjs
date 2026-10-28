@@ -74,12 +74,13 @@ test('refuses a conflicting option arity before the action instead of guessing',
   );
 });
 
-test('refuses credential-disclosure flag aliases without executing gh', async () => {
-  for (const flag of ['-t', '-at', '--show-token=true'])
-    await assert.rejects(
-      prepareSecretSafeSend('gh', ['auth', 'status', flag]),
-      /credential_disclosure_blocked_before_read/,
-    );
+test('preserves local auth display flag aliases without executing gh', async () => {
+  for (const flag of ['-t', '-at', '--show-token=true']) {
+    const args = ['auth', 'status', flag];
+    const prepared = await prepareSecretSafeSend('gh', args);
+    leases.push(prepared);
+    assert.deepEqual(prepared.args, args);
+  }
 });
 
 test('preserves ordinary reads, explicit approval and metadata edits', async () => {

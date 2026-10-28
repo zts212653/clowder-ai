@@ -169,21 +169,20 @@ describe('worktree-reaper end to end', () => {
     assert.ok(e.idleDays >= 0);
   });
 
-  it('gates creation at exactly the cap and validates CLI flags', () => {
+  it('allows creation at an advisory count and still validates lifecycle flags', () => {
     const { count } = checkCapacity({ repo: fx.repo, max: 40 });
     assert.equal(checkCapacity({ repo: fx.repo, max: count }).over, true);
-    assert.throws(
-      () =>
-        createWorktree({
-          repo: fx.repo,
-          path: join(fx.parent, 'cat-cafe-over'),
-          owner: 'x',
-          policy: 'merged',
-          max: count,
-        }),
-      /capacity/,
+    assert.doesNotThrow(() =>
+      createWorktree({
+        repo: fx.repo,
+        path: join(fx.parent, 'cat-cafe-over'),
+        owner: 'x',
+        policy: 'merged',
+        max: count,
+      }),
     );
-    assert.equal(existsSync(join(fx.parent, 'cat-cafe-over')), false);
+    assert.equal(existsSync(join(fx.parent, 'cat-cafe-over')), true);
+    git(fx.repo, 'worktree', 'remove', join(fx.parent, 'cat-cafe-over'));
     for (const bad of [['--min-idle-days', '0'], ['--quarantine-days', '1'], ['--max', '0'], ['--max']]) {
       assert.throws(() => parsePolicyArgs(bad), /invalid/, bad.join(' '));
     }

@@ -2,7 +2,7 @@
 
 import { AppTooltip } from '@/components/AppTooltip';
 import { useMeasuredOverflow } from '@/components/content-overflow/useMeasuredOverflow';
-import { MemoryBookStarIcon, ShellGlyph } from '@/components/shell/ShellIcons';
+import { MemoryBookStarIcon, ShellGlyph, YarnBallIcon } from '@/components/shell/ShellIcons';
 import { useShellCopy } from '@/components/shell/shell-copy';
 import { HOME_ROWS } from '@/components/workspace-home/home-rows';
 import type { F307WorkbenchTabsProps } from './F307WorkbenchTabs';
@@ -14,6 +14,7 @@ function WorkbenchTabIcon({ surface }: { surface: WorkspaceSurfaceDescriptor }) 
   const destination = resolveWorkspaceDestinationTarget(surface);
   const toolIcon = HOME_ROWS.find((row) => row.id === destination?.destinationRef)?.icon;
   const iconClassName = 'ml-1 h-3 w-3 shrink-0';
+  if (toolIcon === 'yarnBall') return <YarnBallIcon className={iconClassName} />;
   if (toolIcon === 'memory') return <MemoryBookStarIcon className={iconClassName} />;
   if (toolIcon) return <ShellGlyph name={toolIcon} className={iconClassName} />;
   const paths =

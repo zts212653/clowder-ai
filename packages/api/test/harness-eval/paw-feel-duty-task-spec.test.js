@@ -223,7 +223,7 @@ describe('F278 paw-feel duty task', () => {
     assert.equal(invoked[0].targetCatId, 'codex-sol');
     assert.match(invoked[0].content, /1 review bundle\(s\) \/ 2 raw signal\(s\)/i);
     assert.match(invoked[0].content, /10\/20\/50-item slices are execution limits, not a terminal condition/i);
-    assert.match(invoked[0].content, /real task \+ named owner \+ active F167 lease/i);
+    assert.match(invoked[0].content, /real task \+ named owner \+ verified current repairBinding/i);
     assert.ok(
       invoked[0].content.includes(`durable proposal awaiting ${getCoCreatorConfig().nickname ?? 'operator'} approval`),
     );

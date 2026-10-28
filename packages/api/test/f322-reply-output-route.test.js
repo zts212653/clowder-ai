@@ -291,45 +291,108 @@ for (const [name, route] of [
     assert.deepEqual(live.filter((event) => event.type === 'done').at(-1).extra.outputLayout, layout);
   });
 
-  test(`${name}: native deltas keep incremental frames and the existing draft write throttle`, async (t) => {
-    t.mock.method(Date, 'now', () => 1_800_000_000_000);
-    const { deps, records, drafts, live } = fixture();
-    const answer = '字'.repeat(200);
-    deps.services.codex.invoke = async function* () {
-      const state = { hadPriorTextTurn: false };
-      for (const delta of answer) {
+  for (const toolAfter of ['first delta', 'all deltas'])
+    test(`${name}: signature removal after an interleaved tool preserves one answer (${toolAfter})`, async () => {
+      const { deps, records, live } = fixture();
+      const signature = '[Sol/gpt-6.1-sol🐾]';
+      const body = '结论一\n\n结论二';
+      deps.services.codex.invoke = async function* () {
+        const state = { hadPriorTextTurn: false, signatureIdentity: 'Sol', canonicalSignature: signature };
+        for (const [index, delta] of ['结论一', `\n\n结论二\n\n${signature}`].entries()) {
+          yield transformCodexEvent(
+            { type: 'item.agent_message.delta', thread_id: 'native', turn_id: 'turn', item_id: 'answer', delta },
+            'codex',
+            state,
+          );
+          if ((toolAfter === 'first delta' && index === 0) || (toolAfter === 'all deltas' && index === 1))
+            yield {
+              type: 'tool_result',
+              catId: 'codex',
+              toolUseId: 'pending-build',
+              content: 'ok',
+              timestamp: Date.now(),
+            };
+        }
         yield transformCodexEvent(
-          { type: 'item.agent_message.delta', thread_id: 'native', turn_id: 'turn', item_id: 'answer', delta },
+          {
+            type: 'item.completed',
+            thread_id: 'native',
+            turn_id: 'turn',
+            item: { type: 'agent_message', id: 'answer', phase: 'final_answer', text: `${body}\n\n${signature}` },
+          },
           'codex',
           state,
         );
-      }
-      yield transformCodexEvent(
-        {
-          type: 'item.completed',
-          thread_id: 'native',
-          turn_id: 'turn',
-          item: { type: 'agent_message', id: 'answer', phase: 'final_answer', text: answer },
-        },
-        'codex',
-        state,
+        transformCodexEvent({ type: 'turn.completed', usage: {} }, 'codex', state);
+        const suffix = finalizeCodexStream(state, 'codex');
+        assert.ok(suffix);
+        yield suffix;
+        yield { type: 'done', catId: 'codex', timestamp: Date.now() };
+      };
+      for await (const event of route(deps, ['codex'], 'hello', 'user-test', 'thread-test')) live.push(event);
+      const stored = records.find((record) => record.catId === 'codex' && record.origin === 'stream');
+      assert.equal(stored.content, `${body}\n\n${signature}`);
+      assert.equal(stored.content.split('结论二').length - 1, 1);
+      assert.equal(stored.content.split(signature).length - 1, 1);
+      assert.equal(stored.extra.outputLayout.status, 'available');
+    });
+
+  for (const interleaved of [false, true])
+    test(`${name}: native deltas keep incremental frames and draft throttling (${interleaved ? 'interleaved tool result' : 'text only'})`, async (t) => {
+      t.mock.method(Date, 'now', () => 1_800_000_000_000);
+      const { deps, records, drafts, live } = fixture();
+      const answer = '字'.repeat(200);
+      deps.services.codex.invoke = async function* () {
+        const state = { hadPriorTextTurn: false };
+        if (interleaved)
+          yield {
+            type: 'tool_use',
+            catId: 'codex',
+            toolName: 'build',
+            toolUseId: 'pending-build',
+            timestamp: Date.now(),
+          };
+        for (const [index, delta] of Array.from(answer).entries()) {
+          yield transformCodexEvent(
+            { type: 'item.agent_message.delta', thread_id: 'native', turn_id: 'turn', item_id: 'answer', delta },
+            'codex',
+            state,
+          );
+          if (interleaved && index === 0)
+            yield {
+              type: 'tool_result',
+              catId: 'codex',
+              toolUseId: 'pending-build',
+              content: 'ok',
+              timestamp: Date.now(),
+            };
+        }
+        yield transformCodexEvent(
+          {
+            type: 'item.completed',
+            thread_id: 'native',
+            turn_id: 'turn',
+            item: { type: 'agent_message', id: 'answer', phase: 'final_answer', text: answer },
+          },
+          'codex',
+          state,
+        );
+        yield { type: 'done', catId: 'codex', timestamp: Date.now() };
+      };
+      for await (const event of route(deps, ['codex'], 'hello', 'user-test', 'thread-test')) live.push(event);
+      const texts = live.filter((event) => event.type === 'text');
+      assert.equal(texts.filter((event) => event.textMode === 'replace').length, 1);
+      assert.equal(texts.filter((event) => event.textMode === 'append').length, 200);
+      assert.equal(
+        texts.reduce((size, event) => size + event.content.length, 0),
+        400,
       );
-      yield { type: 'done', catId: 'codex', timestamp: Date.now() };
-    };
-    for await (const event of route(deps, ['codex'], 'hello', 'user-test', 'thread-test')) live.push(event);
-    const texts = live.filter((event) => event.type === 'text');
-    assert.equal(texts.filter((event) => event.textMode === 'replace').length, 1);
-    assert.equal(texts.filter((event) => event.textMode === 'append').length, 200);
-    assert.equal(
-      texts.reduce((size, event) => size + event.content.length, 0),
-      400,
-    );
-    assert.equal(drafts.length, 2, 'first delta and completed snapshot, not one write per token');
-    assert.equal(drafts.at(-1).content, answer);
-    const stored = records.find((record) => record.catId === 'codex' && record.origin === 'stream');
-    assert.equal(stored.content, answer);
-    assert.equal(stored.extra.outputLayout.status, 'available');
-  });
+      assert.equal(drafts.length, 2, 'first delta and completed snapshot, not one write per token');
+      assert.equal(drafts.at(-1).content, answer);
+      const stored = records.find((record) => record.catId === 'codex' && record.origin === 'stream');
+      assert.equal(stored.content, answer);
+      assert.equal(stored.extra.outputLayout.status, 'available');
+    });
 }
 
 for (const [name, route] of [

@@ -132,13 +132,21 @@ test('MCP-only OpenCode projection preserves existing provider routing, aliases 
 });
 
 test('the existing iCode HTTP overlay keeps shared principals in the scoped gateway', () => {
-  const base = [{ name: 'cat-cafe-memory', command: 'node', args: [], env: [] }];
+  const base = [
+    { name: 'cat-cafe-memory', command: process.execPath, args: [resolve('../mcp-server/dist/memory.js')], env: [] },
+  ];
   const callback = {
     CAT_CAFE_API_URL: 'http://127.0.0.1:3102',
     CAT_CAFE_INVOCATION_ID: 'fixture-A',
     CAT_CAFE_CALLBACK_TOKEN: 'fixture-token-A',
     CAT_CAFE_MCP_TRANSPORT: 'shared',
   };
+  const foreign = materializeIcodeSessionMcpServers(
+    [{ name: 'cat-cafe-memory', command: 'foreign', args: [], env: [] }],
+    callback,
+  );
+  assert.deepEqual(foreign.gatewayRouted, []);
+  assert.deepEqual(foreign.droppedStdio, ['cat-cafe-memory']);
   const { servers } = materializeIcodeSessionMcpServers(base, callback);
   assert.equal(new URL(servers[0].url).searchParams.get('shared'), '1');
   assert.ok(servers[0].headers.some((header) => header.name === 'x-mcp-connection-id' && header.value));

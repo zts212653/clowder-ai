@@ -52,7 +52,6 @@ const fileProps: WorkspaceFileViewerProps = {
   onToggleHtmlPreview: () => record('html'),
   onToggleJsxPreview: () => record('jsx'),
   onSave: async () => undefined,
-  revealInFinder: () => record('finder'),
 };
 
 function MenuPage() {

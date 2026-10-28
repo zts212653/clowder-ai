@@ -85,7 +85,7 @@ const savedRevision = () => {
     : 'no file quote';
 };
 
-it('a card opened on words of one revision does not outlive it, so nothing is saved from it under the next', async () => {
+it('a card opened on old words keeps its comment and stamps the old revision after a refresh', async () => {
   await render(OLD);
   await act(async () =>
     document.querySelector<HTMLButtonElement>('[data-testid="workspace-content-review-text-add-to-chat"]')?.click(),
@@ -94,8 +94,9 @@ it('a card opened on words of one revision does not outlive it, so nothing is sa
   // Browser focus clears the live selection; the card keeps its own copy of it.
   selection.current = null;
   await render(NEW);
-  expect(editor()).toBeNull();
-  expect(useChatStore.getState().pendingChatInsert).toBeNull();
+  expect(editor()).not.toBeNull();
+  await saveWords('仍然是在说旧版这一句');
+  expect(savedRevision()).toBe(OLD);
 });
 
 it('saves the revision on screen for words selected and saved under it', async () => {

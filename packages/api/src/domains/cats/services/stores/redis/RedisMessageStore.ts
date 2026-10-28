@@ -49,7 +49,11 @@ import {
 
 import { isDeepStrictEqual } from 'node:util';
 import type { CatId, CustodyOfferV1, LifecycleStoredMessageMetadata } from '@cat-cafe/shared';
-import { custodyOfferV1Schema, isLifecycleStoredMessageMetadata } from '@cat-cafe/shared';
+import {
+  custodyOfferV1Schema,
+  isLifecycleStoredMessageMetadata,
+  messageSearchAnswerBindingSchema,
+} from '@cat-cafe/shared';
 import type { RedisClient } from '@cat-cafe/shared/utils';
 import { createModuleLogger } from '../../../../../infrastructure/logger.js';
 import {
@@ -74,6 +78,11 @@ import { cursorFor, parseCursor } from '../cursor.js';
 import type { LifecycleAppendRecoveryInput, LifecycleAppendRecoveryResult } from '../lifecycle-append-recovery.js';
 import type { LifecycleWakeCoverageInput, LifecycleWakeCoverageResult } from '../lifecycle-wake-coverage.js';
 import { messageFrom } from '../message-from.js';
+import {
+  ATTACH_MESSAGE_SEARCH_ANSWER_LUA,
+  type MessageSearchAnswerAttachment,
+  messageSearchAnswerBlock,
+} from '../message-search-answer-binding.js';
 import { notifyMessageTimelineChange } from '../notify-message-timeline-change.js';
 import type {
   AdvanceLifecycleInputDispatchResult,
@@ -1009,7 +1018,21 @@ return redis.call('HGETALL', KEYS[1])
 const UPDATE_EXTRA_IF_NOT_RECALLED_LUA = `
 if redis.call('EXISTS', KEYS[1]) == 0 then return 0 end
 if redis.call('HGET', KEYS[1], 'recall') or redis.call('HGET', KEYS[1], '_tombstone') then return 0 end
-redis.call('HSET', KEYS[1], 'extra', ARGV[1])
+local extra=cjson.decode(ARGV[1])
+local currentRaw=redis.call('HGET',KEYS[1],'extra')
+local current={}
+if currentRaw and currentRaw ~= '' then current=cjson.decode(currentRaw) end
+extra.messageSearchAnswer=current.messageSearchAnswer
+if current.messageSearchAnswer then
+  local binding=current.messageSearchAnswer
+  local blocks={}
+  if extra.rich and extra.rich.blocks then
+    for _,block in ipairs(extra.rich.blocks) do if block.id ~= binding.blockId then table.insert(blocks,block) end end
+  end
+  table.insert(blocks,{kind='card',v=1,id=binding.blockId,title='',meta={domain='message-search-answer',publicationRef=binding.publicationRef}})
+  extra.rich={v=1,blocks=blocks}
+end
+redis.call('HSET', KEYS[1], 'extra', cjson.encode(extra))
 if ARGV[2] ~= '' then redis.call('HSETNX', KEYS[1], 'pluginMessage', ARGV[2]) end
 return 1
 `;
@@ -3619,11 +3642,31 @@ export class RedisMessageStore {
       : null;
   }
 
+  async attachMessageSearchAnswer(id: string, input: MessageSearchAnswerAttachment): Promise<StoredMessage | null> {
+    const parsed = messageSearchAnswerBindingSchema.safeParse(input.binding);
+    if (!parsed.success) return null;
+    const changed = await this.redis.eval(
+      ATTACH_MESSAGE_SEARCH_ANSWER_LUA,
+      1,
+      MessageKeys.detail(id),
+      input.ownerUserId,
+      input.threadId,
+      input.catId,
+      JSON.stringify(parsed.data),
+      JSON.stringify(messageSearchAnswerBlock(parsed.data)),
+    );
+    if (Number(changed) !== 1) return null;
+    const result = await this.getById(id);
+    if (result) notifyMessageTimelineChange(this, result);
+    return result;
+  }
+
   async updateExtra(id: string, extra: HostMessageExtra): Promise<StoredMessage | null> {
     const msg = await this.getById(id);
     if (!msg) return null;
     const { hostExtra: current, pluginMessage } = splitMessageExtra(msg.extra);
     const {
+      messageSearchAnswer: _stripAnswer,
       pluginMessage: _stripPlugin,
       custodyOfferV1: _stripCustody,
       entrustedWorkHumanTerminalReceiptV1: _stripEntrustedWorkTerminal,

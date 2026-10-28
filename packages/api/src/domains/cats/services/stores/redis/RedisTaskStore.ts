@@ -34,6 +34,7 @@ import {
 } from '../../../../ball-custody/TypedWaitRegistration.js';
 import type { DevelopmentWorkTransition } from '../ports/DevelopmentWorkTransition.js';
 import type { AttachEntrustedWorkArtifactInput } from '../ports/EntrustedWorkArtifactEvidence.js';
+import { advanceOrdinaryTaskAssignment, type OrdinaryTaskMutation } from '../ports/OrdinaryTaskMutation.js';
 import { automationGeneration, mergeTaskAutomationState } from '../ports/TaskAutomationState.js';
 import type { EntrustedTaskDataControllerTransition } from '../ports/TaskDataControllerTransition.js';
 import { reconcileDeploymentWaitTaskMutation } from '../ports/TaskDeploymentWaitState.js';
@@ -62,6 +63,7 @@ import { buildSubjectTaskUpdate } from '../ports/TaskSubjectUpsert.js';
 import { buildTaskWaitReplacement } from '../ports/TaskWaitReplacement.js';
 import { TaskKeys } from '../redis-keys/task-keys.js';
 import { DEPLOYMENT_WAIT_INDEX, listDeploymentWaitProjectionCandidates } from './deployment-wait-index.js';
+import { mutateOrdinaryRedisTask } from './RedisOrdinaryTaskMutation.js';
 import { hydrateTask, hydrateWaitRegistration, serializeTask } from './RedisTaskCodec.js';
 import { fetchRedisTasksByIds, readRedisTaskThreadPage } from './RedisTaskCollectionReader.js';
 import { RedisTaskDataControllerStore } from './RedisTaskDataControllerStore.js';
@@ -89,6 +91,11 @@ const MAX_ANCHOR_LIFETIME_RECONCILIATION_RETRIES = 5;
 const MAX_UNIQUE_SUBJECT_CREATE_RETRIES = 8;
 
 export class RedisTaskStore implements ITaskStore {
+  async mutateOrdinaryTask(command: OrdinaryTaskMutation, writeFence?: TaskMutationWriteFence) {
+    const result = await mutateOrdinaryRedisTask(this.redis, command, writeFence);
+    if (result.kind === 'updated') await this.applyTtl(result.task);
+    return result;
+  }
   async replacePluginWait(taskId: string, input: ReplacePluginWaitInput): Promise<TaskItem | null> {
     return replacePluginWait(this.redis, taskId, input);
   }
@@ -542,23 +549,30 @@ export class RedisTaskStore implements ITaskStore {
 
   private applyTaskUpdate(existing: TaskItem, input: UpdateTaskInput): TaskItem {
     assertEntrustedWorkGenericUpdateAllowed(existing);
-    return reconcilePluginWaitTaskMutation(
+    return advanceOrdinaryTaskAssignment(
       existing,
-      reconcileDeploymentWaitTaskMutation(existing, {
-        ...existing,
-        ...(input.title !== undefined ? { title: input.title } : {}),
-        ...(input.ownerCatId !== undefined ? { ownerCatId: input.ownerCatId } : {}),
-        ...(input.status !== undefined ? { status: input.status } : {}),
-        ...(input.why !== undefined ? { why: input.why } : {}),
-        ...(input.automationState !== undefined ? { automationState: input.automationState } : {}),
-        ...(input.probe !== undefined ? { probe: input.probe } : {}),
-        ...(input.resolveMode !== undefined ? { resolveMode: input.resolveMode } : {}),
-        // Generic task move support: callers that change threadId own the UX contract.
-        ...(input.threadId !== undefined ? { threadId: input.threadId } : {}),
-        // F193-E1 P1-4: allow patching dispatchGate
-        ...(input.dispatchGate !== undefined ? { dispatchGate: input.dispatchGate } : {}),
-        updatedAt: Date.now(),
-      }),
+      reconcilePluginWaitTaskMutation(
+        existing,
+        reconcileDeploymentWaitTaskMutation(
+          existing,
+          {
+            ...existing,
+            ...(input.title !== undefined ? { title: input.title } : {}),
+            ...(input.ownerCatId !== undefined ? { ownerCatId: input.ownerCatId } : {}),
+            ...(input.status !== undefined ? { status: input.status } : {}),
+            ...(input.why !== undefined ? { why: input.why } : {}),
+            ...(input.automationState !== undefined ? { automationState: input.automationState } : {}),
+            ...(input.probe !== undefined ? { probe: input.probe } : {}),
+            ...(input.resolveMode !== undefined ? { resolveMode: input.resolveMode } : {}),
+            // Generic task move support: callers that change threadId own the UX contract.
+            ...(input.threadId !== undefined ? { threadId: input.threadId } : {}),
+            // F193-E1 P1-4: allow patching dispatchGate
+            ...(input.dispatchGate !== undefined ? { dispatchGate: input.dispatchGate } : {}),
+            updatedAt: Date.now(),
+          },
+          { statusIsExplicit: input.status !== undefined },
+        ),
+      ),
     );
   }
 

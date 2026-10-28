@@ -3,13 +3,11 @@ import type { ReactNode } from 'react';
 import { resolveShellCopy, useShellCopy } from '@/components/shell/shell-copy';
 import { readShellLanguage } from '@/components/shell/shell-language';
 import { workspaceChromeCopy } from '@/components/workbench/workspace-chrome.shell-copy';
-import { ChatFileActions } from '../chat-references/ChatFileActions';
+import { FileToolbar } from '../content-review/FileToolbar';
 import { FileIcon } from './FileIcons';
-import { V2WorkspaceMenu } from './V2WorkspaceMenu';
 import type { WorkspaceFileViewerProps } from './WorkspaceFileViewer.types';
 import { WorkspaceToolbarButton as Button } from './WorkspaceToolbarButton';
 import { workspaceFileCopy } from './workspace-file.shell-copy';
-import { workspaceFileReference } from './workspace-file-reference';
 
 export function fileReturnLabel(origin: WorkspaceFileViewerProps['navigationOrigin']): string {
   const t = resolveShellCopy(workspaceFileCopy, readShellLanguage());
@@ -80,7 +78,7 @@ export function V2WorkspaceFileChrome({
           disabled={p.editMode}
           title={p.editMode ? t.saveFirst : t.annotationTitle}
         >
-          {t.annotations}
+          {p.collaborationLabel ?? t.annotations}
           {p.annotationCount != null ? ` ${p.annotationCount}` : ''}
         </Button>
       )}
@@ -140,75 +138,45 @@ export function V2WorkspaceFileChrome({
           </div>
         </div>
       ) : null}
-      <div
-        role="toolbar"
-        aria-label={t.actions}
-        data-testid="workspace-file-toolbar"
-        data-v2-workspace-menu-boundary=""
-        className="flex h-10 min-w-0 items-center gap-2 border-b border-cafe-subtle bg-cafe-surface px-3"
-      >
-        <button
-          type="button"
-          onClick={p.onRevealInTree}
-          disabled={!p.onRevealInTree}
-          data-testid="v2-file-directory"
-          title={t.reveal}
-          className="min-w-0 flex-1 truncate text-left text-xs text-cafe-muted"
-        >
-          {p.nestedWork ? path.split('/').at(-1) || path : directory}
-        </button>
-        {!p.nestedWork ? (
-          <span className="shrink-0 text-micro text-cafe-muted">
-            {p.file.size < 1024 ? `${p.file.size}B` : `${Math.round(p.file.size / 1024)}KB`}
-          </span>
-        ) : null}
-        <span className={p.isHtml ? 'shrink-0' : 'v2-file-view-toggle shrink-0'}>{toggle}</span>
-        <span className={p.isHtml ? 'v2-html-secondary contents' : 'contents'}>{secondaryActions}</span>
-        <span className="v2-file-listen shrink-0">{listen}</span>
-        {p.nestedWork && p.onBack ? (
-          <button
-            type="button"
-            className="shrink-0 rounded border border-cafe-subtle px-2 py-1 text-xs"
-            data-testid="v2-file-back"
-            onClick={p.onBack}
-          >
-            {fileReturnLabel(p.navigationOrigin)}
-          </button>
-        ) : null}
-        <V2WorkspaceMenu
-          width={248}
-          trigger={t.more}
-          triggerProps={{
-            title: t.moreTitle,
-            className:
-              'cursor-pointer list-none rounded px-2 py-1 text-xs text-cafe-secondary hover:bg-cafe-surface-sunken',
-          }}
-          panelClassName="flex flex-col items-stretch gap-1 p-2"
-        >
-          {!p.isHtml && <span className="v2-file-menu-view">{toggle}</span>}
-          {p.isHtml && <span className="v2-html-menu-secondary flex-col gap-1">{secondaryActions}</span>}
-          <span className="v2-file-menu-listen">{listen}</span>
-          {p.isMarkdown && p.canEdit && (
-            <Button onClick={p.onToggleEdit} active={p.editMode} title={t.editTitle}>
-              {p.editMode ? t.editing : t.edit}
-            </Button>
-          )}
-          {cache}
-          <Button
-            onClick={() => void navigator.clipboard.writeText(p.file.content)}
-            title={p.file.truncated ? t.copyLoaded : t.copyAllTitle}
-          >
-            {p.file.truncated ? t.copyLoaded : t.copyContent}
-          </Button>
-          {p.worktreeId ? (
-            <ChatFileActions target={workspaceFileReference(p.file, p.worktreeId, p.currentWorktree?.root)} inline />
-          ) : null}
-          {p.navigationOrigin?.kind === 'chat-file-link' && p.onBack && (
-            <Button onClick={p.onBack} title={t.returnTitle(p.navigationOrigin.messageId)}>
-              {t.returnSource(p.navigationOrigin.messageId)}
-            </Button>
-          )}
-        </V2WorkspaceMenu>
+      <div data-testid="workspace-file-toolbar">
+        <FileToolbar
+          source={{ kind: 'workspace', worktreeId: p.worktreeId ?? '', path }}
+          filename={path}
+          mime={p.file.mime}
+          byteLength={p.file.size}
+          text={p.file.binary ? undefined : p.file.content}
+          readOnlyReason={!p.canEdit ? '此来源没有文件写入权限' : undefined}
+          leading={
+            p.onBack && p.nestedWork ? (
+              <Button onClick={p.onBack} title={t.returnTitle(path)}>
+                {fileReturnLabel(p.navigationOrigin)}
+              </Button>
+            ) : undefined
+          }
+          controls={
+            <>
+              <button
+                type="button"
+                data-testid="v2-file-directory"
+                onClick={p.onRevealInTree}
+                disabled={!p.onRevealInTree}
+                title={t.reveal}
+                className="shrink-0 rounded border border-cafe px-2 py-1 text-xs"
+              >
+                {directory}
+              </button>
+              {toggle}
+              {secondaryActions}
+              {listen}
+              {cache}
+              {p.isMarkdown && p.canEdit && (
+                <Button onClick={p.onToggleEdit} active={p.editMode} title={t.editTitle}>
+                  {p.editMode ? t.editing : t.edit}
+                </Button>
+              )}
+            </>
+          }
+        />
       </div>
     </div>
   );

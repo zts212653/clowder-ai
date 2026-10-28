@@ -56,7 +56,16 @@ export function CatProfileCard({
   return (
     <>
       <CatProfileCardOverlay anchor={anchor} label={copy.title(name)} suspended={imageOpen} onClose={onClose}>
-        <header className={styles.header} style={{ '--cat-card-surface': cat.color.secondary } as CSSProperties}>
+        <header
+          className={styles.header}
+          data-has-banner={!!cat.banner || undefined}
+          style={{ '--cat-card-surface': cat.color.secondary } as CSSProperties}
+        >
+          {cat.banner && (
+            <div className={styles.banner}>
+              <AvatarImageWithFallback src={cat.banner} alt="" className="h-full w-full object-cover" />
+            </div>
+          )}
           <button
             type="button"
             className={styles.avatar}

@@ -14,7 +14,7 @@ import { PawFeelDirectRepairError } from './direct-repair-errors.js';
 export interface PawFeelRepairTerminalTruth {
   ownerCatId: string;
   taskTerminalRef: OwnerTruthRefV1;
-  leaseTerminalRef: OwnerTruthRefV1;
+  leaseTerminalRef?: OwnerTruthRefV1;
 }
 
 export interface PawFeelRepairTerminalResolver {
@@ -90,7 +90,11 @@ export class PawFeelDirectRepairOutcomeResolver {
       !sameRef(outcome.bindingRef, binding.bindingRef) ||
       !sameRef(outcome.ownerOutcomeRef, ownerOutcomeRef) ||
       !sameRef(outcome.taskTerminalRef, terminal.taskTerminalRef) ||
-      !sameRef(outcome.leaseTerminalRef, terminal.leaseTerminalRef)
+      (outcome.leaseTerminalRef || terminal.leaseTerminalRef
+        ? !outcome.leaseTerminalRef ||
+          !terminal.leaseTerminalRef ||
+          !sameRef(outcome.leaseTerminalRef, terminal.leaseTerminalRef)
+        : false)
     ) {
       throw new PawFeelDirectRepairError(
         'outcome_invalid',
@@ -108,7 +112,7 @@ export class PawFeelDirectRepairOutcomeResolver {
     try {
       terminal = await this.options.terminalResolver.resolve(projection, binding);
       ownerTruthRefV1Schema.parse(terminal.taskTerminalRef);
-      ownerTruthRefV1Schema.parse(terminal.leaseTerminalRef);
+      if (terminal.leaseTerminalRef) ownerTruthRefV1Schema.parse(terminal.leaseTerminalRef);
     } catch (error) {
       throw new PawFeelDirectRepairError(
         'terminal_evidence_invalid',

@@ -20,7 +20,7 @@ export interface MailboxPersonalActions {
 
 type Undo = { owner: string; coordinates: UnifiedAttentionPreferenceCoordinate[]; source: PersonalActionSource };
 const sourceOf = (item: UnifiedAttentionItemV1): PersonalActionSource => {
-  if (item.collectiveAccountabilityRequest) return 'all';
+  if (item.collectiveAccountabilityRequest || item.collectiveProjectAttention) return 'all';
   if (item.kind === 'user_mention' && item.userMention) return 'mentions';
   if (item.runtimeInteraction || item.choiceRequest) return 'structuredChoices';
   if (item.approval) return 'approvals';

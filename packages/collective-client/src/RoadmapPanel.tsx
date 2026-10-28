@@ -9,9 +9,12 @@ import type { SharedArtifact } from './collective-artifact-client.js';
 import { type ProjectArtifactStatus, ProjectArtifactSurface } from './ProjectArtifactSurface.js';
 import { ProjectBoard } from './ProjectBoard.js';
 import { ProjectContextPanel } from './ProjectContextPanel.js';
+import { useProjectMaterials } from './ProjectMaterialsContext.js';
 import { ProjectPageToolbar, ProjectPanelSummary } from './ProjectPanelChrome.js';
 import { ProjectPlanTable } from './ProjectPlanTable.js';
 import { ProjectSuggestionActions, type ProjectSuggestionDecisionHandler } from './ProjectSuggestionActions.js';
+import type { ProjectTargetChangeHandler } from './ProjectTimeSummary.js';
+import { ProjectTriagePanel } from './ProjectTriagePanel.js';
 import { RoadmapProjection } from './RoadmapProjection.js';
 import { RoadmapWorkDetails } from './RoadmapWorkDetails.js';
 import {
@@ -21,7 +24,9 @@ import {
   visibleRoadmapWorks,
   worksForRoadmap,
 } from './roadmap-view-model.js';
+import { ShareMaterialDialog } from './ShareMaterialDialog.js';
 import type { ProjectTaskResponsibility } from './use-collective-collaboration.js';
+import type { WorkTimeChangeHandler } from './WorkTimeEditor.js';
 
 export function RoadmapPanel({
   roadmap,
@@ -38,6 +43,8 @@ export function RoadmapPanel({
   onViewChange,
   onOpenNavigation,
   onBack,
+  onChangeWorkTime,
+  onChangeProjectTarget,
   onSetDependencies,
   onSetStatus,
   onCreateTask,
@@ -63,6 +70,8 @@ export function RoadmapPanel({
   readonly onViewChange?: (view: RoadmapViewState) => void;
   readonly onOpenNavigation?: () => void;
   readonly onBack?: () => void;
+  readonly onChangeWorkTime?: WorkTimeChangeHandler;
+  readonly onChangeProjectTarget?: ProjectTargetChangeHandler;
   readonly onSetDependencies: (work: CollectiveWorkProjection, dependencyWorkIds: readonly string[]) => void;
   readonly onSetStatus: (roadmap: CollectiveRoadmapRecord, status: 'active' | 'completed') => void;
   readonly onCreateTask?: (
@@ -104,6 +113,8 @@ export function RoadmapPanel({
     if (!view) setInternalView(next);
     onViewChange?.(next);
   };
+  const materialFeed = useProjectMaterials(roadmap.roadmapId);
+  const [sharingMaterial, setSharingMaterial] = useState(false);
   const routeWorks = worksForRoadmap(roadmap, works);
   const visibleWorks = visibleRoadmapWorks(routeWorks, activeView, currentHumanId);
   const selectedWork = activeView.workId ? routeWorks.find((work) => work.workId === activeView.workId) : undefined;
@@ -112,7 +123,7 @@ export function RoadmapPanel({
       ...activeView,
       lens,
       presentation,
-      workId: lens === 'artifacts' ? undefined : activeView.workId,
+      workId: lens === 'artifacts' || lens === 'triage' ? undefined : activeView.workId,
       ...(lens === 'dependencies' || (lens === 'stage' && presentation === 'graph')
         ? { scope: 'all', relation: 'all' as const }
         : {}),
@@ -141,6 +152,11 @@ export function RoadmapPanel({
         onOpenNavigation={onOpenNavigation}
         onBack={onBack ?? (() => undefined)}
         onSetLens={setLens}
+        materialCount={materialFeed.feed.pendingCount}
+        hasMaterials={
+          materialFeed.feed.items.length + materialFeed.feed.unavailable.length > 0 || activeView.lens === 'triage'
+        }
+        onShareMaterial={materialFeed.client ? () => setSharingMaterial(true) : undefined}
         onCreateTask={onCreateTask}
       />
       <div className="project-page-body">
@@ -152,6 +168,7 @@ export function RoadmapPanel({
             humans={humans}
             humanNames={humanNames}
             canChangeStatus={canChangeStatus}
+            onChangeTarget={onChangeProjectTarget}
             onSetStatus={onSetStatus}
           />
           <ProjectSuggestionActions
@@ -184,7 +201,16 @@ export function RoadmapPanel({
               </ControlGroup>
             </div>
           )}
-          {activeView.lens === 'artifacts' ? (
+          {activeView.lens === 'triage' ? (
+            <ProjectTriagePanel
+              project={roadmap}
+              works={works}
+              currentHumanId={currentHumanId}
+              feed={materialFeed}
+              view={activeView}
+              onOpenWork={(workId) => updateView({ ...activeView, workId })}
+            />
+          ) : activeView.lens === 'artifacts' ? (
             <ProjectArtifactSurface
               roadmap={roadmap}
               works={routeWorks}
@@ -242,6 +268,7 @@ export function RoadmapPanel({
           )}
         </main>
         <ProjectContextPanel
+          materialFeed={materialFeed}
           roadmap={roadmap}
           works={routeWorks}
           availableWorks={works}
@@ -251,6 +278,7 @@ export function RoadmapPanel({
       </div>
       {selectedWork && (
         <RoadmapWorkDetails
+          materialFeed={materialFeed}
           work={selectedWork}
           roadmap={roadmap}
           allRoadmaps={allRoadmaps}
@@ -260,6 +288,7 @@ export function RoadmapPanel({
           humanNames={humanNames}
           humans={humans}
           participants={participants}
+          onChangeTime={onChangeWorkTime}
           canEditDependencies={roadmap.status === 'active'}
           onSetDependencies={onSetDependencies}
           onCommitWork={onCommitWork}
@@ -268,6 +297,17 @@ export function RoadmapPanel({
           onOpenSource={onOpenSource}
           onOpenResult={onOpenResult}
           onClose={() => updateView({ ...activeView, workId: undefined })}
+        />
+      )}
+      {sharingMaterial && materialFeed.client && (
+        <ShareMaterialDialog
+          project={roadmap}
+          client={materialFeed.client}
+          onClose={() => setSharingMaterial(false)}
+          onShared={async () => {
+            await materialFeed.reload();
+            updateView({ ...activeView, lens: 'triage', workId: undefined });
+          }}
         />
       )}
     </section>

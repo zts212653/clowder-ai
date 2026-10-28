@@ -421,7 +421,7 @@ describe('chatMessagesToTranscriptEvents', () => {
     expect(replayMessages[1]).toMatchObject({ type: 'user', content: '中途插一句。' });
   });
 
-  it('uses deliveredAt for projection ordering', () => {
+  it('keeps queued input at send time in replay after delivery', () => {
     const events = chatMessagesToTranscriptEvents(
       [
         message({
@@ -439,6 +439,7 @@ describe('chatMessagesToTranscriptEvents', () => {
           content: 'late delivered user message',
           timestamp: 1500,
           deliveredAt: 4000,
+          timelineOrderAt: 5000,
         }),
         message({
           id: 'other-cat',
@@ -461,14 +462,15 @@ describe('chatMessagesToTranscriptEvents', () => {
       cliStdout: 'stdout chunk 1',
     });
     expect(replayMessages[1]).toMatchObject({
+      type: 'user',
+      content: 'late delivered user message',
+      timestamp: 1500,
+    });
+    expect(replayMessages[2]).toMatchObject({
       type: 'assistant',
       catId: 'opus',
       content: 'another participant between chunks',
-    });
-    expect(replayMessages[2]).toMatchObject({
-      type: 'user',
-      content: 'late delivered user message',
-      timestamp: 4000,
+      timestamp: 2500,
     });
   });
 });

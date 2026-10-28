@@ -60,6 +60,7 @@ import {
   resolveMcpSchemaDeliveryDiscoverySurface,
   resolveMcpSchemaDeliveryForProviderLaunch,
 } from './mcp-schema-delivery-capability.js';
+import { writeInvocationMcpConfigFile } from './session-credential-file.js';
 
 const log = createModuleLogger('claude-agent');
 
@@ -369,7 +370,6 @@ export class ClaudeAgentService implements AgentService {
   /** F203: compiles per-cat L0 → file for --system-prompt-file. */
   private readonly l0CompilerFn: typeof compileL0ViaSubprocess;
   /** Windows: cached MCP config file path (created once per instance, reused across invocations) */
-  private mcpConfigFilePath: string | undefined;
   /** #780: Raw NDJSON archive for post-mortem diagnostics */
   private readonly rawArchive: RawArchiveSink;
 
@@ -525,16 +525,7 @@ export class ClaudeAgentService implements AgentService {
         // #712: Always pass --mcp-config + --strict-mcp-config in managed invocations.
         // --strict-mcp-config ensures only the merged config (capabilities.json +
         // user project .mcp.json) is active — no auto-discovered entries leak through.
-        if (IS_WINDOWS) {
-          if (!this.mcpConfigFilePath) {
-            const dir = mkdtempSync(join(tmpdir(), 'cat-cafe-mcp-'));
-            this.mcpConfigFilePath = join(dir, 'mcp-config.json');
-          }
-          writeFileSync(this.mcpConfigFilePath, JSON.stringify({ mcpServers }), 'utf-8');
-          args.push('--mcp-config', this.mcpConfigFilePath);
-        } else {
-          args.push('--mcp-config', JSON.stringify({ mcpServers }));
-        }
+        args.push('--mcp-config', writeInvocationMcpConfigFile({ mcpServers }, options?.callbackEnv));
         args.push('--strict-mcp-config');
         declaredMcpServerNames = Object.keys(mcpServers).sort();
       }

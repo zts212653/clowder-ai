@@ -18,6 +18,7 @@ import { ProjectBoard } from './ProjectBoard.js';
 import { ProjectList } from './ProjectList.js';
 import type { ProjectSuggestionDecisionHandler } from './ProjectSuggestionActions.js';
 import { NewWorkspaceTaskControl } from './ProjectTaskAuthoring.js';
+import type { ProjectTargetChangeHandler } from './ProjectTimeSummary.js';
 import { RoadmapPanel } from './RoadmapPanel.js';
 import { RoadmapProjection } from './RoadmapProjection.js';
 import {
@@ -28,6 +29,7 @@ import {
 } from './roadmap-view-model.js';
 import type { ProjectTaskResponsibility } from './use-collective-collaboration.js';
 import type { VoteDraft } from './VoteDraftForm.js';
+import type { WorkTimeChangeHandler } from './WorkTimeEditor.js';
 
 export function RoadmapWorkspace({
   roadmaps,
@@ -45,6 +47,8 @@ export function RoadmapWorkspace({
   onOpenSource,
   onOpenResult,
   onOpenArtifact,
+  onChangeWorkTime,
+  onChangeProjectTarget,
   onSetDependencies,
   onSetStatus,
   onCreateProject,
@@ -75,6 +79,8 @@ export function RoadmapWorkspace({
   readonly onOpenSource?: (work: CollectiveWorkProjection, view: RoadmapViewState) => void;
   readonly onOpenResult?: (work: CollectiveWorkProjection, view: RoadmapViewState) => void;
   readonly onOpenArtifact?: (artifact: SharedArtifact) => void;
+  readonly onChangeWorkTime?: WorkTimeChangeHandler;
+  readonly onChangeProjectTarget?: ProjectTargetChangeHandler;
   readonly onSetDependencies: (work: CollectiveWorkProjection, dependencyWorkIds: readonly string[]) => void;
   readonly onSetStatus: (roadmap: CollectiveRoadmapRecord, status: 'active' | 'completed') => void;
   readonly onCreateProject?: (channelId: string, title: string, purpose: string) => Promise<void>;
@@ -159,6 +165,8 @@ export function RoadmapWorkspace({
           onOpenSource={onOpenSource}
           onOpenResult={onOpenResult}
           onOpenArtifact={onOpenArtifact}
+          onChangeWorkTime={onChangeWorkTime}
+          onChangeProjectTarget={onChangeProjectTarget}
           onSetDependencies={onSetDependencies}
           onSetStatus={onSetStatus}
           onCreateTask={onCreateProjectTask}
@@ -218,6 +226,9 @@ export function RoadmapWorkspace({
       </section>
       {workspace === 'list' && (
         <ProjectAttentionPanel
+          onOpenMaterials={(project) =>
+            updateView({ ...defaultRoadmapView, workspace: 'project', roadmapId: project.roadmapId, lens: 'triage' })
+          }
           roadmaps={roadmaps}
           works={works}
           humans={humans}

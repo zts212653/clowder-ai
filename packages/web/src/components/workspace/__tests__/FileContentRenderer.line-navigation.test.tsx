@@ -61,10 +61,47 @@ it('scrolls rendered Markdown to the source block at or before the requested lin
     onMdAddToChat: () => undefined,
     onSave: async () => undefined,
     rawUrl: () => '',
-    revealInFinder: () => undefined,
   };
 
   act(() => root.render(<FileContentRenderer {...props} />));
 
   expect(scrollIntoViewMock.mock.contexts.at(-1)).toBe(mdContainerRef.current?.querySelector('[data-source-line="5"]'));
+});
+
+it.each([
+  { path: 'foo.conf', binary: false },
+  { path: 'Cargo.lock', binary: false },
+  { path: 'foo.conf', binary: true },
+])('uses the byte-reader binary=$binary decision for $path, regardless of generic MIME', ({ path, binary }) => {
+  const props: FileContentRendererProps = {
+    file: {
+      path,
+      content: 'a=1',
+      size: 3,
+      sha256: 'digest',
+      mime: 'application/octet-stream',
+      truncated: false,
+      binary,
+    },
+    openFilePath: path,
+    isMarkdown: false,
+    isHtml: false,
+    isJsx: false,
+    markdownRendered: false,
+    htmlPreview: false,
+    jsxPreview: false,
+    editMode: false,
+    scrollToLine: null,
+    worktreeId: 'fixture',
+    mdContainerRef: createRef<HTMLDivElement>(),
+    mdSelectionAction: null,
+    onMdAddToChat: () => undefined,
+    rawUrl: () => '',
+  };
+  act(() => root.render(<FileContentRenderer {...props} />));
+  if (binary) expect(host.textContent).toContain('二进制文件');
+  else {
+    expect(host.textContent).toContain('a=1');
+    expect(host.textContent).not.toContain('二进制文件');
+  }
 });

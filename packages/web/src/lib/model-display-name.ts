@@ -18,7 +18,11 @@ export function formatModelName(model: string): string {
     return `Claude ${parts.map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')}`;
   }
   if (model.startsWith('gpt-')) {
-    return `GPT ${model.replace('gpt-', '')}`;
+    return `GPT ${model
+      .slice(4)
+      .split('-')
+      .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+      .join(' ')}`;
   }
   if (model.startsWith('gemini-')) {
     return model

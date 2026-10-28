@@ -1,17 +1,30 @@
 import type { CollectiveMessageAttachment } from '@cat-cafe/shared';
-import { formatAttachmentSize, MessageMediaViewer } from '@cat-cafe/ui';
-import { useEffect, useRef, useState } from 'react';
+import { collectiveRichMediaReferences, findMessageSticker } from '@cat-cafe/shared';
+import {
+  AudioPlayer,
+  FileSummary,
+  formatAttachmentSize,
+  MediaThumbnail,
+  MessageMediaViewer,
+  markdownImageReferences,
+  StickerArtwork,
+} from '@cat-cafe/ui';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { actorDisplayName, formatEventTime } from './channel-model.js';
 import type { CollectiveEventEnvelope } from './client-types.js';
 import { useCollectiveLanguage } from './collective-copy.js';
 import { useMessageExpression } from './message-expression-context.js';
 
-function MessageAttachment({
+export function MessageAttachment({
   attachment,
   event,
+  inline = false,
+  imageDescription,
 }: {
   attachment: CollectiveMessageAttachment;
   event: CollectiveEventEnvelope;
+  inline?: boolean;
+  imageDescription?: string;
 }) {
   const port = useMessageExpression();
   const language = useCollectiveLanguage();
@@ -21,7 +34,8 @@ function MessageAttachment({
   const [requested, setRequested] = useState(false);
   const [attempt, setAttempt] = useState(0);
   const [open, setOpen] = useState(false);
-  const host = useRef<HTMLDivElement>(null);
+  const host = useRef<HTMLElement | null>(null);
+  const Frame = inline ? 'span' : 'div';
   const image = /^image\/(png|jpeg|gif|webp)$/u.test(attachment.mediaType);
   const attachmentId = attachment.attachmentId;
   useEffect(() => {
@@ -63,23 +77,34 @@ function MessageAttachment({
     };
   }, [requested, attempt, port, attachmentId, event.eventId]);
   const label = language === 'en' ? 'Open original' : '打开原图';
+  const stickerLabel = attachment.sticker && findMessageSticker(attachment.sticker.stickerId)?.label[language];
   const returnToSource = () => {
     setOpen(false);
-    const source = document.getElementById(`collective-event-${event.eventId}`);
+    const source = host.current?.closest<HTMLElement>('[data-event-id]');
     source?.scrollIntoView({ block: 'center' });
     source?.focus({ preventScroll: true });
   };
   return (
-    <div ref={host} className={image ? 'message-image-attachment' : 'message-file-attachment'}>
-      {image && url ? (
-        <button type="button" aria-label={`${label}：${attachment.fileName}`} onClick={() => setOpen(true)}>
-          <img src={url} alt={attachment.fileName} loading="lazy" />
-        </button>
+    <Frame
+      ref={(node: HTMLElement | null) => {
+        host.current = node;
+      }}
+      className={image ? 'message-image-attachment' : 'message-file-attachment'}
+    >
+      {image && url && stickerLabel ? (
+        <StickerArtwork src={url} alt={stickerLabel} onOpen={() => setOpen(true)} />
+      ) : image && url ? (
+        <MediaThumbnail
+          src={url}
+          alt={imageDescription ?? attachment.fileName}
+          label={`${label}：${imageDescription ?? attachment.fileName}`}
+          onOpen={() => setOpen(true)}
+        />
       ) : attachment.mediaType.startsWith('audio/') && url ? (
-        <audio src={url} controls preload="metadata" aria-label={attachment.fileName} />
+        <AudioPlayer url={url} label={attachment.fileName} />
       ) : attachment.mediaType.startsWith('video/') && url ? (
         <video src={url} controls preload="metadata" aria-label={attachment.fileName} />
-      ) : (
+      ) : url ? null : (
         <button
           type="button"
           disabled={loading || !port}
@@ -93,17 +118,24 @@ function MessageAttachment({
         </button>
       )}
       {!image && url && (
-        <a href={url} download={attachment.fileName}>
-          {language === 'en' ? 'Download' : '下载'} {attachment.fileName}
-        </a>
+        <FileSummary fileName={attachment.fileName} size={formatAttachmentSize(attachment.byteLength)}>
+          {attachment.mediaType.startsWith('video/') && (
+            <button type="button" onClick={() => setOpen(true)}>
+              {language === 'en' ? 'Expand video' : '放大观看'}
+            </button>
+          )}
+          <a href={url} download={attachment.fileName}>
+            {language === 'en' ? 'Download' : '下载'} {attachment.fileName}
+          </a>
+        </FileSummary>
       )}
       {error && (
-        <p role="status">
+        <span role="status">
           {error}{' '}
           <button type="button" onClick={() => setAttempt((value) => value + 1)}>
             {language === 'en' ? 'Retry' : '重试'}
           </button>
-        </p>
+        </span>
       )}
       {open && url && (
         <MessageMediaViewer
@@ -115,17 +147,34 @@ function MessageAttachment({
           closeLabel={language === 'en' ? 'Close' : '关闭'}
         />
       )}
-    </div>
+    </Frame>
   );
 }
 
 export function MessageAttachments({ event }: { readonly event: CollectiveEventEnvelope }) {
+  const inlineImages = useMemo(() => {
+    if (!event.attachments?.length) return new Set<string>();
+    const sources = [
+      event.body,
+      ...(event.richBlocks?.flatMap((block) =>
+        block.kind === 'card' && block.bodyMarkdown ? [block.bodyMarkdown] : [],
+      ) ?? []),
+    ];
+    return new Set(sources.flatMap((source) => [...markdownImageReferences(source)]));
+  }, [event.body, event.richBlocks, event.attachments]);
   if (!event.attachments?.length) return null;
+  const richMedia = collectiveRichMediaReferences(event.richBlocks ?? []);
   return (
     <div className="message-attachments">
-      {event.attachments.map((attachment) => (
-        <MessageAttachment key={attachment.attachmentId} attachment={attachment} event={event} />
-      ))}
+      {event.attachments
+        .filter(
+          (attachment) =>
+            !richMedia.some((ref) => ref.url === attachment.contentRef) &&
+            !(attachment.mediaType.startsWith('image/') && inlineImages.has(attachment.contentRef)),
+        )
+        .map((attachment) => (
+          <MessageAttachment key={attachment.attachmentId} attachment={attachment} event={event} />
+        ))}
     </div>
   );
 }

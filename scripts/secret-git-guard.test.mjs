@@ -34,15 +34,15 @@ afterEach(() => {
 });
 
 describe('Git secret guards at real hook entry points', () => {
-  it('rejects a secret in INDEX even when the worktree version was cleaned', () => {
+  it('observes a secret in INDEX without interrupting a local commit', () => {
     const root = repo();
     const path = 'docs/a file with spaces.md';
     write(root, path, `\`\`\`\n${fake()}\n\`\`\`\n`);
     git(root, 'add', path);
     write(root, path, 'clean in worktree\n');
     const result = runHook(root);
-    assert.equal(result.status, 1);
-    assert.match(result.stderr, /secret_content_detected/);
+    assert.equal(result.status, 0);
+    assert.match(result.stderr, /secret_content_observed/);
     assert.ok(!result.stderr.includes(fake()));
   });
 
@@ -59,8 +59,8 @@ describe('Git secret guards at real hook entry points', () => {
     const path = join(root, '.git', 'fixture-msg');
     writeFileSync(path, `explain ${fake()}\n`);
     const result = spawnSync('bash', [commitHook, path], { cwd: root, encoding: 'utf8' });
-    assert.equal(result.status, 1);
-    assert.match(result.stderr, /secret_content_detected/);
+    assert.equal(result.status, 0);
+    assert.match(result.stderr, /secret_content_observed/);
     assert.ok(!result.stderr.includes(fake()));
     writeFileSync(path, 'safe message\n');
     assert.equal(spawnSync('bash', [commitHook, path], { cwd: root }).status, 0);

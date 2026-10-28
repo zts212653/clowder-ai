@@ -3,7 +3,11 @@ import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { assertNamedAlphaCheckout, assertNamedAlphaNotServing } from './alpha-coordinates.mjs';
 import { parseAlphaLaunchChild } from './alpha-launch-contract.mjs';
+import { readRegisteredPreviewEnvelope, recoveryPathExists } from './preview-alpha-recovery-evidence.mjs';
+import { isUnclaimedPreviewFailure } from './preview-cleanup-result.mjs';
 import { previewProcessRecordId } from './preview-process-record-key.mjs';
+import { recordedAlphaConfiguration } from './preview-recorded-alpha-configuration.mjs';
+import { readRetiredPreviewRecord } from './preview-registration-receipts.mjs';
 
 /** A new Alpha child must be fully attributed or refused; unsupported shapes cannot fall back to ordinary. */
 export function namedAlphaPreviewDecision(invocation, shellCwd) {
@@ -40,6 +44,17 @@ export function namedAlphaPreviewDecision(invocation, shellCwd) {
  * The launcher still verifies exact live ownership before stop; this reader
  * cannot prove a PID, executable, completion or cleanup from record text.
  */
+function validateRecordedLifecycle(config, record, coordinates, recordedDirect, retired) {
+  if (retired) return;
+  const checkoutPresent = recoveryPathExists(coordinates.alphaRoot);
+  if (recordedDirect || !checkoutPresent) {
+    const { completion } = readRegisteredPreviewEnvelope(config, record);
+    if (!isUnclaimedPreviewFailure(completion) || recoveryPathExists(`${record.completionPath}.owner.json`))
+      throw new Error('historical Alpha configuration has no exact unclaimed failure envelope');
+  }
+  if (checkoutPresent) assertNamedAlphaCheckout(coordinates, { requireClean: false });
+}
+
 function namedAlphaLifecycleDecision({ action, child, options, packageCwd, separator }, shellCwd) {
   if (!['status', 'stop'].includes(action) || separator >= 0 || child.length || options.has('--lifetime-seconds'))
     return null;
@@ -49,8 +64,24 @@ function namedAlphaLifecycleDecision({ action, child, options, packageCwd, separ
   const stateDir = resolve(
     process.env.CAT_CAFE_PREVIEW_PROCESS_DIR ?? join(homedir(), '.cat-cafe', 'preview-processes'),
   );
+  const config = {
+    id,
+    cwd: requested,
+    port: Number(options.get('--port')),
+    stateDir,
+    recordPath: join(stateDir, `${id}.json`),
+  };
   try {
-    const record = JSON.parse(readFileSync(join(stateDir, `${id}.json`), 'utf8'));
+    let record,
+      retired = false;
+    try {
+      record = JSON.parse(readFileSync(config.recordPath, 'utf8'));
+    } catch (error) {
+      if (error.code !== 'ENOENT') throw error;
+      record = readRetiredPreviewRecord(config);
+      if (!record) throw error;
+      retired = true;
+    }
     if (
       record.version !== 1 ||
       record.id !== id ||
@@ -59,9 +90,15 @@ function namedAlphaLifecycleDecision({ action, child, options, packageCwd, separ
       !Array.isArray(record.command)
     )
       return null;
-    const { coordinates, options: launchOptions } = parseAlphaLaunchChild(record.command, requested);
+    const {
+      coordinates,
+      options: launchOptions,
+      recordedDirect,
+    } = recordedAlphaConfiguration(record.command, requested);
     if (!launchOptions['--instance'] || coordinates.ports.frontend !== record.port) return { status: 'deny' };
-    assertNamedAlphaCheckout(coordinates);
+    // Released checkouts retain only their exact unclaimed/retired configuration.
+    // The canonical stopper independently proves eligibility; this is no live PID grant.
+    validateRecordedLifecycle(config, record, coordinates, recordedDirect, retired);
     return {
       status: 'allow',
       operation: {

@@ -8,6 +8,7 @@ import { ReplyPreviewBar } from './ReplyPreviewBar';
 import { WhisperTargetChips } from './WhisperCatSelector';
 
 interface ChatComposerDraftExtrasProps {
+  threadId?: string;
   files: File[];
   contextAttachments: readonly ContextAttachment[];
   replyToMessage: { id: string; content: string; senderCatId: string | null } | null;
@@ -23,6 +24,7 @@ interface ChatComposerDraftExtrasProps {
 
 /** One draft owner rendered either inside the v2 paper border or in the frozen classic sibling position. */
 export function ChatComposerDraftExtras({
+  threadId,
   files,
   contextAttachments,
   replyToMessage,
@@ -41,7 +43,7 @@ export function ChatComposerDraftExtras({
         <WhisperTargetChips cats={whisperCats} selected={whisperTargets} onToggle={onToggleWhisperTarget} />
       ) : null}
       <AttachmentPreview files={files} onRemove={onRemoveFile} />
-      <ContextAttachmentList attachments={contextAttachments} compact onRemove={onRemoveContext} />
+      <ContextAttachmentList attachments={contextAttachments} compact onRemove={onRemoveContext} threadId={threadId} />
       {replyToMessage ? <ReplyPreviewBar replyToMessage={replyToMessage} cats={cats} onClear={onClearReply} /> : null}
     </>
   );

@@ -1,6 +1,7 @@
 'use client';
 
 import {
+  type CodexStartupRecovery,
   MESSAGE_BUNDLE_CLI_QUOTE_PROJECTION_VERSION_V2,
   MESSAGE_BUNDLE_CLI_QUOTE_PROJECTION_VERSION_V3,
 } from '@cat-cafe/shared';
@@ -8,6 +9,7 @@ import { useState } from 'react';
 import { countRecallEvents } from '@/hooks/recall-feed-model';
 import type { ChatMessageMetadata } from '@/stores/chat-types';
 import { usePublishLayoutAfterDisclosure } from '../cli-output/CliOutputBlock';
+import { codexStartupCopy } from '../codex-startup.shell-copy';
 import { MetadataBadge } from '../MetadataBadge';
 import { useShellCopy } from '../shell/shell-copy';
 import { NativeReplyText } from './NativeReplyText';
@@ -191,6 +193,7 @@ function ThinkingRow({ text }: { text: string }) {
 }
 
 export interface ReplyRecordProps {
+  startupRecovery?: CodexStartupRecovery;
   id: string;
   rows: readonly ReplyRecordRow[];
   /** The reply's effective status is still active; raw streaming residue never revives a terminal turn. */
@@ -234,8 +237,10 @@ export function ReplyRecord({
   nativeOutput,
   subexecutions,
   catId,
+  startupRecovery,
 }: ReplyRecordProps) {
   const t = useShellCopy(subexecutionCopy);
+  const startupCopy = useShellCopy(codexStartupCopy);
   const [toolsOpen, setToolsOpen] = useState(false);
   usePublishLayoutAfterDisclosure(toolsOpen);
   const tools = nativeOutput
@@ -253,6 +258,11 @@ export function ReplyRecord({
       className="ml-1 flex min-w-0 flex-col gap-1.5 border-l py-1 pl-3 text-xs"
       style={{ borderColor: 'var(--shell-hairline)', color: 'var(--shell-muted)' }}
     >
+      {startupRecovery?.stage === 'ready' && startupRecovery.attempt > 1 ? (
+        <p className="m-0" data-testid="startup-recovered-record">
+          {startupCopy.recovered(startupRecovery.attempt)}
+        </p>
+      ) : null}
       {recall ? <RecallRow recall={recall} /> : null}
       {thinking ? <ThinkingRow text={thinking} /> : null}
       {workingText ? (

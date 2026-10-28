@@ -4,6 +4,11 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { ArtworkLightboxHost } from '@/components/content-review/ArtworkLightboxHost';
 import { ArtworkLightboxProvider } from '@/components/content-review/ArtworkLightboxScope';
+import { MessageReadingControls } from '@/components/message-search/MessageReadingControls';
+import { openMessageFindDestination } from '@/components/message-search/message-find-destinations';
+import { MESSAGE_FIND_RETURN_EVENT } from '@/components/message-search/message-find-events';
+import { startMessageReadingSession } from '@/components/message-search/message-reading-session';
+import type { MessageSearchHost } from '@/components/message-search/useMessageSearchHost';
 import { writeShellLanguage } from '@/components/shell/shell-language';
 import { writeShellPresentation } from '@/components/shell/shell-presentation';
 import { useChatStore } from '@/stores/chatStore';
@@ -31,6 +36,7 @@ let host: HTMLDivElement;
 let root: Root;
 const open = vi.fn();
 beforeEach(() => {
+  localStorage.clear();
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
   writeShellPresentation('classic');
   writeShellLanguage('en');
@@ -50,6 +56,90 @@ beforeEach(() => {
   host = document.createElement('div');
   document.body.append(host);
   root = createRoot(host);
+});
+it('keeps the existing name filter and carries the same find return through a work open', async () => {
+  writeShellPresentation('v2');
+  const session = startMessageReadingSession(
+    {
+      searchId: 'find',
+      origin: { threadId: 'work-source', readingRef: 'opaque-owner' },
+      targets: [],
+      generation: 0,
+      settledIndex: null,
+      pending: null,
+      status: 'ready',
+    },
+    true,
+    {
+      destination: 'works',
+      state: { query: 'Delivered', scope: 'thread', sort: 'time', scrollTop: 214, status: 'idle' },
+    },
+  ).session;
+  openMessageFindDestination(session);
+  const readingHost: MessageSearchHost = {
+    session,
+    open: false,
+    persisted: true,
+    notice: null,
+    findState: undefined,
+    findSeed: 0,
+    openSearch: vi.fn(),
+    openDestination: vi.fn(),
+    closeSearch: vi.fn(),
+    registerReadingPort: vi.fn(() => () => {}),
+    navigateResult: vi.fn(),
+    moveTo: vi.fn(),
+    returnToOrigin: vi.fn(),
+  };
+  const returning = vi.fn();
+  window.addEventListener(MESSAGE_FIND_RETURN_EVENT, returning);
+  try {
+    await act(async () =>
+      root.render(
+        <>
+          <MessageReadingControls host={readingHost} />
+          <ThreadWorksPanelV2
+            threadId="work-source"
+            initialView={{
+              scope: 'thread',
+              filter: 'all',
+              query: 'Delivered',
+              grouping: 'time',
+              catFilter: null,
+              collapsed: [],
+              findSessionId: session.id,
+            }}
+            onSelectArtifact={open}
+          />
+        </>,
+      ),
+    );
+    expect(host.querySelector<HTMLInputElement>('input')?.value).toBe('Delivered');
+    expect(host.querySelectorAll('[data-testid="workspace-home-artifact-card"]')).toHaveLength(1);
+    await act(async () =>
+      host.querySelector<HTMLButtonElement>('[data-testid="workspace-home-artifact-card"]')?.click(),
+    );
+    expect(open.mock.calls[0][1].view.findSessionId).toBe(session.id);
+    const back = [...host.querySelectorAll('button')].find((button) => button.textContent === '‹ 回到查找');
+    expect(back).toBeDefined();
+    expect([...host.querySelectorAll('button')].filter((button) => button.textContent === '‹ 回到查找')).toHaveLength(
+      1,
+    );
+    await act(async () => back?.click());
+    expect(returning).toHaveBeenCalledOnce();
+    expect((returning.mock.calls[0][0] as CustomEvent).detail).toBe(session.id);
+    expect(data.fetch.mock.calls.every(([url]) => !String(url).includes('/evidence/search'))).toBe(true);
+    await act(async () => {
+      useChatStore.setState({ rightPanelOpen: false });
+      root.render(<MessageReadingControls host={readingHost} />);
+    });
+    const fallback = [...host.querySelectorAll('button')].find((button) => button.textContent === '‹ 回到查找');
+    expect(fallback).toBeDefined();
+    await act(async () => fallback?.click());
+    expect(readingHost.returnToOrigin).toHaveBeenCalledOnce();
+  } finally {
+    window.removeEventListener(MESSAGE_FIND_RETURN_EVENT, returning);
+  }
 });
 afterEach(() => {
   act(() => root.unmount());

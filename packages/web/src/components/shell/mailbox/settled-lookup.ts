@@ -26,7 +26,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-function terminalOf(row: Record<string, unknown>): Terminal | null {
+export function settledTerminal(row: Record<string, unknown>): Terminal | null {
   const resolution = TERMINAL_RESOLUTIONS.find((candidate) => candidate === row.resolution);
   if (!resolution) return null;
   const decidedBy = typeof row.decidedBy === 'string' ? row.decidedBy.trim() : '';
@@ -99,7 +99,7 @@ export async function lookupSettled(input: SettledLookupInput): Promise<SettledL
         return unavailable;
     }
     // The newest row for this exact proposal; one that does not say a terminal resolution is not a decision we can state.
-    const terminal = terminalOf(matching[0]);
+    const terminal = settledTerminal(matching[0]);
     if (!terminal) return unavailable;
     if (input.sourceFeatureId === 'F128' && terminal.resolution === 'accepted') {
       const threadId = await lookupCreatedThread(input);

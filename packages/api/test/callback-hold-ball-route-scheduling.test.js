@@ -632,7 +632,10 @@ describe('F167 C1: /api/callbacks/hold-ball scheduling + errors', () => {
     assert.equal(r4.statusCode, 429);
     const body = JSON.parse(r4.body);
     assert.match(body.error, /maxHoldsPerWindow/);
-    assert.match(body.error, /pass the ball now/);
+    // F314 Humphrey case: the cap tells the cat to keep working or hand off to a
+    // cat who can act — it no longer routes the ball to the co-creator by default.
+    assert.match(body.error, /Stop re-arming timers/);
+    assert.doesNotMatch(body.error, /co-creator|@co-creator/i);
     assert.equal(body.maxHoldsPerWindow, 3);
     assert.equal(body.holdsInWindow, 3);
     assert.equal(body.windowMs, 3_600_000);

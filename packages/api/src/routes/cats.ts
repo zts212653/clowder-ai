@@ -1,4 +1,6 @@
+import type { MemberCanonService } from '../domains/collaborative-content/asset-canon/member-service.js';
 import { registerDshSetupRoutes } from './dsh-setup-route.js';
+import { registerMemberCanonResponse } from './member-canon-response.js';
 import { dshLauncherProfileState, InvalidDshProfile } from './native-dsh-profile.js';
 import { discoverNativeRuntimesWithReadiness } from './native-runtimes.js';
 import { registerRuntimeCatalogRoute } from './runtime-catalog-route.js';
@@ -15,6 +17,7 @@ import {
   BUILTIN_GPT_PRO_IDENTITY,
   type BuiltinCloudIdentityLockedField,
   type BuiltinCloudIdentityProtectedField,
+  backgroundImageUrlSchema,
   CAT_CARRIERS,
   type CatCarrier,
   type CatConfig,
@@ -202,6 +205,7 @@ const baseCatSchema = z.object({
   displayName: z.string().min(1),
   variantLabel: z.string().optional(),
   nickname: z.string().optional(),
+  banner: backgroundImageUrlSchema.optional(),
   avatar: z.preprocess(
     (val) => (typeof val === 'string' && val.trim() === '' ? undefined : val),
     z.string().min(1).optional(),
@@ -279,6 +283,7 @@ const updateCatSchema = z.object({
   variantLabel: z.string().nullable().optional(),
   nickname: z.string().optional(),
   avatar: z.string().min(1).optional(),
+  banner: backgroundImageUrlSchema.nullable().optional(),
   color: colorSchema.optional(),
   mentionPatterns: z.array(z.string().min(1)).min(1).optional(),
   configurationSource: z.enum(['native_tool', 'managed_account']).nullable().optional(),
@@ -780,6 +785,7 @@ async function toCatResponse(
         // Omitting this field makes every refreshed native member fall back to
         // the gray default avatar even though the catalog contains the asset.
         avatar: resolveNativeAvatar(cat.clientId, cat.avatar, acpConfig),
+        ...(cat.banner ? { banner: cat.banner } : {}),
         color: cat.color,
         mentionPatterns: cat.mentionPatterns,
         breedId: cat.breedId,
@@ -924,6 +930,7 @@ async function cleanupBlockedMcpForAllProjects(projectRoot: string, deletedCatId
 }
 
 interface CatsRoutesOptions {
+  memberAssets?: () => MemberCanonService | undefined;
   onCatalogChanged?: (cats: Record<string, CatConfig>) => Promise<void> | void;
   resolveContextCapacitySnapshot?: (catId: CatId) => InvocationCapacitySnapshot | undefined;
   nativeRuntimeDiscovery?: typeof discoverNativeRuntimesWithReadiness;
@@ -931,6 +938,7 @@ interface CatsRoutesOptions {
 }
 
 export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opts) => {
+  if (opts.memberAssets) registerMemberCanonResponse(app, opts.memberAssets);
   registerRuntimeCatalogRoute(app);
   registerDshSetupRoutes(app);
   app.get('/api/cats/native-runtimes', async (request, reply) => {
@@ -1023,6 +1031,7 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opt
     }
 
     const body = parsed.data;
+
     const createViolationFields = builtinCloudIdentityCreateViolationFields(body);
     if (
       body.catId === 'gpt-dot' ||
@@ -1160,6 +1169,7 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opt
           variantLabel: body.variantLabel,
           nickname: body.nickname,
           avatar: resolvedAvatar,
+          ...(body.banner ? { banner: body.banner } : {}),
           color: body.color,
           mentionPatterns: body.mentionPatterns,
           ...(accountRef !== undefined ? { accountRef: accountRef ?? undefined } : {}),
@@ -1191,6 +1201,7 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opt
           variantLabel: body.variantLabel,
           nickname: body.nickname,
           avatar: resolvedAvatar,
+          ...(body.banner ? { banner: body.banner } : {}),
           color: body.color,
           mentionPatterns: body.mentionPatterns,
           ...(accountRef !== undefined ? { accountRef: accountRef ?? undefined } : {}),
@@ -1251,6 +1262,7 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opt
           variantLabel: body.variantLabel,
           nickname: body.nickname,
           avatar: resolvedAvatar,
+          ...(body.banner ? { banner: body.banner } : {}),
           color: body.color,
           mentionPatterns: body.mentionPatterns,
           ...(accountRef !== undefined ? { accountRef: accountRef ?? undefined } : {}),
@@ -1340,6 +1352,13 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opt
     }
 
     const body = parsed.data;
+    if (body.avatar !== undefined && opts.memberAssets?.()?.binding(request.params.id)) {
+      const mixed = Object.keys(body).some((key) => key !== 'avatar' && key !== 'expectedRevision');
+      return reply.code(409).send({
+        error: mixed ? 'canon_avatar_mixed_patch' : 'canon_avatar_selection_required',
+        message: '头像已关联正典，请在外观里单独选择并保存头像。',
+      });
+    }
     const restoringBuiltinCloudIdentity = body.restoreBuiltinCloudIdentity === true;
     if (request.params.id === 'gpt-dot') {
       const fields = [...BUILTIN_CLOUD_IDENTITY_LOCKED_FIELDS, 'mentionPatterns', 'restoreBuiltinCloudIdentity'];
@@ -1655,6 +1674,7 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opt
         ...(body.variantLabel !== undefined ? { variantLabel: body.variantLabel } : {}),
         ...(body.nickname !== undefined ? { nickname: body.nickname } : {}),
         ...(body.avatar !== undefined ? { avatar: body.avatar } : {}),
+        ...(body.banner !== undefined ? { banner: body.banner } : {}),
         ...(body.color !== undefined ? { color: body.color } : {}),
         ...(body.mentionPatterns !== undefined ? { mentionPatterns: body.mentionPatterns } : {}),
         ...(body.configurationSource !== undefined ? { configurationSource: body.configurationSource } : {}),

@@ -67,3 +67,16 @@ test('the exact reviewed alpha.7 archive receives Host Chrome setup actions', ()
 test('alpha.7 with the right version but unreviewed bytes remains untrusted', () => {
   assert.equal(chromeSetupPolicy({ ...alpha7Record(), packageDigest: 'sha512-unreviewed-alpha7' }), undefined);
 });
+
+test('the exact alpha.8 health fix receives setup actions while other alpha.8 bytes remain untrusted', () => {
+  const candidate = record();
+  candidate.version = '0.1.0-alpha.8';
+  candidate.manifest.version = candidate.version;
+  candidate.packageDigest =
+    'sha512-ePdPiPWIyzscHHi9IDi0WGAZK4a9nvDgW6eGkzHA+4gMRqxusmmqMQf8f+ktoGjGFcHUgG4eeJVTlpwm2bj8lg==';
+  assert.deepEqual(
+    chromeSetupPolicy(candidate)?.actions.map(({ id }) => id),
+    ['inspect', 'install', 'uninstall'],
+  );
+  assert.equal(chromeSetupPolicy({ ...candidate, packageDigest: 'sha512-unreviewed-alpha8' }), undefined);
+});

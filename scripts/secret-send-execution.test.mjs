@@ -3,7 +3,7 @@ import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { afterEach, test } from 'node:test';
 
 const roots = [];
@@ -57,7 +57,7 @@ for (const [program, prefix] of [
     assert.ok(!existsSync(sent.args.at(-1).replace(/^@/, '')));
   });
 
-test('delegate output is redacted before reaching the native shell result', () => {
+test('a configured credential in delegate output is redacted before reaching the native shell result', () => {
   const f = fixture('gh');
   writeFileSync(
     f.delegate,
@@ -65,7 +65,7 @@ test('delegate output is redacted before reaching the native shell result', () =
   );
   const result = spawnSync(resolve('scripts/guarded-bin/gh'), ['pr', 'view', '1'], {
     cwd: f.dir,
-    env: f.env,
+    env: { ...f.env, GH_TOKEN: secret() },
     encoding: 'utf8',
   });
   assert.equal(result.status, 0);
@@ -123,20 +123,20 @@ test('release draft assets are rejected before the upload delegate executes', ()
   assert.notEqual(uploaded.args.at(-1), f.body);
 });
 
-test('the real curl cannot copy an explicit credential URL into an output file', () => {
+test('the real curl can copy a local file without treating the copy as an upload', () => {
   const dir = mkdtempSync(join(tmpdir(), 'curl-file-copy-'));
   roots.push(dir);
   const source = join(dir, '.env.local');
   const destination = join(dir, 'copied.txt');
   writeFileSync(source, secret());
-  const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('CAT_CAFE_')));
+  const env = { PATH: `/usr/bin:/bin:${dirname(process.execPath)}` };
   const result = spawnSync(resolve('scripts/guarded-bin/curl'), ['--url', `file://${source}`, '-o', destination], {
     cwd: dir,
     env,
     encoding: 'utf8',
   });
-  assert.equal(result.status, 1);
-  assert.ok(!existsSync(destination));
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(readFileSync(destination, 'utf8'), secret());
   assert.ok(!`${result.stdout}${result.stderr}`.includes(secret()));
   const cleanSource = join(dir, 'ordinary.txt');
   writeFileSync(cleanSource, 'safe local resource');

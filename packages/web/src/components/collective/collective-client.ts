@@ -30,6 +30,12 @@ export interface CollectiveConnectorStatus {
   readonly runtimeStatus: 'active' | 'inactive';
   readonly connections: readonly CollectiveConnectionProjection[];
   readonly localService?: LocalCollectiveServiceStatus;
+  readonly remoteService?: {
+    readonly serviceUrl: string;
+    readonly state: 'offline' | 'instance_mismatch' | 'setup_required' | 'unpaired' | 'ready';
+    readonly serviceInstanceId?: string;
+    readonly pairedConnections?: number;
+  };
 }
 
 export interface LocalCollectiveServiceStatus {

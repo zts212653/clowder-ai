@@ -184,6 +184,60 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
     console.log('Retained isolated catalog fixtures:', JSON.stringify(tempDirs));
   });
 
+  it('persists a member banner through POST, GET and PATCH removal without changing its avatar', async () => {
+    const projectRoot = createProjectRoot();
+    process.env.CAT_TEMPLATE_PATH = join(projectRoot, 'cat-template.json');
+    const app = (await import('fastify')).default();
+    await app.register((await import('../dist/routes/cats.js')).catsRoutes);
+    const headers = { 'x-cat-cafe-user': 'default-user' };
+    try {
+      const created = await app.inject({
+        method: 'POST',
+        url: '/api/cats',
+        headers,
+        payload: {
+          catId: 'banner-http',
+          name: 'Banner member',
+          displayName: 'Banner member',
+          avatar: '/avatars/default.png',
+          banner: '/uploads/banner-sunset.jpg',
+          color: { primary: '#765843', secondary: '#eadccc' },
+          mentionPatterns: ['@banner-http'],
+          roleDescription: 'Preview',
+          clientId: 'openai',
+          accountRef: 'codex',
+          defaultModel: 'gpt-5.4',
+          mcpSupport: true,
+        },
+      });
+      assert.equal(created.statusCode, 201, created.payload);
+      const read = async () =>
+        (await app.inject({ method: 'GET', url: '/api/cats', headers }))
+          .json()
+          .cats.find((cat) => cat.id === 'banner-http');
+      assert.equal((await read()).banner, '/uploads/banner-sunset.jpg');
+      const rejected = await app.inject({
+        method: 'PATCH',
+        url: '/api/cats/banner-http',
+        headers,
+        payload: { banner: 'https://tracker.example/banner.jpg' },
+      });
+      assert.equal(rejected.statusCode, 400, rejected.payload);
+      const cleared = await app.inject({
+        method: 'PATCH',
+        url: '/api/cats/banner-http',
+        headers,
+        payload: { banner: null },
+      });
+      assert.equal(cleared.statusCode, 200, cleared.payload);
+      const cat = await read();
+      assert.equal(cat.banner, undefined);
+      assert.equal(cat.avatar, '/avatars/default.png');
+    } finally {
+      await app.close();
+    }
+  });
+
   it('POST and PATCH accept an existing breedId and preserve member identity', async () => {
     const projectRoot = createProjectRoot();
     process.env.CAT_TEMPLATE_PATH = join(projectRoot, 'cat-template.json');

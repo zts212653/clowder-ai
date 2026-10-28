@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { writeFileSync } from 'node:fs';
 import { test } from 'node:test';
+import { createRequestGenerationRecorder } from '../dist/domains/cats/services/agents/invocation/request-generation-recorder.js';
 import { ClaudeAgentService } from '../dist/domains/cats/services/agents/providers/ClaudeAgentService.js';
 import { CodexAgentService } from '../dist/domains/cats/services/agents/providers/CodexAgentService.js';
 import { ensureFakeCliOnPath } from './helpers/fake-cli-path.js';
@@ -69,14 +70,44 @@ test('F299 Claude awaits the recorder and launches from the exact prepared bytes
   assert.equal(spawned.stdinInput, recorded.message.body);
 });
 
-test('F299 Codex exec_json awaits the recorder and launches from the exact prepared bytes', async () => {
+test('F299 Codex records the actual native opening only after observation and launches the prepared bytes', async () => {
   let recorded;
   let recorderResolved = false;
   let spawned;
+  let generation;
+  const deliveries = [];
+  const recorder = createRequestGenerationRecorder({
+    invocationId: 'codex-opening-invocation',
+    threadId: 'codex-opening-thread',
+    userId: 'codex-opening-owner',
+    catId: 'codex-astra',
+    transcriptWriter: {
+      keyedContentDigest: async () => `hmac-sha256:${'a'.repeat(64)}`,
+      appendDurableEvent: async () => {},
+    },
+    sessionChainStore: {
+      getActive: async () => ({
+        id: 'codex-opening-session',
+        threadId: 'codex-opening-thread',
+        catId: 'codex-astra',
+        seq: 0,
+      }),
+    },
+    profileRepository: {
+      readCapsule: () => ({ content: '先讲结果。', revision: 'sha256:opening-fixture' }),
+    },
+    onProfileOpeningObserved: async (delivery) => deliveries.push(delivery),
+    snapshot: () => ({
+      continuity: { mode: 'cold', contextEpoch: 1, transition: 'fresh', capability: 'exact', compactionRefs: [] },
+      messageSourceRefs: [],
+      nativeInstructionSourceRefs: [],
+      presentations: [],
+    }),
+  });
   const service = new CodexAgentService({
     carrierMode: 'exec_json',
     model: 'gpt-test',
-    l0CompilerFn: async () => 'CODEX-L0',
+    l0CompilerFn: async () => 'CODEX-L0\n## 主人画像\n\n先讲结果。',
   });
 
   await collect(
@@ -84,9 +115,9 @@ test('F299 Codex exec_json awaits the recorder and launches from the exact prepa
       beforeProviderLaunch: async (request) => {
         assert.equal(spawned, undefined);
         recorded = request;
-        await Promise.resolve();
+        generation = await recorder.recordPrepared(request, { attempt: 1 });
         recorderResolved = true;
-        return commit();
+        return generation;
       },
       spawnCliOverride: (options) => {
         assert.equal(recorderResolved, true);
@@ -99,6 +130,11 @@ test('F299 Codex exec_json awaits the recorder and launches from the exact prepa
     }),
   );
 
+  assert.equal(deliveries.length, 0, 'preparation and launch are not observed delivery');
+  await recorder.recordObserved(generation, { evidenceRef: 'native-thread' });
+  assert.equal(deliveries.length, 1, 'the real Codex native instruction channel must retain its opening receipt');
+  assert.equal(deliveries[0].sourceRevision, 'sha256:opening-fixture');
+  assert.equal(deliveries[0].consumerCatId, 'codex-astra');
   assert.equal(recorded.message.body, 'codex-message');
   assert.match(recorded.nativeInstructions[0].body, /CODEX-L0/);
   assert.equal(recorded.runtime.carrier, 'exec_json');

@@ -4,6 +4,8 @@ import { type CloudBridgeOutboundReceiptV1, isCloudBridgeOutboundReceiptV1 } fro
 import type { ReactNode } from 'react';
 import { getCachedCats } from '@/hooks/useCatData';
 import type { ChatMessage as ChatMessageType } from '@/stores/chatStore';
+import { ChatApprovalDecisionReceipt } from './approval-receipt/ChatApprovalDecisionReceipt';
+import { isChatApprovalReceipt } from './approval-receipt/receipt-source';
 import { CloudDotReceipt } from './CloudDotReceipt';
 import { HubIcon } from './hub-icons';
 import { MarkdownContent } from './MarkdownContent';
@@ -36,6 +38,8 @@ function NoticeIcon({ icon }: { icon?: string }) {
 interface SystemNoticeBarProps {
   message: ChatMessageType;
   footer?: ReactNode;
+  threadId?: string;
+  timelineMessages?: readonly ChatMessageType[];
 }
 
 const RECEIPT_STATUS_LABEL: Record<CloudBridgeOutboundReceiptV1['status'], string> = {
@@ -82,9 +86,16 @@ function CloudOutboundAudit({ message, receipt }: { message: ChatMessageType; re
   );
 }
 
-export function SystemNoticeBar({ message, footer }: SystemNoticeBarProps) {
+export function SystemNoticeBar({ message, footer, threadId, timelineMessages }: SystemNoticeBarProps) {
   const source = message.source;
   if (!source) return null;
+  if (isChatApprovalReceipt(message))
+    return (
+      <>
+        <ChatApprovalDecisionReceipt message={message} threadId={threadId} timelineMessages={timelineMessages} />
+        {footer}
+      </>
+    );
 
   const tone = getNoticeTone(source.meta);
   const outboundReceipt = isCloudBridgeOutboundReceiptV1(source.meta?.cloudBridgeOutboundReceipt)

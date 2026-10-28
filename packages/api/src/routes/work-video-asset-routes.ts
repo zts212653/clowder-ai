@@ -22,7 +22,7 @@ const sourceStatuses: Readonly<Record<string, number>> = {
   not_found: 404,
   access_denied: 403,
 };
-function failAsset(reply: FastifyReply, error: unknown) {
+export function failAsset(reply: FastifyReply, error: unknown) {
   if (error instanceof WorkspaceContentSourceError)
     return reply.code(sourceStatuses[error.code] ?? 400).send({ error: error.code });
   if (error instanceof WorkspaceSecurityError) {
@@ -35,7 +35,7 @@ function failAsset(reply: FastifyReply, error: unknown) {
 }
 
 type OpenAsset = Awaited<ReturnType<VideoProjectAssetIndex['open']>>;
-async function sendAsset(request: FastifyRequest, reply: FastifyReply, opened: OpenAsset) {
+export async function sendAsset(request: FastifyRequest, reply: FastifyReply, opened: OpenAsset) {
   const range = request.headers.range ? parseMediaByteRange(request.headers.range, opened.byteLength) : null;
   if (request.headers.range && !range) {
     await opened.handle.close();

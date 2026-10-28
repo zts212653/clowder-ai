@@ -3,8 +3,9 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, test } from 'node:test';
+import { fileURLToPath } from 'node:url';
 import { AcpAgentService } from '../../dist/domains/cats/services/agents/providers/acp/AcpAgentService.js';
-import { secretMcpContract } from '../helpers/secret-mcp-contract.js';
+import { directMcpContract } from '../helpers/direct-mcp-contract.js';
 
 const roots = [];
 afterEach(() => {
@@ -224,8 +225,9 @@ for (const nativePlugin of [false, true]) {
     const resumes = [];
     const registration = {
       name: nativePlugin ? 'plugin-fixture' : 'cat-cafe-memory',
+      ...(nativePlugin ? { hostSource: 'plugin' } : {}),
       command: process.execPath,
-      args: [],
+      args: nativePlugin ? [] : [fileURLToPath(new URL('../../../mcp-server/dist/memory.js', import.meta.url))],
       env: nativePlugin
         ? [
             { name: 'CLOWDER_PLUGIN_ACTION_TOKEN', value: 'synthetic-action' },
@@ -236,10 +238,10 @@ for (const nativePlugin of [false, true]) {
     const f = fixture({
       mcpServers: [registration],
       onResume: (args) => {
-        const contract = secretMcpContract(args[2][0]);
+        const contract = directMcpContract(args[2][0]);
         resumes.push({
           ...contract,
-          seen: JSON.parse(readFileSync(contract.proxyEnv.CAT_CAFE_CREDENTIAL_FILE, 'utf8')),
+          seen: JSON.parse(readFileSync(contract.launchEnv.CAT_CAFE_CREDENTIAL_FILE, 'utf8')),
         });
       },
     });
@@ -255,7 +257,7 @@ for (const nativePlugin of [false, true]) {
     try {
       const events = await Array.fromAsync(f.service.invoke('first', { ...f.options, callbackEnv }));
       const setup = f.calls.find(([name]) => name === 'new');
-      const initial = secretMcpContract(setup[2][0]);
+      const initial = directMcpContract(setup[2][0]);
       const binding = events.find((event) => event.nativeSessionBinding).nativeSessionBinding;
       for (const turn of ['second', 'third']) {
         await Array.fromAsync(
@@ -275,20 +277,20 @@ for (const nativePlugin of [false, true]) {
         assert.equal(seen.callbackToken, `synthetic-${turn}`);
       }
       assert.equal(resumes.length, 2, 'both turns must use native resume');
-      for (const { proxyEnv, upstream } of [initial, ...resumes]) {
+      for (const { launchEnv, upstream } of [initial, ...resumes]) {
         assert.equal(upstream.command, registration.command);
         assert.deepEqual(upstream.args, registration.args);
-        assert.equal(upstream.source, registration.name);
-        assert.equal(proxyEnv.CLOWDER_PLUGIN_ACTION_TOKEN, undefined);
-        assert.equal(proxyEnv.CLOWDER_PLUGIN_ACTION_PATH, undefined);
+
+        assert.equal(launchEnv.CLOWDER_PLUGIN_ACTION_TOKEN, upstream.env.CLOWDER_PLUGIN_ACTION_TOKEN);
+        assert.equal(launchEnv.CLOWDER_PLUGIN_ACTION_PATH, upstream.env.CLOWDER_PLUGIN_ACTION_PATH);
         if (nativePlugin) {
           assert.equal(upstream.env.CLOWDER_PLUGIN_ACTION_TOKEN, 'synthetic-action');
           assert.equal(upstream.env.CLOWDER_PLUGIN_ACTION_PATH, '/api/plugin-runtime/action');
         }
-        for (const env of [proxyEnv, upstream.env]) {
+        for (const env of [launchEnv, upstream.env]) {
           assert.equal(Object.hasOwn(env, 'CAT_CAFE_INVOCATION_ID'), false);
           assert.equal(Object.hasOwn(env, 'CAT_CAFE_CALLBACK_TOKEN'), false);
-          assert.equal(env.CAT_CAFE_CREDENTIAL_FILE, initial.proxyEnv.CAT_CAFE_CREDENTIAL_FILE);
+          assert.equal(env.CAT_CAFE_CREDENTIAL_FILE, initial.launchEnv.CAT_CAFE_CREDENTIAL_FILE);
         }
       }
     } finally {

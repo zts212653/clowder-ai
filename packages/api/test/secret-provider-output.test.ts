@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 // @ts-expect-error Shared native/MCP boundary is an ESM script.
-import { protectSecretToolResult } from '../../../scripts/lib/secret-tool-io.mjs';
+import { PENDING_EXPOSURE_NOTICE, protectSecretToolResult } from '../../../scripts/lib/secret-tool-io.mjs';
 import { protectNativeProviderResult } from '../src/domains/cats/services/agents/invocation/secret-provider-result.js';
 import { sanitizeRawEvent } from '../src/domains/cats/services/agents/providers/codex-audit-hooks.js';
 
@@ -30,19 +30,18 @@ test('provider result boundary records a credential-free warning with the exact 
         callbackEnv: {
           CAT_CAFE_API_URL: 'http://127.0.0.1:59999',
           CAT_CAFE_INVOCATION_ID: 'fixture-inv',
-          CAT_CAFE_CALLBACK_TOKEN: 'fixture-callback',
+          CAT_CAFE_CALLBACK_TOKEN: fake(),
         },
       },
     );
     assert.ok(!JSON.stringify(result).includes(fake()));
     assert.match(result.content ?? '', /轮转/);
-    assert.ok(result.content?.includes('尚未核实真实凭据'));
-    assert.ok(result.content?.includes('仅在确认真实凭据已暴露后'));
+    assert.ok(result.content?.includes('当前已配置的凭据值'));
     assert.equal(requests.length, 1);
     assert.equal(requests[0].headers['x-invocation-id'], 'fixture-inv');
-    assert.equal(requests[0].headers['x-callback-token'], 'fixture-callback');
+    assert.equal(requests[0].headers['x-callback-token'], fake());
     assert.ok(!requests[0].body.includes(fake()));
-    assert.ok(requests[0].body.includes('尚未核实真实凭据'));
+    assert.ok(requests[0].body.includes('当前已配置的凭据值'));
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -72,7 +71,7 @@ test('blocked native input echoed in ACP metadata is redacted without inventing 
         callbackEnv: {
           CAT_CAFE_API_URL: 'http://127.0.0.1:59999',
           CAT_CAFE_INVOCATION_ID: 'current',
-          CAT_CAFE_CALLBACK_TOKEN: 'fixture',
+          CAT_CAFE_CALLBACK_TOKEN: fake(),
         },
       },
     );
@@ -84,7 +83,7 @@ test('blocked native input echoed in ACP metadata is redacted without inventing 
   }
 });
 
-test('an uninspectable native payload is discarded instead of retaining unsafe raw fields', async () => {
+test('an uninspectable local payload remains available without an exposure claim', async () => {
   let nested: unknown = fake();
   for (let depth = 0; depth < 66; depth++) nested = { nested };
   const result = await protectNativeProviderResult(
@@ -98,12 +97,9 @@ test('an uninspectable native payload is discarded instead of retaining unsafe r
     },
     {},
   );
-  assert.ok(!JSON.stringify(result).includes(fake()));
-  assert.equal(result.toolRawPayload, undefined);
-  assert.equal(result.toolInput, undefined);
-  assert.match(result.content ?? '', /hidden|轮转/);
-  assert.ok(result.content?.includes('检查未完成'));
-  assert.ok(!result.content?.includes('轮转'));
+  assert.equal(result.toolRawPayload?.rawOutput, nested);
+  assert.equal(result.toolInput?.value, fake());
+  assert.equal(result.content, 'Oversized result');
 });
 
 test('raw native output still counts as exposure when the display content omits it', async () => {
@@ -115,14 +111,14 @@ test('raw native output still counts as exposure when the display content omits 
       content: 'Display summary',
       toolRawPayload: { rawOutput: { value: fake() } },
     },
-    {},
+    { callbackEnv: { CAT_CAFE_CALLBACK_TOKEN: fake() } },
   );
   assert.ok(!JSON.stringify(result).includes(fake()));
   assert.match(result.content ?? '', /轮转/);
 });
 
-test('pooled native result persists a relay warning with current turn auth when the child has none', async () => {
-  const safe = await protectSecretToolResult({ content: [{ type: 'text', text: fake() }] });
+test('an unconfirmed pooled format match cannot manufacture a notice in the host', async () => {
+  const safe = await protectSecretToolResult({ content: [{ type: 'text', text: fake() }] }, { environment: {} });
   const originalFetch = globalThis.fetch;
   let notices = 0;
   globalThis.fetch = (async (_url, init) => {
@@ -137,7 +133,7 @@ test('pooled native result persists a relay warning with current turn auth when 
         catId: 'kimi',
         toolUseId: 'native-relay-call',
         timestamp: 0,
-        content: safe.content.map((part: { text: string }) => part.text).join('\n'),
+        content: `${safe.content.map((part: { text: string }) => part.text).join('\n')}\n${PENDING_EXPOSURE_NOTICE}`,
       },
       {
         callbackEnv: {
@@ -147,8 +143,8 @@ test('pooled native result persists a relay warning with current turn auth when 
         },
       },
     );
-    assert.equal(notices, 1);
-    assert.ok(!JSON.stringify(result).includes(fake()));
+    assert.equal(notices, 0);
+    assert.ok(JSON.stringify(result).includes(fake()));
   } finally {
     globalThis.fetch = originalFetch;
   }

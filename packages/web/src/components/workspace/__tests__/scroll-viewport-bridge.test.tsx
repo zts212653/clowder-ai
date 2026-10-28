@@ -74,7 +74,6 @@ async function render(kind: 'code' | 'markdown') {
           onMdAddToChat={() => undefined}
           onSave={async () => undefined}
           rawUrl={() => ''}
-          revealInFinder={() => undefined}
           restoreScrollTop={0}
           onScrollTopChange={saveScroll}
         />

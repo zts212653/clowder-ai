@@ -24,6 +24,12 @@ export const TRUSTED_CHROME_SETUP_DELIVERIES = Object.freeze([
     version: '0.1.0-alpha.7',
     digest: 'sha512-/lLrNrAsCYEhwHiJuaaiEnG8YIzKGJ+tIX2C8FGFF2BJQd8Rtz6/dg4pXpeVDhUFt16c+7oRitfEnWCGU+Tr+g==',
   }),
+  // Exact alpha.8 health fix: SHA256 f79283d3dc1284b602e0b01be11b8d6e51c1271dbaca34fa959ca654601dd995.
+  // HOME authority remains limited to this archive and the fixed setup runner.
+  Object.freeze({
+    version: '0.1.0-alpha.8',
+    digest: 'sha512-ePdPiPWIyzscHHi9IDi0WGAZK4a9nvDgW6eGkzHA+4gMRqxusmmqMQf8f+ktoGjGFcHUgG4eeJVTlpwm2bj8lg==',
+  }),
 ]);
 
 /** Routing is not authorization: both projection and execution resolve the policy below. */

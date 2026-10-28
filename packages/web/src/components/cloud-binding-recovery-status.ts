@@ -10,6 +10,8 @@ const syncFailureMessages: Record<string, string> = {
   HELPER_UPDATE_REQUIRED: '连接组件需要更新，已有会话授权仍保留。请在插件设置中修复后再刷新。',
   HELPER_NOT_INSTALLED: '本机连接组件尚未就绪，请在插件设置中检查。',
   EXTENSION_RELOAD_REQUIRED: 'Chrome 扩展需要重载，已有会话授权仍保留。重载后再刷新名称。',
+  PAGE_RELOAD_REQUIRED:
+    '原对话页面仍在使用旧连接。请重载该页面，再到插件设置对这条会话点「检查会话页面」。已有会话授权仍保留。',
   STALE_HELPER: '连接组件已更新，但 Chrome 仍在使用旧组件。重载扩展后再刷新。',
   STALE_HELPER_PROTOCOL: 'Chrome 仍在使用旧连接组件，请在插件设置中更新并重载扩展。',
   CHROME_DISCONNECTED: '暂时无法连接 Chrome。请确认扩展已连接，再刷新名称。',
@@ -27,6 +29,7 @@ function connectionIssueFor(state: PluginStatus): string | undefined {
   )
     return syncFailureMessages.HELPER_UPDATE_REQUIRED;
   if (status?.delivery?.reloadRequired === true) return syncFailureMessages.EXTENSION_RELOAD_REQUIRED;
+  if (status?.delivery?.pageReloadRequired === true) return syncFailureMessages.PAGE_RELOAD_REQUIRED;
   if (status?.helper?.state === 'unreachable') return syncFailureMessages.CHROME_DISCONNECTED;
   return undefined;
 }

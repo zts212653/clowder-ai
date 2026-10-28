@@ -3,12 +3,19 @@ import { useEffect, useMemo, useState } from 'react';
 import { apiFetch } from '@/utils/api-client';
 import { isMemorySearchData, type MemorySearchData, type SearchType } from './memory-search-types';
 
-export function useMemorySearch() {
-  const [input, setInput] = useState('');
-  const [query, setQuery] = useState<string | null>(null);
+export function useMemorySearch(initialQuery?: string) {
+  const initial = initialQuery?.trim() ?? '';
+  const [input, setInput] = useState(initial);
+  const [query, setQuery] = useState<string | null>(initial || null);
   const [type, setType] = useState<SearchType>('all');
   const [depth, setDepth] = useState<'summary' | 'raw'>('summary');
   const [attempt, setAttempt] = useState(0);
+  useEffect(() => {
+    setInput(initial);
+    setQuery(initial || null);
+    setType('all');
+    setDepth('summary');
+  }, [initial]);
   const request = useMemo(
     () => (query === null ? null : { query, type, depth, attempt }),
     [query, type, depth, attempt],

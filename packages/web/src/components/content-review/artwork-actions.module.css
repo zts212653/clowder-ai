@@ -44,10 +44,11 @@
 }
 .menu {
   position: fixed;
+  margin: 0;
   z-index: 90;
   width: 300px;
   max-width: calc(100vw - 16px);
-  max-height: calc(100dvh - 24px);
+  max-height: min(550px, calc(100dvh - 24px));
   overflow: auto;
   padding: 6px;
   border: 1px solid var(--cafe-border);
@@ -55,6 +56,14 @@
   background: var(--cafe-surface);
   color: var(--cafe-text);
   box-shadow: 0 12px 48px #0005;
+}
+.headerActions > .download,
+.workHeader .download {
+  background: transparent;
+  color: inherit;
+}
+.download:hover {
+  text-decoration: underline;
 }
 .menu button,
 .menu a {
@@ -131,6 +140,7 @@
   color: var(--cafe-text);
   box-shadow: 0 4px 20px #0004;
   font-size: 13px;
+  white-space: nowrap;
 }
 @media (max-width: 600px) {
   .header {

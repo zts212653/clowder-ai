@@ -1,12 +1,13 @@
 'use client';
 import type { ThreadArtifactDTO } from '@cat-cafe/shared';
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { ShellGlyph } from '@/components/shell/ShellIcons';
 import { useShellCopy } from '@/components/shell/shell-copy';
 import { API_URL } from '@/utils/api-client';
 import { resolveAssetUrl } from './artifact-view';
 import { useNearWorkViewport } from './useNearWorkViewport';
-import { useWorkCardDescription, type WorkCardDescription, workVideoPoster } from './useWorkCardDescription';
+import { useWorkCardDescription, type WorkCardDescription, workVideoDemo } from './useWorkCardDescription';
+import { requestWorkVideoFrame, type WorkVideoFrame } from './work-video-frame';
 import { worksPanelCopy } from './works-panel.shell-copy';
 
 export function WorkVideoPreview({
@@ -18,90 +19,72 @@ export function WorkVideoPreview({
   description?: WorkCardDescription | null;
   pending?: boolean;
 }) {
-  const { ref, near } = useNearWorkViewport<HTMLSpanElement>();
+  const { ref, near } = useNearWorkViewport<HTMLSpanElement>({ rootMargin: '0px', once: false });
   const read = useWorkCardDescription(artifact.work, near && description === undefined);
-  const poster = workVideoPoster(description ?? read.description);
+  const demo = workVideoDemo(description ?? read.description);
   const url = resolveAssetUrl(artifact.url, API_URL);
   const t = useShellCopy(worksPanelCopy);
   return (
     <span ref={ref} className="work-cover work-cover-video">
-      {near && url && !read.loading && !pending ? (
-        <VideoFrame key={`${url}:${poster ?? ''}`} url={url} poster={poster} label={t.filters.video} />
-      ) : (
-        <>
-          <span className="work-cover-play">
-            <ShellGlyph name="play" className="h-5 w-5" />
-          </span>
-          <span className="work-cover-badge work-cover-video-badge">
-            <ShellGlyph name="play" className="h-3 w-3" />
-            {t.filters.video}
-          </span>
-        </>
-      )}
+      <VideoFrame
+        key={`${url}:${demo?.poster ?? ''}`}
+        url={url}
+        poster={demo?.poster}
+        duration={demo?.durationSeconds}
+        enabled={near && (description !== undefined || !read.loading) && !pending}
+        label={t.filters.video}
+      />
     </span>
   );
 }
 
-function VideoFrame({ url, poster, label }: { url: string; poster?: string | null; label: string }) {
-  const [failed, setFailed] = useState(false);
-  const [ready, setReady] = useState(false);
-  const [duration, setDuration] = useState<number>();
+function VideoFrame({
+  url,
+  poster,
+  duration,
+  enabled,
+  label,
+}: {
+  url?: string;
+  poster?: string;
+  duration?: number;
+  enabled: boolean;
+  label: string;
+}) {
+  const [frame, setFrame] = useState<WorkVideoFrame | null>(null);
   const [posterFailed, setPosterFailed] = useState(false);
   const cover = poster && !posterFailed ? poster : undefined;
+  const canvas = useRef<HTMLCanvasElement>(null);
+  useEffect(() => {
+    if (!enabled || !url || cover || frame) return;
+    return requestWorkVideoFrame(url, setFrame);
+  }, [enabled, url, cover, frame]);
+  useEffect(() => {
+    if (!frame || !canvas.current) return;
+    canvas.current.width = frame.canvas.width;
+    canvas.current.height = frame.canvas.height;
+    canvas.current.getContext('2d')?.drawImage(frame.canvas, 0, 0);
+  }, [frame]);
+  const seconds = frame?.duration ?? duration;
   const time =
-    duration === undefined
-      ? null
-      : `${Math.floor(duration / 60)}:${String(Math.floor(duration % 60)).padStart(2, '0')}`;
+    seconds !== undefined && Number.isFinite(seconds) && seconds > 0
+      ? `${Math.floor(seconds / 60)}:${String(Math.floor(seconds % 60)).padStart(2, '0')}`
+      : label;
   return (
     <>
-      {!failed && (
-        <video
-          key={cover ?? 'frame'}
-          src={url}
-          poster={cover}
-          muted
-          playsInline
-          preload="metadata"
-          aria-hidden="true"
-          tabIndex={-1}
-          className={cover || ready ? 'work-cover-frame' : 'work-cover-frame work-cover-frame-pending'}
-          onLoadedMetadata={(event) => {
-            const video = event.currentTarget;
-            if (Number.isFinite(video.duration) && video.duration > 0) {
-              setDuration(video.duration);
-              if (!cover) video.currentTime = Math.min(4, video.duration * 0.3);
-            }
-          }}
-          onSeeked={() => setReady(true)}
-          onLoadedData={(event) => {
-            if (cover || event.currentTarget.currentTime > 0) setReady(true);
-          }}
-          onError={() => {
-            setFailed(true);
-            setDuration(undefined);
-          }}
-        />
+      {frame && <canvas ref={canvas} className="work-cover-frame" aria-hidden="true" tabIndex={-1} />}
+      {cover && enabled && (
+        // biome-ignore lint/performance/noImgElement: exact registered cut, with fallback to a queued frame.
+        <img className="work-cover-poster" src={cover} alt="" onError={() => setPosterFailed(true)} />
       )}
-      {cover && (
-        // biome-ignore lint/performance/noImgElement: covers are already published static assets, with explicit error recovery.
-        <img
-          className="work-cover-poster"
-          src={cover}
-          alt=""
-          onError={() => {
-            setPosterFailed(true);
-            setReady(false);
-          }}
-        />
-      )}
-      {(!cover && !ready) || failed ? (
+      {!cover && !frame && (
         <span className="work-cover-play">
           <ShellGlyph name="play" className="h-5 w-5" />
         </span>
-      ) : null}
+      )}
       <span className="work-cover-badge work-cover-video-badge">
         <ShellGlyph name="play" className="h-3 w-3" />
-        {time ?? label}
+        {time}
       </span>
     </>
   );

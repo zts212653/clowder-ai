@@ -21,6 +21,7 @@ import type {
   Roster,
 } from '@cat-cafe/shared';
 import {
+  backgroundImageUrlSchema,
   CAT_CARRIERS,
   type ClientId,
   catClientSupportsCarrier,
@@ -154,6 +155,7 @@ const catVariantSchema = z
     personality: z.string().optional(),
     strengths: z.array(z.string()).optional(),
     avatar: z.string().min(1).optional(), // F32-b P4c: override breed avatar
+    banner: backgroundImageUrlSchema.nullable().optional(),
     color: colorSchema.optional(), // F32-b P4c: override breed color
     /** clowder-ai#1208: explicit context window cap. undefined=Auto, positive int=Manual. */
     contextWindow: z.number().int().positive().optional(),
@@ -766,6 +768,7 @@ export function toAllCatConfigs(config: CatCafeConfig): Record<string, CatConfig
         displayName: variant.displayName ?? breed.displayName,
         ...(nickname != null ? { nickname } : {}),
         avatar: variant.avatar ?? breed.avatar, // F32-b P4c: variant can override
+        ...(variant.banner ? { banner: variant.banner } : {}),
         color: variant.color ?? breed.color, // F32-b P4c: variant can override
         mentionPatterns,
         ...(variant.accountRef != null ? { accountRef: variant.accountRef } : {}),

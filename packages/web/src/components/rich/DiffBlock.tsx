@@ -9,7 +9,7 @@ export function DiffBlock({ block }: { block: RichDiffBlock }) {
       <div className="bg-[var(--ws-editor-bg)] px-3 py-1.5 text-xs font-mono text-cafe-muted console-divider-b truncate">
         {block.filePath}
       </div>
-      <DiffViewer diff={block.diff} compact />
+      <DiffViewer diff={block.diff} fallbackFilePath={block.filePath} compact />
     </div>
   );
 }

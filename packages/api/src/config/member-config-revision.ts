@@ -15,9 +15,14 @@ export class MemberConfigurationConflict extends Error {
 export function memberConfigurationRevision(projectRoot: string, catId: string): string | undefined {
   const raw = readCatCatalogRaw(projectRoot, { persistMigrations: false });
   if (!raw) return undefined;
-  const cat = toAllCatConfigs(JSON.parse(raw) as CatCafeConfig)[catId];
+  const config = JSON.parse(raw) as CatCafeConfig;
+  const cat = toAllCatConfigs(config)[catId];
   if (!cat) return undefined;
-  return createHash('sha256').update(JSON.stringify(cat)).digest('hex');
+  // Public projection omits tombstones. The member's authored overrides must also invalidate an older editor.
+  const variant = config.breeds.flatMap((breed) =>
+    breed.variants.filter((entry) => (entry.catId ?? breed.catId) === catId),
+  )[0];
+  return createHash('sha256').update(JSON.stringify({ cat, variant })).digest('hex');
 }
 
 export function updateMemberWithRevision(

@@ -6,7 +6,11 @@ import {
   type PawFeelDirectRepairAuthorityDecisionV1,
   type PawFeelDirectRepairBindingV1,
   type PawFeelDispositionProjection,
+  type PawFeelRepairRequest,
+  pawFeelRepairBinding,
+  pawFeelRepairRequest,
   refIdentity,
+  repairRequestForBinding,
 } from '@cat-cafe/shared';
 import type { PawFeelFixResolver } from '../command-context.js';
 import type { PawFeelResolvedFix } from '../commands.js';
@@ -69,18 +73,18 @@ function deriveBindingRef(
   });
 }
 
-function requireResolvedCustody(fix: PawFeelResolvedFix, requestedLeaseId: string): PawFeelResolvedFix {
+function requireResolvedCustody(fix: PawFeelResolvedFix, requested: PawFeelRepairRequest): PawFeelResolvedFix {
+  const binding = pawFeelRepairBinding(fix);
   if (
-    fix.leaseId !== requestedLeaseId ||
+    !binding ||
+    JSON.stringify(repairRequestForBinding(binding)) !== JSON.stringify(requested) ||
     !fix.ownerCatId.trim() ||
     !fix.taskId.trim() ||
-    !Number.isSafeInteger(fix.leaseGeneration) ||
-    fix.leaseGeneration < 0 ||
     !fix.custodyEvidenceRef.trim()
   ) {
     throw new PawFeelDirectRepairError(
       'terminal_evidence_invalid',
-      'Task/F167 custody does not match the requested lease identity',
+      'repair responsibility differs from the exact requested reference',
     );
   }
   return fix;
@@ -91,14 +95,23 @@ export class PawFeelDirectRepairResolver {
 
   async resolve(input: {
     projection: PawFeelDispositionProjection;
-    leaseId: string;
+    leaseId?: string;
+    repairBinding?: PawFeelRepairRequest;
+    userId?: string;
     actionRef: string;
   }): Promise<PawFeelDirectRepairResolution> {
     const source = await this.options.sourceVerifier.verify(input.projection);
     const selected = this.options.federation.select(source.sourceToolRef);
     const actionRef = typeof input.actionRef === 'string' ? input.actionRef.trim() : '';
     if (!actionRef) throw new PawFeelDirectRepairError('action_not_found', 'actionRef must be non-empty');
-    const fix = requireResolvedCustody(await this.options.custodyResolver.resolve(input.leaseId), input.leaseId);
+    const requested = pawFeelRepairRequest(input);
+    const fix = requireResolvedCustody(
+      await this.options.custodyResolver.resolve(
+        requested.kind === 'action_lease' ? requested.leaseId : requested,
+        input.userId,
+      ),
+      requested,
+    );
     let decision: PawFeelDirectRepairAuthorityDecisionV1;
     try {
       decision = await selected.provider.resolveAuthority({ source, custody: fix, actionRef });

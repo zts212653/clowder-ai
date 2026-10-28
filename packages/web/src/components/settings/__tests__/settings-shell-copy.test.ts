@@ -35,6 +35,7 @@ describe('the 设置与管理 catalogue words follow settings-ia, which stays th
   it('the English names are the approved table, not a translation made on the spot', () => {
     expect(settingsShellCopy.en.title).toBe('Settings');
     expect(settingsShellCopy.en.entries).toEqual({
+      you: 'You',
       team: 'Cat team',
       schedule: 'Scheduling',
       evolution: 'Capability evolution',

@@ -2,6 +2,7 @@ import {
   MAX_MESSAGE_OUTPUT_REFS,
   MAX_MESSAGE_OUTPUT_RUNS,
   type MessageOutputOwner,
+  type OutputMessageIdentity,
   readHostSignatureOutput,
   readOutputMessageIdentity,
   sameOutputMessageIdentity,
@@ -67,22 +68,63 @@ function appendRun(state: MessageOutputState, run: OutputTextRun): MessageOutput
 
 type Observation = ReturnType<typeof observation>;
 
+function continuesAcrossTools(
+  state: MessageOutputState,
+  next: Observation,
+  index: number,
+  previous: OutputTextRun,
+  signatureSuffix?: string,
+) {
+  // One native run stays anchored at its first text observation; late command
+  // results retain their arrival order. Only a proven producer signature removal
+  // may shorten the observed text; ordinary prefix truncation remains conflict.
+  const removedOwnSignature = signatureSuffix !== undefined && (next.text + signatureSuffix).startsWith(previous.text);
+  return (
+    state.entries.slice(index + 1).every((entry) => entry.kind === 'tool') &&
+    (next.mode === 'append' || next.text.startsWith(previous.text) || removedOwnSignature)
+  );
+}
+
+function duplicateCompletion(previous: OutputTextRun, next: Observation): boolean {
+  return (
+    previous.complete &&
+    next.complete &&
+    previous.channel === next.channel &&
+    next.mode === 'replace' &&
+    previous.text === next.text
+  );
+}
+
+function latestNativeRunIndex(state: MessageOutputState, identity: OutputMessageIdentity, next: Observation): number {
+  let latest = -1;
+  const completion = next.complete && next.mode === 'replace';
+  for (let index = state.entries.length - 1; index >= 0; index--) {
+    const entry = state.entries[index];
+    if (entry.kind !== 'text' || !entry.identity || !sameOutputMessageIdentity(entry.identity, identity)) continue;
+    // A retry of either side of a past conflict is still a duplicate, even if
+    // the other observation was more recent. New fragments use the latest run.
+    if (!completion || duplicateCompletion(entry, next)) return index;
+    if (latest < 0) latest = index;
+  }
+  return latest;
+}
+
 function updateExistingRun(
   state: MessageOutputState,
   next: Observation,
   index: number,
   previous: OutputTextRun,
+  signatureSuffix?: string,
 ): MessageOutputState {
   const sameChannel = previous.channel === next.channel;
   const observedChannel = previous.channel === undefined && next.channel !== undefined && !previous.complete;
-  const duplicateCompletion =
-    previous.complete && next.complete && sameChannel && next.mode === 'replace' && previous.text === next.text;
-  if (duplicateCompletion) return next.reason ? { ...state, reason: state.reason ?? next.reason } : state;
+  if (duplicateCompletion(previous, next))
+    return next.reason ? { ...state, reason: state.reason ?? next.reason } : state;
   const conflictingObservation = next.reason && next.reason !== 'content_changed';
   if (
     (!sameChannel && !observedChannel) ||
     previous.complete ||
-    index !== state.entries.length - 1 ||
+    (index !== state.entries.length - 1 && !continuesAcrossTools(state, next, index, previous, signatureSuffix)) ||
     conflictingObservation
   ) {
     // Contradictory public text remains readable, with no classification claim.
@@ -157,13 +199,9 @@ export function accumulateMessageOutputText(
     };
   }
   const identity = next.identity;
-  const index = identity
-    ? state.entries.findIndex(
-        (entry) => entry.kind === 'text' && entry.identity && sameOutputMessageIdentity(entry.identity, identity),
-      )
-    : -1;
+  const index = identity ? latestNativeRunIndex(state, identity, next) : -1;
   const previous = state.entries[index];
-  if (previous?.kind === 'text') return updateExistingRun(state, next, index, previous);
+  if (previous?.kind === 'text') return updateExistingRun(state, next, index, previous, input.nativeSignatureSuffix);
   const reason = state.reason ?? next.reason ?? (invalidOuterMode(input.textMode) ? 'conflict' : undefined);
   return appendUnobservedRun({ ...state, ...(reason ? { reason } : {}) }, next);
 }

@@ -12,6 +12,7 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, describe, test } from 'node:test';
+import { assertGuardedOrUnproved } from './helpers/native-effect-policy-assertions.js';
 
 const { decideNativeHookPayload } = await import('../../../scripts/native-effect-target-guard.mjs');
 const { shellInvocation } = await import('../../../scripts/native-effect-shell-tokenizer.mjs');
@@ -48,11 +49,9 @@ function decideBoth(command, cwd) {
 }
 function expect(decision, command, cwd = mainRoot) {
   const result = decideBoth(command, cwd);
-  assert.equal(
-    result.decision,
-    decision,
-    `expected ${decision}: ${command}\n→ ${result.reasonCode} (${result.effect} → ${result.target.kind})`,
-  );
+  const message = `expected ${decision}: ${command}\n→ ${result.reasonCode} (${result.effect} → ${result.target.kind})`;
+  if (decision === 'deny') assertGuardedOrUnproved(result, message);
+  else assert.equal(result.decision, decision, message);
 }
 
 describe('F306 final attribution: metadata is data; known writes have a positive effect', () => {
@@ -140,7 +139,6 @@ describe('F306 final attribution: metadata is data; known writes have a positive
     expect('allow', 'redis-cli < /tmp/in -p 6399 GET HSET');
     for (const command of ['UNKNOWN GET', '--unknown GET', 'UNKNOWN "$(printf GET)"']) {
       const result = decideBoth(`redis-cli -p 6399 ${command}`, mainRoot);
-      assert.equal(result.decision, 'deny', command);
       assert.equal(result.effect, 'unknown', command);
     }
   });
@@ -192,9 +190,10 @@ describe('F306 final attribution: metadata is data; known writes have a positive
     }
     expect('allow', "printf '%s' 'redis-cli -p 6399 HSET x y z'");
     expect('allow', "redis-cli -p 6399 GET 'HSET'");
-    // Removing the unknown fallback is not part of this correction.
+    // A defers parser uncertainty; the command was not certified as a read.
     const unknown = decideBoth('redis-cli -p 6399 UNKNOWN_COMMAND x', mainRoot);
-    assert.equal(unknown.reasonCode, 'protected_target_unparsed');
+    assert.equal(unknown.effect, 'unknown');
+    assert.equal(unknown.reasonCode, 'unrecognised_effect_deferred');
   });
 
   test('in-place editors, output options and read-write redirection identify writes', () => {

@@ -127,6 +127,7 @@ export interface RouteBroadcaster {
 
 /** Dependencies shared across route strategies */
 export interface RouteStrategyDeps {
+  messageSearchAnswerService?: import('../../../../memory/MessageSearchAnswerPublicationService.js').MessageSearchAnswerPublicationService;
   routingDispatchPreflight?: import('../../../../routing-context/RoutingDispatchPreflightPort.js').RoutingDispatchPreflightPort;
   services: Record<string, AgentService>;
   unavailableServices?: ReadonlyMap<string, AgentRegistrationFailure>;

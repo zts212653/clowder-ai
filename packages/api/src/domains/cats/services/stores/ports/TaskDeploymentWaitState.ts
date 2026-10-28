@@ -26,7 +26,11 @@ export function deploymentWaitReplacementMatches(
 }
 
 /** A custody or terminal Task write consumes its armed deployment wait in the same aggregate write. */
-export function reconcileDeploymentWaitTaskMutation(previous: TaskItem, next: TaskItem): TaskItem {
+export function reconcileDeploymentWaitTaskMutation(
+  previous: TaskItem,
+  next: TaskItem,
+  options: { statusIsExplicit?: boolean } = {},
+): TaskItem {
   const active = previous.deploymentWait?.await;
   // An admitted message may still be retried. Terminal work and owner changes
   // must revoke that authority in the same Task write, even after delivery.
@@ -43,6 +47,8 @@ export function reconcileDeploymentWaitTaskMutation(previous: TaskItem, next: Ta
   const nextStep = active ? active.continuation.then : matched?.nextStep;
   return {
     ...next,
+    // Ending an owner's parked wait resumes responsibility, unless the caller explicitly chose a status.
+    ...(ownerChanged && !terminal && !options.statusIsExplicit ? { status: 'doing' as const } : {}),
     deploymentWait: {
       waitOutcome: {
         v: 1,

@@ -77,6 +77,7 @@ function assertGlobalReads(reads) {
 
 async function openProof() {
   const page = await browser.newPage();
+  await page.addInitScript(() => localStorage.setItem('cat-cafe:shell-language', 'en'));
   const reads = [],
     writes = [],
     errors = [];

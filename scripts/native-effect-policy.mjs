@@ -25,6 +25,11 @@ const TARGETS = new Set([
 /** Pure provider-neutral policy. Filesystem capability remains outside this guard. */
 export function decideNativeEffect(candidate) {
   if (!isCandidate(candidate)) return deny(candidate, 'invalid_candidate');
+  if (candidate.effect === 'unknown')
+    return allow(
+      candidate,
+      candidate.target.kind === 'ordinary' ? 'ordinary_policy_deferred' : 'unrecognised_effect_deferred',
+    );
   if (candidate.effect === 'read') return allow(candidate, 'read_only');
   if (candidate.effect === 'repository_refresh') return allow(candidate, 'remote_tracking_refresh');
   if (candidate.effect === 'remote_mutation') {
@@ -39,14 +44,13 @@ export function decideNativeEffect(candidate) {
 }
 
 // Deny = recognised dangerous effect on a protected target (operator: fail closed on the physical target,
-// ordinary targets go to sandbox/permission/custody). `unknown` still denies on the two literal
-// sanctuaries, runtime and Redis 6399 -- #4807's conservative line, named in argv, cwd or redirection.
+// ordinary targets go to sandbox/permission/custody). An unrecognised effect is
+// deferred above; it is neither a proved read nor evidence of a mutation.
 const PROTECTED_POLICIES = {
-  runtime_sanctuary: (candidate) =>
-    deny(candidate, candidate.effect === 'unknown' ? 'protected_target_unparsed' : 'runtime_sanctuary_mutation'),
+  runtime_sanctuary: (candidate) => deny(candidate, 'runtime_sanctuary_mutation'),
   redis_sanctuary: (candidate) =>
-    ['service_mutation', 'process_control', 'delete', 'repository_rewrite', 'unknown'].includes(candidate.effect)
-      ? deny(candidate, candidate.effect === 'unknown' ? 'protected_target_unparsed' : 'redis_sanctuary_mutation')
+    ['service_mutation', 'process_control', 'delete', 'repository_rewrite'].includes(candidate.effect)
+      ? deny(candidate, 'redis_sanctuary_mutation')
       : null,
   broad_root: (candidate) =>
     ['delete', 'repository_rewrite', 'process_control', 'service_mutation'].includes(candidate.effect)

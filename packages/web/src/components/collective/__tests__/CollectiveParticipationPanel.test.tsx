@@ -2,7 +2,7 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-vi.mock('@/utils/api-client', () => ({ apiFetch: vi.fn() }));
+vi.mock('@/utils/api-client', () => ({ apiFetch: vi.fn(), API_URL: 'http://127.0.0.1:3102' }));
 
 import { apiFetch } from '@/utils/api-client';
 import { CollectiveParticipationPanel } from '../CollectiveParticipationPanel';
@@ -132,6 +132,16 @@ describe('Collective owner participation interactions', () => {
     expect(container.textContent?.indexOf('我的猫')).toBeLessThan(
       container.textContent?.indexOf('这段讨论带回的请求与工作') ?? -1,
     );
+  });
+
+  it('retains a local canonical avatar in the home roster', async () => {
+    fetchMock.mockImplementation(async () =>
+      response({ ...view, cats: [{ ...view.cats[0], avatar: '/api/cats/codex-astra/avatar?bindingRevision=2' }] }),
+    );
+    await open();
+    expect(
+      container.querySelector('img[src="http://127.0.0.1:3102/api/cats/codex-astra/avatar?bindingRevision=2"]'),
+    ).not.toBeNull();
   });
 
   it('shows registered identities and the next action before Work, while keeping exclusions visible', async () => {

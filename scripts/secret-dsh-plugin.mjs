@@ -7,6 +7,7 @@ export const inject = ['tools', 'workingDirectory'];
 export function apply(ctx) {
   if (typeof ctx.tools.guard !== 'function') throw new Error('secret_dsh_guard_api_unavailable');
   ctx.tools.guard((execution) => {
+    if (!['bash', 'shell', 'exec_command', 'run_command'].includes(execution.name.toLowerCase())) return undefined;
     try {
       return (
         nativeSecretDenial({

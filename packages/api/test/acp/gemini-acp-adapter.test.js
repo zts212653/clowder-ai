@@ -1,3 +1,4 @@
+import { fileURLToPath as nativeEntrypointPath } from 'node:url';
 /**
  * AcpAgentService unit tests — Phase C: pool-backed AgentService via AcpClient.
  * F161: Renamed from GeminiAcpAdapter tests.
@@ -5,12 +6,12 @@
 
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { PassThrough } from 'node:stream';
 import { afterEach, describe, it, mock } from 'node:test';
-import { assertCurrentCallback, secretMcpContract } from '../helpers/secret-mcp-contract.js';
+import { assertCurrentCallback, directMcpContract } from '../helpers/direct-mcp-contract.js';
 
 const { AcpAgentService: GeminiAcpAdapter } = await import(
   '../../dist/domains/cats/services/agents/providers/acp/AcpAgentService.js'
@@ -73,12 +74,12 @@ function createPoolWithAutoRespond({ usageUpdate = false } = {}) {
       captured.push(msg);
       if (msg.method === 'initialize') {
         setImmediate(() =>
-          agentStdout.write(JSON.stringify({ jsonrpc: '2.0', id: msg.id, result: INIT_RESULT }) + '\n'),
+          agentStdout.write(`${JSON.stringify({ jsonrpc: '2.0', id: msg.id, result: INIT_RESULT })}\n`),
         );
       } else if (msg.method === 'session/new') {
         setImmediate(() =>
           agentStdout.write(
-            JSON.stringify({
+            `${JSON.stringify({
               jsonrpc: '2.0',
               id: msg.id,
               result: {
@@ -95,53 +96,53 @@ function createPoolWithAutoRespond({ usageUpdate = false } = {}) {
                   },
                 ],
               },
-            }) + '\n',
+            })}\n`,
           ),
         );
       } else if (msg.method === 'session/load') {
         setImmediate(() =>
           agentStdout.write(
-            JSON.stringify({
+            `${JSON.stringify({
               jsonrpc: '2.0',
               id: msg.id,
               result: {
                 sessionId: msg.params.sessionId,
                 configOptions: [],
               },
-            }) + '\n',
+            })}\n`,
           ),
         );
       } else if (msg.method === 'session/set_config_option') {
         setImmediate(() =>
-          agentStdout.write(JSON.stringify({ jsonrpc: '2.0', id: msg.id, result: { configOptions: [] } }) + '\n'),
+          agentStdout.write(`${JSON.stringify({ jsonrpc: '2.0', id: msg.id, result: { configOptions: [] } })}\n`),
         );
       } else if (msg.method === 'session/prompt') {
         setImmediate(() => {
           if (usageUpdate) {
             agentStdout.write(
-              JSON.stringify({
+              `${JSON.stringify({
                 jsonrpc: '2.0',
                 method: 'session/update',
                 params: {
                   sessionId: msg.params.sessionId,
                   update: { sessionUpdate: 'usage_update', used: 85_000, size: 100_000 },
                 },
-              }) + '\n',
+              })}\n`,
             );
           }
           agentStdout.write(
-            JSON.stringify({
+            `${JSON.stringify({
               jsonrpc: '2.0',
               method: 'session/update',
               params: {
                 sessionId: msg.params.sessionId,
                 update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'Hello from ACP!' } },
               },
-            }) + '\n',
+            })}\n`,
           );
           setTimeout(() => {
             agentStdout.write(
-              JSON.stringify({ jsonrpc: '2.0', id: msg.id, result: { stopReason: 'end_turn' } }) + '\n',
+              `${JSON.stringify({ jsonrpc: '2.0', id: msg.id, result: { stopReason: 'end_turn' } })}\n`,
             );
           }, 10);
         });
@@ -241,7 +242,13 @@ describe('GeminiAcpAdapter', () => {
       pool,
       poolKey: TEST_POOL_KEY,
       projectRoot: '/tmp',
-      mcpServers: [{ name: 'cat-cafe-collab', command: 'node', args: ['collab.js'] }],
+      mcpServers: [
+        {
+          name: 'cat-cafe-collab',
+          command: process.execPath,
+          args: [nativeEntrypointPath(new URL('../../../mcp-server/dist/collab.js', import.meta.url))],
+        },
+      ],
     });
 
     const messages = [];
@@ -266,8 +273,8 @@ describe('GeminiAcpAdapter', () => {
       mcpServers: [
         {
           name: 'cat-cafe-collab',
-          command: 'node',
-          args: ['mcp.js'],
+          command: process.execPath,
+          args: [nativeEntrypointPath(new URL('../../../mcp-server/dist/collab.js', import.meta.url))],
           env: [
             { name: 'CAT_CAFE_INVOCATION_ID', value: 'old-invocation' },
             { name: 'CAT_CAFE_CALLBACK_TOKEN', value: 'old-token' },
@@ -296,16 +303,18 @@ describe('GeminiAcpAdapter', () => {
       false,
       'successful resume must not create a new session',
     );
-    const { proxyEnv, upstream } = secretMcpContract(sessionLoad.params.mcpServers[0]);
+    const { launchEnv, upstream } = directMcpContract(sessionLoad.params.mcpServers[0]);
     const expected = {
       CAT_CAFE_INVOCATION_ID: 'new-invocation',
       CAT_CAFE_CALLBACK_TOKEN: 'new-token',
       CAT_CAFE_API_URL: 'http://127.0.0.1:3004',
       CAT_CAFE_THREAD_ID: 'thread-new',
     };
-    assert.deepEqual(proxyEnv, expected);
+    assert.deepEqual(launchEnv, expected);
     assert.deepEqual(upstream.env, expected, 'resumed builtin must receive this turn, not the previous credentials');
-    assert.deepEqual(upstream.args, ['mcp.js']);
+    assert.deepEqual(upstream.args, [
+      nativeEntrypointPath(new URL('../../../mcp-server/dist/collab.js', import.meta.url)),
+    ]);
   });
 
   it('preserves ACP session affinity when resuming across idle pool clients', async () => {
@@ -661,38 +670,38 @@ describe('GeminiAcpAdapter', () => {
         captured.push(msg);
         if (msg.method === 'initialize') {
           setImmediate(() =>
-            agentStdout.write(JSON.stringify({ jsonrpc: '2.0', id: msg.id, result: INIT_RESULT }) + '\n'),
+            agentStdout.write(`${JSON.stringify({ jsonrpc: '2.0', id: msg.id, result: INIT_RESULT })}\n`),
           );
         } else if (msg.method === 'session/load') {
           setImmediate(() =>
             agentStdout.write(
-              JSON.stringify({
+              `${JSON.stringify({
                 jsonrpc: '2.0',
                 id: msg.id,
                 error: { code: -32000, message: 'session not found' },
-              }) + '\n',
+              })}\n`,
             ),
           );
         } else if (msg.method === 'session/new') {
           setImmediate(() =>
             agentStdout.write(
-              JSON.stringify({ jsonrpc: '2.0', id: msg.id, result: { sessionId: 'fresh-session' } }) + '\n',
+              `${JSON.stringify({ jsonrpc: '2.0', id: msg.id, result: { sessionId: 'fresh-session' } })}\n`,
             ),
           );
         } else if (msg.method === 'session/prompt') {
           setImmediate(() => {
             agentStdout.write(
-              JSON.stringify({
+              `${JSON.stringify({
                 jsonrpc: '2.0',
                 method: 'session/update',
                 params: {
                   sessionId: msg.params.sessionId,
                   update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'fresh ok' } },
                 },
-              }) + '\n',
+              })}\n`,
             );
             agentStdout.write(
-              JSON.stringify({ jsonrpc: '2.0', id: msg.id, result: { stopReason: 'end_turn' } }) + '\n',
+              `${JSON.stringify({ jsonrpc: '2.0', id: msg.id, result: { stopReason: 'end_turn' } })}\n`,
             );
           });
         }
@@ -744,7 +753,7 @@ describe('GeminiAcpAdapter', () => {
       modelName: 'gemini-acp',
     });
 
-    for await (const msg of adapter.invoke('hello')) {
+    for await (const _msg of adapter.invoke('hello')) {
       /* drain */
     }
 
@@ -773,7 +782,7 @@ describe('GeminiAcpAdapter', () => {
         mcpSupport: false, // member has MCP disabled
       });
 
-      for await (const msg of adapter.invoke('hello', { workingDirectory: userProjectDir })) {
+      for await (const _msg of adapter.invoke('hello', { workingDirectory: userProjectDir })) {
         /* drain */
       }
 
@@ -828,12 +837,12 @@ describe('GeminiAcpAdapter', () => {
         captured.push(msg);
         if (msg.method === 'initialize') {
           setImmediate(() =>
-            agentStdout.write(JSON.stringify({ jsonrpc: '2.0', id: msg.id, result: INIT_RESULT }) + '\n'),
+            agentStdout.write(`${JSON.stringify({ jsonrpc: '2.0', id: msg.id, result: INIT_RESULT })}\n`),
           );
         } else if (msg.method === 'session/new') {
           setImmediate(() =>
             agentStdout.write(
-              JSON.stringify({
+              `${JSON.stringify({
                 jsonrpc: '2.0',
                 id: msg.id,
                 result: {
@@ -847,23 +856,23 @@ describe('GeminiAcpAdapter', () => {
                     },
                   ],
                 },
-              }) + '\n',
+              })}\n`,
             ),
           );
         } else if (msg.method === 'session/prompt') {
           setImmediate(() => {
             agentStdout.write(
-              JSON.stringify({
+              `${JSON.stringify({
                 jsonrpc: '2.0',
                 method: 'session/update',
                 params: {
                   sessionId: msg.params.sessionId,
                   update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'ok' } },
                 },
-              }) + '\n',
+              })}\n`,
             );
             agentStdout.write(
-              JSON.stringify({ jsonrpc: '2.0', id: msg.id, result: { stopReason: 'end_turn' } }) + '\n',
+              `${JSON.stringify({ jsonrpc: '2.0', id: msg.id, result: { stopReason: 'end_turn' } })}\n`,
             );
           });
         }
@@ -911,12 +920,12 @@ describe('GeminiAcpAdapter', () => {
         const msg = JSON.parse(line);
         if (msg.method === 'initialize') {
           setImmediate(() =>
-            agentStdout.write(JSON.stringify({ jsonrpc: '2.0', id: msg.id, result: INIT_RESULT }) + '\n'),
+            agentStdout.write(`${JSON.stringify({ jsonrpc: '2.0', id: msg.id, result: INIT_RESULT })}\n`),
           );
         } else if (msg.method === 'session/new') {
           setImmediate(() =>
             agentStdout.write(
-              JSON.stringify({
+              `${JSON.stringify({
                 jsonrpc: '2.0',
                 id: msg.id,
                 result: {
@@ -930,33 +939,33 @@ describe('GeminiAcpAdapter', () => {
                     },
                   ],
                 },
-              }) + '\n',
+              })}\n`,
             ),
           );
         } else if (msg.method === 'session/set_config_option') {
           setImmediate(() =>
             agentStdout.write(
-              JSON.stringify({
+              `${JSON.stringify({
                 jsonrpc: '2.0',
                 id: msg.id,
                 error: { code: -32602, message: 'model not found' },
-              }) + '\n',
+              })}\n`,
             ),
           );
         } else if (msg.method === 'session/prompt') {
           setImmediate(() => {
             agentStdout.write(
-              JSON.stringify({
+              `${JSON.stringify({
                 jsonrpc: '2.0',
                 method: 'session/update',
                 params: {
                   sessionId: msg.params.sessionId,
                   update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'ok' } },
                 },
-              }) + '\n',
+              })}\n`,
             );
             agentStdout.write(
-              JSON.stringify({ jsonrpc: '2.0', id: msg.id, result: { stopReason: 'end_turn' } }) + '\n',
+              `${JSON.stringify({ jsonrpc: '2.0', id: msg.id, result: { stopReason: 'end_turn' } })}\n`,
             );
           });
         }
@@ -1110,20 +1119,20 @@ describe('GeminiAcpAdapter', () => {
         const msg = JSON.parse(line);
         if (msg.method === 'initialize') {
           setImmediate(() =>
-            agentStdout.write(JSON.stringify({ jsonrpc: '2.0', id: msg.id, result: INIT_RESULT }) + '\n'),
+            agentStdout.write(`${JSON.stringify({ jsonrpc: '2.0', id: msg.id, result: INIT_RESULT })}\n`),
           );
         } else if (msg.method === 'session/new') {
           setImmediate(() =>
-            agentStdout.write(JSON.stringify({ jsonrpc: '2.0', id: msg.id, result: { sessionId: 'mcp-sess' } }) + '\n'),
+            agentStdout.write(`${JSON.stringify({ jsonrpc: '2.0', id: msg.id, result: { sessionId: 'mcp-sess' } })}\n`),
           );
         } else if (msg.method === 'session/prompt') {
           setImmediate(() =>
             agentStdout.write(
-              JSON.stringify({
+              `${JSON.stringify({
                 jsonrpc: '2.0',
                 id: msg.id,
                 error: { code: -32002, message: 'MCP server cat-cafe-collab failed to initialize: timeout after 30s' },
-              }) + '\n',
+              })}\n`,
             ),
           );
         }
@@ -1169,71 +1178,71 @@ describe('GeminiAcpAdapter integration', () => {
         const msg = JSON.parse(line);
         if (msg.method === 'initialize') {
           setImmediate(() =>
-            agentStdout.write(JSON.stringify({ jsonrpc: '2.0', id: msg.id, result: INIT_RESULT }) + '\n'),
+            agentStdout.write(`${JSON.stringify({ jsonrpc: '2.0', id: msg.id, result: INIT_RESULT })}\n`),
           );
         } else if (msg.method === 'session/new') {
           setImmediate(() =>
             agentStdout.write(
-              JSON.stringify({ jsonrpc: '2.0', id: msg.id, result: { sessionId: 'integ-sess' } }) + '\n',
+              `${JSON.stringify({ jsonrpc: '2.0', id: msg.id, result: { sessionId: 'integ-sess' } })}\n`,
             ),
           );
         } else if (msg.method === 'session/prompt') {
           const sid = msg.params.sessionId;
           setImmediate(() => {
             agentStdout.write(
-              JSON.stringify({
+              `${JSON.stringify({
                 jsonrpc: '2.0',
                 method: 'session/update',
                 params: {
                   sessionId: sid,
                   update: { sessionUpdate: 'agent_thought_chunk', content: { type: 'text', text: 'Let me check...' } },
                 },
-              }) + '\n',
+              })}\n`,
             );
             agentStdout.write(
-              JSON.stringify({
+              `${JSON.stringify({
                 jsonrpc: '2.0',
                 method: 'session/update',
                 params: {
                   sessionId: sid,
                   update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'I found ' } },
                 },
-              }) + '\n',
+              })}\n`,
             );
             agentStdout.write(
-              JSON.stringify({
+              `${JSON.stringify({
                 jsonrpc: '2.0',
                 method: 'session/update',
                 params: {
                   sessionId: sid,
                   update: { sessionUpdate: 'tool_call', toolName: 'read_file', toolInput: { path: '/a.txt' } },
                 },
-              }) + '\n',
+              })}\n`,
             );
             agentStdout.write(
-              JSON.stringify({
+              `${JSON.stringify({
                 jsonrpc: '2.0',
                 method: 'session/update',
                 params: {
                   sessionId: sid,
                   update: { sessionUpdate: 'user_message_chunk', content: { type: 'text', text: 'echo' } },
                 },
-              }) + '\n',
+              })}\n`,
             );
             agentStdout.write(
-              JSON.stringify({
+              `${JSON.stringify({
                 jsonrpc: '2.0',
                 method: 'session/update',
                 params: {
                   sessionId: sid,
                   update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'the answer.' } },
                 },
-              }) + '\n',
+              })}\n`,
             );
           });
           setTimeout(() => {
             agentStdout.write(
-              JSON.stringify({ jsonrpc: '2.0', id: msg.id, result: { stopReason: 'end_turn' } }) + '\n',
+              `${JSON.stringify({ jsonrpc: '2.0', id: msg.id, result: { stopReason: 'end_turn' } })}\n`,
             );
           }, 30);
         }
@@ -1286,13 +1295,13 @@ describe('GeminiAcpAdapter integration', () => {
         const msg = JSON.parse(line);
         if (msg.method === 'initialize') {
           setImmediate(() =>
-            agentStdout.write(JSON.stringify({ jsonrpc: '2.0', id: msg.id, result: INIT_RESULT }) + '\n'),
+            agentStdout.write(`${JSON.stringify({ jsonrpc: '2.0', id: msg.id, result: INIT_RESULT })}\n`),
           );
         } else if (msg.method === 'session/new') {
           sessionCounter++;
           const sid = `sess-${sessionCounter}`;
           setImmediate(() =>
-            agentStdout.write(JSON.stringify({ jsonrpc: '2.0', id: msg.id, result: { sessionId: sid } }) + '\n'),
+            agentStdout.write(`${JSON.stringify({ jsonrpc: '2.0', id: msg.id, result: { sessionId: sid } })}\n`),
           );
         } else if (msg.method === 'session/prompt') {
           const sid = msg.params.sessionId;
@@ -1302,19 +1311,19 @@ describe('GeminiAcpAdapter integration', () => {
           } else if (sid === 'sess-2') {
             setImmediate(() => {
               agentStdout.write(
-                JSON.stringify({
+                `${JSON.stringify({
                   jsonrpc: '2.0',
                   method: 'session/update',
                   params: {
                     sessionId: sid,
                     update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'alive!' } },
                   },
-                }) + '\n',
+                })}\n`,
               );
               respondLater(
                 () =>
                   agentStdout.write(
-                    JSON.stringify({ jsonrpc: '2.0', id: msg.id, result: { stopReason: 'end_turn' } }) + '\n',
+                    `${JSON.stringify({ jsonrpc: '2.0', id: msg.id, result: { stopReason: 'end_turn' } })}\n`,
                   ),
                 10,
               );
@@ -1327,7 +1336,7 @@ describe('GeminiAcpAdapter integration', () => {
           if (promptId) {
             respondLater(() => {
               agentStdout.write(
-                JSON.stringify({ jsonrpc: '2.0', id: promptId, result: { stopReason: 'cancelled' } }) + '\n',
+                `${JSON.stringify({ jsonrpc: '2.0', id: promptId, result: { stopReason: 'cancelled' } })}\n`,
               );
             }, 5);
           }
@@ -1379,41 +1388,41 @@ describe('GeminiAcpAdapter integration', () => {
 
   it('R2-P1: abort during newSession window still cancels the session', async () => {
     const { child, clientStdin, agentStdout, ee } = createMockChild();
-    let sawCancel = false;
+    let _sawCancel = false;
 
     clientStdin.on('data', (chunk) => {
       for (const line of chunk.toString().trim().split('\n')) {
         const msg = JSON.parse(line);
         if (msg.method === 'initialize') {
           setImmediate(() =>
-            agentStdout.write(JSON.stringify({ jsonrpc: '2.0', id: msg.id, result: INIT_RESULT }) + '\n'),
+            agentStdout.write(`${JSON.stringify({ jsonrpc: '2.0', id: msg.id, result: INIT_RESULT })}\n`),
           );
         } else if (msg.method === 'session/new') {
           setTimeout(
             () =>
               agentStdout.write(
-                JSON.stringify({ jsonrpc: '2.0', id: msg.id, result: { sessionId: 'slow-sess' } }) + '\n',
+                `${JSON.stringify({ jsonrpc: '2.0', id: msg.id, result: { sessionId: 'slow-sess' } })}\n`,
               ),
             30,
           );
         } else if (msg.method === 'session/prompt') {
           setImmediate(() => {
             agentStdout.write(
-              JSON.stringify({
+              `${JSON.stringify({
                 jsonrpc: '2.0',
                 method: 'session/update',
                 params: {
                   sessionId: msg.params.sessionId,
                   update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'oops' } },
                 },
-              }) + '\n',
+              })}\n`,
             );
             agentStdout.write(
-              JSON.stringify({ jsonrpc: '2.0', id: msg.id, result: { stopReason: 'end_turn' } }) + '\n',
+              `${JSON.stringify({ jsonrpc: '2.0', id: msg.id, result: { stopReason: 'end_turn' } })}\n`,
             );
           });
         } else if (msg.method === 'session/cancel') {
-          sawCancel = true;
+          _sawCancel = true;
         }
       }
     });
@@ -1451,27 +1460,27 @@ describe('GeminiAcpAdapter integration', () => {
         const msg = JSON.parse(line);
         if (msg.method === 'initialize') {
           setImmediate(() =>
-            agentStdout.write(JSON.stringify({ jsonrpc: '2.0', id: msg.id, result: INIT_RESULT }) + '\n'),
+            agentStdout.write(`${JSON.stringify({ jsonrpc: '2.0', id: msg.id, result: INIT_RESULT })}\n`),
           );
         } else if (msg.method === 'session/new') {
           setImmediate(() =>
-            agentStdout.write(JSON.stringify({ jsonrpc: '2.0', id: msg.id, result: { sessionId: 'r3-sess' } }) + '\n'),
+            agentStdout.write(`${JSON.stringify({ jsonrpc: '2.0', id: msg.id, result: { sessionId: 'r3-sess' } })}\n`),
           );
         } else if (msg.method === 'session/prompt') {
           sawPrompt = true;
           setImmediate(() => {
             agentStdout.write(
-              JSON.stringify({
+              `${JSON.stringify({
                 jsonrpc: '2.0',
                 method: 'session/update',
                 params: {
                   sessionId: msg.params.sessionId,
                   update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'should not see' } },
                 },
-              }) + '\n',
+              })}\n`,
             );
             agentStdout.write(
-              JSON.stringify({ jsonrpc: '2.0', id: msg.id, result: { stopReason: 'end_turn' } }) + '\n',
+              `${JSON.stringify({ jsonrpc: '2.0', id: msg.id, result: { stopReason: 'end_turn' } })}\n`,
             );
           });
         }
@@ -2883,8 +2892,18 @@ describe('GeminiAcpAdapter callbackEnv passthrough', () => {
     pool = p;
 
     const mcpServers = [
-      { name: 'cat-cafe-collab', command: 'node', args: ['collab.js'], env: [] },
-      { name: 'cat-cafe-memory', command: 'node', args: ['memory.js'], env: [] },
+      {
+        name: 'cat-cafe-collab',
+        command: process.execPath,
+        args: [nativeEntrypointPath(new URL('../../../mcp-server/dist/collab.js', import.meta.url))],
+        env: [],
+      },
+      {
+        name: 'cat-cafe-memory',
+        command: process.execPath,
+        args: [nativeEntrypointPath(new URL('../../../mcp-server/dist/memory.js', import.meta.url))],
+        env: [],
+      },
     ];
     const adapter = new GeminiAcpAdapter({
       catId: 'gemini',
@@ -2915,15 +2934,15 @@ describe('GeminiAcpAdapter callbackEnv passthrough', () => {
     // cat-cafe-collab should have callback env merged
     const collab = servers.find((s) => s.name === 'cat-cafe-collab');
     assert.ok(collab, 'cat-cafe-collab should be present');
-    const { upstream: collabUpstream, proxyEnv: collabProxyEnv } = secretMcpContract(collab);
+    const { upstream: collabUpstream, launchEnv: collabLaunchEnv } = directMcpContract(collab);
     const collabEnvMap = collabUpstream.env;
-    assertCurrentCallback(collabProxyEnv, callbackEnv);
+    assertCurrentCallback(collabLaunchEnv, callbackEnv);
     assertCurrentCallback(collabEnvMap, callbackEnv);
 
     // cat-cafe-memory should also get callback env
     const memory = servers.find((s) => s.name === 'cat-cafe-memory');
     assert.ok(memory, 'cat-cafe-memory should be present');
-    const memoryEnvMap = secretMcpContract(memory).upstream.env;
+    const memoryEnvMap = directMcpContract(memory).upstream.env;
     assertCurrentCallback(memoryEnvMap, callbackEnv);
   });
 
@@ -2932,7 +2951,12 @@ describe('GeminiAcpAdapter callbackEnv passthrough', () => {
     pool = p;
 
     const mcpServers = [
-      { name: 'cat-cafe', command: 'node', args: ['cat-cafe.js'], env: [{ name: 'EXISTING', value: 'keep' }] },
+      {
+        name: 'cat-cafe',
+        command: process.execPath,
+        args: [nativeEntrypointPath(new URL('../../../mcp-server/dist/index.js', import.meta.url))],
+        env: [],
+      },
       { name: 'pencil', command: 'node', args: ['pencil.js'], env: [{ name: 'UNCHANGED', value: 'yes' }] },
     ];
     const adapter = new GeminiAcpAdapter({
@@ -2962,19 +2986,19 @@ describe('GeminiAcpAdapter callbackEnv passthrough', () => {
 
     const catCafe = sentServers.find((s) => s.name === 'cat-cafe');
     assert.ok(catCafe, 'cat-cafe should be present');
-    const catCafeEnv = secretMcpContract(catCafe).upstream.env;
+    const catCafeEnv = directMcpContract(catCafe).upstream.env;
     assert.equal(catCafeEnv.CAT_CAFE_API_URL, 'http://127.0.0.1:3004');
     assert.equal(catCafeEnv.CAT_CAFE_CALLBACK_TOKEN, 'token-acp-123');
-    assert.equal(catCafeEnv.EXISTING, 'keep');
+    assert.equal(catCafeEnv.CAT_CAFE_THREAD_ID, callbackEnv.CAT_CAFE_THREAD_ID);
 
     const pencil = sentServers.find((s) => s.name === 'pencil');
     assert.ok(pencil, 'pencil should be present');
-    const { upstream: pencilUpstream, proxyEnv: pencilProxyEnv } = secretMcpContract(pencil);
+    const { upstream: pencilUpstream, launchEnv: pencilLaunchEnv } = directMcpContract(pencil);
     const pencilEnv = pencilUpstream.env;
     for (const key of Object.keys(callbackEnv))
       assert.equal(pencilEnv[key], undefined, `foreign upstream must not receive ${key}`);
-    assert.equal(pencilProxyEnv.CAT_CAFE_INVOCATION_ID, callbackEnv.CAT_CAFE_INVOCATION_ID);
-    assert.equal(pencilProxyEnv.CAT_CAFE_CALLBACK_TOKEN, callbackEnv.CAT_CAFE_CALLBACK_TOKEN);
+    assert.equal(pencilLaunchEnv.CAT_CAFE_INVOCATION_ID, undefined);
+    assert.equal(pencilLaunchEnv.CAT_CAFE_CALLBACK_TOKEN, undefined);
     assert.equal(pencilEnv.UNCHANGED, 'yes');
   });
 
@@ -2985,8 +3009,8 @@ describe('GeminiAcpAdapter callbackEnv passthrough', () => {
     const mcpServers = [
       {
         name: 'cat-cafe-collab',
-        command: 'node',
-        args: ['collab.js'],
+        command: process.execPath,
+        args: [nativeEntrypointPath(new URL('../../../mcp-server/dist/collab.js', import.meta.url))],
         env: [
           { name: 'CAT_CAFE_API_URL', value: '${CAT_CAFE_API_URL}' },
           { name: 'CAT_CAFE_CALLBACK_TOKEN', value: '${CAT_CAFE_CALLBACK_TOKEN}' },
@@ -3013,7 +3037,7 @@ describe('GeminiAcpAdapter callbackEnv passthrough', () => {
     const sessionNew = captured.find((m) => m.method === 'session/new');
     assert.ok(sessionNew, 'Expected session/new');
     const collab = sessionNew.params.mcpServers[0];
-    const envMap = secretMcpContract(collab).upstream.env;
+    const envMap = directMcpContract(collab).upstream.env;
     assert.equal(envMap.CAT_CAFE_API_URL, 'http://localhost:3004', 'Placeholder should be overwritten');
     assert.equal(envMap.CAT_CAFE_CALLBACK_TOKEN, 'real-token', 'Placeholder should be overwritten');
   });
@@ -3022,7 +3046,14 @@ describe('GeminiAcpAdapter callbackEnv passthrough', () => {
     const { pool: p, captured } = createPoolWithAutoRespond();
     pool = p;
 
-    const mcpServers = [{ name: 'cat-cafe-collab', command: 'node', args: ['collab.js'], env: [] }];
+    const mcpServers = [
+      {
+        name: 'cat-cafe-collab',
+        command: process.execPath,
+        args: [nativeEntrypointPath(new URL('../../../mcp-server/dist/collab.js', import.meta.url))],
+        env: [],
+      },
+    ];
     const adapter = new GeminiAcpAdapter({
       catId: 'gemini',
       pool,
@@ -3039,11 +3070,13 @@ describe('GeminiAcpAdapter callbackEnv passthrough', () => {
     assert.ok(sessionNew, 'Expected session/new');
     const collab = sessionNew.params.mcpServers.find((s) => s.name === 'cat-cafe-collab');
     assert.ok(collab, 'cat-cafe-collab should be present');
-    const { proxyEnv, upstream } = secretMcpContract(collab);
-    assert.deepEqual(proxyEnv, {}, 'no turn credentials may be invented for the relay');
+    const { launchEnv, upstream } = directMcpContract(collab);
+    assert.deepEqual(launchEnv, {}, 'no turn credentials may be invented for the relay');
     assert.deepEqual(upstream.env, {}, 'no callbackEnv means no upstream callback credentials');
-    assert.equal(upstream.command, 'node');
-    assert.deepEqual(upstream.args, ['collab.js']);
+    assert.equal(upstream.command, process.execPath);
+    assert.deepEqual(upstream.args, [
+      nativeEntrypointPath(new URL('../../../mcp-server/dist/collab.js', import.meta.url)),
+    ]);
   });
 
   // F161 architecture change: capabilities.json-aware filtering (disabled capabilities,
@@ -3115,7 +3148,14 @@ describe('GeminiAcpAdapter callbackEnv passthrough', () => {
         pool,
         poolKey: TEST_POOL_KEY,
         projectRoot,
-        mcpServers: [{ name: 'cat-cafe-collab', command: 'node', args: ['collab.js'], env: [] }],
+        mcpServers: [
+          {
+            name: 'cat-cafe-collab',
+            command: process.execPath,
+            args: [nativeEntrypointPath(new URL('../../../mcp-server/dist/collab.js', import.meta.url))],
+            env: [],
+          },
+        ],
       });
 
       for await (const _ of adapter.invoke('test', { workingDirectory: userRoot })) {
@@ -3310,7 +3350,7 @@ describe('F117: ACP prompt uses only the member-level no-output timeout', () => 
       },
       async setSessionConfigOption() {},
       cancelSession() {},
-      async *promptStream(sessionId, text, options) {
+      async *promptStream(sessionId, _text, options) {
         capturedPromptStreamOpts = options;
         yield {
           sessionId,
@@ -3358,7 +3398,7 @@ describe('F117: ACP prompt uses only the member-level no-output timeout', () => 
       },
       async setSessionConfigOption() {},
       cancelSession() {},
-      async *promptStream(sessionId, text, options) {
+      async *promptStream(sessionId, _text, options) {
         capturedPromptStreamOpts = options;
         yield {
           sessionId,
@@ -3420,7 +3460,7 @@ describe('#1186: cancel settles prompt stream and releases lease (P1)', () => {
         const cb = cancelCallbacks.get(sessionId);
         if (cb) cb();
       },
-      async *promptStream(sessionId, text, options) {
+      async *promptStream(sessionId, _text, options) {
         // Register cancel callback (mirrors real transport)
         let settledByCancel = false;
         cancelCallbacks.set(sessionId, () => {
@@ -3582,7 +3622,7 @@ describe('#1186: error-driven lease cleanup (finally releases without manual .re
             return { sessionId: `sess-err-${label}` };
           },
           cancelSession() {},
-          async *promptStream(sessionId, text, options) {
+          async *promptStream(sessionId, _text, options) {
             timeline.push(`promptStream:start:${label}`);
             // First invoke: yield one event then throw (simulating idle stall)
             // Second invoke: complete normally
@@ -3681,7 +3721,7 @@ describe('F117: ACP legacy idle error mapping', () => {
               return { sessionId: 'race-opts-sess' };
             },
             cancelSession() {},
-            async *promptStream(sessionId, text, options) {
+            async *promptStream(sessionId, _text, options) {
               capturedOpts = options;
               assert.equal(options.timeoutMs, 0);
               assert.equal(options.idleStallMs, 0);
@@ -3753,13 +3793,13 @@ describe('#1186: cancel retires an unquiesced non-multiplexed carrier', () => {
           const msg = JSON.parse(line);
           if (msg.method === 'initialize') {
             setImmediate(() =>
-              agentStdout.write(JSON.stringify({ jsonrpc: '2.0', id: msg.id, result: INIT_RESULT }) + '\n'),
+              agentStdout.write(`${JSON.stringify({ jsonrpc: '2.0', id: msg.id, result: INIT_RESULT })}\n`),
             );
           } else if (msg.method === 'session/new') {
             sessionCounter++;
             const sid = `sess-${sessionCounter}`;
             setImmediate(() =>
-              agentStdout.write(JSON.stringify({ jsonrpc: '2.0', id: msg.id, result: { sessionId: sid } }) + '\n'),
+              agentStdout.write(`${JSON.stringify({ jsonrpc: '2.0', id: msg.id, result: { sessionId: sid } })}\n`),
             );
           } else if (msg.method === 'session/prompt') {
             const sid = msg.params.sessionId;
@@ -3770,32 +3810,32 @@ describe('#1186: cancel retires an unquiesced non-multiplexed carrier', () => {
               // ignores session/cancel below, so this process is not quiescent.
               setImmediate(() => {
                 agentStdout.write(
-                  JSON.stringify({
+                  `${JSON.stringify({
                     jsonrpc: '2.0',
                     method: 'session/update',
                     params: {
                       sessionId: sid,
                       update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'start-A' } },
                     },
-                  }) + '\n',
+                  })}\n`,
                 );
               });
             } else if (sid === 'sess-2') {
               setImmediate(() => {
                 agentStdout.write(
-                  JSON.stringify({
+                  `${JSON.stringify({
                     jsonrpc: '2.0',
                     method: 'session/update',
                     params: {
                       sessionId: sid,
                       update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'result-B' } },
                     },
-                  }) + '\n',
+                  })}\n`,
                 );
                 setTimeout(
                   () =>
                     agentStdout.write(
-                      JSON.stringify({ jsonrpc: '2.0', id: msg.id, result: { stopReason: 'end_turn' } }) + '\n',
+                      `${JSON.stringify({ jsonrpc: '2.0', id: msg.id, result: { stopReason: 'end_turn' } })}\n`,
                     ),
                   10,
                 );
@@ -3893,19 +3933,19 @@ describe('#1186: multiplexed cancel seals only the affected logical session', ()
         const msg = JSON.parse(line);
         if (msg.method === 'initialize') {
           setImmediate(() =>
-            agentStdout.write(JSON.stringify({ jsonrpc: '2.0', id: msg.id, result: INIT_RESULT }) + '\n'),
+            agentStdout.write(`${JSON.stringify({ jsonrpc: '2.0', id: msg.id, result: INIT_RESULT })}\n`),
           );
         } else if (msg.method === 'session/new') {
           sessionCounter++;
           const sessionId = `mux-sess-${sessionCounter}`;
           setImmediate(() =>
-            agentStdout.write(JSON.stringify({ jsonrpc: '2.0', id: msg.id, result: { sessionId } }) + '\n'),
+            agentStdout.write(`${JSON.stringify({ jsonrpc: '2.0', id: msg.id, result: { sessionId } })}\n`),
           );
         } else if (msg.method === 'session/load') {
           loads.push(msg.params.sessionId);
           setImmediate(() =>
             agentStdout.write(
-              JSON.stringify({ jsonrpc: '2.0', id: msg.id, result: { sessionId: msg.params.sessionId } }) + '\n',
+              `${JSON.stringify({ jsonrpc: '2.0', id: msg.id, result: { sessionId: msg.params.sessionId } })}\n`,
             ),
           );
         } else if (msg.method === 'session/prompt') {
@@ -3916,7 +3956,7 @@ describe('#1186: multiplexed cancel seals only the affected logical session', ()
           }
           setImmediate(() => {
             agentStdout.write(
-              JSON.stringify({
+              `${JSON.stringify({
                 jsonrpc: '2.0',
                 method: 'session/update',
                 params: {
@@ -3926,11 +3966,11 @@ describe('#1186: multiplexed cancel seals only the affected logical session', ()
                     content: { type: 'text', text: sessionId === 'mux-sess-1' ? 'start-A' : 'result-B' },
                   },
                 },
-              }) + '\n',
+              })}\n`,
             );
             if (sessionId !== 'mux-sess-1' || unsafeSameSessionOverlap) {
               agentStdout.write(
-                JSON.stringify({ jsonrpc: '2.0', id: msg.id, result: { stopReason: 'end_turn' } }) + '\n',
+                `${JSON.stringify({ jsonrpc: '2.0', id: msg.id, result: { stopReason: 'end_turn' } })}\n`,
               );
             }
           });
@@ -4001,7 +4041,7 @@ describe('AcpAgentService turn.agent_busy retry', () => {
         captured.push(msg);
         if (msg.method === 'initialize') {
           setImmediate(() =>
-            agentStdout.write(JSON.stringify({ jsonrpc: '2.0', id: msg.id, result: INIT_RESULT }) + '\n'),
+            agentStdout.write(`${JSON.stringify({ jsonrpc: '2.0', id: msg.id, result: INIT_RESULT })}\n`),
           );
         } else if (msg.method === 'session/new') {
           setImmediate(() =>
@@ -4015,7 +4055,7 @@ describe('AcpAgentService turn.agent_busy retry', () => {
           setImmediate(() => {
             if (promptAttempts <= busyFailures) {
               agentStdout.write(
-                JSON.stringify({
+                `${JSON.stringify({
                   jsonrpc: '2.0',
                   id: msg.id,
                   error: {
@@ -4023,12 +4063,12 @@ describe('AcpAgentService turn.agent_busy retry', () => {
                     message: 'Invalid request: Cannot launch a new turn while another turn (ID 8) is active',
                     data: { code: 'turn.agent_busy', details: { turnId: 8 } },
                   },
-                }) + '\n',
+                })}\n`,
               );
               return;
             }
             agentStdout.write(
-              JSON.stringify({
+              `${JSON.stringify({
                 jsonrpc: '2.0',
                 method: 'session/update',
                 params: {
@@ -4038,11 +4078,11 @@ describe('AcpAgentService turn.agent_busy retry', () => {
                     content: { type: 'text', text: 'Hello after busy!' },
                   },
                 },
-              }) + '\n',
+              })}\n`,
             );
             setTimeout(() => {
               agentStdout.write(
-                JSON.stringify({ jsonrpc: '2.0', id: msg.id, result: { stopReason: 'end_turn' } }) + '\n',
+                `${JSON.stringify({ jsonrpc: '2.0', id: msg.id, result: { stopReason: 'end_turn' } })}\n`,
               );
             }, 10);
           });

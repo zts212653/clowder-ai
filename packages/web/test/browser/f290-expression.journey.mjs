@@ -162,6 +162,28 @@ test(
     await b.page.getByRole('button', { name: '回到原消息', exact: true }).click();
     step('original opened and returned');
     await b.page.locator(`#collective-event-${event.eventId}`).waitFor();
+    await b.page.locator(`#collective-event-${event.eventId} .message-markdown`).evaluate((body) => {
+      const range = document.createRange();
+      range.selectNodeContents(body);
+      const selection = window.getSelection();
+      selection.removeAllRanges();
+      selection.addRange(range);
+      document.dispatchEvent(new Event('selectionchange'));
+    });
+    await b.page.getByRole('button', { name: '引用到聊天', exact: true }).click();
+    await b.page.locator('.composer .message-quote').waitFor();
+    await b.page.reload({ waitUntil: 'networkidle' });
+    await b.page.locator('.composer .message-quote').waitFor();
+    await b.page.getByRole('button', { name: '发送', exact: true }).click();
+    await a.page.locator('.channel-flow .message-quote').waitFor();
+    const quoteEvent = (
+      await fixture.store.listEventsForHuman(fixture.creator.sessionToken, fixture.coordinates.collectiveId)
+    ).find((item) => item.contextAttachments?.some((quote) => quote.source.eventId === event.eventId));
+    assert.ok(quoteEvent, 'A sourced quote is public content, not a private draft-only preview');
+    assert.equal(quoteEvent.body, '');
+    await a.page.locator('.channel-flow .message-quote header button').first().click();
+    await a.page.locator(`#collective-event-${event.eventId}`).waitFor();
+    step('selected quote restored, sent and returned to its public source');
     await a.page.waitForFunction(() => !document.querySelector('.composer .cafe-attachment-preview'));
     await a.page
       .locator('input[type=file]')
@@ -188,6 +210,46 @@ test(
     step('Service restarted');
     await b.page.reload({ waitUntil: 'networkidle' });
     await b.page.getByRole('img', { name: 'first.png', exact: true }).waitFor();
+    await b.page.getByRole('button', { name: '更多输入选项', exact: true }).click();
+    await b.page.getByRole('button', { name: '贴纸', exact: true }).click();
+    const picker = b.page.getByRole('dialog', { name: '贴纸', exact: true });
+    await picker.waitFor();
+    assert.equal(await picker.locator('.cafe-sticker-tile').count(), 16);
+    await picker.getByRole('button', { name: '梵花猫', exact: true }).click();
+    if (process.env.F290_EXPRESSION_EVIDENCE_DIR) {
+      await picker.getByRole('button', { name: '好耶 · 梵花猫', exact: true }).waitFor({ state: 'visible' });
+      await b.page.screenshot({
+        path: join(process.env.F290_EXPRESSION_EVIDENCE_DIR, 'sticker-picker-1440.png'),
+        fullPage: true,
+      });
+    }
+    await picker.getByRole('button', { name: '好耶 · 梵花猫', exact: true }).click();
+    await b.page.locator('.cafe-attachment-preview[data-status="ready"]').waitFor();
+    await b.page.reload({ waitUntil: 'networkidle' });
+    await b.page.locator('.cafe-attachment-preview[data-status="ready"]').waitFor();
+    await b.page.getByRole('button', { name: '发送', exact: true }).click();
+    await b.page.waitForFunction(() => !document.querySelector('.composer .cafe-attachment-preview'));
+    const stickerEvent = (
+      await fixture.store.listEventsForHuman(fixture.member.sessionToken, fixture.coordinates.collectiveId)
+    ).find((item) => item.attachments?.some((attachment) => attachment.sticker?.stickerId === 'momo-cheer'));
+    assert.ok(stickerEvent, 'A selected original sticker survives a private draft reload and reaches the other member');
+    await a.page.locator(`#collective-event-${stickerEvent.eventId}`).scrollIntoViewIfNeeded();
+    const sticker = a.page.locator('.channel-flow .cafe-message-sticker img');
+    await sticker.waitFor();
+    assert.equal(await sticker.getAttribute('alt'), '好耶 · 梵花猫');
+    assert.ok(
+      await sticker.evaluate(async (image) => {
+        await image.decode();
+        return image.naturalWidth > 0;
+      }),
+    );
+    if (process.env.F290_EXPRESSION_EVIDENCE_DIR) {
+      await a.page.screenshot({
+        path: join(process.env.F290_EXPRESSION_EVIDENCE_DIR, 'sticker-message-1440.png'),
+        fullPage: true,
+      });
+    }
+    step('shared sticker catalogue sent its original image through the ordinary durable attachment path');
     const a2 = await openMember(fixture.creator.sessionToken);
     await a.page.locator('.composer textarea').fill('窗口一的私人草稿');
     await a.page.waitForResponse(

@@ -67,6 +67,8 @@ export interface HumanAuthBeginResult {
 export interface ClientTarget {
   readonly draftReceipt?: { revision: number; rootEventId?: string };
   readonly attachments?: import('@cat-cafe/shared').CollectiveMessageAttachment[];
+  readonly contextAttachments?: import('@cat-cafe/shared').CollectiveMessageQuote[];
+  readonly richBlocks?: import('@cat-cafe/shared').CollectiveMessageRichBlock[];
   readonly target?: CollectiveTarget;
   readonly location?: CollectiveLocation;
   readonly recipient?: CollectiveRecipient;

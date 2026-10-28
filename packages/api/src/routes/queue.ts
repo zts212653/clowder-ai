@@ -1,3 +1,4 @@
+import { isTaskHandoffSource } from '../domains/ball-custody/OrdinaryTaskHandoffContract.js';
 /**
  * Queue Management API Routes (F39)
  *
@@ -1016,18 +1017,22 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
     const queueRevision = invocationQueue.snapshotRevision(threadId, guard.userId);
     const enrichedQueue = await enrichQueueEntries(queueEntries, messageStore);
     return {
-      queue: enrichedQueue.map((entry) => {
-        const internal = queueEntries.find((candidate) => candidate.id === entry.id);
-        if (!internal) return entry;
-        const projection = projectLifecycleAppendAction({
-          threadId,
-          userId: guard.userId,
-          queueRevision,
-          entry: internal,
-          invocationTracker,
-        });
-        return projection.available ? { ...entry, lifecycleActions: { append: projection.action } } : entry;
-      }),
+      queue: await Promise.all(
+        enrichedQueue.map(async (entry) => {
+          const internal = queueEntries.find((candidate) => candidate.id === entry.id);
+          if (!internal || !messageStore) return entry;
+          const sources = await Promise.all(queueEntryMessageIds(internal).map((id) => messageStore.getById(id)));
+          if (sources.some(isTaskHandoffSource)) return entry;
+          const projection = projectLifecycleAppendAction({
+            threadId,
+            userId: guard.userId,
+            queueRevision,
+            entry: internal,
+            invocationTracker,
+          });
+          return projection.available ? { ...entry, lifecycleActions: { append: projection.action } } : entry;
+        }),
+      ),
       queueRevision,
       activeInvocations,
     };

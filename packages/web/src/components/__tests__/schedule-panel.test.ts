@@ -1,6 +1,7 @@
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { writeShellLanguage } from '@/components/shell/shell-language';
 import { useChatStore } from '@/stores/chatStore';
 import { apiFetch } from '@/utils/api-client';
 import { SchedulePanel } from '../workspace/SchedulePanel';
@@ -70,6 +71,7 @@ describe('SchedulePanel', () => {
   });
 
   beforeEach(() => {
+    writeShellLanguage('en');
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);

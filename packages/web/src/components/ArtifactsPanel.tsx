@@ -13,7 +13,6 @@ import { scrollToMessage } from '@/utils/scrollToMessage';
 import { kickTeleportResolve, planTeleport } from '@/utils/teleport';
 import { useGlobalArtifacts } from '../hooks/useGlobalArtifacts';
 import { useThreadArtifacts } from '../hooks/useThreadArtifacts';
-import { ArtifactDetailView } from './artifacts/ArtifactDetailView';
 import { extractCatChips, filterByCat } from './artifacts/artifact-filters';
 import type { ArtifactGroup, GroupingMode } from './artifacts/artifact-grouping';
 import { groupArtifacts } from './artifacts/artifact-grouping';
@@ -21,7 +20,7 @@ import type { ArtifactListOrigin, ArtifactListView } from './artifacts/artifact-
 import { artifactActionLabel, artifactRowMeta, resolveAssetUrl } from './artifacts/artifact-view';
 import { ThreadWorksPanelV2, type WorksPanelProps } from './artifacts/ThreadWorksPanelV2';
 import { CompactLabel } from './content-overflow/CompactLabel';
-import { messagePublicationSource, usePublishedContent } from './content-review/usePublishedContent';
+import { useContentOpen } from './content-review/useContentOpen';
 import { useShellPresentation } from './shell/shell-presentation';
 
 const resolveUrl = (url?: string): string | undefined => resolveAssetUrl(url, API_URL);
@@ -265,12 +264,9 @@ function ClassicArtifactsPanel({
   const { artifacts, loading, error } = scope === 'global' ? globalData : threadData;
 
   const { getCatById } = useCatData();
-  const workspaceWorktreeId = useChatStore((s) => s.workspaceWorktreeId);
   const [filter, setFilter] = useState<FilterKey>(initialView?.filter ?? 'all');
   const [q, setQ] = useState(initialView?.query ?? '');
-  // AC-A7: 选中产物 → panel 内进入内容详情视图（null = 列表视图）。
-  const [selected, setSelected] = useState<ThreadArtifactDTO | null>(null);
-  const publication = usePublishedContent();
+  const opening = useContentOpen();
   const [sourceError, setSourceError] = useState<string | null>(null);
   const selectArtifact = (artifact: ThreadArtifactDTO | GlobalArtifactDTO) => {
     const origin: ArtifactListOrigin = {
@@ -278,36 +274,13 @@ function ClassicArtifactsPanel({
       threadId,
       view: { scope, filter, query: q, grouping, catFilter, collapsed: [...collapsed] },
     };
-    if (onSelectArtifact) {
-      onSelectArtifact(artifact, origin);
-      return;
-    }
-    if ((artifact.type === 'file' || artifact.type === 'code') && artifact.ref && !artifact.url) {
-      useChatStore.getState().openPublishedArtifact(threadId, artifact, origin);
-      return;
-    }
-    if (artifact.url && /^\/uploads\/[^/]+\.(png|jpe?g|webp|mp4)$/i.test(artifact.url)) {
-      const source =
-        artifact.sourceMessageId && artifact.publicationItem
-          ? messagePublicationSource(
-              {
-                threadId: isGlobal(artifact) ? artifact.threadId : threadId,
-                messageId: artifact.sourceMessageId,
-                messageRevision: String(artifact.createdAt),
-              },
-              artifact.publicationItem,
-              artifact.url,
-            )
-          : null;
-      if (!source) {
-        setSourceError('原发布消息没有可核验的内容坐标，请回到来源核对。');
-        return;
-      }
-      setSourceError(null);
-      useChatStore.getState().openPublishedArtifact(threadId, artifact, origin);
-      return;
-    }
-    setSelected(artifact);
+    void opening.openContent({
+      kind: 'artifact',
+      threadId: isGlobal(artifact) ? artifact.threadId : threadId,
+      artifact,
+      origin,
+      attach: onSelectArtifact ? () => onSelectArtifact(artifact, origin) : undefined,
+    });
   };
 
   // F232 Phase B: grouping mode (only active in global scope)
@@ -333,7 +306,6 @@ function ClassicArtifactsPanel({
   useEffect(() => {
     if (previousScope.current.threadId === threadId && previousScope.current.scope === scope) return;
     previousScope.current = { threadId, scope };
-    setSelected(null);
     setFilter('all');
     setQ('');
     setCatFilter(null);
@@ -429,212 +401,200 @@ function ClassicArtifactsPanel({
       className="flex flex-col overflow-hidden bg-cafe-surface text-cafe"
       style={width ? { width, flexShrink: 0 } : { flex: '1 1 0%', minWidth: 0 }}
     >
-      {sourceError || publication.error ? (
+      {sourceError || opening.error ? (
         <p role="alert" className="p-3 text-sm text-cafe-error">
-          {sourceError ?? publication.error}
+          {sourceError ?? opening.error}
         </p>
       ) : null}
-      {selected ? (
-        <ArtifactDetailView
-          sourceThreadId={isGlobal(selected) ? selected.threadId : threadId}
-          artifact={selected}
-          // P1 fix (gpt52 review): global scope artifact from another thread must NOT use the current
-          // thread's worktreeId — that would fetch the wrong file version or 404. Pass null to force
-          // fallback to URL/non-workspace content resolution for cross-thread artifacts.
-          worktreeId={isGlobal(selected) && selected.threadId !== threadId ? null : workspaceWorktreeId}
-          onBack={() => setSelected(null)}
-          onJump={(msgId) => handleJump(msgId, isGlobal(selected) ? selected.threadId : undefined)}
-        />
-      ) : (
-        <>
-          {/* Header — aligned with TaskBoardPanel / RecallPanel structure */}
-          <div className="border-b border-cafe px-3 py-2.5">
-            <div className="flex items-center justify-between">
-              <span className="flex items-center gap-1.5 text-xs font-semibold text-cafe-secondary">
-                <IconLayers />
-                产物
-              </span>
-              {onClose && (
-                <button
-                  type="button"
-                  onClick={onClose}
-                  aria-label="关闭"
-                  className="flex text-cafe-muted transition-colors hover:text-cafe-secondary"
-                >
-                  <IconX />
-                </button>
-              )}
-            </div>
+      <>
+        {/* Header — aligned with TaskBoardPanel / RecallPanel structure */}
+        <div className="border-b border-cafe px-3 py-2.5">
+          <div className="flex items-center justify-between">
+            <span className="flex items-center gap-1.5 text-xs font-semibold text-cafe-secondary">
+              <IconLayers />
+              产物
+            </span>
+            {onClose && (
+              <button
+                type="button"
+                onClick={onClose}
+                aria-label="关闭"
+                className="flex text-cafe-muted transition-colors hover:text-cafe-secondary"
+              >
+                <IconX />
+              </button>
+            )}
+          </div>
 
-            {/* F232 Phase B: Scope toggle — matches recall panel [记忆流] [拉闸记录] pattern */}
-            <div className="mt-2 flex rounded-lg border border-cafe-subtle bg-cafe-surface-sunken p-0.5">
-              {(['thread', 'global'] as const).map((s) => (
+          {/* F232 Phase B: Scope toggle — matches recall panel [记忆流] [拉闸记录] pattern */}
+          <div className="mt-2 flex rounded-lg border border-cafe-subtle bg-cafe-surface-sunken p-0.5">
+            {(['thread', 'global'] as const).map((s) => (
+              <button
+                key={s}
+                type="button"
+                onClick={() => setScope(s)}
+                className={`flex-1 rounded-md px-2 py-1 text-micro font-medium transition-colors ${
+                  scope === s
+                    ? 'bg-cafe-surface-elevated text-cafe-secondary shadow-sm'
+                    : 'text-cafe-muted hover:text-cafe-secondary'
+                }`}
+              >
+                {s === 'thread' ? '当前对话' : '全局'}
+              </button>
+            ))}
+          </div>
+
+          <div className="mt-1.5 text-micro text-cafe-muted">
+            {loading
+              ? '加载中…'
+              : error
+                ? '加载失败，点筛选可重试'
+                : `共 ${counts.all} 项 · ${counts.image} 图 · ${counts.file} 文件 · ${counts.codepr} 代码/PR · ${counts.audio} 语音 · ${counts.video} 视频 · ${counts.widget} 小组件`}
+          </div>
+          <label className="mt-2 flex items-center gap-2 rounded-lg border border-cafe-subtle bg-cafe-surface-sunken px-2.5 py-1.5 text-xs text-cafe-muted">
+            <IconSearch />
+            <input
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              placeholder={scope === 'global' ? '搜索所有对话的产物…' : '在本 thread 的产物里搜…'}
+              className="flex-1 bg-transparent text-xs text-cafe outline-none placeholder:text-cafe-muted"
+            />
+          </label>
+          <div className="mt-2 flex flex-wrap gap-1.5">
+            {chips.map(([key, label, n]) => {
+              const on = filter === key;
+              return (
                 <button
-                  key={s}
+                  key={key}
                   type="button"
-                  onClick={() => setScope(s)}
-                  className={`flex-1 rounded-md px-2 py-1 text-micro font-medium transition-colors ${
-                    scope === s
-                      ? 'bg-cafe-surface-elevated text-cafe-secondary shadow-sm'
-                      : 'text-cafe-muted hover:text-cafe-secondary'
+                  onClick={() => setFilter(key)}
+                  className={`flex items-center gap-1 rounded-full px-2 py-0.5 text-micro transition-colors ${
+                    on
+                      ? 'bg-cafe-crosspost/15 font-semibold text-cafe-crosspost'
+                      : 'bg-cafe-surface-elevated text-cafe-muted hover:text-cafe-secondary'
                   }`}
                 >
-                  {s === 'thread' ? '当前对话' : '全局'}
+                  {label} {n}
                 </button>
-              ))}
-            </div>
-
-            <div className="mt-1.5 text-micro text-cafe-muted">
-              {loading
-                ? '加载中…'
-                : error
-                  ? '加载失败，点筛选可重试'
-                  : `共 ${counts.all} 项 · ${counts.image} 图 · ${counts.file} 文件 · ${counts.codepr} 代码/PR · ${counts.audio} 语音 · ${counts.video} 视频 · ${counts.widget} 小组件`}
-            </div>
-            <label className="mt-2 flex items-center gap-2 rounded-lg border border-cafe-subtle bg-cafe-surface-sunken px-2.5 py-1.5 text-xs text-cafe-muted">
-              <IconSearch />
-              <input
-                value={q}
-                onChange={(e) => setQ(e.target.value)}
-                placeholder={scope === 'global' ? '搜索所有对话的产物…' : '在本 thread 的产物里搜…'}
-                className="flex-1 bg-transparent text-xs text-cafe outline-none placeholder:text-cafe-muted"
-              />
-            </label>
-            <div className="mt-2 flex flex-wrap gap-1.5">
-              {chips.map(([key, label, n]) => {
-                const on = filter === key;
+              );
+            })}
+          </div>
+          {/* F232 Phase B: Cat filter chips — only in global scope, when multiple cats */}
+          {scope === 'global' && catChips.length > 1 && (
+            <div className="mt-2 flex flex-wrap items-center gap-1.5">
+              <span className="text-micro text-cafe-muted">猫:</span>
+              <button
+                type="button"
+                onClick={() => setCatFilter(null)}
+                className={`rounded-full px-2 py-0.5 text-micro transition-colors ${
+                  catFilter === null
+                    ? 'bg-cafe-crosspost/15 font-semibold text-cafe-crosspost'
+                    : 'bg-cafe-surface-elevated text-cafe-muted hover:text-cafe-secondary'
+                }`}
+              >
+                全部
+              </button>
+              {catChips.map((chip) => {
+                const on = catFilter === chip.catId;
                 return (
                   <button
-                    key={key}
+                    key={chip.catId}
                     type="button"
-                    onClick={() => setFilter(key)}
+                    onClick={() => setCatFilter(on ? null : chip.catId)}
                     className={`flex items-center gap-1 rounded-full px-2 py-0.5 text-micro transition-colors ${
                       on
                         ? 'bg-cafe-crosspost/15 font-semibold text-cafe-crosspost'
                         : 'bg-cafe-surface-elevated text-cafe-muted hover:text-cafe-secondary'
                     }`}
                   >
-                    {label} {n}
+                    {chip.label} {chip.count}
                   </button>
                 );
               })}
             </div>
-            {/* F232 Phase B: Cat filter chips — only in global scope, when multiple cats */}
-            {scope === 'global' && catChips.length > 1 && (
-              <div className="mt-2 flex flex-wrap items-center gap-1.5">
-                <span className="text-micro text-cafe-muted">猫:</span>
-                <button
-                  type="button"
-                  onClick={() => setCatFilter(null)}
-                  className={`rounded-full px-2 py-0.5 text-micro transition-colors ${
-                    catFilter === null
-                      ? 'bg-cafe-crosspost/15 font-semibold text-cafe-crosspost'
-                      : 'bg-cafe-surface-elevated text-cafe-muted hover:text-cafe-secondary'
-                  }`}
-                >
-                  全部
-                </button>
-                {catChips.map((chip) => {
-                  const on = catFilter === chip.catId;
-                  return (
-                    <button
-                      key={chip.catId}
-                      type="button"
-                      onClick={() => setCatFilter(on ? null : chip.catId)}
-                      className={`flex items-center gap-1 rounded-full px-2 py-0.5 text-micro transition-colors ${
-                        on
-                          ? 'bg-cafe-crosspost/15 font-semibold text-cafe-crosspost'
-                          : 'bg-cafe-surface-elevated text-cafe-muted hover:text-cafe-secondary'
-                      }`}
-                    >
-                      {chip.label} {chip.count}
-                    </button>
-                  );
-                })}
-              </div>
-            )}
-            {/* F232 Phase B: Grouping chips — only in global scope */}
-            {scope === 'global' && (
-              <div className="mt-2 flex items-center gap-1.5">
-                <span className="text-micro text-cafe-muted">分组:</span>
-                {groupingChips.map(([mode, label]) => {
-                  const on = grouping === mode;
-                  return (
-                    <button
-                      key={mode}
-                      type="button"
-                      onClick={() => {
-                        setGrouping(mode);
-                        setCollapsed(new Set());
-                      }}
-                      className={`rounded-full px-2 py-0.5 text-micro transition-colors ${
-                        on
-                          ? 'bg-cafe-crosspost/15 font-semibold text-cafe-crosspost'
-                          : 'bg-cafe-surface-elevated text-cafe-muted hover:text-cafe-secondary'
-                      }`}
-                    >
-                      {label}
-                    </button>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-          {/* List */}
-          <div className="flex-1 overflow-y-auto">
-            {visible.length === 0 ? (
-              <div className="px-3 py-8 text-center text-xs text-cafe-muted">{loading ? '' : '该类型暂无产物'}</div>
-            ) : (
-              groups.map((group) => {
-                const isOpen = !collapsed.has(group.id);
-                const showHeader = scope === 'global' && group.label !== '';
+          )}
+          {/* F232 Phase B: Grouping chips — only in global scope */}
+          {scope === 'global' && (
+            <div className="mt-2 flex items-center gap-1.5">
+              <span className="text-micro text-cafe-muted">分组:</span>
+              {groupingChips.map(([mode, label]) => {
+                const on = grouping === mode;
                 return (
-                  <div key={group.id}>
-                    {showHeader && (
-                      // biome-ignore lint/a11y: the nested native button owns keyboard/screen-reader semantics; the wrapper restores the surrounding pointer hit area
-                      <div
-                        data-artifact-group-header
-                        onClick={(event) => {
-                          if (isRowPrimaryActionTarget(event.target, event.currentTarget)) toggleCollapse(group.id);
-                        }}
-                        className="flex w-full cursor-pointer items-center gap-1.5 border-b border-cafe-subtle bg-cafe-surface-sunken px-3 py-2 text-left"
-                      >
-                        <button
-                          type="button"
-                          aria-expanded={isOpen}
-                          aria-label={`${isOpen ? '收起' : '展开'}分组：${group.label}`}
-                          onClick={() => toggleCollapse(group.id)}
-                          className="flex h-7 w-7 shrink-0 items-center justify-center rounded text-cafe-muted transition-colors hover:bg-cafe-surface-elevated hover:text-cafe-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cafe-accent"
-                        >
-                          <IconChevron open={isOpen} />
-                        </button>
-                        <CompactLabel
-                          label="分组名称"
-                          value={group.label}
-                          className="min-w-0 flex-1 text-xs font-semibold text-cafe-secondary"
-                        />
-                        <span className="text-micro text-cafe-muted">{group.count}</span>
-                      </div>
-                    )}
-                    {isOpen &&
-                      group.items.map((a, i) => (
-                        <ArtifactRow
-                          key={`${a.ref ?? a.name}-${i}`}
-                          a={a}
-                          index={i}
-                          grouping={grouping}
-                          resolveNick={resolveNickname}
-                          onSelect={selectArtifact}
-                          onJump={handleJump}
-                        />
-                      ))}
-                  </div>
+                  <button
+                    key={mode}
+                    type="button"
+                    onClick={() => {
+                      setGrouping(mode);
+                      setCollapsed(new Set());
+                    }}
+                    className={`rounded-full px-2 py-0.5 text-micro transition-colors ${
+                      on
+                        ? 'bg-cafe-crosspost/15 font-semibold text-cafe-crosspost'
+                        : 'bg-cafe-surface-elevated text-cafe-muted hover:text-cafe-secondary'
+                    }`}
+                  >
+                    {label}
+                  </button>
                 );
-              })
-            )}
-          </div>
-        </>
-      )}
+              })}
+            </div>
+          )}
+        </div>
+        {/* List */}
+        <div className="flex-1 overflow-y-auto">
+          {visible.length === 0 ? (
+            <div className="px-3 py-8 text-center text-xs text-cafe-muted">{loading ? '' : '该类型暂无产物'}</div>
+          ) : (
+            groups.map((group) => {
+              const isOpen = !collapsed.has(group.id);
+              const showHeader = scope === 'global' && group.label !== '';
+              return (
+                <div key={group.id}>
+                  {showHeader && (
+                    // biome-ignore lint/a11y: the nested native button owns keyboard/screen-reader semantics; the wrapper restores the surrounding pointer hit area
+                    <div
+                      data-artifact-group-header
+                      onClick={(event) => {
+                        if (isRowPrimaryActionTarget(event.target, event.currentTarget)) toggleCollapse(group.id);
+                      }}
+                      className="flex w-full cursor-pointer items-center gap-1.5 border-b border-cafe-subtle bg-cafe-surface-sunken px-3 py-2 text-left"
+                    >
+                      <button
+                        type="button"
+                        aria-expanded={isOpen}
+                        aria-label={`${isOpen ? '收起' : '展开'}分组：${group.label}`}
+                        onClick={() => toggleCollapse(group.id)}
+                        className="flex h-7 w-7 shrink-0 items-center justify-center rounded text-cafe-muted transition-colors hover:bg-cafe-surface-elevated hover:text-cafe-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cafe-accent"
+                      >
+                        <IconChevron open={isOpen} />
+                      </button>
+                      <CompactLabel
+                        label="分组名称"
+                        value={group.label}
+                        className="min-w-0 flex-1 text-xs font-semibold text-cafe-secondary"
+                      />
+                      <span className="text-micro text-cafe-muted">{group.count}</span>
+                    </div>
+                  )}
+                  {isOpen &&
+                    group.items.map((a, i) => (
+                      <ArtifactRow
+                        key={`${a.ref ?? a.name}-${i}`}
+                        a={a}
+                        index={i}
+                        grouping={grouping}
+                        resolveNick={resolveNickname}
+                        onSelect={selectArtifact}
+                        onJump={handleJump}
+                      />
+                    ))}
+                </div>
+              );
+            })
+          )}
+        </div>
+      </>
+      {opening.lightbox}
     </aside>
   );
 }

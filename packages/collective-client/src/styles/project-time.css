@@ -1,0 +1,172 @@
+.work-time-panel {
+  margin: 18px 0;
+}
+.work-time-panel > header,
+.work-time-editor > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.work-time-panel h4 {
+  margin: 0;
+  font-size: 13px;
+}
+.work-time-panel button,
+.project-time-target button {
+  min-height: 28px;
+  padding: 4px 8px;
+  border: 1px solid var(--console-border-soft);
+  border-radius: 6px;
+  background: var(--console-card-bg);
+  color: var(--cafe-text-primary);
+  font-size: 11px;
+  cursor: pointer;
+}
+.work-time-panel button.primary,
+.project-time-target button.primary {
+  border-color: var(--cafe-accent);
+  background: var(--cafe-surface-1);
+  color: var(--cafe-accent);
+}
+.work-time-panel button:disabled,
+.project-time-target button:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+.work-time-panel > dl > div {
+  display: grid;
+  grid-template-columns: 68px minmax(0, 1fr);
+  gap: 8px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--console-border-soft);
+}
+.work-time-panel dt {
+  font-size: 12px;
+  color: var(--cafe-text-muted);
+}
+.work-time-panel dd {
+  margin: 0;
+  display: grid;
+  gap: 4px;
+  font-size: 13px;
+}
+.work-time-panel small,
+.work-time-note,
+.project-time-target small {
+  color: var(--cafe-text-muted);
+  font-size: 11px;
+  line-height: 1.5;
+}
+.work-time-panel dd > span {
+  color: var(--cafe-text-muted);
+}
+.work-time-panel dd > button {
+  justify-self: start;
+}
+.work-time-suggestion {
+  margin-top: 10px;
+  padding: 10px 12px;
+  border-left: 2px solid var(--semantic-warning);
+  border-radius: 8px;
+  background: var(--semantic-warning-surface);
+  font-size: 12px;
+}
+.work-time-suggestion strong {
+  font-size: 12.5px;
+}
+.work-time-suggestion p {
+  margin: 6px 0;
+  line-height: 1.55;
+}
+.work-time-suggestion > div {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+}
+.work-time-editor {
+  display: grid;
+  min-width: 0;
+  gap: 9px;
+  margin-top: 10px;
+  padding: 10px;
+  border: 1px solid var(--console-border-soft);
+  border-radius: 8px;
+  background: var(--cafe-surface-1);
+}
+.work-time-editor label {
+  display: grid;
+  gap: 4px;
+  color: var(--cafe-text-muted);
+  font-size: 11px;
+}
+.work-time-editor input,
+.work-time-editor select,
+.work-time-editor textarea {
+  box-sizing: border-box;
+  min-width: 0;
+  width: 100%;
+  padding: 7px;
+  border: 1px solid var(--console-border-soft);
+  border-radius: 6px;
+  background: var(--cafe-surface-0);
+  color: var(--cafe-text-primary);
+  font: inherit;
+}
+.work-time-editor p {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.5;
+}
+.work-time-summary {
+  display: grid;
+  gap: 3px;
+  font-size: 12px;
+}
+.work-time-summary small {
+  font-size: 11px;
+  color: var(--cafe-text-muted);
+}
+.work-time-summary[data-tone="overdue"] strong {
+  color: var(--semantic-critical);
+}
+.work-time-summary[data-tone="estimate"] strong {
+  font-weight: 400;
+  color: var(--cafe-text-muted);
+}
+.work-time-summary .work-time-pending {
+  color: var(--semantic-warning);
+}
+.project-time-target dd {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  font-size: 12px;
+}
+.project-summary dl > .project-time-target {
+  align-items: start;
+}
+.project-time-target button {
+  justify-self: start;
+}
+.project-time-target form {
+  grid-column: 1 / -1;
+}
+@media (max-width: 640px) {
+  .work-time-editor > div {
+    flex-wrap: wrap;
+  }
+}
+
+.channel-work-dates > summary {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--cafe-text-muted);
+  font-size: 12px;
+  cursor: pointer;
+  margin: 10px 0;
+}
+.channel-work-dates .work-time-panel {
+  margin: 10px 0;
+}

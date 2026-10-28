@@ -4,7 +4,7 @@ related_features: [F245, F222, F248, F128, F266, F167, F264, F311, F313]
 topics: [paw-feel, friction, disposition, inbox, triage, system-thread, workspace, eval]
 doc_kind: spec
 created: 2026-07-26
-tips_exempt: "Renewed 2026-10-22 for a bounded cat-internal audit read; canonical ledger semantics stay unchanged, automated duty remains paused, and no human UI/action is added."
+tips_exempt: "Renewed 2026-10-27 for Task738 repairBinding compatibility: cat-internal repair proof now consumes the canonical Task assignment or an existing governed lease; automated duty remains paused and no new human operation is added."
 mcp_admission_status: accepted
 mcp_admission_ref: "file:docs/features/F278-paw-feel-disposition-inbox.md"
 mcp_admission_claims:
@@ -62,7 +62,7 @@ operator 要的不是“采到过”，而是每条爪感差都有人负责看�
 | F248 | Settings / Workspace Eval Hub 可读投影 | Workspace「评估」新增 live paw-feel surface |
 | F266 | published eval verdict lifecycle | 复用 append-only event/projection 形状，不复用 verdict 对象或状态语义 |
 | F128 | 无准确 owner 时提案 | pending proposal 是可审计 blocked exit；批准后仍须形成真实 repair binding 或 terminal disposition |
-| F167 | 路由后的工作球权与闭环 | named owner + task + active lease 才能投影 `bound_in_repair`；transport-only `routed` 仍是 `unreviewed` |
+| F167 | 路由后的工作球权与闭环 | named owner + task + 经复验的 repairBinding 才能投影 `bound_in_repair`；transport-only `routed` 仍是 `unreviewed` |
 | F264 | 原消息上的 durable status projection | 原消息就地显示 paw-feel disposition，不复制正文 |
 
 F277 已被开放 PR #3234 占用，因此本功能使用最新可用编号 F278。
@@ -114,7 +114,7 @@ MessageStore original message
 12. bundle 处置是 O(1) 猫确认 + O(例外) 拆出；list 返回服务端签名的精确 `signalId + expectedSequence` membership snapshot，confirm 只验证并消费该快照，禁止重新水合 membership。后来新到的成员保持原状态，不得被追溯签名。
 13. transport delivery、wake、旧 `routed` 事件或文本文案都不能成为业务责任 exit；只有 terminal disposition、verified repair binding、pending proposal 或 explicit blocker 可成为当班 valid exit。`signature_waiting` 是可恢复的 active state，不完成 receipt。
 14. primary / backup 未配置时必须是 Workspace 与 Settings 的最高优先级运行红灯；在完成配置并走通一批真实 triage 之前，F278 不能宣称运营完成。
-15. 每个 actionable bundle 必须处于 `terminal`，或拥有 named owner + task + **当前仍 active 的 exact lease/generation**，或 **F128 当前仍为 pending 的 proposal**，或 explicit blocker；投影必须携带对应 evidence refs。read/receipt 时重新查权威 store，过期 lease 或非 pending proposal 立即失去 `validExit`。`signature_waiting` 必须继续完成独立签署或转成 explicit blocker。
+15. 每个 actionable bundle 必须处于 `terminal`，或拥有 named owner + task + **当前仍 open 的 exact Task assignment/revision（或保留治理任务的 active lease/generation）**，或 **F128 当前仍为 pending 的 proposal**，或 explicit blocker；投影必须携带对应 evidence refs。read/receipt 时重新查权威 store，过期 lease 或非 pending proposal 立即失去 `validExit`。`signature_waiting` 必须继续完成独立签署或转成 explicit blocker。
 16. duty watermark 的终态是业务 receipt，不是 messenger receipt。每班只有在精确 snapshot 中每个 bundle 都有 valid exit，且同一 durable notice 已更新为逐 bundle rich checklist 后才能 complete；未完成 batch 不得被新 watermark 覆盖。
 17. source cat 可以是 resolver-verified repair owner，但不能 terminal-sign 自己的 signal。系统必须持久化 exact candidate、source signer exclusion 和可选 preferred signer，使 Backup / 首选 signer 中断后任一合法独立 signer 都能结构化恢复。
 18. 全量审计必须使用逐页有界的 signal scan：每页只读取该页 projection 与 source preview，不计算 bundle、issue、responsibility 或全局 aggregate；continuation 由持久 HMAC secret 签名，live traversal 不得冒充 frozen snapshot。
@@ -208,7 +208,7 @@ interface PawFeelReviewBundle {
 | `seen` | `route_pending` | cat + exact owner evidence or F128 proposal ref |
 | `route_pending` | `routed` | legacy audit transition only；即使 receipt 合法也不构成新业务 exit |
 | `route_pending` | `seen` | owner rejection / proposal rejection (`route_reopened`) |
-| `new` / `seen` / `route_pending` | `fix` | cat/operator + resolver-verified named owner, task and active F167 lease |
+| `new` / `seen` / `route_pending` | `fix` | cat/operator + resolver-verified named owner, task and current repairBinding |
 | `new` / `seen` / `route_pending` | `signature_waiting` | source cat requests one exact `duplicate` / `no_action` / `fix` candidate; persisted request excludes source signer and may name a preferred independent signer |
 | `signature_waiting` | `fix` / `duplicate` / `no_action` | any authenticated legal signer other than excluded source signs the exact persisted candidate; preferred signer is routing preference, not a single point of failure |
 | `new` / `seen` / `route_pending` / `signature_waiting` | `blocked` | cat writes an explicit blocker code + evidence ref |
@@ -250,18 +250,18 @@ interface PawFeelReviewBundle {
 1. 每个 bundle 只读一次原始上下文，查看其中所有 marker；
 2. 选择共同 disposition，必要时把例外成员拆出；
 3. 一次确认后，服务端为快照中的每个 signal 独立校验 sequence、独立写猫签事件并明确报告冲突；
-4. 路由与信使回执只提供 transport evidence；真实 repair 必须解析到 named owner + task + active lease，未知 owner 则保持 pending proposal / explicit blocker；
+4. 路由与信使回执只提供 transport evidence；真实 repair 必须解析到 named owner + task + 当前 repairBinding，未知 owner 则保持 pending proposal / explicit blocker；
 5. 查不到 owner 时走 F128 proposal，不猜 owner、不直接代替 owner 修复。
 6. source cat 同时是 verified repair owner 时，提交 exact signature request；任一非 source 的合法 signer 可从持久化 candidate 继续签署，不依赖原 Backup invocation 存活。
 7. 当 snapshot 中每个 bundle 都达到允许的 valid exit 后，值班 notice 原地生成逐 bundle rich receipt，作为本班完成凭据；`signature_waiting` 仍保持未勾选。
 
-Phase E 的值班主动作收敛为三个：`duplicate`、带理由 `no_action`、`fix`。`fix` 必须解析到 named owner + task + F167 active lease；task-backed implement 的直线路径是 persisted task standing → `implement/task_done` lease，不接受 generic durable-verdict、自报 ACK 或 transport receipt。它表示“责任已进入可执行修复球权”，不是“问题已修复”。旧 `route_pending/routed/closed` 事件继续可审计，但 transport-only receipt 不再可由新动作写绿。
+Phase E 的值班主动作收敛为三个：`duplicate`、带理由 `no_action`、`fix`。`fix` 必须解析到 named owner + task + 当前责任引用；普通 work/无 namespace/无 entrustedWork Task 使用 `task_assignment {taskId, expectedOwnerRevision}`，仍受治理的任务使用 `action_lease {leaseId}`，不接受 generic durable-verdict、自报 ACK 或 transport receipt。它表示“责任已进入可执行修复球权”，不是“问题已修复”。旧 `route_pending/routed/closed` 事件继续可审计，但 transport-only receipt 不再可由新动作写绿。
 
 semantic suggestion 只是在 bundle 之上的候选合并层；未命中或 degraded 时不影响确定性 bundle 与 raw signal 可见性。
 
 ### 报告猫：原消息就地确认
 
-报告猫回到原 turn 看到一个聚合状态框，例如“3 条：2 已看 · 1 已交修”，展开后才看逐条状态；`fix` 显示 named owner/task/lease 并明确“已进入修复，不等于已修复”。不会因为一条消息含多个 marker 就出现多个相似“责任箱”。
+报告猫回到原 turn 看到一个聚合状态框，例如“3 条：2 已看 · 1 已交修”，展开后才看逐条状态；`fix` 显示 named owner/task/assignment（真实 lease 分支保留 lease） 并明确“已进入修复，不等于已修复”。不会因为一条消息含多个 marker 就出现多个相似“责任箱”。
 
 ## Design in Context
 
@@ -356,7 +356,7 @@ semantic suggestion 只是在 bundle 之上的候选合并层；未命中或 deg
 ### Phase F — Business Responsibility & Auditable Duty Receipt
 
 - list 为每个 bundle 返回服务端签名的 exact membership snapshot；confirm 不再按实时 source context 重建成员；
-- 在 disposition event 之上派生 `unreviewed / bound_in_repair / signature_waiting / blocked / terminal` 五态责任真相，并在读取时复验 active lease 与 pending proposal 后暴露 valid-exit evidence；
+- 在 disposition event 之上派生 `unreviewed / bound_in_repair / signature_waiting / blocked / terminal` 五态责任真相，并在读取时复验 Task assignment 或真实 active lease，以及 pending proposal 后暴露 valid-exit evidence；
 - source=owner 与 source=signer 解耦：source 可成为 verified repair owner，但 exact terminal candidate 必须由独立 signer 签署；首选 signer 中断不锁死恢复；
 - duty watermark 持久化每班 snapshot，delivery/wake 只推进到 `awaiting_receipt`；逐 bundle valid exit 后将同一 durable notice 更新为 rich checklist receipt，再 complete；
 - Workspace、原消息 bubble 与筛选器消费 responsibility projection，旧 `routed` 不再被误算为业务完成；
@@ -428,14 +428,14 @@ Why: 只为既有 canonical ledger 增加 page-local read consumer 与受治理 
 - [x] AC-E4: 新报告由 server-owned typed capture 明确意图；legacy parser 保留合法 inline/fenced/blockquote 正例，仅以确定性 provenance guard 排除 escaped placeholder / copied marker；ambiguous/contaminated 历史行可见且不静默改写，存量确认假阳性由值班猫签 `no_action(parser_false_positive)`。
 - [x] AC-E5: 本阶段不接 semantic suggestion；UI 明确问题族数量不可可靠计算。未来若启用，只比较 bundle 并显示 provenance/health；degraded 不影响 deterministic bundle / raw visibility。
 - [x] AC-E6: Workspace 默认 bundle-first 且 duty-unconfigured fail-loud；Settings 只保留 duty config + compact audit/deep link，不重复完整 history；原消息只显示一个可展开的聚合状态框。
-- [x] AC-E7: transport receipt / 任意字符串不能完成 `routed`；只有 resolver-verified F167 active custody 可签 `fix`。task-backed implement 必须由真实 task 的 named owner 在 task thread 建立 `implement/task_done` lease；owner ACK 不替代 custody。
+- [x] AC-E7: transport receipt / 任意字符串不能完成 `routed`；只有 resolver-verified 当前 `repairBinding` 可签 `fix`。普通 Task 必须匹配认证 tenant、named owner、home thread 与冻结 assignment revision，保留治理任务仍走 exact active lease；owner ACK 不替代 custody。
 - [x] AC-E8: operator 已从 main 激活 runtime 并配置不同的 Primary/Backup；真实 duty cohort 已完成 Primary 审阅、独立 signer CAS 与 durable 44/44 receipt（`private-source-id`）。
 
 ### F — Business Responsibility & Duty Receipt
 
 - [x] AC-F1: 公共 list→confirm 使用 server-authenticated exact membership snapshot；confirm 期间 source hydration 变化不会让旧列表漂移，late members 不被追溯签署。
 - [x] AC-F2: 每个 bundle 派生五态 responsibility 与 `validExit`；transport-only `routed` 与失效 repair binding 均保持 `unreviewed`，只有 active exact binding 计入 `bound_in_repair`；UI、counts、filters 与原消息 bubble 使用同一投影。2026-08-28 production 全量 `fix` 成员复验为 754 raw / 516 context bundles，零 invalid exit；全局五态分母按未过滤 aggregate bundle 独立报告（`private-source-id`）。
-- [x] AC-F3: actionable bundle 只有 terminal、权威 store 复验仍有效的 owner/task/active lease、当前仍 pending 的 proposal 或 explicit blocker 才能完成本班责任；过期绑定保留历史 evidence 但重新进入 duty，可重绑或显式阻塞；recoverable signature request 保持 active，直到独立 signer 完成 exact candidate 或记录 explicit blocker。真实 cohort 经 Terra 独立签署 26 bundles / 35 signals 后 `signature_waiting=0`（`private-source-id`）。
+- [x] AC-F3: actionable bundle 只有 terminal、权威 store 复验仍有效的 owner/task/repairBinding、当前仍 pending 的 proposal 或 explicit blocker 才能完成本班责任；过期绑定保留历史 evidence 但重新进入 duty，可重绑或显式阻塞；recoverable signature request 保持 active，直到独立 signer 完成 exact candidate 或记录 explicit blocker。真实 cohort 经 Terra 独立签署 26 bundles / 35 signals 后 `signature_waiting=0`（`private-source-id`）。
 - [x] AC-F4: source cat 可作为 verified repair owner，但不能 terminal-sign 自己的 signal；持久化 exact candidate 与 signer exclusion，preferred signer / Backup 中断后可由其他合法 signer 恢复。
 - [x] AC-F5: duty delivery/wake 不完成 watermark；complete 与 incomplete 都更新同一 durable notice 的逐 bundle rich checklist，只有全部 checked 才 complete；scheduler-owned reconcile 在 duty invocation 失败时仍能留下 danger receipt，未完成 batch 不被新 watermark 覆盖。Production notice `private-source-id` 在同一消息上持久更新为 44/44 success receipt，逐 bundle checklist 全 checked。
 - [x] AC-F6: 真实 `112876b3` failure mode 有 RED→GREEN 回归；focused API/MCP、shared contract、Web 全量与 isolated Redis 6398 DB 15 均有 fresh green evidence。

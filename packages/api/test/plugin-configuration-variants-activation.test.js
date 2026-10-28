@@ -9,11 +9,10 @@
  */
 
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { join } from 'node:path';
 import { afterEach, test } from 'node:test';
-import { fileURLToPath } from 'node:url';
 import { catRegistry } from '@cat-cafe/shared';
 import { validateManifest } from '@clowder-ai/plugin-contract';
 import { createModuleActionClient } from '@clowder-ai/plugin-sdk';
@@ -35,7 +34,7 @@ import {
   createPluginManagerRuntimeComposition,
 } from '../dist/domains/plugin/index.js';
 import { pluginNativeActionRoutes } from '../dist/routes/plugin-native-action-routes.js';
-import { secretMcpContract } from './helpers/secret-mcp-contract.js';
+import { directMcpContract } from './helpers/direct-mcp-contract.js';
 
 const roots = [];
 afterEach(async () => {
@@ -189,15 +188,6 @@ async function installConfigureEnable(updates, roots) {
     (roots?.configOnWorkspace ? roots.workspace : roots?.runtime) ??
     (await tempRoot('cat-cafe-variants-feishu-project-'));
   const configRoot = roots?.workspace ?? projectRoot;
-  if (roots?.runtime && roots.runtime !== resolve(import.meta.dirname, '../../..')) {
-    const dist = join(roots.runtime, 'packages/mcp-server/dist');
-    await mkdir(dist, { recursive: true });
-    // A synthetic binary root must include the real transport artifact.
-    await symlink(
-      fileURLToPath(new URL('../../mcp-server/dist/secret-mcp-proxy.js', import.meta.url)),
-      join(dist, 'secret-mcp-proxy.js'),
-    );
-  }
   const packageRoot = await writeFixturePackage(Boolean(roots), roots?.mcpTools);
   const io = roots
     ? fileBasedMcpIO(configRoot, {
@@ -352,11 +342,11 @@ test('variant changes refresh existing project MCP providers while preserving me
       }
       const provider = await inject(consumer, allowedCat);
       assert.ok(provider, `${mode}: allowed member must receive the refreshed descriptor`);
-      const { upstream, proxyEnv } = secretMcpContract(provider);
+      const { upstream, launchEnv } = directMcpContract(provider);
       assert.equal(Object.hasOwn(upstream.env, 'FEISHU_TOKEN'), mode === 'webhook');
       if (mode === 'webhook') assert.equal(upstream.env.FEISHU_TOKEN, 'fixture-variant-secret');
-      assert.equal(proxyEnv.FEISHU_TOKEN, undefined);
-      assert.equal(proxyEnv.CLOWDER_PLUGIN_ACTION_TOKEN, undefined);
+      assert.equal(launchEnv.FEISHU_TOKEN, upstream.env.FEISHU_TOKEN);
+      assert.equal(launchEnv.CLOWDER_PLUGIN_ACTION_TOKEN, upstream.env.CLOWDER_PLUGIN_ACTION_TOKEN);
       const native = await runtime.supervisor.resolveNativeMcpLaunch({
         mode: 'plugin_native',
         pluginInstanceId: installed.pluginInstanceId,
@@ -438,13 +428,13 @@ for (const configOnWorkspace of [false, true])
       });
       const server = servers[id.replaceAll(':', '__')];
       assert.ok(server, 'real composition must provide the live plugin despite distinct runtime/workspace roots');
-      const { upstream, proxyEnv } = secretMcpContract(server);
+      const { upstream, launchEnv } = directMcpContract(server);
       assert.equal(upstream.env.CLOWDER_PLUGIN_ACTION_TOKEN, live.env.CLOWDER_PLUGIN_ACTION_TOKEN);
       assert.equal(upstream.env.CLOWDER_PLUGIN_ACTION_PATH, live.env.CLOWDER_PLUGIN_ACTION_PATH);
-      assert.equal(proxyEnv.CLOWDER_PLUGIN_ACTION_TOKEN, undefined);
+      assert.equal(launchEnv.CLOWDER_PLUGIN_ACTION_TOKEN, upstream.env.CLOWDER_PLUGIN_ACTION_TOKEN);
       assert.equal(upstream.command, live.command);
       assert.deepEqual(upstream.args, [...live.args]);
-      assert.match(server.args[0], /secret-mcp-proxy\.js$/);
+      assert.deepEqual(server.args, [...live.args]);
     } finally {
       await ownedRuntime?.shutdown();
     }
@@ -585,14 +575,14 @@ for (const legacy of ['missing-env-mapping', 'persisted-old-token']) {
       });
       const server = servers[existing.id.replaceAll(':', '__')];
       assert.ok(server);
-      const { upstream, proxyEnv } = secretMcpContract(server);
+      const { upstream, launchEnv } = directMcpContract(server);
       assert.equal(upstream.env.CLOWDER_PLUGIN_ACTION_TOKEN, token);
       assert.equal(upstream.env.CLOWDER_PLUGIN_ACTION_PATH, '/api/plugin-runtime/action');
       assert.equal(upstream.env.FEISHU_TOKEN, ' preserved legacy secret ');
       assert.equal(upstream.command, existing.mcpServer.command);
       assert.deepEqual(upstream.args, existing.mcpServer.args);
-      assert.equal(proxyEnv.CLOWDER_PLUGIN_ACTION_TOKEN, undefined);
-      assert.equal(proxyEnv.FEISHU_TOKEN, undefined);
+      assert.equal(launchEnv.CLOWDER_PLUGIN_ACTION_TOKEN, upstream.env.CLOWDER_PLUGIN_ACTION_TOKEN);
+      assert.equal(launchEnv.FEISHU_TOKEN, upstream.env.FEISHU_TOKEN);
       assert.equal(await readFile(projectFile, 'utf8'), projectBytes, 'unregistered legacy project needs no rewrite');
       client = new Client({ name: 'existing-install-upgrade', version: '1' });
       await client.connect(new StdioClientTransport({ command: server.command, args: server.args, env: server.env }));

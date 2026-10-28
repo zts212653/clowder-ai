@@ -1,5 +1,3 @@
-import { fileURLToPath, pathToFileURL } from 'node:url';
-import { isCredentialSource } from './secret-credential-paths.mjs';
 import {
   CURL_FILE_VALUES,
   CURL_FLAGS,
@@ -16,7 +14,7 @@ export async function prepareCurlArgs(args, freeze) {
       output.push(argument.name, await curlValue(argument.name, argument.value, freeze));
     } else {
       if (argument.kind === 'flag') checkFlag(argument.name);
-      output.push(await curlUrl(argument.word, freeze));
+      output.push(argument.word);
     }
   }
   return output;
@@ -29,7 +27,7 @@ function checkFlag(name) {
 }
 
 async function curlValue(name, value, freeze) {
-  if (name === '--url') return curlUrl(value, freeze);
+  if (['--url', '--write-out', '-w', '--cacert', '--capath', '--cert', '--key'].includes(name)) return value;
   if (CURL_FILE_VALUES.has(name) && name !== '--cookie-jar') return freeze(value);
   if (CURL_REFERENCES.has(name) && value.startsWith('@')) return `@${await freeze(value.slice(1))}`;
   if ((name === '--cookie' || name === '-b') && !value.includes('=')) return freeze(value);
@@ -40,13 +38,6 @@ async function curlValue(name, value, freeze) {
       return `${value.slice(0, marker + 1)}${await freeze(value.slice(marker + 1))}`;
   }
   return value;
-}
-
-async function curlUrl(value, freeze) {
-  if (!/^file:/i.test(value)) return value;
-  const url = new URL(value);
-  if (isCredentialSource(url.href)) throw new Error('credential_source_blocked_before_read');
-  return pathToFileURL(await freeze(fileURLToPath(url))).href;
 }
 
 async function freezeForm(value, freeze) {

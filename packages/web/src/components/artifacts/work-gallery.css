@@ -306,3 +306,33 @@
     grid-template-columns: minmax(0, 1fr);
   }
 }
+
+/* Home supplies density; the card, source and actions are the same as Works and Chat. */
+.work-gallery-open.home-work-summary {
+  display: grid;
+  grid-template-columns: 56px minmax(0, 1fr);
+  align-items: center;
+  margin: 0;
+  padding: 6px;
+}
+.work-gallery-open.home-work-summary .work-gallery-visual {
+  width: 56px;
+  aspect-ratio: 1;
+}
+.work-gallery-open.home-work-summary .work-gallery-title {
+  height: auto;
+  margin: 0;
+  padding: 4px 10px;
+}
+.work-gallery-actions {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  z-index: 2;
+}
+.work-gallery-actions > output {
+  top: 38px;
+  right: 0;
+  left: auto;
+  transform: none;
+}

@@ -51,6 +51,7 @@ function ChoiceRow({
       role="radio"
       aria-checked={selected}
       data-testid={testId}
+      data-chat-background-surface={selected ? 'selected' : 'paper'}
       onClick={onChoose}
       className="shell-focusable flex items-center gap-3 rounded-lg px-3 py-2 text-left text-sm"
       style={{
@@ -171,6 +172,7 @@ export function ThemeSettingsPanel() {
             return (
               <li
                 key={theme.id}
+                data-chat-background-surface={active ? 'selected' : 'paper'}
                 className="flex items-center gap-2 rounded-lg px-3 py-2"
                 style={{
                   background: active ? 'var(--shell-selected)' : 'var(--shell-paper)',

@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 import { NAMED_ALPHA_PORTS, namedAlphaFixture } from './lib/alpha-named-fixture.mjs';
 import { lifecycleConfig } from './lib/worktree-reaper-probes.mjs';
+import { managedPreviewOperationDecision } from './native-effect-preview-classifier.mjs';
 import { decideNativeHookPayload } from './native-effect-target-guard.mjs';
 import { finishWorktree, ownedWorktreeFacts } from './worktree-finish.mjs';
 
@@ -63,7 +64,7 @@ test('named Alpha preserves managed preview context across dotenv and does not m
   assert.equal(direct.CAT_CAFE_PREVIEW_CLEANUP_RESULT, '');
 });
 
-test('actual native guard admits only the registered main-lineage named Alpha child', (t) => {
+test('named Alpha attribution requires the registered main-lineage child; the launcher rejects unsupported shapes', (t) => {
   const f = namedAlphaFixture(t);
   const child = `pnpm alpha:start --instance f290-communication --ports ${NAMED_ALPHA_PORTS} --allow-empty-redis`;
   const decide = (command, cwd = f.mainRoot) =>
@@ -91,11 +92,34 @@ test('actual native guard admits only the registered main-lineage named Alpha ch
     command.replace('5311 --cwd', '3001 --cwd'),
     command.replace('15397', '6399'),
     command.replace('pnpm alpha:start', 'env CAT_CAFE_DEPLOYMENT_ID= pnpm alpha:start'),
-  ])
-    assert.equal(decide(invalid).decision, 'deny', invalid);
-  assert.equal(decide(command, f.alphaRoot).decision, 'deny', 'launcher belongs to the actual main coordinate');
+  ]) {
+    const verdict = decide(invalid);
+    assert.notEqual(managedPreviewOperationDecision(invalid, f.mainRoot)?.status, 'allow', invalid);
+    assert.notEqual(verdict.target.value, allowed.target.value, 'unsupported shape gains no named attribution');
+    if (invalid.includes('3001 --cwd') || invalid.includes('6399'))
+      assert.equal(verdict.decision, 'deny', 'recognised protected tuples stay refused');
+    else assert.equal(verdict.effect, 'unknown', 'ordinary unsupported grammar remains unproved');
+  }
+  for (const flag of [
+    ['--force'],
+    ['--no-sync'],
+    ['--env-file', '/tmp/evil'],
+    ['--dir', '/tmp/arbitrary'],
+    ['--branch', 'feature'],
+    ['--remote', 'other'],
+  ]) {
+    const rejected = f.run(['start', '--instance', 'f290-communication', '--ports', NAMED_ALPHA_PORTS, ...flag]);
+    assert.notEqual(rejected.status, 0, 'the real launcher retains its option contract');
+  }
+  assert.equal(managedPreviewOperationDecision(command, f.alphaRoot)?.status, 'deny');
+  assert.equal(decide(command, f.alphaRoot).effect, 'unknown', 'main coordinate was not proved');
   writeFileSync(join(f.alphaRoot, 'scripts/alpha-worktree.sh'), '# dirty\n');
-  assert.equal(decide(command).decision, 'deny', 'tracked dirty implementation cannot start');
+  assert.equal(managedPreviewOperationDecision(command, f.mainRoot)?.status, 'deny');
+  assert.equal(decide(command).effect, 'unknown', 'tracked dirty implementation has no named proof');
+  const dirty = f.run(['start', '--instance', 'f290-communication', '--ports', NAMED_ALPHA_PORTS]);
+  assert.notEqual(dirty.status, 0);
+  assert.match(dirty.stderr, /tracked changes/);
+  assert.doesNotMatch(f.readCalls(), /pnpm|redis-cli/);
 });
 
 test('named status/stop consume the existing launcher record coordinates without a start preflight', (t) => {
@@ -117,18 +141,24 @@ test('named status/stop consume the existing launcher record coordinates without
     command: ['pnpm', 'alpha:start', '--instance', 'f290-communication', '--ports', NAMED_ALPHA_PORTS],
   };
   writeFileSync(join(stateDir, `${id}.json`), JSON.stringify(record));
-  for (const action of ['status', 'stop']) {
-    const verdict = decideNativeHookPayload(
-      {
-        tool_name: 'exec_command',
-        cwd: '/tmp',
-        tool_input: { cmd: `pnpm --dir ${f.mainRoot} preview:process ${action} --cwd ${f.mainRoot} --port 5311` },
-      },
-      { selfHost: () => ({ confidence: 'none' }) },
-    );
-    assert.equal(verdict.decision, 'allow', JSON.stringify(verdict));
-    assert.equal(verdict.target.value, `preview://alpha${f.mainRoot}:5311`);
-  }
+  // Serving/build-generated tracked changes do not invalidate an existing
+  // lifecycle coordinate. Startup still requires the exact clean checkout.
+  writeFileSync(join(f.alphaRoot, 'packages/web/package.json'), '{"generated":true}\n');
+  for (const action of ['status', 'stop'])
+    for (const tool_name of ['Bash', 'exec_command']) {
+      const command = `pnpm --dir ${f.mainRoot} preview:process ${action} --cwd ${f.mainRoot} --port 5311`;
+      const verdict = decideNativeHookPayload(
+        {
+          tool_name,
+          cwd: '/tmp',
+          tool_input: { cmd: command, command },
+          ...(tool_name === 'exec_command' ? { turn_id: 'named-alpha-stop' } : {}),
+        },
+        { selfHost: () => ({ confidence: 'none' }) },
+      );
+      assert.equal(verdict.decision, 'allow', JSON.stringify(verdict));
+      assert.equal(verdict.target.value, `preview://alpha${f.mainRoot}:5311`);
+    }
   record.command[record.command.length - 1] = '5311,3002,5411,5511,6399';
   writeFileSync(join(stateDir, `${id}.json`), JSON.stringify(record));
   const verdict = decideNativeHookPayload(
@@ -139,7 +169,8 @@ test('named status/stop consume the existing launcher record coordinates without
     },
     { selfHost: () => ({ confidence: 'none' }) },
   );
-  assert.equal(verdict.decision, 'deny');
+  assert.equal(verdict.effect, 'unknown', 'a malformed stored tuple supplies no lifecycle proof');
+  assert.notEqual(verdict.target.value, `preview://alpha${f.mainRoot}:5311`);
 });
 
 test('named start rejects path overrides and protected tuples before contacting any Redis', (t) => {
@@ -264,7 +295,8 @@ test('a live process in the named checkout prevents a new tuple from rebuilding 
     { turn_id: 'serving-alpha', tool_name: 'exec_command', cwd: f.mainRoot, tool_input: { cmd: command } },
     { selfHost: () => ({ confidence: 'none' }) },
   );
-  assert.equal(decision.decision, 'deny');
+  assert.equal(decision.effect, 'unknown', 'serving checkout supplies no new-start attribution');
+  assert.equal(managedPreviewOperationDecision(command, f.mainRoot)?.status, 'deny');
   const start = f.run(['start', '--instance', 'f290-communication', '--ports', tuple]);
   assert.notEqual(start.status, 0);
   assert.match(start.stderr, /checkout has a live process/);

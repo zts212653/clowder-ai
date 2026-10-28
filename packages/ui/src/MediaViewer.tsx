@@ -30,12 +30,13 @@ export function MessageMediaViewer({
   readonly onSelect?: (id: string) => void;
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
+  const returnedToSource = useRef(false);
   useEffect(() => {
     const prior = document.activeElement instanceof HTMLElement ? document.activeElement : undefined;
     dialog.current?.showModal();
     return () => {
       dialog.current?.close();
-      if (prior?.isConnected) prior.focus({ preventScroll: true });
+      if (!returnedToSource.current && prior?.isConnected) prior.focus({ preventScroll: true });
     };
   }, []);
   return createPortal(
@@ -56,7 +57,14 @@ export function MessageMediaViewer({
           <span>{title ?? item.title}</span>
           <div>
             {onReturn && (
-              <button type="button" onClick={onReturn}>
+              <button
+                type="button"
+                onClick={() => {
+                  returnedToSource.current = true;
+                  dialog.current?.close();
+                  onReturn();
+                }}
+              >
                 {returnLabel}
               </button>
             )}

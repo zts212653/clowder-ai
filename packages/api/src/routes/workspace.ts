@@ -10,7 +10,6 @@ import { isLocalHumanFileActionRequest } from './media-file-actions.js';
  * GET  /api/workspace/diff         — git diff for worktree (changed files + unified diff)
  * POST /api/workspace/linked-roots  — add a linked root (name + path)
  * DELETE /api/workspace/linked-roots — remove a linked root by id
- * POST /api/workspace/reveal         — open file in system file manager (Finder/Explorer)
  * POST /api/workspace/navigate       — F131: cat-initiated workspace panel navigation
  * POST /api/workspace/resolve-document-link — F063: absolute local link → typed target
  *
@@ -20,7 +19,7 @@ import { isLocalHumanFileActionRequest } from './media-file-actions.js';
 import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { readdir, readFile, stat } from 'node:fs/promises';
-import { dirname, extname, isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { extname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { promisify } from 'node:util';
 import type { CallbackPrincipal } from '@cat-cafe/shared';
 import { isAbsoluteFilesystemPath, normalizeWorkspaceRelativePath } from '@cat-cafe/shared/utils';
@@ -71,9 +70,10 @@ import { registerWorkspaceChatReferences } from './workspace-chat-references.js'
 import { parseWorkspaceChangedFiles } from './workspace-diff.js';
 import { workspaceDirectHuman } from './workspace-direct-human.js';
 import { registerWorkspaceFileActions } from './workspace-file-actions.js';
+import { registerWorkspaceFileDownload } from './workspace-file-download.js';
+import { sendWorkspaceFileBytes } from './workspace-file-response.js';
 import { registerWorkspaceFileSourceRoutes } from './workspace-file-source-routes.js';
 import { registerWorkspaceHtmlPreviewRoutes } from './workspace-html-preview.js';
-import { sendWorkspaceMedia } from './workspace-media-response.js';
 import {
   handleWorkspaceNavigateBody,
   parseWorkspaceNavigateBody,
@@ -427,6 +427,7 @@ async function attachSkillConsumptionReceipt(
 export const workspaceRoutes: FastifyPluginAsync<WorkspaceRouteOpts> = async (app, opts) => {
   registerWorkspaceChatReferences(app, resolveWorkspaceInteractiveUserId, opts.threadStore);
   registerWorkspaceFileActions(app, resolveWorkspaceInteractiveUserId);
+  registerWorkspaceFileDownload(app, resolveWorkspaceInteractiveUserId);
   registerChatChanges(app, resolveWorkspaceInteractiveUserId, opts.threadStore, opts.pullRequestChangesDependencies);
   registerWorkspaceMediaFileActions(app);
   const auditLog = opts.auditLog ?? getEventAuditLog();
@@ -619,7 +620,7 @@ export const workspaceRoutes: FastifyPluginAsync<WorkspaceRouteOpts> = async (ap
         reply.status(413);
         return { error: `File too large (${Math.round(fileStat.size / 1024 / 1024)}MB, max 10MB)` };
       }
-      return sendWorkspaceMedia(request, reply, resolved, fileStat.size, mime);
+      return sendWorkspaceFileBytes(request, reply, resolved, fileStat.size, mime);
     } catch (e) {
       if (e instanceof WorkspaceSecurityError) {
         reply.status(e.code === 'NOT_FOUND' ? 404 : 403);
@@ -833,46 +834,6 @@ export const workspaceRoutes: FastifyPluginAsync<WorkspaceRouteOpts> = async (ap
     } catch (error) {
       if (error instanceof WorkspaceSecurityError) return reply.code(409).send({ error: 'connection_changed' });
       return reply.code(503).send({ error: 'connection_state_unavailable' });
-    }
-  });
-
-  // POST /api/workspace/reveal — open file/directory in system file manager
-  app.post<{
-    Body: { worktreeId: string; path: string };
-  }>('/api/workspace/reveal', async (request, reply) => {
-    if (!isLocalHumanFileActionRequest(request) || !workspaceDirectHuman(request, resolveWorkspaceInteractiveUserId))
-      return reply.code(403).send({ error: 'local_human_required' });
-    const { worktreeId, path: filePath } = request.body ?? {};
-    if (!worktreeId || !filePath) {
-      reply.status(400);
-      return { error: 'worktreeId and path required' };
-    }
-    try {
-      const root = await getWorktreeRoot(worktreeId);
-      const resolved = await resolveWorkspaceFilesystemPath(root, filePath);
-      if (process.platform === 'darwin') {
-        // macOS: open -R reveals the file in Finder
-        await execFileAsync('open', ['-R', resolved], { timeout: 5000 });
-      } else if (process.platform === 'win32') {
-        await execFileAsync('explorer', ['/select,', resolved], { timeout: 5000 });
-      } else {
-        // Linux: xdg-open can only open directories, not select files
-        const fileStat = await stat(resolved);
-        const dir = fileStat.isDirectory() ? resolved : dirname(resolved);
-        await execFileAsync('xdg-open', [dir], { timeout: 5000 });
-      }
-      return { ok: true };
-    } catch (e) {
-      if (e instanceof WorkspaceSecurityError) {
-        reply.status(e.code === 'NOT_FOUND' ? 404 : 403);
-        return { error: e.message };
-      }
-      if ((e as NodeJS.ErrnoException).code === 'ENOENT') {
-        reply.status(404);
-        return { error: 'File not found' };
-      }
-      reply.status(500);
-      return { error: 'Failed to reveal file' };
     }
   });
 

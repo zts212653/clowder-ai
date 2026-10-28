@@ -22,6 +22,10 @@ test('raw intermediate review is found by exact commit association and notified 
   assert.equal(a.notices[0].threadId, origin.threadId);
   assert.equal(a.notices[0].kind, 'merged-unfinished');
   assert.deepEqual(a, mergedWorktreeNotices('/fixture', [row], deps));
+  assert.equal(
+    mergedWorktreeNotices('/fixture', [row], { ...deps, findSources: () => [sourceRef, sourceRef] }).notices.length,
+    1,
+  );
   for (const changed of [{ state: 'OPEN' }, { commits: [] }])
     assert.equal(
       mergedWorktreeNotices('/fixture', [row], { ...deps, readPr: () => ({ ...truth, ...changed }) }).notices.length,
@@ -32,6 +36,13 @@ test('raw intermediate review is found by exact commit association and notified 
     0,
   );
   assert.equal(mergedWorktreeNotices('/fixture', [{ ...row, lifecycle: {} }], deps).notices.length, 0);
+  assert.equal(
+    mergedWorktreeNotices('/fixture', [{ ...row, retentionStatus: 'retention-expired', notice: {} }], deps).notices
+      .length,
+    1,
+  );
+  for (const retentionStatus of ['retention-invalid', 'retention-head-changed'])
+    assert.equal(mergedWorktreeNotices('/fixture', [{ ...row, retentionStatus }], deps).notices.length, 0);
 });
 test('bounded batches cover all subjects; source query failure preserves unknown instead of a false all-clear', () => {
   const rows = Array.from({ length: 13 }, (_, i) => ({ ...row, path: `/fixture/${String(i).padStart(2, '0')}` }));

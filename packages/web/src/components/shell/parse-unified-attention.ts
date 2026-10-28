@@ -1,5 +1,6 @@
 import {
   collectiveAccountabilityAttentionItemSchema,
+  collectiveProjectAttentionItemSchema,
   isValidRichBlock,
   type UnifiedAttentionReadV1,
   unifiedAttentionChoiceRequestSchema,
@@ -122,6 +123,17 @@ function isItem(value: unknown): boolean {
   if (value.runtimeInteraction !== undefined && !isRuntimeInteraction(value.runtimeInteraction)) return false;
   if (value.choiceRequest !== undefined && !isChoiceRequest(value.choiceRequest)) return false;
   if (!isCollectiveAccountabilityItem(value)) return false;
+  if (value.collectiveProjectAttention !== undefined) {
+    const parsed = collectiveProjectAttentionItemSchema.safeParse(value.collectiveProjectAttention);
+    if (
+      !parsed.success ||
+      value.kind !== 'judgment' ||
+      value.linkedNeedsMe.length !== 0 ||
+      value.decisionRef !== `${parsed.data.producerId}:${parsed.data.subjectRef}` ||
+      value.collectiveAccountabilityRequest !== undefined
+    )
+      return false;
+  }
   if (value.kind === 'user_mention') return isUserMention(value.userMention);
   if (value.approval === undefined) return true;
   return isRecord(value.approval) && isNonBlankString(value.approval.proposalId);
@@ -169,6 +181,10 @@ function hasSources(body: Record<string, unknown>): boolean {
         isRecord(body.sources.collectiveAccountabilityRequests) &&
         body.sources.collectiveAccountabilityRequests.coverage ===
           'pending_f290_collective_accountability_requests')) &&
+    (body.sources.collectiveProjectAttention === undefined ||
+      (isSourceRead(body.sources.collectiveProjectAttention) &&
+        isRecord(body.sources.collectiveProjectAttention) &&
+        body.sources.collectiveProjectAttention.coverage === 'pending_f290_project_materials_and_dates')) &&
     (body.sources.structuredChoices === undefined || isSourceRead(body.sources.structuredChoices)) &&
     (body.sources.userMentions === undefined || isSourceRead(body.sources.userMentions)) &&
     (body.sources.personalPreferences === undefined || isSourceRead(body.sources.personalPreferences))
@@ -180,9 +196,11 @@ function itemsMatchSources(body: Record<string, unknown>): boolean {
   const accountabilityItems = body.items.filter(
     (item) => isRecord(item) && item.collectiveAccountabilityRequest !== undefined,
   );
-  if (accountabilityItems.length === 0) return true;
   const source = body.sources.collectiveAccountabilityRequests;
-  return isRecord(source) && source.status === 'available';
+  if (accountabilityItems.length && (!isRecord(source) || source.status !== 'available')) return false;
+  const projectItems = body.items.filter((item) => isRecord(item) && item.collectiveProjectAttention !== undefined);
+  const projectSource = body.sources.collectiveProjectAttention;
+  return projectItems.length === 0 || (isRecord(projectSource) && projectSource.status === 'available');
 }
 
 function hasConsistency(body: Record<string, unknown>): boolean {

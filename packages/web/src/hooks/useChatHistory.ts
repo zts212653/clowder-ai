@@ -1,6 +1,11 @@
 'use client';
 
-import { type CliDiagnostics, type ReplyPreview, timelineMessageKind } from '@cat-cafe/shared';
+import {
+  type CliDiagnostics,
+  mergeCodexStartupRecovery,
+  type ReplyPreview,
+  timelineMessageKind,
+} from '@cat-cafe/shared';
 import { type MouseEvent, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import { readShellPresentation } from '@/components/shell/shell-presentation';
@@ -87,6 +92,7 @@ import { hydrateQueueActiveInvocationSlots, type QueueActiveInvocationSlot } fro
 import { useViewportMessageTimeline } from './useViewportMessageTimeline';
 
 type RestoreFrameKind = 'restore' | 'navigation' | 'correction';
+type ReadingRefreshStatus = 'ready' | 'unavailable' | 'interrupted';
 type NavigationSettleSample = {
   top: number;
   messageAnchor: MessageScrollAnchor;
@@ -423,7 +429,8 @@ function mergeMessageExtra(
   // ChatMessage.extra carrier makes TypeScript require an explicit merge rule,
   // while unknown runtime properties are still discarded. Most carriers are
   // immutable/additive projections, so the selected message wins and the other
-  // side only fills a missing field. `rich` remains the sole structural merge.
+  // side only fills a missing field. `rich` merges structurally; startupRecovery
+  // chooses its own monotonic version independently of body preference.
   const fields: RequiredMessageExtraFields = {
     // No fallback inheritance: this layout belongs to the selected full body.
     outputLayout: preferred?.outputLayout,
@@ -457,6 +464,7 @@ function mergeMessageExtra(
     recovery: pick('recovery'),
     systemInfo: pick('systemInfo'),
     providerRecovery: pick('providerRecovery'),
+    startupRecovery: mergeCodexStartupRecovery(preferred?.startupRecovery, fallback?.startupRecovery),
   };
   const definedFields = Object.fromEntries(Object.entries(fields).filter(([, value]) => value !== undefined)) as Omit<
     MessageExtra,
@@ -675,6 +683,7 @@ export function useChatHistory(threadId: string) {
   const restoreWritesRef = useRef(new ChatRestoreWriteCheckpoint());
   const readingSettlementRef = useRef<ChatReadingInputFence | null>(null);
   const navigationHighlightRef = useRef<(() => void) | undefined>(undefined);
+  const readingRefreshRef = useRef<{ resolve: (status: ReadingRefreshStatus) => void } | null>(null);
   const readingReceiptRef = useRef<{
     snapshot: ChatReadingSnapshot;
     resolve: (receipt: ChatReadingRestoreReceipt) => void;
@@ -760,6 +769,8 @@ export function useChatHistory(threadId: string) {
       preserveNavigationReceipt = false,
       preserveRestoreWrites = false,
     ) => {
+      readingRefreshRef.current?.resolve('interrupted');
+      readingRefreshRef.current = null;
       if (!preserveRestoreWrites) restoreWritesRef.current.invalidate();
       navigationHighlightRef.current?.();
       navigationHighlightRef.current = undefined;
@@ -1532,7 +1543,7 @@ export function useChatHistory(threadId: string) {
   // A search admission checks authority; this original reader still refreshes the
   // actual transcript before choosing a DOM target from its cache.
   const refreshReadingHistory = useCallback(
-    async (signal?: AbortSignal): Promise<'ready' | 'unavailable' | 'interrupted'> => {
+    async (signal?: AbortSignal): Promise<ReadingRefreshStatus> => {
       if (signal?.aborted) return 'interrupted';
       if (threadIdRef.current !== threadId || useChatStore.getState().currentThreadId !== threadId)
         return 'unavailable';
@@ -1540,15 +1551,27 @@ export function useChatHistory(threadId: string) {
       readingRestoreRef.current = null;
       restoreFrameKindRef.current = 'navigation';
       const generation = restoreGenerationRef.current;
-      let refreshed: boolean | undefined;
-      try {
-        refreshed = await fetchHistory(undefined, { replace: true });
-      } catch {
-        refreshed = false;
-      }
-      if (generation !== restoreGenerationRef.current || threadIdRef.current !== threadId) return 'interrupted';
-      restoreFrameKindRef.current = null;
-      return signal?.aborted ? 'interrupted' : refreshed === true ? 'ready' : 'unavailable';
+      const receipt = new Promise<ReadingRefreshStatus>((resolve) => {
+        const operation = { resolve };
+        readingRefreshRef.current = operation;
+        const finish = (refreshed: boolean | undefined) => {
+          if (readingRefreshRef.current !== operation) return;
+          readingRefreshRef.current = null;
+          if (generation !== restoreGenerationRef.current || threadIdRef.current !== threadId || signal?.aborted) {
+            resolve('interrupted');
+            return;
+          }
+          restoreFrameKindRef.current = null;
+          resolve(refreshed === true ? 'ready' : 'unavailable');
+        };
+        // History can be shared with another reader. Retire this navigation's
+        // wait immediately without cancelling that shared fetch or its hydration.
+        void fetchHistory(undefined, { replace: true }).then(finish, () => finish(false));
+      });
+      const owned = readingRefreshRef.current;
+      return bindReadingAbort(receipt, signal, () => {
+        if (owned && readingRefreshRef.current === owned) cancelPendingRestore();
+      });
     },
     [cancelPendingRestore, fetchHistory, threadId],
   );
@@ -1597,7 +1620,7 @@ export function useChatHistory(threadId: string) {
       const data = await res.json();
       const tasks = data.tasks ?? [];
       taskCacheByThread.set(fetchForThread, tasks);
-      setTasks(tasks);
+      setTasks(tasks, fetchForThread);
       return true;
     } catch {
       return false;
@@ -1764,7 +1787,8 @@ export function useChatHistory(threadId: string) {
   // Restore per-thread tasks before paint so revisiting a thread does not show
   // an empty secondary panel while revalidation is still in flight.
   useLayoutEffect(() => {
-    setTasks(taskCacheByThread.get(threadId) ?? []);
+    const cached = taskCacheByThread.get(threadId);
+    setTasks(cached ?? [], cached ? threadId : undefined);
   }, [threadId, setTasks]);
 
   // Admit the incoming history before its initial layout restore. The asynchronous

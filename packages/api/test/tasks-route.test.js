@@ -33,6 +33,9 @@ describe('Tasks Routes', () => {
   async function createApp(overrides = {}) {
     const { tasksRoutes } = await import('../dist/routes/tasks.js');
     const app = Fastify();
+    app.addHook('onRequest', async (request) => {
+      if (!request.headers['x-cat-cafe-user']) request.sessionUserId = 'task-route-user';
+    });
     await app.register(tasksRoutes, { taskStore, socketManager, ...overrides });
     return app;
   }

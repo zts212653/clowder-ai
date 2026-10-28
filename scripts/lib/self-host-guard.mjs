@@ -184,7 +184,7 @@ export function assessSideEffect(commandLine, cwd, self = {}, observations = {})
     );
   }
 
-  const commands = analyseCommands(raw, cwd);
+  const commands = analyseCommands(raw, cwd, observations);
   const knownPids = selfPids(self);
   const knownPorts = selfPorts(self);
 

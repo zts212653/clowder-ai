@@ -1,5 +1,6 @@
 'use client';
 import { createContext, type ReactNode, useContext, useId, useState } from 'react';
+import { ApprovalReceiptPresentation, receiptOutcome } from '../approval-receipt/receipt-presentation';
 import { useShellCopy } from '../shell/shell-copy';
 import { decisionResultCopy } from './decision-result.shell-copy';
 
@@ -26,6 +27,34 @@ export function ApprovalResultRow({
   const [expanded, setExpanded] = useState(false);
   const id = useId();
   const insideDetails = useContext(ResultDetailsContext);
+  const receipt = useContext(ApprovalReceiptPresentation);
+  if (receipt) {
+    const outcome = receiptOutcome(label, receipt.decisionWord, receipt.time);
+    return (
+      <div
+        data-testid="decision-result-row"
+        data-presentation="chat-receipt"
+        className="flex flex-wrap items-center gap-x-1.5 gap-y-1 text-[13px]"
+      >
+        <span
+          aria-hidden="true"
+          data-testid={`${testIdPrefix}-dot`}
+          data-status={receipt.status}
+          className="inline-block h-2 w-2 shrink-0 rounded-full"
+          style={{ background: receipt.status === 'approved' ? 'var(--semantic-success)' : 'var(--semantic-critical)' }}
+        />
+        {receipt.lead}
+        {outcome ? (
+          <>
+            <span aria-hidden="true">·</span>
+            <span data-testid={`${testIdPrefix}-label`}>{outcome}</span>
+          </>
+        ) : null}
+        {actions}
+        {receipt.suffix}
+      </div>
+    );
+  }
   if (insideDetails) return <>{children}</>;
   return (
     <div data-testid="decision-result-row" className="min-w-0 text-sm">

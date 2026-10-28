@@ -5,7 +5,7 @@
  * setting cannot clobber another. Writes are crash-safe temp+rename and no-TTL.
  */
 
-import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import type {
   MessageDispositionPreferenceSnapshot,
@@ -13,19 +13,18 @@ import type {
   MessageWorkDisposition,
   UserPreferences,
 } from '@cat-cafe/shared';
+import { userPreferencesPath } from './chat-background-file-generation.js';
+import type { BackgroundMetadataWrite } from './chat-background-metadata-lifecycle.js';
+import { writeUserPreferencesAtomic } from './user-preferences-atomic-write.js';
 
 type BubbleDefaultPreferences = NonNullable<UserPreferences['bubbleDefaults']>;
 type BubbleDisplayDefaultPreference = NonNullable<BubbleDefaultPreferences['cliOutput']>;
 
 export const MESSAGE_DISPOSITION_PRODUCT_DEFAULT: MessageWorkDisposition = 'next_work';
 
-function preferencesPath(projectRoot: string): string {
-  return resolve(projectRoot, '.cat-cafe', 'user-preferences.json');
-}
-
 /** Only a genuinely missing file is a writable empty profile. */
 export function readUserPreferencesStrict(projectRoot: string): UserPreferences {
-  const path = preferencesPath(projectRoot);
+  const path = userPreferencesPath(projectRoot);
   let text: string;
   try {
     text = readFileSync(path, 'utf-8');
@@ -52,22 +51,15 @@ export function readUserPreferences(projectRoot: string): UserPreferences {
 export function updateUserPreferences(
   projectRoot: string,
   update: (current: UserPreferences) => UserPreferences,
-  _options: { strictRead?: boolean } = {},
+  options: { strictRead?: boolean; backgroundMetadataWrite?: BackgroundMetadataWrite } = {},
 ): UserPreferences {
   // The single API owner cannot yield between read and atomic rename, so same-process
   // writers cannot interleave. Cross-process writers are outside runtime ownership.
   const directory = resolve(projectRoot, '.cat-cafe');
-  const path = preferencesPath(projectRoot);
-  const tempPath = `${path}.${process.pid}.${Date.now()}.tmp`;
   mkdirSync(directory, { recursive: true });
-  const next = update(readUserPreferencesStrict(projectRoot));
-  try {
-    writeFileSync(tempPath, `${JSON.stringify(next, null, 2)}\n`, 'utf-8');
-    renameSync(tempPath, path);
-  } finally {
-    if (existsSync(tempPath)) unlinkSync(tempPath);
-  }
-  return next;
+  const current = readUserPreferencesStrict(projectRoot);
+  const previousBackgrounds = { chatBackgrounds: structuredClone(current.chatBackgrounds) };
+  return writeUserPreferencesAtomic(projectRoot, previousBackgrounds, update(current), options.backgroundMetadataWrite);
 }
 
 function isBubbleDisplayDefault(value: unknown): value is BubbleDisplayDefaultPreference {

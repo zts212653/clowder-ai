@@ -16,7 +16,7 @@ const managedCommand = () =>
   `${quote(process.execPath)} ${quote(SCRIPT)} || exit ${process.platform === 'win32' ? '/b ' : ''}2`;
 function managedHooks() {
   const command = managedCommand();
-  return `${START}\n${['PreToolUse', 'PostToolUse'].map((event) => `[[hooks]]\nevent = "${event}"\ncommand = ${JSON.stringify(command)}\ntimeout = 30\n`).join('')}${END}\n`;
+  return `${START}\n${['PreToolUse', 'PostToolUse'].map((event) => `[[hooks]]\nevent = "${event}"\nmatcher = "Shell"\ncommand = ${JSON.stringify(command)}\ntimeout = 30\n`).join('')}${END}\n`;
 }
 
 function isManagedHook(value: unknown): boolean {
@@ -26,7 +26,7 @@ function isManagedHook(value: unknown): boolean {
     (hook.event === 'PreToolUse' || hook.event === 'PostToolUse') &&
     hook.command === managedCommand() &&
     hook.timeout === 30 &&
-    hook.matcher === undefined
+    (hook.matcher === undefined || hook.matcher === 'Shell')
   );
 }
 

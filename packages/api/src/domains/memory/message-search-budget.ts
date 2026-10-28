@@ -4,16 +4,21 @@ import type { MessagePassageSearchExecution } from './message-passage-search-typ
 export const MESSAGE_SEARCH_RESPONSE_BUDGET = 24_000;
 
 /** Bound whole canonical rows so neither consumer silently invents a shorter source title/body. */
-export function boundMessageSearchResponse(response: MessageSearchResponse): MessageSearchResponse {
+export function boundMessageSearchResponse(
+  response: MessageSearchResponse,
+  budgetChars = MESSAGE_SEARCH_RESPONSE_BUDGET,
+): MessageSearchResponse {
+  if (!Number.isInteger(budgetChars) || budgetChars < 2000 || budgetChars > MESSAGE_SEARCH_RESPONSE_BUDGET)
+    throw new Error('Invalid message response budget');
   const out = {
     ...response,
     results: [...response.results],
     meta: {
       ...response.meta,
       response: {
-        budgetChars: MESSAGE_SEARCH_RESPONSE_BUDGET,
+        budgetChars,
         serializedChars: 0,
-        truncated: false,
+        truncated: response.meta.response.truncated,
         continuation: 'unavailable' as const,
       },
     },
@@ -24,7 +29,7 @@ export function boundMessageSearchResponse(response: MessageSearchResponse): Mes
       out.meta.response.serializedChars = length;
       length = JSON.stringify(out).length;
     }
-    if (length <= MESSAGE_SEARCH_RESPONSE_BUDGET) return out;
+    if (length <= budgetChars) return out;
     if (out.results.length === 0) throw new Error('Message search response metadata exceeds its budget');
     out.results.pop();
     out.meta.hasMore = true;

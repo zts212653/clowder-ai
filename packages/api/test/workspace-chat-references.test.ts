@@ -141,7 +141,6 @@ it('recognizes an existing extensionless file and a bare directory without turni
 
 it('rejects invocation, callback and agent-key desktop reveal before validating input or launching an application', async () => {
   for (const url of [
-    '/api/workspace/reveal',
     '/api/workspace/reveal-project',
     '/api/workspace/file/actions/reveal?worktreeId=chat-reference-fixture&path=.',
   ]) {

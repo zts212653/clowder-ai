@@ -7,6 +7,7 @@ import type { CatData } from '@/hooks/useCatData';
 const apiFetchMock = vi.fn();
 
 vi.mock('@/utils/api-client', () => ({
+  API_URL: 'http://127.0.0.1:3102',
   apiFetch: (...args: unknown[]) => apiFetchMock(...args),
 }));
 
@@ -120,6 +121,19 @@ describe('F255 cat home panel', () => {
   afterEach(() => {
     act(() => root.unmount());
     container.remove();
+  });
+
+  it('loads the selected canonical portrait from the API origin', async () => {
+    apiFetchMock.mockImplementation(handleDiaryFetch);
+    const canonical = { ...cat, avatar: '/api/cats/fable-5/avatar?bindingRevision=2' };
+    await act(async () =>
+      root.render(
+        <CatHomePanel cat={canonical} availableCats={[canonical]} onSelectCat={() => {}} onClose={() => {}} />,
+      ),
+    );
+    expect(container.querySelector('header img')?.getAttribute('src')).toBe(
+      'http://127.0.0.1:3102/api/cats/fable-5/avatar?bindingRevision=2',
+    );
   });
 
   it('keeps diary cards folded, records an explicit open, then sends a light reaction', async () => {

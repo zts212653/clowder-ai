@@ -5,7 +5,7 @@
  * Fetches once per session, caches module-level. All consumers share same data.
  */
 
-import type { AgyProfileConfig } from '@cat-cafe/shared';
+import type { AgyProfileConfig, MemberVisualAssets } from '@cat-cafe/shared';
 import { type BuiltinCloudIdentityProtection, CAT_CARRIERS, type CatCarrier } from '@cat-cafe/shared';
 import { useEffect, useMemo, useState } from 'react';
 import { formatCatDisplayName } from '@/lib/cat-display-name';
@@ -16,6 +16,7 @@ import { apiFetch } from '@/utils/api-client';
 import { refreshSpeechAliases } from '@/utils/transcription-corrector';
 
 export interface CatData {
+  visualAssets?: MemberVisualAssets;
   configurationRevision?: string;
   id: string;
   name?: string;
@@ -24,6 +25,8 @@ export interface CatData {
   color: { primary: string; secondary: string };
   mentionPatterns: string[];
   breedId?: string;
+  /** Stable relationship owner; never infer it from a nickname or model. */
+  relationshipKey?: string;
   accountRef?: string;
   accountBindingMode?: 'follow' | 'override';
   /** clowder-ai#340 P5: CLI client identity (renamed from provider). */
@@ -88,6 +91,7 @@ export interface CatData {
     observesCompression?: boolean;
   } | null;
   avatar: string;
+  banner?: string;
   roleDescription: string;
   personality: string;
   teamStrengths?: string;
@@ -193,6 +197,7 @@ function normalizeCats(rawCats: unknown[]): CatData[] {
       defaultModel: cat.defaultModel ?? '',
       cli: cat.cli,
       avatar: cat.avatar ?? '',
+      ...(cat.banner ? { banner: cat.banner } : {}),
       roleDescription: cat.roleDescription ?? '',
       personality: cat.personality ?? '',
       teamStrengths: cat.teamStrengths,

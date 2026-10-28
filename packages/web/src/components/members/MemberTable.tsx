@@ -68,6 +68,9 @@ export function MemberTable({
               <td />
               <td>
                 <button type="button" className="member-name" onClick={onEditCoCreator}>
+                  {config.coCreator.avatar && (
+                    <AvatarImageWithFallback src={config.coCreator.avatar} alt="" className="member-avatar" />
+                  )}
                   {config.coCreator.name} <small>{t('所有者')}</small>
                 </button>
               </td>

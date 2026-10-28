@@ -4,6 +4,7 @@
   --shell-paper: var(--cafe-surface-canvas);
   --shell-work: var(--cafe-surface-elevated);
   --shell-frame: var(--cafe-surface);
+  --shell-group: color-mix(in srgb, white 35%, var(--shell-frame));
   --shell-selected: var(--cafe-surface-sunken);
   --shell-hairline: var(--cafe-border-subtle);
   --shell-hairline-strong: var(--cafe-border);
@@ -40,6 +41,7 @@ html[data-shell="v2"] {
 [data-theme="dark"] .cafe-presentation,
 [data-theme="dark"] .member-editor-embedded {
   --shell-frame: var(--cafe-surface-elevated);
+  --shell-group: color-mix(in srgb, white 3%, var(--shell-frame));
   --shell-work: var(--cafe-surface-canvas);
   --shell-paper: var(--cafe-surface);
   --shell-selected: var(--cafe-surface-sunken);
@@ -57,6 +59,249 @@ html[data-shell="v2"] {
   align-items: center;
   border-radius: 8px 8px 0 0;
   padding: 0 10px 0 40px;
+}
+
+.cafe-rich-card,
+.cafe-rich-checklist,
+.cafe-rich-diff,
+.cafe-message-choices,
+.cafe-rich-widget {
+  min-width: 0;
+  margin: 10px 0;
+  padding: 12px;
+  border: 1px solid var(--shell-hairline, var(--cafe-border-subtle));
+  border-radius: 8px;
+  overflow-wrap: anywhere;
+}
+.cafe-rich-card h4,
+.cafe-rich-diff h4,
+.cafe-message-choices h4,
+.cafe-rich-widget h4 {
+  margin: 0 0 8px;
+  font-size: 14px;
+  font-weight: 600;
+}
+.cafe-rich-card dl {
+  margin: 8px 0 0;
+}
+.cafe-rich-card dl > div {
+  display: grid;
+  grid-template-columns: minmax(72px, 1fr) 2fr;
+  gap: 8px;
+}
+.cafe-rich-card dt {
+  color: var(--shell-muted, var(--cafe-text-muted));
+}
+.cafe-rich-card dd {
+  margin: 0;
+  white-space: pre-wrap;
+}
+.cafe-rich-checklist ul {
+  display: grid;
+  gap: 6px;
+  padding: 0;
+  margin: 8px 0 0;
+  list-style: none;
+}
+.cafe-rich-checklist li {
+  display: flex;
+  align-items: start;
+  gap: 8px;
+}
+.cafe-rich-checklist li[data-checked="true"] > span {
+  text-decoration: line-through;
+  color: var(--shell-muted, var(--cafe-text-muted));
+}
+.cafe-rich-media-gallery {
+  min-width: 0;
+  margin: 10px 0;
+  border: 1px solid var(--shell-hairline, var(--cafe-border-subtle));
+  border-radius: var(--radius-card, 12px);
+  padding: 12px;
+}
+.cafe-rich-media-gallery h4 {
+  margin: 0 0 8px;
+  font-size: 14px;
+  font-weight: 600;
+}
+.cafe-rich-gallery {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(180px, 100%), 1fr));
+  gap: 8px;
+}
+.cafe-rich-gallery figure,
+.cafe-audio-player {
+  min-width: 0;
+  margin: 0;
+}
+.cafe-audio-player audio {
+  width: 100%;
+  max-width: 100%;
+}
+.cafe-file-summary {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+}
+.cafe-file-summary-name {
+  display: grid;
+  min-width: 0;
+  flex: 1;
+  overflow-wrap: anywhere;
+}
+.cafe-file-summary-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.cafe-choice-options {
+  display: grid;
+  gap: 8px;
+  margin: 8px 0;
+}
+.cafe-choice-group {
+  grid-column: 1 / -1;
+  color: var(--shell-muted, var(--cafe-text-muted));
+  font-size: 12px;
+  font-weight: 600;
+}
+.cafe-choice-options[data-choice-layout="card-grid"] {
+  grid-template-columns: repeat(auto-fit, minmax(min(180px, 100%), 1fr));
+}
+.cafe-choice-options > button {
+  display: flex;
+  gap: 8px;
+  text-align: start;
+  padding: 10px 12px;
+  border: 1px solid var(--shell-hairline, var(--cafe-border-subtle));
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+}
+.cafe-choice-options > button[aria-pressed="true"] {
+  border-color: var(--shell-primary, var(--cafe-accent));
+  background: var(--shell-primary-soft, var(--cafe-surface-sunken));
+}
+.cafe-choice-content {
+  display: block;
+  min-width: 0;
+}
+.cafe-choice-description {
+  display: block;
+  margin-top: 4px;
+  color: var(--shell-muted, var(--cafe-text-muted));
+  font-size: 12px;
+}
+.cafe-diff-viewer {
+  min-width: 0;
+  overflow: auto;
+  font-family: monospace;
+}
+.cafe-diff-viewer table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+.cafe-diff-viewer td {
+  padding: 2px 6px;
+  white-space: pre;
+}
+.cafe-diff-viewer td:not(:last-child) {
+  width: 36px;
+  text-align: end;
+  color: var(--shell-muted, var(--cafe-text-muted));
+}
+.cafe-diff-viewer tr[data-diff-line="add"] {
+  background: color-mix(in srgb, var(--semantic-success) 12%, transparent);
+  color: var(--semantic-success);
+}
+.cafe-diff-viewer tr[data-diff-line="remove"] {
+  background: color-mix(in srgb, var(--semantic-critical) 12%, transparent);
+  color: var(--semantic-critical);
+}
+.composer-rich-tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 6px 0;
+}
+.composer-rich-tools button,
+.composer-rich-editor button,
+.composer-rich-preview button {
+  min-height: 32px;
+  padding: 6px 10px;
+  border: 1px solid var(--shell-hairline, var(--cafe-border-subtle));
+  border-radius: 8px;
+  background: var(--shell-work, var(--cafe-surface-elevated));
+  color: inherit;
+  font: inherit;
+  font-size: 12px;
+  text-align: start;
+  cursor: pointer;
+}
+.composer-rich-tools button:hover,
+.composer-rich-editor button:hover,
+.composer-rich-preview button:hover {
+  background: var(--shell-selected, var(--cafe-surface-sunken));
+}
+.composer-rich-tools button:focus-visible,
+.composer-rich-editor button:focus-visible,
+.composer-rich-preview button:focus-visible {
+  outline: 2px solid var(--shell-primary, var(--cafe-accent));
+  outline-offset: 2px;
+}
+.composer-rich-tools button:disabled,
+.composer-rich-editor button:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+.composer-rich-editor {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  border: 1px solid var(--shell-hairline);
+  border-radius: 8px;
+  margin: 8px 0;
+  padding: 12px;
+}
+.composer-rich-editor legend {
+  padding-inline: 4px;
+  font-size: 12px;
+  font-weight: 600;
+}
+.composer-rich-editor label {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+.composer-rich-editor input,
+.composer-rich-editor textarea {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  color: inherit;
+  background: var(--shell-paper);
+  border: 1px solid var(--shell-hairline);
+  border-radius: 6px;
+  padding: 8px;
+  font: inherit;
+}
+.composer-rich-preview {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin: 6px 0;
+  padding: 8px 12px;
+  border: 1px solid var(--shell-hairline);
+  border-radius: 8px;
+}
+.composer-rich-preview > span {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .cafe-nameplate-avatar {
   position: absolute;
@@ -412,4 +657,166 @@ html[data-shell="v2"] {
 }
 .cafe-media-viewer:not([open]) {
   display: none;
+}
+.cafe-quote-excerpt {
+  display: block;
+  min-width: 0;
+  color: var(--cafe-text-secondary, currentColor);
+  font-size: 0.875rem;
+}
+.cafe-quote-text {
+  display: block;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.cafe-quote-excerpt[data-compact] .cafe-quote-text {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.cafe-quote-comment {
+  display: block;
+  margin-top: 0.4rem;
+  border-left: 2px solid var(--cafe-accent, currentColor);
+  padding-left: 0.5rem;
+  white-space: pre-wrap;
+}
+.cafe-selection-quote {
+  position: fixed;
+  z-index: 1100;
+  border: 1px solid var(--cafe-border, #85776d);
+  border-radius: 0.65rem;
+  background: var(--cafe-surface-elevated, #fffaf3);
+  color: var(--cafe-text, #30261f);
+  box-shadow: 0 3px 12px #0002;
+  padding: 0.45rem 0.7rem;
+  font: inherit;
+  cursor: pointer;
+}
+.cafe-sticker-picker {
+  position: fixed;
+  inset: auto 20px 100px auto;
+  width: min(380px, calc(100vw - 24px));
+  max-height: min(520px, calc(100dvh - 48px));
+  margin: 0;
+  border: 1px solid var(--cafe-border, #d9cfc2);
+  border-radius: 16px;
+  padding: 16px;
+  color: var(--cafe-text, #30261f);
+  background: var(--cafe-surface-elevated, #fffcf7);
+  box-shadow: 0 12px 40px #0002;
+  overflow: auto;
+  font: inherit;
+}
+.cafe-sticker-picker::backdrop {
+  background: transparent;
+}
+.cafe-sticker-picker header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.cafe-sticker-picker p {
+  color: var(--cafe-text-secondary, #796d63);
+  font-size: 12px;
+}
+.cafe-sticker-picker button {
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  border: 0;
+  background: transparent;
+}
+.cafe-sticker-picker button:focus-visible {
+  outline: 2px solid var(--cafe-accent, #ae5b40);
+  outline-offset: 2px;
+}
+.cafe-sticker-picker nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-block: 12px;
+}
+.cafe-sticker-picker nav button {
+  padding: 6px 8px;
+  border-radius: 8px;
+  font-size: 12px;
+}
+.cafe-sticker-picker nav [aria-pressed="true"] {
+  background: var(--cafe-surface-hover, #eee7dd);
+}
+.cafe-sticker-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+.cafe-sticker-tile {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 4px;
+  font-size: 12px !important;
+}
+.cafe-sticker-tile img {
+  width: 100%;
+  aspect-ratio: 1;
+  object-fit: contain;
+}
+.cafe-sticker-tile:disabled {
+  cursor: wait;
+  opacity: 0.5;
+}
+.cafe-message-sticker {
+  display: block;
+  width: fit-content;
+  max-width: 100%;
+}
+.cafe-message-sticker img {
+  display: block;
+  width: 136px;
+  height: 136px;
+  max-width: 100%;
+  object-fit: contain;
+  border: 0;
+  background: transparent;
+}
+.cafe-message-sticker button {
+  border: 0;
+  padding: 0;
+  background: transparent;
+  cursor: pointer;
+}
+.cafe-voice-input {
+  display: inline-grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 32px;
+  height: 32px;
+  padding: 6px;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--cafe-text-secondary, #796d63);
+  cursor: pointer;
+}
+.cafe-voice-input svg {
+  width: 18px;
+  height: 18px;
+}
+.cafe-voice-input[data-voice-state="recording"] {
+  background: #b53f36;
+  color: #fff;
+}
+.cafe-voice-input:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+@media (max-width: 600px) {
+  .cafe-sticker-picker {
+    right: 12px;
+    bottom: 90px;
+  }
 }

@@ -6,6 +6,7 @@ import { pathToFileURL } from 'node:url';
 import { commandTouchesAgyControl } from './agy-native-control-commands.mjs';
 import { readSelfHostFacet } from './lib/self-host-facet.mjs';
 import { kernelPath } from './lib/shell-directory.mjs';
+import { appendNativeDenial, guardReason } from './native-effect-audit.mjs';
 import { decideNativeHookPayload } from './native-effect-target-guard.mjs';
 import { nativeSecretDenial } from './native-secret-policy.mjs';
 
@@ -85,7 +86,10 @@ export function decideAgyNativeHookPayload(payload, options = {}) {
   const cwd = typeof args.Cwd === 'string' ? args.Cwd : payload.workspacePaths?.[0];
   if (typeof cwd !== 'string' || !isAbsolute(cwd)) return deny('missing tool workspace');
   // Preserve raw content and delegated arguments before effect/target projection.
-  const secretDenial = nativeSecretDenial({ tool_name: name, tool_input: args, cwd });
+  const secretTool =
+    name === 'call_mcp_tool' && args.ServerName === 'browser' ? `mcp__browser__${args.ToolName}` : name;
+  const secretInput = secretTool === name ? args : args.Arguments;
+  const secretDenial = nativeSecretDenial({ tool_name: secretTool, tool_input: secretInput, cwd });
   if (secretDenial) return deny(secretDenial);
   if (options.readOnly && !READERS.has(name)) return deny('read-only invocation');
   const isControl = (path, directory, profileHome) =>
@@ -124,8 +128,10 @@ export function decideAgyNativeHookPayload(payload, options = {}) {
     // provider/callback authority. They do not become shell or file commands.
     return DELEGATED_TOOLS.has(name) ? { decision: 'allow' } : deny(`unknown or unqualified native operation: ${name}`);
   }
-  const verdict = decideNativeHookPayload({ tool_name: toolName, tool_input: toolInput, cwd }, options);
-  return verdict.decision === 'allow' ? { decision: 'allow' } : deny(verdict.reasonCode);
+  const projected = { tool_name: toolName, tool_input: toolInput, cwd };
+  const verdict = decideNativeHookPayload(projected, options);
+  options.onTargetDecision?.(projected, verdict);
+  return verdict.decision === 'allow' ? { decision: 'allow' } : { decision: 'deny', reason: guardReason(verdict) };
 }
 
 async function main() {
@@ -146,6 +152,12 @@ async function main() {
       toolHome,
       readOnly: process.argv[3] === 'read-only',
       selfHost: () => readSelfHostFacet({ ...(hostHome ? { homeDir: hostHome } : {}) }),
+      onTargetDecision: (payload, verdict) =>
+        appendNativeDenial(
+          payload,
+          { ...verdict, source: { ...verdict.source, provider: 'agy' } },
+          hostHome ? { homeDir: hostHome } : {},
+        ),
     });
     process.stdout.write(`${JSON.stringify(decision)}\n`);
   } catch {

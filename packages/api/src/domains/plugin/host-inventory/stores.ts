@@ -32,8 +32,10 @@ function transactionFor(
   contract: PackageAdmissionContractRuntime | undefined,
 ): {
   readonly transaction: PluginInventoryTransaction;
+  readonly hasWrites: () => boolean;
   readonly snapshot: () => PluginInventorySnapshot;
 } {
+  let written = false;
   const state: TransactionState = {
     packages: new Map(snapshot.packages.map((record) => [record.packageDigest, clone(record)])),
     instances: new Map(snapshot.instances.map((record) => [record.pluginInstanceId, clone(record)])),
@@ -44,7 +46,10 @@ function transactionFor(
       return value ? clone(value) : undefined;
     },
     list: () => [...state.packages.values()].map(clone),
-    put: (record) => state.packages.set(record.packageDigest, clone(record)),
+    put: (record) => {
+      state.packages.set(record.packageDigest, clone(record));
+      written = true;
+    },
   };
   const instances: PluginInstanceStore = {
     get: (instanceId) => {
@@ -58,10 +63,14 @@ function transactionFor(
       return value ? clone(value) : undefined;
     },
     list: () => [...state.instances.values()].map(clone),
-    put: (record) => state.instances.set(record.pluginInstanceId, clone(record)),
+    put: (record) => {
+      state.instances.set(record.pluginInstanceId, clone(record));
+      written = true;
+    },
   };
   return {
     transaction: { packages, instances },
+    hasWrites: () => written,
     snapshot: () =>
       parsePluginInventorySnapshot(
         {
@@ -209,6 +218,9 @@ export class FilePluginInventoryStore implements PluginInventoryStore {
       try {
         const candidate = transactionFor(await this.load(), this.contract);
         const result = await work(candidate.transaction);
+        // The writer lease and queue still cover every authority check. Only
+        // callbacks with an explicit put require validation and atomic commit.
+        if (!candidate.hasWrites()) return result;
         const next = candidate.snapshot();
         await this.fileOps.mkdir(dirname(this.path), { recursive: true });
         const temporaryPath = `${this.path}.tmp-${process.pid}-${randomUUID()}`;

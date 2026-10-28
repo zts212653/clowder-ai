@@ -22,12 +22,15 @@ afterEach(() => {
 });
 
 describe('freeze and scan actual send content', () => {
-  it('blocks explicit gh credential disclosure before running the delegate', async () => {
+  it('allows a local gh credential display without running the delegate', async () => {
     for (const args of [
       ['auth', 'token'],
       ['auth', 'status', '--show-token'],
-    ])
-      await assert.rejects(prepareSecretSafeSend('gh', args), /credential_disclosure_blocked_before_read/);
+    ]) {
+      const prepared = await prepareSecretSafeSend('gh', args);
+      snapshots.push(prepared);
+      assert.deepEqual(prepared.args, args);
+    }
   });
   for (const [program, args] of [
     ['gh', (path) => ['issue', 'comment', '1', '--body-file', path]],
@@ -181,16 +184,19 @@ describe('freeze and scan actual send content', () => {
     ['uppercase file scheme', (url) => ['--url', url.replace('file:', 'FILE:')]],
     ['URL after option terminator', (url) => ['--', url]],
   ])
-    it(`blocks a credential source in curl ${label}`, async () => {
+    it(`preserves a local credential source URL in curl ${label}`, async () => {
       const source = join(dirname(file('ordinary file')), '.env.local');
       writeFileSync(source, secret());
-      await assert.rejects(
-        prepareSecretSafeSend('curl', args(pathToFileURL(source).href)),
-        /credential_source_blocked_before_read/,
+      const input = args(pathToFileURL(source).href);
+      const prepared = await prepareSecretSafeSend('curl', input);
+      snapshots.push(prepared);
+      assert.equal(
+        decodeURIComponent(prepared.args.at(-1).replace(/^--url=/, '')).toLowerCase(),
+        pathToFileURL(source).href.toLowerCase(),
       );
     });
 
-  it('freezes ordinary file URLs before curl can copy them outside stdout', async () => {
+  it('does not snapshot ordinary local file copies as outbound payloads', async () => {
     const source = file('safe local resource');
     for (const args of [
       [pathToFileURL(source).href],
@@ -199,22 +205,21 @@ describe('freeze and scan actual send content', () => {
     ]) {
       const prepared = await prepareSecretSafeSend('curl', args);
       snapshots.push(prepared);
-      const frozen = fileURLToPath(prepared.args.at(-1));
-      assert.notEqual(frozen, source);
+      const preserved = fileURLToPath(prepared.args.at(-1));
+      assert.equal(preserved, source);
       writeFileSync(source, 'replaced after preparation');
-      assert.equal(readFileSync(frozen, 'utf8'), 'safe local resource');
+      assert.equal(readFileSync(preserved, 'utf8'), 'replaced after preparation');
       writeFileSync(source, 'safe local resource');
     }
   });
 
-  it('inspects curl format and certificate input files as reads', async () => {
-    for (const name of ['--write-out', '-w', '--cacert']) {
+  it('leaves curl local formatting and TLS trust inputs to curl', async () => {
+    for (const name of ['--write-out', '-w', '--cacert', '--cert', '--key']) {
       const source = file(secret());
-      const value = name === '--cacert' ? source : `@${source}`;
-      await assert.rejects(
-        prepareSecretSafeSend('curl', [name, value, 'https://example.invalid']),
-        /secret_content_detected/,
-      );
+      const value = ['--cacert', '--cert', '--key'].includes(name) ? source : `@${source}`;
+      const prepared = await prepareSecretSafeSend('curl', [name, value, 'https://example.invalid']);
+      snapshots.push(prepared);
+      assert.deepEqual(prepared.args, ['-q', name, value, 'https://example.invalid']);
     }
   });
 

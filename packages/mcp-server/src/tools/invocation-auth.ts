@@ -93,6 +93,13 @@ export function resolveInvocationCredentials(): InvocationCredentialValues {
     return { invocationId: undefined, callbackToken: undefined };
   }
   const fileCreds = readCredentialFile();
+  if (
+    process.env.CAT_CAFE_CREDENTIAL_FILE &&
+    process.env.CAT_CAFE_MCP_TRANSPORT === 'stdio' &&
+    process.env.CAT_CAFE_INVOCATION_ID &&
+    fileCreds?.invocationId !== process.env.CAT_CAFE_INVOCATION_ID
+  )
+    return { invocationId: undefined, callbackToken: undefined };
   return {
     invocationId: fileCreds?.invocationId ?? process.env.CAT_CAFE_INVOCATION_ID,
     callbackToken: fileCreds?.callbackToken ?? process.env.CAT_CAFE_CALLBACK_TOKEN,

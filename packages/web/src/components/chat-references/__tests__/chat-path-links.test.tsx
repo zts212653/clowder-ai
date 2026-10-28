@@ -115,8 +115,12 @@ it('recognizes a whole code span, prose and a Markdown path link in one batch ac
   expect(JSON.stringify(body)).not.toContain('code-only');
   const file = container.querySelector<HTMLButtonElement>('[data-chat-reference-kind=file] button');
   await act(async () => file?.click());
-  expect(useChatStore.getState().workspaceOpenFilePath).toBe('docs/报告.md');
-  expect(useChatStore.getState().workspaceOpenFileLine).toBe(7);
+  expect(useChatStore.getState().workspaceOpenRequest?.target).toMatchObject({
+    kind: 'file',
+    path: 'docs/报告.md',
+    worktreeId: 'project',
+    scrollToLine: 7,
+  });
 });
 it('explains a confirmed missing file without navigation and styles a standalone existing path as a card', async () => {
   await act(async () => {
@@ -167,14 +171,17 @@ it('keeps the file action menu inside a 390px viewport and closes it with Escape
       />,
     ),
   );
-  const menu = document.body.querySelector<HTMLElement>('[role=group]');
-  expect(container.contains(menu)).toBe(false);
+  const menu = document.body.querySelector<HTMLElement>('[role=menu]');
+  expect(menu).not.toBeNull();
   expect(menu?.style.position).toBe('fixed');
-  expect(menu?.style.left).toBe('16px');
+  expect(Number.parseFloat(menu!.style.left)).toBeGreaterThanOrEqual(8);
+  expect(Number.parseFloat(menu!.style.left) + 300).toBeLessThanOrEqual(390);
   await act(async () => menu?.querySelector('button')?.dispatchEvent(new Event('pointerdown', { bubbles: true })));
-  expect(document.body.querySelector('[role=group]')).toBe(menu);
-  await act(async () => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' })));
-  expect(document.body.querySelector('[role=group]')).toBeNull();
+  expect(document.body.querySelector('[role=menu]')).toBe(menu);
+  await act(async () =>
+    menu?.querySelector('button')?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })),
+  );
+  expect(document.body.querySelector('[role=menu]')).toBeNull();
 });
 
 it('keeps ambiguous prose and whole code spans literal in an enabled Chat reference scope', async () => {
@@ -315,8 +322,8 @@ it('consumes historical worktree hints without exposing them or resolving agains
   expect(container.textContent).toContain('docs/other.md');
   expect(container.querySelectorAll('[data-chat-reference-kind=file]')).toHaveLength(1);
   await act(async () => container.querySelector<HTMLButtonElement>('[data-chat-reference-kind=file] button')?.click());
-  expect(useChatStore.getState().workspaceOpenFilePath).toBe('docs/history.md');
-  expect(useChatStore.getState().workspaceWorktreeId).toBe('old-root');
+  expect(useChatStore.getState().workspaceOpenRequest?.target).toMatchObject({ kind: 'file', path: 'docs/history.md' });
+  expect(useChatStore.getState().workspaceOpenRequest?.target).toMatchObject({ kind: 'file', worktreeId: 'old-root' });
 });
 
 it('exposes full GitHub titles and missing-file explanations through focusable accessible controls', async () => {

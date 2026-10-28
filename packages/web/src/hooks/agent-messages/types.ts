@@ -24,6 +24,7 @@ export interface AgentEventMetadata {
 type TurnExecutionProjection = NonNullable<NonNullable<ChatMessage['extra']>['turnExecution']>;
 
 export interface AgentEventExtra {
+  startupRecovery?: import('@cat-cafe/shared').CodexStartupRecovery;
   outputLayout?: NonNullable<ChatMessage['extra']>['outputLayout'];
   crossPost?: { sourceThreadId: string; sourceInvocationId?: string };
   a2aRouting?: { fromCatId?: string; targetCatId?: string; invocationId?: string; routing?: A2ARoutingProjection };

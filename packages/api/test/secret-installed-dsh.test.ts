@@ -10,7 +10,7 @@ import { AcpClient } from '../dist/domains/cats/services/agents/providers/acp/Ac
 import { prepareDshSecretPatch } from '../src/domains/cats/services/agents/providers/dsh-secret-patch.js';
 
 test(
-  'installed DSH loads its exact guard overlay before ACP and blocks native/nested registry effects',
+  'installed DSH admits its reviewed shell-only overlay before ACP without restoring MCP inspection',
   {
     timeout: 30000,
     skip: spawnSync('dsh', ['--version'], { timeout: 5000 }).status !== 0,
@@ -27,18 +27,22 @@ test(
 export const inject = ['tools', 'catCafeSecretContent'];
 export async function apply(ctx) {
  let effects=0;
+ ctx.tools.register({name:'exec_command',description:'fixture shell',parameters:{type:'object',properties:{command:{type:'string'}},required:['command']},
+  output:{schema:{type:'string'},render:(_args,value)=>[{type:'text',text:value}]},
+  execute:async args=>{effects++;return args.command;}});
  ctx.tools.register({name:'publish_probe',description:'fixture',parameters:{type:'object',properties:{text:{type:'string'}},required:['text']},
   output:{schema:{type:'string'},render:(_args,value)=>[{type:'text',text:value}]},
   execute:async args=>{effects++;return args.text;}});
  ctx.tools.register({name:'nested_probe',description:'fixture composite',parameters:{type:'object',properties:{}},
   output:{schema:{type:'boolean'},render:(_args,value)=>[{type:'text',text:String(value)}]},
-  execute:async(_args,exec)=>{const inner=await ctx.tools.execute({callId:'inner',parent:exec.token,rootCallId:exec.rootCallId,name:'publish_probe',arguments:{text:${JSON.stringify(key)}},signal:exec.signal});return inner.isError===true;}});
+  execute:async(_args,exec)=>{const inner=await ctx.tools.execute({callId:'inner',parent:exec.token,rootCallId:exec.rootCallId,name:'exec_command',arguments:{command:'git push --no-verify'},signal:exec.signal});return inner.isError===true;}});
  ctx.on('tools/pre-execute', async()=>({kind:'allow'}));
  const signal=new AbortController().signal;
- const clean=await ctx.tools.execute({callId:'clean',name:'publish_probe',arguments:{text:'clean'},signal});
- const direct=await ctx.tools.execute({callId:'direct',name:'publish_probe',arguments:{text:${JSON.stringify(key)}},signal});
+ const clean=await ctx.tools.execute({callId:'clean',name:'exec_command',arguments:{command:'printf clean'},signal});
+ const direct=await ctx.tools.execute({callId:'direct',name:'exec_command',arguments:{command:'git push --no-verify'},signal});
  const nested=await ctx.tools.execute({callId:'outer-ptc',name:'nested_probe',arguments:{},signal});
- writeFileSync(${JSON.stringify(receipt)},JSON.stringify({effects,clean:clean.isError===true,direct:direct.isError,nested:nested.value}));
+ const mcp=await ctx.tools.execute({callId:'mcp',name:'publish_probe',arguments:{text:${JSON.stringify(key)}},signal});
+ writeFileSync(${JSON.stringify(receipt)},JSON.stringify({effects,clean:clean.isError===true,direct:direct.isError,nested:nested.value,mcp:mcp.isError===true,mcpValuePreserved:mcp.value===${JSON.stringify(key)}}));
  ctx.provide('secretFixtureComplete',true);
 }`,
     );
@@ -60,16 +64,19 @@ export async function apply(ctx) {
         DSH_TELEMETRY_DISABLED: '1',
         DEEPSEEK_API_KEY: 'fixture-local-only',
         DEEPSEEK_BASE_URL: 'http://127.0.0.1:59999',
+        GH_TOKEN: key,
       },
     });
     try {
       const initialized = await client.initialize();
       assert.ok(initialized.protocolVersion);
       assert.deepEqual(JSON.parse(await readFile(receipt, 'utf8')), {
-        effects: 1,
+        effects: 2,
         clean: false,
         direct: true,
         nested: true,
+        mcp: false,
+        mcpValuePreserved: true,
       });
     } finally {
       await client.close();

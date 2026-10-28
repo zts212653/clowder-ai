@@ -1,6 +1,10 @@
 import { z } from 'zod';
 import { artifactReviewResponseRecordSchema } from './artifact-review.js';
+import { assetCanonCommandSchema } from './asset-canon-commands.js';
+import { workReferenceSchema } from './work-reference.js';
 import { workVideoContextSchema } from './work-video.js';
+
+export { type WorkReference, workReferenceSchema } from './work-reference.js';
 
 const id = z
   .string()
@@ -8,10 +12,6 @@ const id = z
   .max(256)
   .refine((value) => value === value.trim() && !value.includes('\0'));
 const ref = z.string().min(1).max(2048);
-export const workReferenceSchema = z
-  .object({ contentRef: ref, ownerRevision: z.number().int().positive().safe() })
-  .strict();
-export type WorkReference = z.infer<typeof workReferenceSchema>;
 
 /** A chat reference names immutable owner content; its title and source block never grant access. */
 export const workReferenceCardSchema = z
@@ -90,6 +90,7 @@ export const importWorkContextSchema = setWorkContextSchema
 export type ImportWorkContext = z.infer<typeof importWorkContextSchema>;
 
 export const workCommandSchema = z.union([
+  assetCanonCommandSchema,
   commitWorkSchema,
   setWorkContextSchema,
   importWorkContextSchema,

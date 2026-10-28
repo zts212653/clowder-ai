@@ -52,6 +52,12 @@ export function NativeFailureDiagnostics({ message }: { message: ChatMessage }) 
   const failed =
     message.lifecycle?.kind === 'response' ? message.lifecycle.status === 'failed' : message.variant === 'error';
   const diagnostics = message.extra?.cliDiagnostics ?? message.metadata?.cliDiagnostics;
-  if (message.isStreaming || !failed || message.metadata?.provider !== 'google' || !diagnostics) return null;
+  if (
+    message.isStreaming ||
+    !failed ||
+    !['google', 'openai'].includes(message.metadata?.provider ?? '') ||
+    !diagnostics
+  )
+    return null;
   return <CliDiagnosticsPanel errorMessage={message.content} diagnostics={diagnostics} detailsOnly />;
 }

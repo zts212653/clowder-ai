@@ -5,7 +5,8 @@ export type { TaskItem } from '@cat-cafe/shared';
 
 interface TaskState {
   tasks: TaskItem[];
-  setTasks: (tasks: TaskItem[]) => void;
+  loadedThreadId: string | null;
+  setTasks: (tasks: TaskItem[], loadedThreadId?: string) => void;
   addTask: (task: TaskItem) => void;
   updateTask: (task: TaskItem) => void;
   removeTask: (taskId: string) => void;
@@ -14,8 +15,9 @@ interface TaskState {
 
 export const useTaskStore = create<TaskState>((set) => ({
   tasks: [],
+  loadedThreadId: null,
 
-  setTasks: (tasks) => set({ tasks }),
+  setTasks: (tasks, loadedThreadId) => set({ tasks, loadedThreadId: loadedThreadId ?? null }),
 
   addTask: (task) =>
     set((state) => {
@@ -38,5 +40,5 @@ export const useTaskStore = create<TaskState>((set) => ({
       tasks: state.tasks.filter((t) => t.id !== taskId),
     })),
 
-  clearTasks: () => set({ tasks: [] }),
+  clearTasks: () => set({ tasks: [], loadedThreadId: null }),
 }));

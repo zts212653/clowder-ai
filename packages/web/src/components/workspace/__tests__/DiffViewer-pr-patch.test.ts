@@ -2,6 +2,13 @@ import { expect, it } from 'vitest';
 import { readPullRequestFiles } from '../../../../../api/src/domains/workspace/pull-request-changes-files';
 import { parseUnifiedDiff } from '../DiffViewer';
 
+it('presents a normal F22 hunk without requiring a synthetic git command header', () => {
+  expect(parseUnifiedDiff('@@ -1 +1 @@\n-before\n+after', 'notes.txt')[0]).toMatchObject({
+    path: 'notes.txt',
+    hunks: [{ lines: [{ type: 'header' }, { type: 'remove', content: 'before' }, { type: 'add', content: 'after' }] }],
+  });
+});
+
 it.each([
   'removed',
   'added',

@@ -26,6 +26,8 @@ import { type CoverageToolData, renderCoverageToolResponse } from './evidence-co
 import type { ToolResult } from './file-tools.js';
 import { errorResult, successResult } from './file-tools.js';
 import { resolveInvocationEnv } from './invocation-auth.js';
+import { defineMessageSearchAnswerTool } from './message-search-answer-tool.js';
+import { messageSearchParams } from './message-search-transport.js';
 
 function resolveApiUrl(): string {
   return resolveInvocationEnv('CAT_CAFE_API_URL') ?? deploymentDefaults.apiBaseUrl;
@@ -172,19 +174,7 @@ export async function handleSearchEvidence(
   extra?: EvidenceToolCallExtra,
 ): Promise<ToolResult> {
   if (input.resultUnit === 'message') {
-    const params: Record<string, string> = {
-      q: input.query,
-      resultUnit: 'message',
-      scope: input.scope ?? 'threads',
-      messageSort: input.messageSort ?? 'time',
-      mode: input.mode ?? 'hybrid',
-    };
-    if (input.threadId) params.threadId = input.threadId;
-    if (input.limit !== undefined) params.limit = String(input.limit);
-    if (input.dateFrom) params.dateFrom = input.dateFrom;
-    if (input.dateTo) params.dateTo = input.dateTo;
-    if (input.dimension) params.dimension = input.dimension;
-    if (input.intent) params.intent = input.intent;
+    const params = messageSearchParams(input);
     return callbackGet('/api/callbacks/search-evidence', params, { agentKeyCatId: input.agentKeyCatId });
   }
   const { dimension = 'project' } = input;
@@ -763,6 +753,7 @@ function formatDrillDownLines(drillDown: EvidenceDrillDown): string[] {
 }
 
 export const evidenceTools = [
+  // The original read remains first and retains its read-only governance certificate.
   defineMcpTool({
     name: 'cat_cafe_search_evidence',
     description:
@@ -770,6 +761,7 @@ export const evidenceTools = [
       'Use when: finding an earlier discussion ("以前聊过 / 找回旧消息", resultUnit=message), semantically finding project knowledge, tracing a topic across docs or threads, or building a bounded coverage/source map. ' +
       'NOT for: resolving a known exact anchor (use cat_cafe_graph_resolve), scanning recent items without a query (use cat_cafe_list_recent), or reading raw messages from a known thread (use get_thread_context). ' +
       'Output: document-mode evidence summaries, or message-mode canonical source snippets, thread/message coordinates and honest scope/degradation metadata; this is read-only and does not navigate. ' +
+      'To attach that same bounded message result as a source-backed answer card, explicitly use cat_cafe_prepare_message_search_answer; ordinary recall here never publishes a card. ' +
       'MESSAGE CONTRACT: resultUnit=message supports messageSort=time (default) or relevance and mode=hybrid (default); scope is threads, optional threadId means current conversation, omission means all readable project conversations. Authenticated invocation binds the exact question exclusion; caller-supplied user/source IDs are ignored. Limited results and unknown freshness do not prove the first occurrence or complete history. ' +
       'GOTCHA: matchRank is rank position, not trust; authority is document reliability, and broad coverage requires separate docs + threads searches instead of treating one all-scope query as exhaustive. ' +
       'Semantic/fuzzy find entry point for memory recall. For precise anchors (F186, ADR-019), prefer cat_cafe_graph_resolve; for zero-prior scanning, prefer cat_cafe_list_recent; when unsure, start here with mode=hybrid. ' +
@@ -863,4 +855,5 @@ export const evidenceTools = [
       ],
     },
   }),
+  defineMessageSearchAnswerTool(searchEvidenceInputSchema),
 ] as const;

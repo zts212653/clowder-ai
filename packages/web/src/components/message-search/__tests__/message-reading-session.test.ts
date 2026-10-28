@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { __resetChatScrollMemoryForTest, captureChatReadingRef, readChatReadingRef } from '@/utils/chat-scroll-memory';
+import type { MessageFindContext } from '../message-find-state';
 import {
   readActiveMessageReadingSession,
   saveMessageReadingSession,
@@ -110,5 +111,33 @@ describe('durable message reading sessions', () => {
     expect(localStorage.getItem('cat-cafe:message-reading-session:invalid')).toBeNull();
     expect(localStorage.getItem('review-draft:owned-by-review')).toBe('keep');
     expect(localStorage.length).toBe(3);
+  });
+
+  it('keeps a find-page return and its UI state in the original J5 session without inventing a message target', () => {
+    const find: MessageFindContext = {
+      destination: 'memory',
+      state: { query: '一行', scope: 'global', sort: 'relevance', scrollTop: 214, status: 'idle' },
+    };
+    const origin = captureChatReadingRef({ threadId: 'origin', position: { top: 125, anchor: 'bottom' } })!;
+    const value: MessageReadingTrip = {
+      ...trip(),
+      origin: { threadId: 'origin', readingRef: origin.ref },
+      targets: [],
+      status: 'ready',
+      pending: null,
+      generation: 0,
+    };
+    const started = startMessageReadingSession(value, true, find);
+    expect(started.persisted).toBe(true);
+    const restored = readActiveMessageReadingSession();
+    expect(restored?.find).toEqual(find);
+    expect(restored?.trip.targets).toEqual([]);
+    expect(restored?.trip.origin.readingRef).toBe(origin.ref);
+    expect(readChatReadingRef(origin.ref)).toBeDefined();
+    expect(JSON.stringify(restored)).not.toContain('expires');
+  });
+
+  it('does not accept a targetless message trip without a valid find-page context', () => {
+    expect(() => startMessageReadingSession({ ...trip(), targets: [] }, true)).toThrow();
   });
 });

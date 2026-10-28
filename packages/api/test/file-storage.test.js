@@ -57,6 +57,28 @@ describe('saveUploadedFiles', () => {
     assert.equal(saved[0].content.mimeType, 'application/octet-stream');
   });
 
+  it('preserves the Unicode display filename while keeping the stored upload locator generated and confined', async () => {
+    const { saveUploadedFiles } = await import('../dist/utils/file-storage.js');
+    const name = 'doc-0a6831f6718f-Clowder_AI_后续建设与分工讨论稿-v0_2.md';
+    const [saved] = await saveUploadedFiles(
+      [createMockFile(name, 'text/markdown', Buffer.from('read only copy'))],
+      uploadDir,
+    );
+    assert.equal(saved.content.fileName, name);
+    assert.ok(saved.absPath.startsWith(resolve(uploadDir)));
+    assert.match(saved.urlPath, /^\/uploads\/[a-zA-Z0-9-]+\.md$/);
+  });
+
+  it('removes bidi overrides and C1 controls from a display name without changing its generated locator', async () => {
+    const { saveUploadedFiles } = await import('../dist/utils/file-storage.js');
+    const [saved] = await saveUploadedFiles(
+      [createMockFile('中文\u202e\u2066\u0085稿.md', 'text/markdown', Buffer.from('same bytes'))],
+      uploadDir,
+    );
+    assert.equal(saved.content.fileName, '中文稿.md');
+    assert.match(saved.urlPath, /^\/uploads\/[a-zA-Z0-9-]+\.md$/);
+  });
+
   it('rejects unsupported MIME types', async () => {
     const { saveUploadedFiles, FileUploadError } = await import('../dist/utils/file-storage.js');
 

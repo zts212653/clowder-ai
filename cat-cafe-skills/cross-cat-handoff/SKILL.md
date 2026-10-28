@@ -1,6 +1,6 @@
 ---
 name: cross-cat-handoff
-tips_exempt: "2026-10-22: Task dispatch guidance corrects agent-only calling instructions; no new end-user operation or authority."
+tips_exempt: "2026-10-27: Task738 replaces ordinary lease calling instructions with exact Task assignment and existing execution control; no new end-user operation or authority."
 description: "跨猫交接与 review 双路由。Use when: 交接、exact-HEAD external PR review task 或 PR tracking。Not for: 自己任务。Output: 足够接手的交接与适用的责任/审查回执。"
 triggers:
   - "交接"
@@ -38,11 +38,12 @@ action: {
   actionFamily: "implement",
   successorSlot: "implementer",
   mode: "single",
-  terminalPredicate: { kind: "task_done" }
+  terminalPredicate: { kind: "task_done" },
+  expectedOwnerRevision: 0
 }
 ```
 
-调用同时提供 `clientMessageId` 和明确 `targetCats`。Task 必须覆盖本次工作，目标猫与 thread 必须具有当前 owner/delegate standing；`threadId`、catId、requestId 不是责任对象。资产/文件/Feature 编号写在工作包或成果引用里，不能改个前缀冒充 Task。复用旧 thread 不等于复用旧 Task 或旧批次批准。
+调用同时提供 `clientMessageId` 和明确 `targetCats`；示例版本0须替换为实际 Task.ownerRevision（旧记录缺省为0）。Task 必须覆盖本次工作，目标猫与 thread 必须具有当前 owner/delegate standing；`threadId`、catId、requestId 不是责任对象。资产/文件/Feature 编号写在工作包或成果引用里，不能改个前缀冒充 Task。复用旧 thread 不等于复用旧 Task 或旧批次批准。
 
 `terminalPredicate` 在公开 schema 中可选，是为了兼容 `returnToPredecessor`；新实现 claim（包括 `existing_standing`）仍必须传。`existing_standing + groundingEvidenceRef` 只证明已有 standing 的自接，不因同 catId 或一条人类原话自动授予另一个 thread 的 delegate 资格。没有已核 Task/委派关系时，按 `custody-recognition` 解析原责任与当前 scope，再走对应批准/委派入口；不要捏造 Task、用已完成旧 Task 套新工作或删掉 `action` 绕拒收。原任务内已合法启动的执行不补投第二份。
 
@@ -51,7 +52,8 @@ action: {
 - 默认 `mode=single`：一个 holder。前一 successor 仍 active 时，接受 `safe_wait`，不要再召唤下一只。
 - 同 thread 普通单猫通知 → `post_message` / 行首 `@`；同 thread structured single successor → `post_message(action.mode=single)`；跨 thread → `cross_post_message(action)`；真正并行聚合 → `multi_mention(mode=parallel)`。
 - `multi_mention(action.mode=single)` 只保留 legacy 兼容；新交接不要再借“多猫”入口派一个 successor。
-- fallback：只在 server 已记录前手 `failed/canceled/unavailable` 后，用返回的 `leaseId + expectedGeneration` 做 `replace`。caller 自称“它不行了”不算证明。
+- 先按实际 Task 分类：`kind=work / subjectKey=null / 无 entrustedWork` 的普通实现以 Task 分配为准；传 `expectedOwnerRevision`，需停旧执行时用 `stopPreviousExecution`。保留 canonical home/source/WIP 与当前 approved-child 合同；Message/Queue 只承载同一请求，队列回执不是 provider 已启动。同一已授权 Task 跨 thread 不再提交第二张 Approval Hub 卡，兼容 `assign_work + proposedAction` 也走这条原生路径。
+- 仍受治理的 lease fallback：只在 server 已记录前手 `failed/canceled/unavailable` 后，用返回的 `leaseId + expectedGeneration` 做 `replace`。caller 自称“它不行了”不算证明。
 - `mode=parallel`：只用于独立多猫评审、`#ideate` 或明确 operator fan-out，并写 `parallelIntent`；holder 集合一次冻结，不在重复调用中偷偷加猫。
 - failure domain 只用于选择顺序：默认选一个与前手独立的 provider/quota domain；它不是 identity，也不是强制拒绝条件。
 - 外部 subject 已 merged/closed 等终态：停止交接；晚到响应由 generation/terminal fence 抑制。

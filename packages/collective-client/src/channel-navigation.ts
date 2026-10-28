@@ -20,13 +20,17 @@ export function channelDestinations(
   });
 }
 
-export function readChannelPosition(namespace: string): string {
+export function readSavedChannelPosition(namespace: string): string | undefined {
   try {
     const saved = window.localStorage.getItem(`collective-channel:${namespace}`);
-    return saved?.trim() && saved.length <= 160 ? saved : 'general';
+    return saved?.trim() && saved.length <= 160 ? saved : undefined;
   } catch {
-    return 'general';
+    return undefined;
   }
+}
+
+export function readChannelPosition(namespace: string): string {
+  return readSavedChannelPosition(namespace) ?? 'general';
 }
 
 export function readChannelTarget(search?: string) {
@@ -71,6 +75,14 @@ export function writeLibraryTarget() {
 export function saveChannelPosition(namespace: string, channelId: string) {
   try {
     window.localStorage.setItem(`collective-channel:${namespace}`, channelId);
+  } catch {
+    /* Navigation still works when browser storage is unavailable. */
+  }
+}
+
+export function clearChannelPosition(namespace: string) {
+  try {
+    window.localStorage.removeItem(`collective-channel:${namespace}`);
   } catch {
     /* Navigation still works when browser storage is unavailable. */
   }

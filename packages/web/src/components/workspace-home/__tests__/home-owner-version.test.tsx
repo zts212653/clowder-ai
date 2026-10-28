@@ -51,16 +51,34 @@ describe('Home consumes the original thread owner-version read', () => {
   });
   async function render(items: ThreadArtifactDTO[], workLineage: 'resolved' | 'unavailable') {
     // Serialize the released GET shape through the real useThreadArtifacts hook.
-    read.apiFetch.mockImplementation(async () =>
-      Response.json({
+    read.apiFetch.mockImplementation(async (url: string) => {
+      if (url === '/api/content-publications/resolve')
+        return Response.json({
+          status: 'resolved',
+          ownerUserId: 'operator',
+          asset: {
+            contentRef: artifact.work!.contentRef,
+            ownerRevision: 4,
+            blobDigest: `sha256:${'a'.repeat(64)}`,
+            mediaType: 'image/png',
+            media: { kind: 'image', width: 160, height: 100 },
+            sourcePublication: {
+              artifactRef: artifact.url,
+              sourceRef: `message:thread-owner-read:${artifact.sourceMessageId}`,
+              revision: String(artifact.createdAt),
+            },
+            ownerReceiptRef: 'receipt',
+          },
+        });
+      return Response.json({
         threadId: 'thread-owner-read',
         artifacts: items,
         workLineage,
         view: 'works',
         total: items.length,
         complete: true,
-      }),
-    );
+      });
+    });
     await act(async () =>
       root.render(
         <HomeWorksSummary
@@ -86,15 +104,20 @@ describe('Home consumes the original thread owner-version read', () => {
     vi.spyOn(host, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 34, 288, 480));
     await act(async () => card.click());
     const annotate = [...document.querySelectorAll<HTMLButtonElement>('[role="dialog"] button')].find(
-      (button) => button.textContent === '批注',
+      (button) => button.dataset.testid === 'lightbox-open-workspace',
     );
     expect(annotate).toBeDefined();
     await act(async () => annotate?.click());
-    expect(openOriginal).toHaveBeenCalledExactlyOnceWith(artifact, {
-      kind: 'workspace-home-artifact',
-      threadId: 'thread-owner-read',
-      artifactId: artifactObjectId(artifact),
-      viewportOffsetPx: -22,
+    expect(useChatStore.getState().workspaceOpenRequest?.target).toMatchObject({
+      kind: 'publication',
+      contentRef: artifact.work!.contentRef,
+      ownerRevision: 4,
+      navigationOrigin: {
+        kind: 'workspace-home-artifact',
+        threadId: 'thread-owner-read',
+        artifactId: artifactObjectId(artifact),
+        viewportOffsetPx: -22,
+      },
     });
   });
   it.each([
@@ -131,7 +154,7 @@ describe('Home consumes the original thread owner-version read', () => {
     const image = host.querySelector('img');
     await act(async () => image?.dispatchEvent(new Event('error')));
     const card = host.querySelector('[data-testid="workspace-home-artifact-card"]');
-    expect(card?.classList.contains('home-work-summary')).toBe(true);
+    expect(card?.querySelector('img')).toBeNull();
     expect(card?.textContent).toContain(artifact.name);
     expect(host.textContent).toContain('无法读取图片');
   });

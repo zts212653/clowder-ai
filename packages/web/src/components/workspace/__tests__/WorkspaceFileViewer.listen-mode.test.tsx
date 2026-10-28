@@ -77,7 +77,6 @@ describe('WorkspaceFileViewer listen mode', () => {
           onToggleHtmlPreview={vi.fn()}
           onToggleJsxPreview={vi.fn()}
           onSave={vi.fn()}
-          revealInFinder={vi.fn()}
         />,
       );
     });

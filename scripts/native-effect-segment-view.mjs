@@ -36,15 +36,16 @@ export function segmentView(segment, location, roleSource = segment, namespaceSt
   // Read the original code/argv evidence before the legacy source mask. A mask
   // must not turn generated interpreter source into a literal execution fact.
   const roles = invocationTargetView(roleSource, location);
+  const roleContext = roles ? gitDirectoryContext(roles.text, roles.call.cwd) : { command, location: context.location };
   return {
     command,
-    location: roles?.call.cwd ?? context.location,
-    targetCwd: roles ? roles.call.cwd : targetCwd,
+    location: roleContext.location,
+    targetCwd: roles ? (actsOnlyOnAbsoluteOperands(roleContext.command) ? undefined : roleContext.location) : targetCwd,
     roles,
     unprovedReadProgram:
       readProgram.unproved ??
       (commandName(program?.value) === 'diff' || (commandName(program?.value) === 'gh' && program.value.includes('/'))),
-    targetText: withObservedWriteAliases(roles?.text ?? command, roles?.call.cwd ?? context.location),
+    targetText: withObservedWriteAliases(withoutGhMessageData(roleContext.command), roleContext.location),
   };
 }
 

@@ -11,6 +11,24 @@ import { CheckCircleIcon, type PlatformActionDef, QrCodeIcon, SpinnerIcon } from
 export type ActionPhase = 'idle' | 'loading' | 'result' | 'polling' | 'connected' | 'error' | 'disconnecting';
 export type ResultState = { render: string; data: unknown; label?: string };
 
+function externalActionUrl(result: ResultState | undefined): string | null {
+  if (
+    !result ||
+    !['url', 'polling'].includes(result.render) ||
+    !result.data ||
+    typeof result.data !== 'object' ||
+    !('url' in result.data) ||
+    typeof result.data.url !== 'string'
+  )
+    return null;
+  try {
+    const url = new URL(result.data.url);
+    return url.protocol === 'https:' && !url.username && !url.password ? url.href : null;
+  } catch {
+    return null;
+  }
+}
+
 export function ConnectedBanner({
   connectorId,
   label,
@@ -101,6 +119,7 @@ export function ActionPanelBody({
   const isButtonAction = currentAction?.render === 'button';
   const canTrigger = phase === 'idle' || phase === 'error' || phase === 'result';
   const imgData = lastResult?.render === 'img' ? (lastResult.data as { url?: string }) : null;
+  const externalUrl = externalActionUrl(lastResult);
   const statusLabel =
     phase === 'result' && lastResult?.render === 'status'
       ? (lastResult.label ?? (typeof lastResult.data === 'string' ? lastResult.data : null))
@@ -151,6 +170,19 @@ export function ActionPanelBody({
           statusLabel={lastResult?.label}
           showSpinner={phase === 'polling'}
         />
+      )}
+
+      {externalUrl && (
+        <a
+          href={externalUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          referrerPolicy="no-referrer"
+          className="inline-flex rounded-lg border border-cafe-border px-4 py-2 text-sm font-medium text-cafe-secondary hover:bg-cafe-surface-sunken"
+          data-testid={`${connectorId}-authorization-link`}
+        >
+          {lastResult?.label ?? '打开授权页'}
+        </a>
       )}
 
       {phase === 'polling' && !imgData?.url && (

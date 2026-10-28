@@ -5,7 +5,7 @@
  * - classifyArtifactView (AC-A7): 产物按 type + 数据可用性分发到内容查看策略。
  *   决定「点击产物看什么」——这是 F232 灵魂（点击看内容，不只列清单）的判定核心。
  */
-import { SOURCE_CODE_EXTENSIONS, type ThreadArtifactDTO } from '@cat-cafe/shared';
+import { projectFileContent, TEXT_FILE_EXTENSIONS, type ThreadArtifactDTO } from '@cat-cafe/shared';
 import { formatRelativeTime } from '../ThreadSidebar/thread-utils';
 
 export interface ArtifactRowMeta {
@@ -28,28 +28,9 @@ export function artifactRowMeta(
 /** 内容查看策略：决定点击产物后 panel 内渲染什么。 */
 export type ArtifactView = 'image' | 'audio' | 'video' | 'pr' | 'text' | 'widget' | 'download' | 'fallback';
 
-// 文本类扩展名 → panel 内看正文（MarkdownContent / CodeViewer）。
-const TEXT_EXTENSIONS = new Set([
-  'md',
-  'txt',
-  'log',
-  'json',
-  'yml',
-  'yaml',
-  'toml',
-  'xml',
-  'csv',
-  'tsv',
-  'env',
-  ...SOURCE_CODE_EXTENSIONS,
-]);
-function extensionOf(name: string): string {
-  const base = name.split(/[/\\]/).pop() ?? name;
-  const dot = base.lastIndexOf('.');
-  return dot > 0 ? base.slice(dot + 1).toLowerCase() : '';
-}
-
-export function classifyArtifactView(a: Pick<ThreadArtifactDTO, 'type' | 'name' | 'url' | 'ref'>): ArtifactView {
+export function classifyArtifactView(
+  a: Pick<ThreadArtifactDTO, 'type' | 'name' | 'url' | 'ref' | 'mime'>,
+): ArtifactView {
   if (a.type === 'image' && a.url) return 'image';
   if (a.type === 'audio' && a.url) return 'audio';
   if (a.type === 'video' && a.url) return 'video';
@@ -58,11 +39,9 @@ export function classifyArtifactView(a: Pick<ThreadArtifactDTO, 'type' | 'name' 
   // file / code：先看有无内容源，再按扩展名分文本 vs 二进制。
   const hasSource = Boolean(a.url || a.ref);
   if (!hasSource) return 'fallback';
-  const ext = extensionOf(a.name);
-  // allowlist：无扩展名（如 LICENSE/Makefile，当文本试）或已知文本扩展名 → panel 内看正文；
-  // 其余（已知二进制 + 未知扩展名）→ download，避免把二进制 fetch+decode 成文本（hang panel/乱码）。
-  if (!ext || TEXT_EXTENSIONS.has(ext)) return 'text';
-  return 'download';
+  const { kind } = projectFileContent(a);
+  if (kind === 'image' || kind === 'video' || kind === 'audio') return kind;
+  return kind === 'binary' || kind === 'office' ? 'download' : 'text';
 }
 
 /** PR ref（org/repo#123）→ GitHub PR url；解析失败返回 undefined。 */
@@ -116,4 +95,4 @@ export function artifactActionLabel(type: ThreadArtifactDTO['type']): string {
   return type === 'audio' || type === 'video' ? '播放' : '打开';
 }
 
-export { TEXT_EXTENSIONS };
+export { TEXT_FILE_EXTENSIONS as TEXT_EXTENSIONS };

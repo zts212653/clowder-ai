@@ -1,4 +1,4 @@
-import type { ListenDocumentIdentity, ListenPlaybackRate, ListenRetention } from '@cat-cafe/shared';
+import type { ListenDocumentIdentity, ListenPlaybackRate, ListenRetention, ThreadArtifactDTO } from '@cat-cafe/shared';
 import { create } from 'zustand';
 import type { ListenSentence } from '@/lib/listen-mode/markdown-sentences';
 
@@ -11,6 +11,10 @@ export interface ListenDocumentDescriptor {
   title: string;
   worktreeId: string | null;
   sentences: ListenSentence[];
+  /** Navigation points back to an existing owner; an opaque cache identity is never a filesystem locator. */
+  returnTarget?:
+    | { kind: 'workspace'; worktreeId: string; path: string }
+    | { kind: 'artifact'; threadId: string; artifact: ThreadArtifactDTO };
 }
 
 export interface ListenModeSession extends ListenDocumentDescriptor {

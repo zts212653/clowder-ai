@@ -1,6 +1,7 @@
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { expect, it, vi } from 'vitest';
+import { openFileMenu } from '@/test-utils/open-file-menu';
 import { FileBlock } from '../FileBlock';
 
 it('keeps the full filename available in the shared title and download action for documents and video', async () => {
@@ -27,9 +28,14 @@ it('keeps the full filename available in the shared title and download action fo
         ),
       );
       expect(host.querySelector('.work-gallery-title')?.getAttribute('title')).toBe(fileName);
+      await openFileMenu(host);
       expect(host.querySelector('a[download]')?.getAttribute('download')).toBe(fileName);
       expect(host.querySelector('a button')).toBeNull();
-      await act(async () => host.querySelector<HTMLButtonElement>('button[aria-label="复制完整文件名"]')?.click());
+      await act(async () =>
+        [...host.querySelectorAll<HTMLButtonElement>('[role="menu"] button')]
+          .find((item) => item.textContent === '复制完整文件名')
+          ?.click(),
+      );
       expect(copy).toHaveBeenLastCalledWith(fileName);
     }
   } finally {

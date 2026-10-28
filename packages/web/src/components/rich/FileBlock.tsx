@@ -1,16 +1,14 @@
 'use client';
-import type { ThreadArtifactDTO } from '@cat-cafe/shared';
+import { projectFileContent, type ThreadArtifactDTO } from '@cat-cafe/shared';
 import { ChatWorkCard } from '@/components/artifacts/ChatWorkCard';
 import { useNearWorkViewport } from '@/components/artifacts/useNearWorkViewport';
 import { useWorkCardDescription } from '@/components/artifacts/useWorkCardDescription';
 import type { PublishedMessageCoordinate } from '@/components/content-review/usePublishedContent';
-import { inferFileKind } from '@/lib/file-kind';
 import type { RichFileBlock } from '@/stores/chat-types';
 import { useChatStore } from '@/stores/chatStore';
 import { isSafeFileUrl, useFileCardOpen } from './useFileCardOpen';
 import { useRegisteredFileWork } from './useRegisteredFileWork';
 
-const VIDEO_EXTENSIONS = /\.(mp4|mov|webm|avi|mkv|m4v|ogv)$/i;
 type FileBlockProps = {
   block: RichFileBlock;
   publication?: PublishedMessageCoordinate;
@@ -19,6 +17,11 @@ type FileBlockProps = {
   sourceMessageIds?: readonly string[];
   catId?: string;
 };
+
+function fileArtifactType(block: RichFileBlock): ThreadArtifactDTO['type'] {
+  const { kind } = projectFileContent({ name: block.fileName, url: block.url, mime: block.mimeType });
+  return kind === 'image' || kind === 'video' || kind === 'audio' ? kind : 'file';
+}
 
 export function FileBlock(props: FileBlockProps) {
   const { block, publication, sourceThreadId, messageId, sourceMessageIds } = props;
@@ -43,7 +46,8 @@ function FileCard({ block, publication, sourceThreadId, messageId, sourceMessage
   const registered = useRegisteredFileWork(block.url, originThread, near);
   const reference = registered.artifact?.work ?? registered.reference ?? undefined;
   const read = useWorkCardDescription(reference, near);
-  const video = !!block.mimeType?.startsWith('video/') || VIDEO_EXTENSIONS.test(block.fileName);
+  const type = fileArtifactType(block);
+  const video = type === 'video';
   const opening = useFileCardOpen({
     block,
     publication,
@@ -55,8 +59,9 @@ function FileCard({ block, publication, sourceThreadId, messageId, sourceMessage
     video,
   });
   const original: ThreadArtifactDTO = registered.artifact ?? {
-    type: video ? 'video' : inferFileKind(block.fileName) === 'image' ? 'image' : 'file',
+    type,
     name: block.fileName,
+    mime: block.mimeType,
     catId: catId ?? null,
     createdAt: Number(publication?.messageRevision) || 0,
     sourceMessageId: messageId ?? null,
@@ -78,7 +83,7 @@ function FileCard({ block, publication, sourceThreadId, messageId, sourceMessage
         artifact={artifact}
         busy={opening.busy}
         description={read.description}
-        previewPending={!!reference && read.loading}
+        previewPending={registered.loading || read.loading}
         disabled={!isSafeFileUrl(block.url)}
         onSelect={() => void opening.open('lightbox')}
         onOpen={() => void opening.open('work-mode')}

@@ -31,7 +31,7 @@ export interface PersonalChromeStateResponse {
   status?: {
     status?: string;
     helper?: { state?: string };
-    delivery?: { failure?: string; reloadRequired?: boolean };
+    delivery?: { failure?: string; reloadRequired?: boolean; pageReloadRequired?: boolean };
   };
   titleSync?: { status?: string; errorCode?: string; updatedCount?: number; requestedCount?: number };
   error?: string;

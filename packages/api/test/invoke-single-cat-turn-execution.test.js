@@ -537,6 +537,8 @@ describe('invokeSingleCat durable child execution lifecycle', () => {
 
     assert.equal(providerCalled, false);
     assert.deepEqual(await store.get('child-returned'), {
+      providerLifecycleTracked: true,
+      providerTeardownAt: (await store.get('child-returned')).endedAt,
       invocationId: 'child-returned',
       parentInvocationId: 'parent-1',
       threadId: 'thread-1',

@@ -1,7 +1,7 @@
 import { commandName } from '../native-effect-shell-tokenizer.mjs';
+import { packageManagerInvocation } from './package-manager-invocation.mjs';
 import { stoppedDeploymentsIn } from './self-host-deployments.mjs';
 import { executedInvocations, executionChainInvocations } from './shell-invocation.mjs';
-import { scanShellText } from './shell-lexical.mjs';
 
 /**
  * F300 -- work out what a command line would actually stop.
@@ -70,6 +70,7 @@ function signalOperands(operands) {
  */
 function killerOperands(invocation) {
   if (KILL_VERBS.has(invocation.name ?? '')) {
+    if (PATTERN_KILLERS.has(invocation.name) && invocation.operands[0] === '-0') return { isKiller: false };
     if (PATTERN_KILLERS.has(invocation.name)) return { isKiller: true, operands: undefined };
     if (invocation.operands[0] === '-0' && invocation.operands.slice(1).every((value) => /^\d+$/.test(value)))
       return { isKiller: false };
@@ -87,6 +88,10 @@ function killerOperands(invocation) {
 }
 
 function isServiceStop(invocation) {
+  if (packageManagerInvocation(invocation.name, invocation.operands).script === 'preview:process') {
+    const index = invocation.operands.indexOf('preview:process');
+    return ['start', 'stop'].includes(invocation.operands[index + 1]);
+  }
   return (
     SERVICE_MANAGERS.has(invocation.name ?? '') && invocation.operands.some((token) => SERVICE_STOP_VERBS.has(token))
   );
@@ -167,7 +172,7 @@ function servicePorts(operands) {
  * about the rest. Only the stage feeding it directly can describe that stdin,
  * and only when every argument of that producer is understood.
  */
-function resolveStopTargets(pipelines) {
+function resolveStopTargets(pipelines, observations) {
   const pids = [];
   const ports = [];
   let unresolved = false;
@@ -180,6 +185,14 @@ function resolveStopTargets(pipelines) {
       if (invocation.inputOwner === 'xargs' && KILL_VERBS.has(invocation.name)) continue;
       const killer = killerOperands(invocation);
       if (killer.isKiller) {
+        if (PATTERN_KILLERS.has(invocation.name) && invocation.argvComplete && !invocation.argumentEvidence?.length) {
+          const selected = observations.patternTargets?.(invocation.name, invocation.operands);
+          if (selected?.complete) {
+            stops ||= selected.pids.length > 0;
+            pids.push(...selected.pids);
+            continue;
+          }
+        }
         stops = true;
         if (killer.consumesStdin) {
           // Only what feeds this stage directly can describe its stdin. An
@@ -215,28 +228,24 @@ function resolveStopTargets(pipelines) {
  * @returns {readonly {stopClass: boolean, unresolved: boolean, pids: number[], ports: number[],
  *   deployments: {deploymentId?: string, projectRoot?: string}[], text: string}[]}
  */
-export function analyseCommands(raw, cwd) {
+export function analyseCommands(raw, cwd, observations = {}) {
   raw = String(raw ?? '');
   const observed = executedInvocations(raw, { cwd });
   const chained = executionChainInvocations(raw, { cwd });
   observed.pipelines.push(...chained.pipelines);
-  observed.complete &&= chained.complete;
-  const unknownProgram = observed.pipelines
-    .flat()
-    .some(({ name, generatedCode }) => name === undefined || generatedCode);
-  const partialStop =
-    !observed.complete &&
-    (!scanShellText(raw).complete || unknownProgram) &&
-    /\b(?:kill|pkill|killall|runtime:(?:stop|restart)|shutdown|restart)\b/.test(raw);
   const quiet = { stopClass: false, unresolved: false, pids: [], ports: [], deployments: [], text: raw };
   const deployments = stoppedDeploymentsIn(observed.pipelines.flat(), cwd);
-  const { pids, ports, unresolved, stops } = resolveStopTargets(observed.pipelines);
+  const { pids, ports, unresolved, stops } = resolveStopTargets(observed.pipelines, observations);
   const namesNothing = pids.length === 0 && ports.length === 0 && deployments.length === 0;
   const commands =
     deployments.length === 0 && !stops
       ? [quiet]
       : [{ stopClass: true, unresolved: unresolved || namesNothing, pids, ports, deployments, text: raw }];
-  if (partialStop)
-    commands.push({ stopClass: true, unresolved: true, pids: [], ports: [], deployments: [], text: raw });
   return commands;
+}
+
+export function hasPatternKiller(raw, cwd) {
+  return executedInvocations(raw, { cwd })
+    .pipelines.flat()
+    .some(({ name }) => PATTERN_KILLERS.has(name));
 }

@@ -1,6 +1,15 @@
-import { type WorkCommand, workCommandSchema, workReferenceSchema, workWorkspaceSourceSchema } from '@cat-cafe/shared';
+import {
+  type AssetCanonCommand,
+  assetCanonCommandSchema,
+  type WorkCommand,
+  workCommandSchema,
+  workReferenceSchema,
+  workWorkspaceSourceSchema,
+} from '@cat-cafe/shared';
 import type { FastifyInstance, FastifyReply } from 'fastify';
 import { z } from 'zod';
+import type { AssetCanonService } from '../domains/collaborative-content/asset-canon/service.js';
+import { AssetCanonConflictError } from '../domains/collaborative-content/asset-canon/store.js';
 import { WorkContextConflictError } from '../domains/collaborative-content/works/context-store.js';
 import { inspectWorkResult } from '../domains/collaborative-content/works/inspection.js';
 import {
@@ -19,6 +28,10 @@ import {
   requireCallbackPrincipal,
 } from './callback-auth-prehandler.js';
 import { directContentHuman } from './content-modification-routes.js';
+
+function isAssetCommand(command: WorkCommand): command is AssetCanonCommand {
+  return assetCanonCommandSchema.safeParse(command).success;
+}
 
 const envelope = z.object({ threadId: z.string().min(1).max(128).optional(), command: workCommandSchema }).strict();
 const callbackEnvelope = envelope.extend({
@@ -40,7 +53,12 @@ async function run(
   command: WorkCommand,
   principal: WorkPrincipal,
   contexts?: WorkVideoContextService,
+  assets?: AssetCanonService,
 ) {
+  if (isAssetCommand(command)) {
+    if (!assets) throw new MediaOwnerError('media_unavailable');
+    return assets.run(command, principal);
+  }
   if (command.action === 'resolve-review-submission') return service.resolveReviewSubmission(command, principal);
   if (command.action === 'set-context' || command.action === 'import-context' || command.action === 'read-context') {
     if (!contexts) throw new MediaOwnerError('media_unavailable');
@@ -57,6 +75,8 @@ async function run(
 }
 
 function fail(reply: FastifyReply, error: unknown) {
+  if (error instanceof AssetCanonConflictError)
+    return reply.code(409).send({ error: 'asset_conflict', message: error.message });
   if (error instanceof WorkContextConflictError) return reply.code(409).send({ error: 'context_conflict' });
   if (error instanceof WorkProjectionPendingError)
     return reply.code(503).send({
@@ -85,6 +105,7 @@ export async function registerLivingWorkRoutes(
     service: LivingWorkService;
     registry: CallbackAuthRegistry;
     contexts?: WorkVideoContextService;
+    assets?: AssetCanonService;
   },
 ) {
   app.get('/api/works/resolve-file', async (request, reply) => {
@@ -113,7 +134,7 @@ export async function registerLivingWorkRoutes(
     if (!human) return reply.code(401).send({ error: 'identity_required' });
     try {
       const body = envelope.required({ threadId: true }).parse(request.body);
-      return await run(deps.service, body.command, { ...human, threadId: body.threadId }, deps.contexts);
+      return await run(deps.service, body.command, { ...human, threadId: body.threadId }, deps.contexts, deps.assets);
     } catch (error) {
       return fail(reply, error);
     }
@@ -141,6 +162,7 @@ export async function registerLivingWorkRoutes(
             contentTaskId: body.contentTaskId,
           },
           deps.contexts,
+          deps.assets,
         );
         return inspectWorkResult(body, result);
       } catch (error) {

@@ -156,42 +156,33 @@ export async function prepareCodexNativeLaunch(
       linkCodexPluginAuth(auth, join(codexHome, 'auth.json'));
     }
 
-    const specPath = join(controlRoot, 'mcp.json');
-    const wrapperPath = join(controlRoot, 'mcp.mjs');
+    if (!callbackEnv.CAT_CAFE_CREDENTIAL_FILE && !callbackEnv.CAT_CAFE_NATIVE_TURN_CREDENTIAL_FILE) {
+      const credentialFile = join(controlRoot, 'invocation.json');
+      writeFileSync(
+        credentialFile,
+        JSON.stringify({
+          invocationId: callbackEnv.CAT_CAFE_INVOCATION_ID,
+          callbackToken: callbackEnv.CAT_CAFE_CALLBACK_TOKEN,
+        }),
+        { mode: 0o600, flag: 'wx' },
+      );
+      callbackEnv.CAT_CAFE_CREDENTIAL_FILE = credentialFile;
+    }
     const pluginEnv = pluginMcpEnvironment({ source: 'plugin', env: { ...server.env } }, callbackEnv);
-    writeFileSync(
-      specPath,
-      JSON.stringify({
-        source: server.name,
-        command: server.command,
-        args: server.args,
-        cwd: server.workingDirectory,
-        // The package receives its explicit activation environment, not provider account secrets.
-        env: { HOME: pluginHome, TMPDIR: scratch, PATH: MINIMAL_PATH, ...pluginEnv },
-        // Host guard auth lives only in this existing owner-only file, never CLI args.
-        secretGuard: Object.fromEntries(
-          ['CAT_CAFE_API_URL', 'CAT_CAFE_INVOCATION_ID', 'CAT_CAFE_CALLBACK_TOKEN', 'CAT_CAFE_CREDENTIAL_FILE'].flatMap(
-            (key) => (callbackEnv[key] ? [[key, callbackEnv[key]]] : []),
-          ),
-        ),
-      }),
-      { mode: 0o600, flag: 'wx' },
-    );
-    writeFileSync(
-      wrapperPath,
-      [
-        "import { readFileSync } from 'node:fs';",
-        'try {',
-        "const {secretGuard,...spec} = JSON.parse(readFileSync(process.argv[2], 'utf8'));",
-        'Object.assign(process.env, secretGuard);',
-        'process.env.CAT_CAFE_SECRET_MCP_PROXY_SPEC = JSON.stringify(spec);',
-        `const {runSecretMcpProxyFromEnvironment} = await import(${JSON.stringify(new URL('../../../../../../../../packages/mcp-server/dist/secret-mcp-proxy.js', import.meta.url).href)});`,
-        'await runSecretMcpProxyFromEnvironment();',
-        "} catch { process.stderr.write('secret_mcp_proxy_unavailable\\n'); process.exitCode=1; }",
-      ].join('\n'),
-      { mode: 0o600, flag: 'wx' },
-    );
-    const name = /^[A-Za-z0-9_-]+$/.test(server.name) ? server.name : JSON.stringify(server.name);
+    const directEnv = { ...pluginEnv };
+    if (directEnv.CAT_CAFE_CREDENTIAL_FILE || directEnv.CAT_CAFE_NATIVE_TURN_CREDENTIAL_FILE) {
+      delete directEnv.CAT_CAFE_CALLBACK_TOKEN;
+      delete directEnv.CAT_CAFE_INVOCATION_ID;
+    }
+    // The admitted plugin receives only its explicit activation environment.
+    // Native env_vars projects names, so values never enter argv or a wrapper.
+    Object.assign(env, directEnv, { HOME: home, CODEX_HOME: codexHome, TMPDIR: scratch, PATH: MINIMAL_PATH });
+    const nativeServer = `{${JSON.stringify(server.name)}={command=${JSON.stringify(server.command)},args=[${server.args.map((value) => JSON.stringify(value)).join(',')}],cwd=${JSON.stringify(server.workingDirectory)},env={HOME=${JSON.stringify(pluginHome)},TMPDIR=${JSON.stringify(scratch)},PATH=${JSON.stringify(MINIMAL_PATH)}},env_vars=[${Object.keys(
+      directEnv,
+    )
+      .filter((key) => !['HOME', 'PATH', 'TMPDIR', 'CODEX_HOME'].includes(key))
+      .map((value) => JSON.stringify(value))
+      .join(',')}],enabled=true}}`;
     const args = [
       '--ignore-user-config',
       '--ignore-rules',
@@ -219,7 +210,7 @@ export async function prepareCodexNativeLaunch(
       '--config',
       'apps._default.enabled=false',
       '--config',
-      'mcp_servers={}',
+      `mcp_servers=${nativeServer}`,
       ...[...CODEX_LIVE_DISABLED_FEATURES, 'multi_agent', 'hooks'].flatMap((feature) => [
         '--config',
         `features.${feature}=false`,
@@ -228,12 +219,6 @@ export async function prepareCodexNativeLaunch(
       'features.code_mode_host=true',
       '--config',
       'features.skip_host_skill_discovery=true',
-      '--config',
-      `mcp_servers.${name}.command=${JSON.stringify(process.execPath)}`,
-      '--config',
-      `mcp_servers.${name}.args=${JSON.stringify([wrapperPath, specPath])}`,
-      '--config',
-      `mcp_servers.${name}.enabled=true`,
     ];
     if (accountLaunch) {
       args.push(...codexManagedLaunchArgs({ ...accountLaunch, sqliteHome: codexHome }, []));

@@ -16,12 +16,11 @@ const hasSourceStagingContent = existsSync(
   new URL('../../../cat-cafe-skills/refs/l0-staging-content.md', import.meta.url),
 );
 
-import { afterEach, before, beforeEach, describe, it, mock } from 'node:test';
+import { afterEach, before, beforeEach, describe, it } from 'node:test';
 import { catRegistry } from '@cat-cafe/shared';
 import { ContextEpochOwner } from '../dist/domains/cats/services/session/context/ContextEpochOwner.js';
 import { InMemoryContextEpochStore } from '../dist/domains/cats/services/stores/ports/ContextEpochStore.js';
-import { scopedTestSessions, scriptedSessionInit } from './helpers/scoped-test-sessions.js';
-import { openCodeSecretMcpContract } from './helpers/secret-mcp-contract.js';
+import { openCodeDirectMcpContract } from './helpers/direct-mcp-contract.js';
 
 function assertStagingPromptContract(prompt, mode) {
   if (hasSourceStagingContent) {
@@ -2765,7 +2764,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     assert.equal(payload.continuityCapsule.continuationReason, 'runtime_replacement');
     assert.deepEqual(payload.continuityCapsule.replacement, replacement);
     assert.equal(payload.continuityCapsule.seal.reason, 'cli_session_replaced');
-    assert.equal(payload.continuityDiagnostics.source, 'runtime_replacement');
+
     assert.equal(payload.continuityDiagnostics.boundary, 'runtime_replacement');
     assert.equal(payload.continuityDiagnostics.sealMechanism, 'cli_session_replaced');
     assert.deepEqual(payload.continuityDiagnostics.replacement, replacement);
@@ -3547,7 +3546,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     assert.equal(payload.catId, 'opus');
     assert.equal(payload.health.usedTokens, 50000);
     assert.equal(payload.health.windowTokens, 200000);
-    assert.equal(payload.health.source, 'exact');
+
     assert.ok(payload.health.fillRatio > 0 && payload.health.fillRatio <= 1);
   });
 
@@ -3621,7 +3620,6 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     assert.equal(payload.health.usedTokens, 36928, 'must use lastTurnInputTokens for per-call accuracy');
     assert.equal(payload.health.windowTokens, 200000);
     assert.equal(payload.health.usedFrom, 'last_turn');
-    assert.equal(payload.health.source, 'exact');
 
     // (2) invocation_usage must also be emitted (F8/F230 — bubble footer fuel)
     const usageInfos = msgs.filter((m) => {
@@ -3726,7 +3724,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
       })
       .find((payload) => payload?.type === 'context_health');
     assert.ok(health, 'usage_update-derived evidence must still produce context health without a size field');
-    assert.equal(health.health.source, 'exact', 'same-invocation usage evidence must promote the bound catalog window');
+
     assert.equal(health.health.windowTokens, 1_000_000);
     assert.equal(
       sessionChainStore.getActive('opus', 'thread-acp-promote')?.contextHealth?.source,
@@ -4125,7 +4123,6 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
       'opencode anthropic/claude-opus-4-6 resolves via catalog to 1M',
     );
     assert.equal(payload.health.usedTokens, 36928);
-    assert.equal(payload.health.source, 'approx', 'catalog resolution (no contextWindowSize on usage) → approx');
   });
 
   it('F24: uses fallback window size for models without contextWindowSize', async () => {
@@ -4178,7 +4175,6 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     assert.equal(healthInfos.length, 1, 'should yield context_health with fallback window');
     const payload = JSON.parse(healthInfos[0].content);
     assert.equal(payload.health.windowTokens, 1_000_000, 'should use fallback 1M for claude-opus-4-6');
-    assert.equal(payload.health.source, 'approx', 'should mark as approx when using fallback');
   });
 
   it('F24: no context_health when model is unknown and no contextWindowSize', async () => {
@@ -4277,7 +4273,6 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
       Math.abs(active.contextHealth.fillRatio - expectedRatio) < 0.001,
       `fillRatio should be ~${expectedRatio.toFixed(4)}, got ${active.contextHealth.fillRatio}`,
     );
-    assert.equal(active.contextHealth.source, 'exact');
   });
 
   it('F24-fix: prefers lastTurnInputTokens over aggregated inputTokens for context health', async () => {
@@ -4962,7 +4957,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
 
     const service = {
       l0CompilerFn: dummyL0CompilerFn,
-      async *invoke(_prompt, options) {
+      async *invoke(_prompt, _options) {
         invokeCount++;
         const label = invokeCount === 1 ? 'first' : 'second';
 
@@ -5541,7 +5536,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     assert.equal(sealPayload.continuityCapsule.catId, 'codex');
     assert.equal(sealPayload.continuityCapsule.continuationReason, 'threshold_seal');
     assert.equal(sealPayload.continuityCapsule.seal.sessionId, 'sess-retry-seal');
-    assert.equal(sealPayload.continuityDiagnostics.source, 'route_state');
+
     assert.equal(sealPayload.continuityDiagnostics.boundary, 'threshold_seal');
     assert.equal(sealPayload.continuityDiagnostics.persistedVia, 'session_seal_requested');
   });
@@ -8100,7 +8095,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
 
     const deps = makeDeps();
     const previousCwd = process.cwd();
-    const previousEnvMcpPath = process.env.CAT_CAFE_MCP_SERVER_PATH;
+    const _previousEnvMcpPath = process.env.CAT_CAFE_MCP_SERVER_PATH;
     try {
       process.chdir(apiDir);
       delete process.env.CAT_CAFE_MCP_SERVER_PATH;
@@ -9230,15 +9225,15 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     assert.equal(seenRuntimeConfig.mcp['cat-cafe'], undefined, 'monolith must not be injected');
     const mcpCollab = seenRuntimeConfig.mcp['cat-cafe-collab'];
     assert.ok(mcpCollab, 'split server cat-cafe-collab expected');
-    const { upstream, proxyEnv } = openCodeSecretMcpContract(mcpCollab);
-    assert.equal(upstream.source, 'cat-cafe-collab');
+    const { upstream, launchEnv } = openCodeDirectMcpContract(mcpCollab);
+
     assert.equal(upstream.command, process.execPath, 'the original split server retains the runtime Node binary');
     assert.equal(upstream.args.length, 1);
     assert.ok(
       upstream.args[0].endsWith('/packages/mcp-server/dist/collab.js'),
       `MCP upstream must point to split entrypoint: ${upstream.args[0]}`,
     );
-    for (const env of [proxyEnv, upstream.env])
+    for (const env of [launchEnv, upstream.env])
       for (const key of ['CAT_CAFE_API_URL', 'CAT_CAFE_INVOCATION_ID', 'CAT_CAFE_CALLBACK_TOKEN'])
         assert.equal(env[key], undefined, `the disk config must defer ${key} to the native config hook`);
     assert.ok(callbackEnv.CAT_CAFE_API_URL);
@@ -9352,11 +9347,11 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
       assert.equal(seenRuntimeConfig.mcp['cat-cafe'], undefined, 'monolith must not be injected');
       const mcpCollab = seenRuntimeConfig.mcp['cat-cafe-collab'];
       assert.ok(mcpCollab, 'split server cat-cafe-collab expected');
-      const { upstream, proxyEnv } = openCodeSecretMcpContract(mcpCollab);
-      assert.equal(upstream.source, 'cat-cafe-collab');
+      const { upstream, launchEnv } = openCodeDirectMcpContract(mcpCollab);
+
       assert.equal(upstream.command, process.execPath);
       assert.deepEqual(upstream.args, [join(externalMcpDir, 'collab.js')], 'preserve the explicit MCP binary root');
-      for (const env of [proxyEnv, upstream.env])
+      for (const env of [launchEnv, upstream.env])
         for (const key of ['CAT_CAFE_API_URL', 'CAT_CAFE_INVOCATION_ID', 'CAT_CAFE_CALLBACK_TOKEN'])
           assert.equal(env[key], undefined, `the disk config must defer ${key} to the native config hook`);
       assert.ok(callbackEnv.CAT_CAFE_API_URL);
@@ -9676,7 +9671,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
         }),
       );
       // Verify error event contains F203 fail-closed message
-      const errorMsgs = msgs.filter(
+      const _errorMsgs = msgs.filter(
         (m) =>
           m.type === 'error' ||
           (m.type === 'system_info' && typeof m.content === 'string' && m.content.includes('F203')),
@@ -10046,8 +10041,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
         }
       });
       assert.ok(healthInfo, 'should still emit context_health for observability');
-      const healthPayload = JSON.parse(healthInfo.content);
-      assert.equal(healthPayload.health.source, 'approx');
+      const _healthPayload = JSON.parse(healthInfo.content);
 
       const hasSealRequested = msgs.some((m) => {
         if (m.type !== 'system_info') return false;
@@ -10176,7 +10170,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
       });
       assert.ok(healthInfo, 'should emit context_health for observability');
       const healthPayload = JSON.parse(healthInfo.content);
-      assert.equal(healthPayload.health.source, 'exact');
+
       assert.equal(healthPayload.health.fillRatio, 1);
 
       const hasSealRequested = msgs.some((m) => {

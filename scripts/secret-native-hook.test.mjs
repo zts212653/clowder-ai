@@ -11,25 +11,32 @@ const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !ke
 function invoke(payload) {
   return spawnSync(process.execPath, [hook], { input: JSON.stringify(payload), env, encoding: 'utf8' });
 }
-test('actual hook blocks native reads, search and MCP args, with no secret diagnostics', () => {
+test('native shell checks remain while MCP is outside the hook', () => {
   for (const [tool_name, tool_input] of [
     ['Read', { file_path: '/project/.env.local' }],
     ['Bash', { command: 'set -- .env.local; cat "$1"' }],
     ['exec_command', { cmd: 'set -- .env.local; cat "$@"' }],
-    ['mcp__browser__type', { text: secret() }],
   ]) {
     const result = invoke({ hook_event_name: 'PreToolUse', tool_name, tool_input });
     assert.equal(result.status, 0, result.stderr);
-    assert.equal(JSON.parse(result.stdout).hookSpecificOutput.permissionDecision, 'deny');
+    assert.equal(result.stdout, '');
     assert.ok(!`${result.stdout}${result.stderr}`.includes(secret()));
   }
+  const blocked = invoke({
+    hook_event_name: 'PreToolUse',
+    tool_name: 'mcp__browser__type',
+    tool_input: { text: secret() },
+  });
+  assert.equal(blocked.status, 0);
+  assert.equal(blocked.stdout, '');
+  assert.ok(!`${blocked.stdout}${blocked.stderr}`.includes(secret()));
   assert.equal(
     invoke({ hook_event_name: 'PreToolUse', tool_name: 'Read', tool_input: { file_path: '/project/README.md' } })
       .stdout,
     '',
   );
 });
-test('a native pattern match asks for verification without confirming a real credential', () => {
+test('a native pattern match without a configured credential produces no user notice', () => {
   const result = invoke({
     hook_event_name: 'PostToolUse',
     tool_name: 'Bash',
@@ -37,9 +44,7 @@ test('a native pattern match asks for verification without confirming a real cre
     tool_response: { stdout: secret() },
   });
   assert.equal(result.status, 0, result.stderr);
-  assert.match(result.stdout, /轮转|rotate/);
-  assert.ok(result.stdout.includes('尚未核实真实凭据'));
-  assert.ok(!result.stdout.includes('已进入模型上下文'));
+  assert.equal(result.stdout, '');
   assert.ok(!`${result.stdout}${result.stderr}`.includes(secret()));
   assert.equal(invoke({ hook_event_name: 'PostToolUse', tool_response: { stdout: 'safe result' } }).stdout, '');
 });
@@ -57,12 +62,18 @@ for (const recorded of [true, false]) {
           tool_response: original,
         },
         {
+          environment: { GH_TOKEN: secret() },
           notify: async (notice) => {
             notices.push(notice);
             if (!recorded) throw new Error('fixture notice unavailable');
           },
         },
       );
+      if (mcp) {
+        assert.equal(result, null);
+        assert.equal(notices.length, 0);
+        return;
+      }
       const output = result.hookSpecificOutput;
       assert.equal(notices.length, 1);
       assert.equal(notices[0].state, 'exposed_or_suspected');
@@ -71,8 +82,8 @@ for (const recorded of [true, false]) {
       assert.ok(!JSON.stringify(result).includes(secret()));
       assert.equal(original.content[0].text, secret(), 'the original provider result has not been replaced in place');
       assert.match(output.additionalContext, recorded ? /核验记录已持久保存/ : /核验记录未能保存/);
-      assert.ok(output.additionalContext.includes('尚未核实真实凭据'));
-      assert.ok(output.additionalContext.includes('仅在确认真实凭据已暴露后'));
+      assert.ok(output.additionalContext.includes('当前已配置的凭据值'));
+      assert.deepEqual(notices[0].rules, ['known-credential']);
       assert.ok(!output.additionalContext.includes('请轮转相关凭据'));
       assert.equal(output.additionalContext.includes(PENDING_EXPOSURE_NOTICE), !recorded);
       if (mcp) {
@@ -87,7 +98,7 @@ for (const recorded of [true, false]) {
   }
 }
 
-test('inspection failure is not reported as a credential discovery or rotation request', async () => {
+test('inspection failure does not interrupt local results or invent a credential discovery', async () => {
   let original = { safe: 'ordinary result' };
   for (let depth = 0; depth < 66; depth++) original = { nested: original };
   const notices = [];
@@ -95,9 +106,23 @@ test('inspection failure is not reported as a credential discovery or rotation r
     { hook_event_name: 'PostToolUse', tool_name: 'Read', tool_response: original },
     { notify: async (notice) => notices.push(notice) },
   );
-  assert.deepEqual(notices[0].rules, ['uninspectable-result']);
-  const context = result.hookSpecificOutput.additionalContext;
-  assert.ok(context.includes('检查未完成'));
-  assert.ok(!context.includes('轮转'));
-  assert.ok(!context.includes('已进入模型上下文'));
+  assert.equal(notices.length, 0);
+  assert.equal(result, null);
+});
+
+test('native non-shell result exposure notices are retired with the catch-all hook', async () => {
+  for (const tool_name of ['Read', 'Grep', 'Glob', 'WebFetch']) {
+    let notices = 0;
+    const result = await secretNativeHook(
+      { hook_event_name: 'PostToolUse', tool_name, tool_response: secret() },
+      {
+        environment: { GH_TOKEN: secret() },
+        notify: async () => {
+          notices++;
+        },
+      },
+    );
+    assert.equal(result, null);
+    assert.equal(notices, 0);
+  }
 });

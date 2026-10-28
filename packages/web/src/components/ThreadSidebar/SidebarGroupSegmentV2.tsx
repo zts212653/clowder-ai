@@ -16,9 +16,9 @@ export function SidebarGroupSegmentV2({
       className={`relative mx-2 min-w-0 ${first ? 'pt-1' : ''} ${last ? 'pb-1' : ''}`}
     >
       <div
-        className={`min-w-0 border-x [--sidebar-group-lift:35%] dark:[--sidebar-group-lift:3%] ${first ? 'rounded-t-[10px] border-t' : ''} ${last ? 'rounded-b-[10px] border-b' : ''}`}
+        className={`min-w-0 border-x ${first ? 'rounded-t-[10px] border-t' : ''} ${last ? 'rounded-b-[10px] border-b' : ''}`}
         style={{
-          background: 'color-mix(in srgb, white var(--sidebar-group-lift), var(--shell-frame))',
+          background: 'var(--shell-group)',
           borderColor: 'var(--shell-hairline)',
         }}
       >

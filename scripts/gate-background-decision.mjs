@@ -3,14 +3,14 @@ import { pathToFileURL } from 'node:url';
 import { packageManagerInvocation } from './lib/package-manager-invocation.mjs';
 import { executedInvocations } from './lib/shell-invocation.mjs';
 import { SUBSTITUTION } from './lib/shell-text.mjs';
+import { appendNativeDenial } from './native-effect-audit.mjs';
 import { hereDocumentView } from './native-effect-heredoc.mjs';
 
 /** Consume the shared execution view: quoted argv/body text never becomes a command. */
 export function gateBackgroundDecision(payload) {
   if (payload?.tool_name !== 'Bash' || typeof payload.tool_input?.command !== 'string') return false;
   const host = hereDocumentView(payload.tool_input.command).host;
-  const { pipelines, complete } = executedInvocations(host);
-  if (!complete && /\b(?:gate|pre-merge-check\.(?:sh|bash))\b/.test(host)) return true;
+  const { pipelines } = executedInvocations(host);
   const background = payload.tool_input.run_in_background === true;
   return pipelines.flat().some(({ name, operands }) => {
     if (name === undefined)
@@ -34,7 +34,14 @@ if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.ar
   try {
     let input = '';
     for await (const chunk of process.stdin) input += chunk;
-    if (gateBackgroundDecision(JSON.parse(input))) {
+    const payload = JSON.parse(input);
+    if (gateBackgroundDecision(payload)) {
+      appendNativeDenial(payload, {
+        decision: 'deny',
+        reasonCode: 'gate_requires_managed_command',
+        effect: 'process_control',
+        target: { kind: 'ordinary', value: payload.cwd ?? '<unknown-cwd>' },
+      });
       console.log(
         JSON.stringify({
           hookSpecificOutput: {

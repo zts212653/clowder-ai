@@ -5,16 +5,9 @@ import { inflateRawSync } from 'node:zlib';
 import sharp from 'sharp';
 import { guessMime } from './workspace-file-read.js';
 
-const OFFICE_MIME: Record<string, string> = {
-  '.pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
-  '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-  '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-  '.ppt': 'application/vnd.ms-powerpoint',
-  '.doc': 'application/msword',
-  '.xls': 'application/vnd.ms-excel',
-};
+/** Shared MIME facts also drive opening and catalogue projections. */
 export function workspaceReferenceMime(path: string): string {
-  return OFFICE_MIME[extname(path).toLowerCase()] ?? guessMime(path);
+  return guessMime(path);
 }
 
 /** Only OOXML's small producer metadata is inspected; no conversion, extraction or execution. */

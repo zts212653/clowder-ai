@@ -5,5 +5,15 @@ export default function MemoryPage({ searchParams }: { searchParams: Record<stri
   const from = typeof searchParams.from === 'string' ? searchParams.from : null;
   const requested = searchParams.tab;
   const tab = requested === 'brakes' || requested === 'library' || requested === 'recall' ? requested : 'all';
-  return <MemoryEntry tab={tab} from={from} profileSource={readProfileSourceTarget(searchParams)} />;
+  const query = typeof searchParams.q === 'string' ? searchParams.q : undefined;
+  const findSessionId = typeof searchParams.findSession === 'string' ? searchParams.findSession : undefined;
+  return (
+    <MemoryEntry
+      tab={tab}
+      from={from}
+      profileSource={readProfileSourceTarget(searchParams)}
+      initialQuery={query}
+      findSessionId={findSessionId}
+    />
+  );
 }

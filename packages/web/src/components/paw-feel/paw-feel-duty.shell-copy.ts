@@ -12,6 +12,8 @@ export const pawFeelDutyCopy = defineShellCopy(
       staleProposal: (id: string) => `F128 proposal ${id} 当前不是 pending，需重新路由或显式阻塞`,
       duplicate: (id: string) => `重复于 ${id}`,
       binding: (owner: string, task: string, lease: string) => `由 @${owner} 负责 · 任务 ${task} · F167 lease ${lease}`,
+      assignment: (owner: string, task: string) => `由 @${owner} 负责 · 任务 ${task} · 当前任务分配`,
+      failedAssignment: '任务分配已变化，需要重新绑定',
       failedLease: '当前 active lease 复验失败',
       reason: (code: string) => `理由：${code}`,
       responsibilitySurface: '责任面',
@@ -28,6 +30,8 @@ export const pawFeelDutyCopy = defineShellCopy(
       duplicate: (id: string) => `Duplicate of ${id}`,
       binding: (owner: string, task: string, lease: string) =>
         `Responsible cat @${owner} · Task ${task} · F167 lease ${lease}`,
+      assignment: (owner: string, task: string) => `Responsible cat @${owner} · Task ${task} · Current assignment`,
+      failedAssignment: 'Task assignment changed; rebind required',
       failedLease: 'Active lease revalidation failed',
       reason: (code: string) => `Reason: ${code}`,
       responsibilitySurface: 'responsibility surface',
@@ -48,6 +52,10 @@ export const pawFeelDutyCopy = defineShellCopy(
       pending: [['thread-a'], ['thread-b']],
       staleProposal: [['proposal-a'], ['proposal-b']],
       duplicate: [['signal-a'], ['signal-b']],
+      assignment: [
+        ['sol', 'task-a'],
+        ['kimi', 'task-b'],
+      ],
       binding: [
         ['sol', 'task-a', 'lease-a'],
         ['kimi', 'task-b', 'lease-b'],

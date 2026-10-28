@@ -12,8 +12,9 @@ import {
 import { SETTINGS_SECTIONS } from '../settings-nav-config';
 
 describe('F322 设置与管理 information architecture', () => {
-  it('has exactly the 11 decided first-level items, in the decided order and groups', () => {
+  it('places your profile above the decided settings destinations and groups', () => {
     expect(SETTINGS_IA.map((entry) => entry.label)).toEqual([
+      '你',
       '猫猫团队',
       '调度',
       '能力进化',
@@ -26,7 +27,7 @@ describe('F322 设置与管理 information architecture', () => {
       '功能看板',
       '信号',
     ]);
-    expect(SETTINGS_IA.map((entry) => entry.group)).toEqual([1, 1, 1, 1, 2, 2, 2, 3, 3, 3, 3]);
+    expect(SETTINGS_IA.map((entry) => entry.group)).toEqual([1, 1, 1, 1, 1, 2, 2, 2, 3, 3, 3, 3]);
     expect(new Set(SETTINGS_IA.map((entry) => entry.id)).size).toBe(SETTINGS_IA.length);
   });
 

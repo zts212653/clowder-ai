@@ -5,6 +5,7 @@ import { dirname, join } from 'node:path';
 import { after, test } from 'node:test';
 import { executedInvocations } from '../../../scripts/lib/shell-invocation.mjs';
 import { decideNativeHookPayload } from '../../../scripts/native-effect-target-guard.mjs';
+import { assertGuardedOrUnproved } from './helpers/native-effect-policy-assertions.js';
 
 const root = realpathSync(mkdtempSync(join(tmpdir(), 'f306-call-contract-')));
 const main = join(root, 'cat-cafe');
@@ -16,7 +17,8 @@ const noHost = { selfHost: () => ({ confidence: 'none' }) };
 function parity(command, expected, cwd = main) {
   for (const tool_name of ['Bash', 'exec_command']) {
     const result = decideNativeHookPayload({ tool_name, cwd, tool_input: { command, cmd: command } }, noHost);
-    assert.equal(result.decision, expected, `${tool_name}: ${command}: ${JSON.stringify(result)}`);
+    if (expected === 'unproved') assertGuardedOrUnproved(result, command);
+    else assert.equal(result.decision, expected, `${tool_name}: ${command}: ${JSON.stringify(result)}`);
   }
 }
 
@@ -29,15 +31,15 @@ test('PATH search coordinates remain execution configuration, not a write target
     parity(`${prefix} printf '%s' 'runtime:restart' > /tmp/f306-output`, 'allow');
     parity(`${prefix} printf x > ${runtime}/sentinel`, 'deny');
     parity(`${prefix} git push --force origin main`, 'deny');
-    parity(`${prefix} sort -o /tmp/f306-output /tmp/input`, 'deny', runtime);
+    parity(`${prefix} sort -o /tmp/f306-output /tmp/input`, 'unproved', runtime);
   }
-  parity(`NODE_OPTIONS='--require ${runtime}/loader.js' node -e 'console.log(1)'`, 'deny');
-  parity(`env BASH_ENV=${runtime}/bootstrap sh -c 'echo x'`, 'deny');
-  parity(`env -C ${runtime} PATH=/usr/bin node -e 'console.log(1)'`, 'deny');
-  parity(`PATH=/usr/bin node ${runtime}/code.js`, 'deny');
-  parity(`PATH=/usr/bin node -r ${runtime}/loader.js /tmp/code.js`, 'deny');
+  parity(`NODE_OPTIONS='--require ${runtime}/loader.js' node -e 'console.log(1)'`, 'unproved');
+  parity(`env BASH_ENV=${runtime}/bootstrap sh -c 'echo x'`, 'unproved');
+  parity(`env -C ${runtime} PATH=/usr/bin node -e 'console.log(1)'`, 'unproved');
+  parity(`PATH=/usr/bin node ${runtime}/code.js`, 'unproved');
+  parity(`PATH=/usr/bin node -r ${runtime}/loader.js /tmp/code.js`, 'unproved');
   parity(`PATH=${runtime}/bin eval 'rm -rf ${runtime}'`, 'deny');
-  parity(`PATH=${runtime}/bin $PROGRAM ${runtime}`, 'deny');
+  parity(`PATH=${runtime}/bin $PROGRAM ${runtime}`, 'unproved');
 });
 
 test('the shared reader preserves program, environment, code and redirection roles', () => {
@@ -72,12 +74,15 @@ test('Alpha configuration and child identity remain bounded', () => {
   for (const child of [
     `env CAT_CAFE_API_PORT=${protectedRuntimeApiPort} pnpm alpha:start`,
     'env REDIS_URL=redis://localhost:6399 pnpm alpha:start',
-    'env NODE_OPTIONS=--require=/tmp/load.js pnpm alpha:start',
-    'pnpm alpha:start -- --dir /tmp/other',
     'pnpm alpha:start -- --ports 3001,3002,4100,4111,6399',
-    'node /tmp/preview.js',
   ])
     parity(`pnpm preview:process start --cwd ${main} --port 3011 -- ${child}`, 'deny');
+  for (const child of [
+    'env NODE_OPTIONS=--require=/tmp/load.js pnpm alpha:start',
+    'pnpm alpha:start -- --dir /tmp/other',
+    'node /tmp/preview.js',
+  ])
+    parity(`pnpm preview:process start --cwd ${main} --port 3011 -- ${child}`, 'allow');
   parity(`pnpm --dir ${runtime} preview:process start --cwd ${runtime} --port 3011 -- pnpm alpha:start`, 'deny');
   parity(`pnpm --dir ${runtime} preview:process start --cwd ${main} --port 3011 -- pnpm alpha:start`, 'deny');
 });

@@ -1,8 +1,10 @@
-import { type ReactNode, useState } from 'react';
-import ReactMarkdown, { type Components, defaultUrlTransform } from 'react-markdown';
-import remarkBreaks from 'remark-breaks';
-import remarkGfm from 'remark-gfm';
+import { isCollectiveAttachmentUrl } from '@cat-cafe/shared';
+import { MarkdownSurface } from '@cat-cafe/ui';
+import { createContext, type ReactNode, useContext, useState } from 'react';
+import { type Components, defaultUrlTransform } from 'react-markdown';
+import type { CollectiveEventEnvelope } from './client-types.js';
 import { useCollectiveText } from './collective-copy.js';
+import { MessageAttachment } from './MessageAttachments.js';
 import { useSharedArtifacts } from './use-collective-artifacts.js';
 import {
   type CollectiveWorkResultFileAddress,
@@ -90,55 +92,47 @@ function AuthenticatedWorkResultFile({
   );
 }
 
+const MessageMarkdownEvent = createContext<CollectiveEventEnvelope | undefined>(undefined);
+const messageMarkdownComponents: Components = {
+  a: function MessageLink({ children, href }) {
+    const result = href ? collectiveWorkResultFileAddress(href) : undefined;
+    if (result) return <AuthenticatedWorkResultFile address={result}>{children}</AuthenticatedWorkResultFile>;
+    return isSafeWebLink(href) ? <SafeLink href={href}>{children}</SafeLink> : <InertLink>{children}</InertLink>;
+  },
+  img: function MessageImage({ src, alt }) {
+    const event = useContext(MessageMarkdownEvent);
+    const attachment = event?.attachments?.find((item) => item.contentRef === src);
+    return event && attachment && attachment.mediaType.startsWith('image/') ? (
+      <MessageAttachment attachment={attachment} event={event} imageDescription={alt} inline />
+    ) : (
+      <span className="message-markdown-inert-image">{alt ? `图片：${alt}` : '图片'}</span>
+    );
+  },
+};
+
 export function MessageMarkdown({
   source,
   prefix,
   sourceCoordinates = false,
+  event,
 }: {
   readonly source: string;
   readonly prefix?: ReactNode;
   readonly sourceCoordinates?: boolean;
+  readonly event?: CollectiveEventEnvelope;
 }) {
-  const position = (node?: { position?: { start: { offset?: number }; end: { offset?: number } } }) =>
-    sourceCoordinates
-      ? {
-          'data-source-start': node?.position?.start.offset,
-          'data-source-end': node?.position?.end.offset,
-        }
-      : {};
-  const sourceComponents: Components = sourceCoordinates
-    ? {
-        p: ({ node, ...props }) => <p {...props} {...position(node)} />,
-        h1: ({ node, ...props }) => <h1 {...props} {...position(node)} />,
-        h2: ({ node, ...props }) => <h2 {...props} {...position(node)} />,
-        h3: ({ node, ...props }) => <h3 {...props} {...position(node)} />,
-        li: ({ node, ...props }) => <li {...props} {...position(node)} />,
-        td: ({ node, ...props }) => <td {...props} {...position(node)} />,
-        pre: ({ node, ...props }) => <pre {...props} {...position(node)} />,
-      }
-    : {};
   return (
-    <div className="message-body message-markdown">
-      {prefix && <span className="message-prefix">{prefix}</span>}
-      <ReactMarkdown
-        remarkPlugins={[remarkGfm, remarkBreaks]}
-        urlTransform={defaultUrlTransform}
-        components={{
-          ...sourceComponents,
-          a: ({ children, href }) => {
-            const result = href ? collectiveWorkResultFileAddress(href) : undefined;
-            if (result) return <AuthenticatedWorkResultFile address={result}>{children}</AuthenticatedWorkResultFile>;
-            return isSafeWebLink(href) ? (
-              <SafeLink href={href}>{children}</SafeLink>
-            ) : (
-              <InertLink>{children}</InertLink>
-            );
-          },
-          img: ({ alt }) => <span className="message-markdown-inert-image">{alt ? `图片：${alt}` : '图片'}</span>,
-        }}
-      >
-        {source}
-      </ReactMarkdown>
-    </div>
+    <MessageMarkdownEvent.Provider value={event}>
+      <div className="message-body message-markdown">
+        {prefix && <span className="message-prefix">{prefix}</span>}
+        <MarkdownSurface
+          sourceCoordinates={sourceCoordinates}
+          urlTransform={(url) => (isCollectiveAttachmentUrl(url) ? url : defaultUrlTransform(url))}
+          components={messageMarkdownComponents}
+        >
+          {source}
+        </MarkdownSurface>
+      </div>
+    </MessageMarkdownEvent.Provider>
   );
 }

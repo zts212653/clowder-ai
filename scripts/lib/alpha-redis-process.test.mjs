@@ -15,6 +15,21 @@ test('named Redis ownership captures the listener pidfile and canonical start id
   assert.equal(verifyNamedAlphaRedisIdentity(raw, proof, deps), true);
 });
 
+test('serving tracked changes retain captured Redis identity without authorizing a new capture', (t) => {
+  const { f, raw, deps, identity } = redisFixture(t);
+  const proof = captureNamedAlphaRedisIdentity(raw, deps);
+  writeFileSync(join(f.alphaRoot, 'packages/web/package.json'), '{"generatedDuringServing":true}\n');
+  assert.throws(() => captureNamedAlphaRedisIdentity(raw, deps), /tracked changes/);
+  assert.equal(verifyNamedAlphaRedisIdentity(raw, proof, deps), true);
+  assert.throws(() => verifyNamedAlphaRedisIdentity(raw, proof, { ...deps, readListeners: () => [41022] }), /replaced/);
+  assert.throws(
+    () => verifyNamedAlphaRedisIdentity(raw, proof, { ...deps, capture: () => ({ ...identity, cwd: '/foreign' }) }),
+    /incarnation/,
+  );
+  writeFileSync(join(f.alphaRoot, 'packages/api/dist/.build-commit'), 'not-the-captured-revision');
+  assert.throws(() => verifyNamedAlphaRedisIdentity(raw, proof, deps), /compiled revision/);
+});
+
 test('replacement listener or stale same PID refuses before any Redis protocol or process signal', (t) => {
   const { raw, deps, identity } = redisFixture(t);
   const proof = captureNamedAlphaRedisIdentity(raw, deps);

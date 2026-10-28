@@ -1,4 +1,8 @@
-import { deploymentDefaults } from '@cat-cafe/shared';
+import {
+  deploymentDefaults,
+  type MessageSearchAnswerAttachmentRequest,
+  messageSearchAnswerAttachmentSchema,
+} from '@cat-cafe/shared';
 import { defineMcpCanonicalFactory, defineMcpMigrationFactory } from '../tool-governance-migration.js';
 import { invocationFetch } from './invocation-auth.js';
 
@@ -366,6 +370,11 @@ const IMPLEMENTATION_REVIEW_ANCHOR_ERROR =
 const postMessageThreadIdSchema = z.string().min(1);
 
 export const postMessageInputSchema = {
+  searchAnswer: messageSearchAnswerAttachmentSchema
+    .optional()
+    .describe(
+      'Prepared server-owned answer reference. Requires stable clientMessageId. For forwarding an actual bound card, add source={messageId,blockId}; the Host re-admits it for this destination.',
+    ),
   content: z.string().min(1).describe('The message content to post'),
   effectClass: z
     .enum(['fyi', 'coordinate', 'investigate'])
@@ -707,6 +716,7 @@ export const createTaskInputSchema = {
 
 export const updateTaskInputSchema = {
   taskId: z.string().min(1).describe('The ID of the task to update'),
+  expectedOwnerRevision: z.number().int().nonnegative().optional(),
   status: z
     .enum(['todo', 'doing', 'blocked', 'done'])
     .optional()
@@ -970,6 +980,7 @@ function containsPawFeelMarker(content: string): boolean {
 async function _executePostMessage(
   input: {
     content: string;
+    searchAnswer?: MessageSearchAnswerAttachmentRequest;
     contextAttachments?: ContextAttachment[] | undefined;
     threadId?: string | undefined;
     replyTo?: string | undefined;
@@ -990,6 +1001,8 @@ async function _executePostMessage(
   },
   transportOptions?: CallbackTransportOptions,
 ): Promise<ToolResult> {
+  if (input.searchAnswer && !input.clientMessageId)
+    return errorResult('searchAnswer requires a stable clientMessageId; retry that ID without searching again.');
   if (input.localReviewVerdict) {
     if (!input.clientMessageId) {
       return errorResult(
@@ -1029,6 +1042,7 @@ async function _executePostMessage(
         '/api/callbacks/post-message',
         {
           content: input.content,
+          ...(input.searchAnswer ? { searchAnswer: input.searchAnswer } : {}),
           ...(input.contextAttachments?.length ? { contextAttachments: input.contextAttachments } : {}),
           ...(input.threadId ? { threadId: input.threadId } : {}),
           ...(input.replyTo ? { replyTo: input.replyTo } : {}),
@@ -1142,6 +1156,7 @@ async function _executePostMessage(
 export async function handlePostMessage(
   input: {
     content: string;
+    searchAnswer?: MessageSearchAnswerAttachmentRequest;
     contextAttachments?: ContextAttachment[] | undefined;
     threadId?: string | undefined;
     replyTo?: string | undefined;
@@ -1397,6 +1412,7 @@ function formatFeatIndexResponse(raw: string): string {
 
 export async function handleUpdateTask(input: {
   taskId: string;
+  expectedOwnerRevision?: number;
   status?: string | undefined;
   why?: string | undefined;
   agentKeyCatId?: string | undefined;
@@ -1416,6 +1432,7 @@ export async function handleUpdateTask(input: {
         '/api/callbacks/update-task',
         {
           taskId: input.taskId,
+          ...(input.expectedOwnerRevision !== undefined ? { expectedOwnerRevision: input.expectedOwnerRevision } : {}),
           ...(input.status ? { status: input.status } : {}),
           ...(input.why ? { why: input.why } : {}),
           // F193-E1 P1-4: allow patching dispatchGate on existing tasks
@@ -1628,6 +1645,7 @@ export async function handleCreateTask(input: {
 export async function handleCrossPostMessage(input: {
   threadId: string;
   content: string;
+  searchAnswer?: MessageSearchAnswerAttachmentRequest;
   targetCats?: string[] | undefined;
   replyTo?: string | undefined;
   clientMessageId?: string | undefined;
@@ -1736,6 +1754,7 @@ export async function handleCrossPostMessage(input: {
   return _executePostMessage({
     threadId: input.threadId,
     content: input.content,
+    ...(input.searchAnswer ? { searchAnswer: input.searchAnswer } : {}),
     ...(input.replyTo ? { replyTo: input.replyTo } : {}),
     ...(input.clientMessageId ? { clientMessageId: input.clientMessageId } : {}),
     ...(input.agentKeyCatId ? { agentKeyCatId: input.agentKeyCatId } : {}),
@@ -3549,12 +3568,12 @@ export const callbackTools = [
       "The receipt acknowledges submission, not the recipient's answer; wait for an inbound reply before claiming their result. " +
       'GOTCHA: use one delivery carrier per intended hop. After a successful routed post, repeating the same line-start @mention in final text creates another hop; use that text fallback when the post failed. ' +
       'Scarce dossier engagementPolicy seats receive effectClass=fyi or coordination.phase=terminal unread without waking; deliveredWithoutWake confirms delivery, not reading. Active coordination, actions and localReviewVerdict retain their wake. ' +
-      'GOTCHA: action is Task-backed implement work: subjectRef=subject:task:<taskId>, terminalPredicate={kind:"task_done"}, explicit clientMessageId and exactly one targetCats entry. Ordinary existing-owner notifications need no action; removing action does not authorize new work. ' +
+      'GOTCHA: action is Task-backed implement work: subjectRef=subject:task:<taskId>, terminalPredicate={kind:"task_done"}, explicit clientMessageId and exactly one targetCats entry. For ordinary work (work Task, no namespaced subject or entrusted contract), send expectedOwnerRevision from list_tasks and optionally stopPreviousExecution; the server reuses Task/Message/Queue, reports queueing separately from execution, and never requires lease replacement or another approval for the same authorized work. Ordinary existing-owner notifications need no action; removing action does not authorize new work. ' +
       'For a direct Claim/Release chain, pass coordination.phase=active on work hops and terminal on the final delivery; terminal recipients may clean-stop without another @. ' +
       'An unaddressed terminal transition whose id or bound subject conflicts with the incoming coordination fails with HTTP 409 before persistence. After an incoming terminal, any authored target is genuinely new active work even if the caller repeats a stale terminal label. ' +
       'A reply after terminal is a quiet courtesy ACK only when it has no explicit routing credential; line-start @mentions and structured targetCats always start a new active routing generation and remain subject to the normal loop-streak guard. ' +
       'For a local review result, route an ordinary @author message with localReviewVerdict + exact reviewedHeadSha + reviewSubjectRef + acceptedSourceRef + acceptedRevision + clientMessageId. This durable fact needs no action lease, coordination generation, replacement, or issuer route. Public prose is never parsed. ' +
-      'Existing standing uses claimOrigin="existing_standing" + groundingEvidenceRef; rejected custody uses returnToPredecessor and targets the persisted predecessor. ' +
+      'Governed lease work alone uses existing_standing + groundingEvidenceRef or returnToPredecessor. Ordinary Task handoff uses the current assignment revision; its original home, source, approvals and WIP remain canonical. ' +
       'GOTCHA: structured action metadata currently requires invocation-token auth; agent-key callers fail closed with the non-retryable action_agent_key_unsupported status and never send an unfenced fallback. ' +
       'F247: gpt-pro agent-key returns copy only replyTo=sourceMessageId from the runtime delta; the server admits it only when an exact server-custodied dispatch grant exists. ' +
       'A post_message is always its own durable message, separate from your final reply. ' +
@@ -3797,19 +3816,19 @@ export const callbackTools = [
       'For scarce dossier engagementPolicy seats, effectClass=fyi or coordination.phase=terminal persists unread without waking; receipt deliveredWithoutWake means delivered, not read. Active coordination, actions, assign_work approval and localReviewVerdict retain their normal routing. ' +
       'Messages without routing (no targetCats, no line-start @) will be REJECTED (F193 AC-A4). ' +
       'GOTCHA: Requires threadId — use feat_index/list_threads plus thread truth to verify the exact owning thread; never guess a nearby thread. ' +
-      'PAW-FEEL: The original [爪感差: ...] message is already collected. Cross-post only a marker-free sourceMessageId reference to a verified owner; if none exists, use cat_cafe_propose_thread (F128). New responsibility uses effectClass=assign_work plus proposedAction for Approval Hub review. ' +
+      'PAW-FEEL: The original [爪感差: ...] message is already collected. Cross-post only a marker-free sourceMessageId reference to a verified owner; if none exists, use cat_cafe_propose_thread (F128). A genuinely new authorization uses effectClass=assign_work plus proposedAction for Approval Hub review; the same already-authorized ordinary Task uses its native handoff and creates no second card. ' +
       'GOTCHA: For Claim/Release coordination, pass coordination.phase=active on Claim/work hops and terminal on Release. ' +
       'An unaddressed terminal transition whose id or bound subject conflicts with the incoming coordination fails with HTTP 409 before persistence. Cross-thread routing credentials after an incoming terminal always name genuinely new active work. ' +
       'For a local review result, route one ordinary @author cross-post with localReviewVerdict + exact reviewedHeadSha + reviewSubjectRef + acceptedSourceRef + acceptedRevision + clientMessageId. This durable fact needs no action lease, coordination generation, replacement, or issuer route; prose is never parsed. ' +
       'The server carries a stable id across active hops. Every cross-thread post supplies an explicit routing credential, so a line-start @mention or structured targetCats after terminal always starts a new active routing generation and remains subject to the normal loop-streak guard. ' +
       'If terminal reveals genuinely new work, start a new coordination with phase=active instead of ACKing the closed chain. ' +
       'GOTCHA: direct action is Task-backed implement work: subjectRef=subject:task:<taskId> and terminalPredicate={kind:"task_done"}, plus clientMessageId and targetCats. An asset ID or reuse of an old thread does not grant delegate standing. For operator-gated new responsibility, pass proposedAction with effectClass=assign_work; both paths require the actual Task. Ordinary existing-owner notifications omit action, but cannot bypass an implementation refusal. ' +
-      'Output: direct action admission posts and queues one fenced carrier; assign_work publishes one pending approval card and posts nothing to the target until approval atomically acquires the fence. ' +
+      'Output: ordinary Task handoff conditionally updates the original assignment and queues one durable source; it waits for exact previous-provider teardown before starting another writer. Replays reuse that source. Pass expectedOwnerRevision; stopPreviousExecution requests exact cancellation, not fabricated stop proof. Retained assign_work+proposedAction for that same authorized Task follows this path with no new approval card. Missing Task standing or a mismatched child is rejected, without opening a card. Cross-thread assign_work outside this native Task path still requires the existing pending approval proposal. ' +
       'Existing standing reuses the same CAS via claimOrigin="existing_standing" + groundingEvidenceRef. returnToPredecessor sends a rejected single generation to the server-persisted predecessor; parallel mode records only the rejecting holder terminal. ' +
       'For a canonical Task-owner replacement of an initial terminal delegate in the same approved child, groundingEvidenceRef must be the exact direct-human message:<id>; server validation binds user, child, revision, and timing, and never turns prose alone into a grant. ' +
       'Structured action metadata currently requires invocation-token auth; agent-key callers fail closed with the non-retryable action_agent_key_unsupported status and never send an unfenced fallback. ' +
       'F247: gpt-pro agent-key returns carry only the exact replyTo from the runtime delta; authorization stays in server custody. ' +
-      'Fallback must use replace with the active leaseId/generation after server-recorded terminal evidence. Use mode=parallel + parallelIntent only for deliberate independent review, #ideate, or explicit operator fan-out. ' +
+      'Only surviving governed lease work uses replace with leaseId/generation after server-recorded terminal evidence. Ordinary Task implementation uses expectedOwnerRevision and existing execution control. Use mode=parallel + parallelIntent only for deliberate independent review, #ideate, or explicit operator fan-out. ' +
       'TIP: The sub-thread "## 主 Thread" header includes exact routing credentials (threadId + targetCats/handle) — copy them directly.',
     inputSchema: crossPostMessageInputSchema,
     handler: handleCrossPostMessage,
@@ -3903,9 +3922,9 @@ export const callbackTools = [
   defineCanonicalTool({
     name: 'cat_cafe_update_task',
     description:
-      'Update a task you own: mark as doing/blocked/done, or resolve a missing dispatch gate. ' +
+      'Update a task you own, or pick up an unassigned ordinary Task in your home thread by marking it doing; also resolve a missing dispatch gate. ' +
       'Entrusted work cannot be marked done through this generic tool; use its typed, evidence-backed closure action. ' +
-      'GOTCHA: You can only update tasks assigned to you (your catId). ' +
+      'Output: the canonical Task update is returned; picking up an unassigned Task assigns its owner and binds the current authenticated execution atomically. Ordinary completion never waits for a lease mirror. GOTCHA: assigned ordinary work requires the current owner or exact admitted delegate execution; include expectedOwnerRevision from the Task read. Stale assignment, source withdrawal or a different live writer is rejected. A later owner invocation recovers a stranded binding only with exact positive provider-stop evidence. Entrusted/typed closure and namespaced producers retain their own contracts. ' +
       'TIP: Include a "why" note when marking as blocked — it helps others understand the situation. ' +
       'F193-E1: Pass dispatchGate to resolve a "missing" dispatch gate (e.g. after cross_posting to the owning thread).',
     inputSchema: updateTaskInputSchema,

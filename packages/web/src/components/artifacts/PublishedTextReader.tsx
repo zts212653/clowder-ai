@@ -1,6 +1,12 @@
-import { type MessageQuoteSource, MessageQuoteSourceSchema, type ThreadArtifactDTO } from '@cat-cafe/shared';
+import {
+  type MessageQuoteSource,
+  MessageQuoteSourceSchema,
+  projectFileContent,
+  type ThreadArtifactDTO,
+} from '@cat-cafe/shared';
 import { type ReactNode, useEffect, useState } from 'react';
 import { API_URL } from '@/utils/api-client';
+import type { FileActionSource } from '../content-review/file-action-client';
 import { WorkspaceFileViewer } from '../workspace/WorkspaceFileViewer';
 import { resolveAssetUrl } from './artifact-view';
 
@@ -42,17 +48,23 @@ export function PublishedTextReader({
   sourceThreadId,
   onBack,
   reviewAction,
+  source,
+  binary = false,
+  mime,
 }: {
   artifact: ThreadArtifactDTO;
   content: string;
   sourceThreadId?: string;
   onBack: () => void;
   reviewAction?: ReactNode;
+  source?: FileActionSource;
+  binary?: boolean;
+  mime?: string;
 }) {
   const [snapshot, setSnapshot] = useState<{ content: string; digest: string }>();
   useEffect(() => {
     let current = true;
-    if (!globalThis.crypto?.subtle) return;
+    if (binary || !globalThis.crypto?.subtle) return;
     void globalThis.crypto.subtle
       .digest('SHA-256', new TextEncoder().encode(content))
       .then((buffer) => {
@@ -68,22 +80,25 @@ export function PublishedTextReader({
     return () => {
       current = false;
     };
-  }, [content]);
+  }, [content, binary]);
   const digest = snapshot?.content === content ? snapshot.digest : undefined;
   return (
     <WorkspaceFileViewer
       file={{
-        path: artifact.name,
+        path: source?.kind === 'workspace' ? source.path : artifact.name,
         content,
         sha256: digest ?? '',
         size: new TextEncoder().encode(content).length,
-        mime: /\.(md|markdown)$/i.test(artifact.name) ? 'text/markdown' : 'text/plain',
+        mime: mime ?? projectFileContent(artifact).mime,
+        binary,
         truncated: false,
       }}
-      publication={{
-        url: resolveAssetUrl(artifact.url, API_URL) ?? '',
-        quoteSource: publishedTextQuoteSource(artifact, sourceThreadId, digest),
-      }}
+      source={source ?? { kind: 'url', url: resolveAssetUrl(artifact.url, API_URL) ?? '' }}
+      quoteSource={publishedTextQuoteSource(artifact, sourceThreadId, digest)}
+      readOnlyReason="发到聊天时保存的副本；修改副本不会修改原稿"
+      listenReturn={
+        sourceThreadId && (!source || source.kind === 'url') ? { threadId: sourceThreadId, artifact } : undefined
+      }
       onBack={onBack}
       reviewAction={reviewAction}
     />

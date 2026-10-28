@@ -53,6 +53,7 @@ import { useFirstRealMessageSync } from './first-run-quest/useFirstRealMessageSy
 import { BootcampIcon } from './icons/BootcampIcon';
 import { PawIcon } from './icons/PawIcon';
 import { MessageSearchOverlay } from './message-search/MessageSearchOverlay';
+import { openMessageFindDestination, restoreFindWorkspaceOrigin } from './message-search/message-find-destinations';
 import { useMessageSearchHost } from './message-search/useMessageSearchHost';
 import { NewConversationPage } from './new-conversation/NewConversationPage';
 import { DEMO_SETTINGS_URL } from './onboarding-demo/demo-story';
@@ -439,6 +440,8 @@ function InteractiveChatContainer({ threadId }: ChatContainerProps) {
     threadId,
     pushThreadRoute: navigateToThread,
     available: messageSearchAvailable,
+    onOpenDestination: openMessageFindDestination,
+    beforeFindReturn: restoreFindWorkspaceOrigin,
   });
 
   useEffect(() => {

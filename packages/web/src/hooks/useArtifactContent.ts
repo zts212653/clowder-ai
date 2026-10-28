@@ -1,4 +1,4 @@
-import type { ThreadArtifactDTO } from '@cat-cafe/shared';
+import { projectFileContent, type ThreadArtifactDTO } from '@cat-cafe/shared';
 import { useEffect, useState } from 'react';
 import {
   type ArtifactContentSource,
@@ -67,7 +67,7 @@ export function useArtifactContent(
       return;
     }
     const path = artifact.ref ?? artifact.name;
-    const isMarkdown = /\.(md|markdown)$/i.test(path);
+    const isMarkdown = projectFileContent(artifact).kind === 'markdown';
     const source = artifactContentSource(artifact, worktreeId);
     if (source.kind === 'none') {
       setState({ content: null, path, isMarkdown, loading: false, error: true });

@@ -95,7 +95,14 @@ describe('OperationRowsRenderer (F202 W2-3 h1)', () => {
       if (options.revokeError) return jsonResponse({ error: options.revokeError }, 502);
       const { conversationId } = JSON.parse(body) as { conversationId: string };
       listed = listed.filter((candidate) => candidate.key !== conversationId);
-      return jsonResponse({ ok: true, render: 'status', data: { status: 'ok' }, currentAction: 'list', advance: true });
+      return jsonResponse({
+        ok: true,
+        render: 'rows',
+        data: { rows: listed },
+        label: `${listed.length} authorized conversation(s)`,
+        currentAction: 'list',
+        advance: true,
+      });
     };
     const reset = () => {
       listed = [];
@@ -185,6 +192,50 @@ describe('OperationRowsRenderer (F202 W2-3 h1)', () => {
     await render(<ActionRenderer target={target} operation={operation} />);
 
     expect(byTestId('chatgpt-pro-rows-empty')?.textContent).toBe('No authorized conversations');
+  });
+
+  it.each([
+    'immediate',
+    'after detail fetch',
+  ] as const)('retains the row diagnostic across %s operation-state refresh, then clears it after a failure', async (timing) => {
+    let failed = false;
+    let updatedAt = 1;
+    const diagnostic = 'The selected conversation page is ready; no message sent.';
+    const op: PlatformOperationStatus = { ...operation, rowActions: [{ id: 'check-page', label: 'Check page' }] };
+    mockApiFetch.mockImplementation(async (url) => {
+      calls.push({ url: String(url) });
+      return String(url).endsWith('/list')
+        ? jsonResponse({
+            ok: true,
+            render: 'rows',
+            data: { rows: [{ ...row('a1'), actions: [{ action: 'check-page', input: { conversationId: 'a1' } }] }] },
+          })
+        : jsonResponse(
+            failed ? { ok: false, label: 'Connection lost' } : { ok: true, render: 'status', label: diagnostic },
+          );
+    });
+    function RefreshedDetail() {
+      const [state, setState] = React.useState({ currentAction: 'list', updatedAt });
+      const onStatusChange = () => {
+        const refresh = () => setState({ currentAction: 'check-page', updatedAt: ++updatedAt });
+        if (timing === 'immediate') refresh();
+        else void Promise.resolve().then(refresh);
+      };
+      return <ActionRenderer target={target} operation={{ ...op, ...state }} onStatusChange={onStatusChange} />;
+    }
+    await render(<RefreshedDetail />);
+    const retainedRow = byTestId('chatgpt-pro-row-a1');
+    await click(byTestId('chatgpt-pro-row-a1-action-check-page'));
+    expect(updatedAt).toBe(2);
+    expect(container.querySelector('[role="status"]')?.textContent).toBe(diagnostic);
+    expect(retainedRow?.querySelector('[role="status"]')?.textContent).toBe(diagnostic);
+    expect(retainedRow?.querySelector('[role="status"]')?.closest('li')).toBe(retainedRow);
+    expect(byTestId('chatgpt-pro-row-a1')).toBe(retainedRow);
+    expect(sent('list')).toHaveLength(1);
+    failed = true;
+    await click(byTestId('chatgpt-pro-row-a1-action-check-page'));
+    expect(container.querySelector('[role="status"]')).toBeNull();
+    expect(byTestId('chatgpt-pro-row-a1-error')?.textContent).toBe('Connection lost');
   });
 
   it.each([
@@ -288,6 +339,8 @@ describe('OperationRowsRenderer (F202 W2-3 h1)', () => {
     expect(sent('list')).toHaveLength(2);
     expect(byTestId('chatgpt-pro-row-a1')).toBeNull();
     expect(byTestId('chatgpt-pro-row-b2')).not.toBeNull();
+    expect(container.querySelector('[role="status"]')?.textContent).toBe('1 authorized conversation(s)');
+    expect(container.querySelector('[role="status"]')?.closest('li')).toBeNull();
   });
 
   it("uses a row's own wording in place of the declared one", async () => {

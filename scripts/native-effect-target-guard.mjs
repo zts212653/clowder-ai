@@ -9,6 +9,8 @@ import { isAbsolute } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { createHostProcessObserver, readSelfHostFacet } from './lib/self-host-facet.mjs';
 import { assessSideEffect } from './lib/self-host-guard.mjs';
+import { hasPatternKiller } from './lib/self-host-targets.mjs';
+import { appendNativeDenial, guardReason } from './native-effect-audit.mjs';
 import { hereDocumentView } from './native-effect-heredoc.mjs';
 import { decideNativeEffect, deny, invalidCandidate, isRecord } from './native-effect-policy.mjs';
 import {
@@ -36,12 +38,19 @@ export { decideNativeEffect };
 function applySelfHostPolicy(decision, raw, cwd, resolveSelfHost, observeHost = createHostProcessObserver) {
   if (decision.decision !== 'allow') return decision;
   const { confidence, facet } = resolveSelfHost();
-  // `none` means nothing claims to host this process, so there is no self to
-  // protect. `unreadable` and `ambiguous` mean a deployment is named and we
-  // could not pin it down -- absence of evidence, which is not permission.
-  if (confidence === 'none' || !facet) return decision;
+  // Unhosted calls need no deployment check. Literal pattern killers still
+  // observe global sanctuary listeners and this invocation's ancestor chain.
+  // A named but unreadable deployment retains its unresolved identity.
+  if ((confidence === 'none' || !facet) && !hasPatternKiller(raw, cwd)) return decision;
 
-  const assessment = assessSideEffect(raw, cwd, facet, observeHost(facet));
+  const subject = {
+    ...facet,
+    hostDependencies: [
+      ...(facet?.hostDependencies ?? []),
+      { kind: 'redis', port: 6399, identityRef: 'redis://127.0.0.1:6399' },
+    ],
+  };
+  const assessment = assessSideEffect(raw, cwd, subject, observeHost(subject));
   // Sanctuary was already settled authoritatively above -- we only reach here on
   // `allow`. Re-deciding it from the raw text would throw away the target
   // attribution the policy just did (temporary worktrees, remote repositories),
@@ -156,6 +165,7 @@ async function runHookCli() {
     payload = null;
   }
   const verdict = decideNativeHookPayload(payload);
+  appendNativeDenial(payload, verdict);
   if (isRecord(payload) && payload.hook_event_name === 'NativeShellSafetyCheck') {
     const fingerprint =
       isRecord(payload.native_execution) && typeof payload.native_execution.fingerprint === 'string'
@@ -178,10 +188,6 @@ async function runHookCli() {
       },
     })}\n`,
   );
-}
-
-function guardReason(verdict) {
-  return `Clowder AI native guard: ${verdict.reasonCode} (${verdict.effect} → ${verdict.target.kind})${verdict.detail ? ` — ${verdict.detail}` : ''}`;
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

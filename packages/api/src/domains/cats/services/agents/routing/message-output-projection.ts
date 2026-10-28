@@ -14,6 +14,7 @@ import {
   createMessageOutputState,
   materializeMessageOutput,
 } from '../message-output-accumulator.js';
+import { nativeSignatureRemoval } from '../message-output-native-finalization.js';
 import type { MessageOutputState } from '../message-output-state.js';
 import type { OutputFragmentFacts } from '../message-output-stream-transform.js';
 import { alignTrimmedToolBoundary } from './message-output-finalization.js';
@@ -34,6 +35,7 @@ export class RoutingMessageOutputProjection {
       textMode: callback ? 'replace' : message.textMode,
       outputMessage: callback ? undefined : message.outputMessage,
       hostOutput: callback ? undefined : message.hostOutput,
+      nativeSignatureSuffix: callback ? undefined : nativeSignatureRemoval(message),
       ...(fragment ? { fragment } : {}),
     });
     if (callback) this.state = { ...this.state, reason: 'callback' };

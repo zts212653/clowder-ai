@@ -21,6 +21,8 @@ export function pawFeelIssueDetail(item: PawFeelInboxItem, language: 'zh' | 'en'
   if (continuation.canonicalSignalId) parts.push(`${t.originalIssue} ${continuation.canonicalSignalId}`);
   if (continuation.ownerCatId) parts.push(`owner @${continuation.ownerCatId}`);
   if (continuation.taskId) parts.push(`${t.task} ${continuation.taskId}`);
+  if (continuation.repairBinding?.kind === 'task_assignment')
+    parts.push(`Task assignment ${continuation.repairBinding.ownerRevision}`);
   if (continuation.leaseId) parts.push(`F167 lease ${continuation.leaseId}`);
   if (continuation.proposalId) parts.push(`Approval ${continuation.proposalId}`);
   if (continuation.caseActionRef) parts.push(`case action ${continuation.caseActionRef}`);

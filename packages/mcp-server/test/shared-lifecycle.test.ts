@@ -5,16 +5,16 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import test from 'node:test';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
+import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+import { materializeNativeMcpHttp } from '../src/managed-mcp-config.js';
 import { createMemberGatewayHandler } from '../src/member-gateway.js';
-import { guardMcpConfig } from '../src/secret-mcp-config.js';
 
-test('an unknown write outcome is not replayed; gateway reconnect and one proxy crash preserve other owners', async () => {
+test('an unknown write outcome is not replayed; gateway reconnect and closing one native connection preserve other owners', async () => {
   const root = mkdtempSync(join(tmpdir(), 'shared-mcp-lifecycle-'));
   let apiUrl = '';
   let dropWriteResponse = false;
   let effects = 0;
-  const peers: Array<{ client: Client; transport: StdioClientTransport }> = [];
+  const peers: Array<{ client: Client; transport: StreamableHTTPClientTransport }> = [];
   const handler = createMemberGatewayHandler({
     verify: async ({ invocationId, callbackToken }) => ({
       ok: true,
@@ -83,16 +83,18 @@ test('an unknown write outcome is not replayed; gateway reconnect and one proxy 
     writeFileSync(credentialFile, JSON.stringify({ invocationId: owner, callbackToken: `fixture-token-${owner}` }), {
       mode: 0o600,
     });
-    const config = guardMcpConfig(
-      { command: process.execPath, args: [resolve('dist/index.js')] },
-      { CAT_CAFE_API_URL: apiUrl, CAT_CAFE_CREDENTIAL_FILE: credentialFile, CAT_CAFE_MCP_TRANSPORT: 'shared' },
-    );
+    const config = materializeNativeMcpHttp(
+      { own: { command: process.execPath, args: [resolve('dist/index.js')] } },
+      {
+        CAT_CAFE_API_URL: apiUrl,
+        CAT_CAFE_INVOCATION_ID: owner,
+        CAT_CAFE_CREDENTIAL_FILE: credentialFile,
+        CAT_CAFE_MCP_TRANSPORT: 'shared',
+      },
+    ).own;
     const client = new Client({ name: 'f333-lifecycle', version: '1' });
-    const transport = new StdioClientTransport({
-      command: String(config.command),
-      args: config.args as string[],
-      env: config.env as Record<string, string>,
-      stderr: 'pipe',
+    const transport = new StreamableHTTPClientTransport(new URL(String(config.url)), {
+      requestInit: { headers: { ...(config.headers as Record<string, string>), Connection: 'close' } },
     });
     peers.push({ client, transport });
     await client.connect(transport);
@@ -116,15 +118,16 @@ test('an unknown write outcome is not replayed; gateway reconnect and one proxy 
     await close();
     server = makeServer();
     await listen(port);
-    assert.ok(JSON.stringify(await read(a.client)).includes('document A'));
+    const recoveredA = await connect('A');
+    const recoveredB = await connect('B');
+    assert.ok(JSON.stringify(await read(recoveredA.client)).includes('document A'));
     assert.ok(performance.now() - start < 5000, 'stateless transport reconnects within the fixed recovery budget');
     assert.equal(effects, 1, 'reconnect cannot replay the write whose result was lost');
-    assert.ok(a.transport.pid);
-    process.kill(a.transport.pid, 'SIGKILL');
+    await recoveredA.transport.close();
     await a.client.close();
     assert.ok(
-      JSON.stringify(await read(b.client)).includes('document B'),
-      'another caller retains its legal session when A crashes',
+      JSON.stringify(await read(recoveredB.client)).includes('document B'),
+      'another caller retains its legal session when A closes',
     );
     const replacement = await connect('A');
     assert.ok(JSON.stringify(await read(replacement.client)).includes('document A'));

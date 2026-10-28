@@ -1,5 +1,6 @@
 'use client';
 
+import { MarkdownSurface } from '@cat-cafe/ui';
 import {
   Children,
   type CSSProperties,
@@ -13,9 +14,8 @@ import {
   useRef,
   useState,
 } from 'react';
-import ReactMarkdown, { type Components, defaultUrlTransform } from 'react-markdown';
+import { type Components, defaultUrlTransform } from 'react-markdown';
 import rehypeKatex from 'rehype-katex';
-import remarkBreaks from 'remark-breaks';
 import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
 import remarkParse from 'remark-parse';
@@ -534,10 +534,8 @@ export const MarkdownContent = memo(function MarkdownContent({
     <ChatReferenceDemand.Provider value={referenceDemand}>
       <div ref={referenceAnchor} className={`markdown-content text-sm break-words ${className ?? ''}`}>
         {cmdMatch && <span className="font-semibold text-[var(--semantic-info)]">{cmdMatch[1]}</span>}
-        <ReactMarkdown
+        <MarkdownSurface
           remarkPlugins={[
-            remarkGfm,
-            remarkBreaks,
             ...(referenceThreadId ? [remarkChatReferences] : []),
             [remarkMath, { singleDollarTextMath: false }],
             ...(listenSentences?.length ? [createListenSentenceRemarkPlugin(listenSentences)] : []),
@@ -547,7 +545,7 @@ export const MarkdownContent = memo(function MarkdownContent({
           urlTransform={transformChatMarkdownUrl}
         >
           {md}
-        </ReactMarkdown>
+        </MarkdownSurface>
       </div>
     </ChatReferenceDemand.Provider>
   );

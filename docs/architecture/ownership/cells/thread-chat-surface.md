@@ -14,6 +14,8 @@ created: 2026-08-28
 updated: 2026-08-29
 canonical_features: [F229]
 code_anchors:
+  - packages/web/src/components/message-search/MessageSearchAnswerCard.tsx
+  - packages/web/src/components/message-search/message-find-destinations.ts
   - packages/web/src/lib/feature-demo-trial.ts
   - packages/web/src/components/thread-chat/ThreadChatRuntimeProvider.tsx
   - packages/web/src/components/thread-chat/ThreadChatSurface.tsx

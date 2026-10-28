@@ -10,6 +10,7 @@ const fields: Record<FormKey, MemberFieldLabels> = {
   nickname: ['昵称', 'Nickname'],
   variantLabel: ['显示后缀', 'Variant Label'],
   avatar: ['头像', 'Avatar'],
+  banner: ['横幅', 'Banner'],
   colorPrimary: ['消息颜色', 'Message color', 'Background Color'],
   colorSecondary: ['消息颜色', 'Message color', 'Background Color'],
   mentionPatterns: ['@ 名字', 'Mention names', 'Aliases'],

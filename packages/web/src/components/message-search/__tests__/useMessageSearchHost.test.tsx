@@ -1,9 +1,11 @@
 import type { MessageSearchResponse } from '@cat-cafe/shared';
-import { act } from 'react';
+import { act, StrictMode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { apiFetch } from '@/utils/api-client';
 import type { ChatReadingPort } from '../../thread-chat/useThreadChatReadingPort';
+import { requestMessageFindOpen } from '../message-find-events';
+import { readActiveMessageReadingSession } from '../message-reading-session';
 import { type MessageSearchHost, useMessageSearchHost } from '../useMessageSearchHost';
 
 vi.mock('@/utils/api-client', () => ({ apiFetch: vi.fn() }));
@@ -81,8 +83,16 @@ describe('search Host drives the original reader', () => {
   let root: Root;
   let current: MessageSearchHost;
   const route = vi.fn();
+  const destination = vi.fn();
+  const beforeFindReturn = vi.fn();
   function Harness({ threadId, available }: { threadId: string; available: boolean }) {
-    current = useMessageSearchHost({ threadId, pushThreadRoute: route, available });
+    current = useMessageSearchHost({
+      threadId,
+      pushThreadRoute: route,
+      available,
+      onOpenDestination: destination,
+      beforeFindReturn,
+    });
     return null;
   }
   function render(threadId = 'origin', available = true) {
@@ -91,7 +101,10 @@ describe('search Host drives the original reader', () => {
   beforeEach(() => {
     Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
     localStorage.clear();
+    window.history.replaceState({}, '', '/');
     route.mockClear();
+    destination.mockClear();
+    beforeFindReturn.mockClear();
     vi.mocked(apiFetch)
       .mockReset()
       .mockImplementation(async (url) => availableSource(url));
@@ -121,6 +134,145 @@ describe('search Host drives the original reader', () => {
     });
     expect(reader.releaseReadingRef).toHaveBeenCalledWith('immutable-origin');
     expect(current.session?.trip.status).toBe('completed');
+  });
+  it('opens a card snapshot in the current find without search, then uses the original reader for its source', async () => {
+    const reader = port();
+    act(() => current.registerReadingPort(reader));
+    act(() => expect(requestMessageFindOpen('origin', response)).toBe(true));
+    expect(current.open).toBe(true);
+    expect(current.findState).toMatchObject({ query: response.query, scope: 'global', sort: 'time', response });
+    expect(reader.captureReadingRef).not.toHaveBeenCalled();
+    expect(apiFetch).not.toHaveBeenCalled();
+    const seed = current.findSeed;
+    act(() => expect(requestMessageFindOpen('origin', response)).toBe(true));
+    expect(current.findSeed).toBe(seed + 1);
+    act(() => expect(requestMessageFindOpen('other', response)).toBe(false));
+    await act(async () => expect(requestMessageFindOpen('origin', response, response.results[0])).toBe(true));
+    expect(reader.captureReadingRef).toHaveBeenCalledOnce();
+    expect(current.session?.trip.settledIndex).toBe(0);
+    expect(vi.mocked(apiFetch).mock.calls.every(([url]) => url.includes('/navigation-source?'))).toBe(true);
+    render('origin', false);
+    act(() => expect(requestMessageFindOpen('origin', response)).toBe(false));
+  });
+  it('returns from a find page through the same saved reading owner, then reopens without a new search', async () => {
+    const reader = port();
+    act(() => current.registerReadingPort(reader));
+    const state = {
+      query: '一行',
+      scope: 'global' as const,
+      sort: 'relevance' as const,
+      scrollTop: 214,
+      status: 'idle' as const,
+    };
+    act(() => current.openDestination?.('memory', state));
+    expect(reader.captureReadingRef).toHaveBeenCalledOnce();
+    expect(destination).toHaveBeenCalledWith(expect.objectContaining({ find: { destination: 'memory', state } }));
+    const saved = current.session!;
+    expect(saved.trip.targets).toEqual([]);
+    act(() => root.unmount());
+    window.history.replaceState({}, '', `/thread/origin?findReturn=${saved.id}`);
+    root = createRoot(host);
+    await act(async () => render());
+    const returningReader = port();
+    await act(async () => current.registerReadingPort(returningReader));
+    expect(beforeFindReturn).toHaveBeenCalledWith(expect.objectContaining({ id: saved.id }));
+    expect(returningReader.restoreReadingRef).toHaveBeenCalledWith('immutable-origin', expect.any(AbortSignal), {
+      refresh: true,
+    });
+    expect(current.session?.trip.status).toBe('completed');
+    expect(current.open).toBe(true);
+    expect(current.findState).toEqual(state);
+    expect(vi.mocked(apiFetch).mock.calls.every(([url]) => url.includes('/navigation-source?'))).toBe(true);
+    expect(window.location.search).not.toContain('findReturn');
+  });
+  it.each([
+    false,
+    true,
+  ])('recovers find after delayed foreground hydration, including StrictMode %s', async (strict) => {
+    const reader = port();
+    act(() => current.registerReadingPort(reader));
+    act(() =>
+      current.openDestination('memory', {
+        query: '一行',
+        scope: 'global',
+        sort: 'time',
+        scrollTop: 214,
+        status: 'idle',
+      }),
+    );
+    const saved = current.session!;
+    act(() => root.unmount());
+    window.history.replaceState({}, '', `/thread/origin?findReturn=${saved.id}`);
+    root = createRoot(host);
+    const mount = async (threadId: string, available: boolean) =>
+      act(async () =>
+        root.render(
+          strict ? (
+            <StrictMode>
+              <Harness threadId={threadId} available={available} />
+            </StrictMode>
+          ) : (
+            <Harness threadId={threadId} available={available} />
+          ),
+        ),
+      );
+    await mount('default', false);
+    await mount('origin', true);
+    const returning = port();
+    await act(async () => current.registerReadingPort(returning));
+    expect(returning.restoreReadingRef).toHaveBeenCalledWith('immutable-origin', expect.any(AbortSignal), {
+      refresh: true,
+    });
+    expect(current.open).toBe(true);
+    expect(window.location.search).not.toContain('findReturn');
+  });
+  it('keeps a cold return intent through the StrictMode mount replay until the original owner settles', async () => {
+    const reader = port();
+    act(() => current.registerReadingPort(reader));
+    act(() =>
+      current.openDestination('memory', {
+        query: '一行',
+        scope: 'global',
+        sort: 'time',
+        scrollTop: 214,
+        status: 'idle',
+      }),
+    );
+    const saved = current.session!;
+    act(() => root.unmount());
+    window.history.replaceState({}, '', `/thread/origin?findReturn=${saved.id}`);
+    root = createRoot(host);
+    await act(async () =>
+      root.render(
+        <StrictMode>
+          <Harness threadId="origin" available />
+        </StrictMode>,
+      ),
+    );
+    const returning = port();
+    await act(async () => current.registerReadingPort(returning));
+    expect(returning.restoreReadingRef).toHaveBeenCalledOnce();
+    expect(current.open).toBe(true);
+    expect(window.location.search).not.toContain('findReturn');
+  });
+  it('does not replace an existing return point when the new cross-page reading ref was not persisted', async () => {
+    const reader = port();
+    act(() => current.registerReadingPort(reader));
+    await act(async () => current.navigateResult(response.results[0], response));
+    const original = readActiveMessageReadingSession();
+    vi.mocked(reader.captureReadingRef).mockReturnValueOnce({ ref: 'unpersisted-new-ref', persisted: false });
+    act(() =>
+      current.openDestination('memory', {
+        query: '一行',
+        scope: 'global',
+        sort: 'time',
+        scrollTop: 214,
+        status: 'idle',
+      }),
+    );
+    expect(destination).not.toHaveBeenCalled();
+    expect(readActiveMessageReadingSession()?.id).toBe(original?.id);
+    expect(reader.releaseReadingRef).toHaveBeenCalledWith('unpersisted-new-ref');
   });
   it('unavailable presentation rejects stale open and navigation callbacks without capturing or writing a session', async () => {
     const reader = port();

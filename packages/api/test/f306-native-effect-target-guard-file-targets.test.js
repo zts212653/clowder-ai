@@ -16,6 +16,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { decideNativeHookPayload } from '../../../scripts/native-effect-target-guard.mjs';
+import { assertGuardedOrUnproved } from './helpers/native-effect-policy-assertions.js';
 
 const root = realpathSync(mkdtempSync(join(tmpdir(), 'f306-file-targets-')));
 const runtime = join(root, 'projects/relay-station/cat-cafe-runtime');
@@ -30,7 +31,8 @@ function expect(decision, command, cwd = root) {
     { tool_name: 'exec_command', turn_id: 'file-targets', cwd, tool_input: { cmd: command } },
   ]) {
     const actual = decideNativeHookPayload(payload, noHost);
-    assert.equal(actual.decision, decision, `${command}: ${actual.effect} / ${actual.reasonCode}`);
+    if (decision === 'deny') assertGuardedOrUnproved(actual, `${command}: ${actual.effect} / ${actual.reasonCode}`);
+    else assert.equal(actual.decision, decision, `${command}: ${actual.effect} / ${actual.reasonCode}`);
     result = actual;
   }
   return result;

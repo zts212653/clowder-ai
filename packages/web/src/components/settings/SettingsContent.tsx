@@ -37,6 +37,7 @@ import { SettingsPlaceholder } from './SettingsPlaceholder';
 import { SkillsContent } from './SkillsContent';
 import { useSettingsDetailText } from './settings-detail.shell-copy';
 import { SETTINGS_SECTIONS } from './settings-nav-config';
+import { YouSettingsPage } from './YouSettingsPage';
 
 interface SettingsContentProps {
   section: string;
@@ -199,6 +200,8 @@ export function SettingsContent({ section, initialEditCatId }: SettingsContentPr
   );
 
   if (section === 'marketplace') return <MarketplaceContent />;
+  if (section === 'you')
+    return <YouSettingsPage coCreator={config?.coCreator ?? null} loadError={fetchError !== null} reload={fetchData} />;
   if (section === 'skills') return <SkillsContent />;
   if (section === 'profiles') {
     return (
@@ -249,7 +252,15 @@ export function SettingsContent({ section, initialEditCatId }: SettingsContentPr
               await handleEditorSaved(trace);
               setEditingCat(saved);
             }}
-            onEditCoCreator={() => setCoCreatorEditorOpen(true)}
+            onEditCoCreator={() => {
+              if (isV2) {
+                const params = new URLSearchParams(searchParams.toString());
+                params.set('s', 'you');
+                params.delete('cat');
+                params.delete('view');
+                router.push(`/settings?${params.toString()}`, { scroll: false });
+              } else setCoCreatorEditorOpen(true);
+            }}
             onDelete={handleDeleteMember}
             onToggle={handleToggleAvailability}
             togglingCatId={togglingCatId}

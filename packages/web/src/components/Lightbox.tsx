@@ -1,65 +1,25 @@
 'use client';
 
-import { type ReactNode, useCallback, useEffect, useRef, useState } from 'react';
+import { type ReactNode, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { API_URL } from '@/utils/api-client';
 import { ArtworkChromeProvider } from './content-review/ArtworkChrome';
 import { ArtworkFloatingHeader } from './content-review/ArtworkFloatingHeader';
 import { ArtworkGalleryNavigation, useArtworkGalleryNavigation } from './content-review/ArtworkGalleryNavigation';
 import { ArtworkPreviewMedia } from './content-review/ArtworkPreviewMedia';
 import type { ArtworkGallery } from './content-review/artwork-gallery';
 import artworkStyles from './content-review/artwork-lightbox.module.css';
+import { ContentMediaElement } from './content-review/ContentMediaElement';
+import { FileActions } from './content-review/FileActions';
 import { lightboxCopy } from './lightbox.shell-copy';
 import { useShellCopy } from './shell/shell-copy';
 import { useShellPresentation } from './shell/shell-presentation';
 
-async function copyImageToClipboard(url: string) {
-  const source = new URL(url, window.location.origin);
-  const privateDotImage =
-    source.origin === new URL(API_URL).origin && source.pathname.startsWith('/api/plugins/chatgpt-dot/images/');
-  const res = await fetch(url, privateDotImage ? { credentials: 'include' } : undefined);
-  if (!res.ok) throw new Error(`fetch failed: ${res.status}`);
-  const blob = await res.blob();
-  if (!blob.type.startsWith('image/')) throw new Error(`not an image: ${blob.type}`);
-  await navigator.clipboard.write([new ClipboardItem({ [blob.type]: blob })]);
-}
-
+/** Legacy placement only; copy/feedback and source handling belong to FileActions. */
 export function CopyButton({ url, placement = 'overlay' }: { url: string; placement?: 'overlay' | 'below' }) {
-  const [copied, setCopied] = useState(false);
-  const isV2 = useShellPresentation() === 'v2';
-  const t = useShellCopy(lightboxCopy);
-
-  const handleCopy = useCallback(
-    async (e: React.MouseEvent) => {
-      e.stopPropagation();
-      try {
-        await copyImageToClipboard(url);
-      } catch {
-        try {
-          await navigator.clipboard.writeText(url);
-        } catch {
-          return;
-        }
-      }
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    },
-    [url],
-  );
-
   return (
-    <button
-      type="button"
-      onClick={handleCopy}
-      className={
-        placement === 'below'
-          ? 'rounded-md border border-cafe-subtle px-2 py-1 text-xs text-cafe-muted hover:text-cafe'
-          : 'absolute top-2 right-2 bg-[var(--console-overlay-control)] hover:bg-[var(--console-overlay-control-hover)] text-[var(--overlay-fg)] rounded-md px-2 py-1 text-xs opacity-0 group-hover:opacity-100 transition-opacity'
-      }
-      title={copied ? (isV2 ? t.copied : 'Copied!') : isV2 ? t.copyImage : 'Copy image'}
-    >
-      {copied ? (isV2 ? t.copied : 'Copied!') : isV2 ? t.copy : 'Copy'}
-    </button>
+    <span className={placement === 'overlay' ? 'absolute right-2 top-2' : ''}>
+      <FileActions source={{ kind: 'url', url }} src={url} mediaType="image" filename="image.png" appearance="copy" />
+    </span>
   );
 }
 
@@ -208,15 +168,20 @@ export function Lightbox({
             (composerSlot ? (
               <ArtworkPreviewMedia url={url} title={alt} video={mediaType === 'video'} gallery={gallery} />
             ) : mediaType === 'video' ? (
-              <video
+              <ContentMediaElement
+                kind="video"
                 src={url}
-                controls
-                preload="metadata"
-                aria-label={alt}
+                title={alt}
+                videoProps={{ controls: true, preload: 'metadata', 'aria-label': alt }}
                 className="max-w-full max-h-[85vh] rounded-lg"
               />
             ) : (
-              <img src={url} alt={alt} className="max-w-full max-h-[85vh] object-contain rounded-lg" />
+              <ContentMediaElement
+                kind="image"
+                src={url}
+                title={alt}
+                className="max-w-full max-h-[85vh] object-contain rounded-lg"
+              />
             ))}
           {caption && <p className="mt-2 text-sm text-[var(--overlay-fg-muted)]">{caption}</p>}
           {gallery ? <ArtworkGalleryNavigation gallery={gallery} arrows={!children && !composerSlot} /> : null}

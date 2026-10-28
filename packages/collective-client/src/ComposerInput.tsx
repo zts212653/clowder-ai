@@ -1,8 +1,16 @@
-import { ComposerAttachmentPreview, ComposerControl, ComposerFrame, MessageMediaViewer } from '@cat-cafe/ui';
+import {
+  ComposerAttachmentPreview,
+  ComposerControl,
+  ComposerFrame,
+  MessageMediaViewer,
+  VoiceInputButton,
+} from '@cat-cafe/ui';
 import { type RefObject, type TextareaHTMLAttributes, useState } from 'react';
 import { CollectiveIcon } from './CollectiveIcon.js';
+import { ComposerVoiceStatus } from './ComposerVoiceStatus.js';
 import { useCollectiveLanguage, useCollectiveText } from './collective-copy.js';
 import type { useComposerAttachments } from './use-composer-attachments.js';
+import type { useComposerVoice } from './use-composer-voice.js';
 
 /** Shared expression surface; recipient/work authority and durable draft transitions remain in Composer. */
 export function ComposerInput({
@@ -14,6 +22,7 @@ export function ComposerInput({
   onExpand,
   disabled,
   controls,
+  voice,
 }: {
   readonly files: ReturnType<typeof useComposerAttachments>;
   readonly input: TextareaHTMLAttributes<HTMLTextAreaElement>;
@@ -23,6 +32,7 @@ export function ComposerInput({
   readonly onExpand: () => void;
   readonly disabled: boolean;
   readonly controls?: React.ReactNode;
+  readonly voice?: ReturnType<typeof useComposerVoice>;
 }) {
   const language = useCollectiveLanguage(),
     t = useCollectiveText();
@@ -30,6 +40,7 @@ export function ComposerInput({
   const item = files.items.find((value) => value.id === selected);
   return (
     <>
+      {voice && <ComposerVoiceStatus voice={voice} />}
       <input
         ref={fileRef}
         type="file"
@@ -79,6 +90,22 @@ export function ComposerInput({
           +
         </ComposerControl>
         {controls}
+        {voice && (
+          <VoiceInputButton
+            language={language}
+            available={voice.available}
+            disabled={!!voice.draft || !voice.ready}
+            state={
+              voice.draft?.state === 'recording'
+                ? 'recording'
+                : voice.draft?.state === 'transcribing'
+                  ? 'transcribing'
+                  : 'idle'
+            }
+            onStart={() => void voice.start()}
+            onStop={voice.stop}
+          />
+        )}
         <button type="submit" className="composer-send" aria-label={t('发送')} disabled={disabled}>
           <CollectiveIcon kind="send" />
         </button>

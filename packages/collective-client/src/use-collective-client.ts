@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { readSavedChannelPosition } from './channel-navigation.js';
 import type { ClientSnapshot, InviteResult, PairingIntentResult } from './client-types.js';
 import { phaseForHuman } from './human-auth-flow.js';
 import { collectiveClientNamespace } from './human-send-custody.js';
@@ -31,8 +32,17 @@ export function useCollectiveClient() {
   const activeCollectiveRole = snapshot.collective?.role;
   const currentNamespace = useRef<string>();
   currentNamespace.current = collectiveClientNamespace(snapshot);
-  const { token, request, binaryRequest, loadMe, invitationMode, bootstrap, authenticate, configureProvider } =
-    useHumanAuthSession(snapshot, setSnapshot);
+  const {
+    token,
+    request,
+    binaryRequest,
+    loadMe,
+    invitationMode,
+    bootstrap,
+    authenticate,
+    configureProvider,
+    switchAccount: leaveHumanSession,
+  } = useHumanAuthSession(snapshot, setSnapshot);
   const { refreshEvents, recheckScope, cancelRefresh } = useCollectiveRefresh(
     snapshot,
     setSnapshot,
@@ -40,6 +50,11 @@ export function useCollectiveClient() {
     loadMe,
     token,
   );
+  const switchAccount = useCallback(() => {
+    cancelRefresh();
+    currentNamespace.current = undefined;
+    leaveHumanSession();
+  }, [cancelRefresh, leaveHumanSession]);
 
   const createCollective = useCallback(
     async (name: string) => {
@@ -105,10 +120,13 @@ export function useCollectiveClient() {
       if (!collective) return;
       if (snapshot.collective?.collectiveId === collectiveId) return;
       cancelRefresh();
-      currentNamespace.current = collectiveClientNamespace({ ...snapshot, collective });
+      const targetNamespace = collectiveClientNamespace({ ...snapshot, collective });
+      currentNamespace.current = targetNamespace;
       const url = new URL(location.href);
       url.searchParams.set('collectiveId', collectiveId);
-      url.searchParams.delete('channelId');
+      const savedChannelId = targetNamespace ? readSavedChannelPosition(targetNamespace) : undefined;
+      if (savedChannelId) url.searchParams.set('channelId', savedChannelId);
+      else url.searchParams.delete('channelId');
       history.replaceState(null, '', url);
       setSnapshot((current) => ({
         ...current,
@@ -206,15 +224,20 @@ export function useCollectiveClient() {
   const artifacts = useCollectiveArtifacts(snapshot, request, refreshEvents);
   const expressionServiceId = snapshot.meta?.serviceInstanceId;
   const expressionCollectiveId = snapshot.collective?.collectiveId;
+  const expressionHumanId = snapshot.me?.human.humanId;
   const expression = useMemo(
     () =>
-      expressionServiceId && expressionCollectiveId
+      expressionServiceId && expressionCollectiveId && expressionHumanId
         ? createMessageExpressionPort(
-            { serviceInstanceId: expressionServiceId, collectiveId: expressionCollectiveId },
+            {
+              serviceInstanceId: expressionServiceId,
+              collectiveId: expressionCollectiveId,
+              humanId: expressionHumanId,
+            },
             binaryRequest,
           )
         : undefined,
-    [expressionServiceId, expressionCollectiveId, binaryRequest],
+    [expressionServiceId, expressionCollectiveId, expressionHumanId, binaryRequest],
   );
 
   return {
@@ -226,6 +249,7 @@ export function useCollectiveClient() {
     bootstrap,
     authenticate,
     configureProvider,
+    switchAccount,
     createCollective,
     sendMessage,
     createInvite,

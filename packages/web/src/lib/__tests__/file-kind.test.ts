@@ -3,13 +3,13 @@ import { inferFileKind, inferRenderMode } from '../file-kind';
 
 describe('inferFileKind', () => {
   it('classifies server-supported image extensions as image', () => {
-    for (const ext of ['png', 'jpg', 'jpeg', 'gif', 'svg', 'webp', 'ico']) {
+    for (const ext of ['png', 'jpg', 'jpeg', 'gif', 'svg', 'webp', 'ico', 'avif']) {
       expect(inferFileKind(`assets/x.${ext}`)).toBe('image');
     }
   });
 
-  it('does NOT classify avif/bmp as image — server MIME_MAP lacks them so the raw endpoint would 404 → broken image (云端 P2)', () => {
-    expect(inferFileKind('assets/photo.avif')).toBe('file');
+  it('keeps unsupported BMP generic while AVIF shares the server-supported MIME projection', () => {
+    expect(inferFileKind('assets/photo.avif')).toBe('image');
     expect(inferFileKind('assets/old.bmp')).toBe('file');
   });
 

@@ -1,6 +1,7 @@
 import type { AgentCarrierSession } from '../../types.js';
 import type { CodexAppServerJsonObject } from './CodexAppServerEventMapper.js';
 import { CodexAppServerLifecycle, type CodexAppServerLifecycleSnapshot } from './CodexAppServerLifecycle.js';
+import { withCodexStartupCancellation } from './codex-startup-recovery.js';
 
 export type CodexAppServerApprovalsReviewer = 'user' | 'auto_review' | 'guardian_subagent';
 
@@ -41,6 +42,7 @@ export async function closeCodexAppServerTransport(
   abortHandler: () => void,
   rejectPending: (error: Error) => void,
   disposition: 'release' | 'evict' = 'release',
+  startupSignal?: AbortSignal,
 ): Promise<{ closing: CodexAppServerLifecycleSnapshot; closed: CodexAppServerLifecycleSnapshot }> {
   signal?.removeEventListener('abort', abortHandler);
   lifecycle.clearTimers();
@@ -48,14 +50,14 @@ export async function closeCodexAppServerTransport(
   let cleanupError: Error | null = null;
   try {
     if (disposition === 'evict' && wire.terminate) await wire.terminate();
-    else await wire.close();
+    else await withCodexStartupCancellation(wire.close(), startupSignal);
   } catch (error) {
     cleanupError = error instanceof Error ? error : new Error(String(error));
     lifecycle.recordCleanupFailure();
     if (disposition === 'evict') await wire.close().catch(() => {});
-    else await wire.terminate?.().catch(() => {});
+    else if (!startupSignal) await wire.terminate?.().catch(() => {});
   }
-  await pumpPromise?.catch(() => {});
+  await withCodexStartupCancellation(pumpPromise?.catch(() => {}) ?? Promise.resolve(), startupSignal).catch(() => {});
   rejectPending(new Error('Codex app-server closed'));
   const closed = lifecycle.transition('closed', cleanupError ? { cleanupError: cleanupError.message } : undefined);
   return { closing, closed };

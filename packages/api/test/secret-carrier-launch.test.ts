@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { guardMcpConfig } from '../src/config/capabilities/secret-mcp-config.js';
+import { parse } from 'smol-toml';
 import { buildCodexNativeEffectGuardArgs } from '../src/domains/cats/services/agents/providers/CodexNativeEffectGuard.js';
 import { prepareClaudeSdkLaunch } from '../src/domains/cats/services/agents/providers/claude-sdk-launch.js';
 
@@ -25,29 +25,21 @@ test('Claude SDK managed settings keep native content hooks for external cwd', a
   assert.match(settings, /PostToolUse/);
 });
 
-test('MCP wrapping preserves SSE and secret auth as transport configuration', () => {
-  const server = guardMcpConfig(
-    { type: 'sse', url: 'https://example.invalid/mcp', headers: { Authorization: 'host-injected' }, enabled: true },
-    { CAT_CAFE_API_URL: 'http://127.0.0.1:59999' },
-  );
-  const env = server.env as Record<string, string>;
-  const spec = JSON.parse(env.CAT_CAFE_SECRET_MCP_PROXY_SPEC);
-  assert.equal(spec.transport, 'sse');
-  assert.equal(spec.headers.Authorization, 'host-injected');
-  assert.equal(server.url, undefined);
-  assert.equal(server.type, undefined);
-});
-
-test('a native plugin refreshes invocation auth on an already guarded server without nesting the relay', () => {
-  const first = guardMcpConfig({ command: 'fixture', args: ['tool.mjs'] });
-  const second = guardMcpConfig(first, {
-    CAT_CAFE_API_URL: 'http://127.0.0.1:59999',
-    CAT_CAFE_INVOCATION_ID: 'current-inv',
-    CAT_CAFE_CALLBACK_TOKEN: 'fixture-current',
-  });
-  assert.deepEqual(second.args, first.args);
-  assert.equal((second.env as Record<string, string>).CAT_CAFE_INVOCATION_ID, 'current-inv');
-  const original = JSON.parse((second.env as Record<string, string>).CAT_CAFE_SECRET_MCP_PROXY_SPEC);
-  assert.equal(original.command, 'fixture');
-  assert.equal(original.env.CAT_CAFE_CALLBACK_TOKEN, undefined, 'a foreign upstream does not inherit host auth');
+test('Codex secret hooks run for native shell, never for an MCP tool', () => {
+  const args = buildCodexNativeEffectGuardArgs();
+  const expression = args.find((arg) => arg.startsWith('hooks='));
+  assert.ok(expression);
+  const config = parse(expression).hooks as Record<
+    string,
+    Array<{ matcher: string; hooks: Array<{ command: string }> }>
+  >;
+  for (const event of ['PreToolUse', 'PostToolUse']) {
+    const group = config[event].find((group) =>
+      group.hooks.some((hook) => hook.command.includes('secret-native-hook.mjs')),
+    );
+    assert.ok(group);
+    assert.ok(new RegExp(group.matcher).test('Bash'));
+    assert.equal(new RegExp(group.matcher).test('mcp__cat-cafe-memory__cat_cafe_read_file_slice'), false);
+    assert.equal(new RegExp(group.matcher).test('mcp__browser__type'), false);
+  }
 });

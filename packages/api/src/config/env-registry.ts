@@ -129,14 +129,6 @@ export const ENV_VARS: EnvDefinition[] = [
   ...ENV_DEFINITIONS_7,
   ...ENV_DEFINITIONS_8,
   {
-    name: 'CAT_CAFE_SECRET_MCP_PROXY_SPEC',
-    defaultValue: '(Host managed)',
-    description: 'Host-owned MCP transport specification; may contain endpoint credentials.',
-    category: 'cli',
-    sensitive: true,
-    runtimeEditable: false,
-  },
-  {
     name: 'CAT_CAFE_GUARD_NODE',
     defaultValue: '(Host managed)',
     description: 'Host-selected Node executable for native provider secret guards.',

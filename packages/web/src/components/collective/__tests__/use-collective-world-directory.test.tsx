@@ -4,6 +4,7 @@ import { act, useRef } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { getWorldDirectoryStoreSnapshot, resetWorldDirectoryStoreForTests } from '../collective-world-directory-store';
 import { useCollectiveWorldDirectory } from '../use-collective-world-directory';
 
 function Harness({ iframe }: { readonly iframe: HTMLIFrameElement }) {
@@ -38,12 +39,14 @@ describe('useCollectiveWorldDirectory', () => {
     iframe = document.createElement('iframe');
     document.body.append(container, iframe);
     root = createRoot(container);
+    resetWorldDirectoryStoreForTests();
   });
 
   afterEach(() => {
     act(() => root.unmount());
     container.remove();
     iframe.remove();
+    resetWorldDirectoryStoreForTests();
     vi.restoreAllMocks();
     delete (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT;
   });
@@ -93,6 +96,16 @@ describe('useCollectiveWorldDirectory', () => {
       );
     });
     expect(container.textContent).toBe('ready');
+    expect(getWorldDirectoryStoreSnapshot().services[0]).toMatchObject({
+      status: 'ready',
+      serviceUrl: 'http://localhost:5201',
+      serviceInstanceId: 'svc_12345678',
+      humanId: 'human_12345678',
+      memberships: [
+        { collectiveId: 'col_12345678', name: 'Alpha' },
+        { collectiveId: 'col_87654321', name: 'Invite-only room' },
+      ],
+    });
 
     await act(async () => container.querySelector('button')?.click());
     expect(postMessage).toHaveBeenLastCalledWith(
@@ -156,8 +169,50 @@ describe('useCollectiveWorldDirectory', () => {
     await handshake(iframe.contentWindow);
     expect(generation()).toBe('bridge_aaaaaaaa@http://localhost:5201');
 
+    expect(getWorldDirectoryStoreSnapshot().services[0]?.status).toBe('checking');
+
     uuid.mockReturnValue('bridge_bbbbbbbb');
     await handshake(iframe.contentWindow);
     expect(generation()).toBe('bridge_bbbbbbbb@http://localhost:5201');
+    expect(getWorldDirectoryStoreSnapshot().services[0]).toMatchObject({
+      bridgeId: 'bridge_bbbbbbbb',
+      status: 'checking',
+    });
+  });
+
+  it('marks a previously verified directory as checking when its exact iframe unmounts', async () => {
+    await act(async () => root.render(<Harness iframe={iframe} />));
+    await act(async () => {
+      window.dispatchEvent(
+        new MessageEvent('message', {
+          origin: 'http://localhost:5201',
+          source: iframe.contentWindow,
+          data: { type: 'collective:world-directory-ready' },
+        }),
+      );
+      window.dispatchEvent(
+        new MessageEvent('message', {
+          origin: 'http://localhost:5201',
+          source: iframe.contentWindow,
+          data: {
+            type: 'collective:client-world-directory',
+            bridgeId: 'bridge_12345678',
+            revision: 1,
+            state: 'ready',
+            serviceInstanceId: 'svc_12345678',
+            humanId: 'human_12345678',
+            memberships: [{ collectiveId: 'col_12345678', name: 'Alpha', role: 'member' }],
+          },
+        }),
+      );
+    });
+    expect(getWorldDirectoryStoreSnapshot().services[0]?.status).toBe('ready');
+
+    act(() => root.unmount());
+    expect(getWorldDirectoryStoreSnapshot().services[0]).toMatchObject({
+      status: 'checking',
+      memberships: [{ collectiveId: 'col_12345678', name: 'Alpha' }],
+    });
+    root = createRoot(container);
   });
 });

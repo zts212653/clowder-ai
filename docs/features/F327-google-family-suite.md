@@ -1,11 +1,11 @@
 ---
 feature_ids: [F327]
-related_features: [F205, F247, F325, F290]
+related_features: [F202, F205, F247, F325, F290, F314]
 topics: [google, gemini, lyria, veo, flow, flow-music, chrome-extension, plugin, media-generation]
 doc_kind: spec
 created: 2026-10-14
-updated: 2026-10-26
-tips_exempt: "2026-10-26: API candidate #6159 remains draft. operator clarified the original web intent, then allowed API work after an F314 incident report. Real generation and billing acceptance remain open; Phase B/C have no shipped entry."
+updated: 2026-10-27
+tips_exempt: "2026-10-27: PR6159 carries the music tip. Paired previews and follow-up fixes are merged; real Alpha Manager/native generation and project delivery passed. Billing/Ultra-credit verification remains open. Phase B/C have no shipped entry."
 description: "把 You 的 Google AI 订阅里家里用得上的能力（音乐、视频、Gemini 网页等）接进 Clowder AI，让猫自己用，不靠人在网页上手点转发。"
 description_source: human
 description_author: opus55
@@ -32,40 +32,33 @@ You 要开 Google AI Ultra（为了只有 Ultra 能用的 Gemini Argon），订�
 
 ## Current State / 现状基线
 
-- **2026-10-26 开工**：operator 在 `[thread-id]#private-source-id` 对 Phase A 开工提议回复「我觉得可以啊哈哈哈新建thread」。仅 Phase A 获准执行；本线程独立实现、自测、review，最终一次回报盘点线程。Phase B/C 保留原范围。
-- **2026-10-26 实现候选**：[PR #6159](https://github.com/zts212653/clowder-ai/pull/6159) 提供 `cat_cafe_generate_music`，复用 callback、Google 账户与设置页配置根目录；音频/来源回执持久落盘，不覆盖、不自动重试。126 项定向检查、API/MCP 构建与工具治理校验通过；@gemini-argon 已独立代码审查通过，typed fact 为 `local-review:private-source-id:approved`，覆盖 HEAD `786fc371e574dd11aea3e1e367561d64d7b683b6`。该候选仅实现 API-key 认证；已解析的 Google 账户 `gemini` 为 OAuth，因作者的 key-only 检查而停在 `configuration_required`，尚未向 Google 发出计费请求。该错误不证明官方接口只能用 key，也不构成要求 operator 新建 key 的依据。
-- **2026-10-26 认证纠正**：operator 在本执行线程 `private-source-id` 明确「我们之前设定的难道不是走 oauth？」。作者撤回创建 API key／另开计费的操作指引，将 OAuth 纳入明确验收契约；当前候选尚不满足该要求，PR 保持 draft，不进入 merge-gate。官方 Gemini API [支持 OAuth](https://ai.google.dev/gemini-api/docs/oauth)，但该官方 Cloud OAuth 路径与家里 AGY Native 个人登录的授权范围、计费项目及 Ultra 额度适用性仍需核验；没有提取、转发原生登录 token，也没有改走 Phase B 网页通道。下一动作归作者核实并修正认证实现，不是等待 operator 补 key。
-- **2026-10-14 实测**：给《AI-native builder 的一天》出配乐时，Sol6.1 只能用 macOS 界面操作 You 的 Chrome 去 Gemini「Create music」逐条抽卡。21 条里 Gemini 只出了 5 条，16 条回复「现在无法生成音频」；剩下的改用 Flow Music（同账号 Plus 权益）才补齐。全程需要 You 授权、开浏览器，猫手动点。记录见 `meow-club/cat-cafe-films` 的 `builder-day/public/builder-day/score/gemini/FIRST-PASS-20261014.md` 与 `flow-music/FLOW-FIRST-PASS-20261014.md`。
-- **家里已有、可复用的底座**：
-  - F205：视频生成插件的声明式协议引擎（`packages/api/src/plugins/video-gen/`，模板有 jimeng / kling / zhipu；`video-analysis` 有一份 gemini 模板）。它的 AC-C2「用真实密钥跑通一次」仍未关。
-  - F247：Personal Chrome Host（MV3 扩展 + Native Messaging 助手 + 配对授权 + 回执账本，`packages/api/src/plugins/cloud-cat-personal-host/`），目前只有 ChatGPT 页面适配器。
-  - F325：Antigravity（AGY）原生载体，是Siamese的运行载体，不负责生成能力。
-- **还没有**：任何 Google 的音乐/视频生成接口或网页通道接进家里。
-- **外部事实（2026-10-14 核 Google 官方页面）**：
-  - Gemini API 有 Lyria 3.5（$0.08/首）、Lyria 3 Clip（30 秒，$0.04/首），没有免费档；生成的音频都带 SynthID 水印。
-  - Veo 3.1 按秒计费：Fast 1080p $0.12/s，Standard 1080p $0.40/s，没有免费档。
-  - Google AI Pro / Ultra 订阅附带每月 Google Cloud 额度（Ultra operational cost/月），可用于 Gemini API，需要在 Google Developer Program 激活（Google 博客 2026-01-27）。
-  - Flow、Flow Music 没有找到官方 API 或官方 MCP，只有社区做的、替用户操作网页的 MCP。
+- **2026-10-27 11:14 UTC：有界项目音频交付已获 operator 采纳，配对代码已合入。** operator 原消息 `thread_mvosmqalhrabbmvd#private-source-id` 选择“采纳，合入并发布配套预览版”。[Host #6159](https://github.com/zts212653/clowder-ai/pull/6159) 实际合入 `3608aa08d179029cd028c53e02d08864ea4dee30`；[插件仓 #137](https://github.com/zts212653/clowder-ai-plugins/pull/137) 实际合入 `8450bdf57b26671ea43970dcee74f90e3e071b53`，配套 Contract/SDK 预发布流程 `40494590987` 已启动，发布结果仍待 registry 精确版本/完整性核验。原 Argon 对 Host `3aca381f` 的独立安装/边界 10/10 和 API 类型检查批准已消费，公开产品批准及 e60 的包字节连续性也已消费。音乐包仍为 private、未上架。原 Task2559 继续自有 named Alpha 的真实 Manager 配置/显式启用、猫调用、可播放产物与账单验收；对应 AC 仍未关闭。
+
+- **2026-10-27 10:10 UTC：Host 0.3 已配对，进入本次实质增量独审。** #6236 已合入 `8b989adb`，原基线依赖已解除。Host #6159 已推 `3aca381f4d64f503d9077a2349f5530900084533`，消费冻结 main `8c9df913` 并保留删除旧 API 权限表的结果；API、Web 与 SDK 嵌套消费同一份精确 Contract `0.3.1-candidate.0`，音乐归档与公开已审字节一致。新配对实际安装/native/loopback/媒体交付及失败清理等 71/71 隔离检查、完整 API 依赖构建、API/Web 类型、MCP 治理（202、零变化）和 tips 均通过；供应商仍为 fixture。公开 #137 当前 `e60a4e40` 两路 CI 已实际成功，Argon 对 `101e241a` 的产品批准由仅测试断言修复、生产/工作流源码及三份包完全同字节的连续性桥接。新增有界公共项目交付采纳和 Alpha 真实调用/账单仍未完成；不把隔离成功写成正式可用。
+- **2026-10-27：公开仓已适配 Contract 0.3 并独审通过，Host 配对仍在续办。** [公开 PR #137](https://github.com/zts212653/clowder-ai-plugins/pull/137) 当前 `101e241a7df07f3c47bb33c1be75347bde43c795` 已正常整合 main `de496d1c`：不恢复已退役 API 权限表或原生 MCP 方法白名单，改用同 feature 的真实 native/media 声明绑定。Argon `private-source-id` 精确批准公开增量，独立托管 11/11 及三包类型检查通过；作者 Contract 646、SDK 228、music/独立安装入口 27、gate 脚本 12 项与 conformance 均通过。当前 [Host #6159](https://github.com/zts212653/clowder-ai/pull/6159) 为 `549b1a4ccb0f17b8f6e34e27f3a052f85799c405`，普通调用内部 producer/lookup 的新增失败检查已 RED→GREEN，6 项输出测试通过。Host 完整 0.3 基线由原维护 Task1136 的 [吸收 PR #6236](https://github.com/zts212653/clowder-ai/pull/6236) 接入；F327 不复制其清理，待接入后替换精确依赖和归档、验证完整安装旅程。这是真实兼容前提，不是 CI 账单等待；未将旧 Host 通过记录当成新配对通过，公共交付范围采纳、Alpha 真实使用和账单验收仍未完成。
+- **原安装 RED 与清理问题已分别处置。** Argon `private-source-id` 对 Host `8c96aeeb` 独立托管原 installed journey 和 timeout/abort 清理，3/3、13.96 秒、退出 0。实际修复了 helper 先 reject 而自有 child 未退出及 fixture 清理顺序；原 AGY step65 的 9 秒 RED 仍缺错误栈/退出回执，不能倒推其触发原因。F325 的执行终态诊断归原线；旧代码与服务实测批准各守历史范围。
+- **2026-10-27：可安装配对候选已形成，进入独审。** [Host PR #6159](https://github.com/zts212653/clowder-ai/pull/6159) 的 `eb416d23d5f7ee3308536a82870ef0d0eb4b32ec` 与[公开插件 PR #137](https://github.com/zts212653/clowder-ai-plugins/pull/137) 的 `fceb515ea04e02d3438d67fc77b5036f5e40c67f` 成对。模块、manifest、Manager 确认复用/后台 OAuth/恢复、原生 MCP、Cloud 单次生成和持久音频已实现；Host 接可信项目授权、持久派发、真实文件预留与交付，旧内置 Google service/callback/MCP/shared 音乐契约已删除。包保持 private、未发布/上架，公共输出权限尚未采纳，不代表已能在正式环境使用。
+- **外部 CI 观察已结算，不阻塞续办**：Host HEAD `eb416d23d5f7ee3308536a82870ef0d0eb4b32ec` 的 Actions run `40451303664` 两项作业均为 `runner_id=0`、`steps=[]`，annotation 明确为账号支付/额度阻止启动；对应两份样式表测试本地 5 项通过。按 [LL-098](../public-lessons.md#ll-098-zero-step-billingspending-limit-是外部基础设施不是新的代码裁决) 与[现行 CI 规则](../../cat-cafe-skills/refs/pr-signals.md#ci-外部基础设施)，归类 `external_infrastructure` 并结束这条不可执行等待；不要求 operator 充值、修账单或关闭 workflow，不冒称托管 CI 通过。公开仓同 HEAD 两项 CI 已实际通过，本地完整 36 步通过。operator 在 `private-source-id` 再次纠正，作者已撤回将此列为阻碍的表述，继续消费本地验证与独审。
 
 ## What
 
 ### Phase A: 官方接口出音乐
 
-按 operator `private-source-id` 改用 Google Cloud 的 Lyria，核对并使用 Ultra 附带的 Cloud 额度；不充值 AI Studio。猫给一条提示词（可指定时长、纯器乐、WAV），拿回音频文件，落到调用方指定的位置，并记下来源：模型、提示词、时间、费用口径。
+按 operator `private-source-id` 改用 Google Cloud 的 Lyria，核对并使用 Ultra 附带的 Cloud 额度；不充值 AI Studio。猫给一条提示词（可指定时长目标、纯器乐，输出 MP3），拿回音频文件，落到调用方指定的位置，并记下来源：模型、提示词、时间、费用口径。
 
-承载方式由 owner 定：可以作为 F205 协议引擎的新模板（新增「音乐生成」插件），也可以是一个独立的 MCP 工具。原则是复用家里已有的密钥、配置和插件管理，不另造一套。
+按 operator `private-source-id` 的现行 F202 要求，最终承载为独立插件包与统一 Plugin Manager，复用公开配置/凭据、声明 action、实际安装/启用、调用归属与生命周期，猫走公开工具发现和调用。Contract 0.3 已撤销重复 API 授权表，F327 不恢复该表。已有 Cloud 授权先核验、复用；不能让用户每次搬链接、复制 token 或手动搬音频。原 Host 内置音乐 MCP 方案保留为底层候选事实，不先合入制造第二套 Google 业务控制面。
 
-**Phase A 执行切口（2026-10-26）**：独立原生 music-gen MCP 入口，经现有 callback 鉴权调用官方音乐 API；当前候选实现使用 Gemini Developer API，待按本轮 Cloud 指令修正接点后验收。凭据沿用现有 Google 账户配置，输出限制在调用线程项目内。与 F205 的视频协议工具分开，音频与 provenance 一起持久落盘，拒绝覆盖已有文件。HTTP 请求不自动重试，配额、安全拒绝、超时均返回结构化失败。时长/节奏是提示词意图，回执不把意图写成已测得的精确时长。需真实生成回执后才勾 AC-A1。
+**当前插件实现（2026-10-27，主线已集成，音乐包 private）**：公开仓独立 Google Cloud music module 通过现行 Manager 设置和原生 MCP 承载。用户确认复用已有授权或在卡片完成必要的新授权，再明确启用；猫使用 `generate_music` 的稳定 `requestId`，Host 在原 action 调度统一核权限并先预留 MP3/回执，插件才发起单次 Cloud Interactions 请求。插件持久保存音频，Host 复用媒体 ledger 承接和恢复项目交付。默认 Clip、Pro 需明确选用，仅承诺 MP3；不替换模型/账号/项目，不自动重试未知付费效果。时长/BPM 是意图，实际扣费与赠金扣抵仍未知。
 
-**认证要求的来源修正（2026-10-26）**：作者曾将 operator source `private-source-id` 的 OAuth 纠偏写成 API Cloud OAuth 契约；operator 后在 `private-source-id`、`private-source-id` 明确原意是网页版，撤回这项作者解释。停工后的 source `private-source-id` 允许 API、要求 F314 复盘先行；后续从此账号真实可用的 API 授权核实，不将 Cloud OAuth 设置当作原始人类要求，不拆解 AGY 私有登录或浏览器凭据，也不把网页登录或赠额页面等同于 API 已授权、费用已抵扣。两份旧代码批准保留其实际覆盖范围，真实生成验收仍必需。
+**授权来源**：早期将网页 OAuth 纠偏误写成 Cloud OAuth 前置的解释已经撤回。API 来自复盘先行后的 `private-source-id`，Google Cloud 来自 `private-source-id`，新版 F202 旅程来自 `private-source-id`，继续实施来自 `private-source-id`。这些不取消网页范围，也不代替新增公共权限的采纳。候选可以准备和审查，正式 adoption/发布仍守原边界。
 
-Architecture cell: action-plane
-Map delta: none
-Why: 在现有 typed vendor action、callback、账户与文件边界内增加一个音乐操作；不新增凭据库或后台队列。
+Architecture cell: plugin
+Map delta: 配对实现已更新 `docs/architecture/ownership/cells/plugin.md`；有界公共输出行为已获 CVO1442 采纳。
+Why: 插件拥有 Google 业务和保留的供应商产物，Host 拥有调用者项目授权、持久预留及交付，既有 media ledger 拥有已承接字节；不保留第二套 Host Google 控制面。
 
-Canonical source: `packages/api/src/routes/callback-auth-prehandler.ts#requireCallbackAuth`、`packages/api/src/config/account-resolver.ts#resolveForClient`、`packages/api/src/config/provider-credential-policy.ts#assertProviderCredentialDestination`。
-Consumer evidence: PR #6159 中运行 `rg -n --no-ignore 'registerCallbackMusicRoutes|musicTools|musicGenerationSchema' packages/api/src packages/mcp-server/src packages/shared/src`，覆盖注册、callback、service 与共享输入契约。
-Claim guard: `packages/api/test/music-generation-journey.test.ts` 经真实本地 HTTP 走 MCP→callback→service→文件；权限、路径、凭据目的地、格式与不重试边界分别由同 PR 的 `callback-music-routes.test.ts`、`music-generation.test.ts`、`music-tools.test.ts` 保护。Google 返回在自动测试中使用 fixture，不替代真实生成验收。
+Canonical source: `packages/api/src/domains/plugin/outputs/project-output-actions.ts`、`output-dispatch.ts`、`project-output-files.ts`；公开仓的 `packages/music-generation/src/plugin-entrypoint.ts` / `settings.ts` / `music-jobs.ts`。
+Consumer evidence: 实际入口由 `carrier/runtime-carrier.ts` 和 `routes/plugin-native-action-routes.ts` 承接；公开 Contract/SDK/manifest 配对，首版只允许可认证的原生 MCP，不开放设置动作或 direct-tool 绕过。
+Claim guard: `f327-plugin-package-journey.test.ts` 用实际归档/native 进程和真实本地 HTTP 验证完整隔离旅程；`plugin-project-output.test.ts`、`plugin-output-files.test.ts`、`plugin-output-dispatch.test.ts` 覆盖权限/并发/物理文件和恢复。模拟授权与供应商不能替代真实猫到 Cloud 验收。配对版本集成后由原 Task 在 Alpha 接续真实验证，不以 CI 或草稿状态替代产品完成。
 
 ### Phase B: 网页通道（Chrome）出音乐和视频
 
@@ -98,9 +91,11 @@ Gemini 网页里的 Argon 做成能在 thread 里说话的云端猫（像 gpt-pr
 ## Acceptance Criteria
 
 ### Phase A（官方接口出音乐）
-- [ ] AC-A1: 猫用一条提示词调用音乐生成，得到 MP3 或 WAV，落到指定目录，附模型、提示词、时间与费用口径的来源记录；You 不操作网页。
-- [ ] AC-A2: 额度不足、被拒、超时时，调用方拿到明确的失败原因，不静默、不自动重试刷额度。
+- [x] AC-A1: 猫用一条提示词调用音乐生成，得到 MP3 或 WAV，落到指定目录，附模型、提示词、时间与费用口径的来源记录；You 不操作网页。2026-10-27 原 Native/CLI 插件调用和 Host 项目双产物自动交付已实证，见上述 Alpha 证据。
+- [x] AC-A2: 额度不足、被拒、超时时，调用方拿到明确的失败原因，不静默、不自动重试刷额度。最终插件的拒绝/未知/超时契约及收尾定向实跑通过；本次真实 pending 查询同一操作，生成计数 1。
 - [ ] AC-A3: 在 operator `private-source-id` 的 API 许可下，真实核对所用账号、API 认证来源与费用归属，不能用模拟 token、代码单测或网页登录状态替代。原稿将 OAuth 纠偏写成 Cloud OAuth 前置，已按后续原话撤回；后续 `private-source-id` 新明确选择 Google Cloud，必须核实 Cloud 项目及赠金关联，不能倒推为此前网页 OAuth 解释正确，不能静默借用其他账号或 AGY 私有 token。
+
+- [x] AC-A4: 符合现行 F202 的可安装插件交付：用户从 Plugin Manager 完成必要的账号、Cloud 项目/费用归属确认、授权及显式启用，后续猫自行生成并交付到正确项目；失效在同一卡片恢复，安装/配置/auth/启用意图/live 分开，停用/升级/卸载保留应留的作品与来源数据。以真实安装/授权/调用旅程和制品依赖闭包证明，不能用 Host 内置工具或已有服务单测代替（operator `private-source-id`）。2026-10-27 真实 Alpha Manager 安装/连接恢复/明确启用/原生生成/项目交付通过；重启复用及停止后作品保留已实证，最终归档的停用/卸载等保护由独立实跑覆盖。该验收不表示正式 runtime 已部署，费用/赠金未知仍由 AC-A3 承接。
 
 ### Phase B（网页通道出音乐和视频）
 - [ ] AC-B1: 猫发起一次 Flow Music 生成，经 You 已登录的 Chrome 完成，音频文件自动回到家里；除首次安装和授权外，You 不手点。
@@ -155,11 +150,14 @@ Phase A 交付时新增 1 条 tip：「要配乐时，让猫直接调用音乐�
 | KD-6 | 明确 OAuth 认证要求，撤回作者提出的 API-key 前置步骤 | operator source `private-source-id`；官方 API 的选择不等于 key-only 认证授权 | 2026-10-26 |
 | KD-7 | 撤回作者将 KD-6 写成 Cloud OAuth 的解释；API 获后续新许可，先交 F314 复盘 | operator `private-source-id`、`private-source-id` 明确原网页版意图；`private-source-id` 后允许 API，但不能据此倒推此前解释正确或网页已交付 | 2026-10-26 |
 | KD-8 | 后续 API 走 Google Cloud，禁止 AI Studio 充值；配置只在后台执行 | operator `private-source-id`、`private-source-id`；首授权由人主动打开链接，作者不抢占前台 | 2026-10-26 |
+| KD-9 | 采纳普通插件经 Host 将当次音频与来源回执新建到获准项目，合入配对候选并发布配套基础包预览版 | operator `private-source-id`；不含任意写入、覆盖或未知结果自动重复付费，音乐包保持 private，真实 Alpha/账单继续原 Task 验收 | 2026-10-27 |
 
 ## Review Gate
 
 - Phase A：非作者猫 review；用真实额度跑一次生成作为证据。
 - 本轮代码 review 已通过：reviewer `gemini-argon`，HEAD `786fc371e574dd11aea3e1e367561d64d7b683b6`，accepted source revision `17bb4fe946e7daeb02aa63b95808ae6d034b057d`，durable fact `local-review:private-source-id:approved`。批准仅覆盖代码与契约；实际音乐验收仍未通过。
 - OAuth 修正代码已独审批准：reviewer `gemini-argon`，HEAD `c0b30645c54c766fdf88d163f71023db328a79b8`，accepted source revision `025ea95452518f66d754ca1590d00b536fc458ab`，durable fact `local-review:private-source-id:approved`。作者已核验相同代码与需求；本次共享状态只登记批准和未验边界，无新实质内容，不为 ACK 重新唤醒 reviewer。
-- 下一动作：在指定账号完成首次 Cloud 授权后，仅通过后台 API 核实项目/结算账号/赠金，配置 Cloud 接点并执行单次样张验证。禁止充值、自动扣款与抢占前台；若授权未完成，诚实保留配置缺口。旧批准只覆盖历史 Gemini API 候选，后续 Cloud 接入修正需要风险匹配的验证和独立 review；真实音频与费用验收通过才进入适用的 merge-gate。PR 保持 draft，不把 API 交付写成网页插件已完成。
+- Cloud 增量已独审批准：`gemini-argon`，HEAD `76d4f4ae5571d8043034da43b9f4d230be30599b`，accepted source revision `deb2752251168440adea415c80fe6dd104c29f3e`，durable fact `local-review:private-source-id:approved`。覆盖 Cloud 实现、主线集成与真实服务样张；不外推为完整 native MCP、实际账单扣抵或网页交付通过。
+- 新本地发现接点已独审并合入：`gemini-argon`，HEAD `eb1d512ebba8ebfd1560693a797887d121db20cb`，accepted source `ee863b7162b4cbc8815792dbfc0b6fc29277f7d0`，typed fact `local-review:private-source-id:approved`；实际合入 `e4d06cd5d3c86b716c92058ee615ad478d652e80`。合后原 Task 已完成真实普通猫调用和项目自动交付，不再等待 draft、旧 guard 或 CI 账单。
+- 下一动作：原 Task `private-source-id` 继续核 AC-A3 的实际费用与 Ultra/Cloud 赠金关联；未知保持未知，不新增付费生成或重复授权。Phase A Alpha 功能可用，正式 runtime 部署与网页 Phase B 不在本次已验结果内；不擅自重启生产或关闭整项 Feature。
 - Phase B：沿用 F247 Chrome Host 的审查口径；在 You 日常 Chrome 上做一次真实旅程验收。

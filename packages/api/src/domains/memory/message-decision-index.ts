@@ -24,6 +24,20 @@ const unavailable = (): DecisionIndexResult => ({ status: 'unavailable', facts: 
 export const hasDecisionSourceCoordinate = (row: Pick<MessageSearchResult, 'messageId'>) =>
   /^\d{13,17}-\d{6}-[a-f0-9]{8}$/.test(row.messageId);
 
+/** Compare declared meaning; commit and line are versioned locations, not a different decision. */
+export function sameDeclaredDecision(left: DecisionSourceFact, right: DecisionSourceFact): boolean {
+  const fields = (fact: DecisionSourceFact) => [
+    fact.status,
+    fact.conclusion,
+    fact.featureId,
+    fact.documentPath,
+    fact.decidedBy ?? null,
+    fact.decidedAt ?? null,
+    fact.historical ?? false,
+  ];
+  return JSON.stringify(fields(left)) === JSON.stringify(fields(right));
+}
+
 /** Derived lookup of already-admitted coordinates, not another query/retrieval pipeline.
  * Pin the existing local origin/main ref; do not fetch, write, classify text or start a watcher. */
 export class GitMessageDecisionIndex implements MessageDecisionIndex {

@@ -35,7 +35,11 @@ export function ownedWorktreeFacts(opts) {
   const records = parseWorktreePorcelain(mustGit(opts.repo, ['worktree', 'list', '--porcelain']));
   const record = records.find((r) => safeRealpath(r.path) === opts.path);
   if (!record || record.prunable) fail('target is not a registered worktree');
-  if (opts.path === safeRealpath(records[0].path) || isProtected(basename(opts.path))) fail('protected/main worktree');
+  if (
+    opts.path === safeRealpath(records[0].path) ||
+    isProtected(basename(opts.path), undefined, basename(records[0].path))
+  )
+    fail('protected/main worktree');
   const root = quarantineRoot(dirname(safeRealpath(records[0].path)));
   if (opts.path.startsWith(`${root}/`)) fail('target is already in quarantine');
   const lifecycle = lifecycleConfig(opts.path, '--worktree');
@@ -138,6 +142,8 @@ function requireMergedContent(entry, opts) {
 }
 
 function releaseProbe(entry, opts) {
+  if (opts.expectedHead !== undefined && entry.head !== opts.expectedHead) fail('checkout HEAD changed');
+  opts.releaseGuard?.(entry);
   if (entry.locked) fail('locked worktree');
   if (entry.lifecycle.policy === 'never') fail('policy-never: change owner intent explicitly first');
   if (retentionStatus(entry.lifecycle, opts.now) === 'retention-invalid') fail('invalid owner retention');
@@ -228,8 +234,8 @@ export function finishWorktree(input) {
     fail('worktree changed before release');
   removeFinishedWorktree({
     repo: opts.repo,
-    actor: opts.owner,
-    authorizationRef: opts.sourceRef,
+    actor: opts.actor ?? opts.owner,
+    authorizationRef: opts.authorizationRef ?? opts.sourceRef,
     root: current.root,
     entry: {
       ...current,

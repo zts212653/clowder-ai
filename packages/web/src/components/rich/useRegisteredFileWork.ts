@@ -66,6 +66,7 @@ export function useRegisteredFileWork(url: string, threadId: string | undefined,
     resolve,
     reference: publication,
     artifact: loaded?.key === key ? loaded.artifact : null,
+    loading: !!key && loaded?.key !== key,
     error: loaded?.key === key ? loaded.error : undefined,
   };
 }

@@ -84,6 +84,8 @@ export interface CatVariant {
   readonly strengths?: readonly string[];
   /** F32-b P4c: Override breed-level avatar for this variant */
   readonly avatar?: string;
+  /** Member-only banner. Null explicitly removes a template value; siblings never inherit it. */
+  readonly banner?: string | null;
   /** F32-b P4c: Override breed-level color for this variant */
   readonly color?: CatColor;
   /**

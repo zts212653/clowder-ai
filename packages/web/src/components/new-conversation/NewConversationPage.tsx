@@ -346,6 +346,7 @@ export function NewConversationPage(props: NewConversationPageProps) {
           {discussionNotice && <p role="alert">{discussionNotice}</p>}
         </div>
       </div>
+      {floating.lightbox}
     </main>
   );
 }

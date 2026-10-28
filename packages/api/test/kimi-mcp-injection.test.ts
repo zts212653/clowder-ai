@@ -10,7 +10,8 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { KimiAgentService } from '../src/domains/cats/services/agents/providers/KimiAgentService.js';
 import { prepareKimiMcpConfig } from '../src/domains/cats/services/agents/providers/kimi-mcp-config.js';
-import { secretMcpContract } from './helpers/secret-mcp-contract.js';
+import { buildChildEnv } from '../src/utils/cli-spawn.js';
+import { directMcpContract } from './helpers/direct-mcp-contract.js';
 
 async function fixture(t: TestContext) {
   const root = await mkdtemp(join(tmpdir(), 'kimi-mcp-injection-'));
@@ -60,6 +61,7 @@ async function fixture(t: TestContext) {
         KIMI_CODE_HOME: join(root, 'native'),
         CAT_CAFE_CAT_ID: 'kimi',
         CAT_CAFE_THREAD_ID: 'thread-kimi-mcp',
+        CAT_CAFE_MCP_TRANSPORT: 'stdio',
         CAT_CAFE_INVOCATION_ID: 'inv-kimi-mcp',
         CAT_CAFE_API_URL: 'http://127.0.0.1:1',
         CAT_CAFE_CALLBACK_TOKEN: 'test-secret',
@@ -82,7 +84,7 @@ async function fixture(t: TestContext) {
 }
 
 test('Kimi receives effective MCP config during invocation and restores native project bytes', async (t) => {
-  const { root, file, invoke } = await fixture(t);
+  const { root, file, invoke, workspace } = await fixture(t);
   await writeFile(
     join(root, 'binary/packages/mcp-server/dist/collab.js'),
     `import { McpServer } from ${JSON.stringify(import.meta.resolve('@modelcontextprotocol/sdk/server/mcp.js'))};
@@ -111,10 +113,10 @@ await server.connect(new StdioServerTransport());`,
     assert.ok(config.mcpServers['cat-cafe-collab'], 'managed MCP must be materialized for native Kimi');
     assert.ok(!raw.includes('test-secret'), 'callback secrets must stay in the child environment');
     assert.ok(!raw.includes('inv-kimi-mcp'), 'project config must not freeze an invocation identity');
-    const { upstream, proxyEnv } = secretMcpContract(config.mcpServers['cat-cafe-collab']);
+    const { upstream, launchEnv } = directMcpContract(config.mcpServers['cat-cafe-collab']);
     credentialFile = upstream.env.CAT_CAFE_CREDENTIAL_FILE;
     assert.equal(credentialFile, launch.env?.CAT_CAFE_CREDENTIAL_FILE);
-    assert.equal(proxyEnv.CAT_CAFE_CREDENTIAL_FILE, credentialFile);
+    assert.equal(launchEnv.CAT_CAFE_CREDENTIAL_FILE, credentialFile);
     assert.ok(!credentialFile.startsWith(root), 'the credential lease must be outside the project and native HOME');
     const credentials = JSON.parse(await readFile(credentialFile, 'utf8'));
     assert.equal(credentials.invocationId, 'inv-kimi-mcp');
@@ -127,7 +129,7 @@ await server.connect(new StdioServerTransport());`,
     assert.equal(launch.env?.KIMI_CODE_TRUST_WORKSPACE, '1');
     const relay = config.mcpServers['cat-cafe-collab'];
     const client = new Client({ name: 'kimi-auth-consumer', version: '1' });
-    const env = Object.fromEntries(Object.entries(launch.env ?? {}).filter(([, value]) => typeof value === 'string'));
+    const env = buildChildEnv(launch.env, { workingDirectory: workspace });
     const transport = new StdioClientTransport({
       command: relay.command,
       args: relay.args,
@@ -144,7 +146,7 @@ await server.connect(new StdioServerTransport());`,
           text: JSON.stringify({
             currentInvocation: true,
             currentCallback: true,
-            noInlineInvocation: true,
+            noInlineInvocation: false,
             noInlineCallback: true,
           }),
         },
@@ -170,9 +172,9 @@ test('Kimi preserves a credential file owned by its caller', async (t) => {
   });
   try {
     const config = JSON.parse(await readFile(file, 'utf8'));
-    const { upstream, proxyEnv } = secretMcpContract(config.mcpServers['cat-cafe-collab']);
+    const { upstream, launchEnv } = directMcpContract(config.mcpServers['cat-cafe-collab']);
     assert.equal(upstream.env.CAT_CAFE_CREDENTIAL_FILE, credentialFile);
-    assert.equal(proxyEnv.CAT_CAFE_CREDENTIAL_FILE, credentialFile);
+    assert.equal(launchEnv.CAT_CAFE_CREDENTIAL_FILE, credentialFile);
     assert.equal(lease.env.CAT_CAFE_CREDENTIAL_FILE, credentialFile);
   } finally {
     await lease.dispose();
@@ -189,7 +191,7 @@ test('Kimi removes its private credentials when MCP installation fails and resto
   const writeMock = mock.method(fs, 'writeFile', async (...args: Parameters<typeof fs.writeFile>) => {
     if (String(args[0]) === file && typeof args[1] === 'string') {
       const config = JSON.parse(args[1]);
-      const { upstream } = secretMcpContract(config.mcpServers['cat-cafe-collab']);
+      const { upstream } = directMcpContract(config.mcpServers['cat-cafe-collab']);
       credentialFile = upstream.env.CAT_CAFE_CREDENTIAL_FILE;
       assert.equal(JSON.parse(await readFile(credentialFile, 'utf8')).callbackToken, 'test-secret');
       throw new Error('injected MCP installation failure');

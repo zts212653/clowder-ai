@@ -26,6 +26,7 @@ export function parseCodexReconnectNotice(event: unknown): CodexReconnectNotice 
 }
 
 import { normalizeTaskStatus } from '../invocation/invoke-helpers.js';
+import { withNativeSignatureRemoval } from '../message-output-native-finalization.js';
 import { type CodexApprovalSurface, classifyCodexGithubAppApprovalFailure } from './codex-app-approval-routing.js';
 import { buildCodexAsyncQuestionMessages } from './codex-async-question.js';
 import { codexOutputMessage } from './codex-output-message.js';
@@ -622,7 +623,10 @@ export function transformCodexEvent(
             outputMessage,
             timestamp: Date.now(),
           };
-          return asyncQuestionMessages.length > 0 ? [completion, ...asyncQuestionMessages] : completion;
+          const finalized = stripped.signature
+            ? withNativeSignatureRemoval(completion, item.text.slice(stripped.content.length))
+            : completion;
+          return asyncQuestionMessages.length > 0 ? [finalized, ...asyncQuestionMessages] : finalized;
         }
         const replacement: AgentMessage = {
           type: 'text',

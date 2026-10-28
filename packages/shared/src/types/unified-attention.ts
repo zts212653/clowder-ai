@@ -8,6 +8,7 @@ import {
   approvalResolutionSchema,
 } from './approval-lifecycle.js';
 import type { CollectiveAccountabilityAttentionItem } from './collective-accountability-attention.js';
+import type { CollectiveProjectAttentionItem } from './collective-project-attention.js';
 import { producerAttentionCoverageV1Schema } from './growing.js';
 import { preparedArtifactSnapshotV1Schema } from './growing-artifact.js';
 import type { RichCardBlock, RichInteractiveBlock } from './rich.js';
@@ -128,6 +129,7 @@ export type UnifiedAttentionSourceRead = {
     | 'all_registered_F246_producers'
     | 'current_linked_F310_five_producers'
     | 'pending_f290_collective_accountability_requests'
+    | 'pending_f290_project_materials_and_dates'
     | 'pending_f306_structured_choices'
     | 'explicit_user_mentions'
     | 'owner_personal_ignored_items';
@@ -224,6 +226,7 @@ export interface UnifiedAttentionItemV1 {
   runtimeInteraction?: UnifiedAttentionRuntimeInteraction;
   approval?: UnifiedAttentionVisibleApproval;
   /** One Service-authorized, still-operable named-Human responsibility request. */
+  collectiveProjectAttention?: CollectiveProjectAttentionItem;
   collectiveAccountabilityRequest?: CollectiveAccountabilityAttentionItem;
   /** Present only after the canonical live F225/F231 source message passes its closed producer validator. */
   originalApprovalCard?: UnifiedAttentionOriginalApprovalCard;
@@ -271,6 +274,7 @@ export interface UnifiedAttentionReadV1 {
     approvals: UnifiedAttentionSourceRead;
     needsMe: UnifiedAttentionSourceRead;
     collectiveAccountabilityRequests?: UnifiedAttentionSourceRead;
+    collectiveProjectAttention?: UnifiedAttentionSourceRead;
     structuredChoices?: UnifiedAttentionSourceRead;
     userMentions?: UnifiedAttentionSourceRead;
     personalPreferences?: UnifiedAttentionSourceRead;

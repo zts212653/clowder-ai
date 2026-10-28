@@ -368,6 +368,47 @@ describe('F117 named-message writes', () => {
       expect(systemRows(threadId)).toEqual([]);
     });
 
+    it('retains startup recovery on the exact response, rejects stale/foreign attempts, and never creates another row', () => {
+      publishResponse(threadId);
+      const recovery = {
+        invocationId: INV,
+        stage: 'retry_wait' as const,
+        sequence: 2,
+        attempt: 1,
+        maxAttempts: 6,
+        startedAt: 1_000,
+        deadlineAt: 121_000,
+        updatedAt: 2_000,
+        nextRetryAt: 4_000,
+      };
+      send(systemInfo(threadId, { type: 'codex_startup_recovery', startupRecovery: recovery }));
+      expect(messageIn(threadId, R)?.extra?.startupRecovery).toEqual(recovery);
+      expect(systemRows(threadId)).toEqual([]);
+      send(
+        systemInfo(threadId, {
+          type: 'codex_startup_recovery',
+          startupRecovery: { ...recovery, sequence: 1, stage: 'checking' },
+        }),
+      );
+      send(
+        systemInfo(threadId, {
+          type: 'codex_startup_recovery',
+          startupRecovery: { ...recovery, sequence: 3, invocationId: 'other-invocation' },
+        }),
+      );
+      expect(messageIn(threadId, R)?.extra?.startupRecovery).toEqual(recovery);
+      const ready = { ...recovery, sequence: 3, attempt: 2, stage: 'ready' };
+      send(systemInfo(threadId, { type: 'codex_startup_recovery', startupRecovery: ready }));
+      expect(messageIn(threadId, R)?.extra?.startupRecovery).toEqual(ready);
+      send(systemInfo(threadId, { type: 'codex_startup_recovery', startupRecovery: { ...recovery, sequence: 4 } }));
+      expect(messageIn(threadId, R)?.extra?.startupRecovery).toEqual(ready);
+      publishResponse(threadId, 'completed', 'answer');
+      const completed = messageIn(threadId, R);
+      send(systemInfo(threadId, { type: 'codex_startup_recovery', startupRecovery: { ...recovery, sequence: 99 } }));
+      expect(messageIn(threadId, R)).toBe(completed);
+      expect(systemRows(threadId)).toEqual([]);
+    });
+
     it.each([
       { catId: 'codex-sol' },
       { invocationId: 'other-invocation' },

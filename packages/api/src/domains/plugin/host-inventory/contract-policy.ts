@@ -2,7 +2,7 @@ import { createRequire } from 'node:module';
 import { validateHostPluginManifest } from '../desktop-window-runtime/presentation-manifest.js';
 
 /** Exact npm package consumed by this Host build. */
-export const PLUGIN_CONTRACT_PACKAGE_VERSION = '0.3.0' as const;
+export const PLUGIN_CONTRACT_PACKAGE_VERSION = '0.3.1-candidate.0' as const;
 /** Baseline manifest protocol; independent of the SDK and contract npm package releases. */
 export const PLUGIN_CONTRACT_VERSION = '0.1.0' as const;
 /**

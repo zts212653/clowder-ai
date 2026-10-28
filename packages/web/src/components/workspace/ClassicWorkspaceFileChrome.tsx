@@ -1,4 +1,6 @@
 'use client';
+import { useRef } from 'react';
+import { FileActions } from '../content-review/FileActions';
 import { FileIcon } from './FileIcons';
 import type { useWorkspaceListenMode } from './useWorkspaceListenMode';
 import type { WorkspaceFileViewerProps } from './WorkspaceFileViewer.types';
@@ -49,10 +51,10 @@ export function ClassicWorkspaceFileChrome({
     onToggleJsxPreview,
     collaborationAvailable,
     onOpenCollaboration,
-    revealInFinder,
     onFocusMode,
     focusDisabled,
   } = props;
+  const filename = useRef<HTMLButtonElement>(null);
   return (
     <>
       {/* Tab bar */}
@@ -61,6 +63,7 @@ export function ClassicWorkspaceFileChrome({
           {openTabs.map((tab) => (
             <button
               key={tab}
+              ref={tab === openFilePath ? filename : undefined}
               type="button"
               onClick={() => setOpenFile(tab)}
               className={`group flex items-center gap-1.5 px-3 py-1.5 text-xs font-mono border-r border-[var(--ws-editor-surface)] flex-shrink-0 transition-colors ${
@@ -134,7 +137,7 @@ export function ClassicWorkspaceFileChrome({
                 disabled={editMode}
                 title={editMode ? '请先保存或退出编辑，再进入协作批注' : '围绕这份内容保存协作批注'}
               >
-                协作批注
+                {props.collaborationLabel ?? '协作批注'}
               </ToolbarBtn>
             )}
           </div>
@@ -177,34 +180,17 @@ export function ClassicWorkspaceFileChrome({
                 {jsxPreview ? 'Preview' : 'Code'}
               </ToolbarBtn>
             )}
-            {file.content != null && (
-              <ToolbarBtn
-                onClick={() => void navigator.clipboard.writeText(file.content)}
-                title={
-                  file.truncated ? '\u590D\u5236\u5DF2\u52A0\u8F7D\u5185\u5BB9' : '\u590D\u5236\u6587\u4EF6\u5168\u6587'
-                }
-              >
-                {file.truncated ? 'Copy\u2026' : 'Copy'}
-              </ToolbarBtn>
+            {props.worktreeId && (
+              <FileActions
+                source={{ kind: 'workspace', worktreeId: props.worktreeId, path: openFilePath ?? file.path }}
+                filename={openFilePath ?? file.path}
+                mime={file.mime}
+                byteLength={file.size}
+                text={file.binary ? undefined : file.content}
+                appearance="classic"
+                contextRef={filename}
+              />
             )}
-            <ToolbarBtn
-              onClick={() => {
-                if (!openFilePath) return;
-                const abs = currentWorktree ? `${currentWorktree.root}/${openFilePath}` : openFilePath;
-                void navigator.clipboard.writeText(abs);
-              }}
-              title="\u590D\u5236\u7EDD\u5BF9\u8DEF\u5F84"
-            >
-              Path
-            </ToolbarBtn>
-            <ToolbarBtn
-              onClick={() => {
-                if (openFilePath) void revealInFinder(openFilePath);
-              }}
-              title="\u5728 Finder \u4E2D\u663E\u793A"
-            >
-              Finder
-            </ToolbarBtn>
             {canEdit && (
               <ToolbarBtn
                 active={editMode}

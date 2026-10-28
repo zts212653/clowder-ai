@@ -3,8 +3,8 @@ import { mkdir } from 'node:fs/promises';
 import path from 'node:path';
 import { after, before, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { chromium } from 'playwright';
 import { build } from 'vite';
-import { chromium } from '../../../ppt-forge/node_modules/playwright/index.mjs';
 import { managerDot } from './f247-dot-entry.fixtures.mjs';
 
 // Real recovery controller, chooser, Plugin Manager, confirmation and navigation.
@@ -46,7 +46,7 @@ after(async () => {
   process.chdir(previousCwd);
 });
 
-function pro(installed, enabled) {
+function pro(installed, enabled, operationState) {
   return {
     ...managerDot(installed, enabled, true, true),
     pluginId,
@@ -58,11 +58,25 @@ function pro(installed, enabled) {
       trust: 'official',
     },
     description: '连接 Chrome 并授权指定 ChatGPT 会话。',
-    availableVersion: '0.1.0-alpha.6',
-    installedVersion: installed ? '0.1.0-alpha.6' : null,
+    availableVersion: '0.1.0-alpha.8',
+    installedVersion: installed ? '0.1.0-alpha.8' : null,
     steps: [{ text: '安装并启用插件，再准备 Chrome 连接；安装不表示浏览器已连接。' }],
     configFields: installed
       ? [
+          {
+            key: 'personalChromeAuthorizations',
+            kind: 'operation',
+            label: 'ChatGPT conversation authorizations',
+            currentValue: null,
+            required: false,
+            sensitive: false,
+            operationState,
+            actions: [{ id: 'list', label: 'Authorized conversations', render: 'status', resultRender: 'rows' }],
+            rowActions: [
+              { id: 'check-page', label: '检查会话页面' },
+              { id: 'revoke', label: 'Revoke authorization', confirm: 'Revoke this authorization?' },
+            ],
+          },
           {
             key: 'hostChromeSetup',
             kind: 'operation',
@@ -99,7 +113,9 @@ for (const { presentation, width } of ['v1', 'v2'].flatMap((presentation) =>
       authorized = false,
       bound = false,
       prepared = false,
-      connected = false;
+      connected = false,
+      pageReloadRequired = false;
+    let authOperationState = { currentAction: 'list', updatedAt: 0 };
     const writes = [],
       errors = [];
     page.on('pageerror', (error) => errors.push(error.message));
@@ -118,6 +134,12 @@ for (const { presentation, width } of ['v1', 'v2'].flatMap((presentation) =>
           body: '<!doctype html><meta name="viewport" content="width=device-width, initial-scale=1"><link rel="stylesheet" href="/proof.css"><div id="root"></div><script type="module" src="/proof.js"></script>',
         });
       if (request.method() !== 'GET') writes.push(url.pathname);
+      if (request.method() === 'POST' && url.pathname.startsWith(`${actionBase}personalChromeAuthorizations/`)) {
+        authOperationState = {
+          currentAction: url.pathname.split('/').at(-1),
+          updatedAt: authOperationState.updatedAt + 1,
+        };
+      }
       if (url.pathname === '/api/session') return answer({ userId: 'isolated-owner', csrfToken: 'fixture-csrf' });
       if (url.pathname.endsWith('/cloud-bindings')) {
         if (request.method() === 'PATCH') {
@@ -143,29 +165,52 @@ for (const { presentation, width } of ['v1', 'v2'].flatMap((presentation) =>
       }
       const catalog = { status: 'fresh', refreshedAt: 1 };
       if (url.pathname === '/api/plugin-manager/plugins' || url.pathname === '/api/plugin-manager/plugins/_local')
-        return answer({ plugins: [pro(installed, enabled)], catalog });
+        return answer({ plugins: [pro(installed, enabled, authOperationState)], catalog });
       if (url.pathname.endsWith('/documentation')) return answer({});
       if (url.pathname.endsWith('/contributions/tools')) return answer({ pluginId, tools: [] });
       if (
         url.pathname === `/api/plugin-manager/plugins/${pluginId}` ||
         url.pathname === `/api/plugin-manager/plugins/_local/${pluginId}`
       )
-        return answer({ plugin: pro(installed, enabled), catalog });
+        return answer({ plugin: pro(installed, enabled, authOperationState), catalog });
       if (url.pathname === `${actionBase}personalChromeAuthorizations/list`)
         return installed
           ? answer({
               ok: true,
               render: 'rows',
-              data: { rows: authorized ? [{ key: 'retained-pro', label: '原来授权的会话' }] : [] },
+              data: {
+                rows: authorized
+                  ? [
+                      {
+                        key: 'retained-pro',
+                        label: '原来授权的会话',
+                        actions: [
+                          { action: 'revoke', input: { conversationId: 'retained-pro' } },
+                          { action: 'check-page', input: { conversationId: 'retained-pro' } },
+                        ],
+                      },
+                    ]
+                  : [],
+              },
             })
           : answer({ error: `Plugin '${pluginId}' is not installed` }, 404);
+      if (url.pathname === `${actionBase}personalChromeAuthorizations/check-page`) {
+        assert.deepEqual(request.postDataJSON(), { conversationId: 'retained-pro' });
+        pageReloadRequired = false;
+        return answer({
+          ok: true,
+          render: 'status',
+          label: '原对话页面已就绪（未发送消息）',
+          data: { health: { status: 'ready' } },
+        });
+      }
       if (url.pathname === `${actionBase}personalChromeAuthorizations/status`)
         return answer({
           ok: true,
           render: 'status',
           data: {
             helper: { state: connected ? 'connected' : prepared ? 'unreachable' : 'not_installed' },
-            delivery: { reloadRequired: prepared && !connected },
+            delivery: { reloadRequired: prepared && !connected, pageReloadRequired },
           },
         });
       if (url.pathname.startsWith(`${actionBase}hostChromeSetup/`)) {
@@ -229,9 +274,79 @@ for (const { presentation, width } of ['v1', 'v2'].flatMap((presentation) =>
       await recovery.getByRole('button', { name: '我已授权，重新检查', exact: true }).click();
       await recovery.getByText('原来授权的会话', { exact: true }).waitFor();
       assert.equal(bound, false, 'discovering an authorization never binds it automatically');
+      pageReloadRequired = true; // A later exact probe observed an outdated conversation page.
+      await page.reload();
+      await recovery.getByText(/原对话页面仍在使用旧连接/).waitFor();
+      assert.equal(await recovery.getByText(/Chrome 扩展需要重载/).count(), 0);
+      assert.equal(await recovery.locator('[data-recovery-primary]').isDisabled(), true);
+      assert.equal(bound, false);
+      assert.equal(
+        writes.some((value) => value.endsWith('/retry')),
+        false,
+      );
+      if (process.env.F247_PRO_EVIDENCE_DIR) {
+        await mkdir(process.env.F247_PRO_EVIDENCE_DIR, { recursive: true });
+        await page.screenshot({
+          path: path.join(process.env.F247_PRO_EVIDENCE_DIR, `page-reload-${presentation}-${width}.png`),
+          fullPage: true,
+        });
+      }
+      // The owner has reloaded that original ChatGPT page; explicitly check its row in Settings.
+      await recovery.getByRole('link', { name: '检查 Chrome 连接', exact: true }).click();
+      const authRow = await page.getByTestId(`${pluginId}-row-retained-pro`).elementHandle();
+      assert.ok(authRow);
+      const listedBeforeCheck = writes.filter(
+        (value) => value === `${actionBase}personalChromeAuthorizations/list`,
+      ).length;
+      const stateBeforeCheck = authOperationState.updatedAt;
+      const detailRefresh = page.waitForResponse((response) => {
+        const url = new URL(response.url());
+        return (
+          response.request().method() === 'GET' &&
+          [`/api/plugin-manager/plugins/${pluginId}`, `/api/plugin-manager/plugins/_local/${pluginId}`].includes(
+            url.pathname,
+          )
+        );
+      });
+      await page.getByRole('button', { name: '检查会话页面', exact: true }).click();
+      const refreshedDetail = await (await detailRefresh).json();
+      assert.ok(
+        refreshedDetail.plugin.configFields.find((field) => field.key === 'personalChromeAuthorizations').operationState
+          .updatedAt > stateBeforeCheck,
+        'the real detail callback must observe the advanced operation state',
+      );
+      await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+      const checkedRow = page.getByTestId(`${pluginId}-row-retained-pro`);
+      await checkedRow.getByRole('status').filter({ hasText: '原对话页面已就绪（未发送消息）' }).waitFor();
+      assert.equal(
+        await checkedRow.getByRole('status').evaluate((node) => {
+          const rect = node.getBoundingClientRect();
+          return rect.top < innerHeight && rect.bottom > 0;
+        }),
+        true,
+        'row feedback stays beside the clicked conversation in the viewport',
+      );
+      if (width === 390) {
+        const title = await checkedRow.locator('p').first().boundingBox();
+        assert.ok(title.width > 120, 'mobile conversation titles retain readable width');
+      }
+      assert.equal(await authRow.evaluate((row) => row.isConnected), true, 'runtime-state refresh must retain the row');
+      assert.equal(
+        writes.filter((value) => value === `${actionBase}personalChromeAuthorizations/list`).length,
+        listedBeforeCheck,
+        'detail state refresh must not reset or re-list the operation',
+      );
+      if (process.env.F247_PRO_EVIDENCE_DIR) {
+        await page.screenshot({
+          path: path.join(process.env.F247_PRO_EVIDENCE_DIR, `page-check-${presentation}-${width}.png`),
+          fullPage: true,
+        });
+      }
+      await page.goBack();
+      await recovery.getByText('原来授权的会话', { exact: true }).waitFor();
       // Bind through the thread chooser; sending a production message is outside this proof.
       const chooser = page.getByTestId('cloud-conversation-link');
-      await chooser.getByRole('button', { name: '重新检查', exact: true }).click();
+      await chooser.getByRole('radio').waitFor();
       await chooser.getByRole('radio').check();
       await chooser.getByRole('button', { name: '连接这个会话', exact: true }).click();
       await chooser.locator('[data-route-status="connected"]').waitFor();

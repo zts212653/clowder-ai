@@ -1,9 +1,7 @@
 import assert from 'node:assert/strict';
-import { spawn, spawnSync } from 'node:child_process';
 import { EventEmitter } from 'node:events';
 import { existsSync, readFileSync, realpathSync, statSync } from 'node:fs';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
-import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { isAbsolute, join, relative } from 'node:path';
 import { PassThrough } from 'node:stream';
@@ -88,16 +86,23 @@ async function fixture(t, serviceOverrides = {}) {
     },
   };
   const spawnFn = (_command, args, options) => {
-    const launchArgs = codexConfigObjectFromArgs(args).mcp_servers?.[server.name]?.args;
-    const specPath = launchArgs?.[1];
-    const spec = specPath ? JSON.parse(readFileSync(specPath, 'utf8')) : undefined;
+    const descriptor = codexConfigObjectFromArgs(args).mcp_servers?.[server.name];
+    const inherited = Object.fromEntries(
+      (descriptor?.env_vars ?? [])
+        .filter((key) => options.env[key] !== undefined)
+        .map((key) => [key, options.env[key]]),
+    );
+    const spec = descriptor ? { ...descriptor, env: { ...inherited, ...descriptor.env } } : undefined;
+    const specPath = spec?.env?.CAT_CAFE_CREDENTIAL_FILE;
     const specMode = specPath ? statSync(specPath).mode & 0o777 : undefined;
+    const authentication = specPath ? JSON.parse(readFileSync(specPath, 'utf8')) : undefined;
     const authPath = options.env.CODEX_HOME && join(options.env.CODEX_HOME, 'auth.json');
     const authTarget = authPath && existsSync(authPath) ? realpathSync(authPath) : undefined;
     calls.push({
       args: [...args],
       options: { ...options, env: { ...options.env } },
       spec,
+      authentication,
       specMode,
       specPath,
       authTarget,
@@ -121,6 +126,7 @@ async function fixture(t, serviceOverrides = {}) {
         await duringSpawn(calls.at(-1));
       } catch (error) {
         child.emit('error', error);
+        child.kill();
         return;
       }
       child.stdout.end(`${JSON.stringify({ type: 'turn.completed', usage: {} })}\n`);
@@ -177,8 +183,9 @@ async function fixture(t, serviceOverrides = {}) {
   };
 }
 
-test('the private plugin wrapper runs the real guarded MCP without enabling native hooks', async (t) => {
+test('the admitted plugin runs directly without a protection process or native hooks', async (t) => {
   const f = await fixture(t);
+  f.options.callbackEnv.CAT_CAFE_CALLBACK_TOKEN += '-long-fixture-value';
   const file = join(f.packageRoot, 'result.txt');
   await writeFile(file, 'clean');
   writeMcpProbe(f.launch.server.args[0], `return {text:readFileSync(${JSON.stringify(file)},'utf8')};`);
@@ -191,7 +198,7 @@ test('the private plugin wrapper runs the real guarded MCP without enabling nati
     const transport = new StdioClientTransport({
       command: server.command,
       args: server.args,
-      env: call.options.env,
+      env: call.spec.env,
       stderr: 'pipe',
     });
     transport.stderr?.on('data', () => {});
@@ -202,11 +209,10 @@ test('the private plugin wrapper runs the real guarded MCP without enabling nati
       assert.equal(JSON.parse(clean.content[0].text).text, 'clean');
       const fake = ['ghp', '_', 'Z'.repeat(36)].join('');
       const blocked = await client.callTool({ name: 'probe', arguments: { text: fake } });
-      assert.equal(blocked.isError, true);
+      assert.notEqual(blocked.isError, true);
       await writeFile(file, fake);
       const redacted = await client.callTool({ name: 'probe', arguments: {} });
-      assert.ok(!JSON.stringify(redacted).includes(fake));
-      assert.match(JSON.stringify(redacted), /轮转/);
+      assert.ok(JSON.stringify(redacted).includes(fake), 'third-party MCP result inspection was explicitly retired');
       checked = true;
     } finally {
       await client.close();
@@ -283,16 +289,15 @@ test(
     }
     assert.equal(args.includes('--add-dir'), false);
     const values = configValues(args);
-    assert.equal(values.get('mcp_servers'), '{}');
-    const servers = [...values.keys()].filter((key) => key.startsWith('mcp_servers.'));
-    assert.ok(servers.length > 0, 'the admitted server must actually be injected');
-    assert.ok(servers.every((key) => key.startsWith('mcp_servers.plugin__fixture__native.')));
-    assert.equal(values.get('mcp_servers.plugin__fixture__native.command'), JSON.stringify(process.execPath));
+    const configured = codexConfigObjectFromArgs(args).mcp_servers;
+    assert.deepEqual(Object.keys(configured), [f.launch.server.name]);
+    assert.equal(configured[f.launch.server.name].command, process.execPath);
     const { spec, specMode, specPath } = f.calls[0];
     assert.equal(spec.command, process.execPath);
     assert.deepEqual(spec.args, [join(f.packageRoot, 'native.mjs'), '--bound']);
     assert.equal(spec.cwd, f.packageRoot);
-    assert.equal(spec.env.CAT_CAFE_CALLBACK_TOKEN, 'current-fixture');
+    assert.equal(spec.env.CAT_CAFE_CALLBACK_TOKEN, undefined);
+    assert.equal(f.calls[0].authentication.callbackToken, 'current-fixture');
     assert.equal(spec.env.CLOWDER_PLUGIN_ACTION_TOKEN, 'activation-fixture');
     assert.equal(spec.env.OPENAI_API_KEY, undefined);
     assert.equal(specMode, 0o600);

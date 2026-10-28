@@ -6,8 +6,10 @@ import type {
   CollectiveWorkProjection,
 } from './client-types.js';
 import type { SharedArtifact } from './collective-artifact-client.js';
+import { useCollectiveLanguage } from './collective-copy.js';
 import { type ProjectArtifactStatus, ProjectArtifactSummary } from './ProjectArtifactSurface.js';
 import { AgentIdentityChip, HumanIdentityChip } from './ProjectIdentityChip.js';
+import { formatWorkDate } from './project-time.js';
 import { projectBoardColumn, worksForRoadmap } from './roadmap-view-model.js';
 import { workBlockingPresentation } from './work-blocking-presentation.js';
 
@@ -178,6 +180,7 @@ function ProjectListRow({
   readonly onOpen: (roadmap: CollectiveRoadmapRecord) => void;
   readonly onOpenArtifact?: (artifact: SharedArtifact) => void;
 }) {
+  const language = useCollectiveLanguage();
   const projectWorks = worksForRoadmap(roadmap, works);
   const blocked = projectWorks.filter((work) => work.status === 'blocked').length;
   const unassigned = projectWorks.filter((work) => work.status === 'unassigned').length;
@@ -196,6 +199,13 @@ function ProjectListRow({
         <span className="project-list-identity">
           <strong>{roadmap.title}</strong>
           <small>{roadmap.purpose}</small>
+          {roadmap.targetDate && (
+            <small>
+              {language === 'en' ? 'Target' : '目标'} {formatWorkDate(roadmap.targetDate, language)} ·{' '}
+              {roadmap.targetDate.actor.displayName}
+              {language === 'en' ? '' : '定'}
+            </small>
+          )}
         </span>
         <span className="project-list-people">
           <HumanIdentityChip

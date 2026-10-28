@@ -1,5 +1,5 @@
 'use client';
-import type { WorkContextRecord, WorkVideoContext } from '@cat-cafe/shared';
+import type { AssetCanonItem, AssetCanonUpdate, WorkContextRecord, WorkVideoContext } from '@cat-cafe/shared';
 import { useState } from 'react';
 import { VideoWorkMaterials } from './VideoWorkMaterials';
 import { VideoWorkSource } from './VideoWorkSource';
@@ -16,8 +16,16 @@ export function VideoWorkSidebar({
   assetUrl,
   clock,
   currentTick,
+  canon,
 }: {
   record: WorkContextRecord | null;
+  canon?: {
+    error?: string;
+    selectedId?: string;
+    items: Record<string, AssetCanonItem>;
+    updates: AssetCanonUpdate[];
+    onSelect: (id: string) => void;
+  };
   clock?: StoryClock;
   currentTick?: number;
   loading: boolean;
@@ -65,6 +73,9 @@ export function VideoWorkSidebar({
             key={`${record?.reference.contentRef}:${record?.reference.ownerRevision}:${record?.metadataRevision}`}
             record={record}
             assetUrl={assetUrl}
+            clock={clock}
+            onSeek={onSeek}
+            {...canon}
           />
         )
       ) : null}

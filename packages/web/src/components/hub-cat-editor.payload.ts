@@ -224,6 +224,7 @@ export function buildCatPayload(form: HubCatEditorFormState, cat?: CatData | nul
     variantLabel: trimText(form.variantLabel),
     nickname: trimText(form.nickname),
     avatar: trimText(form.avatar),
+    ...(form.banner?.trim() ? { banner: form.banner.trim() } : cat?.banner ? { banner: null } : {}),
     color: {
       primary: trimText(form.colorPrimary),
       secondary: trimText(form.colorSecondary),
@@ -326,6 +327,7 @@ export function buildCatPatchPayload(form: HubCatEditorFormState, cat: CatData, 
 
 export function buildMemberPatchPayload(form: HubCatEditorFormState, cat: CatData, context: CatPayloadContext = {}) {
   const payload = buildCatPatchPayload(form, cat, context);
+  if (cat.visualAssets && cat.visualAssets.state !== 'unlinked') delete payload.avatar;
   // Compare form projections, not normalized persisted objects: a name-only save
   // must not round ACP TTLs, rewrite voice extensions or persist inferred defaults.
   const baseline = buildCatPayload(initialState(cat), cat, context) as Record<string, unknown>;

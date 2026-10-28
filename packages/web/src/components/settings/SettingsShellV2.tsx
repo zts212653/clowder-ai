@@ -1,7 +1,9 @@
 'use client';
 
 import { Fragment, useState } from 'react';
+import { useCoCreatorConfig } from '@/hooks/useCoCreatorConfig';
 import { usePinnedSections } from '@/hooks/usePinnedSections';
+import { AvatarImageWithFallback } from '../AvatarImageWithFallback';
 import { HubIcon } from '../hub-icons';
 import { useShellCopy } from '../shell/shell-copy';
 import { useOpenDestination } from '../shell/use-open-destination';
@@ -23,6 +25,7 @@ import { ThemeSettingsPanel } from './ThemeSettingsPanel';
 /** The value `?s=` takes when a first-level entry is chosen: its first old section, or `theme`. */
 function selectionForEntry(entry: SettingsEntry): string | null {
   const destination = entry.destination;
+  if (destination.kind === 'you') return 'you';
   if (destination.kind === 'theme') return 'theme';
   if (destination.kind !== 'sections') return null;
   const first = destination.items.find((item) => item.kind === 'section');
@@ -58,7 +61,7 @@ function SettingsReturnRow() {
 }
 
 /**
- * 设置与管理 (Café 1.6): 11 first-level destinations in three hairline-separated groups, default 猫猫团队.
+ * 设置与管理: the personal You entry precedes the existing grouped destinations; default 猫猫团队.
  * Every old section keeps its id, renderer, `/settings?s=` link and extra params; entries that live somewhere else open
  * that place instead of copying it.
  */
@@ -74,6 +77,7 @@ export function SettingsShellV2({
   onSelect: (selection: string) => void;
 }) {
   const { openEntry, openTeam } = useOpenDestination();
+  const owner = useCoCreatorConfig();
   const [mobileNavigation, setMobileNavigation] = useState(false);
   const { isPinned, pin, unpin } = usePinnedSections();
   // The words of the frame follow the shell language; ids, icons, groups and destinations stay in settings-ia.
@@ -150,10 +154,29 @@ export function SettingsShellV2({
                       fontWeight: isActive ? 500 : undefined,
                     }}
                   >
-                    <span className="flex-none" style={{ color: 'var(--shell-muted)' }}>
-                      <HubIcon name={entry.icon} className="h-4 w-4" />
-                    </span>
-                    <span className="min-w-0 flex-1 truncate">{labelOf(entry)}</span>
+                    {entry.id === 'you' ? (
+                      <>
+                        <span
+                          className="flex h-5 w-5 flex-none items-center justify-center overflow-hidden rounded-full"
+                          style={{ background: 'var(--color-cocreator-primary)', color: 'var(--shell-paper)' }}
+                        >
+                          {owner.avatar ? (
+                            <AvatarImageWithFallback src={owner.avatar} alt="" className="h-full w-full object-cover" />
+                          ) : (
+                            owner.name.slice(0, 1)
+                          )}
+                        </span>
+                        <span className="min-w-0 truncate">{owner.name}</span>
+                        <span style={{ color: 'var(--shell-muted)' }}>{t.entries.you}</span>
+                      </>
+                    ) : (
+                      <>
+                        <span className="flex-none" style={{ color: 'var(--shell-muted)' }}>
+                          <HubIcon name={entry.icon} className="h-4 w-4" />
+                        </span>
+                        <span className="min-w-0 flex-1 truncate">{labelOf(entry)}</span>
+                      </>
+                    )}
                   </button>
                   <span
                     className={`absolute right-1 ${isPinned(destPinId(entry.id)) ? '' : 'opacity-0 focus-within:opacity-100 group-hover:opacity-100'}`}
@@ -174,6 +197,7 @@ export function SettingsShellV2({
       <div
         className={`min-h-0 min-w-0 flex-1 ${fixedLayout ? 'overflow-hidden' : 'overflow-y-auto'}`}
         data-trajectory-origin-scroll
+        data-background-sampling-area="settings-content"
       >
         <div
           className={`${fixedLayout ? 'flex h-full min-h-0 flex-col gap-5' : 'space-y-5'} px-5 py-5 md:px-8 md:py-7`}

@@ -127,8 +127,8 @@ test('self-host and gate consume unproved code without erasing literal data role
     runtime: { worktree: main, apiPid: 4242, apiPort: 18080 },
     hostDependencies: [{ kind: 'api', pid: 4242, port: 18080 }],
   };
-  assert.notEqual(assessSideEffect(`bash -c "echo $(printf 'OK; kill -9 4242')"`, '/tmp', facet).verdict, 'allow');
-  assert.equal(gateBackgroundDecision(payload(`bash -c "echo $(printf 'OK; pnpm gate')"`)), true);
+  assert.equal(executedInvocations(`bash -c "echo $(printf 'OK; kill -9 4242')"`).complete, false);
+  assert.equal(executedInvocations(`bash -c "echo $(printf 'OK; pnpm gate')"`).complete, false);
   assert.equal(assessSideEffect(`bash -c 'echo "$(printf "%s" "OK; kill -9 4242")"'`, '/tmp', facet).verdict, 'allow');
   assert.equal(gateBackgroundDecision(payload(`bash -c 'echo "$(printf "%s" "OK; pnpm gate")"'`)), false);
 });

@@ -24,6 +24,7 @@ export function useMessageAnnotationMarkers(
         .filter(
           ({ attachment }) =>
             attachment.source.kind !== 'workspace_file' &&
+            attachment.source.kind !== 'collective_message' &&
             !(attachment.source.kind === 'message' && attachment.source.artifactFile) &&
             attachment.source.threadId === threadId &&
             attachment.source.messageId === messageId,

@@ -1,5 +1,7 @@
 import type { RedisClient } from '@cat-cafe/shared/utils';
 import { createModuleLogger } from '../../infrastructure/logger.js';
+import { hydrateTask } from '../cats/services/stores/redis/RedisTaskCodec.js';
+import { TaskKeys } from '../cats/services/stores/redis-keys/task-keys.js';
 import type {
   ActionSubjectTerminalTruth,
   ActionSuccessorClaimStoreResult,
@@ -41,6 +43,7 @@ import {
   returnActionSuccessorToPredecessor,
 } from './action-successor-state-machine.js';
 import { runTaskContinuationFencedCommand } from './approved-task-continuation-fence.js';
+import { isRetiredTaskAction } from './retired-task-action.js';
 
 const MAX_CAS_ATTEMPTS = 20;
 const MAX_MALFORMED_CENSUS_SAMPLES = 5;
@@ -176,7 +179,18 @@ export class RedisActionSuccessorLeaseStore implements ActionSuccessorLeaseStore
       const batch = keys.slice(offset, offset + batchSize);
       const raws = await this.redis.mget(...batch);
       const parsed = parseCensusBatch(batch, raws, predicate);
-      matches.push(...parsed.matches);
+      for (const lease of parsed.matches) {
+        const retired = await isRetiredTaskAction(
+          {
+            get: async (id) => {
+              const raw = await this.redis.hgetall(TaskKeys.detail(id));
+              return raw.id ? hydrateTask(raw) : null;
+            },
+          },
+          lease,
+        );
+        if (!retired) matches.push(lease);
+      }
       malformedCount += parsed.malformedCount;
       malformedSamples.push(
         ...parsed.malformedSamples.slice(0, MAX_MALFORMED_CENSUS_SAMPLES - malformedSamples.length),

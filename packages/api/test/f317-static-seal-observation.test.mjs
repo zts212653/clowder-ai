@@ -164,3 +164,75 @@ test('a failed parallel scan drains its other readers before returning the origi
   assert.equal(active, 0);
   await assert.rejects(check(), /damaged/);
 });
+
+test('other seal IO can independently exhaust observation freshness without any store transaction', async (t) => {
+  let release;
+  const held = new Promise((resolve) => {
+    release = resolve;
+  });
+  const pending = [];
+  t.after(async () => {
+    release();
+    await Promise.allSettled(pending);
+  });
+  const root = await tree(t);
+  const check = await sealStaticPackage(root, async () => {});
+  let now = 2_000;
+  let monotonic = 0;
+  t.mock.method(performance, 'now', () => monotonic);
+  let occupied = 0;
+  let enter;
+  const entered = new Promise((resolve) => {
+    enter = resolve;
+  });
+  const lstat = fs.lstat;
+  instrument(t, async (read) => read());
+  fs.lstat = async (path, ...args) => {
+    if (String(path).includes('/asset-') && occupied < 4) {
+      if (++occupied === 4) enter();
+      await held;
+    }
+    return lstat(path, ...args);
+  };
+  syncBuiltinESMExports();
+  pending.push(check());
+  await entered;
+  const observer = new DesktopWindowObserver({
+    id: 'fixture',
+    lease: 'lease',
+    freshnessMs: 15_000,
+    now: () => now,
+    isCurrent: () => true,
+    window: { poll: async () => 'visible' },
+    connection: { renewRuntimeLease: async () => {} },
+    features: {
+      run: async (_lease, publish, diagnostics) => {
+        await check(diagnostics.packageDiagnostics);
+        await publish({ contributionIds: ['window'] });
+      },
+    },
+  });
+  const failed = assert.rejects(observer.observe(), /observation expired/);
+  pending.push(failed);
+  await turn(); // The newer consumer has queued behind the four held operations.
+  now += 24_000;
+  monotonic += 24_000;
+  release();
+  await Promise.all(pending);
+  const diagnostic = observer.diagnostic();
+  assert.equal(observer.observation, undefined);
+  assert.equal(diagnostic.error.reason, 'observation_expired');
+  assert.equal(diagnostic.costs.seal.maxQueueWaitMs, 24_000);
+  assert.equal(diagnostic.costs.seal.longestQueueWait.slotWaitMs, 24_000);
+  assert.equal(diagnostic.costs.seal.longestQueueWait.resumeDelayMs, 0);
+  assert.equal(diagnostic.costs.seal.longestQueueWait.releasedBy.caller, 'other');
+  assert.equal(diagnostic.costs.seal.longestQueueWait.releasedBy.operation, 'lstat');
+  assert.equal(diagnostic.costs.seal.longestQueueWait.waitingAhead, 16);
+  assert.equal(
+    diagnostic.costs.seal.longestQueueWait.releasedBy.ioAwaitMs,
+    0,
+    'the final handoff is a later short read; the sixteen queued predecessors include the earlier stall',
+  );
+  assert.equal(diagnostic.costs.seal.ioPeak, 4);
+  assert.equal(diagnostic.costs.seal.lstatCalls, 22, 'the newer consumer still completes the entire tree check');
+});

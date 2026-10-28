@@ -8,8 +8,8 @@ import { namedAlphaEnvironment } from '../../../../scripts/lib/alpha-coordinates
 import { CodexAgentService } from '../../dist/domains/cats/services/agents/providers/CodexAgentService.js';
 import { resolveClaudeMcpConfig } from '../../dist/domains/cats/services/agents/providers/claude-mcp-config.js';
 import { writeOpenCodeRuntimeConfig } from '../../dist/domains/cats/services/agents/providers/opencode-config-writer.js';
+import { upstreamMcpServersFromArgs } from './direct-mcp-contract.js';
 import { fakeL0Compiler } from './fake-l0-compiler.js';
-import { upstreamMcpServersFromArgs } from './secret-mcp-contract.js';
 
 export const memberIds = ['codex', 'opus', 'kimi', 'glm52'];
 export const callbackFixture = {

@@ -5,10 +5,12 @@ import { after, before, test } from 'node:test';
 import { chromium } from '../../../ppt-forge/node_modules/playwright/index.mjs';
 import { runClaudeAccountJourney } from './f320-claude-accounts.journey.mjs';
 import { startFinalAccountPreview } from './f320-final-runtime.fixture.mjs';
+import { registerCodexStartupJourney } from './f320-startup-recovery.journey.mjs';
 
 let preview, browser, companyIdentity;
+registerCodexStartupJourney({ preview: () => preview, browser: () => browser });
 before(async () => {
-  preview = await startFinalAccountPreview({ withOverrides: true, withClaude: true });
+  preview = await startFinalAccountPreview({ withOverrides: true, withClaude: true, withStartupRecovery: true });
   browser = await chromium.launch({ headless: true });
 });
 after(async () => {

@@ -8,8 +8,15 @@
     "./styles.css": "./src/styles.css"
   },
   "dependencies": {
+    "@cat-cafe/shared": "workspace:*",
+    "dompurify": "^3.3.3",
     "react": "^18.2.0",
-    "react-dom": "^18.2.0"
+    "react-dom": "^18.2.0",
+    "react-markdown": "^10.1.0",
+    "remark-breaks": "^4.0.0",
+    "remark-gfm": "^4.0.1",
+    "remark-parse": "^11.0.0",
+    "unified": "^11.0.5"
   },
   "devDependencies": {
     "@types/react": "^18.2.0",

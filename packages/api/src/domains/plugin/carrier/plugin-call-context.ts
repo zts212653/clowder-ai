@@ -12,6 +12,8 @@ export interface PluginCallContext {
   readonly threadId: string;
   readonly userId: string;
   readonly invocationId: string;
+  /** Set only inside the Host's admitted project-output dispatcher. */
+  readonly outputOperation?: { readonly id: string };
   /** Host-only authenticated lookup; never serialized into package identity or action input. */
   /** Authenticated facts, not permission inferred from a matching userId. */
   readonly ownerAuthProvenance?: OwnerAuthProvenance;

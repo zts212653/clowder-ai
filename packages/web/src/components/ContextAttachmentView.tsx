@@ -1,9 +1,11 @@
 'use client';
 
 import type { ContextAttachment, MediaContextAttachment, WorkspaceFileQuoteSource } from '@cat-cafe/shared';
+import { QuoteExcerpt } from '@cat-cafe/ui';
 import { useState } from 'react';
 import { useChatStore } from '@/stores/chatStore';
 import { apiFetch } from '@/utils/api-client';
+import { AssetAttachmentView } from './AssetAttachmentView';
 import { ComposerFileQuoteTags } from './ComposerFileQuoteTags';
 import { GalleryAttachmentGroup } from './content-review/GalleryAttachmentGroup';
 import { sameGalleryGroup } from './content-review/media-chat-selection';
@@ -12,6 +14,7 @@ import { replyBodyCopy } from './reply-body.shell-copy';
 import { useShellCopy } from './shell/shell-copy';
 import { useShellPresentation } from './shell/shell-presentation';
 import { pushThreadRouteWithHistory } from './ThreadSidebar/thread-navigation';
+import { assetGroupKey, WorkAssetAttachmentGroup } from './WorkAssetAttachmentGroup';
 import { ProjectScreeningAttachmentView } from './workbench/video-project/ProjectScreeningAttachmentView';
 
 interface ContextAttachmentViewProps {
@@ -19,6 +22,7 @@ interface ContextAttachmentViewProps {
   compact?: boolean;
   onRemove?: () => void;
   quoteNumber?: number;
+  threadId?: string;
 }
 
 /**
@@ -59,6 +63,8 @@ async function confirmQuotedLine(
 }
 
 export function ContextAttachmentView(props: ContextAttachmentViewProps) {
+  if (props.attachment.kind === 'asset')
+    return <AssetAttachmentView attachment={props.attachment} onRemove={props.onRemove} threadId={props.threadId} />;
   if (props.attachment.kind === 'media')
     return (
       <GalleryAttachmentGroup
@@ -138,22 +144,19 @@ function OrdinaryContextAttachmentView({
           <span className="block min-w-0 truncate text-xs font-medium text-cafe-secondary">{presentation.title}</span>
           {quoteNumber ? <span className="shrink-0 text-xs text-cafe-secondary">{t.place(quoteNumber)}</span> : null}
         </span>
-        <span
-          className={`block text-micro text-cafe-muted ${attachment.kind === 'quote' ? 'line-clamp-3 whitespace-pre-wrap' : 'truncate font-mono'}`}
-        >
-          {presentation.detail}
-        </span>
+        {attachment.kind === 'quote' ? (
+          <QuoteExcerpt
+            text={attachment.text}
+            comment={attachment.comment}
+            commentLabel={presentation.commentLabel}
+            compact
+          />
+        ) : (
+          <span className="block text-micro text-cafe-muted truncate font-mono">{presentation.detail}</span>
+        )}
         {(isUnversionedFileQuote(attachment) || location) && (
           <span className="mt-0.5 block text-micro text-cafe-secondary">
             {location === 'changed' ? t.changedFileQuote : t.unversionedFileQuote}
-          </span>
-        )}
-        {attachment.kind === 'quote' && attachment.comment && (
-          <span className="mt-1.5 block border-l-2 border-cafe-accent/50 pl-2 text-xs leading-relaxed text-cafe-primary">
-            <span className={`mr-1 text-micro font-semibold ${isV2 ? '' : 'uppercase '}tracking-wide text-cafe-muted`}>
-              {presentation.commentLabel}
-            </span>
-            {attachment.comment}
           </span>
         )}
       </span>
@@ -198,10 +201,12 @@ export function ContextAttachmentList({
   attachments,
   compact = false,
   onRemove,
+  threadId,
 }: {
   attachments: readonly ContextAttachment[];
   compact?: boolean;
   onRemove?: (id: string) => void;
+  threadId?: string;
 }) {
   const v2FileTags = useShellPresentation() === 'v2' && compact && Boolean(onRemove);
   if (attachments.length === 0) return null;
@@ -231,6 +236,30 @@ export function ContextAttachmentList({
       className={compact ? 'relative flex flex-wrap gap-2 px-4 pt-2' : undefined}
     >
       {attachments.map((attachment) => {
+        const workKey = assetGroupKey(attachment);
+        const materialGroup = workKey
+          ? attachments.filter(
+              (a): a is Extract<ContextAttachment, { kind: 'asset' }> =>
+                a.kind === 'asset' && assetGroupKey(a) === workKey,
+            )
+          : [];
+        if (materialGroup.length) {
+          if (renderedGalleries.has(attachment.id)) return null;
+          const media = attachments.filter(
+            (a): a is MediaContextAttachment => a.kind === 'media' && assetGroupKey(a) === workKey,
+          );
+          for (const item of [...media, ...materialGroup]) renderedGalleries.add(item.id);
+          return (
+            <WorkAssetAttachmentGroup
+              key={attachment.id}
+              assets={materialGroup}
+              threadId={threadId}
+              media={media}
+              compact={compact}
+              onRemove={onRemove}
+            />
+          );
+        }
         if (attachment.kind === 'media') {
           if (renderedGalleries.has(attachment.id)) return null;
           const group = attachment.gallery

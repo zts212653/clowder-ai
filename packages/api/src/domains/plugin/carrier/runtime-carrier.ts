@@ -26,6 +26,7 @@ import { ExternalPluginRuntimeError, type VerifiedPluginPackageLocator } from '.
 import type { PluginInventoryStore } from '../host-inventory/ports.js';
 import { assertExecutablePackage } from '../host-inventory/stored-manifest.js';
 import type { ExecutablePluginPackageRecord, PluginInstanceRecord } from '../host-inventory/types.js';
+import type { PluginProjectOutputs } from '../outputs/project-output-actions.js';
 import {
   attemptPluginAction,
   invocationNotStarted,
@@ -85,6 +86,7 @@ export class PluginRuntimeCarrierRouter implements PluginRuntimeLifecyclePort {
     private readonly resources?: DeclaredStaticResourceHost,
     runtimeContributions?: DeclaredRuntimeContributionHost,
     private readonly beforeStop?: (instanceId: string, reason: string) => Promise<void>,
+    private readonly projectOutputs?: PluginProjectOutputs,
   ) {
     this.#runtimeContributions = new DeclaredRuntimeContributions(
       runtimeContributions ?? {
@@ -217,6 +219,14 @@ export class PluginRuntimeCarrierRouter implements PluginRuntimeLifecyclePort {
     return this.#nativeMcpLaunches.resolve(policy);
   }
 
+  /** Isolated deployments read local launches without publishing into the persistent capability root. */
+  async resolveMemberMcpView(): Promise<
+    import('../../../config/capabilities/invocation-plugin-mcp-view.js').InvocationPluginMcpView | undefined
+  > {
+    if (this.resources?.persistCapabilities !== false) return undefined;
+    return this.#nativeMcpLaunches.memberView(this.resources.projectRoot);
+  }
+
   async deliver(pluginInstanceId: string, input: PluginDeliveryInput): Promise<PluginDeliveryReceipt> {
     const method = 'host.messaging.deliver';
     if (!isPluginDeliveryInput(input)) {
@@ -245,12 +255,33 @@ export class PluginRuntimeCarrierRouter implements PluginRuntimeLifecyclePort {
    */
   async attemptInvoke(pluginInstanceId: string, method: string, params: unknown): Promise<PluginInvocationOutcome> {
     let carrier: PluginRuntimeCarrier;
+    let admission: PluginRuntimeAdmission;
     try {
-      carrier = await this.#select(pluginInstanceId);
+      admission = await this.#admission(pluginInstanceId);
+      carrier = this.#selectAdmission(admission);
     } catch (error) {
       return invocationNotStarted(error);
     }
     const attempt = carrier.attemptInvoke?.bind(carrier);
+    if (
+      admission.packageRecord.manifest.projectOutputs?.some(
+        (output) => output.producerMethod === method || output.resultMethod === method,
+      )
+    )
+      return invocationNotStarted(new Error('output_internal_method'));
+    if (admission.packageRecord.manifest.projectOutputs?.some((output) => output.method === method)) {
+      const outputs = this.projectOutputs;
+      if (!outputs) return invocationNotStarted(new Error('project_output_unsupported'));
+      const invoke = carrier.invoke?.bind(carrier);
+      const raw = async (target: string, input: unknown) => {
+        if (attempt) return settlePluginInvocation(await attempt(pluginInstanceId, target, input));
+        if (!invoke) throw new Error('output_producer_unavailable');
+        return invoke(pluginInstanceId, target, input);
+      };
+      return attemptPluginAction(() =>
+        outputs.call(pluginInstanceId, method, params, () => this.#admission(pluginInstanceId), raw),
+      );
+    }
     if (attempt) return reportedPluginInvocation(() => attempt(pluginInstanceId, method, params));
     const invoke = carrier.invoke?.bind(carrier);
     if (!invoke) {
@@ -263,6 +294,15 @@ export class PluginRuntimeCarrierRouter implements PluginRuntimeLifecyclePort {
 
   /** F202 W2-3 h3b: whether the instance's active package exposes `method`. */
   async exposesAction(pluginInstanceId: string, method: string): Promise<boolean> {
+    const admission = await this.#admission(pluginInstanceId);
+    if (
+      admission.packageRecord.manifest.projectOutputs?.some(
+        (output) => output.producerMethod === method || output.resultMethod === method,
+      )
+    )
+      return false;
+    if (admission.packageRecord.manifest.projectOutputs?.some((output) => output.method === method))
+      return this.projectOutputs !== undefined;
     const carrier = await this.#select(pluginInstanceId);
     return carrier.exposesAction?.(pluginInstanceId, method) ?? false;
   }

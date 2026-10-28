@@ -22,6 +22,7 @@ export function ThreadProposalResult({
   threadId,
   openLocked = false,
   effectUnknown = false,
+  effectFailed = false,
   authorizeOpen,
   children,
   onExpandedChange,
@@ -34,6 +35,7 @@ export function ThreadProposalResult({
   threadId?: string | null;
   openLocked?: boolean;
   effectUnknown?: boolean;
+  effectFailed?: boolean;
   authorizeOpen?: () => boolean;
   children: ReactNode;
   onExpandedChange?: (expanded: boolean) => void;
@@ -50,7 +52,9 @@ export function ThreadProposalResult({
   const label = superseded
     ? t.superseded
     : status === 'approved'
-      ? [t.approved, effectUnknown ? t.effectUnknown : threadId ? t.opened : null].filter(Boolean).join(' · ')
+      ? [t.approved, effectFailed ? t.failed : effectUnknown ? t.effectUnknown : threadId ? t.opened : null]
+          .filter(Boolean)
+          .join(' · ')
       : [status === 'rejected' ? t.declined : resultCopy[status], time].filter(Boolean).join(' · ');
   return (
     <div data-testid="thread-proposal-result">
@@ -90,7 +94,7 @@ export function ThreadProposalResult({
                   }
                 }}
               >
-                {t.open}
+                {effectFailed ? t.retry : t.open}
               </button>
             </>
           ) : null

@@ -85,6 +85,7 @@ export interface ModulePluginHostShape {
   readonly tasks: PluginTaskHost;
   readonly members?: PluginNeutralHost['members'];
   readonly collectiveArtifactOwner?: PluginNeutralHost['collectiveArtifactOwner'];
+  readonly collectiveMaterialSource?: PluginNeutralHost['collectiveMaterialSource'];
   readonly threads: PluginThreadHost;
   readonly messaging: PluginMessagingHost;
   readonly streams: PluginStreams;

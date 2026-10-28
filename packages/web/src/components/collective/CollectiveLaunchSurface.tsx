@@ -2,14 +2,14 @@
 
 import type { CollectiveHostParticipationReady } from '@cat-cafe/shared';
 
-import { useMemo, useRef } from 'react';
+import { type RefObject, useEffect, useMemo, useRef, useState } from 'react';
 import { CollectiveCafeHost } from './CollectiveCafeHost';
 import { CollectiveEntryReview } from './CollectiveEntryReview';
 import {
-  CollectiveConnectionPicker,
   CollectiveConnectorBoundary,
   CollectiveLaunchNotice,
   CollectiveServiceSetup,
+  CollectiveWorldUnavailable,
 } from './CollectiveLaunchChrome';
 import { CollectiveMediaShare } from './CollectiveMediaShare';
 import { CollectiveMediaSurface } from './CollectiveMediaSurface';
@@ -41,6 +41,7 @@ export function CollectiveLaunchSurface({
   const explicitWorldTarget = parsedWorldTarget.kind === 'target' ? parsedWorldTarget.target : undefined;
   const hasExplicitWorldIntent = parsedWorldTarget.kind !== 'none';
   const iframeRef = useRef<HTMLIFrameElement>(null);
+  const [frameAttempt, setFrameAttempt] = useState(0);
   const workResult = useAcceptedWorkReconciliation();
   const connector = useCollectiveConnectorLaunch({
     initialServiceUrl,
@@ -70,7 +71,6 @@ export function CollectiveLaunchSurface({
     setServiceInput,
     status,
   } = connector;
-  const liveConnections = status?.connections.filter((item) => item.authorityStatus !== 'revoked') ?? [];
   const pairingBridge = useCollectivePairingBridge({
     iframeRef,
     serviceUrl: world.activeLaunchUrl,
@@ -82,6 +82,13 @@ export function CollectiveLaunchSurface({
   const policyBridge = useCollectiveWorkPolicyBridge(iframeRef, connection, contextBridge.context);
   useCollectiveAppearanceBridge({ iframeRef, frameGeneration: world.frameGeneration });
   const frameUrl = world.frameUrl;
+  const previousRemoteState = useRef(status?.remoteService?.state);
+  useEffect(() => {
+    const current = status?.remoteService?.state;
+    if (previousRemoteState.current === 'offline' && current && current !== 'offline')
+      setFrameAttempt((attempt) => attempt + 1);
+    previousRemoteState.current = current;
+  }, [status?.remoteService?.state]);
 
   if (!status || status.runtimeStatus === 'inactive')
     return <CollectiveConnectorBoundary status={status} error={error} />;
@@ -93,19 +100,23 @@ export function CollectiveLaunchSurface({
       style={{ containerType: 'inline-size', containerName: 'collective-host' }}
     >
       {frameUrl ? (
-        <iframe
-          ref={iframeRef}
-          src={frameUrl}
-          title="Collective"
-          aria-hidden={Boolean(contextBridge.mediaRef || mediaShare.reference)}
-          tabIndex={contextBridge.mediaRef || mediaShare.reference ? -1 : undefined}
-          style={contextBridge.mediaRef || mediaShare.reference ? { visibility: 'hidden' } : undefined}
-          sandbox="allow-forms allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox"
+        <CollectiveWorldFrame
+          iframeRef={iframeRef}
+          frameUrl={frameUrl}
+          frameKey={world.frameKey}
+          frameAttempt={frameAttempt}
+          hidden={Boolean(contextBridge.mediaRef || mediaShare.reference)}
           onLoad={() => {
             pairingBridge.handleFrameLoad();
             contextBridge.reset();
           }}
-          className="h-full w-full border-0 bg-[var(--cafe-surface-sunken)]"
+          retryable={world.retryable}
+          error={world.error}
+          displayName={world.displayName}
+          onRetry={() => {
+            setFrameAttempt((attempt) => attempt + 1);
+            void connector.refresh(true);
+          }}
         />
       ) : (
         <CollectiveServiceSetup
@@ -118,32 +129,15 @@ export function CollectiveLaunchSurface({
           onError={setError}
         />
       )}
-      {frameUrl && (
-        <div
-          aria-hidden="true"
-          style={{
-            position: 'absolute',
-            right: 0,
-            bottom: 0,
-            width: `min(${MESSAGE_ACTION_RESERVE.width}px, 100%)`,
-            height: `min(${MESSAGE_ACTION_RESERVE.height}px, 100%)`,
-            pointerEvents: 'none',
-          }}
-        />
-      )}
-      <CollectiveLaunchNotice
+      <CollectiveWorldStatusNotice
         connectorError={error}
         worldError={world.error}
+        worldRetryable={world.retryable}
         sessionRequired={world.sessionRequired}
         workNotice={workResult.notice}
         pairingError={pairingBridge.error}
         entryError={entry.error}
         entryBusy={entry.busy}
-      />
-      <CollectiveConnectionPicker
-        visible={!hasExplicitWorldIntent && liveConnections.length > 1 && !connection}
-        connections={liveConnections}
-        onSelect={selectConnection}
       />
       {connection && contextBridge.context && (
         <CollectiveCafeHost
@@ -213,5 +207,91 @@ export function CollectiveLaunchSurface({
         />
       )}
     </div>
+  );
+}
+
+function CollectiveWorldFrame({
+  iframeRef,
+  frameUrl,
+  frameKey,
+  frameAttempt,
+  hidden,
+  onLoad,
+  retryable,
+  error,
+  displayName,
+  onRetry,
+}: {
+  readonly iframeRef: RefObject<HTMLIFrameElement>;
+  readonly frameUrl: string;
+  readonly frameKey?: string;
+  readonly frameAttempt: number;
+  readonly hidden: boolean;
+  readonly onLoad: () => void;
+  readonly retryable: boolean;
+  readonly error?: string;
+  readonly displayName?: string;
+  readonly onRetry: () => void;
+}) {
+  return (
+    <>
+      <iframe
+        key={`${frameKey ?? frameUrl}:${frameAttempt}`}
+        ref={iframeRef}
+        src={frameUrl}
+        title="Collective"
+        aria-hidden={hidden}
+        tabIndex={hidden ? -1 : undefined}
+        style={hidden ? { visibility: 'hidden' } : undefined}
+        sandbox="allow-forms allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox"
+        allow="microphone"
+        onLoad={onLoad}
+        className="h-full w-full border-0 bg-[var(--cafe-surface-sunken)]"
+      />
+      <div
+        aria-hidden="true"
+        style={{
+          position: 'absolute',
+          right: 0,
+          bottom: 0,
+          width: `min(${MESSAGE_ACTION_RESERVE.width}px, 100%)`,
+          height: `min(${MESSAGE_ACTION_RESERVE.height}px, 100%)`,
+          pointerEvents: 'none',
+        }}
+      />
+      {retryable && error && <CollectiveWorldUnavailable name={displayName} onRetry={onRetry} />}
+    </>
+  );
+}
+
+function CollectiveWorldStatusNotice({
+  connectorError,
+  worldError,
+  worldRetryable,
+  sessionRequired,
+  workNotice,
+  pairingError,
+  entryError,
+  entryBusy,
+}: {
+  readonly connectorError?: string;
+  readonly worldError?: string;
+  readonly worldRetryable: boolean;
+  readonly sessionRequired: boolean;
+  readonly workNotice?: string;
+  readonly pairingError?: string;
+  readonly entryError?: string;
+  readonly entryBusy?: boolean;
+}) {
+  return (
+    <CollectiveLaunchNotice
+      connectorError={connectorError}
+      worldError={worldRetryable ? undefined : worldError}
+      sessionRequired={sessionRequired}
+      workNotice={workNotice}
+      pairingError={worldRetryable ? undefined : pairingError}
+      entryError={worldRetryable ? undefined : entryError}
+      entryBusy={worldRetryable ? false : entryBusy}
+    />
   );
 }

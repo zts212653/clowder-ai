@@ -10,7 +10,6 @@ import { homedir } from 'node:os';
 import * as path from 'node:path';
 import { createInterface } from 'node:readline';
 import { z } from 'zod';
-import { credentialReadDenial } from '../secret-credential-source.js';
 import { resolveAbsolutePath } from '../utils/path-utils.js';
 import { ensureDir, isPathAllowed } from '../utils/path-validator.js';
 import { authorizeInvocationTool, resolveInvocationEnv } from './invocation-auth.js';
@@ -193,8 +192,6 @@ export async function handleReadFileSlice(input: {
   if (!isPathAllowed(filePath)) {
     return errorResult(`Access denied: ${filePath} is not within allowed directories`);
   }
-  const secretDenial = await credentialReadDenial(filePath);
-  if (secretDenial) return errorResult(secretDenial);
   await authorizeInvocationTool('cat_cafe_read_file_slice');
   if (!fs.existsSync(filePath)) {
     return errorResult(`File not found: ${filePath}`);

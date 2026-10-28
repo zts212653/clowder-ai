@@ -28,6 +28,9 @@ export interface RedisTurnExecutionHash {
   status?: string;
   endedAt?: string;
   terminalReason?: string;
+  providerTeardownAt?: string;
+  providerStartedAt?: string;
+  providerLifecycleTracked?: string;
   /** F117 KD-21: late-bound fence verdict, outside the immutable identity like coverage. */
   outputFence?: string;
 }
@@ -76,6 +79,7 @@ function hasValidLifecycle(record: TurnExecutionRecord): boolean {
     status: record.status,
     endedAt: record.endedAt,
     ...(record.terminalReason !== undefined ? { terminalReason: record.terminalReason } : {}),
+    ...(record.providerTeardownAt !== undefined ? { providerTeardownAt: record.providerTeardownAt } : {}),
   });
   return true;
 }
@@ -106,11 +110,14 @@ export function hydrateTurnExecution(data: RedisTurnExecutionHash): TurnExecutio
       ...(data.queueCompletionPolicy === 'explicit_source'
         ? { queueCompletionPolicy: 'explicit_source' as const }
         : {}),
+      ...(data.providerLifecycleTracked === '1' ? { providerLifecycleTracked: true as const } : {}),
+      ...(data.providerStartedAt ? { providerStartedAt: Number(data.providerStartedAt) } : {}),
       startedAt: Number(data.startedAt),
       ...(legacyCausal ? { causal: legacyCausal } : {}),
       status: data.status as TurnExecutionStatus,
       ...(data.endedAt ? { endedAt: Number(data.endedAt) } : {}),
       ...(data.terminalReason ? { terminalReason: data.terminalReason } : {}),
+      ...(data.providerTeardownAt ? { providerTeardownAt: Number(data.providerTeardownAt) } : {}),
     };
     assertCreateTurnExecutionInput(legacyRecord);
     if (data.immutableIdentity !== serializeTurnExecutionIdentity(legacyRecord)) return null;

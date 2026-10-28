@@ -101,6 +101,8 @@ describe('governance-l0 compiler (#747)', () => {
       'unknown-first',
       '钛合金裤衩子',
       '钛合金内裤',
+      '防弹内裤',
+      '汉弗莱喵',
     ]) {
       assert.ok(l0.includes(word), `missing magic word ${word}`);
     }

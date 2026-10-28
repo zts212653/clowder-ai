@@ -1,3 +1,6 @@
+import { isTaskHandoffSource } from '../../../../ball-custody/OrdinaryTaskHandoffContract.js';
+import { isRetiredTaskAction } from '../../../../ball-custody/retired-task-action.js';
+import type { ITaskStore } from '../../stores/ports/TaskStore.js';
 /**
  * QueueProcessor
  * 处理 InvocationQueue 中的排队条目：自动出队 + 暂停管理。
@@ -562,7 +565,12 @@ export interface QueueProcessorDeps {
   /** Durable child lifecycle and causal coverage; auth registry is not historical truth. */
   turnExecutionStore?: Pick<ITurnExecutionStore, 'get' | 'clearResponsePending' | 'settleOutputFence'>;
   /** F167 Phase S.1: carrier preflight plus failed/canceled runtime outcomes; success requires Evidence→Verdict. */
-  actionSuccessorLeaseStore?: Pick<ActionSuccessorLeaseStore, 'preflight' | 'preflightOutput' | 'commitOutcome'>;
+  taskStore?: Pick<ITaskStore, 'get'>;
+  actionSuccessorLeaseStore?: Pick<
+    ActionSuccessorLeaseStore,
+    'get' | 'preflight' | 'preflightOutput' | 'commitOutcome'
+  >;
+  ordinaryTaskHandoffs?: import('../../../../ball-custody/OrdinaryTaskHandoffService.js').OrdinaryTaskHandoffService;
   deploymentWaitStartGuard?: Pick<DeploymentWaitStartGuard, 'check'>;
   /**
    * F254 Phase E (ADR-041 §5): seed the freshness seenCursor when closure adoption
@@ -997,6 +1005,9 @@ export class QueueProcessor {
     },
     onHandoff?: () => void,
   ): Promise<AppendExactEntryResult> {
+    const sourceEntry = this.deps.queue.getEntrySnapshot(input.threadId, input.userId, input.entryId);
+    if (sourceEntry && (await this.hasTaskHandoffSource([sourceEntry])))
+      return { outcome: 'rejected', reason: 'append_unavailable' };
     if (input.expectedRuns.length > 1) {
       if (this.deps.queue.snapshotRevision(input.threadId, input.userId) !== input.expectedQueueRevision) {
         return { outcome: 'rejected', reason: 'state_changed' };
@@ -3648,6 +3659,10 @@ export class QueueProcessor {
     ) {
       return { started: false };
     }
+    if (entries.length > 1 && (await this.hasTaskHandoffSource(entries))) {
+      await this.deps.queue.restoreClaimedEntries(threadId, entryIds);
+      return { started: false };
+    }
     const slotKey = QueueProcessor.slotKey(threadId, targetCatId);
     if (this.processingSlots.has(slotKey) || this.deps.invocationTracker.has(threadId, targetCatId)) {
       await this.deps.queue.restoreClaimedEntries(threadId, entryIds);
@@ -3687,6 +3702,13 @@ export class QueueProcessor {
     return this.deps.queue.hasDispatchableQueuedForThread(threadId);
   }
 
+  private async hasTaskHandoffSource(entries: readonly QueueEntry[]): Promise<boolean> {
+    const sources = await Promise.all(
+      entries.flatMap(queueEntryMessageIds).map((id) => this.deps.messageStore.getById(id)),
+    );
+    return sources.some(isTaskHandoffSource);
+  }
+
   private async startReservedEntry(
     entry: QueueEntry,
     slotKey: string,
@@ -3699,6 +3721,28 @@ export class QueueProcessor {
     routingOwnerRetryTarget?: string,
   ): Promise<boolean> {
     const attemptedQueueEntryIds = [entry.id, ...claimedBatchMembers.map((candidate) => candidate.id)];
+    const taskSourceId = entry.execution.a2aTriggerMessageId ?? entry.payload.messageId;
+    const taskSource = taskSourceId ? await this.deps.messageStore.getById(taskSourceId) : null;
+    if (taskSource?.extra?.taskHandoff || taskSource?.extra?.taskHandoffInvalid) {
+      let admission;
+      try {
+        admission = await this.deps.ordinaryTaskHandoffs?.apply(taskSource.id);
+      } catch (error) {
+        await this.deps.queue.restoreClaimedEntries(entry.threadId, attemptedQueueEntryIds);
+        this.deps.log.warn({ err: error, taskSourceId }, 'Task start truth unavailable; preserved exact Queue source');
+        return false;
+      }
+      if (!admission || admission.kind === 'waiting') {
+        await this.deps.queue.restoreClaimedEntries(entry.threadId, attemptedQueueEntryIds);
+        return false;
+      }
+      if (admission.kind === 'refused') {
+        await this.deps.queue.restoreClaimedEntries(entry.threadId, attemptedQueueEntryIds);
+        await this.deps.queue.terminalizeEntryDurable(entry.threadId, queueEntryOwnerId(entry), entry.id);
+        await this.cancelMessageIds([taskSource.id], this.deps.log, 'task_assignment_rejected');
+        return false;
+      }
+    }
     const durable = await this.deps.queue.getDurableEntry(entry.threadId, entry.id);
     if (
       (executionTargetCats ?? entry.targets).some(
@@ -4439,6 +4483,7 @@ export class QueueProcessor {
     let heartbeatInterval: ReturnType<typeof setInterval> | undefined;
     let executionError: unknown;
     let actionFencePreflightRejected = false;
+    let retiredTaskAction = false;
     let actionFenceAggregateSucceeded = false;
     const actionFenceCommittedHolderCatIds = new Set<string>();
     const actionFenceOutputValidatedHolderCatIds = new Set<string>();
@@ -4539,7 +4584,7 @@ export class QueueProcessor {
       catIds: readonly string[] = [primaryCat],
     ): Promise<boolean> => {
       const fence = entry.execution.actionSuccessorFence;
-      if (!fence) return true;
+      if (!fence || retiredTaskAction) return true;
       const leaseStore = this.deps.actionSuccessorLeaseStore;
       try {
         if (!leaseStore) throw new Error('action successor lease store unavailable');
@@ -4662,6 +4707,15 @@ export class QueueProcessor {
       // F167 Phase S: a queue row is only a carrier. The durable action lease owns
       // successor cardinality; fail closed before creating an invocation when its
       // generation was replaced or the external subject reached terminal truth.
+      if (entry.execution.actionSuccessorFence && this.deps.taskStore) {
+        const historical = await this.deps.actionSuccessorLeaseStore?.get(entry.execution.actionSuccessorFence.leaseId);
+        retiredTaskAction = Boolean(historical && (await isRetiredTaskAction(this.deps.taskStore, historical)));
+        if (retiredTaskAction) {
+          actionFencePreflightRejected = true;
+          await this.cancelMessageIds(queueEntryMessageIds(entry), log, 'ordinary_task_lease_retired');
+          return executionResult('canceled');
+        }
+      }
       if (entry.execution.actionSuccessorFence) {
         const leaseStore = this.deps.actionSuccessorLeaseStore;
         if (!leaseStore) {

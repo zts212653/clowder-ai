@@ -64,10 +64,10 @@ export const WORKSPACE_MODE_META: Record<WorkspaceMode, WorkspaceModeMeta> = {
     searchTerms: 'schedule cron timer 调度 定时',
   },
   tasks: {
-    label: '任务',
-    description: '毛线球与执行进度',
+    label: '毛线球',
+    description: '这条对话的毛线球与状态',
     group: 'work',
-    searchTerms: 'task plan backlog 毛线球 任务 计划',
+    searchTerms: 'task tasks yarn ball plan backlog 毛线球 任务 计划',
   },
   team: {
     label: '猫猫团队',

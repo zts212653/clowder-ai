@@ -40,6 +40,7 @@ import { ChatContextPicker } from './ChatContextPicker';
 import { ChatInputActionButton } from './ChatInputActionButton';
 import { ChatInputAddMenu } from './ChatInputAddMenu';
 import { ChatInputMenus } from './ChatInputMenus';
+import { ChatInputStickers } from './ChatInputStickers';
 import { ComposerRoutingPreview } from './ComposerRoutingPreview';
 import { useCatCardComposer } from './cat-profile-card/CatProfileCardContext';
 import { chatComposerCopy } from './chat-composer.shell-copy';
@@ -302,6 +303,7 @@ export function ChatInput({
   const [mentionStart, setMentionStart] = useState(-1);
   const [mentionFilter, setMentionFilter] = useState('');
   const [images, setImages] = useState<File[]>(() => (threadId ? (threadImageDrafts.get(threadId) ?? []) : []));
+  const [stickerThread, setStickerThread] = useState<string>();
   const [contextAttachments, setContextAttachments] = useState<ContextAttachment[]>(() =>
     threadId ? (threadContextAttachmentDrafts.get(threadId) ?? []) : [],
   );
@@ -932,6 +934,7 @@ export function ChatInput({
 
   const composerDraftExtras = (
     <ChatComposerDraftExtras
+      threadId={effectiveThreadId}
       files={images}
       contextAttachments={shownContextAttachments}
       replyToMessage={replyToMessage}
@@ -1047,6 +1050,7 @@ export function ChatInput({
         <ChatInputAddMenu
           presentation={presentation}
           onAttach={() => fileInputRef.current?.click()}
+          onStickers={() => setStickerThread(threadId ?? '__new__')}
           onAddContext={() => openContextPicker('all')}
           onWhisperToggle={handleWhisperToggle}
           onClose={() => setAddMenuOpen(false)}
@@ -1057,6 +1061,13 @@ export function ChatInput({
           maxImages={images.length >= 5}
           whisperMode={whisperMode}
           preferredCat={shellV2 ? (preferredCatControl ?? undefined) : undefined}
+        />
+      )}
+      {stickerThread === (threadId ?? '__new__') && (
+        <ChatInputStickers
+          key={threadId ?? '__new__'}
+          onClose={() => setStickerThread(undefined)}
+          onSelect={(file) => setImages((current) => [...current, file].slice(0, 5))}
         />
       )}
 

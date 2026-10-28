@@ -1,0 +1,69 @@
+'use client';
+import { createContext, type ReactNode, useContext, useRef } from 'react';
+import { FileActions } from './FileActions';
+import type { FileActionSource } from './file-action-client';
+
+type OwnerControls = { leading?: ReactNode; controls?: ReactNode };
+const OwnerControlsContext = createContext<OwnerControls>({});
+const HostControlsContext = createContext<ReactNode>(null);
+/** The Workspace host supplies layout controls; the reader keeps the only file row. */
+export const FileToolbarHostControls = HostControlsContext.Provider;
+/** Existing owners project their return/version controls into the reader's single row. */
+export const FileToolbarOwnerControls = OwnerControlsContext.Provider;
+
+/** One row beneath the file tab. Entries supply controls and facts, never their own file menu. */
+export function FileToolbar({
+  source,
+  filename,
+  mime,
+  byteLength,
+  text,
+  leading,
+  controls,
+  readOnlyReason,
+}: {
+  source: FileActionSource;
+  filename: string;
+  mime?: string;
+  byteLength?: number;
+  text?: string;
+  leading?: ReactNode;
+  controls?: ReactNode;
+  readOnlyReason?: string;
+}) {
+  const name = useRef<HTMLSpanElement>(null);
+  const owner = useContext(OwnerControlsContext);
+  const hostControls = useContext(HostControlsContext);
+  return (
+    <div
+      role="toolbar"
+      aria-label="文件操作"
+      data-testid="content-file-toolbar"
+      className="flex h-10 min-w-0 shrink-0 items-center gap-2 border-b border-cafe-subtle bg-cafe-surface px-3"
+    >
+      {leading ?? owner.leading}
+      <span ref={name} title={filename} className="min-w-0 flex-1 truncate text-xs text-cafe-muted">
+        {filename}
+      </span>
+      {readOnlyReason && (
+        <span className="shrink-0 text-xs text-cafe-muted" title={readOnlyReason}>
+          只读
+        </span>
+      )}
+      <div className="flex min-w-0 shrink items-center gap-2 overflow-x-auto">
+        {hostControls}
+        {owner.controls}
+        {controls}
+      </div>
+      <FileActions
+        source={source}
+        filename={filename}
+        mime={mime}
+        byteLength={byteLength}
+        text={text}
+        contextRef={name}
+        copyName
+      />
+    </div>
+  );
+}

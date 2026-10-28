@@ -175,7 +175,8 @@ export function NeedsMeOwnerSurface({
       if (
         actionTarget.kind === 'message' ||
         actionTarget.kind === 'collective-work' ||
-        actionTarget.kind === 'collective-accountability'
+        actionTarget.kind === 'collective-accountability' ||
+        actionTarget.kind === 'collective-project'
       ) {
         navigateToEntrustedWorkAction(actionRef);
         return;

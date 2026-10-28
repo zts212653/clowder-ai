@@ -359,7 +359,53 @@ describe('ChatMessage notice rendering', () => {
     expect(container.querySelector('[data-testid="message-bubble"]')).toBeNull();
     expect(container.querySelector('[data-testid="capability-tip-strip"]')).not.toBeNull();
     expect(container.textContent).not.toContain('正在回复');
-    expect(container.textContent).toContain('avatar');
+    expect(container.textContent).toContain('布偶猫');
+  });
+
+  it('shows account recovery in the existing empty response tip without claiming the model is replying', () => {
+    const now = Date.now();
+    act(() =>
+      root.render(
+        React.createElement(ChatMessage, {
+          getCatById: () => undefined,
+          message: {
+            id: 'startup-response',
+            type: 'assistant',
+            catId: 'codex',
+            content: '',
+            timestamp: now,
+            lifecycle: {
+              kind: 'response',
+              orderKey: '1:startup',
+              invocationId: 'startup',
+              targetId: 'codex',
+              inputEntryIds: [],
+              inputMessageIds: [],
+              status: 'processing',
+              startedAt: now,
+            },
+            extra: {
+              startupRecovery: {
+                invocationId: 'startup',
+                stage: 'retry_wait',
+                sequence: 2,
+                attempt: 1,
+                maxAttempts: 6,
+                startedAt: now,
+                deadlineAt: now + 120_000,
+                updatedAt: now,
+                nextRetryAt: now + 2_000,
+              },
+            },
+          },
+        }),
+      ),
+    );
+    expect(container.querySelector('[data-testid="response-lifecycle-tip"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="codex-startup-recovery"]')).not.toBeNull();
+    expect(container.textContent).toContain('本次任务尚未开始');
+    expect(container.textContent).not.toContain('已接下，还没有输出');
+    expect(container.querySelector('[data-testid="message-bubble"]')).toBeNull();
   });
 
   it.each([

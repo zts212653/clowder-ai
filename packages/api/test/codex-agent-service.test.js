@@ -10,9 +10,9 @@ import { basename, dirname, join } from 'node:path';
 import { PassThrough } from 'node:stream';
 import { describe, mock, test } from 'node:test';
 import { catRegistry } from '@cat-cafe/shared';
+import { upstreamMcpServersFromArgs } from './helpers/direct-mcp-contract.js';
 import { assertSelectedApiAccount, installAmbientCodexAccount } from './helpers/f320-auth-environment.js';
 import { fakeL0Compiler } from './helpers/fake-l0-compiler.js';
-import { upstreamMcpServersFromArgs } from './helpers/secret-mcp-contract.js';
 
 const {
   CodexAgentService: ProductionCodexAgentService,
@@ -1139,7 +1139,7 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
 
           const servers = upstreamMcpServersFromArgs(args);
           const dash = servers['foo-bar'].bearer_token_env_var;
-          const underscore = servers['foo_bar'].bearer_token_env_var;
+          const underscore = servers.foo_bar.bearer_token_env_var;
           assert.match(dash, /^CAT_CAFE_MCP_BEARER_/);
           assert.match(underscore, /^CAT_CAFE_MCP_BEARER_/);
           assert.notEqual(dash, underscore, 'normalizing IDs must not collapse bearer identity');
@@ -4074,18 +4074,18 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
     const startMs = Date.now();
     const promise = collect(service.invoke('test'));
 
-    proc.stdout.write(JSON.stringify({ type: 'thread.started', thread_id: 'thread-116' }) + '\n');
+    proc.stdout.write(`${JSON.stringify({ type: 'thread.started', thread_id: 'thread-116' })}\n`);
     proc.stdout.write(
-      JSON.stringify({
+      `${JSON.stringify({
         type: 'item.completed',
         item: { id: 'msg-1', type: 'agent_message', text: 'Done!' },
-      }) + '\n',
+      })}\n`,
     );
     proc.stdout.write(
-      JSON.stringify({
+      `${JSON.stringify({
         type: 'turn.completed',
         usage: { input_tokens: 100, output_tokens: 50 },
-      }) + '\n',
+      })}\n`,
     );
     proc.stdout.end();
 

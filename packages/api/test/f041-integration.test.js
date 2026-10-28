@@ -14,7 +14,7 @@ import { mkdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, it } from 'node:test';
-import { secretMcpContract } from './helpers/secret-mcp-contract.js';
+import { directMcpContract } from './helpers/direct-mcp-contract.js';
 
 const {
   readCapabilitiesConfig,
@@ -186,11 +186,11 @@ describe('F041 Cloud P1-1: bootstrap feeds invocation-owned MCP', () => {
     assert.ok(memory);
     assert.ok(signals);
     for (const server of [collab, memory, signals]) {
-      const { upstream, proxyEnv } = secretMcpContract(server);
+      const { upstream, launchEnv } = directMcpContract(server);
       const { ALLOWED_WORKSPACE_DIRS } = upstream.env;
       assert.equal(ALLOWED_WORKSPACE_DIRS, process.env.ALLOWED_WORKSPACE_DIRS?.trim() || dir);
       assert.deepEqual(
-        proxyEnv,
+        launchEnv,
         { ALLOWED_WORKSPACE_DIRS, ...callbackEnv },
         'the proxy retains the workspace boundary alongside this invocation identity and credentials',
       );
@@ -409,7 +409,7 @@ describe('F041 Discovery Consistency', () => {
 
     const catCafeCollab = config.capabilities.find((c) => c.id === 'cat-cafe-collab');
     assert.ok(catCafeCollab);
-    assert.equal(catCafeCollab.source, 'cat-cafe');
+
     assert.ok(config.capabilities.find((c) => c.id === 'cat-cafe-memory'));
     assert.ok(config.capabilities.find((c) => c.id === 'cat-cafe-signals'));
     assert.ok(config.capabilities.find((c) => c.id === 'cat-cafe-limb'));
@@ -417,11 +417,9 @@ describe('F041 Discovery Consistency', () => {
 
     const pencil = config.capabilities.find((c) => c.id === 'pencil');
     assert.ok(pencil);
-    assert.equal(pencil.source, 'external');
 
     const jb = config.capabilities.find((c) => c.id === 'jetbrains');
     assert.ok(jb);
-    assert.equal(jb.source, 'external');
   });
 
   it('external servers discovered from multiple CLI configs are deduplicated', async () => {

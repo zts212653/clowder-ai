@@ -5,7 +5,7 @@
  *   pnpm worktree:reap                  # dry-run: classify everything, write .cat-cafe/tmp/reaper-<date>.tsv
  *   pnpm worktree:reap --apply          # quarantine declared+eligible dirs (moves, never deletes)
  *   pnpm worktree:reap --purge          # delete quarantine entries older than 14 days (only deleting path)
- *   pnpm worktree:check                 # exit 2 when active declared worktrees >= cap (40); legacy not counted
+ *   pnpm worktree:check                 # report declared and legacy worktrees; never blocks creation
  *
  * Who triggers what: nothing runs on a schedule and creation never moves anything. `--apply` (quarantine)
  * and `--purge` (the only deletion) are explicit commands, run by whoever is authorised to.
@@ -235,10 +235,10 @@ export function capacityHolders({ repo, parentDir, policy = DEFAULT_POLICY }) {
   return { active, legacy };
 }
 
-export function checkCapacity({ repo, parentDir, max = DEFAULT_POLICY.maxWorktrees }) {
+export function checkCapacity({ repo, parentDir, max = null }) {
   const { active, legacy } = capacityHolders({ repo, parentDir });
-  // Checked BEFORE `git worktree add`: at the cap, the next one would be over.
-  return { count: active.length, max, over: active.length >= max, legacy: legacy.length };
+  // An explicit --max is retained as an advisory comparison for old callers, never an admission veto.
+  return { count: active.length, max, over: max !== null && active.length >= max, legacy: legacy.length };
 }
 
 function writeLedger(repo, plan, withSizes) {
@@ -262,7 +262,7 @@ function argValue(args, flag) {
 
 export function parsePolicyArgs(args) {
   // Idle/quarantine windows are safety axes; a flag on the same command as --apply/--purge could both
-  // weaken and use them. Only the creation cap (which never moves or deletes anything) is tunable.
+  // weaken and use them. --max survives only as an optional inventory comparison, never a creation veto.
   for (const locked of ['--min-idle-days', '--quarantine-days']) {
     if (args.includes(locked)) throw new Error(`invalid ${locked}: this safety window is not configurable`);
   }
@@ -294,15 +294,9 @@ function main(argv) {
       console.log(line);
     });
     const legacy = cap.legacy > 0 ? ` (+${cap.legacy} undeclared legacy, not counted)` : '';
-    if (!cap.over) {
-      console.log(`[worktree-reaper] OK ${cap.count}/${cap.max} active declared worktrees${legacy}`);
-      return 0;
-    }
-    console.error(
-      `[worktree-reaper] FULL ${cap.count}/${cap.max} active declared worktrees${legacy} — ` +
-        '`pnpm worktree:new` will refuse and list who holds the slots.',
-    );
-    return 2;
+    const advisory = cap.max == null ? '' : ` (advisory ${cap.max}; no creation limit)`;
+    console.log(`[worktree-reaper] ${cap.count} active declared worktrees${legacy}${advisory}`);
+    return 0;
   }
   const opts = { repo };
   const plan = planReap(collectEntries(opts), policy);

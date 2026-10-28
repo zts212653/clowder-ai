@@ -49,6 +49,7 @@ import { resolveOwnerGate } from '../utils/owner-gate.js';
 import { resolveHeaderUserId, resolveStrictUserId } from '../utils/request-identity.js';
 import { getDefaultUploadDir } from '../utils/upload-paths.js';
 import { configCatOrderRoutes } from './config-cat-order.js';
+import { configChatBackgroundRoutes } from './config-chat-background.js';
 import { configConversationViewRoutes } from './config-conversation-view.js';
 import { configIgnoredItemRoutes } from './config-ignored-items.js';
 import { configLiveProjectRoutes } from './config-live-projects.js';
@@ -107,7 +108,7 @@ const timeZonePatchSchema = z
 
 const coCreatorPatchSchema = z.object({
   name: z.string().trim().min(1),
-  aliases: z.array(z.string().trim().min(1)),
+  aliases: z.array(z.string().trim().min(1)).optional(),
   mentionPatterns: z.array(coCreatorMentionInputSchema).min(1),
   timeZone: timeZonePatchSchema.optional(),
   avatar: z.string().trim().nullable().optional(),
@@ -204,6 +205,7 @@ export async function configRoutes(app: FastifyInstance, opts: ConfigRoutesOptio
   await app.register(configCatOrderRoutes, { projectRoot });
   await app.register(configLiveProjectRoutes, { projectRoot });
   await app.register(configConversationViewRoutes, { projectRoot, threadStore: opts.threadStore });
+  await app.register(configChatBackgroundRoutes, { projectRoot, threadStore: opts.threadStore });
   await app.register(configIgnoredItemRoutes, { projectRoot });
   await app.register(configProcessTalkRoutes, { projectRoot });
   await app.register(configMessageDispositionRoutes, { projectRoot });

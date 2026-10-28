@@ -16,7 +16,7 @@ export function journeyMoment(projection: EvolutionProgramProjection): JourneyMo
 export function journeyStageLabel(projection: EvolutionProgramProjection): string {
   const phase = MOMENTS[journeyMoment(projection)];
   if (projection.program.lifecycle !== 'active') return phase;
-  if (projection.program.stage === 'constituting') return `${phase}（等你确认）`;
+  if (projection.program.stage === 'constituting') return `${phase}（约定待补齐）`;
   if (projection.program.stage === 'instrumenting') return `${phase}（评估）`;
   return phase;
 }

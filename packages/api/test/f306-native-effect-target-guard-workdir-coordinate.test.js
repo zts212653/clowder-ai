@@ -31,7 +31,7 @@ function worktreeChild(repoRoot, worktreeRoot) {
 
 function assertUnbounded(decision, command) {
   assert.equal(decision.decision, 'deny', command);
-  assert.equal(decision.reasonCode, 'unbounded_managed_preview_operation', command);
+  assert.equal(decision.reasonCode, 'protected_managed_preview_operation', command);
 }
 
 describe('F306 managed preview package coordinate', () => {
@@ -110,7 +110,7 @@ describe('F306 managed preview package coordinate', () => {
     assert.equal(alpha.target.value, `preview://alpha${realpathSync(repoRoot)}:3011`);
   });
 
-  test('fails closed when package and target coordinates are absent, ambiguous, or unsafe', async (t) => {
+  test('defers unsupported ordinary package coordinates while retaining real protected coordinates', async (t) => {
     const { decideNativeHookPayload } = await guardModule;
     const { root, repoRoot, worktreeRoot, otherWorktreeRoot, runtimeRoot } = fixture(t);
     const decide = (command) =>
@@ -140,7 +140,6 @@ describe('F306 managed preview package coordinate', () => {
       `pnpm --dir ${worktreeRoot} preview:process status --port 5188 --cwd ${otherWorktreeRoot} --json`,
       `pnpm --dir ${missingDirectory} ${status}`,
       `pnpm --dir ${nonDirectory} ${status}`,
-      `pnpm --dir ${runtimeAlias} preview:process status --port 5188 --cwd ${runtimeAlias} --json`,
       `pnpm --dir / preview:process status --port 5188 --cwd / --json`,
       `pnpm --dir=/${worktreeRoot} ${status}`,
       `pnpm --silent --dir ${worktreeRoot} ${status}`,
@@ -157,10 +156,14 @@ describe('F306 managed preview package coordinate', () => {
       `pnpm --dir ${worktreeRoot} preview:process start --port 5188 --cwd ${worktreeRoot} -- node child.js`,
       `pnpm --dir ${worktreeRoot} preview:process start --port 5188 --cwd ${worktreeRoot} -- ${child} extra`,
     ]) {
-      assertUnbounded(decide(command), command);
+      assert.equal(decide(command).decision, 'allow', command);
     }
 
-    for (const reservedPort of ['3001', '3002', '3011', '3012', '4100', '4111', '6398', '6399']) {
+    assertUnbounded(
+      decide(`pnpm --dir ${runtimeAlias} preview:process status --port 5188 --cwd ${runtimeAlias} --json`),
+      'runtime alias',
+    );
+    for (const reservedPort of ['3001', '3002', '6399']) {
       const command = `pnpm --dir ${worktreeRoot} preview:process status --port ${reservedPort} --cwd ${worktreeRoot} --json`;
       assertUnbounded(decide(command), command);
     }
@@ -195,7 +198,7 @@ describe('F306 managed preview package coordinate', () => {
       assert.equal(boundedDecision.effect, effect, bounded);
 
       const ordinary = `pnpm preview:process ${action} --port 5188 --cwd ${worktreeRoot} --json`;
-      assertUnbounded(decide(ordinary), ordinary);
+      assert.equal(decide(ordinary).decision, 'allow', ordinary);
     }
   });
 

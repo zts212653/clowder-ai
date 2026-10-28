@@ -5,9 +5,11 @@ import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writ
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { clearPreviewSettlement, readPreviewSettlement } from './lib/preview-alpha-registration-settlement.mjs';
+import { withPreviewMutationLock } from './lib/preview-process-mutex.mjs';
 import { previewProcessRecordId } from './lib/preview-process-record-key.mjs';
 import { probePort, waitForPort } from './lib/preview-process-runtime.mjs';
-import { stopManagedPreview } from './lib/preview-process-stop.mjs';
+import { readPreviewCompletion, stopManagedPreview } from './lib/preview-process-stop.mjs';
 import {
   launchDetached,
   launchWithLaunchd,
@@ -114,9 +116,12 @@ function writeRecord(config, record) {
 function readRecord(config) {
   try {
     const value = JSON.parse(readFileSync(config.recordPath, 'utf8'));
-    return value.version === RECORD_VERSION && value.id === config.id ? value : null;
-  } catch {
-    return null;
+    if (value.version !== RECORD_VERSION || value.id !== config.id)
+      throw new Error('preview registration is inconsistent');
+    return value;
+  } catch (error) {
+    if (error.code === 'ENOENT') return null;
+    throw error;
   }
 }
 
@@ -131,6 +136,15 @@ function report(config, payload, exitCode = 0) {
     process.stdout.write(`[preview-process] ${payload.status} ${payload.cwd}:${payload.port}`);
     if (payload.origin) process.stdout.write(`\norigin: ${payload.origin}`);
     if (payload.logPath) process.stdout.write(`\nlog: ${payload.logPath}`);
+    if (payload.settlement) {
+      process.stdout.write(`\noriginal process exit: ${payload.settlement.originalExitCode}`);
+      process.stdout.write(`\nbusiness exit: ${payload.settlement.businessExitCode ?? 'unknown (legacy)'}`);
+      process.stdout.write(`\ncleanup exit: ${payload.settlement.cleanupExitCode ?? 'unknown (legacy)'}`);
+      if (payload.settlement.commandGroupStatus)
+        process.stdout.write(`\ncommand group: ${payload.settlement.commandGroupStatus} (not a full-stop receipt)`);
+      if (payload.settlement.otherResourcesStatus) process.stdout.write('\nother resources: not verified');
+      process.stdout.write('\nsaved data: not reverified');
+    }
     process.stdout.write('\n');
   }
   process.exitCode = exitCode;
@@ -176,7 +190,7 @@ async function handleExistingStart(config, existing) {
       reportManagedStatus(config, 'starting', existing.record);
       return true;
     }
-    rmSync(config.recordPath, { force: true });
+    if (!existing.record.completionPath) rmSync(config.recordPath, { force: true });
     throw new Error(`preview process exited before listening on port ${config.port}; see ${config.logPath}`);
   }
   if (existing.status === 'unmanaged' || existing.status === 'unavailable') {
@@ -200,18 +214,30 @@ async function finishStartedProcess(config, record) {
     reportManagedStatus(config, 'starting', record);
     return;
   }
-  if (record.origin === 'launchd') {
+  if (!record.completionPath && record.origin === 'launchd') {
     removeLaunchdJob(config);
     rmSync(config.plistPath, { force: true });
   }
-  rmSync(config.recordPath, { force: true });
+  if (!record.completionPath) rmSync(config.recordPath, { force: true });
   throw new Error(`preview process exited before listening on port ${config.port}; see ${config.logPath}`);
 }
 
 async function start(config) {
   const existing = await currentStatus(config);
   if (await handleExistingStart(config, existing)) return;
+  if (existing.record?.completionPath) {
+    const completion = readPreviewCompletion(existing.record);
+    if (
+      !completion ||
+      completion.exitCode !== 0 ||
+      completion.forced ||
+      completion.cleanupOwnerStatus === 'unclaimed' ||
+      (completion.version !== undefined && completion.version !== 2)
+    )
+      throw new Error('preview cleanup remains unsettled; preserve its record and run canonical preview stop');
+  }
   rmSync(config.recordPath, { force: true });
+  clearPreviewSettlement(config);
   mkdirSync(config.stateDir, { recursive: true, mode: 0o700 });
   const expiresAt = new Date(Date.now() + config.lifetimeSeconds * 1_000).toISOString();
   const completionPath = join(config.stateDir, `${config.id}.${randomUUID()}.completion.json`);
@@ -247,17 +273,30 @@ async function start(config) {
 }
 
 async function status(config) {
-  const result = await currentStatus(config);
+  let result = await currentStatus(config);
   if (result.status === 'running' && result.record && !result.record.readyAt) {
-    writeRecord(config, { ...result.record, readyAt: new Date().toISOString() });
+    // This legacy lazy readiness write is a record writer too. It must not
+    // resurrect an old registration while stop/start owns the same lifecycle.
+    try {
+      await withPreviewMutationLock(config, async () => {
+        result = await currentStatus(config);
+        if (result.status === 'running' && result.record && !result.record.readyAt)
+          writeRecord(config, { ...result.record, readyAt: new Date().toISOString() });
+      });
+    } catch (error) {
+      if (error.code !== 'PREVIEW_MUTATION_BUSY') throw error;
+      result = await currentStatus(config);
+    }
   }
+  const settlement = !result.record ? readPreviewSettlement(config) : null;
   report(
     config,
     {
-      status: result.status,
+      status: result.status === 'stopped' ? (settlement?.status ?? result.status) : result.status,
       registered: result.record !== null,
       cwd: config.cwd,
       port: config.port,
+      ...(settlement ? { settlement } : {}),
       ...(result.record
         ? {
             pid: result.record.pid,
@@ -267,19 +306,37 @@ async function status(config) {
           }
         : {}),
     },
-    result.status === 'running' || result.status === 'starting' ? 0 : 1,
+    settlement?.status === 'registration_retired'
+      ? 3
+      : result.status === 'running' || result.status === 'starting'
+        ? 0
+        : 1,
   );
 }
 
 async function stop(config) {
-  const result = await currentStatus(config);
-  await stopManagedPreview(config, result);
-  report(config, { status: 'stopped', cwd: config.cwd, port: config.port, logPath: result.record?.logPath });
+  let result;
+  const stopped = await stopManagedPreview(config, async () => {
+    result = await currentStatus(config);
+    return result;
+  });
+  const settlement = stopped?.settlement ?? readPreviewSettlement(config);
+  report(
+    config,
+    {
+      status: settlement?.status ?? 'stopped',
+      cwd: config.cwd,
+      port: config.port,
+      logPath: result.record?.logPath,
+      ...(settlement ? { settlement } : {}),
+    },
+    settlement?.status === 'registration_retired' ? 3 : 0,
+  );
 }
 
 try {
   const config = resolveConfig(parseArgs(process.argv.slice(2)));
-  if (config.action === 'start') await start(config);
+  if (config.action === 'start') await withPreviewMutationLock(config, () => start(config));
   if (config.action === 'status') await status(config);
   if (config.action === 'stop') await stop(config);
 } catch (error) {

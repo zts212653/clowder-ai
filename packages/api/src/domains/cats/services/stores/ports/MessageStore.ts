@@ -68,6 +68,11 @@ import {
 } from '../lifecycle-wake-coverage.js';
 import type { MessageDeliveryBoundary } from '../message-delivery-boundary.js';
 import { messageFrom } from '../message-from.js';
+import {
+  attachMessageSearchAnswerExtra,
+  type MessageSearchAnswerAttachment,
+  preserveMessageSearchAnswerBlock,
+} from '../message-search-answer-binding.js';
 import { storedMessageSource } from '../message-source.js';
 import { notifyMessageTimelineChange } from '../notify-message-timeline-change.js';
 import { type UserMentionHandlingMetadata, UserMentionIndex } from '../user-mention-index.js';
@@ -311,12 +316,18 @@ export interface StoredMessage {
   metadata?: MessageMetadata;
   /** F022+F052+F098-C1+F153-F: Extensible extra data (rich blocks, stream metadata, cross-post origin, explicit targets, tracing pointers) */
   extra?: {
+    /** F167: one authenticated immutable ordinary Task handoff, recovered by the existing Queue. */
+    taskHandoff?: import('../../../../ball-custody/OrdinaryTaskHandoffContract.js').OrdinaryTaskHandoffRequest;
+    taskHandoffInvalid?: true;
+    /** Immutable parameter digest for the human Task assignment source. */
+    taskAssignmentRequestDigest?: string;
     /** Read-only pre-plugin Host receipt; new admission belongs to the plugin Task controller. */
     collectiveOwnerAdmissionV1?: import('@cat-cafe/shared').CollectiveOwnerAdmissionV1;
     /** Retain malformed/revoked legacy provenance so hydration can never revive it. */
     collectiveAuthorizationInvalid?: true;
     /** Optional references into this message's one normalized full body. */
     outputLayout?: import('@cat-cafe/shared').MessageOutputLayoutV1;
+    startupRecovery?: import('@cat-cafe/shared').CodexStartupRecovery;
     /** Server-written admission provenance for the original response's failure return, not another owner. */
     a2aFailureReturn?: {
       triggerMessageId: string;
@@ -386,6 +397,8 @@ export interface StoredMessage {
       invocationId: string;
     };
     rich?: RichMessageExtra;
+    /** Host-only binding of a durable memory result to this exact rich block. */
+    messageSearchAnswer?: import('@cat-cafe/shared').MessageSearchAnswerBinding;
     /** Outbound media owns publication until durable materialization completes. */
     mediaPublication?: 'deferred';
     /** #1354 structured routing feedback retained from Queue payload into History. */
@@ -731,6 +744,7 @@ export type StoredPluginMessage = NonNullable<NonNullable<StoredMessage['extra']
 export type HostMessageExtra = Omit<
   NonNullable<StoredMessage['extra']>,
   | 'pluginMessage'
+  | 'messageSearchAnswer'
   | 'custodyOfferV1'
   | 'evolutionPreparationSubmissionV1'
   | 'deliveryBoundary'
@@ -760,7 +774,10 @@ export type AppendMessageInput = Omit<
   | 'extra'
 > & {
   from: MessageFrom;
-  extra?: Omit<NonNullable<StoredMessage['extra']>, 'collectiveOwnerAdmissionV1' | 'collectiveAuthorizationInvalid'>;
+  extra?: Omit<
+    NonNullable<StoredMessage['extra']>,
+    'collectiveOwnerAdmissionV1' | 'collectiveAuthorizationInvalid' | 'messageSearchAnswer'
+  >;
   threadId?: string;
   /** Append may initialize only queued state; terminal delivery metadata belongs to transition methods. */
   deliveryStatus?: 'queued';
@@ -1573,6 +1590,21 @@ export function lifecycleResponseTerminalPatchFromAppendInput(
   const publicInputIds = new Set(current.lifecycle?.kind === 'response' ? current.lifecycle.inputMessageIds : []);
   const responseReplyTo = [message.replyTo, current.replyTo].find((id) => id && publicInputIds.has(id));
   const extra = { ...current.extra, ...message.extra };
+  // Stop may close the route before its buffered Runner cancellation reaches the writer.
+  // The canonical response terminal still settles the same persisted startup projection.
+  if (
+    terminal.status === 'canceled' &&
+    extra.startupRecovery?.invocationId === invocationId &&
+    ['checking', 'retry_wait'].includes(extra.startupRecovery.stage)
+  ) {
+    extra.startupRecovery = {
+      ...extra.startupRecovery,
+      stage: 'cancelled',
+      sequence: extra.startupRecovery.sequence + 1,
+      updatedAt: terminal.completedAt,
+      nextRetryAt: undefined,
+    };
+  }
   if (extra.causal && !publicInputIds.has(extra.causal.triggerMessageId)) {
     if (current.extra?.causal && publicInputIds.has(current.extra.causal.triggerMessageId)) {
       extra.causal = current.extra.causal;
@@ -1775,6 +1807,8 @@ export function isValidCustodyOfferTransition(
 
 /** Validate every caller-controlled field that affects persistent message order. */
 export function assertValidAppendMessageInput(msg: AppendMessageInput): void {
+  if (msg.extra && 'messageSearchAnswer' in msg.extra)
+    throw new TypeError('Search answer binding requires its dedicated Host transition');
   if ('companionDeliveryReceipt' in msg) throw new TypeError('Host delivery acceptance requires its original producer');
   for (const key of [
     'collectiveOwnerAdmissionV1',
@@ -1878,6 +1912,7 @@ export function mergeMessageExtra(
 ): StoredMessage['extra'] | undefined {
   if (!existing && !incoming) return undefined;
   const {
+    messageSearchAnswer: _stripAnswer,
     pluginMessage: _stripPlugin,
     custodyOfferV1: _stripCustody,
     entrustedWorkHumanTerminalReceiptV1: _stripEntrustedWorkTerminal,
@@ -1893,7 +1928,9 @@ export function mergeMessageExtra(
   const merged = { ...(existing ?? {}), ...incomingHost };
   const rich = mergeRichExtra(existing?.rich, incoming?.rich);
   if (rich) merged.rich = rich;
-  return Object.keys(merged).length > 0 ? merged : undefined;
+  return Object.keys(merged).length > 0
+    ? preserveMessageSearchAnswerBlock(merged, existing?.messageSearchAnswer)
+    : undefined;
 }
 
 export function mergeStoredToolEvents(
@@ -1954,6 +1991,10 @@ export interface UserMentionHandlingReceipt extends UserMentionHandlingResult {
 }
 
 export interface IMessageStore {
+  attachMessageSearchAnswer(
+    id: string,
+    input: MessageSearchAnswerAttachment,
+  ): StoredMessage | null | Promise<StoredMessage | null>;
   getLastUserMentionHandling(
     userId: string,
   ): UserMentionHandlingReceipt | null | Promise<UserMentionHandlingReceipt | null>;
@@ -3667,10 +3708,21 @@ export class MessageStore {
     return structuredClone(message);
   }
 
+  attachMessageSearchAnswer(id: string, input: MessageSearchAnswerAttachment): StoredMessage | null {
+    const msg = this.messages.find((message) => message.id === id);
+    if (!msg) return null;
+    const extra = attachMessageSearchAnswerExtra(msg, input);
+    if (!extra) return null;
+    msg.extra = extra;
+    notifyMessageTimelineChange(this, msg);
+    return structuredClone(msg);
+  }
+
   updateExtra(id: string, extra: HostMessageExtra): StoredMessage | null {
     const msg = this.messages.find((m) => m.id === id);
     if (!msg || msg.recall || msg._tombstone) return null;
     const {
+      messageSearchAnswer: _stripAnswer,
       pluginMessage: _stripPlugin,
       custodyOfferV1: _stripCustody,
       entrustedWorkHumanTerminalReceiptV1: _stripEntrustedWorkTerminal,
@@ -3684,8 +3736,8 @@ export class MessageStore {
       ...hostOnly
     } = extra as Record<string, unknown>;
     const previousRich = JSON.stringify(msg.extra?.rich);
-    msg.extra = { ...msg.extra, ...hostOnly };
-    if (hostOnly.rich !== undefined && previousRich !== JSON.stringify(msg.extra.rich))
+    msg.extra = preserveMessageSearchAnswerBlock({ ...msg.extra, ...hostOnly }, msg.extra?.messageSearchAnswer);
+    if (hostOnly.rich !== undefined && previousRich !== JSON.stringify(msg.extra?.rich))
       notifyMessageTimelineChange(this, msg);
     return msg;
   }

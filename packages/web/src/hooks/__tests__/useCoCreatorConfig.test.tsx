@@ -21,6 +21,10 @@ function CoCreatorProbe() {
   return React.createElement('span', null, coCreator.name);
 }
 
+function FullConfigProbe() {
+  return <output>{JSON.stringify(useCoCreatorConfig())}</output>;
+}
+
 async function flushEffects(): Promise<void> {
   await Promise.resolve();
   await Promise.resolve();
@@ -140,5 +144,38 @@ describe('useCoCreatorConfig', () => {
     });
     expect(recoverable).not.toHaveBeenCalled();
     expect(container.textContent).toBe('首次体验环境主人');
+  });
+
+  it.each([
+    'success',
+    'failure',
+  ] as const)('keeps a canonical save when an older GET finishes with %s', async (outcome) => {
+    let release: (response: Response) => void = () => undefined;
+    mockApiFetch.mockReturnValueOnce(
+      new Promise((resolve) => {
+        release = resolve;
+      }),
+    );
+    await act(async () => root.render(<FullConfigProbe />));
+    const saved = { name: 'Saved Owner', aliases: ['New alias'], mentionPatterns: ['@saved-owner'] };
+    act(() => primeCoCreatorConfigCache(saved));
+    await act(async () => {
+      release(
+        outcome === 'success'
+          ? Response.json({
+              config: { coCreator: { name: 'Old Owner', aliases: ['Old alias'], mentionPatterns: ['@old-owner'] } },
+            })
+          : new Response('failed', { status: 500 }),
+      );
+      await flushEffects();
+    });
+    expect(JSON.parse(container.textContent ?? '')).toEqual(saved);
+    expect(getMentionToCat()['saved-owner']).toBe('__co-creator__');
+    expect(getMentionToCat()['old-owner']).toBeUndefined();
+    act(() => root.unmount());
+    root = createRoot(container);
+    await act(async () => root.render(<FullConfigProbe />));
+    expect(JSON.parse(container.textContent ?? '')).toEqual(saved);
+    expect(mockApiFetch).toHaveBeenCalledTimes(1);
   });
 });

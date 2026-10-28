@@ -21,6 +21,7 @@ import { sharedToolAuthorizer } from './shared-tool-authorization.js';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
+import { AjvJsonSchemaValidator } from '@modelcontextprotocol/sdk/validation/ajv-provider.js';
 import { SERVER_INSTRUCTIONS } from './server-instructions.js';
 import {
   registerAudioToolset,
@@ -126,6 +127,9 @@ export function createMemberGatewayHandler(
   const log = deps.log ?? { warn() {} };
   // Request-owned cancellation only. No session/replay/authority is retained here.
   const activeRequests = new Map<string, AbortController>();
+  // Reuse only the SDK schema compiler. Protocol servers, tool handlers and
+  // invocation authority remain request-owned; no principal enters this cache.
+  let sharedSchemaValidator: AjvJsonSchemaValidator | undefined;
 
   return async function handleMemberGatewayRequest(
     req: IncomingMessage,
@@ -266,13 +270,19 @@ export function createMemberGatewayHandler(
       }
 
       const requested = url.searchParams.get('family') as MemberToolFamily | null;
+      const schemaOptions = shared
+        ? { jsonSchemaValidator: (sharedSchemaValidator ??= new AjvJsonSchemaValidator()) }
+        : {};
       const server =
         shared && requested
           ? new McpServer(
               { name: `cat-cafe-${requested}-mcp`, version: '0.1.0' },
-              { instructions: SERVER_INSTRUCTIONS[requested] },
+              { ...schemaOptions, instructions: SERVER_INSTRUCTIONS[requested] },
             )
-          : new McpServer({ name: shared ? 'cat-cafe-mcp' : SERVER_NAME, version: shared ? '0.1.0' : SERVER_VERSION });
+          : new McpServer(
+              { name: shared ? 'cat-cafe-mcp' : SERVER_NAME, version: shared ? '0.1.0' : SERVER_VERSION },
+              schemaOptions,
+            );
       const transport = new StreamableHTTPServerTransport({
         sessionIdGenerator: undefined,
         enableJsonResponse: true,

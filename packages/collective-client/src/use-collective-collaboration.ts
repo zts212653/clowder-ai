@@ -1,5 +1,6 @@
-import { collectiveWorkProjectionSchema } from '@cat-cafe/shared';
+import { collectiveMaterialListSchema, collectiveWorkProjectionSchema } from '@cat-cafe/shared';
 import { type Dispatch, type MutableRefObject, type SetStateAction, useCallback, useRef } from 'react';
+import { z } from 'zod';
 import type { ClientRequest } from './client-request.js';
 import type {
   ClientSnapshot,
@@ -15,8 +16,11 @@ import { acknowledgeCollaborationCommand, prepareCollaborationCommand } from './
 import { publishCollectiveAccountabilityChanged } from './collective-accountability-events.js';
 import { collectiveClientNamespace } from './human-send-custody.js';
 import type { ProjectSuggestionEdits } from './ProjectSuggestionActions.js';
+import type { ProjectTargetChangeHandler } from './ProjectTimeSummary.js';
+import type { ProjectMaterialClient } from './project-material-client.js';
 import { collectiveClientErrorMessage } from './use-human-auth-session.js';
 import type { InformalVoteDraft } from './VoteCard.js';
+import type { WorkTimeChangeHandler } from './WorkTimeEditor.js';
 
 export interface ProjectTaskResponsibility {
   readonly accountability: 'self' | 'unassigned';
@@ -34,7 +38,12 @@ export function useCollectiveCollaboration(input: {
 }) {
   const running = useRef<Promise<void>>();
   const command = useCallback(
-    (path: string, payload: Record<string, unknown>, acceptedLabel: string, onAccepted?: (result: unknown) => void) => {
+    (
+      path: string,
+      payload: Record<string, unknown>,
+      acceptedLabel: string | ((result: unknown) => string),
+      onAccepted?: (result: unknown) => void,
+    ) => {
       const { snapshot } = input;
       const namespace = collectiveClientNamespace(snapshot);
       if (!namespace || !snapshot.meta || !snapshot.collective) {
@@ -64,7 +73,10 @@ export function useCollectiveCollaboration(input: {
           if (namespace !== input.currentNamespace.current) return;
           input.setSnapshot((current) => ({
             ...current,
-            delivery: { kind: 'accepted', label: acceptedLabel },
+            delivery: {
+              kind: 'accepted',
+              label: typeof acceptedLabel === 'function' ? acceptedLabel(result) : acceptedLabel,
+            },
             error: undefined,
           }));
           onAccepted?.(result);
@@ -86,7 +98,50 @@ export function useCollectiveCollaboration(input: {
     },
     [input],
   );
+  const materialRead = async (path: string, roadmapId: string) => {
+    const { snapshot } = input,
+      namespace = collectiveClientNamespace(snapshot);
+    if (!namespace || !snapshot.meta || !snapshot.collective) throw new Error('Collective session unavailable');
+    const result = await input.request(path, {
+      method: 'POST',
+      body: JSON.stringify({
+        serviceInstanceId: snapshot.meta.serviceInstanceId,
+        collectiveId: snapshot.collective.collectiveId,
+        roadmapId,
+      }),
+    });
+    if (namespace !== input.currentNamespace.current) throw new Error('Collective session changed');
+    return result;
+  };
+  const materialClient: ProjectMaterialClient = {
+    namespace: collectiveClientNamespace(input.snapshot) ?? '',
+    list: async (roadmapId) =>
+      collectiveMaterialListSchema.parse(await materialRead('/api/collaboration/materials/list', roadmapId)),
+    connections: async (roadmapId) =>
+      z
+        .object({ connections: z.array(z.object({ connectionId: z.string(), label: z.string() }).strict()) })
+        .strict()
+        .parse(await materialRead('/api/collaboration/materials/connections', roadmapId)).connections,
+    publish: (project, connectionId, provider, sourceId) =>
+      command(
+        '/api/collaboration/materials/publish',
+        { roadmapId: project.roadmapId, connectionId, provider, sourceId },
+        '材料已分享到频道，等待项目负责人分拣',
+      ),
+    sort: async (material, change) => {
+      await command(
+        '/api/collaboration/materials/sort',
+        { materialId: material.materialId, expectedRevision: material.revision, ...change },
+        (result) =>
+          result && typeof result === 'object' && 'outcome' in result && result.outcome === 'already_processed'
+            ? '刚才已经处理过，已显示去向'
+            : '材料去向已确认',
+      );
+      window.dispatchEvent(new Event('collective:material-changed'));
+    },
+  };
   return {
+    materialClient,
     createProject: (channelId: string, title: string, purpose: string) =>
       command('/api/collaboration/projects/create', { channelId, title, purpose }, '项目已建立，来源已留在频道'),
     createProjectTask: (
@@ -254,6 +309,18 @@ export function useCollectiveCollaboration(input: {
         { workId: work.workId, expectedRevision: work.revision },
         '这项任务已完成，动态会继续保留',
       ),
+    changeWorkTime: ((work, change) =>
+      command(
+        '/api/collaboration/work/time',
+        { workId: work.workId, expectedRevision: work.revision, ...change },
+        change.action === 'suggest' ? '日期建议已留下，等待负责人确认' : '日期已更新，历史会保留',
+      )) satisfies WorkTimeChangeHandler,
+    setProjectTargetDate: ((roadmap, time) =>
+      command(
+        '/api/collaboration/roadmaps/target-date',
+        { roadmapId: roadmap.roadmapId, expectedRevision: roadmap.revision, time },
+        '项目目标日期已更新',
+      )) satisfies ProjectTargetChangeHandler,
     setWorkDependencies: (work: CollectiveWorkProjection, dependencyWorkIds: readonly string[]) =>
       command(
         '/api/collaboration/work/dependencies',

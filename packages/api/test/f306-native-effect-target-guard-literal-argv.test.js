@@ -8,6 +8,7 @@ import { sedScriptEffect } from '../../../scripts/native-effect-sed-classifier.m
 import { expandSegmentBindings, FORGOTTEN } from '../../../scripts/native-effect-shell-expansion.mjs';
 import { shellInvocation } from '../../../scripts/native-effect-shell-tokenizer.mjs';
 import { decideNativeHookPayload } from '../../../scripts/native-effect-target-guard.mjs';
+import { assertGuardedOrUnproved } from './helpers/native-effect-policy-assertions.js';
 
 const root = realpathSync(mkdtempSync(join(tmpdir(), 'f306-literal-argv-')));
 after(() => rmSync(root, { recursive: true, force: true }));
@@ -22,7 +23,8 @@ function expect(decision, command) {
     { turn_id: 'literal-argv', tool_name: 'exec_command', cwd: main, tool_input: { cmd: command } },
   ]) {
     const result = decideNativeHookPayload(payload, noHost);
-    assert.equal(result.decision, decision, `${command}\n${result.reasonCode} (${result.effect})`);
+    if (decision === 'deny') assertGuardedOrUnproved(result, `${command}\n${result.reasonCode} (${result.effect})`);
+    else assert.equal(result.decision, decision, `${command}\n${result.reasonCode} (${result.effect})`);
   }
 }
 

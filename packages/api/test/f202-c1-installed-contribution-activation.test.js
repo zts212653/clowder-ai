@@ -28,7 +28,7 @@ import {
   createPluginManagerRuntimeComposition,
 } from '../dist/domains/plugin/index.js';
 import { registerPluginManagerRoutes } from '../dist/routes/plugin-manager-routes.js';
-import { secretMcpContract } from './helpers/secret-mcp-contract.js';
+import { directMcpContract } from './helpers/direct-mcp-contract.js';
 
 const roots = [];
 const execFileAsync = promisify(execFile);
@@ -371,14 +371,13 @@ for (const phase of ['package replacement', 'restart recovery']) {
         provider: 'codex',
       });
       assert.ok(injected[name]);
-      const { upstream, proxyEnv } = secretMcpContract(injected[name]);
+      const { upstream } = directMcpContract(injected[name]);
       const currentToken = activeRuntime.supervisor.nativeActions.environment(
         installed.pluginInstanceId,
         'native',
       ).CLOWDER_PLUGIN_ACTION_TOKEN;
       assert.ok(currentToken);
       assert.ok(upstream.env.CLOWDER_PLUGIN_ACTION_TOKEN === currentToken);
-      assert.equal(proxyEnv.CLOWDER_PLUGIN_ACTION_TOKEN, undefined);
       const lease = await prepareKimiMcpConfig({
         workingDirectory: consumer,
         mcpServerPath: join(projectRoot, 'packages/mcp-server/dist/index.js'),
@@ -1135,11 +1134,11 @@ test('plugin MCP lifecycle reaches existing projects and their provider injectio
     }
     const providerEntry = (await inject(consumer, allowedCat))[name];
     assert.ok(providerEntry, `${phase}: provider must retain the activated plugin`);
-    const { upstream, proxyEnv } = secretMcpContract(providerEntry);
+    const { upstream, launchEnv } = directMcpContract(providerEntry);
     assert.equal(upstream.command, homeEntry.mcpServer.command);
     assert.deepEqual(upstream.args, homeEntry.mcpServer.args);
     assert.equal(upstream.env.CLOWDER_PLUGIN_ACTION_PATH, '/api/plugin-runtime/action');
-    assert.equal(proxyEnv.CLOWDER_PLUGIN_ACTION_TOKEN, undefined);
+    assert.equal(launchEnv.CLOWDER_PLUGIN_ACTION_TOKEN, upstream.env.CLOWDER_PLUGIN_ACTION_TOKEN);
     assert.ok(
       upstream.env.CLOWDER_PLUGIN_ACTION_TOKEN === currentToken,
       `${phase}: provider must inject the active token`,

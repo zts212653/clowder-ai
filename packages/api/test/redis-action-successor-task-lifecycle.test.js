@@ -48,6 +48,7 @@ describe('task-backed Redis ActionSuccessor lifecycle', { skip: redisIsolationSk
     const rawTasks = new TaskStore();
     const task = await rawTasks.create({
       threadId: 'thread-task',
+      subjectKey: 'eval-case:kept-implementation-contract',
       title: 'Implement F167 task custody',
       why: 'prove the executable task lifecycle',
       ownerCatId: 'opus',
@@ -113,6 +114,7 @@ describe('task-backed Redis ActionSuccessor lifecycle', { skip: redisIsolationSk
     const rawTasks = new TaskStore();
     const task = await rawTasks.create({
       threadId: 'thread-task',
+      subjectKey: 'eval-case:kept-implementation-contract',
       title: 'Replace F167 task custody',
       why: 'prove replacement preserves the complete standing evidence chain',
       ownerCatId: 'codex-sol',

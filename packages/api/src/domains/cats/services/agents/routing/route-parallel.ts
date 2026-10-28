@@ -1,6 +1,7 @@
 import { InvocationServiceScope } from '../invocation/invocation-service-scope.js';
 import { isRoutingOwnerAttempt } from './routing-owner-attempt.js';
 import { routingPreflightNotice } from './routing-preflight-notice.js';
+import { persistStartupRecovery } from './startup-recovery-projection.js';
 /**
  * Parallel Route Strategy
  * All cats respond independently to the same message.
@@ -1336,6 +1337,19 @@ async function* routeParallelPrepared(
           /* ignore parse errors */
         }
       }
+      if (effectiveMsg.extra?.startupRecovery && effectiveMsg.catId) {
+        const responseId = catLifecycleResponse.get(effectiveMsg.catId)?.messageId;
+        if (
+          !(await persistStartupRecovery(
+            deps.messageStore,
+            effectiveMsg,
+            responseId,
+            catInvocationId.get(effectiveMsg.catId),
+          ))
+        )
+          continue;
+        effectiveMsg = { ...effectiveMsg, messageId: responseId };
+      }
       if (effectiveMsg.type === 'text' && effectiveMsg.catId) {
         const cat = effectiveMsg.catId;
         const projection = catOutputProjections.get(cat);
@@ -2143,6 +2157,20 @@ async function* routeParallelPrepared(
             storedMsg = await deps.messageStore.append(streamMessageInput);
           }
 
+          if (
+            storedMsg &&
+            ownInvId &&
+            actionOutputCommitAllowed &&
+            lifecycleTerminalStatus === 'completed' &&
+            deps.messageSearchAnswerService
+          ) {
+            try {
+              storedMsg = await deps.messageSearchAnswerService.publishResponse(storedMsg, ownInvId);
+              allRichBlocks = [...(storedMsg.extra?.rich?.blocks ?? allRichBlocks)];
+            } catch {
+              log.warn({ threadId, messageId: storedMsg.id }, 'Search answer binding pending on committed response');
+            }
+          }
           turnStoredMessageId = storedMsg?.id;
 
           const triagePlanStore = deps.invocationDeps.conciergeTriagePlanStore;
@@ -2297,6 +2325,25 @@ async function* routeParallelPrepared(
               // Reviewed read-only tool-only audit remains non-routable and does not become
               // a normal answer. Unknown or mutating tools enter the freshness gate above.
               storedNoText = await deps.messageStore.append(noTextMessageInput);
+            }
+            if (
+              storedNoText &&
+              ownInvId &&
+              actionOutputCommitAllowed &&
+              lifecycleTerminalStatus === 'completed' &&
+              deps.messageSearchAnswerService
+            ) {
+              try {
+                storedNoText = await deps.messageSearchAnswerService.publishResponse(storedNoText, ownInvId);
+                const bound = storedNoText.extra?.messageSearchAnswer;
+                const block = bound && storedNoText.extra?.rich?.blocks.find((block) => block.id === bound.blockId);
+                if (block && !noTextBlocks.some((current) => current.id === block.id)) noTextBlocks.push(block);
+              } catch {
+                log.warn(
+                  { threadId, messageId: storedNoText.id },
+                  'Search answer binding pending on committed response',
+                );
+              }
             }
             // F088-P3: Stash rich blocks for outbound delivery (no-text branch)
             if (storedNoText && options.persistenceContext && noTextBlocks.length > 0) {

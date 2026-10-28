@@ -4,7 +4,6 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, it } from 'node:test';
 import { pathToFileURL } from 'node:url';
-import { redactSecretContent } from './secret-content-scan.mjs';
 import { withSecretToolGuard } from './secret-tool-io.mjs';
 
 const fake = () => ['ghp', '_', 'E'.repeat(36)].join('');
@@ -41,7 +40,7 @@ afterEach(() => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
 
-describe('MCP input/result boundary', () => {
+describe('outbound attachments and confirmed result exposure', () => {
   for (const [key, configured, filename] of [
     ['CAT_CAFE_CREDENTIAL_FILE', 'store/session.json', 'store/session.json'],
     ['CAT_CAFE_NATIVE_TURN_CREDENTIAL_FILE', 'store/session.json', 'store/session.json'],
@@ -54,7 +53,7 @@ describe('MCP input/result boundary', () => {
     ['GH_CONFIG_DIR', 'provider', 'provider/hosts.yml'],
     ['XDG_CONFIG_HOME', 'config-root', 'config-root/gh/hosts.yml'],
   ])
-    it(`resolves configured ${key} at the same cwd as the read handler`, async () => {
+    it(`resolves configured ${key} at the same cwd as the outbound attachment`, async () => {
       const root = mkdtempSync(join(tmpdir(), 'credential-context-'));
       roots.push(root);
       const source = join(root, filename);
@@ -65,40 +64,50 @@ describe('MCP input/result boundary', () => {
         await withCredentialEnv({ [key]: value }, async () => {
           let calls = 0;
           const result = await withSecretToolGuard(
-            'read_file',
+            'upload_file',
             { path: 'notes.txt' },
             async () => {
               calls++;
               return {};
             },
-            { cwd: root },
+            { cwd: root, outbound: true },
           );
           assert.equal(calls, 0);
           assert.equal(result.isError, true);
         });
     });
 
-  it('rejects secret arguments before invoking a server, including read/search queries', async () => {
+  it('rejects secret queries before invoking an external server', async () => {
     let effects = 0;
-    const result = await withSecretToolGuard('search', { query: fake() }, async () => {
-      effects++;
-      return {};
-    });
+    const result = await withSecretToolGuard(
+      'search',
+      { query: fake() },
+      async () => {
+        effects++;
+        return {};
+      },
+      { outbound: true },
+    );
     assert.equal(effects, 0);
     assert.equal(result.isError, true);
     assert.ok(!JSON.stringify(result).includes(fake()));
   });
 
-  it('blocks explicit credential file reads before the handler opens them', async () => {
+  it('blocks explicit credential attachments before the external handler opens them', async () => {
     let opened = false;
-    const result = await withSecretToolGuard('read_file', { path: '/work/.env.local' }, async () => {
-      opened = true;
-    });
+    const result = await withSecretToolGuard(
+      'upload_file',
+      { path: '/work/.env.local' },
+      async () => {
+        opened = true;
+      },
+      { outbound: true },
+    );
     assert.equal(opened, false);
     assert.equal(result.isError, true);
   });
 
-  it('blocks configured credential files through symlinks on either side of the comparison', async () => {
+  it('blocks outgoing configured credential files through symlinks on either side of the comparison', async () => {
     const root = mkdtempSync(join(tmpdir(), 'opaque-auth-file-'));
     roots.push(root);
     const source = join(root, 'session.json');
@@ -123,13 +132,13 @@ describe('MCP input/result boundary', () => {
             let opened = false;
             const notices = [];
             const result = await withSecretToolGuard(
-              'read_file',
+              'upload_file',
               { path },
               async () => {
                 opened = true;
                 return { content: [{ type: 'text', text: readFileSync(source, 'utf8') }] };
               },
-              { notify: async (notice) => notices.push(notice) },
+              { outbound: true, notify: async (notice) => notices.push(notice) },
             );
             assert.equal(opened, false);
             assert.equal(result.isError, true);
@@ -138,7 +147,7 @@ describe('MCP input/result boundary', () => {
         });
   });
 
-  it('protects custom credential directories and provider homes by canonical identity', async () => {
+  it('protects outgoing custom credential directories and provider homes by canonical identity', async () => {
     const root = mkdtempSync(join(tmpdir(), 'opaque-auth-root-'));
     roots.push(root);
     const store = join(root, 'private-store');
@@ -160,10 +169,15 @@ describe('MCP input/result boundary', () => {
       await withCredentialEnv({ [key]: alias }, async () => {
         for (const path of [source, join(alias, filename), fileAlias]) {
           let calls = 0;
-          const result = await withSecretToolGuard('read_file', { path }, async () => {
-            calls++;
-            return {};
-          });
+          const result = await withSecretToolGuard(
+            'upload_file',
+            { path },
+            async () => {
+              calls++;
+              return {};
+            },
+            { outbound: true },
+          );
           assert.equal(calls, 0);
           assert.equal(result.isError, true);
         }
@@ -171,16 +185,21 @@ describe('MCP input/result boundary', () => {
         mkdirSync(neighbor, { recursive: true });
         const ordinary = join(neighbor, 'notes.txt');
         writeFileSync(ordinary, 'ordinary result');
-        const result = await withSecretToolGuard('read_file', { path: ordinary }, async () => ({
-          content: [{ type: 'text', text: readFileSync(ordinary, 'utf8') }],
-        }));
+        const result = await withSecretToolGuard(
+          'upload_file',
+          { path: ordinary },
+          async () => ({
+            content: [{ type: 'text', text: readFileSync(ordinary, 'utf8') }],
+          }),
+          { outbound: true },
+        );
         assert.equal(result.content[0].text, 'ordinary result');
       });
       rmSync(fileAlias);
     }
   });
 
-  it('redacts a tool result and persists a source-only rotation notice', async () => {
+  it('redacts a configured credential and persists a value-free rotation notice', async () => {
     const notices = [];
     const result = await withSecretToolGuard(
       'read_text',
@@ -191,6 +210,7 @@ describe('MCP input/result boundary', () => {
       }),
       {
         callId: 'opaque-call-1',
+        knownCredentials: [fake()],
         notify: async (notice) => {
           notices.push(notice);
         },
@@ -201,8 +221,8 @@ describe('MCP input/result boundary', () => {
     assert.equal(notices[0].state, 'exposed_or_suspected');
     assert.ok(!JSON.stringify(notices).includes(fake()));
     assert.equal(result._meta.secretExposure.rotationNotice, 'recorded');
-    assert.ok(result.content.at(-1).text.includes('尚未核实真实凭据'));
-    assert.ok(result.content.at(-1).text.includes('仅在确认真实凭据已暴露后'));
+    assert.ok(result.content.at(-1).text.includes('当前已配置的凭据值'));
+    assert.deepEqual(notices[0].rules, ['known-credential']);
   });
 
   it('redacts an opaque callback credential from an unexpected result and records exposure', async () => {
@@ -215,7 +235,7 @@ describe('MCP input/result boundary', () => {
         content: [{ type: 'text', text: JSON.stringify({ callbackToken }) }],
         structuredContent: { callbackToken },
       }),
-      { notify: async (notice) => notices.push(notice) },
+      { knownCredentials: [callbackToken], notify: async (notice) => notices.push(notice) },
     );
     assert.ok(!JSON.stringify(result).includes(callbackToken));
     assert.equal(notices.length, 1);
@@ -228,6 +248,7 @@ describe('MCP input/result boundary', () => {
       {},
       async () => ({ content: [{ type: 'text', text: fake() }] }),
       {
+        knownCredentials: [fake()],
         notify: async () => {
           throw new Error('offline');
         },
@@ -239,24 +260,22 @@ describe('MCP input/result boundary', () => {
     assert.ok(!result.content.at(-2).text.includes('请轮转相关凭据'));
   });
 
-  it('distinguishes unavailable inspection from finding a credential', async () => {
+  it('leaves an uninspectable local result intact without an exposure notice', async () => {
     let nested = { text: 'ordinary result' };
     for (let depth = 0; depth < 66; depth++) nested = { nested };
     const notices = [];
     const result = await withSecretToolGuard('read_text', {}, async () => nested, {
       notify: async (notice) => notices.push(notice),
     });
-    assert.equal(result._meta.secretExposure.rotationNotice, 'recorded');
-    assert.deepEqual(notices[0].rules, ['uninspectable-result']);
-    assert.ok(result.content.at(-1).text.includes('检查未完成'));
-    assert.ok(!result.content.at(-1).text.includes('轮转'));
+    assert.equal(result, nested);
+    assert.equal(notices.length, 0);
   });
 
   it('redacts complete variable-length credentials crossing result chunk boundaries', async () => {
     const values = [
       ['sk', '-ant-api03-', 'Ab3Cd4Ef5Gh6Ij7Kl8Mn9Pq0'.repeat(4)].join(''),
       ['sk', '-proj-', 'B'.repeat(128)].join(''),
-      `PASSWORD="${'Ab3Cd4Ef5Gh6Ij7Kl8Mn9Pq0'.repeat(4)}"`,
+      'Ab3Cd4Ef5Gh6Ij7Kl8Mn9Pq0'.repeat(4),
     ];
     for (const boundary of [1024 * 1024, 2 * 1024 * 1024])
       for (const value of values) {
@@ -268,13 +287,14 @@ describe('MCP input/result boundary', () => {
           {},
           async () => ({ content: [{ type: 'text', text: prefix + value + suffix }] }),
           {
+            knownCredentials: [value],
             notify: async (notice) => {
               notices.push(notice);
             },
           },
         );
         assert.ok(
-          result.content[0].text === prefix + redactSecretContent(value) + suffix,
+          result.content[0].text === prefix + '[credential redacted]' + suffix,
           'chunking must not change redaction extent or ordinary UTF-8 bytes',
         );
         assert.equal(result._meta.secretExposure.rotationNotice, 'recorded');

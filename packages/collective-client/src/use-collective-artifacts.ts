@@ -83,7 +83,7 @@ export function useCollectiveArtifacts(
     async (address: CollectiveWorkResultFileAddress) => {
       if (!api || namespace !== currentNamespace.current) throw new Error('作品服务当前不可用。');
       const artifact = await api.openWorkResult(address.fileId);
-      if (namespace !== currentNamespace.current) throw new Error('共同家园已经切换，请从当前页面重新打开结果。');
+      if (namespace !== currentNamespace.current) throw new Error('共同体已经切换，请从当前页面重新打开结果。');
       setCatalogue((current) => [artifact, ...current.filter((item) => item.artifactId !== artifact.artifactId)]);
       setStatus('ready');
       setError(undefined);

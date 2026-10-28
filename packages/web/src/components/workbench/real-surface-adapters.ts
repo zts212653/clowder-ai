@@ -3,6 +3,7 @@ import {
   type EvolutionProgramOriginV1,
   evolutionProgramTitle,
   type GlobalArtifactDTO,
+  projectFileContent,
   type ThreadArtifactDTO,
 } from '@cat-cafe/shared';
 import { decodeTeamWorkspaceSubject, encodeTeamWorkspaceSubject } from '@/components/routing-context/team-navigation';
@@ -288,17 +289,22 @@ export function createArtifactSurface(input: {
 }
 
 function artifactTypeLabel(artifact: ThreadArtifactDTO | GlobalArtifactDTO): string {
-  if (artifact.type === 'file' && /\.(?:md|markdown)$/i.test(artifact.name)) return 'Markdown';
+  if (artifact.type === 'pr') return 'PR';
+  if (artifact.type === 'widget') return '小组件';
+  if (artifact.type === 'code') return '代码';
+  const kind = projectFileContent(artifact).kind;
   const labels = {
     image: '图片',
-    file: '文件',
-    code: '代码',
+    binary: '文件',
+    text: '文件',
+    markdown: 'Markdown',
+    html: 'HTML',
+    jsx: 'JSX',
+    office: '文档',
     audio: '音频',
     video: '视频',
-    widget: '小组件',
-    pr: 'PR',
   };
-  return labels[artifact.type];
+  return labels[kind];
 }
 
 type AgentRunAdapterInput =

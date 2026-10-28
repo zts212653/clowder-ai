@@ -1,6 +1,6 @@
 'use client';
 import type { ThreadArtifactDTO } from '@cat-cafe/shared';
-import { type ReactNode, type RefObject, useCallback, useEffect, useRef, useState } from 'react';
+import { type ReactNode, type RefObject, useEffect, useRef, useState } from 'react';
 import { useArtworkLightboxScope } from '@/components/content-review/ArtworkLightboxScope';
 import { useArtifactLightbox } from '@/components/content-review/useArtifactLightbox';
 import { WorksIcon } from '@/components/shell/ShellIcons';
@@ -13,7 +13,6 @@ import { useCatData } from '@/hooks/useCatData';
 import { useThreadArtifacts } from '@/hooks/useThreadArtifacts';
 import { artifactObjectId } from '../workbench/real-surface-adapters';
 import { artifactCardMetadata } from './artifact-card-metadata';
-import { HomeArtifactLightbox } from './HomeArtifactLightbox';
 import { WorkCard } from './HomeWorkCard';
 import { captureHomeArtifactOrigin, type WorkspaceHomeArtifactOrigin } from './home-artifact-origin';
 import { workspaceV3Copy } from './workspace-v3.shell-copy';
@@ -109,25 +108,16 @@ function ThreadWorksSummary({
   returnArtifactId,
 }: HomeWorksSummaryProps) {
   const t = useShellCopy(workspaceV3Copy);
-  const floating = useArtifactLightbox(threadId ?? '');
   const { getCatById } = useCatData();
   const { artifacts, works, total, complete, loading, error } = useThreadArtifacts(threadId, 'works');
-  const [selected, setSelected] = useState<{ threadId: string; artifact: ThreadArtifactDTO } | null>(null);
+  const floating = useArtifactLightbox(threadId ?? '', onOpenArtifact, {
+    items: artifacts,
+    complete: complete && !loading && !error,
+  });
   const [unavailable, setUnavailable] = useState(false);
   const origin = useRef<WorkspaceHomeArtifactOrigin | null>(null);
   const originFocus = useRef<HomeOriginFocus | null>(null);
   useNativeHomeFocus(threadId, originFocus);
-  const close = useCallback(() => {
-    const focus = document.activeElement;
-    const ownsFocus = focus instanceof Element && !!focus.closest('.home-lightbox');
-    setSelected(null);
-    const entry = originFocus.current;
-    if (!ownsFocus || !entry || entry.threadId !== threadId || !entry.viewport.isConnected) return;
-    const card = [...entry.viewport.querySelectorAll<HTMLButtonElement>('[data-home-artifact-id]')].find(
-      (node) => node.getAttribute('data-home-artifact-id') === entry.artifactId,
-    );
-    card?.focus({ preventScroll: true });
-  }, [threadId]);
   const returned = returnArtifactId
     ? artifacts.find((artifact) => artifactObjectId(artifact) === returnArtifactId)
     : undefined;
@@ -148,35 +138,9 @@ function ThreadWorksSummary({
     originFocus.current = { threadId, artifactId: artifactObjectId(artifact), viewport };
     setUnavailable(false);
     const navigationOrigin = origin.current;
-    if (floating.open(artifact, navigationOrigin)) return;
-    if (artifact.type === 'image' && artifact.url) setSelected({ threadId, artifact });
-    else if (onOpenArtifact) {
-      originFocus.current = null;
-      onOpenArtifact(artifact, origin.current);
-    } else setUnavailable(true);
+    floating.open(artifact, navigationOrigin, artifacts);
   };
-  const annotate = () => {
-    if (!selected || selected.threadId !== threadId || !origin.current || !onOpenArtifact) {
-      setUnavailable(true);
-      return;
-    }
-    originFocus.current = null;
-    onOpenArtifact(selected.artifact, { ...origin.current, artifactId: artifactObjectId(selected.artifact) });
-    close();
-  };
-  const selectPreview = (artifact: ThreadArtifactDTO) => {
-    if (!threadId) return;
-    const viewport = originFocus.current?.threadId === threadId ? originFocus.current.viewport : null;
-    const card = viewport?.querySelector<HTMLElement>(
-      `[data-home-artifact-id="${CSS.escape(artifactObjectId(artifact))}"]`,
-    );
-    origin.current = card && viewport ? captureHomeArtifactOrigin(threadId, artifact, card, viewport) : null;
-    setSelected({ threadId, artifact });
-    setUnavailable(false);
-  };
-  const selectedId = selected ? artifactObjectId(selected.artifact) : null;
-  const current =
-    selected?.threadId === threadId ? artifacts.find((item) => artifactObjectId(item) === selectedId) : undefined;
+
   return (
     <section
       className="home-section"
@@ -216,20 +180,9 @@ function ThreadWorksSummary({
           ))}
         </div>
       </WorksCatalogue>
-      {(returnUnavailable || unavailable || (selected?.threadId === threadId && !current)) && (
-        <output className="text-xs">{t.unavailable}</output>
-      )}
-      {current && (
-        <HomeArtifactLightbox
-          artifact={current}
-          images={visible.filter((item) => item.type === 'image' && !!item.url)}
-          onSelect={selectPreview}
-          onClose={close}
-          onAnnotate={annotate}
-          metadata={metadata(current)}
-          notice={unavailable ? t.unavailable : undefined}
-        />
-      )}
+      {(returnUnavailable || unavailable) && <output className="text-xs">{t.unavailable}</output>}
+      {floating.error && <output role="alert">{floating.error}</output>}
+      {floating.lightbox}
     </section>
   );
 }
