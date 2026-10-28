@@ -60,7 +60,7 @@ mcp_admission_claims:
 （2026-10-20：“应该是产物……视频 图片 文档”）。本次修正描述与检索入口；具体能力仍按下列
 阶段和原验收证据交付，不把网页作品版本化或 Office 完整共编记成已经完成。
 
-> **Status**: in-progress / Phase R、Studio 297 历史有界交付保留；Phase U 全入口归一 #6249 已合入；父 Alpha 基础旅程通过，入口与元数据缺口已交原 writer 续修；其余 Phase U、Office/video Admission Gate 与未勾 AC 仍开放
+> **Status**: in-progress / Phase R、Studio 297 历史有界交付保留；Phase U 归一四项补漏、#6264 prepared、#6275 卡片与 #6277 raw缩略/目录阅读器均已过父 Alpha；原Task414 g20等待正式加载f34c651a，完整正式体验、Phase U、Office/video Admission Gate与未勾AC仍开放
 > **Owner**: 小星星·Maine Coon (@codex-astra, GPT-6 Astra)，F309 统筹与最终交付
 > **Priority**: P1
 > **Source thread**: `[thread-id]` — F309「指挥」

@@ -71,13 +71,25 @@ function Wrapper() {
   );
 }
 const render = async () => act(async () => root.render(<Wrapper />));
-const click = async (id: string) =>
-  act(async () => document.querySelector<HTMLButtonElement>(`[data-testid="${id}"]`)?.click());
+const click = async (id: string) => {
+  if (
+    !document.querySelector(`[data-testid="${id}"]`) &&
+    (id === 'mailbox-item-toggle' || id === 'mailbox-item-restore')
+  ) {
+    await act(async () =>
+      document.querySelector<HTMLButtonElement>('[data-testid="mailbox-history-item-toggle"]')?.click(),
+    );
+    if (id === 'mailbox-item-toggle') return;
+  }
+  if (id !== 'mailbox-item-toggle' || document.querySelector('[data-testid="mailbox-item-toggle"]'))
+    await act(async () => document.querySelector<HTMLButtonElement>(`[data-testid="${id}"]`)?.click());
+};
 function read() {
   if (mode === 'ignored' && revision === 4) preferenceEntries = [{ coordinate, ignoredAt: 20 }];
   const result = okRead([item]);
   if (result.kind !== 'ok') throw new Error('Fixture');
   result.read.sources.personalPreferences = source;
+  result.read.sources.userMentions = { ...source, coverage: 'explicit_user_mentions' };
   result.read.sources.structuredChoices = { ...source, coverage: 'pending_f306_structured_choices' };
   result.read.personalView = {
     mode,
@@ -202,6 +214,7 @@ describe('Mailbox exact personal ignore actions through the original preference 
     view.result.read.mentionPeriod = 'handled';
     view.result.read.items = [{ ...item, userMention: { ...item.userMention, handled: true } }];
     await render();
+    await click('mailbox-history-tab-mentions');
     await click('mailbox-item-toggle');
     const restore = document.querySelector('[data-testid="mailbox-mention-restore"]');
     expect(restore).not.toBeNull();
@@ -273,7 +286,7 @@ describe('Mailbox exact personal ignore actions through the original preference 
       await vi.advanceTimersByTimeAsync(1);
     });
     expect(document.querySelector('[data-testid="mailbox-personal-undo"]')).toBeNull();
-    expect(document.querySelector('[data-testid="mailbox-open-ignored"]')).not.toBeNull();
+    expect(document.querySelector('[data-testid="mailbox-history"]')).not.toBeNull();
     expect(writes()).toHaveLength(1);
     expect(JSON.parse(writes()[0][1].body).restore).toEqual([]);
     vi.useRealTimers();
@@ -359,9 +372,11 @@ describe('Mailbox exact personal ignore actions through the original preference 
         : '暂时无法确认你的忽略记录，请重试。',
     );
     expect(document.querySelector('[data-testid="mailbox-bulk-ignore-notice"]')).toBeNull();
-    expect(document.querySelector('[data-testid="mailbox-mention-preview"]')?.textContent).toContain(
-      'Please look here',
-    );
+    expect(
+      document.querySelector(
+        action === 'restore' ? '[data-testid="mailbox-history-row"]' : '[data-testid="mailbox-mention-preview"]',
+      )?.textContent,
+    ).toContain('Please look here');
     expect(document.querySelector('[data-testid="mailbox-personal-undo"]')).toBeNull();
     owner = 'different-owner';
     read();
@@ -540,6 +555,12 @@ describe('Mailbox exact personal ignore actions through the original preference 
       },
     };
     await render();
+    if (selected === 'ignored') {
+      expect(document.querySelector('[data-testid="mailbox-handled-history"]')).not.toBeNull();
+      expect(document.querySelector('[data-testid="mailbox-group-mentions"]')).toBeNull();
+      expect(document.querySelectorAll('[data-testid="mailbox-history-row"]')).toHaveLength(1);
+      return;
+    }
     const groups = document.querySelector('[data-testid="mailbox-group-mentions"]');
     expect(document.querySelector('[data-testid="mailbox-state-text"]')?.textContent).toBe(
       `当前范围共 ${selected === 'visible' ? 29 : 25} 件`,
@@ -675,6 +696,25 @@ describe('Personal actions keep independent source eligibility', () => {
     if (!b) throw new Error('Personal action missing');
     expect(b.disabled).toBe(false);
   });
+  it('keeps the partial notice and saves the exact mention when the same plugin also makes needs-me partial', async () => {
+    unrelatedCollectiveFailure();
+    if (view.result.kind !== 'ok') throw new Error('Fixture');
+    view.result.read.sources.needsMe = { ...view.result.read.sources.needsMe, exhaustiveness: 'partial' };
+    await render();
+    const button = document.querySelector<HTMLButtonElement>('[data-testid="mailbox-item-ignore"]');
+    expect(button?.disabled).toBe(false);
+    expect(view.result.read.status).toBe('partial');
+    expect(document.querySelector('[data-testid="mailbox-state-text"]')?.textContent).toContain('仅部分读取');
+    await click('mailbox-item-ignore');
+    expect(writes()).toHaveLength(1);
+    expect(JSON.parse(writes()[0][1].body)).toEqual({
+      expectedOwnerUserId: OWNER,
+      expectedRevision: 4,
+      ignore: [coordinate],
+      restore: [],
+    });
+    expect(mocks.apiFetch.mock.calls.some(([, init]) => init?.method === 'POST')).toBe(false);
+  });
   it('unrelated F290 outage must allow full-set authority preview', async () => {
     unrelatedCollectiveFailure();
     await render();
@@ -760,6 +800,32 @@ describe('Personal actions keep independent source eligibility', () => {
 });
 
 describe('Partial reads preserve the personal write boundary', () => {
+  it('does not turn an older handled mention without a recorded reason into a viewed claim', async () => {
+    history = true;
+    read();
+    if (view.result.kind !== 'ok') throw new Error('Fixture');
+    view.result.read.items = [{ ...item, userMention: { ...item.userMention!, handled: true } }];
+    await render();
+    const row = document.querySelector('[data-testid="mailbox-history-row"]');
+    expect(row?.textContent).toContain('已处理');
+    expect(row?.textContent).not.toContain('看过');
+  });
+  it('clears ignored-history selection when a newer preference revision is installed', async () => {
+    mode = 'ignored';
+    read();
+    await render();
+    await click('mailbox-history-select');
+    const checkbox = document.querySelector<HTMLInputElement>('input[type="checkbox"]');
+    expect(checkbox).not.toBeNull();
+    await act(async () => checkbox?.click());
+    expect(document.querySelector<HTMLInputElement>('input[type="checkbox"]')?.checked).toBe(true);
+    revision++;
+    read();
+    await render();
+    expect(document.querySelector('input[type="checkbox"]')).toBeNull();
+    expect(document.querySelector('[data-testid="mailbox-history-restore-selected"]')).toBeNull();
+    expect(writes()).toHaveLength(0);
+  });
   it('saves, rereads and restores only the exact mention version while another source is down', async () => {
     unrelatedCollectiveFailure();
     await render();
@@ -809,7 +875,6 @@ describe('Partial reads preserve the personal write boundary', () => {
     'revision',
     'generation',
     'coordinate',
-    'other-source',
   ] as const)('refuses the partial mention write when %s is unverified', async (failure) => {
     unrelatedCollectiveFailure();
     if (view.result.kind !== 'ok') throw new Error('Fixture');
@@ -829,13 +894,6 @@ describe('Partial reads preserve the personal write boundary', () => {
     if (failure === 'revision') revision++;
     if (failure === 'generation') view = { ...view, readsStarted: () => 2 };
     if (failure === 'coordinate') value.items = [{ ...item, preferenceCoordinate: undefined }];
-    if (failure === 'other-source')
-      value.sources.approvals = {
-        ...source,
-        coverage: 'all_registered_F246_producers',
-        status: 'unavailable',
-        exhaustiveness: 'unknown',
-      };
     await render();
     await click('mailbox-item-ignore');
     expect(writes()).toHaveLength(0);

@@ -12,19 +12,21 @@ export function personalSourceRefusal(
   read: UnifiedAttentionReadV1,
   source: PersonalActionSource,
 ): PersonalActionRefusal | null {
-  if (
-    read.status === 'available' &&
-    read.consistency.state === 'verified' &&
-    read.consistency.reasons.length === 0 &&
-    Object.values(read.sources).every(complete)
-  )
-    return null;
+  const consistent = read.consistency.state === 'verified' && read.consistency.reasons.length === 0;
+  if (source === 'all')
+    return read.status === 'available' && consistent && Object.values(read.sources).every(complete) ? null : 'source';
 
-  // Both Host generations attribute this outage to Collective. Identity/invalid states and unknown reasons stay blocked.
   if (
-    source !== 'all' &&
-    complete(read.sources[source === 'mentions' ? 'userMentions' : source]) &&
-    complete(read.sources.personalPreferences) &&
+    read.status === 'unavailable' ||
+    !complete(read.sources[source === 'mentions' ? 'userMentions' : source]) ||
+    !complete(read.sources.personalPreferences) ||
+    Object.values(read.sources).some((value) => value?.status !== 'available' && value?.status !== 'unavailable')
+  )
+    return 'source';
+  if (consistent) return null;
+
+  // Availability diagnostics do not revoke another producer's proof. Identity, conflicts and unknown reasons do.
+  if (
     read.status === 'partial' &&
     read.sources.collectiveAccountabilityRequests?.status === 'unavailable' &&
     read.consistency.reasons.length > 0 &&
@@ -32,9 +34,6 @@ export function personalSourceRefusal(
       (reason) =>
         reason === 'collective_accountability_connection_read_failed' ||
         reason === 'collective_accountability_plugin_unavailable',
-    ) &&
-    Object.entries(read.sources).every(
-      ([name, value]) => name === 'collectiveAccountabilityRequests' || complete(value),
     )
   )
     return null;

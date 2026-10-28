@@ -1,10 +1,9 @@
-import { readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { assertNamedAlphaCheckout, assertNamedAlphaNotServing } from './alpha-coordinates.mjs';
 import { acquireNamedAlphaLifecycle } from './alpha-lifecycle-lock.mjs';
+import { assertNoOtherAlphaGeneration } from './preview-alpha-occupancy.mjs';
 import {
   readRegisteredPreviewEnvelope,
-  recoveryFile,
   recoveryPathExists,
   recoverySnapshot,
 } from './preview-alpha-recovery-evidence.mjs';
@@ -24,18 +23,6 @@ import { isUnclaimedPreviewFailure } from './preview-cleanup-result.mjs';
 import { readBoundPreviewCommand } from './preview-command-identity.mjs';
 import { recordedAlphaConfiguration } from './preview-recorded-alpha-configuration.mjs';
 import { isProcessRunning } from './process-tree.mjs';
-
-function otherGeneration(config, coordinates) {
-  const names = readdirSync(config.stateDir);
-  if (names.length > 16384) throw new Error('preview registry observation exceeds its bound');
-  for (const name of names.filter((n) => /^[a-f0-9]{16}\.json$/.test(n))) {
-    const path = join(config.stateDir, name);
-    if (path === config.recordPath) continue;
-    const other = recoveryFile(path).value;
-    if (Object.values(coordinates.ports).includes(other.port) || other.command?.includes(coordinates.instance))
-      throw new Error('another registered Alpha generation is active or unsettled, including pre-listener builds');
-  }
-}
 
 export function readUnclaimedAlphaRegistration(config, record) {
   const envelope = readRegisteredPreviewEnvelope(config, record);
@@ -75,7 +62,7 @@ export function assertUnclaimedAlphaIdle(config, record, evidence, deps = {}) {
   for (const port of Object.values(coordinates.ports))
     if ((deps.readListeners ?? recoveryListeners)(port).length) throw new Error('Alpha port is occupied');
   if (portLeases(coordinates, deps).length) throw new Error('Alpha same-port producer lease still exists');
-  otherGeneration(config, coordinates);
+  assertNoOtherAlphaGeneration(config, coordinates);
   assertNamedAlphaNotServing(coordinates, { readCwds: deps.readCwds });
 }
 

@@ -50,6 +50,8 @@ export interface ObservationWorkSummary {
   readonly seal?: SealReadSummary;
   readonly clock?: {
     readonly received: ClockPoint;
+    /** Latest additional native reply; total elapsed time still starts at received. */
+    readonly refreshed?: ClockPoint;
     readonly published: ClockPoint;
     readonly wallElapsedMs: number;
     readonly monotonicElapsedMs: number;

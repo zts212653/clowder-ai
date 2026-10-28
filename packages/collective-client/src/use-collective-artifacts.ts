@@ -2,7 +2,11 @@ import type { CollectiveModificationProjection } from '@cat-cafe/shared';
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { type ClientRequest, CollectiveClientRequestError, collectiveClientErrorMessage } from './client-request.js';
 import type { ClientSnapshot } from './client-types.js';
-import { collectiveArtifactClient, type SharedArtifact } from './collective-artifact-client.js';
+import {
+  collectiveArtifactClient,
+  type SharedArtifact,
+  type SharedArtifactOpenOptions,
+} from './collective-artifact-client.js';
 import { collectiveClientNamespace } from './human-send-custody.js';
 import { participantRecipient } from './participant-identity.js';
 import type { CollectiveWorkResultFileAddress } from './work-result-file-link.js';
@@ -30,6 +34,7 @@ export function useCollectiveArtifacts(
   const [selected, setSelected] = useState<{
     artifactId: string;
     ownerRevision?: number;
+    options?: SharedArtifactOpenOptions;
     requestId?: string;
     request?: CollectiveModificationProjection;
   }>();
@@ -67,8 +72,12 @@ export function useCollectiveArtifacts(
     };
   }, [api, refresh, snapshot.phase]);
   const open = useCallback(
-    (artifact: SharedArtifact, ownerRevision?: number) =>
-      setSelected({ artifactId: artifact.artifactId, ...(ownerRevision ? { ownerRevision } : {}) }),
+    (artifact: SharedArtifact, ownerRevision?: number, options?: SharedArtifactOpenOptions) =>
+      setSelected({
+        artifactId: artifact.artifactId,
+        ...(ownerRevision ? { ownerRevision } : {}),
+        ...(options ? { options } : {}),
+      }),
     [],
   );
   const close = useCallback(() => setSelected(undefined), []);
@@ -137,6 +146,7 @@ export function useCollectiveArtifacts(
   };
 }
 export type CollectiveArtifactState = ReturnType<typeof useCollectiveArtifacts> & {
+  documentHosted?: boolean;
   returnToSource?: (channelId: string, eventId: string) => void;
   returnLabel?: string;
   openWorkResultFile?: (address: CollectiveWorkResultFileAddress) => Promise<void>;

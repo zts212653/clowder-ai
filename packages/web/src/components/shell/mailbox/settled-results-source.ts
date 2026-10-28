@@ -49,6 +49,8 @@ const rowSchema = z.object({
 export const settledResultKey = (item: Pick<SettledApprovalHubItem, 'sourceFeatureId' | 'proposalId'>) =>
   JSON.stringify([item.sourceFeatureId, item.proposalId]);
 
+export class SettledOwnerUnverified extends Error {}
+
 /** A conflicting identity or lifecycle makes the read unavailable, never an empty or "latest wins" history. */
 export function parseSettledResults(body: unknown, ownerUserId: string): SettledResultItem[] | null {
   const parsed = z.object({ items: z.array(rowSchema) }).safeParse(body);
@@ -74,19 +76,34 @@ export function parseSettledResults(body: unknown, ownerUserId: string): Settled
 export async function readSettledResults(
   ownerUserId: string,
   signal: AbortSignal,
-  limit: 50 | 200 = 50,
+  limit: 30 | 50 | 200 = 50,
+): Promise<SettledResultItem[] | null | 'preparing'> {
+  try {
+    return await readOwnedSettledResults(ownerUserId, signal, limit);
+  } catch {
+    return null;
+  }
+}
+
+/** The cache distinguishes a failed update from lost identity; legacy exact readers still return null for either. */
+export async function readOwnedSettledResults(
+  ownerUserId: string,
+  signal: AbortSignal,
+  limit: 30 | 50 | 200 = 50,
 ): Promise<SettledResultItem[] | null | 'preparing'> {
   const response = await apiFetch(`/api/approval-hub/settled?limit=${limit}`, { signal }, { afterCurrentGet: true });
+  const body: unknown = await response.json().catch(() => null);
+  // Even a refused/preparing response may follow a changed cookie. It cannot keep the former owner's rows visible.
+  const principal = await apiFetch('/api/session', { signal }, { afterCurrentGet: true }).catch(() => null);
+  const session = z
+    .object({ userId: nonBlank })
+    .safeParse(principal?.ok ? await principal.json().catch(() => null) : null);
+  if (!session.success || session.data.userId !== ownerUserId || response.status === 401 || response.status === 403)
+    throw new SettledOwnerUnverified('History identity could not be confirmed');
   if (response.status === 503) {
-    const error = z
-      .object({ code: z.literal('APPROVAL_HISTORY_PREPARING') })
-      .safeParse(await response.json().catch(() => null));
+    const error = z.object({ code: z.literal('APPROVAL_HISTORY_PREPARING') }).safeParse(body);
     return error.success ? 'preparing' : null;
   }
   if (!response.ok) return null;
-  const items = parseSettledResults(await response.json(), ownerUserId);
-  // Recheck after the data read. A response issued under the previous login cannot be installed for a new owner.
-  const principal = await apiFetch('/api/session', { signal }, { afterCurrentGet: true });
-  const session = z.object({ userId: nonBlank }).safeParse(principal.ok ? await principal.json() : null);
-  return session.success && session.data.userId === ownerUserId ? items : null;
+  return parseSettledResults(body, ownerUserId);
 }

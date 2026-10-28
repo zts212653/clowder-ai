@@ -3,6 +3,7 @@
 import type { ArtifactReviewView } from '@cat-cafe/shared';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { invalidateArtifactReviewAccess } from '@/components/content-review/review-access-invalidation';
+import { useContentOpen } from '@/components/content-review/useContentOpen';
 import { NeedsMePanel } from '@/components/growing/NeedsMePanel';
 import { type PreparedArtifactCoordinate, ProductSchedulePanel } from '@/components/growing/ProductSchedulePanel';
 import { readPreparedArtifact } from '@/components/growing/read-prepared-artifact';
@@ -13,7 +14,6 @@ import { apiFetch } from '@/utils/api-client';
 import { createArtifactReviewSurface, reviewSurfaceFromPreparedRef } from './artifact-review-surface';
 import {
   createApprovalActionSurface,
-  createArtifactSurface,
   createNeedsMeReturnSurface,
   createProductScheduleReturnSurface,
   resolveNeedsMeReturnTarget,
@@ -41,6 +41,7 @@ function ArtifactUnavailable({ onRetry }: { onRetry: () => void }) {
 }
 
 function usePreparedArtifactReturn(onOpen: ArtifactReturnProps['onOpenArtifactWithReturn']) {
+  const { openContent, lightbox } = useContentOpen();
   const [loading, setLoading] = useState(false);
   const readRef = useRef<AbortController | null>(null);
   useEffect(() => () => readRef.current?.abort(), []);
@@ -91,14 +92,20 @@ function usePreparedArtifactReturn(onOpen: ArtifactReturnProps['onOpenArtifactWi
           setUnavailable(true);
           return;
         }
-        onOpen({ artifact: createArtifactSurface({ threadId: artifact.threadId, artifact }), returnSurface });
+        const opened = await openContent({
+          kind: 'artifact',
+          threadId: artifact.threadId,
+          artifact,
+          attach: (surface) => onOpen({ artifact: surface, returnSurface }),
+        });
+        if (!opened && !controller.signal.aborted) setUnavailable(true);
       } catch {
         if (!controller.signal.aborted) setUnavailable(true);
       } finally {
         if (!controller.signal.aborted) setLoading(false);
       }
     },
-    [onOpen],
+    [onOpen, openContent],
   );
   const open = useCallback(
     (coordinate: PreparedArtifactCoordinate, returnSurface: WorkspaceSurfaceDescriptor | null, title?: string) => {
@@ -122,7 +129,7 @@ function usePreparedArtifactReturn(onOpen: ArtifactReturnProps['onOpenArtifactWi
     setUnavailable(false);
     window.dispatchEvent(new Event('cat-cafe:entrusted-work-projection-invalidated'));
   }, []);
-  return { loading, open, openReview, openReviewAction, unavailable, retry };
+  return { loading, open, openReview, openReviewAction, unavailable, retry, lightbox };
 }
 
 export function ProductScheduleOwnerSurface({ surface, onOpenArtifactWithReturn }: ArtifactReturnProps) {
@@ -141,6 +148,7 @@ export function ProductScheduleOwnerSurface({ surface, onOpenArtifactWithReturn 
           target.openReview(review, createProductScheduleReturnSurface(surface, itemRef))
         }
       />
+      {target.lightbox}
     </div>
   );
 }
@@ -200,6 +208,7 @@ export function NeedsMeOwnerSurface({
         onOpenAction={openAction}
         onOpenReview={(review, itemRef) => target.openReview(review, returnSurface(itemRef))}
       />
+      {target.lightbox}
     </div>
   );
 }

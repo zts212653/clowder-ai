@@ -14,8 +14,9 @@ const mocks = vi.hoisted(() => ({
   queueWorkDiscussion: vi.fn(),
   currentThreadId: 'default',
   fakeArtifact: {
-    type: 'image',
-    name: 'work',
+    type: 'file',
+    name: 'work.md',
+    url: '/uploads/work.md',
     catId: 'codex-sol',
     createdAt: 1,
     sourceMessageId: 'message-1',
@@ -40,6 +41,7 @@ vi.mock('@/stores/chatStore', () => ({
     {
       getState: () => ({
         currentThreadId: mocks.currentThreadId,
+        openPublishedArtifact: mocks.openPublishedArtifact,
         setCurrentThread: mocks.setCurrentThread,
         closeRightPanel: mocks.closeRightPanel,
       }),
@@ -324,7 +326,7 @@ describe('F322 new conversation page', () => {
     );
 
     act(() => buttons.find((button) => button.textContent === 'open work')?.click());
-    expect(mocks.openPublishedArtifact).toHaveBeenCalledWith('default', mocks.fakeArtifact);
+    expect(mocks.openPublishedArtifact).toHaveBeenCalledWith('default', mocks.fakeArtifact, undefined);
     act(() => buttons.find((button) => button.textContent === 'all works')?.click());
     expect(mocks.setWorkspaceMode).toHaveBeenCalledWith('artifacts');
   });

@@ -13,6 +13,7 @@ import {
   schedulePublicationCandidate,
 } from './read-schedule-approval';
 import { scheduleApprovalCopy } from './schedule-approval.shell-copy';
+import { useOriginalApprovalRead } from './use-original-approval-read';
 
 export interface ScheduleApprovalProps {
   block?: RichCardBlock;
@@ -34,60 +35,49 @@ export function useScheduleApprovalController({ block, item, coordinate, message
   // messageId alone is not a thread coordinate and cannot authorize this card.
   const threadId = ref?.threadId,
     cardMessageId = ref?.messageId ?? messageId;
-  const [proposal, setProposal] = useState<ScheduleMutationProposal | null>(null);
-  const [checking, setChecking] = useState(true),
-    [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null),
+  const liveBinding = useRef({ readItem, block, proposalId, threadId, cardMessageId });
+  liveBinding.current = { readItem, block, proposalId, threadId, cardMessageId };
+  const original = useOriginalApprovalRead(
+    'F139',
+    proposalId,
+    { threadId, messageId: cardMessageId, block },
+    async (_signal, fresh) =>
+      proposalId && threadId && cardMessageId
+        ? readScheduleSource(proposalId, { threadId, messageId: cardMessageId }, readItem, fresh)
+        : null,
+    item?.ownerUserId,
+  );
+  const remembered = useRef<{ owner: string | null; value: ScheduleMutationProposal } | null>(null);
+  if (remembered.current?.owner !== original.ownerUserId) remembered.current = null;
+  if (original.value) remembered.current = { owner: original.ownerUserId, value: original.value };
+  const proposal = original.ownerUserId ? (remembered.current?.value ?? null) : null;
+  const checking = original.reading || (original.value === undefined && !original.failed && !original.retained);
+  const [busy, setBusy] = useState(false),
+    [error, setError] = useState<string | null>(null),
     [unknown, setUnknown] = useState(false);
   const live = useRef<ScheduleMutationProposal | null>(null),
-    generation = useRef(0),
     mounted = useRef(true),
     inFlight = useRef(false);
+  live.current = original.value && !checking && !original.failed ? original.value : null;
   const guardedWrite = useGuardedWrite(),
-    blocked = useWriteBlocked(busy || checking || unknown || !proposal);
+    blocked = useWriteBlocked(busy || checking || unknown || !original.value || original.failed);
   const refresh = useCallback(async () => {
-    const round = ++generation.current;
-    live.current = null;
-    setChecking(true);
-    try {
-      const next =
-        proposalId && threadId && cardMessageId
-          ? await readScheduleSource(proposalId, { threadId, messageId: cardMessageId }, readItem)
-          : null;
-      if (round !== generation.current || !mounted.current) return null;
-      live.current = next;
-      setProposal(next);
-      setError(next ? null : t.unavailable);
-      return next;
-    } catch {
-      if (round === generation.current && mounted.current) {
-        setProposal(null);
-        setError(t.unavailable);
-      }
-      return null;
-    } finally {
-      if (round === generation.current && mounted.current) setChecking(false);
-    }
-  }, [proposalId, threadId, cardMessageId, readItem, t.unavailable]);
+    const next = (await original.refresh()) ?? null;
+    live.current = next;
+    if (mounted.current) setError(next ? null : t.unavailable);
+    return next;
+  }, [original.refresh, t.unavailable]);
   useEffect(() => {
     mounted.current = true;
-    void refresh();
-    const invalidate = () => {
-      if (!inFlight.current) void refresh();
-    };
-    for (const event of [...UNIFIED_ATTENTION_INVALIDATION_EVENTS, 'cat-cafe:proposal-updated'])
-      window.addEventListener(event, invalidate);
     return () => {
       mounted.current = false;
-      ++generation.current;
       live.current = null;
-      for (const event of [...UNIFIED_ATTENTION_INVALIDATION_EVENTS, 'cat-cafe:proposal-updated'])
-        window.removeEventListener(event, invalidate);
     };
-  }, [refresh]);
+  }, []);
   const decide = useCallback(
     async (decision: 'approve' | 'reject') => {
       const previous = live.current;
+      const expectedBinding = liveBinding.current;
       if (
         !previous ||
         blocked ||
@@ -103,7 +93,7 @@ export function useScheduleApprovalController({ block, item, coordinate, message
       try {
         const next = await refresh();
         if (!mounted.current) return;
-        if (!next || !sameScheduleValue(previous, next)) {
+        if (!next || !sameScheduleValue(previous, next) || !sameScheduleValue(expectedBinding, liveBinding.current)) {
           setError(t.changed);
           return;
         }
@@ -150,5 +140,17 @@ export function useScheduleApprovalController({ block, item, coordinate, message
     setError(null);
     void refresh();
   };
-  return { t, language, proposal, checking, busy, error, unknown, blocked, decide, reread };
+  return {
+    t,
+    language,
+    proposal,
+    checking,
+    busy,
+    error,
+    unknown,
+    blocked,
+    decide,
+    reread,
+    retained: original.retained,
+  };
 }

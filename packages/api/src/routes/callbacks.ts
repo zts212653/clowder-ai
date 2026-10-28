@@ -1,5 +1,6 @@
 import { getCoCreatorDisplay } from '../config/co-creator-display.js';
 import { cloudPrincipalStanding } from '../domains/cats/services/cloud-bridge/cloud-conversation-identity.js';
+import { cloudReturnProof } from '../domains/cats/services/cloud-bridge/cloud-return-proof.js';
 import { makeCallbackAuthError } from './callback-errors.js';
 /**
  * Callback API Routes — MCP 回传端点
@@ -1434,6 +1435,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       }
       const isCloudReturnAttempt = (isDot && !dotAskAdmission) || (isGptPro && Boolean(replyTo || cloudReturnBinding));
       const usesServerGrant = (isDot || isGptPro) && Boolean(replyTo) && !cloudReturnBinding;
+      let verifiedLegacyReturn: import('@cat-cafe/shared').CloudBridgeReturnV1 | undefined;
       if (isGptPro && cloudReturnBinding) {
         if (!replyTo) {
           reply.status(400);
@@ -1463,6 +1465,13 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
             message: 'Cloud return binding does not authorize this source, thread, user, or cloud cat.',
           };
         }
+        verifiedLegacyReturn = cloudReturnProof({
+          threadId: effectiveThreadId,
+          userId: principal.userId,
+          sourceMessageId: replyTo,
+          targetCatId: String(principal.catId),
+          dispatchInvocationId: bindingVerdict.dispatchInvocationId,
+        });
       }
 
       const { cleanText: storedContent, blocks: extractedBlocks } = extractRichFromText(content);
@@ -1894,6 +1903,11 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
         );
       }
 
+      const admittedCloudReturn = !isDot
+        ? cloudReturnGrantClaim
+          ? cloudReturnProof(cloudReturnGrantClaim)
+          : verifiedLegacyReturn
+        : undefined;
       const appendInput: AppendMessageInput = {
         from: { kind: 'agent', catId: principal.catId },
         threadId: effectiveThreadId,
@@ -1904,7 +1918,9 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
         ...(mentionsUser ? { mentionsUser } : {}),
         origin: 'callback',
         timestamp: now,
-        ...(extra ? { extra } : {}),
+        ...(extra || admittedCloudReturn
+          ? { extra: { ...extra, ...(admittedCloudReturn ? { cloudBridgeReturn: admittedCloudReturn } : {}) } }
+          : {}),
         ...(validatedReplyTo ? { replyTo: validatedReplyTo } : {}),
         ...(cloudReturnMessageIdempotencyKey || localReviewFactMessageIdempotencyKey || callbackMessageIdempotencyKey
           ? {
@@ -2053,6 +2069,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
           // #814: Always include isExplicitPost in broadcast so frontend TD112 dedup skips merge
           extra: {
             isExplicitPost: true,
+            ...(storedMsg.extra?.cloudBridgeReturn ? { cloudBridgeReturn: storedMsg.extra.cloudBridgeReturn } : {}),
             ...(validExplicitTargets.length ? { targetCats: validExplicitTargets } : {}),
           },
           ...(mentionsUser ? { mentionsUser } : {}),

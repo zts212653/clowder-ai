@@ -18,10 +18,10 @@ export function ThreadProposalDecision({ item }: { item: ApprovalHubItem }) {
   const host = useMemo<ApprovalHost>(
     () => ({
       ...parentHost,
-      writesLocked: parentHost.writesLocked || proposal === null,
-      authorizeWrite: (kind, options) => proposal !== null && parentHost.authorizeWrite(kind, options),
+      writesLocked: parentHost.writesLocked || proposal === null || checking,
+      authorizeWrite: (kind, options) => proposal !== null && !checking && parentHost.authorizeWrite(kind, options),
     }),
-    [parentHost, proposal],
+    [parentHost, proposal, checking],
   );
   return (
     <>

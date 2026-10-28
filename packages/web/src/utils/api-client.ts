@@ -14,6 +14,7 @@ import { apiClientCopy } from './api-client.shell-copy';
 
 import { markApiGetGeneration } from './api-get-generation';
 import { resolveApiUrl } from './api-origin';
+import { observeApiSessionOwner } from './api-session-identity';
 import { waitForPromiseWithSignal } from './bounded-fetch';
 import { configureConnectionDiagnostics, scheduleConnectionDiagnosticDelivery } from './connection-diagnostics';
 import { diagnosticFetch, recordConnectionNotice } from './connection-request-trace';
@@ -115,14 +116,18 @@ function ensureSession(): Promise<void> {
       }
       const body = (typeof res.json === 'function' ? await res.json().catch(() => null) : null) as {
         csrfToken?: unknown;
+        userId?: unknown;
       } | null;
+      if (sessionGate !== gate) return;
       sessionCsrfToken = typeof body?.csrfToken === 'string' && body.csrfToken ? body.csrfToken : null;
+      observeApiSessionOwner(body?.userId);
       scheduleConnectionDiagnosticDelivery();
     })
     .catch((err) => {
       if (sessionGate === gate) {
         sessionGate = null;
         sessionCsrfToken = null;
+        observeApiSessionOwner(null);
       }
       throw err;
     });
@@ -149,14 +154,18 @@ export function refreshApiSession(): Promise<void> {
       if (!res.ok) throw new Error(`session bootstrap failed (${res.status})`);
       const body = (typeof res.json === 'function' ? await res.json().catch(() => null) : null) as {
         csrfToken?: unknown;
+        userId?: unknown;
       } | null;
+      if (sessionGate !== gate) return;
       sessionCsrfToken = typeof body?.csrfToken === 'string' && body.csrfToken ? body.csrfToken : null;
+      observeApiSessionOwner(body?.userId);
       scheduleConnectionDiagnosticDelivery();
     })
     .catch((err) => {
       if (sessionGate === gate) {
         sessionGate = null;
         sessionCsrfToken = null;
+        observeApiSessionOwner(null);
       }
       throw err;
     })
@@ -172,6 +181,7 @@ function invalidateSession(observedGate: Promise<void>) {
   if (sessionGate === observedGate) {
     sessionGate = null;
     sessionCsrfToken = null;
+    observeApiSessionOwner(null);
   }
 }
 

@@ -124,7 +124,7 @@ export function ClassicWorkspaceFileChrome({
                 请猫修改
               </ToolbarBtn>
             )}
-            {file.size > 0 && (
+            {file.size !== undefined && file.size > 0 && (
               <span className="text-micro text-cafe-secondary font-mono flex-shrink-0">
                 {file.size < 1024 ? `${file.size}B` : `${Math.round(file.size / 1024)}KB`}
               </span>

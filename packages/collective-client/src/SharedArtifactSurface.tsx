@@ -27,6 +27,7 @@ export function SharedArtifactSurface({
   if (artifact) managed.current = artifact;
   if (!shared?.selected) managed.current = undefined;
   if (!shared?.selected) return null;
+
   const managementArtifact = managed.current?.artifactId === shared.selected.artifactId ? managed.current : undefined;
   const infoKey = `${managementArtifact?.serviceInstanceId}:${managementArtifact?.collectiveId}:${shared.selected.artifactId}:${shared.humanId}`;
   const latestRevision = artifact?.versions.at(-1)?.ownerRevision;
@@ -80,6 +81,11 @@ export function SharedArtifactSurface({
       ) : !view ? (
         <output className="shared-artifact-state">{t('正在读取作品…')}</output>
       ) : null}
+      {shared.documentHosted && (
+        <p className="shared-artifact-history-banner">
+          {t('正文在 Workspace 的常驻标签中；这里沿原讨论批注、请猫修改与采用。')}
+        </p>
+      )}
       {view && artifact && (
         <>
           {view.view.historyReadOnly && (
@@ -102,7 +108,7 @@ export function SharedArtifactSurface({
             />
           ) : (
             <div className="shared-artifact-reading-area">
-              <SharedArtifactDocument view={view} />
+              {!shared.documentHosted && <SharedArtifactDocument view={view} />}
               <SharedArtifactAnnotations view={view} onOpenDiscussion={onOpenDiscussion} />
             </div>
           )}

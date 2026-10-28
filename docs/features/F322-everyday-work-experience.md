@@ -4,7 +4,7 @@ related_features: [F056, F083, F147, F229, F232, F269, F277, F283, F284, F290, F
 topics: [frontend, ux, discoverability, navigation, continuity, accessibility]
 doc_kind: spec
 created: 2026-09-27
-updated: 2026-10-27
+updated: 2026-10-28
 description: "把日常主屏与跨面板操作整理成看得懂、找得到、能继续的工作体验，并逐项结算已有前端承诺。"
 description_source: model
 description_author: codex-astra
@@ -108,6 +108,7 @@ Ragdoll（设计，@opus55）和小星星（ROOT，@codex-astra）共同维护�
   3. 侧栏项目工具栏（定位当前对话、展开/折叠全部、新增项目）：10-15 核来源，这是Ragdoll 10-12 在图册附二自己记的一笔，You 没提过；「定位当前对话」已经上线。先不画，等真用时有需要再说。
   4. 图册里过时的页：**10-15 已换**。侧栏的组、新对话、「+」、账户、成员换成 boot32 正式环境真页面（都已对稿通过）；接上会话换成 10-15 实页；待办换成 10-14 新卡；首页换成 r7；第十章和附一挪到第九章后面；新增第十一章「找回以前的，接着用」（候选）。日程那张的红圈是当时的焦点框毛病，在说明里写清了。
      **10-27 本批设计验收通过；静态标签随下批移除**：Opus 对照v8与Alpha设置浅色1440、对话浅色/暗色1440，确认原色差、实心保存按钮及黄昏默认20%通过（`[thread-id]#private-source-id`）。设计已在`45cb147daf`撤回规则8的「深色的画配暗色」与静态「适合暗色」；`ChatBackgroundPicker`目前仍给Café夜晚、主星书房显示该小标。按设计明确安排：下次F322前端改动顺手移除两处、不换别的提示；不为此立即另开PR，若无后续批次再单独小改。此尾项未实现，不影响本批设计通过，也不改变正式runtime及整F322/Task167边界。
+     **10-27 外部 lint 回归已修复**：main #6249 的六项 unused 已由原 owner 在 [#6258](https://github.com/zts212653/clowder-ai/pull/6258) 合入 `45de1f4572075d17df09487ac5edc86e27c4b499`；已核 GitHub 合入事实、当前 `main/origin/main` 包含该 merge。修复方冻结合流 `18585819` 的完整 Web lint 退出0（warnings保留）、types退出0、八文件79/79记录已回读；35条作者路径与 Sonnet 已审 `02a40b1f` 在 merge 逐字一致，已独立核 Git blob。[原 PR 证据](https://github.com/zts212653/clowder-ai/pull/6258#issuecomment-6455717544)；回执 `[thread-id]#private-source-id`。这是后继修复事实，#6245 的 build10/full lint 原失败及冻结证据保持原样；本轮未重跑旧视觉/Alpha矩阵，未操作正式runtime，不改变整F322/Task167状态。
   - 不另画的：待办其余 15 类卡照原卡做（10-14 已定，交来逐类对稿）；接上会话的多工具状态 10-15 已实现并对稿；暗色、英文、390 窄屏在每次对稿时一起看，不单出一套。
 
 **10-12 F310 日程终态依赖（后端合同，未替代设计审）**：F322 后续只消费同一 owner-read 的

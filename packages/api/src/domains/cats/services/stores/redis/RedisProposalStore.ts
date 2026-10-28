@@ -1,4 +1,7 @@
+import { reconcileSettledIndexTime } from '../../../../../utils/reconcile-settled-index-time.js';
 import { advanceSettledIndex, SettledIndexPreparingError } from '../../../../../utils/redis-settled-index.js';
+import { readRedisSettledPage } from '../../../../../utils/redis-settled-page.js';
+import type { SettledHistoryPageOptions, SettledHistorySourcePage } from '../../../../../utils/settled-history-page.js';
 /**
  * Redis-backed F128 Proposal store.
  *
@@ -137,7 +140,7 @@ export class RedisProposalStore implements IProposalStore {
     return this.loadFromIndex(ProposalKeys.userList(userId), limit);
   }
 
-  async listSettledByUser(userId: string, limit = DEFAULT_LIST_LIMIT): Promise<ThreadProposal[]> {
+  private async prepareSettledHistory() {
     const ready = await advanceSettledIndex(this.redis, {
       progressKey: 'proposals:history-index:v1',
       prefix: 'proposal:',
@@ -155,6 +158,44 @@ export class RedisProposalStore implements IProposalStore {
       },
     });
     if (!ready) throw new SettledIndexPreparingError();
+  }
+
+  async listSettledPage(
+    owner: string,
+    options: SettledHistoryPageOptions,
+  ): Promise<SettledHistorySourcePage<ThreadProposal>> {
+    await this.prepareSettledHistory();
+    return readRedisSettledPage(this.redis, ProposalKeys.userSettled(owner), options, async (id, at) => {
+      const p = await this.get(id);
+      if (!p) return null;
+      if (p.createdBy !== owner || !['approved', 'rejected', 'withdrawn'].includes(p.status))
+        throw new Error('Settled index canonical owner/status mismatch');
+      if (p.proposalId !== id) throw new Error('Settled index identity mismatch');
+      await reconcileSettledIndexTime(
+        this.redis,
+        ProposalKeys.userSettled(owner),
+        id,
+        at,
+        p.withdrawnAt ?? p.approvedAt ?? p.rejectedAt ?? 0,
+        [
+          {
+            key: ProposalKeys.detail(id),
+            fields: {
+              status: p.status,
+              createdBy: p.createdBy,
+              approvedAt: p.approvedAt,
+              rejectedAt: p.rejectedAt,
+              withdrawnAt: p.withdrawnAt,
+            },
+          },
+        ],
+      );
+      return p;
+    });
+  }
+
+  async listSettledByUser(userId: string, limit = DEFAULT_LIST_LIMIT): Promise<ThreadProposal[]> {
+    await this.prepareSettledHistory();
     return (await this.loadFromIndex(ProposalKeys.userSettled(userId), limit)).filter(
       (p) => p.createdBy === userId && ['approved', 'rejected', 'withdrawn'].includes(p.status),
     );

@@ -287,7 +287,7 @@ export interface UnifiedAttentionReadV1 {
   /** Exact open approvals + canonical pending F306 interactions + named content reviews. */
   attentionCount?: number;
   mentionCounts?: { today: number; week: number; earlier: number; handled: number };
-  mentionPeriod?: 'recent' | 'today' | 'week' | 'earlier' | 'handled';
+  mentionPeriod?: 'recent' | 'today' | 'week' | 'earlier' | 'handled' | 'all';
   /** Present only when the caller explicitly requests an owner-personal visible or ignored view. */
   personalView?: UnifiedAttentionPersonalViewV1;
   /** hasMore describes only the known rows from this independent-source read. */

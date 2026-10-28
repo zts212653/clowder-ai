@@ -59,6 +59,15 @@ export class StaticFeatureAuthority {
       this.admission === 'desktop-companion'
         ? await this.options.broker.authorizeHostCall(pluginInstanceId)
         : await this.options.broker.authorizeStaticFeature(pluginInstanceId);
+    // Provisioning scans share the same locks as active observations. Keep IO
+    // outside both stores, then check the current binding, preference and epoch
+    // in the transaction: an earlier grant cannot survive a slow package scan.
+    let packageTrusted = true;
+    try {
+      await this.options.verifyActivePackage(pluginInstanceId, binding.packageDigest);
+    } catch {
+      packageTrusted = false;
+    }
     const decision = await this.options.store.transaction((tx) =>
       this.options.inventory.transaction(async (inventory): Promise<Decision<StaticFeatureLease>> => {
         const { instance, manifest } = this.current(tx, inventory, binding);
@@ -81,9 +90,7 @@ export class StaticFeatureAuthority {
           (r) => r.pluginInstanceId === pluginInstanceId && r.integrityEpoch === sessionEpoch,
         );
         if (epoch?.state === 'damaged') throw denied('package integrity epoch is damaged');
-        try {
-          await this.options.verifyActivePackage(pluginInstanceId, binding.packageDigest);
-        } catch {
+        if (!packageTrusted) {
           if (epoch)
             tx.staticFeatures.put(
               containStaticFeatureEpoch(ledger, pluginInstanceId, epoch.integrityEpoch, this.now()),
@@ -153,8 +160,15 @@ export class StaticFeatureAuthority {
     executionLease: string,
     work: (lease: StaticFeatureLease) => Promise<T>,
     diagnostics?: StaticFeatureRunDiagnostics,
+    readFreshInput?: () => Promise<void>,
   ): Promise<T> {
-    return this.withLease(executionLease, 'active', (record) => work(structuredClone(record)), diagnostics);
+    return this.withLease(
+      executionLease,
+      'active',
+      (record) => work(structuredClone(record)),
+      diagnostics,
+      readFreshInput,
+    );
   }
 
   async resolve(pluginInstanceId: string, providerId: string): Promise<StaticFeatureLease | null> {
@@ -201,6 +215,7 @@ export class StaticFeatureAuthority {
     phase: 'provisioning' | 'active',
     work: (lease: StaticFeatureLease, tx: HostBrokerTransaction, inventory: PluginInventoryTransaction) => Promise<T>,
     diagnostics?: StaticFeatureRunDiagnostics,
+    readFreshInput?: () => Promise<void>,
   ): Promise<T> {
     const measure: StaticFeatureRunDiagnostics['measure'] = (stage, operation) =>
       diagnostics ? diagnostics.measure(stage, operation) : operation();
@@ -224,6 +239,11 @@ export class StaticFeatureAuthority {
     } catch {
       packageTrusted = false;
     }
+    // A trusted Host consumer may refresh its input after slow preparation.
+    // This is a read outside both locks, never an authority grant: every
+    // binding, preference, epoch and clock check below still runs afterwards.
+    // An untrusted package must reach durable containment without another read.
+    if (packageTrusted) await readFreshInput?.();
     const decision = await measure('broker-transaction', () =>
       this.options.store.transaction((tx) =>
         measure('inventory-transaction', () =>

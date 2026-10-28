@@ -2,7 +2,7 @@ import { projectFileContent, type ThreadArtifactDTO } from '@cat-cafe/shared';
 import type { ReactNode } from 'react';
 import { useArtifactContent } from '@/hooks/useArtifactContent';
 import { FileToolbar } from '../content-review/FileToolbar';
-import type { FileActionSource } from '../content-review/file-action-client';
+import { artifactContentSource } from './artifact-view';
 import { PublishedTextReader } from './PublishedTextReader';
 
 /** Catalogue adapter only. All document/media/binary presentation belongs to ContentViewer. */
@@ -23,12 +23,9 @@ export function ArtifactFileReader({
 }) {
   const { mime, kind } = projectFileContent(artifact);
   const binary = ['image', 'video', 'audio', 'office', 'binary'].includes(kind);
-  const { content, loading, error } = useArtifactContent(artifact, worktreeId, !binary);
-  const source: FileActionSource | null = artifact.url
-    ? { kind: 'url', url: artifact.url }
-    : artifact.ref && worktreeId
-      ? { kind: 'workspace', worktreeId, path: artifact.ref }
-      : null;
+  const { content, loading, error, truncated, size } = useArtifactContent(artifact, worktreeId, !binary);
+  const resolved = artifactContentSource(artifact, worktreeId);
+  const source = resolved.kind === 'none' ? null : resolved;
   if (!source || (!binary && (error || content === null)))
     return (
       <div className="flex min-h-0 flex-1 flex-col p-3">
@@ -62,6 +59,8 @@ export function ArtifactFileReader({
       content={content ?? ''}
       source={source}
       binary={binary}
+      truncated={truncated}
+      byteLength={size}
       mime={mime}
       sourceThreadId={sourceThreadId}
       onBack={onBack}

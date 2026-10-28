@@ -397,3 +397,9 @@ describe('parseUnifiedAttentionRead — a body is a read only if it is a version
     expect(parseUnifiedAttentionRead(input)).toBeNull();
   });
 });
+
+it('the all-time window retains the canonical four mention counters; it does not invent a fifth count', () => {
+  const read = body({ mentionPeriod: 'all', mentionCounts: { today: 1, week: 2, earlier: 3, handled: 4 } });
+  expect(parseUnifiedAttentionRead(read)?.mentionPeriod).toBe('all');
+  expect(parseUnifiedAttentionRead(read)?.mentionCounts).toEqual({ today: 1, week: 2, earlier: 3, handled: 4 });
+});

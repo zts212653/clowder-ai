@@ -16,6 +16,7 @@ interface LiveSelectionAnnotationActionProps<T extends LiveSelectionTarget> {
   actionTestId: string;
   /** Returning `false` refuses the save: the card, the words and the selection stay as they were. */
   onSave: (action: T, comment: string) => void | boolean;
+  collectComment?: boolean;
   onForward?: (action: T, comment: string) => void;
   canForward?: (action: T) => boolean;
   triggerContent?: ReactNode;
@@ -32,6 +33,7 @@ export function LiveSelectionAnnotationAction<T extends LiveSelectionTarget>({
   positionMode,
   actionTestId,
   onSave,
+  collectComment,
   onForward,
   canForward,
   triggerContent,
@@ -56,6 +58,7 @@ export function LiveSelectionAnnotationAction<T extends LiveSelectionTarget>({
       onOpen={() => setSnapshot(ownedAction)}
       onClose={() => setSnapshot(null)}
       onSave={(comment) => onSave(ownedAction, comment)}
+      collectComment={collectComment}
       triggerContent={triggerContent}
       triggerClassName={triggerClassName}
       {...(onForward && (canForward?.(ownedAction) ?? true)

@@ -178,7 +178,7 @@ function openArtifactWithReturn(
 ): WorkbenchLayoutState {
   if (
     !isUserEntitled(action.entitlement) ||
-    !isTaskArtifactSurface(action.artifact) ||
+    (!isTaskArtifactSurface(action.artifact) && resolveFileTarget(action.artifact) === null) ||
     !isEntrustedWorkReturnSurface(action.returnSurface)
   ) {
     return state;

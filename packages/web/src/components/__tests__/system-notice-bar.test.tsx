@@ -7,8 +7,12 @@ import { SystemNoticeBar } from '../SystemNoticeBar';
 vi.mock('@/components/MarkdownContent', () => ({
   MarkdownContent: ({ content }: { content: string }) => React.createElement('p', null, content),
 }));
+vi.mock('@/components/thread-chat/MessageNavigationContext', () => ({ useMessageNavigation: () => vi.fn() }));
 
-function renderNotice(message: Partial<ChatMessageType> & Pick<ChatMessageType, 'content' | 'timestamp' | 'source'>) {
+function renderNotice(
+  message: Partial<ChatMessageType> & Pick<ChatMessageType, 'content' | 'timestamp' | 'source'>,
+  timelineMessages: readonly ChatMessageType[] = [],
+) {
   return renderToStaticMarkup(
     <SystemNoticeBar
       message={
@@ -18,11 +22,66 @@ function renderNotice(message: Partial<ChatMessageType> & Pick<ChatMessageType, 
           ...message,
         } as ChatMessageType
       }
+      threadId="thread-pro"
+      timelineMessages={timelineMessages}
     />,
   );
 }
 
 describe('SystemNoticeBar', () => {
+  it('shows the exact authenticated reply while retaining an unknown browser receipt', () => {
+    const outbound = {
+      v: 1,
+      sourceMessageId: 'source119',
+      sourceSender: { kind: 'cat', id: 'codex61-sol' },
+      dispatchInvocationId: 'dispatch119',
+      targetCatId: 'gpt-pro',
+      status: 'unknown',
+      transport: 'host',
+      idempotency: { keyKind: 'source_message_id', disposition: 'unknown' },
+    };
+    const source = { id: 'source119', type: 'assistant', catId: 'codex61-sol', content: 'new source', timestamp: 1 };
+    const answer = {
+      id: 'reply122',
+      type: 'assistant',
+      from: { kind: 'agent', catId: 'gpt-pro' },
+      catId: 'gpt-pro',
+      content: '收到 Sol',
+      timestamp: 3,
+      replyTo: 'source119',
+      origin: 'callback',
+      extra: {
+        isExplicitPost: true,
+        cloudBridgeReturn: {
+          v: 1,
+          threadId: 'thread-pro',
+          sourceMessageId: 'source119',
+          targetCatId: 'gpt-pro',
+          dispatchInvocationId: 'dispatch119',
+        },
+      },
+    };
+    const html = renderNotice(
+      {
+        content: '投递给 Pro 的结果未知',
+        timestamp: 2,
+        replyTo: 'source119',
+        source: {
+          connector: 'cloud-bridge-status',
+          label: '云端猫投递',
+          icon: 'info',
+          meta: { noticeTone: 'warning', cloudBridgeOutboundReceipt: outbound },
+        },
+      },
+      [source, answer] as ChatMessageType[],
+    );
+    expect(html).toContain('已收到 Pro 回复');
+    expect(html).toContain('本次浏览器 Host 回执未确认');
+    expect(html).toContain('data-cloud-outbound-status="unknown"');
+    expect(html).not.toContain('投递给 Pro 的结果未知');
+    expect(html).not.toContain('已确认投递');
+  });
+
   const receipt = {
     v: 1,
     kind: 'approval_decision_receipt',

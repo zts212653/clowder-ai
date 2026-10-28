@@ -1,13 +1,14 @@
 import { basename, isAbsolute, join, relative } from 'node:path';
 import type { AssetCanonRecord } from '@cat-cafe/shared';
 import { indexedVersionRefSchema } from '@cat-cafe/shared';
-import type { FastifyInstance } from 'fastify';
+import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import type { MemberCanonService } from '../domains/collaborative-content/asset-canon/member-service.js';
 import { AssetCanonConflictError } from '../domains/collaborative-content/asset-canon/store.js';
 import type { VideoProjectAssetIndex } from '../domains/video-studio/project/asset-index.js';
 import type { WorkspaceContentSourceService } from '../domains/workspace/workspace-content-source.js';
 import { listWorktrees } from '../domains/workspace/workspace-security.js';
+import { resolveSessionUserId } from '../utils/request-identity.js';
 import { getDefaultUploadDir } from '../utils/upload-paths.js';
 import { directContentHuman } from './content-modification-routes.js';
 import { failAsset, sendAsset } from './work-video-asset-routes.js';
@@ -29,6 +30,18 @@ export function registerMemberCanonRoutes(
 ) {
   const principal = (request: Parameters<typeof directContentHuman>[0]) => {
     const human = directContentHuman(request);
+    return deps.members.requireHuman(human ? { ...human, threadId: '' } : null);
+  };
+  // Display bytes use the authenticated owner session, including LAN/proxy requests.
+  // Selecting/uploading an identity still uses principal()'s direct Human boundary.
+  const avatarReader = (request: FastifyRequest) => {
+    const userId = resolveSessionUserId(request);
+    const fromSession = userId ? { userId, actor: { kind: 'human' as const, actorId: userId } } : null;
+    const human = ['x-invocation-id', 'x-callback-token', 'x-agent-key-secret'].some(
+      (header) => request.headers[header] !== undefined,
+    )
+      ? null
+      : (fromSession ?? directContentHuman(request));
     return deps.members.requireHuman(human ? { ...human, threadId: '' } : null);
   };
   const fail = (reply: Parameters<typeof failAsset>[0], error: unknown) =>
@@ -112,34 +125,47 @@ export function registerMemberCanonRoutes(
       return fail(reply, error);
     }
   });
-  app.get('/api/cats/:catId/avatar', async (request, reply) => {
-    reply.header('Cache-Control', 'private, no-store').header('X-Content-Type-Options', 'nosniff');
-    try {
-      const p = principal(request);
-      const { catId } = z.object({ catId: z.string().min(1).max(256) }).parse(request.params);
-      const { bindingRevision } = z
-        .object({ bindingRevision: z.coerce.number().int().positive().optional() })
-        .strict()
-        .parse(request.query);
-      const binding = deps.members.binding(catId);
-      if (!binding?.indexedVersionRef) return reply.code(410).send({ error: 'avatar_not_selected' });
-      if (bindingRevision !== undefined && bindingRevision !== binding.bindingRevision)
-        throw new AssetCanonConflictError('Avatar selection changed');
-      const record = deps.members.canon.deps.store.get(p.userId, binding.indexedVersionRef)!;
-      await deps.members.canon.access.authorize(record, p);
-      const opened = await deps.assets.open(record.version);
+  app.get(
+    '/api/cats/:catId/avatar',
+    {
+      onSend: async (_request, reply, payload) => {
+        // sendAsset can return a range error without throwing; failures must not be stored.
+        if (reply.statusCode !== 200 && reply.statusCode !== 206) reply.header('Cache-Control', 'private, no-store');
+        return payload;
+      },
+    },
+    async (request, reply) => {
+      reply.header('Cache-Control', 'private, no-store').header('X-Content-Type-Options', 'nosniff');
+      const vary = reply.getHeader('Vary');
+      reply.header('Vary', [vary, 'Cookie', 'X-Cat-Cafe-User'].filter(Boolean).join(', '));
       try {
-        if (deps.members.binding(catId)?.bindingRevision !== binding.bindingRevision)
+        const p = avatarReader(request);
+        const { catId } = z.object({ catId: z.string().min(1).max(256) }).parse(request.params);
+        const { bindingRevision } = z
+          .object({ bindingRevision: z.coerce.number().int().positive().optional() })
+          .strict()
+          .parse(request.query);
+        const binding = deps.members.binding(catId);
+        if (!binding?.indexedVersionRef) return reply.code(410).send({ error: 'avatar_not_selected' });
+        if (bindingRevision !== undefined && bindingRevision !== binding.bindingRevision)
           throw new AssetCanonConflictError('Avatar selection changed');
+        const record = deps.members.canon.deps.store.get(p.userId, binding.indexedVersionRef)!;
         await deps.members.canon.access.authorize(record, p);
-        return await sendAsset(request, reply, opened);
+        const opened = await deps.assets.open(record.version);
+        try {
+          if (deps.members.binding(catId)?.bindingRevision !== binding.bindingRevision)
+            throw new AssetCanonConflictError('Avatar selection changed');
+          await deps.members.canon.access.authorize(record, p);
+          if (bindingRevision !== undefined) reply.header('Cache-Control', 'private, max-age=31536000, immutable');
+          return await sendAsset(request, reply, opened);
+        } catch (error) {
+          await opened.handle.close();
+          await opened.cleanup();
+          throw error;
+        }
       } catch (error) {
-        await opened.handle.close();
-        await opened.cleanup();
-        throw error;
+        return fail(reply, error);
       }
-    } catch (error) {
-      return fail(reply, error);
-    }
-  });
+    },
+  );
 }

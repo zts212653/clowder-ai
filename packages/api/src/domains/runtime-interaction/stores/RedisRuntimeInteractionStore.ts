@@ -7,6 +7,9 @@ import type {
 } from '@cat-cafe/shared';
 import type { RedisClient } from '@cat-cafe/shared/utils';
 import { SettledIndexPreparingError } from '../../../utils/redis-settled-index.js';
+import { readRedisSettledPage } from '../../../utils/redis-settled-page.js';
+import type { SettledHistoryPageOptions, SettledHistorySourcePage } from '../../../utils/settled-history-page.js';
+import { requireHistoryIndexTime } from '../../../utils/settled-history-page.js';
 import type {
   ClaimRuntimeInteractionSubmissionInput,
   CompleteRuntimeInteractionSubmissionInput,
@@ -223,6 +226,25 @@ export class RedisRuntimeInteractionStore implements RuntimeInteractionStore {
   }
 
   /** Owner index bounds ordinary reads; legacy discovery advances one bounded, resumable batch. */
+  async listSettledPage(
+    owner: string,
+    options: SettledHistoryPageOptions,
+  ): Promise<SettledHistorySourcePage<RuntimeInteractionRecord>> {
+    if (!(await advanceRuntimeHistoryIndex(this.redis, parseRecord))) throw new SettledIndexPreparingError();
+    return readRedisSettledPage(this.redis, runtimeSettledKey(owner), options, async (id, at) => {
+      const p = await this.get(id);
+      if (!p) return null;
+      if (
+        p.request.interactionId !== id ||
+        !(p.request.owner.userId === owner) ||
+        !(!!p.cardRef && !!p.terminal && p.status !== 'pending' && p.status !== 'staged')
+      )
+        throw new Error('Settled index canonical identity/owner/status mismatch');
+      requireHistoryIndexTime(at, p.terminal?.settledAt);
+      return p;
+    });
+  }
+
   async listSettledByUser(userId: string, limit: number): Promise<RuntimeInteractionRecord[]> {
     if (!Number.isInteger(limit) || limit < 1 || limit > 200) throw new Error('invalid runtime history limit');
     if (!(await advanceRuntimeHistoryIndex(this.redis, parseRecord))) throw new SettledIndexPreparingError();

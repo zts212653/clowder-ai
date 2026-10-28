@@ -1,4 +1,6 @@
+import type { SettledHistoryPageOptions } from '../../../utils/settled-history-page.js';
 import { type ApprovalDecisionRead, projectApprovalDecisionRead } from '../ports/IApprovalAdapter.js';
+import { projectSettledPage } from '../project-settled-page.js';
 /**
  * F246 Phase B: F193 (Cross-Thread Dispatch) → ApprovalItem adapter.
  *
@@ -21,6 +23,10 @@ export class F193ApprovalAdapter implements IApprovalAdapter {
   readonly featureId = 'F193' as const;
 
   constructor(private readonly store: IDispatchProposalStore) {}
+
+  async listSettledPage(owner: string, options: SettledHistoryPageOptions) {
+    return projectSettledPage(this.store, owner, options, toSettledItem);
+  }
 
   async listPending(userId: string): Promise<ApprovalItem[]> {
     const proposals = await this.store.listPendingByUser(userId);

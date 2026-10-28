@@ -14,6 +14,8 @@ code_anchors:
   - packages/api/src/domains/managed-job/managed-job-ledger.ts
   - packages/api/src/domains/managed-job/durable-managed-gate-supervisor.ts
   - packages/api/src/infrastructure/managed-runner-command-worker.ts
+  - packages/api/src/domains/ball-custody/durable-managed-gate-child-contract.ts
+  - packages/api/src/infrastructure/managed-runner-environment.ts
   - packages/api/src/domains/ball-custody/ManagedCommandWakeRecoverySweep.ts
   - packages/api/src/routes/callback-wecom-action-routes.ts
   - packages/api/src/routes/callback-lark-action-routes.ts
@@ -46,6 +48,12 @@ subscription's guardian principal and an explicit schedule admission. It cannot
 invent an invocation/message admission or choose a command over worker IPC.
 The subscription freezes its carrier and managed owner; only the existing managed
 worker may resume that exact consumer through the shared recovery protocol.
+
+Checkout provenance supplied to managed child commands is noncredential metadata derived from
+this same validated descriptor's wake target and original invocation (or job id). Inherited
+provenance is discarded, callback/session credentials remain absent, and the receiving
+worktree-storage cell records only a newly created checkout's source. No job or cleanup authority
+is granted by this metadata.
 
 ## Use This When
 

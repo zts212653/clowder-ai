@@ -2,6 +2,7 @@
 import type { UnifiedAttentionVisibleApproval } from '@cat-cafe/shared';
 import { type ReactNode, useState } from 'react';
 import type { Terminal } from '../shell/mailbox/approval-reconcile';
+import { approvalReconcileCopy } from '../shell/mailbox/approval-reconcile.shell-copy';
 import { useShellCopy } from '../shell/shell-copy';
 import { ApprovalResultRow } from './ApprovalResultRow';
 import { decisionResultCopy } from './decision-result.shell-copy';
@@ -28,13 +29,16 @@ export function PersonMemoryRetainedReceipt({
 }) {
   const t = useShellCopy(personMemoryCopy);
   const resultCopy = useShellCopy(decisionResultCopy);
+  const phaseCopy = useShellCopy(approvalReconcileCopy);
+  const phase = terminal?.resolution === 'accepted' ? approval.materialization.state : null;
+  const phaseLabel = phase === 'in_progress' ? phaseCopy.inProgress : phase === 'failed' ? phaseCopy.writeFailed : null;
   const ref = approval.navigation.state === 'anchored' ? approval.navigation.approvalCardRef : undefined;
   const [requested, setRequested] = useState(!deferProducerRead);
   const expandedChange = (value: boolean) => {
     if (value) setRequested(true);
     onExpandedChange?.(value);
   };
-  const read = usePersonMemoryProposal(approval.proposalId, ref, undefined, ownerUserId, requested);
+  const read = usePersonMemoryProposal(approval.proposalId, ref, undefined, ownerUserId, requested, requested);
   const snapshot = read.source?.snapshot,
     receipt = snapshot?.decisionReceipt;
   const name = typeof approval.detail.displayName === 'string' ? approval.detail.displayName : null;
@@ -69,14 +73,19 @@ export function PersonMemoryRetainedReceipt({
     return (
       <ApprovalResultRow
         status={status === 'rejected' && approval.detail.hasRetainedWrites === true ? 'approved' : status}
-        label={personMemoryResultLabel(
-          outcome,
-          name,
-          t,
-          resultCopy,
-          approval.detail.hasRetainedWrites === true,
-          personMemoryWriteCount(approval.detail.materialized),
-        )}
+        warning={outcome === 'approved_unknown' && phase === 'failed'}
+        label={
+          outcome === 'approved_unknown' && phaseLabel
+            ? `${resultCopy.approved} · ${phaseLabel}`
+            : personMemoryResultLabel(
+                outcome,
+                name,
+                t,
+                resultCopy,
+                approval.detail.hasRetainedWrites === true,
+                personMemoryWriteCount(approval.detail.materialized),
+              )
+        }
         onExpandedChange={expandedChange}
       >
         {children}
@@ -99,7 +108,14 @@ export function PersonMemoryRetainedReceipt({
     return (
       <ApprovalResultRow
         status="closed"
-        label={snapshot?.status === 'pending_approval' ? t.reopened : resultCopy.unknown}
+        label={
+          snapshot?.status === 'pending_approval'
+            ? t.reopened
+            : phaseLabel
+              ? `${resultCopy.approved} · ${phaseLabel}`
+              : resultCopy.unknown
+        }
+        warning={!snapshot && phase === 'failed'}
         onExpandedChange={expandedChange}
       >
         {t.kind}
@@ -111,7 +127,7 @@ export function PersonMemoryRetainedReceipt({
           onClick={() => void read.refresh()}
           className="shell-focusable text-xs hover:underline"
         >
-          {t.reread}
+          {!snapshot && phase === 'failed' ? phaseCopy.retry : t.reread}
         </button>
       </ApprovalResultRow>
     );

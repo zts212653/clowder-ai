@@ -3,6 +3,7 @@ import { CloudBindingRecoveryCard } from '@/components/CloudBindingRecoveryCard'
 import { CloudConversationLink } from '@/components/CloudConversationLink';
 import { PluginsContent } from '@/components/settings/PluginsContent';
 import { ConfirmProvider } from '@/components/useConfirm';
+import { ReplyStateJourney } from './f247-reply-state';
 import '@/app/globals.css';
 import '@/app/theme-tokens.css';
 import '@/app/console-tokens.css';
@@ -12,7 +13,9 @@ const element = document.getElementById('root');
 if (!element) throw new Error('Missing fixture root');
 createRoot(element).render(
   <ConfirmProvider>
-    {window.location.pathname === '/settings' ? (
+    {window.location.pathname === '/reply-state' ? (
+      <ReplyStateJourney />
+    ) : window.location.pathname === '/settings' ? (
       <PluginsContent />
     ) : (
       <main className="mx-auto max-w-3xl p-4">

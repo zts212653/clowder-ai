@@ -8,6 +8,7 @@ import type {
   ReportingMode,
   ThreadProposal,
 } from '@cat-cafe/shared';
+import type { SettledHistoryPageOptions, SettledHistorySourcePage } from '../../../../../utils/settled-history-page.js';
 import type {
   ApprovedTaskContinuationInput,
   ApprovedTaskContinuationResult,
@@ -97,6 +98,10 @@ export interface IProposalStore {
   create(input: CreateProposalInput): ThreadProposal | Promise<ThreadProposal>;
   get(proposalId: string): ThreadProposal | null | Promise<ThreadProposal | null>;
   listByUser(userId: string, limit?: number): ThreadProposal[] | Promise<ThreadProposal[]>;
+  listSettledPage?(
+    owner: string,
+    options: SettledHistoryPageOptions,
+  ): SettledHistorySourcePage<ThreadProposal> | Promise<SettledHistorySourcePage<ThreadProposal>>;
   listSettledByUser(userId: string, limit?: number): ThreadProposal[] | Promise<ThreadProposal[]>;
   listPending(userId: string, limit?: number): ThreadProposal[] | Promise<ThreadProposal[]>;
   listByThread(threadId: string, limit?: number): ThreadProposal[] | Promise<ThreadProposal[]>;

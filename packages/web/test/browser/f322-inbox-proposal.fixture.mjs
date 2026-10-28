@@ -19,6 +19,8 @@ import { CALENDAR_THREAD, createCalendarFixture } from './f310-work-calendar.fix
 /** Original producer/store/routes, owner publication and private draft/preferences; no provider or Redis connection. */
 export async function createInboxProposalFixture({
   readStateStore,
+  configureReceipts,
+  proposalProjectPath = 'default',
   configureRuntime,
   configureApprovals,
   configureOwnedReads,
@@ -73,7 +75,7 @@ export async function createInboxProposalFixture({
         parentThreadId: parent.id,
         preferredCats: ['codex61-sol'],
         initialMessage,
-        projectPath: 'default',
+        projectPath: proposalProjectPath,
         declaredWorkMode: 'investigation',
         reportingMode: 'final-only',
         createdBy: owner,
@@ -140,10 +142,11 @@ export async function createInboxProposalFixture({
     const runtime = await configureRuntime?.({ app, owner, messages, threads, socketManager });
     approvalSources = await configureApprovals?.({ app, owner, messages, threads, socketManager });
     const registry = await createTestApprovalRegistry([
-      new F128ApprovalAdapter(proposals),
+      new F128ApprovalAdapter(proposals, (id) => threads.get(id)),
       ...(runtime?.approvalAdapter ? [runtime.approvalAdapter] : []),
       ...(approvalSources?.adapters ?? []),
     ]);
+    await configureReceipts?.({ app, owner, messages, threads, proposals });
     await app.register(proposalRoutes, {
       proposalStore: proposals,
       threadStore: threads,

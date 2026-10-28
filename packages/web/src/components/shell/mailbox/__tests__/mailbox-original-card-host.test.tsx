@@ -5,6 +5,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { CardBlock } from '@/components/rich/CardBlock';
 import { HandoffProposalCard } from '@/components/rich/HandoffProposalCard';
 import { apiFetch } from '@/utils/api-client';
+import { observeApiSessionOwner } from '@/utils/api-session-identity';
 import { writeShellLanguage } from '../../shell-language';
 import { writeShellPresentation } from '../../shell-presentation';
 import { createApprovalSessions } from '../approval-sessions';
@@ -42,6 +43,7 @@ function source(kind: 'F225' | 'F231'): UnifiedAttentionItemV1 {
   return item;
 }
 beforeEach(() => {
+  observeApiSessionOwner('owner-1');
   vi.stubGlobal('React', React);
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
   starts = 1;
@@ -49,6 +51,7 @@ beforeEach(() => {
   document.body.appendChild(container);
   root = createRoot(container);
   vi.mocked(apiFetch).mockImplementation(async (url, options) => {
+    if (String(url) === '/api/session') return json({ userId: 'owner-1' });
     if (options?.method === 'POST') return json({ proposalId: 'original-p', status: 'approved' });
     if (String(url).includes('/session-handoff/'))
       return json({ proposal: { proposalId: 'original-p', status: 'pending' } });

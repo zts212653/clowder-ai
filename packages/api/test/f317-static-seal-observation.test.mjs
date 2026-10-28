@@ -92,8 +92,9 @@ test('independent metadata latency does not unnecessarily expire a genuine poll;
     window: { poll: async () => 'visible' },
     connection: { renewRuntimeLease: async () => {} },
     features: {
-      run: async (_lease, publish) => {
+      run: async (_lease, publish, _diagnostics, readFreshInput) => {
         await check();
+        await readFreshInput();
         now += extraDelay;
         await publish({ contributionIds: ['window'] });
       },
@@ -165,7 +166,7 @@ test('a failed parallel scan drains its other readers before returning the origi
   await assert.rejects(check(), /damaged/);
 });
 
-test('other seal IO can independently exhaust observation freshness without any store transaction', async (t) => {
+test('a complete delayed seal needs a new native reply before publication, retaining the real FIFO cost', async (t) => {
   let release;
   const held = new Promise((resolve) => {
     release = resolve;
@@ -181,6 +182,8 @@ test('other seal IO can independently exhaust observation freshness without any 
   let monotonic = 0;
   t.mock.method(performance, 'now', () => monotonic);
   let occupied = 0;
+  let polls = 0;
+  let costs;
   let enter;
   const entered = new Promise((resolve) => {
     enter = resolve;
@@ -203,25 +206,36 @@ test('other seal IO can independently exhaust observation freshness without any 
     freshnessMs: 15_000,
     now: () => now,
     isCurrent: () => true,
-    window: { poll: async () => 'visible' },
+    window: {
+      poll: async () => {
+        polls++;
+        return 'visible';
+      },
+    },
     connection: { renewRuntimeLease: async () => {} },
     features: {
-      run: async (_lease, publish, diagnostics) => {
+      run: async (_lease, publish, diagnostics, readFreshInput) => {
         await check(diagnostics.packageDiagnostics);
+        await readFreshInput();
         await publish({ contributionIds: ['window'] });
+        costs = diagnostics.snapshot();
       },
     },
   });
-  const failed = assert.rejects(observer.observe(), /observation expired/);
-  pending.push(failed);
+  pending.push(observer.observe());
   await turn(); // The newer consumer has queued behind the four held operations.
   now += 24_000;
   monotonic += 24_000;
   release();
   await Promise.all(pending);
-  const diagnostic = observer.diagnostic();
-  assert.equal(observer.observation, undefined);
-  assert.equal(diagnostic.error.reason, 'observation_expired');
+  const diagnostic = costs;
+  assert.equal(observer.observation?.state, 'visible');
+  assert.equal(observer.observation.observedAt, 26_000);
+  assert.equal(observer.observation.expiresAt, 41_000);
+  assert.equal(polls, 2, 'a new native reply, never an extended old expiry');
+  assert.equal(diagnostic.costs.clock.received.wallMs, 2_000);
+  assert.equal(diagnostic.costs.clock.refreshed.wallMs, 26_000);
+  assert.equal(diagnostic.costs.clock.wallElapsedMs, 24_000);
   assert.equal(diagnostic.costs.seal.maxQueueWaitMs, 24_000);
   assert.equal(diagnostic.costs.seal.longestQueueWait.slotWaitMs, 24_000);
   assert.equal(diagnostic.costs.seal.longestQueueWait.resumeDelayMs, 0);

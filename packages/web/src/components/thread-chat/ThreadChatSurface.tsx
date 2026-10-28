@@ -40,7 +40,7 @@ import { useShellPresentation } from '../shell/shell-presentation';
 import { ThreadComposerContext } from '../ThreadComposerContext';
 import { TransferTargetPicker } from '../TransferTargetPicker';
 import { VoteActiveBar } from '../VoteActiveBar';
-import { MessageNavigationProvider } from './MessageNavigationContext';
+import { type MessageNavigationOptions, MessageNavigationProvider } from './MessageNavigationContext';
 import { SingleCatConversationTimeline } from './SingleCatConversationTimeline';
 import {
   projectSingleCatConversation,
@@ -153,12 +153,23 @@ export function ThreadChatSurface({
     handleReadingIntent,
     jumpToLatest,
     jumpToMessage,
+    navigateToMessage,
     beginUserScroll,
     scrollContainerRef,
     messagesEndRef,
     isLoadingHistory,
     hasMore,
   } = history;
+  const navigateMessage = useCallback(
+    (messageId: string, options?: MessageNavigationOptions): boolean => {
+      if (options?.loadIfNeeded) {
+        void navigateToMessage(messageId, undefined, { refresh: true });
+        return true;
+      }
+      return jumpToMessage(messageId);
+    },
+    [jumpToMessage, navigateToMessage],
+  );
   useThreadChatReadingPort(threadId, presentation, onReadingPort, history);
   const { handleSend, uploadStatus, uploadError } = useSendMessage(threadId);
   const interactiveSendContext = `thread-chat-surface:${useId()}`;
@@ -483,7 +494,7 @@ export function ThreadChatSurface({
     </section>
   );
   return (
-    <MessageNavigationProvider value={jumpToMessage}>
+    <MessageNavigationProvider value={navigateMessage}>
       <ChatReferenceScope value={threadId}>
         {/* Keep the chat/history nodes mounted while only the v2 card capability changes. */}
         <CatProfileCardScope

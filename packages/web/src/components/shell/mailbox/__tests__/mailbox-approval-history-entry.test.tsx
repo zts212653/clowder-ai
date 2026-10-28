@@ -24,9 +24,8 @@ const settled = (id: string, resolution: 'accepted' | 'rejected', owner = OWNER)
   materialization: { state: 'not_started' },
 });
 const records = [
-  settled('accepted', 'accepted'),
-  settled('rejected', 'rejected'),
-  settled('foreign', 'accepted', 'other'),
+  { ...settled('accepted', 'accepted'), decidedAt: 1793100000001 },
+  { ...settled('rejected', 'rejected'), decidedAt: 1793100000000 },
 ];
 const view: UnifiedAttentionView = {
   result: okRead([]),
@@ -74,8 +73,15 @@ beforeEach(() => {
   mocks.fetch.mockImplementation(async (url: string) =>
     url === '/api/session'
       ? Response.json({ userId: OWNER })
-      : url.startsWith('/api/approval-hub/settled?')
-        ? Response.json({ items: records, count: records.length })
+      : url.startsWith('/api/approval-hub/settled/page?')
+        ? Response.json({
+            items: records,
+            count: records.length,
+            identity: { ownerUserId: OWNER },
+            manifest: [{ id: 'F128' }],
+            page: { limit: 30, nextCursor: null, hasMore: false },
+            coverage: { state: 'complete', orderVersion: 1, sources: ['F128'] },
+          })
         : Response.json({ items: [], count: 0 }),
   );
   host = document.createElement('div');
@@ -90,33 +96,100 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+it.each(['zh', 'en'] as const)('keeps long-lived history out of the pending page (%s)', async (language) => {
+  writeShellLanguage(language);
+  await act(async () => root.render(<Wrapper />));
+  expect(mocks.fetch.mock.calls.filter(([url]) => String(url).includes('/approval-hub/settled'))).toHaveLength(0);
+  expect(document.querySelector('[data-testid="mailbox-settled-results"]')).toBeNull();
+  expect(document.querySelector('[data-testid="mailbox-records"]')).toBeNull();
+  expect(document.querySelector('[data-testid="mailbox-open-ignored"]')).toBeNull();
+  expect(document.querySelector('[data-testid="mailbox-history"]')?.textContent).toContain(
+    language === 'en' ? 'Handled' : '已处理的',
+  );
+});
+
 it.each([
   'zh',
   'en',
-] as const)('opens approval records directly, filters the owner’s history and returns without writing (%s)', async (language) => {
+] as const)('opens one on-demand history with recognizable subjects and no old approval UI (%s)', async (language) => {
   writeShellLanguage(language);
   await act(async () => root.render(<Wrapper />));
-  const handled = document.querySelector('[data-testid="mailbox-history"]');
-  await click('mailbox-records');
-  const history = document.querySelector('[data-testid="approval-history-content"]');
-  expect(history).not.toBeNull();
-  expect(handled?.textContent).toBe(language === 'en' ? 'Handled @you' : '已处理的 @你');
-  expect(history?.textContent).toContain('Traceable proposal accepted');
-  expect(history?.textContent).not.toContain('Traceable proposal foreign');
-  if (language === 'en') expect(history?.textContent).not.toMatch(/[\u3400-\u9fff]/u);
-  expect(document.querySelector('[data-testid="approval-empty-state"]')).toBeNull();
-  expect(document.querySelector('[data-testid="approval-tab-pending"]')?.textContent).toContain(
-    language === 'en' ? 'Pending approvals' : '待我处理',
+  await click('mailbox-history');
+  expect(document.querySelector('[data-testid="mailbox-handled-history"]')).not.toBeNull();
+  expect(document.querySelector('[data-testid="approval-panel"]')).toBeNull();
+  expect(document.querySelector('[data-testid="approval-tab-pending"]')).toBeNull();
+  const rows = document.querySelectorAll('[data-testid="mailbox-history-row"]');
+  expect(rows).toHaveLength(2);
+  expect(rows[0]?.textContent).toContain('Traceable proposal accepted');
+  expect(rows[1]?.textContent).toContain('Traceable proposal rejected');
+  const reads = mocks.fetch.mock.calls.filter(([url]) => String(url).includes('/approval-hub/settled'));
+  expect(reads).toHaveLength(1);
+  expect(String(reads[0][0])).toContain('limit=30');
+  expect(document.querySelector('[data-testid="mailbox-panel"]')?.textContent).not.toContain('default-user');
+  const resultFilter = document.querySelector<HTMLButtonElement>('[role="combobox"]');
+  expect(resultFilter).not.toBeNull();
+  await act(async () => resultFilter?.click());
+  const accepted = [...document.querySelectorAll<HTMLButtonElement>('[role="option"]')].find(
+    (option) => option.textContent?.trim() === (language === 'en' ? 'Approved' : '已同意'),
   );
-  expect(document.querySelector('[data-testid="approval-history-filter-accepted"]')?.textContent).toBe(
-    language === 'en' ? 'Accepted' : '接受',
-  );
-  await click('approval-history-filter-accepted');
-  expect(document.querySelector('[data-testid="settled-card-accepted"]')).not.toBeNull();
-  expect(document.querySelector('[data-testid="settled-card-rejected"]')).toBeNull();
-  await click('approval-history-filter-clear');
-  expect(document.querySelector('[data-testid="settled-card-rejected"]')).not.toBeNull();
-  await click('mailbox-records-back');
-  expect(document.querySelector('[data-testid="mailbox-tab-needs-me"]')).not.toBeNull();
+  expect(accepted).toBeDefined();
+  await act(async () => accepted?.click());
+  expect(document.querySelectorAll('[data-testid="mailbox-history-row"]')).toHaveLength(1);
+  expect(mocks.fetch.mock.calls.filter(([url]) => String(url).includes('/approval-hub/settled'))).toHaveLength(1);
   expect(mocks.fetch.mock.calls.filter(([, init]) => init?.method && init.method !== 'GET')).toHaveLength(0);
+});
+
+it('keeps canonical descending tie order and names both visible filters', async () => {
+  writeShellLanguage('zh');
+  const old = mocks.fetch.getMockImplementation();
+  const tied = ['z-newest-key', 'a-older-key'].map((id) => ({
+    ...settled(id, 'rejected'),
+    decidedAt: 1793100000000,
+    detail: {
+      rejectionReason: '缺少原始证据',
+      reason: '保留原始依据，展开后才读长内容。',
+      projectPath: '/private/history-project',
+      parentThreadId: 'source-thread',
+      title: 'Traceable proposal',
+      preferredCats: ['codex61-sol'],
+    },
+  }));
+  mocks.fetch.mockImplementation(async (url: string, ...args: unknown[]) =>
+    url.startsWith('/api/approval-hub/settled/page?')
+      ? Response.json({
+          items: tied,
+          count: 2,
+          identity: { ownerUserId: OWNER },
+          manifest: [{ id: 'F128' }],
+          page: { limit: 30, nextCursor: null, hasMore: false },
+          coverage: { state: 'complete', orderVersion: 1, sources: ['F128'] },
+        })
+      : old?.(url, ...args),
+  );
+  await act(async () => root.render(<Wrapper />));
+  await click('mailbox-history');
+  expect(
+    [...document.querySelectorAll('[data-testid="mailbox-history-row"]')].map((row) =>
+      row.getAttribute('data-proposal-id'),
+    ),
+  ).toEqual(['z-newest-key', 'a-older-key']);
+  expect([...document.querySelectorAll('[role="combobox"]')].map((button) => button.textContent)).toEqual([
+    '结果 ⌄',
+    '种类 ⌄',
+  ]);
+  await act(async () =>
+    document.querySelector<HTMLButtonElement>('[data-testid="mailbox-history-row"] button')?.click(),
+  );
+  expect(document.querySelector('[data-testid="mailbox-panel"]')?.textContent).toContain('理由：缺少原始证据');
+  const technical = document.querySelector<HTMLDetailsElement>('[data-testid="handled-technical-details"]');
+  expect(technical).not.toBeNull();
+  expect(technical?.open).toBe(false);
+  expect(technical?.textContent).toContain('history-project');
+  const reason = document.querySelector<HTMLDetailsElement>('[data-testid="handled-reason"]');
+  expect(reason?.open).toBe(false);
+  expect(reason?.textContent).toContain('保留原始依据');
+  await act(async () => {
+    if (technical) technical.open = true;
+  });
+  expect(technical?.open).toBe(true);
 });

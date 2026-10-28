@@ -4,7 +4,7 @@ import { useEffect, useId, useRef, useState } from 'react';
 import { capsulePrimary, capsuleSecondary, MemoryCapsuleEditor } from './MemoryCapsuleEditor';
 import { CapsulePendingLabel, MemoryCapsuleProposals, pendingCapsuleProposals } from './MemoryCapsuleProposals';
 import { MemoryForgetControl, MemoryOwnerFeedback } from './MemoryOwnerControls';
-import { profileCardClass } from './MemoryProfileCard';
+import { MemoryProfileCardFrame } from './MemoryProfileCardFrame';
 import { MemoryProfileSource } from './MemoryProfileSource';
 import { MemoryReadState } from './MemoryReadState';
 import {
@@ -30,7 +30,7 @@ export function MemoryCapsuleCard({
 }) {
   const pending = pendingCapsuleProposals(entry?.proposals ?? setup?.proposals);
   return (
-    <article className={profileCardClass(selected)}>
+    <MemoryProfileCardFrame selected={selected} select={select}>
       <div className="flex flex-wrap items-center gap-2">
         <button
           type="button"
@@ -52,7 +52,7 @@ export function MemoryCapsuleCard({
           {entry.updatedAt !== undefined ? ` · ${formatMemoryDate(entry.updatedAt)} 修改` : ''}
         </p>
       )}
-    </article>
+    </MemoryProfileCardFrame>
   );
 }
 

@@ -34,6 +34,7 @@ import {
   evolutionPreparationSubmissionV1Schema,
   evolutionUseSourceV1Schema,
   isCloudBridgeRetryV1,
+  isCloudBridgeReturnV1,
   isLifecycleStoredMessageMetadata,
   isMessageFrom,
   isProviderSemanticEvent,
@@ -252,6 +253,7 @@ type ExtraCarrierPersistenceClassification<
  * Every StoredMessage.extra key must be classified when it is introduced.
  */
 type ExtraCarrierPersistence = ExtraCarrierPersistenceClassification<{
+  cloudBridgeReturn: 'parsed';
   taskHandoff: 'parsed';
   taskHandoffInvalid: 'derived';
   taskAssignmentRequestDigest: 'parsed';
@@ -690,6 +692,10 @@ export function safeParseExtra(raw: string | undefined): StoredMessage['extra'] 
 
     if (isCloudBridgeRetryV1(parsed.cloudBridgeRetry)) {
       result.cloudBridgeRetry = parsed.cloudBridgeRetry;
+      hasField = true;
+    }
+    if (isCloudBridgeReturnV1(parsed.cloudBridgeReturn)) {
+      result.cloudBridgeReturn = parsed.cloudBridgeReturn;
       hasField = true;
     }
     const startupRecovery = parseCodexStartupRecovery(parsed.startupRecovery);

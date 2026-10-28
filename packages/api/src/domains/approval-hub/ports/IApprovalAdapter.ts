@@ -7,6 +7,7 @@
  */
 
 import type { ApprovalItem, ApprovalProducerId, SettledApprovalItem } from '@cat-cafe/shared';
+import type { SettledHistoryPageOptions, SettledHistorySourcePage } from '../../../utils/settled-history-page.js';
 
 export interface ListSettledOpts {
   /** Maximum items to return. Defaults to 50. */
@@ -48,6 +49,11 @@ export interface IApprovalAdapter {
    * Optional — adapters that don't retain decided data return [].
    */
   listSettled?(userId: string, opts?: ListSettledOpts): SettledApprovalItem[] | Promise<SettledApprovalItem[]>;
+  /** True bounded index continuation. Legacy listSettled is never a paging fallback. */
+  listSettledPage?(
+    userId: string,
+    opts: SettledHistoryPageOptions,
+  ): Promise<SettledHistorySourcePage<SettledApprovalItem>>;
   /** Exact canonical read required by the shared receipt runtime at admission. No history window. */
   readDecision?(userId: string, proposalId: string): ApprovalDecisionRead | Promise<ApprovalDecisionRead>;
 }

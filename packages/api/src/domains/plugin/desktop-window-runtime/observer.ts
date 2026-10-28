@@ -50,7 +50,7 @@ export class DesktopWindowObserver {
 
   private async observeOnce(): Promise<void> {
     if (!this.options.isCurrent()) throw new Error('desktop window ended');
-    const { window, lease, connection, features, freshnessMs, now, isCurrent, id } = this.options;
+    const { lease, connection, features, freshnessMs, now, isCurrent, id } = this.options;
     const deadlineMs = Math.floor(freshnessMs / 3);
     const startedAtMs = now();
     const attempt: ObservationAttempt = {
@@ -62,21 +62,59 @@ export class DesktopWindowObserver {
       diagnostics: new ObservationDiagnostics(),
     };
     this.attempt = attempt;
+    let sample = await this.poll(attempt);
+    // Only a fresh native reply may renew a still-current Broker binding.
+    // Expired bindings fail here; renewal never revives old feature authority.
+    attempt.phase = 'lease-renew';
+    await attempt.diagnostics.measure('lease-renew', () => connection.renewRuntimeLease());
+    attempt.phase = 'authority';
+    await attempt.diagnostics.measure('authority', () =>
+      features.run(
+        lease,
+        (authority) =>
+          attempt.diagnostics.measure('observation-publish', async () => {
+            const publishedAt = now();
+            attempt.diagnostics.costs.publish(publishedAt);
+            if (publishedAt - sample.receivedAt >= freshnessMs) throw new Error('desktop observation expired');
+            const contributionId = authority.contributionIds[0];
+            if (!contributionId) throw new Error('desktop authority without contribution');
+            this.observation = {
+              pluginInstanceId: id,
+              contributionId,
+              state: sample.state,
+              observedAt: sample.receivedAt,
+              expiresAt: sample.receivedAt + freshnessMs,
+            };
+          }),
+        attempt.diagnostics,
+        async () => {
+          if (!isCurrent()) throw new Error('desktop window ended');
+          // Keep the fast path's genuine reply. If Host IO has spent its
+          // normal heartbeat interval, ask the child once more outside the
+          // stores, then publish only after the original current checks.
+          // Never retry a failed poll or change an earlier reply's timestamp.
+          if (now() - sample.receivedAt >= deadlineMs) sample = await this.poll(attempt, true);
+          attempt.phase = 'authority';
+        },
+      ),
+    );
+    if (this.attempt === attempt) this.attempt = undefined;
+  }
+
+  private async poll(attempt: ObservationAttempt, refreshing = false) {
+    const { window, freshnessMs, now, isCurrent } = this.options;
+    attempt.phase = 'poll';
+    attempt.pending = true;
+    const deadlineMs = Math.floor(freshnessMs / 3);
+    attempt.deadlineAtMs = now() + deadlineMs;
     let timer: ReturnType<typeof setTimeout> | undefined;
     try {
       const poll = Promise.resolve()
         .then(() => window.poll())
-        .then(
-          (state) => {
-            attempt.pending = false;
-            return state;
-          },
-          (error: unknown) => {
-            attempt.pending = false;
-            throw error;
-          },
-        );
-      const state = await attempt.diagnostics.measure('poll', () =>
+        .finally(() => {
+          attempt.pending = false;
+        });
+      const state = await attempt.diagnostics.measure(refreshing ? 'poll-refresh' : 'poll', () =>
         Promise.race([
           poll,
           new Promise<never>((_, reject) => {
@@ -86,35 +124,10 @@ export class DesktopWindowObserver {
         ]),
       );
       const receivedAt = now();
-      attempt.diagnostics.costs.receive(receivedAt);
+      if (refreshing) attempt.diagnostics.costs.refresh(receivedAt);
+      else attempt.diagnostics.costs.receive(receivedAt);
       if (!isCurrent()) throw new Error('desktop window ended');
-      // Only a fresh native reply may renew a still-current Broker binding.
-      // Expired bindings fail here; renewal never revives old feature authority.
-      attempt.phase = 'lease-renew';
-      await attempt.diagnostics.measure('lease-renew', () => connection.renewRuntimeLease());
-      attempt.phase = 'authority';
-      await attempt.diagnostics.measure('authority', () =>
-        features.run(
-          lease,
-          (authority) =>
-            attempt.diagnostics.measure('observation-publish', async () => {
-              const publishedAt = now();
-              attempt.diagnostics.costs.publish(publishedAt);
-              if (publishedAt - receivedAt >= freshnessMs) throw new Error('desktop observation expired');
-              const contributionId = authority.contributionIds[0];
-              if (!contributionId) throw new Error('desktop authority without contribution');
-              this.observation = {
-                pluginInstanceId: id,
-                contributionId,
-                state,
-                observedAt: receivedAt,
-                expiresAt: receivedAt + freshnessMs,
-              };
-            }),
-          attempt.diagnostics,
-        ),
-      );
-      if (this.attempt === attempt) this.attempt = undefined;
+      return { state, receivedAt };
     } finally {
       clearTimeout(timer);
     }

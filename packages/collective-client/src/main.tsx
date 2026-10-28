@@ -53,3 +53,5 @@ createRoot(root).render(
 );
 
 import './styles/project-material.css';
+
+import './styles/project-artifact-reference.css';

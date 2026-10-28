@@ -286,10 +286,15 @@
 }
 .project-page-authoring-actions {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: flex-end;
   gap: 8px;
   justify-self: end;
+}
+.project-page-authoring-actions > .project-share-material {
+  flex: none;
+  white-space: nowrap;
 }
 .project-page-authoring-actions .project-authoring-control > button {
   min-height: 32px;
@@ -298,4 +303,14 @@
   border-radius: 8px;
   font-size: 13px;
   cursor: pointer;
+}
+
+@media (max-width: 820px) {
+  .project-page-authoring-actions {
+    justify-self: stretch;
+  }
+
+  .project-page-authoring-actions > .project-task-authoring-control {
+    display: contents;
+  }
 }

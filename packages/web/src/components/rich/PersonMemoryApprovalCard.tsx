@@ -18,6 +18,7 @@ import {
   personMemorySnapshotResult,
   personMemoryWriteCount,
 } from './person-memory-result';
+import { RetainedApprovalCardResult } from './use-original-approval-read';
 import { usePersonMemoryProposal } from './use-person-memory-proposal';
 
 /** The same original selector, original writer and exact owner receipt in Chat and every approval host. */
@@ -37,10 +38,17 @@ export function PersonMemoryApprovalCard({
   const resultCopy = useShellCopy(decisionResultCopy);
   const ref = coordinate ?? (item?.navigation.state === 'anchored' ? item.navigation.approvalCardRef : undefined);
   const read = usePersonMemoryProposal(proposalId, ref, block);
-  const last = useRef<{ proposalId: string; item: ApprovalHubItem } | null>(null);
-  if (read.source?.item) last.current = { proposalId, item: read.source.item };
+  const last = useRef<{ proposalId: string; owner: string | null; item: ApprovalHubItem } | null>(null);
+  if (read.source?.item) last.current = { proposalId, owner: read.ownerUserId, item: read.source.item };
   const settled = read.source && !read.source.item;
-  const shown = read.source?.item ?? (!settled && last.current?.proposalId === proposalId ? last.current.item : null);
+  const shown =
+    read.source?.item ??
+    (!settled &&
+    !!read.ownerUserId &&
+    last.current?.owner === read.ownerUserId &&
+    last.current?.proposalId === proposalId
+      ? last.current.item
+      : null);
   const snapshot = read.source?.snapshot,
     receipt = snapshot?.decisionReceipt;
   const actual = snapshot ? personMemorySnapshotResult(snapshot) : null;
@@ -58,6 +66,7 @@ export function PersonMemoryApprovalCard({
   const displayName =
     participant?.detail.displayName ??
     (isPersonMemoryProposalCardBlock(block) ? block.meta.subjectDisplayName : undefined);
+  if (read.retained) return <RetainedApprovalCardResult item={read.retained} reread={() => void read.reread()} />;
   if (settled && snapshot && label && actual) {
     const result = actual;
     const resultLabel = personMemoryResultLabel(

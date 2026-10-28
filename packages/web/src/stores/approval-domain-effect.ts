@@ -69,9 +69,9 @@ export function canonicalDomainEffect(value: unknown): DomainApprovalEffect | un
     proof !== detail?.canonicalEffectProofRef
   )
     return;
-  return row.sourceFeatureId === 'F193'
-    ? 'dispatch-delivered'
-    : row.sourceFeatureId === 'F260'
-      ? 'entity-written'
-      : undefined;
+  if (row.sourceFeatureId === 'F193') return 'dispatch-delivered';
+  if (row.sourceFeatureId === 'F260') return 'entity-written';
+  if (row.sourceFeatureId === 'F221' && proof.startsWith(`taste-proposal:${row.proposalId}:vignette:`))
+    return 'taste-written';
+  return undefined;
 }

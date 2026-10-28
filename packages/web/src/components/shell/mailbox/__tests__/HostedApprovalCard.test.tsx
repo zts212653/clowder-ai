@@ -14,8 +14,10 @@ import type { ApprovalHubItem } from '@cat-cafe/shared';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { approvalResultRead } from '@/lib/approval-result-read';
 import { resolveEndpoint } from '@/stores/approval-decision-http';
 import { useApprovalHubStore } from '@/stores/approvalHubStore';
+import { observeApiSessionOwner } from '@/utils/api-session-identity';
 import type { MailboxRead } from '../../unified-mailbox-state';
 import type { UnifiedAttentionView } from '../../use-unified-attention';
 import { resolveOriginalPlace } from '../original-place';
@@ -65,6 +67,7 @@ const calls = () => mocks.apiFetch.mock.calls.map((call) => `${call[1]?.method ?
 
 function route(network: Network) {
   mocks.apiFetch.mockImplementation((path: string) => {
+    if (path === '/api/session') return Promise.resolve(Response.json({ userId: OWNER }));
     if (path === '/api/approval-hub/pending') {
       return Promise.resolve(Response.json({ items: network.pending, count: network.pending.length }));
     }
@@ -111,6 +114,8 @@ beforeEach(() => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
   mocks.apiFetch.mockReset();
   onOpen.mockReset();
+  approvalResultRead.clear();
+  observeApiSessionOwner(OWNER);
   useApprovalHubStore.setState({
     items: [item],
     count: 1,
@@ -118,6 +123,8 @@ beforeEach(() => {
     deciding: {},
     error: null,
     isLoading: false,
+    pendingReadAvailable: true,
+    pendingOwnerUserId: OWNER,
   });
   fake = fakeView();
   container = document.createElement('div');
@@ -133,7 +140,7 @@ afterEach(() => {
 });
 
 describe('HostedApprovalCard: the original card, when it may be shown', () => {
-  it('shows the original card when the store holds the same decision, and refreshes the store to be sure', async () => {
+  it('shows the original card from the verified shared read without redownloading pending', async () => {
     route({
       pending: [item],
       approve: async () => new Response(null, { status: 500 }),
@@ -143,7 +150,7 @@ describe('HostedApprovalCard: the original card, when it may be shown', () => {
     await flush();
     expect($('approve-btn')).not.toBeNull();
     expect($('reject-btn')).not.toBeNull();
-    expect(calls()).toContain('GET /api/approval-hub/pending');
+    expect(calls()).not.toContain('GET /api/approval-hub/pending');
     expect($('mailbox-approval-unmatched')).toBeNull();
   });
 
@@ -164,7 +171,7 @@ describe('HostedApprovalCard: the original card, when it may be shown', () => {
   });
 
   it('says it is checking while the store has not answered, instead of calling the decision unmatched', async () => {
-    useApprovalHubStore.setState({ items: [] });
+    useApprovalHubStore.setState({ items: [], pendingReadAvailable: false, isLoading: true });
     let finish: () => void = () => undefined;
     mocks.apiFetch.mockImplementation(
       () =>
@@ -172,10 +179,14 @@ describe('HostedApprovalCard: the original card, when it may be shown', () => {
           finish = () => resolve(Response.json({ items: [item], count: 1 }));
         }),
     );
+    const loading = useApprovalHubStore.getState().fetchPending();
     await render();
     expect($('mailbox-approval-checking')).not.toBeNull();
     expect($('mailbox-approval-unmatched')).toBeNull();
-    await act(async () => finish());
+    await act(async () => {
+      finish();
+      await loading;
+    });
     await flush();
     expect($('mailbox-approval-checking')).toBeNull();
     expect($('approve-btn')).not.toBeNull();

@@ -2,6 +2,9 @@ import { createHash } from 'node:crypto';
 import type { ApprovalEnvelope, ApprovalPublication, EventMemoryCorrectionProposal } from '@cat-cafe/shared';
 import { assertApprovalEnvelopeIdentity } from '@cat-cafe/shared';
 import type { RedisClient } from '@cat-cafe/shared/utils';
+import { reconcileSettledIndexTime } from '../../../utils/reconcile-settled-index-time.js';
+import { readRedisSettledPage } from '../../../utils/redis-settled-page.js';
+import type { SettledHistoryPageOptions, SettledHistorySourcePage } from '../../../utils/settled-history-page.js';
 import {
   abortRedisStaged,
   commitRedisApprovalEnvelope,
@@ -96,6 +99,26 @@ export class RedisEventMemoryCorrectionProposalStore implements EventMemoryCorre
     return this.readIndex(keys.pending(ownerUserId), limit, (proposal) =>
       ['pending', 'approving'].includes(proposal.status),
     );
+  }
+
+  async listSettledPage(
+    owner: string,
+    options: SettledHistoryPageOptions,
+  ): Promise<SettledHistorySourcePage<EventMemoryCorrectionProposal>> {
+    return readRedisSettledPage(this.redis, keys.settled(owner), options, async (id, at) => {
+      const p = await this.get(id);
+      if (!p) return null;
+      if (p.ownerUserId !== owner || !['approved', 'rejected'].includes(p.status))
+        throw new Error('Settled index canonical owner/status mismatch');
+      if (p.proposalId !== id) throw new Error('Settled index identity mismatch');
+      await reconcileSettledIndexTime(this.redis, keys.settled(owner), id, at, p.approvedAt ?? p.rejectedAt ?? 0, [
+        {
+          key: keys.detail(id),
+          fields: { status: p.status, ownerUserId: p.ownerUserId, approvedAt: p.approvedAt, rejectedAt: p.rejectedAt },
+        },
+      ]);
+      return p;
+    });
   }
 
   async listSettled(ownerUserId: string, limit = 100): Promise<EventMemoryCorrectionProposal[]> {

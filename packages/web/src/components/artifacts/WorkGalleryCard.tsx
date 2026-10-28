@@ -72,7 +72,7 @@ export function WorkGalleryCard({
             compact={compact}
           />
         </span>
-        <span className="work-gallery-title home-work-label" title={label}>
+        <span className={`work-gallery-title${compact ? ' home-work-label' : ''}`} title={label}>
           {label}
         </span>
         {subtitle && (
@@ -88,7 +88,7 @@ export function WorkGalleryCard({
       )}
       <div className="work-gallery-footer">
         {footer ?? (
-          <small className="home-work-meta" title={metadata}>
+          <small className={compact ? 'home-work-meta' : undefined} title={metadata}>
             {metadata}
           </small>
         )}

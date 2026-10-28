@@ -14,6 +14,7 @@ import type { ClientRequest } from './client-request.js';
 import type { ClientSnapshot } from './client-types.js';
 import type { collectiveArtifactClient } from './collective-artifact-client.js';
 import { useHostAccountabilityContext } from './use-host-accountability-context.js';
+import { useHostDocumentSurface } from './use-host-document-surface.js';
 import { useHostMediaShare } from './use-host-media-share.js';
 import { type MediaSelection, useHostMediaSurface } from './use-host-media-surface.js';
 import { type ProjectAttentionFocus, useHostProjectAttentionContext } from './use-host-project-attention-context.js';
@@ -31,6 +32,7 @@ export function useHostContext(
     api?: ReturnType<typeof collectiveArtifactClient>;
     onShared?: Parameters<typeof useHostMediaShare>[0]['onShared'];
     humanName?: (humanId: string) => string;
+    onDocumentReturn?: Parameters<typeof useHostDocumentSurface>[0]['onDocumentReturn'];
   },
   onOpenMembers?: () => void,
 ) {
@@ -251,12 +253,21 @@ export function useHostContext(
     channelId,
     onShared: media?.onShared,
   });
+  const documentSurfaceReady = useHostDocumentSurface({
+    context: publicContext,
+    bridge,
+    hostOrigin,
+    generation: JSON.stringify([bridge, channelKey, open, cafeSection, projectionReady]),
+    ...media,
+  });
   useHostMediaSurface({
     context: publicContext,
     bridge,
     hostOrigin,
     channelId,
     generation: JSON.stringify([bridge, channelKey, open, cafeSection, projectionReady]),
+    // This adapter's acknowledgement also negotiates project-aware media return coordinates.
+    projectReturnSupported: documentSurfaceReady,
     ...media,
   });
   useEffect(() => {
@@ -297,6 +308,7 @@ export function useHostContext(
   }, []);
   const hide = useCallback(() => setOpen(false), []);
   return {
+    documentSurfaceReady,
     shareMedia: bridge && bridge.authorityStatus !== 'revoked' ? shareMedia : undefined,
     requestWorkPermission: humanSession ? requestWorkPermission : undefined,
     available: Boolean(bridge),

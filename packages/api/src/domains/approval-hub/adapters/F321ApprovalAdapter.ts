@@ -1,4 +1,5 @@
 import type { ApprovalItem, EventMemoryCorrectionProposal, SettledApprovalItem } from '@cat-cafe/shared';
+import type { SettledHistoryPageOptions } from '../../../utils/settled-history-page.js';
 import type { EventMemoryCorrectionProposalStore } from '../../memory/event/EventMemoryCorrectionProposalStore.js';
 import {
   ALL_PENDING_APPROVALS_LIMIT,
@@ -7,6 +8,7 @@ import {
   type ListSettledOpts,
   projectApprovalDecisionRead,
 } from '../ports/IApprovalAdapter.js';
+import { projectSettledPage } from '../project-settled-page.js';
 import { compactApprovalProjections, projectApprovalNavigation } from '../projectApprovalNavigation.js';
 import { projectSettledDecisionFacts } from '../settled-decision-facts.js';
 
@@ -16,6 +18,10 @@ export class F321ApprovalAdapter implements IApprovalAdapter {
   readonly featureId = 'F321' as const;
 
   constructor(private readonly store: EventMemoryCorrectionProposalStore) {}
+
+  async listSettledPage(owner: string, options: SettledHistoryPageOptions) {
+    return projectSettledPage(this.store, owner, options, toSettledItem);
+  }
 
   async listPending(ownerUserId: string): Promise<ApprovalItem[]> {
     const proposals = await this.store.listActionable(ownerUserId, ALL_PENDING_APPROVALS_LIMIT);
@@ -65,7 +71,13 @@ function toSettledItem(proposal: EventMemoryCorrectionProposal): SettledApproval
     ownerUserId: proposal.ownerUserId,
     status: proposal.status,
     summary: `Event correction: ${proposal.eventId}`,
-    detail: { ...detailOf(proposal), ...decision.detail },
+    detail: {
+      ...detailOf(proposal),
+      ...decision.detail,
+      ...(proposal.status === 'approved' && proposal.appliedRevision?.trim()
+        ? { canonicalEffectProofRef: `event-memory:${proposal.eventId}:revision:${proposal.appliedRevision}` }
+        : {}),
+    },
     navigation,
     decidedAt: decision.decidedAt,
     decidedBy: decision.decidedBy,

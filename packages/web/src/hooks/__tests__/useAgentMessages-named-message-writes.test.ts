@@ -245,6 +245,30 @@ describe('F117 named-message writes', () => {
       expect(useChatStore.getState().getThreadState(threadId).catStatuses[CAT]).toBe('streaming');
     });
 
+    it('preserves authenticated cloud return proof through a live callback instead of deriving it from the message invocation', () => {
+      const proof = {
+        v: 1 as const,
+        threadId,
+        sourceMessageId: 'source119',
+        targetCatId: 'gpt-pro',
+        dispatchInvocationId: 'actual-dispatch',
+      };
+      send(
+        event(threadId, {
+          type: 'text',
+          catId: 'gpt-pro',
+          origin: 'callback',
+          content: 'reply122',
+          messageId: 'reply122',
+          replyTo: 'source119',
+          invocationId: 'reply122',
+          extra: { isExplicitPost: true, cloudBridgeReturn: proof },
+        }),
+      );
+      expect(messageIn(threadId, 'reply122')?.extra?.cloudBridgeReturn).toEqual(proof);
+      expect(messageIn(threadId, 'reply122')?.replyTo).toBe('source119');
+    });
+
     it('changes nothing for stream events after R is committed — not R, not status, liveness or activity', () => {
       publishResponse(threadId, 'completed', 'Final answer');
       const store = useChatStore.getState();

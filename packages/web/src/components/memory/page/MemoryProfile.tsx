@@ -137,11 +137,7 @@ export function MemoryProfile({
             key={`${current.id}:${current.revision}`}
             entry={current}
             onDirtyChange={setDirty}
-            close={() => {
-              setDirty(false);
-              followSource(false);
-              select(null);
-            }}
+            close={() => choose(null)}
             reload={() => {
               setDirty(false);
               followSource(false);

@@ -2,6 +2,7 @@ import type { ReactNode } from 'react';
 import { ApprovalHostContext, PERMISSIVE_APPROVAL_HOST } from '@/components/ApprovalHost';
 import { ApprovalItemCard } from '@/components/ApprovalItemCard';
 import { MarkdownContent } from '@/components/MarkdownContent';
+import { HistoryTechnicalDetails } from '@/components/rich/approval-result-history';
 import { CardBlock } from '@/components/rich/CardBlock';
 import { HandoffCardContent } from '@/components/rich/HandoffCardContent';
 import { PersonMemoryOriginal } from '@/components/rich/PersonMemoryOriginal';
@@ -23,6 +24,7 @@ export function ApprovalDecisionReceipt({
   onExpandedChange,
   deferProducerRead = false,
   resolveThreadId,
+  effectFailed = false,
 }: {
   session: Pick<ApprovalSession, 'approval' | 'ownerUserId' | 'originalBlock'>;
   terminal: Terminal;
@@ -33,6 +35,7 @@ export function ApprovalDecisionReceipt({
   onExpandedChange?: (expanded: boolean) => void;
   deferProducerRead?: boolean;
   resolveThreadId?: () => Promise<string | null>;
+  effectFailed?: boolean;
 }) {
   if (session.approval.sourceFeatureId === 'F276') {
     return (
@@ -52,9 +55,11 @@ export function ApprovalDecisionReceipt({
           }}
         >
           {session.originalBlock ? (
-            <div data-testid="approval-receipt-original">
-              <PersonMemoryOriginal block={session.originalBlock} />
-            </div>
+            <HistoryTechnicalDetails>
+              <div data-testid="approval-receipt-original">
+                <PersonMemoryOriginal block={session.originalBlock} />
+              </div>
+            </HistoryTechnicalDetails>
           ) : null}
         </ApprovalHostContext.Provider>
         {children}
@@ -77,46 +82,53 @@ export function ApprovalDecisionReceipt({
   }
   const approval = session.approval;
   return (
-    <ReconciledApprovalResult terminal={terminal} line={line} onExpandedChange={onExpandedChange}>
-      {heading ? <MarkdownContent content={heading} className="!text-sm [&_p]:mb-0" disableCommandPrefix /> : null}
-      <ApprovalHostContext.Provider
-        value={{
-          ...PERMISSIVE_APPROVAL_HOST,
-          presentation: 'mailbox',
-          writesLocked: true,
-          authorizeWrite: () => false,
-        }}
-      >
-        {session.originalBlock ? (
-          <div data-testid="approval-receipt-original">
-            {approval.sourceFeatureId === 'F225' ? (
-              <>
-                {session.originalBlock.bodyMarkdown ? (
-                  <MarkdownContent
-                    content={session.originalBlock.bodyMarkdown}
-                    className="!text-xs"
-                    disableCommandPrefix
-                  />
-                ) : null}
-                <HandoffCardContent fields={session.originalBlock.fields ?? []} />
-              </>
-            ) : approval.sourceFeatureId === 'F231' ? (
-              <ProfileUpdateCardContent block={session.originalBlock} />
-            ) : (
-              <CardBlock block={{ ...session.originalBlock, actions: undefined }} />
-            )}
-          </div>
-        ) : (
-          <ApprovalItemCard
-            item={{
-              ...approval,
-              ownerUserId: session.ownerUserId,
-              resolution: terminal.resolution,
-              inlineApprovable: false,
-            }}
-          />
-        )}
-      </ApprovalHostContext.Provider>
+    <ReconciledApprovalResult
+      terminal={terminal}
+      line={line}
+      onExpandedChange={onExpandedChange}
+      effectFailed={effectFailed}
+    >
+      <HistoryTechnicalDetails>
+        {heading ? <MarkdownContent content={heading} className="!text-sm [&_p]:mb-0" disableCommandPrefix /> : null}
+        <ApprovalHostContext.Provider
+          value={{
+            ...PERMISSIVE_APPROVAL_HOST,
+            presentation: 'mailbox',
+            writesLocked: true,
+            authorizeWrite: () => false,
+          }}
+        >
+          {session.originalBlock ? (
+            <div data-testid="approval-receipt-original">
+              {approval.sourceFeatureId === 'F225' ? (
+                <>
+                  {session.originalBlock.bodyMarkdown ? (
+                    <MarkdownContent
+                      content={session.originalBlock.bodyMarkdown}
+                      className="!text-xs"
+                      disableCommandPrefix
+                    />
+                  ) : null}
+                  <HandoffCardContent fields={session.originalBlock.fields ?? []} />
+                </>
+              ) : approval.sourceFeatureId === 'F231' ? (
+                <ProfileUpdateCardContent block={session.originalBlock} />
+              ) : (
+                <CardBlock block={{ ...session.originalBlock, actions: undefined }} />
+              )}
+            </div>
+          ) : (
+            <ApprovalItemCard
+              item={{
+                ...approval,
+                ownerUserId: session.ownerUserId,
+                resolution: terminal.resolution,
+                inlineApprovable: false,
+              }}
+            />
+          )}
+        </ApprovalHostContext.Provider>
+      </HistoryTechnicalDetails>
       {children}
     </ReconciledApprovalResult>
   );

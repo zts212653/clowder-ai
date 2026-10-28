@@ -47,15 +47,19 @@ export class OwnerDesktop {
         !instance ||
         instance.activationState !== 'enabled' ||
         instance.configReadiness !== 'ready' ||
-        (instance.runtimeState !== 'crashed' && !hasRetainedDesktopLoss(instance)) ||
+        (instance.runtimeState !== 'healthy' &&
+          instance.runtimeState !== 'crashed' &&
+          !hasRetainedDesktopLoss(instance)) ||
         pkg?.packageState !== 'installed' ||
         pkg.manifest === null ||
         !desktopWindowContribution(pkg.manifest)
       )
         throw new Error('desktop recovery unavailable');
-      // Repair owns the revision CAS, durable close, fresh package/activation checks
-      // and new Broker/feature generation. No call or media is restored here.
-      await lifecycle.repair(instance.pluginInstanceId, instance.lifecycleRevision);
+      // A healthy body can have an observation still pending behind Host IO;
+      // show waits for it under current authority. Only retained loss repairs.
+      // Repair retains its revision CAS and fresh package/activation checks.
+      if (instance.runtimeState !== 'healthy')
+        await lifecycle.repair(instance.pluginInstanceId, instance.lifecycleRevision);
     }
     await desktop.show();
   }

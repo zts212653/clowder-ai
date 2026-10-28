@@ -1821,7 +1821,7 @@
     {
       "id": "F309",
       "name": "产物协作 — Artifact Collaboration / Collaborative Content Plane",
-      "status": "in-progress / Phase R、Studio 297 历史有界交付保留；Phase U 全入口归一 #6249 已合入；父 Alpha 基础旅程通过，入口与元数据缺口已交原 writer 续修；其余 Phase U、Office/video Admission Gate 与未勾 AC 仍开放",
+      "status": "in-progress / Phase R、Studio 297 历史有界交付保留；Phase U 归一四项补漏、#6264 prepared、#6275 卡片与 #6277 raw缩略/目录阅读器均已过父 Alpha；原Task414 g20等待正式加载f34c651a，完整正式体验、Phase U、Office/video Admission Gate与未勾AC仍开放",
       "file": "F309-collaborative-content-plane.md"
     },
     {

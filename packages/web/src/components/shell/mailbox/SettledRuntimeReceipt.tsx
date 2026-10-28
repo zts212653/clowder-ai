@@ -1,12 +1,14 @@
 import type { RuntimeInteractionRecord, SettledApprovalHubItem } from '@cat-cafe/shared';
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { ApprovalResultRow, type DecisionResultStatus } from '@/components/rich/ApprovalResultRow';
+import { HistoryTechnicalDetails } from '@/components/rich/approval-result-history';
 import { conversationDecisionCopy } from '@/components/rich/conversation-decision.shell-copy';
 import { conversationResult } from '@/components/rich/conversation-result';
 import { decisionResultCopy } from '@/components/rich/decision-result.shell-copy';
 import { ReadOnlyChoiceList } from '@/components/rich/ReadOnlyChoiceList';
 import { RuntimeInteractionRequestDetails } from '@/components/rich/RuntimeInteractionRequestDetails';
 import { runtimeDecisionResult } from '@/components/rich/runtime-decision-result';
+import { useApprovalResult } from '@/lib/use-approval-result';
 import { useShellCopy } from '../shell-copy';
 import { mailboxRuntimeCopy } from './mailbox-runtime.shell-copy';
 import { settledResultsCopy } from './settled-results.shell-copy';
@@ -19,22 +21,16 @@ export function SettledRuntimeReceipt({ item, reread }: { item: SettledApprovalH
     conversationCopy = useShellCopy(conversationDecisionCopy);
   const t = useShellCopy(settledResultsCopy);
   const [expanded, setExpanded] = useState(false);
-  const [read, setRead] = useState<{ item: SettledApprovalHubItem; record: RuntimeInteractionRecord | null } | null>(
-    null,
+  const source = useApprovalResult<RuntimeInteractionRecord | null>(
+    'F306',
+    item.proposalId,
+    `runtime-details:${JSON.stringify([item.detail.runtimeRevision, item.decidedAt])}`,
+    (signal) => readSettledRuntime(item, signal),
+    item.ownerUserId,
+    expanded,
   );
-  useEffect(() => {
-    if (!expanded) return;
-    const controller = new AbortController();
-    void readSettledRuntime(item, controller.signal)
-      .then((record) => {
-        if (!controller.signal.aborted) setRead({ item, record });
-      })
-      .catch(() => {
-        if (!controller.signal.aborted) setRead({ item, record: null });
-      });
-    return () => controller.abort();
-  }, [item, expanded]);
-  const record = read?.item === item ? read.record : null;
+  const record = source.value ?? null;
+  const checked = source.value !== undefined;
   const labels = Array.isArray(item.detail.runtimeSelectedLabels)
     ? item.detail.runtimeSelectedLabels.filter((value): value is string => typeof value === 'string')
     : [];
@@ -54,7 +50,7 @@ export function SettledRuntimeReceipt({ item, reread }: { item: SettledApprovalH
             ? resultCopy.selected(labels.join(' / '))
             : `${status === 'approved' ? resultCopy.approved : status === 'rejected' ? resultCopy.declined : resultCopy[status]} · ${item.summary}`,
         };
-  if (read?.item === item && !record) result = { status: 'closed', label: `${resultCopy.unknown} · ${item.summary}` };
+  if (checked && !record) result = { status: 'closed', label: `${resultCopy.unknown} · ${item.summary}` };
   if (record?.request.kind === 'conversation_decision') {
     const reason = record.terminal?.reasonCode;
     const selected = record.terminal?.response?.kind === 'selection' ? record.terminal.response.selectedIds : [];
@@ -65,19 +61,23 @@ export function SettledRuntimeReceipt({ item, reread }: { item: SettledApprovalH
   } else if (record) result = runtimeDecisionResult(record, resultCopy, copy);
   return (
     <ApprovalResultRow {...result} onExpandedChange={setExpanded}>
-      {record ? (
-        <>
-          <RuntimeInteractionRequestDetails request={record.request} terminal={record.terminal} />
-          {record.request.kind === 'conversation_decision' ? (
-            <ReadOnlyChoiceList
-              options={record.request.presentation.options}
-              selectedIds={record.terminal?.response?.kind === 'selection' ? record.terminal.response.selectedIds : []}
-            />
-          ) : null}
-        </>
-      ) : (
-        <p>{t.sourceUnavailable}</p>
-      )}
+      <HistoryTechnicalDetails>
+        {record ? (
+          <>
+            <RuntimeInteractionRequestDetails request={record.request} terminal={record.terminal} />
+            {record.request.kind === 'conversation_decision' ? (
+              <ReadOnlyChoiceList
+                options={record.request.presentation.options}
+                selectedIds={
+                  record.terminal?.response?.kind === 'selection' ? record.terminal.response.selectedIds : []
+                }
+              />
+            ) : null}
+          </>
+        ) : (
+          <p>{t.sourceUnavailable}</p>
+        )}
+      </HistoryTechnicalDetails>
       <button type="button" className="shell-focusable text-xs hover:underline" onClick={reread}>
         {t.reread}
       </button>

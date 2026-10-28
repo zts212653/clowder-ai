@@ -6,6 +6,7 @@
  *   决定「点击产物看什么」——这是 F232 灵魂（点击看内容，不只列清单）的判定核心。
  */
 import { projectFileContent, TEXT_FILE_EXTENSIONS, type ThreadArtifactDTO } from '@cat-cafe/shared';
+import { workspaceFileSourceFromUrl } from '../content-review/file-source';
 import { formatRelativeTime } from '../ThreadSidebar/thread-utils';
 
 export interface ArtifactRowMeta {
@@ -72,21 +73,22 @@ export function resolveAssetUrl(url: string | undefined, apiBase: string): strin
 
 /**
  * 文本类产物（view='text'）的内容来源判定：
- *  - 有 url（uploads 文本文件）→ 直接 fetch url
+ *  - URL 中的工作区坐标复用共同解析器；授权仍由文件 API 判断
+ *  - 其他 url（uploads 文本文件）→ 直接 fetch url
  *  - 无 url 有 ref + 有 worktreeId（repo 文件，如 backlog）→ 走 workspace 文件 API
  *  - 无 url 无 ref，或 repo 文件但无 worktreeId（用户没开过 workspace）→ none（降级到 fallback）
  */
 export type ArtifactContentSource =
   | { kind: 'url'; url: string }
-  | { kind: 'workspace'; path: string }
+  | { kind: 'workspace'; worktreeId: string; path: string }
   | { kind: 'none' };
 
 export function artifactContentSource(
   a: Pick<ThreadArtifactDTO, 'url' | 'ref'>,
   worktreeId: string | null,
 ): ArtifactContentSource {
-  if (a.url) return { kind: 'url', url: a.url };
-  if (a.ref && worktreeId) return { kind: 'workspace', path: a.ref };
+  if (a.url) return workspaceFileSourceFromUrl(a.url) ?? { kind: 'url', url: a.url };
+  if (a.ref && worktreeId) return { kind: 'workspace', worktreeId, path: a.ref };
   return { kind: 'none' };
 }
 

@@ -16,12 +16,16 @@ export type ContentFileInfo = {
   createdAt?: string;
   modifiedAt?: string;
 };
-export type FileActionSource = { kind: 'workspace'; worktreeId: string; path: string } | { kind: 'url'; url: string };
+export type FileActionSource =
+  | { kind: 'workspace'; worktreeId: string; path: string }
+  | { kind: 'url'; url: string }
+  | { kind: 'owner'; key: string };
 
 function apiBase() {
   return contentApiBase();
 }
 export function fileSourceUrl(source: FileActionSource): string | null {
+  if (source.kind === 'owner') return null;
   return source.kind === 'url'
     ? contentFileUrl(source.url)
     : new URL(
@@ -30,6 +34,7 @@ export function fileSourceUrl(source: FileActionSource): string | null {
       ).href;
 }
 export function fileSourceIdentity(source: FileActionSource): string {
+  if (source.kind === 'owner') return source.key;
   const workspace = source.kind === 'workspace' ? source : workspaceFileSourceFromUrl(source.url);
   return JSON.stringify(workspace ?? { kind: 'url', url: fileSourceUrl(source) });
 }
@@ -42,6 +47,7 @@ export function fileDownloadUrl(raw: string): string | null {
   return url.href;
 }
 export function fileActionUrl(source: FileActionSource, action: 'file-info' | 'reveal' | 'open'): string | null {
+  if (source.kind === 'owner') return null;
   if (source.kind === 'workspace')
     return (
       '/api/workspace/file/actions/' +

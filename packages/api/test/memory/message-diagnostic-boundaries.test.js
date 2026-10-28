@@ -104,6 +104,40 @@ test('trace allow-list, event cap, zero-cost receipt and unknown usage remain pr
   assert.deepEqual(d.snapshot().workerReads, []);
 });
 
+test('qualification traces carry bounded batch coordinates and output counts, without thinking or prompt text', () => {
+  const event = {
+    phase: 'native-output',
+    batchIndex: 1,
+    outputChars: 227,
+    usage: {
+      output_tokens: 1200,
+      output_tokens_details: { thinking_tokens: 1080, thinking: 'PRIVATE-THINKING' },
+    },
+    thinking: 'PRIVATE-THINKING',
+    prompt: 'PRIVATE-PROMPT',
+  };
+  assert.deepEqual(privateMessageSearchTrace(event), {
+    phase: 'native-output',
+    batchIndex: 1,
+    outputChars: 227,
+    usage: { output_tokens: 1200, output_tokens_details: { thinking_tokens: 1080 } },
+  });
+  const safe = privateMessageSearchTrace({
+    phase: 'native-completed',
+    batchIndex: 0,
+    outputChars: 272,
+    afterUsageMs: 700,
+    permissionMode: 'dontAsk',
+    effort: 'low',
+  });
+  assert.equal(safe.afterUsageMs, 700);
+  assert.equal(safe.permissionMode, 'dontAsk');
+  assert.equal(safe.effort, 'low');
+  for (const batchIndex of [-1, 2, 0.5, NaN, Infinity, 'PRIVATE-QUERY']) {
+    assert.equal(privateMessageSearchTrace({ phase: 'native-response', batchIndex }).batchIndex, undefined);
+  }
+});
+
 test('overlapping operation time is explicitly a settled sum and late work cannot alter a closed snapshot', async () => {
   const d = new MessageSearchDiagnostics();
   let release;

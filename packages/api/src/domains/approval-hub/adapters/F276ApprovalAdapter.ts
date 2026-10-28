@@ -1,4 +1,5 @@
 import type { ApprovalItem, SettledApprovalItem } from '@cat-cafe/shared';
+import type { SettledHistoryPageOptions } from '../../../utils/settled-history-page.js';
 import { projectCandidateInteractionInformedEvidence } from '../../memory/people/PersonMemoryInformedEvidence.js';
 import type { PersonMemoryStore, StoredPersonMemoryCandidate } from '../../memory/people/PersonMemoryStore.js';
 import { projectPersonMemoryRetainedEffects } from '../../memory/people/person-memory-proposal-status.js';
@@ -9,12 +10,28 @@ import {
   type ListSettledOpts,
   projectApprovalDecisionRead,
 } from '../ports/IApprovalAdapter.js';
+import { projectSettledPage } from '../project-settled-page.js';
 import { compactApprovalProjections, projectApprovalNavigation } from '../projectApprovalNavigation.js';
 
 export class F276ApprovalAdapter implements IApprovalAdapter {
   readonly featureId = 'F276' as const;
 
   constructor(private readonly store: PersonMemoryStore | null) {}
+
+  async listSettledPage(owner: string, options: SettledHistoryPageOptions) {
+    if (!this.store)
+      throw Object.assign(new Error('F276 canonical history source unavailable'), {
+        statusCode: 503,
+        code: 'APPROVAL_HISTORY_UNAVAILABLE',
+      });
+    return projectSettledPage(this.store, owner, options, async ({ candidate, decidedAt }) => {
+      const person =
+        candidate.state === 'materialized' && candidate.materializedPersonId
+          ? await this.store?.getPerson(owner, candidate.materializedPersonId)
+          : null;
+      return toSettledItem(candidate, decidedAt, person?.displayName);
+    });
+  }
 
   async listPending(userId: string): Promise<ApprovalItem[]> {
     if (!this.store) return [];
@@ -189,6 +206,9 @@ function toSettledItem(
           : '人物提案',
     detail: {
       ...detail,
+      ...(candidate.state === 'materialized' && receipt?.decisionId
+        ? { canonicalEffectProofRef: `person-memory-decision:${receipt.decisionId}` }
+        : {}),
       ...projectPersonMemoryRetainedEffects(candidate),
       ...(decidedAt === 0 ? { closureTimeUnknown: true } : {}),
     },

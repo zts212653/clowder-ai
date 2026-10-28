@@ -1,7 +1,9 @@
 import type { ApprovalDecisionReceiptV1 } from '@cat-cafe/shared';
 import { beforeEach, expect, it, vi } from 'vitest';
+import { approvalResultRead } from '@/lib/approval-result-read';
 import type { ChatMessage } from '@/stores/chatStore';
 import { apiFetch } from '@/utils/api-client';
+import { observeApiSessionOwner } from '@/utils/api-session-identity';
 import { readChatApprovalReceipt, receiptImmediatelyFollowsCard } from '../receipt-source';
 
 vi.mock('@/utils/api-client', () => ({ apiFetch: vi.fn() }));
@@ -36,6 +38,8 @@ const item = {
 };
 let row: typeof item, owner: string, threadAvailable: boolean;
 beforeEach(() => {
+  approvalResultRead.clear();
+  observeApiSessionOwner(null);
   row = structuredClone(item);
   owner = 'owner';
   threadAvailable = true;
@@ -117,4 +121,17 @@ it('suppresses only immediate adjacency in the same supplied timeline', () => {
   expect(receiptImmediatelyFollowsCard('receipt', receipt, 'thread_origin', [{ id: 'receipt' }] as ChatMessage[])).toBe(
     false,
   );
+});
+
+it('retains a verified receipt across unmounts and consumers without another request', async () => {
+  const first = await readChatApprovalReceipt(receipt, new AbortController().signal);
+  expect(first?.terminal.threadId).toBe('thread_child');
+  vi.mocked(apiFetch).mockClear();
+  const copies = await Promise.all(
+    Array.from({ length: 8 }, () => readChatApprovalReceipt(receipt, new AbortController().signal)),
+  );
+  expect(
+    copies.every((copy) => copy?.item === first?.item && copy?.terminal.threadId === first?.terminal.threadId),
+  ).toBe(true);
+  expect(apiFetch).not.toHaveBeenCalled();
 });

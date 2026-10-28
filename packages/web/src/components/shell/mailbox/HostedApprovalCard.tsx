@@ -38,8 +38,8 @@ const MUTED = { color: 'var(--shell-muted)' } as const;
  *  - The store removes an item optimistically on a 2xx. That is not a result and must not make the card vanish while the
  *    answer is being confirmed, so the last matched copy stays on screen until the result is in.
  */
-/** The store's copy is what the card acts on. Opening the row reads it afresh (a read; it changes nothing), once per approval. */
-function useStoreCopies(key: string): {
+/** The mailbox's shared pending read supplies the original writer; expanding a row does not refetch its entire table. */
+function useStoreCopies(): {
   storeItems: readonly ApprovalHubItem[];
   storeChecked: boolean;
   storeWaiting: boolean;
@@ -47,22 +47,7 @@ function useStoreCopies(key: string): {
   const storeItems = useApprovalHubStore((state) => state.items);
   const unavailable = useApprovalHubStore((state) => state.isLoading || !state.pendingReadAvailable);
   const loading = useApprovalHubStore((state) => state.isLoading);
-  const [storeChecked, setStoreChecked] = useState(false);
-  // biome-ignore lint/correctness/useExhaustiveDependencies: one refresh per opened approval
-  useEffect(() => {
-    let live = true;
-    setStoreChecked(false);
-    void useApprovalHubStore
-      .getState()
-      .fetchPending()
-      .finally(() => {
-        if (live) setStoreChecked(true);
-      });
-    return () => {
-      live = false;
-    };
-  }, [key]);
-  return { storeItems, storeChecked: storeChecked && !unavailable, storeWaiting: !storeChecked || loading };
+  return { storeItems, storeChecked: !unavailable, storeWaiting: loading };
 }
 
 /** What stands in the card's place when the original card may not be shown: still checking, or checked and not the same decision. */
@@ -168,10 +153,10 @@ function Hosted({
       approval,
       ...(item.originalApprovalCard?.block.kind === 'card' ? { originalBlock: item.originalApprovalCard.block } : {}),
     });
-  }, [sessions, ownerUserId, item.decisionRef, approval]);
+  }, [sessions, ownerUserId, item.decisionRef, approval, item.originalApprovalCard?.block]);
   useSyncExternalStore(sessions.subscribe, sessions.getVersion, sessions.getVersion);
   const session = sessions.get(key);
-  const { storeItems, storeChecked, storeWaiting } = useStoreCopies(key);
+  const { storeItems, storeChecked, storeWaiting } = useStoreCopies();
 
   const match = matchHostedApproval({ read: approval, readOwnerUserId: ownerUserId, storeItems, now: Date.now() });
   const state = session?.model.state ?? { kind: 'idle' as const };

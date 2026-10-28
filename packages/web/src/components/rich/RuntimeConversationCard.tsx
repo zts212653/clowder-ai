@@ -1,7 +1,10 @@
 'use client';
+
 import type { RuntimeConversationResponse, RuntimeInteractionCardRef } from '@cat-cafe/shared';
 import type { ReactNode } from 'react';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
+import { readApprovalResultOwner } from '@/lib/approval-result-owner';
+import { approvalResultRead } from '@/lib/approval-result-read';
 import type { RichInteractiveBlock } from '@/stores/chat-types';
 import { useChatStore } from '@/stores/chatStore';
 import { useShellCopy } from '../shell/shell-copy';
@@ -12,7 +15,6 @@ import { decisionResultCopy } from './decision-result.shell-copy';
 import { InteractiveBlock } from './InteractiveBlock';
 import { ReadOnlyChoiceList } from './ReadOnlyChoiceList';
 import {
-  type ConversationRecord,
   type RuntimeConversationBinding,
   type RuntimeConversationContext,
   readConversation,
@@ -21,6 +23,7 @@ import {
   sameConversationPresentation,
   submitConversationAnswer,
 } from './runtime-conversation-model';
+import { RetainedApprovalCardResult, useOriginalApprovalRead } from './use-original-approval-read';
 
 export interface ConversationHostRead {
   ownerUserId: string;
@@ -51,47 +54,29 @@ export function RuntimeConversationCard({
 }) {
   const copy = useShellCopy(conversationDecisionCopy);
   const resultCopy = useShellCopy(decisionResultCopy);
-  const [record, setRecord] = useState<ConversationRecord | null>(null);
-  const [owner, setOwner] = useState<string | null>(null);
+  const source = useOriginalApprovalRead(
+    'F306',
+    binding.interactionId,
+    { threadId: sourceThreadId, messageId, block },
+    async (_signal, fresh) => {
+      const principal = fresh ? await readConversationOwner() : await readApprovalResultOwner();
+      const read = principal ? await readConversation(binding.interactionId, !fresh) : null;
+      return { read, principal };
+    },
+    host?.ownerUserId,
+  );
+  const record = source.value?.read ?? null,
+    owner = source.value?.principal === source.ownerUserId ? source.ownerUserId : null;
   const [busy, setBusy] = useState(false);
-  const [loading, setLoading] = useState(true);
+  const loading = source.reading || (source.value === undefined && !source.failed && !source.retained);
   const [failed, setFailed] = useState(false);
   const generation = useRef(0),
     submitting = useRef(false);
   const attempt = useRef<{ signature: string; operationId: string } | null>(null);
   const hydrate = useCallback(async () => {
-    const current = ++generation.current;
-    setLoading(true);
-    try {
-      const [read, principal] = await Promise.all([readConversation(binding.interactionId), readConversationOwner()]);
-      if (current === generation.current && !submitting.current) {
-        setRecord(read);
-        setOwner(principal);
-        setFailed(!read);
-      }
-    } catch {
-      if (current === generation.current) setFailed(true);
-    } finally {
-      if (current === generation.current) setLoading(false);
-    }
-  }, [binding.interactionId]);
-  useEffect(() => {
-    void hydrate();
-    return () => {
-      generation.current++;
-    };
-  }, [hydrate]);
-  useEffect(() => {
-    const handler = (e: Event) => {
-      if (
-        (e as CustomEvent<{ interactionId?: string }>).detail?.interactionId === binding.interactionId &&
-        !submitting.current
-      )
-        void hydrate();
-    };
-    window.addEventListener('cat-cafe:runtime-interaction-updated', handler);
-    return () => window.removeEventListener('cat-cafe:runtime-interaction-updated', handler);
-  }, [hydrate, binding.interactionId]);
+    const next = await source.refresh();
+    setFailed(!next?.read);
+  }, [source.refresh]);
   const aligned = Boolean(
     record &&
       owner &&
@@ -146,7 +131,11 @@ export function RuntimeConversationCard({
     setFailed(false);
     try {
       const next = await submitConversationAnswer(coordinates, answer, host?.verifyCurrentRead);
-      setRecord(next);
+      if (next && owner === next.request.owner.userId)
+        approvalResultRead.seedFacts(
+          { owner, producer: 'F306', proposalId: binding.interactionId },
+          { native: { interaction: next } },
+        );
     } catch {
       setFailed(true);
     } finally {
@@ -183,6 +172,12 @@ export function RuntimeConversationCard({
           : terminal === 'defaulted'
             ? copy.defaulted
             : copy.expired;
+  if (source.retained)
+    return (
+      <section data-testid="runtime-conversation-card">
+        <RetainedApprovalCardResult item={source.retained} reread={() => void source.reread()} />
+      </section>
+    );
   if (aligned && record && record.status !== 'pending') {
     const choices = record.request.presentation.options
       .filter((option) => selectedIds.includes(option.id))

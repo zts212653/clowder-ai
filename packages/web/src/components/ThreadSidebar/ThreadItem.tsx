@@ -265,7 +265,7 @@ function ThreadItemComponent({
           />
         ) : (
           <span className="flex min-w-0 flex-1 items-center gap-1">
-            {isV2 && <ThreadPinV2 id={id} pinned={isPinned} />}
+            {isV2 && <ThreadPinV2 id={id} title={displayTitle} pinned={isPinned} onToggle={onTogglePin} />}
             {!isV2 && canPin && (
               <RowTip enabled={isV2} label={isPinned ? '取消置顶' : '置顶'}>
                 <button

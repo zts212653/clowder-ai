@@ -2,6 +2,7 @@ import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { writeShellLanguage } from '../../shell/shell-language';
+import { ApprovalResultHistory } from '../approval-result-history';
 import { ThreadProposalResult } from '../ThreadProposalResult';
 
 let root: Root, host: HTMLDivElement;
@@ -74,4 +75,33 @@ it('keeps a failed effect honest and retries the existing guarded result read', 
   await act(async () => retry?.click());
   expect(resolve).toHaveBeenCalledOnce();
   expect(navigate).not.toHaveBeenCalled();
+});
+
+it('shows a proven in-progress effect instead of an unknown or opened conversation', async () => {
+  await act(async () =>
+    root.render(
+      <ThreadProposalResult status="approved" effectInProgress effectUnknown>
+        <p>Original proposal</p>
+      </ThreadProposalResult>,
+    ),
+  );
+  expect(host.textContent).toContain('正在开对话…');
+  expect(host.textContent).not.toContain('实际结果尚未确认');
+  expect(host.textContent).not.toContain('对话已开');
+});
+
+it('uses the history time once while retaining the original result component', async () => {
+  await act(async () =>
+    root.render(
+      <ApprovalResultHistory.Provider
+        value={{ subject: '原提议', proposer: '缅因猫 Sol', kind: '新对话', time: '1 天前', details: null }}
+      >
+        <ThreadProposalResult status="rejected" decidedAt={1793100000000}>
+          <p>原内容</p>
+        </ThreadProposalResult>
+      </ApprovalResultHistory.Provider>,
+    ),
+  );
+  expect(host.querySelector('[data-testid="proposal-result-label"]')?.textContent).toBe('已拒绝');
+  expect(host.textContent).toContain('1 天前');
 });

@@ -2906,6 +2906,31 @@
     "owner": "codex-sol"
   },
   {
+    "id": "workflow-collective-project-version",
+    "kind": "workflow",
+    "sourceRef": {
+      "path": "packages/collective-client/src/ProjectArtifactReferenceCard.tsx",
+      "anchor": "ProjectArtifactReferenceCard"
+    },
+    "structureSource": {
+      "path": "packages/collective-client/src/ProjectArtifactSurface.tsx",
+      "anchor": "ProjectArtifactSurface"
+    },
+    "bodySource": {
+      "path": "packages/collective-client/src/ProjectArtifactVersionDialog.tsx",
+      "anchor": "ProjectArtifactVersionDialog"
+    },
+    "contexts": ["feature_dev", "long_running", "concierge_open"],
+    "audience": ["all"],
+    "body": "在 Collective 项目的“作品”里引用一件作品时，先选择本项目要用的版本。原件更新后会提示，负责人可以先比较，再明确换用或保持；换用只影响当前项目，其他项目继续使用各自选定的版本。",
+    "action": {
+      "type": "open_capability_surface",
+      "label": "查看项目作品",
+      "surfaceId": "collective"
+    },
+    "owner": "codex61-sol"
+  },
+  {
     "id": "feature-f290-collective",
     "kind": "feature",
     "sourceRef": {

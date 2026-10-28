@@ -652,7 +652,7 @@ export function F307ExperienceWorkbench({
     setHomeOpen(false);
   };
   const openHomeArtifact = useCallback<OpenHomeArtifact>(
-    (artifact, origin) => {
+    (artifact, origin, resolvedSurface) => {
       const chat = useChatStore.getState();
       if (!threadId || origin.threadId !== threadId || chat.currentThreadId !== threadId) {
         useToastStore
@@ -674,7 +674,7 @@ export function F307ExperienceWorkbench({
             .addToast({ type: 'info', title: 'PR', message: t.pullRequestSourceUnavailable, duration: 6000 });
         return;
       }
-      chat.openPublishedArtifact(threadId, artifact, origin);
+      openHomeSurface(resolvedSurface);
     },
     [threadId, t, canonicalWorktreeId, worktreeId, openHomeSurface],
   );

@@ -4,7 +4,8 @@ import type { ApprovalSession, ApprovalSessions } from './approval-sessions';
 
 export type MailboxDisplayRow =
   | { key: string; kind: 'item'; item: UnifiedAttentionItemV1 }
-  | { key: string; kind: 'retained'; session: ApprovalSession };
+  | { key: string; kind: 'retained'; session: ApprovalSession }
+  | { key: string; kind: 'feedback'; item: UnifiedAttentionItemV1; result: 'handled' | 'ignored' };
 export function mailboxRowKey(item: UnifiedAttentionItemV1): string {
   return item.approval ? JSON.stringify([item.approval.sourceFeatureId, item.approval.proposalId]) : item.decisionRef;
 }

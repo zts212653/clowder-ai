@@ -8,9 +8,11 @@ import { API_URL } from '@/utils/api-client';
 import { useArtworkChrome } from '../content-review/ArtworkChrome';
 import { FileToolbar } from '../content-review/FileToolbar';
 import { fileSourceIdentity } from '../content-review/file-action-client';
+import { useShellCopy } from '../shell/shell-copy';
 import { useShellPresentation } from '../shell/shell-presentation';
 import { ClassicWorkspaceFileChrome } from './ClassicWorkspaceFileChrome';
 import { FileContentRenderer } from './FileContentRenderer';
+import { publishedTextCopy } from './published-text.shell-copy';
 import { type MarkdownSelectionAction, useMarkdownSelectionAction } from './useMarkdownSelectionAction';
 import { useWorkspaceListenMode } from './useWorkspaceListenMode';
 import { V2WorkspaceFileChrome } from './V2WorkspaceFileChrome';
@@ -43,7 +45,10 @@ export function WorkspaceFileViewer(props: WorkspaceFileViewerProps | ContentDoc
   const isMarkdown = kind === 'markdown',
     isHtml = kind === 'html',
     isJsx = kind === 'jsx';
-  const quoteSource = published?.source.kind === 'url' ? (published.quoteSource ?? false) : undefined;
+  const quoteSource =
+    published?.source.kind === 'url' || published?.source.kind === 'owner'
+      ? (published.quoteSource ?? false)
+      : undefined;
   const source = published?.source ?? { kind: 'workspace' as const, worktreeId: worktreeId ?? '', path: file.path };
   const sourceKey = fileSourceIdentity(source);
   const listenReturn = useMemo(
@@ -51,20 +56,24 @@ export function WorkspaceFileViewer(props: WorkspaceFileViewerProps | ContentDoc
     [published?.listenReturn],
   );
   const isV2 = useShellPresentation() === 'v2';
+  const localized = useShellCopy(publishedTextCopy);
+  const copy = isV2 ? localized : publishedTextCopy.zh;
   const currentThreadId = useChatStore((s) => s.currentThreadId);
   const onQuoteSelected = props.onQuoteSelected;
   const mdContainerRef = useRef<HTMLDivElement>(null);
   const mdSelectionAction = useMarkdownSelectionAction(
     mdContainerRef,
-    isMarkdown && markdownRendered && !editMode && quoteSource !== false,
+    isMarkdown && markdownRendered && !editMode && (Boolean(published?.onOwnerQuote) || quoteSource !== false),
     sourceKey,
     // The loaded file's version, only when it is the file this tab names.
     file.path === openFilePath ? file.sha256 : null,
+    published?.source.kind === 'owner' ? file.content : undefined,
   );
 
   const handleMdAddToChat = useCallback(
     (action: MarkdownSelectionAction, comment: string) => {
       if (!openFilePath) return;
+      if (published?.onOwnerQuote) return published.onOwnerQuote(action, comment);
       if (quoteSource === false) return false;
       if (quoteSource) {
         if (quoteSource.artifactFile?.displayDigest !== `sha256:${action.version}`) return false;
@@ -95,20 +104,22 @@ export function WorkspaceFileViewer(props: WorkspaceFileViewerProps | ContentDoc
       onQuoteSelected?.('');
       return true;
     },
-    [currentThreadId, currentWorktree, openFilePath, worktreeId, quoteSource, onQuoteSelected],
+    [currentThreadId, currentWorktree, openFilePath, worktreeId, quoteSource, onQuoteSelected, published?.onOwnerQuote],
   );
 
   const rawUrl = (path: string) =>
     published
-      ? published.source.kind === 'url'
-        ? published.source.url
-        : `${API_URL}/api/workspace/file/raw?${new URLSearchParams({ worktreeId: published.source.worktreeId, path: published.source.path })}`
+      ? published.source.kind === 'owner'
+        ? ''
+        : published.source.kind === 'url'
+          ? published.source.url
+          : `${API_URL}/api/workspace/file/raw?${new URLSearchParams({ worktreeId: published.source.worktreeId, path: published.source.path })}`
       : `${API_URL}/api/workspace/file/raw?worktreeId=${encodeURIComponent(worktreeId ?? '')}&path=${encodeURIComponent(path)}`;
   const listenMode = useWorkspaceListenMode({
     file,
     openFilePath,
     worktreeId,
-    enabled: isMarkdown && markdownRendered && !editMode && !file.truncated && !!file.sha256,
+    enabled: source.kind !== 'owner' && isMarkdown && markdownRendered && !editMode && !file.truncated && !!file.sha256,
     sourceKey: source.kind === 'url' ? sourceKey : undefined,
     returnTarget: listenReturn,
   });
@@ -131,7 +142,7 @@ export function WorkspaceFileViewer(props: WorkspaceFileViewerProps | ContentDoc
     onStartCache: listenMode.startCache,
     onStartListen: () => listenMode.start(),
   };
-  const listenAvailable = isMarkdown && markdownRendered && !editMode;
+  const listenAvailable = source.kind !== 'owner' && isMarkdown && markdownRendered && !editMode;
   const listenAction = listenAvailable ? <WorkspaceListenActions {...listenProps} action="listen" /> : null;
   const cacheAction = listenAvailable ? <WorkspaceListenActions {...listenProps} action="cache" /> : null;
 
@@ -148,7 +159,7 @@ export function WorkspaceFileViewer(props: WorkspaceFileViewerProps | ContentDoc
           leading={
             published.onBack && (
               <button type="button" className="shrink-0 text-xs" onClick={published.onBack}>
-                返回来源
+                {copy.back}
               </button>
             )
           }
@@ -161,7 +172,7 @@ export function WorkspaceFileViewer(props: WorkspaceFileViewerProps | ContentDoc
                   className="shrink-0 rounded border border-cafe px-2 py-1 text-xs"
                   onClick={() => setRendered((value) => !value)}
                 >
-                  {rendered ? '源码' : '渲染'}
+                  {rendered ? copy.source : copy.rendered}
                 </button>
               )}
               {listenAction}
@@ -242,6 +253,8 @@ export function WorkspaceFileViewer(props: WorkspaceFileViewerProps | ContentDoc
         mdContainerRef={mdContainerRef}
         mdSelectionAction={mdSelectionAction}
         onMdAddToChat={handleMdAddToChat}
+        collectMdComment={published?.source.kind !== 'owner'}
+        mdQuoteLabel={published?.ownerQuoteLabel}
         onSave={workspace?.onSave}
         onDirtyChange={workspace?.onDirtyChange}
         rawUrl={rawUrl}

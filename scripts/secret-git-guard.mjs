@@ -1,7 +1,6 @@
 #!/usr/bin/env node
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { existsSync, readFileSync, realpathSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { scanSecretContent } from './lib/secret-content-scan.mjs';
 import {
   GIT_OID,
@@ -106,4 +105,18 @@ async function main() {
   }
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) await main();
+// Compare real paths on both sides: Node names the main module by its real path, or by
+// the given path under --preserve-symlinks-main, and a symlinked invocation path (e.g.
+// macOS /var -> /private/var) must never skip the scan. A non-file argv[1] (node -e), or
+// a query or hash on this module's URL (a main module has neither), means an importer.
+const self = new URL(import.meta.url);
+const invoked = process.argv[1];
+if (
+  !self.search &&
+  !self.hash &&
+  invoked &&
+  existsSync(invoked) &&
+  realpathSync(invoked) === realpathSync(fileURLToPath(self))
+) {
+  await main();
+}

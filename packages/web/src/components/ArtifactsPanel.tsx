@@ -250,7 +250,7 @@ function ClassicArtifactsPanel({
   threadId: string;
   width?: number;
   onClose?: () => void;
-  onSelectArtifact?: (artifact: ThreadArtifactDTO | GlobalArtifactDTO, origin: ArtifactListOrigin) => void;
+  onSelectArtifact?: WorksPanelProps['onSelectArtifact'];
   initialView?: ArtifactListView;
 }) {
   // F232 Phase B: scope toggle state
@@ -278,7 +278,7 @@ function ClassicArtifactsPanel({
       threadId: isGlobal(artifact) ? artifact.threadId : threadId,
       artifact,
       origin,
-      attach: onSelectArtifact ? () => onSelectArtifact(artifact, origin) : undefined,
+      attach: onSelectArtifact ? (surface) => onSelectArtifact(artifact, origin, surface) : undefined,
     });
   };
 

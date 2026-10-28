@@ -1,76 +1,32 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useSyncExternalStore } from 'react';
 import { createPortal } from 'react-dom';
+import { apiSessionIdentity } from '@/utils/api-session-identity';
 import type { ApprovalSessions } from './mailbox/approval-sessions';
+import { handledHistoryCopy } from './mailbox/handled-history.shell-copy';
+import type { HandledHistoryRead } from './mailbox/handled-history-read';
 import { MailboxApprovalTools, MailboxSecondLayer } from './mailbox/MailboxApprovalTools';
+import { MailboxHandledHistory } from './mailbox/MailboxHandledHistory';
 import { MailboxItemGroups } from './mailbox/MailboxItemGroups';
 import { MailboxMentionControls } from './mailbox/MailboxMentionControls';
-import { MailboxMentionUndo } from './mailbox/MailboxMentionUndo';
 import { MailboxPagination } from './mailbox/MailboxPagination';
 import { MailboxPanelHeader } from './mailbox/MailboxPanelHeader';
-import { MailboxPeriodFilter } from './mailbox/MailboxPeriodFilter';
 import { MailboxPersonalNotice } from './mailbox/MailboxPersonalNotice';
 import { MailboxReadNotes } from './mailbox/MailboxReadNotes';
 import { MailboxRow } from './mailbox/MailboxRow';
-import { MailboxSettledResults } from './mailbox/MailboxSettledResults';
 import { mailboxEntryCopy } from './mailbox/mailbox-entry.shell-copy';
+import { MailboxFeedback, usePendingFeedback } from './mailbox/mailbox-feedback';
 import type { MailboxSection } from './mailbox/mailbox-navigation';
 import { type MailboxDisplayRow, useMailboxRows } from './mailbox/mailbox-rows';
 import type { OriginalPlace } from './mailbox/original-place';
 import { RetainedResult } from './mailbox/RetainedResults';
+import { useHandledHistory } from './mailbox/use-handled-history';
+import { RAIL_WIDTH_FALLBACK, useEscapeToClose, useOpenRow, useRailEdge } from './mailbox/use-mailbox-panel-layout';
 import { useMailboxPersonalPreferences } from './mailbox/use-mailbox-personal-preferences';
 import { useShellCopy } from './shell-copy';
 import { deriveMailboxState, type MailboxState } from './unified-mailbox-state';
 import type { UnifiedAttentionView } from './use-unified-attention';
 
-const RAIL_WIDTH_FALLBACK = 52;
 const PANEL_WIDTH = 440;
-const MOBILE_BREAKPOINT = 768;
-/** The panel docks against the rail's right edge; without a rail in the tree (a bare unit render) it uses the rail's width. */
-function useRailEdge(anchor: React.RefObject<HTMLElement | null>): number | null {
-  const [edge, setEdge] = useState<number | null>(null);
-  useEffect(() => {
-    const measure = () => {
-      if (window.innerWidth < MOBILE_BREAKPOINT) {
-        setEdge(0);
-        return;
-      }
-      const rail = anchor.current?.closest('[data-testid="world-rail"]');
-      setEdge(Math.round(rail?.getBoundingClientRect().right || RAIL_WIDTH_FALLBACK));
-    };
-    measure();
-    window.addEventListener('resize', measure);
-    return () => window.removeEventListener('resize', measure);
-  }, [anchor]);
-  return edge;
-}
-
-/** A nested dialog (for example a card's reject-feedback dialog) owns Escape while it is open. */
-function useEscapeToClose(panel: React.RefObject<HTMLElement | null>, onClose: () => void) {
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape' || event.defaultPrevented) return;
-      const otherDialog = [...document.querySelectorAll('[role="dialog"], [aria-modal="true"]')].some(
-        (dialog) => dialog !== panel.current,
-      );
-      if (!otherDialog) onClose();
-    };
-    document.addEventListener('keydown', onKeyDown);
-    return () => document.removeEventListener('keydown', onKeyDown);
-  }, [panel, onClose]);
-}
-
-/** Which row is open. A row that left the read is forgotten, not merely hidden: if a later read brings it back it starts closed. */
-function useOpenRow(keys: string[], loading: boolean) {
-  const [expandedKey, setExpandedKey] = useState<string | null>(null);
-  const keysSignature = keys.join('\n');
-  // biome-ignore lint/correctness/useExhaustiveDependencies: keysSignature stands for keys
-  useEffect(() => {
-    if (!loading) setExpandedKey((current) => (current !== null && !keys.includes(current) ? null : current));
-  }, [keysSignature, loading]);
-  const openKey = expandedKey !== null && (loading || keys.includes(expandedKey)) ? expandedKey : null;
-  return { openKey, toggle: (key: string) => setExpandedKey(openKey === key ? null : key) };
-}
-
 /**
  * What the panel shows, and whose it is. While re-reading, the previous rows may stay visible, but only labelled as the
  * previous read — never as current. The owner is the read's verified identity (a previous read is shown only once its owner is
@@ -78,7 +34,7 @@ function useOpenRow(keys: string[], loading: boolean) {
  */
 function panelRows(view: UnifiedAttentionView, sessions: ApprovalSessions) {
   const read = view.result.kind === 'ok' ? view.result.read : null;
-  const staleRead = view.result.kind === 'loading' ? view.staleRead : null;
+  const staleRead = view.result.kind !== 'ok' ? view.staleRead : null;
   const shown = read ?? staleRead;
   const items = shown?.items ?? [];
   const ownerUserId = shown?.identity.ownerUserId ?? null;
@@ -97,7 +53,7 @@ function panelRows(view: UnifiedAttentionView, sessions: ApprovalSessions) {
  * (the design owner's call). A dialog opened by a card inside it must take Escape first and must never unmount the panel or
  * lose a draft; that is proven where such cards are hosted (S3-2b), not here. Handled requests have their own page; approval records stay in the existing approval consumer.
  */
-export function MailboxPanel({
+function MailboxPanelContent({
   anchor,
   state,
   view,
@@ -108,6 +64,8 @@ export function MailboxPanel({
   onSectionChange,
   selectedProposalId = null,
   onOpenSchedule,
+  historyRead,
+  projectFeedback,
 }: {
   anchor: React.RefObject<HTMLButtonElement | null>;
   state: MailboxState;
@@ -120,8 +78,11 @@ export function MailboxPanel({
   onSectionChange?: (section: MailboxSection) => void;
   selectedProposalId?: string | null;
   onOpenSchedule?: () => void;
+  historyRead?: HandledHistoryRead;
+  projectFeedback: (rows: MailboxDisplayRow[]) => MailboxDisplayRow[];
 }) {
   const t = useShellCopy(mailboxEntryCopy);
+  const historyCopy = useShellCopy(handledHistoryCopy);
   const personal = useMailboxPersonalPreferences(view);
   const panelRef = useRef<HTMLDivElement>(null);
   const left = useRailEdge(anchor);
@@ -130,7 +91,28 @@ export function MailboxPanel({
   const { read, staleRead, items, ownerUserId, hosted } = panelRows(view, sessions);
   if (ownerUserId !== null) mentionOwner.current = ownerUserId;
   else if (view.result.kind === 'failed') mentionOwner.current = null;
-  const allRows = useMailboxRows(items, sessions, ownerUserId);
+  const apiOwner = useSyncExternalStore(
+    apiSessionIdentity.subscribe,
+    apiSessionIdentity.getSnapshot,
+    apiSessionIdentity.getSnapshot,
+  ).ownerUserId;
+  const { read: handledRead, snapshot: historySnapshot } = useHandledHistory(
+    ownerUserId ?? apiOwner,
+    section === 'history' || section === 'records' || section === 'ignored',
+    historyRead,
+  );
+  const oldResults = useRef(
+    new Set(
+      sessions
+        .list()
+        .filter((session) => session.model.state.kind === 'decided')
+        .map((session) => session.key),
+    ),
+  );
+  const baseRows = useMailboxRows(items, sessions, ownerUserId);
+  const allRows = (ownerUserId ? projectFeedback(baseRows) : []).filter(
+    (row) => row.kind !== 'retained' || !oldResults.current.has(row.session.key),
+  );
   const rows =
     section === 'history' ? allRows.filter((row) => row.kind === 'item' && row.item.kind === 'user_mention') : allRows;
   const keys = rows.map((row) => row.key);
@@ -177,7 +159,16 @@ export function MailboxPanel({
   const personalRead = read?.personalView;
   const groupCounts = completeRead && personalRead ? personalRead.groupCounts?.[personalRead.mode] : undefined;
   const renderRow = (row: MailboxDisplayRow) =>
-    row.kind === 'retained' ? (
+    row.kind === 'feedback' ? (
+      <li
+        key={row.key}
+        data-testid="mailbox-transient-result"
+        className="truncate rounded-lg px-3 py-2 text-xs text-[var(--shell-muted)]"
+      >
+        ● {row.result === 'ignored' ? historyCopy.ignoredResult : historyCopy.handledJustNow} ·{' '}
+        {row.item.userMention?.threadTitle ?? row.item.summary}
+      </li>
+    ) : row.kind === 'retained' ? (
       <RetainedResult key={row.key} session={row.session} sessions={sessions} />
     ) : (
       <MailboxRow
@@ -218,7 +209,21 @@ export function MailboxPanel({
         onBack={() => onSectionChange?.('pending')}
         onOpenSchedule={onOpenSchedule}
       />
-      {(section === 'tools' || section === 'records') && read !== null ? (
+      {section === 'history' || section === 'records' || section === 'ignored' ? (
+        <>
+          <MailboxPersonalNotice personal={personal} />
+          <MailboxHandledHistory
+            section={section === 'ignored' ? 'ignored' : 'history'}
+            view={view}
+            personal={personal}
+            onSectionChange={onSectionChange}
+            snapshot={historySnapshot}
+            read={handledRead}
+            onOpenPlace={onOpenPlace}
+            verifyCurrent={() => view.resultGeneration === view.readsStarted()}
+          />
+        </>
+      ) : section === 'tools' && read !== null ? (
         <MailboxApprovalTools
           section={section}
           view={view}
@@ -233,18 +238,19 @@ export function MailboxPanel({
           aria-labelledby="mailbox-tab-needs-me"
           className="flex min-h-0 flex-1 flex-col overflow-y-auto px-[22px] pb-4"
         >
-          {section === 'history' ? (
-            <MailboxMentionUndo
-              key={mentionOwner.current}
-              owner={mentionOwner.current ?? undefined}
-              visible={ownerUserId !== null && ownerUserId === mentionOwner.current}
-              disabled={read === null}
-            />
-          ) : null}
-          {section === 'ignored' ? <MailboxPeriodFilter read={read} view={view} /> : null}
           <MailboxPersonalNotice personal={personal} />
           <MailboxReadNotes state={state} read={read} stale={staleRead !== null} />
-          {section === 'pending' || section === 'ignored' ? (
+          {section === 'pending' && onSectionChange ? (
+            <button
+              type="button"
+              className="shell-focusable mb-2 self-start text-xs hover:underline"
+              data-testid="mailbox-tools"
+              onClick={() => onSectionChange('tools')}
+            >
+              {t.approvalTools}
+            </button>
+          ) : null}
+          {section === 'pending' ? (
             <MailboxItemGroups
               section={section}
               rows={rows}
@@ -276,25 +282,6 @@ export function MailboxPanel({
             <ul className="m-0 flex list-none flex-col gap-2 p-0">{rows.map(renderRow)}</ul>
           ) : null}
           <MailboxPagination read={read} onNextPage={view.nextPage} onPreviousPage={view.previousPage} />
-          {section === 'pending' && ownerUserId ? (
-            <MailboxSettledResults
-              key={ownerUserId}
-              ownerUserId={ownerUserId}
-              generation={view.resultGeneration}
-              verifyCurrent={() => view.resultGeneration === view.readsStarted()}
-              excludedKeys={rows.map((row) =>
-                row.kind === 'retained'
-                  ? row.key
-                  : row.item.approval
-                    ? row.key
-                    : row.item.runtimeInteraction
-                      ? JSON.stringify(['F306', row.item.runtimeInteraction.interactionId])
-                      : row.item.choiceRequest
-                        ? JSON.stringify(['F306', row.item.choiceRequest.interactionId])
-                        : row.key,
-              )}
-            />
-          ) : null}
           {canRetry ? (
             <div className="pt-1.5">
               <button
@@ -307,22 +294,27 @@ export function MailboxPanel({
               </button>
             </div>
           ) : null}
-          {onSectionChange && section === 'pending' ? (
-            <button
-              type="button"
-              data-testid="mailbox-open-ignored"
-              className="shell-nav-row shell-focusable mt-4 self-start rounded-lg px-2 py-1 text-xs"
-              onClick={() => onSectionChange('ignored')}
-            >
-              {t.ignored}
-            </button>
-          ) : null}
-          {onSectionChange && section === 'pending' ? (
-            <MailboxSecondLayer disabled={read === null} onNavigate={onSectionChange} />
-          ) : null}
         </div>
       )}
+      {onSectionChange && section === 'pending' ? (
+        <MailboxSecondLayer disabled={read === null} onNavigate={onSectionChange} />
+      ) : null}
     </div>,
     document.body,
+  );
+}
+
+export function MailboxPanel(props: Omit<Parameters<typeof MailboxPanelContent>[0], 'projectFeedback'>) {
+  const read = props.view.result.kind === 'ok' ? props.view.result.read : props.view.staleRead;
+  const identity = useSyncExternalStore(
+    apiSessionIdentity.subscribe,
+    apiSessionIdentity.getSnapshot,
+    apiSessionIdentity.getSnapshot,
+  );
+  const feedback = usePendingFeedback(read?.items ?? [], identity.ownerUserId ?? read?.identity.ownerUserId ?? null);
+  return (
+    <MailboxFeedback.Provider value={feedback.acknowledge}>
+      <MailboxPanelContent {...props} projectFeedback={feedback.project} />
+    </MailboxFeedback.Provider>
   );
 }

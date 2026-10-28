@@ -20,7 +20,7 @@ export function chatReferenceFileType(target: Pick<ChatFileReference, 'path' | '
     )[extension] ?? extension.toUpperCase()
   );
 }
-export function ChatReferenceIcon({ target }: { target: ChatFileReference }) {
+export function ChatReferenceIcon({ target }: { target: Pick<ChatFileReference, 'path' | 'entryType'> }) {
   if (target.entryType === 'directory')
     return (
       <span className={styles.icon}>

@@ -67,48 +67,58 @@ export async function assertApprovalHistoryJourney(page, fixture, language, evid
     await page.setViewportSize({ width, height: 1000 });
     await foldMobileWorkspace(page, width, language);
     await page.getByTestId('mailbox-button').click();
-    const records = page.getByRole('button', {
-      name: language === 'en' ? 'Approval records' : '审批记录',
-      exact: true,
-    });
-    const handled = page.getByRole('button', {
-      name: language === 'en' ? 'Handled @you' : '已处理的 @你',
-      exact: true,
-    });
-    await records.waitFor();
-    assert.equal(await handled.count(), 1, 'the two history scopes have distinct accessible names');
-    if (width === 390) await records.press('Enter');
-    else await records.click();
-    await page.getByTestId(`settled-card-${accepted.proposalId}`).waitFor();
-    assert.equal(await page.getByTestId('approval-tab-history').getAttribute('aria-pressed'), 'true');
+    const history = page.getByTestId('mailbox-history');
+    await history.waitFor();
+    assert.equal(
+      await page
+        .getByRole('button', { name: language === 'en' ? 'Approval records' : '审批记录', exact: true })
+        .count(),
+      0,
+    );
+    assert.equal(
+      await page
+        .getByRole('button', { name: language === 'en' ? 'Handled @you' : '已处理的 @你', exact: true })
+        .count(),
+      0,
+    );
+    if (width === 390) await history.press('Enter');
+    else await history.click();
+    await page.getByTestId('mailbox-history-tab-decisions').click();
+    const row = (id) => page.locator(`[data-testid="mailbox-history-row"][data-proposal-id="${id}"]`);
+    await row(accepted.proposalId).waitFor();
+    assert.equal(await page.getByTestId('mailbox-history-tab-decisions').getAttribute('aria-current'), 'page');
     assert.equal(
       await page.getByTestId('approval-empty-state').count(),
       0,
-      'records never opens the pending empty state',
+      'history never opens the pending empty state',
     );
     const panel = page.getByTestId('mailbox-panel');
     const historyText = (
       await panel
-        .locator(
-          '[data-testid="mailbox-title"], [data-testid="approval-tab-bar"], [data-testid="approval-history-filter-bar"], [data-testid="settled-card-status"], [data-testid="settled-card-time"], [data-testid="settled-card-feature-badge"], [data-testid="approval-origin-link"], [data-testid="approval-card-link"], [data-testid="mailbox-records-back"]',
-        )
+        .locator('[data-testid="mailbox-title"], nav, [role="combobox"], [data-testid$="-label"]')
         .allTextContents()
     ).join('\n');
     if (language === 'en')
       assert.doesNotMatch(historyText, /[\u3400-\u9fff]/u, 'fixed history controls use the selected language');
-    await page.getByTestId('approval-history-filter-accepted').press('Enter');
-    assert.equal(await page.getByTestId(`settled-card-${rejected.proposalId}`).count(), 0);
+    await page.getByRole('combobox', { name: language === 'en' ? 'Result' : '结果', exact: true }).click();
+    await page.getByRole('option', { name: language === 'en' ? 'Approved' : '已同意', exact: true }).press('Enter');
+    assert.equal(await row(rejected.proposalId).count(), 0);
     await waitForMailboxPaint(page);
     await page.screenshot({ path: path.join(evidence, `j3-approval-history-${language}-${width}.png`) });
-    await page.getByTestId('approval-history-filter-feature-trigger').click();
-    await page.getByTestId('approval-history-filter-feature-F128').press('Enter');
-    const target = page.getByTestId(`settled-card-${accepted.proposalId}`);
+    await page.getByRole('combobox', { name: language === 'en' ? 'Type' : '种类', exact: true }).click();
+    await page
+      .getByRole('option', { name: language === 'en' ? 'New conversation' : '新对话', exact: true })
+      .press('Enter');
+    const target = row(accepted.proposalId);
     assert.equal(await target.count(), 1);
-    await target.getByTestId('approval-origin-link').press('Enter');
+    await target.getByRole('button').first().press('Enter');
+    await target
+      .getByRole('button', { name: language === 'en' ? 'View original ↗' : '在原处看 ↗', exact: true })
+      .press('Enter');
     const originalMessage = page.locator(`[data-message-id="${accepted.origin.id}"]`);
     await originalMessage.waitFor();
     assert.match(await originalMessage.innerText(), /Controlled approved proposal origin/);
-    await page.getByTestId('mailbox-records-back').press('Enter');
+    await page.getByTestId('mailbox-handled-back').press('Enter');
     await page.getByTestId('mailbox-tab-needs-me').waitFor();
     await page.getByTestId('mailbox-close').click();
     await waitForVisibleSource(page, accepted.origin.id);

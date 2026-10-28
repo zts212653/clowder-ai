@@ -196,6 +196,7 @@ describe('F276ApprovalAdapter', () => {
     assert.deepEqual(item.detail, {
       displayName: '吴浪',
       materialized: { claims: 1, relationships: 1, events: 0 },
+      canonicalEffectProofRef: 'person-memory-decision:decision_wu_lang',
     });
     assert.doesNotMatch(JSON.stringify(item), /evidenceExcerpt|sourceBundle|privateAliases/);
   });

@@ -6,6 +6,9 @@ export const MANAGED_GATE_RECOVERY_PROTOCOL_ENV = 'CAT_CAFE_MANAGED_GATE_RECOVER
 interface DurableManagedGateChildBinding {
   readonly originTaskId: string;
   readonly recordPath: string;
+  readonly jobId?: string;
+  readonly wakeTarget?: { readonly threadId: string; readonly userId: string };
+  readonly definition?: { readonly originInvocationId?: string };
   readonly recovery?: { readonly protocolVersion: 2 };
 }
 
@@ -14,5 +17,17 @@ export function durableManagedGateChildEnvironment(job: DurableManagedGateChildB
     [MANAGED_GATE_ORIGIN_TASK_ENV]: job.originTaskId,
     [MANAGED_GATE_CANCEL_REQUEST_PATH_ENV]: `${job.recordPath}.cancel-request`,
     ...(job.recovery?.protocolVersion === 2 ? { [MANAGED_GATE_RECOVERY_PROTOCOL_ENV]: '2' } : {}),
+    // This is creation metadata only. Callback/session credentials remain stripped.
+    ...(job.wakeTarget && job.jobId
+      ? {
+          CAT_CAFE_WORKTREE_ORIGIN: JSON.stringify({
+            threadId: job.wakeTarget.threadId,
+            userId: job.wakeTarget.userId,
+            sourceRef: job.definition?.originInvocationId
+              ? `invocation:${job.definition.originInvocationId}`
+              : `managed-job:${job.jobId}`,
+          }),
+        }
+      : {}),
   };
 }

@@ -339,6 +339,37 @@ describe('useChatHistory replace hydration', () => {
     expect(hydrated?.extra).not.toHaveProperty('queueReceipt');
   });
 
+  it('restores exact cloud reply proof from cold history without using the stream invocation as its attempt', async () => {
+    const history = installDeferredHistoryResponse();
+    const proof = {
+      v: 1 as const,
+      threadId: 'thread-b',
+      sourceMessageId: 'source119',
+      targetCatId: 'gpt-pro',
+      dispatchInvocationId: 'actual-dispatch',
+    };
+    mountReplaceHydrationThread(makeThreadBState(Date.now() - 1000));
+    await history.waitUntilPending();
+    await history.resolve({
+      messages: [
+        {
+          id: 'reply122',
+          type: 'assistant',
+          catId: 'gpt-pro',
+          content: 'nonempty reply',
+          timestamp: Date.now(),
+          replyTo: 'source119',
+          origin: 'callback',
+          extra: { cloudBridgeReturn: proof, isExplicitPost: true, stream: { invocationId: 'reply122' } },
+        },
+      ],
+      hasMore: false,
+    });
+    const answer = useChatStore.getState().messages.find((message) => message.id === 'reply122');
+    expect(answer?.extra?.cloudBridgeReturn).toEqual(proof);
+    expect(answer?.extra?.stream?.invocationId).not.toBe(proof.dispatchInvocationId);
+  });
+
   it('hydrates a modification source from persisted history when no live metadata copy exists', async () => {
     const history = installDeferredHistoryResponse();
     const metadata = {

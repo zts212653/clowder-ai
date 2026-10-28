@@ -402,6 +402,7 @@ export interface AgentMessage {
   messageTimestamp?: number;
   /** F52: Cross-thread origin metadata (set for cross-thread callback messages) */
   extra?: {
+    cloudBridgeReturn?: import('@cat-cafe/shared').CloudBridgeReturnV1;
     startupRecovery?: import('@cat-cafe/shared').CodexStartupRecovery;
     outputLayout?: import('@cat-cafe/shared').MessageOutputLayoutV1;
     crossPost?: {

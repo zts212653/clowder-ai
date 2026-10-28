@@ -5,7 +5,7 @@ related_features: [F062, F136, F171, F291, F318, F319]
 topics: [accounts, oauth, credentials, provider-routing, hub-settings]
 doc_kind: spec
 created: 2026-09-24
-updated: 2026-10-27
+updated: 2026-10-28
 description: "同一家厂商可以登录多个 OAuth 账号（如公司号与私人号），各自隔离；按猫家族一键换绑，或按项目自动选用对应账号。"
 description_source: human
 description_author: opus55
@@ -18,13 +18,11 @@ description_updated_at: 2026-09-24T09:38:50Z
 
 **Codex-first 当前责任**：Astra (@codex-astra, gpt-6-astra) 规划/协调/验收，Sol61 (@codex61-sol, gpt-6.1-sol) 执行；保留原 Feature owner 与 Phase A/B/C。
 
-## Open Issue：启动联网失败恢复与诊断（2026-10-27）
+## 已修复 Issue：启动联网失败恢复与诊断（2026-10-27）
 
 You 在 `[thread-id]#private-source-id` 要求先由 Astra 写清修法，再交 F320 小太阳实施：暂时联网失败应自动恢复，错误要保留实际后端证据并让人理解。截图调用在 `account/read` 两次失败，尚未发送 `turn/start`；引入账号前置核验的是 #5195，额外一次启动重试来自 #3097。
 
 You 随后在同线程 `private-source-id` 明确要求派给 F320 小太阳修复。修复 Task `private-source-id` 已以结构化 action 派发 Sol61，实际执行复用当前问题线程 `[thread-id]`，Astra 协调/验收；成功消息 `private-source-id` 与落点调整原因写入问题单，旧 F320 线程保留为历史上下文。
-
-正式 runtime 仍是旧版本，原 Task 已登记 `deploymentWait generation1`，等 runtime API/Web 包含固定合入 SHA 并 ready 后自动接回验收；Task 为 blocked，Issue 仍 open，不写成已正式加载。初版次数/间隔未冒称真人体验签字，原 Feature owner、Phase 和 in-progress 状态保持。
 
 ## Codex 当前使用与验收状态（2026-10-23 UTC）
 

@@ -32,8 +32,10 @@ export function recoveryPathExists(path) {
 }
 
 export function recoverySnapshot(path, { maxBytes = 32768 } = {}) {
-  if (realpathSync(path) !== path || lstatSync(path).isSymbolicLink()) throw new Error('recovery evidence is linked');
-  const fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+  const kind = lstatSync(path);
+  if (realpathSync(path) !== path || kind.isSymbolicLink()) throw new Error('recovery evidence is linked');
+  if (!kind.isFile()) throw new Error('recovery evidence must be a bounded regular file');
+  const fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
   try {
     const before = fstatSync(fd);
     if (!before.isFile() || before.size > maxBytes) throw new Error('recovery evidence must be a bounded regular file');
@@ -174,18 +176,20 @@ export function readPreviewCompletionEvidence(config, record) {
   return { sources, owner, completion };
 }
 
-export function readFailedAlphaEvidence(
+function readAlphaProducerEvidence(
   config,
   record,
   { registryDir = namedAlphaRedisRegistryDir(), savedLease } = {},
+  protocolRecovery,
 ) {
   const { sources, coordinates: selected, owner, completion } = readAlphaCompletionEvidence(config, record);
   // Redis protocol recovery retains its existing tighter lifetime proof.
   // Metadata-only retirement proves that no resources remain instead; the
   // registration may legitimately be published later than the runner's birth.
-  if (Math.abs(Date.parse(`${record.processStartedAt} UTC`) - Date.parse(record.startedAt)) >= 1000)
+  if (protocolRecovery && Math.abs(Date.parse(`${record.processStartedAt} UTC`) - Date.parse(record.startedAt)) >= 1000)
     throw new Error('failed cleanup supervisor lifetime is inconsistent');
-  if (completion.exitCode < 1 || owner.exitCode !== completion.exitCode)
+  const explicit = completion.version === 2 && owner.version === 2;
+  if (completion.exitCode < 1 || ((protocolRecovery || !explicit) && owner.exitCode !== completion.exitCode))
     throw new Error('failed cleanup owner completion is missing, forced, or inconsistent');
   if (lstatSync(registryDir).isSymbolicLink()) throw new Error('named Alpha lease registry is linked');
   // macOS's native TMPDIR uses /var, whose system alias is /private/var.
@@ -221,7 +225,8 @@ export function readFailedAlphaEvidence(
       'bash ./scripts/start-dev.sh --quick',
       'bash scripts/start-dev.sh --quick',
     ].includes(ownerProcess.command) ||
-    ownerProcess.startedAtEpochMs < Date.parse(record.startedAt) - 1000 ||
+    ownerProcess.startedAtEpochMs <
+      (protocolRecovery ? Date.parse(record.startedAt) - 1000 : Date.parse(`${record.processStartedAt} UTC`)) ||
     Date.parse(`${ownerProcess.startedAt} UTC`) !== ownerProcess.startedAtEpochMs ||
     ownerProcess.startedAtEpochMs > lease.redis?.process?.startedAtEpochMs ||
     lease.redis?.process?.startedAtEpochMs > Date.parse(lease.createdAt) ||
@@ -232,4 +237,14 @@ export function readFailedAlphaEvidence(
   )
     throw new Error('failed cleanup producer lease does not belong to the recorded owner lifetime');
   return { sources, coordinates, owner, proof: lease.redis };
+}
+
+/** Existing saving recovery keeps its original strict registration/lifetime envelope. */
+export function readFailedAlphaEvidence(config, record, deps = {}) {
+  return readAlphaProducerEvidence(config, record, deps, true);
+}
+
+/** Historical binding only. Current absence must be proved separately; never authorizes Redis protocol. */
+export function readHistoricalAlphaLeaseEvidence(config, record, deps = {}) {
+  return readAlphaProducerEvidence(config, record, deps, false);
 }

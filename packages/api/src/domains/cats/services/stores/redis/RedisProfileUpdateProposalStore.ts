@@ -1,3 +1,6 @@
+import { reconcileSettledIndexTime } from '../../../../../utils/reconcile-settled-index-time.js';
+import { readRedisSettledPage } from '../../../../../utils/redis-settled-page.js';
+import type { SettledHistoryPageOptions, SettledHistorySourcePage } from '../../../../../utils/settled-history-page.js';
 /**
  * Redis-backed F231 Phase C ProfileUpdateProposal store.
  *
@@ -111,6 +114,33 @@ export class RedisProfileUpdateProposalStore implements IProfileUpdateProposalSt
   }
 
   /** F246 Phase H: list settled (approved/rejected) proposals for a user, newest first. */
+  async listSettledPage(
+    owner: string,
+    options: SettledHistoryPageOptions,
+  ): Promise<SettledHistorySourcePage<ProfileUpdateProposal>> {
+    return readRedisSettledPage(this.redis, ProfileUpdateProposalKeys.userSettled(owner), options, async (id, at) => {
+      const p = await this.get(id);
+      if (!p) return null;
+      if (p.createdBy !== owner || !['approved', 'rejected'].includes(p.status))
+        throw new Error('Settled index canonical owner/status mismatch');
+      if (p.proposalId !== id) throw new Error('Settled index identity mismatch');
+      await reconcileSettledIndexTime(
+        this.redis,
+        ProfileUpdateProposalKeys.userSettled(owner),
+        id,
+        at,
+        p.approvedAt ?? p.rejectedAt ?? 0,
+        [
+          {
+            key: ProfileUpdateProposalKeys.detail(id),
+            fields: { status: p.status, createdBy: p.createdBy, approvedAt: p.approvedAt, rejectedAt: p.rejectedAt },
+          },
+        ],
+      );
+      return p;
+    });
+  }
+
   async listSettledByUser(userId: string, limit: number = DEFAULT_LIST_LIMIT): Promise<ProfileUpdateProposal[]> {
     return this.loadFromIndex(ProfileUpdateProposalKeys.userSettled(userId), limit);
   }

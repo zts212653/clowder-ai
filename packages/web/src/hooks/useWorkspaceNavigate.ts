@@ -9,6 +9,7 @@ import { pushThreadRouteWithHistory } from '@/components/ThreadSidebar/thread-na
 import { useChatStore } from '@/stores/chatStore';
 import { API_URL } from '@/utils/api-client';
 import { scrollToMessage } from '@/utils/scrollToMessage';
+import { joinSocketRoomOnConnect } from '@/utils/socket-room';
 import { kickTeleportResolve, planTeleport } from '@/utils/teleport';
 import {
   areWorktreeIdsEquivalent,
@@ -355,7 +356,7 @@ export function useWorkspaceNavigate(
     const apiUrl = new URL(API_URL);
     const socket = io(`${apiUrl.protocol}//${apiUrl.host}`, { transports: ['websocket'] });
 
-    socket.emit('join_room', WORKSPACE_NAVIGATION_ACK_ROOM);
+    const stopJoiningRoom = joinSocketRoomOnConnect(socket, WORKSPACE_NAVIGATION_ACK_ROOM);
 
     const handler = (data: NavigateEvent, acknowledge?: (receipt: WorkspaceNavigationReceipt) => void) => {
       if (!shouldProcessNavigateEvent(data, lastEventIdRef)) return;
@@ -392,6 +393,7 @@ export function useWorkspaceNavigate(
     socket.on('workspace:navigate', handler);
 
     return () => {
+      stopJoiningRoom();
       socket.off('workspace:navigate', handler);
       socket.disconnect();
     };

@@ -6,7 +6,7 @@ import {
 } from '@cat-cafe/shared';
 import { z } from 'zod';
 import { readConversationRecord } from '@/components/rich/runtime-conversation-model';
-import { apiFetch } from '@/utils/api-client';
+import { readApprovalProducerBody } from '@/lib/approval-producer-read';
 
 const ids = z.array(z.string());
 const responseSchema = z.discriminatedUnion('kind', [
@@ -109,12 +109,11 @@ export function settledRuntimeRecord(value: unknown, item: SettledApprovalHubIte
 }
 
 export async function readSettledRuntime(item: SettledApprovalHubItem, signal: AbortSignal) {
-  const response = await apiFetch(
+  const body: unknown = await readApprovalProducerBody(
+    { owner: item.ownerUserId, producer: 'F306', proposalId: item.proposalId },
     `/api/runtime-interactions/${encodeURIComponent(item.proposalId)}`,
     { signal },
-    { afterCurrentGet: true },
   );
-  const body: unknown = response.ok ? await response.json() : null;
   return body && typeof body === 'object' && 'interaction' in body
     ? settledRuntimeRecord(body.interaction, item)
     : null;

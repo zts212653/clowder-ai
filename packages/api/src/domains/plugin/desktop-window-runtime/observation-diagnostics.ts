@@ -13,7 +13,7 @@ export interface ObservationError {
   readonly sessionCloseReason?: string;
 }
 
-type Stage = StaticFeatureRunStage | 'poll' | 'lease-renew' | 'authority' | 'observation-publish';
+type Stage = StaticFeatureRunStage | 'poll' | 'poll-refresh' | 'lease-renew' | 'authority' | 'observation-publish';
 export interface ObservationStage {
   readonly stage: Stage;
   readonly elapsedMs: number;
@@ -111,7 +111,7 @@ function observationError(error: unknown): ObservationError {
 
 const duration = (started: number) => Math.min(86_400_000, Math.max(0, Math.round(performance.now() - started)));
 
-/** One attempt, at most nine fixed stages; no sampling loop, global buffer or success logging. */
+/** One attempt, at most ten fixed stages; no sampling loop, global buffer or success logging. */
 export class ObservationDiagnostics implements StaticFeatureRunDiagnostics {
   readonly costs: ObservationCosts;
   constructor(caller: SealCaller = 'observer') {

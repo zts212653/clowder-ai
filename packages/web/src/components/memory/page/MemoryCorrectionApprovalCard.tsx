@@ -1,8 +1,9 @@
 'use client';
 import type { ApprovalHubItem, EventMemoryCorrectionPatch } from '@cat-cafe/shared';
 import { memoryOwnerRevisionSchema } from '@cat-cafe/shared';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useRef } from 'react';
 import { ApprovalMember } from '@/components/rich/ApprovalMember';
+import { RetainedApprovalCardResult, useOriginalApprovalRead } from '@/components/rich/use-original-approval-read';
 import { describeReconcile } from '@/components/shell/mailbox/approval-reconcile';
 import { useShellCopy } from '@/components/shell/shell-copy';
 import { useShellLanguage } from '@/components/shell/shell-language';
@@ -21,44 +22,31 @@ import { readCorrectionResult } from './read-correction-result';
 export function MemoryCorrectionApprovalCard({ item }: { item: ApprovalHubItem }) {
   const t = useShellCopy(memoryCorrectionCopy),
     language = useShellLanguage();
-  const [memory, setMemory] = useState<CorrectionMemory | null>(null),
-    [unavailable, setUnavailable] = useState(false);
-  const [result, setResult] = useState<Awaited<ReturnType<typeof readCorrectionResult>>>(null);
-  const live = useRef<CorrectionMemory | null>(null),
-    controller = useRef<AbortController | null>(null);
-  const refresh = useCallback(async () => {
-    controller.current?.abort();
-    const nextController = new AbortController();
-    controller.current = nextController;
-    live.current = null;
-    setResult(null);
-    try {
-      const next = await readCorrectionMemory(item, nextController.signal);
+  const coordinate = item.navigation.state === 'anchored' ? item.navigation.approvalCardRef : undefined;
+  const original = useOriginalApprovalRead(
+    'F321',
+    item.proposalId,
+    { ...coordinate },
+    async (signal, fresh) => {
+      const next = await readCorrectionMemory(item, signal);
       const outcome =
-        next && ['approved', 'rejected'].includes(next.proposal.status) && item.navigation.state === 'anchored'
-          ? await readCorrectionResult(item.proposalId, item.navigation.approvalCardRef, item.ownerUserId)
+        next && ['approved', 'rejected'].includes(next.proposal.status) && coordinate
+          ? await readCorrectionResult(item.proposalId, coordinate, item.ownerUserId, !fresh)
           : null;
-      if (nextController.signal.aborted) return null;
-      setResult(outcome);
-      live.current = next;
-      setMemory(next);
-      setUnavailable(!next);
-      return next;
-    } catch {
-      if (!nextController.signal.aborted) {
-        setMemory(null);
-        setUnavailable(true);
-      }
-      return null;
-    }
-  }, [item]);
-  useEffect(() => {
-    void refresh();
-    return () => {
-      controller.current?.abort();
-      live.current = null;
-    };
-  }, [refresh]);
+      return { next, outcome };
+    },
+    item.ownerUserId,
+  );
+  const memory = original.value?.next ?? null,
+    result = original.value?.outcome ?? null;
+  const unavailable = original.failed || (original.value !== undefined && !memory);
+  const live = useRef<CorrectionMemory | null>(null);
+  live.current = original.reading || original.failed ? null : memory;
+  const refresh = useCallback(async () => {
+    const next = (await original.refresh())?.next ?? null;
+    live.current = next;
+    return next;
+  }, [original.refresh]);
   const beforeWrite = useCallback(
     async (decision: MemoryCorrectionDecision) => {
       const previous = live.current;
@@ -78,6 +66,8 @@ export function MemoryCorrectionApprovalCard({ item }: { item: ApprovalHubItem }
     await refresh();
     for (const event of UNIFIED_ATTENTION_INVALIDATION_EVENTS) window.dispatchEvent(new Event(event));
   }, [refresh]);
+  if (original.retained)
+    return <RetainedApprovalCardResult item={original.retained} reread={() => void original.reread()} />;
   if (result)
     return (
       <div className="space-y-2 text-sm">

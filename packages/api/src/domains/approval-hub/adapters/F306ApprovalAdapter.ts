@@ -1,14 +1,23 @@
 import type { ApprovalItem, CatId, RuntimeInteractionRecord, SettledApprovalItem } from '@cat-cafe/shared';
 import { runtimePublicSelectedLabels, runtimeTerminalDisposition } from '@cat-cafe/shared';
+import type { SettledHistoryPageOptions } from '../../../utils/settled-history-page.js';
 import type { RuntimeInteractionStore } from '../../runtime-interaction/ports/RuntimeInteractionStore.js';
 import type { ApprovalDecisionRead, IApprovalAdapter, ListSettledOpts } from '../ports/IApprovalAdapter.js';
+import { projectSettledPage } from '../project-settled-page.js';
 
 export class F306ApprovalAdapter implements IApprovalAdapter {
   readonly featureId = 'F306' as const;
 
   constructor(
-    private readonly store: Pick<RuntimeInteractionStore, 'get' | 'listPendingByUser' | 'listSettledByUser'>,
+    private readonly store: Pick<
+      RuntimeInteractionStore,
+      'get' | 'listPendingByUser' | 'listSettledByUser' | 'listSettledPage'
+    >,
   ) {}
+
+  async listSettledPage(owner: string, options: SettledHistoryPageOptions) {
+    return projectSettledPage(this.store, owner, options, (record) => projectSettled(record, owner)[0] ?? null);
+  }
 
   async listPending(userId: string): Promise<ApprovalItem[]> {
     const records = await this.store.listPendingByUser(userId);

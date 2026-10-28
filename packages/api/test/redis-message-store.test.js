@@ -658,6 +658,71 @@ describe('RedisMessageStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () 
     assert.equal(msg.userId, 'user1');
   });
 
+  it('restores exact cloud reply proof through Redis without extending grants or rewriting historical certainty', async () => {
+    const { RedisCloudReturnGrantStore } = await import(
+      '../dist/domains/cats/services/cloud-bridge/cloud-return-grant.js'
+    );
+    const { cloudReturnSourceKey } = await import(
+      '../dist/domains/cats/services/cloud-bridge/cloud-return-source-binding.js'
+    );
+    const { buildCloudReturnMessageIdempotencyKey } = await import(
+      '../dist/domains/cats/services/cloud-bridge/cloud-return-message.js'
+    );
+    const { cloudReturnProof } = await import('../dist/domains/cats/services/cloud-bridge/cloud-return-proof.js');
+    const { readCloudReturn } = await import('../dist/domains/cats/services/cloud-bridge/read-cloud-return.js');
+    const grants = new RedisCloudReturnGrantStore(redis);
+    await grants.bindPersistedSources();
+    const source = await store.append({
+      from: { kind: 'agent', catId: 'codex61-sol' },
+      userId: 'proof-owner',
+      threadId: 'proof-thread',
+      content: 'isolated source119',
+      mentions: [],
+      timestamp: Date.now(),
+    });
+    const scope = {
+      threadId: source.threadId,
+      userId: source.userId,
+      sourceMessageId: source.id,
+      targetCatId: 'gpt-pro',
+    };
+    assert.equal((await grants.issue({ ...scope, dispatchInvocationId: 'proof-attempt' })).ok, true);
+    const claim = await grants.claim(scope);
+    assert.equal(claim.ok, true);
+    try {
+      const answer = await store.append({
+        from: { kind: 'agent', catId: 'gpt-pro' },
+        userId: source.userId,
+        threadId: source.threadId,
+        content: 'isolated reply122',
+        mentions: [],
+        timestamp: Date.now(),
+        replyTo: source.id,
+        origin: 'callback',
+        extra: { isExplicitPost: true, cloudBridgeReturn: cloudReturnProof(claim) },
+        idempotencyKey: buildCloudReturnMessageIdempotencyKey(scope),
+      });
+      assert.equal(await grants.commit(claim), true);
+      await redis.pexpire(claim.grantKey, 5000);
+      const raw = await redis.get(claim.grantKey);
+      const ttl = await redis.pttl(claim.grantKey);
+      const result = await readCloudReturn(store, { ...scope, dispatchInvocationId: 'proof-attempt' });
+      assert.equal(result.replyMessageId, answer.id);
+      assert.equal(result.proof.dispatchInvocationId, 'proof-attempt');
+      assert.deepEqual((await store.getById(answer.id)).extra.cloudBridgeReturn, result.proof);
+      assert.equal(await redis.get(claim.grantKey), raw);
+      assert.ok((await redis.pttl(claim.grantKey)) <= ttl);
+      assert.equal(await readCloudReturn(store, { ...scope, dispatchInvocationId: 'old-attempt' }), null);
+      await redis.del(claim.grantKey);
+      assert.equal(
+        (await readCloudReturn(store, { ...scope, dispatchInvocationId: 'proof-attempt' })).replyMessageId,
+        answer.id,
+      );
+    } finally {
+      await redis.del(claim.grantKey, claim.claimKey, cloudReturnSourceKey(scope));
+    }
+  });
+
   it('F167 rehydrates a typed local-review verdict from the real Redis hash', async () => {
     const localReviewVerdict = {
       verdict: 'changes_requested',

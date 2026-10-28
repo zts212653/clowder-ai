@@ -1,0 +1,113 @@
+.project-references > header {
+  flex-wrap: wrap;
+}
+.project-references button,
+.project-reference-picker button {
+  min-height: 32px;
+  padding: 5px 10px;
+  border: 1px solid var(--console-border-soft);
+  border-radius: 8px;
+  background: var(--console-card-bg);
+  color: var(--cafe-text);
+  font: inherit;
+  font-size: 12px;
+  white-space: normal;
+}
+.project-reference-explanation {
+  color: var(--cafe-text-muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
+.project-reference-card {
+  position: relative;
+  display: grid;
+  gap: 8px;
+  margin-block: 12px;
+  padding: 16px;
+  border: 1px solid var(--console-border-soft);
+  border-radius: 10px;
+  background: var(--console-card-bg);
+  font-size: 13px;
+}
+.project-reference-title {
+  display: grid;
+  gap: 5px;
+}
+.project-reference-card small {
+  color: var(--cafe-text-muted);
+}
+.project-reference-card strong {
+  overflow-wrap: anywhere;
+}
+.project-reference-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.project-reference-update {
+  padding: 4px 7px;
+  border-radius: 6px;
+  background: var(--cafe-accent-soft);
+  color: var(--cafe-text);
+  font-size: 12px;
+}
+.project-reference-remove {
+  justify-self: end;
+}
+.project-reference-card details {
+  border-top: 1px solid var(--console-border-soft);
+  padding-top: 8px;
+}
+.project-reference-card details li {
+  margin-block: 9px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+.project-reference-version-list {
+  max-height: 230px;
+  overflow-y: auto;
+  padding: 0;
+  list-style: none;
+}
+.project-reference-version-list li {
+  display: grid;
+  grid-template-columns: 32px 100px minmax(0, 1fr);
+  gap: 6px 10px;
+  padding-block: 8px;
+  border-bottom: 1px solid var(--console-border-soft);
+}
+.project-reference-version-list small {
+  grid-column: 3;
+  color: var(--cafe-text-muted);
+}
+.project-reference-picker {
+  display: grid;
+  gap: 8px;
+}
+.project-reference-picker button {
+  display: grid;
+  gap: 4px;
+  text-align: start;
+}
+@media (max-width: 600px) {
+  .project-references {
+    padding: 12px;
+  }
+  .project-reference-card {
+    padding: 12px;
+  }
+  .project-reference-actions {
+    align-items: stretch;
+  }
+  .project-reference-actions button {
+    flex: 1 1 130px;
+  }
+  .project-reference-version-list li {
+    grid-template-columns: 32px minmax(0, 1fr);
+  }
+  .project-reference-version-list li span,
+  .project-reference-version-list small {
+    grid-column: 2;
+  }
+}

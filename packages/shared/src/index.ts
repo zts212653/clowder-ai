@@ -95,6 +95,7 @@ export * from './runtime-question-retirement.js';
 // Export all schemas
 export * from './schemas/index.js';
 export { richBlockSchema } from './schemas/rich-block.schema.js';
+export * from './shared-markdown-selection.js';
 // Export shared source-code extension helpers (F232 artifact classification + preview)
 export * from './source-code-extensions.js';
 export * from './text-utils.js';
@@ -123,6 +124,8 @@ export * from './types/collective-artifact-relay.js';
 export * from './types/collective-collaboration.js';
 export * from './types/collective-content-modification.js';
 export * from './types/collective-context-bridge.js';
+export * from './types/collective-document-surface.js';
+export * from './types/collective-document-view.js';
 export * from './types/collective-material.js';
 export * from './types/collective-media-share-surface.js';
 export * from './types/collective-media-surface.js';
@@ -133,6 +136,8 @@ export * from './types/collective-message-state.js';
 export * from './types/collective-model-content.js';
 export * from './types/collective-model-media.js';
 export * from './types/collective-participation.js';
+export * from './types/collective-project-artifact.js';
+export * from './types/collective-project-artifact-return.js';
 export * from './types/collective-project-attention.js';
 export * from './types/collective-project-authoring.js';
 export * from './types/collective-project-focus.js';

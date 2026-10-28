@@ -3,6 +3,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { chmod, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { basename, resolve } from 'node:path';
+import { assertWorkCardChrome } from './fixtures/work-card-chrome.mjs';
 
 const wt = resolve(process.env.F309_WORKTREE_ROOT ?? process.cwd());
 const require = createRequire(wt + '/package.json');
@@ -169,8 +170,12 @@ try {
     return { value: await composer.inputValue() };
   });
   const card = page.getByTestId('workspace-home-artifact-card').filter({ hasText: filename });
+  await stage('shared-card-title-and-input-affordances', () =>
+    assertWorkCardChrome(page, card.locator('xpath=ancestor::article[1]')),
+  );
   await stage('card-common-menu', async () => {
     const article = card.locator('xpath=ancestor::article[1]');
+    await article.hover();
     await article.getByRole('button', { name: '作品更多操作', exact: true }).click();
     const menu = page.getByRole('menu', { name: '作品更多操作' });
     await menu.getByRole('menuitem', { name: '复制路径', exact: true }).waitFor();
@@ -182,6 +187,7 @@ try {
   });
   await stage('card-download-original-bytes', async () => {
     const article = card.locator('xpath=ancestor::article[1]');
+    await article.hover();
     await article.getByRole('button', { name: '作品更多操作', exact: true }).click();
     const dl = page.waitForEvent('download');
     await page.getByRole('menu').getByRole('menuitem', { name: '下载', exact: true }).click();

@@ -7,6 +7,9 @@ const numeric = [
   'rows',
   'costUsd',
   'durationMs',
+  'runnerElapsedMs',
+  'afterUsageMs',
+  'outputChars',
   'examined',
   'supported',
   'rejected',
@@ -25,6 +28,8 @@ const batchStages = new Set([
   'native-init',
   'native-response',
   'native-usage',
+  'native-output',
+  'native-completed',
 ]);
 
 function qualificationBatches(input: unknown) {
@@ -33,6 +38,7 @@ function qualificationBatches(input: unknown) {
     if (!value || typeof value !== 'object') return [];
     const batch = value as Record<string, unknown>;
     const result: Record<string, unknown> = {};
+    if (batch.batchIndex === 0 || batch.batchIndex === 1) result.batchIndex = batch.batchIndex;
     for (const key of batchNumeric) {
       const count = batch[key];
       if (typeof count === 'number' && Number.isFinite(count) && count >= 0) result[key] = count;
@@ -46,6 +52,7 @@ function qualificationBatches(input: unknown) {
 const tokenFields = [
   'input_tokens',
   'output_tokens',
+  'thinking_tokens',
   'cache_creation_input_tokens',
   'cache_read_input_tokens',
   'ephemeral_5m_input_tokens',
@@ -74,6 +81,8 @@ const phases = new Set([
   'native-init',
   'native-response',
   'native-usage',
+  'native-output',
+  'native-completed',
 ]);
 function counts(input: unknown, nested = true): Record<string, unknown> | undefined {
   if (!input || typeof input !== 'object') return;
@@ -83,7 +92,7 @@ function counts(input: unknown, nested = true): Record<string, unknown> | undefi
     if (typeof value === 'number' && Number.isFinite(value) && value >= 0) result[key] = value;
   }
   if (nested)
-    for (const key of ['cache_creation', 'server_tool_use']) {
+    for (const key of ['cache_creation', 'server_tool_use', 'output_tokens_details']) {
       const value = counts((input as Record<string, unknown>)[key], false);
       if (value) result[key] = value;
     }
@@ -94,6 +103,9 @@ export function privateMessageSearchTrace(trace: Record<string, unknown>): Recor
   try {
     if (typeof trace.phase !== 'string' || !phases.has(trace.phase)) return;
     const result: Record<string, unknown> = { phase: trace.phase };
+    if (trace.batchIndex === 0 || trace.batchIndex === 1) result.batchIndex = trace.batchIndex;
+    if (trace.permissionMode === 'dontAsk') result.permissionMode = 'dontAsk';
+    if (trace.effort === 'low') result.effort = 'low';
     for (const key of numeric) {
       const value = trace[key];
       if (typeof value === 'number' && Number.isFinite(value) && value >= 0) result[key] = value;

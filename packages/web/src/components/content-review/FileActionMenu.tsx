@@ -4,7 +4,7 @@ import { useShellCopy } from '@/components/shell/shell-copy';
 import { useShellLanguage } from '@/components/shell/shell-language';
 import styles from './artwork-actions.module.css';
 import { artworkActionsCopy } from './artwork-actions.shell-copy';
-import { artworkApplicationName, artworkFileDate } from './artwork-file-labels';
+import { artworkApplicationName, artworkFileDate, fileByteLengthLabel } from './artwork-file-labels';
 import { type ContentFileInfo, fileDownloadUrl } from './file-action-client';
 import { contentApiBase } from './file-source';
 import { ReviewToolbarIcon } from './ReviewToolbarIcon';
@@ -80,14 +80,7 @@ export function FileActionMenu({
   const date = artworkFileDate(info?.createdAt ?? info?.modifiedAt, language);
   const location = info === null ? t.loading : info.local ? (info.displayPath ?? info.path) : link;
   const bytes = info?.byteLength ?? byteLength;
-  const fileSize =
-    bytes === undefined
-      ? null
-      : bytes < 1024
-        ? `${bytes} B`
-        : bytes < 1024 * 1024
-          ? `${(bytes / 1024).toFixed(1)} KB`
-          : `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+  const fileSize = fileByteLengthLabel(bytes);
   return (
     <div
       ref={menu}

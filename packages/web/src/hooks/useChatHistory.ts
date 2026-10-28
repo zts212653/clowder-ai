@@ -456,6 +456,7 @@ function mergeMessageExtra(
     governanceBlocked: pick('governanceBlocked'),
     freshness: pick('freshness'),
     cloudBridgeRetry: pick('cloudBridgeRetry'),
+    cloudBridgeReturn: pick('cloudBridgeReturn'),
     recall: pick('recall'),
     coordination: pick('coordination'),
     localReviewVerdict: pick('localReviewVerdict'),

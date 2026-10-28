@@ -12,12 +12,17 @@ import {
 import { useCatData } from '@/hooks/useCatData';
 import { useThreadArtifacts } from '@/hooks/useThreadArtifacts';
 import { artifactObjectId } from '../workbench/real-surface-adapters';
+import type { WorkspaceSurfaceDescriptor } from '../workbench/workbench-contract';
 import { artifactCardMetadata } from './artifact-card-metadata';
 import { WorkCard } from './HomeWorkCard';
 import { captureHomeArtifactOrigin, type WorkspaceHomeArtifactOrigin } from './home-artifact-origin';
 import { workspaceV3Copy } from './workspace-v3.shell-copy';
 
-export type OpenHomeArtifact = (artifact: ThreadArtifactDTO, origin: WorkspaceHomeArtifactOrigin) => void;
+export type OpenHomeArtifact = (
+  artifact: ThreadArtifactDTO,
+  origin: WorkspaceHomeArtifactOrigin,
+  surface: WorkspaceSurfaceDescriptor,
+) => void;
 
 type HomeWorksSummaryProps = {
   threadId?: string;

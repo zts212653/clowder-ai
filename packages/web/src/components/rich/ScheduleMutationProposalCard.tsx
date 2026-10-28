@@ -4,15 +4,17 @@ import { ApprovalMember } from './ApprovalMember';
 import { scheduleEffect } from './read-schedule-approval';
 import { ScheduleApprovalContent } from './ScheduleApprovalContent';
 import { ScheduleApprovalResult } from './ScheduleApprovalResult';
+import { RetainedApprovalCardResult } from './use-original-approval-read';
 import { type ScheduleApprovalProps, useScheduleApprovalController } from './useScheduleApprovalController';
 
 export { isScheduleMutationProposalCardBlock } from './read-schedule-approval';
 
 /** The original F139 card and writer, shared by Chat, Hub and Inbox. Original owner re-reads supply content and results. */
 export function ScheduleMutationProposalCard(props: ScheduleApprovalProps) {
-  const { t, language, proposal, checking, busy, error, unknown, blocked, decide, reread } =
+  const { t, language, proposal, checking, busy, error, unknown, blocked, decide, reread, retained } =
     useScheduleApprovalController(props);
   const host = useApprovalHost();
+  if (retained) return <RetainedApprovalCardResult item={retained} reread={reread} />;
   if (!proposal)
     return (
       <div className="space-y-2 text-sm text-cafe-muted">

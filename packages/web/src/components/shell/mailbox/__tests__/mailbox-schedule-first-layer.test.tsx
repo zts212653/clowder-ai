@@ -24,6 +24,7 @@ it('a collapsed scheduled task uses its original card and current-read guard, wi
           ? ok({ proposal: scheduleProposal() })
           : ok({ id: 'destination', title: 'Original discussion', projectPath: 'default' }),
   );
+  await useApprovalHubStore.getState().fetchPending();
   const sessions = createApprovalSessions({
     readsStarted: () => generation,
     refetch: () => {},

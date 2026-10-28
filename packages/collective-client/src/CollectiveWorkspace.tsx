@@ -12,10 +12,12 @@ import {
   writeLibraryTarget,
 } from './channel-navigation.js';
 import type { CollectiveEventEnvelope, CollectiveWorkProjection } from './client-types.js';
+import type { SharedArtifactOpenOptions } from './collective-artifact-client.js';
 import { useCollectiveLanguage, useCollectiveText } from './collective-copy.js';
 import { type RoadmapReturn, visibleCollectiveCats } from './collective-workspace-model.js';
 import { FirstEntryOverlays } from './first-entry/FirstEntryOverlays.js';
 import { useFirstEntryGuide } from './first-entry/use-first-entry-guide.js';
+import { HostedDocumentSelection } from './HostedDocumentSelection.js';
 import { collectiveClientNamespace } from './human-send-custody.js';
 import { LeaveCollectiveDialog } from './LeaveCollectiveDialog.js';
 import type { LeaveReadinessArtifact, LeaveReadinessProject, LeaveReadinessWork } from './leave-readiness.js';
@@ -61,6 +63,24 @@ export function CollectiveWorkspace({
   const mediaArtifact = client.artifacts?.catalogue.find(
     (item) => item.artifactId === client.artifacts?.selected?.artifactId,
   );
+  const restoreArtifactProject = (target: NonNullable<SharedArtifactOpenOptions['projectReturn']>) => {
+    setDestination('channel');
+    setChannelId(target.channelId);
+    setContent('roadmap');
+    setSelectedMember(undefined);
+    setNavigationOpen(false);
+    setFocusEventId(undefined);
+    setRoadmapViews((current) => ({
+      ...current,
+      [target.channelId]: {
+        ...defaultRoadmapView,
+        roadmapId: target.roadmapId,
+        lens: 'artifacts',
+        workspace: 'project',
+      },
+    }));
+    writeChannelTarget(target.channelId);
+  };
   const host = useHostContext(
     embedded,
     snapshot,
@@ -75,12 +95,29 @@ export function CollectiveWorkspace({
         client.artifacts?.closePublication();
         client.artifacts?.open(artifact);
       },
+      onDocumentReturn: (target, targetDestination) => {
+        if (targetDestination === 'project' && target.projectReturn) {
+          artifactNavigation.discard();
+          restoreArtifactProject(target.projectReturn);
+        } else if (targetDestination === 'discussion') {
+          const artifact = client.artifacts?.catalogue.find((item) => item.artifactId === target.artifactId);
+          if (artifact)
+            client.artifacts?.open(artifact, target.ownerRevision, {
+              projectReturn: target.projectReturn,
+              discussionOnly: true,
+            });
+          setDestination('channel');
+          setChannelId(target.channelId);
+          setContent('conversation');
+          requestAnimationFrame(() => window.dispatchEvent(new Event('collective:reveal-document-discussion')));
+        } else selectChannel(target.channelId, target.sourceEventId);
+      },
       selection: mediaArtifact && {
         artifact: mediaArtifact,
         ownerRevision: client.artifacts?.selected?.ownerRevision,
+        options: client.artifacts?.selected?.options,
         onReturn: () => {
-          client.artifacts?.close();
-          selectChannel(mediaArtifact.sourceLocation.channelId, mediaArtifact.sourceEventId);
+          artifactNavigation.close();
         },
       },
     },
@@ -104,6 +141,7 @@ export function CollectiveWorkspace({
     artifacts: client.artifacts,
     place: { destination, channelId, content, query, focusEventId, roadmapReturn },
     onOpenSource: (id, eventId) => selectChannel(id, eventId),
+    onRestoreProject: restoreArtifactProject,
     onRestore: (place) => {
       setDestination(place.destination);
       setChannelId(place.channelId);
@@ -357,6 +395,7 @@ export function CollectiveWorkspace({
         client.artifacts && {
           ...client.artifacts,
           open: artifactNavigation.open,
+          documentHosted: host.documentSurfaceReady,
           close: artifactNavigation.close,
           openWorkResultFile: async (address) => {
             const artifact = await client.artifacts?.resolveWorkResultFile(address);
@@ -368,6 +407,7 @@ export function CollectiveWorkspace({
       }
     >
       <SharedArtifactReading>
+        <HostedDocumentSelection />
         <HostWorkPermissionContext.Provider
           value={{ connectionId: host.connectionId, request: host.requestWorkPermission }}
         >

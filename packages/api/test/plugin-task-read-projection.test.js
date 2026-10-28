@@ -4,6 +4,9 @@ import { safeParseExtra, serializeExtra } from '../dist/domains/cats/services/st
 import { withPluginCallContext } from '../dist/domains/plugin/carrier/plugin-call-context.js';
 import { createPluginTaskHost } from '../dist/domains/plugin/host-surface/task/plugin-task-host.js';
 
+const currentSdkEntry = import.meta.resolve('@clowder-ai/plugin-sdk');
+const { projectTaskReadList: projectCurrentTaskReadList } = await import(new URL('./task-read.js', currentSdkEntry));
+
 const minimal = {
   id: 'task',
   kind: 'work',
@@ -36,6 +39,73 @@ function fixture(task, options = {}) {
     ...options,
   });
 }
+
+function controlledTask(receiptGrantRevision) {
+  const receiptRef = `task-data-controller:${'a'.repeat(64)}`;
+  const controllerCoordinates = {
+    userId: 'owner',
+    catId: 'cat',
+    threadId: 'thread',
+    subjectKey: 'subject',
+    firstSourceRef: 'message:source',
+    admissionAuthorityRef: 'message:authority',
+    pluginId: 'neutral',
+    pluginInstanceId: 'instance',
+    moduleRef: 'plugin:neutral',
+    lifecycleRevision: 13,
+  };
+  const receiptController = {
+    ...controllerCoordinates,
+    ...(receiptGrantRevision === undefined ? {} : { grantRevision: receiptGrantRevision }),
+  };
+  return {
+    ...minimal,
+    userId: 'owner',
+    entrustedWork: {
+      revision: 3,
+      artifactRefs: [],
+      closure: { state: 'open' },
+      admission: {
+        basis: 'authorized_source',
+        sourceRefs: ['message:source'],
+        authorityRef: 'message:authority',
+      },
+      dataController: {
+        bindingRevision: 1,
+        state: 'active',
+        binding: { ...controllerCoordinates, ownerOperationReceiptRef: receiptRef },
+        receipts: [
+          {
+            receiptRef,
+            operationId: 'bind-controller',
+            payloadDigest: `sha256:${'b'.repeat(64)}`,
+            actorRef: 'user:owner',
+            operationKey: 'work',
+            actionId: 'adopt-task',
+            requestId: 'request',
+            confirmedAt: 1,
+            recordedAt: 1,
+            kind: 'bind',
+            controller: receiptController,
+          },
+        ],
+      },
+    },
+  };
+}
+
+test('task reads remain consumable by installed SDK 0.2 beta23 after Host grant cleanup', async () => {
+  for (const receiptGrantRevision of [2, undefined]) {
+    const task = controlledTask(receiptGrantRevision);
+    assert.equal(task.entrustedWork.dataController.binding.grantRevision, undefined);
+    const projected = await fixture(task).list({ kind: 'work' });
+    assert.equal(projected[0].entrustedWork.dataController.binding.grantRevision, receiptGrantRevision ?? 1);
+    assert.equal(
+      projectCurrentTaskReadList(projected)[0].entrustedWork.dataController.binding.grantRevision,
+      undefined,
+    );
+  }
+});
 
 test('all task read slots project owner and minimal entrusted work without authority or mutable store aliases', async () => {
   const task = {

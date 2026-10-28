@@ -705,6 +705,37 @@ describe('useChatHistory navigation input owner', () => {
     expect(top.get()).toBe(600);
   });
 
+  it('loads a reply newer than the cached window through canonical refresh before reporting arrival', async () => {
+    const threadId = 'cloud-reply-newer-window';
+    const { el, top } = await openThread(threadId);
+    const reply = makeMsg('reply122', 3);
+    apiFetchMock.mockClear();
+    apiFetchMock.mockResolvedValue({ ok: true, json: async () => ({ messages: [reply], hasMore: false }) } as Response);
+    const boundary = appendMessageBoundary(el, reply.id, () => ({ top: 100 - top.get(), bottom: 500 - top.get() }));
+    boundary.querySelector<HTMLElement>('[data-message-id]')!.scrollIntoView = () => top.set(100);
+    let receipt!: Promise<import('../useChatHistory').ChatMessageNavigationReceipt>;
+    await act(async () => {
+      receipt = capturedHook!.navigateToMessage(reply.id, undefined, { refresh: true });
+      for (let n = 0; n < 10; n++) await Promise.resolve();
+    });
+    expect(
+      apiFetchMock.mock.calls.some(
+        ([url]) => String(url).startsWith('/api/messages?') && !String(url).includes('before='),
+      ),
+    ).toBe(true);
+    await act(async () => {
+      for (let n = 0; n < 8; n++) flushAnimationFrames();
+      await receipt;
+    });
+    expect(await receipt).toMatchObject({ status: 'settled', threadId, messageId: reply.id });
+    expect(
+      useChatStore
+        .getState()
+        .getThreadState(threadId)
+        .messages.some((message) => message.id === reply.id),
+    ).toBe(true);
+  });
+
   it('retires an explicit restore receipt on new input, and rejects another thread snapshot', async () => {
     const { top } = await openThread('search-reading-generation');
     expect(capturedHook!.captureReadingPosition).toBeTypeOf('function');

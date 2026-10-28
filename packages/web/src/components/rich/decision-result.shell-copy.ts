@@ -19,6 +19,7 @@ export const decisionResultCopy = defineShellCopy(
       notTracked: '这次不纳入跟踪',
       custodyTitle: '帮你接住这件事',
       technical: '技术详情',
+      retry: '再试一次',
       selected: (value: string) => `已选「${value}」`,
     },
     en: {
@@ -38,6 +39,7 @@ export const decisionResultCopy = defineShellCopy(
       notTracked: 'Not tracked this time',
       custodyTitle: 'Keep track of this work',
       technical: 'Technical details',
+      retry: 'Try again',
       selected: (value: string) => `Chose “${value}”`,
     },
   },

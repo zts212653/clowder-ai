@@ -31,6 +31,45 @@ beforeEach(() => {
   (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   fixture.fetch.mockReset();
 });
+
+it.each([
+  ['original.docx', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 5529, /5\.4\s*KB/],
+  ['original.bin', 'application/octet-stream', 7168, /7(?:\.0)?\s*KB/],
+] as const)('a published %s reads its byte length from the canonical file metadata, not its omitted body', async (name, mime, byteLength, label) => {
+  fixture.fetch.mockResolvedValue({
+    ok: true,
+    json: async () => ({ local: true, path: `/isolated/${name}`, mime, byteLength }),
+  });
+  await act(async () =>
+    root.render(
+      <ArtifactDetailView
+        artifact={{ ...artifact, name, mime, url: `/uploads/${name}` }}
+        worktreeId={null}
+        onBack={() => undefined}
+        onJump={() => undefined}
+      />,
+    ),
+  );
+  expect(container.querySelector('[data-testid="workspace-file-viewer"]')?.textContent).toMatch(label);
+});
+
+it('unknown published Office metadata remains unknown instead of claiming a zero-byte document', async () => {
+  fixture.fetch.mockResolvedValue({ ok: true, json: async () => ({ local: false }) });
+  await act(async () =>
+    root.render(
+      <ArtifactDetailView
+        artifact={{ ...artifact, name: 'remote.docx', url: 'https://assets.example/remote.docx' }}
+        worktreeId={null}
+        onBack={() => undefined}
+        onJump={() => undefined}
+      />,
+    ),
+  );
+  expect(container.querySelector('[data-testid="workspace-office-file"]')?.textContent).not.toContain('0.0 KB');
+  expect(container.querySelector('[data-testid="workspace-office-file"]')?.textContent).toMatch(
+    /大小.*未知|Size.*unknown/i,
+  );
+});
 afterEach(() => {
   act(() => root.render(null));
   delete (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT;
@@ -86,6 +125,88 @@ it('a published selection preserves its exact original message and file item as 
   expect(parsed.success).toBe(true);
   if (parsed.success)
     expect(parsed.data.source).toMatchObject({ kind: 'message', artifactFile: { item: artifact.publicationItem } });
+});
+
+it('a workspace-backed catalogue document stays read-only without being labelled an upload copy', async () => {
+  const path = 'docs/真实原文.md';
+  const url = `/api/workspace/file/raw?worktreeId=source-tree&path=${encodeURIComponent(path)}`;
+  fixture.fetch.mockImplementation(async (target: string) => ({
+    ok: !target.startsWith('/api/workspace/file/raw?'),
+    json: async () => ({ content: '# Workspace original\n\nOwner text.', binary: false, mime: 'text/markdown' }),
+  }));
+  await act(async () =>
+    root.render(
+      <ArtifactDetailView
+        artifact={{ ...artifact, url }}
+        worktreeId="ambient-tree"
+        onBack={vi.fn()}
+        onJump={vi.fn()}
+      />,
+    ),
+  );
+  expect(container.querySelector('[data-testid="workspace-file-viewer"]')?.textContent).toContain('Owner text.');
+  expect(container.querySelector('[title="此视图只读；原文件保留在工作区"]')).not.toBeNull();
+  expect(
+    [...container.querySelectorAll('[title]')].some((el) => el.getAttribute('title')?.includes('发到聊天时保存的副本')),
+  ).toBe(false);
+  expect(
+    [...container.querySelectorAll('button')].some((el) => /编辑|采用并写回|请猫修改/.test(el.textContent ?? '')),
+  ).toBe(false);
+});
+
+it.each([
+  'raw',
+  'download',
+  'ref',
+] as const)('a truncated %s workspace document uses the real reader warning and disables listening', async (entry) => {
+  const path = 'docs/大文档.md';
+  fixture.fetch.mockResolvedValue({
+    ok: true,
+    json: async () => ({
+      path,
+      content: '# 大文档\n\n只有前面一部分正文。',
+      size: 3690029,
+      mime: 'text/markdown',
+      binary: false,
+      truncated: true,
+      sha256: '',
+    }),
+  });
+  const target = {
+    ...artifact,
+    ...(entry === 'ref'
+      ? { url: undefined, ref: path }
+      : { url: `/api/workspace/file/${entry}?worktreeId=source-tree&path=${encodeURIComponent(path)}` }),
+  };
+  await act(async () =>
+    root.render(<ArtifactDetailView artifact={target} worktreeId="source-tree" onBack={vi.fn()} onJump={vi.fn()} />),
+  );
+  const reader = container.querySelector('[data-testid="workspace-file-viewer"]');
+  expect(reader?.textContent).toContain('只有前面一部分正文');
+  expect(reader?.textContent).toContain('文件已截断');
+  const listen = [...container.querySelectorAll('button')].find((button) => button.textContent === '听读');
+  expect(listen).toBeDefined();
+  expect(listen?.disabled).toBe(true);
+});
+
+it('a text-named file sniffed as binary keeps its source and reports unreadable instead of a blank document', async () => {
+  fixture.fetch.mockResolvedValue({
+    ok: true,
+    json: async () => ({ content: '', binary: true, truncated: false, size: 32, mime: 'text/markdown' }),
+  });
+  await act(async () =>
+    root.render(
+      <ArtifactDetailView
+        artifact={{ ...artifact, url: '/api/workspace/file/raw?worktreeId=source-tree&path=nul.md' }}
+        worktreeId="ambient-tree"
+        onBack={vi.fn()}
+        onJump={vi.fn()}
+      />,
+    ),
+  );
+  expect(container.textContent).toContain('原文件暂时不可读取；来源保留');
+  expect(container.querySelector('[data-testid="workspace-file-viewer"]')).toBeNull();
+  expect(fixture.fetch).toHaveBeenCalledTimes(1);
 });
 
 it('a published document has the common file menu while its text keeps native context selection', async () => {

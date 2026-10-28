@@ -1,21 +1,13 @@
 import type { FileData } from '@/hooks/useWorkspace';
 import { ChatReferenceIcon, chatReferenceFileType } from '../chat-references/ChatReferenceIcon';
 import { chatReferenceCopy } from '../chat-references/chat-reference.shell-copy';
+import { fileByteLengthLabel } from '../content-review/artwork-file-labels';
 import { useShellCopy } from '../shell/shell-copy';
-import { workspaceFileReference } from './workspace-file-reference';
 
 /** Uses the existing file tab/chrome; the body is honest metadata, without a second viewer. */
-export function OfficeFileCard({
-  file,
-  worktreeId,
-  root,
-}: {
-  file: FileData;
-  worktreeId: string | null;
-  root?: string;
-}) {
+export function OfficeFileCard({ file }: { file: FileData }) {
   const t = useShellCopy(chatReferenceCopy);
-  const target = workspaceFileReference(file, worktreeId ?? '', root);
+  const target = { path: file.path, entryType: 'file' as const };
   return (
     <section
       data-testid="workspace-office-file"
@@ -24,7 +16,7 @@ export function OfficeFileCard({
       <ChatReferenceIcon target={target} />
       <h3 className="max-w-full break-all font-semibold">{file.path.split('/').at(-1)}</h3>
       <p className="text-sm text-[var(--shell-muted)]">
-        {chatReferenceFileType(target)} · {(file.size / 1024).toFixed(1)} KB
+        {chatReferenceFileType(target)} · {fileByteLengthLabel(file.size) ?? t.sizeUnknown}
         {file.pageCount !== undefined
           ? ` · ${file.pageCount} ${t[file.pageUnit ?? 'pages']}`
           : ` · ${t.pageCountUnknown}`}

@@ -4,6 +4,7 @@ export const chatApprovalReceiptCopy = defineShellCopy({
   zh: {
     loading: '正在读取审批结果…',
     unavailable: '审批结果暂不可确认',
+    cachedFailure: '没更新成功，保留上次读到的结果',
     reread: '重新读取',
     approved: '你同意了',
     responded: '你处理了',
@@ -18,6 +19,7 @@ export const chatApprovalReceiptCopy = defineShellCopy({
   en: {
     loading: 'Reading the approval result…',
     unavailable: 'Approval result unavailable',
+    cachedFailure: 'Could not update; showing the previous result',
     reread: 'Read again',
     approved: 'You approved',
     responded: 'You answered',

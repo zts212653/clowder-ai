@@ -50,9 +50,27 @@ afterEach(() => {
   writeShellLanguage('zh');
   vi.unstubAllGlobals();
 });
-it('uses the fixed slot only as a pin indicator and keeps the pin command in the row menu', () => {
+it('pins and unpins from the fixed shortcut without selecting the conversation', () => {
   render(false);
-  expect(host.querySelector('[data-testid="thread-pin-button"]')).toBeNull();
+  const button = host.querySelector<HTMLButtonElement>('[data-testid="thread-pin-button"]');
+  expect(button).not.toBeNull();
+  expect(button?.getAttribute('aria-label')).toBe('Pin Target');
+  expect(button?.getAttribute('aria-pressed')).toBe('false');
+  expect(button?.querySelector('svg')?.getAttribute('fill')).toBe('none');
+  act(() => button?.click());
+  expect(pin).toHaveBeenCalledExactlyOnceWith('thread', true);
+  expect(select).not.toHaveBeenCalled();
+  render(true);
+  const pinned = host.querySelector<HTMLButtonElement>('[data-testid="thread-pin-button"]');
+  expect(pinned?.getAttribute('aria-label')).toBe('Unpin Target');
+  expect(pinned?.getAttribute('aria-pressed')).toBe('true');
+  expect(pinned?.querySelector('svg')?.getAttribute('fill')).toBe('currentColor');
+  act(() => pinned?.click());
+  expect(pin).toHaveBeenLastCalledWith('thread', false);
+  expect(select).not.toHaveBeenCalled();
+});
+it('keeps the menu shortcut on the same pin command', () => {
+  render(false);
   act(() => host.querySelector<HTMLButtonElement>('button[aria-label="更多操作"]')?.click());
   const pinAction = Array.from(host.querySelectorAll<HTMLButtonElement>('[role="menu"] button')).find(
     (button) => button.textContent?.trim() === 'Pin',
@@ -61,9 +79,6 @@ it('uses the fixed slot only as a pin indicator and keeps the pin command in the
   act(() => pinAction?.click());
   expect(pin).toHaveBeenLastCalledWith('thread', true);
   expect(select).not.toHaveBeenCalled();
-  render(true);
-  expect(host.querySelector('[data-testid="thread-pin-mark"]')?.getAttribute('aria-label')).toBe('Pinned');
-  expect(host.querySelector('[data-testid="thread-pin-button"]')).toBeNull();
 });
 it('keeps a read-only pinned mark visible and never creates a default-thread pin action', () => {
   render(true, false);

@@ -222,7 +222,7 @@ function hasValidTotal(body: Record<string, unknown>): boolean {
   return (
     validMentionCounts(body) &&
     (body.mentionPeriod === undefined ||
-      ['recent', 'today', 'week', 'earlier', 'handled'].includes(body.mentionPeriod as string)) &&
+      ['recent', 'today', 'week', 'earlier', 'handled', 'all'].includes(body.mentionPeriod as string)) &&
     (body.totalCount === undefined || (Number.isInteger(body.totalCount) && (body.totalCount as number) >= 0)) &&
     (body.attentionCount === undefined ||
       (Number.isInteger(body.attentionCount) && (body.attentionCount as number) >= 0))

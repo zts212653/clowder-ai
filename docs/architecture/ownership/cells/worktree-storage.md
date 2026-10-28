@@ -12,6 +12,7 @@ code_anchors:
   - scripts/worktree-retire-merged.mjs
   - scripts/lib/worktree-reaper-core.mjs
   - scripts/lib/worktree-inventory.mjs
+  - scripts/lib/worktree-origin.mjs
   - scripts/lib/worktree-release-archive.mjs
   - scripts/lib/worktree-release-transactions.mjs
   - scripts/lib/daily-cycle-workspace.mjs
@@ -30,6 +31,11 @@ static_scan_hints: [WorktreeNoticeService, worktreeInventory, finishWorktree, wi
 The canonical source remains worktree-private `catcafe.lifecycle.*` Git config plus the existing
 verified release internal-archive/ledger. Origin and PR association add provenance without replacing Task,
 thread or custody truth. Inventory counts never veto worktree creation.
+
+Managed commands carry checkout creation metadata from the validated job descriptor, separately
+from callback credentials and provider process ownership. `worktree:new` consumes that metadata
+when explicit CLI/current invocation source fields are absent; it never declares a legacy checkout
+after the fact. The runner discards inherited metadata before supplying the current job's source.
 
 The read-only inventory includes undeclared and nonstandard registered paths. GitHub PR evidence
 uses canonical gh, exact repository/PR and the complete commit list; unknown stays unknown.
@@ -64,9 +70,10 @@ input, not continuous monitoring or a completed disposition.
 
 Without valid origin the scanner exposes exact paths in the existing inventory's `unroutable` result; it does
 not guess a user/thread or authorize removal. Those legacy cases require the existing repository maintenance
-work's explicit inventory check and source verification. For this rollout the original maintenance Task469
-holds the four real missing-origin rows, including both changed-retention cases, with source-thread follow-ups;
-that investigation remains open. No universal guardian, new Task or shadow ownership registry is created.
+work's explicit inventory check and source verification. The original maintenance Task469 keeps its
+current inventory and source-thread follow-ups; a rollout snapshot is not a permanent count or a
+presumption that retained checkouts are useful. No universal guardian, new Task or shadow ownership
+registry is created.
 
 Automatic transactions journal preserving/removing phases before their corresponding work. A failure
 pauses further automatic attempts for that path/HEAD. Before removal, duplicate archives can be discarded;

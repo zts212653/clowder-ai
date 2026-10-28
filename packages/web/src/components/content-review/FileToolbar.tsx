@@ -1,5 +1,8 @@
 'use client';
 import { createContext, type ReactNode, useContext, useRef } from 'react';
+import { useShellCopy } from '../shell/shell-copy';
+import { useShellPresentation } from '../shell/shell-presentation';
+import { publishedTextCopy } from '../workspace/published-text.shell-copy';
 import { FileActions } from './FileActions';
 import type { FileActionSource } from './file-action-client';
 
@@ -32,12 +35,15 @@ export function FileToolbar({
   readOnlyReason?: string;
 }) {
   const name = useRef<HTMLSpanElement>(null);
+  const localized = useShellCopy(publishedTextCopy);
+  const isV2 = useShellPresentation() === 'v2';
+  const copy = isV2 ? localized : publishedTextCopy.zh;
   const owner = useContext(OwnerControlsContext);
   const hostControls = useContext(HostControlsContext);
   return (
     <div
       role="toolbar"
-      aria-label="文件操作"
+      aria-label={copy.toolbar}
       data-testid="content-file-toolbar"
       className="flex h-10 min-w-0 shrink-0 items-center gap-2 border-b border-cafe-subtle bg-cafe-surface px-3"
     >
@@ -47,7 +53,7 @@ export function FileToolbar({
       </span>
       {readOnlyReason && (
         <span className="shrink-0 text-xs text-cafe-muted" title={readOnlyReason}>
-          只读
+          {copy.readonly}
         </span>
       )}
       <div className="flex min-w-0 shrink items-center gap-2 overflow-x-auto">

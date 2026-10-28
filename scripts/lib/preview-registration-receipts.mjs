@@ -72,6 +72,18 @@ function validUnclaimedProjection(value, pointer) {
   );
 }
 
+function validExpiredLeaseProjection(value) {
+  const lease = value.retiredLease;
+  return (
+    value.outcome.leaseStatus === 'retired' &&
+    lease?.path === value.sources?.lease?.path &&
+    lease?.sha256 === value.sources?.lease?.sha256 &&
+    [lease?.port, lease?.redisPid, lease?.ownerPid].every((n) => Number.isSafeInteger(n) && n > 1) &&
+    basename(lease.path) === `redis-${lease.port}-${lease.redisPid}-${lease.ownerPid}.json` &&
+    !Object.hasOwn(value.outcome, 'shutdownExitCode')
+  );
+}
+
 export function readPreviewSettlement(config) {
   if (recoveryPathExists(config.recordPath)) return null;
   if (!recoveryPathExists(pointerPath(config))) return null;
@@ -101,6 +113,7 @@ export function readPreviewSettlement(config) {
       'completed-preview-registration-settlement',
       'unclaimed-alpha-registration-retirement',
       'unclaimed-preview-registration-retirement',
+      'expired-named-alpha-lease-settlement',
     ].includes(value.kind) ||
     value.sources?.record?.path !== config.recordPath ||
     value.sources?.completion?.path !== pointer.completionPath ||
@@ -108,6 +121,7 @@ export function readPreviewSettlement(config) {
       ? value.sources?.owner !== undefined || value.ownerAbsent !== true
       : value.sources?.owner?.path !== `${pointer.completionPath}.owner.json`) ||
     summary?.status !== (retired ? 'registration_retired' : 'stopped') ||
+    (value.kind === 'expired-named-alpha-lease-settlement' && !validExpiredLeaseProjection(value)) ||
     (retired && !validUnclaimedProjection(value, pointer)) ||
     summary.registered !== false ||
     summary.persistenceStatus !== 'not_reverified' ||

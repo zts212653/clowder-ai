@@ -37,7 +37,10 @@ export function MailboxItemGroups({
     );
   }
   const waiting = (row: MailboxDisplayRow) =>
-    row.kind === 'item' && row.item.kind !== 'user_mention' && isMailboxDecision(row.item);
+    row.kind === 'retained' ||
+    ((row.kind === 'item' || row.kind === 'feedback') &&
+      row.item.kind !== 'user_mention' &&
+      isMailboxDecision(row.item));
   const groups = [
     {
       id: 'decisions',
@@ -59,15 +62,14 @@ export function MailboxItemGroups({
         : groupCounts?.userMentions === 0 || (complete && !groupCounts)
           ? t.mentionsEmpty
           : t.mentionsPageEmpty,
-      rows: rows.filter((row) => row.kind === 'item' && row.item.kind === 'user_mention'),
+      rows: rows.filter((row) => (row.kind === 'item' || row.kind === 'feedback') && row.item.kind === 'user_mention'),
     },
   ];
-  const other = rows.filter((row) => row.kind === 'item' && row.item.kind !== 'user_mention' && !waiting(row));
-  const retained = rows.filter((row) => row.kind === 'retained');
+  const other = rows.filter(
+    (row) => (row.kind === 'item' || row.kind === 'feedback') && row.item.kind !== 'user_mention' && !waiting(row),
+  );
   if (other.length || (groupCounts?.other ?? 0) > 0)
     groups.push({ id: 'other', count: groupCounts?.other, label: t.other, empty: t.otherPageEmpty, rows: other });
-  if (retained.length)
-    groups.push({ id: 'results', count: retained.length, label: t.results, empty: '', rows: retained });
   return (
     <div className="flex flex-col gap-5">
       {(section === 'ignored' ? groups.filter((group) => group.rows.length > 0 || (group.count ?? 0) > 0) : groups).map(

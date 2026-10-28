@@ -1,4 +1,6 @@
 import type { RedisClient } from '@cat-cafe/shared/utils';
+import { readRedisSettledPage } from '../../../utils/redis-settled-page.js';
+import type { SettledHistoryPageOptions } from '../../../utils/settled-history-page.js';
 import type { StoredPersonMemoryCandidate, StoredPersonMemorySettledCandidate } from './PersonMemoryStore.js';
 import { PersonMemoryKeys } from './person-memory-keys.js';
 import { parseStoredCandidate } from './person-memory-records.js';
@@ -33,6 +35,30 @@ export async function listSettledPersonMemoryCandidates(
   ownerUserId: string,
   limit: number,
 ): Promise<StoredPersonMemorySettledCandidate[]> {
+  await preparePersonHistory(redis);
+  const raw = await redis.zrevrange(PersonMemoryKeys.settled(ownerUserId), 0, Math.max(0, limit - 1), 'WITHSCORES');
+  const records = await Promise.all(
+    Array.from({ length: Math.floor(raw.length / 2) }, async (_, index) => {
+      const candidateId = raw[index * 2];
+      const score = Number(raw[index * 2 + 1]);
+      if (!candidateId || !Number.isFinite(score)) return null;
+      const [candidate] = await readCandidates(redis, ownerUserId, [candidateId]);
+      if (
+        !candidate ||
+        candidate.ownerUserId !== ownerUserId ||
+        candidate.publication.state !== 'anchored' ||
+        (candidate.state !== 'materialized' && candidate.state !== 'rejected' && candidate.state !== 'withdrawn')
+      )
+        return null;
+      return { candidate, decidedAt: score };
+    }),
+  );
+  return records.filter((record): record is NonNullable<typeof record> => record !== null);
+}
+
+import { advanceSettledIndex, SettledIndexPreparingError } from '../../../utils/redis-settled-index.js';
+
+async function preparePersonHistory(redis: RedisClient) {
   const ready = await advanceSettledIndex(redis, {
     progressKey: 'person-memory:history-index:v2',
     prefix: 'person-memory:candidate:',
@@ -71,24 +97,24 @@ export async function listSettledPersonMemoryCandidates(
     },
   });
   if (!ready) throw new SettledIndexPreparingError();
-  const raw = await redis.zrevrange(PersonMemoryKeys.settled(ownerUserId), 0, Math.max(0, limit - 1), 'WITHSCORES');
-  const records = await Promise.all(
-    Array.from({ length: Math.floor(raw.length / 2) }, async (_, index) => {
-      const candidateId = raw[index * 2];
-      const score = Number(raw[index * 2 + 1]);
-      if (!candidateId || !Number.isFinite(score)) return null;
-      const [candidate] = await readCandidates(redis, ownerUserId, [candidateId]);
-      if (
-        !candidate ||
-        candidate.ownerUserId !== ownerUserId ||
-        candidate.publication.state !== 'anchored' ||
-        (candidate.state !== 'materialized' && candidate.state !== 'rejected' && candidate.state !== 'withdrawn')
-      )
-        return null;
-      return { candidate, decidedAt: score };
-    }),
-  );
-  return records.filter((record): record is NonNullable<typeof record> => record !== null);
 }
 
-import { advanceSettledIndex, SettledIndexPreparingError } from '../../../utils/redis-settled-index.js';
+export async function pageSettledPersonMemoryCandidates(
+  redis: RedisClient,
+  owner: string,
+  options: SettledHistoryPageOptions,
+) {
+  await preparePersonHistory(redis);
+  return readRedisSettledPage(redis, PersonMemoryKeys.settled(owner), options, async (id, decidedAt) => {
+    const [candidate] = await readCandidates(redis, owner, [id]);
+    if (!candidate) return null;
+    if (
+      candidate.candidateId !== id ||
+      candidate.ownerUserId !== owner ||
+      candidate.publication.state !== 'anchored' ||
+      !['materialized', 'rejected', 'withdrawn'].includes(candidate.state)
+    )
+      throw new Error('Settled index canonical identity/owner/status mismatch');
+    return { candidate, decidedAt };
+  });
+}

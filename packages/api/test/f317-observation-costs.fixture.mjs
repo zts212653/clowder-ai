@@ -140,6 +140,21 @@ export async function observationCostFailure(t, { snapshotMode = 'none', overlap
   };
   const locate = runtime.packages.resolveInstalledPackage.bind(runtime.packages);
   let verifyCalls = 0;
+  let publicationReady = false;
+  let publicationDelayed = false;
+  const transaction = runtime.brokerStore.transaction.bind(runtime.brokerStore);
+  runtime.brokerStore.transaction = (work) =>
+    transaction(async (tx) => {
+      // The final input refresh may legitimately replace an earlier reply after
+      // slow preparation. To exercise the stale-publication failure outlet, spend
+      // the15s inside the actual final transaction, after the last native reply.
+      if (publicationReady && !publicationDelayed) {
+        publicationDelayed = true;
+        advance(15_001);
+        wall += clockJump;
+      }
+      return work(tx);
+    });
   runtime.packages.resolveInstalledPackage = async (digest) => {
     const pkg = await locate(digest);
     return {
@@ -149,8 +164,7 @@ export async function observationCostFailure(t, { snapshotMode = 'none', overlap
         await (pkg.verifyStaticIntegrity?.(diagnostics) ?? pkg.verifyIntegrity());
         if (current === 1) {
           if (presence) await presence;
-          advance(15_001);
-          wall += clockJump;
+          publicationReady = true;
         }
       },
       release: async () => {

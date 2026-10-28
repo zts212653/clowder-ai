@@ -1,6 +1,7 @@
 import type { ApprovalEnvelope, ApprovalPublication, DispatchProposal } from '@cat-cafe/shared';
 import { assertApprovalEnvelopeIdentity } from '@cat-cafe/shared';
 import type { RedisClient } from '@cat-cafe/shared/utils';
+import type { SettledHistoryPageOptions } from '../../../../utils/settled-history-page.js';
 import { type OwnerAuthProvenance, requireOwnerAuthProvenance } from '../../../cats/services/owner-auth-provenance.js';
 import { commitRedisApprovalEnvelope } from '../../../cats/services/stores/redis/RedisApprovalPublication.js';
 import { DispatchProposalKeys } from '../../../cats/services/stores/redis-keys/proposals/dispatch-proposal-keys.js';
@@ -27,7 +28,7 @@ import {
   RedisCanonicalAdmissionUnavailableError,
 } from './RedisDispatchProposalCanonicalClaim.js';
 import { createRedisDispatchProposal } from './RedisDispatchProposalCreate.js';
-import { listRedisDispatchHistory } from './RedisDispatchProposalHistory.js';
+import { listRedisDispatchHistory, pageRedisDispatchHistory } from './RedisDispatchProposalHistory.js';
 import {
   CAS_APPROVE_DISPATCH_PROPOSAL_LUA,
   CAS_REJECT_DISPATCH_PROPOSAL_LUA,
@@ -203,6 +204,10 @@ export class RedisDispatchProposalStore implements IDispatchProposalStore, Appro
       decidedAt: now,
       decidedBy: userId,
     };
+  }
+
+  async listSettledPage(owner: string, options: SettledHistoryPageOptions) {
+    return pageRedisDispatchHistory(this.redis, owner, options);
   }
 
   async listSettledByUser(userId: string, limit: number): Promise<DispatchProposal[]> {

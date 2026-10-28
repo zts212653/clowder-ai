@@ -14,16 +14,36 @@ export function validateOrigin(origin) {
   )
     throw new Error('invalid worktree origin');
 }
+
+function managedOrigin(env) {
+  if (env.CAT_CAFE_WORKTREE_ORIGIN === undefined) return undefined;
+  let value;
+  try {
+    value = JSON.parse(env.CAT_CAFE_WORKTREE_ORIGIN);
+  } catch {
+    throw new Error('invalid worktree origin metadata');
+  }
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('invalid worktree origin metadata');
+  const origin = { threadId: value.threadId, sourceRef: value.sourceRef, userId: value.userId, role: 'author' };
+  validateOrigin(origin);
+  return origin;
+}
+
 export function originFromEnvironment(env, options = {}) {
-  const threadId = options.threadId ?? env.CAT_CAFE_THREAD_ID;
-  const sourceRef =
-    options.sourceRef ?? (env.CAT_CAFE_INVOCATION_ID ? `invocation:${env.CAT_CAFE_INVOCATION_ID}` : undefined);
+  const direct = {
+    threadId: options.threadId ?? env.CAT_CAFE_THREAD_ID,
+    sourceRef:
+      options.sourceRef ?? (env.CAT_CAFE_INVOCATION_ID ? `invocation:${env.CAT_CAFE_INVOCATION_ID}` : undefined),
+    userId: options.userId ?? env.CAT_CAFE_USER_ID,
+  };
+  const source = Object.values(direct).some((value) => value !== undefined) ? direct : managedOrigin(env);
+  const { threadId, sourceRef, userId } = source ?? {};
   if (!threadId && !sourceRef) return undefined;
   const origin = {
     threadId,
     sourceRef,
     role: options.role ?? 'author',
-    ...((options.userId ?? env.CAT_CAFE_USER_ID) ? { userId: options.userId ?? env.CAT_CAFE_USER_ID } : {}),
+    ...(userId ? { userId } : {}),
   };
   validateOrigin(origin);
   return origin;

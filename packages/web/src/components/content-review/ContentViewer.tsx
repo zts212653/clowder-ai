@@ -5,8 +5,10 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { FileData, WorktreeEntry } from '@/hooks/useWorkspace';
 import { type ListenSentence, maskLeadingMarkdownFrontmatter } from '@/lib/listen-mode/markdown-sentences';
 import { LISTEN_RETURN_DOCUMENT_EVENT } from '@/stores/listenModeStore';
+import { chatReferenceCopy } from '../chat-references/chat-reference.shell-copy';
 import { LiveSelectionAnnotationAction } from '../LiveSelectionAnnotationAction';
 import { MarkdownContent } from '../MarkdownContent';
+import { useShellCopy } from '../shell/shell-copy';
 import { useShellPresentation } from '../shell/shell-presentation';
 import { WorkspaceFileQuoteMarks } from '../workbench/content-review/WorkspaceFileQuoteMarks';
 import { WorkspacePendingFileQuoteMarks } from '../workbench/content-review/WorkspacePendingFileQuoteMarks';
@@ -18,6 +20,7 @@ import type { MarkdownSelectionAction } from '../workspace/useMarkdownSelectionA
 import { WorkspaceHtmlPreview } from '../workspace/WorkspaceHtmlPreview';
 import type { WorkspaceFileSave } from '../workspace/workspace-file-draft';
 import { ArtworkPreviewMedia } from './ArtworkPreviewMedia';
+import { fileByteLengthLabel } from './artwork-file-labels';
 import { ContentMediaElement } from './ContentMediaElement';
 
 function scrollMarkdownToSourceLine(container: HTMLDivElement | null, isActive: boolean, line: number | null): void {
@@ -48,6 +51,8 @@ export interface ContentViewerProps {
   mdContainerRef: React.RefObject<HTMLDivElement>;
   mdSelectionAction: MarkdownSelectionAction | null;
   onMdAddToChat: (action: MarkdownSelectionAction, comment: string) => void | boolean;
+  collectMdComment?: boolean;
+  mdQuoteLabel?: string;
   onSave?: WorkspaceFileSave;
   onDirtyChange?: (dirty: boolean) => void;
   rawUrl: (p: string) => string;
@@ -81,6 +86,8 @@ export function ContentViewer({
   mdContainerRef,
   mdSelectionAction,
   onMdAddToChat,
+  collectMdComment,
+  mdQuoteLabel,
   onSave,
   onDirtyChange,
   rawUrl,
@@ -101,6 +108,7 @@ export function ContentViewer({
     isJsx = contentKind === 'jsx';
   const visible = useWorkspaceSurfaceVisibility();
   const isV2 = useShellPresentation() === 'v2';
+  const t = useShellCopy(chatReferenceCopy);
   const onScrollTopChangeRef = useRef(onScrollTopChange);
   onScrollTopChangeRef.current = onScrollTopChange;
   const restoreScrollTopRef = useRef(restoreScrollTop);
@@ -195,8 +203,7 @@ export function ContentViewer({
 
   // The byte reader knows whether an otherwise unknown format contains text.
   if (file.binary || ['image', 'video', 'audio', 'office'].includes(contentKind)) {
-    if (/\.(?:pptx?|docx?|xlsx?)$/i.test(file.path))
-      return <OfficeFileCard file={file} worktreeId={worktreeId} root={currentWorktree?.root} />;
+    if (/\.(?:pptx?|docx?|xlsx?)$/i.test(file.path)) return <OfficeFileCard file={file} />;
     const kind = fileContentKind(file.path, file.mime);
     if (kind === 'image' || kind === 'video')
       return <ArtworkPreviewMedia url={rawUrl(file.path)} title={file.path} video={kind === 'video'} />;
@@ -221,7 +228,7 @@ export function ContentViewer({
         </svg>
         <p>二进制文件</p>
         <p className="text-micro mt-1">
-          {file.mime} · {Math.round(file.size / 1024)}KB
+          {file.mime} · {fileByteLengthLabel(file.size) ?? t.sizeUnknown}
         </p>
       </div>
     );
@@ -298,6 +305,8 @@ export function ContentViewer({
             showFileQuotes ? 'workspace-content-review-text-add-to-chat' : 'workspace-markdown-selection-add-to-chat'
           }
           onSave={onMdAddToChat}
+          collectComment={collectMdComment}
+          triggerContent={mdQuoteLabel}
         />
       </div>
     );

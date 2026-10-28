@@ -6,6 +6,7 @@ import type {
   RuntimeInteractionTerminal,
   RuntimeInteractionTerminalReasonCode,
 } from '@cat-cafe/shared';
+import type { SettledHistoryPageOptions, SettledHistorySourcePage } from '../../../utils/settled-history-page.js';
 
 export interface CreateRuntimeInteractionInput {
   request: RuntimeInteractionRequest;
@@ -85,6 +86,10 @@ export interface RuntimeInteractionStore {
   readPendingIndexByUser(userId: string): Promise<RuntimeInteractionPendingIndexRead>;
   listPendingByUser(userId: string): Promise<RuntimeInteractionRecord[]>;
   /** Canonical decision read; bounded derived-index preparation may occur. No decision/payload writes. */
+  listSettledPage?(
+    owner: string,
+    options: SettledHistoryPageOptions,
+  ): SettledHistorySourcePage<RuntimeInteractionRecord> | Promise<SettledHistorySourcePage<RuntimeInteractionRecord>>;
   listSettledByUser?(userId: string, limit: number): Promise<RuntimeInteractionRecord[]>;
 }
 

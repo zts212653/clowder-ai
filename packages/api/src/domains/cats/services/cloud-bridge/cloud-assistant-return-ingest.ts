@@ -9,6 +9,7 @@ import {
 } from './cloud-conversation-identity.js';
 import type { CloudReturnGrantClaim, CloudReturnGrantStore } from './cloud-return-grant.js';
 import { buildCloudReturnMessageIdempotencyKey } from './cloud-return-message.js';
+import { cloudReturnProof } from './cloud-return-proof.js';
 
 const MAX_CONTENT_BYTES = 128 * 1024;
 
@@ -64,7 +65,10 @@ export class CloudAssistantReturnIngestService {
         origin: 'callback',
         messageId: message.id,
         invocationId: message.id,
-        extra: { isExplicitPost: true },
+        extra: {
+          isExplicitPost: true,
+          ...(message.extra?.cloudBridgeReturn ? { cloudBridgeReturn: message.extra.cloudBridgeReturn } : {}),
+        },
         ...(message.replyTo ? { replyTo: message.replyTo } : {}),
         ...(replyPreview ? { replyPreview } : {}),
         timestamp: this.deps.now?.() ?? Date.now(),
@@ -147,7 +151,7 @@ export class CloudAssistantReturnIngestService {
         mentions: [],
         origin: 'callback',
         timestamp: this.deps.now?.() ?? Date.now(),
-        extra: { isExplicitPost: true },
+        extra: { isExplicitPost: true, cloudBridgeReturn: cloudReturnProof(claimed) },
         replyTo: source.id,
         idempotencyKey,
       });

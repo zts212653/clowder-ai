@@ -6,6 +6,7 @@ import {
   type WorkReference,
 } from '@cat-cafe/shared';
 import type { WorkspaceFileNavigationOrigin } from '@/stores/chat-types';
+import type { CollectiveDocumentHostTarget } from '../workbench/collective-document-surface';
 import type { createFileSurface } from '../workbench/real-surface-adapters';
 import type { WorkspaceSurfaceDescriptor } from '../workbench/workbench-contract';
 import { fileSourceUrl } from './file-action-client';
@@ -24,6 +25,7 @@ export type ContentOpenSource = Origin & { gallery?: { items: readonly ContentOp
         artifact: ThreadArtifactDTO | GlobalArtifactDTO;
         attach?: (surface: WorkspaceSurfaceDescriptor) => void;
       }
+    | ({ kind: 'collective' } & CollectiveDocumentHostTarget)
     | { kind: 'work'; reference: WorkReference; title: string; current?: boolean; expectedSurfaceKey?: string }
     | {
         kind: 'message-file';
@@ -41,7 +43,13 @@ export type ContentOpenSource = Origin & { gallery?: { items: readonly ContentOp
 /** Presentation follows content facts, never the entry component or its URL spelling. */
 export function contentOpenFacts(source: Exclude<ContentOpenSource, { kind: 'work' }>) {
   return projectFileContent(
-    source.kind === 'workspace' ? { name: source.target.path } : source.kind === 'artifact' ? source.artifact : source,
+    source.kind === 'collective'
+      ? { name: '共同作品.md', mime: 'text/markdown' }
+      : source.kind === 'workspace'
+        ? { name: source.target.path }
+        : source.kind === 'artifact'
+          ? source.artifact
+          : source,
   );
 }
 
@@ -50,7 +58,7 @@ export function contentSourcePreview(source: ContentOpenSource) {
   const name = source.kind === 'work' ? source.title : contentOpenFacts(source).name;
   const facts = source.kind === 'work' ? null : contentOpenFacts(source);
   const url =
-    source.kind === 'work'
+    source.kind === 'work' || source.kind === 'collective'
       ? ''
       : source.kind === 'workspace'
         ? fileSourceUrl({ kind: 'workspace', ...source.target })

@@ -8,6 +8,7 @@ import {
   normalizeApprovalLifecycleProjection,
   type SettledApprovalHubItem,
 } from '@cat-cafe/shared';
+import type { SettledHistoryPageOptions, SettledHistorySourcePage } from '../../utils/settled-history-page.js';
 import type { IApprovalAdapter } from './ports/IApprovalAdapter.js';
 
 export interface ApprovalProducerRuntimeBinding {
@@ -96,6 +97,43 @@ export class ApprovalProducerRegistry {
 
   manifest(): ReadonlyArray<ApprovalProducerManifestEntry> {
     return this.producerIds.map((id) => ({ id, ...APPROVAL_PRODUCER_CATALOG[id] }));
+  }
+
+  async listSettledPageFor(
+    id: ApprovalProducerId,
+    userId: string,
+    options: SettledHistoryPageOptions,
+  ): Promise<SettledHistorySourcePage<SettledApprovalHubItem>> {
+    const adapter = this.get(id).adapter;
+    if (!adapter.listSettledPage)
+      throw Object.assign(new Error(`Approval history paging unavailable: ${id}`), {
+        statusCode: 503,
+        code: 'APPROVAL_HISTORY_UNAVAILABLE',
+      });
+    try {
+      const page = await adapter.listSettledPage(userId, options);
+      return {
+        ...page,
+        records: page.records.map((item) => {
+          if (item.ownerUserId !== userId) throw new Error(`Approval history owner mismatch: ${id}`);
+          return normalizeSettledItem(id, item);
+        }),
+      };
+    } catch (cause) {
+      if (
+        typeof cause === 'object' &&
+        cause !== null &&
+        'statusCode' in cause &&
+        cause.statusCode === 503 &&
+        'code' in cause &&
+        ['APPROVAL_HISTORY_PREPARING', 'APPROVAL_HISTORY_UNAVAILABLE'].includes(String(cause.code))
+      )
+        throw cause;
+      throw Object.assign(new Error(`Approval history unavailable: ${id}`, { cause }), {
+        statusCode: 503,
+        code: 'APPROVAL_HISTORY_UNAVAILABLE',
+      });
+    }
   }
 }
 

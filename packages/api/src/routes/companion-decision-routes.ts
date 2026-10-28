@@ -15,7 +15,7 @@ const pageSchema = z
     limit: z.coerce.number().int().min(1).max(20).default(20),
     view: z.literal('unified').optional(),
     includeUserMentions: z.literal('true').optional(),
-    mentionPeriod: z.enum(['recent', 'today', 'week', 'earlier', 'handled']).default('week'),
+    mentionPeriod: z.enum(['recent', 'today', 'week', 'earlier', 'handled', 'all']).default('week'),
     personalView: z.enum(['visible', 'ignored']).optional(),
   })
   .strict();

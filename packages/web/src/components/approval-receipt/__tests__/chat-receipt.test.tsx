@@ -121,7 +121,8 @@ it('uses the original result row and canonical title, with separate source and d
   expect(host.textContent).toContain('来自原卡的新标题');
   expect(host.textContent).toContain('对话已开');
   expect(host.textContent).not.toContain('proposal_receipt');
-  expect(host.textContent).not.toContain('gpt-6.1-sol');
+  expect(host.textContent).toContain('gpt-6.1-sol');
+  expect(host.textContent).toContain('新对话「');
   expect(
     host.querySelector(
       '[data-testid="thread-proposal-result"] [data-testid="decision-result-row"][data-presentation="chat-receipt"]',

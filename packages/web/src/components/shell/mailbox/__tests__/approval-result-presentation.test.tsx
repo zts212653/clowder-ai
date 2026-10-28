@@ -2,10 +2,12 @@ import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { apiFetch } from '@/utils/api-client';
+import { observeApiSessionOwner } from '@/utils/api-session-identity';
 import { writeShellLanguage } from '../../shell-language';
 import { ApprovalDecisionReceipt } from '../ApprovalDecisionReceipt';
 import { describeReconcile, INITIAL_RECONCILE, type ReconcileState } from '../approval-reconcile';
 import { createApprovalSessions } from '../approval-sessions';
+import { producerKind } from '../HandledApprovalRow';
 import { RetainedResult } from '../RetainedResults';
 import { approvalRow, okRead, storeItem, visibleApproval } from './mailbox-fixtures';
 
@@ -18,6 +20,36 @@ beforeEach(() => {
   vi.mocked(apiFetch).mockReset();
 });
 const disposals: Array<() => void> = [];
+it.each([
+  ['in_progress', '正在处理…'],
+  ['failed', '没存上'],
+] as const)('distinguishes an accepted %s effect from an unknown effect', (state, expected) => {
+  const model: ReconcileState = { kind: 'decided', terminal: { resolution: 'accepted', effectUnknown: true } };
+  const materialization =
+    state === 'in_progress'
+      ? { state, attemptRef: 'original-attempt' }
+      : { state, failureRef: 'original-failure', retryable: true };
+  const view = describeReconcile(model, { language: 'zh', sourceFeatureId: 'F231', materialization });
+  expect(view.line).toBe(`已同意 · ${expected}`);
+  expect(
+    describeReconcile(model, {
+      language: 'zh',
+      sourceFeatureId: 'F231',
+      materialization,
+      originalEffect: 'profile-written',
+    }).line,
+  ).toBe('已同意 · 已写入档案');
+});
+it('uses the current card names in handled history instead of the old approval-center abbreviations', () => {
+  expect((['F128', 'F139', 'F193', 'F225', 'F321'] as const).map((id) => producerKind(id, 'zh'))).toEqual([
+    '新对话',
+    '定时任务',
+    '派活',
+    '会话接力',
+    '记忆纠错',
+  ]);
+  expect(producerKind('F128', 'en')).toBe('New conversation');
+});
 afterEach(() => {
   for (const dispose of disposals.splice(0)) dispose();
   writeShellLanguage('zh');
@@ -209,6 +241,7 @@ it('the actual retained-result consumer supplies its verified owner and live she
 });
 
 async function domainResult(kind: 'F225' | 'F231', body: unknown, ok = true, effectUnknown = true) {
+  observeApiSessionOwner('owner-1');
   vi.mocked(apiFetch).mockResolvedValue({ ok, status: ok ? 200 : 503, json: async () => body } as Response);
   const item = storeItem({
     sourceFeatureId: kind,

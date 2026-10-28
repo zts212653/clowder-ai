@@ -3329,6 +3329,10 @@ async function main(): Promise<void> {
     },
   };
   await app.register(messagesRoutes, messagesOpts);
+  await app.register((await import('./routes/cloud-return-read.js')).cloudReturnReadRoutes, {
+    messageStore,
+    threadStore,
+  });
   await app.register(messageBundleRoutes, { messageStore, threadStore });
   // F297 Phase B: 所有"什么在跑"的问题收口到同一个 domain service。
   //
@@ -5802,7 +5806,7 @@ async function main(): Promise<void> {
 
   // F246: Approval Hub — unified operator approval center.
   const approvalProducerRegistry = new ApprovalProducerRegistry({
-    F128: bindLegacyApprovalProducer(new F128ApprovalAdapter(proposalStore)),
+    F128: bindLegacyApprovalProducer(new F128ApprovalAdapter(proposalStore, (id) => threadStore.get(id))),
     F139: bindLegacyApprovalProducer(new F139ApprovalAdapter(scheduleMutationProposalStore)),
     F193: bindLegacyApprovalProducer(new F193ApprovalAdapter(dispatchProposalStore)),
     F221: bindLegacyApprovalProducer(new F221ApprovalAdapter(tasteProposalStore)),

@@ -8,12 +8,14 @@ import type { WorkspaceSurfaceDescriptor } from '@/components/workbench/workbenc
 import { BrowserPanel } from '@/components/workspace/BrowserPanel';
 import { TerminalTab } from '@/components/workspace/TerminalTab';
 import type { WorkspaceFileNavigationOrigin } from '@/stores/chat-types';
+import { CollectiveDocumentSurface } from '../collective/CollectiveDocumentSurface';
 import { AgentRunOwnerSurface } from './AgentRunOwnerSurface';
 import { ArtifactFileNavigator } from './ArtifactFileNavigator';
 import { createArtifactReviewSurface, resolveArtifactReviewTarget } from './artifact-review-surface';
 import { CanonicalWorkspaceFileSurface } from './CanonicalWorkspaceFileSurface';
 import { ContentPublicationNavigator } from './ContentPublicationNavigator';
 import { useResolveContentSurface } from './ContentSurfaceResolution';
+import { resolveCollectiveDocumentTarget } from './collective-document-surface';
 import { ContentEditorOwnerSurface } from './content-editor/ContentEditorOwnerSurface';
 import { EvolutionContentReviewSurface } from './content-review/EvolutionContentReviewSurface';
 import { PublicationContentReviewSurface } from './content-review/PublicationContentReviewSurface';
@@ -105,6 +107,8 @@ function F307OwnerSurfaceContent({
       <OwnerUnavailable message="审片项目没有一致的成片引用。" />
     );
   }
+  const collectiveDocument = resolveCollectiveDocumentTarget(surface);
+  if (collectiveDocument) return <CollectiveDocumentSurface source={collectiveDocument} />;
   if (surface.renderer === 'file-preview' || surface.renderer === 'code-editor') {
     return (
       <CanonicalWorkspaceFileSurface

@@ -1,4 +1,6 @@
+import type { SettledHistoryPageOptions } from '../../../utils/settled-history-page.js';
 import { type ApprovalDecisionRead, projectApprovalDecisionRead } from '../ports/IApprovalAdapter.js';
+import { projectSettledPage } from '../project-settled-page.js';
 /**
  * F260 Phase A: Entity Proposal → ApprovalItem adapter.
  *
@@ -33,6 +35,19 @@ export class F260ApprovalAdapter implements IApprovalAdapter {
     ) => EntityConflictContext | null | Promise<EntityConflictContext | null>,
     private readonly readEffectProof?: (proposal: EntityProposal) => Promise<string | null> | string | null,
   ) {}
+
+  async listSettledPage(owner: string, options: SettledHistoryPageOptions) {
+    return projectSettledPage(this.store, owner, options, async (proposal) =>
+      toSettledItem(
+        proposal,
+        proposal.status === 'approved'
+          ? await Promise.resolve()
+              .then(() => this.readEffectProof?.(proposal))
+              .catch(() => null)
+          : null,
+      ),
+    );
+  }
 
   listPending(userId: string): ApprovalItem[] | Promise<ApprovalItem[]> {
     const result = this.store.listPending(userId, ALL_PENDING_APPROVALS_LIMIT);

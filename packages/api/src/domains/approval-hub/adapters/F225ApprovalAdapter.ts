@@ -1,4 +1,6 @@
+import type { SettledHistoryPageOptions } from '../../../utils/settled-history-page.js';
 import { type ApprovalDecisionRead, projectApprovalDecisionRead } from '../ports/IApprovalAdapter.js';
+import { projectSettledPage } from '../project-settled-page.js';
 /**
  * F246: F225 (Session Handoff Proposal) → ApprovalItem adapter.
  *
@@ -22,6 +24,10 @@ export class F225ApprovalAdapter implements IApprovalAdapter {
   readonly featureId = 'F225' as const;
 
   constructor(private readonly store: ISessionHandoffProposalStore) {}
+
+  async listSettledPage(owner: string, options: SettledHistoryPageOptions) {
+    return projectSettledPage(this.store, owner, options, toSettledItem);
+  }
 
   listPending(userId: string): ApprovalItem[] | Promise<ApprovalItem[]> {
     const result = this.store.listPendingByUser(userId, ALL_PENDING_APPROVALS_LIMIT);
@@ -88,6 +94,9 @@ function toSettledItem(p: SessionHandoffProposal): SettledApprovalItem | null {
     status: p.status as 'approved' | 'rejected' | 'expired',
     summary: `Session handoff: ${p.sourceCatId} → ${p.note.done.slice(0, 60)}`,
     detail: {
+      ...(p.status === 'approved' && p.sealedSessionId === p.sourceSessionId && p.continuationEntryId?.trim()
+        ? { canonicalEffectProofRef: `session-handoff:${p.proposalId}:continuation:${p.continuationEntryId}` }
+        : {}),
       done: p.note.done,
       nextSteps: p.note.nextSteps,
       worktreeBranch: p.note.worktreeBranch,

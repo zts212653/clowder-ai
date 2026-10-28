@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useApprovalHost, useGuardedWrite, useWriteBlocked } from '@/components/ApprovalHost';
 import { MarkdownContent } from '@/components/MarkdownContent';
+import { approvalResultRead } from '@/lib/approval-result-read';
 import type { RichCardBlock } from '@/stores/chat-types';
 import { apiFetch } from '@/utils/api-client';
 import { originalApprovalCopy } from '../shell/mailbox/original-approval.shell-copy';
@@ -10,6 +11,7 @@ import { useShellCopy } from '../shell/shell-copy';
 import { useShellPresentation } from '../shell/shell-presentation';
 import { HandoffCardContent } from './HandoffCardContent';
 import { HandoffResultRow } from './HandoffResultRow';
+import { useApprovalStatus } from './use-approval-status';
 
 type Status = 'pending' | 'approving' | 'approved' | 'rejected' | 'expired';
 
@@ -121,7 +123,11 @@ export function HandoffProposalCard({ block }: { block: RichCardBlock; messageId
   const copy = useShellCopy(originalApprovalCopy);
   const guardedWrite = useGuardedWrite();
   const proposalId = useMemo(() => extractProposalId(block), [block]);
-  const [status, setStatus] = useState<Status>('pending');
+  const native = useApprovalStatus('F225', proposalId, `/api/session-handoff/${encodeURIComponent(proposalId ?? '')}`);
+  const nativeStatus = ['pending', 'approving', 'approved', 'rejected', 'expired'].includes(native.status ?? '')
+    ? (native.status as Status)
+    : null;
+  const [status, setStatus] = useState<Status>(() => nativeStatus ?? 'pending');
   const [loading, setLoading] = useState(false);
   const [statusKnown, setStatusKnown] = useState(false);
   const writeBlocked = useWriteBlocked(
@@ -129,35 +135,11 @@ export function HandoffProposalCard({ block }: { block: RichCardBlock; messageId
   );
   const [error, setError] = useState<string | null>(null);
 
-  // Mount: fetch durable status so a reloaded / multi-tab card (that missed the socket event)
-  // doesn't drift to stale 'pending' and re-show live buttons on a settled proposal (云端 review P2,
-  // mirrors ProposalCard).
   useEffect(() => {
-    if (!proposalId) return;
-    let cancelled = false;
-    (async () => {
-      try {
-        const res = await apiFetch(`/api/session-handoff/${proposalId}`);
-        if (!res.ok || cancelled) return;
-        const data = (await res.json()) as { proposal?: { proposalId?: string; status?: Status } };
-        const fetched = data.proposal?.status;
-        const verified =
-          ['pending', 'approving', 'approved', 'rejected', 'expired'].includes(String(fetched)) &&
-          data.proposal?.proposalId === proposalId;
-        if (fetched && !cancelled && (host.presentation !== 'mailbox' || verified)) {
-          setStatusKnown(true);
-          // Monotonic hydration (砚砚 re-review P2): a late GET (e.g. a stale 'pending') must NOT
-          // overwrite a status the user already settled by clicking approve/reject before it resolved.
-          setStatus((prev) => (isSettled(prev) && !isSettled(fetched) ? prev : fetched));
-        }
-      } catch {
-        // best-effort; keep optimistic 'pending' if the fetch fails
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [proposalId, host.presentation]);
+    if (!nativeStatus) return;
+    setStatusKnown(true);
+    setStatus((previous) => (isSettled(previous) && !isSettled(nativeStatus) ? previous : nativeStatus));
+  }, [nativeStatus]);
 
   // Reflect async / other-tab approve via the same socket event ProposalCard listens to.
   useEffect(() => {
@@ -204,6 +186,7 @@ export function HandoffProposalCard({ block }: { block: RichCardBlock; messageId
       } catch (err) {
         setError(err instanceof Error ? err.message : failMsg);
       } finally {
+        approvalResultRead.invalidate({ producer: 'F225', proposalId });
         setLoading(false);
       }
     },

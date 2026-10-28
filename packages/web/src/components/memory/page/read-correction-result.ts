@@ -1,5 +1,5 @@
 import { memoryOwnerRevisionSchema } from '@cat-cafe/shared';
-import { lookupSettled } from '@/components/shell/mailbox/settled-lookup';
+import { lookupDisplayedSettled, lookupSettled } from '@/components/shell/mailbox/settled-lookup';
 import { apiFetch } from '@/utils/api-client';
 import { isEventCorrection } from './event-correction-read';
 import { memoryObject } from './owner-memory-read';
@@ -20,10 +20,16 @@ export async function readCorrectionResult(
   proposalId: string,
   coordinate: CorrectionCoordinate,
   expectedOwner?: string,
+  display = false,
 ) {
   const ownerUserId = await readCorrectionOwner();
   if (!ownerUserId || (expectedOwner && ownerUserId !== expectedOwner)) return null;
-  const result = await lookupSettled({ ownerUserId, sourceFeatureId: 'F321', proposalId, approvalCardRef: coordinate });
+  const result = await (display ? lookupDisplayedSettled : lookupSettled)({
+    ownerUserId,
+    sourceFeatureId: 'F321',
+    proposalId,
+    approvalCardRef: coordinate,
+  });
   if (result.kind !== 'found') return null;
   let effect = false;
   if (result.terminal.resolution === 'accepted') {

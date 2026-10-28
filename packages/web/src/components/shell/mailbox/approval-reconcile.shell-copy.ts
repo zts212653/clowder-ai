@@ -6,6 +6,10 @@ export const approvalReconcileCopy = defineShellCopy({
     closedReasons: { expired: '已过期', withdrawn: '已撤回' },
     opened: '对话已开',
     effectUnknown: '效果暂未确认',
+    inProgress: '正在处理…',
+    failed: '没办成',
+    writeFailed: '没存上',
+    retry: '再试一次',
     originalEffects: {
       'handoff-started': '接力已发起',
       'profile-written': '档案已写入',
@@ -47,6 +51,10 @@ export const approvalReconcileCopy = defineShellCopy({
     closedReasons: { expired: 'Expired', withdrawn: 'Withdrawn' },
     opened: 'conversation created',
     effectUnknown: 'Effect not yet confirmed',
+    inProgress: 'In progress…',
+    failed: 'The action failed',
+    writeFailed: 'Not saved',
+    retry: 'Try again',
     originalEffects: {
       'handoff-started': 'Handoff started',
       'profile-written': 'Profile written',

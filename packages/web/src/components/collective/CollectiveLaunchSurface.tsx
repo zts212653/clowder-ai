@@ -1,9 +1,10 @@
 'use client';
 
 import type { CollectiveHostParticipationReady } from '@cat-cafe/shared';
-
 import { type RefObject, useEffect, useMemo, useRef, useState } from 'react';
+import { useContentOpen } from '../content-review/useContentOpen';
 import { CollectiveCafeHost } from './CollectiveCafeHost';
+import { CollectiveDocumentWorkspace } from './CollectiveDocumentWorkspace';
 import { CollectiveEntryReview } from './CollectiveEntryReview';
 import {
   CollectiveConnectorBoundary,
@@ -21,6 +22,7 @@ import { useCollectiveActionRef } from './use-collective-action-ref';
 import { useCollectiveAppearanceBridge } from './use-collective-appearance-bridge';
 import { useCollectiveConnectorLaunch } from './use-collective-connector-launch';
 import { useCollectiveContextBridge } from './use-collective-context-bridge';
+import { useCollectiveDocumentBridge } from './use-collective-document-bridge';
 import { useCollectiveEntryPairing } from './use-collective-entry-pairing';
 import { useCollectiveMediaRpc } from './use-collective-media-rpc';
 import { useCollectiveMediaShare } from './use-collective-media-share';
@@ -35,6 +37,9 @@ export function CollectiveLaunchSurface({
 }: {
   readonly initialServiceUrl?: string;
 }) {
+  const contentOpening = useContentOpen();
+  const [documentWorkspace, setDocumentWorkspace] = useState(false);
+  const [documentWorkspaceMounted, setDocumentWorkspaceMounted] = useState(false);
   const actionRef = useCollectiveActionRef();
   const workTarget = useMemo(() => parseCollectiveWorkActionRef(actionRef), [actionRef]);
   const parsedWorldTarget = useMemo(() => parseCollectiveWorldTarget(actionRef), [actionRef]);
@@ -77,6 +82,37 @@ export function CollectiveLaunchSurface({
     pair: entry.receive,
   });
   const contextBridge = useCollectiveContextBridge(iframeRef, connection, workResult.reconcile, workTarget);
+  useCollectiveDocumentBridge({
+    iframe: iframeRef,
+    connection,
+    context: contextBridge.context,
+    onOpen: (target, hostKey) => {
+      void contentOpening.openContent({ kind: 'collective', target, hostKey }).then((opened) => {
+        if (opened) {
+          setDocumentWorkspaceMounted(true);
+          setDocumentWorkspace(true);
+        }
+      });
+    },
+    onReturn: () => setDocumentWorkspace(false),
+  });
+  useEffect(() => {
+    const showHost = (event: Event) => {
+      const hostKey =
+        connection &&
+        JSON.stringify([
+          'collective',
+          connection.serviceInstanceId,
+          connection.collectiveId,
+          connection.connectionId,
+          connection.authorizedHumanId,
+        ]);
+      if (documentWorkspace || (event as CustomEvent<{ hostKey?: string }>).detail?.hostKey === hostKey)
+        setDocumentWorkspace(false);
+    };
+    window.addEventListener('collective:show-document-host', showHost);
+    return () => window.removeEventListener('collective:show-document-host', showHost);
+  }, [connection, documentWorkspace]);
   const mediaRpc = useCollectiveMediaRpc(iframeRef, connection, contextBridge.context, contextBridge.mediaRef);
   const mediaShare = useCollectiveMediaShare(iframeRef, connection, contextBridge.context);
   const policyBridge = useCollectiveWorkPolicyBridge(iframeRef, connection, contextBridge.context);
@@ -105,7 +141,7 @@ export function CollectiveLaunchSurface({
           frameUrl={frameUrl}
           frameKey={world.frameKey}
           frameAttempt={frameAttempt}
-          hidden={Boolean(contextBridge.mediaRef || mediaShare.reference)}
+          hidden={Boolean(documentWorkspace || contextBridge.mediaRef || mediaShare.reference)}
           onLoad={() => {
             pairingBridge.handleFrameLoad();
             contextBridge.reset();
@@ -139,6 +175,9 @@ export function CollectiveLaunchSurface({
         entryError={entry.error}
         entryBusy={entry.busy}
       />
+      {documentWorkspaceMounted && (
+        <CollectiveDocumentWorkspace visible={documentWorkspace} onBack={() => setDocumentWorkspace(false)} />
+      )}
       {connection && contextBridge.context && (
         <CollectiveCafeHost
           key={`${connection.connectionId}:${contextBridge.context.contextId}:${contextBridge.context.channelId}`}

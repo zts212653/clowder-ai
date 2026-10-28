@@ -3,6 +3,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { RichCardBlock } from '@/stores/chat-types';
 import { apiFetch } from '@/utils/api-client';
+import { observeApiSessionOwner } from '@/utils/api-session-identity';
 import { HandoffProposalCard, isHandoffProposalCardBlock } from '../HandoffProposalCard';
 
 vi.mock('@/utils/api-client', () => ({
@@ -46,6 +47,7 @@ describe('HandoffProposalCard (F225 P1-2 — buttons no longer inert)', () => {
     delete (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT;
   });
   beforeEach(() => {
+    observeApiSessionOwner('owner-1');
     vi.mocked(apiFetch).mockReset();
     // 云端 P2 added a mount GET status fetch, so every render now also calls apiFetch. Default:
     // mount GET → pending; POST approve/reject → settled status. Tests override for settled-on-load.
@@ -53,7 +55,7 @@ describe('HandoffProposalCard (F225 P1-2 — buttons no longer inert)', () => {
       if (opts?.method === 'POST') {
         return okJson({ status: url.endsWith('/approve') ? 'approved' : 'rejected' });
       }
-      return okJson({ proposal: { status: 'pending' } });
+      return okJson({ proposal: { proposalId: 'prop_1', status: 'pending' } });
     });
     container = document.createElement('div');
     document.body.appendChild(container);
@@ -138,7 +140,7 @@ describe('HandoffProposalCard (F225 P1-2 — buttons no longer inert)', () => {
     // must render 已过期 from the server result, not 已驳回 from the clicked verb.
     vi.mocked(apiFetch).mockImplementation(async (_url: string, opts?: { method?: string }) => {
       if (opts?.method === 'POST') return okJson({ status: 'expired', deduped: true });
-      return okJson({ proposal: { status: 'pending' } });
+      return okJson({ proposal: { proposalId: 'prop_1', status: 'pending' } });
     });
     await act(async () => {
       root.render(<HandoffProposalCard block={handoffBlock} />);
@@ -163,7 +165,7 @@ describe('HandoffProposalCard (F225 P1-2 — buttons no longer inert)', () => {
           json: async () => ({ error: 'already terminal', status: 'expired' }),
         } as Response;
       }
-      return okJson({ proposal: { status: 'pending' } });
+      return okJson({ proposal: { proposalId: 'prop_1', status: 'pending' } });
     });
     await act(async () => {
       root.render(<HandoffProposalCard block={handoffBlock} />);
@@ -178,11 +180,13 @@ describe('HandoffProposalCard (F225 P1-2 — buttons no longer inert)', () => {
 
   it('hydrates durable status on mount — settled card shows no live buttons (云端 P2)', async () => {
     // mount GET returns an already-approved proposal (reload / multi-tab that missed the socket event)
-    vi.mocked(apiFetch).mockImplementation(async () => okJson({ proposal: { status: 'approved' } }));
+    vi.mocked(apiFetch).mockImplementation(async () =>
+      okJson({ proposal: { proposalId: 'prop_1', status: 'approved' } }),
+    );
     await act(async () => {
       root.render(<HandoffProposalCard block={handoffBlock} />);
     });
-    expect(apiFetch).toHaveBeenCalledWith('/api/session-handoff/prop_1');
+    expect(apiFetch).toHaveBeenCalledWith('/api/session-handoff/prop_1', expect.anything(), { afterCurrentGet: true });
     expect(container.textContent).toContain('已批准');
     expect(container.querySelectorAll('button').length).toBe(0);
   });
@@ -207,7 +211,7 @@ describe('HandoffProposalCard (F225 P1-2 — buttons no longer inert)', () => {
     expect(container.textContent).toContain('已批准');
     // now the late mount GET resolves with a STALE 'pending'
     await act(async () => {
-      resolveGet?.(okJson({ proposal: { status: 'pending' } }));
+      resolveGet?.(okJson({ proposal: { proposalId: 'prop_1', status: 'pending' } }));
       await lateGet;
     });
     // monotonic: settled 'approved' survives the late pending GET — no live buttons reappear

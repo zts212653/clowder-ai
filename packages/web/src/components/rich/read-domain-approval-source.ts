@@ -1,6 +1,7 @@
 import type { ApprovalHubItem, RichCardBlock, UnifiedAttentionItemV1 } from '@cat-cafe/shared';
 import { matchHostedApproval } from '@/components/shell/mailbox/approval-match';
 import { parseUnifiedAttentionRead } from '@/components/shell/parse-unified-attention';
+import { readFreshApprovalResultOwner } from '@/lib/approval-result-owner';
 import { useApprovalHubStore } from '@/stores/approvalHubStore';
 import { apiFetch } from '@/utils/api-client';
 
@@ -55,15 +56,14 @@ export function domainApprovalCandidate(
 export async function readDomainApprovalSource(
   block: RichCardBlock,
   coordinate: DomainCardCoordinate,
+  fresh = true,
 ): Promise<DomainApprovalSource | null> {
   const candidate = domainApprovalCandidate(block);
   if (!candidate) return null;
   try {
-    const session = await apiFetch('/api/session');
-    if (!session.ok) return null;
-    const identity: unknown = await session.json();
-    if (!identity || typeof identity !== 'object' || !('userId' in identity) || typeof identity.userId !== 'string')
-      return null;
+    const userId = await readFreshApprovalResultOwner();
+    if (!userId) return null;
+    const identity = { userId };
     for (let offset = 0; ; offset += 20) {
       const response = await apiFetch(
         `/api/concierge/work/decisions?view=unified&offset=${offset}&limit=20`,
@@ -100,7 +100,8 @@ export async function readDomainApprovalSource(
           JSON.stringify(proof.block) !== JSON.stringify(block)
         )
           return null;
-        await useApprovalHubStore.getState().fetchPending();
+        if (fresh) await useApprovalHubStore.getState().fetchPending();
+        else await useApprovalHubStore.getState().ensurePending(identity.userId);
         const store = useApprovalHubStore.getState();
         if (!store.pendingReadAvailable || store.isLoading) return null;
         const match = matchHostedApproval({

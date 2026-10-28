@@ -280,7 +280,11 @@ it('refuses a changed undo epoch before submitting the selected drafts', async (
 it('keeps an edited subset through an unavailable reread and locks producer buttons', async () => {
   await render('Chat');
   await act(async () => container.querySelectorAll<HTMLInputElement>('input[type="checkbox"]')[1]?.click());
-  vi.mocked(apiFetch).mockResolvedValue(Response.json({ error: 'unavailable' }, { status: 503 }));
+  vi.mocked(apiFetch).mockImplementation(async (path) =>
+    path === '/api/session'
+      ? Response.json({ userId: 'owner-1' })
+      : Response.json({ error: 'unavailable' }, { status: 503 }),
+  );
   await act(async () =>
     [...container.querySelectorAll<HTMLButtonElement>('button')].find((b) => b.textContent === '重新读取')?.click(),
   );
@@ -356,6 +360,7 @@ it('the first Inbox layer shows the person and two draft choices without opening
       latestRead: () => ({ result: okRead([row]), generation: 1 }),
       now: Date.now,
     });
+  await useApprovalHubStore.getState().fetchPending();
   await act(async () =>
     root.render(
       <MailboxRow

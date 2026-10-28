@@ -119,10 +119,7 @@ export function captureNamedAlphaRedisIdentity(raw, deps = {}) {
   return withIdentityReobservation((readListeners) => captureRedisIdentityOnce(raw, { ...deps, readListeners }), deps);
 }
 
-/** OS metadata must prove the same incarnation before PING, CONFIG, BGSAVE or shutdown is considered. */
-function verifyRedisIdentityOnce(raw, proof, { readListeners = listenerPids, capture = captureProcessIdentity } = {}) {
-  // Serving generators may change tracked files after capture. Reprove the
-  // frozen checkout/build and process identity without reapplying launch cleanliness.
+function storedProofScope(raw, proof) {
   const scope = redisScope(raw, { requireClean: false });
   if (
     !proof ||
@@ -135,6 +132,22 @@ function verifyRedisIdentityOnce(raw, proof, { readListeners = listenerPids, cap
     !proof.process
   )
     throw new Error('Alpha Redis ownership proof is missing or changed');
+  return scope;
+}
+
+/** Historical scope only. This never supplies live ownership or authorizes a protocol command. */
+export function assertNamedAlphaRedisHistoricalProof(raw, proof) {
+  const scope = storedProofScope(raw, proof);
+  if (
+    !validRedisIdentity(proof.process, scope.dataDirectory) ||
+    Date.parse(`${proof.process.startedAt} UTC`) !== proof.process.startedAtEpochMs
+  )
+    throw new Error('Alpha Redis historical process identity is inconsistent');
+}
+
+/** OS metadata must prove the same incarnation before PING, CONFIG, BGSAVE or shutdown is considered. */
+function verifyRedisIdentityOnce(raw, proof, { readListeners = listenerPids, capture = captureProcessIdentity } = {}) {
+  const scope = storedProofScope(raw, proof);
   const listeners = readListeners(scope.port);
   if (listeners.length !== 1 || listeners[0] !== proof.pid) throw new Error('Alpha Redis listener was replaced');
   const current = captureAlphaIdentity(proof.pid, capture, REDIS_SUBJECT);

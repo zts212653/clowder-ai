@@ -144,6 +144,7 @@ afterEach(() => {
   vi.mocked(apiFetch).mockReset();
 });
 async function render(entrance: 'Chat' | 'Inbox', original = block) {
+  if (entrance === 'Inbox') await useApprovalHubStore.getState().fetchPending();
   const row = approvalRow(item);
   const sessions = createApprovalSessions({
     readsStarted: () => 1,

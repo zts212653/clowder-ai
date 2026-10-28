@@ -122,7 +122,7 @@ export class MessageQueryQualifier {
               for (const [key, decision] of parseQualification(text, batch, evidence)) decisions.set(key, decision);
           } catch (error) {
             failed = true;
-            context.onTrace?.({
+            batchObservation.trace({
               phase: 'qualification-unavailable',
               reason: error instanceof Error ? error.name : 'unknown',
             });

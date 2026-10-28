@@ -36,7 +36,11 @@ export function ProjectList({
   readonly participants: readonly CollectiveParticipant[];
   readonly humanNames: Readonly<Record<string, string>>;
   readonly onOpen: (roadmap: CollectiveRoadmapRecord) => void;
-  readonly onOpenArtifact?: (artifact: SharedArtifact) => void;
+  readonly onOpenArtifact?: (
+    artifact: SharedArtifact,
+    ownerRevision?: number,
+    options?: import('./collective-artifact-client.js').SharedArtifactOpenOptions,
+  ) => void;
 }) {
   const [filter, setFilter] = useState<ProjectListFilter>('active');
   const [owner, setOwner] = useState('all');
@@ -178,7 +182,11 @@ function ProjectListRow({
   readonly participants: readonly CollectiveParticipant[];
   readonly humanNames: Readonly<Record<string, string>>;
   readonly onOpen: (roadmap: CollectiveRoadmapRecord) => void;
-  readonly onOpenArtifact?: (artifact: SharedArtifact) => void;
+  readonly onOpenArtifact?: (
+    artifact: SharedArtifact,
+    ownerRevision?: number,
+    options?: import('./collective-artifact-client.js').SharedArtifactOpenOptions,
+  ) => void;
 }) {
   const language = useCollectiveLanguage();
   const projectWorks = worksForRoadmap(roadmap, works);
@@ -253,6 +261,7 @@ function ProjectListRow({
       </button>
       <div className="project-list-artifact-cell">
         <ProjectArtifactSummary
+          roadmap={roadmap}
           works={projectWorks}
           artifacts={artifacts}
           status={artifactStatus}

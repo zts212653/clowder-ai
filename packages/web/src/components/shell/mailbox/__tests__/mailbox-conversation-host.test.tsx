@@ -102,9 +102,7 @@ it('keeps the original conversation choices actionable in the collapsed row and 
   const posts = vi.mocked(apiFetch).mock.calls.filter(([, o]) => o?.method === 'POST');
   expect(posts).toHaveLength(1);
   expect(JSON.parse(String(posts[0][1]?.body)).expectedRevision).toBe(5);
-  expect(container.querySelector('[data-testid=conversation-decision-result]')?.textContent).toContain(
-    '已在对话里回答',
-  );
+  expect(container.querySelector('[data-testid=conversation-decision-result]')?.textContent).toContain('已选「Alpha」');
 });
 it('a newer pending read closes the writer before React has committed its stale row', async () => {
   await render();

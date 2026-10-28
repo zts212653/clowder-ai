@@ -33,10 +33,13 @@ vi.mock('next/navigation', () => ({ usePathname: () => '/thread/current', useRou
 vi.mock('@/stores/chatStore', () => ({
   useChatStore: (s: (v: { setWorkspaceMode: () => void }) => unknown) => s({ setWorkspaceMode: vi.fn() }),
 }));
-vi.mock('@/stores/approvalHubStore', () => ({
-  useApprovalHubStore: (s: (v: { fetchPending: () => void; decisionAttempts: Record<string, never> }) => unknown) =>
-    s({ fetchPending: vi.fn(), decisionAttempts: {} }),
-}));
+vi.mock('@/stores/approvalHubStore', () => {
+  const state = { fetchPending: vi.fn(), ensurePending: vi.fn(), pendingRequestVersion: 0, decisionAttempts: {} };
+  const useApprovalHubStore = (select: (value: typeof state) => unknown) => select(state);
+  useApprovalHubStore.getState = () => state;
+  useApprovalHubStore.subscribe = () => () => {};
+  return { useApprovalHubStore };
+});
 vi.mock('../mailbox/open-exact-place', () => ({ openExactPlace: data.navigate }));
 vi.mock('@/hooks/useCatNameResolver', () => ({ useCatNameResolver: () => (catId: string) => `猫:${catId}` }));
 vi.mock('../use-unified-attention', () => ({ useUnifiedAttention: () => data.view }));
@@ -270,9 +273,12 @@ describe('the 待办 panel and the approvals it can host', () => {
 
   describe('a result outlives the row it belongs to', () => {
     it('keeps a decided result when the read no longer lists the approval', async () => {
+      data.sessions = fakeSessions([sessionIn({ kind: 'writing', attemptId: 2 })]);
+      show(okRead([row]));
+      await openPanel();
       data.sessions = fakeSessions([sessionIn(decided)]);
       show(okRead([]));
-      await openPanel();
+      await act(async () => root.render(<MailboxButton />));
       const retained = $('mailbox-retained-result');
       expect(retained).not.toBeNull();
       expect(retained?.textContent).toContain('已同意');
@@ -284,9 +290,12 @@ describe('the 待办 panel and the approvals it can host', () => {
 
     it('lets the user dismiss it, and only then is it forgotten', async () => {
       const sessions = fakeSessions([sessionIn(decided)]);
+      data.sessions = fakeSessions([sessionIn({ kind: 'writing', attemptId: 2 })]);
+      show(okRead([row]));
+      await openPanel();
       data.sessions = sessions;
       show(okRead([]));
-      await openPanel();
+      await act(async () => root.render(<MailboxButton />));
       await act(async () =>
         $('mailbox-retained-result')?.querySelector<HTMLButtonElement>('button[aria-expanded="false"]')?.click(),
       );

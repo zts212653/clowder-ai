@@ -1,11 +1,10 @@
 'use client';
 import type { RichCardBlock } from '@cat-cafe/shared';
-import { type ReactNode, useCallback, useEffect, useRef, useState } from 'react';
+import { type ReactNode, useCallback, useRef } from 'react';
 import { type ApprovalHost, ApprovalHostContext } from '@/components/ApprovalHost';
 import { describeReconcile } from '@/components/shell/mailbox/approval-reconcile';
 import { useShellCopy } from '@/components/shell/shell-copy';
 import { useShellLanguage } from '@/components/shell/shell-language';
-import { UNIFIED_ATTENTION_INVALIDATION_EVENTS } from '@/components/shell/use-unified-attention';
 import { CardBlock } from './CardBlock';
 import { DomainApprovalCard } from './DomainApprovalCard';
 import { domainApprovalCopy } from './domain-approval.shell-copy';
@@ -14,8 +13,10 @@ import { readDomainApprovalResult } from './read-domain-approval-result';
 import {
   type DomainApprovalSource,
   type DomainCardCoordinate,
+  domainApprovalCandidate,
   readDomainApprovalSource,
 } from './read-domain-approval-source';
+import { RetainedApprovalCardResult, useOriginalApprovalRead } from './use-original-approval-read';
 
 /** Chat and Inbox share the verified original card and the original domain writer. Absence is never a terminal result. */
 export function OriginalDomainApprovalCard({
@@ -37,47 +38,40 @@ export function OriginalDomainApprovalCard({
 }) {
   const t = useShellCopy(domainApprovalCopy);
   const language = useShellLanguage();
-  const [result, setResult] = useState<Awaited<ReturnType<typeof readDomainApprovalResult>>>(null);
-  const [last, setLast] = useState<DomainApprovalSource | null>(null),
-    [current, setCurrent] = useState(false);
-  const liveSource = useRef<DomainApprovalSource | null>(null),
-    writing = useRef(false),
-    generation = useRef(0);
+  const candidate = domainApprovalCandidate(block);
   const threadId = coordinate?.threadId,
     messageId = coordinate?.messageId;
+  const writing = useRef(false);
+  const source = useOriginalApprovalRead(
+    candidate?.feature ?? '',
+    candidate?.proposalId ?? null,
+    { threadId, messageId, block },
+    async (_signal, fresh) => {
+      const read = threadId && messageId ? await readDomainApprovalSource(block, { threadId, messageId }, fresh) : null;
+      const next = read && (!expectedOwnerUserId || read.ownerUserId === expectedOwnerUserId) ? read : null;
+      const outcome =
+        !next && threadId && messageId
+          ? await readDomainApprovalResult(block, { threadId, messageId }, expectedOwnerUserId, !fresh)
+          : null;
+      return { next, outcome };
+    },
+    expectedOwnerUserId,
+  );
+  const remembered = useRef<{ key: string; source: DomainApprovalSource } | null>(null);
+  const binding = JSON.stringify([source.ownerUserId, candidate, threadId, messageId, block]);
+  if (remembered.current?.key !== binding) remembered.current = null;
+  const next = source.value?.next ?? null;
+  if (next) remembered.current = { key: binding, source: next };
+  const last = source.ownerUserId ? (remembered.current?.source ?? null) : null,
+    result = source.value?.outcome ?? null;
+  const current = !!next && !source.reading && !source.failed;
+  const liveSource = useRef(last);
+  liveSource.current = current ? last : null;
   const refresh = useCallback(async () => {
-    const round = ++generation.current;
-    liveSource.current = null;
-    setCurrent(false);
-    setResult(null);
-    const read = threadId && messageId ? await readDomainApprovalSource(block, { threadId, messageId }) : null;
-    const next = read && (!expectedOwnerUserId || read.ownerUserId === expectedOwnerUserId) ? read : null;
-    const outcome =
-      !next && threadId && messageId
-        ? await readDomainApprovalResult(block, { threadId, messageId }, expectedOwnerUserId)
-        : null;
-    if (round !== generation.current) return null;
+    const next = (await source.refresh())?.next ?? null;
     liveSource.current = next;
-    setCurrent(next !== null);
-    setResult(outcome);
-    if (next) setLast(next);
     return next;
-  }, [block, threadId, messageId, expectedOwnerUserId]);
-  const cancelReads = useCallback(() => {
-    ++generation.current;
-    liveSource.current = null;
-  }, []);
-  useEffect(() => {
-    void refresh();
-    const invalidate = () => {
-      void refresh();
-    };
-    for (const event of UNIFIED_ATTENTION_INVALIDATION_EVENTS) window.addEventListener(event, invalidate);
-    return () => {
-      cancelReads();
-      for (const event of UNIFIED_ATTENTION_INVALIDATION_EVENTS) window.removeEventListener(event, invalidate);
-    };
-  }, [refresh, cancelReads]);
+  }, [source.refresh]);
   const beforeWrite = useCallback(async () => {
     const previous = liveSource.current;
     if (!previous || writing.current || (verifyCurrentRead && !verifyCurrentRead())) return false;
@@ -97,6 +91,12 @@ export function OriginalDomainApprovalCard({
       if (event.phase === 'end') onWriteSettled?.();
     },
   };
+  if (source.retained)
+    return (
+      <div data-testid="domain-approval-result">
+        <RetainedApprovalCardResult item={source.retained} reread={() => void source.reread()} />
+      </div>
+    );
   if (result) {
     const line =
       describeReconcile(

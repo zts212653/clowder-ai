@@ -1,10 +1,12 @@
-import { useEffect, useState } from 'react';
 import { correctionEffectConfirmed } from '@/components/memory/page/read-correction-result';
 import { readEvalRepairResult } from '@/components/rich/read-eval-repair';
 import { readScheduleSource, scheduleEffect } from '@/components/rich/read-schedule-approval';
+import { readApprovalProducerBody } from '@/lib/approval-producer-read';
+import { approvalResultRead } from '@/lib/approval-result-read';
+import { producerCommittedEffect } from '@/lib/producer-result-effect';
+import { useApprovalResult } from '@/lib/use-approval-result';
 import { canonicalDomainEffect, type DomainApprovalEffect, domainAttemptEffect } from '@/stores/approval-domain-effect';
 import { useApprovalHubStore } from '@/stores/approvalHubStore';
-import { apiFetch } from '@/utils/api-client';
 import type { ApprovalSession } from './approval-sessions';
 
 export type OriginalApprovalEffect =
@@ -16,31 +18,6 @@ export type OriginalApprovalEffect =
   | 'repair-started'
   | DomainApprovalEffect;
 
-function asRecord(value: unknown): Record<string, unknown> | null {
-  return value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
-}
-
-function confirmedEffect(
-  value: unknown,
-  feature: string,
-  proposalId: string,
-  originalSession: unknown,
-): OriginalApprovalEffect | null {
-  const body = asRecord(value);
-  if (feature === 'F321') return correctionEffectConfirmed(value, proposalId) ? 'memory-corrected' : null;
-  const record = feature === 'F225' ? asRecord(body?.proposal) : body;
-  if (record?.proposalId !== proposalId || record?.status !== 'approved') return null;
-  if (feature === 'F221') return 'taste-written';
-  // F225 approved crosses note + seal + continuation enqueue; correlate the original session witness too.
-  if (feature === 'F225') {
-    return typeof originalSession === 'string' && originalSession && record.sealedSessionId === originalSession
-      ? 'handoff-started'
-      : null;
-  }
-  // F231 approved is finalized only after the original filesystem/provenance write pipeline commits.
-  return feature === 'F231' ? 'profile-written' : null;
-}
-
 /** A producer's owner GET can confirm its historical effect even when the generic Hub adapter has no effect projection. */
 export function useOriginalApprovalEffect(
   session: Pick<ApprovalSession, 'approval' | 'model' | 'ownerUserId' | 'key'>,
@@ -48,91 +25,96 @@ export function useOriginalApprovalEffect(
 ): OriginalApprovalEffect | null {
   const { approval, model } = session;
   const feature = approval.sourceFeatureId;
-  const originalSession = approval.detail.sourceSessionId;
   const eligible =
     model.state.kind === 'decided' &&
     model.state.terminal?.resolution === 'accepted' &&
-    (feature === 'F225' ||
-      feature === 'F231' ||
-      feature === 'F221' ||
-      feature === 'F193' ||
-      feature === 'F260' ||
-      feature === 'F321' ||
-      feature === 'F139' ||
-      feature === 'F266');
-  const enabled = readEnabled && eligible;
+    ['F225', 'F231', 'F221', 'F193', 'F260', 'F321', 'F139', 'F266'].includes(feature);
   const canonical =
     model.state.kind === 'decided'
       ? (model.state.terminal?.domainEffect ?? canonicalDomainEffect(approval))
       : undefined;
-  const attempt = useApprovalHubStore((s) => s.decisionAttempts[approval.proposalId]);
+  const attempt = useApprovalHubStore((state) => state.decisionAttempts[approval.proposalId]);
   const receipt =
     approval.navigation.state === 'anchored'
       ? domainAttemptEffect(attempt, session.ownerUserId, feature, approval.navigation.approvalCardRef)
       : undefined;
-  const key = `${session.key}:${typeof originalSession === 'string' ? originalSession : ''}`;
-  const [confirmed, setConfirmed] = useState<{ key: string; effect: OriginalApprovalEffect } | null>(null);
-  useEffect(() => {
-    if (
-      !enabled ||
-      receipt ||
-      (feature !== 'F225' &&
-        feature !== 'F231' &&
-        feature !== 'F221' &&
-        feature !== 'F321' &&
-        feature !== 'F139' &&
-        feature !== 'F266')
-    )
-      return;
-    let current = true;
-    if (feature === 'F266') {
-      if (approval.navigation.state === 'anchored')
-        void readEvalRepairResult(approval.proposalId, approval.navigation.approvalCardRef, {
-          ...approval,
-          ownerUserId: session.ownerUserId,
-        })
-          .then((result) => {
-            if (current && result?.effect) setConfirmed({ key, effect: result.effect });
-          })
-          .catch(() => {});
-      return () => {
-        current = false;
-      };
-    }
-    if (feature === 'F139') {
-      if (approval.navigation.state === 'anchored') {
-        void readScheduleSource(approval.proposalId, approval.navigation.approvalCardRef, {
-          ...approval,
-          ownerUserId: session.ownerUserId,
-        })
-          .then((proposal) => {
-            const effect = proposal ? scheduleEffect(proposal) : null;
-            if (current && effect) setConfirmed({ key, effect });
-          })
-          .catch(() => {});
+  const repair =
+    feature === 'F266' && approval.materialization.state === 'succeeded' ? ('repair-started' as const) : null;
+  const proof =
+    approval.materialization.state === 'succeeded' &&
+    approval.materialization.effectProofRef === approval.detail.canonicalEffectProofRef
+      ? approval.materialization.effectProofRef
+      : null;
+  let retained: OriginalApprovalEffect | null = null;
+  if (proof && feature === 'F225' && proof.startsWith(`session-handoff:${approval.proposalId}:continuation:`))
+    retained = 'handoff-started';
+  if (proof && feature === 'F231' && proof.startsWith(`profile-update:${approval.proposalId}:provenance:`))
+    retained = 'profile-written';
+  if (
+    proof &&
+    feature === 'F321' &&
+    proof === `event-memory:${approval.detail.eventId}:revision:${approval.detail.appliedRevision}`
+  )
+    retained = 'memory-corrected';
+  if (
+    proof &&
+    feature === 'F139' &&
+    proof ===
+      `schedule-proposal:${approval.proposalId}:checkpoint:${approval.detail.mutationKind}:${approval.detail.taskId}`
+  ) {
+    if (approval.detail.mutationKind === 'create') retained = 'schedule-created';
+    if (approval.detail.mutationKind === 'delete') retained = 'schedule-deleted';
+  }
+  const enabled = eligible && readEnabled && !canonical && !receipt && !repair && !retained;
+  const result = useApprovalResult<OriginalApprovalEffect | null>(
+    feature,
+    enabled ? approval.proposalId : null,
+    'effect',
+    async (signal) => {
+      if (feature === 'F266') {
+        if (approval.navigation.state !== 'anchored') return null;
+        return (
+          (
+            await readEvalRepairResult(approval.proposalId, approval.navigation.approvalCardRef, {
+              ...approval,
+              ownerUserId: session.ownerUserId,
+            })
+          )?.effect ?? null
+        );
       }
-      return () => {
-        current = false;
-      };
-    }
-    const prefix =
-      feature === 'F225'
-        ? 'session-handoff'
-        : feature === 'F231'
-          ? 'profile-updates'
-          : feature === 'F321'
-            ? 'event-memory-corrections'
-            : 'taste-proposals';
-    void apiFetch(`/api/${prefix}/${encodeURIComponent(approval.proposalId)}`, {}, { afterCurrentGet: true })
-      .then(async (response) => {
-        if (!response.ok) return;
-        const effect = confirmedEffect(await response.json(), feature, approval.proposalId, originalSession);
-        if (current && effect) setConfirmed({ key, effect });
-      })
-      .catch(() => {});
-    return () => {
-      current = false;
-    };
-  }, [enabled, feature, approval, session.ownerUserId, originalSession, key, receipt]);
-  return eligible ? (canonical ?? receipt ?? (enabled && confirmed?.key === key ? confirmed.effect : null)) : null;
+      if (feature === 'F139') {
+        if (approval.navigation.state !== 'anchored') return null;
+        const proposal = await readScheduleSource(approval.proposalId, approval.navigation.approvalCardRef, {
+          ...approval,
+          ownerUserId: session.ownerUserId,
+        });
+        return proposal ? scheduleEffect(proposal) : null;
+      }
+      if (feature !== 'F225' && feature !== 'F231' && feature !== 'F221' && feature !== 'F321') return null;
+      const prefixes = {
+        F225: 'session-handoff',
+        F231: 'profile-updates',
+        F321: 'event-memory-corrections',
+        F221: 'taste-proposals',
+      } as const;
+      const body = await readApprovalProducerBody(
+        { owner: session.ownerUserId, producer: feature, proposalId: approval.proposalId },
+        `/api/${prefixes[feature]}/${encodeURIComponent(approval.proposalId)}`,
+        { signal },
+      );
+      const effect =
+        feature === 'F321'
+          ? correctionEffectConfirmed(body, approval.proposalId)
+            ? ('memory-corrected' as const)
+            : null
+          : producerCommittedEffect(body, feature, approval.proposalId, approval.detail.sourceSessionId);
+      if (effect) {
+        const key = { owner: session.ownerUserId, producer: feature, proposalId: approval.proposalId };
+        approvalResultRead.terminal(key);
+      }
+      return effect;
+    },
+    session.ownerUserId,
+  );
+  return eligible ? (canonical ?? receipt ?? repair ?? retained ?? result.value ?? null) : null;
 }

@@ -316,6 +316,8 @@ export interface StoredMessage {
   metadata?: MessageMetadata;
   /** F022+F052+F098-C1+F153-F: Extensible extra data (rich blocks, stream metadata, cross-post origin, explicit targets, tracing pointers) */
   extra?: {
+    /** Authenticated cloud-return scope, never a replacement for native delivery history. */
+    cloudBridgeReturn?: import('@cat-cafe/shared').CloudBridgeReturnV1;
     /** F167: one authenticated immutable ordinary Task handoff, recovered by the existing Queue. */
     taskHandoff?: import('../../../../ball-custody/OrdinaryTaskHandoffContract.js').OrdinaryTaskHandoffRequest;
     taskHandoffInvalid?: true;

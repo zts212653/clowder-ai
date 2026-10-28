@@ -4,6 +4,7 @@ import type {
   EventMemoryCorrectionProposal,
   MemoryCorrectionReason,
 } from '@cat-cafe/shared';
+import type { SettledHistoryPageOptions, SettledHistorySourcePage } from '../../../utils/settled-history-page.js';
 import type { ApprovalPublicationStore } from '../../approval-hub/ports/ApprovalPublicationStore.js';
 
 export interface CreateEventMemoryCorrectionProposalInput {
@@ -25,6 +26,12 @@ export interface EventMemoryCorrectionProposalStore extends ApprovalPublicationS
   create(input: CreateEventMemoryCorrectionProposalInput): Promise<EventMemoryCorrectionProposal>;
   get(proposalId: string): Promise<EventMemoryCorrectionProposal | null>;
   listActionable(ownerUserId: string, limit?: number): Promise<EventMemoryCorrectionProposal[]>;
+  listSettledPage?(
+    owner: string,
+    options: SettledHistoryPageOptions,
+  ):
+    | SettledHistorySourcePage<EventMemoryCorrectionProposal>
+    | Promise<SettledHistorySourcePage<EventMemoryCorrectionProposal>>;
   listSettled(ownerUserId: string, limit?: number): Promise<EventMemoryCorrectionProposal[]>;
   countActionableForEvents(ownerUserId: string, eventIds: readonly string[]): Promise<ReadonlyMap<string, number>>;
   listActionableForEvent(

@@ -3,8 +3,10 @@
 import type { UnifiedAttentionItemV1 } from '@cat-cafe/shared';
 import { useState } from 'react';
 import { apiFetch } from '@/utils/api-client';
+import { apiSessionIdentity } from '@/utils/api-session-identity';
 import { useShellCopy } from '../shell-copy';
 import { mailboxEntryCopy } from './mailbox-entry.shell-copy';
+import { useMailboxFeedback } from './mailbox-feedback';
 
 export function UserMentionDetails({
   request,
@@ -14,9 +16,11 @@ export function UserMentionDetails({
   showHandling?: boolean;
 }) {
   const t = useShellCopy(mailboxEntryCopy);
+  const acknowledge = useMailboxFeedback();
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   async function resolve() {
+    const owner = apiSessionIdentity.getSnapshot().ownerUserId;
     setPending(true);
     setError(null);
     try {
@@ -30,6 +34,17 @@ export function UserMentionDetails({
         if (response.status === 409) window.dispatchEvent(new Event('cat-cafe:user-mention-updated'));
         return;
       }
+      const body: unknown = await response.json();
+      if (!body || typeof body !== 'object' || !('status' in body) || body.status !== 'resolved')
+        throw new Error('Unconfirmed handling');
+      if (owner && owner === apiSessionIdentity.getSnapshot().ownerUserId && request.expectedRevision !== undefined)
+        acknowledge({
+          owner,
+          result: 'handled',
+          threadId: request.threadId,
+          messageId: request.messageId,
+          expectedRevision: request.expectedRevision,
+        });
       window.dispatchEvent(new Event('cat-cafe:user-mention-updated'));
     } catch {
       setError(t.mentionResolveFailed);

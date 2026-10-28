@@ -1067,7 +1067,8 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
         ...(m.metadata ? { metadata: m.metadata } : {}),
         ...(m.origin ? { origin: m.origin } : {}),
         ...(m.thinking ? { thinking: m.thinking } : {}),
-        ...(m.extra?.outputLayout ||
+        ...(m.extra?.cloudBridgeReturn ||
+        m.extra?.outputLayout ||
         m.extra?.runtimeInteractionCard ||
         m.extra?.contentModificationReceiptV1 ||
         m.extra?.semanticEvent ||
@@ -1094,6 +1095,7 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
         m.extra?.recovery
           ? {
               extra: {
+                ...(m.extra?.cloudBridgeReturn ? { cloudBridgeReturn: m.extra.cloudBridgeReturn } : {}),
                 ...(m.extra?.outputLayout ? { outputLayout: m.extra.outputLayout } : {}),
                 ...(m.extra?.runtimeInteractionCard ? { runtimeInteractionCard: m.extra.runtimeInteractionCard } : {}),
                 ...(m.extra?.contentModificationReceiptV1

@@ -2,12 +2,11 @@ import { readProfileOpeningReference } from '@cat-cafe/shared/profile-opening-re
 import { CatAvatar } from '@/components/CatAvatar';
 import { useCatData } from '@/hooks/useCatData';
 import { CapsulePendingLabel, pendingCapsuleProposals } from './MemoryCapsuleProposals';
+import { MemoryProfileCardFrame } from './MemoryProfileCardFrame';
 import type { ProfileMemoryRead } from './owner-memory-read';
 import { profileIdentity, profileSections, profileText } from './profile-presentation';
 import { formatMemoryDate } from './use-memory-read';
 
-export const profileCardClass = (selected: boolean) =>
-  `min-w-0 rounded-xl border p-3 ${selected ? 'border-cafe-accent bg-[var(--console-card-bg)]' : 'border-cafe-subtle bg-[var(--console-card-bg)]'}`;
 export function MemoryProfileCard({
   entry,
   selected,
@@ -22,7 +21,7 @@ export function MemoryProfileCard({
   const pending = pendingCapsuleProposals(entry.proposals);
   const opening = entry.layer === 'primer' && readProfileOpeningReference(entry.content);
   return (
-    <article className={profileCardClass(selected)}>
+    <MemoryProfileCardFrame selected={selected} select={select}>
       <div className="flex items-center gap-2">
         {identity.members.map((cat) => (
           <CatAvatar key={cat.id} catId={cat.id} size={24} ring="none" />
@@ -47,6 +46,6 @@ export function MemoryProfileCard({
         {entry.updatedAt !== undefined && <span>{formatMemoryDate(entry.updatedAt)} 更新</span>}
       </div>
       {pending?.[0] && <CapsulePendingLabel proposal={pending[0]} />}
-    </article>
+    </MemoryProfileCardFrame>
   );
 }

@@ -71,6 +71,44 @@ describe('CloudBindingRecoveryCard', () => {
     await flushEffects();
   }
 
+  it.each([
+    true,
+    false,
+  ])('replaces recovery actions with a real reply and honest attempt certainty (proof=%s)', async (withProof) => {
+    const proof = {
+      v: 1 as const,
+      threadId: 'thread-one',
+      sourceMessageId: 'source-one',
+      targetCatId: 'gpt-pro',
+      dispatchInvocationId: 'attempt-one',
+    };
+    mockApiFetch.mockResolvedValue(jsonResponse({ status: 'unverified' }));
+    await renderCard({
+      deliveryStatus: 'unknown',
+      timelineMessages: [
+        { id: 'source-one', type: 'user', content: 'original message', timestamp: 1 },
+        {
+          id: 'reply122',
+          type: 'assistant',
+          from: { kind: 'agent', catId: 'gpt-pro' },
+          catId: 'gpt-pro',
+          content: 'nonempty callback',
+          replyTo: 'source-one',
+          origin: 'callback',
+          timestamp: 3,
+          extra: { isExplicitPost: true, ...(withProof ? { cloudBridgeReturn: proof } : {}) },
+        },
+      ],
+    });
+    expect(container.textContent).toContain('已收到 Pro 回复');
+    expect(container.textContent?.includes('当前发送批次仍待核对')).toBe(!withProof);
+    expect(container.querySelector('[data-recovery-primary]')).toBeNull();
+    expect([...container.querySelectorAll('button')].map((button) => button.textContent)).toEqual(['查看回复']);
+    expect(
+      mockApiFetch.mock.calls.every(([url, init]) => String(url).includes('/cloud-return?') && !init?.method),
+    ).toBe(true);
+  });
+
   it('preselects one authorized conversation and binds before retrying the exact source attempt', async () => {
     const conversationId = '6a928d55-ed7c-83ee-adbf-56bef0ffe336';
     mockApiFetch.mockImplementation(async (path, init) => {

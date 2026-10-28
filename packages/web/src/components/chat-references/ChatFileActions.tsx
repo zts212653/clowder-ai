@@ -26,7 +26,7 @@ export function ChatFileActions({
     <span ref={owned} className="relative inline-flex text-xs">
       <FileActions
         source={{ kind: 'workspace', worktreeId: target.worktreeId, path: target.path }}
-        filename={target.path.split('/').at(-1) ?? target.path}
+        filename={target.absolutePath.split('/').filter(Boolean).at(-1) ?? '/'}
         initiallyOpen={visible}
         contextRef={anchorRef ?? ref}
         hideTrigger={hideTrigger && !inline}

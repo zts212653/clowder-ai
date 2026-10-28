@@ -1,8 +1,9 @@
 'use client';
 
 import type { UnifiedAttentionReadV1 } from '@cat-cafe/shared';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { apiFetch } from '@/utils/api-client';
+import { apiSessionIdentity, observeApiSessionOwner } from '@/utils/api-session-identity';
 import { parseUnifiedAttentionRead } from './parse-unified-attention';
 import { UNIFIED_ATTENTION_INVALIDATION_EVENTS } from './unified-attention-events';
 import type { MailboxRead } from './unified-mailbox-state';
@@ -14,7 +15,7 @@ export const UNIFIED_ATTENTION_PATH =
 /** The original invalidation chain: approvals (F246) and entrusted work / runtime interactions (F310). No new subscription. */
 export { UNIFIED_ATTENTION_INVALIDATION_EVENTS } from './unified-attention-events';
 
-export type MentionPeriod = 'recent' | 'today' | 'week' | 'earlier' | 'handled';
+export type MentionPeriod = 'recent' | 'today' | 'week' | 'earlier' | 'handled' | 'all';
 export type MailboxPersonalView = 'visible' | 'ignored';
 export interface UnifiedAttentionView {
   setPersonalView?: (mode: MailboxPersonalView, period?: MentionPeriod) => void;
@@ -30,6 +31,10 @@ export interface UnifiedAttentionView {
   refetch: () => void;
   nextPage?: () => void;
   previousPage?: () => void;
+  /** Contiguous physical pages of the current owner/query and invalidation epoch. Not independent action authority. */
+  pages?: UnifiedAttentionReadV1[];
+  /** Pages verified since the latest first-page refresh; older display pages cannot authorize actions. */
+  currentPages?: UnifiedAttentionReadV1[];
   /**
    * How many reads this hook has started so far, live: the mount read is the first and every re-read adds one, the moment it
    * starts. "After a write" is judged on this count and not on a clock (the client's and the server's clocks need not agree,
@@ -74,22 +79,37 @@ async function readOnce(
         `personalView=${mode}`,
       ) + (period === 'week' ? '' : `&mentionPeriod=${period}`);
     const unified = await apiFetch(path, { signal }, { afterCurrentGet: true });
+    // Both GETs started together. Even a fast 5xx needs this round's owner before retaining history.
+    const principal = await principalRead;
     if (unified.status === 401) return { kind: 'failed', reason: 'unauthenticated' };
     // 503 is the structured "every source unavailable" read; 200 is available or partial. Anything else is a refusal.
     if (unified.status !== 200 && unified.status !== 503) return { kind: 'failed', reason: 'unavailable' };
 
     const read = parseUnifiedAttentionRead(await unified.json().catch(() => null));
-    if (!read || read.page.offset !== offset || read.page.limit !== 20 || read.personalView?.mode !== mode)
+    if (
+      !read ||
+      read.page.offset !== offset ||
+      read.page.limit !== 20 ||
+      read.personalView?.mode !== mode ||
+      (read.mentionPeriod ?? 'week') !== period
+    )
       return { kind: 'failed', reason: 'unavailable' };
-    const principal = await principalRead;
     if (principal === null || read.identity.ownerUserId !== principal) return { kind: 'failed', reason: 'unavailable' };
     return { kind: 'ok', read };
   } catch {
+    await principalRead;
     return { kind: 'failed', reason: 'unavailable' };
   }
 }
 
+const queryKey = (mode: MailboxPersonalView, period: MentionPeriod, offset: number) => `${mode}:${period}:${offset}`;
+
 export function useUnifiedAttention(): UnifiedAttentionView {
+  const identity = useSyncExternalStore(
+    apiSessionIdentity.subscribe,
+    apiSessionIdentity.getSnapshot,
+    apiSessionIdentity.getSnapshot,
+  );
   const [result, setResult] = useState<MailboxRead>({ kind: 'loading' });
   const [badgeResult, setBadgeResult] = useState<MailboxRead>({ kind: 'loading' });
   const [staleRead, setStaleRead] = useState<UnifiedAttentionReadV1 | null>(null);
@@ -97,23 +117,32 @@ export function useUnifiedAttention(): UnifiedAttentionView {
   const lastOkRef = useRef<UnifiedAttentionReadV1 | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const startedRef = useRef(0);
+  const pageEpoch = useRef(0);
   const periodRef = useRef<MentionPeriod>('week');
   const modeRef = useRef<MailboxPersonalView>('visible');
+  const offsetRef = useRef(0);
+  const ownerRef = useRef<string | null>(null);
+  const queryCache = useRef(new Map<string, { read: UnifiedAttentionReadV1; generation: number }>());
   const readsStarted = useCallback(() => startedRef.current, []);
 
   const startRead = useCallback((offset: number) => {
     abortRef.current?.abort();
     const controller = new AbortController();
     abortRef.current = controller;
-    const previous = lastOkRef.current;
     const mode = modeRef.current;
     const period = periodRef.current;
+    offsetRef.current = offset;
+    const cached = queryCache.current.get(queryKey(mode, period, offset));
+    const previous = cached?.read ?? lastOkRef.current;
     const sameScope = previous && previous.personalView?.mode === mode && (previous.mentionPeriod ?? 'week') === period;
     setBadgeResult(sameScope ? { kind: 'ok', read: previous } : { kind: 'loading' });
-    let settled = false;
+    let settled = false,
+      verifiedPrincipal: string | null = null;
+    const sessionGeneration = apiSessionIdentity.getSnapshot().generation;
     // Counted synchronously, before anything is awaited: a write that ends right now must see that this read has begun.
     startedRef.current += 1;
     const generation = startedRef.current;
+    if (offset === 0) pageEpoch.current = generation;
     // Re-reading withdraws the previous claim: loading carries no number, no rows and no generation.
     setResult({ kind: 'loading' });
     setResultGeneration(null);
@@ -124,6 +153,12 @@ export function useUnifiedAttention(): UnifiedAttentionView {
       controller.signal,
       (principal) => {
         if (settled || controller.signal.aborted) return;
+        const currentIdentity = apiSessionIdentity.getSnapshot();
+        if (currentIdentity.generation !== sessionGeneration && currentIdentity.ownerUserId !== principal) return;
+        verifiedPrincipal = principal;
+        if (ownerRef.current !== null && ownerRef.current !== principal) queryCache.current.clear();
+        ownerRef.current = principal;
+        observeApiSessionOwner(principal);
         if (!previous || principal !== previous.identity.ownerUserId) setBadgeResult({ kind: 'loading' });
         if (
           previous &&
@@ -141,8 +176,18 @@ export function useUnifiedAttention(): UnifiedAttentionView {
       // A newer read aborted this controller (or the hook is gone): this answer is no longer the current question's.
       if (controller.signal.aborted) return;
       settled = true;
+      if (next.kind === 'ok' && next.read.identity.ownerUserId !== apiSessionIdentity.getSnapshot().ownerUserId)
+        next = { kind: 'failed', reason: 'unavailable' };
       lastOkRef.current = next.kind === 'ok' ? next.read : null;
-      setStaleRead(null);
+      const retainHistory =
+        next.kind === 'failed' &&
+        (period === 'handled' || mode === 'ignored') &&
+        previous?.identity.ownerUserId === verifiedPrincipal &&
+        verifiedPrincipal === apiSessionIdentity.getSnapshot().ownerUserId;
+      if (retainHistory && previous) lastOkRef.current = previous;
+      if (next.kind === 'ok') queryCache.current.set(queryKey(mode, period, offset), { read: next.read, generation });
+      else if (!retainHistory) queryCache.current.clear();
+      setStaleRead(retainHistory ? previous : null);
       setResult(next);
       setBadgeResult(next);
       setResultGeneration(generation);
@@ -151,18 +196,34 @@ export function useUnifiedAttention(): UnifiedAttentionView {
 
   const setPersonalView = useCallback(
     (mode: MailboxPersonalView, period?: MentionPeriod) => {
+      const nextPeriod = period ?? periodRef.current;
+      if (modeRef.current === mode && periodRef.current === nextPeriod && offsetRef.current === 0) return;
       modeRef.current = mode;
-      if (period !== undefined) periodRef.current = period;
-      startRead(0);
+      periodRef.current = nextPeriod;
+      const cached = queryCache.current.get(queryKey(mode, nextPeriod, 0));
+      if (
+        cached &&
+        cached.read.identity.ownerUserId === ownerRef.current &&
+        cached.read.identity.ownerUserId === apiSessionIdentity.getSnapshot().ownerUserId
+      ) {
+        abortRef.current?.abort();
+        offsetRef.current = 0;
+        lastOkRef.current = cached.read;
+        setResult({ kind: 'ok', read: cached.read });
+        setBadgeResult({ kind: 'ok', read: cached.read });
+        setStaleRead(null);
+        setResultGeneration(cached.generation === startedRef.current ? cached.generation : null);
+        if (cached.generation !== startedRef.current) startRead(0);
+      } else startRead(0);
     },
     [startRead],
   );
   const setMentionPeriod = useCallback(
     (period: MentionPeriod) => {
-      periodRef.current = period;
-      startRead(0);
+      if (periodRef.current === period && offsetRef.current === 0) return;
+      setPersonalView(modeRef.current, period);
     },
-    [startRead],
+    [setPersonalView],
   );
   const refetch = useCallback(() => startRead(0), [startRead]);
   const nextPage = useCallback(() => {
@@ -176,18 +237,61 @@ export function useUnifiedAttention(): UnifiedAttentionView {
 
   useEffect(() => {
     refetch();
-    const onInvalidated = () => refetch();
+    let queued = false,
+      disposed = false;
+    const onInvalidated = () => {
+      // Keep old pages for display while withdrawing their action epoch synchronously in startRead.
+      if (queued) return;
+      queued = true;
+      if (!disposed) refetch();
+      queueMicrotask(() => {
+        queued = false;
+      });
+    };
     for (const name of UNIFIED_ATTENTION_INVALIDATION_EVENTS) window.addEventListener(name, onInvalidated);
     return () => {
+      disposed = true;
       for (const name of UNIFIED_ATTENTION_INVALIDATION_EVENTS) window.removeEventListener(name, onInvalidated);
       abortRef.current?.abort();
     };
   }, [refetch]);
 
+  useEffect(() => {
+    if (ownerRef.current && ownerRef.current !== identity.ownerUserId) {
+      abortRef.current?.abort();
+      queryCache.current.clear();
+      lastOkRef.current = null;
+      ownerRef.current = null;
+      setStaleRead(null);
+      setResultGeneration(null);
+      if (identity.ownerUserId) startRead(0);
+      else {
+        setResult({ kind: 'failed', reason: 'unauthenticated' });
+        setBadgeResult({ kind: 'failed', reason: 'unauthenticated' });
+      }
+    }
+  }, [identity.ownerUserId, startRead]);
+  const pages: UnifiedAttentionReadV1[] = [],
+    currentPages: UnifiedAttentionReadV1[] = [];
+  for (let offset = 0; ; offset += 20) {
+    const cached = queryCache.current.get(queryKey(modeRef.current, periodRef.current, offset));
+    if (!cached || cached.read.identity.ownerUserId !== ownerRef.current) break;
+    pages.push(cached.read);
+    if (cached.generation >= pageEpoch.current) currentPages.push(cached.read);
+    if (!cached.read.page.hasMore) break;
+  }
   return {
-    result,
-    badgeResult,
-    staleRead,
+    pages,
+    currentPages,
+    result:
+      result.kind === 'ok' && result.read.identity.ownerUserId !== identity.ownerUserId
+        ? { kind: 'failed', reason: 'unavailable' }
+        : result,
+    badgeResult:
+      badgeResult.kind === 'ok' && badgeResult.read.identity.ownerUserId !== identity.ownerUserId
+        ? { kind: 'loading' }
+        : badgeResult,
+    staleRead: staleRead?.identity.ownerUserId === identity.ownerUserId ? staleRead : null,
     refetch,
     nextPage,
     previousPage,

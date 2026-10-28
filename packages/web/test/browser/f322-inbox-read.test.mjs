@@ -55,7 +55,12 @@ for (const language of ['zh', 'en'])
       for (const stream of [server.stdout, server.stderr])
         stream.on('data', (d) => writeFile(path.join(evidence, 'web.log'), d, { flag: 'a' }));
       await waitForHttp(`http://127.0.0.1:${webPort}/thread/${CALENDAR_THREAD}`, server);
-      const browser = await chromium.launch({ headless: true });
+      const browser = await chromium.launch({
+        headless: true,
+        ...(process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH
+          ? { executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH }
+          : {}),
+      });
       t.after(() => browser.close());
       const page = await browser.newPage({ viewport: { width, height: 1000 } });
       const observedReads = [],
@@ -79,6 +84,7 @@ for (const language of ['zh', 'en'])
       }, language);
       const base = `http://127.0.0.1:${webPort}`;
       const rowFor = (title) => page.getByTestId('mailbox-item').filter({ hasText: title });
+      const historyRowFor = (title) => page.getByTestId('mailbox-history-row').filter({ hasText: title });
       const sidebarRow = (id) => page.getByTestId('sidebar-thread-list').locator(`[data-thread-id="${id}"]`);
       const ensureSidebar = async () => {
         const expand = page.getByTestId('header-sidebar-expand');
@@ -164,10 +170,12 @@ for (const language of ['zh', 'en'])
           'reading never settles either original approval',
         );
         await page.getByTestId('mailbox-history').click();
-        await rowFor('Read from the inbox').waitFor();
-        await rowFor('Read from the sidebar').waitFor();
+        await page.getByTestId('mailbox-history-tab-mentions').click();
+        await historyRowFor('Read from the inbox').waitFor();
+        await historyRowFor('Read from the sidebar').waitFor();
         const viewedLabel = language === 'en' ? 'Viewed' : '看过';
         for (const title of ['Read from the inbox', 'Read from the sidebar']) {
+          await historyRowFor(title).getByTestId('mailbox-history-item-toggle').click();
           assert.equal(await rowFor(title).getByTestId('mailbox-mention-handled-reason').innerText(), viewedLabel);
           await rowFor(title).getByText(title, { exact: true }).waitFor();
         }
@@ -176,7 +184,8 @@ for (const language of ['zh', 'en'])
         await page.reload();
         await openMailbox();
         await page.getByTestId('mailbox-history').click();
-        await rowFor('Read from the inbox').waitFor();
+        await page.getByTestId('mailbox-history-tab-mentions').click();
+        await historyRowFor('Read from the inbox').waitFor();
         assert.equal(
           fixture.messages.getUserMentionHandlingMetadata('default-user')[fixture.inbox.message.id].reason,
           'viewed',
@@ -207,6 +216,8 @@ for (const language of ['zh', 'en'])
         await openMailbox();
         await rowFor('A newly published request remains pending').waitFor();
         await page.getByTestId('mailbox-history').click();
+        await page.getByTestId('mailbox-history-tab-mentions').click();
+        await historyRowFor('Answered in the original conversation').getByTestId('mailbox-history-item-toggle').click();
         await rowFor('Answered in the original conversation').waitFor();
         assert.equal(
           await rowFor('Answered in the original conversation')

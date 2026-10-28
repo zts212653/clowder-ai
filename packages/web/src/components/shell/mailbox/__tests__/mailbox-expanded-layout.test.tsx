@@ -3,6 +3,7 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useApprovalHubStore } from '@/stores/approvalHubStore';
+import { observeApiSessionOwner } from '@/utils/api-session-identity';
 import { cardRef, owner, provider, record, setSelect } from '../../../rich/__tests__/runtime-interaction-test-fixtures';
 import { writeShellLanguage } from '../../shell-language';
 import type { UnifiedAttentionView } from '../../use-unified-attention';
@@ -159,6 +160,7 @@ function Wrapper({ item, expanded = true }: { item: UnifiedAttentionItemV1; expa
 }
 
 beforeEach(() => {
+  observeApiSessionOwner('owner-1');
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
   personal.change.mockClear();
   onOpen.mockClear();
@@ -170,6 +172,8 @@ beforeEach(() => {
   });
   useApprovalHubStore.setState({
     items: [approval],
+    pendingReadAvailable: true,
+    pendingOwnerUserId: OWNER,
     count: 1,
     decisionAttempts: {},
     deciding: {},

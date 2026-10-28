@@ -1,6 +1,5 @@
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { catRegistry } from '@cat-cafe/shared';
 import { validateRuntimeProviderBinding } from '../../config/account-resolver.js';
@@ -13,7 +12,8 @@ import { findMonorepoRoot } from '../../utils/monorepo-root.js';
 import { ClaudeAgentService } from '../cats/services/agents/providers/ClaudeAgentService.js';
 import { hasSupportedEnvTemplate } from '../cats/services/agents/providers/env-map.js';
 import { compileL0ViaSubprocess } from '../cats/services/agents/providers/l0-compiler.js';
-import { contentRevision, QUERY_QUALIFICATION_INSTRUCTIONS } from './message-query-protocol.js';
+import { prepareQualificationLaunch } from './message-query-launch.js';
+import { QUERY_QUALIFICATION_INSTRUCTIONS } from './message-query-protocol.js';
 import type { QueryBatchRunner } from './message-query-qualifier.js';
 
 /** Keep the existing supervisor, giving its descendant cleanup time to finish
@@ -40,6 +40,13 @@ export const qualificationSpawnDeps = {
 
 /** Existing native OAuth account and full L0; this consumer never starts a family turn or MCP server. */
 export const runNativeQueryBatch: QueryBatchRunner = async (batch, context) => {
+  const entered = performance.now();
+  let usageAt: number | undefined;
+  const trace = (event: Record<string, unknown>) => {
+    const now = performance.now();
+    if (event.phase === 'native-usage') usageAt = now;
+    context.onTrace?.({ ...event, runnerElapsedMs: Math.max(0, now - entered) });
+  };
   context.signal?.throwIfAborted();
   const config = catRegistry.tryGet('haiku55')?.config;
   if (!config || config.clientId !== 'anthropic' || config.defaultModel !== 'claude-haiku-5-5')
@@ -58,7 +65,7 @@ export const runNativeQueryBatch: QueryBatchRunner = async (batch, context) => {
   );
   const controller = new AbortController();
   const signal = context.signal ? AbortSignal.any([controller.signal, context.signal]) : controller.signal;
-  const observer = nativeQualificationObserver(config.defaultModel, controller, context.onTrace);
+  const observer = nativeQualificationObserver(config.defaultModel, controller, trace);
   let successful = false;
   let failed = false;
   let launched = false;
@@ -87,23 +94,15 @@ export const runNativeQueryBatch: QueryBatchRunner = async (batch, context) => {
       signal.throwIfAborted();
       if (launched) throw new Error('Qualification retries are unavailable');
       launched = true;
-      verifyQualificationLaunch(original.args, config.defaultModel, context.onTrace);
-      context.onTrace?.({
+      const prepared = prepareQualificationLaunch(original, config.defaultModel, trace);
+      trace({
         phase: 'native-launch',
         model: config.defaultModel,
         rows: batch.rows.length,
         bodyChars: batch.rows.reduce((sum, row) => sum + row.body.length, 0),
         safeMode: true,
       });
-      yield* spawnCli(
-        {
-          ...original,
-          args: [...original.args, '--safe-mode'],
-          env: { ...original.env, CLAUDE_CODE_SAFE_MODE: '1' },
-          bindExecutionOwner: false,
-        },
-        qualificationSpawnDeps,
-      );
+      yield* spawnCli(prepared, qualificationSpawnDeps);
     },
   })) {
     if (message.type === 'text')
@@ -120,32 +119,13 @@ export const runNativeQueryBatch: QueryBatchRunner = async (batch, context) => {
   }
   signal.throwIfAborted();
   if (!observer.verified() || !successful || failed) throw new Error('Qualification native result unavailable');
+  trace({
+    phase: 'native-completed',
+    outputChars: text.length,
+    ...(usageAt === undefined ? {} : { afterUsageMs: Math.max(0, performance.now() - usageAt) }),
+  });
   return text;
 };
-
-function verifyQualificationLaunch(
-  args: readonly string[],
-  model: string,
-  trace?: (value: Record<string, unknown>) => void,
-) {
-  const at = (flag: string) => args[args.indexOf(flag) + 1];
-  if (
-    !args.includes('--tools') ||
-    at('--tools') !== '' ||
-    !args.includes('--strict-mcp-config') ||
-    args.some((flag) => ['--mcp-config', '--chrome', '--resume'].includes(flag)) ||
-    at('--model') !== model
-  )
-    throw new Error('Qualification launch mismatch');
-  const instructions = ['--system-prompt-file', '--append-system-prompt-file'].map((flag) => {
-    const path = at(flag);
-    if (!path) throw new Error('Qualification full instructions unavailable');
-    const body = readFileSync(path, 'utf8');
-    if (!body.trim()) throw new Error('Qualification full instructions empty');
-    return { decision: flag, chars: body.length, sha256: contentRevision(body) };
-  });
-  trace?.({ phase: 'native-prepared', instructions });
-}
 
 function nativeQualificationObserver(
   model: string,
@@ -176,6 +156,19 @@ function nativeQualificationObserver(
         modelUsage: item.modelUsage,
         costUsd: item.total_cost_usd,
         durationMs: item.duration_ms,
+      });
+      return;
+    }
+    if (item.type === 'assistant') {
+      const message = object(item.message);
+      const content = Array.isArray(message.content) ? message.content : [];
+      trace?.({
+        phase: 'native-output',
+        usage: message.usage,
+        outputChars: content.reduce((sum, block) => {
+          const value = object(block);
+          return sum + (value.type === 'text' && typeof value.text === 'string' ? value.text.length : 0);
+        }, 0),
       });
       return;
     }

@@ -149,6 +149,7 @@ it.each(['Chat', 'Inbox'] as const)('uses the existing taste recovery on its ori
     latestRead: () => ({ result: okRead([row]), generation: 1 }),
     now: Date.now,
   });
+  if (entrance === 'Inbox') await useApprovalHubStore.getState().fetchPending();
   await act(async () =>
     root.render(
       entrance === 'Chat' ? (

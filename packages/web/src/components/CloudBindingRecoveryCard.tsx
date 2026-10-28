@@ -1,6 +1,8 @@
 'use client';
 
+import { isCloudBridgeOutboundReceiptV1 } from '@cat-cafe/shared';
 import { useId } from 'react';
+import type { ChatMessage } from '@/stores/chat-types';
 import { personalChromeSettingsHref } from '@/utils/personal-chrome-settings';
 import {
   CloudConversationChoices,
@@ -8,10 +10,13 @@ import {
   ConversationSummary,
   OpenConversation,
 } from './CloudConversationChoices';
+import { CloudReplyStatus } from './CloudReplyStatus';
 import type { RecoveryDeliveryStatus, RecoveryLoadState, RecoveryPhase } from './cloud-binding-recovery-operations';
 import { useCloudBindingRecovery } from './useCloudBindingRecovery';
+import { useCloudReply } from './useCloudReply';
 
 export interface CloudBindingRecoveryCardProps {
+  timelineMessages?: readonly ChatMessage[];
   threadId: string;
   sourceMessageId: string;
   targetCatId: string;
@@ -263,6 +268,43 @@ export function CloudBindingRecoveryCardView(props: CloudBindingRecoveryCardView
 }
 
 export function CloudBindingRecoveryCard(props: CloudBindingRecoveryCardProps) {
+  const receipt = props.timelineMessages
+    ?.flatMap((m) => {
+      const value = m.source?.meta?.cloudBridgeOutboundReceipt;
+      return m.source?.connector === 'cloud-bridge-status' &&
+        m.replyTo === props.sourceMessageId &&
+        isCloudBridgeOutboundReceiptV1(value) &&
+        value.sourceMessageId === props.sourceMessageId &&
+        value.targetCatId === props.targetCatId &&
+        (!props.attemptId || value.dispatchInvocationId === props.attemptId)
+        ? [value]
+        : [];
+    })
+    .at(-1);
+  const identity =
+    receipt ??
+    (props.attemptId
+      ? {
+          sourceMessageId: props.sourceMessageId,
+          targetCatId: props.targetCatId,
+          dispatchInvocationId: props.attemptId,
+        }
+      : undefined);
+  const logical = useCloudReply(identity, props.threadId, props.timelineMessages);
+  if (logical.state !== 'unverified')
+    return (
+      <section data-testid="cloud-binding-recovery-card" className="mt-3 rounded-xl border border-default p-4">
+        <CloudReplyStatus
+          result={logical}
+          targetCatId={props.targetCatId}
+          hostUnconfirmed={receipt?.status === 'unknown' && receipt.transport === 'host'}
+        />
+      </section>
+    );
+  return <ActiveRecoveryCard {...props} />;
+}
+
+function ActiveRecoveryCard(props: CloudBindingRecoveryCardProps) {
   const controller = useCloudBindingRecovery(props);
   return (
     <CloudBindingRecoveryCardView

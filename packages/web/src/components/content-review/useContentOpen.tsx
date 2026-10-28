@@ -6,6 +6,8 @@ import { createArtifactSurface, createFileSurface } from '@/components/workbench
 import { useChatStore } from '@/stores/chatStore';
 import { API_URL } from '@/utils/api-client';
 import { captureChatReadingBeforeLayoutChange } from '@/utils/chat-layout-change';
+import { createCollectiveDocumentSurface } from '../workbench/collective-document-surface';
+import { useF307ExperienceWorkbenchStore } from '../workbench/experience-workbench-store';
 import { useArtworkLightboxScope } from './ArtworkLightboxScope';
 import { type ContentOpenSource, contentOpenFacts, contentSourcePreview } from './content-open-source';
 import { contentFileUrl, workspaceFileSourceFromUrl } from './file-source';
@@ -70,6 +72,19 @@ export function useContentOpen(publication?: PublishedMessageCoordinate, sourceS
       useChatStore.getState().currentThreadId === host &&
       scopeRef.current?.getGeneration() === generation;
     try {
+      if (source.kind === 'collective') {
+        captureChatReadingBeforeLayoutChange();
+        const store = useF307ExperienceWorkbenchStore.getState();
+        if (!store.hydrated) store.hydrate();
+        useF307ExperienceWorkbenchStore.getState().dispatch({
+          type: 'open-surface',
+          surface: createCollectiveDocumentSurface({ target: source.target, hostKey: source.hostKey }),
+          entitlement: { kind: 'user', reason: 'open-from-chat' },
+          visitThreadId: host,
+        });
+        scopeRef.current?.close();
+        return true;
+      }
       if (source.kind === 'message-file') {
         const mediaUrl = contentFileUrl(source.url);
         if (!mediaUrl) throw new Error('这份文件的链接格式不可打开。');

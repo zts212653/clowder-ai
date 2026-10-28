@@ -192,6 +192,40 @@ describe('RedisRuntimeInteractionStore', { skip }, () => {
     for (const id of historyIds) assert.equal(await redis.pttl(RuntimeInteractionKeys.detail(id)), -1);
   });
 
+  it('rejects inconsistent settled page membership instead of claiming empty history', async () => {
+    const id = 'page-owner-corrupt';
+    const native = { ...request, interactionId: id, owner: { ...request.owner, userId: 'page-owner' } };
+    await store.createStaged({ request: native, hostEpoch: 'isolated', now: 3998 });
+    await store.anchor(id, 'isolated', { threadId: 'thread-1', messageId: 'page-card', blockId: 'page-block' }, 3999);
+    await store.settle({
+      interactionId: id,
+      hostEpoch: 'isolated',
+      now: 4000,
+      terminal: {
+        status: 'answered',
+        reasonCode: 'answered',
+        settledAt: 4000,
+        response: { kind: 'decision', decisionId: 'accept' },
+      },
+    });
+    let page;
+    for (let batch = 0; batch < 30; batch++) {
+      try {
+        page = await store.listSettledPage('page-owner', { limit: 30 });
+        break;
+      } catch (error) {
+        if (error.code !== 'APPROVAL_HISTORY_PREPARING') throw error;
+      }
+    }
+    assert.equal(page.records.length, 1);
+    await redis.hset(
+      RuntimeInteractionKeys.detail(id),
+      'request',
+      JSON.stringify({ ...native, owner: { ...native.owner, userId: 'other-owner' } }),
+    );
+    await assert.rejects(store.listSettledPage('page-owner', { limit: 30 }), /canonical.*mismatch/i);
+  });
+
   it('bounds legacy history preparation and warm reads independently of historical size', async () => {
     const writes = redis.pipeline();
     for (let i = 0; i < 601; i++) {

@@ -15,6 +15,7 @@ import { settleStoppedNamedAlphaRegistration } from './preview-alpha-registratio
 import { cleanupOwnerResultPath } from './preview-cleanup-result.mjs';
 import { previewCommandIdentityPath } from './preview-command-identity.mjs';
 import { settleCompletedPreviewRegistration } from './preview-completed-registration-settlement.mjs';
+import { settleExpiredNamedAlphaLease } from './preview-expired-lease-settlement.mjs';
 import { ordinaryRetirementCandidate, retireUnclaimedOrdinaryRegistration } from './preview-ordinary-retirement.mjs';
 import { withPreviewMutationLock } from './preview-process-mutex.mjs';
 import { processGroupExists, waitForPort, waitForProcessGroupExit } from './preview-process-runtime.mjs';
@@ -178,6 +179,10 @@ async function stopLocked(config, result, { recovery } = {}) {
       releaseRegistration(config, record, retired.record, retired.summary, retired.assertReadyToRelease),
     );
   if (completion?.exitCode > 0 && !completion.forced && record.command?.includes('--instance')) {
+    const expired = await settleExpiredNamedAlphaLease(config, record, recovery ?? {}, (retired) =>
+      releaseRegistration(config, record, retired.record, retired.summary, retired.assertReadyToRelease),
+    );
+    if (expired) return expired.result;
     await finishFailed();
   } else if (record.completionPath) {
     const completed = await stopWithCompletion(config, record);

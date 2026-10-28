@@ -95,6 +95,8 @@ export {
   type AgentKeyFailureReason,
   isAgentKeyFailureReason,
 } from './agent-key-reasons.js';
+export type { ApprovalHistoryPage, ApprovalHistoryPageRequest } from './approval-history-page.js';
+export { compareApprovalHistoryId, compareApprovalHistoryItems } from './approval-history-page.js';
 export {
   type ApprovalCardRef,
   type ApprovalDecisionMode,
@@ -333,6 +335,7 @@ export {
   isCloudBridgeRecoveryV1,
   isCloudBridgeRetryV1,
 } from './cloud-bridge-outbound-receipt.js';
+export { type CloudBridgeReturnV1, isCloudBridgeReturnV1 } from './cloud-bridge-return.js';
 export * from './collective.js';
 export * from './collective-collaboration.js';
 export * from './collective-decision-vote.js';

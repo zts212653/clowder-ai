@@ -109,20 +109,31 @@ export class DesktopWindowPluginRuntime implements BundledPluginRuntime {
 
   async show(): Promise<void> {
     const run = this.active;
-    if (!run?.ready || !run.observer || !run.lease || !(await this.presence()))
+    if (!run?.ready || !run.observer || !run.window || !run.lease || run.closing)
       throw new Error('desktop body unavailable');
+    const observer = run.observer;
+    const window = run.window;
+    // Join the live attempt when Host IO has aged the projection. An explicit
+    // owner click may wait for fresh evidence; it cannot revive a failed run.
+    if (!observer.observation || this.now() >= observer.observation.expiresAt)
+      await this.observeOrClose(run, () => observer.observe());
+    if (this.active !== run || !(await this.presence())) throw new Error('desktop body unavailable');
     // Admit the send atomically with authority, but never hold a store transaction
     // while waiting for an OS process. A later close is ordered after this send.
     const admitted = await this.features.run(run.lease, async () => ({
-      completion: run.window!.show().then(
+      completion: window.show().then(
         () => ({ ok: true as const }),
         (error: unknown) => ({ ok: false as const, error }),
       ),
     }));
     const result = await admitted.completion;
     if (!result.ok) throw result.error;
+    await this.observeOrClose(run, () => observer.observeAfterShow());
+  }
+
+  private async observeOrClose(run: ActiveWindow, observe: () => Promise<void>): Promise<void> {
     try {
-      await run.observer.observeAfterShow();
+      await observe();
     } catch (error) {
       this.observationLost(run, error);
       throw error;

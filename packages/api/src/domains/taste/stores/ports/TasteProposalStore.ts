@@ -1,3 +1,4 @@
+import type { SettledHistoryPageOptions, SettledHistorySourcePage } from '../../../../utils/settled-history-page.js';
 /**
  * F221 Phase B TasteProposalStore — port interface.
  *
@@ -50,6 +51,10 @@ export interface ITasteProposalStore extends ApprovalPublicationStore {
   /** List user-actionable proposals, including durable approving states that require resume. */
   listActionable(userId: string, limit?: number): TasteProposal[] | Promise<TasteProposal[]>;
   /** List settled (approved+rejected) proposals for a user, ordered by decidedAt DESC. */
+  listSettledPage?(
+    owner: string,
+    options: SettledHistoryPageOptions,
+  ): SettledHistorySourcePage<TasteProposal> | Promise<SettledHistorySourcePage<TasteProposal>>;
   listSettledByUser(userId: string, limit?: number): TasteProposal[] | Promise<TasteProposal[]>;
   /** Actionable correction suggestions attached to one canonical vignette source. */
   listCorrectionsBySource(

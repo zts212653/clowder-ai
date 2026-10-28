@@ -2,6 +2,7 @@ import type { ThreadProposal, UnifiedAttentionVisibleApproval } from '@cat-cafe/
 import type { ReactNode } from 'react';
 import { MarkdownContent } from '@/components/MarkdownContent';
 import { ApprovalMember } from '@/components/rich/ApprovalMember';
+import { HistoryTechnicalDetails } from '@/components/rich/approval-result-history';
 import { ProposalCardDetails, type ProposalDetails } from '@/components/rich/ProposalCardDetails';
 import { proposalResultCopy } from '@/components/rich/proposal-result.shell-copy';
 import { ThreadProposalResult } from '@/components/rich/ThreadProposalResult';
@@ -46,31 +47,40 @@ export function ThreadProposalDecisionReceipt({
       decidedAt={terminal.decidedAt}
       effectUnknown={terminal.effectUnknown}
       effectFailed={approval.materialization.state === 'failed' && !terminal.threadId}
+      effectInProgress={approval.materialization.state === 'in_progress' && !terminal.threadId}
       threadId={terminal.effectUnknown ? undefined : terminal.threadId}
       authorizeOpen={authorizeOpen}
       onExpandedChange={onExpandedChange}
       resolveThreadId={resolveThreadId}
     >
-      <div>
-        <span className="font-semibold">{lead} </span>
-        <MarkdownContent content={title} className="!text-sm [&_p]:mb-0" disableCommandPrefix />
-      </div>
-      <div className="flex items-center gap-2 text-xs">
-        <span>{t.proposer}:</span>
-        <ApprovalMember catId={approval.requesterCatId} />
-      </div>
-      {proposal ? (
-        <ProposalCardDetails
-          proposal={proposal}
-          workMode={proposal.declaredWorkMode}
-          reportingMode={proposal.reportingMode ?? 'final-only'}
-        />
+      {terminal.resolution === 'rejected' && typeof fields.rejectionReason === 'string' && fields.rejectionReason ? (
+        <p className="text-sm">
+          {t.reason}
+          {fields.rejectionReason}
+        </p>
       ) : null}
-      {line ? (
-        <output data-testid="mailbox-retained-line" className="block text-xs text-[var(--shell-muted)]">
-          {line}
-        </output>
-      ) : null}
+      <HistoryTechnicalDetails>
+        <div>
+          <span className="font-semibold">{lead} </span>
+          <MarkdownContent content={title} className="!text-sm [&_p]:mb-0" disableCommandPrefix />
+        </div>
+        <div className="flex items-center gap-2 text-xs">
+          <span>{t.proposer}:</span>
+          <ApprovalMember catId={approval.requesterCatId} />
+        </div>
+        {proposal ? (
+          <ProposalCardDetails
+            proposal={proposal}
+            workMode={proposal.declaredWorkMode}
+            reportingMode={proposal.reportingMode ?? 'final-only'}
+          />
+        ) : null}
+        {line ? (
+          <output data-testid="mailbox-retained-line" className="block text-xs text-[var(--shell-muted)]">
+            {line}
+          </output>
+        ) : null}
+      </HistoryTechnicalDetails>
       {children}
     </ThreadProposalResult>
   );

@@ -9,12 +9,14 @@ export function ReconciledApprovalResult({
   children,
   actions,
   onExpandedChange,
+  effectFailed = false,
 }: {
   terminal: Terminal;
   line: string;
   children: ReactNode;
   actions?: ReactNode;
   onExpandedChange?: (expanded: boolean) => void;
+  effectFailed?: boolean;
 }) {
   return (
     <ApprovalResultRow
@@ -28,6 +30,7 @@ export function ReconciledApprovalResult({
       label={line}
       actions={actions}
       onExpandedChange={onExpandedChange}
+      warning={effectFailed}
     >
       {children}
     </ApprovalResultRow>

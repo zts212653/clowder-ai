@@ -747,6 +747,7 @@ function ChatMessageContent({
         )}
         {cloudBindingRecovery && renderThreadId ? (
           <CloudBindingRecoveryCard
+            timelineMessages={threadMessages}
             threadId={renderThreadId}
             sourceMessageId={message.id}
             targetCatId={cloudBindingRecovery.targetCatId}

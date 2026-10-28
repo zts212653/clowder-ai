@@ -109,7 +109,7 @@ export function preserveRegistrationJournal(
     sources[name] = { path: snapshot.path, sha256: snapshot.sha256 };
   }
   const data = snapshots.map((snapshot, index) => {
-    const savedPath = join(directory, `data-${index}.rdb`);
+    const savedPath = join(directory, `data-${index}.${snapshot.path.endsWith('.rdb') ? 'rdb' : 'bin'}`);
     preserve(savedPath, snapshot);
     return { path: snapshot.path, savedPath, sha256: snapshot.sha256, size: snapshot.bytes.length };
   });

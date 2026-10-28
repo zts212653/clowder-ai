@@ -4,14 +4,14 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { primeCoCreatorConfigCache, resetCoCreatorConfigCacheForTest } from '@/hooks/useCoCreatorConfig';
 import { NeedsMeOwnerSurface, ProductScheduleOwnerSurface } from '../GrowingOwnerSurfaces';
-import { createWorkspaceDestinationSurface } from '../real-surface-adapters';
+import { createWorkspaceDestinationSurface, resolveFileTarget } from '../real-surface-adapters';
 
 const mocks = vi.hoisted(() => ({
   fetch: vi.fn(),
   ownerReads: [] as EntrustedWorkOwnerReadV1[],
   navigate: vi.fn(),
 }));
-vi.mock('@/utils/api-client', () => ({ apiFetch: mocks.fetch }));
+vi.mock('@/utils/api-client', () => ({ apiFetch: mocks.fetch, API_URL: 'http://localhost' }));
 vi.mock('@/hooks/useEntrustedWorkProjection', () => ({
   useEntrustedWorkProjection: () => ({ ownerReads: mocks.ownerReads, loading: false, error: false, refetch: vi.fn() }),
 }));
@@ -204,6 +204,40 @@ describe('F310 prepared Artifact loading in real owner surfaces', () => {
     });
     expect(decodeURIComponent(open.mock.calls[0]?.[0].returnSurface.resultTargetRef.key)).toContain(`${subjectRef}|2`);
     expect(mocks.fetch.mock.calls.map(([path]) => path)).not.toContain('/api/artifacts');
+  });
+
+  it.each([
+    'product-schedule',
+    'needs-me',
+  ] as const)('%s hands the common opener resolved raw FILE to its original return host', async (projection) => {
+    const raw =
+      '/api/workspace/file/raw?' +
+      new URLSearchParams({
+        worktreeId: 'source-tree',
+        path: 'docs/后续建设.md',
+      });
+    const work = preparedOwnerRead();
+    if (!work.preparedArtifact) throw new Error('Expected a prepared source');
+    work.preparedArtifact = {
+      ...work.preparedArtifact,
+      artifactRef: raw,
+      openInWorkspaceRef: `workspace:artifact:thread-source:700:${raw}`,
+    };
+    mocks.ownerReads = [work];
+    mockRequests((path) => {
+      if (path !== '/api/threads/thread-source/artifacts') throw new Error(`Unexpected request: ${path}`);
+      return Promise.resolve(Response.json({ threadId: 'thread-source', artifacts: [{ ...artifact, url: raw }] }));
+    });
+    await render(projection);
+    await act(async () =>
+      button(projection === 'needs-me' ? 'needs-me-open-artifact' : 'product-schedule-open-artifact').click(),
+    );
+    expect(open).toHaveBeenCalledOnce();
+    const { artifact: surface, returnSurface } = open.mock.calls[0][0];
+    expect(surface.type).toBe('file');
+    expect(resolveFileTarget(surface)).toMatchObject({ worktreeId: 'source-tree', path: 'docs/后续建设.md' });
+    expect(decodeURIComponent(returnSurface.resultTargetRef.key)).toContain(`${subjectRef}|2`);
+    expect(mocks.fetch.mock.calls.map(([path]) => path)).not.toContain(raw);
   });
 
   it.each([

@@ -138,6 +138,7 @@
 
 .project-page-main {
   min-width: 0;
+  container: project-main / inline-size;
 }
 
 .project-summary {
@@ -149,6 +150,13 @@
   border: 1px solid var(--console-border-soft);
   border-radius: 12px;
   background: var(--console-card-bg);
+}
+
+@container project-main (max-width: 680px) {
+  .project-summary {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 14px;
+  }
 }
 
 .project-summary h1,
@@ -266,6 +274,12 @@
   .project-view-navigation {
     width: 100%;
     overflow-x: auto;
+  }
+
+  .project-workspace-heading nav > button,
+  .project-view-navigation > button {
+    flex: none;
+    white-space: nowrap;
   }
 
   .project-page-location {

@@ -1,3 +1,5 @@
+import { InMemorySettledIndex } from '../../../../utils/in-memory-settled-index.js';
+import type { SettledHistoryPageOptions, SettledHistorySourcePage } from '../../../../utils/settled-history-page.js';
 /**
  * F260 Phase A: Entity proposal store port.
  *
@@ -65,6 +67,10 @@ export interface IEntityProposalStore extends ApprovalPublicationStore {
   releaseDedup(userId: string, clientRequestId: string, expectedProposalId: string): void | Promise<void>;
 
   /** List settled (approved/rejected) proposals for history view. Newest first. */
+  listSettledPage?(
+    owner: string,
+    options: SettledHistoryPageOptions,
+  ): SettledHistorySourcePage<EntityProposal> | Promise<SettledHistorySourcePage<EntityProposal>>;
   listSettledByUser(userId: string, limit?: number): EntityProposal[] | Promise<EntityProposal[]>;
 
   /** CAS pending → approved. Returns updated proposal, or null if not pending. */
@@ -88,6 +94,30 @@ const DEFAULT_LIST_LIMIT = 100;
 
 /** In-memory implementation for tests and single-process dev. */
 export class InMemoryEntityProposalStore implements IEntityProposalStore, ApprovalPublicationStore {
+  private readonly historyIndex = new InMemorySettledIndex();
+
+  /** Keep only derived ordering refs; original snapshots and mutation semantics remain unchanged. */
+  private indexedSnapshot(record: EntityProposal): EntityProposal {
+    this.historyIndex.update(
+      record.ownerUserId,
+      record.proposalId,
+      ['approved', 'rejected'].includes(record.status) ? (record.approvedAt ?? record.rejectedAt ?? 0) : null,
+    );
+    return clone(record);
+  }
+
+  async listSettledPage(
+    owner: string,
+    options: SettledHistoryPageOptions,
+  ): Promise<SettledHistorySourcePage<EntityProposal>> {
+    return this.historyIndex.page(owner, options, async (id) => {
+      const record = this.proposals.get(id);
+      return record && record.ownerUserId === owner && ['approved', 'rejected'].includes(record.status)
+        ? this.indexedSnapshot(record)
+        : null;
+    });
+  }
+
   private readonly proposals = new Map<string, EntityProposal>();
   private readonly dedupIndex = new Map<string, string>(); // "userId:clientRequestId" → proposalId
   private nextId = 1;
@@ -115,12 +145,12 @@ export class InMemoryEntityProposalStore implements IEntityProposalStore, Approv
       publication: { state: 'staged', stagedAt: now },
     };
     this.proposals.set(proposalId, proposal);
-    return clone(proposal);
+    return this.indexedSnapshot(proposal);
   }
 
   get(proposalId: string): EntityProposal | null {
     const found = this.proposals.get(proposalId);
-    return found ? clone(found) : null;
+    return found ? this.indexedSnapshot(found) : null;
   }
 
   listPending(userId: string, limit: number = DEFAULT_LIST_LIMIT): EntityProposal[] {
@@ -145,7 +175,7 @@ export class InMemoryEntityProposalStore implements IEntityProposalStore, Approv
     proposal.status = 'approved';
     proposal.approvedBy = approvedBy;
     proposal.approvedAt = Date.now();
-    return clone(proposal);
+    return this.indexedSnapshot(proposal);
   }
 
   markRejected(proposalId: string, rejectedBy: string, rejectionReason?: string): EntityProposal | null {
@@ -155,7 +185,7 @@ export class InMemoryEntityProposalStore implements IEntityProposalStore, Approv
     proposal.rejectedBy = rejectedBy;
     proposal.rejectedAt = Date.now();
     if (rejectionReason) proposal.rejectionReason = rejectionReason;
-    return clone(proposal);
+    return this.indexedSnapshot(proposal);
   }
 
   revertToPending(proposalId: string): boolean {
@@ -214,6 +244,7 @@ export class InMemoryEntityProposalStore implements IEntityProposalStore, Approv
   async abortStaged(proposalId: string, _reason: string): Promise<void> {
     const p = this.proposals.get(proposalId);
     if (!p || p.publication?.state !== 'staged') return;
+    this.historyIndex.update('', proposalId, null);
     this.proposals.delete(proposalId);
     if (p.clientRequestId) {
       this.releaseDedup(p.ownerUserId, p.clientRequestId, p.proposalId);
@@ -227,7 +258,7 @@ export class InMemoryEntityProposalStore implements IEntityProposalStore, Approv
   ): EntityProposal[] {
     const result: EntityProposal[] = [];
     for (const proposal of this.proposals.values()) {
-      if (predicate(proposal)) result.push(clone(proposal));
+      if (predicate(proposal)) result.push(this.indexedSnapshot(proposal));
     }
     result.sort(sort);
     return result.slice(0, Math.max(0, limit));

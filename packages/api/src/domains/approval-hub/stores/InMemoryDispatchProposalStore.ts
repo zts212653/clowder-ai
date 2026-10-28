@@ -4,6 +4,8 @@ import {
   commitApprovalEnvelope,
   deriveDispatchProposalSourceInvocationId,
 } from '@cat-cafe/shared';
+import { InMemorySettledIndex } from '../../../utils/in-memory-settled-index.js';
+import type { SettledHistoryPageOptions } from '../../../utils/settled-history-page.js';
 import { type OwnerAuthProvenance, requireOwnerAuthProvenance } from '../../cats/services/owner-auth-provenance.js';
 import { InMemoryDispatchNegativeAuthorizationIndex } from './InMemoryDispatchNegativeAuthorizationIndex.js';
 import {
@@ -23,6 +25,28 @@ import type { IDispatchProposalStore } from './ports/DispatchProposalStorePort.j
 
 /** Fast unit-test implementation; production uses RedisDispatchProposalStore. */
 export class InMemoryDispatchProposalStore implements IDispatchProposalStore {
+  private readonly historyIndex = new InMemorySettledIndex();
+  private indexedSnapshot(proposal: DispatchProposal): DispatchProposal {
+    this.historyIndex.update(
+      proposal.ownerUserId,
+      proposal.proposalId,
+      ['approved', 'rejected', 'superseded'].includes(proposal.status)
+        ? (proposal.supersededAt ?? proposal.decidedAt ?? 0)
+        : null,
+    );
+    return { ...proposal };
+  }
+  async listSettledPage(owner: string, options: SettledHistoryPageOptions) {
+    return this.historyIndex.page(owner, options, async (id) => {
+      const proposal = this.proposals.get(id);
+      return proposal &&
+        proposal.ownerUserId === owner &&
+        ['approved', 'rejected', 'superseded'].includes(proposal.status)
+        ? this.indexedSnapshot(proposal)
+        : null;
+    });
+  }
+
   private readonly proposals = new Map<string, DispatchProposal>();
   private readonly lineageIndex = new Map<string, string>();
   private readonly negativeAuthorization = new InMemoryDispatchNegativeAuthorizationIndex();
@@ -48,11 +72,12 @@ export class InMemoryDispatchProposalStore implements IDispatchProposalStore {
     if (existingId) {
       const existing = this.proposals.get(existingId);
       if (existing?.status === 'pending') {
-        if (existing.publication?.state === 'staged') return { proposal: { ...existing }, supersededProposals: [] };
+        if (existing.publication?.state === 'staged')
+          return { proposal: this.indexedSnapshot(existing), supersededProposals: [] };
         existing.status = 'superseded';
         existing.supersededBy = input.proposalId;
         existing.supersededAt = now;
-        supersededProposals.push({ ...existing });
+        supersededProposals.push(this.indexedSnapshot(existing));
       }
     }
 
@@ -62,12 +87,12 @@ export class InMemoryDispatchProposalStore implements IDispatchProposalStore {
     this.lineageIndex.set(lineage, input.proposalId);
     const directPredecessor = supersededProposals.at(-1);
     if (directPredecessor) this.predecessorCustody.set(input.proposalId, directPredecessor.proposalId);
-    return { proposal: { ...proposal }, supersededProposals };
+    return { proposal: this.indexedSnapshot(proposal), supersededProposals };
   }
 
   async get(proposalId: string): Promise<DispatchProposal | null> {
     const proposal = this.proposals.get(proposalId);
-    return proposal ? { ...proposal } : null;
+    return proposal ? this.indexedSnapshot(proposal) : null;
   }
 
   async listPendingByUser(userId: string): Promise<DispatchProposal[]> {
@@ -89,7 +114,7 @@ export class InMemoryDispatchProposalStore implements IDispatchProposalStore {
     proposal.decidedBy = userId;
     this.negativeAuthorization.remove(proposal);
     this.approvalOwnerAuthProvenance.set(proposalId, provenance);
-    return { ...proposal };
+    return this.indexedSnapshot(proposal);
   }
 
   async getApprovalOwnerAuthProvenance(proposalId: string): Promise<OwnerAuthProvenance | undefined> {
@@ -120,6 +145,7 @@ export class InMemoryDispatchProposalStore implements IDispatchProposalStore {
       proposal.decidedAt = undefined;
       proposal.decidedBy = undefined;
       this.negativeAuthorization.add(proposal);
+      this.indexedSnapshot(proposal);
       return null;
     }
 
@@ -128,7 +154,7 @@ export class InMemoryDispatchProposalStore implements IDispatchProposalStore {
     proposal.decidedBy = undefined;
     this.negativeAuthorization.add(proposal);
     this.lineageIndex.set(lineage, proposalId);
-    return { ...proposal };
+    return this.indexedSnapshot(proposal);
   }
 
   async reject(proposalId: string, userId: string): Promise<DispatchProposal | null> {
@@ -137,13 +163,13 @@ export class InMemoryDispatchProposalStore implements IDispatchProposalStore {
     proposal.status = 'rejected';
     proposal.decidedAt = Date.now();
     proposal.decidedBy = userId;
-    return { ...proposal };
+    return this.indexedSnapshot(proposal);
   }
 
   async findByClientMessageId(clientMessageId: string, sourceThreadId: string): Promise<DispatchProposal | null> {
     for (const proposal of this.proposals.values()) {
       if (proposal.clientMessageId === clientMessageId && proposal.sourceThreadId === sourceThreadId)
-        return { ...proposal };
+        return this.indexedSnapshot(proposal);
     }
     return null;
   }
@@ -211,7 +237,7 @@ export class InMemoryDispatchProposalStore implements IDispatchProposalStore {
       )
       .sort((left, right) => (right.supersededAt ?? right.decidedAt ?? 0) - (left.supersededAt ?? left.decidedAt ?? 0))
       .slice(0, limit)
-      .map((proposal) => ({ ...proposal }));
+      .map((proposal) => this.indexedSnapshot(proposal));
   }
 
   async getPublication(proposalId: string): Promise<ApprovalPublication | null> {
@@ -248,6 +274,7 @@ export class InMemoryDispatchProposalStore implements IDispatchProposalStore {
     const restored = (predecessorId ? predecessor(predecessorId) : undefined) ?? deliveryPredecessors[0];
 
     this.negativeAuthorization.remove(proposal);
+    this.historyIndex.update('', proposalId, null);
     this.proposals.delete(proposalId);
     this.approvalOwnerAuthProvenance.delete(proposalId);
     this.predecessorCustody.delete(proposalId);

@@ -100,7 +100,11 @@ it('restores the original global scope/query and captures them separately from t
   const row = container.querySelector<HTMLElement>('[data-artifact-row]');
   expect(row).toBeTruthy();
   act(() => row!.click());
-  expect(selected).toHaveBeenCalledWith(artifact, { kind: 'artifact-list', threadId: 'list-host-thread', view });
+  expect(selected).toHaveBeenCalledWith(
+    artifact,
+    { kind: 'artifact-list', threadId: 'list-host-thread', view },
+    expect.objectContaining({ type: 'artifact', renderer: 'artifact-view' }),
+  );
 });
 
 it('the standalone list opens a repository file in the canonical Workbench pipeline with its return state', async () => {

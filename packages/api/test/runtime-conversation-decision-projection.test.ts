@@ -5,7 +5,29 @@ import Fastify from 'fastify';
 import { MessageStore } from '../src/domains/cats/services/stores/ports/MessageStore.js';
 import { MessageRuntimeInteractionCardPublisher } from '../src/domains/runtime-interaction/RuntimeInteractionCardPublisher.js';
 import { InMemoryRuntimeInteractionStore } from '../src/domains/runtime-interaction/stores/InMemoryRuntimeInteractionStore.js';
+import type {
+  CollectiveAccountabilityAttentionSourceRead,
+  CollectiveAccountabilitySource,
+} from '../src/routes/companion-collective-accountability-source.js';
 import { readCompanionDecisionProjection } from '../src/routes/companion-decision-read-service.js';
+
+// These cases isolate conversation decisions while every other source is fully read.
+const readEmptyCollectiveAccountability: CollectiveAccountabilitySource = async () => ({
+  status: 200,
+  body: {
+    data: {
+      items: [],
+      reasons: [],
+      state: {
+        coverage: 'pending_f290_collective_accountability_requests',
+        startedAt: 1,
+        observedAt: 2,
+        status: 'available',
+        exhaustiveness: 'complete',
+      },
+    } satisfies CollectiveAccountabilityAttentionSourceRead,
+  },
+});
 
 const presentation: RichInteractiveBlock = {
   id: 'conversation-decision-block',
@@ -75,6 +97,7 @@ test('F310 projects a live conversation decision with its monotonic CAS revision
     fixture.interactions,
     undefined,
     fixture.messages,
+    readEmptyCollectiveAccountability,
   );
 
   assert.equal(result.status, 'available');
@@ -156,6 +179,7 @@ test('F310 isolates a dead conversation presentation without hiding live provide
     fixture.interactions,
     undefined,
     fixture.messages,
+    readEmptyCollectiveAccountability,
   );
 
   assert.equal(result.status, 'available');
@@ -201,6 +225,7 @@ test('F310 stops offering a decision after its answer has won the durable submis
     fixture.interactions,
     undefined,
     fixture.messages,
+    readEmptyCollectiveAccountability,
   );
 
   assert.equal(result.status, 'available');

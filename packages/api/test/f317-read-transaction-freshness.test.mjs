@@ -104,7 +104,8 @@ for (const scenario of ['competing-read', 'presence-reads', 'necessary-write']) 
       await runtime.desktopWindows.show();
       const presence = await runtime.ownerDesktop.presence();
       assert.equal(presence?.state, 'visible');
-      assert.equal(now - presence.observedAt, 8_000);
+      assert.equal(now - presence.observedAt, 0, 'a new native reply follows the slow renewal');
+      assert.equal(polls, 3);
       assert.equal(writes, 1, 'only the necessary lease renewal commits');
       assert.equal(failures.length, 0);
       assert.equal(closes, 0);
@@ -114,14 +115,22 @@ for (const scenario of ['competing-read', 'presence-reads', 'necessary-write']) 
       assert.equal(after.sessions[0].phase, 'active');
       assert.equal(after.staticFeatures.leases.at(-1).state, 'active');
     } else {
-      await assert.rejects(runtime.desktopWindows.show(), /observation expired/);
-      for (let i = 0; i < 100 && closes === 0; i++) await new Promise((resolve) => setTimeout(resolve, 5));
-      assert.equal(failures[0].observation.error.reason, 'observation_expired');
-      assert.equal(await runtime.desktopWindows.presence(), null);
-      assert.equal(closes, 1);
+      // Repeated real lifecycle/show/authority/presence rounds with an expensive
+      // necessary write. This is virtual service time, not native OS stability.
+      for (let cycle = 0; cycle < 3; cycle++) {
+        await runtime.desktopWindows.show();
+        const presence = await runtime.desktopWindows.presence();
+        assert.equal(presence?.state, 'visible');
+        assert.equal(presence.observedAt, now, 'never redate the pre-write native reply');
+        assert.equal(presence.expiresAt - presence.observedAt, 15_000);
+      }
+      assert.equal(polls, 7, 'initial plus two genuine polls per slow show');
+      assert.equal(writes, 3, 'only necessary renewals commit; refresh reads do not renew again');
+      assert.equal(failures.length, 0);
+      assert.equal(closes, 0);
       const after = await runtime.brokerStore.snapshot();
-      assert.equal(after.sessions[0].phase, 'closed');
-      assert.equal(after.staticFeatures.leases.at(-1).state, 'revoked');
+      assert.equal(after.sessions[0].phase, 'active');
+      assert.equal(after.staticFeatures.leases.at(-1).state, 'active');
     }
   });
 }

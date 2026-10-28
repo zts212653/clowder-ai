@@ -56,6 +56,7 @@ export function Lightbox({
   closeRef.current = onClose;
   const closeButton = useRef<HTMLButtonElement>(null);
   const dialog = useRef<HTMLDivElement>(null);
+  const classicMedia = useRef<HTMLDivElement>(null);
   useArtworkGalleryNavigation(gallery, dialog);
   const [opening, setOpening] = useState(false);
   const [openError, setOpenError] = useState<string | null>(null);
@@ -167,21 +168,18 @@ export function Lightbox({
           {children ??
             (composerSlot ? (
               <ArtworkPreviewMedia url={url} title={alt} video={mediaType === 'video'} gallery={gallery} />
-            ) : mediaType === 'video' ? (
-              <ContentMediaElement
-                kind="video"
-                src={url}
-                title={alt}
-                videoProps={{ controls: true, preload: 'metadata', 'aria-label': alt }}
-                className="max-w-full max-h-[85vh] rounded-lg"
-              />
             ) : (
-              <ContentMediaElement
-                kind="image"
-                src={url}
-                title={alt}
-                className="max-w-full max-h-[85vh] object-contain rounded-lg"
-              />
+              <div ref={classicMedia} className="max-w-full max-h-[85vh]">
+                <ContentMediaElement
+                  kind={mediaType}
+                  src={url}
+                  title={alt}
+                  videoProps={
+                    mediaType === 'video' ? { controls: true, preload: 'metadata', 'aria-label': alt } : undefined
+                  }
+                  className={`max-w-full max-h-[85vh] rounded-lg${mediaType === 'image' ? ' object-contain' : ''}`}
+                />
+              </div>
             ))}
           {caption && <p className="mt-2 text-sm text-[var(--overlay-fg-muted)]">{caption}</p>}
           {gallery ? <ArtworkGalleryNavigation gallery={gallery} arrows={!children && !composerSlot} /> : null}
@@ -195,7 +193,19 @@ export function Lightbox({
               {workspaceError || openError}
             </p>
           )}
-          {!children && !composerSlot && mediaType === 'image' && <CopyButton url={url} />}
+          {!children && !composerSlot && (
+            <div className="absolute right-2 top-2 flex items-center gap-2">
+              {mediaType === 'image' && <CopyButton url={url} placement="below" />}
+              <FileActions
+                source={{ kind: 'url', url }}
+                filename={alt}
+                src={url}
+                mediaType={mediaType}
+                root={classicMedia}
+                contextRef={classicMedia}
+              />
+            </div>
+          )}
           {composerSlot}
         </div>
       </div>

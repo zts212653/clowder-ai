@@ -67,6 +67,7 @@ export function RetainedResult({ session, sessions }: { session: ApprovalSession
     ownerUserId: session.ownerUserId,
     sourceFeatureId: feature,
     originalEffect,
+    materialization: session.approval.materialization,
   });
   if (state.kind === 'decided') {
     return (
@@ -82,6 +83,7 @@ export function RetainedResult({ session, sessions }: { session: ApprovalSession
             terminal={displayed.kind === 'decided' ? displayed.terminal : state.terminal}
             line={[view.line, feature === 'F128' ? null : title].filter(Boolean).join(' · ')}
             heading={title}
+            effectFailed={session.approval.materialization.state === 'failed' && !originalEffect}
           >
             {view.canReread ? (
               <button
@@ -90,7 +92,7 @@ export function RetainedResult({ session, sessions }: { session: ApprovalSession
                 onClick={() => sessions.reread(session.key)}
                 className="shell-focusable text-xs"
               >
-                {t.reread}
+                {session.approval.materialization.state === 'failed' && !originalEffect ? t.retry : t.reread}
               </button>
             ) : null}
             <button

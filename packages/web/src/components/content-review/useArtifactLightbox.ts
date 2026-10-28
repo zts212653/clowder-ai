@@ -3,13 +3,18 @@ import type { GlobalArtifactDTO, ThreadArtifactDTO } from '@cat-cafe/shared';
 import { useEffect, useRef } from 'react';
 import type { WorkspaceFileNavigationOrigin } from '@/stores/chat-types';
 import { artifactObjectId } from '../workbench/real-surface-adapters';
+import type { WorkspaceSurfaceDescriptor } from '../workbench/workbench-contract';
 import { type ContentOpenSource, contentOpenFacts } from './content-open-source';
 import { useContentOpen } from './useContentOpen';
 
 /** Entry supplies its source and attachment control; opening/type decisions have one implementation. */
 export function useArtifactLightbox<Origin extends WorkspaceFileNavigationOrigin = WorkspaceFileNavigationOrigin>(
   hostThreadId: string,
-  onOpenDocument?: (artifact: ThreadArtifactDTO | GlobalArtifactDTO, origin: Origin) => void,
+  onOpenDocument?: (
+    artifact: ThreadArtifactDTO | GlobalArtifactDTO,
+    origin: Origin,
+    surface: WorkspaceSurfaceDescriptor,
+  ) => void,
   catalogue?: { items: readonly (ThreadArtifactDTO | GlobalArtifactDTO)[]; complete: boolean },
 ) {
   const opening = useContentOpen();
@@ -46,7 +51,7 @@ export function useArtifactLightbox<Origin extends WorkspaceFileNavigationOrigin
         threadId: 'threadId' in artifact ? artifact.threadId : hostThreadId,
         artifact,
         origin,
-        attach: onOpenDocument && origin ? () => onOpenDocument(artifact, origin) : undefined,
+        attach: onOpenDocument && origin ? (surface) => onOpenDocument(artifact, origin, surface) : undefined,
       });
       return true;
     },

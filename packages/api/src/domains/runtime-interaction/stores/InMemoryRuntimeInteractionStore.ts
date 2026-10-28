@@ -3,6 +3,8 @@ import type {
   RuntimeInteractionRecord,
   RuntimeInteractionTerminalReasonCode,
 } from '@cat-cafe/shared';
+import { InMemorySettledIndex } from '../../../utils/in-memory-settled-index.js';
+import type { SettledHistoryPageOptions, SettledHistorySourcePage } from '../../../utils/settled-history-page.js';
 import type {
   ClaimRuntimeInteractionSubmissionInput,
   CompleteRuntimeInteractionSubmissionInput,
@@ -20,6 +22,34 @@ import {
 } from '../RuntimeInteractionRecordModel.js';
 
 export class InMemoryRuntimeInteractionStore implements RuntimeInteractionStore {
+  private readonly historyIndex = new InMemorySettledIndex();
+
+  /** Keep only derived ordering refs; original snapshots and mutation semantics remain unchanged. */
+  private indexedSnapshot(record: RuntimeInteractionRecord): RuntimeInteractionRecord {
+    this.historyIndex.update(
+      record.request.owner.userId,
+      record.request.interactionId,
+      !!record.cardRef && !!record.terminal && !isRuntimeInteractionActive(record) ? record.terminal?.settledAt : null,
+    );
+    return clone(record);
+  }
+
+  async listSettledPage(
+    owner: string,
+    options: SettledHistoryPageOptions,
+  ): Promise<SettledHistorySourcePage<RuntimeInteractionRecord>> {
+    return this.historyIndex.page(owner, options, async (id) => {
+      const record = this.records.get(id);
+      return record &&
+        record.request.owner.userId === owner &&
+        !!record.cardRef &&
+        !!record.terminal &&
+        !isRuntimeInteractionActive(record)
+        ? this.indexedSnapshot(record)
+        : null;
+    });
+  }
+
   private readonly records = new Map<string, RuntimeInteractionRecord>();
 
   async createStaged(input: CreateRuntimeInteractionInput): Promise<RuntimeInteractionRecord> {
@@ -48,7 +78,7 @@ export class InMemoryRuntimeInteractionStore implements RuntimeInteractionStore 
       updatedAt: input.now,
     };
     this.records.set(id, record);
-    return clone(record);
+    return this.indexedSnapshot(record);
   }
 
   async anchor(
@@ -75,7 +105,7 @@ export class InMemoryRuntimeInteractionStore implements RuntimeInteractionStore 
       updatedAt: now,
     };
     this.records.set(interactionId, anchored);
-    return clone(anchored);
+    return this.indexedSnapshot(anchored);
   }
 
   async settle(input: SettleRuntimeInteractionInput): Promise<RuntimeInteractionRecord | null> {
@@ -96,7 +126,7 @@ export class InMemoryRuntimeInteractionStore implements RuntimeInteractionStore 
       updatedAt: input.now,
     };
     this.records.set(input.interactionId, settled);
-    return clone(settled);
+    return this.indexedSnapshot(settled);
   }
 
   async claimSubmission(input: ClaimRuntimeInteractionSubmissionInput): Promise<RuntimeInteractionRecord | null> {
@@ -116,7 +146,7 @@ export class InMemoryRuntimeInteractionStore implements RuntimeInteractionStore 
       updatedAt: input.now,
     };
     this.records.set(input.interactionId, claimed);
-    return clone(claimed);
+    return this.indexedSnapshot(claimed);
   }
 
   async completeSubmission(input: CompleteRuntimeInteractionSubmissionInput): Promise<RuntimeInteractionRecord | null> {
@@ -138,7 +168,7 @@ export class InMemoryRuntimeInteractionStore implements RuntimeInteractionStore 
     };
     delete (settled as { submission?: unknown }).submission;
     this.records.set(input.interactionId, settled);
-    return clone(settled);
+    return this.indexedSnapshot(settled);
   }
 
   async settleConversation(input: SettleConversationInteractionInput): Promise<RuntimeInteractionRecord | null> {
@@ -159,7 +189,7 @@ export class InMemoryRuntimeInteractionStore implements RuntimeInteractionStore 
       updatedAt: input.now,
     };
     this.records.set(input.interactionId, settled);
-    return clone(settled);
+    return this.indexedSnapshot(settled);
   }
 
   async invalidate(input: InvalidateRuntimeInteractionInput): Promise<RuntimeInteractionRecord | null> {
@@ -172,7 +202,7 @@ export class InMemoryRuntimeInteractionStore implements RuntimeInteractionStore 
       return null;
     const invalidated = invalidatedRecord(record, input.reasonCode, input.now);
     this.records.set(input.interactionId, invalidated);
-    return clone(invalidated);
+    return this.indexedSnapshot(invalidated);
   }
 
   async invalidateByInvocation(
@@ -201,7 +231,7 @@ export class InMemoryRuntimeInteractionStore implements RuntimeInteractionStore 
 
   async get(interactionId: string): Promise<RuntimeInteractionRecord | null> {
     const record = this.records.get(interactionId);
-    return record ? clone(record) : null;
+    return record ? this.indexedSnapshot(record) : null;
   }
 
   async listActive(): Promise<RuntimeInteractionRecord[]> {
@@ -243,7 +273,7 @@ export class InMemoryRuntimeInteractionStore implements RuntimeInteractionStore 
       if (!isRuntimeInteractionActive(record) || !predicate(record)) continue;
       const next = invalidatedRecord(record, reasonCode, now);
       this.records.set(id, next);
-      invalidated.push(clone(next));
+      invalidated.push(this.indexedSnapshot(next));
     }
     return invalidated;
   }

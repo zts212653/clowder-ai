@@ -19,7 +19,7 @@ import { isLocalHumanFileActionRequest } from './media-file-actions.js';
 import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { readdir, readFile, stat } from 'node:fs/promises';
-import { extname, isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { promisify } from 'node:util';
 import type { CallbackPrincipal } from '@cat-cafe/shared';
 import { isAbsoluteFilesystemPath, normalizeWorkspaceRelativePath } from '@cat-cafe/shared/utils';
@@ -42,6 +42,7 @@ import {
   WorkspacePathNotFoundError,
   WorkspacePathNotRegisteredError,
 } from '../domains/workspace/workspace-path-resolution.js';
+import { searchWorkspace } from '../domains/workspace/workspace-search.js';
 import {
   addLinkedRoot,
   getLinkedRootsAsync,
@@ -88,7 +89,6 @@ const MAX_FILE_SIZE = 1024 * 1024; // 1 MB text preview
 const MAX_IMAGE_AUDIO_SIZE = 10 * 1024 * 1024; // 10 MB image/audio preview
 const MAX_SEARCH_RESULTS = 100;
 const MAX_TREE_DEPTH = 5;
-const MAX_CONTENT_SEARCH_FILE_SIZE = 10 * 1024 * 1024; // 10 MB per searchable text file
 
 async function resolveDocumentLinkRouteResult(href: string): Promise<{
   statusCode: number;
@@ -116,24 +116,6 @@ async function resolveDocumentLinkRouteResult(href: string): Promise<{
   }
 }
 
-const CONTENT_SEARCH_EXTENSIONS = new Set([
-  '.ts',
-  '.tsx',
-  '.js',
-  '.jsx',
-  '.json',
-  '.md',
-  '.mdx',
-  '.txt',
-  '.css',
-  '.html',
-  '.yaml',
-  '.yml',
-  '.toml',
-  '.sh',
-  '.py',
-]);
-
 interface TreeNode {
   name: string;
   path: string;
@@ -142,134 +124,6 @@ interface TreeNode {
 }
 
 const SKIP_DIRS = new Set(['node_modules', '.next', 'dist', '.git', '.turbo', 'coverage', '.claude']);
-
-interface WorkspaceSearchResult {
-  path: string;
-  line: number;
-  content: string;
-  contextBefore: string;
-  contextAfter: string;
-}
-
-async function listWorkspaceFiles(root: string): Promise<string[]> {
-  // Use -prune to skip entire directory trees efficiently.
-  // Hidden dirs (.*) are pruned in one rule — covers .venv, .git, .claude,
-  // .next, .playwright-mcp, .idea, etc. without listing each one.
-  const { stdout } = await execFileAsync(
-    'find',
-    [
-      root,
-      '(',
-      '-name',
-      '.*',
-      '-not',
-      '-name',
-      '.',
-      '-type',
-      'd',
-      ')',
-      '-prune',
-      '-o',
-      '(',
-      '-name',
-      'node_modules',
-      '-type',
-      'd',
-      ')',
-      '-prune',
-      '-o',
-      '(',
-      '-name',
-      'dist',
-      '-type',
-      'd',
-      ')',
-      '-prune',
-      '-o',
-      '(',
-      '-name',
-      'secrets',
-      '-type',
-      'd',
-      ')',
-      '-prune',
-      '-o',
-      '-type',
-      'f',
-      '-not',
-      '-name',
-      '.env*',
-      '-not',
-      '-name',
-      '*.pem',
-      '-not',
-      '-name',
-      '*.key',
-      '-not',
-      '-name',
-      'id_rsa*',
-      '-print',
-    ],
-    { timeout: 5000, maxBuffer: 10 * 1024 * 1024 },
-  );
-
-  return stdout
-    .trim()
-    .split('\n')
-    .filter(Boolean)
-    .sort((a, b) => a.localeCompare(b));
-}
-
-function isContentSearchable(relPath: string): boolean {
-  return CONTENT_SEARCH_EXTENSIONS.has(extname(relPath).toLowerCase());
-}
-
-async function searchWorkspaceContent(
-  root: string,
-  query: string,
-  limit: number,
-): Promise<{ results: WorkspaceSearchResult[]; truncated: boolean }> {
-  const files = await listWorkspaceFiles(root);
-  const normalizedQuery = query.toLowerCase();
-  const results: WorkspaceSearchResult[] = [];
-  let truncated = false;
-
-  for (const fullPath of files) {
-    if (results.length >= limit) {
-      truncated = true;
-      break;
-    }
-
-    const relPath = normalizeWorkspaceRelativePath(relative(root, fullPath));
-    if (isDenylisted(relPath) || !isContentSearchable(relPath)) continue;
-
-    const fileStat = await stat(fullPath).catch(() => null);
-    if (!fileStat || fileStat.size > MAX_CONTENT_SEARCH_FILE_SIZE) continue;
-
-    let text = '';
-    try {
-      text = await readFile(fullPath, 'utf-8');
-    } catch {
-      continue;
-    }
-
-    const lines = text.split(/\r?\n/);
-    for (let index = 0; index < lines.length; index += 1) {
-      if (!lines[index]?.toLowerCase().includes(normalizedQuery)) continue;
-
-      results.push({
-        path: relPath,
-        line: index + 1,
-        content: lines[index]?.trim() ?? '',
-        contextBefore: lines.slice(Math.max(0, index - 2), index).join('\n'),
-        contextAfter: lines.slice(index + 1, index + 3).join('\n'),
-      });
-      break;
-    }
-  }
-
-  return { results, truncated };
-}
 
 /** The tree listing's own visibility rule: dot entries (except .claude/.kimi) and SKIP_DIRS are not shown. */
 function hiddenFromTree(name: string): boolean {
@@ -649,34 +503,22 @@ export const workspaceRoutes: FastifyPluginAsync<WorkspaceRouteOpts> = async (ap
       return { error: 'Query too long (max 200 chars)' };
     }
 
-    const limit = Math.min(rawLimit ?? 50, MAX_SEARCH_RESULTS);
+    const requestedLimit = rawLimit ?? 50;
+    if (!Number.isInteger(requestedLimit) || requestedLimit < 1) {
+      reply.status(400);
+      return { error: 'limit must be a positive integer' };
+    }
+    const limit = Math.min(requestedLimit, MAX_SEARCH_RESULTS);
 
     try {
       const root = await getWorktreeRoot(worktreeId);
 
-      if (type === 'filename') {
-        // List all non-excluded files, then post-filter on the *relative* path.
-        // We avoid using find's -path for the query because it matches against
-        // the absolute path — if the worktree root itself contains the query
-        // string, nearly every file would match (P2 from cloud review).
-        const files = await listWorkspaceFiles(root);
-        const lowerQuery = query.toLowerCase();
-        const results = files
-          .map((fullPath) => normalizeWorkspaceRelativePath(relative(root, fullPath)))
-          .filter((relPath) => !isDenylisted(relPath) && relPath.toLowerCase().includes(lowerQuery))
-          .slice(0, limit)
-          .map((relPath) => ({
-            path: relPath,
-            line: 0,
-            content: '',
-            contextBefore: '',
-            contextAfter: '',
-          }));
-
-        return { query, results, totalMatches: results.length, truncated: false };
-      }
-
-      const { results, truncated } = await searchWorkspaceContent(root, query, limit);
+      const { results, truncated } = await searchWorkspace(
+        root,
+        query,
+        type === 'filename' ? 'filename' : 'content',
+        limit,
+      );
 
       return {
         query,

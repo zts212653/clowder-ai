@@ -13,6 +13,9 @@ export interface ContentDocumentViewerProps {
   readOnlyReason?: string;
   onBack?: () => void;
   reviewAction?: ReactNode;
+  /** An owner-backed source retains its own public quote/annotation authority. */
+  onOwnerQuote?: (action: import('./useMarkdownSelectionAction').MarkdownSelectionAction, comment: string) => boolean;
+  ownerQuoteLabel?: string;
   showFileQuotes?: boolean;
   scrollToLine?: number | null;
   onQuoteSelected?: (quote: string) => void;

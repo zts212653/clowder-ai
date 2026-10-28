@@ -156,19 +156,23 @@ it('uses the named source read and opens a complete document DTO with the origin
   expect(host.textContent).not.toContain('Unknown version');
   const card = host.querySelector<HTMLButtonElement>('[data-testid="workspace-home-artifact-card"]');
   await act(async () => card?.click());
-  expect(open).toHaveBeenCalledExactlyOnceWith(items[0], {
-    kind: 'artifact-list',
-    threadId: 'work-source',
-    view: {
-      scope: 'thread',
-      filter: 'all',
-      query: '',
-      grouping: 'time',
-      catFilter: null,
-      collapsed: [],
-      viewport: { scrollTop: 0, anchor: { key: expect.any(String), offset: 0 } },
+  expect(open).toHaveBeenCalledExactlyOnceWith(
+    items[0],
+    {
+      kind: 'artifact-list',
+      threadId: 'work-source',
+      view: {
+        scope: 'thread',
+        filter: 'all',
+        query: '',
+        grouping: 'time',
+        catFilter: null,
+        collapsed: [],
+        viewport: { scrollTop: 0, anchor: { key: expect.any(String), offset: 0 } },
+      },
     },
-  });
+    expect.objectContaining({ type: 'artifact', renderer: 'artifact-view' }),
+  );
 });
 it('keeps the same-scope works count while refreshing', async () => {
   await act(async () => root.render(<ThreadWorksPanelV2 threadId="work-source" />));
@@ -539,7 +543,11 @@ it('opens a coordinate-backed html_widget inside Works, but keeps an interactive
   const cards = host.querySelectorAll<HTMLButtonElement>('[data-testid="workspace-home-artifact-card"]');
   expect(cards).toHaveLength(2);
   await act(async () => cards[0].click());
-  expect(open).toHaveBeenCalledExactlyOnceWith(widget, expect.objectContaining({ kind: 'artifact-list' }));
+  expect(open).toHaveBeenCalledExactlyOnceWith(
+    widget,
+    expect.objectContaining({ kind: 'artifact-list' }),
+    expect.objectContaining({ type: 'artifact', renderer: 'artifact-view' }),
+  );
 
   await act(async () => cards[1].click());
   expect(open).toHaveBeenCalledTimes(1);

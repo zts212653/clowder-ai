@@ -20,6 +20,7 @@ export class ObservationCosts {
   private readObserved = false;
   private seal?: SealReadSummary;
   private received?: ClockPoint;
+  private refreshed?: ClockPoint;
   private published?: ClockPoint;
 
   constructor(caller: SealCaller) {
@@ -60,6 +61,10 @@ export class ObservationCosts {
     this.received = point(wallMs);
   }
 
+  refresh(wallMs: number): void {
+    this.refreshed = point(wallMs);
+  }
+
   publish(wallMs: number): void {
     this.published = point(wallMs);
   }
@@ -78,6 +83,7 @@ export class ObservationCosts {
         ? {
             clock: {
               received,
+              ...(this.refreshed ? { refreshed: this.refreshed } : {}),
               published,
               wallElapsedMs: signedMs(wallElapsed),
               monotonicElapsedMs: workMs(monotonicElapsed),

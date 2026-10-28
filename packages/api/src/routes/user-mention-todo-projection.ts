@@ -10,7 +10,7 @@ export interface UserMentionTodoRead {
   period?: UserMentionPeriod;
 }
 
-export type UserMentionPeriod = 'recent' | 'today' | 'week' | 'earlier' | 'handled';
+export type UserMentionPeriod = 'recent' | 'today' | 'week' | 'earlier' | 'handled' | 'all';
 export interface MentionReadOptions {
   cutover: number;
   now: number;
@@ -91,6 +91,8 @@ function countMentionPeriods(source: StoredMessage[], handled: StoredMessage[], 
 function selectMentionRows(source: StoredMessage[], handled: StoredMessage[], options?: MentionReadOptions) {
   if (!options) return source;
   if (options.period === 'handled') return handled;
+  if (options.period === 'all')
+    return [...new Map([...handled, ...source].map((message) => [message.id, message])).values()];
   return source.filter((message) => {
     const period = mentionPeriodFor(message, options);
     return options.period === 'recent' || options.period === 'week' ? period !== 'earlier' : period === options.period;
@@ -110,18 +112,21 @@ export async function readUserMentionTodos(
     const source = await messages.listUserMentionRequests(userId);
     const handled = options && messages.listHandledUserMentions ? await messages.listHandledUserMentions(userId) : [];
     const handlingMetadata =
-      options?.period === 'handled' && messages.getUserMentionHandlingMetadata
+      (options?.period === 'handled' || options?.period === 'all') && messages.getUserMentionHandlingMetadata
         ? await messages.getUserMentionHandlingMetadata(userId)
         : {};
     const revisions = messages.getUserMentionStateRevisions ? await messages.getUserMentionStateRevisions(userId) : {};
     const counts = countMentionPeriods(source, handled, options);
     const selected = selectMentionRows(source, handled, options);
+    const pendingIds = new Set(source.map((message) => message.id));
+    const handledIds = new Set(handled.map((message) => message.id));
     const items: UnifiedAttentionItemV1[] = selected.map((message) =>
       projectUserMentionTodoItem(
         message,
         userId,
         revisions[message.threadId] ?? 0,
-        options?.period === 'handled',
+        options?.period === 'handled' ||
+          (options?.period === 'all' && handledIds.has(message.id) && !pendingIds.has(message.id)),
         handlingMetadata[message.id],
       ),
     );

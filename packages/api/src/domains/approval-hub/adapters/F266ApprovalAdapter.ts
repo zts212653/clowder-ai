@@ -5,17 +5,33 @@ import {
   projectEvalRepairApprovals,
 } from '../../../infrastructure/harness-eval/eval-repair-approval-projection.js';
 import type { IReevalClosureEventLog } from '../../../infrastructure/harness-eval/reeval-closure-event-log.js';
+import type { SettledHistoryPageOptions } from '../../../utils/settled-history-page.js';
 import {
   type ApprovalDecisionRead,
   type IApprovalAdapter,
   type ListSettledOpts,
   projectApprovalDecisionRead,
 } from '../ports/IApprovalAdapter.js';
+import { projectSettledPage } from '../project-settled-page.js';
 
 export class F266ApprovalAdapter implements IApprovalAdapter {
   readonly featureId = 'F266' as const;
 
   constructor(private readonly eventLog?: IReevalClosureEventLog) {}
+
+  async listSettledPage(owner: string, options: SettledHistoryPageOptions) {
+    if (!this.eventLog)
+      throw Object.assign(new Error('F266 canonical history source unavailable'), {
+        statusCode: 503,
+        code: 'APPROVAL_HISTORY_UNAVAILABLE',
+      });
+    return projectSettledPage(
+      { listSettledPage: this.eventLog.listApprovalHistoryPage?.bind(this.eventLog) },
+      owner,
+      options,
+      (record) => toSettledItem(record, owner),
+    );
+  }
 
   async listPending(userId: string): Promise<ApprovalItem[]> {
     if (!this.eventLog) return [];

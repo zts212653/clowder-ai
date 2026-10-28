@@ -136,6 +136,32 @@ test('private diagnostics preserve frozen errors and never retain raw provider p
   assert.doesNotThrow(() => obs.attach(hostile));
 });
 
+test('interleaved native events are attributed to their own request-local batch, without source identities', () => {
+  const obs = observeQueryQualification();
+  const events = [];
+  const one = obs.start(7, 22241, Date.now() + 15000, (event) => events.push(event));
+  const two = obs.start(6, 20892, Date.now() + 15000, (event) => events.push(event));
+  two.trace({ phase: 'native-response', batchIndex: 99 });
+  one.trace({ phase: 'native-response' });
+  two.trace({ phase: 'native-completed', outputChars: 227 });
+  one.trace({ phase: 'native-completed', outputChars: 272 });
+  two.finish(false, false);
+  one.finish(false, false);
+  assert.deepEqual(
+    events.map((event) => event.batchIndex),
+    [1, 0, 1, 0],
+  );
+  const batches = obs.snapshot().batches;
+  assert.deepEqual(
+    batches.map((batch) => batch.batchIndex),
+    [0, 1],
+  );
+  assert.deepEqual(
+    batches.map((batch) => batch.stage),
+    ['native-completed', 'native-completed'],
+  );
+});
+
 test('HTTP keeps qualification evidence private and preserves the original timeout503 contract', async () => {
   const error = new DOMException('Message search deadline exceeded', 'TimeoutError');
   const obs = observeQueryQualification();

@@ -1,3 +1,5 @@
+import { InMemorySettledIndex } from '../../../utils/in-memory-settled-index.js';
+import type { SettledHistoryPageOptions, SettledHistorySourcePage } from '../../../utils/settled-history-page.js';
 /**
  * F221 Phase B — In-memory TasteProposalStore for tests and single-process dev.
  *
@@ -21,6 +23,30 @@ import type {
 const DEFAULT_LIST_LIMIT = 100;
 
 export class InMemoryTasteProposalStore implements ITasteProposalStore, ApprovalPublicationStore {
+  private readonly historyIndex = new InMemorySettledIndex();
+
+  /** Keep only derived ordering refs; original snapshots and mutation semantics remain unchanged. */
+  private indexedSnapshot(record: TasteProposal): TasteProposal {
+    this.historyIndex.update(
+      record.userId,
+      record.id,
+      ['approved', 'rejected'].includes(record.status) ? (record.approvedAt ?? record.rejectedAt ?? 0) : null,
+    );
+    return clone(record);
+  }
+
+  async listSettledPage(
+    owner: string,
+    options: SettledHistoryPageOptions,
+  ): Promise<SettledHistorySourcePage<TasteProposal>> {
+    return this.historyIndex.page(owner, options, async (id) => {
+      const record = this.proposals.get(id);
+      return record && record.userId === owner && ['approved', 'rejected'].includes(record.status)
+        ? this.indexedSnapshot(record)
+        : null;
+    });
+  }
+
   private readonly proposals = new Map<string, TasteProposal>();
   private readonly dedupCache = new Map<string, string>();
   /** Monotonic counter for stable sort when timestamps tie (same-ms creation). */
@@ -50,12 +76,12 @@ export class InMemoryTasteProposalStore implements ITasteProposalStore, Approval
     };
     this.proposals.set(proposal.id, proposal);
     this.insertionOrder.set(proposal.id, this.nextOrder++);
-    return clone(proposal);
+    return this.indexedSnapshot(proposal);
   }
 
   get(id: string): TasteProposal | null {
     const found = this.proposals.get(id);
-    return found ? clone(found) : null;
+    return found ? this.indexedSnapshot(found) : null;
   }
 
   listPending(userId: string, limit: number = DEFAULT_LIST_LIMIT): TasteProposal[] {
@@ -108,7 +134,7 @@ export class InMemoryTasteProposalStore implements ITasteProposalStore, Approval
       return null;
     proposal.status = 'approving';
     proposal.approvedBy = approvedBy;
-    return clone(proposal);
+    return this.indexedSnapshot(proposal);
   }
 
   recordWriteCheckpoint(id: string, checkpoint: TasteWriteCheckpoint): TasteProposal | null {
@@ -116,7 +142,7 @@ export class InMemoryTasteProposalStore implements ITasteProposalStore, Approval
     if (!proposal || proposal.status !== 'approving') return null;
     proposal.vignetteSlug = checkpoint.vignetteSlug;
     proposal.vignettePath = checkpoint.vignettePath;
-    return clone(proposal);
+    return this.indexedSnapshot(proposal);
   }
 
   finalizeApproval(id: string, approvedBy: string, slug: string, path: string): TasteProposal | null {
@@ -127,7 +153,7 @@ export class InMemoryTasteProposalStore implements ITasteProposalStore, Approval
     proposal.approvedBy = approvedBy;
     proposal.vignetteSlug = slug;
     proposal.vignettePath = path;
-    return clone(proposal);
+    return this.indexedSnapshot(proposal);
   }
 
   rollbackClaim(id: string): boolean {
@@ -152,7 +178,7 @@ export class InMemoryTasteProposalStore implements ITasteProposalStore, Approval
     proposal.rejectedBy = rejectedBy;
     proposal.rejectedAt = Date.now();
     proposal.rejectionReason = reason;
-    return clone(proposal);
+    return this.indexedSnapshot(proposal);
   }
 
   getDedupProposalId(userId: string, clientRequestId: string): string | null {
@@ -198,6 +224,7 @@ export class InMemoryTasteProposalStore implements ITasteProposalStore, Approval
   async abortStaged(proposalId: string, _reason: string): Promise<void> {
     const p = this.proposals.get(proposalId);
     if (!p || p.publication?.state !== 'staged') return;
+    this.historyIndex.update('', proposalId, null);
     this.proposals.delete(proposalId);
     if (p.clientRequestId) {
       this.releaseDedup(p.userId, p.clientRequestId, p.id);
@@ -211,7 +238,7 @@ export class InMemoryTasteProposalStore implements ITasteProposalStore, Approval
   ): TasteProposal[] {
     const result: TasteProposal[] = [];
     for (const proposal of this.proposals.values()) {
-      if (predicate(proposal)) result.push(clone(proposal));
+      if (predicate(proposal)) result.push(this.indexedSnapshot(proposal));
     }
     result.sort(sort);
     return result.slice(0, Math.max(0, limit));

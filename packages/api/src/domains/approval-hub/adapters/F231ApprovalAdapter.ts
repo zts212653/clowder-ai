@@ -1,4 +1,6 @@
+import type { SettledHistoryPageOptions } from '../../../utils/settled-history-page.js';
 import { type ApprovalDecisionRead, projectApprovalDecisionRead } from '../ports/IApprovalAdapter.js';
+import { projectSettledPage } from '../project-settled-page.js';
 /**
  * F246 v2: F231 (Profile Update Proposal) → ApprovalItem adapter.
  *
@@ -22,6 +24,10 @@ export class F231ApprovalAdapter implements IApprovalAdapter {
   readonly featureId = 'F231' as const;
 
   constructor(private readonly store: IProfileUpdateProposalStore) {}
+
+  async listSettledPage(owner: string, options: SettledHistoryPageOptions) {
+    return projectSettledPage(this.store, owner, options, toSettledItem);
+  }
 
   listPending(userId: string): ApprovalItem[] | Promise<ApprovalItem[]> {
     const result = this.store.listPending(userId, ALL_PENDING_APPROVALS_LIMIT);
@@ -88,6 +94,9 @@ function toSettledItem(p: ProfileUpdateProposal): SettledApprovalItem | null {
     summary: `${p.targetLayer === 'corpus' ? 'Corpus' : 'Profile'} update: ${p.rationale.slice(0, 80)}`,
     detail: {
       ...decision.detail,
+      ...(p.status === 'approved' && p.writtenPath?.trim() && p.provenancePath?.trim()
+        ? { canonicalEffectProofRef: `profile-update:${p.proposalId}:provenance:${p.provenancePath}` }
+        : {}),
       rationale: p.rationale,
       targetLayer: p.targetLayer,
       targetPath: p.targetPath,

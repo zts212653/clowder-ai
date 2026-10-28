@@ -8,6 +8,7 @@ import {
   type PersonRelationship,
 } from '@cat-cafe/shared';
 import type { RedisClient } from '@cat-cafe/shared/utils';
+import type { SettledHistoryPageOptions } from '../../../utils/settled-history-page.js';
 import type { HumanDispositionRandomBytesSource } from '../../human-disposition/human-disposition-adapters.js';
 import { DeferredPersonMemoryReceiptKeys } from '../deferred-person-memory-redis-contract.js';
 import { PersonMemoryDispositionProofResolver } from './PersonMemoryDispositionProofResolver.js';
@@ -39,6 +40,7 @@ import { approvePersonMemoryDrafts } from './person-memory-approval.js';
 import {
   listPendingPersonMemoryCandidates,
   listSettledPersonMemoryCandidates,
+  pageSettledPersonMemoryCandidates,
 } from './person-memory-candidate-list.js';
 import { PersonMemoryCandidatePublication } from './person-memory-candidate-publication.js';
 import {
@@ -154,6 +156,10 @@ export class RedisPersonMemoryStore implements PersonMemoryStore {
 
   async listPending(ownerUserId: string, limit = 100): Promise<StoredPersonMemoryCandidate[]> {
     return listPendingPersonMemoryCandidates(this.redis, ownerUserId, limit);
+  }
+
+  async listSettledPage(owner: string, options: SettledHistoryPageOptions) {
+    return pageSettledPersonMemoryCandidates(this.redis, owner, options);
   }
 
   async listSettled(ownerUserId: string, limit = 50) {

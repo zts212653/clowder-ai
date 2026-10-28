@@ -1,3 +1,9 @@
+import {
+  type CollectiveDocumentTarget,
+  type CollectiveDocumentView as SharedMarkdownView,
+  collectiveDocumentViewSchema as sharedMarkdownViewSchema,
+} from '@cat-cafe/shared';
+import { projectArtifactClient } from './project-artifact-client.js';
 import { readArtifactJsonPages, SharedArtifactCatalogueReconciled } from './shared-artifact-json-pages.js';
 export { readArtifactJsonPages, SharedArtifactCatalogueReconciled };
 
@@ -5,9 +11,6 @@ import {
   type CollectiveArtifactAction,
   type CollectiveModificationProjection,
   collectiveArtifactProjectionSchema,
-  collectiveModificationProjectionSchema,
-  type WorkspaceContentReview,
-  workspaceContentReviewSchema,
 } from '@cat-cafe/shared';
 import { z } from 'zod';
 import type { ClientRequest } from './client-request.js';
@@ -27,6 +30,11 @@ import {
   verifySharedAnnotationReplyPage,
 } from './shared-artifact-review-client.js';
 
+export interface SharedArtifactOpenOptions {
+  projectReturn?: CollectiveDocumentTarget['projectReturn'];
+  comparisonOwnerRevision?: number;
+  discussionOnly?: boolean;
+}
 export type SharedArtifact = z.infer<typeof collectiveArtifactProjectionSchema>;
 const workResultArtifactResolutionSchema = z.discriminatedUnion('status', [
   z
@@ -50,70 +58,9 @@ export type SharedArtifactOperation = (
   requestId: string,
   ownerRevision?: number,
 ) => Promise<unknown>;
-export interface SharedMarkdownView {
-  contentRef: string;
-  ownerRevision: number;
-  blobDigest: string;
-  text: string;
-  view: {
-    review: Omit<WorkspaceContentReview, 'ownerUserId'>;
-    historyReadOnly: boolean;
-    canWrite: boolean;
-    canReply?: boolean;
-    replyPages?: { annotationId: string; offset: number; total: number; nextOffset?: number }[];
-    annotationPage: { offset: number; total: number; nextOffset?: number };
-    annotationResolutions?: { annotationId: string; status: 'attached' | 'moved' | 'ambiguous' | 'orphaned' }[];
-  };
-  modifications?: {
-    requests: CollectiveModificationProjection[];
-    total: number;
-    offset: number;
-    nextOffset?: number;
-    snapshot?: string;
-  };
-}
-export const sharedMarkdownViewSchema: z.ZodType<SharedMarkdownView, z.ZodTypeDef, unknown> = z
-  .object({
-    contentRef: z.string(),
-    ownerRevision: z.number().int().positive(),
-    blobDigest: z.string(),
-    text: z.string().max(65536),
-    view: z
-      .object({
-        review: workspaceContentReviewSchema.innerType().omit({ ownerUserId: true }),
-        historyReadOnly: z.boolean(),
-        canWrite: z.boolean(),
-        canReply: z.boolean().optional(),
-        replyPages: z
-          .object({
-            annotationId: z.string(),
-            offset: z.number(),
-            total: z.number(),
-            nextOffset: z.number().optional(),
-          })
-          .array()
-          .optional(),
-        annotationPage: z.object({ offset: z.number(), total: z.number(), nextOffset: z.number().optional() }),
-        annotationResolutions: z
-          .object({ annotationId: z.string(), status: z.enum(['attached', 'moved', 'ambiguous', 'orphaned']) })
-          .array()
-          .optional(),
-      })
-      .passthrough(),
-    modifications: z
-      .object({
-        requests: collectiveModificationProjectionSchema.array(),
-        total: z.number(),
-        offset: z.number(),
-        nextOffset: z.number().optional(),
-        snapshot: z
-          .string()
-          .regex(/^sha256:[a-f0-9]{64}$/)
-          .optional(),
-      })
-      .optional(),
-  })
-  .passthrough();
+export type { CollectiveDocumentView as SharedMarkdownView } from '@cat-cafe/shared';
+export { collectiveDocumentViewSchema as sharedMarkdownViewSchema } from '@cat-cafe/shared';
+
 type Coordinates = { serviceInstanceId: string; collectiveId: string };
 
 /** This factory retains one authenticated coordinate binding; mutation clients are split out, while shared page/schema assembly stays here to avoid cyclic imports.
@@ -282,6 +229,7 @@ export function collectiveArtifactClient(request: ClientRequest, coordinates: Co
     return verifySharedAnnotationReplyPage(view, annotationId, offset, page);
   };
   return {
+    projectReferences: projectArtifactClient(request, coordinates, namespace),
     moreAnnotations: async (artifact: SharedArtifact, view: SharedMarkdownView) => {
       const annotationOffset = view.view.annotationPage.nextOffset;
       if (annotationOffset === undefined) return view;

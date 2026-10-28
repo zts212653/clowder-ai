@@ -128,6 +128,16 @@ describe('RedisDispatchProposalStore', { skip: redisIsolationSkipReason(REDIS_UR
     throw new Error('bounded history preparation did not complete');
   }
 
+  it('rejects inconsistent settled page membership instead of claiming empty history', async () => {
+    await store.create({ ...baseInput, proposalId: 'page-owner-corrupt' });
+    await anchor('page-owner-corrupt');
+    await store.reject('page-owner-corrupt', 'user-1');
+    await historyUntilPrepared();
+    assert.equal((await store.listSettledPage('user-1', { limit: 30 })).records.length, 1);
+    await redis.hset('dispatch-proposal:page-owner-corrupt', 'ownerUserId', 'other-owner');
+    await assert.rejects(store.listSettledPage('user-1', { limit: 30 }), /canonical.*mismatch/i);
+  });
+
   it('indexes supersession atomically and removes the closure when staged publication rolls back', async () => {
     await store.create({ ...baseInput, proposalId: 'closed-old', createdAt: 1000 });
     await anchor('closed-old');

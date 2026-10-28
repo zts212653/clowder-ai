@@ -7,6 +7,7 @@ import { messageFindReturnHref, requestMessageFindReturn } from '@/components/me
 import { useShellCopy } from '@/components/shell/shell-copy';
 import { pushThreadRouteWithHistory } from '@/components/ThreadSidebar/thread-navigation';
 import { artifactObjectId } from '@/components/workbench/real-surface-adapters';
+import type { WorkspaceSurfaceDescriptor } from '@/components/workbench/workbench-contract';
 import { artifactCardMetadata } from '@/components/workspace-home/artifact-card-metadata';
 import { workspaceV3Copy } from '@/components/workspace-home/workspace-v3.shell-copy';
 import { useCatData } from '@/hooks/useCatData';
@@ -28,7 +29,11 @@ export type WorksPanelProps = {
   threadId: string;
   width?: number;
   onClose?: () => void;
-  onSelectArtifact?: (artifact: ThreadArtifactDTO | GlobalArtifactDTO, origin: ArtifactListOrigin) => void;
+  onSelectArtifact?: (
+    artifact: ThreadArtifactDTO | GlobalArtifactDTO,
+    origin: ArtifactListOrigin,
+    surface: WorkspaceSurfaceDescriptor,
+  ) => void;
   initialView?: ArtifactListView;
 };
 type Work = ThreadArtifactDTO | GlobalArtifactDTO;
@@ -137,11 +142,7 @@ export function ThreadWorksPanelV2({ threadId, width, onClose, onSelectArtifact,
           : {}),
       },
     };
-    const openWorkspace = () => {
-      if (onSelectArtifact) onSelectArtifact(artifact, origin);
-      else useChatStore.getState().openPublishedArtifact(threadId, artifact, origin);
-    };
-    if (!floating.open(artifact, origin, visible)) openWorkspace();
+    floating.open(artifact, origin, visible);
   };
   const jump = (artifact: Work) => {
     if (!artifact.sourceMessageId) {

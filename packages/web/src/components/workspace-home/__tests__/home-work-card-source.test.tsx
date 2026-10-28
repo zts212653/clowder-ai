@@ -48,7 +48,7 @@ it('localizes untitled image cards while preserving authored names and download 
           />,
         );
       });
-      expect(host.querySelector('.home-work-label')?.textContent).toBe(expected);
+      expect(host.querySelector('.work-gallery-title')?.textContent).toBe(expected);
       expect(host.querySelector('img')?.alt).toBe(expected);
       await act(async () => host.querySelector<HTMLButtonElement>('[aria-haspopup="menu"]')?.click());
       expect(host.querySelector('a[download]')?.getAttribute('download')).toBe(name);

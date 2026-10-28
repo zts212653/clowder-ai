@@ -1,3 +1,5 @@
+import { InMemorySettledIndex } from '../../../../../utils/in-memory-settled-index.js';
+import type { SettledHistoryPageOptions, SettledHistorySourcePage } from '../../../../../utils/settled-history-page.js';
 /**
  * F225 Session Handoff Proposal Store.
  *
@@ -74,6 +76,10 @@ export interface ISessionHandoffProposalStore {
   /** F246 Approval Hub: pending proposals for a user, newest first. */
   listPendingByUser(userId: string, limit?: number): SessionHandoffProposal[] | Promise<SessionHandoffProposal[]>;
   /** F246 Phase G: settled proposals for a user, newest first. */
+  listSettledPage?(
+    owner: string,
+    options: SettledHistoryPageOptions,
+  ): SettledHistorySourcePage<SessionHandoffProposal> | Promise<SettledHistorySourcePage<SessionHandoffProposal>>;
   listSettledByUser(userId: string, limit?: number): SessionHandoffProposal[] | Promise<SessionHandoffProposal[]>;
   /**
    * A4 cooldown: most recent proposal (ANY status, incl. rejected/expired) for this cat+thread.
@@ -130,6 +136,30 @@ const ACTIVE_STATUSES: ReadonlySet<SessionHandoffProposal['status']> = new Set([
  * CAS semantics enforced by single-threaded JS event loop (Redis impl uses Lua).
  */
 export class InMemorySessionHandoffProposalStore implements ISessionHandoffProposalStore {
+  private readonly historyIndex = new InMemorySettledIndex();
+
+  /** Keep only derived ordering refs; original snapshots and mutation semantics remain unchanged. */
+  private indexedSnapshot(record: SessionHandoffProposal): SessionHandoffProposal {
+    this.historyIndex.update(
+      record.userId,
+      record.proposalId,
+      ['approved', 'rejected', 'expired'].includes(record.status) ? record.updatedAt : null,
+    );
+    return clone(record);
+  }
+
+  async listSettledPage(
+    owner: string,
+    options: SettledHistoryPageOptions,
+  ): Promise<SettledHistorySourcePage<SessionHandoffProposal>> {
+    return this.historyIndex.page(owner, options, async (id) => {
+      const record = this.proposals.get(id);
+      return record && record.userId === owner && ['approved', 'rejected', 'expired'].includes(record.status)
+        ? this.indexedSnapshot(record)
+        : null;
+    });
+  }
+
   private readonly proposals = new Map<string, SessionHandoffProposal>();
   private readonly disposition: InMemorySessionHandoffDisposition;
   // clientRequestId → proposalId dedup index (transport-retry idempotency, 云端 P2).
@@ -170,13 +200,13 @@ export class InMemorySessionHandoffProposalStore implements ISessionHandoffPropo
       updatedAt: now,
       publication: { state: 'staged', stagedAt: now },
     };
-    this.proposals.set(proposalId, clone(proposal));
-    return clone(proposal);
+    this.proposals.set(proposalId, this.indexedSnapshot(proposal));
+    return this.indexedSnapshot(proposal);
   }
 
   get(proposalId: string): SessionHandoffProposal | null {
     const found = this.proposals.get(proposalId);
-    return found ? clone(found) : null;
+    return found ? this.indexedSnapshot(found) : null;
   }
 
   claimForApproval(proposalId: string): SessionHandoffProposal | null {
@@ -184,7 +214,7 @@ export class InMemorySessionHandoffProposalStore implements ISessionHandoffPropo
     if (!p || p.status !== 'pending') return null;
     p.status = 'approving';
     p.updatedAt = Date.now();
-    return clone(p);
+    return this.indexedSnapshot(p);
   }
 
   recordCheckpoint(proposalId: string, patch: HandoffCheckpointPatch): SessionHandoffProposal | null {
@@ -196,7 +226,7 @@ export class InMemorySessionHandoffProposalStore implements ISessionHandoffPropo
     if (patch.continuationEntryId !== undefined) p.continuationEntryId = patch.continuationEntryId;
     if (patch.cardMessageId !== undefined) p.cardMessageId = patch.cardMessageId;
     p.updatedAt = Date.now();
-    return clone(p);
+    return this.indexedSnapshot(p);
   }
 
   finalizeApproval(proposalId: string): SessionHandoffProposal | null {
@@ -204,14 +234,14 @@ export class InMemorySessionHandoffProposalStore implements ISessionHandoffPropo
     if (!p || p.status !== 'approving') return null;
     p.status = 'approved';
     p.updatedAt = Date.now();
-    return clone(p);
+    return this.indexedSnapshot(p);
   }
 
   markRejected(proposalId: string, input: RejectSessionHandoffInput): SessionHandoffRejectionResult {
     const p = this.proposals.get(proposalId);
     if (!p) return { outcome: 'not_available' };
     const result = this.disposition.reject(p, input);
-    return { ...result, ...(result.proposal ? { proposal: clone(result.proposal) } : {}) };
+    return { ...result, ...(result.proposal ? { proposal: this.indexedSnapshot(result.proposal) } : {}) };
   }
 
   loadHumanDispositionEntry(input: {
@@ -231,14 +261,14 @@ export class InMemorySessionHandoffProposalStore implements ISessionHandoffPropo
     if (!p || !ACTIVE_STATUSES.has(p.status)) return null;
     p.status = 'expired';
     p.updatedAt = Date.now();
-    return clone(p);
+    return this.indexedSnapshot(p);
   }
 
   listActiveBySession(sourceSessionId: string): SessionHandoffProposal[] {
     const result: SessionHandoffProposal[] = [];
     for (const p of this.proposals.values()) {
       if (p.sourceSessionId === sourceSessionId && ACTIVE_STATUSES.has(p.status)) {
-        result.push(clone(p));
+        result.push(this.indexedSnapshot(p));
       }
     }
     return result;
@@ -248,7 +278,7 @@ export class InMemorySessionHandoffProposalStore implements ISessionHandoffPropo
     const result: SessionHandoffProposal[] = [];
     for (const p of this.proposals.values()) {
       if (p.userId === userId && p.status === 'pending') {
-        result.push(clone(p));
+        result.push(this.indexedSnapshot(p));
       }
     }
     result.sort((a, b) => b.createdAt - a.createdAt);
@@ -260,7 +290,7 @@ export class InMemorySessionHandoffProposalStore implements ISessionHandoffPropo
     const result: SessionHandoffProposal[] = [];
     for (const p of this.proposals.values()) {
       if (p.userId === userId && (p.status === 'approved' || p.status === 'rejected' || p.status === 'expired')) {
-        result.push(clone(p));
+        result.push(this.indexedSnapshot(p));
       }
     }
     result.sort((a, b) => b.updatedAt - a.updatedAt);
@@ -274,7 +304,7 @@ export class InMemorySessionHandoffProposalStore implements ISessionHandoffPropo
         if (!latest || p.createdAt > latest.createdAt) latest = p;
       }
     }
-    return latest ? clone(latest) : null;
+    return latest ? this.indexedSnapshot(latest) : null;
   }
 
   countRecentByCatThread(userId: string, sourceCatId: CatId, sourceThreadId: string, sinceTs: number): number {
@@ -293,6 +323,7 @@ export class InMemorySessionHandoffProposalStore implements ISessionHandoffPropo
   }
 
   delete(proposalId: string): void {
+    this.historyIndex.update('', proposalId, null);
     this.proposals.delete(proposalId);
   }
 

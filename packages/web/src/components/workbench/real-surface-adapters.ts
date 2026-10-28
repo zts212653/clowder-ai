@@ -13,6 +13,7 @@ import type { WorkspaceLauncherDestination } from '@/components/workspace/Worksp
 import { WORKSPACE_MODE_META, type WorkspaceMode } from '@/lib/workspace-modes';
 import type { TeamWorkspaceSubject } from '@/stores/chat-types';
 import { artifactObjectId } from './artifact-object-key';
+import { resolveCollectiveDocumentTarget } from './collective-document-surface';
 
 export {
   artifactObjectId,
@@ -78,6 +79,7 @@ function isCodePath(path: string): boolean {
 }
 
 export function isRealSurfaceOwnerAvailable(surface: WorkspaceSurfaceDescriptor): boolean {
+  if (resolveCollectiveDocumentTarget(surface)) return true;
   if (surface.type === 'video-project') return resolveVideoProjectTarget(surface) !== null;
   if (surface.type === 'thread-replay') return resolveThreadReplayThreadId(surface) !== null;
   if (

@@ -1152,6 +1152,31 @@ describe('RedisPersonMemoryStore', { skip: redisIsolationSkipReason(REDIS_URL) }
     assert.deepEqual(await store.listPeople(input.ownerUserId), []);
   });
 
+  it('rejects inconsistent settled page membership instead of claiming empty history', async () => {
+    const input = candidateInput({ candidateId: 'person_candidate_page_owner' });
+    await stageAndAnchor(input);
+    await store.rejectCandidate({
+      ownerUserId: input.ownerUserId,
+      candidateId: input.candidateId,
+      decisionId: 'page-reject',
+      decidedAt: 300,
+    });
+    let page;
+    for (let batch = 0; batch < 30; batch++) {
+      try {
+        page = await store.listSettledPage(input.ownerUserId, { limit: 30 });
+        break;
+      } catch (error) {
+        if (error.code !== 'APPROVAL_HISTORY_PREPARING') throw error;
+      }
+    }
+    assert.equal(page.records.length, 1);
+    const key = PersonMemoryKeys.candidate(input.ownerUserId, input.candidateId);
+    const canonical = JSON.parse(await redis.get(key));
+    await redis.set(key, JSON.stringify({ ...canonical, ownerUserId: 'other-owner' }));
+    await assert.rejects(store.listSettledPage(input.ownerUserId, { limit: 30 }), /canonical.*mismatch/i);
+  });
+
   it('keeps not-now owner-visible but non-recallable, then rejects and purges payload', async () => {
     const input = candidateInput({
       candidateId: 'person_candidate_not_now',

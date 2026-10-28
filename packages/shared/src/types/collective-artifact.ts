@@ -42,6 +42,7 @@ export type CollectiveArtifactAction = z.infer<typeof collectiveArtifactActionSc
 export const collectiveArtifactVersionSchema = z
   .object({
     ownerRevision: positive,
+    changeSummary: z.string().trim().min(1).max(2000).optional(),
     blobDigest: digest,
     receiptRef: id,
     recordedAt: z.string().datetime(),
@@ -142,6 +143,7 @@ export const registerCollectiveArtifactSchema = z
     sourceEventId: id,
     workId: id.optional(),
     ownerRevision: positive,
+    changeSummary: z.string().trim().min(1).max(2000).optional(),
     blobDigest: digest,
     receiptRef: id,
     requestId: id,

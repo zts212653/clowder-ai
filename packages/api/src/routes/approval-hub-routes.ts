@@ -13,9 +13,10 @@
  */
 
 import { performance } from 'node:perf_hooks';
-import type { ApprovalProducerId } from '@cat-cafe/shared';
+import type { ApprovalHistoryPageRequest, ApprovalProducerId } from '@cat-cafe/shared';
 import type { FastifyBaseLogger, FastifyPluginAsync } from 'fastify';
 import type { ApprovalProducerRegistry } from '../domains/approval-hub/ApprovalProducerRegistry.js';
+import { readApprovalHistoryPage } from '../domains/approval-hub/approval-history-page.js';
 import { resolveUserId } from '../utils/request-identity.js';
 
 const MAX_SETTLED_LIMIT = 200;
@@ -104,6 +105,25 @@ async function measuredFanOut<T>(
 export const approvalHubRoutes: FastifyPluginAsync<ApprovalHubRoutesOptions> = async (app, opts) => {
   const { registry } = opts;
 
+  app.get('/api/approval-hub/settled/page', async (request, reply) => {
+    const owner = resolveUserId(request);
+    if (!owner) return reply.status(401).send({ error: 'Identity required' });
+    const query = request.query as Record<string, unknown>;
+    if (
+      Object.keys(query).some((key) => !['limit', 'cursor', 'producer', 'resolution'].includes(key)) ||
+      Object.values(query).some((value) => typeof value !== 'string')
+    )
+      return reply.status(400).send({ error: 'Invalid approval history query' });
+    return readApprovalHistoryPage(registry, owner, {
+      ...(query.limit === undefined ? {} : { limit: Number(query.limit) }),
+      ...(query.cursor === undefined ? {} : { cursor: query.cursor as string }),
+      ...(query.producer === undefined ? {} : { producer: query.producer as ApprovalHistoryPageRequest['producer'] }),
+      ...(query.resolution === undefined
+        ? {}
+        : { resolution: query.resolution as ApprovalHistoryPageRequest['resolution'] }),
+    });
+  });
+
   app.get('/api/approval-hub/pending', async (request, reply) => {
     const userId = resolveUserId(request);
     if (!userId) {
@@ -122,7 +142,13 @@ export const approvalHubRoutes: FastifyPluginAsync<ApprovalHubRoutesOptions> = a
       )
     ).sort((a, b) => b.createdAt - a.createdAt);
 
-    return { items, count: items.length, manifest: registry.manifest(), coverage: { state: 'complete' as const } };
+    return {
+      items,
+      count: items.length,
+      identity: { ownerUserId: userId },
+      manifest: registry.manifest(),
+      coverage: { state: 'complete' as const },
+    };
   });
 
   // F246 Phase F: approval history

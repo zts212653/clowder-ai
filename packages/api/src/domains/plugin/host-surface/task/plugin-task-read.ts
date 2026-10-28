@@ -39,11 +39,27 @@ export type PluginTaskReadItem = Pick<
       readonly state: 'active' | 'revoked';
       /** Host-derived live fence; never persisted and never supplied by the package. */
       readonly currentForCaller: boolean;
-      readonly binding: DataController['binding'];
+      readonly binding: DataController['binding'] & {
+        /**
+         * Deprecated read-only compatibility epoch for SDK 0.2 Task readers.
+         * It conveys no current grant or mutation authority.
+         */
+        readonly grantRevision: number;
+      };
       readonly revocationReceiptRef?: string;
     };
   };
 };
+
+function legacyGrantRevision(controller: DataController): number {
+  const bindingReceipt = controller.receipts?.find(
+    (receipt) => receipt.kind === 'bind' && receipt.receiptRef === controller.binding.ownerOperationReceiptRef,
+  );
+  // Contract 0.3 removed mutable grant authority. Older SDK 0.2 readers still
+  // require this positive read field, so preserve the immutable historical
+  // value when one exists and expose a stable compatibility epoch otherwise.
+  return bindingReceipt?.kind === 'bind' ? (bindingReceipt.controller.grantRevision ?? 1) : 1;
+}
 
 function projectWait(wait: PluginWaitState): NonNullable<PluginTaskReadItem['pluginWait']> {
   return {
@@ -111,7 +127,10 @@ export function projectPluginTaskRead(
                     bindingRevision: work.dataController.bindingRevision,
                     state: work.dataController.state,
                     currentForCaller: dataControllerCurrentForCaller,
-                    binding: work.dataController.binding,
+                    binding: {
+                      ...work.dataController.binding,
+                      grantRevision: legacyGrantRevision(work.dataController),
+                    },
                     ...(work.dataController.revocationReceiptRef === undefined
                       ? {}
                       : { revocationReceiptRef: work.dataController.revocationReceiptRef }),

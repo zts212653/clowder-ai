@@ -8,6 +8,7 @@ import { writeShellPresentation } from '@/components/shell/shell-presentation';
 import type { RichCardBlock } from '@/stores/chat-types';
 import { useSidebarProjectionStore } from '@/stores/sidebarProjectionStore';
 import { apiFetch } from '@/utils/api-client';
+import { observeApiSessionOwner } from '@/utils/api-session-identity';
 import { ProposalCard } from '../ProposalCard';
 
 vi.mock('@/utils/api-client', () => ({ apiFetch: vi.fn() }));
@@ -66,6 +67,7 @@ const block: RichCardBlock = {
 let host: HTMLDivElement;
 let root: Root;
 beforeEach(() => {
+  observeApiSessionOwner(proposal.createdBy);
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
   writeShellPresentation('v2');
   useSidebarProjectionStore.setState({ rows: [] });

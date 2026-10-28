@@ -143,6 +143,7 @@ function report(config, payload, exitCode = 0) {
       if (payload.settlement.commandGroupStatus)
         process.stdout.write(`\ncommand group: ${payload.settlement.commandGroupStatus} (not a full-stop receipt)`);
       if (payload.settlement.otherResourcesStatus) process.stdout.write('\nother resources: not verified');
+      if (payload.settlement.leaseStatus) process.stdout.write(`\nproducer lease: ${payload.settlement.leaseStatus}`);
       process.stdout.write('\nsaved data: not reverified');
     }
     process.stdout.write('\n');

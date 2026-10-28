@@ -100,7 +100,11 @@ export function RoadmapPanel({
   readonly onDecideProjectSuggestion?: ProjectSuggestionDecisionHandler;
   readonly onOpenSource?: (work: CollectiveWorkProjection, view: RoadmapViewState) => void;
   readonly onOpenResult?: (work: CollectiveWorkProjection, view: RoadmapViewState) => void;
-  readonly onOpenArtifact?: (artifact: SharedArtifact) => void;
+  readonly onOpenArtifact?: (
+    artifact: SharedArtifact,
+    ownerRevision?: number,
+    options?: import('./collective-artifact-client.js').SharedArtifactOpenOptions,
+  ) => void;
 }) {
   const [internalView, setInternalView] = useState<RoadmapViewState>({
     lens: 'stage',

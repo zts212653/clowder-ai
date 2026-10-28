@@ -50,7 +50,8 @@ export interface FileData {
   absolutePath?: string;
   content: string;
   sha256: string;
-  size: number;
+  /** Undefined when the reader has not obtained source metadata (for example an unread Office attachment). */
+  size?: number;
   mime: string;
   truncated: boolean;
   binary?: boolean;

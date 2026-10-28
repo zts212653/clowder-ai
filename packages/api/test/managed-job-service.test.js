@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { test } from 'node:test';
 import Database from 'better-sqlite3';
 import { ManagedCommandWakeRecoverySweep } from '../dist/domains/ball-custody/ManagedCommandWakeRecoverySweep.js';
@@ -46,7 +46,7 @@ async function until(check, label, timeout = 12_000) {
   throw new Error(`Timed out: ${label}`);
 }
 
-function fixture(t, budget = 4) {
+function fixture(t, budget = 4, owner = principal) {
   const root = mkdtempSync(join(tmpdir(), 'managed-job-test-'));
   const previous = process.env.CAT_CAFE_DATA_DIR;
   process.env.CAT_CAFE_DATA_DIR = root;
@@ -70,14 +70,14 @@ function fixture(t, budget = 4) {
     rmSync(root, { recursive: true, force: true });
   });
   const submit = (command, key = 'command', extra = {}) =>
-    service.submit(principal, {
+    service.submit(owner, {
       command,
       cwd: root,
       originTaskId: `hold-ball-${key}`,
       originInvocationId: 'invocation-1',
       idempotencyKey: key,
       executionSlaMs: 5000,
-      wakeTarget: principal,
+      wakeTarget: owner,
       ...extra,
     });
   return { root, service, submit };
@@ -155,10 +155,58 @@ test('command environment never inherits callback credentials or provider tree o
     CAT_CAFE_CREDENTIAL_FILE: '/private/credentials',
     CAT_CAFE_SESSION_CREDENTIAL_FILE: '/private/session',
     CAT_CAFE_CLI_OWNER_TOKEN: 'provider-owner',
+    CAT_CAFE_WORKTREE_ORIGIN: '{"threadId":"thread_unrelated_daemon"}',
   });
   assert.equal(env.CAT_CAFE_CALLBACK_TOKEN, undefined);
   assert.equal(env.CAT_CAFE_INVOCATION_ID, undefined);
   assert.equal(env.CAT_CAFE_CREDENTIAL_FILE, undefined);
+  assert.equal(env.CAT_CAFE_WORKTREE_ORIGIN, undefined);
+});
+
+test('a managed command creates a worktree with its admitted source, without CLI credentials', async (t) => {
+  const owner = { ...principal, threadId: 'thread_managed_worktree' };
+  const { root, service, submit } = fixture(t, 4, owner);
+  const repo = join(root, 'repo');
+  mkdirSync(repo);
+  const git = (...args) => {
+    const result = spawnSync('git', ['-C', repo, ...args], { encoding: 'utf8' });
+    assert.equal(result.status, 0, result.stderr);
+    return result.stdout.trim();
+  };
+  git('init', '-q', '-b', 'main');
+  git('config', 'user.name', 'Fixture');
+  git('config', 'user.email', 'fixture@example.test');
+  git('config', 'extensions.worktreeConfig', 'true');
+  writeFileSync(join(repo, 'README.md'), 'fixture\n');
+  git('add', 'README.md');
+  git('commit', '-qm', 'fixture');
+  git('update-ref', 'refs/remotes/origin/main', 'HEAD');
+  const path = join(root, 'alpha');
+  const entry = resolve('../../scripts/worktree-new.mjs');
+  const command = node(`
+    const assert = require('node:assert/strict');
+    for (const key of ['CAT_CAFE_CALLBACK_TOKEN', 'CAT_CAFE_INVOCATION_ID', 'CAT_CAFE_CREDENTIAL_FILE'])
+      assert.equal(process.env[key], undefined);
+    require('node:child_process').execFileSync(process.execPath,
+      ${JSON.stringify([entry, path, '--owner', owner.catId, '--role', 'alpha', '--full'])},
+      { stdio: 'inherit' });
+  `);
+  const job = await submit(command, 'worktree-origin', { cwd: repo, executionSlaMs: 10_000 });
+  service.admit(owner, job.jobId, 'visible-worktree-job');
+  const { admission, completion } = service.start(owner, job.jobId, new ManagedRunner());
+  assert.equal((await admission).spawned, true);
+  await completion;
+  assert.equal(service.get(owner, job.jobId).state, 'succeeded', service.tail(owner, job.jobId));
+  const result = spawnSync('git', ['-C', path, 'config', '--worktree', '--get', 'catcafe.lifecycle.origin'], {
+    encoding: 'utf8',
+  });
+  assert.equal(result.status, 0, 'managed job must leave an origin on its real created checkout');
+  assert.deepEqual(JSON.parse(result.stdout), {
+    threadId: owner.threadId,
+    userId: owner.userId,
+    sourceRef: 'invocation:invocation-1',
+    role: 'alpha',
+  });
 });
 
 test('one owner budget spans threads while idempotency and reads remain thread scoped', async (t) => {

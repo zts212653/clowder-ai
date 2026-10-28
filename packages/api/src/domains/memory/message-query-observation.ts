@@ -1,6 +1,7 @@
 /** Request-local lifecycle evidence only: no query, identity, body, prompt or raw provider event. */
 export function observeQueryQualification() {
   const batches: Array<{
+    batchIndex: number;
     rows: number;
     bodyChars: number;
     remainingMs: number;
@@ -25,6 +26,7 @@ export function observeQueryQualification() {
     start(rows: number, bodyChars: number, deadlineAt: number, onTrace?: (event: Record<string, unknown>) => void) {
       const entered = performance.now();
       const batch: (typeof batches)[number] = {
+        batchIndex: batches.length,
         rows,
         bodyChars,
         remainingMs: Math.max(0, deadlineAt - Date.now()),
@@ -34,9 +36,15 @@ export function observeQueryQualification() {
       return {
         trace(event: Record<string, unknown>) {
           if (
-            ['native-prepared', 'native-launch', 'native-init', 'native-response', 'native-usage'].includes(
-              String(event.phase),
-            )
+            [
+              'native-prepared',
+              'native-launch',
+              'native-init',
+              'native-response',
+              'native-output',
+              'native-usage',
+              'native-completed',
+            ].includes(String(event.phase))
           )
             batch.stage = String(event.phase);
           if (event.phase === 'native-launch') nativeLaunches++;
@@ -49,7 +57,7 @@ export function observeQueryQualification() {
             costReports++;
             reportedCostUsd += event.costUsd;
           }
-          onTrace?.(event);
+          onTrace?.({ ...event, batchIndex: batch.batchIndex });
         },
         abort() {
           batch.abortAfterMs ??= Math.max(0, performance.now() - entered);

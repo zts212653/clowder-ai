@@ -78,7 +78,11 @@ export function RoadmapWorkspace({
   readonly onOpenNavigation?: () => void;
   readonly onOpenSource?: (work: CollectiveWorkProjection, view: RoadmapViewState) => void;
   readonly onOpenResult?: (work: CollectiveWorkProjection, view: RoadmapViewState) => void;
-  readonly onOpenArtifact?: (artifact: SharedArtifact) => void;
+  readonly onOpenArtifact?: (
+    artifact: SharedArtifact,
+    ownerRevision?: number,
+    options?: import('./collective-artifact-client.js').SharedArtifactOpenOptions,
+  ) => void;
   readonly onChangeWorkTime?: WorkTimeChangeHandler;
   readonly onChangeProjectTarget?: ProjectTargetChangeHandler;
   readonly onSetDependencies: (work: CollectiveWorkProjection, dependencyWorkIds: readonly string[]) => void;

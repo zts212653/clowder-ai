@@ -4,12 +4,12 @@ related_features: [F038, F148, F167, F188, F203, F209, F227, F231, F236, F237, F
 topics: [memory, context, retrieval, delivery, reliability, command]
 doc_kind: spec
 created: 2026-09-27
-updated: 2026-10-27
+updated: 2026-10-28
 description: "让猫以可控的上下文成本取得可信、完整可续读的记忆，减少旧消息回放、检索绕路与启动时的重复负担。"
 description_source: human
 description_author: codex-astra
 description_updated_at: 2026-09-27T12:29:12Z
-tips_exempt: "Renewed 2026-10-27 for PR6216 intake: this delta records the existing Task's date-access repair, independent review, same-run Alpha settlement and exact loading condition. It adds no user operation, setting, or discovery surface. Production migration cost and natural search outcomes remain unverified; earlier accepted slices and original owners remain intact."
+tips_exempt: "Renewed 2026-10-28 for boot58: this delta records actual index presence and same-request native/qualification observations. It adds no user operation, setting, or discovery surface. Date-query recovery, migration duration and whole acceptance remain open; accepted slices and original owners remain intact."
 ---
 
 # F324: Memory Delivery Reliability｜记忆交付可靠性与上下文成本收口

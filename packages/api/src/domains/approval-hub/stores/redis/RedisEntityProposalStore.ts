@@ -1,3 +1,6 @@
+import { reconcileSettledIndexTime } from '../../../../utils/reconcile-settled-index-time.js';
+import { readRedisSettledPage } from '../../../../utils/redis-settled-page.js';
+import type { SettledHistoryPageOptions, SettledHistorySourcePage } from '../../../../utils/settled-history-page.js';
 /** F260 Redis proposal state: persistent TTL=0, pending → approved/rejected. */
 
 import type {
@@ -148,6 +151,38 @@ export class RedisEntityProposalStore implements IEntityProposalStore, ApprovalP
     )
       .sort((left, right) => right.createdAt - left.createdAt)
       .slice(0, Math.max(0, limit));
+  }
+
+  async listSettledPage(
+    owner: string,
+    options: SettledHistoryPageOptions,
+  ): Promise<SettledHistorySourcePage<EntityProposal>> {
+    return readRedisSettledPage(this.redis, EntityProposalKeys.userSettled(owner), options, async (id, at) => {
+      const p = await this.get(id);
+      if (!p) return null;
+      if (p.ownerUserId !== owner || !['approved', 'rejected'].includes(p.status))
+        throw new Error('Settled index canonical owner/status mismatch');
+      if (p.proposalId !== id) throw new Error('Settled index identity mismatch');
+      await reconcileSettledIndexTime(
+        this.redis,
+        EntityProposalKeys.userSettled(owner),
+        id,
+        at,
+        p.approvedAt ?? p.rejectedAt ?? 0,
+        [
+          {
+            key: EntityProposalKeys.detail(id),
+            fields: {
+              status: p.status,
+              ownerUserId: p.ownerUserId,
+              approvedAt: p.approvedAt,
+              rejectedAt: p.rejectedAt,
+            },
+          },
+        ],
+      );
+      return p;
+    });
   }
 
   async listSettledByUser(userId: string, limit = 100): Promise<EntityProposal[]> {

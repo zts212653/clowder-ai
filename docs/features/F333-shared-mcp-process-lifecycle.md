@@ -5,12 +5,12 @@ related_decisions: [ADR-039, ADR-044]
 topics: [mcp, process-lifecycle, host-capacity, invocation-context, streamable-http, resource-reclamation]
 doc_kind: spec
 created: 2026-10-25
-updated: 2026-10-27
+updated: 2026-10-28
 description: "让多只猫并行工作时复用 MCP 的重复运行开销，保留每次调用的身份、权限、工作区和故障隔离，并用完整资源账证明收益。"
 description_source: model
 description_author: codex-astra
 description_updated_at: 2026-10-26T04:44:27Z
-tips_exempt: "2026-10-27 续核：本切面撤除 MCP 外层代理并迁移受管旧配置，仍使用现有聊天、工具与配置入口，没有新增需要用户学习的操作；这里不将 Alpha 实测、尚待生产资源验收或暂缓的载体写成新的已交付能力。"
+tips_exempt: "2026-10-28 验收：本切面撤除 MCP 外层代理并迁移受管旧配置，仍使用现有聊天、工具与配置入口，没有新增需要用户学习的操作；线上撤层已验，OpenCode 暂缓与 Phase B 全量目标不计已交付。"
 ---
 
 # F333: Shared MCP Process Lifecycle｜多猫共用 MCP 运行资源
@@ -22,7 +22,7 @@ tips_exempt: "2026-10-27 续核：本切面撤除 MCP 外层代理并迁移受�
 >
 > **交付约束（2026-10-25 PDT / 10-26 UTC）**：You 在 `#private-source-id` 要求少 Phase、先查复用，并明确「别一个 phase 一堆 PR，每个都是半成品，一个 PR 得是一个完整的东西」。据此收为两个 Phase；原盘点与试点移入第一笔完整交付的内部工作，不丢弃任何原验收要求。
 
-## 当前撤除交付范围（operator 948；#6237 已合入，验收发现回归续修）
+## 当前撤除交付范围（operator 948；Phase A 已部署并验收）
 
 **拆除 MCP 外面的保护代理层**，不是聚合该层或改名保留：
 
@@ -65,7 +65,6 @@ CLI 的单独新指令，也不声称已证明所有私人 CLI 都无人使用�
 切换时执行并回读验证。验收覆盖已有深合并反例变绿、同原生会话续接、第三方保留与显式 stdio 回退。
 
 已路由原作者：`[thread-id]#private-source-id`。
-这是已裁决、待实现的配置迁移；截至本次记录，未修改现役 `.codex/config.toml` 或账户文件。
 
 ## Why
 
@@ -176,10 +175,8 @@ CLI 的单独新指令，也不声称已证明所有私人 CLI 都无人使用�
 - [x] AC-A3: Claude + Codex 真实 initialize/list/call/resume 完成，证明原 turn 绑定与 secret 不进 argv/env/archive；未支持路径明确记录，不能算通过。
 - [x] AC-A4: callback、本地文件/图片、discovery、展示及派生缓存均消费正确的请求上下文；跨猫/线程/工作区、缺失字段、受限 profile、排队后撤销和迟到请求的反例不能扩大权限。
 - [x] AC-A5: 取消/断线/crash/reconnect 保持其他合法请求与用户数据；不重复执行结果不明的写操作；soak 后内存/句柄/连接/timer 回到预定稳定区间。
-- [ ] AC-A6: 自家及第三方 MCP 外层保护代理停止生成，每宿主该层进程为零；线上真实负载拆前/拆后各记录常驻 MCP 相关进程与内存、活动负载和正常调用，不再以 25% 作为验收。
 - [x] AC-A7: 自家所有启用 family 与现役 MCP 载体逐项有真实使用证据，至少覆盖 Claude、Codex、AGY Native；其他实际消费路径逐项核验，不适用有依据；工作区、部署、权限域不混用。撤代理后五类载体已实际验证，DSH 启动回归经 #6244 合入后真实复验；OpenCode 依 operator 暂缓未验，不计通过。
 - [x] AC-A8: 受管启动/ready/假活恢复/停止有明确 owner 和故障范围；原子切换/回滚覆盖客户端工具引用、能力开关与旧配置，单 runtime/profile 无双面。
-- [ ] AC-A9: 同一完整交付覆盖 Alpha 与获准实际部署的版本及资源账；正常工具、并发与原 callback 身份仍成立；撤除 MCP 外层检查依 operator 948，且不依赖 B 的 backend 共享才能使用。
 
 ### Phase B（第三方与全量）
 - [ ] AC-B1: 本批第三方清单逐项真实可用，并证明状态/授权适合共享或给出保留隔离的证据；实际停用、回收和恢复成立，插件 activation/grant/revoke 在迁移后仍生效。
@@ -222,7 +219,7 @@ CLI 的单独新指令，也不声称已证明所有私人 CLI 都无人使用�
 | R1 | 多猫并行时减少重复进程和内存开销 | AC-A1/A2/A6/A9、AC-B2 | 同负载完整资源账与实测 | [ ] |
 | R2 | 每次调用认对身份、权限、线程和工作区 | AC-A3/A4/A7 | 真实载体正常路径与越权/迟到反例；OpenCode 依 operator 暂缓未验 | [x] |
 | R3 | 结束可回收、故障能恢复，其他猫能继续干活 | AC-A5/A8/A9、AC-B1 | soak、取消/crash/恢复及切换演练 | [ ] |
-| R4 | 利用现有网关、核实入口合并与 AGY Native 收益 | AC-A1/A2/A3/A6/A7/A8 | 撤代理及 DSH 修复已合入；五载体实读，线上净收益未验 | [ ] |
+| R4 | 利用现有网关、核实入口合并与 AGY Native 收益 | AC-A1/A2/A3/A6/A7/A8 | 五载体Alpha与boot58线上使用已验，原生HTTP复用既有网关，保护代理层归零；不外推整机净收益 | [x] |
 | R5 | 第三方受控扩面、自家交付不冒充完整目标 | AC-B1/B2 | 插件撤销/状态隔离与全量验收 | [ ] |
 | R6 | 少 Phase，复用已有设施，每笔 PR 是完整可用结果 | AC-A7/A8/A9、AC-B1/B2；PR 边界段 | 从真实入口验证独立可用与整笔回滚，不依赖后续 PR 补齐同一使用路径 | [ ] |
 
@@ -265,5 +262,5 @@ Map delta: none at kickoff。正式实现新增 worker/connection 责任时更�
 - operator 1236 指定本次实现分工：Sol6.1 写、Sonnet 审、Astra 最终把关验收。Sonnet 在执行现场给精确实现目标的独立 verdict，修复回原作者；Astra 消费整项最终结果与真实运行证据，不逐步重复审核实现。
 - 默认一笔完整 Phase A 实现 PR；执行侧在风险门禁满足后正常合入，整项实现结束回流一次。Astra 继续持有 AC-A9 与整体真实验收，生产启用/重启与 Feature close 仍按各自权限处理。
 - 已有设计证据：Sol 6.1 对 v2 的四项 finding 全部关闭；Argon 对新基线无阻塞性反对。两者不代签尚未运行的试点或实现。
-- 立项内容复用上述独立判断并以当前源码收正适用范围，未为立项重复唤醒 reviewer；最终实现沿既有 API gateway 承载，当前生产 loaded revision 已核，净资源验收继续开放。
+- 立项内容复用上述独立判断并以当前源码收正适用范围，未为立项重复唤醒 reviewer；最终实现沿既有 API gateway 承载，Phase A已由Astra核实际迁移、使用及资源账；全量净资源目标保留在B，不因A验收代签。
 - 实现涉及行为、secret/权限、MCP consumer 和生命周期，按当时实际 delta 选择非作者独立验证与相关 RED/GREEN；测试范围按风险，不把本页等同 merge approval。

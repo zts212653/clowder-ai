@@ -1,11 +1,14 @@
 import type { RichCardBlock } from '@cat-cafe/shared';
-import { useEffect, useMemo, useState } from 'react';
+import { useContext, useEffect, useMemo, useState } from 'react';
+import { ApprovalResultHistory } from '@/components/rich/approval-result-history';
 import { useShellCopy } from '../shell-copy';
 import { useShellLanguage } from '../shell-language';
 import { ApprovalDecisionReceipt } from './ApprovalDecisionReceipt';
 import { useApprovalHeading } from './approval-heading';
 import { describeReconcile, type ReconcileModel, type Terminal } from './approval-reconcile';
+import { approvalReconcileCopy } from './approval-reconcile.shell-copy';
 import { lookupCreatedThread } from './created-thread-lookup';
+import { useCreatedThreadResult } from './created-thread-result';
 import { originalApprovalCopy } from './original-approval.shell-copy';
 import { readSettledOriginalBlock } from './settled-original-block';
 import { settledResultsCopy } from './settled-results.shell-copy';
@@ -25,6 +28,9 @@ export function SettledApprovalReceipt({
   const language = useShellLanguage(),
     t = useShellCopy(settledResultsCopy);
   const originalCopy = useShellCopy(originalApprovalCopy);
+  const phaseCopy = useShellCopy(approvalReconcileCopy);
+  const history = useContext(ApprovalResultHistory);
+  const created = useCreatedThreadResult(item);
   const [detailsRequested, setDetailsRequested] = useState(false);
   const approval = useMemo(() => ({ ...item, inlineApprovable: false }), [item]);
   const { title: proposalTitle } = useApprovalHeading(approval);
@@ -40,12 +46,7 @@ export function SettledApprovalReceipt({
   useEffect(() => {
     if (!detailsRequested) return;
     const controller = new AbortController();
-    void Promise.all([
-      readSettledOriginalBlock(item, controller.signal),
-      item.sourceFeatureId === 'F128' && item.resolution === 'accepted'
-        ? lookupCreatedThread({ ...item, signal: controller.signal })
-        : null,
-    ])
+    void Promise.all([readSettledOriginalBlock(item, controller.signal), null])
       .then(([block, threadId]) => {
         if (!controller.signal.aborted) setContext({ item, block, threadId });
       })
@@ -59,10 +60,12 @@ export function SettledApprovalReceipt({
       ...(item.detail.closureTimeUnknown ? {} : { decidedAt: item.decidedAt }),
       decidedBy: item.decidedBy,
       ...(item.closedReason ? { closedReason: item.closedReason } : {}),
-      ...(original?.threadId ? { threadId: original.threadId } : {}),
-      ...(item.resolution === 'accepted' ? { effectUnknown: !original?.threadId } : {}),
+      ...(created.value ? { threadId: created.value } : {}),
+      ...(item.resolution === 'accepted'
+        ? { effectUnknown: item.sourceFeatureId === 'F128' ? !created.value : true }
+        : {}),
     }),
-    [item, original?.threadId],
+    [item, created.value],
   );
   const session = useMemo(
     () => ({
@@ -74,24 +77,27 @@ export function SettledApprovalReceipt({
     }),
     [item, approval, terminal, original?.block],
   );
-  const effect = useOriginalApprovalEffect(session, detailsRequested);
+  const effect = useOriginalApprovalEffect(session, true);
   const view = describeReconcile(session.model.state, {
     language,
     ownerUserId: item.ownerUserId,
     sourceFeatureId: item.sourceFeatureId,
     originalEffect: effect,
+    compactResult: Boolean(history),
+    materialization: item.materialization,
   });
   return (
     <ApprovalDecisionReceipt
       session={session}
       terminal={terminal}
-      line={[view.line, title].filter(Boolean).join(' · ')}
+      line={history ? (view.line ?? '') : [view.line, title].filter(Boolean).join(' · ')}
       heading={title}
       authorizeOpen={authorizeOpen}
       onExpandedChange={(expanded) => {
         if (expanded) setDetailsRequested(true);
       }}
       deferProducerRead
+      effectFailed={item.materialization.state === 'failed' && !effect && !created.value}
       resolveThreadId={
         item.sourceFeatureId === 'F128' && item.resolution === 'accepted' ? () => lookupCreatedThread(item) : undefined
       }
@@ -100,7 +106,7 @@ export function SettledApprovalReceipt({
         <p>{t.sourceUnavailable}</p>
       ) : null}
       <button type="button" className="shell-focusable text-xs hover:underline" onClick={reread}>
-        {t.reread}
+        {item.materialization.state === 'failed' && !effect && !created.value ? phaseCopy.retry : t.reread}
       </button>
     </ApprovalDecisionReceipt>
   );

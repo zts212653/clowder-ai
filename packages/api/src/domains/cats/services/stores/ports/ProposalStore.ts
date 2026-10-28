@@ -1,3 +1,5 @@
+import { InMemorySettledIndex } from '../../../../../utils/in-memory-settled-index.js';
+import type { SettledHistoryPageOptions, SettledHistorySourcePage } from '../../../../../utils/settled-history-page.js';
 /**
  * F128 Proposal Store
  * Cats propose threads; users approve/reject. Proposal is the persistent
@@ -41,6 +43,32 @@ const DEFAULT_LIST_LIMIT = 100;
  * In-memory implementation for tests and single-process dev.
  */
 export class InMemoryProposalStore implements IProposalStore {
+  private readonly historyIndex = new InMemorySettledIndex();
+
+  /** Keep only derived ordering refs; original snapshots and mutation semantics remain unchanged. */
+  private indexedSnapshot(record: ThreadProposal): ThreadProposal {
+    this.historyIndex.update(
+      record.createdBy,
+      record.proposalId,
+      ['approved', 'rejected', 'withdrawn'].includes(record.status)
+        ? (record.withdrawnAt ?? record.approvedAt ?? record.rejectedAt ?? 0)
+        : null,
+    );
+    return cloneProposal(record);
+  }
+
+  async listSettledPage(
+    owner: string,
+    options: SettledHistoryPageOptions,
+  ): Promise<SettledHistorySourcePage<ThreadProposal>> {
+    return this.historyIndex.page(owner, options, async (id) => {
+      const record = this.proposals.get(id);
+      return record && record.createdBy === owner && ['approved', 'rejected', 'withdrawn'].includes(record.status)
+        ? this.indexedSnapshot(record)
+        : null;
+    });
+  }
+
   private readonly proposals: Map<string, ThreadProposal> = new Map();
   private readonly dedupCache: Map<string, string> = new Map();
 
@@ -94,12 +122,12 @@ export class InMemoryProposalStore implements IProposalStore {
       ...(input.approvedDevelopmentScope ? { approvedDevelopmentScope: { ...input.approvedDevelopmentScope } } : {}),
     };
     this.proposals.set(proposal.proposalId, proposal);
-    return cloneProposal(proposal);
+    return this.indexedSnapshot(proposal);
   }
 
   get(proposalId: string): ThreadProposal | null {
     const found = this.proposals.get(proposalId);
-    return found ? cloneProposal(found) : null;
+    return found ? this.indexedSnapshot(found) : null;
   }
 
   recordRevisionRequest(
@@ -119,13 +147,13 @@ export class InMemoryProposalStore implements IProposalStore {
     proposal.revisionRequest ??= structuredClone(request);
     if (request.queuedAt && proposal.revisionRequest.messageId === request.messageId)
       proposal.revisionRequest.queuedAt ??= request.queuedAt;
-    return cloneProposal(proposal);
+    return this.indexedSnapshot(proposal);
   }
 
   supersedePending(proposalId: string, replacementId: string, requestMessageId: string): ThreadProposal | null {
     const proposal = this.proposals.get(proposalId);
     const next = this.proposals.get(replacementId);
-    if (proposal?.supersededByProposalId === replacementId) return cloneProposal(proposal);
+    if (proposal?.supersededByProposalId === replacementId) return this.indexedSnapshot(proposal);
     if (
       !proposal ||
       proposal.status !== 'pending' ||
@@ -143,7 +171,7 @@ export class InMemoryProposalStore implements IProposalStore {
     proposal.withdrawnBy = proposal.sourceCatId;
     proposal.withdrawnAt = Date.now();
     proposal.supersededByProposalId = replacementId;
-    return cloneProposal(proposal);
+    return this.indexedSnapshot(proposal);
   }
 
   listByUser(userId: string, limit: number = DEFAULT_LIST_LIMIT): ThreadProposal[] {
@@ -180,7 +208,7 @@ export class InMemoryProposalStore implements IProposalStore {
     proposal.status = 'approving';
     proposal.approvedBy = input.approvedBy;
     proposal.claimedAt = Date.now();
-    return cloneProposal(proposal);
+    return this.indexedSnapshot(proposal);
   }
 
   finalizeApproval(input: FinalizeApprovalInput): ThreadProposal | null {
@@ -191,7 +219,7 @@ export class InMemoryProposalStore implements IProposalStore {
       (proposal.createdThreadId && proposal.createdThreadId !== input.createdThreadId)
     )
       return null;
-    const updated = cloneProposal(proposal);
+    const updated = this.indexedSnapshot(proposal);
     updated.status = 'approved';
     updated.approvedAt = Date.now();
     updated.createdThreadId = input.createdThreadId;
@@ -199,7 +227,7 @@ export class InMemoryProposalStore implements IProposalStore {
     applyProposalOverrides(updated, input.overrides);
     freezeApprovedTaskContract(updated);
     this.proposals.set(updated.proposalId, updated);
-    return cloneProposal(updated);
+    return this.indexedSnapshot(updated);
   }
 
   rollbackClaim(proposalId: string): boolean {
@@ -225,7 +253,7 @@ export class InMemoryProposalStore implements IProposalStore {
     proposal.rejectedBy = input.rejectedBy;
     proposal.rejectedAt = Date.now();
     if (input.rejectionReason) proposal.rejectionReason = input.rejectionReason;
-    return cloneProposal(proposal);
+    return this.indexedSnapshot(proposal);
   }
 
   withdrawPending(input: WithdrawProposalInput): ThreadProposal | null {
@@ -234,7 +262,7 @@ export class InMemoryProposalStore implements IProposalStore {
     proposal.status = 'withdrawn';
     proposal.withdrawnBy = input.withdrawnBy;
     proposal.withdrawnAt = Date.now();
-    return cloneProposal(proposal);
+    return this.indexedSnapshot(proposal);
   }
 
   getDedupProposalId(userId: string, clientRequestId: string): string | null {
@@ -285,13 +313,14 @@ export class InMemoryProposalStore implements IProposalStore {
   }
 
   delete(proposalId: string): void {
+    this.historyIndex.update('', proposalId, null);
     this.proposals.delete(proposalId);
   }
 
   private collect(predicate: (p: ThreadProposal) => boolean, limit: number): ThreadProposal[] {
     const result: ThreadProposal[] = [];
     for (const proposal of this.proposals.values()) {
-      if (predicate(proposal)) result.push(cloneProposal(proposal));
+      if (predicate(proposal)) result.push(this.indexedSnapshot(proposal));
     }
     result.sort((a, b) => b.createdAt - a.createdAt);
     return result.slice(0, Math.max(0, limit));

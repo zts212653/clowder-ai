@@ -14,10 +14,13 @@ import type { F307WorkbenchTabsProps } from '../F307WorkbenchTabs';
 import {
   artifactObjectId,
   createArtifactSurface,
+  createFileSurface,
   createWorkspaceDestinationSurface,
   createWorkspaceModeSurface,
+  resolveFileTarget,
   resolvePullRequestChangesTarget,
 } from '../real-surface-adapters';
+import type { WorkspaceSurfaceDescriptor } from '../workbench-contract';
 import { createInitialWorkbenchState } from '../workbench-model';
 
 const probes = vi.hoisted(() => ({
@@ -26,6 +29,7 @@ const probes = vi.hoisted(() => ({
   openArtifact: vi.fn(),
   homeArtifact: null as ThreadArtifactDTO | null,
   homeOrigin: null as Parameters<OpenHomeArtifact>[1] | null,
+  homeSurface: null as WorkspaceSurfaceDescriptor | null,
 }));
 const artifact: ThreadArtifactDTO = {
   type: 'image',
@@ -101,7 +105,17 @@ vi.mock('@/components/workspace-home/WorkspaceHomeV2', () => ({
         type="button"
         data-testid="annotate-probe"
         onClick={() => {
-          if (probes.homeArtifact && probes.homeOrigin) onOpenArtifact?.(probes.homeArtifact, probes.homeOrigin);
+          if (probes.homeArtifact && probes.homeOrigin)
+            onOpenArtifact?.(
+              probes.homeArtifact,
+              probes.homeOrigin,
+              probes.homeSurface ??
+                createArtifactSurface({
+                  threadId: probes.homeOrigin.threadId,
+                  artifact: probes.homeArtifact,
+                  navigationOrigin: probes.homeOrigin,
+                }),
+            );
         }}
       >
         批注
@@ -134,6 +148,7 @@ beforeEach(() => {
   probes.openArtifact.mockClear();
   probes.homeArtifact = artifact;
   probes.homeOrigin = origin;
+  probes.homeSurface = null;
   container = document.createElement('div');
   document.body.append(container);
   root = createRoot(container);
@@ -242,7 +257,22 @@ it('restores a recent closed owner through its original action and records only 
 it('passes the full publication item and signed Home origin to the existing artifact owner', async () => {
   await renderHost();
   await act(async () => container.querySelector<HTMLButtonElement>('[data-testid="annotate-probe"]')?.click());
-  expect(probes.openArtifact).toHaveBeenCalledExactlyOnceWith('thread-a', artifact, origin);
+  expect(useF307ExperienceWorkbenchStore.getState().layout.surfaces).toContainEqual(
+    createArtifactSurface({ threadId: 'thread-a', artifact, navigationOrigin: origin }),
+  );
+  expect(probes.openArtifact).not.toHaveBeenCalled();
+});
+
+it('attaches the already resolved Home file and keeps its original path instead of rebuilding an artifact', async () => {
+  const path = '.cat-cafe/uploads/中文讨论稿.md';
+  probes.homeSurface = createFileSurface({ worktreeId: 'upload-root', path, navigationOrigin: origin });
+  await renderHost();
+  await act(async () => container.querySelector<HTMLButtonElement>('[data-testid="annotate-probe"]')?.click());
+  const state = useF307ExperienceWorkbenchStore.getState().layout;
+  const selected = state.surfaces.find((surface) => surface.id === state.activeSurfaceId);
+  expect(selected).toEqual(probes.homeSurface);
+  expect(resolveFileTarget(selected!)).toMatchObject({ worktreeId: 'upload-root', path });
+  expect(probes.openArtifact).not.toHaveBeenCalled();
 });
 
 it('opens a Home PR in exact Changes and returns to its same canonical card through ordinary Back', async () => {

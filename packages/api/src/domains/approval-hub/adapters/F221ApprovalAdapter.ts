@@ -1,4 +1,6 @@
+import type { SettledHistoryPageOptions } from '../../../utils/settled-history-page.js';
 import { type ApprovalDecisionRead, projectApprovalDecisionRead } from '../ports/IApprovalAdapter.js';
+import { projectSettledPage } from '../project-settled-page.js';
 /**
  * F246 v2: F221 (Taste Proposal) → ApprovalItem adapter.
  *
@@ -24,6 +26,10 @@ export class F221ApprovalAdapter implements IApprovalAdapter {
 
   constructor(store: ITasteProposalStore) {
     this.store = store;
+  }
+
+  async listSettledPage(owner: string, options: SettledHistoryPageOptions) {
+    return projectSettledPage(this.store, owner, options, toSettledItem);
   }
 
   listPending(userId: string): ApprovalItem[] | Promise<ApprovalItem[]> {
@@ -102,6 +108,9 @@ function toSettledItem(p: TasteProposal): SettledApprovalItem | null {
     summary: `${p.correctionTarget ? 'Taste correction' : 'Taste'} [${p.dimension}]: ${(p.takeaway ?? p.quote).slice(0, 60)}`,
     detail: {
       ...decision.detail,
+      ...(p.status === 'approved' && p.vignetteSlug?.trim() && p.vignettePath?.trim()
+        ? { canonicalEffectProofRef: `taste-proposal:${p.id}:vignette:${p.vignetteSlug}` }
+        : {}),
       scene: p.scene,
       quote: p.quote,
       ...(p.takeaway ? { takeaway: p.takeaway } : {}),

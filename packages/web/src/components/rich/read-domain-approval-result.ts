@@ -1,52 +1,27 @@
 import type { RichCardBlock } from '@cat-cafe/shared';
 import type { Terminal } from '@/components/shell/mailbox/approval-reconcile';
-import { lookupSettled } from '@/components/shell/mailbox/settled-lookup';
+import { lookupDisplayedSettled, lookupSettled } from '@/components/shell/mailbox/settled-lookup';
+import { readApprovalProducerBody } from '@/lib/approval-producer-read';
+import { readFreshApprovalResultOwner } from '@/lib/approval-result-owner';
+import { producerCommittedEffect } from '@/lib/producer-result-effect';
 import { type DomainApprovalEffect, domainAttemptEffect } from '@/stores/approval-domain-effect';
 import { useApprovalHubStore } from '@/stores/approvalHubStore';
-import { apiFetch } from '@/utils/api-client';
 import { type DomainCardCoordinate, domainApprovalCandidate } from './read-domain-approval-source';
 
-async function resultOwner(): Promise<string | null> {
-  const response = await apiFetch('/api/session', {}, { afterCurrentGet: true });
-  if (!response.ok) return null;
-  const session: unknown = await response.json();
-  return session && typeof session === 'object' && 'userId' in session && typeof session.userId === 'string'
-    ? session.userId
-    : null;
-}
-async function tasteWriteEffect(proposalId: string): Promise<DomainApprovalEffect | undefined> {
-  try {
-    const response = await apiFetch(
-      `/api/taste-proposals/${encodeURIComponent(proposalId)}`,
-      {},
-      { afterCurrentGet: true },
-    );
-    const body: unknown = response.ok ? await response.json() : null;
-    return body &&
-      typeof body === 'object' &&
-      'proposalId' in body &&
-      body.proposalId === proposalId &&
-      'status' in body &&
-      body.status === 'approved'
-      ? 'taste-written'
-      : undefined;
-  } catch {
-    return;
-  }
-}
-
+const resultOwner = readFreshApprovalResultOwner;
 /** Private canonical history observation, never a permission to write or a conclusion from a missing pending row. */
 export async function readDomainApprovalResult(
   block: RichCardBlock,
   coordinate: DomainCardCoordinate,
   expectedOwnerUserId?: string,
+  display = false,
 ): Promise<{ ownerUserId: string; terminal: Terminal; effect?: DomainApprovalEffect } | null> {
   const candidate = domainApprovalCandidate(block);
   if (!candidate) return null;
   try {
     const ownerUserId = await resultOwner();
     if (!ownerUserId || (expectedOwnerUserId && ownerUserId !== expectedOwnerUserId)) return null;
-    const result = await lookupSettled({
+    const result = await (display ? lookupDisplayedSettled : lookupSettled)({
       ownerUserId,
       sourceFeatureId: candidate.feature,
       proposalId: candidate.proposalId,
@@ -57,8 +32,16 @@ export async function readDomainApprovalResult(
     if (terminal.resolution !== 'accepted') return { ownerUserId, terminal };
     const attempt = useApprovalHubStore.getState().decisionAttempts[candidate.proposalId];
     let effect = terminal.domainEffect ?? domainAttemptEffect(attempt, ownerUserId, candidate.feature, coordinate);
-    // F221's approved status is finalized only after its durable vignette checkpoint. A cold Chat read can recover it.
-    if (!effect && candidate.feature === 'F221') effect = await tasteWriteEffect(candidate.proposalId);
+    // Preserve F221's original finalized-status commit receipt, shared with other consumers.
+    if (!effect && candidate.feature === 'F221') {
+      const body = await readApprovalProducerBody(
+        { owner: ownerUserId, producer: 'F221', proposalId: candidate.proposalId },
+        `/api/taste-proposals/${encodeURIComponent(candidate.proposalId)}`,
+        { fresh: !display },
+      );
+      const committed = producerCommittedEffect(body, 'F221', candidate.proposalId);
+      if (committed === 'taste-written') effect = committed;
+    }
     return {
       ownerUserId,
       terminal: { ...terminal, ...(!effect ? { effectUnknown: true } : {}) },

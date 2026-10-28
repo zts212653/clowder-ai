@@ -1,7 +1,11 @@
+import { approvalResultRead } from '@/lib/approval-result-read';
 import { canonicalDomainEffect } from '@/stores/approval-domain-effect';
 import { apiFetch } from '@/utils/api-client';
+import { apiSessionIdentity } from '@/utils/api-session-identity';
 import type { SettledLookup, Terminal } from './approval-reconcile';
 import { lookupCreatedThread } from './created-thread-lookup';
+import type { SettledResultItem } from './settled-results-source';
+import { readSharedSettledWindow } from './shared-settled-window';
 
 /**
  * F322 S3-2b-1c: the exact settled lookup the reconciler asks for.
@@ -75,6 +79,28 @@ export async function lookupSettled(input: SettledLookupInput): Promise<SettledL
   if (!response.ok) return unavailable;
 
   const body: unknown = await response.json().catch(() => null);
+  return lookupSettledBody(body, input);
+}
+
+/** Shared display evidence never replaces a fresh action/decision confirmation. */
+export async function lookupDisplayedSettled(input: SettledLookupInput): Promise<SettledLookup> {
+  const key = { owner: input.ownerUserId, producer: input.sourceFeatureId, proposalId: input.proposalId };
+  if (apiSessionIdentity.getSnapshot().ownerUserId !== input.ownerUserId) return { kind: 'unavailable' };
+  const retained = approvalResultRead.isCurrent(key, 'settled')
+    ? approvalResultRead.snapshot<SettledResultItem>(key, 'settled').value
+    : undefined;
+  try {
+    const rows = retained ? [retained] : await readSharedSettledWindow(input.ownerUserId, input.signal);
+    if (!Array.isArray(rows) || apiSessionIdentity.getSnapshot().ownerUserId !== input.ownerUserId)
+      return { kind: 'unavailable' };
+    return lookupSettledBody({ items: rows }, input, true);
+  } catch {
+    return { kind: 'unavailable' };
+  }
+}
+
+async function lookupSettledBody(body: unknown, input: SettledLookupInput, display = false): Promise<SettledLookup> {
+  const unavailable: SettledLookup = { kind: 'unavailable' };
   if (!isRecord(body) || !Array.isArray(body.items)) return unavailable;
   const rows = body.items.filter(isRecord);
 
@@ -102,7 +128,7 @@ export async function lookupSettled(input: SettledLookupInput): Promise<SettledL
     const terminal = settledTerminal(matching[0]);
     if (!terminal) return unavailable;
     if (input.sourceFeatureId === 'F128' && terminal.resolution === 'accepted') {
-      const threadId = await lookupCreatedThread(input);
+      const threadId = await lookupCreatedThread(input, { reuseProducerForDisplay: display });
       return { kind: 'found', terminal: { ...terminal, ...(threadId ? { threadId } : { effectUnknown: true }) } };
     }
     return { kind: 'found', terminal };

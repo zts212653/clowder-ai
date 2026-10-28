@@ -1,8 +1,10 @@
 import { type Dispatch, type SetStateAction, useEffect, useState } from 'react';
 import type { GuardedWrite } from '@/components/ApprovalHost';
+import { approvalResultRead } from '@/lib/approval-result-read';
 import type { RichCardBlock } from '@/stores/chat-types';
 import { useChatStore } from '@/stores/chatStore';
 import { apiFetch } from '@/utils/api-client';
+import { useApprovalStatus } from './use-approval-status';
 
 type ProfileUpdateDecision = 'approve' | 'reject';
 type ProfileUpdateTerminalStatus = 'approved' | 'rejected';
@@ -52,11 +54,21 @@ export function useProfileUpdateTerminalSync({
   messageId?: string;
   preserveDetails?: boolean;
 }): unknown {
-  const [status, setStatus] = useState<unknown>(undefined);
   const proposalId = getProfileUpdateProposalId(block);
+  const native = useApprovalStatus(
+    'F231',
+    proposalId || null,
+    `/api/profile-updates/${encodeURIComponent(proposalId)}`,
+    !!messageId,
+  );
+  const [eventStatus, setStatus] = useState<unknown>(undefined);
+  const status = native.status ?? eventStatus;
+  useEffect(() => {
+    if (messageId && native.status && !preserveDetails)
+      collapseProfileUpdateCardForStatus(native.status, block, messageId);
+  }, [native.status, messageId, block, preserveDetails]);
   useEffect(() => {
     if (!messageId || !proposalId || typeof window === 'undefined') return;
-    let cancelled = false;
     const handler = (ev: Event) => {
       const detail = (ev as CustomEvent<{ proposalId?: unknown; status?: unknown }>).detail;
       if (!detail || detail.proposalId !== proposalId) return;
@@ -64,14 +76,7 @@ export function useProfileUpdateTerminalSync({
       if (!preserveDetails) collapseProfileUpdateCardForStatus(detail.status, block, messageId);
     };
     window.addEventListener('cat-cafe:proposal-updated', handler);
-    void hydrateProfileUpdateStatus(proposalId).then((status) => {
-      if (!cancelled) {
-        setStatus(status);
-        if (!preserveDetails) collapseProfileUpdateCardForStatus(status, block, messageId);
-      }
-    });
     return () => {
-      cancelled = true;
       window.removeEventListener('cat-cafe:proposal-updated', handler);
     };
   }, [block, messageId, proposalId, preserveDetails]);
@@ -136,17 +141,6 @@ function getProfileUpdateProposalId(block: RichCardBlock): string {
   return stampedProposalId(block);
 }
 
-async function hydrateProfileUpdateStatus(proposalId: string): Promise<unknown> {
-  try {
-    const res = await apiFetch(`/api/profile-updates/${encodeURIComponent(proposalId)}`);
-    if (!res.ok) return undefined;
-    const body = (await res.json()) as { proposalId?: unknown; status?: unknown };
-    return body.proposalId === proposalId ? body.status : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
 async function postProfileUpdateDecision(
   proposalId: string,
   decision: ProfileUpdateDecision,
@@ -157,6 +151,7 @@ async function postProfileUpdateDecision(
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({}),
   });
+  approvalResultRead.invalidate({ producer: 'F231', proposalId });
   reportEvidence?.({ outcome: res.ok ? 'settled' : 'http-error', status: res.status });
   const body = (await res.json().catch(() => ({}))) as { error?: string; status?: unknown };
   if (res.ok) {

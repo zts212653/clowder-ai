@@ -35,7 +35,6 @@ import {
   resolvePullRequestChangesTarget,
 } from './pull-request-changes-surface';
 import {
-  createArtifactSurface,
   createEvolutionProgramSurface,
   createFileSurface,
   createTeamWorkspaceSurface,
@@ -144,7 +143,7 @@ function WorkspaceModeOwnerSurface({
         key={JSON.stringify([threadId, surface.artifactListView])}
         threadId={threadId}
         initialView={surface.artifactListView}
-        onSelectArtifact={(artifact, navigationOrigin) => {
+        onSelectArtifact={(artifact, navigationOrigin, resolvedSurface) => {
           if (artifact.type === 'pr') {
             const target = createPullRequestChangesSurface({
               artifact,
@@ -162,13 +161,7 @@ function WorkspaceModeOwnerSurface({
               });
             return;
           }
-          onOpenSurface(
-            createArtifactSurface({
-              threadId: 'threadId' in artifact ? artifact.threadId : threadId,
-              artifact,
-              navigationOrigin,
-            }),
-          );
+          onOpenSurface(resolvedSurface);
         }}
       />
     );

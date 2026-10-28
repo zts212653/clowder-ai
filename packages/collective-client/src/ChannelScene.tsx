@@ -188,10 +188,11 @@ export function ChannelScene(props: ChannelSceneProps) {
     return () => cancelAnimationFrame(frame);
   }, [events, focusEventId, shared?.selected]);
   useEffect(() => {
-    if (content !== 'roadmap') return;
+    if (content !== 'roadmap' || artifactTopicId) return;
     setTopicRootId(undefined);
     setReplyRequest(undefined);
-  }, [content]);
+    setSharedDiscussionOpen(false);
+  }, [content, artifactTopicId]);
   useEffect(() => {
     if (!context && !topic) return;
     const close = (event: KeyboardEvent) => {
@@ -204,6 +205,11 @@ export function ChannelScene(props: ChannelSceneProps) {
     window.addEventListener('keydown', close);
     return () => window.removeEventListener('keydown', close);
   }, [context, topic, onCloseContext, returnToRoot]);
+  useEffect(() => {
+    const reveal = () => setSharedDiscussionOpen(true);
+    window.addEventListener('collective:reveal-document-discussion', reveal);
+    return () => window.removeEventListener('collective:reveal-document-discussion', reveal);
+  }, []);
   const requestMember = (event: CollectiveEventEnvelope) => {
     setTopicRootId(undefined);
     const result = mentionSelectionForEvent(event, participants, channelId);

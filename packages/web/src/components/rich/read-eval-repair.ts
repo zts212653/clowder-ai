@@ -2,6 +2,8 @@ import type { ApprovalHubItem, RichCardBlock } from '@cat-cafe/shared';
 import { matchHostedApproval } from '@/components/shell/mailbox/approval-match';
 import type { Terminal } from '@/components/shell/mailbox/approval-reconcile';
 import { SETTLED_LOOKUP_PATH } from '@/components/shell/mailbox/settled-lookup';
+import { readSharedSettledWindow } from '@/components/shell/mailbox/shared-settled-window';
+import { readFreshApprovalResultOwner } from '@/lib/approval-result-owner';
 import { useApprovalHubStore } from '@/stores/approvalHubStore';
 import { apiFetch } from '@/utils/api-client';
 import { evalRepairCandidate, evalRepairModel, matchesEvalRepairCard } from './eval-repair-model';
@@ -15,13 +17,7 @@ function samePublication(item: ApprovalHubItem, coordinate: RepairCoordinate): b
     item.navigation.approvalCardRef.messageId === coordinate.messageId
   );
 }
-async function readOwner(): Promise<string | null> {
-  const response = await apiFetch('/api/session', {}, { afterCurrentGet: true });
-  const body: unknown = response.ok ? await response.json() : null;
-  return body && typeof body === 'object' && 'userId' in body && typeof body.userId === 'string' && body.userId
-    ? body.userId
-    : null;
-}
+const readOwner = readFreshApprovalResultOwner;
 
 /** F266 already has an owner-complete pending fan-out. Read it without any Inbox personal partition or page cap. */
 export async function readEvalRepairPending(
@@ -29,12 +25,14 @@ export async function readEvalRepairPending(
   coordinate: RepairCoordinate,
   expected?: ApprovalHubItem,
   block?: RichCardBlock,
+  fresh = true,
 ): Promise<ApprovalHubItem | null> {
   try {
     const owner = await readOwner();
     if (!owner || (expected && expected.ownerUserId !== owner) || (block && evalRepairCandidate(block) !== proposalId))
       return null;
-    await useApprovalHubStore.getState().fetchPending();
+    if (fresh) await useApprovalHubStore.getState().fetchPending();
+    else await useApprovalHubStore.getState().ensurePending(owner);
     const store = useApprovalHubStore.getState();
     if (!store.pendingReadAvailable || store.isLoading) return null;
     const copies = store.items.filter((item) => item.sourceFeatureId === 'F266' && item.proposalId === proposalId);
@@ -66,12 +64,17 @@ export async function readEvalRepairResult(
   coordinate: RepairCoordinate,
   expected?: ApprovalHubItem,
   block?: RichCardBlock,
+  fresh = true,
 ): Promise<{ ownerUserId: string; terminal: Terminal; effect?: 'repair-started' } | null> {
   try {
     const owner = await readOwner();
     if (!owner || (expected && expected.ownerUserId !== owner)) return null;
-    const response = await apiFetch(SETTLED_LOOKUP_PATH, {}, { afterCurrentGet: true });
-    const body: unknown = response.ok ? await response.json() : null;
+    const response = fresh ? await apiFetch(SETTLED_LOOKUP_PATH, {}, { afterCurrentGet: true }) : null;
+    const body: unknown = fresh
+      ? response?.ok
+        ? await response.json()
+        : null
+      : { items: await readSharedSettledWindow(owner) };
     if (!body || typeof body !== 'object' || !('items' in body) || !Array.isArray(body.items)) return null;
     const copies = body.items.filter(
       (item: unknown) =>
