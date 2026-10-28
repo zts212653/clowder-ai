@@ -9,7 +9,7 @@ import { createHostProcessObserver } from '../../../scripts/lib/self-host-facet.
 import { hereDocumentView } from '../../../scripts/native-effect-heredoc.mjs';
 import { decideShellHookPayload } from '../../../scripts/native-effect-shell-decision.mjs';
 import { decideNativeHookPayload } from '../../../scripts/native-effect-target-guard.mjs';
-import { nativeHookTestEnv } from './helpers/native-hook-programs.js';
+import { nativeHookPrograms, nativeHookTestEnv } from './helpers/native-hook-programs.js';
 
 const root = fileURLToPath(new URL('../../../', import.meta.url));
 const main = join(homedir(), 'projects/relay-station/cat-cafe');
@@ -33,16 +33,25 @@ function parity(command, expected, cwd = main, options = noHost) {
   return result;
 }
 
-function claude(command, cwd = main) {
+function assertHookDecisions(command, expected, cwd = main) {
   const env = nativeHookTestEnv();
   delete env.CAT_CAFE_DEPLOYMENT_ID;
-  const result = spawnSync('bash', [join(root, '.claude/hooks/runtime-sanctuary-guard.sh')], {
-    input: JSON.stringify({ tool_name: 'Bash', cwd, tool_input: { command } }),
-    encoding: 'utf8',
-    env,
-  });
-  assert.equal(result.status, 0, result.stderr);
-  return result.stdout.trim() ? JSON.parse(result.stdout).hookSpecificOutput.permissionDecision : 'allow';
+  // The public export has the native entry, while home also exercises its private Claude wrapper.
+  for (const [program, path, tool_name] of nativeHookPrograms(root)) {
+    const result = spawnSync(program, [path], {
+      input: JSON.stringify({
+        tool_name,
+        cwd,
+        tool_input: { command, cmd: command },
+        ...(tool_name === 'exec_command' ? { turn_id: 'slimming-hook' } : {}),
+      }),
+      encoding: 'utf8',
+      env,
+    });
+    assert.equal(result.status, 0, result.stderr);
+    const decision = result.stdout.trim() ? JSON.parse(result.stdout).hookSpecificOutput.permissionDecision : 'allow';
+    assert.equal(decision, expected, `${tool_name}: ${command}`);
+  }
 }
 
 test('shared protection recognises a destructive home-relative relay child wildcard', () => {
@@ -50,14 +59,15 @@ test('shared protection recognises a destructive home-relative relay child wildc
     const result = parity(`${program} ~/projects/relay-station/cat-cafe-*`, 'deny');
     assert.equal(result.target.value, runtime);
   }
-  parity('rm -rf /tmp/cat-cafe-*', 'allow');
+  // with-test-home may itself live under /tmp/cat-cafe-*; that glob can then select its real runtime.
+  parity('rm -rf /tmp/f306-outside-relay/cat-cafe-*', 'allow');
 });
 
-test('healthy Claude shared allow is final for shell heredoc data mentioning a kill pipeline', () => {
+test('healthy shared hook allow is final for shell heredoc data mentioning a kill pipeline', () => {
   const command = "cat > /tmp/f306-report.mjs <<'EOF'\nconst note = 'lsof -ti :3001 | xargs kill';\nEOF";
   parity(command, 'allow');
-  assert.equal(claude(command), 'allow');
-  assert.equal(claude(`rm -rf ${runtime}`), 'deny');
+  assertHookDecisions(command, 'allow');
+  assertHookDecisions(`rm -rf ${runtime}`, 'deny');
 });
 
 test('healthy admission replaces regex nudges with ordinary positives and real-target negatives', () => {
@@ -68,7 +78,7 @@ test('healthy admission replaces regex nudges with ordinary positives and real-t
     'git branch -D runtime/ordinary-feature',
   ]) {
     parity(command, 'allow');
-    assert.equal(claude(command), 'allow', command);
+    assertHookDecisions(command, 'allow');
   }
   for (const command of [
     `D=${runtime}; echo a && echo b && trash "$D"`,
@@ -76,7 +86,7 @@ test('healthy admission replaces regex nudges with ordinary positives and real-t
     'git branch -D runtime/main-sync',
   ]) {
     parity(command, 'deny');
-    assert.equal(claude(command), 'deny', command);
+    assertHookDecisions(command, 'deny');
   }
 });
 
@@ -87,7 +97,7 @@ test('A: an unknown runtime or Redis effect defers without claiming a proved rea
   ]) {
     const result = parity(command, 'allow');
     assert.equal(result.effect, 'unknown');
-    assert.equal(claude(command), 'allow', command);
+    assertHookDecisions(command, 'allow');
   }
   for (const command of [
     `sed -i '' 's/old/new/' ${runtime}/.env`,
@@ -95,7 +105,7 @@ test('A: an unknown runtime or Redis effect defers without claiming a proved rea
     'git reset --hard HEAD~1',
   ]) {
     parity(command, 'deny');
-    assert.equal(claude(command), 'deny', command);
+    assertHookDecisions(command, 'deny');
   }
 });
 
@@ -180,7 +190,7 @@ test('unrecognised ordinary preview operations defer while real protected coordi
     'pnpm preview:process start --port 5188 --cwd /tmp/feature -- node custom-preview.mjs',
   ]) {
     parity(command, 'allow');
-    assert.equal(claude(command), 'allow', command);
+    assertHookDecisions(command, 'allow');
   }
   for (const port of [3001, 3002, 6399]) {
     parity(`pnpm preview:process stop --port ${port} --cwd ${main} --json`, 'deny');

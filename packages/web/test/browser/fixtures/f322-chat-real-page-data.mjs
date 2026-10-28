@@ -111,6 +111,9 @@ export function createChatProofApi(now = Date.now(), crowded = false, surface = 
     const body = method === 'GET' ? null : request.postDataJSON();
     requests.push({ method, path: url.pathname, search: url.search, body });
     if (url.pathname === '/api/session') return reply({ userId: 'owner-proof', csrfToken: 'fixture-only' });
+    if (url.pathname === '/api/config/chat-background' && method === 'GET') return reply({ threads: {} });
+    if (url.pathname === '/api/plugins/official.collective-connector/connections' && method === 'GET')
+      return reply({ runtimeStatus: 'inactive', connections: [] });
     if (url.pathname === '/api/concierge/work/decisions' && method === 'GET') {
       assert.equal(url.searchParams.get('view'), 'unified');
       const offset = Number(url.searchParams.get('offset'));

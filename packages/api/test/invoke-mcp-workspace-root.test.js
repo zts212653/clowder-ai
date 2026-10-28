@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { directMcpContract } from './helpers/direct-mcp-contract.js';
+import { assertInheritedHostAuthorityCleared, directMcpContract } from './helpers/direct-mcp-contract.js';
 import { capabilityFile, fixture, managed, memberIds, providers, putConfig } from './helpers/invoke-mcp-workspace.js';
 
 function transport(provider, server, _name) {
@@ -99,6 +99,10 @@ for (const [provider, invoke] of Object.entries(providers)) {
     const external = transport(provider, mcp['fixture-external'], 'fixture-external');
     assert.equal(external.command, 'node');
     assert.deepEqual(external.args, [join(f.main, 'external-server.js')]);
-    assert.deepEqual(external.env ?? {}, {}, 'external source resolution must not grant host callback authority');
+    if (provider === 'claude') {
+      assertInheritedHostAuthorityCleared(external.env);
+    } else {
+      assert.deepEqual(external.env ?? {}, {}, 'external source resolution must not grant host callback authority');
+    }
   });
 }

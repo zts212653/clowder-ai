@@ -10,6 +10,8 @@ import { nativeHookTestEnv } from './helpers/native-hook-programs.js';
 
 const guardModule = import('../../../scripts/native-effect-target-guard.mjs');
 const hookPath = fileURLToPath(new URL('../../../scripts/native-effect-target-guard.mjs', import.meta.url));
+// A protected policy coordinate, not a deployment default for the exporter to remap.
+const runtimeWebPort = 3001;
 
 function candidate(effect, kind, value = '/tmp/ordinary', source = {}) {
   return {
@@ -139,7 +141,7 @@ describe('F306 AC-C7 provider-neutral effect/target policy', () => {
         target: 'ordinary',
       },
       {
-        command: `pnpm preview:process start --port 3003 --cwd ${broadRepoRoot} -- pnpm alpha:start`,
+        command: `pnpm preview:process start --port ${runtimeWebPort} --cwd ${broadRepoRoot} -- pnpm alpha:start`,
         target: 'runtime_sanctuary',
         expected: 'deny',
       },
@@ -216,7 +218,7 @@ describe('F306 AC-C7 provider-neutral effect/target policy', () => {
     }
 
     for (const command of [
-      `pnpm preview:process start --port 3003 --cwd ${worktreeRoot} -- ${child}`,
+      `pnpm preview:process start --port ${runtimeWebPort} --cwd ${worktreeRoot} -- ${child}`,
       `pnpm preview:process start --port 3511 --cwd ${worktreeRoot} -- env CAT_CAFE_RUNTIME_ROOT=${runtimeRoot} pnpm dev:direct`,
       `pnpm preview:process start --port 3511 --cwd ${worktreeRoot} -- env CAT_CAFE_WORKSPACE_ROOT=${repoRoot} CAT_CAFE_RUNTIME_ROOT=${runtimeRoot} pnpm runtime:start`,
     ]) {
@@ -322,7 +324,7 @@ describe('F306 AC-C7 provider-neutral effect/target policy', () => {
     assert.equal(ordinaryStatusFromManagedShell.target.kind, 'ordinary');
 
     assertUnboundedManagedPreviewCommands(decide, [
-      `pnpm preview:process status --port 3003 --cwd ${worktreeRoot} --json`,
+      `pnpm preview:process status --port ${runtimeWebPort} --cwd ${worktreeRoot} --json`,
       `pnpm preview:process status --port 03001 --cwd ${worktreeRoot} --json`,
     ]);
     assert.equal(decide(`pnpm preview:process status --port 6397 --cwd ${worktreeRoot} --json`).decision, 'allow');

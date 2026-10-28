@@ -15,7 +15,7 @@
 
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { PassThrough } from 'node:stream';
@@ -186,14 +186,28 @@ function createNativeFixtureService(spawnFn) {
       ...options,
       workingDirectory: workspace,
       spawnCliOverride: (launch) => {
-        // Observe the credential at the real launch fence, before finally retires it.
+        // The router selects shared HTTP. Observe its private per-turn config before retirement.
         const geminiDirArg = launch.args.find((arg) => arg.startsWith('--gemini_dir='));
         assert.ok(geminiDirArg, 'Native launch must identify its per-run configuration');
         const geminiDir = geminiDirArg.slice('--gemini_dir='.length);
-        const config = JSON.parse(readFileSync(join(geminiDir, 'config/mcp_config.json'), 'utf8'));
-        const credentialPath = config.mcpServers?.['cat-cafe-collab']?.env?.CAT_CAFE_CREDENTIAL_FILE;
-        assert.ok(credentialPath, 'Native collab MCP must receive its per-run credential file');
-        spawnFn._nativeCredential = JSON.parse(readFileSync(credentialPath, 'utf8'));
+        spawnFn._nativeConfigPath = join(geminiDir, 'config/mcp_config.json');
+        const config = JSON.parse(readFileSync(spawnFn._nativeConfigPath, 'utf8'));
+        const collab = config.mcpServers['cat-cafe-collab'];
+        assert.equal(collab.command, undefined);
+        const url = new URL(collab.serverUrl);
+        assert.equal(url.origin, new URL(options.callbackEnv.CAT_CAFE_API_URL).origin);
+        assert.equal(url.searchParams.get('family'), 'collab');
+        spawnFn._nativeCredential = {
+          invocationId: collab.headers['x-invocation-id'],
+          callbackToken: collab.headers['x-callback-token'],
+        };
+        assert.ok(spawnFn._nativeCredential.callbackToken);
+        assert.equal(spawnFn._nativeCredential.callbackToken, options.callbackEnv.CAT_CAFE_CALLBACK_TOKEN);
+        assert.equal(
+          JSON.stringify({ args: launch.args, env: launch.env }).includes(spawnFn._nativeCredential.callbackToken),
+          false,
+          'native HTTP authorization stays in the private configuration',
+        );
         return spawnCli(launch, { spawnFn });
       },
     });
@@ -436,6 +450,7 @@ describe('AgentRouter + Services wiring', () => {
     assert.equal(spawnOpts.env.CAT_CAFE_CALLBACK_TOKEN, undefined);
     assert.ok(geminiSpawn._nativeCredential?.callbackToken);
     assert.equal(geminiSpawn._nativeCredential.invocationId, spawnOpts.env.CAT_CAFE_INVOCATION_ID);
+    assert.equal(existsSync(geminiSpawn._nativeConfigPath), false, 'terminal cleanup retires the private headers');
   });
 
   // --- InvocationRegistry 接线验证 ---

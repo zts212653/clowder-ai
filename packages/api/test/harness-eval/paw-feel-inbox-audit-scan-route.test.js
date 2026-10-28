@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { request as httpRequest } from 'node:http';
 import { afterEach, describe, it } from 'node:test';
 import Fastify from 'fastify';
+import { withInvocationCredentials } from '../../../mcp-server/dist/tools/invocation-auth.js';
 import { handleScanPawFeelInbox } from '../../../mcp-server/dist/tools/paw-feel-inbox-audit-scan-tool.js';
 import {
   PawFeelInboxAuditCursorError,
@@ -230,43 +231,34 @@ describe('F278 cat-authenticated bounded inbox audit scan route', () => {
     apps.push(app);
     const address = app.server.address();
     assert.ok(address && typeof address === 'object');
-    const previous = {
-      apiUrl: process.env.CAT_CAFE_API_URL,
-      invocationId: process.env.CAT_CAFE_INVOCATION_ID,
-      callbackToken: process.env.CAT_CAFE_CALLBACK_TOKEN,
-    };
-    process.env.CAT_CAFE_API_URL = `http://127.0.0.1:${address.port}`;
-    process.env.CAT_CAFE_INVOCATION_ID = 'inv-1';
-    process.env.CAT_CAFE_CALLBACK_TOKEN = 'token-1';
+    await withInvocationCredentials(
+      {
+        apiUrl: `http://127.0.0.1:${address.port}`,
+        invocationId: 'inv-1',
+        callbackToken: 'token-1',
+      },
+      async () => {
+        const firstResult = await handleScanPawFeelInbox({ limit: 50 });
+        assert.equal(firstResult.isError, undefined, JSON.stringify(firstResult));
+        const first = JSON.parse(firstResult.content[0].text);
+        const secondResult = await handleScanPawFeelInbox({ limit: 50, cursor: first.nextCursor });
+        assert.equal(secondResult.isError, undefined, JSON.stringify(secondResult));
+        const second = JSON.parse(secondResult.content[0].text);
 
-    try {
-      const firstResult = await handleScanPawFeelInbox({ limit: 50 });
-      assert.equal(firstResult.isError, undefined, JSON.stringify(firstResult));
-      const first = JSON.parse(firstResult.content[0].text);
-      const secondResult = await handleScanPawFeelInbox({ limit: 50, cursor: first.nextCursor });
-      assert.equal(secondResult.isError, undefined, JSON.stringify(secondResult));
-      const second = JSON.parse(secondResult.content[0].text);
-
-      assert.deepEqual(
-        readBatches.map((batch) => batch.length),
-        [50, 50],
-      );
-      assert.equal(new Set(readBatches.flat()).size, 100);
-      assert.equal(first.totalScannedSignals, 50);
-      assert.equal(second.totalScannedSignals, 100);
-      assert.equal(first.entries.length, 50);
-      assert.equal(second.entries.length, 50);
-      for (const key of ['bundleCounts', 'denominator', 'responsibilityCounts', 'issueCounts']) {
-        assert.equal(key in first, false);
-        assert.equal(key in second, false);
-      }
-    } finally {
-      if (previous.apiUrl === undefined) delete process.env.CAT_CAFE_API_URL;
-      else process.env.CAT_CAFE_API_URL = previous.apiUrl;
-      if (previous.invocationId === undefined) delete process.env.CAT_CAFE_INVOCATION_ID;
-      else process.env.CAT_CAFE_INVOCATION_ID = previous.invocationId;
-      if (previous.callbackToken === undefined) delete process.env.CAT_CAFE_CALLBACK_TOKEN;
-      else process.env.CAT_CAFE_CALLBACK_TOKEN = previous.callbackToken;
-    }
+        assert.deepEqual(
+          readBatches.map((batch) => batch.length),
+          [50, 50],
+        );
+        assert.equal(new Set(readBatches.flat()).size, 100);
+        assert.equal(first.totalScannedSignals, 50);
+        assert.equal(second.totalScannedSignals, 100);
+        assert.equal(first.entries.length, 50);
+        assert.equal(second.entries.length, 50);
+        for (const key of ['bundleCounts', 'denominator', 'responsibilityCounts', 'issueCounts']) {
+          assert.equal(key in first, false);
+          assert.equal(key in second, false);
+        }
+      },
+    );
   });
 });

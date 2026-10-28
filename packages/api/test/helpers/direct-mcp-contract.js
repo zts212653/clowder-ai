@@ -12,6 +12,27 @@ export function directMcpContract(server) {
   return { launchEnv: env, upstream: { ...server, env } };
 }
 
+/** Claude stdio children inherit the parent. Missing overrides would retain its Host authority. */
+export function assertInheritedHostAuthorityCleared(env) {
+  const inherited = Object.fromEntries(
+    [
+      'CAT_CAFE_CREDENTIAL_FILE',
+      'CAT_CAFE_NATIVE_TURN_CREDENTIAL_FILE',
+      'CAT_CAFE_NATIVE_CONNECTION_ID',
+      'CAT_CAFE_INVOCATION_ID',
+      'CAT_CAFE_CALLBACK_TOKEN',
+      'CAT_CAFE_API_URL',
+      'CAT_CAFE_DATA_DIR',
+      'ALLOWED_WORKSPACE_DIRS',
+    ].map((key) => [key, `fixture-parent-${key}`]),
+  );
+  assert.deepEqual(
+    { ...inherited, ...env },
+    Object.fromEntries(Object.keys(inherited).map((key) => [key, ''])),
+    'external source resolution must clear inherited Host authority',
+  );
+}
+
 export function openCodeDirectMcpContract(server) {
   assert.equal(server.type, 'local');
   return directMcpContract({ command: server.command[0], args: server.command.slice(1), env: server.environment });
