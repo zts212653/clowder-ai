@@ -66,7 +66,8 @@ bold "Step 1/6 — Build web application"
 if [[ $SKIP_WEB -eq 0 ]]; then
   cd "$PROJECT_ROOT"
   pnpm install --frozen-lockfile || die "Frozen dependency installation failed"
-  CAT_CAFE_DESKTOP_WEB_BUILD=1 pnpm run build
+  # API's standalone build re-emits shared output; finish it before Web reads it.
+  CAT_CAFE_DESKTOP_WEB_BUILD=1 pnpm -r --workspace-concurrency=1 run build
   ok "Web application built"
 else
   ok "Skipped (--skip-web)"

@@ -29,12 +29,12 @@ function fixture(t, script) {
   }
   fs.writeFileSync(
     path.join(bin, 'pnpm'),
-    '#!/bin/sh\nif [ "$1" = run ] && [ "$2" = build ]; then\n printf %s "$CAT_CAFE_DESKTOP_WEB_BUILD" >"$F330_BUILD_FLAG_RECEIPT"\n exit 42\nfi\nexit 0\n',
+    '#!/bin/sh\ncase " $* " in *" run build "*)\n printf %s "$CAT_CAFE_DESKTOP_WEB_BUILD" >"$F330_BUILD_FLAG_RECEIPT"\n exit 42\n;; esac\nexit 0\n',
     { mode: 0o755 },
   );
   fs.writeFileSync(
     path.join(bin, 'pnpm.cmd'),
-    '@echo off\r\nif "%1"=="run" if "%2"=="build" (\r\n >"%F330_BUILD_FLAG_RECEIPT%" echo %CAT_CAFE_DESKTOP_WEB_BUILD%\r\n exit /b 42\r\n)\r\nexit /b 0\r\n',
+    '@echo off\r\necho %* | findstr /C:"run build" >nul\r\nif not errorlevel 1 (\r\n >"%F330_BUILD_FLAG_RECEIPT%" echo %CAT_CAFE_DESKTOP_WEB_BUILD%\r\n exit /b 42\r\n)\r\nexit /b 0\r\n',
   );
   const env = {
     ...process.env,

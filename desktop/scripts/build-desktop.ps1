@@ -152,7 +152,8 @@ if (-not $SkipWebBuild) {
     $previousDesktopWebBuild = $env:CAT_CAFE_DESKTOP_WEB_BUILD
     try {
         $env:CAT_CAFE_DESKTOP_WEB_BUILD = '1'
-        pnpm run build
+        # API's standalone build re-emits shared output; finish it before Web reads it.
+        pnpm -r --workspace-concurrency=1 run build
         if ($LASTEXITCODE -ne 0) { Write-Err "Build failed"; exit 1 }
     } finally {
         if ($null -eq $previousDesktopWebBuild) {
