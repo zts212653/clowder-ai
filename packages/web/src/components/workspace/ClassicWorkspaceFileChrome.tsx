@@ -41,7 +41,6 @@ export function ClassicWorkspaceFileChrome({
     markdownRendered,
     htmlPreview,
     jsxPreview,
-    currentWorktree,
     setOpenFile,
     closeTab,
     onCloseCurrentTab,

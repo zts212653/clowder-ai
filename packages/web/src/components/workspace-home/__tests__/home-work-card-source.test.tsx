@@ -65,7 +65,7 @@ it('localizes untitled image cards while preserving authored names and download 
 
 it('uses the shared download menu, retains exact names and never fetches or forwards credentials to an external asset', async () => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
-  const externalFetch = vi.fn(async (_url: string) => new Response('preview'));
+  const externalFetch = vi.fn<typeof fetch>().mockResolvedValue(new Response('preview'));
   vi.stubGlobal('fetch', externalFetch);
   const createObjectURL = vi.fn(() => 'blob:original-file');
   const revokeObjectURL = vi.fn();

@@ -59,28 +59,28 @@
     {
       "path": "packages/api/src/domains/concierge/live",
       "owner": "codex-astra",
-      "reason": "2026-10-13 public sync: 24 to 27 files after F317 presentation observations, response timing and native subexecution records. These readers share the existing live-call lifecycle; retain the reviewed import boundaries for this cut and reassess an observation/projection split before expiry.",
-      "expiresAt": "2026-10-27",
-      "ticket": "F317 / clowder-ai#1589"
+      "reason": "2026-10-28 daily sync reassessment: 26 TypeScript files; live-call state, transcript projection and observation readers remain coupled through the current CompanionHostBridge and LiveCompanionCall. Keep these reviewed owner boundaries together for this repair; reassess the corresponding reader/adapter groups with their import graph before the bounded renewal expires.",
+      "expiresAt": "2026-11-10",
+      "ticket": "F317 / clowder-ai#1589 / clowder-ai#1731"
     },
     {
       "path": "packages/api/src/domains/concierge/live/host",
       "owner": "codex-astra",
-      "reason": "2026-10-13 public sync: 24 to 25 files after F317 late-result notices. The notice adapter belongs to the current Host result-return lifecycle. Avoid moving that reviewed authority boundary solely to reduce the count; reassess the Host adapter grouping before expiry.",
-      "expiresAt": "2026-10-27",
-      "ticket": "F317 / clowder-ai#1589"
+      "reason": "2026-10-28 daily sync reassessment: 31 TypeScript files; conversation readers, late-result returns and page-action adapters share the current Host lease and recovery binding. Keep these reviewed owner boundaries together for this repair; reassess the corresponding reader/adapter groups with their import graph before the bounded renewal expires.",
+      "expiresAt": "2026-11-10",
+      "ticket": "F317 / clowder-ai#1589 / clowder-ai#1731"
     },
     {
       "path": "packages/api/src/domains/growing",
       "owner": "codex-astra",
-      "reason": "2026-10-13 public sync: 24 to 31 files after F310 authenticated human-terminal and Task-execution evidence readers. Keep the reviewed Task-owned contracts intact in this cut; evaluate human-terminal and execution-read subdirectories with their import/authority boundaries before expiry.",
-      "expiresAt": "2026-10-27",
-      "ticket": "F310 / clowder-ai#1589"
+      "reason": "2026-10-28 daily sync reassessment: 33 TypeScript files; Task execution evidence, human terminal receipts and artifact return adapters share EntrustedWork lifecycle and custody projections. Keep these reviewed owner boundaries together for this repair; reassess the corresponding reader/adapter groups with their import graph before the bounded renewal expires.",
+      "expiresAt": "2026-11-10",
+      "ticket": "F310 / clowder-ai#1589 / clowder-ai#1731"
     },
     {
       "path": "packages/api/src/domains/cats/services/agents/routing",
       "owner": "opus-48",
-      "reason": "2026-08-31 renewal (F23 gate option b — freshness/ real split in same PR). 33 files. Agent routing + artifact tracking remain one unsplit agents subdomain.",
+      "reason": "2026-08-31 renewal (F23 gate option b \u2014 freshness/ real split in same PR). 33 files. Agent routing + artifact tracking remain one unsplit agents subdomain.",
       "expiresAt": "2026-10-31",
       "ticket": "F23-followup"
     },
@@ -174,6 +174,20 @@
       "reason": "2026-08-31 renewal. 51 files. People memory mixes identity, proposal lifecycle, disposition proofs, Redis persistence; F276/F281/F282 own split.",
       "expiresAt": "2026-10-31",
       "ticket": "F276/F281/F282"
+    },
+    {
+      "path": "packages/api/src/config/capabilities",
+      "owner": "codex-astra",
+      "reason": "2026-10-28 daily sync audit: 26 TypeScript files; native MCP binding, managed Codex migration and per-project plugin exposure share the invocation capability root and launch owner. Keep the independently reviewed source boundaries for this cut and reassess the launch/migration or evidence/reader grouping with its callers before expiry.",
+      "expiresAt": "2026-11-10",
+      "ticket": "F333/F327 / cat-cafe#6237/#6252 / clowder-ai#1731"
+    },
+    {
+      "path": "packages/api/src/infrastructure/harness-eval/paw-feel-disposition",
+      "owner": "codex-astra",
+      "reason": "2026-10-28 daily sync audit: 25 TypeScript files; Task-native handoff evidence and the bounded inbox scanner share the existing disposition receipt and source projection; the directory already has focused subgroups. Keep the independently reviewed source boundaries for this cut and reassess the launch/migration or evidence/reader grouping with its callers before expiry.",
+      "expiresAt": "2026-11-10",
+      "ticket": "F167/F267/F278 / cat-cafe#6232/#5974 / clowder-ai#1731"
     }
   ]
 }

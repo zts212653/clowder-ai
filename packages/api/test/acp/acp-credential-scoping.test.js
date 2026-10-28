@@ -17,6 +17,7 @@ import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, describe, it } from 'node:test';
+import { fileURLToPath } from 'node:url';
 
 const credsDir = mkdtempSync(join(tmpdir(), 'cat-cafe-acp-creds-'));
 process.env.CAT_CAFE_MCP_CREDS_DIR = credsDir;
@@ -164,7 +165,14 @@ function makeAdapter(client) {
     projectRoot: '/tmp',
     providerName: 'kimi',
     modelName: 'kimi-acp',
-    mcpServers: [{ name: 'cat-cafe-collab', command: 'node', args: [], env: [] }],
+    mcpServers: [
+      {
+        name: 'cat-cafe-collab',
+        command: process.execPath,
+        args: [fileURLToPath(new URL('../../../mcp-server/dist/collab.js', import.meta.url))],
+        env: [],
+      },
+    ],
   });
 }
 

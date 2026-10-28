@@ -117,6 +117,8 @@ test('a name the Host keeps its own files under is never given to a plugin', asy
   for (const packageManifest of [
     manifest({ runtime: { transport: 'builtin', entrypoint: 'dist/plugin.js', dataDirectory: 'packages' } }),
     manifest({ runtime: { transport: 'builtin', entrypoint: 'dist/plugin.js', dataDirectory: 'inventory.json' } }),
+    manifest({ runtime: { transport: 'builtin', entrypoint: 'dist/plugin.js', dataDirectory: 'project-outputs' } }),
+    manifest({ pluginId: 'project-outputs', runtime: { transport: 'builtin', entrypoint: 'dist/plugin.js' } }),
     manifest({ pluginId: 'resources', runtime: { transport: 'builtin', entrypoint: 'dist/plugin.js' } }),
   ]) {
     await assert.rejects(

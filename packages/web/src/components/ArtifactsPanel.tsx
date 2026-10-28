@@ -267,7 +267,6 @@ function ClassicArtifactsPanel({
   const [filter, setFilter] = useState<FilterKey>(initialView?.filter ?? 'all');
   const [q, setQ] = useState(initialView?.query ?? '');
   const opening = useContentOpen();
-  const [sourceError, setSourceError] = useState<string | null>(null);
   const selectArtifact = (artifact: ThreadArtifactDTO | GlobalArtifactDTO) => {
     const origin: ArtifactListOrigin = {
       kind: 'artifact-list',
@@ -401,9 +400,9 @@ function ClassicArtifactsPanel({
       className="flex flex-col overflow-hidden bg-cafe-surface text-cafe"
       style={width ? { width, flexShrink: 0 } : { flex: '1 1 0%', minWidth: 0 }}
     >
-      {sourceError || opening.error ? (
+      {opening.error ? (
         <p role="alert" className="p-3 text-sm text-cafe-error">
-          {sourceError ?? opening.error}
+          {opening.error}
         </p>
       ) : null}
       <>

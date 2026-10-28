@@ -13,22 +13,6 @@ import { useChatArtworkLightbox } from './content-review/useChatArtworkLightbox'
 import type { PublishedMessageCoordinate } from './content-review/usePublishedContent';
 import { MarkdownContent } from './MarkdownContent';
 
-function formatFileSize(bytes: number): string {
-  if (bytes < 1024) return `${bytes}B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)}KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)}MB`;
-}
-
-function fileIcon(mimeType: string): string {
-  if (mimeType.startsWith('audio/')) return '🎵';
-  if (mimeType.startsWith('video/')) return '🎬';
-  if (mimeType === 'application/pdf') return '📄';
-  if (mimeType === 'application/zip' || mimeType === 'application/gzip' || mimeType === 'application/x-tar') return '🗜️';
-  if (mimeType.startsWith('text/')) return '📝';
-  if (mimeType === 'application/json') return '📋';
-  return '📎';
-}
-
 function resolveUrl(url: string, isV2: boolean): string {
   if (url.startsWith('/uploads/') || (isV2 && url.startsWith('/api/workspace/file/raw?'))) return `${API_URL}${url}`;
   return url;

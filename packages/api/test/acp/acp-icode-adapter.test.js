@@ -22,6 +22,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, it } from 'node:test';
+import { fileURLToPath } from 'node:url';
 
 const { AcpAgentService } = await import('../../dist/domains/cats/services/agents/providers/acp/AcpAgentService.js');
 const { createAcpServiceForConfig } = await import(
@@ -37,7 +38,12 @@ const TEST_POOL_KEY = { projectPath: '/tmp', providerProfile: 'test' };
 // Keep session credential files out of the repo working tree.
 process.env.CAT_CAFE_MCP_CREDS_DIR = mkdtempSync(join(tmpdir(), 'icode-adapter-creds-'));
 
-const STDIO_SERVER = { name: 'cat-cafe', command: 'node', args: ['server.js'], env: [] };
+const STDIO_SERVER = {
+  name: 'cat-cafe',
+  command: process.execPath,
+  args: [fileURLToPath(new URL('../../../mcp-server/dist/index.js', import.meta.url))],
+  env: [],
+};
 const HTTP_SERVER = { name: 'gateway', type: 'http', url: 'http://127.0.0.1:1/mcp', headers: [] };
 const USER_STDIO_SERVER = { name: 'user-tool', command: 'node', args: ['tool.js'], env: [] };
 

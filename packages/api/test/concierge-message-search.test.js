@@ -5,6 +5,14 @@ import {
   buildConciergeSearchContext,
   formatConciergeHandleBinding,
 } from '../dist/domains/concierge/concierge-search-context.js';
+import { MESSAGE_SEARCH_RESPONSE_BUDGET } from '../dist/domains/memory/message-search-budget.js';
+
+const responseBudget = () => ({
+  budgetChars: MESSAGE_SEARCH_RESPONSE_BUDGET,
+  serializedChars: 0,
+  truncated: false,
+  continuation: 'unavailable',
+});
 
 test('concierge uses the common message projection with multiple per-thread handles and honest metadata', async () => {
   let input;
@@ -31,6 +39,7 @@ test('concierge uses the common message projection with multiple per-thread hand
       degraded: true,
       effectiveMode: 'lexical',
       qualification: { status: 'partial', examined: 8, supported: 2, rejected: 0, indeterminate: 1, unassessed: 5 },
+      response: responseBudget(),
     },
   };
   const context = await buildConciergeSearchContext({
@@ -91,7 +100,14 @@ test('a shared public concierge context does not publish private whisper snippet
           publiclyQuotable: false,
         },
       ],
-      meta: { scope: 'global', sort: 'time', partial: true, sourceCoverage: 'unknown', freshness: 'unknown' },
+      meta: {
+        scope: 'global',
+        sort: 'time',
+        partial: true,
+        sourceCoverage: 'unknown',
+        freshness: 'unknown',
+        response: responseBudget(),
+      },
     }),
   });
   assert.equal(context.handles.length, 0);

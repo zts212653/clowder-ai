@@ -107,7 +107,7 @@ describe('F307 Files owner surface: worktree identity through the coordinate tha
     listings[alphaListing] = [
       { ok: true, worktrees: [{ ...alphaEntry, rootIdentity: rootId, resolvedRoot: ALPHA_ROOT, rootEpoch: 0 }] },
     ];
-    const onOpen = await render(vi.fn(), createFilesSurface(rootId));
+    await render(vi.fn(), createFilesSurface(rootId));
     expect(select()?.value).toBe(ALPHA_ID);
     expect(header()).toContain('69c41632');
     expect(status()).toBeNull();

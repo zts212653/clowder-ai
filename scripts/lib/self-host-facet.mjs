@@ -101,18 +101,22 @@ function readHostListeners(self, read) {
 
 function readProcessSelection(program, args, read) {
   const unknown = { pids: [], complete: false };
+  let output;
   try {
-    const output = read(program, args);
-    const lines = output.trim().split('\n');
-    if (lines.some((line) => !/^\d+$/.test(line) || Number(line) <= 1 || !Number.isSafeInteger(Number(line))))
-      return unknown;
-    return { pids: [...new Set(lines.map(Number))], complete: true };
+    output = read(program, args);
   } catch (error) {
-    // Exit 1 and no diagnostics means a complete search with no listeners.
-    return error?.status === 1 && !error?.stdout?.length && !error?.stderr?.length
-      ? { pids: [], complete: true }
-      : unknown;
+    if (error?.status !== 1 || error?.signal || error?.stderr?.length) return unknown;
+    if (!error?.stdout?.length) return { pids: [], complete: true };
+    // lsof exits 1 when any requested port is absent, even while returning
+    // the complete matches for other ports. pgrep has no such partial-match exit.
+    if (program !== 'lsof') return unknown;
+    output = error.stdout;
   }
+  if (typeof output !== 'string') return unknown;
+  const lines = output.trim().split('\n');
+  if (lines.some((line) => !/^\d+$/.test(line) || Number(line) <= 1 || !Number.isSafeInteger(Number(line))))
+    return unknown;
+  return { pids: [...new Set(lines.map(Number))], complete: true };
 }
 
 function patternQuery(program, operands) {

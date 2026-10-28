@@ -570,7 +570,7 @@ export function createDormantPluginRuntimeComposition(
       );
     },
     new PluginProjectOutputs({
-      root: resolve(dirname(paths.inventorySnapshotPath), 'project-outputs'),
+      root: resolve(dirname(paths.inventorySnapshotPath), PLUGIN_HOST_ENTRIES.projectOutputs),
       importer: mediaImporter,
       ledger: mediaLedger,
       ...(options.threadStore ? { threads: options.threadStore } : {}),

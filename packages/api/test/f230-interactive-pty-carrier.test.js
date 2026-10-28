@@ -18,6 +18,8 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { after, before, describe, it } from 'node:test';
+import { fileURLToPath } from 'node:url';
+import { CAT_CAFE_SPLIT_ENTRYPOINTS } from '../../mcp-server/dist/mcp-launch-contract.js';
 import {
   ClaudeInteractivePtyCarrierService,
   ptyTranscriptDir,
@@ -389,7 +391,7 @@ describe('ClaudeInteractivePtyCarrierService — Step 5: env delta contract', { 
 
 // ─── Step 6: MCP config shape (P1-2 regression) ─────────────────────────────
 // When callbackEnv + mcpServerPath present, --mcp-config must point to a
-// JSON config file ({ mcpServers: { "cat-cafe": { command, args } } }),
+// JSON config file containing the installed split-family servers,
 // NOT directly to the MCP server JS path.
 
 describe('ClaudeInteractivePtyCarrierService — Step 6: MCP config shape', { timeout: 10_000 }, () => {
@@ -402,9 +404,7 @@ describe('ClaudeInteractivePtyCarrierService — Step 6: MCP config shape', { ti
   });
 
   it('callbackEnv + mcpServerPath → extraArgs has --mcp-config <json-file> with correct shape', async () => {
-    // Create a fake MCP server JS file so existsSync passes
-    const fakeMcpServerPath = join(tmpDir, 'fake-mcp-index.js');
-    await writeFile(fakeMcpServerPath, '// fake mcp server', 'utf8');
+    const installedMcpServerPath = fileURLToPath(new URL('../../mcp-server/dist/index.js', import.meta.url));
 
     const sidecarPath = await writeSidecar(tmpDir, [stopEventLine('ok')]);
     let capturedOpts = null;
@@ -419,7 +419,7 @@ describe('ClaudeInteractivePtyCarrierService — Step 6: MCP config shape', { ti
       transcriptDirOverride: tmpDir,
       hookSidecarPathOverride: sidecarPath,
       pollIntervalMs: 20,
-      mcpServerPath: fakeMcpServerPath, // test seam
+      mcpServerPath: installedMcpServerPath,
     });
 
     await collect(carrier.invoke('test', { callbackEnv: { CAT_CAFE_SOME_CALLBACK: 'val' } }));
@@ -436,7 +436,7 @@ describe('ClaudeInteractivePtyCarrierService — Step 6: MCP config shape', { ti
 
     // Value must be a JSON FILE path (not the JS server path directly)
     assert.ok(mcpConfigValue.endsWith('.json'), `--mcp-config value must be a .json file, got: ${mcpConfigValue}`);
-    assert.notEqual(mcpConfigValue, fakeMcpServerPath, '--mcp-config must NOT be the raw JS path');
+    assert.notEqual(mcpConfigValue, installedMcpServerPath, '--mcp-config must NOT be the raw JS path');
 
     // JSON file must have the correct mcpServers shape
     let config;
@@ -446,10 +446,12 @@ describe('ClaudeInteractivePtyCarrierService — Step 6: MCP config shape', { ti
       assert.fail(`--mcp-config file is not valid JSON at ${mcpConfigValue}: ${err.message}`);
     }
     assert.ok(config.mcpServers, 'config.mcpServers present');
-    const catCafe = config.mcpServers['cat-cafe'];
-    assert.ok(catCafe, 'mcpServers["cat-cafe"] present');
-    assert.equal(catCafe.command, 'node', 'mcpServers["cat-cafe"].command === "node"');
-    assert.deepEqual(catCafe.args, [fakeMcpServerPath], 'mcpServers["cat-cafe"].args === [mcpServerPath]');
+    for (const [name, entrypoint] of CAT_CAFE_SPLIT_ENTRYPOINTS) {
+      const server = config.mcpServers[name];
+      assert.ok(server, `${name} present`);
+      assert.equal(server.command, process.execPath, `${name} uses the installed Node executable`);
+      assert.deepEqual(server.args, [join(dirname(installedMcpServerPath), entrypoint)]);
+    }
 
     // --strict-mcp-config must also be present
     assert.ok(extraArgs.includes('--strict-mcp-config'), '--strict-mcp-config present in extraArgs');
