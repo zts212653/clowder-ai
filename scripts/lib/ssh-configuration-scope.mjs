@@ -58,7 +58,10 @@ function globPattern(pattern) {
 function hostMatches(patterns, host) {
   let positive = false;
   for (const pattern of patterns) {
-    if (!/^[!\w.*?:-]+$/.test(pattern)) throw new Error('unreadable SSH Host pattern');
+    // systemd uses unix/* and unix%* Host patterns for its local transports.
+    // Slash and percent are literal pattern data here, never an executable or
+    // a token expansion. Match first; only the active block's options apply.
+    if (!/^[!\w.*?:%/-]+$/.test(pattern)) throw new Error('unreadable SSH Host pattern');
     const negative = pattern.startsWith('!');
     if (!globPattern(negative ? pattern.slice(1) : pattern).test(host)) continue;
     if (negative) return false;

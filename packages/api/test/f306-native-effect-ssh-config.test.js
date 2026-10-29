@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { sshConfigurationScope } from '../../../scripts/lib/ssh-configuration-scope.mjs';
+import { systemSshRunnerInputs } from './helpers/system-ssh-runner-inputs.js';
 
 function fixture(t) {
   const root = mkdtempSync(join(tmpdir(), 'ssh-config-scope-'));
@@ -66,4 +67,49 @@ test('an Include Host block cannot disable local admission in its active parent'
   assert.equal(sshConfigurationScope('203.0.113.8', [config]).complete, false);
   writeFileSync(config, `Host *\n Include ${included}\n Port 2255\n`);
   assert.deepEqual(sshConfigurationScope('203.0.113.8', [config]), { complete: true, port: 2255 });
+});
+
+test('unrelated systemd SSH transport patterns are data, while matching proxy blocks stay denied', (t) => {
+  const root = fixture(t),
+    config = join(root, 'config'),
+    transport = join(root, '20-systemd-ssh-proxy.conf');
+  // systemd's distributed ssh_config fragment: slash and percent are literal
+  // Host pattern data, not shell syntax or percent expansion in this directive.
+  writeFileSync(
+    transport,
+    [
+      'Host .host machine/.host',
+      ' ProxyCommand /usr/lib/systemd/systemd-ssh-proxy unix/run/ssh-unix-local/socket %p',
+      'Host unix/* unix%* vsock/* vsock%* vsock-mux/* vsock-mux%* machine/* machine%*',
+      ' User root',
+      ' ProxyCommand /usr/lib/systemd/systemd-ssh-proxy %h %p',
+      ' ProxyUseFdpass yes',
+      ' CheckHostIP no',
+    ].join('\n'),
+  );
+  writeFileSync(config, `Include ${transport}\nHost *\n Port 22\n`);
+  assert.deepEqual(sshConfigurationScope('203.0.113.8', [config]), { complete: true, port: 22 });
+  for (const host of [
+    '.host',
+    'machine/.host',
+    'unix/run/ssh/socket',
+    'unix%run%ssh%socket',
+    'vsock/7:22',
+    'machine/test',
+  ])
+    assert.equal(sshConfigurationScope(host, [config]).complete, false, host);
+  writeFileSync(config, `Include ${transport}\nHost *\n ProxyCommand kill -TERM 4242\n`);
+  assert.equal(sshConfigurationScope('203.0.113.8', [config]).complete, false, 'active proxy remains local');
+});
+
+test('runner diagnostics capture only bounded system inputs and never follow an extra Include', (t) => {
+  const root = fixture(t);
+  mkdirSync(join(root, 'ssh_config.d'));
+  writeFileSync(join(root, 'ssh_config'), `Include ${root}/ssh_config.d/*.conf\n`);
+  writeFileSync(join(root, 'ssh_config.d', '20-local.conf'), 'Host unix/* unix%*\n ProxyCommand false\n');
+  const result = systemSshRunnerInputs(root);
+  assert.deepEqual(result.scope, { complete: true, port: 22 });
+  assert.equal(result.files.length, 2);
+  writeFileSync(join(root, 'ssh_config'), 'Include ~/.ssh/config\n');
+  assert.equal(systemSshRunnerInputs(root).scope.reason, 'diagnostic_include_out_of_scope');
 });
