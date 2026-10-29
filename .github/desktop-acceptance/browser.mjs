@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
+import { waitForInitialPlugins } from './initial-plugins.mjs';
 import { waitForRendererDocument } from './renderer-document.mjs';
 
 const [phase, directory, frontendText, apiText, debugText, version] = process.argv.slice(2);
@@ -128,6 +129,19 @@ try {
   const capsule = reads.profile.entries.find((entry) => entry.id === 'capsule');
   assert.equal(capsule.content, expected.content);
   assert.equal(capsule.revision, expected.capsule.revision);
+  const initialPlugins = await waitForInitialPlugins({
+    read: () =>
+      evaluate(`(async () => {
+      const response = await fetch('http://localhost:${api}/api/plugin-manager/plugins/_local', { credentials: 'include' });
+      if (!response.ok) throw new Error('Installed plugins: HTTP ' + response.status);
+      return response.json();
+    })()`),
+    observe: (plugins) =>
+      fs.writeFileSync(
+        path.join(directory, `${phase}-initial-plugins.json`),
+        JSON.stringify({ observedAt: new Date().toISOString(), plugins }, null, 2),
+      ),
+  });
   await call('Page.navigate', { url: `${base}/memory?__clowder_desktop_version=${version}` });
   let visibleText = '';
   for (let index = 0; index < 60; index++) {
@@ -147,7 +161,14 @@ try {
   fs.writeFileSync(
     path.join(directory, `${phase}.json`),
     JSON.stringify(
-      { observedAt: new Date().toISOString(), initialWindowUrl: target.url, health, reads, visibleText },
+      {
+        observedAt: new Date().toISOString(),
+        initialWindowUrl: target.url,
+        health,
+        initialPlugins,
+        reads,
+        visibleText,
+      },
       null,
       2,
     ),
@@ -158,6 +179,7 @@ try {
       threadId: expected.thread.id,
       capsuleRevision: capsule.revision,
       durableStateRead: true,
+      defaultInitialPluginsReady: initialPlugins.defaultInitialPluginsReady,
       actualWindowScreenshot: true,
     }),
   );

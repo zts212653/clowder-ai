@@ -92,6 +92,7 @@ foreach ($kind in @('installer', 'portable')) {
   $distribution = @(Get-ChildItem -LiteralPath $wrapper -File)
   if ($distribution.Count -ne 1 -or $distribution[0].Extension -ne $(if ($kind -eq 'installer') { '.exe' } else { '.zip' })) { throw 'Unexpected distribution content' }
   Get-FileHash -LiteralPath $distribution[0].FullName -Algorithm SHA256 | ConvertTo-Json | Set-Content (Join-Path $output 'distribution-sha256.json')
+  $logsComplete = $true
   try {
     if ($kind -eq 'installer') {
       $arguments = @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-','/NOICONS','/NoAutoStart=1',"/DIR=$install","/LOG=$(Join-Path $output 'setup.log')","/DesktopInstanceRoot=$state","/FrontendPort=$($ports[0])","/ApiPort=$($ports[1])","/RedisPort=$($ports[2])")
@@ -116,7 +117,6 @@ foreach ($kind in @('installer', 'portable')) {
       if ($LASTEXITCODE -ne 0) { throw "Real renderer $phase verification failed" }
       Quit-Owned $exe $install $state $ports
     }
-    @{ status='passed'; distribution=$kind; instanceRoot=$state; ports=$ports; normalExit=$true; actualInstallAndRestore=$true; scope='fresh runner; no paid model, real account import or non-elevated installation claim' } | ConvertTo-Json -Depth 5 | Set-Content (Join-Path $output 'result.json')
   } finally {
     # Includes this Setup's temporary child. Every matching executable is inside our unique root.
     $remaining = @(Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -and $_.ExecutablePath.StartsWith($root + '\', [StringComparison]::OrdinalIgnoreCase) })
@@ -129,10 +129,20 @@ foreach ($kind in @('installer', 'portable')) {
     if (Test-Path (Join-Path $install '.installer-logs')) { Copy-Item (Join-Path $install '.installer-logs') (Join-Path $output 'installer-logs') -Recurse }
     foreach ($record in $records) {
       foreach ($stream in @('stdout','stderr')) {
-        if ($record[$stream].IsCompletedSuccessfully) { $text=$record[$stream].Result; $text.Substring(0,[Math]::Min($text.Length,2097152)) | Set-Content (Join-Path $output "$($record.phase)-$($record.process.Id)-$stream.log") }
+        $task = $record[$stream]
+        try { $complete = $task.Wait(5000) } catch { $complete = $false }
+        if (-not $complete -or -not $task.IsCompletedSuccessfully) { $logsComplete = $false; continue }
+        $text = $task.Result
+        if ($text.Length -gt 2097152) { $logsComplete = $false }
+        $text.Substring(0,[Math]::Min($text.Length,2097152)) | Set-Content (Join-Path $output "$($record.phase)-$($record.process.Id)-$stream.log")
       }
     }
+    @{ allStreamsCapturedWithinBudget=$logsComplete } | ConvertTo-Json | Set-Content (Join-Path $output 'log-capture.json')
     $records.Clear()
     Assert-Free $ports
   }
+  if (-not $logsComplete) { throw 'Actual startup logs exceed the evidence budget; cannot certify absence of plugin errors' }
+  & $node (Join-Path $PSScriptRoot 'initial-plugins.mjs') --logs $output
+  if ($LASTEXITCODE -ne 0) { throw 'Actual distribution logs contain initial plugin setup failures' }
+  @{ status='passed'; distribution=$kind; instanceRoot=$state; ports=$ports; normalExit=$true; actualInstallAndRestore=$true; defaultInitialPluginsReady=$true; actualStartupLogsChecked=$true; scope='fresh runner; no paid model, real account import or non-elevated installation claim' } | ConvertTo-Json -Depth 5 | Set-Content (Join-Path $output 'result.json')
 }

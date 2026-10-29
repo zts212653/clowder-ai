@@ -38,6 +38,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 24
+      - name: Check candidate verifier contracts
+        run: node --test .github/desktop-acceptance/*.test.mjs
       - name: Verify producer identity and download exact artifact bytes
         env:
           GH_TOKEN: ${{ github.token }}

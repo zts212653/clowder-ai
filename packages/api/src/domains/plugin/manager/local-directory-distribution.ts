@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { constants, existsSync, realpathSync, type Stats } from 'node:fs';
+import { constants, realpathSync, type Stats } from 'node:fs';
 import { chmod, lstat, mkdir, mkdtemp, readFile, rm, utimes, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { basename, dirname, isAbsolute, relative, resolve, sep } from 'node:path';
@@ -8,6 +8,7 @@ import { promisify } from 'node:util';
 import { PLUGIN_ARCHIVE_BUDGET, preflightPluginArchive } from '../external-runtime/archive-preflight.js';
 import type { LocalDirectoryOperation } from './local-directory-operation.js';
 import { type LocalDirectorySourceCoordinates, LocalDirectorySourceError } from './local-directory-source.js';
+import { resolveNpmInvocation } from './npm-invocation.js';
 
 const execFileAsync = promisify(execFile);
 const RECEIPT = '.clowder-local-source.json';
@@ -57,24 +58,6 @@ function invalid(code: string, message: string): never {
 }
 function hash(bytes: Buffer | string): string {
   return `sha512-${createHash('sha512').update(bytes).digest('base64')}`;
-}
-function resolveNpmInvocation(npmBin: string): { command: string; prefixArgs: string[] } {
-  // An explicit npm CLI entrypoint is JavaScript, not a launcher. Node can run
-  // it everywhere, including Windows where execFile cannot start npm.cmd.
-  if (/\.(?:c|m)?js$/i.test(npmBin)) return { command: process.execPath, prefixArgs: [npmBin] };
-  if (process.platform !== 'win32') return { command: npmBin, prefixArgs: [] };
-  const lower = npmBin.toLowerCase();
-  if (lower !== 'npm' && !lower.endsWith('.cmd')) return { command: npmBin, prefixArgs: [] };
-  // execFile cannot launch npm.cmd on Windows. Run npm's JS entrypoint with
-  // the same Node binary instead, preserving the caller's npm version.
-  const candidates = [
-    resolve(dirname(process.execPath), 'node_modules', 'npm', 'bin', 'npm-cli.js'),
-    ...(isAbsolute(npmBin) ? [resolve(dirname(npmBin), 'node_modules', 'npm', 'bin', 'npm-cli.js')] : []),
-  ];
-  for (const candidate of candidates) {
-    if (existsSync(candidate)) return { command: process.execPath, prefixArgs: [candidate] };
-  }
-  return { command: npmBin, prefixArgs: [] };
 }
 function hasControlCharacter(value: string): boolean {
   for (const character of value) {
